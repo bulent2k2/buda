@@ -62,21 +62,6 @@ items this page doesn't see).
    span-adjust that closed big2's strand, so a full golden + fast/mid
    re-verify.
 
-11. **A metal above the TOP band is still a top metal (layer-model gap)** —
-   [`wishlist-planner.md`](wishlist-planner.md) → *"A metal above the TOP
-   band is still a top metal"*. `LayerType` is a hand-labelled binary
-   flag; nothing checks stack position, so a metal declared *above* the
-   TOP layers (e.g. `M7` above `M5/M6 TOP` in `flow/tracks/tracks.buda`)
-   but not marked `TOP` reads to the planner as a **cheap** non-TOP stub-
-   offload target — physically backwards (a layer above TOP is *more*
-   precious). This is the modeling root cause of the NON-TOP/LOW stub-open
-   bug (item 4): flow 10's "M7 is non-TOP creates some opens" note is the
-   planner offloading a stub onto M7 as if it were low, then DNUTS failing
-   to legalize it. Fix directions (deny the offload discount to an
-   above-TOP layer + config warning; or a position-derived layer model)
-   in the wishlist; marking the flow `TOP` is a symptom patch, not a fix.
-   Small–medium, golden-guarded, lower urgency than the bug it underlies.
-
 ## Big / blocked / conditional
 
 *(bottom-up conditionals, added 2026-07-10 — these only fire on specific
@@ -114,6 +99,24 @@ designs and fail LOUD, never silent:)*
   `test_bdb_user_topo.py` (flat lock-in + 3 hier round trips).  Follow-ons
   (op-log provenance in BDB meta, GUI hier frames, per-instance pools) in
   [`wishlist-topoedit.md`](wishlist-topoedit.md).
+
+- **A metal above the TOP band is still a top metal (layer-model gap)** ✅
+  — **DONE (2026-07-16)**. `LayerType` is position-blind, so a metal
+  declared above the highest TOP layer but not marked `TOP` (e.g. `M7`
+  over `M5/M6 TOP`) read to the planner as a **cheap** non-TOP stub-
+  offload target. Shipped `LayerStack::is_above_top` + an always-on
+  config-smell **WARNING** at `build_congestion_map` (pure diagnostic,
+  goldens bit-identical) naming the mis-labelled layers and pointing at
+  the fix. Corrected `tracks.buda`'s M7 to `TOP` (the warning's advice) —
+  measured a WIN on the hbundles suite (05 opens 32→0, 06 2/34→0/20, 07
+  overlap→0). An **automatic** "treat above-TOP as TOP" override was
+  measured and **rejected**: a dense stress flow (`channel_stress`)
+  legitimately uses the high metal as an overflow-relief valve and
+  regresses when M7 is forced TOP (0/3 → 2/5), so it stays non-TOP by
+  design — "above TOP ⇒ TOP" is a per-design call, not an auto-rule. The
+  diagnostic + per-design config fix is the model; a position-derived
+  layer type is a deferred nicety (see wishlist-planner). Tests:
+  `test/tests/test_above_top_layer_warning.py`.
 
 ## Resolved (by 2026-07-15)
 

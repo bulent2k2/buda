@@ -3,7 +3,7 @@ def_layer 3 M3 V     55.56
 def_layer 4 M4 H     55.56
 def_layer 5 M5 V TOP 50
 def_layer 6 M6 H TOP 52.94
-def_layer 7 M7 V     56.10
+def_layer 7 M7 V TOP 56.10
 
 # Track patterns are REQUIRED for Detailed NUTS
 # Format: <layer_id> <origin> [<type> <width> <spacing>] ...

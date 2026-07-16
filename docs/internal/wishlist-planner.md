@@ -47,50 +47,45 @@ opens item 4 (the `do_span_adjustments` span-stretch clamp — the NUTS-side
 half of the same bug). **Effort:** medium; the payoff is turning the
 opt-in gate always-on cleanly.
 
-## A metal *above* the TOP band is still a top metal — the non-TOP category is position-blind — OPEN
+## A metal *above* the TOP band is still a top metal — config-smell WARNING shipped; auto-override measured & rejected
 
 **What:** `LayerType` is a binary flag `{ TOP, LOW }` set explicitly per
-layer in `def_layer`, and the planner's `base_cost_non_top` penalty gives
-**every** non-TOP layer a span-scaled cheap-offload discount (short stubs
-drop off TOP onto a "low" layer for almost nothing —
-`congestion_planner.cpp`, the `base` term). "non-TOP" is treated as a
-synonym for "cheap, fine-pitch, below the TOP band". But the flag is
-purely a label: nothing checks a layer's **position** in the stack. A
-metal declared *above* the highest TOP layer — e.g. `flow/tracks/tracks.buda`
-declares `M5 (V) TOP`, `M6 (H) TOP`, then `M7 (V)` with no `TOP` — is
-physically a high, coarse, precious top-level metal, yet the planner reads
-it as a cheap offload target and steers stubs onto it. That is backwards:
-any layer above the TOP band is *more* precious than the TOP layers, not
-less, and should not be over-used.
+layer in `def_layer`; nothing checks a layer's **position** in the stack.
+A metal declared *above* the highest TOP layer — e.g. `tracks.buda` had
+`M5 (V) TOP`, `M6 (H) TOP`, then `M7 (V)` with no `TOP` — is physically a
+high, precious top-level metal, yet the planner's `base_cost_non_top`
+penalty (`congestion_planner.cpp`, the `base` term) read it as a cheap
+non-TOP offload target and steered short stubs onto it. That is the
+modeling half of the NON-TOP/LOW stub-open bug (opens item 4): the
+"M7 is non-TOP creates some opens" note.
 
-**Why it matters:** this is the modeling half of the NON-TOP/LOW stub-open
-bug (opens.md "Non-TOP pin-access stub …", `wishlist-nuts.md`). The
-position-blind category is *why* `flow/hbundles/10` carries the
-"M7 is non-TOP which creates some opens" note — the planner offloads a
-pin-access stub onto M7 as if it were a cheap low layer, then DNUTS
-cannot legalize it. Marking M7 `TOP` (as `tracks4top.buda` does) papers
-over the symptom on that one flow; the model gap is that `LOW`/non-TOP
-means "not flagged TOP" instead of "physically below the TOP band".
+**Shipped:** `LayerStack::is_above_top(id)` (non-TOP AND id above the
+highest TOP-layer id in its direction) + an always-on config-smell
+**WARNING** at `build_congestion_map` naming the offending layers and
+pointing at the fix (mark them `TOP` in `def_layer`).  Zero routing
+change — pure diagnostic, goldens bit-identical.  **`tracks.buda`'s M7
+corrected to `TOP`** (the warning's own advice): measured a WIN across the
+hbundles suite — 05 opens 32→**0**, 06 2/34→**0/20**, 07 overlap→**0**, 10
+unchanged.  Test: `test/tests/test_above_top_layer_warning.py`.
 
-**Fix directions (separate work item — NOT this doc):**
-- *Cheapest, honest:* derive an "above-TOP" condition from stack position
-  (a non-TOP layer whose id/height exceeds the max TOP-layer id in its
-  direction) and DENY it the `base_cost_non_top` discount — cost it like
-  a TOP layer (or worse), and emit a config-smell warning at `def_layer`
-  so the stack is declared sanely.
-- *Fuller:* replace the binary flag with a physical position model (or a
-  third `ABOVE_TOP` category) so TOP-ness is *derived* from the stack, not
-  hand-labelled — removes the whole class of "layer above TOP marked LOW"
-  config traps.
-- *Not a fix:* editing flows to mark the high metal `TOP`. Corrects one
-  design's numbers, leaves the model wrong for the next stack.
+**Measured & rejected — an automatic "treat above-TOP as TOP" override.**
+Two shapes tried: (a) my first cut denied the discount but only
+half-wired the TOP steering (kBalance can PULL load onto the empty high
+metal) — regressed `channel_stress` 0/3 → 12/21; (b) the honest config
+fix (mark the layer TOP, full machinery) is a *win* on hbundles but
+*regresses* the same `channel_stress` 0/3 → **2/5**.  Root cause: a dense
+stress flow legitimately uses the high metal as an **overflow-relief
+valve**, and the offload discount is exactly the relief it leans on.  So
+"a layer above TOP is always TOP" is NOT a universally correct auto-rule —
+it is a per-design call.  `channel_stress`'s fixture is therefore left
+non-TOP deliberately (the warning informs; the design choice stands).
 
-**Effort:** small–medium (the discount-denial + warning is a few lines in
-the `base` term and `def_layer` parsing; the position model is a layering
-refactor). **Guard:** a full golden + fast/mid re-verify — every flow with
-a non-TOP layer above its TOP band shifts layer assignments. Lower urgency
-than the stub-open bug it underlies, but fixing it removes the root cause
-rather than the symptom.
+**Still open (lower priority):** a position-derived layer model (or a
+third `ABOVE_TOP` category) so TOP-ness is *derived* from the stack rather
+than hand-labelled.  Given the relief-valve tension it would need a
+per-layer opt-out, so the diagnostic-plus-config-fix that shipped is the
+pragmatic model; the derived-position refactor is a nicety, not a
+correctness gap.
 
 ## LOW-layer abutment crossings are guaranteed DNUTS opens (big2's 72 open bits) — ✅ RESOLVED
 
