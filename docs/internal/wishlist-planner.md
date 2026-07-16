@@ -4,6 +4,94 @@ Deferred follow-ups for the bundle / congestion planner
 (`src/congestion_planner.cpp`, `src/layering.cpp`). Index:
 [`wishlist.md`](wishlist.md).
 
+## NON-TOP dead-span stub opens: planner-side gate SHIPPED (opt-in) + the always-on discriminator — OPEN
+
+**What:** the planner's per-cut capacity (`score_segment` →
+`usable_band_cap`) samples a non-TOP stub's endpoint-CLAMPED along-extent
+(`for_each_band` treats the in-cell tail as pin access routed on another
+layer), so a pin-access stub whose in-cell span sits over a leaf keepout
+on a LOW layer passes the width/track check yet is assigned to a band with
+too few — often **zero** — signal tracks across the FULL span DetailedNUTS
+places from. Result: a guaranteed DNUTS open. Diagnosed on
+`flow/big_data_test/bigHalf.buda` (no rr): **10 stub segments**, every one
+assigned to M2/M3 with `count_signal_tracks_in_span == 0` while a
+same-direction TOP layer (M4/M5/M6/M7) had 100–380 tracks right there. The
+same class is flow 10's "M7 is non-TOP creates some opens" note (M7's
+above-TOP mis-label, the sibling wishlist item below, is one *source* of a
+dead LOW band).
+
+**Shipped (opt-in, this PR):** `set_planner_param nontop_dead_span_gate 1`
+— refuse a NON-TOP layer whose abstract span has **0** keepout-clear
+signal tracks in the chosen band (the exact `count_signal_tracks_in_span`
+pool DNUTS reads, via the factored `span_signal_supply` helper), so STRICT
+escalates to a TOP layer that can host the bits. Measured **bigHalf no-rr
+DNUTS unplaced 566 → 135 (−76%)**, no new overlaps. Default OFF, so the
+whole corpus is bit-identical.
+
+**Why opt-in — the hard part that's still OPEN.** `span_pool == 0` over the
+CONSERVATIVE abstract span does NOT distinguish a genuine cull from a
+survivor: the abstract span is an overestimate of the final
+junction-adjusted bit spans, so bigHalf's stubs (whose bits cannot retract
+clear of the keepout → cull → open) and `rnr_mix`'s stubs (whose final
+spans DO clear the keepout → place) BOTH read `span_pool == 0` at plan
+time. An always-on gate therefore helps bigHalf but regresses rnr_mix's
+healed endpoint (0 → 16) by over-escalating survivors onto TOP (also
+measured: the midpoint-fallback variant, which mirrors DNUTS admission,
+un-fires the useful cases because the planner's wide slide window sees
+tracks the narrow final interval won't — bigHalf back to 566). **The
+always-on discriminator** is a post-placement-aware predictor: does the
+keepout cover the WHOLE routed extent (→ bits can't retract clear → gate)
+or only part (→ they can → leave on LOW)? That needs either a
+final-span estimate at plan time or a NUTS-side signal, and ties into
+opens item 4 (the `do_span_adjustments` span-stretch clamp — the NUTS-side
+half of the same bug). **Effort:** medium; the payoff is turning the
+opt-in gate always-on cleanly.
+
+## A metal *above* the TOP band is still a top metal — the non-TOP category is position-blind — OPEN
+
+**What:** `LayerType` is a binary flag `{ TOP, LOW }` set explicitly per
+layer in `def_layer`, and the planner's `base_cost_non_top` penalty gives
+**every** non-TOP layer a span-scaled cheap-offload discount (short stubs
+drop off TOP onto a "low" layer for almost nothing —
+`congestion_planner.cpp`, the `base` term). "non-TOP" is treated as a
+synonym for "cheap, fine-pitch, below the TOP band". But the flag is
+purely a label: nothing checks a layer's **position** in the stack. A
+metal declared *above* the highest TOP layer — e.g. `flow/tracks/tracks.buda`
+declares `M5 (V) TOP`, `M6 (H) TOP`, then `M7 (V)` with no `TOP` — is
+physically a high, coarse, precious top-level metal, yet the planner reads
+it as a cheap offload target and steers stubs onto it. That is backwards:
+any layer above the TOP band is *more* precious than the TOP layers, not
+less, and should not be over-used.
+
+**Why it matters:** this is the modeling half of the NON-TOP/LOW stub-open
+bug (opens.md "Non-TOP pin-access stub …", `wishlist-nuts.md`). The
+position-blind category is *why* `flow/hbundles/10` carries the
+"M7 is non-TOP which creates some opens" note — the planner offloads a
+pin-access stub onto M7 as if it were a cheap low layer, then DNUTS
+cannot legalize it. Marking M7 `TOP` (as `tracks4top.buda` does) papers
+over the symptom on that one flow; the model gap is that `LOW`/non-TOP
+means "not flagged TOP" instead of "physically below the TOP band".
+
+**Fix directions (separate work item — NOT this doc):**
+- *Cheapest, honest:* derive an "above-TOP" condition from stack position
+  (a non-TOP layer whose id/height exceeds the max TOP-layer id in its
+  direction) and DENY it the `base_cost_non_top` discount — cost it like
+  a TOP layer (or worse), and emit a config-smell warning at `def_layer`
+  so the stack is declared sanely.
+- *Fuller:* replace the binary flag with a physical position model (or a
+  third `ABOVE_TOP` category) so TOP-ness is *derived* from the stack, not
+  hand-labelled — removes the whole class of "layer above TOP marked LOW"
+  config traps.
+- *Not a fix:* editing flows to mark the high metal `TOP`. Corrects one
+  design's numbers, leaves the model wrong for the next stack.
+
+**Effort:** small–medium (the discount-denial + warning is a few lines in
+the `base` term and `def_layer` parsing; the position model is a layering
+refactor). **Guard:** a full golden + fast/mid re-verify — every flow with
+a non-TOP layer above its TOP band shifts layer assignments. Lower urgency
+than the stub-open bug it underlies, but fixing it removes the root cause
+rather than the symptom.
+
 ## LOW-layer abutment crossings are guaranteed DNUTS opens (big2's 72 open bits) — ✅ RESOLVED
 
 **What (history):** big2's only remaining DNUTS opens (72 bits, 2026-07

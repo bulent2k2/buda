@@ -9,7 +9,7 @@ items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
 
-11. **BDB topology tables as the USER-topo persistence home (hier flows)**
+12. **BDB topology tables as the USER-topo persistence home (hier flows)**
    — [`wishlist-topoedit.md`](wishlist-topoedit.md) → *"BDB topology
    tables as the USER-topo persistence home"*.  Hand-built USER
    candidates persist via the sidecar op-log today (base uid + applied
@@ -58,18 +58,41 @@ items this page doesn't see).
    (Gap 4). Flow 10's cross-chip `x_t*` stubs: the planner downgrades a
    generator-hinted-TOP pin-access stub to a non-TOP layer, where the
    endpoint leaf is a keepout and NUTS span-stretches the stub onto it →
-   the pin-access bits are culled (a silent open). **Host-sensitive** (the
-   M5-vs-M7 near-tie flips under `-march=native`; companion PR #281
-   host-tolerances the flow's test — until it lands the strict flow test
-   still fails on a non-golden host). **NOT a planner cost term** — the crossing is a
-   post-placement span-stretch event the planner's nominal scoring cannot
-   see (an exclusive leaf-overlap check never fires, an inclusive one
-   over-fires and broadly churns; both measured). Fix locus is NUTS-side:
-   a span-stretch clamp in `do_span_adjustments` (don't stretch a non-TOP
-   segment onto a leaf keepout — clamp at the face). **Effort:** medium;
-   touches the span-adjust that closed big2's strand, so a full golden +
-   fast/mid re-verify. Lower value (only a host-sensitive residual on one
-   flow, already bounded and loudly reported).
+   the pin-access bits are culled (a silent open). **Two halves:**
+   *Planner side (partly shipped)* — the planner assigns a non-TOP layer
+   whose real full-span signal-track supply is short/zero because
+   `score_segment`'s per-cut capacity samples the endpoint-CLAMPED extent.
+   The **opt-in `set_planner_param nontop_dead_span_gate`** now refuses a
+   non-TOP layer whose span has **0** keepout-clear tracks and escalates to
+   TOP (measured on `bigHalf` no-rr: 10 dead-span stubs, DNUTS unplaced
+   **566 → 135, −76%**). It stays opt-in because `span_pool == 0` over the
+   conservative abstract span can't tell a genuine cull from a survivor
+   whose final adjusted span clears the keepout (always-on regresses
+   `rnr_mix` 0 → 16); the always-on discriminator is in wishlist-planner.
+   *NUTS side (still open)* — **NOT a planner cost term** for the
+   *survivor* case: the crossing is a post-placement span-stretch event
+   (an exclusive leaf-overlap check never fires, an inclusive one
+   over-fires; both measured). Fix locus is a span-stretch clamp in
+   `do_span_adjustments` (don't stretch a non-TOP segment onto a leaf
+   keepout — clamp at the face). **Host-sensitive** (the M5-vs-M7 near-tie
+   flips under `-march=native`). **Effort:** medium; touches the
+   span-adjust that closed big2's strand, so a full golden + fast/mid
+   re-verify.
+
+11. **A metal above the TOP band is still a top metal (layer-model gap)** —
+   [`wishlist-planner.md`](wishlist-planner.md) → *"A metal above the TOP
+   band is still a top metal"*. `LayerType` is a hand-labelled binary
+   flag; nothing checks stack position, so a metal declared *above* the
+   TOP layers (e.g. `M7` above `M5/M6 TOP` in `flow/tracks/tracks.buda`)
+   but not marked `TOP` reads to the planner as a **cheap** non-TOP stub-
+   offload target — physically backwards (a layer above TOP is *more*
+   precious). This is the modeling root cause of the NON-TOP/LOW stub-open
+   bug (item 4): flow 10's "M7 is non-TOP creates some opens" note is the
+   planner offloading a stub onto M7 as if it were low, then DNUTS failing
+   to legalize it. Fix directions (deny the offload discount to an
+   above-TOP layer + config warning; or a position-derived layer model)
+   in the wishlist; marking the flow `TOP` is a symptom patch, not a fix.
+   Small–medium, golden-guarded, lower urgency than the bug it underlies.
 
 ## Big / blocked / conditional
 
