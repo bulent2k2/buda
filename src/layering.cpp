@@ -85,6 +85,12 @@ bool LayerStack::is_top(int id) const {
     const Layer* l = get_layer(id);
     return l && l->type == LayerType::TOP;
 }
+bool LayerStack::is_above_top(int id) const {
+    const Layer* l = get_layer(id);
+    if (!l || l->type == LayerType::TOP) return false;
+    int top = get_top_layer(l->dir);
+    return top >= 0 && id > top;
+}
 LayerDir LayerStack::get_layer_dir(int id) const {
     for(auto& l : layers_) if(l.id == id) return l.dir;
     return LayerDir::HORIZONTAL;

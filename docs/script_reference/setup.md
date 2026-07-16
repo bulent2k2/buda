@@ -21,7 +21,7 @@ Register a metal routing layer.
 | `id` | int | Unique numeric layer ID (used everywhere else to identify the layer) |
 | `name` | str | Human-readable name, e.g. `M4` |
 | `dir` | `H` or `V` | Routing direction: horizontal or vertical |
-| `TOP` / `LOW` | keyword | Optional. `TOP` — preferred (highest) layer in this direction; `LOW` — secondary. Omitting defaults to `LOW`. |
+| `TOP` / `LOW` | keyword | Optional. `TOP` — preferred (highest) layer in this direction; `LOW` — secondary. Omitting defaults to `LOW`. **Declare a metal above your TOP band as `TOP`** — a `LOW`/non-TOP layer above the highest `TOP` layer in its direction is physically a high top-level metal, but the planner would cost it as a cheap stub-offload target; `run_planner` prints a config-smell WARNING naming any such layer. |
 | `overhead%` | float | Fraction of each channel consumed by power/clock tracks, 0–99. Scales effective bus width by `100/(100 − overhead%)`. Use `0.0` for no dilation. |
 | `span_min N` | keyword+int | Optional. Segments shorter than `N` layout units on this layer incur a span-mismatch penalty (guides short stubs to lower layers). |
 | `span_max N` | keyword+int | Optional. Segments longer than `N` layout units on this layer incur a span-mismatch penalty (guides long wires to higher layers). |
