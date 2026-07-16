@@ -9,23 +9,6 @@ items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
 
-12. **BDB topology tables as the USER-topo persistence home (hier flows)**
-   — [`wishlist-topoedit.md`](wishlist-topoedit.md) → *"BDB topology
-   tables as the USER-topo persistence home"*.  Hand-built USER
-   candidates persist via the sidecar op-log today (base uid + applied
-   `edit_*` commands, replayed after `generate_topologies`) — right for
-   the flat flow, a side channel for hier.  The hier flow's native
-   surface — the BDB `topology`/`topology_segment` tables +
-   `topology_seg_busterm`/bridge links and `load_pipeline` — should
-   carry USER candidates first-class: persist at `edit_commit`, restore
-   with taps/clamps/pin by `topo_uid`, and settle the template-vs-
-   instance scope of a hier edit (a cell-local edit replicates to
-   instances; an expanded-instance edit stays local), with BDB-fixture
-   round-trip + hier replication tests.  **The designer-interaction
-   keystone for hier designs** — today `load_pipeline` silently drops
-   USER candidates.  **Effort:** medium-large (persist path exists;
-   restore + hier scope + tests are the work).
-
 10. **The `bigHalf.buda` rr flip (decision, then a two-line edit)** —
    re-enable the flow's two commented `ripup_reroute` lines now that the
    RR arc has taken the clean 0/0 endpoint from ~49s to **~12.4s flow
@@ -98,6 +81,24 @@ designs and fail LOUD, never silent:)*
    follows the documented pattern (own translation unit behind a CMake flag).
 
 ## Resolved (by 2026-07-16)
+
+- **BDB topology tables as the USER-topo persistence home (hier flows)** ✅
+  — **DONE (2026-07-16)**, closing item 12.  Flat was already whole (v15
+  `source='user'`); the hier gaps were frame resolution, not persistence:
+  TopoEdit (`edit_topology`) and the `load_pipeline` loader now resolve each
+  bundle's OWN floorplan (the same `_floorplan_for_hbundle` cases
+  check_design uses; the loader also restores the never-read-back
+  `entry/exit_busterm_ids` that gate the cell-local case), so a cell-local
+  template edits/validates in its own frame, a PRE-planner hier checkpoint
+  with a hand-committed USER candidate resumes (the missing-block gate used
+  to reject `pa_i`/`pb_i`), and the resumed `run_planner hier` replicates
+  the pinned USER template to every instance.  A POST-expansion
+  `edit_commit` now persists through `_persist_planner_output` (the
+  pre-expansion `_persist_topologies` used to rewrite instance wrappers as
+  normal rows, clobbering the `is_expanded` checkpoint in place).  Tests:
+  `test_bdb_user_topo.py` (flat lock-in + 3 hier round trips).  Follow-ons
+  (op-log provenance in BDB meta, GUI hier frames, per-instance pools) in
+  [`wishlist-topoedit.md`](wishlist-topoedit.md).
 
 - **A metal above the TOP band is still a top metal (layer-model gap)** ✅
   — **DONE (2026-07-16)**. `LayerType` is position-blind, so a metal

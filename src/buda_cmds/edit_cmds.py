@@ -65,6 +65,19 @@ def cmd_edit_topology(session, cmd, args, cmd_line):
     session._edit_w, session._edit_topo, session._edit_src = w, topo, src_desc
     session._edit_slide = {}
     session._edit_layers_changed = False
+    # Resolve the session's FLOORPLAN: a hier bundle's candidates live in the
+    # frame they were generated in — CELL-LOCAL coordinates and block names
+    # (pa_i, not proc_i1/pa_i) for a cell-level template, a custom endpoint
+    # floorplan for a cross-level bundle — so every edit op's verdict, stub
+    # tap, and slide range must use that floorplan, not the flat session one.
+    # Same resolver as check_design / dump_topologies (flat bundles, expanded
+    # per-instance wrappers, and same-level hier bundles keep session.fp).
+    session._edit_fp = session._make_topo_fp_resolver()(w)
+    if session._edit_fp is not session.fp:
+        hb = w.input.original_bundle
+        print(f"[edit] hier bundle: edits use the bundle's own floorplan "
+              f"({'cell-local: ' + hb.cell_context if hb.cell_context else 'endpoint frame'}"
+              f", {len(session._edit_fp.get_all_blocks())} block(s))")
     print(f"[edit] session opened on bundle {bid}: {src_desc} "
           f"({len(topo.segments)} segment(s)). "
           f"edit_status shows the verdict; edit_commit / edit_abort ends.")
@@ -86,7 +99,7 @@ def cmd_edit_add_trunk(session, cmd, args, cmd_line):
     perp = int(pos[1])
     lo, hi = (int(pos[2]), int(pos[3])) if len(pos) >= 4 else (1, 0)
     h_def, v_def = session._edit_layers()
-    v = buda.edit_add_trunk(session._edit_topo, session.fp, horiz, perp,
+    v = buda.edit_add_trunk(session._edit_topo, session._edit_fp, horiz, perp,
                             lo, hi, layer if layer is not None
                             else (h_def if horiz else v_def))
     session._edit_report(v)
@@ -112,7 +125,7 @@ def cmd_edit_add_stub(session, cmd, args, cmd_line):
                  and session._edit_topo.segments[to_seg].start.y
                      == session._edit_topo.segments[to_seg].end.y)
         layer = v_def if tgt_h else h_def
-    v = buda.edit_add_stub(session._edit_topo, session.fp, pos[0], to_seg, layer)
+    v = buda.edit_add_stub(session._edit_topo, session._edit_fp, pos[0], to_seg, layer)
     session._edit_report(v)
 
 
@@ -120,7 +133,7 @@ def cmd_edit_remove_segment(session, cmd, args, cmd_line):
     # Usage: edit_remove_segment <seg#>
     if session._edit_session() is None: return
     si = int(args[0])
-    v = buda.edit_remove_segment(session._edit_topo, session.fp, si)
+    v = buda.edit_remove_segment(session._edit_topo, session._edit_fp, si)
     session._edit_report(v)
     if v.applied:
         # Indices above si shifted down: remap the staged slide windows,
@@ -133,7 +146,7 @@ def cmd_edit_remove_segment(session, cmd, args, cmd_line):
 def cmd_edit_set_span(session, cmd, args, cmd_line):
     # Usage: edit_set_span <seg#> <along_lo> <along_hi>
     if session._edit_session() is None: return
-    v = buda.edit_set_span(session._edit_topo, session.fp,
+    v = buda.edit_set_span(session._edit_topo, session._edit_fp,
                            int(args[0]), int(args[1]), int(args[2]))
     session._edit_report(v)
 
@@ -168,7 +181,7 @@ def cmd_edit_set_slide(session, cmd, args, cmd_line):
         return
     lo, hi = sorted((float(args[1]), float(args[2])))
     ct = buda.ConnTopology()
-    ct.build(topo, session.fp)
+    ct.build(topo, session._edit_fp)
     cs = list(ct.segs())[si]
     s_lo, s_hi = float(cs.perp_lo), float(cs.perp_hi)
     clo, chi = max(lo, s_lo), min(hi, s_hi)
@@ -214,7 +227,7 @@ def cmd_edit_set_layer(session, cmd, args, cmd_line):
 def cmd_edit_connect(session, cmd, args, cmd_line):
     # Usage: edit_connect <seg_i> <seg_j>   (perpendicular pair)
     if session._edit_session() is None: return
-    v = buda.edit_connect(session._edit_topo, session.fp,
+    v = buda.edit_connect(session._edit_topo, session._edit_fp,
                           int(args[0]), int(args[1]))
     session._edit_report(v)
 
@@ -222,7 +235,7 @@ def cmd_edit_connect(session, cmd, args, cmd_line):
 def cmd_edit_disconnect(session, cmd, args, cmd_line):
     # Usage: edit_disconnect <seg_i> <seg_j> <retract_to>
     if session._edit_session() is None: return
-    v = buda.edit_disconnect(session._edit_topo, session.fp,
+    v = buda.edit_disconnect(session._edit_topo, session._edit_fp,
                              int(args[0]), int(args[1]), int(args[2]))
     session._edit_report(v)
 
@@ -239,7 +252,7 @@ def cmd_edit_status(session, cmd, args, cmd_line):
         print(f"  seg {i} {d} ({sg.start.x},{sg.start.y})-"
               f"({sg.end.x},{sg.end.y}) L{sg.layer_hint}")
     if topo.segments:
-        session._edit_report(buda.edit_verdict(topo, session.fp))
+        session._edit_report(buda.edit_verdict(topo, session._edit_fp))
 
 
 def cmd_edit_abort(session, cmd, args, cmd_line):
@@ -270,7 +283,7 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
             for s in topo.segments)
         + sum(abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y)
               for s in topo.bridge_segments.values()))
-    v = buda.edit_verdict(topo, session.fp)
+    v = buda.edit_verdict(topo, session._edit_fp)
     if not v.ok():
         session._edit_report(v)
         print("  Warning: committing a not-clean topology — "
@@ -331,7 +344,7 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
         session._edit_slide = {}
     if session._edit_slide:
         ct = buda.ConnTopology()
-        ct.build(topo, session.fp)
+        ct.build(topo, session._edit_fp)
         cs_list = list(ct.segs())
         nseg = len(topo.segments)
         slo = [float('nan')] * nseg
@@ -359,7 +372,33 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
         session._edit_slide = {}
     session._edit_w = session._edit_topo = None
     session._edit_src = ""
-    if session._persist_topologies():
+    if getattr(session, "_hier_expansion_map", None):
+        # POST-expansion hier session: self.bundles are the per-instance
+        # wrappers.  The pre-expansion _persist_topologies would rewrite them
+        # as NORMAL bundle rows and clobber the planner's expanded checkpoint
+        # (is_expanded rows + template linkage — a later `load_pipeline
+        # expanded` would find nothing and trip the missing-block gate on the
+        # mixed frames).  Persist through the planner's expanded path instead:
+        # each instance's SELECTED topology is recorded, so a pinning commit
+        # lands as the instance's routed shape.
+        if session.bdb is not None:
+            expanded_ids = {x.input.original_bundle.id
+                            for ws in session._hier_expansion_map.values()
+                            for x in ws}
+            if w.input.original_bundle.id not in expanded_ids:
+                # A NORMAL bundle (cross-block / global) edited post-expansion:
+                # the planner persist below only updates its selection/layers —
+                # refresh its candidate rows first so the just-committed USER
+                # topology actually exists for is_selected to point at (else
+                # the pin appears to save but load_pipeline reloads the old
+                # pool — Codex #306).
+                session._persist_bundle_candidates(w)
+            session._persist_planner_output()
+            print("[BDB] re-persisted expanded planner state to the open BDB.")
+            if not is_selected:
+                print("  Note: expanded instances persist only their SELECTED "
+                      "topology — the un-pinned USER candidate is session-only.")
+    elif session._persist_topologies():
         print("[BDB] re-persisted candidate topologies to the open BDB.")
 
 
