@@ -164,6 +164,7 @@ class ExplorerEditMixin:
                 f"[{self._fmt_perp(s_lo)},{self._fmt_perp(s_hi)}]")
             self._draw(); return
         self._edit_slide[self.sidx] = (clo, chi)
+        self._edit_log_op(f"edit_set_slide {self.sidx} {clo:.0f} {chi:.0f}")
         note = "" if (clo, chi) == (lo, hi) else " (clamped to slide range)"
         self._edit_msg = (f"EDIT: seg {self.sidx} slide window "
                           f"[{clo:.0f},{chi:.0f}]{note} — applies on commit")
@@ -175,6 +176,7 @@ class ExplorerEditMixin:
         if not (0 <= self.sidx < len(self._edit_topo.segments)):
             self._edit_msg = "EDIT: select a segment first (j/k)"
         elif self._edit_slide.pop(self.sidx, None) is not None:
+            self._edit_log_op(f"edit_set_slide {self.sidx} clear")
             self._edit_msg = f"EDIT: seg {self.sidx} slide window cleared"
         else:
             self._edit_msg = f"EDIT: seg {self.sidx} has no slide window"

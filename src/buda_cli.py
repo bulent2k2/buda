@@ -206,6 +206,9 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._edit_w = None          # BundleWrapper being edited
         self._edit_topo = None       # the working Topology copy
         self._edit_src = ""          # description of what was opened
+        self._edit_slide = {}        # staged slide windows {seg: (lo, hi)} —
+                                     # edit_set_slide; applied to
+                                     # plan.seg_slide_lo/hi at edit_commit
         self.no_viz = False          # set by --no-viz CLI flag
         self.verbose_conn = False    # set by --verbose-conn: print every per-bit violation
         self.ipc_verbose = False     # set by --ipc-verbose: surface buda_viz/def_viz IPC chatter

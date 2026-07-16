@@ -835,21 +835,27 @@ def test_edit_ops_logged_and_user_topo_survives_rerun(tmp_path, capsys):
         exp.sidx = 0
         _key(exp, 'S', x=200, y=1200)
         _key(exp, 'S', x=200, y=200)
+        exp.sidx = 0
+        _key(exp, 'W', x=420, y=700)          # slide window bound 1
+        _key(exp, 'W', x=460, y=700)          # bound 2 → staged [420,460]
         _key(exp, 'enter')
         out = capsys.readouterr().out
         assert '[edit-cmd] edit_add_trunk V 500' in out
         assert '[edit-cmd] edit_add_stub up 0 layer 4' in out
+        assert '[edit-cmd] edit_set_slide 0 420 460' in out
         uid1 = None
         sel = exp._find_selection()
         assert sel and sel.get('user_topo', {}).get('ops'), \
             "sidecar entry must carry the op-log"
+        assert 'edit_set_slide 0 420 460' in sel['user_topo']['ops']
         uid1 = sel['topo_uid']
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
 
     # Session 2: fresh run of the SAME flow — the op-log replays and the pin
-    # resolves to the rebuilt USER candidate.
+    # resolves to the rebuilt USER candidate, W window included.
+    import math
     s2 = buda_cli.BudaSession(); s2.no_viz = True
     s2.script_path = str(flow)
     run_flow(s2)
@@ -861,3 +867,31 @@ def test_edit_ops_logged_and_user_topo_survives_rerun(tmp_path, capsys):
     assert w2.input.topology_pinned
     assert w2.input.candidates[idx].type == 'USER'
     assert buda.topo_uid(w2.input.candidates[idx]) == uid1
+    # The staged W window survived the round trip onto the plan.
+    assert (w2.plan.seg_slide_lo[0], w2.plan.seg_slide_hi[0]) == (420.0, 460.0)
+    assert all(math.isnan(v) for v in list(w2.plan.seg_slide_lo)[1:])
+
+
+def test_cli_edit_set_slide_stages_clamps_and_rekeys(tmp_path):
+    """The scriptable W: edit_set_slide stages a window (clamped to the
+    structural slide range), 'clear' unstages, edit_remove_segment re-keys,
+    and edit_commit lands the survivors on plan.seg_slide_lo/hi."""
+    import math
+    s = _dd_base_session()                    # C committed+pinned (5 segments)
+    for cmd in (
+        "edit_topology 1 new",
+        "edit_add_trunk V 500 200 1200",      # seg 0: OOB → range [400, inf)
+        "edit_add_stub up 0",                 # seg 1: slides in up's face
+        "edit_add_stub lo 0",                 # seg 2
+        "edit_set_slide 0 0 460",             # lo clamps to the range floor
+                                              # (400 face + 20 min-stub push-out)
+        "edit_set_slide 1 1000 1200",         # valid window on the stub
+        "edit_set_slide 1 clear",             # ...then unstaged
+        "edit_remove_segment 2",              # re-key check (no window ≥ 2)
+        "edit_commit pin",
+    ):
+        s.do_command(cmd)
+    w = s.bundles[0]
+    slo, shi = list(w.plan.seg_slide_lo), list(w.plan.seg_slide_hi)
+    assert (slo[0], shi[0]) == (420.0, 460.0)   # lo clamped 0 → 420
+    assert all(math.isnan(v) for v in slo[1:])  # seg 1 cleared, seg 2 gone
