@@ -160,9 +160,25 @@ to see them").  No schema version bump if it rides `meta`.  **Value:
 documentation/forensics, not correctness** — which is exactly why it was
 deferred.
 
-### 2. Explorer (GUI) hier frames
+### 2. Explorer (GUI) hier frames — ✅ RESOLVED
 
-**The gap.** The CLI edit session is frame-aware — `edit_topology` on a
+**Landed** (follow-on batch): `TopologyExplorer` takes an `fp_resolver`
+(the session's `_make_topo_fp_resolver`) and re-points `self.fp` at each
+shown bundle's OWN floorplan on open and on every bundle switch
+(`_sync_bundle_fp`) — a cell-local template draws and edits against its
+cell frame (blocks, bundle Hanan grid, `S`/`P` hit-tests, edit verdicts all
+follow the swap; the view re-homes when the frame changes), while flat
+bundles, expanded instance wrappers, and same-level hier bundles keep the
+session floorplan.  Both construction sites forward the resolver
+(`visualize_topologies` directly; `visualize` → `BudaVisualizer` → the `v`
+explorer).  Convergence bonus: GUI template edits record CELL-FRAME ops in
+the sidecar, which the frame-aware CLI replay (opens item 12) rebuilds on a
+fresh flow run — same uid, pin resolved.  Tests:
+`test_topo_explorer_hier_frames.py` (cell-frame open, GUI gesture set on a
+template, frame swap template↔level-0, GUI-edit → sidecar → rerun round
+trip).
+
+**The original gap (for the record).** The CLI edit session is frame-aware — `edit_topology` on a
 cell-local template resolves `session._edit_fp` and every op verdicts/taps
 in cell coordinates.  The EXPLORER still receives the flat session
 floorplan at construction.  Open the topology explorer in a hier session

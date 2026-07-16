@@ -55,8 +55,18 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
     def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None,
                  rerun_fn=None, refresh_fn=None, layer_stack=None,
                  ui_state: ViewState = None, start_bidx=0, layer_visible=None,
-                 on_focus_bundle=None, bundle_order_fn=None):
+                 on_focus_bundle=None, bundle_order_fn=None, fp_resolver=None):
         self.fp          = fp
+        # Per-bundle frame resolution (hier): fp_resolver is the session's
+        # _make_topo_fp_resolver — wrapper -> the Floorplan its candidates were
+        # generated in (cell-local for a cell-level template, endpoint frame
+        # for cross-level; the session fp otherwise).  self.fp is re-pointed on
+        # every bundle switch (_sync_bundle_fp), so ALL fp consumers — the
+        # drawn blocks, the bundle-scoped Hanan grid, block hit-tests for
+        # S/P, edit-op verdicts, span anchors — follow the shown bundle's
+        # frame.  None (flat session / orphan explorer) = never swap.
+        self._session_fp  = fp
+        self._fp_resolver = fp_resolver
         self.layer_stack = layer_stack
         self.ui_state    = ui_state or ViewState()
         # Live reference to the main viz's {layer_id: visible} map so a layer
@@ -91,6 +101,7 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
         # Open on the requested bundle (e.g. the one matched by a viz hint).
         self.bidx     = start_bidx if 0 <= start_bidx < len(self.wrappers) else 0
+        self._sync_bundle_fp()         # the opening bundle's own frame (hier)
         self.idx      = 0
         self.sidx     = -1  # current selected segment index within current topology
         # TopoEdit mode (Phase E3b GUI): a working COPY being edited in place of
@@ -299,9 +310,14 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
 class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, VizDetailedDrawMixin, VizViewMixin):
     def __init__(self, floorplan, bundles, sidecar_path=None, rerun_layer_fn=None,
                  rerun_fn=None, routing_grid=None, layer_stack=None,
-                 net_endpoints=None, ipc_session=None, ipc_verbose=False):
+                 net_endpoints=None, ipc_session=None, ipc_verbose=False,
+                 fp_resolver=None):
         self.fp           = floorplan
         self.bundles      = bundles
+        # Forwarded to the TopologyExplorer it opens ('v'): per-bundle frame
+        # resolution for hier sessions (see TopologyExplorer.__init__).  The
+        # main viz itself always draws the session floorplan.
+        self._fp_resolver = fp_resolver
         self._ipc_session = ipc_session
         self._ipc_verbose = ipc_verbose   # gated: --ipc-verbose surfaces IPC chatter
         self._ipc         = None
