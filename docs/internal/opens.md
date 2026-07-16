@@ -54,6 +54,21 @@ items this page doesn't see).
    fast/mid re-verify. Lower value (only a host-sensitive residual on one
    flow, already bounded and loudly reported).
 
+11. **A metal above the TOP band is still a top metal (layer-model gap)** —
+   [`wishlist-planner.md`](wishlist-planner.md) → *"A metal above the TOP
+   band is still a top metal"*. `LayerType` is a hand-labelled binary
+   flag; nothing checks stack position, so a metal declared *above* the
+   TOP layers (e.g. `M7` above `M5/M6 TOP` in `flow/tracks/tracks.buda`)
+   but not marked `TOP` reads to the planner as a **cheap** non-TOP stub-
+   offload target — physically backwards (a layer above TOP is *more*
+   precious). This is the modeling root cause of the NON-TOP/LOW stub-open
+   bug (item 4): flow 10's "M7 is non-TOP creates some opens" note is the
+   planner offloading a stub onto M7 as if it were low, then DNUTS failing
+   to legalize it. Fix directions (deny the offload discount to an
+   above-TOP layer + config warning; or a position-derived layer model)
+   in the wishlist; marking the flow `TOP` is a symptom patch, not a fix.
+   Small–medium, golden-guarded, lower urgency than the bug it underlies.
+
 ## Big / blocked / conditional
 
 *(bottom-up conditionals, added 2026-07-10 — these only fire on specific
