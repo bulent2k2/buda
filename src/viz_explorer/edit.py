@@ -88,6 +88,8 @@ class ExplorerEditMixin:
         self._trunk_pin_set = None
         self._trunk_pin_grid = set()
         self._trunk_pin_hover = None
+        self._edit_grid_x  = set()
+        self._edit_grid_y  = set()
         self._edit_msg     = msg
         self._draw()
 
@@ -224,6 +226,28 @@ class ExplorerEditMixin:
         self._trunk_mode = None
         self._trunk_hover = None
         self._edit_msg = "EDIT: trunk cancelled"
+        self._draw()
+
+    def _edit_grid_line_at(self, event):
+        """'G' while a trunk is armed: drop a TEMPORARY Hanan line at the
+        cursor on the armed axis (a row for T, a column for Y) and hover it.
+        The escape hatch for an EMPTY channel between blocks — the bundle grid
+        has no line there, so T/Y could only snap to the blocks' faces.  The
+        line joins the bundle grid (snap target + display) for the rest of the
+        session; the placed trunk's [edit-cmd] log carries the explicit
+        coordinate, so replay/folding need no grid at all."""
+        if event.xdata is None or event.ydata is None:
+            self._edit_msg = "EDIT: put the cursor where the line should go"
+            self._draw(); return
+        horiz = self._trunk_mode
+        coord = int(round(event.ydata if horiz else event.xdata))
+        (self._edit_grid_y if horiz else self._edit_grid_x).add(coord)
+        self._trunk_hover = coord            # hover the new line immediately
+        axis = 'y' if horiz else 'x'
+        self._edit_msg = (f"EDIT: temp grid line {axis}={coord} — "
+                          f"{'T' if horiz else 'Y'}/enter/click places the "
+                          f"trunk on it")
+        print(f"[edit] {self._edit_msg}")
         self._draw()
 
     def _edit_trunk_place(self, event):

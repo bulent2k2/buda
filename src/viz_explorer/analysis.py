@@ -146,4 +146,8 @@ class ExplorerAnalysisMixin:
                 lo, hi = min(s), max(s)
                 m = max(int(round((hi - lo) * 0.25)), 1)
                 s.update((lo - m, hi + m))
+        # Temporary lines dropped with 'G' while a trunk is armed — the escape
+        # for an EMPTY channel between blocks (no edge line to snap to there).
+        xs.update(getattr(self, '_edit_grid_x', ()))
+        ys.update(getattr(self, '_edit_grid_y', ()))
         return sorted(xs), sorted(ys)

@@ -132,10 +132,12 @@ class ExplorerNavMixin:
                 if event.key == 'escape':       self._edit_trunk_pin_cancel(); return
                 return
             # Two-step trunk placement is armed: swallow keys except place /
-            # re-arm / cancel so a stray key can't fall through mid-placement.
+            # re-arm / temp-grid-line / cancel so a stray key can't fall
+            # through mid-placement.
             if self._trunk_mode is not None:
                 if event.key == 'T':            self._edit_trunk_key(event, horiz=True);  return
                 if event.key == 'Y':            self._edit_trunk_key(event, horiz=False); return
+                if event.key == 'G':            self._edit_grid_line_at(event); return
                 if event.key == 'enter':        self._edit_trunk_place(event); return
                 if event.key == 'escape':       self._edit_trunk_cancel(); return
                 return

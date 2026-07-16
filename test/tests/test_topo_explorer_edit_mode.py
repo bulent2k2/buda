@@ -990,3 +990,34 @@ def test_sidecar_load_preserves_user_topo(tmp_path, capsys):
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
+
+
+def test_edit_temp_grid_line_places_trunk_mid_channel(tmp_path):
+    """'G' while a trunk is armed drops a TEMPORARY Hanan line at the cursor
+    on the armed axis — the escape for an EMPTY channel between blocks, where
+    the bundle grid has no line and T could only snap to the blocks' faces
+    (the c_ddd_detour scenario).  The line is a snap target for the placement
+    and is session-scoped (gone after commit/abort)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    for cmd in ("def_layer 4 M4 H TOP 10", "def_layer 5 M5 V TOP 10",
+                "add_block lo 0 0 400 400", "add_block up 0 1000 400 1400",
+                "add_bus w[4] lo.o up.i", "run_bundler",
+                "generate_topologies"):
+        s.do_command(cmd)
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'E')
+        _key(exp, 'T', 200, 860)              # arm: hover snaps to a block edge
+        assert exp._trunk_hover in (400, 1000)
+        _key(exp, 'G', 200, 850)              # temp line at the cursor's row
+        assert exp._trunk_hover == 850
+        assert 850 in exp._bundle_hanan_grid()[1]
+        _key(exp, 'T', 200, 852)              # place: snaps to the temp line
+        sg = exp._edit_topo.segments[0]
+        assert sg.start.y == sg.end.y == 850  # mid-channel, off the block edges
+        _key(exp, 'escape')                   # abort → temp lines cleared
+        assert 850 not in exp._bundle_hanan_grid()[1]
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')

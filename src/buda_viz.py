@@ -124,6 +124,14 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         # second T·Y / enter places it, escape cancels.
         self._trunk_mode  = None
         self._trunk_hover = None
+        # Temporary Hanan lines added with 'G' while a trunk is armed — the
+        # channel-splitting escape: the bundle grid only carries block/keepout
+        # edges (+ OOB margins), so an EMPTY channel between two blocks has no
+        # line for T/Y to snap to.  'G' drops one at the cursor on the armed
+        # axis (y for T, x for Y); it becomes a snap target and draws with the
+        # bundle grid.  Session-scoped (cleared at commit/abort).
+        self._edit_grid_x = set()
+        self._edit_grid_y = set()
         # "Pin trunk span to busterms" mode (P): _trunk_pin_set is None (off) or
         # a set of clicked busterm-block names whose extent along the selected
         # segment's axis becomes its span; _trunk_pin_seg is that segment index.
