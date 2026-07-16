@@ -76,6 +76,27 @@ def test_c_detour_routes_clean(flow):
     assert len([n for n in flow.detailed_result.net_segments]) == 20
 
 
+def test_c_detour_pulls_minimize_placed_wl(flow):
+    """The pulls must actually TIGHTEN the detour, not just point the right way.
+    NUTS places the V spine at the block's left edge (its OOB Hanan-cell slide
+    seed lets the +pull land it there), so the placed abstract wirelength
+    collapses far below the as-built (nominal) spread.  Without the fix the
+    spine stays at its nominal x=-700 and the two H trunks alone keep ~2x700 of
+    wire — this is the guard that the fix yields minimum WL, not the direction
+    check alone."""
+    w, topo = _selected(flow)
+    bid = w.input.original_bundle.id
+    nominal = topo.estimated_wirelength                 # as-built wide C (~4400)
+    placed = sum(abs(g.span_hi - g.span_lo)
+                 for g in flow.nuts_result.segments if g.bundle_id == bid)
+    assert placed < 0.5 * nominal                       # ~1540 vs 4400
+    # The V spine lands hugging the block edge (x~=0), not its nominal -700.
+    spine = max((g for g in flow.nuts_result.segments
+                 if g.bundle_id == bid and not g.horiz),
+                key=lambda g: abs(g.span_hi - g.span_lo))
+    assert abs(spine.track_position) < 50               # at x~=0, not -700
+
+
 def _conn_segs(s):
     w, topo = _selected(s)
     ct = buda.ConnTopology()
