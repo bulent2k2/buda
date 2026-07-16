@@ -1,3 +1,4 @@
+@landed
 Feature: BDB combined DEF+Verilog import
   Verify that import_def_lef followed by import_verilog merges physical
   placement and logical hierarchy onto the same component rows.

@@ -1,3 +1,4 @@
+@landed
 Feature: BDB cell definition and add_inst
   add_cell defines a cell with a canonical size.
   add_inst places an instance of a defined cell using coordinates

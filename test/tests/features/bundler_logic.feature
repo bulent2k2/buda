@@ -1,9 +1,10 @@
+@landed
 Feature: Intelligent Net Bundling
   As a chip planner
   I want to bundle nets based on connectivity patterns
   So that I can optimize routing for related signals
 
-  # Previous Scenario (Strict)
+  # STRICT: signature = driver instance + sorted receiver instances (exact match).
   Scenario: Strict Bundling (Shared Driver & Receiver)
     Given a netlist with nets:
       | Net Name | Driver      | Receivers      |
@@ -12,7 +13,7 @@ Feature: Intelligent Net Bundling
     When I run the bundler with "strict_connectivity"
     Then I should get 1 bundle containing "data_0, data_1"
 
-  # NEW Scenario (Your Request)
+  # CONVERGENT: signature = sorted receiver instances only (shared sink is enough).
   Scenario: Convergent Bundling (Ignore Driver, Shared Receivers)
     Given a netlist with nets:
       | Net Name | Driver       | Receivers             |

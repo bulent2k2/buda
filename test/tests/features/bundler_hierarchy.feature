@@ -1,3 +1,9 @@
+@orphaned
+# STATUS: not bound to any step file (never run). This early 2-scenario sketch of
+# hierarchical bundling was superseded by hier_bundler.feature (LANDED, bound to
+# test_hier_bundler.py), which covers depth-0/1 grouping, cell_context, and
+# multiple-occurrence bundles against the real BDB hier flow. Kept for historical
+# reference; a candidate for the attic. Do not rely on it for coverage.
 Feature: Hierarchical Net Bundling
   As a chip planner
   I want to bundle nets based on shared drivers and receivers at a specific hierarchy depth

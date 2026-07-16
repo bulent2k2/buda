@@ -1,3 +1,4 @@
+@landed
 Feature: Designer Keepout Zones
   As a physical designer
   I want to define regions where specific layers are prohibited

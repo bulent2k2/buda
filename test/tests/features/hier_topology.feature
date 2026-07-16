@@ -1,3 +1,4 @@
+@landed
 Feature: generate_hier_topologies — pipeline test vehicle
   Verify topology candidate generation for both bundle kinds:
   cross-block (leaf-precision endpoints, level = common-ancestor depth)

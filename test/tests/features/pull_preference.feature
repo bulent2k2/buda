@@ -1,3 +1,4 @@
+@landed
 Feature: Pull preference model for topology segments
   As a chip planner
   I want each trunk segment to carry pull preference metadata

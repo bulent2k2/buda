@@ -1,3 +1,4 @@
+@landed
 Feature: BDB mutation operations
   Verify move_comp, resize_cell, and add_comp work correctly
   against the combined hier_test1 fixture (DEF placement + Verilog hierarchy).

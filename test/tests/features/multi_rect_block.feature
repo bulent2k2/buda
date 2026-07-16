@@ -1,3 +1,12 @@
+@future
+# STATUS: spec ahead of implementation (all scenarios xfail — see
+# test_multi_rect_block.py). Written against an imagined `add_block_rects` command
+# that did NOT ship. The feature that landed uses the inline multi-rect syntax
+# `add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode thru|over]`: the
+# topology generator picks the best-fit rect per trunk position, and `teg_mode over`
+# emits an explicit bridge segment over a notch (`Topology::bridge_segments`) — see
+# busterm_over_the_block.feature (LANDED) for the shipped behavior. Realigning these
+# scenarios to the `add_block ... rect` API is a documented follow-up.
 Feature: Multi-rect blocks and equivalent busterms
   As a chip planner
   I want blocks to expose multiple candidate connection rectangles

@@ -1,3 +1,4 @@
+@landed
 Feature: Multi-trunk BITRUNK trees for high-fan-out datapath nets
   As a chip planner
   I want the generator to build two-level BITRUNK trees (a root spine feeding

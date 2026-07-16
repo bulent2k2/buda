@@ -1,3 +1,4 @@
+@landed
 Feature: ripup_reroute clears congestion-induced NUTS overlaps
   As a chip planner
   I want a feedback pass that re-routes a contending bundle after NUTS

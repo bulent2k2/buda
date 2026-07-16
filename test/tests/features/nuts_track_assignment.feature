@@ -1,3 +1,4 @@
+@doc
 Feature: Non-Uniform Track Sharing (NUTS)
   As a chip planner
   I want to assign concrete perpendicular track positions to every bus segment

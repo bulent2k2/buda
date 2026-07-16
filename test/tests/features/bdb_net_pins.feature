@@ -1,3 +1,4 @@
+@landed
 Feature: BDB net/pin commands and bdb_net_mode toggle
   add_cell_pin defines cell-level port interfaces.
   add_net_pins inserts a net plus leaf and intermediate hierarchy pins.

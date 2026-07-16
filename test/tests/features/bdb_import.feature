@@ -1,3 +1,4 @@
+@landed
 Feature: BDB Verilog import
   Verify that import_verilog correctly elaborates a shared-cell hierarchy:
   top module hier_test1 has ai/bi/ci (cells a/b/c); a has a1i1,a1i2,a2i;

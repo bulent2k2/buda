@@ -1,3 +1,4 @@
+@landed
 Feature: HierarchicalBundler derives pin directions from Verilog declarations
   Verilog-only bootstrap may import net pins with UNKNOWN direction.
   HBundle generation is responsible for deriving endpoint roles from module

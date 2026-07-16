@@ -1,3 +1,4 @@
+@landed
 Feature: HierarchicalBundler — pipeline test vehicle
   Verify depth-level grouping, cell context, and multiple-occurrence detection
   on the three-block pipeline: src_i → proc_i (3×pipe_cell) → snk_i.

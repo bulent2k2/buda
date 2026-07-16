@@ -1,3 +1,4 @@
+@landed
 Feature: Multi-level trunk topologies (BITRUNK and generalised trees)
   As a chip planner
   I want the topology generator to build two-level and multi-level trunk trees

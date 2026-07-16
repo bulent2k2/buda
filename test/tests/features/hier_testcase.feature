@@ -1,3 +1,4 @@
+@landed
 Feature: Hierarchical test vehicle — pipeline subsystem
   Primary test vehicle for hierarchical bundle (HBundle) development.
   Models a three-block data-pipeline: src_i → proc_i (3×pipe stage) → snk_i.

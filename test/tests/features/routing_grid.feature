@@ -1,3 +1,4 @@
+@doc
 Feature: Routing Grid — physical track structure per metal layer
   As a chip planner
   I want to define repeating power/signal/clock track patterns per layer

@@ -1,3 +1,4 @@
+@landed
 Feature: add_blocks_from_bdb
   Walk BDB hierarchy at a given depth and populate the Floorplan with
   add_block calls so the routing engine can generate topologies.

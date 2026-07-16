@@ -1,3 +1,4 @@
+@landed
 Feature: Floorplanner GUI — basic manual floorplanning workflow
   A designer starting from Verilog should be able to create a quick traditional
   hierarchical floorplan before running the HBundle feedback loop.

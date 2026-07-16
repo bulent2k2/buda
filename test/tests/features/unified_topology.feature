@@ -1,3 +1,4 @@
+@landed
 Feature: Unified topology generation for two-busterm case
   As a chip planner
   I want the topology generator to enumerate I, L, Z, U, and UU shapes

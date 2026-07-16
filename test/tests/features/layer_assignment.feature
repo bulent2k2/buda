@@ -1,3 +1,10 @@
+@orphaned
+# STATUS: not bound to any step file (never run). This thin 2-scenario sketch of
+# an "optimistic layer assigner" was superseded by span_aware_layer_assignment.feature
+# (LANDED, bound to test_span_layer_assignment.py) and the congestion planner's
+# actual layer assignment (span-scaled non-TOP penalty, kHeight short-stub steering,
+# TOP-preference) — see also planner_knobs.feature (LANDED). Kept for historical
+# reference; a candidate for the attic. Do not rely on it for coverage.
 Feature: Optimistic Layer Assignment
   As a chip planner
   I want to assign topology segments to the highest available metal layers

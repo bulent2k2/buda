@@ -1,3 +1,10 @@
+@orphaned
+# STATUS: not bound to any step file (never run), and its asserts are qualitative
+# ("significantly less", "within acceptable limits"). The MST/Steiner and BITRUNK
+# large-fan-out behavior it sketches is covered concretely by
+# multicast_topology.feature (LANDED, bound to test_multicast_topology.py — MST,
+# BITRUNK, pass_through_count, slide ranges) and multi_level_trunk.feature. Kept
+# for historical reference; a candidate for the attic. Do not rely on it for coverage.
 Feature: Large Fan-out Steiner Tree Topology Generation
   As a chip planner
   I want to generate efficient topologies for large fan-out bundles using Steiner Tree heuristics
