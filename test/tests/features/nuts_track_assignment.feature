@@ -1,3 +1,4 @@
+@doc
 Feature: Non-Uniform Track Sharing (NUTS)
   As a chip planner
   I want to assign concrete perpendicular track positions to every bus segment
@@ -44,8 +45,7 @@ Feature: Non-Uniform Track Sharing (NUTS)
       | 2         | 100     | 400     | 0           | 500         | 20    |
     When I run NUTS with track_pitch 1.0
     Then there should be 0 track overlaps
-    And  segment (bundle=1, seg=0) track_position should differ from
-         segment (bundle=2, seg=0) track_position by at least 21 (width + pitch)
+    And segment (bundle=1, seg=0) track_position should differ from segment (bundle=2, seg=0) track_position by at least 21 (width + pitch)
 
   # -----------------------------------------------------------------------
   Scenario: Non-uniform widths are respected during placement
@@ -60,8 +60,7 @@ Feature: Non-Uniform Track Sharing (NUTS)
 
   # -----------------------------------------------------------------------
   Scenario: Layers are solved independently (H and V segments do not conflict)
-    Given a horizontal segment on layer 3 and a vertical segment on layer 4,
-    both spanning the same routing range:
+    Given a horizontal segment on layer 3 and a vertical segment on layer 4 both spanning the same routing range:
       | bundle_id | layer | span_lo | span_hi | interval_lo | interval_hi | width |
       | 1         | 3     | 0       | 300     | 100         | 200         | 10    |
       | 2         | 4     | 0       | 300     | 100         | 200         | 10    |
@@ -82,8 +81,7 @@ Feature: Non-Uniform Track Sharing (NUTS)
       | 2         | 100     | 300     | 200         | 500         | 10    |
     When I run NUTS with track_pitch 1.0
     Then there should be 0 track overlaps
-    And  segment (bundle=1, seg=0) track_position should differ from
-         segment (bundle=2, seg=0) track_position by at least 11 (width + pitch)
+    And segment (bundle=1, seg=0) track_position should differ from segment (bundle=2, seg=0) track_position by at least 11 (width + pitch)
 
   # -----------------------------------------------------------------------
   # Regression: three segments all starting at the same span_lo, each

@@ -7,6 +7,12 @@ wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
 lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved (by \<date\>)*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
 items this page doesn't see).
 
+> **Feature-suite coverage:** the Gherkin narrative spec layer
+> (`test/tests/features/`) is mapped to these arcs & opens in
+> [`feature_coverage_plan.md`](feature_coverage_plan.md). The open items below
+> are also captured as `@future` scenarios in `features/future_directions.feature`
+> — flip those to `@landed` as they ship.
+
 ## Substantial features (bounded, clear plans)
 
 10. **The `bigHalf.buda` rr flip (decision, then a two-line edit)** —

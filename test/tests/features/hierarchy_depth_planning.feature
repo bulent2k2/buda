@@ -1,3 +1,13 @@
+@future
+# STATUS: spec ahead of implementation (all scenarios xfail — see
+# test_hierarchy_depth_planning.py). This file imagines a FLAT hierarchy syntax
+# (`add_block ... depth/parent`, `generate_topologies depth N`) that did NOT ship.
+# The hierarchy-depth control that landed runs through the BDB hier flow instead:
+# `derive_busterms [max_depth N]` rolls busterms up to a chosen level, then
+# `run_hier_bundler [depth N]`, `generate_hier_topologies`, and `run_planner hier`
+# consume them (see hier_bundler / hier_topology / hier_planner .feature, all
+# LANDED, and hierarchy_depth is exercised end-to-end by hier_testcase.feature).
+# Realigning these scenarios to the BDB hier flow is a documented follow-up.
 Feature: Hierarchy-Depth Busterm Generation
   As a chip planner
   I want to control which hierarchy level of blocks are used as busterm endpoints

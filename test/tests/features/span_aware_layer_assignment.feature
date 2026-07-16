@@ -1,3 +1,4 @@
+@doc
 Feature: Span-Aware Layer Assignment
   As a chip planner
   I want to assign segments to metal layers based on their span length and congestion

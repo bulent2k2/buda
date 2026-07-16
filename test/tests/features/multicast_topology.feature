@@ -1,3 +1,4 @@
+@landed
 Feature: Multicast topology generation for N-busterm case
   As a chip planner
   I want the topology generator to enumerate trunk-based and MST-based topologies

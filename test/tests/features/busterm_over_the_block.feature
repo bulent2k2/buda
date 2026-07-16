@@ -1,3 +1,4 @@
+@landed
 Feature: Over-the-Block vs Thru-the-Block TEG Routing Modes
   As a chip planner
   I want to control whether a non-rectangular (multi-rect) receiver block

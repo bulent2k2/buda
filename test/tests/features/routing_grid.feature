@@ -1,3 +1,4 @@
+@doc
 Feature: Routing Grid — physical track structure per metal layer
   As a chip planner
   I want to define repeating power/signal/clock track patterns per layer
@@ -95,8 +96,7 @@ Feature: Routing Grid — physical track structure per metal layer
   # -----------------------------------------------------------------------
   Scenario: PatternOverride takes precedence over global pattern inside its region
     Given a RoutingGridStack with layer 4 using the standard pattern (origin=0)
-    And a pattern override for layer 4 in region (x1=100, y1=0, x2=200, y2=500)
-      with a 2-slot pattern: [POWER(w=1,sp=0), SIGNAL(w=1,sp=0)]
+    And a pattern override for layer 4 in region (x1=100, y1=0, x2=200, y2=500) with a 2-slot pattern of POWER w=1 sp=0 then SIGNAL w=1 sp=0
     When I call effective_pattern_at(x=150, y=250) on layer 4
     Then the returned pattern should have unit_pitch 2.0
     # Point is inside the override region

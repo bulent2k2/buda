@@ -1,9 +1,15 @@
+@landed
 Feature: Multi-level trunk topologies (BITRUNK and generalised trees)
   As a chip planner
   I want the topology generator to build two-level and multi-level trunk trees
   when a single-trunk topology cannot efficiently connect all leaf blocks
   So that large fan-out nets can be routed with minimum total wire and
   balanced load on each trunk level.
+
+  # As-built scope: the multi_trunk generator builds TWO-LEVEL BITRUNK trees in
+  # both orientations. A source-anchored root and a true depth-3 (two branch
+  # levels) tree remain documented follow-ups — the scenarios below assert the
+  # two-level structure the generator actually builds (see the per-scenario notes).
 
   # Diagram notation used throughout this file:
   #

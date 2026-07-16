@@ -1,3 +1,14 @@
+@future
+# STATUS: spec ahead of implementation (all scenarios xfail — see test_feedthru.py).
+# This file was written against an imagined per-block `pass_through_count` /
+# `feedthru_penalty` API that did NOT ship. The feature that landed is opt-in
+# `set_feedthru <blocks|*> <layers|*> [on|off]`: a TRUNK_H/TRUNK_V spine is split
+# at the faces of any bundle busterm it passes through that opted in (two BUSTERM
+# landings, recorded in `Topology::feedthru_blocks`), and check_topo accepts the
+# declared relay while still flagging an UNDECLARED one as FEEDTHRU_RELAY.
+# Realigning these scenarios to the shipped multicast-trunk geometry, plus
+# straight/I-shape feedthru and a real `feedthru_penalty` ranking knob, are
+# documented follow-ups. see docs/internal/trunk_mst_and_feedthru_plan.md §2.9
 Feature: Feedthru-enabled trunk generation
   As a chip planner
   I want to mark large relay blocks as feedthru-capable

@@ -1,3 +1,4 @@
+@landed
 Feature: Topology ranking by routing flexibility score
   As a chip planner
   I want topologies to be ranked not only by estimated wirelength
@@ -42,9 +43,12 @@ Feature: Topology ranking by routing flexibility score
     #
     # H segment perp axis = y. Hanan y lines: {100, 200, 300}.
     # Hanan cell containing y=150: [100, 200].
-    # perp_lo = 100, perp_hi = 200.  slide = 100.
+    # perp_lo = 100.  perp_hi = 180: the raw Hanan cell top is y=200 (B's bottom
+    # face), but the H segment cannot slide onto that face — the perpendicular V
+    # stub up to B must keep at least the default minimum stub length (20 units,
+    # MinStubLength.global) — so the upper bound insets to 200 − 20 = 180.
     #
-    #   ~~~y=200~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  ← perp_hi
+    #   ~~~y=180~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  ← perp_hi (200 − 20)
     #   y=200 ─  +------+         +--x---+   ← A.y2; B bottom face (B.y1=200)
     #            |      |            ||
     #   y=150 ─  |  A   x============*        ← H stub; bend at (350,150)
@@ -53,7 +57,7 @@ Feature: Topology ranking by routing flexibility score
     #   ~~~y=100~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  ← perp_lo
     #              0  100              300 400
     #
-    #   H segment slide = perp_hi(200) − perp_lo(100) = 100
+    #   H segment slide = perp_hi(180) − perp_lo(100) = 80
     #
     Given a block "A" at (0,100)-(100,200)
     And a block "B" at (300,200)-(400,300)

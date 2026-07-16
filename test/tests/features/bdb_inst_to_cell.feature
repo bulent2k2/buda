@@ -1,3 +1,4 @@
+@landed
 Feature: add_inst_to_cell — cell-occurrence expansion
 
   Scenario: child component is auto-created when the parent cell is placed

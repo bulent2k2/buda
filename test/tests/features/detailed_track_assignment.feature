@@ -1,3 +1,4 @@
+@doc
 Feature: Detailed NUTS — expand abstract bus segments to concrete bit-wire tracks
   As a chip planner
   I want each abstract BusSegment to be split into N individual NetSegments

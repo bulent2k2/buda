@@ -1,3 +1,7 @@
+@landed
+# Bound executable smoke spec (test_ripup_reroute.py). The comprehensive narrative
+# for the whole RR arc (global-occupant pass, fast trials, fixed-context screen,
+# negotiate) is ripup_reroute_arc.feature.
 Feature: ripup_reroute clears congestion-induced NUTS overlaps
   As a chip planner
   I want a feedback pass that re-routes a contending bundle after NUTS

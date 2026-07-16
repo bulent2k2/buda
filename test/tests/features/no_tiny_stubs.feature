@@ -1,3 +1,4 @@
+@landed
 Feature: Elimination of Trivial or Tiny Stubs
   As a chip planner
   I want topology slide ranges to exclude positions that result in trivial stubs

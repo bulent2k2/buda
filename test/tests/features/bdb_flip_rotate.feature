@@ -1,3 +1,4 @@
+@landed
 Feature: flip_comp and rotate_comp transform component subtrees
 
   # ── Single-level: blk(120×90) at (50,50) containing leaf(45×50) at rel(10,15)

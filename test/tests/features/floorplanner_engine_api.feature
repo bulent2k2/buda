@@ -1,3 +1,4 @@
+@landed
 Feature: Floorplanner engine API — core placement operations
   The GUI should delegate traditional floorplanning operations to a C++ engine
   exposed through Python bindings, so the behavior is deterministic and testable

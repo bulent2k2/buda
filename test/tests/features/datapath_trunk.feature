@@ -1,3 +1,4 @@
+@landed
 Feature: Multi-trunk BITRUNK trees for high-fan-out datapath nets
   As a chip planner
   I want the generator to build two-level BITRUNK trees (a root spine feeding
@@ -8,6 +9,12 @@ Feature: Multi-trunk BITRUNK trees for high-fan-out datapath nets
 
   # Opt-in: these candidates only appear under the multi_trunk generator flag,
   # so default candidate sets (and their rankings) are unchanged.
+  #
+  # Scope: this file specs the FLAT generator (generate_topologies multi_trunk).
+  # The hier flow builds the same BITRUNK_HVH/VHV trees via
+  # `generate_hier_topologies multi_trunk` (same builders, per HBundle) — see
+  # hier_topology.feature. The over-the-notch bridge for gapped multi-rect blocks
+  # (teg_mode over) is specced in busterm_over_the_block.feature.
 
   # ---------------------------------------------------------------------------
   # Column datapath → BITRUNK_HVH: root H spine feeds two V branch trunks, each

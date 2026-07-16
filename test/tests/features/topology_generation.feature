@@ -1,3 +1,10 @@
+@orphaned
+# STATUS: binding deliberately disabled — test_topology.py's
+# `scenarios('features/topology_generation.feature')` line is commented out, so
+# these scenarios never run. Superseded by unified_topology.feature (LANDED, bound
+# to test_unified_topology.py), the authoritative I/L/Z/U/UU two-busterm geometry
+# spec (14 scenarios), plus connector_shape.feature and topology_flexibility.feature.
+# Kept for historical reference; a candidate for the attic. Do not rely on it for coverage.
 Feature: Topology Generation with Hanan Grid
   As a chip planner
   I want to generate a set of optimal topology candidates (I, L, Z, shapes)

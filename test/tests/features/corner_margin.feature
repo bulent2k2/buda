@@ -1,3 +1,4 @@
+@doc
 Feature: Block Corner Margin for Slide Ranges
   As a chip planner
   I want to keep trunk/stub connections away from block corners

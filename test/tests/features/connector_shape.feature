@@ -1,3 +1,4 @@
+@landed
 Feature: Connector shape selection rules
   As a chip planner
   I want the topology generator to automatically choose the correct connector shape
