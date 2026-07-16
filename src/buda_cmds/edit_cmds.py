@@ -64,6 +64,7 @@ def cmd_edit_topology(session, cmd, args, cmd_line):
         src_desc = f"copy of candidate {ci + 1} ({topo.type})"
     session._edit_w, session._edit_topo, session._edit_src = w, topo, src_desc
     session._edit_slide = {}
+    session._edit_layers_changed = False
     print(f"[edit] session opened on bundle {bid}: {src_desc} "
           f"({len(topo.segments)} segment(s)). "
           f"edit_status shows the verdict; edit_commit / edit_abort ends.")
@@ -206,6 +207,7 @@ def cmd_edit_set_layer(session, cmd, args, cmd_line):
                   f"{lid} routes {'H' if dir_h else 'V'} — check_design will "
                   f"flag LAYER_DIR")
     seg.layer_hint = lid
+    session._edit_layers_changed = True   # commit rebuilds pinned_seg_layers
     print(f"[edit] seg {i} layer -> {lid}")
 
 
@@ -247,6 +249,7 @@ def cmd_edit_abort(session, cmd, args, cmd_line):
     session._edit_w = session._edit_topo = None
     session._edit_src = ""
     session._edit_slide = {}
+    session._edit_layers_changed = False
 
 
 def cmd_edit_commit(session, cmd, args, cmd_line):
@@ -291,12 +294,41 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
         w.plan.selected_topology_index = idx
         w.input.topology_pinned = True
         print(f"  Pinned bundle {w.input.original_bundle.id} to it.")
+    # Per-segment overrides below are indexed by the COMMITTED topology's
+    # segments and live on plan/input state that NUTS/planner consult for the
+    # SELECTED candidate — writing them when the commit did not (re)select the
+    # candidate would misapply them to whatever is selected (the length guard
+    # can coincide).  So both blocks gate on the committed candidate being the
+    # selection (a 'pin' commit, or a dedup onto the already-selected one).
+    is_selected = (w.plan.selected_topology_index == idx)
+    # Rebuild the pinned layer overrides when the session re-layered a segment
+    # (edit_set_layer): layer_hint alone is only a suggestion to the planner —
+    # wrapper.input.pinned_seg_layers is what forces the layers (GUI parity;
+    # the explorer commit does the same).  No layer decision -> clear a stale
+    # list rather than let it re-pin old layers onto the new topology.
+    if is_selected:
+        if session._edit_layers_changed:
+            w.input.pinned_seg_layers = [s.layer_hint for s in topo.segments]
+            print(f"  Pinned {len(topo.segments)} segment layer(s) from the "
+                  f"session's edit_set_layer edits.")
+        else:
+            w.input.pinned_seg_layers = []
+    elif session._edit_layers_changed:
+        print("  Warning: edit_set_layer edits NOT pinned — the commit did "
+              "not select the candidate (use 'edit_commit pin'); the planner "
+              "treats bare layer_hints as suggestions only.")
+    session._edit_layers_changed = False
     # Land the session's staged slide windows (edit_set_slide) as NUTS
     # overrides on the committed candidate — the same plan.seg_slide_lo/hi
     # hatch the explorer's 'W' rides.  REVALIDATED against the committed
     # topology's connectivity (a geometry edit after staging can narrow a
     # segment's structural range; NUTS honors any non-NaN override verbatim):
     # a shrunken window clamps, a now-disjoint one is dropped LOUD.
+    if session._edit_slide and not is_selected:
+        print(f"  Warning: {len(session._edit_slide)} staged slide window(s) "
+              f"discarded — the commit did not select the candidate (use "
+              f"'edit_commit pin'); plan overrides attach to the selection.")
+        session._edit_slide = {}
     if session._edit_slide:
         ct = buda.ConnTopology()
         ct.build(topo, session.fp)

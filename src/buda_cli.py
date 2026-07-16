@@ -209,6 +209,8 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._edit_slide = {}        # staged slide windows {seg: (lo, hi)} —
                                      # edit_set_slide; applied to
                                      # plan.seg_slide_lo/hi at edit_commit
+        self._edit_layers_changed = False   # edit_set_layer used: commit
+                                     # rebuilds pinned_seg_layers (GUI parity)
         self.no_viz = False          # set by --no-viz CLI flag
         self.verbose_conn = False    # set by --verbose-conn: print every per-bit violation
         self.ipc_verbose = False     # set by --ipc-verbose: surface buda_viz/def_viz IPC chatter

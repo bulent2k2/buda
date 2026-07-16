@@ -409,7 +409,15 @@ class HierMixin:
             self.do_command(f"edit_topology {bid} {base_arg}")
             for op in ops:
                 self.do_command(op)
-            self.do_command("edit_commit")     # append; the pin resolves below
+            # Commit WITH pin unless a script command (select_topology) already
+            # pinned this wrapper — the script keeps precedence, exactly as in
+            # the selection loop below.  The pin matters beyond selection: an
+            # un-pinned commit rightly DISCARDS the session's per-segment
+            # overrides (slide windows, edit_set_layer pins) because they
+            # attach to the selection — so the replayed session's overrides
+            # land only when its candidate actually becomes the selection.
+            already = getattr(w.input, 'topology_pinned', False)
+            self.do_command("edit_commit" if already else "edit_commit pin")
             if sc_uid and not any(buda.topo_uid(c) == sc_uid
                                   for c in w.input.candidates):
                 print(f"Warning: rebuilt USER candidate for bundle {bid} does "

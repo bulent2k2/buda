@@ -895,3 +895,98 @@ def test_cli_edit_set_slide_stages_clamps_and_rekeys(tmp_path):
     slo, shi = list(w.plan.seg_slide_lo), list(w.plan.seg_slide_hi)
     assert (slo[0], shi[0]) == (420.0, 460.0)   # lo clamped 0 → 420
     assert all(math.isnan(v) for v in slo[1:])  # seg 1 cleared, seg 2 gone
+
+
+# ── Codex #305 review fixes ───────────────────────────────────────────────────
+
+def test_cli_commit_without_pin_discards_overrides(capsys):
+    """Codex #305: an un-pinned edit_commit appends the candidate but does NOT
+    select it — per-segment overrides (staged slide windows, edit_set_layer
+    pins) are indexed by the committed topology and attach to the SELECTION,
+    so writing them would misapply to whatever is selected (the length guard
+    can coincide).  They must be discarded LOUD, and the live plan/input state
+    left untouched."""
+    import math
+    s = _dd_base_session()                    # C committed+pinned via the flow
+    w = s.bundles[0]
+    sel_before = w.plan.selected_topology_index
+    slide_before = list(w.plan.seg_slide_lo)
+    pins_before = list(w.input.pinned_seg_layers)
+    for cmd in (
+        "edit_topology 1 new",
+        "edit_add_trunk V 500 200 1200",
+        "edit_add_stub up 0",
+        "edit_add_stub lo 0",
+        "edit_set_slide 0 420 460",
+        "edit_set_layer 1 5",                 # H stub → V layer (just a change)
+        "edit_commit",                        # NO pin
+    ):
+        s.do_command(cmd)
+    out = capsys.readouterr().out
+    assert 'slide window(s) discarded' in out
+    assert 'NOT pinned' in out
+    assert w.plan.selected_topology_index == sel_before   # selection untouched
+    assert list(w.plan.seg_slide_lo) == slide_before      # no plan pollution
+    assert list(w.input.pinned_seg_layers) == pins_before
+
+
+def test_cli_edit_set_layer_pins_on_commit():
+    """Codex #305: edit_set_layer must survive planning — layer_hint alone is
+    a suggestion; a pinning commit rebuilds wrapper.input.pinned_seg_layers
+    from the working copy (GUI parity)."""
+    s = _dd_base_session()
+    for cmd in (
+        "edit_topology 1 new",
+        "edit_add_trunk V 500 200 1200",      # seg 0, default V layer 5
+        "edit_add_stub up 0",                 # seg 1, H layer 4
+        "edit_add_stub lo 0",                 # seg 2, H layer 4
+        "edit_set_layer 0 5",                 # explicit (same value, still a pin)
+        "edit_commit pin",
+    ):
+        s.do_command(cmd)
+    w = s.bundles[0]
+    topo = w.input.candidates[w.plan.selected_topology_index]
+    assert list(w.input.pinned_seg_layers) == \
+        [sg.layer_hint for sg in topo.segments]
+
+
+def test_sidecar_load_preserves_user_topo(tmp_path, capsys):
+    """Codex #305: _load_sidecar must carry user_topo through — a designer
+    opening an explorer on an existing sidecar and re-saving any selection
+    must not strand the USER candidate's replay log.  Re-pinning the SAME
+    USER candidate keeps it too."""
+    s = _dd_base_session()
+    sc = str(tmp_path / "sc.json")
+    exp = buda_viz.TopologyExplorer(s.fp, s.bundles, sidecar_path=sc,
+                                    layer_stack=s.layers)
+    try:
+        _key(exp, 'E')
+        _trunk(exp, 'Y', 500, 700)
+        exp.sidx = 0
+        _key(exp, 'S', x=200, y=1200)
+        _key(exp, 'S', x=200, y=200)
+        _key(exp, 'enter')                    # commit + pin → sidecar user_topo
+        assert 'user_topo' in exp._find_selection()
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+    # A SECOND explorer loads the same sidecar, then re-saves: the replay log
+    # must survive the load→save cycle.
+    exp2 = buda_viz.TopologyExplorer(s.fp, s.bundles, sidecar_path=sc,
+                                     layer_stack=s.layers)
+    try:
+        sel = exp2._find_selection()
+        assert sel is not None and 'user_topo' in sel, \
+            "_load_sidecar dropped the replay log"
+        exp2._save_sidecar()
+        import json
+        on_disk = json.load(open(sc))['selections'][0]
+        assert 'user_topo' in on_disk
+        # Re-pinning the same USER candidate (s on the shown selection) keeps it.
+        exp2._select_current()
+        sel2 = exp2._find_selection()
+        assert sel2 is not None and 'user_topo' in sel2
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
