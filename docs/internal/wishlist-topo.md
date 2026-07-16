@@ -7,6 +7,54 @@ See also [`mst_edge_realization.md`](mst_edge_realization.md) — trunk-tail
 tightening and the per-edge MST L/Z DOF (avoiding the 2ᴺ candidate explosion),
 grounded in the current generator code with a measured prototype result.
 
+## Nominal-WL comparability across shape families (the b44 root causes) — OPEN
+
+**Context (2026-07-16, `flow/big_data_test/b44.buda`; deep-dive after the
+`kWLSpread` ship, see wishlist-planner "Realization-risk WL"):** the b44
+mis-ranking traced to THREE generation-policy facts that make the nominal
+`estimated_wirelength` non-comparable across shape families:
+
+1. **The 3510 nominal is the geometric floor, and several families sit ON it
+   while others sit above it.** b44's floor = the L1 distance between the two
+   far blocks' nearest corners (io_pad_tl (1200,12000) ↔ blk_07 (2960,10250) =
+   1760 H + 1750 V; the middle block is covered by crossing/pass-through for
+   free). The `TRUNK_H+MST` hybrid's nominal is a 6-segment **monotone
+   staircase** between those corners (H components sum exactly 1760, V exactly
+   1750 — zero overshoot **by construction**: nearest-face MST joins + relay
+   completion place every segment at its locally-minimal nominal), so its
+   nominal ALWAYS equals its envelope bottom `wl_lo`. Plain trunks only hit
+   the floor when a sampled locus happens to align.
+
+2. **Trunk loci are sampled at Hanan-channel MIDPOINTS only**
+   (`topology.cpp` multicast locus loop: `mid = (hanan[i]+hanan[i+1])/2`,
+   strictly inside the bundle bbox) — never ON a Hanan line. b44's V loci are
+   700/1950/2830/3810; the WL-optimal x=1200 (io_pad_tl's right edge) is
+   structurally unsampled, so the tight 2-seg `TRUNK_V@x700` carries a +500
+   nominal overshoot its own slide window could remove (NUTS in fact slides
+   it to ~1073, the bus-width-clearance limit). A locus ON the Hanan line
+   would nominal at the floor with the narrowest envelope of the pool.
+
+3. **WL ties break ALPHABETICALLY, then by index.** `annotate_and_sort`
+   orders candidates by `(wl, type)` and ASCII `'+' < '@'` sorts
+   `TRUNK_H+MST@…` before `TRUNK_H@…`/`TRUNK_V@…`; the planner's soft costs
+   tie (~0.01 across the 3510 group) and its equal-score tie-break keeps the
+   LOWEST index — so the 6-junction staircase won the 3-way 3510 tie **by
+   alphabet**, and NUTS's greedy per-segment placement then realized it at
+   4510/bit vs the 3-seg tie-sibling's 3625/bit.
+
+**Shipped mitigation:** the planner-side `kWLSpread` knob (opt-in) prices the
+envelope spread, which resolves exactly these ties toward the tightest
+realization (b44: picks `TRUNK_V@x1950`, detailed 188513 = 3625/bit, −19.6%,
+better than the flow's hand-pin). **Generation-side follow-ons (this item):**
+(a) also sample trunk loci ON Hanan lines (or at least the per-window
+WL-optimal edge) so simple trunks can nominal at the floor — cheap, but
+grows the pool ~2×; (b) make the WL tie-break structural instead of
+alphabetical — fewer segments / fewer junctions first (`(wl, nsegs, type)`).
+CAUTION on (b): the sort defines the 1-based candidate indices that
+`select_topology` pins in checked-in flows and tests — changing tie order
+renumbers pools, so it needs a flow/test index audit (the reason the
+score-term route shipped first).
+
 ## True along-flex trunk DOF (Stage C of the flexible-root re-arch)
 
 **Context.** The coverage-driven flexible trunk span (PR on `claude/topo-gen-b4`)

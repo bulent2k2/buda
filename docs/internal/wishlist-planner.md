@@ -281,6 +281,16 @@ ripup: **0 opens / 1 overlap** vs baseline 0/5, +2.1% WL; bigHalf + healers
 **0/0**). `0.25` is too aggressive (mix healed endpoint 0→16). Tests:
 `test/tests/test_planner_wl_spread.py`; docs: `docs/script_reference/planner.md`.
 
+**Root causes (deep-dive):** the nominal-vs-realization gap is a
+generation-policy comparability problem — the MST hybrid's nominal is a
+zero-overshoot monotone staircase (always AT its envelope bottom), plain
+trunks sample loci only at Hanan-channel midpoints (the WL-optimal
+edge-aligned locus is never emitted, b44's +500), and WL ties break
+alphabetically (`(wl, type)`, ASCII `'+' < '@'`) then by lowest index — see
+[`wishlist-topo.md`](wishlist-topo.md) → *"Nominal-WL comparability across
+shape families"* for the generation-side follow-ons (Hanan-line loci,
+structural tie-break) and why the score-term route shipped first.
+
 **Default-flip criteria (stays opt-in for now):** same bar as `kPeak` — the
 opens shuffle on plain pipelines means a blanket default needs either (a) the
 healers in the default flow path, or (b) a spread term that prices only the
