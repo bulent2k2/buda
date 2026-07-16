@@ -227,3 +227,30 @@ def test_gui_template_edit_survives_flow_rerun_via_sidecar(tmp_path):
     assert w2.input.topology_pinned
     assert w2.input.candidates[sel].type == "USER"
     assert buda.topo_uid(w2.input.candidates[sel]) == uid
+
+
+def test_show_bundle_index_parked_during_edit_session(tmp_path):
+    """Review #311 observation 1: the main window's focus hook
+    (show_bundle_index) must be parked while an edit session is open, like
+    the nav keys — it would otherwise move self.bidx and swap self.fp under
+    the session's working copy (a cell-frame copy over a suddenly-absolute
+    backdrop)."""
+    db = str(tmp_path / "d.bdb")
+    _build_design(db, cross=True)
+    s = _hier_session(db)
+    ti = _tmpl_idx(s)
+    exp = _explorer(s, tmp_path, start_bidx=ti)
+    try:
+        _key(exp, 'E')                       # open a session on the template
+        fp_before = exp.fp
+        other = next(i for i in range(len(s.bundles)) if i != ti)
+        exp.show_bundle_index(other)         # main-window focus hook
+        assert exp.bidx == ti                # parked: bundle unchanged
+        assert exp.fp is fp_before           # frame NOT swapped under the copy
+        assert "finish the session" in exp._edit_msg
+        _key(exp, 'escape')
+        exp.show_bundle_index(other)         # after the session: works again
+        assert exp.bidx == other
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')

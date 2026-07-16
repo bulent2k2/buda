@@ -105,7 +105,16 @@ class ExplorerNavMixin:
 
     def show_bundle_index(self, idx):
         """Jump to a specific bundle (used when the explorer is already open and
-        the parent viz wants to focus a different highlighted bundle)."""
+        the parent viz wants to focus a different highlighted bundle).
+
+        Parked while a TopoEdit session is open, like the nav keys: an open
+        session pins the frame (self.fp) and the working copy to ITS bundle —
+        adopting the main window's focus here would move self.bidx and swap
+        self.fp under the copy (the cross-window race from review #311)."""
+        if self._edit_topo is not None:
+            self._edit_msg = "EDIT: finish the session first (enter/esc)"
+            self._draw()
+            return
         if 0 <= idx < len(self.wrappers) and idx != self.bidx:
             self.bidx = idx
             self._sync_bundle_fp()                 # its own frame (hier)
