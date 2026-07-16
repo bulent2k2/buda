@@ -3,9 +3,28 @@
 Deferred follow-ups for track assignment (`src/nuts.cpp`,
 `src/detailed_nuts.cpp`). Index: [`wishlist.md`](wishlist.md).
 
-## Non-TOP pin-access stub span-stretched onto its endpoint leaf — OPEN
+## Non-TOP pin-access stub span-stretched onto its endpoint leaf — NO LIVE REPRO (effectively closed by config; latent NUTS clamp deferred)
 
-**What:** A cross-block bus (flow 10's cross-chip `x_t*`, e.g. `x_t4`) routes as
+**Status (2026-07-16):** the one live repro (flow 10's `x_t*`) was the M5-vs-M7
+planner near-tie, and **PR #307** removed it at the source by correcting
+`flow/tracks/tracks.buda`'s `M7` to `TOP` (M7 sits above M5/M6 TOP — a genuine
+top metal, not a cheap offload target). A **full-corpus sweep**
+(all **109** `flow`/`demo` `.buda` scripts that run `run_detailed_nuts` —
+`rg -l run_detailed_nuts flow demo -g '*.buda'`, including the doubly-nested
+`flow/big_data_test/big2/*.buda`; grepping for the `cull_keepout_crossers`
+`"bit(s) removed"` WARNING) now finds
+**0 flows with keepout culls** — the survivor span-stretch-onto-keepout event
+fires nowhere in the corpus. Combined with the opt-in `nontop_dead_span_gate`
+(PR #304) and the keepout-model audit (below), the class has no live repro.
+The NUTS-side span-stretch clamp described under **Where to start** is therefore
+a **latent** guard, deferred until a design re-creates the near-tie downgrade —
+writing it now would touch the delicate `do_span_adjustments` path (big2's
+coverage-invariant strand fix) with **no measurable win** and a real
+host-sensitivity risk, against the measured-change discipline. If the class
+recurs it is still loudly reported (`KEEPOUT_CROSS` + the DNUTS cull WARNING —
+never silent), which is the trigger to land the clamp below.
+
+**What (original repro, now config-closed):** A cross-block bus (flow 10's cross-chip `x_t*`, e.g. `x_t4`) routes as
 a TOP-H trunk + two vertical stubs dropping into its endpoint leaf cells. The
 generator hints a TOP-V layer (M5) for those stubs — TOP tiles leaves freely —
 but the planner downgrades them to a non-TOP-V layer (M7) to save the
