@@ -14,7 +14,7 @@ genuinely **cyclic** vertical constraints (via a dogleg) are handled; the
 remaining open items are noted at the end of §3. Gap 4 (a non-TOP pin-access stub
 span-stretched onto its endpoint leaf) now has **no live repro** (PR #307
 corrected `tracks.buda`'s M7→TOP, removing flow 10's M5-vs-M7 near-tie downgrade;
-a 100-flow corpus sweep finds 0 keepout culls) — the clamp below is a latent,
+a 109-flow full-corpus sweep finds 0 keepout culls) — the clamp below is a latent,
 deferred guard; see [`../internal/wishlist-nuts.md`](../internal/wishlist-nuts.md)
 and [`../internal/opens.md`](../internal/opens.md). Historically it was
 diagnosed as **open**, with the reason a
@@ -230,9 +230,12 @@ bits, and 0 bit-level shorts.
 
 > **Update (2026-07-16):** PR #307 corrected `flow/tracks/tracks.buda`'s `M7`
 > to `TOP` (M7 sits above M5/M6 TOP — a genuine top metal), removing flow 10's
-> M5-vs-M7 near-tie downgrade that was the sole live repro. A 100-flow
-> full-corpus sweep for the `cull_keepout_crossers` `"bit(s) removed"` WARNING
-> finds **0 flows with keepout culls**. The span-stretch clamp below is retained
+> M5-vs-M7 near-tie downgrade that was the sole live repro. A full-corpus sweep
+> over all **109** `flow`/`demo` `.buda` scripts that run `run_detailed_nuts`
+> (`rg -l run_detailed_nuts flow demo -g '*.buda'`, incl. the doubly-nested
+> `flow/big_data_test/big2/*.buda`) for the `cull_keepout_crossers`
+> `"bit(s) removed"` WARNING finds **0 flows with keepout culls**. The
+> span-stretch clamp below is retained
 > as a **latent, deferred** guard (no measurable win with no live repro; touches
 > big2's coverage-invariant strand fix); if the class recurs it is loudly
 > reported (`KEEPOUT_CROSS` + DNUTS cull WARNING). The original diagnosis is kept

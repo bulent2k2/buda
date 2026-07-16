@@ -8,9 +8,11 @@ Deferred follow-ups for track assignment (`src/nuts.cpp`,
 **Status (2026-07-16):** the one live repro (flow 10's `x_t*`) was the M5-vs-M7
 planner near-tie, and **PR #307** removed it at the source by correcting
 `flow/tracks/tracks.buda`'s `M7` to `TOP` (M7 sits above M5/M6 TOP — a genuine
-top metal, not a cheap offload target). A **100-flow full-corpus sweep**
-(every `flow/*.buda flow/*/*.buda demo/*.buda` running `run_detailed_nuts`,
-grepping for the `cull_keepout_crossers` `"bit(s) removed"` WARNING) now finds
+top metal, not a cheap offload target). A **full-corpus sweep**
+(all **109** `flow`/`demo` `.buda` scripts that run `run_detailed_nuts` —
+`rg -l run_detailed_nuts flow demo -g '*.buda'`, including the doubly-nested
+`flow/big_data_test/big2/*.buda`; grepping for the `cull_keepout_crossers`
+`"bit(s) removed"` WARNING) now finds
 **0 flows with keepout culls** — the survivor span-stretch-onto-keepout event
 fires nowhere in the corpus. Combined with the opt-in `nontop_dead_span_gate`
 (PR #304) and the keepout-model audit (below), the class has no live repro.

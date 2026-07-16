@@ -84,9 +84,11 @@ designs and fail LOUD, never silent:)*
   removed at the **source** by **PR #307**: the downgrade was the M5-vs-M7
   planner near-tie, and M7 sits *above* M5/M6 TOP — a genuine top metal, so
   correcting `flow/tracks/tracks.buda`'s `M7` to `TOP` eliminated the offload.
-  A **100-flow full-corpus sweep** (every `flow`/`demo` script running
-  `run_detailed_nuts`, grepping the `cull_keepout_crossers` `"bit(s) removed"`
-  WARNING) now finds **0 flows with keepout culls** — the survivor
+  A **full-corpus sweep** (all **109** `flow`/`demo` `.buda` scripts running
+  `run_detailed_nuts` — `rg -l run_detailed_nuts flow demo -g '*.buda'`,
+  including the doubly-nested `flow/big_data_test/big2/*.buda`; grepping the
+  `cull_keepout_crossers` `"bit(s) removed"` WARNING) finds **0 flows with
+  keepout culls** — the survivor
   span-stretch-onto-keepout event fires nowhere. The NUTS-side span-stretch
   clamp in `do_span_adjustments` (don't stretch a non-TOP segment onto a leaf
   keepout — clamp at the face) is kept as a **latent, deferred** guard in
