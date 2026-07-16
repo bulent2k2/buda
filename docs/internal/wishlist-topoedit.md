@@ -56,7 +56,7 @@ now log the same command into the `[edit-cmd]` stream and the sidecar
 op-log, so a replayed session keeps its slide refinements — the
 sidecar/replay story is whole.
 
-## BDB topology tables as the USER-topo persistence home (hier flows) — OPEN, significant
+## BDB topology tables as the USER-topo persistence home (hier flows) — ✅ RESOLVED (core), follow-ons below
 
 **Context.** Hand-built USER candidates now persist via the SIDECAR
 op-log (`user_topo`: base uid + applied `edit_*` commands, replayed after
@@ -90,10 +90,40 @@ hier flows:
    `load_pipeline` → pin resolves; the `bdb_input` copy-to-temp fixture),
    plus a hier flow whose template edit lands on every instance.
 
-**Why significant.** This is the designer-interaction keystone for hier
-designs: today a hier session's hand edits survive only while the sidecar
-matches the flow, and cross-session/hier-aware continuation
-(`load_pipeline`) silently drops USER candidates.  Where to start:
-`src/buda_session/persist.py` (`_persist_topologies`) +
-`src/buda_session/hier.py` (`load_pipeline` restore path) +
-[`../BDB_REFERENCE.md`](../BDB_REFERENCE.md) schema notes.
+**Landed** (opens item 12 batch).  What the investigation found and fixed:
+
+- *Flat was already whole* (v15 `source='user'`): commit persists, restore
+  resolves the pin by uid — locked in by `test_bdb_user_topo.py`.
+- *TopoEdit is now frame-aware*: `edit_topology` resolves the bundle's OWN
+  floorplan via the same `_floorplan_for_hbundle` cases check_design uses,
+  so a CELL-LOCAL template edits in cell-local block names/coordinates
+  (`session._edit_fp`; flat/expanded/same-level stay on `session.fp`).
+- *The loader resolves frames too*: `_restore_wrapper` restores the
+  persisted `entry/exit_busterm_ids` (written since v-early, never read
+  back — and `entry_busterm_ids` is exactly the cell-local case's gate) and,
+  with the loader's shared `fp_env`, validates each bundle in its own frame
+  — a PRE-planner hier checkpoint (templates only, incl. a hand-committed
+  USER candidate) now loads instead of tripping the missing-block gate,
+  and the resumed `run_planner hier` replicates the pinned USER template
+  to every instance.
+- *Post-expansion commits persist through the planner's expanded path*:
+  `edit_commit` on an expanded session used to rewrite the per-instance
+  wrappers as NORMAL bundle rows via `_persist_topologies`, clobbering the
+  `is_expanded` checkpoint IN PLACE (binary BDBs open read-write); it now
+  routes through `_persist_planner_output`, so an instance-local edit
+  stays instance-local and `load_pipeline expanded` round-trips.
+
+**Follow-ons (not blocking):**
+
+1. **Op-log provenance in the BDB** — the sidecar `user_topo` replay log
+   (base uid + edit_* commands) could be mirrored into BDB meta so the
+   geometric restore carries its editing provenance; restore is geometric
+   either way, so this is documentation value only.
+2. **Explorer (GUI) hier frames** — the CLI edit session is frame-aware;
+   the explorer still draws/edits against the session floorplan, so
+   editing a cell-local template in the GUI shows the wrong backdrop.
+   Needs the explorer to accept a per-bundle floorplan (same resolver).
+3. **Un-pinned instance commits are session-only** (expanded rows persist
+   only their selection, by design) — surfaced with a printed note; a
+   full per-instance candidate-pool persistence would be a schema change
+   with little value until a workflow needs it.

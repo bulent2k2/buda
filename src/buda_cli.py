@@ -211,6 +211,10 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
                                      # plan.seg_slide_lo/hi at edit_commit
         self._edit_layers_changed = False   # edit_set_layer used: commit
                                      # rebuilds pinned_seg_layers (GUI parity)
+        self._edit_fp = None         # the session's floorplan: cell-local /
+                                     # endpoint-depth for a hier bundle (the
+                                     # frame its candidates were generated in),
+                                     # else self.fp; set by edit_topology
         self.no_viz = False          # set by --no-viz CLI flag
         self.verbose_conn = False    # set by --verbose-conn: print every per-bit violation
         self.ipc_verbose = False     # set by --ipc-verbose: surface buda_viz/def_viz IPC chatter

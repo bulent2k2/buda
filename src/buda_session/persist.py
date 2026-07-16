@@ -532,7 +532,7 @@ class PersistMixin:
 
 
     def _restore_wrapper(self, br, h_layer_ids, v_layer_ids, missing_blocks,
-                         fp=None):
+                         fp=None, fp_env=None):
         """Rebuild ONE BundleWrapper from its persisted rows (bundle +
         candidate topologies + segments + logical annotations + bridges +
         selection/pin/layers/bu_locked) — the loader loop's body, extracted
@@ -540,15 +540,20 @@ class PersistMixin:
         bottom-up TEMPLATE wrappers (_restore_bottom_up_templates).
 
         `fp` is the floorplan candidates are validated against (block-name
-        existence gate before load_seg_busterms) — self.fp by default; a
-        cell-local TEMPLATE passes its own cell-local floorplan, since its
-        block names are cell-local and legitimately absent from self.fp.
+        existence gate before load_seg_busterms) — a cell-local TEMPLATE
+        passes its own cell-local floorplan, since its block names are
+        cell-local and legitimately absent from self.fp.  With fp=None the
+        frame is RESOLVED per bundle (fp_env = the loader's shared
+        (fp_cache, comps_by_name)): a pre-expansion cell-local template /
+        replica or a cross-level bundle gets its own floorplan via the same
+        `_floorplan_for_hbundle` cases check_design uses — so a hier
+        checkpoint taken BEFORE `run_planner hier` (templates only, incl. a
+        hand-committed USER candidate) loads without tripping the
+        missing-block gate; everything else validates against self.fp.
         Returns None when the row has no persisted candidates (e.g. a
         bundler-only stop); unknown block names accumulate in
         missing_blocks (the caller decides whether that is fatal)."""
         import json
-        if fp is None:
-            fp = self.fp
         topos = self.bdb.topologies(br.id)
         if not topos:
             return None
@@ -566,6 +571,27 @@ class PersistMixin:
         hb.drv_spec_path = br.drv_spec_path
         hb.rcv_spec_paths = (json.loads(br.rcv_spec_paths)
                              if br.rcv_spec_paths else [])
+        # The entry/exit busterm links are persisted (bundle_busterm) but were
+        # never restored — and `entry_busterm_ids` is exactly the marker
+        # _floorplan_for_hbundle's cell-local case gates on, so a resumed
+        # session's check_design/dump/TopoEdit could not resolve a template's
+        # frame without this.
+        ent, ext = [], []
+        for bt_id, kind in self.bdb.bundle_busterms(br.id):
+            (ent if kind == "entry" else ext).append(bt_id)
+        hb.entry_busterm_ids = ent
+        hb.exit_busterm_ids = ext
+        if fp is None:
+            fp = self.fp
+            if (fp_env is not None
+                    and not getattr(br, "is_expanded", False)
+                    and ((hb.cell_context and hb.entry_busterm_ids)
+                         or hb.drv_spec_depth >= 0)):
+                fp_cache, comps_by_name = fp_env
+                resolved = self._floorplan_for_hbundle(hb, fp_cache,
+                                                       comps_by_name)
+                if resolved is not None:
+                    fp = resolved
         w = buda.BundleWrapper()
         w.input.original_bundle = hb
         w.input.width = len(hb.get_net_names()) * 1.5   # as run_bundler sets it
@@ -805,10 +831,14 @@ class PersistMixin:
 
         h_layer_ids = set(self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL))
         v_layer_ids = set(self.layers.get_layer_ids_by_dir(buda.LayerDir.VERTICAL))
+        # Shared frame-resolution environment for _restore_wrapper's fp=None
+        # path (cell-local templates / cross-level bundles validate in their
+        # own floorplan, not self.fp — see the docstring there).
+        fp_env = ({}, {c.name: c for c in self.bdb.all_components()})
         bundles, missing_blocks, skipped = [], set(), 0
         for br in rows:
             w = self._restore_wrapper(br, h_layer_ids, v_layer_ids,
-                                      missing_blocks)
+                                      missing_blocks, fp_env=fp_env)
             if w is None:
                 skipped += 1
                 continue          # no candidates persisted (e.g. bundler-only stop)
