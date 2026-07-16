@@ -81,10 +81,10 @@ bool endpoint_tapped(const Topology& topo, int si, int ep) {
 
 EditVerdict edit_add_trunk(Topology& topo, const Floorplan& fp, bool horiz,
                            int perp_pos, int along_lo, int along_hi, int layer) {
+    std::vector<int> xs, ys;                    // one grid derivation, reused below
+    fp.get_hanan_grid(xs, ys);
     if (along_lo > along_hi) {
         // Default: full span = the Hanan grid's extent on this axis.
-        std::vector<int> xs, ys;
-        fp.get_hanan_grid(xs, ys);
         const std::vector<int>& g = horiz ? xs : ys;
         if (g.size() < 2)
             return fail("floorplan has no Hanan extent to span");
@@ -111,8 +111,6 @@ EditVerdict edit_add_trunk(Topology& topo, const Floorplan& fp, bool horiz,
     // (only edit_add_trunk).  The user refines with `W`, which overrides via
     // seg_slide.
     {
-        std::vector<int> xs, ys;
-        fp.get_hanan_grid(xs, ys);
         const std::vector<int>& g = horiz ? ys : xs;   // perp-axis grid lines
         int lo = INT_MIN, hi = INT_MAX;
         for (int c : g) {                              // g is sorted ascending
