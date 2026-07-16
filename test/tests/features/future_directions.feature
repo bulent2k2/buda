@@ -46,6 +46,35 @@ Feature: Roadmap — documented open items & future directions
     When the along-flex DOF is enabled end-to-end
     Then the trunk slides along its axis without inflating wirelength or flipping planner selections
 
+  # ── Nominal-WL comparability (opens #13, wishlist-topo.md — the b44 follow-ons) ──
+
+  Scenario: trunk loci are sampled on Hanan lines as well as channel midpoints
+    # see docs/internal/wishlist-topo.md "Nominal-WL comparability" + opens.md #13
+    # Today loci = midpoints between adjacent Hanan lines only, so the WL-optimal
+    # edge-aligned trunk (b44's x=1200) is never emitted and the tight 2-seg
+    # candidate carries a +500 nominal overshoot its slide window could remove.
+    Given a multicast bundle whose WL-optimal trunk position lies ON a Hanan line
+    When generate_topologies samples trunk loci
+    Then a candidate at the Hanan-line locus exists with its nominal at the geometric floor
+
+  Scenario: equal-WL candidates tie-break structurally, not alphabetically
+    # see docs/internal/wishlist-topo.md "Nominal-WL comparability" + opens.md #13
+    # Today annotate_and_sort orders by (wl, type) and ASCII '+' < '@' put b44's
+    # 6-junction TRUNK_H+MST staircase ahead of the 3-seg trunks at the same 3510.
+    # CAUTION: the sort defines the 1-based select_topology indices, so this
+    # needs a checked-in flow/test index audit.
+    Given several candidates with equal nominal wirelength
+    When candidates are sorted for planning
+    Then fewer-segment (fewer-junction) shapes rank ahead of slide-coupled staircases
+
+  Scenario: a dominated candidate is pruned at generation
+    # see docs/internal/wishlist-topo.md "Nominal-WL comparability" + opens.md #13
+    # The sound salvage of the measured-and-rejected min-WL assignment: wl_lo/wl_hi
+    # are deterministic, so envelope dominance is decidable at generation time.
+    Given a candidate whose envelope lower bound exceeds another candidate's upper bound
+    When generate_topologies filters the pool
+    Then the dominated candidate is dropped (it can never win under any realization)
+
   # ── Feedthru follow-ups (trunk_mst_and_feedthru_plan.md §2.9) ──────────────
 
   Scenario: straight / I-shape feedthru split
