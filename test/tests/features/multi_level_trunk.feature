@@ -6,6 +6,11 @@ Feature: Multi-level trunk topologies (BITRUNK and generalised trees)
   So that large fan-out nets can be routed with minimum total wire and
   balanced load on each trunk level.
 
+  # As-built scope: the multi_trunk generator builds TWO-LEVEL BITRUNK trees in
+  # both orientations. A source-anchored root and a true depth-3 (two branch
+  # levels) tree remain documented follow-ups — the scenarios below assert the
+  # two-level structure the generator actually builds (see the per-scenario notes).
+
   # Diagram notation used throughout this file:
   #
   #   +----+  block boundary  (+= corner,  - top/bottom,  | sides)
