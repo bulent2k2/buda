@@ -34,34 +34,6 @@ items this page doesn't see).
    template↔replica linkage so every instance splits identically). Both
    fail LOUD/conservative today, never silent.
 
-4. **Non-TOP pin-access stub span-stretched onto its endpoint leaf** —
-   [`wishlist-nuts.md`](wishlist-nuts.md) → *"Non-TOP pin-access stub
-   span-stretched onto its endpoint leaf — OPEN"* and
-   [`../future/nuts_packing_gaps.md`](../future/nuts_packing_gaps.md) §4
-   (Gap 4). Flow 10's cross-chip `x_t*` stubs: the planner downgrades a
-   generator-hinted-TOP pin-access stub to a non-TOP layer, where the
-   endpoint leaf is a keepout and NUTS span-stretches the stub onto it →
-   the pin-access bits are culled (a silent open). **Two halves:**
-   *Planner side (partly shipped)* — the planner assigns a non-TOP layer
-   whose real full-span signal-track supply is short/zero because
-   `score_segment`'s per-cut capacity samples the endpoint-CLAMPED extent.
-   The **opt-in `set_planner_param nontop_dead_span_gate`** now refuses a
-   non-TOP layer whose span has **0** keepout-clear tracks and escalates to
-   TOP (measured on `bigHalf` no-rr: 10 dead-span stubs, DNUTS unplaced
-   **566 → 135, −76%**). It stays opt-in because `span_pool == 0` over the
-   conservative abstract span can't tell a genuine cull from a survivor
-   whose final adjusted span clears the keepout (always-on regresses
-   `rnr_mix` 0 → 16); the always-on discriminator is in wishlist-planner.
-   *NUTS side (still open)* — **NOT a planner cost term** for the
-   *survivor* case: the crossing is a post-placement span-stretch event
-   (an exclusive leaf-overlap check never fires, an inclusive one
-   over-fires; both measured). Fix locus is a span-stretch clamp in
-   `do_span_adjustments` (don't stretch a non-TOP segment onto a leaf
-   keepout — clamp at the face). **Host-sensitive** (the M5-vs-M7 near-tie
-   flips under `-march=native`). **Effort:** medium; touches the
-   span-adjust that closed big2's strand, so a full golden + fast/mid
-   re-verify.
-
 ## Big / blocked / conditional
 
 *(bottom-up conditionals, added 2026-07-10 — these only fire on specific
@@ -99,6 +71,31 @@ designs and fail LOUD, never silent:)*
   `test_bdb_user_topo.py` (flat lock-in + 3 hier round trips).  Follow-ons
   (op-log provenance in BDB meta, GUI hier frames, per-instance pools) in
   [`wishlist-topoedit.md`](wishlist-topoedit.md).
+
+- **Non-TOP pin-access stub span-stretched onto its endpoint leaf** ✅
+  (as NO LIVE REPRO — effectively closed by config) — **DONE (2026-07-16)**.
+  The one live repro was flow 10's cross-chip `x_t*` stubs, where the planner
+  downgraded a generator-hinted-TOP pin-access stub to a non-TOP layer whose
+  endpoint leaf is a keepout and NUTS span-stretched the stub onto it → the
+  pin-access bits were culled (a silent open). The **planner half shipped**
+  as the opt-in `set_planner_param nontop_dead_span_gate` (PR #304 — refuses a
+  non-TOP layer whose span has **0** keepout-clear tracks and escalates to TOP;
+  `bigHalf` no-rr DNUTS unplaced **566 → 135, −76%**). The repro itself was then
+  removed at the **source** by **PR #307**: the downgrade was the M5-vs-M7
+  planner near-tie, and M7 sits *above* M5/M6 TOP — a genuine top metal, so
+  correcting `flow/tracks/tracks.buda`'s `M7` to `TOP` eliminated the offload.
+  A **100-flow full-corpus sweep** (every `flow`/`demo` script running
+  `run_detailed_nuts`, grepping the `cull_keepout_crossers` `"bit(s) removed"`
+  WARNING) now finds **0 flows with keepout culls** — the survivor
+  span-stretch-onto-keepout event fires nowhere. The NUTS-side span-stretch
+  clamp in `do_span_adjustments` (don't stretch a non-TOP segment onto a leaf
+  keepout — clamp at the face) is kept as a **latent, deferred** guard in
+  [`wishlist-nuts.md`](wishlist-nuts.md): with no live repro it would touch the
+  delicate span-adjust path (big2's coverage-invariant strand fix) with **no
+  measurable win** and real host-sensitivity risk, against the measured-change
+  discipline. If the class ever recurs it is still loudly reported
+  (`KEEPOUT_CROSS` + the DNUTS cull WARNING — never silent), which is the
+  trigger to land the clamp.
 
 - **A metal above the TOP band is still a top metal (layer-model gap)** ✅
   — **DONE (2026-07-16)**. `LayerType` is position-blind, so a metal

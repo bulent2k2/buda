@@ -12,7 +12,12 @@ Gaps 1 and 2 are now **resolved** (flow 10: abstract-NUTS overlaps dropped from
 resolved too: span-stretch corner overlaps, the cross-trunk-layer case, and now
 genuinely **cyclic** vertical constraints (via a dogleg) are handled; the
 remaining open items are noted at the end of §3. Gap 4 (a non-TOP pin-access stub
-span-stretched onto its endpoint leaf) is **open** — diagnosed, with the reason a
+span-stretched onto its endpoint leaf) now has **no live repro** (PR #307
+corrected `tracks.buda`'s M7→TOP, removing flow 10's M5-vs-M7 near-tie downgrade;
+a 100-flow corpus sweep finds 0 keepout culls) — the clamp below is a latent,
+deferred guard; see [`../internal/wishlist-nuts.md`](../internal/wishlist-nuts.md)
+and [`../internal/opens.md`](../internal/opens.md). Historically it was
+diagnosed as **open**, with the reason a
 planner-side cost term cannot fix it and the NUTS-side options in §4.
 
 Related context: the planner exports its chosen band per segment
@@ -221,7 +226,17 @@ bits, and 0 bit-level shorts.
 
 ---
 
-## 4. Non-TOP pin-access stub span-stretched into its endpoint leaf — OPEN
+## 4. Non-TOP pin-access stub span-stretched into its endpoint leaf — NO LIVE REPRO (config-closed 2026-07-16)
+
+> **Update (2026-07-16):** PR #307 corrected `flow/tracks/tracks.buda`'s `M7`
+> to `TOP` (M7 sits above M5/M6 TOP — a genuine top metal), removing flow 10's
+> M5-vs-M7 near-tie downgrade that was the sole live repro. A 100-flow
+> full-corpus sweep for the `cull_keepout_crossers` `"bit(s) removed"` WARNING
+> finds **0 flows with keepout culls**. The span-stretch clamp below is retained
+> as a **latent, deferred** guard (no measurable win with no live repro; touches
+> big2's coverage-invariant strand fix); if the class recurs it is loudly
+> reported (`KEEPOUT_CROSS` + DNUTS cull WARNING). The original diagnosis is kept
+> below for reference.
 
 ### Problem
 
