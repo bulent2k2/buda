@@ -4,6 +4,51 @@ Deferred follow-ups for the bundle / congestion planner
 (`src/congestion_planner.cpp`, `src/layering.cpp`). Index:
 [`wishlist.md`](wishlist.md).
 
+## A metal *above* the TOP band is still a top metal — the non-TOP category is position-blind — OPEN
+
+**What:** `LayerType` is a binary flag `{ TOP, LOW }` set explicitly per
+layer in `def_layer`, and the planner's `base_cost_non_top` penalty gives
+**every** non-TOP layer a span-scaled cheap-offload discount (short stubs
+drop off TOP onto a "low" layer for almost nothing —
+`congestion_planner.cpp`, the `base` term). "non-TOP" is treated as a
+synonym for "cheap, fine-pitch, below the TOP band". But the flag is
+purely a label: nothing checks a layer's **position** in the stack. A
+metal declared *above* the highest TOP layer — e.g. `flow/tracks/tracks.buda`
+declares `M5 (V) TOP`, `M6 (H) TOP`, then `M7 (V)` with no `TOP` — is
+physically a high, coarse, precious top-level metal, yet the planner reads
+it as a cheap offload target and steers stubs onto it. That is backwards:
+any layer above the TOP band is *more* precious than the TOP layers, not
+less, and should not be over-used.
+
+**Why it matters:** this is the modeling half of the NON-TOP/LOW stub-open
+bug (opens.md "Non-TOP pin-access stub …", `wishlist-nuts.md`). The
+position-blind category is *why* `flow/hbundles/10` carries the
+"M7 is non-TOP which creates some opens" note — the planner offloads a
+pin-access stub onto M7 as if it were a cheap low layer, then DNUTS
+cannot legalize it. Marking M7 `TOP` (as `tracks4top.buda` does) papers
+over the symptom on that one flow; the model gap is that `LOW`/non-TOP
+means "not flagged TOP" instead of "physically below the TOP band".
+
+**Fix directions (separate work item — NOT this doc):**
+- *Cheapest, honest:* derive an "above-TOP" condition from stack position
+  (a non-TOP layer whose id/height exceeds the max TOP-layer id in its
+  direction) and DENY it the `base_cost_non_top` discount — cost it like
+  a TOP layer (or worse), and emit a config-smell warning at `def_layer`
+  so the stack is declared sanely.
+- *Fuller:* replace the binary flag with a physical position model (or a
+  third `ABOVE_TOP` category) so TOP-ness is *derived* from the stack, not
+  hand-labelled — removes the whole class of "layer above TOP marked LOW"
+  config traps.
+- *Not a fix:* editing flows to mark the high metal `TOP`. Corrects one
+  design's numbers, leaves the model wrong for the next stack.
+
+**Effort:** small–medium (the discount-denial + warning is a few lines in
+the `base` term and `def_layer` parsing; the position model is a layering
+refactor). **Guard:** a full golden + fast/mid re-verify — every flow with
+a non-TOP layer above its TOP band shifts layer assignments. Lower urgency
+than the stub-open bug it underlies, but fixing it removes the root cause
+rather than the symptom.
+
 ## LOW-layer abutment crossings are guaranteed DNUTS opens (big2's 72 open bits) — ✅ RESOLVED
 
 **What (history):** big2's only remaining DNUTS opens (72 bits, 2026-07
