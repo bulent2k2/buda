@@ -4,6 +4,49 @@ Deferred follow-ups for the bundle / congestion planner
 (`src/congestion_planner.cpp`, `src/layering.cpp`). Index:
 [`wishlist.md`](wishlist.md).
 
+## NON-TOP dead-span stub opens: planner-side gate SHIPPED (opt-in) + the always-on discriminator — OPEN
+
+**What:** the planner's per-cut capacity (`score_segment` →
+`usable_band_cap`) samples a non-TOP stub's endpoint-CLAMPED along-extent
+(`for_each_band` treats the in-cell tail as pin access routed on another
+layer), so a pin-access stub whose in-cell span sits over a leaf keepout
+on a LOW layer passes the width/track check yet is assigned to a band with
+too few — often **zero** — signal tracks across the FULL span DetailedNUTS
+places from. Result: a guaranteed DNUTS open. Diagnosed on
+`flow/big_data_test/bigHalf.buda` (no rr): **10 stub segments**, every one
+assigned to M2/M3 with `count_signal_tracks_in_span == 0` while a
+same-direction TOP layer (M4/M5/M6/M7) had 100–380 tracks right there. The
+same class is flow 10's "M7 is non-TOP creates some opens" note (M7's
+above-TOP mis-label, the sibling wishlist item below, is one *source* of a
+dead LOW band).
+
+**Shipped (opt-in, this PR):** `set_planner_param nontop_dead_span_gate 1`
+— refuse a NON-TOP layer whose abstract span has **0** keepout-clear
+signal tracks in the chosen band (the exact `count_signal_tracks_in_span`
+pool DNUTS reads, via the factored `span_signal_supply` helper), so STRICT
+escalates to a TOP layer that can host the bits. Measured **bigHalf no-rr
+DNUTS unplaced 566 → 135 (−76%)**, no new overlaps. Default OFF, so the
+whole corpus is bit-identical.
+
+**Why opt-in — the hard part that's still OPEN.** `span_pool == 0` over the
+CONSERVATIVE abstract span does NOT distinguish a genuine cull from a
+survivor: the abstract span is an overestimate of the final
+junction-adjusted bit spans, so bigHalf's stubs (whose bits cannot retract
+clear of the keepout → cull → open) and `rnr_mix`'s stubs (whose final
+spans DO clear the keepout → place) BOTH read `span_pool == 0` at plan
+time. An always-on gate therefore helps bigHalf but regresses rnr_mix's
+healed endpoint (0 → 16) by over-escalating survivors onto TOP (also
+measured: the midpoint-fallback variant, which mirrors DNUTS admission,
+un-fires the useful cases because the planner's wide slide window sees
+tracks the narrow final interval won't — bigHalf back to 566). **The
+always-on discriminator** is a post-placement-aware predictor: does the
+keepout cover the WHOLE routed extent (→ bits can't retract clear → gate)
+or only part (→ they can → leave on LOW)? That needs either a
+final-span estimate at plan time or a NUTS-side signal, and ties into
+opens item 4 (the `do_span_adjustments` span-stretch clamp — the NUTS-side
+half of the same bug). **Effort:** medium; the payoff is turning the
+opt-in gate always-on cleanly.
+
 ## A metal *above* the TOP band is still a top metal — the non-TOP category is position-blind — OPEN
 
 **What:** `LayerType` is a binary flag `{ TOP, LOW }` set explicitly per
