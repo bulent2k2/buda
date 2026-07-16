@@ -104,8 +104,33 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         self._edit_topo    = None
         self._edit_pending = -1
         self._edit_msg     = ""
+        # One-shot text for the selected-segment info line (e.g. set by a layer
+        # change to "V segment 3 is now on M7."); cleared after one _draw.
+        self._seg_info_override = ""
+        # Two-step trunk placement (T/Y): _trunk_mode is None (off) / True (H) /
+        # False (V) while arming; _trunk_hover is the snapped perp coord the
+        # cursor is previewing.  Hover highlights the target cell; a click / a
+        # second T·Y / enter places it, escape cancels.
+        self._trunk_mode  = None
+        self._trunk_hover = None
+        # "Pin trunk span to busterms" mode (P): _trunk_pin_set is None (off) or
+        # a set of clicked busterm-block names whose extent along the selected
+        # segment's axis becomes its span; _trunk_pin_seg is that segment index.
+        # _trunk_pin_grid holds clicked Hanan-grid coordinates (a block-less
+        # anchor, so a span endpoint can land on a grid line BEYOND the last
+        # busterm — e.g. a C-detour trunk); _trunk_pin_hover is the grid line the
+        # cursor is previewing while in pin mode.
+        self._trunk_pin_seg = -1
+        self._trunk_pin_set = None
+        self._trunk_pin_grid = set()
+        self._trunk_pin_hover = None
         self._edit_slide   = {}
         self._edit_slide_mark = None
+        # True once the session re-layered a segment (+/-): on commit the pinned
+        # layer overrides are rebuilt from the working copy so the edit sticks
+        # (else a stale pinned_seg_layers from the source would re-pin the old
+        # layers over the edit — Codex #302).
+        self._edit_layers_changed = False
 
         # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at, seg_layers}
         self._selections    = {}
@@ -225,6 +250,10 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
 
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
         self.fig.canvas.mpl_connect('close_event', self._on_close)
+        # Two-step trunk placement (T/Y): hover previews the target cell, a
+        # left-click places it (right-click-drag stays the zoom-to-box gesture).
+        self.fig.canvas.mpl_connect('motion_notify_event', self._on_trunk_motion)
+        self.fig.canvas.mpl_connect('button_press_event', self._on_trunk_click)
         _install_bbox_zoom(self)   # right-click-drag zoom-to-box (from the Floorplanner)
 
         self._draw()

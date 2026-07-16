@@ -81,10 +81,10 @@ bool endpoint_tapped(const Topology& topo, int si, int ep) {
 
 EditVerdict edit_add_trunk(Topology& topo, const Floorplan& fp, bool horiz,
                            int perp_pos, int along_lo, int along_hi, int layer) {
+    std::vector<int> xs, ys;                    // one grid derivation, reused below
+    fp.get_hanan_grid(xs, ys);
     if (along_lo > along_hi) {
         // Default: full span = the Hanan grid's extent on this axis.
-        std::vector<int> xs, ys;
-        fp.get_hanan_grid(xs, ys);
         const std::vector<int>& g = horiz ? xs : ys;
         if (g.size() < 2)
             return fail("floorplan has no Hanan extent to span");
@@ -97,6 +97,32 @@ EditVerdict edit_add_trunk(Topology& topo, const Floorplan& fp, bool horiz,
     s.start = horiz ? Point{along_lo, perp_pos} : Point{perp_pos, along_lo};
     s.end   = horiz ? Point{along_hi, perp_pos} : Point{perp_pos, along_hi};
     s.layer_hint = layer;
+    // For an OUT-OF-BOUNDS trunk — one placed BEYOND the extreme Hanan line on
+    // the perp axis (e.g. a detour spine sitting to the side of every block) —
+    // seed its slide with the half-open Hanan cell: bound the block-facing side
+    // at the nearest grid line, leave the outward side free.  Without this an
+    // OOB trunk is a floating relay with a fully-unbounded perp range, so NUTS
+    // has no finite pull target (it falls back to the nominal position) and
+    // downstream pull inference sees no interval for its neighbours (a stub
+    // tapping it can't tell it shortens the trunk) — the detour never tightens
+    // toward the blocks.  Scoped to the OOB case: an INSIDE-grid trunk keeps its
+    // free range (its stubs bound it via the Pass-1/2 push-out, and it may need
+    // to slide across cells to align), and NO generated topology is touched
+    // (only edit_add_trunk).  The user refines with `W`, which overrides via
+    // seg_slide.
+    {
+        const std::vector<int>& g = horiz ? ys : xs;   // perp-axis grid lines
+        int lo = INT_MIN, hi = INT_MAX;
+        for (int c : g) {                              // g is sorted ascending
+            if (c < perp_pos) lo = c;                  // nearest line below
+            else if (c > perp_pos) { hi = c; break; }  // nearest line above
+        }
+        const bool has_lo = (lo != INT_MIN), has_hi = (hi != INT_MAX);
+        if (has_lo != has_hi) {                        // OOB: exactly one side
+            if (has_hi) s.perp_clamp_hi = hi;          // trunk below the blocks
+            else        s.perp_clamp_lo = lo;          // trunk above the blocks
+        }
+    }
     int idx = (int)topo.segments.size();
     topo.segments.push_back(s);
     return finish(topo, fp, "trunk added", idx);

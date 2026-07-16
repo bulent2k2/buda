@@ -109,8 +109,22 @@ class ExplorerNavMixin:
         if event.key == 'e':                    self._edit_open(empty=False); return
         if event.key == 'E':                    self._edit_open(empty=True); return
         if self._edit_topo is not None:
-            if event.key == 'T':                self._edit_add_trunk_at(event, horiz=True); return
-            if event.key == 'Y':                self._edit_add_trunk_at(event, horiz=False); return
+            # Pin-span mode (click busterms): swallow keys except apply/cancel.
+            if self._trunk_pin_set is not None:
+                if event.key == 'enter':        self._edit_trunk_pin_apply(); return
+                if event.key == 'escape':       self._edit_trunk_pin_cancel(); return
+                return
+            # Two-step trunk placement is armed: swallow keys except place /
+            # re-arm / cancel so a stray key can't fall through mid-placement.
+            if self._trunk_mode is not None:
+                if event.key == 'T':            self._edit_trunk_key(event, horiz=True);  return
+                if event.key == 'Y':            self._edit_trunk_key(event, horiz=False); return
+                if event.key == 'enter':        self._edit_trunk_place(event); return
+                if event.key == 'escape':       self._edit_trunk_cancel(); return
+                return
+            if event.key == 'T':                self._edit_trunk_key(event, horiz=True); return
+            if event.key == 'Y':                self._edit_trunk_key(event, horiz=False); return
+            if event.key == 'P':                self._edit_trunk_pin_begin(); return
             if event.key == 'S':                self._edit_add_stub_at(event); return
             if event.key == 'C':                self._edit_pair_op(event, connect=True); return
             if event.key == 'D':                self._edit_pair_op(event, connect=False); return
@@ -196,6 +210,33 @@ class ExplorerNavMixin:
         if self.sidx == -1 or self.layer_stack is None:
             return
         wrapper = self.wrappers[self.bidx]
+
+        # In a TopoEdit session, cycle the WORKING COPY's segment layer directly
+        # (the pinned-layer sidecar path below targets a committed candidate, not
+        # the edit topo) so the change is what gets committed and the info line
+        # reflects it.
+        if self._edit_topo is not None:
+            if not (0 <= self.sidx < len(self._edit_topo.segments)):
+                return
+            seg = self._edit_topo.segments[self.sidx]
+            is_h = (seg.start.y == seg.end.y)
+            d = ic.LayerDir.HORIZONTAL if is_h else ic.LayerDir.VERTICAL
+            lids = list(self.layer_stack.get_layer_ids_by_dir(d))
+            if not lids:
+                return
+            try:
+                lidx = lids.index(seg.layer_hint)
+            except ValueError:
+                lidx = 0
+            new_lid = lids[(lidx + delta) % len(lids)]
+            seg.layer_hint = new_lid
+            self._edit_layers_changed = True   # commit rebuilds pinned overrides
+            self._seg_info_override = (
+                f"{'H' if is_h else 'V'} segment {self.sidx} is now on "
+                f"{_layer_label(new_lid, self.layer_stack).split()[0]}.")
+            self._draw()
+            return
+
         topo = wrapper.input.candidates[self.idx]
         seg = topo.segments[self.sidx]
         is_h = (seg.start.y == seg.end.y)
@@ -249,6 +290,9 @@ class ExplorerNavMixin:
 
         pinned_list[self.sidx] = new_lid
         wrapper.input.pinned_seg_layers = pinned_list
+        self._seg_info_override = (
+            f"{'H' if is_h else 'V'} segment {self.sidx} is now on "
+            f"{_layer_label(new_lid, self.layer_stack).split()[0]}.")
 
         # Selection logic now automatically persists this to sidecar.
         self._select_current()

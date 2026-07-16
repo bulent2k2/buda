@@ -1,0 +1,62 @@
+# C-double-detour — a hand-built "large C" topology for two vertically-aligned
+# blocks, showcasing the TopoEdit grid-line span pin (P).
+#
+# The net lo.o -> up.i is routed the LONG way, wrapping the LEFT side:
+#
+#            +----------------------------------- top H trunk (above 'up')
+#            |                                  |
+#            |   [ up ]  (receiver) --- V stub -+   (up's TOP edge)
+#            |
+#   V spine  |   two vertically-aligned blocks, same x column
+#   (the     |
+#    back    |   [ lo ]  (driver) ------ V stub -+   (lo's BOTTOM edge)
+#    of C)   |                                  |
+#            +----------------------------------- bottom H trunk (below 'lo')
+#
+# The V spine's span is pinned to Hanan lines BELOW the lower block (-550) and
+# ABOVE the upper block (2750) — both beyond the busterms — exactly what the
+# new `P` (pin-span to grid line) gesture produces interactively.
+
+def_layer 4 M4 H TOP 44.44
+def_layer 5 M5 V TOP 50.00
+
+add_block lo 0    0 400  400
+add_block up 0 1000 400 1400
+
+add_bus w[4] lo.o up.i
+run_bundler
+generate_topologies
+
+# --- Build the C by hand on bundle 1 (an empty working topology) ------------
+# Note: render.py draws with the y-axis inverted (screen coords), so 'lo'
+# (y=0) appears at the TOP of the image and 'up' (y=1400) at the bottom.
+edit_topology 1 new
+# seg 0: top H trunk, above 'up'  (y=1700 is a Hanan line beyond the pair).
+# Span it across the full block width for now so the stub lands at the block
+# CENTRE (x=200); we retract the right end onto that stub below.
+edit_add_trunk H  1700 -700 400
+# seg 1: V spine on the left; span pinned BELOW lo (-300) .. ABOVE up (1700)
+edit_add_trunk V  -700 -300 1700
+# seg 2: bottom H trunk, below 'lo' (y=-300 is a Hanan line beyond the pair)
+edit_add_trunk H  -300 -700 400
+# seg 3/4: V stubs into the blocks' OUTER faces (up's top, lo's bottom); each
+# lands at the overlap centre (x=200, the block centre).
+edit_add_stub up 0
+edit_add_stub lo 2
+# Retract each H trunk's RIGHT end from x=400 back to the stub column (x=200)
+# so the trunk stops exactly where its stub taps it — no dangling over-cell
+# overhang past the connection.  The left end (x=-700) stays on the V spine.
+edit_set_span 0 -700 200
+edit_set_span 2 -700 200
+edit_status
+edit_commit pin
+
+# --- Concrete tracks so DetailedNUTS can place the 4 bits -------------------
+def_track_pattern 4 -400  POWER 2 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1
+def_track_pattern 5 -500  POWER 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1
+
+run_planner 5
+run_nuts
+run_detailed_nuts
+check_design
+report_wl
