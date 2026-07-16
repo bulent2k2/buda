@@ -23,6 +23,7 @@ The **Floorplanner** (`bin/fp`, `bin/bfp`) is a separate interactive GUI tool th
 - [BUDA Script Reference](docs/BUDA_SCRIPT_REFERENCE.md) — Detailed command documentation (index + pipeline overview; per-stage command pages live under `docs/script_reference/`).
 - [BDB Reference](docs/BDB_REFERENCE.md) — Physical design database: schema, `.buda` commands, Python API.
 - [BDB Test-Data Management](docs/internal/bdb_test_data.md) — Diffable `*.bdb.sql` fixtures, the copy-to-temp `bdb_input` test fixture, and the write-back/OA versioning roadmap.
+- [Feature-suite coverage plan](docs/internal/feature_coverage_plan.md) — the Gherkin/pytest-bdd spec layer (`test/tests/features/`): the `@landed`/`@future`/`@doc`/`@orphaned` tag vocabulary, the arc→feature coverage map, and the parse+tag guard (`test_feature_files.py`).
 - [Floorplanner User Guide](docs/FLOORPLANNER_USER_GUIDE.md) / [Reference](docs/FLOORPLANNER_REFERENCE_GUIDE.md) — Interactive placement GUI and engine API.
 - [Hier Bundler](docs/HIER_BUNDLER.md), [Hier Topology](docs/HIER_TOPOLOGY.md), [Hier Planner](docs/HIER_PLANNER.md) — Hierarchy-aware pipeline internals.
 - [Cross-Level Bundling](docs/cross_level_bundling.md) and [HBundle Pipeline session notes](docs/session_hbundle_pipeline.md) — How the hier flow was built (Phases A–E).
