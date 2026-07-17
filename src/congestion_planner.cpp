@@ -33,6 +33,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "kSpan")             kSpan_             = value;
     else if (name == "base_cost_non_top") base_cost_non_top_ = value;
     else if (name == "kWL")               kWL_               = value;
+    else if (name == "kSegs")             kSegs_             = value;
     else if (name == "kBalance")          kBalance_          = value;
     else if (name == "kHeight")           kHeight_           = value;
     else if (name == "kPeak")             kPeak_             = value;
@@ -1293,6 +1294,14 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         double wl_est = topo.estimated_wirelength;
         if (kWLSpread_ >= 0.0 && topo.wl_lo >= 0.0 && topo.wl_hi >= topo.wl_lo)
             wl_est += kWLSpread_ * (topo.wl_hi - topo.wl_lo);
+        // Segment-count penalty (opt-in, default 0): each segment beyond the
+        // wire itself costs junction vias PER BIT and realization DOF the WL
+        // estimate never sees (b61: the 10-seg TRUNK+MST estimates 9% under
+        // the 5-seg tree but realizes only 2% under it — with 2.25x the
+        // vias).  Priced in wirelength-equivalents so the knob reads as
+        // "one extra segment costs like kSegs units of wire".
+        if (kSegs_ > 0.0)
+            wl_est += kSegs_ * (double)topo.segments.size();
         topo_score += kWL_ * wl_est;
 
         if (topo_infeasible) {

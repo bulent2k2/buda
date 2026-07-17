@@ -174,6 +174,14 @@ public:
     //   "kWL"              — wirelength cost per layout-unit (default 0.001);
     //                        steers ties toward shorter topologies so detours
     //                        only win when they avoid real congestion
+    //   "kSegs"            — segment-count penalty in wirelength-equivalent
+    //                        units per segment (default 0 = OFF): the kWL
+    //                        term scores  wl + kSegs * n_segments, demoting
+    //                        many-segment trees whose junction vias (per
+    //                        bit!) and realization DOF the WL estimate
+    //                        omits — b61: 10-seg TRUNK+MST estimates 9%
+    //                        under the 5-seg tree, realizes only 2% under
+    //                        it, with 2.25x the detailed vias
     //   "base_span_ref"    — span at which a segment pays the full non-TOP
     //                        penalty; shorter segments pay proportionally
     //                        less (default: 25% of the larger grid extent)
@@ -515,6 +523,12 @@ private:
     double kSpan_             = 0.001;
     double base_cost_non_top_ = 0.5;
     double kWL_               = 0.001;
+    // Segment-count penalty in wirelength-equivalent units per segment
+    // (opt-in, default 0 = off): the kWL term scores
+    // estimated_wirelength + kSegs * n_segments, so a many-segment tree must
+    // buy real wirelength to beat a simpler shape (each segment costs
+    // junction vias per bit and realization DOF the WL estimate omits).
+    double kSegs_             = 0.0;
     // Realization-risk WL spread penalty (see set_planner_param "kWLSpread").
     // < 0 = OFF (kWL scores the plain nominal estimated_wirelength).
     double kWLSpread_         = -1.0;
