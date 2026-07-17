@@ -249,7 +249,7 @@ missing file is now a hard error (exit 1, like an unknown command), and
 `run_planner` prints a one-shot `[Planner] WARNING` when no H/V layers are defined
 before falling back to M4/M5.
 
-## Charge pulled segments at their predicted pull target (books vs metal) — PHASES 0+1 SHIPPED (opt-in `charge_pull_target`); junction-anchored variant OPEN
+## Charge pulled segments at their predicted pull target (books vs metal) — PHASES 0+1 SHIPPED (opt-in level 1); junction prediction SHIPPED (opt-in level 2); default-flip still gated
 
 **What (2026-07-17, from the b44 slide-range analysis):** the planner
 charges each segment's congestion demand at a chosen band
@@ -294,11 +294,36 @@ kPeak hybrid-floor tests asserted anchors on a pulled fixture segment
 whose metal never moved (books-only steering, all 8 bits stranded old AND
 new — fixtures to refit with an unpulled segment when this flips default).
 
-**Follow-on (a), the default-flip gate:** predict the JUNCTION-ANCHORED
-placement too — the anchor depends on the partner's placed position,
-unknown at plan time, but the partner's own predicted target can proxy it
-(fixpoint over the preference chain).  With (a) in, re-measure
-comprehensive_demo (b3) and revisit the default.
+**Follow-on (a) shipped (2026-07-17) as LEVEL 2** (`charge_pull_target 2`):
+the demo-b3 probe overturned the first diagnosis — b3's charge and metal
+AGREE (both y=500); the failure is a SPAN books-vs-metal: seg3's nominal
+span is a 35-unit stub clear of the keepout, but its pulled trunk partner's
+predicted track (450) stretches it 200 units across the M4 keepout (the
+junction-driven span stretch NUTS's do_span_adjustments realizes).  Level 2
+adds: **(a1)** the single-rider anchor clamp on the charged band (the NUTS
+anchor rule mirrored on nominal rider extents) and **(a2)** a STRICT
+DEAD-BAND gate over junction-extended spans (`span_hits_dead_band`) — each
+span extended to every pulled partner's deterministic predicted track,
+refused ONLY when the extension crosses a zero-capacity (keepout-carved)
+band.  Two stronger (a2) forms measured and REJECTED: charging the full
+extension corpus-wide (mix healed 0→2 ov, big2 WL +13%) and gating on
+any-overflow (mix 2 ov / 21 opens) — physical impossibility gates, load
+pressure never does (the dead-span-gate over-conservatism lesson, twice).
+Measured at level 2: **comprehensive_demo heals to 0/0**, big2 plain opens
+268→60 (the (a1) clamp), b44/mempool/hbundles-10 unchanged; mix 2/21 and
+bigHalf 3/560 vs level 1 — per-design.  Isolation note: level 1's own mix
+endpoint is 0 ov / 26 opens (vs 0/0 off-knob) — an occupant-overlay
+reshuffle property discovered during (a)'s isolation runs, previously
+unmeasured.  Tests: `test_level2_junction_prediction_heals_demo_b3` +
+the level-1 suite.
+
+**Default-flip: still gated.**  The remaining discriminators: (i) mix's
+dislike of the honest-books mode at BOTH levels (its heal budget is tuned
+to legacy anchors — same class as its kPeak sensitivity); (ii) the
+alignment-sibling placement remains unpredicted (b44's seg3 residual);
+(iii) goldens must be regenerated on the reference host.  The kPeak
+hybrid-floor fixture refit (their pulled segment asserts books-only
+anchors) also waits on the flip.
 
 ## Realization-risk WL: rank on the envelope, not just the nominal — `kWLSpread` SHIPPED (opt-in)
 

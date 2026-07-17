@@ -41,7 +41,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "track_cap_slack")   track_cap_slack_   = value;
     else if (name == "refine_passes")     refine_passes_     = (int)value;
     else if (name == "nontop_dead_span_gate") nontop_dead_span_gate_ = (value != 0.0);
-    else if (name == "charge_pull_target")    charge_pull_target_    = (value != 0.0);
+    else if (name == "charge_pull_target")    charge_pull_target_    = (int)value;
     else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
 }
 
@@ -438,6 +438,26 @@ double CongestionPlanner::score_segment(const Segment& seg, int layer_id,
     return std::max(peak, 0.0);
 }
 
+// Variant C of the junction-extension gate (charge_pull_target follow-on
+// (a2)): true iff the span crosses a band with (near-)ZERO usable capacity —
+// a keepout-carved band the metal physically cannot exist in, the demo-b3
+// signature.  Deliberately NOT any-overflow: gating the conservative
+// extension on load pressure over-rejects stretched-but-fine survivors
+// (measured: mix healed endpoint 0->2 ov / 21 opens under the any-overflow
+// form), while a zero-capacity band is impossibility, not pressure.
+bool CongestionPlanner::span_hits_dead_band(const Segment& seg, int layer_id,
+                                            int perp_pos_override,
+                                            int slide_lo, int slide_hi) const {
+    bool is_vcut_dir = (seg.start.y == seg.end.y);
+    bool dead = false;
+    for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
+        const GlobalCut& c = cuts_[ci];
+        if (usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi) <= 1e-9)
+            dead = true;
+    });
+    return dead;
+}
+
 // The band-set sibling of score_segment: records WHICH bands overflow rather
 // than reducing to a scalar.  Bands whose overflow stems purely from the
 // slide-window clamp (zero usage) still get recorded but are harmless for
@@ -824,6 +844,73 @@ double CongestionPlanner::span_cost_for(double seg_span, int layer_id) const {
 // Per-bundle candidate scoring
 // ---------------------------------------------------------------------------
 
+// Honest-books junction prediction (charge_pull_target follow-on (a)).
+// NUTS realizes junctions with the partners' PLACED positions: a stub's span
+// stretches to reach its trunk's placed track (do_span_adjustments), and a
+// single-junction segment's own track clamps into its rider's span (the
+// anchor rule).  Both were invisible to plan-time scoring, which used nominal
+// geometry — comprehensive_demo b3: a 35-unit nominal MST stub scored clean
+// while its pulled trunk's predicted track (450) stretches it 200 units
+// across the M4 keepout, stranding a bit.  With the pull targets now
+// DETERMINISTIC (the breakpoint clamp), the stretch is predictable:
+// return a copy of the topology's segments with each along-span EXTENDED
+// (never retracted — conservative books) to every pulled junction partner's
+// layer-independent predicted track (window bound tightened by an in-travel
+// ConnSeg::pull_break; the per-layer bus-width clamp happens at charge time
+// where eff is known).  `riders_out` (optional) collects the NUTS jn_map
+// mirror — segments whose SEG conns land on each segment — for the
+// single-rider anchor clamp (a1).  Callers gate on charge_pull_target_.
+std::vector<Segment> CongestionPlanner::junction_extended_segments(
+        const Topology& topo, const std::vector<ConnSeg>& conn_segs,
+        std::vector<std::vector<int>>* riders_out) const {
+    const int n = (int)conn_segs.size();
+    std::vector<int> pred_perp(n, INT_MIN);
+    if (riders_out) riders_out->assign(n, {});
+    for (int i = 0; i < n; ++i) {
+        const ConnSeg& c2 = conn_segs[i];
+        if (riders_out)
+            for (const auto& cn : c2.conns)
+                if (cn.kind == SegConn::SEG && cn.seg_idx >= 0 &&
+                    cn.seg_idx < n)
+                    (*riders_out)[cn.seg_idx].push_back(i);
+        if (c2.net_pull == 0) continue;
+        const auto& pg = c2.horiz ? y_grid_ : x_grid_;
+        if (pg.empty()) continue;
+        const int lo = std::max(c2.perp_lo, pg.front());
+        const int hi = std::min(c2.perp_hi, pg.back());
+        if (lo > hi) continue;
+        double pref = (c2.net_pull > 0) ? (double)hi : (double)lo;
+        if (c2.pull_break != INT_MIN) {
+            const double bp = (double)c2.pull_break;
+            if (c2.net_pull > 0 && bp > c2.perp_pos && bp < pref)      pref = bp;
+            else if (c2.net_pull < 0 && bp < c2.perp_pos && bp > pref) pref = bp;
+        }
+        pred_perp[i] = (int)std::lround(pref);
+    }
+    std::vector<Segment> out(topo.segments);
+    for (int si = 0; si < (int)out.size() && si < n; ++si) {
+        for (const auto& cn : conn_segs[si].conns) {
+            if (cn.kind != SegConn::SEG) continue;
+            const int j = cn.seg_idx;
+            if (j < 0 || j >= n || pred_perp[j] == INT_MIN) continue;
+            const int pp = pred_perp[j];
+            Segment& sg = out[si];
+            if (sg.start.y == sg.end.y) {
+                const int lo = std::min(sg.start.x, sg.end.x);
+                const int hi = std::max(sg.start.x, sg.end.x);
+                sg.start.x = std::min(lo, pp);
+                sg.end.x   = std::max(hi, pp);
+            } else {
+                const int lo = std::min(sg.start.y, sg.end.y);
+                const int hi = std::max(sg.start.y, sg.end.y);
+                sg.start.y = std::min(lo, pp);
+                sg.end.y   = std::max(hi, pp);
+            }
+        }
+    }
+    return out;
+}
+
 // Score every candidate topology of one bundle against the CURRENT cut state
 // and return the cheapest admissible one for the given mode.  Pure scoring:
 // the cut state is restored before returning; the caller commits the winner
@@ -916,8 +1003,28 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         const auto& conn_segs = ct.segs();
         constexpr int kSentinel = INT_MAX / 2;
 
+        // Honest-books junction prediction (charge_pull_target follow-on (a),
+        // see junction_extended_segments).  The extended spans participate in
+        // STRICT gating ONLY, and only through the DEAD-BAND check
+        // (span_hits_dead_band): a layer is refused when the junction-extended
+        // span crosses a zero-capacity (keepout-carved) band — the metal
+        // physically cannot exist there once NUTS stretches the segment to its
+        // pulled partner's predicted track (comprehensive_demo b3).  Soft
+        // costs and the committed charge stay on the NOMINAL span, and load-
+        // pressure overflow on the extension does NOT gate: both stronger
+        // forms were measured and rejected (full extension: mix healed 0->2
+        // ov, big2 WL +13%; any-overflow gate: mix 2 ov / 21 opens — the
+        // dead-span-gate over-conservatism lesson).  riders feeds the (a1)
+        // single-rider anchor clamp on the charged band.
+        std::vector<Segment> ext_segs;
+        std::vector<std::vector<int>> riders;
+        if (charge_pull_target_ >= 2)
+            ext_segs = junction_extended_segments(topo, conn_segs, &riders);
+
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
             const Segment& seg = topo.segments[si];
+            const Segment& gate_seg = (si < (int)ext_segs.size())
+                                          ? ext_segs[si] : seg;
             bool  is_h         = (seg.start.y == seg.end.y);
             const auto& layers_rev = is_h ? h_layers_rev : v_layers_rev;
             double seg_span = is_h
@@ -953,7 +1060,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             // pull direction, tightened by an in-travel breakpoint, centre
             // clamped per layer so the bus width stays inside the window.
             int pull_anchor = INT_MIN;
-            if (charge_pull_target_ && slide_lo != INT_MIN &&
+            if (charge_pull_target_ >= 1 && slide_lo != INT_MIN &&
                 si < (int)conn_segs.size()) {
                 const ConnSeg& cs = conn_segs[si];
                 if (cs.net_pull != 0) {
@@ -981,8 +1088,31 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                         return (int)std::lround(
                             std::clamp((double)pull_anchor, c_lo, c_hi));
                 }
-                return best_band_perp(seg, lid, eff, slide_lo, slide_hi,
-                                      (double)seg_n(topo, si));
+                int pp = best_band_perp(seg, lid, eff, slide_lo, slide_hi,
+                                        (double)seg_n(topo, si));
+                // (a1) single-rider junction anchor: NUTS clamps an unpulled
+                // single-junction segment's preference into its rider's span
+                // when the base falls outside it — mirror that on the charge
+                // (base inside the rider's along-extent keeps the band pick).
+                if (charge_pull_target_ >= 2 && si < (int)riders.size() &&
+                    riders[si].size() == 1) {
+                    const int r = riders[si][0];
+                    if (r >= 0 && r < (int)conn_segs.size() &&
+                        conn_segs[r].horiz != conn_segs[si].horiz) {
+                        const int jlo = conn_segs[r].along_lo;
+                        const int jhi = conn_segs[r].along_hi;
+                        if (pp < jlo || pp > jhi) {
+                            const double half = eff / 2.0;
+                            const double c_lo = slide_lo + half;
+                            const double c_hi = slide_hi - half;
+                            if (c_lo <= c_hi)
+                                pp = (int)std::lround(std::clamp(
+                                    std::clamp((double)pp, (double)jlo,
+                                               (double)jhi), c_lo, c_hi));
+                        }
+                    }
+                }
+                return pp;
             };
 
             int    best_lid = layers_rev[0];
@@ -997,10 +1127,13 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                 double eff = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), best_lid);
                 best_pp  = band_perp(best_lid, eff);
                 best_ov  = score_segment(seg, best_lid, eff, best_pp, slide_lo, slide_hi);
+                if (charge_pull_target_ >= 2 && enforce_overflow && best_ov <= kOvEps &&
+                    span_hits_dead_band(gate_seg, best_lid, best_pp, slide_lo, slide_hi))
+                    best_ov = 9999.0;
                 if (enforce_overflow && best_ov > kOvEps) {
                     topo_infeasible = true;
                     if (contended)
-                        collect_overflow_bands(seg, best_lid, eff, best_pp,
+                        collect_overflow_bands(gate_seg, best_lid, eff, best_pp,
                                                slide_lo, slide_hi, *contended);
                 }
             } else {
@@ -1009,13 +1142,16 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     double eff  = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), lid);
                     int    pp   = band_perp(lid, eff);
                     double ov   = score_segment(seg, lid, eff, pp, slide_lo, slide_hi);
+                    if (charge_pull_target_ >= 2 && enforce_overflow && ov <= kOvEps &&
+                        span_hits_dead_band(gate_seg, lid, pp, slide_lo, slide_hi))
+                        ov = 9999.0;   // extension crosses a keepout-dead band
                     // STRICT: overflow is a hard constraint.  An overflowing
                     // band physically cannot host the bus — NUTS would emit a
                     // real overlap — so the layer is not a choice, however
                     // cheap its soft cost.
                     if (enforce_overflow && ov > kOvEps) {
                         if (contended)
-                            collect_overflow_bands(seg, lid, eff, pp,
+                            collect_overflow_bands(gate_seg, lid, eff, pp,
                                                    slide_lo, slide_hi, *contended);
                         continue;
                     }
@@ -1189,6 +1325,10 @@ void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& p
         int lid = plan.seg_layers[si];
         // Charge eff + pitch (Gap 1); sign rips up symmetrically.  Tapered
         // fan-in: charge each segment for its member bits only (seg_bits).
+        // Deliberately the NOMINAL span even under charge_pull_target: the
+        // junction-extended spans participate in overflow GATING only —
+        // committing the conservative extension was measured and rejected
+        // (mix healed endpoint 0->2 overlaps, big2 WL +13%).
         const int    n = seg_bit_count(t, si, nbits);
         const double w = (nbits > 0 && n != nbits)
                              ? bw.input.width * ((double)n / (double)nbits)

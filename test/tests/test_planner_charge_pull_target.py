@@ -152,6 +152,38 @@ def test_global_pass_heals_under_knob():
     assert s.nuts_result.num_overlaps == 0
 
 
+def _demo(level):
+    """demo/comprehensive_demo.buda with the knob at the given level."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with open("demo/comprehensive_demo.buda") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#") or line.startswith("visualize"):
+                continue
+            if level and line.startswith("run_planner"):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    s.do_command(f"set_planner_param charge_pull_target {level}")
+                level = 0          # inject once
+            with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+                s.do_command(line)
+    return s
+
+
+def test_level2_junction_prediction_heals_demo_b3():
+    """Level 2 (the junction prediction, follow-on (a)): comprehensive_demo's
+    b3 reshuffle under level 1 lands an MST leg's junction-extended span on
+    the M4 keepout (nominal 35-unit stub, stretched 200 units to its pulled
+    trunk's predicted track) — 1 bit strands.  The level-2 dead-band gate
+    (span_hits_dead_band over the junction-extended span) makes the crossing
+    visible to STRICT, and the flow ends clean."""
+    s1 = _demo(1)
+    assert s1.detailed_result.num_unplaced == 1      # the b3 keepout strand
+    s2 = _demo(2)
+    assert s2.detailed_result.num_unplaced == 0
+    assert s2.nuts_result.num_overlaps == 0
+
+
 def test_param_recognized():
     s = buda_cli.BudaSession()
     s.no_viz = True
