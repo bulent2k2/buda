@@ -172,13 +172,16 @@ static void build_nuts_maps(
                 // +1000/bit realization excess).  Only when the breakpoint lies
                 // WITHIN the travel from nominal to the bound (a tightening,
                 // never a new direction), and never for a dogleg-pinned slide
-                // (its bound IS the exported trunk position, the intent).  The
-                // dogleg net-pull override keeps the raw bound too: its votes
-                // were computed on the pre-split topology, so the recomputed
-                // breakpoint does not describe the split piece.
+                // (its bound IS the exported trunk position, the intent).  A
+                // dogleg net-pull PIN keeps the raw bound too — the pin's
+                // PRESENCE is the signal (apply_dogleg pins every original
+                // stub because the split topology's votes are not
+                // authoritative), so any non-sentinel pin suppresses the
+                // clamp even when its value happens to equal the recomputed
+                // pull: equal aggregates do not mean the vote composition or
+                // the breakpoint survived the split (Codex #315).
                 const bool np_overridden =
-                    (np_ok && bw.plan.seg_net_pull[si] != INT_MIN &&
-                     bw.plan.seg_net_pull[si] != cs.net_pull);
+                    (np_ok && bw.plan.seg_net_pull[si] != INT_MIN);
                 if (!slide_pinned && !np_overridden && cs.pull_break != INT_MIN) {
                     const double bp = static_cast<double>(cs.pull_break);
                     if (eff_net_pull > 0 && bp > cs.perp_pos && bp < preferred)
