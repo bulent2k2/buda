@@ -84,6 +84,7 @@ class ExplorerEditMixin:
         self._edit_base    = 'new'
         self._trunk_mode   = None
         self._trunk_hover  = None
+        self._trunk_hover_exact = False
         self._trunk_pin_seg = -1
         self._trunk_pin_set = None
         self._trunk_pin_grid = set()
@@ -198,6 +199,56 @@ class ExplorerEditMixin:
         iv = int(round(val))
         return min(coords, key=lambda c: abs(c - iv)) if coords else iv
 
+    @staticmethod
+    def _snap_cell_center(val, lines):
+        """Snap a cursor coordinate to the nearest Hanan CELL CENTERLINE (the
+        midpoint between two adjacent grid lines) — where a trunk should live:
+        mid-channel, with the two bounding lines as its initial slide range —
+        rather than on a line (a block face).  Falls back to rounding when
+        fewer than two lines exist."""
+        if len(lines) < 2:
+            return int(round(val))
+        centers = [(a + b) / 2 for a, b in zip(lines, lines[1:])]
+        return int(round(min(centers, key=lambda c: abs(c - val))))
+
+    @staticmethod
+    def _cell_around(p, lines):
+        """(lo_line, hi_line) strictly bracketing coordinate p in the sorted
+        grid lines — the Hanan cell a centerline-placed trunk slides in.
+        Either side is None when no line lies beyond p (OOB placement)."""
+        below = [g for g in lines if g < p]
+        above = [g for g in lines if g > p]
+        return (max(below) if below else None,
+                min(above) if above else None)
+
+    def _busterms_touching_slice(self, horiz, lo, hi):
+        """The bundle's busterm blocks whose PERPENDICULAR extent touches the
+        slice [lo, hi] (closed — a block whose face IS a slice bound counts:
+        the trunk can slide onto that face and tap it).  These seed the new
+        trunk's along span, i.e. its initial busterms/pass-throughs — refined
+        afterwards with P."""
+        names = []
+        for n in sorted(self._bundle_busterm_names()):
+            r = self.fp.get_block_bounds(n)
+            b_lo, b_hi = (r.y1, r.y2) if horiz else (r.x1, r.x2)
+            if b_lo <= hi and b_hi >= lo:
+                names.append(n)
+        return names
+
+    def _trunk_hover_msg(self, horiz, p):
+        """Live armed-trunk banner: the hovered centerline, the cell it slides
+        in, and the busterms that slice touches — updated on every hover."""
+        xs, ys = self._bundle_hanan_grid()
+        g_lo, g_hi = self._cell_around(p, ys if horiz else xs)
+        axis = 'y' if horiz else 'x'
+        info = f"ADD {'H' if horiz else 'V'} TRUNK: {axis}={p}"
+        if g_lo is not None and g_hi is not None:
+            bts = self._busterms_touching_slice(horiz, g_lo, g_hi)
+            info += (f" slide=[{g_lo},{g_hi}]"
+                     + (f" busterms: {','.join(bts)}" if bts else ""))
+        return (info + f" — {'T' if horiz else 'Y'}/enter/click places, "
+                       f"G drops a line, esc cancels")
+
 
     def _block_at(self, x, y):
         for name, r in self.fp.get_all_blocks():
@@ -220,17 +271,21 @@ class ExplorerEditMixin:
         self._trunk_hover = None
         if event is not None and event.xdata is not None and event.ydata is not None:
             xs, ys = self._bundle_hanan_grid()
-            self._trunk_hover = self._snap(event.ydata if horiz else event.xdata,
-                                           ys if horiz else xs)
-        self._edit_msg = (
-            f"ADD {'H' if horiz else 'V'} TRUNK: hover a grid line "
-            f"(cell highlights), click or {'T' if horiz else 'Y'}/enter to "
-            f"place, esc to cancel")
+            self._trunk_hover = self._snap_cell_center(
+                event.ydata if horiz else event.xdata, ys if horiz else xs)
+        if self._trunk_hover is not None:
+            self._edit_msg = self._trunk_hover_msg(horiz, self._trunk_hover)
+        else:
+            self._edit_msg = (
+                f"ADD {'H' if horiz else 'V'} TRUNK: hover a channel "
+                f"(centerline snaps), click or {'T' if horiz else 'Y'}/enter "
+                f"to place, esc to cancel")
         self._draw()
 
     def _edit_trunk_cancel(self):
         self._trunk_mode = None
         self._trunk_hover = None
+        self._trunk_hover_exact = False
         self._edit_msg = "EDIT: trunk cancelled"
         self._draw()
 
@@ -249,6 +304,7 @@ class ExplorerEditMixin:
         coord = int(round(event.ydata if horiz else event.xdata))
         (self._edit_grid_y if horiz else self._edit_grid_x).add(coord)
         self._trunk_hover = coord            # hover the new line immediately
+        self._trunk_hover_exact = True       # place ON it, not a re-snapped cell
         axis = 'y' if horiz else 'x'
         self._edit_msg = (f"EDIT: temp grid line {axis}={coord} — "
                           f"{'T' if horiz else 'Y'}/enter/click places the "
@@ -257,18 +313,25 @@ class ExplorerEditMixin:
         self._draw()
 
     def _edit_trunk_place(self, event):
-        """Commit the armed trunk at the cursor's (or last-hovered) grid line."""
+        """Commit the armed trunk at the cursor's snapped centerline (or the
+        last-hovered coordinate — used verbatim when 'G' pinned an exact one)."""
         horiz = self._trunk_mode
         self._trunk_mode = None
         hover = self._trunk_hover
+        exact = self._trunk_hover_exact
         self._trunk_hover = None
-        if event is not None and event.xdata is not None and event.ydata is not None:
+        self._trunk_hover_exact = False
+        if hover is not None and exact:
+            # 'G' hovered its dropped line: place exactly there, not at the
+            # cursor's re-snapped cell centerline.
+            self._edit_add_trunk_from_perp(horiz, hover)
+        elif event is not None and event.xdata is not None and event.ydata is not None:
             self._edit_add_trunk_at(event, horiz)
         elif hover is not None:
             # Placed by a key with no cursor coords: use the previewed line.
             self._edit_add_trunk_from_perp(horiz, hover)
         else:
-            self._edit_msg = "EDIT: hover a grid line first"
+            self._edit_msg = "EDIT: hover a channel first"
             self._draw()
 
     def _on_trunk_motion(self, event):
@@ -296,9 +359,12 @@ class ExplorerEditMixin:
             return
         xs, ys = self._bundle_hanan_grid()
         horiz = self._trunk_mode
-        new = self._snap(event.ydata if horiz else event.xdata, ys if horiz else xs)
+        new = self._snap_cell_center(event.ydata if horiz else event.xdata,
+                                     ys if horiz else xs)
         if new != self._trunk_hover:
             self._trunk_hover = new
+            self._trunk_hover_exact = False   # cursor re-snap ends a G pin
+            self._edit_msg = self._trunk_hover_msg(horiz, new)   # live info
             self._draw()
 
     def _on_trunk_click(self, event):
@@ -487,33 +553,62 @@ class ExplorerEditMixin:
                           f"{lo} {hi} layer {sg.layer_hint}")
 
     def _edit_add_trunk_from_perp(self, horiz, perp):
-        lo, hi = self._busterm_along_span(horiz)
-        h, v_ = self._edit_default_layers()
-        if self._edit_apply(ic.edit_add_trunk(
-                self._edit_topo, self.fp, horiz, int(perp), lo, hi,
-                h if horiz else v_)):
-            self._edit_log_trunk(horiz)
+        # Placed by a key with no cursor coords: the previewed coordinate is
+        # used verbatim (a hover-snapped centerline, or a G line's exact coord).
+        self._edit_place_trunk(horiz, int(perp))
 
     def _edit_add_trunk_at(self, event, horiz):
         if event.xdata is None or event.ydata is None:
             self._edit_msg = "EDIT: put the cursor on the canvas first"
             self._draw(); return
-        # Snap to the BUNDLE-scoped grid — exactly the lines the toggle
-        # displays (busterm-block + keepout edges + OOB detour lines), so a
-        # trunk never lands on an invisible full-design line.
+        # Snap to the nearest CELL CENTERLINE of the BUNDLE-scoped grid
+        # (busterm-block + keepout edges + OOB detour lines + G temp lines):
+        # a trunk lives mid-channel, not on a block face, and the bounding
+        # lines become its initial slide range.
         xs, ys = self._bundle_hanan_grid()
-        perp = self._snap(event.ydata if horiz else event.xdata,
-                          ys if horiz else xs)
-        # Span the bundle's busterm extent along the trunk axis instead of the
-        # whole-design Hanan extent (lo>hi) — a full-span trunk overshoots its
-        # busterms and stubs.  Endpoints at the extreme busterm centres (where
-        # stubs will drop), so the trunk covers exactly the blocks it serves.
-        lo, hi = self._busterm_along_span(horiz)
+        perp = self._snap_cell_center(event.ydata if horiz else event.xdata,
+                                      ys if horiz else xs)
+        self._edit_place_trunk(horiz, perp)
+
+    def _edit_place_trunk(self, horiz, perp):
+        """Add a trunk at perpendicular coordinate `perp`:
+
+        - Along span = the extent of the busterm blocks TOUCHING the Hanan
+          slice around `perp` (the cell a centerline placement slides in) —
+          the blocks this trunk is there to serve; all-busterm extent when the
+          slice touches none (or `perp` is beyond the grid).  Refine with P.
+        - The slice's two bounding lines seed the trunk's slide window (staged
+          like a 'W' refinement — intersected with the structural range,
+          logged as edit_set_slide, lands on commit; W re-refines it).
+        - The new segment is auto-SELECTED, so the info banner (layer, perp +
+          slide, pull/busterms/passthru/conn-segs) live-updates exactly as
+          when stepping segments with j/k — and S stubs target it directly."""
+        xs, ys = self._bundle_hanan_grid()
+        g_lo, g_hi = self._cell_around(perp, ys if horiz else xs)
+        touching = (self._busterms_touching_slice(horiz, g_lo, g_hi)
+                    if g_lo is not None and g_hi is not None else [])
+        span = ((self._along_span_of_blocks(touching, horiz)
+                 if touching else None)
+                or self._busterm_along_span(horiz))
         h, v_ = self._edit_default_layers()
-        if self._edit_apply(ic.edit_add_trunk(
-                self._edit_topo, self.fp, horiz, perp, lo, hi,
+        if not self._edit_apply(ic.edit_add_trunk(
+                self._edit_topo, self.fp, horiz, perp, span[0], span[1],
                 h if horiz else v_)):
-            self._edit_log_trunk(horiz)
+            return
+        self._edit_log_trunk(horiz)
+        si = len(self._edit_topo.segments) - 1
+        self.sidx = si                    # auto-select: info banner + S target
+        if g_lo is not None and g_hi is not None:
+            cs = list(self._build_conn_topo(self._edit_topo).segs())[si]
+            clo = max(float(g_lo), float(cs.perp_lo))
+            chi = min(float(g_hi), float(cs.perp_hi))
+            if clo <= chi and (clo, chi) != (float(cs.perp_lo),
+                                             float(cs.perp_hi)):
+                self._edit_slide[si] = (clo, chi)
+                self._edit_log_op(f"edit_set_slide {si} {clo:.0f} {chi:.0f}")
+        if touching:
+            self._edit_msg += f" — busterms: {','.join(touching)}"
+        self._draw()
 
     def _along_span_of_blocks(self, names, horiz):
         """(lo, hi) covering the given blocks along a trunk axis, or None if

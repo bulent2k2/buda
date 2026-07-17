@@ -232,6 +232,7 @@ class ExplorerNavMixin:
         n = len(topo.segments)
         if n == 0: return
         self.sidx = (self.sidx + delta) % n
+        self._zoom_sel_mode = 'bundle'   # cmd-z targets the NEW selection first
         self._draw()
 
 
@@ -382,9 +383,10 @@ class ExplorerNavMixin:
         self.fig.canvas.draw_idle()
 
 
-    def _zoom_to_bundle(self, _=None):
-        """Zoom axes to the bounding box of the active bundle's terminals/topology."""
-        topo = self.topos[self.idx]
+    def _bundle_zoom_bbox(self):
+        """Raw (un-padded) bbox of the shown topology's endpoints + busterm
+        connection points, or None when there is nothing to frame."""
+        topo = self._shown_topo()
         ct = self._build_conn_topo(topo)
         xs, ys = [], []
         # Add topology endpoints
@@ -403,15 +405,51 @@ class ExplorerNavMixin:
                     px, py = display_perp, conn.at_pos
                 xs.append(float(px))
                 ys.append(float(py))
-
         if not xs:
+            return None
+        return min(xs), max(xs), min(ys), max(ys)
+
+    def _zoom_to_bundle(self, _=None):
+        """cmd/ctrl-z: zoom to the active bundle's bbox — and with a segment
+        selected (j/k), TOGGLE between the bundle bbox and the selected
+        segment on repeated presses.  A tiny segment (longer bbox dim <= 10%
+        of the bundle bbox's shorter dim) zooms at most 4x past the bundle
+        view, centered on the segment, instead of filling the window with a
+        sliver."""
+        bb = self._bundle_zoom_bbox()
+        if bb is None:
             return
-        x0, x1 = min(xs), max(xs)
-        y0, y1 = min(ys), max(ys)
-        pad_x = max((x1 - x0) * 0.2, 50)
-        pad_y = max((y1 - y0) * 0.2, 50)
-        _set_lims_filling_box(self.ax, x0 - pad_x, x1 + pad_x,
-                              y0 - pad_y, y1 + pad_y)
+        bx0, bx1, by0, by1 = bb
+        bpad_x = max((bx1 - bx0) * 0.2, 50)
+        bpad_y = max((by1 - by0) * 0.2, 50)
+        topo = self._shown_topo()
+        if (self._zoom_sel_mode == 'bundle'
+                and 0 <= self.sidx < len(topo.segments)):
+            seg = topo.segments[self.sidx]
+            sx0, sx1 = sorted((float(seg.start.x), float(seg.end.x)))
+            sy0, sy1 = sorted((float(seg.start.y), float(seg.end.y)))
+            seg_long = max(sx1 - sx0, sy1 - sy0)
+            # Ratio against the PADDED bundle dims: the raw bbox of a nearly
+            # collinear bundle can be a sliver on one axis (endpoints only),
+            # and the pads floor it at a real viewing extent.
+            if seg_long <= 0.10 * min(bx1 - bx0 + 2 * bpad_x,
+                                      by1 - by0 + 2 * bpad_y):
+                # Cap: the bundle view's dims / 4, centered on the segment.
+                cx, cy = (sx0 + sx1) / 2, (sy0 + sy1) / 2
+                w = (bx1 - bx0 + 2 * bpad_x) / 4
+                h = (by1 - by0 + 2 * bpad_y) / 4
+                _set_lims_filling_box(self.ax, cx - w / 2, cx + w / 2,
+                                      cy - h / 2, cy + h / 2)
+            else:
+                pad_x = max((sx1 - sx0) * 0.2, 50)
+                pad_y = max((sy1 - sy0) * 0.2, 50)
+                _set_lims_filling_box(self.ax, sx0 - pad_x, sx1 + pad_x,
+                                      sy0 - pad_y, sy1 + pad_y)
+            self._zoom_sel_mode = 'seg'
+        else:
+            _set_lims_filling_box(self.ax, bx0 - bpad_x, bx1 + bpad_x,
+                                  by0 - bpad_y, by1 + bpad_y)
+            self._zoom_sel_mode = 'bundle'
         self.fig.canvas.draw_idle()
 
 

@@ -93,6 +93,10 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         self._home_xlim        = None
         self._home_ylim        = None
         self._home_data_bbox   = None   # raw data bbox (x0,x1,y0,y1) for maximal home fit
+        # cmd/ctrl-z toggle: 'bundle' = next press zooms to the bundle bbox;
+        # 'seg' = it just did a segment zoom, so the next press returns to the
+        # bundle.  Reset to 'bundle' whenever the segment selection changes.
+        self._zoom_sel_mode    = 'bundle'
 
         # Listen for global visibility changes (e.g. from parent BudaVisualizer)
         self.ui_state.add_listener(self.fig_redraw)
@@ -124,6 +128,10 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         # second T·Y / enter places it, escape cancels.
         self._trunk_mode  = None
         self._trunk_hover = None
+        # True while _trunk_hover holds an EXACT coordinate (set by 'G' — the
+        # dropped line itself) rather than a hover-snapped cell centerline:
+        # placement then uses it verbatim, ignoring the cursor re-snap.
+        self._trunk_hover_exact = False
         # Temporary Hanan lines added with 'G' while a trunk is armed — the
         # channel-splitting escape: the bundle grid only carries block/keepout
         # edges (+ OOB margins), so an EMPTY channel between two blocks has no
