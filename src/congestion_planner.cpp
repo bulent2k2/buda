@@ -1092,23 +1092,33 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                                         (double)seg_n(topo, si));
                 // (a1) single-rider junction anchor: NUTS clamps an unpulled
                 // single-junction segment's preference into its rider's span
-                // when the base falls outside it — mirror that on the charge
-                // (base inside the rider's along-extent keeps the band pick).
+                // when the base falls outside it — mirror that on the charge.
+                // The BASE must be the one NUTS uses: a segment
+                // WITH busterm faces never consumes seg_perp (build_nuts_maps
+                // leaves pull_map at the nominal when n_bt != 0), so its base
+                // is the NOMINAL coordinate; only a face-free segment's base
+                // is the charged band.  Base inside the rider's along-extent
+                // keeps the base unchanged (the NUTS rule).
                 if (charge_pull_target_ >= 2 && si < (int)riders.size() &&
                     riders[si].size() == 1) {
                     const int r = riders[si][0];
                     if (r >= 0 && r < (int)conn_segs.size() &&
                         conn_segs[r].horiz != conn_segs[si].horiz) {
+                        int n_bt = 0;
+                        for (const auto& cn : conn_segs[si].conns)
+                            if (cn.kind == SegConn::BUSTERM) ++n_bt;
+                        int base = (n_bt > 0) ? conn_segs[si].perp_pos : pp;
                         const int jlo = conn_segs[r].along_lo;
                         const int jhi = conn_segs[r].along_hi;
-                        if (pp < jlo || pp > jhi) {
+                        if (base < jlo || base > jhi)
+                            base = std::clamp(base, jlo, jhi);
+                        if (base != pp) {
                             const double half = eff / 2.0;
                             const double c_lo = slide_lo + half;
                             const double c_hi = slide_hi - half;
                             if (c_lo <= c_hi)
-                                pp = (int)std::lround(std::clamp(
-                                    std::clamp((double)pp, (double)jlo,
-                                               (double)jhi), c_lo, c_hi));
+                                pp = (int)std::lround(
+                                    std::clamp((double)base, c_lo, c_hi));
                         }
                     }
                 }

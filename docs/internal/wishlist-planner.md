@@ -301,7 +301,12 @@ span is a 35-unit stub clear of the keepout, but its pulled trunk partner's
 predicted track (450) stretches it 200 units across the M4 keepout (the
 junction-driven span stretch NUTS's do_span_adjustments realizes).  Level 2
 adds: **(a1)** the single-rider anchor clamp on the charged band (the NUTS
-anchor rule mirrored on nominal rider extents) and **(a2)** a STRICT
+anchor rule mirrored on nominal rider extents — starting from THE SAME
+BASE NUTS uses: the NOMINAL coordinate when the segment has busterm faces,
+since `pull_map` stays nominal and `seg_perp` is never consumed there, the
+band pick otherwise; clamping every single-rider segment from the band
+pick was a mis-mirror caught in review — fixing it took mix from 2 ov/21
+opens to 1/0 and bigHalf 3/560 to 2/360) and **(a2)** a STRICT
 DEAD-BAND gate over junction-extended spans (`span_hits_dead_band`) — each
 span extended to every pulled partner's deterministic predicted track,
 refused ONLY when the extension crosses a zero-capacity (keepout-carved)
@@ -310,9 +315,10 @@ extension corpus-wide (mix healed 0→2 ov, big2 WL +13%) and gating on
 any-overflow (mix 2 ov / 21 opens) — physical impossibility gates, load
 pressure never does (the dead-span-gate over-conservatism lesson, twice).
 Measured at level 2: **comprehensive_demo heals to 0/0**, big2 plain opens
-268→60 (the (a1) clamp), b44/mempool/hbundles-10 unchanged; mix 2/21 and
-bigHalf 3/560 vs level 1 — per-design.  Isolation note: level 1's own mix
-endpoint is 0 ov / 26 opens (vs 0/0 off-knob) — an occupant-overlay
+268→152 (5 ov, the (a1) clamp), b44/mempool/hbundles-10 unchanged;
+**mix 1 ov / 0 opens** and bigHalf 2/360 vs level 1's 0/26 and 2/392 —
+level 2 improves level 1's opens on both.  Isolation note: level 1's own
+mix endpoint is 0 ov / 26 opens (vs 0/0 off-knob) — an occupant-overlay
 reshuffle property discovered during (a)'s isolation runs, previously
 unmeasured.  Tests: `test_level2_junction_prediction_heals_demo_b3` +
 the level-1 suite.
