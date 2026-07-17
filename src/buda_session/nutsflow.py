@@ -787,6 +787,39 @@ class NutsFlowMixin:
             else:
                 emit(f"[NUTS] {lname}: no local overlaps")
 
+        # Books-vs-metal divergence (wishlist-planner "Charge pulled segments
+        # at their predicted pull target"): for each PULLED segment, compare
+        # the planner's charged band centre (plan.seg_perp) against the placed
+        # track.  A pulled segment's placement outranks the charged band, so a
+        # large divergence means the congestion books reserved capacity where
+        # the metal did not go (and vice versa) — the systematic source of
+        # "unpredicted" overlaps on the congested corpus (bigHalf: 141/185
+        # pulled segments diverged >100 units before the charge fix).
+        if target_layer is None:
+            sp_by_key = {}
+            for w in self.bundles:
+                bid = w.input.original_bundle.id
+                for si, sp in enumerate(w.plan.seg_perp):
+                    if sp != -(2 ** 31):
+                        sp_by_key[(bid, si)] = sp
+            n_pulled = n_div = 0
+            worst = 0.0
+            for s in result.segments:
+                if s.net_pull == 0 or not s.placed:
+                    continue
+                sp = sp_by_key.get((s.bundle_id, s.seg_idx))
+                if sp is None:
+                    continue
+                n_pulled += 1
+                d = abs(s.track_position - sp)
+                if d > 100.0:
+                    n_div += 1
+                worst = max(worst, d)
+            if n_pulled:
+                emit(f"[NUTS] books-vs-metal: {n_div}/{n_pulled} pulled "
+                     f"segment(s) placed >100 units from the planner's "
+                     f"charged band (worst Δ={worst:.0f})")
+
         # Span adjustments: compare before vs after spans.
         # For rerun: skip the target layer (it drove the adjustment).
         # For full run: report all layers.

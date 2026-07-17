@@ -939,8 +939,46 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     if (slide_lo > slide_hi) { slide_lo = INT_MIN; slide_hi = INT_MIN; }
                 }
             }
+            // Pulled segments: NUTS's placement preference chain puts the
+            // pull/face target ABOVE the planner's charged band (seg_perp is
+            // consumed only by segments FREE of pull/face semantics), so
+            // charging the cheapest/nearest band books capacity where the
+            // metal will not go — and never charges where it will
+            // (books-vs-metal: 141/185 pulled segments diverged >100 units
+            // from their charged band on bigHalf, 123/148 on big2, worst
+            // Δ3378).  The pull-breakpoint clamp made the target
+            // DETERMINISTIC at plan time, so charge there: mirror NUTS
+            // (build_nuts_maps + set_pull_targets) — the window bound in the
+            // pull direction, tightened by an in-travel breakpoint, centre
+            // clamped per layer so the bus width stays inside the window.
+            int pull_anchor = INT_MIN;
+            if (slide_lo != INT_MIN && si < (int)conn_segs.size()) {
+                const ConnSeg& cs = conn_segs[si];
+                if (cs.net_pull != 0) {
+                    double pref = (cs.net_pull > 0) ? (double)slide_hi
+                                                    : (double)slide_lo;
+                    if (cs.pull_break != INT_MIN) {
+                        const double bp = (double)cs.pull_break;
+                        if (cs.net_pull > 0 && bp > cs.perp_pos && bp < pref)
+                            pref = bp;
+                        else if (cs.net_pull < 0 && bp < cs.perp_pos && bp > pref)
+                            pref = bp;
+                    }
+                    pull_anchor = (int)std::lround(pref);
+                }
+            }
             auto band_perp = [&](int lid, double eff) {
                 if (slide_lo == INT_MIN) return INT_MIN;   // no window: nominal lookup
+                if (pull_anchor != INT_MIN) {
+                    // Charge at the predicted pull target (bus-width clamped);
+                    // a window too narrow for the bus falls back to the band
+                    // choice (the window-feasibility check rejects it anyway).
+                    const double half = eff / 2.0;
+                    const double c_lo = slide_lo + half, c_hi = slide_hi - half;
+                    if (c_lo <= c_hi)
+                        return (int)std::lround(
+                            std::clamp((double)pull_anchor, c_lo, c_hi));
+                }
                 return best_band_perp(seg, lid, eff, slide_lo, slide_hi,
                                       (double)seg_n(topo, si));
             };
