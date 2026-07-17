@@ -235,6 +235,10 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # optional bundle bit bound (set_max_bundle_bits) — consumed by
         # run_bundler's generalized/COMBINED path and its split pass.
         self._bundling_overrides = {}
+        # Opt-in WL-dominance candidate pruning (set_prune_dominated): drop a
+        # candidate whose envelope bottom exceeds an EQUIVALENT candidate's
+        # envelope top at generation time.  Default OFF — bit-identical flows.
+        self._prune_dominated = False
         self._max_bundle_bits = None
         self._max_bundle_bits_auto = False
         self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]

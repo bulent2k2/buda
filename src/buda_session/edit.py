@@ -241,6 +241,187 @@ class EditMixin:
                         print(f"  Pin re-attached by topo_uid to candidate {i + 1}.")
                         break
 
+    # ── WL-dominance pruning (opt-in: set_prune_dominated) ────────────────
+    #
+    # Drop a candidate whose WL envelope bottom (wl_lo) exceeds another
+    # candidate's envelope top (wl_hi) — deterministic WL dominance — but
+    # ONLY when the two are equivalent in every non-WL respect the planner
+    # scores or the escalation ladder exploits (Codex P2 on PR #313: the
+    # planner scores congestion/span/layer/balance/peak BEFORE weighted WL,
+    # and a longer candidate can be the only overflow-free / window-feasible
+    # option, so an unconditional drop could strand the only routable
+    # topology).  The gate is deliberately conservative: a false prune is a
+    # correctness bug, a missed prune only wasted planner work.
+
+    _PRUNE_SENT = 1e8            # ConnTopology unbounded-slide sentinel (~5e8)
+    _CLAMP_LO_SENT = -2**31      # Segment::perp_clamp_lo INT_MIN sentinel
+    _CLAMP_HI_SENT = 2**31 - 1   # Segment::perp_clamp_hi INT_MAX sentinel
+
+    def _topo_prune_info(self, topo, fp):
+        """Extract one candidate's dominance/equivalence facts, or None when
+        the candidate must not participate in pruning at all (as dominated OR
+        survivor): TEG bridge segments (extra wire outside `segments`),
+        fan-in per-bit taper (`seg_bits` — per-segment demand differs per
+        bit), adopted dogleg jogs, U_OVL perp clamps (a NUTS constraint the
+        window model below does not carry), or an underivable envelope/
+        connectivity.  Returns {lo, hi, nominal, blocks, feedthru, segs}
+        where segs = [(horiz, layer_hint, win_lo, win_hi, along_lo,
+        along_hi)] with unbounded windows widened to ±inf."""
+        try:
+            if topo.bridge_segments or topo.seg_bits:
+                return None
+            for seg in topo.segments:
+                if getattr(seg, 'is_jog', False):
+                    return None
+                if (seg.perp_clamp_lo != self._CLAMP_LO_SENT
+                        or seg.perp_clamp_hi != self._CLAMP_HI_SENT):
+                    return None
+            ct = buda.ConnTopology()
+            ct.build(topo, fp)
+            csegs = list(ct.segs())
+            if not csegs or len(csegs) != len(topo.segments):
+                return None
+            lo, hi = self._topology_wl_interval(topo, fp=fp)
+            segs = []
+            for i, cs in enumerate(csegs):
+                wlo = min(cs.perp_lo, cs.perp_hi)
+                whi = max(cs.perp_lo, cs.perp_hi)
+                if wlo < -self._PRUNE_SENT:
+                    wlo = float('-inf')
+                if whi > self._PRUNE_SENT:
+                    whi = float('inf')
+                segs.append((cs.horiz, topo.segments[i].layer_hint,
+                             wlo, whi, cs.along_lo, cs.along_hi))
+            return {"lo": lo, "hi": hi,
+                    "nominal": topo.estimated_wirelength,
+                    "blocks": frozenset(topo.connected_block_names),
+                    "feedthru": frozenset(topo.feedthru_blocks),
+                    "segs": segs}
+        except Exception:
+            return None
+
+    @staticmethod
+    def _wl_prune_equivalent(d, s):
+        """True iff survivor `s` offers at least dominated `d`'s routing
+        freedom in every non-WL respect: same block contract and feedthru
+        declarations, same segment count, and a one-to-one segment matching
+        where each matched pair has the same orientation and layer hint, the
+        SURVIVOR's slide window COVERS the dominated one's (the safe
+        containment direction — every band/track placement reachable by the
+        dominated segment is reachable by the survivor's), and the survivor's
+        along-extent lies INSIDE the dominated one's (the survivor crosses a
+        subset of the cuts with the same bus width, so any overflow-free
+        assignment for the dominated candidate maps to one for the survivor).
+        Inputs are `_topo_prune_info` dicts."""
+        if d["blocks"] != s["blocks"] or d["feedthru"] != s["feedthru"]:
+            return False
+        ds, ss = d["segs"], s["segs"]
+        n = len(ds)
+        if n != len(ss):
+            return False
+
+        def compatible(di, sj):
+            (dh, dl, dwlo, dwhi, dalo, dahi) = di
+            (sh, sl, swlo, swhi, salo, sahi) = sj
+            return (dh == sh and dl == sl
+                    and swlo <= dwlo and swhi >= dwhi     # window coverage
+                    and dalo <= salo and sahi <= dahi)    # span containment
+
+        # Perfect bipartite matching (augmenting paths; n is small).
+        adj = [[j for j in range(n) if compatible(ds[i], ss[j])]
+               for i in range(n)]
+        match = [-1] * n     # survivor seg j -> dominated seg i
+
+        def augment(i, seen):
+            for j in adj[i]:
+                if j in seen:
+                    continue
+                seen.add(j)
+                if match[j] < 0 or augment(match[j], seen):
+                    match[j] = i
+                    return True
+            return False
+
+        return all(augment(i, set()) for i in range(n))
+
+    def _prune_wl_dominated(self, w, fp):
+        """Prune bundle `w`'s WL-dominated + gate-equivalent candidates.
+        Never prunes a USER candidate or the currently selected/pinned one;
+        the selection index is remapped by uid across the shrink.  A pruned
+        survivor may still prune others: dominance + the gate are transitive
+        (window coverage composes; s pruned by s2 means s.lo > s2.hi, and
+        d.lo > s.hi >= s.lo > s2.hi).  Returns (n_pruned, n_refused_pairs)
+        where refused = dominated pairs the equivalence gate kept."""
+        cands = list(w.input.candidates)
+        if len(cands) < 2:
+            return (0, 0)
+        infos = [self._topo_prune_info(c, fp) for c in cands]
+        sel = w.plan.selected_topology_index
+        bid = w.input.original_bundle.id
+        pruned, refused = set(), 0
+        for i in range(len(cands)):
+            di = infos[i]
+            if di is None or cands[i].type == "USER" or i == sel:
+                continue
+            for j in range(len(cands)):
+                sj = infos[j]
+                if j == i or sj is None:
+                    continue
+                # Deterministic dominance: the dominated candidate's BEST
+                # realization exceeds the survivor's WORST — and the nominal
+                # (which carries dangling wire the conn-based envelope does
+                # not) must dominate too, so the planner's kWL term never
+                # preferred the pruned one.
+                if not (di["lo"] > sj["hi"]
+                        and sj["nominal"] <= di["nominal"]):
+                    continue
+                if self._wl_prune_equivalent(di, sj):
+                    pruned.add(i)
+                    print(f"  [TopoPrune] bundle {bid}: dropped {cands[i].type} "
+                          f"wl[{di['lo']:.0f}..{di['hi']:.0f}] — WL-dominated by "
+                          f"{cands[j].type} wl[{sj['lo']:.0f}..{sj['hi']:.0f}] "
+                          f"(equivalent layers/corridors/contract)")
+                    break
+                refused += 1
+        if pruned:
+            sel_uid = (buda.topo_uid(cands[sel])
+                       if 0 <= sel < len(cands) else None)
+            keep = [c for k, c in enumerate(cands) if k not in pruned]
+            w.input.candidates = keep
+            if sel_uid is not None:
+                for k, c in enumerate(w.input.candidates):
+                    if buda.topo_uid(c) == sel_uid:
+                        w.plan.selected_topology_index = k
+                        break
+        return (len(pruned), refused)
+
+    def _prune_dominated_pools(self, wraps=None):
+        """Run the opt-in WL-dominance prune over `wraps` (default: all
+        bundles) and print the per-run summary.  No-op (bit-identical) when
+        set_prune_dominated is off.  Called by the generation commands AFTER
+        the pool is final (knob-memo replay included) and BEFORE sidecar
+        selection restore / BDB persistence, so indices, persisted rows, and
+        later select_topology pins all see the same (pruned) pool."""
+        if not getattr(self, "_prune_dominated", False):
+            return (0, 0)
+        if wraps is None:
+            wraps = self.bundles
+        topo_fp = self._make_topo_fp_resolver()
+        total_pruned = total_refused = 0
+        n_bundles = 0
+        for w in wraps:
+            if len(w.input.candidates) < 2:
+                continue
+            np_, nr = self._prune_wl_dominated(w, topo_fp(w))
+            if np_:
+                n_bundles += 1
+            total_pruned += np_
+            total_refused += nr
+        print(f"[TopoPrune] pruned {total_pruned} WL-dominated candidate(s) "
+              f"across {n_bundles} bundle(s); {total_refused} dominated "
+              f"pair(s) refused by the equivalence gate.")
+        return (total_pruned, total_refused)
+
     def _user_candidates(self, w):
         """Deep copies of w's hand-committed (type USER) candidates, captured
         BEFORE a regeneration replaces the candidate vector — the pybind list

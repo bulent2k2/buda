@@ -32,6 +32,29 @@ def _endpoint_label(src, dsts, fanin=False):
     return f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
 
 
+def cmd_set_prune_dominated(session, cmd, args, cmd_line):
+    # Usage: set_prune_dominated [on|off]
+    # Opt-in WL-dominance candidate pruning (default OFF — flows are
+    # bit-identical without it).  When on, every generation command
+    # (generate_topologies / generate_hier_topologies / the per-bundle
+    # variants, but NOT the additive generate_more_topologies) drops a
+    # candidate whose WL envelope bottom exceeds an EQUIVALENT candidate's
+    # envelope top — gated on non-WL routing equivalence (same block
+    # contract/feedthru declarations, same segment directions and layer
+    # hints, survivor slide windows covering the dominated one's, survivor
+    # spans inside the dominated one's), so the escalation ladder / ripup
+    # never lose the only routable option.  Declare BEFORE the generation
+    # command; pruning renumbers candidate indices, so select_topology pins
+    # must come from an opted-in run.
+    val = args[0].lower() if args else "on"
+    if val not in ("on", "off"):
+        print(f"Error: set_prune_dominated expects on|off, got {args[0]!r}")
+        return
+    session._prune_dominated = (val == "on")
+    print(f"WL-dominance candidate pruning {'ENABLED' if val == 'on' else 'disabled'} "
+          f"(applies at the next generate_[hier_]topologies).")
+
+
 def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
     # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [hanan_loci]
     # Single dst  → 2-pin L/Z/U candidates
@@ -79,6 +102,7 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
                       f"unrouted. Check the placement of blocks {src} and "
                       f"{', '.join(dsts)} "
                       f"(coincident / corner-touch / one contained in the other?).")
+            session._prune_dominated_pools([w])
             found = True
     if not found: print(f"Warning: Could not find bundle matching hint {hint}")
     elif session._persist_topologies():
@@ -272,6 +296,9 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
                   f"unrouted. Check the placement of blocks {src} and "
                   f"{', '.join(dsts)} "
                   f"(coincident / corner-touch / one contained in the other?).")
+    # Opt-in WL-dominance prune (set_prune_dominated) — after the pool is
+    # final (knob memo replayed), before sidecar restore + persistence.
+    session._prune_dominated_pools()
     # Restore the sidecar baseline (pins + per-segment layer overrides) onto
     # the freshly generated candidates, so the live state matches the GUI
     # even before run_planner. A later select_topology overrides it; the
@@ -325,6 +352,9 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
         total_candidates += n
     print(f"generate_hier_topologies: {len(session.bundles)} bundles, "
           f"{total_candidates} total candidates")
+    # Opt-in WL-dominance prune (set_prune_dominated) — after the pool is
+    # final (knob memo replayed), before sidecar restore + persistence.
+    session._prune_dominated_pools()
     # Restore the sidecar baseline onto the fresh candidates (see
     # generate_topologies); keeps live state and GUI consistent pre-plan.
     session._apply_selections()
@@ -363,12 +393,14 @@ def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
     n = session._generate_hier_topo_one(target_w, use_center, use_double_detour,
                                       fp_cache, comps_by_name, use_multi_trunk,
                                       use_hanan_loci=use_hanan_loci)
+    session._prune_dominated_pools([target_w])
     print(f"generate_topologies_for_hbundle: bundle {bid} — {n} candidates")
     if session._persist_topologies():
         print("[BDB] re-persisted candidate topologies to the open BDB.")
 
 
 COMMANDS = {
+    "set_prune_dominated": cmd_set_prune_dominated,
     "generate_topologies_for_bundle": cmd_generate_topologies_for_bundle,
     "generate_more_topologies": cmd_generate_more_topologies,
     "generate_topologies": cmd_generate_topologies,
