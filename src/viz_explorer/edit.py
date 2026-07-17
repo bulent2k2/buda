@@ -551,9 +551,15 @@ class ExplorerEditMixin:
             return
         self._edit_log_op(f"edit_set_span {seg_idx} {span[0]} {span[1]}")
         # A segment anchor pins the span TO another trunk: stretch and CONNECT
-        # both — edit_connect lands the pinned end on the partner's line and
-        # extends the partner to the crossing when its span falls short, so
-        # the pair ends junctioned, not merely touching coordinates.
+        # both.  An anchor at the applied span's ENDPOINT connects forward —
+        # edit_connect lands the pinned end on the partner's line (a no-op
+        # move) and extends the partner to the crossing when its span falls
+        # short.  An INTERIOR anchor (between outer anchors) must NOT move
+        # the pinned segment — the forward call would shrink the span it just
+        # applied, discarding an outer anchor (Codex #322) — so the connect
+        # REVERSES: the partner's endpoint lands on the pinned trunk instead
+        # (extended to the crossing when short), a T junction with the pinned
+        # span preserved.
         span_msg = self._edit_msg
         for coord in sorted(seg_srcs):
             if coord not in grid:
@@ -561,9 +567,13 @@ class ExplorerEditMixin:
             other = seg_srcs[coord]
             if not (0 <= other < len(self._edit_topo.segments)):
                 continue
+            sg = self._edit_topo.segments[seg_idx]
+            lo, hi = sorted((sg.start.x, sg.end.x) if horiz
+                            else (sg.start.y, sg.end.y))
+            a, b = (seg_idx, other) if coord in (lo, hi) else (other, seg_idx)
             if self._edit_apply(ic.edit_connect(self._edit_topo, self.fp,
-                                                seg_idx, other)):
-                self._edit_log_op(f"edit_connect {seg_idx} {other}")
+                                                a, b)):
+                self._edit_log_op(f"edit_connect {a} {b}")
                 span_msg += f" + connected seg {other}"
             else:
                 span_msg += (f" (connect to seg {other} failed: "

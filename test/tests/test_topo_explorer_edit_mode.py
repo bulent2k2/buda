@@ -774,6 +774,40 @@ def test_pin_to_trunk_stretches_and_connects(tmp_path):
         plt.close('all')
 
 
+def test_pin_interior_trunk_anchor_preserves_span(tmp_path):
+    """Codex #322 P2: a segment anchor BETWEEN outer anchors must not shrink
+    the just-applied span — the connect reverses (the PARTNER's endpoint
+    lands on the pinned trunk, extended to the crossing), instead of moving
+    the pinned trunk's nearest end inward to the anchor."""
+    s = _dd_base_session()
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'e')                        # clone the C (5 segments)
+        _trunk(exp, 'Y', 500, 700)            # V trunk (idx 5) at x=450,
+        exp.sidx = 0                          #   spanning y 200..1200
+        _key(exp, 'P')                        # pin the TOP H trunk (y=1700)
+        _click(exp, 200, 1200)                # block anchor: up (centre 200)
+        _click(exp, 500, 1650)                # grid anchor: OOB line x=500
+                                              #   (above the V trunk's span)
+        _click(exp, 450, 700)                 # trunk anchor x=450 — INTERIOR
+        assert exp._trunk_pin_grid == {500, 450}
+        _key(exp, 'enter')
+        # Span = [min,max] over anchors {200, 500, 450} — the interior 450
+        # did NOT pull the right end in (the old forward connect gave 450).
+        assert _span(exp, 0, horiz=True) == (200, 500)
+        # The PARTNER junctioned onto the pinned trunk instead: extended from
+        # y 1200 up to the crossing at 1700.
+        assert _span(exp, 5, horiz=False) == (200, 1700)
+        ct = exp._build_conn_topo(exp._edit_topo)
+        conns0 = [c.seg_idx for c in list(ct.segs())[0].conns
+                  if c.kind == buda.SegConnKind.SEG]
+        assert 5 in conns0
+        assert "connected seg 5" in exp._edit_msg
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
 def test_edit_duplicate_trunk_rejected(tmp_path):
     """Repeated Y at the same spot must NOT stack identical trunks: the second,
     geometrically identical placement is rejected loud (same line + span);
