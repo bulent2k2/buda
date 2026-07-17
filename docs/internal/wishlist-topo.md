@@ -62,8 +62,15 @@ but because NUTS does not deliver it: realization ≈ lo + fill·spread, so the
 estimate must carry BOTH the floor and the risk — hence the (nominal,
 spread) pair the shipped `kWLSpread` scores. The clean salvage of the
 min-assignment idea is **dominance pruning**: a candidate whose `wl_lo`
-exceeds another's `wl_hi` is deterministically dominated and could be
-dropped at generation.
+exceeds another's `wl_hi` is WL-dominated deterministically — but
+WL-dominance alone is NOT overall dominance (Codex #313): the planner
+scores congestion/span/layer/balance/peak BEFORE weighted WL, and a
+longer candidate can be the only overflow-free / window-feasible option
+(the escalation ladder and ripup's OOB-trunk promotion exist for exactly
+that), so an unconditional generation-time drop could strand the only
+routable topology. A prune must be gated on non-WL routing equivalence
+(same layers/corridors/slide windows) — or the comparison deferred to
+planner scoring where the other cost terms already arbitrate.
 
 **Shipped mitigation:** the planner-side `kWLSpread` knob (opt-in) prices the
 envelope spread, which resolves exactly these ties toward the tightest

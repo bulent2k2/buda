@@ -15,6 +15,29 @@ items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
 
+13. **Nominal-WL comparability across shape families (b44 follow-ons)** —
+   [`wishlist-topo.md`](wishlist-topo.md) → *"Nominal-WL comparability
+   across shape families"*. The generation-side residue of the b44 arc
+   (PR #312 shipped the planner-side opt-in `kWLSpread`): the MST hybrid's
+   nominal sits AT its envelope bottom by construction while plain trunks
+   sample loci only at Hanan-channel midpoints (the WL-optimal edge-aligned
+   locus is never emitted, b44's +500), and WL ties break alphabetically
+   (`(wl, type)`, ASCII `'+' < '@'`) then by lowest index. Three bounded
+   pieces: **(a)** also sample trunk loci ON Hanan lines (~2× pool growth,
+   measure); **(b)** a structural `(wl, nsegs, type)` tie-break — CAUTION:
+   the sort defines the 1-based indices `select_topology` pins in
+   checked-in flows/tests, so it needs an index audit; **(c)** dominance
+   pruning — drop a candidate whose `wl_lo` exceeds another's `wl_hi`,
+   but ONLY gated on non-WL routing equivalence (layers/corridors/slide
+   windows): WL-dominance alone is not overall dominance — the planner
+   scores congestion/span/layer/balance/peak before weighted WL and a
+   longer candidate can be the only overflow-free option (the escalation
+   ladder / ripup's OOB-trunk promotion), so an unconditional drop could
+   strand the only routable topology (Codex #313); the salvage of the
+   measured-and-rejected min-WL assignment. Also parked there: the `kWLSpread`
+   default-flip criteria ([`wishlist-planner.md`](wishlist-planner.md) →
+   *"Realization-risk WL"*).
+
 10. **The `bigHalf.buda` rr flip (decision, then a two-line edit)** —
    re-enable the flow's two commented `ripup_reroute` lines now that the
    RR arc has taken the clean 0/0 endpoint from ~49s to **~12.4s flow
