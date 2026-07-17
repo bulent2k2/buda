@@ -263,6 +263,31 @@ designs and fail LOUD, never silent:)*
   per-segment bit subsets exist) and the taper-aware `UNPLACED` audit
   (expects only the bits a segment actually carries, PR #271).
 
+- **BIT_SHORT heal: same-bundle bit-track consistency in DNUTS** ✅ —
+  **DONE (2026-07-17)**. The audit above found real shorts on the
+  corpus: `big.buda` 44 (3 same-layer sibling pairs off one trunk,
+  windows interleaved by a few slots — the per-bit junction stagger
+  then overlaps different-bit spans), `mix.buda` 90.  Root cause: the
+  exemption is only sound BIT-FOR-BIT, but `place_by_layer` chose each
+  same-bundle segment's window independently (abstract sibling
+  alignment is best-effort and congestion bumps it; even equal anchors
+  can snap to offset track sets when a competitor reserves one slot).
+  Fix in `place_by_layer`, natural-first: keep the historical selection
+  whenever it shares no track with a span-interacting sibling carrying
+  a different bit (byte-identical — the dogleg split trunks and every
+  clean flow untouched); on a real conflict, ALIGN (adopt the sibling's
+  exact per-bit track list — bit k joins bit k as one net) else
+  DISJOINT (repick with the sibling's tracks reserved), else honest
+  unplaced (never a silent short, same policy as the corner bound).
+  Hazard scope: closed span test dilated by the sibling's track extent
+  (the bit-span adjustment reaches past the abstract span end by up to
+  the junction partner's extent).  Measured: big 44 → 0, mix 90 → 0,
+  BIT_SHORT zero corpus-wide; wl_corpus identical everywhere except
+  mix (+0.5% abstract WL — its rnr healing re-steers once the shorts
+  are gone; still 0 overlaps / 0 unplaced); fast+mid tiers green with
+  no golden churn.  Tests: `test_dnuts_same_bundle_shorts.py` (all
+  three branches + exemption-scope preservation).
+
 ## Resolved (by 2026-07-12)
 
 - **Selection basis: rank on measured routability** ✅ — **SETTLED
