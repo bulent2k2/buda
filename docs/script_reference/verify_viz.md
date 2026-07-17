@@ -153,9 +153,13 @@ with `@face=` coord and `(end)`/`(mid)`) and `segs:` (other segments, by index a
 junction position) — and **`passthru:`**, the **bundle's** blocks the segment
 geometrically crosses without tapping (the coverage/feedthru-relevant set,
 consistent with the table's `pass` column; a declared feedthru is marked
-`[feedthru]`). Unrelated floorplan blocks the wire crosses — ordinary
-over-the-cell routing on TOP layers, not a problem indicator — are listed
-separately as **`otc-over:`** (omitted when empty). Crossing is tested against
+`[feedthru]`). Unrelated floorplan blocks the wire crosses split by the
+segment's **effective layer**: on a TOP layer (or over a container envelope,
+transparent to LOW layers) the crossing is ordinary over-the-cell routing —
+listed as **`otc-over:`**, not a problem indicator; on a **non-TOP** layer a
+leaf footprint is an implicit keepout, so the crossing is flagged
+**`low-cross:`** — a real problem to notice (a pinned or best-effort plan, or a
+`+`/`-` restyle, can land a segment there). Both lines are omitted when empty. Crossing is tested against
 each block's **solid** geometry and requires interior overlap: a segment through
 the notch/gap of a multi-rect (TEG) block does not count, and neither does a
 single-point abutment (a trunk endpoint landing on the face of the block

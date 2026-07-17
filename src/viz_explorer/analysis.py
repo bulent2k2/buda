@@ -135,6 +135,23 @@ class ExplorerAnalysisMixin:
         return passt, otc
 
 
+    def _seg_eff_lid(self, ci):
+        """The segment's EFFECTIVE layer id — the same precedence the drawing
+        and `+`/`-` restyle paths resolve with: pinned selection override →
+        planner assignment (when showing the planned candidate) → generation
+        hint."""
+        topo = self._shown_topo()
+        sel = self._find_selection()
+        if self._current_is_selected() and sel and 'seg_layers' in sel:
+            pinned = sel['seg_layers']
+            if len(pinned) == len(topo.segments):
+                return pinned[ci]
+        if (self.idx == self.wrapper.plan.selected_topology_index
+                and len(self.wrapper.plan.seg_layers) == len(topo.segments)):
+            return self.wrapper.plan.seg_layers[ci]
+        return topo.segments[ci].layer_hint
+
+
     def _seg_conn_line(self, cs, ci):
         """Line 3 of the segment info banner: net-pull always, then busterm
         taps / pass-through blocks / connected segs when present."""
@@ -151,7 +168,20 @@ class ExplorerAnalysisMixin:
         if passt:
             parts.append("passthru: " + ",".join(passt))
         if otc:
-            parts.append("otc-over: " + ",".join(otc))
+            # On a non-TOP effective layer a LEAF footprint is an implicit
+            # keepout — flag the crossing (`low-cross`) instead of calling it
+            # benign over-the-cell routing; containers stay transparent.
+            lid = self._seg_eff_lid(ci)
+            low = (self.layer_stack is not None
+                   and self.layer_stack.has_layer(lid)
+                   and not self.layer_stack.is_top(lid))
+            lowx = [n for n in otc
+                    if low and not self.fp.is_container(n)]
+            rest = [n for n in otc if n not in lowx]
+            if rest:
+                parts.append("otc-over: " + ",".join(rest))
+            if lowx:
+                parts.append("low-cross: " + ",".join(lowx))
         if sgs:
             parts.append("segs: " + ",".join(sgs))
         return " · ".join(parts)

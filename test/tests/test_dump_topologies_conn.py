@@ -169,6 +169,28 @@ def test_dump_passthru_scoped_to_bundle_blocks():
     assert not any("passthru:" in ln and "obs" in ln for ln in lines), lines
 
 
+def test_dump_low_layer_crossing_flagged_not_otc():
+    """A crossing of an unrelated LEAF block is benign over-the-cell routing
+    only on a TOP layer.  When the segment's effective layer is non-TOP the
+    leaf footprint is an implicit keepout, so the dump must flag the crossing
+    as `low-cross:` — never file it under the not-a-problem `otc-over:`."""
+    s = _run([
+        "def_layer 2 M2 H LOW 0.0",       # the ONLY H layer -> trunk lands on it
+        "def_layer 5 M5 V TOP 0.0",
+        "add_block A 0 0 100 300", "add_block B 400 0 500 300",
+        "add_block obs 100 0 400 300",
+        "add_bus a[4] A.p B.p", "run_bundler", "generate_topologies",
+        "select_topology 1 1",            # pin the direct I_H (crosses obs)
+        "run_planner",
+    ])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        s.do_command("dump_topologies --conn")
+    lines = buf.getvalue().splitlines()
+    assert any("low-cross:" in ln and "obs" in ln for ln in lines), buf.getvalue()
+    assert not any("otc-over:" in ln and "obs" in ln for ln in lines), lines
+
+
 def test_crossing_predicate_requires_interior_overlap():
     """The report's crossing test needs POSITIVE-length overlap: a block the
     segment merely abuts at a single point (big2 b61: the trunk's endpoints

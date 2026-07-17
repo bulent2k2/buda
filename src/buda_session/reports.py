@@ -183,21 +183,31 @@ class ReportsMixin:
             # Pass-through: BUNDLE blocks this seg crosses (solid geometry)
             # without tapping — the coverage/feedthru-relevant set, matching
             # the table's `pass` column semantics.  Unrelated floorplan blocks
-            # the wire merely flies over (normal over-the-cell routing on TOP
-            # layers) are listed separately as `otc-over` — context, not a
-            # problem indicator.
-            passt, otc = [], []
+            # the wire flies over split by the segment's EFFECTIVE layer:
+            # on a TOP layer (or over a container envelope, transparent to LOW
+            # layers) that is normal over-the-cell routing — `otc-over`,
+            # context, not a problem indicator; on a non-TOP layer a LEAF
+            # footprint is an implicit keepout, so the crossing is flagged
+            # `low-cross` — a problem an expert needs to notice.
+            low_layer = (self.layers.has_layer(layer)
+                         and not self.layers.is_top(layer))
+            passt, otc, lowx = [], [], []
             for name, ubbox in blocks:
                 if name in tapped:
                     continue
                 if self._seg_spans_block(cs, name, ubbox, fp):
                     if name in contract:
                         passt.append(name + ("[feedthru]" if name in feedthru else ""))
+                    elif low_layer and not fp.is_container(name):
+                        lowx.append(name)
                     else:
                         otc.append(name)
             print(f"        passthru: {', '.join(passt) if passt else '(none)'}")
             if otc:
                 print(f"        otc-over: {', '.join(otc)}")
+            if lowx:
+                print(f"        low-cross: {', '.join(lowx)}  "
+                      f"(M{layer} is non-TOP — leaf footprints are keepouts)")
 
     def _dump_topologies(self, hint, problems_only, conn_detail=False):
         if not self.bundles:
