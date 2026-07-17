@@ -19,6 +19,7 @@
 #include <functional>
 #include <optional>
 #include <set>
+#include <tuple>
 #include <utility>
 #include "bundler.h"
 #include "topology.h"
@@ -287,7 +288,8 @@ public:
     std::vector<std::pair<int, double>> band_occupants(
             const std::vector<BundleWrapper>& bundles, int layer_id,
             double span_lo, double span_hi,
-            double perp_lo, double perp_hi, int top_k) const;
+            double perp_lo, double perp_hi, int top_k,
+            const std::vector<std::tuple<int, int, int>>& placed = {}) const;
     const std::vector<GlobalCut>& get_cuts() const { return cuts_; }
     const std::vector<int>& get_x_grid() const { return x_grid_; }
     const std::vector<int>& get_y_grid() const { return y_grid_; }
@@ -503,6 +505,12 @@ private:
     // Realization-risk WL spread penalty (see set_planner_param "kWLSpread").
     // < 0 = OFF (kWL scores the plain nominal estimated_wirelength).
     double kWLSpread_         = -1.0;
+    // Honest-books mode (see set_planner_param "charge_pull_target"): charge a
+    // pulled segment at its DETERMINISTIC predicted pull target (window bound
+    // tightened by an in-travel ConnSeg::pull_break) instead of
+    // best_band_perp, and rank band_occupants by the caller-supplied PLACED
+    // positions.  false = legacy charging, bit-identical.
+    bool charge_pull_target_  = false;
     // Same-direction TOP-layer load-balancing weight.  Without it the planner
     // breaks ties toward the highest metal (span/base costs are 0 on a TOP layer
     // with no span window), piling every H bus on the top H layer and every V

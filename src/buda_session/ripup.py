@@ -744,9 +744,22 @@ class RipupMixin:
             # including the cross-site `tried` dedupe, which also consumes
             # ranking slots at later sites — then cap the TRIALED
             # occupants per site at K here.
+            # Honest-books mode (charge_pull_target): rank occupants by where
+            # the metal actually IS — the charge prediction can diverge from
+            # the placed track under contention fallback (and the whole point
+            # of the mode is that the charge moved off the legacy anchor), so
+            # the plan-based ranking would miss the bundle physically holding
+            # the site's bands.  Off: empty overlay = legacy plan ranking.
+            placed = []
+            if (self._planner_params.get("charge_pull_target", 0.0) != 0.0
+                    and self.nuts_result is not None):
+                placed = [(ts.bundle_id, ts.seg_idx,
+                           int(round(ts.track_position)))
+                          for ts in self.nuts_result.segments if ts.placed]
             occ = self.planner.band_occupants(
                 self.bundles, layer, s_lo, s_hi, p_lo, p_hi,
-                _RR_GLOBAL_TOP_K + len(exclude) + len(tried))
+                _RR_GLOBAL_TOP_K + len(exclude) + len(tried),
+                placed)
             site = [(layer in h_layers, 0.5 * (p_lo + p_hi))]
             site_occupants = 0
             for bid, _demand in occ:

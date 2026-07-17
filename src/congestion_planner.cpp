@@ -41,6 +41,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "track_cap_slack")   track_cap_slack_   = value;
     else if (name == "refine_passes")     refine_passes_     = (int)value;
     else if (name == "nontop_dead_span_gate") nontop_dead_span_gate_ = (value != 0.0);
+    else if (name == "charge_pull_target")    charge_pull_target_    = (value != 0.0);
     else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
 }
 
@@ -952,7 +953,8 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             // pull direction, tightened by an in-travel breakpoint, centre
             // clamped per layer so the bus width stays inside the window.
             int pull_anchor = INT_MIN;
-            if (slide_lo != INT_MIN && si < (int)conn_segs.size()) {
+            if (charge_pull_target_ && slide_lo != INT_MIN &&
+                si < (int)conn_segs.size()) {
                 const ConnSeg& cs = conn_segs[si];
                 if (cs.net_pull != 0) {
                     double pref = (cs.net_pull > 0) ? (double)slide_hi
@@ -1799,7 +1801,8 @@ void CongestionPlanner::clear_injected_demand() {
 std::vector<std::pair<int, double>> CongestionPlanner::band_occupants(
         const std::vector<BundleWrapper>& bundles, int layer_id,
         double span_lo, double span_hi,
-        double perp_lo, double perp_hi, int top_k) const {
+        double perp_lo, double perp_hi, int top_k,
+        const std::vector<std::tuple<int, int, int>>& placed) const {
     std::vector<std::pair<int, double>> out;
     if (cuts_.empty() || top_k <= 0) return out;
     const Layer* layer = layers_.get_layer(layer_id);
@@ -1822,9 +1825,25 @@ std::vector<std::pair<int, double>> CongestionPlanner::band_occupants(
         bands.insert({ci, b});
     });
     if (bands.empty()) return out;
+    // Optional PLACED-position overlay (the charge_pull_target arc's honest-
+    // books mode): rank holders by where the metal actually IS, not where the
+    // plan charged it — NUTS's preference chain (pull/face/junction) outranks
+    // the charged band, so under divergence a plan-based ranking misses the
+    // bundle physically holding the contended bands (and the global pass
+    // starves).  Empty overlay = plan-based ranking, bit-identical legacy.
+    std::map<std::pair<int, int>, int> placed_perp;
+    for (const auto& [bid, si, pp] : placed) placed_perp[{bid, si}] = pp;
     for (const auto& bw : bundles) {
         if (bw.hier.locked || !has_committed_plan_(bw)) continue;
-        double d = plan_band_overlap(bw, fixed_plan_of_(bw), bands);
+        PlanResult plan = fixed_plan_of_(bw);
+        if (!placed_perp.empty()) {
+            const int bid = bw.input.original_bundle.id;
+            for (int si = 0; si < (int)plan.seg_perp.size(); ++si) {
+                auto it = placed_perp.find({bid, si});
+                if (it != placed_perp.end()) plan.seg_perp[si] = it->second;
+            }
+        }
+        double d = plan_band_overlap(bw, plan, bands);
         if (d > 0.0) out.push_back({bw.input.original_bundle.id, d});
     }
     std::sort(out.begin(), out.end(),
