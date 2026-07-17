@@ -146,6 +146,30 @@ def test_overlapping_spans_same_side_never_interleave():
     assert _bit_shorts(r) == 0
 
 
+def test_reversed_span_sibling_still_detected_as_hazard():
+    """Codex #317 P1: make_bus_segments deliberately preserves reversed NUTS
+    spans (span_lo > span_hi).  The hazard test must compare normalized
+    extents — a raw-order comparison misses the overlap and leaves the
+    different-bit track sharing unrepaired.  Sibling A carries the reversed
+    span here (stored raw in the layer assignment)."""
+    a = _seg(seg_idx=0, span=(100.0, 0.0), anchor=4.5)     # reversed [0,100]
+    b = _seg(seg_idx=1, span=(100.0, 200.0), anchor=8.0)   # natural {5.5, 10.5}
+    r = buda.DetailedNUTSEngine(_stack()).run([a, b])
+    assert r.num_unplaced == 0
+    assert _tracks(r, 1) == pytest.approx([3.5, 5.5])      # aligned adoption
+    assert _bit_shorts(r) == 0
+
+
+def test_reversed_span_current_segment_still_detected_as_hazard():
+    """As above, with the CURRENT segment carrying the reversed span."""
+    a = _seg(seg_idx=0, span=(0.0, 100.0), anchor=4.5)
+    b = _seg(seg_idx=1, span=(200.0, 100.0), anchor=8.0)   # reversed [100,200]
+    r = buda.DetailedNUTSEngine(_stack()).run([a, b])
+    assert r.num_unplaced == 0
+    assert _tracks(r, 1) == pytest.approx([3.5, 5.5])      # aligned adoption
+    assert _bit_shorts(r) == 0
+
+
 def test_far_apart_siblings_may_share_tracks():
     """Same bundle, same layer, spans FAR apart (no interaction even after
     junction stagger): the exemption stays — both may use the same band."""

@@ -364,12 +364,19 @@ void DetailedNUTSEngine::place_by_layer(
             // one bus extent past the abstract span endpoint.
             std::set<double> reserved;
             std::vector<const LayerAssignment*> hazards;
+            // Normalized extent of this segment's span: make_bus_segments
+            // deliberately preserves reversed NUTS spans (span_lo > span_hi,
+            // see the span-adjustment pass), and a raw-order comparison would
+            // miss a real overlap and leave a bit short unrepaired.
+            const double bs_lo = std::min(bs.span_lo, bs.span_hi);
+            const double bs_hi = std::max(bs.span_lo, bs.span_hi);
             for (const auto& asgn : layer_assigns) {
                 if (asgn.bundle_id == bs.bundle_id) {
                     const double dil = asgn.track_positions.empty() ? 0.0
                         : asgn.track_positions.back() - asgn.track_positions.front();
-                    if (asgn.span_lo <= bs.span_hi + dil &&
-                        asgn.span_hi + dil >= bs.span_lo)
+                    const double a_lo = std::min(asgn.span_lo, asgn.span_hi);
+                    const double a_hi = std::max(asgn.span_lo, asgn.span_hi);
+                    if (a_lo <= bs_hi + dil && a_hi + dil >= bs_lo)
                         hazards.push_back(&asgn);
                     continue;
                 }
