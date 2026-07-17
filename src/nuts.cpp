@@ -163,6 +163,32 @@ static void build_nuts_maps(
                     preferred = (hi < kSentinel) ? hi : pull_map[key];  // fallback
                 else
                     preferred = (lo > -kSentinel) ? lo : pull_map[key]; // fallback
+                // Breakpoint clamp: stop the pull at its wirelength saturation
+                // point (ConnSeg::pull_break) instead of the window edge — on a
+                // wide interior window the edge overshoots the point where the
+                // pull's gain ends and stretches the coupled trunk between the
+                // connectors (b44's TRUNK_H+MST: the seg1 connector's window
+                // reaches 940 past its breakpoint; the overshoot was the whole
+                // +1000/bit realization excess).  Only when the breakpoint lies
+                // WITHIN the travel from nominal to the bound (a tightening,
+                // never a new direction), and never for a dogleg-pinned slide
+                // (its bound IS the exported trunk position, the intent).  A
+                // dogleg net-pull PIN keeps the raw bound too — the pin's
+                // PRESENCE is the signal (apply_dogleg pins every original
+                // stub because the split topology's votes are not
+                // authoritative), so any non-sentinel pin suppresses the
+                // clamp even when its value happens to equal the recomputed
+                // pull: equal aggregates do not mean the vote composition or
+                // the breakpoint survived the split (Codex #315).
+                const bool np_overridden =
+                    (np_ok && bw.plan.seg_net_pull[si] != INT_MIN);
+                if (!slide_pinned && !np_overridden && cs.pull_break != INT_MIN) {
+                    const double bp = static_cast<double>(cs.pull_break);
+                    if (eff_net_pull > 0 && bp > cs.perp_pos && bp < preferred)
+                        preferred = bp;
+                    else if (eff_net_pull < 0 && bp < cs.perp_pos && bp > preferred)
+                        preferred = bp;
+                }
                 pull_map[key] = preferred;
             } else if (n_bt == 0 && perp_ok &&
                        bw.plan.seg_perp[si] != INT_MIN) {

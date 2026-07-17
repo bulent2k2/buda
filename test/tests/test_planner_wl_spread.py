@@ -75,9 +75,14 @@ def test_b44_default_nominal_ranking_picks_wide_envelope_mst():
 
 
 def test_b44_kwlspread_flips_to_tight_envelope_candidate():
-    """With kWLSpread 0.125 the planner demotes the wide-envelope MST and the
-    detailed WL drops by ~20% (234546 -> ~188513 on the reference host; the
-    assertion bounds are deliberately loose for host near-tie tolerance)."""
+    """With kWLSpread 0.125 the planner demotes the wide-envelope MST and
+    picks a tight-envelope candidate.  History: pre-clamp, this flip was
+    worth ~20% detailed WL (234546 -> ~188513) because the MST's greedy pull
+    placement overshot to the window edges; the NUTS pull-target BREAKPOINT
+    clamp (ConnSeg::pull_break) then fixed the realization itself, so the
+    baseline now lands within ~1% of the knob's pick and the assertion is
+    "not worse", not "20% better".  The knob remains the selection-level
+    guard for realization risk the clamp cannot remove (e.g. contention)."""
     s0, _ = _b44_session(knob=False)
     s1, out = _b44_session(knob=True)
     assert "WL envelopes annotated" in out
@@ -88,8 +93,9 @@ def test_b44_kwlspread_flips_to_tight_envelope_candidate():
     assert len(sel.segments) <= 3
     assert sel.wl_lo >= 0.0 and sel.wl_hi >= sel.wl_lo
     assert s1.detailed_result.num_unplaced == 0
-    # The realized bit-WL must improve decisively over the nominal ranking.
-    assert _detailed_wl(s1) < 0.9 * _detailed_wl(s0)
+    # The knob's pick must not realize worse than the nominal ranking's
+    # (small tolerance for host near-tie noise).
+    assert _detailed_wl(s1) <= 1.02 * _detailed_wl(s0)
 
 
 def test_kwlspread_off_by_default_no_annotation():

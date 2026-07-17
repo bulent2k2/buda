@@ -3,6 +3,56 @@
 Deferred follow-ups for track assignment (`src/nuts.cpp`,
 `src/detailed_nuts.cpp`). Index: [`wishlist.md`](wishlist.md).
 
+## Pull-target breakpoint clamp — ✅ SHIPPED (the b44 tug-of-war fix)
+
+**What (2026-07-17):** `net_pull` is a *direction*; NUTS's pull placement
+aimed at the bus-clamped slide-window EDGE (`pull_target`).  On a wide
+interior window — a connector crossing the covered block, w=2500 on b44's
+`TRUNK_H+MST` — the edge overshoots the point where the pull's wirelength
+gain saturates: b44's seg1 (gain ends at 1200 where its trunklet collapses)
+was placed at 258.5, its opposite-pulled sibling at 2641.5, and the interior
+trunk between them stretched 1250 → 2383 — the entire **+1000/bit**
+realization excess behind the b44 mis-ranking arc (each pull "won" its local
+leg for ~−640 combined while costing +1643 on the coupled segments).
+
+**As-built:** `derive_net_pull` (topology_analysis.cpp) records each vote's
+saturation coordinate and resolves the net pull's slope-crossing breakpoint
+onto `ConnSeg::pull_break` — a busterm vote saturates at its `face_coord`, a
+floating-spine vote at the NEAREST far segment's slide bound (the exact
+overshoot boundary its outside-interval gate already encodes); multi-vote
+nets take the ⌈net/2⌉-th breakpoint in travel order (slope crossing).
+`build_nuts_maps` (nuts.cpp) clamps the pull preference at the breakpoint
+ONLY when it lies within the travel from nominal to the bound (a tightening,
+never a new direction); dogleg-pinned slides and dogleg-overridden pulls
+keep the bound semantics (their votes describe the pre-split topology), and
+the ANCHORED vote case is inert by construction (its face_coord lies beyond
+the bound and clamps back — hold-at-bound preserved, tc3a B20).
+
+**Measured (this container):** b44 default selection (the 6-seg MST)
+realizes **3627/bit vs 4510 (−19.6%)** — seg1 stops at its 1200 breakpoint,
+its sibling aligns onto it, the interior trunk collapses to zero, and the
+MST now realizes near its envelope floor, BEATING the 2-seg L (3715) and
+matching the kWLSpread knob's re-selection (188,513) via the default
+pipeline (188,682).  Corpus: mix / mempool_tile / channel_stress /
+comprehensive / hbundles-10 **byte-identical** (the clamp fires only when a
+breakpoint sits strictly inside the pull's travel); bigHalf no-rr overlaps
+7→3 (opens 288→294, culls 72→138 — the usual plain-pipeline shuffle),
+big2 plain overlaps 5→4 with opens 0→48; the standard healers absorb both
+completely: big2+negotiate+ripup **0 opens / 4 overlaps** (main+heal 0/5),
+bigHalf+healers **0/0**.  Full fast+mid tiers green (1434) with every
+golden bit-identical.  The kWLSpread b44 delta collapsed to ~0.1% (its
+test now asserts "not worse"); the knob remains the selection-level guard
+for realization risk the clamp cannot remove (contention-driven stretch).
+
+**Follow-ons (from the same b44 slide-range analysis):** (a) the
+opposite-pull connector pair (seg1/seg3) is detectable at analysis time —
+a cheap structural realization-risk signal that could feed the WL
+tie-break; (b) open-space MST edge legs carry FREE (sentinel) slide
+windows (b44 cand 19's edge leg) — unbounded envelopes and NUTS wildcards;
+(c) the planner's charged band vs pull placement can diverge by >1000
+units (seg3 charged at band 1450, placed at 2641.5) — a books-vs-metal
+mismatch worth a diagnostic.
+
 ## Non-TOP pin-access stub span-stretched onto its endpoint leaf — NO LIVE REPRO (effectively closed by config; latent NUTS clamp deferred)
 
 **Status (2026-07-16):** the one live repro (flow 10's `x_t*`) was the M5-vs-M7

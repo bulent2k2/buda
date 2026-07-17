@@ -73,6 +73,18 @@ struct ConnSeg {
     // net_pull < 0: more anchors lie below → prefer sliding down/left.
     // net_pull == 0: balanced or no stub connections → no preferred direction.
     int  net_pull  = 0;
+    // Saturation coordinate of the net_pull: the perpendicular position where
+    // the pull's wirelength gain stops (the slope-crossing breakpoint over the
+    // votes derive_net_pull counted — a busterm vote saturates at its
+    // face_coord, a floating-spine vote at the far segment's near slide
+    // bound).  Sliding PAST it re-lengthens what the pull was shortening —
+    // the b44 tug-of-war: NUTS's legacy pull placement aims at the slide-
+    // window EDGE, and on a wide interior window (a connector crossing the
+    // covered block, w=2500) that overshoots the breakpoint by ~940 and
+    // stretches the coupled trunk between the connectors.  INT_MIN sentinel =
+    // no derivable breakpoint (net_pull == 0, or votes without a coordinate);
+    // consumers fall back to the window bound.
+    int  pull_break = INT_MIN;
 
     // ── Along-flex DOF (Stage C of the flexible-root re-arch) ─────────────────
     // The perp slide above moves the whole segment rigidly.  A trunk spine has a
