@@ -104,17 +104,24 @@ class ExplorerAnalysisMixin:
 
 
     def _seg_passthru_names(self, cs, tapped):
-        """Blocks `cs` geometrically crosses (solid rects — each real rect of
-        a multi-rect block, the union bbox otherwise) WITHOUT tapping: the
-        pass-through set shown in the segment info banner.  Mirrors reports'
-        _seg_spans_block / verify's seg_spans_rect, at the nominal perp."""
+        """Split the blocks `cs` geometrically crosses (solid rects — each real
+        rect of a multi-rect block, the union bbox otherwise) WITHOUT tapping
+        into `(passthru, otc_over)`: `passthru` = the BUNDLE's blocks — the
+        coverage/feedthru-relevant set; `otc_over` = unrelated floorplan blocks
+        the wire merely flies over (normal over-the-cell routing on TOP
+        layers).  Crossing means INTERIOR overlap (perp strictly inside, along
+        overlap of positive length) — riding a face line or abutting at a
+        single point does not count.  Mirrors reports' _seg_spans_block, at
+        the nominal perp."""
         def crosses(x1, y1, x2, y2):
             if cs.horiz:   # perp = y, along = x
-                return (y1 <= cs.perp_pos <= y2
-                        and cs.along_lo <= x2 and cs.along_hi >= x1)
-            return (x1 <= cs.perp_pos <= x2
-                    and cs.along_lo <= y2 and cs.along_hi >= y1)
-        names = []
+                return (y1 < cs.perp_pos < y2
+                        and cs.along_lo < x2 and cs.along_hi > x1)
+            return (x1 < cs.perp_pos < x2
+                    and cs.along_lo < y2 and cs.along_hi > y1)
+        contract = (set(self._shown_topo().connected_block_names)
+                    | self._bundle_busterm_names())
+        passt, otc = [], []
         for name, ubbox in self.fp.get_all_blocks():
             if name in tapped:
                 continue
@@ -124,8 +131,8 @@ class ExplorerAnalysisMixin:
             else:
                 hit = crosses(ubbox.x1, ubbox.y1, ubbox.x2, ubbox.y2)
             if hit:
-                names.append(name)
-        return names
+                (passt if name in contract else otc).append(name)
+        return passt, otc
 
 
     def _seg_conn_line(self, cs, ci):
@@ -140,9 +147,11 @@ class ExplorerAnalysisMixin:
         parts = [f"pull={p_dir}({pull})"]
         if bts:
             parts.append("busterms: " + ",".join(bts))
-        passt = self._seg_passthru_names(cs, set(bts))
+        passt, otc = self._seg_passthru_names(cs, set(bts))
         if passt:
             parts.append("passthru: " + ",".join(passt))
+        if otc:
+            parts.append("otc-over: " + ",".join(otc))
         if sgs:
             parts.append("segs: " + ",".join(sgs))
         return " · ".join(parts)

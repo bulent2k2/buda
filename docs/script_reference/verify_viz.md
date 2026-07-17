@@ -150,11 +150,17 @@ before planning, or for a candidate that is not the planned one, it falls back t
 the candidate's generation hint and is marked `·hint` (e.g. `M6·hint`). Under each
 segment three lines list **what it connects to** — `busterms:` (block-face taps,
 with `@face=` coord and `(end)`/`(mid)`) and `segs:` (other segments, by index and
-junction position) — and **`passthru:`**, the blocks the segment geometrically
-crosses without tapping. Pass-through is tested against each block's **solid**
-geometry, so a segment through the notch/gap of a multi-rect (TEG) block does not
-count; a declared feedthru is marked `[feedthru]`. The bundle header also echoes any
-declared `feedthru=` blocks. This is the same connectivity view the planner and NUTS
+junction position) — and **`passthru:`**, the **bundle's** blocks the segment
+geometrically crosses without tapping (the coverage/feedthru-relevant set,
+consistent with the table's `pass` column; a declared feedthru is marked
+`[feedthru]`). Unrelated floorplan blocks the wire crosses — ordinary
+over-the-cell routing on TOP layers, not a problem indicator — are listed
+separately as **`otc-over:`** (omitted when empty). Crossing is tested against
+each block's **solid** geometry and requires interior overlap: a segment through
+the notch/gap of a multi-rect (TEG) block does not count, and neither does a
+single-point abutment (a trunk endpoint landing on the face of the block
+flanking its junction) or riding a block's face line. The bundle header also
+echoes any declared `feedthru=` blocks. This is the same connectivity view the planner and NUTS
 consume, so it is the first place to look when a bundle routes with an open or an
 unexpected slide/pull.
 
