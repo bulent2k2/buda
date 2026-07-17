@@ -166,7 +166,10 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("dogleg_seg_slide_hi", &NUTSResult::dogleg_seg_slide_hi);
 
     py::class_<NUTSEngine>(m, "NUTSEngine")
-        .def(py::init<const Floorplan&, const LayerStack&>())
+        // Engine keeps references to both args (floorplan_/layers_); keep them
+        // alive as long as the engine so temporaries are not freed early.
+        .def(py::init<const Floorplan&, const LayerStack&>(),
+             py::keep_alive<1, 2>(), py::keep_alive<1, 3>())
         .def("set_track_pitch",       &NUTSEngine::set_track_pitch)
         .def("set_skip_tighten",      &NUTSEngine::set_skip_tighten)
         .def("set_skip_doglegs",      &NUTSEngine::set_skip_doglegs)
@@ -347,7 +350,10 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("pass_seconds",     &DetailedNUTSResult::pass_seconds);
 
     py::class_<DetailedNUTSEngine>(m, "DetailedNUTSEngine")
-        .def(py::init<const RoutingGridStack&>())
+        // The engine keeps a reference to the stack (stack_); keep it alive as
+        // long as the engine so a temporary stack (e.g. Engine(make_stack()))
+        // is not freed before run() dereferences it.
+        .def(py::init<const RoutingGridStack&>(), py::keep_alive<1, 2>())
         .def("add_fixed_bits", &DetailedNUTSEngine::add_fixed_bits,
              py::arg("bits"))
         .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"),

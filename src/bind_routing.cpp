@@ -538,7 +538,10 @@ void bind_routing(py::module_& m) {
         .value("SIGNAL_TRACKS", CapacityMode::SIGNAL_TRACKS);
 
     py::class_<CongestionPlanner>(m, "CongestionPlanner")
-        .def(py::init<const Floorplan&, const LayerStack&>())
+        // Planner keeps references to both args (floorplan_/layers_); keep them
+        // alive as long as the planner so temporaries are not freed early.
+        .def(py::init<const Floorplan&, const LayerStack&>(),
+             py::keep_alive<1, 2>(), py::keep_alive<1, 3>())
         .def("set_planner_param",    &CongestionPlanner::set_planner_param)
         .def("set_track_pitch",      &CongestionPlanner::set_track_pitch)
         // Opt-in signal-track capacity model (Gap A part 2).  keep_alive so the
