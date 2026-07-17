@@ -20,7 +20,40 @@ Each handler takes (session, cmd, args, cmd_line) and is registered
 in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
+import re
+
 import buda
+
+# Coordinate arguments of edit_* commands accept BLOCK/FACE REFERENCES in
+# place of absolute numbers: `<block>.<ref>[+N|-N]` with ref one of
+# left/right (x faces), bottom/top (y faces), cx/cy (centres) — resolved
+# against the edit session's own floorplan (cell-local for a hier template),
+# so a folded command tracks the floorplan instead of hard-coding numbers.
+# The GUI's [edit-cmd] log emits the same form for block-pinned endpoints.
+# The block name is parsed GREEDILY from the face suffix (the `.ref` is
+# anchored at the end), because block names themselves may contain dots
+# (`IO.PAD`, `u_cpu0.c0l3c0` in the bundled demos) — `IO.PAD.right-20`
+# resolves block `IO.PAD`, face `right`, offset -20.
+_COORD_REF = re.compile(
+    r"^(.+)\.(left|right|top|bottom|cx|cy)([+-]\d+)?$")
+
+
+def _coord(session, tok):
+    """Resolve an edit_* coordinate argument: an integer, or a block/face
+    reference like `up.bottom+20` / `lo.cx` (see _COORD_REF)."""
+    m = _COORD_REF.match(tok)
+    if m is None:
+        return int(tok)
+    name, ref, off = m.group(1), m.group(2), int(m.group(3) or 0)
+    fp = session._edit_fp if session._edit_fp is not None else session.fp
+    # get_block_bounds returns a zero rect for unknown names — check
+    # membership explicitly so a typo fails loud, not as a (0,0) landing.
+    if name not in {n for n, _ in fp.get_all_blocks()}:
+        raise ValueError(f"unknown block '{name}' in coordinate '{tok}'")
+    r = fp.get_block_bounds(name)
+    v = {"left": r.x1, "right": r.x2, "bottom": r.y1, "top": r.y2,
+         "cx": (r.x1 + r.x2) // 2, "cy": (r.y1 + r.y2) // 2}[ref]
+    return v + off
 
 
 def cmd_edit_topology(session, cmd, args, cmd_line):
@@ -86,6 +119,7 @@ def cmd_edit_topology(session, cmd, args, cmd_line):
 def cmd_edit_add_trunk(session, cmd, args, cmd_line):
     # Usage: edit_add_trunk <H|V> <perp_pos> [<along_lo> <along_hi>] [layer <id>]
     # Pick axis + a Hanan line; default span = the full Hanan extent.
+    # Coordinates accept block/face references (up.bottom+20, lo.cx).
     if session._edit_session() is None: return
     pos = list(args)
     layer = None
@@ -96,8 +130,9 @@ def cmd_edit_add_trunk(session, cmd, args, cmd_line):
         print("Error: edit_add_trunk <H|V> <perp_pos> [<lo> <hi>] [layer <id>]")
         return
     horiz = pos[0].upper() == "H"
-    perp = int(pos[1])
-    lo, hi = (int(pos[2]), int(pos[3])) if len(pos) >= 4 else (1, 0)
+    perp = _coord(session, pos[1])
+    lo, hi = ((_coord(session, pos[2]), _coord(session, pos[3]))
+              if len(pos) >= 4 else (1, 0))
     h_def, v_def = session._edit_layers()
     v = buda.edit_add_trunk(session._edit_topo, session._edit_fp, horiz, perp,
                             lo, hi, layer if layer is not None
@@ -145,9 +180,11 @@ def cmd_edit_remove_segment(session, cmd, args, cmd_line):
 
 def cmd_edit_set_span(session, cmd, args, cmd_line):
     # Usage: edit_set_span <seg#> <along_lo> <along_hi>
+    # Coordinates accept block/face references (up.bottom+20, lo.cx).
     if session._edit_session() is None: return
     v = buda.edit_set_span(session._edit_topo, session._edit_fp,
-                           int(args[0]), int(args[1]), int(args[2]))
+                           int(args[0]), _coord(session, args[1]),
+                           _coord(session, args[2]))
     session._edit_report(v)
 
 
@@ -179,7 +216,8 @@ def cmd_edit_set_slide(session, cmd, args, cmd_line):
     if len(args) < 3:
         print("Error: edit_set_slide <seg#> <lo> <hi>  |  edit_set_slide <seg#> clear")
         return
-    lo, hi = sorted((float(args[1]), float(args[2])))
+    lo, hi = sorted((float(_coord(session, args[1])),
+                     float(_coord(session, args[2]))))
     ct = buda.ConnTopology()
     ct.build(topo, session._edit_fp)
     cs = list(ct.segs())[si]
@@ -234,9 +272,11 @@ def cmd_edit_connect(session, cmd, args, cmd_line):
 
 def cmd_edit_disconnect(session, cmd, args, cmd_line):
     # Usage: edit_disconnect <seg_i> <seg_j> <retract_to>
+    # retract_to accepts a block/face reference (up.bottom+20, lo.cx).
     if session._edit_session() is None: return
     v = buda.edit_disconnect(session._edit_topo, session._edit_fp,
-                             int(args[0]), int(args[1]), int(args[2]))
+                             int(args[0]), int(args[1]),
+                             _coord(session, args[2]))
     session._edit_report(v)
 
 

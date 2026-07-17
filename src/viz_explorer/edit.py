@@ -69,6 +69,7 @@ class ExplorerEditMixin:
         if not was_open and self._edit_topo is not None:
             self._edit_slide = {}          # fresh session: no staged windows
             self._edit_slide_mark = None
+            self._edit_slide_grid = True   # W snaps to the grid by default
             self._edit_layers_changed = False
         self._edit_pending = -1
         self._draw()
@@ -140,14 +141,40 @@ class ExplorerEditMixin:
                 else "inf" if v > _UNCONSTRAINED else f"{v:.0f}")
 
 
+    def _slide_snap(self, raw, horiz):
+        """A 'W' bound on the slide (perpendicular) axis: snapped to the
+        nearest bundle-grid Hanan line in GRIDDED mode (the default — bounds
+        land where generation's candidates do), verbatim in gridless mode
+        ('enter' mid-refine toggles)."""
+        if not self._edit_slide_grid:
+            return raw
+        xs, ys = self._bundle_hanan_grid()
+        return float(self._snap(raw, ys if horiz else xs))
+
+    def _edit_slide_toggle_grid(self):
+        """'enter' while a W refine is pending: toggle gridded/gridless and
+        re-echo the marked bound under the new mode (the mark stores the RAW
+        cursor coordinate, so toggling re-snaps or un-snaps it)."""
+        self._edit_slide_grid = not self._edit_slide_grid
+        mode = "grid" if self._edit_slide_grid else "free"
+        si, raw = self._edit_slide_mark
+        cs = list(self._build_conn_topo(self._edit_topo).segs())[si]
+        self._edit_msg = (f"EDIT: seg {si} slide bound at "
+                          f"{self._slide_snap(raw, cs.horiz):.0f} [{mode}] — "
+                          f"press W at the other bound, enter toggles")
+        self._draw()
+
     def _edit_slide_at(self, event):
         """Two-step slide-window refine ('W'): with a segment selected, the
         first press marks the cursor's PERPENDICULAR coordinate as one bound,
         the second applies [min, max] of the two marks — intersected with the
         segment's structural slide range (a window outside it would make the
         NUTS placement infeasible) — as a staged override that lands on
-        plan.seg_slide_lo/hi at commit.  'w' clears the selected segment's
-        staged window."""
+        plan.seg_slide_lo/hi at commit.  Bounds SNAP to the bundle grid's
+        Hanan lines by default; 'enter' mid-refine toggles the gridless
+        sub-mode for off-grid bounds (both marks store the raw cursor
+        coordinate, so the mode at APPLY time decides).  'w' clears the
+        selected segment's staged window."""
         if not (0 <= self.sidx < len(self._edit_topo.segments)):
             self._edit_msg = "EDIT: select a segment first (j/k)"
             self._draw(); return
@@ -155,15 +182,20 @@ class ExplorerEditMixin:
             self._edit_msg = "EDIT: put the cursor on the canvas first"
             self._draw(); return
         cs = list(self._build_conn_topo(self._edit_topo).segs())[self.sidx]
-        coord = float(event.ydata if cs.horiz else event.xdata)
+        raw = float(event.ydata if cs.horiz else event.xdata)
         if (self._edit_slide_mark is None
                 or self._edit_slide_mark[0] != self.sidx):
-            self._edit_slide_mark = (self.sidx, coord)
+            self._edit_slide_mark = (self.sidx, raw)
+            mode = "grid" if self._edit_slide_grid else "free"
             self._edit_msg = (f"EDIT: seg {self.sidx} slide bound at "
-                              f"{coord:.0f} — press W at the other bound")
+                              f"{self._slide_snap(raw, cs.horiz):.0f} [{mode}]"
+                              f" — press W at the other bound, enter toggles "
+                              f"grid/free")
             self._draw(); return
-        _, c1 = self._edit_slide_mark
+        _, r1 = self._edit_slide_mark
         self._edit_slide_mark = None
+        c1 = self._slide_snap(r1, cs.horiz)
+        coord = self._slide_snap(raw, cs.horiz)
         lo, hi = min(c1, coord), max(c1, coord)
         s_lo, s_hi = float(cs.perp_lo), float(cs.perp_hi)
         clo, chi = max(lo, s_lo), min(hi, s_hi)
@@ -493,27 +525,56 @@ class ExplorerEditMixin:
         self._edit_msg = "EDIT: pin span cancelled"
         self._draw()
 
-    def _pin_span_of(self, blocks, coords, horiz, seg_idx=-1):
-        """Span covering the pinned anchors along the trunk axis: each block
-        contributes its along-axis CENTRE (where a stub drops), each line
-        anchor (grid line / perpendicular segment) its coordinate; the span is
-        [min, max] over them.  A block-only pick that collapses to one point
-        falls back to the footprint EXTENT (spans the block).  A SINGLE line
-        anchor moves only the NEAREST endpoint of the pinned segment (the far
-        end stays put) — the 're-span one end' gesture that lets a trunk span
-        one block on one side and keep its junction on the other.  None only
-        when the result would be degenerate."""
-        pts = []
-        for n in blocks:
+    def _pin_span_of(self, blocks, coords, horiz, seg_idx=-1, sym_out=None):
+        """Span covering the pinned anchors along the trunk axis.  A block
+        anchor at the resulting span's EXTREME is a trunk ENDPOINT pinned to
+        that block — it lands like an auto-generated trunk: entering at the
+        block's INNER face (the face toward the span interior) and
+        overlapping INTO the block by the min-stub length, instead of
+        stretching to the block CENTRE (the old rule, which NUTS/DNUTS then
+        kept as a half-block overshoot).  An INTERIOR block anchor stays the
+        stub-drop CENTRE.  Line anchors (grid lines / perpendicular segments)
+        contribute their coordinate; the span is [min, max] over all.  A
+        block-only pick that collapses to one point falls back to the
+        footprint EXTENT (spans the block).  A SINGLE line anchor moves only
+        the NEAREST endpoint of the pinned segment (the far end stays put) —
+        the 're-span one end' gesture.  None only when the result would be
+        degenerate.  `sym_out` (dict) collects endpoint-value → block/face
+        reference (e.g. 'up.bottom+20') for symbolic [edit-cmd] logging."""
+        cs, rects = [], {}
+        for n in sorted(blocks):
             r = self.fp.get_block_bounds(n)
-            pts.append(int(round((r.x1 + r.x2) / 2 if horiz
-                                 else (r.y1 + r.y2) / 2)))
-        pts += list(coords)
+            cs.append((int(round((r.x1 + r.x2) / 2 if horiz
+                                 else (r.y1 + r.y2) / 2)), n))
+            rects[n] = r
+        pts = [c for c, _ in cs] + list(coords)
         uniq = set(pts)
         if len(uniq) >= 2:
-            return min(uniq), max(uniq)
+            lo_v, hi_v = min(uniq), max(uniq)
+            m = self._pin_overlap(seg_idx, horiz)
+            f_lo, f_hi = ('left', 'right') if horiz else ('bottom', 'top')
+            for c, n in cs:
+                r = rects[n]
+                b_lo, b_hi = (r.x1, r.x2) if horiz else (r.y1, r.y2)
+                if c == lo_v:               # low-extreme block: inner (high)
+                    v = max(b_hi - m, b_lo)  # face, min-stub INTO the block
+                    lo_v = min(v, hi_v)     # never crosses the far anchors
+                    if sym_out is not None:
+                        sym_out[lo_v] = f"{n}.{f_hi}" + (f"-{m}" if m else "")
+                elif c == hi_v:             # high-extreme: inner (low) face
+                    v = min(b_lo + m, b_hi)
+                    hi_v = max(v, lo_v)
+                    if sym_out is not None:
+                        sym_out[hi_v] = f"{n}.{f_lo}" + (f"+{m}" if m else "")
+            return (lo_v, hi_v) if lo_v < hi_v else None
         if blocks and not coords:           # blocks only, degenerate → extent
-            return self._along_span_of_blocks(blocks, horiz)
+            span = self._along_span_of_blocks(blocks, horiz)
+            if span is not None and sym_out is not None and len(blocks) == 1:
+                n = next(iter(blocks))
+                f_lo, f_hi = ('left', 'right') if horiz else ('bottom', 'top')
+                sym_out[span[0]] = f"{n}.{f_lo}"
+                sym_out[span[1]] = f"{n}.{f_hi}"
+            return span
         if len(uniq) == 1 and 0 <= seg_idx < len(self._edit_topo.segments):
             c = next(iter(uniq))            # one anchor → move nearest end
             sg = self._edit_topo.segments[seg_idx]
@@ -522,6 +583,16 @@ class ExplorerEditMixin:
             span = (c, hi) if abs(c - lo) <= abs(c - hi) else (lo, c)
             return span if span[0] < span[1] else None
         return None
+
+    def _pin_overlap(self, seg_idx, horiz):
+        """How far a block-pinned trunk endpoint reaches past the block's
+        inner face INTO the block: the min-stub length for the trunk's
+        direction/layer (the auto-generated landing depth)."""
+        lid = -1
+        if 0 <= seg_idx < len(self._edit_topo.segments):
+            lid = self._edit_topo.segments[seg_idx].layer_hint
+        d = ic.LayerDir.HORIZONTAL if horiz else ic.LayerDir.VERTICAL
+        return max(self.fp.get_min_stub_length(d, lid), 0)
 
     def _edit_trunk_pin_apply(self):
         seg_idx = self._trunk_pin_seg
@@ -540,7 +611,8 @@ class ExplorerEditMixin:
             self._draw(); return
         seg = self._edit_topo.segments[seg_idx]
         horiz = (seg.start.y == seg.end.y)
-        span = self._pin_span_of(picked, grid, horiz, seg_idx)
+        syms = {}
+        span = self._pin_span_of(picked, grid, horiz, seg_idx, sym_out=syms)
         if span is None:
             self._edit_msg = ("PIN SPAN rejected: those anchors collapse the "
                               "span (a single anchor moves the nearest end — "
@@ -549,7 +621,12 @@ class ExplorerEditMixin:
         if not self._edit_apply(ic.edit_set_span(self._edit_topo, self.fp,
                                                  seg_idx, span[0], span[1])):
             return
-        self._edit_log_op(f"edit_set_span {seg_idx} {span[0]} {span[1]}")
+        # Log block-pinned endpoints as block/face REFERENCES (up.bottom+20),
+        # not absolute coordinates — the folded command stays readable and
+        # tracks the floorplan.
+        self._edit_log_op(f"edit_set_span {seg_idx} "
+                          f"{syms.get(span[0], span[0])} "
+                          f"{syms.get(span[1], span[1])}")
         # A segment anchor pins the span TO another trunk: stretch and CONNECT
         # both.  An anchor at the applied span's ENDPOINT connects forward —
         # edit_connect lands the pinned end on the partner's line (a no-op
@@ -581,9 +658,29 @@ class ExplorerEditMixin:
         self._edit_msg = span_msg
         self._draw()
 
+    def _coord_sym(self, v, axis):
+        """Symbolic block/face reference for coordinate v on axis 'x'/'y'
+        when it exactly matches a bundle busterm's face or centre — the
+        [edit-cmd] log then reads (and replays) as `lo.cx` / `up.bottom`
+        instead of a hard-coded number.  Falls back to the number itself."""
+        for n in sorted(self._bundle_busterm_names()):
+            try:
+                r = self.fp.get_block_bounds(n)
+            except Exception:
+                continue
+            refs = ((('left', r.x1), ('right', r.x2),
+                     ('cx', (r.x1 + r.x2) // 2)) if axis == 'x' else
+                    (('bottom', r.y1), ('top', r.y2),
+                     ('cy', (r.y1 + r.y2) // 2)))
+            for ref, rv in refs:
+                if v == rv:
+                    return f"{n}.{ref}"
+        return v
+
     def _edit_log_trunk(self, horiz):
         """Log the just-appended trunk with its RESOLVED geometry (post default
-        span), so the folded command reproduces it without cursor context."""
+        span), so the folded command reproduces it without cursor context —
+        coordinates as block/face references where they match one."""
         sg = self._edit_topo.segments[-1]
         if horiz:
             perp = sg.start.y
@@ -591,8 +688,11 @@ class ExplorerEditMixin:
         else:
             perp = sg.start.x
             lo, hi = sorted((sg.start.y, sg.end.y))
-        self._edit_log_op(f"edit_add_trunk {'H' if horiz else 'V'} {perp} "
-                          f"{lo} {hi} layer {sg.layer_hint}")
+        a_ax, p_ax = ('x', 'y') if horiz else ('y', 'x')
+        self._edit_log_op(f"edit_add_trunk {'H' if horiz else 'V'} "
+                          f"{self._coord_sym(perp, p_ax)} "
+                          f"{self._coord_sym(lo, a_ax)} "
+                          f"{self._coord_sym(hi, a_ax)} layer {sg.layer_hint}")
 
     def _edit_add_trunk_from_perp(self, horiz, perp):
         # Placed by a key with no cursor coords: the previewed coordinate is

@@ -309,8 +309,9 @@ def test_edit_mode_slide_window_revalidated_at_commit(tmp_path):
         # range accepts anything), then stubs narrow the range to the b1..b2
         # channel — commit must drop the stale window, not write it.
         _key(exp, 'E')
-        _trunk(exp, 'Y', 150, 50)               # bare V trunk at x=140
+        _trunk(exp, 'Y', 150, 50)               # bare V trunk at x=150
         exp.sidx = 0
+        exp._edit_slide_grid = False            # off-grid bounds on purpose
         _key(exp, 'W', x=1050, y=50)
         _key(exp, 'W', x=1090, y=50)
         assert exp._edit_slide.get(0) == (1050, 1090)   # accepted: bare trunk
@@ -332,6 +333,7 @@ def test_edit_mode_slide_window_revalidated_at_commit(tmp_path):
         _key(exp, 'E')
         _trunk(exp, 'Y', 150, 50)
         exp.sidx = 0
+        exp._edit_slide_grid = False            # off-grid bounds on purpose
         _key(exp, 'W', x=120, y=50)
         _key(exp, 'W', x=1090, y=50)
         assert exp._edit_slide.get(0) == (120, 1090)
@@ -479,7 +481,10 @@ def test_edit_trunk_pin_span_to_busterm_subset(tmp_path):
         _trunk(exp, 'T', 200, 190)
         assert xspan(0) == (50, 2350)
 
-        # Pin trunk 0 to pair A (click a1, a2) -> span shrinks to [50, 350].
+        # Pin trunk 0 to pair A (click a1, a2): the extreme block anchors are
+        # trunk ENDPOINTS — they land like auto-gen trunks, at each block's
+        # INNER face overlapping min-stub (20) INTO the block, not at the
+        # centre: a1.right-20=80 .. a2.left+20=320.
         exp.sidx = 0
         _key(exp, 'P')
         assert exp._trunk_pin_set == set()
@@ -487,17 +492,17 @@ def test_edit_trunk_pin_span_to_busterm_subset(tmp_path):
         assert exp._trunk_pin_set == {'a1', 'a2'}
         _key(exp, 'enter')
         assert exp._trunk_pin_set is None
-        assert xspan(0) == (50, 350)                  # limited to pair A
+        assert xspan(0) == (80, 320)                  # limited to pair A
 
-        # Trunk 1 on the SAME row, pinned to pair B -> [2050, 2350].
+        # Trunk 1 on the SAME row, pinned to pair B -> [2080, 2320].
         _trunk(exp, 'T', 200, 190)
         exp.sidx = 1
         _key(exp, 'P')
         click(2050, 50); click(2350, 50)              # b3, b4
         assert exp._trunk_pin_set == {'b3', 'b4'}
         _key(exp, 'enter')
-        assert xspan(1) == (2050, 2350)               # limited to pair B
-        assert xspan(0) == (50, 350)                  # trunk 0 unchanged
+        assert xspan(1) == (2080, 2320)               # limited to pair B
+        assert xspan(0) == (80, 320)                  # trunk 0 unchanged
 
         # esc cancels pin mode without changing the span; a click toggles off.
         exp.sidx = 0
@@ -507,7 +512,7 @@ def test_edit_trunk_pin_span_to_busterm_subset(tmp_path):
         click(50, 50)
         _key(exp, 'escape')
         assert exp._trunk_pin_set is None
-        assert xspan(0) == (50, 350)                  # unchanged by the cancel
+        assert xspan(0) == (80, 320)                  # unchanged by the cancel
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
@@ -571,16 +576,18 @@ def test_edit_trunk_pin_span_to_grid_lines_beyond_busterms(tmp_path):
         assert yspan(0) == (below, above)             # reaches beyond both
         assert exp._edit_topo.segments[0].start.x == cx    # perp preserved
 
-        # A grid pick toggles off; a mixed block+grid anchor also works.
+        # A grid pick toggles off; a mixed block+grid anchor also works — the
+        # block anchor at the LOW extreme lands at lo's inner (top) face
+        # min-stub INTO the block (100-20=80), not its centre.
         _key(exp, 'P')
         click(col, above); click(col, above)          # toggle high line on/off
         assert exp._trunk_pin_grid == set()
-        click(50, 50)                                 # lower block centre (y=50)
+        click(50, 50)                                 # lower block (anchor)
         click(col, above)                             # up to the high grid line
         assert exp._trunk_pin_set == {'lo'}
         assert exp._trunk_pin_grid == {above}
         _key(exp, 'enter')
-        assert yspan(0) == (50, above)                # lower centre .. high line
+        assert yspan(0) == (80, above)                # lo.top-20 .. high line
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
@@ -722,12 +729,14 @@ def test_edit_pin_segment_anchor_and_single_anchor_respan(tmp_path):
         _trunk(exp, 'Y', 500, 700)            # right V trunk (idx 5), OOB x=500
         exp.sidx = 5
         _key(exp, 'P')
-        _click(exp, 200, 1200)                # inside `up` → block anchor (1200)
+        _click(exp, 200, 1200)                # inside `up` → block anchor
         _click(exp, 0, 1700)                  # ON the top H trunk → segment
         assert exp._trunk_pin_set == {'up'}   #   anchor at ITS y=1700 (off-grid)
         assert exp._trunk_pin_grid == {1700}
         _key(exp, 'enter')
-        assert _span(exp, 5, horiz=False) == (1200, 1700)
+        # Block-anchored end lands at up's inner (top) face min-stub INTO the
+        # block (1400-20), not its centre (1200) — the auto-gen landing.
+        assert _span(exp, 5, horiz=False) == (1380, 1700)
 
         # Single segment-anchor: re-span the top H trunk's right end onto the
         # new V trunk (at the detour band's centerline x=450); the left end
@@ -759,7 +768,7 @@ def test_pin_to_trunk_stretches_and_connects(tmp_path):
         _click(exp, 200, 1200)                # block anchor: up (centre 1200)
         _click(exp, 0, 1700)                  # segment anchor: top H trunk (0)
         _key(exp, 'enter')
-        assert _span(exp, 5, horiz=False) == (1200, 1700)
+        assert _span(exp, 5, horiz=False) == (1380, 1700)   # up.top-20 .. seg
         # The PARTNER stretched to the crossing: the top H trunk's right end
         # reaches the V trunk's line (was -700..200, V trunk at x=450).
         assert _span(exp, 0, horiz=True) == (-700, 450)
@@ -792,9 +801,11 @@ def test_pin_interior_trunk_anchor_preserves_span(tmp_path):
         _click(exp, 450, 700)                 # trunk anchor x=450 — INTERIOR
         assert exp._trunk_pin_grid == {500, 450}
         _key(exp, 'enter')
-        # Span = [min,max] over anchors {200, 500, 450} — the interior 450
-        # did NOT pull the right end in (the old forward connect gave 450).
-        assert _span(exp, 0, horiz=True) == (200, 500)
+        # Span over the anchors: the up block anchor at the LOW extreme
+        # lands at its inner (right) face min-stub INTO the block (400-20),
+        # and the interior 450 did NOT pull the right end in (the old
+        # forward connect gave 450).
+        assert _span(exp, 0, horiz=True) == (380, 500)
         # The PARTNER junctioned onto the pinned trunk instead: extended from
         # y 1200 up to the crossing at 1700.
         assert _span(exp, 5, horiz=False) == (200, 1700)
@@ -1052,6 +1063,105 @@ def test_trunk_centerline_slice_busterms_and_live_info(tmp_path):
         plt.close('all')
 
 
+def test_slide_refine_snaps_to_grid_and_enter_toggles(tmp_path):
+    """'W' bounds snap to the bundle grid's Hanan lines by default; enter
+    mid-refine toggles the gridless sub-mode (marks store the RAW cursor
+    coordinate, so the mode at apply time decides both bounds)."""
+    s = _session()
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'E')
+        _trunk(exp, 'Y', 150, 50)             # V trunk at x=150 (seeds 140,160)
+        exp.sidx = 0
+        # Gridded (default): 97 → 100, 208 → 200 (bundle-grid lines).
+        _key(exp, 'W', x=97, y=50)
+        assert '[grid]' in exp._edit_msg
+        _key(exp, 'W', x=208, y=50)
+        assert exp._edit_slide[0] == (100.0, 200.0)
+        # Toggled gridless: the same cursor coords stage raw.
+        _key(exp, 'W', x=97, y=50)
+        _key(exp, 'enter')                    # toggle → free
+        assert '[free]' in exp._edit_msg
+        _key(exp, 'W', x=208, y=50)
+        assert exp._edit_slide[0] == (97.0, 208.0)
+        # The toggle is sticky until re-toggled or a new session opens.
+        assert exp._edit_slide_grid is False
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
+def test_cli_edit_coords_accept_block_face_refs(capsys):
+    """edit_* coordinate arguments accept block/face references —
+    `<block>.<left|right|top|bottom|cx|cy>[+/-N]` — resolved against the
+    edit session's floorplan; the GUI emits the same form (P block-pinned
+    endpoints, trunk spans matching a face/centre), so the [edit-cmd] log
+    replays without hard-coded numbers."""
+    s = _dd_base_session()                    # lo (0..400), up (1000..1400 y)
+    for cmd in (
+        "edit_topology 1 new",
+        "edit_add_trunk V up.right+50 lo.cy up.cy",     # x=450, y 200..1200
+        "edit_set_span 0 lo.cy up.bottom+20",           # 200 .. 1020
+        "edit_set_slide 0 up.right lo.right+100",       # [400, 500]
+    ):
+        s.do_command(cmd)
+    sg = s._edit_topo.segments[0]
+    assert sg.start.x == sg.end.x == 450
+    assert (min(sg.start.y, sg.end.y), max(sg.start.y, sg.end.y)) == (200, 1020)
+    assert s._edit_slide[0] == (400.0, 500.0)
+    s.do_command("edit_abort")
+    capsys.readouterr()
+    s.do_command("edit_topology 1 new")
+    try:
+        s.do_command("edit_add_trunk V nosuch.left 0 100")
+        assert False, "unknown block must fail loud"
+    except ValueError as e:
+        assert "nosuch" in str(e)
+    s.do_command("edit_abort")
+
+
+def test_cli_edit_coord_refs_with_dotted_block_names(capsys):
+    """Codex #323 P1: block names may themselves contain dots (IO.PAD,
+    u_cpu0.c0l3c0) — the reference parses the face from the SUFFIX, so
+    `IO.PAD.right-20` resolves block `IO.PAD` and sidecar replay of a
+    GUI-emitted op never falls through to int()."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    for cmd in (
+        "def_layer 4 M4 H TOP 10", "def_layer 5 M5 V TOP 10",
+        "add_block IO.PAD 0 0 100 100",
+        "add_block u_cpu0.c0l3c0 200 0 300 100",
+        "add_bus v[4] IO.PAD.o u_cpu0.c0l3c0.i",
+        "run_bundler", "generate_topologies",
+        "edit_topology 1 new",
+        "edit_add_trunk H IO.PAD.top+50 IO.PAD.cx u_cpu0.c0l3c0.cx",
+    ):
+        s.do_command(cmd)
+    sg = s._edit_topo.segments[0]
+    assert sg.start.y == sg.end.y == 150
+    assert (min(sg.start.x, sg.end.x), max(sg.start.x, sg.end.x)) == (50, 250)
+    s.do_command("edit_abort")
+
+
+def test_pin_block_endpoints_logged_symbolically(tmp_path, capsys):
+    """A P block-pinned endpoint is logged as a block/face REFERENCE
+    (a1.right-20), not an absolute coordinate."""
+    s = _session_row()
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'E')
+        _trunk(exp, 'T', 200, 190)
+        exp.sidx = 0
+        _key(exp, 'P')
+        _click(exp, 50, 50); _click(exp, 350, 50)       # a1, a2
+        _key(exp, 'enter')
+        out = capsys.readouterr().out
+        assert '[edit-cmd] edit_set_span 0 a1.right-20 a2.left+20' in out
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
 def test_edit_ops_logged_and_user_topo_survives_rerun(tmp_path, capsys):
     """Items 5+8: every applied GUI op prints its `.buda` equivalent
     ([edit-cmd] …), the commit stores the op-log in the sidecar, and a FRESH
@@ -1087,8 +1197,10 @@ def test_edit_ops_logged_and_user_topo_survives_rerun(tmp_path, capsys):
         _key(exp, 'S', x=200, y=1200)
         _key(exp, 'S', x=200, y=200)
         exp.sidx = 0
-        _key(exp, 'W', x=420, y=700)          # slide window bound 1
-        _key(exp, 'W', x=460, y=700)          # bound 2 → staged [420,460]
+        _key(exp, 'W', x=420, y=700)          # bound 1 (gridded would snap)
+        _key(exp, 'enter')                    # mid-refine: toggle → gridless
+        assert '[free]' in exp._edit_msg
+        _key(exp, 'W', x=460, y=700)          # bound 2 → staged [420,460] raw
         _key(exp, 'enter')
         out = capsys.readouterr().out
         # Y at x=500 (the OOB line) snaps to the detour band's CENTERLINE

@@ -160,6 +160,9 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         self._trunk_pin_hover = None
         self._edit_slide   = {}
         self._edit_slide_mark = None
+        # 'W' bounds snap to bundle-grid Hanan lines by default; enter while a
+        # refine is pending toggles the gridless sub-mode (raw coordinates).
+        self._edit_slide_grid = True
         # True once the session re-layered a segment (+/-): on commit the pinned
         # layer overrides are rebuilt from the working copy so the edit sticks
         # (else a stale pinned_seg_layers from the source would re-pin the old

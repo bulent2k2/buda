@@ -158,6 +158,10 @@ class ExplorerNavMixin:
             if event.key == 'D':                self._edit_pair_op(event, connect=False); return
             if event.key == 'W':                self._edit_slide_at(event); return
             if event.key == 'w':                self._edit_slide_clear(); return
+            # Mid W-refine, enter toggles the gridded/gridless bound sub-mode
+            # (commit still needs the refine finished or cleared first).
+            if event.key == 'enter' and self._edit_slide_mark is not None:
+                self._edit_slide_toggle_grid(); return
             if event.key == 'X':
                 if 0 <= self.sidx < len(self._edit_topo.segments):
                     si = self.sidx
