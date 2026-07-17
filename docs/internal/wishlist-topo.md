@@ -7,6 +7,23 @@ See also [`mst_edge_realization.md`](mst_edge_realization.md) — trunk-tail
 tightening and the per-edge MST L/Z DOF (avoiding the 2ᴺ candidate explosion),
 grounded in the current generator code with a measured prototype result.
 
+## Coverage by zero-length abutment (`seg_spans_rect` inclusive bounds) — NOTED
+
+**Found 2026-07-17 while fixing the passthru report scope (big2 b61):** verify's
+`seg_spans_rect` (`verify.cpp:77`) uses inclusive bounds, so a segment that
+merely touches a bundle block at a SINGLE POINT — a trunk endpoint landing on
+the block's corner, or riding a face line — counts the block as "covered" in
+`check_topo`'s coverage check (suppressing `BUSTERM_OPEN`) and in generation's
+coverage gate (`filter_uncovered` keeps the candidate).  Full-edge abutment is
+load-bearing (the ABUT shared-edge candidates depend on it), but a zero-length
+corner touch granting coverage is dubious: no realizable wire connects through
+a point.  Not observed misfiring on the corpus (the report's floorplan-wide
+scan was the only site listing point-touches, fixed by requiring interior
+overlap there); if a real strand traces back here, the fix is a positive-length
+along-overlap requirement in `seg_spans_rect` with the perp-face inclusive
+bounds kept (face landings are real).  The display predicate
+(`reports.py::_seg_crosses_rect`) is deliberately stricter — see its docstring.
+
 ## Nominal-WL comparability across shape families (the b44 root causes) — OPEN
 
 **Context (2026-07-16, `flow/big_data_test/b44.buda`; deep-dive after the

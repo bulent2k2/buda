@@ -90,15 +90,19 @@ class ReportsMixin:
     _SLIDE_SENTINEL = 1e8   # ConnTopology marks an unbounded slide with ~5e8
 
     def _seg_crosses_rect(self, cs, x1, y1, x2, y2):
-        """True iff ConnSeg `cs` geometrically crosses the rect (perp coordinate
-        inside the rect's perp extent and the along span overlapping the rect's
-        along extent).  Mirrors verify's seg_spans_rect."""
+        """True iff ConnSeg `cs` crosses the rect's INTERIOR: perp coordinate
+        strictly inside the rect's perp extent, along overlap of positive
+        length.  A wire that merely rides a face line, or abuts the rect at a
+        single point (a trunk whose endpoint lands on the block face flanking
+        its junction), does not cross it.  Deliberately STRICTER than verify's
+        seg_spans_rect, whose inclusive bounds grant COVERAGE for bundle
+        blocks (full-edge abutment is load-bearing there — ABUT candidates)."""
         if cs.horiz:   # perp = y (perp_pos), along = x
-            return (y1 <= cs.perp_pos <= y2
-                    and cs.along_lo <= x2 and cs.along_hi >= x1)
+            return (y1 < cs.perp_pos < y2
+                    and cs.along_lo < x2 and cs.along_hi > x1)
         else:          # perp = x, along = y
-            return (x1 <= cs.perp_pos <= x2
-                    and cs.along_lo <= y2 and cs.along_hi >= y1)
+            return (x1 < cs.perp_pos < x2
+                    and cs.along_lo < y2 and cs.along_hi > y1)
 
     def _seg_spans_block(self, cs, name, ubbox, fp=None):
         """True iff `cs` crosses block `name`'s SOLID geometry.  Multi-rect / TEG
@@ -139,6 +143,7 @@ class ReportsMixin:
 
         blocks = fp.get_all_blocks()   # [(name, Rect union-bbox)]
         feedthru = set(topo.feedthru_blocks)
+        contract = set(topo.connected_block_names)   # the bundle's block set
         # Effective per-segment layer: when this candidate IS the planned/selected
         # one, the planner may have reassigned layers (or honoured a pinned
         # selection / post_nuts move) — report that, the layer NUTS actually routes
@@ -175,14 +180,34 @@ class ReportsMixin:
             print(f"        busterms: {', '.join(bts) if bts else '(none)'}")
             print(f"        segs:     {', '.join(sgs) if sgs else '(none)'}")
 
-            # Pass-through: blocks this seg crosses (solid geometry) but does NOT tap.
-            passt = []
+            # Pass-through: BUNDLE blocks this seg crosses (solid geometry)
+            # without tapping — the coverage/feedthru-relevant set, matching
+            # the table's `pass` column semantics.  Unrelated floorplan blocks
+            # the wire flies over split by the segment's EFFECTIVE layer:
+            # on a TOP layer (or over a container envelope, transparent to LOW
+            # layers) that is normal over-the-cell routing — `otc-over`,
+            # context, not a problem indicator; on a non-TOP layer a LEAF
+            # footprint is an implicit keepout, so the crossing is flagged
+            # `low-cross` — a problem an expert needs to notice.
+            low_layer = (self.layers.has_layer(layer)
+                         and not self.layers.is_top(layer))
+            passt, otc, lowx = [], [], []
             for name, ubbox in blocks:
                 if name in tapped:
                     continue
                 if self._seg_spans_block(cs, name, ubbox, fp):
-                    passt.append(name + ("[feedthru]" if name in feedthru else ""))
+                    if name in contract:
+                        passt.append(name + ("[feedthru]" if name in feedthru else ""))
+                    elif low_layer and not fp.is_container(name):
+                        lowx.append(name)
+                    else:
+                        otc.append(name)
             print(f"        passthru: {', '.join(passt) if passt else '(none)'}")
+            if otc:
+                print(f"        otc-over: {', '.join(otc)}")
+            if lowx:
+                print(f"        low-cross: {', '.join(lowx)}  "
+                      f"(M{layer} is non-TOP — leaf footprints are keepouts)")
 
     def _dump_topologies(self, hint, problems_only, conn_detail=False):
         if not self.bundles:

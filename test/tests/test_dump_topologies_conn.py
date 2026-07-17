@@ -111,9 +111,11 @@ def test_dump_reports_planned_layer_not_conntopology_hint():
 
 
 def test_dump_passthrough_respects_multirect_notch():
-    """A segment through a multi-rect block's notch/gap must NOT be reported as a
-    pass-through (its solid geometry is not crossed), but a segment through one of
-    its rectangles must be."""
+    """A segment through a multi-rect block's notch/gap must NOT be reported as
+    crossed (its solid geometry is untouched), but a segment through one of its
+    rectangles must be.  `notch` is not a bundle block, so a genuine crossing
+    shows under `otc-over:` (over-the-cell flyover), never under `passthru:`
+    (bundle-block coverage)."""
     # `notch` is two rects: below y=900 and above y=1200 — a gap spans y∈(900,1200).
     base = [
         "def_layer 4 M4 H TOP 0.0", "def_layer 5 M5 V TOP 0.0",
@@ -125,12 +127,14 @@ def test_dump_passthrough_respects_multirect_notch():
     buf = io.StringIO()
     with redirect_stdout(buf):
         s.do_command("dump_topologies --conn")
-    pass_lines = [ln for ln in buf.getvalue().splitlines() if "passthru:" in ln]
-    # The trunk runs at y≈1050, inside the gap → notch not crossed.
-    assert pass_lines, buf.getvalue()
-    assert not any("notch" in ln for ln in pass_lines), pass_lines
+    out = buf.getvalue()
+    # The trunk runs at y≈1050, inside the gap → notch not crossed anywhere.
+    assert "passthru:" in out, out
+    assert not any("notch" in ln for ln in out.splitlines()
+                   if "passthru:" in ln or "otc-over:" in ln), out
 
-    # Now route at a y that lands inside the lower rect → notch IS crossed.
+    # Now route at a y that lands inside the lower rect → notch IS crossed —
+    # reported as otc-over (not a bundle block), and never as passthru.
     s2 = _run([
         "def_layer 4 M4 H TOP 0.0", "def_layer 5 M5 V TOP 0.0",
         "add_block src 0 400 100 500", "add_block dst 3000 400 3100 500",
@@ -140,8 +144,75 @@ def test_dump_passthrough_respects_multirect_notch():
     buf2 = io.StringIO()
     with redirect_stdout(buf2):
         s2.do_command("dump_topologies --conn")
-    pass_lines2 = [ln for ln in buf2.getvalue().splitlines() if "passthru:" in ln]
-    assert any("notch" in ln for ln in pass_lines2), buf2.getvalue()
+    lines2 = buf2.getvalue().splitlines()
+    assert any("otc-over:" in ln and "notch" in ln for ln in lines2), buf2.getvalue()
+    assert not any("passthru:" in ln and "notch" in ln for ln in lines2), lines2
+
+
+def test_dump_passthru_scoped_to_bundle_blocks():
+    """The big2 b61 report bug: an unrelated block filling the corridor between
+    the endpoints is crossed by every direct route — normal over-the-cell
+    routing, NOT a pass-through.  It must be listed under `otc-over:` and the
+    `passthru:` line must stay empty, consistent with the candidate table's
+    `pass 0` (the bundle-scoped C++ count)."""
+    s = _run([
+        "def_layer 4 M4 H TOP 0.0", "def_layer 5 M5 V TOP 0.0",
+        "add_block A 0 0 100 300", "add_block B 400 0 500 300",
+        "add_block obs 100 0 400 300",    # fills the corridor, abuts both faces
+        "add_bus a[4] A.p B.p", "run_bundler", "generate_topologies", "run_planner",
+    ])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        s.do_command("dump_topologies --conn")
+    lines = buf.getvalue().splitlines()
+    assert any("otc-over:" in ln and "obs" in ln for ln in lines), buf.getvalue()
+    assert not any("passthru:" in ln and "obs" in ln for ln in lines), lines
+
+
+def test_dump_low_layer_crossing_flagged_not_otc():
+    """A crossing of an unrelated LEAF block is benign over-the-cell routing
+    only on a TOP layer.  When the segment's effective layer is non-TOP the
+    leaf footprint is an implicit keepout, so the dump must flag the crossing
+    as `low-cross:` — never file it under the not-a-problem `otc-over:`."""
+    s = _run([
+        "def_layer 2 M2 H LOW 0.0",       # the ONLY H layer -> trunk lands on it
+        "def_layer 5 M5 V TOP 0.0",
+        "add_block A 0 0 100 300", "add_block B 400 0 500 300",
+        "add_block obs 100 0 400 300",
+        "add_bus a[4] A.p B.p", "run_bundler", "generate_topologies",
+        "select_topology 1 1",            # pin the direct I_H (crosses obs)
+        "run_planner",
+    ])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        s.do_command("dump_topologies --conn")
+    lines = buf.getvalue().splitlines()
+    assert any("low-cross:" in ln and "obs" in ln for ln in lines), buf.getvalue()
+    assert not any("otc-over:" in ln and "obs" in ln for ln in lines), lines
+
+
+def test_crossing_predicate_requires_interior_overlap():
+    """The report's crossing test needs POSITIVE-length overlap: a block the
+    segment merely abuts at a single point (big2 b61: the trunk's endpoints
+    land on blk_37/blk_39's faces at x=1250/4870) or whose face line the wire
+    rides is not crossed.  Exact coordinates from the b61 repro."""
+    from types import SimpleNamespace
+    from buda_cli import BudaSession
+    s = BudaSession()
+    trunk = SimpleNamespace(horiz=True, perp_pos=3505, along_lo=1250, along_hi=4870)
+    assert not s._seg_crosses_rect(trunk, 0, 3310, 1250, 3895)      # blk_37: point-touch
+    assert not s._seg_crosses_rect(trunk, 4870, 3365, 6100, 4425)   # blk_39: point-touch
+    assert s._seg_crosses_rect(trunk, 1250, 3225, 2230, 3780)       # blk_05: real crossing
+    assert s._seg_crosses_rect(trunk, 2230, 3365, 3500, 4615)       # blk_15: real crossing
+    # Riding a block's face line (perp == edge) is boundary, not interior.
+    edge_rider = SimpleNamespace(horiz=True, perp_pos=3780,
+                                 along_lo=1250, along_hi=4870)
+    assert not s._seg_crosses_rect(edge_rider, 1250, 3225, 2230, 3780)
+    # Same rules for a vertical segment.
+    vseg = SimpleNamespace(horiz=False, perp_pos=150, along_lo=0, along_hi=100)
+    assert s._seg_crosses_rect(vseg, 100, 20, 200, 80)     # interior crossing
+    assert not s._seg_crosses_rect(vseg, 100, 100, 200, 300)  # endpoint touch y=100
+    assert not s._seg_crosses_rect(vseg, 150, 20, 300, 80)    # rides x=150 face
 
 
 def _re_env(line):

@@ -104,17 +104,24 @@ class ExplorerAnalysisMixin:
 
 
     def _seg_passthru_names(self, cs, tapped):
-        """Blocks `cs` geometrically crosses (solid rects — each real rect of
-        a multi-rect block, the union bbox otherwise) WITHOUT tapping: the
-        pass-through set shown in the segment info banner.  Mirrors reports'
-        _seg_spans_block / verify's seg_spans_rect, at the nominal perp."""
+        """Split the blocks `cs` geometrically crosses (solid rects — each real
+        rect of a multi-rect block, the union bbox otherwise) WITHOUT tapping
+        into `(passthru, otc_over)`: `passthru` = the BUNDLE's blocks — the
+        coverage/feedthru-relevant set; `otc_over` = unrelated floorplan blocks
+        the wire merely flies over (normal over-the-cell routing on TOP
+        layers).  Crossing means INTERIOR overlap (perp strictly inside, along
+        overlap of positive length) — riding a face line or abutting at a
+        single point does not count.  Mirrors reports' _seg_spans_block, at
+        the nominal perp."""
         def crosses(x1, y1, x2, y2):
             if cs.horiz:   # perp = y, along = x
-                return (y1 <= cs.perp_pos <= y2
-                        and cs.along_lo <= x2 and cs.along_hi >= x1)
-            return (x1 <= cs.perp_pos <= x2
-                    and cs.along_lo <= y2 and cs.along_hi >= y1)
-        names = []
+                return (y1 < cs.perp_pos < y2
+                        and cs.along_lo < x2 and cs.along_hi > x1)
+            return (x1 < cs.perp_pos < x2
+                    and cs.along_lo < y2 and cs.along_hi > y1)
+        contract = (set(self._shown_topo().connected_block_names)
+                    | self._bundle_busterm_names())
+        passt, otc = [], []
         for name, ubbox in self.fp.get_all_blocks():
             if name in tapped:
                 continue
@@ -124,8 +131,25 @@ class ExplorerAnalysisMixin:
             else:
                 hit = crosses(ubbox.x1, ubbox.y1, ubbox.x2, ubbox.y2)
             if hit:
-                names.append(name)
-        return names
+                (passt if name in contract else otc).append(name)
+        return passt, otc
+
+
+    def _seg_eff_lid(self, ci):
+        """The segment's EFFECTIVE layer id — the same precedence the drawing
+        and `+`/`-` restyle paths resolve with: pinned selection override →
+        planner assignment (when showing the planned candidate) → generation
+        hint."""
+        topo = self._shown_topo()
+        sel = self._find_selection()
+        if self._current_is_selected() and sel and 'seg_layers' in sel:
+            pinned = sel['seg_layers']
+            if len(pinned) == len(topo.segments):
+                return pinned[ci]
+        if (self.idx == self.wrapper.plan.selected_topology_index
+                and len(self.wrapper.plan.seg_layers) == len(topo.segments)):
+            return self.wrapper.plan.seg_layers[ci]
+        return topo.segments[ci].layer_hint
 
 
     def _seg_conn_line(self, cs, ci):
@@ -140,9 +164,24 @@ class ExplorerAnalysisMixin:
         parts = [f"pull={p_dir}({pull})"]
         if bts:
             parts.append("busterms: " + ",".join(bts))
-        passt = self._seg_passthru_names(cs, set(bts))
+        passt, otc = self._seg_passthru_names(cs, set(bts))
         if passt:
             parts.append("passthru: " + ",".join(passt))
+        if otc:
+            # On a non-TOP effective layer a LEAF footprint is an implicit
+            # keepout — flag the crossing (`low-cross`) instead of calling it
+            # benign over-the-cell routing; containers stay transparent.
+            lid = self._seg_eff_lid(ci)
+            low = (self.layer_stack is not None
+                   and self.layer_stack.has_layer(lid)
+                   and not self.layer_stack.is_top(lid))
+            lowx = [n for n in otc
+                    if low and not self.fp.is_container(n)]
+            rest = [n for n in otc if n not in lowx]
+            if rest:
+                parts.append("otc-over: " + ",".join(rest))
+            if lowx:
+                parts.append("low-cross: " + ",".join(lowx))
         if sgs:
             parts.append("segs: " + ",".join(sgs))
         return " · ".join(parts)
