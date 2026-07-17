@@ -103,6 +103,51 @@ class ExplorerAnalysisMixin:
         return float(cs.perp_pos)
 
 
+    def _seg_passthru_names(self, cs, tapped):
+        """Blocks `cs` geometrically crosses (solid rects — each real rect of
+        a multi-rect block, the union bbox otherwise) WITHOUT tapping: the
+        pass-through set shown in the segment info banner.  Mirrors reports'
+        _seg_spans_block / verify's seg_spans_rect, at the nominal perp."""
+        def crosses(x1, y1, x2, y2):
+            if cs.horiz:   # perp = y, along = x
+                return (y1 <= cs.perp_pos <= y2
+                        and cs.along_lo <= x2 and cs.along_hi >= x1)
+            return (x1 <= cs.perp_pos <= x2
+                    and cs.along_lo <= y2 and cs.along_hi >= y1)
+        names = []
+        for name, ubbox in self.fp.get_all_blocks():
+            if name in tapped:
+                continue
+            rects = self.fp.get_block_rects(name)   # [] for single-rect blocks
+            if rects:
+                hit = any(crosses(x1, y1, x2, y2) for (x1, y1, x2, y2) in rects)
+            else:
+                hit = crosses(ubbox.x1, ubbox.y1, ubbox.x2, ubbox.y2)
+            if hit:
+                names.append(name)
+        return names
+
+
+    def _seg_conn_line(self, cs, ci):
+        """Line 3 of the segment info banner: net-pull always, then busterm
+        taps / pass-through blocks / connected segs when present."""
+        pull = self._seg_net_pull(cs, ci)
+        bts = list(dict.fromkeys(c.block_name for c in cs.conns
+                                 if c.kind == ic.SegConnKind.BUSTERM))
+        sgs = list(dict.fromkeys(str(c.seg_idx) for c in cs.conns
+                                 if c.kind == ic.SegConnKind.SEG))
+        p_dir = '→hi' if pull > 0 else '→lo' if pull < 0 else 'none'
+        parts = [f"pull={p_dir}({pull})"]
+        if bts:
+            parts.append("busterms: " + ",".join(bts))
+        passt = self._seg_passthru_names(cs, set(bts))
+        if passt:
+            parts.append("passthru: " + ",".join(passt))
+        if sgs:
+            parts.append("segs: " + ",".join(sgs))
+        return " · ".join(parts)
+
+
     def _bundle_busterm_names(self):
         """The bundle's busterm block set — the union of seg_busterms taps
         across this bundle's candidates (the generator's own tap record; every

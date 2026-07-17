@@ -132,9 +132,9 @@ class ExplorerDrawMixin:
     def _draw_trunk_preview(self):
         """Highlight the Hanan cell the armed trunk (T/Y) is hovering: a
         vertical column for a V trunk (Y), a horizontal row for an H trunk (T),
-        centred on the snapped grid line and spanning the view.  The cell width
-        is the gap to the adjacent bundle-grid lines (a real Hanan cell), so
-        the highlight reads as the strip the trunk will occupy."""
+        with the dashed centerline at the snapped coordinate.  The slab is the
+        FULL cell between the two bounding bundle-grid lines — exactly the
+        initial slide range the placed trunk is seeded with."""
         ax = self.ax
         p = self._trunk_hover
         horiz = self._trunk_mode
@@ -142,12 +142,9 @@ class ExplorerDrawMixin:
         y0, y1 = ax.get_ylim()
         col = '#ff7f0e'   # orange — distinct from every layer colour
         xs, ys = self._bundle_hanan_grid()
-        lines = ys if horiz else xs
-        # Half-cell to each neighbouring grid line (fallback to a small slab).
-        below = [g for g in lines if g < p]
-        above = [g for g in lines if g > p]
-        lo = (p + max(below)) / 2 if below else p - (x1 - x0) * 0.01
-        hi = (p + min(above)) / 2 if above else p + (x1 - x0) * 0.01
+        g_lo, g_hi = self._cell_around(p, ys if horiz else xs)
+        lo = g_lo if g_lo is not None else p - (x1 - x0) * 0.01
+        hi = g_hi if g_hi is not None else p + (x1 - x0) * 0.01
         if horiz:                                   # H trunk → horizontal row
             ax.add_patch(patches.Rectangle(
                 (x0, lo), x1 - x0, hi - lo, facecolor=col, alpha=0.16,
@@ -557,6 +554,9 @@ class ExplorerDrawMixin:
                 info += (f"\n{axis}={cs_i.perp_pos} {sdir}-slide="
                          f"[{self._fmt_perp(float(s_lo))},"
                          f"{self._fmt_perp(float(s_hi))}]")
+                # Third line: net-pull + the segment's connectivity — busterm
+                # taps, pass-through blocks, and connected segs (if any).
+                info += "\n" + self._seg_conn_line(cs_i, self.sidx)
             y_info = 0.93 if (self._edit_topo is not None or self._edit_msg) else 0.985
             ax.text(0.01, y_info, info, transform=ax.transAxes, fontsize=8.5,
                     color='#20304a', va='top', ha='left', zorder=60,

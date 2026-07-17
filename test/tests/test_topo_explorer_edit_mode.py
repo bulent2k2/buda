@@ -94,12 +94,14 @@ def test_edit_mode_builds_commits_and_pins(tmp_path):
         _key(exp, 'E')                            # open empty session
         assert exp._edit_topo is not None
 
-        _trunk(exp, 'Y', 150, 50)               # V trunk, snaps to x=140
+        _trunk(exp, 'Y', 150, 50)               # V trunk, snaps to x=150
         assert len(exp._edit_topo.segments) == 1
         seg = exp._edit_topo.segments[0]
-        # Bundle-grid snap: x=140 is the KEEPOUT's edge (busterm blocks +
-        # keepouts are the only snap targets now — c1's edges are not).
-        assert seg.start.x == seg.end.x == 140
+        # CENTERLINE snap: x=150 is the middle of the bundle-grid cell between
+        # the keepout's edges (140..160) — trunks land mid-channel, and the
+        # cell's bounding lines seed the initial slide window.
+        assert seg.start.x == seg.end.x == 150
+        assert exp._edit_slide[0] == (140.0, 160.0)
         # No overshoot: the trunk spans the BUSTERM extent along its axis, not
         # the whole-design Hanan extent. b1/b2 share a y-centre (50), so the
         # span falls back to their y-EXTENT (0..100) — NOT (0..340) past c1.
@@ -240,7 +242,7 @@ def test_edit_mode_slide_window_refine(tmp_path):
     try:
         w = s.bundles[0]
         _key(exp, 'E')
-        _trunk(exp, 'Y', 150, 50)               # V trunk at x=140
+        _trunk(exp, 'Y', 150, 50)               # V trunk at x=150 (centerline)
         _key(exp, 'j')                            # select seg 0
         _key(exp, 'S', x=50, y=50)                # stub b1
         _key(exp, 'S', x=250, y=50)               # stub b2
@@ -248,11 +250,13 @@ def test_edit_mode_slide_window_refine(tmp_path):
         # A window DISJOINT from the structural slide range is rejected: the
         # stubbed trunk can only slide within the b1..b2 channel, nowhere
         # near x=1050 (a bare unstubbed trunk would legally accept anything —
-        # its slide range is unconstrained).
+        # its slide range is unconstrained).  The rejection leaves the
+        # placement-seeded window (the Hanan cell 140..160) untouched.
         exp.sidx = 0
         _key(exp, 'W', x=1050, y=50)
         _key(exp, 'W', x=1090, y=50)
-        assert "rejected" in exp._edit_msg and 0 not in exp._edit_slide
+        assert "rejected" in exp._edit_msg
+        assert exp._edit_slide.get(0) == (140.0, 160.0)
 
         # Refine the trunk's slide window: V segment → perpendicular is X.
         _key(exp, 'W', x=120, y=50)
@@ -400,9 +404,10 @@ def test_edit_trunk_two_step_arm_preview_place(tmp_path):
         assert len(exp._edit_topo.segments) == 0
         assert "ADD H TRUNK" in exp._edit_msg
 
-        # A motion event previews the snapped row (y=190 -> 200) without placing.
+        # A motion event previews the snapped CELL CENTERLINE (y=190 lies in
+        # the 100..200 cell -> centerline 150) without placing.
         exp._on_trunk_motion(SimpleNamespace(inaxes=exp.ax, xdata=150, ydata=190))
-        assert exp._trunk_hover == 200
+        assert exp._trunk_hover == 150
         assert len(exp._edit_topo.segments) == 0
 
         # Second 'T' PLACES at the cursor and leaves trunk mode.
@@ -410,7 +415,11 @@ def test_edit_trunk_two_step_arm_preview_place(tmp_path):
         assert exp._trunk_mode is None
         assert len(exp._edit_topo.segments) == 1
         seg = exp._edit_topo.segments[0]
-        assert min(seg.start.y, seg.end.y) == max(seg.start.y, seg.end.y) == 200
+        assert min(seg.start.y, seg.end.y) == max(seg.start.y, seg.end.y) == 150
+        # The cell's bounding lines seed the trunk's slide window, and the new
+        # segment is auto-selected (live info banner + direct S target).
+        assert exp._edit_slide[0] == (100.0, 200.0)
+        assert exp.sidx == 0
 
         # esc cancels an armed trunk without touching the session or topology.
         _key(exp, 'Y', x=150, y=50)
@@ -421,7 +430,7 @@ def test_edit_trunk_two_step_arm_preview_place(tmp_path):
         assert len(exp._edit_topo.segments) == 1     # no V trunk added
 
         # A left-click also places (switch back to a fresh arm first).
-        _key(exp, 'Y', x=150, y=150)                 # arm V (snaps x -> 140)
+        _key(exp, 'Y', x=150, y=150)                 # arm V (snaps x -> 150)
         exp._on_trunk_click(SimpleNamespace(button=1, inaxes=exp.ax,
                                             xdata=150, ydata=150))
         assert exp._trunk_mode is None
@@ -543,9 +552,12 @@ def test_edit_trunk_pin_span_to_grid_lines_beyond_busterms(tmp_path):
         below, above = min(ys), max(ys)               # OOB lines beyond blocks
         assert below < 0 and above > 2100
         col = min(xs)                                  # V spine sits OOB, beside
+        cx = exp._snap_cell_center(col, xs)            # OOB band's centerline
 
-        # V trunk (the C spine); default span is the busterm extent (50..2050).
+        # V trunk (the C spine) lands mid-detour-band; default span is the
+        # busterm extent (50..2050) — both blocks touch the band's inner line.
         _trunk(exp, 'Y', col, 1000)
+        assert exp._edit_topo.segments[0].start.x == cx
         assert yspan(0) == (50, 2050)
 
         # Pin the two endpoints to grid lines beyond both blocks.
@@ -557,7 +569,7 @@ def test_edit_trunk_pin_span_to_grid_lines_beyond_busterms(tmp_path):
         assert exp._trunk_pin_grid == {below, above}
         _key(exp, 'enter')
         assert yspan(0) == (below, above)             # reaches beyond both
-        assert exp._edit_topo.segments[0].start.x == col   # perp preserved
+        assert exp._edit_topo.segments[0].start.x == cx    # perp preserved
 
         # A grid pick toggles off; a mixed block+grid anchor also works.
         _key(exp, 'P')
@@ -718,13 +730,14 @@ def test_edit_pin_segment_anchor_and_single_anchor_respan(tmp_path):
         assert _span(exp, 5, horiz=False) == (1200, 1700)
 
         # Single segment-anchor: re-span the top H trunk's right end onto the
-        # new V trunk; the left end (on the spine at -700) must not move.
+        # new V trunk (at the detour band's centerline x=450); the left end
+        # (on the spine at -700) must not move.
         exp.sidx = 0
         _key(exp, 'P')
-        _click(exp, 500, 1600)                # near the V trunk line (x=500)
-        assert exp._trunk_pin_grid == {500}
+        _click(exp, 500, 1600)                # near the V trunk line (x=450)
+        assert exp._trunk_pin_grid == {450}
         _key(exp, 'enter')
-        assert _span(exp, 0, horiz=True) == (-700, 500)
+        assert _span(exp, 0, horiz=True) == (-700, 450)
         assert 'rejected' not in exp._edit_msg
     finally:
         import matplotlib.pyplot as plt
@@ -860,6 +873,117 @@ def test_abort_drops_stale_segment_selection(tmp_path):
         plt.close('all')
 
 
+def test_zoom_toggle_bundle_vs_segment(tmp_path):
+    """cmd/ctrl-z zooms to the bundle bbox; with a segment selected, repeated
+    presses TOGGLE bundle <-> segment.  A tiny segment (longer dim <= 10% of
+    the bundle bbox's shorter dim) zooms at most 4x past the bundle view."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    for cmd in ("def_layer 4 M4 H TOP 10", "def_layer 5 M5 V TOP 10",
+                # Nearly-aligned tall pair: the L candidates carry a ~10-unit
+                # H jog (tiny vs the ~2100-tall bundle bbox) and a ~2000 V run.
+                "add_block b1 0 0 100 100", "add_block b2 10 2000 110 2100",
+                "add_bus v[4] b1.o b2.i", "run_bundler",
+                "generate_topologies"):
+        s.do_command(cmd)
+    exp = _explorer(s, tmp_path)
+    try:
+        # A multi-segment candidate (candidate 0 can be a straight 1-seg shot
+        # whose bbox IS the bundle bbox — no jog to zoom to).
+        while len(exp._shown_topo().segments) < 2:
+            exp._step_topo(+1)
+        exp._zoom_to_bundle()
+        assert exp._zoom_sel_mode == 'bundle'
+        bx = exp.ax.get_xlim(); by = exp.ax.get_ylim()
+        bw, bh = bx[1] - bx[0], by[1] - by[0]
+
+        # Select the TINY jog: the toggle zooms in on it, but capped at 4x
+        # from the bundle view (never a filled-window sliver).
+        # _set_lims_filling_box only ever EXPANDS an axis to the window
+        # aspect, so both final spans stay >= the requested bundle-dims/4.
+        topo = exp._shown_topo()
+        exp.sidx = min(range(len(topo.segments)),
+                       key=lambda i: abs(topo.segments[i].end.x
+                                         - topo.segments[i].start.x)
+                       + abs(topo.segments[i].end.y - topo.segments[i].start.y))
+        exp._zoom_to_bundle()
+        assert exp._zoom_sel_mode == 'seg'
+        tx = exp.ax.get_xlim(); ty = exp.ax.get_ylim()
+        assert (tx[1] - tx[0]) >= bw / 4 * 0.99
+        assert (ty[1] - ty[0]) >= bh / 4 * 0.99
+        assert (ty[1] - ty[0]) < bh                           # still zoomed in
+
+        exp._zoom_to_bundle()                                 # toggle back out
+        assert exp._zoom_sel_mode == 'bundle'
+        bx2 = exp.ax.get_xlim(); by2 = exp.ax.get_ylim()
+        assert abs((bx2[1] - bx2[0]) - bw) < 1
+        assert abs((by2[1] - by2[0]) - bh) < 1
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
+def test_seg_info_banner_conn_line(tmp_path):
+    """Line 3 of the segment info banner: net-pull always, plus busterm taps /
+    pass-through blocks / connected segs when present."""
+    s = _session()
+    exp = _explorer(s, tmp_path)
+    try:
+        # A multi-segment candidate: seg 0 taps its block and joins another.
+        while len(exp._shown_topo().segments) < 2:
+            exp._step_topo(+1)
+        _key(exp, 'j')
+        infos = [t.get_text() for t in exp.ax.texts
+                 if 'segment 0' in t.get_text()]
+        assert infos
+        lines = infos[0].splitlines()
+        assert len(lines) >= 3 and lines[2].startswith('pull=')
+        assert 'busterms:' in lines[2]
+        assert 'segs:' in lines[2]
+
+        # A hand-placed trunk CROSSING blocks reports them as passthru: T at
+        # y=50 (centerline of the 0..100 cell) spans b1..b2's centres and
+        # crosses both footprints without tapping.
+        _key(exp, 'E')
+        _trunk(exp, 'T', 150, 60)
+        assert exp.sidx == 0                  # auto-selected on placement
+        infos = [t.get_text() for t in exp.ax.texts
+                 if 'segment 0' in t.get_text()]
+        assert infos
+        line3 = infos[0].splitlines()[2]
+        assert 'passthru: b1,b2' in line3
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
+def test_trunk_centerline_slice_busterms_and_live_info(tmp_path):
+    """T/Y hover snaps to the Hanan-cell CENTERLINE, the armed banner
+    live-reports the prospective trunk (coordinate, slide, touching
+    busterms), and placement seeds the slide window from the cell's bounding
+    lines with the along span from the busterms touching the slice."""
+    s = _session_col()          # lo (0..100 y), up (2000..2100 y), aligned
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'E')
+        _key(exp, 'T', 50, 1080)              # arm over the lo..up channel
+        assert exp._trunk_hover == 1050       # centerline of the 100..2000 cell
+        assert 'y=1050' in exp._edit_msg
+        assert 'slide=[100,2000]' in exp._edit_msg
+        assert 'busterms: lo,up' in exp._edit_msg   # both touch the slice
+        _key(exp, 'T', 50, 1080)              # place
+        sg = exp._edit_topo.segments[0]
+        assert sg.start.y == sg.end.y == 1050
+        # Along span: lo/up share x-centre 50, so the touching-busterm span
+        # falls back to their x-EXTENT (0..100).
+        assert (min(sg.start.x, sg.end.x), max(sg.start.x, sg.end.x)) == (0, 100)
+        assert exp._edit_slide[0] == (100.0, 2000.0)
+        assert exp.sidx == 0                  # auto-selected
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
 def test_edit_ops_logged_and_user_topo_survives_rerun(tmp_path, capsys):
     """Items 5+8: every applied GUI op prints its `.buda` equivalent
     ([edit-cmd] …), the commit stores the op-log in the sidecar, and a FRESH
@@ -899,7 +1023,11 @@ def test_edit_ops_logged_and_user_topo_survives_rerun(tmp_path, capsys):
         _key(exp, 'W', x=460, y=700)          # bound 2 → staged [420,460]
         _key(exp, 'enter')
         out = capsys.readouterr().out
-        assert '[edit-cmd] edit_add_trunk V 500' in out
+        # Y at x=500 (the OOB line) snaps to the detour band's CENTERLINE
+        # (400..500 → 450), which also seeds the initial slide window; the W
+        # refinement then replaces it.
+        assert '[edit-cmd] edit_add_trunk V 450' in out
+        assert '[edit-cmd] edit_set_slide 0 400 500' in out   # placement seed
         assert '[edit-cmd] edit_add_stub up 0 layer 4' in out
         assert '[edit-cmd] edit_set_slide 0 420 460' in out
         uid1 = None
@@ -1053,10 +1181,10 @@ def test_sidecar_load_preserves_user_topo(tmp_path, capsys):
 
 def test_edit_temp_grid_line_places_trunk_mid_channel(tmp_path):
     """'G' while a trunk is armed drops a TEMPORARY Hanan line at the cursor
-    on the armed axis — the escape for an EMPTY channel between blocks, where
-    the bundle grid has no line and T could only snap to the blocks' faces
-    (the c_ddd_detour scenario).  The line is a snap target for the placement
-    and is session-scoped (gone after commit/abort)."""
+    on the armed axis and pins the placement EXACTLY there — the escape for an
+    OFF-CENTER coordinate (hover now snaps to cell centerlines, so the channel
+    centerline needs no G; an upper-half trunk like c_ddd's y=850 does).  The
+    line joins the grid for the session (gone after commit/abort)."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     for cmd in ("def_layer 4 M4 H TOP 10", "def_layer 5 M5 V TOP 10",
@@ -1067,14 +1195,14 @@ def test_edit_temp_grid_line_places_trunk_mid_channel(tmp_path):
     exp = _explorer(s, tmp_path)
     try:
         _key(exp, 'E')
-        _key(exp, 'T', 200, 860)              # arm: hover snaps to a block edge
-        assert exp._trunk_hover in (400, 1000)
+        _key(exp, 'T', 200, 860)              # arm: hover snaps to the CHANNEL
+        assert exp._trunk_hover == 700        #   centerline (400..1000 cell)
         _key(exp, 'G', 200, 850)              # temp line at the cursor's row
         assert exp._trunk_hover == 850
         assert 850 in exp._bundle_hanan_grid()[1]
-        _key(exp, 'T', 200, 852)              # place: snaps to the temp line
+        _key(exp, 'T', 200, 852)              # place: the G pin wins verbatim
         sg = exp._edit_topo.segments[0]
-        assert sg.start.y == sg.end.y == 850  # mid-channel, off the block edges
+        assert sg.start.y == sg.end.y == 850  # off-center, exactly as dropped
         _key(exp, 'escape')                   # abort → temp lines cleared
         assert 850 not in exp._bundle_hanan_grid()[1]
     finally:
