@@ -249,7 +249,7 @@ missing file is now a hard error (exit 1, like an unknown command), and
 `run_planner` prints a one-shot `[Planner] WARNING` when no H/V layers are defined
 before falling back to M4/M5.
 
-## Charge pulled segments at their predicted pull target (books vs metal) — OPEN
+## Charge pulled segments at their predicted pull target (books vs metal) — PHASES 0+1 SHIPPED (opt-in `charge_pull_target`); junction-anchored variant OPEN
 
 **What (2026-07-17, from the b44 slide-range analysis):** the planner
 charges each segment's congestion demand at a chosen band
@@ -269,17 +269,36 @@ seg11: charged 3565, placed 186.5).  `big2_noviz` — **123 of 148**, worst
 Δ2264.  This is the MAJORITY of pulled segments on the congested corpus,
 not a corner case.
 
-**Fix sketch:** the pull-breakpoint clamp
-([`wishlist-nuts.md`](wishlist-nuts.md) → *"Pull-target breakpoint
-clamp"*) makes the fix tractable — a pulled segment's target is now
-DETERMINISTIC at plan time (`ConnSeg::pull_break`, else the bus-clamped
-window bound), so the planner can charge the band at the predicted
-target instead of nominal-nearest.  Phase 0: a divergence diagnostic
-(report/WARNING, the scan above).  Phase 1: anchor the band choice for
-pulled segments at the predicted target — a real cost-model change with
-corpus-wide measurement (expected: bigHalf/big2 overlap reduction; risk:
-selection shuffles like every books change).  The planner-side twin of
-the NUTS clamp; the biggest-upside item of the b44 follow-on trio.
+**Shipped (2026-07-17, opt-in `set_planner_param charge_pull_target 1`):**
+Phase 0 — the `[NUTS] books-vs-metal` diagnostic line after every
+`run_nuts` (always-on report, no behavior).  Phase 1 — with the knob on,
+`plan_bundle` anchors a pulled segment's charge/scored bands at the
+deterministic predicted target (window bound tightened by an in-travel
+`ConnSeg::pull_break`, bus-width clamped), and the session passes PLACED
+positions to `band_occupants` so ripup's victim ranking follows the metal
+(contention fallback can move metal off even an honest prediction — the
+plan-based ranking saw only b1 of the (1,3) overlap on the occupant
+fixture).  Measured: divergence bigHalf 141→22 (−84%), big2 123→53, b44
+4→1; endpoints mempool_tile WL −83% with overlaps 61→27 and opens
+2971→1696, bigHalf WL −6.1% overlaps 3→2, mix/channel_stress ~neutral;
+healers absorb the plain-pipeline shuffles (big2+heal 0/0, bigHalf+heal
+0/0).  Tests: `test_planner_charge_pull_target.py`; knob-off is
+bit-identical (full fast+mid green).  **Why opt-in — the deep-dive
+finding on the kPeak/alignment/ripup test failures + comprehensive_demo:**
+the placement preference chain has THREE members that outrank the charged
+band (pull, face, junction-anchor) and the prediction covers only the
+pull.  On `comprehensive_demo` the knob's WL-better reshuffle (−3.3%)
+lands b3's MST leg on the keepout via the JUNCTION-ANCHORED preference
+(`pull=0`) — 1 bit strands on a healer-less demo.  Also exposed: the two
+kPeak hybrid-floor tests asserted anchors on a pulled fixture segment
+whose metal never moved (books-only steering, all 8 bits stranded old AND
+new — fixtures to refit with an unpulled segment when this flips default).
+
+**Follow-on (a), the default-flip gate:** predict the JUNCTION-ANCHORED
+placement too — the anchor depends on the partner's placed position,
+unknown at plan time, but the partner's own predicted target can proxy it
+(fixpoint over the preference chain).  With (a) in, re-measure
+comprehensive_demo (b3) and revisit the default.
 
 ## Realization-risk WL: rank on the envelope, not just the nominal — `kWLSpread` SHIPPED (opt-in)
 
