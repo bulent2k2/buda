@@ -63,3 +63,20 @@ def test_segs_mode_orders_by_segment_count(monkeypatch):
     assert keys == sorted(keys)
     # Rank 1 is now the minimal 3-segment V+H+stub shape.
     assert pool[0][0] == 3
+
+
+def test_segs_mode_survives_candidate_accretion(monkeypatch):
+    """Codex #326: generate_more_topologies re-sorts the merged pool via the
+    session-side helper — it must use the same mode-aware key, or the pool
+    silently reverts to wirelength order after accretion."""
+    monkeypatch.setenv("BUDA_TOPO_SORT", "segs")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in _B61:
+            s.do_command(c)
+        s.do_command("generate_more_topologies bus_034 multi_trunk")
+    pool = [(len(t.segments), t.estimated_wirelength)
+            for t in s.bundles[0].input.candidates]
+    assert pool == sorted(pool)           # still segments-first after merge
+    assert pool[0][0] == 3
