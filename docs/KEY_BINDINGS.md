@@ -60,7 +60,7 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `v`, `cmd+1`, `ctrl+1` | Bring the **Main View** window to the front. Since the Main View's `v` opens/raises this explorer, tapping `v` cycles between the two windows. |
 | `z` | **Zoom In** (centered on the mouse cursor). |
 | `Z` (Shift+z) | **Zoom Out** (centered on the mouse cursor). |
-| `cmd+z`, `ctrl+z` | **Zoom to Selection**: Fit the view to the active bundle's terminals/topology. With a segment selected (`j`/`k`), repeated presses **toggle** between the bundle bbox and the selected segment; a **tiny** segment (longer dim ≤ 10% of the bundle view's shorter dim) zooms **at most 4×** past the bundle view, centered on the segment, instead of filling the window with a sliver. |
+| `cmd+z`, `ctrl+z` | **Zoom to Selection**: Fit the view to the active bundle's terminals/topology. With a segment selected (`j`/`k`), repeated presses **toggle** between the selected segment and the bundle bbox — **segment first**: the press right after selecting frames that segment, the next returns to the bundle. A **tiny** segment (longer dim ≤ 10% of the bundle view's shorter dim) zooms **at most 4×** past the bundle view, centered on the segment, instead of filling the window with a sliver. |
 | `h`, `H`, `cmd+a`, `ctrl+a` | **Home**: Reset zoom and return to the original full view. |
 | `f`, `cmd+f`, `ctrl+f` | Toggle Fullscreen mode. |
 | `cmd+q`, `ctrl+q` | Close all visualizer windows. |

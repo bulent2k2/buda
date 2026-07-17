@@ -93,9 +93,11 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         self._home_xlim        = None
         self._home_ylim        = None
         self._home_data_bbox   = None   # raw data bbox (x0,x1,y0,y1) for maximal home fit
-        # cmd/ctrl-z toggle: 'bundle' = next press zooms to the bundle bbox;
-        # 'seg' = it just did a segment zoom, so the next press returns to the
-        # bundle.  Reset to 'bundle' whenever the segment selection changes.
+        # cmd/ctrl-z toggle state: 'bundle' = the view last fit the bundle (or
+        # the selection just changed), so the next press zooms to the SELECTED
+        # segment when one is picked — segment-first: the press right after a
+        # j/k selection frames that segment, no double-press.  'seg' = it just
+        # did a segment zoom, so the next press returns to the bundle.
         self._zoom_sel_mode    = 'bundle'
 
         # Listen for global visibility changes (e.g. from parent BudaVisualizer)
