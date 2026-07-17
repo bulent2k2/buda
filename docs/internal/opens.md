@@ -27,9 +27,14 @@ items this page doesn't see).
    measure); **(b)** a structural `(wl, nsegs, type)` tie-break — CAUTION:
    the sort defines the 1-based indices `select_topology` pins in
    checked-in flows/tests, so it needs an index audit; **(c)** dominance
-   pruning — drop a candidate whose `wl_lo` exceeds another's `wl_hi`
-   (deterministically unwinnable; the sound salvage of the measured-and-
-   rejected min-WL assignment). Also parked there: the `kWLSpread`
+   pruning — drop a candidate whose `wl_lo` exceeds another's `wl_hi`,
+   but ONLY gated on non-WL routing equivalence (layers/corridors/slide
+   windows): WL-dominance alone is not overall dominance — the planner
+   scores congestion/span/layer/balance/peak before weighted WL and a
+   longer candidate can be the only overflow-free option (the escalation
+   ladder / ripup's OOB-trunk promotion), so an unconditional drop could
+   strand the only routable topology (Codex #313); the salvage of the
+   measured-and-rejected min-WL assignment. Also parked there: the `kWLSpread`
    default-flip criteria ([`wishlist-planner.md`](wishlist-planner.md) →
    *"Realization-risk WL"*).
 

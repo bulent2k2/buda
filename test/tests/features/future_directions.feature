@@ -67,13 +67,18 @@ Feature: Roadmap — documented open items & future directions
     When candidates are sorted for planning
     Then fewer-segment (fewer-junction) shapes rank ahead of slide-coupled staircases
 
-  Scenario: a dominated candidate is pruned at generation
+  Scenario: a WL-dominated candidate is pruned only when routing-equivalent
     # see docs/internal/wishlist-topo.md "Nominal-WL comparability" + opens.md #13
-    # The sound salvage of the measured-and-rejected min-WL assignment: wl_lo/wl_hi
-    # are deterministic, so envelope dominance is decidable at generation time.
+    # wl_lo/wl_hi are deterministic, so envelope dominance is decidable at
+    # generation — but WL-dominance alone is NOT overall dominance: the planner
+    # scores congestion/span/layer/balance/peak before weighted WL, and a
+    # longer candidate can be the only overflow-free option (the escalation
+    # ladder and ripup's OOB-trunk promotion exist for exactly that), so an
+    # unconditional drop could strand the only routable topology.
     Given a candidate whose envelope lower bound exceeds another candidate's upper bound
+    And the two candidates are equivalent in non-WL routing resources (layers, corridors, slide windows)
     When generate_topologies filters the pool
-    Then the dominated candidate is dropped (it can never win under any realization)
+    Then only then is the WL-dominated candidate dropped (otherwise it stays for the planner and ripup to judge)
 
   # ── Feedthru follow-ups (trunk_mst_and_feedthru_plan.md §2.9) ──────────────
 
