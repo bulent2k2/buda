@@ -801,6 +801,41 @@ def test_seg_info_lines_on_unpinned_topo(tmp_path):
         plt.close('all')
 
 
+@pytest.mark.parametrize("pinned", (False, True))
+@pytest.mark.parametrize("edit", (False, True))
+def test_seg_selection_emphasis_consistent(tmp_path, pinned, edit):
+    """Stepping with j/k highlights the segment AND its slide band in every
+    state of the 2x2 matrix (pinned x edit-mode).  The band gate used to
+    require edit-or-pinned while the segment halo worked on any candidate,
+    so an un-pinned j left the halo without the band emphasis."""
+    s = _session()
+    exp = _explorer(s, tmp_path)
+    try:
+        exp._step_topo(+1)              # a multi-segment candidate
+        if pinned:
+            _key(exp, 's')
+        if edit:
+            _key(exp, 'e')              # session on the current candidate
+        _key(exp, 'j')
+        assert exp.sidx != -1
+        halo = any(ln.get_zorder() == 9 and ln.get_color() == 'white'
+                   for ln in exp.ax.lines)
+        bands = sorted({round(p.get_alpha(), 2) for p in exp.ax.patches
+                        if p.get_zorder() == 3})
+        assert halo, "selected-segment halo missing"
+        assert bands == [0.04, 0.3], (
+            f"slide bands not emphasized/dimmed: {bands}")
+        # No selection: every band back at the uniform resting alpha.
+        exp.sidx = -1
+        exp._draw()
+        bands = {round(p.get_alpha(), 2) for p in exp.ax.patches
+                 if p.get_zorder() == 3}
+        assert bands == {0.10}
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
 def test_edit_ops_logged_and_user_topo_survives_rerun(tmp_path, capsys):
     """Items 5+8: every applied GUI op prints its `.buda` equivalent
     ([edit-cmd] …), the commit stores the op-log in the sidecar, and a FRESH
