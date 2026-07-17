@@ -1241,8 +1241,18 @@ static int wirelength(const Topology& t) {
 static void annotate_and_sort(std::vector<Topology>& v) {
     for (auto& t : v)
         t.estimated_wirelength = wirelength(t);
+    // Experiment toggle (BUDA_TOPO_SORT=segs): order candidates by ascending
+    // SEGMENT COUNT first, estimated wirelength second — the "simplest shape
+    // first" extreme.  Candidate order feeds the display, script/sidecar
+    // indices, the planner's tie-break, and ripup's index-window alternates;
+    // the planner's SELECTION stays cost-driven either way (see kSegs for
+    // the penalty that changes selection).  Default: wirelength order.
+    const char* mode = std::getenv("BUDA_TOPO_SORT");
+    const bool segs_first = (mode != nullptr && std::string(mode) == "segs");
     std::sort(v.begin(), v.end(),
-        [](const Topology& a, const Topology& b) {
+        [segs_first](const Topology& a, const Topology& b) {
+            if (segs_first && a.segments.size() != b.segments.size())
+                return a.segments.size() < b.segments.size();
             if (a.estimated_wirelength != b.estimated_wirelength)
                 return a.estimated_wirelength < b.estimated_wirelength;
             return a.type < b.type;

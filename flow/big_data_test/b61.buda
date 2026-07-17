@@ -16,6 +16,18 @@
 #   bigHalf unplaced 593->214, overlaps 3->1, detWL -3.1%, vias -29%.
 # uncomment to try:
 #set_planner_param kSegs 500
+#
+# SORT EXPERIMENT (BUDA_TOPO_SORT=segs — candidates ordered by ascending
+# SEGMENT COUNT, wirelength second; the "simplest shape first" extreme):
+#   b61: rank1 becomes the 3-seg TRUNK_V, but the planner's SELECTION is
+#     UNCHANGED in both kSegs settings (selection is cost-driven; the sort
+#     only relabels indices).
+#   b44: BREAKS the index-pinned script (`select_topology 1 10` lands on a
+#     different shape under the new order: 2->4 segs, 3x the vias).
+#   big2 + stage-b ripup: the fewest-seg index windows heal to 0/0 but land
+#     +1.1% detWL ABOVE the wirelength-ordered windows (11.957M -> 12.087M);
+#     with kSegs 500 ripup is a no-op either way (11.673M, the best result).
+#   verdict: kSegs is the effective lever; the sort toggle is experiment-only.
 
 source ../tracks/tracks4top.buda
 #source tc3a_flat_x10.buda
