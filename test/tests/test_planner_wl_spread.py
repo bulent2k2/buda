@@ -62,15 +62,21 @@ def _detailed_wl(s):
                for ns in s.detailed_result.net_segments)
 
 
-def test_b44_default_nominal_ranking_picks_wide_envelope_mst():
-    """Baseline lock-in: the nominal WL ranking selects the slide-coupled
-    multi-segment shape (the b44 mis-ranking this knob exists for).  If this
-    starts failing because generation/planner changes fix the ranking
-    upstream, the knob's b44 rationale should be re-measured."""
+def test_b44_default_nominal_ranking_picks_structural_tie_winner():
+    """Baseline lock-in, updated for the structural (wl, nsegs, type)
+    tie-break: the nominal ranking used to select the slide-coupled 6-seg
+    TRUNK_H+MST at the 3510 tie by ALPHABET ('+' < '@'; the b44 mis-ranking
+    kWLSpread was shipped for).  The tie-break now sorts the 3-seg plain
+    trunks ahead of the staircase, so the default equal-score pick is a
+    structurally-tight candidate — the mis-pick class this knob guarded
+    against at equal nominal WL is resolved upstream (the knob remains the
+    guard for UNEQUAL-nominal envelope risk)."""
     s, _ = _b44_session(knob=False)
     w = s.bundles[0]
     sel = w.input.candidates[w.plan.selected_topology_index]
-    assert len(sel.segments) >= 4          # the 6-seg TRUNK_H+MST family
+    assert sel.estimated_wirelength == 3510   # still the nominal floor group
+    assert len(sel.segments) <= 3             # structural tie winner, not the
+    assert "MST" not in sel.type              # 6-seg staircase
     assert s.detailed_result.num_unplaced == 0
 
 

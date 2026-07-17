@@ -89,7 +89,8 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
     # run the generator with the given knobs and merge the new candidates
     # into the bundle's existing list, deduplicated by stable content uid —
     # instead of replacing it.  The merged pool is re-sorted by the same key
-    # as generation (wirelength, then type) so cand_index stays a meaningful
+    # as generation (wirelength, then segment count, then type) so
+    # cand_index stays a meaningful
     # ranking; the expert accretes a candidate pool across knob experiments
     # without losing SELECTIONS — the pin (and dogleg slot) are remapped to
     # follow their candidate across the re-sort, so raw indices may move but

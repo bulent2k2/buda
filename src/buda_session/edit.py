@@ -140,7 +140,8 @@ class EditMixin:
         return self._edit_w, self._edit_topo
 
     def _resort_pool_preserving_selection(self, w, pool):
-        """Sort `pool` by generation's key (wirelength, then type — the same
+        """Sort `pool` by generation's key (wirelength, then structural
+        segment count incl. TEG-over bridges, then type — the same
         annotate_and_sort uses) and remap the candidate-index references that must
         follow their candidate: the selection (selected_topology_index) and the
         dogleg slot/original.  Per-segment plan arrays ride the SELECTED candidate,
@@ -160,11 +161,14 @@ class EditMixin:
         # EXPERIMENT toggle (BUDA_TOPO_SORT=segs) must survive accretion —
         # an unconditional WL sort here would silently revert the pool order
         # after generate_more_topologies / knob-memo replays (Codex #326).
+        # Default key mirrors the structural (wl, nsegs, type) tie-break
+        # (bridge segments counted, as in C++).
+        _nsegs = lambda c: len(c.segments) + len(c.bridge_segments)
         if os.environ.get("BUDA_TOPO_SORT") == "segs":
             pool.sort(key=lambda c: (len(c.segments),
-                                     c.estimated_wirelength, c.type))
+                                     c.estimated_wirelength, _nsegs(c), c.type))
         else:
-            pool.sort(key=lambda c: (c.estimated_wirelength, c.type))
+            pool.sort(key=lambda c: (c.estimated_wirelength, _nsegs(c), c.type))
         posn = {buda.topo_uid(c): i for i, c in enumerate(pool)}
         if sel_uid is not None:
             w.plan.selected_topology_index = posn[sel_uid]

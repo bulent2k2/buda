@@ -38,6 +38,11 @@ import buda_cli
 
 
 def _b44_session():
+    """b44 with the TRUNK_H+MST@y11915 staircase PINNED — the subject of
+    these tests is that candidate's pull mechanics.  It used to sort first
+    at the 3510 tie by alphabet ('+' < '@'), so the default planner pick
+    was it; the structural (wl, nsegs, type) tie-break now sorts the 3-seg
+    plain trunks ahead, so the tests pin it by content."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     buf = io.StringIO()
@@ -47,19 +52,31 @@ def _b44_session():
                   "add_block blk_23 200 10830 2700 11830",
                   "add_block io_pad_tl 200 12000 1200 12800",
                   "add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p",
-                  "run_bundler", "generate_topologies",
-                  "run_planner", "run_nuts"]:
+                  "run_bundler", "generate_topologies"]:
+            s.do_command(c)
+        idx = _mst_index(s)
+        for c in [f"select_topology 1 {idx + 1}", "run_planner", "run_nuts"]:
             s.do_command(c)
     return s
 
 
+def _mst_index(s):
+    """0-based index of the 6-seg TRUNK_H+MST@y11915 staircase."""
+    return next(i for i, c in enumerate(s.bundles[0].input.candidates)
+                if c.type == "TRUNK_H+MST@y11915"
+                and c.estimated_wirelength == 3510)
+
+
+def _mst_cand(s):
+    return s.bundles[0].input.candidates[_mst_index(s)]
+
+
 def test_spine_vote_breakpoint_recorded():
-    """b44 cand 0 seg1: a floating-spine vote via the y11915 trunklet whose
+    """b44 MST staircase seg1: a floating-spine vote via the y11915 trunklet whose
     far segment (the io_pad tap) has slide [200,1200] — the pull's gain
     saturates at 1200, far short of the window edge 200."""
     s = _b44_session()
-    w = s.bundles[0]
-    c0 = w.input.candidates[0]
+    c0 = _mst_cand(s)
     assert "MST" in c0.type
     ct = buda.ConnTopology()
     ct.build(c0, s.fp)
@@ -69,14 +86,13 @@ def test_spine_vote_breakpoint_recorded():
 
 
 def test_anchored_vote_keeps_bound_behavior():
-    """b44 cand 0 seg3: the ANCHORED busterm vote (already at its
+    """b44 MST staircase seg3: the ANCHORED busterm vote (already at its
     busterm-side bound).  Its breakpoint is the face_coord (2960) beyond the
     bound, so the clamp is inert and the hold-at-bound behavior survives —
     pull_target stays the bus-clamped window edge."""
     s = _b44_session()
-    w = s.bundles[0]
     ct = buda.ConnTopology()
-    ct.build(w.input.candidates[0], s.fp)
+    ct.build(_mst_cand(s), s.fp)
     segs = ct.segs()
     assert segs[3].net_pull == 1
     assert segs[3].pull_break == 2960    # blk_07's tapped face
@@ -86,7 +102,7 @@ def test_anchored_vote_keeps_bound_behavior():
 
 
 def test_b44_mst_realization_no_overshoot():
-    """The end-to-end effect: the default selection (the 6-seg TRUNK_H+MST)
+    """The end-to-end effect: the pinned 6-seg TRUNK_H+MST
     realizes near its envelope floor instead of +1000/bit of tug-of-war
     stretch.  seg1's pull_target is the 1200 breakpoint (was 258.5 = window
     edge), and total placed WL is within 5% of the joint minimum 3510
@@ -102,9 +118,8 @@ def test_b44_mst_realization_no_overshoot():
 def test_pull_break_sentinel_without_votes():
     """A segment with no pull carries the INT_MIN sentinel (no breakpoint)."""
     s = _b44_session()
-    w = s.bundles[0]
     ct = buda.ConnTopology()
-    ct.build(w.input.candidates[0], s.fp)
+    ct.build(_mst_cand(s), s.fp)
     segs = ct.segs()
     for cs in segs:
         if cs.net_pull == 0:

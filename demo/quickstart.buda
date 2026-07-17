@@ -35,7 +35,7 @@ add_bus dft[3]        IO.PAD.io CPU.io,MEM.io,GPU.io
 # ── Step 4: Execute Planning ──
 run_bundler strict
 generate_topologies
-select_topologies 1,2 3 3-5 2
+select_topologies 1 2 2 3 3-5 2
 run_planner
 run_nuts
 run_detailed_nuts

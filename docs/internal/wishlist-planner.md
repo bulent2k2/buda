@@ -367,11 +367,12 @@ ripup: **0 opens / 1 overlap** vs baseline 0/5, +2.1% WL; bigHalf + healers
 generation-policy comparability problem — the MST hybrid's nominal is a
 zero-overshoot monotone staircase (always AT its envelope bottom), plain
 trunks sample loci only at Hanan-channel midpoints (the WL-optimal
-edge-aligned locus is never emitted, b44's +500), and WL ties break
-alphabetically (`(wl, type)`, ASCII `'+' < '@'`) then by lowest index — see
+edge-aligned locus is never emitted, b44's +500), and WL ties USED TO break
+alphabetically (`(wl, type)`, ASCII `'+' < '@'`) then by lowest index — the
+structural `(wl, nsegs, type)` tie-break shipped 2026-07-17 (piece b) — see
 [`wishlist-topo.md`](wishlist-topo.md) → *"Nominal-WL comparability across
-shape families"* for the generation-side follow-ons (Hanan-line loci,
-structural tie-break) and why the score-term route shipped first.
+shape families"* for the remaining generation-side follow-ons (Hanan-line
+loci, dominance pruning) and why the score-term route shipped first.
 
 **Update (2026-07-17, post pull-breakpoint clamp):** the NUTS pull-target
 breakpoint clamp ([`wishlist-nuts.md`](wishlist-nuts.md) → *"Pull-target

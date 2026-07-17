@@ -1249,12 +1249,26 @@ static void annotate_and_sort(std::vector<Topology>& v) {
     // the penalty that changes selection).  Default: wirelength order.
     const char* mode = std::getenv("BUDA_TOPO_SORT");
     const bool segs_first = (mode != nullptr && std::string(mode) == "segs");
+    // Structural tie-break (wishlist-topo "Nominal-WL comparability", piece b):
+    // equal-WL candidates order by ascending SEGMENT COUNT — fewer segments =
+    // fewer junctions = tighter realization risk — so a 6-junction MST
+    // staircase no longer outranks a 2-seg trunk at the same nominal WL just
+    // because ASCII '+' < '@' (the b44 mis-pick: the planner's equal-score
+    // tie-break keeps the LOWEST index, which this sort defines).  The type
+    // string stays as the final determinism anchor only.  Bridge segments
+    // (TEG-over) are real wires with a junction each; count them so a bridged
+    // candidate doesn't look structurally simpler than it is.
+    auto nsegs = [](const Topology& t) {
+        return t.segments.size() + t.bridge_segments.size();
+    };
     std::sort(v.begin(), v.end(),
-        [segs_first](const Topology& a, const Topology& b) {
+        [&](const Topology& a, const Topology& b) {
             if (segs_first && a.segments.size() != b.segments.size())
                 return a.segments.size() < b.segments.size();
             if (a.estimated_wirelength != b.estimated_wirelength)
                 return a.estimated_wirelength < b.estimated_wirelength;
+            if (nsegs(a) != nsegs(b))
+                return nsegs(a) < nsegs(b);
             return a.type < b.type;
         });
 }
