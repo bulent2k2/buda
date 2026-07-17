@@ -744,6 +744,70 @@ def test_edit_pin_segment_anchor_and_single_anchor_respan(tmp_path):
         plt.close('all')
 
 
+def test_pin_to_trunk_stretches_and_connects(tmp_path):
+    """P with a segment anchor doesn't just land the pinned trunk's end ON
+    the partner's line — it CONNECTS the pair (edit_connect), stretching the
+    PARTNER to the crossing when its span falls short, so the two trunks end
+    junctioned instead of merely sharing a coordinate."""
+    s = _dd_base_session()
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'e')                        # clone the C (5 segments)
+        _trunk(exp, 'Y', 500, 700)            # right V trunk (idx 5) at x=450
+        exp.sidx = 5
+        _key(exp, 'P')
+        _click(exp, 200, 1200)                # block anchor: up (centre 1200)
+        _click(exp, 0, 1700)                  # segment anchor: top H trunk (0)
+        _key(exp, 'enter')
+        assert _span(exp, 5, horiz=False) == (1200, 1700)
+        # The PARTNER stretched to the crossing: the top H trunk's right end
+        # reaches the V trunk's line (was -700..200, V trunk at x=450).
+        assert _span(exp, 0, horiz=True) == (-700, 450)
+        # And the pair is junctioned — ConnTopology sees the SEG conn.
+        ct = exp._build_conn_topo(exp._edit_topo)
+        conns5 = [c.seg_idx for c in list(ct.segs())[5].conns
+                  if c.kind == buda.SegConnKind.SEG]
+        assert 0 in conns5
+        assert "connected seg 0" in exp._edit_msg
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
+def test_pin_interior_trunk_anchor_preserves_span(tmp_path):
+    """Codex #322 P2: a segment anchor BETWEEN outer anchors must not shrink
+    the just-applied span — the connect reverses (the PARTNER's endpoint
+    lands on the pinned trunk, extended to the crossing), instead of moving
+    the pinned trunk's nearest end inward to the anchor."""
+    s = _dd_base_session()
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'e')                        # clone the C (5 segments)
+        _trunk(exp, 'Y', 500, 700)            # V trunk (idx 5) at x=450,
+        exp.sidx = 0                          #   spanning y 200..1200
+        _key(exp, 'P')                        # pin the TOP H trunk (y=1700)
+        _click(exp, 200, 1200)                # block anchor: up (centre 200)
+        _click(exp, 500, 1650)                # grid anchor: OOB line x=500
+                                              #   (above the V trunk's span)
+        _click(exp, 450, 700)                 # trunk anchor x=450 — INTERIOR
+        assert exp._trunk_pin_grid == {500, 450}
+        _key(exp, 'enter')
+        # Span = [min,max] over anchors {200, 500, 450} — the interior 450
+        # did NOT pull the right end in (the old forward connect gave 450).
+        assert _span(exp, 0, horiz=True) == (200, 500)
+        # The PARTNER junctioned onto the pinned trunk instead: extended from
+        # y 1200 up to the crossing at 1700.
+        assert _span(exp, 5, horiz=False) == (200, 1700)
+        ct = exp._build_conn_topo(exp._edit_topo)
+        conns0 = [c.seg_idx for c in list(ct.segs())[0].conns
+                  if c.kind == buda.SegConnKind.SEG]
+        assert 5 in conns0
+        assert "connected seg 5" in exp._edit_msg
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
 def test_edit_duplicate_trunk_rejected(tmp_path):
     """Repeated Y at the same spot must NOT stack identical trunks: the second,
     geometrically identical placement is rejected loud (same line + span);
@@ -875,8 +939,10 @@ def test_abort_drops_stale_segment_selection(tmp_path):
 
 def test_zoom_toggle_bundle_vs_segment(tmp_path):
     """cmd/ctrl-z zooms to the bundle bbox; with a segment selected, repeated
-    presses TOGGLE bundle <-> segment.  A tiny segment (longer dim <= 10% of
-    the bundle bbox's shorter dim) zooms at most 4x past the bundle view."""
+    presses TOGGLE bundle <-> segment.  The segment view frames the SPAN +
+    SLIDE box — centered, covering at most 1/9 of the canvas (1/3 per
+    dimension) — so a slide-displaced drawn wire is never shifted out of
+    frame (the nominal-endpoint zoom used to drift off the band)."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     for cmd in ("def_layer 4 M4 H TOP 10", "def_layer 5 M5 V TOP 10",
@@ -897,21 +963,23 @@ def test_zoom_toggle_bundle_vs_segment(tmp_path):
         bx = exp.ax.get_xlim(); by = exp.ax.get_ylim()
         bw, bh = bx[1] - bx[0], by[1] - by[0]
 
-        # Select the TINY jog: the toggle zooms in on it, but capped at 4x
-        # from the bundle view (never a filled-window sliver).
-        # _set_lims_filling_box only ever EXPANDS an axis to the window
-        # aspect, so both final spans stay >= the requested bundle-dims/4.
-        topo = exp._shown_topo()
-        exp.sidx = min(range(len(topo.segments)),
-                       key=lambda i: abs(topo.segments[i].end.x
-                                         - topo.segments[i].start.x)
-                       + abs(topo.segments[i].end.y - topo.segments[i].start.y))
-        exp._zoom_to_bundle()
-        assert exp._zoom_sel_mode == 'seg'
-        tx = exp.ax.get_xlim(); ty = exp.ax.get_ylim()
-        assert (tx[1] - tx[0]) >= bw / 4 * 0.99
-        assert (ty[1] - ty[0]) >= bh / 4 * 0.99
-        assert (ty[1] - ty[0]) < bh                           # still zoomed in
+        for si in range(len(exp._shown_topo().segments)):
+            exp.sidx = si
+            exp._zoom_sel_mode = 'bundle'
+            exp._zoom_to_bundle()
+            assert exp._zoom_sel_mode == 'seg'
+            x0b, x1b, y0b, y1b = exp._seg_zoom_box()
+            tx = exp.ax.get_xlim(); ty = exp.ax.get_ylim()
+            # Centered on the span+slide box...
+            assert abs((tx[0] + tx[1]) / 2 - (x0b + x1b) / 2) < 1
+            assert abs((ty[0] + ty[1]) / 2 - (y0b + y1b) / 2) < 1
+            # ...and the box covers at most 1/3 per dimension (1/9 of canvas);
+            # the window filler only ever EXPANDS an axis, never shrinks it.
+            assert (x1b - x0b) <= (tx[1] - tx[0]) / 3 + 1e-6
+            assert (y1b - y0b) <= (ty[1] - ty[0]) / 3 + 1e-6
+            # The whole box (wire + slide band) is inside the view.
+            assert tx[0] <= x0b and x1b <= tx[1]
+            assert ty[0] <= y0b and y1b <= ty[1]
 
         exp._zoom_to_bundle()                                 # toggle back out
         assert exp._zoom_sel_mode == 'bundle'

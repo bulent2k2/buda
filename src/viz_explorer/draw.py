@@ -551,7 +551,10 @@ class ExplorerDrawMixin:
                 cs_i = cs_list[self.sidx]
                 s_lo, s_hi = self._seg_slide(cs_i, self.sidx)
                 axis, sdir = ('y', 'V') if cs_i.horiz else ('x', 'H')
-                info += (f"\n{axis}={cs_i.perp_pos} {sdir}-slide="
+                adir = 'H' if cs_i.horiz else 'V'
+                info += (f"\n{axis}={cs_i.perp_pos} "
+                         f"{adir}-span=[{cs_i.along_lo},{cs_i.along_hi}] "
+                         f"{sdir}-slide="
                          f"[{self._fmt_perp(float(s_lo))},"
                          f"{self._fmt_perp(float(s_hi))}]")
                 # Third line: net-pull + the segment's connectivity — busterm

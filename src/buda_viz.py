@@ -152,6 +152,11 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         self._trunk_pin_seg = -1
         self._trunk_pin_set = None
         self._trunk_pin_grid = set()
+        # coord -> source segment index for anchors picked off a PERPENDICULAR
+        # segment: the apply stretches the pinned span to the coordinate AND
+        # connects the pair (edit_connect — the partner extends to the
+        # crossing when its span falls short).
+        self._trunk_pin_seg_srcs = {}
         self._trunk_pin_hover = None
         self._edit_slide   = {}
         self._edit_slide_mark = None

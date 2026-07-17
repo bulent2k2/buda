@@ -88,6 +88,7 @@ class ExplorerEditMixin:
         self._trunk_pin_seg = -1
         self._trunk_pin_set = None
         self._trunk_pin_grid = set()
+        self._trunk_pin_seg_srcs = {}
         self._trunk_pin_hover = None
         self._edit_grid_x  = set()
         self._edit_grid_y  = set()
@@ -347,10 +348,10 @@ class ExplorerEditMixin:
             if over_bt is not None and over_bt in self._bundle_busterm_names():
                 new = None                              # block pick — no grid line
             else:
-                new = self._pin_segment_anchor_at(event.xdata, event.ydata)
-                if new is None:
-                    new = self._snap(*self._pin_grid_target(event.xdata,
-                                                            event.ydata))
+                hit = self._pin_segment_anchor_at(event.xdata, event.ydata)
+                new = (hit[0] if hit is not None else
+                       self._snap(*self._pin_grid_target(event.xdata,
+                                                         event.ydata)))
             if new != self._trunk_pin_hover:
                 self._trunk_pin_hover = new
                 self._draw()
@@ -382,10 +383,11 @@ class ExplorerEditMixin:
                 return
             # Near a PERPENDICULAR segment of the working copy → anchor at ITS
             # exact perp coordinate (often not a grid line), so "end on that
-            # trunk" lands the junction precisely.
-            seg_c = self._pin_segment_anchor_at(event.xdata, event.ydata)
-            if seg_c is not None:
-                self._edit_trunk_pin_toggle_coord(seg_c)
+            # trunk" lands the junction precisely — remembering the source
+            # segment so the apply can CONNECT the pair.
+            hit = self._pin_segment_anchor_at(event.xdata, event.ydata)
+            if hit is not None:
+                self._edit_trunk_pin_toggle_coord(hit[0], src_seg=hit[1])
             else:
                 self._edit_trunk_pin_toggle_grid(       # else → a grid line
                     event.xdata, event.ydata)
@@ -401,10 +403,12 @@ class ExplorerEditMixin:
         self._trunk_pin_seg = self.sidx
         self._trunk_pin_set = set()
         self._trunk_pin_grid = set()
+        self._trunk_pin_seg_srcs = {}
         self._trunk_pin_hover = None
         self._edit_msg = ("PIN SPAN: click busterm blocks, perpendicular "
-                          "segments, and/or grid lines (one anchor moves only "
-                          "the nearest end), enter to apply, esc to cancel")
+                          "segments (span + connect), and/or grid lines (one "
+                          "anchor moves only the nearest end), enter to "
+                          "apply, esc to cancel")
         self._draw()
 
     def _pin_seg_horiz(self):
@@ -432,20 +436,24 @@ class ExplorerEditMixin:
         outermost busterm."""
         self._edit_trunk_pin_toggle_coord(self._snap(*self._pin_grid_target(x, y)))
 
-    def _edit_trunk_pin_toggle_coord(self, coord):
+    def _edit_trunk_pin_toggle_coord(self, coord, src_seg=None):
         if coord in self._trunk_pin_grid:
             self._trunk_pin_grid.discard(coord)
+            self._trunk_pin_seg_srcs.pop(coord, None)
         else:
             self._trunk_pin_grid.add(coord)
+            if src_seg is not None:
+                self._trunk_pin_seg_srcs[coord] = src_seg
         self._pin_msg()
 
     def _pin_segment_anchor_at(self, x, y):
-        """Coordinate anchor from a click near a PERPENDICULAR segment of the
-        working copy: that segment's perp position, taken on the pinned
+        """(coord, seg_idx) anchor from a click near a PERPENDICULAR segment
+        of the working copy: that segment's perp position, taken on the pinned
         segment's along axis — so 'span up to that trunk' lands the endpoint
         exactly on it (a junction), even when the trunk is not on a Hanan
-        line.  None when no perpendicular segment is within tolerance (≈2% of
-        the view span on the anchor axis)."""
+        line.  The source segment index rides along so the apply can CONNECT
+        the pair.  None when no perpendicular segment is within tolerance
+        (≈2% of the view span on the anchor axis)."""
         horiz = self._pin_seg_horiz()          # pinned segment's orientation
         x0, x1 = self.ax.get_xlim()
         y0, y1 = self.ax.get_ylim()
@@ -466,7 +474,7 @@ class ExplorerEditMixin:
                 lo, hi = sorted((sg.start.x, sg.end.x))
                 d, in_span = abs(y - c), (lo - tol) <= x <= (hi + tol)
             if in_span and d < best_d:
-                best, best_d = c, d
+                best, best_d = (c, i), d
         return best
 
     def _pin_msg(self):
@@ -480,6 +488,7 @@ class ExplorerEditMixin:
         self._trunk_pin_seg = -1
         self._trunk_pin_set = None
         self._trunk_pin_grid = set()
+        self._trunk_pin_seg_srcs = {}
         self._trunk_pin_hover = None
         self._edit_msg = "EDIT: pin span cancelled"
         self._draw()
@@ -518,9 +527,11 @@ class ExplorerEditMixin:
         seg_idx = self._trunk_pin_seg
         picked = set(self._trunk_pin_set or ())
         grid = set(self._trunk_pin_grid or ())
+        seg_srcs = dict(self._trunk_pin_seg_srcs or {})
         self._trunk_pin_seg = -1
         self._trunk_pin_set = None
         self._trunk_pin_grid = set()
+        self._trunk_pin_seg_srcs = {}
         self._trunk_pin_hover = None
         if not (0 <= seg_idx < len(self._edit_topo.segments)):
             self._edit_msg = "EDIT: pin target gone"; self._draw(); return
@@ -535,9 +546,40 @@ class ExplorerEditMixin:
                               "span (a single anchor moves the nearest end — "
                               "pick one apart from the far end, or two anchors)")
             self._draw(); return
-        if self._edit_apply(ic.edit_set_span(self._edit_topo, self.fp, seg_idx,
-                                             span[0], span[1])):
-            self._edit_log_op(f"edit_set_span {seg_idx} {span[0]} {span[1]}")
+        if not self._edit_apply(ic.edit_set_span(self._edit_topo, self.fp,
+                                                 seg_idx, span[0], span[1])):
+            return
+        self._edit_log_op(f"edit_set_span {seg_idx} {span[0]} {span[1]}")
+        # A segment anchor pins the span TO another trunk: stretch and CONNECT
+        # both.  An anchor at the applied span's ENDPOINT connects forward —
+        # edit_connect lands the pinned end on the partner's line (a no-op
+        # move) and extends the partner to the crossing when its span falls
+        # short.  An INTERIOR anchor (between outer anchors) must NOT move
+        # the pinned segment — the forward call would shrink the span it just
+        # applied, discarding an outer anchor (Codex #322) — so the connect
+        # REVERSES: the partner's endpoint lands on the pinned trunk instead
+        # (extended to the crossing when short), a T junction with the pinned
+        # span preserved.
+        span_msg = self._edit_msg
+        for coord in sorted(seg_srcs):
+            if coord not in grid:
+                continue                        # anchor was toggled back off
+            other = seg_srcs[coord]
+            if not (0 <= other < len(self._edit_topo.segments)):
+                continue
+            sg = self._edit_topo.segments[seg_idx]
+            lo, hi = sorted((sg.start.x, sg.end.x) if horiz
+                            else (sg.start.y, sg.end.y))
+            a, b = (seg_idx, other) if coord in (lo, hi) else (other, seg_idx)
+            if self._edit_apply(ic.edit_connect(self._edit_topo, self.fp,
+                                                a, b)):
+                self._edit_log_op(f"edit_connect {a} {b}")
+                span_msg += f" + connected seg {other}"
+            else:
+                span_msg += (f" (connect to seg {other} failed: "
+                             f"{self._edit_msg.replace('EDIT rejected: ', '')})")
+        self._edit_msg = span_msg
+        self._draw()
 
     def _edit_log_trunk(self, horiz):
         """Log the just-appended trunk with its RESOLVED geometry (post default
