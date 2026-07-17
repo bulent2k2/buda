@@ -23,6 +23,7 @@
 #include <utility>
 #include "bundler.h"
 #include "topology.h"
+#include "conn_topology.h"
 #include "layering.h"
 #include "routing_grid.h"
 namespace buda {
@@ -426,6 +427,18 @@ private:
     // Synthetic committed-assignment PlanResult / chargeability check, shared
     // by recharge_committed_ and the ripup victim ranking.
     static PlanResult fixed_plan_of_(const BundleWrapper& bw);
+    // Honest-books junction prediction (charge_pull_target follow-on (a2)):
+    // topology segments with each along-span extended to every pulled
+    // partner's deterministic predicted track; riders_out (optional) = the
+    // NUTS jn_map mirror for the single-rider anchor clamp (a1).
+    std::vector<Segment> junction_extended_segments(
+            const Topology& topo, const std::vector<ConnSeg>& conn_segs,
+            std::vector<std::vector<int>>* riders_out) const;
+    // True iff the span crosses a (near-)zero-capacity band — the keepout-
+    // carved impossibility the junction-extension gate fires on (variant C).
+    bool span_hits_dead_band(const Segment& seg, int layer_id,
+                             int perp_pos_override,
+                             int slide_lo, int slide_hi) const;
     static bool has_committed_plan_(const BundleWrapper& bw);
     // Park (sign=+1) or release (sign=-1) the bundle's reserved demand as
     // virtual usage on TOP-layer bands inside its reservation region.
@@ -505,12 +518,18 @@ private:
     // Realization-risk WL spread penalty (see set_planner_param "kWLSpread").
     // < 0 = OFF (kWL scores the plain nominal estimated_wirelength).
     double kWLSpread_         = -1.0;
-    // Honest-books mode (see set_planner_param "charge_pull_target"): charge a
-    // pulled segment at its DETERMINISTIC predicted pull target (window bound
-    // tightened by an in-travel ConnSeg::pull_break) instead of
-    // best_band_perp, and rank band_occupants by the caller-supplied PLACED
-    // positions.  false = legacy charging, bit-identical.
-    bool charge_pull_target_  = false;
+    // Honest-books mode LEVEL (see set_planner_param "charge_pull_target"):
+    //   0 (default) — legacy charging, bit-identical.
+    //   1 — charge a pulled segment at its DETERMINISTIC predicted pull
+    //       target (window bound tightened by an in-travel ConnSeg::pull_break)
+    //       instead of best_band_perp, and rank band_occupants by the
+    //       caller-supplied PLACED positions (PR #319).
+    //   2 — + the junction prediction (follow-on (a)): the single-rider
+    //       anchor clamp on the charged band (a1) and the STRICT dead-band
+    //       gate over junction-extended spans (a2, span_hits_dead_band) —
+    //       heals comprehensive_demo's b3 keepout strand; per-flow tradeoffs
+    //       measured and documented in wishlist-planner.
+    int  charge_pull_target_  = 0;
     // Same-direction TOP-layer load-balancing weight.  Without it the planner
     // breaks ties toward the highest metal (span/base costs are 0 on a TOP layer
     // with no span window), piling every H bus on the top H layer and every V
