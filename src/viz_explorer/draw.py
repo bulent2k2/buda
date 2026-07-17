@@ -180,10 +180,12 @@ class ExplorerDrawMixin:
         cs_map  = {j: cs_list[j] for j in range(len(cs_list))}
 
         # Emphasize the SELECTED segment's slide band + bounds and dim the rest,
-        # so overlapping bands are disambiguated while stepping with j/k (both
-        # edit mode and a pure selection).  hi == -1: no selection, all normal.
-        hi = (self.sidx if (self.sidx != -1 and
-              (self._edit_topo is not None or self._current_is_selected())) else -1)
+        # so overlapping bands are disambiguated while stepping with j/k — on
+        # ANY candidate (pinned or not, edit session or not), matching the
+        # segment halo's gate.  hi == -1: no selection, all bands normal.  An
+        # index outside the shown topology (stale across a view change) counts
+        # as no selection rather than dimming everything.
+        hi = self.sidx if 0 <= self.sidx < len(cs_list) else -1
 
         for ci, (raw_seg, cs) in enumerate(zip(topo.segments, cs_list)):
             if ci in getattr(self, '_hidden_seg', ()):   # layer hidden in main viz
