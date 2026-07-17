@@ -249,6 +249,38 @@ missing file is now a hard error (exit 1, like an unknown command), and
 `run_planner` prints a one-shot `[Planner] WARNING` when no H/V layers are defined
 before falling back to M4/M5.
 
+## Charge pulled segments at their predicted pull target (books vs metal) — OPEN
+
+**What (2026-07-17, from the b44 slide-range analysis):** the planner
+charges each segment's congestion demand at a chosen band
+(`BundleAssignment.seg_perp`), but NUTS's placement preference chain lets
+pull/face semantics OUTRANK the charged band for pulled segments — so the
+capacity books say one place and the metal lands in another: reserved
+bands sit empty while used bands were never charged.  Under contention
+this is a systematic source of the overlaps the planner "didn't predict"
+(the class negotiate/ripup grind on).
+
+**Repros (pulled segments with a charged band; divergence =
+|placed track − seg_perp|):** `b44` — **4 of 4** pulled segments diverge
+>100 (e.g. seg5 charged at band 11330, placed 10888.5, Δ442; pre-clamp
+seg3 was charged 1450, placed 2641.5, Δ1191).  `bigHalf` — **141 of 185**
+pulled+charged segments diverge >100 units, worst **Δ3378** (bundle 45
+seg11: charged 3565, placed 186.5).  `big2_noviz` — **123 of 148**, worst
+Δ2264.  This is the MAJORITY of pulled segments on the congested corpus,
+not a corner case.
+
+**Fix sketch:** the pull-breakpoint clamp
+([`wishlist-nuts.md`](wishlist-nuts.md) → *"Pull-target breakpoint
+clamp"*) makes the fix tractable — a pulled segment's target is now
+DETERMINISTIC at plan time (`ConnSeg::pull_break`, else the bus-clamped
+window bound), so the planner can charge the band at the predicted
+target instead of nominal-nearest.  Phase 0: a divergence diagnostic
+(report/WARNING, the scan above).  Phase 1: anchor the band choice for
+pulled segments at the predicted target — a real cost-model change with
+corpus-wide measurement (expected: bigHalf/big2 overlap reduction; risk:
+selection shuffles like every books change).  The planner-side twin of
+the NUTS clamp; the biggest-upside item of the b44 follow-on trio.
+
 ## Realization-risk WL: rank on the envelope, not just the nominal — `kWLSpread` SHIPPED (opt-in)
 
 **The b44 mis-ranking (repro `flow/big_data_test/b44.buda`, 2026-07-16):**

@@ -44,14 +44,68 @@ golden bit-identical.  The kWLSpread b44 delta collapsed to ~0.1% (its
 test now asserts "not worse"); the knob remains the selection-level guard
 for realization risk the clamp cannot remove (contention-driven stretch).
 
-**Follow-ons (from the same b44 slide-range analysis):** (a) the
-opposite-pull connector pair (seg1/seg3) is detectable at analysis time —
-a cheap structural realization-risk signal that could feed the WL
-tie-break; (b) open-space MST edge legs carry FREE (sentinel) slide
-windows (b44 cand 19's edge leg) — unbounded envelopes and NUTS wildcards;
-(c) the planner's charged band vs pull placement can diverge by >1000
-units (seg3 charged at band 1450, placed at 2641.5) — a books-vs-metal
-mismatch worth a diagnostic.
+**Follow-ons (from the same b44 slide-range analysis; corpus-probed
+2026-07-17, detailed below):** (a) opposite-pull connector pairs — a
+structural realization-risk signal; (b) FREE-window open-space MST legs;
+(c) planner books vs placed metal on pulled segments (planner-side, the
+biggest upside — see [`wishlist-planner.md`](wishlist-planner.md) →
+*"Charge pulled segments at their predicted pull target"*).
+
+## Opposite-pull ("tug-of-war") connector pairs — a structural risk signal — OPEN
+
+**What:** two connectors riding the same interior segment T, pulling in
+opposite OUTWARD directions (the lower-position rider pulls down, the
+higher pulls up).  Each pull locally shortens its own perpendicular leg;
+jointly they stretch T between them.  The breakpoint clamp (above) bounds
+each pull's overshoot, but the pair remains the structural signature of
+realization risk: under contention (a breakpoint position occupied,
+placement falling back) or where breakpoints leave a gap, the tug
+re-opens.
+
+**Repros (scanner over SELECTED candidates, post-plan):** `b44` — the
+canonical: bundle 1 `seg5` tugged by `seg1(−)/seg3(+)`, nominal separation
+1250 (pre-clamp realized +1133 of trunk stretch; post-clamp collapses to
+0).  `bigHalf` — **7 pairs** on selected candidates alone, e.g. bundle 44
+`seg5` by `seg1(−)/seg3(+)` (`TRUNK_H+MST@y5957`, sep 625) and bundle 31's
+`MST_VH` with TWO pairs on one segment (`seg8` by `seg3/seg7(−)` vs
+`seg1(+)`); `mix` 3 pairs, `mempool_tile` 6 (all on the big `MST_HV/VH`
+trees), `big2` 0.
+
+**Fix sketch:** detectable inside `derive_net_pull`'s own data (a segment
+whose riders include both a −pull and a +pull at distinct positions) —
+zero extra passes.  Uses: (a) a per-candidate count feeding the WL
+tie-break or a kWLSpread-style risk estimate (cheaper than the envelope
+descent, and STRUCTURAL — it names the mechanism rather than bounding
+it); (b) NUTS-side joint arbitration — place the pair to minimize the SUM
+(connector legs + T's stretch) instead of sequentially.  Effort: small
+for (a); (b) touches placement order → full golden gate.
+
+## FREE (sentinel) slide windows on open-space MST legs — OPEN
+
+**What:** an MST-edge leg that taps no face and crosses no block gets no
+constraint from ConnTopology — its window stays the ±5e8 sentinel.
+Consequences: the WL envelope's `hi` clamps to the floorplan extent
+(meaninglessly loose, so kWLSpread over-taxes the whole candidate), NUTS
+interval constraints balloon to near-die-width, and placement becomes a
+wildcard driven purely by soft preferences.
+
+**Repro (`b44.buda`, `select_topology 1 20` = `TRUNK_V_OOB+MST@x-246`):**
+**5 of 9 segments are FREE**, with NUTS intervals like `[-246,5106]` and
+`[9811,12739]` (essentially the die).  Placement scatters: seg0's nominal
+perp is **−246** (out of bounds) but lands at **700** (a 946 shift), seg8
+drifts 2700→3018.5, four segments collapse to zero span.  On this
+uncontended die it realizes 5818 abstract (below the 7206 nominal — the
+collapses ate the OOB detour) at 0/0, but the envelope reads
+`[3514..51890]` and under ripup's OOB-class promotion these wildcards are
+exactly what gets trialed into congested designs.  Second repro: cand 18
+(`TRUNK_H_OOB+MST@y9445`, seg0 FREE, envelope hi 17220).
+
+**Fix sketch:** derive a finite window for open-space legs from what they
+connect — the junction partners' windows unioned with the bundle bbox
+(+ detour band for OOB shapes).  Simultaneously makes the envelope `hi`
+honest, shrinks the NUTS interval, and de-randomizes placement.  Effort:
+medium — a new rule in `derive_slide_ranges`, full golden + fast/mid
+re-verify.
 
 ## Non-TOP pin-access stub span-stretched onto its endpoint leaf — NO LIVE REPRO (effectively closed by config; latent NUTS clamp deferred)
 
