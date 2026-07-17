@@ -714,6 +714,11 @@ void derive_net_pull(const Topology& topo, const Floorplan& fp,
     for (int ci = 0; ci < (int)segs.size(); ++ci) {
         ConnSeg& cs = segs[ci];
         int pos = 0, neg = 0;
+        // Each vote's SATURATION coordinate (see ConnSeg::pull_break): the
+        // position where that vote's wirelength gain stops.  Collected per
+        // direction so the net pull's slope-crossing breakpoint can be
+        // resolved after the votes are in.
+        std::vector<int> pos_bps, neg_bps;
         for (const auto& conn : cs.conns) {
             if (conn.kind != SegConn::SEG) continue;
             const ConnSeg& nb = segs[conn.seg_idx];
@@ -738,8 +743,15 @@ void derive_net_pull(const Topology& topo, const Floorplan& fp,
                 //       two top stubs both anchored), or a dogleg spine endpoint.
                 bool anchored = (sign > 0) ? (cs.perp_pos >= cs.perp_hi)
                                            : (cs.perp_pos <= cs.perp_lo);
-                if (anchored || stub_binds_trunk_end(segs, ci, cs, nb, sign))
-                    (sign > 0) ? ++pos : ++neg;
+                if (anchored || stub_binds_trunk_end(segs, ci, cs, nb, sign)) {
+                    // A busterm vote saturates at the face itself: moving cs
+                    // toward the face shortens nb's stub until cs reaches it.
+                    // (The anchored case is already at its bound; face_coord
+                    // lies beyond it and clamps back to the bound downstream —
+                    // preserving the hold-at-bound behavior.)
+                    if (sign > 0) { ++pos; pos_bps.push_back(sc.face_coord); }
+                    else          { ++neg; neg_bps.push_back(sc.face_coord); }
+                }
             }
         }
         for (const auto& conn : cs.conns) {
@@ -766,16 +778,46 @@ void derive_net_pull(const Topology& topo, const Floorplan& fp,
             // multiply the pull.  If far segments lie on both sides, cs is
             // interior and exerts no pull.
             int far_hi = 0, far_lo = 0;
+            int near_lo_bound = INT_MAX;   // min far.perp_lo over the above set
+            int near_hi_bound = INT_MIN;   // max far.perp_hi over the below set
             for (const auto& sc : nb.conns) {
                 if (sc.kind != SegConn::SEG || sc.seg_idx == ci) continue;
                 const ConnSeg& far = segs[sc.seg_idx];
-                if      (cs.perp_pos < far.perp_lo) ++far_hi;   // far is above/right of cs
-                else if (cs.perp_pos > far.perp_hi) ++far_lo;   // far is below/left  of cs
+                if (cs.perp_pos < far.perp_lo) {          // far is above/right of cs
+                    ++far_hi;
+                    near_lo_bound = std::min(near_lo_bound, far.perp_lo);
+                } else if (cs.perp_pos > far.perp_hi) {   // far is below/left  of cs
+                    ++far_lo;
+                    near_hi_bound = std::max(near_hi_bound, far.perp_hi);
+                }
             }
-            if      (far_hi > 0 && far_lo == 0) ++pos;   // cs is the low endpoint → pull toward hi
-            else if (far_lo > 0 && far_hi == 0) ++neg;   // cs is the high endpoint → pull toward lo
+            // A spine vote saturates at the NEAREST far segment's slide bound:
+            // moving cs toward the far side shortens the spine until cs meets
+            // the first far interval — the exact overshoot boundary the
+            // outside-interval gate above exists for (see flow/pull2.buda).
+            if (far_hi > 0 && far_lo == 0) {
+                ++pos; pos_bps.push_back(near_lo_bound);
+            } else if (far_lo > 0 && far_hi == 0) {
+                ++neg; neg_bps.push_back(near_hi_bound);
+            }
         }
         cs.net_pull = pos - neg;
+        // Slope-crossing breakpoint of the net pull.  Travelling in the net
+        // direction, total-WL slope starts at -(same_dir - opp_dir) votes and
+        // gains +2 per same-direction breakpoint passed (that vote flips from
+        // shortening to lengthening), so the optimum is the ceil(net/2)-th
+        // same-direction breakpoint in travel order.  Opposite-direction
+        // breakpoints lie behind the travel and never flip.
+        cs.pull_break = INT_MIN;
+        if (cs.net_pull > 0 && !pos_bps.empty()) {
+            std::sort(pos_bps.begin(), pos_bps.end());          // travel = ascending
+            int k = std::min((cs.net_pull + 1) / 2, (int)pos_bps.size());
+            cs.pull_break = pos_bps[k - 1];
+        } else if (cs.net_pull < 0 && !neg_bps.empty()) {
+            std::sort(neg_bps.begin(), neg_bps.end(), std::greater<int>());  // descending
+            int k = std::min((-cs.net_pull + 1) / 2, (int)neg_bps.size());
+            cs.pull_break = neg_bps[k - 1];
+        }
     }
 }
 

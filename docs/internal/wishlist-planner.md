@@ -291,6 +291,16 @@ alphabetically (`(wl, type)`, ASCII `'+' < '@'`) then by lowest index — see
 shape families"* for the generation-side follow-ons (Hanan-line loci,
 structural tie-break) and why the score-term route shipped first.
 
+**Update (2026-07-17, post pull-breakpoint clamp):** the NUTS pull-target
+breakpoint clamp ([`wishlist-nuts.md`](wishlist-nuts.md) → *"Pull-target
+breakpoint clamp"*) removed b44's +1000/bit realization overshoot at the
+source, so the DEFAULT pipeline now realizes the MST at 3627/bit and the
+knob's b44 delta collapsed to ~0.1% (its test asserts "not worse").  The
+knob remains the selection-level guard for realization risk the clamp
+cannot remove (contention-driven stretch; wide envelopes still price real
+risk on congested designs — the mempool_tile/bigHalf numbers below predate
+the clamp and should be re-measured before a default-flip decision).
+
 **Default-flip criteria (stays opt-in for now):** same bar as `kPeak` — the
 opens shuffle on plain pipelines means a blanket default needs either (a) the
 healers in the default flow path, or (b) a spread term that prices only the

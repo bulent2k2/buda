@@ -163,6 +163,29 @@ static void build_nuts_maps(
                     preferred = (hi < kSentinel) ? hi : pull_map[key];  // fallback
                 else
                     preferred = (lo > -kSentinel) ? lo : pull_map[key]; // fallback
+                // Breakpoint clamp: stop the pull at its wirelength saturation
+                // point (ConnSeg::pull_break) instead of the window edge — on a
+                // wide interior window the edge overshoots the point where the
+                // pull's gain ends and stretches the coupled trunk between the
+                // connectors (b44's TRUNK_H+MST: the seg1 connector's window
+                // reaches 940 past its breakpoint; the overshoot was the whole
+                // +1000/bit realization excess).  Only when the breakpoint lies
+                // WITHIN the travel from nominal to the bound (a tightening,
+                // never a new direction), and never for a dogleg-pinned slide
+                // (its bound IS the exported trunk position, the intent).  The
+                // dogleg net-pull override keeps the raw bound too: its votes
+                // were computed on the pre-split topology, so the recomputed
+                // breakpoint does not describe the split piece.
+                const bool np_overridden =
+                    (np_ok && bw.plan.seg_net_pull[si] != INT_MIN &&
+                     bw.plan.seg_net_pull[si] != cs.net_pull);
+                if (!slide_pinned && !np_overridden && cs.pull_break != INT_MIN) {
+                    const double bp = static_cast<double>(cs.pull_break);
+                    if (eff_net_pull > 0 && bp > cs.perp_pos && bp < preferred)
+                        preferred = bp;
+                    else if (eff_net_pull < 0 && bp < cs.perp_pos && bp > preferred)
+                        preferred = bp;
+                }
                 pull_map[key] = preferred;
             } else if (n_bt == 0 && perp_ok &&
                        bw.plan.seg_perp[si] != INT_MIN) {
