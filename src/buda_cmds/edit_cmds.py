@@ -30,8 +30,12 @@ import buda
 # against the edit session's own floorplan (cell-local for a hier template),
 # so a folded command tracks the floorplan instead of hard-coding numbers.
 # The GUI's [edit-cmd] log emits the same form for block-pinned endpoints.
+# The block name is parsed GREEDILY from the face suffix (the `.ref` is
+# anchored at the end), because block names themselves may contain dots
+# (`IO.PAD`, `u_cpu0.c0l3c0` in the bundled demos) — `IO.PAD.right-20`
+# resolves block `IO.PAD`, face `right`, offset -20.
 _COORD_REF = re.compile(
-    r"^([A-Za-z_]\w*(?:/\w+)*)\.(left|right|top|bottom|cx|cy)([+-]\d+)?$")
+    r"^(.+)\.(left|right|top|bottom|cx|cy)([+-]\d+)?$")
 
 
 def _coord(session, tok):

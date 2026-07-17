@@ -1120,6 +1120,29 @@ def test_cli_edit_coords_accept_block_face_refs(capsys):
     s.do_command("edit_abort")
 
 
+def test_cli_edit_coord_refs_with_dotted_block_names(capsys):
+    """Codex #323 P1: block names may themselves contain dots (IO.PAD,
+    u_cpu0.c0l3c0) — the reference parses the face from the SUFFIX, so
+    `IO.PAD.right-20` resolves block `IO.PAD` and sidecar replay of a
+    GUI-emitted op never falls through to int()."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    for cmd in (
+        "def_layer 4 M4 H TOP 10", "def_layer 5 M5 V TOP 10",
+        "add_block IO.PAD 0 0 100 100",
+        "add_block u_cpu0.c0l3c0 200 0 300 100",
+        "add_bus v[4] IO.PAD.o u_cpu0.c0l3c0.i",
+        "run_bundler", "generate_topologies",
+        "edit_topology 1 new",
+        "edit_add_trunk H IO.PAD.top+50 IO.PAD.cx u_cpu0.c0l3c0.cx",
+    ):
+        s.do_command(cmd)
+    sg = s._edit_topo.segments[0]
+    assert sg.start.y == sg.end.y == 150
+    assert (min(sg.start.x, sg.end.x), max(sg.start.x, sg.end.x)) == (50, 250)
+    s.do_command("edit_abort")
+
+
 def test_pin_block_endpoints_logged_symbolically(tmp_path, capsys):
     """A P block-pinned endpoint is logged as a block/face REFERENCE
     (a1.right-20), not an absolute coordinate."""
