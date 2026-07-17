@@ -33,23 +33,26 @@ def _endpoint_label(src, dsts, fanin=False):
 
 
 def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
-    # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk]
+    # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [hanan_loci]
     # Single dst  → 2-pin L/Z/U candidates
     # Multiple dst → multicast trunk+branch candidates
     # Append "center_mode"    to use block centres instead of busterm faces.
     # Append "double_detour"  to include UU_VHV / UU_HVH high-congestion variants.
     # Append "multi_trunk"    to add two-level BITRUNK_HVH/VHV datapath trees.
+    # Append "hanan_loci"     to also sample trunk loci ON in-bbox Hanan lines.
     use_center        = "center_mode"   in args
     use_double_detour = "double_detour" in args
     use_multi_trunk   = "multi_trunk"   in args
+    use_hanan_loci    = "hanan_loci"    in args
     pos_args = [a for a in args
-                if a not in ("center_mode", "double_detour", "multi_trunk")]
+                if a not in ("center_mode", "double_detour", "multi_trunk",
+                             "hanan_loci")]
     if not pos_args:
         print("Error: generate_topologies_for_bundle requires a hint")
         return
     hint = pos_args[0]
     topo_gen = session._make_topo_gen(session.fp, use_center, use_double_detour,
-                                   use_multi_trunk)
+                                   use_multi_trunk, use_hanan_loci)
     found = False
     for w in session.bundles:
         net_name = w.input.original_bundle.get_net_names()[0]
@@ -83,7 +86,7 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
 
 
 def cmd_generate_more_topologies(session, cmd, args, cmd_line):
-    # Usage: generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk]
+    # Usage: generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk] [hanan_loci]
     # ADDITIVE variant of generate_topologies_for_bundle /
     # generate_topologies_for_hbundle (Phase E2 of topo_conn_unification.md):
     # run the generator with the given knobs and merge the new candidates
@@ -107,8 +110,10 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
     use_center        = "center_mode"   in args
     use_double_detour = "double_detour" in args
     use_multi_trunk   = "multi_trunk"   in args
+    use_hanan_loci    = "hanan_loci"    in args
     pos_args = [a for a in args
-                if a not in ("center_mode", "double_detour", "multi_trunk")]
+                if a not in ("center_mode", "double_detour", "multi_trunk",
+                             "hanan_loci")]
     if not pos_args:
         print("Error: generate_more_topologies requires a hint")
         return
@@ -170,10 +175,12 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
         for w in targets:
             session._generate_hier_topo_one(w, use_center, use_double_detour,
                                             fp_cache, comps_by_name,
-                                            use_multi_trunk, additive=True)
+                                            use_multi_trunk, additive=True,
+                                            use_hanan_loci=use_hanan_loci)
     else:
         topo_gen = session._make_topo_gen(session.fp, use_center,
-                                          use_double_detour, use_multi_trunk)
+                                          use_double_detour, use_multi_trunk,
+                                          use_hanan_loci)
         for w in session.bundles:
             net_name = w.input.original_bundle.get_net_names()[0]
             if not net_name.startswith(hint):
@@ -205,7 +212,8 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
     knobs = " ".join(k for k, on in (
         ("center_mode", use_center),
         ("double_detour", use_double_detour),
-        ("multi_trunk", use_multi_trunk)) if on)
+        ("multi_trunk", use_multi_trunk),
+        ("hanan_loci", use_hanan_loci)) if on)
     if session.bdb is not None and knobs:
         for w in targets:
             bid = str(w.input.original_bundle.id)
@@ -217,7 +225,7 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
 
 
 def cmd_generate_topologies(session, cmd, args, cmd_line):
-    # Usage: generate_topologies [center_mode] [double_detour]
+    # Usage: generate_topologies [center_mode] [double_detour] [multi_trunk] [hanan_loci]
     # Generates topologies for every bundle produced by run_bundler,
     # deriving src/dst block names from the netlist automatically.
     if not session.bundles:
@@ -232,8 +240,9 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
     use_center        = "center_mode"   in args
     use_double_detour = "double_detour" in args
     use_multi_trunk   = "multi_trunk"   in args
+    use_hanan_loci    = "hanan_loci"    in args
     topo_gen = session._make_topo_gen(session.fp, use_center, use_double_detour,
-                                   use_multi_trunk)
+                                   use_multi_trunk, use_hanan_loci)
     for w in session.bundles:
         net_name = w.input.original_bundle.get_net_names()[0]
         ep = session._bundle_endpoints(w)
@@ -275,7 +284,7 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
 
 
 def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
-    # generate_hier_topologies [center_mode] [double_detour] [multi_trunk]
+    # generate_hier_topologies [center_mode] [double_detour] [multi_trunk] [hanan_loci]
     # Generates topology candidates for all HBundles produced by
     # run_hier_bundler.  Three cases per bundle:
     #   (a) cell-level (cell_context set)     → cell-local floorplan
@@ -290,9 +299,11 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
     use_center        = "center_mode"   in args
     use_double_detour = "double_detour" in args
     use_multi_trunk   = "multi_trunk"   in args
+    use_hanan_loci    = "hanan_loci"    in args
     # Remembered so a rotation-class clone created later (at run_planner
     # hier) generates its candidates with the same knobs.
-    session._hier_gen_knobs = (use_center, use_double_detour, use_multi_trunk)
+    session._hier_gen_knobs = (use_center, use_double_detour, use_multi_trunk,
+                               use_hanan_loci)
 
     # Cache floorplans keyed by (depth, is_cell_local, instance_or_empty)
     fp_cache = {}
@@ -303,7 +314,8 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
         old_pin_uid = session._pinned_uid(w)
         n = session._generate_hier_topo_one(w, use_center, use_double_detour,
                                           fp_cache, comps_by_name,
-                                          use_multi_trunk)
+                                          use_multi_trunk,
+                                          use_hanan_loci=use_hanan_loci)
         # Honor the bundle's persisted generation-knob memo (v15): re-apply
         # prior generate_more_topologies accretions additively so the pool
         # does not silently revert on a bulk regeneration (Phase E2b — the
@@ -323,7 +335,7 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
 
 
 def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
-    # Usage: generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk]
+    # Usage: generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk] [hanan_loci]
     if not args:
         print("Error: generate_topologies_for_hbundle requires a bundle_id"); return
     if session.bdb is None:
@@ -335,6 +347,7 @@ def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
     use_center        = "center_mode"   in args[1:]
     use_double_detour = "double_detour" in args[1:]
     use_multi_trunk   = "multi_trunk"   in args[1:]
+    use_hanan_loci    = "hanan_loci"    in args[1:]
     target_w = next((w for w in session.bundles if w.input.original_bundle.id == bid), None)
     if target_w is None:
         orig_w = next((w for w in session._hier_bundles_orig
@@ -348,7 +361,8 @@ def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
     fp_cache = {}
     comps_by_name = {c.name: c for c in session.bdb.all_components()}
     n = session._generate_hier_topo_one(target_w, use_center, use_double_detour,
-                                      fp_cache, comps_by_name, use_multi_trunk)
+                                      fp_cache, comps_by_name, use_multi_trunk,
+                                      use_hanan_loci=use_hanan_loci)
     print(f"generate_topologies_for_hbundle: bundle {bid} — {n} candidates")
     if session._persist_topologies():
         print("[BDB] re-persisted candidate topologies to the open BDB.")

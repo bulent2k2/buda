@@ -47,15 +47,9 @@ Feature: Roadmap — documented open items & future directions
     Then the trunk slides along its axis without inflating wirelength or flipping planner selections
 
   # ── Nominal-WL comparability (opens #13, wishlist-topo.md — the b44 follow-ons) ──
-
-  Scenario: trunk loci are sampled on Hanan lines as well as channel midpoints
-    # see docs/internal/wishlist-topo.md "Nominal-WL comparability" + opens.md #13
-    # Today loci = midpoints between adjacent Hanan lines only, so the WL-optimal
-    # edge-aligned trunk (b44's x=1200) is never emitted and the tight 2-seg
-    # candidate carries a +500 nominal overshoot its slide window could remove.
-    Given a multicast bundle whose WL-optimal trunk position lies ON a Hanan line
-    When generate_topologies samples trunk loci
-    Then a candidate at the Hanan-line locus exists with its nominal at the geometric floor
+  # Piece (a) — trunk loci ON Hanan lines — SHIPPED 2026-07-17 as the opt-in
+  # `hanan_loci` generation knob; its scenario moved to the @landed
+  # hanan_trunk_loci.feature (bound by test_topo_hanan_loci.py).
 
   # Piece (b) — structural (wl, nsegs, type) tie-break — SHIPPED 2026-07-17
   # (annotate_and_sort + the Python pool-merge resort); its scenario moved to

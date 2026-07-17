@@ -933,13 +933,15 @@ class HierMixin:
 
     def _generate_hier_topo_one(self, w, use_center, use_double_detour,
                                 fp_cache, comps_by_name, use_multi_trunk=False,
-                                additive=False):
+                                additive=False, use_hanan_loci=False):
         """Generate topology candidates for a single HBundle wrapper.
 
         Updates w.input.candidates in place. Returns candidate count.
         fp_cache is a dict shared across calls; pass {} for a fresh cache.
         comps_by_name is {name: ComponentRow} from bdb.all_components().
         use_multi_trunk adds two-level BITRUNK_HVH/VHV datapath trees (opt-in),
+        as in the flat generate_topologies.
+        use_hanan_loci also samples trunk loci ON in-bbox Hanan lines (opt-in),
         as in the flat generate_topologies.
 
         additive=True is the generate_more_topologies contract: the fresh
@@ -981,7 +983,7 @@ class HierMixin:
                 print(f"  Warning: could not build cell-local fp for {parent_name!r} — skipping")
                 return 0
             tg = self._make_topo_gen(cell_fp, use_center, use_double_detour,
-                                     use_multi_trunk)
+                                     use_multi_trunk, use_hanan_loci)
             entries = [e.removeprefix('bt:').rsplit('/', 1)[-1]
                        for e in b.entry_busterm_ids]
             exits = [e.removeprefix('bt:').rsplit('/', 1)[-1]
@@ -1043,7 +1045,7 @@ class HierMixin:
             if not ok:
                 return 0
             tg = self._make_topo_gen(fp, use_center, use_double_detour,
-                                     use_multi_trunk)
+                                     use_multi_trunk, use_hanan_loci)
             n, detail = install(tg.generate_candidates(b.drv_spec_path,
                                                        list(b.rcv_spec_paths)))
             label = (f"{b.drv_spec_path}→{b.rcv_spec_paths[0]}"
@@ -1070,7 +1072,7 @@ class HierMixin:
                 fp_cache[cache_key] = self._build_bdb_floorplan(ep_depth)
             depth_fp = fp_cache[cache_key]
             tg = self._make_topo_gen(depth_fp, use_center, use_double_detour,
-                                     use_multi_trunk)
+                                     use_multi_trunk, use_hanan_loci)
             if src is None:
                 print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
                 return 0
@@ -1104,7 +1106,8 @@ class HierMixin:
         ks = set(knobs.split())
         added = self._generate_hier_topo_one(
             w, "center_mode" in ks, "double_detour" in ks, fp_cache,
-            comps_by_name, "multi_trunk" in ks, additive=True)
+            comps_by_name, "multi_trunk" in ks, additive=True,
+            use_hanan_loci="hanan_loci" in ks)
         if added:
             print(f"  Re-applied knob memo '{knobs}' for bundle "
                   f"{w.input.original_bundle.id}: +{added} candidate(s).")
@@ -1326,7 +1329,7 @@ class HierMixin:
                 replicas.setdefault(b.parent_id, []).append(w)
         next_id = max((w.input.original_bundle.id
                        for w in self.bundles), default=-1) + 1
-        knobs = getattr(self, "_hier_gen_knobs", (False, False, False))
+        knobs = getattr(self, "_hier_gen_knobs", (False, False, False, False))
         ocache, fp_cache = {}, {}
 
         # Pass 1 — classify per cell_context against the per-cell
@@ -1421,13 +1424,15 @@ class HierMixin:
                 # cell-local floorplan.
                 self._generate_hier_topo_one(nw, knobs[0], knobs[1],
                                              fp_cache, comps_by_name,
-                                             knobs[2])
+                                             knobs[2],
+                                             use_hanan_loci=knobs[3])
                 if ref_moved:
                     # The kept side lost the instance its candidates were
                     # generated from — regenerate in its new frame.
                     self._generate_hier_topo_one(w, knobs[0], knobs[1],
                                                  fp_cache, comps_by_name,
-                                                 knobs[2])
+                                                 knobs[2],
+                                                 use_hanan_loci=knobs[3])
             else:
                 # Rotated-only template: the WHOLE bundle belongs to the
                 # clone class — re-context in place (same id, nets, and
@@ -1446,7 +1451,8 @@ class HierMixin:
                     # regenerate from the class reference.
                     self._generate_hier_topo_one(w, knobs[0], knobs[1],
                                                  fp_cache, comps_by_name,
-                                                 knobs[2])
+                                                 knobs[2],
+                                                 use_hanan_loci=knobs[3])
         if not made:
             return 0
         self.bundles = result
@@ -2882,7 +2888,7 @@ class HierMixin:
         return result, expansion_map
 
     def _make_topo_gen(self, fp, use_center=False, use_double_detour=False,
-                       use_multi_trunk=False):
+                       use_multi_trunk=False, use_hanan_loci=False):
         """Create a TopologyGenerator on fp with the current layer stack."""
         tg = buda.TopologyGenerator(fp)
         h = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
@@ -2906,6 +2912,8 @@ class HierMixin:
             tg.set_double_detour(True)
         if use_multi_trunk:
             tg.set_multi_trunk(True)
+        if use_hanan_loci:
+            tg.set_hanan_loci(True)
         return tg
 
     def _make_layer_names(self):

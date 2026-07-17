@@ -24,7 +24,7 @@ along-overlap requirement in `seg_spans_rect` with the perp-face inclusive
 bounds kept (face landings are real).  The display predicate
 (`reports.py::_seg_crosses_rect`) is deliberately stricter — see its docstring.
 
-## Nominal-WL comparability across shape families (the b44 root causes) — OPEN (piece b ✅)
+## Nominal-WL comparability across shape families (the b44 root causes) — (a)+(b) SHIPPED, (c) OPEN
 
 **Context (2026-07-16, `flow/big_data_test/b44.buda`; deep-dive after the
 `kWLSpread` ship, see wishlist-planner "Realization-risk WL"):** the b44
@@ -93,9 +93,36 @@ planner scoring where the other cost terms already arbitrate.
 envelope spread, which resolves exactly these ties toward the tightest
 realization (b44: picks `TRUNK_V@x1950`, detailed 188513 = 3625/bit, −19.6%,
 better than the flow's hand-pin). **Generation-side follow-ons (this item):**
-(a) also sample trunk loci ON Hanan lines (or at least the per-window
-WL-optimal edge) so simple trunks can nominal at the floor — cheap, but
-grows the pool ~2×; ✅ **(b) SHIPPED 2026-07-17: the WL tie-break is
+(a) **SHIPPED (2026-07-17, opt-in `hanan_loci` generation knob)** — also
+sample n-pin trunk loci ON the in-bbox Hanan lines
+(`TopologyGenerator::allow_hanan_loci_`, gating an extra insert into
+`generate_npin`'s `x_set`/`y_set` beside the channel midpoints; the whole
+TRUNK_H/V family inherits it — `+MST` hybrids derive from the trunk results,
+BITRUNK positions are quartile/cluster-data-driven not channel-sampled, the
+2-pin Z is WL-locus-independent, and OOB loci are beyond the floor by
+definition).  On b44 the knob emits `TRUNK_V@x1200` (io_pad_tl's right edge)
+AT the 3510 floor — `test_topo_hanan_loci.py` guards both that and the
+knob-off default pool staying byte-identical.  **Measured:** pool growth is
+~1.3–1.6×, NOT the predicted ~2× (b44 23→35 (+52%), comprehensive_demo
+154→245 (+59%), rnr/mix hier 1237→1688 (+36%), big2/b4_bus_077 17→22
+(+29%)); QoR endpoints byte-identical knob-on vs knob-off on b44 unpinned /
+comprehensive_demo / b4_bus_077 (measured pre-(b): the then-alphabetical
+tie-break still picked the same `TRUNK_H+MST` at the 3510 tie — the
+combined `hanan_loci` + structural-tiebreak corpus measurement is the
+pending default-flip decision point), mix shifts to
+1 overlap / 32 dnuts-unplaced (from 0/0) with detailed WL −0.5% — the
+default-on QoR blocker, together with 16 fast-tier failures from index
+renumbering incl. `topo_analysis` goldens (CONTENT shifts from new candidates —
+order-only shifts are now absorbed by (b)'s canonical comparison; the
+content regen stays reference-host-owned), is WHY it shipped opt-in; generation runtime +0.12s on mix
+(0.41→0.53s).  **Interplay caution (measured):** `hanan_loci` +
+`kWLSpread 0.125` on b44 picks the edge-aligned `TRUNK_V@x1200` (floor
+nominal, narrowest envelope) but realizes 3719/bit (193376) — the
+window-EDGE effect quoted above (the bus centre cannot reach an
+edge-aligned optimum), vs `TRUNK_V@x1950`'s interior-optimum 3625/bit
+(188513) that `kWLSpread` alone picks; an envelope term that prices
+edge-vs-interior optima is the (b)/(c)-adjacent follow-on.
+✅ **(b) SHIPPED 2026-07-17: the WL tie-break is
 structural** — `annotate_and_sort` (and the Python pool-merge resort
 `_resort_pool_preserving_selection`, its replica for
 `generate_more_topologies`/knob-memo replays) orders by `(wl, nsegs, type)`:
