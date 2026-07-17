@@ -409,42 +409,57 @@ class ExplorerNavMixin:
             return None
         return min(xs), max(xs), min(ys), max(ys)
 
+    def _seg_zoom_box(self):
+        """The selected segment's SPAN + SLIDE box — the region the drawn wire
+        and its slide band actually occupy (the nominal endpoints alone drift
+        off the slide-centered display position, shifting the zoom): along =
+        the segment's span, perp = its slide range (NUTS override honored),
+        an unbounded side collapsing to the display perp.  None when nothing
+        is selected."""
+        topo = self._shown_topo()
+        if not (0 <= self.sidx < len(topo.segments)):
+            return None
+        cs_list = list(self._build_conn_topo(topo).segs())
+        cs = cs_list[self.sidx]
+        s_lo, s_hi = self._seg_slide(cs, self.sidx)
+        if self._is_dogleg_seg(self.sidx):
+            raw = topo.segments[self.sidx]
+            disp = float(raw.start.y if cs.horiz else raw.start.x)
+        elif abs(s_lo) < _UNCONSTRAINED and abs(s_hi) < _UNCONSTRAINED:
+            disp = (float(s_lo) + float(s_hi)) / 2.0
+        else:
+            disp = float(cs.perp_pos)
+        p_lo = float(s_lo) if abs(s_lo) < _UNCONSTRAINED else disp
+        p_hi = float(s_hi) if abs(s_hi) < _UNCONSTRAINED else disp
+        a_lo, a_hi = float(cs.along_lo), float(cs.along_hi)
+        if cs.horiz:
+            return a_lo, a_hi, p_lo, p_hi
+        return p_lo, p_hi, a_lo, a_hi
+
     def _zoom_to_bundle(self, _=None):
         """cmd/ctrl-z: zoom to the active bundle's bbox — and with a segment
         selected (j/k), TOGGLE between the bundle bbox and the selected
-        segment on repeated presses.  A tiny segment (longer bbox dim <= 10%
-        of the bundle bbox's shorter dim) zooms at most 4x past the bundle
-        view, centered on the segment, instead of filling the window with a
-        sliver."""
+        segment on repeated presses (segment first).  The segment view frames
+        its span+slide box CENTERED, scaled so the box covers at most 1/9 of
+        the canvas (1/3 per dimension) — the window filler can only expand an
+        axis further, so coverage never exceeds that."""
         bb = self._bundle_zoom_bbox()
         if bb is None:
             return
         bx0, bx1, by0, by1 = bb
         bpad_x = max((bx1 - bx0) * 0.2, 50)
         bpad_y = max((by1 - by0) * 0.2, 50)
-        topo = self._shown_topo()
-        if (self._zoom_sel_mode == 'bundle'
-                and 0 <= self.sidx < len(topo.segments)):
-            seg = topo.segments[self.sidx]
-            sx0, sx1 = sorted((float(seg.start.x), float(seg.end.x)))
-            sy0, sy1 = sorted((float(seg.start.y), float(seg.end.y)))
-            seg_long = max(sx1 - sx0, sy1 - sy0)
-            # Ratio against the PADDED bundle dims: the raw bbox of a nearly
-            # collinear bundle can be a sliver on one axis (endpoints only),
-            # and the pads floor it at a real viewing extent.
-            if seg_long <= 0.10 * min(bx1 - bx0 + 2 * bpad_x,
-                                      by1 - by0 + 2 * bpad_y):
-                # Cap: the bundle view's dims / 4, centered on the segment.
-                cx, cy = (sx0 + sx1) / 2, (sy0 + sy1) / 2
-                w = (bx1 - bx0 + 2 * bpad_x) / 4
-                h = (by1 - by0 + 2 * bpad_y) / 4
-                _set_lims_filling_box(self.ax, cx - w / 2, cx + w / 2,
-                                      cy - h / 2, cy + h / 2)
-            else:
-                pad_x = max((sx1 - sx0) * 0.2, 50)
-                pad_y = max((sy1 - sy0) * 0.2, 50)
-                _set_lims_filling_box(self.ax, sx0 - pad_x, sx1 + pad_x,
-                                      sy0 - pad_y, sy1 + pad_y)
+        box = (self._seg_zoom_box()
+               if self._zoom_sel_mode == 'bundle' else None)
+        if box is not None:
+            sx0, sx1, sy0, sy1 = box
+            cx, cy = (sx0 + sx1) / 2, (sy0 + sy1) / 2
+            # View = 3x the box per dimension, floored so a degenerate box
+            # (pinched slide + point span) still yields a real viewport.
+            w = 3 * max(sx1 - sx0, 50.0)
+            h = 3 * max(sy1 - sy0, 50.0)
+            _set_lims_filling_box(self.ax, cx - w / 2, cx + w / 2,
+                                  cy - h / 2, cy + h / 2)
             self._zoom_sel_mode = 'seg'
         else:
             _set_lims_filling_box(self.ax, bx0 - bpad_x, bx1 + bpad_x,
