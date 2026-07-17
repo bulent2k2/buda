@@ -236,10 +236,16 @@ void DetailedNUTSEngine::place_by_layer(
         const RoutingGrid& grid = stack_.get_layer_grid(layer);
 
         // Assignments already made on this layer; used to reserve tracks.
+        // track_positions is ascending and bits_on_track is parallel to it
+        // (the GLOBAL bit index riding each track) so a later same-bundle
+        // segment can check per-track bit identity — the same-bundle sharing
+        // exemption is only sound when a shared track carries the SAME bit
+        // (net) on both segments.
         struct LayerAssignment {
             int bundle_id;
             double span_lo, span_hi, interval_lo, interval_hi;
             std::vector<double> track_positions;
+            std::vector<int>    bits_on_track;
         };
         std::vector<LayerAssignment> layer_assigns;
 
@@ -249,11 +255,15 @@ void DetailedNUTSEngine::place_by_layer(
         // assignment (same span/interval overlap test, same same-bundle
         // sharing exemption).
         {
-            std::map<std::pair<int,int>, LayerAssignment> groups;
+            struct FixedGroup {
+                LayerAssignment a;
+                std::vector<std::pair<double,int>> track_bits; // (track, bit)
+            };
+            std::map<std::pair<int,int>, FixedGroup> groups;
             for (const auto& nb : fixed_bits_) {
                 if (nb.layer != layer) continue;
                 auto [it, fresh] = groups.try_emplace({nb.bundle_id, nb.seg_idx});
-                LayerAssignment& g = it->second;
+                LayerAssignment& g = it->second.a;
                 const double lo = std::min(nb.span_lo, nb.span_hi);
                 const double hi = std::max(nb.span_lo, nb.span_hi);
                 if (fresh) {
@@ -276,9 +286,16 @@ void DetailedNUTSEngine::place_by_layer(
                     g.interval_hi = std::max(g.interval_hi,
                                              nb.track_position + nb.width);
                 }
-                g.track_positions.push_back(nb.track_position);
+                it->second.track_bits.push_back({nb.track_position, nb.bit_index});
             }
-            for (auto& [k, g] : groups) layer_assigns.push_back(std::move(g));
+            for (auto& [k, fg] : groups) {
+                std::sort(fg.track_bits.begin(), fg.track_bits.end());
+                for (auto& [t, b] : fg.track_bits) {
+                    fg.a.track_positions.push_back(t);
+                    fg.a.bits_on_track.push_back(b);
+                }
+                layer_assigns.push_back(std::move(fg.a));
+            }
         }
 
         // --------------------------------------------------------------- //
@@ -333,10 +350,36 @@ void DetailedNUTSEngine::place_by_layer(
             }
 
             // Collect track positions already reserved by competing segments.
-            // Segments from the SAME bundle are allowed to share tracks.
+            // Segments from the SAME bundle may share tracks — but only
+            // BIT-FOR-BIT: bit k of two segments is the same net (sharing a
+            // track is a join), while bit k and bit j≠k are different nets
+            // (sharing a track is a short — the BIT_SHORT class check_dnuts
+            // audits).  A same-bundle assignment whose span interacts with
+            // this segment's is therefore a HAZARD, handled below: either
+            // this segment adopts its exact per-bit track list (alignment) or
+            // treats its tracks as reserved (disjoint windows).  The span
+            // test is closed and dilated by the sibling's track extent: the
+            // bit-span adjustment staggers each bit's endpoint to its
+            // junction partner's per-bit track, so wires reach up to about
+            // one bus extent past the abstract span endpoint.
             std::set<double> reserved;
+            std::vector<const LayerAssignment*> hazards;
+            // Normalized extent of this segment's span: make_bus_segments
+            // deliberately preserves reversed NUTS spans (span_lo > span_hi,
+            // see the span-adjustment pass), and a raw-order comparison would
+            // miss a real overlap and leave a bit short unrepaired.
+            const double bs_lo = std::min(bs.span_lo, bs.span_hi);
+            const double bs_hi = std::max(bs.span_lo, bs.span_hi);
             for (const auto& asgn : layer_assigns) {
-                if (asgn.bundle_id == bs.bundle_id) continue;
+                if (asgn.bundle_id == bs.bundle_id) {
+                    const double dil = asgn.track_positions.empty() ? 0.0
+                        : asgn.track_positions.back() - asgn.track_positions.front();
+                    const double a_lo = std::min(asgn.span_lo, asgn.span_hi);
+                    const double a_hi = std::max(asgn.span_lo, asgn.span_hi);
+                    if (a_lo <= bs_hi + dil && a_hi + dil >= bs_lo)
+                        hazards.push_back(&asgn);
+                    continue;
+                }
 
                 bool span_ov = asgn.span_lo < bs.span_hi && asgn.span_hi > bs.span_lo;
                 bool itvl_ov = asgn.interval_lo < bs.interval_hi &&
@@ -374,41 +417,51 @@ void DetailedNUTSEngine::place_by_layer(
             // span-follow) and net_names[bit_index] stay consistent.
             const int  bw = bus_seg_nbits(bs);
 
-            // chosen_indices: the bw signal-track indices to use,
-            // already sorted by track position (ascending).
-            std::vector<int> chosen_indices;
+            // The GLOBAL bit that rides ascending-track rank i of this
+            // segment (mirrors the emission mapping below: rank -> local bit
+            // via bit_order, local -> global via bit_list).
+            auto bit_on_rank = [&](int i) {
+                const int b = (bs.bit_order == "HI_LO") ? (bw - 1 - i) : i;
+                return bs.bit_list.empty() ? b : bs.bit_list[b];
+            };
 
-            if (use_anchor && !bs.timing_critical) {
-                // Path A: N closest available tracks.
-                std::vector<int> avail;
-                avail.reserve(n_sig);
-                for (int k = 0; k < n_sig; ++k)
-                    if (!reserved.count(signal_tracks[k].first))
-                        avail.push_back(k);
+            // choose(): today's Path A / Path B track selection against a
+            // given reserved set.  Factored so the same-bundle hazard
+            // resolution below can re-run it with the hazard tracks added.
+            // Returns the bw chosen signal-track indices ascending, or empty
+            // on failure (prints the corresponding warning).
+            auto choose = [&](const std::set<double>& resv) -> std::vector<int> {
+                std::vector<int> chosen;
+                if (use_anchor && !bs.timing_critical) {
+                    // Path A: N closest available tracks.
+                    std::vector<int> avail;
+                    avail.reserve(n_sig);
+                    for (int k = 0; k < n_sig; ++k)
+                        if (!resv.count(signal_tracks[k].first))
+                            avail.push_back(k);
 
-                if ((int)avail.size() < bw) {
-                    std::cout << "[DetailedNUTS] Warning: Layer " << layer
-                              << " has " << avail.size() << " unreserved tracks"
-                              << " (need " << bw << ") in interval ["
-                              << bs.interval_lo << ", " << bs.interval_hi
-                              << "] — reservation conflict (bundle " << bs.bundle_id << ")"
-                              << std::endl;
-                    result.num_unplaced += bw;
-                    if (over_budget()) return;
-                    continue;
+                    if ((int)avail.size() < bw) {
+                        std::cout << "[DetailedNUTS] Warning: Layer " << layer
+                                  << " has " << avail.size() << " unreserved tracks"
+                                  << " (need " << bw << ") in interval ["
+                                  << bs.interval_lo << ", " << bs.interval_hi
+                                  << "] — reservation conflict (bundle " << bs.bundle_id << ")"
+                                  << std::endl;
+                        return chosen;
+                    }
+
+                    // Sort available by distance from abstract_pos.
+                    std::sort(avail.begin(), avail.end(), [&](int a, int b) {
+                        return std::abs(signal_tracks[a].first - bs.abstract_pos) <
+                               std::abs(signal_tracks[b].first - bs.abstract_pos);
+                    });
+
+                    // Take the bw closest; sort them by track index (= by position).
+                    chosen.assign(avail.begin(), avail.begin() + bw);
+                    std::sort(chosen.begin(), chosen.end());
+                    return chosen;
                 }
 
-                // Sort available by distance from abstract_pos.
-                std::sort(avail.begin(), avail.end(), [&](int a, int b) {
-                    return std::abs(signal_tracks[a].first - bs.abstract_pos) <
-                           std::abs(signal_tracks[b].first - bs.abstract_pos);
-                });
-
-                // Take the bw closest; sort them by track index (= by position).
-                chosen_indices.assign(avail.begin(), avail.begin() + bw);
-                std::sort(chosen_indices.begin(), chosen_indices.end());
-
-            } else {
                 // Path B: window-based (timing-critical or no anchor).
                 int best_start = -1;
                 double best_dist = std::numeric_limits<double>::max();
@@ -416,7 +469,7 @@ void DetailedNUTSEngine::place_by_layer(
                 for (int j = 0; j + bw <= n_sig; ++j) {
                     bool avail = true;
                     for (int k = j; k < j + bw; ++k) {
-                        if (reserved.count(signal_tracks[k].first)) { avail = false; break; }
+                        if (resv.count(signal_tracks[k].first)) { avail = false; break; }
                     }
                     if (!avail) continue;
 
@@ -447,20 +500,99 @@ void DetailedNUTSEngine::place_by_layer(
                               << bs.interval_lo << ", " << bs.interval_hi
                               << "] after reservation (bundle " << bs.bundle_id << ")"
                               << std::endl;
-                    result.num_unplaced += bw;
-                    if (over_budget()) return;
-                    continue;
+                    return chosen;
                 }
 
                 for (int k = 0; k < bw; ++k)
-                    chosen_indices.push_back(best_start + k);
-                // chosen_indices already in ascending order.
+                    chosen.push_back(best_start + k);
+                // chosen already in ascending order.
+                return chosen;
+            };
+
+            // Natural selection first — hazards invisible, exactly the
+            // historical behaviour (byte-identical whenever it is already
+            // short-free against every same-bundle sibling).
+            std::vector<int> chosen_indices = choose(reserved);
+            if (chosen_indices.empty()) {
+                result.num_unplaced += bw;
+                if (over_budget()) return;
+                continue;
+            }
+
+            // Same-bundle hazard resolution (see the hazards comment above):
+            // intervene ONLY when the natural choice actually conflicts —
+            // some chosen track already carries a DIFFERENT bit (a different
+            // net) of this bundle on a span-interacting sibling.
+            if (!hazards.empty()) {
+                auto conflicted = [&](const std::vector<int>& picks) {
+                    for (int i = 0; i < (int)picks.size(); ++i) {
+                        const double t   = signal_tracks[picks[i]].first;
+                        const int    bit = bit_on_rank(i);
+                        for (const LayerAssignment* H : hazards) {
+                            auto lb = std::lower_bound(H->track_positions.begin(),
+                                                       H->track_positions.end(), t);
+                            if (lb != H->track_positions.end() && *lb == t &&
+                                H->bits_on_track[lb - H->track_positions.begin()] != bit)
+                                return true;
+                        }
+                    }
+                    return false;
+                };
+                if (conflicted(chosen_indices)) {
+                    // First repair — ALIGN: adopt a hazard sibling's exact
+                    // track list when the per-bit mapping matches (same
+                    // count, same bit on every rank) and every track is
+                    // usable here (in this segment's pool — interval, span
+                    // availability, and corner bounds already applied — not
+                    // competitor-reserved, and carrying no conflicting bit
+                    // on any other hazard).  Bit k then lands on the SAME
+                    // track on both segments: their wires join at the
+                    // junction as one net — the exemption's sound case.
+                    std::vector<int> repaired;
+                    if (use_anchor && !bs.timing_critical) {
+                        std::map<double, int> pos_to_idx;
+                        for (int k = 0; k < n_sig; ++k)
+                            pos_to_idx[signal_tracks[k].first] = k;
+                        for (const LayerAssignment* A : hazards) {
+                            if ((int)A->track_positions.size() != bw) continue;
+                            bool ok = true;
+                            std::vector<int> idxs;
+                            idxs.reserve(bw);
+                            for (int i = 0; i < bw; ++i) {
+                                if (A->bits_on_track[i] != bit_on_rank(i)) { ok = false; break; }
+                                auto pit = pos_to_idx.find(A->track_positions[i]);
+                                if (pit == pos_to_idx.end() ||
+                                    reserved.count(A->track_positions[i])) { ok = false; break; }
+                                idxs.push_back(pit->second);
+                            }
+                            if (ok && conflicted(idxs)) ok = false;   // vs the OTHER hazards
+                            if (ok) { repaired = std::move(idxs); break; }
+                        }
+                    }
+                    // Second repair — DISJOINT: repick with every hazard
+                    // track reserved so the windows cannot interleave.  If
+                    // that leaves too few tracks the bits go honestly
+                    // unplaced (feeding the stage-b healing machinery)
+                    // rather than silently shorting — the same policy as
+                    // the cross-layer corner bound.
+                    if (repaired.empty()) {
+                        std::set<double> resv2 = reserved;
+                        for (const LayerAssignment* H : hazards)
+                            for (double p : H->track_positions) resv2.insert(p);
+                        repaired = choose(resv2);
+                    }
+                    if (repaired.empty()) {
+                        result.num_unplaced += bw;
+                        if (over_budget()) return;
+                        continue;
+                    }
+                    chosen_indices = std::move(repaired);
+                }
             }
 
             // Emit NetSegments.
             // For LO_HI: bit_index=0 → chosen_indices[0] (lowest position).
             // For HI_LO: bit_index=0 → chosen_indices[bw-1] (highest position).
-            std::vector<double> assigned;
             for (int bit = 0; bit < bw; ++bit) {
                 int ci = (bs.bit_order == "HI_LO") ? (bw - 1 - bit) : bit;
                 int ti = chosen_indices[ci];
@@ -474,11 +606,18 @@ void DetailedNUTSEngine::place_by_layer(
                 ns.span_lo        = bs.span_lo;
                 ns.span_hi        = bs.span_hi;
                 result.net_segments.push_back(ns);
-                assigned.push_back(signal_tracks[ti].first);
+            }
+            // Record ascending-track order with the parallel per-track bit
+            // (rank i carries bit_on_rank(i) — the emission mapping above).
+            std::vector<double> assigned;
+            std::vector<int>    assigned_bits;
+            for (int i = 0; i < bw; ++i) {
+                assigned.push_back(signal_tracks[chosen_indices[i]].first);
+                assigned_bits.push_back(bit_on_rank(i));
             }
             layer_assigns.push_back({bs.bundle_id, bs.span_lo, bs.span_hi,
                                      bs.interval_lo, bs.interval_hi,
-                                     std::move(assigned)});
+                                     std::move(assigned), std::move(assigned_bits)});
         }
     }
 }
