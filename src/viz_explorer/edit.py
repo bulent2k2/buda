@@ -90,6 +90,12 @@ class ExplorerEditMixin:
         self._trunk_pin_hover = None
         self._edit_grid_x  = set()
         self._edit_grid_y  = set()
+        # The session's working copy may have had more segments than the
+        # candidate we return to (abort after adding + selecting one): drop a
+        # selection index the restored topology can't resolve.
+        n = len(self.topos[self.idx].segments) if self.topos else 0
+        if not (0 <= self.sidx < n):
+            self.sidx = -1
         self._edit_msg     = msg
         self._draw()
 
