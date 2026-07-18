@@ -235,14 +235,86 @@ none go missing), the golden regen kit (6 files: four_blocks + dogleg2 fast,
 all four mid flows), 10 index-sensitive fast-tier tests made CONTENT-based
 (dogleg, alignment, tap-edge, charge_pull — green under both defaults), and
 the sidecar/BDB order-insensitivity verification (uid-first resolution;
-zero `(type, wl)` fallback collisions across all audited pools).  The flip
-itself stays blocked on the **degenerate face/abutment-coincident loci
-candidates** the audit surfaced — loci ON a shared face line emit
-all-tap trees that `check_topo` flags `DISCONNECTED` yet sort FIRST and get
-auto-selected (aligned columns!), junction-less trees that defeat the
-fan-in taper, and mis-tapped zero-slide face-riders that slip past
-`filter_pinched` — a generation-side gate must land first; see the audit
-doc's "Flip blockers" and its flip-commit checklist.
+zero `(type, wl)` fallback collisions across all audited pools).  The degenerate-loci
+blocker the audit surfaced is FIXED — next paragraph.
+
+**Degenerate face/abutment-coincident loci — ✅ FIXED (2026-07-18, branch
+`claude/hanan-loci-degenerate-gate`; the flip-blocker gate from
+[hanan_loci_flip_audit.md](hanan_loci_flip_audit.md)).**  The extra loci are
+exactly the block-face/abutment Hanan lines, and a trunk sampled ON such a
+line degenerated three ways: (1) an aligned column's shared face line made
+every stub's TRUNK-side endpoint land exactly on a face-riding block's face,
+so `annotate_endpoints` tagged it a busterm TAP and the tap-wins-over-junction
+precedence swallowed the stub↔spine junction — a `DISCONNECTED` all-tap tree
+at the WL floor that sorts FIRST and gets auto-selected (a missing island =
+less wire + fewer opens, so optimization CONVERGES onto them; pre-gate bigHalf
+carried 92 such candidates and shipped 7 broken selected bundles at a healed
+"0/0"); (2) the connected-but-junction-less variant defeated the fan-in
+taper's driver→sink derivation; (3) an abutment-line spine whose slide window
+only collapses under the block contract's pass-through clamps (b34
+`TRUNK_H@y4615`: pre-contract [3365,4615], post-contract [4615,4615], taps
+{blk_15,blk_15}) slipped past the pre-contract `filter_pinched`.  Fixed at the
+root + gated:
+
+- *Generation correctness* — `restore_face_graze_junctions` (topology.cpp):
+  a stub trunk-side endpoint ON a spine segment whose tapped block's face IS
+  the trunk locus is a GRAZE, not a landing (the spine itself rides that face,
+  the same load-bearing inclusive overlap the ABUT candidates use), so the
+  graze tap is cleared and the real junction is derived — the face-line trunk
+  becomes a VALID candidate (classes 1–2 fixed structurally, taper works).
+- *Loci pinch gate* — `generate_npin` re-checks loci-ONLY candidates (and
+  their `+MST` hybrids) against the FINAL post-contract analysis and drops any
+  with a zero-slide segment (class 3).  Scoped to the loci-only trunk
+  positions so default-off pools are untouched by construction (moving the
+  contract stamp above `filter_pinched` for everyone was measured to drop
+  pre-existing zero-slide candidates from the DEFAULT rnr/mix pool — see the
+  NOTE in `finalize_candidates`).
+- *Defense-in-depth* — `filter_uncovered` now also drops `DISCONNECTED`
+  candidates (the same island computation as `check_topo`'s
+  `detect_disconnected`; declared-feedthru candidates exempt — their split-gap
+  islands are bridged by the fed-through block).  This surfaced and led to a
+  root-cause fix of a pre-existing default-off TEG-over bug: the gap-stub pair
+  is emitted at rect CENTRES while the spine span came from the pulled
+  `att[]`, so an extreme TEG block's stub pair floated off a too-short trunk —
+  the spine span now extends to the gap-stub positions.
+
+Default-off measured bit-identical: fast+mid 100% green (1485 passed),
+topo goldens untouched.  Guards: `test_topo_hanan_loci_degenerate.py`
+(repro fixtures for all three classes + the default-off superset property);
+the four audit category-(c) tests pass under a scratch default-on.
+
+*Pool effect of the fix (knob-on, generation stage):* bigHalf 3954 → 3950
+candidates with DISCONNECTED 92 → 0; big2_noviz 2326 → 2233 with 41 → 0 —
+i.e. most face-line trunks are REPAIRED in place (junctions restored, the
+candidate stays and competes), and only the unplaceable remainder is gated.
+
+*Stressed-corpus re-measurement (2026-07-18, post-gate; healed =
+negotiate_congestion + ripup_reroute after both run_nuts and
+run_detailed_nuts; opens = DNUTS unplaced; DISC = DISCONNECTED candidates in
+pool / among selected):*
+
+| flow / endpoint | side | pool | ov | opens | det WL | DISC pool/sel |
+|---|---|---|---|---|---|---|
+| big2_noviz plain | base | 1617 | 4 | 108 | 11465635 | 0 / 0 |
+| big2_noviz plain | loci | 2233 | 2 | 28 | 11608386 (+1.2%) | 0 / 0 |
+| big2_noviz healed | base | 1617 | 0 | 0 | 11842590 | 0 / 0 |
+| big2_noviz healed | loci | 2233 | 0 | 0 | 11722521 (−1.0%) | 0 / 0 |
+| bigHalf plain | base | 2488 | 6 | 626 | 14364154 | 0 / 0 |
+| bigHalf plain | loci | 3950 | 5 | 283 | 15187090 (+5.7%) | 0 / 0 |
+| bigHalf healed | base | 2488 | 0 | 80 | 15408926 | 0 / 0 |
+| bigHalf healed | loci | 3950 | 0 | 63 | 14716562 (−4.5%) | 0 / 0 |
+
+**Updated flip verdict:** the wins SURVIVE the gate — and are now honest
+(pre-gate, part of the loci "win" was missing islands).  With the gated pools,
+`hanan_loci` strictly improves every stressed endpoint that matters: plain
+opens −74% (big2 108→28) / −55% (bigHalf 626→283), healed endpoints equal or
+better on BOTH metrics (big2 0/0 at −1.0% det WL; bigHalf opens 80→63 at
+−4.5% det WL), zero DISCONNECTED anywhere on either side.  The remaining flip
+blockers are purely mechanical: re-collect the on-side pin indices against the
+GATED pools (the audit's remap table is stale — its CAUTION now says so),
+regenerate the 6 shifted goldens on the reference host, invert the two opt-in
+spec tests, and re-measure rnr/mix hier (the audit's QoR caveat) — see the
+flip-commit checklist in hanan_loci_flip_audit.md.
 
 ### Piece (c) — gated WL-dominance pruning — ✅ SHIPPED (opt-in `set_prune_dominated`)
 
