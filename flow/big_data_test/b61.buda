@@ -1,6 +1,21 @@
 # 6 busterms, ideal topo: trunk V + trunk H + one stub
 # instead of the 10 seg Trunk+MST
 # let's measure the impact of a num-seg penalty..
+#
+# FINDINGS (kSegs experiment — set_planner_param kSegs <wl-units/segment>):
+#   pinned through planner+NUTS+DNUTS (all clean, 16-bit bus):
+#     topo1  TRUNK_H+MST 10 segs estWL 15940  detWL 244772  vias 144
+#     topo13 TRUNK_V+MST  5 segs estWL 17480  detWL 250064  vias  64
+#     topo19 TRUNK_V      4 segs estWL 19010  detWL 303436  vias  48
+#     topo26 TRUNK_V      3 segs estWL 21110  detWL 307268  vias  32
+#   the WL estimate exaggerates the big tree's edge (+9.7% est vs +2.2%
+#   realized against the 5-seg tree, which has 56% fewer per-bit vias).
+#   kSegs selects: 0->topo1, 100-300->topo2 (9 segs), 400-800->topo13,
+#   1600->topo19, 2400->topo26 (the 3-seg shape described above).
+#   corpus @500: big2 unplaced 108->0, overlaps 4->0, detWL +1.8%;
+#   bigHalf unplaced 593->214, overlaps 3->1, detWL -3.1%, vias -29%.
+# uncomment to try:
+#set_planner_param kSegs 500
 
 source ../tracks/tracks4top.buda
 #source tc3a_flat_x10.buda
