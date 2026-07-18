@@ -57,15 +57,11 @@ Feature: Roadmap — documented open items & future directions
     When generate_topologies samples trunk loci
     Then a candidate at the Hanan-line locus exists with its nominal at the geometric floor
 
-  Scenario: equal-WL candidates tie-break structurally, not alphabetically
-    # see docs/internal/wishlist-topo.md "Nominal-WL comparability" + opens.md #13
-    # Today annotate_and_sort orders by (wl, type) and ASCII '+' < '@' put b44's
-    # 6-junction TRUNK_H+MST staircase ahead of the 3-seg trunks at the same 3510.
-    # CAUTION: the sort defines the 1-based select_topology indices, so this
-    # needs a checked-in flow/test index audit.
-    Given several candidates with equal nominal wirelength
-    When candidates are sorted for planning
-    Then fewer-segment (fewer-junction) shapes rank ahead of slide-coupled staircases
+  # Piece (b) — structural (wl, nsegs, type) tie-break — SHIPPED 2026-07-17
+  # (annotate_and_sort + the Python pool-merge resort); its scenario moved to
+  # the @landed structural_tiebreak.feature (bound by
+  # test_topo_structural_tiebreak.py).  The pin index audit rode the ship:
+  # 112/112 checked-in select_topology pins verified by topo_uid, 3 remapped.
 
   Scenario: a WL-dominated candidate is pruned only when routing-equivalent
     # see docs/internal/wishlist-topo.md "Nominal-WL comparability" + opens.md #13

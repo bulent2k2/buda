@@ -71,8 +71,10 @@ def test_additive_merges_dedupes_resorts_and_preserves_pin(capsys):
     assert base_uids <= set(now_uids)
     assert len(now) > len(base), "multi_trunk added nothing on a 6-block fan-out"
     assert len(set(now_uids)) == len(now_uids)
-    # Pool is re-sorted by generation's key (wirelength asc, then type).
-    keys = [(c.estimated_wirelength, c.type) for c in now]
+    # Pool is re-sorted by generation's key (wirelength asc, then the
+    # structural segment count, then type as the determinism anchor).
+    keys = [(c.estimated_wirelength,
+             len(c.segments) + len(c.bridge_segments), c.type) for c in now]
     assert keys == sorted(keys), keys
     # The SELECTION is preserved: the pin still points at the SAME candidate, at
     # its post-resort index (which may differ from the original pin_idx).
@@ -89,7 +91,9 @@ def test_additive_merges_dedupes_resorts_and_preserves_pin(capsys):
 
 
 def _is_wl_sorted(pool):
-    keys = [(c.estimated_wirelength, c.type) for c in pool]
+    # generation's key: (wl, structural segment count incl. bridges, type)
+    keys = [(c.estimated_wirelength,
+             len(c.segments) + len(c.bridge_segments), c.type) for c in pool]
     return keys == sorted(keys)
 
 

@@ -21,12 +21,18 @@ items this page doesn't see).
    (PR #312 shipped the planner-side opt-in `kWLSpread`): the MST hybrid's
    nominal sits AT its envelope bottom by construction while plain trunks
    sample loci only at Hanan-channel midpoints (the WL-optimal edge-aligned
-   locus is never emitted, b44's +500), and WL ties break alphabetically
-   (`(wl, type)`, ASCII `'+' < '@'`) then by lowest index. Three bounded
+   locus is never emitted, b44's +500), and WL ties USED TO break
+   alphabetically (`(wl, type)`, ASCII `'+' < '@'`) then by lowest index.
+   Three bounded
    pieces: **(a)** also sample trunk loci ON Hanan lines (~2× pool growth,
-   measure); **(b)** a structural `(wl, nsegs, type)` tie-break — CAUTION:
-   the sort defines the 1-based indices `select_topology` pins in
-   checked-in flows/tests, so it needs an index audit; **(c)** dominance
+   measure); ~~**(b)** a structural `(wl, nsegs, type)` tie-break~~ —
+   ✅ shipped 2026-07-17 (`annotate_and_sort` + the Python pool-merge
+   resort; the pin index audit rode the ship: 112 checked-in
+   `select_topology` pins uid-verified, 109 unchanged / 3 remapped; the
+   `topo_analysis` golden comparison made order-canonical so text goldens
+   stay byte-owned by the reference host, digest goldens recomputed under
+   the order-independent canonical hash with a baseline-equality proof —
+   audit table + measurements in wishlist-topo.md); **(c)** dominance
    pruning — drop a candidate whose `wl_lo` exceeds another's `wl_hi`,
    but ONLY gated on non-WL routing equivalence (layers/corridors/slide
    windows): WL-dominance alone is not overall dominance — the planner

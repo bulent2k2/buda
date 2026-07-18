@@ -34,6 +34,10 @@ import buda_cli
 
 
 def _b44(knob):
+    """b44 with the TRUNK_H+MST@y11915 staircase PINNED — its seg1 pull is
+    the books-vs-metal subject here.  The structural (wl, nsegs, type)
+    tie-break now sorts the 3-seg plain trunks ahead of it at the 3510 tie,
+    so the fixture pins it by content instead of relying on default order."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     cmds = ["source flow/tracks/tracks4top.buda",
@@ -42,11 +46,17 @@ def _b44(knob):
             "add_block io_pad_tl 200 12000 1200 12800",
             "add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p",
             "run_bundler", "generate_topologies"]
-    if knob:
-        cmds.append("set_planner_param charge_pull_target 1")
-    cmds += ["run_planner", "run_nuts"]
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), buda.ostream_redirect():
+        for c in cmds:
+            s.do_command(c)
+        mst = next(i for i, c in enumerate(s.bundles[0].input.candidates)
+                   if c.type == "TRUNK_H+MST@y11915"
+                   and c.estimated_wirelength == 3510)
+        cmds = [f"select_topology 1 {mst + 1}"]
+        if knob:
+            cmds.append("set_planner_param charge_pull_target 1")
+        cmds += ["run_planner", "run_nuts"]
         for c in cmds:
             s.do_command(c)
     return s

@@ -24,7 +24,7 @@ along-overlap requirement in `seg_spans_rect` with the perp-face inclusive
 bounds kept (face landings are real).  The display predicate
 (`reports.py::_seg_crosses_rect`) is deliberately stricter — see its docstring.
 
-## Nominal-WL comparability across shape families (the b44 root causes) — OPEN
+## Nominal-WL comparability across shape families (the b44 root causes) — OPEN (piece b ✅)
 
 **Context (2026-07-16, `flow/big_data_test/b44.buda`; deep-dive after the
 `kWLSpread` ship, see wishlist-planner "Realization-risk WL"):** the b44
@@ -95,12 +95,51 @@ realization (b44: picks `TRUNK_V@x1950`, detailed 188513 = 3625/bit, −19.6%,
 better than the flow's hand-pin). **Generation-side follow-ons (this item):**
 (a) also sample trunk loci ON Hanan lines (or at least the per-window
 WL-optimal edge) so simple trunks can nominal at the floor — cheap, but
-grows the pool ~2×; (b) make the WL tie-break structural instead of
-alphabetical — fewer segments / fewer junctions first (`(wl, nsegs, type)`).
-CAUTION on (b): the sort defines the 1-based candidate indices that
-`select_topology` pins in checked-in flows and tests — changing tie order
-renumbers pools, so it needs a flow/test index audit (the reason the
-score-term route shipped first).
+grows the pool ~2×; ✅ **(b) SHIPPED 2026-07-17: the WL tie-break is
+structural** — `annotate_and_sort` (and the Python pool-merge resort
+`_resort_pool_preserving_selection`, its replica for
+`generate_more_topologies`/knob-memo replays) orders by `(wl, nsegs, type)`:
+equal-WL candidates by ascending segment count (TEG-over bridge segments
+counted — real wires, a junction each), type only as the final determinism
+anchor.  b44's 3510 tie group now ranks its two 3-seg plain trunks ahead of
+the 6-seg `TRUNK_H+MST` staircase, so the planner's equal-score lowest-index
+pick is the structurally-tight candidate.  Spec + tests:
+`features/structural_tiebreak.feature` / `test_topo_structural_tiebreak.py`.
+  - *Pin index audit (the shipping CAUTION):* the sort defines the 1-based
+    `select_topology` indices.  All 33 checked-in `.buda` flows with active
+    pins (112 pin records) were executed before/after and each pinned
+    candidate compared by `topo_uid`: **109 unchanged, 3 remapped** to
+    preserve the original candidate — `demo/quickstart.buda` b1 3→2
+    (TRUNK_V@x350@wl1200, 5 segs, now ahead of the 6-seg TRUNK_H+MST tie
+    sibling), `flow/big_data_test/b44.buda` b1 10→8 (TRUNK_V@x700@wl4010,
+    2 segs, moved to the head of its 4010 tie), and
+    `flow/big_data_test/big_3bundles_sel_trunk+mst_topo.buda` b2 4→5
+    (TRUNK_H+MST@y2340@wl6970 — its 4-seg tie sibling TRUNK_V+MST@x5690 now
+    sorts first).  Sidecar JSON selections resolve `topo_uid` →
+    `(type, wl)` → warned index hint in `_apply_selections`, so they are
+    order-insensitive by construction; BDB `load_pipeline` resumes restore
+    candidates from the persisted rows themselves with `is_selected`/
+    `is_pinned` flags ON the row (uid-verified, v14) — never an index into a
+    regenerated pool — so pre-change checkpoints resume identically.
+    Four fast-tier b44-fixture tests that relied on the MST staircase
+    sorting first now pin it by content.  The `topo_analysis` golden
+    COMPARISON was made order-canonical (per-candidate blocks sorted by
+    content on both sides — `topo_snapshot.canonicalize`) so a pure
+    tie-order permutation needs no golden change: the text goldens stay
+    byte-identical to the reference host's, candidate ranking is guarded by
+    `test_topo_structural_tiebreak.py`, and only the two per-bundle DIGEST
+    goldens (big, rnr_mix) were recomputed under the now
+    order-independent-by-construction canonical hash — proven safe by
+    computing the canonical digests with main's C++ and the branch C++ and
+    getting byte-identical results.
+  - *Measured (QoR endpoints, before → after):* b44 unpinned 188682 →
+    188695 detailed WL (+0.007%, picks `TRUNK_H@y11330` over the staircase
+    at the 3510 tie), comprehensive_demo 40868 → 40868,
+    big2/b4_bus_077 191669 → 191669, rnr/mix (hier) 799419 → 799419; NUTS
+    overlaps and DNUTS unplaced 0/0 on all four, both sides.  The change is
+    an ordering policy, not a generator change: pools are content-identical.
+CAUTION on future re-keys: any further tie-order change renumbers pools the
+same way and needs a fresh pin audit.
 
 ## True along-flex trunk DOF (Stage C of the flexible-root re-arch)
 

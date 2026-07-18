@@ -21,8 +21,10 @@ report_wl
 # [report_wirelength] total detailed WL = 234546 over 1 bundle(s) / 312 bit-wire(s), 0 unplaced bit(s); bit-scaled envelope [182520..632320]
 # visualize
 
-# simple L-topo comes much later (topo WL = 4010)
-select_topology 1 10
+# simple L-topo comes much later (topo WL = 4010; TRUNK_V@x700 — the
+# structural (wl, nsegs, type) tie-break sorts this 2-seg candidate ahead
+# of its 4010-tie siblings, so it sits at index 8 now, not 10)
+select_topology 1 8
 run_planner
 run_nuts
 run_detailed_nuts
