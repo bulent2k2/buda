@@ -23,6 +23,8 @@ Methods extracted verbatim from buda_cli.BudaSession (the CLI mixin
 split); bodies unchanged — `self` is the composed BudaSession, so
 cross-mixin helper calls resolve through the class as before.
 """
+import os
+
 import buda
 
 
@@ -154,7 +156,15 @@ class EditMixin:
         sel_uid = _uid_at(w.plan.selected_topology_index)
         dg_uid = _uid_at(self._dogleg_slot.get(bid, -1))
         og_uid = _uid_at(self._dogleg_originals.get(bid, -1))
-        pool.sort(key=lambda c: (c.estimated_wirelength, c.type))
+        # Same mode-aware key as C++ annotate_and_sort: the segments-first
+        # EXPERIMENT toggle (BUDA_TOPO_SORT=segs) must survive accretion —
+        # an unconditional WL sort here would silently revert the pool order
+        # after generate_more_topologies / knob-memo replays (Codex #326).
+        if os.environ.get("BUDA_TOPO_SORT") == "segs":
+            pool.sort(key=lambda c: (len(c.segments),
+                                     c.estimated_wirelength, c.type))
+        else:
+            pool.sort(key=lambda c: (c.estimated_wirelength, c.type))
         posn = {buda.topo_uid(c): i for i, c in enumerate(pool)}
         if sel_uid is not None:
             w.plan.selected_topology_index = posn[sel_uid]
