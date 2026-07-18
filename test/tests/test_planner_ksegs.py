@@ -32,6 +32,13 @@ import buda_cli
 
 pytestmark = pytest.mark.mid
 
+
+@pytest.fixture(autouse=True)
+def _no_ksegs_env(monkeypatch):
+    """These tests assert the knob's OWN defaults — shield them from the
+    BUDA_KSEGS_REL experiment env (the default-flip study hook)."""
+    monkeypatch.delenv("BUDA_KSEGS_REL", raising=False)
+
 # The b61 repro geometry (flow/big_data_test/b61.buda) inline.
 _B61 = (
     "def_layer 2 M2 H 25",
@@ -93,6 +100,46 @@ def test_ksegs_demotes_many_segment_trees():
     assert len(t2400.segments) <= len(t500.segments)
     # And at the high end the minimal 3-segment V+H+stub shape wins.
     assert len(t2400.segments) == 3
+
+
+def test_ksegs_rel_scales_with_design_hpwl(monkeypatch):
+    """kSegsRel prices each segment as a FRACTION of the design's
+    max-possible HPWL (grid W+H ~ 21.7k on the b61 geometry), so 0.02
+    lands in the 5-seg sweet spot like absolute ~434 — and the env hook
+    BUDA_KSEGS_REL supplies the same as an experiment default, with an
+    explicit set_planner_param overriding it."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in _B61:
+            s.do_command(c)
+        s.do_command("set_planner_param kSegsRel 0.02")
+        s.do_command("run_planner")
+    w = s.bundles[0]
+    t = w.input.candidates[w.plan.selected_topology_index]
+    assert len(t.segments) == 5           # the compact-tree sweet spot
+
+    # Env default drives the same selection with no explicit param...
+    monkeypatch.setenv("BUDA_KSEGS_REL", "0.02")
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in _B61:
+            s2.do_command(c)
+        s2.do_command("run_planner")
+    w2 = s2.bundles[0]
+    t2 = w2.input.candidates[w2.plan.selected_topology_index]
+    assert len(t2.segments) == 5
+    # ...and an explicit 0 overrides the env (back to the WL-cheapest).
+    s3 = buda_cli.BudaSession()
+    s3.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in _B61:
+            s3.do_command(c)
+        s3.do_command("set_planner_param kSegsRel 0")
+        s3.do_command("run_planner")
+    w3 = s3.bundles[0]
+    assert w3.plan.selected_topology_index == 0
 
 
 def test_ksegs_default_off_keeps_selection():

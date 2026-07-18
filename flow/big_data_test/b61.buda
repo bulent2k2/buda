@@ -44,6 +44,15 @@
 #     flat-500 regressions to 0/0 (07: +5.8% detWL, -25% vias; channel: 0/0)
 #     and keeps every win.  kSegsGate stays an opt-in experiment knob (0 =
 #     flat default).
+#
+# RELATIVE FORMULATION + DEFAULT-FLIP AUDIT (kSegsRel = fraction of the
+# design's max-possible HPWL; env BUDA_KSEGS_REL flips the default for
+# study runs): full sweep tables and the gating-issue list (G1-G6) in
+# docs/internal/ksegs_default_audit.md.  Headlines: channel_stress's
+# absolute-500 regression was a units artifact (invariant at every alpha
+# <= 0.25 relative); alpha=0.02 is the safe Pareto point (only
+# 07_wide_fan_stress regresses, healed by ripup); on THIS flow 0.02-0.05
+# picks the 5-seg tree, 0.1+ over-compacts to the 3-seg at +25% WL.
 
 source ../tracks/tracks4top.buda
 #source tc3a_flat_x10.buda
