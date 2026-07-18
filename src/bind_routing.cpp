@@ -452,6 +452,7 @@ void bind_routing(py::module_& m) {
         .def("set_busterm_mode",   &TopologyGenerator::set_busterm_mode)
         .def("set_double_detour",  &TopologyGenerator::set_double_detour)
         .def("set_multi_trunk",    &TopologyGenerator::set_multi_trunk)
+        .def("set_hanan_loci",     &TopologyGenerator::set_hanan_loci)
         .def("set_layer_ids",      &TopologyGenerator::set_layer_ids)
         .def("set_all_h_layers",   &TopologyGenerator::set_all_h_layers)
         .def("set_all_v_layers",   &TopologyGenerator::set_all_v_layers)

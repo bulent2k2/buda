@@ -24,8 +24,15 @@ items this page doesn't see).
    locus is never emitted, b44's +500), and WL ties USED TO break
    alphabetically (`(wl, type)`, ASCII `'+' < '@'`) then by lowest index.
    Three bounded
-   pieces: **(a)** also sample trunk loci ON Hanan lines (~2× pool growth,
-   measure); ~~**(b)** a structural `(wl, nsegs, type)` tie-break~~ —
+   pieces: ~~**(a)** also sample trunk loci ON Hanan lines (~2× pool growth,
+   measure)~~ — **SHIPPED 2026-07-17** as the opt-in `hanan_loci` generation
+   knob (b44 emits `TRUNK_V@x1200` at the 3510 floor; measured growth
+   ~1.3–1.6×, not 2×; opt-in because default-on renumbers pinned indices —
+   16 fast-tier failures incl. `topo_analysis` golden CONTENT shifts (new
+   candidates; order-only shifts are absorbed by the canonical comparison
+   piece (b) shipped) — and regresses the rnr/mix healed endpoint to
+   1 ov / 32 unplaced; measurements in wishlist-topo);
+   ~~**(b)** a structural `(wl, nsegs, type)` tie-break~~ —
    ✅ shipped 2026-07-17 (`annotate_and_sort` + the Python pool-merge
    resort; the pin index audit rode the ship: 112 checked-in
    `select_topology` pins uid-verified, 109 unchanged / 3 remapped; the

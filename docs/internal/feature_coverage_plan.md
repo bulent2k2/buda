@@ -125,6 +125,7 @@ Updated as files land. `L` = `@landed`, `F` = `@future`, `D` = `@doc`.
 | GDS interchange | `gds_interchange.feature` | L | `test_gds_export.py` |
 | Pipeline resume / save_bdb | `pipeline_resume.feature` | L | `test_bdb_*persist*`, resume tests |
 | Planner knobs | `planner_knobs.feature` | L | `test_planner_*` |
+| Hanan-line trunk loci (opens #13a) | `hanan_trunk_loci.feature` | L | `test_topo_hanan_loci.py` |
 | Roadmap / opens | `future_directions.feature` | F | — (pending) |
 
 ## Maintenance rule

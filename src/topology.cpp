@@ -2532,6 +2532,26 @@ std::vector<Topology> TopologyGenerator::generate_npin(
         int mid = (hanan_x[i] + hanan_x[i+1]) / 2;
         if (mid > x_lo && mid < x_hi) x_set.insert(mid);
     }
+    // OPT-IN (`hanan_loci` generation knob): ALSO sample trunk loci ON the
+    // Hanan lines themselves (strictly inside the bundle bbox), not just at
+    // channel MIDPOINTS.  A block-edge-aligned locus is where a trunk's nominal
+    // wirelength can reach the geometric floor (the b44 mis-ranking: the
+    // WL-optimal V-trunk locus x=1200 is io_pad_tl's right edge — a Hanan
+    // line — structurally unsampled by midpoints, so the best emitted 2-seg
+    // TRUNK_V carried a +500 nominal overshoot).  An edge-aligned locus is
+    // safe in add_trunk: the inclusive perp_lo/hi containment test treats a
+    // face-riding trunk as inside the block (trunk_inside_direct), so it is not
+    // re-snapped, and face-riding coverage is the same load-bearing inclusive
+    // overlap the ABUT candidates rely on.  The std::set dedups a Hanan line
+    // that coincides with a channel midpoint; distinct-locus duplicates
+    // downstream are caught by the content uid (topo_uid).  Opt-in because the
+    // extra loci renumber the WL-sorted candidate pool checked-in flows and
+    // goldens pin by index.  See docs/internal/wishlist-topo.md "Nominal-WL
+    // comparability across shape families", piece (a).
+    if (allow_hanan_loci_) {
+        for (int v : hanan_y) if (v > y_lo && v < y_hi) y_set.insert(v);
+        for (int v : hanan_x) if (v > x_lo && v < x_hi) x_set.insert(v);
+    }
 
     // Keepout-aware trunk filtering: skip trunk positions where ALL candidate
     // layers for that direction are blocked by keepouts spanning the full x/y

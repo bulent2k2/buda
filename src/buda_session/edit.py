@@ -213,7 +213,8 @@ class EditMixin:
             return
         ks = set(knobs.split())
         tg = self._make_topo_gen(self.fp, "center_mode" in ks,
-                                 "double_detour" in ks, "multi_trunk" in ks)
+                                 "double_detour" in ks, "multi_trunk" in ks,
+                                 "hanan_loci" in ks)
         pool = list(w.input.candidates)
         seen = {buda.topo_uid(c) for c in pool}
         added = 0
