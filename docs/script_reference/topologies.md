@@ -361,8 +361,12 @@ dominating survivor is equivalent in every non-WL respect:
 
 Candidates with TEG bridge segments, fan-in per-bit taper (`seg_bits`),
 adopted dogleg jogs, or U_OVL perp clamps never participate; `USER`
-candidates and the currently selected/pinned candidate are never pruned (a
-pruned pool remaps the selection index by `topo_uid`).  When in doubt the
+candidates take no part at all — they are never pruned AND never act as
+survivors (`edit_commit` accepts a not-clean hand edit with only a warning,
+so an invalid-but-shorter USER candidate must not evict a valid generated
+alternative); the currently selected/pinned candidate is never pruned
+either (a pruned pool remaps the selection index by `topo_uid`).  When in
+doubt the
 gate refuses — a missed prune is only wasted planner work, a false prune
 could strand the only routable topology.
 

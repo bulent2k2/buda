@@ -149,6 +149,27 @@ def test_gate_window_containment_direction():
     assert not gate(d, info((0, 4), (10, 65), 40, 60))
 
 
+def test_user_candidate_never_acts_as_survivor():
+    """A USER (hand-committed) candidate must not PRUNE others: edit_commit
+    accepts a not-clean hand edit with only a warning, so an invalid-but-
+    shorter USER candidate would otherwise evict the VALID generated
+    alternative and leave only the bad topology in the pool (Codex on
+    PR #329).  Here the USER candidate WL-dominates an equivalent generated
+    candidate — the generated one must SURVIVE."""
+    s = _session(_SETUP)
+    w = s.bundles[0]
+    user_short = _short_L(s)
+    user_short.type = "USER"          # the dominator is a hand edit
+    generated_long = _long_L(s)       # the valid generated alternative
+    w.input.candidates = [user_short, generated_long]
+    s.do_command("set_prune_dominated on")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        pruned, refused = s._prune_dominated_pools([w])
+    assert pruned == 0, buf.getvalue()
+    assert [c.type for c in w.input.candidates] == ["USER", "HAND_LONG"]
+
+
 def test_off_by_default_pool_unchanged():
     """Without set_prune_dominated the pool is untouched even when a
     dominated + equivalent pair exists (bit-identical default)."""

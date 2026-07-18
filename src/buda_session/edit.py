@@ -346,7 +346,10 @@ class EditMixin:
 
     def _prune_wl_dominated(self, w, fp):
         """Prune bundle `w`'s WL-dominated + gate-equivalent candidates.
-        Never prunes a USER candidate or the currently selected/pinned one;
+        A USER candidate takes no part at all — never pruned AND never a
+        survivor (edit_commit accepts a not-clean hand edit with only a
+        warning, so it must not evict a valid generated alternative); the
+        currently selected/pinned candidate is never pruned either;
         the selection index is remapped by uid across the shrink.  A pruned
         survivor may still prune others: dominance + the gate are transitive
         (window coverage composes; s pruned by s2 means s.lo > s2.hi, and
@@ -365,7 +368,11 @@ class EditMixin:
                 continue
             for j in range(len(cands)):
                 sj = infos[j]
-                if j == i or sj is None:
+                # A USER candidate never acts as SURVIVOR either: edit_commit
+                # allows committing a not-clean hand-edited topology with only
+                # a warning, so an invalid-but-shorter USER candidate must not
+                # evict the valid generated alternative (Codex on PR #329).
+                if j == i or sj is None or cands[j].type == "USER":
                     continue
                 # Deterministic dominance: the dominated candidate's BEST
                 # realization exceeds the survivor's WORST — and the nominal

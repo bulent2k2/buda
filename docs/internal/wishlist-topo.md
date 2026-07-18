@@ -202,9 +202,13 @@ Non-participants (either side): TEG `bridge_segments` (wire outside
 `segments`), fan-in `seg_bits` taper (per-segment demand differs per bit),
 adopted dogleg jogs, U_OVL `perp_clamp` segments (a NUTS constraint the
 window model does not carry), and underivable envelopes/connectivity.
-`USER` candidates and the selected/pinned candidate are never pruned; a
-shrunk pool remaps the selection index by `topo_uid`.  Dominance + the gate
-compose transitively, so a pruned survivor may still prune others soundly.
+`USER` candidates take no part at all — never pruned AND never a survivor
+(`edit_commit` accepts a not-clean hand edit with only a warning, so an
+invalid-but-shorter USER candidate must not evict the valid generated
+alternative — Codex on PR #329); the selected/pinned candidate is never
+pruned either, and a shrunk pool remaps the selection index by `topo_uid`.
+Dominance + the gate compose transitively, so a pruned survivor may still
+prune others soundly.
 
 **Measured (ON vs OFF; OFF is bit-identical by construction and fast+mid
 green):** on the four reference flows — `flow/big_data_test/b44.buda`
