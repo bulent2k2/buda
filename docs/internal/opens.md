@@ -28,8 +28,10 @@ items this page doesn't see).
    measure); ~~**(b)** a structural `(wl, nsegs, type)` tie-break~~ —
    ✅ shipped 2026-07-17 (`annotate_and_sort` + the Python pool-merge
    resort; the pin index audit rode the ship: 112 checked-in
-   `select_topology` pins uid-verified, 109 unchanged / 3 remapped,
-   `topo_analysis` goldens re-baselined as a verified pure permutation —
+   `select_topology` pins uid-verified, 109 unchanged / 3 remapped; the
+   `topo_analysis` golden comparison made order-canonical so text goldens
+   stay byte-owned by the reference host, digest goldens recomputed under
+   the order-independent canonical hash with a baseline-equality proof —
    audit table + measurements in wishlist-topo.md); **(c)** dominance
    pruning — drop a candidate whose `wl_lo` exceeds another's `wl_hi`,
    but ONLY gated on non-WL routing equivalence (layers/corridors/slide

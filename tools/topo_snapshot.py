@@ -29,9 +29,14 @@ full candidate list:
     ordering because NUTS tie-breaks depend on it).
 
 Golden files live in test/tests/data/topo_golden/ and are compared by
-test_topo_analysis_golden.py.  Any refactor of topology.cpp/conn_topology.cpp
-must reproduce them byte-for-byte — or re-baseline deliberately by re-running
-this tool and reviewing the diff.
+test_topo_analysis_golden.py.  The comparison is ORDER-CANONICAL: per-candidate
+blocks are sorted by content on both sides (see canonicalize), so candidate
+RANKING order is excluded — it is a policy with its own test
+(test_topo_structural_tiebreak.py) — while every candidate's geometry and
+derived analysis must still reproduce byte-for-byte.  Any refactor of
+topology.cpp/conn_topology.cpp that changes a derived value fails the gate —
+or re-baseline deliberately by re-running this tool (on the reference host
+that owns the goldens) and reviewing the diff.
 
 Generation stage only, on purpose: candidate geometry and its analysis are pure
 integer arithmetic (machine-stable), while post-NUTS mutations (doglegs) ride on
@@ -229,13 +234,62 @@ def snapshot_session(s, include_edge_id=True):
     return "".join(text for _, text in snapshot_bundles(s, include_edge_id))
 
 
+def canonicalize(text):
+    """Order-canonical form of a snapshot text: within each bundle block, the
+    per-candidate sub-blocks (each starting at a ' cand ' line) are sorted by
+    their own text.  Bundle blocks keep their order (bundle ids are stable).
+
+    Candidate ORDER within a pool is a ranking policy (annotate_and_sort's
+    (wl, nsegs, type) key), guarded by its own test
+    (test_topo_structural_tiebreak.py) — NOT by the goldens, which guard the
+    per-candidate geometry + derived-analysis CONTENT.  Canonicalizing both
+    sides of the golden comparison makes a pure candidate-order permutation
+    a no-op, so a tie-break change requires no golden re-baseline (goldens
+    stay owned by the reference host).  Line order WITHIN a candidate block
+    (segments, conns — the frozen NUTS tie-break contract) is untouched.
+    """
+    out_lines = []
+    header, cands, cur = [], [], None
+
+    def flush_bundle():
+        nonlocal header, cands, cur
+        if cur is not None:
+            cands.append(cur)
+            cur = None
+        out_lines.extend(header)
+        for blk in sorted(cands):
+            out_lines.extend(blk)
+        header, cands = [], []
+
+    for line in text.splitlines():
+        if line.startswith("bundle "):
+            flush_bundle()
+            header = [line]
+        elif line.startswith(" cand "):
+            if cur is not None:
+                cands.append(cur)
+            cur = [line]
+        elif cur is not None:
+            cur.append(line)
+        else:
+            header.append(line)
+    flush_bundle()
+    return "\n".join(out_lines) + ("\n" if text.endswith("\n") else "")
+
+
 def snapshot_digest(s):
-    """Per-bundle sha256 digest text, for flows too large to commit as text."""
+    """Per-bundle sha256 digest text, for flows too large to commit as text.
+
+    Hashes the ORDER-CANONICAL form of each bundle block (see canonicalize),
+    so the digest is independent of candidate ranking order by construction —
+    it fingerprints the pool's content, and a pure tie-break permutation
+    leaves it unchanged."""
     import hashlib
-    lines = ["# topo_snapshot per-bundle sha256 (see tools/topo_snapshot.py)"]
+    lines = ["# topo_snapshot per-bundle sha256, order-canonical "
+             "(see tools/topo_snapshot.py)"]
     for bid, text in snapshot_bundles(s):
         lines.append(f"bundle {bid} "
-                     f"{hashlib.sha256(text.encode()).hexdigest()}")
+                     f"{hashlib.sha256(canonicalize(text).encode()).hexdigest()}")
     return "\n".join(lines) + "\n"
 
 
@@ -255,8 +309,12 @@ def main():
             print(f"{flow}: MISSING")
             continue
         s = run_flow_generation(flow)
+        # Both golden kinds are written order-canonical (candidate ranking is
+        # guarded by test_topo_structural_tiebreak.py, not by goldens); the
+        # comparison canonicalizes loaded text goldens too, so pre-existing
+        # unsorted goldens keep matching without a rewrite.
         text = (snapshot_digest(s) if flow in DIGEST_FLOWS
-                else snapshot_session(s))
+                else canonicalize(snapshot_session(s)))
         path = golden_path(flow, out_dir)
         with open(path, "w") as f:
             f.write(text)

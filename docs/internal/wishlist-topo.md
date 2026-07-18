@@ -122,10 +122,16 @@ pick is the structurally-tight candidate.  Spec + tests:
     `is_pinned` flags ON the row (uid-verified, v14) — never an index into a
     regenerated pool — so pre-change checkpoints resume identically.
     Four fast-tier b44-fixture tests that relied on the MST staircase
-    sorting first now pin it by content; the `topo_analysis` goldens were
-    deliberately re-baselined (baseline goldens reproduced byte-identically
-    on the same host first, and the regenerated text golden is a verified
-    pure line permutation — content untouched, tie order only).
+    sorting first now pin it by content.  The `topo_analysis` golden
+    COMPARISON was made order-canonical (per-candidate blocks sorted by
+    content on both sides — `topo_snapshot.canonicalize`) so a pure
+    tie-order permutation needs no golden change: the text goldens stay
+    byte-identical to the reference host's, candidate ranking is guarded by
+    `test_topo_structural_tiebreak.py`, and only the two per-bundle DIGEST
+    goldens (big, rnr_mix) were recomputed under the now
+    order-independent-by-construction canonical hash — proven safe by
+    computing the canonical digests with main's C++ and the branch C++ and
+    getting byte-identical results.
   - *Measured (QoR endpoints, before → after):* b44 unpinned 188682 →
     188695 detailed WL (+0.007%, picks `TRUNK_H@y11330` over the staircase
     at the 3510 tie), comprehensive_demo 40868 → 40868,

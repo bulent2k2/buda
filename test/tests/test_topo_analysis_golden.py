@@ -20,15 +20,29 @@ windows, net_pull, along-flex, and the ORDERED conns list) — must match the
 committed golden byte-for-byte.  This is the candidate-list snapshot (item 4)
 and the analysis-equivalence gate (item 5) in one: any refactor of
 topology.cpp / conn_topology.cpp that changes a single derived value or a
-single ordering fails here with a line-level diff.
+single line ordering WITHIN a candidate fails here with a line-level diff.
+
+ORDER-CANONICAL comparison: candidate RANKING order within a pool is
+deliberately excluded from the golden contract — both sides (the live
+snapshot AND the loaded golden) are canonicalized by sorting each bundle's
+per-candidate blocks by their own content (topo_snapshot.canonicalize)
+before comparing.  The ranking is a selection policy (annotate_and_sort's
+(wl, nsegs, type) key) with its own dedicated test
+(test_topo_structural_tiebreak.py); goldens guard the per-candidate
+geometry + derived-analysis CONTENT.  This keeps the on-disk goldens owned
+by the reference host: a pure tie-break permutation requires no golden
+change at all.  Line order INSIDE a candidate block (segments, the conns
+list — the frozen NUTS tie-break contract) is still exact.
 
 Large flows (big, rnr/mix) gate on per-bundle sha256 digests instead of
-full text (multi-MB); a digest mismatch names the bundle, and the reviewable
-diff comes from regenerating the full snapshot on the baseline tree
-(tools/topo_snapshot.py <out_dir>) — the wl_corpus comparison workflow.
+full text (multi-MB); the digest hashes the CANONICALIZED bundle block, so
+it is order-independent by construction.  A digest mismatch names the
+bundle, and the reviewable diff comes from regenerating the full snapshot
+on the baseline tree (tools/topo_snapshot.py <out_dir>) — the wl_corpus
+comparison workflow.
 
-Deliberate re-baseline: rerun `PYTHONPATH=build:tools python3
-tools/topo_snapshot.py` and review the golden diff in the PR.
+Deliberate re-baseline (reference host only): rerun `PYTHONPATH=build:tools
+python3 tools/topo_snapshot.py` and review the golden diff in the PR.
 """
 import difflib
 import os
@@ -44,8 +58,13 @@ def _check_flow(flow):
         f"missing golden {golden} — run tools/topo_snapshot.py to create it")
     s = ts.run_flow_generation(flow)
     live = (ts.snapshot_digest(s) if flow in ts.DIGEST_FLOWS
-            else ts.snapshot_session(s))
+            else ts.canonicalize(ts.snapshot_session(s)))
     want = open(golden).read()
+    if flow not in ts.DIGEST_FLOWS:
+        # Goldens generated before the canonical sort are in ranking order;
+        # canonicalizing the loaded text keeps them byte-owned by the
+        # reference host while excluding candidate order from the contract.
+        want = ts.canonicalize(want)
     if live == want:
         return
     diff = list(difflib.unified_diff(
