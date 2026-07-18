@@ -34,6 +34,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "base_cost_non_top") base_cost_non_top_ = value;
     else if (name == "kWL")               kWL_               = value;
     else if (name == "kSegs")             kSegs_             = value;
+    else if (name == "kSegsGate")         kSegsGate_         = value;
     else if (name == "kBalance")          kBalance_          = value;
     else if (name == "kHeight")           kHeight_           = value;
     else if (name == "kPeak")             kPeak_             = value;
@@ -991,6 +992,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         std::vector<int> seg_perp;   // perp-centre overrides for band lookup
         double topo_overflow = 0.0;
         double topo_score    = 0.0;
+        double topo_peak_fill = 0.0; // worst chosen-band fill (kSegs gate)
         bool   topo_infeasible = false;
 
         // Build ConnTopology for this candidate to obtain authoritative
@@ -1257,6 +1259,17 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             if (topo_infeasible) break;
             int perp_pos = best_pp;
 
+            // kSegs headroom gate: record the chosen layer's PRE-CHARGE peak
+            // band fill (the kPeak measure, absolute-supply floor included).
+            // The candidate's worst fill fades the segment-count penalty —
+            // see the wl_est term below.
+            if (kSegs_ > 0.0 && kSegsGate_ > 0.0) {
+                double fill = peak_util_segment(seg, best_lid, best_pp,
+                                                slide_lo, slide_hi,
+                                                (double)seg_n(topo, si));
+                topo_peak_fill = std::max(topo_peak_fill, fill);
+            }
+
             // Feasibility: the bus (eff_width in the perpendicular direction)
             // must fit within the sliding range ConnTopology computed for this
             // segment — covers busterms (Pass 1) and spines/trunks (Pass 2).
@@ -1300,8 +1313,19 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         // the 5-seg tree but realizes only 2% under it — with 2.25x the
         // vias).  Priced in wirelength-equivalents so the knob reads as
         // "one extra segment costs like kSegs units of wire".
-        if (kSegs_ > 0.0)
-            wl_est += kSegs_ * (double)topo.segments.size();
+        //
+        // HEADROOM GATE (kSegsGate, EXPERIMENT — default 0 = flat): >0
+        // fades the penalty with the candidate's worst chosen-band fill.
+        // Measured WORSE than flat (see kSegsGate_ in the header): the gate
+        // is per-candidate, so a candidate heading into FULL bands pays no
+        // penalty — a perverse incentive that makes stress attractive.
+        // Kept opt-in for reproducing the study.
+        if (kSegs_ > 0.0) {
+            double gate = (kSegsGate_ > 0.0)
+                              ? std::max(0.0, 1.0 - topo_peak_fill)
+                              : 1.0;
+            wl_est += kSegs_ * gate * (double)topo.segments.size();
+        }
         topo_score += kWL_ * wl_est;
 
         if (topo_infeasible) {

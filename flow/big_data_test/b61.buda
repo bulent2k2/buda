@@ -28,6 +28,22 @@
 #     +1.1% detWL ABOVE the wirelength-ordered windows (11.957M -> 12.087M);
 #     with kSegs 500 ripup is a no-op either way (11.673M, the best result).
 #   verdict: kSegs is the effective lever; the sort toggle is experiment-only.
+#
+# HEADROOM-GATE EXPERIMENT (kSegsGate — fade the penalty with the candidate's
+# peak chosen-band fill; motivated by flat kSegs=500 regressing two stressed
+# flows: 07_wide_fan_stress 0/0 -> 3 unpl/2 ovl, channel_stress 3 -> 7 unpl):
+#   b61/b44 (quiet): gated == flat (5-seg tree / unchanged) — gate inert.
+#   07_wide_fan:  gated is WORSE THAN BASELINE (272 sel segs vs 183, 11 unpl)
+#     — the gate is per-candidate, so full-band candidates pay NO penalty:
+#     stress becomes attractive (a perverse incentive, not a safety valve).
+#   mempool_tile: gated gives back most of flat's -54% detWL win (453K vs
+#     245K, unpl 3090 vs 1756).  bigHalf/big2: worse than flat across the
+#     board.  A bundle-level gate would be sound but fades the penalty
+#     exactly where flat wins biggest (stress: fewer segs = less demand).
+#   RESOLUTION: flat kSegs + healers dominates — ripup_reroute heals BOTH
+#     flat-500 regressions to 0/0 (07: +5.8% detWL, -25% vias; channel: 0/0)
+#     and keeps every win.  kSegsGate stays an opt-in experiment knob (0 =
+#     flat default).
 
 source ../tracks/tracks4top.buda
 #source tc3a_flat_x10.buda

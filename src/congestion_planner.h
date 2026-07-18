@@ -525,10 +525,26 @@ private:
     double kWL_               = 0.001;
     // Segment-count penalty in wirelength-equivalent units per segment
     // (opt-in, default 0 = off): the kWL term scores
-    // estimated_wirelength + kSegs * n_segments, so a many-segment tree must
-    // buy real wirelength to beat a simpler shape (each segment costs
-    // junction vias per bit and realization DOF the WL estimate omits).
+    // estimated_wirelength + kSegs * gate * n_segments, so a many-segment
+    // tree must buy real wirelength to beat a simpler shape (each segment
+    // costs junction vias per bit and realization DOF the WL estimate
+    // omits).
+    //
+    // kSegsGate (EXPERIMENT, default 0 = flat penalty): >0 fades the
+    // penalty with the candidate's worst chosen-band fill
+    // (peak_util_segment).  MEASURED WORSE and left off: the gate is
+    // per-candidate, so a candidate heading into FULL bands pays no
+    // penalty — stress becomes attractive (07_wide_fan_stress balloons
+    // 183->272 selected segments, 0->11 unplaced, worse than baseline;
+    // mempool_tile gives back most of flat kSegs' -54% detWL win).  The
+    // sound alternative — a bundle-level candidate-independent gate —
+    // would fade the penalty exactly where flat kSegs wins BIGGEST
+    // (stressed designs: fewer segments = less total demand); only the
+    // measured-metric ripup loop can tell load-bearing tree DOF from
+    // gratuitous complexity, and flat kSegs + ripup heals every measured
+    // regression (07: 0/0 at +5.8% WL, -25% vias; channel_stress: 0/0).
     double kSegs_             = 0.0;
+    double kSegsGate_         = 0.0;
     // Realization-risk WL spread penalty (see set_planner_param "kWLSpread").
     // < 0 = OFF (kWL scores the plain nominal estimated_wirelength).
     double kWLSpread_         = -1.0;
