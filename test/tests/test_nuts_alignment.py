@@ -34,6 +34,15 @@ import buda
 _FLOW = os.path.normpath(os.path.join(
     os.path.dirname(__file__), '..', '..', 'flow'))
 
+# The scenario these mechanism tests exercise (B2's two M6 stubs off one V
+# trunk, four buses of M6 demand on three bands) is what the planner
+# auto-selects from planner3.buda's pool under today's generation default.
+# Pin those selections BY CONTENT so a generation-default change (e.g. the
+# `hanan_loci` flip growing the pool) cannot swap the scenario out from under
+# the alignment/repack assertions.  Under today's default the pins match the
+# planner's own choice, so behavior is unchanged.
+_SCENARIO_PINS = {1: "TRUNK_H@y305", 2: "TRUNK_V@x450", 3: "TRUNK_H@y175"}
+
 
 @pytest.fixture(scope="module")
 def planner3_session():
@@ -47,6 +56,12 @@ def planner3_session():
             line = line.strip()
             if not line or line.startswith("#") or line == "visualize":
                 continue
+            if line.startswith("run_planner"):
+                for w in s.bundles:
+                    bid = w.input.original_bundle.id
+                    idx = next(i for i, c in enumerate(w.input.candidates)
+                               if c.type == _SCENARIO_PINS[bid]) + 1
+                    s.do_command(f"select_topologies {bid} {idx}")
             s.do_command(line)
         yield s
     finally:

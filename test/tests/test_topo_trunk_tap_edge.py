@@ -48,6 +48,13 @@ def _trunk_inside(fp, drv, rcvs, Bname, axis):
 
     axis='V': vertical trunk, trunk_location is x, compared to B's x-extent.
     axis='H': horizontal trunk, trunk_location is y, compared to B's y-extent.
+
+    STRICT interior on purpose: these tests spec the contained/straddle spine
+    cases, and a trunk locus riding B's own edge (possible when the generator
+    samples loci ON Hanan lines, e.g. under the `hanan_loci` knob) is a
+    different case — a face-riding trunk, not a contained spine — and must not
+    be picked as the specimen here.  Channel-midpoint loci are always strictly
+    between Hanan lines, so this filter changes nothing for the default pool.
     """
     g = buda.TopologyGenerator(fp)
     g.set_layer_ids(4, 5)
@@ -58,7 +65,7 @@ def _trunk_inside(fp, drv, rcvs, Bname, axis):
     for c in g.generate_candidates(drv, rcvs):
         if not c.type.startswith(want) or "MST" in c.type:
             continue
-        if lo <= c.trunk_location <= hi:
+        if lo < c.trunk_location < hi:
             hits.append(c)
     assert hits, f"no in-B {want} candidate for {Bname}"
     return hits[0], B

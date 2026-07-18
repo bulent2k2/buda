@@ -163,18 +163,33 @@ def test_global_pass_heals_under_knob():
 
 
 def _demo(level):
-    """demo/comprehensive_demo.buda with the knob at the given level."""
+    """demo/comprehensive_demo.buda with the knob at the given level.
+
+    Bundle 3 is pinned BY CONTENT to the strand-forming `TRUNK_V+MST@x285`
+    candidate (what the planner auto-selects from today's default pool), so the
+    b3 keepout-strand repro below survives candidate-pool growth under a
+    different generation default (e.g. the `hanan_loci` flip): the repro is a
+    property of that candidate's MST-leg geometry, not of its pool index.
+    Under today's default the pin matches the planner's own choice."""
     s = buda_cli.BudaSession()
     s.no_viz = True
+    pinned = False
     with open("demo/comprehensive_demo.buda") as f:
         for raw in f:
             line = raw.strip()
             if not line or line.startswith("#") or line.startswith("visualize"):
                 continue
-            if level and line.startswith("run_planner"):
+            if not pinned and line.startswith("run_planner"):
+                pinned = True      # inject once, before the first planner run
+                w = next(b for b in s.bundles
+                         if b.input.original_bundle.id == 3)
+                idx = next(i for i, c in enumerate(w.input.candidates)
+                           if c.type == "TRUNK_V+MST@x285") + 1
                 with contextlib.redirect_stdout(io.StringIO()):
-                    s.do_command(f"set_planner_param charge_pull_target {level}")
-                level = 0          # inject once
+                    s.do_command(f"select_topology 3 {idx}")
+                    if level:
+                        s.do_command(
+                            f"set_planner_param charge_pull_target {level}")
             with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
                 s.do_command(line)
     return s

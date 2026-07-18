@@ -168,6 +168,23 @@ pick is the structurally-tight candidate.  Spec + tests:
 CAUTION on future re-keys: any further tie-order change renumbers pools the
 same way and needs a fresh pin audit.
 
+**Default-flip prep for (a) — DONE (2026-07-18):** the INDEX/TEST audit gate
+for flipping `hanan_loci` default-on is prepared in
+[hanan_loci_flip_audit.md](hanan_loci_flip_audit.md): the full pin remap
+table (22 of 112 pins across 15 flows shift, identity checked by `topo_uid`,
+none go missing), the golden regen kit (6 files: four_blocks + dogleg2 fast,
+all four mid flows), 10 index-sensitive fast-tier tests made CONTENT-based
+(dogleg, alignment, tap-edge, charge_pull — green under both defaults), and
+the sidecar/BDB order-insensitivity verification (uid-first resolution;
+zero `(type, wl)` fallback collisions across all audited pools).  The flip
+itself stays blocked on the **degenerate face/abutment-coincident loci
+candidates** the audit surfaced — loci ON a shared face line emit
+all-tap trees that `check_topo` flags `DISCONNECTED` yet sort FIRST and get
+auto-selected (aligned columns!), junction-less trees that defeat the
+fan-in taper, and mis-tapped zero-slide face-riders that slip past
+`filter_pinched` — a generation-side gate must land first; see the audit
+doc's "Flip blockers" and its flip-commit checklist.
+
 ### Piece (c) — gated WL-dominance pruning — ✅ SHIPPED (opt-in `set_prune_dominated`)
 
 **As-built.**  `set_prune_dominated on` (default OFF — bit-identical flows

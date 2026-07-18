@@ -35,11 +35,46 @@ import buda_cli  # noqa: E402  (adds build/ to sys.path and imports the buda mod
 
 FLOW_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'flow')
 
+# The dogleg-forming topology each flow's `select_topologies` pin targets, BY
+# CONTENT.  The checked-in flows pin bundle 3 by 1-based index into the
+# WL-sorted candidate pool; a generation-default change (e.g. the `hanan_loci`
+# flip) grows the pool and renumbers those indices, silently landing the pin on
+# a non-dogleg candidate.  These tests are about the dogleg MECHANISM, not the
+# index, so `_run` re-pins by type when the flow's index pin missed and re-runs
+# the pinned pipeline.  No-op under today's default (the flow's pin already
+# selects this candidate), so default-off behavior is unchanged.
+_DOGLEG_PIN = {
+    "dogleg2.buda": (3, "TRUNK_H@y225"),
+    "dogleg2-aligned-dogleg-stub.buda": (3, "TRUNK_H@y225"),
+}
+
+
+def _cand_index(sess, bid, type_str):
+    """1-based index of the candidate with the given type in bundle bid's pool."""
+    w = next(b for b in sess.bundles if b.input.original_bundle.id == bid)
+    return next(i for i, c in enumerate(w.input.candidates)
+                if c.type == type_str) + 1
+
+
+def _repin_by_type(sess, bid, type_str):
+    """Re-pin bundle bid to the candidate of the given type and re-run the
+    pinned planner->NUTS->DetailedNUTS pipeline — only if the current selection
+    is a different candidate (content-based rescue of a stale index pin)."""
+    w = next(b for b in sess.bundles if b.input.original_bundle.id == bid)
+    if w.input.candidates[w.plan.selected_topology_index].type == type_str:
+        return
+    sess.do_command(f"select_topologies {bid} {_cand_index(sess, bid, type_str)}")
+    sess.do_command("run_planner 1")
+    sess.do_command("run_nuts")
+    sess.do_command("run_detailed_nuts")
+
 
 def _run(flow):
     sess = buda_cli.BudaSession()
     sess.no_viz = True
     sess.do_command(f"source {os.path.abspath(os.path.join(FLOW_DIR, flow))}")
+    if flow in _DOGLEG_PIN:
+        _repin_by_type(sess, *_DOGLEG_PIN[flow])
     return sess
 
 
@@ -240,10 +275,10 @@ def test_dogleg_state_cleared_on_regenerate():
     # The full re-plan + re-solve sequence that used to crash now completes and
     # re-detects the cycle from scratch.
     sess.do_command("select_topologies 1,2 4")
-    # Bundle 3 -> TRUNK_H@y225 (the dogleg-forming topology); its 1-based index is
-    # 6 now that trunk+MST spines are re-clipped to their extreme kept landing, so
-    # the completed TRUNK_V+MST@x275 tree (honest WL 600) sorts just ahead of it.
-    sess.do_command("select_topologies 3 6")
+    # Bundle 3 -> TRUNK_H@y225 (the dogleg-forming topology), pinned by CONTENT
+    # so the test survives candidate-pool growth (index renumbering) under a
+    # different generation default.
+    sess.do_command(f"select_topologies 3 {_cand_index(sess, 3, 'TRUNK_H@y225')}")
     sess.do_command("run_planner 1")
     sess.do_command("run_nuts")
     assert sess.nuts_result.num_overlaps == 0, \
