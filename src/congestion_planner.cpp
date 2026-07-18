@@ -1502,10 +1502,19 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         const char* e = std::getenv("BUDA_KSEGS_REL");
         rel = (e != nullptr) ? std::atof(e) : 0.0;
     }
-    if (rel > 0.0 && x_grid_.size() >= 2 && y_grid_.size() >= 2) {
-        double hpwl_max = (double)(x_grid_.back() - x_grid_.front())
-                        + (double)(y_grid_.back() - y_grid_.front());
-        ksegs_eff_ += rel * hpwl_max;
+    if (rel > 0.0) {
+        // Scale from the DESIGN's Hanan extent (the floorplan grid), NOT the
+        // working x_grid_/y_grid_ — those were just extended with candidate
+        // endpoints, so an OOB/detour candidate in the pool would inflate
+        // the "relative" penalty (Codex #331).  The design extent is stable
+        // across pool changes, which is the whole point of kSegsRel.
+        std::vector<int> fx, fy;
+        floorplan_.get_hanan_grid(fx, fy);
+        if (fx.size() >= 2 && fy.size() >= 2) {
+            double hpwl_max = (double)(fx.back() - fx.front())
+                            + (double)(fy.back() - fy.front());
+            ksegs_eff_ += rel * hpwl_max;
+        }
     }
 
     // Sort: locked (bottom-up template instance) wrappers first — their
