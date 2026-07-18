@@ -39,16 +39,20 @@ items this page doesn't see).
    `topo_analysis` golden comparison made order-canonical so text goldens
    stay byte-owned by the reference host, digest goldens recomputed under
    the order-independent canonical hash with a baseline-equality proof —
-   audit table + measurements in wishlist-topo.md); **(c)** dominance
-   pruning — drop a candidate whose `wl_lo` exceeds another's `wl_hi`,
-   but ONLY gated on non-WL routing equivalence (layers/corridors/slide
-   windows): WL-dominance alone is not overall dominance — the planner
-   scores congestion/span/layer/balance/peak before weighted WL and a
-   longer candidate can be the only overflow-free option (the escalation
-   ladder / ripup's OOB-trunk promotion), so an unconditional drop could
-   strand the only routable topology (Codex #313); the salvage of the
-   measured-and-rejected min-WL assignment. Also parked there: the `kWLSpread`
-   default-flip criteria ([`wishlist-planner.md`](wishlist-planner.md) →
+   audit table + measurements in wishlist-topo.md); 
+   ~~**(c)** dominance
+   pruning~~ — ✅ SHIPPED as the opt-in `set_prune_dominated` (default off,
+   bit-identical): drops a candidate whose `wl_lo` exceeds another's
+   `wl_hi` ONLY when the survivor passes the non-WL routing-equivalence
+   gate (same contract/feedthru, same seg count/directions/layer hints,
+   survivor windows covering + spans inside the dominated one's — the
+   Codex #313 condition). Corpus-measured: 0 pruned / 11-3010 dominated
+   pairs refused per flow with identical endpoints — every dominated pair
+   differs in shape family or corridor, so this is safety infrastructure
+   for future pool-growing generation changes, not a QoR lever today;
+   details + gate definition in `wishlist-topo.md` piece (c). Also parked
+   there: the `kWLSpread` default-flip criteria
+   ([`wishlist-planner.md`](wishlist-planner.md) →
    *"Realization-risk WL"*).
 
 10. **The `bigHalf.buda` rr flip (decision, then a two-line edit)** —

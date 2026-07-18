@@ -1,6 +1,6 @@
 # BUDA Script Reference — Stage 2 — Topology generator
 
-Candidate enumeration and expert editing: `generate_topologies`, `generate_topologies_for_bundle`, `generate_more_topologies`, the TopoEdit session (`edit_topology` … `edit_commit`), `generate_hier_topologies`, `generate_topologies_for_hbundle`.
+Candidate enumeration and expert editing: `generate_topologies`, `generate_topologies_for_bundle`, `generate_more_topologies`, the TopoEdit session (`edit_topology` … `edit_commit`), `generate_hier_topologies`, `generate_topologies_for_hbundle`, `set_prune_dominated`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -317,6 +317,82 @@ Note: bundle {id} was expanded by run_planner hier — re-run generate_hier_topo
 ```buda
 generate_topologies_for_hbundle 4              # re-generate candidates for hb-4
 generate_topologies_for_hbundle 4 center_mode  # with centre-mode flag
+```
+
+---
+
+### `set_prune_dominated`
+
+```
+set_prune_dominated [on|off]
+```
+
+Opt-in **WL-dominance candidate pruning** (default **off** — flows are
+bit-identical without it).  When on, every generation command
+(`generate_topologies`, `generate_hier_topologies`,
+`generate_topologies_for_bundle`, `generate_topologies_for_hbundle` — but
+**not** the additive `generate_more_topologies`, whose contract is to only
+grow the pool) runs a prune pass after the pool is final: a candidate whose
+WL envelope bottom `wl_lo` exceeds another candidate's envelope top `wl_hi`
+(the `wl[lo..hi]` column of `dump_topologies`) is *deterministically*
+WL-dominated — its **best** realization is longer than the survivor's
+**worst** — and is dropped with a printed note.
+
+**The equivalence gate is the load-bearing part.**  WL-dominance alone is
+NOT overall dominance: the planner scores congestion/span/layer/balance/peak
+*before* weighted WL, and a longer candidate can be the only overflow-free or
+window-feasible option (the escalation ladder and ripup's OOB-trunk promotion
+exist for exactly that).  So a dominated candidate is pruned **only** when a
+dominating survivor is equivalent in every non-WL respect:
+
+- same **block contract** (`connected_block_names`) and **feedthru
+  declarations** (`feedthru_blocks`);
+- same **segment count**, and a one-to-one segment matching where each pair
+  has the same **orientation** and **layer hint**;
+- the survivor's **slide window covers** the dominated segment's (the safe
+  containment direction — every band/track placement reachable by the
+  dominated candidate is reachable by the survivor);
+- the survivor's **along-span lies inside** the dominated segment's (the
+  survivor crosses a subset of the planner cuts with the same bus width, so
+  any overflow-free assignment for the dominated candidate maps to one for
+  the survivor);
+- the survivor's **nominal WL** does not exceed the dominated one's (the
+  nominal carries dangling wire the connection-based envelope excludes).
+
+Candidates with TEG bridge segments, fan-in per-bit taper (`seg_bits`),
+adopted dogleg jogs, or U_OVL perp clamps never participate; `USER`
+candidates take no part at all — they are never pruned AND never act as
+survivors (`edit_commit` accepts a not-clean hand edit with only a warning,
+so an invalid-but-shorter USER candidate must not evict a valid generated
+alternative); the currently selected/pinned candidate is never pruned
+either (a pruned pool remaps the selection index by `topo_uid`).  When in
+doubt the
+gate refuses — a missed prune is only wasted planner work, a false prune
+could strand the only routable topology.
+
+Each run prints a summary:
+
+```
+[TopoPrune] pruned N WL-dominated candidate(s) across M bundle(s); K dominated pair(s) refused by the equivalence gate.
+```
+
+Measured on the corpus (b44 no-pin, comprehensive_demo, rnr/mix hier,
+big2/b4_bus_077): **0 pruned**, 11/459/3010/30 dominated pairs refused —
+every WL-dominated pair on these flows differs in shape family or corridor,
+i.e. is exactly the kind the ladder may need — with all QoR endpoints
+(overlaps, unplaced, abstract+detailed WL) identical to the off runs.
+
+**Ordering:** declare *before* the generation command.  Pruning renumbers the
+1-based candidate indices, so `select_topology` pins in a flow must be taken
+from an opted-in run (the prune runs before sidecar restore and BDB
+persistence, so `dump_topologies`, persisted `topology` rows, and later pins
+all see the same pruned pool).
+
+**Example:**
+```buda
+set_prune_dominated on
+generate_topologies            # pool pruned, note + summary printed
+set_prune_dominated off        # later regenerations keep everything again
 ```
 
 ---

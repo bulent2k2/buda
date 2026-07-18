@@ -24,7 +24,7 @@ along-overlap requirement in `seg_spans_rect` with the perp-face inclusive
 bounds kept (face landings are real).  The display predicate
 (`reports.py::_seg_crosses_rect`) is deliberately stricter — see its docstring.
 
-## Nominal-WL comparability across shape families (the b44 root causes) — (a)+(b) SHIPPED, (c) OPEN
+## Nominal-WL comparability across shape families (the b44 root causes) — (a)+(b)+(c) SHIPPED
 
 **Context (2026-07-16, `flow/big_data_test/b44.buda`; deep-dive after the
 `kWLSpread` ship, see wishlist-planner "Realization-risk WL"):** the b44
@@ -167,6 +167,70 @@ pick is the structurally-tight candidate.  Spec + tests:
     an ordering policy, not a generator change: pools are content-identical.
 CAUTION on future re-keys: any further tie-order change renumbers pools the
 same way and needs a fresh pin audit.
+
+### Piece (c) — gated WL-dominance pruning — ✅ SHIPPED (opt-in `set_prune_dominated`)
+
+**As-built.**  `set_prune_dominated on` (default OFF — bit-identical flows
+without it) makes every generation command (`generate_[hier_]topologies` and
+the per-bundle regen variants; NOT the additive `generate_more_topologies`)
+run a prune pass after the pool is final and before sidecar restore / BDB
+persistence (`BudaSession._prune_dominated_pools`,
+`src/buda_session/edit.py`; command in `src/buda_cmds/topologies_cmds.py`).
+A candidate is dropped, with a printed note, when its envelope bottom
+`wl_lo` STRICTLY exceeds a survivor's envelope top `wl_hi` (the deterministic
+dominance salvaged from the rejected min-WL assignment above) **and** the
+survivor passes the non-WL routing-equivalence gate (the Codex #313
+condition):
+
+- same `connected_block_names` and `feedthru_blocks` (as sets);
+- same segment count, with a one-to-one (bipartite) segment matching where
+  each pair has the same orientation and the same `layer_hint`;
+- the survivor's perpendicular slide window **covers** the dominated
+  segment's (the safe containment direction: every band/track placement
+  reachable by the dominated candidate is reachable by the survivor —
+  STRICT feasibility, the rip-up ladder, and DNUTS track supply are all
+  window-scoped);
+- the survivor's along-span lies **inside** the dominated segment's (the
+  survivor crosses a subset of the planner cuts at the same bus width, so an
+  overflow-free assignment for the dominated candidate maps onto one for the
+  survivor with no greater demand on any band);
+- the survivor's *nominal* WL ≤ the dominated one's (the nominal carries
+  dangling wire the connection-based envelope excludes, and the planner's
+  kWL term scores the nominal).
+
+Non-participants (either side): TEG `bridge_segments` (wire outside
+`segments`), fan-in `seg_bits` taper (per-segment demand differs per bit),
+adopted dogleg jogs, U_OVL `perp_clamp` segments (a NUTS constraint the
+window model does not carry), and underivable envelopes/connectivity.
+`USER` candidates take no part at all — never pruned AND never a survivor
+(`edit_commit` accepts a not-clean hand edit with only a warning, so an
+invalid-but-shorter USER candidate must not evict the valid generated
+alternative — Codex on PR #329); the selected/pinned candidate is never
+pruned either, and a shrunk pool remaps the selection index by `topo_uid`.
+Dominance + the gate compose transitively, so a pruned survivor may still
+prune others soundly.
+
+**Measured (ON vs OFF; OFF is bit-identical by construction and fast+mid
+green):** on the four reference flows — `flow/big_data_test/b44.buda`
+truncated before its hand-pin tail, `demo/comprehensive_demo.buda`,
+`flow/rnr/mix.buda` (hier), `flow/big_data_test/big2/b4_bus_077.buda` —
+the prune fires **0 times** with 11 / 459 / 3010 / 30 dominated pairs
+refused by the gate respectively, and every QoR endpoint is identical
+(b44 0 ov / 0 unpl / detailed 188682; demo 0/0; b4 0/0; mix heals to 0/0
+with detailed 799419 in both runs — flow logs diff clean modulo the prune
+summary).  A refusal-reason tally on comprehensive_demo: 338/459 different
+segment count, 121/459 direction/corridor mismatches (window AND span both
+fail) — i.e. every WL-dominated pair on the corpus differs in shape family
+or corridor, exactly the ones the escalation ladder may need, confirming
+the gate's necessity rather than its looseness.  Cost: envelope computation
+makes generation slower when opted in (demo 0.01→0.21 s, mix hier
+0.42→1.04 s); planner runtime unchanged.  The prune DOES fire on genuinely
+redundant strictly-worse candidates (same corridors, far-face taps — see
+`test/tests/test_topo_prune_dominated.py`), so it is safety infrastructure
+for future generation changes (e.g. piece (a)'s ~2× pool growth) rather
+than a corpus QoR lever today.  Indices renumber under the prune, so
+`select_topology` pins must come from an opted-in run — the reason it is a
+setup command, not a default.
 
 ## True along-flex trunk DOF (Stage C of the flexible-root re-arch)
 

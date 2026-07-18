@@ -57,8 +57,11 @@ Feature: Roadmap — documented open items & future directions
   # test_topo_structural_tiebreak.py).  The pin index audit rode the ship:
   # 112/112 checked-in select_topology pins verified by topo_uid, 3 remapped.
 
+  @landed
   Scenario: a WL-dominated candidate is pruned only when routing-equivalent
-    # see docs/internal/wishlist-topo.md "Nominal-WL comparability" + opens.md #13
+    # ✅ SHIPPED as the opt-in `set_prune_dominated` (default off, bit-identical);
+    # coverage: test/tests/test_topo_prune_dominated.py.  Gate definition +
+    # corpus measurements: wishlist-topo.md "Nominal-WL comparability" piece (c).
     # wl_lo/wl_hi are deterministic, so envelope dominance is decidable at
     # generation — but WL-dominance alone is NOT overall dominance: the planner
     # scores congestion/span/layer/balance/peak before weighted WL, and a

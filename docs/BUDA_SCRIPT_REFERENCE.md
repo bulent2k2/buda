@@ -35,6 +35,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 2 | `generate_topologies`, `generate_hier_topologies` | Enumerate topology candidates for flat or hierarchical bundles |
 | 2 | `generate_topologies_for_bundle` | Enumerate topology candidates for a **specific** flat bundle |
 | 2 | `generate_topologies_for_hbundle` | Re-run topology generation for a **specific** HBundle by its integer ID |
+| 2 setup | `set_prune_dominated` | Opt-in WL-dominance candidate pruning, gated on non-WL routing equivalence (default off) |
 | 3 | `set_planner_param` | Tune planner cost coefficients (applied at the next `run_planner`) |
 | 3 | `run_planner` | Select topology + assign layers per segment |
 | 3b | `select_topology` | Manually pin a specific topology candidate for a bundle by its 1-based ID |
@@ -70,7 +71,7 @@ The per-command documentation lives in one page per pipeline stage under
 |---|---|---|
 | [Setup](script_reference/setup.md) | setup | `def_layer` · `add_block` · `add_keepout` · `add_net` · `add_bus` · `corner_margin` · `detour_channel` · `set_min_stub_length[_dir|_layer]` · `set_feedthru` · `set_track_pitch` |
 | [Bundler](script_reference/bundling.md) | 1 | `run_bundler` · `run_hier_bundler` · `dump_hbundles` |
-| [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` |
+| [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` · `set_prune_dominated` |
 | [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` |
 | [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `ripup_reroute` · `negotiate_congestion` |
 | [Routing grid](script_reference/routing_grid.md) | 8 | `def_track_pattern` · `add_grid_override` · `report_overhead` |
