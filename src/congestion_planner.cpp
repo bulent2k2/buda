@@ -18,6 +18,7 @@
 #include "conn_topology.h"
 #include <iostream>
 #include <algorithm>
+#include <cstdlib>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -34,6 +35,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "base_cost_non_top") base_cost_non_top_ = value;
     else if (name == "kWL")               kWL_               = value;
     else if (name == "kSegs")             kSegs_             = value;
+    else if (name == "kSegsRel")          kSegsRel_          = value;
     else if (name == "kSegsGate")         kSegsGate_         = value;
     else if (name == "kBalance")          kBalance_          = value;
     else if (name == "kHeight")           kHeight_           = value;
@@ -1263,7 +1265,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             // band fill (the kPeak measure, absolute-supply floor included).
             // The candidate's worst fill fades the segment-count penalty —
             // see the wl_est term below.
-            if (kSegs_ > 0.0 && kSegsGate_ > 0.0) {
+            if (ksegs_eff_ > 0.0 && kSegsGate_ > 0.0) {
                 double fill = peak_util_segment(seg, best_lid, best_pp,
                                                 slide_lo, slide_hi,
                                                 (double)seg_n(topo, si));
@@ -1320,11 +1322,11 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         // is per-candidate, so a candidate heading into FULL bands pays no
         // penalty — a perverse incentive that makes stress attractive.
         // Kept opt-in for reproducing the study.
-        if (kSegs_ > 0.0) {
+        if (ksegs_eff_ > 0.0) {
             double gate = (kSegsGate_ > 0.0)
                               ? std::max(0.0, 1.0 - topo_peak_fill)
                               : 1.0;
-            wl_est += kSegs_ * gate * (double)topo.segments.size();
+            wl_est += ksegs_eff_ * gate * (double)topo.segments.size();
         }
         topo_score += kWL_ * wl_est;
 
@@ -1484,6 +1486,35 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         double ext_x = (double)(x_grid_.back() - x_grid_.front());
         double ext_y = (double)(y_grid_.back() - y_grid_.front());
         span_ref_eff_ = 0.25 * std::max(ext_x, ext_y);
+    }
+
+    // kSegs RELATIVE mode (kSegsRel / env BUDA_KSEGS_REL): price each
+    // segment as a FRACTION of the design's max-possible HPWL (grid extent
+    // W + H) so one value transfers across flow scales — the absolute 500
+    // that healed big2 (~24k max-HPWL, ~2%) was an effective ~70% on
+    // mempool_tile (~720).  Adds to any absolute kSegs.  The env var
+    // supplies an experiment DEFAULT for the default-flip study (an
+    // explicit set_planner_param kSegsRel wins over it; 0 = explicitly
+    // off).
+    ksegs_eff_ = kSegs_;
+    double rel = kSegsRel_;
+    if (rel < 0.0) {
+        const char* e = std::getenv("BUDA_KSEGS_REL");
+        rel = (e != nullptr) ? std::atof(e) : 0.0;
+    }
+    if (rel > 0.0) {
+        // Scale from the DESIGN's Hanan extent (the floorplan grid), NOT the
+        // working x_grid_/y_grid_ — those were just extended with candidate
+        // endpoints, so an OOB/detour candidate in the pool would inflate
+        // the "relative" penalty (Codex #331).  The design extent is stable
+        // across pool changes, which is the whole point of kSegsRel.
+        std::vector<int> fx, fy;
+        floorplan_.get_hanan_grid(fx, fy);
+        if (fx.size() >= 2 && fy.size() >= 2) {
+            double hpwl_max = (double)(fx.back() - fx.front())
+                            + (double)(fy.back() - fy.front());
+            ksegs_eff_ += rel * hpwl_max;
+        }
     }
 
     // Sort: locked (bottom-up template instance) wrappers first — their

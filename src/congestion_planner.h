@@ -544,6 +544,13 @@ private:
     // gratuitous complexity, and flat kSegs + ripup heals every measured
     // regression (07: 0/0 at +5.8% WL, -25% vias; channel_stress: 0/0).
     double kSegs_             = 0.0;
+    // Relative kSegs (kSegsRel): fraction of the design's max-possible HPWL
+    // (grid extent W + H) added per segment — scale-free across flows.
+    // < 0 = unset (env BUDA_KSEGS_REL may supply an experiment default);
+    // 0 = explicitly off.  Resolved into ksegs_eff_ when the grids are
+    // known (beside span_ref_eff_).
+    double kSegsRel_          = -1.0;
+    double ksegs_eff_         = 0.0;
     double kSegsGate_         = 0.0;
     // Realization-risk WL spread penalty (see set_planner_param "kWLSpread").
     // < 0 = OFF (kWL scores the plain nominal estimated_wirelength).
