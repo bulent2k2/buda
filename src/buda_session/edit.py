@@ -519,7 +519,10 @@ class EditMixin:
             # Look up the original ID in the expansion map and apply to all instances.
             wrappers = self._hier_expansion_map.get(bid, [])
             if wrappers:
-                if tidx < 0 or tidx >= len(wrappers[0].candidates):
+                # BundleWrapper has no bare .candidates — the pool lives on
+                # .input (audit P3-02: this branch crashed with
+                # AttributeError before any pin was applied).
+                if tidx < 0 or tidx >= len(wrappers[0].input.candidates):
                     print(f"Error: invalid topology id {tid} for bundle {bid}")
                 else:
                     for w in wrappers:

@@ -16,6 +16,9 @@
 first direct coverage of the setup_cmds wrapper layer."""
 import contextlib
 import io
+import pathlib
+
+import pytest
 
 import buda_cli
 
@@ -58,3 +61,30 @@ def test_add_bus_descending_range_creates_all_nets():
     _run(s, "add_bus w[7:0] A.o B.i")
     names = {n for n in s._net_endpoints if n.startswith("w_")}
     assert names == {f"w_{i}" for i in range(8)}, names
+
+
+@pytest.mark.mid
+def test_select_topology_pins_expanded_hier_template():
+    # Audit P3-02: after run_planner hier, pinning a TEMPLATE bundle id goes
+    # through the expansion-map fallback, which read wrappers[0].candidates —
+    # an attribute BundleWrapper does not have (the pool is .input.candidates)
+    # — so the whole pin-all-instances feature crashed with AttributeError
+    # before any pin was applied.
+    s = _session()
+    flow = pathlib.Path("flow/hbundles/01_pipeline_hier.buda")
+    for line in flow.read_text().splitlines():
+        c = line.split("#", 1)[0].strip()
+        if not c or c.startswith("visualize"):
+            continue
+        c = c.replace("source ../", "source flow/")
+        _run(s, c)
+        if c.startswith("run_planner hier"):
+            break
+    tmpl_ids = list(s._hier_expansion_map)
+    assert tmpl_ids, "expected expanded template bundles"
+    bid = tmpl_ids[0]
+    out = _run(s, f"select_topology {bid} 1")
+    assert "Pinned bundle" in out, out
+    for w in s._hier_expansion_map[bid]:
+        assert w.input.topology_pinned
+        assert w.plan.selected_topology_index == 0
