@@ -142,3 +142,42 @@ def test_def_nets_escaped_bracket_connections_survive(tmp_path):
     assert pins_by_comp["plain"] == 1
     assert pins_by_comp["mem[0]"] == 1, \
         "escaped-name instance lost its net connection"
+
+
+def test_candidates_element_access_returns_owned_copies():
+    # Audit C7-04 (found by the suite's own intermittent segfault): element
+    # access on w.input.candidates handed back registered NON-OWNING views
+    # into the live vector (def_readwrite getter = reference_internal, the
+    # policy the stl caster propagates to elements). A view held across any
+    # pool reassignment dangled — and worse, its stale registry entry at
+    # the freed address made a LATER cast of a fresh temporary Topology at
+    # a recycled address return the stale object instead of the new value:
+    # topo_uid then read freed memory (the ~30% fast-tier crash, pystack'd
+    # to _merge_more_candidates). The getter must return owned copies.
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 100, 100)
+    fp.add_block("B", 300, 0, 400, 100)
+    tg = buda.TopologyGenerator(fp)
+    tg.set_layer_ids(4, 5)
+    w = buda.BundleWrapper()
+    w.input.candidates = tg.generate_candidates("A", ["B"])
+    a = w.input.candidates
+    b = w.input.candidates
+    assert a[0] is not b[0], \
+        "element access must yield owned copies, not registered views"
+    # The lifetime guarantee the copy provides: elements held across a pool
+    # reassignment stay independently valid (pre-fix: dangling views).
+    held = list(w.input.candidates)
+    uid_before = buda.topo_uid(held[0])
+    w.input.candidates = []
+    assert buda.topo_uid(held[0]) == uid_before
+    # Same guarantee for the dogleg topology map (map<int, Topology> member
+    # on NUTSResult — the same stl-caster view semantics applied).
+    r = buda.NUTSResult()
+    r.dogleg_topologies = {7: held[0]}
+    d1 = r.dogleg_topologies
+    d2 = r.dogleg_topologies
+    assert d1[7] is not d2[7]
+    r.dogleg_topologies = {}
+    assert buda.topo_uid(d1[7]) == uid_before
+

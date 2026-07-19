@@ -158,7 +158,16 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("n_solves",           &NUTSResult::n_solves)
         .def_readwrite("overlaps_post_fixpoint",
                        &NUTSResult::overlaps_post_fixpoint)
-        .def_readwrite("dogleg_topologies",   &NUTSResult::dogleg_topologies)
+        // Getter by value: dict values must be OWNED Topology copies, not
+        // registered views into the map — a view held after this result is
+        // replaced dangles, and its stale registry entry can alias a later
+        // cast at a recycled address (audit C7-04; same fix as
+        // BundleInput::candidates in bind_routing.cpp).
+        .def_property("dogleg_topologies",
+            [](const NUTSResult& r) { return r.dogleg_topologies; },
+            [](NUTSResult& r, std::map<int, Topology> m) {
+                r.dogleg_topologies = std::move(m);
+            })
         .def_readwrite("dogleg_seg_layers",   &NUTSResult::dogleg_seg_layers)
         .def_readwrite("dogleg_seg_net_pull", &NUTSResult::dogleg_seg_net_pull)
         .def_readwrite("dogleg_seg_perp",     &NUTSResult::dogleg_seg_perp)

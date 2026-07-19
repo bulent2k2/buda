@@ -251,8 +251,8 @@ class NutsFlowMixin:
         one pass before planning also covers every later replan/rr trial on
         the same candidates.  A candidate whose envelope cannot be derived
         is reset to -1 and falls back to the nominal in the planner.
-        Element access on w.input.candidates hands back a reference into the
-        C++ vector, so the stamp writes through.  `fp` overrides the
+        w.input.candidates yields OWNED copies (audit C7-04), so the pool is
+        read, stamped, and assigned back.  `fp` overrides the
         per-bundle frame resolution for EVERY wrapper — the bottom-up
         template solve passes the cell-local floorplan it already built
         (its wrappers all belong to one cell); default = the same
@@ -280,6 +280,7 @@ class NutsFlowMixin:
                     c.wl_lo = -1.0
                     c.wl_hi = -1.0
                     n_fail += 1
+            w.input.candidates = cands
         msg = f"[Planner] kWLSpread: WL envelopes annotated on {n_ok} candidate(s)"
         if n_fail:
             msg += f" ({n_fail} underivable -> nominal fallback)"

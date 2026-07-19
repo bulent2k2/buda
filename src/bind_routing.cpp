@@ -520,7 +520,24 @@ void bind_routing(py::module_& m) {
     py::class_<BundleInput>(m, "BundleInput")
         .def(py::init<>())
         .def_readwrite("original_bundle",   &BundleInput::original_bundle)
-        .def_readwrite("candidates",        &BundleInput::candidates)
+        // candidates: the getter returns the pool BY VALUE, so Python
+        // receives OWNED Topology copies — never element views into the
+        // live vector.  The def_readwrite getter (reference_internal, the
+        // policy the stl caster propagates to elements) handed out views
+        // that (a) dangled across any pool reassignment (the hazard the
+        // Topology __copy__ note documents) and (b) left stale entries in
+        // pybind's instance registry at freed addresses, so a LATER cast
+        // of a fresh temporary Topology landing at a recycled address
+        // returned the STALE object instead of the new value — the
+        // intermittent topo_uid use-after-free segfault (audit C7-04).
+        // Session code already treats the pool as a value (read → mutate →
+        // assign back — see e.g. hier._derive_hier_fanin_bits), so
+        // semantics are unchanged.
+        .def_property("candidates",
+            [](const BundleInput& s) { return s.candidates; },
+            [](BundleInput& s, std::vector<Topology> v) {
+                s.candidates = std::move(v);
+            })
         .def_readwrite("width",             &BundleInput::width)
         .def_readwrite("pinned_seg_layers", &BundleInput::pinned_seg_layers)
         .def_readwrite("assigned_v_layer",  &BundleInput::assigned_v_layer)
