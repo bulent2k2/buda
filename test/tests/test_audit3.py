@@ -278,11 +278,14 @@ def test_import_gds_bounds_aref_array(tmp_path):
 
 def test_floorplanner_write_bdb_cell_name_collision(tmp_path):
     e = buda.FloorplannerEngine()
-    e.set_die(1000, 800)
+    e.set_die(2000, 2000)
     e.add_block("top1", 0, 0, 50, 50)
     e.add_block("top1/core", 0, 0, 10, 10)
     e.add_block("top2", 100, 0, 160, 60)
     e.add_block("top2/core", 100, 0, 120, 20)
+    # A real leaf block whose name equals the '/'->'_' flattening of the
+    # ambiguous 'top1/core' path — the collision the PR #348 review flagged.
+    e.add_block("top1_core", 500, 500, 540, 540)
     db = buda_db.BDB(str(tmp_path / "c11.bdb"))
     e.write_bdb(db)
 
@@ -293,6 +296,10 @@ def test_floorplanner_write_bdb_cell_name_collision(tmp_path):
     # overwrote the first's dims.
     assert c1 != c2, comps
     assert cells[c1] == (10.0, 10.0) and cells[c2] == (20.0, 20.0), cells
+    # The ambiguous path must NOT collide with the real leaf's cell — each
+    # keeps its own dims (10x10 vs 40x40).
+    assert comps["top1/core"] != comps["top1_core"], comps
+    assert cells[comps["top1_core"]] == (40.0, 40.0), cells
 
 
 # ──────────────────────────────────────────────────────────────────────────

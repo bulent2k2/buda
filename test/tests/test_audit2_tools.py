@@ -193,6 +193,49 @@ def test_bdb2buda_inout_and_self_loop(tmp_path):
     assert io_lines[0].rstrip().endswith(" inout"), io_lines
 
 
+def test_bdb2buda_inout_keeps_self_loop_endpoint(tmp_path):
+    # PR #348 review: an INOUT/UNKNOWN net legitimately allows a pin on the
+    # driver block, so the self-loop drop (directed-only) must NOT fire here —
+    # and the ` inout` suffix must stay the LAST token (4th arg), not collapse
+    # into the receiver-CSV where the CLI would misparse it.
+    from tools import bdb2buda
+    p = str(tmp_path / "io2.bdb")
+    b = buda_db.BDB(p)
+    b.set_die(1000, 800)
+    b.add_comp("a", "CELL", "", 0, 0, 100, 100, True)
+    b.add_comp("bb", "CELL", "", 300, 0, 400, 100, True)
+    # Two pins on the driver block 'a' plus one on 'bb'.
+    b.add_net_pins_inout("bidir", ["a.p", "a.q", "bb.p"])
+    del b
+
+    line = next(ln for ln in bdb2buda.convert(p, scale=1).splitlines()
+                if ln.startswith("add_net bidir"))
+    toks = line.split()
+    assert toks[-1] == "inout", line
+    rcvs = toks[3].split(",")
+    # The self-pin a.q is retained; every endpoint survives.
+    assert any(r.startswith("a.") for r in rcvs), line
+
+
+def test_bdb2buda_top_level_keeps_die_coords(tmp_path):
+    # PR #348 review: a top-level export (no -cell) must stay in DIE
+    # coordinates — a block at (100,100) inside a larger die must not be
+    # rebased to the origin (that path is only for an actual unplaced parent).
+    from tools import bdb2buda
+    p = str(tmp_path / "top.bdb")
+    b = buda_db.BDB(p)
+    b.set_die(1000, 800)
+    b.add_comp("A", "CA", "", 100, 100, 300, 200, True)
+    b.add_comp("B", "CB", "", 400, 400, 600, 500, True)
+    del b
+
+    script = bdb2buda.convert(p, scale=1)
+    xs = [int(ln.split()[2]) for ln in script.splitlines()
+          if ln.split()[:1] == ["add_block"]]
+    # The leftmost block keeps x==100 (die coords), NOT shifted to 0.
+    assert 100 in xs and min(xs) == 100, script
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # T3-05 — def_cluster only emits generation for FILTERED (valid) buses
 # ──────────────────────────────────────────────────────────────────────────
