@@ -448,7 +448,11 @@ void bind_routing(py::module_& m) {
 
     // ── TopologyGenerator ─────────────────────────────────────────────────
     py::class_<TopologyGenerator>(m, "TopologyGenerator")
-        .def(py::init<const Floorplan&>())
+        // keep_alive<1,2>: stores const Floorplan& — the Python Floorplan
+        // must outlive the generator; a temporary parent
+        // (TopologyGenerator(Floorplan())) previously dangled immediately
+        // (audit C7-03).
+        .def(py::init<const Floorplan&>(), py::keep_alive<1, 2>())
         .def("set_busterm_mode",   &TopologyGenerator::set_busterm_mode)
         .def("set_double_detour",  &TopologyGenerator::set_double_detour)
         .def("set_multi_trunk",    &TopologyGenerator::set_multi_trunk)

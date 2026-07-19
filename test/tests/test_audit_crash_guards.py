@@ -41,3 +41,36 @@ def test_add_net_pins_empty_path_endpoint_does_not_underflow():
     # Same guard on the undirected and inout variants (identical loops).
     nid2 = db.add_net_pins_undirected("n2", [".x", "c.y"])
     assert isinstance(nid2, int)
+
+
+def test_reference_holding_ctors_keep_parent_alive():
+    # Audit C7-01/02/03: BustermGen(BDB&), HierarchicalBundler(BDB&) and
+    # TopologyGenerator(const Floorplan&) store C++ references but had no
+    # py::keep_alive — dropping the Python parent left the child dangling
+    # (a temporary parent dangled IMMEDIATELY). With keep_alive the
+    # temporary-parent pattern is safe by construction.
+    import gc
+    import buda_db
+
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 100, 100)
+    fp.add_block("B", 300, 0, 400, 100)
+    g = buda.TopologyGenerator(fp)
+    g.set_layer_ids(4, 5)
+    del fp
+    gc.collect()
+    cands = g.generate_candidates("A", ["B"])   # dangled pre-fix
+    assert cands, "generator must still see the kept-alive floorplan"
+
+    db = buda.BDB(":memory:")
+    db.add_cell("c", 10, 10)
+    gen = buda_db.BustermGen(db)
+    del db
+    gc.collect()
+    gen.derive(0)                               # dangled pre-fix
+
+    db2 = buda.BDB(":memory:")
+    hb = buda.HierarchicalBundler(db2)
+    del db2
+    gc.collect()
+    hb.run(1)                                   # dangled pre-fix
