@@ -1602,6 +1602,11 @@ class HierMixin:
             planner = buda.CongestionPlanner(fp, self.layers)
             for pname, pval in self._planner_params.items():
                 planner.set_planner_param(pname, pval)
+            # Same healer-gate declaration as the global planner (Codex
+            # #342): the cell-local template solve must run under the SAME
+            # objective, or expansion locks in selections a suppressed env
+            # default made differently.
+            self._apply_healers_ahead(planner)
             self._apply_hier_refine_default(planner)
             planner.set_track_pitch(self._nuts_pitch)
             planner.build_congestion_map()

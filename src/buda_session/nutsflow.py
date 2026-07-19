@@ -32,6 +32,59 @@ import buda
 
 class NutsFlowMixin:
 
+    _HEALER_CMDS = ("ripup_reroute", "negotiate_congestion")
+
+    def _healers_in_flow(self):
+        """True when the flow SCRIPT contains a healer command
+        (ripup_reroute / negotiate_congestion), scanning `source`d files
+        recursively from script_path.  Cached; False for interactive /
+        scriptless sessions — the conservative direction for the gate
+        below."""
+        cached = getattr(self, "_healers_in_flow_cache", None)
+        if cached is not None:
+            return cached
+        found = False
+        seen = set()
+
+        def scan(path):
+            nonlocal found
+            rp = os.path.realpath(path)
+            if found or rp in seen or not os.path.exists(rp):
+                return
+            seen.add(rp)
+            try:
+                lines = open(rp).read().splitlines()
+            except OSError:
+                return
+            for ln in lines:
+                ln = ln.split('#', 1)[0].strip()
+                if not ln:
+                    continue
+                parts = ln.split()
+                if parts[0].lower() in self._HEALER_CMDS:
+                    found = True
+                    return
+                if parts[0].lower() == "source" and len(parts) > 1:
+                    scan(os.path.join(os.path.dirname(rp), parts[1]))
+
+        if self.script_path:
+            scan(self.script_path)
+        self._healers_in_flow_cache = found
+        return found
+
+    def _apply_healers_ahead(self, planner, healing_now=False):
+        """Audit G1/G2 gate: declare `healersAhead` to the planner when the
+        flow runs a healer, so the BUDA_KSEGS_REL env default may apply —
+        the penalty's two measured correctness regressions are both
+        ripup-healed, and real only without healers.  An explicit
+        set_planner_param healersAhead (the harness escape) always wins.
+        `healing_now` = the caller IS a healer (ripup's re-plan) — declare
+        regardless of the script scan (an interactive ripup counts too)."""
+        if "healersAhead" in self._planner_params:
+            return
+        if healing_now or self._healers_in_flow():
+            planner.set_planner_param("healersAhead", 1.0)
+
     @staticmethod
     def _wirelength_by_bundle(segments):
         """Sum routing-direction length |span_hi - span_lo| per bundle and per

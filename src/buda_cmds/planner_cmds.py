@@ -115,6 +115,7 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         session.planner = buda.CongestionPlanner(session.fp, session.layers)
         for pname, pval in session._planner_params.items():
             session.planner.set_planner_param(pname, pval)
+        session._apply_healers_ahead(session.planner)
         # Hier planning defaults refine_passes to 1 (an explicit
         # set_planner_param wins, including 0) — see
         # BudaSession._apply_hier_refine_default for the decision record.
@@ -156,6 +157,7 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         session.planner = buda.CongestionPlanner(session.fp, session.layers)
         for pname, pval in session._planner_params.items():
             session.planner.set_planner_param(pname, pval)
+        session._apply_healers_ahead(session.planner)
         # Mirror NUTS inter-bus pitch so the band books reserve the
         # spacing NUTS enforces (Gap 1).  Use set_track_pitch before
         # run_planner to plan a non-default pitch; run_nuts warns if its

@@ -37,6 +37,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "kSegs")             kSegs_             = value;
     else if (name == "kSegsRel")          kSegsRel_          = value;
     else if (name == "kSegsGate")         kSegsGate_         = value;
+    else if (name == "healersAhead")      healersAhead_      = value;
     else if (name == "kBalance")          kBalance_          = value;
     else if (name == "kHeight")           kHeight_           = value;
     else if (name == "kPeak")             kPeak_             = value;
@@ -1553,6 +1554,20 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     // down for a design whose pools carry gated trees; an explicit
     // kSegs/kSegsRel still applies in full.
     if (rel_from_env) {
+        // G1/G2 (audit): the env default is only SAFE with healers in the
+        // flow — the 07_wide_fan structural loser and big2's jagged alpha
+        // response are both healed by ripup_reroute (and never without it).
+        // The session declares healersAhead when the flow script contains a
+        // healer command (ripup_reroute / negotiate_congestion); interactive
+        // sessions and harnesses can set it explicitly.  No healers -> the
+        // env default stands down.
+        if (healersAhead_ <= 0.0) {
+            std::cout << "[Planner] kSegsRel env default suppressed: no "
+                         "healer (ripup_reroute/negotiate_congestion) in the "
+                         "flow (explicit set_planner_param kSegs/kSegsRel "
+                         "still applies).\n";
+            rel = 0.0;
+        }
         // G4 (audit): a segment penalty is a DETOUR penalty — it was
         // measured to overwhelm kPeak's sub-capacity routability steering
         // (the U-detour off a loaded band costs 2 extra segments, and the
@@ -1561,7 +1576,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         // routability-first selection, so it outranks the env default the
         // same way multi_trunk does below; a user setting kSegs/kSegsRel
         // EXPLICITLY alongside kPeak owns that calibration.
-        if (kPeak_ > 0.0) {
+        if (rel > 0.0 && kPeak_ > 0.0) {
             std::cout << "[Planner] kSegsRel env default suppressed: kPeak "
                          "routability steering is enabled (explicit "
                          "set_planner_param kSegs/kSegsRel still applies).\n";
