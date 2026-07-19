@@ -43,6 +43,34 @@ namespace {
 // endpoint taps it.  A junction endpoint (nullopt) writes no row.  Reload rebuilds
 // the annotation from those rows alone — no geometric re-derivation, no floorplan.
 
+// Geometry fingerprint for the routing busterm id (audit P3-03): the id was
+// keyed by block NAME alone, but two bundles' frames can contain a same-named
+// block with different geometry (cell-local floorplans of two cell types, a
+// 90-degree rotation-class clone template, or a cell-local name colliding
+// with a top-level block) — with the cross-bundle dedup set, the first
+// writer's bbox reloaded for BOTH bundles.  Suffixing a deterministic hash of
+// the full one-true-source content keeps identical-geometry blocks on one
+// shared row while differing frames split.  FNV-1a, hex — stable across
+// platforms/runs so persisted fixtures stay diffable.
+std::string busterm_geom_fp(const Busterm& bt) {
+    uint64_t h = 1469598103934665603ULL;
+    auto mix = [&h](long long v) {
+        for (int i = 0; i < 8; ++i) {
+            h ^= (unsigned char)(v >> (8 * i));
+            h *= 1099511628211ULL;
+        }
+    };
+    auto rect = [&](const Rect& r) { mix(r.x1); mix(r.y1); mix(r.x2); mix(r.y2); };
+    rect(bt.bbox);
+    rect(bt.orig_bbox);
+    for (const auto& r : bt.rects) rect(r);
+    mix(bt.teg_mode == TegMode::OVER ? 1 : 0);
+    char buf[17];
+    std::snprintf(buf, sizeof buf, "%08x",
+                  (unsigned)((h >> 32) ^ (h & 0xffffffffULL)));
+    return buf;
+}
+
 void persist_seg_busterms(BDB& bdb, const std::string& bundle_id,
                           int cand_index, const Topology& topo,
                           py::object seen = py::none()) {
@@ -59,7 +87,10 @@ void persist_seg_busterms(BDB& bdb, const std::string& bundle_id,
     auto put = [&](int seg_idx, const std::optional<Busterm>& bt,
                    const char* endpoint) {
         if (!bt) return;                         // junction: no row (the default)
-        const std::string id = "tb:" + bt->block_name;  // distinct from hier 'bt:'
+        // 'tb:' distinct from hier 'bt:'; geometry-suffixed so same-named
+        // blocks from different frames never share a row (audit P3-03).
+        const std::string id =
+            "tb:" + bt->block_name + ":" + busterm_geom_fp(*bt);
         bool write_row = true;
         if (dedup) {
             py::str pid(id);

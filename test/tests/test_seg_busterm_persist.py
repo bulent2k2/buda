@@ -249,3 +249,70 @@ def test_roundtrip_through_sql(tmp_path):
     assert after == before
     # The hier-derived busterm query stays unpolluted by the 'tb:' routing rows.
     assert all(not b.id.startswith("tb:") for b in db2.all_busterms())
+
+
+def test_same_name_different_frame_blocks_do_not_share_a_row(tmp_path):
+    """Audit P3-03: the routing busterm row was keyed 'tb:<block_name>' only,
+    and _persist_topologies shares ONE dedup set across all bundles — so two
+    bundles whose frames contain a same-named block with DIFFERENT geometry
+    (cell-local floorplans of two cell types, a 90-degree rotation-class
+    clone template, or a cell-local name colliding with a top-level block)
+    shared a single row: the first writer's bbox reloaded for BOTH bundles,
+    breaking the uid round-trip and mis-deriving taps/slides on resume.
+    The id must carry a geometry fingerprint so identical-geometry blocks
+    still share a row while differing frames get their own."""
+    db = buda.BDB(str(tmp_path / "tbcol.bdb"))
+
+    def mk(blocks, src, dst):
+        fp = buda.Floorplan()
+        for n, (x1, y1, x2, y2) in blocks.items():
+            fp.add_block(n, x1, y1, x2, y2)
+        return buda.TopologyGenerator(fp).generate_candidates(src, [dst])[0]
+
+    # Frame 1: block "core" is 10x10.  Frame 2: same name, 6x20.
+    t1 = mk({"core": (0, 0, 10, 10), "mem": (30, 0, 40, 10)}, "core", "mem")
+    t2 = mk({"core": (0, 0, 6, 20), "mem": (30, 0, 40, 10)}, "core", "mem")
+    for bid, t in (("1", t1), ("2", t2)):
+        row = buda.BundleRow()
+        row.id = bid
+        db.add_bundle(row)
+        tr = buda.TopoRow()
+        tr.id = bid
+        tr.cand_index = 0
+        tr.type = t.type
+        tr.topo_uid = buda.topo_uid(t)
+        db.add_topology(tr)
+    seen = set()               # exactly as _persist_topologies shares it
+    buda.persist_seg_busterms(db, "1", 0, t1, seen)
+    buda.persist_seg_conns(db, "1", 0, t1)
+    buda.persist_seg_busterms(db, "2", 0, t2, seen)
+    buda.persist_seg_conns(db, "2", 0, t2)
+
+    def reload(bid, orig):
+        t = buda.Topology()
+        t.type = orig.type
+        t.segments = list(orig.segments)
+        t.trunk_location = orig.trunk_location
+        t.pass_through_count = orig.pass_through_count
+        t.connected_block_names = list(orig.connected_block_names)
+        buda.load_seg_busterms(db, bid, 0, t)
+        return t
+
+    r1, r2 = reload("1", t1), reload("2", t2)
+    assert buda.topo_uid(r1) == buda.topo_uid(t1)
+    assert buda.topo_uid(r2) == buda.topo_uid(t2), \
+        "bundle 2's taps reloaded with frame 1's geometry (shared tb: row)"
+    cores = [_norm_bt(bt)
+             for eps in r2.seg_busterms.values() for bt in eps
+             if bt is not None and bt.block_name == "core"]
+    assert cores, "fixture must tap block 'core'"
+    assert all(c[2] == (0, 0, 6, 20) for c in cores), cores
+    # Identical-geometry blocks (mem in both frames) still share one row.
+    con = sqlite3.connect(str(tmp_path / "tbcol.bdb"))
+    try:
+        ids = [r[0] for r in con.execute(
+            "SELECT id FROM busterm WHERE id LIKE 'tb:%'").fetchall()]
+    finally:
+        con.close()
+    n_mem = sum(1 for i in ids if ":mem" in i or i == "tb:mem")
+    assert n_mem == 1, f"identical-geometry dedup lost: {ids}"
