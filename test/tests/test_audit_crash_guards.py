@@ -213,3 +213,23 @@ def test_hier_bundler_multi_driven_net_attaches_all_driver_blocks():
         f"second OUTPUT driver's block must be attached ({b.reason})"
     assert {"A", "C"} <= endpoints, b.reason
     assert b.num_terminals == 3
+
+
+def test_resize_cell_swaps_dims_for_rotated_instances(tmp_path):
+    # Audit C6-03: resize_cell wrote x1+w / y1+h to EVERY instance without
+    # consulting component.orient, so a 90/270-rotated instance (E/W/FE/FW)
+    # got un-swapped dimensions — breaking the bbox-orient invariant the
+    # v13 GDS round-trip depends on (export writes orient + bbox-derived
+    # placement; a mismatch corrupts the re-imported layout).
+    import buda_db
+    db = buda_db.BDB(str(tmp_path / "rot.bdb"))
+    db.add_cell("alu", 10.0, 20.0)
+    db.add_inst("u0", "alu", "", 0.0, 0.0)      # upright: 10x20
+    db.add_inst("u1", "alu", "", 100.0, 0.0)
+    db.rotate_comp("u1", 90)                     # rotated: bbox 20x10
+    db.resize_cell("alu", 12.0, 24.0)
+    comps = {c.name: c for c in db.all_components()}
+    u0, u1 = comps["u0"], comps["u1"]
+    assert (u0.x2 - u0.x1, u0.y2 - u0.y1) == (12.0, 24.0)
+    assert (u1.x2 - u1.x1, u1.y2 - u1.y1) == (24.0, 12.0), \
+        "rotated instance must get swapped dims on resize"

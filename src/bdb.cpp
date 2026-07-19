@@ -2020,8 +2020,16 @@ void BDB::resize_cell(const std::string& cell, double w, double h) {
     sqlite3_bind_double(uc, 2, w);
     sqlite3_bind_double(uc, 3, h);
     sqlite3_step(uc);
-    // Update every instance's bounding box
-    Stmt u(_db, "UPDATE component SET x2=x1+?, y2=y1+? WHERE cell=?");
+    // Update every instance's bounding box.  A 90/270-rotated instance
+    // (orient E/W/FE/FW) carries SWAPPED dimensions — writing w/h straight
+    // would break the bbox↔orient invariant the v13 GDS round-trip depends
+    // on (audit C6-03).
+    Stmt u(_db, "UPDATE component SET"
+                " x2 = x1 + CASE WHEN orient IN ('E','W','FE','FW')"
+                "               THEN ?2 ELSE ?1 END,"
+                " y2 = y1 + CASE WHEN orient IN ('E','W','FE','FW')"
+                "               THEN ?1 ELSE ?2 END"
+                " WHERE cell=?3");
     sqlite3_bind_double(u, 1, w);
     sqlite3_bind_double(u, 2, h);
     sqlite3_bind_text  (u, 3, cell.c_str(), -1, SQLITE_TRANSIENT);
