@@ -68,7 +68,10 @@ static void build_nuts_maps(
     std::set<std::pair<int,int>> jog_set;   // dogleg jogs: excluded from alignment
     // Pass 1 — nominal perpendicular position from the topology.
     for (const auto& bw : bundles) {
-        if (bw.input.candidates.empty() || bw.plan.selected_topology_index < 0) continue;
+        if (bw.input.candidates.empty() ||
+            bw.plan.selected_topology_index < 0 ||
+            bw.plan.selected_topology_index >= (int)bw.input.candidates.size())
+            continue;   // out-of-range index is UB (audit C1-02)
         const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
         int bid = bw.input.original_bundle.id;
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
@@ -83,7 +86,10 @@ static void build_nuts_maps(
 
     // Pass 2 — connectivity-based override.
     for (const auto& bw : bundles) {
-        if (bw.input.candidates.empty() || bw.plan.selected_topology_index < 0) continue;
+        if (bw.input.candidates.empty() ||
+            bw.plan.selected_topology_index < 0 ||
+            bw.plan.selected_topology_index >= (int)bw.input.candidates.size())
+            continue;   // out-of-range index is UB (audit C1-02)
         const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
         int bid = bw.input.original_bundle.id;
 
@@ -1180,7 +1186,10 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
 {
     std::vector<TrackSegment> result;
     for (const auto& bw : bundles) {
-        if (bw.input.candidates.empty() || bw.plan.selected_topology_index < 0) continue;
+        if (bw.input.candidates.empty() ||
+            bw.plan.selected_topology_index < 0 ||
+            bw.plan.selected_topology_index >= (int)bw.input.candidates.size())
+            continue;   // out-of-range index is UB (audit C1-02)
         // A fixed (bottom-up copy) bundle is never re-solved: its already-
         // placed segments are appended to the result verbatim instead.
         if (fixed_bundle_ids_.count(bw.input.original_bundle.id)) continue;
@@ -2300,7 +2309,8 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     for (int bid : doglegged_bids)
         for (const auto& bw : bundles)
             if (bw.input.original_bundle.id == bid &&
-                bw.plan.selected_topology_index >= 0) {
+                bw.plan.selected_topology_index >= 0 &&
+                bw.plan.selected_topology_index < (int)bw.input.candidates.size()) {
                 out.result.dogleg_topologies[bid] =
                     bw.input.candidates[bw.plan.selected_topology_index];
                 out.result.dogleg_seg_layers[bid]    = bw.plan.seg_layers;

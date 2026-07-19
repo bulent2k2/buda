@@ -229,8 +229,15 @@ void DetailedNUTSEngine::place_by_layer(
 
         // Sort by abstract_pos; NaN (unset) sorts last — those fall back
         // to LO_HI/HI_LO window search after anchored segments are placed.
+        // NaN-safe comparator (audit C11-04): a raw `<` with NaN present is
+        // not a strict weak ordering (NaN compares false both ways, so NaN
+        // segments could sort FIRST and steal anchored tracks — and std::sort
+        // over a non-SWO range is UB).  Order non-NaN strictly before NaN.
         std::sort(indices.begin(), indices.end(), [&](int a, int b) {
-            return bus_segs[a].abstract_pos < bus_segs[b].abstract_pos;
+            const double pa = bus_segs[a].abstract_pos, pb = bus_segs[b].abstract_pos;
+            const bool na = std::isnan(pa), nb = std::isnan(pb);
+            if (na != nb) return !na;          // a non-NaN sorts before a NaN
+            return pa < pb;                    // both real (or both NaN → equal)
         });
 
         const RoutingGrid& grid = stack_.get_layer_grid(layer);

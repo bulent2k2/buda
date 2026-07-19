@@ -155,6 +155,10 @@ void CongestionPlanner::warn_above_top_layers_() {
 
 void CongestionPlanner::rebuild_cuts_() {
     cuts_.clear();
+    // Injected-demand records key cuts by index; a rebuild reorders/resizes
+    // cuts_, so the records are meaningless afterward (audit C3-03).  Drop
+    // them here rather than letting apply_injected_ mischarge a reordered cut.
+    injected_.clear();
     if (x_grid_.size() < 2 || y_grid_.size() < 2) return;
 
     auto blocks   = floorplan_.get_all_blocks();
@@ -2148,7 +2152,13 @@ std::vector<std::pair<int, double>> CongestionPlanner::band_occupants(
 
 void CongestionPlanner::apply_injected_(double sign) {
     for (const auto& [ci, b, amount] : injected_)
-        if (ci >= 0 && ci < (int)cuts_.size())
+        // Guard the BAND index too, not just the cut index (audit C3-03): a
+        // cuts_ rebuild can shrink a cut's band count, turning a stale record
+        // into an out-of-bounds write into band_usage_.  (rebuild_cuts_ also
+        // clears injected_ now, so cross-rebuild records can't mischarge a
+        // reordered cut — this is the belt-and-braces bound.)
+        if (ci >= 0 && ci < (int)cuts_.size() &&
+            b >= 0 && b < cuts_[ci].num_bands())
             cuts_[ci].add_usage(b, sign * amount);
 }
 
