@@ -61,6 +61,63 @@ beneficiaries — bigHalf (−76% no-rr opens) and un-pinning mix from
 `kWLSpread 0.125` regresses it (42 → 48), `kPeak 0.1` only partially helps
 (42 → 32).
 
+**The discriminator SIGNAL found — it is FINAL-GEOMETRY, not plan-time
+(2026-07-19, measured on `flow/rnr/mix.buda`).**  Two prototypes:
+- *Plan-time span discrimination is INSUFFICIENT.*  Gating on the CLAMPED
+  routed-extent (corridor between the endpoint cell faces) supply instead
+  of the raw span — the natural "does the keepout cover the whole
+  corridor" test — STILL regresses mix baseline 0/0 → 0/48: mix's
+  SURVIVORS have dead corridors too (`routed_extent` supply == 0), because
+  the true final span is shorter still than the corridor.  The root
+  circularity: DNUTS admits on the NARROW final interval (span-clear OR
+  midpoint pool), while any plan-time gate only has the WIDE slide window
+  — so no plan-time span test separates a cull from a survivor.  (The
+  earlier midpoint-fallback variant fails the mirror way — over-un-fires.)
+- *The FINAL-GEOMETRY (post-NUTS) test is CLEAN.*  Running the exact DNUTS
+  admission test — `count_signal_tracks_in_span` (span-clear) OR
+  `count_signal_tracks_in` (midpoint) — on each LOW segment's ACTUAL
+  placed span + band, after abstract NUTS, fires on **ZERO** LOW segments
+  in mix baseline (no survivor false-positives), because the final
+  interval IS what DNUTS uses.  This is the concrete path to the always-on
+  gate: a **post-NUTS dead-span escalation** — move a genuinely dead LOW
+  segment to a TOP layer with supply and re-solve (the `run_planner
+  post_nuts` insertion class, `nutsflow.py::_run_post_nuts_planner`),
+  driven off placed geometry.  `RoutingGrid::count_signal_tracks_in{,_span}`
+  are Python-bound; the C++ `span_signal_supply` computes the same on
+  placed geometry.
+
+**BUILT — opt-in `set_dead_span_escalate on` (2026-07-19).**
+`nutsflow.py::_escalate_dead_low_segments`, wired into `cmd_run_nuts` behind
+the session flag (default OFF = every checked-in flow bit-identical).  After
+each `run_nuts`, every LOW segment whose ACTUAL placed geometry (`span_lo/hi`
++ `interval_lo/hi`) offers zero keepout-clear signal tracks — the exact
+DNUTS admission test: `count_signal_tracks_in_span` (span-clear) then the
+`count_signal_tracks_in` midpoint fallback — is moved to the cheapest
+same-direction TOP layer (`seg_layers[si]`) and NUTS re-solves; iterate until
+no dead LOW segment remains (a segment pinned to TOP never returns to LOW, so
+the LOW set strictly shrinks — termination guaranteed).  Corpus A/B (flag on
+vs off, `ov`/`unpl`):
+
+| flow | baseline | escalate | Δ |
+|---|---|---|---|
+| bigHalf | 5 / 315 | **3 / 171** | opens −144, ov −2 |
+| mix (loci on) | 0 / 42 | **0 / 16** | opens −26, ov 0 |
+| mix (baseline) | 0 / 0 | 0 / 0 | no-op (clean signal) |
+| b44, big2, channel_stress, comprehensive_demo, hbundles/10, b4_bus_077 | — | — | bit-identical |
+| mempool_tile | 61 / 2976 | 90 / 2913 | opens −63 but **ov +29** |
+
+So it is OPT-IN, not default: the two clean beneficiaries are bigHalf and
+un-pinning mix from `no_hanan_loci`; the pathological `mempool_tile` stress
+demo (already 2976 opens) trades opens for overlaps when it escalates onto its
+crowded TOP bands — the one regression, and why default-off matters.  mix's
+full un-pinning still needs the LOW-supply capacity fix too (~2/3; see
+wishlist-topo "mix–loci").  Tested: `test/tests/test_dead_span_escalate.py`
+(keepout-dead LOW stub strands 8 bits off; escalation moves it to TOP and
+places; a live LOW stub is left in place — no false positives; default off).
+**Follow-on:** fold the escalation into the automatic negotiate/ripup loop so
+it engages without a manual command, and re-decide default once the mempool
+overflow trade is understood.
+
 ## A metal *above* the TOP band is still a top metal — config-smell WARNING shipped; auto-override measured & rejected
 
 **What:** `LayerType` is a binary flag `{ TOP, LOW }` set explicitly per
