@@ -216,6 +216,21 @@ HierarchicalBundler::_endpoints_at_depth(
                 ep.receiver_comp_ids.push_back(unknown_comp_ids[i]);
             ++_unk_fallback_count;
         }
+        // A net with a real OUTPUT (or INOUT) driver but ONLY UNKNOWN-direction
+        // sinks (audit C10-03): the positional fallback above only fires when
+        // NO driver was found, so such a net kept an empty receiver list and
+        // was dropped entirely below — never routed — even though both the
+        // all-UNKNOWN and the fully-annotated forms route fine. Promote the
+        // UNKNOWN pins to receivers (skipping the driver's own comp), the same
+        // positional spirit already applied to the all-UNKNOWN case.
+        else if (ep.driver_comp_id >= 0 && ep.receiver_comp_ids.empty()
+                 && !unknown_comp_ids.empty()) {
+            for (int id : unknown_comp_ids)
+                if (id != ep.driver_comp_id)
+                    ep.receiver_comp_ids.push_back(id);
+            if (!ep.receiver_comp_ids.empty())
+                ++_unk_fallback_count;
+        }
         if (ep.driver_comp_id >= 0 && !ep.receiver_comp_ids.empty())
             result[net_id] = std::move(ep);
     }

@@ -82,6 +82,32 @@ def _cap(session, cmd):
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# C10-03 — a net with an OUTPUT driver but UNKNOWN sinks is still bundled
+# ──────────────────────────────────────────────────────────────────────────
+
+def test_hier_bundler_output_driver_unknown_sink(tmp_path):
+    # producer declares `output y` (→ OUTPUT driver); consumer declares no
+    # port, so its sink pin stays UNKNOWN. Pre-fix the positional fallback
+    # only fired when NO driver existed, so this net had no receivers and was
+    # dropped entirely (never routed).
+    v = tmp_path / "mixed.v"
+    v.write_text(
+        "module producer(output y);\nendmodule\n"
+        "module consumer();\nendmodule\n"
+        "module top();\n"
+        "  wire sig;\n"
+        "  producer u_src (.y(sig));\n"
+        "  consumer u_dst (.a(sig));\n"
+        "endmodule\n"
+    )
+    db = buda.BDB(":memory:")
+    db.import_verilog(str(v))
+    bundles = buda.HierarchicalBundler(db).run(2)
+    bundled_nets = {n for b in bundles for n in b.net_names}
+    assert "sig" in bundled_nets, [list(b.net_names) for b in bundles]
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # P5-05 — `check_design all` audits at the current stage (was: unknown stage)
 # ──────────────────────────────────────────────────────────────────────────
 

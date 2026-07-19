@@ -627,11 +627,16 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             if (std::abs(bend_x - s_orig.face_x(bend_x)) < m_h) {
                 if (dst.x1 < src.x1) {
                     int bx = std::min(s_orig.x1 - m_h, dst.x2);
-                    if (bx >= d_orig.x1) gen_lhv(bx);
+                    // Bound by the corner-margin-shrunk dst box, not d_orig
+                    // (audit C4-03): the original bbox let the vertical stub
+                    // tap dst's top/bottom face inside the declared corner
+                    // margin — the exact band corner_margin exists to keep
+                    // taps out of.
+                    if (bx >= dst.x1) gen_lhv(bx);
                 }
                 if (dst.x2 > src.x2) {
                     int bx = std::max(s_orig.x2 + m_h, dst.x1);
-                    if (bx <= d_orig.x2) gen_lhv(bx);
+                    if (bx <= dst.x2) gen_lhv(bx);
                 }
             }
         } else {
@@ -3626,7 +3631,12 @@ void TopologyGenerator::add_multi_trunk_candidates(
 
             for (int i : cl) {
                 const Busterm& b = blocks[i];
-                bool straddle = (b_ra > RA1(b) && b_ra < RA2(b));
+                // Inclusive straddle (audit C4-05): a branch landing exactly on
+                // a leaf's along-edge is an edge-riding pass-through covered by
+                // the branch span — matching add_trunk's inclusive convention.
+                // The strict form computed a zero-length 'stub' there and the
+                // < stub_root check silently dropped the WHOLE candidate.
+                bool straddle = (b_ra >= RA1(b) && b_ra <= RA2(b));
                 if (straddle) continue;   // pass-through: branch covers this block
                 int face = RAface(b, b_ra);
                 if (std::abs(face - b_ra) < stub_root) return;   // stub too short → drop
@@ -4041,22 +4051,32 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
             // generate_2pin, which now runs AFTER this rescue — so the fallback no
             // longer scores itself.
             const auto& kos = floorplan_.get_keepout_zones();
+            // Build the ConnTopology once: its per-segment slide window feeds
+            // BOTH the pinch test and the SLIDE-AWARE keepout gate (audit
+            // C5-03).  The old nominal-only all_layers_blocked_by_keepouts
+            // dropped a last-resort ABUT/CORNER candidate whenever a keepout
+            // merely crossed its generated centre, even though most of its
+            // slide window was clear — the main cull was already upgraded to
+            // the slide-aware form (Codex #234); mirror it here.
+            ConnTopology ct;
+            ct.build(t, floorplan_);
+            const auto& css = ct.segs();
+            bool pinched = false;
+            for (const auto& cs : css)
+                if (cs.perp_lo == cs.perp_hi) { pinched = true; break; }
             bool blocked = false;
-            if (!kos.empty()) {
-                for (const auto& seg : t.segments) {
+            if (!pinched && !kos.empty()) {
+                for (size_t i = 0; i < t.segments.size(); ++i) {
+                    const auto& seg = t.segments[i];
                     const bool sh = (seg.start.y == seg.end.y);
                     const std::vector<int>& layers = sh ? all_h_layers_ : all_v_layers_;
-                    if (all_layers_blocked_by_keepouts(seg, layers, kos)) {
+                    int w_lo, w_hi;
+                    if (i < css.size()) { w_lo = css[i].perp_lo; w_hi = css[i].perp_hi; }
+                    else { w_lo = w_hi = sh ? seg.start.y : seg.start.x; }
+                    if (all_layers_blocked_across_slide(seg, w_lo, w_hi, layers, kos)) {
                         blocked = true; break;
                     }
                 }
-            }
-            bool pinched = false;
-            if (!blocked) {
-                ConnTopology ct;
-                ct.build(t, floorplan_);
-                for (const auto& cs : ct.segs())
-                    if (cs.perp_lo == cs.perp_hi) { pinched = true; break; }
             }
             if (!blocked && !pinched)
                 candidates.push_back(std::move(t));

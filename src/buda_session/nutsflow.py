@@ -676,7 +676,17 @@ class NutsFlowMixin:
         pitch = self._nuts_pitch if hasattr(self, '_nuts_pitch') and self._nuts_pitch else 1.0
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(pitch)
+        # Mirror cmd_run_nuts's engine setup (audit P4-04): re-derive the
+        # selected candidates' fan-in taper and feed the planner's extra grid
+        # points, so this final solve runs against the SAME Hanan grid as the
+        # run_nuts result it replaces (a coarser grid could otherwise move
+        # segments the post-NUTS layer reassignment did not intend to touch).
+        self._derive_fanin_bits_all(selected_only=True)
         self._inject_bottom_up_fixed(nuts)
+        if self.planner is not None:
+            nuts.set_extra_grid_points(
+                list(self.planner.get_x_grid()),
+                list(self.planner.get_y_grid()))
         self.nuts_result = nuts.run(self.bundles)
         self._adopt_doglegs()
 
