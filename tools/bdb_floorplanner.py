@@ -516,6 +516,7 @@ class BdbFloorplanner:
             path = bdb_serialize.materialize_if_sql(path)
         fpc.release_bdb_lock(self.state)
         self.state = fpc.load_bdb(path, sql_source=sql_source)
+        self._reset_session_state()          # audit T2-01
         self._path = []
         self._zoom_limits = None
         self._bdb_var.set(sql_source or path)
@@ -546,6 +547,7 @@ class BdbFloorplanner:
             return
         fpc.release_bdb_lock(self.state)
         self.state = fpc.create_bdb(path, self._die_w.get(), self._die_h.get(), self._grid.get())
+        self._reset_session_state()          # audit T2-01
         self._path = []
         self._zoom_limits = None
         self._bdb_var.set(path)
@@ -578,6 +580,7 @@ class BdbFloorplanner:
             return
         fpc.release_bdb_lock(self.state)   # Release only after successful import
         self.state = new_state
+        self._reset_session_state()          # audit T2-01
         self._path = []
         self._zoom_limits = None
         self._bdb_var.set(bdb_path)
@@ -838,6 +841,7 @@ class BdbFloorplanner:
             else:
                 fpc.release_bdb_lock(self.state)
                 self.state = fpc.save_bdb_as_binary(self.state, path)
+                self._reset_session_state()      # audit T2-01
                 self._path = []
                 self._bdb_var.set(path)
                 self._refresh_breadcrumbs()
@@ -1179,6 +1183,15 @@ class BdbFloorplanner:
         self._draw()
         self._status.set("Home: full view.")
 
+    def _reset_session_state(self) -> None:
+        """Clear per-design UI state when self.state is replaced by a different
+        design (audit T2-01): undo/redo history and canvas/edge selections from
+        the previous BDB must not act on the new one."""
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._canvas_sel.clear()
+        self._edge_sel = []
+
     def _clear_canvas_sel(self) -> None:
         """Deselect all blocks (or, in edge mode with a selection, clear edges)."""
         if self._edge_mode and self._edge_sel:
@@ -1404,6 +1417,12 @@ class BdbFloorplanner:
             try:
                 b = self.state.block(name)
                 fpc.move_block(self.state, name, b.x1 + dx, b.y1 + dy)
+                # Sync sibling instances of a shared cell, exactly as the
+                # drag-release path does (audit T2-07): without this the
+                # keyboard nudge silently de-synchronized instances, and
+                # write_bdb's cell-children templating then propagated one
+                # instance's move to all of them.
+                fpc.sync_move_to_instances(self.state, name, b.x1 + dx, b.y1 + dy)
             except Exception:
                 pass
         self._draw()
@@ -1800,6 +1819,9 @@ class BdbFloorplanner:
 
         name = self._drag["name"]
 
+        if mode in ("resize", "move"):
+            self._drag["moved"] = True   # a motion during the drag (audit T2-06)
+
         if mode == "resize":
             corner = self._drag["corner"]
             b = self.state.block(name)
@@ -1892,7 +1914,14 @@ class BdbFloorplanner:
 
         name = self._drag.get("name")
         snap = self._drag.get("snap")
+        moved = self._drag.get("moved", False)
         self._drag = None
+        # A plain click that never dragged (audit T2-06): don't push an undo
+        # snapshot or run the sibling sync — that polluted/evicted the 50-entry
+        # undo deque and could snap divergent sibling instances on a mere
+        # selection click. Mirror the edge_move path's `moved` gate.
+        if not moved:
+            return
         if snap is not None:
             self._push_undo(snap)
         if mode == "resize" and name:
@@ -2014,11 +2043,21 @@ class _OptimizeDialog:
         self.result   = None
         self.metrics  = None
         self._settings = settings
+        # Cancel handling (audit T2-02): the optimizer worker mutates the
+        # engine in-place, so if the user cancels mid-run we must NOT tear the
+        # dialog down until the worker finishes — otherwise the daemon thread
+        # re-applies placements after the caller has moved on. The dialog stays
+        # open ("Cancelling…") until _poll sees the worker's terminal message,
+        # then restores the pre-run engine state and reports no result.
+        self._running = False
+        self.cancelled = False
+        self._pre_snapshot: dict = {}
 
         self.top = tk.Toplevel(parent)
         self.top.title("Optimize Placement")
         self.top.resizable(False, False)
         self.top.grab_set()  # modal
+        self.top.protocol("WM_DELETE_WINDOW", self._on_cancel)
 
         pad = dict(padx=6, pady=3)
 
@@ -2169,7 +2208,8 @@ class _OptimizeDialog:
         btn_f.pack(fill=tk.X, padx=8, pady=8)
         self._run_btn = ttk.Button(btn_f, text="Run", command=self._run)
         self._run_btn.pack(side=tk.RIGHT, padx=(4, 0))
-        ttk.Button(btn_f, text="Cancel", command=self.top.destroy).pack(side=tk.RIGHT)
+        self._cancel_btn = ttk.Button(btn_f, text="Cancel", command=self._on_cancel)
+        self._cancel_btn.pack(side=tk.RIGHT)
         # Progress widgets — packed into btn_f (left side) only while running
         self._progress_var = tk.IntVar(value=0)
         self._prog_bar = ttk.Progressbar(btn_f, variable=self._progress_var,
@@ -2186,6 +2226,35 @@ class _OptimizeDialog:
         state = "normal" if enabled else "disabled"
         self._min_w_spins[name].config(state=state)
         self._min_h_spins[name].config(state=state)
+
+    def _engine_snapshot(self) -> dict:
+        snap = {}
+        for name in self.state.block_names:
+            try:
+                b = self.state.engine.get_block(name)
+                snap[name] = (b.x1, b.y1, b.x2, b.y2)
+            except Exception:
+                pass
+        return snap
+
+    def _restore_engine(self, snap: dict) -> None:
+        for name, (x1, y1, x2, y2) in snap.items():
+            try:
+                self.state.engine.resize_block_raw(name, x1, y1, x2, y2)
+            except Exception:
+                pass
+
+    def _on_cancel(self):
+        """Cancel button / window close (audit T2-02): while the worker runs,
+        defer teardown so the daemon thread can't apply after we leave — mark
+        cancelled and wait for _poll to restore and destroy."""
+        if self._running and not self.cancelled:
+            self.cancelled = True
+            self._cancel_btn.config(state="disabled")
+            self._run_btn.config(state="disabled")
+            self._prog_lbl.config(text="Cancelling…")
+            return
+        self.top.destroy()
 
     def _run(self):
         fixed      = [n for n, v in self._fixed_vars.items()   if v.get()]
@@ -2274,6 +2343,10 @@ class _OptimizeDialog:
             except Exception as exc:
                 q.put(("error", str(exc)))
 
+        # Snapshot placement before launching the worker so a cancel can
+        # roll back the daemon thread's partial mutations (audit T2-02).
+        self._pre_snapshot = self._engine_snapshot()
+        self._running = True
         threading.Thread(target=worker, daemon=True).start()
         self._poll(q)
 
@@ -2287,11 +2360,26 @@ class _OptimizeDialog:
                     self._progress_var.set(pct)
                     self._prog_lbl.config(text=f"{pct}%")
                 elif kind == "done":
+                    self._running = False
+                    if self.cancelled:
+                        # The user cancelled while this run was in flight: undo
+                        # the worker's placement mutations and drop the result
+                        # (audit T2-02) rather than silently applying it.
+                        self._restore_engine(self._pre_snapshot)
+                        self.result = None
+                        self.top.destroy()
+                        return
                     self.result = msg[1]
                     self.metrics = msg[2]
                     self.top.destroy()
                     return
                 elif kind == "error":
+                    self._running = False
+                    if self.cancelled:
+                        self._restore_engine(self._pre_snapshot)
+                        self.result = None
+                        self.top.destroy()
+                        return
                     messagebox.showerror("Optimizer Error", msg[1], parent=self.top)
                     self._run_btn.config(state="normal")
                     self._prog_bar.pack_forget()

@@ -515,8 +515,9 @@ class NutsFlowMixin:
         seg_label = {}
         for w in self.bundles:
             bid   = w.input.original_bundle.id
-            nets  = w.input.original_bundle.get_net_names()
-            hint  = nets[0] if nets else f"B{bid}"
+            # (audit P4-07: the former net-name `hint` local was dead — the
+            # seg_label below keys off the bundle id + layer, not the net —
+            # so it is dropped rather than left computed-but-unused.)
             if not w.input.candidates or w.plan.selected_topology_index < 0 or w.plan.selected_topology_index >= len(w.input.candidates):
                 continue  # bundle has no topology (e.g. src==dst or no candidates generated)
             topo  = w.input.candidates[w.plan.selected_topology_index]
@@ -610,20 +611,6 @@ class NutsFlowMixin:
 
         action = "appended to" if append else "→"
         print(f"NUTS overlap log {action} {log_path}")
-
-    def extract_instances(self, bundle):
-        # Helper to find source/dest instances from a bundle's nets for Topology Generation
-        if not bundle.get_net_names(): return "top", "top"
-        # Hack: assume first net's driver/receiver pins follow instance.pin format
-        first_net_name = bundle.get_net_names()[0]
-        # Find this net in the netlist to get its pins. This is inefficient but works for prototype.
-        # A real implementation would store src/dst instance on the Bundle object itself.
-        driver_pin = ""
-        receiver_pin = ""
-        # C++ Netlist doesn't expose find_net yet, so we rely on the input script naming convention for the demo.
-        # Assuming net name is like 'b1_0' and driver is 'u_cpu.tx'
-        # Let's just pass the block names directly in the script for now to simplify the connection.
-        return "top", "top"
 
     def _run_post_nuts_planner(self,
                                v_thresholds: tuple[float, float] | None,
@@ -743,13 +730,30 @@ class NutsFlowMixin:
         pitch = self._nuts_pitch if hasattr(self, '_nuts_pitch') and self._nuts_pitch else 1.0
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(pitch)
+        # Mirror cmd_run_nuts's engine setup (audit P4-04): re-derive the
+        # selected candidates' fan-in taper and feed the planner's extra grid
+        # points, so this final solve runs against the SAME Hanan grid as the
+        # run_nuts result it replaces (a coarser grid could otherwise move
+        # segments the post-NUTS layer reassignment did not intend to touch).
+        self._derive_fanin_bits_all(selected_only=True)
         self._inject_bottom_up_fixed(nuts)
+        if self.planner is not None:
+            nuts.set_extra_grid_points(
+                list(self.planner.get_x_grid()),
+                list(self.planner.get_y_grid()))
         self.nuts_result = nuts.run(self.bundles)
         self._adopt_doglegs()
 
         layer_names = self._make_layer_names()
         self._write_nuts_log(layer_names, append=True, rerun_layer_name="post_nuts",
                              extra_lines=extra_lines)
+
+        # The abstract solve just changed; a detailed route from the PREVIOUS
+        # solve is now stale (audit P4-03).  Re-run it (as _rerun_all does) so
+        # the session's detailed_result matches the new bus placement, rather
+        # than leaving an inconsistent route live.
+        if self.detailed_result is not None:
+            self._run_detailed_nuts(bit_order=self._detailed_bit_order)
 
     def _escalate_dead_low_segments(self, max_iter: int = 5) -> int:
         """Post-NUTS dead-span escalation (opt-in: `set_dead_span_escalate on`).

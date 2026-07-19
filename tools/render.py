@@ -90,8 +90,19 @@ def _run_flow(flow_path, bundle, topo, no_dnuts=False):
                 if line.split()[0] in _SKIP:
                     continue
                 s.do_command(line)
-            # Pin the requested candidate, then place.
+        # Pin the requested candidate, then place — OUTSIDE the stdout
+        # redirect (audit T3-03): a failed select_topology (bad --bundle /
+        # out-of-range --topo) must not be swallowed, then confidently
+        # rendered against the wrong bundle.
+        sel = io.StringIO()
+        with contextlib.redirect_stdout(sel):
             s.do_command(f"select_topology {bundle} {topo}")
+        out = sel.getvalue()
+        sys.stdout.write(out)
+        if "Error" in out:
+            sys.exit(f"render: select_topology {bundle} {topo} failed — "
+                     "check --bundle / --topo")
+        with contextlib.redirect_stdout(io.StringIO()):
             s.do_command("run_planner")
             s.do_command("run_nuts")
             if not no_dnuts:
@@ -123,7 +134,9 @@ def _find_wrapper(s, bundle):
     try:
         return s.bundles[int(bundle) - 1]
     except (ValueError, IndexError):
-        return s.bundles[0] if s.bundles else None
+        # No silent fallback to bundles[0] (audit T3-03): a bad hint must
+        # fail loudly, not render a PNG mislabeled with the requested bundle.
+        sys.exit(f"render: no bundle matches --bundle {bundle!r}")
 
 
 def _layer_color(lid):

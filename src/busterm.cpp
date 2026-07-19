@@ -29,7 +29,13 @@ std::string encode_rects_json(
     std::string out = "[";
     for (const auto& [x1,y1,x2,y2] : rects) {
         char buf[128];
-        std::snprintf(buf, sizeof(buf), "[%g,%g,%g,%g],", x1, y1, x2, y2);
+        // %.17g is round-trip-exact for doubles (still compact for small
+        // values).  Plain %g's 6 significant digits corrupted any coordinate
+        // >= 1e6 on the persist/reload round-trip — 1234567 -> "1.23457e+06"
+        // -> 1234570 — while every other persisted coord keeps full precision
+        // via SQLite's REAL columns (audit C10-04).
+        std::snprintf(buf, sizeof(buf), "[%.17g,%.17g,%.17g,%.17g],",
+                      x1, y1, x2, y2);
         out += buf;
     }
     out.back() = ']';  // replace trailing comma

@@ -297,13 +297,16 @@ class VizPanelsMixin:
         layer_seg_count = {}
         layer_bit_count = {}
         if self._nuts_result is not None:
+            seg_bits = self._seg_member_bits()
             for ts in self._nuts_result.segments:
                 if not ts.placed:
                     continue
                 lid = ts.layer
                 layer_seg_count[lid] = layer_seg_count.get(lid, 0) + 1
-                layer_bit_count[lid] = (layer_bit_count.get(lid, 0)
-                                        + self._bundle_bits(ts.bundle_id))
+                bits = seg_bits.get((ts.bundle_id, ts.seg_idx))
+                if bits is None:
+                    bits = self._bundle_bits(ts.bundle_id)
+                layer_bit_count[lid] = layer_bit_count.get(lid, 0) + bits
 
         has_rerun = self._rerun_layer_fn is not None
         for row, lid in enumerate(self._layer_ids):
@@ -383,6 +386,25 @@ class VizPanelsMixin:
         row_h_in  = 0.145   # ~10 pt rows at standard DPI
         return max(1, int(ax_h_in / row_h_in))
 
+
+    def _seg_member_bits(self):
+        """{(bundle_id, seg_idx): member-bit count} for every selected
+        topology's segments — the per-segment fan-in taper (Topology::seg_bits)
+        every real width consumer uses (audit P7-04). A dogleg-split
+        TrackSegment whose seg_idx has no entry here falls back to the full
+        bundle width at the call site, matching the pre-taper behavior."""
+        m = {}
+        for w in self.bundles:
+            sel = w.plan.selected_topology_index
+            if not w.input.candidates or not (0 <= sel < len(w.input.candidates)):
+                continue
+            topo  = w.input.candidates[sel]
+            nbits = len(w.input.original_bundle.get_net_names())
+            sb    = topo.seg_bits
+            bid   = w.input.original_bundle.id
+            for si in range(len(topo.segments)):
+                m[(bid, si)] = len(sb.get(si, [])) or nbits
+        return m
 
     @staticmethod
     def _expected_bit_wires(w):
@@ -508,11 +530,15 @@ class VizPanelsMixin:
         NUTS has run."""
         n_segs = n_bits = 0
         if self._nuts_result is not None:
+            seg_bits = self._seg_member_bits()
             for ts in self._nuts_result.segments:
                 if not ts.placed:
                     continue
                 n_segs += 1
-                n_bits += self._bundle_bits(ts.bundle_id)
+                bits = seg_bits.get((ts.bundle_id, ts.seg_idx))
+                if bits is None:
+                    bits = self._bundle_bits(ts.bundle_id)
+                n_bits += bits
         return n_segs, n_bits
 
 

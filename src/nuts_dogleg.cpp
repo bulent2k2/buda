@@ -282,15 +282,35 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
     // so the nominal topology stays connected.  (void)colL/colR: ordering is by
     // jog_x, not exact column.
     (void)colL; (void)colR;
-    for (auto& s : topo.segments) {
+    // Only retarget verticals that actually JUNCTIONED the split trunk (audit
+    // C2-03).  A raw "any vertical with an endpoint at y_t" test also moved
+    // verticals connected to a DIFFERENT horizontal that merely shares row y_t,
+    // breaking their real connectivity.  Use the pre-split seg_conns (this runs
+    // before the annotate_seg_conns re-derivation below): a stub is a trunk
+    // partner iff it appears in trunk_si's conn lists or lists trunk_si in its
+    // own — plus the x-in-[x_lo,x_hi] gate the trunk's along-extent implies.
+    std::set<int> trunk_partners;
+    for (const auto& [key, others] : topo.seg_conns) {
+        if (key.first == trunk_si)
+            trunk_partners.insert(others.begin(), others.end());
+        else if (std::find(others.begin(), others.end(), trunk_si) != others.end())
+            trunk_partners.insert(key.first);
+    }
+    const bool have_conns = !topo.seg_conns.empty();
+    for (int si = 0; si < (int)topo.segments.size(); ++si) {
+        Segment& s = topo.segments[si];
         if (s.start.x != s.end.x) continue;                 // only vertical stubs
         if (s.is_jog) continue;                             // skip the jog we appended
         // Skip by the is_jog flag, NOT by x==jog_x: an ORIGINAL stub may also sit
         // at the rounded jog column (multicast/odd-grid).  Such a stub still has an
-        // endpoint at y_t and must be extended to yL like any left-of-jog stub, so
-        // it touches the left piece's endpoint (jog_x, yL) and stays connected; the
-        // jog itself (endpoints yL/yR, never y_t) would be untouched regardless.
+        // endpoint at y_t and must be extended to yL like any left-of-jog stub.
         const int sx = s.start.x;
+        // Junction gate: a real trunk stub is a seg_conns partner of trunk_si AND
+        // lands within the trunk's along-extent.  When conns are absent (legacy),
+        // fall back to the x-extent gate alone rather than moving everything.
+        const bool in_extent = (sx >= x_lo && sx <= x_hi);
+        const bool partner   = trunk_partners.count(si) != 0;
+        if (have_conns ? !(partner && in_extent) : !in_extent) continue;
         const int new_y = (sx <= jog_x) ? yL : yR;
         if (s.start.y == y_t)      s.start.y = new_y;
         else if (s.end.y == y_t)   s.end.y   = new_y;

@@ -40,6 +40,7 @@ identical, so a regenerated fixture produces a no-op `git diff`.
 import os
 import sqlite3
 import sys
+import urllib.parse
 
 # A single sentinel line so a partial/interrupted dump is obvious in review.
 _HEADER = "-- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py\n"
@@ -50,7 +51,13 @@ def dump(bdb_path: str, sql_path: str) -> None:
     if not os.path.exists(bdb_path):
         raise FileNotFoundError(bdb_path)
     # Open read-only so serializing never mutates the source (no WAL sidecars).
-    con = sqlite3.connect(f"file:{os.path.abspath(bdb_path)}?mode=ro", uri=True)
+    # Percent-encode the path (audit T1-04): a raw f-string let URI
+    # metacharacters in the filename be misparsed — a '?' silently opened an
+    # EMPTY db (dumping nothing, overwriting a fixture), a '%' raised
+    # OperationalError. quote() keeps '/' so the path structure survives.
+    uri = "file:" + urllib.parse.quote(os.path.abspath(bdb_path), safe="/") \
+        + "?mode=ro"
+    con = sqlite3.connect(uri, uri=True)
     try:
         # iterdump() captures schema + rows but NOT PRAGMA user_version, so emit
         # it explicitly — otherwise the schema version is lost on load and the DB

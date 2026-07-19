@@ -156,6 +156,10 @@ void CongestionPlanner::warn_above_top_layers_() {
 
 void CongestionPlanner::rebuild_cuts_() {
     cuts_.clear();
+    // Injected-demand records key cuts by index; a rebuild reorders/resizes
+    // cuts_, so the records are meaningless afterward (audit C3-03).  Drop
+    // them here rather than letting apply_injected_ mischarge a reordered cut.
+    injected_.clear();
     if (x_grid_.size() < 2 || y_grid_.size() < 2) return;
 
     auto blocks   = floorplan_.get_all_blocks();
@@ -1709,6 +1713,17 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                     PlanResult theirs = plan_bundle(pw, PlanMode::STRICT);
                     if (theirs.found) {
                         commit_plan(pw, theirs);
+                        // Patch the victim's per-level layer mix (audit C3-02):
+                        // the refine pass patches layer_hist on every accepted
+                        // change, but the rip-up stage did not — so the
+                        // '[Planner] Level summary' kept counting the victim's
+                        // OLD segment layers. Subtract cp.plan's layers, add
+                        // theirs, mirroring the refine pass.
+                        {
+                            LevelStats& vls = level_stats[pw.hier.level];
+                            for (int lid : cp.plan.seg_layers) vls.layer_hist[lid] -= 1;
+                            for (int lid : theirs.seg_layers)  vls.layer_hist[lid] += 1;
+                        }
                         cp.plan = theirs;
                         assignments[cp.asn_idx] = make_assignment(pw, theirs);
                         std::cout << "[Planner] Rip-up: replanned bundle "
@@ -2168,7 +2183,13 @@ std::vector<std::pair<int, double>> CongestionPlanner::band_occupants(
 
 void CongestionPlanner::apply_injected_(double sign) {
     for (const auto& [ci, b, amount] : injected_)
-        if (ci >= 0 && ci < (int)cuts_.size())
+        // Guard the BAND index too, not just the cut index (audit C3-03): a
+        // cuts_ rebuild can shrink a cut's band count, turning a stale record
+        // into an out-of-bounds write into band_usage_.  (rebuild_cuts_ also
+        // clears injected_ now, so cross-rebuild records can't mischarge a
+        // reordered cut — this is the belt-and-braces bound.)
+        if (ci >= 0 && ci < (int)cuts_.size() &&
+            b >= 0 && b < cuts_[ci].num_bands())
             cuts_[ci].add_usage(b, sign * amount);
 }
 

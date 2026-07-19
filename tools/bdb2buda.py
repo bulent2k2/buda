@@ -160,8 +160,23 @@ def convert(bdb_path: str, cell_name: Optional[str] = None,
     comp_name_by_id = {c.id: c.name for c in target_comps}
 
     # Origin offset so child coordinates are relative to the parent's LL corner.
-    ox = parent_comp.x1 if parent_comp is not None else 0.0
-    oy = parent_comp.y1 if parent_comp is not None else 0.0
+    # A top-level export (no -cell, parent_comp is None) stays in DIE
+    # coordinates — ox=oy=0 — so a full design's placement margins survive
+    # (a block at (100,100) inside a larger die must NOT be shifted to the
+    # origin while set_die is unchanged).  Only an actual UNPLACED PARENT
+    # (bbox -1..-1, the canonical DEF+Verilog merge state) has no meaningful
+    # corner: derive the origin from the children's own extent instead,
+    # matching the die-size fallback above — else every child shifts by +1
+    # and lands outside the emitted die (audit T1-03).
+    if parent_comp is None:
+        ox = oy = 0.0
+    elif parent_comp.x2 > parent_comp.x1 and parent_comp.x1 >= 0 and parent_comp.y1 >= 0:
+        ox, oy = parent_comp.x1, parent_comp.y1
+    elif target_comps:
+        ox = min(c.x1 for c in target_comps)
+        oy = min(c.y1 for c in target_comps)
+    else:
+        ox = oy = 0.0
 
     # ── Collect and group pins ────────────────────────────────────────────────
     pins_by_net: dict = defaultdict(list)
@@ -189,10 +204,41 @@ def convert(bdb_path: str, cell_name: Optional[str] = None,
         def _fp(p, _cni=comp_name_by_id):
             return _fmt_pin(_cni[p.comp_id], p.pin_name)
 
+        # Direction class for the add_net suffix (audit T1-01): all-INOUT nets
+        # emit ` inout`, all-UNKNOWN emit ` unknown` — without it INOUT/UNKNOWN
+        # nets silently degraded to plain directed nets on export.
+        dirs = {p.dir for p in pins}
+        if dirs <= {"INOUT"}:
+            dir_suffix = " inout"
+        elif dirs <= {"UNKNOWN", ""}:
+            dir_suffix = " unknown"
+        else:
+            dir_suffix = ""
+
+        # A driver block appearing among its own receivers hard-fails the CLI
+        # ("used as both driver and receiver") — but ONLY for a DIRECTED net;
+        # cmd_add_net explicitly ALLOWS same-block endpoints for `inout` /
+        # `unknown` nets.  So drop the self-receiver only for directed nets;
+        # for inout/unknown, keep every endpoint (audit T1-01; scoped by the
+        # PR #348 review).
+        drv_block = comp_name_by_id[drv.comp_id]
+        if dir_suffix == "":
+            kept_rcvs = []
+            for p in rcvs:
+                if comp_name_by_id[p.comp_id] == drv_block:
+                    sys.stderr.write(
+                        f"bdb2buda: net {net_name!r}: dropping receiver on driver "
+                        f"block {drv_block!r} (self-loop)\n")
+                    continue
+                kept_rcvs.append(p)
+        else:
+            kept_rcvs = list(rcvs)
+
         net_descs[net_id] = {
             "name": net_name,
             "drv":  _fp(drv),
-            "rcvs": [_fp(p) for p in rcvs],
+            "rcvs": [_fp(p) for p in kept_rcvs],
+            "dir":  dir_suffix,
         }
 
     # ── Detect buses: groups of nets prefix_0 … prefix_{N-1} ─────────────────
@@ -253,9 +299,15 @@ def convert(bdb_path: str, cell_name: Optional[str] = None,
         )
         for name, nid in remaining:
             desc = net_descs[nid]
+            suffix = desc.get("dir", "")
             if desc["rcvs"]:
-                lines.append(f"add_net {name} {desc['drv']} {','.join(desc['rcvs'])}")
+                lines.append(f"add_net {name} {desc['drv']} "
+                             f"{','.join(desc['rcvs'])}{suffix}")
             else:
+                # A driver-only net carries no routable connection, so the
+                # direction suffix is dropped: `add_net n drv inout` would
+                # misparse `inout` as the receiver-CSV positional (the PR #348
+                # review) — emit the bare driver form instead.
                 lines.append(f"add_net {name} {desc['drv']}")
 
     return "\n".join(lines) + "\n"
