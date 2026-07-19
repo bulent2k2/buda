@@ -74,3 +74,41 @@ def test_reference_holding_ctors_keep_parent_alive():
     del db2
     gc.collect()
     hb.run(1)                                   # dangled pre-fix
+
+
+def _bs(bundle_id, seg_idx, span, interval=(0.0, 28.0), bits=2):
+    s = buda.BusSegment()
+    s.bundle_id, s.seg_idx, s.layer = bundle_id, seg_idx, 4
+    s.span_lo, s.span_hi = span
+    s.interval_lo, s.interval_hi = interval
+    s.bit_width = bits
+    s.bit_order = "LO_HI"
+    return s
+
+
+def _dnuts_stack(layer=4):
+    stack = buda.RoutingGridStack()
+    slots = [buda.TrackSlot("POWER", "VDD", 2.0, 1.0)]
+    for _ in range(4):
+        slots.append(buda.TrackSlot("SIGNAL", "sig", 1.0, 1.0))
+    stack.define_layer(layer, buda.TrackPattern(origin=0.0, slots=slots), True)
+    return stack
+
+
+def test_cross_bundle_reservation_sees_inverted_span():
+    # Audit C11-03: the cross-bundle track-reservation overlap test used raw
+    # span order while the same-bundle branch directly above normalizes with
+    # min/max. A bus segment whose span is inverted (span_lo > span_hi — the
+    # documented placement-swap state) but physically overlapping another
+    # bundle's segment read as disjoint, its tracks were not reserved, and
+    # the two bundles landed different nets on the same track: a silent
+    # cross-bundle short. Both bundles overlap on [40, 60] here; bundle 2's
+    # span is stored inverted.
+    a = _bs(1, 0, (0.0, 60.0))
+    b = _bs(2, 0, (100.0, 40.0))       # inverted; real extent 40..100
+    r = buda.DetailedNUTSEngine(_dnuts_stack()).run([a, b])
+    assert r.num_unplaced == 0
+    t1 = {ns.track_position for ns in r.net_segments if ns.bundle_id == 1}
+    t2 = {ns.track_position for ns in r.net_segments if ns.bundle_id == 2}
+    assert not (t1 & t2), \
+        f"different bundles share tracks {t1 & t2} — reservation missed"

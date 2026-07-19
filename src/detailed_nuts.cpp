@@ -381,7 +381,14 @@ void DetailedNUTSEngine::place_by_layer(
                     continue;
                 }
 
-                bool span_ov = asgn.span_lo < bs.span_hi && asgn.span_hi > bs.span_lo;
+                // Normalized extents, like the same-bundle branch above: an
+                // inverted span (span_lo > span_hi, the documented placement-
+                // swap state) must not read as disjoint — a missed cross-
+                // bundle reservation puts different nets on one track
+                // (audit C11-03).
+                const double o_lo = std::min(asgn.span_lo, asgn.span_hi);
+                const double o_hi = std::max(asgn.span_lo, asgn.span_hi);
+                bool span_ov = o_lo < bs_hi && o_hi > bs_lo;
                 bool itvl_ov = asgn.interval_lo < bs.interval_hi &&
                                asgn.interval_hi > bs.interval_lo;
                 if (span_ov && itvl_ov)
