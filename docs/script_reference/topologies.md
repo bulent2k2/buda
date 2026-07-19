@@ -11,7 +11,7 @@ Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pip
 ### `generate_topologies_for_bundle`
 
 ```
-generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [hanan_loci]
+generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
 ```
 
 Generate routing topology candidates for the bundle whose first net name
@@ -31,7 +31,7 @@ automatically from the netlist.
 | `center_mode` | Use block centres as connection points instead of the nearest busterm face. |
 | `double_detour` | Also generate `UU_VHV` / `UU_HVH` high-detour candidates for very congested situations. |
 | `multi_trunk` | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees (opt-in — see the multicast table below). |
-| `hanan_loci` | Also sample n-pin trunk loci ON the in-bbox Hanan lines (block/keepout edges), not just at channel midpoints, so a block-edge-aligned trunk can nominal at the geometric WL floor (opt-in: grows the multicast pool ~1.3-1.6x and renumbers the WL-sorted candidate indices `select_topology` pins). **CAUTION (open soundness issue, fix in progress):** on stressed floorplans a face/abutment-coincident locus can emit an electrically incomplete (`DISCONNECTED`) candidate that generation does not yet drop and the planner/healers may SELECT (they don't price completeness; `check_design` is report-only) — after enabling, run `check_design` and treat any `DISCONNECTED` on a selected topology as a broken route; see wishlist-topo "Nominal-WL comparability" piece (a) for the stressed-corpus evidence and the pending island-split generation gate. |
+| `no_hanan_loci` | Opt OUT of the default Hanan-line trunk loci for this run: n-pin trunk loci are sampled only at the channel midpoints (the pre-flip behavior). Since the default flip, loci ON the in-bbox Hanan lines (block/keepout edges) are sampled BY DEFAULT, so a block-edge-aligned trunk can nominal at the geometric WL floor; the default pool is ~1.3-1.6x the midpoint-only pool and the WL-sorted candidate indices `select_topology` pins DIFFER between the two settings, so pins must come from the matching run. The legacy `hanan_loci` flag remains accepted as a keep-on no-op (backward compatibility for pre-flip scripts and v15 knob memos). The degenerate-loci soundness gate is built in (see wishlist-topo piece (a) / hanan_loci_flip_audit.md): face/abutment-coincident loci get their stub↔spine junctions restored, a loci-only candidate whose slide window collapses under the final block contract is dropped with a note, and `DISCONNECTED` island-split candidates are dropped by generation's coverage gate (declared-feedthru candidates exempt). |
 
 **Candidate shapes generated (2-pin):**
 
@@ -51,7 +51,7 @@ automatically from the netlist.
 
 | Type string | Description |
 |---|---|
-| `TRUNK_H@y{trunk}` | H spine + V stubs to each receiver. Optimised with pass-through snapping and extreme-stub slide. Loci sampled at the in-bbox Hanan channel midpoints (`hanan_loci` adds the Hanan lines themselves). For receivers with `teg_mode over`, may carry a `bridge_segments` entry (see below). |
+| `TRUNK_H@y{trunk}` | H spine + V stubs to each receiver. Optimised with pass-through snapping and extreme-stub slide. Loci sampled at the in-bbox Hanan channel midpoints AND on the Hanan lines themselves (the post-flip default; `no_hanan_loci` restores midpoint-only sampling). For receivers with `teg_mode over`, may carry a `bridge_segments` entry (see below). |
 | `TRUNK_V@x{trunk}` | V spine + H stubs. Symmetric. Same locus sampling and bridge logic apply. |
 | `TRUNK_H+MST@y{trunk}` | TRUNK_H hybrid: adds MST inter-branch edges between the branch blocks (those with explicit stubs) on top of the spine, shortening inter-block paths. Generated for 3+ blocks. Type string is `TRUNK_H+MST@y{trunk}`. |
 | `TRUNK_V+MST@x{trunk}` | TRUNK_V hybrid with MST inter-branch edges. Symmetric. |
@@ -92,7 +92,7 @@ generate_topologies_for_bundle bus_rsp  # multicast
 ### `generate_more_topologies`
 
 ```
-generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk] [hanan_loci]
+generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
 ```
 
 **Additive** sibling of `generate_topologies_for_bundle` /
@@ -187,7 +187,7 @@ edit_commit pin               # pin the hand-built route; then run_planner…
 ### `generate_topologies`
 
 ```
-generate_topologies [center_mode] [double_detour] [multi_trunk] [hanan_loci]
+generate_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
 ```
 
 Generate routing topology candidates for **all** bundles produced by `run_bundler`.
@@ -201,7 +201,7 @@ Source and destination block names are derived automatically from the netlist
 | `center_mode` | Use block centres as connection points instead of the nearest busterm face. |
 | `double_detour` | Also generate `UU_VHV` / `UU_HVH` high-detour candidates for very congested situations. |
 | `multi_trunk` | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees for high-fan-out column/row-aligned buses (opt-in; wins on datapaths, QoR-neutral elsewhere at a small candidate-count cost). |
-| `hanan_loci` | Also sample n-pin trunk loci ON the in-bbox Hanan lines (block/keepout edges), not just at channel midpoints, so a block-edge-aligned trunk can nominal at the geometric WL floor (opt-in: grows the multicast pool ~1.3-1.6x and renumbers the WL-sorted candidate indices `select_topology` pins). **CAUTION (open soundness issue, fix in progress):** on stressed floorplans a face/abutment-coincident locus can emit an electrically incomplete (`DISCONNECTED`) candidate that generation does not yet drop and the planner/healers may SELECT (they don't price completeness; `check_design` is report-only) — after enabling, run `check_design` and treat any `DISCONNECTED` on a selected topology as a broken route; see wishlist-topo "Nominal-WL comparability" piece (a) for the stressed-corpus evidence and the pending island-split generation gate. |
+| `no_hanan_loci` | Opt OUT of the default Hanan-line trunk loci for this run: n-pin trunk loci are sampled only at the channel midpoints (the pre-flip behavior). Since the default flip, loci ON the in-bbox Hanan lines (block/keepout edges) are sampled BY DEFAULT, so a block-edge-aligned trunk can nominal at the geometric WL floor; the default pool is ~1.3-1.6x the midpoint-only pool and the WL-sorted candidate indices `select_topology` pins DIFFER between the two settings, so pins must come from the matching run. The legacy `hanan_loci` flag remains accepted as a keep-on no-op (backward compatibility for pre-flip scripts and v15 knob memos). The degenerate-loci soundness gate is built in (see wishlist-topo piece (a) / hanan_loci_flip_audit.md): face/abutment-coincident loci get their stub↔spine junctions restored, a loci-only candidate whose slide window collapses under the final block contract is dropped with a note, and `DISCONNECTED` island-split candidates are dropped by generation's coverage gate (declared-feedthru candidates exempt). |
 
 **Notes:**
 - Replaces N individual `generate_topologies_for_bundle` calls with one line.
@@ -255,7 +255,7 @@ run_planner
 ### `generate_hier_topologies`
 
 ```
-generate_hier_topologies [center_mode] [double_detour] [multi_trunk] [hanan_loci]
+generate_hier_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
 ```
 
 Generate routing topology candidates for all HBundles generated by `run_hier_bundler`. Must be called after `run_hier_bundler` and before `run_planner`.
@@ -271,7 +271,7 @@ The topology generator automatically determines the routing context for each HBu
 | `center_mode` | Use block centres as connection points instead of the nearest busterm face. |
 | `double_detour` | Also generate `UU_VHV` / `UU_HVH` high-detour candidates for very congested situations. |
 | `multi_trunk` | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees, exactly as in the flat `generate_topologies` (opt-in). Applied per HBundle across all three routing cases (cell-local / cross-level / cross-block). |
-| `hanan_loci` | Also sample trunk loci ON in-bbox Hanan lines, exactly as in the flat `generate_topologies` (opt-in). Carries the same open-soundness CAUTION as the flat flag — run `check_design` after enabling. |
+| `no_hanan_loci` | Opt OUT of the default Hanan-line trunk loci, exactly as in the flat `generate_topologies` (see its flag table for the full semantics; `hanan_loci` = keep-on no-op). Applied per HBundle across all three routing cases (cell-local / cross-level / cross-block), and round-tripped by the v15 knob memo across bulk regenerations. |
 
 **Zero-candidate warning:** If any HBundle ends up with 0 topology candidates, the CLI prints:
 ```
@@ -291,7 +291,7 @@ run_planner hier 5
 ### `generate_topologies_for_hbundle`
 
 ```
-generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk] [hanan_loci]
+generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
 ```
 
 Re-run topology generation for a single HBundle identified by its integer ID. Uses the same 3-case dispatch as `generate_hier_topologies` (cell-local / cross-level / cross-block). Useful for debugging when a specific bundle has zero candidates or when experimenting with flags without re-running all bundles.
@@ -302,7 +302,7 @@ Re-run topology generation for a single HBundle identified by its integer ID. Us
 | `center_mode` | keyword | Use block centres as connection points instead of the nearest busterm face. |
 | `double_detour` | keyword | Also generate `UU_VHV` / `UU_HVH` high-detour candidates. |
 | `multi_trunk` | keyword | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees (opt-in). |
-| `hanan_loci` | keyword | Also sample trunk loci ON in-bbox Hanan lines (opt-in). |
+| `no_hanan_loci` | keyword | Opt OUT of the default Hanan-line trunk loci (midpoint-only pool; `hanan_loci` = keep-on no-op). An explicit polarity is recorded in the bundle's v15 knob memo, so a later bulk `generate_hier_topologies` keeps this bundle's pool as generated. |
 
 **Requirements:** open BDB, `run_hier_bundler` already called.
 

@@ -16,10 +16,13 @@ generate_topologies
 # force bundle 3 to switch to another topo:
 add_keepout 600 250 650 350 M6
 
-select_topology 1 3
-# Bundle 2 -> TRUNK_H@y440; its 1-based index is 5 now that selective trunk+MST
-# generation drops the non-beneficial +MST hybrids that padded the candidate list.
-select_topology 2 5
+# Bundle 1 -> TRUNK_H@y175; index 7 since the hanan_loci default flip grew
+# the pool 26->38 (same candidate by topo_uid, was index 3).
+select_topology 1 7
+# Bundle 2 -> TRUNK_H@y440; its 1-based index is 10 since the hanan_loci
+# default flip grew the pool 26->38 (same candidate by topo_uid, was index 5
+# after selective trunk+MST generation dropped the non-beneficial hybrids).
+select_topology 2 10
 #planner selects topo 1 without keepout:
 #select_topology 3 1
 

@@ -28,7 +28,9 @@ check_design topo
 
 # force a cycle:
 select_topologies 1,2 4
-select_topologies 3 5
+# Bundle 3 -> TRUNK_H@y225 (the dogleg-forming topology); index 8 since the
+# hanan_loci default flip grew the pool 20->31 (same candidate by topo_uid).
+select_topologies 3 8
 run_planner 1
 
 run_nuts

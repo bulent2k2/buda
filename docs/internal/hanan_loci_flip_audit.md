@@ -1,10 +1,17 @@
 # `hanan_loci` default-flip audit — index/test gate
 
-**Status: PREP COMPLETE (2026-07-18, branch `claude/hanan-loci-flip-prep`).
-The flip itself has NOT happened** — `TopologyGenerator::allow_hanan_loci_`
-(src/topology.h) stays `false` and this tree is bit-identical for default-off
-users.  This document is the mechanical apply-list for the eventual flip
-commit, plus the list of blockers that must land BEFORE it.
+**Status: APPLIED (2026-07-19, branch `claude/hanan-loci-default-flip`).**
+The flip has landed on that branch: `TopologyGenerator::allow_hanan_loci_`
+(src/topology.h) is now `true`, every generation command accepts the
+`no_hanan_loci` opt-out (the legacy `hanan_loci` flag stays accepted as a
+keep-on no-op), the pin remaps below were RE-COLLECTED against the gated
+pools and applied to the checked-in flows, and the two opt-in spec tests
+were inverted into a default-ON spec.  The only remaining step is the
+**reference-host golden regen** (`tools/regen_goldens.py --write`, pushed
+onto the same branch) — see
+[hanan_loci_golden_regen.md](hanan_loci_golden_regen.md).  The sections
+below are kept as the audit record; the remap table reflects the FINAL
+applied indices.
 
 Context: docs/internal/wishlist-topo.md, "Nominal-WL comparability across
 shape families", piece (a).  The `hanan_loci` generation knob (opt-in,
@@ -90,11 +97,17 @@ fast + mid tiers fully green (1484 passed).
   first `run_planner`, keeping the b3 keepout-strand repro (and its level-2
   heal) independent of pool numbering.
 
-## Pin remap table (apply mechanically IN the flip commit — NOT before)
+## Pin remap table — RE-COLLECTED against the gated pools and APPLIED
 
-22 of 112 pins need remapping; 90 are unchanged (2-pin L/Z/U pools are
+Final (2026-07-19, the flip commit): the on-side indices were re-collected
+against the GATED default-on pools (the pre-gate table's CAUTION applied —
+the degenerate-loci gate shrank knob-on pools, so 4 of the 22 pre-gate rows
+changed).  **20 of 112 pins remapped; 92 unchanged** (2-pin L/Z/U pools are
 unaffected — loci only extend the TRUNK_H/V n-pin family).  Identity was
-checked by `topo_uid`; type/wl shown for review.
+checked by `topo_uid` per pin (before = post-flip generation with
+`no_hanan_loci` == the pre-flip default; after = the flipped default), and
+the EDITED flows were re-audited: all 112 pins resolve to the identical
+`topo_uid`, 0 pins MISSING from the default pools.
 
 | Flow | Bundle | Pin (off) | -> Pin (on) | Candidate |
 |---|---|---|---|---|
@@ -102,10 +115,8 @@ checked by `topo_uid`; type/wl shown for review.
 | demo/quickstart.buda | 2 | 3 | 5 | TRUNK_V@x650 wl=1220 |
 | demo/quickstart.buda | 4 | 2 | 5 | TRUNK_V@x500 wl=920 |
 | flow/big_data_test/b44.buda | 1 | 8 | 15 | TRUNK_V@x700 wl=4010 |
-| flow/big_data_test/big2/b24_bus_056.buda | 1 | 8 | 11 | TRUNK_V+MST@x2865 wl=5240 |
-| flow/big_data_test/big2/b34_bus_028.buda | 1 | 2 | 3 | TRUNK_V@x1740 wl=1478 |
-| flow/big_data_test/big2/big2_b4_b24.buda | 1 | 4 | 5 | TRUNK_H+MST@y2875 wl=4751 |
-| flow/big_data_test/big2/big2_b4_b24.buda | 2 | 8 | 11 | TRUNK_V+MST@x2865 wl=5240 |
+| flow/big_data_test/big2/b24_bus_056.buda | 1 | 8 | 10 | TRUNK_V+MST@x2865 wl=5240 |
+| flow/big_data_test/big2/big2_b4_b24.buda | 2 | 8 | 10 | TRUNK_V+MST@x2865 wl=5240 |
 | flow/big_data_test/big_3bundles_sel_pure_mst_topo.buda | 1 | 7 | 14 | TRUNK_V+MST@x3520 wl=21424 |
 | flow/big_data_test/big_3bundles_sel_pure_mst_topo.buda | 2 | 10 | 20 | TRUNK_V@x5690 wl=7300 |
 | flow/big_data_test/big_3bundles_sel_pure_mst_topo.buda | 3 | 7 | 18 | TRUNK_H@y4255 wl=11195 |
@@ -121,22 +132,23 @@ checked by `topo_uid`; type/wl shown for review.
 | flow/stub_order_swap.buda | 1 | 1 | 3 | TRUNK_H@y8460 wl=4850 |
 | flow/test.buda | 1 | 2 | 5 | TRUNK_V@x450 wl=600 |
 
+Post-gate deltas vs the stale pre-gate table: `b24_bus_056` b1 and
+`big2_b4_b24` b2 land at **10** (pre-gate 11 — one gated candidate ahead of
+them), and two pre-gate rows became UNCHANGED entirely —
+`big2_b4_b24` b1 stays 4 and `b34_bus_028` b1 stays 2 (the gated
+`TRUNK_H@y4615` abutment-line candidate was exactly the one that would have
+shifted them).
+
 Unchanged-pin flows (spot list): channel_stress (62 pins), dogleg1,
 nuts_corner_overlap[_3layer], nuts_corner_touch, nuts_dogleg_cycle,
 nuts_relax_range_reg, no_planner_flow, non_default_routing_orientation,
 home_view_enh, planner7_noop, planner8_pinned_topos, psi1, ripup1, ripup2,
-xlayer_short, sel_topos (b1,b3), quickstart (b3, b5).
+xlayer_short, sel_topos (b1,b3), quickstart (b3, b5),
+big2_b4_b24 (b1), b34_bus_028.
 `flow/sel_topos_typo.buda`'s pins are unreachable (the flow exits at its
 deliberate `add_bus` typo before generation) — no remap needed.
-
-CAUTION: the on-indices above are valid for the PRE-GATE generator.  The
-degenerate-candidate gate + junction repair HAVE now landed (branch
-`claude/hanan-loci-degenerate-gate`, see "Flip blockers" below): knob-on
-pools are smaller (loci-only zero-slide candidates dropped, DISCONNECTED
-candidates dropped, face-graze trunks repaired in place), so **the on-side
-pin indices in this table are stale and MUST be re-collected against the
-gated pools** before the flip commit applies any remap (the uid side of each
-row is stable and remains the ground truth for identity).
+`demo/quickstart.buda`'s grouped `select_topologies 3-5 2` was split
+(`3,5 2 4 5`) because b4 remaps while b3/b5 do not.
 
 ## Golden regen kit (reference host only — NEVER regenerated here)
 
@@ -151,7 +163,9 @@ renumbering never touches goldens):
   no surviving loci candidates)
 - mid tier (ALL four shift): `demo_comprehensive_demo.txt`,
   `big_data_test_big.txt` (digest), `big_data_test_big2_b4_bus_077.txt`,
-  `rnr_mix.txt` (digest)
+  `rnr_mix.txt` (digest) — **UPDATE (flip commit): rnr_mix no longer
+  shifts** — the flow is pinned out (`no_hanan_loci`, owner decision), so
+  the regen list is 5 topo goldens, not 6
 
 Regen: `PYTHONPATH=build:tools python3 tools/topo_snapshot.py` on the
 reference host, in the flip commit, AFTER the generator gate below.
@@ -258,12 +272,43 @@ Also flip-owned:
 
 ## Flip-commit checklist
 
-1. Land the degenerate-loci generator gate (blockers 1–3 above) + its tests.
-2. Re-run the audit collector under both defaults; refresh the remap table
-   (uids are the stable side).
-3. Flip `allow_hanan_loci_ = true` (src/topology.h) and make the knob
-   bidirectional (`no_hanan_loci` opt-out).
-4. Apply the pin remaps to the 15 flows above; update the two
-   `test_topo_hanan_loci.py` specs (+ feature file tags).
-5. Regenerate the 6 shifted goldens on the reference host.
-6. Full `bb slow` gate + QoR corpus re-measurement (incl. rnr/mix).
+1. ✅ Land the degenerate-loci generator gate (blockers 1–3 above) + its
+   tests (PR #335).
+2. ✅ Re-run the audit collector under both defaults; refresh the remap
+   table (uids are the stable side) — table above, 2026-07-19.
+3. ✅ Flip `allow_hanan_loci_ = true` (src/topology.h) and make the knob
+   bidirectional (`no_hanan_loci` opt-out on all five generation commands,
+   threaded through `_make_topo_gen` / the hier generator / the
+   rotation-class clone regen / the v15 knob-memo writer + both replay
+   sites — memo encoding documented at `_record_gen_knob_memo`,
+   src/buda_cmds/topologies_cmds.py).
+4. ✅ Apply the pin remaps (13 flows, 20 pins); invert the two
+   `test_topo_hanan_loci.py` specs + `features/hanan_trunk_loci.feature`
+   (default-ON spec, opt-out spec, legacy keep-on no-op spec).
+5. ⏳ Regenerate the shifted goldens ON THE REFERENCE HOST and push onto
+   `claude/hanan-loci-default-flip`: **5** `topo_analysis` goldens
+   (`tools/regen_goldens.py --write`; `--verify` on this branch reports
+   CONTENT-DIFFERS on exactly four_blocks, dogleg2, comprehensive_demo,
+   big digest, b4_bus_077 — rnr_mix reads OK since the flow itself is
+   pinned out, see item 6) PLUS the NUTS placement goldens
+   (`tools/nuts_snapshot.py` — four_blocks + comprehensive_demo shift in
+   the mid tier, big's digest in the slow tier; mix's stays valid via the
+   pin-out; found by this branch's mid run, which the pre-flip fast-tier
+   audit could not see).
+6. ✅ fast+mid gates — residual failures are EXACTLY the golden-content
+   set awaiting the reference host: the 6 `topo_analysis` goldens + the 2
+   mid-tier `nuts_placement` goldens (four_blocks, comprehensive_demo);
+   1485 passed otherwise.  Five index/measurement-sensitive mid-tier
+   fixtures were pinned pre-flip via `no_hanan_loci`
+   (test_nuts_pull_repack's big fixture, test_planner_nontop_dead_span,
+   test_planner_signal_tracks' mix repro, test_datapath_multi_trunk_qor,
+   and flow/planner3.buda's contention scenario) — the fast-tier audit
+   could not see these, its (b)-fix analogues.  Plus QoR
+   re-measurement incl. rnr/mix — **mix REGRESSED under default-on**
+   (healed endpoint 0 overlaps / 42 dnuts-unplaced / detWL +0.13% vs 0/0
+   with `no_hanan_loci`) and is **PINNED-OUT by owner decision
+   (2026-07-19)**: `flow/rnr/mix.buda` generates with `no_hanan_loci`,
+   restoring its 0/0 healed endpoint as checked in; the regression
+   numbers are kept for the record in wishlist-topo piece (a)'s final
+   flip table, and root-causing the interaction is an OPEN follow-on
+   there.  `bb slow` still pending on the reference host.

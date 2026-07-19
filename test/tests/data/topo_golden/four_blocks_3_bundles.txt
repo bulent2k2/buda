@@ -173,40 +173,6 @@ bundle 3 nets=16 candidates=8
   ana 0 conns BT:u1@100 ; SEG:1@150e
   ana 1 horiz=1 layer=6 along=[100,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[100,150] apull=0
   ana 1 conns SEG:0@100e ; BT:u4@150
- cand type=Z_HVH@x125@y100 wl=100 trunk=0 passthru=0
-  blocks=u1,u4 feedthru=
-  seg 0 (100,100)-(125,100) L6 jog=0 edge=-1
-  seg 1 (125,100)-(125,150) L5 jog=0 edge=-1
-  seg 2 (125,150)-(150,150) L6 jog=0 edge=-1
-  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
-  bt 2 - u4:THRU:(150,150,200,200):(150,150,200,200):[]
-  sconn (0,1)->[1]
-  sconn (1,0)->[0]
-  sconn (1,1)->[2]
-  sconn (2,0)->[1]
-  ana 0 horiz=1 layer=6 along=[100,125] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,125] apull=0
-  ana 0 conns BT:u1@100 ; SEG:1@125e
-  ana 1 horiz=0 layer=5 along=[100,150] perp=125 slide=[120,130] pull=0 aflex=11 acover=[100,150] apull=0
-  ana 1 conns SEG:0@100e ; SEG:2@150e
-  ana 2 horiz=1 layer=6 along=[125,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[125,150] apull=0
-  ana 2 conns SEG:1@125e ; BT:u4@150
- cand type=Z_VHV@y125@x100 wl=100 trunk=0 passthru=0
-  blocks=u1,u4 feedthru=
-  seg 0 (100,100)-(100,125) L5 jog=0 edge=-1
-  seg 1 (100,125)-(150,125) L6 jog=0 edge=-1
-  seg 2 (150,125)-(150,150) L5 jog=0 edge=-1
-  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
-  bt 2 - u4:THRU:(150,150,200,200):(150,150,200,200):[]
-  sconn (0,1)->[1]
-  sconn (1,0)->[0]
-  sconn (1,1)->[2]
-  sconn (2,0)->[1]
-  ana 0 horiz=0 layer=5 along=[100,125] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,125] apull=0
-  ana 0 conns BT:u1@100 ; SEG:1@125e
-  ana 1 horiz=1 layer=6 along=[100,150] perp=125 slide=[120,130] pull=0 aflex=11 acover=[100,150] apull=0
-  ana 1 conns SEG:0@100e ; SEG:2@150e
-  ana 2 horiz=0 layer=5 along=[125,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[125,150] apull=0
-  ana 2 conns SEG:1@125e ; BT:u4@150
  cand type=U_HVH@x220 wl=190 trunk=0 passthru=0
   blocks=u1,u4 feedthru=
   seg 0 (100,100)-(220,100) L6 jog=0 edge=-1
@@ -275,6 +241,40 @@ bundle 3 nets=16 candidates=8
   ana 1 conns SEG:0@100e ; SEG:2@150e
   ana 2 horiz=0 layer=5 along=[30,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[30,150] apull=0
   ana 2 conns SEG:1@30e ; BT:u4@150
+ cand type=Z_HVH@x125@y100 wl=100 trunk=0 passthru=0
+  blocks=u1,u4 feedthru=
+  seg 0 (100,100)-(125,100) L6 jog=0 edge=-1
+  seg 1 (125,100)-(125,150) L5 jog=0 edge=-1
+  seg 2 (125,150)-(150,150) L6 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u4:THRU:(150,150,200,200):(150,150,200,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[100,125] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,125] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@125e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=125 slide=[120,130] pull=0 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@150e
+  ana 2 horiz=1 layer=6 along=[125,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[125,150] apull=0
+  ana 2 conns SEG:1@125e ; BT:u4@150
+ cand type=Z_VHV@y125@x100 wl=100 trunk=0 passthru=0
+  blocks=u1,u4 feedthru=
+  seg 0 (100,100)-(100,125) L5 jog=0 edge=-1
+  seg 1 (100,125)-(150,125) L6 jog=0 edge=-1
+  seg 2 (150,125)-(150,150) L5 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u4:THRU:(150,150,200,200):(150,150,200,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[100,125] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,125] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@125e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=125 slide=[120,130] pull=0 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@150e
+  ana 2 horiz=0 layer=5 along=[125,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[125,150] apull=0
+  ana 2 conns SEG:1@125e ; BT:u4@150
 bundle 4 nets=16 candidates=5
  cand type=I_H wl=50 trunk=0 passthru=0
   blocks=u2,u1 feedthru=
@@ -450,40 +450,6 @@ bundle 6 nets=4 candidates=8
   ana 0 conns BT:u4@150 ; SEG:1@100e
   ana 1 horiz=1 layer=6 along=[100,150] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,150] apull=0
   ana 1 conns SEG:0@150e ; BT:u1@100
- cand type=Z_HVH@x125@y150 wl=100 trunk=0 passthru=0
-  blocks=u4,u1 feedthru=
-  seg 0 (150,150)-(125,150) L6 jog=0 edge=-1
-  seg 1 (125,150)-(125,100) L5 jog=0 edge=-1
-  seg 2 (125,100)-(100,100) L6 jog=0 edge=-1
-  bt 0 u4:THRU:(150,150,200,200):(150,150,200,200):[] -
-  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
-  sconn (0,1)->[1]
-  sconn (1,0)->[0]
-  sconn (1,1)->[2]
-  sconn (2,0)->[1]
-  ana 0 horiz=1 layer=6 along=[125,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[125,150] apull=0
-  ana 0 conns BT:u4@150 ; SEG:1@125e
-  ana 1 horiz=0 layer=5 along=[100,150] perp=125 slide=[120,130] pull=0 aflex=11 acover=[100,150] apull=0
-  ana 1 conns SEG:0@150e ; SEG:2@100e
-  ana 2 horiz=1 layer=6 along=[100,125] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,125] apull=0
-  ana 2 conns SEG:1@125e ; BT:u1@100
- cand type=Z_VHV@y125@x150 wl=100 trunk=0 passthru=0
-  blocks=u4,u1 feedthru=
-  seg 0 (150,150)-(150,125) L5 jog=0 edge=-1
-  seg 1 (150,125)-(100,125) L6 jog=0 edge=-1
-  seg 2 (100,125)-(100,100) L5 jog=0 edge=-1
-  bt 0 u4:THRU:(150,150,200,200):(150,150,200,200):[] -
-  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
-  sconn (0,1)->[1]
-  sconn (1,0)->[0]
-  sconn (1,1)->[2]
-  sconn (2,0)->[1]
-  ana 0 horiz=0 layer=5 along=[125,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[125,150] apull=0
-  ana 0 conns BT:u4@150 ; SEG:1@125e
-  ana 1 horiz=1 layer=6 along=[100,150] perp=125 slide=[120,130] pull=0 aflex=11 acover=[100,150] apull=0
-  ana 1 conns SEG:0@150e ; SEG:2@100e
-  ana 2 horiz=0 layer=5 along=[100,125] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,125] apull=0
-  ana 2 conns SEG:1@125e ; BT:u1@100
  cand type=U_HVH@x220 wl=190 trunk=0 passthru=0
   blocks=u4,u1 feedthru=
   seg 0 (200,150)-(220,150) L6 jog=0 edge=-1
@@ -552,3 +518,37 @@ bundle 6 nets=4 candidates=8
   ana 1 conns SEG:0@150e ; SEG:2@100e
   ana 2 horiz=0 layer=5 along=[30,50] perp=100 slide=[50,100] pull=1 aflex=10 acover=[30,50] apull=0
   ana 2 conns SEG:1@30e ; BT:u1@50
+ cand type=Z_HVH@x125@y150 wl=100 trunk=0 passthru=0
+  blocks=u4,u1 feedthru=
+  seg 0 (150,150)-(125,150) L6 jog=0 edge=-1
+  seg 1 (125,150)-(125,100) L5 jog=0 edge=-1
+  seg 2 (125,100)-(100,100) L6 jog=0 edge=-1
+  bt 0 u4:THRU:(150,150,200,200):(150,150,200,200):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[125,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[125,150] apull=0
+  ana 0 conns BT:u4@150 ; SEG:1@125e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=125 slide=[120,130] pull=0 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@100e
+  ana 2 horiz=1 layer=6 along=[100,125] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,125] apull=0
+  ana 2 conns SEG:1@125e ; BT:u1@100
+ cand type=Z_VHV@y125@x150 wl=100 trunk=0 passthru=0
+  blocks=u4,u1 feedthru=
+  seg 0 (150,150)-(150,125) L5 jog=0 edge=-1
+  seg 1 (150,125)-(100,125) L6 jog=0 edge=-1
+  seg 2 (100,125)-(100,100) L5 jog=0 edge=-1
+  bt 0 u4:THRU:(150,150,200,200):(150,150,200,200):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[125,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[125,150] apull=0
+  ana 0 conns BT:u4@150 ; SEG:1@125e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=125 slide=[120,130] pull=0 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@100e
+  ana 2 horiz=0 layer=5 along=[100,125] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,125] apull=0
+  ana 2 conns SEG:1@125e ; BT:u1@100

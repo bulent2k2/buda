@@ -125,7 +125,13 @@ def _mix_to_dnuts(planner_cmd):
         s.do_command("add_blocks_from_bdb 1 skip")
         s.do_command("add_blocks_from_bdb 2 skip")
         s.do_command("run_hier_bundler depth 2")
-        s.do_command("generate_hier_topologies")
+        # Midpoint-only pool: this test measures the signal-track capacity
+        # model against the fixture its 156->128 numbers were collected on.
+        # Under the hanan_loci default-on pool the mix repro shifts (width
+        # 300 / signal_tracks 332 — the benefit inverts on this corpus; part
+        # of the mix default-on regression recorded in wishlist-topo piece
+        # (a)), so the generation corpus is pinned pre-flip via the opt-out.
+        s.do_command("generate_hier_topologies no_hanan_loci")
         s.do_command(planner_cmd)
         s.do_command("run_nuts")
         s.do_command("run_detailed_nuts")

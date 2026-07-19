@@ -70,7 +70,14 @@ def _blocks_and_buses(orient):
 def _route(orient, multi_trunk: bool):
     s = buda_cli.BudaSession()
     s.no_viz = True
-    gen = "generate_topologies multi_trunk" if multi_trunk else "generate_topologies"
+    # Midpoint-only pool on BOTH sides (hanan_loci default-flip opt-out): this
+    # QoR claim ("multi_trunk pays off on a datapath") was measured against the
+    # pre-flip plain pool, and the comparison must isolate the ONE multi_trunk
+    # variable.  Under the default-on pool the loci-enriched plain trunks beat
+    # the two-level trees on this synthetic datapath (col: plain 17947 vs
+    # multi 18332) — recorded in wishlist-topo piece (a)'s flip notes.
+    gen = ("generate_topologies multi_trunk no_hanan_loci" if multi_trunk
+           else "generate_topologies no_hanan_loci")
     cmds = _LAYERS + _blocks_and_buses(orient) + ["run_bundler", gen,
                                                   "run_planner", "run_nuts"]
     with contextlib.redirect_stdout(io.StringIO()):

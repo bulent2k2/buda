@@ -19,7 +19,9 @@ run_bundler strict
 # Pass all four destination blocks so the CLI dispatches to
 # generate_multicast_candidates() instead of generate_candidates().
 generate_topologies_for_bundle b1 drv1 rcv1 rcv2
-select_topology 1 2
+# TRUNK_V@x450; index 5 since the hanan_loci default flip grew the pool
+# 26->38 (same candidate by topo_uid, was index 2).
+select_topology 1 5
 run_planner 1
 
 # Step through all 18 topologies in wirelength order.

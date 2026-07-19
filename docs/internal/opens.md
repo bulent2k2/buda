@@ -32,11 +32,14 @@ items this page doesn't see).
    pieces: ~~**(a)** also sample trunk loci ON Hanan lines (~2× pool growth,
    measure)~~ — **SHIPPED 2026-07-17** as the opt-in `hanan_loci` generation
    knob (b44 emits `TRUNK_V@x1200` at the 3510 floor; measured growth
-   ~1.3–1.6×, not 2×; opt-in because default-on renumbers pinned indices —
-   16 fast-tier failures incl. `topo_analysis` golden CONTENT shifts (new
-   candidates; order-only shifts are absorbed by the canonical comparison
-   piece (b) shipped) — and regresses the rnr/mix healed endpoint to
-   1 ov / 32 unplaced; measurements in wishlist-topo);
+   ~1.3–1.6×, not 2×), then **FLIPPED DEFAULT-ON 2026-07-19** (branch
+   `claude/hanan-loci-default-flip`, after the degenerate-loci gate): the
+   knob is now the `no_hanan_loci` opt-out, the 20-pin remap is applied
+   (uid-verified), and the 5 content-shifted goldens await the
+   reference-host regen; the rnr/mix healed endpoint REGRESSED default-on
+   (0/0 → 0 ov / 42 unplaced) and the flow is PINNED-OUT with
+   `no_hanan_loci` by owner decision — numbers kept, and the mix–loci
+   root-cause is an OPEN follow-on in wishlist-topo piece (a);
    ~~**(b)** a structural `(wl, nsegs, type)` tie-break~~ —
    ✅ shipped 2026-07-17 (`annotate_and_sort` + the Python pool-merge
    resort; the pin index audit rode the ship: 112 checked-in

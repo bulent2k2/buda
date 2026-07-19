@@ -582,13 +582,16 @@ public:
     // default candidate rankings are unchanged.
     void set_multi_trunk(bool v) { allow_multi_trunk_ = v; }
 
-    // Hanan-line trunk loci (default false): ALSO sample n-pin trunk loci ON
-    // the in-bbox Hanan lines themselves, not just at channel midpoints, so a
-    // block-edge-aligned trunk can nominal at the geometric WL floor (the b44
-    // +500 overshoot — docs/internal/wishlist-topo.md "Nominal-WL
-    // comparability", piece (a)).  Opt-in: the extra loci grow the pool
-    // ~1.5-2x and renumber the WL-sorted candidate indices checked-in flows
-    // and goldens pin.
+    // Hanan-line trunk loci (default TRUE since the default flip): ALSO
+    // sample n-pin trunk loci ON the in-bbox Hanan lines themselves, not just
+    // at channel midpoints, so a block-edge-aligned trunk can nominal at the
+    // geometric WL floor (the b44 +500 overshoot —
+    // docs/internal/wishlist-topo.md "Nominal-WL comparability", piece (a)).
+    // Flipped default-on after the degenerate-loci gate landed (face-graze
+    // junction repair + loci pinch gate + DISCONNECTED island gate — see
+    // docs/internal/hanan_loci_flip_audit.md); scripts opt OUT per command
+    // with `no_hanan_loci` (the CLI calls set_hanan_loci(false)), and the
+    // legacy `hanan_loci` flag is still accepted as a keep-on no-op.
     void set_hanan_loci(bool v) { allow_hanan_loci_ = v; }
 
     // Unified entry point: 1 dst → L/Z/U shapes; N dsts → trunk+branch shapes.
@@ -628,7 +631,7 @@ private:
     bool use_busterm_         = true;
     bool allow_double_detour_ = false;
     bool allow_multi_trunk_   = false;
-    bool allow_hanan_loci_    = false;
+    bool allow_hanan_loci_    = true;
     int  h_layer_             = 4;
     int  v_layer_             = 5;
     std::vector<int> all_h_layers_ = {4};

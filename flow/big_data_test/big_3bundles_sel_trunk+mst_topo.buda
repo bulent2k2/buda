@@ -161,14 +161,16 @@ run_bundler
 generate_topologies
 
 # Select the "best" (lowest-WL) TRUNK_V|H+MST hybrid candidate for each bundle.
-# bundle 1 (bus_069/old-46): idx10 TRUNK_V@x8235
-# bundle 2 (bus_047/old-50): idx5  TRUNK_H+MST@y2340 (was idx4 before the
+# bundle 1 (bus_069/old-46): idx19 TRUNK_V@x8235
+# bundle 2 (bus_047/old-50): idx13 TRUNK_H+MST@y2340 (was idx4 before the
 #   structural (wl, nsegs, type) tie-break: its 4-seg 6970-tie sibling
 #   TRUNK_V+MST@x5690 now sorts first)
-# bundle 3 (bus_030/old-57): idx6  TRUNK_V+MST@x5870
-select_topology 1 10
-select_topology 2 5
-select_topology 3 6
+# bundle 3 (bus_030/old-57): idx16 TRUNK_V+MST@x5870
+# (indices re-collected for the hanan_loci default flip — pools 44->71 /
+#  33->52 / 33->54, same candidates by topo_uid)
+select_topology 1 19
+select_topology 2 13
+select_topology 3 16
 run_planner
 run_nuts
 check_design nuts

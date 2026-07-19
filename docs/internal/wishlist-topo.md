@@ -304,7 +304,99 @@ pool / among selected):*
 | bigHalf healed | base | 2488 | 0 | 80 | 15408926 | 0 / 0 |
 | bigHalf healed | loci | 3950 | 0 | 63 | 14716562 (−4.5%) | 0 / 0 |
 
-**Updated flip verdict:** the wins SURVIVE the gate — and are now honest
+**FLIPPED — pending goldens (2026-07-19, branch
+`claude/hanan-loci-default-flip`).**  `allow_hanan_loci_ = true`
+(src/topology.h); every generation command grew a `no_hanan_loci` opt-out
+(the legacy `hanan_loci` flag stays accepted as a keep-on no-op, and the
+v15 knob memo round-trips the opt-out — encoding documented at
+`_record_gen_knob_memo`, src/buda_cmds/topologies_cmds.py); the 20-pin
+remap was re-collected against the gated pools and applied (all 112 pins
+uid-verified identical — [hanan_loci_flip_audit.md](hanan_loci_flip_audit.md),
+now APPLIED); the two opt-in spec tests were inverted.  Remaining: the
+6-golden regen on the reference host
+([hanan_loci_golden_regen.md](hanan_loci_golden_regen.md)).
+
+*Final flip table (default-on vs `no_hanan_loci`, endpoints as checked in
+incl. remapped pins; ov = NUTS overlaps, opens = DNUTS unplaced bits):*
+
+| flow / endpoint | side | pool | ov | opens | det WL |
+|---|---|---:|---:|---:|---:|
+| b44 pinned (as checked in) | loci | 35 | 0 | 0 | 193376 |
+| | no_loci (pre-flip pin 8) | 23 | 0 | 0 | 193376 |
+| b44 planner-free (no pin tail) | loci | 35 | 0 | 0 | 193376 (picks TRUNK_V@x1200, the floor locus) |
+| | no_loci | 23 | 0 | 0 | 188695 (picks TRUNK_H@y11330) |
+| comprehensive_demo | loci | 243 | 0 | 0 | 40888 (+0.05%) |
+| | no_loci | 154 | 0 | 0 | 40868 |
+| big2/b4_bus_077 | loci | 21 | 0 | 0 | 191669 (byte-identical) |
+| | no_loci | 17 | 0 | 0 | 191669 |
+| **rnr/mix (hier, healed)** | loci (measured pre-pin-out) | 1675 | 0 | **42** | 800426 (+0.13%) |
+| | no_loci (**= as checked in, PINNED-OUT**) | 1237 | 0 | 0 | 799419 |
+
+**⚠ rnr/mix REGRESSED under default-on → PINNED-OUT by owner decision
+(2026-07-19); regression numbers kept above for the record:** the audit's
+QoR caveat was CONFIRMED post-gate.  Under the default-on pool mix's
+fully-healed endpoint (2× negotiate_congestion + ripup_reroute) went from
+a clean 0 overlaps / 0 opens to **42 dnuts-unplaced bits (2 bundles /
+3 groups)** with detailed WL +0.13% and a ~3× slower heal loop (58s vs
+21s end-to-end).  The richer pool steers mix's planner/healers onto
+realizations whose real signal-track supply falls short; no DISCONNECTED
+candidates are involved (0 in pool and selection on both sides — the gate
+holds).  The stressed big2/bigHalf wins above still stand.  Resolution:
+`flow/rnr/mix.buda` now generates with `no_hanan_loci` (flow-level bulk
+flag, non-sticky — no knob memo involved), restoring the 0/0 healed
+endpoint at det WL 799419 as checked in; a side benefit is that the
+rnr_mix topo_analysis digest golden (and its slow-tier NUTS placement
+digest) no longer shift, shrinking the reference-host regen to **5**
+topo goldens.  Root-causing the interaction is a follow-on — next item.
+b44's planner-free +2.5% detWL is the known window-EDGE effect (the floor
+locus x=1200 nominal beats y11330's, but the bus centre cannot reach an
+edge-aligned optimum) — the (b)/(c)-adjacent envelope follow-on above.
+Two smaller default-on notes from the full-corpus smoke: `flow/sel_topos.buda`
+(healer-less R&D flow) shifts 0 ov / 0 opens → 1 / 16 (its unpinned bundles
+pick loci candidates; its b2 pin is uid-preserved), and three mid-tier
+planner/NUTS measurement tests (`test_nuts_pull_repack` big fixture,
+`test_planner_nontop_dead_span`, `test_planner_signal_tracks` mix repro —
+where the signal_tracks benefit inverts on the loci pool, 300→332;
+`test_datapath_multi_trunk_qor`, where the loci-enriched PLAIN pool beats
+the BITRUNK two-level trees on the synthetic column datapath, 17947 vs
+18332 — the multi_trunk QoR claim is now relative to the midpoint corpus;
+and `flow/planner3.buda` itself, whose double-booked-trunk contention
+scenario dissolves when the planner auto-picks a loci trunk) now pin
+their generation corpus pre-flip via `no_hanan_loci` to keep their measured
+scenarios; `flow/big_data_test/big_3bundles_sel_pure_mst_topo.buda`'s
+12 opens are pre-existing (identical both sides).
+
+**Follow-on — bigHalf rr slow-tier endpoint under the loci default (OPEN,
+accepted at flip time):** `test_bighalf_rr_reaches_clean_endpoint` (slow
+tier — the ReadMe_bigHalf row-6 both-rr-lines config) fails to reach the
+clean 0/0 endpoint on the reference host under the default-on pool; every
+fast+mid tier test passes and the checked-in bigHalf.buda (row-7 config)
+is unaffected.  Owner decision at flip time: ship and debug later — same
+family as the mix–loci interaction below (the richer pool shifts what the
+heal loop converges to), and the first debugging step is the same
+occupancy/trial trace on the loci pool.
+
+**Follow-on — root-cause the mix–loci interaction (OPEN, from the flip):**
+on `flow/rnr/mix.buda` the RICHER default-on pool degrades the fully-healed
+endpoint (0 ov / 0 opens → 0 / 42, det WL +0.13%, heal loop ~3× slower)
+with **zero DISCONNECTED candidates** in pool or selection — not a
+soundness hole but a selection/feedback pathology: more floor-tied loci
+candidates shift the hier planner's picks and the negotiate/ripup loops
+converge onto realizations whose real signal-track supply falls short
+(the signal_tracks repro inverts too: width 300 vs signal_tracks 332
+opens on the loci pool — test_planner_signal_tracks' pinned fixture).
+Same sensitivity class as the `kPeak` record (wishlist-planner "Selection
+basis": big2's healers prefer the knob off — selection perturbations and
+the healing feedback loops double-steer when untuned).  Until root-caused,
+mix is PINNED-OUT (`no_hanan_loci` on its generation line — owner decision
+2026-07-19).  Investigation sketch: replay mix's shifted bundles under
+both pools and find which cost term (or healer metric) fails to price the
+loci realizations — candidates: the kWLSpread envelope on edge-aligned
+optima, `kPeak`'s absolute-supply floor, and ripup's lexicographic metric
+being blind to supply-short bands below overflow.
+
+**Pre-flip verdict record (2026-07-18, post-gate stressed corpus):** the
+wins SURVIVE the gate — and are now honest
 (pre-gate, part of the loci "win" was missing islands).  With the gated pools,
 `hanan_loci` strictly improves every stressed endpoint that matters: plain
 opens −74% (big2 108→28) / −55% (bigHalf 626→283), healed endpoints equal or

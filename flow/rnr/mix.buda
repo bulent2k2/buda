@@ -8,7 +8,13 @@ add_blocks_from_bdb 1 skip
 add_blocks_from_bdb 2 skip
 run_hier_bundler depth 2
 dump_hbundles
-generate_hier_topologies
+# Midpoint-only pool (hanan_loci default-flip opt-out, owner decision): this
+# flow's fully-healed 0 overlaps / 0 opens endpoint is a regression target,
+# and the default-on loci pool regresses it to 42 dnuts-unplaced (2 bundles)
+# at det WL +0.13% with no DISCONNECTED involved — see wishlist-topo
+# "Nominal-WL comparability" piece (a) (final flip table + the mix-loci
+# root-cause follow-on).
+generate_hier_topologies no_hanan_loci
 # improvement (1) due to signal_tracks:
 run_planner hier 5 signal_tracks
 run_nuts

@@ -23,40 +23,6 @@ bundle 1 nets=8 candidates=8
   ana 0 conns BT:bot1@100 ; SEG:1@352e
   ana 1 horiz=1 layer=4 along=[98,150] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[98,150] apull=0
   ana 1 conns SEG:0@98e ; BT:top2@150
- cand type=Z_HVH@x125@y98 wl=304 trunk=0 passthru=0
-  blocks=bot1,top2 feedthru=
-  seg 0 (100,98)-(125,98) L4 jog=0 edge=-1
-  seg 1 (125,98)-(125,352) L5 jog=0 edge=-1
-  seg 2 (125,352)-(150,352) L4 jog=0 edge=-1
-  bt 0 bot1:THRU:(52,52,98,98):(50,50,100,100):[] -
-  bt 2 - top2:THRU:(152,352,198,398):(150,350,200,400):[]
-  sconn (0,1)->[1]
-  sconn (1,0)->[0]
-  sconn (1,1)->[2]
-  sconn (2,0)->[1]
-  ana 0 horiz=1 layer=4 along=[100,125] perp=98 slide=[52,98] pull=1 aflex=01 acover=[100,125] apull=0
-  ana 0 conns BT:bot1@100 ; SEG:1@125e
-  ana 1 horiz=0 layer=5 along=[98,352] perp=125 slide=[102,148] pull=0 aflex=11 acover=[98,352] apull=0
-  ana 1 conns SEG:0@98e ; SEG:2@352e
-  ana 2 horiz=1 layer=4 along=[125,150] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[125,150] apull=0
-  ana 2 conns SEG:1@125e ; BT:top2@150
- cand type=Z_VHV@y225@x98 wl=304 trunk=0 passthru=0
-  blocks=bot1,top2 feedthru=
-  seg 0 (98,100)-(98,225) L5 jog=0 edge=-1
-  seg 1 (98,225)-(152,225) L4 jog=0 edge=-1
-  seg 2 (152,225)-(152,350) L5 jog=0 edge=-1
-  bt 0 bot1:THRU:(52,52,98,98):(50,50,100,100):[] -
-  bt 2 - top2:THRU:(152,352,198,398):(150,350,200,400):[]
-  sconn (0,1)->[1]
-  sconn (1,0)->[0]
-  sconn (1,1)->[2]
-  sconn (2,0)->[1]
-  ana 0 horiz=0 layer=5 along=[100,225] perp=98 slide=[52,98] pull=1 aflex=01 acover=[100,225] apull=0
-  ana 0 conns BT:bot1@100 ; SEG:1@225e
-  ana 1 horiz=1 layer=4 along=[98,152] perp=225 slide=[102,348] pull=0 aflex=11 acover=[98,152] apull=0
-  ana 1 conns SEG:0@98e ; SEG:2@152e
-  ana 2 horiz=0 layer=5 along=[225,350] perp=152 slide=[152,198] pull=-1 aflex=10 acover=[225,350] apull=0
-  ana 2 conns SEG:1@225e ; BT:top2@350
  cand type=U_HVH@x215 wl=384 trunk=0 passthru=0
   blocks=bot1,top2 feedthru=
   seg 0 (100,98)-(215,98) L4 jog=0 edge=-1
@@ -125,6 +91,40 @@ bundle 1 nets=8 candidates=8
   ana 1 conns SEG:0@98e ; SEG:2@152e
   ana 2 horiz=0 layer=5 along=[400,435] perp=152 slide=[152,198] pull=-1 aflex=01 acover=[400,435] apull=0
   ana 2 conns SEG:1@435e ; BT:top2@400
+ cand type=Z_HVH@x125@y98 wl=304 trunk=0 passthru=0
+  blocks=bot1,top2 feedthru=
+  seg 0 (100,98)-(125,98) L4 jog=0 edge=-1
+  seg 1 (125,98)-(125,352) L5 jog=0 edge=-1
+  seg 2 (125,352)-(150,352) L4 jog=0 edge=-1
+  bt 0 bot1:THRU:(52,52,98,98):(50,50,100,100):[] -
+  bt 2 - top2:THRU:(152,352,198,398):(150,350,200,400):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=4 along=[100,125] perp=98 slide=[52,98] pull=1 aflex=01 acover=[100,125] apull=0
+  ana 0 conns BT:bot1@100 ; SEG:1@125e
+  ana 1 horiz=0 layer=5 along=[98,352] perp=125 slide=[102,148] pull=0 aflex=11 acover=[98,352] apull=0
+  ana 1 conns SEG:0@98e ; SEG:2@352e
+  ana 2 horiz=1 layer=4 along=[125,150] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[125,150] apull=0
+  ana 2 conns SEG:1@125e ; BT:top2@150
+ cand type=Z_VHV@y225@x98 wl=304 trunk=0 passthru=0
+  blocks=bot1,top2 feedthru=
+  seg 0 (98,100)-(98,225) L5 jog=0 edge=-1
+  seg 1 (98,225)-(152,225) L4 jog=0 edge=-1
+  seg 2 (152,225)-(152,350) L5 jog=0 edge=-1
+  bt 0 bot1:THRU:(52,52,98,98):(50,50,100,100):[] -
+  bt 2 - top2:THRU:(152,352,198,398):(150,350,200,400):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[100,225] perp=98 slide=[52,98] pull=1 aflex=01 acover=[100,225] apull=0
+  ana 0 conns BT:bot1@100 ; SEG:1@225e
+  ana 1 horiz=1 layer=4 along=[98,152] perp=225 slide=[102,348] pull=0 aflex=11 acover=[98,152] apull=0
+  ana 1 conns SEG:0@98e ; SEG:2@152e
+  ana 2 horiz=0 layer=5 along=[225,350] perp=152 slide=[152,198] pull=-1 aflex=10 acover=[225,350] apull=0
+  ana 2 conns SEG:1@225e ; BT:top2@350
 bundle 2 nets=8 candidates=8
  cand type=L_HV@x252@y98 wl=304 trunk=0 passthru=0
   blocks=bot2,top3 feedthru=
@@ -150,40 +150,6 @@ bundle 2 nets=8 candidates=8
   ana 0 conns BT:bot2@100 ; SEG:1@352e
   ana 1 horiz=1 layer=4 along=[198,250] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[198,250] apull=0
   ana 1 conns SEG:0@198e ; BT:top3@250
- cand type=Z_HVH@x225@y98 wl=304 trunk=0 passthru=0
-  blocks=bot2,top3 feedthru=
-  seg 0 (200,98)-(225,98) L4 jog=0 edge=-1
-  seg 1 (225,98)-(225,352) L5 jog=0 edge=-1
-  seg 2 (225,352)-(250,352) L4 jog=0 edge=-1
-  bt 0 bot2:THRU:(152,52,198,98):(150,50,200,100):[] -
-  bt 2 - top3:THRU:(252,352,298,398):(250,350,300,400):[]
-  sconn (0,1)->[1]
-  sconn (1,0)->[0]
-  sconn (1,1)->[2]
-  sconn (2,0)->[1]
-  ana 0 horiz=1 layer=4 along=[200,225] perp=98 slide=[52,98] pull=1 aflex=01 acover=[200,225] apull=0
-  ana 0 conns BT:bot2@200 ; SEG:1@225e
-  ana 1 horiz=0 layer=5 along=[98,352] perp=225 slide=[202,248] pull=0 aflex=11 acover=[98,352] apull=0
-  ana 1 conns SEG:0@98e ; SEG:2@352e
-  ana 2 horiz=1 layer=4 along=[225,250] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[225,250] apull=0
-  ana 2 conns SEG:1@225e ; BT:top3@250
- cand type=Z_VHV@y225@x198 wl=304 trunk=0 passthru=0
-  blocks=bot2,top3 feedthru=
-  seg 0 (198,100)-(198,225) L5 jog=0 edge=-1
-  seg 1 (198,225)-(252,225) L4 jog=0 edge=-1
-  seg 2 (252,225)-(252,350) L5 jog=0 edge=-1
-  bt 0 bot2:THRU:(152,52,198,98):(150,50,200,100):[] -
-  bt 2 - top3:THRU:(252,352,298,398):(250,350,300,400):[]
-  sconn (0,1)->[1]
-  sconn (1,0)->[0]
-  sconn (1,1)->[2]
-  sconn (2,0)->[1]
-  ana 0 horiz=0 layer=5 along=[100,225] perp=198 slide=[152,198] pull=1 aflex=01 acover=[100,225] apull=0
-  ana 0 conns BT:bot2@100 ; SEG:1@225e
-  ana 1 horiz=1 layer=4 along=[198,252] perp=225 slide=[102,348] pull=0 aflex=11 acover=[198,252] apull=0
-  ana 1 conns SEG:0@198e ; SEG:2@252e
-  ana 2 horiz=0 layer=5 along=[225,350] perp=252 slide=[252,298] pull=-1 aflex=10 acover=[225,350] apull=0
-  ana 2 conns SEG:1@225e ; BT:top3@350
  cand type=U_HVH@x135 wl=384 trunk=0 passthru=0
   blocks=bot2,top3 feedthru=
   seg 0 (150,98)-(135,98) L4 jog=0 edge=-1
@@ -252,101 +218,92 @@ bundle 2 nets=8 candidates=8
   ana 1 conns SEG:0@198e ; SEG:2@252e
   ana 2 horiz=0 layer=5 along=[400,435] perp=252 slide=[252,298] pull=-1 aflex=01 acover=[400,435] apull=0
   ana 2 conns SEG:1@435e ; BT:top3@400
-bundle 3 nets=8 candidates=20
- cand type=TRUNK_V@x275 wl=502 trunk=275 passthru=0
+ cand type=Z_HVH@x225@y98 wl=304 trunk=0 passthru=0
+  blocks=bot2,top3 feedthru=
+  seg 0 (200,98)-(225,98) L4 jog=0 edge=-1
+  seg 1 (225,98)-(225,352) L5 jog=0 edge=-1
+  seg 2 (225,352)-(250,352) L4 jog=0 edge=-1
+  bt 0 bot2:THRU:(152,52,198,98):(150,50,200,100):[] -
+  bt 2 - top3:THRU:(252,352,298,398):(250,350,300,400):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=4 along=[200,225] perp=98 slide=[52,98] pull=1 aflex=01 acover=[200,225] apull=0
+  ana 0 conns BT:bot2@200 ; SEG:1@225e
+  ana 1 horiz=0 layer=5 along=[98,352] perp=225 slide=[202,248] pull=0 aflex=11 acover=[98,352] apull=0
+  ana 1 conns SEG:0@98e ; SEG:2@352e
+  ana 2 horiz=1 layer=4 along=[225,250] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[225,250] apull=0
+  ana 2 conns SEG:1@225e ; BT:top3@250
+ cand type=Z_VHV@y225@x198 wl=304 trunk=0 passthru=0
+  blocks=bot2,top3 feedthru=
+  seg 0 (198,100)-(198,225) L5 jog=0 edge=-1
+  seg 1 (198,225)-(252,225) L4 jog=0 edge=-1
+  seg 2 (252,225)-(252,350) L5 jog=0 edge=-1
+  bt 0 bot2:THRU:(152,52,198,98):(150,50,200,100):[] -
+  bt 2 - top3:THRU:(252,352,298,398):(250,350,300,400):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[100,225] perp=198 slide=[152,198] pull=1 aflex=01 acover=[100,225] apull=0
+  ana 0 conns BT:bot2@100 ; SEG:1@225e
+  ana 1 horiz=1 layer=4 along=[198,252] perp=225 slide=[102,348] pull=0 aflex=11 acover=[198,252] apull=0
+  ana 1 conns SEG:0@198e ; SEG:2@252e
+  ana 2 horiz=0 layer=5 along=[225,350] perp=252 slide=[252,298] pull=-1 aflex=10 acover=[225,350] apull=0
+  ana 2 conns SEG:1@225e ; BT:top3@350
+bundle 3 nets=8 candidates=31
+ cand type=TRUNK_H+MST@y100 wl=679 trunk=100 passthru=1
   blocks=bot3,top1,top4 feedthru=
-  seg 0 (275,100)-(275,352) L5 jog=0 edge=-1
-  seg 1 (100,352)-(275,352) L4 jog=0 edge=-1
-  seg 2 (350,352)-(275,352) L4 jog=0 edge=-1
-  bt 0 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  seg 0 (98,100)-(250,100) L4 jog=0 edge=-1
+  seg 1 (98,375)-(98,100) L5 jog=0 edge=-1
+  seg 2 (98,375)-(350,375) L4 jog=0 edge=0
+  bt 0 - bot3:THRU:(252,52,298,98):(250,50,300,100):[]
+  bt 2 - top4:THRU:(352,352,448,398):(350,350,450,400):[]
+  sconn (0,0)->[1]
+  sconn (1,0)->[2]
+  sconn (1,1)->[0]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=4 along=[98,250] perp=100 slide=[50,100] pull=1 aflex=10 acover=[98,250] apull=0
+  ana 0 conns SEG:1@98e ; BT:bot3@250
+  ana 1 horiz=0 layer=5 along=[100,375] perp=98 slide=[52,98] pull=2 aflex=11 acover=[100,375] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@375e
+  ana 2 horiz=1 layer=4 along=[98,350] perp=375 slide=[352,398] pull=-1 aflex=10 acover=[98,350] apull=0
+  ana 2 conns SEG:1@98e ; BT:top4@350
+ cand type=TRUNK_H+MST@y75 wl=704 trunk=75 passthru=1
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (98,75)-(250,75) L4 jog=0 edge=-1
+  seg 1 (98,375)-(98,75) L5 jog=0 edge=-1
+  seg 2 (98,375)-(350,375) L4 jog=0 edge=0
+  bt 0 - bot3:THRU:(252,52,298,98):(250,50,300,100):[]
+  bt 2 - top4:THRU:(352,352,448,398):(350,350,450,400):[]
+  sconn (0,0)->[1]
+  sconn (1,0)->[2]
+  sconn (1,1)->[0]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=4 along=[98,250] perp=75 slide=[52,98] pull=1 aflex=10 acover=[98,250] apull=0
+  ana 0 conns SEG:1@98e ; BT:bot3@250
+  ana 1 horiz=0 layer=5 along=[75,375] perp=98 slide=[52,98] pull=2 aflex=11 acover=[75,375] apull=0
+  ana 1 conns SEG:0@75e ; SEG:2@375e
+  ana 2 horiz=1 layer=4 along=[98,350] perp=375 slide=[352,398] pull=-1 aflex=10 acover=[98,350] apull=0
+  ana 2 conns SEG:1@98e ; BT:top4@350
+ cand type=TRUNK_H@y100 wl=754 trunk=100 passthru=1
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (98,100)-(352,100) L4 jog=0 edge=-1
+  seg 1 (98,350)-(98,100) L5 jog=0 edge=-1
+  seg 2 (352,350)-(352,100) L5 jog=0 edge=-1
   bt 1 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
   bt 2 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
-  sconn (0,1)->[1,2]
-  sconn (1,1)->[0]
-  sconn (2,1)->[0]
-  ana 0 horiz=0 layer=5 along=[100,352] perp=275 slide=[252,298] pull=0 aflex=01 acover=[100,352] apull=0
-  ana 0 conns BT:bot3@100 ; SEG:1@352e ; SEG:2@352e
-  ana 1 horiz=1 layer=4 along=[100,275] perp=352 slide=[352,398] pull=-1 aflex=01 acover=[100,275] apull=0
-  ana 1 conns SEG:0@275e ; BT:top1@100
-  ana 2 horiz=1 layer=4 along=[275,350] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[275,350] apull=0
-  ana 2 conns SEG:0@275e ; BT:top4@350
- cand type=TRUNK_H@y375 wl=525 trunk=375 passthru=0
-  blocks=bot3,top1,top4 feedthru=
-  seg 0 (100,375)-(350,375) L4 jog=0 edge=-1
-  seg 1 (275,100)-(275,375) L5 jog=0 edge=-1
-  bt 0 top1:THRU:(52,352,98,398):(50,350,100,400):[] top4:THRU:(352,352,448,398):(350,350,450,400):[]
-  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
-  sconn (1,1)->[0]
-  ana 0 horiz=1 layer=4 along=[100,350] perp=375 slide=[352,398] pull=-1 aflex=00 acover=[100,350] apull=0
-  ana 0 conns BT:top1@100 ; BT:top4@350 ; SEG:1@275
-  ana 1 horiz=0 layer=5 along=[100,375] perp=275 slide=[252,298] pull=0 aflex=01 acover=[100,375] apull=0
-  ana 1 conns BT:bot3@100 ; SEG:0@375e
- cand type=TRUNK_V@x325 wl=529 trunk=325 passthru=0
-  blocks=bot3,top1,top4 feedthru=
-  seg 0 (325,98)-(325,352) L5 jog=0 edge=-1
-  seg 1 (300,98)-(325,98) L4 jog=0 edge=-1
-  seg 2 (100,352)-(325,352) L4 jog=0 edge=-1
-  seg 3 (350,352)-(325,352) L4 jog=0 edge=-1
-  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
-  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
-  bt 3 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
   sconn (0,0)->[1]
-  sconn (0,1)->[2,3]
+  sconn (0,1)->[2]
   sconn (1,1)->[0]
   sconn (2,1)->[0]
-  sconn (3,1)->[0]
-  ana 0 horiz=0 layer=5 along=[98,352] perp=325 slide=[302,348] pull=-1 aflex=11 acover=[98,352] apull=0
-  ana 0 conns SEG:1@98e ; SEG:2@352e ; SEG:3@352e
-  ana 1 horiz=1 layer=4 along=[300,325] perp=98 slide=[52,98] pull=1 aflex=01 acover=[300,325] apull=0
-  ana 1 conns SEG:0@325e ; BT:bot3@300
-  ana 2 horiz=1 layer=4 along=[100,325] perp=352 slide=[352,398] pull=-1 aflex=01 acover=[100,325] apull=0
-  ana 2 conns SEG:0@325e ; BT:top1@100
-  ana 3 horiz=1 layer=4 along=[325,350] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[325,350] apull=0
-  ana 3 conns SEG:0@325e ; BT:top4@350
- cand type=TRUNK_V@x175 wl=579 trunk=175 passthru=0
-  blocks=bot3,top1,top4 feedthru=
-  seg 0 (175,98)-(175,352) L5 jog=0 edge=-1
-  seg 1 (250,98)-(175,98) L4 jog=0 edge=-1
-  seg 2 (100,352)-(175,352) L4 jog=0 edge=-1
-  seg 3 (350,352)-(175,352) L4 jog=0 edge=-1
-  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
-  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
-  bt 3 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
-  sconn (0,0)->[1]
-  sconn (0,1)->[2,3]
-  sconn (1,1)->[0]
-  sconn (2,1)->[0]
-  sconn (3,1)->[0]
-  ana 0 horiz=0 layer=5 along=[98,352] perp=175 slide=[102,248] pull=1 aflex=11 acover=[98,352] apull=0
-  ana 0 conns SEG:1@98e ; SEG:2@352e ; SEG:3@352e
-  ana 1 horiz=1 layer=4 along=[175,250] perp=98 slide=[52,98] pull=1 aflex=10 acover=[175,250] apull=0
-  ana 1 conns SEG:0@175e ; BT:bot3@250
-  ana 2 horiz=1 layer=4 along=[100,175] perp=352 slide=[352,398] pull=-1 aflex=01 acover=[100,175] apull=0
-  ana 2 conns SEG:0@175e ; BT:top1@100
-  ana 3 horiz=1 layer=4 along=[175,350] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[175,350] apull=0
-  ana 3 conns SEG:0@175e ; BT:top4@350
- cand type=TRUNK_V+MST@x275 wl=600 trunk=275 passthru=0
-  blocks=bot3,top1,top4 feedthru=
-  seg 0 (275,100)-(275,352) L5 jog=0 edge=-1
-  seg 1 (350,352)-(275,352) L4 jog=0 edge=-1
-  seg 2 (100,375)-(350,375) L4 jog=0 edge=0
-  seg 3 (350,352)-(350,375) L5 jog=0 edge=-1
-  bt 0 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
-  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
-  sconn (0,1)->[1]
-  sconn (1,0)->[3]
-  sconn (1,1)->[0]
-  sconn (2,1)->[3]
-  sconn (3,0)->[1]
-  sconn (3,1)->[2]
-  ana 0 horiz=0 layer=5 along=[100,352] perp=275 slide=[252,298] pull=1 aflex=01 acover=[100,352] apull=0
-  ana 0 conns BT:bot3@100 ; SEG:1@352e
-  ana 1 horiz=1 layer=4 along=[275,350] perp=352 slide=[352,398] pull=-1 aflex=11 acover=[275,350] apull=0
-  ana 1 conns SEG:0@275e ; SEG:3@350e
-  ana 2 horiz=1 layer=4 along=[100,350] perp=375 slide=[352,398] pull=0 aflex=01 acover=[100,350] apull=0
-  ana 2 conns BT:top1@100 ; SEG:3@350e
-  ana 3 horiz=0 layer=5 along=[352,375] perp=350 slide=[352,448] pull=-2 aflex=11 acover=[352,375] apull=0
-  ana 3 conns SEG:1@352e ; SEG:2@375e
+  ana 0 horiz=1 layer=4 along=[98,352] perp=100 slide=[52,98] pull=2 aflex=11 acover=[98,352] apull=0
+  ana 0 conns SEG:1@98e ; SEG:2@352e
+  ana 1 horiz=0 layer=5 along=[100,350] perp=98 slide=[52,98] pull=1 aflex=10 acover=[100,350] apull=0
+  ana 1 conns SEG:0@100e ; BT:top1@350
+  ana 2 horiz=0 layer=5 along=[100,350] perp=352 slide=[352,448] pull=-1 aflex=10 acover=[100,350] apull=0
+  ana 2 conns SEG:0@100e ; BT:top4@350
  cand type=TRUNK_H@y225 wl=629 trunk=225 passthru=0
   blocks=bot3,top1,top4 feedthru=
   seg 0 (98,225)-(352,225) L4 jog=0 edge=-1
@@ -369,133 +326,28 @@ bundle 3 nets=8 candidates=20
   ana 2 conns SEG:0@225e ; BT:top1@350
   ana 3 horiz=0 layer=5 along=[225,350] perp=352 slide=[352,448] pull=-1 aflex=10 acover=[225,350] apull=0
   ana 3 conns SEG:0@225e ; BT:top4@350
- cand type=TRUNK_V@x400 wl=654 trunk=400 passthru=1
+ cand type=TRUNK_H@y350 wl=500 trunk=350 passthru=0
   blocks=bot3,top1,top4 feedthru=
-  seg 0 (400,98)-(400,352) L5 jog=0 edge=-1
-  seg 1 (300,98)-(400,98) L4 jog=0 edge=-1
-  seg 2 (100,352)-(400,352) L4 jog=0 edge=-1
-  bt 0 - top4:THRU:(352,352,448,398):(350,350,450,400):[]
+  seg 0 (100,350)-(350,350) L4 jog=0 edge=-1
+  seg 1 (275,100)-(275,350) L5 jog=0 edge=-1
+  bt 0 top1:THRU:(52,352,98,398):(50,350,100,400):[] top4:THRU:(352,352,448,398):(350,350,450,400):[]
   bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
-  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
-  sconn (0,0)->[1]
   sconn (1,1)->[0]
-  sconn (2,1)->[0]
-  ana 0 horiz=0 layer=5 along=[98,352] perp=400 slide=[352,448] pull=-2 aflex=10 acover=[98,352] apull=0
-  ana 0 conns SEG:1@98e ; BT:top4@352 ; SEG:2@352e
-  ana 1 horiz=1 layer=4 along=[300,400] perp=98 slide=[52,98] pull=1 aflex=01 acover=[300,400] apull=0
-  ana 1 conns SEG:0@400e ; BT:bot3@300
-  ana 2 horiz=1 layer=4 along=[100,400] perp=352 slide=[352,398] pull=0 aflex=01 acover=[100,400] apull=0
-  ana 2 conns BT:top1@100 ; SEG:0@400e
- cand type=TRUNK_H_OOB@y435 wl=659 trunk=435 passthru=0
+  ana 0 horiz=1 layer=4 along=[100,350] perp=350 slide=[350,400] pull=-1 aflex=00 acover=[100,350] apull=0
+  ana 0 conns BT:top1@100 ; BT:top4@350 ; SEG:1@275
+  ana 1 horiz=0 layer=5 along=[100,350] perp=275 slide=[252,298] pull=0 aflex=01 acover=[100,350] apull=0
+  ana 1 conns BT:bot3@100 ; SEG:0@350e
+ cand type=TRUNK_H@y375 wl=525 trunk=375 passthru=0
   blocks=bot3,top1,top4 feedthru=
-  seg 0 (98,435)-(352,435) L4 jog=0 edge=-1
-  seg 1 (275,100)-(275,435) L5 jog=0 edge=-1
-  seg 2 (98,400)-(98,435) L5 jog=0 edge=-1
-  seg 3 (352,400)-(352,435) L5 jog=0 edge=-1
+  seg 0 (100,375)-(350,375) L4 jog=0 edge=-1
+  seg 1 (275,100)-(275,375) L5 jog=0 edge=-1
+  bt 0 top1:THRU:(52,352,98,398):(50,350,100,400):[] top4:THRU:(352,352,448,398):(350,350,450,400):[]
   bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
-  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
-  bt 3 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
-  sconn (0,0)->[2]
-  sconn (0,1)->[3]
   sconn (1,1)->[0]
-  sconn (2,1)->[0]
-  sconn (3,1)->[0]
-  ana 0 horiz=1 layer=4 along=[98,352] perp=435 slide=[402,1073741823] pull=-3 aflex=11 acover=[98,352] apull=0
-  ana 0 conns SEG:2@98e ; SEG:3@352e ; SEG:1@275
-  ana 1 horiz=0 layer=5 along=[100,435] perp=275 slide=[252,298] pull=0 aflex=01 acover=[100,435] apull=0
-  ana 1 conns BT:bot3@100 ; SEG:0@435e
-  ana 2 horiz=0 layer=5 along=[400,435] perp=98 slide=[52,98] pull=1 aflex=01 acover=[400,435] apull=0
-  ana 2 conns SEG:0@435e ; BT:top1@400
-  ana 3 horiz=0 layer=5 along=[400,435] perp=352 slide=[352,448] pull=-1 aflex=01 acover=[400,435] apull=0
-  ana 3 conns SEG:0@435e ; BT:top4@400
- cand type=TRUNK_H_OOB+MST@y435 wl=676 trunk=435 passthru=0
-  blocks=bot3,top1,top4 feedthru=
-  seg 0 (98,435)-(352,435) L4 jog=0 edge=-1
-  seg 1 (98,400)-(98,435) L5 jog=0 edge=-1
-  seg 2 (352,350)-(352,435) L5 jog=0 edge=-1
-  seg 3 (300,100)-(300,350) L5 jog=0 edge=1
-  seg 4 (300,350)-(352,350) L4 jog=0 edge=1
-  bt 1 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
-  bt 3 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
-  sconn (0,0)->[1]
-  sconn (0,1)->[2]
-  sconn (1,1)->[0]
-  sconn (2,0)->[4]
-  sconn (2,1)->[0]
-  sconn (3,1)->[4]
-  sconn (4,0)->[3]
-  sconn (4,1)->[2]
-  ana 0 horiz=1 layer=4 along=[98,352] perp=435 slide=[402,1073741823] pull=-2 aflex=11 acover=[98,352] apull=0
-  ana 0 conns SEG:1@98e ; SEG:2@352e
-  ana 1 horiz=0 layer=5 along=[400,435] perp=98 slide=[52,98] pull=1 aflex=01 acover=[400,435] apull=0
-  ana 1 conns SEG:0@435e ; BT:top1@400
-  ana 2 horiz=0 layer=5 along=[350,435] perp=352 slide=[352,448] pull=-2 aflex=11 acover=[350,435] apull=0
-  ana 2 conns SEG:0@435e ; SEG:4@350e
-  ana 3 horiz=0 layer=5 along=[100,350] perp=300 slide=[250,300] pull=1 aflex=01 acover=[100,350] apull=0
-  ana 3 conns BT:bot3@100 ; SEG:4@350e
-  ana 4 horiz=1 layer=4 along=[300,352] perp=350 slide=[352,398] pull=0 aflex=11 acover=[300,352] apull=0
-  ana 4 conns SEG:2@352e ; SEG:3@300e
- cand type=TRUNK_H+MST@y75 wl=704 trunk=75 passthru=1
-  blocks=bot3,top1,top4 feedthru=
-  seg 0 (98,75)-(250,75) L4 jog=0 edge=-1
-  seg 1 (98,375)-(98,75) L5 jog=0 edge=-1
-  seg 2 (98,375)-(350,375) L4 jog=0 edge=0
-  bt 0 - bot3:THRU:(252,52,298,98):(250,50,300,100):[]
-  bt 2 - top4:THRU:(352,352,448,398):(350,350,450,400):[]
-  sconn (0,0)->[1]
-  sconn (1,0)->[2]
-  sconn (1,1)->[0]
-  sconn (2,0)->[1]
-  ana 0 horiz=1 layer=4 along=[98,250] perp=75 slide=[52,98] pull=1 aflex=10 acover=[98,250] apull=0
-  ana 0 conns SEG:1@98e ; BT:bot3@250
-  ana 1 horiz=0 layer=5 along=[75,375] perp=98 slide=[52,98] pull=2 aflex=11 acover=[75,375] apull=0
-  ana 1 conns SEG:0@75e ; SEG:2@375e
-  ana 2 horiz=1 layer=4 along=[98,350] perp=375 slide=[352,398] pull=-1 aflex=10 acover=[98,350] apull=0
-  ana 2 conns SEG:1@98e ; BT:top4@350
- cand type=TRUNK_V@x75 wl=704 trunk=75 passthru=1
-  blocks=bot3,top1,top4 feedthru=
-  seg 0 (75,98)-(75,352) L5 jog=0 edge=-1
-  seg 1 (250,98)-(75,98) L4 jog=0 edge=-1
-  seg 2 (350,352)-(75,352) L4 jog=0 edge=-1
-  bt 0 - top1:THRU:(52,352,98,398):(50,350,100,400):[]
-  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
-  bt 2 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
-  sconn (0,0)->[1]
-  sconn (1,1)->[0]
-  sconn (2,1)->[0]
-  ana 0 horiz=0 layer=5 along=[98,352] perp=75 slide=[52,98] pull=2 aflex=10 acover=[98,352] apull=0
-  ana 0 conns SEG:1@98e ; BT:top1@352 ; SEG:2@352e
-  ana 1 horiz=1 layer=4 along=[75,250] perp=98 slide=[52,98] pull=1 aflex=10 acover=[75,250] apull=0
-  ana 1 conns SEG:0@75e ; BT:bot3@250
-  ana 2 horiz=1 layer=4 along=[75,350] perp=352 slide=[352,398] pull=0 aflex=10 acover=[75,350] apull=0
-  ana 2 conns BT:top4@350 ; SEG:0@75e
- cand type=TRUNK_V+MST@x75 wl=779 trunk=75 passthru=1
-  blocks=bot3,top1,top4 feedthru=
-  seg 0 (75,98)-(75,350) L5 jog=0 edge=-1
-  seg 1 (275,98)-(75,98) L4 jog=0 edge=-1
-  seg 2 (275,100)-(350,100) L4 jog=0 edge=0
-  seg 3 (350,100)-(350,350) L5 jog=0 edge=0
-  seg 4 (275,98)-(275,100) L5 jog=0 edge=-1
-  bt 0 - top1:THRU:(52,352,98,398):(50,350,100,400):[]
-  bt 3 - top4:THRU:(352,352,448,398):(350,350,450,400):[]
-  sconn (0,0)->[1]
-  sconn (1,0)->[4]
-  sconn (1,1)->[0]
-  sconn (2,0)->[4]
-  sconn (2,1)->[3]
-  sconn (3,0)->[2]
-  sconn (4,0)->[1]
-  sconn (4,1)->[2]
-  ana 0 horiz=0 layer=5 along=[98,350] perp=75 slide=[52,98] pull=1 aflex=10 acover=[98,350] apull=0
-  ana 0 conns SEG:1@98e ; BT:top1@350
-  ana 1 horiz=1 layer=4 along=[75,275] perp=98 slide=[52,98] pull=1 aflex=11 acover=[75,275] apull=0
-  ana 1 conns SEG:0@75e ; SEG:4@275e
-  ana 2 horiz=1 layer=4 along=[275,350] perp=100 slide=[52,98] pull=0 aflex=11 acover=[275,350] apull=0
-  ana 2 conns SEG:4@275e ; SEG:3@350e
-  ana 3 horiz=0 layer=5 along=[100,350] perp=350 slide=[350,450] pull=-1 aflex=10 acover=[100,350] apull=0
-  ana 3 conns SEG:2@100e ; BT:top4@350
-  ana 4 horiz=0 layer=5 along=[98,100] perp=275 slide=[252,298] pull=0 aflex=11 acover=[98,100] apull=0
-  ana 4 conns SEG:1@98e ; SEG:2@100e
+  ana 0 horiz=1 layer=4 along=[100,350] perp=375 slide=[352,398] pull=-1 aflex=00 acover=[100,350] apull=0
+  ana 0 conns BT:top1@100 ; BT:top4@350 ; SEG:1@275
+  ana 1 horiz=0 layer=5 along=[100,375] perp=275 slide=[252,298] pull=0 aflex=01 acover=[100,375] apull=0
+  ana 1 conns BT:bot3@100 ; SEG:0@375e
  cand type=TRUNK_H@y75 wl=804 trunk=75 passthru=1
   blocks=bot3,top1,top4 feedthru=
   seg 0 (98,75)-(352,75) L4 jog=0 edge=-1
@@ -513,98 +365,6 @@ bundle 3 nets=8 candidates=20
   ana 1 conns SEG:0@75e ; BT:top1@350
   ana 2 horiz=0 layer=5 along=[75,350] perp=352 slide=[352,448] pull=-1 aflex=10 acover=[75,350] apull=0
   ana 2 conns SEG:0@75e ; BT:top4@350
- cand type=TRUNK_V+MST@x400 wl=804 trunk=400 passthru=1
-  blocks=bot3,top1,top4 feedthru=
-  seg 0 (400,98)-(400,350) L5 jog=0 edge=-1
-  seg 1 (275,98)-(400,98) L4 jog=0 edge=-1
-  seg 2 (275,100)-(100,100) L4 jog=0 edge=0
-  seg 3 (100,100)-(100,350) L5 jog=0 edge=0
-  seg 4 (275,98)-(275,100) L5 jog=0 edge=-1
-  bt 0 - top4:THRU:(352,352,448,398):(350,350,450,400):[]
-  bt 3 - top1:THRU:(52,352,98,398):(50,350,100,400):[]
-  sconn (0,0)->[1]
-  sconn (1,0)->[4]
-  sconn (1,1)->[0]
-  sconn (2,0)->[4]
-  sconn (2,1)->[3]
-  sconn (3,0)->[2]
-  sconn (4,0)->[1]
-  sconn (4,1)->[2]
-  ana 0 horiz=0 layer=5 along=[98,350] perp=400 slide=[352,448] pull=-1 aflex=10 acover=[98,350] apull=0
-  ana 0 conns SEG:1@98e ; BT:top4@350
-  ana 1 horiz=1 layer=4 along=[275,400] perp=98 slide=[52,98] pull=1 aflex=11 acover=[275,400] apull=0
-  ana 1 conns SEG:0@400e ; SEG:4@275e
-  ana 2 horiz=1 layer=4 along=[100,275] perp=100 slide=[52,98] pull=0 aflex=11 acover=[100,275] apull=0
-  ana 2 conns SEG:4@275e ; SEG:3@100e
-  ana 3 horiz=0 layer=5 along=[100,350] perp=100 slide=[50,100] pull=1 aflex=10 acover=[100,350] apull=0
-  ana 3 conns SEG:2@100e ; BT:top1@350
-  ana 4 horiz=0 layer=5 along=[98,100] perp=275 slide=[252,298] pull=0 aflex=11 acover=[98,100] apull=0
-  ana 4 conns SEG:1@98e ; SEG:2@100e
- cand type=TRUNK_V_OOB@x10 wl=834 trunk=10 passthru=0
-  blocks=bot3,top1,top4 feedthru=
-  seg 0 (10,98)-(10,352) L5 jog=0 edge=-1
-  seg 1 (250,98)-(10,98) L4 jog=0 edge=-1
-  seg 2 (350,352)-(10,352) L4 jog=0 edge=-1
-  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
-  bt 2 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
-  sconn (0,0)->[1]
-  sconn (0,1)->[2]
-  sconn (1,1)->[0]
-  sconn (2,1)->[0]
-  ana 0 horiz=0 layer=5 along=[98,352] perp=10 slide=[-1073741824,100] pull=2 aflex=11 acover=[98,352] apull=0
-  ana 0 conns SEG:1@98e ; SEG:2@352e
-  ana 1 horiz=1 layer=4 along=[10,250] perp=98 slide=[52,98] pull=1 aflex=10 acover=[10,250] apull=0
-  ana 1 conns SEG:0@10e ; BT:bot3@250
-  ana 2 horiz=1 layer=4 along=[10,350] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[10,350] apull=0
-  ana 2 conns SEG:0@10e ; BT:top4@350
- cand type=TRUNK_V_OOB@x490 wl=834 trunk=490 passthru=0
-  blocks=bot3,top1,top4 feedthru=
-  seg 0 (490,98)-(490,352) L5 jog=0 edge=-1
-  seg 1 (300,98)-(490,98) L4 jog=0 edge=-1
-  seg 2 (100,352)-(490,352) L4 jog=0 edge=-1
-  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
-  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
-  sconn (0,0)->[1]
-  sconn (0,1)->[2]
-  sconn (1,1)->[0]
-  sconn (2,1)->[0]
-  ana 0 horiz=0 layer=5 along=[98,352] perp=490 slide=[350,1073741823] pull=-2 aflex=11 acover=[98,352] apull=0
-  ana 0 conns SEG:1@98e ; SEG:2@352e
-  ana 1 horiz=1 layer=4 along=[300,490] perp=98 slide=[52,98] pull=1 aflex=01 acover=[300,490] apull=0
-  ana 1 conns SEG:0@490e ; BT:bot3@300
-  ana 2 horiz=1 layer=4 along=[100,490] perp=352 slide=[352,398] pull=-1 aflex=01 acover=[100,490] apull=0
-  ana 2 conns SEG:0@490e ; BT:top1@100
- cand type=TRUNK_V+MST@x325 wl=856 trunk=325 passthru=0
-  blocks=bot3,top1,top4 feedthru=
-  seg 0 (325,98)-(325,352) L5 jog=0 edge=-1
-  seg 1 (300,98)-(325,98) L4 jog=0 edge=-1
-  seg 2 (100,375)-(350,375) L4 jog=0 edge=0
-  seg 3 (300,100)-(350,100) L4 jog=0 edge=1
-  seg 4 (350,100)-(350,375) L5 jog=0 edge=1
-  seg 5 (300,98)-(300,100) L5 jog=0 edge=-1
-  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
-  sconn (0,0)->[1]
-  sconn (1,0)->[5]
-  sconn (1,1)->[0]
-  sconn (2,1)->[4]
-  sconn (3,0)->[5]
-  sconn (3,1)->[4]
-  sconn (4,0)->[3]
-  sconn (4,1)->[2]
-  sconn (5,0)->[1]
-  sconn (5,1)->[3]
-  ana 0 horiz=0 layer=5 along=[98,352] perp=325 slide=[250,1073741823] pull=-1 aflex=11 acover=[98,98] apull=1
-  ana 0 conns SEG:1@98e
-  ana 1 horiz=1 layer=4 along=[300,325] perp=98 slide=[52,98] pull=0 aflex=11 acover=[300,325] apull=0
-  ana 1 conns SEG:0@325e ; SEG:5@300e
-  ana 2 horiz=1 layer=4 along=[100,350] perp=375 slide=[352,398] pull=-1 aflex=01 acover=[100,350] apull=0
-  ana 2 conns BT:top1@100 ; SEG:4@350e
-  ana 3 horiz=1 layer=4 along=[300,350] perp=100 slide=[52,98] pull=0 aflex=11 acover=[300,350] apull=0
-  ana 3 conns SEG:5@300e ; SEG:4@350e
-  ana 4 horiz=0 layer=5 along=[100,375] perp=350 slide=[352,448] pull=-2 aflex=11 acover=[100,375] apull=0
-  ana 4 conns SEG:2@375e ; SEG:3@100e
-  ana 5 horiz=0 layer=5 along=[98,100] perp=300 slide=[252,298] pull=1 aflex=11 acover=[98,100] apull=0
-  ana 5 conns SEG:1@98e ; SEG:3@100e
  cand type=TRUNK_H_OOB+MST@y15 wl=939 trunk=15 passthru=0
   blocks=bot3,top1,top4 feedthru=
   seg 0 (98,15)-(352,15) L4 jog=0 edge=-1
@@ -640,6 +400,104 @@ bundle 3 nets=8 candidates=20
   ana 5 conns SEG:1@275e ; SEG:3@300e
   ana 6 horiz=0 layer=5 along=[350,375] perp=350 slide=[352,448] pull=-2 aflex=11 acover=[350,375] apull=0
   ana 6 conns SEG:2@375e ; SEG:4@350e
+ cand type=TRUNK_H_OOB+MST@y435 wl=676 trunk=435 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (98,435)-(352,435) L4 jog=0 edge=-1
+  seg 1 (98,400)-(98,435) L5 jog=0 edge=-1
+  seg 2 (352,350)-(352,435) L5 jog=0 edge=-1
+  seg 3 (300,100)-(300,350) L5 jog=0 edge=1
+  seg 4 (300,350)-(352,350) L4 jog=0 edge=1
+  bt 1 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  bt 3 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  sconn (0,0)->[1]
+  sconn (0,1)->[2]
+  sconn (1,1)->[0]
+  sconn (2,0)->[4]
+  sconn (2,1)->[0]
+  sconn (3,1)->[4]
+  sconn (4,0)->[3]
+  sconn (4,1)->[2]
+  ana 0 horiz=1 layer=4 along=[98,352] perp=435 slide=[402,1073741823] pull=-2 aflex=11 acover=[98,352] apull=0
+  ana 0 conns SEG:1@98e ; SEG:2@352e
+  ana 1 horiz=0 layer=5 along=[400,435] perp=98 slide=[52,98] pull=1 aflex=01 acover=[400,435] apull=0
+  ana 1 conns SEG:0@435e ; BT:top1@400
+  ana 2 horiz=0 layer=5 along=[350,435] perp=352 slide=[352,448] pull=-2 aflex=11 acover=[350,435] apull=0
+  ana 2 conns SEG:0@435e ; SEG:4@350e
+  ana 3 horiz=0 layer=5 along=[100,350] perp=300 slide=[250,300] pull=1 aflex=01 acover=[100,350] apull=0
+  ana 3 conns BT:bot3@100 ; SEG:4@350e
+  ana 4 horiz=1 layer=4 along=[300,352] perp=350 slide=[352,398] pull=0 aflex=11 acover=[300,352] apull=0
+  ana 4 conns SEG:2@352e ; SEG:3@300e
+ cand type=TRUNK_H_OOB@y15 wl=959 trunk=15 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (98,15)-(352,15) L4 jog=0 edge=-1
+  seg 1 (275,50)-(275,15) L5 jog=0 edge=-1
+  seg 2 (98,350)-(98,15) L5 jog=0 edge=-1
+  seg 3 (352,350)-(352,15) L5 jog=0 edge=-1
+  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  bt 3 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
+  sconn (0,0)->[2]
+  sconn (0,1)->[3]
+  sconn (1,1)->[0]
+  sconn (2,1)->[0]
+  sconn (3,1)->[0]
+  ana 0 horiz=1 layer=4 along=[98,352] perp=15 slide=[-1073741824,48] pull=3 aflex=11 acover=[98,352] apull=0
+  ana 0 conns SEG:2@98e ; SEG:3@352e ; SEG:1@275
+  ana 1 horiz=0 layer=5 along=[15,50] perp=275 slide=[252,298] pull=0 aflex=10 acover=[15,50] apull=0
+  ana 1 conns BT:bot3@50 ; SEG:0@15e
+  ana 2 horiz=0 layer=5 along=[15,350] perp=98 slide=[52,98] pull=1 aflex=10 acover=[15,350] apull=0
+  ana 2 conns SEG:0@15e ; BT:top1@350
+  ana 3 horiz=0 layer=5 along=[15,350] perp=352 slide=[352,448] pull=-1 aflex=10 acover=[15,350] apull=0
+  ana 3 conns SEG:0@15e ; BT:top4@350
+ cand type=TRUNK_H_OOB@y435 wl=659 trunk=435 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (98,435)-(352,435) L4 jog=0 edge=-1
+  seg 1 (275,100)-(275,435) L5 jog=0 edge=-1
+  seg 2 (98,400)-(98,435) L5 jog=0 edge=-1
+  seg 3 (352,400)-(352,435) L5 jog=0 edge=-1
+  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  bt 3 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
+  sconn (0,0)->[2]
+  sconn (0,1)->[3]
+  sconn (1,1)->[0]
+  sconn (2,1)->[0]
+  sconn (3,1)->[0]
+  ana 0 horiz=1 layer=4 along=[98,352] perp=435 slide=[402,1073741823] pull=-3 aflex=11 acover=[98,352] apull=0
+  ana 0 conns SEG:2@98e ; SEG:3@352e ; SEG:1@275
+  ana 1 horiz=0 layer=5 along=[100,435] perp=275 slide=[252,298] pull=0 aflex=01 acover=[100,435] apull=0
+  ana 1 conns BT:bot3@100 ; SEG:0@435e
+  ana 2 horiz=0 layer=5 along=[400,435] perp=98 slide=[52,98] pull=1 aflex=01 acover=[400,435] apull=0
+  ana 2 conns SEG:0@435e ; BT:top1@400
+  ana 3 horiz=0 layer=5 along=[400,435] perp=352 slide=[352,448] pull=-1 aflex=01 acover=[400,435] apull=0
+  ana 3 conns SEG:0@435e ; BT:top4@400
+ cand type=TRUNK_V+MST@x100 wl=754 trunk=100 passthru=1
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (100,98)-(100,350) L5 jog=0 edge=-1
+  seg 1 (275,98)-(100,98) L4 jog=0 edge=-1
+  seg 2 (275,100)-(350,100) L4 jog=0 edge=0
+  seg 3 (350,100)-(350,350) L5 jog=0 edge=0
+  seg 4 (275,98)-(275,100) L5 jog=0 edge=-1
+  bt 0 - top1:THRU:(52,352,98,398):(50,350,100,400):[]
+  bt 3 - top4:THRU:(352,352,448,398):(350,350,450,400):[]
+  sconn (0,0)->[1]
+  sconn (1,0)->[4]
+  sconn (1,1)->[0]
+  sconn (2,0)->[4]
+  sconn (2,1)->[3]
+  sconn (3,0)->[2]
+  sconn (4,0)->[1]
+  sconn (4,1)->[2]
+  ana 0 horiz=0 layer=5 along=[98,350] perp=100 slide=[50,100] pull=1 aflex=10 acover=[98,350] apull=0
+  ana 0 conns SEG:1@98e ; BT:top1@350
+  ana 1 horiz=1 layer=4 along=[100,275] perp=98 slide=[52,98] pull=1 aflex=11 acover=[100,275] apull=0
+  ana 1 conns SEG:0@100e ; SEG:4@275e
+  ana 2 horiz=1 layer=4 along=[275,350] perp=100 slide=[52,98] pull=0 aflex=11 acover=[275,350] apull=0
+  ana 2 conns SEG:4@275e ; SEG:3@350e
+  ana 3 horiz=0 layer=5 along=[100,350] perp=350 slide=[350,450] pull=-1 aflex=10 acover=[100,350] apull=0
+  ana 3 conns SEG:2@100e ; BT:top4@350
+  ana 4 horiz=0 layer=5 along=[98,100] perp=275 slide=[252,298] pull=0 aflex=11 acover=[98,100] apull=0
+  ana 4 conns SEG:1@98e ; SEG:2@100e
  cand type=TRUNK_V+MST@x175 wl=956 trunk=175 passthru=0
   blocks=bot3,top1,top4 feedthru=
   seg 0 (175,98)-(175,352) L5 jog=0 edge=-1
@@ -671,25 +529,378 @@ bundle 3 nets=8 candidates=20
   ana 4 conns SEG:2@375e ; SEG:3@100e
   ana 5 horiz=0 layer=5 along=[98,100] perp=275 slide=[252,298] pull=1 aflex=11 acover=[98,100] apull=0
   ana 5 conns SEG:1@98e ; SEG:3@100e
- cand type=TRUNK_H_OOB@y15 wl=959 trunk=15 passthru=0
+ cand type=TRUNK_V+MST@x250 wl=625 trunk=250 passthru=0
   blocks=bot3,top1,top4 feedthru=
-  seg 0 (98,15)-(352,15) L4 jog=0 edge=-1
-  seg 1 (275,50)-(275,15) L5 jog=0 edge=-1
-  seg 2 (98,350)-(98,15) L5 jog=0 edge=-1
-  seg 3 (352,350)-(352,15) L5 jog=0 edge=-1
+  seg 0 (250,100)-(250,352) L5 jog=0 edge=-1
+  seg 1 (350,352)-(250,352) L4 jog=0 edge=-1
+  seg 2 (100,375)-(350,375) L4 jog=0 edge=0
+  seg 3 (350,352)-(350,375) L5 jog=0 edge=-1
+  bt 0 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  sconn (0,1)->[1]
+  sconn (1,0)->[3]
+  sconn (1,1)->[0]
+  sconn (2,1)->[3]
+  sconn (3,0)->[1]
+  sconn (3,1)->[2]
+  ana 0 horiz=0 layer=5 along=[100,352] perp=250 slide=[250,300] pull=1 aflex=01 acover=[100,352] apull=0
+  ana 0 conns BT:bot3@100 ; SEG:1@352e
+  ana 1 horiz=1 layer=4 along=[250,350] perp=352 slide=[352,398] pull=-1 aflex=11 acover=[250,350] apull=0
+  ana 1 conns SEG:0@250e ; SEG:3@350e
+  ana 2 horiz=1 layer=4 along=[100,350] perp=375 slide=[352,398] pull=0 aflex=01 acover=[100,350] apull=0
+  ana 2 conns BT:top1@100 ; SEG:3@350e
+  ana 3 horiz=0 layer=5 along=[352,375] perp=350 slide=[352,448] pull=-2 aflex=11 acover=[352,375] apull=0
+  ana 3 conns SEG:1@352e ; SEG:2@375e
+ cand type=TRUNK_V+MST@x275 wl=600 trunk=275 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (275,100)-(275,352) L5 jog=0 edge=-1
+  seg 1 (350,352)-(275,352) L4 jog=0 edge=-1
+  seg 2 (100,375)-(350,375) L4 jog=0 edge=0
+  seg 3 (350,352)-(350,375) L5 jog=0 edge=-1
+  bt 0 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  sconn (0,1)->[1]
+  sconn (1,0)->[3]
+  sconn (1,1)->[0]
+  sconn (2,1)->[3]
+  sconn (3,0)->[1]
+  sconn (3,1)->[2]
+  ana 0 horiz=0 layer=5 along=[100,352] perp=275 slide=[252,298] pull=1 aflex=01 acover=[100,352] apull=0
+  ana 0 conns BT:bot3@100 ; SEG:1@352e
+  ana 1 horiz=1 layer=4 along=[275,350] perp=352 slide=[352,398] pull=-1 aflex=11 acover=[275,350] apull=0
+  ana 1 conns SEG:0@275e ; SEG:3@350e
+  ana 2 horiz=1 layer=4 along=[100,350] perp=375 slide=[352,398] pull=0 aflex=01 acover=[100,350] apull=0
+  ana 2 conns BT:top1@100 ; SEG:3@350e
+  ana 3 horiz=0 layer=5 along=[352,375] perp=350 slide=[352,448] pull=-2 aflex=11 acover=[352,375] apull=0
+  ana 3 conns SEG:1@352e ; SEG:2@375e
+ cand type=TRUNK_V+MST@x300 wl=575 trunk=300 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (300,100)-(300,352) L5 jog=0 edge=-1
+  seg 1 (350,352)-(300,352) L4 jog=0 edge=-1
+  seg 2 (100,375)-(350,375) L4 jog=0 edge=0
+  seg 3 (350,352)-(350,375) L5 jog=0 edge=-1
+  bt 0 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  sconn (0,1)->[1]
+  sconn (1,0)->[3]
+  sconn (1,1)->[0]
+  sconn (2,1)->[3]
+  sconn (3,0)->[1]
+  sconn (3,1)->[2]
+  ana 0 horiz=0 layer=5 along=[100,352] perp=300 slide=[250,300] pull=1 aflex=01 acover=[100,352] apull=0
+  ana 0 conns BT:bot3@100 ; SEG:1@352e
+  ana 1 horiz=1 layer=4 along=[300,350] perp=352 slide=[352,398] pull=-1 aflex=11 acover=[300,350] apull=0
+  ana 1 conns SEG:0@300e ; SEG:3@350e
+  ana 2 horiz=1 layer=4 along=[100,350] perp=375 slide=[352,398] pull=0 aflex=01 acover=[100,350] apull=0
+  ana 2 conns BT:top1@100 ; SEG:3@350e
+  ana 3 horiz=0 layer=5 along=[352,375] perp=350 slide=[352,448] pull=-2 aflex=11 acover=[352,375] apull=0
+  ana 3 conns SEG:1@352e ; SEG:2@375e
+ cand type=TRUNK_V+MST@x325 wl=856 trunk=325 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (325,98)-(325,352) L5 jog=0 edge=-1
+  seg 1 (300,98)-(325,98) L4 jog=0 edge=-1
+  seg 2 (100,375)-(350,375) L4 jog=0 edge=0
+  seg 3 (300,100)-(350,100) L4 jog=0 edge=1
+  seg 4 (350,100)-(350,375) L5 jog=0 edge=1
+  seg 5 (300,98)-(300,100) L5 jog=0 edge=-1
+  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  sconn (0,0)->[1]
+  sconn (1,0)->[5]
+  sconn (1,1)->[0]
+  sconn (2,1)->[4]
+  sconn (3,0)->[5]
+  sconn (3,1)->[4]
+  sconn (4,0)->[3]
+  sconn (4,1)->[2]
+  sconn (5,0)->[1]
+  sconn (5,1)->[3]
+  ana 0 horiz=0 layer=5 along=[98,352] perp=325 slide=[250,1073741823] pull=-1 aflex=11 acover=[98,98] apull=1
+  ana 0 conns SEG:1@98e
+  ana 1 horiz=1 layer=4 along=[300,325] perp=98 slide=[52,98] pull=0 aflex=11 acover=[300,325] apull=0
+  ana 1 conns SEG:0@325e ; SEG:5@300e
+  ana 2 horiz=1 layer=4 along=[100,350] perp=375 slide=[352,398] pull=-1 aflex=01 acover=[100,350] apull=0
+  ana 2 conns BT:top1@100 ; SEG:4@350e
+  ana 3 horiz=1 layer=4 along=[300,350] perp=100 slide=[52,98] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 3 conns SEG:5@300e ; SEG:4@350e
+  ana 4 horiz=0 layer=5 along=[100,375] perp=350 slide=[352,448] pull=-2 aflex=11 acover=[100,375] apull=0
+  ana 4 conns SEG:2@375e ; SEG:3@100e
+  ana 5 horiz=0 layer=5 along=[98,100] perp=300 slide=[252,298] pull=1 aflex=11 acover=[98,100] apull=0
+  ana 5 conns SEG:1@98e ; SEG:3@100e
+ cand type=TRUNK_V+MST@x350 wl=754 trunk=350 passthru=1
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (350,98)-(350,350) L5 jog=0 edge=-1
+  seg 1 (275,98)-(350,98) L4 jog=0 edge=-1
+  seg 2 (275,100)-(100,100) L4 jog=0 edge=0
+  seg 3 (100,100)-(100,350) L5 jog=0 edge=0
+  seg 4 (275,98)-(275,100) L5 jog=0 edge=-1
+  bt 0 - top4:THRU:(352,352,448,398):(350,350,450,400):[]
+  bt 3 - top1:THRU:(52,352,98,398):(50,350,100,400):[]
+  sconn (0,0)->[1]
+  sconn (1,0)->[4]
+  sconn (1,1)->[0]
+  sconn (2,0)->[4]
+  sconn (2,1)->[3]
+  sconn (3,0)->[2]
+  sconn (4,0)->[1]
+  sconn (4,1)->[2]
+  ana 0 horiz=0 layer=5 along=[98,350] perp=350 slide=[350,450] pull=-1 aflex=10 acover=[98,350] apull=0
+  ana 0 conns SEG:1@98e ; BT:top4@350
+  ana 1 horiz=1 layer=4 along=[275,350] perp=98 slide=[52,98] pull=1 aflex=11 acover=[275,350] apull=0
+  ana 1 conns SEG:0@350e ; SEG:4@275e
+  ana 2 horiz=1 layer=4 along=[100,275] perp=100 slide=[52,98] pull=0 aflex=11 acover=[100,275] apull=0
+  ana 2 conns SEG:4@275e ; SEG:3@100e
+  ana 3 horiz=0 layer=5 along=[100,350] perp=100 slide=[50,100] pull=1 aflex=10 acover=[100,350] apull=0
+  ana 3 conns SEG:2@100e ; BT:top1@350
+  ana 4 horiz=0 layer=5 along=[98,100] perp=275 slide=[252,298] pull=0 aflex=11 acover=[98,100] apull=0
+  ana 4 conns SEG:1@98e ; SEG:2@100e
+ cand type=TRUNK_V+MST@x400 wl=804 trunk=400 passthru=1
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (400,98)-(400,350) L5 jog=0 edge=-1
+  seg 1 (275,98)-(400,98) L4 jog=0 edge=-1
+  seg 2 (275,100)-(100,100) L4 jog=0 edge=0
+  seg 3 (100,100)-(100,350) L5 jog=0 edge=0
+  seg 4 (275,98)-(275,100) L5 jog=0 edge=-1
+  bt 0 - top4:THRU:(352,352,448,398):(350,350,450,400):[]
+  bt 3 - top1:THRU:(52,352,98,398):(50,350,100,400):[]
+  sconn (0,0)->[1]
+  sconn (1,0)->[4]
+  sconn (1,1)->[0]
+  sconn (2,0)->[4]
+  sconn (2,1)->[3]
+  sconn (3,0)->[2]
+  sconn (4,0)->[1]
+  sconn (4,1)->[2]
+  ana 0 horiz=0 layer=5 along=[98,350] perp=400 slide=[352,448] pull=-1 aflex=10 acover=[98,350] apull=0
+  ana 0 conns SEG:1@98e ; BT:top4@350
+  ana 1 horiz=1 layer=4 along=[275,400] perp=98 slide=[52,98] pull=1 aflex=11 acover=[275,400] apull=0
+  ana 1 conns SEG:0@400e ; SEG:4@275e
+  ana 2 horiz=1 layer=4 along=[100,275] perp=100 slide=[52,98] pull=0 aflex=11 acover=[100,275] apull=0
+  ana 2 conns SEG:4@275e ; SEG:3@100e
+  ana 3 horiz=0 layer=5 along=[100,350] perp=100 slide=[50,100] pull=1 aflex=10 acover=[100,350] apull=0
+  ana 3 conns SEG:2@100e ; BT:top1@350
+  ana 4 horiz=0 layer=5 along=[98,100] perp=275 slide=[252,298] pull=0 aflex=11 acover=[98,100] apull=0
+  ana 4 conns SEG:1@98e ; SEG:2@100e
+ cand type=TRUNK_V+MST@x75 wl=779 trunk=75 passthru=1
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (75,98)-(75,350) L5 jog=0 edge=-1
+  seg 1 (275,98)-(75,98) L4 jog=0 edge=-1
+  seg 2 (275,100)-(350,100) L4 jog=0 edge=0
+  seg 3 (350,100)-(350,350) L5 jog=0 edge=0
+  seg 4 (275,98)-(275,100) L5 jog=0 edge=-1
+  bt 0 - top1:THRU:(52,352,98,398):(50,350,100,400):[]
+  bt 3 - top4:THRU:(352,352,448,398):(350,350,450,400):[]
+  sconn (0,0)->[1]
+  sconn (1,0)->[4]
+  sconn (1,1)->[0]
+  sconn (2,0)->[4]
+  sconn (2,1)->[3]
+  sconn (3,0)->[2]
+  sconn (4,0)->[1]
+  sconn (4,1)->[2]
+  ana 0 horiz=0 layer=5 along=[98,350] perp=75 slide=[52,98] pull=1 aflex=10 acover=[98,350] apull=0
+  ana 0 conns SEG:1@98e ; BT:top1@350
+  ana 1 horiz=1 layer=4 along=[75,275] perp=98 slide=[52,98] pull=1 aflex=11 acover=[75,275] apull=0
+  ana 1 conns SEG:0@75e ; SEG:4@275e
+  ana 2 horiz=1 layer=4 along=[275,350] perp=100 slide=[52,98] pull=0 aflex=11 acover=[275,350] apull=0
+  ana 2 conns SEG:4@275e ; SEG:3@350e
+  ana 3 horiz=0 layer=5 along=[100,350] perp=350 slide=[350,450] pull=-1 aflex=10 acover=[100,350] apull=0
+  ana 3 conns SEG:2@100e ; BT:top4@350
+  ana 4 horiz=0 layer=5 along=[98,100] perp=275 slide=[252,298] pull=0 aflex=11 acover=[98,100] apull=0
+  ana 4 conns SEG:1@98e ; SEG:2@100e
+ cand type=TRUNK_V@x100 wl=654 trunk=100 passthru=1
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (100,98)-(100,352) L5 jog=0 edge=-1
+  seg 1 (250,98)-(100,98) L4 jog=0 edge=-1
+  seg 2 (350,352)-(100,352) L4 jog=0 edge=-1
+  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 2 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
+  sconn (0,0)->[1]
+  sconn (0,1)->[2]
+  sconn (1,1)->[0]
+  sconn (2,1)->[0]
+  ana 0 horiz=0 layer=5 along=[98,352] perp=100 slide=[52,98] pull=2 aflex=11 acover=[98,352] apull=0
+  ana 0 conns SEG:1@98e ; SEG:2@352e
+  ana 1 horiz=1 layer=4 along=[100,250] perp=98 slide=[52,98] pull=1 aflex=10 acover=[100,250] apull=0
+  ana 1 conns SEG:0@100e ; BT:bot3@250
+  ana 2 horiz=1 layer=4 along=[100,350] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[100,350] apull=0
+  ana 2 conns SEG:0@100e ; BT:top4@350
+ cand type=TRUNK_V@x175 wl=579 trunk=175 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (175,98)-(175,352) L5 jog=0 edge=-1
+  seg 1 (250,98)-(175,98) L4 jog=0 edge=-1
+  seg 2 (100,352)-(175,352) L4 jog=0 edge=-1
+  seg 3 (350,352)-(175,352) L4 jog=0 edge=-1
   bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
   bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
   bt 3 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
-  sconn (0,0)->[2]
-  sconn (0,1)->[3]
+  sconn (0,0)->[1]
+  sconn (0,1)->[2,3]
   sconn (1,1)->[0]
   sconn (2,1)->[0]
   sconn (3,1)->[0]
-  ana 0 horiz=1 layer=4 along=[98,352] perp=15 slide=[-1073741824,48] pull=3 aflex=11 acover=[98,352] apull=0
-  ana 0 conns SEG:2@98e ; SEG:3@352e ; SEG:1@275
-  ana 1 horiz=0 layer=5 along=[15,50] perp=275 slide=[252,298] pull=0 aflex=10 acover=[15,50] apull=0
-  ana 1 conns BT:bot3@50 ; SEG:0@15e
-  ana 2 horiz=0 layer=5 along=[15,350] perp=98 slide=[52,98] pull=1 aflex=10 acover=[15,350] apull=0
-  ana 2 conns SEG:0@15e ; BT:top1@350
-  ana 3 horiz=0 layer=5 along=[15,350] perp=352 slide=[352,448] pull=-1 aflex=10 acover=[15,350] apull=0
-  ana 3 conns SEG:0@15e ; BT:top4@350
+  ana 0 horiz=0 layer=5 along=[98,352] perp=175 slide=[102,248] pull=1 aflex=11 acover=[98,352] apull=0
+  ana 0 conns SEG:1@98e ; SEG:2@352e ; SEG:3@352e
+  ana 1 horiz=1 layer=4 along=[175,250] perp=98 slide=[52,98] pull=1 aflex=10 acover=[175,250] apull=0
+  ana 1 conns SEG:0@175e ; BT:bot3@250
+  ana 2 horiz=1 layer=4 along=[100,175] perp=352 slide=[352,398] pull=-1 aflex=01 acover=[100,175] apull=0
+  ana 2 conns SEG:0@175e ; BT:top1@100
+  ana 3 horiz=1 layer=4 along=[175,350] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[175,350] apull=0
+  ana 3 conns SEG:0@175e ; BT:top4@350
+ cand type=TRUNK_V@x250 wl=502 trunk=250 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (250,100)-(250,352) L5 jog=0 edge=-1
+  seg 1 (100,352)-(250,352) L4 jog=0 edge=-1
+  seg 2 (350,352)-(250,352) L4 jog=0 edge=-1
+  bt 0 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 1 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  bt 2 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
+  sconn (0,1)->[1,2]
+  sconn (1,1)->[0]
+  sconn (2,1)->[0]
+  ana 0 horiz=0 layer=5 along=[100,352] perp=250 slide=[250,300] pull=0 aflex=01 acover=[100,352] apull=0
+  ana 0 conns BT:bot3@100 ; SEG:1@352e ; SEG:2@352e
+  ana 1 horiz=1 layer=4 along=[100,250] perp=352 slide=[352,398] pull=-1 aflex=01 acover=[100,250] apull=0
+  ana 1 conns SEG:0@250e ; BT:top1@100
+  ana 2 horiz=1 layer=4 along=[250,350] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[250,350] apull=0
+  ana 2 conns SEG:0@250e ; BT:top4@350
+ cand type=TRUNK_V@x275 wl=502 trunk=275 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (275,100)-(275,352) L5 jog=0 edge=-1
+  seg 1 (100,352)-(275,352) L4 jog=0 edge=-1
+  seg 2 (350,352)-(275,352) L4 jog=0 edge=-1
+  bt 0 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 1 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  bt 2 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
+  sconn (0,1)->[1,2]
+  sconn (1,1)->[0]
+  sconn (2,1)->[0]
+  ana 0 horiz=0 layer=5 along=[100,352] perp=275 slide=[252,298] pull=0 aflex=01 acover=[100,352] apull=0
+  ana 0 conns BT:bot3@100 ; SEG:1@352e ; SEG:2@352e
+  ana 1 horiz=1 layer=4 along=[100,275] perp=352 slide=[352,398] pull=-1 aflex=01 acover=[100,275] apull=0
+  ana 1 conns SEG:0@275e ; BT:top1@100
+  ana 2 horiz=1 layer=4 along=[275,350] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[275,350] apull=0
+  ana 2 conns SEG:0@275e ; BT:top4@350
+ cand type=TRUNK_V@x300 wl=502 trunk=300 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (300,100)-(300,352) L5 jog=0 edge=-1
+  seg 1 (100,352)-(300,352) L4 jog=0 edge=-1
+  seg 2 (350,352)-(300,352) L4 jog=0 edge=-1
+  bt 0 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 1 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  bt 2 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
+  sconn (0,1)->[1,2]
+  sconn (1,1)->[0]
+  sconn (2,1)->[0]
+  ana 0 horiz=0 layer=5 along=[100,352] perp=300 slide=[250,300] pull=0 aflex=01 acover=[100,352] apull=0
+  ana 0 conns BT:bot3@100 ; SEG:1@352e ; SEG:2@352e
+  ana 1 horiz=1 layer=4 along=[100,300] perp=352 slide=[352,398] pull=-1 aflex=01 acover=[100,300] apull=0
+  ana 1 conns SEG:0@300e ; BT:top1@100
+  ana 2 horiz=1 layer=4 along=[300,350] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[300,350] apull=0
+  ana 2 conns SEG:0@300e ; BT:top4@350
+ cand type=TRUNK_V@x325 wl=529 trunk=325 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (325,98)-(325,352) L5 jog=0 edge=-1
+  seg 1 (300,98)-(325,98) L4 jog=0 edge=-1
+  seg 2 (100,352)-(325,352) L4 jog=0 edge=-1
+  seg 3 (350,352)-(325,352) L4 jog=0 edge=-1
+  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  bt 3 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
+  sconn (0,0)->[1]
+  sconn (0,1)->[2,3]
+  sconn (1,1)->[0]
+  sconn (2,1)->[0]
+  sconn (3,1)->[0]
+  ana 0 horiz=0 layer=5 along=[98,352] perp=325 slide=[302,348] pull=-1 aflex=11 acover=[98,352] apull=0
+  ana 0 conns SEG:1@98e ; SEG:2@352e ; SEG:3@352e
+  ana 1 horiz=1 layer=4 along=[300,325] perp=98 slide=[52,98] pull=1 aflex=01 acover=[300,325] apull=0
+  ana 1 conns SEG:0@325e ; BT:bot3@300
+  ana 2 horiz=1 layer=4 along=[100,325] perp=352 slide=[352,398] pull=-1 aflex=01 acover=[100,325] apull=0
+  ana 2 conns SEG:0@325e ; BT:top1@100
+  ana 3 horiz=1 layer=4 along=[325,350] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[325,350] apull=0
+  ana 3 conns SEG:0@325e ; BT:top4@350
+ cand type=TRUNK_V@x350 wl=554 trunk=350 passthru=1
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (350,98)-(350,352) L5 jog=0 edge=-1
+  seg 1 (300,98)-(350,98) L4 jog=0 edge=-1
+  seg 2 (100,352)-(350,352) L4 jog=0 edge=-1
+  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  sconn (0,0)->[1]
+  sconn (0,1)->[2]
+  sconn (1,1)->[0]
+  sconn (2,1)->[0]
+  ana 0 horiz=0 layer=5 along=[98,352] perp=350 slide=[352,448] pull=-2 aflex=11 acover=[98,352] apull=0
+  ana 0 conns SEG:1@98e ; SEG:2@352e
+  ana 1 horiz=1 layer=4 along=[300,350] perp=98 slide=[52,98] pull=1 aflex=01 acover=[300,350] apull=0
+  ana 1 conns SEG:0@350e ; BT:bot3@300
+  ana 2 horiz=1 layer=4 along=[100,350] perp=352 slide=[352,398] pull=-1 aflex=01 acover=[100,350] apull=0
+  ana 2 conns SEG:0@350e ; BT:top1@100
+ cand type=TRUNK_V@x400 wl=654 trunk=400 passthru=1
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (400,98)-(400,352) L5 jog=0 edge=-1
+  seg 1 (300,98)-(400,98) L4 jog=0 edge=-1
+  seg 2 (100,352)-(400,352) L4 jog=0 edge=-1
+  bt 0 - top4:THRU:(352,352,448,398):(350,350,450,400):[]
+  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  sconn (0,0)->[1]
+  sconn (1,1)->[0]
+  sconn (2,1)->[0]
+  ana 0 horiz=0 layer=5 along=[98,352] perp=400 slide=[352,448] pull=-2 aflex=10 acover=[98,352] apull=0
+  ana 0 conns SEG:1@98e ; BT:top4@352 ; SEG:2@352e
+  ana 1 horiz=1 layer=4 along=[300,400] perp=98 slide=[52,98] pull=1 aflex=01 acover=[300,400] apull=0
+  ana 1 conns SEG:0@400e ; BT:bot3@300
+  ana 2 horiz=1 layer=4 along=[100,400] perp=352 slide=[352,398] pull=0 aflex=01 acover=[100,400] apull=0
+  ana 2 conns BT:top1@100 ; SEG:0@400e
+ cand type=TRUNK_V@x75 wl=704 trunk=75 passthru=1
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (75,98)-(75,352) L5 jog=0 edge=-1
+  seg 1 (250,98)-(75,98) L4 jog=0 edge=-1
+  seg 2 (350,352)-(75,352) L4 jog=0 edge=-1
+  bt 0 - top1:THRU:(52,352,98,398):(50,350,100,400):[]
+  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 2 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
+  sconn (0,0)->[1]
+  sconn (1,1)->[0]
+  sconn (2,1)->[0]
+  ana 0 horiz=0 layer=5 along=[98,352] perp=75 slide=[52,98] pull=2 aflex=10 acover=[98,352] apull=0
+  ana 0 conns SEG:1@98e ; BT:top1@352 ; SEG:2@352e
+  ana 1 horiz=1 layer=4 along=[75,250] perp=98 slide=[52,98] pull=1 aflex=10 acover=[75,250] apull=0
+  ana 1 conns SEG:0@75e ; BT:bot3@250
+  ana 2 horiz=1 layer=4 along=[75,350] perp=352 slide=[352,398] pull=0 aflex=10 acover=[75,350] apull=0
+  ana 2 conns BT:top4@350 ; SEG:0@75e
+ cand type=TRUNK_V_OOB@x10 wl=834 trunk=10 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (10,98)-(10,352) L5 jog=0 edge=-1
+  seg 1 (250,98)-(10,98) L4 jog=0 edge=-1
+  seg 2 (350,352)-(10,352) L4 jog=0 edge=-1
+  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 2 top4:THRU:(352,352,448,398):(350,350,450,400):[] -
+  sconn (0,0)->[1]
+  sconn (0,1)->[2]
+  sconn (1,1)->[0]
+  sconn (2,1)->[0]
+  ana 0 horiz=0 layer=5 along=[98,352] perp=10 slide=[-1073741824,100] pull=2 aflex=11 acover=[98,352] apull=0
+  ana 0 conns SEG:1@98e ; SEG:2@352e
+  ana 1 horiz=1 layer=4 along=[10,250] perp=98 slide=[52,98] pull=1 aflex=10 acover=[10,250] apull=0
+  ana 1 conns SEG:0@10e ; BT:bot3@250
+  ana 2 horiz=1 layer=4 along=[10,350] perp=352 slide=[352,398] pull=-1 aflex=10 acover=[10,350] apull=0
+  ana 2 conns SEG:0@10e ; BT:top4@350
+ cand type=TRUNK_V_OOB@x490 wl=834 trunk=490 passthru=0
+  blocks=bot3,top1,top4 feedthru=
+  seg 0 (490,98)-(490,352) L5 jog=0 edge=-1
+  seg 1 (300,98)-(490,98) L4 jog=0 edge=-1
+  seg 2 (100,352)-(490,352) L4 jog=0 edge=-1
+  bt 1 bot3:THRU:(252,52,298,98):(250,50,300,100):[] -
+  bt 2 top1:THRU:(52,352,98,398):(50,350,100,400):[] -
+  sconn (0,0)->[1]
+  sconn (0,1)->[2]
+  sconn (1,1)->[0]
+  sconn (2,1)->[0]
+  ana 0 horiz=0 layer=5 along=[98,352] perp=490 slide=[350,1073741823] pull=-2 aflex=11 acover=[98,352] apull=0
+  ana 0 conns SEG:1@98e ; SEG:2@352e
+  ana 1 horiz=1 layer=4 along=[300,490] perp=98 slide=[52,98] pull=1 aflex=01 acover=[300,490] apull=0
+  ana 1 conns SEG:0@490e ; BT:bot3@300
+  ana 2 horiz=1 layer=4 along=[100,490] perp=352 slide=[352,398] pull=-1 aflex=01 acover=[100,490] apull=0
+  ana 2 conns SEG:0@490e ; BT:top1@100
