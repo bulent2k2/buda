@@ -370,3 +370,47 @@ def test_resumed_planner_persists_selection_at_bdb_cand_index(tmp_path):
         f"pinned USER selection lost from the checkpoint: {sel}"
     assert layered == [(sel[0][0],)], \
         f"assigned layers must land on the selected row: {layered} vs {sel}"
+
+
+@pytest.mark.mid
+def test_run_nuts_on_layer_does_not_compound_interval_shrink():
+    # Audit C1-01: rerun_layer copied prev's segments — whose intervals the
+    # original run's prep had ALREADY clamped (slide windows + the 10%-per-
+    # side trunk margin) — and prepped them AGAIN. The trunk-margin shrink
+    # is not idempotent, so every run_nuts_on_layer invocation shrank each
+    # trunk's hard slide window by another 20% (0.8^n), silently diverging
+    # from the full solve's constraints until the pinched windows forced
+    # overlaps repair could not clear — and the corrupted result was
+    # checkpointed to the BDB. The rerun must re-seed fresh full-grid
+    # intervals so the prep applies exactly once: interval widths stay
+    # IDENTICAL to the full solve across any number of reruns.
+    s = _session()
+    for c in ("def_layer 4 M4 H TOP 52.94", "def_layer 5 M5 V TOP 50.00",
+              "add_block bot1 50 50 100 100", "add_block bot2 150 50 200 100",
+              "add_block bot3 250 50 300 100", "add_block top1 50 350 100 400",
+              "add_block top2 150 350 200 400",
+              "add_block top3 250 350 300 400",
+              "add_bus x[8] bot1.o top2.i", "add_bus y[8] bot2.o top3.i",
+              "add_bus z[8] bot3.o top1.i", "run_bundler strict",
+              "corner_margin dy 2 dx 2", "set_min_stub_length 2",
+              "generate_topologies", "select_topologies 1-3 4",
+              "run_planner 1", "run_nuts"):
+        _run(s, c)
+
+    def intervals():
+        return {(t.bundle_id, t.seg_idx): (t.interval_lo, t.interval_hi)
+                for t in s.nuts_result.segments}
+
+    def placements():
+        return {(t.bundle_id, t.seg_idx): t.track_position
+                for t in s.nuts_result.segments}
+
+    base = intervals()
+    _run(s, "run_nuts_on_layer M4")
+    assert intervals() == base, \
+        "rerun #1 shrank hard slide windows (non-idempotent prep)"
+    p1 = placements()
+    _run(s, "run_nuts_on_layer M4")
+    assert intervals() == base, "rerun #2 kept shrinking"
+    assert placements() == p1, \
+        "repeated rerun on an unchanged design must be a fixpoint"
