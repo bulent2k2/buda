@@ -47,6 +47,20 @@ opens item 4 (the `do_span_adjustments` span-stretch clamp — the NUTS-side
 half of the same bug). **Effort:** medium; the payoff is turning the
 opt-in gate always-on cleanly.
 
+**Second flow now blocked on this same discriminator (2026-07-19): the
+`rnr/mix` hanan_loci regression.**  Root-causing the mix–loci flip
+regression (wishlist-topo "mix–loci interaction ROOT-CAUSED") landed
+exactly here: mix's 42 stranded bits (b61 seg1/seg6, b90 seg0) are
+segments the STRICT ladder escalates onto LOW layers (M2/M3) whose full
+span is keepout-dead, because the richer loci pool crowds the TOP bands.
+`nontop_dead_span_gate 1` is the strongest lever (mix loci 42 → 18) but
+over-conservative in the same way (+5 ov, and it regresses mix's baseline
+0/0 → 0/48).  So the always-on discriminator now has **two** corpus
+beneficiaries — bigHalf (−76% no-rr opens) and un-pinning mix from
+`no_hanan_loci` — raising its priority.  Measured non-fixes for mix:
+`kWLSpread 0.125` regresses it (42 → 48), `kPeak 0.1` only partially helps
+(42 → 32).
+
 ## A metal *above* the TOP band is still a top metal — config-smell WARNING shipped; auto-override measured & rejected
 
 **What:** `LayerType` is a binary flag `{ TOP, LOW }` set explicitly per
