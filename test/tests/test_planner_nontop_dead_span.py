@@ -52,6 +52,12 @@ def _run_bighalf(gate):
     ripup) with the gate optionally enabled before the first run_planner."""
     s = buda_cli.BudaSession()
     s.no_viz = True
+    # Isolate the PLANNER's plan-time dead-span gate: the healer-folded
+    # escalation (default on) would independently escalate the same dead LOW
+    # stubs inside negotiate_congestion, collapsing the gate-off baseline this
+    # test measures against.  This test is about the plan-time gate, not the
+    # healer fold (which has its own test), so switch the fold off here.
+    s._heal_dead_spans_in_healers = False
     with contextlib.redirect_stdout(io.StringIO()):
         s.do_command(f"source {_ROOT / 'flow/tracks/tracks4top.buda'}")
         s.do_command(f"source {_ROOT / 'flow/big_data_test/tc3a_flat_5x.buda'}")
