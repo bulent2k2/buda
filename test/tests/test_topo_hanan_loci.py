@@ -128,6 +128,37 @@ def test_no_hanan_loci_memo_round_trips_bulk_regeneration(tmp_path):
     assert has_1200()
 
 
+def test_pure_opt_out_memo_skips_additive_replay(tmp_path):
+    """A memo whose ONLY token is `no_hanan_loci` has nothing to replay
+    additively: after the midpoint-only base regen, running the additive
+    generator anyway (all non-memo knobs off) would append the PLAIN
+    midpoint pool into a knobbed bulk regen — e.g. `generate_topologies
+    center_mode` would no longer produce a center-mode-consistent pool for
+    that bundle.  The replay must skip the additive pass, so the bulk pool
+    equals a fresh (center_mode + no_hanan_loci) generation exactly."""
+    import buda
+    from buda_cli import BudaSession
+    s = BudaSession()
+    bdb = str(tmp_path / "loci_memo_cm.bdb")
+    with redirect_stdout(io.StringIO()):
+        for line in [f"open_bdb {bdb}"] + B44_SETUP + ["generate_topologies"]:
+            s.do_command(line)
+        s.do_command("generate_topologies_for_bundle bus_060 no_hanan_loci")
+        s.do_command("generate_topologies center_mode")   # memo replays here
+    got = {buda.topo_uid(c) for c in s.bundles[0].input.candidates}
+
+    ref = BudaSession()
+    with redirect_stdout(io.StringIO()):
+        for line in B44_SETUP:
+            ref.do_command(line)
+        ref.do_command("generate_topologies center_mode no_hanan_loci")
+    want = {buda.topo_uid(c) for c in ref.bundles[0].input.candidates}
+    assert got == want, (
+        f"pure no_hanan_loci memo polluted the center_mode bulk pool: "
+        f"{len(got)} vs {len(want)} candidates "
+        f"(+{len(got - want)} extra, -{len(want - got)} missing)")
+
+
 def test_legacy_hanan_loci_flag_is_a_keep_on_noop():
     """Backward compatibility: pre-flip scripts (and v15 knob memos) passing
     `hanan_loci` must keep working — the flag is accepted and the pool is

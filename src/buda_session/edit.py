@@ -241,6 +241,17 @@ class EditMixin:
             print(f"  Re-applied knob memo '{knobs}' for bundle "
                   f"{w.input.original_bundle.id}: regenerated midpoint-only "
                   f"(no_hanan_loci).")
+        # A memo with NO additive opt-in tokens has nothing left to replay:
+        # the base pool already honors the bulk knobs and the loci polarity
+        # (regenerated above for an opt-out under a loci-on bulk).  Running
+        # the additive generator anyway — all non-memo knobs off — would
+        # append a PLAIN midpoint pool into e.g. a center_mode bulk regen,
+        # polluting the requested candidate set.  The one additive job left
+        # for a pure-polarity memo is a loci OPT-IN against a loci-off base.
+        base_loci = False if "no_hanan_loci" in ks else bulk_knobs[3]
+        if (not (ks - {"hanan_loci", "no_hanan_loci"})
+                and not (replay_loci and not base_loci)):
+            return
         tg = self._make_topo_gen(self.fp, "center_mode" in ks,
                                  "double_detour" in ks, "multi_trunk" in ks,
                                  replay_loci)
