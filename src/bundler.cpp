@@ -161,19 +161,40 @@ HierarchicalBundler::_endpoints_at_depth(
     std::unordered_map<int, NetEndpoints> result;
     for (const auto& [net_id, pins] : pins_by_net) {
         NetEndpoints ep;
+        std::vector<int> extra_output_ids;
         std::vector<int> inout_comp_ids;
         std::vector<int> unknown_comp_ids;
         for (const auto& p : pins) {
             auto it = comp_by_id.find(p.comp_id);
             if (it == comp_by_id.end() || it->second.depth != depth) continue;
-            if (p.dir == "OUTPUT" && ep.driver_comp_id < 0)
-                ep.driver_comp_id = p.comp_id;
+            if (p.dir == "OUTPUT") {
+                if (ep.driver_comp_id < 0)
+                    ep.driver_comp_id = p.comp_id;
+                else if (p.comp_id != ep.driver_comp_id)
+                    extra_output_ids.push_back(p.comp_id);
+            }
             else if (p.dir == "INPUT")
                 ep.receiver_comp_ids.push_back(p.comp_id);
             else if (p.dir == "INOUT")
                 inout_comp_ids.push_back(p.comp_id);
             else if (p.dir == "UNKNOWN")
                 unknown_comp_ids.push_back(p.comp_id);
+        }
+        // Multi-driven net (audit C10-02): OUTPUT pins after the first are
+        // REAL distinct drivers (same-depth comps are never each other's
+        // ancestor projections).  They used to fall through every branch —
+        // neither driver nor receiver — so their blocks were silently
+        // dropped from the route: a guaranteed open no check could see.
+        // Attach them as additional endpoints (the INOUT secondary-driver
+        // treatment): routing needs the physical attachment, and the
+        // fan-in/fidelity machinery models per-net drivers separately.
+        if (!extra_output_ids.empty()) {
+            for (int id : extra_output_ids)
+                ep.receiver_comp_ids.push_back(id);
+            std::cerr << "[HierBundler] net_id=" << net_id << " at depth "
+                      << depth << ": " << (extra_output_ids.size() + 1)
+                      << " OUTPUT drivers — extra driver blocks attached "
+                      << "as endpoints\n";
         }
         // INOUT fallback: secondary driver when no OUTPUT exists;
         // otherwise INOUT pins are additional receivers.
@@ -247,6 +268,10 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
         std::vector<int>         rcv_spec_comp_ids;
         int                      rcv_spec_depth = -1;
         std::vector<std::string> rcv_spec_paths;
+        // Extra same-depth OUTPUT drivers (multi-driven net, audit C10-02):
+        // attached as additional receiver endpoints after the scan.
+        std::vector<int>         extra_drv_comp_ids;
+        std::vector<std::string> extra_drv_paths;
         // Deepest INOUT-direction pin (priority: OUTPUT > INOUT > UNKNOWN).
         int inout_spec_depth   = -1;
         int inout_spec_comp_id = -1;
@@ -293,9 +318,20 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
             int d = it->second.depth;
             if (p.dir == "OUTPUT") {
                 if (d > info.drv_spec_depth) {
+                    // A deeper OUTPUT supersedes: shallower OUTPUT pins are
+                    // the same driver's ancestor interface projections, not
+                    // distinct drivers.
                     info.drv_spec_depth   = d;
                     info.drv_spec_comp_id = p.comp_id;
                     info.drv_spec_path    = it->second.name;
+                    info.extra_drv_comp_ids.clear();
+                    info.extra_drv_paths.clear();
+                } else if (d == info.drv_spec_depth &&
+                           p.comp_id != info.drv_spec_comp_id) {
+                    // Same-depth second OUTPUT = a real distinct driver
+                    // (audit C10-02) — collect, attach as endpoint below.
+                    info.extra_drv_comp_ids.push_back(p.comp_id);
+                    info.extra_drv_paths.push_back(it->second.name);
                 }
             } else if (p.dir == "INPUT") {
                 if (d > info.rcv_spec_depth) {
@@ -351,6 +387,23 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
             }
             if (info.rcv_spec_depth < 0 && !info.rcv_spec_comp_ids.empty())
                 info.rcv_spec_depth = info.inout_spec_depth;
+        }
+        // Multi-driven net (audit C10-02): extra same-depth OUTPUT drivers
+        // used to be dropped entirely — neither driver nor receiver, so
+        // their blocks never joined the route (a silent open).  Attach them
+        // as additional receiver endpoints, mirroring the INOUT treatment
+        // above; warn LOUD so the netlist anomaly is visible.
+        if (!info.extra_drv_comp_ids.empty()) {
+            for (size_t i = 0; i < info.extra_drv_comp_ids.size(); ++i) {
+                info.rcv_spec_comp_ids.push_back(info.extra_drv_comp_ids[i]);
+                info.rcv_spec_paths.push_back(info.extra_drv_paths[i]);
+            }
+            if (info.rcv_spec_depth < 0)
+                info.rcv_spec_depth = info.drv_spec_depth;
+            std::cerr << "[HierBundler] net_id=" << net_id << ": "
+                      << (info.extra_drv_comp_ids.size() + 1)
+                      << " OUTPUT drivers — extra driver blocks attached "
+                      << "as endpoints\n";
         }
         // Fallback: promote deepest UNKNOWN pins to driver/receiver roles
         // when OUTPUT/INPUT/INOUT pins are absent (e.g. after import_verilog or

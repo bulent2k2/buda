@@ -181,3 +181,35 @@ def test_candidates_element_access_returns_owned_copies():
     r.dogleg_topologies = {}
     assert buda.topo_uid(d1[7]) == uid_before
 
+def test_hier_bundler_multi_driven_net_attaches_all_driver_blocks():
+    # Audit C10-02: a multiply-driven net (two or more OUTPUT pins) silently
+    # lost every OUTPUT driver after the first — the extra drivers were
+    # neither drivers nor receivers, so their blocks never attached to the
+    # bundle's route: a guaranteed open no check could see. Extra same-depth
+    # OUTPUT drivers must attach as additional endpoints (the INOUT
+    # secondary-driver treatment), loudly.
+    import contextlib
+    import io
+
+    import buda_cli
+    db = buda.BDB(":memory:")
+    db.add_cell("cell", 80, 80)
+    for name, x in (("A", 0), ("B", 300), ("C", 600)):
+        db.add_inst(name, "cell", "", x, 0)
+    for i in range(2):
+        db.add_net_pins(f"md_{i}", "A.o", [f"C.i{i}"])
+        db.add_net_pins(f"md_{i}", "B.o2", [])       # second OUTPUT driver
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_hier_bundler")
+    assert s.bundles, "expected at least one hier bundle"
+    b = s.bundles[0].input.original_bundle
+    drv, _, rcv = b.reason.partition("|REC:")
+    endpoints = {drv.removeprefix("DRV:")} | \
+        {r for r in rcv.split(",") if r}
+    assert "B" in endpoints, \
+        f"second OUTPUT driver's block must be attached ({b.reason})"
+    assert {"A", "C"} <= endpoints, b.reason
+    assert b.num_terminals == 3
