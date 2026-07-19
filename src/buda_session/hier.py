@@ -449,9 +449,24 @@ class HierMixin:
 
         for sel in data.get('selections', []):
             hint = sel['bundle_hint']
-            matching = [w for w in self.bundles
-                        if w.input.original_bundle.get_net_names() and
-                           w.input.original_bundle.get_net_names()[0].startswith(hint)]
+            # Hints are written as the bundle's FULL first net name
+            # (sidecar._bundle_hint), so resolve by EXACT match first: the
+            # old prefix-only match let a selection for bus "d" (hint
+            # "d_0") land on bus "d_0x" (first net "d_0x_0") — a silent
+            # wrong pin (audit P1-01). Prefix stays as a legacy fallback
+            # for hand-written short hints, but an AMBIGUOUS prefix now
+            # warns and skips instead of picking an arbitrary bundle.
+            nets0 = [(w, w.input.original_bundle.get_net_names()[0])
+                     for w in self.bundles
+                     if w.input.original_bundle.get_net_names()]
+            matching = [w for w, n0 in nets0 if n0 == hint]
+            if not matching:
+                matching = [w for w, n0 in nets0 if n0.startswith(hint)]
+                if len(matching) > 1:
+                    print(f"  Warning: sidecar hint '{hint}' is ambiguous "
+                          f"({len(matching)} bundles match by prefix) — "
+                          "skipping this selection")
+                    continue
             if not matching:
                 continue
 

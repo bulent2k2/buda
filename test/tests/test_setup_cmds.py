@@ -182,3 +182,33 @@ def test_rerun_all_preserves_bottom_up_fixed_copies():
     # The bottom-up copies (and everything else, absent other changes) must
     # re-place identically — the re-run sees the same frozen context.
     assert fixed_after == fixed_before
+
+
+def test_sidecar_selection_exact_match_beats_prefix_collision(tmp_path):
+    # Audit P1-01: sidecar selections resolved by first-net-name PREFIX, so
+    # a selection for bus "d" (hint "d_0") could land on bus "d_0x" (first
+    # net "d_0x_0") — whichever came first in self.bundles — a silent wrong
+    # pin. Exact match must win; ambiguous legacy prefixes warn and skip.
+    s = _session()
+    _run(s, "add_block A 0 0 100 100")
+    _run(s, "add_block B 300 0 400 100")
+    _run(s, "def_layer 4 M4 H TOP 44.44")
+    _run(s, "def_layer 5 M5 V TOP 50.0")
+    _run(s, "add_block C 300 200 400 300")
+    _run(s, "add_bus d_0x[4] A.o B.i")     # first net d_0x_0 (prefix trap)
+    _run(s, "add_bus d[4] A.o2 C.i2")      # first net d_0 (separate bundle)
+    _run(s, "run_bundler")
+    _run(s, "generate_topologies")
+    import json
+    sidecar = tmp_path / "sel.sidecar.json"
+    sidecar.write_text(json.dumps({"selections": [
+        {"bundle_hint": "d_0", "topo_index_hint": 1, "topo_type": "",
+         "topo_wl": -1}]}))
+    s._sidecar_path = lambda: str(sidecar)
+    s._apply_selections()
+    by_first_net = {w.input.original_bundle.get_net_names()[0]: w
+                    for w in s.bundles}
+    assert by_first_net["d_0"].input.topology_pinned, \
+        "exact-hint bundle must receive the selection"
+    assert not by_first_net["d_0x_0"].input.topology_pinned, \
+        "prefix-collision bundle must NOT be pinned"
