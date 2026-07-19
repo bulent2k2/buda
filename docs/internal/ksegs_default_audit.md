@@ -53,16 +53,27 @@ penalty idea.
 
 ## The gating issues
 
-- **G1 — a structural loser exists (07_wide_fan_stress).**  Even α=0.02
-  (effective ~30 units/seg) strands 2 bits; the flow's wide-fan tree DOF
-  is load-bearing at any penalty.  No local signal separates it from
-  mempool (where compact shapes REDUCE demand and heal 1200+ strands) —
-  only the measured-metric loop can: `ripup_reroute` heals it at +5.8%
-  detWL / −25% vias.  A default is only safe **with healers in the flow**.
-- **G2 — big2's response is jagged.**  Non-monotone in α (8 → 44 → 48 → 0
-  unplaced across 0.02→0.25): the selection landscape is knife-edged, so
-  no tuned α is a reliable "clean point" without healers (with rr, every
-  α is clean).
+- **G1 — a structural loser exists (07_wide_fan_stress) — RESOLVED
+  (healer gate).**  Even α=0.02 (effective ~30 units/seg) strands 2 bits;
+  the flow's wide-fan tree DOF is load-bearing at any penalty.  No local
+  signal separates it from mempool (where compact shapes REDUCE demand
+  and heal 1200+ strands) — only the measured-metric loop can:
+  `ripup_reroute` heals it at +5.8% detWL / −25% vias.  A default is only
+  safe **with healers in the flow** — and now IS gated on exactly that:
+  the planner param `healersAhead` (default 0) is declared by the session
+  when the flow script contains `ripup_reroute`/`negotiate_congestion`
+  (`_healers_in_flow`, scanning `source`d files recursively; explicit
+  `set_planner_param healersAhead 1` is the harness escape), and the
+  `BUDA_KSEGS_REL` env default stands down without it.  Lock-in:
+  `test_ksegs_env_default_healer_gated` (scriptless suppression + note,
+  explicit declaration, and script detection through a sourced
+  sub-script).
+- **G2 — big2's response is jagged — RESOLVED (same gate).**
+  Non-monotone in α (8 → 44 → 48 → 0 unplaced across 0.02→0.25): the
+  selection landscape is knife-edged, so no tuned α is a reliable "clean
+  point" without healers (with rr, every α is clean).  The healer gate
+  above is exactly the guard: the default only applies where the loop
+  that flattens the jaggedness runs.
 - **G3 — the penalty fights deliberately-multi-segment structures.**
   `multi_trunk`'s BITRUNK datapath trees are demoted (1 of the expected 2
   trees selected at α=0.02).  This splits in two:
@@ -116,19 +127,30 @@ penalty idea.
 - **G5 — α tension across flows.**  b61 wants ≤0.05 (0.1 over-compacts to
   the 3-seg shape at +25% WL), mempool/05 want ≥0.1 for their full wins,
   big2 wants 0.25-or-healers.  0.02 is safe-Pareto, not optimal-everywhere.
-- **G6 — mechanical churn.**  The golden/behavioral updates above, plus
-  docs and the demo-b3 test premise.
+- **G6 — mechanical churn — DISSOLVED by the gates.**  The original 10
+  suite failures under the env flip existed because the default applied
+  unconditionally.  With the G1–G4 gates in place, the FULL fast+mid
+  suite passes **identically with and without `BUDA_KSEGS_REL=0.02`**
+  (1527/1527): scriptless test sessions suppress via the healer gate, and
+  the multi_trunk / kPeak flows via their own.  Nothing to absorb.
 
 ## Verdict
 
-`kSegsRel ≈ 0.02` **with healers in the flow** loses nowhere measured and
-wins broadly; without healers, G1/G2 are real correctness risks and G3/G4
-are QoR distortions.  The principled path to default-on:
+All six gates are addressed:
 
-1. ~~bits-weighted penalty (G3a)~~ — DONE: the penalty charges
-   `Σ seg_bit_count/nbits`; the multicast-tree tension (G3b) remains open;
-2. ~~keep it subordinate to congestion terms (G4)~~ — DONE: the env
-   default stands down for explicit kPeak steering;
-3. gate the default on healer presence (G1/G2), i.e. flows running
-   `negotiate_congestion`/`ripup_reroute`;
-4. then absorb the golden churn (G6).
+1. ~~bits-weighted penalty (G3a)~~ — DONE: `Σ seg_bit_count/nbits`;
+2. ~~multicast-tree tension (G3b)~~ — DONE: candidate exemption + the
+   intent hierarchy (`explicit param > opt-in > env default`);
+3. ~~congestion subordination (G4)~~ — DONE: the env default stands down
+   for explicit kPeak steering;
+4. ~~healer gating (G1/G2)~~ — DONE: `healersAhead`, session-declared
+   from the flow script;
+5. ~~golden churn (G6)~~ — dissolved: zero suite churn under the flip.
+
+`BUDA_KSEGS_REL=0.02` is now a SAFE standing default: it engages only in
+healer-running flows without multi_trunk/kPeak opt-ins — exactly where it
+was measured to only win (big2 108 unpl/4 ovl → clean-or-healed at +1.8%
+WL −19% vias, bigHalf −3.1% WL −29% vias, mempool −48% WL, 07 healed at
++5.8% WL −25% vias).  Promoting it from env hook to compiled default is
+now a one-line decision (`kSegsRel_` init), gated identically — left to
+the maintainer.
