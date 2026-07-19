@@ -92,9 +92,11 @@ priority view** — what's actually open right now, ranked by value/effort — s
   ([audit_2026-07.md](audit_2026-07.md), C7-04); sweeping the remaining
   container members is a binding-breaking change to do deliberately, with
   a perf pass on the hot accessors.
-- **2026-07 audit report-only leads** — 60 unverified findings tabled in
-  [audit_2026-07.md](audit_2026-07.md) (24 silent-corruption class, incl.
-  the tools/ converter set); verify before fixing.
+- **2026-07 audit report-only findings** — the deferred adversarial pass
+  (2026-07-19) CONFIRMED 59 of the 60 tabled leads (27 silent-corruption,
+  4 crash, 12 wrong-but-loud, 4 leak-perf, 12 cosmetic; P3-05 refuted) —
+  see [audit_2026-07.md](audit_2026-07.md). These are verified defects
+  awaiting fixes, executed repros archived per finding.
 
 ## Conventions
 
