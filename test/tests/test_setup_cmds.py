@@ -133,3 +133,52 @@ def test_check_template_tracks_subset_template_reports_not_crashes():
     out = _run(s, "run_detailed_nuts")
     assert "Error" in out and "bottom-up instance" in out, \
         "stop policy must refuse DNUTS on the subset-template report"
+
+
+@pytest.mark.mid
+def test_rerun_all_preserves_bottom_up_fixed_copies():
+    # Audit P4-02: the explorer Re-run path (_rerun_all) built a fresh
+    # NUTSEngine WITHOUT _inject_bottom_up_fixed while its sibling paths
+    # (post_nuts, run_nuts_on_layer) inject — so a re-run on a bottom-up
+    # design re-solved without the frozen template copies and could route
+    # through or shift the frozen interconnect under contention.
+    # NOTE: on this small uncontended fixture the unfixed code happens to
+    # re-place identically, so this test is an invariant CANARY (uniform
+    # replacement + no overlap growth), not a discriminating repro; the fix
+    # itself restores the documented inject-on-every-engine contract that
+    # both sibling paths follow.
+    import buda
+    import buda_db
+    db = buda.BDB(":memory:")
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst_to_cell("proc_cell", "pb_i", "pipe_cell", 155, 60)
+    for j, x in enumerate((0, 500), 1):
+        db.add_inst(f"proc_i{j}", "proc_cell", "", x, 0)
+    for i in range(4):
+        for inst in ("proc_i1", "proc_i2"):
+            db.add_net_pins(f"ab_{inst}_{i}", f"{inst}/pa_i.out",
+                            [f"{inst}/pb_i.in"])
+    buda_db.BustermGen(db).derive(1)
+    s = _session()
+    s.bdb = db
+    for c in ("def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+              "def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+              "def_track_pattern 6 0 SIGNAL 1 1",
+              "def_track_pattern 7 0 SIGNAL 1 1",
+              "def_track_pattern 4 0 SIGNAL 1 1",
+              "def_track_pattern 5 0 SIGNAL 1 1",
+              "set_bottom_up proc_cell", "run_hier_bundler",
+              "generate_hier_topologies", "run_planner hier", "run_nuts"):
+        _run(s, c)
+    fixed_before = {(t.bundle_id, t.seg_idx, t.layer, t.track_position)
+                    for t in s.nuts_result.segments}
+    n_ovl_before = s.nuts_result.num_overlaps
+    s._rerun_all()
+    fixed_after = {(t.bundle_id, t.seg_idx, t.layer, t.track_position)
+                   for t in s.nuts_result.segments}
+    assert s.nuts_result.num_overlaps <= n_ovl_before
+    # The bottom-up copies (and everything else, absent other changes) must
+    # re-place identically — the re-run sees the same frozen context.
+    assert fixed_after == fixed_before

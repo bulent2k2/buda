@@ -986,6 +986,12 @@ class NutsFlowMixin:
         layer_names = self._make_layer_names()
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(self._nuts_pitch)
+        # Bottom-up designs: the frozen template copies must ride EVERY
+        # engine construction — the post_nuts and run_nuts_on_layer paths
+        # inject them, but this explorer re-run path did not, so a re-run
+        # re-solved without the copies and could route through / shift the
+        # frozen bottom-up interconnect (audit P4-02).
+        self._inject_bottom_up_fixed(nuts)
         if self.planner is not None:
             nuts.set_extra_grid_points(
                 list(self.planner.get_x_grid()),
