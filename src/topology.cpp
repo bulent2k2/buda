@@ -2303,6 +2303,39 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
         a_lo = new_lo; a_hi = new_hi;                  // spine spans between the spread stubs
     }
 
+    // TEG-over gap stubs are emitted at their rects' CENTRES (a_near/a_far in the
+    // emission loop below), not at att[i] — but the spine span [a_lo, a_hi] is
+    // computed from att[], which the extreme-attachment pull may have shortened to
+    // the block's near along-face.  When such a block is the spine's extreme
+    // block, the trunk then stops SHORT of the gap-stub pair and the pair floats
+    // off the trunk as a genuinely disconnected island (check_topo DISCONNECTED;
+    // the generation coverage gate would drop the candidate, losing the only
+    // bridged TEG-over option).  Extend the spine span to reach every gap-stub
+    // position, mirroring the emission's best_near/best_far selection exactly.
+    for (int i = 0; i < n; ++i) {
+        if (stub_suppressed[i] || !has_stub[i]) continue;
+        if (blocks[i].teg_mode != TegMode::OVER || blocks[i].rects.size() < 2) continue;
+        const auto& rects = blocks[i].rects;
+        bool trunk_inside_any = false;
+        for (const auto& r : rects)
+            if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) { trunk_inside_any = true; break; }
+        if (trunk_inside_any) continue;
+        Rect best_near = rects[0]; bool has_near = false;
+        Rect best_far  = rects[0]; bool has_far  = false;
+        for (const auto& r : rects) {
+            if (axis.perp_hi(r) <= locus) {
+                if (!has_near || axis.perp_hi(r) > axis.perp_hi(best_near)) { best_near = r; has_near = true; }
+            } else if (axis.perp_lo(r) >= locus) {
+                if (!has_far || axis.perp_lo(r) < axis.perp_lo(best_far)) { best_far = r; has_far = true; }
+            }
+        }
+        if (!has_near || !has_far) continue;           // falls back to the normal att[i] stub
+        for (int a : {axis.along_center(best_near), axis.along_center(best_far)}) {
+            a_lo = std::min(a_lo, a);
+            a_hi = std::max(a_hi, a);
+        }
+    }
+
     Topology t;
     std::string letter = axis.along_horiz ? "H" : "V";
     t.type               = std::string("TRUNK_") + letter + (out_of_bbox ? "_OOB" : "")
@@ -2458,6 +2491,93 @@ bool TopologyGenerator::choose_edge_h_first(const Point& p1, const Point& p2,
 // Multi-pin topology generation
 // ---------------------------------------------------------------------------
 
+// hanan_loci face-graze repair (flip blockers 1–2 in
+// docs/internal/hanan_loci_flip_audit.md).  A trunk locus sampled ON a block
+// face line (the `hanan_loci` knob's extra loci — a midpoint locus is strictly
+// inside a channel and cannot ride a face except in degenerate 1-unit
+// channels) makes a stub's TRUNK-side endpoint land exactly on the face of a
+// face-riding block: annotate_endpoints tags that endpoint as a busterm TAP,
+// and a tapped endpoint is never given a SEG junction (annotate_seg_conns'
+// tap-wins-over-junction precedence) — so the stub↔spine junction is silently
+// swallowed.  The result is either a DISCONNECTED wire graph (an aligned
+// column's shared face line taps every stub endpoint: bigHalf shipped 7 such
+// auto-selected candidates) or a connected-but-junction-less tree that
+// defeats the fan-in taper's driver→sink path derivation.
+//
+// The tap is a GRAZE, not a landing: the spine itself rides the tapped
+// block's face (the same load-bearing inclusive overlap the ABUT candidates
+// rely on), so the block keeps its coverage when the graze tap is cleared —
+// and clearing it lets annotate_seg_conns record the real junction, restoring
+// the constraint NUTS actually needs to hold the stub and spine together.
+//
+// Cleared only when ALL of:
+//   (a) the endpoint lies ON a spine segment (a junction is really there);
+//   (b) the trunk locus IS a face coordinate of the tapped block (the tap is
+//       the graze, not a genuine face landing into the block).
+// A seeded block-side tap can never match (a): has_stub ⇒ conn != locus, so
+// the stub's block-side endpoint is off the spine by construction.  Spine
+// segments' own endpoint taps (the extreme blocks' structural landings) are
+// never touched.
+static void restore_face_graze_junctions(Topology& topo) {
+    const bool spine_h = topo.type.rfind("TRUNK_H", 0) == 0;
+    const bool spine_v = topo.type.rfind("TRUNK_V", 0) == 0;
+    if (!spine_h && !spine_v) return;
+    const int locus = topo.trunk_location;
+    auto horiz_of = [](const Segment& s) { return s.start.y == s.end.y; };
+    // Spine segments: along the trunk axis at perp == locus (feedthru splits
+    // leave several).
+    std::vector<int> spines;
+    for (int i = 0; i < (int)topo.segments.size(); ++i) {
+        const Segment& s = topo.segments[i];
+        if (horiz_of(s) == spine_h &&
+            (spine_h ? s.start.y : s.start.x) == locus)
+            spines.push_back(i);
+    }
+    if (spines.empty()) return;
+    auto on_spine = [&](const Point& P) {
+        for (int j : spines) {
+            const Segment& sj = topo.segments[j];
+            const int alo = spine_h ? std::min(sj.start.x, sj.end.x)
+                                    : std::min(sj.start.y, sj.end.y);
+            const int ahi = spine_h ? std::max(sj.start.x, sj.end.x)
+                                    : std::max(sj.start.y, sj.end.y);
+            const int a   = spine_h ? P.x : P.y;
+            if (a >= alo && a <= ahi) return true;
+        }
+        return false;
+    };
+    // Does the trunk line ride one of the tapped block's faces?  Mirror
+    // annotate_endpoints' rect discipline: individual rects when present,
+    // orig/shrunk bbox otherwise.
+    auto locus_on_face = [&](const Busterm& bt) {
+        auto face = [&](const Rect& r) {
+            return spine_h ? (locus == r.y1 || locus == r.y2)
+                           : (locus == r.x1 || locus == r.x2);
+        };
+        if (bt.rects.empty()) return face(bt.orig_bbox) || face(bt.bbox);
+        for (const Rect& r : bt.rects)
+            if (face(r)) return true;
+        return false;
+    };
+    for (int i = 0; i < (int)topo.segments.size(); ++i) {
+        const Segment& s = topo.segments[i];
+        if (horiz_of(s) == spine_h) continue;          // spine-direction: keep taps
+        auto bt = topo.seg_busterms.find(i);
+        if (bt == topo.seg_busterms.end()) continue;
+        for (int ep = 0; ep < 2; ++ep) {
+            auto& slot = (ep == 0) ? bt->second.first : bt->second.second;
+            if (!slot.has_value()) continue;
+            const Point& P = (ep == 0) ? s.start : s.end;
+            if ((spine_h ? P.y : P.x) != locus) continue;   // not the trunk-side end
+            if (!on_spine(P)) continue;                     // (a)
+            if (!locus_on_face(*slot)) continue;            // (b)
+            slot.reset();                                   // junction wins over graze tap
+        }
+        if (!bt->second.first.has_value() && !bt->second.second.has_value())
+            topo.seg_busterms.erase(bt);
+    }
+}
+
 std::vector<Topology> TopologyGenerator::generate_npin(
     const std::string& src_name,
     const std::vector<std::string>& dst_names)
@@ -2548,9 +2668,17 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     // extra loci renumber the WL-sorted candidate pool checked-in flows and
     // goldens pin by index.  See docs/internal/wishlist-topo.md "Nominal-WL
     // comparability across shape families", piece (a).
+    // loci_only_* record the loci that exist ONLY because of the knob (a Hanan
+    // line that coincides with a channel midpoint is a normal midpoint locus).
+    // They scope the post-contract pinch gate at the end of this function:
+    // both sets are empty at default-off, so the gate cannot touch default
+    // pools by construction.
+    std::set<int> loci_only_y, loci_only_x;
     if (allow_hanan_loci_) {
-        for (int v : hanan_y) if (v > y_lo && v < y_hi) y_set.insert(v);
-        for (int v : hanan_x) if (v > x_lo && v < x_hi) x_set.insert(v);
+        for (int v : hanan_y) if (v > y_lo && v < y_hi && !y_set.count(v)) loci_only_y.insert(v);
+        for (int v : hanan_x) if (v > x_lo && v < x_hi && !x_set.count(v)) loci_only_x.insert(v);
+        y_set.insert(loci_only_y.begin(), loci_only_y.end());
+        x_set.insert(loci_only_x.begin(), loci_only_x.end());
     }
 
     // Keepout-aware trunk filtering: skip trunk positions where ALL candidate
@@ -2630,6 +2758,7 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     }
 
     for (auto& t : results) annotate_endpoints(t, blocks);
+    for (auto& t : results) restore_face_graze_junctions(t);
     add_trunk_mst_candidates(blocks, results);
     add_mst_candidates(blocks, results);
     add_multi_trunk_candidates(pins, blocks, results);
@@ -2641,6 +2770,55 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     std::vector<std::string> block_names;
     for (const auto& b : blocks) block_names.push_back(b.block_name);
     finalize_candidates(results, block_names);
+    // Post-contract pinch gate for hanan_loci-ONLY trunk candidates (flip
+    // blocker 3 in docs/internal/hanan_loci_flip_audit.md — the mis-tapped
+    // zero-slide face-riders).  filter_pinched runs BEFORE the block contract
+    // is stamped (a deliberate legacy-preserving order, see the NOTE in
+    // finalize_candidates), so a face/abutment-line spine whose slide window
+    // only collapses under the contract's pass-through clamps — e.g. the b34
+    // TRUNK_H@y4615 abutment spine, pre-contract [3365,4615], post-contract
+    // [4615,4615] — slips through.  Re-check the loci-only candidates (and
+    // their +MST hybrids, which inherit the trunk locus) against the FINAL
+    // analysis state and drop any that carry a zero-slide segment: an excluded
+    // degenerate locus is strictly better than an unplaceable candidate the
+    // planner would rank first on wirelength.  Scoped to loci_only_* so the
+    // default-off pool is untouched by construction.
+    if (!loci_only_y.empty() || !loci_only_x.empty()) {
+        // Pass 1: mark (no moves — the common case is zero drops and the list
+        // must come back untouched, mirroring filter_uncovered's structure).
+        std::vector<char> drop(results.size(), 0);
+        int n_drop = 0;
+        std::string first_drop;
+        for (size_t i = 0; i < results.size(); ++i) {
+            const Topology& t = results[i];
+            bool loci =
+                (t.type.rfind("TRUNK_H", 0) == 0 && loci_only_y.count(t.trunk_location)) ||
+                (t.type.rfind("TRUNK_V", 0) == 0 && loci_only_x.count(t.trunk_location));
+            if (!loci) continue;
+            ConnTopology ct;
+            ct.build(t, floorplan_);
+            for (const auto& cs : ct.segs())
+                if (cs.perp_lo == cs.perp_hi) { drop[i] = 1; break; }
+            if (drop[i]) {
+                ++n_drop;
+                if (first_drop.empty()) first_drop = t.type;
+            }
+        }
+        // Pass 2: rebuild without the dropped candidates.  n_drop == results
+        // size is unreachable in practice (the midpoint pool is a superset
+        // baseline), but mirror the coverage gate's never-strand policy: keep
+        // the flagged list rather than empty the bundle.
+        if (n_drop > 0 && n_drop < (int)results.size()) {
+            std::vector<Topology> kept;
+            kept.reserve(results.size() - n_drop);
+            for (size_t i = 0; i < results.size(); ++i)
+                if (!drop[i]) kept.push_back(std::move(results[i]));
+            std::cerr << "[TopoGen] dropped " << n_drop << " hanan-loci candidate(s) "
+                      << "with a post-contract zero-slide segment (first: "
+                      << first_drop << "); " << kept.size() << " remain.\n";
+            results = std::move(kept);
+        }
+    }
     annotate_and_sort(results);   // final WL rank (deferred out of finalize_candidates)
     return results;
 }
@@ -3543,6 +3721,16 @@ void TopologyGenerator::finalize_candidates(std::vector<Topology>& candidates,
     }
 
     filter_pinched(candidates);
+    // NOTE: the contract stamp deliberately TRAILS filter_pinched.  The
+    // analysis' pass-through tightening reads connected_block_names, so the
+    // pinch gate historically evaluated a PRE-contract (wider) window than the
+    // one downstream stages see — and several checked-in default pools contain
+    // candidates whose post-contract window is degenerate (e.g. rnr/mix
+    // bundles 33/35: stub slide [1530,1530]) that today's flows route anyway.
+    // Moving the stamp above the culls was measured to change those default
+    // pools (mix golden), so the stricter POST-contract pinch is applied only
+    // to the hanan_loci-only trunk candidates (generate_npin's loci gate
+    // below), where the degenerate abutment-line spines actually arise.
     for (auto& t : candidates)
         if (t.connected_block_names.empty())
             t.connected_block_names = block_names;
@@ -3575,16 +3763,23 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
     // Pass 1: mark. (No moves here — the common case is zero drops and the
     // list must come back untouched.)
     //
-    // Two silent-open risks the planner must not be able to pick when a
+    // Three silent-open risks the planner must not be able to pick when a
     // buildable alternative exists:
     //   * BUSTERM_OPEN   — an uncovered block (a silent open).  Always dropped.
+    //   * DISCONNECTED   — the wire graph splits into 2+ electrically separate
+    //     islands (the hanan_loci face-coincident-locus family; the SAME island
+    //     computation check_topo's detect_disconnected runs, so gate and audit
+    //     can never diverge).  A missing island means LESS wire and FEWER
+    //     opens, so these sort FIRST and optimization CONVERGES onto them —
+    //     always dropped, like BUSTERM_OPEN.
     //   * FEEDTHRU_RELAY — the legacy multi-rect / rootless trunk+MST fallback
     //     whose incident wires do not physically touch (a silent feedthru relay
     //     no downstream stage catches).  Dropped too — BUT only when at least
     //     one clean candidate (neither open nor relay) survives, so a bundle
     //     whose ONLY options are relays is never stranded: it stays flagged for
     //     check_connectivity / dump_topologies, exactly as before.
-    std::vector<char> is_open(candidates.size(), 0), is_relay(candidates.size(), 0);
+    std::vector<char> is_open(candidates.size(), 0), is_relay(candidates.size(), 0),
+                      is_disc(candidates.size(), 0);
     int n_clean = 0;
     std::string first_block, first_type;
     for (size_t i = 0; i < candidates.size(); ++i) {
@@ -3599,6 +3794,21 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
                     first_type  = candidates[i].type;
                 }
                 is_open[i] = 1;
+            } else if (v.kind == ViolationKind::DISCONNECTED) {
+                // Declared-feedthru exemption, scoped to the islands the
+                // declared block(s) actually bridge (Codex P2 on #335): a
+                // fed-through block's internal routing bridges its split
+                // spine (and any stub landing in the split gap), which
+                // detect_disconnected does not model — e.g. the TRUNK_H
+                // feedthru-through-'mid' candidates the collinear-merge tests
+                // pin have always been flagged here and still route.  Exempt
+                // ONLY when EVERY island touches a declared feedthru block
+                // (disconnected_islands_bridged — the same island union-find
+                // detect_disconnected runs); a candidate that ALSO carries an
+                // unrelated island touching no declared block is a genuine
+                // open and is dropped like any other DISCONNECTED candidate.
+                if (!disconnected_islands_bridged(ct, candidates[i], floorplan_))
+                    is_disc[i] = 1;
             } else if (v.kind == ViolationKind::FEEDTHRU_RELAY) {
                 is_relay[i] = 1;
             }
@@ -3611,24 +3821,35 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
     // Relays are only droppable when a buildable alternative remains.
     const bool drop_relays = (n_clean > 0);
     std::vector<char> drop(candidates.size(), 0);
-    int dropped = 0, dropped_relay = 0;
+    int dropped = 0, dropped_relay = 0, dropped_disc = 0;
+    std::string first_disc_type;
     for (size_t i = 0; i < candidates.size(); ++i) {
-        if (is_open[i] || (is_relay[i] && drop_relays)) {
+        if (is_open[i] || is_disc[i] || (is_relay[i] && drop_relays)) {
             drop[i] = 1;
             ++dropped;
-            if (is_relay[i] && !is_open[i]) ++dropped_relay;
+            if (is_disc[i]) {
+                ++dropped_disc;
+                if (first_disc_type.empty()) first_disc_type = candidates[i].type;
+            }
+            if (is_relay[i] && !is_open[i] && !is_disc[i]) ++dropped_relay;
         }
     }
     if (dropped == 0) return;
     if (dropped == (int)candidates.size()) {
-        // Never strand a bundle: keep the (all-uncovered) list and let the
+        // Never strand a bundle: keep the (all-broken) list and let the
         // planner's ALLOW_OVERFLOW/BEST_EFFORT ladder commit one with a WARNING;
         // check_connectivity will report the open.  (Reachable only for the
-        // all-open case — relays are dropped solely when a clean one survives.)
+        // all-open / all-disconnected case — relays are dropped solely when a
+        // clean one survives.)
         std::cerr << "[TopoGen] WARNING: all " << candidates.size()
-                  << " candidate(s) leave block '" << first_block
-                  << "' unconnected; keeping them (check_connectivity will "
-                     "report the open).\n";
+                  << " candidate(s) are broken (";
+        if (!first_block.empty())
+            std::cerr << "block '" << first_block << "' unconnected";
+        if (dropped_disc > 0)
+            std::cerr << (first_block.empty() ? "" : "; ")
+                      << dropped_disc << " with a disconnected wire graph";
+        std::cerr << "); keeping them (check_connectivity will report the "
+                     "violations).\n";
         return;
     }
     // Pass 2: rebuild without the dropped candidates.
@@ -3638,6 +3859,9 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
         if (!drop[i]) kept.push_back(std::move(candidates[i]));
     std::cerr << "[TopoGen] dropped " << dropped << " candidate(s) "
               << "(" << dropped_relay << " feedthru-relay";
+    if (dropped_disc > 0)
+        std::cerr << ", " << dropped_disc << " disconnected islands"
+                  << " (first: " << first_disc_type << ")";
     if (!first_type.empty())
         std::cerr << ", first open: " << first_type << " missing block '"
                   << first_block << "'";

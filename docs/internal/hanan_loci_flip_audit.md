@@ -129,10 +129,14 @@ xlayer_short, sel_topos (b1,b3), quickstart (b3, b5).
 `flow/sel_topos_typo.buda`'s pins are unreachable (the flow exits at its
 deliberate `add_bus` typo before generation) — no remap needed.
 
-CAUTION: the on-indices above are valid for the CURRENT generator.  If the
-degenerate-candidate gate below removes loci candidates, the on-side indices
-shift again — the flip commit must re-run the audit script after the gate
-lands and apply the refreshed table (the uid side of each row is stable).
+CAUTION: the on-indices above are valid for the PRE-GATE generator.  The
+degenerate-candidate gate + junction repair HAVE now landed (branch
+`claude/hanan-loci-degenerate-gate`, see "Flip blockers" below): knob-on
+pools are smaller (loci-only zero-slide candidates dropped, DISCONNECTED
+candidates dropped, face-graze trunks repaired in place), so **the on-side
+pin indices in this table are stale and MUST be re-collected against the
+gated pools** before the flip commit applies any remap (the uid side of each
+row is stable and remains the ground truth for identity).
 
 ## Golden regen kit (reference host only — NEVER regenerated here)
 
@@ -153,6 +157,24 @@ Regen: `PYTHONPATH=build:tools python3 tools/topo_snapshot.py` on the
 reference host, in the flip commit, AFTER the generator gate below.
 
 ## Flip blockers — genuine defects the flip must resolve first (category c)
+
+**STATUS: RESOLVED (2026-07-18, branch `claude/hanan-loci-degenerate-gate`).**
+All three shapes below are fixed — blockers 1–2 at the ROOT
+(`restore_face_graze_junctions`, src/topology.cpp: a stub's trunk-side
+endpoint that lands on a face-riding block's face line gets its graze tap
+cleared so the real stub↔spine junction is derived — the candidate becomes
+VALID, junctions restored, fan-in taper derivable), blocker 3 by the
+loci-scoped post-contract pinch gate in `generate_npin` (loci-only trunk
+candidates re-checked against the FINAL contract analysis; zero-slide →
+dropped with a note), plus the defense-in-depth island gate in
+`filter_uncovered` (DISCONNECTED candidates dropped, same island computation
+as check_topo's detect_disconnected; declared-feedthru candidates exempt —
+their split-gap islands are bridged by the fed-through block).  The four
+category-(c) tests below pass under a scratch default-on;
+`test_topo_hanan_loci_degenerate.py` pins the repro fixtures permanently.
+Default-off measured bit-identical (fast+mid 100% green, goldens untouched).
+Stressed-corpus re-measurement + updated flip verdict: wishlist-topo.md
+piece (a).
 
 The extra loci are exactly the block-face/abutment Hanan lines, so a
 degenerate family appears when a sampled locus COINCIDES with the faces the

@@ -193,12 +193,13 @@ static void detect_feedthru_relay(const std::vector<ConnSeg>& segs,
 // though every block is tapped and every junction touches — e.g. a TopoEdit
 // session that removed the only bridging stub and committed with comps=2.
 // Structural (conn records, not placement), so one detector serves every stage.
-static void detect_disconnected(const std::vector<ConnSeg>& segs,
-                                int bundle_id, const char* stage,
-                                ConnResult& result)
+// The island model itself, shared by detect_disconnected (verify) and the
+// declared-feedthru scoping of generation's DISCONNECTED gate
+// (disconnected_islands_bridged below) — ONE union-find, never forked.
+// Returns the root island id per segment (path-compressed).
+static std::vector<int> island_roots(const std::vector<ConnSeg>& segs)
 {
     int n = (int)segs.size();
-    if (n < 2) return;
     std::vector<int> uf(n);
     std::iota(uf.begin(), uf.end(), 0);
     std::function<int(int)> find = [&](int x){ return uf[x]==x ? x : uf[x]=find(uf[x]); };
@@ -213,8 +214,18 @@ static void detect_disconnected(const std::vector<ConnSeg>& segs,
             }
         }
     }
-    std::set<int> comps;
-    for (int i = 0; i < n; ++i) comps.insert(find(i));
+    for (int i = 0; i < n; ++i) uf[i] = find(i);
+    return uf;
+}
+
+static void detect_disconnected(const std::vector<ConnSeg>& segs,
+                                int bundle_id, const char* stage,
+                                ConnResult& result)
+{
+    int n = (int)segs.size();
+    if (n < 2) return;
+    std::vector<int> roots = island_roots(segs);
+    std::set<int> comps(roots.begin(), roots.end());
     if ((int)comps.size() <= 1) return;
     ConnViolation v;
     v.kind = ViolationKind::DISCONNECTED;
@@ -228,6 +239,48 @@ static void detect_disconnected(const std::vector<ConnSeg>& segs,
     msg << ") — the net cannot be electrically complete (" << stage << ")";
     v.message = msg.str();
     result.violations.push_back(std::move(v));
+}
+
+bool disconnected_islands_bridged(const ConnTopology& ct, const Topology& topo,
+                                  const Floorplan& fp)
+{
+    if (topo.feedthru_blocks.empty()) return false;
+    const auto& segs = ct.segs();
+    int n = (int)segs.size();
+    if (n < 2) return false;                     // cannot be split
+    std::vector<int> roots = island_roots(segs); // detect_disconnected's model
+    std::set<int> islands(roots.begin(), roots.end());
+    if (islands.size() <= 1) return false;       // not split: nothing to exempt
+    // Rects of the declared feedthru blocks (multi-rect blocks per rect).
+    std::vector<Rect> ft_rects;
+    for (const auto& bname : topo.feedthru_blocks) {
+        auto rects = fp.get_block_rects(bname);
+        if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        ft_rects.insert(ft_rects.end(), rects.begin(), rects.end());
+    }
+    const std::set<std::string> ft(topo.feedthru_blocks.begin(),
+                                   topo.feedthru_blocks.end());
+    // An island is bridged when SOME member segment touches a declared
+    // feedthru block: a BUSTERM conn to it (the split spine's face landings)
+    // or inclusive geometric overlap with one of its rects (a stub landing in
+    // the split gap over the block's footprint).
+    std::set<int> bridged;
+    for (int i = 0; i < n; ++i) {
+        if (bridged.count(roots[i])) continue;
+        bool touch = false;
+        for (const auto& conn : segs[i].conns)
+            if (conn.kind == SegConn::BUSTERM && ft.count(conn.block_name)) {
+                touch = true;
+                break;
+            }
+        for (size_t r = 0; !touch && r < ft_rects.size(); ++r)
+            if (seg_spans_rect(segs[i], (double)segs[i].perp_pos, ft_rects[r]))
+                touch = true;
+        if (touch) bridged.insert(roots[i]);
+    }
+    for (int isl : islands)
+        if (!bridged.count(isl)) return false;   // a genuinely open island
+    return true;
 }
 
 // ── check_topo ────────────────────────────────────────────────────────────────
