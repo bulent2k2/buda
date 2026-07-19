@@ -88,3 +88,48 @@ def test_select_topology_pins_expanded_hier_template():
     for w in s._hier_expansion_map[bid]:
         assert w.input.topology_pinned
         assert w.plan.selected_topology_index == 0
+
+
+@pytest.mark.mid
+def test_check_template_tracks_subset_template_reports_not_crashes():
+    # Audit P1-02: a bottom-up cell with two cell-local templates covering
+    # DIFFERENT instance subsets (a bus existing only in some occurrences)
+    # crashed check_template_tracks with a raw StopIteration — and the
+    # partially-built verdict then silently DISABLED the bottom-up track
+    # gate, letting run_detailed_nuts copy without any alignment check. The
+    # subset group must instead be reported misaligned (no comparison base)
+    # and the default stop policy must refuse DNUTS loudly.
+    import buda
+    db = buda.BDB(":memory:")
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst_to_cell("proc_cell", "pb_i", "pipe_cell", 155, 60)
+    for j, x in enumerate((0, 500, 1000), 1):
+        db.add_inst(f"proc_i{j}", "proc_cell", "", x, 0)
+    for i in range(4):
+        for inst in ("proc_i1", "proc_i2", "proc_i3"):
+            db.add_net_pins(f"ab_{inst}_{i}", f"{inst}/pa_i.out",
+                            [f"{inst}/pb_i.in"])
+        for inst in ("proc_i2", "proc_i3"):     # subset bus: not in proc_i1
+            db.add_net_pins(f"cd_{inst}_{i}", f"{inst}/pb_i.out2",
+                            [f"{inst}/pa_i.in2"])
+    import buda_db
+    buda_db.BustermGen(db).derive(1)
+
+    s = _session()
+    s.bdb = db
+    for c in ("def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+              "def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+              "def_track_pattern 6 0 SIGNAL 1 1",
+              "def_track_pattern 7 0 SIGNAL 1 1",
+              "def_track_pattern 4 0 SIGNAL 1 1",
+              "def_track_pattern 5 0 SIGNAL 1 1",
+              "set_bottom_up proc_cell", "run_hier_bundler",
+              "generate_hier_topologies", "run_planner hier", "run_nuts"):
+        _run(s, c)
+    out = _run(s, "check_template_tracks")          # crashed pre-fix
+    assert "MISALIGNED" in out and "no comparison base" in out, out
+    out = _run(s, "run_detailed_nuts")
+    assert "Error" in out and "bottom-up instance" in out, \
+        "stop policy must refuse DNUTS on the subset-template report"
