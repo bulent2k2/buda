@@ -117,7 +117,32 @@ class PersistMixin:
             _k = self.bdb.bundle_gen_knobs(_bid)
             if _k:
                 knob_memo[_bid] = _k
+        # Membership of FK-kept bundles must survive too (audit P3-04):
+        # clear_bundles(keep_user) preserves a bundle row still referenced
+        # by a kept USER topology, but wipes ALL bundle_net/bundle_busterm
+        # rows, and the re-add loop below covers only the CURRENT
+        # self.bundles — so a kept bundle absent from this run permanently
+        # lost its net membership, reloading as a zero-net, zero-width
+        # bundle whose "kept" user routing routes nothing.  Snapshot the
+        # absent bundles' membership and rewrite it for the rows the clear
+        # actually kept.
+        cur_ids = {str(w.input.original_bundle.id) for w in self.bundles}
+        absent_membership = {}
+        for _row in self.bdb.all_bundles():
+            if _row.id not in cur_ids:
+                absent_membership[_row.id] = (
+                    self.bdb.bundle_nets(_row.id),
+                    self.bdb.bundle_busterms(_row.id))
         self.bdb.clear_bundles(keep_user=True)
+        kept_ids = ({r.id for r in self.bdb.all_bundles()}
+                    if absent_membership else set())
+        for _bid, (_nets, _bts) in absent_membership.items():
+            if _bid not in kept_ids:
+                continue
+            for _nm in _nets:
+                self.bdb.add_bundle_net(_bid, _nm)
+            for _bt, _role in _bts:
+                self.bdb.add_bundle_busterm(_bid, _bt, _role)
         for w in self.bundles:
             hb = w.input.original_bundle
             row = buda.BundleRow()

@@ -184,6 +184,43 @@ def test_rerun_all_preserves_bottom_up_fixed_copies():
     assert fixed_after == fixed_before
 
 
+def test_clear_bundles_keep_user_preserves_absent_bundle_membership(tmp_path):
+    # Audit P3-04: clear_bundles(keep_user=True) kept the bundle row of a
+    # hand-committed USER topology (FK) but unconditionally wiped ALL
+    # bundle_net/bundle_busterm rows — and the re-add loop only covers the
+    # CURRENT bundler run. A kept bundle absent from a later session's
+    # netlist therefore permanently lost its net membership, reloading as a
+    # zero-net, zero-width bundle whose "kept" user routing routes nothing.
+    import buda
+    db = buda.BDB(str(tmp_path / "p304.bdb"))
+    s1 = _session()
+    s1.bdb = db
+    for c in ("def_layer 4 M4 H TOP 0.0", "def_layer 5 M5 V TOP 0.0",
+              "add_block A 0 0 100 100", "add_block B 400 300 500 400",
+              "add_block C 0 300 100 400",
+              "add_bus u[4] A.o B.i", "add_bus v[4] A.o2 C.i2",
+              "run_bundler STRICT", "generate_topologies"):
+        _run(s1, c)
+    wv = next(w for w in s1.bundles
+              if "v_0" in w.input.original_bundle.get_net_names())
+    vid = str(wv.input.original_bundle.id)
+    _run(s1, f"edit_topology {vid} 1")
+    _run(s1, "edit_commit pin")                 # USER candidate FK-keeps vid
+    assert db.bundle_nets(vid) == [f"v_{i}" for i in range(4)]
+
+    # Session B against the same BDB: re-bundle WITHOUT the v bus.
+    s2 = _session()
+    s2.bdb = db
+    for c in ("def_layer 4 M4 H TOP 0.0", "def_layer 5 M5 V TOP 0.0",
+              "add_block A 0 0 100 100", "add_block B 400 300 500 400",
+              "add_bus u[4] A.o B.i", "run_bundler STRICT"):
+        _run(s2, c)
+    ids = {r.id for r in db.all_bundles()}
+    assert vid in ids, "keep_user must preserve the USER-topology bundle row"
+    assert db.bundle_nets(vid) == [f"v_{i}" for i in range(4)], \
+        "FK-kept bundle lost its net membership (audit P3-04)"
+
+
 def test_select_topology_clears_stale_slide_overrides():
     # Audit P5-03: select_topology re-pinned a bundle without clearing the
     # plan.seg_slide_lo/hi (and seg_net_pull/seg_perp) staged by a previous
