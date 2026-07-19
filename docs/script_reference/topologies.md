@@ -31,7 +31,7 @@ automatically from the netlist.
 | `center_mode` | Use block centres as connection points instead of the nearest busterm face. |
 | `double_detour` | Also generate `UU_VHV` / `UU_HVH` high-detour candidates for very congested situations. |
 | `multi_trunk` | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees (opt-in — see the multicast table below). |
-| `hanan_loci` | Also sample n-pin trunk loci ON the in-bbox Hanan lines (block/keepout edges), not just at channel midpoints, so a block-edge-aligned trunk can nominal at the geometric WL floor (opt-in: grows the multicast pool ~1.3-1.6x and renumbers the WL-sorted candidate indices `select_topology` pins). |
+| `hanan_loci` | Also sample n-pin trunk loci ON the in-bbox Hanan lines (block/keepout edges), not just at channel midpoints, so a block-edge-aligned trunk can nominal at the geometric WL floor (opt-in: grows the multicast pool ~1.3-1.6x and renumbers the WL-sorted candidate indices `select_topology` pins). **CAUTION (open soundness issue, fix in progress):** on stressed floorplans a face/abutment-coincident locus can emit an electrically incomplete (`DISCONNECTED`) candidate that generation does not yet drop and the planner/healers may SELECT (they don't price completeness; `check_design` is report-only) — after enabling, run `check_design` and treat any `DISCONNECTED` on a selected topology as a broken route; see wishlist-topo "Nominal-WL comparability" piece (a) for the stressed-corpus evidence and the pending island-split generation gate. |
 
 **Candidate shapes generated (2-pin):**
 
@@ -201,7 +201,7 @@ Source and destination block names are derived automatically from the netlist
 | `center_mode` | Use block centres as connection points instead of the nearest busterm face. |
 | `double_detour` | Also generate `UU_VHV` / `UU_HVH` high-detour candidates for very congested situations. |
 | `multi_trunk` | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees for high-fan-out column/row-aligned buses (opt-in; wins on datapaths, QoR-neutral elsewhere at a small candidate-count cost). |
-| `hanan_loci` | Also sample n-pin trunk loci ON the in-bbox Hanan lines (block/keepout edges), not just at channel midpoints, so a block-edge-aligned trunk can nominal at the geometric WL floor (opt-in: grows the multicast pool ~1.3-1.6x and renumbers the WL-sorted candidate indices `select_topology` pins). |
+| `hanan_loci` | Also sample n-pin trunk loci ON the in-bbox Hanan lines (block/keepout edges), not just at channel midpoints, so a block-edge-aligned trunk can nominal at the geometric WL floor (opt-in: grows the multicast pool ~1.3-1.6x and renumbers the WL-sorted candidate indices `select_topology` pins). **CAUTION (open soundness issue, fix in progress):** on stressed floorplans a face/abutment-coincident locus can emit an electrically incomplete (`DISCONNECTED`) candidate that generation does not yet drop and the planner/healers may SELECT (they don't price completeness; `check_design` is report-only) — after enabling, run `check_design` and treat any `DISCONNECTED` on a selected topology as a broken route; see wishlist-topo "Nominal-WL comparability" piece (a) for the stressed-corpus evidence and the pending island-split generation gate. |
 
 **Notes:**
 - Replaces N individual `generate_topologies_for_bundle` calls with one line.
@@ -271,7 +271,7 @@ The topology generator automatically determines the routing context for each HBu
 | `center_mode` | Use block centres as connection points instead of the nearest busterm face. |
 | `double_detour` | Also generate `UU_VHV` / `UU_HVH` high-detour candidates for very congested situations. |
 | `multi_trunk` | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees, exactly as in the flat `generate_topologies` (opt-in). Applied per HBundle across all three routing cases (cell-local / cross-level / cross-block). |
-| `hanan_loci` | Also sample trunk loci ON in-bbox Hanan lines, exactly as in the flat `generate_topologies` (opt-in). |
+| `hanan_loci` | Also sample trunk loci ON in-bbox Hanan lines, exactly as in the flat `generate_topologies` (opt-in). Carries the same open-soundness CAUTION as the flat flag — run `check_design` after enabling. |
 
 **Zero-candidate warning:** If any HBundle ends up with 0 topology candidates, the CLI prints:
 ```

@@ -122,6 +122,65 @@ window-EDGE effect quoted above (the bus centre cannot reach an
 edge-aligned optimum), vs `TRUNK_V@x1950`'s interior-optimum 3625/bit
 (188513) that `kWLSpread` alone picks; an envelope term that prices
 edge-vs-interior optima is the (b)/(c)-adjacent follow-on.
+**Stressed-corpus measurement (default-flip gate, 2026-07-18, merged main
+post-(b)):** the four-flow combined measurement on merged main was
+byte-identical everywhere, so the flip's QoR case was re-measured on the
+stressed corpus, where a richer pool can feed the planner's escalation
+ladder and ripup's index-window alternates.  Per flow, baseline vs
+`hanan_loci` appended to every generation command ("plain" = the pipeline
+endpoint with the flow's own `negotiate_congestion` lines skipped;
+"healed" = `negotiate_congestion` + `ripup_reroute` run after
+`run_detailed_nuts`; opens = DNUTS unplaced bits, with keepout-culled
+bits in parens; DISC = check_design `DISCONNECTED` bundles in the
+endpoint's SELECTED routing):
+
+| flow (variant) | side | pool | gen s | NUTS ov | opens (ko) | det WL | DISC |
+|---|---|---:|---:|---:|---:|---:|---:|
+| big2_noviz (checked-in = plain) | base | 1617 | 0.12 | 4 | 108 (0) | 11.47M | 0 |
+| | hanan | 2326 (+44%) | 0.16 | 1 | 80 (0) | 11.33M | **4** |
+| big2_noviz healed (0.15s / 0.17s) | base | | | 1 | 0 | 11.95M | 0 |
+| | hanan | | | 0 | 0 | 11.43M | **4** |
+| bigHalf as checked in (2× negotiate) | base | 2488 | 0.14 | 3 | 593 (301) | 14.78M | 0 |
+| | hanan | 3954 (+59%) | 0.21 | 3 | 270 (54) | 14.04M | **5** |
+| bigHalf plain | base | 2488 | 0.22 | 6 | 626 (198) | 14.36M | 0 |
+| | hanan | 3954 | 0.23 | 3 | 270 (54) | 14.04M | **5** |
+| bigHalf healed (51.4s / 3.3s) | base | | | 6 | 64 | 15.32M | 0 |
+| | hanan | | | 0 | 0 | 14.31M | **7** |
+| mempool_tile (as checked in) | base | 94 | 0.01 | 61 | 2971 (507) | 529756 | 0 |
+| | hanan | 99 | 0.01 | 61 | 2971 (507) | 529756 | 0 |
+| channel_stress (as checked in) | base | 461 | 0.01 | 0 | 3 (3) | 102052 | 0 |
+| | hanan | 461 | 0.01 | 0 | 3 (3) | 102052 | 0 |
+| hbundles/10 (as checked in) | base | 901 | 0.18 | 0 | 0 | 364252 | 0 |
+| | hanan | 901 | 0.16 | 0 | 0 | 364252 | 0 |
+
+**Verdict: the flip's QoR case is NOT made — and the gate found a
+soundness blocker, not a neutral.**  On the metrics the healers optimize,
+the richer pool *looks* like a clear win on both big flows (bigHalf healed
+6 ov/64 opens → 0/0 with det WL −6.6% and a 15× faster heal loop; big2
+healed 1 ov → 0/0 at −4.3%), and honestly neutral everywhere else
+(mempool_tile +5 candidates, endpoint byte-identical; channel_stress and
+hbundles/10 have ZERO pool growth — 2-pin/no-eligible-loci corpora — and
+byte-identical endpoints).  But every big-flow "win" is disqualified by
+the same discovery: the edge-aligned loci emit **electrically incomplete
+candidates** — `check_design topo all` counts 92 island-split
+(`DISCONNECTED`) candidates in bigHalf's knob-on pool vs 0 in baseline's
+(e.g. b1 topo 1 `TRUNK_H@y3880`, a trunk ON a block edge whose seg graph
+splits) — and nothing downstream refuses them: the coverage gate only
+drops `BUSTERM_OPEN`/relay candidates, `check_design` is report-only, and
+neither the planner score nor negotiate/ripup's `(opens, overlaps)`
+metrics price completeness, so the flow converges ONTO them (missing
+island = missing wire = fewer opens and less WL): bigHalf selects 5
+`DISCONNECTED` bundles at the plain endpoint and ripup grows that to 7 in
+its "0/0" healed state; big2's "0/0" healed state carries 4.  The
+baseline pool has zero such candidates at every endpoint, so the opens/WL
+columns above are not comparable across sides on big2/bigHalf.  Flip
+prerequisite, ahead of any re-measurement: extend generation's coverage
+gate (`filter_uncovered`) to drop island-split candidates (the
+`DISCONNECTED` wire-graph check it already has access to), then re-run
+this table — the honest part of the knob-on pool may still help (the
+big-flow deltas are large), but no number here can support the flip until
+the pool is sound.  Gen-runtime cost of the flip is a non-issue
+(+0.04–0.08s worst, on big2/bigHalf).
 ✅ **(b) SHIPPED 2026-07-17: the WL tie-break is
 structural** — `annotate_and_sort` (and the Python pool-merge resort
 `_resort_pool_preserving_selection`, its replica for
