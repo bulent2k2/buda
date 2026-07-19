@@ -1340,7 +1340,21 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             double gate = (kSegsGate_ > 0.0)
                               ? std::max(0.0, 1.0 - topo_peak_fill)
                               : 1.0;
-            wl_est += ksegs_eff_ * gate * (double)topo.segments.size();
+            // Taper-honest weight (audit G3a): charge each segment for its
+            // MEMBER-BIT share (seg_bit_count / nbits) — the sum is the
+            // per-bit average path length in segments, which is what the
+            // junction vias actually scale with.  An untapered candidate
+            // (empty seg_bits: every segment carries every bit) reduces to
+            // n_segments exactly; a fan-in branch carrying 4 of 16 bits
+            // counts 0.25, so a per-bit tapered tree is no longer charged
+            // nseg x all-bits for structure most bits never traverse.
+            double w_segs = (double)topo.segments.size();
+            if (nbits > 0 && !topo.seg_bits.empty()) {
+                w_segs = 0.0;
+                for (int si = 0; si < (int)topo.segments.size(); ++si)
+                    w_segs += (double)seg_n(topo, si) / (double)nbits;
+            }
+            wl_est += ksegs_eff_ * gate * w_segs;
         }
         topo_score += kWL_ * wl_est;
 

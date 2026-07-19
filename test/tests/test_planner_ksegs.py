@@ -142,6 +142,38 @@ def test_ksegs_rel_scales_with_design_hpwl(monkeypatch):
     assert w3.plan.selected_topology_index == 0
 
 
+def test_ksegs_taper_honest_weight_keeps_fanin_tree():
+    """Audit G3a: the penalty charges each segment for its MEMBER-BIT share
+    (seg_bit_count/nbits — the per-bit average path length), not raw
+    n_segments.  A CONVERGENT fan-in tree (two 8-bit driver stubs onto one
+    trunk: 3 segments, w_segs = 2.0) keeps winning at kSegs=100 where
+    raw-nseg pricing would flip to the 2-seg TRUNK_V:
+      old: 800 + 3*100 = 1100  >  850 + 2*100 = 1050  (tree loses)
+      new: 800 + 2*100 = 1000  <  1050                (tree wins)"""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cmds = ["def_layer 4 M4 H TOP 10", "def_layer 5 M5 V TOP 10",
+            "add_block d1 0 0 100 100", "add_block d2 0 400 100 500",
+            "add_block sink 600 200 700 300"]
+    for i in range(8):
+        cmds += [f"add_net n{i} d1.o{i} sink.i{i}",
+                 f"add_net m{i} d2.p{i} sink.j{i}"]
+    cmds += ["run_bundler CONVERGENT", "set_planner_param kSegs 100",
+             "generate_topologies", "run_planner"]
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    w = s.bundles[0]
+    t = w.input.candidates[w.plan.selected_topology_index]
+    assert t.seg_bits, "fan-in taper must be derived before planning"
+    assert t.type.startswith("TRUNK_H") and len(t.segments) == 3
+    assert t.estimated_wirelength == 800
+    nbits = len(w.input.original_bundle.get_net_names())
+    w_segs = sum((len(t.seg_bits.get(si, [])) or nbits)
+                 for si in range(len(t.segments))) / nbits
+    assert w_segs == 2.0                  # each driver stub carries 8/16 bits
+
+
 def test_ksegs_default_off_keeps_selection():
     """kSegs defaults to 0 — an un-set knob must not change the planner's
     choice (the WL-cheapest candidate keeps winning)."""

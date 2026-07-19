@@ -65,11 +65,28 @@ penalty idea.
   α is clean).
 - **G3 — the penalty fights deliberately-multi-segment structures.**
   `multi_trunk`'s BITRUNK datapath trees are demoted (1 of the expected 2
-  trees selected at α=0.02).  Root cause is the penalty's implicit cost
-  model: it charges `nseg × (all bits)`, but per-bit TAPERED trees route
-  each bit over only its own path — their real via cost does NOT scale
-  with raw segment count.  Refinement path: weight the penalty by
-  bits-per-segment (`Topology::seg_bits`) instead of nseg.
+  trees selected at α=0.02).  This splits in two:
+  - **G3a (RESOLVED — taper-honest weight):** for per-bit TAPERED trees
+    (fan-in bundles with `Topology::seg_bits`, derived before planning by
+    `_derive_fanin_bits_all`) the penalty now charges each segment its
+    MEMBER-BIT share — `Σ seg_bit_count/nbits`, the per-bit average path
+    length, which is what junction vias actually scale with.  Untapered
+    candidates reduce to `n_segments` exactly (corpus numbers unchanged —
+    the big flows bundle STRICT).  Lock-in: a CONVERGENT fan-in trunk
+    (3 segments, w_segs 2.0) keeps winning at kSegs=100 where raw-nseg
+    pricing flips to a 2-seg shape
+    (`test_ksegs_taper_honest_weight_keeps_fanin_tree`).
+  - **G3b (OPEN — multicast trees):** datapath BITRUNK trees are NOT
+    tapered (every bit multicasts to every receiver, so `seg_bits` is
+    empty and every bit really does traverse the whole tree).  Measured
+    at α=0.02 (effective ~52/seg on the 2.6k-extent datapath): abstract
+    WL REGRESSES — col plain 18191→22321 (+23%), multi 17346→20356
+    (+17%); row multi 17244→19947 (+16%) and multi loses its edge over
+    plain (19947 vs 19885).  The trees buy 5–14% WL and the penalty is
+    the same order as that win at this scale — a genuine price-vs-win
+    tension, not a modeling bug.  Mitigations: smaller α on tree-heavy
+    small designs, or treat an explicit `multi_trunk` opt-in as intent
+    and exempt/discount the gated two-level trees.
 - **G4 — a segment penalty is a detour penalty.**  kPeak's routability
   steering (U-detour off a loaded band) is overwhelmed even at effective
   ~30 units/seg in the synthetic steer test: detours cost 2 extra
@@ -89,7 +106,8 @@ penalty idea.
 wins broadly; without healers, G1/G2 are real correctness risks and G3/G4
 are QoR distortions.  The principled path to default-on:
 
-1. bits-weighted penalty (G3) — charge `Σ seg_bits`, not `nseg × bits`;
+1. ~~bits-weighted penalty (G3a)~~ — DONE: the penalty charges
+   `Σ seg_bit_count/nbits`; the multicast-tree tension (G3b) remains open;
 2. keep it subordinate to congestion terms or exempt detour variants (G4);
 3. gate the default on healer presence (G1/G2), i.e. flows running
    `negotiate_congestion`/`ripup_reroute`;
