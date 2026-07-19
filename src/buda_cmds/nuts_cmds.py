@@ -94,7 +94,14 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
 def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
     # Usage: run_detailed_nuts [lo_hi|hi_lo]
     session._detailed_bit_order = "LO_HI"
-    if args and args[0].lower() in ("lo_hi", "hi_lo"):
+    if args:
+        # An unrecognized token used to be silently ignored, running the
+        # LO_HI default — so a typo'd 'hi-lo'/'hilo' produced the OPPOSITE of
+        # the requested bit order with no diagnostic (audit P5-06).
+        if args[0].lower() not in ("lo_hi", "hi_lo"):
+            print(f"Error: run_detailed_nuts bit-order must be 'lo_hi' or "
+                  f"'hi_lo', got '{args[0]}'")
+            return
         session._detailed_bit_order = args[0].upper()
 
     if session.nuts_result is None:

@@ -31,17 +31,26 @@ def cmd_source(session, cmd, args, cmd_line):
         return
 
     raw_path = args[0]
-    if not raw_path.endswith('.buda') and not os.path.exists(raw_path):
-        raw_path += '.buda'
 
-    # Resolve path relative to the current executing script (if any)
-    if session._script_stack:
-        parent_dir = os.path.dirname(session._script_stack[-1])
-        full_path = os.path.normpath(os.path.join(parent_dir, raw_path))
-    else:
-        full_path = os.path.abspath(raw_path)
+    # Resolve relative to the current executing script's dir (else CWD), and
+    # make the '.buda'-suffix decision against the RESOLVED candidates — not
+    # os.path.exists(raw_path) in the process CWD (audit P5-04): a nested
+    # `source foo` broke whenever an unrelated file/dir named `foo` happened
+    # to sit in the invocation CWD, even though `foo.buda` lives beside the
+    # parent script. os.path.isfile also rejects a same-named directory.
+    base_dir = (os.path.dirname(session._script_stack[-1])
+                if session._script_stack else os.getcwd())
 
-    if not os.path.exists(full_path):
+    def _resolve(rel):
+        return os.path.normpath(os.path.join(base_dir, rel))
+
+    full_path = _resolve(raw_path)
+    if not os.path.isfile(full_path) and not raw_path.endswith('.buda'):
+        cand = _resolve(raw_path + '.buda')
+        if os.path.isfile(cand):
+            full_path = cand
+
+    if not os.path.isfile(full_path):
         # Fail fast (like an unknown command): a missing/typo'd source
         # silently continuing would leave the design misconfigured — e.g.
         # no def_layers loaded, so run_planner falls back to its M4/M5

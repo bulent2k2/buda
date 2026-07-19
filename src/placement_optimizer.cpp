@@ -132,6 +132,15 @@ PlacementOptimizer::_perturb(const Placement& p, std::mt19937& rng) const {
         do { b_idx = moveable[pick_mv(rng)]; } while (b_idx == a);
         std::swap(q[a].x, q[b_idx].x);
         std::swap(q[a].y, q[b_idx].y);
+        // Re-clamp both blocks to the die (audit C11-05): swapping positions
+        // between blocks of DIFFERENT size can push the larger one past the
+        // die edge, and _cost has no out-of-die term — so the optimizer could
+        // report overlap=0 (the documented 'legal' signal) for a placement
+        // with a block hanging outside the die.
+        for (size_t k : {a, b_idx}) {
+            q[k].x = std::min(std::max(q[k].x, 0.0), std::max(0.0, _die_w - q[k].w));
+            q[k].y = std::min(std::max(q[k].y, 0.0), std::max(0.0, _die_h - q[k].h));
+        }
     } else {
         // Reshape: change aspect ratio of one reshapeable block
         std::uniform_int_distribution<size_t> pick_rs(0, reshapeable.size() - 1);
@@ -155,7 +164,12 @@ void PlacementOptimizer::_perturb_reshape(Placement& p, size_t idx,
     double new_w = _snap(std::exp(r_log(rng)));
     if (new_w < _grid) new_w = _grid;
     double new_h = _snap(area / new_w);
-    if (new_h < min_h || new_h > _die_h || new_w > _die_w) return;
+    // Re-validate the SNAPPED width against min_w too (audit C11-06): grid
+    // snapping can round new_w below the declared minimum, silently violating
+    // the block's min-width constraint in the final result — only min_h was
+    // being re-checked.
+    if (new_w < min_w || new_h < min_h || new_h > _die_h || new_w > _die_w)
+        return;
 
     p[idx].w = new_w;
     p[idx].h = new_h;

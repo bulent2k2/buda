@@ -129,6 +129,13 @@ def cmd_edit_add_trunk(session, cmd, args, cmd_line):
     if len(pos) < 2 or pos[0].upper() not in ("H", "V"):
         print("Error: edit_add_trunk <H|V> <perp_pos> [<lo> <hi>] [layer <id>]")
         return
+    if len(pos) == 3:
+        # One lone span bound was given — the pair must come together, else
+        # the stray token was silently dropped and a full-span trunk added
+        # (audit P5-07).
+        print("Error: edit_add_trunk along_lo and along_hi must be given "
+              "together (got one span bound)")
+        return
     horiz = pos[0].upper() == "H"
     perp = _coord(session, pos[1])
     lo, hi = ((_coord(session, pos[2]), _coord(session, pos[3]))

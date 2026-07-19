@@ -354,10 +354,38 @@ void FloorplannerEngine::write_bdb(BDB& db) const {
     for (const auto& c : db.all_components())
         exists[c.name] = true;
 
+    // A cell name derived from only the LEAF name collides when two blocks of
+    // DIFFERENT size share a leaf under different parents ('top1/core' 10x10
+    // vs 'top2/core' 20x20) — add_cell upserts, so the last writer's dims
+    // overwrite the cell and the other component's metadata goes wrong (audit
+    // C11-07). Pre-scan for leaf names carrying differing sizes and key those
+    // off the FULL path instead; congruent same-leaf instances still share
+    // one cell (order-independent, so no change to existing outputs).
+    std::map<std::string, std::pair<double, double>> leaf_dims;
+    std::set<std::string> ambiguous_leaf;
+    for (const Block* b : ordered) {
+        std::string leaf = _leaf_name(b->name);
+        double w = b->x2 - b->x1, h = b->y2 - b->y1;
+        auto it = leaf_dims.find(leaf);
+        if (it == leaf_dims.end()) leaf_dims[leaf] = {w, h};
+        else if (std::abs(it->second.first - w) > 1e-9 ||
+                 std::abs(it->second.second - h) > 1e-9)
+            ambiguous_leaf.insert(leaf);
+    }
+    auto cell_name_of = [&](const Block* b) -> std::string {
+        std::string leaf = _leaf_name(b->name);
+        if (ambiguous_leaf.count(leaf)) {
+            std::string p = b->name;
+            std::replace(p.begin(), p.end(), '/', '_');
+            return p + "_cell";
+        }
+        return leaf + "_cell";
+    };
+
     for (const Block* b : ordered) {
         double w = b->x2 - b->x1;
         double h = b->y2 - b->y1;
-        std::string cell   = _leaf_name(b->name) + "_cell";
+        std::string cell   = cell_name_of(b);
         std::string parent = _parent_path(b->name);
         bool is_leaf = (has_children.count(b->name) == 0);
         db.add_cell(cell, w, h);

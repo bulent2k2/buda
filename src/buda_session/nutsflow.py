@@ -461,8 +461,9 @@ class NutsFlowMixin:
         seg_label = {}
         for w in self.bundles:
             bid   = w.input.original_bundle.id
-            nets  = w.input.original_bundle.get_net_names()
-            hint  = nets[0] if nets else f"B{bid}"
+            # (audit P4-07: the former net-name `hint` local was dead — the
+            # seg_label below keys off the bundle id + layer, not the net —
+            # so it is dropped rather than left computed-but-unused.)
             if not w.input.candidates or w.plan.selected_topology_index < 0 or w.plan.selected_topology_index >= len(w.input.candidates):
                 continue  # bundle has no topology (e.g. src==dst or no candidates generated)
             topo  = w.input.candidates[w.plan.selected_topology_index]
@@ -556,20 +557,6 @@ class NutsFlowMixin:
 
         action = "appended to" if append else "→"
         print(f"NUTS overlap log {action} {log_path}")
-
-    def extract_instances(self, bundle):
-        # Helper to find source/dest instances from a bundle's nets for Topology Generation
-        if not bundle.get_net_names(): return "top", "top"
-        # Hack: assume first net's driver/receiver pins follow instance.pin format
-        first_net_name = bundle.get_net_names()[0]
-        # Find this net in the netlist to get its pins. This is inefficient but works for prototype.
-        # A real implementation would store src/dst instance on the Bundle object itself.
-        driver_pin = ""
-        receiver_pin = ""
-        # C++ Netlist doesn't expose find_net yet, so we rely on the input script naming convention for the demo.
-        # Assuming net name is like 'b1_0' and driver is 'u_cpu.tx'
-        # Let's just pass the block names directly in the script for now to simplify the connection.
-        return "top", "top"
 
     def _run_post_nuts_planner(self,
                                v_thresholds: tuple[float, float] | None,

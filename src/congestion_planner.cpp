@@ -1693,6 +1693,17 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                     PlanResult theirs = plan_bundle(pw, PlanMode::STRICT);
                     if (theirs.found) {
                         commit_plan(pw, theirs);
+                        // Patch the victim's per-level layer mix (audit C3-02):
+                        // the refine pass patches layer_hist on every accepted
+                        // change, but the rip-up stage did not — so the
+                        // '[Planner] Level summary' kept counting the victim's
+                        // OLD segment layers. Subtract cp.plan's layers, add
+                        // theirs, mirroring the refine pass.
+                        {
+                            LevelStats& vls = level_stats[pw.hier.level];
+                            for (int lid : cp.plan.seg_layers) vls.layer_hist[lid] -= 1;
+                            for (int lid : theirs.seg_layers)  vls.layer_hist[lid] += 1;
+                        }
                         cp.plan = theirs;
                         assignments[cp.asn_idx] = make_assignment(pw, theirs);
                         std::cout << "[Planner] Rip-up: replanned bundle "

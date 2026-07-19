@@ -342,6 +342,19 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
                 if (cur_ref) {
                     cur_ref->cols = std::max<int>(1, r.i16(0));
                     cur_ref->rows = std::max<int>(1, r.i16(2));
+                    // Bound the AREF explosion (audit C8-03): COLROW comes
+                    // straight off the file, so a hostile/corrupt stream can
+                    // declare cols=rows=32767 (~1.07e9 instances) and hang the
+                    // importer — each element is an add_comp SQL insert. Fail
+                    // LOUD past any real array size.
+                    const long long AREF_MAX = 1LL << 20;   // 1,048,576
+                    if ((long long)cur_ref->cols * cur_ref->rows > AREF_MAX)
+                        throw std::runtime_error(
+                            "import_gds: AREF array of " +
+                            std::to_string(cur_ref->cols) + "x" +
+                            std::to_string(cur_ref->rows) +
+                            " exceeds the " + std::to_string(AREF_MAX) +
+                            "-element cap (corrupt COLROW record?)");
                 }
                 break;
             case R_PROPVALUE:

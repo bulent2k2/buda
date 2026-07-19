@@ -858,30 +858,9 @@ def write_bdb(state: FloorplannerAppState):
             raise RuntimeError("No BDB path set")
         state.bdb = buda.BDB(state.bdb_path)
     state.engine.write_bdb(state.bdb)
-    # Recompute each cell's dims from the FINAL engine block sizes (audit
-    # T2-05): sync_cell_to_instances no longer writes the BDB cell row live,
-    # so a resize survives a GUI undo without leaving the BDB inconsistent.
-    _sync_cell_dims(state)
     # Update cell_children so the template is consistent with the written
     # component positions for shared-cell hierarchies.
     _sync_cell_children(state)
-
-
-def _sync_cell_dims(state: FloorplannerAppState) -> None:
-    """Write each cell's dims from its instances' final engine sizes."""
-    if state.bdb is None:
-        return
-    dims: dict[str, tuple[float, float]] = {}
-    for c in state.bdb.all_components():
-        if c.name not in state.block_names:
-            continue
-        try:
-            b = state.engine.get_block(c.name)
-        except Exception:
-            continue
-        dims.setdefault(c.cell, (b.x2 - b.x1, b.y2 - b.y1))
-    for cell, (w, h) in dims.items():
-        state.bdb.add_cell(cell, w, h)
 
 
 def save_sql(state: FloorplannerAppState, sql_path: str | None = None) -> str:
@@ -1059,10 +1038,12 @@ def sync_cell_to_instances(state: FloorplannerAppState, name: str,
     if cell is None:
         return ("", 0)
     w, h = x2 - x1, y2 - y1
-    # BDB cell-dims write is DEFERRED to write_bdb (audit T2-05): writing
-    # add_cell here left the BDB cell row updated after a GUI undo (which
-    # restores only engine bboxes), so the BDB diverged from the engine.
-    # write_bdb's _sync_cell_dims recomputes dims from the final engine sizes.
+    # Keep the cell row current so template expansion uses the new dimensions.
+    # (audit T2-05 proposed deferring this to write_bdb; that was REVERTED —
+    # the immediate write is intentional so a non-synthesized cell name
+    # reflects the resize right away, guarded by
+    # test_resize_shared_cell_preserves_sibling_positions.)
+    state.bdb.add_cell(cell, w, h)
     count = 0
     for c in state.bdb.all_components():
         if c.cell == cell and c.name in state.block_names:

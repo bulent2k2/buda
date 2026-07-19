@@ -2748,9 +2748,18 @@ void BDB::clear_bundles(bool keep_user) {
     _exec("DELETE FROM bundle_busterm; DELETE FROM bundle_net;");
     if (keep_user) {
         // Keep the bundle rows still referenced by kept topology rows (FK);
-        // the re-add upserts them in place.
-        _exec("DELETE FROM bundle WHERE id NOT IN"
-              " (SELECT DISTINCT bundle_id FROM topology);");
+        // the re-add upserts them in place. A kept child bundle's parent_id
+        // self-FK must survive too, so also keep the transitive parent
+        // closure (audit C6-04): deleting a parent still referenced by a kept
+        // child aborted the whole re-bundle with 'FOREIGN KEY constraint
+        // failed'.
+        _exec("DELETE FROM bundle WHERE id NOT IN ("
+              " WITH RECURSIVE keep(id) AS ("
+              "   SELECT DISTINCT bundle_id FROM topology"
+              "   UNION"
+              "   SELECT b.parent_id FROM bundle b JOIN keep k ON b.id=k.id"
+              "     WHERE b.parent_id IS NOT NULL AND b.parent_id<>''"
+              " ) SELECT id FROM keep);");
     } else {
         _exec("DELETE FROM bundle;");
     }

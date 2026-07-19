@@ -41,12 +41,29 @@ def cmd_check_design(session, cmd, args, cmd_line):
     # yet (i.e. before run_planner).  The command outgrew its original name
     # (it audits far more than connectivity), hence the rename; the old name
     # stays registered as an alias so existing scripts keep working.
-    stage     = args[0].lower() if args else "dnuts"
-    all_cands = len(args) > 1 and args[1].lower() == "all"
-    if stage in ("topo", "nuts", "dnuts"):
-        session._check_design(stage, all_candidates=all_cands)
+    # CLAUDE.md documents `check_design [all]`: audit at the CURRENT stage,
+    # with an optional `all` flag — so `all` must be accepted as the first
+    # token (audit P5-05: it was rejected as an unknown stage), and a bare
+    # `check_design` must audit at the deepest completed stage rather than
+    # always demanding dnuts. An explicit topo/nuts/dnuts token still pins
+    # the stage for back-compat.
+    toks = [a.lower() for a in args]
+    all_cands = "all" in toks
+    stage_toks = [t for t in toks if t in ("topo", "nuts", "dnuts")]
+    unknown = [t for t in toks if t not in ("all", "topo", "nuts", "dnuts")]
+    if unknown:
+        print(f"Error: unknown argument '{unknown[0]}' — "
+              f"use topo, nuts, dnuts, or all")
+        return
+    if stage_toks:
+        stage = stage_toks[0]
+    elif session.detailed_result is not None:
+        stage = "dnuts"
+    elif session.nuts_result is not None:
+        stage = "nuts"
     else:
-        print(f"Error: unknown stage '{stage}' — use topo, nuts, or dnuts")
+        stage = "topo"
+    session._check_design(stage, all_candidates=all_cands)
 
 
 def cmd_visualize_topologies(session, cmd, args, cmd_line):
