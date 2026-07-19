@@ -38,6 +38,14 @@ struct Stmt {
     Stmt& operator=(const Stmt&) = delete;
     operator sqlite3_stmt*() const { return p; }
 };
+
+// Null-safe TEXT column read: constructing std::string from a NULL
+// sqlite3_column_text is undefined behavior (crash).  Nullable TEXT columns
+// (component.cell, meta.value, …) must go through this (audit C6-06).
+inline std::string col_txt(sqlite3_stmt* st, int c) {
+    const unsigned char* p = sqlite3_column_text(st, c);
+    return p ? reinterpret_cast<const char*>(p) : std::string();
+}
 } // namespace
 
 BDB::BDB(const std::string& db_path) {
@@ -213,8 +221,11 @@ static const char* TOPOLOGY_DDL = R"(
     );
 )";
 
-// Abstract-NUTS bus routing tables (schema v5). bundle_id is a *soft* link (no FK):
-// the hier flow's expanded per-instance ids need not exist in the bundle table.
+// Abstract-NUTS bus routing tables (schema v5). bundle_id is a HARD FK to
+// bundle(id) (NOT NULL REFERENCES, since v7): a persist path must ensure the
+// parent bundle exists first.  (Audit C6-09 — check the persist step's result
+// — is deferred: the hier re-plan expansion path currently produces
+// FK-orphaned rows that a silent drop tolerates; see wishlist-bdb.)
 // Composite keys (no autoincrement) → deterministic *.bdb.sql dumps.
 static const char* NUTS_DDL = R"(
     CREATE TABLE IF NOT EXISTS bus_segment (
@@ -391,8 +402,8 @@ void BDB::_create_schema() {
     _migrate();
     Stmt mq(_db, "SELECT key,value FROM meta");
     while (sqlite3_step(mq) == SQLITE_ROW) {
-        std::string k = (const char*)sqlite3_column_text(mq, 0);
-        std::string v = (const char*)sqlite3_column_text(mq, 1);
+        std::string k = col_txt(mq, 0);
+        std::string v = col_txt(mq, 1);
         if (k == "units") _units = std::stoi(v);
         else if (k == "die_w") _die_w = std::stod(v);
         else if (k == "die_h") _die_h = std::stod(v);
@@ -445,7 +456,7 @@ std::string BDB::meta_get(const std::string& key, const std::string& def) const 
     Stmt q(_db, "SELECT value FROM meta WHERE key=?");
     sqlite3_bind_text(q, 1, key.c_str(), -1, SQLITE_TRANSIENT);
     if (sqlite3_step(q) == SQLITE_ROW)
-        return reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
+        return col_txt(q, 0);            // NULL value → empty, never a crash (C6-06)
     return def;
 }
 
@@ -480,13 +491,24 @@ void BDB::_migrate() {
             nullptr, nullptr, nullptr);  // Ignored if column already exists.
     }
     if (v < 2) {
-        // v1 -> v2: bundle-persistence schema. The bundle tables have never had a
-        // write path, so they are always empty — rebuild them to the new shape
-        // (busterm role, extra hier columns) rather than a long ALTER chain.
-        _exec("DROP TABLE IF EXISTS bundle_busterm;"
-              "DROP TABLE IF EXISTS bundle_net;"
-              "DROP TABLE IF EXISTS bundle;");
-        _exec(BUNDLE_DDL);
+        // v1 -> v2: bundle-persistence schema. Legacy pre-v2 bundle tables were
+        // always empty, so rebuild them to the new shape rather than a long
+        // ALTER chain.  But a modern-schema DB can reach here with
+        // user_version reading 0 (e.g. a serialize round-trip that lost the
+        // pragma) and its bundle table is already current-shape WITH data — the
+        // unconditional DROP silently destroyed it (audit C6-05).  Guard on the
+        // modern shape actually being absent (the `cell_context` column, added
+        // in v2); when present the tables are already current, so skip.
+        bool modern_bundle = false;
+        { Stmt q(_db, "PRAGMA table_info(bundle)");
+          while (sqlite3_step(q) == SQLITE_ROW)
+              if (col_txt(q, 1) == "cell_context") modern_bundle = true; }
+        if (!modern_bundle) {
+            _exec("DROP TABLE IF EXISTS bundle_busterm;"
+                  "DROP TABLE IF EXISTS bundle_net;"
+                  "DROP TABLE IF EXISTS bundle;");
+            _exec(BUNDLE_DDL);
+        }
     }
     if (v < 3) {
         // v2 -> v3: re-key bundle_net by net_id (was net_name). Preserve any
@@ -813,6 +835,7 @@ int BDB::add_net_pins(const std::string& net_name,
     if (sqlite3_step(q_net) != SQLITE_ROW)
         throw std::runtime_error("add_net_pins: failed to insert net " + net_name);
     int net_id = sqlite3_column_int(q_net, 0);
+    _ensure_net_props(net_id);   // else it disappears from HPWL/fanout (C6-07)
 
     // Parse "inst/path.pin_name" into (path, pin_name, dir).
     struct Ep { std::string path, pin, dir; };
@@ -889,6 +912,7 @@ int BDB::add_net_pins_undirected(const std::string& net_name,
     if (sqlite3_step(q_net) != SQLITE_ROW)
         throw std::runtime_error("add_net_pins_undirected: failed to insert net " + net_name);
     int net_id = sqlite3_column_int(q_net, 0);
+    _ensure_net_props(net_id);   // else it disappears from HPWL/fanout (C6-07)
 
     auto split = [](const std::string& p) {
         std::vector<std::string> v;
@@ -953,6 +977,7 @@ int BDB::add_net_pins_inout(const std::string& net_name,
     if (sqlite3_step(q_net) != SQLITE_ROW)
         throw std::runtime_error("add_net_pins_inout: failed to insert net " + net_name);
     int net_id = sqlite3_column_int(q_net, 0);
+    _ensure_net_props(net_id);   // else it disappears from HPWL/fanout (C6-07)
 
     auto split = [](const std::string& p) {
         std::vector<std::string> v;
@@ -1452,8 +1477,8 @@ std::vector<ComponentRow> BDB::all_components() const {
         auto q = _q_all_components;
         ComponentRow r;
         r.id           = sqlite3_column_int(q,0);
-        r.name         = (const char*)sqlite3_column_text(q,1);
-        r.cell         = (const char*)sqlite3_column_text(q,2);
+        r.name         = col_txt(q,1);
+        r.cell         = col_txt(q,2);
         r.parent_id    = sqlite3_column_int(q,3);
         r.depth        = sqlite3_column_int(q,4);
         r.x1           = sqlite3_column_double(q,5);
@@ -1462,7 +1487,7 @@ std::vector<ComponentRow> BDB::all_components() const {
         r.y2           = sqlite3_column_double(q,8);
         r.is_leaf      = sqlite3_column_int(q,9);
         r.is_replicated= sqlite3_column_int(q,10);
-        r.orient       = (const char*)sqlite3_column_text(q,11);
+        r.orient       = col_txt(q,11);
         rows.push_back(r);
     }
     return rows;
@@ -1970,20 +1995,19 @@ void BDB::import_verilog(const std::string& v_path) {
 // ── Mutations ─────────────────────────────────────────────────────────────────
 
 void BDB::move_comp(const std::string& name, double x, double y) {
-    Stmt q(_db, "SELECT x1, y1, x2, y2 FROM component WHERE name=?");
-    sqlite3_bind_text(q, 1, name.c_str(), -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(q) != SQLITE_ROW)
-        throw std::runtime_error("move_comp: not found: " + name);
-    double w = sqlite3_column_double(q, 2) - sqlite3_column_double(q, 0);
-    double h = sqlite3_column_double(q, 3) - sqlite3_column_double(q, 1);
-    Stmt u(_db, "UPDATE component SET x1=?, y1=?, x2=?, y2=? WHERE name=?");
-    sqlite3_bind_double(u, 1, x);
-    sqlite3_bind_double(u, 2, y);
-    sqlite3_bind_double(u, 3, x + w);
-    sqlite3_bind_double(u, 4, y + h);
-    sqlite3_bind_text  (u, 5, name.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_step(u);
-    compute_hpwl();
+    // Move the component's lower-left corner to (x, y).  Implemented as a pure
+    // translation so the SUBTREE and its (absolute) pin positions ride along —
+    // the old in-place bbox rewrite left pin.px/py stale, then compute_hpwl()
+    // recomputed HPWL from the stale pins: refreshed-looking but wrong values
+    // (audit C6-08).  translate_comp shifts pins + subtree and runs compute_hpwl.
+    double dx, dy;
+    { Stmt q(_db, "SELECT x1, y1 FROM component WHERE name=?");
+      sqlite3_bind_text(q, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+      if (sqlite3_step(q) != SQLITE_ROW)
+          throw std::runtime_error("move_comp: not found: " + name);
+      dx = x - sqlite3_column_double(q, 0);
+      dy = y - sqlite3_column_double(q, 1); }
+    translate_comp(name, dx, dy);
 }
 
 void BDB::set_comp_is_leaf(const std::string& name, bool is_leaf) {
@@ -2535,8 +2559,8 @@ std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
         auto q = _q_components_at_depth;
         ComponentRow r;
         r.id           = sqlite3_column_int(q, 0);
-        r.name         = (const char*)sqlite3_column_text(q, 1);
-        r.cell         = (const char*)sqlite3_column_text(q, 2);
+        r.name         = col_txt(q, 1);
+        r.cell         = col_txt(q, 2);
         r.parent_id    = sqlite3_column_int(q, 3);
         r.depth        = sqlite3_column_int(q, 4);
         r.x1           = sqlite3_column_double(q, 5);
@@ -2545,7 +2569,7 @@ std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
         r.y2           = sqlite3_column_double(q, 8);
         r.is_leaf      = sqlite3_column_int(q, 9);
         r.is_replicated= sqlite3_column_int(q, 10);
-        r.orient       = (const char*)sqlite3_column_text(q, 11);
+        r.orient       = col_txt(q, 11);
         rows.push_back(r);
     }
     return rows;
@@ -2678,6 +2702,12 @@ int BDB::_ensure_net(const std::string& name) {
     sqlite3_bind_text(ins, 1, name.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_step(ins);
     return static_cast<int>(sqlite3_last_insert_rowid(_db));
+}
+
+void BDB::_ensure_net_props(int net_id) {
+    Stmt np(_db, "INSERT OR IGNORE INTO net_props(net_id) VALUES(?)");
+    sqlite3_bind_int(np, 1, net_id);
+    sqlite3_step(np);
 }
 
 void BDB::add_bundle_net(const std::string& bundle_id, const std::string& net_name) {
