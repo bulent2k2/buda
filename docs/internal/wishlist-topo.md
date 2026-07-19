@@ -366,6 +366,16 @@ their generation corpus pre-flip via `no_hanan_loci` to keep their measured
 scenarios; `flow/big_data_test/big_3bundles_sel_pure_mst_topo.buda`'s
 12 opens are pre-existing (identical both sides).
 
+**Follow-on — bigHalf rr slow-tier endpoint under the loci default (OPEN,
+accepted at flip time):** `test_bighalf_rr_reaches_clean_endpoint` (slow
+tier — the ReadMe_bigHalf row-6 both-rr-lines config) fails to reach the
+clean 0/0 endpoint on the reference host under the default-on pool; every
+fast+mid tier test passes and the checked-in bigHalf.buda (row-7 config)
+is unaffected.  Owner decision at flip time: ship and debug later — same
+family as the mix–loci interaction below (the richer pool shifts what the
+heal loop converges to), and the first debugging step is the same
+occupancy/trial trace on the loci pool.
+
 **Follow-on — root-cause the mix–loci interaction (OPEN, from the flip):**
 on `flow/rnr/mix.buda` the RICHER default-on pool degrades the fully-healed
 endpoint (0 ov / 0 opens → 0 / 42, det WL +0.13%, heal loop ~3× slower)
