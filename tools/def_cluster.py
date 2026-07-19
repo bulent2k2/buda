@@ -147,7 +147,11 @@ def parse_def(def_path):
     nets_sec = re.search(r'^NETS \d+ ;(.*?)^END NETS',
                          content, re.DOTALL | re.MULTILINE)
     if nets_sec:
-        for net_m in re.finditer(r'- (\S+)\s+(.*?)(?=\n\s*-\s|\nEND)',
+        # The `\Z` alternative is essential (audit T3-01): the section body
+        # captured by the NETS regex excludes the literal 'END NETS', so
+        # without an end-of-string terminator the LAST net of every section
+        # matched neither `\n- ` nor `\nEND` and was silently dropped.
+        for net_m in re.finditer(r'- (\S+)\s+(.*?)(?=\n\s*-\s|\nEND|\Z)',
                                  nets_sec.group(1), re.DOTALL):
             net_name = net_m.group(1)
             body = net_m.group(2)
@@ -955,14 +959,19 @@ def write_buda_script(path, die, def_file, grid_buses, hf_buses, args):
         # ── Pipeline ─────────────────────────────────────────────────────────
         f.write('run_bundler strict\n\n')
 
-        if grid_buses:
-            for i, b in enumerate(grid_buses):
+        # Emit generation for the FILTERED buses (audit T3-05): the blocks/
+        # buses above were declared from grid_valid/hf_valid, so iterating the
+        # unfiltered grid_buses/n_hf here referenced g_/hf_ blocks that were
+        # never declared whenever any bus failed _topo_valid — a hard CLI
+        # error on the generated script.
+        if grid_valid:
+            for i in range(len(grid_valid)):
                 f.write(f'generate_topologies_for_bundle g_{i+1}  '
                         f'g_{i+1}_src  g_{i+1}_dst\n')
             f.write('\n')
 
-        if hf_buses:
-            for i in range(n_hf):
+        if hf_valid:
+            for i in range(len(hf_valid)):
                 f.write(f'generate_topologies_for_bundle hf_{i+1}  '
                         f'hf_{i+1}_src  hf_{i+1}_dst\n')
             f.write('\n')
@@ -972,8 +981,11 @@ def write_buda_script(path, die, def_file, grid_buses, hf_buses, args):
         f.write('run_detailed_nuts\n\n')
         f.write('visualize\n')
 
-    total = n_grid + n_hf
-    print(f'\nWrote {total} buses ({2*total} blocks) to {path}')
+    total = len(grid_valid) + len(hf_valid)
+    msg = f'\nWrote {total} buses ({2*total} blocks) to {path}'
+    if skipped:
+        msg += f' ({skipped} degenerate bus(es) skipped)'
+    print(msg)
 
 
 if __name__ == '__main__':

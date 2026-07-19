@@ -328,9 +328,21 @@ def _run_capturing(fn, kwargs):
         import buda_cli  # noqa: E402
         orig_do = buda_cli.BudaSession.do_command
 
+        # Record only TOP-LEVEL commands (audit T1-02): `source <flow>`
+        # re-dispatches every child command through do_command, so recording
+        # nested calls emitted the source line AND the whole expanded flow —
+        # the .buda then ran everything twice. A depth counter keeps only the
+        # outermost call per dispatch.
+        _depth = [0]
+
         def _rec_do(self, cmd_line, _orig=orig_do):
-            _CMD_CALLS.append(cmd_line.strip())
-            return _orig(self, cmd_line)
+            if _depth[0] == 0:
+                _CMD_CALLS.append(cmd_line.strip())
+            _depth[0] += 1
+            try:
+                return _orig(self, cmd_line)
+            finally:
+                _depth[0] -= 1
 
         buda_cli.BudaSession.do_command = _rec_do
     except Exception:  # noqa: BLE001 — buda_cli optional; topology mode still works

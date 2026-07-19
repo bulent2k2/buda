@@ -205,7 +205,13 @@ class VizIPC:
                     self._queue.append(json.loads(line))
                 except json.JSONDecodeError:
                     pass
-        self._disconnect()
+        # Locked teardown, and only if we still own THIS socket (audit T3-04):
+        # the GUI thread also reads/writes _sock/_connected, so an unlocked
+        # _disconnect() raced send() (AttributeError on a None _sock) and a
+        # stale recv thread could close a freshly-accepted peer's socket.
+        with self._lock:
+            if self._sock is sock:
+                self._disconnect()
 
     def _disconnect(self):
         """Must be called with _lock held or from recv thread (which owns the sock)."""

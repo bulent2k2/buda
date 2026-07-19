@@ -320,7 +320,13 @@ def load_bdb(path: str, sql_source: str = "") -> FloorplannerAppState:
         state.engine.set_die(die_w, die_h)
 
     for comp in state.bdb.all_components():
-        if comp.x1 < 0 or comp.y1 < 0 or comp.x2 <= comp.x1 or comp.y2 <= comp.y1:
+        # Only the exact -1/-1 import_verilog placeholder (or a degenerate
+        # bbox) is 'unplaced' — a block legitimately at negative coordinates
+        # must still load (audit T2-03: `x1 < 0 or y1 < 0` silently dropped
+        # such blocks on reopen, losing them from the saved design).
+        unplaced = (comp.x1 == -1 and comp.y1 == -1) \
+            or comp.x2 <= comp.x1 or comp.y2 <= comp.y1
+        if unplaced:
             continue
         state.engine.add_block(comp.name, comp.x1, comp.y1, comp.x2, comp.y2)
         state.add_name(comp.name)
@@ -407,6 +413,17 @@ def import_verilog(v_path: str, bdb_path: str, die_w: float = 2000.0,
         fd = None  # File doesn't exist yet; lock acquired after BDB creates it.
 
     try:
+        # import_verilog only clears net/pin and UPSERTs components, so a
+        # PRE-EXISTING target's stale components/cells survive and get seeded
+        # as phantom placeholder blocks (audit T2-04). Rebuild from scratch:
+        # remove the file (and its WAL sidecars) now that the write lock is
+        # held, so the fresh BDB() genuinely starts empty.
+        if pre_existing:
+            for sfx in ("", "-wal", "-shm"):
+                try:
+                    os.remove(bdb_path + sfx)
+                except FileNotFoundError:
+                    pass
         state = new_state()
         state.bdb = buda.BDB(bdb_path)
         state.bdb_path = bdb_path
@@ -841,9 +858,30 @@ def write_bdb(state: FloorplannerAppState):
             raise RuntimeError("No BDB path set")
         state.bdb = buda.BDB(state.bdb_path)
     state.engine.write_bdb(state.bdb)
+    # Recompute each cell's dims from the FINAL engine block sizes (audit
+    # T2-05): sync_cell_to_instances no longer writes the BDB cell row live,
+    # so a resize survives a GUI undo without leaving the BDB inconsistent.
+    _sync_cell_dims(state)
     # Update cell_children so the template is consistent with the written
     # component positions for shared-cell hierarchies.
     _sync_cell_children(state)
+
+
+def _sync_cell_dims(state: FloorplannerAppState) -> None:
+    """Write each cell's dims from its instances' final engine sizes."""
+    if state.bdb is None:
+        return
+    dims: dict[str, tuple[float, float]] = {}
+    for c in state.bdb.all_components():
+        if c.name not in state.block_names:
+            continue
+        try:
+            b = state.engine.get_block(c.name)
+        except Exception:
+            continue
+        dims.setdefault(c.cell, (b.x2 - b.x1, b.y2 - b.y1))
+    for cell, (w, h) in dims.items():
+        state.bdb.add_cell(cell, w, h)
 
 
 def save_sql(state: FloorplannerAppState, sql_path: str | None = None) -> str:
@@ -929,7 +967,11 @@ def export_hbundle_script(state: FloorplannerAppState, path: str,
     layers AND track patterns and is sourced relatively, so the script can run the
     full flow through detailed NUTS without external tech files.
     """
-    bdb_path = state.bdb_path or "floorplan.bdb"
+    # Absolute so the open_bdb line resolves the same regardless of the
+    # subprocess cwd (audit T2-08: run_hbundle_flow runs the CLI with
+    # cwd=_ROOT, but a floorplanner launched with a relative BDB path wrote
+    # the script relative to the GUI's cwd — the two disagreed).
+    bdb_path = os.path.abspath(state.bdb_path or "floorplan.bdb")
     max_depth = design_max_depth(state)
     # Cover the whole design (never less than its actual depth).
     depth = max_depth if depth is None else max(depth, max_depth)
@@ -970,6 +1012,7 @@ def run_hbundle_flow(state: FloorplannerAppState, script_path: str | None = None
     if script_path is None:
         stem = os.path.splitext(state.bdb_path or "floorplan.bdb")[0]
         script_path = stem + "_hbundle.buda"
+    script_path = os.path.abspath(script_path)   # cwd-independent (audit T2-08)
     export_hbundle_script(state, script_path, depth=depth, visualize=False)
 
     env = os.environ.copy()
@@ -1016,8 +1059,10 @@ def sync_cell_to_instances(state: FloorplannerAppState, name: str,
     if cell is None:
         return ("", 0)
     w, h = x2 - x1, y2 - y1
-    # Keep the cell row current so template expansion uses the new dimensions.
-    state.bdb.add_cell(cell, w, h)
+    # BDB cell-dims write is DEFERRED to write_bdb (audit T2-05): writing
+    # add_cell here left the BDB cell row updated after a GUI undo (which
+    # restores only engine bboxes), so the BDB diverged from the engine.
+    # write_bdb's _sync_cell_dims recomputes dims from the final engine sizes.
     count = 0
     for c in state.bdb.all_components():
         if c.cell == cell and c.name in state.block_names:
