@@ -3795,14 +3795,20 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
                 }
                 is_open[i] = 1;
             } else if (v.kind == ViolationKind::DISCONNECTED) {
-                // Declared-feedthru candidates are exempt: a fed-through
-                // block's internal routing bridges its split spine (and any
-                // stub landing in the split gap), which detect_disconnected
-                // does not model — e.g. the TRUNK_H feedthru-through-'mid'
-                // candidates the collinear-merge tests pin have always been
-                // flagged here and still route.  The hanan_loci degenerate
-                // family this gate exists for declares no feedthrus.
-                if (candidates[i].feedthru_blocks.empty()) is_disc[i] = 1;
+                // Declared-feedthru exemption, scoped to the islands the
+                // declared block(s) actually bridge (Codex P2 on #335): a
+                // fed-through block's internal routing bridges its split
+                // spine (and any stub landing in the split gap), which
+                // detect_disconnected does not model — e.g. the TRUNK_H
+                // feedthru-through-'mid' candidates the collinear-merge tests
+                // pin have always been flagged here and still route.  Exempt
+                // ONLY when EVERY island touches a declared feedthru block
+                // (disconnected_islands_bridged — the same island union-find
+                // detect_disconnected runs); a candidate that ALSO carries an
+                // unrelated island touching no declared block is a genuine
+                // open and is dropped like any other DISCONNECTED candidate.
+                if (!disconnected_islands_bridged(ct, candidates[i], floorplan_))
+                    is_disc[i] = 1;
             } else if (v.kind == ViolationKind::FEEDTHRU_RELAY) {
                 is_relay[i] = 1;
             }

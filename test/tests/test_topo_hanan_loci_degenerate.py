@@ -136,3 +136,67 @@ def test_default_off_pools_unaffected():
         missing = base_uids - knob_uids
         assert not missing, \
             f"gate removed {len(missing)} default candidate(s) under the knob"
+
+
+# ---------------------------------------------------------------------------
+# Declared-feedthru exemption scoping (Codex P2 on #335): the DISCONNECTED
+# gate exempts a split ONLY when every island is bridged by a declared
+# feedthru block — a candidate that ALSO carries an unrelated island (no
+# feedthru-block touch) is a genuine open and must be dropped.
+# ---------------------------------------------------------------------------
+
+def _feedthru_fixture():
+    """A / mid / B on one row + off-spine C, mid a declared feedthru: the
+    TRUNK_H spine splits at mid's faces and C's stub lands in the split gap —
+    check_topo flags DISCONNECTED, but every island touches mid (its internal
+    routing is the declared bridge), so the gate keeps it."""
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 100, 100)
+    fp.add_block("mid", 300, 0, 400, 100)
+    fp.add_block("B", 600, 0, 700, 100)
+    fp.add_block("C", 300, 400, 400, 500)
+    fp.set_feedthru(True)
+    g = buda.TopologyGenerator(fp)
+    g.set_layer_ids(4, 5)
+    return fp, g
+
+
+def test_feedthru_bridged_split_is_kept():
+    """Every island of the declared split touches 'mid' -> exempt, KEPT."""
+    fp, g = _feedthru_fixture()
+    cands = g.generate_candidates("A", ["mid", "B", "C"])
+    ft = [c for c in cands
+          if c.type.startswith("TRUNK_H") and "mid" in c.feedthru_blocks]
+    assert ft, "expected a TRUNK_H feedthru candidate through 'mid'"
+    # The exemption is only meaningful if the kept candidate really is
+    # DISCONNECTED-flagged (the split-gap stub island).
+    assert any(_islands(fp, c) for c in ft), \
+        "fixture no longer produces a DISCONNECTED-flagged feedthru split"
+
+
+def test_feedthru_with_unrelated_island_is_dropped():
+    """The same feedthru candidate carrying an ADDITIONAL island that touches
+    no declared feedthru block is a genuine open: the candidate-wide exemption
+    must not cover it (Codex P2) -> DROPPED by the gate."""
+    fp, g = _feedthru_fixture()
+    cands = g.generate_candidates("A", ["mid", "B", "C"])
+    broken = next(c for c in cands
+                  if c.type.startswith("TRUNK_H") and "mid" in c.feedthru_blocks
+                  and _islands(fp, c))
+    clean = next(c for c in cands if not _islands(fp, c))
+    # Sanity: unmodified, the gate keeps the bridged split next to a clean
+    # alternative (the scoped exemption at work).
+    kept = g.filter_uncovered([broken, clean])
+    assert {c.type for c in kept} == {broken.type, clean.type}
+    # Graft an unrelated floating island (far from every block and from the
+    # declared feedthru) onto the feedthru candidate.
+    extra = buda.Segment()
+    extra.start = buda.Point(2000, 2000)
+    extra.end = buda.Point(2200, 2000)
+    extra.layer_hint = 4
+    broken.segments = list(broken.segments) + [extra]
+    buda.annotate_topology(broken, fp)
+    assert len(_islands(fp, broken)) >= 1
+    kept = g.filter_uncovered([broken, clean])
+    assert [c.type for c in kept] == [clean.type], \
+        "unrelated island rode the candidate-wide feedthru exemption"

@@ -80,6 +80,19 @@ struct ConnResult {
 ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
                       const Floorplan& fp, int bundle_id);
 
+// Declared-feedthru scoping for generation's DISCONNECTED gate
+// (TopologyGenerator::filter_uncovered).  True iff the wire graph splits into
+// 2+ islands under detect_disconnected's island model (SEG junctions +
+// same-block tap continuity — the SAME union-find, shared implementation) and
+// EVERY island touches one of topo.feedthru_blocks (a BUSTERM conn to it, or
+// inclusive geometric overlap with its rects — a stub landing in the split
+// gap): each island then reaches the declared block, whose internal routing
+// is the declared bridge.  An island touching NO declared feedthru block is a
+// genuine open the exemption must not cover (Codex P2 on #335).  False when
+// no feedthru is declared or the graph is not split.
+bool disconnected_islands_bridged(const ConnTopology& ct, const Topology& topo,
+                                  const Floorplan& fp);
+
 // NUTS-level check: same topology structure but positions from TrackSegments.
 // Includes block-coverage check for pass-through blocks at placed positions,
 // layer-direction validity (H segment on H layer, V on V), and the
