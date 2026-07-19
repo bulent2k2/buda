@@ -84,8 +84,14 @@ int CongestionPlanner::find_band(bool is_vcut, int perp_pos) const {
 // absent from the zone list and keep their full channel capacity (Gap 2).
 // A zone with EMPTY layer_ids blocks every layer — the same convention as the
 // topology predicates and NUTS's keepout_occupied (keepout-model audit).
+// The cut position is passed DOUBLED (cut_coord_2x) so the coverage test is
+// exact: the rounded cut_coord truncates a width-1 channel's half-integer
+// midpoint onto its lower grid line, where a keepout that merely ABUTS the
+// channel passed the closed covers test and falsely zeroed the band — STRICT
+// then priced a physically routable band as hard overflow (audit C3-01; the
+// same truncation hazard cut_coord_2x fixed for segment matching).
 static double band_available_length(
-        int cut_coord, bool is_vcut,
+        int cut_coord_2x, bool is_vcut,
         const std::vector<KeepoutZone>& keepouts,
         int layer_id,
         int band_lo, int band_hi)
@@ -95,8 +101,8 @@ static double band_available_length(
         if (!koz.layer_ids.empty() && !koz.layer_ids.count(layer_id)) continue;
         const Rect& r = koz.bbox;
         bool covers = is_vcut
-            ? (cut_coord >= r.x1 && cut_coord <= r.x2)
-            : (cut_coord >= r.y1 && cut_coord <= r.y2);
+            ? (cut_coord_2x >= 2 * r.x1 && cut_coord_2x <= 2 * r.x2)
+            : (cut_coord_2x >= 2 * r.y1 && cut_coord_2x <= 2 * r.y2);
         if (!covers) continue;
         int lo = is_vcut ? r.y1 : r.x1;
         int hi = is_vcut ? r.y2 : r.x2;
@@ -187,12 +193,17 @@ void CongestionPlanner::rebuild_cuts_() {
             // Leaf cells reach LOW layers via `keepouts` (low_layer_keepouts),
             // so blocks no longer carve capacity directly.
             c.init_bands(n_ybands, [&](int b) {
-                return band_available_length(x_mid, true, keepouts, lid, y_grid_[b], y_grid_[b+1]);
+                return band_available_length(c.cut_coord_2x, true, keepouts, lid,
+                                             y_grid_[b], y_grid_[b+1]);
             });
             if (track_mode_for(lid))
                 c.init_sig_ntrk([&](int b) {
+                    // Exact midpoint sample (audit C3-01): the truncated
+                    // x_mid shares band_available_length's abutting-keepout
+                    // hazard inside count_signal_tracks_in's coverage test.
                     return grid_->get_layer_grid(lid).count_signal_tracks_in(
-                        (double)x_mid, (double)y_grid_[b], (double)y_grid_[b+1]);
+                        0.5 * c.cut_coord_2x,
+                        (double)y_grid_[b], (double)y_grid_[b+1]);
                 });
             cuts_.push_back(std::move(c));
         }
@@ -211,12 +222,14 @@ void CongestionPlanner::rebuild_cuts_() {
             c.dir          = LayerDir::HORIZONTAL;
             c.layer_id  = lid;
             c.init_bands(n_xbands, [&](int b) {
-                return band_available_length(y_mid, false, keepouts, lid, x_grid_[b], x_grid_[b+1]);
+                return band_available_length(c.cut_coord_2x, false, keepouts, lid,
+                                             x_grid_[b], x_grid_[b+1]);
             });
             if (track_mode_for(lid))
                 c.init_sig_ntrk([&](int b) {
                     return grid_->get_layer_grid(lid).count_signal_tracks_in(
-                        (double)y_mid, (double)x_grid_[b], (double)x_grid_[b+1]);
+                        0.5 * c.cut_coord_2x,
+                        (double)x_grid_[b], (double)x_grid_[b+1]);
                 });
             cuts_.push_back(std::move(c));
         }
@@ -240,7 +253,7 @@ void CongestionPlanner::rebuild_cuts_() {
                 double v;
                 if (ttrack && b + 1 < (int)pgrid.size())
                     v = (double)grid_->get_layer_grid(lid)
-                            .signal_tracks_in((double)c.cut_coord,
+                            .signal_tracks_in(0.5 * c.cut_coord_2x,
                                               (double)pgrid[b], (double)pgrid[b + 1]).size();
                 else
                     v = c.cap(b);
@@ -528,7 +541,8 @@ double CongestionPlanner::usable_band_cap(const GlobalCut& c, int b, bool is_vcu
         int ntrk = (lo <= blo && hi >= bhi && c.has_sig_ntrk())
             ? c.sig_ntrk(b)
             : grid_->get_layer_grid(c.layer_id)
-                  .count_signal_tracks_in((double)c.cut_coord, (double)lo, (double)hi);
+                  .count_signal_tracks_in(0.5 * c.cut_coord_2x,
+                                          (double)lo, (double)hi);
         double cap = ((double)ntrk + track_cap_slack_) *
                      layers_.eff_bus_width(1, 1.0, c.layer_id);   // * bit pitch
         if (cap <= 0.0) return 0.0;

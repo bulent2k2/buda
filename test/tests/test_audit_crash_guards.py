@@ -252,3 +252,51 @@ def test_bitrunk_h_refuses_x_aligned_column():
         for s in c.segments:
             assert (s.start.x, s.start.y) != (s.end.x, s.end.y), \
                 f"zero-length segment emitted in {c.type}"
+
+
+def test_width_one_channel_band_cap_not_zeroed_by_abutting_keepout():
+    # Audit C3-01: band capacity was sampled at the integer-TRUNCATED cut
+    # midpoint ((g_lo+g_hi)/2), so a width-1 Hanan channel's sample
+    # collapsed onto its lower grid line — and a keepout (or implicit
+    # leaf-cell footprint) that merely ABUTS the channel passed the
+    # closed-interval covers test, zeroing the channel's band capacity.
+    # STRICT then priced a physically routable band as hard overflow
+    # (kCong*9999) and silently rejected the layer/candidate, though the
+    # true cut line (g_lo + 0.5) is keepout-free. The same truncated
+    # sample fed count_signal_tracks_in. This is the exact truncation
+    # hazard cut_coord_2x already fixed for segment matching.
+    fp = buda.Floorplan()
+    fp.add_block("L", 0, 60, 40, 100)
+    fp.add_block("R", 101, 0, 160, 50)          # width-1 channel [100, 101]
+    fp.add_keepout_zone(50, 0, 100, 50, [4])    # ends AT x=100 (abuts)
+    ls = buda.LayerStack()
+    ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.add_layer(5, "M5", buda.LayerDir.VERTICAL, buda.LayerType.TOP)
+    pl = buda.CongestionPlanner(fp, ls)
+    pl.build_congestion_map()
+    yg = list(pl.get_y_grid())
+    band0 = (yg[0], yg[1])                       # y in [0, 50]
+    assert band0 == (0, 50), yg
+    for c in pl.get_cuts():
+        if c.dir != buda.LayerDir.VERTICAL or c.layer_id != 4:
+            continue
+        if not (100 <= c.cut_coord <= 101):      # the width-1 channel's cut
+            continue
+        assert c.cap(0) == 50.0, (
+            f"abutting keepout zeroed the width-1 channel's band: "
+            f"caps={[c.cap(b) for b in range(c.num_bands())]}")
+        break
+    else:
+        raise AssertionError("width-1 channel cut not found")
+    # A keepout genuinely COVERING the channel still zeroes the band.
+    fp2 = buda.Floorplan()
+    fp2.add_block("L", 0, 60, 40, 100)
+    fp2.add_block("R", 101, 0, 160, 50)
+    fp2.add_keepout_zone(50, 0, 102, 50, [4])
+    pl2 = buda.CongestionPlanner(fp2, ls)
+    pl2.build_congestion_map()
+    for c in pl2.get_cuts():
+        if (c.dir == buda.LayerDir.VERTICAL and c.layer_id == 4
+                and 100 <= c.cut_coord <= 101):
+            assert c.cap(0) == 0.0, "covering keepout must still block"
+            break
