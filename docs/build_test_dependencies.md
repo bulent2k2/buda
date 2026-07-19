@@ -111,3 +111,7 @@ artifact), and a stripped module has no sanitizer stack traces. Caveat: the
 a dlopen'd module on gcc-13/glibc, so drive sanitized runs through
 throw-free repro scripts and corpus flows rather than the full pytest
 suite. Background: `docs/internal/audit_2026-07.md` (Environment notes).
+GCC only: configuring with Clang fails fast — Clang's static-by-default
+sanitizer runtime leaves instrumented shared modules with unresolved
+`__asan_*`/`__ubsan_*` symbols at import (a port needs `-shared-libsan`
+plus preloading `libclang_rt.asan-<arch>.so`, unvalidated here).

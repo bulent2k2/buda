@@ -57,7 +57,22 @@ endif()
 # dlopen'd module on gcc-13/glibc — usable for throw-free repro scripts
 # and the corpus flows, not for the full pytest suite (see the audit doc).
 option(BUDA_SANITIZE "Build with ASAN+UBSAN (no LTO, symbols kept)" OFF)
-if(BUDA_SANITIZE AND NOT MSVC)
+if(BUDA_SANITIZE)
+    # GCC only (validated).  Clang statically links the sanitizer runtime
+    # into EXECUTABLES, so instrumented shared modules are left with
+    # unresolved __asan_*/__ubsan_* symbols that the documented libasan
+    # preload does not cover — the import fails before a sanitized run can
+    # start.  A Clang port needs -shared-libsan (plus preloading
+    # libclang_rt.asan-<arch>.so) and has not been validated; fail LOUD
+    # here rather than configure a build that cannot import (Codex P2 on
+    # PR #336).  MSVC has no ASAN shared-module story either.
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        message(FATAL_ERROR
+            "BUDA_SANITIZE is validated with GCC only (found "
+            "${CMAKE_CXX_COMPILER_ID}). Configure with g++, or port the "
+            "Clang path (-shared-libsan + libclang_rt.asan preload) and "
+            "validate an instrumented import before relaxing this check.")
+    endif()
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer
                         -fno-sanitize-recover=null -g)
     add_link_options(-fsanitize=address,undefined)
