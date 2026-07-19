@@ -861,6 +861,10 @@ int BDB::add_net_pins(const std::string& net_name,
 
         // Intermediate ancestors: use net_name as the interface pin_name.
         // Direction: OUTPUT if on the driver side, INPUT if on a receiver side.
+        // An empty path (endpoint like ".pin" or "") has no ancestors — and
+        // seg.size()-1 on size_t would underflow to SIZE_MAX and index the
+        // empty vector (audit C6-02).
+        if (seg.empty()) continue;
         for (size_t d = seg.size() - 1; d > common; --d) {
             std::string anc;
             for (size_t k = 0; k < d; ++k) {
@@ -924,6 +928,7 @@ int BDB::add_net_pins_undirected(const std::string& net_name,
         const auto& ep  = eps[i];
         const auto& seg = all_segs[i];
         _add_pin_by_path(net_id, ep.path, ep.pin, "UNKNOWN");
+        if (seg.empty()) continue;   // audit C6-02: size_t underflow on empty path
         for (size_t d = seg.size() - 1; d > common; --d) {
             std::string anc;
             for (size_t k = 0; k < d; ++k) {
@@ -986,6 +991,7 @@ int BDB::add_net_pins_inout(const std::string& net_name,
         const auto& ep  = eps[i];
         const auto& seg = all_segs[i];
         _add_pin_by_path(net_id, ep.path, ep.pin, "INOUT");
+        if (seg.empty()) continue;   // audit C6-02: size_t underflow on empty path
         for (size_t d = seg.size() - 1; d > common; --d) {
             std::string anc;
             for (size_t k = 0; k < d; ++k) {

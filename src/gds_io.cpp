@@ -491,6 +491,13 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
         [&](const GStruct& s, const XForm& xf, const std::string& comp_path,
             const std::string& parent_path, int depth,
             const std::string& orient) {
+        // A valid GDS structure graph is a DAG; a corrupt/hostile stream with
+        // a reference cycle would recurse forever (stack overflow). Fail LOUD
+        // at a depth no real hierarchy reaches (audit C8-01).
+        if (depth > 256)
+            throw std::runtime_error(
+                "import_gds: structure reference depth >256 at '" + comp_path +
+                "' — reference cycle in the GDS stream?");
         BBox bb = xf.apply(bbox_of(s.name));
         if (bb.empty()) bb = BBox{0, 0, 0, 0};
         // orient = this instance's LOCAL orientation (relative to its parent);

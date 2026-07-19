@@ -20,6 +20,7 @@
 #include <cmath>
 #include <climits>
 #include <deque>
+#include <stdexcept>
 #include <set>
 #include <string>
 #include <iostream>
@@ -332,6 +333,9 @@ void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y
 }
 void Floorplan::add_block_rects(const std::string& name, const std::vector<Rect>& rects,
                                  TegMode mode) {
+    if (rects.empty())
+        throw std::invalid_argument(
+            "add_block_rects('" + name + "'): rect list must not be empty");
     std::vector<Rect> norm_rects;
     norm_rects.reserve(rects.size());
     for (const auto& r : rects) {
