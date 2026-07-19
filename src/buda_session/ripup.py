@@ -370,6 +370,9 @@ class RipupMixin:
         self.planner = buda.CongestionPlanner(self.fp, self.layers)
         for pname, pval in self._planner_params.items():
             self.planner.set_planner_param(pname, pval)
+        # The caller IS a healer (ripup's hier re-plan), so the env-default
+        # gate is satisfied by construction — script scan or not.
+        self._apply_healers_ahead(self.planner, healing_now=True)
         self._apply_hier_refine_default(self.planner)
         self.planner.set_track_pitch(self._nuts_pitch)
         self._planner_pitch = self._nuts_pitch

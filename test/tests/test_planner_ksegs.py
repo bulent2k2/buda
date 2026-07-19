@@ -296,6 +296,46 @@ def test_ksegs_env_default_healer_gated(monkeypatch, tmp_path):
                .segments) == 5
 
 
+def test_healers_ahead_declaration_paths(tmp_path):
+    """The _apply_healers_ahead wiring shared by ALL planner-construction
+    sites — global (flat + hier), the bottom-up cell-local template solve,
+    and ripup's hier re-plan (Codex #342): script detection through
+    `source`, the healing_now=True unconditional path (the caller IS a
+    healer), and the explicit-param override."""
+    class FakePlanner:
+        def __init__(self):
+            self.calls = []
+        def set_planner_param(self, n, v):
+            self.calls.append((n, v))
+
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    p = FakePlanner()
+    s._apply_healers_ahead(p)                 # scriptless: nothing declared
+    assert p.calls == []
+    s._apply_healers_ahead(p, healing_now=True)   # ripup's re-plan: always
+    assert p.calls == [("healersAhead", 1.0)]
+
+    flow = tmp_path / "f.buda"
+    sub = tmp_path / "heal.buda"
+    sub.write_text("negotiate_congestion\n")
+    flow.write_text("run_planner\nsource heal.buda\n")
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    s2.script_path = str(flow)
+    p2 = FakePlanner()
+    s2._apply_healers_ahead(p2)               # detected through source
+    assert p2.calls == [("healersAhead", 1.0)]
+
+    s3 = buda_cli.BudaSession()
+    s3.no_viz = True
+    s3.script_path = str(flow)
+    s3._planner_params["healersAhead"] = 0.0  # explicit set wins, even 0
+    p3 = FakePlanner()
+    s3._apply_healers_ahead(p3, healing_now=True)
+    assert p3.calls == []
+
+
 def test_ksegs_default_off_keeps_selection():
     """kSegs defaults to 0 — an un-set knob must not change the planner's
     choice (the WL-cheapest candidate keeps winning)."""

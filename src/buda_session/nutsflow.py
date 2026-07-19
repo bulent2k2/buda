@@ -72,15 +72,17 @@ class NutsFlowMixin:
         self._healers_in_flow_cache = found
         return found
 
-    def _apply_healers_ahead(self, planner):
+    def _apply_healers_ahead(self, planner, healing_now=False):
         """Audit G1/G2 gate: declare `healersAhead` to the planner when the
         flow runs a healer, so the BUDA_KSEGS_REL env default may apply —
         the penalty's two measured correctness regressions are both
         ripup-healed, and real only without healers.  An explicit
-        set_planner_param healersAhead (the harness escape) always wins."""
+        set_planner_param healersAhead (the harness escape) always wins.
+        `healing_now` = the caller IS a healer (ripup's re-plan) — declare
+        regardless of the script scan (an interactive ripup counts too)."""
         if "healersAhead" in self._planner_params:
             return
-        if self._healers_in_flow():
+        if healing_now or self._healers_in_flow():
             planner.set_planner_param("healersAhead", 1.0)
 
     @staticmethod
