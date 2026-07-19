@@ -143,6 +143,35 @@ LOW-supply capacity fix (see wishlist-topo "mix–loci").  Off-switch:
 `test/tests/test_dead_span_heal_fold.py`.  The manual `set_dead_span_escalate`
 (run_nuts-level) stays for healer-less flows.
 
+**TIMING REFINEMENT — escalate at `run_nuts`, before the healers (2026-07-19).**
+The stage-b fold arrives AFTER the stage-a healers have already committed
+around the un-escalated layout, so the escalated bundle lands in a
+pre-arranged crowd.  Running the SAME escalation at `run_nuts` — before any
+healer — lets the whole negotiate/ripup cascade adapt around the escalated
+layers.  `cmd_run_nuts` now escalates automatically when a healer is ahead
+(the `_healers_in_flow` scan the kSegsRel default uses; the manual
+`set_dead_span_escalate` still forces it), and the stage-b fold STILL runs
+too — the two compose (a segment already moved to TOP is not re-found).
+Measured-best is BOTH: run_nuts-timing fixes flows the late fold alone
+leaves open, while the fold recovers the one flow the early pass alone
+regresses.  Corpus A/B (fresh build, real config — kSegsRel + healersAhead
+active; OLD = fold only, NEW = run_nuts + fold):
+
+| flow | off (fold only) | on (run_nuts + fold) | Δ |
+|---|---|---|---|
+| mix (as-checked-in) | 1 / 16 | **0 / 0** | opens −16, ov −1 |
+| bigHalf | 1 / 190 | **1 / 94** | opens −96 |
+| mix-loci, slowdown_rnr, big2, b61 | 0 / 0 | 0 / 0 | already clean |
+| mix2 | 2 / 42 | 2 / 42 | fold recovers (no regression) |
+| mix2_fast | 33 / 256 | 33 / 256 | unchanged |
+
+Two clean wins, zero regressions.  Rollback/study knob
+`_dead_span_auto_at_run_nuts = False` forces the stage-b-only timing.  This
+is also what closed the mix–loci follow-on (wishlist-topo): with kSegsRel on,
+mix-loci was already 0/0, and the 42/32/16 figures were a scriptless-harness
+artifact (no `script_path` → `_healers_in_flow` False → kSegsRel silently
+off).
+
 ## A metal *above* the TOP band is still a top metal — config-smell WARNING shipped; auto-override measured & rejected
 
 **What:** `LayerType` is a binary flag `{ TOP, LOW }` set explicitly per

@@ -1266,6 +1266,14 @@ class RipupMixin:
         if not getattr(self, '_heal_dead_spans_in_healers',
                        _RR_HEAL_DEAD_SPANS_DEFAULT):
             return 0
+        # NOTE: this stage-b fold runs even when cmd_run_nuts already
+        # escalated at run_nuts (the earlier, before-the-healers timing).
+        # Running BOTH is measured-best: the run_nuts escalation fixes the
+        # flows the late fold alone leaves open (mix 16->0, bigHalf 190->94),
+        # while the late fold recovers the one flow the early escalation alone
+        # regresses (mix2 stays 42, not 66).  A dead LOW segment the early
+        # pass already moved to TOP is simply not re-found here (no-op), so
+        # the two passes compose without conflict.
         n = self._escalate_dead_low_segments()
         if n:
             # Refresh the stage-b metric off the escalated abstract solve.

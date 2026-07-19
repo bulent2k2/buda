@@ -193,6 +193,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._detailed_bit_order = "LO_HI"
         self._dead_span_escalate = False  # opt-in post-NUTS dead-span escalation
         self._heal_dead_spans_in_healers = True  # auto dead-span escalation in healers
+        self._dead_span_auto_at_run_nuts = True  # auto-escalate at run_nuts when healers ahead
        # last track pitch used by run_nuts
         self._planner_iterations = 5 # last iteration count used by run_planner
         self._script_stack = []      # stack of absolute paths of sourced scripts

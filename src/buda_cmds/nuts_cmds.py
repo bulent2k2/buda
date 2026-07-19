@@ -73,10 +73,22 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
     with buda.ostream_redirect():
         session.nuts_result = nuts.run(session.bundles)
     session._adopt_doglegs()
-    # Opt-in post-NUTS dead-span escalation: move LOW segments whose final
-    # placed geometry has zero signal supply (guaranteed DNUTS opens) to a
-    # TOP layer and re-solve.  Off by default = bit-identical.
-    if getattr(session, "_dead_span_escalate", False):
+    # Post-NUTS dead-span escalation, run HERE (before any healer) so the
+    # whole negotiate/ripup cascade can adapt around the escalated layers.
+    # Measured (real config): escalating BEFORE the healers fixes flows the
+    # stage-b `_heal_dead_spans` fold alone leaves open — mix 16->0 opens,
+    # bigHalf 190->94 — and keeping that fold too (it still runs at stage b)
+    # recovers the one flow this early pass alone regresses (mix2 stays 42,
+    # not 66).  The two passes compose: a dead LOW segment moved to TOP here
+    # is not re-found at stage b.  Fires on the explicit opt-in flag, or
+    # AUTOMATICALLY when a healer is ahead in the flow (the `_healers_in_flow`
+    # gate the kSegsRel default also uses) — off for a scriptless/interactive
+    # run, where the stage-b fold remains the sole path.
+    do_escalate = (getattr(session, "_dead_span_escalate", False) or
+                   (getattr(session, "_heal_dead_spans_in_healers", True)
+                    and getattr(session, "_dead_span_auto_at_run_nuts", True)
+                    and session._healers_in_flow()))
+    if do_escalate:
         n_esc = session._escalate_dead_low_segments()
         if n_esc:
             print(f"[NUTS] dead-span escalation: moved {n_esc} dead LOW "
