@@ -1553,7 +1553,22 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     // down for a design whose pools carry gated trees; an explicit
     // kSegs/kSegsRel still applies in full.
     if (rel_from_env) {
+        // G4 (audit): a segment penalty is a DETOUR penalty — it was
+        // measured to overwhelm kPeak's sub-capacity routability steering
+        // (the U-detour off a loaded band costs 2 extra segments, and the
+        // env-default penalty out-prices the kPeak term that exists to buy
+        // exactly that detour).  kPeak is an explicit opt-in for
+        // routability-first selection, so it outranks the env default the
+        // same way multi_trunk does below; a user setting kSegs/kSegsRel
+        // EXPLICITLY alongside kPeak owns that calibration.
+        if (kPeak_ > 0.0) {
+            std::cout << "[Planner] kSegsRel env default suppressed: kPeak "
+                         "routability steering is enabled (explicit "
+                         "set_planner_param kSegs/kSegsRel still applies).\n";
+            rel = 0.0;
+        }
         for (const auto& bw : bundles) {
+            if (rel == 0.0) break;
             for (const auto& cand : bw.input.candidates) {
                 if (cand.type.rfind("BITRUNK_HVH", 0) == 0 ||
                     cand.type.rfind("BITRUNK_VHV", 0) == 0) {
@@ -1565,7 +1580,6 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                     break;
                 }
             }
-            if (rel == 0.0) break;
         }
     }
     if (rel > 0.0) {
