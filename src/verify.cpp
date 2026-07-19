@@ -790,7 +790,38 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
         if (explicitly_connected.count(bname)) continue;
         auto rects = fp.get_block_rects(bname);
         if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+
+        // Which bits actually route THROUGH this pass-through block?  A tapered
+        // fan-in segment (Topology::seg_bits) carries only its member bits, so
+        // a bit whose covering segment does not carry it legitimately has no
+        // wire here — requiring coverage for it is a spurious BUSTERM_OPEN
+        // (audit C9-04), mirroring the taper handling of the UNPLACED check
+        // above.  Derive the required bit set from the NOMINAL covering
+        // segments' membership (a segment carrying every bit when it has no
+        // seg_bits entry).  If NO segment nominally spans the block — a
+        // generation inconsistency, not a taper case — fall back to requiring
+        // every bit so a genuine open is still caught.
+        std::vector<char> req(num_bits, 0);
+        bool any_cover = false;
+        for (int i = 0; i < n; ++i) {
+            const ConnSeg& cs = segs[i];
+            bool spans = false;
+            for (const Rect& r : rects)
+                if (seg_spans_rect(cs, (double)cs.perp_pos, r)) { spans = true; break; }
+            if (!spans) continue;
+            any_cover = true;
+            auto sbit = topo.seg_bits.find(i);
+            if (sbit != topo.seg_bits.end() && !sbit->second.empty()) {
+                for (int b : sbit->second)
+                    if (b >= 0 && b < num_bits) req[b] = 1;
+            } else {
+                std::fill(req.begin(), req.end(), 1);
+            }
+        }
+        if (!any_cover) std::fill(req.begin(), req.end(), 1);
+
         for (int bit = 0; bit < num_bits; ++bit) {
+            if (!req[bit]) continue;
             bool covered = false;
             for (int i = 0; i < n && !covered; ++i) {
                 auto it = ns_map.find({i, bit});
