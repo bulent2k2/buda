@@ -49,7 +49,9 @@ void bind_db(py::module_& m) {
 
     // ── BustermGen ────────────────────────────────────────────────────────
     py::class_<BustermGen>(m, "BustermGen")
-        .def(py::init<BDB&>(), py::arg("db"))
+        // keep_alive<1,2>: BustermGen stores BDB& — the Python BDB must
+        // outlive the generator or every later call dangles (audit C7-01).
+        .def(py::init<BDB&>(), py::arg("db"), py::keep_alive<1, 2>())
         .def("derive", &BustermGen::derive, py::arg("max_depth") = 0)
         .def("refine", &BustermGen::refine)
         .def("all",    &BustermGen::all);

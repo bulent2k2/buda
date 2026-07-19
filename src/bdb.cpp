@@ -861,6 +861,10 @@ int BDB::add_net_pins(const std::string& net_name,
 
         // Intermediate ancestors: use net_name as the interface pin_name.
         // Direction: OUTPUT if on the driver side, INPUT if on a receiver side.
+        // An empty path (endpoint like ".pin" or "") has no ancestors — and
+        // seg.size()-1 on size_t would underflow to SIZE_MAX and index the
+        // empty vector (audit C6-02).
+        if (seg.empty()) continue;
         for (size_t d = seg.size() - 1; d > common; --d) {
             std::string anc;
             for (size_t k = 0; k < d; ++k) {
@@ -924,6 +928,7 @@ int BDB::add_net_pins_undirected(const std::string& net_name,
         const auto& ep  = eps[i];
         const auto& seg = all_segs[i];
         _add_pin_by_path(net_id, ep.path, ep.pin, "UNKNOWN");
+        if (seg.empty()) continue;   // audit C6-02: size_t underflow on empty path
         for (size_t d = seg.size() - 1; d > common; --d) {
             std::string anc;
             for (size_t k = 0; k < d; ++k) {
@@ -986,6 +991,7 @@ int BDB::add_net_pins_inout(const std::string& net_name,
         const auto& ep  = eps[i];
         const auto& seg = all_segs[i];
         _add_pin_by_path(net_id, ep.path, ep.pin, "INOUT");
+        if (seg.empty()) continue;   // audit C6-02: size_t underflow on empty path
         for (size_t d = seg.size() - 1; d > common; --d) {
             std::string anc;
             for (size_t k = 0; k < d; ++k) {
@@ -1352,7 +1358,12 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
             if (net_id < 0) continue;
             auto cb = std::sregex_iterator(line.begin(), line.end(), conn_re);
             for (auto it=cb; it!=std::sregex_iterator(); ++it) {
-                std::string inst=(*it)[1], pin=(*it)[2];
+                // Normalize DEF escapes exactly like the COMPONENTS section
+                // did when the row was stored: the raw token 'mem\[0\]'
+                // would miss get_comp_id('mem[0]') and the connection was
+                // SILENTLY dropped (audit C6-01).
+                std::string inst=normalize_def_name((*it)[1]);
+                std::string pin =normalize_def_name((*it)[2]);
                 if (inst=="PIN") continue;
                 int cid = get_comp_id(inst);
                 if (cid < 0) continue;
@@ -2009,8 +2020,16 @@ void BDB::resize_cell(const std::string& cell, double w, double h) {
     sqlite3_bind_double(uc, 2, w);
     sqlite3_bind_double(uc, 3, h);
     sqlite3_step(uc);
-    // Update every instance's bounding box
-    Stmt u(_db, "UPDATE component SET x2=x1+?, y2=y1+? WHERE cell=?");
+    // Update every instance's bounding box.  A 90/270-rotated instance
+    // (orient E/W/FE/FW) carries SWAPPED dimensions — writing w/h straight
+    // would break the bbox↔orient invariant the v13 GDS round-trip depends
+    // on (audit C6-03).
+    Stmt u(_db, "UPDATE component SET"
+                " x2 = x1 + CASE WHEN orient IN ('E','W','FE','FW')"
+                "               THEN ?2 ELSE ?1 END,"
+                " y2 = y1 + CASE WHEN orient IN ('E','W','FE','FW')"
+                "               THEN ?1 ELSE ?2 END"
+                " WHERE cell=?3");
     sqlite3_bind_double(u, 1, w);
     sqlite3_bind_double(u, 2, h);
     sqlite3_bind_text  (u, 3, cell.c_str(), -1, SQLITE_TRANSIENT);

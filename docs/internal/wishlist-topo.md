@@ -776,3 +776,16 @@ stale "NOT YET PERSISTED" note on `topology.h Segment::edge_id` was refreshed.
 Option 2 (re-derive on load, no schema change) was considered and set aside: the
 persist path is a direct mirror of the existing `edge_id` machinery, so it is the
 lower-risk, self-documenting choice.
+
+## Audit 2026-07: stub_suppressed TEG-over blocks skip the spine pre-extension — OPEN (pool loss, not an open)
+
+Finding C4-01 of [audit_2026-07.md](audit_2026-07.md), refuted as a
+correctness bug on HEAD: the trunk generator's TEG-over pre-pass (which
+folds a gap block's near/far stub positions into the spine extent) skips
+blocks whose normal stub is `stub_suppressed`, while the emission still
+emits their gap stubs — off-spine, so the candidate's wire graph splits and
+the generation coverage/islands gates (#335) DROP it. Net effect today is a
+lost candidate (pool completeness), not a silent open. Fix shape: extend
+the pre-pass to suppressed TEG-over gap blocks too (their gap stubs are the
+real connection; the suppression logic models only the single-stub form),
+then re-measure the pool on the TEG flows.

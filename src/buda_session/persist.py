@@ -117,7 +117,32 @@ class PersistMixin:
             _k = self.bdb.bundle_gen_knobs(_bid)
             if _k:
                 knob_memo[_bid] = _k
+        # Membership of FK-kept bundles must survive too (audit P3-04):
+        # clear_bundles(keep_user) preserves a bundle row still referenced
+        # by a kept USER topology, but wipes ALL bundle_net/bundle_busterm
+        # rows, and the re-add loop below covers only the CURRENT
+        # self.bundles — so a kept bundle absent from this run permanently
+        # lost its net membership, reloading as a zero-net, zero-width
+        # bundle whose "kept" user routing routes nothing.  Snapshot the
+        # absent bundles' membership and rewrite it for the rows the clear
+        # actually kept.
+        cur_ids = {str(w.input.original_bundle.id) for w in self.bundles}
+        absent_membership = {}
+        for _row in self.bdb.all_bundles():
+            if _row.id not in cur_ids:
+                absent_membership[_row.id] = (
+                    self.bdb.bundle_nets(_row.id),
+                    self.bdb.bundle_busterms(_row.id))
         self.bdb.clear_bundles(keep_user=True)
+        kept_ids = ({r.id for r in self.bdb.all_bundles()}
+                    if absent_membership else set())
+        for _bid, (_nets, _bts) in absent_membership.items():
+            if _bid not in kept_ids:
+                continue
+            for _nm in _nets:
+                self.bdb.add_bundle_net(_bid, _nm)
+            for _bt, _role in _bts:
+                self.bdb.add_bundle_busterm(_bid, _bt, _role)
         for w in self.bundles:
             hb = w.input.original_bundle
             row = buda.BundleRow()
@@ -986,9 +1011,10 @@ class PersistMixin:
             else:                                   # normal bundle (flat / cross-block)
                 if bid not in original_ids:         # not persisted yet → persist fully
                     self._persist_normal_bundle(w)
-                self.bdb.set_topology_selected(bid, sel)
+                ci = self._selected_bdb_cand_index(bid, w, sel)
+                self.bdb.set_topology_selected(bid, ci)
                 self.bdb.reset_assigned_layers(bid)  # drop stale layers from a prior plan
-                self._persist_assigned_layers(bid, sel, w)
+                self._persist_assigned_layers(bid, ci, w)
             n += 1
         return n
 
@@ -1073,7 +1099,30 @@ class PersistMixin:
             # restores both; never re-derived from geometry).
             self._persist_topology_annotations(bid, ci, topo)
 
+    def _selected_bdb_cand_index(self, bid, w, sel):
+        """BDB cand_index of the wrapper's selected candidate, resolved by
+        stable content uid (audit P3-01): on a load_pipeline-resumed session
+        the compact in-memory index diverges from the persisted cand_index
+        whenever the topology table has holes — which the keep_user
+        renumbering itself creates (a kept USER row at ci >= n_new stays
+        put when a later session's pool shrinks).  Writing the compact
+        index then marked the WRONG persisted row — or none at all — as
+        selected and parked the layer assignments on it, silently dropping
+        a pinned USER selection from the checkpoint.  The loader already
+        models this divergence (sel vs sel_ci); this is the persist-side
+        half.  Falls back to the compact index when no persisted row
+        carries the uid (fresh pool just persisted in compact order)."""
+        try:
+            uid = buda.topo_uid(w.input.candidates[sel])
+        except Exception:
+            return sel
+        for tr in self.bdb.topologies(bid):
+            if tr.topo_uid == uid:
+                return tr.cand_index
+        return sel
+
     def _persist_assigned_layers(self, bid, sel, w):
-        """Write the planner's per-segment assigned layers for a selected topology."""
+        """Write the planner's per-segment assigned layers for a selected topology
+        (`sel` here is the BDB cand_index — see _selected_bdb_cand_index)."""
         for seg_index, layer in enumerate(w.plan.seg_layers):
             self.bdb.set_segment_layer(bid, sel, seg_index, int(layer))

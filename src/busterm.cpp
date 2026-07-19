@@ -45,7 +45,13 @@ decode_rects_json(const std::string& s) {
     while (*p == '[') {
         double x1, y1, x2, y2;
         int consumed = 0;
-        if (std::sscanf(p, "[%lf,%lf,%lf,%lf]%n", &x1, &y1, &x2, &y2, &consumed) == 4) {
+        if (std::sscanf(p, "[%lf,%lf,%lf,%lf]%n", &x1, &y1, &x2, &y2, &consumed) == 4 &&
+            consumed > 0) {
+            // consumed==0 means the doubles matched but the closing ']' did
+            // not (%n after an unmatched literal is never reached — sscanf
+            // still returns 4): without this check p would never advance and
+            // the loop would append the same rect forever on malformed input
+            // such as a hand-edited .bdb.sql fixture (audit C10-01).
             result.emplace_back(x1, y1, x2, y2);
             p += consumed;
             if (*p == ',') ++p;

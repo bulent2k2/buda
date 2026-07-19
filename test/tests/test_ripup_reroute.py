@@ -1109,30 +1109,35 @@ def test_rr_flip_move_is_an_involution():
 
 
 def test_flip_persists_to_wrapper_candidate():
-    """An in-place mutation of `w.input.candidates[sel]` PERSISTS to the wrapper
-    (the property the flip move relies on): `_rr_apply_move`'s flip mutates the
-    candidate in place and then `_rr_trial` replans reading `w.input.candidates`,
-    so the mutation must be visible on a FRESH read — not lost to a pybind11 STL
-    copy.  `candidates` returns a list of references to the underlying C++
-    Topology objects, so field-level edits (start/end/layer_hint — exactly what
-    flip_mst_edge writes) round-trip; only structural edits (append/delete, e.g.
-    doglegs) need `w.input.candidates = cands` write-back.  Deterministic guard
-    against a future binding change that would silently make flip trials measure
-    the un-flipped route (Codex #176 P2)."""
+    """A flip's mutation reaches the wrapper via EXPLICIT write-back (the
+    property the flip move relies on): `_rr_apply_move` mutates its held
+    copy and assigns `w.input.candidates = cands`, and `_rr_trial` then
+    replans reading the updated pool.
+
+    History: this test originally pinned the OPPOSITE contract — element
+    access as write-through references (Codex #176 P2).  Audit C7-04
+    inverted it: the reference semantics left registered dangling views
+    behind every pool reassignment, and a stale registry entry at a
+    recycled heap address made later casts return freed objects (the
+    intermittent topo_uid segfault).  `candidates` now yields OWNED copies;
+    mutating sites write the pool back — the flip-visible-to-trial property
+    is the same, provided differently (the _rr_apply_move/undo test above
+    checks it end-to-end through the real flip path)."""
     s = _mst_session()
     w = s.bundles[0]
     sel = 0
-    # Read via one access, then mutate a segment coord; a FRESH access must see it.
+    # Element access yields owned copies: an in-place edit does NOT write
+    # through (pre-C7-04 it did)...
     orig = w.input.candidates[sel].segments[0].start.x
     w.input.candidates[sel].segments[0].start.x = orig + 4242
-    assert w.input.candidates[sel].segments[0].start.x == orig + 4242, (
-        "in-place edit of w.input.candidates was lost to a copy — flip trials "
-        "would measure the un-flipped route"
-    )
-    # The var-held pattern _rr_apply_move uses ("cands = w.input.candidates").
+    assert w.input.candidates[sel].segments[0].start.x == orig, (
+        "element access must yield owned copies (audit C7-04)")
+    # ...and the write-back pattern _rr_apply_move uses DOES persist.
     cands = w.input.candidates
     cands[sel].segments[0].start.x = orig + 99
-    assert w.input.candidates[sel].segments[0].start.x == orig + 99
+    w.input.candidates = cands
+    assert w.input.candidates[sel].segments[0].start.x == orig + 99, (
+        "write-back must persist the flipped geometry to the wrapper")
 
 
 # ── use_edge_candidates: the flip move-source is opt-in ──────────────────────

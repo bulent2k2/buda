@@ -498,6 +498,23 @@ class EditMixin:
                           f"topology {i + 1} ({c.type})")
                     break
 
+    @staticmethod
+    def _clear_stale_seg_overrides(w, tidx):
+        """Drop per-segment overrides when a pin moves to a DIFFERENT candidate
+        (audit P5-03): edit_commit stages seg_slide_lo/hi (and the dogleg pass
+        seg_net_pull / seg_perp) for the candidate selected at commit time, and
+        NUTS's only staleness guard is an array-LENGTH match — so re-pinning
+        another same-segment-count candidate (all Z/U shapes have 3 segments)
+        silently applied the old windows to unrelated segments, clamping the
+        new trunk into a window meant for a perpendicular-axis segment.
+        Re-pinning the SAME candidate keeps its overrides."""
+        if tidx == w.plan.selected_topology_index:
+            return
+        w.plan.seg_net_pull = []
+        w.plan.seg_slide_lo = []
+        w.plan.seg_slide_hi = []
+        w.plan.seg_perp = []
+
     def _select_single_topology_internal(self, bid, tid):
         """Helper for select_topology/select_topologies: set a pin without re-planning layers.
         Returns True if the bundle (or its hierarchical expansion) was found.
@@ -509,6 +526,7 @@ class EditMixin:
                 if tidx < 0 or tidx >= len(w.input.candidates):
                     print(f"Error: invalid topology id {tid} for bundle {bid}")
                 else:
+                    self._clear_stale_seg_overrides(w, tidx)
                     w.plan.selected_topology_index = tidx
                     w.input.topology_pinned = True
                     print(f"Pinned bundle {bid} to topology {tid}")
@@ -519,10 +537,14 @@ class EditMixin:
             # Look up the original ID in the expansion map and apply to all instances.
             wrappers = self._hier_expansion_map.get(bid, [])
             if wrappers:
-                if tidx < 0 or tidx >= len(wrappers[0].candidates):
+                # BundleWrapper has no bare .candidates — the pool lives on
+                # .input (audit P3-02: this branch crashed with
+                # AttributeError before any pin was applied).
+                if tidx < 0 or tidx >= len(wrappers[0].input.candidates):
                     print(f"Error: invalid topology id {tid} for bundle {bid}")
                 else:
                     for w in wrappers:
+                        self._clear_stale_seg_overrides(w, tidx)
                         w.plan.selected_topology_index = tidx
                         w.input.topology_pinned = True
                     n = len(wrappers)

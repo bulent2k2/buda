@@ -2373,6 +2373,24 @@ NUTSResult NUTSEngine::rerun_layer(
         // detailed NUTS would filter these trunks to an obsolete side.
         ts.track_lo_bound = -kInf;
         ts.track_hi_bound =  kInf;
+        // Re-seed the FRESH interval baseline (full grid extent, exactly as
+        // the initial extraction does): prev's intervals were already
+        // clamped by the previous solve's prep, and the trunk-margin shrink
+        // in apply_interval_constraints is NOT idempotent — re-prepping the
+        // prepped interval shrank every trunk's hard window by another 20%
+        // per invocation (0.8^n), silently diverging from the full solve's
+        // constraints until the pinched windows forced overlaps a repair
+        // could not clear (audit C1-01).  build_context(only_layer) below
+        // then applies the prep to this layer exactly once.
+        if (ts.horiz) {
+            if (!y_grid.empty()) {
+                ts.interval_lo = static_cast<double>(y_grid.front());
+                ts.interval_hi = static_cast<double>(y_grid.back());
+            }
+        } else if (!x_grid.empty()) {
+            ts.interval_lo = static_cast<double>(x_grid.front());
+            ts.interval_hi = static_cast<double>(x_grid.back());
+        }
     }
     NutsContext ctx = build_context(bundles, floorplan_, result.segments, layer_id);
     std::vector<TrackSegment*> layer_segs;

@@ -299,6 +299,11 @@ def cmd_add_bus(session, cmd, args, cmd_line):
     hi = int(m.group(3)) if m.group(3) is not None else lo - 1
     if m.group(3) is None:      # name[N]  → indices 0 … N-1
         lo, hi = 0, int(m.group(2)) - 1
+    elif lo > hi:
+        # Verilog-style descending range (bus[7:0] = bits 0..7): normalize —
+        # range(lo, hi+1) on the raw order was EMPTY and silently created
+        # zero nets (audit P5-02).
+        lo, hi = hi, lo
     drv_pin  = bus_args[1]
     rcv_pins = bus_args[2].split(',')
     drv_inst = session._pin_instance(drv_pin)
@@ -340,6 +345,13 @@ def cmd_def_layer(session, cmd, args, cmd_line):
         elif kw == "span_max":  span_max = int(rest[i+1]);    i += 2
         elif kw == "kspan":     kspan_override = float(rest[i+1]); i += 2
         else: i += 1
+    # Fail fast on a bad direction token: anything that is not exactly H or V
+    # (e.g. a typo, or arguments passed in the wrong order) used to fall
+    # through SILENTLY to VERTICAL — a wrong-direction layer makes every
+    # segment assigned to it an unbuildable wire (audit P5-01).
+    if dirstr.upper() not in ("H", "V"):
+        print(f"Error: def_layer direction must be H or V, got '{dirstr}'")
+        return
     ldir  = buda.LayerDir.HORIZONTAL if dirstr.upper()=="H" else buda.LayerDir.VERTICAL
     ltype = buda.LayerType.TOP if typestr == "TOP" else buda.LayerType.LOW
     session.layers.add_layer(int(lid), name, ldir, ltype)

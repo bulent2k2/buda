@@ -370,3 +370,65 @@ def test_check_dnuts_reports_busterm_face_for_single_bit():
     face = _kinds(res, buda.ViolationKind.BUSTERM_FACE)
     assert [(v.seg_idx, v.bit_index, v.block_name) for v in face] == [
         (2, bad_bit, "B")], [v.message for v in res.violations]
+
+
+def test_check_dnuts_bit_short_detected_with_inverted_span():
+    # Audit C9-01: bit-wire spans may legitimately carry span_lo > span_hi
+    # (detailed_nuts span adjustment keeps nominal endpoint identity when
+    # placement swaps the two ends — see detailed_nuts.cpp, span-adjust
+    # comment).  The BIT_SHORT disjoint test must therefore compare the
+    # NORMALIZED extents, like the KEEPOUT_CROSS scan next to it: with the
+    # raw ordering, wire A span (110,60) [real extent 60..110] vs wire B
+    # span (70,90) reads "a.span_lo >= b.span_hi" -> disjoint -> a real
+    # different-net short on a shared (layer, track) goes unreported.
+    fp, topo, ct = _z_setup()
+    dnuts = _nominal_dnuts(ct, NUM_BITS)
+    for ns in dnuts.net_segments:
+        if ns.seg_idx == 0 and ns.bit_index == 0:
+            ns.layer = LAYER_H
+            ns.track_position = 4321.0
+            ns.span_lo, ns.span_hi = 110.0, 60.0   # inverted, extent 60..110
+        if ns.seg_idx == 1 and ns.bit_index == 1:
+            ns.layer = LAYER_H
+            ns.track_position = 4321.0
+            ns.span_lo, ns.span_hi = 70.0, 90.0    # inside the other's extent
+    res = buda.check_dnuts(ct, dnuts, topo, fp, _layers(), 1, NUM_BITS)
+    shorts = _kinds(res, buda.ViolationKind.BIT_SHORT)
+    assert shorts, "inverted-span overlap must be reported as BIT_SHORT"
+    assert {tuple(sorted((v.seg_idx, v.seg_idx2))) for v in shorts} == {(0, 1)}
+
+
+def test_check_nuts_busterm_face_multi_rect_requires_reached_rect():
+    # Audit C9-02: for a MULTI-RECT block, perp_in_block_face accepted a
+    # track_position covered by ANY rect's face range, ignoring whether the
+    # wire's along extent actually reaches that rect.  An L-shaped block with
+    # disjoint per-rect perp ranges could thus read "on face" for a wire whose
+    # track sits in rect A's range while its placed span only touches rect B —
+    # a physical miss reported clean.  The face test must only accept rects
+    # the placed along span overlaps (inclusive: a face-touching end counts).
+    fp = buda.Floorplan()
+    fp.add_block_rects("L", [(0, 100, 100, 200),     # rect A: y 100..200
+                             (100, 0, 200, 100)])    # rect B: y 0..100 (east arm)
+    fp.add_block("src", 300, 120, 400, 180)
+    g = buda.TopologyGenerator(fp)
+    g.set_layer_ids(LAYER_H, LAYER_V)
+    # Any candidate with an H segment landing on L works as the vehicle.
+    topo = ct = si = None
+    for cand in g.generate_candidates("src", ["L"]):
+        c = buda.ConnTopology(); c.build(cand, fp)
+        for i, cs in enumerate(c.segs()):
+            if cs.horiz and "L" in _busterms(cs):
+                topo, ct, si = cand, c, i
+                break
+        if topo is not None:
+            break
+    assert topo is not None, "no H-stub candidate landing on L"
+    nuts = _nominal_nuts(ct)
+    for ts in nuts.segments:
+        if ts.seg_idx == si:
+            ts.track_position = 150.0        # inside rect A's y-range only
+            ts.span_lo, ts.span_hi = 200.0, 400.0   # reaches only rect B (touch at 200)
+    res = buda.check_nuts(ct, nuts, topo, fp, _layers(), 1)
+    face = _kinds(res, buda.ViolationKind.BUSTERM_FACE)
+    assert any(v.block_name == "L" and v.seg_idx == si for v in face), \
+        "wire reaching only rect B with track in rect A's range must be flagged"

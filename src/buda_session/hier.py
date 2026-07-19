@@ -449,9 +449,24 @@ class HierMixin:
 
         for sel in data.get('selections', []):
             hint = sel['bundle_hint']
-            matching = [w for w in self.bundles
-                        if w.input.original_bundle.get_net_names() and
-                           w.input.original_bundle.get_net_names()[0].startswith(hint)]
+            # Hints are written as the bundle's FULL first net name
+            # (sidecar._bundle_hint), so resolve by EXACT match first: the
+            # old prefix-only match let a selection for bus "d" (hint
+            # "d_0") land on bus "d_0x" (first net "d_0x_0") — a silent
+            # wrong pin (audit P1-01). Prefix stays as a legacy fallback
+            # for hand-written short hints, but an AMBIGUOUS prefix now
+            # warns and skips instead of picking an arbitrary bundle.
+            nets0 = [(w, w.input.original_bundle.get_net_names()[0])
+                     for w in self.bundles
+                     if w.input.original_bundle.get_net_names()]
+            matching = [w for w, n0 in nets0 if n0 == hint]
+            if not matching:
+                matching = [w for w, n0 in nets0 if n0.startswith(hint)]
+                if len(matching) > 1:
+                    print(f"  Warning: sidecar hint '{hint}' is ambiguous "
+                          f"({len(matching)} bundles match by prefix) — "
+                          "skipping this selection")
+                    continue
             if not matching:
                 continue
 
@@ -2069,9 +2084,28 @@ class HierMixin:
             aligned, misaligned = [ref_name], {}
             n_windows = 0
             for iws in cells[cell]:
-                ref_iw = next(iw for iw in iws
-                              if iw.input.original_bundle.instances[0]
-                              == ref_name)
+                ref_iw = next((iw for iw in iws
+                               if iw.input.original_bundle.instances[0]
+                               == ref_name), None)
+                if ref_iw is None:
+                    # This template's bus exists only in a subset of the
+                    # cell's occurrences that EXCLUDES the cell-wide
+                    # reference (bundler groups cell-local bundles per bus,
+                    # so subsets are legal). There is no sound comparison
+                    # base against the cell reference, so treat the group's
+                    # instances as misaligned — LOUD and conservative: the
+                    # stop policy refuses DNUTS with this report,
+                    # `independent` solves them individually. The bare
+                    # next() here used to raise StopIteration, and the
+                    # partially-built verdict then silently DISABLED the
+                    # whole bottom-up track gate (audit P1-02).
+                    for iw in iws:
+                        inst = iw.input.original_bundle.instances[0]
+                        misaligned.setdefault(inst, []).append(
+                            "template covers an instance subset that "
+                            f"excludes reference '{ref_name}' — no "
+                            "comparison base; treating as misaligned")
+                    continue
                 ref_bid = ref_iw.input.original_bundle.id
                 for iw in iws:
                     inst = iw.input.original_bundle.instances[0]

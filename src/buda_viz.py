@@ -773,8 +773,11 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
 
         if self._ipc_session:
             import sys as _sys, os as _os
+            # tools/ is a sibling of src/ — ONE level up from this file
+            # (audit P6-01: '..', '..' pointed outside the repo, so the
+            # fallback could never resolve viz_ipc; matches buda_cli.py).
             _tools = _os.path.normpath(
-                _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'tools'))
+                _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'tools'))
             if _tools not in _sys.path:
                 _sys.path.insert(0, _tools)
             from viz_ipc import VizIPC, POLL_MS

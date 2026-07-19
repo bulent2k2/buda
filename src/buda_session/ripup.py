@@ -867,6 +867,9 @@ class RipupMixin:
         if not buda.flip_mst_edge(cands[sel], move[1], h, v, self.fp):
             return None                          # alt bend on an obstacle: no move
         buda.annotate_seg_conns(cands[sel])
+        # cands elements are owned copies (audit C7-04) — write the flipped
+        # pool back so the trial pipeline sees the new geometry.
+        w.input.candidates = cands
         return self._rr_trial(w, sel, stage, metric, full=full)
 
     def _rr_guarded_move(self, w, move, old_tidx, stage, metric, snap):
@@ -894,6 +897,7 @@ class RipupMixin:
         h, v = self._gen_hv()
         buda.flip_mst_edge(cands[sel], move[1], h, v, self.fp)
         buda.annotate_seg_conns(cands[sel])
+        w.input.candidates = cands       # owned copies (C7-04): write back
 
     @staticmethod
     def _rr_move_str(old_tidx, move):

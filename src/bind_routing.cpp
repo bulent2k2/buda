@@ -43,6 +43,34 @@ namespace {
 // endpoint taps it.  A junction endpoint (nullopt) writes no row.  Reload rebuilds
 // the annotation from those rows alone — no geometric re-derivation, no floorplan.
 
+// Geometry fingerprint for the routing busterm id (audit P3-03): the id was
+// keyed by block NAME alone, but two bundles' frames can contain a same-named
+// block with different geometry (cell-local floorplans of two cell types, a
+// 90-degree rotation-class clone template, or a cell-local name colliding
+// with a top-level block) — with the cross-bundle dedup set, the first
+// writer's bbox reloaded for BOTH bundles.  Suffixing a deterministic hash of
+// the full one-true-source content keeps identical-geometry blocks on one
+// shared row while differing frames split.  FNV-1a, hex — stable across
+// platforms/runs so persisted fixtures stay diffable.
+std::string busterm_geom_fp(const Busterm& bt) {
+    uint64_t h = 1469598103934665603ULL;
+    auto mix = [&h](long long v) {
+        for (int i = 0; i < 8; ++i) {
+            h ^= (unsigned char)(v >> (8 * i));
+            h *= 1099511628211ULL;
+        }
+    };
+    auto rect = [&](const Rect& r) { mix(r.x1); mix(r.y1); mix(r.x2); mix(r.y2); };
+    rect(bt.bbox);
+    rect(bt.orig_bbox);
+    for (const auto& r : bt.rects) rect(r);
+    mix(bt.teg_mode == TegMode::OVER ? 1 : 0);
+    char buf[17];
+    std::snprintf(buf, sizeof buf, "%08x",
+                  (unsigned)((h >> 32) ^ (h & 0xffffffffULL)));
+    return buf;
+}
+
 void persist_seg_busterms(BDB& bdb, const std::string& bundle_id,
                           int cand_index, const Topology& topo,
                           py::object seen = py::none()) {
@@ -59,7 +87,10 @@ void persist_seg_busterms(BDB& bdb, const std::string& bundle_id,
     auto put = [&](int seg_idx, const std::optional<Busterm>& bt,
                    const char* endpoint) {
         if (!bt) return;                         // junction: no row (the default)
-        const std::string id = "tb:" + bt->block_name;  // distinct from hier 'bt:'
+        // 'tb:' distinct from hier 'bt:'; geometry-suffixed so same-named
+        // blocks from different frames never share a row (audit P3-03).
+        const std::string id =
+            "tb:" + bt->block_name + ":" + busterm_geom_fp(*bt);
         bool write_row = true;
         if (dedup) {
             py::str pid(id);
@@ -448,7 +479,11 @@ void bind_routing(py::module_& m) {
 
     // ── TopologyGenerator ─────────────────────────────────────────────────
     py::class_<TopologyGenerator>(m, "TopologyGenerator")
-        .def(py::init<const Floorplan&>())
+        // keep_alive<1,2>: stores const Floorplan& — the Python Floorplan
+        // must outlive the generator; a temporary parent
+        // (TopologyGenerator(Floorplan())) previously dangled immediately
+        // (audit C7-03).
+        .def(py::init<const Floorplan&>(), py::keep_alive<1, 2>())
         .def("set_busterm_mode",   &TopologyGenerator::set_busterm_mode)
         .def("set_double_detour",  &TopologyGenerator::set_double_detour)
         .def("set_multi_trunk",    &TopologyGenerator::set_multi_trunk)
@@ -485,7 +520,24 @@ void bind_routing(py::module_& m) {
     py::class_<BundleInput>(m, "BundleInput")
         .def(py::init<>())
         .def_readwrite("original_bundle",   &BundleInput::original_bundle)
-        .def_readwrite("candidates",        &BundleInput::candidates)
+        // candidates: the getter returns the pool BY VALUE, so Python
+        // receives OWNED Topology copies — never element views into the
+        // live vector.  The def_readwrite getter (reference_internal, the
+        // policy the stl caster propagates to elements) handed out views
+        // that (a) dangled across any pool reassignment (the hazard the
+        // Topology __copy__ note documents) and (b) left stale entries in
+        // pybind's instance registry at freed addresses, so a LATER cast
+        // of a fresh temporary Topology landing at a recycled address
+        // returned the STALE object instead of the new value — the
+        // intermittent topo_uid use-after-free segfault (audit C7-04).
+        // Session code already treats the pool as a value (read → mutate →
+        // assign back — see e.g. hier._derive_hier_fanin_bits), so
+        // semantics are unchanged.
+        .def_property("candidates",
+            [](const BundleInput& s) { return s.candidates; },
+            [](BundleInput& s, std::vector<Topology> v) {
+                s.candidates = std::move(v);
+            })
         .def_readwrite("width",             &BundleInput::width)
         .def_readwrite("pinned_seg_layers", &BundleInput::pinned_seg_layers)
         .def_readwrite("assigned_v_layer",  &BundleInput::assigned_v_layer)

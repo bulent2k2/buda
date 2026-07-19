@@ -87,3 +87,40 @@ def test_explorer_pins_at_most_one_topology_per_bundle(tmp_path):
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
+
+
+def test_pin_change_clears_stale_seg_overrides(tmp_path):
+    """Audit P7-01 (the explorer twin of select_topology's P5-03): the pin
+    path ('s' key / star button / _cycle_layer) cleared only plan.seg_layers
+    when re-pointing the pin at a DIFFERENT candidate — seg_slide_lo/hi,
+    seg_net_pull and seg_perp from a dogleg adoption or a prior TopoEdit
+    commit survived, and NUTS's only staleness guard (an array-LENGTH match)
+    then applied them verbatim to the new topology's unrelated segments.
+    Re-pinning the SAME candidate must keep them."""
+    s = _session()
+    exp = buda_viz.TopologyExplorer(
+        s.fp, s.bundles, sidecar_path=str(tmp_path / "sc.json"),
+        layer_stack=s.layers)
+    try:
+        w = s.bundles[0]
+        exp.bidx = 0
+        cur = w.plan.selected_topology_index
+        n = len(w.input.candidates[cur].segments)
+        w.plan.seg_slide_lo = [150.0] * n
+        w.plan.seg_slide_hi = [180.0] * n
+        w.plan.seg_net_pull = [1] * n
+        # Re-pinning the SAME candidate keeps the staged overrides.
+        exp.idx = cur
+        exp._select_current()
+        assert list(w.plan.seg_slide_lo), \
+            "same-candidate re-pin must keep the staged override"
+        # Pinning a DIFFERENT candidate must drop them.
+        exp.idx = (cur + 1) % len(exp.topos)
+        exp._select_current()
+        assert list(w.plan.seg_slide_lo) == [], \
+            "stale slide windows survived onto a different topology"
+        assert list(w.plan.seg_slide_hi) == []
+        assert list(w.plan.seg_net_pull) == []
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')

@@ -251,19 +251,30 @@ EditVerdict edit_connect(Topology& topo, const Floorplan& fp, int i, int j) {
     const int other = (ep == 0) ? a1 : a0;
     if (other == target)
         return fail("connect would collapse the segment to zero length");
+
+    // Validate the j side BEFORE mutating anything: a fail returned after
+    // moving i's endpoint would leave a half-applied edit on the rejection
+    // path, violating the transactional edit_* contract (audit C11-01).
+    // The crossing coordinate on j's axis is i's PERP position, which the
+    // endpoint move does not change — safe to compute up front.
+    const int ic = ih ? si.start.y : si.start.x;              // crossing on j's axis
+    int jlo = jh ? std::min(sj.start.x, sj.end.x) : std::min(sj.start.y, sj.end.y);
+    int jhi = jh ? std::max(sj.start.x, sj.end.x) : std::max(sj.start.y, sj.end.y);
+    const bool extend_j = (ic < jlo || ic > jhi);
+    int jep = -1;
+    if (extend_j) {
+        jep = std::abs((jh ? sj.start.x : sj.start.y) - ic)
+            <= std::abs((jh ? sj.end.x : sj.end.y) - ic) ? 0 : 1;
+        if (endpoint_tapped(topo, j, jep))
+            return fail("partner endpoint is a busterm tap — extend it with "
+                        "edit_set_span first");
+    }
+
     p = ih ? Point{target, si.start.y} : Point{si.start.x, target};
 
     // Extend j to reach the crossing when it falls outside j's span (never
     // retract — that could break j's other junctions/taps silently).
-    const int ic = ih ? si.start.y : si.start.x;              // crossing on j's axis
-    int jlo = jh ? std::min(sj.start.x, sj.end.x) : std::min(sj.start.y, sj.end.y);
-    int jhi = jh ? std::max(sj.start.x, sj.end.x) : std::max(sj.start.y, sj.end.y);
-    if (ic < jlo || ic > jhi) {
-        const int jep = std::abs((jh ? sj.start.x : sj.start.y) - ic)
-                      <= std::abs((jh ? sj.end.x : sj.end.y) - ic) ? 0 : 1;
-        if (endpoint_tapped(topo, j, jep))
-            return fail("partner endpoint is a busterm tap — extend it with "
-                        "edit_set_span first");
+    if (extend_j) {
         Point& q = (jep == 0) ? sj.start : sj.end;
         q = jh ? Point{ic, sj.start.y} : Point{sj.start.x, ic};
     }
