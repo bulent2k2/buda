@@ -13,6 +13,11 @@ items this page doesn't see).
 > are also captured as `@future` scenarios in `features/future_directions.feature`
 > — flip those to `@landed` as they ship.
 
+> **2026-07 whole-codebase audit:** 33 findings fixed + 1 refuted + 60
+> report-only leads (unverified), with the confirmed-fix table, the C7-04
+> pybind view-aliasing deep dive, and sanitizer-build environment notes in
+> [`audit_2026-07.md`](audit_2026-07.md).
+
 ## Substantial features (bounded, clear plans)
 
 13. **Nominal-WL comparability across shape families (b44 follow-ons)** —

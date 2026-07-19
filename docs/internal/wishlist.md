@@ -79,6 +79,23 @@ priority view** — what's actually open right now, ranked by value/effort — s
   endpoint ~49s → ~12.4s.  Remaining levers are trigger-gated (fixed-bits
   DNUTS, stage-b opens-proxy, warm-default flip) with the bars recorded.
 
+## Cross-cutting (no subsystem file)
+
+- **Bound-container element views (the C7-04 hazard class)** — pybind's stl
+  caster propagates `def_readwrite`'s `reference_internal` policy to
+  container ELEMENTS, so registered-class members like `Topology.segments`
+  and `seg_busterms` hand out non-owning views: held across a reassignment
+  they dangle, and their stale instance-registry entries can alias later
+  casts at recycled heap addresses. `BundleInput.candidates` and
+  `NUTSResult.dogleg_topologies` were converted to by-value getters after
+  an actual intermittent use-after-free segfault
+  ([audit_2026-07.md](audit_2026-07.md), C7-04); sweeping the remaining
+  container members is a binding-breaking change to do deliberately, with
+  a perf pass on the hot accessors.
+- **2026-07 audit report-only leads** — 60 unverified findings tabled in
+  [audit_2026-07.md](audit_2026-07.md) (24 silent-corruption class, incl.
+  the tools/ converter set); verify before fixing.
+
 ## Conventions
 
 - A ✅-marked entry is kept for the record (resolution notes, or an implemented

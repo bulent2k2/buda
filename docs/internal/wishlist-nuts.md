@@ -351,3 +351,15 @@ approximation is unchanged. Tests: the boundary-claim unit test in
 to 1 + 10) and the end-to-end regression in
 `test_planner_kpeak_supply.py` (the y2=120 detour now places all 8 bits,
 previously a full strand).
+
+## Audit 2026-07: single-layer rerun placement drift vs the full solve — OPEN (observation)
+
+Seen while fixing C1-01 ([audit_2026-07.md](audit_2026-07.md), the
+compounding rerun-layer interval shrink): with the intervals now stable,
+`run_nuts_on_layer M4` on the 3-bus Z fixture still moves a trunk
+(212.03 → 225.00) and lands one M5 overlap the full solve doesn't have —
+repeat reruns are a fixpoint, so this is a one-time drift of the
+single-layer re-solve's context (junction preferences see other layers
+frozen; `resolve_corner_overlaps` is deliberately not run, per the
+documented contract). Worth a look if the per-layer ↺ is ever used as a
+quality tool rather than a what-if probe.
