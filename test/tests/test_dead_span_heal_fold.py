@@ -49,18 +49,21 @@ _SETUP = [
 ]
 
 
-def _stage_b_session(fold):
-    """L-shape flow with its H stub pinned to a keepout-dead LOW M2, taken
-    through run_nuts + run_detailed_nuts so a stage-b (DNUTS-open) state
-    exists.  `fold` sets the healer auto-escalation flag.  Returns the
-    session and the pinned H-segment index."""
+def _stage_b_session(fold, keepout=True):
+    """L-shape flow with its H stub pinned to a LOW M2, taken through run_nuts
+    + run_detailed_nuts so a stage-b (DNUTS-open) state exists.  With
+    keepout=True the M2 tracks are all killed (the stub is dead); with
+    keepout=False the stub has real supply (a live LOW, nothing to escalate).
+    `fold` sets the healer auto-escalation flag.  Returns the session and the
+    pinned H-segment index."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     s._heal_dead_spans_in_healers = fold
     with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
         for c in _SETUP:
             s.do_command(c)
-        s.do_command("add_keepout 0 0 200 500 2")   # kills every M2 track
+        if keepout:
+            s.do_command("add_keepout 0 0 200 500 2")   # kills every M2 track
     w = s.bundles[0]
     sel = w.plan.selected_topology_index
     topo = w.input.candidates[sel]
@@ -124,3 +127,32 @@ def test_ripup_auto_heals_dead_low():
     with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
         s.do_command("ripup_reroute")
     assert s.detailed_result.num_unplaced == 0
+
+
+def test_heal_checkpoints_route_when_bdb_open(monkeypatch):
+    """A heal-only fix must persist: when a BDB is open and the escalation
+    moves segments, `_heal_dead_spans` checkpoints the healed route itself,
+    so a heal that fixes the opens with no following hill-climb commit is not
+    lost on load_pipeline (Codex #349 P2)."""
+    s, _ = _stage_b_session(fold=True)
+    calls = []
+    s.bdb = object()   # non-None sentinel; _checkpoint_routing is stubbed
+    monkeypatch.setattr(s, "_checkpoint_routing", lambda *a, **k: calls.append(1))
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        n = s._heal_dead_spans("b")
+    assert n >= 1
+    assert calls == [1]        # the heal persisted its own route
+
+
+def test_heal_no_checkpoint_when_nothing_dead(monkeypatch):
+    """No dead segment → no escalation → no spurious checkpoint (the heal is a
+    true no-op, so it must not touch the BDB)."""
+    s, _ = _stage_b_session(fold=True, keepout=False)   # live LOW stub
+    assert s.detailed_result.num_unplaced == 0
+    calls = []
+    s.bdb = object()
+    monkeypatch.setattr(s, "_checkpoint_routing", lambda *a, **k: calls.append(1))
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        n = s._heal_dead_spans("b")
+    assert n == 0
+    assert calls == []
