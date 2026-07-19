@@ -1122,3 +1122,20 @@ def test_box_zoom_yields_to_active_toolbar_mode(monkeypatch):
         "box zoom ran despite an active toolbar mode"
     assert not any(getattr(p, "get_linestyle", lambda: None)() == "--"
                    for p in ax.patches), "rubber-band drawn despite toolbar mode"
+
+
+def test_ipc_tools_path_fallback_resolves_viz_ipc():
+    """Audit P6-01: the sys.path fallback ahead of `from viz_ipc import …`
+    computed dirname(buda_viz.py)/../../tools — one level too far up, a
+    directory that does not exist — so a viz launched with --ipc outside
+    the tools/ dir could never import viz_ipc.  It must point at the
+    repo's tools/ (dirname/../tools, as buda_cli.py computes it)."""
+    import os
+
+    import buda_viz
+    tools = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(buda_viz.__file__)), '..', 'tools'))
+    assert os.path.isfile(os.path.join(tools, 'viz_ipc.py'))
+    src = open(buda_viz.__file__.replace('.pyc', '.py')).read()
+    assert "'..', '..', 'tools'" not in src, \
+        "the ../../tools fallback path is back (audit P6-01)"
