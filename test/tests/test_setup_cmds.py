@@ -184,6 +184,42 @@ def test_rerun_all_preserves_bottom_up_fixed_copies():
     assert fixed_after == fixed_before
 
 
+def test_select_topology_clears_stale_slide_overrides():
+    # Audit P5-03: select_topology re-pinned a bundle without clearing the
+    # plan.seg_slide_lo/hi (and seg_net_pull/seg_perp) staged by a previous
+    # edit_commit pin. NUTS's only staleness guard is an array-LENGTH match,
+    # so a newly selected candidate with the same segment count (all Z/U
+    # shapes have 3 segments) had the old candidate's slide windows applied
+    # verbatim to unrelated segments — clamping e.g. the new y-trunk into a
+    # window staged for the old x-trunk, silently. Re-pinning the SAME
+    # candidate must keep its overrides.
+    s = _session()
+    for c in ("def_layer 4 M4 H TOP 0.0", "def_layer 5 M5 V TOP 0.0",
+              "add_block A 0 0 100 100", "add_block B 400 300 500 400",
+              "add_bus d[4] A.o B.i", "run_bundler STRICT",
+              "generate_topologies"):
+        _run(s, c)
+    w = s.bundles[0]
+    z3 = [i for i, c in enumerate(w.input.candidates)
+          if len(c.segments) == 3]
+    assert len(z3) >= 2, "fixture needs two 3-segment candidates"
+    _run(s, f"edit_topology 1 {z3[0] + 1}")
+    _run(s, "edit_set_slide 1 150 180")
+    _run(s, "edit_commit pin")                # appends USER cand + pins it
+    user_idx = w.plan.selected_topology_index
+    assert list(w.plan.seg_slide_lo), "commit must stage the slide override"
+    # Re-pinning the SAME (user) candidate keeps its staged windows.
+    _run(s, f"select_topology 1 {user_idx + 1}")
+    assert list(w.plan.seg_slide_lo), \
+        "same-candidate re-pin must keep the staged override"
+    # Pinning a DIFFERENT same-seg-count candidate must drop them.
+    _run(s, f"select_topology 1 {z3[1] + 1}")
+    assert list(w.plan.seg_slide_lo) == [], \
+        "stale slide windows survived onto a different topology"
+    assert list(w.plan.seg_slide_hi) == []
+    assert list(w.plan.seg_net_pull) == []
+
+
 def test_leaf_keepouts_cover_layers_patterned_after_first_solve():
     # Audit P4-01: _install_leaf_keepouts guarded on grid-object IDENTITY,
     # making it a one-shot — a LOW layer patterned AFTER the first solve
