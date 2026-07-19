@@ -326,10 +326,90 @@ the level-1 suite.
 **Default-flip: still gated.**  The remaining discriminators: (i) mix's
 dislike of the honest-books mode at BOTH levels (its heal budget is tuned
 to legacy anchors — same class as its kPeak sensitivity); (ii) the
-alignment-sibling placement remains unpredicted (b44's seg3 residual);
+alignment-sibling placement remains unpredicted (b44's seg3 residual — a
+LEVEL-3 static predictor was PROTOTYPED AND REJECTED, detailed below);
 (iii) goldens must be regenerated on the reference host.  The kPeak
 hybrid-floor fixture refit (their pulled segment asserts books-only
 anchors) also waits on the flip.
+
+**The alignment-sibling prediction — PROTOTYPED & REJECTED (2026-07-19,
+static heuristic insufficient; it is a genuine placement fixed-point).**
+NUTS's START-time placement chain (`nuts.cpp` solve loop, ~L1600–1656)
+picks a segment's target track in strict priority: (1) cross-layer
+split-side bound → (2) **alignment sibling** → (3) junction anchor →
+(4) charged pull target → (5) interval centre.  Level 1 taught the planner
+to charge at member (4)'s predicted target; level 2 predicted member (3).
+Member (2) — the alignment sibling — sits ABOVE both and is still charged
+wrong.  An *alignment sibling* is a same-bundle segment sharing a
+perpendicular connector (Pass 3, `nuts.cpp:210` — `rev_conn_map[T]` lists
+the segments whose span follows trunk `T`; any two sharing `T` are
+siblings, e.g. a multicast trunk's stubs on opposite sides).  When one is
+already placed and its track fits the current segment's centre range, the
+current segment lands EXACTLY on the sibling's track
+(`nuts.cpp:1605–1613`), collapsing the split onto one shared track — free,
+since same-bundle bits never conflict, and a win for DNUTS bit-sharing; it
+exists to break the wirelength-neutral trunk deadlock (moving one sibling
+alone leaves the others pinning the junction).
+
+*Why it is the HARDEST member to predict.*  Levels 1–2 are functions of
+STATIC topology geometry — the pull breakpoint is a slope crossing; the
+junction anchor clamps into a partner's nominal span; both knowable at
+plan time.  The alignment target is `sibling.track_position` — a RUNTIME
+output of the sweep, wherever that sibling landed, which depends on sweep
+order and the whole occupancy state.  It is not a geometric constant but a
+FIXED POINT of the placement itself.
+
+*The concrete residual (b44 seg3, the outlier pinned in
+`test_planner_charge_pull_target.py`; reproduced on the pinned
+`TRUNK_H+MST@y11915` staircase at level 2).*  seg1 (V, pull −1) and seg3
+(V, pull +1) are siblings sharing the H connector seg5 (pull −1).  The
+planner charges seg3 at its own upward pull target (2642), but NUTS
+collapses seg1/seg3 onto ONE track at 1200 (seg5 → zero): seg1 lands at
+its charge (div 0), seg3 lands on seg1's track, off its 2642 charge
+(**div 1442**).  3 of 4 pulled charges are exact; seg3 is the residual.
+
+*The prototype (`charge_pull_target 3`, graded above level 2).*  Build
+alignment groups from `conn_segs` (same-orientation segs sharing a
+perpendicular SEG-conn partner, union-find).  For each group, charge every
+pulled member at the predicted collapse track — the extreme member anchor
+in the group's NET-PULL direction (members + the SHARED connector's pull:
+the b44 seg5 tie-breaker, only connectors touching ≥2 members vote),
+clamped into the group's common slide window.  **On b44 this WORKS:** net
+= seg1(−1)+seg3(+1)+seg5(−1) = −1 → collapse low → both charge 1200, seg3
+div 1442 → **0**, all 4 pulled charges exact.
+
+*Why REJECTED — the static rule cannot tell a real collapse from an
+independent placement.*  Two same-orientation segments sharing a connector
+are only POTENTIAL siblings; whether they actually merge onto one track is
+the sweep fixed-point, invisible at plan time.  Measured (level 3 vs 2,
+each flow AS CHECKED IN incl. its healers):
+  - **Blanket group override:** endpoint REGRESSIONS — big2 dnuts-unplaced
+    84 → 184 and overlaps 2 → 4, bigHalf worst books-divergence 662 →
+    4185; mix happened to improve (ov 1 → 0, WL −0.6%) but by luck, not
+    prediction quality.
+  - **Tightened to the clean case** (exactly two pulled siblings, opposite
+    pull signs — b44's shape): endpoint-NEUTRAL corpus-wide, but STILL
+    false-positives — `demo/comprehensive_demo` bundle 3 seg7 (H, pull +1)
+    charges AND places at its own pull target 748 at level 2 (div 0, no
+    collapse), yet the level-3 detector groups it with a non-merging
+    sibling and charges it at a phantom 652 → a **new** 96-unit divergence
+    where there was none.  A books-honesty feature that dishonest-ifies
+    some books is self-defeating, and it does NOT reduce the big2/bigHalf
+    residuals (56 → 57, 22 → 22) — it only fixes b44 by the net-pull
+    direction coincidentally matching.
+
+*Conclusion.*  The collapse track is a true fixed-point of the sweep; no
+static plan-time heuristic distinguishes a merging sibling pair from an
+independent one.  A reliable prediction needs a NUTS-side pre-solve signal
+— an actual alignment-group resolution pass run at plan time (place the
+group in isolation, read the collapse) — which is a larger build than the
+level-1/2 geometric predictions and out of proportion to the payoff
+(endpoint-neutral on today's corpus; only b44's pinned staircase moves).
+Prototype reverted; the `band_occupants` PLACED-position overlay (Phase 1)
+already lets ripup attribute a mispredicted aligned segment correctly, so
+the downstream damage is contained even with the charge left approximate.
+Gate (ii) for the default flip therefore stands, downgraded from
+"unpredicted" to "predictable only via a NUTS-side pass, deferred".
 
 ## Realization-risk WL: rank on the envelope, not just the nominal — `kWLSpread` SHIPPED (opt-in)
 
