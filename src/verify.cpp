@@ -884,7 +884,16 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                     // junction points (zero-length touch) by construction —
                     // that contact is where same-bit wires join, not a short.
                     // A real exemption co-location overlaps over an extent.
-                    if (a.span_lo >= b.span_hi || b.span_lo >= a.span_hi)
+                    // Compare NORMALIZED extents: bit-wire spans may carry
+                    // span_lo > span_hi (detailed-NUTS span adjustment keeps
+                    // nominal endpoint identity when placement swaps the two
+                    // ends), and the raw ordering would read an overlapping
+                    // inverted-span pair as disjoint (audit C9-01).
+                    const double a_lo = std::min(a.span_lo, a.span_hi);
+                    const double a_hi = std::max(a.span_lo, a.span_hi);
+                    const double b_lo = std::min(b.span_lo, b.span_hi);
+                    const double b_hi = std::max(b.span_lo, b.span_hi);
+                    if (a_lo >= b_hi || b_lo >= a_hi)
                         continue;                               // disjoint/touch
                     ConnViolation v;
                     v.kind = ViolationKind::BIT_SHORT;
