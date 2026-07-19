@@ -99,13 +99,20 @@ penalty idea.
        applies in full (with the trees exempt).
     Lock-in: `test_ksegs_env_default_stands_down_for_multi_trunk`; the
     datapath QoR test passes with and without the env default.
-- **G4 — a segment penalty is a detour penalty.**  kPeak's routability
-  steering (U-detour off a loaded band) is overwhelmed even at effective
-  ~30 units/seg in the synthetic steer test: detours cost 2 extra
-  segments, so kSegs systematically biases INTO contended corridors that
-  kPeak/kCong try to price away.  Same mechanism as G1.  Any default must
-  keep the penalty subordinate to the congestion terms (or exempt
-  same-endpoint detour variants).
+- **G4 — a segment penalty is a detour penalty (RESOLVED — intent
+  hierarchy).**  kPeak's routability steering (U-detour off a loaded
+  band) is overwhelmed even at effective ~30 units/seg in the synthetic
+  steer test: detours cost 2 extra segments, so kSegs systematically
+  biases INTO contended corridors that kPeak prices away — exactly the
+  sub-capacity band where kPeak is the only signal (an overflowing
+  straight shape already loses STRICT, so the ladder covers the
+  over-capacity case).  Resolution: kPeak is an explicit routability
+  opt-in, so it outranks the env default the same way multi_trunk does
+  — `BUDA_KSEGS_REL` stands down when kPeak > 0 (note printed), and an
+  explicit kSegs/kSegsRel set alongside kPeak is the user's own
+  calibration and applies in full.  Lock-in:
+  `test_ksegs_env_default_stands_down_for_kpeak` (detour kept under the
+  env flip; explicit-both goes straight — the owned trade).
 - **G5 — α tension across flows.**  b61 wants ≤0.05 (0.1 over-compacts to
   the 3-seg shape at +25% WL), mempool/05 want ≥0.1 for their full wins,
   big2 wants 0.25-or-healers.  0.02 is safe-Pareto, not optimal-everywhere.
@@ -120,7 +127,8 @@ are QoR distortions.  The principled path to default-on:
 
 1. ~~bits-weighted penalty (G3a)~~ — DONE: the penalty charges
    `Σ seg_bit_count/nbits`; the multicast-tree tension (G3b) remains open;
-2. keep it subordinate to congestion terms or exempt detour variants (G4);
+2. ~~keep it subordinate to congestion terms (G4)~~ — DONE: the env
+   default stands down for explicit kPeak steering;
 3. gate the default on healer presence (G1/G2), i.e. flows running
    `negotiate_congestion`/`ripup_reroute`;
 4. then absorb the golden churn (G6).

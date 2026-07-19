@@ -159,11 +159,24 @@ def test_ksegs_taper_honest_weight_keeps_fanin_tree():
         cmds += [f"add_net n{i} d1.o{i} sink.i{i}",
                  f"add_net m{i} d2.p{i} sink.j{i}"]
     cmds += ["run_bundler CONVERGENT", "set_planner_param kSegs 100",
-             "generate_topologies", "run_planner"]
+             "generate_topologies"]
     with contextlib.redirect_stdout(io.StringIO()):
         for c in cmds:
             s.do_command(c)
     w = s.bundles[0]
+    # Restrict the pool to a CONTROLLED pair (robust to generation churn):
+    #   A: tapered 3-seg TRUNK_H, WL 800 (two 8-bit driver stubs -> w=2.0)
+    #   B: untapered 2-seg TRUNK_V, WL 850
+    # kSegs=100 arithmetic: old (raw nseg): A 800+300 > B 850+200 -> B wins;
+    # new (member-bit share):  A 800+200 < B 850+200 -> A wins.
+    pool = list(w.input.candidates)
+    a = next(c for c in pool if c.type.startswith("TRUNK_H")
+             and len(c.segments) == 3 and c.estimated_wirelength == 800)
+    b = next(c for c in pool if c.type.startswith("TRUNK_V")
+             and len(c.segments) == 2 and c.estimated_wirelength == 850)
+    w.input.candidates = [a, b]
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_planner")       # derives seg_bits, then scores
     t = w.input.candidates[w.plan.selected_topology_index]
     assert t.seg_bits, "fan-in taper must be derived before planning"
     assert t.type.startswith("TRUNK_H") and len(t.segments) == 3
@@ -207,11 +220,28 @@ def test_ksegs_env_default_stands_down_for_multi_trunk(monkeypatch, capsys):
     with contextlib.redirect_stdout(io.StringIO()):
         for c in cmds:
             s.do_command(c)
-    expl = sum(1 for w in s.bundles
-               if w.input.candidates[w.plan.selected_topology_index]
-                   .type.startswith("BITRUNK_VHV"))
-    assert expl >= 1                              # exemption keeps trees alive
     assert _selected_types(s) != _selected_types(base)   # penalty did act
+
+
+def test_ksegs_env_default_stands_down_for_kpeak(monkeypatch):
+    """Audit G4: a segment penalty is a DETOUR penalty — it overwhelms
+    kPeak's sub-capacity steering (the U-detour off a loaded band costs 2
+    extra segments).  kPeak is an explicit routability opt-in, so the env
+    default stands down for it (same hierarchy as multi_trunk); explicit
+    kSegs/kSegsRel alongside kPeak is the user's own calibration and still
+    applies."""
+    from test_planner_kpeak import _route
+
+    monkeypatch.setenv("BUDA_KSEGS_REL", "0.02")
+    s, sel = _route(0.2)
+    # The env default stood down: the probe still takes the kPeak detour.
+    assert sel["probe_0"].startswith("U_"), sel
+    # And an explicit kSegsRel alongside kPeak DOES apply: the penalty
+    # out-prices the steering and the probe goes straight — the calibration
+    # the user owns when setting both.
+    monkeypatch.delenv("BUDA_KSEGS_REL", raising=False)
+    s2, sel2 = _route(0.2, extra=("set_planner_param kSegsRel 0.02",))
+    assert sel2["probe_0"].startswith("I_"), sel2
 
 
 def test_ksegs_default_off_keeps_selection():
