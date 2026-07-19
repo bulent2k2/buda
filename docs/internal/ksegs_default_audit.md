@@ -3,10 +3,12 @@
 The question: what stops `kSegs = <relative-to-max-possible-HPWL>` from
 being the DEFAULT for all flows?  This documents the `kSegsRel` experiment
 (fraction of the design's max-possible HPWL = Hanan grid extent `W + H`,
-resolved into the effective per-segment penalty once the grids are known;
-env `BUDA_KSEGS_REL` supplies the default for study runs) and the measured
-answer.  Background: `set_planner_param kSegs` (absolute units) and the
-findings log in `flow/big_data_test/b61.buda`.
+resolved into the effective per-segment penalty once the grids are known)
+and the measured answer.  **Outcome: 0.02 is now the COMPILED DEFAULT**
+(`CongestionPlanner::kDefaultKSegsRel`), gated as derived below; env
+`BUDA_KSEGS_REL` overrides it for study runs (`"0"` disables).
+Background: `set_planner_param kSegs` (absolute units) and the findings
+log in `flow/big_data_test/b61.buda`.
 
 ## Why relative at all
 
@@ -147,10 +149,22 @@ All six gates are addressed:
    from the flow script;
 5. ~~golden churn (G6)~~ — dissolved: zero suite churn under the flip.
 
-`BUDA_KSEGS_REL=0.02` is now a SAFE standing default: it engages only in
+`kSegsRel = 0.02` is a SAFE standing default: it engages only in
 healer-running flows without multi_trunk/kPeak opt-ins — exactly where it
 was measured to only win (big2 108 unpl/4 ovl → clean-or-healed at +1.8%
 WL −19% vias, bigHalf −3.1% WL −29% vias, mempool −48% WL, 07 healed at
-+5.8% WL −25% vias).  Promoting it from env hook to compiled default is
-now a one-line decision (`kSegsRel_` init), gated identically — left to
-the maintainer.
++5.8% WL −25% vias).
+
+**PROMOTED — the 0.02 is now COMPILED IN**
+(`CongestionPlanner::kDefaultKSegsRel`), gated identically to the env
+hook it replaces.  Resolution order for an UNSET `kSegsRel`:
+`BUDA_KSEGS_REL` if present (the study override — `"0"` disables the
+default outright, even in a healer flow), else the compiled 0.02; either
+way the value is non-explicit and passes through the G1–G4 gates
+(healers ahead, no multi_trunk trees in the pools, no kPeak).  An
+explicit `set_planner_param kSegs/kSegsRel` bypasses the gates entirely,
+including an explicit 0.  Verified at the flip: fast+mid 1529 passed
+with zero churn, slow tier green.  Lock-in:
+`test_ksegs_compiled_default_engages_gated` (scriptless-env healer flow
+selects the 5-seg shape; `BUDA_KSEGS_REL=0` restores the 10-seg
+WL-cheapest tree).

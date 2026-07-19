@@ -1537,14 +1537,19 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     // off).
     ksegs_eff_ = kSegs_;
     double rel = kSegsRel_;
-    bool rel_from_env = false;
+    bool rel_is_default = false;
     if (rel < 0.0) {
+        // Unset: BUDA_KSEGS_REL overrides the COMPILED DEFAULT of 0.02 (the
+        // audit's safe-Pareto point; env "0" disables for study runs).  Both
+        // are non-explicit and pass through the gates below; an explicit
+        // set_planner_param kSegsRel bypasses them (the user's own
+        // calibration).
         const char* e = std::getenv("BUDA_KSEGS_REL");
-        rel = (e != nullptr) ? std::atof(e) : 0.0;
-        rel_from_env = (rel > 0.0);
+        rel = (e != nullptr) ? std::atof(e) : kDefaultKSegsRel;
+        rel_is_default = (rel > 0.0);
     }
     // Intent hierarchy (audit G3b): explicit set_planner_param > the
-    // `multi_trunk` generation opt-in > the env DEFAULT.  Gated two-level
+    // `multi_trunk` generation opt-in > the DEFAULT (compiled 0.02 / env override).  Gated two-level
     // trees (BITRUNK_HVH/VHV) exist in a pool only when the user passed
     // `multi_trunk` — a declaration that trees matter here — and the
     // measured greedy coupling means a default penalty degrades such flows
@@ -1553,16 +1558,16 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     // optimum ripup never touches, +15.7% WL).  So the ENV default stands
     // down for a design whose pools carry gated trees; an explicit
     // kSegs/kSegsRel still applies in full.
-    if (rel_from_env) {
-        // G1/G2 (audit): the env default is only SAFE with healers in the
+    if (rel_is_default) {
+        // G1/G2 (audit): the default is only SAFE with healers in the
         // flow — the 07_wide_fan structural loser and big2's jagged alpha
         // response are both healed by ripup_reroute (and never without it).
         // The session declares healersAhead when the flow script contains a
         // healer command (ripup_reroute / negotiate_congestion); interactive
         // sessions and harnesses can set it explicitly.  No healers -> the
-        // env default stands down.
+        // default stands down.
         if (healersAhead_ <= 0.0) {
-            std::cout << "[Planner] kSegsRel env default suppressed: no "
+            std::cout << "[Planner] kSegsRel default suppressed: no "
                          "healer (ripup_reroute/negotiate_congestion) in the "
                          "flow (explicit set_planner_param kSegs/kSegsRel "
                          "still applies).\n";
@@ -1573,11 +1578,11 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         // (the U-detour off a loaded band costs 2 extra segments, and the
         // env-default penalty out-prices the kPeak term that exists to buy
         // exactly that detour).  kPeak is an explicit opt-in for
-        // routability-first selection, so it outranks the env default the
+        // routability-first selection, so it outranks the default the
         // same way multi_trunk does below; a user setting kSegs/kSegsRel
         // EXPLICITLY alongside kPeak owns that calibration.
         if (rel > 0.0 && kPeak_ > 0.0) {
-            std::cout << "[Planner] kSegsRel env default suppressed: kPeak "
+            std::cout << "[Planner] kSegsRel default suppressed: kPeak "
                          "routability steering is enabled (explicit "
                          "set_planner_param kSegs/kSegsRel still applies).\n";
             rel = 0.0;
@@ -1587,7 +1592,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
             for (const auto& cand : bw.input.candidates) {
                 if (cand.type.rfind("BITRUNK_HVH", 0) == 0 ||
                     cand.type.rfind("BITRUNK_VHV", 0) == 0) {
-                    std::cout << "[Planner] kSegsRel env default suppressed: "
+                    std::cout << "[Planner] kSegsRel default suppressed: "
                                  "the pool carries multi_trunk two-level "
                                  "trees (explicit set_planner_param kSegs/"
                                  "kSegsRel still applies).\n";

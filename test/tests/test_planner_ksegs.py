@@ -336,6 +336,32 @@ def test_healers_ahead_declaration_paths(tmp_path):
     assert p3.calls == []
 
 
+def test_ksegs_compiled_default_engages_gated(monkeypatch, tmp_path):
+    """The audit verdict, flipped: an UNSET kSegsRel now defaults to the
+    COMPILED 0.02 — no env var involved — gated exactly like the env hook
+    was (healers / multi_trunk / kPeak).  BUDA_KSEGS_REL demotes to a study
+    override, with "0" disabling the default even in a healer flow."""
+    monkeypatch.delenv("BUDA_KSEGS_REL", raising=False)
+    flow = tmp_path / "f.buda"
+    flow.write_text("\n".join(_B61)
+                    + "\nrun_planner\nrun_nuts\nripup_reroute\n")
+
+    def run():
+        s = buda_cli.BudaSession()
+        s.no_viz = True
+        s.script_path = str(flow)
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(f"source {flow}")
+        w = s.bundles[0]
+        return len(w.input.candidates[w.plan.selected_topology_index].segments)
+
+    # Healer flow, nothing set anywhere → the compiled default engages.
+    assert run() == 5                     # the 0.02 sweet spot
+    # The env override at "0" DISABLES it, healers or not (study escape).
+    monkeypatch.setenv("BUDA_KSEGS_REL", "0")
+    assert run() == 10                    # back to the WL-cheapest tree
+
+
 def test_ksegs_default_off_keeps_selection():
     """kSegs defaults to 0 — an un-set knob must not change the planner's
     choice (the WL-cheapest candidate keeps winning)."""
