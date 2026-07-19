@@ -74,7 +74,8 @@ class NutsFlowMixin:
 
     def _apply_healers_ahead(self, planner, healing_now=False):
         """Audit G1/G2 gate: declare `healersAhead` to the planner when the
-        flow runs a healer, so the BUDA_KSEGS_REL env default may apply —
+        flow runs a healer, so the non-explicit kSegsRel default (compiled
+        0.02 / env BUDA_KSEGS_REL override) may apply —
         the penalty's two measured correctness regressions are both
         ripup-healed, and real only without healers.  An explicit
         set_planner_param healersAhead (the harness escape) always wins.
