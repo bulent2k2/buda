@@ -544,6 +544,12 @@ private:
     // gratuitous complexity, and flat kSegs + ripup heals every measured
     // regression (07: 0/0 at +5.8% WL, -25% vias; channel_stress: 0/0).
     double kSegs_             = 0.0;
+    // Set by the SESSION when the flow script contains a healer command
+    // (ripup_reroute / negotiate_congestion) — the audit G1/G2 gate: the
+    // BUDA_KSEGS_REL env default applies only then (the penalty's two
+    // measured correctness regressions are both ripup-healed; without
+    // healers they are real).  Settable explicitly for harnesses.
+    double healersAhead_      = 0.0;
     // Relative kSegs (kSegsRel): fraction of the design's max-possible HPWL
     // (grid extent W + H) added per segment — scale-free across flows.
     // < 0 = unset (env BUDA_KSEGS_REL may supply an experiment default);

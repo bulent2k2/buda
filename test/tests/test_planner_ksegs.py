@@ -126,6 +126,7 @@ def test_ksegs_rel_scales_with_design_hpwl(monkeypatch):
     with contextlib.redirect_stdout(io.StringIO()):
         for c in _B61:
             s2.do_command(c)
+        s2.do_command("set_planner_param healersAhead 1")  # harness escape
         s2.do_command("run_planner")
     w2 = s2.bundles[0]
     t2 = w2.input.candidates[w2.plan.selected_topology_index]
@@ -233,7 +234,7 @@ def test_ksegs_env_default_stands_down_for_kpeak(monkeypatch):
     from test_planner_kpeak import _route
 
     monkeypatch.setenv("BUDA_KSEGS_REL", "0.02")
-    s, sel = _route(0.2)
+    s, sel = _route(0.2, extra=("set_planner_param healersAhead 1",))
     # The env default stood down: the probe still takes the kPeak detour.
     assert sel["probe_0"].startswith("U_"), sel
     # And an explicit kSegsRel alongside kPeak DOES apply: the penalty
@@ -242,6 +243,57 @@ def test_ksegs_env_default_stands_down_for_kpeak(monkeypatch):
     monkeypatch.delenv("BUDA_KSEGS_REL", raising=False)
     s2, sel2 = _route(0.2, extra=("set_planner_param kSegsRel 0.02",))
     assert sel2["probe_0"].startswith("I_"), sel2
+
+
+def test_ksegs_env_default_healer_gated(monkeypatch, tmp_path):
+    """Audit G1/G2: the env default is only SAFE with healers in the flow
+    (the 07_wide_fan structural loser and big2's jagged alpha response are
+    both ripup-healed, and real only without).  Without a healer the env
+    default stands down; the session detects ripup_reroute /
+    negotiate_congestion in the flow SCRIPT (through `source`) and declares
+    healersAhead; harnesses may declare it explicitly."""
+    monkeypatch.setenv("BUDA_KSEGS_REL", "0.02")
+
+    # 1. Interactive/scriptless session, no healers → suppressed: the
+    #    WL-cheapest candidate keeps winning, and the note names the reason.
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        for c in _B61:
+            s.do_command(c)
+        s.do_command("run_planner")
+    assert s.bundles[0].plan.selected_topology_index == 0
+    assert "no healer" in buf.getvalue()
+
+    # 2. Explicit healersAhead (harness escape) → the default applies.
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in _B61:
+            s2.do_command(c)
+        s2.do_command("set_planner_param healersAhead 1")
+        s2.do_command("run_planner")
+    w2 = s2.bundles[0]
+    assert len(w2.input.candidates[w2.plan.selected_topology_index]
+               .segments) == 5             # the 0.02 sweet spot
+
+    # 3. Script detection: a flow whose SOURCED sub-script runs
+    #    ripup_reroute is a healer flow — the default applies with no
+    #    explicit declaration.
+    sub = tmp_path / "heal.buda"
+    sub.write_text("ripup_reroute\n")
+    flow = tmp_path / "f.buda"
+    flow.write_text("\n".join(_B61)
+                    + "\nrun_planner\nrun_nuts\nsource heal.buda\n")
+    s3 = buda_cli.BudaSession()
+    s3.no_viz = True
+    s3.script_path = str(flow)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s3.do_command(f"source {flow}")
+    w3 = s3.bundles[0]
+    assert len(w3.input.candidates[w3.plan.selected_topology_index]
+               .segments) == 5
 
 
 def test_ksegs_default_off_keeps_selection():
