@@ -112,3 +112,33 @@ def test_cross_bundle_reservation_sees_inverted_span():
     t2 = {ns.track_position for ns in r.net_segments if ns.bundle_id == 2}
     assert not (t1 & t2), \
         f"different bundles share tracks {t1 & t2} — reservation missed"
+
+
+def test_def_nets_escaped_bracket_connections_survive(tmp_path):
+    # Audit C6-01: the COMPONENTS section stores normalized names (escapes
+    # stripped: mem\[0\] -> mem[0]) but the NETS connection loop looked up
+    # the RAW token, so every connection to an escaped-name instance missed
+    # get_comp_id and was SILENTLY dropped — nets on bus-bit-named macros
+    # (the standard DEF escaping) lost their pins.
+    import buda_db
+    lef = tmp_path / "t.lef"
+    lef.write_text(
+        "MACRO ram\n  SIZE 10 BY 10 ;\n  PIN d\n    DIRECTION INPUT ;\n"
+        "    PORT\n      RECT 1 1 2 2 ;\n    END\n  END d\nEND ram\n")
+    deff = tmp_path / "t.def"
+    deff.write_text(
+        "VERSION 5.8 ;\nUNITS DISTANCE MICRONS 1000 ;\n"
+        "DIEAREA ( 0 0 ) ( 100000 100000 ) ;\nCOMPONENTS 2 ;\n"
+        "- mem\\[0\\] ram + PLACED ( 1000 1000 ) N ;\n"
+        "- plain ram + PLACED ( 50000 50000 ) N ;\nEND COMPONENTS\n"
+        "NETS 1 ;\n- n1 ( mem\\[0\\] d ) ( plain d ) ;\nEND NETS\nEND DESIGN\n")
+    db = buda_db.BDB(str(tmp_path / "t.bdb"))
+    db.import_def_lef(str(deff), str(lef))
+    comps = {c.name: c.id for c in db.all_components()}
+    assert "mem[0]" in comps
+    pins_by_comp = {}
+    for c in db.all_components():
+        pins_by_comp[c.name] = len(db.pins_by_comp(c.id))
+    assert pins_by_comp["plain"] == 1
+    assert pins_by_comp["mem[0]"] == 1, \
+        "escaped-name instance lost its net connection"

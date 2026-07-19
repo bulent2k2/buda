@@ -1358,7 +1358,12 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
             if (net_id < 0) continue;
             auto cb = std::sregex_iterator(line.begin(), line.end(), conn_re);
             for (auto it=cb; it!=std::sregex_iterator(); ++it) {
-                std::string inst=(*it)[1], pin=(*it)[2];
+                // Normalize DEF escapes exactly like the COMPONENTS section
+                // did when the row was stored: the raw token 'mem\[0\]'
+                // would miss get_comp_id('mem[0]') and the connection was
+                // SILENTLY dropped (audit C6-01).
+                std::string inst=normalize_def_name((*it)[1]);
+                std::string pin =normalize_def_name((*it)[2]);
                 if (inst=="PIN") continue;
                 int cid = get_comp_id(inst);
                 if (cid < 0) continue;
