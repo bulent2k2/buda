@@ -59,15 +59,32 @@ struct Rec {
     const uint8_t* data = nullptr;
     size_t len = 0;
 
+    // Every fixed-width accessor bounds-checks against the RECORD length
+    // (audit C8-02): the stream reader guarantees data..data+len is inside
+    // the file buffer, but a malformed record shorter than its declared
+    // fields would otherwise read the NEXT record's bytes (or past the
+    // buffer on the last record) as coordinate data — silently importing
+    // garbage geometry instead of the fail-LOUD the importer promises.
+    void need(size_t off, size_t n) const {
+        if (off + n > len)
+            throw std::runtime_error(
+                "import_gds: truncated record (type 0x" +
+                std::to_string(type) + ": field at offset " +
+                std::to_string(off) + "+" + std::to_string(n) +
+                " exceeds record length " + std::to_string(len) + ")");
+    }
     int16_t i16(size_t off = 0) const {
+        need(off, 2);
         return (int16_t)((data[off] << 8) | data[off + 1]);
     }
     int32_t i32(size_t off = 0) const {
+        need(off, 4);
         return (int32_t)((uint32_t(data[off]) << 24) | (uint32_t(data[off + 1]) << 16) |
                          (uint32_t(data[off + 2]) << 8) | data[off + 3]);
     }
     // Excess-64 base-16 8-byte real.
     double real8(size_t off = 0) const {
+        need(off, 8);
         const uint8_t* b = data + off;
         int sign = (b[0] & 0x80) ? -1 : 1;
         int exp = (b[0] & 0x7F) - 64;

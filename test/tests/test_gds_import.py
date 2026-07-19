@@ -555,3 +555,41 @@ def test_cli_def_gds_layer_errors_and_warnings(capsys, tmp_path):
     s.do_command("def_gds_layer 4 8 0")
     assert "already mapped to layer 3" in capsys.readouterr().out
     assert s.layers.layer_for_gds(8, 0) == 3
+
+
+def test_truncated_xy_record_fails_loud(tmp_path):
+    """Audit C8-02: the XY handler read point 0 for a TEXT (and SREF/AREF)
+    unconditionally — a malformed XY record shorter than one 8-byte
+    coordinate made the accessors read bytes belonging to the NEXT record
+    (or past the buffer) as the placement coordinate, silently importing
+    garbage geometry.  The record accessors must bounds-check against the
+    record length and throw the truncated-record error the header contract
+    promises."""
+    import struct
+
+    import gds_build as gb
+
+    def rec(rt, payload=b""):
+        return struct.pack(">HBB", 4 + len(payload), rt[0], rt[1]) + payload
+
+    stream = b"".join([
+        rec(gb._HEADER, struct.pack(">h", 600)),
+        rec(gb._BGNLIB, b"\x00" * 24),
+        rec(gb._LIBNAME, b"lib\x00"),
+        rec(gb._UNITS, gb._real8(1e-3) + gb._real8(1e-9)),
+        rec(gb._BGNSTR, b"\x00" * 24),
+        rec(gb._STRNAME, b"top\x00"),
+        rec(gb._TEXT),
+        rec(gb._LAYER, struct.pack(">h", 63)),
+        rec(gb._TEXTTYPE, struct.pack(">h", 0)),
+        rec(gb._XY, struct.pack(">i", 5)),      # TRUNCATED: 4 of 8 bytes
+        rec(gb._STRING, b"n1\x00\x00"),
+        rec(gb._ENDEL),
+        rec(gb._ENDSTR),
+        rec(gb._ENDLIB),
+    ])
+    p = tmp_path / "trunc.gds"
+    p.write_bytes(stream)
+    db = buda.BDB(str(tmp_path / "trunc.bdb"))
+    with pytest.raises(Exception, match="truncated"):
+        db.import_gds(str(p), [63])
