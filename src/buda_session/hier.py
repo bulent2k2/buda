@@ -1682,8 +1682,22 @@ class HierMixin:
         cache = getattr(self, "_bu_fixed_cache", None)
         if cache is not None:
             return cache
-        fixed = []
+        # Publish the cache only on SUCCESS (audit P2-01): an exception during
+        # the local NUTS solve / dogleg-adoption loop below must not leave a
+        # permanently-cached PARTIAL (or empty) list that every later call
+        # returns silently.  Compute into a local, cache at the end / on
+        # exception reset to None.
+        try:
+            fixed = self._bottom_up_fixed_segments_compute()
+        except BaseException:
+            self._bu_fixed_cache = None
+            raise
         self._bu_fixed_cache = fixed
+        return fixed
+
+    def _bottom_up_fixed_segments_compute(self):
+        """The uncached body of _bottom_up_fixed_segments (audit P2-01)."""
+        fixed = []
         if not getattr(self, "_planner_is_hier", False) or self.bdb is None:
             return fixed
         bu_cells = set(self.bdb.bottom_up_cells())
@@ -1712,7 +1726,6 @@ class HierMixin:
                       f"restored from the persisted NUTS routing")
                 return fixed
             fixed = []
-            self._bu_fixed_cache = fixed
         if not templates:
             locked_ids = {w.input.original_bundle.id for w in self.bundles
                           if w.hier.locked}
@@ -2081,7 +2094,9 @@ class HierMixin:
                       "not gate it.")
             return self._check_template_tracks_placement(verbose=verbose)
         verdict = {}
-        self._template_track_verdict = verdict
+        # Cache published only after the fill completes (audit P2-01): an
+        # exception mid-fill must not leave a partial verdict cached — which
+        # would then silently DISABLE the bottom-up track gate on the next call.
         if self.routing_grid is None and verbose:
             print("check_template_tracks: no routing grid defined "
                   "(def_track_pattern) — nothing to compare yet; alignment "
@@ -2202,6 +2217,7 @@ class HierMixin:
                           f"{len(aligned)} instance(s) see identical signal "
                           f"tracks (ref {ref_name}, {n_windows} window(s) "
                           f"compared)")
+        self._template_track_verdict = verdict   # publish on success (P2-01)
         return verdict
 
     def _grid_layer_dirs(self):

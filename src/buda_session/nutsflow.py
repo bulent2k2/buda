@@ -697,6 +697,13 @@ class NutsFlowMixin:
         self._write_nuts_log(layer_names, append=True, rerun_layer_name="post_nuts",
                              extra_lines=extra_lines)
 
+        # The abstract solve just changed; a detailed route from the PREVIOUS
+        # solve is now stale (audit P4-03).  Re-run it (as _rerun_all does) so
+        # the session's detailed_result matches the new bus placement, rather
+        # than leaving an inconsistent route live.
+        if self.detailed_result is not None:
+            self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+
     def _segment_states_from_topology(self) -> dict:
         """Build a 'before' snapshot from topology geometry (no track assignment yet).
 

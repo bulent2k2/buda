@@ -384,3 +384,30 @@ for br in bdb.all_bundles():            # filter by is_replicated per `expanded`
    `add_blocks_from_bdb` + `load_pipeline expanded` + `run_planner hier` in phase 2.
 3. **Guard tests:** `load_pipeline` with no open BDB / no persisted topologies
    errors clearly; `load_pipeline` before re-declaring blocks fails fast.
+
+## Audit 2026-07 (deferred): re-plan expanded-parent FK staleness + persist-step checking (C6-09) — OPEN
+
+Two coupled findings from [audit_2026-07.md](audit_2026-07.md), deferred as a
+pair because C6-09 cannot land until the staleness bug is fixed:
+
+- **Re-plan expanded-parent staleness (newly discovered).** A second
+  `run_planner hier` re-expands the templates into per-instance bundle rows
+  whose `parent_id` (via `_hier_expansion_map` / `expanded_to_template`) can
+  point at a PRIOR expansion's instance id — a row `clear_expanded_bundles`
+  just deleted — instead of the real template. The whole orphaned subtree
+  (bundle → topology → routing) then FK-fails and is **silently dropped**, so
+  a checkpoint taken after a re-plan is missing those instances and a resume
+  cannot restore them. Repro: the dogleg-cell flow's second `run_planner hier`
+  (`test_doglegged_template_replan_resets_and_readopts`) produces an expanded
+  row `id=9 parent=5` while only `[1,2,3,4]` exist. Fix: resolve
+  `expanded_to_template` values to the CURRENT template ids on every re-plan
+  (or persist templates before their instances and re-point stale parents).
+- **C6-09: check the persist step's result.** The persist mutators ignore
+  `sqlite3_step`'s return, so an FK/constraint failure silently drops the row.
+  The fix (throw on non-`SQLITE_DONE`) is correct and valuable, but turning it
+  on today converts the staleness bug above from a silent drop into a hard
+  crash of the hier re-plan flow — so it must land WITH, or after, that fix.
+  When both land: add `step_checked` to add_bundle / add_topology /
+  add_topology_segment / add_bus_segment / add_bus_via / add_net_segment /
+  add_net_via / add_busterm / renumber_topology, and flip the NUTS_DDL header
+  comment back to "FK-rejected insert throws".
