@@ -89,3 +89,25 @@ python3 -c "import sys,matplotlib,numpy,pytest; \
 print('py',sys.version.split()[0],'mpl',matplotlib.__version__, \
 'numpy',numpy.__version__,'pytest',pytest.__version__)"
 ```
+
+## Sanitized builds (`BUDA_SANITIZE`)
+
+Opt-in ASAN+UBSAN instrumentation for bug hunts (OFF by default; the normal
+build is untouched):
+
+```bash
+cmake -S . -B build-san -DBUDA_SANITIZE=ON
+cmake --build build-san -j4
+LD_PRELOAD=$(gcc -print-file-name=libasan.so) \
+  ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 \
+  PYTHONPATH=build-san:src python3 src/buda_cli.py flow/… --no-viz
+```
+
+The option deliberately disables pybind's per-module LTO and post-build
+strip (`NO_EXTRAS`) and adds `-g`: mixed compile/link optimization levels
+under LTO miscompile libstdc++ hashtables on GCC 13 (the audit's "PRE-1"
+artifact), and a stripped module has no sanitizer stack traces. Caveat: the
+`LD_PRELOAD` interceptor CHECK-fails on the first C++ exception thrown from
+a dlopen'd module on gcc-13/glibc, so drive sanitized runs through
+throw-free repro scripts and corpus flows rather than the full pytest
+suite. Background: `docs/internal/audit_2026-07.md` (Environment notes).
