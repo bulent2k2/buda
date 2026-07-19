@@ -93,6 +93,15 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
         if n_esc:
             print(f"[NUTS] dead-span escalation: moved {n_esc} dead LOW "
                   f"segment(s) to a TOP layer and re-solved.")
+            # The escalation mutated w.plan.seg_layers — the PLANNER's layer
+            # assignment.  The _persist_nuts() below writes only the bus_segment
+            # rows (the TOP geometry); without also re-persisting the planner
+            # output, topology_segment.assigned_layer keeps the stale LOW pin,
+            # so a load_pipeline resume would restore LOW and a resumed run_nuts
+            # could recreate the dead assignment.  Mirror the stage-b heal's
+            # _checkpoint_routing (Codex #351 P2).  Trial-guarded inside.
+            if session.bdb is not None:
+                session._persist_planner_output()
     # A fresh abstract solve invalidates any prior detailed result:
     # ripup_reroute / negotiate_congestion key their stage off
     # detailed_result, and hill-climbing against a detailed route of
