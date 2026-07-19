@@ -194,3 +194,30 @@ def test_failed_op_leaves_topology_untouched():
     assert not buda.edit_set_span(topo, fp, 0, 500, 100).applied
     assert not buda.edit_remove_segment(topo, fp, 9).applied
     assert buda.topo_uid(topo) == uid
+
+
+def test_connect_rejected_on_tapped_partner_leaves_topo_unchanged():
+    # Audit C11-01: edit_connect moved segment i's endpoint BEFORE checking
+    # whether partner j's required extension endpoint is a busterm tap. On
+    # that rejection path the op reported failure but left i mutated — a
+    # half-applied edit violating the transactional edit_* contract. The
+    # rejected op must leave the topology byte-identical.
+    fp = _fp()
+    topo = buda.Topology()
+    topo.connected_block_names = []
+    # H trunk near block A, stub A onto it -> the stub carries a busterm tap.
+    buda.edit_add_trunk(topo, fp, True, 200, 0, 300, H_LAYER)     # seg 0: H y=200
+    v = buda.edit_add_stub(topo, fp, "A", 0, V_LAYER)             # seg 1: V, tapped at A
+    assert v.applied, v.note
+    # A far H segment whose connect crossing forces extending seg 1 at its
+    # TAPPED end: place it below A, beyond the stub's tapped endpoint.
+    tap_seg = topo.segments[1]
+    x_stub = tap_seg.start.x
+    lo_y = min(tap_seg.start.y, tap_seg.end.y)
+    buda.edit_add_trunk(topo, fp, True, lo_y - 50, x_stub - 40, x_stub + 40,
+                        H_LAYER)                                  # seg 2
+    before = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in topo.segments]
+    v = buda.edit_connect(topo, fp, 2, 1)
+    assert not v.applied, "connect through a tapped partner end must fail"
+    after = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in topo.segments]
+    assert after == before, "rejected edit_connect must not mutate the topology"
