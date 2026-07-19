@@ -428,6 +428,12 @@ class ExplorerDrawMixin:
         # pass below — segments, slide spans, busterm markers — skips the same
         # set (a layer turned off in the main viz shows no artifacts here).
         def _resolved_lid(i):
+            # During a TopoEdit session the WORKING COPY governs the display:
+            # a '+'/'-' layer edit changes seg.layer_hint (what commit
+            # persists), so honor it over the stale sidecar/planner layers
+            # (audit P7-03).
+            if getattr(self, '_edit_topo', None) is not None:
+                return topo.segments[i].layer_hint
             if is_current_selection and sel and 'seg_layers' in sel:
                 pinned = sel['seg_layers']
                 if len(pinned) == len(topo.segments):

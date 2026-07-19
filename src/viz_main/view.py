@@ -381,6 +381,16 @@ class VizViewMixin:
 
     def _on_close(self, event):
         """Cleanup when the main window is closed."""
+        # Deregister our ViewState listener (audit P6-02): the ViewState is
+        # shared with the TopologyExplorer, so a stale fig_redraw left
+        # registered here fires against a destroyed figure whenever the
+        # explorer notifies after this window closes. Mirrors the explorer's
+        # own _on_close.
+        if getattr(self, 'ui_state', None) is not None:
+            try:
+                self.ui_state.remove_listener(self.fig_redraw)
+            except Exception:
+                pass
         if hasattr(self, '_ipc_timer') and self._ipc_timer is not None:
             try:
                 self._ipc_timer.stop()

@@ -141,6 +141,11 @@ class ExplorerAnalysisMixin:
         planner assignment (when showing the planned candidate) → generation
         hint."""
         topo = self._shown_topo()
+        # During a TopoEdit session the working copy's layer_hint governs (a
+        # '+'/'-' edit changes it and is what commit persists) — audit P7-03,
+        # mirroring _resolved_lid in draw.py.
+        if self._edit_topo is not None:
+            return topo.segments[ci].layer_hint
         sel = self._find_selection()
         if self._current_is_selected() and sel and 'seg_layers' in sel:
             pinned = sel['seg_layers']

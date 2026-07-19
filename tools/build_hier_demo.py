@@ -168,9 +168,11 @@ def _parse_param(s: str):
 def _parse_instances(s: str):
     """Parse the --instances value into an int, positional list, or named dict.
 
-    '2'                  → 2            (every cell)
-    '2,3,1'              → [2, 3, 1]    (positional, in --cells order)
-    'dnuts1=3,chan=1'    → {'dnuts1':3,'channel_stress'…}  (named; rest default 2)
+    '2'                       → 2            (every cell)
+    '2,3,1'                   → [2, 3, 1]    (positional, in --cells order)
+    'dnuts1=3,channel_stress=1'
+                              → {'dnuts1':3, 'channel_stress':1}  (named counts,
+                                validated against FULL cell names; rest default 2)
     """
     s = s.strip()
     if "=" in s:

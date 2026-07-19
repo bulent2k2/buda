@@ -269,6 +269,20 @@ class DefViz:
                 self.inst_nets.setdefault(inst, set()).add(net_name)
             self.net_insts[net_name] = inst_set
 
+        # Components with no signal-net connection (tie/filler/power-only
+        # macros, or victims of a dropped net) never entered inst_info above,
+        # so 'Show all instances' and the background draw silently omitted
+        # them (audit T3-06). Add every remaining component now, leaving
+        # net_insts / inst_nets / inst_roles untouched.
+        for inst, (cell, dx, dy, _) in components.items():
+            if inst in self.inst_info:
+                continue
+            x1, y1 = dx / units, dy / units
+            w, h = cell_sizes.get(cell, (0.5, 0.5))
+            self.inst_info[inst] = {
+                'x1': x1, 'y1': y1, 'x2': x1 + w, 'y2': y1 + h, 'cell': cell
+            }
+
         self._all_nets    = sorted(nets_raw.keys())
         self.selected_nets.clear()
 

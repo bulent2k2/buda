@@ -1332,6 +1332,29 @@ class HierMixin:
             name = f"{cell}90_{i}"
         return name
 
+    def _clone_gen_knobs(self, base, bundle_id):
+        """Overlay a bundle's persisted v15 generation-knob memo on `base`
+        (the bulk/default (center, double_detour, multi_trunk, hanan_loci)
+        tuple), returning the effective clone-generation knobs.  On the
+        load_pipeline resume path `_hier_gen_knobs` is unset and `base` is the
+        all-default fallback, so without this the clone candidates would be
+        generated coarser than the pool they mirror (audit P2-02)."""
+        if self.bdb is None:
+            return base
+        memo = self.bdb.bundle_gen_knobs(str(bundle_id))
+        if not memo:
+            return base
+        ks = set(memo.split())
+        loci = base[3]
+        if "no_hanan_loci" in ks:
+            loci = False
+        elif "hanan_loci" in ks:
+            loci = True
+        return (base[0] or "center_mode" in ks,
+                base[1] or "double_detour" in ks,
+                base[2] or "multi_trunk" in ks,
+                loci)
+
     def _split_bottom_up_rotation_classes(self):
         """Give each marked cell's 90°-rotated instance class its OWN
         template — the rotation-class CLONE.  Within the 90° family
@@ -1444,6 +1467,13 @@ class HierMixin:
             if plan is None or not b.cell_context:
                 continue
             keep, rot, cname, bref, cell, origin_tid = plan
+            # Per-template generation knobs: overlay this template's persisted
+            # v15 memo on the bulk/default base, so a load_pipeline resume (no
+            # _hier_gen_knobs set — generate_hier_topologies never ran this
+            # session) still generates the clone candidates with the same
+            # knobs the original pool used, instead of silently falling back
+            # to all-defaults (audit P2-02).
+            bk = self._clone_gen_knobs(knobs, b.id)
             # Clone-side instance order: the class reference first (when
             # this bundle has it), so the group solves share one frame.
             order_rot = ([bref] + sorted(i for i in rot if i != bref)
@@ -1477,17 +1507,17 @@ class HierMixin:
                 # Candidates generated from the owning side's reference —
                 # real per-direction layer costs on the class's actual
                 # cell-local floorplan.
-                self._generate_hier_topo_one(nw, knobs[0], knobs[1],
+                self._generate_hier_topo_one(nw, bk[0], bk[1],
                                              fp_cache, comps_by_name,
-                                             knobs[2],
-                                             use_hanan_loci=knobs[3])
+                                             bk[2],
+                                             use_hanan_loci=bk[3])
                 if ref_moved:
                     # The kept side lost the instance its candidates were
                     # generated from — regenerate in its new frame.
-                    self._generate_hier_topo_one(w, knobs[0], knobs[1],
+                    self._generate_hier_topo_one(w, bk[0], bk[1],
                                                  fp_cache, comps_by_name,
-                                                 knobs[2],
-                                                 use_hanan_loci=knobs[3])
+                                                 bk[2],
+                                                 use_hanan_loci=bk[3])
             else:
                 # Rotated-only template: the WHOLE bundle belongs to the
                 # clone class — re-context in place (same id, nets, and
@@ -1504,10 +1534,10 @@ class HierMixin:
                 if order_rot[0] != old_ref:
                     # Its candidates were generated from old_ref's frame —
                     # regenerate from the class reference.
-                    self._generate_hier_topo_one(w, knobs[0], knobs[1],
+                    self._generate_hier_topo_one(w, bk[0], bk[1],
                                                  fp_cache, comps_by_name,
-                                                 knobs[2],
-                                                 use_hanan_loci=knobs[3])
+                                                 bk[2],
+                                                 use_hanan_loci=bk[3])
         if not made:
             return 0
         self.bundles = result
