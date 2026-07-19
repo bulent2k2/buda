@@ -751,6 +751,92 @@ class NutsFlowMixin:
         self._write_nuts_log(layer_names, append=True, rerun_layer_name="post_nuts",
                              extra_lines=extra_lines)
 
+    def _escalate_dead_low_segments(self, max_iter: int = 5) -> int:
+        """Post-NUTS dead-span escalation (opt-in: `set_dead_span_escalate on`).
+
+        After abstract NUTS, a LOW-layer segment whose ACTUAL placed geometry
+        (its span + Hanan interval) offers ZERO keepout-clear signal tracks —
+        by the exact DetailedNUTS admission test (span-clear pool OR the
+        midpoint-fallback pool) — is a guaranteed DNUTS open: its bits have
+        nowhere to land.  The plan-time `nontop_dead_span_gate` cannot
+        separate these from survivors (the wide slide window vs the narrow
+        final interval — see wishlist-planner "dead-span discriminator"), but
+        the FINAL placed geometry can: the same test on placed spans fires on
+        ZERO survivor segments.  Move each genuinely-dead LOW segment to the
+        cheapest same-direction TOP layer (which carries full signal supply)
+        and re-solve, iterating until no dead LOW segment remains (a segment
+        pinned to TOP never returns to LOW, so the LOW set strictly shrinks —
+        max_iter is only a safety bound).  Returns the total escalations.
+        """
+        if self.nuts_result is None or self.routing_grid is None:
+            return 0
+
+        # Skip locked bottom-up copies: their plan must stay identical to the
+        # placed fixed routing (extraction skips fixed bundles — a reassign
+        # here would diverge plan.seg_layers from the routed copies).
+        wmap = {w.input.original_bundle.id: w for w in self.bundles
+                if not w.hier.locked}
+
+        def _cheapest_top(dir_enum):
+            tops = sorted(l for l in self.layers.get_layer_ids_by_dir(dir_enum)
+                          if self.layers.is_top(l))
+            return tops[0] if tops else None
+
+        top_h = _cheapest_top(buda.LayerDir.HORIZONTAL)
+        top_v = _cheapest_top(buda.LayerDir.VERTICAL)
+
+        total = 0
+        for _ in range(max_iter):
+            moved = 0
+            for seg in self.nuts_result.segments:
+                if not seg.placed or self.layers.is_top(seg.layer):
+                    continue
+                if not self.routing_grid.has_layer(seg.layer):
+                    continue
+                g = self.routing_grid.get_layer_grid(seg.layer)
+                # The exact DNUTS admission test on the PLACED geometry:
+                # span-clear pool, then the midpoint-fallback pool.
+                if g.count_signal_tracks_in_span(seg.span_lo, seg.span_hi,
+                                                 seg.interval_lo, seg.interval_hi) > 0:
+                    continue
+                x = (seg.span_lo + seg.span_hi) / 2.0
+                if g.count_signal_tracks_in(x, seg.interval_lo, seg.interval_hi) > 0:
+                    continue
+                # Genuinely dead — escalate to the same-direction TOP layer.
+                new_layer = top_h if seg.horiz else top_v
+                if new_layer is None or new_layer == seg.layer:
+                    continue
+                w = wmap.get(seg.bundle_id)
+                if w is None or not w.plan.seg_layers:
+                    continue
+                sel = w.plan.selected_topology_index
+                if sel < 0 or sel >= len(w.input.candidates):
+                    continue
+                sl = list(w.plan.seg_layers)
+                if seg.seg_idx >= len(sl) or sl[seg.seg_idx] == new_layer:
+                    continue
+                sl[seg.seg_idx] = new_layer
+                w.plan.seg_layers = sl
+                moved += 1
+            if not moved:
+                break
+            total += moved
+            # Re-solve with the escalated assignments (mirrors cmd_run_nuts's
+            # core, minus persist/log — those run once on the final result).
+            pitch = self._nuts_pitch if getattr(self, '_nuts_pitch', None) else 1.0
+            nuts = buda.NUTSEngine(self.fp, self.layers)
+            nuts.set_track_pitch(pitch)
+            self._derive_fanin_bits_all(selected_only=True)
+            self._inject_bottom_up_fixed(nuts)
+            if self.planner is not None:
+                nuts.set_extra_grid_points(
+                    list(self.planner.get_x_grid()),
+                    list(self.planner.get_y_grid()))
+            with buda.ostream_redirect():
+                self.nuts_result = nuts.run(self.bundles)
+            self._adopt_doglegs()
+        return total
+
     def _segment_states_from_topology(self) -> dict:
         """Build a 'before' snapshot from topology geometry (no track assignment yet).
 

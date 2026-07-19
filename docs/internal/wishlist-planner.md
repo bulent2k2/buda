@@ -84,11 +84,39 @@ beneficiaries — bigHalf (−76% no-rr opens) and un-pinning mix from
   post_nuts` insertion class, `nutsflow.py::_run_post_nuts_planner`),
   driven off placed geometry.  `RoutingGrid::count_signal_tracks_in{,_span}`
   are Python-bound; the C++ `span_signal_supply` computes the same on
-  placed geometry.  **Remaining build:** integrate the escalation into the
-  automatic negotiate/ripup loop (benefit without a manual command),
-  corpus-measure, guard regressions, tests.  bigHalf (−76% no-rr opens)
-  is the clean beneficiary; see wishlist-topo "mix–loci" for why mix is
-  only ~1/3 this item.
+  placed geometry.
+
+**BUILT — opt-in `set_dead_span_escalate on` (2026-07-19).**
+`nutsflow.py::_escalate_dead_low_segments`, wired into `cmd_run_nuts` behind
+the session flag (default OFF = every checked-in flow bit-identical).  After
+each `run_nuts`, every LOW segment whose ACTUAL placed geometry (`span_lo/hi`
++ `interval_lo/hi`) offers zero keepout-clear signal tracks — the exact
+DNUTS admission test: `count_signal_tracks_in_span` (span-clear) then the
+`count_signal_tracks_in` midpoint fallback — is moved to the cheapest
+same-direction TOP layer (`seg_layers[si]`) and NUTS re-solves; iterate until
+no dead LOW segment remains (a segment pinned to TOP never returns to LOW, so
+the LOW set strictly shrinks — termination guaranteed).  Corpus A/B (flag on
+vs off, `ov`/`unpl`):
+
+| flow | baseline | escalate | Δ |
+|---|---|---|---|
+| bigHalf | 5 / 315 | **3 / 171** | opens −144, ov −2 |
+| mix (loci on) | 0 / 42 | **0 / 16** | opens −26, ov 0 |
+| mix (baseline) | 0 / 0 | 0 / 0 | no-op (clean signal) |
+| b44, big2, channel_stress, comprehensive_demo, hbundles/10, b4_bus_077 | — | — | bit-identical |
+| mempool_tile | 61 / 2976 | 90 / 2913 | opens −63 but **ov +29** |
+
+So it is OPT-IN, not default: the two clean beneficiaries are bigHalf and
+un-pinning mix from `no_hanan_loci`; the pathological `mempool_tile` stress
+demo (already 2976 opens) trades opens for overlaps when it escalates onto its
+crowded TOP bands — the one regression, and why default-off matters.  mix's
+full un-pinning still needs the LOW-supply capacity fix too (~2/3; see
+wishlist-topo "mix–loci").  Tested: `test/tests/test_dead_span_escalate.py`
+(keepout-dead LOW stub strands 8 bits off; escalation moves it to TOP and
+places; a live LOW stub is left in place — no false positives; default off).
+**Follow-on:** fold the escalation into the automatic negotiate/ripup loop so
+it engages without a manual command, and re-decide default once the mempool
+overflow trade is understood.
 
 ## A metal *above* the TOP band is still a top metal — config-smell WARNING shipped; auto-override measured & rejected
 
