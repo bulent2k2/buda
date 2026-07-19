@@ -316,3 +316,57 @@ def test_sidecar_selection_exact_match_beats_prefix_collision(tmp_path):
         "exact-hint bundle must receive the selection"
     assert not by_first_net["d_0x_0"].input.topology_pinned, \
         "prefix-collision bundle must NOT be pinned"
+
+
+@pytest.mark.mid
+def test_resumed_planner_persists_selection_at_bdb_cand_index(tmp_path):
+    # Audit P3-01: _persist_planner_output wrote the wrapper's COMPACT
+    # selected_topology_index as the BDB cand_index. On a load_pipeline-
+    # resumed session the two diverge whenever the topology table has holes
+    # — which the keep_user renumbering itself creates (a kept USER row at
+    # ci >= n_new stays put when a later session's pool shrinks). The
+    # UPDATE then marked no row (or the WRONG row) selected and parked the
+    # layer assignments on it: the pinned USER selection silently vanished
+    # from the checkpoint. The persist side must resolve the row by
+    # topo_uid, as the loader already does.
+    import sqlite3
+    bdb = tmp_path / "p301.bdb"
+    setup = (f"open_bdb {bdb}",
+             "def_layer 3 M3 H TOP 20", "def_layer 4 M4 V TOP 20",
+             "add_block blkA 0 0 10 10", "add_block blkB 30 0 40 10")
+
+    def session(*cmds):
+        s = _session()
+        for c in setup + cmds:
+            _run(s, c)
+        return s
+
+    # Session A: generated pool + hand-committed USER candidate, pinned.
+    session("add_bus d[4] blkA.p blkB.q", "run_bundler STRICT",
+            "generate_topologies", "edit_topology 1 new",
+            "edit_add_trunk V 20", "edit_add_stub blkA 0",
+            "edit_add_stub blkB 0", "edit_commit pin")
+    # Session B: regenerate with a knob that shrinks the pool — the kept
+    # USER row stays at its old ci, leaving a cand_index hole.
+    session("add_bus d[4] blkA.p blkB.q", "run_bundler STRICT",
+            "generate_topologies center_mode")
+    con = sqlite3.connect(str(bdb))
+    cis = [r[0] for r in con.execute(
+        "SELECT cand_index FROM topology WHERE bundle_id='1' ORDER BY 1")]
+    con.close()
+    assert cis != list(range(len(cis))), \
+        f"fixture must create a cand_index hole, got {cis}"
+    # Session C: resume and plan — the pinned USER selection must persist
+    # onto the USER row's REAL cand_index.
+    session("load_pipeline", "run_planner 1")
+    con = sqlite3.connect(str(bdb))
+    sel = con.execute("SELECT cand_index, type FROM topology"
+                      " WHERE bundle_id='1' AND is_selected=1").fetchall()
+    layered = con.execute(
+        "SELECT DISTINCT cand_index FROM topology_segment"
+        " WHERE bundle_id='1' AND assigned_layer >= 0").fetchall()
+    con.close()
+    assert len(sel) == 1 and sel[0][1] == "USER", \
+        f"pinned USER selection lost from the checkpoint: {sel}"
+    assert layered == [(sel[0][0],)], \
+        f"assigned layers must land on the selected row: {layered} vs {sel}"
