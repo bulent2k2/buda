@@ -184,6 +184,37 @@ def test_rerun_all_preserves_bottom_up_fixed_copies():
     assert fixed_after == fixed_before
 
 
+def test_leaf_keepouts_cover_layers_patterned_after_first_solve():
+    # Audit P4-01: _install_leaf_keepouts guarded on grid-object IDENTITY,
+    # making it a one-shot — a LOW layer patterned AFTER the first solve
+    # (def_track_pattern reuses the same RoutingGridStack) never received
+    # its implicit solid-leaf-cell keepouts, so DetailedNUTS placed
+    # bit-wires straight across solid cells on that layer and the planner's
+    # signal-track supply over-counted it. The guard must be content-aware.
+    s = _session()
+    for c in ("def_layer 3 M3 H 20", "def_layer 4 M4 H TOP 20",
+              "def_layer 5 M5 V 20", "def_layer 6 M6 V TOP 20",
+              "add_block A 0 0 100 100", "add_block B 500 0 600 100",
+              "add_block C 200 300 300 400",   # solid leaf -> LOW keepout
+              "add_net n0 A.p B.q",
+              "run_bundler STRICT", "generate_topologies",
+              "def_track_pattern 3 0 POWER 2 1 SIGNAL 1 1 SIGNAL 1 1",
+              "run_planner 5 signal_tracks",    # first install: M3 only
+              "def_track_pattern 5 0 POWER 2 1 SIGNAL 1 1 SIGNAL 1 1",
+              "run_nuts", "run_detailed_nuts"):
+        _run(s, c)
+    rg = s.routing_grid
+    # Block C occupies (200,300)-(300,400); count signal tracks in a window
+    # fully inside it. M3 is H (perp=y), M5 is V (perp=x).
+    n3 = rg.get_layer_grid(3).count_signal_tracks_in_span(
+        210.0, 290.0, 310.0, 390.0)
+    n5 = rg.get_layer_grid(5).count_signal_tracks_in_span(
+        310.0, 390.0, 210.0, 290.0)
+    assert n3 == 0, "layer patterned before the first solve lost its keepout"
+    assert n5 == 0, \
+        "layer patterned AFTER the first solve must still get leaf keepouts"
+
+
 def test_sidecar_selection_exact_match_beats_prefix_collision(tmp_path):
     # Audit P1-01: sidecar selections resolved by first-net-name PREFIX, so
     # a selection for bus "d" (hint "d_0") could land on bus "d_0x" (first

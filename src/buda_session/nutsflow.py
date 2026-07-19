@@ -1013,9 +1013,14 @@ class NutsFlowMixin:
         """Install implicit solid-leaf-cell keepouts on every non-TOP layer grid
         so signal tracks over cells are excluded — matching the planner and
         abstract NUTS (Gap 2).  Independent of the order in which blocks,
-        containers, and track patterns were declared.  Guarded per grid object so
-        repeated calls (detailed re-runs, or a `signal_tracks` plan before DNUTS)
-        don't re-add duplicates.  No-op without a routing grid.
+        containers, and track patterns were declared.  Guarded per installed
+        (layer, rect) pair — NOT per grid object — so repeated calls (detailed
+        re-runs, or a `signal_tracks` plan before DNUTS) don't re-add
+        duplicates, while a layer patterned or a block/zone added AFTER the
+        first solve still receives its keepouts on the next call (audit
+        P4-01: the old grid-identity guard made this a one-shot, leaving
+        later-patterned LOW layers routable through solid cells).  No-op
+        without a routing grid.
 
         Also the one grid-sync point for user zones with EMPTY layer_ids, which
         block EVERY layer (keepout-model audit class 3 — the convention shared
@@ -1025,23 +1030,30 @@ class NutsFlowMixin:
         so they are installed here on every defined grid, TOP included."""
         if self.routing_grid is None:
             return
-        if getattr(self, '_leaf_keepouts_grid', None) is self.routing_grid:
-            return
+        if getattr(self, '_leaf_keepouts_grid', None) is not self.routing_grid:
+            self._leaf_keepouts_grid = self.routing_grid
+            self._leaf_keepouts_done = set()
+        done = self._leaf_keepouts_done
+
+        def _add(lid, bbox):
+            key = (lid, bbox.x1, bbox.y1, bbox.x2, bbox.y2)
+            if key not in done:
+                done.add(key)
+                self.routing_grid.add_keepout(lid, bbox.x1, bbox.y1,
+                                              bbox.x2, bbox.y2)
+
         for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL):
             for lid in self.layers.get_layer_ids_by_dir(d):
                 if not self.routing_grid.has_layer(lid):
                     continue
                 for koz in self.fp.get_keepout_zones():
                     if not koz.layer_ids:
-                        self.routing_grid.add_keepout(lid, koz.bbox.x1, koz.bbox.y1,
-                                                      koz.bbox.x2, koz.bbox.y2)
+                        _add(lid, koz.bbox)
                 if self.layers.is_top(lid):
                     continue
                 for koz in self.fp.low_layer_keepouts([lid]):
                     if lid in koz.layer_ids:
-                        self.routing_grid.add_keepout(lid, koz.bbox.x1, koz.bbox.y1,
-                                                      koz.bbox.x2, koz.bbox.y2)
-        self._leaf_keepouts_grid = self.routing_grid
+                        _add(lid, koz.bbox)
 
     @staticmethod
     def _planner_iters(args, default=5):
