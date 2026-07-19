@@ -52,11 +52,22 @@ static bool zone_on_layer(const KeepoutZone& koz, int layer) {
 // True when `pos` falls within the block face extent in the perpendicular axis.
 //   H segment (horiz=true):  pos = y, checked against rect's [y1, y2].
 //   V segment (horiz=false): pos = x, checked against rect's [x1, x2].
-// Returns true if any individual rect of the block covers pos (multi-rect aware).
+// Returns true if a rect of the block covers pos (multi-rect aware).  For a
+// multi-rect block, only rects the wire's ALONG extent actually reaches may
+// vouch for the perpendicular position (audit C9-02): an L-shaped block's
+// arms can have disjoint perp ranges, and a wire whose track sits in rect
+// A's range while its span only touches rect B is a physical miss — the
+// any-rect test read it as on-face.  Along overlap is INCLUSIVE (a stub
+// legitimately ends touching the face line).  along_lo/along_hi accept
+// either order (placed spans may be inverted); pass an unbounded extent to
+// keep the position-only semantics (single-rect blocks are unaffected).
 static bool perp_in_block_face(double pos, bool horiz,
                                 const std::string& block_name,
-                                const Floorplan& fp)
+                                const Floorplan& fp,
+                                double along_lo, double along_hi)
 {
+    const double a_lo = std::min(along_lo, along_hi);
+    const double a_hi = std::max(along_lo, along_hi);
     auto rects = fp.get_block_rects(block_name);
     if (rects.empty()) {
         Rect bb = fp.get_block_bounds(block_name);
@@ -66,7 +77,9 @@ static bool perp_in_block_face(double pos, bool horiz,
     for (const Rect& r : rects) {
         bool ok = horiz ? (pos >= r.y1 && pos <= r.y2)
                         : (pos >= r.x1 && pos <= r.x2);
-        if (ok) return true;
+        bool reach = horiz ? (a_lo <= r.x2 && a_hi >= r.x1)
+                           : (a_lo <= r.y2 && a_hi >= r.y1);
+        if (ok && reach) return true;
     }
     return false;
 }
@@ -331,7 +344,9 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
             bool at_endpoint = (conn.face_coord == cs.along_lo ||
                                 conn.face_coord == cs.along_hi);
             bool face_ok = perp_in_block_face((double)cs.perp_pos, cs.horiz,
-                                              conn.block_name, fp);
+                                              conn.block_name, fp,
+                                              (double)cs.along_lo,
+                                              (double)cs.along_hi);
             if (!at_endpoint || !face_ok) {
                 ConnViolation v;
                 v.kind = ViolationKind::BUSTERM_FACE;
@@ -482,7 +497,8 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
         const ConnSeg& cs = segs[i];
         for (const auto& conn : cs.conns) {
             if (conn.kind != SegConn::BUSTERM) continue;
-            if (!perp_in_block_face(ts.track_position, cs.horiz, conn.block_name, fp)) {
+            if (!perp_in_block_face(ts.track_position, cs.horiz, conn.block_name,
+                                    fp, ts.span_lo, ts.span_hi)) {
                 ConnViolation v;
                 v.kind = ViolationKind::BUSTERM_FACE;
                 v.bundle_id = bundle_id; v.seg_idx = i;
@@ -657,7 +673,9 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                 auto it = ns_map.find({i, bit});
                 if (it == ns_map.end()) continue;
                 if (!perp_in_block_face(it->second->track_position, cs.horiz,
-                                        conn.block_name, fp)) {
+                                        conn.block_name, fp,
+                                        it->second->span_lo,
+                                        it->second->span_hi)) {
                     ConnViolation v;
                     v.kind = ViolationKind::BUSTERM_FACE;
                     v.bundle_id = bundle_id; v.seg_idx = i; v.bit_index = bit;
