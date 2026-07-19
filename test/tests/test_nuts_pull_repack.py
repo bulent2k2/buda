@@ -50,10 +50,18 @@ _RUN_THROUGH = "run_nuts"
 _SKIP_PREFIXES = ("check_design", "visualize", "run_detailed_nuts")
 
 
-def _run_through_nuts(script_name):
+def _run_through_nuts(script_name, loci_opt_out=False):
     """Drive a .buda script in-process up to (and including) run_nuts.  Caller
     must already be cwd'd into the script's directory (so relative `source`
-    lines resolve)."""
+    lines resolve).
+
+    loci_opt_out=True appends `no_hanan_loci` to the generation commands —
+    used by the big.buda fixture ONLY: those tests spec tighten_pulls'
+    aligned-sibling group move on the exact scenario the bug report named
+    (B9/B20/B28 seg indices + measured deviation thresholds), and the
+    hanan_loci default flip re-selects those bundles' topologies, so the
+    scenario is pinned pre-flip via the opt-out.  nuts_group_pull.buda runs
+    with the default (its checked-in pin indexes the default-on pool)."""
     from buda_cli import BudaSession
     s = BudaSession()
     s.script_path = script_name
@@ -63,6 +71,9 @@ def _run_through_nuts(script_name):
             continue
         if line.startswith(_SKIP_PREFIXES):
             continue
+        if loci_opt_out and line.split()[0] in ("generate_topologies",
+                                                "generate_hier_topologies"):
+            line += " no_hanan_loci"
         s.do_command(line)
         if line == _RUN_THROUGH:
             break
@@ -74,14 +85,14 @@ def big_nuts_session():
     cwd = os.getcwd()
     os.chdir(_BIG_DIR)            # so `source ../tracks4top.buda` etc. resolve
     try:
-        yield _run_through_nuts("big.buda")
+        yield _run_through_nuts("big.buda", loci_opt_out=True)
     finally:
         os.chdir(cwd)
 
 
 def _build_big_session():
     """Fresh big-flow session (caller already cwd'd into _BIG_DIR)."""
-    return _run_through_nuts("big.buda")
+    return _run_through_nuts("big.buda", loci_opt_out=True)
 
 
 def _pull_deviation(session):

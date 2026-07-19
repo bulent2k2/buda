@@ -201,20 +201,49 @@ class EditMixin:
             w, existing)
         return added, len(fresh) - added
 
-    def _apply_gen_knobs(self, w, src, dsts, old_pin_uid=None):
+    def _apply_gen_knobs(self, w, src, dsts, old_pin_uid=None,
+                         bulk_knobs=(False, False, False, True)):
         """Honor the bundle's persisted generation-knob memo (v15): re-run the
         knob-configured generator additively after a bulk regeneration, so a
         pool accreted with generate_more_topologies does not silently revert.
-        Re-attempts the uid pin reattach among the appended extras."""
+        Re-attempts the uid pin reattach among the appended extras.
+
+        bulk_knobs = the bulk command's effective (center_mode, double_detour,
+        multi_trunk, hanan_loci) — the knobs the base pool was just generated
+        with.  A `no_hanan_loci` memo token (the default-flip opt-out) cannot
+        be replayed additively (an additive merge only ADDS candidates), so it
+        is honored by REGENERATING the base pool midpoint-only with the bulk's
+        other knobs (pin re-attached by uid, USER candidates kept) before the
+        additive opt-in replay — the exact mirror of how opt-ins round-trip.
+        Loci polarity for the additive part: memo token wins (either
+        polarity), else the bulk setting; see the memo-encoding note at
+        _record_gen_knob_memo (topologies_cmds.py)."""
         if self.bdb is None:
             return
         knobs = self.bdb.bundle_gen_knobs(str(w.input.original_bundle.id))
         if not knobs:
             return
         ks = set(knobs.split())
+        if "no_hanan_loci" in ks:
+            replay_loci = False
+        elif "hanan_loci" in ks:
+            replay_loci = True
+        else:
+            replay_loci = bulk_knobs[3]
+        if "no_hanan_loci" in ks and bulk_knobs[3]:
+            pin_uid = self._pinned_uid(w) or old_pin_uid
+            kept_user = self._user_candidates(w)
+            tg_off = self._make_topo_gen(self.fp, bulk_knobs[0],
+                                         bulk_knobs[1], bulk_knobs[2],
+                                         use_hanan_loci=False)
+            w.input.candidates = tg_off.generate_candidates(src, dsts)
+            self._reset_plan_for_regen(w, pin_uid, kept_user)
+            print(f"  Re-applied knob memo '{knobs}' for bundle "
+                  f"{w.input.original_bundle.id}: regenerated midpoint-only "
+                  f"(no_hanan_loci).")
         tg = self._make_topo_gen(self.fp, "center_mode" in ks,
                                  "double_detour" in ks, "multi_trunk" in ks,
-                                 "hanan_loci" in ks)
+                                 replay_loci)
         pool = list(w.input.candidates)
         seen = {buda.topo_uid(c) for c in pool}
         added = 0

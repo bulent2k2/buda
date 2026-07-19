@@ -27,10 +27,11 @@ check_design topo
 # force a cycle:
 select_topologies 1,2 4
 # Bundle 3 -> TRUNK_H@y225 (the dogleg-forming topology).  Its 1-based index is
-# 6: trunk+MST spines are now re-clipped to their extreme kept landing, so the
+# 12: trunk+MST spines are re-clipped to their extreme kept landing, so the
 # completed TRUNK_V+MST@x275 tree (honest WL 600) sorts just ahead of this
-# TRUNK_H@y225 (629) in the WL-ordered candidate list.
-select_topologies 3 6
+# TRUNK_H@y225 (629) in the WL-ordered candidate list; the hanan_loci default
+# flip grew the pool 20->31 (same candidate by topo_uid, was index 6).
+select_topologies 3 12
 run_planner 1
 
 run_nuts

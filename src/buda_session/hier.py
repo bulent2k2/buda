@@ -933,7 +933,7 @@ class HierMixin:
 
     def _generate_hier_topo_one(self, w, use_center, use_double_detour,
                                 fp_cache, comps_by_name, use_multi_trunk=False,
-                                additive=False, use_hanan_loci=False):
+                                additive=False, use_hanan_loci=True):
         """Generate topology candidates for a single HBundle wrapper.
 
         Updates w.input.candidates in place. Returns candidate count.
@@ -941,8 +941,10 @@ class HierMixin:
         comps_by_name is {name: ComponentRow} from bdb.all_components().
         use_multi_trunk adds two-level BITRUNK_HVH/VHV datapath trees (opt-in),
         as in the flat generate_topologies.
-        use_hanan_loci also samples trunk loci ON in-bbox Hanan lines (opt-in),
-        as in the flat generate_topologies.
+        use_hanan_loci samples trunk loci ON in-bbox Hanan lines as well as at
+        channel midpoints (DEFAULT-ON since the hanan_loci default flip; pass
+        False — the `no_hanan_loci` command flag / knob-memo opt-out — for a
+        midpoint-only pool), as in the flat generate_topologies.
 
         additive=True is the generate_more_topologies contract: the fresh
         candidates are MERGED into the existing pool (topo_uid dedup + WL
@@ -1096,18 +1098,43 @@ class HierMixin:
         persisted generation-knob memo (v15) by re-running the 3-case hier
         generator ADDITIVELY after a bulk regeneration, so an HBundle pool
         accreted with generate_more_topologies does not silently revert on
-        the next generate_hier_topologies.  Re-attempts the uid pin
-        reattach among the appended extras."""
+        the next generate_hier_topologies.  A `no_hanan_loci` memo token
+        (the default-flip opt-out) is replayed by REGENERATING the bundle's
+        base pool midpoint-only first — an additive merge can only add, so
+        the opt-out round-trips via replacement, exactly mirroring how the
+        opt-ins round-trip via accretion.  Re-attempts the uid pin reattach
+        among the appended extras."""
         if self.bdb is None:
             return
         knobs = self.bdb.bundle_gen_knobs(str(w.input.original_bundle.id))
         if not knobs:
             return
         ks = set(knobs.split())
+        # Loci polarity (see the memo-encoding note at _record_gen_knob_memo,
+        # topologies_cmds.py): a memo token wins for this bundle — either
+        # polarity — else the bulk command's effective setting applies.
+        bulk = getattr(self, "_hier_gen_knobs", (False, False, False, True))
+        if "no_hanan_loci" in ks:
+            replay_loci = False
+        elif "hanan_loci" in ks:
+            replay_loci = True
+        else:
+            replay_loci = bulk[3]
+        if "no_hanan_loci" in ks and bulk[3]:
+            # The opt-OUT cannot be replayed additively (an additive merge
+            # can only ADD candidates) — REGENERATE this bundle's base pool
+            # midpoint-only (bulk's other knobs kept; pin re-attached by uid,
+            # USER candidates kept by the non-additive install).
+            self._generate_hier_topo_one(
+                w, bulk[0], bulk[1], fp_cache, comps_by_name, bulk[2],
+                additive=False, use_hanan_loci=False)
+            print(f"  Re-applied knob memo '{knobs}' for bundle "
+                  f"{w.input.original_bundle.id}: regenerated midpoint-only "
+                  f"(no_hanan_loci).")
         added = self._generate_hier_topo_one(
             w, "center_mode" in ks, "double_detour" in ks, fp_cache,
             comps_by_name, "multi_trunk" in ks, additive=True,
-            use_hanan_loci="hanan_loci" in ks)
+            use_hanan_loci=replay_loci)
         if added:
             print(f"  Re-applied knob memo '{knobs}' for bundle "
                   f"{w.input.original_bundle.id}: +{added} candidate(s).")
@@ -1329,7 +1356,9 @@ class HierMixin:
                 replicas.setdefault(b.parent_id, []).append(w)
         next_id = max((w.input.original_bundle.id
                        for w in self.bundles), default=-1) + 1
-        knobs = getattr(self, "_hier_gen_knobs", (False, False, False, False))
+        # Generation knobs remembered from generate_hier_topologies; the
+        # fallback keeps hanan_loci ON (its post-flip default).
+        knobs = getattr(self, "_hier_gen_knobs", (False, False, False, True))
         ocache, fp_cache = {}, {}
 
         # Pass 1 — classify per cell_context against the per-cell
@@ -2888,8 +2917,14 @@ class HierMixin:
         return result, expansion_map
 
     def _make_topo_gen(self, fp, use_center=False, use_double_detour=False,
-                       use_multi_trunk=False, use_hanan_loci=False):
-        """Create a TopologyGenerator on fp with the current layer stack."""
+                       use_multi_trunk=False, use_hanan_loci=True):
+        """Create a TopologyGenerator on fp with the current layer stack.
+
+        use_hanan_loci defaults to True (the hanan_loci default flip) and is
+        ALWAYS stamped on the generator explicitly, so a caller that resolved
+        an opt-out (`no_hanan_loci` command flag or a per-bundle
+        `no_hanan_loci` knob memo) gets a midpoint-only generator regardless
+        of the C++ member default."""
         tg = buda.TopologyGenerator(fp)
         h = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
         v = self.layers.get_top_layer(buda.LayerDir.VERTICAL)
@@ -2912,8 +2947,9 @@ class HierMixin:
             tg.set_double_detour(True)
         if use_multi_trunk:
             tg.set_multi_trunk(True)
-        if use_hanan_loci:
-            tg.set_hanan_loci(True)
+        # Default-on knob: set unconditionally (see docstring) so an opt-out
+        # actually reaches the generator.
+        tg.set_hanan_loci(bool(use_hanan_loci))
         return tg
 
     def _make_layer_names(self):

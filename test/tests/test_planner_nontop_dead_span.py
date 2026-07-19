@@ -56,7 +56,12 @@ def _run_bighalf(gate):
         s.do_command(f"source {_ROOT / 'flow/tracks/tracks4top.buda'}")
         s.do_command(f"source {_ROOT / 'flow/big_data_test/tc3a_flat_5x.buda'}")
         s.do_command("run_bundler")
-        s.do_command("generate_topologies")
+        # Midpoint-only pool: this test measures the PLANNER's dead-span gate
+        # against the fixture the 566->135 numbers were collected on; the
+        # hanan_loci default flip grows the pool (bigHalf no-rr baseline opens
+        # 626 -> 283) and would invalidate the measured thresholds, so the
+        # generation corpus is pinned pre-flip via the opt-out.
+        s.do_command("generate_topologies no_hanan_loci")
         if gate:
             s.do_command("set_planner_param nontop_dead_span_gate 1")
         s.do_command("run_planner signal_tracks")

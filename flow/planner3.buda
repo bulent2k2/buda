@@ -10,7 +10,14 @@ add_bus b[16] rcv1.o drv1.i,rcv2.i
 add_bus c[16] rcv2.o drv1.i,rcv1.i
 
 run_bundler strict
-generate_topologies
+# Midpoint-only pool (hanan_loci default-flip opt-out): this flow is the
+# regression vehicle for the window-aware capacity clamp — bundles 1 and 2
+# must CONTEND for the same TRUNK_H@y305 slide window (asserted by
+# test_flow_scripts.py::test_planner3_window_capacity_avoids_double_booked_trunk
+# and the test_nuts_alignment.py scenario pins).  Under the default-on pool
+# the planner auto-picks the loci candidate TRUNK_H@y230 for bundle 1 and the
+# double-booking scenario dissolves, so the scenario is pinned pre-flip.
+generate_topologies no_hanan_loci
 run_planner
 run_nuts
 run_detailed_nuts

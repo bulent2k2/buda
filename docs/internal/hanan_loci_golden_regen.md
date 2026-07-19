@@ -12,6 +12,15 @@ order-canonical comparison (`tools/topo_snapshot.py::canonicalize`, PR #327);
 the content regen stays **reference-host-owned** — goldens must only ever be
 rewritten on the host that owns them, never on a drive-by container.
 
+**STATUS (2026-07-19): the flip has LANDED on branch
+`claude/hanan-loci-default-flip`** (default `allow_hanan_loci_ = true`,
+`no_hanan_loci` opt-out, pin remaps applied, spec tests inverted — see
+[hanan_loci_flip_audit.md](hanan_loci_flip_audit.md), APPLIED).  The
+`--write` re-baseline is the branch's ONE remaining step and lands **on that
+same branch** (the owner runs it on the reference host and pushes) — use the
+abbreviated procedure at the end of this doc, not the from-scratch flip
+walk-through in the middle (kept for the record).
+
 This doc is the turnkey procedure for that regen, built around
 `tools/regen_goldens.py`:
 
@@ -123,6 +132,48 @@ bin/bb mid
 
 # 6. Commit the goldens
 git add test/tests/data/topo_golden && git commit -m "topo goldens: re-baseline for hanan_loci default-on"
+```
+
+## The abbreviated procedure for `claude/hanan-loci-default-flip`
+
+The flip branch already carries steps 2–5's tree changes, so the reference
+host only validates and re-baselines:
+
+```bash
+# 0. Host-validity check on PRE-flip main (the designed tripwire):
+git checkout main && git pull && bin/bb
+PYTHONPATH=build:tools python3 tools/regen_goldens.py --verify   # must be all OK / OK (order-only)
+
+# 1. The flip branch:
+git checkout claude/hanan-loci-default-flip && git pull && bin/bb
+PYTHONPATH=build:tools python3 tools/regen_goldens.py --verify
+#    Expected: CONTENT-DIFFERS on exactly the recorded 6 flows
+#    (four_blocks, dogleg2, comprehensive_demo, big digest, b4_bus_077,
+#    rnr_mix digest), the other 4 OK — matching the branch's own recorded
+#    --verify run.  A different list = host or tree drift; STOP.
+
+# 2. Re-baseline (clean tree required) and gate:
+git status --porcelain                                            # must be empty
+PYTHONPATH=build:tools python3 tools/regen_goldens.py --write
+pytest test/tests/test_topo_analysis_golden.py -o addopts="" -m "not slow" -v
+
+# 2b. The NUTS placement goldens shift too (tools/nuts_snapshot.py —
+#     discovered by the flip branch's mid-tier run, which the pre-flip audit
+#     did not cover): the changed pools re-select topologies in
+#     flow/four_blocks.buda and demo/comprehensive_demo.buda (mid tier), and
+#     the slow-tier big.buda / rnr/mix.buda digests will shift for the same
+#     reason.  Same ownership rule: re-baseline ONLY on this host, and
+#     review the diff (expect changes confined to those flows).
+PYTHONPATH=build:tools python3 tools/nuts_snapshot.py
+git diff --stat test/tests/data/nuts_golden
+
+bin/bb mid          # now fully green
+bin/bb slow         # the flip's full-tier gate (pending item 6 of the audit)
+
+# 3. Commit onto the SAME branch and push:
+git add test/tests/data/topo_golden test/tests/data/nuts_golden
+git commit -m "goldens: re-baseline topo + nuts placement for hanan_loci default-on"
+git push origin claude/hanan-loci-default-flip
 ```
 
 ## Rollback

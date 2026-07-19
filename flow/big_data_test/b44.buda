@@ -23,8 +23,9 @@ report_wl
 
 # simple L-topo comes much later (topo WL = 4010; TRUNK_V@x700 — the
 # structural (wl, nsegs, type) tie-break sorts this 2-seg candidate ahead
-# of its 4010-tie siblings, so it sits at index 8 now, not 10)
-select_topology 1 8
+# of its 4010-tie siblings; index 15 since the hanan_loci default flip grew
+# the pool 23->35, same candidate by topo_uid)
+select_topology 1 15
 run_planner
 run_nuts
 run_detailed_nuts

@@ -12,10 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The `hanan_loci` generation knob (wishlist-topo "Nominal-WL comparability",
-piece (a)): ALSO sample n-pin trunk loci ON the in-bbox Hanan lines, not just
-at channel midpoints, so a block-edge-aligned trunk can nominal at the
-geometric WL floor.
+"""Hanan-line trunk loci (wishlist-topo "Nominal-WL comparability",
+piece (a)): sample n-pin trunk loci ON the in-bbox Hanan lines as well as at
+channel midpoints, so a block-edge-aligned trunk can nominal at the geometric
+WL floor.
+
+DEFAULT-ON since the default flip (allow_hanan_loci_ = true, src/topology.h):
+the default pool CONTAINS the Hanan-line loci, `no_hanan_loci` is the
+per-command opt-out that restores the midpoint-only pool, and the legacy
+`hanan_loci` flag remains accepted as a keep-on no-op.
 
 Fixture = the b44 block layout (flow/big_data_test/b44.buda): the WL-optimal
 V-trunk locus is x=1200 — io_pad_tl's right edge, a Hanan LINE — which the
@@ -54,8 +59,11 @@ def _gen(gen_cmd):
     return s.bundles[0].input.candidates
 
 
-def test_hanan_loci_emits_edge_aligned_trunk_at_wl_floor():
-    cands = _gen("generate_topologies hanan_loci")
+def test_default_pool_emits_edge_aligned_trunk_at_wl_floor():
+    """The flipped DEFAULT: plain generation samples the Hanan-line loci, so
+    the b44 fixture emits TRUNK_V@x1200 at the 3510 geometric floor with no
+    knob at all."""
+    cands = _gen("generate_topologies")
     at_1200 = [t for t in cands
                if "TRUNK_V" in t.type and t.trunk_location == 1200]
     assert at_1200, (
@@ -65,21 +73,70 @@ def test_hanan_loci_emits_edge_aligned_trunk_at_wl_floor():
         [(t.type, t.estimated_wirelength) for t in at_1200])
 
 
-def test_hanan_loci_is_opt_in_default_pool_unchanged():
-    """Default generation must not change: the knob renumbers the WL-sorted
-    candidate pool that checked-in flows pin by index, so it is opt-in."""
-    base = _gen("generate_topologies")
+def test_no_hanan_loci_restores_midpoint_only_pool():
+    """`no_hanan_loci` is the per-command opt-out: the pool reverts to
+    midpoint-only trunk loci (the pre-flip default), a strict subset of the
+    default pool."""
+    base = _gen("generate_topologies no_hanan_loci")
     assert not any("TRUNK_V" in t.type and t.trunk_location == 1200
                    for t in base)
     best_plain_v = min(t.estimated_wirelength for t in base
                        if t.type.startswith("TRUNK_V@"))
-    with_knob = _gen("generate_topologies hanan_loci")
-    best_knob_v = min(t.estimated_wirelength for t in with_knob
-                      if t.type.startswith("TRUNK_V@"))
-    assert best_knob_v == WL_FLOOR
-    assert best_knob_v <= best_plain_v
-    # Superset property: every default candidate locus is still sampled.
-    assert len(with_knob) >= len(base)
+    default = _gen("generate_topologies")
+    best_default_v = min(t.estimated_wirelength for t in default
+                         if t.type.startswith("TRUNK_V@"))
+    assert best_default_v == WL_FLOOR
+    assert best_default_v <= best_plain_v
+    # Superset property: every midpoint-only locus is still sampled by the
+    # default (loci only ADD candidates).
+    assert len(default) >= len(base)
+
+
+def test_no_hanan_loci_memo_round_trips_bulk_regeneration(tmp_path):
+    """The v15 knob-memo opt-out contract (see _record_gen_knob_memo,
+    src/buda_cmds/topologies_cmds.py): a pool generated per-bundle with
+    `no_hanan_loci` stays midpoint-only after a bulk generate_topologies
+    replays memos, and an explicit `hanan_loci` flips the memo polarity
+    back."""
+    from buda_cli import BudaSession
+    s = BudaSession()
+    bdb = str(tmp_path / "loci_memo.bdb")
+    with redirect_stdout(io.StringIO()):
+        for line in [f"open_bdb {bdb}"] + B44_SETUP + ["generate_topologies"]:
+            s.do_command(line)
+
+    def has_1200():
+        return any("TRUNK_V" in t.type and t.trunk_location == 1200
+                   for t in s.bundles[0].input.candidates)
+
+    def memo():
+        bid = str(s.bundles[0].input.original_bundle.id)
+        return s.bdb.bundle_gen_knobs(bid)
+
+    assert has_1200()                       # default-on pool
+    with redirect_stdout(io.StringIO()):
+        s.do_command("generate_topologies_for_bundle bus_060 no_hanan_loci")
+    assert not has_1200() and memo() == "no_hanan_loci"
+    with redirect_stdout(io.StringIO()):
+        s.do_command("generate_topologies")  # bulk regen — memo must hold
+    assert not has_1200(), "no_hanan_loci memo did not survive bulk regen"
+    with redirect_stdout(io.StringIO()):
+        s.do_command("generate_topologies_for_bundle bus_060 hanan_loci")
+    assert has_1200() and memo() == "hanan_loci"   # polarity flipped back
+    with redirect_stdout(io.StringIO()):
+        s.do_command("generate_topologies")
+    assert has_1200()
+
+
+def test_legacy_hanan_loci_flag_is_a_keep_on_noop():
+    """Backward compatibility: pre-flip scripts (and v15 knob memos) passing
+    `hanan_loci` must keep working — the flag is accepted and the pool is
+    identical to the plain default-on pool."""
+    import buda
+    legacy = _gen("generate_topologies hanan_loci")
+    default = _gen("generate_topologies")
+    assert ([buda.topo_uid(t) for t in legacy]
+            == [buda.topo_uid(t) for t in default])
 
 
 # ---------------------------------------------------------------------------
@@ -100,14 +157,14 @@ def _given_b44_layout(ctx):
     ctx['layout'] = B44_SETUP
 
 
-@when("generate_topologies samples trunk loci with the hanan_loci knob")
-def _when_gen_with_knob(ctx):
-    ctx['candidates'] = _gen("generate_topologies hanan_loci")
-
-
-@when("generate_topologies samples trunk loci without the hanan_loci knob")
-def _when_gen_without_knob(ctx):
+@when("generate_topologies samples trunk loci with the default settings")
+def _when_gen_default(ctx):
     ctx['candidates'] = _gen("generate_topologies")
+
+
+@when("generate_topologies samples trunk loci with the no_hanan_loci opt-out")
+def _when_gen_opt_out(ctx):
+    ctx['candidates'] = _gen("generate_topologies no_hanan_loci")
 
 
 @then("a candidate at the Hanan-line locus exists with its nominal at the geometric floor")

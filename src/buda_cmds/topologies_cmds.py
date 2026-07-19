@@ -32,6 +32,67 @@ def _endpoint_label(src, dsts, fanin=False):
     return f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
 
 
+# All keyword flags a generation command accepts (used to split them from the
+# positional hint/bundle_id arguments).
+_GEN_FLAGS = ("center_mode", "double_detour", "multi_trunk",
+              "hanan_loci", "no_hanan_loci")
+
+
+def _parse_gen_flags(args):
+    """Parse a generation command's keyword flags.
+
+    Returns (use_center, use_double_detour, use_multi_trunk, use_hanan_loci,
+    loci_explicit).  `hanan_loci` is DEFAULT-ON since the default flip
+    (TopologyGenerator::allow_hanan_loci_, src/topology.h): `no_hanan_loci`
+    is the per-command opt-out (midpoint-only trunk loci), and the legacy
+    `hanan_loci` flag remains accepted as a keep-on no-op so pre-flip
+    scripts and v15 knob memos keep working.  If both are passed,
+    `no_hanan_loci` wins.  loci_explicit is True when either loci flag was
+    given — the per-bundle commands record the explicit polarity in the
+    knob memo then (see _record_gen_knob_memo)."""
+    return ("center_mode" in args,
+            "double_detour" in args,
+            "multi_trunk" in args,
+            "no_hanan_loci" not in args,
+            ("hanan_loci" in args) or ("no_hanan_loci" in args))
+
+
+def _record_gen_knob_memo(session, wrappers, tokens):
+    """THE v15 per-bundle generation-knob memo writer (BDB
+    `bundle_gen_knobs`; every write site goes through here).
+
+    ENCODING: a space-separated, sorted SET of knob tokens per bundle id —
+    the opt-in tokens `center_mode` / `double_detour` / `multi_trunk` /
+    `hanan_loci`, plus the default-flip opt-OUT token `no_hanan_loci`.
+    Merging is a union with any previously recorded tokens, EXCEPT that
+    `hanan_loci` and `no_hanan_loci` are mutually exclusive in the store:
+    recording either polarity discards the other, so the LAST explicit
+    choice wins (post-flip, a stored `hanan_loci` is otherwise a keep-on
+    no-op, retained for pre-flip v15 memos).
+
+    REPLAY (the bulk generate_[hier_]topologies via _apply_gen_knobs /
+    _apply_hier_gen_knobs): opt-in tokens re-generate ADDITIVELY (uid-dedup
+    merge, today's semantics), while `no_hanan_loci` re-generates the
+    bundle's BASE pool midpoint-only — a replacement, because an additive
+    merge can only ADD and cannot remove the default-on loci candidates —
+    so an explicit opt-out round-trips across a bulk regeneration exactly
+    like the opt-ins round-trip: a pool generated with `no_hanan_loci`
+    stays midpoint-only after the bulk replays memos.
+
+    No-op without an open BDB or with no tokens."""
+    if session.bdb is None or not tokens:
+        return
+    new = set(tokens)
+    for w in wrappers:
+        bid = str(w.input.original_bundle.id)
+        merged = set(session.bdb.bundle_gen_knobs(bid).split()) | new
+        if "no_hanan_loci" in new:
+            merged.discard("hanan_loci")
+        elif "hanan_loci" in new:
+            merged.discard("no_hanan_loci")
+        session.bdb.set_bundle_gen_knobs(bid, " ".join(sorted(merged)))
+
+
 def cmd_set_prune_dominated(session, cmd, args, cmd_line):
     # Usage: set_prune_dominated [on|off]
     # Opt-in WL-dominance candidate pruning (default OFF — flows are
@@ -56,20 +117,17 @@ def cmd_set_prune_dominated(session, cmd, args, cmd_line):
 
 
 def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
-    # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [hanan_loci]
+    # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
     # Single dst  → 2-pin L/Z/U candidates
     # Multiple dst → multicast trunk+branch candidates
     # Append "center_mode"    to use block centres instead of busterm faces.
     # Append "double_detour"  to include UU_VHV / UU_HVH high-congestion variants.
     # Append "multi_trunk"    to add two-level BITRUNK_HVH/VHV datapath trees.
-    # Append "hanan_loci"     to also sample trunk loci ON in-bbox Hanan lines.
-    use_center        = "center_mode"   in args
-    use_double_detour = "double_detour" in args
-    use_multi_trunk   = "multi_trunk"   in args
-    use_hanan_loci    = "hanan_loci"    in args
-    pos_args = [a for a in args
-                if a not in ("center_mode", "double_detour", "multi_trunk",
-                             "hanan_loci")]
+    # Append "no_hanan_loci"  for midpoint-only trunk loci (Hanan-line loci
+    #                         are the default; "hanan_loci" = keep-on no-op).
+    (use_center, use_double_detour, use_multi_trunk,
+     use_hanan_loci, loci_explicit) = _parse_gen_flags(args)
+    pos_args = [a for a in args if a not in _GEN_FLAGS]
     if not pos_args:
         print("Error: generate_topologies_for_bundle requires a hint")
         return
@@ -77,6 +135,7 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
     topo_gen = session._make_topo_gen(session.fp, use_center, use_double_detour,
                                    use_multi_trunk, use_hanan_loci)
     found = False
+    remembered = []
     for w in session.bundles:
         net_name = w.input.original_bundle.get_net_names()[0]
         if net_name.startswith(hint):
@@ -103,14 +162,23 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
                       f"{', '.join(dsts)} "
                       f"(coincident / corner-touch / one contained in the other?).")
             session._prune_dominated_pools([w])
+            remembered.append(w)
             found = True
     if not found: print(f"Warning: Could not find bundle matching hint {hint}")
-    elif session._persist_topologies():
-        print("[BDB] re-persisted candidate topologies to the open BDB.")
+    else:
+        # An explicit loci polarity is recorded in the knob memo so a later
+        # bulk generate_topologies cannot silently flip this bundle's pool
+        # back (the opt-out especially — see _record_gen_knob_memo).
+        if loci_explicit:
+            _record_gen_knob_memo(
+                session, remembered,
+                ["hanan_loci" if use_hanan_loci else "no_hanan_loci"])
+        if session._persist_topologies():
+            print("[BDB] re-persisted candidate topologies to the open BDB.")
 
 
 def cmd_generate_more_topologies(session, cmd, args, cmd_line):
-    # Usage: generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk] [hanan_loci]
+    # Usage: generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
     # ADDITIVE variant of generate_topologies_for_bundle /
     # generate_topologies_for_hbundle (Phase E2 of topo_conn_unification.md):
     # run the generator with the given knobs and merge the new candidates
@@ -131,13 +199,13 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
     # Accretion happens on PRE-expansion templates: after run_planner hier
     # the pools live on per-instance expanded wrappers, so re-run the flow
     # from generate_hier_topologies instead.
-    use_center        = "center_mode"   in args
-    use_double_detour = "double_detour" in args
-    use_multi_trunk   = "multi_trunk"   in args
-    use_hanan_loci    = "hanan_loci"    in args
-    pos_args = [a for a in args
-                if a not in ("center_mode", "double_detour", "multi_trunk",
-                             "hanan_loci")]
+    #
+    # hanan_loci is default-ON since the default flip; "no_hanan_loci"
+    # generates the accretion midpoint-only (a subset — additive, so it
+    # removes nothing) AND records the opt-out in the knob memo below.
+    (use_center, use_double_detour, use_multi_trunk,
+     use_hanan_loci, loci_explicit) = _parse_gen_flags(args)
+    pos_args = [a for a in args if a not in _GEN_FLAGS]
     if not pos_args:
         print("Error: generate_more_topologies requires a hint")
         return
@@ -231,27 +299,29 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
             print(f"Warning: Could not find bundle matching hint {hint}")
             return
     # Per-bundle knob memo (v15): a resumed bulk generate_[hier_]topologies
-    # re-applies these knobs additively, so the accreted pool does not
-    # silently revert (Phase E2b).
-    knobs = " ".join(k for k, on in (
+    # re-applies these knobs — opt-ins additively, the no_hanan_loci opt-out
+    # by midpoint-only base regeneration — so the accreted pool does not
+    # silently revert (Phase E2b).  Encoding: _record_gen_knob_memo.
+    tokens = [k for k, on in (
         ("center_mode", use_center),
         ("double_detour", use_double_detour),
         ("multi_trunk", use_multi_trunk),
-        ("hanan_loci", use_hanan_loci)) if on)
-    if session.bdb is not None and knobs:
-        for w in targets:
-            bid = str(w.input.original_bundle.id)
-            prev = set(session.bdb.bundle_gen_knobs(bid).split())
-            session.bdb.set_bundle_gen_knobs(
-                bid, " ".join(sorted(prev | set(knobs.split()))))
+        ("hanan_loci", loci_explicit and use_hanan_loci),
+        ("no_hanan_loci", loci_explicit and not use_hanan_loci)) if on]
+    _record_gen_knob_memo(session, targets, tokens)
     if session._persist_topologies():
         print("[BDB] re-persisted candidate topologies to the open BDB.")
 
 
 def cmd_generate_topologies(session, cmd, args, cmd_line):
-    # Usage: generate_topologies [center_mode] [double_detour] [multi_trunk] [hanan_loci]
+    # Usage: generate_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
     # Generates topologies for every bundle produced by run_bundler,
     # deriving src/dst block names from the netlist automatically.
+    # Hanan-line trunk loci are DEFAULT-ON (the hanan_loci default flip);
+    # "no_hanan_loci" opts this run out (midpoint-only), "hanan_loci" is a
+    # keep-on no-op for backward compatibility.  Bulk flags are
+    # per-invocation (not sticky); a per-bundle no_hanan_loci knob memo is
+    # honored in _apply_gen_knobs.
     if not session.bundles:
         if session._net_endpoints:
             print("Warning: no bundles to generate topologies for — nets are "
@@ -261,12 +331,12 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
             print("Warning: no bundles to generate topologies for — define nets "
                   "with add_net/add_bus, then run `run_bundler` first.")
         return
-    use_center        = "center_mode"   in args
-    use_double_detour = "double_detour" in args
-    use_multi_trunk   = "multi_trunk"   in args
-    use_hanan_loci    = "hanan_loci"    in args
+    (use_center, use_double_detour, use_multi_trunk,
+     use_hanan_loci, _loci_explicit) = _parse_gen_flags(args)
     topo_gen = session._make_topo_gen(session.fp, use_center, use_double_detour,
                                    use_multi_trunk, use_hanan_loci)
+    bulk_knobs = (use_center, use_double_detour, use_multi_trunk,
+                  use_hanan_loci)
     for w in session.bundles:
         net_name = w.input.original_bundle.get_net_names()[0]
         ep = session._bundle_endpoints(w)
@@ -279,7 +349,8 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
         kept_user = session._user_candidates(w)
         w.input.candidates = topo_gen.generate_candidates(src, dsts)
         session._reset_plan_for_regen(w, old_pin_uid, kept_user)
-        session._apply_gen_knobs(w, src, dsts, old_pin_uid)
+        session._apply_gen_knobs(w, src, dsts, old_pin_uid,
+                                 bulk_knobs=bulk_knobs)
         label = _endpoint_label(src, dsts, fanin)
         print(f"Generated {len(w.input.candidates)} topologies for bundle "
               f"{w.input.original_bundle.id} ({label}) {session._bundle_nets_suffix(w)}")
@@ -311,7 +382,7 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
 
 
 def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
-    # generate_hier_topologies [center_mode] [double_detour] [multi_trunk] [hanan_loci]
+    # generate_hier_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
     # Generates topology candidates for all HBundles produced by
     # run_hier_bundler.  Three cases per bundle:
     #   (a) cell-level (cell_context set)     → cell-local floorplan
@@ -323,12 +394,14 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
         print("Warning: no HBundles to generate topologies for — run "
               "`run_hier_bundler` first.")
         return
-    use_center        = "center_mode"   in args
-    use_double_detour = "double_detour" in args
-    use_multi_trunk   = "multi_trunk"   in args
-    use_hanan_loci    = "hanan_loci"    in args
+    # Hanan-line trunk loci are DEFAULT-ON (the hanan_loci default flip);
+    # "no_hanan_loci" opts this run out, "hanan_loci" is a keep-on no-op.
+    (use_center, use_double_detour, use_multi_trunk,
+     use_hanan_loci, _loci_explicit) = _parse_gen_flags(args)
     # Remembered so a rotation-class clone created later (at run_planner
-    # hier) generates its candidates with the same knobs.
+    # hier) generates its candidates with the same knobs, and so the knob
+    # memo replay (_apply_hier_gen_knobs) knows this run's effective loci
+    # setting.
     session._hier_gen_knobs = (use_center, use_double_detour, use_multi_trunk,
                                use_hanan_loci)
 
@@ -365,7 +438,11 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
 
 
 def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
-    # Usage: generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk] [hanan_loci]
+    # Usage: generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
+    # ("no_hanan_loci" opts out of the default-on Hanan-line trunk loci;
+    #  "hanan_loci" = keep-on no-op.  An explicit polarity is recorded in the
+    #  knob memo so a bulk generate_hier_topologies can't silently flip the
+    #  pool back — see _record_gen_knob_memo.)
     if not args:
         print("Error: generate_topologies_for_hbundle requires a bundle_id"); return
     if session.bdb is None:
@@ -374,10 +451,8 @@ def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
         bid = int(args[0])
     except ValueError:
         print(f"Error: invalid bundle_id {args[0]!r}"); return
-    use_center        = "center_mode"   in args[1:]
-    use_double_detour = "double_detour" in args[1:]
-    use_multi_trunk   = "multi_trunk"   in args[1:]
-    use_hanan_loci    = "hanan_loci"    in args[1:]
+    (use_center, use_double_detour, use_multi_trunk,
+     use_hanan_loci, loci_explicit) = _parse_gen_flags(args[1:])
     target_w = next((w for w in session.bundles if w.input.original_bundle.id == bid), None)
     if target_w is None:
         orig_w = next((w for w in session._hier_bundles_orig
@@ -394,6 +469,10 @@ def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
                                       fp_cache, comps_by_name, use_multi_trunk,
                                       use_hanan_loci=use_hanan_loci)
     session._prune_dominated_pools([target_w])
+    if loci_explicit:
+        _record_gen_knob_memo(
+            session, [target_w],
+            ["hanan_loci" if use_hanan_loci else "no_hanan_loci"])
     print(f"generate_topologies_for_hbundle: bundle {bid} — {n} candidates")
     if session._persist_topologies():
         print("[BDB] re-persisted candidate topologies to the open BDB.")

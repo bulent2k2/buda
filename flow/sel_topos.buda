@@ -20,7 +20,9 @@ add_keepout 600 250 650 350 M6
 #in json:
 #select_topology 1 3
 
-select_topology 2 4
+# TRUNK_V+MST@x290; index 9 since the hanan_loci default flip grew the pool
+# 26->38 (same candidate by topo_uid, was index 4).
+select_topology 2 9
 
 #planner selects topo 1 without keepout:
 #select_topology 3 1

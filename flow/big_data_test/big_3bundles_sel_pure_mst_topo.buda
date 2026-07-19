@@ -161,10 +161,12 @@ run_bundler
 generate_topologies
 
 # Select the first standalone MST (MST_HV/MST_VH) candidate for each bundle.
-# bundle 1 (bus_069/old-46): idx7  bundle 2 (bus_047/old-50): idx10  bundle 3 (bus_030/old-57): idx7
-select_topology 1 7
-select_topology 2 10
-select_topology 3 7
+# bundle 1 (bus_069/old-46): idx14  bundle 2 (bus_047/old-50): idx20  bundle 3 (bus_030/old-57): idx18
+# (indices re-collected for the hanan_loci default flip — pools 44->71 /
+#  33->52 / 33->54, same candidates by topo_uid)
+select_topology 1 14
+select_topology 2 20
+select_topology 3 18
 run_planner
 run_nuts
 check_design nuts

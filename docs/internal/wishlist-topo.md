@@ -304,7 +304,65 @@ pool / among selected):*
 | bigHalf healed | base | 2488 | 0 | 80 | 15408926 | 0 / 0 |
 | bigHalf healed | loci | 3950 | 0 | 63 | 14716562 (−4.5%) | 0 / 0 |
 
-**Updated flip verdict:** the wins SURVIVE the gate — and are now honest
+**FLIPPED — pending goldens (2026-07-19, branch
+`claude/hanan-loci-default-flip`).**  `allow_hanan_loci_ = true`
+(src/topology.h); every generation command grew a `no_hanan_loci` opt-out
+(the legacy `hanan_loci` flag stays accepted as a keep-on no-op, and the
+v15 knob memo round-trips the opt-out — encoding documented at
+`_record_gen_knob_memo`, src/buda_cmds/topologies_cmds.py); the 20-pin
+remap was re-collected against the gated pools and applied (all 112 pins
+uid-verified identical — [hanan_loci_flip_audit.md](hanan_loci_flip_audit.md),
+now APPLIED); the two opt-in spec tests were inverted.  Remaining: the
+6-golden regen on the reference host
+([hanan_loci_golden_regen.md](hanan_loci_golden_regen.md)).
+
+*Final flip table (default-on vs `no_hanan_loci`, endpoints as checked in
+incl. remapped pins; ov = NUTS overlaps, opens = DNUTS unplaced bits):*
+
+| flow / endpoint | side | pool | ov | opens | det WL |
+|---|---|---:|---:|---:|---:|
+| b44 pinned (as checked in) | loci | 35 | 0 | 0 | 193376 |
+| | no_loci (pre-flip pin 8) | 23 | 0 | 0 | 193376 |
+| b44 planner-free (no pin tail) | loci | 35 | 0 | 0 | 193376 (picks TRUNK_V@x1200, the floor locus) |
+| | no_loci | 23 | 0 | 0 | 188695 (picks TRUNK_H@y11330) |
+| comprehensive_demo | loci | 243 | 0 | 0 | 40888 (+0.05%) |
+| | no_loci | 154 | 0 | 0 | 40868 |
+| big2/b4_bus_077 | loci | 21 | 0 | 0 | 191669 (byte-identical) |
+| | no_loci | 17 | 0 | 0 | 191669 |
+| **rnr/mix (hier, healed)** | **loci** | **1675** | **0** | **42** | **800426 (+0.13%)** |
+| | no_loci | 1237 | 0 | 0 | 799419 |
+
+**⚠ rnr/mix REGRESSES under default-on — said loudly, not buried:** the
+audit's QoR caveat is CONFIRMED post-gate.  mix's fully-healed endpoint
+(2× negotiate_congestion + ripup_reroute) goes from a clean 0 overlaps /
+0 opens to **42 dnuts-unplaced bits (2 bundles / 3 groups)** with detailed
+WL +0.13% and a ~3× slower heal loop (58s vs 21s end-to-end).  The richer
+pool steers mix's planner/healers onto realizations whose real
+signal-track supply falls short; no DISCONNECTED candidates are involved
+(0 in pool and selection on both sides — the gate holds).  The stressed
+big2/bigHalf wins above still stand, and a per-flow escape hatch exists
+(`no_hanan_loci` on mix's generation line), but mix is a real default-on
+casualty the owner should weigh before (or after) pushing the goldens.
+b44's planner-free +2.5% detWL is the known window-EDGE effect (the floor
+locus x=1200 nominal beats y11330's, but the bus centre cannot reach an
+edge-aligned optimum) — the (b)/(c)-adjacent envelope follow-on above.
+Two smaller default-on notes from the full-corpus smoke: `flow/sel_topos.buda`
+(healer-less R&D flow) shifts 0 ov / 0 opens → 1 / 16 (its unpinned bundles
+pick loci candidates; its b2 pin is uid-preserved), and three mid-tier
+planner/NUTS measurement tests (`test_nuts_pull_repack` big fixture,
+`test_planner_nontop_dead_span`, `test_planner_signal_tracks` mix repro —
+where the signal_tracks benefit inverts on the loci pool, 300→332;
+`test_datapath_multi_trunk_qor`, where the loci-enriched PLAIN pool beats
+the BITRUNK two-level trees on the synthetic column datapath, 17947 vs
+18332 — the multi_trunk QoR claim is now relative to the midpoint corpus;
+and `flow/planner3.buda` itself, whose double-booked-trunk contention
+scenario dissolves when the planner auto-picks a loci trunk) now pin
+their generation corpus pre-flip via `no_hanan_loci` to keep their measured
+scenarios; `flow/big_data_test/big_3bundles_sel_pure_mst_topo.buda`'s
+12 opens are pre-existing (identical both sides).
+
+**Pre-flip verdict record (2026-07-18, post-gate stressed corpus):** the
+wins SURVIVE the gate — and are now honest
 (pre-gate, part of the loci "win" was missing islands).  With the gated pools,
 `hanan_loci` strictly improves every stressed endpoint that matters: plain
 opens −74% (big2 108→28) / −55% (bigHalf 626→283), healed endpoints equal or

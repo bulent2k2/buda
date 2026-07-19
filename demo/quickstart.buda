@@ -35,7 +35,10 @@ add_bus dft[3]        IO.PAD.io CPU.io,MEM.io,GPU.io
 # ── Step 4: Execute Planning ──
 run_bundler strict
 generate_topologies
-select_topologies 1 2 2 3 3-5 2
+# Indices re-collected for the hanan_loci default flip (same candidates by
+# topo_uid): b1 TRUNK_V@x350 2->7, b2 TRUNK_V@x650 3->5, b4 TRUNK_V@x500 2->5;
+# b3/b5 (L-shapes) unchanged at 2.
+select_topologies 1 7 2 5 3,5 2 4 5
 run_planner
 run_nuts
 run_detailed_nuts

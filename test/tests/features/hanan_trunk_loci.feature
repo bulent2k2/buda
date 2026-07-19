@@ -1,13 +1,15 @@
 @landed
 # Executable coverage: test/tests/test_topo_hanan_loci.py (binds this file and
-# adds hand-written asserts for the opt-in default and the WL floor).
-Feature: Hanan-line trunk loci (opt-in hanan_loci generation knob)
+# adds hand-written asserts for the default-on pool, the WL floor, and the
+# legacy hanan_loci keep-on no-op).
+Feature: Hanan-line trunk loci (generation default; no_hanan_loci opt-out)
   As a chip planner
   I want n-pin trunk loci sampled ON the in-bbox Hanan lines as well as at
-  channel midpoints when I opt in with the hanan_loci generation knob,
+  channel midpoints by default,
   So that a block-edge-aligned trunk can nominal at the geometric wirelength
   floor instead of carrying a structural overshoot (the b44 +500 — see
-  docs/internal/wishlist-topo.md "Nominal-WL comparability", piece (a)).
+  docs/internal/wishlist-topo.md "Nominal-WL comparability", piece (a)),
+  while the no_hanan_loci opt-out restores the midpoint-only pool.
 
   # Fixture = the flow/big_data_test/b44.buda block layout: the WL-optimal
   # V-trunk locus x=1200 is io_pad_tl's right edge — a Hanan LINE — which
@@ -27,12 +29,12 @@ Feature: Hanan-line trunk loci (opt-in hanan_loci generation knob)
   #
   #   floor = |1200-2960| + |12000-10250| = 1760 + 1750 = 3510
 
-  Scenario: trunk loci are sampled on Hanan lines as well as channel midpoints
+  Scenario: trunk loci are sampled on Hanan lines as well as channel midpoints by default
     Given a multicast bundle whose WL-optimal trunk position lies ON a Hanan line
-    When generate_topologies samples trunk loci with the hanan_loci knob
+    When generate_topologies samples trunk loci with the default settings
     Then a candidate at the Hanan-line locus exists with its nominal at the geometric floor
 
-  Scenario: the extra Hanan-line loci are opt-in
+  Scenario: the no_hanan_loci opt-out restores the midpoint-only pool
     Given a multicast bundle whose WL-optimal trunk position lies ON a Hanan line
-    When generate_topologies samples trunk loci without the hanan_loci knob
+    When generate_topologies samples trunk loci with the no_hanan_loci opt-out
     Then no candidate is emitted at the Hanan-line locus
