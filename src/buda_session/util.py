@@ -73,6 +73,15 @@ _RR_SCREEN_TOP_N = 2
 # warm eval (the study's crossover); `no_warm_trials` forces off.
 _RR_WARM_TRIALS_DEFAULT = False
 
+# Dead-span escalation folded into the healers (2026-07-19): before a
+# stage-b (DNUTS-open) healer hill-climb, escalate every genuinely-dead LOW
+# segment (zero keepout-clear signal tracks over its placed geometry — a
+# guaranteed open no candidate re-pin can fix) to a TOP layer and re-solve,
+# so the healer starts from an opens-reduced state and absorbs any collateral
+# overlap.  Default ON: only stage-b healer runs are affected, and escalation
+# strictly reduces opens; a healer-less flow (e.g. mempool_tile) is untouched.
+_RR_HEAL_DEAD_SPANS_DEFAULT = True
+
 
 def _batched(method):
     """Run a BDB-persist method inside ONE transaction (see BudaSession._bdb_batch).

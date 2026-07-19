@@ -114,9 +114,34 @@ full un-pinning still needs the LOW-supply capacity fix too (~2/3; see
 wishlist-topo "mix–loci").  Tested: `test/tests/test_dead_span_escalate.py`
 (keepout-dead LOW stub strands 8 bits off; escalation moves it to TOP and
 places; a live LOW stub is left in place — no false positives; default off).
-**Follow-on:** fold the escalation into the automatic negotiate/ripup loop so
-it engages without a manual command, and re-decide default once the mempool
-overflow trade is understood.
+
+**FOLDED INTO THE HEALERS — default ON (2026-07-19).**
+`ripup.py::_heal_dead_spans`, called at the top of both stage-b healers
+(`_ripup_reroute` / `_negotiate_congestion`) before the hill-climb: a dead
+LOW segment is a guaranteed open no candidate re-pin can reach (a
+layer-assignment fault, not a topology-selection one), so escalate it to TOP
+ONCE up front and let the healer's own loop absorb any collateral overlap —
+the same "escalate, then heal the fallout" contract the planner escalations
+use.  Crucially the fold is **structurally safe as a default**: only
+stage-b (DNUTS-open) healer runs are touched, escalation strictly reduces
+opens (a dead LOW segment strands 100% of its bits), and the manual opt-in's
+one regressor — `mempool_tile` — runs NO healer, so it is out of scope by
+construction.  Corpus A/B over every healer-running flow (fold off = main, on
+= default):
+
+| flow | off (main) | on (fold) | esc | Δ |
+|---|---|---|---|---|
+| bigHalf | 5 / 315 | **5 / 179** | 2 | opens −136, ov 0 |
+| slowdown_rnr | 0 / 42 | **0 / 32** | 3 | opens −10, ov 0 |
+| mix, b61, mix2, mix2_fast, big2, datapath×2, synth×3 | — | unchanged | 0–2 | no-op |
+
+Two clean wins, zero regressions, no overlap cost anywhere.  `mix2`/`mix2_fast`
+still open (73 / 256) with esc 0 — their opens are the LOW-supply-contention
+class, NOT keepout-dead, so the fold correctly leaves them for the companion
+LOW-supply capacity fix (see wishlist-topo "mix–loci").  Off-switch:
+`_heal_dead_spans_in_healers = False` (study/bisect).  Tested:
+`test/tests/test_dead_span_heal_fold.py`.  The manual `set_dead_span_escalate`
+(run_nuts-level) stays for healer-less flows.
 
 ## A metal *above* the TOP band is still a top metal — config-smell WARNING shipped; auto-override measured & rejected
 
