@@ -76,17 +76,29 @@ penalty idea.
     (3 segments, w_segs 2.0) keeps winning at kSegs=100 where raw-nseg
     pricing flips to a 2-seg shape
     (`test_ksegs_taper_honest_weight_keeps_fanin_tree`).
-  - **G3b (OPEN — multicast trees):** datapath BITRUNK trees are NOT
-    tapered (every bit multicasts to every receiver, so `seg_bits` is
+  - **G3b (RESOLVED — the intent hierarchy):** datapath BITRUNK trees are
+    NOT tapered (every bit multicasts to every receiver, so `seg_bits` is
     empty and every bit really does traverse the whole tree).  Measured
     at α=0.02 (effective ~52/seg on the 2.6k-extent datapath): abstract
-    WL REGRESSES — col plain 18191→22321 (+23%), multi 17346→20356
-    (+17%); row multi 17244→19947 (+16%) and multi loses its edge over
-    plain (19947 vs 19885).  The trees buy 5–14% WL and the penalty is
-    the same order as that win at this scale — a genuine price-vs-win
-    tension, not a modeling bug.  Mitigations: smaller α on tree-heavy
-    small designs, or treat an explicit `multi_trunk` opt-in as intent
-    and exempt/discount the gated two-level trees.
+    WL REGRESSED — col plain 18191→22321 (+23%), multi 17346→20356
+    (+17%); row multi 17244→19947 (+16%), losing its edge over plain.
+    Two fixes landed, in layers:
+    1. *Candidate exemption:* the gated two-level trees (BITRUNK_HVH/VHV
+       — they exist only under the `multi_trunk` flag) are exempt from
+       the penalty.  Necessary but NOT sufficient: col recovered (trees
+       2→3, multi WL −3.1%), but on row the GREEDY COUPLING remained —
+       neighbors' penalty-shifted selections strand the field in a
+       clean-but-worse optimum (+15.7% WL) that neither refine_passes
+       nor ripup touches (healers heal correctness, not WL; the result
+       is 0/0).
+    2. *Env-default stand-down:* the intent hierarchy is
+       `explicit set_planner_param  >  multi_trunk opt-in  >  env
+       default` — a design whose pools carry gated trees suppresses the
+       BUDA_KSEGS_REL env default entirely (note printed), restoring the
+       kSegs=0 result byte-identically; an explicit kSegs/kSegsRel still
+       applies in full (with the trees exempt).
+    Lock-in: `test_ksegs_env_default_stands_down_for_multi_trunk`; the
+    datapath QoR test passes with and without the env default.
 - **G4 — a segment penalty is a detour penalty.**  kPeak's routability
   steering (U-detour off a loaded band) is overwhelmed even at effective
   ~30 units/seg in the synthetic steer test: detours cost 2 extra
