@@ -89,7 +89,15 @@ const TrackPattern& RoutingGrid::effective_pattern_at(double x, double y) const 
 
 std::vector<std::pair<double, TrackSlot>>
 RoutingGrid::signal_tracks_in(double x, double lo, double hi) const {
-    const TrackPattern& pat = effective_pattern_at(x, lo);
+    // Override lookup in REAL coordinates: `x` is the ALONG coordinate (an X
+    // value on a horizontal layer, a Y value on a vertical one) and [lo, hi]
+    // is the PERP interval — map per orientation before consulting
+    // effective_pattern_at(x, y), else the region test runs transposed on
+    // vertical layers (audit C11-02).  Same single-point perp sample (lo) as
+    // before; the slice-accurate walk is for_each_signal_track_in_span.
+    const TrackPattern& pat = is_horizontal_
+        ? effective_pattern_at(x, lo)
+        : effective_pattern_at(lo, x);
     auto all = pat.tracks_in_range(lo, hi);
     std::vector<std::pair<double, TrackSlot>> result;
     result.reserve(all.size());
@@ -294,8 +302,11 @@ std::vector<PreRoutedSegment> RoutingGrid::preroutes_in(
 int RoutingGrid::count_signal_tracks_in(double x, double lo, double hi) const {
     // Count-only twin of signal_tracks_in: same tiling walk + SIGNAL/keepout
     // filter, but never allocates (returns the count directly).  Kept in lockstep
-    // with tracks_in_range's loop and signal_tracks_in's filter above.
-    const TrackPattern& pat = effective_pattern_at(x, lo);
+    // with tracks_in_range's loop and signal_tracks_in's filter above —
+    // including the orientation-aware override lookup (audit C11-02).
+    const TrackPattern& pat = is_horizontal_
+        ? effective_pattern_at(x, lo)
+        : effective_pattern_at(lo, x);
     const double up = pat.unit_pitch();
     if (up <= 0.0 || pat.slots.empty() || lo > hi) return 0;
     int n_start = static_cast<int>(std::floor((lo - pat.origin) / up)) - 1;

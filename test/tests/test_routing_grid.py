@@ -381,3 +381,35 @@ def test_boundary_touching_override_does_not_claim_band_above():
     # and the twins agree on the sliced walk too
     assert (grid.count_signal_tracks_in_span(100, 900, 100, 140)
             == len(grid.signal_tracks_in_span(100, 900, 100, 140)))
+
+
+def test_signal_tracks_in_vertical_layer_override_lookup_not_transposed():
+    """Audit C11-02: on a VERTICAL layer, signal_tracks_in's first argument is
+    the ALONG coordinate (a Y value) and [lo, hi] is the perpendicular X
+    interval — but the override lookup passed them to effective_pattern_at
+    (x, y) unswapped, so the region test ran TRANSPOSED. A query physically
+    OUTSIDE an override region (here Y=1500, region y<=100) wrongly adopted
+    the override pattern whenever the transposed point happened to land
+    inside. The tracks must come from the GLOBAL pattern."""
+    stack = buda.RoutingGridStack()
+    stack.define_layer(5, make_standard_pattern(origin=0.0), False)   # vertical
+    override_pat = make_two_slot_pattern(origin=0.0)                  # pitch 2
+    stack.add_override(5, x1=1000, y1=0, x2=2000, y2=100,
+                       pattern=override_pat)
+
+    grid = stack.get_layer_grid(5)
+    # Physical point: X in [50, 60] (perp), Y = 1500 (along) — outside the
+    # region (its y-range ends at 100). Transposed lookup reads (1500, 50):
+    # 1500 in x-range AND 50 in y-range -> override wrongly applied.
+    tracks = grid.signal_tracks_in(1500.0, 50.0, 60.0)
+    # Global standard pattern: 4 signal slots per 14-unit pitch; the 2-slot
+    # override would yield ~5 signal tracks at pitch 2 in a 10-wide window.
+    got = [t[0] for t in tracks]
+    # Assert directly against the global pattern's own enumeration (a stack
+    # with no override at all):
+    ref_stack = buda.RoutingGridStack()
+    ref_stack.define_layer(5, make_standard_pattern(origin=0.0), False)
+    ref = [t[0] for t in
+           ref_stack.get_layer_grid(5).signal_tracks_in(1500.0, 50.0, 60.0)]
+    assert got == pytest.approx(ref), \
+        f"override leaked into an outside-region query: {got} != {ref}"
