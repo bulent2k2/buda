@@ -153,8 +153,17 @@ class ExplorerSidecarMixin:
         
         # Update live object
         if wrapper.plan.selected_topology_index != self.idx:
-            wrapper.plan.seg_layers = [] # Clear stale results for different topology
-        
+            # Clear stale plan state staged for the OLD candidate (audit
+            # P7-01, the explorer twin of select_topology's P5-03): NUTS's
+            # only staleness guard is an array-LENGTH match, so surviving
+            # slide/net-pull/perp overrides would apply verbatim to the new
+            # topology's unrelated segments.
+            wrapper.plan.seg_layers = []
+            wrapper.plan.seg_net_pull = []
+            wrapper.plan.seg_slide_lo = []
+            wrapper.plan.seg_slide_hi = []
+            wrapper.plan.seg_perp = []
+
         wrapper.plan.selected_topology_index = self.idx
         wrapper.input.topology_pinned = True
         
@@ -176,6 +185,12 @@ class ExplorerSidecarMixin:
             wrapper = self.wrappers[self.bidx]
             wrapper.input.topology_pinned = False
             wrapper.input.pinned_seg_layers = []
+            # Unpinned, the next run_planner may select a DIFFERENT candidate
+            # — and it never clears slide/net-pull overrides, so stale ones
+            # would ride onto whatever it picks (audit P7-01).
+            wrapper.plan.seg_net_pull = []
+            wrapper.plan.seg_slide_lo = []
+            wrapper.plan.seg_slide_hi = []
 
         self._draw()
 
