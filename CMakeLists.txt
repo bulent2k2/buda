@@ -39,6 +39,48 @@ else()
     add_compile_options($<IF:$<BOOL:${BUDA_ASSERTS}>,-UNDEBUG,-DNDEBUG>)
 endif()
 
+# Opt-in sanitized build for bug hunts / CI sweeps (2026-07 audit pre-pass):
+#   cmake -B build-san -DBUDA_SANITIZE=ON && cmake --build build-san
+#   LD_PRELOAD=$(gcc -print-file-name=libasan.so) \
+#     ASAN_OPTIONS=detect_leaks=0 PYTHONPATH=build-san:src python3 …
+# Lessons this option encodes (see docs/internal/audit_2026-07.md,
+# "Environment notes"):
+#   - NO LTO in sanitized builds: GCC 13.3 miscompiles hashtable
+#     equal_range when LTO objects and the link use different opt levels
+#     (the "PRE-1" segfault) — NO_EXTRAS below keeps pybind from adding
+#     its own IPO, so compile and link stay plain and consistent.
+#   - KEEP SYMBOLS: pybind's post-build strip would gut the sanitizer
+#     stack traces (NO_EXTRAS skips it); -g is added for triage.
+#   - -fno-sanitize-recover=null makes null-deref UB fatal rather than a
+#     log line, so a suite run fails loudly at the defect.
+# Note: the LD_PRELOAD approach CHECK-fails on the first C++ throw from a
+# dlopen'd module on gcc-13/glibc — usable for throw-free repro scripts
+# and the corpus flows, not for the full pytest suite (see the audit doc).
+option(BUDA_SANITIZE "Build with ASAN+UBSAN (no LTO, symbols kept)" OFF)
+if(BUDA_SANITIZE)
+    # GCC only (validated).  Clang statically links the sanitizer runtime
+    # into EXECUTABLES, so instrumented shared modules are left with
+    # unresolved __asan_*/__ubsan_* symbols that the documented libasan
+    # preload does not cover — the import fails before a sanitized run can
+    # start.  A Clang port needs -shared-libsan (plus preloading
+    # libclang_rt.asan-<arch>.so) and has not been validated; fail LOUD
+    # here rather than configure a build that cannot import (Codex P2 on
+    # PR #336).  MSVC has no ASAN shared-module story either.
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        message(FATAL_ERROR
+            "BUDA_SANITIZE is validated with GCC only (found "
+            "${CMAKE_CXX_COMPILER_ID}). Configure with g++, or port the "
+            "Clang path (-shared-libsan + libclang_rt.asan preload) and "
+            "validate an instrumented import before relaxing this check.")
+    endif()
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer
+                        -fno-sanitize-recover=null -g)
+    add_link_options(-fsanitize=address,undefined)
+    set(BUDA_PYBIND_EXTRAS NO_EXTRAS)
+else()
+    set(BUDA_PYBIND_EXTRAS "")
+endif()
+
 execute_process(
     COMMAND python3 -c "import pybind11; print(pybind11.get_cmake_dir())"
     OUTPUT_VARIABLE PYBIND11_CMAKE_DIR
@@ -80,7 +122,7 @@ set(BUDA_DB_FILES
     src/bindings_db.cpp
     src/bind_db.cpp
 )
-pybind11_add_module(buda_db ${BUDA_DB_FILES})
+pybind11_add_module(buda_db ${BUDA_PYBIND_EXTRAS} ${BUDA_DB_FILES})
 target_include_directories(buda_db PRIVATE src)
 target_link_libraries(buda_db PRIVATE buda_core)
 set_target_properties(buda_db PROPERTIES
@@ -117,7 +159,7 @@ set(SOURCE_FILES
     # bundler.cpp, bundle_refiner.cpp, bdb.cpp, busterm.cpp, sqlite3.c:
     # provided by buda_core via linker
 )
-pybind11_add_module(buda ${SOURCE_FILES})
+pybind11_add_module(buda ${BUDA_PYBIND_EXTRAS} ${SOURCE_FILES})
 target_include_directories(buda PRIVATE src)
 target_link_libraries(buda PRIVATE buda_core)
 set_target_properties(buda PROPERTIES
