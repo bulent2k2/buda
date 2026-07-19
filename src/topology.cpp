@@ -3508,6 +3508,12 @@ void TopologyGenerator::add_multi_trunk_candidates(
         t.type = "BITRUNK_H";
         int x_min = INT_MAX, x_max = INT_MIN;
         for (const auto& p : pins) { x_min = std::min(x_min, p.x); x_max = std::max(x_max, p.x); }
+        // A perfectly x-aligned column collapses both H trunks to points —
+        // a zero-length wire has no conn-segs to pin it, carries no bus,
+        // and cannot be placed by NUTS (kAbutmentSpanEpsilon invariant).
+        // Mirror the y_t1==y_t2 guard (audit C4-02); TRUNK_V shapes cover
+        // the column.
+        if (x_min == x_max) return;
         int x_backbone = (x_min + x_max) / 2;
         t.segments.push_back(make_seg(x_min, y_t1, x_max, y_t1, h_layer_));
         t.segments.push_back(make_seg(x_min, y_t2, x_max, y_t2, h_layer_));

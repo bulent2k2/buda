@@ -233,3 +233,22 @@ def test_resize_cell_swaps_dims_for_rotated_instances(tmp_path):
     assert (u0.x2 - u0.x1, u0.y2 - u0.y1) == (12.0, 24.0)
     assert (u1.x2 - u1.x1, u1.y2 - u1.y1) == (24.0, 12.0), \
         "rotated instance must get swapped dims on resize"
+
+
+def test_bitrunk_h_refuses_x_aligned_column():
+    # Audit C4-02: the always-on legacy BITRUNK_H generator guarded the
+    # degenerate y case (y_t1 == y_t2) but not x_min == x_max — a perfectly
+    # x-aligned column of >= 4 blocks emitted a candidate whose two H
+    # "trunks" were zero-length points, violating the zero-length-wire
+    # invariant (no conn-segs to pin it, no bus, unplaceable by NUTS).
+    fp = buda.Floorplan()
+    for i in range(4):
+        fp.add_block(f"b{i}", 0, i * 300, 100, i * 300 + 100)
+    tg = buda.TopologyGenerator(fp)
+    tg.set_layer_ids(4, 5)
+    cands = tg.generate_candidates("b0", ["b1", "b2", "b3"])
+    assert cands
+    for c in cands:
+        for s in c.segments:
+            assert (s.start.x, s.start.y) != (s.end.x, s.end.y), \
+                f"zero-length segment emitted in {c.type}"
