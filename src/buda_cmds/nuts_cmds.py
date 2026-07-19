@@ -73,6 +73,14 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
     with buda.ostream_redirect():
         session.nuts_result = nuts.run(session.bundles)
     session._adopt_doglegs()
+    # Opt-in post-NUTS dead-span escalation: move LOW segments whose final
+    # placed geometry has zero signal supply (guaranteed DNUTS opens) to a
+    # TOP layer and re-solve.  Off by default = bit-identical.
+    if getattr(session, "_dead_span_escalate", False):
+        n_esc = session._escalate_dead_low_segments()
+        if n_esc:
+            print(f"[NUTS] dead-span escalation: moved {n_esc} dead LOW "
+                  f"segment(s) to a TOP layer and re-solved.")
     # A fresh abstract solve invalidates any prior detailed result:
     # ripup_reroute / negotiate_congestion key their stage off
     # detailed_result, and hill-climbing against a detailed route of
@@ -207,10 +215,29 @@ def cmd_run_nuts_on_layer(session, cmd, args, cmd_line):
         print("[BDB] re-persisted routing after run_nuts_on_layer.")
 
 
+def cmd_set_dead_span_escalate(session, cmd, args, cmd_line):
+    # Usage: set_dead_span_escalate [on|off]
+    # Opt-in post-NUTS dead-span escalation: after every run_nuts, a LOW
+    # segment whose FINAL placed geometry has zero keepout-clear signal
+    # tracks (a guaranteed DetailedNUTS open) is moved to the cheapest
+    # same-direction TOP layer and NUTS re-solves.  Off by default =
+    # bit-identical.  See wishlist-planner "dead-span discriminator".
+    if not args:
+        state = "on" if getattr(session, "_dead_span_escalate", False) else "off"
+        print(f"dead_span_escalate is {state}")
+        return
+    val = args[0].lower()
+    if val not in ("on", "off"):
+        print(f"Error: set_dead_span_escalate expects on|off, got {args[0]!r}")
+        return
+    session._dead_span_escalate = (val == "on")
+
+
 COMMANDS = {
     "run_nuts": cmd_run_nuts,
     "run_detailed_nuts": cmd_run_detailed_nuts,
     "ripup_reroute": cmd_ripup_reroute,
     "negotiate_congestion": cmd_negotiate_congestion,
     "run_nuts_on_layer": cmd_run_nuts_on_layer,
+    "set_dead_span_escalate": cmd_set_dead_span_escalate,
 }

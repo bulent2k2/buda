@@ -191,6 +191,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._nuts_pitch = 1.0
         self._planner_pitch = None   # pitch the last run_planner reserved bands for
         self._detailed_bit_order = "LO_HI"
+        self._dead_span_escalate = False  # opt-in post-NUTS dead-span escalation
        # last track pitch used by run_nuts
         self._planner_iterations = 5 # last iteration count used by run_planner
         self._script_stack = []      # stack of absolute paths of sourced scripts

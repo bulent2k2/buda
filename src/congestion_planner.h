@@ -544,12 +544,25 @@ private:
     // gratuitous complexity, and flat kSegs + ripup heals every measured
     // regression (07: 0/0 at +5.8% WL, -25% vias; channel_stress: 0/0).
     double kSegs_             = 0.0;
+    // Set by the SESSION when the flow script contains a healer command
+    // (ripup_reroute / negotiate_congestion) — the audit G1/G2 gate: the
+    // non-explicit kSegsRel default (compiled 0.02 / env override) applies
+    // only then (the penalty's two measured correctness regressions are
+    // both ripup-healed; without healers they are real).  Settable
+    // explicitly for harnesses.
+    double healersAhead_      = 0.0;
     // Relative kSegs (kSegsRel): fraction of the design's max-possible HPWL
     // (grid extent W + H) added per segment — scale-free across flows.
-    // < 0 = unset (env BUDA_KSEGS_REL may supply an experiment default);
+    // < 0 = unset (resolves to env BUDA_KSEGS_REL else kDefaultKSegsRel);
     // 0 = explicitly off.  Resolved into ksegs_eff_ when the grids are
     // known (beside span_ref_eff_).
     double kSegsRel_          = -1.0;
+    // The compiled default for an UNSET kSegsRel (audit verdict: the
+    // safe-Pareto point, gated on healers / no multi_trunk / no kPeak so it
+    // engages exactly where it was measured to only win).  BUDA_KSEGS_REL
+    // overrides it for study runs ("0" disables); an explicit
+    // set_planner_param bypasses the gates entirely.
+    static constexpr double kDefaultKSegsRel = 0.02;
     double ksegs_eff_         = 0.0;
     double kSegsGate_         = 0.0;
     // Realization-risk WL spread penalty (see set_planner_param "kWLSpread").
