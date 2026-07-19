@@ -147,10 +147,12 @@ PYTHONPATH=build:tools python3 tools/regen_goldens.py --verify   # must be all O
 # 1. The flip branch:
 git checkout claude/hanan-loci-default-flip && git pull && bin/bb
 PYTHONPATH=build:tools python3 tools/regen_goldens.py --verify
-#    Expected: CONTENT-DIFFERS on exactly the recorded 6 flows
-#    (four_blocks, dogleg2, comprehensive_demo, big digest, b4_bus_077,
-#    rnr_mix digest), the other 4 OK — matching the branch's own recorded
-#    --verify run.  A different list = host or tree drift; STOP.
+#    Expected: CONTENT-DIFFERS on exactly 5 flows — four_blocks, dogleg2,
+#    comprehensive_demo, big digest, b4_bus_077 — and rnr_mix reads OK
+#    (its flow is pinned out with `no_hanan_loci` by owner decision, so
+#    its pool matches the checked-in golden; the measured-classification
+#    table above predates the pin-out and lists it as a 6th shifter).
+#    The other 4 flows OK.  A different list = host or tree drift; STOP.
 
 # 2. Re-baseline (clean tree required) and gate:
 git status --porcelain                                            # must be empty
@@ -161,9 +163,10 @@ pytest test/tests/test_topo_analysis_golden.py -o addopts="" -m "not slow" -v
 #     discovered by the flip branch's mid-tier run, which the pre-flip audit
 #     did not cover): the changed pools re-select topologies in
 #     flow/four_blocks.buda and demo/comprehensive_demo.buda (mid tier), and
-#     the slow-tier big.buda / rnr/mix.buda digests will shift for the same
-#     reason.  Same ownership rule: re-baseline ONLY on this host, and
-#     review the diff (expect changes confined to those flows).
+#     the slow-tier big.buda digest will shift for the same reason
+#     (rnr/mix's stays valid — the flow is pinned out).  Same ownership
+#     rule: re-baseline ONLY on this host, and review the diff (expect
+#     changes confined to those flows).
 PYTHONPATH=build:tools python3 tools/nuts_snapshot.py
 git diff --stat test/tests/data/nuts_golden
 

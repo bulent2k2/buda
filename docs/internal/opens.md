@@ -30,10 +30,11 @@ items this page doesn't see).
    ~1.3–1.6×, not 2×), then **FLIPPED DEFAULT-ON 2026-07-19** (branch
    `claude/hanan-loci-default-flip`, after the degenerate-loci gate): the
    knob is now the `no_hanan_loci` opt-out, the 20-pin remap is applied
-   (uid-verified), and the 6 content-shifted goldens await the
-   reference-host regen; the rnr/mix healed endpoint still REGRESSES
-   default-on (0/0 → 0 ov / 42 unplaced — reported loudly in
-   wishlist-topo piece (a)'s final flip table);
+   (uid-verified), and the 5 content-shifted goldens await the
+   reference-host regen; the rnr/mix healed endpoint REGRESSED default-on
+   (0/0 → 0 ov / 42 unplaced) and the flow is PINNED-OUT with
+   `no_hanan_loci` by owner decision — numbers kept, and the mix–loci
+   root-cause is an OPEN follow-on in wishlist-topo piece (a);
    ~~**(b)** a structural `(wl, nsegs, type)` tie-break~~ —
    ✅ shipped 2026-07-17 (`annotate_and_sort` + the Python pool-merge
    resort; the pin index audit rode the ship: 112 checked-in

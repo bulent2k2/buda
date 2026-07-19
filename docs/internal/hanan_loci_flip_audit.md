@@ -163,7 +163,9 @@ renumbering never touches goldens):
   no surviving loci candidates)
 - mid tier (ALL four shift): `demo_comprehensive_demo.txt`,
   `big_data_test_big.txt` (digest), `big_data_test_big2_b4_bus_077.txt`,
-  `rnr_mix.txt` (digest)
+  `rnr_mix.txt` (digest) — **UPDATE (flip commit): rnr_mix no longer
+  shifts** — the flow is pinned out (`no_hanan_loci`, owner decision), so
+  the regen list is 5 topo goldens, not 6
 
 Regen: `PYTHONPATH=build:tools python3 tools/topo_snapshot.py` on the
 reference host, in the flip commit, AFTER the generator gate below.
@@ -284,12 +286,14 @@ Also flip-owned:
    `test_topo_hanan_loci.py` specs + `features/hanan_trunk_loci.feature`
    (default-ON spec, opt-out spec, legacy keep-on no-op spec).
 5. ⏳ Regenerate the shifted goldens ON THE REFERENCE HOST and push onto
-   `claude/hanan-loci-default-flip`: the 6 `topo_analysis` goldens
+   `claude/hanan-loci-default-flip`: **5** `topo_analysis` goldens
    (`tools/regen_goldens.py --write`; `--verify` on this branch reports
-   CONTENT-DIFFERS on exactly the recorded 6 flows, OK elsewhere) PLUS the
-   NUTS placement goldens (`tools/nuts_snapshot.py` — four_blocks +
-   comprehensive_demo shift in the mid tier, big/mix digests in the slow
-   tier; found by this branch's mid run, which the pre-flip fast-tier
+   CONTENT-DIFFERS on exactly four_blocks, dogleg2, comprehensive_demo,
+   big digest, b4_bus_077 — rnr_mix reads OK since the flow itself is
+   pinned out, see item 6) PLUS the NUTS placement goldens
+   (`tools/nuts_snapshot.py` — four_blocks + comprehensive_demo shift in
+   the mid tier, big's digest in the slow tier; mix's stays valid via the
+   pin-out; found by this branch's mid run, which the pre-flip fast-tier
    audit could not see).
 6. ✅ fast+mid gates — residual failures are EXACTLY the golden-content
    set awaiting the reference host: the 6 `topo_analysis` goldens + the 2
@@ -300,7 +304,11 @@ Also flip-owned:
    test_planner_signal_tracks' mix repro, test_datapath_multi_trunk_qor,
    and flow/planner3.buda's contention scenario) — the fast-tier audit
    could not see these, its (b)-fix analogues.  Plus QoR
-   re-measurement incl. rnr/mix — **mix REGRESSES under default-on**
+   re-measurement incl. rnr/mix — **mix REGRESSED under default-on**
    (healed endpoint 0 overlaps / 42 dnuts-unplaced / detWL +0.13% vs 0/0
-   with `no_hanan_loci`); reported loudly in wishlist-topo piece (a)'s
-   final flip table.  `bb slow` still pending on the reference host.
+   with `no_hanan_loci`) and is **PINNED-OUT by owner decision
+   (2026-07-19)**: `flow/rnr/mix.buda` generates with `no_hanan_loci`,
+   restoring its 0/0 healed endpoint as checked in; the regression
+   numbers are kept for the record in wishlist-topo piece (a)'s final
+   flip table, and root-causing the interaction is an OPEN follow-on
+   there.  `bb slow` still pending on the reference host.

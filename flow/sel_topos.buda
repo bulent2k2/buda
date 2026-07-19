@@ -1,5 +1,11 @@
 # user can select a topo here or in GUI (json sidecar file)
 # planner auto selects to detour congestion/obstacles
+#
+# NOTE (hanan_loci default flip): this healer-less R&D flow's endpoint shifted
+# from 0 overlaps / 0 opens to 1 overlap / 16 dnuts-unplaced — the UNPINNED
+# bundles (1, 3) now auto-select loci candidates.  No test or doc pins the old
+# endpoint, so the flow deliberately stays on the default pool; opt out with
+# `generate_topologies no_hanan_loci` to reproduce the pre-flip endpoint.
 
 source tracks/tracks2top.buda
 add_block drv1    50  380  230  620

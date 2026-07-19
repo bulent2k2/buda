@@ -329,20 +329,25 @@ incl. remapped pins; ov = NUTS overlaps, opens = DNUTS unplaced bits):*
 | | no_loci | 154 | 0 | 0 | 40868 |
 | big2/b4_bus_077 | loci | 21 | 0 | 0 | 191669 (byte-identical) |
 | | no_loci | 17 | 0 | 0 | 191669 |
-| **rnr/mix (hier, healed)** | **loci** | **1675** | **0** | **42** | **800426 (+0.13%)** |
-| | no_loci | 1237 | 0 | 0 | 799419 |
+| **rnr/mix (hier, healed)** | loci (measured pre-pin-out) | 1675 | 0 | **42** | 800426 (+0.13%) |
+| | no_loci (**= as checked in, PINNED-OUT**) | 1237 | 0 | 0 | 799419 |
 
-**⚠ rnr/mix REGRESSES under default-on — said loudly, not buried:** the
-audit's QoR caveat is CONFIRMED post-gate.  mix's fully-healed endpoint
-(2× negotiate_congestion + ripup_reroute) goes from a clean 0 overlaps /
-0 opens to **42 dnuts-unplaced bits (2 bundles / 3 groups)** with detailed
-WL +0.13% and a ~3× slower heal loop (58s vs 21s end-to-end).  The richer
-pool steers mix's planner/healers onto realizations whose real
-signal-track supply falls short; no DISCONNECTED candidates are involved
-(0 in pool and selection on both sides — the gate holds).  The stressed
-big2/bigHalf wins above still stand, and a per-flow escape hatch exists
-(`no_hanan_loci` on mix's generation line), but mix is a real default-on
-casualty the owner should weigh before (or after) pushing the goldens.
+**⚠ rnr/mix REGRESSED under default-on → PINNED-OUT by owner decision
+(2026-07-19); regression numbers kept above for the record:** the audit's
+QoR caveat was CONFIRMED post-gate.  Under the default-on pool mix's
+fully-healed endpoint (2× negotiate_congestion + ripup_reroute) went from
+a clean 0 overlaps / 0 opens to **42 dnuts-unplaced bits (2 bundles /
+3 groups)** with detailed WL +0.13% and a ~3× slower heal loop (58s vs
+21s end-to-end).  The richer pool steers mix's planner/healers onto
+realizations whose real signal-track supply falls short; no DISCONNECTED
+candidates are involved (0 in pool and selection on both sides — the gate
+holds).  The stressed big2/bigHalf wins above still stand.  Resolution:
+`flow/rnr/mix.buda` now generates with `no_hanan_loci` (flow-level bulk
+flag, non-sticky — no knob memo involved), restoring the 0/0 healed
+endpoint at det WL 799419 as checked in; a side benefit is that the
+rnr_mix topo_analysis digest golden (and its slow-tier NUTS placement
+digest) no longer shift, shrinking the reference-host regen to **5**
+topo goldens.  Root-causing the interaction is a follow-on — next item.
 b44's planner-free +2.5% detWL is the known window-EDGE effect (the floor
 locus x=1200 nominal beats y11330's, but the bus centre cannot reach an
 edge-aligned optimum) — the (b)/(c)-adjacent envelope follow-on above.
@@ -360,6 +365,25 @@ scenario dissolves when the planner auto-picks a loci trunk) now pin
 their generation corpus pre-flip via `no_hanan_loci` to keep their measured
 scenarios; `flow/big_data_test/big_3bundles_sel_pure_mst_topo.buda`'s
 12 opens are pre-existing (identical both sides).
+
+**Follow-on — root-cause the mix–loci interaction (OPEN, from the flip):**
+on `flow/rnr/mix.buda` the RICHER default-on pool degrades the fully-healed
+endpoint (0 ov / 0 opens → 0 / 42, det WL +0.13%, heal loop ~3× slower)
+with **zero DISCONNECTED candidates** in pool or selection — not a
+soundness hole but a selection/feedback pathology: more floor-tied loci
+candidates shift the hier planner's picks and the negotiate/ripup loops
+converge onto realizations whose real signal-track supply falls short
+(the signal_tracks repro inverts too: width 300 vs signal_tracks 332
+opens on the loci pool — test_planner_signal_tracks' pinned fixture).
+Same sensitivity class as the `kPeak` record (wishlist-planner "Selection
+basis": big2's healers prefer the knob off — selection perturbations and
+the healing feedback loops double-steer when untuned).  Until root-caused,
+mix is PINNED-OUT (`no_hanan_loci` on its generation line — owner decision
+2026-07-19).  Investigation sketch: replay mix's shifted bundles under
+both pools and find which cost term (or healer metric) fails to price the
+loci realizations — candidates: the kWLSpread envelope on edge-aligned
+optima, `kPeak`'s absolute-supply floor, and ripup's lexicographic metric
+being blind to supply-short bands below overflow.
 
 **Pre-flip verdict record (2026-07-18, post-gate stressed corpus):** the
 wins SURVIVE the gate — and are now honest
