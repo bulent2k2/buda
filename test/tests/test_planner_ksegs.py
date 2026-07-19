@@ -174,6 +174,46 @@ def test_ksegs_taper_honest_weight_keeps_fanin_tree():
     assert w_segs == 2.0                  # each driver stub carries 8/16 bits
 
 
+def test_ksegs_env_default_stands_down_for_multi_trunk(monkeypatch, capsys):
+    """Audit G3b intent hierarchy: explicit set_planner_param > the
+    multi_trunk generation opt-in > the env default.  A design whose pools
+    carry the gated two-level trees (they exist only under `multi_trunk`)
+    suppresses the ENV-DEFAULT penalty entirely — the measured greedy
+    coupling degrades such flows even with the trees themselves exempt —
+    while an explicit kSegsRel still applies (with the trees exempt)."""
+    from test_datapath_multi_trunk_qor import _route, _selected_types
+
+    def vhv(s):
+        return sum(v for k, v in _selected_types(s).items()
+                   if k == "BITRUNK_VHV")
+
+    monkeypatch.delenv("BUDA_KSEGS_REL", raising=False)
+    base = _route("row", True)                    # kSegs fully off
+    monkeypatch.setenv("BUDA_KSEGS_REL", "0.02")
+    capsys.readouterr()
+    env = _route("row", True)                     # env default → suppressed
+    # Byte-identical selections to the kSegs-0 run, and the note printed.
+    assert _selected_types(env) == _selected_types(base)
+    assert vhv(env) == vhv(base) >= 2
+    # Explicit kSegsRel on the same design DOES apply (no suppression):
+    # non-tree candidates are penalized, the gated trees stay exempt.
+    monkeypatch.delenv("BUDA_KSEGS_REL", raising=False)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    import test_datapath_multi_trunk_qor as dp
+    cmds = (dp._LAYERS + dp._blocks_and_buses("row")
+            + ["run_bundler", "set_planner_param kSegsRel 0.02",
+               "generate_topologies multi_trunk", "run_planner"])
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    expl = sum(1 for w in s.bundles
+               if w.input.candidates[w.plan.selected_topology_index]
+                   .type.startswith("BITRUNK_VHV"))
+    assert expl >= 1                              # exemption keeps trees alive
+    assert _selected_types(s) != _selected_types(base)   # penalty did act
+
+
 def test_ksegs_default_off_keeps_selection():
     """kSegs defaults to 0 — an un-set knob must not change the planner's
     choice (the WL-cheapest candidate keeps winning)."""

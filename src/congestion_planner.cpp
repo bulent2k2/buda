@@ -1336,7 +1336,17 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         // is per-candidate, so a candidate heading into FULL bands pays no
         // penalty — a perverse incentive that makes stress attractive.
         // Kept opt-in for reproducing the study.
-        if (ksegs_eff_ > 0.0) {
+        // G3b (audit): the two-level datapath trees BITRUNK_HVH/VHV exist in
+        // the pool ONLY when the user passed `multi_trunk` — an explicit
+        // request for exactly these many-segment shapes, whose 5-14% WL win
+        // the generic penalty was measured to invert (datapath abstract WL
+        // +16-23% at kSegsRel 0.02, multi losing its edge over plain).  An
+        // explicit opt-in outranks a generic prior: exempt them.  The legacy
+        // always-on BITRUNK_H is NOT gated behind the flag and stays priced.
+        const bool opted_in_tree =
+            topo.type.rfind("BITRUNK_HVH", 0) == 0 ||
+            topo.type.rfind("BITRUNK_VHV", 0) == 0;
+        if (ksegs_eff_ > 0.0 && !opted_in_tree) {
             double gate = (kSegsGate_ > 0.0)
                               ? std::max(0.0, 1.0 - topo_peak_fill)
                               : 1.0;
@@ -1526,9 +1536,37 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     // off).
     ksegs_eff_ = kSegs_;
     double rel = kSegsRel_;
+    bool rel_from_env = false;
     if (rel < 0.0) {
         const char* e = std::getenv("BUDA_KSEGS_REL");
         rel = (e != nullptr) ? std::atof(e) : 0.0;
+        rel_from_env = (rel > 0.0);
+    }
+    // Intent hierarchy (audit G3b): explicit set_planner_param > the
+    // `multi_trunk` generation opt-in > the env DEFAULT.  Gated two-level
+    // trees (BITRUNK_HVH/VHV) exist in a pool only when the user passed
+    // `multi_trunk` — a declaration that trees matter here — and the
+    // measured greedy coupling means a default penalty degrades such flows
+    // even with the trees themselves exempt (row datapath: neighbors'
+    // penalty-shifted selections strand the field in a clean-but-worse
+    // optimum ripup never touches, +15.7% WL).  So the ENV default stands
+    // down for a design whose pools carry gated trees; an explicit
+    // kSegs/kSegsRel still applies in full.
+    if (rel_from_env) {
+        for (const auto& bw : bundles) {
+            for (const auto& cand : bw.input.candidates) {
+                if (cand.type.rfind("BITRUNK_HVH", 0) == 0 ||
+                    cand.type.rfind("BITRUNK_VHV", 0) == 0) {
+                    std::cout << "[Planner] kSegsRel env default suppressed: "
+                                 "the pool carries multi_trunk two-level "
+                                 "trees (explicit set_planner_param kSegs/"
+                                 "kSegsRel still applies).\n";
+                    rel = 0.0;
+                    break;
+                }
+            }
+            if (rel == 0.0) break;
+        }
     }
     if (rel > 0.0) {
         // Scale from the DESIGN's Hanan extent (the floorplan grid), NOT the
