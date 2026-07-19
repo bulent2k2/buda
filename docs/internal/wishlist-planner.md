@@ -61,6 +61,35 @@ beneficiaries — bigHalf (−76% no-rr opens) and un-pinning mix from
 `kWLSpread 0.125` regresses it (42 → 48), `kPeak 0.1` only partially helps
 (42 → 32).
 
+**The discriminator SIGNAL found — it is FINAL-GEOMETRY, not plan-time
+(2026-07-19, measured on `flow/rnr/mix.buda`).**  Two prototypes:
+- *Plan-time span discrimination is INSUFFICIENT.*  Gating on the CLAMPED
+  routed-extent (corridor between the endpoint cell faces) supply instead
+  of the raw span — the natural "does the keepout cover the whole
+  corridor" test — STILL regresses mix baseline 0/0 → 0/48: mix's
+  SURVIVORS have dead corridors too (`routed_extent` supply == 0), because
+  the true final span is shorter still than the corridor.  The root
+  circularity: DNUTS admits on the NARROW final interval (span-clear OR
+  midpoint pool), while any plan-time gate only has the WIDE slide window
+  — so no plan-time span test separates a cull from a survivor.  (The
+  earlier midpoint-fallback variant fails the mirror way — over-un-fires.)
+- *The FINAL-GEOMETRY (post-NUTS) test is CLEAN.*  Running the exact DNUTS
+  admission test — `count_signal_tracks_in_span` (span-clear) OR
+  `count_signal_tracks_in` (midpoint) — on each LOW segment's ACTUAL
+  placed span + band, after abstract NUTS, fires on **ZERO** LOW segments
+  in mix baseline (no survivor false-positives), because the final
+  interval IS what DNUTS uses.  This is the concrete path to the always-on
+  gate: a **post-NUTS dead-span escalation** — move a genuinely dead LOW
+  segment to a TOP layer with supply and re-solve (the `run_planner
+  post_nuts` insertion class, `nutsflow.py::_run_post_nuts_planner`),
+  driven off placed geometry.  `RoutingGrid::count_signal_tracks_in{,_span}`
+  are Python-bound; the C++ `span_signal_supply` computes the same on
+  placed geometry.  **Remaining build:** integrate the escalation into the
+  automatic negotiate/ripup loop (benefit without a manual command),
+  corpus-measure, guard regressions, tests.  bigHalf (−76% no-rr opens)
+  is the clean beneficiary; see wishlist-topo "mix–loci" for why mix is
+  only ~1/3 this item.
+
 ## A metal *above* the TOP band is still a top metal — config-smell WARNING shipped; auto-override measured & rejected
 
 **What:** `LayerType` is a binary flag `{ TOP, LOW }` set explicitly per
