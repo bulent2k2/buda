@@ -76,6 +76,22 @@ class CommandRequest(BaseModel):
     session_id: str = "default"
 
 
+class EditOpenRequest(BaseModel):
+    bundle: int
+    candidate: int | str = "new"     # int index (0-based) or "new"
+    session_id: str = "default"
+
+
+class EditOpRequest(BaseModel):
+    command: str                     # a full edit_* command string (CLI syntax)
+    session_id: str = "default"
+
+
+class EditCommitRequest(BaseModel):
+    pin: bool = False
+    session_id: str = "default"
+
+
 # ── routes ──────────────────────────────────────────────────────────────────
 @app.post("/api/command")
 async def post_command(req: CommandRequest):
@@ -115,6 +131,60 @@ async def get_render(stage: str, session_id: str = "default",
         if stage == "detailed":
             return serialize.serialize_render_detailed(st.session)
         return {"error": f"unknown render stage '{stage}'"}
+
+
+def _edit_payload(session, result):
+    return {"result": result,
+            "edit": serialize.serialize_edit(session),
+            "state": serialize.serialize_state(session)}
+
+
+@app.post("/api/edit/open")
+async def edit_open(req: EditOpenRequest):
+    """Open an interactive edit session on a candidate (or `new` = empty). Mirrors
+    the CLI `edit_topology <bundle> [<cand#>|new]`; the working copy + live
+    verdict come back in `edit`."""
+    st = _get(req.session_id)
+    cand = req.candidate
+    which = "new" if cand == "new" else str(int(cand) + 1)   # CLI is 1-based
+    async with st.lock:
+        res = runner.run_one(st.session, f"edit_topology {req.bundle} {which}")
+        return _edit_payload(st.session, res)
+
+
+@app.post("/api/edit/op")
+async def edit_op(req: EditOpRequest):
+    """Apply one `edit_*` operation (full CLI-syntax command string, e.g.
+    `edit_add_trunk H 700`). Returns the refreshed working copy + verdict."""
+    cmd = req.command.strip()
+    if not cmd.startswith("edit_") or cmd.split()[0] in (
+            "edit_topology", "edit_commit", "edit_abort"):
+        return {"result": {"ok": False, "error": ["error", "not an edit op"],
+                            "log_lines": [], "num_warnings": 0, "num_errors": 1,
+                            "summary": "use edit_add_trunk/edit_set_span/… here"},
+                "edit": serialize.serialize_edit(_get(req.session_id).session),
+                "state": serialize.serialize_state(_get(req.session_id).session)}
+    st = _get(req.session_id)
+    async with st.lock:
+        res = runner.run_one(st.session, cmd)
+        return _edit_payload(st.session, res)
+
+
+@app.post("/api/edit/commit")
+async def edit_commit(req: EditCommitRequest):
+    """Commit the edit as a USER candidate (`pin` also selects it)."""
+    st = _get(req.session_id)
+    async with st.lock:
+        res = runner.run_one(st.session, "edit_commit pin" if req.pin else "edit_commit")
+        return _edit_payload(st.session, res)
+
+
+@app.post("/api/edit/abort")
+async def edit_abort(session_id: str = "default"):
+    st = _get(session_id)
+    async with st.lock:
+        res = runner.run_one(st.session, "edit_abort")
+        return _edit_payload(st.session, res)
 
 
 @app.post("/api/reset")

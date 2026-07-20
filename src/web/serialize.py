@@ -438,6 +438,64 @@ def serialize_render_nuts(session):
     }
 
 
+# ── interactive topology edit (Phase 4) ──────────────────────────────────────
+def _violation(v):
+    kind = getattr(v, "kind", None)
+    return {
+        "kind": getattr(kind, "name", str(kind)),
+        "seg_idx": getattr(v, "seg_idx", -1),
+        "seg_idx2": getattr(v, "seg_idx2", -1),
+        "block_name": getattr(v, "block_name", ""),
+        "message": getattr(v, "message", ""),
+    }
+
+
+def serialize_verdict(v):
+    """An EditVerdict (from buda.edit_verdict / an edit_* op) as JSON."""
+    if v is None:
+        return None
+    conn = getattr(v, "conn", None)
+    violations = list(conn.violations) if conn is not None else []
+    return {
+        "applied": bool(v.applied),
+        "note": v.note,
+        "seg_idx": v.seg_idx,
+        "pinched": bool(v.pinched),
+        "components": v.components,
+        "ok": bool(v.ok()),
+        "violations": [_violation(x) for x in violations],
+    }
+
+
+def serialize_edit(session):
+    """The current interactive-edit session, if one is open.
+
+    `{open: False}` when no `edit_topology` is active; otherwise the working-copy
+    topology (rendered in the bundle's own frame) + the live EditVerdict
+    (re-judged via `buda.edit_verdict`, the same call the CLI uses)."""
+    import buda
+    topo = getattr(session, "_edit_topo", None)
+    if topo is None:
+        return {"open": False}
+    fp = getattr(session, "_edit_fp", None) or session.fp
+    w = getattr(session, "_edit_w", None)
+    bundle_id = w.input.original_bundle.id if w is not None else None
+    try:
+        verdict = serialize_verdict(buda.edit_verdict(topo, fp))
+    except Exception:
+        verdict = None
+    return {
+        "open": True,
+        "bundle_id": bundle_id,
+        "src": getattr(session, "_edit_src", ""),
+        "verdict": verdict,
+        "topology": serialize_topology(topo, fp),
+        "slide_overrides": {str(k): list(v)
+                            for k, v in (getattr(session, "_edit_slide", {})
+                                         or {}).items()},
+    }
+
+
 def serialize_render_detailed(session):
     """Compose the detailed-NUTS render payload: floorplan + bit-wires + vias."""
     orient = _orient_map(getattr(session, "nuts_result", None))
