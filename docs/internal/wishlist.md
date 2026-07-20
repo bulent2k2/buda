@@ -8,6 +8,11 @@ priority view** — what's actually open right now, ranked by value/effort — s
 
 ## History
 
+- **2026-07-20** — Added
+  [`opens_topoedit_hier_2026-07-20.md`](opens_topoedit_hier_2026-07-20.md):
+  a focused snapshot of what remains open in topology editing and the
+  hierarchical flows (verified against main post-#344), incl. the
+  TopoEdit follow-on ranking and the hier bundler corners.
 - **2026-07-14** — Added [`wishlist-topoedit.md`](wishlist-topoedit.md) (topology
   editor): 'W' slide-refine input-precision options (snap-to-grid variant, echo
   marker at the marked bound, precise text entry) deferred until the raw

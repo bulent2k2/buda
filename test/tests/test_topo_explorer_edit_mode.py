@@ -292,6 +292,52 @@ def test_edit_mode_slide_window_refine(tmp_path):
         plt.close('all')
 
 
+def test_edit_mode_slide_mark_echo_marker(tmp_path):
+    """The first 'W' press draws a transient echo marker — a dashed line +
+    'W:<coord> [mode]' label at the captured bound's EFFECTIVE coordinate —
+    so the user sees where it landed before committing the second press.
+    The marker re-echoes when 'enter' toggles gridded/gridless (the mark
+    stores the raw cursor coordinate; the mode decides), and disappears when
+    the second 'W' applies the window."""
+    s = _session()
+    exp = _explorer(s, tmp_path)
+    try:
+        def marks():
+            return [t.get_text().strip() for t in exp.ax.texts
+                    if t.get_text().strip().startswith('W:')]
+
+        _key(exp, 'E')
+        _trunk(exp, 'Y', 150, 50)               # V trunk at x=150 (selected)
+        exp.sidx = 0
+        assert marks() == []                      # no pending mark, no marker
+
+        # Free mode: the marker sits at the raw cursor coordinate.
+        exp._edit_slide_grid = False
+        _key(exp, 'W', x=120, y=50)
+        assert marks() == ['W:120 [free]'], (marks(), exp._edit_msg)
+        # The dashed marker LINE is drawn at x=120 (a V segment slides in x);
+        # 120 is not a Hanan line, so no grid line can alias it.
+        assert any(l.get_linestyle() == '--'
+                   and all(x == 120 for x in l.get_xdata())
+                   for l in exp.ax.get_lines())
+
+        # 'enter' toggles to gridded: the SAME raw mark re-snaps (120 → 100,
+        # the nearest bundle-grid line: b1's right edge) and the marker
+        # follows.
+        _key(exp, 'enter')
+        assert exp._edit_slide_grid
+        assert marks() == ['W:100 [grid]'], (marks(), exp._edit_msg)
+
+        # The second W applies the window — the marker is gone.
+        _key(exp, 'W', x=180, y=50)
+        assert exp._edit_slide_mark is None
+        assert 0 in exp._edit_slide
+        assert marks() == []
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
 def test_edit_mode_slide_window_revalidated_at_commit(tmp_path):
     """A staged 'W' window is validated against the ConnTopology AT STAGING
     time; later geometry edits (stubs, connect/disconnect) can narrow the
