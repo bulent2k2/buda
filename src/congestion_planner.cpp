@@ -1125,9 +1125,17 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                         // places.  Where the congestion is REAL (anchor AND every
                         // nearby band overflow) the fallback still overflows and
                         // STRICT escalates, so the honest concentration
-                        // (mempool_tile/mix wins) is preserved.
-                        if (cong_cost_segment(seg, lid, eff, anchor,
-                                              slide_lo, slide_hi) <= kOvEps)
+                        // (mempool_tile/mix wins) is preserved.  Use
+                        // score_segment (RAW overflow), NOT cong_cost_segment
+                        // (kCong_-scaled): the STRICT ladder below rejects on
+                        // score_segment's raw overflow, so the anchor
+                        // feasibility test must use the same measure or a
+                        // small/zero kCong would make cong_cost read 0 on a
+                        // genuinely overflowing anchor — we'd return it, and
+                        // STRICT would then reject the layer WITHOUT trying the
+                        // free band best_band_perp would have found (Codex #364).
+                        if (score_segment(seg, lid, eff, anchor,
+                                          slide_lo, slide_hi) <= kOvEps)
                             return anchor;
                     }
                 }

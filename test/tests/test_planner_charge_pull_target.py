@@ -223,6 +223,39 @@ def test_level2_junction_prediction_heals_demo_b3():
     assert s2.nuts_result.num_overlaps == 0
 
 
+def test_anchor_feasibility_consistent_under_zero_kcong():
+    """The occupancy-aware anchor's feasibility test uses score_segment (RAW
+    overflow), the same measure the STRICT ladder rejects on — NOT the
+    kCong-scaled cong_cost_segment, which reads 0 on a genuinely overflowing
+    anchor when kCong is small/zero and would charge there, then let STRICT
+    reject the layer without trying the free band best_band_perp finds
+    (Codex #364).  Smoke guard: the knob-on occupant fixture plans+places
+    consistently with kCong 0 (all segments placed, same overlap count as the
+    default-kCong knob-on run) — the kCong=0 path is not a special case."""
+    base = _occupant_session(knob=True)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cmds = ["def_layer 5 M5 V TOP 50", "def_layer 4 M4 H TOP 50",
+            "def_track_pattern 4 0 SIGNAL 1 4", "def_track_pattern 5 0 SIGNAL 1 4",
+            "add_block D1 0 1000 200 1400", "add_block D2 400 1000 600 1400",
+            "add_block R1 2400 1000 2600 1400", "add_block R2 2400 1600 2600 2000",
+            "add_block D3 1700 1000 1900 1400", "add_block R3 2400 400 2600 800",
+            "add_bus a[8] D1.p R1.p", "add_bus b[8] D2.p R2.p",
+            "add_bus c[8] D3.p R3.p",
+            "add_keepout 0 1270 3000 4000 4", "add_keepout 0 660 3000 1180 4",
+            "add_keepout 0 0 1650 660 4", "add_keepout 0 0 3000 600 4",
+            "run_bundler", "generate_topologies",
+            "select_topology 1 1", "select_topology 2 1", "select_topology 3 1",
+            "set_planner_param charge_pull_target 1", "set_planner_param kCong 0",
+            "run_planner", "run_nuts"]
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        for c in cmds:
+            s.do_command(c)
+    placed = sum(1 for t in s.nuts_result.segments if t.placed)
+    assert placed == len(s.nuts_result.segments)          # nothing stranded
+    assert s.nuts_result.num_overlaps == base.nuts_result.num_overlaps
+
+
 def test_param_recognized():
     s = buda_cli.BudaSession()
     s.no_viz = True
