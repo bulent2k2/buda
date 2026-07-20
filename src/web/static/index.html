@@ -173,9 +173,20 @@ function draw() {
     el("rect", {class: "keepout", x: k.bbox.x1, y: k.bbox.y1,
         width: k.bbox.x2 - k.bbox.x1, height: k.bbox.y2 - k.bbox.y1}, g);
   for (const b of fp.blocks) {
-    el("rect", {class: "blk" + (b.is_container ? " container" : ""),
-        x: b.bbox.x1, y: b.bbox.y1,
-        width: b.bbox.x2 - b.bbox.x1, height: b.bbox.y2 - b.bbox.y1}, g);
+    // A multi-rect / TEG block is NOT solid over its whole bbox — draw each real
+    // rect solid and only OUTLINE the bbox, so gaps (valid pass-through channels)
+    // don't read as block area. Single-rect blocks (rects == []) fill the bbox.
+    if (b.rects && b.rects.length) {
+      for (const r of b.rects)
+        el("rect", {class: "blk", x: r[0], y: r[1], width: r[2] - r[0], height: r[3] - r[1]}, g);
+      el("rect", {class: "blk container",
+          x: b.bbox.x1, y: b.bbox.y1,
+          width: b.bbox.x2 - b.bbox.x1, height: b.bbox.y2 - b.bbox.y1}, g);
+    } else {
+      el("rect", {class: "blk" + (b.is_container ? " container" : ""),
+          x: b.bbox.x1, y: b.bbox.y1,
+          width: b.bbox.x2 - b.bbox.x1, height: b.bbox.y2 - b.bbox.y1}, g);
+    }
     // label: a per-label group translated to the block's top-left (world coords,
     // y-up) then locally un-flipped so the text reads upright.
     const lg = el("g", {transform:
@@ -203,17 +214,46 @@ function placedRect(s) {
     : {x: s.track_position - w/2, y: s.span_lo, width: w, height: s.span_hi - s.span_lo};
 }
 
+// DisplayGeom: place each segment at the CENTER of its slide window (or its
+// nominal perp if unbounded), then snap each connecting endpoint to its partner
+// segment's display perp so junctions visually meet. Ported from
+// src/viz_explorer/draw.py (perp-centering + endpoint snapping); pure geometry
+// over the serialized ConnSeg `analysis`, validated against the golden snapshot.
+function computeDisplay(analysis) {
+  const perp = analysis.map(a =>
+    (a.perp_lo !== null && a.perp_hi !== null) ? (a.perp_lo + a.perp_hi) / 2 : a.perp_pos);
+  const alo = analysis.map(a => a.along_lo);
+  const ahi = analysis.map(a => a.along_hi);
+  analysis.forEach((a, i) => {
+    for (const c of a.conns) {
+      if (c.kind !== "SEG" || c.seg_idx < 0 || c.seg_idx >= perp.length) continue;
+      const target = perp[c.seg_idx];             // partner's display perp
+      // Snap the endpoint of `i` nearest this junction so the line reaches it.
+      if (Math.abs(c.at_pos - alo[i]) <= Math.abs(c.at_pos - ahi[i]))
+        alo[i] = Math.min(alo[i], target);        // extend the lo end outward
+      else
+        ahi[i] = Math.max(ahi[i], target);        // extend the hi end outward
+    }
+  });
+  return {perp, alo, ahi};
+}
+
 function drawGeneration(g, W, H) {
   const bundle = RENDER.bundles[0];
   if (!bundle) return;
   const cand = bundle.candidates[CAND];
   document.getElementById("candlbl").textContent =
     `bundle ${bundle.id} · cand ${CAND + 1}/${bundle.candidates.length} · ${cand.type} · WL ${cand.estimated_wirelength}`;
-  // Nominal coordinates (Phase 1); perp-centering/snapping (DisplayGeom) later.
-  for (const s of cand.segments) {
-    const cls = "seg " + (s.is_jog ? "jog" : (s.horiz ? "H" : "V"));
-    el("line", {class: cls, x1: s.start.x, y1: s.start.y, x2: s.end.x, y2: s.end.y}, g);
-  }
+  const disp = computeDisplay(cand.analysis);
+  cand.analysis.forEach((a, i) => {
+    const s = cand.segments[i];
+    const cls = "seg " + (s.is_jog ? "jog" : (a.horiz ? "H" : "V"));
+    const p = disp.perp[i];
+    if (a.horiz)
+      el("line", {class: cls, x1: disp.alo[i], y1: p, x2: disp.ahi[i], y2: p}, g);
+    else
+      el("line", {class: cls, x1: p, y1: disp.alo[i], x2: p, y2: disp.ahi[i]}, g);
+  });
   for (const bt of cand.seg_busterms)
     for (const side of ["start", "end"]) {
       const b = bt[side]; if (!b) continue;

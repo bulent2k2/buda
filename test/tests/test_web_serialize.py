@@ -19,10 +19,14 @@ JSON-round-trippable payloads with the expected fields and sentinel handling.
 import io
 import contextlib
 import json
+import os
 
 import buda
 import buda_cli
 from web import runner, serialize
+
+_GOLDEN = os.path.join(os.path.dirname(__file__), "data", "web_golden",
+                       "b44_generation.json")
 
 
 _B44_SETUP = [
@@ -67,6 +71,23 @@ def test_serialize_floorplan_shape():
     assert blk["bbox"] == {"x1": 2960, "y1": 9750, "x2": 4660, "y2": 10250}
     assert "corner_margin" in blk and "is_container" in blk
     assert isinstance(fp["keepouts"], list)
+
+
+def test_serialize_floorplan_multi_rect_block():
+    """A multi-rect / TEG block serializes its REAL rects (not just the bbox), so
+    the client can draw the solid rects and leave the gaps open rather than
+    painting the whole bbox solid (Codex P2)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _run(s, ["add_block solid 0 0 100 100",
+             "add_block teg rect 0 0 40 100 rect 60 0 100 100"])  # gap 40..60
+    fp = _json_roundtrip(serialize.serialize_floorplan(s.fp))
+    solid = next(b for b in fp["blocks"] if b["name"] == "solid")
+    teg = next(b for b in fp["blocks"] if b["name"] == "teg")
+    assert solid["rects"] == []                     # single-rect: draw the bbox
+    assert len(teg["rects"]) == 2                    # two real rects with a gap
+    assert [0, 0, 40, 100] in teg["rects"]
+    assert [60, 0, 100, 100] in teg["rects"]
 
 
 def test_serialize_hanan_shape():
@@ -170,3 +191,29 @@ def test_render_none_before_stages():
     assert serialize.serialize_detailed(None) is None
     rn = _json_roundtrip(serialize.serialize_render_nuts(s))
     assert rn["nuts"] is None
+
+
+def test_generation_golden_snapshot():
+    """The generation render payload (floorplan + all 35 b44 candidates + their
+    ConnTopology analysis) is byte-frozen.  This catches any serializer drift AND
+    is the reference the ported Renderer/DisplayGeom is validated against, so the
+    client math cannot silently diverge from the server payload.  The payload is
+    integer-valued at this stage (no NUTS float placement), so it is host-stable.
+
+    Regenerate on an intended change:
+        python -c "import io,contextlib,json,buda,buda_cli; \\
+          from web import runner,serialize; s=buda_cli.BudaSession(); s.no_viz=True; \\
+          [runner.run_one(s,c) for c in SETUP+['run_bundler','generate_topologies']]; \\
+          p=serialize.serialize_generation(s); p.pop('state',None); \\
+          open('test/tests/data/web_golden/b44_generation.json','w').write(
+              json.dumps(p,indent=1,sort_keys=True)+chr(10))"
+    """
+    s = _b44_generated()
+    payload = serialize.serialize_generation(s)
+    payload.pop("state", None)
+    payload = _json_roundtrip(payload)          # normalize to JSON scalars
+    with open(_GOLDEN) as f:
+        golden = json.load(f)
+    assert payload == golden, (
+        "generation render payload drifted from the golden snapshot; if "
+        "intended, regenerate test/tests/data/web_golden/b44_generation.json")

@@ -312,8 +312,16 @@ def serialize_generation(session, bundle_id=None, candidate=None):
             sb["candidate_offset"] = candidate
         out_bundles.append(sb)
 
+    # The floorplan MUST be in the same coordinate frame as the candidates and
+    # hanan grid.  For a pre-expansion hier bundle, bundle_floorplan resolves a
+    # cell-local / endpoint frame (`hanan_fp`), so returning the top-level
+    # session.fp here would draw those local candidates over the wrong blocks.
+    # Emit the resolved frame's floorplan; for the flat flow hanan_fp IS
+    # session.fp, so this is unchanged there.  (A multi-bundle hier render with
+    # per-bundle frames is inherently one-floorplan-per-response; use a focused
+    # `?bundle=` request — the per-bundle-floorplan generalization is a follow-on.)
     return {
-        "floorplan": serialize_floorplan(session.fp),
+        "floorplan": serialize_floorplan(hanan_fp),
         "hanan": serialize_hanan(hanan_fp),
         "bundles": out_bundles,
         "state": serialize_state(session),

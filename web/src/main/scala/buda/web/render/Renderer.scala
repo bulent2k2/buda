@@ -64,10 +64,24 @@ object Renderer {
     }
     blocks.foreach { b =>
       val container = b.is_container.asInstanceOf[Boolean]
-      g.appendChild(el("rect", "class" -> ("blk" + (if (container) " container" else "")),
-        "x" -> d(b.bbox, "x1"), "y" -> d(b.bbox, "y1"),
-        "width" -> (d(b.bbox, "x2") - d(b.bbox, "x1")),
-        "height" -> (d(b.bbox, "y2") - d(b.bbox, "y1"))))
+      val rects = b.rects.asInstanceOf[js.Array[js.Array[Double]]]
+      if (rects.length > 0) {
+        // Multi-rect / TEG block: draw each real rect solid + outline the bbox,
+        // so gaps (valid pass-through channels) don't read as block area.
+        rects.foreach { r =>
+          g.appendChild(el("rect", "class" -> "blk",
+            "x" -> r(0), "y" -> r(1), "width" -> (r(2) - r(0)), "height" -> (r(3) - r(1))))
+        }
+        g.appendChild(el("rect", "class" -> "blk container",
+          "x" -> d(b.bbox, "x1"), "y" -> d(b.bbox, "y1"),
+          "width" -> (d(b.bbox, "x2") - d(b.bbox, "x1")),
+          "height" -> (d(b.bbox, "y2") - d(b.bbox, "y1"))))
+      } else {
+        g.appendChild(el("rect", "class" -> ("blk" + (if (container) " container" else "")),
+          "x" -> d(b.bbox, "x1"), "y" -> d(b.bbox, "y1"),
+          "width" -> (d(b.bbox, "x2") - d(b.bbox, "x1")),
+          "height" -> (d(b.bbox, "y2") - d(b.bbox, "y1"))))
+      }
       val lg = el("g", "transform" ->
         s"translate(${d(b.bbox, "x1") + 4} ${d(b.bbox, "y2") - 12}) scale(1 -1)")
       val t = el("text", "class" -> "blklbl", "x" -> 0, "y" -> 0)
@@ -80,13 +94,23 @@ object Renderer {
     val cands = bundles(0).candidates.asInstanceOf[js.Array[js.Dynamic]]
     if (cands.isEmpty) return
     val c = cands(math.max(0, math.min(cand, cands.length - 1)))
-    c.segments.asInstanceOf[js.Array[js.Dynamic]].foreach { s =>
-      val jog = s.is_jog.asInstanceOf[Boolean]
-      val horiz = s.horiz.asInstanceOf[Boolean]
+    // DisplayGeom: draw each segment at its slide-window center with endpoints
+    // snapped to connected partners, so junctions visually meet.
+    val analysis = c.analysis.asInstanceOf[js.Array[js.Dynamic]]
+    val segs = c.segments.asInstanceOf[js.Array[js.Dynamic]]
+    val placed = DisplayGeom.compute(analysis)
+    for (i <- 0 until analysis.length) {
+      val a = analysis(i)
+      val horiz = a.horiz.asInstanceOf[Boolean]
+      val jog = segs(i).is_jog.asInstanceOf[Boolean]
       val cls = "seg " + (if (jog) "jog" else if (horiz) "H" else "V")
-      g.appendChild(el("line", "class" -> cls,
-        "x1" -> d(s.start, "x"), "y1" -> d(s.start, "y"),
-        "x2" -> d(s.end, "x"), "y2" -> d(s.end, "y")))
+      val p = placed.perp(i)
+      if (horiz)
+        g.appendChild(el("line", "class" -> cls,
+          "x1" -> placed.alo(i), "y1" -> p, "x2" -> placed.ahi(i), "y2" -> p))
+      else
+        g.appendChild(el("line", "class" -> cls,
+          "x1" -> p, "y1" -> placed.alo(i), "x2" -> p, "y2" -> placed.ahi(i)))
     }
   }
 }
