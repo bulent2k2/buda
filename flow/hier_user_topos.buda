@@ -1,0 +1,93 @@
+# ============================================================
+# Hierarchical flow — hand-built USER topologies at BOTH the
+# cell-template level AND the top level, persisted to a BDB.
+# ============================================================
+#
+# Demonstrates that TopoEdit `edit_commit` USER candidates survive into
+# the BDB in the hier flow: two sub-cell TEMPLATES (alu_cell, mem_cell)
+# each get a hand-built USER topology, and so does the top-level
+# cross-block bundle.  `save_bdb <path>.bdb.sql` writes a diffable text
+# fixture whose `topology` table carries the USER rows (type='USER',
+# source='user'); a fresh session's `load_pipeline` restores them.
+#
+# Run:   bin/buda flow/hier_user_topos.buda
+# Then:  grep "'USER'" flow/hier_user_topos.bdb.sql   # the persisted rows
+#
+# NOTE: bundle ids below (1 = alu template, 2 = top cross-block,
+#       3 = mem template) are the deterministic ids run_hier_bundler
+#       assigns to this design — see the `dump_hbundles` output.
+
+def_layer 4 M4 H TOP 10
+def_layer 5 M5 V TOP 10
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+# ── Build the hierarchy in the BDB (all-.buda, no Python) ─────────────
+open_bdb :memory:
+
+# Two sub-cell TYPES, each two leaf pipes; one occurrence of each at top.
+add_cell alu_cell 420 200
+add_cell mem_cell 420 200
+add_cell pipe_cell 110 80
+
+add_inst_to_cell alu_cell pa_i pipe_cell  20 60
+add_inst_to_cell alu_cell pb_i pipe_cell 155 60
+add_inst_to_cell mem_cell qa_i pipe_cell  20 60
+add_inst_to_cell mem_cell qb_i pipe_cell 155 60
+
+add_inst alu_i alu_cell -    0 0
+add_inst mem_i mem_cell -  700 0
+
+derive_busterms 1
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+
+# ── Nets: a cell-local bus in each sub-cell + a top-level bus ─────────
+bdb_net_mode on
+add_bus alu_ab[4] alu_i/pa_i.out alu_i/pb_i.in     # -> alu_cell template (hb-1)
+add_bus mem_ab[4] mem_i/qa_i.out mem_i/qb_i.in     # -> mem_cell template (hb-3)
+add_bus top_ab[4] alu_i/pb_i.out mem_i/qa_i.in     # -> top-level cross-block (hb-2)
+
+# ── Bundle + generate candidates ─────────────────────────────────────
+run_hier_bundler depth 1
+generate_hier_topologies
+dump_hbundles
+
+# ── USER topology #1 — in sub-cell alu_cell (bundle 1, cell-local) ───
+# Edits resolve in the cell's OWN frame: cell-local block names pa_i/pb_i,
+# a horizontal trunk below the pipes with a stub from each.
+edit_topology 1 new
+edit_add_trunk H 30 75 210
+edit_add_stub pa_i 0
+edit_add_stub pb_i 0
+edit_commit pin
+
+# ── USER topology #2 — in sub-cell mem_cell (bundle 3, cell-local) ───
+edit_topology 3 new
+edit_add_trunk H 30 75 210
+edit_add_stub qa_i 0
+edit_add_stub qb_i 0
+edit_commit pin
+
+# ── USER topology #3 — at the TOP level (bundle 2, absolute frame) ───
+# A cross-block H trunk in the channel BELOW the two instances (blocks span
+# y 60..140), with a stub dropping from each block down to it.  Absolute
+# coordinates / face references resolve against the top-level floorplan.
+edit_topology 2 new
+edit_add_trunk H 30 200 760
+edit_add_stub alu_i/pb_i 0
+edit_add_stub mem_i/qa_i 0
+edit_commit pin
+
+# ── Plan (expands the cell templates to their instances) + route ─────
+set_track_pitch 2.0
+run_planner hier 3
+run_nuts
+
+check_design nuts
+
+# ── Persist to a diffable .bdb.sql text fixture ──────────────────────
+# Path is relative to THIS script's directory (flow/), so this writes
+# flow/hier_user_topos.bdb.sql.
+save_bdb hier_user_topos.bdb.sql
