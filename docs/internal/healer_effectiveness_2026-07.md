@@ -87,3 +87,63 @@ the clean **0/0** endpoint (was ~1/94 with negotiate only). The experiment is
 the affordability decision the item asked for: ripup is what takes bigHalf to
 clean, at ~7s of healing on top of the ~2s no-rr pipeline. Endpoint stays
 CI-guarded by `test_bighalf_rr_reaches_clean_endpoint`.
+
+## Staged / cumulative view (the canonical 4-stage sequence)
+
+The single-healer table above isolates negotiate-alone vs ripup-alone, but the
+real flows run a staged sequence — a stage-a pair on NUTS overlaps (before
+DNUTS) then a stage-b pair on DNUTS opens. This second sweep imposes the
+canonical sequence uniformly and reports `overlaps/opens @ cumulative-seconds`
+at each cumulative point (harness: `scratchpad/healer_staged.py`):
+
+- **S0** base `run_nuts ; run_detailed_nuts`
+- **S1 +NCa** `… negotiate ; run_detailed_nuts`
+- **S2 +RRa** `… negotiate ; ripup ; run_detailed_nuts`
+- **S3 +NCb** `… ; run_detailed_nuts ; negotiate`
+- **S4 +RRb** `… ; run_detailed_nuts ; negotiate ; ripup`  (= full flow)
+
+| flow | S0 | S1 +NCa | S2 +RRa | S3 +NCb | S4 +RRb |
+|---|---|---|---|---|---|
+| bigHalf | 4/286 @1.8 | 2/174 @2.4 | 0/186 @3.2 | 1/10 @3.9 | **0/0 @7.7** |
+| big_3bundles_pure_mst | 0/12 @0.0 | 0/12 @0.0 | 0/12 @0.0 | **0/0 @0.1** | 0/0 @0.1 |
+| tc3a | 870/9179 @4.8 | 654/10263 @16 | 539/9222 @43 | 758/8441 @48 | 711/7783 @60 |
+| big2_noviz | 2/28 @0.5 | **0/0 @0.7** | 0/0 | 0/0 | 0/0 |
+| tc3b_flat | 2/28 @0.6 | **0/0 @0.8** | 0/0 | 0/0 | 0/0 |
+| hbundles/06 | 4/48 @0.7 | 1/48 @0.7 | 0/44 @0.9 | 0/8 @1.1 | **0/0 @3.8** |
+| hbundles/07 | 0/11 @0.9 | 0/11 @0.9 | 0/11 @0.9 | 0/11 @1.0 | **0/0 @2.6** |
+| mix | 13/224 @2.3 | 5/175 @3.3 | 0/141 @4.5 | 14/76 @6.4 | 1/16 @36 |
+| mix2 | 16/374 @2.7 | 6/266 @5.5 | 1/248 @28 | 2/42 @29 | **0/0 @49** |
+| mix2_fast | 33/256 @3.9 | 13/188 @7 | 1/193 @17 | 10/123 @20 | 6/30 @41 |
+| mix2_fast_bottomup | 17/— @3.2 | 12/— @5.8 | 2/— @13 | 2/— @13 | 2/— @19 |
+| mix2_fast_topdown | 16/175 @3.7 | 8/213 @5.9 | 0/137 @7.3 | 6/73 @10 | **0/0 @55** |
+| slowdown_rnr | 13/286 @2.9 | 3/205 @5.3 | 0/173 @15 | 6/52 @17.5 | **0/0 @21.5** |
+
+(`—` = mix2_fast_bottomup's bottom-up path produced no detailed result in the
+harness; overlaps still track 17→12→2→2→2.)
+
+**Marginal contribution of each stage:**
+
+- **NCa (negotiate stage-a) is the cheap workhorse** — +0.1–1s (mix2_fast +3s)
+  and it clears most NUTS overlaps AND cuts opens hard (bigHalf 286→174, mix
+  224→175, slowdown 286→205); big2_noviz / tc3b_flat reach 0/0 at NCa alone.
+- **RRa (ripup stage-a)** finishes the NUTS overlaps → ~0 (its job, pre-DNUTS);
+  it barely moves opens (bigHalf 174→186).
+- **NCb (negotiate stage-b)** is the big OPENS reducer once overlaps are gone
+  (bigHalf 186→10, mix2 248→42, slowdown 173→52) — can reintroduce a couple
+  overlaps.
+- **RRb (ripup stage-b) is the finisher and the cost center** — closes the last
+  opens+overlaps to 0/0 but dominates runtime (mix S3→S4 **+30s**,
+  mix2_fast_topdown **+45s**, bigHalf +3.8s).
+
+**Consequences for flow tuning:**
+
+1. Cheap negotiate does 80–90% of the reduction; ripup pays heavily to close
+   the last few — cost is concentrated in the final RRb stage.
+2. Flows split three ways: reach 0/0 early on cheap negotiate (big2_noviz,
+   tc3b_flat, big_3bundles), need the full 4-stage sequence (bigHalf, mix2,
+   hbundles/06 & 07, slowdown, mix2_fast_topdown), or **never** reach 0/0
+   (tc3a, mix 1/16, mix2_fast 6/30) — capacity-limited, not healer-limited.
+3. `tc3a` is pathological: the full sequence costs ~60s and still leaves 7783
+   opens, and NCa even makes it WORSE (9179→10263 — negotiate's demand
+   injection thrashes an over-capacity design). A flow this far over resource
+   should skip the expensive stage-b ripup.
