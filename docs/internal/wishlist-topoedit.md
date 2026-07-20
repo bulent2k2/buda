@@ -6,43 +6,32 @@ scriptable `edit_*` commands (`src/topo_edit.h/cpp`,
 `src/buda_cmds/edit_cmds.py`).  Index: [`wishlist.md`](wishlist.md).
 Key bindings: [`../KEY_BINDINGS.md`](../KEY_BINDINGS.md) → *TopoEdit mode*.
 
-## Slide-window refine ('W') input precision
+## Slide-window refine ('W') input precision — ✅ RESOLVED (all three variants)
 
-**Context.** The `W` two-step slide-window refine (branch
-`claude/topo-edit-ui`) captures each bound from the RAW mouse-cursor
-position at key-press time — the cursor's perpendicular component as an
-unsnapped float, echoed in the banner (`slide bound at 2743 — press W at
-the other bound`) and clamped into the segment's structural slide range at
-apply time.  Deliberate: slide bounds are continuous quantities (the
-discrete track choice happens later in NUTS/DNUTS), so free placement is
-the right default granularity.  But a cursor-derived float may prove too
-loose in practice — a user aiming at a specific track or block face gets
-whatever pixel they hovered.
+**Context.** The `W` two-step slide-window refine originally captured each
+bound from the RAW mouse-cursor position at key-press time — an unsnapped
+float, echoed only in the banner.  Three precision variants were deferred
+until real use showed the float capture missing targets; all three have
+now landed:
 
-**Wish.** If/when raw capture proves too imprecise, add one or more of:
+1. **Snap-to-grid variant** — ✅ landed as the DEFAULT (gridded W refine
+   batch): bounds snap to the bundle grid's Hanan lines (`[grid]` in the
+   banner), and `enter` mid-refine toggles the gridless `[free]` sub-mode
+   for off-grid bounds.  Both marks store the raw cursor coordinate, so
+   the mode at apply time decides.
+2. **Echo marker at the marked bound** — ✅ landed: after the first `W`,
+   `_draw_slide_mark_line` draws a transient dashed line + `W:<coord>
+   [mode]` label at the bound's EFFECTIVE coordinate (re-snapped or raw
+   per the current sub-mode — it re-echoes live when `enter` toggles),
+   across the marked segment's along extent; it disappears when the
+   second `W` applies the window (or the mark is otherwise discarded).
+   Test: `test_edit_mode_slide_mark_echo_marker`.
+3. **Precise text entry** — ✅ landed as the CLI parity command
+   (`edit_set_slide <seg#> <lo> <hi>`, next section), which the GUI's
+   `W`/`w` also log into the `[edit-cmd]` stream and the sidecar op-log.
 
-1. **Snap-to-grid variant** — a modifier or alternate key that snaps the
-   captured bound to the nearest bundle-grid line (the busterm-block +
-   keepout edges `_bundle_hanan_grid` already computes for `T`/`Y`), so a
-   bound lands exactly on a block face.  Where to start: reuse `_snap` in
-   `_edit_slide_at`, gated on the chosen key/modifier.
-2. **Echo marker at the marked bound** — after the first `W`, draw a
-   transient dashed line (perpendicular to the segment, at the captured
-   coordinate) so the user sees exactly where the first bound landed
-   before committing the second.  Where to start: a one-shot artist in
-   `_draw` keyed off `_edit_slide_mark`, styled like the slide-bound
-   dotted lines.
-3. **Precise text entry** — an exact-coordinate path for both bounds,
-   either a matplotlib TextBox popped by a key (GUI) or simply the CLI
-   parity command (`edit_set_slide <seg#> <lo> <hi>`, mirroring
-   `edit_set_span`) so a script or an expert who knows the number types
-   it.  Where to start: the CLI command is the cheap one — stage into the
-   session the way the GUI stages `_edit_slide`, land on
-   `plan.seg_slide_lo/hi` in `cmd_edit_commit`.
-
-**Why deferred.** The raw capture shipped first to validate the workflow;
-none of these variants is needed until real use shows the float capture
-missing targets.  All three compose (snap key + echo marker + text entry
+All three compose, as predicted: snap default + live echo marker + exact
+text entry cover the aiming, feedback, and precision paths.  All three compose (snap key + echo marker + text entry
 are independent).
 
 ## CLI parity for the slide-window refine — ✅ RESOLVED
