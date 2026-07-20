@@ -51,7 +51,22 @@ structural realization-risk signal; (b) FREE-window open-space MST legs;
 biggest upside — see [`wishlist-planner.md`](wishlist-planner.md) →
 *"Charge pulled segments at their predicted pull target"*).
 
-## Opposite-pull ("tug-of-war") connector pairs — a structural risk signal — OPEN
+## Opposite-pull ("tug-of-war") connector pairs — a structural risk signal — DETECTOR SHIPPED (a); joint arbitration (b) OPEN
+
+**Status (2026-07-20):** the structural DETECTOR — sketch (a) — is shipped as a
+byte-identical diagnostic.  `buda_session.util.find_tug_of_war_pairs(segs)`
+reads the already-derived ConnSeg data (each rider's `net_pull` + its junction
+`at_pos` along T) and returns every outward (diverging) `(T, lo_rider, hi_rider)`
+pair — a `−`-puller sitting strictly BELOW a `+`-puller on the same interior
+segment.  It is surfaced in `dump_topologies --problems` (a `TUG(n)` bundle
+flag, a per-pair detail line `tug: cand C segT stretched by segL(−)/segH(+)`,
+and a `bundles with tug-of-war` summary count) on the SELECTED/displayed
+candidate.  Read-only — never changes selection or placement.  Validated
+against the canonical b44 repro (`TRUNK_H+MST@y11915` → `(5,1,3)`, separation
+1250) with positive/negative/synthetic controls in
+`test/tests/test_tug_of_war.py`.  Still OPEN: wiring the count into the
+WL tie-break / a kWLSpread-style risk term (that makes it QoR-affecting — a
+deliberate follow-on), and sketch (b) NUTS-side joint arbitration.
 
 **What:** two connectors riding the same interior segment T, pulling in
 opposite OUTWARD directions (the lower-position rider pulls down, the
