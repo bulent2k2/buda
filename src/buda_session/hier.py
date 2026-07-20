@@ -327,40 +327,53 @@ class HierMixin:
             self.bdb.add_bundle_busterm(bid, _qual(bt), "entry")
         for bt in hb.exit_busterm_ids:
             self.bdb.add_bundle_busterm(bid, _qual(bt), "exit")
-        # Persist only the SELECTED (placed) topology for the instance, with the
-        # planner's assigned layers; the template retains the full candidate set.
-        topo = w.input.candidates[sel]
-        tr = buda.TopoRow()
-        tr.id = bid
-        tr.cand_index = sel
-        tr.type = topo.type
-        tr.wirelength = topo.estimated_wirelength
-        tr.trunk_location = topo.trunk_location
-        tr.pass_through_count = topo.pass_through_count
-        tr.connected_blocks = json.dumps(list(topo.connected_block_names))
-        tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
-        tr.is_selected = True
-        tr.topo_uid = buda.topo_uid(topo)
-        self.bdb.add_topology(tr)
+        # Persist the SELECTED (placed) topology for the instance, with the
+        # planner's assigned layers — plus any per-instance USER candidates
+        # (TopoEdit follow-on #3): a hand-built candidate committed on THIS
+        # instance WITHOUT a pin used to be session-only; now it persists as
+        # an extra row, so both alternative shapes of an instance survive a
+        # save → `load_pipeline expanded` resume.  Row growth stays bounded
+        # by construction: only USER candidates ride (never the full
+        # template-pool copy — the template retains the full candidate set),
+        # so an un-edited instance persists exactly one row as before.
         seg_layers = list(w.plan.seg_layers)
-        for si, seg in enumerate(topo.segments):
-            sr = buda.TopoSegRow()
-            sr.id = bid
-            sr.cand_index = sel
-            sr.seg_index = si
-            sr.x1, sr.y1 = seg.start.x, seg.start.y
-            sr.x2, sr.y2 = seg.end.x, seg.end.y
-            sr.layer_hint = seg.layer_hint
-            sr.is_jog = seg.is_jog
-            sr.edge_id = seg.edge_id
-            sr.perp_clamp_lo = seg.perp_clamp_lo
-            sr.perp_clamp_hi = seg.perp_clamp_hi
-            sr.assigned_layer = int(seg_layers[si]) if si < len(seg_layers) else -1
-            self.bdb.add_topology_segment(sr)
-        # Logical seg-busterm links + TEG-over bridges for the instance's
-        # selected topology, so a `load_pipeline expanded` resume restores its
-        # connectivity (and any bridge) too.
-        self._persist_topology_annotations(bid, sel, topo)
+        for ci, topo in enumerate(w.input.candidates):
+            if ci != sel and topo.type != "USER":
+                continue
+            tr = buda.TopoRow()
+            tr.id = bid
+            tr.cand_index = ci
+            tr.type = topo.type
+            tr.wirelength = topo.estimated_wirelength
+            tr.trunk_location = topo.trunk_location
+            tr.pass_through_count = topo.pass_through_count
+            tr.connected_blocks = json.dumps(list(topo.connected_block_names))
+            tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
+            tr.is_selected = (ci == sel)
+            tr.topo_uid = buda.topo_uid(topo)
+            tr.source = "user" if topo.type == "USER" else "generated"
+            self.bdb.add_topology(tr)
+            for si, seg in enumerate(topo.segments):
+                sr = buda.TopoSegRow()
+                sr.id = bid
+                sr.cand_index = ci
+                sr.seg_index = si
+                sr.x1, sr.y1 = seg.start.x, seg.start.y
+                sr.x2, sr.y2 = seg.end.x, seg.end.y
+                sr.layer_hint = seg.layer_hint
+                sr.is_jog = seg.is_jog
+                sr.edge_id = seg.edge_id
+                sr.perp_clamp_lo = seg.perp_clamp_lo
+                sr.perp_clamp_hi = seg.perp_clamp_hi
+                # Only the selected (placed) topology carries plan layers.
+                sr.assigned_layer = (int(seg_layers[si])
+                                     if ci == sel and si < len(seg_layers)
+                                     else -1)
+                self.bdb.add_topology_segment(sr)
+            # Logical seg-busterm links + TEG-over bridges, so a
+            # `load_pipeline expanded` resume restores connectivity (and any
+            # bridge) for every persisted candidate.
+            self._persist_topology_annotations(bid, ci, topo)
 
     def _restore_user_topos(self, data):
         """Replay sidecar-persisted TopoEdit op-logs ('user_topo': base uid +

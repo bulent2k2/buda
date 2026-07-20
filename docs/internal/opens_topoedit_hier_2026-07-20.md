@@ -22,12 +22,12 @@ deliberately deferred:
    command lines} in BDB `meta` (no schema bump); `load_pipeline` prints
    a pointer per restored USER candidate, `dump_user_ops` prints the
    replayable ops.  Tests: `test_bdb_user_ops.py`.
-2. **Per-instance candidate pools.**  Post-expansion, an instance
-   wrapper persists only its *selected* topology; an unpinned
-   `edit_commit` on an expanded instance is session-only (loudly noted).
-   Recommendation stands: don't build until a real workflow demands it —
-   it would multiply topology rows by instance count and blur
-   template-vs-instance provenance.
+2. **Per-instance candidate pools** — ✅ RESOLVED (follow-up PR to this
+   snapshot; the workflow demand arrived): expanded instances persist
+   their selection plus their USER candidates only — an unpinned
+   instance commit survives `load_pipeline expanded`, un-edited
+   instances still persist one row (bounded growth, loader unchanged).
+   Tests in `test_bdb_user_topo.py`.
 3. **`W` echo marker** — ✅ RESOLVED (this snapshot's companion PR).  The
    last residue of the input-precision item: a transient marker at the
    first captured slide bound so the user sees where it landed before

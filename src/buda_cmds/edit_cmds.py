@@ -469,8 +469,9 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
             session._persist_planner_output()
             print("[BDB] re-persisted expanded planner state to the open BDB.")
             if not is_selected:
-                print("  Note: expanded instances persist only their SELECTED "
-                      "topology — the un-pinned USER candidate is session-only.")
+                print("  Note: the un-pinned USER candidate persisted as a "
+                      "per-instance extra row — it survives `load_pipeline "
+                      "expanded` (pin it there with select_topology).")
     elif session._persist_topologies():
         print("[BDB] re-persisted candidate topologies to the open BDB.")
 
