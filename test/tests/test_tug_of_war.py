@@ -123,6 +123,56 @@ def test_inward_pull_pair_not_flagged():
     assert find_tug_of_war_pairs(segs) == [(0, 1, 2)]
 
 
+def test_seg_net_pull_override_changes_verdict():
+    """Post-dogleg, NUTS places with `plan.seg_net_pull` overrides where they
+    differ from ConnTopology's recomputed pull (build_nuts_maps: an entry wins
+    when the array length matches and it is not the INT_MIN sentinel).  The
+    detector must read the SAME effective pulls, so an override flips its verdict
+    exactly as it flips the placed geometry."""
+    class _C:
+        def __init__(self, seg_idx, at_pos):
+            self.kind = buda.SegConnKind.SEG
+            self.seg_idx = seg_idx
+            self.at_pos = at_pos
+
+    class _S:
+        def __init__(self, net_pull, conns):
+            self.net_pull = net_pull
+            self.conns = conns
+
+    INT_MIN = -2147483648
+    # Raw pulls: low rider +1, high rider -1 → converging → NO tug.
+    segs = [
+        _S(0, [_C(1, 100), _C(2, 900)]),   # T
+        _S(+1, [_C(0, 100)]),               # low rider
+        _S(-1, [_C(0, 900)]),               # high rider
+    ]
+    assert find_tug_of_war_pairs(segs) == []
+
+    # A dogleg override that flips both riders → diverging → the report MUST
+    # now flag the tug (matching what NUTS actually placed).
+    override = [INT_MIN, -1, +1]            # T untouched; riders flipped
+    assert find_tug_of_war_pairs(segs, net_pull=override) == [(0, 1, 2)]
+
+    # Guard fidelity: a length-mismatched (stale) override is ignored, exactly
+    # as build_nuts_maps ignores np_ok == false.
+    assert find_tug_of_war_pairs(segs, net_pull=[-1, +1]) == []
+    # A per-entry INT_MIN sentinel falls back to cs.net_pull for that rider.
+    assert find_tug_of_war_pairs(segs, net_pull=[INT_MIN, INT_MIN, INT_MIN]) == []
+
+
+def test_b44_canonical_tug_unaffected_by_empty_override():
+    """The canonical b44 pair has no dogleg override (empty seg_net_pull), so
+    the effective-pull path is a no-op and the report is unchanged."""
+    s = _b44_bundle()
+    cand = next(c for c in s.bundles[0].input.candidates
+                if c.type == "TRUNK_H+MST@y11915"
+                and c.estimated_wirelength == 3510)
+    segs = _segs(cand, s.fp)
+    assert find_tug_of_war_pairs(segs, net_pull=[]) == [(5, 1, 3)]
+    assert find_tug_of_war_pairs(segs, net_pull=None) == [(5, 1, 3)]
+
+
 def test_dump_topologies_reports_tug():
     """The signal is surfaced in `dump_topologies --problems`: a TUG flag on
     the bundle, a per-pair detail line, and a summary count."""

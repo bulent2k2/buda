@@ -214,17 +214,24 @@ class ReportsMixin:
                 print(f"        low-cross: {', '.join(lowx)}  "
                       f"(M{layer} is non-TOP — leaf footprints are keepouts)")
 
-    def _tug_pairs(self, topo, fp):
+    def _tug_pairs(self, topo, fp, plan=None):
         """Outward opposite-pull connector pairs on `topo` — a NUTS
         realization-risk signal (wishlist-nuts "Opposite-pull connector
         pairs").  Read-only over the derived ConnSeg data (net_pull + junction
         at_pos), so it never affects selection or placement.  Returns a list of
-        (t, lo_rider, hi_rider) segment-index tuples; [] on any build failure."""
+        (t, lo_rider, hi_rider) segment-index tuples; [] on any build failure.
+
+        `plan` (the wrapper's BundlePlan) supplies the post-dogleg
+        `seg_net_pull` override so the report reflects the pulls NUTS actually
+        placed with — a dogleg pins values ConnTopology recomputes wrongly on
+        the split topology.  The detector applies the same length/sentinel guard
+        NUTS uses, so a stale array is ignored."""
         from buda_session.util import find_tug_of_war_pairs
         try:
             ct = buda.ConnTopology()
             ct.build(topo, fp)
-            return find_tug_of_war_pairs(list(ct.segs()))
+            override = getattr(plan, "seg_net_pull", None) if plan is not None else None
+            return find_tug_of_war_pairs(list(ct.segs()), net_pull=override)
         except Exception:
             return []
 
@@ -290,7 +297,11 @@ class ReportsMixin:
             # Tug-of-war signal on the display candidate (selected, else cand 0):
             # opposite-pull rider pairs stretching an interior trunk segment.
             disp = sel if (sel is not None and 0 <= sel < len(cands)) else 0
-            tug = self._tug_pairs(cands[disp], w_fp) if cands else []
+            # Pass the plan so a post-dogleg seg_net_pull override is honored
+            # only for the SELECTED candidate (its overrides match that topology);
+            # for an unselected display fallback the length guard ignores them.
+            tug_plan = w.plan if disp == sel else None
+            tug = self._tug_pairs(cands[disp], w_fp, tug_plan) if cands else []
 
             has_dup = bool(dup_groups)
             has_pinch = bool(pinch_idx)

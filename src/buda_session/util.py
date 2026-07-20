@@ -106,7 +106,7 @@ _RR_CONVERGE_FLOOR = 100
 _RR_CONVERGE_FRAC = 0.03
 
 
-def find_tug_of_war_pairs(segs):
+def find_tug_of_war_pairs(segs, net_pull=None):
     """Detect outward opposite-pull connector pairs on a topology's segments.
 
     A *tug-of-war* (wishlist-nuts "Opposite-pull connector pairs") is the
@@ -128,12 +128,28 @@ def find_tug_of_war_pairs(segs):
     derive_net_pull, junction ``at_pos`` from the seg conns) — no extra passes,
     no mutation, so it never changes selection or placement.
 
-    ``segs`` is a list of ConnSeg (``ConnTopology.segs()``).  Returns a list of
-    ``(t, lo_rider, hi_rider)`` tuples: T's segment index and the two rider
-    indices, ``lo_rider`` the lower-positioned (-pull) rider and ``hi_rider``
-    the higher (+pull).  One tuple per divergent (-,+) rider pair on each T.
+    ``segs`` is a list of ConnSeg (``ConnTopology.segs()``).  ``net_pull`` is an
+    optional per-segment EFFECTIVE net_pull override — a bundle plan's
+    ``seg_net_pull`` list (post-dogleg): a dogleg pins the value NUTS actually
+    placed with when ConnTopology would recompute the split-topology pull wrongly,
+    so the report must read it too.  Applied exactly as NUTS's ``build_nuts_maps``
+    does — an entry wins over ``cs.net_pull`` only when the array length matches
+    ``segs`` and the entry is not the ``INT_MIN`` sentinel — so a stale array
+    (a later run_planner reselected a different-length topology) is ignored.
+
+    Returns a list of ``(t, lo_rider, hi_rider)`` tuples: T's segment index and
+    the two rider indices, ``lo_rider`` the lower-positioned (-pull) rider and
+    ``hi_rider`` the higher (+pull).  One tuple per divergent (-,+) rider pair.
     """
     from buda import SegConnKind
+    _INT_MIN = -2147483648
+    _ov_ok = net_pull is not None and len(net_pull) == len(segs)
+
+    def _eff_pull(i):
+        if _ov_ok and net_pull[i] != _INT_MIN:
+            return net_pull[i]
+        return segs[i].net_pull
+
     pairs = []
     for t, seg in enumerate(segs):
         # Riders: SEG-conn neighbours, each at a junction position along T
@@ -143,7 +159,7 @@ def find_tug_of_war_pairs(segs):
         for c in seg.conns:
             if c.kind != SegConnKind.SEG:
                 continue
-            pull = segs[c.seg_idx].net_pull
+            pull = _eff_pull(c.seg_idx)
             if pull < 0:
                 negs.append((c.at_pos, c.seg_idx))
             elif pull > 0:
