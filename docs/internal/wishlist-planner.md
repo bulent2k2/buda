@@ -500,6 +500,44 @@ clean (mix −8%, comprehensive −3%, 10_chip −2%, bigHalf −2%), only big2 
 and mix2 (unplaced) block — but neither level clears the corpus, so the flip
 stays gated with the blocker relocated from mix to big2/mix2.
 
+**Level-1 charge fix — occupancy-aware anchor (2026-07-20, SHIPPED opt-in).**
+The big2 blocker above was diagnosed as a SELECTION shift: honest-books level 1
+flipped 26/80 big2 bundles to longer OOB/trunk candidates (est-WL +8%, endpoint
+still 0/0 — NUTS placed the short routes fine).  Root cause: `band_perp`
+returned the clamped `pull_anchor` UNCONDITIONALLY, so every pulled segment
+booked demand at its window bound, piling phantom demand onto a few bands;
+later bundles saw those bands full and escalated to detours — but NUTS's
+`preferred_fit` TARGETS the pull and SPREADS to the nearest free track, so the
+concentration never materialized.  Fix: charge at the anchor only when that
+band is overflow-free, else fall to the occupancy-aware `best_band_perp`
+(exactly NUTS's spread).  Where the congestion is REAL (anchor and every nearby
+band overflow) the fallback still overflows and STRICT escalates, so the honest
+concentration is preserved.  Measured (fix vs pre-fix, each level as checked
+in):
+
+| flow | L0 | L1 fix (was) | L2 fix (was) |
+|---|---|---|---|
+| big2 | 0/0/11601416 | 0/0/**11791161** (12395918; +6.8%→**+1.6%**) | 0/0/11836484 (12360178; +6.6%→+2.0%) |
+| bigHalf | 0/0/15473957 | 0/0/**14156043** (15159910; −2%→−8.5%) | 0/0/**15617200** (**0/30**→**0/0**) |
+| mix2 | 2/42/839868 | 5/**31**/854844 (unplaced 144→**31**, below L0) | 11/180/780635 (150→180) |
+| mempool_tile | 61/2976/532381 | 16/1870/**256366** (−52%, win kept) | 24/1984/254976 (−52%) |
+| mix | 0/0/850633 | 0/0/828270 (782204; −8%→−2.6%) | 0/0/777801 (−8.6%, unchanged) |
+| comprehensive / 10_chip | 0/0 | 0/0 (−3%/−2% erased) | 0/0 (erased) |
+
+Net: the fix removes big2's WL blocker (+6.8%→+1.6%), clears bigHalf L2's 0/30
+opens, turns mix2's L1 unplaced regression (144) into an improvement (31, below
+L0), and preserves the mempool/mix-L2 wins.  The trade is small WL-only losses
+(≤3%, all still 0/0) on comprehensive/10_chip and half of mix's L1 win — the
+flip side of removing the over-concentration (where it helped by luck it no
+longer does).  By keeping the charge honest it ALSO heals the comprehensive_demo
+b3 keepout strand at **level 1** (previously a level-2 dead-band-gate win) and
+makes the plan-based `band_occupants` ranking honest enough that the placed
+overlay's strict-superset behavior now shows only on contention-fallback flows.
+Knob-off bit-identical.  Gate (i) is now big2 +1.6% (a defensible honest-books
+cost) — much closer to a defensible default, though the flip still needs
+reference-host golden regeneration (iii) and the alignment-sibling predictor
+(ii).
+
 **Default-flip: still gated.**  The remaining discriminators: (i) the
 honest-books mode is not a corpus-wide win — big2 WL +7% and mix2 unplaced
 42→144 at level 1, plus bigHalf 0→30 opens at level 2 (2026-07-20; mix's

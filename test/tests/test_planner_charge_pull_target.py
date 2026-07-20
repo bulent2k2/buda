@@ -21,10 +21,18 @@ OUTRANK the charged band for pulled segments — the books say one place, the
 metal lands in another (bigHalf: 141/185 pulled segments placed >100 units
 from their charged band).  With the knob on: (1) a pulled segment's charge
 and scored bands anchor at its DETERMINISTIC predicted pull target (window
-bound tightened by an in-travel ConnSeg::pull_break, bus-width clamped);
-(2) ripup's `band_occupants` victim ranking follows the PLACED positions
-(the session passes an overlay), because contention fallback can still move
-metal off even an honest prediction.  Off (default) = bit-identical legacy.
+bound tightened by an in-travel ConnSeg::pull_break, bus-width clamped) — but
+OCCUPANCY-AWARE: the anchor is used only when that band is overflow-free, else
+the charge falls to the occupancy-aware best_band_perp, mirroring NUTS's
+preferred_fit (target the pull, spread to the nearest free track).  Charging
+the raw anchor unconditionally over-concentrated every pulled segment on its
+window bound and booked phantom demand there, steering topology SELECTION to
+longer detours on an UNcongested design (big2 est-WL +8%, all still 0/0); the
+occupancy-aware anchor recovers that (+8% -> +1.6%) and, by keeping the charge
+honest, heals bigHalf's level-2 opens and the comprehensive_demo b3 strand at
+level 1.  (2) ripup's `band_occupants` victim ranking follows the PLACED
+positions (the session passes an overlay), the general-case guard for
+contention-fallback divergence.  Off (default) = bit-identical legacy.
 """
 import io
 import contextlib
@@ -131,16 +139,19 @@ def _occupant_session(knob):
 
 
 def test_occupant_ranking_follows_placed_metal():
-    """Knob on, the charge prediction diverges from contention-forced
-    placements — the PLACED overlay restores the physical holders of the
-    overlap's bands to the ranking (plan-based ranking sees only b1)."""
+    """Knob on, the PLACED overlay ranks the physical holders of the overlap's
+    bands.  Since the occupancy-aware pull anchor (this arc's charge fix) books
+    a pulled segment at its anchor only when that band is free — else at the
+    occupancy-aware best_band_perp, exactly where NUTS spreads it — the level-1
+    charge on THIS small fixture is already honest enough that the plan-based
+    ranking catches both overlap parties too.  The placed overlay remains the
+    general-case guard for CONTENTION-FALLBACK divergence (a BEST_EFFORT commit
+    whose charge is stale vs the moved metal — the big2-b61 class the corpus
+    exercises); here it must at minimum preserve the physical parties."""
     s = _occupant_session(knob=True)
     assert [(od.bid_a, od.bid_b)
             for od in s.nuts_result.overlap_details] == [(1, 3)]
     od = s.nuts_result.overlap_details[0]
-    plan_ranked = {bid for bid, _ in s.planner.band_occupants(
-        s.bundles, od.layer, od.span_lo, od.span_hi,
-        od.perp_lo, od.perp_hi, 3)}
     placed = [(ts.bundle_id, ts.seg_idx, int(round(ts.track_position)))
               for ts in s.nuts_result.segments if ts.placed]
     metal_ranked = {bid for bid, _ in s.planner.band_occupants(
@@ -148,8 +159,6 @@ def test_occupant_ranking_follows_placed_metal():
         od.perp_lo, od.perp_hi, 3, placed)}
     # The physical overlap parties must both rank under the metal overlay.
     assert {1, 3} <= metal_ranked
-    # And the overlay genuinely adds holders the plan ranking missed.
-    assert not ({1, 3} <= plan_ranked)
 
 
 def test_global_pass_heals_under_knob():
@@ -196,14 +205,19 @@ def _demo(level):
 
 
 def test_level2_junction_prediction_heals_demo_b3():
-    """Level 2 (the junction prediction, follow-on (a)): comprehensive_demo's
-    b3 reshuffle under level 1 lands an MST leg's junction-extended span on
-    the M4 keepout (nominal 35-unit stub, stretched 200 units to its pulled
-    trunk's predicted track) — 1 bit strands.  The level-2 dead-band gate
-    (span_hits_dead_band over the junction-extended span) makes the crossing
-    visible to STRICT, and the flow ends clean."""
+    """comprehensive_demo's b3 keepout strand — historically a level-1 reshuffle
+    landed an MST leg's junction-extended span on the M4 keepout (nominal
+    35-unit stub, stretched 200 units to its pulled trunk's predicted track,
+    1 bit stranded), and only level 2's dead-band gate (span_hits_dead_band)
+    healed it.  The occupancy-aware pull anchor (this arc's charge fix) removes
+    the over-concentrated charge that drove that reshuffle, so **level 1 now
+    heals b3 directly** — the trunk no longer books its whole demand at the
+    window bound, so the junction stretch that crossed the keepout does not
+    happen.  Level 2's dead-band gate remains as defense-in-depth for the
+    junction-stretch class on other geometry.  Both levels end clean."""
     s1 = _demo(1)
-    assert s1.detailed_result.num_unplaced == 1      # the b3 keepout strand
+    assert s1.detailed_result.num_unplaced == 0      # L1 now heals the strand
+    assert s1.nuts_result.num_overlaps == 0
     s2 = _demo(2)
     assert s2.detailed_result.num_unplaced == 0
     assert s2.nuts_result.num_overlaps == 0
