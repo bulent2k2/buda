@@ -239,12 +239,24 @@ function bboxOf(fp) {
   if (x1 > x2) { x1 = 0; y1 = 0; x2 = 1000; y2 = 1000; }
   return [x1, y1, x2, y2];
 }
+// The floorplan/hanan to draw against.  In the generation view each bundle now
+// carries its OWN frame (`bundle.floorplan`/`bundle.hanan`) — a hier template
+// bundle lives in a cell-local frame, not the die frame — so prefer the shown
+// bundle's, falling back to the top-level payload (always right for the flat
+// flow, and for the NUTS/detailed views which have no per-bundle floorplan).
+function activeFrame() {
+  if (VIEW === "generation" && RENDER.bundles && RENDER.bundles[0]) {
+    const b = RENDER.bundles[0];
+    if (b.floorplan && b.hanan) return {fp: b.floorplan, hanan: b.hanan};
+  }
+  return {fp: RENDER.floorplan, hanan: RENDER.hanan};
+}
 function draw() {
   const svg = document.getElementById("svg");
   svg.innerHTML = "";
   document.getElementById("candbar").hidden = !RENDER;
   if (!RENDER) return;
-  const fp = RENDER.floorplan;
+  const {fp, hanan} = activeFrame();
   let [x1, y1, x2, y2] = bboxOf(fp);
   const pad = Math.max(x2 - x1, y2 - y1) * 0.06 + 50;
   x1 -= pad; y1 -= pad; x2 += pad; y2 += pad;
@@ -253,9 +265,9 @@ function draw() {
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   const g = el("g", {transform: `translate(${-x1} ${y2}) scale(1 -1)`}, svg);
 
-  for (const line of RENDER.hanan.xs)
+  for (const line of hanan.xs)
     el("line", {class: "hanan", x1: line, y1, x2: line, y2}, g);
-  for (const line of RENDER.hanan.ys)
+  for (const line of hanan.ys)
     el("line", {class: "hanan", x1, y1: line, x2, y2: line}, g);
   for (const k of fp.keepouts)
     el("rect", {class: "keepout", x: k.bbox.x1, y: k.bbox.y1,
