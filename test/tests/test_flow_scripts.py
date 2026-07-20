@@ -811,16 +811,18 @@ def test_inline_comment_boundary_rules(tmp_path):
 @pytest.mark.slow
 def test_bighalf_rr_reaches_clean_endpoint(tmp_path):
     """bigHalf with both ripup_reroute lines enabled reaches the clean
-    0 overlaps / 0 opens endpoint (ReadMe_bigHalf row 6, the config the
-    checked-in flow keeps commented out for speed).  The variant is
-    generated here — the checked-in bigHalf.buda stays the fast row-7
-    config — with a generous max_iter for host tolerance (tc3a NUTS-stage
+    0 overlaps / 0 opens endpoint (ReadMe_bigHalf row 6).  Since opens #10
+    the checked-in bigHalf.buda ENABLES both ripup_reroute lines; this test
+    re-runs it with a generous max_iter for host tolerance (tc3a NUTS-stage
     counts are FP/CPU-sensitive under -march=native, so the ENDPOINT is
     asserted, never intermediate counts or wall time; the trial budget
-    bound guards against a trial-count blowup regression)."""
+    bound guards against a trial-count blowup regression).  The regex-inject
+    stays robust whether the source keeps the lines enabled or reverts them
+    to the commented fast config — the endpoint is CI-guarded either way."""
     src = FLOW / "big_data_test" / "bigHalf.buda"
     text = src.read_text()
-    text = text.replace("# ripup_reroute", "ripup_reroute 30")
+    text = text.replace("# ripup_reroute", "ripup_reroute")     # legacy commented form
+    text = re.sub(r"(?m)^ripup_reroute\s*$", "ripup_reroute 30", text)
     text = text.replace("source ../tracks/",
                         f"source {FLOW / 'tracks'}/")
     text = text.replace("source tc3a_flat_5x.buda",
