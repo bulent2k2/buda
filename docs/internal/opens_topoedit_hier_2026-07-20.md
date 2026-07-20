@@ -1,39 +1,47 @@
 # Open items — topology editing & hierarchical flows (snapshot 2026-07-20)
 
 A focused snapshot of what remains open in two areas, verified against
-`main` on 2026-07-20 (post PR #344, the kSegsRel compiled-default flip).
+`main` on 2026-07-20 (refreshed end-of-day, post the TopoEdit closure
+batch #355/#357/#358/#363/#368/#371/#375).
 Sources: [`opens.md`](opens.md) (the ranked cross-subsystem view),
 [`wishlist-topoedit.md`](wishlist-topoedit.md),
 [`wishlist-bundler.md`](wishlist-bundler.md),
 [`wishlist-topo.md`](wishlist-topo.md).  When an item lands, mark it ✅
 here AND in its wishlist file, per the `opens.md` convention.
 
-## Topology editing (TopoEdit)
+## Topology editing (TopoEdit) — ✅ NO TRACKED OPENS
 
-The big items of the TopoEdit arc are all closed — `edit_set_slide` CLI
-parity, USER-topo persistence in the BDB for hier flows (opens item 12),
-explorer hier frames, the gridded `W` refine (snap-to-Hanan with `enter`
-toggling `[free]`), and block/face coordinate references.  Remaining,
-deliberately deferred:
+Every item in [`wishlist-topoedit.md`](wishlist-topoedit.md) is now
+RESOLVED; the arc is effectively feature-complete.  What shipped:
 
-1. **Op-log provenance in the BDB** — ✅ RESOLVED (follow-up PR to this
-   snapshot): `edit_commit` (CLI + GUI sink) stores
-   `user_ops:<bundle_id>:<topo_uid>` → {base uid, applied `edit_*`
-   command lines} in BDB `meta` (no schema bump); `load_pipeline` prints
-   a pointer per restored USER candidate, `dump_user_ops` prints the
-   replayable ops.  Tests: `test_bdb_user_ops.py`.
-2. **Per-instance candidate pools** — ✅ RESOLVED (follow-up PR to this
-   snapshot; the workflow demand arrived): expanded instances persist
-   their selection plus their USER candidates only — an unpinned
-   instance commit survives `load_pipeline expanded`, un-edited
-   instances still persist one row (bounded growth, loader unchanged).
-   Tests in `test_bdb_user_topo.py`.
-3. **`W` echo marker** — ✅ RESOLVED (this snapshot's companion PR).  The
-   last residue of the input-precision item: a transient marker at the
-   first captured slide bound so the user sees where it landed before
-   committing the second.  Variants 1 (snap-to-grid) and 3 (precise
-   entry via `edit_set_slide`) had already shipped; the wishlist file's
-   input-precision entry is refreshed accordingly.
+- `edit_set_slide` CLI parity, USER-topo persistence in the BDB for hier
+  flows (opens item 12), explorer hier frames, the gridded `W` refine
+  (snap-to-Hanan with `enter` toggling `[free]`) + its **echo marker**
+  (#355), and block/face coordinate references.
+- **Op-log provenance in the BDB** (#357): `edit_commit` (CLI + GUI sink)
+  stores `user_ops:<bundle_id>:<topo_uid>` → {base uid, applied `edit_*`
+  command lines} in BDB `meta`; `load_pipeline` prints a pointer per
+  restored USER candidate, `dump_user_ops` prints the replayable ops.
+- **Per-instance candidate pools** (#358): expanded instances persist
+  their selection plus their USER candidates only — an unpinned instance
+  commit survives `load_pipeline expanded`, un-edited instances still
+  persist one row.
+
+Bugs found + fixed on top of the arc this session:
+
+- **GUI USER topo dropped at the planner on a flat sidecar re-run**
+  (#363): a script `select_topology` used to override the GUI-pinned
+  hand-built USER topo; a `user_topo` sidecar entry now wins (gated on
+  resolve-by-uid so a stale sidecar can't hijack a script pin).
+- **Per-instance busterm links named the reference instance** (#368):
+  replicated instances now name their own occurrence.
+- **Inline-comment leak into the op-log** (#371): `_edit_record` strips
+  the `# comment` before recording.
+- **`S` picked the parent container, not the leaf busterm** (#375):
+  `_block_at` now prefers the bundle's busterm/leaf block (fixes the
+  wrong stub target AND the spurious OTC pass-through rejection).
+
+Nothing tracked remains open here.
 
 ## Hierarchical flows
 
@@ -71,5 +79,7 @@ open:
 - **OA bridge** — gated on the proprietary Si2 OA libraries.
 - **True along-flex trunk DOF (Stage C)** — blocked on the upstream
   far-face-traversal WL-inflation investigation.
-- **2026-07 audit report-only findings** — 59 confirmed defects awaiting
-  fixes ([`audit_2026-07.md`](audit_2026-07.md)).
+- **2026-07 audit** — ✅ CLOSED (2026-07-20).  All 59 confirmed
+  report-only findings are fixed (second-wave slices + the C9-04/P1-03 and
+  C6-09/P7-05 follow-ups); only the two refutations (C4-01, P3-05) stand,
+  and those are not bugs.  See [`audit_2026-07.md`](audit_2026-07.md).

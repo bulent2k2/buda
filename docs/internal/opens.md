@@ -13,10 +13,13 @@ items this page doesn't see).
 > are also captured as `@future` scenarios in `features/future_directions.feature`
 > — flip those to `@landed` as they ship.
 
-> **2026-07 whole-codebase audit:** 33 findings fixed + 1 refuted + 60
-> report-only leads (unverified), with the confirmed-fix table, the C7-04
-> pybind view-aliasing deep dive, and sanitizer-build environment notes in
-> [`audit_2026-07.md`](audit_2026-07.md).
+> **2026-07 whole-codebase audit — CLOSED (2026-07-20):** 33 first-wave
+> findings fixed + 2 refuted + 60 report-only leads verified (59 confirmed,
+> 1 refuted) and **all 59 subsequently fixed** across the second-wave
+> slices and their follow-ups (C6-09/P7-05 last). Nothing remains open from
+> the audit; only the two refutations (C4-01, P3-05) stand. Confirmed-fix
+> table, the C7-04 pybind view-aliasing deep dive, and sanitizer-build
+> notes in [`audit_2026-07.md`](audit_2026-07.md).
 
 ## Substantial features (bounded, clear plans)
 
