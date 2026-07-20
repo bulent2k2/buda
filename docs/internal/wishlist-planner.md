@@ -473,14 +473,42 @@ reshuffle property discovered during (a)'s isolation runs, previously
 unmeasured.  Tests: `test_level2_junction_prediction_heals_demo_b3` +
 the level-1 suite.
 
-**Default-flip: still gated.**  The remaining discriminators: (i) mix's
-dislike of the honest-books mode at BOTH levels (its heal budget is tuned
-to legacy anchors — same class as its kPeak sensitivity); (ii) the
-alignment-sibling placement remains unpredicted (b44's seg3 residual — a
-LEVEL-3 static predictor was PROTOTYPED AND REJECTED, detailed below);
-(iii) goldens must be regenerated on the reference host.  The kPeak
-hybrid-floor fixture refit (their pulled segment asserts books-only
-anchors) also waits on the flip.
+**Re-measured on latest main (2026-07-20, after the dead-span-into-healers
+fold + convergence guard + kSegsRel default landed), each flow AS CHECKED IN
+with its own healers, levels 0/1/2 (detailed WL after `run_detailed_nuts`):**
+
+| flow | L0 ov/un/WL | L1 | L2 |
+|---|---|---|---|
+| mix | 0/0 / 850633 | 0/0 / 782204 (**−8.0%**) | 0/0 / 777816 (**−8.6%**) |
+| comprehensive_demo | 0/0 / 40888 | 0/0 / 39656 (−3.0%) | 0/0 / 39656 (−3.0%) |
+| 10_chip_units | 0/0 / 364252 | 0/0 / 357004 (−2.0%) | 0/0 / 357004 (−2.0%) |
+| bigHalf | 0/0 / 15473957 | 0/0 / 15159910 (−2.0%) | **0/30** / 16142958 (+4.3%) |
+| big2 | 0/0 / 11601416 | 0/0 / 12395918 (**+6.8%**) | 0/0 / 12360178 (**+6.6%**) |
+| mix2 | 2/42 / 839868 | 1/**144** / 821476 | 6/**150** / 785748 |
+
+**Gate (i) has MOVED, not cleared.**  mix — the *historical* blocker — now
+heals cleanly at BOTH levels with a large WL win (−8%): the
+dead-span-escalation-into-healers fold + kSegsRel default that landed since
+2026-07-17 absorb the honest-books reshuffle its heal budget used to choke
+on (same mechanism that dissolved mix's kSegsRel objection).  But the
+honest-books mode is still not a corpus-wide win: **big2's WL regresses ~7%
+at both levels** (endpoint stays 0/0 — the routes just get 7% longer, a real
+quality regression), **mix2's unplaced blows up 42→144 (L1) / 150 (L2)** on
+an already-stressed flow, and **level 2 regresses bigHalf to 0/30 opens**
+(level 1 keeps it clean).  Level 1 is the closer candidate — 4 flows improve
+clean (mix −8%, comprehensive −3%, 10_chip −2%, bigHalf −2%), only big2 (WL)
+and mix2 (unplaced) block — but neither level clears the corpus, so the flip
+stays gated with the blocker relocated from mix to big2/mix2.
+
+**Default-flip: still gated.**  The remaining discriminators: (i) the
+honest-books mode is not a corpus-wide win — big2 WL +7% and mix2 unplaced
+42→144 at level 1, plus bigHalf 0→30 opens at level 2 (2026-07-20; mix's
+historical objection has dissolved but the blocker relocated to big2/mix2,
+table above); (ii) the alignment-sibling placement remains unpredicted
+(b44's seg3 residual — a LEVEL-3 static predictor was PROTOTYPED AND
+REJECTED, detailed below); (iii) goldens must be regenerated on the
+reference host.  The kPeak hybrid-floor fixture refit (their pulled segment
+asserts books-only anchors) also waits on the flip.
 
 **The alignment-sibling prediction — PROTOTYPED & REJECTED (2026-07-19,
 static heuristic insufficient; it is a genuine placement fixed-point).**
