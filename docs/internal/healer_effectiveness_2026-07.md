@@ -147,3 +147,33 @@ harness; overlaps still track 17→12→2→2→2.)
    opens, and NCa even makes it WORSE (9179→10263 — negotiate's demand
    injection thrashes an over-capacity design). A flow this far over resource
    should skip the expensive stage-b ripup.
+
+## Is RRa (stage-a ripup) necessary? — YES, validated (2026-07-20)
+
+RRa clears NUTS overlaps BEFORE DetailedNUTS, so a natural question is whether
+it is redundant with the stage-b ripup that follows. A third sweep re-ran the
+same flows with the canonical sequence MINUS RRa (NCa → NCb → RRb) and compared
+the endpoint + runtime to the with-RRa full sequence (S4 above); harness
+`scratchpad/healer_norra.py`:
+
+| flow | with RRa (S4) | no RRa | endpoint | runtime |
+|---|---|---|---|---|
+| **bigHalf** | 0/0 @7.7 | 0/0 @**55.2** | same | **7× SLOWER without RRa** |
+| big_3bundles, big2_noviz, tc3b_flat, hbundles/06, hbundles/07 | 0/0 | 0/0 | same | ~same |
+| **mix2** | **0/0** @49 | **0/14** @19.7 | **worse — needs RRa for 0/0** | faster |
+| mix2_fast_topdown | 0/0 @55 | 1/0 @61 | worse (1 ov) | slower |
+| slowdown_rnr | 0/0 @21.5 | 1/0 @34 | worse (1 ov) | slower |
+| mix | 1/16 @36 | 4/39 @8.1 | worse | faster |
+| mix2_fast | 6/30 @41 | 9/32 @18 | worse | faster |
+| tc3a | 711/7783 @60 | 750/8215 @43 | worse (both hopeless) | faster |
+
+**RRa is NOT redundant.** Dropping it regresses **6 flows' endpoints** (mix2
+loses its clean 0/0 → 0/14; slowdown_rnr and mix2_fast_topdown gain a stray
+overlap; mix/mix2_fast/tc3a strictly worse) AND makes **bigHalf 7× slower**
+(55s vs 7.7s) for the same endpoint. The mechanism: with the stage-a overlaps
+left in place, DNUTS runs over an overlapping abstract route, so the stage-b
+negotiate is far weaker (bigHalf NCb goes from **1/10** with RRa to **1/190**
+without — a 19× inflation of opens) and the stage-b ripup then has a much
+bigger job (bigHalf RRb balloons +3.8s → +52s). RRa is the cheap ~0.5–1s
+stage-a pass that keeps the expensive stage-b work tractable — a **runtime**
+guard as much as a quality one. Keep it in the canonical flow.
