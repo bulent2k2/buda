@@ -31,21 +31,28 @@ Three thin modules over a single headless `BudaSession`:
   `session_id` (default `"default"`) is carried for a later worker-per-session
   manager. `BUDA_WEB_DEV=1` enables permissive CORS for a Vite dev server.
 
-Routes so far: `POST /api/command {cmds:[str]}`, `GET /api/state`,
-`GET /api/render/generation?bundle=&candidate=`, `POST /api/reset`,
-`GET /api/health`. The generation render serializers
-(`serialize_floorplan/hanan/topology/conn_topology/bundle/generation`) mirror
-`tools/topo_snapshot.py`; ConnTopology slide/pull sentinels serialize as JSON
-`null`, and conn order is preserved (NUTS tie-breaks depend on it).
+Routes: `POST /api/command {cmds:[str]}`, `GET /api/state`,
+`GET /api/render/{generation,nuts,detailed}?bundle=&candidate=`, `POST /api/reset`,
+`GET /api/health`. The render serializers
+(`serialize_floorplan/hanan/topology/conn_topology/bundle/generation`,
+`serialize_nuts`, `serialize_detailed`) mirror `tools/topo_snapshot.py`;
+ConnTopology slide/pull sentinels serialize as JSON `null`, conn order is
+preserved (NUTS tie-breaks depend on it), and each detailed bit-wire inherits
+its bus `TrackSegment`'s orientation (`_orient_map`, since `NetSegment` carries
+no direction flag). Milestone 1 (Phases 0–2) renders the whole flat flow:
+floorplan + candidate topologies (generation), placed bus segments (nuts), and
+per-bit wires + vias (detailed).
 
 ## Frontend
 
 - **`src/web/static/index.html`** — a vanilla-SVG **reference client**, served at
   `/` (StaticFiles). The immediate, toolchain-free way to drive the demo in a
   browser, and the porting reference for the Scala.js renderer. Command console +
-  stage buttons + floorplan/candidate SVG with a candidate stepper. Browser-
-  verified (Playwright/Chromium): floorplan blocks + labels + Hanan grid + a
-  candidate's segments render, and stepping cycles the 35 b44 candidates.
+  stage buttons (bundler→dnuts) + a `topo/NUTS/detailed` view switch. Browser-
+  verified (Playwright/Chromium): the generation view draws the floorplan +
+  candidate segments (stepping the 35 b44 candidates); the NUTS view draws placed
+  track footprints + centerlines; the detailed view draws all 104 bit-wires + 52
+  vias of the routed bus.
 - **`web/`** — the Scala.js project (sbt + sbt-scalajs; `ApiClient`, `Renderer`,
   `Main`). The production frontend target; renders the *same* payloads as the
   reference client. Needs the Scala toolchain to build (see `web/README.md`).

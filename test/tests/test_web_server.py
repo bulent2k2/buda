@@ -147,3 +147,26 @@ def test_reset_clears_session():
     assert client.get("/api/state").json()["stages_run"]["bundler"] is True
     client.post("/api/reset")
     assert client.get("/api/state").json()["stages_run"]["bundler"] is False
+
+
+def test_render_endpoints_full_pipeline():
+    """Drive the whole flat flow over HTTP and fetch each render stage."""
+    client = _client()
+    client.post("/api/command", json={"cmds": B44_SETUP + [
+        "run_bundler", "generate_topologies", "run_planner",
+        "run_nuts", "run_detailed_nuts"]})
+
+    gen = client.get("/api/render/generation?bundle=1").json()
+    assert set(gen) == {"floorplan", "hanan", "bundles", "state"}
+    assert gen["bundles"][0]["candidates"]
+
+    nuts = client.get("/api/render/nuts").json()
+    assert nuts["nuts"]["num_overlaps"] == 0
+    assert nuts["nuts"]["segments"]
+
+    det = client.get("/api/render/detailed").json()
+    assert det["detailed"]["num_unplaced"] == 0
+    assert len(det["detailed"]["net_segments"]) == 104
+    assert len(det["detailed"]["net_vias"]) == 52
+
+    assert "error" in client.get("/api/render/bogus").json()

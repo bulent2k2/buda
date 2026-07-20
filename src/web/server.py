@@ -96,16 +96,25 @@ async def get_state(session_id: str = "default"):
         return serialize.serialize_state(st.session)
 
 
-@app.get("/api/render/generation")
-async def get_render_generation(session_id: str = "default",
-                                bundle: int | None = None,
-                                candidate: int | None = None):
-    """Generation-stage render payload: floorplan + Hanan grid + per-bundle
-    candidate topologies (each with its ConnTopology analysis).  `bundle`
-    restricts to one bundle id; `candidate` (with `bundle`) to one candidate."""
+@app.get("/api/render/{stage}")
+async def get_render(stage: str, session_id: str = "default",
+                     bundle: int | None = None,
+                     candidate: int | None = None):
+    """Render payload for a stage:
+      generation — floorplan + Hanan + per-bundle candidate topologies
+                   (+ ConnTopology analysis); `bundle`/`candidate` narrow it.
+      nuts       — floorplan + placed bus segments + overlap sites.
+      detailed   — floorplan + per-bit wires + per-bit vias.
+    """
     st = _get(session_id)
     async with st.lock:
-        return serialize.serialize_generation(st.session, bundle, candidate)
+        if stage == "generation":
+            return serialize.serialize_generation(st.session, bundle, candidate)
+        if stage == "nuts":
+            return serialize.serialize_render_nuts(st.session)
+        if stage == "detailed":
+            return serialize.serialize_render_detailed(st.session)
+        return {"error": f"unknown render stage '{stage}'"}
 
 
 @app.post("/api/reset")

@@ -34,6 +34,10 @@
   .seg { stroke-width: 2.5; fill: none; }
   .seg.H { stroke: #e6a; } .seg.V { stroke: #4ad; } .seg.jog { stroke: #fa0; }
   .bt { fill: #0bd; } .rcv { fill: none; stroke: #d0b; stroke-width: 1.5; }
+  .track { stroke: #2a7; stroke-width: 2; } .trackftp { fill: #2a73; }
+  .bit { stroke: #08a; stroke-width: 1; } .bit.H { stroke: #e83; }
+  .via { fill: #f60; stroke: #a30; stroke-width: .5; }
+  .overlap { fill: #f005; stroke: #f00; stroke-width: 1; }
   #candbar { position: absolute; top: 8px; left: 8px; background: #000a; color: #fff;
              padding: 6px 10px; border-radius: 5px; }
   #candbar button { background: #fff2; color: #fff; border: 1px solid #fff4; }
@@ -60,6 +64,13 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
     <button onclick="stage('run_bundler')">bundler</button>
     <button onclick="stage('generate_topologies')">topologies</button>
     <button onclick="stage('run_planner')">planner</button>
+    <button onclick="stage('run_nuts')">nuts</button>
+    <button onclick="stage('run_detailed_nuts')">dnuts</button>
+  </div>
+  <div class="row">view:
+    <button onclick="setView('generation')">topo</button>
+    <button onclick="setView('nuts')">NUTS</button>
+    <button onclick="setView('detailed')">detailed</button>
   </div>
   <div id="log"></div>
 </div>
@@ -74,7 +85,7 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
 
 <script>
 const API = "/api";
-let RENDER = null, CAND = 0;
+let RENDER = null, CAND = 0, VIEW = "generation";
 
 async function post(path, body) {
   const r = await fetch(API + path, {method: "POST",
@@ -103,14 +114,21 @@ async function stage(cmd) {
   showStages(res.state);
   await refresh();
 }
+async function setView(v) { VIEW = v; await refresh(); }
 async function refresh() {
   const st = await get("/state");
-  if (!st.stages_run.topologies) { RENDER = null; return draw(); }
-  RENDER = await get("/render/generation?bundle=1");
-  CAND = Math.min(CAND, (RENDER.bundles[0]?.candidates.length || 1) - 1);
+  const sr = st.stages_run;
+  // Auto-advance the view to the deepest available stage on a fresh run.
+  if (VIEW === "detailed" && !sr.dnuts) VIEW = sr.nuts ? "nuts" : "generation";
+  if (VIEW === "nuts" && !sr.nuts) VIEW = "generation";
+  if (!sr.topologies) { RENDER = null; return draw(); }
+  RENDER = await get("/render/" + VIEW + (VIEW === "generation" ? "?bundle=1" : ""));
+  if (VIEW === "generation")
+    CAND = Math.min(CAND, (RENDER.bundles[0]?.candidates.length || 1) - 1);
   draw();
 }
 function stepCand(d) {
+  if (VIEW !== "generation") return;
   const n = RENDER?.bundles[0]?.candidates.length || 0;
   if (!n) return;
   CAND = (CAND + d + n) % n; draw();
@@ -165,25 +183,66 @@ function draw() {
     el("text", {class: "blklbl", x: 0, y: 0}, lg).textContent = b.name;
   }
 
+  document.getElementById("candbar").hidden = (VIEW !== "generation");
+  if (VIEW === "generation") drawGeneration(g, W, H);
+  else if (VIEW === "nuts") drawNuts(g);
+  else if (VIEW === "detailed") drawDetailed(g, Math.max(W, H));
+}
+
+// A placed segment: perpendicular coord = track_position, extent = span_lo..hi
+// along the routing direction. Returns [x1,y1,x2,y2] of the centerline.
+function placedLine(s) {
+  return s.horiz
+    ? [s.span_lo, s.track_position, s.span_hi, s.track_position]
+    : [s.track_position, s.span_lo, s.track_position, s.span_hi];
+}
+function placedRect(s) {
+  const w = s.width;
+  return s.horiz
+    ? {x: s.span_lo, y: s.track_position - w/2, width: s.span_hi - s.span_lo, height: w}
+    : {x: s.track_position - w/2, y: s.span_lo, width: w, height: s.span_hi - s.span_lo};
+}
+
+function drawGeneration(g, W, H) {
   const bundle = RENDER.bundles[0];
   if (!bundle) return;
   const cand = bundle.candidates[CAND];
   document.getElementById("candlbl").textContent =
     `bundle ${bundle.id} · cand ${CAND + 1}/${bundle.candidates.length} · ${cand.type} · WL ${cand.estimated_wirelength}`;
-  // Draw each segment at its NOMINAL coordinates (Phase 1). Perp-centering /
-  // endpoint-snapping (DisplayGeom) is a later refinement.
+  // Nominal coordinates (Phase 1); perp-centering/snapping (DisplayGeom) later.
   for (const s of cand.segments) {
     const cls = "seg " + (s.is_jog ? "jog" : (s.horiz ? "H" : "V"));
     el("line", {class: cls, x1: s.start.x, y1: s.start.y, x2: s.end.x, y2: s.end.y}, g);
   }
-  // Busterm taps (drivers/receivers) as markers.
-  for (const bt of cand.seg_busterms) {
+  for (const bt of cand.seg_busterms)
     for (const side of ["start", "end"]) {
       const b = bt[side]; if (!b) continue;
-      const cx = (b.bbox.x1 + b.bbox.x2) / 2, cy = (b.bbox.y1 + b.bbox.y2) / 2;
-      el("circle", {class: "rcv", cx, cy, r: Math.max(W, H) * 0.008}, g);
+      el("circle", {class: "rcv", cx: (b.bbox.x1 + b.bbox.x2)/2,
+          cy: (b.bbox.y1 + b.bbox.y2)/2, r: Math.max(W, H) * 0.008}, g);
     }
+}
+
+function drawNuts(g) {
+  const n = RENDER.nuts; if (!n) return;
+  for (const s of n.segments) {
+    el("rect", Object.assign({class: "trackftp"}, placedRect(s)), g);
+    const [a, b, c, d2] = placedLine(s);
+    el("line", {class: "track", x1: a, y1: b, x2: c, y2: d2}, g);
   }
+  for (const o of n.overlap_details)
+    el("rect", {class: "overlap", x: o.span_lo, y: o.perp_lo,
+        width: o.span_hi - o.span_lo, height: o.perp_hi - o.perp_lo}, g);
+}
+
+function drawDetailed(g, span) {
+  const d = RENDER.detailed; if (!d) return;
+  for (const s of d.net_segments) {
+    const [a, b, c, e] = placedLine(s);
+    el("line", {class: "bit " + (s.horiz ? "H" : "V"), x1: a, y1: b, x2: c, y2: e}, g);
+  }
+  const r = span * 0.004;
+  for (const v of d.net_vias)
+    el("rect", {class: "via", x: v.x - r, y: v.y - r, width: 2*r, height: 2*r}, g);
 }
 
 refresh();

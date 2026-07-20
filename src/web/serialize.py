@@ -318,3 +318,125 @@ def serialize_generation(session, bundle_id=None, candidate=None):
         "bundles": out_bundles,
         "state": serialize_state(session),
     }
+
+
+# ── placed results: abstract NUTS + detailed NUTS ────────────────────────────
+def serialize_track_segment(ts):
+    """One placed bus segment (stage-4 abstract NUTS)."""
+    return {
+        "bundle_id": ts.bundle_id,
+        "seg_idx": ts.seg_idx,
+        "layer": ts.layer,
+        "horiz": bool(ts.horiz),
+        "span_lo": ts.span_lo,
+        "span_hi": ts.span_hi,
+        "interval_lo": ts.interval_lo,
+        "interval_hi": ts.interval_hi,
+        "track_position": ts.track_position,
+        "width": ts.width,
+        "placed": bool(ts.placed),
+        "is_jog": bool(ts.is_jog),
+    }
+
+
+def _overlap(od):
+    return {
+        "layer": od.layer,
+        "bid_a": od.bid_a, "seg_a": od.seg_a,
+        "bid_b": od.bid_b, "seg_b": od.seg_b,
+        "span_lo": od.span_lo, "span_hi": od.span_hi,
+        "perp_lo": od.perp_lo, "perp_hi": od.perp_hi,
+    }
+
+
+def serialize_nuts(nuts_result):
+    """Abstract-NUTS placement: placed bus segments + overlap sites + counts."""
+    if nuts_result is None:
+        return None
+    return {
+        "segments": [serialize_track_segment(ts) for ts in nuts_result.segments],
+        "overlap_details": [_overlap(od) for od in nuts_result.overlap_details],
+        "num_overlaps": nuts_result.num_overlaps,
+        "num_violations": nuts_result.num_violations,
+    }
+
+
+def serialize_net_segment(ns, orient=None):
+    """One placed bit-wire (stage-9 detailed NUTS).
+
+    `orient` is an optional `{(bundle_id, seg_idx): horiz}` map (built from the
+    bus TrackSegments) — a bit-wire carries no direction flag of its own but
+    inherits its bus segment's, so the renderer knows whether `track_position`
+    is a y (H) or x (V)."""
+    horiz = None
+    if orient is not None:
+        horiz = orient.get((ns.bundle_id, ns.seg_idx))
+    return {
+        "bundle_id": ns.bundle_id,
+        "seg_idx": ns.seg_idx,
+        "bit_index": ns.bit_index,
+        "layer": ns.layer,
+        "span_lo": ns.span_lo,
+        "span_hi": ns.span_hi,
+        "track_position": ns.track_position,
+        "width": ns.width,
+        "horiz": horiz,
+    }
+
+
+def _net_via(v):
+    return {
+        "bundle_id": v.bundle_id,
+        "from_seg": v.from_seg,
+        "to_seg": v.to_seg,
+        "bit_index": v.bit_index,
+        "from_layer": v.from_layer,
+        "to_layer": v.to_layer,
+        "x": v.x,
+        "y": v.y,
+    }
+
+
+def serialize_detailed(detailed_result, orient=None):
+    """Detailed-NUTS placement: per-bit wires + per-bit vias + counts.
+
+    `orient` (optional) maps each `(bundle_id, seg_idx)` to its bus segment's
+    `horiz` so bit-wires render with the right orientation."""
+    if detailed_result is None:
+        return None
+    return {
+        "net_segments": [serialize_net_segment(ns, orient)
+                         for ns in detailed_result.net_segments],
+        "net_vias": [_net_via(v) for v in detailed_result.net_vias],
+        "num_unplaced": detailed_result.num_unplaced,
+    }
+
+
+def _orient_map(nuts_result):
+    """{(bundle_id, seg_idx): horiz} from the placed bus segments."""
+    if nuts_result is None:
+        return {}
+    return {(ts.bundle_id, ts.seg_idx): bool(ts.horiz)
+            for ts in nuts_result.segments}
+
+
+def serialize_render_nuts(session):
+    """Compose the NUTS-stage render payload: floorplan + placed bus segments."""
+    return {
+        "floorplan": serialize_floorplan(session.fp),
+        "hanan": serialize_hanan(session.fp),
+        "nuts": serialize_nuts(getattr(session, "nuts_result", None)),
+        "state": serialize_state(session),
+    }
+
+
+def serialize_render_detailed(session):
+    """Compose the detailed-NUTS render payload: floorplan + bit-wires + vias."""
+    orient = _orient_map(getattr(session, "nuts_result", None))
+    return {
+        "floorplan": serialize_floorplan(session.fp),
+        "hanan": serialize_hanan(session.fp),
+        "detailed": serialize_detailed(
+            getattr(session, "detailed_result", None), orient),
+        "state": serialize_state(session),
+    }

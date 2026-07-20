@@ -25,17 +25,31 @@ import buda_cli
 from web import runner, serialize
 
 
+_B44_SETUP = [
+    "source flow/tracks/tracks4top.buda",
+    "add_block blk_07 2960 9750 4660 10250",
+    "add_block blk_23 200 10830 2700 11830",
+    "add_block io_pad_tl 200 12000 1200 12800",
+    "add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p",
+]
+
+
+def _run(s, cmds):
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        for c in cmds:
+            runner.run_one(s, c)
+
+
 def _b44_generated():
     s = buda_cli.BudaSession()
     s.no_viz = True
-    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
-        for c in ["source flow/tracks/tracks4top.buda",
-                  "add_block blk_07 2960 9750 4660 10250",
-                  "add_block blk_23 200 10830 2700 11830",
-                  "add_block io_pad_tl 200 12000 1200 12800",
-                  "add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p",
-                  "run_bundler", "generate_topologies"]:
-            runner.run_one(s, c)
+    _run(s, _B44_SETUP + ["run_bundler", "generate_topologies"])
+    return s
+
+
+def _b44_routed():
+    s = _b44_generated()
+    _run(s, ["run_planner", "run_nuts", "run_detailed_nuts"])
     return s
 
 
@@ -120,3 +134,39 @@ def test_serialize_generation_focused_candidate():
     b = payload["bundles"][0]
     assert len(b["candidates"]) == 1
     assert b["candidate_offset"] == 2
+
+
+def test_serialize_nuts():
+    s = _b44_routed()
+    payload = _json_roundtrip(serialize.serialize_render_nuts(s))
+    assert payload["state"]["stages_run"]["nuts"] is True
+    n = payload["nuts"]
+    assert n["num_overlaps"] == 0            # b44 places cleanly
+    assert len(n["segments"]) >= 1
+    ts = n["segments"][0]
+    assert set(ts) >= {"bundle_id", "seg_idx", "layer", "horiz",
+                       "span_lo", "span_hi", "track_position", "width", "placed"}
+    assert ts["placed"] is True
+
+
+def test_serialize_detailed_and_bit_orientation():
+    s = _b44_routed()
+    payload = _json_roundtrip(serialize.serialize_render_detailed(s))
+    d = payload["detailed"]
+    assert d["num_unplaced"] == 0
+    assert len(d["net_segments"]) == 104     # 52 bits x 2 bus segments
+    assert len(d["net_vias"]) == 52          # one per bit at the L bend
+    # every bit-wire inherits an orientation from its bus segment (not null)
+    assert all(ns["horiz"] in (True, False) for ns in d["net_segments"])
+    via = d["net_vias"][0]
+    assert via["from_layer"] != via["to_layer"]
+    assert set(via) >= {"bundle_id", "from_seg", "to_seg", "bit_index", "x", "y"}
+
+
+def test_render_none_before_stages():
+    """The result serializers are null-safe before the stage has run."""
+    s = _b44_generated()          # planned/routed stages NOT run
+    assert serialize.serialize_nuts(None) is None
+    assert serialize.serialize_detailed(None) is None
+    rn = _json_roundtrip(serialize.serialize_render_nuts(s))
+    assert rn["nuts"] is None
