@@ -36,7 +36,8 @@ Routes: `POST /api/command {cmds:[str]}`, `GET /api/state`,
 `POST /api/select {bundle,candidate}` (pin a candidate),
 `POST /api/edit/{open,op,commit,abort}`,
 `POST /api/bdb/{open,save,load_pipeline}` (checkpoint), `POST /api/reset`,
-`GET /api/health`. Checkpoint flow: `open` the BDB BEFORE routing so the stages
+`GET /api/health`, `WS /api/ws?session_id=` + `POST /api/stage/{stage}` (progress
+streaming — see below). Checkpoint flow: `open` the BDB BEFORE routing so the stages
 persist into it live; a fresh session resumes by replaying the setup commands,
 `open`ing the same file, and `load_pipeline` (rehydrates bundles + candidates +
 plan + NUTS). `save` is a save-as snapshot to a distinct file.
@@ -53,6 +54,47 @@ its bus `TrackSegment`'s orientation (`_orient_map`, since `NetSegment` carries
 no direction flag). Milestone 1 (Phases 0–2) renders the whole flat flow:
 floorplan + candidate topologies (generation), placed bus segments (nuts), and
 per-bit wires + vias (detailed).
+
+### Progress streaming (`WS /api/ws` + `POST /api/stage/{stage}`)
+
+The long stages (`run_planner`/`run_nuts`/`run_detailed_nuts`/`ripup_reroute`/
+`negotiate_congestion`) can take tens of seconds. They stream coarse progress to
+any connected WebSocket client instead of the UI just blocking on the request.
+
+- **`WS /api/ws?session_id=`** — a client connects **once**; the server registers
+  it in a per-session `clients` set (`_Session.clients`) and pushes JSON frames.
+  On connect it sends `{"kind":"hello","session_id","state":<StateSummary>}`. The
+  socket carries no commands (drive stages via the POST below); its reads are
+  drained only to detect disconnect. A dropped socket is pruned on the next
+  broadcast (a `send_json` error `discard`s it) — it never kills the stage or the
+  server, and the WS handler swallows `WebSocketDisconnect`.
+- **`POST /api/stage/{stage}` `{args?, session_id?}`** — `stage` ∈
+  `{planner, nuts, detailed_nuts, ripup, negotiate}` (mapped to the `.buda`
+  command via `_STAGE_CMDS`; `args` is appended verbatim, e.g. `ripup` + `"8"` →
+  `ripup_reroute 8`). Holds the session lock for the **whole** engine call (state
+  is not reentrant) but runs the blocking `run_one` in
+  `loop.run_in_executor(None, …)` so the event loop stays free to push heartbeat
+  frames while it runs. An unknown stage returns `{error, stages}` (never 500s).
+  Returns the same `{result, state, notable}` shape synchronously, so a client
+  with no WS still gets the outcome.
+
+Frame schema (`kind`):
+- `hello` — `{session_id, state}` on connect.
+- `stage` `status:"started"` — `{name, command}` before the engine call.
+- `heartbeat` — `{name, elapsed}` every ~0.5 s while running (fires in the GIL
+  windows between the stage's C++ calls — coarse, no C++-loop instrumentation).
+- `stage` `status:"done"` — `{name, elapsed, state:<StateSummary>, summary,
+  notable:[str], result}`. `notable` is the last few captured log lines matching
+  the metric/outcome keywords (`_notable_lines` over `run_one`'s `log_lines` —
+  the ripup/nuts `done:`/`placed`/`overlap` lines), so the client shows the
+  result without re-fetching.
+
+Broadcasts go to every client of the session, so a second viewer sees another
+tab's stage progress live. The reference client opens the WS on load
+(`connectWS`, auto-reconnect on close), shows a pulsing "running <stage>… <s>s"
+indicator on `started`/`heartbeat`, clears it on `done`, forwards `notable` to
+the log, and refreshes state — the planner/nuts/dnuts/ripup buttons go through
+`/api/stage/*` (the instant bundler/topology buttons stay on `/api/command`).
 
 ## Frontend
 
@@ -89,3 +131,7 @@ curl -s localhost:8000/api/state
 `test/tests/test_web_server.py` — `run_one` capture + `SystemExit` containment,
 the no-matplotlib import (in a subprocess), and the `/api/command` → `/api/state`
 flow progression via FastAPI `TestClient`.
+`test/tests/test_web_ws.py` — the WS endpoint + `POST /api/stage/{stage}`: a
+connected WS receives `started` then `done` (with a `state`) frames, the stage
+mutates state, a dropped WS breaks neither the stage nor a later request, an
+unknown stage is contained, and the synchronous `/api/command` path still works.
