@@ -90,6 +90,15 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
   </div>
 </div>
 <div id="main">
+  <div id="notbuilt" hidden style="position:absolute; inset:0; display:flex;
+       flex-direction:column; align-items:center; justify-content:center; gap:8px;
+       text-align:center; padding:24px">
+    <b>The Scala.js client isn't built yet.</b>
+    <div>Run <code>bb web</code> at the repo root to build it (needs sbt — any
+      recent version), then reload.</div>
+    <div>Or use the toolchain-free reference client at <a href="/">/</a> — it
+      covers the whole flow.</div>
+  </div>
   <div id="candbar" hidden>
     <button id="prev">◀</button> <span id="candlbl"></span> <button id="next">▶</button>
     <button id="pin">Pin</button>
@@ -99,7 +108,18 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
   <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
 </div>
 
-<!-- Emitted by `sbt fastLinkJS`; copy it here or point at the target dir. -->
+<!-- main.js is a build product (git-ignored), produced by `bb web`
+     (`sbt fullLinkJS`) and copied here.  If it's missing, the capture-phase
+     error handler below reveals the #notbuilt banner instead of a blank page. -->
+<script>
+  window.addEventListener("error", function (e) {
+    var t = e.target;
+    if (t && t.tagName === "SCRIPT" && /main\.js(\?|$)/.test(t.src || "")) {
+      var b = document.getElementById("notbuilt");
+      if (b) b.hidden = false;
+    }
+  }, true);
+</script>
 <script type="module" src="./main.js"></script>
 </body>
 </html>

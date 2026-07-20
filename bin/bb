@@ -21,6 +21,7 @@ cd "$REPO_DIR"
 CLEAN=false
 RUN_TESTS=false
 TEST_TIER=fast   # fast | mid | slow (cumulative)
+BUILD_WEB=false  # `bb web` builds the Scala.js client only (no C++ build)
 
 usage() {
     cat <<'EOF'
@@ -39,6 +40,12 @@ Test options (each implies a build first; tiers are cumulative):
 The mid/slow tiers run in PARALLEL when pytest-xdist is installed (`-n auto
 --dist loadfile`, ~3x on 4 cores); the fast tier stays serial. Override with
 BB_JOBS=<N> (e.g. BB_JOBS=8), or force serial with BB_JOBS=0.
+
+Web client:
+  web               Build the Scala.js client only (sbt fullLinkJS) into the
+                    git-ignored src/web/static/scala/main.js, served at /scala/.
+                    Needs sbt on PATH; the toolchain-free reference client at /
+                    covers the whole flow without this build.
 
 Other:
   -h, --help        Show this help and exit
@@ -71,6 +78,9 @@ for arg in "$@"; do
             RUN_TESTS=true
             TEST_TIER=slow
             ;;
+        web)
+            BUILD_WEB=true
+            ;;
         --help|-h|help)
             usage
             exit 0
@@ -82,6 +92,49 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# `bb web` — build the Scala.js client only, then exit (no C++ build).
+if [ "$BUILD_WEB" = true ]; then
+    echo "=== Building the Scala.js web client ==="
+    OUT_DIR="$REPO_DIR/src/web/static/scala"
+    if ! command -v sbt >/dev/null 2>&1; then
+        cat >&2 <<'MSG'
+sbt is not on your PATH — the Scala.js client at /scala/ can't be built.
+
+Any recent sbt works; the quickest one-time install is Coursier:
+    curl -fsSL https://raw.githubusercontent.com/coursier/launchers/master/coursier -o cs
+    chmod +x cs && ./cs install sbt      # then re-run: bb web
+
+You do NOT need this to use BUDA's web demo — the toolchain-free reference
+client is served at / and covers the whole flow. Only /scala/ needs this build.
+MSG
+        exit 1
+    fi
+    ( cd "$REPO_DIR/web" && sbt fullLinkJS )
+    # fullLinkJS emits under scala-<scalaVersion>/buda-web-opt/ (Scala 3 names the
+    # dir with the FULL version). Target that exact dir — read scalaVersion from
+    # build.sbt — so a stale scala-* dir left by an old version can't be copied
+    # instead of the just-built one (which a lexicographic `ls | head -1` would
+    # do after a scalaVersion bump). Fall back to the newest matching bundle by
+    # mtime (the sbt run just wrote it) if build.sbt can't be parsed.
+    SCALAV=$(sed -n 's/^[[:space:]]*scalaVersion[[:space:]]*:=[[:space:]]*"\([^"]*\)".*/\1/p' \
+             "$REPO_DIR/web/build.sbt" | head -1)
+    BUNDLE=""
+    if [ -n "$SCALAV" ] && [ -f "$REPO_DIR/web/target/scala-$SCALAV/buda-web-opt/main.js" ]; then
+        BUNDLE="$REPO_DIR/web/target/scala-$SCALAV/buda-web-opt/main.js"
+    else
+        BUNDLE=$(ls -t "$REPO_DIR"/web/target/scala-*/buda-web-opt/main.js 2>/dev/null | head -1)
+    fi
+    if [ -z "$BUNDLE" ] || [ ! -f "$BUNDLE" ]; then
+        echo "Build produced no bundle under web/target/scala-*/buda-web-opt/" >&2
+        exit 1
+    fi
+    mkdir -p "$OUT_DIR"
+    cp "$BUNDLE" "$OUT_DIR/main.js"
+    echo "=== Web client built ==="
+    echo "Copied $(basename "$BUNDLE") -> src/web/static/scala/main.js (served at /scala/)."
+    exit 0
+fi
 
 if [ "$CLEAN" = true ]; then
     echo "=== Cleaning and Building BUDA (Clean Build) ==="
