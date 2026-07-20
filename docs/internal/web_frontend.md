@@ -36,7 +36,8 @@ Routes: `POST /api/command {cmds:[str]}`, `GET /api/state`,
 `POST /api/select {bundle,candidate}` (pin a candidate),
 `POST /api/edit/{open,op,commit,abort}`,
 `POST /api/bdb/{open,save,load_pipeline}` (checkpoint), `POST /api/reset`,
-`GET /api/health`. Checkpoint flow: `open` the BDB BEFORE routing so the stages
+`GET /api/health`, `WS /api/ws?session_id=` + `POST /api/stage/{stage}` (progress
+streaming — see below). Checkpoint flow: `open` the BDB BEFORE routing so the stages
 persist into it live; a fresh session resumes by replaying the setup commands,
 `open`ing the same file, and `load_pipeline` (rehydrates bundles + candidates +
 plan + NUTS). `save` is a save-as snapshot to a distinct file.
@@ -71,6 +72,64 @@ the generation view) and falls back to the top-level payload otherwise, so its
 bbox/viewBox math works off whichever floorplan is used. Covered by
 `test_web_hier.py` (flat: per-bundle == top-level; hier `hier_mixed` fixture:
 ≥2 bundles resolve to distinct block-set frames).
+
+### Progress streaming (`WS /api/ws` + `POST /api/stage/{stage}`)
+
+The long stages (`run_planner`/`run_nuts`/`run_detailed_nuts`/`ripup_reroute`/
+`negotiate_congestion`) can take tens of seconds. They stream coarse progress to
+any connected WebSocket client instead of the UI just blocking on the request.
+
+- **`WS /api/ws?session_id=`** — a client connects **once**; the server registers
+  it in a per-session `clients` set (`_Session.clients`) and pushes JSON frames.
+  On connect it sends `{"kind":"hello","session_id","state":<StateSummary>|null}`.
+  The `state` read is guarded by `runner.snapshot_if_idle` (a **non-blocking**
+  acquire of the engine lock, below): if a stage is mid-run it sends `state:null`
+  rather than reading a session another thread is mutating — the client ignores
+  hello `state` and gets the full state in the stage `done` frame anyway. The
+  socket carries no commands (drive stages via the POST below); its reads are
+  drained only to detect disconnect. A dropped socket is pruned on the next
+  broadcast (a `send_json` error `discard`s it) — it never kills the stage or the
+  server, and the WS handler swallows `WebSocketDisconnect`.
+- **`POST /api/stage/{stage}` `{args?, session_id?}`** — `stage` ∈
+  `{planner, nuts, detailed_nuts, ripup, negotiate}` (mapped to the `.buda`
+  command via `_STAGE_CMDS`; `args` is appended verbatim, e.g. `ripup` + `"8"` →
+  `ripup_reroute 8`). Holds the session lock for the **whole** engine call (state
+  is not reentrant) but runs the blocking `run_one` in
+  `loop.run_in_executor(None, …)` so the event loop stays free to push heartbeat
+  frames while it runs. An unknown stage returns `{error, stages}` (never 500s).
+  Returns the same `{result, state, notable}` shape synchronously, so a client
+  with no WS still gets the outcome.
+
+Because a stage runs in a thread-pool executor, distinct per-session asyncio
+locks no longer serialize engine calls across sessions/threads. `run_one`/
+`run_many` therefore hold a **process-wide** `threading.Lock`
+(`runner._ENGINE_LOCK`) across the capture region: `run_one` swaps the *global*
+`sys.stdout`/`sys.stderr` and enters `buda.ostream_redirect` (a process-global
+C++ stream redirect), so two runs must never overlap even for different
+`session_id`s (they would cross-capture each other's log output). The lock is a
+leaf (acquired only around the capture region, never while holding another lock),
+so it cannot deadlock. `runner.snapshot_if_idle(fn)` is the read-side companion:
+it runs `fn()` under a **non-blocking** acquire and returns `None` when the
+engine is busy — used by the WS `hello` frame so a connect never races a running
+stage's mutation.
+
+Frame schema (`kind`):
+- `hello` — `{session_id, state}` on connect.
+- `stage` `status:"started"` — `{name, command}` before the engine call.
+- `heartbeat` — `{name, elapsed}` every ~0.5 s while running (fires in the GIL
+  windows between the stage's C++ calls — coarse, no C++-loop instrumentation).
+- `stage` `status:"done"` — `{name, elapsed, state:<StateSummary>, summary,
+  notable:[str], result}`. `notable` is the last few captured log lines matching
+  the metric/outcome keywords (`_notable_lines` over `run_one`'s `log_lines` —
+  the ripup/nuts `done:`/`placed`/`overlap` lines), so the client shows the
+  result without re-fetching.
+
+Broadcasts go to every client of the session, so a second viewer sees another
+tab's stage progress live. The reference client opens the WS on load
+(`connectWS`, auto-reconnect on close), shows a pulsing "running <stage>… <s>s"
+indicator on `started`/`heartbeat`, clears it on `done`, forwards `notable` to
+the log, and refreshes state — the planner/nuts/dnuts/ripup buttons go through
+`/api/stage/*` (the instant bundler/topology buttons stay on `/api/command`).
 
 ## Frontend
 
@@ -110,4 +169,7 @@ flow progression via FastAPI `TestClient`. `test/tests/test_web_serialize.py` �
 the struct→JSON serializers + the frozen b44 generation golden. `test/tests/
 test_web_hier.py` — per-bundle floorplans: the flat b44 bundle floorplan equals
 the top-level one; the hier `hier_mixed` fixture yields ≥2 bundles in distinct
-frames.
+frames. `test/tests/test_web_ws.py` — the WS endpoint + `POST /api/stage/{stage}`:
+a connected WS receives `started` then `done` (with a `state`) frames, the stage
+mutates state, a dropped WS breaks neither the stage nor a later request, an
+unknown stage is contained, and the synchronous `/api/command` path still works.

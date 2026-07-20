@@ -28,8 +28,9 @@ Run (dev):
 """
 import asyncio
 import os
+import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -52,11 +53,13 @@ if os.environ.get("BUDA_WEB_DEV") == "1":
 
 
 class _Session:
-    """The one demo session + its serialization lock."""
+    """The one demo session + its serialization lock + connected WS clients."""
     def __init__(self):
         self.session = buda_cli.BudaSession()
         self.session.no_viz = True
         self.lock = asyncio.Lock()
+        # Live WebSocket clients subscribed to this session's progress frames.
+        self.clients: set[WebSocket] = set()
 
 
 # Keyed by session_id for forward-compatibility; only "default" is created now.
@@ -73,6 +76,14 @@ def _get(session_id):
 # ── request models ──────────────────────────────────────────────────────────
 class CommandRequest(BaseModel):
     cmds: list[str]
+    session_id: str = "default"
+
+
+class StageRequest(BaseModel):
+    """Run one long-running pipeline stage with WS progress streaming.
+    `args` (optional) is appended verbatim to the mapped command string, e.g.
+    `{"stage": "ripup", "args": "8"}` -> `ripup_reroute 8`."""
+    args: str = ""
     session_id: str = "default"
 
 
@@ -117,6 +128,129 @@ class BdbSaveRequest(BaseModel):
 class BdbLoadRequest(BaseModel):
     expanded: bool = False
     session_id: str = "default"
+
+
+# ── WebSocket progress streaming ─────────────────────────────────────────────
+# The long stages a client drives through /api/stage/{stage}; each maps to one
+# `.buda` command run through the same run_one shim as every other route.
+_STAGE_CMDS = {
+    "planner": "run_planner",
+    "nuts": "run_nuts",
+    "detailed_nuts": "run_detailed_nuts",
+    "ripup": "ripup_reroute",
+    "negotiate": "negotiate_congestion",
+}
+
+# Keywords that mark a captured log line worth forwarding to the client as the
+# stage outcome (the ripup/nuts/planner metric lines). Coarse on purpose.
+_NOTABLE = ("done:", "metric", "overlap", "overflow", "opens", "placed",
+            "unplaced", "warning", "wirelength", "iteration")
+
+_HEARTBEAT_INTERVAL = 0.5   # seconds between heartbeat frames while a stage runs
+
+
+def _notable_lines(log_lines, cap=12):
+    """The last few captured lines that look like progress/outcome, for the
+    client to show after a stage completes."""
+    hits = [ln for ln in log_lines
+            if ln.strip() and any(k in ln.lower() for k in _NOTABLE)]
+    return hits[-cap:]
+
+
+async def _broadcast(st, frame):
+    """Push a JSON frame to every connected WS client of `st`; drop any that
+    error (a disconnected client must never break the stage or the server)."""
+    for ws in list(st.clients):
+        try:
+            await ws.send_json(frame)
+        except Exception:               # noqa: BLE001 — dead socket, just prune it
+            st.clients.discard(ws)
+
+
+async def _heartbeat(st, stage, start):
+    """Emit a heartbeat frame every _HEARTBEAT_INTERVAL while a stage runs.
+    Cancelled by the caller on completion."""
+    while True:
+        await asyncio.sleep(_HEARTBEAT_INTERVAL)
+        await _broadcast(st, {"kind": "heartbeat", "name": stage,
+                              "elapsed": round(time.monotonic() - start, 2)})
+
+
+@app.websocket("/api/ws")
+async def ws_progress(websocket: WebSocket, session_id: str = "default"):
+    """A client connects once and receives this session's progress frames:
+      {"kind":"hello", ...}                       — on connect
+      {"kind":"stage","name":..,"status":"started"}
+      {"kind":"heartbeat","name":..,"elapsed":s}  — periodic while running
+      {"kind":"stage","name":..,"status":"done","state":..,"summary":..,"notable":[..]}
+    The socket carries no commands (drive stages via POST /api/stage); reads are
+    drained only to detect disconnect."""
+    st = _get(session_id)
+    await websocket.accept()
+    st.clients.add(websocket)
+    try:
+        # Read state only if no engine call is in flight — a stage mutates the
+        # (non-reentrant) session in the executor while holding the engine lock,
+        # so a lock-free read here could observe partial state or trip pybind.
+        # If busy, send a hello with state=null (the client ignores hello state
+        # anyway and gets the full state in the stage `done` frame).
+        await websocket.send_json({
+            "kind": "hello", "session_id": session_id,
+            "state": runner.snapshot_if_idle(
+                lambda: serialize.serialize_state(st.session)),
+        })
+        # Keep the connection open; ignore anything the client sends. When the
+        # client goes away, receive_* raises WebSocketDisconnect and we exit.
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:                   # noqa: BLE001 — never let a WS fault escape
+        pass
+    finally:
+        st.clients.discard(websocket)
+
+
+@app.post("/api/stage/{stage}")
+async def post_stage(stage: str, req: StageRequest = StageRequest()):
+    """Run one long pipeline stage, streaming progress to WS clients.
+
+    The session lock is held for the WHOLE engine call (state is not reentrant),
+    but the blocking `run_one` runs in a thread-pool executor so the event loop
+    stays free to push heartbeat frames to connected WS clients while it runs.
+    Returns the same `{result, state}` shape as the other command routes so a
+    client with no WS still gets the outcome synchronously."""
+    cmd = _STAGE_CMDS.get(stage)
+    if cmd is None:
+        return {"error": f"unknown stage '{stage}'",
+                "stages": sorted(_STAGE_CMDS)}
+    if req.args.strip():
+        cmd = f"{cmd} {req.args.strip()}"
+    st = _get(req.session_id)
+    async with st.lock:
+        await _broadcast(st, {"kind": "stage", "name": stage,
+                              "status": "started", "command": cmd})
+        loop = asyncio.get_event_loop()
+        start = time.monotonic()
+        hb = asyncio.create_task(_heartbeat(st, stage, start))
+        try:
+            result = await loop.run_in_executor(
+                None, runner.run_one, st.session, cmd)
+        finally:
+            hb.cancel()
+            try:
+                await hb
+            except asyncio.CancelledError:
+                pass
+        state = serialize.serialize_state(st.session)
+        notable = _notable_lines(result.get("log_lines", []))
+        await _broadcast(st, {
+            "kind": "stage", "name": stage, "status": "done",
+            "elapsed": round(time.monotonic() - start, 2),
+            "state": state, "summary": result.get("summary", ""),
+            "notable": notable, "result": result,
+        })
+    return {"result": result, "state": state, "notable": notable}
 
 
 # ── routes ──────────────────────────────────────────────────────────────────

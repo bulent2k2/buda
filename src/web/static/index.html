@@ -46,6 +46,11 @@
   #editverdict { font-size: 12px; }
   #editverdict.ok { color: #2a7; } #editverdict.bad { color: #e33; }
   .seg.edit { stroke-dasharray: none; opacity: 1; }
+  #running { position: absolute; top: 8px; right: 8px; background: #2a7c;
+             color: #fff; padding: 5px 10px; border-radius: 5px; font-size: 12px; }
+  #running::before { content: "\25CF"; margin-right: 6px;
+                     animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
 </style>
 </head>
 <body>
@@ -68,9 +73,10 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
   <div class="row">
     <button onclick="stage('run_bundler')">bundler</button>
     <button onclick="stage('generate_topologies')">topologies</button>
-    <button onclick="stage('run_planner')">planner</button>
-    <button onclick="stage('run_nuts')">nuts</button>
-    <button onclick="stage('run_detailed_nuts')">dnuts</button>
+    <button onclick="runStage('planner')">planner</button>
+    <button onclick="runStage('nuts')">nuts</button>
+    <button onclick="runStage('detailed_nuts')">dnuts</button>
+    <button onclick="runStage('ripup')">ripup</button>
   </div>
   <div class="row">view:
     <button onclick="setView('generation')">topo</button>
@@ -100,6 +106,7 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
   </div>
 </div>
 <div id="main">
+  <div id="running" hidden></div>
   <div id="candbar" hidden>
     <button onclick="stepCand(-1)">◀</button>
     <span id="candlbl"></span>
@@ -143,6 +150,52 @@ async function stage(cmd) {
   await refresh();
 }
 async function setView(v) { VIEW = v; await refresh(); }
+
+// ── long-running stages via WS progress (Phase 6) ──────────────────────────
+// The stage buttons that can take tens of seconds go through /api/stage/{stage};
+// the WS pushes started/heartbeat/done frames so the UI shows a live indicator.
+const STAGE_MAP = {planner: "run_planner", nuts: "run_nuts",
+                   detailed_nuts: "run_detailed_nuts", ripup: "ripup_reroute"};
+function setRunning(txt) {
+  const el = document.getElementById("running");
+  el.hidden = !txt; if (txt) el.textContent = txt;
+}
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/api/ws`);
+  ws.onmessage = (ev) => {
+    const f = JSON.parse(ev.data);
+    if (f.kind === "stage" && f.status === "started")
+      setRunning(`running ${f.name}…`);
+    else if (f.kind === "heartbeat")
+      setRunning(`running ${f.name}… ${f.elapsed}s`);
+    else if (f.kind === "stage" && f.status === "done") {
+      setRunning(null);
+      if (f.state) showStages(f.state);
+      if (f.notable && f.notable.length) log(f.notable.join("\n"));
+      refresh();
+    }
+  };
+  ws.onclose = () => { setRunning(null); setTimeout(connectWS, 1500); };
+  ws.onerror = () => ws.close();
+}
+async function runStage(stage) {
+  // Falls back to /api/command for the mapped instant commands if the stage
+  // endpoint is somehow unavailable; normally the WS drives the indicator.
+  setRunning(`running ${stage}…`);
+  try {
+    const res = await post("/stage/" + stage, {});
+    if (res.error) {                             // unknown stage -> command path
+      return stage(STAGE_MAP[stage] || stage);
+    }
+    log((res.notable && res.notable.length ? res.notable.join("\n") + "\n" : "")
+        + (res.result.summary || "(ok)"));
+    showStages(res.state);
+    await refresh();
+  } finally {
+    setRunning(null);                            // done frame may have cleared it
+  }
+}
 async function refresh() {
   const st = await get("/state");
   const sr = st.stages_run;
@@ -394,6 +447,7 @@ function drawDetailed(g, span) {
     el("rect", {class: "via", x: v.x - r, y: v.y - r, width: 2*r, height: 2*r}, g);
 }
 
+connectWS();
 refresh();
 </script>
 </body>
