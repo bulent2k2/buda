@@ -328,17 +328,25 @@ class HierMixin:
         for bt in hb.exit_busterm_ids:
             self.bdb.add_bundle_busterm(bid, _qual(bt), "exit")
         # Persist the SELECTED (placed) topology for the instance, with the
-        # planner's assigned layers — plus any per-instance USER candidates
+        # planner's assigned layers — plus any INSTANCE-LOCAL USER candidates
         # (TopoEdit follow-on #3): a hand-built candidate committed on THIS
         # instance WITHOUT a pin used to be session-only; now it persists as
         # an extra row, so both alternative shapes of an instance survive a
         # save → `load_pipeline expanded` resume.  Row growth stays bounded
-        # by construction: only USER candidates ride (never the full
-        # template-pool copy — the template retains the full candidate set),
-        # so an un-edited instance persists exactly one row as before.
+        # by construction: only USER candidates committed ON the instance
+        # ride — a template-level USER candidate replicated by expansion is
+        # in the instance's inherited-uid set and stays template-owned
+        # (Codex #358: persisting it per instance would multiply template
+        # alternatives by instance count), and with no inherited record at
+        # all (shouldn't happen — expansion and the expanded loader both
+        # register) extras are conservatively skipped.  An un-edited
+        # instance persists exactly one row as before.
+        inherited = getattr(self, "_inherited_uids", {}).get(hb.id)
         seg_layers = list(w.plan.seg_layers)
         for ci, topo in enumerate(w.input.candidates):
-            if ci != sel and topo.type != "USER":
+            if ci != sel and (topo.type != "USER"
+                              or inherited is None
+                              or buda.topo_uid(topo) in inherited):
                 continue
             tr = buda.TopoRow()
             tr.id = bid
@@ -2874,6 +2882,10 @@ class HierMixin:
         """
         comps = {c.name: c for c in self.bdb.all_components()}
         bottom_up = set(self.bdb.bottom_up_cells())
+        # instance bundle id -> uids of its template-inherited candidates
+        # (see the registration below; also populated by the expanded
+        # loader for resumed sessions).
+        self._inherited_uids = getattr(self, "_inherited_uids", {})
         # Replica bookkeeping: the multiple-occurrence merge accumulates all
         # instance paths on the template but leaves each replica in the list
         # with its own instance and its own nets.  Expanding both the template
@@ -3050,6 +3062,16 @@ class HierMixin:
                     self._bu_cell_of(b.cell_context) in bottom_up
                     and w.input.topology_pinned
                     and bool(w.input.pinned_seg_layers))
+                # Register the instance's INHERITED candidate uids (the
+                # template-pool copies, transformed — incl. any template
+                # USER candidate replicated here).  _add_expanded_bundle
+                # persists a non-selected USER candidate for an instance
+                # only when its uid is NOT in this set, so a template-level
+                # USER alternative never multiplies into per-instance extra
+                # rows (Codex #358); only candidates committed ON the
+                # instance after expansion count as instance-local.
+                self._inherited_uids[clone.id] = {
+                    buda.topo_uid(t) for t in new_w.input.candidates}
                 expansion_map[b.id].append(new_w)
                 wrapper_at[(b.id, inst_name)] = new_w
                 result.append(new_w)

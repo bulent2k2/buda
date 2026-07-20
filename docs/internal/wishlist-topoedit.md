@@ -212,12 +212,16 @@ using the session floorplan.
 **Landed** (on demand — the "real workflow demands it" trigger fired), in
 a deliberately BOUNDED shape that avoids every risk the deferral named:
 `_add_expanded_bundle` persists the instance's selected topology PLUS its
-**USER candidates only** — never the full template-pool copy — so an
-un-pinned `edit_commit` on an instance survives a save →
-`load_pipeline expanded` resume (both alternative hand shapes in the BDB,
-decided next session), while an un-edited instance still persists exactly
-ONE row (row growth is zero on big2-scale designs unless instances are
-hand-edited).  The loader needed NO changes: the sel/sel_ci compact-index
+**instance-local USER candidates only** — never the full template-pool
+copy, and never a template-level USER candidate replicated by expansion
+(the inherited-uid registry, populated at `_expand_hier_bundles` and by
+the expanded loader for resumed sessions, distinguishes the two — Codex
+#358: an unpinned template USER alternative stays template-owned instead
+of multiplying by instance count) — so an un-pinned `edit_commit` on an
+instance survives a save → `load_pipeline expanded` resume (both
+alternative hand shapes in the BDB, decided next session), while an
+un-edited instance still persists exactly ONE row (row growth is zero on
+big2-scale designs unless instances are hand-edited).  The loader needed NO changes: the sel/sel_ci compact-index
 remap already modeled subset persistence, and the extras ride it.  USER
 extras carry `source='user'`, taps/bridges via the same annotation
 persist, and `assigned_layer=-1` (only the placed selection has plan

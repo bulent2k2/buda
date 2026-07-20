@@ -899,6 +899,20 @@ class PersistMixin:
             # parent_id may point at a REPLICA (pre-fix checkpoints) — walk
             # the chain to the root template so sibling instances group.
             self._planner_is_hier = True
+            # Inherited-uid registry for _add_expanded_bundle on this RESUMED
+            # session: a restored expanded pool contains only the selected
+            # row + instance-local USER extras, so every non-USER row counts
+            # as template-inherited — a later re-persist (post-resume
+            # edit_commit) then keeps the extras instead of conservatively
+            # dropping them.  (An ex-selected template-replicated USER
+            # re-persisting as an extra after a pin-away is the accepted
+            # conservative corner — nothing is lost, growth stays bounded.)
+            self._inherited_uids = getattr(self, "_inherited_uids", {})
+            for br in rows:
+                if getattr(br, "is_expanded", False):
+                    self._inherited_uids[int(br.id)] = {
+                        tr.topo_uid for tr in self.bdb.topologies(br.id)
+                        if tr.source != "user"}
             all_rows = {b.id: b for b in self.bdb.all_bundles()}
 
             def canon(pid):

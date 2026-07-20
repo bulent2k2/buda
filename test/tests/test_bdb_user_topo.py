@@ -276,6 +276,48 @@ def test_hier_unpinned_instance_commit_persists_extra_row(tmp_path):
     assert len(by_id[sibling_id].input.candidates) == 1
 
 
+def test_hier_template_user_unpinned_does_not_multiply(tmp_path):
+    """Codex #358: an UNPINNED template-level USER candidate is copied into
+    every instance's pool at expansion — it must stay TEMPLATE-owned, not
+    persist as a per-instance extra row for instances that were never
+    hand-edited (that would multiply template alternatives by instance
+    count and break the one-row bound)."""
+    src = str(tmp_path / "two.bdb")
+    post = str(tmp_path / "post.bdb")
+    _two_instance_design(src)
+    s, _ = _session(
+        *LAYERS, f"open_bdb {src}",
+        "add_blocks_from_bdb 0", "add_blocks_from_bdb 1 skip",
+        "derive_busterms 1", "run_hier_bundler depth 1",
+        "generate_hier_topologies")
+    tmpl = next(w for w in s.bundles
+                if len(list(w.input.original_bundle.instances)) == 2)
+    tid = tmpl.input.original_bundle.id
+    for c in (f"edit_topology {tid} new",
+              "edit_add_trunk H 30 75 210",
+              "edit_add_stub pa_i 0", "edit_add_stub pb_i 0",
+              "edit_commit",                       # NO pin — template extra
+              "run_planner hier 3",
+              f"save_bdb {post}"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(c)
+    inst_ids = [w.input.original_bundle.id
+                for ws in s._hier_expansion_map.values() for w in ws]
+    # Un-edited instances persisted exactly ONE row each — the inherited
+    # template USER copy did not ride as an extra.
+    for iid in inst_ids:
+        assert len(s.bdb.topologies(str(iid))) == 1
+    del s
+
+    s2, out = _session(f"open_bdb {post}", *HIER_SETUP,
+                       "load_pipeline expanded")
+    assert "rehydrated" in out and "Error" not in out
+    for iid in inst_ids:
+        w = next(x for x in s2.bundles
+                 if x.input.original_bundle.id == iid)
+        assert len(w.input.candidates) == 1
+
+
 def test_hier_two_user_extras_both_survive(tmp_path):
     """The motivating workflow: two alternative hand shapes for one
     instance, BOTH in the BDB, decided next session."""
@@ -304,6 +346,26 @@ def test_hier_two_user_extras_both_survive(tmp_path):
               max(t.segments[0].start.x, t.segments[0].end.x))
              for t in we.input.candidates if t.type == "USER"}
     assert {(75, 250), (75, 300)} <= spans
+
+    # RESUMED-session re-persist (the loader-side inherited registry): a
+    # further commit on the resumed session must KEEP the restored extras —
+    # they are instance-local, not template-inherited.
+    post3 = str(tmp_path / "post3.bdb")
+    for c in (f"edit_topology {edit_id} 1", "edit_set_span 0 75 350",
+              "edit_commit",
+              f"save_bdb {post3}"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            s3.do_command(c)
+    del s3
+    s4, out = _session(f"open_bdb {post3}", *HIER_SETUP,
+                       "load_pipeline expanded")
+    assert "rehydrated" in out and "Error" not in out
+    we4 = next(w for w in s4.bundles
+               if w.input.original_bundle.id == edit_id)
+    spans4 = {(min(t.segments[0].start.x, t.segments[0].end.x),
+               max(t.segments[0].start.x, t.segments[0].end.x))
+              for t in we4.input.candidates if t.type == "USER"}
+    assert {(75, 250), (75, 300), (75, 350)} <= spans4
 
 
 def test_hier_cross_block_user_edit_post_expansion_persists(tmp_path):
