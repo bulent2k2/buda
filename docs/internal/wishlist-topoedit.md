@@ -113,10 +113,9 @@ hier flows:
    the explorer still draws/edits against the session floorplan, so
    editing a cell-local template in the GUI shows the wrong backdrop.
    Needs the explorer to accept a per-bundle floorplan (same resolver).
-3. **Un-pinned instance commits are session-only** (expanded rows persist
-   only their selection, by design) — surfaced with a printed note; a
-   full per-instance candidate-pool persistence would be a schema change
-   with little value until a workflow needs it.
+3. **Un-pinned instance commits are session-only** — ✅ RESOLVED (see the
+   expanded section below): a real workflow demanded it, and it landed as
+   bounded per-instance USER extras, not full-pool persistence.
 
 ## Follow-ons — the fuller picture (2026-07-16)
 
@@ -208,26 +207,35 @@ follow the swap).  Subtleties: selection sync with the main viz window
 (cell frame vs die extents differ wildly); the `[Rerun]` path must keep
 using the session floorplan.
 
-### 3. Per-instance candidate pools (un-pinned instance commits)
+### 3. Per-instance candidate pools (un-pinned instance commits) — ✅ RESOLVED
 
-**The gap.** Post-expansion, each instance wrapper persists ONLY its
-selected topology — by design (expanded rows are the planner's decision
-record, not a candidate store).  Edit an instance's topology and commit
-WITHOUT `pin`, and the new USER candidate exists in memory but is
-deliberately not persisted (the commit prints a loud note rather than
-pretend).
+**Landed** (on demand — the "real workflow demands it" trigger fired), in
+a deliberately BOUNDED shape that avoids every risk the deferral named:
+`_add_expanded_bundle` persists the instance's selected topology PLUS its
+**instance-local USER candidates only** — never the full template-pool
+copy, and never a template-level USER candidate replicated by expansion
+(the inherited-uid registry, populated at `_expand_hier_bundles` and by
+the expanded loader for resumed sessions, distinguishes the two — Codex
+#358: an unpinned template USER alternative stays template-owned instead
+of multiplying by instance count) — so an un-pinned `edit_commit` on an
+instance survives a save → `load_pipeline expanded` resume (both
+alternative hand shapes in the BDB, decided next session), while an
+un-edited instance still persists exactly ONE row (row growth is zero on
+big2-scale designs unless instances are hand-edited).  The loader needed NO changes: the sel/sel_ci compact-index
+remap already modeled subset persistence, and the extras ride it.  USER
+extras carry `source='user'`, taps/bridges via the same annotation
+persist, and `assigned_layer=-1` (only the placed selection has plan
+layers).  The commit note flipped from "session-only" to the
+pin-it-on-resume pointer.  Tests:
+`test_hier_unpinned_instance_commit_persists_extra_row` (selection
+untouched, sibling still single-row) and
+`test_hier_two_user_extras_both_survive` (the motivating workflow), in
+`test_bdb_user_topo.py`.
 
-**Why it matters (rarely).** Only one workflow: "I built two alternative
-hand shapes for instance 7, want BOTH in the BDB, and will decide next
-session."  Today: pin one (persisted) and rebuild the other later — or
-keep both by editing PRE-expansion at the template level, where full
-pools ARE persisted.
-
-**Shape of the work.** The largest of the three — it changes what an
-expanded bundle row MEANS.  Persisting full per-instance pools multiplies
-topology rows by instance count (big2-scale designs would feel it),
-complicates the loader's compact-index remapping (the Codex #136
-territory), and blurs the template-vs-instance provenance the bottom-up
-machinery relies on.  **Recommendation: don't build it until a real
-workflow demands it** — the pin-to-persist rule is coherent and loudly
-surfaced.
+**The original gap (for the record).** Post-expansion, each instance
+wrapper persisted ONLY its selected topology — by design (expanded rows
+are the planner's decision record, not a candidate store).  An un-pinned
+instance commit existed in memory but was deliberately not persisted
+(loud note).  Full per-instance pools were rejected for row
+multiplication, loader remap complexity, and provenance blur — the
+USER-only extras land the workflow without any of the three.

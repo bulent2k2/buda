@@ -622,8 +622,9 @@ class PersistMixin:
         w.input.width = len(hb.get_net_names()) * 1.5   # as run_bundler sets it
         # sel/sel_ci: the selected candidate's COMPACT in-memory index vs its
         # PERSISTED cand_index. They differ when only a subset of candidates
-        # was persisted (hier expanded bundles keep just their selected
-        # topology, at its original template cand_index).
+        # was persisted (hier expanded bundles keep their selected topology —
+        # plus any per-instance USER candidates — at their original template
+        # cand_indices).
         cands, sel, sel_ci, pinned = [], -1, -1, False
         # One bulk read per bundle (empty for non-TEG designs, the common
         # case) instead of one SELECT per candidate.
@@ -803,9 +804,9 @@ class PersistMixin:
         ranges and net_pull from geometry + Floorplan — those are recomputed,
         by design). `expanded` selects the hier post-expansion view
         (is_replicated=1 per-instance rows + non-template bundles) instead of
-        the pre-expansion templates; an expanded instance persists only its
-        selected topology, so its selected index is remapped to the compact
-        in-memory candidate list.
+        the pre-expansion templates; an expanded instance persists its
+        selected topology plus any per-instance USER candidates, so its
+        selected index is remapped to the compact in-memory candidate list.
 
         Not restored (recomputed downstream or absent): seg_perp (a NUTS
         placement *preference* from the planner's charged bands — a resumed
@@ -898,6 +899,20 @@ class PersistMixin:
             # parent_id may point at a REPLICA (pre-fix checkpoints) — walk
             # the chain to the root template so sibling instances group.
             self._planner_is_hier = True
+            # Inherited-uid registry for _add_expanded_bundle on this RESUMED
+            # session: a restored expanded pool contains only the selected
+            # row + instance-local USER extras, so every non-USER row counts
+            # as template-inherited — a later re-persist (post-resume
+            # edit_commit) then keeps the extras instead of conservatively
+            # dropping them.  (An ex-selected template-replicated USER
+            # re-persisting as an extra after a pin-away is the accepted
+            # conservative corner — nothing is lost, growth stays bounded.)
+            self._inherited_uids = getattr(self, "_inherited_uids", {})
+            for br in rows:
+                if getattr(br, "is_expanded", False):
+                    self._inherited_uids[int(br.id)] = {
+                        tr.topo_uid for tr in self.bdb.topologies(br.id)
+                        if tr.source != "user"}
             all_rows = {b.id: b for b in self.bdb.all_bundles()}
 
             def canon(pid):
@@ -980,8 +995,9 @@ class PersistMixin:
         the per-segment assigned layers (`topology_segment.assigned_layer`). Wrappers
         whose id already has BDB rows (flat bundles, hier cross-block / pass-through)
         are UPDATED in place; hier's expanded per-instance wrappers (synthetic ids)
-        are ADDED as `is_replicated=1` bundle rows (parent_id = template) with just
-        their selected topology, so `bus_segment` rows join back to a bundle. No-op
+        are ADDED as `is_replicated=1` bundle rows (parent_id = template) with
+        their selected topology plus any per-instance USER candidates
+        (TopoEdit follow-on #3), so `bus_segment` rows join back to a bundle. No-op
         without an open BDB. See docs/internal/wishlist-bdb.md.
         """
         if self.bdb is None:

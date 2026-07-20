@@ -418,8 +418,12 @@ block missing from the current Floorplan.
 
 `expanded` selects the hier post-expansion view (`is_replicated=1` per-instance
 rows + non-template bundles) instead of the pre-expansion templates. An
-expanded instance persists only its selected topology (at its template
-`cand_index`), so its selection is remapped to the compact in-memory list.
+expanded instance persists its selected topology **plus any per-instance
+USER candidates** (a TopoEdit commit on one instance without `pin` lands as
+an extra `source='user'` row — both alternative hand shapes survive the
+resume, and un-edited instances still persist exactly one row), each at its
+template `cand_index`, so the selection is remapped to the compact
+in-memory list.
 For **bottom-up** designs the pre-expansion TEMPLATE wrappers are restored
 alongside (from the template bundle rows referenced as parents by the
 expanded rows, validated against their own cell-local floorplans, with the

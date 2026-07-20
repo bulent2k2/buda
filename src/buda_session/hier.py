@@ -327,40 +327,61 @@ class HierMixin:
             self.bdb.add_bundle_busterm(bid, _qual(bt), "entry")
         for bt in hb.exit_busterm_ids:
             self.bdb.add_bundle_busterm(bid, _qual(bt), "exit")
-        # Persist only the SELECTED (placed) topology for the instance, with the
-        # planner's assigned layers; the template retains the full candidate set.
-        topo = w.input.candidates[sel]
-        tr = buda.TopoRow()
-        tr.id = bid
-        tr.cand_index = sel
-        tr.type = topo.type
-        tr.wirelength = topo.estimated_wirelength
-        tr.trunk_location = topo.trunk_location
-        tr.pass_through_count = topo.pass_through_count
-        tr.connected_blocks = json.dumps(list(topo.connected_block_names))
-        tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
-        tr.is_selected = True
-        tr.topo_uid = buda.topo_uid(topo)
-        self.bdb.add_topology(tr)
+        # Persist the SELECTED (placed) topology for the instance, with the
+        # planner's assigned layers — plus any INSTANCE-LOCAL USER candidates
+        # (TopoEdit follow-on #3): a hand-built candidate committed on THIS
+        # instance WITHOUT a pin used to be session-only; now it persists as
+        # an extra row, so both alternative shapes of an instance survive a
+        # save → `load_pipeline expanded` resume.  Row growth stays bounded
+        # by construction: only USER candidates committed ON the instance
+        # ride — a template-level USER candidate replicated by expansion is
+        # in the instance's inherited-uid set and stays template-owned
+        # (Codex #358: persisting it per instance would multiply template
+        # alternatives by instance count), and with no inherited record at
+        # all (shouldn't happen — expansion and the expanded loader both
+        # register) extras are conservatively skipped.  An un-edited
+        # instance persists exactly one row as before.
+        inherited = getattr(self, "_inherited_uids", {}).get(hb.id)
         seg_layers = list(w.plan.seg_layers)
-        for si, seg in enumerate(topo.segments):
-            sr = buda.TopoSegRow()
-            sr.id = bid
-            sr.cand_index = sel
-            sr.seg_index = si
-            sr.x1, sr.y1 = seg.start.x, seg.start.y
-            sr.x2, sr.y2 = seg.end.x, seg.end.y
-            sr.layer_hint = seg.layer_hint
-            sr.is_jog = seg.is_jog
-            sr.edge_id = seg.edge_id
-            sr.perp_clamp_lo = seg.perp_clamp_lo
-            sr.perp_clamp_hi = seg.perp_clamp_hi
-            sr.assigned_layer = int(seg_layers[si]) if si < len(seg_layers) else -1
-            self.bdb.add_topology_segment(sr)
-        # Logical seg-busterm links + TEG-over bridges for the instance's
-        # selected topology, so a `load_pipeline expanded` resume restores its
-        # connectivity (and any bridge) too.
-        self._persist_topology_annotations(bid, sel, topo)
+        for ci, topo in enumerate(w.input.candidates):
+            if ci != sel and (topo.type != "USER"
+                              or inherited is None
+                              or buda.topo_uid(topo) in inherited):
+                continue
+            tr = buda.TopoRow()
+            tr.id = bid
+            tr.cand_index = ci
+            tr.type = topo.type
+            tr.wirelength = topo.estimated_wirelength
+            tr.trunk_location = topo.trunk_location
+            tr.pass_through_count = topo.pass_through_count
+            tr.connected_blocks = json.dumps(list(topo.connected_block_names))
+            tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
+            tr.is_selected = (ci == sel)
+            tr.topo_uid = buda.topo_uid(topo)
+            tr.source = "user" if topo.type == "USER" else "generated"
+            self.bdb.add_topology(tr)
+            for si, seg in enumerate(topo.segments):
+                sr = buda.TopoSegRow()
+                sr.id = bid
+                sr.cand_index = ci
+                sr.seg_index = si
+                sr.x1, sr.y1 = seg.start.x, seg.start.y
+                sr.x2, sr.y2 = seg.end.x, seg.end.y
+                sr.layer_hint = seg.layer_hint
+                sr.is_jog = seg.is_jog
+                sr.edge_id = seg.edge_id
+                sr.perp_clamp_lo = seg.perp_clamp_lo
+                sr.perp_clamp_hi = seg.perp_clamp_hi
+                # Only the selected (placed) topology carries plan layers.
+                sr.assigned_layer = (int(seg_layers[si])
+                                     if ci == sel and si < len(seg_layers)
+                                     else -1)
+                self.bdb.add_topology_segment(sr)
+            # Logical seg-busterm links + TEG-over bridges, so a
+            # `load_pipeline expanded` resume restores connectivity (and any
+            # bridge) for every persisted candidate.
+            self._persist_topology_annotations(bid, ci, topo)
 
     def _restore_user_topos(self, data):
         """Replay sidecar-persisted TopoEdit op-logs ('user_topo': base uid +
@@ -2861,6 +2882,10 @@ class HierMixin:
         """
         comps = {c.name: c for c in self.bdb.all_components()}
         bottom_up = set(self.bdb.bottom_up_cells())
+        # instance bundle id -> uids of its template-inherited candidates
+        # (see the registration below; also populated by the expanded
+        # loader for resumed sessions).
+        self._inherited_uids = getattr(self, "_inherited_uids", {})
         # Replica bookkeeping: the multiple-occurrence merge accumulates all
         # instance paths on the template but leaves each replica in the list
         # with its own instance and its own nets.  Expanding both the template
@@ -3037,6 +3062,16 @@ class HierMixin:
                     self._bu_cell_of(b.cell_context) in bottom_up
                     and w.input.topology_pinned
                     and bool(w.input.pinned_seg_layers))
+                # Register the instance's INHERITED candidate uids (the
+                # template-pool copies, transformed — incl. any template
+                # USER candidate replicated here).  _add_expanded_bundle
+                # persists a non-selected USER candidate for an instance
+                # only when its uid is NOT in this set, so a template-level
+                # USER alternative never multiplies into per-instance extra
+                # rows (Codex #358); only candidates committed ON the
+                # instance after expansion count as instance-local.
+                self._inherited_uids[clone.id] = {
+                    buda.topo_uid(t) for t in new_w.input.candidates}
                 expansion_map[b.id].append(new_w)
                 wrapper_at[(b.id, inst_name)] = new_w
                 result.append(new_w)
