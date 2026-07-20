@@ -1413,6 +1413,57 @@ def test_script_select_topology_wins_for_plain_sidecar_selection(tmp_path,
     assert 'overrides the script' not in capsys.readouterr().out
 
 
+def test_stale_user_sidecar_does_not_override_script_pin(tmp_path, capsys):
+    """Codex #363: a STALE user_topo sidecar whose base uid is gone from the
+    regenerated pool must NOT override a script select_topology.  The rebuild
+    is skipped, so the USER uid never resolves; the main loop can only fall
+    through to the type/WL or index-hint match, which points at an UNRELATED
+    generated candidate.  The override is gated on resolve-by-uid + type USER,
+    so the script's pin is kept (the safe default)."""
+    import json
+    flow = tmp_path / "f.buda"
+    flow.write_text("\n".join((
+        "def_layer 4 M4 H TOP 10",
+        "def_layer 5 M5 V TOP 10",
+        "add_block lo 0    0 400  400",
+        "add_block up 0 1000 400 1400",
+        "add_bus w[4] lo.o up.i",
+        "run_bundler",
+        "generate_topologies",
+        "select_topology 1 2",                 # script pins candidate 2
+        "run_planner 1",
+    )) + "\n")
+
+    # Hand-write a sidecar with a user_topo whose base uid is BOGUS (not in
+    # any regenerated pool) and whose own uid won't resolve either, but with
+    # an index hint pointing at a DIFFERENT candidate (candidate 1).  Before
+    # the gate this flipped the script's pin to the hint; now it must not.
+    first_net = "w_0"
+    sidecar = {"selections": [{
+        "bundle_hint": first_net,
+        "topo_uid": "deadbeefdeadbeef",           # unresolvable
+        "topo_type": "USER",
+        "topo_wl": 999999,                          # matches nothing
+        "topo_index_hint": 0,                       # candidate 1 (unrelated)
+        "user_topo": {"base": "cafebabecafebabe",   # base gone → skip rebuild
+                      "ops": ["edit_add_trunk V 500 200 1200"]},
+    }]}
+    (tmp_path / "f.json").write_text(json.dumps(sidecar))
+
+    s = buda_cli.BudaSession(); s.no_viz = True
+    s.script_path = str(flow)
+    for line in flow.read_text().splitlines():
+        if line.strip():
+            s.do_command(line.strip())
+    out = capsys.readouterr().out
+    w = s.bundles[0]
+    # The script's pin (candidate 2, index 1) is kept — NOT the index hint.
+    assert w.plan.selected_topology_index == 1, out
+    assert 'overrides the script' not in out
+    # And no USER candidate was fabricated onto the pool.
+    assert all(c.type != "USER" for c in w.input.candidates)
+
+
 def test_cli_edit_set_slide_stages_clamps_and_rekeys(tmp_path):
     """The scriptable W: edit_set_slide stages a window (clamped to the
     structural slide range), 'clear' unstages, edit_remove_segment re-keys,

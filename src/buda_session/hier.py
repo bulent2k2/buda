@@ -522,11 +522,13 @@ class HierMixin:
             #    (Phase E1b): stable content uid (survives regeneration and
             #    list reordering) -> type+WL -> warned index hint.
             resolved_sidecar_idx = None
+            resolved_by_uid = False   # gate the USER-pin override below
             sc_uid = sel.get('topo_uid')
             if sc_uid:
                 for i, cand in enumerate(first_w.input.candidates):
                     if buda.topo_uid(cand) == sc_uid:
                         resolved_sidecar_idx = i
+                        resolved_by_uid = True
                         break
             if resolved_sidecar_idx is None:
                 for i, cand in enumerate(first_w.input.candidates):
@@ -559,7 +561,20 @@ class HierMixin:
             # where `select_topology` in the script dropped the persisted USER
             # topo.  A plain (generated-candidate) sidecar selection keeps the
             # old precedence: the script's pin wins.
-            is_user_pin = bool(sel.get('user_topo'))
+            #
+            # The override is gated on the USER candidate being ACTUALLY
+            # resolved — by uid, AND the resolved candidate being type USER
+            # (Codex #363): a STALE user_topo sidecar whose base uid left the
+            # regenerated pool (rebuild skipped) can fall through to the
+            # type/WL or index-hint match, which may point at an unrelated
+            # GENERATED candidate.  Overriding a script pin with that would be
+            # wrong — so a user_topo sidecar that no longer resolves to its
+            # hand-built candidate keeps the script's pin (the safe default).
+            is_user_pin = (
+                bool(sel.get('user_topo')) and resolved_by_uid
+                and 0 <= resolved_sidecar_idx < len(first_w.input.candidates)
+                and first_w.input.candidates[resolved_sidecar_idx].type
+                    == "USER")
             n_adopted = 0   # wrappers newly pinned from the sidecar
             n_layered = 0   # wrappers that received layer overrides
             for w in matching:
