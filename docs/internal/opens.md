@@ -82,16 +82,17 @@ items this page doesn't see).
 
 8. **Bundler follow-on corners (hier)** —
    [`wishlist-bundler.md`](wishlist-bundler.md) → *"Remaining corners"*.
-   Two bounded pieces left after the bundler subsystem went
-   feature-complete across flat and hier (PRs #268/#273/#276):
+   After the bundler subsystem went feature-complete across flat and hier
+   (PRs #268/#273/#276), one bounded piece is left:
    **cross-level fan-in grouping** (cross-level nets keep
    STRICT/BIDIRECTIONAL grouping today because their single
    `drv_spec_path` metadata cannot describe a multi-driver group — needs
    a per-net endpoint record like the same-level `net_drivers` /
-   `net_receivers`), and **hier `set_max_bundle_bits`** (the balanced
-   split pass is flat-only; hier splits must propagate through the
-   template↔replica linkage so every instance splits identically). Both
-   fail LOUD/conservative today, never silent.
+   `net_receivers`). Fails LOUD/conservative today, never silent.
+   ✅ **Hier `set_max_bundle_bits`** is now LANDED — `run_hier_bundler`
+   splits an over-limit TEMPLATE bundle before per-instance expansion so
+   the split propagates identically through the template↔replica linkage
+   (`test_hier_max_bundle_bits.py`).
 
 ## Big / blocked / conditional
 

@@ -162,6 +162,71 @@ def _min_bit_pitch(session):
     return min(pitches) if pitches else float(session._nuts_pitch or 1.0)
 
 
+def _partition_nets(nets, target, caps, inc_fn):
+    """Balanced net partition keeping bus groups together while ENFORCING
+    per-block caps per part (the shared core of the flat and hier splitters).
+
+    `target` is the balanced size ceiling, `caps` maps a constrained block to
+    its per-part bit cap (empty = no cap), and `inc_fn(net)` returns the blocks
+    a net is incident to.  Each part closes before any cap would be exceeded
+    (net-level fallback for a group that violates a cap on its own), so a
+    single net always fits an empty part (caps are >= 1).  Returns a list of
+    parts (each a list of net names, bus groups kept contiguous)."""
+    groups, order = {}, []
+    for n in nets:
+        k = _bus_group_key(n)
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(n)
+
+    parts, cur, cur_cnt = [], [], {}
+
+    def _fits(add_nets, base_len, base_cnt):
+        if base_len + len(add_nets) > target:
+            return False
+        if caps:
+            cnt = dict(base_cnt)
+            for n in add_nets:
+                for blk in inc_fn(n):
+                    if blk in caps:
+                        cnt[blk] = cnt.get(blk, 0) + 1
+                        if cnt[blk] > caps[blk]:
+                            return False
+        return True
+
+    def _close():
+        nonlocal cur, cur_cnt
+        if cur:
+            parts.append(cur)
+            cur, cur_cnt = [], {}
+
+    def _add(add_nets):
+        for n in add_nets:
+            cur.append(n)
+            for blk in inc_fn(n):
+                if blk in caps:
+                    cur_cnt[blk] = cur_cnt.get(blk, 0) + 1
+
+    for k in order:
+        g = groups[k]
+        if _fits(g, len(cur), cur_cnt):
+            _add(g)
+            continue
+        _close()
+        if _fits(g, 0, {}):
+            _add(g)
+            continue
+        # The group alone exceeds the target or a block cap: pack its nets
+        # individually, closing the part before any violation.
+        for n in g:
+            if not _fits([n], len(cur), cur_cnt):
+                _close()
+            _add([n])
+    _close()
+    return parts
+
+
 def _split_oversized_bundles(session, raw_bundles):
     """Optional bundle bit bound (set_max_bundle_bits): split any bundle
     over the limit into balanced parts, keeping bits of the same bus
@@ -243,59 +308,7 @@ def _split_oversized_bundles(session, raw_bundles):
             e = eps.get(net)
             return () if e is None else tuple({e[0], *e[1]})
 
-        groups, order = {}, []
-        for n in nets:
-            k = _bus_group_key(n)
-            if k not in groups:
-                groups[k] = []
-                order.append(k)
-            groups[k].append(n)
-
-        parts, cur, cur_cnt = [], [], {}
-
-        def _fits(add_nets, base_len, base_cnt):
-            if base_len + len(add_nets) > target:
-                return False
-            if caps:
-                cnt = dict(base_cnt)
-                for n in add_nets:
-                    for blk in _inc(n):
-                        if blk in caps:
-                            cnt[blk] = cnt.get(blk, 0) + 1
-                            if cnt[blk] > caps[blk]:
-                                return False
-            return True
-
-        def _close():
-            nonlocal cur, cur_cnt
-            if cur:
-                parts.append(cur)
-                cur, cur_cnt = [], {}
-
-        def _add(add_nets):
-            for n in add_nets:
-                cur.append(n)
-                for blk in _inc(n):
-                    if blk in caps:
-                        cur_cnt[blk] = cur_cnt.get(blk, 0) + 1
-
-        for k in order:
-            g = groups[k]
-            if _fits(g, len(cur), cur_cnt):
-                _add(g)
-                continue
-            _close()
-            if _fits(g, 0, {}):
-                _add(g)
-                continue
-            # The group alone exceeds the target or a block cap: pack its
-            # nets individually, closing the part before any violation (a
-            # single net always fits an empty part — caps are >= 1).
-            for n in g:
-                if not _fits([n], len(cur), cur_cnt):
-                    _close()
-                _add([n])
-        _close()
+        parts = _partition_nets(nets, target, caps, _inc)
 
         sizes = "+".join(str(len(p)) for p in parts)
         print(f"[Bundler] split bundle {b.id} ({total} bits) into "
@@ -311,6 +324,179 @@ def _split_oversized_bundles(session, raw_bundles):
             nb.reason = f"{b.reason}|SPLIT:{k}/{len(parts)}"
             nb.num_terminals = b.num_terminals
             out.append(nb)
+    return out
+
+
+def _hier_endpoint_blocks(session, b):
+    """Shared endpoint block names for a NON-fan-in hier bundle (every net
+    lands on the same blocks): cell-local leaf names, cross-level spec paths,
+    or the parsed cross-block reason.  Used only for the AUTO bit-bound cap."""
+    if b.cell_context and b.entry_busterm_ids:
+        ids = list(b.entry_busterm_ids) + list(b.exit_busterm_ids)
+        return [e.removeprefix('bt:').rsplit('/', 1)[-1] for e in ids]
+    if b.drv_spec_depth >= 0:
+        return [b.drv_spec_path, *b.rcv_spec_paths]
+    src, dsts = session._parse_bundle_reason(b.reason)
+    return [src, *dsts] if src else []
+
+
+def _fanin_core(part_drvs, part_rcvs):
+    """Rebuild a fan-in part's (reason, unique_drivers, root, extra_receivers)
+    from its per-net drivers/receivers, matching the C++ FANIN reason builder
+    (root = shared sink; leaves = unique drivers + any receiver beyond root).
+    So a split part that no longer spans every original leaf re-scopes to just
+    the blocks its member bits touch — no spurious 0-bit leaf stub.  Returns
+    (None, [], None, []) when the part has no resolvable sink or no leaves."""
+    root = next((rl[0] for rl in part_rcvs if rl), None)
+    if root is None:
+        return None, [], None, []
+    uniq_drv = []
+    for d in part_drvs:
+        if d and d != root and d not in uniq_drv:
+            uniq_drv.append(d)
+    extra_rcv = []
+    for rl in part_rcvs:
+        for r in rl:
+            if r and r != root and r not in uniq_drv and r not in extra_rcv:
+                extra_rcv.append(r)
+    leaves = uniq_drv + extra_rcv
+    if not leaves:
+        return None, [], None, []
+    reason = "FANIN:" + root + "|FROM:" + "".join(x + "," for x in leaves)
+    return reason, uniq_drv, root, extra_rcv
+
+
+def _split_hier_bundles(session, raw_bundles):
+    """Hier twin of _split_oversized_bundles (set_max_bundle_bits): split an
+    over-limit TEMPLATE bundle into balanced parts BEFORE per-instance
+    expansion, so the split propagates identically to every instance through
+    the template↔replica linkage (each part is its own template, replicated
+    at run_planner hier).  Every HBundle hier field is preserved on each part
+    (_clone_hbundle_with_id); the per-net-aligned fan-in arrays
+    (net_drivers/net_receivers) are split in the same net partition.
+
+    Static cap N needs only the net count, so it is fully general across the
+    three hier bundle kinds.  AUTO cap (busterm edge): per-net incident blocks
+    come from the HBundle metadata (fan-in per-net endpoints, else the shared
+    endpoint blocks) and block dimensions from the open BDB — resolved by
+    component name or a '/<leaf>' suffix (cell-local template leaf names match
+    any congruent instance's child).  A block whose bounds cannot be resolved
+    is skipped for the AUTO cap with a one-line note."""
+    max_bits = getattr(session, "_max_bundle_bits", None)
+    auto = getattr(session, "_max_bundle_bits_auto", False)
+    if (not max_bits and not auto) or not raw_bundles:
+        return raw_bundles
+    pitch = _min_bit_pitch(session) if auto else None
+    comps = list(session.bdb.all_components()) if (auto and session.bdb) else []
+
+    edge_cache = {}
+    unresolved = set()
+
+    def _min_edge(blk):
+        if blk in edge_cache:
+            return edge_cache[blk]
+        cand = None
+        for c in comps:
+            if c.name == blk:
+                cand = c
+                break
+            if cand is None and c.name.endswith('/' + blk):
+                cand = c
+        edge = None if cand is None else min(cand.x2 - cand.x1,
+                                             cand.y2 - cand.y1)
+        edge_cache[blk] = edge
+        if edge is None:
+            unresolved.add(blk)
+        return edge
+
+    out = []
+    next_id = max((b.id for b in raw_bundles), default=0)
+    for b in raw_bundles:
+        nets = list(b.get_net_names())
+        total = len(nets)
+        drvs = list(b.net_drivers)
+        rcvs = [list(r) for r in b.net_receivers]
+        fanin = bool(drvs) and len(drvs) == total
+        net_idx = {n: i for i, n in enumerate(nets)}
+
+        def _inc(net, _shared=None):
+            if fanin:
+                i = net_idx.get(net)
+                if i is None:
+                    return ()
+                return tuple({drvs[i], *rcvs[i]} - {""})
+            return _shared
+
+        n_parts, why = 1, ""
+        if max_bits and total > max_bits:
+            n_parts = math.ceil(total / max_bits)
+            why = f"static limit {max_bits}"
+
+        caps, inc_all = {}, {}
+        if auto and pitch and pitch > 0:
+            shared = None
+            if not fanin:
+                shared = tuple(dict.fromkeys(_hier_endpoint_blocks(session, b)))
+            at_block = {}
+            for n in nets:
+                blks = _inc(n, shared)
+                inc_all[n] = blks
+                for blk in blks:
+                    at_block[blk] = at_block.get(blk, 0) + 1
+            for blk, bits_at in at_block.items():
+                edge = _min_edge(blk)
+                if edge is None or edge <= 0:
+                    continue
+                cap = max(1, int(edge / pitch))
+                caps[blk] = cap
+                need = math.ceil(bits_at / cap)
+                if need > n_parts:
+                    n_parts = need
+                    why = (f"busterm edge of '{blk}' ({edge:g} units / pitch "
+                           f"{pitch:g} = {cap} bits) sees {bits_at} bits")
+
+        if n_parts <= 1:
+            out.append(b)
+            continue
+
+        target = math.ceil(total / n_parts)
+        inc_fn = (lambda n: inc_all.get(n, ())) if caps else (lambda n: ())
+        parts = _partition_nets(nets, target, caps, inc_fn)
+
+        sizes = "+".join(str(len(p)) for p in parts)
+        print(f"[HierBundler] split bundle {b.id} ({total} bits) into "
+              f"{len(parts)} part(s) ({sizes}): {why}")
+        for k, part in enumerate(parts, start=1):
+            if k == 1:
+                nb = session._clone_hbundle_with_id(b, b.id)
+            else:
+                next_id += 1
+                nb = session._clone_hbundle_with_id(b, next_id)
+            nb.net_names = part
+            suffix = f"|SPLIT:{k}/{len(parts)}"
+            if fanin:
+                pd = [drvs[net_idx[n]] for n in part]
+                pr = [rcvs[net_idx[n]] for n in part]
+                nb.net_drivers = pd
+                nb.net_receivers = pr
+                core, uniq_drv, root, extra_rcv = _fanin_core(pd, pr)
+                nb.reason = (core if core else b.reason) + suffix
+                # Cell-local fan-in (case a) reads endpoints from the busterm
+                # ids, not the reason — re-scope those to the part too.
+                if core and b.cell_context and b.entry_busterm_ids:
+                    nb.entry_busterm_ids = ["bt:" + d for d in uniq_drv]
+                    nb.exit_busterm_ids = (["bt:" + root]
+                                           + ["bt:" + r for r in extra_rcv])
+            else:
+                nb.reason = b.reason + suffix
+            out.append(nb)
+
+    if unresolved:
+        shown = sorted(unresolved)[:5]
+        more = f" … and {len(unresolved)-5} more" if len(unresolved) > 5 else ""
+        print(f"  Note: AUTO bit-bound could not resolve bounds for "
+              f"{len(unresolved)} block(s) (skipped for the cap): "
+              f"{', '.join(shown)}{more}")
     return out
 
 
@@ -410,6 +596,9 @@ def cmd_set_max_bundle_bits(session, cmd, args, cmd_line):
     # endpoint block, the bits incident to it (what the per-bit taper
     # actually lands on its face) must fit floor(min(w,h)/min_bit_pitch).
     # Both may be active (the max part count wins); 'off' clears both.
+    # Applies to BOTH run_bundler and run_hier_bundler — a hier TEMPLATE
+    # bundle is split before per-instance expansion, so the split propagates
+    # identically to every occurrence (each part is its own template).
     if not args:
         print("Error: usage: set_max_bundle_bits <N|auto|off> [auto]")
         return
@@ -440,18 +629,13 @@ def cmd_set_max_bundle_bits(session, cmd, args, cmd_line):
           f"{'static ' + str(static) if static else ''}"
           f"{' + ' if static and session._max_bundle_bits_auto else ''}"
           f"{'auto (busterm edge)' if session._max_bundle_bits_auto else ''}"
-          f" (applies at the next run_bundler)")
+          f" (applies at the next run_bundler / run_hier_bundler)")
 
 
 def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     # run_hier_bundler [depth <N>] [STRICT|CONVERGENT|BIDIRECTIONAL|COMBINED]
     if session.bdb is None:
         print("Error: run_hier_bundler requires an open BDB (use open_bdb first)"); return
-    if (getattr(session, "_max_bundle_bits", None)
-            or getattr(session, "_max_bundle_bits_auto", False)):
-        print("Warning: set_max_bundle_bits applies to the FLAT run_bundler "
-              "only — run_hier_bundler ignores it (hier bundle splitting "
-              "is a documented follow-on).")
     max_depth = 1
     if "depth" in args:
         idx = list(args).index("depth")
@@ -482,6 +666,10 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
               "per bundling depth (cross-level nets stay STRICT/BIDIR; "
               "restrict per prefix with set_bundling).")
     raw_bundles = hb.run(max_depth)
+    # set_max_bundle_bits: split over-limit TEMPLATE bundles BEFORE expansion
+    # so the split propagates identically to every instance (each part is its
+    # own template, replicated at run_planner hier).
+    raw_bundles = _split_hier_bundles(session, raw_bundles)
     session.bundles = []
     for b in raw_bundles:
         w = buda.BundleWrapper()

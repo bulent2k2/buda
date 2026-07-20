@@ -290,10 +290,27 @@ def test_bit_bound_off_and_no_bound_is_identity():
     assert len(s.bundles) == 1
 
 
-def test_hier_bundler_warns_on_flat_only_settings():
+def test_hier_bundler_applies_bit_bound():
+    """set_max_bundle_bits is no longer flat-only: run_hier_bundler splits an
+    over-limit bundle too (the hier-aware split — see
+    test_hier_max_bundle_bits.py for the full coverage)."""
     import buda
+    db = buda.BDB(":memory:")
+    db.add_cell("core_cell", 300, 200)
+    db.add_cell("leaf_cell", 60, 60)
+    db.add_inst_to_cell("core_cell", "a_i", "leaf_cell", 20, 60)
+    db.add_inst_to_cell("core_cell", "b_i", "leaf_cell", 200, 60)
+    db.add_inst("core_i", "core_cell", "", 50, 50)
+    for i in range(8):
+        db.add_net_pins(f"bus_{i}", "core_i/a_i.out", ["core_i/b_i.in"])
+    buda.BustermGen(db).derive(1)
     s = buda_cli.BudaSession(); s.no_viz = True
-    s.bdb = buda.BDB(":memory:")
-    s.do_command("set_max_bundle_bits 8")
+    s.bdb = db
+    s.do_command("set_max_bundle_bits 4")
     out = _run(s, "run_hier_bundler")
-    assert "FLAT" in out or "flat" in out
+    assert "FLAT" not in out and "flat" not in out   # the old warning is gone
+    assert "split bundle" in out
+    reasons = [w.input.original_bundle.reason for w in s.bundles]
+    assert all("|SPLIT:" in r for r in reasons)
+    assert sum(len(w.input.original_bundle.get_net_names())
+               for w in s.bundles) == 8               # no bit lost
