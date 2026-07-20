@@ -385,10 +385,23 @@ for br in bdb.all_bundles():            # filter by is_replicated per `expanded`
 3. **Guard tests:** `load_pipeline` with no open BDB / no persisted topologies
    errors clearly; `load_pipeline` before re-declaring blocks fails fast.
 
-## Audit 2026-07 (deferred): re-plan expanded-parent FK staleness + persist-step checking (C6-09) — OPEN
+## Audit 2026-07: re-plan expanded-parent FK staleness + persist-step checking (C6-09) — RESOLVED
 
-Two coupled findings from [audit_2026-07.md](audit_2026-07.md), deferred as a
-pair because C6-09 cannot land until the staleness bug is fixed:
+Both coupled findings landed together (the staleness fix unblocked C6-09).
+
+- **Staleness:** `run_planner hier` now restores the pre-expansion TEMPLATE
+  wrappers (`_hier_bundles_orig`) before re-expanding, so a second run
+  re-derives its per-instance ids from the templates (stable) instead of
+  re-expanding the prior run's per-instance wrappers — ids no longer drift
+  (5..8, not 9..12), the expansion map keys on the real templates, and the
+  checkpoint persists the whole routing subtree (regression:
+  `test_replan_persists_expanded_instances_no_fk_drop`).
+- **C6-09:** the persist mutators go through `step_checked` and throw on any
+  non-`SQLITE_DONE` result (regression:
+  `test_audit4.py::test_persist_step_throws_on_fk_violation`); the NUTS_DDL
+  header comment is updated.
+
+Original write-up (kept for context):
 
 - **Re-plan expanded-parent staleness (newly discovered).** A second
   `run_planner hier` re-expands the templates into per-instance bundle rows

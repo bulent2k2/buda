@@ -360,6 +360,49 @@ def test_heatmap_off_by_default():
     assert ViewState().heatmap is False
 
 
+_P705_FLOW = """
+def_layer 4 M4 H TOP 50
+def_layer 5 M5 V TOP 50
+def_track_pattern 4 0 SIGNAL 1 1 SIGNAL 1 1 SIGNAL 1 1
+def_track_pattern 5 0 SIGNAL 1 1 SIGNAL 1 1 SIGNAL 1 1
+add_block A 0 0 100 100
+add_block B 300 0 400 100
+add_block C 0 300 100 400
+add_bus d[4] A.tx B.rx
+add_bus e[4] C.tx B.rx
+run_bundler strict
+generate_topologies
+run_planner 5
+run_nuts
+visualize
+"""
+
+
+def test_heatmap_refreshes_on_rerun(monkeypatch, tmp_path):
+    """An in-GUI re-run rebuilds the congestion heatmap from the RE-PLANNED
+    cut/band state instead of leaving the stale original overlay on screen
+    (audit P7-05).  With the provider stubbed to report no congested cells,
+    the re-run must CLEAR the stale artists — pre-fix _redraw_nuts_tracks
+    never touched them."""
+    viz = _build_viz_from_text(monkeypatch, tmp_path, _P705_FLOW)
+    # The heatmap is wired to a live cuts provider and drawn at open.
+    assert viz._cuts_provider is not None
+    assert len(viz._heatmap_artists) >= 1
+
+    calls = {"n": 0}
+
+    def _stub():
+        calls["n"] += 1
+        return None                # a re-plan that left no congested cells
+
+    viz._cuts_provider = _stub
+    result = viz._rerun_fn()       # real re-run → fresh NUTSResult
+    viz._redraw_nuts_tracks(result)
+
+    assert calls["n"] >= 1, "the re-run did not consult the cuts provider"
+    assert viz._heatmap_artists == [], "stale heatmap survived the re-run"
+
+
 def test_heatmap_is_single_collection_and_hidden(monkeypatch):
     viz = _build_viz("dnuts1.buda", monkeypatch)
     # The heatmap collapses to one PatchCollection (+ at most _HEATMAP_LABEL_CAP
