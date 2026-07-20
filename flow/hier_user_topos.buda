@@ -56,11 +56,15 @@ dump_hbundles
 
 # ── USER topology #1 — in sub-cell alu_cell (bundle 1, cell-local) ───
 # Edits resolve in the cell's OWN frame: cell-local block names pa_i/pb_i,
-# a horizontal trunk below the pipes with a stub from each.
+# a horizontal trunk below the pipes with a stub from each.  The trunk is
+# added with a generous span so each stub taps at its natural point, then
+# `edit_set_span` TRIMS the trunk to those two taps — the outer stubs meet
+# the trunk at its CORNERS, so no trunk wire overshoots past the ConnSegs.
 edit_topology 1 new
 edit_add_trunk H 30 75 210
 edit_add_stub pa_i 0
 edit_add_stub pb_i 0
+edit_set_span 0 102 182          # trim trunk to the pa_i/pb_i stub taps
 edit_commit pin
 
 # ── USER topology #2 — in sub-cell mem_cell (bundle 3, cell-local) ───
@@ -68,6 +72,7 @@ edit_topology 3 new
 edit_add_trunk H 30 75 210
 edit_add_stub qa_i 0
 edit_add_stub qb_i 0
+edit_set_span 0 102 182          # trim to the qa_i/qb_i taps (no overshoot)
 edit_commit pin
 
 # ── USER topology #3 — at the TOP level (bundle 2, absolute frame) ───
@@ -78,6 +83,7 @@ edit_topology 2 new
 edit_add_trunk H 30 200 760
 edit_add_stub alu_i/pb_i 0
 edit_add_stub mem_i/qa_i 0
+edit_set_span 0 232 740          # trim to the two stub taps (corner-connect)
 edit_commit pin
 
 # ── Plan (expands the cell templates to their instances) + route ─────

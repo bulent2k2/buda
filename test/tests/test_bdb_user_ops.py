@@ -80,6 +80,29 @@ def test_cli_commit_stores_user_ops_meta(tmp_path):
     assert entry["ops"] == list(EDIT_OPS)
 
 
+def test_inline_comment_stripped_from_oplog(tmp_path):
+    """A `# comment` on an edit_* command line (handlers get the RAW cmd_line)
+    must NOT leak into the persisted op-log — otherwise the note is baked in
+    and shown by dump_user_ops.  The recorded op is the clean command."""
+    db = str(tmp_path / "flat.bdb")
+    s, _ = _session(f"open_bdb {db}", *FLAT_SETUP,
+                    "edit_topology 1 new",
+                    "edit_add_trunk V 500 200 1200   # OOB column trunk",
+                    "edit_add_stub up 0",
+                    "edit_add_stub lo 0",
+                    "edit_set_span 0 240 1160  # trim to the stub taps",
+                    "edit_commit pin")
+    uid = _selected_uid(s.bundles[0])
+    entry = json.loads(s.bdb.meta_get(f"user_ops:1:{uid}", ""))
+    assert entry["ops"] == [
+        "edit_add_trunk V 500 200 1200",
+        "edit_add_stub up 0",
+        "edit_add_stub lo 0",
+        "edit_set_span 0 240 1160",
+    ], entry["ops"]
+    assert not any("#" in op for op in entry["ops"])
+
+
 def test_rejected_ops_are_not_recorded(tmp_path):
     """Only APPLIED ops enter the log — a rejected op (out-of-range stub
     target) must not appear (it would break the replay)."""

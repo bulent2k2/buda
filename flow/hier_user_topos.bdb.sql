@@ -89,13 +89,13 @@ CREATE TABLE bus_segment (
         track_hi_bound REAL,
         PRIMARY KEY (bundle_id, seg_idx)
     );
-INSERT INTO "bus_segment" VALUES('4',0,4,1,75.0,5.13333333333333285e+01,210.0,58.0,5.46666666666666643e+01,6.66666666666666696e+00,1,0,5.80000000000000071e+00,58.0,NULL,NULL);
+INSERT INTO "bus_segment" VALUES('4',0,4,1,1.21666666666666671e+02,5.13333333333333285e+01,1.63333333333333342e+02,58.0,5.46666666666666643e+01,6.66666666666666696e+00,1,0,5.80000000000000071e+00,58.0,NULL,NULL);
 INSERT INTO "bus_segment" VALUES('4',1,5,0,1.18333333333333342e+02,5.46666666666666643e+01,125.0,60.0,1.21666666666666671e+02,6.66666666666666696e+00,1,0,25.0,125.0,NULL,NULL);
 INSERT INTO "bus_segment" VALUES('4',2,5,0,160.0,5.46666666666666643e+01,1.66666666666666685e+02,60.0,1.63333333333333342e+02,6.66666666666666696e+00,1,0,160.0,260.0,NULL,NULL);
-INSERT INTO "bus_segment" VALUES('2',0,4,1,200.0,4.26666666666666571e+01,760.0,4.93333333333333285e+01,4.59999999999999928e+01,6.66666666666666696e+00,1,0,5.80000000000000071e+00,58.0,NULL,NULL);
-INSERT INTO "bus_segment" VALUES('2',1,5,0,2.53333333333333342e+02,4.59999999999999928e+01,260.0,60.0,2.56666666666666685e+02,6.66666666666666696e+00,1,0,160.0,260.0,NULL,NULL);
-INSERT INTO "bus_segment" VALUES('2',2,5,0,725.0,4.59999999999999928e+01,7.31666666666666742e+02,60.0,7.28333333333333371e+02,6.66666666666666696e+00,1,0,725.0,825.0,NULL,NULL);
-INSERT INTO "bus_segment" VALUES('5',0,4,1,775.0,5.13333333333333285e+01,910.0,58.0,5.46666666666666643e+01,6.66666666666666696e+00,1,0,5.80000000000000071e+00,58.0,NULL,NULL);
+INSERT INTO "bus_segment" VALUES('2',0,4,1,2.56666666666666685e+02,5.13333333333333285e+01,7.28333333333333371e+02,58.0,5.46666666666666643e+01,6.66666666666666696e+00,1,0,5.80000000000000071e+00,58.0,NULL,NULL);
+INSERT INTO "bus_segment" VALUES('2',1,5,0,2.53333333333333342e+02,5.46666666666666643e+01,260.0,60.0,2.56666666666666685e+02,6.66666666666666696e+00,1,0,160.0,260.0,NULL,NULL);
+INSERT INTO "bus_segment" VALUES('2',2,5,0,725.0,5.46666666666666643e+01,7.31666666666666742e+02,60.0,7.28333333333333371e+02,6.66666666666666696e+00,1,0,725.0,825.0,NULL,NULL);
+INSERT INTO "bus_segment" VALUES('5',0,4,1,8.21666666666666628e+02,5.13333333333333285e+01,8.63333333333333371e+02,58.0,5.46666666666666643e+01,6.66666666666666696e+00,1,0,5.80000000000000071e+00,58.0,NULL,NULL);
 INSERT INTO "bus_segment" VALUES('5',1,5,0,8.18333333333333257e+02,5.46666666666666643e+01,825.0,60.0,8.21666666666666628e+02,6.66666666666666696e+00,1,0,725.0,825.0,NULL,NULL);
 INSERT INTO "bus_segment" VALUES('5',2,5,0,860.0,5.46666666666666643e+01,8.66666666666666742e+02,60.0,8.63333333333333371e+02,6.66666666666666696e+00,1,0,860.0,960.0,NULL,NULL);
 CREATE TABLE bus_via (
@@ -110,8 +110,8 @@ CREATE TABLE bus_via (
     );
 INSERT INTO "bus_via" VALUES('4',0,1,4,5,1.21666666666666671e+02,5.46666666666666643e+01,4);
 INSERT INTO "bus_via" VALUES('4',0,2,4,5,1.63333333333333342e+02,5.46666666666666643e+01,4);
-INSERT INTO "bus_via" VALUES('2',0,1,4,5,2.56666666666666685e+02,4.59999999999999928e+01,4);
-INSERT INTO "bus_via" VALUES('2',0,2,4,5,7.28333333333333371e+02,4.59999999999999928e+01,4);
+INSERT INTO "bus_via" VALUES('2',0,1,4,5,2.56666666666666685e+02,5.46666666666666643e+01,4);
+INSERT INTO "bus_via" VALUES('2',0,2,4,5,7.28333333333333371e+02,5.46666666666666643e+01,4);
 INSERT INTO "bus_via" VALUES('5',0,1,4,5,8.21666666666666628e+02,5.46666666666666643e+01,4);
 INSERT INTO "bus_via" VALUES('5',0,2,4,5,8.63333333333333371e+02,5.46666666666666643e+01,4);
 CREATE TABLE busterm (
@@ -218,9 +218,9 @@ CREATE TABLE meta (
         );
 INSERT INTO "meta" VALUES('schema_version','19');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
-INSERT INTO "meta" VALUES('user_ops:1:25c50f104a2a8284','{"base": "new", "ops": ["edit_add_trunk H 30 75 210", "edit_add_stub pa_i 0", "edit_add_stub pb_i 0"]}');
-INSERT INTO "meta" VALUES('user_ops:3:7d21bcc030e06124','{"base": "new", "ops": ["edit_add_trunk H 30 75 210", "edit_add_stub qa_i 0", "edit_add_stub qb_i 0"]}');
-INSERT INTO "meta" VALUES('user_ops:2:0352631ebf8248f3','{"base": "new", "ops": ["edit_add_trunk H 30 200 760", "edit_add_stub alu_i/pb_i 0", "edit_add_stub mem_i/qa_i 0"]}');
+INSERT INTO "meta" VALUES('user_ops:1:c28a5875dd43fd81','{"base": "new", "ops": ["edit_add_trunk H 30 75 210", "edit_add_stub pa_i 0", "edit_add_stub pb_i 0", "edit_set_span 0 102 182"]}');
+INSERT INTO "meta" VALUES('user_ops:3:ca0d1e834516a611','{"base": "new", "ops": ["edit_add_trunk H 30 75 210", "edit_add_stub qa_i 0", "edit_add_stub qb_i 0", "edit_set_span 0 102 182"]}');
+INSERT INTO "meta" VALUES('user_ops:2:2be06ffa4a617a23','{"base": "new", "ops": ["edit_add_trunk H 30 200 760", "edit_add_stub alu_i/pb_i 0", "edit_add_stub mem_i/qa_i 0", "edit_set_span 0 232 740"]}');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
             name TEXT UNIQUE NOT NULL
@@ -332,7 +332,7 @@ CREATE TABLE route_snapshot (
         n_net_segments INTEGER DEFAULT 0,
         n_net_vias     INTEGER DEFAULT 0
     );
-INSERT INTO "route_snapshot" VALUES(1,'c188eb5429a6d1ea45b7a04819d72b60b740877d1f72080676018a437a876b29',9,6,'abstract_nuts',0,0);
+INSERT INTO "route_snapshot" VALUES(1,'b877caa934166e9b53fa5ffdbb51b2acaabfcd0ecf863a7c4a090fda12a37c82',9,6,'abstract_nuts',0,0);
 CREATE TABLE topology (
         bundle_id          TEXT REFERENCES bundle(id),
         cand_index         INTEGER,
@@ -353,21 +353,21 @@ INSERT INTO "topology" VALUES('1',1,'U_VHV@y148',51,0,0,'["pa_i", "pb_i"]','[]',
 INSERT INTO "topology" VALUES('1',2,'U_VHV@y52',51,0,0,'["pa_i", "pb_i"]','[]',0,0,'c0a59fbb1d571246','generated');
 INSERT INTO "topology" VALUES('1',3,'Z_HVH@x142@y135',95,0,0,'["pa_i", "pb_i"]','[]',0,0,'ae30b51867a76f39','generated');
 INSERT INTO "topology" VALUES('1',4,'Z_HVH@x142@y65',95,0,0,'["pa_i", "pb_i"]','[]',0,0,'d4ee6348d97edd2c','generated');
-INSERT INTO "topology" VALUES('1',5,'USER',195,0,0,'["pa_i", "pb_i"]','[]',1,1,'25c50f104a2a8284','user');
+INSERT INTO "topology" VALUES('1',5,'USER',140,0,0,'["pa_i", "pb_i"]','[]',1,1,'c28a5875dd43fd81','user');
 INSERT INTO "topology" VALUES('2',0,'I_H',455,0,0,'["alu_i/pb_i", "mem_i/qa_i"]','[]',0,0,'223d35e0f83e2462','generated');
 INSERT INTO "topology" VALUES('2',1,'U_VHV@y160',505,0,0,'["alu_i/pb_i", "mem_i/qa_i"]','[]',0,0,'423dafc619997f7c','generated');
 INSERT INTO "topology" VALUES('2',2,'U_VHV@y40',505,0,0,'["alu_i/pb_i", "mem_i/qa_i"]','[]',0,0,'39d1b35018c110a0','generated');
 INSERT INTO "topology" VALUES('2',3,'Z_HVH@x492@y135',525,0,0,'["alu_i/pb_i", "mem_i/qa_i"]','[]',0,0,'5a8430a61bf30326','generated');
 INSERT INTO "topology" VALUES('2',4,'Z_HVH@x492@y65',525,0,0,'["alu_i/pb_i", "mem_i/qa_i"]','[]',0,0,'9245be0cbea9647b','generated');
-INSERT INTO "topology" VALUES('2',5,'USER',620,0,0,'["alu_i/pb_i", "mem_i/qa_i"]','[]',1,1,'0352631ebf8248f3','user');
+INSERT INTO "topology" VALUES('2',5,'USER',568,0,0,'["alu_i/pb_i", "mem_i/qa_i"]','[]',1,1,'2be06ffa4a617a23','user');
 INSERT INTO "topology" VALUES('3',0,'I_H',25,0,0,'["qa_i", "qb_i"]','[]',0,0,'a6d263738835626f','generated');
 INSERT INTO "topology" VALUES('3',1,'U_VHV@y148',51,0,0,'["qa_i", "qb_i"]','[]',0,0,'5cf8b6da7e8066a7','generated');
 INSERT INTO "topology" VALUES('3',2,'U_VHV@y52',51,0,0,'["qa_i", "qb_i"]','[]',0,0,'08497293062c6426','generated');
 INSERT INTO "topology" VALUES('3',3,'Z_HVH@x142@y135',95,0,0,'["qa_i", "qb_i"]','[]',0,0,'bb65b10d0100ce49','generated');
 INSERT INTO "topology" VALUES('3',4,'Z_HVH@x142@y65',95,0,0,'["qa_i", "qb_i"]','[]',0,0,'016a7a1b42ff6e7c','generated');
-INSERT INTO "topology" VALUES('3',5,'USER',195,0,0,'["qa_i", "qb_i"]','[]',1,1,'7d21bcc030e06124','user');
-INSERT INTO "topology" VALUES('4',5,'USER',195,0,0,'["alu_i/pa_i", "alu_i/pb_i"]','[]',1,0,'8f70ba0e4007607c','user');
-INSERT INTO "topology" VALUES('5',5,'USER',195,0,0,'["mem_i/qa_i", "mem_i/qb_i"]','[]',1,0,'5233c790b5ebe1f4','user');
+INSERT INTO "topology" VALUES('3',5,'USER',140,0,0,'["qa_i", "qb_i"]','[]',1,1,'ca0d1e834516a611','user');
+INSERT INTO "topology" VALUES('4',5,'USER',140,0,0,'["alu_i/pa_i", "alu_i/pb_i"]','[]',1,0,'aeb12bbdb0130861','user');
+INSERT INTO "topology" VALUES('5',5,'USER',140,0,0,'["mem_i/qa_i", "mem_i/qb_i"]','[]',1,0,'9e8f32cdd1933821','user');
 CREATE TABLE topology_bridge_segment (
         bundle_id  TEXT,
         cand_index INTEGER,
@@ -455,6 +455,8 @@ INSERT INTO "topology_seg_conn" VALUES('1',4,0,'end',1);
 INSERT INTO "topology_seg_conn" VALUES('1',4,1,'start',0);
 INSERT INTO "topology_seg_conn" VALUES('1',4,1,'end',2);
 INSERT INTO "topology_seg_conn" VALUES('1',4,2,'start',1);
+INSERT INTO "topology_seg_conn" VALUES('1',5,0,'start',1);
+INSERT INTO "topology_seg_conn" VALUES('1',5,0,'end',2);
 INSERT INTO "topology_seg_conn" VALUES('1',5,1,'end',0);
 INSERT INTO "topology_seg_conn" VALUES('1',5,2,'end',0);
 INSERT INTO "topology_seg_conn" VALUES('2',1,0,'end',1);
@@ -473,6 +475,8 @@ INSERT INTO "topology_seg_conn" VALUES('2',4,0,'end',1);
 INSERT INTO "topology_seg_conn" VALUES('2',4,1,'start',0);
 INSERT INTO "topology_seg_conn" VALUES('2',4,1,'end',2);
 INSERT INTO "topology_seg_conn" VALUES('2',4,2,'start',1);
+INSERT INTO "topology_seg_conn" VALUES('2',5,0,'start',1);
+INSERT INTO "topology_seg_conn" VALUES('2',5,0,'end',2);
 INSERT INTO "topology_seg_conn" VALUES('2',5,1,'end',0);
 INSERT INTO "topology_seg_conn" VALUES('2',5,2,'end',0);
 INSERT INTO "topology_seg_conn" VALUES('3',1,0,'end',1);
@@ -491,10 +495,16 @@ INSERT INTO "topology_seg_conn" VALUES('3',4,0,'end',1);
 INSERT INTO "topology_seg_conn" VALUES('3',4,1,'start',0);
 INSERT INTO "topology_seg_conn" VALUES('3',4,1,'end',2);
 INSERT INTO "topology_seg_conn" VALUES('3',4,2,'start',1);
+INSERT INTO "topology_seg_conn" VALUES('3',5,0,'start',1);
+INSERT INTO "topology_seg_conn" VALUES('3',5,0,'end',2);
 INSERT INTO "topology_seg_conn" VALUES('3',5,1,'end',0);
 INSERT INTO "topology_seg_conn" VALUES('3',5,2,'end',0);
+INSERT INTO "topology_seg_conn" VALUES('4',5,0,'start',1);
+INSERT INTO "topology_seg_conn" VALUES('4',5,0,'end',2);
 INSERT INTO "topology_seg_conn" VALUES('4',5,1,'end',0);
 INSERT INTO "topology_seg_conn" VALUES('4',5,2,'end',0);
+INSERT INTO "topology_seg_conn" VALUES('5',5,0,'start',1);
+INSERT INTO "topology_seg_conn" VALUES('5',5,0,'end',2);
 INSERT INTO "topology_seg_conn" VALUES('5',5,1,'end',0);
 INSERT INTO "topology_seg_conn" VALUES('5',5,2,'end',0);
 CREATE TABLE topology_segment (
@@ -525,7 +535,7 @@ INSERT INTO "topology_segment" VALUES('1',3,2,142,65,155,65,4,0,-1,-1,-214748364
 INSERT INTO "topology_segment" VALUES('1',4,0,130,65,142,65,4,0,-1,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('1',4,1,142,65,142,135,5,0,-1,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('1',4,2,142,135,155,135,4,0,-1,-1,-2147483648,2147483647);
-INSERT INTO "topology_segment" VALUES('1',5,0,75,30,210,30,4,0,-1,-1,-2147483648,60);
+INSERT INTO "topology_segment" VALUES('1',5,0,102,30,182,30,4,0,-1,-1,-2147483648,60);
 INSERT INTO "topology_segment" VALUES('1',5,1,102,60,102,30,5,0,-1,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('1',5,2,182,60,182,30,5,0,-1,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('2',0,0,265,100,720,100,4,0,-1,-1,-2147483648,2147483647);
@@ -541,7 +551,7 @@ INSERT INTO "topology_segment" VALUES('2',3,2,492,65,720,65,4,0,-1,-1,-214748364
 INSERT INTO "topology_segment" VALUES('2',4,0,265,65,492,65,4,0,-1,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('2',4,1,492,65,492,135,5,0,-1,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('2',4,2,492,135,720,135,4,0,-1,-1,-2147483648,2147483647);
-INSERT INTO "topology_segment" VALUES('2',5,0,200,30,760,30,4,0,4,-1,-2147483648,2147483647);
+INSERT INTO "topology_segment" VALUES('2',5,0,232,30,740,30,4,0,4,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('2',5,1,232,60,232,30,5,0,5,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('2',5,2,740,60,740,30,5,0,5,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('3',0,0,130,100,155,100,4,0,-1,-1,-2147483648,2147483647);
@@ -557,13 +567,13 @@ INSERT INTO "topology_segment" VALUES('3',3,2,142,65,155,65,4,0,-1,-1,-214748364
 INSERT INTO "topology_segment" VALUES('3',4,0,130,65,142,65,4,0,-1,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('3',4,1,142,65,142,135,5,0,-1,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('3',4,2,142,135,155,135,4,0,-1,-1,-2147483648,2147483647);
-INSERT INTO "topology_segment" VALUES('3',5,0,75,30,210,30,4,0,-1,-1,-2147483648,60);
+INSERT INTO "topology_segment" VALUES('3',5,0,102,30,182,30,4,0,-1,-1,-2147483648,60);
 INSERT INTO "topology_segment" VALUES('3',5,1,102,60,102,30,5,0,-1,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('3',5,2,182,60,182,30,5,0,-1,-1,-2147483648,2147483647);
-INSERT INTO "topology_segment" VALUES('4',5,0,75,30,210,30,4,0,4,-1,-2147483648,60);
+INSERT INTO "topology_segment" VALUES('4',5,0,102,30,182,30,4,0,4,-1,-2147483648,60);
 INSERT INTO "topology_segment" VALUES('4',5,1,102,60,102,30,5,0,5,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('4',5,2,182,60,182,30,5,0,5,-1,-2147483648,2147483647);
-INSERT INTO "topology_segment" VALUES('5',5,0,775,30,910,30,4,0,4,-1,-2147483648,60);
+INSERT INTO "topology_segment" VALUES('5',5,0,802,30,882,30,4,0,4,-1,-2147483648,60);
 INSERT INTO "topology_segment" VALUES('5',5,1,802,60,802,30,5,0,5,-1,-2147483648,2147483647);
 INSERT INTO "topology_segment" VALUES('5',5,2,882,60,882,30,5,0,5,-1,-2147483648,2147483647);
 COMMIT;
