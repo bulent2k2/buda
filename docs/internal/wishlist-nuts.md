@@ -95,9 +95,30 @@ it); (b) NUTS-side joint arbitration — place the pair to minimize the SUM
 (connector legs + T's stretch) instead of sequentially.  Effort: small
 for (a); (b) touches placement order → full golden gate.
 
-## FREE (sentinel) slide windows on open-space MST legs — OPEN (naive clamp MEASURED QoR-ambiguous, reverted 2026-07-20)
+## FREE (sentinel) slide windows on open-space MST legs — placement-clamp direction CLOSED by measurement (2026-07-20)
 
-**Measurement (2026-07-20):** the conservative form of the fix sketch below —
+**Decoupled placement-clamp measurement (2026-07-20, round 2) — the direction
+is a REGRESSION, not a win.** Following the round-1 lesson (below), the clamp was
+re-implemented in the ONE consumer that still reads the raw sentinel — NUTS's
+`build_nuts_maps` `slide_map` — bounding a FREE window to the topology's perp
+extent there, leaving `derive_slide_ranges` (and thus the generation pinch gate)
+completely untouched.  The decoupling worked exactly as intended: comprehensive_demo
+**byte-identical**, b44 unchanged (candidate pools preserved — no pinch-gate churn).
+But the clamp itself REGRESSES the congested design: `rnr/mix` `run_nuts` overlaps
+15 → 20 and, decisively, the flow that ended **0 violations** now ends with **96
+DNUTS violations across 7 bundles** the healers cannot clear (unplaced-bit peak
+175 → 302).  The lesson is definitive: **the FREE window's die-wide slide freedom
+is load-bearing for NUTS packing** — those open-space legs use the room to slide
+clear of contention, and taking it away removes overlap-avoidance headroom exactly
+where a congested design needs it most.  So the "de-randomize placement" goal is
+misguided for the *placement* consumer; the placement window should stay free.
+Reverted (mix back to baseline).  What remains of the item is only the WL-envelope
+facet — and that is ALREADY clamped to the floorplan extent (`_seg_slide_box`,
+nutsflow.py), finite if loose; tightening it to the topology bbox would touch only
+kWLSpread (opt-in, off by default) for near-zero default-corpus value.  Net: the
+open-space-MST-leg "wildcard" is a feature for packing, not a bug to clamp.
+
+**Round-1 measurement (2026-07-20):** the conservative form of the fix sketch below —
 a Pass 4 in `derive_slide_ranges` clamping any still-sentinel bound to the
 TOPOLOGY's own perp extent (min/max over every segment endpoint on that axis,
 which includes an OOB trunk's detour coordinate, so it never excludes a
