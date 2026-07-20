@@ -17,9 +17,12 @@ Verifies: (1) a connected WS receives a `started` then a `done` frame carrying a
 (3) a dropped WS neither breaks the running stage nor a later request;
 (4) the synchronous /api/command path still works (backward compat).
 """
-from fastapi.testclient import TestClient
+import pytest
 
-from web import server
+pytest.importorskip("fastapi")   # skip (don't fail) where fastapi is absent
+from fastapi.testclient import TestClient  # noqa: E402
+
+from web import server  # noqa: E402
 
 
 # Minimal single-bundle b44 flow (mirrors test_web_server.py) — enough to reach

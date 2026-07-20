@@ -68,6 +68,34 @@ def test_run_one_contains_bad_args():
     assert isinstance(r["log_lines"], list)
 
 
+def test_snapshot_if_idle_yields_when_free_and_skips_when_busy():
+    """snapshot_if_idle runs the read only when no engine call holds the lock
+    (Codex P1/P2): a WS hello must not read a session mid-mutation.  When the
+    engine lock is held (a stage running in the executor), it returns None so
+    the caller serves a lock-free fallback instead of racing the mutation."""
+    assert runner.snapshot_if_idle(lambda: "value") == "value"   # lock free
+    with runner._ENGINE_LOCK:                                    # engine "busy"
+        assert runner.snapshot_if_idle(lambda: "value") is None
+    assert runner.snapshot_if_idle(lambda: "value") == "value"   # released again
+
+
+def test_run_one_holds_engine_lock_during_dispatch():
+    """run_one serializes on the process-wide engine lock while dispatching, so
+    a concurrent snapshot_if_idle sees the engine as busy — the invariant that
+    keeps the global stdout/stderr swap from cross-capturing across sessions."""
+    s = _fresh()
+    seen = {}
+
+    def _probe(_session, _cmd, _line):
+        # Runs INSIDE do_command, i.e. while run_one holds _ENGINE_LOCK.
+        seen["busy"] = runner.snapshot_if_idle(lambda: "x") is None
+        return True
+
+    s.do_command = lambda line: _probe(s, None, line)   # type: ignore[assignment]
+    runner.run_one(s, "noop")
+    assert seen.get("busy") is True
+
+
 def test_command_layer_imports_without_matplotlib():
     """Importing the command registry (and buda_cli) must not pull matplotlib —
     the headless-server requirement.  Checked in a FRESH subprocess so an

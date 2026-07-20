@@ -63,7 +63,11 @@ any connected WebSocket client instead of the UI just blocking on the request.
 
 - **`WS /api/ws?session_id=`** — a client connects **once**; the server registers
   it in a per-session `clients` set (`_Session.clients`) and pushes JSON frames.
-  On connect it sends `{"kind":"hello","session_id","state":<StateSummary>}`. The
+  On connect it sends `{"kind":"hello","session_id","state":<StateSummary>|null}`.
+  The `state` read is guarded by `runner.snapshot_if_idle` (a **non-blocking**
+  acquire of the engine lock, below): if a stage is mid-run it sends `state:null`
+  rather than reading a session another thread is mutating — the client ignores
+  hello `state` and gets the full state in the stage `done` frame anyway. The
   socket carries no commands (drive stages via the POST below); its reads are
   drained only to detect disconnect. A dropped socket is pruned on the next
   broadcast (a `send_json` error `discard`s it) — it never kills the stage or the
@@ -77,6 +81,19 @@ any connected WebSocket client instead of the UI just blocking on the request.
   frames while it runs. An unknown stage returns `{error, stages}` (never 500s).
   Returns the same `{result, state, notable}` shape synchronously, so a client
   with no WS still gets the outcome.
+
+Because a stage runs in a thread-pool executor, distinct per-session asyncio
+locks no longer serialize engine calls across sessions/threads. `run_one`/
+`run_many` therefore hold a **process-wide** `threading.Lock`
+(`runner._ENGINE_LOCK`) across the capture region: `run_one` swaps the *global*
+`sys.stdout`/`sys.stderr` and enters `buda.ostream_redirect` (a process-global
+C++ stream redirect), so two runs must never overlap even for different
+`session_id`s (they would cross-capture each other's log output). The lock is a
+leaf (acquired only around the capture region, never while holding another lock),
+so it cannot deadlock. `runner.snapshot_if_idle(fn)` is the read-side companion:
+it runs `fn()` under a **non-blocking** acquire and returns `None` when the
+engine is busy — used by the WS `hello` frame so a connect never races a running
+stage's mutation.
 
 Frame schema (`kind`):
 - `hello` — `{session_id, state}` on connect.

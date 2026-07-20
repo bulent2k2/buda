@@ -189,9 +189,15 @@ async def ws_progress(websocket: WebSocket, session_id: str = "default"):
     await websocket.accept()
     st.clients.add(websocket)
     try:
+        # Read state only if no engine call is in flight — a stage mutates the
+        # (non-reentrant) session in the executor while holding the engine lock,
+        # so a lock-free read here could observe partial state or trip pybind.
+        # If busy, send a hello with state=null (the client ignores hello state
+        # anyway and gets the full state in the stage `done` frame).
         await websocket.send_json({
             "kind": "hello", "session_id": session_id,
-            "state": serialize.serialize_state(st.session),
+            "state": runner.snapshot_if_idle(
+                lambda: serialize.serialize_state(st.session)),
         })
         # Keep the connection open; ignore anything the client sends. When the
         # client goes away, receive_* raises WebSocketDisconnect and we exit.
