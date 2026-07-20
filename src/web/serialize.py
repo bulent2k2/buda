@@ -29,6 +29,25 @@ data is available structured on the objects above.
 # "unconstrained" (JSON null) from a real bound.  (viz_common.py uses 1e9;
 # nutsflow/reports use 1e8 — 1e9 is the safe upper discriminator.)
 _SENTINEL = 10 ** 9
+_INT_MIN = -2147483648      # pull_break "no breakpoint" sentinel
+_INT_MAX = 2147483647       # Segment.perp_clamp_hi "unclamped" sentinel
+
+
+def _rect(r):
+    return {"x1": r.x1, "y1": r.y1, "x2": r.x2, "y2": r.y2}
+
+
+def _slide(v):
+    """A slide-window / clamp bound: JSON null when it is the unbounded sentinel."""
+    return None if abs(v) >= _SENTINEL else v
+
+
+def _pull_break(v):
+    return None if v == _INT_MIN else v
+
+
+def _clamp(v):
+    return None if v in (_INT_MIN, _INT_MAX) or abs(v) >= _SENTINEL else v
 
 
 def _net_names(original_bundle):
@@ -80,4 +99,222 @@ def serialize_state(session):
         "stages_run": stages_run,
         "bundles": bundle_digests,
         "has_bdb": getattr(session, "bdb", None) is not None,
+    }
+
+
+# ── floorplan / grid ─────────────────────────────────────────────────────────
+def serialize_floorplan(fp):
+    """Blocks (bbox + real rects + container flag + corner margin) and keepouts."""
+    blocks = []
+    for name, rect in fp.get_all_blocks():
+        rects = fp.get_block_rects(name)         # [] for single-rect blocks
+        # rects entries may be Rect or (x1,y1,x2,y2) tuples — normalize.
+        norm_rects = []
+        for rr in rects:
+            if hasattr(rr, "x1"):
+                norm_rects.append([rr.x1, rr.y1, rr.x2, rr.y2])
+            else:
+                norm_rects.append([rr[0], rr[1], rr[2], rr[3]])
+        cm = fp.get_block_corner_margin(name)
+        blocks.append({
+            "name": name,
+            "bbox": _rect(rect),
+            "rects": norm_rects,
+            "is_container": bool(fp.is_container(name)),
+            "corner_margin": {"dx": cm.dx, "dy": cm.dy},
+        })
+    keepouts = []
+    for koz in fp.get_keepout_zones():
+        keepouts.append({"bbox": _rect(koz.bbox),
+                         "layers": sorted(koz.layer_ids)})
+    return {"blocks": blocks, "keepouts": keepouts}
+
+
+def serialize_hanan(fp):
+    xs, ys = fp.get_hanan_grid()
+    return {"xs": list(xs), "ys": list(ys)}
+
+
+# ── topology + connectivity analysis ─────────────────────────────────────────
+def _busterm(bt):
+    if bt is None:
+        return None
+    return {
+        "block_name": bt.block_name,
+        "teg_mode": str(bt.teg_mode).split(".")[-1],
+        "bbox": _rect(bt.bbox),
+        "orig_bbox": _rect(bt.orig_bbox),
+        "rects": [_rect(r) for r in bt.rects],
+    }
+
+
+def _segment(sg):
+    return {
+        "start": {"x": sg.start.x, "y": sg.start.y},
+        "end": {"x": sg.end.x, "y": sg.end.y},
+        "horiz": sg.start.y == sg.end.y,
+        "layer_hint": sg.layer_hint,
+        "is_jog": bool(sg.is_jog),
+        "edge_id": sg.edge_id,
+        "perp_clamp_lo": _clamp(sg.perp_clamp_lo),
+        "perp_clamp_hi": _clamp(sg.perp_clamp_hi),
+    }
+
+
+def _conn(cn):
+    import buda
+    is_bt = cn.kind == buda.SegConnKind.BUSTERM
+    # face_coord / block_name are only meaningful for a BUSTERM conn; a SEG conn
+    # leaves them uninitialized, so don't leak the garbage.
+    return {
+        "kind": "BUSTERM" if is_bt else "SEG",
+        "block_name": cn.block_name if is_bt else None,
+        "face_coord": cn.face_coord if is_bt else None,
+        "seg_idx": cn.seg_idx,
+        "at_pos": cn.at_pos,
+        "is_endpoint": bool(cn.is_endpoint),
+    }
+
+
+def serialize_conn_topology(topo, fp):
+    """Per-segment connectivity + slide range + pull (the render/edit payload).
+
+    One entry per `topo.segments[i]`, index-aligned.  Conn ORDER is preserved
+    verbatim (NUTS tie-breaks depend on it — same invariant topo_snapshot
+    freezes).  Slide sentinels and the pull_break sentinel become JSON null.
+    """
+    import buda
+    ct = buda.ConnTopology()
+    ct.build(topo, fp)
+    out = []
+    for cs in ct.segs():
+        out.append({
+            "horiz": bool(cs.horiz),
+            "layer_id": cs.layer_id,
+            "along_lo": cs.along_lo,
+            "along_hi": cs.along_hi,
+            "perp_pos": cs.perp_pos,
+            "perp_lo": _slide(cs.perp_lo),
+            "perp_hi": _slide(cs.perp_hi),
+            "net_pull": cs.net_pull,
+            "pull_break": _pull_break(cs.pull_break),
+            "along_flex_lo": bool(cs.along_flex_lo),
+            "along_flex_hi": bool(cs.along_flex_hi),
+            "along_cover_lo": cs.along_cover_lo,
+            "along_cover_hi": cs.along_cover_hi,
+            "along_pull": cs.along_pull,
+            "conns": [_conn(cn) for cn in cs.conns],   # order preserved
+        })
+    return out
+
+
+def serialize_topology(topo, fp):
+    """One candidate: Topology geometry + busterm taps + junctions + the derived
+    ConnTopology analysis (slide/pull), everything the renderer + edit layer need."""
+    seg_busterms = []
+    for si in sorted(topo.seg_busterms):
+        a, b = topo.seg_busterms[si]
+        if a is None and b is None:
+            continue          # canonical: an all-junction entry == no entry
+        seg_busterms.append({"seg_idx": si,
+                             "start": _busterm(a), "end": _busterm(b)})
+    seg_conns = []
+    for (si, ep) in sorted(topo.seg_conns):
+        seg_conns.append({"seg_idx": si, "endpoint": ep,
+                          "partners": list(topo.seg_conns[(si, ep)])})
+    bridges = {name: _segment(seg)
+               for name, seg in topo.bridge_segments.items()}
+    return {
+        "type": topo.type,
+        "estimated_wirelength": topo.estimated_wirelength,
+        "trunk_location": topo.trunk_location,
+        "pass_through_count": topo.pass_through_count,
+        "connected_block_names": list(topo.connected_block_names),
+        "feedthru_blocks": list(topo.feedthru_blocks),
+        "wl_lo": getattr(topo, "wl_lo", None),
+        "wl_hi": getattr(topo, "wl_hi", None),
+        "segments": [_segment(sg) for sg in topo.segments],
+        "seg_busterms": seg_busterms,
+        "seg_conns": seg_conns,
+        "bridge_segments": bridges,
+        "analysis": serialize_conn_topology(topo, fp),
+    }
+
+
+def bundle_floorplan(session, w):
+    """The floorplan a bundle's candidates were generated in — the session
+    floorplan for the flat flow; a hier (pre-expansion) HBundle's resolved
+    cell-local / depth / endpoint floorplan otherwise (mirrors
+    tools/topo_snapshot.snapshot_bundles + check_design)."""
+    import buda
+    fp = session.fp
+    b = w.input.original_bundle
+    bdb = getattr(session, "bdb", None)
+    exp_map = getattr(session, "_hier_expansion_map", None) or {}
+    expanded_ids = {id(x) for ws in exp_map.values() for x in ws}
+    if (bdb is not None and isinstance(b, buda.HBundle)
+            and id(w) not in expanded_ids):
+        try:
+            comps = {c.name: c for c in bdb.all_components()}
+            resolved = session._floorplan_for_hbundle(b, {}, comps)
+            if resolved is not None:
+                fp = resolved
+        except Exception:
+            pass
+    return fp
+
+
+def serialize_bundle(session, w, include_candidates=True):
+    """A bundle: identity + plan + (optionally) its full candidate list."""
+    ob = w.input.original_bundle
+    fp = bundle_floorplan(session, w)
+    plan = w.plan
+    d = {
+        "id": ob.id,
+        "net_names": _net_names(ob),
+        "width": w.input.width,
+        "pinned": bool(getattr(w.input, "topology_pinned", False)),
+        "selected_index": plan.selected_topology_index,
+        "plan": {
+            "seg_layers": list(plan.seg_layers),
+            "seg_slide_lo": [_slide(v) for v in plan.seg_slide_lo],
+            "seg_slide_hi": [_slide(v) for v in plan.seg_slide_hi],
+            "seg_perp": list(plan.seg_perp),
+            "seg_net_pull": [_pull_break(v) for v in plan.seg_net_pull],
+        },
+    }
+    if include_candidates:
+        d["candidates"] = [serialize_topology(t, fp) for t in w.input.candidates]
+    return d
+
+
+def serialize_generation(session, bundle_id=None, candidate=None):
+    """Compose the generation-stage render payload: floorplan + hanan + bundles.
+
+    `bundle_id` restricts to one bundle; `candidate` (with a bundle) restricts to
+    one candidate (keeps the payload small for a focused view).  The Hanan grid
+    is emitted per the (possibly hier-resolved) floorplan of the shown bundle, or
+    the session floorplan when none is selected.
+    """
+    bundles = list(getattr(session, "bundles", []) or [])
+    if bundle_id is not None:
+        bundles = [w for w in bundles
+                   if w.input.original_bundle.id == bundle_id]
+
+    hanan_fp = session.fp
+    out_bundles = []
+    for w in bundles:
+        fp = bundle_floorplan(session, w)
+        hanan_fp = fp
+        sb = serialize_bundle(session, w, include_candidates=True)
+        if candidate is not None and 0 <= candidate < len(sb["candidates"]):
+            sb["candidates"] = [sb["candidates"][candidate]]
+            sb["candidate_offset"] = candidate
+        out_bundles.append(sb)
+
+    return {
+        "floorplan": serialize_floorplan(session.fp),
+        "hanan": serialize_hanan(hanan_fp),
+        "bundles": out_bundles,
+        "state": serialize_state(session),
     }

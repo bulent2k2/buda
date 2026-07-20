@@ -1,0 +1,69 @@
+<!doctype html>
+<!-- Copyright 2026 Ben Bulent Basaran — Apache-2.0.  Scala.js dev entry. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BUDA — Web Demo (Scala.js)</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.4 ui-monospace, Menlo, monospace;
+         display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+  #side { border-right: 1px solid #8884; padding: 10px; overflow: auto;
+          display: flex; flex-direction: column; gap: 8px; }
+  #main { position: relative; overflow: hidden; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  textarea { width: 100%; height: 120px; font: inherit; resize: vertical; }
+  button { font: inherit; padding: 3px 8px; cursor: pointer; }
+  .row { display: flex; flex-wrap: wrap; gap: 4px; }
+  #log { white-space: pre-wrap; background: #8881; padding: 6px; border-radius: 4px;
+         max-height: 180px; overflow: auto; }
+  #stages span { padding: 1px 6px; border-radius: 3px; margin-right: 3px; opacity: .4; }
+  #stages span.on { opacity: 1; background: #2a72; }
+  svg { width: 100%; height: 100%; display: block; }
+  .blk { fill: #6cf2; stroke: #48c; stroke-width: 1; }
+  .blk.container { fill: none; stroke-dasharray: 4 3; }
+  .blklbl { fill: #48c; font-size: 10px; }
+  .keepout { fill: #f443; stroke: #e33; stroke-width: 1; }
+  .hanan { stroke: #8883; stroke-width: .5; stroke-dasharray: 2 3; }
+  .seg { stroke-width: 2.5; fill: none; }
+  .seg.H { stroke: #e6a; } .seg.V { stroke: #4ad; } .seg.jog { stroke: #fa0; }
+  #candbar { position: absolute; top: 8px; left: 8px; background: #000a; color: #fff;
+             padding: 6px 10px; border-radius: 5px; }
+  #candbar button { background: #fff2; color: #fff; border: 1px solid #fff4; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>BUDA — Web Demo (Scala.js)</h1>
+  <div id="stages">
+    <span data-k="bundler">bundler</span><span data-k="topologies">topo</span
+    ><span data-k="planner">planner</span><span data-k="nuts">nuts</span
+    ><span data-k="dnuts">dnuts</span>
+  </div>
+  <textarea id="cmds">source flow/tracks/tracks4top.buda
+add_block blk_07 2960 9750 4660 10250
+add_block blk_23 200 10830 2700 11830
+add_block io_pad_tl 200 12000 1200 12800
+add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
+  <div class="row">
+    <button id="run">Run commands</button><button id="reset">Reset</button>
+  </div>
+  <div class="row">
+    <button id="bundler">bundler</button><button id="topologies">topologies</button
+    ><button id="planner">planner</button>
+  </div>
+  <div id="log"></div>
+</div>
+<div id="main">
+  <div id="candbar" hidden>
+    <button id="prev">◀</button> <span id="candlbl"></span> <button id="next">▶</button>
+  </div>
+  <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+
+<!-- Emitted by `sbt fastLinkJS`; copy it here or point at the target dir. -->
+<script type="module" src="./main.js"></script>
+</body>
+</html>

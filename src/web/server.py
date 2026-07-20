@@ -31,12 +31,15 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import buda_cli
 from web import runner, serialize
 
 app = FastAPI(title="BUDA Web Backend", version="0.1.0")
+
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 # Dev-only CORS: a Scala.js Vite dev server on another origin needs it.  The
 # shipped demo serves the built client from this same origin (StaticFiles, added
@@ -93,6 +96,18 @@ async def get_state(session_id: str = "default"):
         return serialize.serialize_state(st.session)
 
 
+@app.get("/api/render/generation")
+async def get_render_generation(session_id: str = "default",
+                                bundle: int | None = None,
+                                candidate: int | None = None):
+    """Generation-stage render payload: floorplan + Hanan grid + per-bundle
+    candidate topologies (each with its ConnTopology analysis).  `bundle`
+    restricts to one bundle id; `candidate` (with `bundle`) to one candidate."""
+    st = _get(session_id)
+    async with st.lock:
+        return serialize.serialize_generation(st.session, bundle, candidate)
+
+
 @app.post("/api/reset")
 async def post_reset(session_id: str = "default"):
     """Discard the session and start fresh (demo convenience)."""
@@ -106,3 +121,12 @@ async def post_reset(session_id: str = "default"):
 @app.get("/api/health")
 async def health():
     return {"ok": True, "sessions": list(_SESSIONS)}
+
+
+# Serve the reference static client at "/" (mounted last so it never shadows the
+# /api/* routes).  This is a small vanilla-SVG demo client — the immediate,
+# toolchain-free way to drive the demo in a browser and the porting reference for
+# the Scala.js DisplayGeom.  The production Scala.js bundle can be built into this
+# same dir (or its own) and served identically.
+if os.path.isdir(_STATIC_DIR):
+    app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")

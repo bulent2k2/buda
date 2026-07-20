@@ -32,7 +32,23 @@ Three thin modules over a single headless `BudaSession`:
   manager. `BUDA_WEB_DEV=1` enables permissive CORS for a Vite dev server.
 
 Routes so far: `POST /api/command {cmds:[str]}`, `GET /api/state`,
-`POST /api/reset`, `GET /api/health`.
+`GET /api/render/generation?bundle=&candidate=`, `POST /api/reset`,
+`GET /api/health`. The generation render serializers
+(`serialize_floorplan/hanan/topology/conn_topology/bundle/generation`) mirror
+`tools/topo_snapshot.py`; ConnTopology slide/pull sentinels serialize as JSON
+`null`, and conn order is preserved (NUTS tie-breaks depend on it).
+
+## Frontend
+
+- **`src/web/static/index.html`** — a vanilla-SVG **reference client**, served at
+  `/` (StaticFiles). The immediate, toolchain-free way to drive the demo in a
+  browser, and the porting reference for the Scala.js renderer. Command console +
+  stage buttons + floorplan/candidate SVG with a candidate stepper. Browser-
+  verified (Playwright/Chromium): floorplan blocks + labels + Hanan grid + a
+  candidate's segments render, and stepping cycles the 35 b44 candidates.
+- **`web/`** — the Scala.js project (sbt + sbt-scalajs; `ApiClient`, `Renderer`,
+  `Main`). The production frontend target; renders the *same* payloads as the
+  reference client. Needs the Scala toolchain to build (see `web/README.md`).
 
 ### The headless requirement
 Importing the command registry must not pull matplotlib. `buda_viz` (and thus

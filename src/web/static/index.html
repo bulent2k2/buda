@@ -1,0 +1,192 @@
+<!doctype html>
+<!--
+ Copyright 2026 Ben Bulent Basaran — Apache-2.0.
+ BUDA web reference client (vanilla SVG). The immediate, toolchain-free way to
+ drive the demo; also the porting reference for the Scala.js renderer/DisplayGeom.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BUDA — Web Demo</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+         display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+  #side { border-right: 1px solid #8884; padding: 10px; overflow: auto;
+          display: flex; flex-direction: column; gap: 8px; }
+  #main { position: relative; overflow: hidden; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  textarea { width: 100%; height: 120px; font: inherit; resize: vertical; }
+  button { font: inherit; padding: 3px 8px; cursor: pointer; }
+  .row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  #log { white-space: pre-wrap; background: #8881; padding: 6px; border-radius: 4px;
+         max-height: 180px; overflow: auto; font-size: 12px; }
+  #stages span { padding: 1px 6px; border-radius: 3px; margin-right: 3px; opacity: .4; }
+  #stages span.on { opacity: 1; background: #2a72; }
+  svg { width: 100%; height: 100%; display: block; }
+  .blk { fill: #6cf2; stroke: #48c; stroke-width: 1; }
+  .blk.container { fill: none; stroke-dasharray: 4 3; }
+  .blklbl { fill: #48c; font-size: 10px; }
+  .keepout { fill: #f443; stroke: #e33; stroke-width: 1; }
+  .hanan { stroke: #8883; stroke-width: .5; stroke-dasharray: 2 3; }
+  .seg { stroke-width: 2.5; fill: none; }
+  .seg.H { stroke: #e6a; } .seg.V { stroke: #4ad; } .seg.jog { stroke: #fa0; }
+  .bt { fill: #0bd; } .rcv { fill: none; stroke: #d0b; stroke-width: 1.5; }
+  #candbar { position: absolute; top: 8px; left: 8px; background: #000a; color: #fff;
+             padding: 6px 10px; border-radius: 5px; }
+  #candbar button { background: #fff2; color: #fff; border: 1px solid #fff4; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>BUDA — Web Demo</h1>
+  <div id="stages">
+    <span data-k="bundler">bundler</span><span data-k="topologies">topo</span
+    ><span data-k="planner">planner</span><span data-k="nuts">nuts</span
+    ><span data-k="dnuts">dnuts</span>
+  </div>
+  <textarea id="cmds">source flow/tracks/tracks4top.buda
+add_block blk_07 2960 9750 4660 10250
+add_block blk_23 200 10830 2700 11830
+add_block io_pad_tl 200 12000 1200 12800
+add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
+  <div class="row">
+    <button onclick="runCmds()">Run commands</button>
+    <button onclick="reset()">Reset</button>
+  </div>
+  <div class="row">
+    <button onclick="stage('run_bundler')">bundler</button>
+    <button onclick="stage('generate_topologies')">topologies</button>
+    <button onclick="stage('run_planner')">planner</button>
+  </div>
+  <div id="log"></div>
+</div>
+<div id="main">
+  <div id="candbar" hidden>
+    <button onclick="stepCand(-1)">◀</button>
+    <span id="candlbl"></span>
+    <button onclick="stepCand(1)">▶</button>
+  </div>
+  <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+
+<script>
+const API = "/api";
+let RENDER = null, CAND = 0;
+
+async function post(path, body) {
+  const r = await fetch(API + path, {method: "POST",
+      headers: {"content-type": "application/json"}, body: JSON.stringify(body || {})});
+  return r.json();
+}
+async function get(path) { return (await fetch(API + path)).json(); }
+
+function log(txt) { document.getElementById("log").textContent = txt; }
+function showStages(state) {
+  for (const el of document.querySelectorAll("#stages span"))
+    el.classList.toggle("on", !!(state.stages_run || {})[el.dataset.k]);
+}
+
+async function runCmds() {
+  const cmds = document.getElementById("cmds").value.split("\n").map(s => s.trim()).filter(Boolean);
+  const res = await post("/command", {cmds});
+  log(res.results.map(r => (r.ok ? "  " : "x ") + (r.summary || "(ok)")).join("\n"));
+  showStages(res.state);
+  await refresh();
+}
+async function reset() { showStages(await post("/reset", {})); RENDER = null; draw(); }
+async function stage(cmd) {
+  const res = await post("/command", {cmds: [cmd]});
+  log(res.results.map(r => (r.ok ? "  " : "x ") + (r.summary || "(ok)")).join("\n"));
+  showStages(res.state);
+  await refresh();
+}
+async function refresh() {
+  const st = await get("/state");
+  if (!st.stages_run.topologies) { RENDER = null; return draw(); }
+  RENDER = await get("/render/generation?bundle=1");
+  CAND = Math.min(CAND, (RENDER.bundles[0]?.candidates.length || 1) - 1);
+  draw();
+}
+function stepCand(d) {
+  const n = RENDER?.bundles[0]?.candidates.length || 0;
+  if (!n) return;
+  CAND = (CAND + d + n) % n; draw();
+}
+
+// ── SVG rendering ──────────────────────────────────────────────────────────
+const SVGNS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function bboxOf(fp) {
+  let x1 = 1e18, y1 = 1e18, x2 = -1e18, y2 = -1e18;
+  for (const b of fp.blocks) {
+    x1 = Math.min(x1, b.bbox.x1); y1 = Math.min(y1, b.bbox.y1);
+    x2 = Math.max(x2, b.bbox.x2); y2 = Math.max(y2, b.bbox.y2);
+  }
+  if (x1 > x2) { x1 = 0; y1 = 0; x2 = 1000; y2 = 1000; }
+  return [x1, y1, x2, y2];
+}
+function draw() {
+  const svg = document.getElementById("svg");
+  svg.innerHTML = "";
+  document.getElementById("candbar").hidden = !RENDER;
+  if (!RENDER) return;
+  const fp = RENDER.floorplan;
+  let [x1, y1, x2, y2] = bboxOf(fp);
+  const pad = Math.max(x2 - x1, y2 - y1) * 0.06 + 50;
+  x1 -= pad; y1 -= pad; x2 += pad; y2 += pad;
+  // BUDA y grows UP; SVG y grows DOWN — flip via a group transform.
+  const W = x2 - x1, H = y2 - y1;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const g = el("g", {transform: `translate(${-x1} ${y2}) scale(1 -1)`}, svg);
+
+  for (const line of RENDER.hanan.xs)
+    el("line", {class: "hanan", x1: line, y1, x2: line, y2}, g);
+  for (const line of RENDER.hanan.ys)
+    el("line", {class: "hanan", x1, y1: line, x2, y2: line}, g);
+  for (const k of fp.keepouts)
+    el("rect", {class: "keepout", x: k.bbox.x1, y: k.bbox.y1,
+        width: k.bbox.x2 - k.bbox.x1, height: k.bbox.y2 - k.bbox.y1}, g);
+  for (const b of fp.blocks) {
+    el("rect", {class: "blk" + (b.is_container ? " container" : ""),
+        x: b.bbox.x1, y: b.bbox.y1,
+        width: b.bbox.x2 - b.bbox.x1, height: b.bbox.y2 - b.bbox.y1}, g);
+    // label: a per-label group translated to the block's top-left (world coords,
+    // y-up) then locally un-flipped so the text reads upright.
+    const lg = el("g", {transform:
+        `translate(${b.bbox.x1 + 4} ${b.bbox.y2 - 12}) scale(1 -1)`}, g);
+    el("text", {class: "blklbl", x: 0, y: 0}, lg).textContent = b.name;
+  }
+
+  const bundle = RENDER.bundles[0];
+  if (!bundle) return;
+  const cand = bundle.candidates[CAND];
+  document.getElementById("candlbl").textContent =
+    `bundle ${bundle.id} · cand ${CAND + 1}/${bundle.candidates.length} · ${cand.type} · WL ${cand.estimated_wirelength}`;
+  // Draw each segment at its NOMINAL coordinates (Phase 1). Perp-centering /
+  // endpoint-snapping (DisplayGeom) is a later refinement.
+  for (const s of cand.segments) {
+    const cls = "seg " + (s.is_jog ? "jog" : (s.horiz ? "H" : "V"));
+    el("line", {class: cls, x1: s.start.x, y1: s.start.y, x2: s.end.x, y2: s.end.y}, g);
+  }
+  // Busterm taps (drivers/receivers) as markers.
+  for (const bt of cand.seg_busterms) {
+    for (const side of ["start", "end"]) {
+      const b = bt[side]; if (!b) continue;
+      const cx = (b.bbox.x1 + b.bbox.x2) / 2, cy = (b.bbox.y1 + b.bbox.y2) / 2;
+      el("circle", {class: "rcv", cx, cy, r: Math.max(W, H) * 0.008}, g);
+    }
+  }
+}
+
+refresh();
+</script>
+</body>
+</html>
