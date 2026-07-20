@@ -21,7 +21,12 @@ in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
 import os
-from buda_viz import BudaVisualizer, TopologyExplorer, collect_candidate_bundles
+# NOTE: `buda_viz` is imported LAZILY inside the two visualize handlers below,
+# not at module load.  Importing it pulls in matplotlib/numpy, and this module
+# is eagerly imported by the buda_cmds registry (and thus by buda_cli) — a
+# headless embedder (e.g. the web server) must be able to import the command
+# layer without a matplotlib dependency.  The viz handlers return early under
+# `no_viz`, so the heavy import only happens when a window is actually opened.
 
 
 def cmd_report_wirelength(session, cmd, args, cmd_line):
@@ -69,6 +74,7 @@ def cmd_check_design(session, cmd, args, cmd_line):
 def cmd_visualize_topologies(session, cmd, args, cmd_line):
     if session.no_viz:
         return
+    from buda_viz import TopologyExplorer, collect_candidate_bundles
     # Usage:
     #   visualize_topologies [hint]         — load ALL bundles; a hint just
     #                                         picks which one it opens on, and
@@ -147,6 +153,7 @@ def cmd_dump_topologies(session, cmd, args, cmd_line):
 def cmd_visualize(session, cmd, args, cmd_line):
     if session.no_viz:
         return
+    from buda_viz import BudaVisualizer
     rerun_layer_fn = session._rerun_nuts_layer if session.nuts_result is not None else None
     rerun_all_fn   = session._rerun_all        if session.nuts_result is not None else None
     ipc_session = (os.path.splitext(os.path.basename(session.script_path))[0]
