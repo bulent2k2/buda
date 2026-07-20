@@ -1108,9 +1108,36 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     // choice (the window-feasibility check rejects it anyway).
                     const double half = eff / 2.0;
                     const double c_lo = slide_lo + half, c_hi = slide_hi - half;
-                    if (c_lo <= c_hi)
-                        return (int)std::lround(
+                    if (c_lo <= c_hi) {
+                        int anchor = (int)std::lround(
                             std::clamp((double)pull_anchor, c_lo, c_hi));
+                        // Occupancy-aware anchor: NUTS TARGETS the pull, but its
+                        // preferred_fit spreads to the nearest FREE track when
+                        // the target is occupied — so charging at the anchor
+                        // unconditionally over-concentrated every pulled segment
+                        // on its window bound and booked phantom demand there,
+                        // steering topology SELECTION to longer detours on an
+                        // UNcongested design (big2: 26/80 bundles flipped to
+                        // OOB/long trunks, est-WL +8%, endpoint still 0/0 — NUTS
+                        // placed the short routes fine).  Charge at the anchor
+                        // only when that band can host the bus; otherwise fall to
+                        // the occupancy-aware best_band_perp, exactly as NUTS
+                        // places.  Where the congestion is REAL (anchor AND every
+                        // nearby band overflow) the fallback still overflows and
+                        // STRICT escalates, so the honest concentration
+                        // (mempool_tile/mix wins) is preserved.  Use
+                        // score_segment (RAW overflow), NOT cong_cost_segment
+                        // (kCong_-scaled): the STRICT ladder below rejects on
+                        // score_segment's raw overflow, so the anchor
+                        // feasibility test must use the same measure or a
+                        // small/zero kCong would make cong_cost read 0 on a
+                        // genuinely overflowing anchor — we'd return it, and
+                        // STRICT would then reject the layer WITHOUT trying the
+                        // free band best_band_perp would have found (Codex #364).
+                        if (score_segment(seg, lid, eff, anchor,
+                                          slide_lo, slide_hi) <= kOvEps)
+                            return anchor;
+                    }
                 }
                 int pp = best_band_perp(seg, lid, eff, slide_lo, slide_hi,
                                         (double)seg_n(topo, si));
