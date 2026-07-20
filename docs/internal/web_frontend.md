@@ -33,7 +33,13 @@ Three thin modules over a single headless `BudaSession`:
 
 Routes: `POST /api/command {cmds:[str]}`, `GET /api/state`,
 `GET /api/render/{generation,nuts,detailed}?bundle=&candidate=`,
-`POST /api/edit/{open,op,commit,abort}`, `POST /api/reset`, `GET /api/health`.
+`POST /api/select {bundle,candidate}` (pin a candidate),
+`POST /api/edit/{open,op,commit,abort}`,
+`POST /api/bdb/{open,save,load_pipeline}` (checkpoint), `POST /api/reset`,
+`GET /api/health`. Checkpoint flow: `open` the BDB BEFORE routing so the stages
+persist into it live; a fresh session resumes by replaying the setup commands,
+`open`ing the same file, and `load_pipeline` (rehydrates bundles + candidates +
+plan + NUTS). `save` is a save-as snapshot to a distinct file.
 The edit routes drive the headless `edit_*` engine through `run_one` (open a
 working copy on a candidate or `new`, apply one `edit_*` op, commit a `USER`
 candidate or abort); each response carries the live `EditVerdict`

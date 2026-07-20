@@ -77,6 +77,12 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
     <button onclick="setView('nuts')">NUTS</button>
     <button onclick="setView('detailed')">detailed</button>
   </div>
+  <div class="row">bdb:
+    <input id="bdbpath" value="/tmp/buda_demo.bdb" style="flex:1;font:inherit" />
+    <button onclick="bdbOpen()">Open</button>
+    <button onclick="bdbSave()">Save</button>
+    <button onclick="bdbLoad()">Load</button>
+  </div>
   <div id="log"></div>
   <div id="editpanel" hidden>
     <b>edit</b> <span id="editsrc"></span>
@@ -98,6 +104,7 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
     <button onclick="stepCand(-1)">◀</button>
     <span id="candlbl"></span>
     <button onclick="stepCand(1)">▶</button>
+    <button onclick="pinCand()">Pin</button>
     <button onclick="editOpen()">Edit</button>
     <button onclick="editOpen('new')">Edit new</button>
   </div>
@@ -153,6 +160,37 @@ function stepCand(d) {
   const n = RENDER?.bundles[0]?.candidates.length || 0;
   if (!n) return;
   CAND = (CAND + d + n) % n; draw();
+}
+
+// ── select / pin (Phase 3) ─────────────────────────────────────────────────
+async function pinCand() {
+  if (VIEW !== "generation" || !RENDER || EDIT) return;
+  const res = await post("/select", {bundle: 1, candidate: CAND});
+  log(res.result.summary || "pinned");
+  showStages(res.state);
+  await refresh();
+}
+
+// ── BDB checkpoint (Phase 5) ────────────────────────────────────────────────
+function bdbPath() { return document.getElementById("bdbpath").value.trim(); }
+async function bdbOpen() {
+  // Open BEFORE routing so the stages persist into the file.
+  const r = await post("/bdb/open", {path: bdbPath()});
+  log(r.result.summary || (r.result.ok ? "bdb opened" : "open failed"));
+  showStages(r.state);
+}
+async function bdbSave() {
+  // The open .bdb is written live during routing, so "Save" is a save-AS
+  // snapshot to a distinct file (save_bdb to the same path is rejected).
+  const r = await post("/bdb/save", {path: bdbPath() + ".snap"});
+  log(r.result.summary || (r.result.ok ? "snapshot saved" : "save failed"));
+}
+async function bdbLoad() {
+  // Re-declares nothing here — replay your setup + Open first, then Load.
+  const r = await post("/bdb/load_pipeline", {});
+  log(r.result.summary || (r.result.ok ? "pipeline loaded" : "load failed"));
+  showStages(r.state);
+  await refresh();
 }
 
 // ── interactive edit ───────────────────────────────────────────────────────
@@ -297,7 +335,9 @@ function drawGeneration(g, W, H) {
     const bundle = RENDER.bundles[0];
     if (!bundle) return;
     cand = bundle.candidates[CAND];
-    lbl = `bundle ${bundle.id} · cand ${CAND + 1}/${bundle.candidates.length} · ${cand.type} · WL ${cand.estimated_wirelength}`;
+    const sb = (RENDER.state && RENDER.state.bundles[0]) || {};
+    const pin = (sb.pinned && sb.selected_index === CAND) ? " 📌PINNED" : "";
+    lbl = `bundle ${bundle.id} · cand ${CAND + 1}/${bundle.candidates.length} · ${cand.type} · WL ${cand.estimated_wirelength}${pin}`;
   }
   document.getElementById("candlbl").textContent = lbl;
   if (!cand.analysis.length && !cand.segments.length) return;

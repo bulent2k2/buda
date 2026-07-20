@@ -98,6 +98,27 @@ class SessionRequest(BaseModel):
     session_id: str = "default"
 
 
+class SelectRequest(BaseModel):
+    bundle: int
+    candidate: int                   # 0-based index
+    session_id: str = "default"
+
+
+class BdbOpenRequest(BaseModel):
+    path: str
+    session_id: str = "default"
+
+
+class BdbSaveRequest(BaseModel):
+    path: str | None = None          # None => write back to the open source
+    session_id: str = "default"
+
+
+class BdbLoadRequest(BaseModel):
+    expanded: bool = False
+    session_id: str = "default"
+
+
 # ── routes ──────────────────────────────────────────────────────────────────
 @app.post("/api/command")
 async def post_command(req: CommandRequest):
@@ -207,6 +228,65 @@ async def edit_abort(req: SessionRequest = SessionRequest()):
     async with st.lock:
         res = runner.run_one(st.session, "edit_abort")
         return _edit_payload(st.session, res)
+
+
+@app.post("/api/select")
+async def post_select(req: SelectRequest):
+    """Pin a bundle to a candidate topology (`select_topology <bundle> <id>`;
+    the CLI id is 1-based).  Sets the bundle's selected_topology_index + pin."""
+    st = _get(req.session_id)
+    async with st.lock:
+        res = runner.run_one(
+            st.session, f"select_topology {req.bundle} {req.candidate + 1}")
+        return {"result": res, "state": serialize.serialize_state(st.session)}
+
+
+def _bad_path(session, path):
+    """A path the whitespace-tokenized `.buda` command layer can't carry — reject
+    it explicitly instead of silently opening a truncated path (Codex P2).  The
+    `.buda` command language has no quoting, so a path with whitespace cannot
+    round-trip through do_command's `.split()`."""
+    return {"result": {"ok": False,
+                       "error": ["error", "path contains whitespace"],
+                       "log_lines": [], "num_warnings": 0, "num_errors": 1,
+                       "summary": f"BDB path may not contain whitespace: {path!r}"},
+            "state": serialize.serialize_state(session)}
+
+
+@app.post("/api/bdb/open")
+async def bdb_open(req: BdbOpenRequest):
+    """Open (creating if needed) a BDB checkpoint store (`open_bdb <path>`).
+    Open it BEFORE routing so the pipeline stages persist into it."""
+    st = _get(req.session_id)
+    if any(c.isspace() for c in req.path):
+        return _bad_path(st.session, req.path)
+    async with st.lock:
+        res = runner.run_one(st.session, f"open_bdb {req.path}")
+        return {"result": res, "state": serialize.serialize_state(st.session)}
+
+
+@app.post("/api/bdb/save")
+async def bdb_save(req: BdbSaveRequest):
+    """Snapshot the current BDB (`save_bdb [<path>]`) — a path is a save-as."""
+    st = _get(req.session_id)
+    if req.path and any(c.isspace() for c in req.path):
+        return _bad_path(st.session, req.path)
+    cmd = "save_bdb" + (f" {req.path}" if req.path else "")
+    async with st.lock:
+        res = runner.run_one(st.session, cmd)
+        return {"result": res, "state": serialize.serialize_state(st.session)}
+
+
+@app.post("/api/bdb/load_pipeline")
+async def bdb_load(req: BdbLoadRequest):
+    """Rehydrate the routing pipeline from the open BDB (`load_pipeline`).
+    The Floorplan + LayerStack must be re-declared first (replay the setup +
+    def_track_pattern commands, then open_bdb, then this)."""
+    st = _get(req.session_id)
+    cmd = "load_pipeline" + (" expanded" if req.expanded else "")
+    async with st.lock:
+        res = runner.run_one(st.session, cmd)
+        return {"result": res, "state": serialize.serialize_state(st.session)}
 
 
 @app.post("/api/reset")
