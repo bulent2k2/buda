@@ -177,3 +177,30 @@ without — a 19× inflation of opens) and the stage-b ripup then has a much
 bigger job (bigHalf RRb balloons +3.8s → +52s). RRa is the cheap ~0.5–1s
 stage-a pass that keeps the expensive stage-b work tractable — a **runtime**
 guard as much as a quality one. Keep it in the canonical flow.
+
+## Ripup convergence guard — stop early on an over-capacity design (2026-07-20)
+
+The RRb cost-center observation motivated a runtime guard: a stage-b ripup on
+an over-capacity design (tc3a) grinds all `max_iter` iterations for ~zero gain.
+Per-iteration trajectory (30 iters): opens `8441 → 7246`, still **86%
+remaining**, ~40 cleared/iter — it would need ~180 more iters to converge. By
+contrast the converging flows reach the floor in a FEW iterations, sometimes
+plateauing then jumping to 0 in the LAST iter (mix2:
+`42→42→36→32→32→0`), so a naive "opens stalled" stop is UNSAFE.
+
+`ripup.py::_ripup_reroute` now fires a guard only when ALL of: (a) ≥ `WINDOW`
+(6) committed iterations have run, (b) the primary metric is still ≥ `FLOOR`
+(100) — far above any converging corpus flow's mid-ripup residual (≤48) — and
+(c) < `FRAC` (3%) of the window-start metric cleared over the last `WINDOW`
+iterations. Provably cannot fire on a flow that converges in < `WINDOW` iters
+or drops below `FLOOR`. Measured (stage-b RRb, `max_iter 30`):
+
+| flow | guard ON | guard OFF | |
+|---|---|---|---|
+| **tc3a** | 711/**7727** @16.3s (fires iter 12) | 614/7246 @**56.8s** (30 iters) | **71% faster** for +481 opens on a hopeless flow |
+| bigHalf | 0/0 @3.8s (2 iters) | — | guard never evaluated (converges < WINDOW) |
+| mix2 | 0/0 @21.5s (5 iters) | — | unaffected |
+
+Default ON (structurally safe); `no_converge_guard` grinds to `max_iter`,
+`converge_guard` forces it. Tuning in `util.py` (`_RR_CONVERGE_*`); tests in
+`test/tests/test_ripup_converge_guard.py`.
