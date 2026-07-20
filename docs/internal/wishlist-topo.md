@@ -420,11 +420,26 @@ before `run_planner`):**
 predictor — does the keepout cover the WHOLE routed extent (→ escalate to
 TOP) or only part (→ leave on LOW)? — would fix both bigHalf (the gate's
 original target) AND mix-loci cleanly, letting mix un-pin from
-`no_hanan_loci`.  Until that lands, mix stays PINNED-OUT (owner decision
-2026-07-19).  The `signal_tracks` inversion the earlier note cited (width
+`no_hanan_loci`.  The `signal_tracks` inversion the earlier note cited (width
 300 vs signal_tracks 332 opens, `test_planner_signal_tracks`) is the same
 mechanism: signal-track capacity surfaces the LOW-band shortfall as more
 overflow, which escalation then routes into the dead spans.
+
+**✅ RESOLVED (2026-07-19).**  Re-measured on today's real CLI config
+(kSegsRel-0.02 default + the merged healer dead-span fold, both gated on
+`_healers_in_flow`) with a FRESH build: `rnr/mix` with `hanan_loci` ON is
+**0 ov / 0 opens** — already clean, on par with the pinned `no_hanan_loci`
+config.  The earlier 42/32/16 figures were an **artifact of a scriptless
+measurement harness** that never set `script_path`, so `_healers_in_flow`
+returned False and the kSegsRel default (which is gated on it) silently did
+not apply — i.e. they measured a planner that does not exist in the real
+flow.  With kSegsRel active the loci-shifted LOW-band crowding the dead-span
+story described never materializes.  The "PINNED-OUT / LOW-supply ~2/3"
+follow-on is therefore closed; mix may un-pin whenever the flip checklist
+above is executed.  A companion planner change (escalate dead-LOW spans at
+`run_nuts`, before the healers — wishlist-planner "dead-span discriminator")
+additionally cleaned the as-checked-in `rnr/mix` (1/16 → 0/0) and cut
+bigHalf's no-rr opens (190 → 94), with mix2/mix2_fast/big2 unchanged.
 
 **Pre-flip verdict record (2026-07-18, post-gate stressed corpus):** the
 wins SURVIVE the gate — and are now honest
