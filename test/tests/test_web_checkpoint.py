@@ -21,6 +21,8 @@ B44_SETUP = [
 
 
 def _client():
+    import pytest
+    pytest.importorskip("fastapi")   # skip (don't fail) where fastapi is absent
     from fastapi.testclient import TestClient
     from web import server
     server._SESSIONS.clear()
