@@ -112,6 +112,15 @@ def test_edit_from_candidate_records_base_uid_and_raw_refs(tmp_path):
     entry = json.loads(s.bdb.meta_get(f"user_ops:1:{uid}", ""))
     assert entry["base"] == base_uid
     assert entry["ops"] == ["edit_set_span 0 lo.top+50 up.bottom-50"]
+    # dump_user_ops resolves the base uid to its CURRENT pool index so the
+    # printed sequence is paste-replayable (Codex #357 — no placeholder).
+    with contextlib.redirect_stdout(io.StringIO()) as b:
+        s.do_command("dump_user_ops 1")
+    dump = b.getvalue()
+    base_ci = next(k for k, c in enumerate(w.input.candidates)
+                   if buda.topo_uid(c) == base_uid)
+    assert f"edit_topology 1 {base_ci + 1}" in dump
+    assert "<base" not in dump
 
 
 def test_abort_discards_ops(tmp_path):

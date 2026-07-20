@@ -509,8 +509,21 @@ def cmd_dump_user_ops(session, cmd, args, cmd_line):
                else f"the candidate with uid {base}")
         print(f"  candidate {ci + 1}: USER, built from {src} "
               f"with {len(ops)} op(s):")
-        print(f"    edit_topology {bid} "
-              f"{'new' if base == 'new' else '<base cand#>'}")
+        # Resolve the base uid to its CURRENT pool index so the printed
+        # sequence is paste-replayable (indices shift across sessions; the
+        # uid is the stable identity — Codex #357).
+        if base == "new":
+            print(f"    edit_topology {bid} new")
+        else:
+            base_ci = next((k for k, c in enumerate(w.input.candidates)
+                            if buda.topo_uid(c) == base), None)
+            if base_ci is None:
+                print(f"    # base candidate (uid {base}) is no longer in "
+                      f"the pool — the ops below are NOT directly "
+                      f"replayable (regenerate or pick a comparable base)")
+                print(f"    edit_topology {bid} <base-missing>")
+            else:
+                print(f"    edit_topology {bid} {base_ci + 1}")
         for op in ops:
             print(f"    {op}")
         print(f"    edit_commit pin")

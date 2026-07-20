@@ -31,8 +31,7 @@ now landed:
    `W`/`w` also log into the `[edit-cmd]` stream and the sidecar op-log.
 
 All three compose, as predicted: snap default + live echo marker + exact
-text entry cover the aiming, feedback, and precision paths.  All three compose (snap key + echo marker + text entry
-are independent).
+text entry cover the aiming, feedback, and precision paths.
 
 ## CLI parity for the slide-window refine — ✅ RESOLVED
 
