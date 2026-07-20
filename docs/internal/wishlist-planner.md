@@ -627,6 +627,66 @@ the downstream damage is contained even with the charge left approximate.
 Gate (ii) for the default flip therefore stands, downgraded from
 "unpredicted" to "predictable only via a NUTS-side pass, deferred".
 
+### The NUTS-side alignment pre-solve — DESIGN + measured-negligible decision (2026-07-20)
+
+The reliable predictor the conclusion above calls for is an **isolated
+single-bundle alignment resolution** run at plan time.  Concretely:
+
+1. After a bundle's layers are assigned (so the per-layer sweep is defined),
+   build its alignment groups exactly as NUTS Pass 3 does (`rev_conn_map[T]`
+   over the bundle's own segments: any two segments following the same
+   perpendicular connector `T`, jogs excluded, are siblings — union-find over
+   `conn_segs`).
+2. Run the bundle's segments through an **isolated placement** — the real NUTS
+   sweep on just this bundle, no other occupancy (the machinery already exists:
+   `NUTSEngine::rerun_bundle_warm` / the screen-mode single-bundle placement
+   place one bundle against a frozen/empty context).  Same-bundle bits never
+   conflict, so the collapse is deterministic: the first-swept sibling lands at
+   its pull target and the rest collapse onto it iff its track falls in their
+   centre range — the range check the static level-3 heuristic could not do
+   because it lacked the sweep.
+3. Read each aligned segment's placed track and charge it there (member (2)),
+   above the level-1/2 pull/junction anchors.
+
+This is faithful (it runs the actual sweep, so it distinguishes a real collapse
+from an independent placement) and is the correct way to close member (2).
+
+**Why the build is DEFERRED — the payoff is measured endpoint-neutral.**  After
+the occupancy-aware anchor shipped (#364), a corpus sizing pass
+(`charge_pull_target 2`, each flow as checked in) counted pulled segments whose
+final placed track diverges >100 units from their charged band:
+
+| flow | pulled | div>100 | worst | flow | pulled | div>100 | worst |
+|---|---|---|---|---|---|---|---|
+| b44 | 2 | **0** | 0 | 10_chip | 49 | 8 | 574 |
+| mix | 182 | 21 | 626 | big2 | 159 | 52 | 2498 |
+| mix2 | 167 | 15 | 1010 | bigHalf | 171 | 67 | 3115 |
+| comprehensive | 16 | 0 | 56 | | | | |
+
+The clean signal is **b44's full flow: 0 residual** — the alignment-sibling
+mis-charge only appears in the *pinned staircase* fixture
+(`test_planner_charge_pull_target.py`), never when b44 auto-selects.  The large
+corpus counts (big2 52, bigHalf 67) are NOT the alignment class: this diagnostic
+measures divergence AFTER the full flow, so it is dominated by (a) the healers
+legitimately re-pinning routes, (b) the occupancy-aware anchor charging at
+`best_band_perp` while NUTS spreads to a slightly different free track, and
+(c) contention-fallback (BEST_EFFORT) moving metal — none of which a static
+alignment pre-solve addresses, and (a)/(c) are already handled downstream by the
+`band_occupants` PLACED overlay.  So an isolated-solve pre-solve would fix only
+b44's staircase residual — **endpoint-neutral on the corpus**, confirming the
+2026-07-19 finding post-#364.
+
+**Decision.**  Gate (ii) is reframed: the alignment member is *predictable* (the
+pre-solve above is the design), but predicting it moves **no corpus metric**, so
+the build is DEFERRED under the same measured-change discipline that keeps
+kWLSpread / charge_pull_target opt-in — shipping a large NUTS↔planner pre-solve
+for zero measured movement is exactly the complexity the discipline refuses.
+The design is recorded here and ready to build if a future corpus case makes the
+alignment residual matter (or when the reference host takes up the
+charge_pull_target default flip and wants member (2) closed for completeness).
+The `band_occupants` PLACED overlay already contains the downstream damage in the
+meantime.
+
 ## Realization-risk WL: rank on the envelope, not just the nominal — `kWLSpread` SHIPPED (opt-in)
 
 **The b44 mis-ranking (repro `flow/big_data_test/b44.buda`, 2026-07-16):**
