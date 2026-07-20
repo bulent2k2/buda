@@ -193,17 +193,27 @@ def cmd_ripup_reroute(session, cmd, args, cmd_line):
         warm = False
     elif "warm_trials" in args:
         warm = True
+    # Convergence guard (default on): stop early on an over-capacity design
+    # that can't converge.  `no_converge_guard` disables it (grind to
+    # max_iter); `converge_guard` forces it on.
+    converge_guard = None
+    if "no_converge_guard" in args:
+        converge_guard = False
+    elif "converge_guard" in args:
+        converge_guard = True
     nums = [a for a in args if a not in ("use_edge_candidates", "no_global",
                                          "fast_trials", "no_fast_trials",
                                          "screen", "no_screen",
-                                         "warm_trials", "no_warm_trials")]
+                                         "warm_trials", "no_warm_trials",
+                                         "converge_guard", "no_converge_guard")]
     max_iter = int(nums[0]) if nums else _RR_DEFAULT_MAX_ITER
     session._ripup_reroute(max_iter=max_iter,
                            use_edge_candidates=use_edge_candidates,
                            use_global=use_global,
                            fast_trials=fast_trials,
                            screen=screen,
-                           warm=warm)
+                           warm=warm,
+                           converge_guard=converge_guard)
 
 
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):
