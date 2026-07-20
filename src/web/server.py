@@ -92,6 +92,12 @@ class EditCommitRequest(BaseModel):
     session_id: str = "default"
 
 
+class SessionRequest(BaseModel):
+    """Bare session-id body for POSTs that take no other argument (abort/reset),
+    so all POST routes address the session via the JSON body consistently."""
+    session_id: str = "default"
+
+
 # ── routes ──────────────────────────────────────────────────────────────────
 @app.post("/api/command")
 async def post_command(req: CommandRequest):
@@ -139,6 +145,14 @@ def _edit_payload(session, result):
             "state": serialize.serialize_state(session)}
 
 
+def _edit_error(session, summary):
+    """Structured `{result, edit, state}` for bad edit input — the web command
+    layer never 500s on client input, it returns ok=False (mirrors run_one)."""
+    return _edit_payload(session, {
+        "ok": False, "error": ["error", summary], "log_lines": [],
+        "num_warnings": 0, "num_errors": 1, "summary": summary})
+
+
 @app.post("/api/edit/open")
 async def edit_open(req: EditOpenRequest):
     """Open an interactive edit session on a candidate (or `new` = empty). Mirrors
@@ -146,7 +160,16 @@ async def edit_open(req: EditOpenRequest):
     verdict come back in `edit`."""
     st = _get(req.session_id)
     cand = req.candidate
-    which = "new" if cand == "new" else str(int(cand) + 1)   # CLI is 1-based
+    if cand == "new":
+        which = "new"
+    else:
+        try:                                    # int or numeric string → 1-based
+            which = str(int(cand) + 1)
+        except (TypeError, ValueError):
+            # A non-numeric candidate is bad input, not a server error — return
+            # the structured shape (Codex P2) instead of raising a 500.
+            return _edit_error(
+                st.session, f"invalid candidate {cand!r} — use an int index or 'new'")
     async with st.lock:
         res = runner.run_one(st.session, f"edit_topology {req.bundle} {which}")
         return _edit_payload(st.session, res)
@@ -156,15 +179,11 @@ async def edit_open(req: EditOpenRequest):
 async def edit_op(req: EditOpRequest):
     """Apply one `edit_*` operation (full CLI-syntax command string, e.g.
     `edit_add_trunk H 700`). Returns the refreshed working copy + verdict."""
+    st = _get(req.session_id)
     cmd = req.command.strip()
     if not cmd.startswith("edit_") or cmd.split()[0] in (
             "edit_topology", "edit_commit", "edit_abort"):
-        return {"result": {"ok": False, "error": ["error", "not an edit op"],
-                            "log_lines": [], "num_warnings": 0, "num_errors": 1,
-                            "summary": "use edit_add_trunk/edit_set_span/… here"},
-                "edit": serialize.serialize_edit(_get(req.session_id).session),
-                "state": serialize.serialize_state(_get(req.session_id).session)}
-    st = _get(req.session_id)
+        return _edit_error(st.session, "use edit_add_trunk/edit_set_span/… here")
     async with st.lock:
         res = runner.run_one(st.session, cmd)
         return _edit_payload(st.session, res)
@@ -180,17 +199,20 @@ async def edit_commit(req: EditCommitRequest):
 
 
 @app.post("/api/edit/abort")
-async def edit_abort(session_id: str = "default"):
-    st = _get(session_id)
+async def edit_abort(req: SessionRequest = SessionRequest()):
+    """Discard the open edit session. Takes the session id from the JSON body,
+    like the other edit routes (Codex P2 — a query-only param silently aborted
+    the default session for a non-default client)."""
+    st = _get(req.session_id)
     async with st.lock:
         res = runner.run_one(st.session, "edit_abort")
         return _edit_payload(st.session, res)
 
 
 @app.post("/api/reset")
-async def post_reset(session_id: str = "default"):
+async def post_reset(req: SessionRequest = SessionRequest()):
     """Discard the session and start fresh (demo convenience)."""
-    st = _get(session_id)
+    st = _get(req.session_id)
     async with st.lock:
         st.session = buda_cli.BudaSession()
         st.session.no_viz = True

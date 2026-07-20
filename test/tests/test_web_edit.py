@@ -109,3 +109,30 @@ def test_edit_new_empty_topology():
     r = client.post("/api/edit/open", json={"bundle": 1, "candidate": "new"}).json()
     assert r["edit"]["open"] is True
     assert r["edit"]["topology"]["segments"] == []     # empty working copy
+
+
+def test_edit_open_bad_candidate_is_structured_not_500(client=None):
+    """A non-numeric candidate must return the {result,edit,state} error shape,
+    not raise a 500 (Codex P2)."""
+    client = _client()
+    _generated(client)
+    resp = client.post("/api/edit/open", json={"bundle": 1, "candidate": "foo"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["result"]["ok"] is False
+    assert body["edit"]["open"] is False              # no session opened
+
+
+def test_edit_abort_reads_session_from_body():
+    """abort must address the session named in the body, not always the default
+    (Codex P2). Open an edit on session 's1', abort with {session_id:'s1'}, and
+    confirm s1's edit is closed (the default session is untouched)."""
+    client = _client()
+    # generate on a named session
+    client.post("/api/command", json={
+        "session_id": "s1",
+        "cmds": B44_SETUP + ["run_bundler", "generate_topologies"]})
+    client.post("/api/edit/open", json={"session_id": "s1", "bundle": 1, "candidate": 0})
+    assert client.get("/api/state?session_id=s1")  # session exists
+    r = client.post("/api/edit/abort", json={"session_id": "s1"}).json()
+    assert r["edit"]["open"] is False                 # s1's edit was aborted
