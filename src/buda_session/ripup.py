@@ -30,7 +30,9 @@ import time
 
 import buda
 
-from .util import (_RR_DEFAULT_MAX_ITER, _RR_FAST_TRIALS_DEFAULT,
+from .util import (_RR_CONVERGE_FLOOR, _RR_CONVERGE_FRAC,
+                   _RR_CONVERGE_GUARD_DEFAULT, _RR_CONVERGE_WINDOW,
+                   _RR_DEFAULT_MAX_ITER, _RR_FAST_TRIALS_DEFAULT,
                    _RR_GLOBAL_MAX_TRIALS, _RR_GLOBAL_MOVES_PER_OCC,
                    _RR_GLOBAL_TOP_K, _RR_HEAL_DEAD_SPANS_DEFAULT,
                    _RR_MAX_CANDIDATES_PER_BUNDLE,
@@ -1445,7 +1447,8 @@ class RipupMixin:
 
     def _ripup_reroute(self, max_iter=_RR_DEFAULT_MAX_ITER,
                        use_edge_candidates=False, use_global=True,
-                       fast_trials=None, screen=None, warm=None):
+                       fast_trials=None, screen=None, warm=None,
+                       converge_guard=None):
         if not self.bundles:
             print("Error: ripup_reroute has no bundles.")
             return
@@ -1472,6 +1475,10 @@ class RipupMixin:
         # warm-rejected moves are cold-swept at the stall point — the stop
         # certificate stays a full COLD sweep.
         warm = _RR_WARM_TRIALS_DEFAULT if warm is None else warm
+        # Convergence guard: bail early on an over-capacity design that can't
+        # converge (see util.py).  Default on; `no_converge_guard` disables.
+        converge_guard = (_RR_CONVERGE_GUARD_DEFAULT
+                          if converge_guard is None else converge_guard)
 
         # Fold in the dead-span escalation before the hill-climb (stage b):
         # a dead LOW segment is a guaranteed open no candidate re-pin reaches,
@@ -1505,6 +1512,10 @@ class RipupMixin:
         committed = 0
         it = 0
         n_trials = 0
+        # Convergence guard: primary-metric value after each committed
+        # iteration (seed with the entry value), scanned over a trailing
+        # window to detect a non-converging grind.
+        prim_hist = [self._rr_m_primary(m0)]
         # Rejected trials need no post-loop rebuild: _rr_snapshot captures (and
         # _rr_restore restores) every field a trial can mutate — selection, pin,
         # dogleg-appended candidates, the plan assignment arrays
@@ -1713,6 +1724,32 @@ class RipupMixin:
             print(f"[ripup_reroute] iter {it}: COMMIT bundle {bid} "
                   f"{self._rr_move_str(old_t, move)}, metric {self._rr_m_str(cur)}->"
                   f"{self._rr_m_str(metric())}", flush=True)
+
+            # Convergence guard: a committing iteration made progress, but if
+            # the primary metric is still high AND has barely moved over the
+            # trailing window, this design won't converge in a reasonable
+            # budget — stop now rather than grind (over-capacity flows burn
+            # tens of seconds per stage-b run for a fraction-of-a-percent
+            # gain).  Provably cannot fire on a flow that reaches the floor in
+            # < WINDOW iterations.
+            prim_now = self._rr_m_primary(metric())
+            prim_hist.append(prim_now)
+            if (converge_guard and len(prim_hist) > _RR_CONVERGE_WINDOW
+                    and prim_now >= _RR_CONVERGE_FLOOR):
+                win_start = prim_hist[-1 - _RR_CONVERGE_WINDOW]
+                if win_start > 0:
+                    cleared = (win_start - prim_now) / win_start
+                    if cleared < _RR_CONVERGE_FRAC:
+                        print(f"[ripup_reroute] not converging — primary metric "
+                              f"plateaued at {prim_now} "
+                              f"({cleared * 100:.1f}% cleared over last "
+                              f"{_RR_CONVERGE_WINDOW} iters, ≥ floor "
+                              f"{_RR_CONVERGE_FLOOR}); stopping early to save "
+                              f"runtime (over-capacity design — fix placement, "
+                              f"or `no_converge_guard` / raise max_iter to "
+                              f"continue).", flush=True)
+                        stopped_early = True
+                        break
 
         if not stopped_early and self._rr_m_primary(metric()) > 0:
             print(f"[ripup_reroute] reached max_iter={max_iter} while still "

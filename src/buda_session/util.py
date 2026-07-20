@@ -82,6 +82,26 @@ _RR_WARM_TRIALS_DEFAULT = False
 # strictly reduces opens; a healer-less flow (e.g. mempool_tile) is untouched.
 _RR_HEAL_DEAD_SPANS_DEFAULT = True
 
+# Ripup convergence guard (2026-07-20): stop stage-b ripup early on an
+# over-capacity design that can't converge, to save the (large) runtime it
+# would otherwise burn for ~zero gain.  Measured trajectories: converging
+# flows reach the primary metric's floor in a FEW iterations (bigHalf 2,
+# mix2 5 — sometimes plateauing then jumping to 0 in the LAST iter), so a
+# naive "opens stalled" stop is unsafe; a hopeless flow (tc3a) stays at
+# 86%+ of its opens after 30 iters (~40 cleared/iter out of 8000+ — ~180
+# more iters needed).  The guard fires only when ALL of: (a) ≥ WINDOW
+# committed iterations have run, (b) the primary metric is still ≥ FLOOR —
+# far above any converging corpus flow's mid-ripup residual (≤48) — and
+# (c) < FRAC of the window-start metric was cleared over the last WINDOW
+# iterations.  Provably cannot fire on a flow that converges in < WINDOW
+# iters or drops below FLOOR; trades a tiny endpoint change on genuinely
+# non-converging flows for a large runtime saving.  Default ON; disable per
+# call with the `no_converge_guard` keyword.
+_RR_CONVERGE_GUARD_DEFAULT = True
+_RR_CONVERGE_WINDOW = 6
+_RR_CONVERGE_FLOOR = 100
+_RR_CONVERGE_FRAC = 0.03
+
 
 def _batched(method):
     """Run a BDB-persist method inside ONE transaction (see BudaSession._bdb_batch).
