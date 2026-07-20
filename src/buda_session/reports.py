@@ -495,6 +495,8 @@ class ReportsMixin:
 
         total = 0
         collected = []   # (prefix, violation) — aggregated below unless --verbose-conn
+        tug_bundles = 0  # realization-risk advisory (NOT violations); nuts/dnuts only
+        tug_pairs = 0
         for w in self.bundles:
             if not w.input.candidates:
                 continue
@@ -546,6 +548,18 @@ class ReportsMixin:
                     collected.append((prefix, v))
                     total += 1
 
+                # Realization-risk ADVISORY (not a violation): opposite-pull
+                # rider pairs stretching an interior trunk (wishlist-nuts
+                # "tug-of-war").  Only meaningful on the SELECTED, placed
+                # candidate — read the plan's post-dogleg seg_net_pull override
+                # so the count matches what NUTS actually placed with.
+                if stage in ("nuts", "dnuts") and not (all_candidates
+                                                       and stage == "topo"):
+                    tp = self._tug_pairs(topo, check_fp, w.plan)
+                    if tp:
+                        tug_bundles += 1
+                        tug_pairs += len(tp)
+
         if total == 0:
             print("  Success: no violations found.")
         elif self.verbose_conn:
@@ -553,6 +567,11 @@ class ReportsMixin:
                 print(f"  {prefix}: {v.message}")
         else:
             self._report_violations_summary(collected)
+
+        if tug_pairs:
+            print(f"  Advisory: {tug_pairs} tug-of-war realization-risk pair(s) "
+                  f"on {tug_bundles} bundle(s) — opposite-pull riders stretch an "
+                  f"interior trunk; see 'dump_topologies --problems'.")
 
     # Reason text per ViolationKind, used when collapsing per-bit violations.
     _CONN_KIND_REASON = {

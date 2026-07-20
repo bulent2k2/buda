@@ -192,6 +192,42 @@ def test_dump_topologies_reports_tug():
     assert "bundles with tug-of-war  : 1/1" in txt
 
 
+def _run_to_nuts(s, cand_pred):
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        idx = next(i for i, c in enumerate(s.bundles[0].input.candidates)
+                   if cand_pred(c))
+        for c in (f"select_topology 1 {idx + 1}", "run_planner", "run_nuts"):
+            s.do_command(c)
+
+
+def test_check_design_reports_tug_advisory():
+    """check_design surfaces the realization-risk signal as an ADVISORY at the
+    nuts/dnuts stage — separate from the violation count (a tug is a risk, not a
+    violation) — so the standard audit points at it too, not only
+    dump_topologies."""
+    s = _b44_bundle()
+    _run_to_nuts(s, lambda c: c.type == "TRUNK_H+MST@y11915"
+                 and c.estimated_wirelength == 3510)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), buda.ostream_redirect():
+        s.do_command("check_design nuts")
+    txt = out.getvalue()
+    assert "no violations found" in txt          # the tug is NOT a violation
+    assert "Advisory: 1 tug-of-war realization-risk pair(s) on 1 bundle(s)" in txt
+
+
+def test_check_design_no_tug_advisory_on_plain_trunk():
+    """A plain trunk selection has no tug pair, so check_design emits no
+    advisory line."""
+    s = _b44_bundle()
+    _run_to_nuts(s, lambda c: c.type.startswith("TRUNK_V")
+                 and len(c.segments) == 2)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), buda.ostream_redirect():
+        s.do_command("check_design nuts")
+    assert "tug-of-war" not in out.getvalue()
+
+
 def test_dump_topologies_no_tug_on_plain_selection():
     """Selecting a plain trunk shows no TUG flag (the signal tracks the
     displayed candidate, not the pool)."""
