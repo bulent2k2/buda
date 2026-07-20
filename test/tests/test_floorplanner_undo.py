@@ -35,6 +35,13 @@ def _cell_dims(state, cell):
     return {c.name: (c.width, c.height) for c in state.bdb.all_cells()}[cell]
 
 
+def _comp_dims(state, name):
+    for c in state.bdb.all_components():
+        if c.name == name:
+            return (c.x2 - c.x1, c.y2 - c.y1)
+    raise KeyError(name)
+
+
 def test_undo_reverts_shared_cell_dims(tmp_path):
     # bdb_floorplanner guards its tkinter import, so its pure-logic undo
     # methods import (and run) headless.
@@ -76,3 +83,50 @@ def test_undo_reverts_shared_cell_dims(tmp_path):
     for inst in ("rack_a/slot", "rack_b/slot"):
         blk = state.block(inst)
         assert (blk.x2 - blk.x1, blk.y2 - blk.y1) == (100.0, 80.0), inst
+
+
+def test_undo_after_write_keeps_bdb_components_consistent(tmp_path):
+    """resize -> Write -> undo must not leave the BDB partially mutated.
+
+    `sync_cell_to_instances` persists the resized cell row immediately but
+    defers the component bboxes to `write_bdb`.  If the user Writes after the
+    resize, the BDB holds BOTH the resized cell row and the resized component
+    rows.  A subsequent undo that reverted only the cell row (and the in-memory
+    engine) would leave the file with the cell row at the OLD dims and the
+    component rows still at the resized dims — a partial mutation.  Undo must
+    revert the persisted component rows together with the cell row.
+    """
+    from tools import bdb_floorplanner as F
+    from tools import floorplanner_commands as fpc
+
+    state = fpc.create_bdb(str(tmp_path / "u.bdb"), 2000, 1000, grid=10)
+    fpc.add_block(state, "rack_a", 0, 0, 300, 200)
+    fpc.add_block(state, "rack_b", 400, 0, 300, 200)
+    fpc.add_block(state, "rack_a/slot", 10, 10, 100, 80)
+    fpc.add_block(state, "rack_b/slot", 10, 10, 100, 80)
+    fpc.write_bdb(state)                       # component rows persisted @ 100x80
+
+    class _Fake:
+        pass
+    gui = _Fake()
+    gui.state = state
+
+    snap = F.BdbFloorplanner._snapshot(gui)     # pre-edit snapshot (100x80)
+
+    # Resize the shared cell, then WRITE — so the resized component bboxes are
+    # persisted to the BDB (the intervening Write is the crux of the finding).
+    b = state.block("rack_a/slot")
+    fpc.sync_cell_to_instances(state, "rack_a/slot",
+                               b.x1, b.y1, b.x1 + 120, b.y1 + 90)
+    fpc.write_bdb(state)
+    for inst in ("rack_a/slot", "rack_b/slot"):
+        assert _comp_dims(state, inst) == (120.0, 90.0), inst
+
+    # Undo: the persisted component rows revert together with the cell row.
+    F.BdbFloorplanner._restore_silent(gui, snap)
+
+    cell = fpc.get_block_cell(state, "rack_a/slot")
+    assert _cell_dims(state, cell) == (100.0, 80.0), "cell row not reverted"
+    for inst in ("rack_a/slot", "rack_b/slot"):
+        assert _comp_dims(state, inst) == (100.0, 80.0), \
+            f"BDB component row {inst} left diverged from the reverted cell row"

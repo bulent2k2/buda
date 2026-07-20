@@ -1369,20 +1369,36 @@ class BdbFloorplanner:
     def _restore_silent(self, snap: dict) -> None:
         """Restore block bboxes (engine) AND cell dims (BDB) from a snapshot,
         without redrawing (audit T2-05: cell dims are reverted too so the BDB
-        cell row can't stay diverged from the reverted engine after an undo)."""
+        cell row can't stay diverged from the reverted engine after an undo).
+
+        `sync_cell_to_instances` persists the resized cell row IMMEDIATELY but
+        defers component bboxes to `write_bdb`.  Reverting only the cell row
+        would leave the file partially mutated after a resize->Write->undo (the
+        already-persisted component rows would keep the resized dims while the
+        cell row reverts).  So any component already in the BDB has its reverted
+        bbox re-persisted here too, keeping the cell row and its component rows
+        consistent regardless of an intervening Write."""
         if not snap:
             return
         blocks = snap.get("blocks", {})
         cells = snap.get("cells", {})
+        bdb = self.state.bdb if self.state is not None else None
         for name, (x1, y1, x2, y2) in blocks.items():
             try:
                 self.state.engine.resize_block_raw(name, x1, y1, x2, y2)
             except Exception:
                 pass
-        if cells and self.state is not None and self.state.bdb is not None:
+            # Re-persist the reverted bbox for components already in the BDB
+            # (set_comp_bbox raises for components not yet written — ignored).
+            if bdb is not None:
+                try:
+                    bdb.set_comp_bbox(name, x1, y1, x2, y2)
+                except Exception:
+                    pass
+        if cells and bdb is not None:
             for cname, (w, h) in cells.items():
                 try:
-                    self.state.bdb.add_cell(cname, w, h)
+                    bdb.add_cell(cname, w, h)
                 except Exception:
                     pass
 
