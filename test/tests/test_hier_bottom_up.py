@@ -1641,6 +1641,45 @@ def test_doglegged_template_replan_resets_and_readopts():
     assert s.nuts_result.num_overlaps == 0
 
 
+def test_replan_persists_expanded_instances_no_fk_drop(tmp_path):
+    """A second run_planner hier must re-expand from the TEMPLATES, not the
+    prior run's per-instance wrappers — otherwise the synthetic ids drift
+    (5..8 -> 9..12), the expansion map keys on now-deleted instance ids, and
+    every expanded bundle+routing row FK-fails and is SILENTLY dropped, so a
+    checkpoint after the re-plan is missing the whole routing subtree (the
+    coupled staleness bug that blocked C6-09)."""
+    import sqlite3
+    p = str(tmp_path / "replan.bdb")
+    s = _dogleg_cell_flow(path=p)
+    _run_cmd(s, "run_planner hier")
+    _run_cmd(s, "run_nuts")
+    _run_cmd(s, "run_planner hier")   # the re-plan that used to drift ids
+    _run_cmd(s, "run_nuts")
+
+    # In-memory ids stay in the first expansion's range (re-derived from the
+    # templates), never drifting upward across cycles.
+    ids_mem = sorted(w.input.original_bundle.id for w in s.bundles)
+    assert ids_mem == [5, 6, 7, 8], ids_mem
+
+    con = sqlite3.connect(p)
+    try:
+        rows = con.execute(
+            "SELECT id, parent_id, is_replicated FROM bundle").fetchall()
+        ids = {str(r[0]) for r in rows}
+        # No dangling parent_id (the FK-orphan the silent drop hid).
+        dangling = [(i, pp) for (i, pp, _rep) in rows
+                    if pp not in ("", None) and str(pp) not in ids]
+        assert not dangling, dangling
+        # The four expanded per-instance rows survived the checkpoint...
+        expanded = [r for r in rows if r[2]]
+        assert len(expanded) == 4, rows
+        # ...and their routing persisted (was silently emptied pre-fix).
+        n_bus = con.execute("SELECT COUNT(*) FROM bus_segment").fetchone()[0]
+        assert n_bus > 0, "expanded instances' bus_segment rows were dropped"
+    finally:
+        con.close()
+
+
 def test_doglegged_template_resume_round_trip(tmp_path):
     """Codex #256 P2: the adopted split is PERSISTED (template row with
     source='dogleg' + per-instance selected topologies), so a checkpoint

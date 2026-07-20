@@ -384,3 +384,43 @@ for br in bdb.all_bundles():            # filter by is_replicated per `expanded`
    `add_blocks_from_bdb` + `load_pipeline expanded` + `run_planner hier` in phase 2.
 3. **Guard tests:** `load_pipeline` with no open BDB / no persisted topologies
    errors clearly; `load_pipeline` before re-declaring blocks fails fast.
+
+## Audit 2026-07: re-plan expanded-parent FK staleness + persist-step checking (C6-09) — RESOLVED
+
+Both coupled findings landed together (the staleness fix unblocked C6-09).
+
+- **Staleness:** `run_planner hier` now restores the pre-expansion TEMPLATE
+  wrappers (`_hier_bundles_orig`) before re-expanding, so a second run
+  re-derives its per-instance ids from the templates (stable) instead of
+  re-expanding the prior run's per-instance wrappers — ids no longer drift
+  (5..8, not 9..12), the expansion map keys on the real templates, and the
+  checkpoint persists the whole routing subtree (regression:
+  `test_replan_persists_expanded_instances_no_fk_drop`).
+- **C6-09:** the persist mutators go through `step_checked` and throw on any
+  non-`SQLITE_DONE` result (regression:
+  `test_audit4.py::test_persist_step_throws_on_fk_violation`); the NUTS_DDL
+  header comment is updated.
+
+Original write-up (kept for context):
+
+- **Re-plan expanded-parent staleness (newly discovered).** A second
+  `run_planner hier` re-expands the templates into per-instance bundle rows
+  whose `parent_id` (via `_hier_expansion_map` / `expanded_to_template`) can
+  point at a PRIOR expansion's instance id — a row `clear_expanded_bundles`
+  just deleted — instead of the real template. The whole orphaned subtree
+  (bundle → topology → routing) then FK-fails and is **silently dropped**, so
+  a checkpoint taken after a re-plan is missing those instances and a resume
+  cannot restore them. Repro: the dogleg-cell flow's second `run_planner hier`
+  (`test_doglegged_template_replan_resets_and_readopts`) produces an expanded
+  row `id=9 parent=5` while only `[1,2,3,4]` exist. Fix: resolve
+  `expanded_to_template` values to the CURRENT template ids on every re-plan
+  (or persist templates before their instances and re-point stale parents).
+- **C6-09: check the persist step's result.** The persist mutators ignore
+  `sqlite3_step`'s return, so an FK/constraint failure silently drops the row.
+  The fix (throw on non-`SQLITE_DONE`) is correct and valuable, but turning it
+  on today converts the staleness bug above from a silent drop into a hard
+  crash of the hier re-plan flow — so it must land WITH, or after, that fix.
+  When both land: add `step_checked` to add_bundle / add_topology /
+  add_topology_segment / add_bus_segment / add_bus_via / add_net_segment /
+  add_net_via / add_busterm / renumber_topology, and flip the NUTS_DDL header
+  comment back to "FK-rejected insert throws".

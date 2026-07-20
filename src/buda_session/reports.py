@@ -81,8 +81,13 @@ class ReportsMixin:
         try:
             ct = buda.ConnTopology()
             ct.build(topo, fp if fp is not None else self.fp)
+            # Include ZERO-length slides (audit P4-06): the C++ filter_pinched
+            # flags a candidate when ANY segment has perp_lo == perp_hi, so
+            # dropping zero-slide segs here made a partially-pinched candidate
+            # report a nonzero min-slide and miss the PINCH flag. Only the
+            # inverted (1,0) unbounded sentinel is excluded.
             slides = [cs.perp_hi - cs.perp_lo for cs in ct.segs()
-                      if cs.perp_hi > cs.perp_lo]
+                      if cs.perp_hi >= cs.perp_lo]
             return min(slides) if slides else 0
         except Exception:
             return None

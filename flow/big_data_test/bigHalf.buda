@@ -1,4 +1,4 @@
-# no rr + fine-grain check
+# full rr+negotiate flow (reaches the clean 0/0 endpoint) + fine-grain check
 source ../tracks/tracks4top.buda
 source tc3a_flat_5x.buda
 run_bundler
@@ -8,11 +8,11 @@ run_planner signal_tracks
 run_nuts
 check_design nuts
 negotiate_congestion
-# ripup_reroute
+ripup_reroute 30
 check_design nuts
 run_detailed_nuts
 check_design
 negotiate_congestion
-# ripup_reroute
+ripup_reroute 30
 check_design
 visualize

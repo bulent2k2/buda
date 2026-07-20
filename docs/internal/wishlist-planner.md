@@ -4,7 +4,7 @@ Deferred follow-ups for the bundle / congestion planner
 (`src/congestion_planner.cpp`, `src/layering.cpp`). Index:
 [`wishlist.md`](wishlist.md).
 
-## NON-TOP dead-span stub opens: planner-side gate SHIPPED (opt-in) + the always-on discriminator — OPEN
+## NON-TOP dead-span stub opens: planner-side gate SHIPPED (opt-in) + the discriminator DELIVERED via post-NUTS escalation (default on); residual is a distinct CAPACITY item
 
 **What:** the planner's per-cut capacity (`score_segment` →
 `usable_band_cap`) samples a non-TOP stub's endpoint-CLAMPED along-extent
@@ -46,6 +46,156 @@ final-span estimate at plan time or a NUTS-side signal, and ties into
 opens item 4 (the `do_span_adjustments` span-stretch clamp — the NUTS-side
 half of the same bug). **Effort:** medium; the payoff is turning the
 opt-in gate always-on cleanly.
+
+**Second flow now blocked on this same discriminator (2026-07-19): the
+`rnr/mix` hanan_loci regression.**  Root-causing the mix–loci flip
+regression (wishlist-topo "mix–loci interaction ROOT-CAUSED") landed
+exactly here: mix's 42 stranded bits (b61 seg1/seg6, b90 seg0) are
+segments the STRICT ladder escalates onto LOW layers (M2/M3) whose full
+span is keepout-dead, because the richer loci pool crowds the TOP bands.
+`nontop_dead_span_gate 1` is the strongest lever (mix loci 42 → 18) but
+over-conservative in the same way (+5 ov, and it regresses mix's baseline
+0/0 → 0/48).  So the always-on discriminator now has **two** corpus
+beneficiaries — bigHalf (−76% no-rr opens) and un-pinning mix from
+`no_hanan_loci` — raising its priority.  Measured non-fixes for mix:
+`kWLSpread 0.125` regresses it (42 → 48), `kPeak 0.1` only partially helps
+(42 → 32).
+
+**The discriminator SIGNAL found — it is FINAL-GEOMETRY, not plan-time
+(2026-07-19, measured on `flow/rnr/mix.buda`).**  Two prototypes:
+- *Plan-time span discrimination is INSUFFICIENT.*  Gating on the CLAMPED
+  routed-extent (corridor between the endpoint cell faces) supply instead
+  of the raw span — the natural "does the keepout cover the whole
+  corridor" test — STILL regresses mix baseline 0/0 → 0/48: mix's
+  SURVIVORS have dead corridors too (`routed_extent` supply == 0), because
+  the true final span is shorter still than the corridor.  The root
+  circularity: DNUTS admits on the NARROW final interval (span-clear OR
+  midpoint pool), while any plan-time gate only has the WIDE slide window
+  — so no plan-time span test separates a cull from a survivor.  (The
+  earlier midpoint-fallback variant fails the mirror way — over-un-fires.)
+- *The FINAL-GEOMETRY (post-NUTS) test is CLEAN.*  Running the exact DNUTS
+  admission test — `count_signal_tracks_in_span` (span-clear) OR
+  `count_signal_tracks_in` (midpoint) — on each LOW segment's ACTUAL
+  placed span + band, after abstract NUTS, fires on **ZERO** LOW segments
+  in mix baseline (no survivor false-positives), because the final
+  interval IS what DNUTS uses.  This is the concrete path to the always-on
+  gate: a **post-NUTS dead-span escalation** — move a genuinely dead LOW
+  segment to a TOP layer with supply and re-solve (the `run_planner
+  post_nuts` insertion class, `nutsflow.py::_run_post_nuts_planner`),
+  driven off placed geometry.  `RoutingGrid::count_signal_tracks_in{,_span}`
+  are Python-bound; the C++ `span_signal_supply` computes the same on
+  placed geometry.
+
+**BUILT — opt-in `set_dead_span_escalate on` (2026-07-19).**
+`nutsflow.py::_escalate_dead_low_segments`, wired into `cmd_run_nuts` behind
+the session flag (default OFF = every checked-in flow bit-identical).  After
+each `run_nuts`, every LOW segment whose ACTUAL placed geometry (`span_lo/hi`
++ `interval_lo/hi`) offers zero keepout-clear signal tracks — the exact
+DNUTS admission test: `count_signal_tracks_in_span` (span-clear) then the
+`count_signal_tracks_in` midpoint fallback — is moved to the cheapest
+same-direction TOP layer (`seg_layers[si]`) and NUTS re-solves; iterate until
+no dead LOW segment remains (a segment pinned to TOP never returns to LOW, so
+the LOW set strictly shrinks — termination guaranteed).  Corpus A/B (flag on
+vs off, `ov`/`unpl`):
+
+| flow | baseline | escalate | Δ |
+|---|---|---|---|
+| bigHalf | 5 / 315 | **3 / 171** | opens −144, ov −2 |
+| mix (loci on) | 0 / 42 | **0 / 16** | opens −26, ov 0 |
+| mix (baseline) | 0 / 0 | 0 / 0 | no-op (clean signal) |
+| b44, big2, channel_stress, comprehensive_demo, hbundles/10, b4_bus_077 | — | — | bit-identical |
+| mempool_tile | 61 / 2976 | 90 / 2913 | opens −63 but **ov +29** |
+
+So it is OPT-IN, not default: the two clean beneficiaries are bigHalf and
+un-pinning mix from `no_hanan_loci`; the pathological `mempool_tile` stress
+demo (already 2976 opens) trades opens for overlaps when it escalates onto its
+crowded TOP bands — the one regression, and why default-off matters.  mix's
+full un-pinning still needs the LOW-supply capacity fix too (~2/3; see
+wishlist-topo "mix–loci").  Tested: `test/tests/test_dead_span_escalate.py`
+(keepout-dead LOW stub strands 8 bits off; escalation moves it to TOP and
+places; a live LOW stub is left in place — no false positives; default off).
+
+**FOLDED INTO THE HEALERS — default ON (2026-07-19).**
+`ripup.py::_heal_dead_spans`, called at the top of both stage-b healers
+(`_ripup_reroute` / `_negotiate_congestion`) before the hill-climb: a dead
+LOW segment is a guaranteed open no candidate re-pin can reach (a
+layer-assignment fault, not a topology-selection one), so escalate it to TOP
+ONCE up front and let the healer's own loop absorb any collateral overlap —
+the same "escalate, then heal the fallout" contract the planner escalations
+use.  Crucially the fold is **structurally safe as a default**: only
+stage-b (DNUTS-open) healer runs are touched, escalation strictly reduces
+opens (a dead LOW segment strands 100% of its bits), and the manual opt-in's
+one regressor — `mempool_tile` — runs NO healer, so it is out of scope by
+construction.  Corpus A/B over every healer-running flow (fold off = main, on
+= default):
+
+| flow | off (main) | on (fold) | esc | Δ |
+|---|---|---|---|---|
+| bigHalf | 5 / 315 | **5 / 179** | 2 | opens −136, ov 0 |
+| slowdown_rnr | 0 / 42 | **0 / 32** | 3 | opens −10, ov 0 |
+| mix, b61, mix2, mix2_fast, big2, datapath×2, synth×3 | — | unchanged | 0–2 | no-op |
+
+Two clean wins, zero regressions, no overlap cost anywhere.  `mix2`/`mix2_fast`
+still open (73 / 256) with esc 0 — their opens are the LOW-supply-contention
+class, NOT keepout-dead, so the fold correctly leaves them for the companion
+LOW-supply capacity fix (see wishlist-topo "mix–loci").  Off-switch:
+`_heal_dead_spans_in_healers = False` (study/bisect).  Tested:
+`test/tests/test_dead_span_heal_fold.py`.  The manual `set_dead_span_escalate`
+(run_nuts-level) stays for healer-less flows.
+
+**TIMING REFINEMENT — escalate at `run_nuts`, before the healers (2026-07-19).**
+The stage-b fold arrives AFTER the stage-a healers have already committed
+around the un-escalated layout, so the escalated bundle lands in a
+pre-arranged crowd.  Running the SAME escalation at `run_nuts` — before any
+healer — lets the whole negotiate/ripup cascade adapt around the escalated
+layers.  `cmd_run_nuts` now escalates automatically when a healer is ahead
+(the `_healers_in_flow` scan the kSegsRel default uses; the manual
+`set_dead_span_escalate` still forces it), and the stage-b fold STILL runs
+too — the two compose (a segment already moved to TOP is not re-found).
+Measured-best is BOTH: run_nuts-timing fixes flows the late fold alone
+leaves open, while the fold recovers the one flow the early pass alone
+regresses.  Corpus A/B (fresh build, real config — kSegsRel + healersAhead
+active; OLD = fold only, NEW = run_nuts + fold):
+
+| flow | off (fold only) | on (run_nuts + fold) | Δ |
+|---|---|---|---|
+| mix (as-checked-in) | 1 / 16 | **0 / 0** | opens −16, ov −1 |
+| bigHalf | 1 / 190 | **1 / 94** | opens −96 |
+| mix-loci, slowdown_rnr, big2, b61 | 0 / 0 | 0 / 0 | already clean |
+| mix2 | 2 / 42 | 2 / 42 | fold recovers (no regression) |
+| mix2_fast | 33 / 256 | 33 / 256 | unchanged |
+
+Two clean wins, zero regressions.  Rollback/study knob
+`_dead_span_auto_at_run_nuts = False` forces the stage-b-only timing.  This
+is also what closed the mix–loci follow-on (wishlist-topo): with kSegsRel on,
+mix-loci was already 0/0, and the 42/32/16 figures were a scriptless-harness
+artifact (no `script_path` → `_healers_in_flow` False → kSegsRel silently
+off).
+
+**AT ITS CLEAN LIMIT — the plan-time always-on gate is SUPERSEDED, and the
+supply-short extension is measured & REJECTED (2026-07-19).**  The literal
+open item — flip the plan-time `nontop_dead_span_gate` always-on — is a dead
+end: no plan-time span test separates a cull from a survivor (documented
+above), and the post-NUTS escalation now delivers the same goal reactively
+off placed geometry.  So the discriminator IS the escalation, and it clears
+every *keepout-dead* (pool == 0) LOW segment.  What remains open is a DIFFERENT
+class.  Classifying bigHalf's residual **94 opens** (default, real config) on
+final geometry: **48 are LOW supply-short** (`max(span,mid) pool < nbits` —
+some tracks, just too few) and **46 are LOW pool ≥ nbits** (abstract band OK,
+real per-track OCCUPANCY short — contention).  Neither is keepout-dead.
+Extending the escalation trigger from `pool == 0` to `pool < nbits`
+(supply-short), even with a capacity-aware max-pool TOP target AND a
+`target pool ≥ nbits` gate, **regresses bigHalf 94 → 270 opens** (+2 ov):
+`count_signal_tracks_in{,_span}` sees keepout-clear tracks but NOT occupancy,
+so escalating ~48 supply-short segments floods TOP's already-used bands and
+cascades into far more opens than it fixes.  A *dead* segment strands 100% of
+its bits regardless (2–3 per flow, TOP absorbs them — a layer-assignment
+fault); a *supply-short* segment already places SOME bits on LOW, and forcing
+48 of them onto a crowded TOP just relocates the shortage.  Conclusion: the
+residual is a genuine **TOP-capacity** shortage, not a dead-span fault — it
+needs occupancy-aware planning / better topology selection to LOWER the LOW
+demand (fewer bits forced onto starved bands), not more escalation.  Tracked
+as its own item; the dead-span escalation is CLOSED at its clean limit.
 
 ## A metal *above* the TOP band is still a top metal — config-smell WARNING shipped; auto-override measured & rejected
 
@@ -326,10 +476,90 @@ the level-1 suite.
 **Default-flip: still gated.**  The remaining discriminators: (i) mix's
 dislike of the honest-books mode at BOTH levels (its heal budget is tuned
 to legacy anchors — same class as its kPeak sensitivity); (ii) the
-alignment-sibling placement remains unpredicted (b44's seg3 residual);
+alignment-sibling placement remains unpredicted (b44's seg3 residual — a
+LEVEL-3 static predictor was PROTOTYPED AND REJECTED, detailed below);
 (iii) goldens must be regenerated on the reference host.  The kPeak
 hybrid-floor fixture refit (their pulled segment asserts books-only
 anchors) also waits on the flip.
+
+**The alignment-sibling prediction — PROTOTYPED & REJECTED (2026-07-19,
+static heuristic insufficient; it is a genuine placement fixed-point).**
+NUTS's START-time placement chain (`nuts.cpp` solve loop, ~L1600–1656)
+picks a segment's target track in strict priority: (1) cross-layer
+split-side bound → (2) **alignment sibling** → (3) junction anchor →
+(4) charged pull target → (5) interval centre.  Level 1 taught the planner
+to charge at member (4)'s predicted target; level 2 predicted member (3).
+Member (2) — the alignment sibling — sits ABOVE both and is still charged
+wrong.  An *alignment sibling* is a same-bundle segment sharing a
+perpendicular connector (Pass 3, `nuts.cpp:210` — `rev_conn_map[T]` lists
+the segments whose span follows trunk `T`; any two sharing `T` are
+siblings, e.g. a multicast trunk's stubs on opposite sides).  When one is
+already placed and its track fits the current segment's centre range, the
+current segment lands EXACTLY on the sibling's track
+(`nuts.cpp:1605–1613`), collapsing the split onto one shared track — free,
+since same-bundle bits never conflict, and a win for DNUTS bit-sharing; it
+exists to break the wirelength-neutral trunk deadlock (moving one sibling
+alone leaves the others pinning the junction).
+
+*Why it is the HARDEST member to predict.*  Levels 1–2 are functions of
+STATIC topology geometry — the pull breakpoint is a slope crossing; the
+junction anchor clamps into a partner's nominal span; both knowable at
+plan time.  The alignment target is `sibling.track_position` — a RUNTIME
+output of the sweep, wherever that sibling landed, which depends on sweep
+order and the whole occupancy state.  It is not a geometric constant but a
+FIXED POINT of the placement itself.
+
+*The concrete residual (b44 seg3, the outlier pinned in
+`test_planner_charge_pull_target.py`; reproduced on the pinned
+`TRUNK_H+MST@y11915` staircase at level 2).*  seg1 (V, pull −1) and seg3
+(V, pull +1) are siblings sharing the H connector seg5 (pull −1).  The
+planner charges seg3 at its own upward pull target (2642), but NUTS
+collapses seg1/seg3 onto ONE track at 1200 (seg5 → zero): seg1 lands at
+its charge (div 0), seg3 lands on seg1's track, off its 2642 charge
+(**div 1442**).  3 of 4 pulled charges are exact; seg3 is the residual.
+
+*The prototype (`charge_pull_target 3`, graded above level 2).*  Build
+alignment groups from `conn_segs` (same-orientation segs sharing a
+perpendicular SEG-conn partner, union-find).  For each group, charge every
+pulled member at the predicted collapse track — the extreme member anchor
+in the group's NET-PULL direction (members + the SHARED connector's pull:
+the b44 seg5 tie-breaker, only connectors touching ≥2 members vote),
+clamped into the group's common slide window.  **On b44 this WORKS:** net
+= seg1(−1)+seg3(+1)+seg5(−1) = −1 → collapse low → both charge 1200, seg3
+div 1442 → **0**, all 4 pulled charges exact.
+
+*Why REJECTED — the static rule cannot tell a real collapse from an
+independent placement.*  Two same-orientation segments sharing a connector
+are only POTENTIAL siblings; whether they actually merge onto one track is
+the sweep fixed-point, invisible at plan time.  Measured (level 3 vs 2,
+each flow AS CHECKED IN incl. its healers):
+  - **Blanket group override:** endpoint REGRESSIONS — big2 dnuts-unplaced
+    84 → 184 and overlaps 2 → 4, bigHalf worst books-divergence 662 →
+    4185; mix happened to improve (ov 1 → 0, WL −0.6%) but by luck, not
+    prediction quality.
+  - **Tightened to the clean case** (exactly two pulled siblings, opposite
+    pull signs — b44's shape): endpoint-NEUTRAL corpus-wide, but STILL
+    false-positives — `demo/comprehensive_demo` bundle 3 seg7 (H, pull +1)
+    charges AND places at its own pull target 748 at level 2 (div 0, no
+    collapse), yet the level-3 detector groups it with a non-merging
+    sibling and charges it at a phantom 652 → a **new** 96-unit divergence
+    where there was none.  A books-honesty feature that dishonest-ifies
+    some books is self-defeating, and it does NOT reduce the big2/bigHalf
+    residuals (56 → 57, 22 → 22) — it only fixes b44 by the net-pull
+    direction coincidentally matching.
+
+*Conclusion.*  The collapse track is a true fixed-point of the sweep; no
+static plan-time heuristic distinguishes a merging sibling pair from an
+independent one.  A reliable prediction needs a NUTS-side pre-solve signal
+— an actual alignment-group resolution pass run at plan time (place the
+group in isolation, read the collapse) — which is a larger build than the
+level-1/2 geometric predictions and out of proportion to the payoff
+(endpoint-neutral on today's corpus; only b44's pinned staircase moves).
+Prototype reverted; the `band_occupants` PLACED-position overlay (Phase 1)
+already lets ripup attribute a mispredicted aligned segment correctly, so
+the downstream damage is contained even with the charge left approximate.
+Gate (ii) for the default flip therefore stands, downgraded from
+"unpredicted" to "predictable only via a NUTS-side pass, deferred".
 
 ## Realization-risk WL: rank on the envelope, not just the nominal — `kWLSpread` SHIPPED (opt-in)
 

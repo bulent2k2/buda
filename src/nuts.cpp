@@ -68,7 +68,10 @@ static void build_nuts_maps(
     std::set<std::pair<int,int>> jog_set;   // dogleg jogs: excluded from alignment
     // Pass 1 — nominal perpendicular position from the topology.
     for (const auto& bw : bundles) {
-        if (bw.input.candidates.empty() || bw.plan.selected_topology_index < 0) continue;
+        if (bw.input.candidates.empty() ||
+            bw.plan.selected_topology_index < 0 ||
+            bw.plan.selected_topology_index >= (int)bw.input.candidates.size())
+            continue;   // out-of-range index is UB (audit C1-02)
         const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
         int bid = bw.input.original_bundle.id;
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
@@ -83,7 +86,10 @@ static void build_nuts_maps(
 
     // Pass 2 — connectivity-based override.
     for (const auto& bw : bundles) {
-        if (bw.input.candidates.empty() || bw.plan.selected_topology_index < 0) continue;
+        if (bw.input.candidates.empty() ||
+            bw.plan.selected_topology_index < 0 ||
+            bw.plan.selected_topology_index >= (int)bw.input.candidates.size())
+            continue;   // out-of-range index is UB (audit C1-02)
         const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
         int bid = bw.input.original_bundle.id;
 
@@ -1078,16 +1084,25 @@ void NUTSEngine::add_fixed_segments(const std::vector<TrackSegment>& segs) {
         KeepoutZone koz;
         koz.layer_ids = {s.layer};
         const double h = s.width / 2.0;
+        // Widen the ALONG span by 1 unit (audit C2-02): keepout_occupied's
+        // span test is STRICT, but the overlap metric (segs_overlap) treats
+        // the along span as CLOSED — an end-to-end touch counts as a DRC. So
+        // a free segment placed with its span ending exactly at a fixed
+        // segment's span start, on the same track, passed the solver's
+        // (STRICT) keepout gate yet compute_metrics then reported an overlap
+        // the solver never saw. The +1 makes the touch a strict overlap here,
+        // matching the metric. The perp/track axis stays STRICT (segs_overlap
+        // uses a strict track test), so adjacent tracks are not over-blocked.
         if (s.horiz) {
-            koz.bbox = Rect{(int)std::floor(sp_lo(s)),
+            koz.bbox = Rect{(int)std::floor(sp_lo(s)) - 1,
                             (int)std::floor(s.track_position - h),
-                            (int)std::ceil (sp_hi(s)),
+                            (int)std::ceil (sp_hi(s)) + 1,
                             (int)std::ceil (s.track_position + h)};
         } else {
             koz.bbox = Rect{(int)std::floor(s.track_position - h),
-                            (int)std::floor(sp_lo(s)),
+                            (int)std::floor(sp_lo(s)) - 1,
                             (int)std::ceil (s.track_position + h),
-                            (int)std::ceil (sp_hi(s))};
+                            (int)std::ceil (sp_hi(s)) + 1};
         }
         fixed_zones_.push_back(std::move(koz));
     }
@@ -1180,7 +1195,10 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
 {
     std::vector<TrackSegment> result;
     for (const auto& bw : bundles) {
-        if (bw.input.candidates.empty() || bw.plan.selected_topology_index < 0) continue;
+        if (bw.input.candidates.empty() ||
+            bw.plan.selected_topology_index < 0 ||
+            bw.plan.selected_topology_index >= (int)bw.input.candidates.size())
+            continue;   // out-of-range index is UB (audit C1-02)
         // A fixed (bottom-up copy) bundle is never re-solved: its already-
         // placed segments are appended to the result verbatim instead.
         if (fixed_bundle_ids_.count(bw.input.original_bundle.id)) continue;
@@ -2300,7 +2318,8 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     for (int bid : doglegged_bids)
         for (const auto& bw : bundles)
             if (bw.input.original_bundle.id == bid &&
-                bw.plan.selected_topology_index >= 0) {
+                bw.plan.selected_topology_index >= 0 &&
+                bw.plan.selected_topology_index < (int)bw.input.candidates.size()) {
                 out.result.dogleg_topologies[bid] =
                     bw.input.candidates[bw.plan.selected_topology_index];
                 out.result.dogleg_seg_layers[bid]    = bw.plan.seg_layers;

@@ -238,7 +238,11 @@ class DefVizData:
             for c in comps:
                 if c.depth != d:
                     continue
-                if c.x1 > 0:
+                # x1 >= 0 is placed; the import_verilog placeholder sentinel is
+                # exactly -1 (audit T3-02: `> 0` dropped a leaf legitimately at
+                # the die's left edge, x==0, which has no children to rebuild a
+                # bbox from and vanished from inst_info).
+                if c.x1 >= 0:
                     computed[c.id] = (c.x1, c.y1, c.x2, c.y2)
                 else:
                     kids = [computed[cid] for cid in children.get(c.id, []) if cid in computed]

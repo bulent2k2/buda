@@ -1332,6 +1332,29 @@ class HierMixin:
             name = f"{cell}90_{i}"
         return name
 
+    def _clone_gen_knobs(self, base, bundle_id):
+        """Overlay a bundle's persisted v15 generation-knob memo on `base`
+        (the bulk/default (center, double_detour, multi_trunk, hanan_loci)
+        tuple), returning the effective clone-generation knobs.  On the
+        load_pipeline resume path `_hier_gen_knobs` is unset and `base` is the
+        all-default fallback, so without this the clone candidates would be
+        generated coarser than the pool they mirror (audit P2-02)."""
+        if self.bdb is None:
+            return base
+        memo = self.bdb.bundle_gen_knobs(str(bundle_id))
+        if not memo:
+            return base
+        ks = set(memo.split())
+        loci = base[3]
+        if "no_hanan_loci" in ks:
+            loci = False
+        elif "hanan_loci" in ks:
+            loci = True
+        return (base[0] or "center_mode" in ks,
+                base[1] or "double_detour" in ks,
+                base[2] or "multi_trunk" in ks,
+                loci)
+
     def _split_bottom_up_rotation_classes(self):
         """Give each marked cell's 90°-rotated instance class its OWN
         template — the rotation-class CLONE.  Within the 90° family
@@ -1444,6 +1467,13 @@ class HierMixin:
             if plan is None or not b.cell_context:
                 continue
             keep, rot, cname, bref, cell, origin_tid = plan
+            # Per-template generation knobs: overlay this template's persisted
+            # v15 memo on the bulk/default base, so a load_pipeline resume (no
+            # _hier_gen_knobs set — generate_hier_topologies never ran this
+            # session) still generates the clone candidates with the same
+            # knobs the original pool used, instead of silently falling back
+            # to all-defaults (audit P2-02).
+            bk = self._clone_gen_knobs(knobs, b.id)
             # Clone-side instance order: the class reference first (when
             # this bundle has it), so the group solves share one frame.
             order_rot = ([bref] + sorted(i for i in rot if i != bref)
@@ -1477,17 +1507,17 @@ class HierMixin:
                 # Candidates generated from the owning side's reference —
                 # real per-direction layer costs on the class's actual
                 # cell-local floorplan.
-                self._generate_hier_topo_one(nw, knobs[0], knobs[1],
+                self._generate_hier_topo_one(nw, bk[0], bk[1],
                                              fp_cache, comps_by_name,
-                                             knobs[2],
-                                             use_hanan_loci=knobs[3])
+                                             bk[2],
+                                             use_hanan_loci=bk[3])
                 if ref_moved:
                     # The kept side lost the instance its candidates were
                     # generated from — regenerate in its new frame.
-                    self._generate_hier_topo_one(w, knobs[0], knobs[1],
+                    self._generate_hier_topo_one(w, bk[0], bk[1],
                                                  fp_cache, comps_by_name,
-                                                 knobs[2],
-                                                 use_hanan_loci=knobs[3])
+                                                 bk[2],
+                                                 use_hanan_loci=bk[3])
             else:
                 # Rotated-only template: the WHOLE bundle belongs to the
                 # clone class — re-context in place (same id, nets, and
@@ -1504,10 +1534,10 @@ class HierMixin:
                 if order_rot[0] != old_ref:
                     # Its candidates were generated from old_ref's frame —
                     # regenerate from the class reference.
-                    self._generate_hier_topo_one(w, knobs[0], knobs[1],
+                    self._generate_hier_topo_one(w, bk[0], bk[1],
                                                  fp_cache, comps_by_name,
-                                                 knobs[2],
-                                                 use_hanan_loci=knobs[3])
+                                                 bk[2],
+                                                 use_hanan_loci=bk[3])
         if not made:
             return 0
         self.bundles = result
@@ -1539,6 +1569,39 @@ class HierMixin:
         with."""
         if "refine_passes" not in self._planner_params:
             planner.set_planner_param("refine_passes", 1.0)
+
+    def _check_bottom_up_frame(self, wrappers, comps, cell):
+        """Guard the single-frame assumption of a bottom-up cell's group solve
+        (audit P1-03).  Each template's candidates are generated in its OWN
+        instances[0] cell-local frame, but the group solve builds ONE floorplan
+        from wrappers[0].instances[0] and orientation-transforms every copy
+        relative to it.  A template whose reference has a DIFFERENT orientation
+        (a bus present only in a mirrored/rotated instance subset — S/FN/FS are
+        NOT split into rotation-class clones) would therefore be charged and
+        placed in the wrong frame and DOUBLE-transformed on copy, landing its
+        fixed segments at wrong absolute coordinates (a silent open).  Same
+        orientation but a different instance is fine — the origin-normalized
+        cell-local floorplan is identical — so the check keys on ORIENTATION,
+        not instance identity.  Fail LOUD rather than emit misplaced copies."""
+        if len(wrappers) < 2:
+            return
+        ref_inst = wrappers[0].input.original_bundle.instances[0]
+        orients = self._detect_instance_orients(
+            self._bu_cell_of(cell), comps, ref_name=ref_inst)
+        ref_o = orients.get(ref_inst, "N")
+        for w in wrappers[1:]:
+            wi = w.input.original_bundle.instances[0]
+            wo = orients.get(wi, "N")
+            if wo != ref_o:
+                raise RuntimeError(
+                    f"bottom-up cell '{cell}': template bundle "
+                    f"{w.input.original_bundle.id} generated its candidates from "
+                    f"instance '{wi}' (orient {wo!r}), a different cell-local "
+                    f"frame than the group reference '{ref_inst}' (orient "
+                    f"{ref_o!r}).  Solving them together would misplace the "
+                    f"copied routing (audit P1-03).  Give the cell's internal "
+                    f"buses a uniform reference orientation, or unset "
+                    f"set_bottom_up for this cell to route it top-down.")
 
     def _plan_bottom_up_templates(self, iterations):
         """Stage (a) of bottom-up template planning: solve each marked cell's
@@ -1593,6 +1656,7 @@ class HierMixin:
                                for w in by_cell[c]))
         for cell in deepest_first:
             wrappers = by_cell[cell]
+            self._check_bottom_up_frame(wrappers, None, cell)
             fp = self._build_cell_local_floorplan(
                 wrappers[0].input.original_bundle.instances[0])
             if fp is None:
@@ -1602,6 +1666,11 @@ class HierMixin:
             planner = buda.CongestionPlanner(fp, self.layers)
             for pname, pval in self._planner_params.items():
                 planner.set_planner_param(pname, pval)
+            # Same healer-gate declaration as the global planner (Codex
+            # #342): the cell-local template solve must run under the SAME
+            # objective, or expansion locks in selections a suppressed env
+            # default made differently.
+            self._apply_healers_ahead(planner)
             self._apply_hier_refine_default(planner)
             planner.set_track_pitch(self._nuts_pitch)
             planner.build_congestion_map()
@@ -1682,8 +1751,22 @@ class HierMixin:
         cache = getattr(self, "_bu_fixed_cache", None)
         if cache is not None:
             return cache
-        fixed = []
+        # Publish the cache only on SUCCESS (audit P2-01): an exception during
+        # the local NUTS solve / dogleg-adoption loop below must not leave a
+        # permanently-cached PARTIAL (or empty) list that every later call
+        # returns silently.  Compute into a local, cache at the end / on
+        # exception reset to None.
+        try:
+            fixed = self._bottom_up_fixed_segments_compute()
+        except BaseException:
+            self._bu_fixed_cache = None
+            raise
         self._bu_fixed_cache = fixed
+        return fixed
+
+    def _bottom_up_fixed_segments_compute(self):
+        """The uncached body of _bottom_up_fixed_segments (audit P2-01)."""
+        fixed = []
         if not getattr(self, "_planner_is_hier", False) or self.bdb is None:
             return fixed
         bu_cells = set(self.bdb.bottom_up_cells())
@@ -1712,7 +1795,6 @@ class HierMixin:
                       f"restored from the persisted NUTS routing")
                 return fixed
             fixed = []
-            self._bu_fixed_cache = fixed
         if not templates:
             locked_ids = {w.input.original_bundle.id for w in self.bundles
                           if w.hier.locked}
@@ -1741,6 +1823,7 @@ class HierMixin:
             by_cell.setdefault(b.cell_context, []).append(w)
         for cell in sorted(by_cell):
             wrappers = by_cell[cell]
+            self._check_bottom_up_frame(wrappers, comps.values(), cell)
             fp = self._build_cell_local_floorplan(
                 wrappers[0].input.original_bundle.instances[0])
             if fp is None:
@@ -2081,7 +2164,9 @@ class HierMixin:
                       "not gate it.")
             return self._check_template_tracks_placement(verbose=verbose)
         verdict = {}
-        self._template_track_verdict = verdict
+        # Cache published only after the fill completes (audit P2-01): an
+        # exception mid-fill must not leave a partial verdict cached — which
+        # would then silently DISABLE the bottom-up track gate on the next call.
         if self.routing_grid is None and verbose:
             print("check_template_tracks: no routing grid defined "
                   "(def_track_pattern) — nothing to compare yet; alignment "
@@ -2202,6 +2287,7 @@ class HierMixin:
                           f"{len(aligned)} instance(s) see identical signal "
                           f"tracks (ref {ref_name}, {n_windows} window(s) "
                           f"compared)")
+        self._template_track_verdict = verdict   # publish on success (P2-01)
         return verdict
 
     def _grid_layer_dirs(self):

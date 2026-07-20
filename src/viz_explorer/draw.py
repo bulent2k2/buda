@@ -243,6 +243,39 @@ class ExplorerDrawMixin:
                                 ha='left' if label == 'lo' else 'right', zorder=5, alpha=0.85)
 
 
+    def _draw_slide_mark_line(self, ct):
+        """The 'W' refine's echo marker: the FIRST captured slide bound as a
+        transient dashed line at its EFFECTIVE coordinate — re-snapped or raw
+        per the current gridded/gridless sub-mode, exactly what the banner
+        echoes — drawn across the marked segment's along extent so the user
+        sees where the bound landed before committing the second press.
+        Lives and dies with `_edit_slide_mark` (second `W` applies, `w`
+        clears, session close discards)."""
+        cs_list = list(ct.segs())
+        si, raw = self._edit_slide_mark
+        if not (0 <= si < len(cs_list)):
+            return
+        cs = cs_list[si]
+        coord = self._slide_snap(raw, cs.horiz)
+        col = _LAYER_COLOR.get(self._edit_topo.segments[si].layer_hint,
+                               '#888888')
+        mode = "grid" if self._edit_slide_grid else "free"
+        ext = max((cs.along_hi - cs.along_lo) * 0.15, 1.0)
+        a_lo, a_hi = cs.along_lo - ext, cs.along_hi + ext
+        if cs.horiz:
+            self.ax.plot([a_lo, a_hi], [coord, coord], color=col,
+                         linewidth=1.6, linestyle='--', alpha=0.95, zorder=6)
+            self.ax.text(a_hi, coord, f' W:{coord:.0f} [{mode}]',
+                         fontsize=7, color=col, va='center', ha='left',
+                         zorder=6)
+        else:
+            self.ax.plot([coord, coord], [a_lo, a_hi], color=col,
+                         linewidth=1.6, linestyle='--', alpha=0.95, zorder=6)
+            self.ax.text(coord, a_hi, f' W:{coord:.0f} [{mode}]',
+                         fontsize=7, color=col, va='bottom', ha='center',
+                         zorder=6)
+
+
     def _redraw_topo(self):
         # We trigger a fig_redraw so the UI state updates correctly.
         self.fig_redraw()
@@ -428,6 +461,12 @@ class ExplorerDrawMixin:
         # pass below — segments, slide spans, busterm markers — skips the same
         # set (a layer turned off in the main viz shows no artifacts here).
         def _resolved_lid(i):
+            # During a TopoEdit session the WORKING COPY governs the display:
+            # a '+'/'-' layer edit changes seg.layer_hint (what commit
+            # persists), so honor it over the stale sidecar/planner layers
+            # (audit P7-03).
+            if getattr(self, '_edit_topo', None) is not None:
+                return topo.segments[i].layer_hint
             if is_current_selection and sel and 'seg_layers' in sel:
                 pinned = sel['seg_layers']
                 if len(pinned) == len(topo.segments):
@@ -609,6 +648,11 @@ class ExplorerDrawMixin:
 
         # Slide-range bands (drawn before segments so segments sit on top)
         self._draw_slide_spans(topo, ct)
+
+        # W refine in progress: echo the first captured slide bound so the
+        # user sees where it landed before committing the second.
+        if self._edit_topo is not None and self._edit_slide_mark is not None:
+            self._draw_slide_mark_line(ct)
 
         # Busterm diamonds (on top of segments and junction dots)
         self._draw_busterm_markers(topo, ct, viz_lw)

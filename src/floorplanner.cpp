@@ -346,18 +346,66 @@ void FloorplannerEngine::write_bdb(BDB& db) const {
         ordered.push_back(&b);
     std::sort(ordered.begin(), ordered.end(),
               [](const Block* a, const Block* b) {
-                  return std::count(a->name.begin(), a->name.end(), '/') <
-                         std::count(b->name.begin(), b->name.end(), '/');
+                  // Parents first (fewer '/'); a name tiebreak makes the order
+                  // TOTAL so the ambiguous-cell disambiguation below is
+                  // deterministic. Cell/comp writes are order-independent for
+                  // non-ambiguous blocks, so this changes no existing output.
+                  int ca = (int)std::count(a->name.begin(), a->name.end(), '/');
+                  int cb = (int)std::count(b->name.begin(), b->name.end(), '/');
+                  if (ca != cb) return ca < cb;
+                  return a->name < b->name;
               });
 
     std::map<std::string, bool> exists;
     for (const auto& c : db.all_components())
         exists[c.name] = true;
 
+    // A cell name derived from only the LEAF name collides when two blocks of
+    // DIFFERENT size share a leaf under different parents ('top1/core' 10x10
+    // vs 'top2/core' 20x20) — add_cell upserts, so the last writer's dims
+    // overwrite the cell and the other component's metadata goes wrong (audit
+    // C11-07). Pre-scan for leaf names carrying differing sizes and key those
+    // off the FULL path instead; congruent same-leaf instances still share
+    // one cell (order-independent, so no change to existing outputs).
+    std::map<std::string, std::pair<double, double>> leaf_dims;
+    std::set<std::string> ambiguous_leaf;
+    for (const Block* b : ordered) {
+        std::string leaf = _leaf_name(b->name);
+        double w = b->x2 - b->x1, h = b->y2 - b->y1;
+        auto it = leaf_dims.find(leaf);
+        if (it == leaf_dims.end()) leaf_dims[leaf] = {w, h};
+        else if (std::abs(it->second.first - w) > 1e-9 ||
+                 std::abs(it->second.second - h) > 1e-9)
+            ambiguous_leaf.insert(leaf);
+    }
+    // Reserve the fixed non-ambiguous cell names, then assign each ambiguous
+    // block a cell name derived from its full path — but VERIFIED unique
+    // against the reserved set and prior ambiguous names (PR #348 review): the
+    // raw '/'->'_' flatten could otherwise collide with a real leaf-derived
+    // name (e.g. 'top/core' -> 'top_core_cell', the same name a block literally
+    // named 'top_core' gets), re-introducing the very cell-dims overwrite this
+    // fix removes.  A '_<k>' suffix breaks any residual collision.
+    std::set<std::string> used;
+    for (const Block* b : ordered)
+        if (!ambiguous_leaf.count(_leaf_name(b->name)))
+            used.insert(_leaf_name(b->name) + "_cell");
+    std::map<const Block*, std::string> cell_by_block;
+    for (const Block* b : ordered) {
+        std::string leaf = _leaf_name(b->name);
+        if (!ambiguous_leaf.count(leaf)) { cell_by_block[b] = leaf + "_cell"; continue; }
+        std::string p = b->name;
+        std::replace(p.begin(), p.end(), '/', '_');
+        std::string base = p + "_cell", name = base;
+        int k = 2;
+        while (used.count(name)) name = base + "_" + std::to_string(k++);
+        used.insert(name);
+        cell_by_block[b] = name;
+    }
+
     for (const Block* b : ordered) {
         double w = b->x2 - b->x1;
         double h = b->y2 - b->y1;
-        std::string cell   = _leaf_name(b->name) + "_cell";
+        std::string cell   = cell_by_block[b];
         std::string parent = _parent_path(b->name);
         bool is_leaf = (has_children.count(b->name) == 0);
         db.add_cell(cell, w, h);

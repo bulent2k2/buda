@@ -649,6 +649,9 @@ private:
     // Return the id of net `name`, creating a name-only row if absent (used by
     // add_bundle_net so flat-flow nets can be keyed by net_id).
     int  _ensure_net(const std::string& name);
+    // Insert the net_props row a net needs to appear in compute_hpwl/fanout and
+    // nets_by_hpwl (idempotent) — the DEF/Verilog/label importers all do this.
+    void _ensure_net_props(int net_id);
     // Upsert a meta(key,value) row.
     void _set_meta(const std::string& key, const std::string& value);
     // Insert a pin for net_id at the component named inst_path, auto-register

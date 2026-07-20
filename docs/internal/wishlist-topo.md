@@ -376,24 +376,70 @@ family as the mix–loci interaction below (the richer pool shifts what the
 heal loop converges to), and the first debugging step is the same
 occupancy/trial trace on the loci pool.
 
-**Follow-on — root-cause the mix–loci interaction (OPEN, from the flip):**
+**Follow-on — mix–loci interaction ROOT-CAUSED (2026-07-19, still PINNED-OUT):**
 on `flow/rnr/mix.buda` the RICHER default-on pool degrades the fully-healed
 endpoint (0 ov / 0 opens → 0 / 42, det WL +0.13%, heal loop ~3× slower)
-with **zero DISCONNECTED candidates** in pool or selection — not a
-soundness hole but a selection/feedback pathology: more floor-tied loci
-candidates shift the hier planner's picks and the negotiate/ripup loops
-converge onto realizations whose real signal-track supply falls short
-(the signal_tracks repro inverts too: width 300 vs signal_tracks 332
-opens on the loci pool — test_planner_signal_tracks' pinned fixture).
-Same sensitivity class as the `kPeak` record (wishlist-planner "Selection
-basis": big2's healers prefer the knob off — selection perturbations and
-the healing feedback loops double-steer when untuned).  Until root-caused,
-mix is PINNED-OUT (`no_hanan_loci` on its generation line — owner decision
-2026-07-19).  Investigation sketch: replay mix's shifted bundles under
-both pools and find which cost term (or healer metric) fails to price the
-loci realizations — candidates: the kWLSpread envelope on edge-aligned
-optima, `kPeak`'s absolute-supply floor, and ripup's lexicographic metric
-being blind to supply-short bands below overflow.
+with **zero DISCONNECTED candidates** in pool or selection.  Reproduces
+identically on today's kSegsRel-0.02-default planner (the flip predates the
+kSegsRel default; re-measured to confirm the default did not change it).
+
+**Root cause — LOW-layer dead-span escalation, NOT a WL / selection-envelope
+bug.**  The 42 stranded bits are exactly `check_design` bundles **b61 seg1
+(16) + seg6 (16)** and **b90 seg0 (10)** — "no track in DetailedNUTS".
+Tracing their abstract layer assignments across the two pools is decisive:
+b90 keeps the SAME selection (`TRUNK_V+MST@x1790`) yet its seg0 flips from
+**M5 (TOP)** on the baseline pool to **M3 (LOW)** on the loci pool; b61's
+strand segments land on **M2/M3** (LOW) vs M4/M5 baseline.  Mechanism: the
+richer floor-tied loci pool shifts ~48 OTHER bundles' picks, which crowd
+the TOP-layer bands around b61/b90's region; the STRICT escalation ladder
+then pushes the contended segments DOWN to LOW layers whose per-cut band
+capacity PASSES but whose FULL span sits over a leaf-footprint keepout with
+ZERO DNUTS-placeable signal tracks → strand.  This is precisely the
+**`nontop_dead_span_gate` blind spot** (wishlist-planner) — the loci pool
+is only the TRIGGER (extra TOP contention), not a new failure mode.  The
+regression is already present PRE-healer (loci plain 18 ov / 332 unpl vs
+baseline 12 / 209), so it is a planner LAYER-ASSIGNMENT fault the healers
+inherit, not a ripup blindness.
+
+**The three doc-sketch suspects, resolved by measurement (loci-on, injected
+before `run_planner`):**
+- `kWLSpread 0.125` → **RULED OUT**: makes it WORSE (42 → 48).  The strand
+  is not a WL-envelope mis-pricing of edge-aligned optima.
+- `kPeak 0.1` → **PARTIAL** (42 → 32): its absolute-supply floor catches
+  some supply-short LOW bands — the right FAMILY (supply), incomplete.
+- ripup's lexicographic metric → **not primary**: the strand exists
+  pre-healer; ripup cannot fix it because once contention pushes those
+  segments off TOP, the only legal LOW layers are dead-span.
+- `nontop_dead_span_gate 1` → **strongest, but over-conservative** (loci
+  42 → 18 but +5 ov; and it regresses the BASELINE 0/0 → 0/48).  Exactly
+  the gate's own documented open problem: `span_pool == 0` over the
+  conservative abstract span can't tell a genuine cull from a survivor.
+
+**Conclusion.**  mix–loci is the SAME open item as the `nontop_dead_span_gate`
+**always-on discriminator** (wishlist-planner): a post-placement-aware
+predictor — does the keepout cover the WHOLE routed extent (→ escalate to
+TOP) or only part (→ leave on LOW)? — would fix both bigHalf (the gate's
+original target) AND mix-loci cleanly, letting mix un-pin from
+`no_hanan_loci`.  The `signal_tracks` inversion the earlier note cited (width
+300 vs signal_tracks 332 opens, `test_planner_signal_tracks`) is the same
+mechanism: signal-track capacity surfaces the LOW-band shortfall as more
+overflow, which escalation then routes into the dead spans.
+
+**✅ RESOLVED (2026-07-19).**  Re-measured on today's real CLI config
+(kSegsRel-0.02 default + the merged healer dead-span fold, both gated on
+`_healers_in_flow`) with a FRESH build: `rnr/mix` with `hanan_loci` ON is
+**0 ov / 0 opens** — already clean, on par with the pinned `no_hanan_loci`
+config.  The earlier 42/32/16 figures were an **artifact of a scriptless
+measurement harness** that never set `script_path`, so `_healers_in_flow`
+returned False and the kSegsRel default (which is gated on it) silently did
+not apply — i.e. they measured a planner that does not exist in the real
+flow.  With kSegsRel active the loci-shifted LOW-band crowding the dead-span
+story described never materializes.  The "PINNED-OUT / LOW-supply ~2/3"
+follow-on is therefore closed; mix may un-pin whenever the flip checklist
+above is executed.  A companion planner change (escalate dead-LOW spans at
+`run_nuts`, before the healers — wishlist-planner "dead-span discriminator")
+additionally cleaned the as-checked-in `rnr/mix` (1/16 → 0/0) and cut
+bigHalf's no-rr opens (190 → 94), with mix2/mix2_fast/big2 unchanged.
 
 **Pre-flip verdict record (2026-07-18, post-gate stressed corpus):** the
 wins SURVIVE the gate — and are now honest

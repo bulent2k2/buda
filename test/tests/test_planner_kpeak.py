@@ -40,7 +40,9 @@ import contextlib
 import buda_cli
 
 
-def _route(kpeak):
+def _route(kpeak, extra=()):
+    """`extra` = additional set_planner_param lines before run_planner
+    (used by the kSegs/kPeak interaction tests in test_planner_ksegs.py)."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     cmds = ["def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
@@ -56,6 +58,7 @@ def _route(kpeak):
             "run_bundler strict", "generate_topologies"]
     if kpeak > 0:
         cmds.append(f"set_planner_param kPeak {kpeak}")
+    cmds += list(extra)
     cmds += ["run_planner", "run_nuts"]
     with contextlib.redirect_stdout(io.StringIO()):
         for c in cmds:

@@ -337,9 +337,14 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
     def __init__(self, floorplan, bundles, sidecar_path=None, rerun_layer_fn=None,
                  rerun_fn=None, routing_grid=None, layer_stack=None,
                  net_endpoints=None, ipc_session=None, ipc_verbose=False,
-                 fp_resolver=None):
+                 fp_resolver=None, cuts_provider=None):
         self.fp           = floorplan
         self.bundles      = bundles
+        # () -> (cuts, x_grid, y_grid) | None: fresh planner cut/band state for
+        # the congestion heatmap, so an in-GUI re-run can redraw the overlay
+        # against the RE-ROUTED design instead of leaving the stale original
+        # planner run's utilisation shaded on screen (audit P7-05).
+        self._cuts_provider = cuts_provider
         # Forwarded to the TopologyExplorer it opens ('v'): per-bundle frame
         # resolution for hier sessions (see TopologyExplorer.__init__).  The
         # main viz itself always draws the session floorplan.
@@ -687,16 +692,16 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
 
         # ── Bundle list: ▲ · list · ▼ ───────────────────────────────────
         ax_bscroll_up = self.fig.add_axes(_rect(SCROLL_H, GAP))
-        btn_bscroll_up = Button(ax_bscroll_up, '▲', color='#f0f0f0')
-        btn_bscroll_up.on_clicked(lambda _: self._scroll_bundles_page(-1))
+        self._btn_bscroll_up = Button(ax_bscroll_up, '▲', color='#f0f0f0')
+        self._btn_bscroll_up.on_clicked(lambda _: self._scroll_bundles_page(-1))
 
         self._ax_bundles = self.fig.add_axes(_rect(bundle_list_h))
         self._ax_bundles.set_facecolor('#fafafa')
         self._redraw_bundle_list()
 
         ax_bscroll_dn = self.fig.add_axes(_rect(SCROLL_H))
-        btn_bscroll_dn = Button(ax_bscroll_dn, '▼', color='#f0f0f0')
-        btn_bscroll_dn.on_clicked(lambda _: self._scroll_bundles_page(+1))
+        self._btn_bscroll_dn = Button(ax_bscroll_dn, '▼', color='#f0f0f0')
+        self._btn_bscroll_dn.on_clicked(lambda _: self._scroll_bundles_page(+1))
 
         # ── All Overlaps ─────────────────────────────────────────────────
         n_ov = len(self._overlap_entries)
@@ -759,17 +764,17 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
         ax_bnext = self.fig.add_axes([0.30, _by, 0.14, _bh])
         ax_topos = self.fig.add_axes([0.45, _by, 0.21, _bh])
 
-        btn_bprev = Button(ax_bprev, '◀  Prev Bundle', color='#ddeeff')
-        btn_bprev.on_clicked(lambda _: self._step_bundle(-1))
+        self._btn_bprev = Button(ax_bprev, '◀  Prev Bundle', color='#ddeeff')
+        self._btn_bprev.on_clicked(lambda _: self._step_bundle(-1))
 
         self._btn_solo = Button(ax_solo, 'Solo OFF', color='#f0f0f0')
         self._btn_solo.on_clicked(lambda _: self._toggle_solo())
 
-        btn_bnext = Button(ax_bnext, 'Next Bundle  ▶', color='#ddeeff')
-        btn_bnext.on_clicked(lambda _: self._step_bundle(+1))
+        self._btn_bnext = Button(ax_bnext, 'Next Bundle  ▶', color='#ddeeff')
+        self._btn_bnext.on_clicked(lambda _: self._step_bundle(+1))
 
-        btn_topos = Button(ax_topos, 'View Topologies  ↗', color='#fff0cc')
-        btn_topos.on_clicked(lambda _: self._open_topo_explorer())
+        self._btn_topos = Button(ax_topos, 'View Topologies  ↗', color='#fff0cc')
+        self._btn_topos.on_clicked(lambda _: self._open_topo_explorer())
 
         if self._ipc_session:
             import sys as _sys, os as _os

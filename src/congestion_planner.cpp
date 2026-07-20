@@ -37,6 +37,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "kSegs")             kSegs_             = value;
     else if (name == "kSegsRel")          kSegsRel_          = value;
     else if (name == "kSegsGate")         kSegsGate_         = value;
+    else if (name == "healersAhead")      healersAhead_      = value;
     else if (name == "kBalance")          kBalance_          = value;
     else if (name == "kHeight")           kHeight_           = value;
     else if (name == "kPeak")             kPeak_             = value;
@@ -155,6 +156,10 @@ void CongestionPlanner::warn_above_top_layers_() {
 
 void CongestionPlanner::rebuild_cuts_() {
     cuts_.clear();
+    // Injected-demand records key cuts by index; a rebuild reorders/resizes
+    // cuts_, so the records are meaningless afterward (audit C3-03).  Drop
+    // them here rather than letting apply_injected_ mischarge a reordered cut.
+    injected_.clear();
     if (x_grid_.size() < 2 || y_grid_.size() < 2) return;
 
     auto blocks   = floorplan_.get_all_blocks();
@@ -1336,11 +1341,35 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         // is per-candidate, so a candidate heading into FULL bands pays no
         // penalty — a perverse incentive that makes stress attractive.
         // Kept opt-in for reproducing the study.
-        if (ksegs_eff_ > 0.0) {
+        // G3b (audit): the two-level datapath trees BITRUNK_HVH/VHV exist in
+        // the pool ONLY when the user passed `multi_trunk` — an explicit
+        // request for exactly these many-segment shapes, whose 5-14% WL win
+        // the generic penalty was measured to invert (datapath abstract WL
+        // +16-23% at kSegsRel 0.02, multi losing its edge over plain).  An
+        // explicit opt-in outranks a generic prior: exempt them.  The legacy
+        // always-on BITRUNK_H is NOT gated behind the flag and stays priced.
+        const bool opted_in_tree =
+            topo.type.rfind("BITRUNK_HVH", 0) == 0 ||
+            topo.type.rfind("BITRUNK_VHV", 0) == 0;
+        if (ksegs_eff_ > 0.0 && !opted_in_tree) {
             double gate = (kSegsGate_ > 0.0)
                               ? std::max(0.0, 1.0 - topo_peak_fill)
                               : 1.0;
-            wl_est += ksegs_eff_ * gate * (double)topo.segments.size();
+            // Taper-honest weight (audit G3a): charge each segment for its
+            // MEMBER-BIT share (seg_bit_count / nbits) — the sum is the
+            // per-bit average path length in segments, which is what the
+            // junction vias actually scale with.  An untapered candidate
+            // (empty seg_bits: every segment carries every bit) reduces to
+            // n_segments exactly; a fan-in branch carrying 4 of 16 bits
+            // counts 0.25, so a per-bit tapered tree is no longer charged
+            // nseg x all-bits for structure most bits never traverse.
+            double w_segs = (double)topo.segments.size();
+            if (nbits > 0 && !topo.seg_bits.empty()) {
+                w_segs = 0.0;
+                for (int si = 0; si < (int)topo.segments.size(); ++si)
+                    w_segs += (double)seg_n(topo, si) / (double)nbits;
+            }
+            wl_est += ksegs_eff_ * gate * w_segs;
         }
         topo_score += kWL_ * wl_est;
 
@@ -1512,9 +1541,70 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     // off).
     ksegs_eff_ = kSegs_;
     double rel = kSegsRel_;
+    bool rel_is_default = false;
     if (rel < 0.0) {
+        // Unset: BUDA_KSEGS_REL overrides the COMPILED DEFAULT of 0.02 (the
+        // audit's safe-Pareto point; env "0" disables for study runs).  Both
+        // are non-explicit and pass through the gates below; an explicit
+        // set_planner_param kSegsRel bypasses them (the user's own
+        // calibration).
         const char* e = std::getenv("BUDA_KSEGS_REL");
-        rel = (e != nullptr) ? std::atof(e) : 0.0;
+        rel = (e != nullptr) ? std::atof(e) : kDefaultKSegsRel;
+        rel_is_default = (rel > 0.0);
+    }
+    // Intent hierarchy (audit G3b): explicit set_planner_param > the
+    // `multi_trunk` generation opt-in > the DEFAULT (compiled 0.02 / env override).  Gated two-level
+    // trees (BITRUNK_HVH/VHV) exist in a pool only when the user passed
+    // `multi_trunk` — a declaration that trees matter here — and the
+    // measured greedy coupling means a default penalty degrades such flows
+    // even with the trees themselves exempt (row datapath: neighbors'
+    // penalty-shifted selections strand the field in a clean-but-worse
+    // optimum ripup never touches, +15.7% WL).  So the ENV default stands
+    // down for a design whose pools carry gated trees; an explicit
+    // kSegs/kSegsRel still applies in full.
+    if (rel_is_default) {
+        // G1/G2 (audit): the default is only SAFE with healers in the
+        // flow — the 07_wide_fan structural loser and big2's jagged alpha
+        // response are both healed by ripup_reroute (and never without it).
+        // The session declares healersAhead when the flow script contains a
+        // healer command (ripup_reroute / negotiate_congestion); interactive
+        // sessions and harnesses can set it explicitly.  No healers -> the
+        // default stands down.
+        if (healersAhead_ <= 0.0) {
+            std::cout << "[Planner] kSegsRel default suppressed: no "
+                         "healer (ripup_reroute/negotiate_congestion) in the "
+                         "flow (explicit set_planner_param kSegs/kSegsRel "
+                         "still applies).\n";
+            rel = 0.0;
+        }
+        // G4 (audit): a segment penalty is a DETOUR penalty — it was
+        // measured to overwhelm kPeak's sub-capacity routability steering
+        // (the U-detour off a loaded band costs 2 extra segments, and the
+        // env-default penalty out-prices the kPeak term that exists to buy
+        // exactly that detour).  kPeak is an explicit opt-in for
+        // routability-first selection, so it outranks the default the
+        // same way multi_trunk does below; a user setting kSegs/kSegsRel
+        // EXPLICITLY alongside kPeak owns that calibration.
+        if (rel > 0.0 && kPeak_ > 0.0) {
+            std::cout << "[Planner] kSegsRel default suppressed: kPeak "
+                         "routability steering is enabled (explicit "
+                         "set_planner_param kSegs/kSegsRel still applies).\n";
+            rel = 0.0;
+        }
+        for (const auto& bw : bundles) {
+            if (rel == 0.0) break;
+            for (const auto& cand : bw.input.candidates) {
+                if (cand.type.rfind("BITRUNK_HVH", 0) == 0 ||
+                    cand.type.rfind("BITRUNK_VHV", 0) == 0) {
+                    std::cout << "[Planner] kSegsRel default suppressed: "
+                                 "the pool carries multi_trunk two-level "
+                                 "trees (explicit set_planner_param kSegs/"
+                                 "kSegsRel still applies).\n";
+                    rel = 0.0;
+                    break;
+                }
+            }
+        }
     }
     if (rel > 0.0) {
         // Scale from the DESIGN's Hanan extent (the floorplan grid), NOT the
@@ -1623,6 +1713,17 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                     PlanResult theirs = plan_bundle(pw, PlanMode::STRICT);
                     if (theirs.found) {
                         commit_plan(pw, theirs);
+                        // Patch the victim's per-level layer mix (audit C3-02):
+                        // the refine pass patches layer_hist on every accepted
+                        // change, but the rip-up stage did not — so the
+                        // '[Planner] Level summary' kept counting the victim's
+                        // OLD segment layers. Subtract cp.plan's layers, add
+                        // theirs, mirroring the refine pass.
+                        {
+                            LevelStats& vls = level_stats[pw.hier.level];
+                            for (int lid : cp.plan.seg_layers) vls.layer_hist[lid] -= 1;
+                            for (int lid : theirs.seg_layers)  vls.layer_hist[lid] += 1;
+                        }
                         cp.plan = theirs;
                         assignments[cp.asn_idx] = make_assignment(pw, theirs);
                         std::cout << "[Planner] Rip-up: replanned bundle "
@@ -2082,7 +2183,13 @@ std::vector<std::pair<int, double>> CongestionPlanner::band_occupants(
 
 void CongestionPlanner::apply_injected_(double sign) {
     for (const auto& [ci, b, amount] : injected_)
-        if (ci >= 0 && ci < (int)cuts_.size())
+        // Guard the BAND index too, not just the cut index (audit C3-03): a
+        // cuts_ rebuild can shrink a cut's band count, turning a stale record
+        // into an out-of-bounds write into band_usage_.  (rebuild_cuts_ also
+        // clears injected_ now, so cross-rebuild records can't mischarge a
+        // reordered cut — this is the belt-and-braces bound.)
+        if (ci >= 0 && ci < (int)cuts_.size() &&
+            b >= 0 && b < cuts_[ci].num_bands())
             cuts_[ci].add_usage(b, sign * amount);
 }
 

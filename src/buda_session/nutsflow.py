@@ -32,6 +32,60 @@ import buda
 
 class NutsFlowMixin:
 
+    _HEALER_CMDS = ("ripup_reroute", "negotiate_congestion")
+
+    def _healers_in_flow(self):
+        """True when the flow SCRIPT contains a healer command
+        (ripup_reroute / negotiate_congestion), scanning `source`d files
+        recursively from script_path.  Cached; False for interactive /
+        scriptless sessions — the conservative direction for the gate
+        below."""
+        cached = getattr(self, "_healers_in_flow_cache", None)
+        if cached is not None:
+            return cached
+        found = False
+        seen = set()
+
+        def scan(path):
+            nonlocal found
+            rp = os.path.realpath(path)
+            if found or rp in seen or not os.path.exists(rp):
+                return
+            seen.add(rp)
+            try:
+                lines = open(rp).read().splitlines()
+            except OSError:
+                return
+            for ln in lines:
+                ln = ln.split('#', 1)[0].strip()
+                if not ln:
+                    continue
+                parts = ln.split()
+                if parts[0].lower() in self._HEALER_CMDS:
+                    found = True
+                    return
+                if parts[0].lower() == "source" and len(parts) > 1:
+                    scan(os.path.join(os.path.dirname(rp), parts[1]))
+
+        if self.script_path:
+            scan(self.script_path)
+        self._healers_in_flow_cache = found
+        return found
+
+    def _apply_healers_ahead(self, planner, healing_now=False):
+        """Audit G1/G2 gate: declare `healersAhead` to the planner when the
+        flow runs a healer, so the non-explicit kSegsRel default (compiled
+        0.02 / env BUDA_KSEGS_REL override) may apply —
+        the penalty's two measured correctness regressions are both
+        ripup-healed, and real only without healers.  An explicit
+        set_planner_param healersAhead (the harness escape) always wins.
+        `healing_now` = the caller IS a healer (ripup's re-plan) — declare
+        regardless of the script scan (an interactive ripup counts too)."""
+        if "healersAhead" in self._planner_params:
+            return
+        if healing_now or self._healers_in_flow():
+            planner.set_planner_param("healersAhead", 1.0)
+
     @staticmethod
     def _wirelength_by_bundle(segments):
         """Sum routing-direction length |span_hi - span_lo| per bundle and per
@@ -461,8 +515,9 @@ class NutsFlowMixin:
         seg_label = {}
         for w in self.bundles:
             bid   = w.input.original_bundle.id
-            nets  = w.input.original_bundle.get_net_names()
-            hint  = nets[0] if nets else f"B{bid}"
+            # (audit P4-07: the former net-name `hint` local was dead — the
+            # seg_label below keys off the bundle id + layer, not the net —
+            # so it is dropped rather than left computed-but-unused.)
             if not w.input.candidates or w.plan.selected_topology_index < 0 or w.plan.selected_topology_index >= len(w.input.candidates):
                 continue  # bundle has no topology (e.g. src==dst or no candidates generated)
             topo  = w.input.candidates[w.plan.selected_topology_index]
@@ -556,20 +611,6 @@ class NutsFlowMixin:
 
         action = "appended to" if append else "→"
         print(f"NUTS overlap log {action} {log_path}")
-
-    def extract_instances(self, bundle):
-        # Helper to find source/dest instances from a bundle's nets for Topology Generation
-        if not bundle.get_net_names(): return "top", "top"
-        # Hack: assume first net's driver/receiver pins follow instance.pin format
-        first_net_name = bundle.get_net_names()[0]
-        # Find this net in the netlist to get its pins. This is inefficient but works for prototype.
-        # A real implementation would store src/dst instance on the Bundle object itself.
-        driver_pin = ""
-        receiver_pin = ""
-        # C++ Netlist doesn't expose find_net yet, so we rely on the input script naming convention for the demo.
-        # Assuming net name is like 'b1_0' and driver is 'u_cpu.tx'
-        # Let's just pass the block names directly in the script for now to simplify the connection.
-        return "top", "top"
 
     def _run_post_nuts_planner(self,
                                v_thresholds: tuple[float, float] | None,
@@ -689,13 +730,116 @@ class NutsFlowMixin:
         pitch = self._nuts_pitch if hasattr(self, '_nuts_pitch') and self._nuts_pitch else 1.0
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(pitch)
+        # Mirror cmd_run_nuts's engine setup (audit P4-04): re-derive the
+        # selected candidates' fan-in taper and feed the planner's extra grid
+        # points, so this final solve runs against the SAME Hanan grid as the
+        # run_nuts result it replaces (a coarser grid could otherwise move
+        # segments the post-NUTS layer reassignment did not intend to touch).
+        self._derive_fanin_bits_all(selected_only=True)
         self._inject_bottom_up_fixed(nuts)
+        if self.planner is not None:
+            nuts.set_extra_grid_points(
+                list(self.planner.get_x_grid()),
+                list(self.planner.get_y_grid()))
         self.nuts_result = nuts.run(self.bundles)
         self._adopt_doglegs()
 
         layer_names = self._make_layer_names()
         self._write_nuts_log(layer_names, append=True, rerun_layer_name="post_nuts",
                              extra_lines=extra_lines)
+
+        # The abstract solve just changed; a detailed route from the PREVIOUS
+        # solve is now stale (audit P4-03).  Re-run it (as _rerun_all does) so
+        # the session's detailed_result matches the new bus placement, rather
+        # than leaving an inconsistent route live.
+        if self.detailed_result is not None:
+            self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+
+    def _escalate_dead_low_segments(self, max_iter: int = 5) -> int:
+        """Post-NUTS dead-span escalation (opt-in: `set_dead_span_escalate on`).
+
+        After abstract NUTS, a LOW-layer segment whose ACTUAL placed geometry
+        (its span + Hanan interval) offers ZERO keepout-clear signal tracks —
+        by the exact DetailedNUTS admission test (span-clear pool OR the
+        midpoint-fallback pool) — is a guaranteed DNUTS open: its bits have
+        nowhere to land.  The plan-time `nontop_dead_span_gate` cannot
+        separate these from survivors (the wide slide window vs the narrow
+        final interval — see wishlist-planner "dead-span discriminator"), but
+        the FINAL placed geometry can: the same test on placed spans fires on
+        ZERO survivor segments.  Move each genuinely-dead LOW segment to the
+        cheapest same-direction TOP layer (which carries full signal supply)
+        and re-solve, iterating until no dead LOW segment remains (a segment
+        pinned to TOP never returns to LOW, so the LOW set strictly shrinks —
+        max_iter is only a safety bound).  Returns the total escalations.
+        """
+        if self.nuts_result is None or self.routing_grid is None:
+            return 0
+
+        # Skip locked bottom-up copies: their plan must stay identical to the
+        # placed fixed routing (extraction skips fixed bundles — a reassign
+        # here would diverge plan.seg_layers from the routed copies).
+        wmap = {w.input.original_bundle.id: w for w in self.bundles
+                if not w.hier.locked}
+
+        def _cheapest_top(dir_enum):
+            tops = sorted(l for l in self.layers.get_layer_ids_by_dir(dir_enum)
+                          if self.layers.is_top(l))
+            return tops[0] if tops else None
+
+        top_h = _cheapest_top(buda.LayerDir.HORIZONTAL)
+        top_v = _cheapest_top(buda.LayerDir.VERTICAL)
+
+        total = 0
+        for _ in range(max_iter):
+            moved = 0
+            for seg in self.nuts_result.segments:
+                if not seg.placed or self.layers.is_top(seg.layer):
+                    continue
+                if not self.routing_grid.has_layer(seg.layer):
+                    continue
+                g = self.routing_grid.get_layer_grid(seg.layer)
+                # The exact DNUTS admission test on the PLACED geometry:
+                # span-clear pool, then the midpoint-fallback pool.
+                if g.count_signal_tracks_in_span(seg.span_lo, seg.span_hi,
+                                                 seg.interval_lo, seg.interval_hi) > 0:
+                    continue
+                x = (seg.span_lo + seg.span_hi) / 2.0
+                if g.count_signal_tracks_in(x, seg.interval_lo, seg.interval_hi) > 0:
+                    continue
+                # Genuinely dead — escalate to the same-direction TOP layer.
+                new_layer = top_h if seg.horiz else top_v
+                if new_layer is None or new_layer == seg.layer:
+                    continue
+                w = wmap.get(seg.bundle_id)
+                if w is None or not w.plan.seg_layers:
+                    continue
+                sel = w.plan.selected_topology_index
+                if sel < 0 or sel >= len(w.input.candidates):
+                    continue
+                sl = list(w.plan.seg_layers)
+                if seg.seg_idx >= len(sl) or sl[seg.seg_idx] == new_layer:
+                    continue
+                sl[seg.seg_idx] = new_layer
+                w.plan.seg_layers = sl
+                moved += 1
+            if not moved:
+                break
+            total += moved
+            # Re-solve with the escalated assignments (mirrors cmd_run_nuts's
+            # core, minus persist/log — those run once on the final result).
+            pitch = self._nuts_pitch if getattr(self, '_nuts_pitch', None) else 1.0
+            nuts = buda.NUTSEngine(self.fp, self.layers)
+            nuts.set_track_pitch(pitch)
+            self._derive_fanin_bits_all(selected_only=True)
+            self._inject_bottom_up_fixed(nuts)
+            if self.planner is not None:
+                nuts.set_extra_grid_points(
+                    list(self.planner.get_x_grid()),
+                    list(self.planner.get_y_grid()))
+            with buda.ostream_redirect():
+                self.nuts_result = nuts.run(self.bundles)
+            self._adopt_doglegs()
+        return total
 
     def _segment_states_from_topology(self) -> dict:
         """Build a 'before' snapshot from topology geometry (no track assignment yet).

@@ -126,6 +126,7 @@ def test_ksegs_rel_scales_with_design_hpwl(monkeypatch):
     with contextlib.redirect_stdout(io.StringIO()):
         for c in _B61:
             s2.do_command(c)
+        s2.do_command("set_planner_param healersAhead 1")  # harness escape
         s2.do_command("run_planner")
     w2 = s2.bundles[0]
     t2 = w2.input.candidates[w2.plan.selected_topology_index]
@@ -140,6 +141,225 @@ def test_ksegs_rel_scales_with_design_hpwl(monkeypatch):
         s3.do_command("run_planner")
     w3 = s3.bundles[0]
     assert w3.plan.selected_topology_index == 0
+
+
+def test_ksegs_taper_honest_weight_keeps_fanin_tree():
+    """Audit G3a: the penalty charges each segment for its MEMBER-BIT share
+    (seg_bit_count/nbits — the per-bit average path length), not raw
+    n_segments.  A CONVERGENT fan-in tree (two 8-bit driver stubs onto one
+    trunk: 3 segments, w_segs = 2.0) keeps winning at kSegs=100 where
+    raw-nseg pricing would flip to the 2-seg TRUNK_V:
+      old: 800 + 3*100 = 1100  >  850 + 2*100 = 1050  (tree loses)
+      new: 800 + 2*100 = 1000  <  1050                (tree wins)"""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cmds = ["def_layer 4 M4 H TOP 10", "def_layer 5 M5 V TOP 10",
+            "add_block d1 0 0 100 100", "add_block d2 0 400 100 500",
+            "add_block sink 600 200 700 300"]
+    for i in range(8):
+        cmds += [f"add_net n{i} d1.o{i} sink.i{i}",
+                 f"add_net m{i} d2.p{i} sink.j{i}"]
+    cmds += ["run_bundler CONVERGENT", "set_planner_param kSegs 100",
+             "generate_topologies"]
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    w = s.bundles[0]
+    # Restrict the pool to a CONTROLLED pair (robust to generation churn):
+    #   A: tapered 3-seg TRUNK_H, WL 800 (two 8-bit driver stubs -> w=2.0)
+    #   B: untapered 2-seg TRUNK_V, WL 850
+    # kSegs=100 arithmetic: old (raw nseg): A 800+300 > B 850+200 -> B wins;
+    # new (member-bit share):  A 800+200 < B 850+200 -> A wins.
+    pool = list(w.input.candidates)
+    a = next(c for c in pool if c.type.startswith("TRUNK_H")
+             and len(c.segments) == 3 and c.estimated_wirelength == 800)
+    b = next(c for c in pool if c.type.startswith("TRUNK_V")
+             and len(c.segments) == 2 and c.estimated_wirelength == 850)
+    w.input.candidates = [a, b]
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_planner")       # derives seg_bits, then scores
+    t = w.input.candidates[w.plan.selected_topology_index]
+    assert t.seg_bits, "fan-in taper must be derived before planning"
+    assert t.type.startswith("TRUNK_H") and len(t.segments) == 3
+    assert t.estimated_wirelength == 800
+    nbits = len(w.input.original_bundle.get_net_names())
+    w_segs = sum((len(t.seg_bits.get(si, [])) or nbits)
+                 for si in range(len(t.segments))) / nbits
+    assert w_segs == 2.0                  # each driver stub carries 8/16 bits
+
+
+def test_ksegs_env_default_stands_down_for_multi_trunk(monkeypatch, capsys):
+    """Audit G3b intent hierarchy: explicit set_planner_param > the
+    multi_trunk generation opt-in > the env default.  A design whose pools
+    carry the gated two-level trees (they exist only under `multi_trunk`)
+    suppresses the ENV-DEFAULT penalty entirely — the measured greedy
+    coupling degrades such flows even with the trees themselves exempt —
+    while an explicit kSegsRel still applies (with the trees exempt)."""
+    from test_datapath_multi_trunk_qor import _route, _selected_types
+
+    def vhv(s):
+        return sum(v for k, v in _selected_types(s).items()
+                   if k == "BITRUNK_VHV")
+
+    monkeypatch.delenv("BUDA_KSEGS_REL", raising=False)
+    base = _route("row", True)                    # kSegs fully off
+    monkeypatch.setenv("BUDA_KSEGS_REL", "0.02")
+    capsys.readouterr()
+    env = _route("row", True)                     # env default → suppressed
+    # Byte-identical selections to the kSegs-0 run, and the note printed.
+    assert _selected_types(env) == _selected_types(base)
+    assert vhv(env) == vhv(base) >= 2
+    # Explicit kSegsRel on the same design DOES apply (no suppression):
+    # non-tree candidates are penalized, the gated trees stay exempt.
+    monkeypatch.delenv("BUDA_KSEGS_REL", raising=False)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    import test_datapath_multi_trunk_qor as dp
+    cmds = (dp._LAYERS + dp._blocks_and_buses("row")
+            + ["run_bundler", "set_planner_param kSegsRel 0.02",
+               "generate_topologies multi_trunk", "run_planner"])
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    assert _selected_types(s) != _selected_types(base)   # penalty did act
+
+
+def test_ksegs_env_default_stands_down_for_kpeak(monkeypatch):
+    """Audit G4: a segment penalty is a DETOUR penalty — it overwhelms
+    kPeak's sub-capacity steering (the U-detour off a loaded band costs 2
+    extra segments).  kPeak is an explicit routability opt-in, so the env
+    default stands down for it (same hierarchy as multi_trunk); explicit
+    kSegs/kSegsRel alongside kPeak is the user's own calibration and still
+    applies."""
+    from test_planner_kpeak import _route
+
+    monkeypatch.setenv("BUDA_KSEGS_REL", "0.02")
+    s, sel = _route(0.2, extra=("set_planner_param healersAhead 1",))
+    # The env default stood down: the probe still takes the kPeak detour.
+    assert sel["probe_0"].startswith("U_"), sel
+    # And an explicit kSegsRel alongside kPeak DOES apply: the penalty
+    # out-prices the steering and the probe goes straight — the calibration
+    # the user owns when setting both.
+    monkeypatch.delenv("BUDA_KSEGS_REL", raising=False)
+    s2, sel2 = _route(0.2, extra=("set_planner_param kSegsRel 0.02",))
+    assert sel2["probe_0"].startswith("I_"), sel2
+
+
+def test_ksegs_env_default_healer_gated(monkeypatch, tmp_path):
+    """Audit G1/G2: the env default is only SAFE with healers in the flow
+    (the 07_wide_fan structural loser and big2's jagged alpha response are
+    both ripup-healed, and real only without).  Without a healer the env
+    default stands down; the session detects ripup_reroute /
+    negotiate_congestion in the flow SCRIPT (through `source`) and declares
+    healersAhead; harnesses may declare it explicitly."""
+    monkeypatch.setenv("BUDA_KSEGS_REL", "0.02")
+
+    # 1. Interactive/scriptless session, no healers → suppressed: the
+    #    WL-cheapest candidate keeps winning, and the note names the reason.
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        for c in _B61:
+            s.do_command(c)
+        s.do_command("run_planner")
+    assert s.bundles[0].plan.selected_topology_index == 0
+    assert "no healer" in buf.getvalue()
+
+    # 2. Explicit healersAhead (harness escape) → the default applies.
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in _B61:
+            s2.do_command(c)
+        s2.do_command("set_planner_param healersAhead 1")
+        s2.do_command("run_planner")
+    w2 = s2.bundles[0]
+    assert len(w2.input.candidates[w2.plan.selected_topology_index]
+               .segments) == 5             # the 0.02 sweet spot
+
+    # 3. Script detection: a flow whose SOURCED sub-script runs
+    #    ripup_reroute is a healer flow — the default applies with no
+    #    explicit declaration.
+    sub = tmp_path / "heal.buda"
+    sub.write_text("ripup_reroute\n")
+    flow = tmp_path / "f.buda"
+    flow.write_text("\n".join(_B61)
+                    + "\nrun_planner\nrun_nuts\nsource heal.buda\n")
+    s3 = buda_cli.BudaSession()
+    s3.no_viz = True
+    s3.script_path = str(flow)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s3.do_command(f"source {flow}")
+    w3 = s3.bundles[0]
+    assert len(w3.input.candidates[w3.plan.selected_topology_index]
+               .segments) == 5
+
+
+def test_healers_ahead_declaration_paths(tmp_path):
+    """The _apply_healers_ahead wiring shared by ALL planner-construction
+    sites — global (flat + hier), the bottom-up cell-local template solve,
+    and ripup's hier re-plan (Codex #342): script detection through
+    `source`, the healing_now=True unconditional path (the caller IS a
+    healer), and the explicit-param override."""
+    class FakePlanner:
+        def __init__(self):
+            self.calls = []
+        def set_planner_param(self, n, v):
+            self.calls.append((n, v))
+
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    p = FakePlanner()
+    s._apply_healers_ahead(p)                 # scriptless: nothing declared
+    assert p.calls == []
+    s._apply_healers_ahead(p, healing_now=True)   # ripup's re-plan: always
+    assert p.calls == [("healersAhead", 1.0)]
+
+    flow = tmp_path / "f.buda"
+    sub = tmp_path / "heal.buda"
+    sub.write_text("negotiate_congestion\n")
+    flow.write_text("run_planner\nsource heal.buda\n")
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    s2.script_path = str(flow)
+    p2 = FakePlanner()
+    s2._apply_healers_ahead(p2)               # detected through source
+    assert p2.calls == [("healersAhead", 1.0)]
+
+    s3 = buda_cli.BudaSession()
+    s3.no_viz = True
+    s3.script_path = str(flow)
+    s3._planner_params["healersAhead"] = 0.0  # explicit set wins, even 0
+    p3 = FakePlanner()
+    s3._apply_healers_ahead(p3, healing_now=True)
+    assert p3.calls == []
+
+
+def test_ksegs_compiled_default_engages_gated(monkeypatch, tmp_path):
+    """The audit verdict, flipped: an UNSET kSegsRel now defaults to the
+    COMPILED 0.02 — no env var involved — gated exactly like the env hook
+    was (healers / multi_trunk / kPeak).  BUDA_KSEGS_REL demotes to a study
+    override, with "0" disabling the default even in a healer flow."""
+    monkeypatch.delenv("BUDA_KSEGS_REL", raising=False)
+    flow = tmp_path / "f.buda"
+    flow.write_text("\n".join(_B61)
+                    + "\nrun_planner\nrun_nuts\nripup_reroute\n")
+
+    def run():
+        s = buda_cli.BudaSession()
+        s.no_viz = True
+        s.script_path = str(flow)
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(f"source {flow}")
+        w = s.bundles[0]
+        return len(w.input.candidates[w.plan.selected_topology_index].segments)
+
+    # Healer flow, nothing set anywhere → the compiled default engages.
+    assert run() == 5                     # the 0.02 sweet spot
+    # The env override at "0" DISABLES it, healers or not (study escape).
+    monkeypatch.setenv("BUDA_KSEGS_REL", "0")
+    assert run() == 10                    # back to the WL-cheapest tree
 
 
 def test_ksegs_default_off_keeps_selection():

@@ -138,6 +138,15 @@ class VizHighlightMixin:
         me = getattr(event, 'mouseevent', None)
         if me is not None and me.button == 3:
             return
+        # One mouse press dispatches a SEPARATE pick_event per registered
+        # artist under the cursor; a bus wire always sits inside its own
+        # footprint band, so two events fire for the same bundle and the
+        # toggling _set_highlight cancelled itself out (select-then-deselect).
+        # Dedupe per press by the triggering mouseevent identity (audit P7-02).
+        if me is not None:
+            if getattr(self, '_pick_me_id', None) == id(me):
+                return
+            self._pick_me_id = id(me)
         self._pick_happened = True
         active_reg = (self._detailed_bundle_artists
                       if self.ui_state.detailed_mode else self._bundle_artists)

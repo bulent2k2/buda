@@ -32,7 +32,8 @@ import buda
 
 from .util import (_RR_DEFAULT_MAX_ITER, _RR_FAST_TRIALS_DEFAULT,
                    _RR_GLOBAL_MAX_TRIALS, _RR_GLOBAL_MOVES_PER_OCC,
-                   _RR_GLOBAL_TOP_K, _RR_MAX_CANDIDATES_PER_BUNDLE,
+                   _RR_GLOBAL_TOP_K, _RR_HEAL_DEAD_SPANS_DEFAULT,
+                   _RR_MAX_CANDIDATES_PER_BUNDLE,
                    _RR_SCREEN_DEFAULT, _RR_SCREEN_TOP_N,
                    _RR_WARM_TRIALS_DEFAULT)
 
@@ -370,6 +371,9 @@ class RipupMixin:
         self.planner = buda.CongestionPlanner(self.fp, self.layers)
         for pname, pval in self._planner_params.items():
             self.planner.set_planner_param(pname, pval)
+        # The caller IS a healer (ripup's hier re-plan), so the env-default
+        # gate is satisfied by construction — script scan or not.
+        self._apply_healers_ahead(self.planner, healing_now=True)
         self._apply_hier_refine_default(self.planner)
         self.planner.set_track_pitch(self._nuts_pitch)
         self._planner_pitch = self._nuts_pitch
@@ -1238,6 +1242,58 @@ class RipupMixin:
                 self._rr_t_add_passes('dnuts',
                                       self.detailed_result.pass_seconds)
 
+    def _heal_dead_spans(self, stage):
+        """Preconditioning step folded into the stage-b healers.
+
+        A LOW-layer segment whose ACTUAL placed geometry offers zero
+        keepout-clear signal tracks (the exact DetailedNUTS admission test —
+        `_escalate_dead_low_segments`) is a guaranteed DNUTS open that NO
+        candidate re-pin can fix: it is a layer-assignment fault, not a
+        topology-selection one, so the healers' hill-climb (which re-pins
+        candidates / replans off contended bands) can grind on it forever.
+        Escalating each such segment to the cheapest same-direction TOP layer
+        strictly reduces opens (a dead LOW segment strands 100% of its bits;
+        TOP carries full supply), so we run it ONCE before the hill-climb and
+        let the healer's own loop absorb any collateral overlap the re-solve
+        surfaces — the same "escalate, then heal the fallout" contract the
+        planner escalations already rely on.
+
+        Stage b only (opens); a no-op when nothing is dead.  Returns the
+        number of segments escalated.  Honors `_heal_dead_spans_in_healers`
+        (default on) so a study run / regression bisect can disable it."""
+        if stage != 'b' or self.nuts_result is None:
+            return 0
+        if not getattr(self, '_heal_dead_spans_in_healers',
+                       _RR_HEAL_DEAD_SPANS_DEFAULT):
+            return 0
+        # NOTE: this stage-b fold runs even when cmd_run_nuts already
+        # escalated at run_nuts (the earlier, before-the-healers timing).
+        # Running BOTH is measured-best: the run_nuts escalation fixes the
+        # flows the late fold alone leaves open (mix 16->0, bigHalf 190->94),
+        # while the late fold recovers the one flow the early escalation alone
+        # regresses (mix2 stays 42, not 66).  A dead LOW segment the early
+        # pass already moved to TOP is simply not re-found here (no-op), so
+        # the two passes compose without conflict.
+        n = self._escalate_dead_low_segments()
+        if n:
+            # Refresh the stage-b metric off the escalated abstract solve.
+            self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+            print(f"[heal] dead-span escalation: moved {n} dead LOW "
+                  f"segment(s) to a TOP layer and re-solved before the "
+                  f"hill-climb.", flush=True)
+            # Persist the heal even if no later hill-climb move follows: the
+            # escalation mutated seg_layers and re-solved through the
+            # no-persist NUTS/DNUTS helpers, so the BDB still holds the
+            # pre-heal LOW-layer route.  Without this, a heal-only fix (all
+            # opens cleared by escalation, no committed move) would be lost on
+            # load_pipeline.  Idempotent — a following commit re-persists the
+            # final state.
+            if self.bdb is not None:
+                self._checkpoint_routing()
+                print(f"[BDB] re-persisted routing after dead-span "
+                      f"escalation ({n} segment(s)).")
+        return n
+
     def _negotiate_congestion(self, max_iter=5):
         """Measured-congestion negotiation (wishlist-ripup item 1).  Instead of
         guess-and-test over topology candidates, feed the ACTUAL failures back
@@ -1278,7 +1334,17 @@ class RipupMixin:
                               self.nuts_result.num_overlaps)
         else:
             metric = lambda: self.nuts_result.num_overlaps         # noqa: E731
+        # Fold in the dead-span escalation before the hill-climb (stage b):
+        # clear the guaranteed opens no replan can reach, then let negotiate
+        # heal the fallout.
+        self._heal_dead_spans(stage)
         m0 = metric()
+        # Opens-only primary check (NOT the full-metric one ripup uses after a
+        # heal): negotiate's stage-b engine injects DNUTS-OPEN segments only —
+        # it has no mechanism to reduce NUTS overlaps in stage b, so once the
+        # heal has cleared the opens there is genuinely nothing for negotiate
+        # to do and any overlap fallout is deferred to ripup_reroute (the
+        # documented finisher).  The heal's own checkpoint persists the route.
         if self._rr_m_primary(m0) == 0:
             print(f"[negotiate] stage {stage}: metric already 0 — nothing to do.")
             return
@@ -1407,8 +1473,25 @@ class RipupMixin:
         # certificate stays a full COLD sweep.
         warm = _RR_WARM_TRIALS_DEFAULT if warm is None else warm
 
+        # Fold in the dead-span escalation before the hill-climb (stage b):
+        # a dead LOW segment is a guaranteed open no candidate re-pin reaches,
+        # so escalate it to TOP first and let ripup heal the fallout.
+        n_heal = self._heal_dead_spans(stage)
+
         m0 = metric()
-        if self._rr_m_primary(m0) == 0:
+        # A heal that moved routing may clear the opens but leave (or surface)
+        # NUTS-overlap fallout.  In stage b the loop grinds that overlap once
+        # opens hit 0 (contenders include the overlap partners), so after a
+        # heal the entry "nothing to do" check must look at the FULL metric,
+        # not the opens-only primary — else the fallout the escalation was
+        # meant to hand off is stranded.  With no heal, keep the historical
+        # primary check (do not start a run just to chase pre-existing
+        # abstract overlaps).
+        if n_heal:
+            entry_clean = (m0 == (0, 0)) if isinstance(m0, tuple) else (m0 == 0)
+        else:
+            entry_clean = (self._rr_m_primary(m0) == 0)
+        if entry_clean:
             print(f"[ripup_reroute] stage {stage}: metric already 0 — nothing to do.")
             return
         what = "DNUTS opens" if stage == 'b' else "NUTS overlaps"
