@@ -810,19 +810,26 @@ def test_inline_comment_boundary_rules(tmp_path):
 
 @pytest.mark.slow
 def test_bighalf_rr_reaches_clean_endpoint(tmp_path):
-    """bigHalf with both ripup_reroute lines enabled reaches the clean
-    0 overlaps / 0 opens endpoint (ReadMe_bigHalf row 6).  Since opens #10
-    the checked-in bigHalf.buda ENABLES both ripup_reroute lines; this test
-    re-runs it with a generous max_iter for host tolerance (tc3a NUTS-stage
-    counts are FP/CPU-sensitive under -march=native, so the ENDPOINT is
-    asserted, never intermediate counts or wall time; the trial budget
-    bound guards against a trial-count blowup regression).  The regex-inject
-    stays robust whether the source keeps the lines enabled or reverts them
-    to the commented fast config — the endpoint is CI-guarded either way."""
+    """bigHalf reaches the clean 0 overlaps / 0 opens endpoint (ReadMe_bigHalf
+    row 6).  Since opens #10 the checked-in bigHalf.buda ENABLES both
+    `ripup_reroute 30` lines, so this test runs the checked-in flow AS-IS
+    (only the relative `source` paths are absolutised for tmp_path) — the
+    committed max_iter is what gets guarded, not a rewritten one, so a
+    host that needs >10 iterations to converge fails here exactly as it
+    would for a user running the flow.  The ENDPOINT is asserted, never
+    intermediate counts or wall time (tc3a NUTS-stage counts are FP/CPU-
+    sensitive under -march=native); the trial-budget bound guards against a
+    trial-count blowup regression.  If the source is ever reverted to the
+    bare/commented fast config, the normalise below re-injects the 30 budget
+    so the endpoint stays CI-guarded either way."""
     src = FLOW / "big_data_test" / "bigHalf.buda"
     text = src.read_text()
+    # Guard the COMMITTED budget: run as-is when the flow already carries a
+    # numeric max_iter; only inject 30 if the source was reverted to bare or
+    # commented form (so the test never silently guards a budget the flow
+    # doesn't have).
     text = text.replace("# ripup_reroute", "ripup_reroute")     # legacy commented form
-    text = re.sub(r"(?m)^ripup_reroute\s*$", "ripup_reroute 30", text)
+    text = re.sub(r"(?m)^ripup_reroute\s*$", "ripup_reroute 30", text)  # bare -> budgeted
     text = text.replace("source ../tracks/",
                         f"source {FLOW / 'tracks'}/")
     text = text.replace("source tc3a_flat_5x.buda",
