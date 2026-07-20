@@ -41,6 +41,11 @@
   #candbar { position: absolute; top: 8px; left: 8px; background: #000a; color: #fff;
              padding: 6px 10px; border-radius: 5px; }
   #candbar button { background: #fff2; color: #fff; border: 1px solid #fff4; }
+  #editpanel { border: 1px solid #8884; border-radius: 4px; padding: 6px;
+               display: flex; flex-direction: column; gap: 5px; }
+  #editverdict { font-size: 12px; }
+  #editverdict.ok { color: #2a7; } #editverdict.bad { color: #e33; }
+  .seg.edit { stroke-dasharray: none; opacity: 1; }
 </style>
 </head>
 <body>
@@ -73,19 +78,35 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
     <button onclick="setView('detailed')">detailed</button>
   </div>
   <div id="log"></div>
+  <div id="editpanel" hidden>
+    <b>edit</b> <span id="editsrc"></span>
+    <div id="editverdict"></div>
+    <div class="row">
+      <input id="editop" placeholder="edit_add_trunk H 700" style="flex:1;font:inherit" />
+      <button onclick="editApply()">Apply</button>
+    </div>
+    <div class="row">
+      <button onclick="editCommit(false)">Commit</button>
+      <button onclick="editCommit(true)">Commit + pin</button>
+      <button onclick="editAbort()">Abort</button>
+    </div>
+    <div style="font-size:11px;opacity:.7">ops: edit_add_trunk H|V &lt;perp&gt; · edit_add_stub &lt;block&gt; &lt;seg&gt; · edit_set_span &lt;seg&gt; &lt;lo&gt; &lt;hi&gt; · edit_connect &lt;i&gt; &lt;j&gt; · edit_remove_segment &lt;seg&gt;</div>
+  </div>
 </div>
 <div id="main">
   <div id="candbar" hidden>
     <button onclick="stepCand(-1)">◀</button>
     <span id="candlbl"></span>
     <button onclick="stepCand(1)">▶</button>
+    <button onclick="editOpen()">Edit</button>
+    <button onclick="editOpen('new')">Edit new</button>
   </div>
   <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
 </div>
 
 <script>
 const API = "/api";
-let RENDER = null, CAND = 0, VIEW = "generation";
+let RENDER = null, CAND = 0, VIEW = "generation", EDIT = null;
 
 async function post(path, body) {
   const r = await fetch(API + path, {method: "POST",
@@ -133,6 +154,35 @@ function stepCand(d) {
   if (!n) return;
   CAND = (CAND + d + n) % n; draw();
 }
+
+// ── interactive edit ───────────────────────────────────────────────────────
+function applyEdit(resp) {
+  EDIT = resp.edit && resp.edit.open ? resp.edit : null;
+  const panel = document.getElementById("editpanel");
+  panel.hidden = !EDIT;
+  if (EDIT) {
+    document.getElementById("editsrc").textContent =
+      `bundle ${EDIT.bundle_id} — ${EDIT.src || ""}`;
+    const v = EDIT.verdict || {};
+    const vd = document.getElementById("editverdict");
+    vd.className = v.ok ? "ok" : "bad";
+    vd.textContent = v.ok ? `ok · ${EDIT.topology.segments.length} segs · ${v.components} component(s)`
+      : `NOT ok · ${(v.violations||[]).map(x=>x.kind).join(", ")} · ${v.components} component(s)`;
+  }
+  if (resp.result) log(resp.result.summary || (resp.result.ok ? "(ok)" : "(failed)"));
+  draw();
+}
+async function editOpen(cand) {
+  const c = cand === "new" ? "new" : CAND;
+  VIEW = "generation";                          // an uncommitted edit is topo-only
+  applyEdit(await post("/edit/open", {bundle: 1, candidate: c}));
+}
+async function editApply() {
+  const cmd = document.getElementById("editop").value.trim();
+  if (cmd) applyEdit(await post("/edit/op", {command: cmd}));
+}
+async function editCommit(pin) { applyEdit(await post("/edit/commit", {pin})); await refresh(); }
+async function editAbort() { applyEdit(await post("/edit/abort", {})); }
 
 // ── SVG rendering ──────────────────────────────────────────────────────────
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -239,11 +289,18 @@ function computeDisplay(analysis) {
 }
 
 function drawGeneration(g, W, H) {
-  const bundle = RENDER.bundles[0];
-  if (!bundle) return;
-  const cand = bundle.candidates[CAND];
-  document.getElementById("candlbl").textContent =
-    `bundle ${bundle.id} · cand ${CAND + 1}/${bundle.candidates.length} · ${cand.type} · WL ${cand.estimated_wirelength}`;
+  let cand, lbl;
+  if (EDIT) {                                   // draw the edit working copy
+    cand = EDIT.topology;
+    lbl = `EDITING bundle ${EDIT.bundle_id} · ${cand.segments.length} seg(s)`;
+  } else {
+    const bundle = RENDER.bundles[0];
+    if (!bundle) return;
+    cand = bundle.candidates[CAND];
+    lbl = `bundle ${bundle.id} · cand ${CAND + 1}/${bundle.candidates.length} · ${cand.type} · WL ${cand.estimated_wirelength}`;
+  }
+  document.getElementById("candlbl").textContent = lbl;
+  if (!cand.analysis.length && !cand.segments.length) return;
   const disp = computeDisplay(cand.analysis);
   cand.analysis.forEach((a, i) => {
     const s = cand.segments[i];

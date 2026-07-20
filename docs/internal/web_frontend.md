@@ -32,8 +32,13 @@ Three thin modules over a single headless `BudaSession`:
   manager. `BUDA_WEB_DEV=1` enables permissive CORS for a Vite dev server.
 
 Routes: `POST /api/command {cmds:[str]}`, `GET /api/state`,
-`GET /api/render/{generation,nuts,detailed}?bundle=&candidate=`, `POST /api/reset`,
-`GET /api/health`. The render serializers
+`GET /api/render/{generation,nuts,detailed}?bundle=&candidate=`,
+`POST /api/edit/{open,op,commit,abort}`, `POST /api/reset`, `GET /api/health`.
+The edit routes drive the headless `edit_*` engine through `run_one` (open a
+working copy on a candidate or `new`, apply one `edit_*` op, commit a `USER`
+candidate or abort); each response carries the live `EditVerdict`
+(`serialize_verdict`, re-judged via `buda.edit_verdict`) + the working-copy
+topology so the client shows connectivity violations inline. The render serializers
 (`serialize_floorplan/hanan/topology/conn_topology/bundle/generation`,
 `serialize_nuts`, `serialize_detailed`) mirror `tools/topo_snapshot.py`;
 ConnTopology slide/pull sentinels serialize as JSON `null`, conn order is
