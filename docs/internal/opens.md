@@ -63,17 +63,19 @@ items this page doesn't see).
    ([`wishlist-planner.md`](wishlist-planner.md) →
    *"Realization-risk WL"*).
 
-10. **The `bigHalf.buda` rr flip (decision, then a two-line edit)** —
-   re-enable the flow's two commented `ripup_reroute` lines now that the
-   RR arc has taken the clean 0/0 endpoint from ~49s to **~12.4s flow
-   wall** on the reference host (~8s of rr+negotiate on top of the ~4.5s
-   no-rr config, same host; rounds 3–5, see *Resolved (by 2026-07-15)*
-   below).  This was
-   the rider on the resolved screen item: the affordability bar ("next
-   to the ~5.7s no-rr config") is a judgment call, not a code change —
-   the endpoint stays CI-guarded by
-   `test_bighalf_rr_reaches_clean_endpoint` either way, and
-   `ReadMe_bigHalf.md` carries the row history to decide from.
+10. **The `bigHalf.buda` rr flip — ✅ DONE (2026-07-20).**  Both
+   `ripup_reroute 30` lines are now enabled in the checked-in flow (the
+   `30` = the host-tolerant max_iter the endpoint test guards; ripup stops
+   early at 0/0 so it costs nothing on a fast host), which reaches the clean
+   **0 overlaps / 0 opens** endpoint (was ~1/94 with negotiate only).  Decision backed by a healer-effectiveness sweep of
+   the 15 nested flows that have DNUTS opens without RR: `ripup_reroute`
+   drives 6 of them (bigHalf, big2_noviz, tc3b_flat, hbundles/06 & 07,
+   big_3bundles_pure_mst) to a clean 0/0 that `negotiate_congestion` alone
+   does not reach — negotiate is the cheap first pass (≈0.3–2s, halves the
+   opens) and ripup is the finisher (2–5× slower, closes them).  The
+   endpoint stays CI-guarded by `test_bighalf_rr_reaches_clean_endpoint`
+   (now re-runs the checked-in flow with a max_iter-30 host-tolerance
+   inject, robust whether the lines are enabled or reverted).
 
 8. **Bundler follow-on corners (hier)** —
    [`wishlist-bundler.md`](wishlist-bundler.md) → *"Remaining corners"*.
