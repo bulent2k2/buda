@@ -111,9 +111,20 @@ MSG
         exit 1
     fi
     ( cd "$REPO_DIR/web" && sbt fullLinkJS )
-    # fullLinkJS emits under buda-web-opt/ (fastLinkJS -> buda-web-fastopt/);
-    # glob the scala-x.y.z dir so a compiler bump doesn't break the copy.
-    BUNDLE=$(ls "$REPO_DIR"/web/target/scala-*/buda-web-opt/main.js 2>/dev/null | head -1)
+    # fullLinkJS emits under scala-<scalaVersion>/buda-web-opt/ (Scala 3 names the
+    # dir with the FULL version). Target that exact dir — read scalaVersion from
+    # build.sbt — so a stale scala-* dir left by an old version can't be copied
+    # instead of the just-built one (which a lexicographic `ls | head -1` would
+    # do after a scalaVersion bump). Fall back to the newest matching bundle by
+    # mtime (the sbt run just wrote it) if build.sbt can't be parsed.
+    SCALAV=$(sed -n 's/^[[:space:]]*scalaVersion[[:space:]]*:=[[:space:]]*"\([^"]*\)".*/\1/p' \
+             "$REPO_DIR/web/build.sbt" | head -1)
+    BUNDLE=""
+    if [ -n "$SCALAV" ] && [ -f "$REPO_DIR/web/target/scala-$SCALAV/buda-web-opt/main.js" ]; then
+        BUNDLE="$REPO_DIR/web/target/scala-$SCALAV/buda-web-opt/main.js"
+    else
+        BUNDLE=$(ls -t "$REPO_DIR"/web/target/scala-*/buda-web-opt/main.js 2>/dev/null | head -1)
+    fi
     if [ -z "$BUNDLE" ] || [ ! -f "$BUNDLE" ]; then
         echo "Build produced no bundle under web/target/scala-*/buda-web-opt/" >&2
         exit 1
