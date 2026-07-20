@@ -694,6 +694,16 @@ class PersistMixin:
                 pinned = tr.is_pinned
             cands.append(t)
         w.input.candidates = cands
+        # Surface op-log provenance (user_ops meta, written by edit_commit):
+        # a USER candidate restores geometrically either way, but the
+        # how-it-was-built record is worth a pointer at rehydration time.
+        for ci, t in enumerate(cands):
+            if t.type == "USER":
+                entry = self._user_ops_entry(br.id, buda.topo_uid(t))
+                if entry is not None:
+                    print(f"  bundle {br.id} candidate {ci + 1} is USER, "
+                          f"built from {len(entry.get('ops', []))} op(s) — "
+                          f"`dump_user_ops {br.id}` shows them")
         if sel >= 0:
             # Restore the planner's decision so run_nuts can run directly.
             w.plan.selected_topology_index = sel

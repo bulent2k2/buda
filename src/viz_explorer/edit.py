@@ -885,6 +885,13 @@ class ExplorerEditMixin:
             sel['user_topo'] = {'base': self._edit_base,
                                 'ops': list(self._edit_ops)}
             self._save_sidecar()
+        # BDB op-log provenance (live-session parity with the CLI commit):
+        # the sidecar replay lands the ops in the BDB only on a RE-RUN; the
+        # sink stores them now, beside the geometric rows the session's next
+        # persist writes.
+        if self._user_ops_sink is not None and self._edit_ops:
+            self._user_ops_sink(w.input.original_bundle.id, uid,
+                                self._edit_base, list(self._edit_ops))
         self._edit_log_op("edit_commit pin", record=False)
         self._edit_ops, self._edit_base = None, 'new'
         self._edit_msg = f"EDIT: {note}, pinned"

@@ -218,6 +218,12 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
                                      # endpoint-depth for a hier bundle (the
                                      # frame its candidates were generated in),
                                      # else self.fp; set by edit_topology
+        self._edit_ops = None        # op-log of the open session: the applied
+                                     # edit_* command lines, in order (GUI
+                                     # parity) — commit stores them as BDB
+                                     # meta provenance (user_ops:<bid>:<uid>)
+        self._edit_base = 'new'      # the source candidate's topo_uid ('new'
+                                     # for an empty session) the ops apply on
         self.no_viz = False          # set by --no-viz CLI flag
         self.verbose_conn = False    # set by --verbose-conn: print every per-bit violation
         self.ipc_verbose = False     # set by --ipc-verbose: surface buda_viz/def_viz IPC chatter

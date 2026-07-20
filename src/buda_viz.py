@@ -55,7 +55,8 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
     def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None,
                  rerun_fn=None, refresh_fn=None, layer_stack=None,
                  ui_state: ViewState = None, start_bidx=0, layer_visible=None,
-                 on_focus_bundle=None, bundle_order_fn=None, fp_resolver=None):
+                 on_focus_bundle=None, bundle_order_fn=None, fp_resolver=None,
+                 user_ops_sink=None):
         self.fp          = fp
         # Per-bundle frame resolution (hier): fp_resolver is the session's
         # _make_topo_fp_resolver — wrapper -> the Floorplan its candidates were
@@ -175,6 +176,11 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         # exists again for the pin to resolve.  None = no session.
         self._edit_ops  = None
         self._edit_base = 'new'
+        # Optional (bundle_id, uid, base, ops) -> None: the session's
+        # _record_user_ops — a live GUI commit then stores its op-log as BDB
+        # meta provenance too (user_ops:<bid>:<uid>), not just the sidecar.
+        # None (orphan explorer / no BDB) = sidecar only, as before.
+        self._user_ops_sink = user_ops_sink
 
         # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at, seg_layers}
         self._selections    = {}
@@ -337,9 +343,13 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
     def __init__(self, floorplan, bundles, sidecar_path=None, rerun_layer_fn=None,
                  rerun_fn=None, routing_grid=None, layer_stack=None,
                  net_endpoints=None, ipc_session=None, ipc_verbose=False,
-                 fp_resolver=None, cuts_provider=None):
+                 fp_resolver=None, cuts_provider=None, user_ops_sink=None):
         self.fp           = floorplan
         self.bundles      = bundles
+        # Forwarded to the TopologyExplorer it opens ('v'): the session's
+        # _record_user_ops, so a GUI edit_commit stores BDB op-log
+        # provenance (see TopologyExplorer.__init__).
+        self._user_ops_sink = user_ops_sink
         # () -> (cuts, x_grid, y_grid) | None: fresh planner cut/band state for
         # the congestion heatmap, so an in-GUI re-run can redraw the overlay
         # against the RE-ROUTED design instead of leaving the stale original

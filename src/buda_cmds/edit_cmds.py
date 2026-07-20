@@ -98,6 +98,13 @@ def cmd_edit_topology(session, cmd, args, cmd_line):
     session._edit_w, session._edit_topo, session._edit_src = w, topo, src_desc
     session._edit_slide = {}
     session._edit_layers_changed = False
+    # Op-log provenance (GUI parity): record the applied edit_* commands so
+    # the commit can store the how-it-was-built record as BDB meta beside
+    # the geometric topology rows.  base = the source candidate's content
+    # uid ('new' for an empty session) the ops apply on.
+    session._edit_ops = []
+    session._edit_base = ("new" if spec == "new"
+                          else buda.topo_uid(w.input.candidates[int(spec) - 1]))
     # Resolve the session's FLOORPLAN: a hier bundle's candidates live in the
     # frame they were generated in — CELL-LOCAL coordinates and block names
     # (pa_i, not proc_i1/pa_i) for a cell-level template, a custom endpoint
@@ -144,7 +151,8 @@ def cmd_edit_add_trunk(session, cmd, args, cmd_line):
     v = buda.edit_add_trunk(session._edit_topo, session._edit_fp, horiz, perp,
                             lo, hi, layer if layer is not None
                             else (h_def if horiz else v_def))
-    session._edit_report(v)
+    if session._edit_report(v):
+        session._edit_record(cmd_line.strip())
 
 
 def cmd_edit_add_stub(session, cmd, args, cmd_line):
@@ -168,7 +176,8 @@ def cmd_edit_add_stub(session, cmd, args, cmd_line):
                      == session._edit_topo.segments[to_seg].end.y)
         layer = v_def if tgt_h else h_def
     v = buda.edit_add_stub(session._edit_topo, session._edit_fp, pos[0], to_seg, layer)
-    session._edit_report(v)
+    if session._edit_report(v):
+        session._edit_record(cmd_line.strip())
 
 
 def cmd_edit_remove_segment(session, cmd, args, cmd_line):
@@ -178,6 +187,7 @@ def cmd_edit_remove_segment(session, cmd, args, cmd_line):
     v = buda.edit_remove_segment(session._edit_topo, session._edit_fp, si)
     session._edit_report(v)
     if v.applied:
+        session._edit_record(cmd_line.strip())
         # Indices above si shifted down: remap the staged slide windows,
         # dropping the removed segment's own (mirrors the explorer's X).
         session._edit_slide = {
@@ -192,7 +202,8 @@ def cmd_edit_set_span(session, cmd, args, cmd_line):
     v = buda.edit_set_span(session._edit_topo, session._edit_fp,
                            int(args[0]), _coord(session, args[1]),
                            _coord(session, args[2]))
-    session._edit_report(v)
+    if session._edit_report(v):
+        session._edit_record(cmd_line.strip())
 
 
 def cmd_edit_set_slide(session, cmd, args, cmd_line):
@@ -216,6 +227,7 @@ def cmd_edit_set_slide(session, cmd, args, cmd_line):
         return
     if args[1].lower() == "clear":
         if session._edit_slide.pop(si, None) is not None:
+            session._edit_record(cmd_line.strip())
             print(f"[edit] seg {si} staged slide window cleared")
         else:
             print(f"[edit] seg {si} has no staged slide window")
@@ -235,6 +247,7 @@ def cmd_edit_set_slide(session, cmd, args, cmd_line):
               f"slide range [{s_lo:.0f},{s_hi:.0f}]")
         return
     session._edit_slide[si] = (clo, chi)
+    session._edit_record(cmd_line.strip())
     note = "" if (clo, chi) == (lo, hi) else " (clamped to slide range)"
     print(f"[edit] seg {si} slide window [{clo:.0f},{chi:.0f}]{note} — "
           f"applies at edit_commit")
@@ -266,6 +279,7 @@ def cmd_edit_set_layer(session, cmd, args, cmd_line):
                   f"flag LAYER_DIR")
     seg.layer_hint = lid
     session._edit_layers_changed = True   # commit rebuilds pinned_seg_layers
+    session._edit_record(cmd_line.strip())
     print(f"[edit] seg {i} layer -> {lid}")
 
 
@@ -274,7 +288,8 @@ def cmd_edit_connect(session, cmd, args, cmd_line):
     if session._edit_session() is None: return
     v = buda.edit_connect(session._edit_topo, session._edit_fp,
                           int(args[0]), int(args[1]))
-    session._edit_report(v)
+    if session._edit_report(v):
+        session._edit_record(cmd_line.strip())
 
 
 def cmd_edit_disconnect(session, cmd, args, cmd_line):
@@ -284,7 +299,8 @@ def cmd_edit_disconnect(session, cmd, args, cmd_line):
     v = buda.edit_disconnect(session._edit_topo, session._edit_fp,
                              int(args[0]), int(args[1]),
                              _coord(session, args[2]))
-    session._edit_report(v)
+    if session._edit_report(v):
+        session._edit_record(cmd_line.strip())
 
 
 def cmd_edit_status(session, cmd, args, cmd_line):
@@ -310,6 +326,7 @@ def cmd_edit_abort(session, cmd, args, cmd_line):
     session._edit_src = ""
     session._edit_slide = {}
     session._edit_layers_changed = False
+    session._edit_ops, session._edit_base = None, "new"
 
 
 def cmd_edit_commit(session, cmd, args, cmd_line):
@@ -350,6 +367,14 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
         print(f"[edit] committed as candidate {idx + 1} of bundle "
               f"{w.input.original_bundle.id} (type USER, WL="
               f"{topo.estimated_wirelength}, uid {uid}).")
+    # Op-log provenance: store the session's applied edit_* commands as BDB
+    # meta (user_ops:<bid>:<uid>) beside the geometric rows — restore is
+    # geometric either way; this is the how-it-was-built record
+    # (dump_user_ops shows it, load_pipeline points at it).
+    if session._record_user_ops(w.input.original_bundle.id, uid,
+                                session._edit_base, session._edit_ops):
+        print(f"[BDB] op-log provenance stored ({len(session._edit_ops)} "
+              f"op(s)) — dump_user_ops {w.input.original_bundle.id} shows it.")
     if "pin" in args:
         w.plan.selected_topology_index = idx
         w.input.topology_pinned = True
@@ -419,6 +444,7 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
         session._edit_slide = {}
     session._edit_w = session._edit_topo = None
     session._edit_src = ""
+    session._edit_ops, session._edit_base = None, "new"
     if getattr(session, "_hier_expansion_map", None):
         # POST-expansion hier session: self.bundles are the per-instance
         # wrappers.  The pre-expansion _persist_topologies would rewrite them
@@ -449,6 +475,50 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
         print("[BDB] re-persisted candidate topologies to the open BDB.")
 
 
+def cmd_dump_user_ops(session, cmd, args, cmd_line):
+    # Usage: dump_user_ops <bundle_id>
+    # Print the BDB-persisted op-log provenance of the bundle's USER
+    # candidates (user_ops:<bid>:<uid> meta rows written by edit_commit):
+    # the base candidate each was built from and the applied edit_*
+    # commands, replayable as-is through the CLI.
+    if session.bdb is None:
+        print("Error: dump_user_ops requires an open BDB (open_bdb)")
+        return
+    if not args:
+        print("Error: dump_user_ops requires a bundle id")
+        return
+    bid = int(args[0])
+    w = next((x for x in session.bundles
+              if x.input.original_bundle.id == bid), None)
+    if w is None:
+        print(f"Error: no bundle with id {bid}")
+        return
+    shown = 0
+    for ci, t in enumerate(w.input.candidates):
+        if t.type != "USER":
+            continue
+        entry = session._user_ops_entry(bid, buda.topo_uid(t))
+        if entry is None:
+            print(f"  candidate {ci + 1}: USER — no op-log recorded "
+                  f"(committed before provenance, or a replayed sidecar "
+                  f"without a BDB)")
+            continue
+        base = entry.get("base", "new")
+        ops = entry.get("ops", [])
+        src = ("an empty topology" if base == "new"
+               else f"the candidate with uid {base}")
+        print(f"  candidate {ci + 1}: USER, built from {src} "
+              f"with {len(ops)} op(s):")
+        print(f"    edit_topology {bid} "
+              f"{'new' if base == 'new' else '<base cand#>'}")
+        for op in ops:
+            print(f"    {op}")
+        print(f"    edit_commit pin")
+        shown += 1
+    if not any(t.type == "USER" for t in w.input.candidates):
+        print(f"  bundle {bid} has no USER candidates.")
+
+
 COMMANDS = {
     "edit_topology": cmd_edit_topology,
     "edit_add_trunk": cmd_edit_add_trunk,
@@ -462,4 +532,5 @@ COMMANDS = {
     "edit_status": cmd_edit_status,
     "edit_abort": cmd_edit_abort,
     "edit_commit": cmd_edit_commit,
+    "dump_user_ops": cmd_dump_user_ops,
 }
