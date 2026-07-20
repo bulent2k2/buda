@@ -614,9 +614,46 @@ cannot remove (contention-driven stretch; wide envelopes still price real
 risk on congested designs — the mempool_tile/bigHalf numbers below predate
 the clamp and should be re-measured before a default-flip decision).
 
+**Re-measured post-clamp (2026-07-20), `kWLSpread 0.125` vs `0`, real config
+(script gates on, healers as each flow declares them, detailed WL after
+`run_detailed_nuts`):**
+
+| flow | healers | base ov/un/detWL | 0.125 ov/un/detWL | dWL |
+|---|---|---|---|---|
+| b44 | — | 0/0 / 193376 | 0/0 / 193376 | **+0.0%** |
+| mempool_tile | none | 61/2976 / 532381 | 27/2230 / 267990 | −49.7% |
+| mix | yes | 0/0 / 850633 | 0/0 / 830452 | −2.4% |
+| mix2 | yes | 2/**42** / 839868 | 2/**52** / 825726 | −1.7% |
+| bigHalf | yes | 0/0 / 15473957 | 0/0 / 14541544 | **−6.0%** |
+| big2 | yes | 0/0 / 11601416 | 0/0 / 11543464 | −0.5% |
+| 10_chip_units | yes | 0/0 / 364252 | 0/0 / 362418 | −0.5% |
+| comprehensive_demo | yes | 0/0 / 40888 | 0/0 / 39726 | −2.8% |
+| b4_bus_077 | — | 0/0 / 191669 | 0/0 / 191669 | +0.0% |
+
+The clamp confirms the 2026-07-17 prediction: **b44's flagship −19.6% is gone
+(now +0.0%)** — the clamp already captures at the source what the knob used to
+buy on b44. What survives is (i) modest but genuine WL wins on *clean, healed*
+flows (bigHalf −6.0%, comprehensive −2.8%, mix −2.4%, big2/10_chip −0.5%, all
+0/0 preserved), and (ii) the big mempool_tile number, **but that is a
+healerless flow that never reaches a clean endpoint** (ends 27 ov / 2230 un) —
+not a basis for a default. And mix2's unplaced *regresses* 42→52 **with
+healers already in its flow**.
+
+**Default-flip verdict (2026-07-20): stays OPT-IN.** The mix2 regression is
+the deciding data against criterion (a) below: the kSegsRel-style "gate the
+default on healers-ahead" trick works only because healers absorb the
+selection shuffle — but mix2 *has* healers and still regresses, so a
+healers-ahead gate would not protect it. With the flagship b44 win absorbed by
+the clamp and the largest remaining win on a broken flow, the clean-flow gains
+(≤6%) don't justify risking a stress-flow opens regression by default. Path
+(b) — a spread term that prices only the *trunk-stretch* (junction-coupled)
+component rather than the whole envelope — remains the open route to a safe
+default; it is a real implementation, not measured yet.
+
 **Default-flip criteria (stays opt-in for now):** same bar as `kPeak` — the
 opens shuffle on plain pipelines means a blanket default needs either (a) the
-healers in the default flow path, or (b) a spread term that prices only the
+healers in the default flow path (refuted for kWLSpread above — mix2 regresses
+*with* healers), or (b) a spread term that prices only the
 *trunk-stretch* component (junction-coupled spread) rather than the whole
 envelope. Bottom-up template planning (`_plan_bottom_up_templates`) IS
 annotated (Codex #312): the local solve's planner is seeded from
