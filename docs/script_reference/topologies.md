@@ -145,6 +145,7 @@ edit_remove_segment <seg#>
 edit_status
 edit_commit [pin]
 edit_abort
+dump_user_ops <bundle_id>
 ```
 
 Expert hand-editing as a **transactional session** (topo_conn_unification
@@ -172,7 +173,17 @@ Phase E3b).  `edit_topology` opens a working **copy** of the given candidate
   candidate, deduplicated by `topo_uid` (an identical topology is reported,
   not duplicated); `pin` also selects it.  A not-clean topology commits with
   a WARNING (visible to `check_design`), mirroring generation's
-  never-strand rule.  The pool is re-persisted to the open BDB.
+  never-strand rule.  The pool is re-persisted to the open BDB — along with
+  the session's **op-log provenance** (`user_ops:<bundle_id>:<topo_uid>` in
+  BDB meta: the base candidate's uid — `'new'` for an empty session — plus
+  the applied `edit_*` command lines, block/face references verbatim).  The
+  GUI's TopoEdit commit stores the same record through the explorer's
+  `user_ops_sink`.  Restore never needs it (the topology rows are the
+  geometric truth); it is the human-readable how-it-was-built record.
+* `dump_user_ops` — print the persisted op-log of the bundle's USER
+  candidates as a replayable command sequence (`edit_topology …` → ops →
+  `edit_commit pin`).  `load_pipeline` prints a pointer to it for every
+  restored USER candidate that has one.
 
 ```
 edit_topology 1 new

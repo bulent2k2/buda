@@ -178,7 +178,8 @@ class VizViewMixin:
             layer_visible=self._layer_visible,
             on_focus_bundle=self._adopt_explorer_bundle,
             bundle_order_fn=lambda: self._bid_list,   # opens-first panel order
-            fp_resolver=self._fp_resolver)            # hier per-bundle frames
+            fp_resolver=self._fp_resolver,            # hier per-bundle frames
+            user_ops_sink=self._user_ops_sink)        # BDB op-log provenance
         self._topo_explorer.fig.show()
         viz_window.install_tk_geometry_resync(self._topo_explorer.fig)
         viz_window.extract_from_fullscreen_tab(self._topo_explorer.fig)

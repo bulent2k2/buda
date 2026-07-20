@@ -123,7 +123,8 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
                          sidecar_path=session._sidecar_path(),
                          layer_stack=session.layers,
                          start_bidx=start,
-                         fp_resolver=session._make_topo_fp_resolver()).show()
+                         fp_resolver=session._make_topo_fp_resolver(),
+                         user_ops_sink=session._record_user_ops).show()
 
 
 def cmd_dump_topologies(session, cmd, args, cmd_line):
@@ -173,7 +174,8 @@ def cmd_visualize(session, cmd, args, cmd_line):
                          ipc_session=ipc_session,
                          ipc_verbose=session.ipc_verbose,
                          fp_resolver=session._make_topo_fp_resolver(),
-                         cuts_provider=_cuts_provider)
+                         cuts_provider=_cuts_provider,
+                         user_ops_sink=session._record_user_ops)
     viz.draw_blocks()
     if session.planner is not None:
         cuts = session.planner.get_cuts()

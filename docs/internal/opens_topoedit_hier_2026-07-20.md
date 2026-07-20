@@ -16,20 +16,18 @@ explorer hier frames, the gridded `W` refine (snap-to-Hanan with `enter`
 toggling `[free]`), and block/face coordinate references.  Remaining,
 deliberately deferred:
 
-1. **Op-log provenance in the BDB** (~a day, mostly tests).  A committed
-   USER candidate persists as geometry only; the sidecar's `user_topo`
-   op-log (base uid + `edit_*` sequence — the human-readable design
-   intent) isn't mirrored into BDB `meta`.  Restore works perfectly
-   without it, so this is forensics/documentation value: auditing a
-   checkpoint months later, or replaying ops against a *changed*
-   floorplan where raw geometry can't adapt.  No schema bump needed if
-   it rides the `meta` key-value table.
-2. **Per-instance candidate pools.**  Post-expansion, an instance
-   wrapper persists only its *selected* topology; an unpinned
-   `edit_commit` on an expanded instance is session-only (loudly noted).
-   Recommendation stands: don't build until a real workflow demands it —
-   it would multiply topology rows by instance count and blur
-   template-vs-instance provenance.
+1. **Op-log provenance in the BDB** — ✅ RESOLVED (follow-up PR to this
+   snapshot): `edit_commit` (CLI + GUI sink) stores
+   `user_ops:<bundle_id>:<topo_uid>` → {base uid, applied `edit_*`
+   command lines} in BDB `meta` (no schema bump); `load_pipeline` prints
+   a pointer per restored USER candidate, `dump_user_ops` prints the
+   replayable ops.  Tests: `test_bdb_user_ops.py`.
+2. **Per-instance candidate pools** — ✅ RESOLVED (follow-up PR to this
+   snapshot; the workflow demand arrived): expanded instances persist
+   their selection plus their USER candidates only — an unpinned
+   instance commit survives `load_pipeline expanded`, un-edited
+   instances still persist one row (bounded growth, loader unchanged).
+   Tests in `test_bdb_user_topo.py`.
 3. **`W` echo marker** — ✅ RESOLVED (this snapshot's companion PR).  The
    last residue of the input-precision item: a transient marker at the
    first captured slide bound so the user sees where it landed before

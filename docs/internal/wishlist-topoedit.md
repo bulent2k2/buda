@@ -31,8 +31,7 @@ now landed:
    `W`/`w` also log into the `[edit-cmd]` stream and the sidecar op-log.
 
 All three compose, as predicted: snap default + live echo marker + exact
-text entry cover the aiming, feedback, and precision paths.  All three compose (snap key + echo marker + text entry
-are independent).
+text entry cover the aiming, feedback, and precision paths.
 
 ## CLI parity for the slide-window refine — ✅ RESOLVED
 
@@ -104,18 +103,19 @@ hier flows:
 
 **Follow-ons (not blocking):**
 
-1. **Op-log provenance in the BDB** — the sidecar `user_topo` replay log
-   (base uid + edit_* commands) could be mirrored into BDB meta so the
-   geometric restore carries its editing provenance; restore is geometric
-   either way, so this is documentation value only.
+1. **Op-log provenance in the BDB** — ✅ RESOLVED (see the expanded
+   section below): `edit_commit` (CLI and GUI, via the explorer's
+   `user_ops_sink`) stores `user_ops:<bundle_id>:<topo_uid>` → {base uid,
+   applied edit_* command lines} in BDB meta; `load_pipeline` prints a
+   pointer per restored USER candidate, `dump_user_ops` shows the
+   replayable ops.  Tests: `test_bdb_user_ops.py`.
 2. **Explorer (GUI) hier frames** — the CLI edit session is frame-aware;
    the explorer still draws/edits against the session floorplan, so
    editing a cell-local template in the GUI shows the wrong backdrop.
    Needs the explorer to accept a per-bundle floorplan (same resolver).
-3. **Un-pinned instance commits are session-only** (expanded rows persist
-   only their selection, by design) — surfaced with a printed note; a
-   full per-instance candidate-pool persistence would be a schema change
-   with little value until a workflow needs it.
+3. **Un-pinned instance commits are session-only** — ✅ RESOLVED (see the
+   expanded section below): a real workflow demanded it, and it landed as
+   bounded per-instance USER extras, not full-pool persistence.
 
 ## Follow-ons — the fuller picture (2026-07-16)
 
@@ -124,9 +124,23 @@ bites, the shape of the work, and a priority call.  Recommended order:
 **#2 first** (completes the interactive story for hier designs), #1 as a
 cheap add-on whenever someone is next in that code, #3 only on demand.
 
-### 1. Op-log provenance in the BDB
+### 1. Op-log provenance in the BDB — ✅ RESOLVED
 
-**The gap.** A GUI commit leaves two records: the GEOMETRY (BDB topology
+**Landed** exactly in the predicted shape (BDB `meta`, no schema bump):
+the CLI session now RECORDS its applied `edit_*` commands (GUI parity —
+rejected ops excluded, block/face references verbatim), and `edit_commit`
+stores `user_ops:<bundle_id>:<topo_uid>` → `{"base": <source uid|'new'>,
+"ops": [...]}`.  A live GUI commit stores it too, through the explorer's
+`user_ops_sink` (the session's `_record_user_ops`) — previously the GUI's
+op-log reached the BDB only via a sidecar re-run replay.  `load_pipeline`
+prints a one-liner per restored USER candidate with a log ("built from N
+op(s) — `dump_user_ops <id>` shows them"), and the new `dump_user_ops
+<bundle_id>` command prints the replayable command sequence (base +
+ops + `edit_commit pin`).  Tests: `test_bdb_user_ops.py` (CLI store,
+rejected-op exclusion, base-uid + verbatim refs, abort isolation,
+load-pointer + dump round trip, GUI sink).
+
+**The original gap (for the record).** A GUI commit leaves two records: the GEOMETRY (BDB topology
 tables — what restore actually uses) and the OP-LOG (the sidecar's
 `user_topo`: base candidate uid + the applied `edit_*` command sequence).
 The BDB carries only the geometry.  Lose the sidecar JSON (or move the
@@ -193,26 +207,35 @@ follow the swap).  Subtleties: selection sync with the main viz window
 (cell frame vs die extents differ wildly); the `[Rerun]` path must keep
 using the session floorplan.
 
-### 3. Per-instance candidate pools (un-pinned instance commits)
+### 3. Per-instance candidate pools (un-pinned instance commits) — ✅ RESOLVED
 
-**The gap.** Post-expansion, each instance wrapper persists ONLY its
-selected topology — by design (expanded rows are the planner's decision
-record, not a candidate store).  Edit an instance's topology and commit
-WITHOUT `pin`, and the new USER candidate exists in memory but is
-deliberately not persisted (the commit prints a loud note rather than
-pretend).
+**Landed** (on demand — the "real workflow demands it" trigger fired), in
+a deliberately BOUNDED shape that avoids every risk the deferral named:
+`_add_expanded_bundle` persists the instance's selected topology PLUS its
+**instance-local USER candidates only** — never the full template-pool
+copy, and never a template-level USER candidate replicated by expansion
+(the inherited-uid registry, populated at `_expand_hier_bundles` and by
+the expanded loader for resumed sessions, distinguishes the two — Codex
+#358: an unpinned template USER alternative stays template-owned instead
+of multiplying by instance count) — so an un-pinned `edit_commit` on an
+instance survives a save → `load_pipeline expanded` resume (both
+alternative hand shapes in the BDB, decided next session), while an
+un-edited instance still persists exactly ONE row (row growth is zero on
+big2-scale designs unless instances are hand-edited).  The loader needed NO changes: the sel/sel_ci compact-index
+remap already modeled subset persistence, and the extras ride it.  USER
+extras carry `source='user'`, taps/bridges via the same annotation
+persist, and `assigned_layer=-1` (only the placed selection has plan
+layers).  The commit note flipped from "session-only" to the
+pin-it-on-resume pointer.  Tests:
+`test_hier_unpinned_instance_commit_persists_extra_row` (selection
+untouched, sibling still single-row) and
+`test_hier_two_user_extras_both_survive` (the motivating workflow), in
+`test_bdb_user_topo.py`.
 
-**Why it matters (rarely).** Only one workflow: "I built two alternative
-hand shapes for instance 7, want BOTH in the BDB, and will decide next
-session."  Today: pin one (persisted) and rebuild the other later — or
-keep both by editing PRE-expansion at the template level, where full
-pools ARE persisted.
-
-**Shape of the work.** The largest of the three — it changes what an
-expanded bundle row MEANS.  Persisting full per-instance pools multiplies
-topology rows by instance count (big2-scale designs would feel it),
-complicates the loader's compact-index remapping (the Codex #136
-territory), and blurs the template-vs-instance provenance the bottom-up
-machinery relies on.  **Recommendation: don't build it until a real
-workflow demands it** — the pin-to-persist rule is coherent and loudly
-surfaced.
+**The original gap (for the record).** Post-expansion, each instance
+wrapper persisted ONLY its selected topology — by design (expanded rows
+are the planner's decision record, not a candidate store).  An un-pinned
+instance commit existed in memory but was deliberately not persisted
+(loud note).  Full per-instance pools were rejected for row
+multiplication, loader remap complexity, and provenance blur — the
+USER-only extras land the workflow without any of the three.

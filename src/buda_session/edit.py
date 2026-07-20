@@ -118,10 +118,13 @@ class EditMixin:
         return (h if h != -1 else 4), (v if v != -1 else 5)
 
     def _edit_report(self, v):
-        """Print one edit op's verdict (the transaction's immediate feedback)."""
+        """Print one edit op's verdict (the transaction's immediate feedback).
+        Returns v.applied so handlers can chain bookkeeping — op-log
+        recording, staged-window remaps — on success (GUI _edit_apply
+        parity)."""
         if not v.applied:
             print(f"  [edit] REJECTED: {v.note}")
-            return
+            return False
         kinds = {}
         for viol in v.conn.violations:
             k = str(viol.kind).split('.')[-1]
@@ -131,6 +134,42 @@ class EditMixin:
         seg = f" (seg {v.seg_idx})" if v.seg_idx >= 0 else ""
         print(f"  [edit] {v.note}{seg} — violations: {issues}; "
               f"components={v.components}; pinched={'yes' if v.pinched else 'no'}{tag}")
+        return True
+
+    def _edit_record(self, op):
+        """Record one APPLIED edit op (its `.buda` command line) into the CLI
+        session's op-log — the same design-intent record the GUI's
+        _edit_log_op keeps; edit_commit stores it as BDB meta provenance."""
+        if self._edit_ops is not None:
+            self._edit_ops.append(op)
+
+    def _record_user_ops(self, bundle_id, uid, base, ops):
+        """Store a committed USER candidate's op-log as BDB meta provenance:
+        `user_ops:<bundle_id>:<topo_uid>` -> {"base": <source uid|'new'>,
+        "ops": [...]} — the human-readable how-it-was-built record beside the
+        geometric topology rows (which restore never needs it for).  Rides
+        the key-value meta table, so no schema bump; shared by the CLI
+        edit_commit and the explorer's commit (via the user_ops_sink hook).
+        No-op without an open BDB or an empty op-log."""
+        import json
+        if self.bdb is None or not ops:
+            return False
+        self.bdb.meta_set(f"user_ops:{bundle_id}:{uid}",
+                          json.dumps({"base": base, "ops": list(ops)}))
+        return True
+
+    def _user_ops_entry(self, bundle_id, uid):
+        """The persisted op-log for a (bundle, uid), or None."""
+        import json
+        if self.bdb is None:
+            return None
+        raw = self.bdb.meta_get(f"user_ops:{bundle_id}:{uid}", "")
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return None
 
     def _edit_session(self):
         """The open edit session's (wrapper, topo), or None with an error."""
