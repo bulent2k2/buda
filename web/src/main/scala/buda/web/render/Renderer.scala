@@ -4,17 +4,17 @@ package buda.web.render
 import org.scalajs.dom
 import scala.scalajs.js
 
-/** SVG renderer for the generation-stage payload.
+/** SVG renderer for the three BUDA web views (generation / nuts / detailed).
   *
-  * Draws the floorplan (blocks + keepouts), the Hanan grid, and one candidate's
-  * segments.  BUDA's y grows UP while SVG's grows DOWN, so the scene lives in a
-  * `scale(1 -1)` group and labels are locally un-flipped.
+  * Draws the floorplan (blocks + keepouts), the Hanan grid, and the view-specific
+  * routing geometry.  BUDA's y grows UP while SVG's grows DOWN, so the scene lives
+  * in a `scale(1 -1)` group and labels are locally un-flipped.  This mirrors the
+  * vanilla reference client (`src/web/static/index.html`) draw functions verbatim,
+  * so the two clients render the same server payloads identically.
   *
-  * Phase 1 draws segments at NOMINAL coordinates.  The display-geometry math
-  * (`DisplayGeom`: perp-centering within `[perp_lo, perp_hi]`, endpoint snapping
-  * over `conns[].at_pos`, slide-band extents, pull arrows, via dedup) is the
-  * Phase-2 port from `src/viz_explorer/draw.py` + `src/viz_main/draw_abstract.py`,
-  * validated against the golden-JSON snapshot.
+  * The display-geometry math (`DisplayGeom`: perp-centering within
+  * `[perp_lo, perp_hi]`, endpoint snapping over `conns[].at_pos`) is validated
+  * against the golden-JSON snapshot (`test/tests/data/web_golden/b44_generation.json`).
   */
 object Renderer {
   private val NS = "http://www.w3.org/2000/svg"
@@ -28,13 +28,35 @@ object Renderer {
   private def d(o: js.Dynamic, k: String): Double =
     o.selectDynamic(k).asInstanceOf[Double]
 
-  /** Render `payload` (from ApiClient.renderGeneration) into `svg`, showing
-    * candidate index `cand` of the first bundle. */
-  def draw(svg: dom.svg.SVG, payload: js.Dynamic, cand: Int): Unit = {
+  private def arr(o: js.Dynamic, k: String): js.Array[js.Dynamic] =
+    o.selectDynamic(k).asInstanceOf[js.Array[js.Dynamic]]
+
+  private def defined(v: js.Dynamic): Boolean = !js.isUndefined(v) && v != null
+
+  /** A placed segment centerline: perp coord = track_position, extent = span_lo..hi. */
+  private def placedLine(s: js.Dynamic): (Double, Double, Double, Double) = {
+    val tp = d(s, "track_position"); val lo = d(s, "span_lo"); val hi = d(s, "span_hi")
+    if (s.horiz.asInstanceOf[Boolean]) (lo, tp, hi, tp) else (tp, lo, tp, hi)
+  }
+
+  /** A placed segment footprint rect (perp-centered on track_position). */
+  private def placedRect(s: js.Dynamic): (Double, Double, Double, Double) = {
+    val tp = d(s, "track_position"); val lo = d(s, "span_lo"); val hi = d(s, "span_hi")
+    val w = d(s, "width")
+    if (s.horiz.asInstanceOf[Boolean]) (lo, tp - w / 2, hi - lo, w)
+    else (tp - w / 2, lo, w, hi - lo)
+  }
+
+  /** Render `payload` into `svg` for the given `view` ("generation"/"nuts"/
+    * "detailed").  For the generation view, shows candidate `cand` of the first
+    * bundle, or the `edit` working copy when an edit session is open.  Returns the
+    * candidate-bar label (empty unless the generation view has something to show). */
+  def draw(svg: dom.svg.SVG, payload: js.Dynamic, view: String, cand: Int,
+           edit: js.Dynamic): String = {
     svg.innerHTML = ""
-    if (js.isUndefined(payload) || payload == null) return
+    if (js.isUndefined(payload) || payload == null) return ""
     val fp = payload.floorplan
-    val blocks = fp.blocks.asInstanceOf[js.Array[js.Dynamic]]
+    val blocks = arr(fp, "blocks")
 
     var (x1, y1, x2, y2) = (1e18, 1e18, -1e18, -1e18)
     blocks.foreach { b =>
@@ -56,7 +78,7 @@ object Renderer {
     hanan.ys.asInstanceOf[js.Array[Double]].foreach { yv =>
       g.appendChild(el("line", "class" -> "hanan", "x1" -> x1, "y1" -> yv, "x2" -> x2, "y2" -> yv))
     }
-    fp.keepouts.asInstanceOf[js.Array[js.Dynamic]].foreach { k =>
+    arr(fp, "keepouts").foreach { k =>
       g.appendChild(el("rect", "class" -> "keepout",
         "x" -> d(k.bbox, "x1"), "y" -> d(k.bbox, "y1"),
         "width" -> (d(k.bbox, "x2") - d(k.bbox, "x1")),
@@ -89,15 +111,38 @@ object Renderer {
       lg.appendChild(t); g.appendChild(lg)
     }
 
-    val bundles = payload.bundles.asInstanceOf[js.Array[js.Dynamic]]
-    if (bundles.isEmpty) return
-    val cands = bundles(0).candidates.asInstanceOf[js.Array[js.Dynamic]]
-    if (cands.isEmpty) return
-    val c = cands(math.max(0, math.min(cand, cands.length - 1)))
-    // DisplayGeom: draw each segment at its slide-window center with endpoints
-    // snapped to connected partners, so junctions visually meet.
-    val analysis = c.analysis.asInstanceOf[js.Array[js.Dynamic]]
-    val segs = c.segments.asInstanceOf[js.Array[js.Dynamic]]
+    view match {
+      case "nuts"     => drawNuts(g, payload); ""
+      case "detailed" => drawDetailed(g, payload, math.max(w, h)); ""
+      case _          => drawGeneration(g, payload, cand, edit, w, h)
+    }
+  }
+
+  private def drawGeneration(g: dom.svg.Element, payload: js.Dynamic, cand: Int,
+                             edit: js.Dynamic, w: Double, h: Double): String = {
+    var lbl = ""
+    val editing = defined(edit) && edit.open.asInstanceOf[Boolean]
+    val c: js.Dynamic =
+      if (editing) {
+        val topo = edit.topology
+        lbl = s"EDITING bundle ${edit.bundle_id} · ${arr(topo, "segments").length} seg(s)"
+        topo
+      } else {
+        val bundles = arr(payload, "bundles")
+        if (bundles.isEmpty) return lbl
+        val bundle = bundles(0)
+        val cands = arr(bundle, "candidates")
+        if (cands.isEmpty) return lbl
+        val idx = math.max(0, math.min(cand, cands.length - 1))
+        val cc = cands(idx)
+        val pin = pinSuffix(payload, idx)
+        lbl = s"bundle ${bundle.id} · cand ${idx + 1}/${cands.length} · ${cc.`type`} · WL ${cc.estimated_wirelength}$pin"
+        cc
+      }
+
+    val analysis = arr(c, "analysis")
+    val segs = arr(c, "segments")
+    if (analysis.isEmpty && segs.isEmpty) return lbl
     val placed = DisplayGeom.compute(analysis)
     for (i <- 0 until analysis.length) {
       val a = analysis(i)
@@ -111,6 +156,62 @@ object Renderer {
       else
         g.appendChild(el("line", "class" -> cls,
           "x1" -> p, "y1" -> placed.alo(i), "x2" -> p, "y2" -> placed.ahi(i)))
+    }
+    // Busterm taps: a small circle at each tapped block's center.
+    val r = math.max(w, h) * 0.008
+    arr(c, "seg_busterms").foreach { bt =>
+      for (side <- Seq("start", "end")) {
+        val b = bt.selectDynamic(side)
+        if (defined(b)) {
+          g.appendChild(el("circle", "class" -> "rcv",
+            "cx" -> ((d(b.bbox, "x1") + d(b.bbox, "x2")) / 2),
+            "cy" -> ((d(b.bbox, "y1") + d(b.bbox, "y2")) / 2), "r" -> r))
+        }
+      }
+    }
+    lbl
+  }
+
+  /** " 📌PINNED" when the shown candidate is the pinned selection, else "". */
+  private def pinSuffix(payload: js.Dynamic, idx: Int): String = {
+    val state = payload.selectDynamic("state")
+    if (!defined(state)) return ""
+    val sbs = arr(state, "bundles")
+    if (sbs.isEmpty) return ""
+    val sb = sbs(0)
+    val pinned = defined(sb.selectDynamic("pinned")) && sb.pinned.asInstanceOf[Boolean]
+    if (pinned && sb.selected_index.asInstanceOf[Int] == idx) " 📌PINNED" else ""
+  }
+
+  private def drawNuts(g: dom.svg.Element, payload: js.Dynamic): Unit = {
+    val n = payload.selectDynamic("nuts")
+    if (!defined(n)) return
+    arr(n, "segments").foreach { s =>
+      val (rx, ry, rw, rh) = placedRect(s)
+      g.appendChild(el("rect", "class" -> "trackftp", "x" -> rx, "y" -> ry, "width" -> rw, "height" -> rh))
+      val (a, b, c, d2) = placedLine(s)
+      g.appendChild(el("line", "class" -> "track", "x1" -> a, "y1" -> b, "x2" -> c, "y2" -> d2))
+    }
+    arr(n, "overlap_details").foreach { o =>
+      g.appendChild(el("rect", "class" -> "overlap",
+        "x" -> d(o, "span_lo"), "y" -> d(o, "perp_lo"),
+        "width" -> (d(o, "span_hi") - d(o, "span_lo")),
+        "height" -> (d(o, "perp_hi") - d(o, "perp_lo"))))
+    }
+  }
+
+  private def drawDetailed(g: dom.svg.Element, payload: js.Dynamic, span: Double): Unit = {
+    val det = payload.selectDynamic("detailed")
+    if (!defined(det)) return
+    arr(det, "net_segments").foreach { s =>
+      val (a, b, c, e) = placedLine(s)
+      val cls = "bit " + (if (s.horiz.asInstanceOf[Boolean]) "H" else "V")
+      g.appendChild(el("line", "class" -> cls, "x1" -> a, "y1" -> b, "x2" -> c, "y2" -> e))
+    }
+    val r = span * 0.004
+    arr(det, "net_vias").foreach { v =>
+      g.appendChild(el("rect", "class" -> "via",
+        "x" -> (d(v, "x") - r), "y" -> (d(v, "y") - r), "width" -> (2 * r), "height" -> (2 * r)))
     }
   }
 }
