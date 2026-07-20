@@ -26,6 +26,17 @@
 bin/*.app/
 flow/log/
 log/
+# Scala.js frontend build products (regenerate with `sbt fastLinkJS`, see
+# web/README.md). The *served* client is committed under src/web/static/scala/.
+web/target/
+web/project/target/
+web/project/project/
+web/main.js
+web/main.js.map
+# Local Scala toolchain (coursier + sbt launcher), fetched per web/README.md.
+.tools/
 chip_designs
 graphify-out
 docs/.obsidian/
+# Worktree-local symlink to the main checkout build/ (for pytest/uvicorn).
+/build
