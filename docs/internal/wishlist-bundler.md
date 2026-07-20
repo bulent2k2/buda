@@ -41,10 +41,16 @@ never a driverless `REC:…` (pure CONVERGENT was stranding single-driver
 cross-block buses), and pure-mode same-set groups keep the historical
 ep0 emission + 2-pin pool (the all-drivers emission is fan-in /
 general-path only), each pinned by a seam-targeted regression test.
-**Remaining corners** (opens.md item 8): cross-level nets keep
-STRICT/BIDIRECTIONAL grouping (single drv_spec metadata), and
-`set_max_bundle_bits` stays flat-only (hier splits would have to
-propagate through template↔replica linkage).
+**Remaining corners** (opens.md item 8) — both now ✅ CLOSED:
+- ✅ **Cross-level fan-in grouping** — CONVERGENT/COMBINED group
+  cross-level nets by their shared receiver set into one fan-in bundle
+  (per-net `net_drivers`/`net_receivers` + a persisted `FANIN` reason);
+  generation roots the tree at the shared sink with each deep driver as
+  a per-bit tapered leaf, and a resumed session recovers the endpoints
+  from the reason (`test_hier_cross_level_fanin.py`).
+- ✅ **Hier `set_max_bundle_bits`** — the balanced split runs at
+  `run_hier_bundler` on TEMPLATE bundles before expansion, propagating
+  through the template↔replica linkage (`test_hier_max_bundle_bits.py`).
 Details: [`convergent_bundling.md`](convergent_bundling.md).
 
 **What (historical):** `run_bundler CONVERGENT` groups nets by shared receiver only, so a

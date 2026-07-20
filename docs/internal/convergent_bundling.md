@@ -84,10 +84,19 @@ longest-prefix, both-nets-must-permit); as on the flat side, ANY active
 override switches even a pure strategy onto the union-find path —
 partition-equal, but bundles are ordered by smallest net name instead of
 signature, so bundle IDs can differ from an override-free run.
-Remaining corner: CROSS-LEVEL nets keep STRICT/BIDIRECTIONAL grouping
-(their single drv_spec metadata cannot yet describe a multi-driver group);
-`set_max_bundle_bits` also stays flat-only (hier splits would have to
-propagate through template↔replica linkage).  Tests:
+✅ **Cross-level fan-in landed:** CONVERGENT/COMBINED now group CROSS-LEVEL
+nets by their shared receiver set into one fan-in bundle carrying per-net
+`net_drivers`/`net_receivers` and a `FANIN:root|FROM:leaves` reason.
+Generation case (c) roots the tree at the shared sink with every deep
+driver as a per-bit tapered leaf (`_xlevel_fanin_endpoints` +
+`_derive_hier_fanin_bits`, `local=False`); the reason is persisted, so a
+resumed session recovers the endpoints even though `net_drivers` is not
+persisted (the taper then falls back to conservative full width).
+STRICT/BIDIRECTIONAL keep cross-level nets separate (byte-identical).
+`set_max_bundle_bits` is likewise now hier-aware (split at
+`run_hier_bundler` before per-instance expansion).  Tests:
+`test/tests/test_hier_cross_level_fanin.py`,
+`test/tests/test_hier_max_bundle_bits.py`,
 `test/tests/test_hier_bundler_combined.py`.
 
 ## The two strategies

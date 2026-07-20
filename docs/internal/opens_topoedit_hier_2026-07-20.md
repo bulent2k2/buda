@@ -50,16 +50,17 @@ four strategies, bottom-up planning with all 8 orientations,
 resume/rehydrate, USER templates replicating to instances).  Genuinely
 open:
 
-1. **Cross-level fan-in grouping** (opens item 8,
-   [`wishlist-bundler.md`](wishlist-bundler.md)).  Cross-level nets
-   still keep STRICT/BIDIRECTIONAL grouping because their single
-   `drv_spec_path` metadata cannot describe a multi-driver group — needs
-   a per-net endpoint record like the same-level `net_drivers` /
-   `net_receivers`.  Fails conservative (never silent) today.
-2. **Hier `set_max_bundle_bits`** (same item).  The balanced split pass
-   is flat-only; a hier version must propagate splits through the
-   template↔replica linkage so every instance splits identically.  Also
-   fails LOUD today.
+1. ✅ **Cross-level fan-in grouping** (opens item 8,
+   [`wishlist-bundler.md`](wishlist-bundler.md)) — LANDED.
+   CONVERGENT/COMBINED now group cross-level nets by their shared receiver
+   set into one fan-in bundle (per-net `net_drivers`/`net_receivers` +
+   a persisted `FANIN:root|FROM:leaves` reason); generation roots the tree
+   at the shared sink with each deep driver as a per-bit tapered leaf, and
+   a resumed session recovers the endpoints from the reason.
+   `test_hier_cross_level_fanin.py`.
+2. ✅ **Hier `set_max_bundle_bits`** (same item) — LANDED (split at
+   `run_hier_bundler` on TEMPLATE bundles before expansion, propagating
+   through the template↔replica linkage; `test_hier_max_bundle_bits.py`).
 3. **Re-planning a resumed post-expansion session** is unsupported —
    `run_planner hier` on a `load_pipeline expanded` checkpoint would
    double-expand.  Pre-existing, noted in the resume work; no workflow
