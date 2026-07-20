@@ -98,6 +98,8 @@ def _env_with_pythonpath():
 
 
 def _client():
+    import pytest
+    pytest.importorskip("fastapi")   # skip (don't fail) where fastapi is absent
     from fastapi.testclient import TestClient
     from web import server
     # Isolate each test's session.
