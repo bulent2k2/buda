@@ -1570,6 +1570,39 @@ class HierMixin:
         if "refine_passes" not in self._planner_params:
             planner.set_planner_param("refine_passes", 1.0)
 
+    def _check_bottom_up_frame(self, wrappers, comps, cell):
+        """Guard the single-frame assumption of a bottom-up cell's group solve
+        (audit P1-03).  Each template's candidates are generated in its OWN
+        instances[0] cell-local frame, but the group solve builds ONE floorplan
+        from wrappers[0].instances[0] and orientation-transforms every copy
+        relative to it.  A template whose reference has a DIFFERENT orientation
+        (a bus present only in a mirrored/rotated instance subset — S/FN/FS are
+        NOT split into rotation-class clones) would therefore be charged and
+        placed in the wrong frame and DOUBLE-transformed on copy, landing its
+        fixed segments at wrong absolute coordinates (a silent open).  Same
+        orientation but a different instance is fine — the origin-normalized
+        cell-local floorplan is identical — so the check keys on ORIENTATION,
+        not instance identity.  Fail LOUD rather than emit misplaced copies."""
+        if len(wrappers) < 2:
+            return
+        ref_inst = wrappers[0].input.original_bundle.instances[0]
+        orients = self._detect_instance_orients(
+            self._bu_cell_of(cell), comps, ref_name=ref_inst)
+        ref_o = orients.get(ref_inst, "N")
+        for w in wrappers[1:]:
+            wi = w.input.original_bundle.instances[0]
+            wo = orients.get(wi, "N")
+            if wo != ref_o:
+                raise RuntimeError(
+                    f"bottom-up cell '{cell}': template bundle "
+                    f"{w.input.original_bundle.id} generated its candidates from "
+                    f"instance '{wi}' (orient {wo!r}), a different cell-local "
+                    f"frame than the group reference '{ref_inst}' (orient "
+                    f"{ref_o!r}).  Solving them together would misplace the "
+                    f"copied routing (audit P1-03).  Give the cell's internal "
+                    f"buses a uniform reference orientation, or unset "
+                    f"set_bottom_up for this cell to route it top-down.")
+
     def _plan_bottom_up_templates(self, iterations):
         """Stage (a) of bottom-up template planning: solve each marked cell's
         cell-local template bundles ONCE in a dedicated cell-local planner,
@@ -1623,6 +1656,7 @@ class HierMixin:
                                for w in by_cell[c]))
         for cell in deepest_first:
             wrappers = by_cell[cell]
+            self._check_bottom_up_frame(wrappers, None, cell)
             fp = self._build_cell_local_floorplan(
                 wrappers[0].input.original_bundle.instances[0])
             if fp is None:
@@ -1789,6 +1823,7 @@ class HierMixin:
             by_cell.setdefault(b.cell_context, []).append(w)
         for cell in sorted(by_cell):
             wrappers = by_cell[cell]
+            self._check_bottom_up_frame(wrappers, comps.values(), cell)
             fp = self._build_cell_local_floorplan(
                 wrappers[0].input.original_bundle.instances[0])
             if fp is None:
