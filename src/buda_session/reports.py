@@ -214,6 +214,27 @@ class ReportsMixin:
                 print(f"        low-cross: {', '.join(lowx)}  "
                       f"(M{layer} is non-TOP — leaf footprints are keepouts)")
 
+    def _tug_pairs(self, topo, fp, plan=None):
+        """Outward opposite-pull connector pairs on `topo` — a NUTS
+        realization-risk signal (wishlist-nuts "Opposite-pull connector
+        pairs").  Read-only over the derived ConnSeg data (net_pull + junction
+        at_pos), so it never affects selection or placement.  Returns a list of
+        (t, lo_rider, hi_rider) segment-index tuples; [] on any build failure.
+
+        `plan` (the wrapper's BundlePlan) supplies the post-dogleg
+        `seg_net_pull` override so the report reflects the pulls NUTS actually
+        placed with — a dogleg pins values ConnTopology recomputes wrongly on
+        the split topology.  The detector applies the same length/sentinel guard
+        NUTS uses, so a stale array is ignored."""
+        from buda_session.util import find_tug_of_war_pairs
+        try:
+            ct = buda.ConnTopology()
+            ct.build(topo, fp)
+            override = getattr(plan, "seg_net_pull", None) if plan is not None else None
+            return find_tug_of_war_pairs(list(ct.segs()), net_pull=override)
+        except Exception:
+            return []
+
     def _dump_topologies(self, hint, problems_only, conn_detail=False):
         if not self.bundles:
             print("Warning: no bundles — run the bundler and generate_topologies first.")
@@ -232,6 +253,7 @@ class ReportsMixin:
         cand_counts = []
         shape_hist = {}
         n_dup_bundles = n_pinch_bundles = n_single_bundles = n_passthru_bundles = 0
+        n_tug_bundles = 0
         n_dup_cands = 0
         printed = 0
 
@@ -272,17 +294,29 @@ class ReportsMixin:
             pinch_idx = {i for (i, _, _, _, _, ms, _, _) in rows if ms == 0}
             passthru_idx = {i for (i, _, _, _, pt, _, _, _) in rows if pt > 0}
 
+            # Tug-of-war signal on the display candidate (selected, else cand 0):
+            # opposite-pull rider pairs stretching an interior trunk segment.
+            disp = sel if (sel is not None and 0 <= sel < len(cands)) else 0
+            # Pass the plan so a post-dogleg seg_net_pull override is honored
+            # only for the SELECTED candidate (its overrides match that topology);
+            # for an unselected display fallback the length guard ignores them.
+            tug_plan = w.plan if disp == sel else None
+            tug = self._tug_pairs(cands[disp], w_fp, tug_plan) if cands else []
+
             has_dup = bool(dup_groups)
             has_pinch = bool(pinch_idx)
             is_single = len(cands) <= 1
             has_passthru = bool(passthru_idx)
+            has_tug = bool(tug)
             if has_dup:      n_dup_bundles += 1
             if has_pinch:    n_pinch_bundles += 1
             if is_single:    n_single_bundles += 1
             if has_passthru: n_passthru_bundles += 1
+            if has_tug:      n_tug_bundles += 1
             n_dup_cands += sum(len(idxs) - 1 for idxs in dup_groups)
 
-            if problems_only and not (has_dup or has_pinch or is_single or has_passthru):
+            if problems_only and not (has_dup or has_pinch or is_single
+                                      or has_passthru or has_tug):
                 continue
 
             printed += 1
@@ -291,6 +325,7 @@ class ReportsMixin:
             if has_pinch:    flags.append(f"PINCH({len(pinch_idx)})")
             if is_single:    flags.append("SINGLE")
             if has_passthru: flags.append(f"PASSTHRU({len(passthru_idx)})")
+            if has_tug:      flags.append(f"TUG({len(tug)})")
             net0 = (b.get_net_names()[0] if b.get_net_names() else "?")
             pin_s = " PINNED" if pinned else ""
             print(f"\n── bundle {b.id}  nets={len(b.net_names)} ({net0}…)  "
@@ -317,6 +352,12 @@ class ReportsMixin:
                 print(f"   {i:>3} {typ:<{type_w}} {wl:>8} {env:>17} {nsegs:>4} "
                       f"{pt:>4} {ms_s:>7}  {','.join(marks)}")
 
+            # Tug-of-war detail: which interior segment each opposing rider
+            # pair stretches (cand `disp` = the selected/displayed candidate).
+            for (t, lo, hi) in tug:
+                print(f"   tug: cand {disp} seg{t} stretched by "
+                      f"seg{lo}(-)/seg{hi}(+)  [realization risk]")
+
             # --conn: per-segment connectivity / pass-through / slide / pull for
             # the selected candidate (or candidate 0 if not yet planned).
             if conn_detail:
@@ -338,6 +379,7 @@ class ReportsMixin:
         print(f"   bundles with pinched cand: {n_pinch_bundles}/{n_bundles}")
         print(f"   single-candidate bundles : {n_single_bundles}/{n_bundles}")
         print(f"   bundles with pass-through: {n_passthru_bundles}/{n_bundles}")
+        print(f"   bundles with tug-of-war  : {n_tug_bundles}/{n_bundles}")
         top_shapes = sorted(shape_hist.items(), key=lambda kv: -kv[1])
         print("   shape histogram: "
               + ", ".join(f"{t}={n}" for t, n in top_shapes))

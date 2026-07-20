@@ -51,7 +51,22 @@ structural realization-risk signal; (b) FREE-window open-space MST legs;
 biggest upside — see [`wishlist-planner.md`](wishlist-planner.md) →
 *"Charge pulled segments at their predicted pull target"*).
 
-## Opposite-pull ("tug-of-war") connector pairs — a structural risk signal — OPEN
+## Opposite-pull ("tug-of-war") connector pairs — a structural risk signal — DETECTOR SHIPPED (a); joint arbitration (b) OPEN
+
+**Status (2026-07-20):** the structural DETECTOR — sketch (a) — is shipped as a
+byte-identical diagnostic.  `buda_session.util.find_tug_of_war_pairs(segs)`
+reads the already-derived ConnSeg data (each rider's `net_pull` + its junction
+`at_pos` along T) and returns every outward (diverging) `(T, lo_rider, hi_rider)`
+pair — a `−`-puller sitting strictly BELOW a `+`-puller on the same interior
+segment.  It is surfaced in `dump_topologies --problems` (a `TUG(n)` bundle
+flag, a per-pair detail line `tug: cand C segT stretched by segL(−)/segH(+)`,
+and a `bundles with tug-of-war` summary count) on the SELECTED/displayed
+candidate.  Read-only — never changes selection or placement.  Validated
+against the canonical b44 repro (`TRUNK_H+MST@y11915` → `(5,1,3)`, separation
+1250) with positive/negative/synthetic controls in
+`test/tests/test_tug_of_war.py`.  Still OPEN: wiring the count into the
+WL tie-break / a kWLSpread-style risk term (that makes it QoR-affecting — a
+deliberate follow-on), and sketch (b) NUTS-side joint arbitration.
 
 **What:** two connectors riding the same interior segment T, pulling in
 opposite OUTWARD directions (the lower-position rider pulls down, the
@@ -80,7 +95,35 @@ it); (b) NUTS-side joint arbitration — place the pair to minimize the SUM
 (connector legs + T's stretch) instead of sequentially.  Effort: small
 for (a); (b) touches placement order → full golden gate.
 
-## FREE (sentinel) slide windows on open-space MST legs — OPEN
+## FREE (sentinel) slide windows on open-space MST legs — OPEN (naive clamp MEASURED QoR-ambiguous, reverted 2026-07-20)
+
+**Measurement (2026-07-20):** the conservative form of the fix sketch below —
+a Pass 4 in `derive_slide_ranges` clamping any still-sentinel bound to the
+TOPOLOGY's own perp extent (min/max over every segment endpoint on that axis,
+which includes an OOB trunk's detour coordinate, so it never excludes a
+segment's own nominal perp) — was implemented and corpus-A/B'd, then REVERTED.
+It correctly makes the windows finite (b44 `TRUNK_V_OOB+MST@x-246`: 5/9 FREE →
+0/9, e.g. seg0 `[-246,2960]`, seg1 `[10250,12000]`), but it is NOT byte-neutral:
+the clamped windows feed the **generation-time pinch/coverage gate**
+(`filter_pinched` reads each candidate's `min_slide` from these same ConnSeg
+windows), so a FREE window that was "infinitely slidable" (never pinched)
+becomes a finite — sometimes zero-width — window and the gate now drops
+different candidates.  Corpus effect: comprehensive_demo bundle 5 45 → 28
+candidates (+1 planner warning); `rnr/mix` 1237 → 946 candidates, detailed WL
+850633 → 726880 (−14.5%) BUT unplaced-bit peak 175 → 194 and a transient
+`ovl 4` the healers then clear — a genuinely QoR-**ambiguous** mix of wins and
+regressions, so per the delicate-zone protocol it was reverted to report-only.
+
+**The real lesson:** the FREE→finite clamp cannot live in the shared
+`derive_slide_ranges` analysis, because that one cached result feeds BOTH the
+generation-time `min_slide` pinch gate (which must keep seeing today's
+unbounded windows to preserve the candidate pool) AND the NUTS-interval / WL-
+envelope consumers (which want the finite bound).  A correct fix must
+**decouple** the two: bound the window only in the NUTS/envelope consumers
+(or carry a second "realization window" field distinct from the generation-gate
+window), leaving the pinch/coverage gate on the unbounded sentinel.  That is a
+larger change than "a new rule in derive_slide_ranges" — the A/B above is the
+evidence for scoping it that way.
 
 **What:** an MST-edge leg that taps no face and crosses no block gets no
 constraint from ConnTopology — its window stays the ±5e8 sentinel.

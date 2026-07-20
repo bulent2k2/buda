@@ -106,6 +106,72 @@ _RR_CONVERGE_FLOOR = 100
 _RR_CONVERGE_FRAC = 0.03
 
 
+def find_tug_of_war_pairs(segs, net_pull=None):
+    """Detect outward opposite-pull connector pairs on a topology's segments.
+
+    A *tug-of-war* (wishlist-nuts "Opposite-pull connector pairs") is the
+    structural signature of NUTS realization risk: two connectors riding one
+    interior segment T, pulling in opposite OUTWARD directions, so each locally
+    shortens its own perpendicular leg while jointly STRETCHING T between them.
+    The pull-target breakpoint clamp bounds each pull's overshoot, but the pair
+    stays the mechanism that re-opens under contention or a breakpoint gap (the
+    canonical b44 bundle-1 case: seg5 tugged by seg1(-)/seg3(+)).
+
+    A rider R connects to T at a perpendicular T-junction, so R's slide axis is
+    parallel to T's along-axis and R's signed ``net_pull`` names a direction
+    ALONG T: net_pull<0 pulls its junction toward lower-along-T, net_pull>0
+    toward higher.  When a -puller sits BELOW a +puller on T (distinct junction
+    positions) the two diverge and stretch T; a -puller ABOVE a +puller
+    converges (benign) and is not flagged.
+
+    Pure read-only over the already-derived ConnSeg data (``net_pull`` from
+    derive_net_pull, junction ``at_pos`` from the seg conns) — no extra passes,
+    no mutation, so it never changes selection or placement.
+
+    ``segs`` is a list of ConnSeg (``ConnTopology.segs()``).  ``net_pull`` is an
+    optional per-segment EFFECTIVE net_pull override — a bundle plan's
+    ``seg_net_pull`` list (post-dogleg): a dogleg pins the value NUTS actually
+    placed with when ConnTopology would recompute the split-topology pull wrongly,
+    so the report must read it too.  Applied exactly as NUTS's ``build_nuts_maps``
+    does — an entry wins over ``cs.net_pull`` only when the array length matches
+    ``segs`` and the entry is not the ``INT_MIN`` sentinel — so a stale array
+    (a later run_planner reselected a different-length topology) is ignored.
+
+    Returns a list of ``(t, lo_rider, hi_rider)`` tuples: T's segment index and
+    the two rider indices, ``lo_rider`` the lower-positioned (-pull) rider and
+    ``hi_rider`` the higher (+pull).  One tuple per divergent (-,+) rider pair.
+    """
+    from buda import SegConnKind
+    _INT_MIN = -2147483648
+    _ov_ok = net_pull is not None and len(net_pull) == len(segs)
+
+    def _eff_pull(i):
+        if _ov_ok and net_pull[i] != _INT_MIN:
+            return net_pull[i]
+        return segs[i].net_pull
+
+    pairs = []
+    for t, seg in enumerate(segs):
+        # Riders: SEG-conn neighbours, each at a junction position along T
+        # (at_pos) and carrying its own net_pull (a direction along T).
+        negs = []   # (at_pos, rider_idx) for riders pulling toward lower-along-T
+        poss = []   # (at_pos, rider_idx) for riders pulling toward higher-along-T
+        for c in seg.conns:
+            if c.kind != SegConnKind.SEG:
+                continue
+            pull = _eff_pull(c.seg_idx)
+            if pull < 0:
+                negs.append((c.at_pos, c.seg_idx))
+            elif pull > 0:
+                poss.append((c.at_pos, c.seg_idx))
+        # A -puller strictly BELOW a +puller diverges → stretches T.
+        for (pn, ni) in negs:
+            for (pp, pi) in poss:
+                if pn < pp:
+                    pairs.append((t, ni, pi))
+    return pairs
+
+
 def _batched(method):
     """Run a BDB-persist method inside ONE transaction (see BudaSession._bdb_batch).
 
