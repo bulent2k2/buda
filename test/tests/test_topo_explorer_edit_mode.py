@@ -1285,6 +1285,134 @@ def test_edit_ops_logged_and_user_topo_survives_rerun(tmp_path, capsys):
     assert all(math.isnan(v) for v in list(w2.plan.seg_slide_lo)[1:])
 
 
+def test_user_topo_overrides_script_select_topology_on_rerun(tmp_path, capsys):
+    """Reported flat-flow bug: a flow that pins an AUTO-GENERATED candidate
+    with `select_topology` used to DROP a GUI-pinned hand-built USER topo on
+    re-run — the sidecar replay committed the USER candidate WITHOUT pin
+    (script pin "won"), so the planner picked the scripted topo and the USER
+    topo's slide windows were discarded.  A sidecar `user_topo` entry is an
+    explicit GUI hand-build + pin and now OVERRIDES the script's
+    select_topology (the hand-built candidate is unreachable any other way)."""
+    import math
+    flow = tmp_path / "f.buda"
+    flow.write_text("\n".join((
+        "def_layer 4 M4 H TOP 10",
+        "def_layer 5 M5 V TOP 10",
+        "add_block lo 0    0 400  400",
+        "add_block up 0 1000 400 1400",
+        "add_bus w[4] lo.o up.i",
+        "run_bundler",
+        "generate_topologies",
+        "select_topology 1 1",                 # script pins an auto candidate
+        "run_planner 1",
+    )) + "\n")
+
+    def run_flow(sess):
+        for line in flow.read_text().splitlines():
+            if line.strip():
+                sess.do_command(line.strip())
+
+    # Session 1: run the flow (topo 1 pinned by the script), then hand-build
+    # a USER topo in the GUI and commit+pin it.
+    s1 = buda_cli.BudaSession(); s1.no_viz = True
+    s1.script_path = str(flow)
+    run_flow(s1)
+    exp = buda_viz.TopologyExplorer(
+        s1.fp, s1.bundles, sidecar_path=str(tmp_path / "f.json"),
+        layer_stack=s1.layers)
+    try:
+        _key(exp, 'E')
+        _trunk(exp, 'Y', 500, 700)            # V trunk
+        exp.sidx = 0
+        _key(exp, 'S', x=200, y=1200)         # stub up
+        _key(exp, 'S', x=200, y=200)          # stub lo
+        exp.sidx = 0
+        _key(exp, 'W', x=420, y=700); _key(exp, 'W', x=460, y=700)
+        _key(exp, 'enter')                    # commit + pin → sidecar user_topo
+        w1 = s1.bundles[0]
+        uid1 = buda.topo_uid(
+            w1.input.candidates[w1.plan.selected_topology_index])
+        assert w1.input.candidates[
+            w1.plan.selected_topology_index].type == 'USER'
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+    capsys.readouterr()   # drain
+
+    # Session 2: fresh re-run of the SAME flow — the script's
+    # `select_topology 1 1` runs, but the GUI-pinned USER topo overrides it.
+    s2 = buda_cli.BudaSession(); s2.no_viz = True
+    s2.script_path = str(flow)
+    run_flow(s2)
+    out2 = capsys.readouterr().out
+    assert 'rebuilding USER candidate' in out2
+    assert 'overrides the script' in out2
+    w2 = s2.bundles[0]
+    idx = w2.plan.selected_topology_index
+    assert w2.input.topology_pinned
+    assert w2.input.candidates[idx].type == 'USER', \
+        "the GUI USER topo must win over the script select_topology"
+    assert buda.topo_uid(w2.input.candidates[idx]) == uid1
+    # The staged W window's lower bound survived onto the plan (it was
+    # DISCARDED entirely before the fix — the un-pinned commit dropped it).
+    import math
+    slo = list(w2.plan.seg_slide_lo)
+    assert slo[0] == 420.0, slo
+    assert all(math.isnan(v) for v in slo[1:])   # only seg 0 constrained
+
+
+def test_script_select_topology_wins_for_plain_sidecar_selection(tmp_path,
+                                                                  capsys):
+    """The override is scoped to GUI USER topos: a PLAIN sidecar selection
+    (a generated candidate remembered by the explorer) must still defer to a
+    script `select_topology` — the existing precedence is unchanged for
+    everything but hand-built topologies."""
+    flow = tmp_path / "f.buda"
+    flow.write_text("\n".join((
+        "def_layer 4 M4 H TOP 10",
+        "def_layer 5 M5 V TOP 10",
+        "add_block lo 0    0 400  400",
+        "add_block up 0 1000 400 1400",
+        "add_bus w[4] lo.o up.i",
+        "run_bundler",
+        "generate_topologies",
+        "select_topology 1 2",                 # script pins candidate 2
+        "run_planner 1",
+    )) + "\n")
+
+    def run_flow(sess):
+        for line in flow.read_text().splitlines():
+            if line.strip():
+                sess.do_command(line.strip())
+
+    # Session 1: remember a DIFFERENT generated candidate (3) in the sidecar
+    # by selecting it in the explorer (no edit — a plain selection).
+    s1 = buda_cli.BudaSession(); s1.no_viz = True
+    s1.script_path = str(flow)
+    run_flow(s1)
+    exp = buda_viz.TopologyExplorer(
+        s1.fp, s1.bundles, sidecar_path=str(tmp_path / "f.json"),
+        layer_stack=s1.layers)
+    try:
+        exp.idx = 2                            # candidate 3 (0-based)
+        exp._select_current()                  # plain sidecar selection
+        sel = exp._find_selection()
+        assert sel is not None and 'user_topo' not in sel
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+    capsys.readouterr()
+    # Session 2: the script's select_topology 1 2 must win (candidate 2).
+    s2 = buda_cli.BudaSession(); s2.no_viz = True
+    s2.script_path = str(flow)
+    run_flow(s2)
+    w2 = s2.bundles[0]
+    assert w2.plan.selected_topology_index == 1   # candidate 2, not 3
+    assert 'overrides the script' not in capsys.readouterr().out
+
+
 def test_cli_edit_set_slide_stages_clamps_and_rekeys(tmp_path):
     """The scriptable W: edit_set_slide stages a window (clamped to the
     structural slide range), 'clear' unstages, edit_remove_segment re-keys,

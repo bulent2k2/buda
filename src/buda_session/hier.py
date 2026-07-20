@@ -405,9 +405,20 @@ class HierMixin:
             w = matching[0]
             bid = w.input.original_bundle.id
             sc_uid = sel.get('topo_uid')
-            if sc_uid and any(buda.topo_uid(c) == sc_uid
-                              for c in w.input.candidates):
-                continue                       # already in the pool
+            # Skip the rebuild only when the USER candidate is already the
+            # PINNED selection — nothing to do.  If it is in the pool but a
+            # script `select_topology` (which resets plan.seg_slide_lo/hi to
+            # the new candidate) displaced it, fall through and re-commit: the
+            # replay dedups by uid (no duplicate) but re-pins AND re-applies
+            # the session's slide windows, which the displacement had cleared.
+            # Without this, the all-bundles `generate_topologies` + script
+            # select ordering kept the USER topo selected (main-loop override)
+            # but LOST its slide windows.
+            sel_idx = w.plan.selected_topology_index
+            if sc_uid and getattr(w.input, 'topology_pinned', False) \
+                    and 0 <= sel_idx < len(w.input.candidates) \
+                    and buda.topo_uid(w.input.candidates[sel_idx]) == sc_uid:
+                continue                       # already pinned to it
             if self._edit_topo is not None:
                 print(f"Warning: sidecar USER topology for bundle {bid} not "
                       f"rebuilt — an edit session is already open")
@@ -430,15 +441,28 @@ class HierMixin:
             self.do_command(f"edit_topology {bid} {base_arg}")
             for op in ops:
                 self.do_command(op)
-            # Commit WITH pin unless a script command (select_topology) already
-            # pinned this wrapper — the script keeps precedence, exactly as in
-            # the selection loop below.  The pin matters beyond selection: an
-            # un-pinned commit rightly DISCARDS the session's per-segment
-            # overrides (slide windows, edit_set_layer pins) because they
-            # attach to the selection — so the replayed session's overrides
-            # land only when its candidate actually becomes the selection.
-            already = getattr(w.input, 'topology_pinned', False)
-            self.do_command("edit_commit" if already else "edit_commit pin")
+            # Commit WITH pin — a sidecar `user_topo` entry is ALWAYS an
+            # explicit GUI hand-build + pin (the explorer's edit_commit both
+            # pins and stores the op-log).  It overrides a script
+            # `select_topology`, which can only reference an AUTO-GENERATED
+            # candidate: the hand-built topology exists only via this replay,
+            # so "script pin wins" would make it permanently unreachable
+            # (the persisted USER topo dropped on every re-run — the reported
+            # flat-flow bug).  The pin also matters beyond selection: an
+            # un-pinned commit DISCARDS the session's per-segment overrides
+            # (slide windows, edit_set_layer pins) because they attach to the
+            # selection.  The main selection loop below adopts the same
+            # user_topo over a script pin, so the two paths agree.
+            was_script_pinned = (
+                getattr(w.input, 'topology_pinned', False)
+                and w.plan.selected_topology_index >= 0
+                and w.plan.selected_topology_index < len(w.input.candidates)
+                and w.input.candidates[
+                    w.plan.selected_topology_index].type != "USER")
+            self.do_command("edit_commit pin")
+            if was_script_pinned:
+                print(f"  [sidecar] GUI-pinned USER candidate overrides the "
+                      f"script's select_topology for bundle {bid}")
             if sc_uid and not any(buda.topo_uid(c) == sc_uid
                                   for c in w.input.candidates):
                 print(f"Warning: rebuilt USER candidate for bundle {bid} does "
@@ -528,14 +552,33 @@ class HierMixin:
             #    when that wrapper's selected topology matches the sidecar's, so
             #    their segment count lines up.
             sidecar_layers = sel.get('seg_layers')
+            # A sidecar `user_topo` entry is a GUI hand-build + pin; it
+            # overrides a script select_topology (which cannot reference the
+            # hand-built candidate), so the resolved USER candidate is adopted
+            # even for a script-pinned wrapper — the reported flat-flow bug
+            # where `select_topology` in the script dropped the persisted USER
+            # topo.  A plain (generated-candidate) sidecar selection keeps the
+            # old precedence: the script's pin wins.
+            is_user_pin = bool(sel.get('user_topo'))
             n_adopted = 0   # wrappers newly pinned from the sidecar
             n_layered = 0   # wrappers that received layer overrides
             for w in matching:
                 w_pinned = getattr(w.input, 'topology_pinned', False)
-                target_idx = (w.plan.selected_topology_index if w_pinned
-                              else resolved_sidecar_idx)
+                # Adopt the sidecar's topology when the wrapper is unpinned,
+                # OR when this is a GUI USER pin landing on a DIFFERENT
+                # (script-chosen) candidate — the USER pin outranks it.
+                override = (is_user_pin and w_pinned
+                            and w.plan.selected_topology_index
+                                != resolved_sidecar_idx)
+                target_idx = (resolved_sidecar_idx
+                              if (not w_pinned or override)
+                              else w.plan.selected_topology_index)
 
-                if not w_pinned:
+                if not w_pinned or override:
+                    if override:
+                        print(f"  [sidecar] GUI-pinned USER candidate "
+                              f"overrides the script's select_topology for "
+                              f"bundle {bid}")
                     w.plan.selected_topology_index = target_idx
                     w.input.topology_pinned = True
                     n_adopted += 1

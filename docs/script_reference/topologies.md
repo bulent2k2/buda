@@ -185,6 +185,17 @@ Phase E3b).  `edit_topology` opens a working **copy** of the given candidate
   `edit_commit pin`).  `load_pipeline` prints a pointer to it for every
   restored USER candidate that has one.
 
+**Sidecar re-run precedence.** A GUI TopoEdit commit records its op-log in
+the flow's JSON sidecar; on a fresh re-run of the same flow the replay
+rebuilds the hand-built candidate and **pins it, overriding any
+`select_topology` in the script** (the script can only reference an
+auto-generated candidate, so a hand-built USER topo is reachable no other
+way — without the override it was silently dropped and its slide windows
+discarded).  A prior `select_topology` that reset the plan's slide windows
+is re-applied on the override, so the USER topo's `W`/`edit_set_slide`
+refinements survive.  A *plain* sidecar selection (a remembered generated
+candidate, no edit) still defers to the script's `select_topology`.
+
 ```
 edit_topology 1 new
 edit_add_trunk V 450          # full-span column trunk at x=450
