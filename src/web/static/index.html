@@ -1,0 +1,291 @@
+<!doctype html>
+<!--
+ Copyright 2026 Ben Bulent Basaran — Apache-2.0.
+ BUDA web reference client (vanilla SVG). The immediate, toolchain-free way to
+ drive the demo; also the porting reference for the Scala.js renderer/DisplayGeom.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BUDA — Web Demo</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+         display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+  #side { border-right: 1px solid #8884; padding: 10px; overflow: auto;
+          display: flex; flex-direction: column; gap: 8px; }
+  #main { position: relative; overflow: hidden; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  textarea { width: 100%; height: 120px; font: inherit; resize: vertical; }
+  button { font: inherit; padding: 3px 8px; cursor: pointer; }
+  .row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  #log { white-space: pre-wrap; background: #8881; padding: 6px; border-radius: 4px;
+         max-height: 180px; overflow: auto; font-size: 12px; }
+  #stages span { padding: 1px 6px; border-radius: 3px; margin-right: 3px; opacity: .4; }
+  #stages span.on { opacity: 1; background: #2a72; }
+  svg { width: 100%; height: 100%; display: block; }
+  .blk { fill: #6cf2; stroke: #48c; stroke-width: 1; }
+  .blk.container { fill: none; stroke-dasharray: 4 3; }
+  .blklbl { fill: #48c; font-size: 10px; }
+  .keepout { fill: #f443; stroke: #e33; stroke-width: 1; }
+  .hanan { stroke: #8883; stroke-width: .5; stroke-dasharray: 2 3; }
+  .seg { stroke-width: 2.5; fill: none; }
+  .seg.H { stroke: #e6a; } .seg.V { stroke: #4ad; } .seg.jog { stroke: #fa0; }
+  .bt { fill: #0bd; } .rcv { fill: none; stroke: #d0b; stroke-width: 1.5; }
+  .track { stroke: #2a7; stroke-width: 2; } .trackftp { fill: #2a73; }
+  .bit { stroke: #08a; stroke-width: 1; } .bit.H { stroke: #e83; }
+  .via { fill: #f60; stroke: #a30; stroke-width: .5; }
+  .overlap { fill: #f005; stroke: #f00; stroke-width: 1; }
+  #candbar { position: absolute; top: 8px; left: 8px; background: #000a; color: #fff;
+             padding: 6px 10px; border-radius: 5px; }
+  #candbar button { background: #fff2; color: #fff; border: 1px solid #fff4; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>BUDA — Web Demo</h1>
+  <div id="stages">
+    <span data-k="bundler">bundler</span><span data-k="topologies">topo</span
+    ><span data-k="planner">planner</span><span data-k="nuts">nuts</span
+    ><span data-k="dnuts">dnuts</span>
+  </div>
+  <textarea id="cmds">source flow/tracks/tracks4top.buda
+add_block blk_07 2960 9750 4660 10250
+add_block blk_23 200 10830 2700 11830
+add_block io_pad_tl 200 12000 1200 12800
+add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
+  <div class="row">
+    <button onclick="runCmds()">Run commands</button>
+    <button onclick="reset()">Reset</button>
+  </div>
+  <div class="row">
+    <button onclick="stage('run_bundler')">bundler</button>
+    <button onclick="stage('generate_topologies')">topologies</button>
+    <button onclick="stage('run_planner')">planner</button>
+    <button onclick="stage('run_nuts')">nuts</button>
+    <button onclick="stage('run_detailed_nuts')">dnuts</button>
+  </div>
+  <div class="row">view:
+    <button onclick="setView('generation')">topo</button>
+    <button onclick="setView('nuts')">NUTS</button>
+    <button onclick="setView('detailed')">detailed</button>
+  </div>
+  <div id="log"></div>
+</div>
+<div id="main">
+  <div id="candbar" hidden>
+    <button onclick="stepCand(-1)">◀</button>
+    <span id="candlbl"></span>
+    <button onclick="stepCand(1)">▶</button>
+  </div>
+  <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+
+<script>
+const API = "/api";
+let RENDER = null, CAND = 0, VIEW = "generation";
+
+async function post(path, body) {
+  const r = await fetch(API + path, {method: "POST",
+      headers: {"content-type": "application/json"}, body: JSON.stringify(body || {})});
+  return r.json();
+}
+async function get(path) { return (await fetch(API + path)).json(); }
+
+function log(txt) { document.getElementById("log").textContent = txt; }
+function showStages(state) {
+  for (const el of document.querySelectorAll("#stages span"))
+    el.classList.toggle("on", !!(state.stages_run || {})[el.dataset.k]);
+}
+
+async function runCmds() {
+  const cmds = document.getElementById("cmds").value.split("\n").map(s => s.trim()).filter(Boolean);
+  const res = await post("/command", {cmds});
+  log(res.results.map(r => (r.ok ? "  " : "x ") + (r.summary || "(ok)")).join("\n"));
+  showStages(res.state);
+  await refresh();
+}
+async function reset() { showStages(await post("/reset", {})); RENDER = null; draw(); }
+async function stage(cmd) {
+  const res = await post("/command", {cmds: [cmd]});
+  log(res.results.map(r => (r.ok ? "  " : "x ") + (r.summary || "(ok)")).join("\n"));
+  showStages(res.state);
+  await refresh();
+}
+async function setView(v) { VIEW = v; await refresh(); }
+async function refresh() {
+  const st = await get("/state");
+  const sr = st.stages_run;
+  // Auto-advance the view to the deepest available stage on a fresh run.
+  if (VIEW === "detailed" && !sr.dnuts) VIEW = sr.nuts ? "nuts" : "generation";
+  if (VIEW === "nuts" && !sr.nuts) VIEW = "generation";
+  if (!sr.topologies) { RENDER = null; return draw(); }
+  RENDER = await get("/render/" + VIEW + (VIEW === "generation" ? "?bundle=1" : ""));
+  if (VIEW === "generation")
+    CAND = Math.min(CAND, (RENDER.bundles[0]?.candidates.length || 1) - 1);
+  draw();
+}
+function stepCand(d) {
+  if (VIEW !== "generation") return;
+  const n = RENDER?.bundles[0]?.candidates.length || 0;
+  if (!n) return;
+  CAND = (CAND + d + n) % n; draw();
+}
+
+// ── SVG rendering ──────────────────────────────────────────────────────────
+const SVGNS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function bboxOf(fp) {
+  let x1 = 1e18, y1 = 1e18, x2 = -1e18, y2 = -1e18;
+  for (const b of fp.blocks) {
+    x1 = Math.min(x1, b.bbox.x1); y1 = Math.min(y1, b.bbox.y1);
+    x2 = Math.max(x2, b.bbox.x2); y2 = Math.max(y2, b.bbox.y2);
+  }
+  if (x1 > x2) { x1 = 0; y1 = 0; x2 = 1000; y2 = 1000; }
+  return [x1, y1, x2, y2];
+}
+function draw() {
+  const svg = document.getElementById("svg");
+  svg.innerHTML = "";
+  document.getElementById("candbar").hidden = !RENDER;
+  if (!RENDER) return;
+  const fp = RENDER.floorplan;
+  let [x1, y1, x2, y2] = bboxOf(fp);
+  const pad = Math.max(x2 - x1, y2 - y1) * 0.06 + 50;
+  x1 -= pad; y1 -= pad; x2 += pad; y2 += pad;
+  // BUDA y grows UP; SVG y grows DOWN — flip via a group transform.
+  const W = x2 - x1, H = y2 - y1;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const g = el("g", {transform: `translate(${-x1} ${y2}) scale(1 -1)`}, svg);
+
+  for (const line of RENDER.hanan.xs)
+    el("line", {class: "hanan", x1: line, y1, x2: line, y2}, g);
+  for (const line of RENDER.hanan.ys)
+    el("line", {class: "hanan", x1, y1: line, x2, y2: line}, g);
+  for (const k of fp.keepouts)
+    el("rect", {class: "keepout", x: k.bbox.x1, y: k.bbox.y1,
+        width: k.bbox.x2 - k.bbox.x1, height: k.bbox.y2 - k.bbox.y1}, g);
+  for (const b of fp.blocks) {
+    // A multi-rect / TEG block is NOT solid over its whole bbox — draw each real
+    // rect solid and only OUTLINE the bbox, so gaps (valid pass-through channels)
+    // don't read as block area. Single-rect blocks (rects == []) fill the bbox.
+    if (b.rects && b.rects.length) {
+      for (const r of b.rects)
+        el("rect", {class: "blk", x: r[0], y: r[1], width: r[2] - r[0], height: r[3] - r[1]}, g);
+      el("rect", {class: "blk container",
+          x: b.bbox.x1, y: b.bbox.y1,
+          width: b.bbox.x2 - b.bbox.x1, height: b.bbox.y2 - b.bbox.y1}, g);
+    } else {
+      el("rect", {class: "blk" + (b.is_container ? " container" : ""),
+          x: b.bbox.x1, y: b.bbox.y1,
+          width: b.bbox.x2 - b.bbox.x1, height: b.bbox.y2 - b.bbox.y1}, g);
+    }
+    // label: a per-label group translated to the block's top-left (world coords,
+    // y-up) then locally un-flipped so the text reads upright.
+    const lg = el("g", {transform:
+        `translate(${b.bbox.x1 + 4} ${b.bbox.y2 - 12}) scale(1 -1)`}, g);
+    el("text", {class: "blklbl", x: 0, y: 0}, lg).textContent = b.name;
+  }
+
+  document.getElementById("candbar").hidden = (VIEW !== "generation");
+  if (VIEW === "generation") drawGeneration(g, W, H);
+  else if (VIEW === "nuts") drawNuts(g);
+  else if (VIEW === "detailed") drawDetailed(g, Math.max(W, H));
+}
+
+// A placed segment: perpendicular coord = track_position, extent = span_lo..hi
+// along the routing direction. Returns [x1,y1,x2,y2] of the centerline.
+function placedLine(s) {
+  return s.horiz
+    ? [s.span_lo, s.track_position, s.span_hi, s.track_position]
+    : [s.track_position, s.span_lo, s.track_position, s.span_hi];
+}
+function placedRect(s) {
+  const w = s.width;
+  return s.horiz
+    ? {x: s.span_lo, y: s.track_position - w/2, width: s.span_hi - s.span_lo, height: w}
+    : {x: s.track_position - w/2, y: s.span_lo, width: w, height: s.span_hi - s.span_lo};
+}
+
+// DisplayGeom: place each segment at the CENTER of its slide window (or its
+// nominal perp if unbounded), then snap each connecting endpoint to its partner
+// segment's display perp so junctions visually meet. Ported from
+// src/viz_explorer/draw.py (perp-centering + endpoint snapping); pure geometry
+// over the serialized ConnSeg `analysis`, validated against the golden snapshot.
+function computeDisplay(analysis) {
+  const perp = analysis.map(a =>
+    (a.perp_lo !== null && a.perp_hi !== null) ? (a.perp_lo + a.perp_hi) / 2 : a.perp_pos);
+  const alo = analysis.map(a => a.along_lo);
+  const ahi = analysis.map(a => a.along_hi);
+  analysis.forEach((a, i) => {
+    for (const c of a.conns) {
+      if (c.kind !== "SEG" || c.seg_idx < 0 || c.seg_idx >= perp.length) continue;
+      const target = perp[c.seg_idx];             // partner's display perp
+      // Snap the endpoint of `i` nearest this junction so the line reaches it.
+      if (Math.abs(c.at_pos - alo[i]) <= Math.abs(c.at_pos - ahi[i]))
+        alo[i] = Math.min(alo[i], target);        // extend the lo end outward
+      else
+        ahi[i] = Math.max(ahi[i], target);        // extend the hi end outward
+    }
+  });
+  return {perp, alo, ahi};
+}
+
+function drawGeneration(g, W, H) {
+  const bundle = RENDER.bundles[0];
+  if (!bundle) return;
+  const cand = bundle.candidates[CAND];
+  document.getElementById("candlbl").textContent =
+    `bundle ${bundle.id} · cand ${CAND + 1}/${bundle.candidates.length} · ${cand.type} · WL ${cand.estimated_wirelength}`;
+  const disp = computeDisplay(cand.analysis);
+  cand.analysis.forEach((a, i) => {
+    const s = cand.segments[i];
+    const cls = "seg " + (s.is_jog ? "jog" : (a.horiz ? "H" : "V"));
+    const p = disp.perp[i];
+    if (a.horiz)
+      el("line", {class: cls, x1: disp.alo[i], y1: p, x2: disp.ahi[i], y2: p}, g);
+    else
+      el("line", {class: cls, x1: p, y1: disp.alo[i], x2: p, y2: disp.ahi[i]}, g);
+  });
+  for (const bt of cand.seg_busterms)
+    for (const side of ["start", "end"]) {
+      const b = bt[side]; if (!b) continue;
+      el("circle", {class: "rcv", cx: (b.bbox.x1 + b.bbox.x2)/2,
+          cy: (b.bbox.y1 + b.bbox.y2)/2, r: Math.max(W, H) * 0.008}, g);
+    }
+}
+
+function drawNuts(g) {
+  const n = RENDER.nuts; if (!n) return;
+  for (const s of n.segments) {
+    el("rect", Object.assign({class: "trackftp"}, placedRect(s)), g);
+    const [a, b, c, d2] = placedLine(s);
+    el("line", {class: "track", x1: a, y1: b, x2: c, y2: d2}, g);
+  }
+  for (const o of n.overlap_details)
+    el("rect", {class: "overlap", x: o.span_lo, y: o.perp_lo,
+        width: o.span_hi - o.span_lo, height: o.perp_hi - o.perp_lo}, g);
+}
+
+function drawDetailed(g, span) {
+  const d = RENDER.detailed; if (!d) return;
+  for (const s of d.net_segments) {
+    const [a, b, c, e] = placedLine(s);
+    el("line", {class: "bit " + (s.horiz ? "H" : "V"), x1: a, y1: b, x2: c, y2: e}, g);
+  }
+  const r = span * 0.004;
+  for (const v of d.net_vias)
+    el("rect", {class: "via", x: v.x - r, y: v.y - r, width: 2*r, height: 2*r}, g);
+}
+
+refresh();
+</script>
+</body>
+</html>

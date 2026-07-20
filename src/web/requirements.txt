@@ -1,0 +1,7 @@
+# BUDA web backend runtime dependencies (in addition to the compiled
+# buda/buda_db modules on PYTHONPATH=build and the src/ tree).
+#   pip install -r src/web/requirements.txt
+fastapi>=0.110
+uvicorn>=0.27
+# httpx is pulled in by fastapi's TestClient; listed for the pytest suite.
+httpx>=0.27
