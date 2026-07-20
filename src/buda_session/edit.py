@@ -139,8 +139,20 @@ class EditMixin:
     def _edit_record(self, op):
         """Record one APPLIED edit op (its `.buda` command line) into the CLI
         session's op-log — the same design-intent record the GUI's
-        _edit_log_op keeps; edit_commit stores it as BDB meta provenance."""
-        if self._edit_ops is not None:
+        _edit_log_op keeps; edit_commit stores it as BDB meta provenance.
+
+        Strip an inline `# comment` first (same rule as the CLI parser): the
+        handlers receive the RAW cmd_line, so a commented demo line
+        (`edit_set_span 0 75 210  # trim`) would otherwise bake the note into
+        the persisted op-log and its `dump_user_ops` replay."""
+        if self._edit_ops is None:
+            return
+        for i, ch in enumerate(op):
+            if ch == '#' and (i == 0 or op[i - 1].isspace()):
+                op = op[:i]
+                break
+        op = op.strip()
+        if op:
             self._edit_ops.append(op)
 
     def _record_user_ops(self, bundle_id, uid, base, ops):

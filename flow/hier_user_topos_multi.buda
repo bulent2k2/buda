@@ -82,12 +82,17 @@ dump_hbundles
 # ── USER #1 — core_cell TEMPLATE: a 4-block multicast comb (cell-local) ─
 # One H trunk in the mid-gap (rows at y20..100 / y140..220) with a stub
 # from each of the four leaf blocks — replicated to core_i1 and core_i2.
+# The trunk is added with a generous span so each stub taps at its block's
+# centre column, then `edit_set_span` TRIMS the trunk to the outer taps
+# (c0/c2 at x75, c1/c3 at x210): the end columns meet the trunk at its
+# CORNERS, so no trunk wire overshoots past the outermost ConnSegs.
 edit_topology 1 new
 edit_add_trunk H 115 20 265
 edit_add_stub c0 0
 edit_add_stub c1 0
 edit_add_stub c2 0
 edit_add_stub c3 0
+edit_set_span 0 75 210           # trim comb trunk to the outer stub columns
 edit_commit pin
 
 # ── USER #2 — io_cell TEMPLATE: the same 4-block comb (cell-local) ──────
@@ -97,6 +102,7 @@ edit_add_stub p0 0
 edit_add_stub p1 0
 edit_add_stub p2 0
 edit_add_stub p3 0
+edit_set_span 0 75 210           # trim to the outer p0/p3 columns (no overshoot)
 edit_commit pin
 
 # ── USER #3 — top-level cross-block bundle (absolute frame) ────────────
@@ -106,6 +112,7 @@ edit_topology 2 new
 edit_add_trunk H 115 200 680
 edit_add_stub core_i1/c1 0
 edit_add_stub io_i1/p0 0
+edit_set_span 0 232 650          # trim to the two stub taps (corner-connect)
 edit_commit pin
 
 # ── Plan (expands templates to every occurrence) + route ─────────────
