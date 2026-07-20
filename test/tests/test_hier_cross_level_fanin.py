@@ -106,6 +106,33 @@ def test_set_bundling_no_convergent_keeps_cross_level_separate():
     assert len(xl) == 2                       # opted out → not merged
 
 
+def test_override_does_not_fragment_a_strict_equivalent_bus():
+    """A set_bundling override that disables convergent for one bus must not
+    FRAGMENT that bus: its strictly-identical bits (same driver + sink) stay
+    bundled via the strict signature, only the fan-in merge with the other
+    driver is suppressed (Codex #384 P2 — the union-find always unions strict)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("core_cell", 200, 120)
+    db.add_cell("leaf_cell", 60, 60)
+    db.add_inst_to_cell("core_cell", "c0", "leaf_cell", 20, 30)
+    db.add_inst("core_i1", "core_cell", "", 0, 0)
+    db.add_inst("core_i2", "core_cell", "", 0, 300)
+    db.add_inst("snk_i", "leaf_cell", "", 600, 150)
+    for i in range(4):                        # one strict bus, deep→top
+        db.add_net_pins(f"blk_{i}", "core_i1/c0.out", ["snk_i.in"])
+        db.add_net_pins(f"other_{i}", "core_i2/c0.out", ["snk_i.in"])
+    buda.BustermGen(db).derive(1)
+    s = buda_cli.BudaSession(); s.no_viz = True
+    s.bdb = db
+    _quiet(s, "def_layer 4 M4 H TOP 10", "def_layer 5 M5 V TOP 10",
+           "set_bundling blk_ no_convergent", "run_hier_bundler CONVERGENT")
+    xl = {frozenset(w.input.original_bundle.get_net_names())
+          for w in s.bundles if w.input.original_bundle.drv_spec_depth >= 0}
+    # blk_* stays whole (one strict bundle); other_* is its own bundle.
+    assert frozenset(f"blk_{i}" for i in range(4)) in xl
+    assert frozenset(f"other_{i}" for i in range(4)) in xl
+
+
 # ── generation + routing ──────────────────────────────────────────────────────
 
 @pytest.mark.mid

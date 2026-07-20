@@ -58,9 +58,10 @@ open:
    at the shared sink with each deep driver as a per-bit tapered leaf, and
    a resumed session recovers the endpoints from the reason.
    `test_hier_cross_level_fanin.py`.
-2. ✅ **Hier `set_max_bundle_bits`** (same item) — LANDED (split at
-   `run_hier_bundler` on TEMPLATE bundles before expansion, propagating
-   through the template↔replica linkage; `test_hier_max_bundle_bits.py`).
+2. **Hier `set_max_bundle_bits`** (same item).  The balanced split pass
+   is flat-only; a hier version must propagate splits through the
+   template↔replica linkage so every instance splits identically.  Fails
+   LOUD today.
 3. **Re-planning a resumed post-expansion session** is unsupported —
    `run_planner hier` on a `load_pipeline expanded` checkpoint would
    double-expand.  Pre-existing, noted in the resume work; no workflow

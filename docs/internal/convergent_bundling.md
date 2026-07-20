@@ -92,12 +92,12 @@ driver as a per-bit tapered leaf (`_xlevel_fanin_endpoints` +
 `_derive_hier_fanin_bits`, `local=False`); the reason is persisted, so a
 resumed session recovers the endpoints even though `net_drivers` is not
 persisted (the taper then falls back to conservative full width).
-STRICT/BIDIRECTIONAL keep cross-level nets separate (byte-identical).
-`set_max_bundle_bits` is likewise now hier-aware (split at
-`run_hier_bundler` before per-instance expansion).  Tests:
+STRICT/BIDIRECTIONAL keep cross-level nets separate (byte-identical).  Tests:
 `test/tests/test_hier_cross_level_fanin.py`,
-`test/tests/test_hier_max_bundle_bits.py`,
 `test/tests/test_hier_bundler_combined.py`.
+(Remaining corner: hier `set_max_bundle_bits` — the balanced split is still
+flat-only; a hier version must propagate through the template↔replica
+linkage.)
 
 ## The two strategies
 

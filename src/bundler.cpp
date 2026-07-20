@@ -483,10 +483,17 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 return s;
             };
 
+            // As on the same-level path, ANY active set_bundling override
+            // switches to the union-find join so a strict-equivalent bus stays
+            // bundled (a per-net key would fragment it when a prefix disables
+            // one relation for only some of its bits).
+            const bool general = (_strategy == Strategy::COMBINED)
+                                 || !_overrides.empty();
             std::vector<std::vector<int>> xl_groups;
-            if (_strategy != Strategy::COMBINED) {
-                // Single-relation strategies: the historical sig map (its key
-                // order is the emitted bundle order — deterministic).
+            if (!general) {
+                // Single-relation, override-free strategies: the historical sig
+                // map (its key order is the emitted bundle order — every net
+                // gets the same relation key, so no fragmentation).
                 std::map<std::string, std::vector<int>> xl_sig_to_nets;
                 for (int net_id : xl_nets) {
                     const auto& info = net_leaf.at(net_id);
@@ -512,8 +519,16 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 for (auto& [sig, ids] : xl_sig_to_nets)
                     xl_groups.push_back(std::move(ids));
             } else {
-                // COMBINED: union-find join over conv (receiver set) and bidir
-                // (endpoint set), mirroring the same-level general path.
+                // Union-find join (COMBINED, or any strategy with an override):
+                // the STRICT signature is always unioned, so strictly-identical
+                // cross-level bits stay bundled regardless of per-net relation
+                // permissions; conv/bidir keys merge only when the strategy
+                // enables that relation AND the net permits it.  Mirrors the
+                // same-level general path exactly.
+                const bool strat_conv  = (_strategy == Strategy::CONVERGENT ||
+                                          _strategy == Strategy::COMBINED);
+                const bool strat_bidir = (_strategy == Strategy::BIDIRECTIONAL ||
+                                          _strategy == Strategy::COMBINED);
                 std::map<int, int> parent;
                 for (int n : xl_nets) parent[n] = n;
                 std::function<int(int)> find = [&](int x) {
@@ -529,9 +544,9 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                                                   ? net_name[net_id] : std::string();
                     std::vector<std::string> sigs;
                     sigs.push_back("S" + _strict_sig(info.drv_spec_path, sorted_rcv));
-                    if (_net_allows(nname, "conv"))
+                    if (strat_conv && _net_allows(nname, "conv"))
                         sigs.push_back("C" + rcv_set_sig(sorted_rcv));
-                    if (_net_allows(nname, "bidir")) {
+                    if (strat_bidir && _net_allows(nname, "bidir")) {
                         std::vector<std::string> all = sorted_rcv;
                         all.push_back(info.drv_spec_path);
                         sigs.push_back("B" + _bidir_sig(all));

@@ -83,17 +83,16 @@ items this page doesn't see).
 8. **Bundler follow-on corners (hier)** —
    [`wishlist-bundler.md`](wishlist-bundler.md) → *"Remaining corners"*.
    After the bundler subsystem went feature-complete across flat and hier
-   (PRs #268/#273/#276), the two follow-on corners are now BOTH closed:
+   (PRs #268/#273/#276):
    ✅ **cross-level fan-in grouping** — CONVERGENT/COMBINED now group
    cross-level nets by their shared receiver set into one fan-in bundle
    with per-net `net_drivers`/`net_receivers` + a persisted `FANIN` reason,
    and generation roots the tree at the shared sink with each deep driver
    as a per-bit tapered leaf (the route survives resume via the reason).
    `test_hier_cross_level_fanin.py`.
-   ✅ **hier `set_max_bundle_bits`** — the balanced split now runs at
-   `run_hier_bundler` on TEMPLATE bundles before expansion, propagating
-   identically through the template↔replica linkage
-   (`test_hier_max_bundle_bits.py`).
+   **hier `set_max_bundle_bits`** — the balanced split pass is flat-only;
+   a hier version must propagate splits through the template↔replica
+   linkage so every instance splits identically.  Fails LOUD today.
 
 ## Big / blocked / conditional
 
