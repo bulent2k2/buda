@@ -29,14 +29,31 @@ import collections
 import logging
 import os
 import sys
-import tkinter as tk
 import queue
 import threading
-from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import matplotlib
-matplotlib.use("TkAgg")
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+
+# Tk is required to RUN the GUI, but the module's pure-logic methods (undo
+# snapshot/restore, geometry helpers) should import without a display so they
+# stay unit-testable headless (this file's `from __future__ import annotations`
+# already keeps every tk-typed signature lazy).  In production tkinter is
+# present and this is a plain import; in a headless test/CI it degrades to
+# tk=None and only the actual GUI entry points (which never run headless) are
+# unavailable.
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, simpledialog, ttk
+    matplotlib.use("TkAgg")
+    from matplotlib.backends.backend_tkagg import (
+        FigureCanvasTkAgg, NavigationToolbar2Tk)
+    _TK_AVAILABLE = True
+except Exception:                       # no tkinter / no display
+    tk = None
+    filedialog = messagebox = simpledialog = ttk = None
+    FigureCanvasTkAgg = NavigationToolbar2Tk = None
+    _TK_AVAILABLE = False
+
 from matplotlib.figure import Figure
 import matplotlib.patches as mpatches
 
@@ -1350,14 +1367,40 @@ class BdbFloorplanner:
         self._status.set(msg)
 
     def _restore_silent(self, snap: dict) -> None:
-        """Restore block bboxes from a snapshot without redrawing."""
+        """Restore block bboxes (engine) AND cell dims (BDB) from a snapshot,
+        without redrawing (audit T2-05: cell dims are reverted too so the BDB
+        cell row can't stay diverged from the reverted engine after an undo).
+
+        `sync_cell_to_instances` persists the resized cell row IMMEDIATELY but
+        defers component bboxes to `write_bdb`.  Reverting only the cell row
+        would leave the file partially mutated after a resize->Write->undo (the
+        already-persisted component rows would keep the resized dims while the
+        cell row reverts).  So any component already in the BDB has its reverted
+        bbox re-persisted here too, keeping the cell row and its component rows
+        consistent regardless of an intervening Write."""
         if not snap:
             return
-        for name, (x1, y1, x2, y2) in snap.items():
+        blocks = snap.get("blocks", {})
+        cells = snap.get("cells", {})
+        bdb = self.state.bdb if self.state is not None else None
+        for name, (x1, y1, x2, y2) in blocks.items():
             try:
                 self.state.engine.resize_block_raw(name, x1, y1, x2, y2)
             except Exception:
                 pass
+            # Re-persist the reverted bbox for components already in the BDB
+            # (set_comp_bbox raises for components not yet written — ignored).
+            if bdb is not None:
+                try:
+                    bdb.set_comp_bbox(name, x1, y1, x2, y2)
+                except Exception:
+                    pass
+        if cells and bdb is not None:
+            for cname, (w, h) in cells.items():
+                try:
+                    bdb.add_cell(cname, w, h)
+                except Exception:
+                    pass
 
     def _pan_view(self, dx: int, dy: int) -> None:
         """Pan the canvas by 15 % of the current view span per keypress."""
@@ -1441,28 +1484,41 @@ class BdbFloorplanner:
     # ------------------------------------------------------------------
 
     def _snapshot(self) -> dict:
-        """Capture current block positions from the live engine."""
-        snap = {}
+        """Capture the current live state for undo/redo: block positions from
+        the engine AND cell dimensions from the BDB.
+
+        Cells are captured (audit T2-05) because `sync_cell_to_instances`
+        writes the resized cell dims to the BDB `cell` row IMMEDIATELY (that
+        immediate write is intentional — a non-synthesized cell name would
+        otherwise never be updated, guarded by
+        test_resize_shared_cell_preserves_sibling_positions).  An undo restores
+        only the engine, so without also reverting the cell row the BDB would
+        stay diverged from the reverted engine until the next write_bdb.
+        Reverting both keeps them consistent."""
+        blocks: dict = {}
+        cells: dict = {}
         if self.state is None:
-            return snap
+            return {"blocks": blocks, "cells": cells}
         for name in self.state.block_names:
             try:
                 b = self.state.engine.get_block(name)
-                snap[name] = (b.x1, b.y1, b.x2, b.y2)
+                blocks[name] = (b.x1, b.y1, b.x2, b.y2)
             except Exception:
                 pass
-        return snap
+        if self.state.bdb is not None:
+            try:
+                for c in self.state.bdb.all_cells():
+                    cells[c.name] = (c.width, c.height)
+            except Exception:
+                pass
+        return {"blocks": blocks, "cells": cells}
 
     def _push_undo(self, snap: dict) -> None:
         self._undo_stack.append(snap)
         self._redo_stack.clear()
 
     def _restore(self, snap: dict) -> None:
-        for name, (x1, y1, x2, y2) in snap.items():
-            try:
-                self.state.engine.resize_block_raw(name, x1, y1, x2, y2)
-            except Exception:
-                pass
+        self._restore_silent(snap)
         self._draw()
 
     def _undo(self) -> None:
