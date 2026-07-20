@@ -107,6 +107,31 @@ designs and fail LOUD, never silent:)*
    resume, GDS round-trip incl. rotation/mirror); the OA half is **gated on
    the proprietary Si2 OA C++ libraries** — waits on external access, then
    follows the documented pattern (own translation unit behind a CMake flag).
+8. **NUTS-side alignment pre-solve — the honest-books member (2) closer**
+   (added 2026-07-20) — [`wishlist-planner.md`](wishlist-planner.md) →
+   *"The NUTS-side alignment pre-solve"*. `charge_pull_target` predicts 3 of
+   NUTS's 4 placement members (pull target L1, junction anchor L2); the last,
+   the **alignment sibling** (member 2), is charged wrong — the b44 seg3
+   residual. It is the ONLY remaining gate on flipping the `charge_pull_target`
+   default (besides reference-host golden regen). **Blocked on being a whole
+   planner↔NUTS build for endpoint-neutral payoff:** the collapse track is a
+   fixed-point of the sweep (the group tug-of-war net-pull, NOT sweep order),
+   so no plan-time heuristic predicts it — a bounded in-planner rule was built
+   2026-07-20 and **regressed b44 exactly as the rejected static prototype
+   did** (seg1 1200→2642), empirically re-confirming that only NUTS's actual
+   sweep works. The faithful design is a **session-level two-pass**: after the
+   L2 plan, run an isolated single-bundle solve per bundle
+   (`NUTSEngine::rerun_bundle_warm` against empty occupancy), plumb the
+   per-segment collapse tracks back through a new `BundlePlan` hint binding,
+   and re-plan at L3 reading them (occupancy-aware, above the L1/L2 anchors).
+   **Deferred by measured-change discipline** — the corpus alignment residual
+   is negligible (b44's only shows in the pinned staircase fixture; the large
+   corpus books-vs-metal divergences are healer/spread/fallback classes this
+   does not touch), so it moves no metric today. **Trigger to build:** a new,
+   bigger test case where the alignment residual actually moves a corpus metric
+   (opens/overlaps/WL) — or the reference host taking up the default flip and
+   wanting member (2) closed for completeness. Design + measurement recorded in
+   PR #366.
 
 ## Resolved (by 2026-07-16)
 

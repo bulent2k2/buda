@@ -685,7 +685,24 @@ The design is recorded here and ready to build if a future corpus case makes the
 alignment residual matter (or when the reference host takes up the
 charge_pull_target default flip and wants member (2) closed for completeness).
 The `band_occupants` PLACED overlay already contains the downstream damage in the
-meantime.
+meantime.  Tracked as a **big open** on the planner/NUTS subsystem —
+[`opens.md`](opens.md) → *Big / blocked / conditional* item 8 — with the build
+trigger (a bigger test case where the residual moves a corpus metric).
+
+**Cheap in-planner path re-confirmed insufficient (2026-07-20).**  Before
+deferring, the tractable version was built and measured: resolve the collapse
+*in the planner* as a bounded rule (leader = first-swept sibling by `along_lo`,
+followers collapse onto its pull target, occupancy-aware in `band_perp`).  On
+b44 it **regressed** the residual — seg1's charge went 1200 → 2642 (div 0 →
+1442) — because the collapse track is NOT the first-swept sibling's target: seg3
+has the lower `span_lo` (swept first) yet both land at seg1's 1200, since the
+outcome is the whole group's tug-of-war net-pull (seg1− , seg3+ , shared trunk
+seg5− → net low → 1200), a fixed-point of the sweep.  Any plan-time leader/
+net-pull rule is the same static heuristic already rejected 2026-07-19, and it
+fails the same way.  This empirically re-confirms that ONLY NUTS's actual sweep
+(the isolated single-bundle solve above) captures the collapse — the bounded
+shortcut is not a viable substitute, so the faithful two-pass is the only build
+that works, and it stays deferred on the endpoint-neutral payoff.
 
 ## Realization-risk WL: rank on the envelope, not just the nominal — `kWLSpread` SHIPPED (opt-in)
 
