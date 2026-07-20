@@ -95,7 +95,7 @@ it); (b) NUTS-side joint arbitration — place the pair to minimize the SUM
 (connector legs + T's stretch) instead of sequentially.  Effort: small
 for (a); (b) touches placement order → full golden gate.
 
-## FREE (sentinel) slide windows on open-space MST legs — placement-clamp direction CLOSED by measurement (2026-07-20)
+## FREE (sentinel) slide windows on open-space MST legs — FULLY CLOSED (both facets resolved 2026-07-20)
 
 **Decoupled placement-clamp measurement (2026-07-20, round 2) — the direction
 is a REGRESSION, not a win.** Following the round-1 lesson (below), the clamp was
@@ -112,11 +112,29 @@ is load-bearing for NUTS packing** — those open-space legs use the room to sli
 clear of contention, and taking it away removes overlap-avoidance headroom exactly
 where a congested design needs it most.  So the "de-randomize placement" goal is
 misguided for the *placement* consumer; the placement window should stay free.
-Reverted (mix back to baseline).  What remains of the item is only the WL-envelope
-facet — and that is ALREADY clamped to the floorplan extent (`_seg_slide_box`,
-nutsflow.py), finite if loose; tightening it to the topology bbox would touch only
-kWLSpread (opt-in, off by default) for near-zero default-corpus value.  Net: the
-open-space-MST-leg "wildcard" is a feature for packing, not a bug to clamp.
+Reverted (mix back to baseline).
+
+**Envelope facet — resolved as correct-as-is (2026-07-20), NOT a defect to fix.**
+The other half of the item read "the WL envelope's `hi` clamps to the floorplan
+extent (meaninglessly loose)."  On re-examination it is not loose-by-mistake — it
+is CORRECT, and tightening it would be UNSOUND.  The envelope `hi` must be a valid
+UPPER bound on where the segment can realize; the placement-clamp measurement above
+just proved a FREE leg genuinely retains die-wide (≈fp-extent) slide freedom at
+NUTS time, so `_seg_slide_box`'s existing fp-extent clamp is exactly the right
+bracket.  Tightening it to the topology bbox would make `hi` SMALLER than the leg's
+real reach — an invalid upper bound that would surface bundles as false
+"out-of-envelope" (the very failure `_seg_slide_box`'s dogleg-override branch
+exists to avoid).  It would also DEFEAT kWLSpread's purpose: a FREE-leg candidate
+genuinely IS high-realization-variance, and kWLSpread *should* penalize it — the
+"over-tax" is honest risk pricing, not a bug.  So there is nothing sound to change
+here.
+
+**Net — the item is fully closed:** the open-space-MST-leg "wildcard" is a FEATURE
+(load-bearing for packing), and its loose envelope is the CORRECT bracket for that
+genuine freedom.  The realization risk it does carry is surfaced, not clamped: the
+tug-of-war detector (above) flags the opposite-pull pairs that make these trees
+risky, now reported by BOTH `dump_topologies --problems` and `check_design`
+(nuts/dnuts advisory).
 
 **Round-1 measurement (2026-07-20):** the conservative form of the fix sketch below —
 a Pass 4 in `derive_slide_ranges` clamping any still-sentinel bound to the
