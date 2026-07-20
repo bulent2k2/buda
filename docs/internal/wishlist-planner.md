@@ -4,7 +4,7 @@ Deferred follow-ups for the bundle / congestion planner
 (`src/congestion_planner.cpp`, `src/layering.cpp`). Index:
 [`wishlist.md`](wishlist.md).
 
-## NON-TOP dead-span stub opens: planner-side gate SHIPPED (opt-in) + the always-on discriminator — OPEN
+## NON-TOP dead-span stub opens: planner-side gate SHIPPED (opt-in) + the discriminator DELIVERED via post-NUTS escalation (default on); residual is a distinct CAPACITY item
 
 **What:** the planner's per-cut capacity (`score_segment` →
 `usable_band_cap`) samples a non-TOP stub's endpoint-CLAMPED along-extent
@@ -171,6 +171,31 @@ is also what closed the mix–loci follow-on (wishlist-topo): with kSegsRel on,
 mix-loci was already 0/0, and the 42/32/16 figures were a scriptless-harness
 artifact (no `script_path` → `_healers_in_flow` False → kSegsRel silently
 off).
+
+**AT ITS CLEAN LIMIT — the plan-time always-on gate is SUPERSEDED, and the
+supply-short extension is measured & REJECTED (2026-07-19).**  The literal
+open item — flip the plan-time `nontop_dead_span_gate` always-on — is a dead
+end: no plan-time span test separates a cull from a survivor (documented
+above), and the post-NUTS escalation now delivers the same goal reactively
+off placed geometry.  So the discriminator IS the escalation, and it clears
+every *keepout-dead* (pool == 0) LOW segment.  What remains open is a DIFFERENT
+class.  Classifying bigHalf's residual **94 opens** (default, real config) on
+final geometry: **48 are LOW supply-short** (`max(span,mid) pool < nbits` —
+some tracks, just too few) and **46 are LOW pool ≥ nbits** (abstract band OK,
+real per-track OCCUPANCY short — contention).  Neither is keepout-dead.
+Extending the escalation trigger from `pool == 0` to `pool < nbits`
+(supply-short), even with a capacity-aware max-pool TOP target AND a
+`target pool ≥ nbits` gate, **regresses bigHalf 94 → 270 opens** (+2 ov):
+`count_signal_tracks_in{,_span}` sees keepout-clear tracks but NOT occupancy,
+so escalating ~48 supply-short segments floods TOP's already-used bands and
+cascades into far more opens than it fixes.  A *dead* segment strands 100% of
+its bits regardless (2–3 per flow, TOP absorbs them — a layer-assignment
+fault); a *supply-short* segment already places SOME bits on LOW, and forcing
+48 of them onto a crowded TOP just relocates the shortage.  Conclusion: the
+residual is a genuine **TOP-capacity** shortage, not a dead-span fault — it
+needs occupancy-aware planning / better topology selection to LOWER the LOW
+demand (fewer bits forced onto starved bands), not more escalation.  Tracked
+as its own item; the dead-span escalation is CLOSED at its clean limit.
 
 ## A metal *above* the TOP band is still a top metal — config-smell WARNING shipped; auto-override measured & rejected
 
