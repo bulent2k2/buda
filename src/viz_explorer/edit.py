@@ -284,10 +284,28 @@ class ExplorerEditMixin:
 
 
     def _block_at(self, x, y):
-        for name, r in self.fp.get_all_blocks():
-            if r.x1 <= x <= r.x2 and r.y1 <= y <= r.y2:
-                return name
-        return None
+        """The block under (x, y) for edit gestures (S stub target, P/T pin).
+
+        In the hier flow the session floorplan carries BOTH the depth-0
+        container envelopes (e.g. `mem_i`) and the depth-1 leaf busterm
+        blocks nested inside them (`mem_i/qa_i`), so a click lands inside
+        several rects at once.  Prefer the bundle's own busterm/endpoint
+        block (what a stub is meant to reach), else the SMALLEST containing
+        rect (the innermost leaf) — never the enclosing parent container.
+        Returning the parent made `S` target the wrong block and, for an OTC
+        trunk crossing the parent envelope, wrongly reject the stub as a
+        pass-through even though the trunk misses the leaf busterm."""
+        hits = [(name, r) for name, r in self.fp.get_all_blocks()
+                if r.x1 <= x <= r.x2 and r.y1 <= y <= r.y2]
+        if not hits:
+            return None
+
+        def _area(r):
+            return (r.x2 - r.x1) * (r.y2 - r.y1)
+        bts = self._bundle_busterm_names()
+        bt_hits = [(n, r) for n, r in hits if n in bts]
+        pool = bt_hits or hits
+        return min(pool, key=lambda nr: _area(nr[1]))[0]
 
 
     # ── Two-step trunk placement (T/Y): arm → hover-preview → place ──────────

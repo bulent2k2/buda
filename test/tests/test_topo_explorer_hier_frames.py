@@ -135,6 +135,58 @@ def test_gui_gestures_build_template_topo_in_cell_frame(tmp_path):
         plt.close('all')
 
 
+def _cross_idx(s):
+    """Index of the level-0 cross-block bundle (leaf-to-leaf across two
+    instances), the one whose endpoints are nested inside container blocks."""
+    return next(i for i, w in enumerate(s.bundles)
+                if w.input.original_bundle.level == 0
+                and not w.input.original_bundle.cell_context)
+
+
+def test_stub_targets_leaf_busterm_not_parent_container(tmp_path):
+    """Hier S-stub block resolution: the session floorplan carries BOTH the
+    depth-0 container envelopes (proc_i1/proc_i2) and the depth-1 leaf
+    busterm blocks nested in them (proc_i1/pb_i, proc_i2/pa_i).  A click
+    inside a leaf hits both rects; `_block_at` must resolve to the LEAF the
+    bundle connects to — not the enclosing parent.  Returning the parent made
+    S target the wrong block and, for an OTC trunk crossing the container
+    envelope (but missing the leaf), wrongly reject the stub as a
+    pass-through."""
+    db = str(tmp_path / "d.bdb")
+    _build_design(db, cross=True)
+    s = _hier_session(db)
+    ci = _cross_idx(s)
+    exp = _explorer(s, tmp_path, start_bidx=ci)
+    try:
+        bts = exp._bundle_busterm_names()
+        assert bts == {"proc_i1/pb_i", "proc_i2/pa_i"}, bts
+        blocks = dict(exp.fp.get_all_blocks())
+        # Both the leaf and its parent container are present and nested.
+        assert "proc_i1" in blocks and "proc_i1/pb_i" in blocks
+        for leaf in ("proc_i1/pb_i", "proc_i2/pa_i"):
+            r = blocks[leaf]
+            cx, cy = (r.x1 + r.x2) / 2, (r.y1 + r.y2) / 2
+            assert exp._block_at(cx, cy) == leaf      # LEAF, not the container
+
+        # Drive S with an OTC H trunk that crosses the container envelope
+        # (y=30 is inside proc_i1's 0..200 box) but MISSES the leaf busterms
+        # (at y 60..140): the stub must attach to the leaf, not be rejected.
+        _key(exp, 'E')
+        _key(exp, 'T', 300, 30); _key(exp, 'T', 300, 30)   # H trunk at y=30
+        r = blocks["proc_i1/pb_i"]
+        _key(exp, 'S', x=(r.x1 + r.x2) / 2, y=(r.y1 + r.y2) / 2)
+        assert "rejected" not in exp._edit_msg, exp._edit_msg
+        assert "proc_i1/pb_i" in exp._edit_msg        # stubbed the LEAF
+        taps = {b.block_name
+                for eps in exp._build_conn_topo(exp._edit_topo).segs()
+                for c in eps.conns if c.kind == buda.SegConnKind.BUSTERM
+                for b in [c]}
+        assert "proc_i1/pb_i" in taps and "proc_i1" not in taps
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
 def test_frame_swaps_between_template_and_level0_bundle(tmp_path):
     """Paging between a cell-local template and a level-0 cross-block bundle
     swaps the frame both ways (cell names <-> session floorplan) and marks
