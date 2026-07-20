@@ -95,8 +95,11 @@ _RR_HEAL_DEAD_SPANS_DEFAULT = True
 # (c) < FRAC of the window-start metric was cleared over the last WINDOW
 # iterations.  Provably cannot fire on a flow that converges in < WINDOW
 # iters or drops below FLOOR; trades a tiny endpoint change on genuinely
-# non-converging flows for a large runtime saving.  Default ON; disable per
-# call with the `no_converge_guard` keyword.
+# non-converging flows for a large runtime saving.  STAGE-B ONLY (gated on
+# stage == 'b' in _ripup_reroute): a stage-a run clears NUTS overlaps that
+# DetailedNUTS depends on and must exhaust its requested budget rather than
+# stop early.  Default ON; disable per call with the `no_converge_guard`
+# keyword.
 _RR_CONVERGE_GUARD_DEFAULT = True
 _RR_CONVERGE_WINDOW = 6
 _RR_CONVERGE_FLOOR = 100

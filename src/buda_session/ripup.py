@@ -1731,10 +1731,16 @@ class RipupMixin:
             # budget — stop now rather than grind (over-capacity flows burn
             # tens of seconds per stage-b run for a fraction-of-a-percent
             # gain).  Provably cannot fire on a flow that reaches the floor in
-            # < WINDOW iterations.
+            # < WINDOW iterations.  STAGE-B ONLY: the guard was designed and
+            # measured for DNUTS opens; a stage-a run (NUTS overlaps, before
+            # DNUTS) must exhaust its requested budget so it doesn't strand
+            # abstract overlaps for DetailedNUTS — even a slowly-improving
+            # ≥FLOOR stage-a run is doing the exact work stage b depends on
+            # (Codex #359).
             prim_now = self._rr_m_primary(metric())
             prim_hist.append(prim_now)
-            if (converge_guard and len(prim_hist) > _RR_CONVERGE_WINDOW
+            if (converge_guard and stage == 'b'
+                    and len(prim_hist) > _RR_CONVERGE_WINDOW
                     and prim_now >= _RR_CONVERGE_FLOOR):
                 win_start = prim_hist[-1 - _RR_CONVERGE_WINDOW]
                 if win_start > 0:

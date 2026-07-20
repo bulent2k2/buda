@@ -26,7 +26,6 @@ converges in < WINDOW iters or drops below FLOOR.  Measured: tc3a
 """
 import contextlib
 import io
-import os
 from pathlib import Path
 
 import pytest
@@ -63,11 +62,14 @@ def test_converge_guard_keyword_parsed(monkeypatch):
         assert seen["converge_guard"] is True
 
 
-def _run_tc3a_to_stage_b(s):
+def _run_tc3a_to_stage_b(s, monkeypatch):
     """Drive tc3a through its pipeline (healers stripped) to a stage-b state
     with many DNUTS opens, ready for a single stage-b ripup."""
     absf = _ROOT / "flow" / "big_data_test" / "tc3a.buda"
-    os.chdir(absf.parent)
+    # monkeypatch.chdir restores the previous cwd at test teardown, so this
+    # setup can't leave later tests resolving files from flow/big_data_test
+    # (Codex #359 — the helper used a bare os.chdir with no restore).
+    monkeypatch.chdir(absf.parent)
     s.no_viz = True
     s.script_path = str(absf)
     s._dead_span_auto_at_run_nuts = False
@@ -92,12 +94,12 @@ def _run_tc3a_to_stage_b(s):
 
 
 @pytest.mark.slow
-def test_converge_guard_fires_on_tc3a():
+def test_converge_guard_fires_on_tc3a(monkeypatch):
     """tc3a is over-capacity (thousands of DNUTS opens) — the stage-b ripup
     cannot converge, so the guard stops it early (well before max_iter) with
     the 'not converging' note, and leaves the metric non-zero."""
     s = buda_cli.BudaSession()
-    _run_tc3a_to_stage_b(s)
+    _run_tc3a_to_stage_b(s, monkeypatch)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), buda.ostream_redirect():
         s.do_command("ripup_reroute 30")
@@ -109,11 +111,11 @@ def test_converge_guard_fires_on_tc3a():
 
 
 @pytest.mark.slow
-def test_no_converge_guard_grinds_to_max_iter():
+def test_no_converge_guard_grinds_to_max_iter(monkeypatch):
     """With `no_converge_guard` the same tc3a stage-b ripup grinds the full
     budget (no early stop) — the guard is opt-out-able."""
     s = buda_cli.BudaSession()
-    _run_tc3a_to_stage_b(s)
+    _run_tc3a_to_stage_b(s, monkeypatch)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), buda.ostream_redirect():
         s.do_command("ripup_reroute 12 no_converge_guard")
