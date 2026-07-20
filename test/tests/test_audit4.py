@@ -130,3 +130,28 @@ def test_bottom_up_frame_same_orientation_ok():
     s = _bu_session({"top/i1": "N", "top/i2": "N"})
     wrappers = [_bu_wrapper(1, "top/i1"), _bu_wrapper(2, "top/i2")]
     s._check_bottom_up_frame(wrappers, None, "core")   # must not raise
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# C6-09 — an FK-rejected persist row THROWS instead of silently dropping
+# ──────────────────────────────────────────────────────────────────────────
+
+import buda_db  # noqa: E402
+
+
+def test_persist_step_throws_on_fk_violation(tmp_path):
+    db = buda_db.BDB(str(tmp_path / "fk.bdb"))
+    r = buda_db.BusSegRow()
+    r.id = "999"        # bundle_id: no such bundle row → FK violation
+    r.seg_idx = 0
+    r.layer = 4
+    # Pre-fix the failed step was ignored and the row silently vanished;
+    # now it raises (loud) so the checkpoint aborts instead of writing a
+    # route_snapshot over an incomplete row set.
+    with pytest.raises(RuntimeError, match="add_bus_segment"):
+        db.add_bus_segment(r)
+    # With the parent bundle present the same insert succeeds.
+    br = buda_db.BundleRow()
+    br.id = "999"
+    db.add_bundle(br)
+    db.add_bus_segment(r)   # must not raise

@@ -150,6 +150,19 @@ def cmd_visualize(session, cmd, args, cmd_line):
     rerun_all_fn   = session._rerun_all        if session.nuts_result is not None else None
     ipc_session = (os.path.splitext(os.path.basename(session.script_path))[0]
                    if session.script_path else None)
+
+    def _cuts_provider(_s=session):
+        # Fresh planner cut/band state for the heatmap after an in-GUI re-run
+        # (audit P7-05).  The re-run rebuilds _s.planner's congestion map, so
+        # this always reads the CURRENT usage.
+        if _s.planner is None:
+            return None
+        cuts = _s.planner.get_cuts()
+        if not cuts:
+            return None
+        return (cuts, list(_s.planner.get_x_grid()),
+                list(_s.planner.get_y_grid()))
+
     viz = BudaVisualizer(session.fp, session.bundles,
                          sidecar_path=session.script_path,
                          rerun_layer_fn=rerun_layer_fn,
@@ -159,7 +172,8 @@ def cmd_visualize(session, cmd, args, cmd_line):
                          net_endpoints=session._net_endpoints,
                          ipc_session=ipc_session,
                          ipc_verbose=session.ipc_verbose,
-                         fp_resolver=session._make_topo_fp_resolver())
+                         fp_resolver=session._make_topo_fp_resolver(),
+                         cuts_provider=_cuts_provider)
     viz.draw_blocks()
     if session.planner is not None:
         cuts = session.planner.get_cuts()

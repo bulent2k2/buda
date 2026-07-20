@@ -92,6 +92,29 @@ class VizAbstractDrawMixin:
                 for e in self._grid_rail_artists:
                     e['artist'].set_visible(self.ui_state.tracks)
 
+        # Rebuild the congestion heatmap from the RE-PLANNED cut/band state
+        # (audit P7-05): the re-run recomputed every band's usage, so the
+        # original overlay would keep shading bands the routes no longer use
+        # (and miss new hot bands).  Remove the stale artists and redraw from
+        # fresh cuts; dim the [Heatmap] button when there is nothing to show.
+        if getattr(self, "_cuts_provider", None) is not None:
+            for a in self._heatmap_artists:
+                try: a.remove()
+                except Exception: pass
+            self._heatmap_artists = []
+            fresh = None
+            try:
+                fresh = self._cuts_provider()
+            except Exception:
+                fresh = None
+            if fresh:
+                cuts, xs, ys = fresh
+                if cuts:
+                    self.draw_congestion_map(cuts, xs, ys)
+            if getattr(self, "_btn_heatmap", None) is not None:
+                self._set_button_enabled(self._btn_heatmap,
+                                         bool(self._heatmap_artists))
+
         # Refresh layer list in case new layers were introduced.
         self._update_layer_ids()
         self._redraw_layer_list()

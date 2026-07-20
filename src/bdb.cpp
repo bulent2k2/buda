@@ -46,6 +46,19 @@ inline std::string col_txt(sqlite3_stmt* st, int c) {
     const unsigned char* p = sqlite3_column_text(st, c);
     return p ? reinterpret_cast<const char*>(p) : std::string();
 }
+
+// Run a persist INSERT/UPDATE to completion, THROWING on any non-DONE result
+// (SQLITE_CONSTRAINT — e.g. an FK violation from a persist-ordering regression
+// — or SQLITE_FULL on a disk-full checkpoint) instead of silently dropping the
+// row (audit C6-09).  The old fire-and-forget `sqlite3_step` let a failed
+// insert vanish, after which route_snapshot was written over the incomplete
+// row set and a later load_pipeline resume restored a routing state missing
+// rows with no diagnostic.  Fail LOUD so the caller aborts the checkpoint.
+inline void step_checked(sqlite3* db, sqlite3_stmt* st, const char* what) {
+    if (sqlite3_step(st) != SQLITE_DONE)
+        throw std::runtime_error(std::string("BDB persist failed (") + what +
+                                 "): " + sqlite3_errmsg(db));
+}
 } // namespace
 
 BDB::BDB(const std::string& db_path) {
@@ -223,9 +236,11 @@ static const char* TOPOLOGY_DDL = R"(
 
 // Abstract-NUTS bus routing tables (schema v5). bundle_id is a HARD FK to
 // bundle(id) (NOT NULL REFERENCES, since v7): a persist path must ensure the
-// parent bundle exists first.  (Audit C6-09 — check the persist step's result
-// — is deferred: the hier re-plan expansion path currently produces
-// FK-orphaned rows that a silent drop tolerates; see wishlist-bdb.)
+// parent bundle exists first.  An FK-rejected insert now THROWS (audit C6-09:
+// the persist mutators go through step_checked), no longer silently dropping
+// the row — the hier re-plan expanded-parent staleness that used to produce
+// FK-orphaned rows was fixed alongside (re-expand from templates, not the
+// prior run's per-instance wrappers).
 // Composite keys (no autoincrement) → deterministic *.bdb.sql dumps.
 static const char* NUTS_DDL = R"(
     CREATE TABLE IF NOT EXISTS bus_segment (
@@ -2538,7 +2553,7 @@ void BDB::add_busterm(const BustermRow& bt) {
     sqlite3_bind_double(s, 14, bt.orig_y1);
     sqlite3_bind_double(s, 15, bt.orig_x2);
     sqlite3_bind_double(s, 16, bt.orig_y2);
-    sqlite3_step(s);
+    step_checked(_db, s, "add_busterm");
 }
 
 void BDB::clear_busterms() {
@@ -2689,7 +2704,7 @@ void BDB::add_bundle(const BundleRow& br) {
     sqlite3_bind_int   (s, 14, br.is_expanded ? 1 : 0);
     sqlite3_bind_int   (s, 15, br.bu_locked ? 1 : 0);
     sqlite3_bind_text  (s, 16, br.cloned_from.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_step(s);
+    step_checked(_db, s, "add_bundle");
 }
 
 int BDB::_ensure_net(const std::string& name) {
@@ -2853,7 +2868,7 @@ void BDB::add_topology(const TopoRow& tr) {
     sqlite3_bind_int   (s, 10, tr.is_pinned ? 1 : 0);
     sqlite3_bind_text  (s, 11, tr.topo_uid.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text  (s, 12, tr.source.c_str(),   -1, SQLITE_TRANSIENT);
-    sqlite3_step(s);
+    step_checked(_db, s, "add_topology");
 }
 
 void BDB::add_topology_segment(const TopoSegRow& sr) {
@@ -2875,7 +2890,7 @@ void BDB::add_topology_segment(const TopoSegRow& sr) {
     sqlite3_bind_int   (s, 11, sr.edge_id);
     sqlite3_bind_int   (s, 12, sr.perp_clamp_lo);
     sqlite3_bind_int   (s, 13, sr.perp_clamp_hi);
-    sqlite3_step(s);
+    step_checked(_db, s, "add_topology_segment");
 }
 
 void BDB::clear_topologies(bool keep_user) {
@@ -2928,7 +2943,7 @@ void BDB::renumber_topology(const std::string& bundle_id, int old_ci, int new_ci
         sqlite3_bind_int (s, 1, new_ci);
         sqlite3_bind_text(s, 2, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int (s, 3, old_ci);
-        sqlite3_step(s);
+        step_checked(_db, s, "renumber_topology(copy)");
     }
     for (const char* tbl : {"topology_segment", "topology_seg_busterm",
                             "topology_seg_conn", "topology_bridge_segment"}) {
@@ -2937,13 +2952,13 @@ void BDB::renumber_topology(const std::string& bundle_id, int old_ci, int new_ci
         sqlite3_bind_int (s, 1, new_ci);
         sqlite3_bind_text(s, 2, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int (s, 3, old_ci);
-        sqlite3_step(s);
+        step_checked(_db, s, "renumber_topology(repoint)");
     }
     {
         Stmt s(_db, "DELETE FROM topology WHERE bundle_id=? AND cand_index=?");
         sqlite3_bind_text(s, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int (s, 2, old_ci);
-        sqlite3_step(s);
+        step_checked(_db, s, "renumber_topology(delete)");
     }
 }
 
@@ -3244,7 +3259,7 @@ void BDB::add_bus_segment(const BusSegRow& r) {
     else                              sqlite3_bind_double(s, 15, r.track_lo_bound);
     if (std::isinf(r.track_hi_bound)) sqlite3_bind_null(s, 16);
     else                              sqlite3_bind_double(s, 16, r.track_hi_bound);
-    sqlite3_step(s);
+    step_checked(_db, s, "add_bus_segment");
 }
 
 void BDB::add_bus_via(const BusViaRow& r) {
@@ -3259,7 +3274,7 @@ void BDB::add_bus_via(const BusViaRow& r) {
     sqlite3_bind_double(s, 6, r.x);
     sqlite3_bind_double(s, 7, r.y);
     sqlite3_bind_int   (s, 8, r.bit_width);
-    sqlite3_step(s);
+    step_checked(_db, s, "add_bus_via");
 }
 
 void BDB::clear_bus_routing() {
@@ -3384,7 +3399,7 @@ void BDB::add_net_segment(const NetSegRow& r) {
     sqlite3_bind_double(s, 10, r.y2);
     sqlite3_bind_double(s, 11, r.track_position);
     sqlite3_bind_double(s, 12, r.width);
-    sqlite3_step(s);
+    step_checked(_db, s, "add_net_segment");
 }
 
 void BDB::add_net_via(const NetViaRow& r) {
@@ -3403,7 +3418,7 @@ void BDB::add_net_via(const NetViaRow& r) {
     sqlite3_bind_int   (s, 7, r.to_layer);
     sqlite3_bind_double(s, 8, r.x);
     sqlite3_bind_double(s, 9, r.y);
-    sqlite3_step(s);
+    step_checked(_db, s, "add_net_via");
 }
 
 void BDB::clear_detailed_routing() {

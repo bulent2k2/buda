@@ -337,9 +337,14 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
     def __init__(self, floorplan, bundles, sidecar_path=None, rerun_layer_fn=None,
                  rerun_fn=None, routing_grid=None, layer_stack=None,
                  net_endpoints=None, ipc_session=None, ipc_verbose=False,
-                 fp_resolver=None):
+                 fp_resolver=None, cuts_provider=None):
         self.fp           = floorplan
         self.bundles      = bundles
+        # () -> (cuts, x_grid, y_grid) | None: fresh planner cut/band state for
+        # the congestion heatmap, so an in-GUI re-run can redraw the overlay
+        # against the RE-ROUTED design instead of leaving the stale original
+        # planner run's utilisation shaded on screen (audit P7-05).
+        self._cuts_provider = cuts_provider
         # Forwarded to the TopologyExplorer it opens ('v'): per-bundle frame
         # resolution for hier sessions (see TopologyExplorer.__init__).  The
         # main viz itself always draws the session floorplan.

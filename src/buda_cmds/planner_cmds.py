@@ -84,6 +84,20 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         if session.bdb is None:
             print("Error: run_planner hier requires an open BDB"); return
         iterations = session._planner_iters(args)
+        # Re-plan: restore the pre-expansion TEMPLATE wrappers so this pass
+        # re-derives its per-instance ids from the templates (stable) rather
+        # than re-expanding the PRIOR run's per-instance wrappers.  Without
+        # this, a second run_planner hier expands wrappers whose ids already
+        # sit above the first expansion (5..8 -> 9..12) and keys the new
+        # _hier_expansion_map on those now-deleted instance ids, so the
+        # checkpoint persist links every expanded row's parent_id to a bundle
+        # clear_expanded_bundles just removed — an FK-rejected insert that is
+        # silently dropped, leaving a resume missing the whole routing subtree
+        # (the coupled staleness bug that blocked C6-09).
+        if getattr(session, "_hier_expansion_map", None) and \
+                getattr(session, "_hier_bundles_orig", None):
+            session.bundles = list(session._hier_bundles_orig)
+            session._hier_expansion_map = {}
         # Re-planning invalidates any adopted dogleg (and its pins).
         session._reset_doglegs()
         # Apply user-pinned selections to template wrappers BEFORE expansion
