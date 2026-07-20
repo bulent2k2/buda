@@ -14,36 +14,41 @@ topology-edit round-trip as SVG.
 
 ## Build
 
-The repo does not ship a Scala toolchain. Any recent `sbt` works; the toolchain
-used to build this was fetched with [Coursier](https://get-coursier.io):
+The Scala.js bundle is a **build product, not committed** — only the page shell
+`src/web/static/scala/index.html` is tracked. Build the bundle with the repo's
+build wrapper:
 
 ```bash
-# one-time toolchain (JVM launcher honours a corporate proxy/truststore):
-curl -fsSL https://raw.githubusercontent.com/coursier/launchers/master/coursier -o cs
-chmod +x cs
-./cs install sbt      # or use any locally installed sbt
+bb web        # runs `sbt fullLinkJS`, copies the bundle to src/web/static/scala/main.js
 ```
 
-Then:
+`bb web` needs `sbt` on your PATH. The repo does not ship a Scala toolchain; any
+recent `sbt` works. The quickest one-time install is [Coursier](https://get-coursier.io):
+
+```bash
+# JVM launcher honours a corporate proxy/truststore:
+curl -fsSL https://raw.githubusercontent.com/coursier/launchers/master/coursier -o cs
+chmod +x cs
+./cs install sbt      # or use any locally installed sbt; then re-run: bb web
+```
+
+**You do not need this to use the web demo** — the toolchain-free reference client
+at `/` covers the whole flow. Only the Scala.js client at `/scala/` needs the build;
+until you run `bb web` it shows a "not built" banner pointing back to `/`.
+
+Under the hood `bb web` runs the sbt targets directly:
 
 ```bash
 cd web
-sbt fastLinkJS      # dev  -> target/scala-3.3.4/buda-web-fastopt/main.js
-sbt fullLinkJS      # prod -> target/scala-3.3.4/buda-web-opt/main.js
+sbt fastLinkJS      # dev  -> target/scala-3.3.4/buda-web-fastopt/main.js (unoptimized)
+sbt fullLinkJS      # prod -> target/scala-3.3.4/buda-web-opt/main.js     (what bb web ships)
 ```
 
 ## Run (served same-origin by the backend)
 
-The built client is committed at `src/web/static/scala/{index.html, main.js}` and
-served by the backend at **`/scala/`** (the vanilla reference client stays at
-`/`). To refresh it after a rebuild, copy the emitted bundle next to the served
-page:
-
-```bash
-cp web/target/scala-3.3.4/buda-web-fastopt/main.js src/web/static/scala/main.js
-```
-
-Boot the backend and open the client:
+The backend serves the built client at **`/scala/`** (the vanilla reference client
+stays at `/`). After a source change, re-run `bb web` to refresh the git-ignored
+bundle next to the served page. Boot the backend and open the client:
 
 ```bash
 PYTHONPATH=build:src uvicorn web.server:app --port 8000

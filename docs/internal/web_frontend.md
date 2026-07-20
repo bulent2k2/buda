@@ -143,7 +143,13 @@ the log, and refreshes state — the planner/nuts/dnuts/ripup buttons go through
   vias of the routed bus.
 - **`web/`** — the Scala.js project (sbt + sbt-scalajs; `ApiClient`, `Renderer`,
   `Main`). The production frontend target; renders the *same* payloads as the
-  reference client. Needs the Scala toolchain to build (see `web/README.md`).
+  reference client. Served at **`/scala/`** (the reference client stays at `/`).
+  The bundle is a **build product, not tracked** — `bb web` runs `sbt fullLinkJS`
+  and copies `main.js` into the git-ignored `src/web/static/scala/` (only the page
+  shell `index.html` is committed). `bb web` needs `sbt`; without it `/scala/`
+  shows a "not built" banner pointing back to the toolchain-free client at `/`, so
+  a fresh clone without the Scala toolchain still has the full demo. See
+  `web/README.md`.
 
 ### The headless requirement
 Importing the command registry must not pull matplotlib. `buda_viz` (and thus

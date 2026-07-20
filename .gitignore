@@ -26,13 +26,18 @@
 bin/*.app/
 flow/log/
 log/
-# Scala.js frontend build products (regenerate with `sbt fastLinkJS`, see
-# web/README.md). The *served* client is committed under src/web/static/scala/.
+# Scala.js frontend build products (regenerate with `bb web` / `sbt fullLinkJS`,
+# see web/README.md). The served bundle is a BUILD PRODUCT, not tracked — only
+# the page shell src/web/static/scala/index.html is committed; `bb web` emits
+# main.js next to it, git-ignored. The toolchain-free reference client at / needs
+# no build.
 web/target/
 web/project/target/
 web/project/project/
 web/main.js
 web/main.js.map
+src/web/static/scala/main.js
+src/web/static/scala/main.js.map
 # Local Scala toolchain (coursier + sbt launcher), fetched per web/README.md.
 .tools/
 chip_designs
