@@ -329,11 +329,14 @@ def _split_oversized_bundles(session, raw_bundles):
 
 def _hier_endpoint_blocks(session, b):
     """Shared endpoint block names for a NON-fan-in hier bundle (every net
-    lands on the same blocks): cell-local leaf names, cross-level spec paths,
-    or the parsed cross-block reason.  Used only for the AUTO bit-bound cap."""
+    lands on the same blocks): cell-local busterm paths (kept INSTANCE-
+    QUALIFIED — e.g. `core_i1/c0` — so the AUTO cap resolves the bundle's own
+    reference instance rather than any same-named leaf in another cell, Codex
+    #382 P2), cross-level spec paths, or the parsed cross-block reason.  Used
+    only for the AUTO bit-bound cap."""
     if b.cell_context and b.entry_busterm_ids:
         ids = list(b.entry_busterm_ids) + list(b.exit_busterm_ids)
-        return [e.removeprefix('bt:').rsplit('/', 1)[-1] for e in ids]
+        return [e.removeprefix('bt:') for e in ids]
     if b.drv_spec_depth >= 0:
         return [b.drv_spec_path, *b.rcv_spec_paths]
     src, dsts = session._parse_bundle_reason(b.reason)
@@ -375,13 +378,22 @@ def _split_hier_bundles(session, raw_bundles):
     (_clone_hbundle_with_id); the per-net-aligned fan-in arrays
     (net_drivers/net_receivers) are split in the same net partition.
 
+    A cell-local template with multiple occurrences carries its extra
+    occurrences as separate REPLICA bundles (`parent_id` → the template id),
+    whose nets `_expand_hier_bundles` feeds per instance via the donor keying
+    `(template_id, instance)`.  A split must therefore split the template AND
+    its replicas in LOCKSTEP and rewire each replica part's `parent_id` to the
+    CORRESPONDING template part — else the donor keys collapse onto the
+    original template id (last part wins) and later template parts fall back to
+    the reference instance's net names (Codex #382 P1).
+
     Static cap N needs only the net count, so it is fully general across the
     three hier bundle kinds.  AUTO cap (busterm edge): per-net incident blocks
     come from the HBundle metadata (fan-in per-net endpoints, else the shared
-    endpoint blocks) and block dimensions from the open BDB — resolved by
-    component name or a '/<leaf>' suffix (cell-local template leaf names match
-    any congruent instance's child).  A block whose bounds cannot be resolved
-    is skipped for the AUTO cap with a one-line note."""
+    instance-qualified endpoint paths) and block dimensions from the open BDB,
+    resolved by exact component name (a '/<leaf>' suffix is only a last-resort
+    fallback).  A block whose bounds cannot be resolved is skipped for the AUTO
+    cap with a one-line note."""
     max_bits = getattr(session, "_max_bundle_bits", None)
     auto = getattr(session, "_max_bundle_bits_auto", False)
     if (not max_bits and not auto) or not raw_bundles:
@@ -401,7 +413,7 @@ def _split_hier_bundles(session, raw_bundles):
                 cand = c
                 break
             if cand is None and c.name.endswith('/' + blk):
-                cand = c
+                cand = c    # last-resort: unqualified leaf name
         edge = None if cand is None else min(cand.x2 - cand.x1,
                                              cand.y2 - cand.y1)
         edge_cache[blk] = edge
@@ -409,9 +421,17 @@ def _split_hier_bundles(session, raw_bundles):
             unresolved.add(blk)
         return edge
 
-    out = []
-    next_id = max((b.id for b in raw_bundles), default=0)
-    for b in raw_bundles:
+    counter = [max((b.id for b in raw_bundles), default=0)]
+
+    def _new_id():
+        counter[0] += 1
+        return counter[0]
+
+    def _split_one(b):
+        """Return the HBundle parts b splits into (>=1; part 1 keeps b.id).
+        Preserves every hier field per part; splits the per-net fan-in arrays
+        and re-scopes a fan-in part's reason/busterm ids to the leaves its bits
+        touch."""
         nets = list(b.get_net_names())
         total = len(nets)
         drvs = list(b.net_drivers)
@@ -419,13 +439,13 @@ def _split_hier_bundles(session, raw_bundles):
         fanin = bool(drvs) and len(drvs) == total
         net_idx = {n: i for i, n in enumerate(nets)}
 
-        def _inc(net, _shared=None):
+        def _inc(net, shared):
             if fanin:
                 i = net_idx.get(net)
                 if i is None:
                     return ()
                 return tuple({drvs[i], *rcvs[i]} - {""})
-            return _shared
+            return shared
 
         n_parts, why = 1, ""
         if max_bits and total > max_bits:
@@ -456,8 +476,7 @@ def _split_hier_bundles(session, raw_bundles):
                            f"{pitch:g} = {cap} bits) sees {bits_at} bits")
 
         if n_parts <= 1:
-            out.append(b)
-            continue
+            return [b]
 
         target = math.ceil(total / n_parts)
         inc_fn = (lambda n: inc_all.get(n, ())) if caps else (lambda n: ())
@@ -466,12 +485,9 @@ def _split_hier_bundles(session, raw_bundles):
         sizes = "+".join(str(len(p)) for p in parts)
         print(f"[HierBundler] split bundle {b.id} ({total} bits) into "
               f"{len(parts)} part(s) ({sizes}): {why}")
+        result = []
         for k, part in enumerate(parts, start=1):
-            if k == 1:
-                nb = session._clone_hbundle_with_id(b, b.id)
-            else:
-                next_id += 1
-                nb = session._clone_hbundle_with_id(b, next_id)
+            nb = session._clone_hbundle_with_id(b, b.id if k == 1 else _new_id())
             nb.net_names = part
             suffix = f"|SPLIT:{k}/{len(parts)}"
             if fanin:
@@ -489,7 +505,43 @@ def _split_hier_bundles(session, raw_bundles):
                                            + ["bt:" + r for r in extra_rcv])
             else:
                 nb.reason = b.reason + suffix
-            out.append(nb)
+            result.append(nb)
+        return result
+
+    # Template↔replica grouping: a cell-local replica's parent_id points to its
+    # template.  Skip replicas in the main pass and split each with its template
+    # in lockstep so the parent linkage can be rewired part-for-part.
+    cell_ids = {b.id for b in raw_bundles if b.cell_context}
+
+    def _is_replica(b):
+        return bool(b.cell_context and b.parent_id in cell_ids and b.instances)
+
+    replicas_of = {}
+    for b in raw_bundles:
+        if _is_replica(b):
+            replicas_of.setdefault(b.parent_id, []).append(b)
+
+    out = []
+    for b in raw_bundles:
+        if _is_replica(b):
+            continue                       # handled with its template below
+        tparts = _split_one(b)
+        out.extend(tparts)
+        for rb in replicas_of.get(b.id, ()):
+            rparts = _split_one(rb)
+            if len(rparts) == len(tparts):
+                for tp, rp in zip(tparts, rparts):
+                    rp.parent_id = tp.id    # part k replica → part k template
+            else:
+                # Non-congruent split (should not happen for congruent
+                # instances): pin every replica part to the first template part
+                # and warn LOUD rather than silently mis-map the donor nets.
+                for rp in rparts:
+                    rp.parent_id = tparts[0].id
+                print(f"  Warning: replica bundle {rb.id} split into "
+                      f"{len(rparts)} part(s) != template {b.id}'s "
+                      f"{len(tparts)} — parent linkage pinned to part 1")
+            out.extend(rparts)
 
     if unresolved:
         shown = sorted(unresolved)[:5]

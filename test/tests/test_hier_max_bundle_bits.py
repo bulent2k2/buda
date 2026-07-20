@@ -132,6 +132,44 @@ def test_auto_split_binds_on_cell_local_busterm_edge():
     assert len(template_parts) > 1     # 60 bits did not fit one 80-unit edge
 
 
+def test_auto_cap_resolves_leaf_within_the_bundle_instance():
+    """Two cell types share a child leaf name at DIFFERENT sizes; the AUTO cap
+    must resolve each bundle's OWN instance's leaf, not any same-named leaf
+    (Codex #382 P2)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("big_cell", 400, 400)
+    db.add_cell("small_cell", 400, 400)
+    db.add_cell("wide_leaf", 300, 40)      # min edge 40 → 10-bit cap @ pitch 4
+    db.add_cell("narrow_leaf", 300, 8)     # min edge  8 →  2-bit cap @ pitch 4
+    db.add_inst_to_cell("big_cell", "q", "wide_leaf", 20, 20)
+    db.add_inst_to_cell("big_cell", "r", "wide_leaf", 20, 200)
+    db.add_inst_to_cell("small_cell", "q", "narrow_leaf", 20, 20)   # same 'q'
+    db.add_inst_to_cell("small_cell", "r", "narrow_leaf", 20, 200)
+    db.add_inst("big_i", "big_cell", "", 0, 0)
+    db.add_inst("small_i", "small_cell", "", 800, 0)
+    for i in range(12):
+        db.add_net_pins(f"big_{i}", "big_i/q.out", ["big_i/r.in"])
+        db.add_net_pins(f"small_{i}", "small_i/q.out", ["small_i/r.in"])
+    buda.BustermGen(db).derive(1)
+    s = buda_cli.BudaSession(); s.no_viz = True
+    s.bdb = db
+    _quiet(s, "def_layer 4 M4 H TOP 10", "def_layer 5 M5 V TOP 10",
+           "def_track_pattern 4 0 SIGNAL 2 2", "def_track_pattern 5 0 SIGNAL 2 2")
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        s.do_command("set_max_bundle_bits auto")
+        s.do_command("run_hier_bundler")
+    log = out.getvalue()
+    # big bundle: 12 bits / 10-cap → 2 parts; small: 12 / 2-cap → 6 parts.
+    assert "big_i/q" in log and "40 units" in log
+    assert "small_i/q" in log and "8 units" in log
+    big = [w.input.original_bundle for w in s.bundles
+           if w.input.original_bundle.get_net_names()[0].startswith("big_")]
+    small = [w.input.original_bundle for w in s.bundles
+             if w.input.original_bundle.get_net_names()[0].startswith("small_")]
+    assert len(big) == 2 and len(small) == 6
+
+
 # ── fan-in split alignment ────────────────────────────────────────────────────
 
 def test_fanin_split_keeps_per_net_endpoints_aligned():
@@ -176,7 +214,10 @@ def test_split_propagates_to_instances_and_routes_clean():
            "set_max_bundle_bits 5", "run_hier_bundler",
            "generate_hier_topologies", "set_track_pitch 2.0",
            "run_planner hier 3", "run_nuts")
-    # After expansion each instance sees the same 3-part split.
+    # After expansion each instance sees the same 3-part split — AND carries
+    # only its OWN nets (the multiple-occurrence donor-keying regression:
+    # later template parts must not fall back to the reference instance's
+    # net names, Codex #382 P1).
     per_inst = {}
     for w in s.bundles:
         b = w.input.original_bundle
@@ -185,6 +226,10 @@ def test_split_propagates_to_instances_and_routes_clean():
     assert set(per_inst) == {"core_i1", "core_i2"}
     for parts in per_inst.values():
         assert sorted(len(b.get_net_names()) for b in parts) == [4, 4, 4]
+    prefix_of = {"core_i1": "c1_bus", "core_i2": "c2_bus"}
+    for inst, parts in per_inst.items():
+        nets = sorted(n for b in parts for n in b.get_net_names())
+        assert nets == sorted(f"{prefix_of[inst]}_{i}" for i in range(12)), inst
     assert s.nuts_result.num_overlaps == 0
     check = io.StringIO()
     with contextlib.redirect_stdout(check):
