@@ -55,6 +55,24 @@ no direction flag). Milestone 1 (Phases 0–2) renders the whole flat flow:
 floorplan + candidate topologies (generation), placed bus segments (nuts), and
 per-bit wires + vias (detailed).
 
+**Per-bundle floorplans (hier).** `serialize_generation` keeps a TOP-LEVEL
+`floorplan`/`hanan` (backward-compat + the flat case + the golden), but each
+serialized bundle now ALSO carries its OWN `floorplan`/`hanan`, computed by
+`bundle_floorplan(session, w)` — the frame the bundle's candidates were generated
+in. For the FLAT flow every bundle shares `session.fp`, so the per-bundle fields
+duplicate the top-level ones (and the b44 golden's top-level + candidate/analysis
+fields are byte-unchanged; only the additive per-bundle keys grew it). For the
+HIERARCHY-AWARE flow a pre-expansion HBundle lives in a cell-local / depth /
+endpoint frame that DIFFERS from a top-level bundle's die frame (e.g. a template
+bundle over `pa_i`/`pb_i`/`pc_i` inside `proc_cell` vs. a top bundle over
+`proc_a/…`), so an unfocused multi-bundle render — which one shared top-level
+floorplan could not represent — carries the right frame per bundle. The reference
+client prefers `bundle.floorplan`/`bundle.hanan` when present (`activeFrame()` in
+the generation view) and falls back to the top-level payload otherwise, so its
+bbox/viewBox math works off whichever floorplan is used. Covered by
+`test_web_hier.py` (flat: per-bundle == top-level; hier `hier_mixed` fixture:
+≥2 bundles resolve to distinct block-set frames).
+
 ### Progress streaming (`WS /api/ws` + `POST /api/stage/{stage}`)
 
 The long stages (`run_planner`/`run_nuts`/`run_detailed_nuts`/`ripup_reroute`/
@@ -147,8 +165,11 @@ curl -s localhost:8000/api/state
 ## Tests
 `test/tests/test_web_server.py` — `run_one` capture + `SystemExit` containment,
 the no-matplotlib import (in a subprocess), and the `/api/command` → `/api/state`
-flow progression via FastAPI `TestClient`.
-`test/tests/test_web_ws.py` — the WS endpoint + `POST /api/stage/{stage}`: a
-connected WS receives `started` then `done` (with a `state`) frames, the stage
+flow progression via FastAPI `TestClient`. `test/tests/test_web_serialize.py` —
+the struct→JSON serializers + the frozen b44 generation golden. `test/tests/
+test_web_hier.py` — per-bundle floorplans: the flat b44 bundle floorplan equals
+the top-level one; the hier `hier_mixed` fixture yields ≥2 bundles in distinct
+frames. `test/tests/test_web_ws.py` — the WS endpoint + `POST /api/stage/{stage}`:
+a connected WS receives `started` then `done` (with a `state`) frames, the stage
 mutates state, a dropped WS breaks neither the stage nor a later request, an
 unknown stage is contained, and the synchronous `/api/command` path still works.

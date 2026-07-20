@@ -265,7 +265,17 @@ def bundle_floorplan(session, w):
 
 
 def serialize_bundle(session, w, include_candidates=True):
-    """A bundle: identity + plan + (optionally) its full candidate list."""
+    """A bundle: identity + plan + its OWN floorplan/hanan + (optionally) its
+    full candidate list.
+
+    The per-bundle `floorplan`/`hanan` are computed in the SAME frame the
+    candidates were generated in (`bundle_floorplan`): the shared session
+    floorplan for the flat flow, a hier (pre-expansion) HBundle's resolved
+    cell-local / depth / endpoint frame otherwise.  An unfocused multi-bundle
+    hier render therefore carries the right frame PER bundle — the client draws
+    each bundle's candidates over its own blocks/grid instead of the last
+    bundle's shared top-level floorplan.  For the flat flow this frame IS
+    `session.fp`, so the per-bundle fields duplicate the top-level ones."""
     ob = w.input.original_bundle
     fp = bundle_floorplan(session, w)
     plan = w.plan
@@ -275,6 +285,8 @@ def serialize_bundle(session, w, include_candidates=True):
         "width": w.input.width,
         "pinned": bool(getattr(w.input, "topology_pinned", False)),
         "selected_index": plan.selected_topology_index,
+        "floorplan": serialize_floorplan(fp),
+        "hanan": serialize_hanan(fp),
         "plan": {
             "seg_layers": list(plan.seg_layers),
             "seg_slide_lo": [_slide(v) for v in plan.seg_slide_lo],
@@ -312,14 +324,17 @@ def serialize_generation(session, bundle_id=None, candidate=None):
             sb["candidate_offset"] = candidate
         out_bundles.append(sb)
 
-    # The floorplan MUST be in the same coordinate frame as the candidates and
-    # hanan grid.  For a pre-expansion hier bundle, bundle_floorplan resolves a
-    # cell-local / endpoint frame (`hanan_fp`), so returning the top-level
-    # session.fp here would draw those local candidates over the wrong blocks.
-    # Emit the resolved frame's floorplan; for the flat flow hanan_fp IS
-    # session.fp, so this is unchanged there.  (A multi-bundle hier render with
-    # per-bundle frames is inherently one-floorplan-per-response; use a focused
-    # `?bundle=` request — the per-bundle-floorplan generalization is a follow-on.)
+    # The TOP-LEVEL floorplan/hanan are kept for backward-compat and the flat
+    # case (the reference client's fallback + the golden snapshot): they MUST be
+    # in the same coordinate frame as a single shown bundle's candidates.  For a
+    # pre-expansion hier bundle, bundle_floorplan resolves a cell-local /
+    # endpoint frame (`hanan_fp`); returning the top-level session.fp here would
+    # draw those local candidates over the wrong blocks, so we emit the last
+    # resolved frame — correct for a focused `?bundle=` request.  A multi-bundle
+    # hier render can no longer be represented by ONE top-level floorplan, so
+    # each serialized bundle now ALSO carries its OWN `floorplan`/`hanan`
+    # (`serialize_bundle`); the client prefers those and falls back to these.
+    # For the flat flow hanan_fp IS session.fp, so this is unchanged there.
     return {
         "floorplan": serialize_floorplan(hanan_fp),
         "hanan": serialize_hanan(hanan_fp),

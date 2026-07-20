@@ -10918,6 +10918,73 @@
      "wl_lo": -1.0
     }
    ],
+   "floorplan": {
+    "blocks": [
+     {
+      "bbox": {
+       "x1": 2960,
+       "x2": 4660,
+       "y1": 9750,
+       "y2": 10250
+      },
+      "corner_margin": {
+       "dx": 0,
+       "dy": 0
+      },
+      "is_container": false,
+      "name": "blk_07",
+      "rects": []
+     },
+     {
+      "bbox": {
+       "x1": 200,
+       "x2": 2700,
+       "y1": 10830,
+       "y2": 11830
+      },
+      "corner_margin": {
+       "dx": 0,
+       "dy": 0
+      },
+      "is_container": false,
+      "name": "blk_23",
+      "rects": []
+     },
+     {
+      "bbox": {
+       "x1": 200,
+       "x2": 1200,
+       "y1": 12000,
+       "y2": 12800
+      },
+      "corner_margin": {
+       "dx": 0,
+       "dy": 0
+      },
+      "is_container": false,
+      "name": "io_pad_tl",
+      "rects": []
+     }
+    ],
+    "keepouts": []
+   },
+   "hanan": {
+    "xs": [
+     200,
+     1200,
+     2700,
+     2960,
+     4660
+    ],
+    "ys": [
+     9750,
+     10250,
+     10830,
+     11830,
+     12000,
+     12800
+    ]
+   },
    "id": 1,
    "net_names": [
     "bus_060_0",
