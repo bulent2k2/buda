@@ -26,7 +26,8 @@ object Main {
 
   def main(args: Array[String]): Unit = {
     wire("run", () => runCmds())
-    wire("reset", () => ApiClient.reset().foreach { st => showStages(st); render = null; draw() })
+    wire("reset", () => ApiClient.reset().foreach { st =>
+      showStages(st); render = null; hideEditPanel(); draw() })
     wire("bundler", () => stage("run_bundler"))
     wire("topologies", () => stage("generate_topologies"))
     wire("planner", () => stage("run_planner"))
@@ -202,6 +203,16 @@ object Main {
 
   private def editAbort(): Unit =
     ApiClient.editAbort().foreach(applyEdit)
+
+  /** Drop any open edit session and hide its panel.  Reset clears `render` but
+    * must also clear `edit`, else `draw()` keeps passing the stale working-copy
+    * topology to the renderer and it draws over the freshly reset session until
+    * the next edit API call happens to clear it. */
+  private def hideEditPanel(): Unit = {
+    edit = null
+    Option(byId("editpanel")).foreach(
+      _.asInstanceOf[dom.html.Element].setAttribute("hidden", ""))
+  }
 
   // ── render ──────────────────────────────────────────────────────────────────
   private def draw(): Unit = {

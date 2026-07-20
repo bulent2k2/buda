@@ -1401,6 +1401,14 @@ function $p_Lbuda_web_Main$__editAbort__V($thiz) {
     $p_Lbuda_web_Main$__applyEdit__sjs_js_Dynamic__V($m_Lbuda_web_Main$(), resp);
   })), $m_s_concurrent_ExecutionContext$().global__s_concurrent_ExecutionContextExecutor());
 }
+function $p_Lbuda_web_Main$__hideEditPanel__V($thiz) {
+  $thiz.Lbuda_web_Main$__f_edit = null;
+  var this$1 = $n($m_s_Option$().apply__O__s_Option($p_Lbuda_web_Main$__byId__T__Lorg_scalajs_dom_Element($thiz, "editpanel")));
+  if ((!this$1.isEmpty__Z())) {
+    var arg1 = this$1.get__O();
+    arg1.setAttribute("hidden", "");
+  }
+}
 function $p_Lbuda_web_Main$__draw__V($thiz) {
   var label = $m_Lbuda_web_render_Renderer$().draw__Lorg_scalajs_dom_SVGSVGElement__sjs_js_Dynamic__T__I__sjs_js_Dynamic__T($p_Lbuda_web_Main$__svg__Lorg_scalajs_dom_SVGSVGElement($thiz), $thiz.Lbuda_web_Main$__f_render, $thiz.Lbuda_web_Main$__f_view, $thiz.Lbuda_web_Main$__f_cand, $thiz.Lbuda_web_Main$__f_edit);
   var this$1 = $n($m_s_Option$().apply__O__s_Option($p_Lbuda_web_Main$__byId__T__Lorg_scalajs_dom_Element($thiz, "candbar")));
@@ -1446,6 +1454,7 @@ $c_Lbuda_web_Main$.prototype.main__AT__V = (function(args) {
     $n($m_Lbuda_web_net_ApiClient$().reset__s_concurrent_Future()).foreach__F1__s_concurrent_ExecutionContext__V(new $c_sjsr_AnonFunction1(((st) => {
       $p_Lbuda_web_Main$__showStages__sjs_js_Dynamic__V($m_Lbuda_web_Main$(), st);
       $m_Lbuda_web_Main$().Lbuda_web_Main$__f_render = null;
+      $p_Lbuda_web_Main$__hideEditPanel__V($m_Lbuda_web_Main$());
       $p_Lbuda_web_Main$__draw__V($m_Lbuda_web_Main$());
     })), $m_s_concurrent_ExecutionContext$().global__s_concurrent_ExecutionContextExecutor());
   })));
