@@ -70,6 +70,21 @@ def test_checkpoint_resume_round_trip(tmp_path):
     assert sb["has_bdb"] is True
 
 
+def test_bdb_path_with_whitespace_is_rejected(tmp_path):
+    """A path with whitespace can't round-trip through the whitespace-tokenized
+    .buda command layer, so it's rejected with a structured error rather than
+    silently opening a truncated path (Codex P2)."""
+    c = _client()
+    bad = str(tmp_path / "My Project" / "ckpt.bdb")   # has a space
+    r = c.post("/api/bdb/open", json={"path": bad}).json()
+    assert r["result"]["ok"] is False
+    assert "whitespace" in r["result"]["summary"]
+    assert r["state"]["has_bdb"] is False              # nothing opened
+    # save-as with whitespace is rejected too
+    rs = c.post("/api/bdb/save", json={"path": bad}).json()
+    assert rs["result"]["ok"] is False
+
+
 def test_bdb_save_snapshot(tmp_path):
     """save_bdb <path> snapshots the current routed BDB to a new file."""
     src = str(tmp_path / "work.bdb")

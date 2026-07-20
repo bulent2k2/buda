@@ -241,11 +241,25 @@ async def post_select(req: SelectRequest):
         return {"result": res, "state": serialize.serialize_state(st.session)}
 
 
+def _bad_path(session, path):
+    """A path the whitespace-tokenized `.buda` command layer can't carry — reject
+    it explicitly instead of silently opening a truncated path (Codex P2).  The
+    `.buda` command language has no quoting, so a path with whitespace cannot
+    round-trip through do_command's `.split()`."""
+    return {"result": {"ok": False,
+                       "error": ["error", "path contains whitespace"],
+                       "log_lines": [], "num_warnings": 0, "num_errors": 1,
+                       "summary": f"BDB path may not contain whitespace: {path!r}"},
+            "state": serialize.serialize_state(session)}
+
+
 @app.post("/api/bdb/open")
 async def bdb_open(req: BdbOpenRequest):
     """Open (creating if needed) a BDB checkpoint store (`open_bdb <path>`).
     Open it BEFORE routing so the pipeline stages persist into it."""
     st = _get(req.session_id)
+    if any(c.isspace() for c in req.path):
+        return _bad_path(st.session, req.path)
     async with st.lock:
         res = runner.run_one(st.session, f"open_bdb {req.path}")
         return {"result": res, "state": serialize.serialize_state(st.session)}
@@ -255,6 +269,8 @@ async def bdb_open(req: BdbOpenRequest):
 async def bdb_save(req: BdbSaveRequest):
     """Snapshot the current BDB (`save_bdb [<path>]`) — a path is a save-as."""
     st = _get(req.session_id)
+    if req.path and any(c.isspace() for c in req.path):
+        return _bad_path(st.session, req.path)
     cmd = "save_bdb" + (f" {req.path}" if req.path else "")
     async with st.lock:
         res = runner.run_one(st.session, cmd)
