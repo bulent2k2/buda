@@ -222,6 +222,53 @@ def test_hier_instance_local_edit_round_trips_expanded(tmp_path):
         assert (min(sg.start.x, sg.end.x), max(sg.start.x, sg.end.x)) == want
 
 
+def test_expanded_instance_busterms_name_own_occurrence(tmp_path):
+    """Codex #368: an expanded per-instance wrapper's entry/exit busterm ids
+    (and the `bundle_busterm` rows persisted from them) must name ITS OWN
+    occurrence — not the template's reference instance.  Before the fix the
+    second+ occurrences inherited the reference instance's links (proc_i2's
+    bundle pointed at proc_i1), so any consumer of HBundle.entry/exit_
+    busterm_ids on a resumed expanded session resolved the wrong instance."""
+    src = str(tmp_path / "two.bdb")
+    post = str(tmp_path / "post.bdb")
+    _two_instance_design(src)
+    s, _ = _session(
+        *LAYERS, f"open_bdb {src}",
+        "add_blocks_from_bdb 0", "add_blocks_from_bdb 1 skip",
+        "derive_busterms 1", "run_hier_bundler depth 1",
+        "generate_hier_topologies", "run_planner hier 3", f"save_bdb {post}")
+
+    # Unique expanded wrappers (the replica aliases the template's wrapper
+    # at its instance, so the same object can appear under two map keys).
+    wrappers = {w.input.original_bundle.id: w
+                for ws in s._hier_expansion_map.values() for w in ws}
+
+    # In-memory: every expanded wrapper's busterm ids mention only its own
+    # instance path, never a sibling's.
+    seen_insts = set()
+    for w in wrappers.values():
+        hb = w.input.original_bundle
+        inst = hb.instances[0]
+        seen_insts.add(inst)
+        bts = list(hb.entry_busterm_ids) + list(hb.exit_busterm_ids)
+        assert bts, hb.id
+        for bt in bts:
+            assert inst in bt, (inst, bt)
+            for other in ("proc_i1", "proc_i2"):
+                if other != inst:
+                    assert f"{other}/" not in bt, (inst, other, bt)
+    assert seen_insts == {"proc_i1", "proc_i2"}
+
+    # Persisted: the bundle_busterm rows agree per instance.
+    for w in wrappers.values():
+        hb = w.input.original_bundle
+        inst = hb.instances[0]
+        rows = s.bdb.bundle_busterms(str(hb.id))
+        assert rows, hb.id
+        for bt_id, _kind in rows:
+            assert inst in bt_id, (inst, bt_id)
+
+
 def test_hier_unpinned_instance_commit_persists_extra_row(tmp_path):
     """TopoEdit follow-on #3 (per-instance candidate pools): an edit on ONE
     instance committed WITHOUT pin used to be session-only (loud note).  It
