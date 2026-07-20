@@ -1,0 +1,119 @@
+# ============================================================
+# Hierarchical flow (RICHER variant) — hand-built USER topologies with
+# MULTIPLE sub-cell occurrences, 4-block-local multicast buses, and
+# cross-hierarchy-boundary buses; persisted to a BDB.
+# ============================================================
+#
+# Extends flow/hier_user_topos.buda:
+#   * two sub-cell TYPES (core_cell, io_cell), each instantiated TWICE
+#     (core_i1/core_i2, io_i1/io_i2) — so a single USER template
+#     replicates to every occurrence;
+#   * each sub-cell carries a 4-BLOCK local MULTICAST bus (driver + three
+#     receivers = four busterm blocks touched by one bundle);
+#   * cross-boundary buses (x1/x2) run from a leaf inside a core instance
+#     to a leaf inside an io instance — crossing hierarchy boundaries.
+#
+# A hand-built USER topology is committed on each sub-cell TEMPLATE (the
+# 4-block multicast comb) and on a top-level cross-block bundle; the
+# templates replicate to all occurrences.  `save_bdb <path>.bdb.sql`
+# writes a diffable fixture whose `topology` table carries the USER rows
+# (type='USER', source='user') for the templates, the top-level bundle,
+# AND the replicated per-instance copies, plus the op-log provenance in
+# `meta` (user_ops).
+#
+# Run:   bin/buda flow/hier_user_topos_multi.buda
+# Then:  grep "'USER'" flow/hier_user_topos_multi.bdb.sql
+#
+# Bundle ids (from run_hier_bundler / dump_hbundles for this design):
+#   1 = core_cell TEMPLATE (multicast c0->c1,c2,c3; covers core_i1,core_i2)
+#   2 = top-level cross-block  (core_i1/c1 -> io_i1/p0)
+#   5 = io_cell  TEMPLATE (multicast p0->p1,p2,p3; covers io_i1,io_i2)
+
+def_layer 4 M4 H TOP 10
+def_layer 5 M5 V TOP 10
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+# ── Build the hierarchy in the BDB ───────────────────────────────────
+open_bdb :memory:
+
+# Two sub-cell TYPES, each four leaf pipes in a 2x2 grid (rows y20 / y140).
+add_cell core_cell 300 220
+add_cell io_cell   300 220
+add_cell pipe_cell 110 80
+
+add_inst_to_cell core_cell c0 pipe_cell  20  20
+add_inst_to_cell core_cell c1 pipe_cell 155  20
+add_inst_to_cell core_cell c2 pipe_cell  20 140
+add_inst_to_cell core_cell c3 pipe_cell 155 140
+
+add_inst_to_cell io_cell p0 pipe_cell  20  20
+add_inst_to_cell io_cell p1 pipe_cell 155  20
+add_inst_to_cell io_cell p2 pipe_cell  20 140
+add_inst_to_cell io_cell p3 pipe_cell 155 140
+
+# TWO occurrences of each sub-cell type (4 instances total).
+add_inst core_i1 core_cell -    0   0
+add_inst core_i2 core_cell -    0 400
+add_inst io_i1   io_cell   -  600   0
+add_inst io_i2   io_cell   -  600 400
+
+derive_busterms 1
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+
+# ── Nets ─────────────────────────────────────────────────────────────
+bdb_net_mode on
+# Local 4-block MULTICAST buses (one per occurrence -> template + replica).
+add_bus core_a1[4] core_i1/c0.out core_i1/c1.in,core_i1/c2.in,core_i1/c3.in
+add_bus core_a2[4] core_i2/c0.out core_i2/c1.in,core_i2/c2.in,core_i2/c3.in
+add_bus io_a1[4]   io_i1/p0.out   io_i1/p1.in,io_i1/p2.in,io_i1/p3.in
+add_bus io_a2[4]   io_i2/p0.out   io_i2/p1.in,io_i2/p2.in,io_i2/p3.in
+# Cross-HIERARCHY-BOUNDARY buses: leaf-in-core-instance -> leaf-in-io-instance.
+add_bus x1[4] core_i1/c1.out io_i1/p0.in
+add_bus x2[4] core_i2/c1.out io_i2/p0.in
+
+# ── Bundle + generate candidates ─────────────────────────────────────
+run_hier_bundler depth 1
+generate_hier_topologies
+dump_hbundles
+
+# ── USER #1 — core_cell TEMPLATE: a 4-block multicast comb (cell-local) ─
+# One H trunk in the mid-gap (rows at y20..100 / y140..220) with a stub
+# from each of the four leaf blocks — replicated to core_i1 and core_i2.
+edit_topology 1 new
+edit_add_trunk H 115 20 265
+edit_add_stub c0 0
+edit_add_stub c1 0
+edit_add_stub c2 0
+edit_add_stub c3 0
+edit_commit pin
+
+# ── USER #2 — io_cell TEMPLATE: the same 4-block comb (cell-local) ──────
+edit_topology 5 new
+edit_add_trunk H 115 20 265
+edit_add_stub p0 0
+edit_add_stub p1 0
+edit_add_stub p2 0
+edit_add_stub p3 0
+edit_commit pin
+
+# ── USER #3 — top-level cross-block bundle (absolute frame) ────────────
+# H trunk in the channel below the two leaves (both at y20..100), with a
+# stub dropping from each; face references resolve on the top floorplan.
+edit_topology 2 new
+edit_add_trunk H 115 200 680
+edit_add_stub core_i1/c1 0
+edit_add_stub io_i1/p0 0
+edit_commit pin
+
+# ── Plan (expands templates to every occurrence) + route ─────────────
+set_track_pitch 2.0
+run_planner hier 3
+run_nuts
+
+check_design nuts
+
+# ── Persist to a diffable .bdb.sql text fixture ──────────────────────
+save_bdb hier_user_topos_multi.bdb.sql

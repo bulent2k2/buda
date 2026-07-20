@@ -1,0 +1,29 @@
+# Reload check for hier_user_topos.bdb.sql: a FRESH session reopens the
+# persisted fixture and restores the hand-built USER topologies.
+# (Layers are session state, NOT stored in the BDB, so re-declare them.)
+def_layer 4 M4 H TOP 10
+def_layer 5 M5 V TOP 10
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+open_bdb hier_user_topos.bdb.sql
+
+# Re-declare the floorplan from the BDB hierarchy (depths 0 + 1), then
+# rehydrate bundles + candidate topologies (incl. the USER rows) + the
+# planner selection from the persisted tables.
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+# Plain load_pipeline restores the pre-expansion view: the two sub-cell
+# TEMPLATES (bundles 1, 3) + the top-level cross-block bundle (2), each
+# with its hand-built USER candidate pinned.  (`load_pipeline expanded`
+# instead gives the per-instance wrappers 4, 5 that carry the replicated
+# copies — both views are in the fixture.)
+load_pipeline
+
+# Each restored USER candidate prints a provenance pointer; dump the
+# replayable op-log for all three hand edits (sub-cell alu, sub-cell mem,
+# top level).
+dump_user_ops 1
+dump_user_ops 3
+dump_user_ops 2
+dump_topologies

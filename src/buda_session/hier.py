@@ -3038,6 +3038,31 @@ class HierMixin:
                 clone.net_names = donor_nets.get((b.id, inst_name),
                                                  list(b.net_names))
                 clone.instances = [inst_name]
+                # Re-map the busterm ids from the template's REFERENCE
+                # instance (b.instances[0]) to THIS occurrence, so the
+                # expanded wrapper's entry/exit_busterm_ids — and the
+                # per-instance `bundle_busterm` links _add_expanded_bundle
+                # persists from them — name the actual instance (core_i2/…,
+                # not the reference core_i1/…).  Without this the second+
+                # occurrences inherited the reference instance's links, so
+                # any consumer of HBundle.entry/exit_busterm_ids on a resumed
+                # `load_pipeline expanded` session resolved the wrong
+                # instance (Codex #368).  `_qual` in _add_expanded_bundle
+                # still handles a purely cell-local id (no '/').
+                ref_inst = b.instances[0] if b.instances else ""
+
+                def _reinst(bt, _ref=ref_inst, _inst=inst_name):
+                    if not _ref or _ref == _inst:
+                        return bt
+                    for pre, mk in ((f"bt:{_ref}/", f"bt:{_inst}/"),
+                                    (f"{_ref}/", f"{_inst}/")):
+                        if bt.startswith(pre):
+                            return mk + bt[len(pre):]
+                    return bt
+                clone.entry_busterm_ids = [_reinst(x)
+                                           for x in b.entry_busterm_ids]
+                clone.exit_busterm_ids = [_reinst(x)
+                                          for x in b.exit_busterm_ids]
                 new_w.input.original_bundle = clone
                 new_w.input.width = w.input.width
                 # Map each template candidate to instance coords — through
