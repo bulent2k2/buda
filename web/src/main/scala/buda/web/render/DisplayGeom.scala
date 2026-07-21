@@ -38,15 +38,22 @@ object DisplayGeom {
     val alo = Array.tabulate(n)(i => num(analysis(i), "along_lo"))
     val ahi = Array.tabulate(n)(i => num(analysis(i), "along_hi"))
     for (i <- 0 until n) {
+      val aLo = num(analysis(i), "along_lo")
+      val aHi = num(analysis(i), "along_hi")
       val conns = analysis(i).conns.asInstanceOf[js.Array[js.Dynamic]]
       conns.foreach { c =>
         val kind = c.kind.asInstanceOf[String]
         val j = c.seg_idx.asInstanceOf[Int]
         if (kind == "SEG" && j >= 0 && j < n) {
-          val target = perp(j)
+          val adj = perp(j)
           val at = num(c, "at_pos")
-          if (math.abs(at - alo(i)) <= math.abs(at - ahi(i))) alo(i) = math.min(alo(i), target)
-          else ahi(i) = math.max(ahi(i), target)
+          // draw.py Pass B: snap ONLY a connection incident to an endpoint
+          // (at_pos within 1 unit of along_lo/hi) and REPLACE that endpoint with
+          // the partner's display perp. NOT min/max — extend-only overdraws when
+          // the true endpoint moves inward, and snapping a mid-segment T-tap (no
+          // endpoint gate) stretches the line to a far partner (overextension).
+          if (math.abs(at - aLo) <= 1) alo(i) = adj
+          else if (math.abs(at - aHi) <= 1) ahi(i) = adj
         }
       }
     }

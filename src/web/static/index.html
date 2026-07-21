@@ -380,12 +380,14 @@ function computeDisplay(analysis) {
   analysis.forEach((a, i) => {
     for (const c of a.conns) {
       if (c.kind !== "SEG" || c.seg_idx < 0 || c.seg_idx >= perp.length) continue;
-      const target = perp[c.seg_idx];             // partner's display perp
-      // Snap the endpoint of `i` nearest this junction so the line reaches it.
-      if (Math.abs(c.at_pos - alo[i]) <= Math.abs(c.at_pos - ahi[i]))
-        alo[i] = Math.min(alo[i], target);        // extend the lo end outward
-      else
-        ahi[i] = Math.max(ahi[i], target);        // extend the hi end outward
+      const adj = perp[c.seg_idx];                // partner's display perp
+      // draw.py Pass B: snap ONLY a connection incident to an endpoint (at_pos
+      // within 1 unit of along_lo/hi) and REPLACE that endpoint with the
+      // partner's display perp. NOT min/max — extend-only overdraws a segment
+      // whose true endpoint moves inward, and snapping a mid-segment T-tap (no
+      // endpoint gate) stretches the line to a far partner (overextension bug).
+      if (Math.abs(c.at_pos - a.along_lo) <= 1) alo[i] = adj;
+      else if (Math.abs(c.at_pos - a.along_hi) <= 1) ahi[i] = adj;
     }
   });
   return {perp, alo, ahi};
