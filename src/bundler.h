@@ -51,11 +51,13 @@ struct HBundle {
     std::string drv_spec_path;
     std::vector<std::string> rcv_spec_paths;
 
-    // Fan-in metadata (multi-driver CONVERGENT/COMBINED hier bundles only,
-    // else empty): per-net driver and receiver names ALIGNED with net_names,
-    // in the bundle's frame (depth-level component paths).  Feeds the
-    // per-bit taper (derive_fanin_seg_bits) at hier generation; not
-    // persisted — a resumed session falls back to conservative full width.
+    // Fan-in metadata (multi-driver CONVERGENT/COMBINED hier bundles only —
+    // same-level OR cross-level, else empty): per-net driver and receiver
+    // names ALIGNED with net_names, in the bundle's frame (depth-level or
+    // cross-level component paths).  Feeds the per-bit taper
+    // (derive_fanin_seg_bits) at hier generation; not persisted — a resumed
+    // session recovers the endpoints from the FANIN reason and falls back to
+    // conservative full width.
     std::vector<std::string>              net_drivers;
     std::vector<std::vector<std::string>> net_receivers;
 
@@ -102,10 +104,11 @@ public:
     // direction-agnostic (sorted set of all endpoint names), so a net and its
     // reverse — and the cyclic multi-receiver case — bundle together;
     // CONVERGENT groups by receiver set only (fan-in); COMBINED is the join
-    // of the latter two (chains of either relation, union-find).  All are
-    // applied per bundling depth to SAME-LEVEL nets; cross-level nets keep
-    // STRICT/BIDIRECTIONAL grouping (their single drv_spec metadata cannot
-    // yet describe a multi-driver group — documented follow-on).
+    // of the latter two (chains of either relation, union-find).  Applied per
+    // bundling depth to same-level AND cross-level nets alike: a multi-driver
+    // cross-level group under CONVERGENT/COMBINED forms one fan-in bundle
+    // (per-net endpoints in net_drivers/net_receivers + a FANIN reason), the
+    // cross-level twin of the same-level fan-in.
     void set_strategy(Strategy s) { _strategy = s; }
     // Per-net-name-prefix permission overrides (set_bundling): mode is one
     // of strict|no_convergent|no_bidirectional|combined; longest matching

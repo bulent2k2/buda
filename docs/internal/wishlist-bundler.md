@@ -41,16 +41,21 @@ never a driverless `REC:…` (pure CONVERGENT was stranding single-driver
 cross-block buses), and pure-mode same-set groups keep the historical
 ep0 emission + 2-pin pool (the all-drivers emission is fan-in /
 general-path only), each pinned by a seam-targeted regression test.
-**Remaining corners** (opens.md item 8): cross-level nets keep
-STRICT/BIDIRECTIONAL grouping (single drv_spec metadata).
-✅ **`set_max_bundle_bits` is now hier-aware** — `run_hier_bundler`
-splits an over-limit TEMPLATE bundle before per-instance expansion, so
-each part is its own template and the split propagates identically
-through the template↔replica linkage; every HBundle hier field is
-preserved per part, the AUTO cap resolves a cell-local leaf to a
-congruent instance's child footprint, and a fan-in part re-scopes its
-per-net endpoints + FANIN reason to the leaves its bits touch
-(`test_hier_max_bundle_bits.py`).
+**Remaining corners** (opens.md item 8) — both now ✅ CLOSED:
+- ✅ **Cross-level fan-in grouping** — CONVERGENT/COMBINED group
+  cross-level nets by their shared receiver set into one fan-in bundle
+  (per-net `net_drivers`/`net_receivers` + a persisted `FANIN` reason);
+  generation roots the tree at the shared sink with each deep driver as
+  a per-bit tapered leaf, and a resumed session recovers the endpoints
+  from the reason (`test_hier_cross_level_fanin.py`).
+- ✅ **Hier `set_max_bundle_bits`** — the balanced split runs at
+  `run_hier_bundler` on TEMPLATE bundles before per-instance expansion,
+  so each part is its own template and the split propagates identically
+  through the template↔replica linkage; every HBundle hier field is
+  preserved per part, the AUTO cap resolves a cell-local leaf to a
+  congruent instance's child footprint, and a fan-in part re-scopes its
+  per-net endpoints + FANIN reason to the leaves its bits touch
+  (`test_hier_max_bundle_bits.py`).
 Details: [`convergent_bundling.md`](convergent_bundling.md).
 
 **What (historical):** `run_bundler CONVERGENT` groups nets by shared receiver only, so a

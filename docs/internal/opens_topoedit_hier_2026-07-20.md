@@ -50,12 +50,14 @@ four strategies, bottom-up planning with all 8 orientations,
 resume/rehydrate, USER templates replicating to instances).  Genuinely
 open:
 
-1. **Cross-level fan-in grouping** (opens item 8,
-   [`wishlist-bundler.md`](wishlist-bundler.md)).  Cross-level nets
-   still keep STRICT/BIDIRECTIONAL grouping because their single
-   `drv_spec_path` metadata cannot describe a multi-driver group — needs
-   a per-net endpoint record like the same-level `net_drivers` /
-   `net_receivers`.  Fails conservative (never silent) today.
+1. ✅ **Cross-level fan-in grouping** (opens item 8,
+   [`wishlist-bundler.md`](wishlist-bundler.md)) — LANDED.
+   CONVERGENT/COMBINED now group cross-level nets by their shared receiver
+   set into one fan-in bundle (per-net `net_drivers`/`net_receivers` +
+   a persisted `FANIN:root|FROM:leaves` reason); generation roots the tree
+   at the shared sink with each deep driver as a per-bit tapered leaf, and
+   a resumed session recovers the endpoints from the reason.
+   `test_hier_cross_level_fanin.py`.
 2. ✅ **Hier `set_max_bundle_bits`** (same item) — LANDED.  The balanced
    split now runs at `run_hier_bundler` on the TEMPLATE bundles, before
    per-instance expansion, so each part is its own template and the split

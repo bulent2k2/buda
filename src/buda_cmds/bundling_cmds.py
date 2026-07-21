@@ -706,17 +706,17 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     # A CONVERGENT/COMBINED multi-driver group becomes a fan-in bundle
     # (reason 'FANIN:root|FROM:leaves', per-net endpoints in
     # net_drivers/net_receivers) that generation routes as a per-bit
-    # tapered fan-in tree — same soundness story as the flat flow.  Note:
-    # relations apply per bundling depth to SAME-LEVEL nets; cross-level
-    # nets keep STRICT/BIDIRECTIONAL grouping (documented follow-on).
+    # tapered fan-in tree — same soundness story as the flat flow.  This
+    # applies to SAME-LEVEL and CROSS-LEVEL groups alike (a cross-level
+    # fan-in roots at the shared sink with each deep driver as a leaf).
     hb.set_strategy(getattr(buda.Strategy, strat))
     overrides = getattr(session, "_bundling_overrides", None) or {}
     if overrides:
         hb.set_bundling_overrides(sorted(overrides.items()))
     if strat == "COMBINED":
         print("[HierBundler] COMBINED: join of CONVERGENT and BIDIRECTIONAL "
-              "per bundling depth (cross-level nets stay STRICT/BIDIR; "
-              "restrict per prefix with set_bundling).")
+              "per bundling depth (same-level AND cross-level; restrict per "
+              "prefix with set_bundling).")
     raw_bundles = hb.run(max_depth)
     # set_max_bundle_bits: split over-limit TEMPLATE bundles BEFORE expansion
     # so the split propagates identically to every instance (each part is its

@@ -460,58 +460,196 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
         // ── 2a. Cross-level nets whose bundle_depth == depth ──────────────────
         // Use the actual leaf paths as the signature so they can't collide with
         // same-level bundles that share ancestor-level component names.
+        //
+        // Grouping mirrors the same-level lattice.  STRICT keeps driver+receiver
+        // (byte-identical); BIDIRECTIONAL keeps the shared-endpoint-set sig
+        // (byte-identical).  CONVERGENT groups by the shared RECEIVER SET so a
+        // multi-driver cross-level group forms ONE fan-in bundle (per-net
+        // endpoints in net_drivers/net_receivers + a FANIN reason) instead of
+        // one STRICT bundle per driver.  COMBINED takes the union-find JOIN of
+        // both relations.  set_bundling overrides gate each relation per net.
         {
-            std::map<std::string, std::vector<int>> xl_sig_to_nets;
+            std::vector<int> xl_nets;
             for (const auto& [net_id, info] : net_leaf) {
                 if (!info.is_cross || info.is_degenerate) continue;
                 if (info.bundle_depth != depth) continue;
-                auto sorted_rcv = info.rcv_spec_paths;
-                std::sort(sorted_rcv.begin(), sorted_rcv.end());
-                // Cross-level nets: no convergent/fan-in grouping (their
-                // single drv_spec metadata cannot describe a multi-driver
-                // group — documented follow-on), but the BIDIRECTIONAL
-                // relation stays available under BIDIRECTIONAL *and*
-                // COMBINED (the lattice: COMBINED must never be finer than
-                // BIDIRECTIONAL): a cross-level return pair shares one
-                // endpoint set, and the direction-agnostic trunk of the
-                // existing drv_spec route serves both directions.
-                // set_bundling overrides gate the relation per net, as in
-                // the same-level path.
-                std::string xsig;
-                const std::string* nm = nullptr;
-                {
-                    auto nit = net_name.find(net_id);
-                    if (nit != net_name.end()) nm = &nit->second;
-                }
-                const bool bidir_ok =
-                    (_strategy == Strategy::BIDIRECTIONAL ||
-                     _strategy == Strategy::COMBINED) &&
-                    (!nm || _net_allows(*nm, "bidir"));
-                if (bidir_ok) {
-                    std::vector<std::string> all = sorted_rcv;
-                    all.push_back(info.drv_spec_path);
-                    xsig = _bidir_sig(std::move(all));
-                } else {
-                    xsig = _strict_sig(info.drv_spec_path, sorted_rcv);
-                }
-                xl_sig_to_nets[xsig].push_back(net_id);
+                xl_nets.push_back(net_id);
             }
-            for (const auto& [sig, net_ids] : xl_sig_to_nets) {
+            std::sort(xl_nets.begin(), xl_nets.end());
+
+            auto rcv_set_sig = [](const std::vector<std::string>& sorted_rcv) {
+                std::string s = "XLCONV:";
+                for (const auto& r : sorted_rcv) { s += r; s += ','; }
+                return s;
+            };
+
+            // As on the same-level path, ANY active set_bundling override
+            // switches to the union-find join so a strict-equivalent bus stays
+            // bundled (a per-net key would fragment it when a prefix disables
+            // one relation for only some of its bits).
+            const bool general = (_strategy == Strategy::COMBINED)
+                                 || !_overrides.empty();
+            std::vector<std::vector<int>> xl_groups;
+            if (!general) {
+                // Single-relation, override-free strategies: the historical sig
+                // map (its key order is the emitted bundle order — every net
+                // gets the same relation key, so no fragmentation).
+                std::map<std::string, std::vector<int>> xl_sig_to_nets;
+                for (int net_id : xl_nets) {
+                    const auto& info = net_leaf.at(net_id);
+                    auto sorted_rcv = info.rcv_spec_paths;
+                    std::sort(sorted_rcv.begin(), sorted_rcv.end());
+                    const std::string* nm = nullptr;
+                    { auto nit = net_name.find(net_id);
+                      if (nit != net_name.end()) nm = &nit->second; }
+                    std::string xsig;
+                    if (_strategy == Strategy::CONVERGENT &&
+                        (!nm || _net_allows(*nm, "conv"))) {
+                        xsig = rcv_set_sig(sorted_rcv);
+                    } else if (_strategy == Strategy::BIDIRECTIONAL &&
+                               (!nm || _net_allows(*nm, "bidir"))) {
+                        std::vector<std::string> all = sorted_rcv;
+                        all.push_back(info.drv_spec_path);
+                        xsig = _bidir_sig(std::move(all));
+                    } else {
+                        xsig = _strict_sig(info.drv_spec_path, sorted_rcv);
+                    }
+                    xl_sig_to_nets[xsig].push_back(net_id);
+                }
+                for (auto& [sig, ids] : xl_sig_to_nets)
+                    xl_groups.push_back(std::move(ids));
+            } else {
+                // Union-find join (COMBINED, or any strategy with an override):
+                // the STRICT signature is always unioned, so strictly-identical
+                // cross-level bits stay bundled regardless of per-net relation
+                // permissions; conv/bidir keys merge only when the strategy
+                // enables that relation AND the net permits it.  Mirrors the
+                // same-level general path exactly.
+                const bool strat_conv  = (_strategy == Strategy::CONVERGENT ||
+                                          _strategy == Strategy::COMBINED);
+                const bool strat_bidir = (_strategy == Strategy::BIDIRECTIONAL ||
+                                          _strategy == Strategy::COMBINED);
+                std::map<int, int> parent;
+                for (int n : xl_nets) parent[n] = n;
+                std::function<int(int)> find = [&](int x) {
+                    while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+                    return x;
+                };
+                std::map<std::string, int> by_sig;
+                for (int net_id : xl_nets) {
+                    const auto& info = net_leaf.at(net_id);
+                    auto sorted_rcv = info.rcv_spec_paths;
+                    std::sort(sorted_rcv.begin(), sorted_rcv.end());
+                    const std::string nname = net_name.count(net_id)
+                                                  ? net_name[net_id] : std::string();
+                    std::vector<std::string> sigs;
+                    sigs.push_back("S" + _strict_sig(info.drv_spec_path, sorted_rcv));
+                    if (strat_conv && _net_allows(nname, "conv"))
+                        sigs.push_back("C" + rcv_set_sig(sorted_rcv));
+                    if (strat_bidir && _net_allows(nname, "bidir")) {
+                        std::vector<std::string> all = sorted_rcv;
+                        all.push_back(info.drv_spec_path);
+                        sigs.push_back("B" + _bidir_sig(all));
+                    }
+                    for (const auto& key : sigs) {
+                        auto it = by_sig.find(key);
+                        if (it == by_sig.end()) by_sig[key] = net_id;
+                        else { int ra = find(it->second), rb = find(net_id);
+                               if (ra != rb) parent[rb] = ra; }
+                    }
+                }
+                std::map<int, std::vector<int>> by_root;
+                for (int n : xl_nets) by_root[find(n)].push_back(n);
+                std::vector<std::pair<std::string, std::vector<int>>> tmp;
+                for (auto& [root, ids] : by_root) {
+                    std::string min_name;
+                    for (int nid : ids) {
+                        auto it = net_name.find(nid);
+                        if (it != net_name.end() &&
+                            (min_name.empty() || it->second < min_name))
+                            min_name = it->second;
+                    }
+                    tmp.emplace_back(min_name, std::move(ids));
+                }
+                std::sort(tmp.begin(), tmp.end(),
+                          [](const auto& a, const auto& b) { return a.first < b.first; });
+                for (auto& [k, ids] : tmp) xl_groups.push_back(std::move(ids));
+            }
+
+            for (auto& net_ids : xl_groups) {
                 HBundle b;
                 b.id    = ++next_id;
                 b.level = depth;
-                b.reason = sig;
                 for (int nid : net_ids) {
                     auto it = net_name.find(nid);
                     if (it != net_name.end()) b.net_names.push_back(it->second);
                 }
                 std::sort(b.net_names.begin(), b.net_names.end());
                 const auto& info0 = net_leaf.at(net_ids[0]);
-                b.num_terminals  = 1 + (int)info0.rcv_spec_paths.size();
                 b.drv_spec_depth = info0.drv_spec_depth;
                 b.rcv_spec_depth = info0.rcv_spec_depth;
-                b.drv_spec_path  = info0.drv_spec_path;
-                b.rcv_spec_paths = info0.rcv_spec_paths;
+
+                std::set<std::string> drv_set;
+                for (int nid : net_ids)
+                    drv_set.insert(net_leaf.at(nid).drv_spec_path);
+
+                if (drv_set.size() > 1) {
+                    // Cross-level FAN-IN: multiple distinct drivers share the
+                    // receiver set.  Root at the shared sink, record per-net
+                    // endpoints for the taper, and emit a FANIN reason so
+                    // generation (and a resumed session whose net_drivers were
+                    // not persisted) rebuilds the multi-driver tree.
+                    std::set<std::string> rcv_union;
+                    for (int nid : net_ids)
+                        for (const auto& r : net_leaf.at(nid).rcv_spec_paths)
+                            rcv_union.insert(r);
+                    std::vector<std::string> rcv_sorted(rcv_union.begin(),
+                                                        rcv_union.end());
+                    const std::string root =
+                        rcv_sorted.empty() ? std::string() : rcv_sorted.front();
+                    std::map<std::string, int> nid_by_name;
+                    for (int nid : net_ids) {
+                        auto it = net_name.find(nid);
+                        if (it != net_name.end()) nid_by_name[it->second] = nid;
+                    }
+                    for (const auto& nm : b.net_names) {
+                        const auto& li = net_leaf.at(nid_by_name[nm]);
+                        b.net_drivers.push_back(li.drv_spec_path);
+                        b.net_receivers.push_back(li.rcv_spec_paths);
+                    }
+                    std::vector<std::string> leaves;
+                    for (const auto& d : drv_set)
+                        if (d != root) leaves.push_back(d);
+                    for (const auto& r : rcv_sorted)
+                        if (r != root && drv_set.find(r) == drv_set.end())
+                            leaves.push_back(r);
+                    std::string sig = "FANIN:" + root + "|FROM:";
+                    for (const auto& l : leaves) { sig += l; sig += ','; }
+                    b.reason         = sig;
+                    b.drv_spec_path  = *drv_set.begin();   // compat: first driver
+                    b.rcv_spec_paths = rcv_sorted;
+                    b.num_terminals  = (int)drv_set.size() + (int)rcv_sorted.size();
+                } else {
+                    // Single-driver group: historical metadata + the group's
+                    // shared signature as the reason (byte-identical for the
+                    // STRICT/BIDIRECTIONAL simple-map paths).
+                    auto sorted_rcv = info0.rcv_spec_paths;
+                    std::sort(sorted_rcv.begin(), sorted_rcv.end());
+                    const std::string* nm = nullptr;
+                    { auto nit = net_name.find(net_ids[0]);
+                      if (nit != net_name.end()) nm = &nit->second; }
+                    if (_strategy == Strategy::BIDIRECTIONAL &&
+                        (!nm || _net_allows(*nm, "bidir"))) {
+                        std::vector<std::string> all = sorted_rcv;
+                        all.push_back(info0.drv_spec_path);
+                        b.reason = _bidir_sig(std::move(all));
+                    } else {
+                        b.reason = _strict_sig(info0.drv_spec_path, sorted_rcv);
+                    }
+                    b.drv_spec_path  = info0.drv_spec_path;
+                    b.rcv_spec_paths = info0.rcv_spec_paths;
+                    b.num_terminals  = 1 + (int)info0.rcv_spec_paths.size();
+                }
                 id_to_idx[b.id] = (int)bundles.size();
                 bundles.push_back(std::move(b));
             }

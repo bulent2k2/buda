@@ -1118,36 +1118,44 @@ class HierMixin:
             return n
 
         elif b.drv_spec_depth >= 0:
-            # Case (c): cross-level — custom floorplan from actual endpoint blocks
-            drv_comp = comps_by_name.get(b.drv_spec_path)
-            if drv_comp is None:
-                print(f"  Warning: driver comp {b.drv_spec_path!r} not found — "
-                      f"skipping bundle {b.id}")
-                return 0
+            # Case (c): cross-level — custom floorplan from actual endpoint blocks.
+            # A MULTI-DRIVER cross-level group (CONVERGENT/COMBINED) is a fan-in
+            # bundle: root at the shared sink with every driver as a leaf, and
+            # per-bit tapered from HBundle.net_drivers/net_receivers — the same
+            # treatment as the same-level fan-in case (b), extended across the
+            # hierarchy boundary.
+            fanin_c, root_c, leaves_c = self._xlevel_fanin_endpoints(b)
+            if fanin_c:
+                src = root_c
+                dsts = leaves_c
+            else:
+                src = b.drv_spec_path
+                dsts = list(b.rcv_spec_paths)
             fp = self._apply_fp_session_settings(buda.Floorplan())
-            fp.add_block(b.drv_spec_path,
-                         int(round(drv_comp.x1)), int(round(drv_comp.y1)),
-                         int(round(drv_comp.x2)), int(round(drv_comp.y2)))
             ok = True
-            for rpath in b.rcv_spec_paths:
-                rc = comps_by_name.get(rpath)
-                if rc is None:
-                    print(f"  Warning: receiver comp {rpath!r} not found — "
+            for blk in [src, *dsts]:
+                c = comps_by_name.get(blk)
+                if c is None:
+                    print(f"  Warning: endpoint comp {blk!r} not found — "
                           f"skipping bundle {b.id}")
                     ok = False; break
-                fp.add_block(rpath,
-                             int(round(rc.x1)), int(round(rc.y1)),
-                             int(round(rc.x2)), int(round(rc.y2)))
+                fp.add_block(blk, int(round(c.x1)), int(round(c.y1)),
+                             int(round(c.x2)), int(round(c.y2)))
             if not ok:
                 return 0
             tg = self._make_topo_gen(fp, use_center, use_double_detour,
                                      use_multi_trunk, use_hanan_loci)
-            n, detail = install(tg.generate_candidates(b.drv_spec_path,
-                                                       list(b.rcv_spec_paths)))
-            label = (f"{b.drv_spec_path}→{b.rcv_spec_paths[0]}"
-                     if len(b.rcv_spec_paths) == 1
-                     else f"{b.drv_spec_path}→[{','.join(b.rcv_spec_paths)}]")
-            tag = f"[cross-level D{b.drv_spec_depth}→D{b.rcv_spec_depth}]"
+            n, detail = install(tg.generate_candidates(src, dsts))
+            if fanin_c:
+                # Per-bit taper (no-op / conservative full width on a resumed
+                # session whose net_drivers were not persisted).
+                self._derive_hier_fanin_bits(w, fp, local=False)
+                label = f"[{','.join(dsts)}]→{src} fan-in"
+            else:
+                label = (f"{src}→{dsts[0]}" if len(dsts) == 1
+                         else f"{src}→[{','.join(dsts)}]")
+            tag = (f"[cross-level D{b.drv_spec_depth}→D{b.rcv_spec_depth}"
+                   f"{' fan-in' if fanin_c else ''}]")
             if n == 0 and not w.input.candidates:
                 print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
                       f"0 candidates — bundle will be unrouted!  {tag} {nets_suffix}")
@@ -1277,23 +1285,22 @@ class HierMixin:
 
         if b.drv_spec_depth >= 0:
             # Case (c): cross-level custom floorplan from the endpoint blocks.
+            # A fan-in bundle spans every driver + the shared sink (the same
+            # block set generation used), so check_design / the explorer /
+            # dump_topologies see the whole tree, not just the first driver.
             cache_key = ('xlevel', b.id)
             if cache_key not in fp_cache:
-                fp = None
-                drv_comp = comps_by_name.get(b.drv_spec_path)
-                if drv_comp is not None:
-                    fp = self._apply_fp_session_settings(buda.Floorplan())
-                    fp.add_block(b.drv_spec_path,
-                                 int(round(drv_comp.x1)), int(round(drv_comp.y1)),
-                                 int(round(drv_comp.x2)), int(round(drv_comp.y2)))
-                    for rpath in b.rcv_spec_paths:
-                        rc = comps_by_name.get(rpath)
-                        if rc is None:
-                            fp = None
-                            break
-                        fp.add_block(rpath,
-                                     int(round(rc.x1)), int(round(rc.y1)),
-                                     int(round(rc.x2)), int(round(rc.y2)))
+                fanin_c, root_c, leaves_c = self._xlevel_fanin_endpoints(b)
+                blocks = ([root_c, *leaves_c] if fanin_c
+                          else [b.drv_spec_path, *b.rcv_spec_paths])
+                fp = self._apply_fp_session_settings(buda.Floorplan())
+                for blk in blocks:
+                    c = comps_by_name.get(blk)
+                    if c is None:
+                        fp = None
+                        break
+                    fp.add_block(blk, int(round(c.x1)), int(round(c.y1)),
+                                 int(round(c.x2)), int(round(c.y2)))
                 fp_cache[cache_key] = fp
             return fp_cache[cache_key]
 
@@ -3262,6 +3269,35 @@ class HierMixin:
                 if r != root and r not in leaves:
                     leaves.append(r)
         return root, leaves, True
+
+    @staticmethod
+    def _xlevel_fanin_endpoints(b):
+        """Cross-level fan-in generation endpoints — (fanin, root, leaves).
+
+        A multi-driver cross-level bundle (CONVERGENT/COMBINED) roots the tree
+        at the shared sink with every driver as a leaf.  Uses the per-net
+        HBundle.net_drivers/net_receivers when present (fresh bundling); on a
+        RESUMED session — where net_drivers is not persisted — it recovers the
+        same endpoints by parsing the persisted `FANIN:root|FROM:leaves` reason,
+        so the route stays complete (only the per-bit taper falls back to
+        conservative full width).  Returns (False, None, []) for a single-driver
+        cross-level bundle (the historical drv_spec_path path)."""
+        if b.net_drivers:
+            drivers = list(dict.fromkeys(b.net_drivers))
+            if len(drivers) <= 1:
+                return False, None, []
+            receivers = sorted({r for rl in b.net_receivers for r in rl})
+            if not receivers:
+                return False, None, []
+            root = receivers[0]
+            leaves = [d for d in drivers if d != root]
+            leaves += [r for r in receivers if r != root and r not in drivers]
+            return (True, root, leaves) if leaves else (False, None, [])
+        if b.reason.startswith('FANIN:'):
+            root, leaves = HierMixin._parse_bundle_reason(b.reason)
+            if root and leaves:
+                return True, root, leaves
+        return False, None, []
 
     def _fanin_net_endpoints(self, w):
         """Per-bit endpoint lists for a FAN-IN bundle: ([driver_block per
