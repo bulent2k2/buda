@@ -21,6 +21,7 @@ cd "$REPO_DIR"
 CLEAN=false
 RUN_TESTS=false
 TEST_TIER=fast   # fast | mid | slow (cumulative)
+PARALLEL=false   # `-p` forces parallel for the fast tier (mid/slow already parallel)
 BUILD_WEB=false  # `bb web` builds the Scala.js client only (no C++ build)
 
 usage() {
@@ -33,13 +34,16 @@ Build options:
   -c, --clean       Clean rebuild (make clean before building)
 
 Test options (each implies a build first; tiers are cumulative):
-  -t, --test, test  Run the FAST tier only       (~10s, serial)
+  -t, --test, test  Run the FAST tier only       (serial by default; -p to parallelize)
   -m, --mid,  mid   Run FAST + MID tiers          (+full-pipeline integration tests)
   -s, --slow, slow  Run ALL tiers                 (+SA/GA optimizer storms)
+  -p, --parallel    Parallelize the run (needed only for the fast tier; mid/slow
+                    already parallelize). Implies -t when no tier is given.
 
 The mid/slow tiers run in PARALLEL when pytest-xdist is installed (`-n auto
---dist loadfile`, ~3x on 4 cores); the fast tier stays serial. Override with
-BB_JOBS=<N> (e.g. BB_JOBS=8), or force serial with BB_JOBS=0.
+--dist loadfile`, ~3x on 4 cores); the fast tier is serial unless you pass -p.
+Override the worker count with BB_JOBS=<N> (e.g. BB_JOBS=8), or force serial
+with BB_JOBS=0.
 
 Web client:
   web               Build the Scala.js client only (sbt fullLinkJS) into the
@@ -57,6 +61,7 @@ Examples:
   bb              # incremental build, no tests
   bb -c           # clean rebuild, no tests
   bb -t           # build + fast tests (default inner-loop check)
+  bb -t -p        # build + fast tests, parallelized (or just: bb -p)
   bb -m           # build + fast + mid (integration) tests
   bb -s           # build + everything, before pushing
 EOF
@@ -77,6 +82,10 @@ for arg in "$@"; do
         --slow|-s|slow)
             RUN_TESTS=true
             TEST_TIER=slow
+            ;;
+        --parallel|-p|parallel)
+            RUN_TESTS=true   # -p alone -> fast tier in parallel
+            PARALLEL=true
             ;;
         web)
             BUILD_WEB=true
@@ -230,15 +239,16 @@ if [ "$RUN_TESTS" = true ]; then
             ;;
     esac
 
-    # Parallelize the heavier tiers when pytest-xdist is available: the mid/slow
-    # integration tests are independent and CPU-bound, so `-n auto` gives a big
-    # speedup (~3x on 4 cores). `--dist loadfile` keeps every test in a file on
-    # ONE worker, so tests that share a fixture path (e.g. a viz sidecar next to
-    # a common .buda) can't race across workers. The fast tier stays serial — it
-    # is already ~10s and worker startup wouldn't pay off. Override the worker
-    # count with BB_JOBS (e.g. BB_JOBS=8), or disable with BB_JOBS=0 / no xdist.
+    # Parallelize when pytest-xdist is available: the integration tests are
+    # independent and CPU-bound, so `-n auto` gives a big speedup (~3x on 4
+    # cores). `--dist loadfile` keeps every test in a file on ONE worker, so
+    # tests that share a fixture path (e.g. a viz sidecar next to a common
+    # .buda) can't race across workers. The mid/slow tiers always parallelize;
+    # the fast tier is serial by default (worker startup barely pays off at its
+    # size) but parallelizes on `-p`. Override the worker count with BB_JOBS
+    # (e.g. BB_JOBS=8), or disable with BB_JOBS=0 / no xdist.
     XDIST_OPT=()
-    if [ "$TEST_TIER" != "fast" ] && [ "${BB_JOBS:-auto}" != "0" ]; then
+    if { [ "$TEST_TIER" != "fast" ] || [ "$PARALLEL" = true ]; } && [ "${BB_JOBS:-auto}" != "0" ]; then
         if python -c "import xdist" 2>/dev/null; then
             XDIST_OPT=(-n "${BB_JOBS:-auto}" --dist loadfile)
             echo "  (parallel: pytest-xdist -n ${BB_JOBS:-auto} --dist loadfile)"

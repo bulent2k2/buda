@@ -31,8 +31,9 @@ hand-classification of every new test. Two better levers:
 ## Setup: `-n auto --dist loadfile`
 
 `pip install pytest-xdist`, then `bb -m` / `bb -s` auto-parallelize when xdist is
-importable (the **fast** tier stays serial — it is ~10s and worker startup
-wouldn't pay off). Direct invocation:
+importable (the **fast** tier is serial by default — worker startup barely pays
+off at its size — but `bb -t -p` / `bb -p` parallelizes it too). Direct
+invocation:
 
 ```bash
 pytest -o addopts="" -m "not slow" -n auto --dist loadfile      # mid, parallel
@@ -93,7 +94,7 @@ before diagnosing parallelism.
 | Parallel mid/slow (default when xdist present) | `bb -m` / `bb -s` |
 | Pin worker count | `BB_JOBS=8 bb -m` |
 | Force serial | `BB_JOBS=0 bb -m` (or uninstall xdist) |
-| Fast tier | always serial (`bb -t`) |
+| Fast tier | serial by default (`bb -t`); parallel with `bb -t -p` / `bb -p` |
 
 ## Surgical speedups applied
 
