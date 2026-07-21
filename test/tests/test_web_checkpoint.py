@@ -44,6 +44,21 @@ def test_select_pins_candidate():
     assert client.get("/api/state").json()["bundles"][0]["selected_index"] == 5
 
 
+def test_unpin_clears_pin_keeps_selection():
+    """/api/unpin drops the pin (inverse of /api/select) while leaving the
+    selected candidate in place, so the client can browse/re-pin freely."""
+    client = _client()
+    client.post("/api/command",
+                json={"cmds": B44_SETUP + ["run_bundler", "generate_topologies"]})
+    client.post("/api/select", json={"bundle": 1, "candidate": 5})
+    assert client.get("/api/state").json()["bundles"][0]["pinned"] is True
+    r = client.post("/api/unpin", json={"bundle": 1}).json()
+    assert r["result"]["ok"] is True
+    b = r["state"]["bundles"][0]
+    assert b["pinned"] is False           # pin cleared
+    assert b["selected_index"] == 5       # selection unchanged
+
+
 # ── Phase 5: BDB checkpoint save/resume ──────────────────────────────────────
 def test_checkpoint_resume_round_trip(tmp_path):
     bdb = str(tmp_path / "ckpt.bdb")

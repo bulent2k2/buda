@@ -50,6 +50,9 @@ object ApiClient {
   def select(bundle: Int, candidate: Int): Future[js.Dynamic] =
     postJson("/select", js.Dynamic.literal(bundle = bundle, candidate = candidate))
 
+  def unpin(bundle: Int): Future[js.Dynamic] =
+    postJson("/unpin", js.Dynamic.literal(bundle = bundle))
+
   // ── interactive edit ───────────────────────────────────────────────────────
   /** Open an edit session on a candidate index or the literal string "new". */
   def editOpen(bundle: Int, candidate: js.Any): Future[js.Dynamic] =

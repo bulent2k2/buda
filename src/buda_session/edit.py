@@ -645,3 +645,28 @@ class EditMixin:
         if not found:
             print(f"Error: bundle {bid} not found")
         return found
+
+    def _unpin_topology_internal(self, bid):
+        """Inverse of select_topology: clear a bundle's pin so the next planner
+        run is free to re-choose. Leaves the current selected_topology_index in
+        place (the shown candidate does not jump) but drops topology_pinned.
+        Returns True if the bundle (or its hierarchical expansion) was found."""
+        found = False
+        for w in self.bundles:
+            if w.input.original_bundle.id == bid:
+                w.input.topology_pinned = False
+                print(f"Unpinned bundle {bid}")
+                found = True
+                break
+        if not found:
+            wrappers = self._hier_expansion_map.get(bid, [])
+            if wrappers:
+                for w in wrappers:
+                    w.input.topology_pinned = False
+                n = len(wrappers)
+                print(f"Unpinned bundle {bid} "
+                      f"({n} expanded instance{'s' if n > 1 else ''})")
+                found = True
+        if not found:
+            print(f"Error: bundle {bid} not found")
+        return found
