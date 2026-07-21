@@ -56,10 +56,15 @@ open:
    `drv_spec_path` metadata cannot describe a multi-driver group — needs
    a per-net endpoint record like the same-level `net_drivers` /
    `net_receivers`.  Fails conservative (never silent) today.
-2. **Hier `set_max_bundle_bits`** (same item).  The balanced split pass
-   is flat-only; a hier version must propagate splits through the
-   template↔replica linkage so every instance splits identically.  Also
-   fails LOUD today.
+2. ✅ **Hier `set_max_bundle_bits`** (same item) — LANDED.  The balanced
+   split now runs at `run_hier_bundler` on the TEMPLATE bundles, before
+   per-instance expansion, so each part is its own template and the split
+   propagates identically to every occurrence through the template↔replica
+   linkage.  Every HBundle hier field is preserved per part; the AUTO
+   (busterm-edge) cap resolves a cell-local leaf name to a congruent
+   instance's child footprint; a fan-in part re-scopes its per-net
+   `net_drivers`/`net_receivers` + FANIN reason to the leaves its bits
+   touch.  See `test_hier_max_bundle_bits.py`.
 3. **Re-planning a resumed post-expansion session** is unsupported —
    `run_planner hier` on a `load_pipeline expanded` checkpoint would
    double-expand.  Pre-existing, noted in the resume work; no workflow
