@@ -20,6 +20,23 @@ import sys
 import types
 from datetime import datetime
 
+# On macOS the native 'macosx' backend can intermittently segfault,
+# especially with the IPC timer or when multiple windows open.  Force TkAgg
+# before pyplot locks in a backend.  This lives in the viz façade (not the
+# headless command layer) so importing buda_cmds/buda_cli stays
+# matplotlib-free — the headless-server requirement.
+#
+# Only override the IMPLICIT default ('macosx'): respect a backend the caller
+# already selected explicitly — via MPLBACKEND or a prior matplotlib.use(...) —
+# so headless macOS contexts (tests / PNG rendering that pick Agg) keep their
+# choice instead of being dragged onto Tk.  dict.__getitem__ peeks the raw
+# rcParams value without triggering lazy backend resolution: it is the auto
+# sentinel (non-str) until a choice is made, and a plain string afterwards.
+if sys.platform == 'darwin':
+    import matplotlib
+    if not isinstance(dict.__getitem__(matplotlib.rcParams, 'backend'), str):
+        matplotlib.use('TkAgg')
+
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.collections import PatchCollection, LineCollection

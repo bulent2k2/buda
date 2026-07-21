@@ -30,13 +30,6 @@ _tools = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'tools')
 if _tools not in sys.path:
     sys.path.append(_tools)
 
-# On macOS the native 'macosx' backend can intermittently segfault,
-# especially with the IPC timer or when multiple windows open.
-# Force TkAgg to ensure stability.
-if sys.platform == 'darwin':
-    import matplotlib
-    matplotlib.use('TkAgg')
-
 import buda
 
 faulthandler.enable()
