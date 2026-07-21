@@ -90,7 +90,10 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
   </div>
 </div>
 <div id="main">
-  <div id="notbuilt" hidden style="position:absolute; inset:0; display:flex;
+  <!-- Default display:none (NOT the `hidden` attribute — an inline display:flex
+       would override [hidden]{display:none} and always show it). The script-load
+       error handler below flips this to flex when main.js is missing. -->
+  <div id="notbuilt" style="display:none; position:absolute; inset:0;
        flex-direction:column; align-items:center; justify-content:center; gap:8px;
        text-align:center; padding:24px">
     <b>The Scala.js client isn't built yet.</b>
@@ -116,7 +119,7 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
     var t = e.target;
     if (t && t.tagName === "SCRIPT" && /main\.js(\?|$)/.test(t.src || "")) {
       var b = document.getElementById("notbuilt");
-      if (b) b.hidden = false;
+      if (b) b.style.display = "flex";
     }
   }, true);
 </script>
