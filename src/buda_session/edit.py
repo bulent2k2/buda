@@ -542,7 +542,24 @@ class EditMixin:
         inside a shared slide window — the trunk locus slides with its stubs,
         so they route within NUTS realization-noise of each other (the nominal
         is only a placement hint; the residual spread is the b44 realization
-        sensitivity).  Returns None if the ConnTopology can't be built."""
+        sensitivity).
+
+        Returns None (the candidate never participates in the dedup — as
+        neither a survivor NOR a collapsed member) for anything the ConnSeg
+        skeleton does not fully capture, mirroring `_topo_prune_info`: TEG
+        bridge segments (real wire OUTSIDE `segments`, persisted separately —
+        two candidates with the same skeleton but different bridge wires must
+        not collide, Codex #389), fan-in per-bit taper (`seg_bits`), adopted
+        dogleg jogs, and U_OVL perp clamps.  Also None if the ConnTopology
+        can't be built."""
+        if t.bridge_segments or t.seg_bits:
+            return None
+        for seg in t.segments:
+            if getattr(seg, 'is_jog', False):
+                return None
+            if (seg.perp_clamp_lo != self._CLAMP_LO_SENT
+                    or seg.perp_clamp_hi != self._CLAMP_HI_SENT):
+                return None
         try:
             ct = buda.ConnTopology(); ct.build(t, fp)
         except Exception:

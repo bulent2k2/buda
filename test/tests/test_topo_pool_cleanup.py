@@ -149,6 +149,27 @@ def test_drop_dangling_keeps_a_pinned_dangling_candidate():
     assert uid in [buda.topo_uid(c) for c in s.bundles[0].input.candidates]
 
 
+def test_dedup_excludes_bridged_candidates():
+    """TEG-over bridge wires live OUTSIDE ConnTopology.segs(), so a bridged
+    candidate must never participate in the locus dedup — else two candidates
+    with the same skeleton but different bridge wires would collide and the
+    bridged one could be dropped (Codex #389).  Mirrors the WL-prune exclusion."""
+    s = buda_cli.BudaSession(); s.no_viz = True
+    _run(s,
+         "source flow/tracks/tracks4top.buda",
+         "add_block src 200 10830 700 11330",
+         "add_block dst 4000 10830 4500 11330",
+         "add_block relay rect 1500 10500 2000 11000 "
+         "rect 2500 11200 3000 11700 teg_mode over",
+         "add_bus b[8] src.p dst.p,relay.p",
+         "run_bundler", "generate_topologies")
+    cands = s.bundles[0].input.candidates
+    bridged = [c for c in cands if c.bridge_segments]
+    assert bridged, "expected TEG-over bridge candidates in this scenario"
+    for c in bridged:
+        assert s._topo_loci_canon(c, s.fp) is None   # never a dedup key
+
+
 def test_both_knobs_compose():
     s = _gen("set_dedup_loci on", "set_drop_dangling on")
     n = _n(s)
