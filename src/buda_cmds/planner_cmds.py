@@ -278,9 +278,10 @@ def cmd_unpin_topology(session, cmd, args, cmd_line):
     if args[0] == '*':
         n = 0
         for w in session.bundles:
-            if getattr(w.input, "topology_pinned", False):
-                w.input.topology_pinned = False
+            if getattr(w.input, "topology_pinned", False) or w.input.pinned_seg_layers:
                 n += 1
+            w.input.topology_pinned = False
+            w.input.pinned_seg_layers = []   # also drop forced edit-pinned layers
         print(f"Unpinned all bundles ({n} pinned)")
         session._persist_topologies()
         return

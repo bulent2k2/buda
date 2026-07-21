@@ -56,6 +56,23 @@ def _session():
     return s
 
 
+def test_unpin_topology_clears_pin_and_forced_layers():
+    """unpin_topology is the inverse of the pin: it drops topology_pinned AND
+    the forced pinned_seg_layers that `edit_commit pin` (after edit_set_layer)
+    stores.  CongestionPlanner honors pinned_seg_layers for ANY candidate
+    independent of topology_pinned, so leaving them set would keep forcing stale
+    layers onto a re-chosen topology (Codex #390)."""
+    s = _session()
+    w = s.bundles[0]
+    bid = w.input.original_bundle.id
+    _quiet(s, f"edit_topology {bid} 1", "edit_set_layer 0 5", "edit_commit pin")
+    assert w.input.topology_pinned is True
+    assert len(w.input.pinned_seg_layers) > 0        # forced layers stored
+    _quiet(s, f"unpin_topology {bid}")
+    assert w.input.topology_pinned is False           # pin cleared
+    assert list(w.input.pinned_seg_layers) == []      # forced layers cleared too
+
+
 def test_scripted_user_topology_routes_end_to_end():
     """Build a hand topology purely from .buda commands, pin it, and run the
     full pipeline on it — the E3 loop closed at script level."""
