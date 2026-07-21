@@ -116,6 +116,50 @@ def cmd_set_prune_dominated(session, cmd, args, cmd_line):
           f"(applies at the next generate_[hier_]topologies).")
 
 
+def cmd_set_dedup_loci(session, cmd, args, cmd_line):
+    # Usage: set_dedup_loci [on|off]
+    # Opt-in nominal-locus candidate dedup (default OFF — bit-identical without
+    # it).  When on, every generation command (NOT the additive
+    # generate_more_topologies) collapses candidates that are the SAME
+    # topological choice differing only in a nominal trunk locus WITHIN a
+    # shared slide window — same connectivity, slide windows, block taps and
+    # net-pull (e.g. b44's TRUNK_H@y10830 / y11330 / y11830, all on trunk slide
+    # window [10830,11830]).  The best-estimated (lowest-WL) member of each
+    # group survives; the trunk slides with its stubs, so members route within
+    # NUTS realization-noise of each other (the residual spread is the b44
+    # realization sensitivity, not a real DOF).  A LOSSY cleanup for a tidier
+    # pool — declare BEFORE generation; it renumbers indices, so select_topology
+    # pins must come from an opted-in run.
+    val = args[0].lower() if args else "on"
+    if val not in ("on", "off"):
+        print(f"Error: set_dedup_loci expects on|off, got {args[0]!r}")
+        return
+    session._dedup_loci = (val == "on")
+    print(f"Nominal-locus candidate dedup {'ENABLED' if val == 'on' else 'disabled'} "
+          f"(applies at the next generate_[hier_]topologies).")
+
+
+def cmd_set_drop_dangling(session, cmd, args, cmd_line):
+    # Usage: set_drop_dangling [on|off]
+    # Opt-in dangling/unclamped-segment candidate drop (default OFF —
+    # bit-identical without it).  When on, every generation command (NOT the
+    # additive generate_more_topologies) drops a candidate that has a DANGLING
+    # segment (a single non-block connection — a wire whose other end connects
+    # to nothing) or an UNBOUNDED slide window (the +/-2^30 no-clamp sentinel),
+    # i.e. the OOB detour / MST-relay geometry that survives the coverage gate
+    # but renders as a dangling overshoot (e.g. b44's TRUNK_*_OOB(+MST)
+    # candidates).  Never drops a USER or the pinned candidate, and never
+    # strands a bundle.  Declare BEFORE generation; it renumbers indices, so
+    # select_topology pins must come from an opted-in run.
+    val = args[0].lower() if args else "on"
+    if val not in ("on", "off"):
+        print(f"Error: set_drop_dangling expects on|off, got {args[0]!r}")
+        return
+    session._drop_dangling = (val == "on")
+    print(f"Dangling/unclamped candidate drop {'ENABLED' if val == 'on' else 'disabled'} "
+          f"(applies at the next generate_[hier_]topologies).")
+
+
 def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
     # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
     # Single dst  → 2-pin L/Z/U candidates
@@ -161,7 +205,7 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
                       f"unrouted. Check the placement of blocks {src} and "
                       f"{', '.join(dsts)} "
                       f"(coincident / corner-touch / one contained in the other?).")
-            session._prune_dominated_pools([w])
+            session._cleanup_candidate_pools([w])
             remembered.append(w)
             found = True
     if not found: print(f"Warning: Could not find bundle matching hint {hint}")
@@ -369,7 +413,7 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
                   f"(coincident / corner-touch / one contained in the other?).")
     # Opt-in WL-dominance prune (set_prune_dominated) — after the pool is
     # final (knob memo replayed), before sidecar restore + persistence.
-    session._prune_dominated_pools()
+    session._cleanup_candidate_pools()
     # Restore the sidecar baseline (pins + per-segment layer overrides) onto
     # the freshly generated candidates, so the live state matches the GUI
     # even before run_planner. A later select_topology overrides it; the
@@ -427,7 +471,7 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
           f"{total_candidates} total candidates")
     # Opt-in WL-dominance prune (set_prune_dominated) — after the pool is
     # final (knob memo replayed), before sidecar restore + persistence.
-    session._prune_dominated_pools()
+    session._cleanup_candidate_pools()
     # Restore the sidecar baseline onto the fresh candidates (see
     # generate_topologies); keeps live state and GUI consistent pre-plan.
     session._apply_selections()
@@ -468,7 +512,7 @@ def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
     n = session._generate_hier_topo_one(target_w, use_center, use_double_detour,
                                       fp_cache, comps_by_name, use_multi_trunk,
                                       use_hanan_loci=use_hanan_loci)
-    session._prune_dominated_pools([target_w])
+    session._cleanup_candidate_pools([target_w])
     if loci_explicit:
         _record_gen_knob_memo(
             session, [target_w],
@@ -480,6 +524,8 @@ def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
 
 COMMANDS = {
     "set_prune_dominated": cmd_set_prune_dominated,
+    "set_dedup_loci": cmd_set_dedup_loci,
+    "set_drop_dangling": cmd_set_drop_dangling,
     "generate_topologies_for_bundle": cmd_generate_topologies_for_bundle,
     "generate_more_topologies": cmd_generate_more_topologies,
     "generate_topologies": cmd_generate_topologies,

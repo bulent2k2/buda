@@ -241,6 +241,15 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # candidate whose envelope bottom exceeds an EQUIVALENT candidate's
         # envelope top at generation time.  Default OFF — bit-identical flows.
         self._prune_dominated = False
+        # Opt-in candidate-pool cleanups (default OFF — bit-identical flows).
+        # set_dedup_loci: collapse candidates that are the same topological
+        # choice differing only in a nominal trunk locus WITHIN a shared slide
+        # window (same connectivity/slide-windows/taps/net_pull), keeping the
+        # best-estimated representative.  set_drop_dangling: drop candidates
+        # with a dangling segment (a single non-block connection) or an
+        # unbounded/unclamped slide window.
+        self._dedup_loci = False
+        self._drop_dangling = False
         self._max_bundle_bits = None
         self._max_bundle_bits_auto = False
         self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]

@@ -520,6 +520,166 @@ class EditMixin:
               f"pair(s) refused by the equivalence gate.")
         return (total_pruned, total_refused)
 
+    def _cleanup_candidate_pools(self, wraps=None):
+        """Run the opt-in candidate-pool cleanups in order: WL-dominance prune
+        (set_prune_dominated), nominal-locus dedup (set_dedup_loci), dangling
+        drop (set_drop_dangling).  Each is a no-op (bit-identical) when its knob
+        is off.  Called by every generation command AFTER the pool is final
+        (knob-memo replay included) and BEFORE sidecar restore / persistence, so
+        indices, pins and persisted rows all see the same cleaned pool."""
+        self._prune_dominated_pools(wraps)
+        self._dedup_loci_pools(wraps)
+        self._drop_dangling_pools(wraps)
+
+    # ── opt-in pool cleanups: locus dedup + dangling drop ────────────────────
+    _DANGLING_SENTINEL = 100_000_000   # |perp| >= this = an unclamped window
+
+    def _topo_loci_canon(self, t, fp):
+        """Structural fingerprint of a candidate that is INVARIANT to the
+        nominal trunk locus but SENSITIVE to connectivity, layers, slide
+        windows, block taps and net-pull.  Two candidates with the same key
+        are the SAME topological choice differing only in a nominal position
+        inside a shared slide window — the trunk locus slides with its stubs,
+        so they route within NUTS realization-noise of each other (the nominal
+        is only a placement hint; the residual spread is the b44 realization
+        sensitivity).  Returns None if the ConnTopology can't be built."""
+        try:
+            ct = buda.ConnTopology(); ct.build(t, fp)
+        except Exception:
+            return None
+        segs = ct.segs()
+        base = []
+        for cs in segs:
+            taps = tuple(sorted((c.block_name, round(c.face_coord))
+                                for c in cs.conns if c.block_name))
+            base.append((cs.horiz, cs.layer_id, round(cs.perp_lo),
+                         round(cs.perp_hi), round(cs.net_pull), taps))
+        adj = []
+        for i, cs in enumerate(segs):
+            nb = tuple(sorted(base[c.seg_idx]
+                              for c in cs.conns if not c.block_name))
+            adj.append((base[i], nb))
+        return tuple(sorted(adj))
+
+    def _dedup_loci_one(self, w, fp):
+        cands = list(w.input.candidates)
+        if len(cands) < 2:
+            return 0
+        sel = w.plan.selected_topology_index
+        sel_uid = (buda.topo_uid(cands[sel]) if 0 <= sel < len(cands) else None)
+        bid = w.input.original_bundle.id
+        seen, drop = {}, set()
+        for i, c in enumerate(cands):
+            if c.type == "USER":            # hand-built: never collapsed
+                continue
+            key = self._topo_loci_canon(c, fp)
+            if key is None:
+                continue
+            if key not in seen:
+                seen[key] = i               # first = lowest-WL representative
+            elif i != sel:                  # never drop the pinned candidate
+                drop.add(i)
+                print(f"  [TopoDedup] bundle {bid}: dropped {c.type} "
+                      f"(idx {i + 1}) — same slide-window/connectivity as "
+                      f"idx {seen[key] + 1} (nominal-locus variant)")
+        if not drop:
+            return 0
+        w.input.candidates = [c for k, c in enumerate(cands) if k not in drop]
+        if sel_uid is not None:
+            for k, c in enumerate(w.input.candidates):
+                if buda.topo_uid(c) == sel_uid:
+                    w.plan.selected_topology_index = k
+                    break
+        return len(drop)
+
+    def _dedup_loci_pools(self, wraps=None):
+        """Opt-in nominal-locus dedup (set_dedup_loci): collapse candidates
+        that share connectivity + slide windows + taps + net-pull, keeping the
+        best-estimated (lowest-WL) representative.  No-op (bit-identical) when
+        off.  Runs after the WL-dominance prune, before sidecar restore /
+        persistence, so indices/pins/persisted rows see the collapsed pool."""
+        if not getattr(self, "_dedup_loci", False):
+            return 0
+        if wraps is None:
+            wraps = self.bundles
+        topo_fp = self._make_topo_fp_resolver()
+        total = nb = 0
+        for w in wraps:
+            n = self._dedup_loci_one(w, topo_fp(w))
+            nb += 1 if n else 0
+            total += n
+        if total:
+            print(f"[TopoDedup] collapsed {total} nominal-locus duplicate "
+                  f"candidate(s) across {nb} bundle(s).")
+        return total
+
+    def _topo_dangling_reason(self, t, fp):
+        """A candidate is 'dangling' when some ConnSeg has (a) a single
+        connection that is NOT a block tap — a wire whose other end connects to
+        nothing — or (b) an unbounded/unclamped slide window (the +/-2^30
+        no-clamp sentinel).  Returns a short reason string, or None."""
+        try:
+            ct = buda.ConnTopology(); ct.build(t, fp)
+        except Exception:
+            return None
+        S = self._DANGLING_SENTINEL
+        for j, cs in enumerate(ct.segs()):
+            if abs(cs.perp_lo) >= S or abs(cs.perp_hi) >= S:
+                return f"seg{j} has an unbounded (unclamped) slide window"
+            blk = sum(1 for c in cs.conns if c.block_name)
+            if len(cs.conns) == 1 and blk == 0:
+                return f"seg{j} is a dangling stub (single non-block connection)"
+        return None
+
+    def _drop_dangling_one(self, w, fp):
+        cands = list(w.input.candidates)
+        sel = w.plan.selected_topology_index
+        sel_uid = (buda.topo_uid(cands[sel]) if 0 <= sel < len(cands) else None)
+        bid = w.input.original_bundle.id
+        drop = set()
+        for i, c in enumerate(cands):
+            if c.type == "USER" or i == sel:   # keep USER + the pinned one
+                continue
+            reason = self._topo_dangling_reason(c, fp)
+            if reason:
+                drop.add(i)
+                print(f"  [TopoDangling] bundle {bid}: dropped {c.type} "
+                      f"(idx {i + 1}) — {reason}")
+        if not drop:
+            return 0
+        keep = [c for k, c in enumerate(cands) if k not in drop]
+        if not keep:                            # never strand a bundle
+            print(f"  [TopoDangling] bundle {bid}: every candidate flagged — "
+                  f"keeping the pool (nothing dropped).")
+            return 0
+        w.input.candidates = keep
+        if sel_uid is not None:
+            for k, c in enumerate(w.input.candidates):
+                if buda.topo_uid(c) == sel_uid:
+                    w.plan.selected_topology_index = k
+                    break
+        return len(drop)
+
+    def _drop_dangling_pools(self, wraps=None):
+        """Opt-in dangling/unclamped-segment drop (set_drop_dangling): drop a
+        candidate with a dangling stub or an unbounded slide window (the OOB /
+        MST-relay geometry).  Never drops a USER or the pinned candidate, and
+        never strands a bundle.  No-op (bit-identical) when off."""
+        if not getattr(self, "_drop_dangling", False):
+            return 0
+        if wraps is None:
+            wraps = self.bundles
+        topo_fp = self._make_topo_fp_resolver()
+        total = nb = 0
+        for w in wraps:
+            n = self._drop_dangling_one(w, topo_fp(w))
+            nb += 1 if n else 0
+            total += n
+        if total:
+            print(f"[TopoDangling] dropped {total} candidate(s) with dangling "
+                  f"/ unclamped-slide segments across {nb} bundle(s).")
+        return total
+
     def _user_candidates(self, w):
         """Deep copies of w's hand-committed (type USER) candidates, captured
         BEFORE a regeneration replaces the candidate vector — the pybind list
