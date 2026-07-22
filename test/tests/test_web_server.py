@@ -200,3 +200,18 @@ def test_render_endpoints_full_pipeline():
     assert len(det["detailed"]["net_vias"]) == 52
 
     assert "error" in client.get("/api/render/bogus").json()
+
+
+def test_static_assets_send_no_cache_but_revalidate():
+    """The demo static mount stamps Cache-Control: no-cache so a rebuilt bundle
+    (`bb web` → main.js) is picked up on a normal reload, while ETag revalidation
+    still answers 304 for an unchanged file — no full re-download, no hard
+    refresh.  See docs/internal/web_static_caching.md."""
+    client = _client()
+    r = client.get("/")                       # reference client index.html
+    assert r.status_code == 200
+    assert r.headers.get("cache-control") == "no-cache"
+    etag = r.headers.get("etag")
+    assert etag                                # StaticFiles sends a validator
+    r2 = client.get("/", headers={"If-None-Match": etag})
+    assert r2.status_code == 304               # revalidation still short-circuits
