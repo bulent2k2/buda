@@ -33,6 +33,11 @@ object ApiClient {
 
   def state(): Future[js.Dynamic] = getJson("/state")
 
+  /** The built-in demo catalog (flat + hierarchical): each entry carries its
+    * setup script and a per-stage command map, so the same stage buttons drive
+    * both the flat and the hierarchy-aware flows. */
+  def demos(): Future[js.Dynamic] = getJson("/demos")
+
   def reset(): Future[js.Dynamic] = postJson("/reset", js.Dynamic.literal())
 
   /** Stage render payload — `stage` is "generation", "nuts", or "detailed".

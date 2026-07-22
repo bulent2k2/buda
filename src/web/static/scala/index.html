@@ -34,9 +34,9 @@
   .bit { stroke: #08a; stroke-width: 1; } .bit.H { stroke: #e83; }
   .via { fill: #f60; stroke: #a30; stroke-width: .5; }
   .overlap { fill: #f005; stroke: #f00; stroke-width: 1; }
-  #candbar { position: absolute; top: 8px; left: 8px; background: #000a; color: #fff;
-             padding: 6px 10px; border-radius: 5px; }
-  #candbar button { background: #fff2; color: #fff; border: 1px solid #fff4; }
+  #candbar, #focusbar { position: absolute; top: 8px; left: 8px; background: #000a;
+             color: #fff; padding: 6px 10px; border-radius: 5px; }
+  #candbar button, #focusbar button { background: #fff2; color: #fff; border: 1px solid #fff4; }
   #editpanel { border: 1px solid #8884; border-radius: 4px; padding: 6px;
                display: flex; flex-direction: column; gap: 5px; }
   #editverdict { font-size: 12px; }
@@ -51,11 +51,10 @@
     ><span data-k="planner">planner</span><span data-k="nuts">nuts</span
     ><span data-k="dnuts">dnuts</span>
   </div>
-  <textarea id="cmds">source flow/tracks/tracks4top.buda
-add_block blk_07 2960 9750 4660 10250
-add_block blk_23 200 10830 2700 11830
-add_block io_pad_tl 200 12000 1200 12800
-add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
+  <div class="row">demo:
+    <select id="demo" style="flex:1;font:inherit"></select>
+  </div>
+  <textarea id="cmds"></textarea>
   <div class="row">
     <button id="run">Run commands</button><button id="reset">Reset</button>
   </div>
@@ -107,6 +106,10 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
     <button id="pin">Pin</button>
     <button id="edit-open">Edit</button>
     <button id="edit-open-new">Edit new</button>
+  </div>
+  <div id="focusbar" hidden>
+    <button id="focus-prev">◀</button> <button id="focus-next">▶</button>
+    <span id="focuslbl"></span>
   </div>
   <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
 </div>

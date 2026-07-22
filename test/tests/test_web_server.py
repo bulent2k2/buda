@@ -202,6 +202,56 @@ def test_render_endpoints_full_pipeline():
     assert "error" in client.get("/api/render/bogus").json()
 
 
+def test_demos_catalog_lists_flat_and_hier():
+    """GET /api/demos returns both built-in demos, each with a setup script and
+    a per-stage command map (flat vs hier drive the SAME buttons — the hier one
+    maps to the run_hier_* variants)."""
+    client = _client()
+    body = client.get("/api/demos").json()
+    demos = {d["key"]: d for d in body["demos"]}
+    assert set(demos) == {"flat", "hier"}
+    for d in demos.values():
+        assert d["label"] and d["setup"]
+        assert set(d["stages"]) == {
+            "bundler", "topologies", "planner", "nuts", "dnuts"}
+    # The hier stage map wires the buttons to the hierarchy-aware commands.
+    assert demos["hier"]["stages"]["bundler"].startswith("run_hier_bundler")
+    assert demos["hier"]["stages"]["topologies"] == "generate_hier_topologies"
+    assert demos["hier"]["stages"]["planner"].startswith("run_planner hier")
+    # Flat stays on the flat flow.
+    assert demos["flat"]["stages"]["bundler"] == "run_bundler"
+
+
+def test_hier_demo_drives_full_pipeline():
+    """The hier demo's setup + its per-stage commands run the whole hierarchy
+    flow end to end and yield multiple bundles with distinct bundle_ids in the
+    NUTS render (the highlight-isolation feature needs those ids)."""
+    client = _client()
+    demos = {d["key"]: d for d in client.get("/api/demos").json()["demos"]}
+    hier = demos["hier"]
+
+    setup = [ln for ln in hier["setup"].splitlines() if ln.strip()]
+    r = client.post("/api/command", json={"cmds": setup})
+    assert all(res["ok"] for res in r.json()["results"]), r.json()["results"]
+
+    for stage in ("bundler", "topologies", "planner", "nuts", "dnuts"):
+        cmd = hier["stages"][stage]
+        assert client.post("/api/command", json={"cmds": [cmd]}).json(
+            )["results"][0]["ok"], cmd
+
+    st = client.get("/api/state").json()
+    assert st["stages_run"] == {
+        "bundler": True, "topologies": True, "planner": True,
+        "nuts": True, "dnuts": True,
+    }
+    assert len(st["bundles"]) > 1
+    assert st["bundles"][0]["num_candidates"] > 0
+
+    nuts = client.get("/api/render/nuts").json()["nuts"]
+    bundle_ids = {s["bundle_id"] for s in nuts["segments"]}
+    assert len(bundle_ids) >= 2                # bundle-focus isolation needs these
+
+
 def test_static_assets_send_no_cache_but_revalidate():
     """The demo static mount stamps Cache-Control: no-cache so a rebuilt bundle
     (`bb web` → main.js) is picked up on a normal reload, while ETag revalidation

@@ -32,6 +32,7 @@ Three thin modules over a single headless `BudaSession`:
   manager. `BUDA_WEB_DEV=1` enables permissive CORS for a Vite dev server.
 
 Routes: `POST /api/command {cmds:[str]}`, `GET /api/state`,
+`GET /api/demos` (the built-in demo catalog — see below),
 `GET /api/render/{generation,nuts,detailed}?bundle=&candidate=`,
 `POST /api/select {bundle,candidate}` (pin a candidate),
 `POST /api/unpin {bundle}` (clear the pin — inverse of select),
@@ -73,6 +74,34 @@ the generation view) and falls back to the top-level payload otherwise, so its
 bbox/viewBox math works off whichever floorplan is used. Covered by
 `test_web_hier.py` (flat: per-bundle == top-level; hier `hier_mixed` fixture:
 ≥2 bundles resolve to distinct block-set frames).
+
+### Demo catalog (`GET /api/demos`, `src/web/demos.py`)
+
+`GET /api/demos` returns `{demos:[{key, label, setup, stages}]}` — the built-in
+demos the client's picker offers, so one "load setup + click the stage buttons"
+UX drives **both** the flat and the hierarchy-aware flow without the client
+knowing either command sequence:
+
+- **`flat`** — the single-bundle b44 bus (3 blocks, 52 bits). `stages` maps each
+  button to the flat commands (`run_bundler` / `generate_topologies` /
+  `run_planner` / `run_nuts` / `run_detailed_nuts`).
+- **`hier`** — a depth-2 hierarchy (multi-pin stress, 35 buses). Its `setup` is
+  **extracted** from `flow/hbundles/06_multipin_stress.buda` (everything up to
+  the first pipeline command, comments stripped, the file-relative
+  `source ../tracks/…` rewritten repo-root-relative) rather than duplicated, so
+  editing the flow keeps the demo current (the catalog is rebuilt per request).
+  Its `stages` maps to the hier commands (`run_hier_bundler depth 2` /
+  `generate_hier_topologies` / `run_planner hier 5` / `run_nuts` /
+  `run_detailed_nuts`).
+
+`stages` keys are the button ids (`bundler`/`topologies`/`planner`/`nuts`/
+`dnuts`), so the reference client's `runDemoStage(key)` just looks up the active
+demo's command for that button. For the WS-streamed long stages
+(planner/nuts/dnuts) the reference client splits the demo command into the
+`/api/stage/{stage}` key + args (e.g. `run_planner hier 5` → stage `planner`,
+args `hier 5`) so those keep the progress path; the Scala client (no WS) runs
+every stage through `/api/command`. Both flows persist nothing new server-side —
+the catalog is pure transport over the same `.buda` vocabulary.
 
 ### Progress streaming (`WS /api/ws` + `POST /api/stage/{stage}`)
 
@@ -152,6 +181,19 @@ the log, and refreshes state — the planner/nuts/dnuts/ripup buttons go through
   a fresh clone without the Scala toolchain still has the full demo. See
   `web/README.md`.
 
+Both clients expose the **demo picker** (a dropdown filled from `GET /api/demos`;
+selecting one drops its `setup` into the command textarea and rebinds the stage
+buttons to that demo's `stages` map) and **keyboard navigation**: with focus off
+the textarea/inputs, `n` / `ArrowRight` step forward and `p` / `ArrowLeft` step
+back — in the **generation** view they cycle the shown bundle's candidate
+topologies (same as the `◀ ▶` cand-bar), and in the **NUTS / detailed** views
+they cycle a **bundle-focus ring** `[all, id₀, id₁, …]`. Isolating a bundle dims
+every other bundle's tracks/bit-wires/vias to α = 0.1 (overlap markers stay full
+opacity); a `◀ ▶` focus bar shows `all N bundles` or `bundle X · k/N`. The focus
+resets to "all" on any stage run or view switch. Both clients are byte-for-byte
+equivalent here — the Scala client's dimming lives in `Renderer.bundleAlpha`, the
+reference client's in `bundleAlpha`.
+
 Both clients are served by a `_NoCacheStatic` mount that stamps
 `Cache-Control: no-cache`, so a `bb web` rebuild of `main.js` is picked up on a
 normal reload (no hard refresh) while ETags still short-circuit unchanged files
@@ -176,8 +218,11 @@ curl -s localhost:8000/api/state
 
 ## Tests
 `test/tests/test_web_server.py` — `run_one` capture + `SystemExit` containment,
-the no-matplotlib import (in a subprocess), and the `/api/command` → `/api/state`
-flow progression via FastAPI `TestClient`. `test/tests/test_web_serialize.py` —
+the no-matplotlib import (in a subprocess), the `/api/command` → `/api/state`
+flow progression via FastAPI `TestClient`, and the demo catalog (`/api/demos`
+lists flat + hier with the right per-stage command maps; the hier demo's
+setup + stages drive the whole hierarchy flow to ≥2 distinct NUTS `bundle_id`s —
+the ids the bundle-focus isolation needs). `test/tests/test_web_serialize.py` —
 the struct→JSON serializers + the frozen b44 generation golden. `test/tests/
 test_web_hier.py` — per-bundle floorplans: the flat b44 bundle floorplan equals
 the top-level one; the hier `hier_mixed` fixture yields ≥2 bundles in distinct
