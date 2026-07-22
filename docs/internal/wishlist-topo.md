@@ -567,56 +567,48 @@ stay opt-in.
 See [`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md) for the
 per-flow numbers behind each of these.
 
-## Promote `set_dedup_loci` to default-on in generation — OPEN
+## Promote `set_dedup_loci` to default-on in generation — MEASURED, keep opt-in
 
-**Context.**  `set_dedup_loci` (opt-in, default `off`) collapses candidates
-that are the same topological choice differing only in a nominal trunk locus
-WITHIN a shared slide window (same connectivity / slide windows / block taps /
-net-pull), keeping the best-estimated representative.  It is the LOSSY sibling
-of the sound `set_prune_dominated` (piece (c) above): the collapsed members
-route within NUTS realization-noise of each other, so the residual spread is
-sensitivity, not a real DOF.
+**Full root-cause + measurement:
+[`dedup_default_2026-07.md`](dedup_default_2026-07.md).**
 
-**Why revisit the default.**  In the modes corpus sweep
-([`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md)) `dedup` is
-mostly a **runtime win at neutral-to-better QoR** — `bigHalf` 84s→20s (same
-0/0), `rnr/slowdown_rnr` 0/32→0/0, `rnr/mix2` 73→13 opens, `mix2_fast` 256→242
-— by shrinking the pool the planner and healers search.  A smaller pool also
-directly helps the BDB candidate-topology persist path
-([`wishlist-bdb.md`](wishlist-bdb.md) — persistence is the large-design
-bottleneck), so default-on would pay off on exactly the big hier designs that
-hurt today.
+`set_dedup_loci` (opt-in, default `off`) collapses candidates that are the same
+topological choice differing only in a nominal trunk locus WITHIN a shared slide
+window, keeping the best-estimated representative — the LOSSY sibling of the
+sound `set_prune_dominated` (piece (c) above).
 
-**Blockers to clear before flipping (the same gate `hanan_loci` and
-`prune_dominated` needed):**
-1. **QoR is NOT uniformly neutral.**  The sweep shows real QoR shifts on a
-   couple of `hbundles` flows: `06_multipin_stress` 4/48→13/58 (worse) and
-   `07_wide_fan_stress` 0/11→2/2 (gains an overlap).  Dedup keeps the
-   *lowest-WL-estimated* member, but the estimate is not the realized WL — so
-   collapsing can discard the member a congested flow would actually have
-   picked.  Understand these two regressions before default-on; a
-   realization-aware representative choice (keep the member whose envelope
-   `[wl_lo,wl_hi]` best matches the band it will land in, not just min nominal)
-   may remove them.
-2. **Index renumbering → pin audit.**  Like every pool-shrinking pass, dedup
-   renumbers `select_topology` indices, so a flip needs the full pin-remap
-   audit (identity-checked by `topo_uid`, as done for the `hanan_loci` flip in
-   [`hanan_loci_flip_audit.md`](hanan_loci_flip_audit.md)) plus the golden
-   regen on the reference host.  Sidecar/BDB selections resolve by `topo_uid`
-   so they are order-insensitive by construction; only literal index pins in
-   `.buda` flows move.
-3. **Interaction with `hanan_loci` (now default-on).**  Dedup collapses
-   nominal-locus variants, and the default-on Hanan-line loci ADD exactly such
-   variants — so the two are complementary (dedup would claw back much of the
-   loci pool growth) but must be measured together, not each against a
-   pre-`hanan_loci` baseline.  The right measurement is dedup-on vs dedup-off
-   with `hanan_loci` on both sides, across the stressed corpus.
+The [modes corpus sweep](drop_dangling_modes_2026-07.md) suggested dedup as a
+runtime win at neutral-to-better QoR (`bigHalf` 84s→20s, `slowdown_rnr`
+0/32→0/0, `mix2` 73→13 opens) — a strong default-on case. **Investigated and
+rejected:**
 
-**Path.**  Mirror the `hanan_loci` flip: prepare a `no_dedup_loci` opt-out
-(the legacy opt-in flag stays a keep-on no-op), collect the pin remap against
-the deduped pools, regen goldens on the reference host, then re-measure the
-two `hbundles` regressions.  Until the representative-choice fix removes those,
-keep it opt-in.
+1. **The two `hbundles` regressions are not a representative-choice problem.**
+   On `hbundles/06` the base-selected candidate SURVIVES the dedup pool in every
+   flipped bundle — the planner has it and chooses differently. Cause: the
+   planner charges bands by NOMINAL perp, but dedup's equivalence is the SLIDE
+   WINDOW, so collapsing different-nominal locus variants removes the planner's
+   band-spreading options. Dedup's *value* is exactly that collapse, so it
+   cannot be both valuable and planner-neutral (`charge_pull_target` does not
+   cure it). A realization-aware representative would NOT help.
+2. **The sweep's wins were a `kSegsRel` confound.** The sweep harness runs
+   scriptless, so the `kSegsRel` 0.02 default (and dead-span escalation) were
+   suppressed on BOTH its base and dedup sides — a planner regime that does not
+   ship. Re-measuring with `kSegsRel` active on both sides (the real config),
+   dedup is endpoint-neutral on 4/5 healer flows, **mixed** on `mix2` (opens ↓,
+   overlaps ↑), and its runtime effect FLIPS SIGN: `mix2`/`mix` −83%/−56% but
+   **`bigHalf` +510% (6× slower)** — `kSegsRel` already cleans bigHalf, and the
+   deduped pool makes the healer thrash. dedup and `kSegsRel` chase the same
+   congestion headroom, so stacked on the shipped default dedup is mostly
+   redundant and sometimes counterproductive.
+
+**Verdict: keep opt-in** (like the `multi_trunk` "measured, keep opt-in"
+decision). A future flip would need a NEW justification measured *with*
+`kSegsRel` active — not the scriptless sweep — and would still face the `mix2`
+mixed change, the `bigHalf` slowdown, and the usual pin-remap / golden-regen
+tail (dedup renumbers indices). If the real motivation is pool-persist size for
+large hier designs, measure that against the BDB persist path
+([`wishlist-bdb.md`](wishlist-bdb.md)) — it is independent of the planner regime
+and may justify a persist-time (not generation-time) dedup instead.
 
 ## True along-flex trunk DOF (Stage C of the flexible-root re-arch)
 
