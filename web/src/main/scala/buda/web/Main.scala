@@ -1,7 +1,7 @@
 // Copyright 2026 Ben Bulent Basaran — Apache-2.0.
 package buda.web
 
-import buda.web.net.ApiClient
+import buda.web.net.{ApiClient, WsClient}
 import buda.web.render.Renderer
 import org.scalajs.dom
 import scala.scalajs.js
@@ -58,9 +58,19 @@ object Main {
     Option(byId("demo")).foreach(
       _.addEventListener("change", (_: dom.Event) => loadDemo()))
     dom.window.addEventListener("keydown", (e: dom.KeyboardEvent) => onKey(e))
+    WsClient.connect(setRunning, st => showStages(st), txt => log(txt), () => refresh())
     initDemos()
     refresh()
   }
+
+  private def setRunning(txt: Option[String]): Unit =
+    Option(byId("running")).foreach { el =>
+      val e = el.asInstanceOf[dom.html.Element]
+      txt match {
+        case Some(t) => e.textContent = t; e.removeAttribute("hidden")
+        case None    => e.setAttribute("hidden", "")
+      }
+    }
 
   private def wire(id: String, fn: () => Unit): Unit =
     Option(byId(id)).foreach(_.addEventListener("click", (_: dom.Event) => fn()))
@@ -110,16 +120,58 @@ object Main {
     Option(byId("cmds")).foreach(_.asInstanceOf[dom.html.TextArea].value = setup)
   }
 
+  // The long stages go through the WS-progress endpoint POST /api/stage/{stage}
+  // (WsStage maps a button id to the stage key; WsBase is the command prefix used
+  // to peel the demo command's args, e.g. "run_planner hier 5" -> args "hier 5").
+  // The instant stages (bundler/topologies) stay on /api/command.
+  private val WsStage = Map("planner" -> "planner", "nuts" -> "nuts", "dnuts" -> "detailed_nuts")
+  private val WsBase  = Map("planner" -> "run_planner", "nuts" -> "run_nuts", "dnuts" -> "run_detailed_nuts")
+  // Fallback .buda command per stage key, if the /api/stage endpoint is unavailable.
+  private val StageCmd = Map("planner" -> "run_planner", "nuts" -> "run_nuts",
+    "detailed_nuts" -> "run_detailed_nuts", "ripup" -> "ripup_reroute")
+
   /** Run the ACTIVE demo's command for stage `key` (falls back to the key itself
-    * if no demo is loaded).  The Scala client runs stages through /api/command,
-    * so the flat/hier dispatch is just a per-demo command lookup. */
+    * if no demo is loaded).  Long stages (planner/nuts/dnuts) go through the WS
+    * progress path; instant ones through /api/command. */
   private def runDemoStage(key: String): Unit = {
     val cmd =
       if (active != null && defined(active.selectDynamic("stages"))) {
         val v = active.stages.selectDynamic(key)
         if (defined(v)) v.asInstanceOf[String] else key
       } else key
-    stage(cmd)
+    WsStage.get(key) match {
+      case Some(wsName) =>
+        val base = WsBase(key)
+        val args = if (cmd.startsWith(base)) cmd.substring(base.length).trim else ""
+        runStage(wsName, args)
+      case None => stage(cmd)                    // bundler / topologies
+    }
+  }
+
+  /** POST a long stage to /api/stage/{stage}; the WS drives the running indicator
+    * while it runs, and the response carries the final result/state/notable so a
+    * client without a live WS still updates.  Mirrors the reference `runStage`. */
+  private def runStage(stageName: String, args: String): Unit = {
+    setRunning(Some(s"running $stageName…"))
+    ApiClient.stage(stageName, args).foreach { res =>
+      if (defined(res.selectDynamic("error"))) {  // unknown stage -> command path
+        val fb = StageCmd.getOrElse(stageName, stageName)
+        stage(if (args.nonEmpty) s"$fb $args" else fb)
+      } else {
+        val notable = res.selectDynamic("notable")
+        val nstr =
+          if (defined(notable)) {
+            val a = notable.asInstanceOf[js.Array[String]]
+            if (a.nonEmpty) a.mkString("\n") + "\n" else ""
+          } else ""
+        val summary = res.result.selectDynamic("summary")
+        log(nstr + (if (defined(summary) && summary.asInstanceOf[String].nonEmpty)
+                    summary.asInstanceOf[String] else "(ok)"))
+        showStages(res.state)
+        refresh()
+      }
+      setRunning(None)                            // done frame may have cleared it
+    }
   }
 
   private def showResults(res: js.Dynamic): Unit = {
