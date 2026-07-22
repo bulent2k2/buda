@@ -155,11 +155,18 @@ Frame schema (`kind`):
   result without re-fetching.
 
 Broadcasts go to every client of the session, so a second viewer sees another
-tab's stage progress live. The reference client opens the WS on load
-(`connectWS`, auto-reconnect on close), shows a pulsing "running <stage>… <s>s"
-indicator on `started`/`heartbeat`, clears it on `done`, forwards `notable` to
-the log, and refreshes state — the planner/nuts/dnuts/ripup buttons go through
-`/api/stage/*` (the instant bundler/topology buttons stay on `/api/command`).
+tab's stage progress live. **Both clients** open the WS on load (the reference
+client's `connectWS`; the Scala client's `WsClient.connect`, both auto-reconnect
+on close), show a pulsing "running <stage>… <s>s" indicator on
+`started`/`heartbeat`, clear it on `done`, forward `notable` to the log, and
+refresh state — the planner/nuts/dnuts buttons go through `/api/stage/*` (the
+instant bundler/topology buttons stay on `/api/command`; the reference client
+also routes its ripup button through the WS path). The Scala client peels the WS
+args from the demo command the same way (`run_planner hier 5` → stage `planner`,
+args `hier 5`). Because the socket only *streams* progress, a server built
+without the uvicorn websocket extra (the `/api/ws` 404s) degrades gracefully in
+both clients: the `POST /api/stage/{stage}` still returns the final result and
+the caller toggles the indicator itself; the client just retries the socket.
 
 ## Frontend
 
@@ -171,9 +178,11 @@ the log, and refreshes state — the planner/nuts/dnuts/ripup buttons go through
   candidate segments (stepping the 35 b44 candidates); the NUTS view draws placed
   track footprints + centerlines; the detailed view draws all 104 bit-wires + 52
   vias of the routed bus.
-- **`web/`** — the Scala.js project (sbt + sbt-scalajs; `ApiClient`, `Renderer`,
-  `Main`). The production frontend target; renders the *same* payloads as the
-  reference client. Served at **`/scala/`** (the reference client stays at `/`).
+- **`web/`** — the Scala.js project (sbt + sbt-scalajs; `ApiClient`, `WsClient`,
+  `Renderer`, `Main`). The production frontend target; renders the *same*
+  payloads as the reference client, and drives the long stages through the same
+  WS progress path (`WsClient` + `POST /api/stage/*`). Served at **`/scala/`**
+  (the reference client stays at `/`).
   The bundle is a **build product, not tracked** — `bb web` runs `sbt fullLinkJS`
   and copies `main.js` into the git-ignored `src/web/static/scala/` (only the page
   shell `index.html` is committed). `bb web` needs `sbt`; without it `/scala/`

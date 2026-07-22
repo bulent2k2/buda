@@ -41,6 +41,11 @@
                display: flex; flex-direction: column; gap: 5px; }
   #editverdict { font-size: 12px; }
   #editverdict.ok { color: #2a7; } #editverdict.bad { color: #e33; }
+  #running { position: absolute; top: 8px; right: 8px; background: #2a7c;
+             color: #fff; padding: 5px 10px; border-radius: 5px; font-size: 12px; }
+  #running::before { content: "\25CF"; margin-right: 6px;
+                     animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
 </style>
 </head>
 <body>
@@ -89,6 +94,7 @@
   </div>
 </div>
 <div id="main">
+  <div id="running" hidden></div>
   <!-- Default display:none (NOT the `hidden` attribute — an inline display:flex
        would override [hidden]{display:none} and always show it). The script-load
        error handler below flips this to flex when main.js is missing. -->

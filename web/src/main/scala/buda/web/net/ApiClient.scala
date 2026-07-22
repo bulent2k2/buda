@@ -38,6 +38,15 @@ object ApiClient {
     * both the flat and the hierarchy-aware flows. */
   def demos(): Future[js.Dynamic] = getJson("/demos")
 
+  /** Run a long stage through the WS-progress endpoint `POST /api/stage/{stage}`.
+    * `stage` ∈ {planner, nuts, detailed_nuts, ripup}; `args` is appended verbatim
+    * to the mapped `.buda` command server-side (e.g. "hier 5" → `run_planner
+    * hier 5`). The socket (WsClient) streams progress; this returns the final
+    * `{result, state, notable}` so a client with no live WS still gets the
+    * outcome. */
+  def stage(stage: String, args: String): Future[js.Dynamic] =
+    postJson("/stage/" + stage, js.Dynamic.literal(args = args))
+
   def reset(): Future[js.Dynamic] = postJson("/reset", js.Dynamic.literal())
 
   /** Stage render payload — `stage` is "generation", "nuts", or "detailed".
