@@ -1,8 +1,8 @@
 # Topo-norm Phase 2 (defects 2 & 5) — deferred, and why
 
-**Status:** deferred. Phase 1 (PR #55) is merged; Phase 2 was investigated and
-intentionally not implemented. This note records the findings so the decision is
-not re-litigated from scratch.
+**Status:** Phase 1 (PR #55) is merged. **Defect 2 (issue #57) is now FIXED**
+(2026-07-22, see below). **Defect 5 (issue #58) remains deferred.** This note
+records the findings so the decision is not re-litigated from scratch.
 
 ## Background
 
@@ -53,7 +53,37 @@ right home for this, if ever pursued, is a **NUTS-placement-time** clamp (bound 
 *placed* position, not the slide window), with full dogleg/pull revalidation — not a
 slide-range edit.
 
-## Defect 2 — staircase (collinear relay stubs)
+## Defect 2 — staircase (collinear relay stubs) — ✅ FIXED (issue #57, 2026-07-22)
+
+**Fix as shipped.** The staircase came from the general chaining, which the
+degenerate-collinear MERGE in `complete_relay_junctions` was *refusing* to
+pre-empt whenever a stub's FAR endpoint tapped another block (dropping the stub
+would strand that block's tap). The fix keeps the merge and, in that far-tap
+case, **repoints the far block's landing-map entries** (`incident` / `all_land`)
+from the erased stub onto the surviving merged wire — the tap transfers to the
+straight pass-through, so no jog. Only a declared feedthru still refuses (it must
+keep its two BUSTERM landings). Repro `test_defect2_no_collinear_staircase_jogs`
+flipped xfail → pass; fast tier fully green.
+
+**Not routed-neutral (measured, and why the fix is still correct).** The merge
+makes the affected TRUNK+MST candidates ~4 units shorter (jog removed), which is
+honest WL. Two intentional consequences: (1) on the column datapath multi_trunk
+picks the cleaner TRUNK+MST over one BITRUNK_HVH while STILL improving QoR (WL
+15563 ≤ plain 16600, overlaps equal — the `multi_trunk` mechanism assertion was
+relaxed from "≥2 BITRUNK" to "≥1", the QoR-win assertions unchanged); (2) the
+`big.buda` / `rnr/mix` topo_analysis digests change (`tools/topo_snapshot.py`
+regenerated in place). The generation-stage snapshot is integer content (coords,
+layers, integer WL, integer slide ranges), so the digests are **host-independent**
+— verified: regenerating EVERY golden on this non-reference host changed ONLY the
+~20 big / 5 mix bundles this merge touches, with every other bundle byte-identical
+to the reference-host golden (had there been FP/ISA drift, unrelated bundles would
+differ too). So the re-baseline did not need the reference host. The original
+deferral note below
+predicted "non-selected only" — that held when written but the candidate pool
+has since grown (hanan-loci default flip), so a couple of close datapath
+selections now flip; the flip is QoR-neutral-or-better, so the fix shipped.
+
+### Original deferral analysis (kept for the record)
 
 The staircase is tiny `len=2` jogs: two **collinear** relay stubs (e.g. blk_13: the
 trunk stub and an MST edge, both H at `y=3610`) bridged by a connector offset to
@@ -82,14 +112,21 @@ can carries exactly the feedthru-reopening / cascade risk that blocked defect 5.
 
 ## Decision
 
-Defects 2 & 5 are **deferred**. They do not affect routed output, and the safe
-fixes the current architecture allows cannot express them. Revisiting either should
-start with the enabling architectural change, scoped and tested on its own:
+- **Defect 2 (issue #57): ✅ FIXED (2026-07-22).** The enabling change turned out
+  NOT to need the "teach `ConnTopology` collinear joins" route feared above:
+  `complete_relay_junctions` already had the collinear stub-combine (the MERGE),
+  it was just gated off when a far endpoint tapped a block. Doing the merge with
+  a **tap transfer** (repoint the far block's landing onto the merged wire)
+  expresses spec-a2 without generalizing the de-overlap surgery — so it does NOT
+  carry the feedthru-reopening risk (a declared feedthru still refuses). It is
+  not routed-neutral (see the defect-2 section), but the selection flips it does
+  cause are QoR-neutral-or-better, and the two affected topo_analysis goldens
+  (big / mix) were regenerated in place — verified host-independent, so no
+  reference-host re-baseline was needed.
+- **Defect 5 (issue #58): still deferred.** Move the clamp to **NUTS placement
+  time** (bound the placed position, not the slide window), with dogleg/pull-repack
+  revalidation — the slide-range edit cascades through `filter_pinched` and shifts
+  selected placements (19–27 tests, zero output change). Tracked in issue #58.
 
-- **Defect 2:** teach `ConnTopology` to infer **collinear (end-to-end) joins**, then
-  implement spec-a2 stub-combine in `complete_relay_junctions`.
-- **Defect 5:** move the clamp to **NUTS placement time** (bound the placed
-  position, not the slide window), with dogleg/pull-repack revalidation.
-
-Until then, Phase 1 (honest WL → clean selected topologies) stands as the complete,
-shipped outcome of topo-norm.
+Phase 1 (honest WL → clean selected topologies) plus the defect-2 fix are the
+shipped outcome of topo-norm; only defect 5 remains.

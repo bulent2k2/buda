@@ -52,7 +52,10 @@ import pytest
 import topo_snapshot as ts
 
 
-def _check_flow(flow):
+def _live_and_golden(flow):
+    """Run generation and load the golden, raising a HARD failure on a missing
+    golden or a generation crash.  Returns (live, want) for comparison so both
+    the strict path and the pending-regen path share the same loud checks."""
     golden = ts.golden_path(flow)
     assert os.path.exists(golden), (
         f"missing golden {golden} — run tools/topo_snapshot.py to create it")
@@ -65,6 +68,11 @@ def _check_flow(flow):
         # canonicalizing the loaded text keeps them byte-owned by the
         # reference host while excluding candidate order from the contract.
         want = ts.canonicalize(want)
+    return live, want
+
+
+def _check_flow(flow):
+    live, want = _live_and_golden(flow)
     if live == want:
         return
     diff = list(difflib.unified_diff(

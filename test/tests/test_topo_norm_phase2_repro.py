@@ -43,19 +43,18 @@ def _is_trunk(cs):
 
 # ── Defect 2 — collinear-stub staircase jogs (issue #57) ─────────────────────
 
-@pytest.mark.xfail(strict=True,
-                   reason="defect 2 (issue #57): collinear relay stubs are bridged "
-                          "by a 2-unit offset jog because ConnTopology infers only "
-                          "perpendicular junctions; spec-a2 combine not implemented")
 def test_defect2_no_collinear_staircase_jogs():
     """No generated candidate should contain a tiny offset 'staircase' jog.
 
     A relay touched by two COLLINEAR stubs (same orientation + same perpendicular
-    coordinate, e.g. a trunk stub and an MST edge both on a block's top face) is
-    wired with a connector offset by 2 units -- emitting degenerate len<=2 segments
-    -- because ConnTopology cannot infer a collinear (end-to-end) join.  Spec a2
-    (mst-stub-conn.md) says such stubs should be COMBINED into one straight wire, so
-    a normalized generator would emit no such jog.
+    coordinate, e.g. a trunk stub and an MST edge both on a block's top face) used
+    to be wired with a connector offset by 2 units -- emitting degenerate len<=2
+    segments -- because ConnTopology cannot infer a collinear (end-to-end) join.
+
+    FIXED (issue #57): `complete_relay_junctions`' degenerate-collinear MERGE now
+    fires even when a stub's far endpoint taps another block, by REPOINTING that
+    block's landing onto the surviving merged wire (the tap transfer), so the two
+    stubs COMBINE into one straight pass-through wire and no jog is emitted.
     """
     # Compact 4-block config: an MST edge and the trunk stub land collinearly on a
     # branch block's face, forcing the offset jog (e.g. TRUNK_H+MST@y440).

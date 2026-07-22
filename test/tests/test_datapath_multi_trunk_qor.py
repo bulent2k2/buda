@@ -118,9 +118,15 @@ def _selected_types(s):
 # is FP/ISA-sensitive under -march=native (the generation host selects 3 HVH on
 # the column datapath, this host 2), so the floor tolerates that drift while
 # still proving multi_trunk actually reaches for the gated two-level trees.
+# The column floor is 1 (not 2): the issue-#57 collinear-stub MERGE makes the
+# TRUNK+MST candidates ~4 units shorter (staircase jog removed), so on the column
+# datapath a couple of columns now pick the cleaner TRUNK+MST over BITRUNK_HVH
+# while multi_trunk still reaches >=1 gated two-level tree AND still improves QoR
+# (the WL/overlap assertions below are the real teeth: measured multi WL 15563 <=
+# plain 16600, overlaps equal). The row datapath is unaffected (still 2 VHV).
 @pytest.mark.parametrize(
     "orient, tree, min_trees",
-    [("col", "BITRUNK_HVH", 2),   # columns -> root-H / branch-V trees
+    [("col", "BITRUNK_HVH", 1),   # columns -> root-H / branch-V trees
      ("row", "BITRUNK_VHV", 2)],  # rows    -> root-V / branch-H trees
     ids=["column_hvh", "row_vhv"])
 def test_multi_trunk_selects_bitrunk_and_improves_qor(orient, tree, min_trees):
