@@ -52,7 +52,10 @@ import pytest
 import topo_snapshot as ts
 
 
-def _check_flow(flow):
+def _live_and_golden(flow):
+    """Run generation and load the golden, raising a HARD failure on a missing
+    golden or a generation crash.  Returns (live, want) for comparison so both
+    the strict path and the pending-regen path share the same loud checks."""
     golden = ts.golden_path(flow)
     assert os.path.exists(golden), (
         f"missing golden {golden} — run tools/topo_snapshot.py to create it")
@@ -65,6 +68,11 @@ def _check_flow(flow):
         # canonicalizing the loaded text keeps them byte-owned by the
         # reference host while excluding candidate order from the contract.
         want = ts.canonicalize(want)
+    return live, want
+
+
+def _check_flow(flow):
+    live, want = _live_and_golden(flow)
     if live == want:
         return
     diff = list(difflib.unified_diff(
@@ -99,6 +107,14 @@ _PENDING_REGEN_ISSUE_57 = {
 @pytest.mark.parametrize("flow", ts.CORPUS_MID)
 def test_topo_analysis_matches_golden_mid(flow):
     if flow in _PENDING_REGEN_ISSUE_57:
+        # Still exercise generation AND assert the golden exists (a crash or a
+        # missing/corrupt golden must fail loudly, not hide as an expected
+        # xfail); xfail ONLY the known digest mismatch until the reference host
+        # regenerates (Codex #406).  If the digests already match (regenerated),
+        # the test simply passes and the flow can be dropped from the set.
+        live, want = _live_and_golden(flow)
+        if live == want:
+            return
         pytest.xfail(
             "issue #57 collinear-stub merge changed candidate geometry; golden "
             "digest pending reference-host regen (tools/topo_snapshot.py)")
