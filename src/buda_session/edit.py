@@ -634,7 +634,8 @@ class EditMixin:
         """A candidate is 'dangling' when some ConnSeg has (a) a single
         connection that is NOT a block tap — a wire whose other end connects to
         nothing — or (b) an unbounded/unclamped slide window (the +/-2^30
-        no-clamp sentinel).  Returns a short reason string, or None."""
+        no-clamp sentinel).  The DROP-mode predicate.  Returns a reason, or
+        None."""
         try:
             ct = buda.ConnTopology(); ct.build(t, fp)
         except Exception:
@@ -648,7 +649,22 @@ class EditMixin:
                 return f"seg{j} is a dangling stub (single non-block connection)"
         return None
 
-    def _drop_dangling_one(self, w, fp):
+    def _topo_truly_dangling_reason(self, t, fp):
+        """TRULY dangling: some ConnSeg has a single connection that is NOT a
+        block tap — a wire whose other end connects to nothing.  An unbounded
+        slide window alone is NOT truly dangling (clamp fixes that).  The
+        clamp_drop-mode drop predicate.  Returns a reason, or None."""
+        try:
+            ct = buda.ConnTopology(); ct.build(t, fp)
+        except Exception:
+            return None
+        for j, cs in enumerate(ct.segs()):
+            blk = sum(1 for c in cs.conns if c.block_name)
+            if len(cs.conns) == 1 and blk == 0:
+                return f"seg{j} is a dangling stub (single non-block connection)"
+        return None
+
+    def _drop_dangling_one(self, w, fp, reason_fn):
         cands = list(w.input.candidates)
         sel = w.plan.selected_topology_index
         sel_uid = (buda.topo_uid(cands[sel]) if 0 <= sel < len(cands) else None)
@@ -657,7 +673,7 @@ class EditMixin:
         for i, c in enumerate(cands):
             if c.type == "USER" or i == sel:   # keep USER + the pinned one
                 continue
-            reason = self._topo_dangling_reason(c, fp)
+            reason = reason_fn(c, fp)
             if reason:
                 drop.add(i)
                 print(f"  [TopoDangling] bundle {bid}: dropped {c.type} "
@@ -677,25 +693,114 @@ class EditMixin:
                     break
         return len(drop)
 
+    def _design_extent(self, w, fp):
+        """The routable extent used as the clamp bound: the bounding box of all
+        blocks AND every candidate's segment nominals (so the clamp never
+        excludes a real position), grown by a margin (the detour channel width
+        if reserved, else a quarter of the span) so OOB detours keep slide
+        room.  Returns (xlo, xhi, ylo, yhi) or None."""
+        xs, ys = [], []
+        try:
+            for _name, r in fp.get_all_blocks():   # (name, Rect) tuples
+                xs += [r.x1, r.x2]; ys += [r.y1, r.y2]
+        except Exception:
+            return None
+        for c in w.input.candidates:
+            for seg in c.segments:
+                xs += [seg.start.x, seg.end.x]; ys += [seg.start.y, seg.end.y]
+        if not xs:
+            return None
+        xlo, xhi, ylo, yhi = min(xs), max(xs), min(ys), max(ys)
+        # Honor any reserved detour channel: get_detour_channel() returns a dict
+        # {north,south,east,west} of per-side band widths.  East/West widen the
+        # X extent, North/South the Y extent; fall back to a quarter-span margin
+        # so OOB detours keep slide room even with no channel reserved.
+        dc_x = dc_y = 0
+        try:
+            dc = fp.get_detour_channel()
+            dc_x = int(max(dc.get("east", 0), dc.get("west", 0)) or 0)
+            dc_y = int(max(dc.get("north", 0), dc.get("south", 0)) or 0)
+        except Exception:
+            dc_x = dc_y = 0
+        mx = max(dc_x, (xhi - xlo) // 4, 1)
+        my = max(dc_y, (yhi - ylo) // 4, 1)
+        return (xlo - mx, xhi + mx, ylo - my, yhi + my)
+
+    def _clamp_unbounded_one(self, w, fp, ext):
+        """Bound every unbounded slide window in this bundle's candidates to the
+        design extent via Segment.perp_clamp_lo/hi (which analyze() pass 3
+        intersects into the window), clearing each touched candidate's analysis
+        cache so the next build recomputes the bounded window.  Keeps the
+        candidates; never touches USER candidates.  Returns the number of
+        candidates clamped."""
+        if ext is None:
+            return 0
+        xlo, xhi, ylo, yhi = ext
+        S = self._DANGLING_SENTINEL
+        INT_MIN, INT_MAX = -2147483648, 2147483647
+        cands = list(w.input.candidates)
+        changed = 0
+        for c in cands:
+            if c.type == "USER":
+                continue
+            try:
+                ct = buda.ConnTopology(); ct.build(c, fp)
+            except Exception:
+                continue
+            segs = ct.segs()
+            if len(segs) != len(c.segments):
+                continue    # can't map ConnSeg -> raw seg reliably; skip
+            touched = False
+            for j, cs in enumerate(segs):
+                lo_unb = cs.perp_lo <= -S
+                hi_unb = cs.perp_hi >= S
+                if not (lo_unb or hi_unb):
+                    continue
+                seg = c.segments[j]
+                clo, chi = (ylo, yhi) if cs.horiz else (xlo, xhi)
+                if lo_unb and seg.perp_clamp_lo == INT_MIN:
+                    seg.perp_clamp_lo = clo; touched = True
+                if hi_unb and seg.perp_clamp_hi == INT_MAX:
+                    seg.perp_clamp_hi = chi; touched = True
+            if touched:
+                c.clear_analysis_cache()
+                changed += 1
+        w.input.candidates = cands          # write back (pybind copy semantics)
+        return changed
+
     def _drop_dangling_pools(self, wraps=None):
-        """Opt-in dangling/unclamped-segment drop (set_drop_dangling): drop a
-        candidate with a dangling stub or an unbounded slide window (the OOB /
-        MST-relay geometry).  Never drops a USER or the pinned candidate, and
-        never strands a bundle.  No-op (bit-identical) when off."""
-        if not getattr(self, "_drop_dangling", False):
+        """Opt-in dangling/unclamped-segment handling (set_drop_dangling), by
+        mode: 'drop' drops any dangling/unbounded candidate (most aggressive);
+        'clamp' bounds every unbounded slide window and drops nothing; 'clamp_drop'
+        clamps the windows AND drops only the TRULY dangling candidates.  Never
+        touches a USER candidate, never drops the pinned one, never strands a
+        bundle.  No-op (bit-identical) when off."""
+        mode = getattr(self, "_drop_dangling_mode", "off")
+        if mode == "off":
             return 0
         if wraps is None:
             wraps = self.bundles
         topo_fp = self._make_topo_fp_resolver()
-        total = nb = 0
+        tot_drop = tot_clamp = nb_drop = nb_clamp = 0
         for w in wraps:
-            n = self._drop_dangling_one(w, topo_fp(w))
-            nb += 1 if n else 0
-            total += n
-        if total:
-            print(f"[TopoDangling] dropped {total} candidate(s) with dangling "
-                  f"/ unclamped-slide segments across {nb} bundle(s).")
-        return total
+            fp = topo_fp(w)
+            if mode in ("drop", "clamp_drop"):
+                reason_fn = (self._topo_dangling_reason if mode == "drop"
+                             else self._topo_truly_dangling_reason)
+                nd = self._drop_dangling_one(w, fp, reason_fn)
+                nb_drop += 1 if nd else 0
+                tot_drop += nd
+            if mode in ("clamp", "clamp_drop"):
+                nc = self._clamp_unbounded_one(w, fp, self._design_extent(w, fp))
+                nb_clamp += 1 if nc else 0
+                tot_clamp += nc
+        if tot_clamp:
+            print(f"[TopoDangling] clamped unbounded slide windows on "
+                  f"{tot_clamp} candidate(s) across {nb_clamp} bundle(s).")
+        if tot_drop:
+            print(f"[TopoDangling] dropped {tot_drop} candidate(s) across "
+                  f"{nb_drop} bundle(s).")
+        return tot_drop + tot_clamp
 
     def _user_candidates(self, w):
         """Deep copies of w's hand-committed (type USER) candidates, captured

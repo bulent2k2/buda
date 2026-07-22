@@ -132,6 +132,60 @@ def test_drop_dangling_removes_unclamped_candidates():
     assert _n(s) < _n(_gen())
 
 
+def _n_unbounded(s):
+    n = 0
+    for c in s.bundles[0].input.candidates:
+        ct = buda.ConnTopology(); ct.build(c, s.fp)
+        if any(abs(cs.perp_lo) >= 1e8 or abs(cs.perp_hi) >= 1e8
+               for cs in ct.segs()):
+            n += 1
+    return n
+
+
+def _n_truly_dangling(s):
+    n = 0
+    for c in s.bundles[0].input.candidates:
+        ct = buda.ConnTopology(); ct.build(c, s.fp)
+        if any(len(cs.conns) == 1 and not cs.conns[0].block_name
+               for cs in ct.segs()):
+            n += 1
+    return n
+
+
+def test_on_is_the_drop_mode():
+    assert _n(_gen("set_drop_dangling on")) == _n(_gen("set_drop_dangling drop"))
+
+
+def test_clamp_mode_keeps_all_and_bounds_windows():
+    base = _gen()
+    assert _n_unbounded(base) > 0                 # unbounded present by default
+    s = _gen("set_drop_dangling clamp")
+    assert _n(s) == _n(base)                      # NOTHING dropped
+    assert _n_unbounded(s) == 0                   # every window bounded
+
+
+def test_clamp_drop_drops_only_truly_dangling_and_clamps_the_rest():
+    base = _gen()
+    td = _n_truly_dangling(base)
+    assert td > 0
+    s = _gen("set_drop_dangling clamp_drop")
+    assert _n(base) - _n(s) == td                 # exactly the truly-dangling dropped
+    assert 0 < _n(s) < _n(base)
+    assert _n_unbounded(s) == 0                   # survivors clamped
+    assert _n_truly_dangling(s) == 0              # dangling stubs gone
+
+
+@pytest.mark.mid
+def test_clamp_modes_route_clean():
+    for mode in ("clamp", "clamp_drop"):
+        s = buda_cli.BudaSession(); s.no_viz = True
+        _run(s, *_B44, f"set_drop_dangling {mode}", "run_bundler",
+             "generate_topologies", "run_planner", "run_nuts",
+             "run_detailed_nuts")
+        assert s.nuts_result.num_overlaps == 0, mode
+        assert s.detailed_result.num_unplaced == 0, mode
+
+
 def test_drop_dangling_keeps_a_pinned_dangling_candidate():
     # A pin that pre-exists the drop must survive even though it dangles.
     s = buda_cli.BudaSession(); s.no_viz = True

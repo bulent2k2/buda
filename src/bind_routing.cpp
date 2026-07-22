@@ -253,6 +253,7 @@ void bind_routing(py::module_& m) {
         .def("__deepcopy__",
              [](const Topology& t, py::dict) { return Topology(t); },
              py::arg("memo"))
+        .def("clear_analysis_cache",            &Topology::clear_analysis_cache)
         .def_readwrite("type",                  &Topology::type)
         .def_readwrite("segments",              &Topology::segments)
         .def_readwrite("estimated_wirelength",  &Topology::estimated_wirelength)
