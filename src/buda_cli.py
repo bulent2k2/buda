@@ -245,11 +245,16 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # set_dedup_loci: collapse candidates that are the same topological
         # choice differing only in a nominal trunk locus WITHIN a shared slide
         # window (same connectivity/slide-windows/taps/net_pull), keeping the
-        # best-estimated representative.  set_drop_dangling: drop candidates
-        # with a dangling segment (a single non-block connection) or an
-        # unbounded/unclamped slide window.
+        # best-estimated representative.  set_drop_dangling <mode>: handle
+        # candidates with a dangling segment (a single non-block connection) or
+        # an unbounded/unclamped slide window (the OOB detour / MST-relay
+        # geometry).  Modes: 'off' (no-op); 'drop' (drop any such candidate —
+        # most aggressive); 'clamp' (bound every unbounded slide window to the
+        # design extent, drop nothing — least aggressive); 'clamp_drop' (clamp
+        # the windows AND drop only the TRULY dangling candidates — a wire end
+        # to nothing).
         self._dedup_loci = False
-        self._drop_dangling = False
+        self._drop_dangling_mode = "off"
         self._max_bundle_bits = None
         self._max_bundle_bits_auto = False
         self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]

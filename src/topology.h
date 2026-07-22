@@ -214,6 +214,17 @@ struct Topology {
     // Copies share the (immutable) analysis — correct, since a copy has the
     // same content until mutated, at which point its fingerprint diverges.
     mutable std::shared_ptr<const TopoAnalysis> analysis_cache_;
+
+    // Drop the cached analysis so the NEXT analyze() recomputes from scratch.
+    // Needed ONLY for a post-analysis mutation of the one analysis input the
+    // content fingerprint deliberately omits: Segment::perp_clamp_lo/hi (read
+    // by analyze() pass 3, but left out of topology_fingerprint because hashing
+    // it would churn every persisted topo_uid).  A generation-time clamp needs
+    // no invalidation — it precedes the first analyze(); a POST-generation
+    // clamp (set_drop_dangling clamp/clamp_drop) sets perp_clamp then calls
+    // this.  No other mutator needs it (every other analysis input IS
+    // fingerprinted, so analyze() self-invalidates on those).
+    void clear_analysis_cache() { analysis_cache_.reset(); }
 };
 
 // ── Segment-index discipline helpers ────────────────────────────────────────

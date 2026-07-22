@@ -139,25 +139,45 @@ def cmd_set_dedup_loci(session, cmd, args, cmd_line):
           f"(applies at the next generate_[hier_]topologies).")
 
 
+_DROP_DANGLING_MODES = {"off", "on", "drop", "clamp", "clamp_drop"}
+
+
 def cmd_set_drop_dangling(session, cmd, args, cmd_line):
-    # Usage: set_drop_dangling [on|off]
-    # Opt-in dangling/unclamped-segment candidate drop (default OFF —
-    # bit-identical without it).  When on, every generation command (NOT the
-    # additive generate_more_topologies) drops a candidate that has a DANGLING
-    # segment (a single non-block connection — a wire whose other end connects
-    # to nothing) or an UNBOUNDED slide window (the +/-2^30 no-clamp sentinel),
-    # i.e. the OOB detour / MST-relay geometry that survives the coverage gate
-    # but renders as a dangling overshoot (e.g. b44's TRUNK_*_OOB(+MST)
-    # candidates).  Never drops a USER or the pinned candidate, and never
-    # strands a bundle.  Declare BEFORE generation; it renumbers indices, so
-    # select_topology pins must come from an opted-in run.
+    # Usage: set_drop_dangling [off|on|drop|clamp|clamp_drop]   (default off)
+    # Opt-in handling (default OFF — bit-identical without it) for candidates
+    # with a DANGLING segment (a single non-block connection — a wire whose
+    # other end connects to nothing) or an UNBOUNDED slide window (the +/-2^30
+    # no-clamp sentinel): the OOB detour / MST-relay geometry that survives the
+    # coverage gate but renders as a dangling overshoot (e.g. b44's
+    # TRUNK_*_OOB(+MST) candidates).  Applies at the end of every generation
+    # command (NOT the additive generate_more_topologies).  Modes, least to
+    # most aggressive:
+    #   clamp      — bound every unbounded slide window to the design extent
+    #                (blocks bbox + candidate spans + margin) via perp_clamp;
+    #                drop NOTHING, so OOB detour routes are KEPT but can no
+    #                longer be flung to infinity.
+    #   clamp_drop — clamp the windows AND drop only the TRULY dangling
+    #                candidates (a segment with a single non-block connection);
+    #                the merely-unbounded OOB detours survive (clamped).
+    #   drop (=on) — drop ANY candidate with a dangling seg OR an unbounded
+    #                window (the original behavior; most aggressive — removes
+    #                OOB detours entirely).
+    # Never drops/clamps a USER candidate, never drops the pinned candidate,
+    # and never strands a bundle.  Declare BEFORE generation; drop/clamp_drop
+    # renumber indices, so select_topology pins must come from an opted-in run.
     val = args[0].lower() if args else "on"
-    if val not in ("on", "off"):
-        print(f"Error: set_drop_dangling expects on|off, got {args[0]!r}")
+    if val not in _DROP_DANGLING_MODES:
+        print(f"Error: set_drop_dangling expects "
+              f"off|on|drop|clamp|clamp_drop, got {args[0]!r}")
         return
-    session._drop_dangling = (val == "on")
-    print(f"Dangling/unclamped candidate drop {'ENABLED' if val == 'on' else 'disabled'} "
-          f"(applies at the next generate_[hier_]topologies).")
+    mode = "drop" if val == "on" else val
+    session._drop_dangling_mode = mode
+    if mode == "off":
+        print("Dangling/unclamped candidate handling disabled "
+              "(applies at the next generate_[hier_]topologies).")
+    else:
+        print(f"Dangling/unclamped candidate handling: {mode.upper()} "
+              f"(applies at the next generate_[hier_]topologies).")
 
 
 def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):

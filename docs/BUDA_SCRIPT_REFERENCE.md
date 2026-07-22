@@ -37,7 +37,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 2 | `generate_topologies_for_hbundle` | Re-run topology generation for a **specific** HBundle by its integer ID |
 | 2 setup | `set_prune_dominated` | Opt-in WL-dominance candidate pruning, gated on non-WL routing equivalence (default off) |
 | 2 setup | `set_dedup_loci` | Opt-in dedup of nominal-locus candidate variants that share a slide window + connectivity (default off) |
-| 2 setup | `set_drop_dangling` | Opt-in drop of candidates with a dangling segment or an unclamped slide window (default off) |
+| 2 setup | `set_drop_dangling` | Opt-in handling of candidates with a dangling segment or an unclamped slide window (default off): `clamp` bounds unbounded windows to the design extent, `clamp_drop` also drops truly-dangling candidates, `drop`/`on` drops any such candidate |
 | 3 | `set_planner_param` | Tune planner cost coefficients (applied at the next `run_planner`) |
 | 3 | `run_planner` | Select topology + assign layers per segment |
 | 3b | `select_topology` | Manually pin a specific topology candidate for a bundle by its 1-based ID |

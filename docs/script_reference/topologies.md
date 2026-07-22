@@ -477,13 +477,11 @@ opted-in run (it runs before sidecar restore and BDB persistence, so
 ### `set_drop_dangling`
 
 ```
-set_drop_dangling [on|off]
+set_drop_dangling [off|on|drop|clamp|clamp_drop]
 ```
 
-Opt-in **dangling / unclamped-segment candidate drop** (default **off** — flows
-are bit-identical without it).  When on, every generation command (the same set
-as `set_prune_dominated`; **not** `generate_more_topologies`) drops a candidate
-that has either:
+Opt-in **dangling / unclamped-segment handling** (default **off** — flows are
+bit-identical without it).  It targets candidates with either:
 
 - a **dangling segment** — a segment with a single non-block connection, i.e. a
   wire whose other end connects to nothing; or
@@ -496,21 +494,50 @@ connected island) but render as a **dangling overshoot** — a spine that extend
 past its only tap, or a relay segment NUTS can fling arbitrarily far.  On b44
 these are the `TRUNK_*_OOB` and `TRUNK_*_OOB+MST` candidates.
 
-Each dropped candidate prints a note:
+When on, the handling runs at the end of every generation command (the same set
+as `set_prune_dominated`; **not** `generate_more_topologies`).  There are three
+modes, least → most aggressive:
+
+- **`clamp`** — bound every unbounded slide window to the **design extent** (the
+  bounding box of all blocks plus every candidate's segment nominals, grown by a
+  margin: the detour-channel width if reserved, else a quarter of the span).
+  The bound is written to `Segment.perp_clamp_lo/hi` (which `analyze()` pass 3
+  intersects into the window) and the candidate's own
+  `Topology.clear_analysis_cache()` is called so the next `ConnTopology.build`
+  recomputes the bounded window.  **Nothing is dropped** — the OOB detour routes
+  are kept, they just can no longer slide to infinity, and because the pool is
+  not shrunk, **`select_topology` indices are NOT renumbered** (hard pins in a
+  flow stay valid).
+- **`clamp_drop`** — clamp the windows *and* drop only the **truly dangling**
+  candidates (a segment with a single non-block connection); the
+  merely-unbounded OOB detours survive (clamped).
+- **`drop`** (alias **`on`**) — drop **any** candidate with a dangling segment
+  or an unbounded window (the original, most-aggressive behavior — removes OOB
+  detours entirely).
+
+Each clamp/drop prints a `[TopoDangling]` note plus a per-run summary, e.g.:
 
 ```
-[TopoDangling] bundle B: dropped TYPE (idx I) — seg J has an unbounded (unclamped) slide window
-[TopoDangling] dropped N candidate(s) with dangling / unclamped-slide segments across M bundle(s).
+[TopoDangling] clamped unbounded slide windows on N candidate(s) across M bundle(s).
+[TopoDangling] dropped K candidate(s) across M bundle(s).
 ```
 
-`USER` candidates and the selected/pinned candidate are never dropped, and the
-pass **never strands a bundle** — if every candidate is flagged, the pool is
-kept intact.  On the reported b44 vehicle the single bundle drops from **24 →
-14** with `set_dedup_loci` also on (both knobs compose).
+`USER` candidates are never touched, the selected/pinned candidate is never
+dropped, and the drop passes **never strand a bundle** (if every candidate is
+flagged, the pool is kept intact).  On the b44 vehicle the single 35-candidate
+bundle becomes 25 (`drop`), stays 35 with no unbounded windows (`clamp`), or
+becomes 31 (`clamp_drop`); all four modes route the bundle clean (0/0).
 
-**Ordering:** declare *before* the generation command; like the other pool
-cleanups it renumbers indices, so `select_topology` pins must come from an
-opted-in run.
+**Choosing a mode.** `clamp` is the safest — it fixes the ±2³⁰ overshoot
+without removing any route and without renumbering (so it is the pin-safe
+choice), at the cost of keeping a truly-dangling candidate in the pool.
+`drop` is the most aggressive and, on a corpus sweep, regresses congested flows
+that rely on OOB detour routes (`channel_stress`, `mix`, `big2_noviz`);
+`clamp`/`clamp_drop` keep those routes.
+
+**Ordering:** declare *before* the generation command.  `drop`/`clamp_drop`
+renumber indices (dropped candidates), so their `select_topology` pins must come
+from an opted-in run; `clamp` does not renumber.
 
 **Example (both cleanups):**
 ```buda
