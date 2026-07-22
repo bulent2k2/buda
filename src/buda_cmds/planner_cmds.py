@@ -269,9 +269,35 @@ def cmd_select_topologies(session, cmd, args, cmd_line):
         session._persist_topologies()   # refresh is_selected in the BDB
 
 
+def cmd_unpin_topology(session, cmd, args, cmd_line):
+    # Usage: unpin_topology <bundle_id|*>
+    # Clears select_topology's pin so the next planner run may re-choose.
+    if len(args) < 1:
+        print("Error: unpin_topology requires a bundle_id (or *)")
+        return
+    if args[0] == '*':
+        n = 0
+        for w in session.bundles:
+            if getattr(w.input, "topology_pinned", False) or w.input.pinned_seg_layers:
+                n += 1
+            w.input.topology_pinned = False
+            w.input.pinned_seg_layers = []   # also drop forced edit-pinned layers
+        print(f"Unpinned all bundles ({n} pinned)")
+        session._persist_topologies()
+        return
+    try:
+        bid = int(args[0])
+    except ValueError:
+        print(f"Error: invalid bundle id '{args[0]}'")
+        return
+    if session._unpin_topology_internal(bid):
+        session._persist_topologies()   # refresh is_pinned in the BDB
+
+
 COMMANDS = {
     "set_planner_param": cmd_set_planner_param,
     "run_planner": cmd_run_planner,
     "select_topology": cmd_select_topology,
     "select_topologies": cmd_select_topologies,
+    "unpin_topology": cmd_unpin_topology,
 }

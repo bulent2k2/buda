@@ -19,6 +19,7 @@ object Main {
   private var cand: Int = 0
   private var view: String = "generation"
   private var edit: js.Dynamic = null   // null = no edit session open
+  private var pinnedHere: Boolean = false   // is the shown candidate the pinned one?
 
   private def svg = dom.document.getElementById("svg").asInstanceOf[dom.svg.SVG]
   private def byId(id: String) = dom.document.getElementById(id)
@@ -127,11 +128,14 @@ object Main {
   }
 
   // ── select / pin ────────────────────────────────────────────────────────────
+  // Pin the shown candidate, or unpin if it's already pinned (toggle).
   private def pinCand(): Unit = {
     if (view != "generation" || render == null || edit != null) return
-    ApiClient.select(1, cand).foreach { res =>
+    val call = if (pinnedHere) ApiClient.unpin(1) else ApiClient.select(1, cand)
+    call.foreach { res =>
       val s = res.result.summary
-      log(if (defined(s)) s.asInstanceOf[String] else "pinned")
+      log(if (defined(s)) s.asInstanceOf[String]
+          else if (pinnedHere) "unpinned" else "pinned")
       showStages(res.state)
       refresh()
     }
@@ -217,6 +221,21 @@ object Main {
   // ── render ──────────────────────────────────────────────────────────────────
   private def draw(): Unit = {
     val label = Renderer.draw(svg, render, view, cand, edit)
+    // Is the shown candidate the pinned one? (mirrors the reference client)
+    pinnedHere = false
+    if (render != null && view == "generation" && edit == null) {
+      val st = render.selectDynamic("state")
+      if (defined(st)) {
+        val bs = st.bundles.asInstanceOf[js.Array[js.Dynamic]]
+        if (bs.length > 0) {
+          val sb = bs(0)
+          pinnedHere = defined(sb.selectDynamic("pinned")) &&
+            sb.pinned.asInstanceOf[Boolean] &&
+            sb.selected_index.asInstanceOf[Int] == cand
+        }
+      }
+    }
+    Option(byId("pin")).foreach(_.textContent = if (pinnedHere) "Unpin" else "Pin")
     Option(byId("candbar")).foreach { bar =>
       val bare = bar.asInstanceOf[dom.html.Element]
       val show = render != null && view == "generation"

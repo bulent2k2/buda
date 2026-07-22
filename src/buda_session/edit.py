@@ -822,3 +822,35 @@ class EditMixin:
         if not found:
             print(f"Error: bundle {bid} not found")
         return found
+
+    def _unpin_topology_internal(self, bid):
+        """Inverse of select_topology: clear a bundle's pin so the next planner
+        run is free to re-choose. Leaves the current selected_topology_index in
+        place (the shown candidate does not jump) but drops BOTH topology_pinned
+        AND any forced pinned_seg_layers — a candidate pinned via
+        `edit_commit pin` after `edit_set_layer` stores forced layer choices that
+        CongestionPlanner honors for ANY candidate (congestion_planner.cpp),
+        independent of topology_pinned; leaving them set would keep forcing stale
+        layers onto a re-chosen topology. Returns True if the bundle (or its
+        hierarchical expansion) was found."""
+        found = False
+        for w in self.bundles:
+            if w.input.original_bundle.id == bid:
+                w.input.topology_pinned = False
+                w.input.pinned_seg_layers = []
+                print(f"Unpinned bundle {bid}")
+                found = True
+                break
+        if not found:
+            wrappers = self._hier_expansion_map.get(bid, [])
+            if wrappers:
+                for w in wrappers:
+                    w.input.topology_pinned = False
+                    w.input.pinned_seg_layers = []
+                n = len(wrappers)
+                print(f"Unpinned bundle {bid} "
+                      f"({n} expanded instance{'s' if n > 1 else ''})")
+                found = True
+        if not found:
+            print(f"Error: bundle {bid} not found")
+        return found

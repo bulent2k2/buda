@@ -34,6 +34,7 @@ Three thin modules over a single headless `BudaSession`:
 Routes: `POST /api/command {cmds:[str]}`, `GET /api/state`,
 `GET /api/render/{generation,nuts,detailed}?bundle=&candidate=`,
 `POST /api/select {bundle,candidate}` (pin a candidate),
+`POST /api/unpin {bundle}` (clear the pin — inverse of select),
 `POST /api/edit/{open,op,commit,abort}`,
 `POST /api/bdb/{open,save,load_pipeline}` (checkpoint), `POST /api/reset`,
 `GET /api/health`, `WS /api/ws?session_id=` + `POST /api/stage/{stage}` (progress

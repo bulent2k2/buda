@@ -109,9 +109,9 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
   <div id="running" hidden></div>
   <div id="candbar" hidden>
     <button onclick="stepCand(-1)">◀</button>
-    <span id="candlbl"></span>
     <button onclick="stepCand(1)">▶</button>
-    <button onclick="pinCand()">Pin</button>
+    <span id="candlbl"></span>
+    <button id="pinbtn" onclick="pinToggle()">Pin</button>
     <button onclick="editOpen()">Edit</button>
     <button onclick="editOpen('new')">Edit new</button>
   </div>
@@ -216,10 +216,18 @@ function stepCand(d) {
 }
 
 // ── select / pin (Phase 3) ─────────────────────────────────────────────────
-async function pinCand() {
+let PINNED_HERE = false;   // is the currently-shown candidate the pinned one?
+function setPinBtn() {
+  const b = document.getElementById("pinbtn");
+  if (b) b.textContent = PINNED_HERE ? "Unpin" : "Pin";
+}
+// Pin the shown candidate, or unpin if it's already pinned (toggle).
+async function pinToggle() {
   if (VIEW !== "generation" || !RENDER || EDIT) return;
-  const res = await post("/select", {bundle: 1, candidate: CAND});
-  log(res.result.summary || "pinned");
+  const res = PINNED_HERE
+    ? await post("/unpin", {bundle: 1})
+    : await post("/select", {bundle: 1, candidate: CAND});
+  log(res.result.summary || (PINNED_HERE ? "unpinned" : "pinned"));
   showStages(res.state);
   await refresh();
 }
@@ -398,14 +406,17 @@ function drawGeneration(g, W, H) {
   if (EDIT) {                                   // draw the edit working copy
     cand = EDIT.topology;
     lbl = `EDITING bundle ${EDIT.bundle_id} · ${cand.segments.length} seg(s)`;
+    PINNED_HERE = false;
   } else {
     const bundle = RENDER.bundles[0];
     if (!bundle) return;
     cand = bundle.candidates[CAND];
     const sb = (RENDER.state && RENDER.state.bundles[0]) || {};
-    const pin = (sb.pinned && sb.selected_index === CAND) ? " 📌PINNED" : "";
+    PINNED_HERE = !!(sb.pinned && sb.selected_index === CAND);
+    const pin = PINNED_HERE ? " 📌PINNED" : "";
     lbl = `bundle ${bundle.id} · cand ${CAND + 1}/${bundle.candidates.length} · ${cand.type} · WL ${cand.estimated_wirelength}${pin}`;
   }
+  setPinBtn();
   document.getElementById("candlbl").textContent = lbl;
   if (!cand.analysis.length && !cand.segments.length) return;
   const disp = computeDisplay(cand.analysis);

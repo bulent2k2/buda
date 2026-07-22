@@ -115,6 +115,11 @@ class SelectRequest(BaseModel):
     session_id: str = "default"
 
 
+class UnpinRequest(BaseModel):
+    bundle: int
+    session_id: str = "default"
+
+
 class BdbOpenRequest(BaseModel):
     path: str
     session_id: str = "default"
@@ -372,6 +377,16 @@ async def post_select(req: SelectRequest):
     async with st.lock:
         res = runner.run_one(
             st.session, f"select_topology {req.bundle} {req.candidate + 1}")
+        return {"result": res, "state": serialize.serialize_state(st.session)}
+
+
+@app.post("/api/unpin")
+async def post_unpin(req: UnpinRequest):
+    """Clear a bundle's pin (`unpin_topology <bundle>`) — the inverse of
+    /api/select. The selection stays but is no longer forced."""
+    st = _get(req.session_id)
+    async with st.lock:
+        res = runner.run_one(st.session, f"unpin_topology {req.bundle}")
         return {"result": res, "state": serialize.serialize_state(st.session)}
 
 
