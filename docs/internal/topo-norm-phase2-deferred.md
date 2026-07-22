@@ -1,7 +1,8 @@
 # Topo-norm Phase 2 (defects 2 & 5) — deferred, and why
 
 **Status:** Phase 1 (PR #55) is merged. **Defect 2 (issue #57) is now FIXED**
-(2026-07-22, see below). **Defect 5 (issue #58) remains deferred.** This note
+(2026-07-22, see below). **Defect 5 (issue #58) is now FIXED too** (2026-07-22).
+Both topo-norm Phase 2 defects are resolved. This note
 records the findings so the decision is not re-litigated from scratch.
 
 ## Background
@@ -26,32 +27,40 @@ With Phase 1's honest WL the planner never selects the staircase/outlier-slide
 candidates, so neither defect changes any *routed* output. They are browsable-only
 artifacts in the topology explorer.
 
-## Defect 5 — outlier (runaway) trunk slide
+## Defect 5 — outlier (runaway) trunk slide — ✅ FIXED (issue #58, 2026-07-22)
 
 A trunk (`>=2` SEG conns, no busterm of its own — the predicate in `nuts.cpp`) is
 bounded by `compute_slide_ranges` Pass 2 only on sides where a stub pushes it out.
 When every stub anchors on one side (e.g. an OOB trunk hugging the block cluster)
-the other side stays at its `INT` sentinel — unbounded — so NUTS *could* slide the
-trunk to the chip edge. Example measured: `TRUNK_H_OOB@y905` had slide
-`[-1073741824, 980]`.
+the other side stayed at its `INT` sentinel — unbounded. Example: `TRUNK_H_OOB@y905`
+had slide `[-1073741824, 980]`.
 
-A Pass-3 clamp (bound a trunk's window to the union of its nominal position and its
-stub-face cluster) does fix the geometry in isolation, **but it is too entangled to
-ship:**
+**The key reframe (measured 2026-07-22): NUTS never actually runs away.** NUTS and
+the planner both derive their placement interval from the **Hanan grid**, not the
+raw slide window, and re-clamp before use — so `TRUNK_H_OOB@y905` with slide
+`[-2^30, 980]` still *places* at 968 (interval `[912, 980]`). The defect is purely a
+slide-window **representation** artifact (explorer / goldens), exactly as the issue
+says ("does not change routed output"). So there is nothing to fix at NUTS placement
+time — the window itself just has to be made honest.
 
-- Clamping in `compute_slide_ranges` feeds the downstream `tighten_passthrough_ranges`
-  / `pin_relay_tap_connectors` passes, creating new *pinched* windows
-  (`perp_lo == perp_hi`) that `filter_pinched` then drops at **generation time** —
-  U-shape / detour trunks legitimately sit outside the bbox and got pinched away.
-- Even a narrow "only clamp a genuinely-unbounded side, never pinch" version still
-  shifted **NUTS placements on selected topologies** (`test_nuts_dogleg`,
-  `test_nuts_pull_repack` failed). Deciding whether each shifted placement is an
-  improvement or a regression needs per-test correctness review.
+**Fix as shipped: `clamp_sentinel_windows`**, a FINAL pass in `analyze`
+(`topology_analysis.cpp`) that bounds each still-sentinel side to the candidate's
+own design extent (its segment nominals UNION the blocks bbox, + any reserved
+detour-channel margin). Two properties make it safe where the earlier attempts were
+not:
 
-Two implementations broke **19–27 tests** for zero change to routed output. The
-right home for this, if ever pursued, is a **NUTS-placement-time** clamp (bound the
-*placed* position, not the slide window), with full dogleg/pull revalidation — not a
-slide-range edit.
+- It runs **LAST** — after `tighten_passthrough` / `pin_relay_taps` — so it never
+  *feeds* them. That is the cascade the deferral note feared: clamping *inside*
+  `compute_slide_ranges` created pinched windows `filter_pinched` dropped and shifted
+  selected placements (19–27 tests). Running after all analysis, it can't.
+- The bound is **looser than any interior Hanan cell** (the bbox contains every
+  block edge), so NUTS and the planner re-clamp to the same grid position they
+  already used — **routed-output-neutral**. Verified: the NUTS placement tests
+  (incl. `test_nuts_dogleg` / `test_nuts_pull_repack`), the web generation golden,
+  and the slide-asserting topology tests all pass unchanged; only the 10
+  `topo_golden` snapshots' slide-window bytes differ (regenerated in place).
+
+Repro `test_defect5_trunk_slide_is_bounded` flipped xfail → pass.
 
 ## Defect 2 — staircase (collinear relay stubs) — ✅ FIXED (issue #57, 2026-07-22)
 
@@ -123,10 +132,14 @@ can carries exactly the feedthru-reopening / cascade risk that blocked defect 5.
   cause are QoR-neutral-or-better, and the two affected topo_analysis goldens
   (big / mix) were regenerated in place — verified host-independent, so no
   reference-host re-baseline was needed.
-- **Defect 5 (issue #58): still deferred.** Move the clamp to **NUTS placement
-  time** (bound the placed position, not the slide window), with dogleg/pull-repack
-  revalidation — the slide-range edit cascades through `filter_pinched` and shifts
-  selected placements (19–27 tests, zero output change). Tracked in issue #58.
+- **Defect 5 (issue #58): ✅ FIXED (2026-07-22).** The measured reframe changed the
+  approach entirely: NUTS never actually runs away (it re-clamps to the Hanan grid),
+  so the defect is a slide-window *representation* artifact, not a placement bug —
+  no NUTS-placement-time clamp was needed. `clamp_sentinel_windows` (a FINAL
+  `analyze` pass) bounds still-sentinel sides to the design extent AFTER
+  `tighten_passthrough` / `pin_relay_taps`, dodging the cascade, with a bound looser
+  than any interior Hanan cell so it's routed-output-neutral. See the defect-5
+  section.
 
-Phase 1 (honest WL → clean selected topologies) plus the defect-2 fix are the
-shipped outcome of topo-norm; only defect 5 remains.
+Phase 1 (honest WL → clean selected topologies) plus the defect-2 and defect-5
+fixes are the complete shipped outcome of topo-norm; nothing remains.
