@@ -36,7 +36,7 @@ bundle 1 nets=8 candidates=12
   sconn (2,0)->[1]
   ana 0 horiz=1 layer=6 along=[20,100] perp=250 slide=[100,250] pull=1 aflex=10 acover=[20,100] apull=0
   ana 0 conns BT:u_cpu@100 ; SEG:1@20e
-  ana 1 horiz=0 layer=7 along=[250,750] perp=20 slide=[-1073741824,80] pull=2 aflex=11 acover=[250,750] apull=0
+  ana 1 horiz=0 layer=7 along=[250,750] perp=20 slide=[20,80] pull=2 aflex=11 acover=[250,750] apull=0
   ana 1 conns SEG:0@250e ; SEG:2@750e
   ana 2 horiz=1 layer=6 along=[20,750] perp=750 slide=[750,900] pull=-1 aflex=10 acover=[20,750] apull=0
   ana 2 conns SEG:1@20e ; BT:u_mem@750
@@ -53,7 +53,7 @@ bundle 1 nets=8 candidates=12
   sconn (2,0)->[1]
   ana 0 horiz=1 layer=6 along=[250,980] perp=250 slide=[100,250] pull=1 aflex=01 acover=[250,980] apull=0
   ana 0 conns BT:u_cpu@250 ; SEG:1@980e
-  ana 1 horiz=0 layer=7 along=[250,750] perp=980 slide=[920,1073741823] pull=-2 aflex=11 acover=[250,750] apull=0
+  ana 1 horiz=0 layer=7 along=[250,750] perp=980 slide=[920,980] pull=-2 aflex=11 acover=[250,750] apull=0
   ana 1 conns SEG:0@250e ; SEG:2@750e
   ana 2 horiz=1 layer=6 along=[900,980] perp=750 slide=[750,900] pull=-1 aflex=01 acover=[900,980] apull=0
   ana 2 conns SEG:1@980e ; BT:u_mem@900
@@ -70,7 +70,7 @@ bundle 1 nets=8 candidates=12
   sconn (2,0)->[1]
   ana 0 horiz=0 layer=7 along=[20,100] perp=250 slide=[100,250] pull=1 aflex=10 acover=[20,100] apull=0
   ana 0 conns BT:u_cpu@100 ; SEG:1@20e
-  ana 1 horiz=1 layer=6 along=[250,750] perp=20 slide=[-1073741824,80] pull=2 aflex=11 acover=[250,750] apull=0
+  ana 1 horiz=1 layer=6 along=[250,750] perp=20 slide=[20,80] pull=2 aflex=11 acover=[250,750] apull=0
   ana 1 conns SEG:0@250e ; SEG:2@750e
   ana 2 horiz=0 layer=7 along=[20,750] perp=750 slide=[750,900] pull=-1 aflex=10 acover=[20,750] apull=0
   ana 2 conns SEG:1@20e ; BT:u_mem@750
@@ -87,7 +87,7 @@ bundle 1 nets=8 candidates=12
   sconn (2,0)->[1]
   ana 0 horiz=0 layer=7 along=[250,980] perp=250 slide=[100,250] pull=1 aflex=01 acover=[250,980] apull=0
   ana 0 conns BT:u_cpu@250 ; SEG:1@980e
-  ana 1 horiz=1 layer=6 along=[250,750] perp=980 slide=[920,1073741823] pull=-2 aflex=11 acover=[250,750] apull=0
+  ana 1 horiz=1 layer=6 along=[250,750] perp=980 slide=[920,980] pull=-2 aflex=11 acover=[250,750] apull=0
   ana 1 conns SEG:0@250e ; SEG:2@750e
   ana 2 horiz=0 layer=7 along=[900,980] perp=750 slide=[750,900] pull=-1 aflex=01 acover=[900,980] apull=0
   ana 2 conns SEG:1@980e ; BT:u_mem@900
@@ -245,7 +245,7 @@ bundle 2 nets=16 candidates=47
   ana 0 conns BT:u_gpu@250 ; SEG:1@750e ; SEG:2@750e
   ana 1 horiz=0 layer=7 along=[450,500] perp=750 slide=[750,900] pull=-1 aflex=10 acover=[450,500] apull=0
   ana 1 conns SEG:0@450e ; BT:u_disp@500
-  ana 2 horiz=0 layer=7 along=[400,500] perp=750 slide=[520,1073741823] pull=-1 aflex=11 acover=[400,450] apull=1
+  ana 2 horiz=0 layer=7 along=[400,500] perp=750 slide=[520,900] pull=-1 aflex=11 acover=[400,450] apull=1
   ana 2 conns SEG:0@450 ; SEG:3@400e
   ana 3 horiz=1 layer=6 along=[500,750] perp=400 slide=[300,400] pull=1 aflex=01 acover=[500,750] apull=0
   ana 3 conns SEG:2@750e ; BT:u_noc_a@500
@@ -266,7 +266,7 @@ bundle 2 nets=16 candidates=47
   ana 0 conns BT:u_gpu@250 ; SEG:1@750e ; SEG:2@750e
   ana 1 horiz=0 layer=7 along=[475,500] perp=750 slide=[750,900] pull=-1 aflex=10 acover=[475,500] apull=0
   ana 1 conns SEG:0@475e ; BT:u_disp@500
-  ana 2 horiz=0 layer=7 along=[400,500] perp=750 slide=[520,1073741823] pull=-1 aflex=11 acover=[400,475] apull=1
+  ana 2 horiz=0 layer=7 along=[400,500] perp=750 slide=[520,900] pull=-1 aflex=11 acover=[400,475] apull=1
   ana 2 conns SEG:0@475 ; SEG:3@400e
   ana 3 horiz=1 layer=6 along=[500,750] perp=400 slide=[300,400] pull=1 aflex=01 acover=[500,750] apull=0
   ana 3 conns SEG:2@750e ; BT:u_noc_a@500
@@ -457,25 +457,25 @@ bundle 2 nets=16 candidates=47
   sconn (8,1)->[9]
   sconn (9,0)->[8]
   sconn (9,1)->[5]
-  ana 0 horiz=1 layer=6 along=[250,750] perp=270 slide=[-1073741824,280] pull=1 aflex=11 acover=[450,450] apull=0
+  ana 0 horiz=1 layer=6 along=[250,750] perp=270 slide=[50,280] pull=1 aflex=11 acover=[450,450] apull=0
   ana 0 conns SEG:1@450
   ana 1 horiz=0 layer=7 along=[270,300] perp=450 slide=[400,500] pull=0 aflex=10 acover=[270,300] apull=0
   ana 1 conns BT:u_noc_a@300 ; SEG:0@270e ; SEG:7@300e ; SEG:8@300e
   ana 2 horiz=0 layer=7 along=[400,450] perp=250 slide=[100,250] pull=0 aflex=10 acover=[400,450] apull=0
   ana 2 conns BT:u_gpu@450 ; SEG:3@400e
-  ana 3 horiz=1 layer=6 along=[250,400] perp=400 slide=[-1073741824,430] pull=1 aflex=11 acover=[250,400] apull=0
+  ana 3 horiz=1 layer=6 along=[250,400] perp=400 slide=[50,430] pull=1 aflex=11 acover=[250,400] apull=0
   ana 3 conns SEG:2@250e ; SEG:6@400e
   ana 4 horiz=0 layer=7 along=[400,500] perp=750 slide=[750,900] pull=0 aflex=10 acover=[400,500] apull=0
   ana 4 conns BT:u_disp@500 ; SEG:5@400e
-  ana 5 horiz=1 layer=6 along=[500,750] perp=400 slide=[-1073741824,480] pull=1 aflex=11 acover=[500,750] apull=0
+  ana 5 horiz=1 layer=6 along=[500,750] perp=400 slide=[50,480] pull=1 aflex=11 acover=[500,750] apull=0
   ana 5 conns SEG:4@750e ; SEG:9@500e
-  ana 6 horiz=0 layer=7 along=[300,400] perp=400 slide=[-1073741824,1073741823] pull=-1 aflex=11 acover=[300,400] apull=0
+  ana 6 horiz=0 layer=7 along=[300,400] perp=400 slide=[100,900] pull=-1 aflex=11 acover=[300,400] apull=0
   ana 6 conns SEG:3@400e ; SEG:7@300e
   ana 7 horiz=1 layer=6 along=[400,450] perp=300 slide=[300,400] pull=0 aflex=11 acover=[400,450] apull=0
   ana 7 conns SEG:6@400e ; SEG:1@450e
   ana 8 horiz=1 layer=6 along=[450,500] perp=300 slide=[300,400] pull=0 aflex=11 acover=[450,500] apull=0
   ana 8 conns SEG:1@450e ; SEG:9@500e
-  ana 9 horiz=0 layer=7 along=[300,400] perp=500 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 9 horiz=0 layer=7 along=[300,400] perp=500 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 9 conns SEG:5@400e ; SEG:8@300e
  cand type=TRUNK_H_OOB+MST@y630 wl=1280 trunk=630 passthru=0
   blocks=u_gpu,u_disp,u_noc_a feedthru=
@@ -490,7 +490,7 @@ bundle 2 nets=16 candidates=47
   sconn (2,1)->[3]
   sconn (3,0)->[2]
   sconn (3,1)->[1]
-  ana 0 horiz=1 layer=6 along=[250,750] perp=630 slide=[500,1073741823] pull=-1 aflex=11 acover=[750,750] apull=-1
+  ana 0 horiz=1 layer=6 along=[250,750] perp=630 slide=[500,950] pull=-1 aflex=11 acover=[750,750] apull=-1
   ana 0 conns SEG:1@750e
   ana 1 horiz=0 layer=7 along=[400,630] perp=750 slide=[750,900] pull=-1 aflex=11 acover=[400,630] apull=0
   ana 1 conns SEG:0@630e ; SEG:3@400e
@@ -512,7 +512,7 @@ bundle 2 nets=16 candidates=47
   sconn (1,1)->[0]
   sconn (2,1)->[0]
   sconn (3,1)->[0]
-  ana 0 horiz=1 layer=6 along=[250,750] perp=270 slide=[-1073741824,280] pull=3 aflex=11 acover=[250,750] apull=0
+  ana 0 horiz=1 layer=6 along=[250,750] perp=270 slide=[50,280] pull=3 aflex=11 acover=[250,750] apull=0
   ana 0 conns SEG:1@250e ; SEG:2@750e ; SEG:3@450
   ana 1 horiz=0 layer=7 along=[270,450] perp=250 slide=[100,250] pull=1 aflex=10 acover=[270,450] apull=0
   ana 1 conns SEG:0@270e ; BT:u_gpu@450
@@ -534,7 +534,7 @@ bundle 2 nets=16 candidates=47
   sconn (1,1)->[0]
   sconn (2,1)->[0]
   sconn (3,1)->[0]
-  ana 0 horiz=1 layer=6 along=[250,750] perp=630 slide=[620,1073741823] pull=-3 aflex=11 acover=[250,750] apull=0
+  ana 0 horiz=1 layer=6 along=[250,750] perp=630 slide=[620,950] pull=-3 aflex=11 acover=[250,750] apull=0
   ana 0 conns SEG:1@250e ; SEG:2@750e ; SEG:3@450
   ana 1 horiz=0 layer=7 along=[550,630] perp=250 slide=[100,250] pull=1 aflex=01 acover=[550,630] apull=0
   ana 1 conns SEG:0@630e ; BT:u_gpu@550
@@ -1125,7 +1125,7 @@ bundle 2 nets=16 candidates=47
   sconn (4,1)->[5]
   sconn (5,0)->[3]
   sconn (5,1)->[4]
-  ana 0 horiz=0 layer=7 along=[400,500] perp=980 slide=[750,1073741823] pull=-1 aflex=11 acover=[500,500] apull=-1
+  ana 0 horiz=0 layer=7 along=[400,500] perp=980 slide=[750,980] pull=-1 aflex=11 acover=[500,500] apull=-1
   ana 0 conns SEG:1@500e
   ana 1 horiz=1 layer=6 along=[500,980] perp=500 slide=[500,600] pull=-1 aflex=11 acover=[500,980] apull=0
   ana 1 conns SEG:0@980e ; SEG:4@500e
@@ -1148,7 +1148,7 @@ bundle 2 nets=16 candidates=47
   sconn (0,1)->[1]
   sconn (1,1)->[0]
   sconn (2,1)->[0]
-  ana 0 horiz=0 layer=7 along=[400,500] perp=20 slide=[-1073741824,250] pull=2 aflex=11 acover=[400,500] apull=0
+  ana 0 horiz=0 layer=7 along=[400,500] perp=20 slide=[20,250] pull=2 aflex=11 acover=[400,500] apull=0
   ana 0 conns SEG:2@400e ; SEG:1@500e
   ana 1 horiz=1 layer=6 along=[20,750] perp=500 slide=[500,550] pull=-1 aflex=10 acover=[20,750] apull=0
   ana 1 conns SEG:0@20e ; BT:u_disp@750
@@ -1168,7 +1168,7 @@ bundle 2 nets=16 candidates=47
   sconn (1,1)->[0]
   sconn (2,1)->[0]
   sconn (3,1)->[0]
-  ana 0 horiz=0 layer=7 along=[400,500] perp=980 slide=[920,1073741823] pull=-3 aflex=11 acover=[400,500] apull=0
+  ana 0 horiz=0 layer=7 along=[400,500] perp=980 slide=[920,980] pull=-3 aflex=11 acover=[400,500] apull=0
   ana 0 conns SEG:3@400e ; SEG:2@500e ; SEG:1@450
   ana 1 horiz=1 layer=6 along=[250,980] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,980] apull=0
   ana 1 conns BT:u_gpu@250 ; SEG:0@980e
@@ -1267,35 +1267,35 @@ bundle 3 nets=1 candidates=79
   ana 0 conns BT:u_io_dst@850 ; BT:u_noc_b@750 ; SEG:8@750e
   ana 1 horiz=0 layer=7 along=[150,300] perp=475 slide=[450,500] pull=0 aflex=00 acover=[150,300] apull=0
   ana 1 conns BT:u_io_src@150 ; BT:u_noc_a@300 ; SEG:14@300e ; SEG:15@300e
-  ana 2 horiz=0 layer=7 along=[600,650] perp=600 slide=[-1073741824,730] pull=1 aflex=11 acover=[600,650] apull=0
+  ana 2 horiz=0 layer=7 along=[600,650] perp=600 slide=[100,730] pull=1 aflex=11 acover=[600,650] apull=0
   ana 2 conns SEG:11@650e ; SEG:3@600e
   ana 3 horiz=1 layer=6 along=[600,750] perp=600 slide=[500,600] pull=0 aflex=10 acover=[600,750] apull=0
   ana 3 conns SEG:2@600e ; BT:u_disp@750
-  ana 4 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 4 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 4 conns SEG:12@400e ; SEG:5@450e
   ana 5 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 5 conns SEG:4@400e ; BT:u_gpu@250
-  ana 6 horiz=0 layer=7 along=[350,650] perp=550 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[350,650] apull=0
+  ana 6 horiz=0 layer=7 along=[350,650] perp=550 slide=[100,900] pull=0 aflex=11 acover=[350,650] apull=0
   ana 6 conns SEG:10@650e ; SEG:11@650e ; SEG:7@350e
-  ana 7 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[500,550] apull=0
+  ana 7 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,950] pull=0 aflex=11 acover=[500,550] apull=0
   ana 7 conns SEG:6@550e ; SEG:16@500e
   ana 8 horiz=1 layer=6 along=[525,537] perp=750 slide=[650,750] pull=1 aflex=11 acover=[525,537] apull=0
   ana 8 conns SEG:0@525e ; SEG:9@537e
-  ana 9 horiz=0 layer=7 along=[650,750] perp=537 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[650,750] apull=0
+  ana 9 horiz=0 layer=7 along=[650,750] perp=537 slide=[100,900] pull=0 aflex=11 acover=[650,750] apull=0
   ana 9 conns SEG:8@750e ; SEG:10@650e
-  ana 10 horiz=1 layer=6 along=[537,550] perp=650 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[537,550] apull=0
+  ana 10 horiz=1 layer=6 along=[537,550] perp=650 slide=[50,950] pull=0 aflex=11 acover=[537,550] apull=0
   ana 10 conns SEG:6@550e ; SEG:9@537e
-  ana 11 horiz=1 layer=6 along=[550,600] perp=650 slide=[-1073741824,1073741823] pull=-1 aflex=11 acover=[550,600] apull=0
+  ana 11 horiz=1 layer=6 along=[550,600] perp=650 slide=[50,950] pull=-1 aflex=11 acover=[550,600] apull=0
   ana 11 conns SEG:2@600e ; SEG:6@550e
-  ana 12 horiz=1 layer=6 along=[400,437] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,437] apull=0
+  ana 12 horiz=1 layer=6 along=[400,437] perp=400 slide=[50,950] pull=1 aflex=11 acover=[400,437] apull=0
   ana 12 conns SEG:4@400e ; SEG:13@437e
-  ana 13 horiz=0 layer=7 along=[300,400] perp=437 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 13 horiz=0 layer=7 along=[300,400] perp=437 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 13 conns SEG:12@400e ; SEG:14@300e
   ana 14 horiz=1 layer=6 along=[437,475] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[437,475] apull=0
   ana 14 conns SEG:13@437e ; SEG:1@475e
   ana 15 horiz=1 layer=6 along=[475,500] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[475,500] apull=0
   ana 15 conns SEG:1@475e ; SEG:16@500e
-  ana 16 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 16 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 16 conns SEG:7@350e ; SEG:15@300e
  cand type=TRUNK_H+MST@y100 wl=1975 trunk=100 passthru=1
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu,u_disp feedthru=
@@ -1356,35 +1356,35 @@ bundle 3 nets=1 candidates=79
   ana 1 conns BT:u_noc_a@300 ; SEG:0@100e ; SEG:15@300e ; SEG:16@300e
   ana 2 horiz=0 layer=7 along=[750,850] perp=525 slide=[500,550] pull=0 aflex=00 acover=[750,850] apull=0
   ana 2 conns BT:u_io_dst@850 ; BT:u_noc_b@750 ; SEG:9@750e
-  ana 3 horiz=0 layer=7 along=[600,650] perp=600 slide=[-1073741824,730] pull=1 aflex=11 acover=[600,650] apull=0
+  ana 3 horiz=0 layer=7 along=[600,650] perp=600 slide=[100,730] pull=1 aflex=11 acover=[600,650] apull=0
   ana 3 conns SEG:12@650e ; SEG:4@600e
   ana 4 horiz=1 layer=6 along=[600,750] perp=600 slide=[500,600] pull=0 aflex=10 acover=[600,750] apull=0
   ana 4 conns SEG:3@600e ; BT:u_disp@750
-  ana 5 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 5 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 5 conns SEG:13@400e ; SEG:6@450e
   ana 6 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 6 conns SEG:5@400e ; BT:u_gpu@250
-  ana 7 horiz=0 layer=7 along=[350,650] perp=550 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[350,650] apull=0
+  ana 7 horiz=0 layer=7 along=[350,650] perp=550 slide=[100,900] pull=0 aflex=11 acover=[350,650] apull=0
   ana 7 conns SEG:11@650e ; SEG:12@650e ; SEG:8@350e
-  ana 8 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[500,550] apull=0
+  ana 8 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,950] pull=0 aflex=11 acover=[500,550] apull=0
   ana 8 conns SEG:7@550e ; SEG:17@500e
   ana 9 horiz=1 layer=6 along=[525,537] perp=750 slide=[650,750] pull=1 aflex=11 acover=[525,537] apull=0
   ana 9 conns SEG:2@525e ; SEG:10@537e
-  ana 10 horiz=0 layer=7 along=[650,750] perp=537 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[650,750] apull=0
+  ana 10 horiz=0 layer=7 along=[650,750] perp=537 slide=[100,900] pull=0 aflex=11 acover=[650,750] apull=0
   ana 10 conns SEG:9@750e ; SEG:11@650e
-  ana 11 horiz=1 layer=6 along=[537,550] perp=650 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[537,550] apull=0
+  ana 11 horiz=1 layer=6 along=[537,550] perp=650 slide=[50,950] pull=0 aflex=11 acover=[537,550] apull=0
   ana 11 conns SEG:7@550e ; SEG:10@537e
-  ana 12 horiz=1 layer=6 along=[550,600] perp=650 slide=[-1073741824,1073741823] pull=-1 aflex=11 acover=[550,600] apull=0
+  ana 12 horiz=1 layer=6 along=[550,600] perp=650 slide=[50,950] pull=-1 aflex=11 acover=[550,600] apull=0
   ana 12 conns SEG:3@600e ; SEG:7@550e
-  ana 13 horiz=1 layer=6 along=[400,425] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,425] apull=0
+  ana 13 horiz=1 layer=6 along=[400,425] perp=400 slide=[50,950] pull=1 aflex=11 acover=[400,425] apull=0
   ana 13 conns SEG:5@400e ; SEG:14@425e
-  ana 14 horiz=0 layer=7 along=[300,400] perp=425 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 14 horiz=0 layer=7 along=[300,400] perp=425 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 14 conns SEG:13@400e ; SEG:15@300e
   ana 15 horiz=1 layer=6 along=[425,450] perp=300 slide=[300,400] pull=0 aflex=11 acover=[425,450] apull=0
   ana 15 conns SEG:14@425e ; SEG:1@450e
   ana 16 horiz=1 layer=6 along=[450,500] perp=300 slide=[300,400] pull=0 aflex=11 acover=[450,500] apull=0
   ana 16 conns SEG:1@450e ; SEG:17@500e
-  ana 17 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 17 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 17 conns SEG:8@350e ; SEG:16@300e
  cand type=TRUNK_H+MST@y225 wl=1475 trunk=225 passthru=0
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu,u_disp feedthru=
@@ -1452,35 +1452,35 @@ bundle 3 nets=1 candidates=79
   ana 2 conns SEG:0@225e ; BT:u_noc_a@300 ; SEG:16@300e ; SEG:17@300e
   ana 3 horiz=0 layer=7 along=[750,850] perp=525 slide=[500,550] pull=0 aflex=00 acover=[750,850] apull=0
   ana 3 conns BT:u_io_dst@850 ; BT:u_noc_b@750 ; SEG:10@750e
-  ana 4 horiz=0 layer=7 along=[600,650] perp=600 slide=[-1073741824,730] pull=1 aflex=11 acover=[600,650] apull=0
+  ana 4 horiz=0 layer=7 along=[600,650] perp=600 slide=[100,730] pull=1 aflex=11 acover=[600,650] apull=0
   ana 4 conns SEG:13@650e ; SEG:5@600e
   ana 5 horiz=1 layer=6 along=[600,750] perp=600 slide=[500,600] pull=0 aflex=10 acover=[600,750] apull=0
   ana 5 conns SEG:4@600e ; BT:u_disp@750
-  ana 6 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 6 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 6 conns SEG:14@400e ; SEG:7@450e
   ana 7 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 7 conns SEG:6@400e ; BT:u_gpu@250
-  ana 8 horiz=0 layer=7 along=[350,650] perp=550 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[350,650] apull=0
+  ana 8 horiz=0 layer=7 along=[350,650] perp=550 slide=[100,900] pull=0 aflex=11 acover=[350,650] apull=0
   ana 8 conns SEG:12@650e ; SEG:13@650e ; SEG:9@350e
-  ana 9 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[500,550] apull=0
+  ana 9 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,950] pull=0 aflex=11 acover=[500,550] apull=0
   ana 9 conns SEG:8@550e ; SEG:18@500e
   ana 10 horiz=1 layer=6 along=[525,537] perp=750 slide=[650,750] pull=1 aflex=11 acover=[525,537] apull=0
   ana 10 conns SEG:3@525e ; SEG:11@537e
-  ana 11 horiz=0 layer=7 along=[650,750] perp=537 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[650,750] apull=0
+  ana 11 horiz=0 layer=7 along=[650,750] perp=537 slide=[100,900] pull=0 aflex=11 acover=[650,750] apull=0
   ana 11 conns SEG:10@750e ; SEG:12@650e
-  ana 12 horiz=1 layer=6 along=[537,550] perp=650 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[537,550] apull=0
+  ana 12 horiz=1 layer=6 along=[537,550] perp=650 slide=[50,950] pull=0 aflex=11 acover=[537,550] apull=0
   ana 12 conns SEG:8@550e ; SEG:11@537e
-  ana 13 horiz=1 layer=6 along=[550,600] perp=650 slide=[-1073741824,1073741823] pull=-1 aflex=11 acover=[550,600] apull=0
+  ana 13 horiz=1 layer=6 along=[550,600] perp=650 slide=[50,950] pull=-1 aflex=11 acover=[550,600] apull=0
   ana 13 conns SEG:4@600e ; SEG:8@550e
-  ana 14 horiz=1 layer=6 along=[400,425] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,425] apull=0
+  ana 14 horiz=1 layer=6 along=[400,425] perp=400 slide=[50,950] pull=1 aflex=11 acover=[400,425] apull=0
   ana 14 conns SEG:6@400e ; SEG:15@425e
-  ana 15 horiz=0 layer=7 along=[300,400] perp=425 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,400] apull=0
+  ana 15 horiz=0 layer=7 along=[300,400] perp=425 slide=[100,900] pull=0 aflex=11 acover=[300,400] apull=0
   ana 15 conns SEG:14@400e ; SEG:16@300e
   ana 16 horiz=1 layer=6 along=[425,450] perp=300 slide=[300,400] pull=0 aflex=11 acover=[425,450] apull=0
   ana 16 conns SEG:15@425e ; SEG:2@450e
   ana 17 horiz=1 layer=6 along=[450,500] perp=300 slide=[300,400] pull=0 aflex=11 acover=[450,500] apull=0
   ana 17 conns SEG:2@450e ; SEG:18@500e
-  ana 18 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 18 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 18 conns SEG:9@350e ; SEG:17@300e
  cand type=TRUNK_H+MST@y350 wl=1475 trunk=350 passthru=1
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu,u_disp feedthru=
@@ -1976,21 +1976,21 @@ bundle 3 nets=1 candidates=79
   ana 3 conns SEG:0@800e ; BT:u_disp@600
   ana 4 horiz=0 layer=7 along=[150,300] perp=475 slide=[450,500] pull=0 aflex=00 acover=[150,300] apull=0
   ana 4 conns BT:u_io_src@150 ; BT:u_noc_a@300 ; SEG:10@300e ; SEG:11@300e
-  ana 5 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 5 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 5 conns SEG:8@400e ; SEG:6@450e
   ana 6 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 6 conns SEG:5@400e ; BT:u_gpu@250
-  ana 7 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,750] pull=1 aflex=11 acover=[500,550] apull=0
+  ana 7 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,750] pull=1 aflex=11 acover=[500,550] apull=0
   ana 7 conns SEG:2@550e ; SEG:12@500e
-  ana 8 horiz=1 layer=6 along=[400,437] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,437] apull=0
+  ana 8 horiz=1 layer=6 along=[400,437] perp=400 slide=[50,950] pull=1 aflex=11 acover=[400,437] apull=0
   ana 8 conns SEG:5@400e ; SEG:9@437e
-  ana 9 horiz=0 layer=7 along=[300,400] perp=437 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 9 horiz=0 layer=7 along=[300,400] perp=437 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 9 conns SEG:8@400e ; SEG:10@300e
   ana 10 horiz=1 layer=6 along=[437,475] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[437,475] apull=0
   ana 10 conns SEG:9@437e ; SEG:4@475e
   ana 11 horiz=1 layer=6 along=[475,500] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[475,500] apull=0
   ana 11 conns SEG:4@475e ; SEG:12@500e
-  ana 12 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 12 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 12 conns SEG:7@350e ; SEG:11@300e
  cand type=TRUNK_H+MST@y900 wl=2052 trunk=900 passthru=1
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu,u_disp feedthru=
@@ -2054,37 +2054,37 @@ bundle 3 nets=1 candidates=79
   ana 1 conns BT:u_noc_b@750 ; SEG:0@900e ; SEG:11@750e
   ana 2 horiz=0 layer=7 along=[150,300] perp=475 slide=[450,500] pull=0 aflex=00 acover=[150,300] apull=0
   ana 2 conns BT:u_io_src@150 ; BT:u_noc_a@300 ; SEG:16@300e ; SEG:17@300e
-  ana 3 horiz=0 layer=7 along=[600,650] perp=600 slide=[-1073741824,730] pull=1 aflex=11 acover=[600,650] apull=0
+  ana 3 horiz=0 layer=7 along=[600,650] perp=600 slide=[100,730] pull=1 aflex=11 acover=[600,650] apull=0
   ana 3 conns SEG:13@650e ; SEG:4@600e
   ana 4 horiz=1 layer=6 along=[600,750] perp=600 slide=[500,600] pull=0 aflex=10 acover=[600,750] apull=0
   ana 4 conns SEG:3@600e ; BT:u_disp@750
-  ana 5 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 5 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 5 conns SEG:14@400e ; SEG:6@450e
   ana 6 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 6 conns SEG:5@400e ; BT:u_gpu@250
-  ana 7 horiz=0 layer=7 along=[350,650] perp=550 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[350,650] apull=0
+  ana 7 horiz=0 layer=7 along=[350,650] perp=550 slide=[100,900] pull=0 aflex=11 acover=[350,650] apull=0
   ana 7 conns SEG:9@650e ; SEG:8@350e
-  ana 8 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[500,550] apull=0
+  ana 8 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,950] pull=0 aflex=11 acover=[500,550] apull=0
   ana 8 conns SEG:7@550e ; SEG:18@500e
-  ana 9 horiz=1 layer=6 along=[550,552] perp=650 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[550,552] apull=0
+  ana 9 horiz=1 layer=6 along=[550,552] perp=650 slide=[50,950] pull=0 aflex=11 acover=[550,552] apull=0
   ana 9 conns SEG:7@550e ; SEG:10@552e
-  ana 10 horiz=0 layer=7 along=[650,750] perp=552 slide=[-1073741824,1073741823] pull=-1 aflex=11 acover=[650,750] apull=0
+  ana 10 horiz=0 layer=7 along=[650,750] perp=552 slide=[100,900] pull=-1 aflex=11 acover=[650,750] apull=0
   ana 10 conns SEG:9@650e ; SEG:11@750e
   ana 11 horiz=1 layer=6 along=[550,575] perp=750 slide=[650,750] pull=0 aflex=11 acover=[550,575] apull=0
   ana 11 conns SEG:10@552 ; SEG:1@550e ; SEG:12@575e
-  ana 12 horiz=0 layer=7 along=[650,750] perp=575 slide=[-1073741824,1073741823] pull=-1 aflex=11 acover=[650,750] apull=0
+  ana 12 horiz=0 layer=7 along=[650,750] perp=575 slide=[100,900] pull=-1 aflex=11 acover=[650,750] apull=0
   ana 12 conns SEG:11@750e ; SEG:13@650e
-  ana 13 horiz=1 layer=6 along=[575,600] perp=650 slide=[-1073741824,1073741823] pull=-1 aflex=11 acover=[575,600] apull=0
+  ana 13 horiz=1 layer=6 along=[575,600] perp=650 slide=[50,950] pull=-1 aflex=11 acover=[575,600] apull=0
   ana 13 conns SEG:3@600e ; SEG:12@575e
-  ana 14 horiz=1 layer=6 along=[400,437] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,437] apull=0
+  ana 14 horiz=1 layer=6 along=[400,437] perp=400 slide=[50,950] pull=1 aflex=11 acover=[400,437] apull=0
   ana 14 conns SEG:5@400e ; SEG:15@437e
-  ana 15 horiz=0 layer=7 along=[300,400] perp=437 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 15 horiz=0 layer=7 along=[300,400] perp=437 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 15 conns SEG:14@400e ; SEG:16@300e
   ana 16 horiz=1 layer=6 along=[437,475] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[437,475] apull=0
   ana 16 conns SEG:15@437e ; SEG:2@475e
   ana 17 horiz=1 layer=6 along=[475,500] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[475,500] apull=0
   ana 17 conns SEG:2@475e ; SEG:18@500e
-  ana 18 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 18 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 18 conns SEG:8@350e ; SEG:17@300e
  cand type=TRUNK_H@y100 wl=2750 trunk=100 passthru=1
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu,u_disp feedthru=
@@ -2819,7 +2819,7 @@ bundle 3 nets=1 candidates=79
   sconn (18,1)->[19]
   sconn (19,0)->[18]
   sconn (19,1)->[9]
-  ana 0 horiz=1 layer=6 along=[250,750] perp=-40 slide=[-1073741824,150] pull=1 aflex=11 acover=[500,500] apull=0
+  ana 0 horiz=1 layer=6 along=[250,750] perp=-40 slide=[-40,150] pull=1 aflex=11 acover=[500,500] apull=0
   ana 0 conns SEG:1@500
   ana 1 horiz=0 layer=7 along=[-40,100] perp=500 slide=[450,550] pull=0 aflex=11 acover=[-40,100] apull=0
   ana 1 conns SEG:10@100e ; SEG:0@-40e
@@ -2827,37 +2827,37 @@ bundle 3 nets=1 candidates=79
   ana 2 conns BT:u_io_dst@850 ; BT:u_noc_b@750 ; SEG:11@750e
   ana 3 horiz=0 layer=7 along=[100,300] perp=475 slide=[450,500] pull=0 aflex=10 acover=[100,300] apull=0
   ana 3 conns SEG:10@100e ; BT:u_noc_a@300 ; SEG:17@300e ; SEG:18@300e
-  ana 4 horiz=0 layer=7 along=[600,650] perp=600 slide=[-1073741824,730] pull=1 aflex=11 acover=[600,650] apull=0
+  ana 4 horiz=0 layer=7 along=[600,650] perp=600 slide=[100,730] pull=1 aflex=11 acover=[600,650] apull=0
   ana 4 conns SEG:14@650e ; SEG:5@600e
   ana 5 horiz=1 layer=6 along=[600,750] perp=600 slide=[500,600] pull=0 aflex=10 acover=[600,750] apull=0
   ana 5 conns SEG:4@600e ; BT:u_disp@750
-  ana 6 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 6 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 6 conns SEG:15@400e ; SEG:7@450e
   ana 7 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 7 conns SEG:6@400e ; BT:u_gpu@250
-  ana 8 horiz=0 layer=7 along=[350,650] perp=550 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[350,650] apull=0
+  ana 8 horiz=0 layer=7 along=[350,650] perp=550 slide=[100,900] pull=0 aflex=11 acover=[350,650] apull=0
   ana 8 conns SEG:13@650e ; SEG:14@650e ; SEG:9@350e
-  ana 9 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[500,550] apull=0
+  ana 9 horiz=1 layer=6 along=[500,550] perp=350 slide=[-40,950] pull=0 aflex=11 acover=[500,550] apull=0
   ana 9 conns SEG:8@550e ; SEG:19@500e
   ana 10 horiz=1 layer=6 along=[475,500] perp=100 slide=[50,150] pull=1 aflex=11 acover=[475,500] apull=0
   ana 10 conns SEG:1@500e ; SEG:3@475e
   ana 11 horiz=1 layer=6 along=[525,537] perp=750 slide=[650,750] pull=1 aflex=11 acover=[525,537] apull=0
   ana 11 conns SEG:2@525e ; SEG:12@537e
-  ana 12 horiz=0 layer=7 along=[650,750] perp=537 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[650,750] apull=0
+  ana 12 horiz=0 layer=7 along=[650,750] perp=537 slide=[100,900] pull=0 aflex=11 acover=[650,750] apull=0
   ana 12 conns SEG:11@750e ; SEG:13@650e
-  ana 13 horiz=1 layer=6 along=[537,550] perp=650 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[537,550] apull=0
+  ana 13 horiz=1 layer=6 along=[537,550] perp=650 slide=[-40,950] pull=0 aflex=11 acover=[537,550] apull=0
   ana 13 conns SEG:8@550e ; SEG:12@537e
-  ana 14 horiz=1 layer=6 along=[550,600] perp=650 slide=[-1073741824,1073741823] pull=-1 aflex=11 acover=[550,600] apull=0
+  ana 14 horiz=1 layer=6 along=[550,600] perp=650 slide=[-40,950] pull=-1 aflex=11 acover=[550,600] apull=0
   ana 14 conns SEG:4@600e ; SEG:8@550e
-  ana 15 horiz=1 layer=6 along=[400,437] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,437] apull=0
+  ana 15 horiz=1 layer=6 along=[400,437] perp=400 slide=[-40,950] pull=1 aflex=11 acover=[400,437] apull=0
   ana 15 conns SEG:6@400e ; SEG:16@437e
-  ana 16 horiz=0 layer=7 along=[300,400] perp=437 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 16 horiz=0 layer=7 along=[300,400] perp=437 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 16 conns SEG:15@400e ; SEG:17@300e
   ana 17 horiz=1 layer=6 along=[437,475] perp=300 slide=[300,400] pull=0 aflex=11 acover=[437,475] apull=0
   ana 17 conns SEG:16@437e ; SEG:3@475e
   ana 18 horiz=1 layer=6 along=[475,500] perp=300 slide=[300,400] pull=0 aflex=11 acover=[475,500] apull=0
   ana 18 conns SEG:3@475e ; SEG:19@500e
-  ana 19 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 19 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 19 conns SEG:9@350e ; SEG:18@300e
  cand type=TRUNK_H_OOB+MST@y1040 wl=2140 trunk=1040 passthru=0
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu,u_disp feedthru=
@@ -2918,7 +2918,7 @@ bundle 3 nets=1 candidates=79
   sconn (18,1)->[19]
   sconn (19,0)->[18]
   sconn (19,1)->[9]
-  ana 0 horiz=1 layer=6 along=[250,750] perp=1040 slide=[850,1073741823] pull=-1 aflex=11 acover=[500,500] apull=0
+  ana 0 horiz=1 layer=6 along=[250,750] perp=1040 slide=[850,1040] pull=-1 aflex=11 acover=[500,500] apull=0
   ana 0 conns SEG:1@500
   ana 1 horiz=0 layer=7 along=[900,1040] perp=500 slide=[450,550] pull=0 aflex=11 acover=[900,1040] apull=0
   ana 1 conns SEG:10@900e ; SEG:0@1040e
@@ -2926,37 +2926,37 @@ bundle 3 nets=1 candidates=79
   ana 2 conns SEG:10@900e ; BT:u_noc_b@750 ; SEG:11@750e
   ana 3 horiz=0 layer=7 along=[150,300] perp=475 slide=[450,500] pull=0 aflex=00 acover=[150,300] apull=0
   ana 3 conns BT:u_io_src@150 ; BT:u_noc_a@300 ; SEG:17@300e ; SEG:18@300e
-  ana 4 horiz=0 layer=7 along=[600,650] perp=600 slide=[-1073741824,730] pull=1 aflex=11 acover=[600,650] apull=0
+  ana 4 horiz=0 layer=7 along=[600,650] perp=600 slide=[100,730] pull=1 aflex=11 acover=[600,650] apull=0
   ana 4 conns SEG:14@650e ; SEG:5@600e
   ana 5 horiz=1 layer=6 along=[600,750] perp=600 slide=[500,600] pull=0 aflex=10 acover=[600,750] apull=0
   ana 5 conns SEG:4@600e ; BT:u_disp@750
-  ana 6 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 6 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 6 conns SEG:15@400e ; SEG:7@450e
   ana 7 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 7 conns SEG:6@400e ; BT:u_gpu@250
-  ana 8 horiz=0 layer=7 along=[350,650] perp=550 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[350,650] apull=0
+  ana 8 horiz=0 layer=7 along=[350,650] perp=550 slide=[100,900] pull=0 aflex=11 acover=[350,650] apull=0
   ana 8 conns SEG:13@650e ; SEG:14@650e ; SEG:9@350e
-  ana 9 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[500,550] apull=0
+  ana 9 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,1040] pull=0 aflex=11 acover=[500,550] apull=0
   ana 9 conns SEG:8@550e ; SEG:19@500e
   ana 10 horiz=1 layer=6 along=[500,525] perp=900 slide=[850,950] pull=-1 aflex=11 acover=[500,525] apull=0
   ana 10 conns SEG:1@500e ; SEG:2@525e
   ana 11 horiz=1 layer=6 along=[525,537] perp=750 slide=[650,750] pull=0 aflex=11 acover=[525,537] apull=0
   ana 11 conns SEG:2@525e ; SEG:12@537e
-  ana 12 horiz=0 layer=7 along=[650,750] perp=537 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[650,750] apull=0
+  ana 12 horiz=0 layer=7 along=[650,750] perp=537 slide=[100,900] pull=0 aflex=11 acover=[650,750] apull=0
   ana 12 conns SEG:11@750e ; SEG:13@650e
-  ana 13 horiz=1 layer=6 along=[537,550] perp=650 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[537,550] apull=0
+  ana 13 horiz=1 layer=6 along=[537,550] perp=650 slide=[50,1040] pull=0 aflex=11 acover=[537,550] apull=0
   ana 13 conns SEG:8@550e ; SEG:12@537e
-  ana 14 horiz=1 layer=6 along=[550,600] perp=650 slide=[-1073741824,1073741823] pull=-1 aflex=11 acover=[550,600] apull=0
+  ana 14 horiz=1 layer=6 along=[550,600] perp=650 slide=[50,1040] pull=-1 aflex=11 acover=[550,600] apull=0
   ana 14 conns SEG:4@600e ; SEG:8@550e
-  ana 15 horiz=1 layer=6 along=[400,437] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,437] apull=0
+  ana 15 horiz=1 layer=6 along=[400,437] perp=400 slide=[50,1040] pull=1 aflex=11 acover=[400,437] apull=0
   ana 15 conns SEG:6@400e ; SEG:16@437e
-  ana 16 horiz=0 layer=7 along=[300,400] perp=437 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 16 horiz=0 layer=7 along=[300,400] perp=437 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 16 conns SEG:15@400e ; SEG:17@300e
   ana 17 horiz=1 layer=6 along=[437,475] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[437,475] apull=0
   ana 17 conns SEG:16@437e ; SEG:3@475e
   ana 18 horiz=1 layer=6 along=[475,500] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[475,500] apull=0
   ana 18 conns SEG:3@475e ; SEG:19@500e
-  ana 19 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 19 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 19 conns SEG:9@350e ; SEG:18@300e
  cand type=TRUNK_H_OOB@y-40 wl=3540 trunk=-40 passthru=0
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu,u_disp feedthru=
@@ -2981,7 +2981,7 @@ bundle 3 nets=1 candidates=79
   sconn (4,1)->[0]
   sconn (5,1)->[0]
   sconn (6,1)->[0]
-  ana 0 horiz=1 layer=6 along=[250,750] perp=-40 slide=[-1073741824,30] pull=6 aflex=11 acover=[250,750] apull=0
+  ana 0 horiz=1 layer=6 along=[250,750] perp=-40 slide=[-40,30] pull=6 aflex=11 acover=[250,750] apull=0
   ana 0 conns SEG:5@250e ; SEG:6@750e ; SEG:1@500 ; SEG:2@500 ; SEG:3@550 ; SEG:4@450
   ana 1 horiz=0 layer=7 along=[-40,50] perp=500 slide=[450,550] pull=0 aflex=10 acover=[-40,50] apull=0
   ana 1 conns BT:u_io_src@50 ; SEG:0@-40e
@@ -3018,7 +3018,7 @@ bundle 3 nets=1 candidates=79
   sconn (4,1)->[0]
   sconn (5,1)->[0]
   sconn (6,1)->[0]
-  ana 0 horiz=1 layer=6 along=[250,750] perp=1040 slide=[970,1073741823] pull=-6 aflex=11 acover=[250,750] apull=0
+  ana 0 horiz=1 layer=6 along=[250,750] perp=1040 slide=[970,1040] pull=-6 aflex=11 acover=[250,750] apull=0
   ana 0 conns SEG:5@250e ; SEG:6@750e ; SEG:1@500 ; SEG:2@500 ; SEG:3@550 ; SEG:4@450
   ana 1 horiz=0 layer=7 along=[150,1040] perp=500 slide=[450,550] pull=0 aflex=01 acover=[150,1040] apull=0
   ana 1 conns BT:u_io_src@150 ; SEG:0@1040e
@@ -3092,31 +3092,31 @@ bundle 3 nets=1 candidates=79
   ana 2 conns BT:u_io_dst@850 ; BT:u_noc_b@750 ; SEG:9@750e ; SEG:10@750e
   ana 3 horiz=0 layer=7 along=[150,300] perp=475 slide=[450,550] pull=0 aflex=01 acover=[150,300] apull=0
   ana 3 conns BT:u_io_src@150 ; SEG:16@300e
-  ana 4 horiz=1 layer=6 along=[600,750] perp=650 slide=[620,1073741823] pull=-1 aflex=11 acover=[600,750] apull=0
+  ana 4 horiz=1 layer=6 along=[600,750] perp=650 slide=[620,950] pull=-1 aflex=11 acover=[600,750] apull=0
   ana 4 conns SEG:11@600e ; SEG:5@750e
   ana 5 horiz=0 layer=7 along=[600,650] perp=750 slide=[750,900] pull=0 aflex=01 acover=[600,650] apull=0
   ana 5 conns SEG:4@650e ; BT:u_disp@600
-  ana 6 horiz=1 layer=6 along=[450,500] perp=700 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[450,500] apull=0
+  ana 6 horiz=1 layer=6 along=[450,500] perp=700 slide=[50,950] pull=0 aflex=11 acover=[450,500] apull=0
   ana 6 conns SEG:8@500e ; SEG:7@450e
-  ana 7 horiz=0 layer=7 along=[400,700] perp=450 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[400,700] apull=0
+  ana 7 horiz=0 layer=7 along=[400,700] perp=450 slide=[100,900] pull=0 aflex=11 acover=[400,700] apull=0
   ana 7 conns SEG:6@700e ; SEG:13@400e ; SEG:14@400e
-  ana 8 horiz=0 layer=7 along=[700,750] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[700,750] apull=0
+  ana 8 horiz=0 layer=7 along=[700,750] perp=500 slide=[100,900] pull=0 aflex=11 acover=[700,750] apull=0
   ana 8 conns SEG:6@700e ; SEG:9@750e
   ana 9 horiz=1 layer=6 along=[500,525] perp=750 slide=[650,750] pull=1 aflex=11 acover=[500,525] apull=0
   ana 9 conns SEG:8@500e ; SEG:2@525e
   ana 10 horiz=1 layer=6 along=[525,600] perp=750 slide=[650,750] pull=1 aflex=11 acover=[525,600] apull=0
   ana 10 conns SEG:2@525e ; SEG:11@600e
-  ana 11 horiz=0 layer=7 along=[650,750] perp=600 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[650,750] apull=0
+  ana 11 horiz=0 layer=7 along=[650,750] perp=600 slide=[100,900] pull=0 aflex=11 acover=[650,750] apull=0
   ana 11 conns SEG:4@650e ; SEG:10@750e
   ana 12 horiz=0 layer=7 along=[350,400] perp=400 slide=[400,500] pull=0 aflex=11 acover=[350,400] apull=0
   ana 12 conns SEG:1@350e ; SEG:13@400e
-  ana 13 horiz=1 layer=6 along=[400,450] perp=400 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[400,450] apull=0
+  ana 13 horiz=1 layer=6 along=[400,450] perp=400 slide=[50,950] pull=0 aflex=11 acover=[400,450] apull=0
   ana 13 conns SEG:7@450e ; SEG:12@400e
-  ana 14 horiz=1 layer=6 along=[450,462] perp=400 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[450,462] apull=0
+  ana 14 horiz=1 layer=6 along=[450,462] perp=400 slide=[50,950] pull=0 aflex=11 acover=[450,462] apull=0
   ana 14 conns SEG:7@450e ; SEG:15@462e
-  ana 15 horiz=0 layer=7 along=[300,400] perp=462 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,400] apull=0
+  ana 15 horiz=0 layer=7 along=[300,400] perp=462 slide=[100,900] pull=0 aflex=11 acover=[300,400] apull=0
   ana 15 conns SEG:14@400e ; SEG:16@300e
-  ana 16 horiz=1 layer=6 along=[462,475] perp=300 slide=[170,1073741823] pull=-1 aflex=11 acover=[462,475] apull=0
+  ana 16 horiz=1 layer=6 along=[462,475] perp=300 slide=[170,950] pull=-1 aflex=11 acover=[462,475] apull=0
   ana 16 conns SEG:3@475e ; SEG:15@462e
  cand type=TRUNK_V+MST@x250 wl=1575 trunk=250 passthru=1
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu,u_disp feedthru=
@@ -3163,17 +3163,17 @@ bundle 3 nets=1 candidates=79
   ana 3 conns BT:u_io_dst@850 ; SEG:8@750e ; SEG:9@750e
   ana 4 horiz=0 layer=7 along=[150,350] perp=475 slide=[450,500] pull=-1 aflex=01 acover=[150,350] apull=0
   ana 4 conns SEG:2@350e ; BT:u_io_src@150
-  ana 5 horiz=1 layer=6 along=[600,750] perp=650 slide=[620,1073741823] pull=-1 aflex=11 acover=[600,750] apull=0
+  ana 5 horiz=1 layer=6 along=[600,750] perp=650 slide=[620,950] pull=-1 aflex=11 acover=[600,750] apull=0
   ana 5 conns SEG:10@600e ; SEG:6@750e
   ana 6 horiz=0 layer=7 along=[600,650] perp=750 slide=[750,900] pull=0 aflex=01 acover=[600,650] apull=0
   ana 6 conns SEG:5@650e ; BT:u_disp@600
   ana 7 horiz=0 layer=7 along=[700,750] perp=500 slide=[500,600] pull=0 aflex=11 acover=[700,750] apull=0
   ana 7 conns SEG:1@700e ; SEG:8@750e
-  ana 8 horiz=1 layer=6 along=[500,525] perp=750 slide=[-1073741824,830] pull=1 aflex=11 acover=[500,525] apull=0
+  ana 8 horiz=1 layer=6 along=[500,525] perp=750 slide=[50,830] pull=1 aflex=11 acover=[500,525] apull=0
   ana 8 conns SEG:3@525e ; SEG:7@500e
-  ana 9 horiz=1 layer=6 along=[525,600] perp=750 slide=[-1073741824,830] pull=1 aflex=11 acover=[525,600] apull=0
+  ana 9 horiz=1 layer=6 along=[525,600] perp=750 slide=[50,830] pull=1 aflex=11 acover=[525,600] apull=0
   ana 9 conns SEG:3@525e ; SEG:10@600e
-  ana 10 horiz=0 layer=7 along=[650,750] perp=600 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[650,750] apull=0
+  ana 10 horiz=0 layer=7 along=[650,750] perp=600 slide=[100,900] pull=0 aflex=11 acover=[650,750] apull=0
   ana 10 conns SEG:5@650e ; SEG:9@750e
  cand type=TRUNK_V+MST@x285 wl=1540 trunk=285 passthru=0
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu,u_disp feedthru=
@@ -3225,17 +3225,17 @@ bundle 3 nets=1 candidates=79
   ana 4 conns BT:u_io_dst@850 ; SEG:9@750e ; SEG:10@750e
   ana 5 horiz=0 layer=7 along=[150,350] perp=475 slide=[450,500] pull=0 aflex=01 acover=[150,350] apull=0
   ana 5 conns SEG:2@350e ; BT:u_io_src@150
-  ana 6 horiz=1 layer=6 along=[600,750] perp=650 slide=[620,1073741823] pull=-1 aflex=11 acover=[600,750] apull=0
+  ana 6 horiz=1 layer=6 along=[600,750] perp=650 slide=[620,950] pull=-1 aflex=11 acover=[600,750] apull=0
   ana 6 conns SEG:11@600e ; SEG:7@750e
   ana 7 horiz=0 layer=7 along=[600,650] perp=750 slide=[750,900] pull=0 aflex=01 acover=[600,650] apull=0
   ana 7 conns SEG:6@650e ; BT:u_disp@600
   ana 8 horiz=0 layer=7 along=[700,750] perp=500 slide=[500,600] pull=0 aflex=11 acover=[700,750] apull=0
   ana 8 conns SEG:1@700e ; SEG:9@750e
-  ana 9 horiz=1 layer=6 along=[500,525] perp=750 slide=[-1073741824,830] pull=1 aflex=11 acover=[500,525] apull=0
+  ana 9 horiz=1 layer=6 along=[500,525] perp=750 slide=[50,830] pull=1 aflex=11 acover=[500,525] apull=0
   ana 9 conns SEG:4@525e ; SEG:8@500e
-  ana 10 horiz=1 layer=6 along=[525,600] perp=750 slide=[-1073741824,830] pull=1 aflex=11 acover=[525,600] apull=0
+  ana 10 horiz=1 layer=6 along=[525,600] perp=750 slide=[50,830] pull=1 aflex=11 acover=[525,600] apull=0
   ana 10 conns SEG:4@525e ; SEG:11@600e
-  ana 11 horiz=0 layer=7 along=[650,750] perp=600 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[650,750] apull=0
+  ana 11 horiz=0 layer=7 along=[650,750] perp=600 slide=[100,900] pull=0 aflex=11 acover=[650,750] apull=0
   ana 11 conns SEG:6@650e ; SEG:10@750e
  cand type=TRUNK_V+MST@x320 wl=1560 trunk=320 passthru=0
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu,u_disp feedthru=
@@ -3287,17 +3287,17 @@ bundle 3 nets=1 candidates=79
   ana 4 conns BT:u_gpu@250 ; SEG:0@320e
   ana 5 horiz=0 layer=7 along=[750,850] perp=525 slide=[450,550] pull=0 aflex=10 acover=[750,850] apull=0
   ana 5 conns BT:u_io_dst@850 ; SEG:9@750e ; SEG:10@750e
-  ana 6 horiz=1 layer=6 along=[600,750] perp=650 slide=[620,1073741823] pull=-1 aflex=11 acover=[600,750] apull=0
+  ana 6 horiz=1 layer=6 along=[600,750] perp=650 slide=[620,950] pull=-1 aflex=11 acover=[600,750] apull=0
   ana 6 conns SEG:11@600e ; SEG:7@750e
   ana 7 horiz=0 layer=7 along=[600,650] perp=750 slide=[750,900] pull=0 aflex=01 acover=[600,650] apull=0
   ana 7 conns SEG:6@650e ; BT:u_disp@600
   ana 8 horiz=0 layer=7 along=[700,750] perp=500 slide=[500,600] pull=0 aflex=11 acover=[700,750] apull=0
   ana 8 conns SEG:2@700e ; SEG:9@750e
-  ana 9 horiz=1 layer=6 along=[500,525] perp=750 slide=[-1073741824,830] pull=1 aflex=11 acover=[500,525] apull=0
+  ana 9 horiz=1 layer=6 along=[500,525] perp=750 slide=[50,830] pull=1 aflex=11 acover=[500,525] apull=0
   ana 9 conns SEG:5@525e ; SEG:8@500e
-  ana 10 horiz=1 layer=6 along=[525,600] perp=750 slide=[-1073741824,830] pull=1 aflex=11 acover=[525,600] apull=0
+  ana 10 horiz=1 layer=6 along=[525,600] perp=750 slide=[50,830] pull=1 aflex=11 acover=[525,600] apull=0
   ana 10 conns SEG:5@525e ; SEG:11@600e
-  ana 11 horiz=0 layer=7 along=[650,750] perp=600 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[650,750] apull=0
+  ana 11 horiz=0 layer=7 along=[650,750] perp=600 slide=[100,900] pull=0 aflex=11 acover=[650,750] apull=0
   ana 11 conns SEG:6@650e ; SEG:10@750e
  cand type=TRUNK_V+MST@x360 wl=1520 trunk=360 passthru=0
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu,u_disp feedthru=
@@ -3782,15 +3782,15 @@ bundle 3 nets=1 candidates=79
   ana 4 conns SEG:1@700e ; BT:u_io_dst@850
   ana 5 horiz=0 layer=7 along=[150,300] perp=475 slide=[450,550] pull=0 aflex=01 acover=[150,300] apull=0
   ana 5 conns BT:u_io_src@150 ; SEG:9@300e ; SEG:10@300e
-  ana 6 horiz=1 layer=6 along=[250,400] perp=400 slide=[-1073741824,430] pull=1 aflex=11 acover=[250,400] apull=0
+  ana 6 horiz=1 layer=6 along=[250,400] perp=400 slide=[50,430] pull=1 aflex=11 acover=[250,400] apull=0
   ana 6 conns SEG:8@400e ; SEG:7@250e
   ana 7 horiz=0 layer=7 along=[400,450] perp=250 slide=[100,250] pull=0 aflex=10 acover=[400,450] apull=0
   ana 7 conns SEG:6@400e ; BT:u_gpu@450
-  ana 8 horiz=0 layer=7 along=[300,400] perp=400 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,400] apull=0
+  ana 8 horiz=0 layer=7 along=[300,400] perp=400 slide=[100,900] pull=0 aflex=11 acover=[300,400] apull=0
   ana 8 conns SEG:6@400e ; SEG:9@300e
-  ana 9 horiz=1 layer=6 along=[400,475] perp=300 slide=[170,1073741823] pull=-1 aflex=11 acover=[400,475] apull=0
+  ana 9 horiz=1 layer=6 along=[400,475] perp=300 slide=[170,950] pull=-1 aflex=11 acover=[400,475] apull=0
   ana 9 conns SEG:5@475e ; SEG:8@400e
-  ana 10 horiz=1 layer=6 along=[475,500] perp=300 slide=[170,1073741823] pull=-1 aflex=11 acover=[475,500] apull=0
+  ana 10 horiz=1 layer=6 along=[475,500] perp=300 slide=[170,950] pull=-1 aflex=11 acover=[475,500] apull=0
   ana 10 conns SEG:5@475e ; SEG:11@500e
   ana 11 horiz=0 layer=7 along=[300,350] perp=500 slide=[400,500] pull=0 aflex=11 acover=[300,350] apull=0
   ana 11 conns SEG:10@300e ; SEG:2@350e
@@ -3839,15 +3839,15 @@ bundle 3 nets=1 candidates=79
   ana 3 conns SEG:1@700e ; BT:u_io_dst@850
   ana 4 horiz=0 layer=7 along=[150,300] perp=475 slide=[450,550] pull=0 aflex=01 acover=[150,300] apull=0
   ana 4 conns BT:u_io_src@150 ; SEG:8@300e ; SEG:9@300e
-  ana 5 horiz=1 layer=6 along=[250,400] perp=400 slide=[-1073741824,430] pull=1 aflex=11 acover=[250,400] apull=0
+  ana 5 horiz=1 layer=6 along=[250,400] perp=400 slide=[50,430] pull=1 aflex=11 acover=[250,400] apull=0
   ana 5 conns SEG:7@400e ; SEG:6@250e
   ana 6 horiz=0 layer=7 along=[400,450] perp=250 slide=[100,250] pull=0 aflex=10 acover=[400,450] apull=0
   ana 6 conns SEG:5@400e ; BT:u_gpu@450
-  ana 7 horiz=0 layer=7 along=[300,400] perp=400 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,400] apull=0
+  ana 7 horiz=0 layer=7 along=[300,400] perp=400 slide=[100,900] pull=0 aflex=11 acover=[300,400] apull=0
   ana 7 conns SEG:5@400e ; SEG:8@300e
-  ana 8 horiz=1 layer=6 along=[400,475] perp=300 slide=[170,1073741823] pull=-1 aflex=11 acover=[400,475] apull=0
+  ana 8 horiz=1 layer=6 along=[400,475] perp=300 slide=[170,950] pull=-1 aflex=11 acover=[400,475] apull=0
   ana 8 conns SEG:4@475e ; SEG:7@400e
-  ana 9 horiz=1 layer=6 along=[475,500] perp=300 slide=[170,1073741823] pull=-1 aflex=11 acover=[475,500] apull=0
+  ana 9 horiz=1 layer=6 along=[475,500] perp=300 slide=[170,950] pull=-1 aflex=11 acover=[475,500] apull=0
   ana 9 conns SEG:4@475e ; SEG:10@500e
   ana 10 horiz=0 layer=7 along=[300,350] perp=500 slide=[400,500] pull=0 aflex=11 acover=[300,350] apull=0
   ana 10 conns SEG:9@300e ; SEG:2@350e
@@ -4433,7 +4433,7 @@ bundle 3 nets=1 candidates=79
   sconn (3,1)->[0]
   sconn (4,1)->[0]
   sconn (5,1)->[0]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=20 slide=[-1073741824,250] pull=5 aflex=11 acover=[150,850] apull=0
+  ana 0 horiz=0 layer=7 along=[150,850] perp=20 slide=[20,250] pull=5 aflex=11 acover=[150,850] apull=0
   ana 0 conns SEG:1@150e ; SEG:2@850e ; SEG:3@700 ; SEG:4@350 ; SEG:5@550
   ana 1 horiz=1 layer=6 along=[20,450] perp=150 slide=[50,150] pull=1 aflex=10 acover=[20,450] apull=0
   ana 1 conns SEG:0@20e ; BT:u_io_src@450
@@ -4465,7 +4465,7 @@ bundle 3 nets=1 candidates=79
   sconn (3,1)->[0]
   sconn (4,1)->[0]
   sconn (5,1)->[0]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=980 slide=[750,1073741823] pull=-5 aflex=11 acover=[150,850] apull=0
+  ana 0 horiz=0 layer=7 along=[150,850] perp=980 slide=[750,980] pull=-5 aflex=11 acover=[150,850] apull=0
   ana 0 conns SEG:1@150e ; SEG:2@850e ; SEG:3@700 ; SEG:4@350 ; SEG:5@500
   ana 1 horiz=1 layer=6 along=[550,980] perp=150 slide=[50,150] pull=1 aflex=01 acover=[550,980] apull=0
   ana 1 conns SEG:0@980e ; BT:u_io_src@550
@@ -4499,7 +4499,7 @@ bundle 4 nets=2 candidates=60
   ana 0 conns SEG:5@175e ; SEG:2@362 ; SEG:3@500
   ana 1 horiz=1 layer=6 along=[175,550] perp=700 slide=[650,750] pull=0 aflex=11 acover=[362,500] apull=0
   ana 1 conns SEG:2@362 ; SEG:4@500
-  ana 2 horiz=0 layer=7 along=[350,700] perp=362 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[350,700] apull=0
+  ana 2 horiz=0 layer=7 along=[350,700] perp=362 slide=[100,900] pull=1 aflex=11 acover=[350,700] apull=0
   ana 2 conns SEG:0@350e ; SEG:1@700e
   ana 3 horiz=0 layer=7 along=[150,350] perp=500 slide=[450,500] pull=-1 aflex=01 acover=[150,350] apull=0
   ana 3 conns BT:u_io_src@150 ; SEG:0@350e
@@ -4548,25 +4548,25 @@ bundle 4 nets=2 candidates=60
   ana 0 conns BT:u_io_dst@850 ; SEG:6@700e
   ana 1 horiz=0 layer=7 along=[150,300] perp=475 slide=[450,500] pull=0 aflex=00 acover=[150,300] apull=0
   ana 1 conns BT:u_io_src@150 ; BT:u_noc_a@300 ; SEG:9@300e ; SEG:10@300e
-  ana 2 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 2 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 2 conns SEG:7@400e ; SEG:3@450e
   ana 3 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 3 conns SEG:2@400e ; BT:u_gpu@250
   ana 4 horiz=0 layer=7 along=[350,700] perp=550 slide=[500,600] pull=0 aflex=11 acover=[350,700] apull=0
   ana 4 conns SEG:6@700e ; SEG:5@350e
-  ana 5 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,750] pull=1 aflex=11 acover=[500,550] apull=0
+  ana 5 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,750] pull=1 aflex=11 acover=[500,550] apull=0
   ana 5 conns SEG:4@550e ; SEG:11@500e
   ana 6 horiz=1 layer=6 along=[525,550] perp=700 slide=[650,750] pull=1 aflex=11 acover=[525,550] apull=0
   ana 6 conns SEG:0@525e ; SEG:4@550e
-  ana 7 horiz=1 layer=6 along=[400,437] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,437] apull=0
+  ana 7 horiz=1 layer=6 along=[400,437] perp=400 slide=[50,950] pull=1 aflex=11 acover=[400,437] apull=0
   ana 7 conns SEG:2@400e ; SEG:8@437e
-  ana 8 horiz=0 layer=7 along=[300,400] perp=437 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 8 horiz=0 layer=7 along=[300,400] perp=437 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 8 conns SEG:7@400e ; SEG:9@300e
   ana 9 horiz=1 layer=6 along=[437,475] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[437,475] apull=0
   ana 9 conns SEG:8@437e ; SEG:1@475e
   ana 10 horiz=1 layer=6 along=[475,500] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[475,500] apull=0
   ana 10 conns SEG:1@475e ; SEG:11@500e
-  ana 11 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 11 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 11 conns SEG:5@350e ; SEG:10@300e
  cand type=TRUNK_H+MST@y100 wl=1475 trunk=100 passthru=1
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu feedthru=
@@ -4613,25 +4613,25 @@ bundle 4 nets=2 candidates=60
   ana 1 conns BT:u_noc_a@300 ; SEG:0@100e ; SEG:10@300e ; SEG:11@300e
   ana 2 horiz=0 layer=7 along=[700,850] perp=525 slide=[500,550] pull=0 aflex=10 acover=[700,850] apull=0
   ana 2 conns BT:u_io_dst@850 ; SEG:7@700e
-  ana 3 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 3 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 3 conns SEG:8@400e ; SEG:4@450e
   ana 4 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 4 conns SEG:3@400e ; BT:u_gpu@250
   ana 5 horiz=0 layer=7 along=[350,700] perp=550 slide=[500,600] pull=0 aflex=11 acover=[350,700] apull=0
   ana 5 conns SEG:7@700e ; SEG:6@350e
-  ana 6 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,750] pull=1 aflex=11 acover=[500,550] apull=0
+  ana 6 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,750] pull=1 aflex=11 acover=[500,550] apull=0
   ana 6 conns SEG:5@550e ; SEG:12@500e
   ana 7 horiz=1 layer=6 along=[525,550] perp=700 slide=[650,750] pull=1 aflex=11 acover=[525,550] apull=0
   ana 7 conns SEG:2@525e ; SEG:5@550e
-  ana 8 horiz=1 layer=6 along=[400,425] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,425] apull=0
+  ana 8 horiz=1 layer=6 along=[400,425] perp=400 slide=[50,950] pull=1 aflex=11 acover=[400,425] apull=0
   ana 8 conns SEG:3@400e ; SEG:9@425e
-  ana 9 horiz=0 layer=7 along=[300,400] perp=425 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 9 horiz=0 layer=7 along=[300,400] perp=425 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 9 conns SEG:8@400e ; SEG:10@300e
   ana 10 horiz=1 layer=6 along=[425,450] perp=300 slide=[300,400] pull=0 aflex=11 acover=[425,450] apull=0
   ana 10 conns SEG:9@425e ; SEG:1@450e
   ana 11 horiz=1 layer=6 along=[450,500] perp=300 slide=[300,400] pull=0 aflex=11 acover=[450,500] apull=0
   ana 11 conns SEG:1@450e ; SEG:12@500e
-  ana 12 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 12 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 12 conns SEG:6@350e ; SEG:11@300e
  cand type=TRUNK_H+MST@y225 wl=1425 trunk=225 passthru=0
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu feedthru=
@@ -4683,25 +4683,25 @@ bundle 4 nets=2 candidates=60
   ana 2 conns BT:u_noc_a@300 ; SEG:0@225e ; SEG:11@300e ; SEG:12@300e
   ana 3 horiz=0 layer=7 along=[700,850] perp=525 slide=[500,550] pull=0 aflex=10 acover=[700,850] apull=0
   ana 3 conns BT:u_io_dst@850 ; SEG:8@700e
-  ana 4 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 4 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 4 conns SEG:9@400e ; SEG:5@450e
   ana 5 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 5 conns SEG:4@400e ; BT:u_gpu@250
   ana 6 horiz=0 layer=7 along=[350,700] perp=550 slide=[500,600] pull=0 aflex=11 acover=[350,700] apull=0
   ana 6 conns SEG:8@700e ; SEG:7@350e
-  ana 7 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,750] pull=1 aflex=11 acover=[500,550] apull=0
+  ana 7 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,750] pull=1 aflex=11 acover=[500,550] apull=0
   ana 7 conns SEG:6@550e ; SEG:13@500e
   ana 8 horiz=1 layer=6 along=[525,550] perp=700 slide=[650,750] pull=1 aflex=11 acover=[525,550] apull=0
   ana 8 conns SEG:3@525e ; SEG:6@550e
-  ana 9 horiz=1 layer=6 along=[400,425] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,425] apull=0
+  ana 9 horiz=1 layer=6 along=[400,425] perp=400 slide=[50,950] pull=1 aflex=11 acover=[400,425] apull=0
   ana 9 conns SEG:4@400e ; SEG:10@425e
-  ana 10 horiz=0 layer=7 along=[300,400] perp=425 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,400] apull=0
+  ana 10 horiz=0 layer=7 along=[300,400] perp=425 slide=[100,900] pull=0 aflex=11 acover=[300,400] apull=0
   ana 10 conns SEG:9@400e ; SEG:11@300e
   ana 11 horiz=1 layer=6 along=[425,450] perp=300 slide=[300,400] pull=0 aflex=11 acover=[425,450] apull=0
   ana 11 conns SEG:10@425e ; SEG:2@450e
   ana 12 horiz=1 layer=6 along=[450,500] perp=300 slide=[300,400] pull=0 aflex=11 acover=[450,500] apull=0
   ana 12 conns SEG:2@450e ; SEG:13@500e
-  ana 13 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 13 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 13 conns SEG:7@350e ; SEG:12@300e
  cand type=TRUNK_H+MST@y420 wl=1030 trunk=420 passthru=0
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu feedthru=
@@ -5134,25 +5134,25 @@ bundle 4 nets=2 candidates=60
   ana 2 conns SEG:0@800e ; SEG:8@700e
   ana 3 horiz=0 layer=7 along=[150,300] perp=475 slide=[450,500] pull=0 aflex=00 acover=[150,300] apull=0
   ana 3 conns BT:u_io_src@150 ; BT:u_noc_a@300 ; SEG:11@300e ; SEG:12@300e
-  ana 4 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 4 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 4 conns SEG:9@400e ; SEG:5@450e
   ana 5 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 5 conns SEG:4@400e ; BT:u_gpu@250
   ana 6 horiz=0 layer=7 along=[350,700] perp=550 slide=[500,600] pull=0 aflex=11 acover=[350,700] apull=0
   ana 6 conns SEG:8@700e ; SEG:7@350e
-  ana 7 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,750] pull=1 aflex=11 acover=[500,550] apull=0
+  ana 7 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,750] pull=1 aflex=11 acover=[500,550] apull=0
   ana 7 conns SEG:6@550e ; SEG:13@500e
   ana 8 horiz=1 layer=6 along=[500,550] perp=700 slide=[650,750] pull=0 aflex=11 acover=[500,550] apull=0
   ana 8 conns SEG:2@500e ; SEG:6@550e
-  ana 9 horiz=1 layer=6 along=[400,437] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,437] apull=0
+  ana 9 horiz=1 layer=6 along=[400,437] perp=400 slide=[50,950] pull=1 aflex=11 acover=[400,437] apull=0
   ana 9 conns SEG:4@400e ; SEG:10@437e
-  ana 10 horiz=0 layer=7 along=[300,400] perp=437 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 10 horiz=0 layer=7 along=[300,400] perp=437 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 10 conns SEG:9@400e ; SEG:11@300e
   ana 11 horiz=1 layer=6 along=[437,475] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[437,475] apull=0
   ana 11 conns SEG:10@437e ; SEG:3@475e
   ana 12 horiz=1 layer=6 along=[475,500] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[475,500] apull=0
   ana 12 conns SEG:3@475e ; SEG:13@500e
-  ana 13 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 13 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 13 conns SEG:7@350e ; SEG:12@300e
  cand type=TRUNK_H+MST@y850 wl=1450 trunk=850 passthru=1
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu feedthru=
@@ -5199,25 +5199,25 @@ bundle 4 nets=2 candidates=60
   ana 1 conns SEG:0@850e ; SEG:7@700e ; BT:u_io_dst@850
   ana 2 horiz=0 layer=7 along=[150,300] perp=475 slide=[450,500] pull=0 aflex=00 acover=[150,300] apull=0
   ana 2 conns BT:u_io_src@150 ; BT:u_noc_a@300 ; SEG:10@300e ; SEG:11@300e
-  ana 3 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 3 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 3 conns SEG:8@400e ; SEG:4@450e
   ana 4 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 4 conns SEG:3@400e ; BT:u_gpu@250
   ana 5 horiz=0 layer=7 along=[350,700] perp=550 slide=[500,600] pull=0 aflex=11 acover=[350,700] apull=0
   ana 5 conns SEG:7@700e ; SEG:6@350e
-  ana 6 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,750] pull=1 aflex=11 acover=[500,550] apull=0
+  ana 6 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,750] pull=1 aflex=11 acover=[500,550] apull=0
   ana 6 conns SEG:5@550e ; SEG:12@500e
   ana 7 horiz=1 layer=6 along=[500,550] perp=700 slide=[650,750] pull=1 aflex=11 acover=[500,550] apull=0
   ana 7 conns SEG:1@500e ; SEG:5@550e
-  ana 8 horiz=1 layer=6 along=[400,437] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,437] apull=0
+  ana 8 horiz=1 layer=6 along=[400,437] perp=400 slide=[50,950] pull=1 aflex=11 acover=[400,437] apull=0
   ana 8 conns SEG:3@400e ; SEG:9@437e
-  ana 9 horiz=0 layer=7 along=[300,400] perp=437 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 9 horiz=0 layer=7 along=[300,400] perp=437 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 9 conns SEG:8@400e ; SEG:10@300e
   ana 10 horiz=1 layer=6 along=[437,475] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[437,475] apull=0
   ana 10 conns SEG:9@437e ; SEG:2@475e
   ana 11 horiz=1 layer=6 along=[475,500] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[475,500] apull=0
   ana 11 conns SEG:2@475e ; SEG:12@500e
-  ana 12 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 12 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 12 conns SEG:6@350e ; SEG:11@300e
  cand type=TRUNK_H+MST@y900 wl=1500 trunk=900 passthru=1
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu feedthru=
@@ -5264,25 +5264,25 @@ bundle 4 nets=2 candidates=60
   ana 1 conns SEG:0@900e ; SEG:7@700e
   ana 2 horiz=0 layer=7 along=[150,300] perp=475 slide=[450,500] pull=0 aflex=00 acover=[150,300] apull=0
   ana 2 conns BT:u_io_src@150 ; BT:u_noc_a@300 ; SEG:10@300e ; SEG:11@300e
-  ana 3 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 3 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 3 conns SEG:8@400e ; SEG:4@450e
   ana 4 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 4 conns SEG:3@400e ; BT:u_gpu@250
   ana 5 horiz=0 layer=7 along=[350,700] perp=550 slide=[500,600] pull=0 aflex=11 acover=[350,700] apull=0
   ana 5 conns SEG:7@700e ; SEG:6@350e
-  ana 6 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,750] pull=1 aflex=11 acover=[500,550] apull=0
+  ana 6 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,750] pull=1 aflex=11 acover=[500,550] apull=0
   ana 6 conns SEG:5@550e ; SEG:12@500e
   ana 7 horiz=1 layer=6 along=[500,550] perp=700 slide=[650,750] pull=1 aflex=11 acover=[500,550] apull=0
   ana 7 conns SEG:1@500e ; SEG:5@550e
-  ana 8 horiz=1 layer=6 along=[400,437] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,437] apull=0
+  ana 8 horiz=1 layer=6 along=[400,437] perp=400 slide=[50,950] pull=1 aflex=11 acover=[400,437] apull=0
   ana 8 conns SEG:3@400e ; SEG:9@437e
-  ana 9 horiz=0 layer=7 along=[300,400] perp=437 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 9 horiz=0 layer=7 along=[300,400] perp=437 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 9 conns SEG:8@400e ; SEG:10@300e
   ana 10 horiz=1 layer=6 along=[437,475] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[437,475] apull=0
   ana 10 conns SEG:9@437e ; SEG:2@475e
   ana 11 horiz=1 layer=6 along=[475,500] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[475,500] apull=0
   ana 11 conns SEG:2@475e ; SEG:12@500e
-  ana 12 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 12 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 12 conns SEG:6@350e ; SEG:11@300e
  cand type=TRUNK_H@y100 wl=2100 trunk=100 passthru=1
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu feedthru=
@@ -5791,7 +5791,7 @@ bundle 4 nets=2 candidates=60
   sconn (13,1)->[14]
   sconn (14,0)->[13]
   sconn (14,1)->[7]
-  ana 0 horiz=1 layer=6 along=[250,500] perp=-40 slide=[-1073741824,150] pull=1 aflex=11 acover=[450,450] apull=0
+  ana 0 horiz=1 layer=6 along=[250,500] perp=-40 slide=[-40,150] pull=1 aflex=11 acover=[450,450] apull=0
   ana 0 conns SEG:1@450
   ana 1 horiz=0 layer=7 along=[-40,100] perp=450 slide=[450,550] pull=0 aflex=11 acover=[-40,100] apull=0
   ana 1 conns SEG:8@100e ; SEG:0@-40e
@@ -5799,27 +5799,27 @@ bundle 4 nets=2 candidates=60
   ana 2 conns BT:u_io_dst@850 ; SEG:9@700e
   ana 3 horiz=0 layer=7 along=[100,300] perp=475 slide=[450,500] pull=0 aflex=10 acover=[100,300] apull=0
   ana 3 conns SEG:8@100e ; BT:u_noc_a@300 ; SEG:12@300e ; SEG:13@300e
-  ana 4 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 4 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 4 conns SEG:10@400e ; SEG:5@450e
   ana 5 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 5 conns SEG:4@400e ; BT:u_gpu@250
   ana 6 horiz=0 layer=7 along=[350,700] perp=550 slide=[500,600] pull=0 aflex=11 acover=[350,700] apull=0
   ana 6 conns SEG:9@700e ; SEG:7@350e
-  ana 7 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,750] pull=1 aflex=11 acover=[500,550] apull=0
+  ana 7 horiz=1 layer=6 along=[500,550] perp=350 slide=[-40,750] pull=1 aflex=11 acover=[500,550] apull=0
   ana 7 conns SEG:6@550e ; SEG:14@500e
   ana 8 horiz=1 layer=6 along=[450,475] perp=100 slide=[50,150] pull=1 aflex=11 acover=[450,475] apull=0
   ana 8 conns SEG:1@450e ; SEG:3@475e
   ana 9 horiz=1 layer=6 along=[525,550] perp=700 slide=[650,750] pull=1 aflex=11 acover=[525,550] apull=0
   ana 9 conns SEG:2@525e ; SEG:6@550e
-  ana 10 horiz=1 layer=6 along=[400,437] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,437] apull=0
+  ana 10 horiz=1 layer=6 along=[400,437] perp=400 slide=[-40,950] pull=1 aflex=11 acover=[400,437] apull=0
   ana 10 conns SEG:4@400e ; SEG:11@437e
-  ana 11 horiz=0 layer=7 along=[300,400] perp=437 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 11 horiz=0 layer=7 along=[300,400] perp=437 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 11 conns SEG:10@400e ; SEG:12@300e
   ana 12 horiz=1 layer=6 along=[437,475] perp=300 slide=[300,400] pull=0 aflex=11 acover=[437,475] apull=0
   ana 12 conns SEG:11@437e ; SEG:3@475e
   ana 13 horiz=1 layer=6 along=[475,500] perp=300 slide=[300,400] pull=0 aflex=11 acover=[475,500] apull=0
   ana 13 conns SEG:3@475e ; SEG:14@500e
-  ana 14 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 14 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 14 conns SEG:7@350e ; SEG:13@300e
  cand type=TRUNK_H_OOB+MST@y1040 wl=1690 trunk=1040 passthru=0
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu feedthru=
@@ -5865,7 +5865,7 @@ bundle 4 nets=2 candidates=60
   sconn (13,1)->[14]
   sconn (14,0)->[13]
   sconn (14,1)->[7]
-  ana 0 horiz=1 layer=6 along=[250,500] perp=1040 slide=[850,1073741823] pull=-1 aflex=11 acover=[450,450] apull=0
+  ana 0 horiz=1 layer=6 along=[250,500] perp=1040 slide=[850,1040] pull=-1 aflex=11 acover=[450,450] apull=0
   ana 0 conns SEG:1@450
   ana 1 horiz=0 layer=7 along=[900,1040] perp=450 slide=[450,550] pull=1 aflex=11 acover=[900,1040] apull=0
   ana 1 conns SEG:8@900e ; SEG:0@1040e
@@ -5873,27 +5873,27 @@ bundle 4 nets=2 candidates=60
   ana 2 conns SEG:8@900e ; SEG:9@700e
   ana 3 horiz=0 layer=7 along=[150,300] perp=475 slide=[450,500] pull=0 aflex=00 acover=[150,300] apull=0
   ana 3 conns BT:u_io_src@150 ; BT:u_noc_a@300 ; SEG:12@300e ; SEG:13@300e
-  ana 4 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,1073741823] pull=-1 aflex=11 acover=[400,450] apull=0
+  ana 4 horiz=0 layer=7 along=[400,450] perp=400 slide=[270,900] pull=-1 aflex=11 acover=[400,450] apull=0
   ana 4 conns SEG:10@400e ; SEG:5@450e
   ana 5 horiz=1 layer=6 along=[250,400] perp=450 slide=[450,550] pull=0 aflex=01 acover=[250,400] apull=0
   ana 5 conns SEG:4@400e ; BT:u_gpu@250
   ana 6 horiz=0 layer=7 along=[350,700] perp=550 slide=[500,600] pull=0 aflex=11 acover=[350,700] apull=0
   ana 6 conns SEG:9@700e ; SEG:7@350e
-  ana 7 horiz=1 layer=6 along=[500,550] perp=350 slide=[-1073741824,750] pull=1 aflex=11 acover=[500,550] apull=0
+  ana 7 horiz=1 layer=6 along=[500,550] perp=350 slide=[50,750] pull=1 aflex=11 acover=[500,550] apull=0
   ana 7 conns SEG:6@550e ; SEG:14@500e
   ana 8 horiz=1 layer=6 along=[450,525] perp=900 slide=[850,950] pull=-1 aflex=11 acover=[450,525] apull=0
   ana 8 conns SEG:1@450e ; SEG:2@525e
   ana 9 horiz=1 layer=6 along=[525,550] perp=700 slide=[650,750] pull=1 aflex=11 acover=[525,550] apull=0
   ana 9 conns SEG:2@525e ; SEG:6@550e
-  ana 10 horiz=1 layer=6 along=[400,437] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,437] apull=0
+  ana 10 horiz=1 layer=6 along=[400,437] perp=400 slide=[50,1040] pull=1 aflex=11 acover=[400,437] apull=0
   ana 10 conns SEG:4@400e ; SEG:11@437e
-  ana 11 horiz=0 layer=7 along=[300,400] perp=437 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[300,400] apull=0
+  ana 11 horiz=0 layer=7 along=[300,400] perp=437 slide=[100,900] pull=1 aflex=11 acover=[300,400] apull=0
   ana 11 conns SEG:10@400e ; SEG:12@300e
   ana 12 horiz=1 layer=6 along=[437,475] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[437,475] apull=0
   ana 12 conns SEG:11@437e ; SEG:3@475e
   ana 13 horiz=1 layer=6 along=[475,500] perp=300 slide=[300,400] pull=-1 aflex=11 acover=[475,500] apull=0
   ana 13 conns SEG:3@475e ; SEG:14@500e
-  ana 14 horiz=0 layer=7 along=[300,350] perp=500 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,350] apull=0
+  ana 14 horiz=0 layer=7 along=[300,350] perp=500 slide=[100,900] pull=0 aflex=11 acover=[300,350] apull=0
   ana 14 conns SEG:7@350e ; SEG:13@300e
  cand type=TRUNK_H_OOB@y-40 wl=2750 trunk=-40 passthru=0
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu feedthru=
@@ -5915,7 +5915,7 @@ bundle 4 nets=2 candidates=60
   sconn (3,1)->[0]
   sconn (4,1)->[0]
   sconn (5,1)->[0]
-  ana 0 horiz=1 layer=6 along=[250,500] perp=-40 slide=[-1073741824,30] pull=5 aflex=11 acover=[250,500] apull=0
+  ana 0 horiz=1 layer=6 along=[250,500] perp=-40 slide=[-40,30] pull=5 aflex=11 acover=[250,500] apull=0
   ana 0 conns SEG:5@250e ; SEG:3@500e ; SEG:1@450 ; SEG:2@450 ; SEG:4@450
   ana 1 horiz=0 layer=7 along=[-40,50] perp=450 slide=[450,550] pull=0 aflex=10 acover=[-40,50] apull=0
   ana 1 conns BT:u_io_src@50 ; SEG:0@-40e
@@ -5947,7 +5947,7 @@ bundle 4 nets=2 candidates=60
   sconn (3,1)->[0]
   sconn (4,1)->[0]
   sconn (5,1)->[0]
-  ana 0 horiz=1 layer=6 along=[250,500] perp=1040 slide=[970,1073741823] pull=-5 aflex=11 acover=[250,500] apull=0
+  ana 0 horiz=1 layer=6 along=[250,500] perp=1040 slide=[970,1040] pull=-5 aflex=11 acover=[250,500] apull=0
   ana 0 conns SEG:5@250e ; SEG:3@500e ; SEG:1@450 ; SEG:2@450 ; SEG:4@450
   ana 1 horiz=0 layer=7 along=[150,1040] perp=450 slide=[450,550] pull=0 aflex=01 acover=[150,1040] apull=0
   ana 1 conns BT:u_io_src@150 ; SEG:0@1040e
@@ -6004,17 +6004,17 @@ bundle 4 nets=2 candidates=60
   ana 3 conns BT:u_io_src@150 ; SEG:10@300e
   ana 4 horiz=1 layer=6 along=[450,525] perp=700 slide=[650,750] pull=1 aflex=11 acover=[450,525] apull=0
   ana 4 conns SEG:2@525e ; SEG:5@450e
-  ana 5 horiz=0 layer=7 along=[400,700] perp=450 slide=[-1073741824,600] pull=1 aflex=11 acover=[400,700] apull=0
+  ana 5 horiz=0 layer=7 along=[400,700] perp=450 slide=[100,600] pull=1 aflex=11 acover=[400,700] apull=0
   ana 5 conns SEG:4@700e ; SEG:7@400e ; SEG:8@400e
   ana 6 horiz=0 layer=7 along=[350,400] perp=400 slide=[400,500] pull=0 aflex=11 acover=[350,400] apull=0
   ana 6 conns SEG:1@350e ; SEG:7@400e
-  ana 7 horiz=1 layer=6 along=[400,450] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[400,450] apull=0
+  ana 7 horiz=1 layer=6 along=[400,450] perp=400 slide=[50,950] pull=1 aflex=11 acover=[400,450] apull=0
   ana 7 conns SEG:5@450e ; SEG:6@400e
-  ana 8 horiz=1 layer=6 along=[450,462] perp=400 slide=[-1073741824,1073741823] pull=1 aflex=11 acover=[450,462] apull=0
+  ana 8 horiz=1 layer=6 along=[450,462] perp=400 slide=[50,950] pull=1 aflex=11 acover=[450,462] apull=0
   ana 8 conns SEG:5@450e ; SEG:9@462e
-  ana 9 horiz=0 layer=7 along=[300,400] perp=462 slide=[-1073741824,1073741823] pull=0 aflex=11 acover=[300,400] apull=0
+  ana 9 horiz=0 layer=7 along=[300,400] perp=462 slide=[100,900] pull=0 aflex=11 acover=[300,400] apull=0
   ana 9 conns SEG:8@400e ; SEG:10@300e
-  ana 10 horiz=1 layer=6 along=[462,475] perp=300 slide=[170,1073741823] pull=-1 aflex=11 acover=[462,475] apull=0
+  ana 10 horiz=1 layer=6 along=[462,475] perp=300 slide=[170,950] pull=-1 aflex=11 acover=[462,475] apull=0
   ana 10 conns SEG:3@475e ; SEG:9@462e
  cand type=TRUNK_V+MST@x250 wl=1200 trunk=250 passthru=1
   blocks=u_io_src,u_io_dst,u_noc_b,u_noc_a,u_gpu feedthru=
@@ -6517,7 +6517,7 @@ bundle 4 nets=2 candidates=60
   sconn (6,0)->[5]
   sconn (7,0)->[4]
   sconn (7,1)->[5]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=650 slide=[620,1073741823] pull=-4 aflex=11 acover=[150,850] apull=0
+  ana 0 horiz=0 layer=7 along=[150,850] perp=650 slide=[620,900] pull=-4 aflex=11 acover=[150,850] apull=0
   ana 0 conns SEG:1@150e ; SEG:2@850e ; SEG:3@700 ; SEG:4@350
   ana 1 horiz=1 layer=6 along=[550,650] perp=150 slide=[50,150] pull=1 aflex=01 acover=[550,650] apull=0
   ana 1 conns SEG:0@650e ; BT:u_io_src@550
@@ -6553,7 +6553,7 @@ bundle 4 nets=2 candidates=60
   sconn (3,1)->[0]
   sconn (4,1)->[0]
   sconn (5,1)->[0]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=40 slide=[-1073741824,80] pull=5 aflex=11 acover=[150,850] apull=0
+  ana 0 horiz=0 layer=7 along=[150,850] perp=40 slide=[40,80] pull=5 aflex=11 acover=[150,850] apull=0
   ana 0 conns SEG:1@150e ; SEG:2@850e ; SEG:3@700 ; SEG:4@350 ; SEG:5@500
   ana 1 horiz=1 layer=6 along=[40,450] perp=150 slide=[50,150] pull=1 aflex=10 acover=[40,450] apull=0
   ana 1 conns SEG:0@40e ; BT:u_io_src@450
@@ -6585,7 +6585,7 @@ bundle 4 nets=2 candidates=60
   sconn (3,1)->[0]
   sconn (4,1)->[0]
   sconn (5,1)->[0]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=650 slide=[620,1073741823] pull=-5 aflex=11 acover=[150,850] apull=0
+  ana 0 horiz=0 layer=7 along=[150,850] perp=650 slide=[620,900] pull=-5 aflex=11 acover=[150,850] apull=0
   ana 0 conns SEG:1@150e ; SEG:2@850e ; SEG:3@700 ; SEG:4@350 ; SEG:5@500
   ana 1 horiz=1 layer=6 along=[550,650] perp=150 slide=[50,150] pull=1 aflex=01 acover=[550,650] apull=0
   ana 1 conns SEG:0@650e ; BT:u_io_src@550
@@ -6617,7 +6617,7 @@ bundle 4 nets=2 candidates=60
   sconn (3,1)->[0]
   sconn (4,1)->[0]
   sconn (5,1)->[0]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=760 slide=[620,1073741823] pull=-5 aflex=11 acover=[150,850] apull=0
+  ana 0 horiz=0 layer=7 along=[150,850] perp=760 slide=[620,900] pull=-5 aflex=11 acover=[150,850] apull=0
   ana 0 conns SEG:1@150e ; SEG:2@850e ; SEG:3@700 ; SEG:4@350 ; SEG:5@500
   ana 1 horiz=1 layer=6 along=[550,760] perp=150 slide=[50,150] pull=1 aflex=01 acover=[550,760] apull=0
   ana 1 conns SEG:0@760e ; BT:u_io_src@550
@@ -6763,7 +6763,7 @@ bundle 5 nets=16 candidates=45
   sconn (2,0)->[3]
   sconn (2,1)->[1]
   sconn (3,1)->[2]
-  ana 0 horiz=1 layer=6 along=[550,750] perp=675 slide=[-1073741824,900] pull=1 aflex=11 acover=[750,750] apull=-1
+  ana 0 horiz=1 layer=6 along=[550,750] perp=675 slide=[50,900] pull=1 aflex=11 acover=[750,750] apull=-1
   ana 0 conns SEG:1@750e
   ana 1 horiz=0 layer=7 along=[675,875] perp=750 slide=[750,900] pull=-1 aflex=11 acover=[675,875] apull=0
   ana 1 conns SEG:0@675e ; SEG:2@875e
@@ -7081,7 +7081,7 @@ bundle 5 nets=16 candidates=45
   sconn (3,1)->[2]
   sconn (4,0)->[1]
   sconn (4,1)->[3]
-  ana 0 horiz=1 layer=6 along=[550,750] perp=-40 slide=[-1073741824,150] pull=1 aflex=11 acover=[550,550] apull=1
+  ana 0 horiz=1 layer=6 along=[550,750] perp=-40 slide=[-40,150] pull=1 aflex=11 acover=[550,550] apull=1
   ana 0 conns SEG:1@550e
   ana 1 horiz=0 layer=7 along=[-40,100] perp=550 slide=[450,550] pull=0 aflex=11 acover=[-40,100] apull=0
   ana 1 conns SEG:0@-40e ; SEG:4@100e
@@ -7108,7 +7108,7 @@ bundle 5 nets=16 candidates=45
   sconn (3,1)->[4]
   sconn (4,0)->[1]
   sconn (4,1)->[3]
-  ana 0 horiz=1 layer=6 along=[550,750] perp=1040 slide=[920,1073741823] pull=-2 aflex=11 acover=[550,750] apull=0
+  ana 0 horiz=1 layer=6 along=[550,750] perp=1040 slide=[920,1040] pull=-2 aflex=11 acover=[550,750] apull=0
   ana 0 conns SEG:1@550e ; SEG:2@750e
   ana 1 horiz=0 layer=7 along=[900,1040] perp=550 slide=[450,550] pull=1 aflex=11 acover=[900,1040] apull=0
   ana 1 conns SEG:0@1040e ; SEG:4@900e
@@ -7132,7 +7132,7 @@ bundle 5 nets=16 candidates=45
   sconn (1,1)->[0]
   sconn (2,1)->[0]
   sconn (3,1)->[0]
-  ana 0 horiz=1 layer=6 along=[550,750] perp=-40 slide=[-1073741824,30] pull=3 aflex=11 acover=[550,750] apull=0
+  ana 0 horiz=1 layer=6 along=[550,750] perp=-40 slide=[-40,30] pull=3 aflex=11 acover=[550,750] apull=0
   ana 0 conns SEG:1@550e ; SEG:2@550e ; SEG:3@750e
   ana 1 horiz=0 layer=7 along=[-40,50] perp=550 slide=[450,550] pull=1 aflex=10 acover=[-40,50] apull=0
   ana 1 conns SEG:0@-40e ; BT:u_io_src@50
@@ -7154,7 +7154,7 @@ bundle 5 nets=16 candidates=45
   sconn (1,1)->[0]
   sconn (2,1)->[0]
   sconn (3,1)->[0]
-  ana 0 horiz=1 layer=6 along=[550,750] perp=1040 slide=[970,1073741823] pull=-3 aflex=11 acover=[550,750] apull=0
+  ana 0 horiz=1 layer=6 along=[550,750] perp=1040 slide=[970,1040] pull=-3 aflex=11 acover=[550,750] apull=0
   ana 0 conns SEG:1@550e ; SEG:2@550e ; SEG:3@750e
   ana 1 horiz=0 layer=7 along=[150,1040] perp=550 slide=[450,550] pull=1 aflex=01 acover=[150,1040] apull=0
   ana 1 conns SEG:0@1040e ; BT:u_io_src@150
@@ -7175,7 +7175,7 @@ bundle 5 nets=16 candidates=45
   sconn (2,0)->[3]
   sconn (3,0)->[1]
   sconn (3,1)->[2]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=625 slide=[450,1073741823] pull=-1 aflex=11 acover=[150,150] apull=1
+  ana 0 horiz=0 layer=7 along=[150,850] perp=625 slide=[450,900] pull=-1 aflex=11 acover=[150,150] apull=1
   ana 0 conns SEG:1@150e
   ana 1 horiz=1 layer=6 along=[500,625] perp=150 slide=[50,150] pull=1 aflex=11 acover=[500,625] apull=0
   ana 1 conns SEG:0@625e ; SEG:3@500e
@@ -7199,7 +7199,7 @@ bundle 5 nets=16 candidates=45
   sconn (3,1)->[2]
   sconn (4,0)->[1]
   sconn (4,1)->[2]
-  ana 0 horiz=0 layer=7 along=[825,850] perp=700 slide=[-1073741824,900] pull=1 aflex=11 acover=[825,825] apull=1
+  ana 0 horiz=0 layer=7 along=[825,850] perp=700 slide=[100,900] pull=1 aflex=11 acover=[825,825] apull=1
   ana 0 conns SEG:1@825e
   ana 1 horiz=1 layer=6 along=[700,750] perp=825 slide=[750,900] pull=1 aflex=11 acover=[700,750] apull=0
   ana 1 conns SEG:0@700e ; SEG:4@750e
@@ -7225,7 +7225,7 @@ bundle 5 nets=16 candidates=45
   sconn (3,1)->[2]
   sconn (4,0)->[1]
   sconn (4,1)->[2]
-  ana 0 horiz=0 layer=7 along=[825,850] perp=725 slide=[-1073741824,900] pull=1 aflex=11 acover=[825,825] apull=1
+  ana 0 horiz=0 layer=7 along=[825,850] perp=725 slide=[100,900] pull=1 aflex=11 acover=[825,825] apull=1
   ana 0 conns SEG:1@825e
   ana 1 horiz=1 layer=6 along=[725,750] perp=825 slide=[750,900] pull=1 aflex=11 acover=[725,750] apull=0
   ana 1 conns SEG:0@725e ; SEG:4@750e
@@ -7408,7 +7408,7 @@ bundle 5 nets=16 candidates=45
   sconn (3,0)->[4]
   sconn (4,0)->[2]
   sconn (4,1)->[3]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=262 slide=[-1073741824,430] pull=2 aflex=11 acover=[150,850] apull=0
+  ana 0 horiz=0 layer=7 along=[150,850] perp=262 slide=[100,430] pull=2 aflex=11 acover=[150,850] apull=0
   ana 0 conns SEG:1@150e ; SEG:2@850e
   ana 1 horiz=1 layer=6 along=[262,450] perp=150 slide=[50,150] pull=1 aflex=10 acover=[262,450] apull=0
   ana 1 conns SEG:0@262e ; BT:u_io_src@450
@@ -7435,7 +7435,7 @@ bundle 5 nets=16 candidates=45
   sconn (3,0)->[4]
   sconn (4,0)->[2]
   sconn (4,1)->[3]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=385 slide=[-1073741824,430] pull=2 aflex=11 acover=[150,850] apull=0
+  ana 0 horiz=0 layer=7 along=[150,850] perp=385 slide=[100,430] pull=2 aflex=11 acover=[150,850] apull=0
   ana 0 conns SEG:1@150e ; SEG:2@850e
   ana 1 horiz=1 layer=6 along=[385,450] perp=150 slide=[50,150] pull=1 aflex=10 acover=[385,450] apull=0
   ana 1 conns SEG:0@385e ; BT:u_io_src@450
@@ -7458,7 +7458,7 @@ bundle 5 nets=16 candidates=45
   sconn (2,0)->[3]
   sconn (3,0)->[1]
   sconn (3,1)->[2]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=958 slide=[450,1073741823] pull=-1 aflex=11 acover=[150,150] apull=1
+  ana 0 horiz=0 layer=7 along=[150,850] perp=958 slide=[450,958] pull=-1 aflex=11 acover=[150,150] apull=1
   ana 0 conns SEG:1@150e
   ana 1 horiz=1 layer=6 along=[500,958] perp=150 slide=[50,150] pull=1 aflex=11 acover=[500,958] apull=0
   ana 1 conns SEG:0@958e ; SEG:3@500e
@@ -7480,7 +7480,7 @@ bundle 5 nets=16 candidates=45
   sconn (1,1)->[0]
   sconn (2,1)->[0]
   sconn (3,1)->[0]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=262 slide=[-1073741824,430] pull=3 aflex=11 acover=[150,850] apull=0
+  ana 0 horiz=0 layer=7 along=[150,850] perp=262 slide=[100,430] pull=3 aflex=11 acover=[150,850] apull=0
   ana 0 conns SEG:1@150e ; SEG:2@850e ; SEG:3@825
   ana 1 horiz=1 layer=6 along=[262,450] perp=150 slide=[50,150] pull=1 aflex=10 acover=[262,450] apull=0
   ana 1 conns SEG:0@262e ; BT:u_io_src@450
@@ -7502,7 +7502,7 @@ bundle 5 nets=16 candidates=45
   sconn (1,1)->[0]
   sconn (2,1)->[0]
   sconn (3,1)->[0]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=385 slide=[-1073741824,430] pull=3 aflex=11 acover=[150,850] apull=0
+  ana 0 horiz=0 layer=7 along=[150,850] perp=385 slide=[100,430] pull=3 aflex=11 acover=[150,850] apull=0
   ana 0 conns SEG:1@150e ; SEG:2@850e ; SEG:3@825
   ana 1 horiz=1 layer=6 along=[385,450] perp=150 slide=[50,150] pull=1 aflex=10 acover=[385,450] apull=0
   ana 1 conns SEG:0@385e ; BT:u_io_src@450
@@ -7521,7 +7521,7 @@ bundle 5 nets=16 candidates=45
   sconn (0,1)->[2]
   sconn (1,1)->[0]
   sconn (2,1)->[0]
-  ana 0 horiz=0 layer=7 along=[150,850] perp=958 slide=[750,1073741823] pull=-2 aflex=11 acover=[150,850] apull=0
+  ana 0 horiz=0 layer=7 along=[150,850] perp=958 slide=[750,958] pull=-2 aflex=11 acover=[150,850] apull=0
   ana 0 conns SEG:1@150e ; SEG:2@850e
   ana 1 horiz=1 layer=6 along=[550,958] perp=150 slide=[50,150] pull=1 aflex=01 acover=[550,958] apull=0
   ana 1 conns SEG:0@958e ; BT:u_io_src@550

@@ -278,7 +278,7 @@ bundle 1 nets=60 candidates=21
   sconn (3,1)->[0]
   sconn (4,1)->[0]
   sconn (5,1)->[0]
-  ana 0 horiz=1 layer=6 along=[4862,5772] perp=6787 slide=[6320,1073741823] pull=-5 aflex=11 acover=[4862,5772] apull=0
+  ana 0 horiz=1 layer=6 along=[4862,5772] perp=6787 slide=[6320,7087] pull=-5 aflex=11 acover=[4862,5772] apull=0
   ana 0 conns SEG:1@4862e ; SEG:5@5772e ; SEG:2@5485 ; SEG:3@5485 ; SEG:4@5485
   ana 1 horiz=0 layer=7 along=[6300,6787] perp=4862 slide=[4280,5445] pull=1 aflex=01 acover=[6300,6787] apull=0
   ana 1 conns SEG:0@6787e ; BT:blk_02@6300
@@ -310,7 +310,7 @@ bundle 1 nets=60 candidates=21
   sconn (3,1)->[0]
   sconn (4,1)->[0]
   sconn (5,1)->[0]
-  ana 0 horiz=1 layer=6 along=[4862,5772] perp=938 slide=[-1073741824,1405] pull=5 aflex=11 acover=[4862,5772] apull=0
+  ana 0 horiz=1 layer=6 along=[4862,5772] perp=938 slide=[638,1405] pull=5 aflex=11 acover=[4862,5772] apull=0
   ana 0 conns SEG:1@4862e ; SEG:5@5772e ; SEG:2@5485 ; SEG:3@5485 ; SEG:4@5485
   ana 1 horiz=0 layer=7 along=[938,5350] perp=4862 slide=[4280,5445] pull=1 aflex=10 acover=[938,5350] apull=0
   ana 1 conns SEG:0@938e ; BT:blk_02@5350
@@ -432,7 +432,7 @@ bundle 1 nets=60 candidates=21
   sconn (3,1)->[4]
   sconn (4,0)->[3]
   sconn (5,1)->[1]
-  ana 0 horiz=0 layer=7 along=[2875,4887] perp=4098 slide=[-1073741824,6100] pull=2 aflex=11 acover=[2875,4887] apull=0
+  ana 0 horiz=0 layer=7 along=[2875,4887] perp=4098 slide=[3598,6100] pull=2 aflex=11 acover=[2875,4887] apull=0
   ana 0 conns SEG:1@2875e ; SEG:2@4887e
   ana 1 horiz=1 layer=6 along=[4098,5485] perp=2875 slide=[2385,3365] pull=0 aflex=11 acover=[4098,5485] apull=0
   ana 1 conns SEG:0@4098e ; SEG:5@5485e
@@ -464,7 +464,7 @@ bundle 1 nets=60 candidates=21
   sconn (3,1)->[4]
   sconn (4,0)->[3]
   sconn (5,1)->[1]
-  ana 0 horiz=0 layer=7 along=[2875,4887] perp=6282 slide=[4870,1073741823] pull=-2 aflex=11 acover=[2875,4887] apull=0
+  ana 0 horiz=0 layer=7 along=[2875,4887] perp=6282 slide=[4870,6782] pull=-2 aflex=11 acover=[2875,4887] apull=0
   ana 0 conns SEG:1@2875e ; SEG:2@4887e
   ana 1 horiz=1 layer=6 along=[5485,6282] perp=2875 slide=[2385,3365] pull=0 aflex=11 acover=[5485,6282] apull=0
   ana 1 conns SEG:0@6282e ; SEG:5@5485e
@@ -493,7 +493,7 @@ bundle 1 nets=60 candidates=21
   sconn (2,1)->[0]
   sconn (3,1)->[0]
   sconn (4,1)->[0]
-  ana 0 horiz=0 layer=7 along=[1905,5825] perp=4098 slide=[-1073741824,4850] pull=4 aflex=11 acover=[1905,5825] apull=0
+  ana 0 horiz=0 layer=7 along=[1905,5825] perp=4098 slide=[3598,4850] pull=4 aflex=11 acover=[1905,5825] apull=0
   ana 0 conns SEG:3@1905e ; SEG:4@5825e ; SEG:1@2875 ; SEG:2@4887
   ana 1 horiz=1 layer=6 along=[4098,4870] perp=2875 slide=[2385,3365] pull=0 aflex=10 acover=[4098,4870] apull=0
   ana 1 conns BT:blk_22@4870 ; SEG:0@4098e
@@ -520,7 +520,7 @@ bundle 1 nets=60 candidates=21
   sconn (2,1)->[0]
   sconn (3,1)->[0]
   sconn (4,1)->[0]
-  ana 0 horiz=0 layer=7 along=[1905,5825] perp=6282 slide=[6120,1073741823] pull=-4 aflex=11 acover=[1905,5825] apull=0
+  ana 0 horiz=0 layer=7 along=[1905,5825] perp=6282 slide=[6120,6782] pull=-4 aflex=11 acover=[1905,5825] apull=0
   ana 0 conns SEG:4@1905e ; SEG:1@5825e ; SEG:2@2875 ; SEG:3@4887
   ana 1 horiz=1 layer=6 along=[5445,6282] perp=5825 slide=[5350,6300] pull=-1 aflex=01 acover=[5445,6282] apull=0
   ana 1 conns SEG:0@6282e ; BT:blk_02@5445
