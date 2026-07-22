@@ -596,6 +596,13 @@ class ExplorerDrawMixin:
                          f"{sdir}-slide="
                          f"[{self._fmt_perp(float(s_lo))},"
                          f"{self._fmt_perp(float(s_hi))}]")
+                # A dogleg-split jog piece (is_jog on the topology segment,
+                # set by NUTS's dogleg adoption) — flag it so j/k stepping
+                # shows which segment the split introduced.
+                shown = self._shown_topo()
+                if (0 <= self.sidx < len(shown.segments)
+                        and getattr(shown.segments[self.sidx], 'is_jog', False)):
+                    info += "  · [dogleg-jog]"
                 # Third line: net-pull + the segment's connectivity — busterm
                 # taps, pass-through blocks, and connected segs (if any).
                 info += "\n" + self._seg_conn_line(cs_i, self.sidx)
