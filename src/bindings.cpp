@@ -22,6 +22,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/iostream.h>
 
+#include <cstdio>
+
 namespace py = pybind11;
 
 void bind_bundler(py::module_& m);
@@ -30,6 +32,17 @@ void bind_nuts(py::module_& m);
 void bind_optimizer(py::module_& m);
 
 PYBIND11_MODULE(buda, m) {
+    // Issue #31: line-buffer C stdout so that when fd 1 is a file (a `> out.log`
+    // redirect), C++ std::cout output ([Planner]/[NUTS]/…) interleaves with
+    // Python's eagerly-flushed prints in CHRONOLOGICAL order. Without this, a
+    // redirected stdout is fully block-buffered on some platforms (notably
+    // macOS), so a partial [Planner] block stays stuck in the C buffer and is
+    // only flushed at program exit — landing out of order at the end of the log.
+    // Line buffering costs one write() per line (negligible); a TTY is already
+    // line-buffered. Runs first, before any module output. See buda_cli.py
+    // main(), which line-buffers the Python side to match.
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);
+
     py::add_ostream_redirect(m, "ostream_redirect");
 
     // Import BDB-layer types from buda_db; merge public names into buda

@@ -434,7 +434,24 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
             return
         return handler(self, cmd, args, cmd_line)
 
+def _enable_line_buffered_stdio():
+    """Issue #31: force line buffering on stdout/stderr so that, when they are
+    redirected to a file, Python's prints and the C++ engine's std::cout output
+    (line-buffered via setvbuf at the buda module init, see bindings.cpp) both
+    flush per line and therefore interleave in CHRONOLOGICAL order.  Without it a
+    redirected stream is block-buffered on some platforms (notably macOS), so a
+    partial [Planner] block strands in the buffer and lands out of order at the
+    end of the log.  `reconfigure` exists on TextIOWrapper (the normal
+    console/redirect case); guarded for exotic stdout replacements."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(line_buffering=True)
+        except (AttributeError, ValueError):
+            pass
+
+
 def main():
+    _enable_line_buffered_stdio()
     parser = argparse.ArgumentParser(
         prog='buda',
         description='Run a BUDA interconnect-planning flow script (.buda). '

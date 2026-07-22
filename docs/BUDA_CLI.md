@@ -76,6 +76,13 @@ With `-l`/`--log`, every log above instead lands in the per-run archive dir
 `log/<cell>/<timestamp>/` (as `flow.log`, `nuts.log`, …), next to the archived
 script copies and their `MANIFEST`.
 
+Redirecting the terminal to a file (`buda … > out.log`) keeps its lines in
+**chronological order**: `buda` line-buffers both the Python and the C++
+(`std::cout`) sides at startup, so a mixed stream flushes per line instead of
+letting a block-buffered C++ chunk strand until program exit (which, on some
+platforms, displaced an early `[Planner]` block to the very end of the file — see
+issue #31). No flag or `stdbuf` wrapper needed.
+
 Other artifacts (`<stem>_nuts.log`, the `<stem>.json` topology sidecar, etc.) are
 listed in the [Output files](BUDA_SCRIPT_REFERENCE.md#output-files) table.
 
