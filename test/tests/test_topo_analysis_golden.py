@@ -90,32 +90,7 @@ def test_topo_analysis_matches_golden(flow):
     _check_flow(flow)
 
 
-# Flows whose generation-stage goldens shift under the issue-#57 collinear-stub
-# MERGE (complete_relay_junctions now combines collinear opposite-face stubs into
-# one straight pass-through wire even when a far end taps a block, removing the
-# staircase jog -> cleaner candidate geometry -> different per-bundle digest).
-# The change is intentional and QoR-neutral-or-better; the digests need a
-# REFERENCE-HOST re-baseline (tools/topo_snapshot.py, per the module docstring).
-# Remove a flow from this set once its golden is regenerated on the reference host.
-_PENDING_REGEN_ISSUE_57 = {
-    "flow/big_data_test/big.buda",
-    "flow/rnr/mix.buda",
-}
-
-
 @pytest.mark.mid
 @pytest.mark.parametrize("flow", ts.CORPUS_MID)
 def test_topo_analysis_matches_golden_mid(flow):
-    if flow in _PENDING_REGEN_ISSUE_57:
-        # Still exercise generation AND assert the golden exists (a crash or a
-        # missing/corrupt golden must fail loudly, not hide as an expected
-        # xfail); xfail ONLY the known digest mismatch until the reference host
-        # regenerates (Codex #406).  If the digests already match (regenerated),
-        # the test simply passes and the flow can be dropped from the set.
-        live, want = _live_and_golden(flow)
-        if live == want:
-            return
-        pytest.xfail(
-            "issue #57 collinear-stub merge changed candidate geometry; golden "
-            "digest pending reference-host regen (tools/topo_snapshot.py)")
     _check_flow(flow)

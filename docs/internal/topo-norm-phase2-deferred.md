@@ -71,9 +71,14 @@ honest WL. Two intentional consequences: (1) on the column datapath multi_trunk
 picks the cleaner TRUNK+MST over one BITRUNK_HVH while STILL improving QoR (WL
 15563 ≤ plain 16600, overlaps equal — the `multi_trunk` mechanism assertion was
 relaxed from "≥2 BITRUNK" to "≥1", the QoR-win assertions unchanged); (2) the
-`big.buda` / `rnr/mix` topo_analysis digests change and need a **reference-host
-re-baseline** (`tools/topo_snapshot.py`; the two flows are xfail-marked
-`_PENDING_REGEN_ISSUE_57` until regenerated). The original deferral note below
+`big.buda` / `rnr/mix` topo_analysis digests change (`tools/topo_snapshot.py`
+regenerated in place). The generation-stage snapshot is integer content (coords,
+layers, integer WL, integer slide ranges), so the digests are **host-independent**
+— verified: regenerating EVERY golden on this non-reference host changed ONLY the
+~20 big / 5 mix bundles this merge touches, with every other bundle byte-identical
+to the reference-host golden (had there been FP/ISA drift, unrelated bundles would
+differ too). So the re-baseline did not need the reference host. The original
+deferral note below
 predicted "non-selected only" — that held when written but the candidate pool
 has since grown (hanan-loci default flip), so a couple of close datapath
 selections now flip; the flip is QoR-neutral-or-better, so the fix shipped.
@@ -115,8 +120,9 @@ can carries exactly the feedthru-reopening / cascade risk that blocked defect 5.
   expresses spec-a2 without generalizing the de-overlap surgery — so it does NOT
   carry the feedthru-reopening risk (a declared feedthru still refuses). It is
   not routed-neutral (see the defect-2 section), but the selection flips it does
-  cause are QoR-neutral-or-better, and it shipped with the two affected
-  topo_analysis goldens marked for reference-host regen.
+  cause are QoR-neutral-or-better, and the two affected topo_analysis goldens
+  (big / mix) were regenerated in place — verified host-independent, so no
+  reference-host re-baseline was needed.
 - **Defect 5 (issue #58): still deferred.** Move the clamp to **NUTS placement
   time** (bound the placed position, not the slide window), with dogleg/pull-repack
   revalidation — the slide-range edit cascades through `filter_pinched` and shifts
