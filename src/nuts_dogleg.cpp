@@ -16,6 +16,8 @@
 
 #include "nuts_dogleg.h"
 #include "nuts_geom.h"
+#include "conn_topology.h"
+#include "verify.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -332,7 +334,8 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
 std::set<int> run_dogleg_fallback(std::vector<BundleWrapper>& bundles,
                                   DoglegSolveOut& out,
                                   const DoglegSolveFn& solve,
-                                  double track_pitch)
+                                  double track_pitch,
+                                  const Floorplan& fp)
 {
     // Dogleg fallback: a genuine vertical-constraint cycle survives the corner
     // pass.  Split one trunk on the cycle across two tracks (joined by a jog) so
@@ -405,6 +408,35 @@ std::set<int> run_dogleg_fallback(std::vector<BundleWrapper>& bundles,
                                            p.col1, p.high1, p.col2, p.high2, delta,
                                            orig_net_pull, trunk_slide_lo, trunk_slide_hi);
             if (!dr.ok) continue;
+
+            // Reject a split that SEVERS the bundle into electrical islands
+            // (issue #399).  apply_dogleg retargets each trunk stub to the piece
+            // covering its column, but a stub the split leaves stranded on the
+            // old trunk row — which no piece now occupies — becomes a separate
+            // island (e.g. bigHalf bundle 67's io_pad_br arm).  Such a topology
+            // scores BETTER on the (opens, overlaps) metric the heal optimises
+            // (a missing wire = fewer opens, less WL), so without this guard the
+            // trial could commit to it.  Run the SAME island check generation's
+            // filter_uncovered uses (declared-feedthru islands exempt), on the
+            // post-split nominal geometry, and skip a plan that disconnects.
+            {
+                const BundleWrapper& tb = trial[bw_idx];
+                const Topology& split_topo =
+                    tb.input.candidates[tb.plan.selected_topology_index];
+                ConnTopology ct; ct.build(split_topo, fp);
+                bool disconnected = false;
+                for (const auto& v : check_topo(ct, split_topo, fp, -1).violations)
+                    if (v.kind == ViolationKind::DISCONNECTED
+                            && !disconnected_islands_bridged(ct, split_topo, fp)) {
+                        disconnected = true; break;
+                    }
+                if (disconnected) {
+                    std::cout << "[Dogleg] skipped split of bundle "
+                              << p.split_trunk.first
+                              << " — would disconnect the bundle (issue #399).\n";
+                    continue;
+                }
+            }
 
             // Seed the FULL cycle ordering (preds[X] = segments below X), with
             // the split trunk redirected to whichever piece covers each edge's

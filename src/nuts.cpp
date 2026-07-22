@@ -2363,7 +2363,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     // ordering only), so the topology surgery must not happen (see setter).
     const std::set<int> doglegged_bids = skip_doglegs_
         ? std::set<int>{}
-        : run_dogleg_fallback(bundles_mut, out, solve, track_pitch_);
+        : run_dogleg_fallback(bundles_mut, out, solve, track_pitch_, floorplan_);
 
     // Export the dogleg-mutated topologies so the CLI can adopt them before it
     // rebuilds ConnTopology for detailed NUTS — otherwise the split bundle's

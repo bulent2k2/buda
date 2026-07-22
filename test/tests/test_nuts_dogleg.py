@@ -314,3 +314,42 @@ def test_dogleg_reset_on_replan():
     assert sess.nuts_result.dogleg_topologies, "dogleg not re-detected after re-plan"
     assert sess.nuts_result.num_overlaps == 0, \
         f"re-plan reintroduced {sess.nuts_result.num_overlaps} overlap(s)"
+
+
+# ── issue #399: a committed dogleg never leaves the bundle DISCONNECTED ────────
+#
+# apply_dogleg retargets each trunk stub to the piece covering its column; a stub
+# the split strands on the old trunk row (which no piece now occupies) would land
+# in its own electrical island — a topology that scores BETTER on (opens,
+# overlaps) since a missing wire = fewer opens, so the heal could commit to it
+# (bigHalf bundle 67's io_pad_br arm).  run_dogleg_fallback now runs the same
+# detect_disconnected island check generation's filter_uncovered uses on the
+# post-split geometry and skips any plan that disconnects.  These flows exercise
+# the guard being ACTIVE and NOT rejecting the legitimate splits, and assert the
+# guarantee: every adopted dogleg topology is a single electrical island.
+import buda  # noqa: E402
+
+
+def _adopted_dogleg_disconnections(sess):
+    """DISCONNECTED violations across every dogleg-adopted topology.  These
+    flows declare no feedthru, so a DISCONNECTED here is always a real island
+    split (the bridged-feedthru exemption the guard applies never fires)."""
+    bad = []
+    for bid, topo in sess.nuts_result.dogleg_topologies.items():
+        ct = buda.ConnTopology(); ct.build(topo, sess.fp)
+        for v in buda.check_topo(ct, topo, sess.fp, bid).violations:
+            if v.kind == buda.ViolationKind.DISCONNECTED:
+                bad.append((bid, topo.type))
+    return bad
+
+
+def test_dogleg_two_cycle_stays_connected():
+    sess = _run("nuts_dogleg_cycle.buda")
+    assert sess.nuts_result.dogleg_topologies, "expected a dogleg"
+    assert _adopted_dogleg_disconnections(sess) == []
+
+
+def test_dogleg_three_cycle_stays_connected():
+    sess = _run("dogleg1.buda")
+    assert sess.nuts_result.dogleg_topologies, "expected a dogleg"
+    assert _adopted_dogleg_disconnections(sess) == []
