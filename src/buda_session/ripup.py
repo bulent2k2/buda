@@ -61,12 +61,75 @@ class RipupMixin:
         tuples compare lexicographically, so the loop's `m < cur` works
         unchanged; zero/no-op checks use _rr_m_primary."""
         if self.detailed_result is not None:
-            return 'b', (lambda: (self.detailed_result.num_unplaced,
+            return 'b', (lambda: (self.detailed_result.num_unplaced
+                                  + self._rr_disconnected_bits(),
                                   self.nuts_result.num_overlaps
                                   if self.nuts_result is not None else 0))
         if self.nuts_result is not None:
             return 'a', (lambda: self.nuts_result.num_overlaps)
         return None, None
+
+    def _rr_disconnected_bits(self):
+        """Total bits of bundles whose SELECTED topology splits into 2+ separate
+        electrical islands (unbridged DISCONNECTED — the whole bus is severed).
+
+        Folded into the stage-b opens count so a heal move that SEVERS a bus
+        RAISES the primary metric and is never accepted over a connected route
+        (issue #399 follow-up 2): a severed bus's bits are placed (so they never
+        show as DNUTS opens — the exact blind spot bigHalf bundle 67 hit) but are
+        electrically incomplete, so counting them as effective opens is honest.
+
+        Defense-in-depth: 0 in the common case — generation drops disconnected
+        candidates (filter_uncovered) and the dogleg fallback refuses severing
+        splits (#405).  Per-eval cost is the cached ConnTopology plus the island
+        union-find over the selected topologies; the `disconnected_islands_bridged`
+        exemption keeps declared-feedthru splits (a real bridged relay) from
+        counting.  Any pre-existing DISCONNECTED bundle is a constant offset on
+        both sides of `m < cur`, so it never blocks other progress."""
+        import buda
+        fp = self.fp
+        total = 0
+        for w in self.bundles:
+            cands = w.input.candidates
+            sel = w.plan.selected_topology_index
+            if not (0 <= sel < len(cands)):
+                continue
+            topo = cands[sel]
+            try:
+                ct = buda.ConnTopology(); ct.build(topo, fp)
+                bid = w.input.original_bundle.id
+                if any(v.kind == buda.ViolationKind.DISCONNECTED
+                       for v in buda.check_topo(ct, topo, fp, bid).violations) \
+                        and not buda.disconnected_islands_bridged(ct, topo, fp):
+                    total += len(w.input.original_bundle.get_net_names())
+            except Exception:
+                continue
+        return total
+
+    def _rr_disconnected_bids(self):
+        """The bundle ids whose selected topology is unbridged-DISCONNECTED —
+        for the loud end-of-run report (issue #399 follow-up 3): a severed bus
+        never shows as a DNUTS open, so a plain `done: metric …->0` line would
+        read as fully clean.  Cheap: run once at ripup exit."""
+        import buda
+        fp = self.fp
+        bids = []
+        for w in self.bundles:
+            cands = w.input.candidates
+            sel = w.plan.selected_topology_index
+            if not (0 <= sel < len(cands)):
+                continue
+            topo = cands[sel]
+            try:
+                ct = buda.ConnTopology(); ct.build(topo, fp)
+                bid = w.input.original_bundle.id
+                if any(v.kind == buda.ViolationKind.DISCONNECTED
+                       for v in buda.check_topo(ct, topo, fp, bid).violations) \
+                        and not buda.disconnected_islands_bridged(ct, topo, fp):
+                    bids.append(bid)
+            except Exception:
+                continue
+        return bids
 
     @staticmethod
     def _rr_m_primary(m):
@@ -1765,6 +1828,15 @@ class RipupMixin:
         print(f"[ripup_reroute] done: metric {self._rr_m_str(m0)}->"
               f"{self._rr_m_str(metric())} "
               f"after {committed} move(s), {n_trials} trial(s).", flush=True)
+        # A severed bus places all its bits (never a DNUTS open), so a "metric
+        # ->0" line reads as fully clean — call it out loud if any bundle ended
+        # DISCONNECTED (issue #399 follow-up 3; folded into the metric above so
+        # the heal never PICKS one, this catches a pre-existing / non-heal one).
+        disc = self._rr_disconnected_bids()
+        if disc:
+            print(f"[ripup_reroute] WARNING: {len(disc)} bundle(s) end "
+                  f"DISCONNECTED (electrically severed, not a DNUTS open): "
+                  f"{disc}", flush=True)
         print(f"[ripup_reroute] timing: {self._rr_t_str()}", flush=True)
         _pp = self._rr_t_passes_str()
         if _pp:
