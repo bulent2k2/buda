@@ -31,6 +31,11 @@ import sys
 
 import pytest
 
+# MID tier: each contract check spawns a fresh subprocess that imports matplotlib
+# (~1s total), too heavy for the default fast inner loop.  Runs under `bb mid` /
+# `bb slow` (pytest -m "not slow" / everything).
+pytestmark = pytest.mark.mid
+
 
 def _raw_backend_kind(setup="", env_extra=None):
     """Run `setup` in a FRESH interpreter (backend state is process-global) and
