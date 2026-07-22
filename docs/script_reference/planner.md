@@ -1,6 +1,6 @@
 # BUDA Script Reference — Stage 3 — Global router / planner
 
-Topology selection and layer assignment: `set_planner_param`, `run_planner` (incl. `hier` and `post_nuts` modes), `select_topology`, `select_topologies`.
+Topology selection and layer assignment: `set_planner_param`, `run_planner` (incl. `hier` and `post_nuts` modes), `select_topology`, `select_topologies`, `unpin_topology`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -271,6 +271,35 @@ select_topologies 1,5-9,11,15-19,22 3 2-4,10,12-14,20,21,23-30 1
 ```
 
 ---
+
+### `unpin_topology`
+
+```
+unpin_topology <bundle_id|*>
+```
+
+Clear a bundle's pin — the inverse of `select_topology`. The currently selected
+candidate stays shown (the selection does not jump), but the pin is removed so
+the next `run_planner` is free to re-choose the topology for that bundle. Use
+`*` to clear the pins on every bundle at once.
+
+Unpinning also drops any **forced segment-layer** choices the bundle carries
+from `edit_commit pin` after `edit_set_layer` — those are honored for any
+candidate the planner picks, so leaving them in place would keep forcing the old
+layers onto a re-chosen topology.
+
+| Argument | Type | Description |
+|---|---|---|
+| `bundle_id` | int \| `*` | Numeric ID of the bundle to unpin, or `*` for every pinned bundle. |
+
+**Example:**
+```buda
+# Try a specific candidate, then release it so the planner can re-decide
+select_topology 2 5
+run_planner
+unpin_topology 2       # bundle 2 is no longer forced
+run_planner            # may now choose a different candidate for bundle 2
+```
 
 ---
 
