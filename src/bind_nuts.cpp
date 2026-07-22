@@ -415,6 +415,13 @@ void bind_nuts(py::module_& m) {
 
     m.def("check_topo",  &check_topo,
           py::arg("ct"), py::arg("topo"), py::arg("fp"), py::arg("bundle_id"));
+    // Declared-feedthru scoping for the DISCONNECTED gate: True iff the wire
+    // graph splits into 2+ islands AND every island touches a declared feedthru
+    // block (so the split is bridged, not a real open — see verify.h).  Used by
+    // ripup's disconnected-bits metric term to exempt legitimately-bridged
+    // feedthru splits (issue #399 follow-up 2).
+    m.def("disconnected_islands_bridged", &disconnected_islands_bridged,
+          py::arg("ct"), py::arg("topo"), py::arg("fp"));
     // zone_fp: floorplan whose keepout zones the engine placed against, for
     // the KEEPOUT_CROSS audit — None = fp (see verify.h).
     m.def("check_nuts",  &check_nuts,

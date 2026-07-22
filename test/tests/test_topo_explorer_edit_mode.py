@@ -911,6 +911,12 @@ def test_edit_disconnected_commit_flagged(tmp_path):
         kinds = {str(v.kind).split('.')[-1]
                  for v in buda.check_topo(ct, topo, s.fp, 1).violations}
         assert 'DISCONNECTED' in kinds
+
+        # issue #399 follow-up 2: ripup counts a severed bus's bits as effective
+        # opens so the heal never picks it.  The bus w[4] has 4 bits, all in the
+        # now-DISCONNECTED selected topology.
+        assert s._rr_disconnected_bits() == 4
+        assert s._rr_disconnected_bids() == [w.input.original_bundle.id]
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
