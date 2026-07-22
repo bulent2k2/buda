@@ -711,12 +711,19 @@ class EditMixin:
         if not xs:
             return None
         xlo, xhi, ylo, yhi = min(xs), max(xs), min(ys), max(ys)
+        # Honor any reserved detour channel: get_detour_channel() returns a dict
+        # {north,south,east,west} of per-side band widths.  East/West widen the
+        # X extent, North/South the Y extent; fall back to a quarter-span margin
+        # so OOB detours keep slide room even with no channel reserved.
+        dc_x = dc_y = 0
         try:
-            dsz = int(getattr(fp.get_detour_channel(), "size", 0) or 0)
+            dc = fp.get_detour_channel()
+            dc_x = int(max(dc.get("east", 0), dc.get("west", 0)) or 0)
+            dc_y = int(max(dc.get("north", 0), dc.get("south", 0)) or 0)
         except Exception:
-            dsz = 0
-        mx = max(dsz, (xhi - xlo) // 4, 1)
-        my = max(dsz, (yhi - ylo) // 4, 1)
+            dc_x = dc_y = 0
+        mx = max(dc_x, (xhi - xlo) // 4, 1)
+        my = max(dc_y, (yhi - ylo) // 4, 1)
         return (xlo - mx, xhi + mx, ylo - my, yhi + my)
 
     def _clamp_unbounded_one(self, w, fp, ext):
