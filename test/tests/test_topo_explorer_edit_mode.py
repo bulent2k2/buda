@@ -1613,3 +1613,69 @@ def test_edit_temp_grid_line_places_trunk_mid_channel(tmp_path):
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
+
+
+def test_dogleg_jog_marker_in_seg_banner(tmp_path):
+    """A dogleg-split jog segment (is_jog on the topology segment, set by NUTS's
+    dogleg adoption) shows a '⟂dogleg-jog' marker on line 2 of the seg info
+    banner, so j/k stepping surfaces which segment the split introduced.  A
+    non-jog segment shows no such marker.  Vehicle: flow/dogleg2.buda, whose
+    run adopts a dogleg candidate carrying one is_jog segment."""
+    import contextlib
+    import io
+    root = os.path.join(os.path.dirname(__file__), '..', '..')
+    s = buda_cli.BudaSession(); s.no_viz = True
+    s.script_path = os.path.join(root, "flow/dogleg2.buda")
+    cwd = os.getcwd()
+    os.chdir(os.path.join(root, "flow"))
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            for line in open("dogleg2.buda"):
+                c = line.strip()
+                if (not c or c.startswith('#')
+                        or c.split()[0] in ("visualize", "visualize_topologies",
+                                            "exit", "report_wl", "report_wirelength",
+                                            "check_design", "check_connectivity")):
+                    continue
+                s.do_command(c)
+                if c.split()[0] == "run_detailed_nuts":
+                    break
+    finally:
+        os.chdir(cwd)
+
+    # locate the adopted dogleg candidate + its is_jog segment
+    loc = None
+    for bi, w in enumerate(s.bundles):
+        for ci, t in enumerate(w.input.candidates):
+            for si, seg in enumerate(t.segments):
+                if getattr(seg, 'is_jog', False):
+                    loc = (bi, ci, si); break
+            if loc: break
+        if loc: break
+    assert loc is not None, "expected a dogleg-adopted (is_jog) candidate"
+    bi, ci, si = loc
+
+    exp = _explorer(s, tmp_path)
+    try:
+        exp.bidx = bi
+        exp.idx = ci
+        exp.sidx = si
+        exp._draw()
+        texts = [t.get_text() for t in exp.ax.texts]
+        assert any("dogleg-jog" in t for t in texts), \
+            f"dogleg jog marker missing from seg banner (texts={texts})"
+
+        # a non-jog segment of the same candidate shows no marker
+        other = next((k for k in range(len(s.bundles[bi].input.candidates[ci]
+                                            .segments)) if k != si), None)
+        if other is not None:
+            exp.sidx = other
+            exp._draw()
+            # the OTHER segment's banner line must not carry the marker; guard
+            # against a stale one by requiring the marked seg's index isn't shown
+            banner = "\n".join(t.get_text() for t in exp.ax.texts
+                               if "slide=" in t.get_text())
+            assert "dogleg-jog" not in banner, banner
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
