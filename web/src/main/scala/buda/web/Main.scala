@@ -37,7 +37,9 @@ object Main {
     wire("planner", () => runDemoStage("planner"))
     wire("nuts", () => runDemoStage("nuts"))
     wire("dnuts", () => runDemoStage("dnuts"))
-    wire("ripup", () => stage("ripup_reroute"))   // rip-up & re-route the residual
+    wire("ripup", () => runStage("ripup", ""))     // rip-up & re-route the residual (WS)
+    wire("negotiate", () => runStage("negotiate", ""))   // measured-congestion negotiate (WS)
+    wire("check", () => runCheck())                // design audit at the current stage
     wire("view-topo", () => setView("generation"))
     wire("view-nuts", () => setView("nuts"))
     wire("view-detailed", () => setView("detailed"))
@@ -128,7 +130,8 @@ object Main {
   private val WsBase  = Map("planner" -> "run_planner", "nuts" -> "run_nuts", "dnuts" -> "run_detailed_nuts")
   // Fallback .buda command per stage key, if the /api/stage endpoint is unavailable.
   private val StageCmd = Map("planner" -> "run_planner", "nuts" -> "run_nuts",
-    "detailed_nuts" -> "run_detailed_nuts", "ripup" -> "ripup_reroute")
+    "detailed_nuts" -> "run_detailed_nuts", "ripup" -> "ripup_reroute",
+    "negotiate" -> "negotiate_congestion")
 
   /** Run the ACTIVE demo's command for stage `key` (falls back to the key itself
     * if no demo is loaded).  Long stages (planner/nuts/dnuts) go through the WS
@@ -173,6 +176,26 @@ object Main {
       setRunning(None)                            // done frame may have cleared it
     }
   }
+
+  /** Run the design audit at the current stage.  `check_design` auto-detects its
+    * mode (topo / nuts / dnuts) from how far the pipeline has run — SERVER-side
+    * (buda_cmds/verify_viz_cmds.py) — so the client just runs a bare command and
+    * shows the full audit output.  Read-only: no render refresh (no view/focus
+    * reset). */
+  private def runCheck(): Unit =
+    ApiClient.command(Seq("check_design")).foreach { res =>
+      val r = res.results.asInstanceOf[js.Array[js.Dynamic]](0)
+      val lines = r.selectDynamic("log_lines")
+      val body =
+        if (defined(lines) && lines.asInstanceOf[js.Array[String]].nonEmpty)
+          lines.asInstanceOf[js.Array[String]].mkString("\n")
+        else {
+          val s = r.selectDynamic("summary")
+          if (defined(s) && s.asInstanceOf[String].nonEmpty) s.asInstanceOf[String] else "(ok)"
+        }
+      log(body)
+      showStages(res.state)
+    }
 
   private def showResults(res: js.Dynamic): Unit = {
     val rs = res.results.asInstanceOf[js.Array[js.Dynamic]]
