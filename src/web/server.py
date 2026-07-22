@@ -34,6 +34,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import PlainTextResponse
 
 import buda_cli
 from web import runner, serialize
@@ -453,10 +455,40 @@ async def health():
     return {"ok": True, "sessions": list(_SESSIONS)}
 
 
+class _NoCacheStatic(StaticFiles):
+    """StaticFiles that stamps `Cache-Control: no-cache` on every response.
+
+    The Scala.js client's `main.js` is a build product rebuilt by `bb web`; with
+    the browser's default heuristic caching a plain reload can serve the STALE
+    bundle after a rebuild (the reference client at `/` has its logic inline in
+    index.html, so it doesn't hit this).  `no-cache` means "cache, but REVALIDATE
+    before reuse" — StaticFiles still sends ETag/Last-Modified, so an unchanged
+    file answers 304 (a tiny revalidation round-trip, negligible on a localhost
+    demo) and a rebuilt file is re-fetched on the next reload, no hard refresh.
+    Trade-offs (revalidation cost, whole-mount scope, cache-only staleness) are
+    documented in docs/internal/web_static_caching.md."""
+
+    async def get_response(self, path, scope):
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            # StaticFiles RAISES for a missing file, which would skip the header.
+            # Build the 404 ourselves so it ALSO carries no-cache — otherwise a
+            # browser can cache the 404 for a not-yet-built main.js and keep
+            # showing the not-built banner after `bb web` (Codex #394). Re-raise
+            # anything else (405/401) unchanged.
+            if exc.status_code != 404:
+                raise
+            response = PlainTextResponse(exc.detail or "Not Found", status_code=404)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # Serve the reference static client at "/" (mounted last so it never shadows the
 # /api/* routes).  This is a small vanilla-SVG demo client — the immediate,
 # toolchain-free way to drive the demo in a browser and the porting reference for
-# the Scala.js DisplayGeom.  The production Scala.js bundle can be built into this
-# same dir (or its own) and served identically.
+# the Scala.js DisplayGeom.  The production Scala.js bundle is built into
+# `static/scala/` and served identically.  `_NoCacheStatic` keeps both clients'
+# assets always-fresh after a `bb web` rebuild.
 if os.path.isdir(_STATIC_DIR):
-    app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")
+    app.mount("/", _NoCacheStatic(directory=_STATIC_DIR, html=True), name="static")

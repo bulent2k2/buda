@@ -152,6 +152,11 @@ the log, and refreshes state — the planner/nuts/dnuts/ripup buttons go through
   a fresh clone without the Scala toolchain still has the full demo. See
   `web/README.md`.
 
+Both clients are served by a `_NoCacheStatic` mount that stamps
+`Cache-Control: no-cache`, so a `bb web` rebuild of `main.js` is picked up on a
+normal reload (no hard refresh) while ETags still short-circuit unchanged files
+to `304`. Trade-offs in [web_static_caching.md](web_static_caching.md).
+
 ### The headless requirement
 Importing the command registry must not pull matplotlib. `buda_viz` (and thus
 matplotlib/numpy) is imported **lazily** inside the two visualize handlers in
