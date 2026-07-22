@@ -6,6 +6,9 @@ congestion planner, and the healer stack (`negotiate_congestion` +
 feedback loops — grounded in the functions that do the work and in a live
 trace of two hierarchical flows.*
 
+**Interactive version:** a published interaction map with the live-trace charts —
+<https://claude.ai/code/artifact/087b0257-4001-4a97-b460-1d08efcb3794>.
+
 Companion reading: [congestion_planner.md](congestion_planner.md),
 [single_source_topo_truth.md](single_source_topo_truth.md),
 [seg_junction_coplacement.md](seg_junction_coplacement.md),
@@ -318,7 +321,24 @@ system behaving correctly: reduce hard, report loud, never silently pretend.
 - **`flip_mst_edge` being redundant** suggests the per-edge DOF is in the wrong
   place — the real datapath winners (BITRUNK trees) carry no `edge_id`. Is there
   a topology-level DOF the healer *should* have but doesn't?
-- **`kSegsRel` gating is binary** (healer present / absent). 07 shows it deciding
-  routability; but a flow that *has* a healer yet is under light congestion pays
-  the compact-topology bias for no reason. Should the gate be congestion-aware,
-  not just healer-presence-aware?
+- **`kSegsRel` gating is binary** (healer present / absent) — and a corpus sweep
+  (2026-07-22) says that's fine, closing this one. The worry was that a flow with
+  a healer but light congestion pays the compact-topology bias for nothing;
+  measured on the metric that matters, `(opens, overlaps)`, `kSegsRel=0.02` is
+  **neutral-or-better across every active-healer flow** — real wins on mix2 (59→18
+  opens) and slowdown_rnr (28→0 opens / 3→0 ovl), ties on mix (−3.8% WL), big2,
+  and bigHalf. The penalty is naturally self-gating: it only flips a selection
+  when a compact and a multi-segment candidate are in a *close WL race* — the
+  congested regime — so a scalar congestion-aware gate has nothing to separate,
+  and adds complexity for no measured benefit. (An intermediate reading of this
+  sweep suggested a "non-monotone regression"; that was an artifact of counting
+  *total* `check_design` violations rather than opens — on the opens metric the
+  response is orderly. Sweep harness: `BUDA_KSEGS_REL` env override, α∈{0, 0.02}.)
+- **One residue the sweep did surface** — `DISCONNECTED` below the healer metric.
+  At α≥0.02, bigHalf grows exactly one `DISCONNECTED` bundle (bundle 67,
+  `Seg 3<->7`, 48 bits) that α≤0.01 doesn't — deterministic. Its compact
+  selection yields a topology whose junction NUTS can't close, and `ripup_reroute`
+  optimizes only `(opens, overlaps)` — it is *blind to* `DISCONNECTED`, so the
+  break is reported by `check_design` but never healed. This is a
+  healer-*coverage* gap, not a gating-policy problem: should the stage-b metric be
+  lexicographic `(opens, disconnected, overlaps)`?
