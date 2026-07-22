@@ -152,9 +152,33 @@ Known caveats to handle in the prototype:
   shift even though the planner is untouched — a smaller, more defensible surface
   than Option A.
 
-## Plan
+## Prototype + measurement (Option B, chosen — SHIPPED)
 
-Prototype **Option B** at nuts.cpp:2277 (shared across the three finalize paths),
-verify bundle 30's phantom is gone and hbundles/06 overlaps/opens, then measure
-the fast+mid blast radius and the QoR corpus, and regenerate the NUTS-placement
-goldens on the reference host if the change is a net improvement.
+Implemented `tighten_spans_to_reach` (nuts.cpp) and called it as the last span
+mutation before `compute_metrics` on all three finalize paths — the main
+`run()` solve (after `tighten_pulls`), `rerun_bundle_warm`, and `rerun_layer`.
+
+**Result — surgical and clean:**
+
+- **Bundle 30 seg7 fixed:** abstract span `[120,820]` → **`[797.5, 820]`**, the
+  honest extent between its junctions. Detailed bits unchanged (DNUTS already
+  re-derived them).
+- **QoR corpus neutral-to-better.** b44, big, big2_noviz, mix, mix2, hbundles/06,
+  /07, /10, bigHalf, b4_bus_077 all **byte-identical** overlaps/opens; `tc3a`
+  **improves** (overlaps 870 → **867** — three phantom overlaps removed). No
+  regression anywhere.
+- **Fast+mid tier: 1674 passed, 0 failures** — not even a golden shifted (the
+  golden flows carry no extend-only phantom, so the tighten is a no-op on them).
+  No reference-host golden regen needed.
+- **No planner ripple** by construction (the pass runs after the planner and
+  after all placement).
+
+Why hbundles/06 overlaps stayed 4 (not the Option-A broad 1): the other flagged
+segments there are **not** phantoms — bundle 18 seg0 is a real fan-in trunk
+(zero-length bits are a per-bit taper artifact, its overlaps are genuine), bundle
+3 seg0 is a real OOB trunk spanning its stubs. Option B correctly touches only
+the genuine extend-only over-extension (bundle 30 seg7), leaving real congestion
+for the healer — where Option A's 4→1 was an unprincipled placement shuffle from
+moving analysis windows.
+
+This is the shipped fix.

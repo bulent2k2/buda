@@ -459,6 +459,56 @@ static void settle_spans(std::vector<TrackSegment>& segments, NutsContext& ctx)
     do_span_adjustments(all_placed, ctx.rev_conn_map, ctx.ts_ptr_map);
 }
 
+// Post-convergence span RE-TIGHTEN (Option B, relay_jog_phantom_span_2026-07.md).
+// settle_spans' coverage guarantee is EXTEND-ONLY, so once a segment's span was
+// stretched to cover a junction partner sitting at a TRANSIENT far position (a
+// connector with an unbounded perp window that abstract NUTS clamped to the whole
+// design extent and briefly flung across it), that stretch is never undone even
+// after the partner settles back — a permanent phantom span tail.  After the solve
+// has fully converged, re-derive each placed segment's span as the TIGHT min/max
+// of the coordinates it must actually reach: its placed junction partners' tracks
+// (rev_conn_map[ts] — the same set the coverage guarantee covers) plus its own
+// busterm faces.  This can only SHRINK a span to the exact envelope of what it
+// connects to (a pass-through block sits BETWEEN the real endpoints, so it stays
+// covered), so it never opens a junction; it removes the phantom overlap/WL the
+// inflated span reports.  Endpoint identity is preserved (span_lo stays the
+// lo-end coordinate even when placement leaves span_lo > span_hi).  MUST be the
+// last span mutation before metrics — settle_spans/repair_overlaps are
+// extend-only and would re-inflate.
+static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
+                                   NutsContext& ctx)
+{
+    std::map<std::pair<int,int>, const TrackSegment*> ptr;
+    for (const auto& ts : segments)
+        if (ts.placed) ptr[{ts.bundle_id, ts.seg_idx}] = &ts;
+
+    for (auto& ts : segments) {
+        if (!ts.placed) continue;
+        double rmin =  std::numeric_limits<double>::infinity();
+        double rmax = -std::numeric_limits<double>::infinity();
+        auto it = ctx.rev_conn_map.find({ts.bundle_id, ts.seg_idx});
+        if (it != ctx.rev_conn_map.end())
+            for (const auto& sc : it->second) {
+                auto pj = ptr.find({sc.src_bid, sc.src_si});
+                if (pj == ptr.end()) continue;
+                rmin = std::min(rmin, pj->second->track_position);
+                rmax = std::max(rmax, pj->second->track_position);
+            }
+        for (double fc : ts.busterm_faces) {
+            rmin = std::min(rmin, fc);
+            rmax = std::max(rmax, fc);
+        }
+        if (!std::isfinite(rmin) || !std::isfinite(rmax)) continue;  // nothing to reach
+        const double cur_lo = std::min(ts.span_lo, ts.span_hi);
+        const double cur_hi = std::max(ts.span_lo, ts.span_hi);
+        const double nlo = std::max(cur_lo, rmin);   // contract only
+        const double nhi = std::min(cur_hi, rmax);
+        if (nlo > nhi) continue;                      // reach set outside span: leave as-is
+        if (ts.span_lo <= ts.span_hi) { ts.span_lo = nlo; ts.span_hi = nhi; }
+        else                          { ts.span_lo = nhi; ts.span_hi = nlo; }
+    }
+}
+
 // Band-level repack of spread-fit overlap clusters — defined after LayerSolver
 // (whose repack machinery it drives); see docs/internal/nuts_band_repack.md.
 // seed_cons: active corner constraints (see repair_overlaps), may be null.
@@ -2277,6 +2327,10 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         if (!skip_tighten_)
             tighten_pulls(result.segments, ctx);
         charge("tighten", t0);
+        // Collapse any extend-only phantom span tail now that placement has
+        // converged — the last span mutation before metrics (Option B, see
+        // relay_jog_phantom_span_2026-07.md).
+        tighten_spans_to_reach(result.segments, ctx);
         // Merge the fixed (bottom-up copy) segments AFTER every pass that
         // could move a segment and BEFORE the metrics, so they are immovable
         // but fully accounted (an overlap against a fixed segment counts).
@@ -2426,6 +2480,7 @@ NUTSResult NUTSEngine::rerun_layer(
     // overlap / wirelength guards stay global, so cross-layer spans are honoured)
     // — keeps the single-layer contract while still recovering wirelength.
     tighten_pulls(result.segments, ctx, layer_id);
+    tighten_spans_to_reach(result.segments, ctx);   // last span mutation before metrics
     result.segments.insert(result.segments.end(),
                            fixed_held.begin(), fixed_held.end());
     compute_metrics(result);
@@ -2543,6 +2598,7 @@ NUTSResult NUTSEngine::rerun_bundle_warm(
     resolve_corner_overlaps(warm.segments, ctx);
     if (!skip_tighten_)
         tighten_pulls(warm.segments, ctx);
+    tighten_spans_to_reach(warm.segments, ctx);   // last span mutation before metrics
     compute_metrics(warm);
     warm.num_keepout_conflicts =
         count_keepout_conflicts(low_keepouts(), warm.segments);
