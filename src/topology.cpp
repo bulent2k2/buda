@@ -1810,10 +1810,9 @@ static void complete_relay_junctions(Topology& topo,
                 }
                 return false;
             };
-            if (is_feedthru || far_taps_block(A_far) || far_taps_block(B_far)) {
+            if (is_feedthru) {
                 // A declared feedthru MUST keep its two BUSTERM landings (the block
-                // bridges the split via its own routing, not a straight crossing); a
-                // far endpoint that taps another block might strand it.  Either way,
+                // bridges the split via its own routing, not a straight crossing) --
                 // leave this relay to the general chaining below.
                 handled = false;
             } else {
@@ -1821,6 +1820,34 @@ static void complete_relay_junctions(Topology& topo,
                 // A spans [A_far .. B_far] as one straight wire through the block.
                 ((A.ep == 0) ? sA.start : sA.end) = B_far;
                 to_erase.insert(B.seg_idx);
+                // When a far endpoint taps another block (issue #57: the collinear
+                // stubs are the trunk stub + an MST edge, whose far ends land on the
+                // driver/next-receiver faces), dropping B would strand the tap B_far
+                // carried -- the single-tap pass below assigns it to the about-to-be-
+                // erased stub.  This USED TO force the refusal above (relay fell to
+                // the general chaining, which offsets a 2-unit connector to make an
+                // inferrable perpendicular junction -- the staircase jog).  Instead,
+                // REPOINT every landing map entry that referenced B's erased far
+                // endpoint onto A's surviving new endpoint (same point), so the tap
+                // is assigned to the merged wire.  A_far is untouched (A is kept), so
+                // only B's far endpoint needs repointing.  Runs before the tap /
+                // chaining / erase passes, which consume the pre-erase indices.
+                if (far_taps_block(B_far)) {
+                    const int B_far_ep = (B.ep == 0) ? 1 : 0;
+                    const int a_seg = A.seg_idx, a_ep = A.ep;
+                    const int b_seg = B.seg_idx;
+                    const Point tgt = B_far;
+                    auto repoint = [&](std::map<int, std::vector<Inc>>& mp) {
+                        for (auto& kv : mp)
+                            for (Inc& q : kv.second)
+                                if (q.seg_idx == b_seg && q.ep == B_far_ep &&
+                                    q.p.x == tgt.x && q.p.y == tgt.y) {
+                                    q.seg_idx = a_seg; q.ep = a_ep;
+                                }
+                    };
+                    repoint(all_land);
+                    repoint(incident);
+                }
             }
         }
         if (!handled) continue;
