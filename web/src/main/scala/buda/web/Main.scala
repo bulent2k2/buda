@@ -37,6 +37,7 @@ object Main {
     wire("planner", () => runDemoStage("planner"))
     wire("nuts", () => runDemoStage("nuts"))
     wire("dnuts", () => runDemoStage("dnuts"))
+    wire("ripup", () => stage("ripup_reroute"))   // rip-up & re-route the residual
     wire("view-topo", () => setView("generation"))
     wire("view-nuts", () => setView("nuts"))
     wire("view-detailed", () => setView("detailed"))
