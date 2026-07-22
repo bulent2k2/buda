@@ -76,6 +76,8 @@
     <button onclick="runDemoStage('nuts')">nuts</button>
     <button onclick="runDemoStage('dnuts')">dnuts</button>
     <button onclick="runStage('ripup')">ripup</button>
+    <button onclick="runStage('negotiate')">negotiate</button>
+    <button onclick="runCheck()">check</button>
   </div>
   <div class="row">view:
     <button onclick="setView('generation')">topo</button>
@@ -227,7 +229,8 @@ window.addEventListener("keydown", (e) => {
 // The stage buttons that can take tens of seconds go through /api/stage/{stage};
 // the WS pushes started/heartbeat/done frames so the UI shows a live indicator.
 const STAGE_MAP = {planner: "run_planner", nuts: "run_nuts",
-                   detailed_nuts: "run_detailed_nuts", ripup: "ripup_reroute"};
+                   detailed_nuts: "run_detailed_nuts", ripup: "ripup_reroute",
+                   negotiate: "negotiate_congestion"};
 function setRunning(txt) {
   const el = document.getElementById("running");
   el.hidden = !txt; if (txt) el.textContent = txt;
@@ -267,6 +270,16 @@ async function runStage(stage, args) {
   } finally {
     setRunning(null);                            // done frame may have cleared it
   }
+}
+// check_design auto-detects its stage (topo / nuts / dnuts) from how far the
+// pipeline has run — SERVER-side (buda_cmds/verify_viz_cmds.py) — so the client
+// just runs a bare `check_design` and shows the full audit output. Read-only, so
+// it does NOT refresh the render (no view/focus reset).
+async function runCheck() {
+  const res = await post("/command", {cmds: ["check_design"]});
+  const r = res.results[0];
+  log((r.log_lines && r.log_lines.length) ? r.log_lines.join("\n") : (r.summary || "(ok)"));
+  showStages(res.state);
 }
 async function refresh() {
   BUNDLE_FOCUS = null;                  // a new stage / view starts showing all bundles

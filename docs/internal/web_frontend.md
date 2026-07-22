@@ -160,8 +160,8 @@ client's `connectWS`; the Scala client's `WsClient.connect`, both auto-reconnect
 on close), show a pulsing "running <stage>… <s>s" indicator on
 `started`/`heartbeat`, clear it on `done`, forward `notable` to the log, and
 refresh state — the planner/nuts/dnuts buttons go through `/api/stage/*` (the
-instant bundler/topology buttons stay on `/api/command`; the reference client
-also routes its ripup button through the WS path). The Scala client peels the WS
+instant bundler/topology buttons stay on `/api/command`; the ripup and negotiate
+healer buttons also go through the WS path in **both** clients). The Scala client peels the WS
 args from the demo command the same way (`run_planner hier 5` → stage `planner`,
 args `hier 5`). Because the socket only *streams* progress, a server built
 without the uvicorn websocket extra (the `/api/ws` 404s) degrades gracefully in
@@ -173,7 +173,10 @@ the caller toggles the indicator itself; the client just retries the socket.
 - **`src/web/static/index.html`** — a vanilla-SVG **reference client**, served at
   `/` (StaticFiles). The immediate, toolchain-free way to drive the demo in a
   browser, and the porting reference for the Scala.js renderer. Command console +
-  stage buttons (bundler→dnuts) + a `topo/NUTS/detailed` view switch. Browser-
+  stage buttons (bundler→dnuts, plus the ripup/negotiate healers and a `check`
+  button that runs `check_design` — which auto-selects its audit stage
+  topo/nuts/dnuts server-side from how far the pipeline has run) + a
+  `topo/NUTS/detailed` view switch. Browser-
   verified (Playwright/Chromium): the generation view draws the floorplan +
   candidate segments (stepping the 35 b44 candidates); the NUTS view draws placed
   track footprints + centerlines; the detailed view draws all 104 bit-wires + 52
