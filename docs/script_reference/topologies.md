@@ -1,6 +1,6 @@
 # BUDA Script Reference — Stage 2 — Topology generator
 
-Candidate enumeration and expert editing: `generate_topologies`, `generate_topologies_for_bundle`, `generate_more_topologies`, the TopoEdit session (`edit_topology` … `edit_commit`), `generate_hier_topologies`, `generate_topologies_for_hbundle`, `set_prune_dominated`.
+Candidate enumeration and expert editing: `generate_topologies`, `generate_topologies_for_bundle`, `generate_more_topologies`, the TopoEdit session (`edit_topology` … `edit_commit`), `generate_hier_topologies`, `generate_topologies_for_hbundle`, `set_prune_dominated`, `set_dedup_loci`, `set_drop_dangling`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -415,6 +415,108 @@ all see the same pruned pool).
 set_prune_dominated on
 generate_topologies            # pool pruned, note + summary printed
 set_prune_dominated off        # later regenerations keep everything again
+```
+
+---
+
+### `set_dedup_loci`
+
+```
+set_dedup_loci [on|off]
+```
+
+Opt-in **nominal-locus candidate dedup** (default **off** — flows are
+bit-identical without it).  When on, every generation command (the same set as
+`set_prune_dominated`; **not** the additive `generate_more_topologies`)
+collapses candidates that are the **same topological choice** differing only in
+a **nominal trunk locus that lies inside a shared slide window**.
+
+Why they exist: the Hanan-line loci sampler emits one candidate per Hanan line,
+so a trunk that passes *through* a block (a pass-through with a full-block slide
+window) is emitted once per line inside that window — e.g. `TRUNK_H@y10830`,
+`TRUNK_H@y11330`, `TRUNK_H@y11830`, all with the trunk on slide window
+`[10830,11830]`.  They differ only in the *nominal* trunk position; their
+connectivity, per-segment slide windows, block taps and net-pull are identical,
+and the trunk simply slides with its stubs — so NUTS realizes them within
+placement-noise of each other, and the content `topo_uid` (which hashes the
+nominal geometry) needlessly keeps them apart.  An MST hybrid can even realize
+the *same* skeleton as a plain trunk and collapse with it.
+
+When on, a **structural canonical** — per-segment `(direction, layer, slide
+window, block taps, net-pull)` plus the junction adjacency, deliberately
+**excluding** the slide-dependent nominal — groups these candidates and keeps
+the **best-estimated (lowest-WL) member**; the rest are dropped with a note:
+
+```
+[TopoDedup] bundle B: dropped TYPE (idx I) — same slide-window/connectivity as idx J (nominal-locus variant)
+[TopoDedup] collapsed N nominal-locus duplicate candidate(s) across M bundle(s).
+```
+
+`USER` candidates never collapse, and the selected/pinned candidate is never
+dropped (the selection index is remapped by `topo_uid`).  Candidates carrying
+content the ConnSeg skeleton does not fully describe — **TEG bridge segments**,
+**fan-in per-bit taper** (`seg_bits`), **dogleg jogs**, or **U_OVL perp
+clamps** — never participate (exactly as `set_prune_dominated` excludes them),
+so a bridged candidate can never be collapsed into a same-skeleton non-bridge
+one.
+
+This is a **lossy** cleanup: because NUTS is nominal-sensitive, a few collapsed
+members can realize a couple percent apart (the b44 realization sensitivity),
+so the dedup trades those variants for a tidier pool.  The planner's default
+pick is unchanged — the surviving representative is the lowest-WL member it
+would have selected anyway.  On the reported b44 vehicle the single bundle drops
+from **35 → 24** candidates.
+
+**Ordering:** declare *before* the generation command; the dedup renumbers the
+1-based candidate indices, so `select_topology` pins must be taken from an
+opted-in run (it runs before sidecar restore and BDB persistence, so
+`dump_topologies`, persisted rows and later pins all see the collapsed pool).
+
+---
+
+### `set_drop_dangling`
+
+```
+set_drop_dangling [on|off]
+```
+
+Opt-in **dangling / unclamped-segment candidate drop** (default **off** — flows
+are bit-identical without it).  When on, every generation command (the same set
+as `set_prune_dominated`; **not** `generate_more_topologies`) drops a candidate
+that has either:
+
+- a **dangling segment** — a segment with a single non-block connection, i.e. a
+  wire whose other end connects to nothing; or
+- an **unbounded slide window** — a segment whose perpendicular slide was never
+  clamped (the `±2³⁰` no-clamp sentinel).
+
+These are the **out-of-bounds detour** and **MST-relay** shapes: they pass the
+generation coverage gate (every block is tapped and the wire graph is one
+connected island) but render as a **dangling overshoot** — a spine that extends
+past its only tap, or a relay segment NUTS can fling arbitrarily far.  On b44
+these are the `TRUNK_*_OOB` and `TRUNK_*_OOB+MST` candidates.
+
+Each dropped candidate prints a note:
+
+```
+[TopoDangling] bundle B: dropped TYPE (idx I) — seg J has an unbounded (unclamped) slide window
+[TopoDangling] dropped N candidate(s) with dangling / unclamped-slide segments across M bundle(s).
+```
+
+`USER` candidates and the selected/pinned candidate are never dropped, and the
+pass **never strands a bundle** — if every candidate is flagged, the pool is
+kept intact.  On the reported b44 vehicle the single bundle drops from **24 →
+14** with `set_dedup_loci` also on (both knobs compose).
+
+**Ordering:** declare *before* the generation command; like the other pool
+cleanups it renumbers indices, so `select_topology` pins must come from an
+opted-in run.
+
+**Example (both cleanups):**
+```buda
+set_dedup_loci on
+set_drop_dangling on
+generate_topologies            # collapse nominal-locus variants, drop danglers
 ```
 
 ---
