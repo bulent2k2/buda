@@ -518,6 +518,106 @@ than a corpus QoR lever today.  Indices renumber under the prune, so
 `select_topology` pins must come from an opted-in run — the reason it is a
 setup command, not a default.
 
+## Dangling-topo handling — further investigation (`set_drop_dangling` modes) — OPEN
+
+**Context.**  `set_drop_dangling` (opt-in, default `off`) now has three
+non-trivial modes — `clamp` (bound every unbounded slide window to the design
+extent, drop nothing), `clamp_drop` (clamp + drop only the truly-dangling
+candidates), and `drop`/`on` (drop any dangling/unbounded candidate).  The
+mode expansion (PR #391) and its full corpus sweep are recorded in
+[`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md).  The sweep's
+verdict: `clamp` is the low-risk bound (bit-identical to base on 32/34 flows,
+pin-safe), `drop` is a high-variance per-flow lever, and `clamp_drop` is not a
+good default (its truly-dangling drops perturb more than they save).  All three
+stay opt-in.
+
+**Open questions the sweep surfaced, none yet resolved:**
+1. **Why does a pure `clamp` perturb two healer-heavy flows at all?**  `rnr/mix`
+   0/0→1/2 and `rnr/slowdown_rnr` 0/32→1/36 are the only non-identical `clamp`
+   rows.  Bounding a slide window a healer leaned on being wide changes which
+   track a segment lands on — i.e. the clamp extent (blocks-bbox + candidate
+   nominals + margin) is TIGHTER than the window a converged healer actually
+   used.  Worth checking whether a looser clamp bound (e.g. the design extent
+   grown by the widest converged healer slide, or simply the OOB detour-channel
+   band when one is reserved) makes `clamp` a true no-op on these two.
+2. **Is the unbounded window itself ever load-bearing?**  The ±2³⁰ sentinel is
+   a "no-clamp" marker; the sweep shows clamping it is nearly always inert, but
+   the two perturbations mean SOME realization used the unbounded reach.
+   Understand what NUTS does with an unclamped window today (does
+   `preferred_fit` ever place beyond the design extent?) — if never, the
+   perturbation is purely a re-derivation-order artifact and the clamp could be
+   made provably inert.
+3. **Should the clamp bound come from the planner/NUTS instead of geometry?**
+   The current extent is a generation-time geometric guess.  A placement-aware
+   bound (the actual band reservations / track supply for the segment's layer)
+   would be tighter where safe and looser where the healer needs room — the
+   same "predict the realized extent" theme as the `nontop_dead_span_gate`
+   discriminator (wishlist-planner).
+4. **`clamp_drop` truly-dangling predicate.**  It currently drops a ConnSeg
+   with a single non-block connection.  The sweep shows these are load-bearing
+   more often than not (`rnr/mix` 0/0→0/32).  Investigate whether a stricter
+   predicate (single non-block connection AND no downstream junction consumes
+   the segment) would drop only the genuinely-useless tails, recovering the
+   MST-hybrid trunk-tail case the along-DOF probe flagged (§"True along-flex
+   trunk DOF", ~790k units of dead wire in never-selected `TRUNK+MST` hybrids).
+   That overlaps the "tighten the MST-hybrid trunk endpoints at generation"
+   follow-up noted there — a generation-time tail trim may be the better fix
+   than a post-hoc drop.
+
+See [`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md) for the
+per-flow numbers behind each of these.
+
+## Promote `set_dedup_loci` to default-on in generation — OPEN
+
+**Context.**  `set_dedup_loci` (opt-in, default `off`) collapses candidates
+that are the same topological choice differing only in a nominal trunk locus
+WITHIN a shared slide window (same connectivity / slide windows / block taps /
+net-pull), keeping the best-estimated representative.  It is the LOSSY sibling
+of the sound `set_prune_dominated` (piece (c) above): the collapsed members
+route within NUTS realization-noise of each other, so the residual spread is
+sensitivity, not a real DOF.
+
+**Why revisit the default.**  In the modes corpus sweep
+([`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md)) `dedup` is
+mostly a **runtime win at neutral-to-better QoR** — `bigHalf` 84s→20s (same
+0/0), `rnr/slowdown_rnr` 0/32→0/0, `rnr/mix2` 73→13 opens, `mix2_fast` 256→242
+— by shrinking the pool the planner and healers search.  A smaller pool also
+directly helps the BDB candidate-topology persist path
+([`wishlist-bdb.md`](wishlist-bdb.md) — persistence is the large-design
+bottleneck), so default-on would pay off on exactly the big hier designs that
+hurt today.
+
+**Blockers to clear before flipping (the same gate `hanan_loci` and
+`prune_dominated` needed):**
+1. **QoR is NOT uniformly neutral.**  The sweep shows real QoR shifts on a
+   couple of `hbundles` flows: `06_multipin_stress` 4/48→13/58 (worse) and
+   `07_wide_fan_stress` 0/11→2/2 (gains an overlap).  Dedup keeps the
+   *lowest-WL-estimated* member, but the estimate is not the realized WL — so
+   collapsing can discard the member a congested flow would actually have
+   picked.  Understand these two regressions before default-on; a
+   realization-aware representative choice (keep the member whose envelope
+   `[wl_lo,wl_hi]` best matches the band it will land in, not just min nominal)
+   may remove them.
+2. **Index renumbering → pin audit.**  Like every pool-shrinking pass, dedup
+   renumbers `select_topology` indices, so a flip needs the full pin-remap
+   audit (identity-checked by `topo_uid`, as done for the `hanan_loci` flip in
+   [`hanan_loci_flip_audit.md`](hanan_loci_flip_audit.md)) plus the golden
+   regen on the reference host.  Sidecar/BDB selections resolve by `topo_uid`
+   so they are order-insensitive by construction; only literal index pins in
+   `.buda` flows move.
+3. **Interaction with `hanan_loci` (now default-on).**  Dedup collapses
+   nominal-locus variants, and the default-on Hanan-line loci ADD exactly such
+   variants — so the two are complementary (dedup would claw back much of the
+   loci pool growth) but must be measured together, not each against a
+   pre-`hanan_loci` baseline.  The right measurement is dedup-on vs dedup-off
+   with `hanan_loci` on both sides, across the stressed corpus.
+
+**Path.**  Mirror the `hanan_loci` flip: prepare a `no_dedup_loci` opt-out
+(the legacy opt-in flag stays a keep-on no-op), collect the pin remap against
+the deduped pools, regen goldens on the reference host, then re-measure the
+two `hbundles` regressions.  Until the representative-choice fix removes those,
+keep it opt-in.
+
 ## True along-flex trunk DOF (Stage C of the flexible-root re-arch)
 
 **Context.** The coverage-driven flexible trunk span (PR on `claude/topo-gen-b4`)
