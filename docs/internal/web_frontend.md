@@ -216,6 +216,38 @@ curl -s -X POST localhost:8000/api/command -H 'content-type: application/json' \
 curl -s localhost:8000/api/state
 ```
 
+### Restart vs. refresh — picking up a change
+
+What you do to see a change depends on *which layer* changed. The three cases:
+
+- **Backend change** (a route, `server.py`, `demos.py`, `runner.py`,
+  `serialize.py`, or anything they import) — the running process holds the **old**
+  code in memory, so a browser refresh alone won't see it (e.g. a request to a
+  newly-added route just 404s). You must **restart the server**. A plain
+  `uvicorn …` launch binds the port, so **stop the old process first** — `Ctrl-C`
+  in its terminal, or `pkill -f "uvicorn web.server"` — otherwise the new one
+  dies with `[Errno 98] address already in use`. Then relaunch.
+- **Reference client** (`static/index.html`) — served static with
+  `Cache-Control: no-cache`, so a **normal browser reload** revalidates and picks
+  up the new bytes (no hard refresh, no restart). See
+  [web_static_caching.md](web_static_caching.md).
+- **Scala client** (`static/scala/main.js`) — a git-ignored build product, so
+  rebuild it with **`bb web`** (needs `sbt`), then reload the page. The
+  `no-cache` mount means a plain reload picks up the rebuilt bundle.
+
+**`--reload` avoids the manual backend restart** — it watches the Python source
+and restarts the worker in place on any change on disk, so after a `git pull`
+you don't stop/relaunch by hand:
+
+```bash
+PYTHONPATH=build:src uvicorn web.server:app --port 8000 --reload
+```
+
+Caveat: `--reload` watches Python source only, **not** the `main.js` build
+product (still a `bb web` + reload) and not the static HTML (still just a
+reload). It's a convenience for backend iteration, not a substitute for the two
+static-asset flows above.
+
 ## Tests
 `test/tests/test_web_server.py` — `run_one` capture + `SystemExit` containment,
 the no-matplotlib import (in a subprocess), the `/api/command` → `/api/state`
