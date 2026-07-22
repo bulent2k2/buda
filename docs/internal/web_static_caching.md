@@ -26,6 +26,14 @@ before reuse": the browser keeps the file but sends a conditional request
 - **rebuilt file** → `200` with the new bytes, picked up on the **next normal
   reload** — no hard refresh needed.
 
+`StaticFiles` **raises** `HTTPException(404)` for a missing file rather than
+returning a response, so `_NoCacheStatic` catches the 404 and stamps the header
+on it too. That matters for the not-built → built transition: `/scala/` before
+`bb web` 404s on the git-ignored `main.js`, and 404 is a heuristically-cacheable
+status — without `no-cache` a browser could keep reusing the cached failure (and
+the "not built" banner) after the bundle exists. Other statuses (405/401) are
+re-raised unchanged.
+
 ## Downsides (why this is a deliberate, scoped choice)
 
 1. **A revalidation round-trip on every load.** Each page load makes a

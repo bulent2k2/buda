@@ -34,6 +34,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import PlainTextResponse
 
 import buda_cli
 from web import runner, serialize
@@ -467,7 +469,17 @@ class _NoCacheStatic(StaticFiles):
     documented in docs/internal/web_static_caching.md."""
 
     async def get_response(self, path, scope):
-        response = await super().get_response(path, scope)
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            # StaticFiles RAISES for a missing file, which would skip the header.
+            # Build the 404 ourselves so it ALSO carries no-cache — otherwise a
+            # browser can cache the 404 for a not-yet-built main.js and keep
+            # showing the not-built banner after `bb web` (Codex #394). Re-raise
+            # anything else (405/401) unchanged.
+            if exc.status_code != 404:
+                raise
+            response = PlainTextResponse(exc.detail or "Not Found", status_code=404)
         response.headers["Cache-Control"] = "no-cache"
         return response
 

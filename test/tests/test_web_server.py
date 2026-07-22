@@ -215,3 +215,14 @@ def test_static_assets_send_no_cache_but_revalidate():
     assert etag                                # StaticFiles sends a validator
     r2 = client.get("/", headers={"If-None-Match": etag})
     assert r2.status_code == 304               # revalidation still short-circuits
+
+
+def test_missing_static_asset_404_is_also_no_cache():
+    """A 404 for an absent asset (e.g. main.js before `bb web`) must ALSO carry
+    no-cache — StaticFiles RAISES for a missing file, so without handling it the
+    404 would ship with no header and a browser could cache the failure and keep
+    showing the not-built banner after a rebuild (Codex #394)."""
+    client = _client()
+    r = client.get("/scala/__definitely_missing__.js")   # never on disk
+    assert r.status_code == 404
+    assert r.headers.get("cache-control") == "no-cache"
