@@ -20,6 +20,9 @@ object Main {
   private var view: String = "generation"
   private var edit: js.Dynamic = null   // null = no edit session open
   private var pinnedHere: Boolean = false   // is the shown candidate the pinned one?
+  private var demoList: js.Array[js.Dynamic] = js.Array()
+  private var active: js.Dynamic = null      // the selected demo {label, setup, stages}
+  private var bundleFocus: Option[Int] = None   // None = show all bundles (nuts/detailed)
 
   private def svg = dom.document.getElementById("svg").asInstanceOf[dom.svg.SVG]
   private def byId(id: String) = dom.document.getElementById(id)
@@ -29,11 +32,11 @@ object Main {
     wire("run", () => runCmds())
     wire("reset", () => ApiClient.reset().foreach { st =>
       showStages(st); render = null; hideEditPanel(); draw() })
-    wire("bundler", () => stage("run_bundler"))
-    wire("topologies", () => stage("generate_topologies"))
-    wire("planner", () => stage("run_planner"))
-    wire("nuts", () => stage("run_nuts"))
-    wire("dnuts", () => stage("run_detailed_nuts"))
+    wire("bundler", () => runDemoStage("bundler"))
+    wire("topologies", () => runDemoStage("topologies"))
+    wire("planner", () => runDemoStage("planner"))
+    wire("nuts", () => runDemoStage("nuts"))
+    wire("dnuts", () => runDemoStage("dnuts"))
     wire("view-topo", () => setView("generation"))
     wire("view-nuts", () => setView("nuts"))
     wire("view-detailed", () => setView("detailed"))
@@ -42,6 +45,8 @@ object Main {
     wire("bdb-load", () => bdbLoad())
     wire("prev", () => stepCand(-1))
     wire("next", () => stepCand(1))
+    wire("focus-prev", () => stepBundle(-1))
+    wire("focus-next", () => stepBundle(1))
     wire("pin", () => pinCand())
     wire("edit-open", () => editOpen(cand))                 // int index
     wire("edit-open-new", () => editOpen("new"))
@@ -49,6 +54,10 @@ object Main {
     wire("edit-commit", () => editCommit(false))
     wire("edit-commit-pin", () => editCommit(true))
     wire("edit-abort", () => editAbort())
+    Option(byId("demo")).foreach(
+      _.addEventListener("change", (_: dom.Event) => loadDemo()))
+    dom.window.addEventListener("keydown", (e: dom.KeyboardEvent) => onKey(e))
+    initDemos()
     refresh()
   }
 
@@ -71,6 +80,46 @@ object Main {
 
   private def stage(cmd: String): Unit =
     ApiClient.command(Seq(cmd)).foreach { res => showResults(res); refresh() }
+
+  // ── demo picker ─────────────────────────────────────────────────────────────
+  // The catalog (GET /api/demos) gives each demo its setup text + a per-stage
+  // command map, so the same "setup + click stages" UX drives the flat AND the
+  // hierarchy-aware flow (which needs run_hier_bundler / run_planner hier / …).
+  private def initDemos(): Unit =
+    ApiClient.demos().foreach { resp =>
+      val ds = resp.selectDynamic("demos")
+      demoList = if (defined(ds)) ds.asInstanceOf[js.Array[js.Dynamic]] else js.Array()
+      Option(byId("demo")).foreach { sel =>
+        val s = sel.asInstanceOf[dom.html.Select]
+        s.innerHTML = ""
+        demoList.zipWithIndex.foreach { case (dmo, i) =>
+          val o = dom.document.createElement("option").asInstanceOf[dom.html.Option]
+          o.value = i.toString; o.textContent = dmo.label.asInstanceOf[String]
+          s.appendChild(o)
+        }
+      }
+      if (demoList.nonEmpty) loadDemo()
+    }
+
+  private def loadDemo(): Unit = {
+    val i = Option(byId("demo")).map(_.asInstanceOf[dom.html.Select].value)
+      .flatMap(v => scala.util.Try(v.toInt).toOption).getOrElse(0)
+    active = if (i >= 0 && i < demoList.length) demoList(i) else null
+    val setup = if (active != null) active.setup.asInstanceOf[String] else ""
+    Option(byId("cmds")).foreach(_.asInstanceOf[dom.html.TextArea].value = setup)
+  }
+
+  /** Run the ACTIVE demo's command for stage `key` (falls back to the key itself
+    * if no demo is loaded).  The Scala client runs stages through /api/command,
+    * so the flat/hier dispatch is just a per-demo command lookup. */
+  private def runDemoStage(key: String): Unit = {
+    val cmd =
+      if (active != null && defined(active.selectDynamic("stages"))) {
+        val v = active.stages.selectDynamic(key)
+        if (defined(v)) v.asInstanceOf[String] else key
+      } else key
+    stage(cmd)
+  }
 
   private def showResults(res: js.Dynamic): Unit = {
     val rs = res.results.asInstanceOf[js.Array[js.Dynamic]]
@@ -97,7 +146,8 @@ object Main {
   // ── stage / view refresh ────────────────────────────────────────────────────
   private def setView(v: String): Unit = { view = v; refresh() }
 
-  private def refresh(): Unit =
+  private def refresh(): Unit = {
+    bundleFocus = None                 // a new stage / view starts showing all bundles
     ApiClient.state().foreach { st =>
       showStages(st)
       val sr = st.stages_run
@@ -119,12 +169,62 @@ object Main {
         }
       }
     }
+  }
 
   private def stepCand(dir: Int): Unit = {
     if (view != "generation" || render == null) return
     val bs = render.bundles.asInstanceOf[js.Array[js.Dynamic]]
     val n = if (bs.nonEmpty) bs(0).candidates.asInstanceOf[js.Array[js.Dynamic]].length else 0
     if (n > 0) { cand = ((cand + dir) % n + n) % n; draw() }
+  }
+
+  // ── bundle focus (NUTS / detailed views) ────────────────────────────────────
+  /** The sorted distinct bundle ids present in the current view's segments. */
+  private def currentBundleIds(): Seq[Int] = {
+    if (render == null) return Seq.empty
+    val segs: js.Array[js.Dynamic] = view match {
+      case "nuts" =>
+        val n = render.selectDynamic("nuts")
+        if (defined(n)) n.segments.asInstanceOf[js.Array[js.Dynamic]] else js.Array()
+      case "detailed" =>
+        val de = render.selectDynamic("detailed")
+        if (defined(de)) de.net_segments.asInstanceOf[js.Array[js.Dynamic]] else js.Array()
+      case _ => js.Array()
+    }
+    segs.map(_.bundle_id.asInstanceOf[Double].toInt).distinct.sorted.toSeq
+  }
+
+  /** Cycle the focus ring `[all, id0, id1, …]`; `n`/`p` isolate one bundle. */
+  private def stepBundle(dir: Int): Unit = {
+    if (view == "generation" || render == null) return
+    val ids = currentBundleIds()
+    if (ids.isEmpty) return
+    val ring: Seq[Option[Int]] = None +: ids.map(Some(_))   // None = "all bundles"
+    val i = math.max(0, ring.indexOf(bundleFocus))
+    bundleFocus = ring(((i + dir) % ring.length + ring.length) % ring.length)
+    draw()
+  }
+
+  private def updateFocusLabel(): Unit = {
+    val ids = currentBundleIds()
+    Option(byId("focuslbl")).foreach { l =>
+      l.textContent = bundleFocus match {
+        case None      => s"all ${ids.length} bundles · n/p to isolate one"
+        case Some(bid) => s"bundle $bid · ${ids.indexOf(bid) + 1}/${ids.length} · n/p to step"
+      }
+    }
+  }
+
+  // ── keyboard: step candidates (topo) / bundles (nuts, detailed) ─────────────
+  private def onKey(e: dom.KeyboardEvent): Unit = {
+    val tag = Option(e.target).map(_.asInstanceOf[dom.html.Element].tagName.toLowerCase).getOrElse("")
+    if (tag == "textarea" || tag == "input" || tag == "select") return
+    val fwd = e.key == "n" || e.key == "ArrowRight"
+    val back = e.key == "p" || e.key == "ArrowLeft"
+    if (!fwd && !back) return
+    e.preventDefault()
+    if (view == "generation") stepCand(if (fwd) 1 else -1)
+    else stepBundle(if (fwd) 1 else -1)
   }
 
   // ── select / pin ────────────────────────────────────────────────────────────
@@ -220,7 +320,7 @@ object Main {
 
   // ── render ──────────────────────────────────────────────────────────────────
   private def draw(): Unit = {
-    val label = Renderer.draw(svg, render, view, cand, edit)
+    val label = Renderer.draw(svg, render, view, cand, edit, bundleFocus)
     // Is the shown candidate the pinned one? (mirrors the reference client)
     pinnedHere = false
     if (render != null && view == "generation" && edit == null) {
@@ -241,6 +341,13 @@ object Main {
       val show = render != null && view == "generation"
       if (show) bare.removeAttribute("hidden") else bare.setAttribute("hidden", "")
       if (show) Option(byId("candlbl")).foreach(_.textContent = label)
+    }
+    // The focus bar (bundle isolation) belongs to the NUTS/detailed views only.
+    Option(byId("focusbar")).foreach { bar =>
+      val bare = bar.asInstanceOf[dom.html.Element]
+      val show = render != null && (view == "nuts" || view == "detailed")
+      if (show) { bare.removeAttribute("hidden"); updateFocusLabel() }
+      else bare.setAttribute("hidden", "")
     }
   }
 }

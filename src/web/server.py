@@ -38,7 +38,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import PlainTextResponse
 
 import buda_cli
-from web import runner, serialize
+from web import demos, runner, serialize
 
 app = FastAPI(title="BUDA Web Backend", version="0.1.0")
 
@@ -448,6 +448,13 @@ async def post_reset(req: SessionRequest = SessionRequest()):
         st.session = buda_cli.BudaSession()
         st.session.no_viz = True
         return serialize.serialize_state(st.session)
+
+
+@app.get("/api/demos")
+async def get_demos():
+    """The built-in demo catalog (flat + hierarchical) the client's picker shows:
+    each entry carries its setup commands and its per-stage command map."""
+    return {"demos": demos.catalog()}
 
 
 @app.get("/api/health")

@@ -38,9 +38,9 @@
   .bit { stroke: #08a; stroke-width: 1; } .bit.H { stroke: #e83; }
   .via { fill: #f60; stroke: #a30; stroke-width: .5; }
   .overlap { fill: #f005; stroke: #f00; stroke-width: 1; }
-  #candbar { position: absolute; top: 8px; left: 8px; background: #000a; color: #fff;
-             padding: 6px 10px; border-radius: 5px; }
-  #candbar button { background: #fff2; color: #fff; border: 1px solid #fff4; }
+  #candbar, #focusbar { position: absolute; top: 8px; left: 8px; background: #000a;
+             color: #fff; padding: 6px 10px; border-radius: 5px; }
+  #candbar button, #focusbar button { background: #fff2; color: #fff; border: 1px solid #fff4; }
   #editpanel { border: 1px solid #8884; border-radius: 4px; padding: 6px;
                display: flex; flex-direction: column; gap: 5px; }
   #editverdict { font-size: 12px; }
@@ -61,21 +61,20 @@
     ><span data-k="planner">planner</span><span data-k="nuts">nuts</span
     ><span data-k="dnuts">dnuts</span>
   </div>
-  <textarea id="cmds">source flow/tracks/tracks4top.buda
-add_block blk_07 2960 9750 4660 10250
-add_block blk_23 200 10830 2700 11830
-add_block io_pad_tl 200 12000 1200 12800
-add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
+  <div class="row">demo:
+    <select id="demo" onchange="loadDemo()" style="flex:1;font:inherit"></select>
+  </div>
+  <textarea id="cmds"></textarea>
   <div class="row">
     <button onclick="runCmds()">Run commands</button>
     <button onclick="reset()">Reset</button>
   </div>
   <div class="row">
-    <button onclick="stage('run_bundler')">bundler</button>
-    <button onclick="stage('generate_topologies')">topologies</button>
-    <button onclick="runStage('planner')">planner</button>
-    <button onclick="runStage('nuts')">nuts</button>
-    <button onclick="runStage('detailed_nuts')">dnuts</button>
+    <button onclick="runDemoStage('bundler')">bundler</button>
+    <button onclick="runDemoStage('topologies')">topologies</button>
+    <button onclick="runDemoStage('planner')">planner</button>
+    <button onclick="runDemoStage('nuts')">nuts</button>
+    <button onclick="runDemoStage('dnuts')">dnuts</button>
     <button onclick="runStage('ripup')">ripup</button>
   </div>
   <div class="row">view:
@@ -115,12 +114,18 @@ add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p</textarea>
     <button onclick="editOpen()">Edit</button>
     <button onclick="editOpen('new')">Edit new</button>
   </div>
+  <div id="focusbar" hidden>
+    <button onclick="stepBundle(-1)">◀</button>
+    <button onclick="stepBundle(1)">▶</button>
+    <span id="focuslbl"></span>
+  </div>
   <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
 </div>
 
 <script>
 const API = "/api";
 let RENDER = null, CAND = 0, VIEW = "generation", EDIT = null;
+let DEMOS = [], ACTIVE = null, BUNDLE_FOCUS = null;   // BUNDLE_FOCUS: null = show all
 
 async function post(path, body) {
   const r = await fetch(API + path, {method: "POST",
@@ -151,6 +156,73 @@ async function stage(cmd) {
 }
 async function setView(v) { VIEW = v; await refresh(); }
 
+// ── demo picker ─────────────────────────────────────────────────────────────
+// The catalog (GET /api/demos) gives each demo its setup text + a per-stage
+// command map, so the same "setup + click stages" UX drives the flat AND the
+// hierarchy-aware flow (which needs run_hier_bundler / run_planner hier / …).
+async function initDemos() {
+  DEMOS = (await get("/demos")).demos || [];
+  const sel = document.getElementById("demo");
+  sel.innerHTML = "";
+  DEMOS.forEach((d, i) => {
+    const o = document.createElement("option");
+    o.value = i; o.textContent = d.label; sel.appendChild(o);
+  });
+  if (DEMOS.length) loadDemo();
+}
+function loadDemo() {
+  ACTIVE = DEMOS[+document.getElementById("demo").value || 0];
+  document.getElementById("cmds").value = ACTIVE ? ACTIVE.setup : "";
+}
+// Long stages (planner/nuts/dnuts) keep the WS progress path — split the demo's
+// command into the /api/stage key + args (e.g. "run_planner hier 5" -> args
+// "hier 5"); the instant stages (bundler/topologies) post the command directly.
+const WS_STAGE = {planner: "planner", nuts: "nuts", dnuts: "detailed_nuts"};
+const WS_BASE  = {planner: "run_planner", nuts: "run_nuts", dnuts: "run_detailed_nuts"};
+async function runDemoStage(key) {
+  const cmd = (ACTIVE && ACTIVE.stages && ACTIVE.stages[key]) || key;
+  if (WS_STAGE[key]) {
+    const base = WS_BASE[key];
+    const args = cmd.startsWith(base) ? cmd.slice(base.length).trim() : "";
+    return runStage(WS_STAGE[key], args);
+  }
+  return stage(cmd);
+}
+
+// ── bundle focus (NUTS / detailed views) ────────────────────────────────────
+function currentBundleIds() {
+  const segs = VIEW === "nuts" ? (RENDER && RENDER.nuts && RENDER.nuts.segments)
+             : VIEW === "detailed" ? (RENDER && RENDER.detailed && RENDER.detailed.net_segments)
+             : null;
+  if (!segs) return [];
+  return [...new Set(segs.map(s => s.bundle_id))].sort((a, b) => a - b);
+}
+function stepBundle(d) {
+  if (VIEW === "generation" || !RENDER) return;
+  const ids = currentBundleIds();
+  if (!ids.length) return;
+  const ring = [null, ...ids];                 // null = "all bundles"
+  let i = ring.indexOf(BUNDLE_FOCUS);
+  if (i < 0) i = 0;
+  BUNDLE_FOCUS = ring[(i + d + ring.length) % ring.length];
+  draw();
+}
+function bundleAlpha(bid) {
+  return (BUNDLE_FOCUS === null || bid === BUNDLE_FOCUS) ? 1 : 0.1;
+}
+
+// ── keyboard: step candidates (topo) / bundles (nuts, detailed) ─────────────
+window.addEventListener("keydown", (e) => {
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (tag === "textarea" || tag === "input" || tag === "select") return;
+  const fwd = (e.key === "n" || e.key === "ArrowRight");
+  const back = (e.key === "p" || e.key === "ArrowLeft");
+  if (!fwd && !back) return;
+  e.preventDefault();
+  if (VIEW === "generation") stepCand(fwd ? 1 : -1);
+  else stepBundle(fwd ? 1 : -1);
+});
+
 // ── long-running stages via WS progress (Phase 6) ──────────────────────────
 // The stage buttons that can take tens of seconds go through /api/stage/{stage};
 // the WS pushes started/heartbeat/done frames so the UI shows a live indicator.
@@ -179,12 +251,12 @@ function connectWS() {
   ws.onclose = () => { setRunning(null); setTimeout(connectWS, 1500); };
   ws.onerror = () => ws.close();
 }
-async function runStage(stage) {
+async function runStage(stage, args) {
   // Falls back to /api/command for the mapped instant commands if the stage
   // endpoint is somehow unavailable; normally the WS drives the indicator.
   setRunning(`running ${stage}…`);
   try {
-    const res = await post("/stage/" + stage, {});
+    const res = await post("/stage/" + stage, {args: args || ""});
     if (res.error) {                             // unknown stage -> command path
       return stage(STAGE_MAP[stage] || stage);
     }
@@ -197,6 +269,7 @@ async function runStage(stage) {
   }
 }
 async function refresh() {
+  BUNDLE_FOCUS = null;                  // a new stage / view starts showing all bundles
   const st = await get("/state");
   const sr = st.stages_run;
   // Auto-advance the view to the deepest available stage on a fresh run.
@@ -356,9 +429,22 @@ function draw() {
   }
 
   document.getElementById("candbar").hidden = (VIEW !== "generation");
+  const showFocus = (VIEW === "nuts" || VIEW === "detailed");
+  document.getElementById("focusbar").hidden = !showFocus;
   if (VIEW === "generation") drawGeneration(g, W, H);
   else if (VIEW === "nuts") drawNuts(g);
   else if (VIEW === "detailed") drawDetailed(g, Math.max(W, H));
+  if (showFocus) updateFocusLabel();
+}
+
+function updateFocusLabel() {
+  const ids = currentBundleIds();
+  const lbl = document.getElementById("focuslbl");
+  if (BUNDLE_FOCUS === null)
+    lbl.textContent = `all ${ids.length} bundles · n/p to isolate one`;
+  else
+    lbl.textContent =
+      `bundle ${BUNDLE_FOCUS} · ${ids.indexOf(BUNDLE_FOCUS) + 1}/${ids.length} · n/p to step`;
 }
 
 // A placed segment: perpendicular coord = track_position, extent = span_lo..hi
@@ -440,11 +526,12 @@ function drawGeneration(g, W, H) {
 function drawNuts(g) {
   const n = RENDER.nuts; if (!n) return;
   for (const s of n.segments) {
-    el("rect", Object.assign({class: "trackftp"}, placedRect(s)), g);
+    const op = bundleAlpha(s.bundle_id);
+    el("rect", Object.assign({class: "trackftp", opacity: op}, placedRect(s)), g);
     const [a, b, c, d2] = placedLine(s);
-    el("line", {class: "track", x1: a, y1: b, x2: c, y2: d2}, g);
+    el("line", {class: "track", opacity: op, x1: a, y1: b, x2: c, y2: d2}, g);
   }
-  for (const o of n.overlap_details)
+  for (const o of n.overlap_details)   // overlaps stay full-opacity (congestion markers)
     el("rect", {class: "overlap", x: o.span_lo, y: o.perp_lo,
         width: o.span_hi - o.span_lo, height: o.perp_hi - o.perp_lo}, g);
 }
@@ -453,14 +540,17 @@ function drawDetailed(g, span) {
   const d = RENDER.detailed; if (!d) return;
   for (const s of d.net_segments) {
     const [a, b, c, e] = placedLine(s);
-    el("line", {class: "bit " + (s.horiz ? "H" : "V"), x1: a, y1: b, x2: c, y2: e}, g);
+    el("line", {class: "bit " + (s.horiz ? "H" : "V"), opacity: bundleAlpha(s.bundle_id),
+        x1: a, y1: b, x2: c, y2: e}, g);
   }
   const r = span * 0.004;
   for (const v of d.net_vias)
-    el("rect", {class: "via", x: v.x - r, y: v.y - r, width: 2*r, height: 2*r}, g);
+    el("rect", {class: "via", opacity: bundleAlpha(v.bundle_id),
+        x: v.x - r, y: v.y - r, width: 2*r, height: 2*r}, g);
 }
 
 connectWS();
+initDemos();
 refresh();
 </script>
 </body>

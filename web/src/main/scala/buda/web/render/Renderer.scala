@@ -47,12 +47,20 @@ object Renderer {
     else (tp - w / 2, lo, w, hi - lo)
   }
 
+  /** Opacity for a segment of bundle `bid` under the current focus: 1.0 when no
+    * bundle is isolated (`focus` is None) or this IS the isolated one, else 0.1 —
+    * so `n`/`p` stepping in the NUTS/detailed views dims every other bundle. */
+  private def bundleAlpha(bid: Double, focus: Option[Int]): Double =
+    if (focus.isEmpty || focus.contains(bid.toInt)) 1.0 else 0.1
+
   /** Render `payload` into `svg` for the given `view` ("generation"/"nuts"/
     * "detailed").  For the generation view, shows candidate `cand` of the first
-    * bundle, or the `edit` working copy when an edit session is open.  Returns the
-    * candidate-bar label (empty unless the generation view has something to show). */
+    * bundle, or the `edit` working copy when an edit session is open.  In the
+    * NUTS/detailed views, `focus` (a bundle id, or None = show all) dims every
+    * other bundle so one can be isolated.  Returns the candidate-bar label (empty
+    * unless the generation view has something to show). */
   def draw(svg: dom.svg.SVG, payload: js.Dynamic, view: String, cand: Int,
-           edit: js.Dynamic): String = {
+           edit: js.Dynamic, focus: Option[Int] = None): String = {
     svg.innerHTML = ""
     if (js.isUndefined(payload) || payload == null) return ""
     val fp = payload.floorplan
@@ -112,8 +120,8 @@ object Renderer {
     }
 
     view match {
-      case "nuts"     => drawNuts(g, payload); ""
-      case "detailed" => drawDetailed(g, payload, math.max(w, h)); ""
+      case "nuts"     => drawNuts(g, payload, focus); ""
+      case "detailed" => drawDetailed(g, payload, math.max(w, h), focus); ""
       case _          => drawGeneration(g, payload, cand, edit, w, h)
     }
   }
@@ -183,15 +191,17 @@ object Renderer {
     if (pinned && sb.selected_index.asInstanceOf[Int] == idx) " 📌PINNED" else ""
   }
 
-  private def drawNuts(g: dom.svg.Element, payload: js.Dynamic): Unit = {
+  private def drawNuts(g: dom.svg.Element, payload: js.Dynamic, focus: Option[Int]): Unit = {
     val n = payload.selectDynamic("nuts")
     if (!defined(n)) return
     arr(n, "segments").foreach { s =>
+      val op = bundleAlpha(d(s, "bundle_id"), focus)
       val (rx, ry, rw, rh) = placedRect(s)
-      g.appendChild(el("rect", "class" -> "trackftp", "x" -> rx, "y" -> ry, "width" -> rw, "height" -> rh))
+      g.appendChild(el("rect", "class" -> "trackftp", "opacity" -> op, "x" -> rx, "y" -> ry, "width" -> rw, "height" -> rh))
       val (a, b, c, d2) = placedLine(s)
-      g.appendChild(el("line", "class" -> "track", "x1" -> a, "y1" -> b, "x2" -> c, "y2" -> d2))
+      g.appendChild(el("line", "class" -> "track", "opacity" -> op, "x1" -> a, "y1" -> b, "x2" -> c, "y2" -> d2))
     }
+    // Overlaps stay full-opacity (congestion markers, not per-bundle geometry).
     arr(n, "overlap_details").foreach { o =>
       g.appendChild(el("rect", "class" -> "overlap",
         "x" -> d(o, "span_lo"), "y" -> d(o, "perp_lo"),
@@ -200,17 +210,19 @@ object Renderer {
     }
   }
 
-  private def drawDetailed(g: dom.svg.Element, payload: js.Dynamic, span: Double): Unit = {
+  private def drawDetailed(g: dom.svg.Element, payload: js.Dynamic, span: Double,
+                           focus: Option[Int]): Unit = {
     val det = payload.selectDynamic("detailed")
     if (!defined(det)) return
     arr(det, "net_segments").foreach { s =>
       val (a, b, c, e) = placedLine(s)
       val cls = "bit " + (if (s.horiz.asInstanceOf[Boolean]) "H" else "V")
-      g.appendChild(el("line", "class" -> cls, "x1" -> a, "y1" -> b, "x2" -> c, "y2" -> e))
+      g.appendChild(el("line", "class" -> cls, "opacity" -> bundleAlpha(d(s, "bundle_id"), focus),
+        "x1" -> a, "y1" -> b, "x2" -> c, "y2" -> e))
     }
     val r = span * 0.004
     arr(det, "net_vias").foreach { v =>
-      g.appendChild(el("rect", "class" -> "via",
+      g.appendChild(el("rect", "class" -> "via", "opacity" -> bundleAlpha(d(v, "bundle_id"), focus),
         "x" -> (d(v, "x") - r), "y" -> (d(v, "y") - r), "width" -> (2 * r), "height" -> (2 * r)))
     }
   }
