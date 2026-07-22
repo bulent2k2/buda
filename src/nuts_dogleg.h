@@ -81,6 +81,7 @@ std::vector<DoglegPlan> detect_dogleg_plans(
 std::set<int> run_dogleg_fallback(std::vector<BundleWrapper>& bundles,
                                   DoglegSolveOut& out,
                                   const DoglegSolveFn& solve,
-                                  double track_pitch);
+                                  double track_pitch,
+                                  const Floorplan& fp);
 
 } // namespace buda
