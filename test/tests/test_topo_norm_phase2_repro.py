@@ -13,18 +13,16 @@
 # limitations under the License.
 
 """
-Repro tests for the two deferred topo-norm Phase 2 defects.  Both are marked xfail
-(strict): they currently FAIL because the defect is present, and will XPASS once the
-defect is fixed -- at which point the strict marker turns the unexpected pass into a
-failure, prompting removal of the marker.
+Repro tests for the two (formerly deferred) topo-norm Phase 2 defects.  Both are
+now FIXED and these assert they stay fixed:
 
-  - Defect 2 (staircase): github issue #57
-  - Defect 5 (outlier slide): github issue #58
+  - Defect 2 (staircase): github issue #57 — collinear-stub MERGE with tap transfer.
+  - Defect 5 (outlier slide): github issue #58 — `clamp_sentinel_windows` bounds a
+    still-sentinel slide side to the candidate's design extent.
 
-Rationale and the architectural blockers are in
+History and the (now-resolved) architectural blockers are in
 docs/internal/topo-norm-phase2-deferred.md.
 """
-import pytest
 import buda
 
 
@@ -81,19 +79,21 @@ def test_defect2_no_collinear_staircase_jogs():
 
 # ── Defect 5 — unbounded (runaway) trunk slide (issue #58) ───────────────────
 
-@pytest.mark.xfail(strict=True,
-                   reason="defect 5 (issue #58): a trunk whose stubs all anchor on "
-                          "one side keeps an INT-sentinel-unbounded perp slide; the "
-                          "cluster clamp is not implemented (cascades through "
-                          "filter_pinched / NUTS placement)")
 def test_defect5_trunk_slide_is_bounded():
     """A trunk's perpendicular slide window must stay bounded near its cluster.
 
     A trunk (>=2 SEG conns, no busterm of its own) is pushed out by Pass 2 only on
     sides where a stub bounds it.  When every stub anchors on one side (an OOB trunk
-    hugging the block cluster) the other side stays at its INT sentinel -- unbounded
-    -- so NUTS could slide the trunk to the chip edge.  A normalized
-    compute_slide_ranges would clamp the runaway side to the receiver cluster.
+    hugging the block cluster) the other side used to stay at its INT sentinel --
+    unbounded.
+
+    FIXED (issue #58): the analysis' final pass `clamp_sentinel_windows` bounds any
+    still-sentinel side to the candidate's own design extent (its segment nominals
+    UNION the blocks bbox, + any reserved detour-channel margin).  It runs LAST, so
+    it never feeds tighten_passthrough / pin_relay_taps (the cascade that blocked
+    every earlier in-`compute_slide_ranges` clamp), and the bound is looser than any
+    interior Hanan cell — NUTS and the planner both re-clamp to the grid, so the fix
+    is routed-output-neutral; it only makes the window honest for the explorer.
     """
     # Driver plus receivers all ABOVE the row: the OOB trunk below them stubs only
     # upward, leaving its lower side unbounded.

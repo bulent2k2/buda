@@ -121,6 +121,60 @@ uint64_t topology_fingerprint(const Topology& topo) {
     return h;
 }
 
+// ── Final pass — bound genuinely-unbounded slide sides to the design extent ──
+// A trunk whose stubs all anchor on ONE side keeps its other side at the
+// INT_MIN/2 / INT_MAX/2 sentinel (derive_slide_ranges tightens only where a stub
+// pushes it out).  NUTS and the planner both RE-clamp the window to the Hanan
+// grid before use, so the sentinel never actually places a wire at the chip edge
+// — but it shows in the explorer / goldens as a runaway window (issue #58).
+// Bound each still-sentinel side to this candidate's own design extent (its
+// segment nominals UNION the blocks bbox, grown a quarter-span so an OOB detour
+// keeps slide room).  The extent is LOOSER than any interior Hanan cell, so this
+// is routed-output-neutral — it only makes the window honest.  Runs LAST, so it
+// never feeds tighten_passthrough / pin_relay_taps: that was the cascade
+// (pinched windows dropped by filter_pinched) which blocked every earlier
+// compute_slide_ranges-INTERNAL clamp — see docs/internal/topo-norm-phase2-
+// deferred.md defect 5.
+static void clamp_sentinel_windows(const Topology& topo, const Floorplan& fp,
+                                   std::vector<ConnSeg>& segs) {
+    const int LO_S = INT_MIN / 2, HI_S = INT_MAX / 2;
+    bool any = false;
+    for (const ConnSeg& cs : segs)
+        if (cs.perp_lo <= LO_S || cs.perp_hi >= HI_S) { any = true; break; }
+    if (!any) return;
+    long xlo = LONG_MAX, xhi = LONG_MIN, ylo = LONG_MAX, yhi = LONG_MIN;
+    auto acc = [&](long x, long y) {
+        xlo = std::min(xlo, x); xhi = std::max(xhi, x);
+        ylo = std::min(ylo, y); yhi = std::max(yhi, y);
+    };
+    for (const Segment& s : topo.segments) {
+        acc(s.start.x, s.start.y); acc(s.end.x, s.end.y);
+    }
+    for (const auto& nr : fp.get_all_blocks()) {
+        const Rect& r = nr.second;
+        acc(r.x1, r.y1); acc(r.x2, r.y2);
+    }
+    if (xlo > xhi || ylo > yhi) return;                 // no geometry
+    // Margin = any RESERVED detour-channel width (so an OOB detour into the
+    // channel keeps real slide room), else 0 — the design-geometry bbox is
+    // already looser than any interior Hanan cell, so no quarter-span inflation
+    // is needed for routed-neutrality, and a tight honest window is what the
+    // explorer wants.  (-1 = "auto" channel → treated as 0 here.)
+    const DetourChannelSpec& dc = fp.get_detour_channel();
+    const long mx = std::max<long>(std::max(dc.east, 0),  std::max(dc.west, 0));
+    const long my = std::max<long>(std::max(dc.north, 0), std::max(dc.south, 0));
+    const int x_lo = (int)(xlo - mx), x_hi = (int)(xhi + mx);
+    const int y_lo = (int)(ylo - my), y_hi = (int)(yhi + my);
+    for (ConnSeg& cs : segs) {
+        const int lo_b = cs.horiz ? y_lo : x_lo;        // H slides in y, V in x
+        const int hi_b = cs.horiz ? y_hi : x_hi;
+        int nlo = cs.perp_lo, nhi = cs.perp_hi;
+        if (nlo <= LO_S) nlo = lo_b;
+        if (nhi >= HI_S) nhi = hi_b;
+        if (nlo <= nhi) { cs.perp_lo = nlo; cs.perp_hi = nhi; }   // never invert
+    }
+}
+
 std::shared_ptr<const TopoAnalysis> analyze(const Topology& topo,
                                             const Floorplan& fp) {
     const uint64_t tfp = topology_fingerprint(topo);
@@ -140,6 +194,7 @@ std::shared_ptr<const TopoAnalysis> analyze(const Topology& topo,
     pin_relay_taps     (topo, fp, a->segs);
     derive_net_pull    (topo, fp, a->segs);
     derive_along_flex  (topo, fp, a->segs);
+    clamp_sentinel_windows(topo, fp, a->segs);   // issue #58: honest slide windows
     ++g_computes;
     topo.analysis_cache_ = a;
     return a;
