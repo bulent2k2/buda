@@ -1,4 +1,4 @@
-bundle 1 nets=60 candidates=21
+bundle 1 nets=60 candidates=20
  cand type=BITRUNK_H wl=6810 trunk=0 passthru=0
   blocks=blk_02,blk_22,blk_12,blk_29,io_pad_tr feedthru=
   seg 0 (4862,2875)-(5772,2875) L6 jog=0 edge=-1
@@ -22,36 +22,6 @@ bundle 1 nets=60 candidates=21
   ana 3 conns BT:blk_12@4425 ; SEG:0@2875e
   ana 4 horiz=0 layer=7 along=[2385,2875] perp=5485 slide=[4870,6100] pull=-1 aflex=01 acover=[2385,2875] apull=0
   ana 4 conns BT:blk_29@2385 ; SEG:0@2875e
- cand type=TRUNK_H+MST@y2875 wl=5621 trunk=2875 passthru=1
-  blocks=blk_02,blk_22,blk_12,blk_29,io_pad_tr feedthru=
-  seg 0 (4862,2875)-(5772,2875) L6 jog=0 edge=-1
-  seg 1 (5485,4425)-(5485,2875) L7 jog=0 edge=-1
-  seg 2 (5485,2385)-(5485,2875) L7 jog=0 edge=-1
-  seg 3 (5157,4425)-(5157,5825) L7 jog=0 edge=0
-  seg 4 (5157,5825)-(6100,5825) L6 jog=0 edge=1
-  seg 5 (5485,4425)-(5157,4425) L6 jog=0 edge=-1
-  bt 2 blk_22:THRU:(4870,2385,6100,3365):(4870,2385,6100,3365):[] -
-  bt 4 - io_pad_tr:THRU:(5445,5350,6100,6300):(5445,5350,6100,6300):[]
-  sconn (1,0)->[5]
-  sconn (1,1)->[0]
-  sconn (2,1)->[0]
-  sconn (3,0)->[5]
-  sconn (3,1)->[4]
-  sconn (4,0)->[3]
-  sconn (5,0)->[1]
-  sconn (5,1)->[3]
-  ana 0 horiz=1 layer=6 along=[4862,5772] perp=2875 slide=[2405,5350] pull=0 aflex=11 acover=[5485,5485] apull=0
-  ana 0 conns SEG:1@5485 ; SEG:2@5485
-  ana 1 horiz=0 layer=7 along=[2875,4425] perp=5485 slide=[4870,6100] pull=-1 aflex=11 acover=[2875,4425] apull=0
-  ana 1 conns SEG:5@4425e ; SEG:0@2875e
-  ana 2 horiz=0 layer=7 along=[2385,2875] perp=5485 slide=[4870,6100] pull=0 aflex=01 acover=[2385,2875] apull=0
-  ana 2 conns BT:blk_22@2385 ; SEG:0@2875e
-  ana 3 horiz=0 layer=7 along=[4425,5825] perp=5157 slide=[4870,5445] pull=1 aflex=11 acover=[4425,5825] apull=0
-  ana 3 conns SEG:5@4425e ; SEG:4@5825e
-  ana 4 horiz=1 layer=6 along=[5157,6100] perp=5825 slide=[5350,6300] pull=-1 aflex=10 acover=[5157,6100] apull=0
-  ana 4 conns SEG:3@5157e ; BT:io_pad_tr@6100
-  ana 5 horiz=1 layer=6 along=[5157,5485] perp=4425 slide=[4425,5350] pull=1 aflex=11 acover=[5157,5485] apull=0
-  ana 5 conns SEG:1@5485e ; SEG:3@5157e
  cand type=TRUNK_H@y1905 wl=10800 trunk=1905 passthru=1
   blocks=blk_02,blk_22,blk_12,blk_29,io_pad_tr feedthru=
   seg 0 (4862,1905)-(5772,1905) L6 jog=0 edge=-1

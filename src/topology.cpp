@@ -3274,6 +3274,10 @@ void TopologyGenerator::add_trunk_mst_candidates(
         if (trunk_topo.type.find("+MST") != std::string::npos) continue;
 
         int trunk_pos = trunk_topo.trunk_location;
+        // The single-point-spine drop is scoped to IN-bbox (non-OOB) trunks for
+        // now; an OOB detour trunk's dangling is the separate unbounded-slide
+        // class handled by set_drop_dangling (docs/internal/bus005_dangling_scan).
+        bool is_oob = (trunk_topo.type.find("_OOB") != std::string::npos);
 
         // BRANCH blocks: blocks whose orig_bbox does NOT contain trunk_pos.
         // Pass-through (spine) blocks straddle the trunk; they need no stub
@@ -3503,7 +3507,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
             // Drop a hybrid whose seed trunk ended up attached at a single point
             // (a dangling overshoot the clean-tree gate does not model).
             if (topology_is_clean_tree(tree, floorplan_) &&
-                !trunk_is_single_point(tree, trunk_pos, is_h, floorplan_))
+                (is_oob || !trunk_is_single_point(tree, trunk_pos, is_h, floorplan_)))
                 results.push_back(std::move(tree));
             // A simple hybrid that can't be cleanly completed is DROPPED (the base
             // trunk + standalone MST already cover the bundle).
@@ -3543,7 +3547,8 @@ void TopologyGenerator::add_trunk_mst_candidates(
         // A single-point seed trunk here is a dangling overshoot: drop the whole
         // candidate (and don't pool it as a fallback either — the plain trunk
         // still covers the bundle).
-        bool legacy_dangling = trunk_is_single_point(legacy, trunk_pos, is_h, floorplan_);
+        bool legacy_dangling = !is_oob &&
+            trunk_is_single_point(legacy, trunk_pos, is_h, floorplan_);
         if (topology_is_clean_tree(legacy, floorplan_) && !legacy_dangling) {
             results.push_back(std::move(legacy));
         } else if (blocks.size() < 4 && !legacy_dangling) {

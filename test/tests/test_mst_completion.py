@@ -609,3 +609,65 @@ def test_trunk_mst_root_double_tap_demoted():
         ct.build(c, fp)
         for blk, segs in _busterm_taps(ct).items():
             assert len(segs) == 1, f"{c.type}: block {blk} tapped by {sorted(segs)}"
+
+
+# ── Single-point seed-trunk drop (bus_005 / bundle 67 dangling class) ─────────
+# docs/internal/bus005_dangling_scan_2026-07.md: a non-OOB trunk+MST hybrid
+# whose seed trunk (the spine) attaches at a SINGLE point is a vestigial
+# overshoot -- the MST edges already connect every endpoint -- and is dropped at
+# generation (trunk_is_single_point in topology.cpp).
+
+def _spine_is_single_point(topo, fp, is_h, trunk_pos):
+    """Mirror of the C++ gate: the spine (longest seg at trunk_pos in the trunk
+    orientation) attaches at one along-coordinate."""
+    ct = buda.ConnTopology(); ct.build(topo, fp)
+    segs = ct.segs()
+    spine, best = -1, -1
+    for j, s in enumerate(topo.segments):
+        h = s.start.y == s.end.y
+        if is_h and (not h or s.start.y != trunk_pos): continue
+        if (not is_h) and (h or s.start.x != trunk_pos): continue
+        ln = abs((s.end.x - s.start.x) if is_h else (s.end.y - s.start.y))
+        if ln > best: best, spine = ln, j
+    if spine < 0:
+        return False
+    pos = set()
+    for c in segs[spine].conns:
+        if c.block_name:
+            # busterm tap sits at the seg endpoint on that block's face
+            s = topo.segments[spine]
+            pos.add(s.start.x if is_h else s.start.y)
+            pos.add(s.end.x if is_h else s.end.y)
+        else:
+            pos.add(c.at_pos)
+    return len(pos) == 1
+
+
+def test_collinear_row_drops_all_degenerate_hybrids():
+    """A perfectly collinear 3-block row: every trunk locus's hybrid has all its
+    stubs leaving the spine at one point (single-point seed trunk), so NO +MST
+    hybrid survives -- while the plain trunk / L / Z still cover the bundle."""
+    fp = _make_fp({"A": (0, 0, 100, 100),
+                   "B": (200, 0, 300, 100),
+                   "C": (400, 0, 500, 100)})
+    cands = _gen(fp).generate_candidates("A", ["B", "C"])
+    # Non-OOB hybrids all drop (the drop gate is scoped to in-bbox trunks); OOB
+    # detour hybrids are a separate class and may remain.
+    assert [c.type for c in cands
+            if "+MST" in c.type and "_OOB" not in c.type] == []
+    assert cands, "bundle must still have (non-MST) coverage"
+
+
+def test_no_surviving_nonoob_hybrid_has_single_point_spine():
+    """bus_005 shape (blk_34 -> blk_19, io_pad_br corner IO): the surviving
+    non-OOB TRUNK+MST hybrids all have a well-defined two-endpoint spine."""
+    fp = _make_fp({"blk_34": (100, 1700, 700, 2050),
+                   "blk_19": (100, 2770, 1050, 3420),
+                   "io_pad_br": (6290, 100, 6790, 500)})
+    cands = _gen(fp).generate_candidates("blk_34", ["blk_19", "io_pad_br"])
+    hybrids = [c for c in cands if "+MST" in c.type and "_OOB" not in c.type]
+    assert hybrids, "expected some non-OOB trunk+MST hybrids to survive"
+    for c in hybrids:
+        is_h = "TRUNK_H" in c.type
+        assert not _spine_is_single_point(c, fp, is_h, c.trunk_location), (
+            f"{c.type}: single-point seed trunk survived the drop gate")

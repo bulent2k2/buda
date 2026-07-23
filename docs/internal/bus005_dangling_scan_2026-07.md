@@ -106,6 +106,41 @@ candidates escape only because their trunk locus coincides with a block face.
 Candidate 35 (`@y2410`, 11 segments) is the pathological case: the vestigial
 spine (seg0) plus a tangle of unbounded relay jogs (seg3/5/6/7/8/9).
 
+## Fix (shipped) — drop the candidate when the seed trunk is single-point
+
+Implemented in `add_trunk_mst_candidates` (`topology.cpp`), scoped to **non-OOB**
+trunk+MST hybrids (the OOB unbounded-slide class stays with `set_drop_dangling`,
+per the investigation focus). After `complete_relay_junctions`,
+`trunk_is_single_point()`:
+
+1. finds the spine — the longest segment matching the trunk orientation at
+   `trunk_pos`;
+2. derives `seg_conns` on a local copy (they are not derived until
+   `finalize_candidates`, mirroring `topology_is_clean_tree`);
+3. returns true when every spine attachment — seg-to-seg junctions
+   (`SegConn::at_pos`) and busterm taps (localized per-endpoint via
+   `seg_busterms`) — shares ONE along-coordinate (`lo == hi`). Two taps at the
+   same coordinate still count as single-point (e.g. four_blocks
+   `TRUNK_H+MST@y175`, `BT:u3@99` + `SEG:1@99e`).
+
+Both emit paths gate on it (completed-tree + legacy), and a single-point legacy
+hybrid is not pooled as a `<4`-block fallback. The bundle is never stranded —
+the plain trunk / L / Z / a clean hybrid still cover it, and the coverage gate
+runs after.
+
+**Why drop, not trim.** A single-point spine is *vestigial* — the MST edges
+already connect every endpoint, so the trunk carries no wire the tree needs.
+Dropping is exact; the earlier post-hoc trim (reverted) had to rebuild geometry
+and fought the completion's `edge_id`/junction/WL invariants (11 test
+regressions vs. 0 behavioral here).
+
+**Impact (QoR unchanged).** NUTS placement goldens are byte-identical and the
+flow-script / big2 / ripup QoR tests pass — the dropped candidates were
+*never selected* by the planner (they only ranked low on an understated WL).
+Only the candidate-pool snapshots move: 6 `topo_analysis` goldens shed their
+single-point `+MST` candidates (four_blocks −6, comprehensive −12, dogleg2 −2,
+b4 −1, big/mix in hashed bundles). bus_005: non-OOB truly-dangling 3 → 0.
+
 ## Reproduce
 
 ```bash
