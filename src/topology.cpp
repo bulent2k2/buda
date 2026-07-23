@@ -1600,6 +1600,71 @@ static bool has_collinear_overlap(const Topology& topo, int n_orig) {
 // A straight trunk crossing a block is one continuous wire and is left
 // untouched: its endpoints do not land on the crossed block's faces, so the
 // block collects zero incident endpoints here.
+// After a TRUNK+MST hybrid is completed, its seed trunk (the spine at
+// trunk_pos) must have TWO well-defined endpoints — each a block tap or a
+// junction with another segment.  When the MST edges make the spine redundant,
+// completion can leave it attached at a SINGLE point (one end, or mid-body),
+// with the rest of the spine a wire to nothing — a dangling overshoot the
+// clean-tree gate does not model (it renders as an abstract-NUTS phantom span
+// that DetailedNUTS silently shrinks; bus_005/bundle 67 and 68 more across
+// bigHalf — docs/internal/bus005_dangling_scan_2026-07.md).  This detects that
+// case so the caller drops the whole candidate (the plain trunk / L / Z / a
+// clean hybrid already cover the bundle — the coverage gate never strands).
+//
+// The spine is the longest segment matching the trunk orientation at trunk_pos.
+// It is single-point iff every one of its connections — seg-to-seg junctions
+// (SegConn::at_pos) and busterm taps (localized per-endpoint via seg_busterms)
+// — shares one along-coordinate.  An unlocalized busterm tap is treated as
+// well-defined (never a false drop).
+static bool trunk_is_single_point(const Topology& topo, int trunk_pos, bool is_h,
+                                  const Floorplan& fp) {
+    int spine = -1;
+    long best_len = -1;
+    for (int j = 0; j < (int)topo.segments.size(); ++j) {
+        const Segment& sg = topo.segments[j];
+        bool h = (sg.start.y == sg.end.y);
+        if (is_h ? (!h || sg.start.y != trunk_pos)
+                 : (h || sg.start.x != trunk_pos)) continue;
+        long len = std::abs(is_h ? sg.end.x - sg.start.x : sg.end.y - sg.start.y);
+        if (len > best_len) { best_len = len; spine = j; }
+    }
+    if (spine < 0) return false;                 // no spine found — leave it
+
+    // Mid-generation gate: seg_conns is not derived until finalize_candidates,
+    // so derive it on a local copy (mirrors topology_is_clean_tree) before
+    // reading the spine's junctions.
+    Topology t2 = topo;
+    annotate_seg_conns(t2);
+    ConnTopology ct;
+    ct.build(t2, fp);
+    const auto& csegs = ct.segs();
+    if (spine >= (int)csegs.size()) return false;
+
+    const Segment& sg = topo.segments[spine];
+    long a0 = is_h ? sg.start.x : sg.start.y;
+    long a1 = is_h ? sg.end.x   : sg.end.y;
+    long lo = LONG_MAX, hi = LONG_MIN;
+    int  n = 0, bt_seg_conns = 0;
+    for (const auto& c : csegs[spine].conns) {
+        if (c.kind == SegConn::SEG) { lo = std::min(lo, (long)c.at_pos);
+                                      hi = std::max(hi, (long)c.at_pos); ++n; }
+        else ++bt_seg_conns;
+    }
+    int bt_localized = 0;
+    auto it = topo.seg_busterms.find(spine);
+    if (it != topo.seg_busterms.end()) {
+        if (it->second.first)  { lo = std::min(lo, a0); hi = std::max(hi, a0);
+                                 ++n; ++bt_localized; }
+        if (it->second.second) { lo = std::min(lo, a1); hi = std::max(hi, a1);
+                                 ++n; ++bt_localized; }
+    }
+    // A busterm tap the analysis saw but seg_busterms did not localize to an
+    // endpoint: assume the spine is well-defined (do not drop on uncertainty).
+    if (bt_seg_conns > bt_localized) return false;
+    if (n == 0) return false;                    // isolated — leave for the gate
+    return lo == hi;                             // one attachment point → dangling
+}
+
 static void complete_relay_junctions(Topology& topo,
                                      const std::vector<Busterm>& blocks,
                                      const Floorplan& fp,
@@ -3435,7 +3500,10 @@ void TopologyGenerator::add_trunk_mst_candidates(
             if (tree.connected_block_names.empty())
                 for (const auto& b : blocks)
                     tree.connected_block_names.push_back(b.block_name);
-            if (topology_is_clean_tree(tree, floorplan_))
+            // Drop a hybrid whose seed trunk ended up attached at a single point
+            // (a dangling overshoot the clean-tree gate does not model).
+            if (topology_is_clean_tree(tree, floorplan_) &&
+                !trunk_is_single_point(tree, trunk_pos, is_h, floorplan_))
                 results.push_back(std::move(tree));
             // A simple hybrid that can't be cleanly completed is DROPPED (the base
             // trunk + standalone MST already cover the bundle).
@@ -3472,9 +3540,13 @@ void TopologyGenerator::add_trunk_mst_candidates(
         if (legacy.connected_block_names.empty())
             for (const auto& b : blocks)
                 legacy.connected_block_names.push_back(b.block_name);
-        if (topology_is_clean_tree(legacy, floorplan_)) {
+        // A single-point seed trunk here is a dangling overshoot: drop the whole
+        // candidate (and don't pool it as a fallback either — the plain trunk
+        // still covers the bundle).
+        bool legacy_dangling = trunk_is_single_point(legacy, trunk_pos, is_h, floorplan_);
+        if (topology_is_clean_tree(legacy, floorplan_) && !legacy_dangling) {
             results.push_back(std::move(legacy));
-        } else if (blocks.size() < 4) {
+        } else if (blocks.size() < 4 && !legacy_dangling) {
             // Completion could not yield a clean tree (e.g. a multi-rect/TEG branch
             // whose stubs can't be dropped without dangling its bridge, or no
             // stub-owning root).  Defer it to the post-loop coverage fallback rather
@@ -3799,11 +3871,6 @@ std::vector<Topology> TopologyGenerator::generate_candidates(
     }
     candidates = two_pin ? generate_2pin(src_name, dst_names[0])
                          : generate_npin(src_name, dst_names);
-    // Trim vestigial trunk overshoot BEFORE the coverage gate so it sees the
-    // trimmed geometry (a trunk whose MST edges made it redundant renders as a
-    // dangling stub the gate does not model — bus_005/bundle 67, and 68 more
-    // internal-trunk candidates across bigHalf).
-    trim_dangling_trunks(candidates);
     // Uniform coverage gate — one place, so every generation path (2-pin,
     // trunk, MST, BITRUNK) and every caller (flat/hier CLI, direct API) is
     // covered.  Structural per-path guards (topology_is_clean_tree, the
@@ -3811,149 +3878,6 @@ std::vector<Topology> TopologyGenerator::generate_candidates(
     // that keeps an uncovered candidate from ever reaching the planner.
     filter_uncovered(candidates);
     return candidates;
-}
-
-void TopologyGenerator::trim_dangling_trunks(std::vector<Topology>& candidates) const {
-    if (candidates.empty()) return;
-
-    // A candidate is in scope iff it is a trunk-family shape with NO specialized
-    // termination structure — those (feedthru split faces, TEG bridges, fan-in
-    // taper) are endpoint kinds this pass must never trim through.
-    auto in_scope = [](const Topology& t) {
-        if (t.type != "USER" &&
-            (t.type.rfind("TRUNK", 0) == 0 ||
-             t.type.rfind("BITRUNK", 0) == 0 ||
-             t.type.rfind("MST", 0) == 0) &&
-            t.feedthru_blocks.empty() && t.bridge_segments.empty() &&
-            t.seg_bits.empty())
-            return true;
-        return false;
-    };
-
-    // Does this topology carry a hard connectivity fault (open / unbridged
-    // disconnect)?  A dangling stub is NOT such a fault — that is exactly why the
-    // pass exists — so a clean-but-dangling candidate returns false and a trim
-    // that keeps it false is accepted.
-    auto has_fault = [&](const Topology& t) {
-        ConnTopology ct;
-        ct.build(t, floorplan_);
-        for (const auto& v : check_topo(ct, t, floorplan_, -1).violations) {
-            if (v.kind == ViolationKind::BUSTERM_OPEN) return true;
-            if (v.kind == ViolationKind::DISCONNECTED &&
-                !disconnected_islands_bridged(ct, t, floorplan_))
-                return true;
-        }
-        return false;
-    };
-
-    // One trim sweep over `top`: rebuild its segment list, trimming each segment
-    // to the outermost along-position where it actually attaches (a busterm tap
-    // — known per-endpoint from seg_busterms — or a seg-to-seg junction — the
-    // SegConn at_pos).  A segment whose attachments all coincide collapses and
-    // is dropped.  Returns true and rewrites `top` (segments + re-annotation)
-    // when anything changed.
-    auto trim_once = [&](Topology& top) -> bool {
-        ConnTopology ct;
-        ct.build(top, floorplan_);
-        const auto& csegs = ct.segs();
-        int n = (int)top.segments.size();
-        std::vector<Segment> out;
-        out.reserve(n);
-        bool changed = false;
-        for (int j = 0; j < n; ++j) {
-            const Segment& sg = top.segments[j];
-            bool horiz = (sg.start.y == sg.end.y);
-            long a0 = horiz ? sg.start.x : sg.start.y;
-            long a1 = horiz ? sg.end.x   : sg.end.y;
-            long alo = std::min(a0, a1), ahi = std::max(a0, a1);
-            int  perp = horiz ? sg.start.y : sg.start.x;
-
-            // Gather every attachment's along-coordinate.
-            std::vector<long> pos;
-            int n_bt_conn = 0;
-            if (j < (int)csegs.size())
-                for (const auto& c : csegs[j].conns) {
-                    if (c.kind == SegConn::SEG) pos.push_back(c.at_pos);
-                    else ++n_bt_conn;
-                }
-            // Busterm taps: seg_busterms is authoritative about WHICH endpoint.
-            int bt_endpoints = 0;
-            auto it = top.seg_busterms.find(j);
-            if (it != top.seg_busterms.end()) {
-                if (it->second.first)  { pos.push_back(a0); ++bt_endpoints; }
-                if (it->second.second) { pos.push_back(a1); ++bt_endpoints; }
-            }
-            // A busterm conn the analysis saw but seg_busterms did not localize
-            // to an endpoint: be conservative and pin BOTH ends (never trim).
-            if (n_bt_conn > bt_endpoints) { pos.push_back(alo); pos.push_back(ahi); }
-
-            // Pass-through coverage is load-bearing too: a segment whose body
-            // crosses the INTERIOR of a connected block covers it (seg_spans_rect
-            // — no busterm tap), so trimming inside that block would uncover it.
-            // Pin the block's along-extent (clamped to the segment) so the trim
-            // keeps spanning it.  Strict-interior on the perp axis leaves
-            // face-grazes to the busterm/junction cases above.
-            for (const std::string& bn : top.connected_block_names) {
-                if (!floorplan_.has_block(bn)) continue;
-                Rect r = floorplan_.get_block_bounds(bn);
-                int  plo = horiz ? r.y1 : r.x1, phi = horiz ? r.y2 : r.x2;
-                if (perp <= plo || perp >= phi) continue;       // not interior
-                long blo = horiz ? r.x1 : r.y1, bhi = horiz ? r.x2 : r.y2;
-                if (bhi <= alo || blo >= ahi) continue;         // no along overlap
-                pos.push_back(std::max(alo, blo));
-                pos.push_back(std::min(ahi, bhi));
-            }
-
-            if (pos.empty()) {                 // isolated — leave for the gate
-                out.push_back(sg);
-                continue;
-            }
-            long lo = *std::min_element(pos.begin(), pos.end());
-            long hi = *std::max_element(pos.begin(), pos.end());
-            if (lo == hi) { changed = true; continue; }   // collapses -> drop
-            if (lo > alo || hi < ahi) {                    // overshoot -> trim
-                changed = true;
-                out.push_back(horiz ? make_seg((int)lo, perp, (int)hi, perp, sg.layer_hint)
-                                    : make_seg(perp, (int)lo, perp, (int)hi, sg.layer_hint));
-            } else {
-                out.push_back(sg);
-            }
-        }
-        if (!changed || out.empty()) return false;
-        top.segments = std::move(out);
-        top.seg_busterms.clear();
-        top.seg_conns.clear();
-        top.clear_analysis_cache();
-        annotate_topology(top, floorplan_);
-        return true;
-    };
-
-    int n_trimmed = 0, n_reverted = 0;
-    std::string first_type;
-    for (auto& t : candidates) {
-        if (!in_scope(t)) continue;
-        Topology work = t;
-        bool any = false;
-        // Fixpoint: dropping a spine can expose a partner that now dangles.
-        for (int iter = 0; iter < (int)t.segments.size() + 1; ++iter) {
-            if (!trim_once(work)) break;
-            any = true;
-        }
-        if (!any) continue;
-        // Accept only if the trim did not introduce a hard fault (it removes
-        // non-load-bearing wire, so it should not — but a cascade could isolate
-        // a partner; then keep the original untouched rather than strand it).
-        if (has_fault(work) && !has_fault(t)) { ++n_reverted; continue; }
-        if (first_type.empty()) first_type = t.type;
-        t = std::move(work);
-        ++n_trimmed;
-    }
-    if (n_trimmed > 0)
-        std::cerr << "[TopoTrim] trimmed " << n_trimmed
-                  << " dangling trunk candidate(s) (first: " << first_type << ")"
-                  << (n_reverted ? " ; " + std::to_string(n_reverted) +
-                                   " reverted (would disconnect)" : "")
-                  << ".\n";
 }
 
 void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) const {
