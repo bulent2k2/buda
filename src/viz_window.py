@@ -413,7 +413,11 @@ def _disable_default_keymaps():
     """Remove default matplotlib keybindings that interfere with BUDA shortcuts."""
     keys_to_clear = (
         'keymap.save', 'keymap.fullscreen', 'keymap.home', 'keymap.back',
-        'keymap.forward', 'keymap.xscale', 'keymap.yscale', 'keymap.grid'
+        'keymap.forward', 'keymap.xscale', 'keymap.yscale', 'keymap.grid',
+        # 'p' (pan) and 'o' (zoom) toggle matplotlib's interactive modes; BUDA
+        # binds 'p' to previous-bundle/topo and drives pan/zoom itself, so drop
+        # matplotlib's single-letter defaults or both fire on one keypress.
+        'keymap.pan', 'keymap.zoom'
     )
     for key in keys_to_clear:
         try:
