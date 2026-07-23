@@ -618,6 +618,20 @@ public:
     // unchanged and a warning is printed (the planner ladder still commits one).
     void filter_uncovered(std::vector<Topology>& candidates) const;
 
+    // Trim vestigial trunk overshoot: every segment must have two well-defined
+    // endpoints — each a block tap (busterm) or a junction with another segment
+    // (conn-seg).  A trunk-family spine whose MST/relay edges made it redundant
+    // ends up with a non-load-bearing end (a wire to nothing) or, when its only
+    // attachment is mid-body, both ends dangling.  For each such segment, trim
+    // each end back to its outermost attachment; if all attachments coincide the
+    // segment collapses and is dropped, re-annotating and re-validating so a
+    // trimmed candidate is accepted only when it stays connected + covered (else
+    // the original is kept untouched).  Scoped to TRUNK/BITRUNK/MST candidates
+    // with no feedthru/bridge/fan-in structure (endpoint kinds 3-4 must never be
+    // trimmed through).  Always-on; runs before filter_uncovered so the coverage
+    // gate sees the trimmed geometry.  See docs/internal/bus005_dangling_scan_2026-07.md.
+    void trim_dangling_trunks(std::vector<Topology>& candidates) const;
+
 private:
     // Internal dispatch targets.
     std::vector<Topology> generate_2pin(
