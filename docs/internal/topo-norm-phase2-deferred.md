@@ -1,8 +1,9 @@
-# Topo-norm Phase 2 (defects 2 & 5) — deferred, and why
+# Topo-norm Phase 2 (defects 2 & 5) — resolved, and how
 
-**Status:** Phase 1 (PR #55) is merged. **Defect 2 (issue #57) is now FIXED**
-(2026-07-22, see below). **Defect 5 (issue #58) remains deferred.** This note
-records the findings so the decision is not re-litigated from scratch.
+**Status:** Phase 1 (PR #55) is merged. **Defect 2 (issue #57) is FIXED**
+(2026-07-22, see below). **Defect 5 (issue #58) is FIXED** (2026-07-23, see
+below) — but NOT the way the issue first proposed. This note records the
+findings so the decision is not re-litigated from scratch.
 
 ## Background
 
@@ -26,32 +27,69 @@ With Phase 1's honest WL the planner never selects the staircase/outlier-slide
 candidates, so neither defect changes any *routed* output. They are browsable-only
 artifacts in the topology explorer.
 
-## Defect 5 — outlier (runaway) trunk slide
+## Defect 5 — out-of-bbox trunk placement — ✅ FIXED (issue #58, 2026-07-23)
+
+### The two dead ends (kept for the record)
 
 A trunk (`>=2` SEG conns, no busterm of its own — the predicate in `nuts.cpp`) is
 bounded by `compute_slide_ranges` Pass 2 only on sides where a stub pushes it out.
-When every stub anchors on one side (e.g. an OOB trunk hugging the block cluster)
-the other side stays at its `INT` sentinel — unbounded — so NUTS *could* slide the
-trunk to the chip edge. Example measured: `TRUNK_H_OOB@y905` had slide
-`[-1073741824, 980]`.
+When every stub anchors on one side (an OOB trunk hugging the block cluster) the
+other side stays at its `INT` sentinel — unbounded (`TRUNK_H_OOB@y905` had slide
+`[-1073741824, 980]`). The issue proposed *clamping the slide window*. That was
+tried twice and is a dead end:
 
-A Pass-3 clamp (bound a trunk's window to the union of its nominal position and its
-stub-face cluster) does fix the geometry in isolation, **but it is too entangled to
-ship:**
+- A Pass-3 clamp in `compute_slide_ranges` feeds the downstream
+  `tighten_passthrough_ranges` / `pin_relay_tap_connectors` passes, creating
+  *pinched* windows (`perp_lo == perp_hi`) that `filter_pinched` drops at
+  **generation** — U-shape/detour trunks legitimately sit outside the bbox and
+  got pinched away.
+- A final "clamp only a genuinely-unbounded side" pass (PR #410,
+  `clamp_sentinel_windows`) also failed: the analysis window is a **deliberate**
+  free-DOF representation (serialized as `null`; `test_free_slide_windows_serialize_as_null`),
+  and the planner + NUTS both *consume* `perp_lo/hi`, so bounding the stored
+  value shifts selection and placement. Measured: 25 fast+mid failures and a QoR
+  corpus regression (+103 opens on the `mix2` healer family) for the salvage —
+  see the PR #410 discussion. **The analysis slide window is left unbounded on
+  purpose.**
 
-- Clamping in `compute_slide_ranges` feeds the downstream `tighten_passthrough_ranges`
-  / `pin_relay_tap_connectors` passes, creating new *pinched* windows
-  (`perp_lo == perp_hi`) that `filter_pinched` then drops at **generation time** —
-  U-shape / detour trunks legitimately sit outside the bbox and got pinched away.
-- Even a narrow "only clamp a genuinely-unbounded side, never pinch" version still
-  shifted **NUTS placements on selected topologies** (`test_nuts_dogleg`,
-  `test_nuts_pull_repack` failed). Deciding whether each shifted placement is an
-  improvement or a regression needs per-test correctness review.
+### What actually mattered — and the fix
 
-Two implementations broke **19–27 tests** for zero change to routed output. The
-right home for this, if ever pursued, is a **NUTS-placement-time** clamp (bound the
-*placed* position, not the slide window), with full dogleg/pull revalidation — not a
-slide-range edit.
+The runaway slide window is a *symptom*, not the bug. The real defect surfaces
+only when an OOB trunk is **selected** (an expert `select_topology`, or ripup
+promotion under congestion): its nominal perp sits *below/beyond the block
+bbox*, but the NUTS placement interval is seeded from the Hanan grid extent
+(`get_hanan_grid` = blocks + keepouts only). So the interval collapses
+(`[1000, 980]`, inverted), the trunk violates its interval, and detailed NUTS
+strands every one of its bits — while abstract NUTS reports "0 overlaps". A
+`detour_channel` *reserves* exactly the band such a trunk routes in, but it was
+plumbed into topology **generation** only, never into the NUTS/DNUTS boundary.
+
+The fix (in `nuts.cpp`) makes the NUTS design boundary detour-channel aware and
+fails loud when a selected OOB trunk still has nowhere to sit:
+
+1. **Detour-aware interval seed** (`extract_segments`): when an explicit
+   `detour_channel` side is set, the interval seed reaches into it
+   (`interval_lo -= south`, `interval_hi += north`, etc.). Bounded segments
+   re-tighten to their slide window immediately after, so **only free-slide
+   (sentinel) OOB trunks use the extra room** — a design with no explicit
+   channel is byte-identical. The OOB trunk then gets a real window
+   (`[548, 980]`) and seats; its bits place.
+2. **Loud failure** (`derive_unseatable_trunks`, `NUTSResult::unseatable_trunks`):
+   a selected OOB trunk whose nominal is *still* outside the routable boundary
+   (Hanan extent + explicit channel) is reported per-trunk **and** on the NUTS
+   headline — no more silent "0 overlaps" while DNUTS drops the bits. Widen the
+   channel or re-select.
+
+Both are gated on the geometry, so the default (no explicit `detour_channel`)
+path is untouched: the **34-flow QoR corpus is byte-identical to `main`** on
+overlaps / opens / abstract WL / detailed WL, with **zero** false-positive
+unseatable flags. This is the "NUTS-placement-time" home the original deferral
+predicted — realized as an *extend* (seat the legitimate detour route) plus a
+*loud reject* (for the genuinely unseatable pin), not a slide-range clamp.
+
+Repro: `test_topo_norm_phase2_repro.py::test_defect5_oob_trunk_seats_in_detour_channel`
+(seats + all bits place) and `::test_defect5_oob_trunk_unseatable_without_channel_is_loud`
+(flagged loud, bits strand).
 
 ## Defect 2 — staircase (collinear relay stubs) — ✅ FIXED (issue #57, 2026-07-22)
 
@@ -123,10 +161,15 @@ can carries exactly the feedthru-reopening / cascade risk that blocked defect 5.
   cause are QoR-neutral-or-better, and the two affected topo_analysis goldens
   (big / mix) were regenerated in place — verified host-independent, so no
   reference-host re-baseline was needed.
-- **Defect 5 (issue #58): still deferred.** Move the clamp to **NUTS placement
-  time** (bound the placed position, not the slide window), with dogleg/pull-repack
-  revalidation — the slide-range edit cascades through `filter_pinched` and shifts
-  selected placements (19–27 tests, zero output change). Tracked in issue #58.
+- **Defect 5 (issue #58): ✅ FIXED (2026-07-23).** Resolved at NUTS placement
+  time, as the deferral predicted — but as an **extend + loud reject**, not a
+  clamp. The detour-aware interval seed lets a selected OOB trunk sit in the
+  `detour_channel` band it routes in (so its bits place); an OOB trunk with no
+  channel to sit in is flagged `NUTSResult::unseatable_trunks` loudly instead of
+  silently stranding at DNUTS. Gated on geometry, so the QoR corpus is
+  byte-identical to `main`. The runaway *analysis* slide window is left unbounded
+  on purpose (a deliberate free-DOF/null contract that the planner and NUTS
+  consume — bounding it cascades, see the two dead ends above).
 
-Phase 1 (honest WL → clean selected topologies) plus the defect-2 fix are the
-shipped outcome of topo-norm; only defect 5 remains.
+Phase 1 (honest WL → clean selected topologies) plus the defect-2 and defect-5
+fixes are the shipped outcome of topo-norm.
