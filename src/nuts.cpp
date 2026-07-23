@@ -2537,14 +2537,23 @@ NUTSResult NUTSEngine::rerun_layer(
         // constraints until the pinched windows forced overlaps a repair
         // could not clear (audit C1-01).  build_context(only_layer) below
         // then applies the prep to this layer exactly once.
+        // Same detour-channel extension the initial extract_segments applies
+        // (#58): without it a re-solved layer loses the reserved band and a
+        // detour-seated OOB trunk becomes unplaceable again.  Gated on an
+        // explicit channel side; bounded segments re-tighten in the prep below.
+        const DetourChannelSpec& dc = floorplan_.get_detour_channel();
         if (ts.horiz) {
             if (!y_grid.empty()) {
                 ts.interval_lo = static_cast<double>(y_grid.front());
                 ts.interval_hi = static_cast<double>(y_grid.back());
+                if (dc.south >= 0) ts.interval_lo -= dc.south;
+                if (dc.north >= 0) ts.interval_hi += dc.north;
             }
         } else if (!x_grid.empty()) {
             ts.interval_lo = static_cast<double>(x_grid.front());
             ts.interval_hi = static_cast<double>(x_grid.back());
+            if (dc.west >= 0) ts.interval_lo -= dc.west;
+            if (dc.east >= 0) ts.interval_hi += dc.east;
         }
     }
     NutsContext ctx = build_context(bundles, floorplan_, result.segments, layer_id);

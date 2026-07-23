@@ -138,6 +138,23 @@ def test_defect5_oob_trunk_seats_in_detour_channel():
         "unplaced -- the detour-seated trunk should route cleanly")
 
 
+def test_defect5_oob_trunk_survives_layer_rerun():
+    """A detour-seated OOB trunk must STAY seated across a single-layer re-solve
+    (run_nuts_on_layer / the visualizer's rerun) — rerun_layer re-seeds the
+    layer's intervals and must apply the same detour-channel extension, or the
+    reserved band is lost and the trunk strands again (issue #58, Codex #414)."""
+    s = _pin_below_bbox_oob_trunk(detour_size=500)
+    assert not s.nuts_result.unseatable_trunks and s.detailed_result.num_unplaced == 0
+    # The pure OOB-H trunk routes on the top horizontal layer (M6); re-solve it.
+    s.do_command("run_nuts_on_layer M6")
+    s.do_command("run_detailed_nuts")
+    assert not s.nuts_result.unseatable_trunks, (
+        "the OOB trunk must remain seatable after a single-layer re-solve")
+    assert s.detailed_result.num_unplaced == 0, (
+        f"layer rerun stranded {s.detailed_result.num_unplaced} bit(s) — the "
+        "detour band was not preserved by rerun_layer")
+
+
 def test_defect5_oob_trunk_unseatable_without_channel_is_loud():
     """With NO detour_channel the below-bbox OOB trunk cannot be seated; NUTS
     must say so LOUDLY (unseatable_trunks) rather than report a clean solve
