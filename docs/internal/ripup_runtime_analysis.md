@@ -169,13 +169,34 @@ identity is a sound, self-validating key with no commit/restore coupling.
 Byte-identical (a: 21→3, b: 104→20); modest (~0.4 s / ~2–3 % of stage b — the
 real flow re-calls it less than the micro-profile suggested).
 
-**C deferred (not a clean win after all).** `make_bus_segments` rebuilds the
-DNUTS *input* per trial; caching it means a baseline cache rebuilt at every
-**commit** — i.e. hooking the ripup commit/restore machinery, which this file's
-own loop documents as caching-hostile: a "skip contenders whose contention is
-unchanged" cache was tried here and **reverted** (bigHalf stage b stranded 52
-opens — "a contender's trial outcomes depend on global state, not just its own",
-`ripup.py` ~L1625). C is byte-identical *if* the cache lifecycle is perfect, but
-the verification burden and blast radius are far higher than A/B's isolated
-caches. Recommend it only as a dedicated, exhaustively-verified effort — not a
-drive-by. **E**/**D** remain lower-priority follow-ups.
+**C investigated in depth, then abandoned — it is a refactor, not a cache.** A
+dedicated dig into where `make_bus_segments`' ~12–16 ms/call actually goes
+(instrumented `loop1` vs `loop2`, plus a `fast/slow/null/fpmiss` counter on a
+cached-analysis-reuse attempt) found the cost is NOT a re-derivation a cache can
+skip:
+
+- **`loop2` (build the `BusSegment` rows) ≈ 0.06 ms** — negligible; caching the
+  *output* saves nothing.
+- **`loop1` (per-bundle connectivity analysis) ≈ 7 ms** — but NOT a redundant
+  re-fingerprint of a valid cache. In this hier flow every selected candidate's
+  `analysis_cache_` was populated in a **cell-local frame**, so its `fp_uid`/
+  `fp_rev` mismatch the session floorplan (`fpmiss=100/100`) and `analyze()`
+  **recomputes** the six passes every call. Reusing `analysis_cache_` (the
+  attempted fast path) is a no-op here — and would also break the deliberate
+  "analyze re-fingerprints every call so a stale cache is structurally
+  impossible" invariant (`topology_analysis.h`).
+- **≈ 9 ms is pybind argument marshalling** — `buda.make_bus_segments(self.bundles,
+  …)` deep-**copies** the whole `std::vector<BundleWrapper>` (every candidate of
+  every bundle, not just the selected one) on each call. Confirmed: an in-function
+  cache never persists (each call gets fresh copies), which is *why* the reuse
+  attempt showed `fpmiss` every call.
+
+So the real C win requires two deeper changes, neither a bounded/verifiable
+cache: (1) stop deep-copying all bundles across the binding (a signature/holder
+refactor, e.g. pass only the selected candidates + net counts + `nuts_result`, or
+a non-copying wrapper), and (2) make hier analyses reuse a session-frame cache
+(or hand the NUTS-computed `ConnSeg` straight to DNUTS). Combined with the
+caching-hostile commit/restore loop (a "skip contenders whose contention is
+unchanged" cache was tried at `ripup.py` ~L1625 and **reverted** — bigHalf
+stranded 52 opens), **C is out of scope as an incremental optimization**. The
+A/B + `_open_segments` wins stand; **E**/**D** remain the lower-risk follow-ups.
