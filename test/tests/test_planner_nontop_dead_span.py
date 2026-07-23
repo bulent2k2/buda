@@ -105,9 +105,14 @@ def test_param_recognized():
     assert "unknown param" not in buf.getvalue()
 
 
+@pytest.mark.mid
 def test_default_off_leaves_bighalf_unchanged():
     """Sanity: not setting the knob is the same as the baseline (the gate is
-    gated at entry on the member flag)."""
+    gated at entry on the member flag).
+
+    @mid: runs the full bigHalf flow twice (like its sibling
+    test_gate_slashes_bighalf_dead_span_opens), so it belongs in the
+    integration tier, not the fast tier."""
     ov_a, un_a = _run_bighalf(gate=False)
     ov_b, un_b = _run_bighalf(gate=False)
     assert (ov_a, un_a) == (ov_b, un_b)
