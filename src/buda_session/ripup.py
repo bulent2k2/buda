@@ -1258,9 +1258,23 @@ class RipupMixin:
     def _open_segments(self):
         """(bundle_id, seg_idx, missing_bits, expected_bits) for every
         under-placed segment of the current detailed result (the per-bundle
-        rollup of the same walk is _rr_open_bundles)."""
-        if self.detailed_result is None:
+        rollup of the same walk is _rr_open_bundles).
+
+        Memoized by the identity of `self.detailed_result` (the contender scan
+        calls this several times per iteration on the same result — via
+        _rr_contenders / _rr_contention_centres / _rr_open_bundles / the stage-b
+        edge walk).  A solve always REPLACES detailed_result with a new object
+        (never mutates in place), and selections change in lockstep with it (a
+        move re-solves; a restore reverts both together), so object identity is a
+        sound, self-validating key needing no explicit invalidation — a stale
+        pointer can never survive a state change.  Read-only tuples, so returning
+        the cached list is safe (callers only iterate)."""
+        dr = self.detailed_result
+        if dr is None:
             return []
+        cache = getattr(self, "_open_seg_cache", None)
+        if cache is not None and cache[0] is dr:
+            return cache[1]
         per_seg = {}
         for ns in self.detailed_result.net_segments:
             per_seg.setdefault(ns.bundle_id, {})
@@ -1281,6 +1295,7 @@ class RipupMixin:
                 missing = exp - segs.get(si, 0)
                 if missing > 0:
                     out.append((bid, si, missing, exp))
+        self._open_seg_cache = (dr, out)
         return out
 
     def _negotiate_iteration(self, affected, stage, sink):

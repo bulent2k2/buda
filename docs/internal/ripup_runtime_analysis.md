@@ -151,4 +151,31 @@ metric endpoints **byte-identical** (a: 21→3 / 10 moves / 109 trials; b:
 | stage-b `dnuts` bucket | 6.36 s | 4.85 s | −1.5 s (A) |
 | stage-b metric-eval (un-bucketed) | — | — | ≈ −4.2 s (B) |
 
-Fast tier green (1189 passed). **C**, then **E**/**D**, remain as follow-ups.
+Fast tier green (1189 passed).
+
+## Follow-up — `_open_segments` memo, and why C was deferred
+
+**Re-measured on post-A/B `main`** (113-trial stage-b run), the remaining
+ripup-loop hotspots are `buda.screen_candidates` (~1.4 s, C++), the
+`_rr_disconnected_bits` residual (~1.3 s, the per-bundle loop + `topo_uid`
+keying), and `make_bus_segments` (~1.0 s, item C).
+
+**Shipped (safe, isolated):** `_open_segments` is now memoized by the identity
+of `self.detailed_result` (`ripup.py`). The contender scan calls it several times
+per iteration on the same result (`_rr_contenders` / `_rr_contention_centres` /
+`_rr_open_bundles` / the stage-b edge walk); a solve always *replaces*
+`detailed_result` with a new object and selections change in lockstep, so object
+identity is a sound, self-validating key with no commit/restore coupling.
+Byte-identical (a: 21→3, b: 104→20); modest (~0.4 s / ~2–3 % of stage b — the
+real flow re-calls it less than the micro-profile suggested).
+
+**C deferred (not a clean win after all).** `make_bus_segments` rebuilds the
+DNUTS *input* per trial; caching it means a baseline cache rebuilt at every
+**commit** — i.e. hooking the ripup commit/restore machinery, which this file's
+own loop documents as caching-hostile: a "skip contenders whose contention is
+unchanged" cache was tried here and **reverted** (bigHalf stage b stranded 52
+opens — "a contender's trial outcomes depend on global state, not just its own",
+`ripup.py` ~L1625). C is byte-identical *if* the cache lifecycle is perfect, but
+the verification burden and blast radius are far higher than A/B's isolated
+caches. Recommend it only as a dedicated, exhaustively-verified effort — not a
+drive-by. **E**/**D** remain lower-priority follow-ups.
