@@ -1717,6 +1717,7 @@ class HierMixin:
         # over too: this re-plan's local solve is authoritative now.
         self._bu_fixed_cache = None
         self._template_track_verdict = None
+        self._bu_dnuts_plan_cache = None
         self._bu_fixed_from_resume = False
         self._reset_bottom_up_doglegs()
         bu_cells = set(self.bdb.bottom_up_cells()) if self.bdb else set()
@@ -2374,6 +2375,7 @@ class HierMixin:
                           f"tracks (ref {ref_name}, {n_windows} window(s) "
                           f"compared)")
         self._template_track_verdict = verdict   # publish on success (P2-01)
+        self._bu_dnuts_plan_cache = None         # verdict changed → plan stale
         return verdict
 
     def _grid_layer_dirs(self):
@@ -2839,6 +2841,7 @@ class HierMixin:
             self._bu_fixed_cache = None
             self._template_track_verdict = None
             self._template_track_verdict_placement = None
+            self._bu_dnuts_plan_cache = None
         pitches = (f"x-period {lx}" if lx else "x unconstrained") + ", " + \
                   (f"y-period {ly}" if ly else "y unconstrained")
         print(f"[Align] {moved} instance(s) moved"
@@ -2853,6 +2856,27 @@ class HierMixin:
         return moved
 
     def _bottom_up_dnuts_plan(self):
+        """Cached wrapper for `_bottom_up_dnuts_plan_compute`.
+
+        The plan depends only on the placement, the `check_template_tracks`
+        verdict, and `_bottom_up_fixed_segments` — all invariant during a
+        `ripup_reroute` / `negotiate_congestion` run (trials move topologies,
+        never geometry), so recomputing it on every `_run_detailed_nuts` was
+        ~12.8 ms/trial of pure overhead on `mix2_fast_bottomup`
+        (docs/internal/ripup_runtime_analysis.md, item A).  The cache is reset
+        wherever `_bu_fixed_cache` / `_template_track_verdict` are — a re-plan
+        (`_plan_bottom_up_templates`), an `align_bottom_up` placement nudge, and
+        a fresh `check_template_tracks` verdict.  A one-tuple wrapper
+        distinguishes a cached `None` (no bottom-up plan) from 'not computed';
+        a raising compute (stop-policy mismatch) is never cached."""
+        cached = getattr(self, "_bu_dnuts_plan_cache", None)
+        if cached is not None:
+            return cached[0]
+        result = self._bottom_up_dnuts_plan_compute()
+        self._bu_dnuts_plan_cache = (result,)
+        return result
+
+    def _bottom_up_dnuts_plan_compute(self):
         """Stage (c) DNUTS routing plan for bottom-up cells, from the cached
         (or implicitly run) track verdict.  Returns None when no bottom-up
         fixed routing exists; else (ref_ids, copy_specs, skip_ids):

@@ -85,9 +85,18 @@ class RipupMixin:
         union-find over the selected topologies; the `disconnected_islands_bridged`
         exemption keeps declared-feedthru splits (a real bridged relay) from
         counting.  Any pre-existing DISCONNECTED bundle is a constant offset on
-        both sides of `m < cur`, so it never blocks other progress."""
+        both sides of `m < cur`, so it never blocks other progress.
+
+        Per-run memoized (docs/internal/ripup_runtime_analysis.md, item B): the
+        floorplan is fixed for a ripup/negotiate run, so a candidate's verdict
+        is a pure function of (topo_uid, bid).  `self._rr_disc_memo` (init in
+        _rr_t_init, cleared at exit) caches the boolean, so a metric eval only
+        pays the ConnTopology + union-find for a candidate it has not seen —
+        the moved bundle's new topo — instead of rescanning every bundle each
+        eval.  None outside a run → compute directly (behavior unchanged)."""
         import buda
         fp = self.fp
+        memo = getattr(self, "_rr_disc_memo", None)
         total = 0
         for w in self.bundles:
             cands = w.input.candidates
@@ -95,16 +104,33 @@ class RipupMixin:
             if not (0 <= sel < len(cands)):
                 continue
             topo = cands[sel]
+            bid = w.input.original_bundle.id
             try:
-                ct = buda.ConnTopology(); ct.build(topo, fp)
-                bid = w.input.original_bundle.id
-                if any(v.kind == buda.ViolationKind.DISCONNECTED
-                       for v in buda.check_topo(ct, topo, fp, bid).violations) \
-                        and not buda.disconnected_islands_bridged(ct, topo, fp):
+                if memo is not None:
+                    key = (buda.topo_uid(topo), bid)
+                    dc = memo.get(key)
+                    if dc is None:
+                        dc = self._rr_topo_disconnected(topo, fp, bid)
+                        memo[key] = dc
+                else:
+                    dc = self._rr_topo_disconnected(topo, fp, bid)
+                if dc:
                     total += len(w.input.original_bundle.get_net_names())
             except Exception:
                 continue
         return total
+
+    @staticmethod
+    def _rr_topo_disconnected(topo, fp, bid):
+        """True iff `topo` is unbridged-DISCONNECTED (wire graph splits into 2+
+        electrical islands with no declared-feedthru bridge).  A pure function
+        of (topo, fp); `bid` only labels the violation, so the result is safe to
+        memoize by topo content fingerprint."""
+        import buda
+        ct = buda.ConnTopology(); ct.build(topo, fp)
+        return (any(v.kind == buda.ViolationKind.DISCONNECTED
+                    for v in buda.check_topo(ct, topo, fp, bid).violations)
+                and not buda.disconnected_islands_bridged(ct, topo, fp))
 
     def _rr_disconnected_bids(self):
         """The bundle ids whose selected topology is unbridged-DISCONNECTED —
@@ -156,6 +182,11 @@ class RipupMixin:
                       'n_screen': 0, 'n_warm': 0,
                       'n_snapshot': 0, 'n_restore': 0,
                       'passes': {}}
+        # Per-run memo for _rr_disconnected_bits: the floorplan is fixed for a
+        # run's lifetime, so a candidate's DISCONNECTED verdict is a pure
+        # function of (topo_uid, bid) and unchanged for every bundle a trial
+        # did not move.  Cleared at run exit (both self._rr_t = None sites).
+        self._rr_disc_memo = {}
 
     def _rr_t_add(self, key, dt):
         t = getattr(self, '_rr_t', None)
@@ -1503,6 +1534,7 @@ class RipupMixin:
         if _pp:
             print(f"[negotiate] solve passes: {_pp}", flush=True)
         self._rr_t = None
+        self._rr_disc_memo = None
         if self.bdb is not None and accepted:
             self._checkpoint_routing()
             print(f"[BDB] re-persisted post-negotiate routing "
@@ -1842,6 +1874,7 @@ class RipupMixin:
         if _pp:
             print(f"[ripup_reroute] solve passes: {_pp}", flush=True)
         self._rr_t = None
+        self._rr_disc_memo = None
         self._rr_fast_trials = False
 
         # Commit the FINAL state: the trials/commits above re-ran the
