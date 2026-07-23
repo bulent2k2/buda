@@ -17,9 +17,21 @@ bin/fp fp.bdb
 # Unit-test to .buda converter + Topology Explorer
 bin/u2b test_column_datapath_hvh
 
-# Visualize DEF/LEF pair
-bin/viz tools/data/gcd.def tools/data/Nangate45.lef
+# Visualize a DEF/LEF pair — the tiny BUDA-original toy design ships in-repo:
+bin/viz tools/data/four_blocks.def tools/data/four_blocks.lef
+
+# For a realistic design, use the standard OpenROAD "gcd" example on the
+# Nangate45 open library. These are third-party files with their own licenses
+# and are NOT committed here — download them and point viz at your local copies:
+#   Nangate45 LEF  → OpenROAD-flow-scripts, flow/platforms/nangate45/lef
+#       https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts
+#   gcd design DEF → OpenROAD test suite (test/gcd*.def) or the flow designs
+#       https://github.com/The-OpenROAD-Project/OpenROAD
+# bin/viz /path/to/gcd.def /path/to/Nangate45.lef
 ```
+
+See [`tools/data/README.md`](data/README.md) for what ships in `tools/data/`
+and where to fetch the larger third-party benchmarks.
 
 ## Interactive IPC Test Sequence
 
@@ -43,18 +55,22 @@ viz tools/data/four_blocks.def tools/data/four_blocks.lef
 *Expected behavior*: Clicking a bundle in `buda_viz` highlights its connected driver/receiver instances in `viz`. Clicking an instance in `viz` highlights all bundles touching that instance in `buda_viz`.
 
 ### 2. ISPD19 Test
-(lef/def files are in ~/chip_designs/lefdef/ispd19_test1)
+
+The ISPD 2019 contest benchmarks are third-party and NOT committed here; download
+them from the contest site and point the tools at your **local** copies (adjust
+the paths below to wherever you unpacked them):
+<https://www.ispd.cc/contests/19/>
 
 **Terminal 1:**
 ```bash
 source bin/activate
-buda demo/ispd19_test1.buda
+buda demo/ispd19_test1.buda        # your own .buda wrapper for the design
 ```
 
 **Terminal 2:**
 ```bash
 source bin/activate
-python3 tools/def_viz.py ispd19_test1.input.def ispd19_test1.input.lef
+python3 tools/def_viz.py /path/to/ispd19_test1.input.def /path/to/ispd19_test1.input.lef
 ```
 
 ### IPC Verification Checklist

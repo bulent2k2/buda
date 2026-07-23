@@ -4,6 +4,10 @@ BUDA (Bundled Unified Design Automation) is an open-source EDA interconnect plan
 
 This file provides comprehensive architectural guidance, algorithmic requirements, design patterns, and engineering standards for developers working on the BUDA codebase.
 
+> **Companion to [CLAUDE.md](CLAUDE.md).** CLAUDE.md is the canonical, most-detailed
+> architecture + command reference; GEMINI.md is a high-level mirror. When the two
+> drift, prefer CLAUDE.md and the `docs/` tree (see the Documentation Map, §5).
+
 ---
 
 ## 1. Architectural Overview & Flows
@@ -91,7 +95,7 @@ Netlist / Floorplan (.buda script — flat flow — or projected from BDB)
 *   **Corner Overlap & Pull Clamping:** Detects end-to-end touches or overlap conflicts on stretched stubs. Applies `pull_break` clamps on wide windows to prevent single connectors from overshooting and dragging coupled trunks.
 *   **Dead-Span Escalation:** Automatically moves dead LOW-layer segments (with zero keepout-clear signal tracks) to TOP layers before solving (`_heal_dead_spans`).
 
-### Stage 5: Healers (`ripup.py`, `buda_session/ripup.py`)
+### Stage 5: Healers (`src/buda_session/ripup.py`)
 *   **Responsibility:** Perform closed-loop model correction and measured search to eliminate NUTS overlaps and Detailed NUTS opens.
 *   **`negotiate_congestion`:** PathFinder-style in-place model correction. Lays synthetic demand (`inject_band_demand`) on contended bands with accumulating history to break oscillations, then replans offender pairs simultaneously (~0.1–4s workhorse).
 *   **`ripup_reroute`:** Measured search on lexicographic metric `(DNUTS opens, NUTS overlaps)`. Reaches back into topo-gen's full candidate pool (+8 candidates beyond planner's cheap-8 window), uses fixed-context screening and fast-trial evaluations, and targets bundles with NUTS overlaps, Detailed NUTS opens, or `junction_infeasibilities`.
@@ -117,7 +121,7 @@ The physical layout database lives in `src/bdb.cpp` and SQLite.
 *   **GDSII Ingestion & Export (`src/gds_io.cpp`):**
     *   `import_gds`: Resolves cell geometries, hierarchical placements (SREFs, AREFs), and nets via TEXT label layer mapping. Routing shapes on layers mapped with `def_gds_layer` are excluded from cell footprints.
     *   `export_gds`: Exports design outline structures, wires (`net_segment`), and vias (`net_via`) deterministically (zero-timestamp headers) to match binary output across test environments.
-*   **OpenAccess (OA) Bridge:** Exposes `import_oa` and `export_oa` signatures in `src/oa_bridge.cpp` (spec-only; gated behind `BUDA_WITH_OA` CMake flag).
+*   **OpenAccess (OA) Bridge — planned, NOT yet implemented:** an OA bridge (`import_oa` / `export_oa`, envisioned as a future `src/oa_bridge.cpp` behind a `BUDA_WITH_OA` CMake flag) is specified in the roadmap but does not exist in the tree today. LEF/DEF + Verilog is the supported interchange path. See §6.
 
 ### Serialization & Resume
 *   **SQL Text Fixtures:** BDB data is checked into git as diffable text dumps (`test/tests/data/*.bdb.sql`).
@@ -153,23 +157,25 @@ The physical layout database lives in `src/bdb.cpp` and SQLite.
 
 ---
 
-## 5. Out-of-Date Documents & Known Discrepancies
+## 5. Documentation Map
 
-When working with documentation in this repository, note the following outdated files:
+The authoritative references, most-specific first (this PR modernized the READMEs
+below, so they are current — the earlier "out-of-date documents" list is retired):
 
-*   **`README.md`**: Contains an outdated source tree diagram (lists non-existent top-level `tests/` and `extern/pybind11/` directories; missing `tools/`, `web/`, `bin/`, and modern C++ engine modules in `src/`). Refer to [CLAUDE.md](CLAUDE.md) or this file for current structure.
-*   **`README_build`**: Obsolete build guide referencing a non-existent `setup_buda.py` script and `buda_system/` folder. Use `bin/bb` or standard CMake in `build/`.
-*   **`README_viz`**: Obsolete visualizer guide referencing a non-existent `buda_system_v2` directory. Use `bin/buda` / `bin/viz` / `bin/u2b`.
-*   **`tools/ReadMe_tools.md`**: Outdated path references (`~/src/buda`, `buda_system_v2/`, relative `src/buda_cli.py` paths) predating the `bin/` wrappers and repository layout consolidation.
-*   **`docs/internal/ReadMe.md`**: Scratch artifact stub file.
+*   **[CLAUDE.md](CLAUDE.md)** — the canonical, most-detailed architecture + command reference. GEMINI.md mirrors it at a high level; when the two disagree, CLAUDE.md and the `docs/` tree win.
+*   **[README.md](README.md)** — project overview, current directory tree, quick start.
+*   **[README_build.md](README_build.md)** — build guide (`bin/bb` + standard CMake in `build/`).
+*   **[README_viz.md](README_viz.md)** — visualizers: matplotlib CLI (`bin/viz`), TopoExplorer (`bin/u2b`), Floorplanner (`bin/fp`/`bin/bfp`), and the web client.
+*   **[docs/](docs/)** — user guide, CLI/script references, and `docs/internal/` design notes (indexed by [docs/internal/ReadMe.md](docs/internal/ReadMe.md)).
+*   **[tools/ReadMe_tools.md](tools/ReadMe_tools.md)** — clustering / converter / DEF-viz tooling and IPC demos.
 
 ---
 
 ## 6. Future Roadmap
 
-- [ ] **Steiner Tree Heuristic:** Enhance topology generation with Minimum Steiner Tree (MST) support for high fan-out nets.
+- [ ] **Steiner Tree Heuristic:** Add rectilinear Steiner minimal tree (RSMT) topologies for high fan-out nets — going beyond today's MST-based trunk/branch trees (MST already ships; Steiner points are the new capability).
 - [ ] **Multi-Trunk Enhancements:** Support depth-3 trees and source-anchored roots in multi-trunk generators.
-- [ ] **OpenAccess Integration:** Complete verification of `oa_bridge.cpp` using physical Si2 OA SDK libraries.
+- [ ] **OpenAccess Integration:** Implement and verify the OA bridge (`oa_bridge.cpp`, `import_oa`/`export_oa`) against the physical Si2 OA SDK libraries, behind a `BUDA_WITH_OA` CMake flag.
 - [ ] **Pre-Charge Forecast Horizon:** Build a two-pass demand forecasting layer between topology generation and the global planner to price incoming arrivals before greedy assignment.
 - [ ] **Healer Metric Disconnection Coverage:** Incorporate `DISCONNECTED` bit counts directly into stage-b healer lexicographic metrics `(opens, disconnected, overlaps)`.
 
