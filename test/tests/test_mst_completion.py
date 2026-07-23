@@ -617,9 +617,12 @@ def test_trunk_mst_root_double_tap_demoted():
 # overshoot -- the MST edges already connect every endpoint -- and is dropped at
 # generation (trunk_is_single_point in topology.cpp).
 
-def _spine_is_single_point(topo, fp, is_h, trunk_pos):
-    """Mirror of the C++ gate: the spine (longest seg at trunk_pos in the trunk
-    orientation) attaches at one along-coordinate."""
+def _spine_dangles(topo, fp, is_h, trunk_pos):
+    """Mirror of the C++ gate (trunk_is_single_point): the spine is vestigial iff
+    its whole load-bearing extent -- seg/busterm attachments PLUS pass-through
+    coverage of a block whose interior it crosses (Codex P2) -- collapses to ONE
+    coordinate.  A partial overshoot (extent < span but >1 point) is NOT flagged
+    (those candidates are DNUTS-healed and dropping them regresses QoR)."""
     ct = buda.ConnTopology(); ct.build(topo, fp)
     segs = ct.segs()
     spine, best = -1, -1
@@ -631,16 +634,32 @@ def _spine_is_single_point(topo, fp, is_h, trunk_pos):
         if ln > best: best, spine = ln, j
     if spine < 0:
         return False
-    pos = set()
+    s = topo.segments[spine]
+    a0 = s.start.x if is_h else s.start.y
+    a1 = s.end.x if is_h else s.end.y
+    salo, sahi = min(a0, a1), max(a0, a1)
+    lo = hi = None
+    def add(p):
+        nonlocal lo, hi
+        lo = p if lo is None else min(lo, p)
+        hi = p if hi is None else max(hi, p)
     for c in segs[spine].conns:
         if c.block_name:
-            # busterm tap sits at the seg endpoint on that block's face
-            s = topo.segments[spine]
-            pos.add(s.start.x if is_h else s.start.y)
-            pos.add(s.end.x if is_h else s.end.y)
+            add(a0); add(a1)          # busterm tap at a spine endpoint
         else:
-            pos.add(c.at_pos)
-    return len(pos) == 1
+            add(c.at_pos)
+    for name in topo.connected_block_names:
+        r = fp.get_block_bounds(name)
+        plo, phi = (r.y1, r.y2) if is_h else (r.x1, r.x2)
+        if not (plo < trunk_pos < phi):          # interior only
+            continue
+        blo, bhi = (r.x1, r.x2) if is_h else (r.y1, r.y2)
+        if bhi <= salo or blo >= sahi:
+            continue
+        add(max(salo, blo)); add(min(sahi, bhi))
+    if lo is None:
+        return False
+    return lo == hi
 
 
 def test_collinear_row_drops_all_degenerate_hybrids():
@@ -669,5 +688,29 @@ def test_no_surviving_nonoob_hybrid_has_single_point_spine():
     assert hybrids, "expected some non-OOB trunk+MST hybrids to survive"
     for c in hybrids:
         is_h = "TRUNK_H" in c.type
-        assert not _spine_is_single_point(c, fp, is_h, c.trunk_location), (
-            f"{c.type}: single-point seed trunk survived the drop gate")
+        assert not _spine_dangles(c, fp, is_h, c.trunk_location), (
+            f"{c.type}: dangling seed trunk survived the drop gate")
+
+
+def test_passthrough_covered_spine_is_kept():
+    """Codex P2 (#418): a spine that crosses a block's INTERIOR covers it
+    (pass-through) and is load-bearing, so it must NOT be dropped as dangling
+    even when its explicit taps/junctions collapse to one coordinate.  Here the
+    surviving hybrids include ones whose spine passes through a straddling block;
+    none of them is flagged as an overshoot."""
+    # A wide straddling M, with the two others reached off the trunk.
+    fp = _make_fp({"M": (0, 80, 600, 160),
+                   "P": (0, 0, 60, 50),
+                   "Q": (540, 0, 600, 50)})
+    cands = _gen(fp).generate_candidates("P", ["M", "Q"])
+    hybrids = [c for c in cands if "+MST" in c.type and "_OOB" not in c.type]
+    assert hybrids, "expected surviving non-OOB hybrids"
+    # every survivor is well-formed (no dangling overshoot), and at least one
+    # spine genuinely passes through M's interior (perp strictly inside M).
+    through = 0
+    for c in hybrids:
+        is_h = "TRUNK_H" in c.type
+        assert not _spine_dangles(c, fp, is_h, c.trunk_location), c.type
+        if is_h and 80 < c.trunk_location < 160:
+            through += 1
+    assert through > 0, "expected a spine passing through M's interior to survive"

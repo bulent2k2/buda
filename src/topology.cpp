@@ -1661,8 +1661,41 @@ static bool trunk_is_single_point(const Topology& topo, int trunk_pos, bool is_h
     // A busterm tap the analysis saw but seg_busterms did not localize to an
     // endpoint: assume the spine is well-defined (do not drop on uncertainty).
     if (bt_seg_conns > bt_localized) return false;
+
+    // Pass-through coverage is load-bearing too (Codex P2 on #418): a spine that
+    // crosses the INTERIOR of a connected block covers it (seg_spans_rect — no
+    // tap), so it is that block's only wire and NOT vestigial even when its
+    // explicit taps/junctions collapse to one coordinate.  Widen the load-bearing
+    // range by any such block's along-extent (clamped to the spine).  Strict
+    // interior on the perp axis leaves face-grazes to the tap/junction cases (a
+    // spine grazing a block's face — the bus_005 case — stays flagged).
+    long salo = std::min(a0, a1), sahi = std::max(a0, a1);
+    for (const std::string& bn : topo.connected_block_names) {
+        if (!fp.has_block(bn)) continue;
+        Rect r = fp.get_block_bounds(bn);
+        int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
+        if (trunk_pos <= plo || trunk_pos >= phi) continue;   // not interior
+        long blo = is_h ? r.x1 : r.y1, bhi = is_h ? r.x2 : r.y2;
+        if (bhi <= salo || blo >= sahi) continue;          // no along overlap
+        lo = std::min(lo, std::max(salo, blo));
+        hi = std::max(hi, std::min(sahi, bhi));
+        ++n;
+    }
+
     if (n == 0) return false;                    // isolated — leave for the gate
-    return lo == hi;                             // one attachment point → dangling
+    // Dangling iff the whole load-bearing extent collapses to ONE coordinate:
+    // the spine connects nothing and covers nothing but a point, so it is a
+    // pure vestigial overshoot (the user's "one-end-point" seed trunk).
+    //
+    // The load-bearing extent counts pass-through coverage (Codex P2), so a
+    // spine that crosses a block's interior is NOT single-point and is kept —
+    // even when its explicit taps/junctions collapse to one coordinate.
+    //
+    // We deliberately do NOT drop a PARTIAL overshoot (extent narrower than the
+    // span but still >1 point): those candidates are selected and healed by
+    // DetailedNUTS on the corpus, and dropping them roughly doubled mix's DNUTS
+    // opens (156->308) — the aggressive form is a QoR regression, not a fix.
+    return lo == hi;
 }
 
 static void complete_relay_junctions(Topology& topo,

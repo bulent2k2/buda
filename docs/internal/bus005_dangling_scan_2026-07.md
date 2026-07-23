@@ -117,11 +117,28 @@ per the investigation focus). After `complete_relay_junctions`,
    `trunk_pos`;
 2. derives `seg_conns` on a local copy (they are not derived until
    `finalize_candidates`, mirroring `topology_is_clean_tree`);
-3. returns true when every spine attachment — seg-to-seg junctions
-   (`SegConn::at_pos`) and busterm taps (localized per-endpoint via
-   `seg_busterms`) — shares ONE along-coordinate (`lo == hi`). Two taps at the
-   same coordinate still count as single-point (e.g. four_blocks
-   `TRUNK_H+MST@y175`, `BT:u3@99` + `SEG:1@99e`).
+3. returns true when the spine's whole **load-bearing extent collapses to ONE
+   coordinate** (`lo == hi`) — it connects and covers nothing but a point, a pure
+   vestigial overshoot (the "one-end-point" seed trunk). The load-bearing extent
+   is the min/max along-coordinate of: seg-to-seg junctions (`SegConn::at_pos`),
+   busterm taps (localized per-endpoint via `seg_busterms`), **and pass-through
+   coverage** of any connected block whose interior the spine crosses.
+
+**Codex P2 (#418) — pass-through coverage is load-bearing.** An earlier form of
+the gate ignored pass-through coverage, so it could drop a spine whose only job
+is to cover a block it crosses (for `<4`-block bundles that spine can be the only
+MST-type candidate, since standalone `MST_*` isn't generated below 4 blocks). The
+extent now folds in interior pass-through coverage, so a spine crossing a block's
+interior is not single-point and is kept (`test_passthrough_covered_spine_is_kept`).
+
+**Why single-point, not "any overshoot".** The stricter form — drop whenever the
+load-bearing extent fails to reach the full span (a *partial* overshoot) — is
+geometrically tidier but a **QoR regression**: those partial-overshoot candidates
+are selected and healed by DetailedNUTS, and dropping them roughly **doubled**
+`mix`'s DNUTS opens (width 156→308). So a partial overshoot like bus_005
+`TRUNK_H+MST@y3095` (covers `blk_19` over `[700,1050]`, then runs on to `x=6290`)
+stays in the pool — it is never selected, and dropping it costs more than it
+saves. Only the fully-collapsed single-point spine is dropped.
 
 Both emit paths gate on it (completed-tree + legacy), and a single-point legacy
 hybrid is not pooled as a `<4`-block fallback. The bundle is never stranded —
@@ -135,11 +152,12 @@ and fought the completion's `edge_id`/junction/WL invariants (11 test
 regressions vs. 0 behavioral here).
 
 **Impact (QoR unchanged).** NUTS placement goldens are byte-identical and the
-flow-script / big2 / ripup QoR tests pass — the dropped candidates were
+flow-script / big2 / mix / ripup QoR tests pass — the dropped candidates were
 *never selected* by the planner (they only ranked low on an understated WL).
-Only the candidate-pool snapshots move: 6 `topo_analysis` goldens shed their
-single-point `+MST` candidates (four_blocks −6, comprehensive −12, dogleg2 −2,
-b4 −1, big/mix in hashed bundles). bus_005: non-OOB truly-dangling 3 → 0.
+Only the candidate-pool snapshots move: the `topo_analysis` goldens shed their
+single-point `+MST` candidates (big / comprehensive / dogleg2 / four_blocks /
+mix). bus_005: non-OOB single-point stubs 3 → 1 (the two pure-vestigial spines
+dropped; the pass-through-covering `@y3095` kept per Codex P2).
 
 ## Reproduce
 
