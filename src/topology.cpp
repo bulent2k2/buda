@@ -1791,7 +1791,10 @@ static void complete_relay_junctions(Topology& topo,
             // otherwise leave it to the general chaining.
             Segment& sA = topo.segments[A.seg_idx];
             Segment& sB = topo.segments[B.seg_idx];
-            const Point A_far = (A.ep == 0) ? sA.end : sA.start;
+            // Only B's far endpoint is materialized: the merge extends A's
+            // LANDING endpoint across the block to B_far, so A keeps its own far
+            // endpoint (A_far) untouched and the merged wire spans [A_far .. B_far].
+            // A_far therefore never needs to be read — the asymmetry is by design.
             const Point B_far = (B.ep == 0) ? sB.end : sB.start;
             const bool is_feedthru =
                 std::find(topo.feedthru_blocks.begin(), topo.feedthru_blocks.end(),
