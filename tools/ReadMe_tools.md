@@ -8,7 +8,7 @@ From the repo root (after sourcing `bin/activate`):
 
 ```bash
 # Visualize a BDB floorplan design
-python3 tools/def_viz.py chip_designs/ariane136.bdb
+bin/viz chip_designs/ariane136.bdb
 
 # Visualize DEF/LEF pair
 python3 tools/def_viz.py flow/lefdef/gcd/gcd.def flow/lefdef/gcd/Nangate45.lef
@@ -60,6 +60,3 @@ python3 tools/def_viz.py flow/lefdef/ispd19_test1/ispd19_test1.input.def flow/le
 - **DEF → BUDA direction**: Click an instance box or pick from the instance listbox in `def_viz`. `buda_viz` highlights connected bundles.
 - **Clear propagation**: Clicking background in `buda_viz` clears `def_viz` selection; clicking Clear in `def_viz` deselects `buda_viz`.
 - **Session isolation**: Running multiple instances with different `.buda` scripts isolates IPC sockets by session name (`/tmp/buda_ipc_<session>.sock`).
-
-
-✻ Cooked for 37s

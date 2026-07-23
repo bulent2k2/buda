@@ -36,6 +36,6 @@ bfp tc1
 Launch the Web server for WebSocket-backed interactive progress visualization and control:
 
 ```bash
-python3 src/web/server.py
+PYTHONPATH=build:src uvicorn web.server:app --port 8000
 ```
 Open `http://localhost:8000` (or `web/index.html`) in a web browser.
