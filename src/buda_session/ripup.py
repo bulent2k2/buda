@@ -1159,7 +1159,8 @@ class RipupMixin:
         self._rr_warm_rows = []
 
     def _rr_scan_moves(self, w, bid, old_tidx, moves, cur, stage, metric,
-                       snap, trial_base=0, warm=False, warm_rej=None):
+                       snap, trial_base=0, warm=False, warm_rej=None,
+                       first_improving=False):
         """First-improving scan of ONE contender's move list — the inner
         trial loop of _ripup_reroute, extracted verbatim so the screened
         scan, the deferred-move stall sweep, and the warm-stall cold sweep
@@ -1174,8 +1175,19 @@ class RipupMixin:
         warm-improving move falls through to the normal cold trial, so
         accepts stay on the true metric.  Flip moves and moves the warm
         eval cannot mirror (replan unavailable) are never filtered.
-        Returns (cand_best, n_trials) with cand_best = (metric, bid,
-        old_tidx, move, fwd) or None; n_trials counts cold trials."""
+
+        `first_improving` (item E): stop this contender's scan on the FIRST
+        strictly-improving move instead of trialing the whole list for its
+        BEST move.  Used ONLY by the stall sweeps (deferred + warm-rescued),
+        whose callers break on the first improving contender anyway — so the
+        stop certificate (no improver ⇒ whole list trialed) is preserved, and
+        the sweeps' input is already screen-sorted best-first, so the first
+        improver is the best-screened one.  Cuts sweep trial VOLUME; it does
+        NOT change the main contender scan (where best-of-contender still
+        holds).  Trajectory-affecting (which improver commits can differ),
+        not byte-identical.  Returns (cand_best, n_trials) with cand_best =
+        (metric, bid, old_tidx, move, fwd) or None; n_trials counts cold
+        trials."""
         zero = (0, 0) if isinstance(cur, tuple) else 0
         cand_best = None
         n_trials = 0
@@ -1221,6 +1233,14 @@ class RipupMixin:
                       flush=True)
             if take:
                 cand_best = (m, bid, old_tidx, move, fwd)
+                # Item E: in a stall sweep, the caller commits the first
+                # improving CONTENDER, so this contender only needs one
+                # improving move — and the sweep list is screen-sorted
+                # best-first, so the first improver is the best-screened.
+                # Stop here rather than trialing the rest for the metric
+                # optimum (which the caller would discard anyway).
+                if first_improving:
+                    break
             # Absolute best (stage b: 0 opens AND 0 overlaps) — take it
             # now.  A merely-primary zero keeps scanning: among moves
             # that clear the opens, the lexicographic metric still
@@ -1749,7 +1769,8 @@ class RipupMixin:
                                                        metric, snap,
                                                        trial_base=n_trials,
                                                        warm=warm,
-                                                       warm_rej=wr)
+                                                       warm_rej=wr,
+                                                       first_improving=True)
                     n_trials += t
                     if wr:
                         warm_pend.setdefault(bid, (ci, old_tidx, []))[2] \
