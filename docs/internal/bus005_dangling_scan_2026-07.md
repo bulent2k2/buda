@@ -62,6 +62,50 @@ the truly-dangling stub (masking it), and only the opt-in `set_drop_dangling`
 (drop / clamp / clamp_drop) acts on either category. `scan_dangling.py` is
 the standalone lens.
 
+## Root cause of the Category-A stubs (non-OOB `TRUNK_*+MST`)
+
+Ignoring the OOB detour class (Category B on `TRUNK_*_OOB`), the focus is the
+pure `TRUNK_H+MST` hybrids. Of the 12 non-OOB MST candidates only 3 dangle
+(idx 32 `@y2770`, 34 `@y3095`, 35 `@y2410`); the other 9 are clean. The
+discriminator is **where the trunk locus lands**.
+
+`bus_005` endpoints: `blk_34` (100,1700)-(700,2050) [src], `blk_19`
+(100,2770)-(1050,3420), `io_pad_br` (6290,100)-(6790,500) [far-right corner].
+
+**Clean — idx 18 `TRUNK_H+MST@y1700`:**
+```
+seg0 H (700,1700)->(1050,1700)  conns=[blk:blk_34, seg1, seg2]   # taps blk_34
+```
+The locus y=1700 *is* blk_34's bottom face, so the spine taps the source —
+short, anchored, not dangling.
+
+**Dangling — idx 32 `TRUNK_H+MST@y2770`:**
+```
+seg0 H (700,2770)->(6290,2770)  conns=[seg1]           <<DANGLING>>
+seg1 V (700,500)->(700,2770)    conns=[seg0, seg2, blk:blk_19]
+seg2 H (700,500)->(6290,500)    conns=[seg1, blk:io_pad_br]
+```
+
+The three dangling loci (y2410/2770/3095) sit in the blk_19 band, far from any
+block the horizontal spine can tap along its x-run. Sequence:
+
+1. `add_trunk_mst_candidates` emits a full-width `TRUNK_H` spine (seg0,
+   x700→6290, reaching toward io_pad_br's column at x6290).
+2. The MST/relay completion connects io_pad_br more cheaply via a **side
+   L-path** — seg1 (V down x700→y500) + seg2 (H across at y500) — with blk_19
+   on seg1 and blk_34 grazed by seg1's right face.
+3. seg0 is now **fully redundant**: drop it and src/blk_19/io_pad_br are still
+   one connected tree. Its reach to (6290,2770) lands on nothing → a dangling
+   stub. `complete_relay_junctions` never prunes the vestigial trunk.
+
+So MST does not *add* a dangling wire — the MST edges make the nominal trunk
+spine **vestigial**, and the completion pass leaves the orphaned spine instead
+of collapsing the candidate to the L/Z it effectively became. The clean MST
+candidates escape only because their trunk locus coincides with a block face.
+
+Candidate 35 (`@y2410`, 11 segments) is the pathological case: the vestigial
+spine (seg0) plus a tangle of unbounded relay jogs (seg3/5/6/7/8/9).
+
 ## Reproduce
 
 ```bash
