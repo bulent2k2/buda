@@ -141,12 +141,20 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("seg_a",     &JunctionInfeasibility::seg_a)
         .def_readwrite("seg_b",     &JunctionInfeasibility::seg_b);
 
+    py::class_<UnseatableTrunk>(m, "UnseatableTrunk")
+        .def_readwrite("bundle_id", &UnseatableTrunk::bundle_id)
+        .def_readwrite("seg_idx",   &UnseatableTrunk::seg_idx)
+        .def_readwrite("horiz",     &UnseatableTrunk::horiz)
+        .def_readwrite("nom",       &UnseatableTrunk::nom)
+        .def_readwrite("bound",     &UnseatableTrunk::bound);
+
     py::class_<NUTSResult>(m, "NUTSResult")
         .def(py::init<>())
         .def_readwrite("segments",           &NUTSResult::segments)
         .def_readwrite("overlap_details",    &NUTSResult::overlap_details)
         .def_readwrite("junction_infeasibilities",
                        &NUTSResult::junction_infeasibilities)
+        .def_readwrite("unseatable_trunks",  &NUTSResult::unseatable_trunks)
         .def_readwrite("num_violations",     &NUTSResult::num_violations)
         .def_readwrite("num_keepout_conflicts", &NUTSResult::num_keepout_conflicts)
         .def_readwrite("num_overlaps",       &NUTSResult::num_overlaps)

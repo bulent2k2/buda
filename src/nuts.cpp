@@ -1244,6 +1244,17 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
     const std::vector<int>& y_grid) const
 {
     std::vector<TrackSegment> result;
+    // A detour_channel reserves routable space OUTSIDE the block bounding box
+    // (issue #58): a legitimately-detoured / OOB trunk lives there, but the
+    // Hanan grid is built from blocks+keepouts only, so the interval seed
+    // [grid.front, grid.back] excludes it and the trunk's placement window
+    // collapses (empty/inverted) — it strands with unplaced bits.  Extend the
+    // seed into the EXPLICIT channel below so that trunk can be seated.  Only
+    // an explicit side (>= 0) counts; the -1 "auto" default leaves the seed at
+    // the block bbox.  Bounded segments re-tighten to their slide window just
+    // below, so ONLY free-slide (sentinel) OOB trunks use the extra room —
+    // a design with no explicit channel is byte-identical.
+    const DetourChannelSpec& dc = floorplan_.get_detour_channel();
     for (const auto& bw : bundles) {
         if (bw.input.candidates.empty() ||
             bw.plan.selected_topology_index < 0 ||
@@ -1295,6 +1306,10 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
                                                 : static_cast<double>(y_grid.front());
                 ts.interval_hi = y_grid.empty() ? static_cast<double>(seg.start.y)
                                                 : static_cast<double>(y_grid.back());
+                if (!y_grid.empty()) {                 // #58: reach into the channel
+                    if (dc.south >= 0) ts.interval_lo -= dc.south;   // smaller Y
+                    if (dc.north >= 0) ts.interval_hi += dc.north;   // larger  Y
+                }
             } else {
                 ts.span_lo = std::min(seg.start.y, seg.end.y);
                 ts.span_hi = std::max(seg.start.y, seg.end.y);
@@ -1302,6 +1317,10 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
                                                 : static_cast<double>(x_grid.front());
                 ts.interval_hi = x_grid.empty() ? static_cast<double>(seg.start.x)
                                                 : static_cast<double>(x_grid.back());
+                if (!x_grid.empty()) {                 // #58: reach into the channel
+                    if (dc.west >= 0) ts.interval_lo -= dc.west;    // smaller X
+                    if (dc.east >= 0) ts.interval_hi += dc.east;    // larger  X
+                }
             }
             result.push_back(ts);
         }
@@ -2189,6 +2208,61 @@ void NUTSEngine::orientation_fixpoint(
 // dogleg trials, repair passes), and a signal gathered there would report
 // compromises that the accepted placement no longer has.  Rewrites
 // result.junction_infeasibilities, so rerun_layer refreshes stale entries too.
+// #58 loud failure: an out-of-bbox trunk (>=2 SEG conns, no busterm) whose
+// nominal perpendicular coordinate falls OUTSIDE the routable design boundary
+// (the Hanan grid extent, extended by any EXPLICIT detour_channel — the same
+// extension extract_segments seeds the interval with).  Such a trunk's window
+// collapses (empty/inverted), so it cannot be seated and its bits strand at
+// detailed NUTS.  The abstract-NUTS "0 overlaps" headline hides that, so we
+// surface it loudly here and record it on the result (a pinned/ripup-promoted
+// OOB trunk that needs a wider channel or a different topology).
+static void derive_unseatable_trunks(
+        const std::vector<BundleWrapper>& bundles,
+        const Floorplan& floorplan,
+        const std::vector<int>& x_grid,
+        const std::vector<int>& y_grid,
+        NUTSResult& result) {
+    result.unseatable_trunks.clear();
+    if (x_grid.empty() || y_grid.empty()) return;
+    const DetourChannelSpec& dc = floorplan.get_detour_channel();
+    const double x_lo = x_grid.front() - (dc.west  >= 0 ? dc.west  : 0);
+    const double x_hi = x_grid.back()  + (dc.east  >= 0 ? dc.east  : 0);
+    const double y_lo = y_grid.front() - (dc.south >= 0 ? dc.south : 0);
+    const double y_hi = y_grid.back()  + (dc.north >= 0 ? dc.north : 0);
+    for (const auto& bw : bundles) {
+        const int sel = bw.plan.selected_topology_index;
+        if (sel < 0 || sel >= (int)bw.input.candidates.size()) continue;
+        const Topology& topo = bw.input.candidates[sel];
+        const int bid = bw.input.original_bundle.id;
+        ConnTopology ct;
+        ct.build(topo, floorplan);
+        const auto& conn_segs = ct.segs();
+        for (int si = 0; si < (int)conn_segs.size() &&
+                         si < (int)topo.segments.size(); ++si) {
+            const ConnSeg& cs = conn_segs[si];
+            int n_seg = 0, n_bt = 0;
+            for (const auto& c : cs.conns) {
+                if (c.kind == SegConn::SEG) ++n_seg; else ++n_bt;
+            }
+            if (!(n_seg >= 2 && n_bt == 0)) continue;   // trunk predicate (nuts.cpp)
+            const Segment& seg = topo.segments[si];
+            const bool is_h = (seg.start.y == seg.end.y);
+            const double nom = is_h ? (double)seg.start.y : (double)seg.start.x;
+            const double lo  = is_h ? y_lo : x_lo;
+            const double hi  = is_h ? y_hi : x_hi;
+            if (nom >= lo && nom <= hi) continue;        // seatable within boundary
+            const double bound = (nom < lo) ? lo : hi;
+            result.unseatable_trunks.push_back({bid, si, is_h, nom, bound});
+            std::cout << "[NUTS] WARNING: bundle " << bid << " seg " << si
+                      << " is an out-of-bbox trunk at " << (is_h ? "y=" : "x=")
+                      << nom << ", beyond the routable boundary ["
+                      << lo << ".." << hi << "] — it cannot be seated and its "
+                      << "bits will strand at detailed NUTS; widen "
+                      << "detour_channel or re-select this bundle's topology.\n";
+        }
+    }
+}
+
 static void derive_junction_infeasibilities(
         const std::vector<BundleWrapper>& bundles, NUTSResult& result) {
     result.junction_infeasibilities.clear();
@@ -2389,6 +2463,9 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     // a compromised junction is never silent.
     auto t_tail = pclock::now();
     derive_junction_infeasibilities(bundles, out.result);
+    // #58: flag any selected OOB trunk whose home is beyond the routable
+    // boundary (Hanan extent + explicit detour_channel) — unseatable as pinned.
+    derive_unseatable_trunks(bundles, floorplan_, x_grid, y_grid, out.result);
     charge("junctions", t_tail);
     // Keepout conflicts: report-only, so a bus committed onto a keepout by the
     // exhausted-window centre fallback is never silent (keepout-model audit).
@@ -2404,6 +2481,11 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         std::cout << "[NUTS] WARNING: " << out.result.num_keepout_conflicts
                   << " segment(s) placed ON a keepout (window exhausted; the "
                   << "bus cannot physically route there — re-pin or re-plan).\n";
+    if (!out.result.unseatable_trunks.empty())
+        std::cout << "[NUTS] WARNING: " << out.result.unseatable_trunks.size()
+                  << " out-of-bbox trunk(s) unseatable within the routable "
+                  << "boundary (detour_channel too small or absent; bits will "
+                  << "strand at detailed NUTS — widen the channel or re-select).\n";
     charge("report", t_tail);
     // Stamp the accumulated per-pass profile onto the FINAL result (the
     // fallback's trial re-solves are already folded into the buckets).

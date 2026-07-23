@@ -81,10 +81,23 @@ struct OverlapDetail {
 // alternate topology.
 struct JunctionInfeasibility { int bundle_id; int seg_a; int seg_b; };
 
+// An out-of-bbox trunk (>=2 SEG conns, no busterm of its own) whose nominal
+// perpendicular coordinate falls OUTSIDE the routable design boundary (the
+// Hanan grid extent, extended by any explicit detour_channel) — so its
+// placement window collapses and NUTS cannot seat it there without violating
+// its interval, stranding its bits at detailed NUTS.  Report-only, but loud:
+// the selection is unroutable as pinned (widen detour_channel or re-select).
+// nom = the trunk's nominal perp; bound = the boundary edge it overshot.
+struct UnseatableTrunk { int bundle_id; int seg_idx; bool horiz;
+                         double nom; double bound; };
+
 struct NUTSResult {
     std::vector<TrackSegment>  segments;
     std::vector<OverlapDetail> overlap_details;     // one entry per overlapping pair
     std::vector<JunctionInfeasibility> junction_infeasibilities;
+    // OOB trunks whose nominal perp falls outside the routable design boundary
+    // (Hanan extent + explicit detour_channel): unseatable as pinned (#58).
+    std::vector<UnseatableTrunk> unseatable_trunks;
     int num_violations = 0;   // segments placed outside their interval
     int num_overlaps   = 0;   // pairs of segments that physically overlap after placement
     // Placed segments whose physical extent [pos - w/2, pos + w/2] lands on a

@@ -13,32 +13,29 @@
 # limitations under the License.
 
 """
-Repro tests for the two deferred topo-norm Phase 2 defects.  Both are marked xfail
-(strict): they currently FAIL because the defect is present, and will XPASS once the
-defect is fixed -- at which point the strict marker turns the unexpected pass into a
-failure, prompting removal of the marker.
+Repro tests for the two topo-norm Phase 2 defects.  Both are now FIXED.
 
   - Defect 2 (staircase): github issue #57
-  - Defect 5 (outlier slide): github issue #58
+  - Defect 5 (outlier slide / OOB trunk): github issue #58
 
-Rationale and the architectural blockers are in
-docs/internal/topo-norm-phase2-deferred.md.
+Defect 5's resolution (see docs/internal/topo-norm-phase2-deferred.md): the
+runaway *analysis* slide window is a deliberate free-DOF representation and is
+left alone (bounding it cascades — 25 tests / a corpus regression, PR #410).
+What actually mattered is the *placement*: an out-of-bbox trunk lives beyond the
+Hanan grid, so NUTS could not seat it and its bits stranded.  The fix makes the
+NUTS design boundary detour-channel aware (an explicit ``detour_channel``
+reserves the band the OOB trunk routes in) and, when a selected OOB trunk still
+has no channel to sit in, fails LOUD (``NUTSResult.unseatable_trunks``) instead
+of silently reporting "0 overlaps" while detailed NUTS drops the bits.
 """
-import pytest
 import buda
+import buda_cli
 
 
 def _make_gen(fp, h=4, v=5):
     gen = buda.TopologyGenerator(fp)
     gen.set_layer_ids(h, v)
     return gen
-
-
-def _is_trunk(cs):
-    """A trunk segment: >=2 SEG conns and no busterm of its own (nuts.cpp predicate)."""
-    n_seg = sum(1 for c in cs.conns if c.kind == buda.SegConnKind.SEG)
-    n_bt  = sum(1 for c in cs.conns if c.kind != buda.SegConnKind.SEG)
-    return n_seg >= 2 and n_bt == 0
 
 
 # ── Defect 2 — collinear-stub staircase jogs (issue #57) ─────────────────────
@@ -79,48 +76,79 @@ def test_defect2_no_collinear_staircase_jogs():
     )
 
 
-# ── Defect 5 — unbounded (runaway) trunk slide (issue #58) ───────────────────
+# ── Defect 5 — out-of-bbox trunk placement (issue #58) ───────────────────────
 
-@pytest.mark.xfail(strict=True,
-                   reason="defect 5 (issue #58): a trunk whose stubs all anchor on "
-                          "one side keeps an INT-sentinel-unbounded perp slide; the "
-                          "cluster clamp is not implemented (cascades through "
-                          "filter_pinched / NUTS placement)")
-def test_defect5_trunk_slide_is_bounded():
-    """A trunk's perpendicular slide window must stay bounded near its cluster.
+# The floorplan the original repro used: driver D plus receivers, with a pure
+# TRUNK_H_OOB candidate whose trunk sits BELOW the block bbox (y=905 < the
+# bottom block edge y=1000).  Two TOP layers + track patterns so the full
+# NUTS -> detailed-NUTS pipeline runs and we can see whether the OOB trunk's
+# 8 bits place or strand.
+_OOB_SETUP = [
+    "def_layer 5 M5 V TOP 50",
+    "def_layer 6 M6 H TOP 52.94",
+    "def_track_pattern 5 0 POWER 3 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 "
+    "SIGNAL 2 1 GROUND 3 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1",
+    "def_track_pattern 6 -400 POWER 4 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 "
+    "SIGNAL 2 1 GROUND 4 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1",
+    "add_block D  900 1000 1000 1100",
+    "add_block R1 200 1400 300  1500",
+    "add_block R2 900 1400 1000 1500",
+    "add_block R3 1600 1400 1700 1500",
+    "add_block R4 900 1850 1000 1950",
+    "add_bus b[8] D.o R1.i,R2.i,R3.i,R4.i",
+    "run_bundler",
+    "generate_topologies",
+]
 
-    A trunk (>=2 SEG conns, no busterm of its own) is pushed out by Pass 2 only on
-    sides where a stub bounds it.  When every stub anchors on one side (an OOB trunk
-    hugging the block cluster) the other side stays at its INT sentinel -- unbounded
-    -- so NUTS could slide the trunk to the chip edge.  A normalized
-    compute_slide_ranges would clamp the runaway side to the receiver cluster.
-    """
-    # Driver plus receivers all ABOVE the row: the OOB trunk below them stubs only
-    # upward, leaving its lower side unbounded.
-    fp = buda.Floorplan()
-    fp.add_block("D",  900, 1000, 1000, 1100)
-    fp.add_block("R1", 200, 1400, 300,  1500)
-    fp.add_block("R2", 900, 1400, 1000, 1500)
-    fp.add_block("R3", 1600, 1400, 1700, 1500)
-    fp.add_block("R4", 900, 1850, 1000, 1950)
 
-    gen = _make_gen(fp)
-    cands = gen.generate_candidates("D", ["R1", "R2", "R3", "R4"])
+def _pin_below_bbox_oob_trunk(detour_size=None):
+    """Build the setup, pin the pure below-bbox OOB-H trunk, optionally reserve
+    a detour channel, and run the full NUTS + detailed-NUTS pipeline."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    for cmd in _OOB_SETUP:
+        s.do_command(cmd)
+    cands = list(s.bundles[0].input.candidates)
+    idx = None
+    for i, c in enumerate(cands):
+        if c.type.startswith("TRUNK_H_OOB") and "MST" not in c.type:
+            ys = [min(sg.start.y, sg.end.y) for sg in c.segments]
+            if min(ys) < 1000:                 # trunk below the block bbox
+                idx = i + 1
+                break
+    assert idx is not None, "no below-bbox pure OOB-H trunk candidate generated"
+    s.do_command(f"select_topology 1 {idx}")
+    if detour_size is not None:
+        s.do_command(f"detour_channel A {detour_size}")
+    s.do_command("run_nuts")
+    s.do_command("run_detailed_nuts")
+    return s
 
-    # The whole layout spans < 2000 units, so any trunk slide window wider than that
-    # is a runaway to the chip edge, not a legitimate freedom.
-    MAX_REASONABLE = 2000
-    worst = 0
-    worst_type = None
-    for c in cands:
-        ct = buda.ConnTopology()
-        ct.build(c, fp)
-        for cs in ct.segs():
-            if _is_trunk(cs):
-                width = cs.perp_hi - cs.perp_lo
-                if width > worst:
-                    worst, worst_type = width, c.type
-    assert worst <= MAX_REASONABLE, (
-        f"trunk slide window {worst} (in {worst_type}) is unbounded -- "
-        f"expected <= {MAX_REASONABLE}"
-    )
+
+def test_defect5_oob_trunk_seats_in_detour_channel():
+    """With a detour_channel wide enough to reach it, the below-bbox OOB trunk
+    is SEATED and all its bits place -- the NUTS design boundary now reaches
+    into the reserved band (issue #58)."""
+    s = _pin_below_bbox_oob_trunk(detour_size=500)
+    assert not s.nuts_result.unseatable_trunks, (
+        "OOB trunk should be seatable inside a detour_channel A 500, but NUTS "
+        f"reported {len(s.nuts_result.unseatable_trunks)} unseatable trunk(s)")
+    assert s.detailed_result.num_unplaced == 0, (
+        f"expected all bits placed, got {s.detailed_result.num_unplaced} "
+        "unplaced -- the detour-seated trunk should route cleanly")
+
+
+def test_defect5_oob_trunk_unseatable_without_channel_is_loud():
+    """With NO detour_channel the below-bbox OOB trunk cannot be seated; NUTS
+    must say so LOUDLY (unseatable_trunks) rather than report a clean solve
+    while detailed NUTS silently strands the bits (issue #58)."""
+    s = _pin_below_bbox_oob_trunk(detour_size=None)
+    assert s.nuts_result.unseatable_trunks, (
+        "an OOB trunk with no detour_channel to sit in must be flagged "
+        "unseatable, not silently accepted")
+    u = s.nuts_result.unseatable_trunks[0]
+    assert u.horiz and u.nom < u.bound, (
+        "the flagged trunk should be the below-bbox H trunk (nominal below "
+        f"the boundary): nom={u.nom} bound={u.bound}")
+    # And the strand it warns about is real: those bits do not place.
+    assert s.detailed_result.num_unplaced > 0
