@@ -1600,24 +1600,26 @@ static bool has_collinear_overlap(const Topology& topo, int n_orig) {
 // A straight trunk crossing a block is one continuous wire and is left
 // untouched: its endpoints do not land on the crossed block's faces, so the
 // block collects zero incident endpoints here.
-// After a TRUNK+MST hybrid is completed, its seed trunk (the spine at
-// trunk_pos) must have TWO well-defined endpoints — each a block tap or a
-// junction with another segment.  When the MST edges make the spine redundant,
-// completion can leave it attached at a SINGLE point (one end, or mid-body),
-// with the rest of the spine a wire to nothing — a dangling overshoot the
-// clean-tree gate does not model (it renders as an abstract-NUTS phantom span
-// that DetailedNUTS silently shrinks; bus_005/bundle 67 and 68 more across
-// bigHalf — docs/internal/bus005_dangling_scan_2026-07.md).  This detects that
-// case so the caller drops the whole candidate (the plain trunk / L / Z / a
-// clean hybrid already cover the bundle — the coverage gate never strands).
+// After a TRUNK+MST hybrid is completed, is its seed trunk (the spine at
+// trunk_pos) REDUNDANT — i.e. can it be removed while the rest of the topology
+// stays a valid route (every block still covered, one electrical island)?
+// When the MST edges already connect every endpoint, completion can leave the
+// spine as extra wire the tree does not need — a vestigial trunk that renders
+// as an abstract-NUTS phantom span DetailedNUTS silently shrinks (bus_005/
+// bundle 67 and ~68 more across bigHalf — docs/internal/bus005_dangling_scan).
+//
+// Removability is the exact test (a spine that is the ONLY coverage/connection
+// for some block is NOT removable and is kept — this is what makes it correct
+// where a "single-point attachment" or "any overshoot" heuristic was not: it
+// keeps a genuinely load-bearing pass-through trunk (Codex P2) AND the partial-
+// overshoot trunks the planner actually uses (dropping those regressed mix),
+// while dropping only the truly-redundant ones).  The caller drops the whole
+// candidate; the plain trunk / L / Z / a clean hybrid still cover the bundle,
+// and the coverage gate runs after, so a bundle is never stranded.
 //
 // The spine is the longest segment matching the trunk orientation at trunk_pos.
-// It is single-point iff every one of its connections — seg-to-seg junctions
-// (SegConn::at_pos) and busterm taps (localized per-endpoint via seg_busterms)
-// — shares one along-coordinate.  An unlocalized busterm tap is treated as
-// well-defined (never a false drop).
-static bool trunk_is_single_point(const Topology& topo, int trunk_pos, bool is_h,
-                                  const Floorplan& fp) {
+static bool seed_trunk_is_redundant(const Topology& topo, int trunk_pos, bool is_h,
+                                    const Floorplan& fp) {
     int spine = -1;
     long best_len = -1;
     for (int j = 0; j < (int)topo.segments.size(); ++j) {
@@ -1630,72 +1632,31 @@ static bool trunk_is_single_point(const Topology& topo, int trunk_pos, bool is_h
     }
     if (spine < 0) return false;                 // no spine found — leave it
 
-    // Mid-generation gate: seg_conns is not derived until finalize_candidates,
-    // so derive it on a local copy (mirrors topology_is_clean_tree) before
-    // reading the spine's junctions.
-    Topology t2 = topo;
-    annotate_seg_conns(t2);
+    // Build the trunk-less topology and re-derive its connectivity from scratch
+    // (annotate_topology, like a hand-built candidate), then audit it.
+    Topology t;
+    t.type = topo.type;
+    t.trunk_location = topo.trunk_location;
+    t.connected_block_names = topo.connected_block_names;
+    t.feedthru_blocks = topo.feedthru_blocks;
+    for (int j = 0; j < (int)topo.segments.size(); ++j)
+        if (j != spine) t.segments.push_back(topo.segments[j]);
+    if (t.segments.empty()) return false;        // spine was the only wire — needed
+
+    annotate_topology(t, fp);
     ConnTopology ct;
-    ct.build(t2, fp);
-    const auto& csegs = ct.segs();
-    if (spine >= (int)csegs.size()) return false;
-
-    const Segment& sg = topo.segments[spine];
-    long a0 = is_h ? sg.start.x : sg.start.y;
-    long a1 = is_h ? sg.end.x   : sg.end.y;
-    long lo = LONG_MAX, hi = LONG_MIN;
-    int  n = 0, bt_seg_conns = 0;
-    for (const auto& c : csegs[spine].conns) {
-        if (c.kind == SegConn::SEG) { lo = std::min(lo, (long)c.at_pos);
-                                      hi = std::max(hi, (long)c.at_pos); ++n; }
-        else ++bt_seg_conns;
+    ct.build(t, fp);
+    // Redundant iff removing the spine leaves NO coverage/connectivity fault: an
+    // uncovered block (BUSTERM_OPEN), a split wire graph (unbridged DISCONNECTED),
+    // or a newly-exposed feedthrough relay (FEEDTHRU_RELAY) all mean the spine
+    // was load-bearing — keep the candidate.
+    for (const auto& v : check_topo(ct, t, fp, -1).violations) {
+        if (v.kind == ViolationKind::BUSTERM_OPEN) return false;
+        if (v.kind == ViolationKind::FEEDTHRU_RELAY) return false;
+        if (v.kind == ViolationKind::DISCONNECTED &&
+            !disconnected_islands_bridged(ct, t, fp)) return false;
     }
-    int bt_localized = 0;
-    auto it = topo.seg_busterms.find(spine);
-    if (it != topo.seg_busterms.end()) {
-        if (it->second.first)  { lo = std::min(lo, a0); hi = std::max(hi, a0);
-                                 ++n; ++bt_localized; }
-        if (it->second.second) { lo = std::min(lo, a1); hi = std::max(hi, a1);
-                                 ++n; ++bt_localized; }
-    }
-    // A busterm tap the analysis saw but seg_busterms did not localize to an
-    // endpoint: assume the spine is well-defined (do not drop on uncertainty).
-    if (bt_seg_conns > bt_localized) return false;
-
-    // Pass-through coverage is load-bearing too (Codex P2 on #418): a spine that
-    // crosses the INTERIOR of a connected block covers it (seg_spans_rect — no
-    // tap), so it is that block's only wire and NOT vestigial even when its
-    // explicit taps/junctions collapse to one coordinate.  Widen the load-bearing
-    // range by any such block's along-extent (clamped to the spine).  Strict
-    // interior on the perp axis leaves face-grazes to the tap/junction cases (a
-    // spine grazing a block's face — the bus_005 case — stays flagged).
-    long salo = std::min(a0, a1), sahi = std::max(a0, a1);
-    for (const std::string& bn : topo.connected_block_names) {
-        if (!fp.has_block(bn)) continue;
-        Rect r = fp.get_block_bounds(bn);
-        int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
-        if (trunk_pos <= plo || trunk_pos >= phi) continue;   // not interior
-        long blo = is_h ? r.x1 : r.y1, bhi = is_h ? r.x2 : r.y2;
-        if (bhi <= salo || blo >= sahi) continue;          // no along overlap
-        lo = std::min(lo, std::max(salo, blo));
-        hi = std::max(hi, std::min(sahi, bhi));
-        ++n;
-    }
-
-    if (n == 0) return false;                    // isolated — leave for the gate
-    // Dangling iff the whole load-bearing extent collapses to ONE coordinate:
-    // the spine connects nothing and covers nothing but a point, so it is a
-    // pure vestigial overshoot (the user's "one-end-point" seed trunk).
-    //
-    // The load-bearing extent counts pass-through coverage (Codex P2), so a
-    // spine that crosses a block's interior is NOT single-point and is kept —
-    // even when its explicit taps/junctions collapse to one coordinate.
-    //
-    // We deliberately do NOT drop a PARTIAL overshoot (extent narrower than the
-    // span but still >1 point): those candidates are selected and healed by
-    // DetailedNUTS on the corpus, and dropping them roughly doubled mix's DNUTS
-    // opens (156->308) — the aggressive form is a QoR regression, not a fix.
-    return lo == hi;
+    return true;                                 // valid without the spine → redundant
 }
 
 static void complete_relay_junctions(Topology& topo,
@@ -3540,7 +3501,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
             // Drop a hybrid whose seed trunk ended up attached at a single point
             // (a dangling overshoot the clean-tree gate does not model).
             if (topology_is_clean_tree(tree, floorplan_) &&
-                (is_oob || !trunk_is_single_point(tree, trunk_pos, is_h, floorplan_)))
+                (is_oob || !seed_trunk_is_redundant(tree, trunk_pos, is_h, floorplan_)))
                 results.push_back(std::move(tree));
             // A simple hybrid that can't be cleanly completed is DROPPED (the base
             // trunk + standalone MST already cover the bundle).
@@ -3581,7 +3542,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
         // candidate (and don't pool it as a fallback either — the plain trunk
         // still covers the bundle).
         bool legacy_dangling = !is_oob &&
-            trunk_is_single_point(legacy, trunk_pos, is_h, floorplan_);
+            seed_trunk_is_redundant(legacy, trunk_pos, is_h, floorplan_);
         if (topology_is_clean_tree(legacy, floorplan_) && !legacy_dangling) {
             results.push_back(std::move(legacy));
         } else if (blocks.size() < 4 && !legacy_dangling) {

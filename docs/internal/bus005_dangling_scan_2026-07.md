@@ -106,58 +106,58 @@ candidates escape only because their trunk locus coincides with a block face.
 Candidate 35 (`@y2410`, 11 segments) is the pathological case: the vestigial
 spine (seg0) plus a tangle of unbounded relay jogs (seg3/5/6/7/8/9).
 
-## Fix (shipped) — drop the candidate when the seed trunk is single-point
+## Fix (shipped) — drop the candidate when the seed trunk is REDUNDANT
 
 Implemented in `add_trunk_mst_candidates` (`topology.cpp`), scoped to **non-OOB**
 trunk+MST hybrids (the OOB unbounded-slide class stays with `set_drop_dangling`,
 per the investigation focus). After `complete_relay_junctions`,
-`trunk_is_single_point()`:
+`seed_trunk_is_redundant()`:
 
 1. finds the spine — the longest segment matching the trunk orientation at
    `trunk_pos`;
-2. derives `seg_conns` on a local copy (they are not derived until
-   `finalize_candidates`, mirroring `topology_is_clean_tree`);
-3. returns true when the spine's whole **load-bearing extent collapses to ONE
-   coordinate** (`lo == hi`) — it connects and covers nothing but a point, a pure
-   vestigial overshoot (the "one-end-point" seed trunk). The load-bearing extent
-   is the min/max along-coordinate of: seg-to-seg junctions (`SegConn::at_pos`),
-   busterm taps (localized per-endpoint via `seg_busterms`), **and pass-through
-   coverage** of any connected block whose interior the spine crosses.
+2. builds the **trunk-less** topology (drop the spine), re-derives its
+   connectivity from scratch (`annotate_topology`, like a hand-built candidate);
+3. returns true (redundant → drop) iff removing the spine leaves **a valid
+   route** — no uncovered block (`BUSTERM_OPEN`), no split wire graph (unbridged
+   `DISCONNECTED`), no newly-exposed feedthrough relay (`FEEDTHRU_RELAY`).
 
-**Codex P2 (#418) — pass-through coverage is load-bearing.** An earlier form of
-the gate ignored pass-through coverage, so it could drop a spine whose only job
-is to cover a block it crosses (for `<4`-block bundles that spine can be the only
-MST-type candidate, since standalone `MST_*` isn't generated below 4 blocks). The
-extent now folds in interior pass-through coverage, so a spine crossing a block's
-interior is not single-point and is kept (`test_passthrough_covered_spine_is_kept`).
+**Removability is the exact test** — it directly asks "does the tree still work
+without this trunk?" and so gets right the cases the earlier heuristics got
+wrong:
 
-**Why single-point, not "any overshoot".** The stricter form — drop whenever the
-load-bearing extent fails to reach the full span (a *partial* overshoot) — is
-geometrically tidier but a **QoR regression**: those partial-overshoot candidates
-are selected and healed by DetailedNUTS, and dropping them roughly **doubled**
-`mix`'s DNUTS opens (width 156→308). So a partial overshoot like bus_005
-`TRUNK_H+MST@y3095` (covers `blk_19` over `[700,1050]`, then runs on to `x=6290`)
-stays in the pool — it is never selected, and dropping it costs more than it
-saves. Only the fully-collapsed single-point spine is dropped.
+- A spine that is a block's **only** coverage or connection is *not* removable
+  and is **kept** — this is Codex P2 (#418) stated correctly, and it holds even
+  for `<4`-block bundles where the hybrid is the only MST-type candidate
+  (`test_load_bearing_passthrough_trunk_is_kept`).
+- A spine the MST edges make **superfluous** *is* removable and is dropped —
+  including bus_005 `TRUNK_H+MST@y3095` (it grazes/covers `blk_19` but the rest
+  of the tree already reaches everything) and the "covers a block yet still
+  removable" shape (a spine crossing `M` whose branches reach `M` another way).
 
-Both emit paths gate on it (completed-tree + legacy), and a single-point legacy
+Two heuristics were tried and rejected first: a **single-point-attachment** test
+kept `@y3095` (a covered-but-redundant spine), and its **any-overshoot**
+generalization was a QoR regression — dropping partial-overshoot trunks the
+planner actually uses roughly **doubled** `mix`'s DNUTS opens (156→308).
+Removability keeps those load-bearing/DNUTS-healed trunks while still dropping
+the genuinely-redundant ones.
+
+Both emit paths gate on it (completed-tree + legacy), and a redundant legacy
 hybrid is not pooled as a `<4`-block fallback. The bundle is never stranded —
 the plain trunk / L / Z / a clean hybrid still cover it, and the coverage gate
 runs after.
 
-**Why drop, not trim.** A single-point spine is *vestigial* — the MST edges
-already connect every endpoint, so the trunk carries no wire the tree needs.
+**Why drop, not trim.** A redundant spine carries no wire the tree needs.
 Dropping is exact; the earlier post-hoc trim (reverted) had to rebuild geometry
 and fought the completion's `edge_id`/junction/WL invariants (11 test
-regressions vs. 0 behavioral here).
+regressions vs. 0 here).
 
 **Impact (QoR unchanged).** NUTS placement goldens are byte-identical and the
 flow-script / big2 / mix / ripup QoR tests pass — the dropped candidates were
-*never selected* by the planner (they only ranked low on an understated WL).
+*never selected* by the planner (a redundant trunk is only extra wire, so it
+ranks worse than its trunk-less equivalent, which the generator emits anyway).
 Only the candidate-pool snapshots move: the `topo_analysis` goldens shed their
-single-point `+MST` candidates (big / comprehensive / dogleg2 / four_blocks /
-mix). bus_005: non-OOB single-point stubs 3 → 1 (the two pure-vestigial spines
-dropped; the pass-through-covering `@y3095` kept per Codex P2).
+redundant `+MST` candidates (big / comprehensive / dogleg2 / four_blocks / mix).
+bus_005: non-OOB dangling stubs **3 → 0**.
 
 ## Reproduce
 
