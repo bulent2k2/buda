@@ -199,4 +199,38 @@ a non-copying wrapper), and (2) make hier analyses reuse a session-frame cache
 caching-hostile commit/restore loop (a "skip contenders whose contention is
 unchanged" cache was tried at `ripup.py` ~L1625 and **reverted** — bigHalf
 stranded 52 opens), **C is out of scope as an incremental optimization**. The
-A/B + `_open_segments` wins stand; **E**/**D** remain the lower-risk follow-ups.
+A/B + `_open_segments` wins stand; **E** (implemented below) and **D** remain the
+lower-risk follow-ups.
+
+## Implemented — E (stall-sweep trial-volume cut)
+
+`_rr_scan_moves` gained a `first_improving` flag, passed `True` at the two stall
+sweeps only (the deferred-move sweep and the warm-rescued cold sweep). The main
+contender scan is unchanged — it still full-scans each contender for its
+BEST-metric move — but a stall sweep now stops a contender's scan on its FIRST
+strictly-improving move instead of trialing the rest of its (already
+screen-sorted, best-first) list for an optimum the caller discards anyway: both
+sweeps commit the first improving CONTENDER, so within that contender only one
+improving move is ever used.
+
+The **stall certificate is preserved**: the early exit fires only when an
+improver exists, so a sweep that finds nothing still trials its whole list —
+the "no improving re-route ⇒ stop / go global" verdict rests on the same full
+trial set as before. The change is **trajectory-affecting** (which improver
+commits can differ), not byte-identical; it is a no-op whenever no stall sweep
+fires that iteration.
+
+**Measured** (same build, E vs current `main`):
+
+| flow | stall sweep fires? | endpoint (a / b) | trials (a / b) |
+|---|---|---|---|
+| `mix2_fast_bottomup` | yes | 21→3 / 104(ovl3)→20 (identical) | 109→**104** / 253→**241** |
+| `bigHalf` | no (inert) | 4→0 / 92→0 (identical) | 3 / 5 (unchanged) |
+| `mix` | no (inert) | 7→0 (identical) | 19 (unchanged) |
+
+Where the sweep fires (`mix2`), trial volume drops with a byte-identical metric
+endpoint; where it does not (`bigHalf`, `mix` reach improvers in the screened
+scan), E is provably inert. The saving scales with how often the screened scan
+stalls into the deferred sweep — modest on this corpus, larger on flows that
+lean on the sweep. Fast tier green (1189 passed). **D** (default-on warm
+pre-filter for bottom-up flows) remains the last follow-up.
