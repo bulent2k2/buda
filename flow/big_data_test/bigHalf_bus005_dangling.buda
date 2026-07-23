@@ -1,0 +1,29 @@
+# Repro: bus_005 dangling-segment audit (bigHalf, bundle 67).
+#
+# Same setup as bigHalf.buda, but generates candidates for ONLY bus_005 via
+# `generate_topologies_for_bundle bus_005` (src/dst auto-derived from the
+# netlist) instead of the whole design.  This narrows the candidate pool to
+# the one bus so its dangling segments are easy to eyeball.
+#
+# A "dangling" segment is one of two kinds (see tools/scan_dangling.py and
+# set_drop_dangling):
+#   A. a TRULY-dangling stub  — a ConnSeg with a single, non-block connection
+#      (a wire whose other end connects to nothing); DetailedNUTS silently
+#      shrinks it, which is why NUTS-level viz never flagged it.
+#   B. an UNBOUNDED slide window — the +/-2^30 no-clamp sentinel on an
+#      OOB-detour trunk (set_drop_dangling clamp bounds these).
+#
+# Finding on this fixture (2026-07-23): every Category-A stub is a TRUNK_*+MST
+# hybrid (the MST-relay artifact), confirming the hypothesis for genuine
+# dangling stubs.  Category-B unbounded windows are a SEPARATE class that also
+# appears in pure OOB trunks (TRUNK_V_OOB / TRUNK_H_OOB), not only MST.
+# Run `python3 tools/scan_dangling.py flow/big_data_test/bigHalf_bus005_dangling.buda bus_005`
+# for the categorized per-candidate table.
+source ../tracks/tracks4top.buda
+source tc3a_flat_5x.buda
+run_bundler
+generate_topologies_for_bundle bus_005
+# All candidates, with per-segment connectivity, so dangling stubs are visible:
+dump_topologies bus_005 --conn
+# Audit every candidate (not just the selected one) for connectivity opens:
+check_design topo all
