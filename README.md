@@ -1,8 +1,8 @@
-BUDA (Bundled Unified Design Automation) is an open-source EDA interconnect planning system for hierarchical chip design. It has five major components:
+BUDA (BUndled Design Automation) is an open-source EDA interconnect planning system for hierarchical chip design. It has five major components:
 1. **Bundling**: Grouping nets into buses (flat and hierarchical `HBundle` templates).
 2. **Topology Generation**: Generating physical routing shapes on Hanan grids (L/Z/U-shapes, hybrid MST, relay completion).
 3. **Congestion Planning**: Global planning and layer assignment with healer lookahead coupling and bottom-up template support.
-4. **Track Assignment (NUTS)**: 1.5-D abstract rectangle packing (`nuts`) and bit-level detailed track assignment (`detailed_nuts`) respecting pre-route blockages.
+4. **Track Sharing (NUTS)**: 1.5-D abstract rectangle packing (`nuts`) and bit-level detailed track assignment (`detailed_nuts`) respecting pre-route blockages.
 5. **Healer Stack**: Closed-loop model correction (`negotiate_congestion`) and measured search (`ripup_reroute`) to eliminate overlaps and opens.
 
 BUDA also provides an interactive Floorplanner GUI (`bin/fp`, `bin/bfp`), SQLite physical database persistence (BDB), multi-format interchange (DEF/LEF, Verilog, GDSII), and a web application interface (`web/`, `src/web/`).

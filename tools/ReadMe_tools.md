@@ -8,21 +8,22 @@ From the repo root (after sourcing `bin/activate`):
 
 ```bash
 # Visualize a BDB floorplan design
-bin/viz chip_designs/ariane136.bdb
-
-# Visualize DEF/LEF pair
-python3 tools/def_viz.py flow/lefdef/gcd/gcd.def flow/lefdef/gcd/Nangate45.lef
+python3 tools/bdb_serialize.py load flow/rnr/mix2_aligned.bdb.sql fp.bdb
+bin/viz fp.bdb
 
 # Launch interactive Floorplanner GUI
-bin/fp chip_designs/ariane136.bdb
+bin/fp fp.bdb
 
 # Unit-test to .buda converter + Topology Explorer
 bin/u2b test_column_datapath_hvh
+
+# Visualize DEF/LEF pair
+bin/viz tools/data/gcd.def tools/data/Nangate45.lef
 ```
 
 ## Interactive IPC Test Sequence
 
-`def_viz.py` can connect via Unix domain socket IPC (`/tmp/buda_ipc_<session>.sock`) to `buda_viz.py` for live cross-highlighting between the DEF/BDB physical placement view and BUDA's interconnect bundle view.
+`viz` can connect via Unix domain socket IPC (`/tmp/buda_ipc_<session>.sock`) to `buda_viz.py` for live cross-highlighting between the DEF/BDB physical placement view and BUDA's interconnect bundle view.
 
 ### 1. Small IPC Test
 
@@ -36,12 +37,13 @@ buda flow/four_blocks.buda
 **Terminal 2 — DEF visualizer:**
 ```bash
 source bin/activate
-python3 tools/def_viz.py flow/lefdef/four_blocks/four_blocks.def flow/lefdef/four_blocks/four_blocks.lef
+viz tools/data/four_blocks.def tools/data/four_blocks.lef
 ```
 
-*Expected behavior*: Clicking a bundle in `buda_viz` highlights its connected driver/receiver instances in `def_viz`. Clicking an instance in `def_viz` highlights all bundles touching that instance in `buda_viz`.
+*Expected behavior*: Clicking a bundle in `buda_viz` highlights its connected driver/receiver instances in `viz`. Clicking an instance in `viz` highlights all bundles touching that instance in `buda_viz`.
 
 ### 2. ISPD19 Test
+(lef/def files are in ~/chip_designs/lefdef/ispd19_test1)
 
 **Terminal 1:**
 ```bash
@@ -52,7 +54,7 @@ buda demo/ispd19_test1.buda
 **Terminal 2:**
 ```bash
 source bin/activate
-python3 tools/def_viz.py flow/lefdef/ispd19_test1/ispd19_test1.input.def flow/lefdef/ispd19_test1/ispd19_test1.input.lef
+python3 tools/def_viz.py ispd19_test1.input.def ispd19_test1.input.lef
 ```
 
 ### IPC Verification Checklist

@@ -13,7 +13,8 @@ buda demo/comprehensive_demo.buda
 Or view DEF/LEF / BDB designs:
 
 ```bash
-viz chip_designs/ariane136.bdb
+python3 tools/bdb_serialize.py load flow/rnr/mix2_aligned.bdb.sql tmp.bdb
+viz tmp.bdb
 ```
 
 ## 2. Topology Explorer (Unit-to-Buda)
@@ -27,7 +28,7 @@ u2b test_column_datapath_hvh
 Launch the interactive physical placement editor and hierarchy router:
 
 ```bash
-fp chip_designs/ariane136.bdb
+fp tmp.bdb
 # Or launch built-in demo scenarios:
 bfp tc1
 ```
