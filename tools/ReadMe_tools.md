@@ -1,105 +1,80 @@
-# Clustering and DEF Visualization tools
+# Clustering, Converter, and DEF Visualization Tools
 
 [Also see research doc](../docs/research.md)
 
-## Some quick commands:
-> cd ~/src/buda
-> python3 tools/def_viz_o3.py chip_designs/ariane136/ariane136.bdb
-> python3 tools/def_viz_o3.py chip_designs/ariane136/ariane136_fp_placed_macros.bdb &
-> python3 tools/def_viz.py flow/lefdef/gcd/gcd.def flow/lefdef/gcd/Nangate45.lef &
+## Standard Execution
 
-First Buda viz:
-> rm -f /tmp/buda_ipc_four_blocks.sock
-> cd /Users/ben/src/buda/src
-> python3 buda_cli.py ../flow/four_blocks.buda
+From the repo root (after sourcing `bin/activate`):
 
-After it comes up, def viz:
+```bash
+# Visualize a BDB floorplan design
+python3 tools/bdb_serialize.py load flow/rnr/mix2_aligned.bdb.sql fp.bdb
+bin/viz fp.bdb
 
-> cd /Users/ben/src/buda/tools
-> python3 def_viz.py ../buda_system_v2/flow/lefdef/four_blocks/four_blocks.def ../buda_system_v2/flow/lefdef/four_blocks/four_blocks.lef &
+# Launch interactive Floorplanner GUI
+bin/fp fp.bdb
 
-## Alternative
+# Unit-test to .buda converter + Topology Explorer
+bin/u2b test_column_datapath_hvh
 
-alias py=python3
-BUDA=~/src/buda/src/buda_cli.py
-VIZ=~/src/buda/tools/def_viz.py
-VIZo1=~/src/buda/tools/def_viz_o1.py
-VIZo2=~/src/buda/tools/def_viz_o2.py
-VIZo3=~/src/buda/tools/def_viz_o3.py
-cd ~/src/buda/flow
-rm -f /tmp/buda_ipc_four_blocks.sock
-py $BUDA four_blocks.buda &
-py $VIZ lefdef/four_blocks/four_blocks.def lefdef/four_blocks/four_blocks.lef &
+# Visualize a DEF/LEF pair — the tiny BUDA-original toy design ships in-repo:
+bin/viz tools/data/four_blocks.def tools/data/four_blocks.lef
 
-cd ~/src/buda/flow/lefdef/ispd19_test1
-py $VIZ ispd19_test1.input.def ispd19_test1.input.lef &
-py $BUDA ~/src/buda/demo/ispd19_test1.buda
+# For a realistic design, use the standard OpenROAD "gcd" example on the
+# Nangate45 open library. These are third-party files with their own licenses
+# and are NOT committed here — download them and point viz at your local copies:
+#   Nangate45 LEF  → OpenROAD-flow-scripts, flow/platforms/nangate45/lef
+#       https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts
+#   gcd design DEF → OpenROAD test suite (test/gcd*.def) or the flow designs
+#       https://github.com/The-OpenROAD-Project/OpenROAD
+# bin/viz /path/to/gcd.def /path/to/Nangate45.lef
+```
 
-# Interactive IPC Test Sequence
+See [`tools/data/README.md`](data/README.md) for what ships in `tools/data/`
+and where to fetch the larger third-party benchmarks.
 
-Start with def_viz.py. It has no group management UI — just nets, instances, and canvas — so any IPC issue shows up clearly without extra UI state to reason about. Once the base is confirmed working, the o1/o2/o3 variants all use identical IPC code so they should just work.
+## Interactive IPC Test Sequence
 
-## small test
-Terminal 1 — buda_viz:
-  cd ~/src/buda/buda_system_v2/src
-  python3 buda_cli.py ../flow/four_blocks.buda
-  Session name → four_blocks, socket → /tmp/buda_ipc_four_blocks.sock
+`viz` can connect via Unix domain socket IPC (`/tmp/buda_ipc_<session>.sock`) to `buda_viz.py` for live cross-highlighting between the DEF/BDB physical placement view and BUDA's interconnect bundle view.
 
-  Terminal 2 — def_viz:
-  cd ~/src/buda/tools
-  python3 def_viz.py ../buda_system_v2/flow/lefdef/four_blocks/four_blocks.def \
-                     ../buda_system_v2/flow/lefdef/four_blocks/four_blocks.lef
+### 1. Small IPC Test
 
-  This is the ideal IPC test: only 4 instances (u1–u4) on screen in def_viz, so the cross-highlighting is immediately obvious. Click bundle b1 in buda_viz → only u1 (orange) + u2 (blue) light up. Click
-  u3 in def_viz → bundles b2, b3, b4 (all touching u3) highlight in buda_viz.
+**Terminal 1 — BUDA routing CLI & visualizer:**
+```bash
+source bin/activate
+buda flow/four_blocks.buda
+# Session name → four_blocks, socket → /tmp/buda_ipc_four_blocks.sock
+```
 
-## ispd19 test1
+**Terminal 2 — DEF visualizer:**
+```bash
+source bin/activate
+viz tools/data/four_blocks.def tools/data/four_blocks.lef
+```
 
-  Setup — two terminal windows
+*Expected behavior*: Clicking a bundle in `buda_viz` highlights its connected driver/receiver instances in `viz`. Clicking an instance in `viz` highlights all bundles touching that instance in `buda_viz`.
 
-  Terminal 1 (buda_viz):
-  cd ~/src/buda/buda_system_v2/src
-  python3 buda_cli.py ../demo/ispd19_test1.buda
-  This runs bundler → planner → NUTS → detailed NUTS, then opens buda_viz. The session name will be ispd19_test1 so the socket will be /tmp/buda_ipc_ispd19_test1.sock.
+### 2. ISPD19 Test
 
-  Terminal 2 (def_viz):
-  cd ~/src/buda/tools
-  python3 def_viz.py ../buda_system_v2/flow/lefdef/ispd19_test1/ispd19_test1.input.def \
-                     ../buda_system_v2/flow/lefdef/ispd19_test1/ispd19_test1.input.lef
-  The session name defaults to ispd19_test1 from the file stem — they auto-connect.
+The ISPD 2019 contest benchmarks are third-party and NOT committed here; download
+them from the contest site and point the tools at your **local** copies (adjust
+the paths below to wherever you unpacked them):
+<https://www.ispd.cc/contests/19/>
 
-  ---
-  Tests to run
+**Terminal 1:**
+```bash
+source bin/activate
+buda demo/ispd19_test1.buda        # your own .buda wrapper for the design
+```
 
-  Test 1 — buda→def direction:
-  - Click any bundle segment in buda_viz
-  - Expected: def_viz highlights the driver and receiver instances for that bundle's nets; status bar shows [IPC] bundle N: X net(s) → Y instance(s)
+**Terminal 2:**
+```bash
+source bin/activate
+python3 tools/def_viz.py /path/to/ispd19_test1.input.def /path/to/ispd19_test1.input.lef
+```
 
-  Test 2 — def→buda direction:
-  - Click an instance box in def_viz (or select one from the instance listbox)
-  - Expected: buda_viz highlights the bundle(s) that connect that instance
-
-  Test 3 — clear propagates:
-  - Click background in buda_viz → check def_viz clears
-  - Click Clear button in def_viz → check buda_viz deselects
-
-  Test 4 — late-connect (reconnect logic):
-  - Start buda_viz first, wait for its window, then start def_viz
-  - Within ~1 second the poll timer will connect them; run tests 1–3 again
-
-  Test 5 — reverse startup order:
-  - Start def_viz first, then buda_viz
-  - Same expectation: they find each other within ~1 second
-
-  Test 6 — session isolation:
-  - Open a second buda_viz with a different design (e.g. comprehensive_demo.buda) in a third terminal — it gets session name comprehensive_demo and a different socket, so it should not interfere with the ispd19 pair
-
-  ---
-  What to watch for as failure signals
-
-  - def_viz status bar never shows [IPC] prefix → connection didn't form (check /tmp/buda_ipc_ispd19_test1.sock exists with ls -la /tmp/buda_ipc_*.sock)
-  - buda_viz console prints [viz_ipc] … errors → socket errors worth investigating (errors always print; the informational listening/connected/timer chatter is hidden unless you pass `--ipc-verbose`)
-  - Highlighting works one direction only → likely _bundle_insts is empty (net_endpoints not populated)
-  - Crash on click → exception in _on_ipc_message; Terminal 1/2 will show the traceback
-
-✻ Cooked for 37s
+### IPC Verification Checklist
+- **BUDA → DEF direction**: Click a bundle segment in `buda_viz`. Status bar in `def_viz` shows `[IPC] bundle N: X net(s) -> Y instance(s)`.
+- **DEF → BUDA direction**: Click an instance box or pick from the instance listbox in `def_viz`. `buda_viz` highlights connected bundles.
+- **Clear propagation**: Clicking background in `buda_viz` clears `def_viz` selection; clicking Clear in `def_viz` deselects `buda_viz`.
+- **Session isolation**: Running multiple instances with different `.buda` scripts isolates IPC sockets by session name (`/tmp/buda_ipc_<session>.sock`).

@@ -1,0 +1,42 @@
+# BUDA Visualization Tools
+
+BUDA provides multiple visualization and interactive exploration tools:
+
+## 1. Matplotlib Flow Visualizer
+Run a `.buda` script to launch the interactive Matplotlib routing visualizer:
+
+```bash
+source bin/activate
+buda demo/comprehensive_demo.buda
+```
+
+Or view DEF/LEF / BDB designs:
+
+```bash
+python3 tools/bdb_serialize.py load flow/rnr/mix2_aligned.bdb.sql tmp.bdb
+viz tmp.bdb
+```
+
+## 2. Topology Explorer (Unit-to-Buda)
+Convert a topology unit test to a flat `.buda` script and view its candidates interactively:
+
+```bash
+u2b test_column_datapath_hvh
+```
+
+## 3. Floorplanner GUI
+Launch the interactive physical placement editor and hierarchy router:
+
+```bash
+fp tmp.bdb
+# Or launch built-in demo scenarios:
+bfp tc1
+```
+
+## 4. Web Application Interface
+Launch the Web server for WebSocket-backed interactive progress visualization and control:
+
+```bash
+PYTHONPATH=build:src uvicorn web.server:app --port 8000
+```
+Open `http://localhost:8000` (or `web/index.html`) in a web browser.

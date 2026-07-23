@@ -1,0 +1,34 @@
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN four_blocks ;
+UNITS DISTANCE MICRONS 1000 ;
+
+DIEAREA ( 0 0 ) ( 250000 250000 ) ;
+
+COMPONENTS 4 ;
+  - u1 BLOCK_MACRO + PLACED ( 50000 50000 ) N ;
+  - u2 BLOCK_MACRO + PLACED ( 150000 50000 ) N ;
+  - u3 BLOCK_MACRO + PLACED ( 50000 150000 ) N ;
+  - u4 BLOCK_MACRO + PLACED ( 150000 150000 ) N ;
+END COMPONENTS
+
+NETS 15 ;
+  - b1_0 ( u1 tx ) ( u2 rx ) ;
+  - b1_1 ( u1 tx ) ( u2 rx ) ;
+  - b2_0 ( u1 tx ) ( u2 rx ) ( u3 rx ) ;
+  - b2_1 ( u1 tx ) ( u2 rx ) ( u3 rx ) ;
+  - b2_2 ( u1 tx ) ( u2 rx ) ( u3 rx ) ;
+  - b3_0 ( u1 tx ) ( u2 rx ) ( u3 rx ) ( u4 rx ) ;
+  - b3_1 ( u1 tx ) ( u2 rx ) ( u3 rx ) ( u4 rx ) ;
+  - b3_2 ( u1 tx ) ( u2 rx ) ( u3 rx ) ( u4 rx ) ;
+  - b3_3 ( u1 tx ) ( u2 rx ) ( u3 rx ) ( u4 rx ) ;
+  - b4_0 ( u2 tx ) ( u3 rx ) ( u4 rx ) ( u1 tx ) ;
+  - b4_1 ( u2 tx ) ( u3 rx ) ( u4 rx ) ( u1 tx ) ;
+  - b4_2 ( u2 tx ) ( u3 rx ) ( u4 rx ) ( u1 tx ) ;
+  - b4_3 ( u2 tx ) ( u3 rx ) ( u4 rx ) ( u1 tx ) ;
+  - b4_4 ( u2 tx ) ( u3 rx ) ( u4 rx ) ( u1 tx ) ;
+  - _end_sentinel ( u1 rx ) ;
+END NETS
+
+END DESIGN
