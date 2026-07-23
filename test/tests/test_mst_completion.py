@@ -609,3 +609,90 @@ def test_trunk_mst_root_double_tap_demoted():
         ct.build(c, fp)
         for blk, segs in _busterm_taps(ct).items():
             assert len(segs) == 1, f"{c.type}: block {blk} tapped by {sorted(segs)}"
+
+
+# ── Redundant seed-trunk drop (bus_005 / bundle 67 dangling class) ────────────
+# docs/internal/bus005_dangling_scan_2026-07.md: a non-OOB trunk+MST hybrid
+# whose seed trunk (the spine) is REDUNDANT -- removing it leaves a valid route
+# (every block still covered, one island) -- is dropped at generation
+# (seed_trunk_is_redundant in topology.cpp).  Removability is the exact test: it
+# keeps a genuinely load-bearing trunk (the only coverage/connection for a block
+# -- Codex P2) and the partial-overshoot trunks the planner uses, dropping only
+# the ones the MST edges make superfluous.
+
+def _trunk_removable(topo, fp, is_h, trunk_pos):
+    """Mirror of the C++ gate: build the trunk-less topology and audit it -- the
+    trunk is redundant iff removing it leaves no coverage/connectivity fault."""
+    spine, best = -1, -1
+    for j, s in enumerate(topo.segments):
+        h = s.start.y == s.end.y
+        if is_h and (not h or s.start.y != trunk_pos): continue
+        if (not is_h) and (h or s.start.x != trunk_pos): continue
+        ln = abs((s.end.x - s.start.x) if is_h else (s.end.y - s.start.y))
+        if ln > best: best, spine = ln, j
+    if spine < 0:
+        return False
+    t = buda.Topology()
+    t.type = topo.type
+    t.trunk_location = topo.trunk_location
+    t.connected_block_names = topo.connected_block_names
+    t.segments = [s for j, s in enumerate(topo.segments) if j != spine]
+    if not t.segments:
+        return False
+    buda.annotate_topology(t, fp)
+    ct = buda.ConnTopology(); ct.build(t, fp)
+    v = {str(x.kind).split(".")[-1] for x in buda.check_topo(ct, t, fp, -1).violations}
+    if "BUSTERM_OPEN" in v or "FEEDTHRU_RELAY" in v:
+        return False
+    if "DISCONNECTED" in v and not buda.disconnected_islands_bridged(ct, t, fp):
+        return False
+    return True
+
+
+def test_collinear_row_drops_all_degenerate_hybrids():
+    """A perfectly collinear 3-block row: every trunk locus's hybrid has a
+    redundant seed trunk (the MST edge already connects the row), so NO non-OOB
+    +MST hybrid survives -- while the plain trunk / L / Z still cover the bundle."""
+    fp = _make_fp({"A": (0, 0, 100, 100),
+                   "B": (200, 0, 300, 100),
+                   "C": (400, 0, 500, 100)})
+    cands = _gen(fp).generate_candidates("A", ["B", "C"])
+    # Non-OOB hybrids all drop (the drop gate is scoped to in-bbox trunks); OOB
+    # detour hybrids are a separate class and may remain.
+    assert [c.type for c in cands
+            if "+MST" in c.type and "_OOB" not in c.type] == []
+    assert cands, "bundle must still have (non-MST) coverage"
+
+
+def test_no_surviving_nonoob_hybrid_has_redundant_spine():
+    """bus_005 shape (blk_34 -> blk_19, io_pad_br corner IO): every surviving
+    non-OOB TRUNK+MST hybrid has a load-bearing (non-removable) seed trunk."""
+    fp = _make_fp({"blk_34": (100, 1700, 700, 2050),
+                   "blk_19": (100, 2770, 1050, 3420),
+                   "io_pad_br": (6290, 100, 6790, 500)})
+    cands = _gen(fp).generate_candidates("blk_34", ["blk_19", "io_pad_br"])
+    hybrids = [c for c in cands if "+MST" in c.type and "_OOB" not in c.type]
+    assert hybrids, "expected some non-OOB trunk+MST hybrids to survive"
+    for c in hybrids:
+        is_h = "TRUNK_H" in c.type
+        assert not _trunk_removable(c, fp, is_h, c.trunk_location), (
+            f"{c.type}: redundant seed trunk survived the drop gate")
+
+
+def test_load_bearing_passthrough_trunk_is_kept():
+    """Codex P2 (#418), stated correctly: a trunk that is a straddling block's
+    ONLY connection is load-bearing (removing it uncovers the block), so it is
+    KEPT -- while a trunk the MST edges make superfluous is dropped.  Here M
+    straddles a horizontal trunk in the middle and the branches P, Q sit to one
+    side, so a through-M hybrid's spine is M's only wire."""
+    fp = _make_fp({"M": (280, 80, 360, 200),
+                   "P": (0, 0, 60, 50),
+                   "Q": (600, 0, 660, 50)})
+    cands = _gen(fp).generate_candidates("P", ["M", "Q"])
+    through = [c for c in cands
+               if "TRUNK_H" in c.type and "+MST" in c.type and "_OOB" not in c.type
+               and 80 < c.trunk_location < 200]
+    assert through, "expected a through-M hybrid to survive (trunk is M's only wire)"
+    for c in through:
+        assert not _trunk_removable(c, fp, True, c.trunk_location), (
+            f"{c.type}: through-M trunk must be load-bearing (kept)")

@@ -214,11 +214,17 @@ def test_2pin_ushape_outside_keepout_retained():
 # ── Trunk+MST hybrid ─────────────────────────────────────────────────────────
 
 def test_trunk_mst_candidate_generated_for_3_blocks():
-    """3 blocks → TRUNK+MST hybrid candidate is present."""
+    """3 blocks → TRUNK+MST hybrid candidate is present.
+
+    C is offset in y so the placement is NOT a single collinear row: a
+    collinear row's every trunk locus produces only degenerate hybrids whose
+    stubs all leave the spine at one point (a single-point seed trunk), which
+    the generation gate now correctly drops (trunk_is_single_point in
+    topology.cpp) — leaving a real, non-degenerate hybrid here."""
     fp = buda.Floorplan()
     fp.add_block("A", 0,   0, 100, 100)
     fp.add_block("B", 200, 0, 300, 100)
-    fp.add_block("C", 400, 0, 500, 100)
+    fp.add_block("C", 400, 200, 500, 300)
 
     gen = _make_gen(fp)
     cands = gen.generate_candidates("A", ["B", "C"])

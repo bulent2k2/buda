@@ -1600,6 +1600,65 @@ static bool has_collinear_overlap(const Topology& topo, int n_orig) {
 // A straight trunk crossing a block is one continuous wire and is left
 // untouched: its endpoints do not land on the crossed block's faces, so the
 // block collects zero incident endpoints here.
+// After a TRUNK+MST hybrid is completed, is its seed trunk (the spine at
+// trunk_pos) REDUNDANT — i.e. can it be removed while the rest of the topology
+// stays a valid route (every block still covered, one electrical island)?
+// When the MST edges already connect every endpoint, completion can leave the
+// spine as extra wire the tree does not need — a vestigial trunk that renders
+// as an abstract-NUTS phantom span DetailedNUTS silently shrinks (bus_005/
+// bundle 67 and ~68 more across bigHalf — docs/internal/bus005_dangling_scan).
+//
+// Removability is the exact test (a spine that is the ONLY coverage/connection
+// for some block is NOT removable and is kept — this is what makes it correct
+// where a "single-point attachment" or "any overshoot" heuristic was not: it
+// keeps a genuinely load-bearing pass-through trunk (Codex P2) AND the partial-
+// overshoot trunks the planner actually uses (dropping those regressed mix),
+// while dropping only the truly-redundant ones).  The caller drops the whole
+// candidate; the plain trunk / L / Z / a clean hybrid still cover the bundle,
+// and the coverage gate runs after, so a bundle is never stranded.
+//
+// The spine is the longest segment matching the trunk orientation at trunk_pos.
+static bool seed_trunk_is_redundant(const Topology& topo, int trunk_pos, bool is_h,
+                                    const Floorplan& fp) {
+    int spine = -1;
+    long best_len = -1;
+    for (int j = 0; j < (int)topo.segments.size(); ++j) {
+        const Segment& sg = topo.segments[j];
+        bool h = (sg.start.y == sg.end.y);
+        if (is_h ? (!h || sg.start.y != trunk_pos)
+                 : (h || sg.start.x != trunk_pos)) continue;
+        long len = std::abs(is_h ? sg.end.x - sg.start.x : sg.end.y - sg.start.y);
+        if (len > best_len) { best_len = len; spine = j; }
+    }
+    if (spine < 0) return false;                 // no spine found — leave it
+
+    // Build the trunk-less topology and re-derive its connectivity from scratch
+    // (annotate_topology, like a hand-built candidate), then audit it.
+    Topology t;
+    t.type = topo.type;
+    t.trunk_location = topo.trunk_location;
+    t.connected_block_names = topo.connected_block_names;
+    t.feedthru_blocks = topo.feedthru_blocks;
+    for (int j = 0; j < (int)topo.segments.size(); ++j)
+        if (j != spine) t.segments.push_back(topo.segments[j]);
+    if (t.segments.empty()) return false;        // spine was the only wire — needed
+
+    annotate_topology(t, fp);
+    ConnTopology ct;
+    ct.build(t, fp);
+    // Redundant iff removing the spine leaves NO coverage/connectivity fault: an
+    // uncovered block (BUSTERM_OPEN), a split wire graph (unbridged DISCONNECTED),
+    // or a newly-exposed feedthrough relay (FEEDTHRU_RELAY) all mean the spine
+    // was load-bearing — keep the candidate.
+    for (const auto& v : check_topo(ct, t, fp, -1).violations) {
+        if (v.kind == ViolationKind::BUSTERM_OPEN) return false;
+        if (v.kind == ViolationKind::FEEDTHRU_RELAY) return false;
+        if (v.kind == ViolationKind::DISCONNECTED &&
+            !disconnected_islands_bridged(ct, t, fp)) return false;
+    }
+    return true;                                 // valid without the spine → redundant
+}
+
 static void complete_relay_junctions(Topology& topo,
                                      const std::vector<Busterm>& blocks,
                                      const Floorplan& fp,
@@ -3209,6 +3268,10 @@ void TopologyGenerator::add_trunk_mst_candidates(
         if (trunk_topo.type.find("+MST") != std::string::npos) continue;
 
         int trunk_pos = trunk_topo.trunk_location;
+        // The single-point-spine drop is scoped to IN-bbox (non-OOB) trunks for
+        // now; an OOB detour trunk's dangling is the separate unbounded-slide
+        // class handled by set_drop_dangling (docs/internal/bus005_dangling_scan).
+        bool is_oob = (trunk_topo.type.find("_OOB") != std::string::npos);
 
         // BRANCH blocks: blocks whose orig_bbox does NOT contain trunk_pos.
         // Pass-through (spine) blocks straddle the trunk; they need no stub
@@ -3435,7 +3498,10 @@ void TopologyGenerator::add_trunk_mst_candidates(
             if (tree.connected_block_names.empty())
                 for (const auto& b : blocks)
                     tree.connected_block_names.push_back(b.block_name);
-            if (topology_is_clean_tree(tree, floorplan_))
+            // Drop a hybrid whose seed trunk ended up attached at a single point
+            // (a dangling overshoot the clean-tree gate does not model).
+            if (topology_is_clean_tree(tree, floorplan_) &&
+                (is_oob || !seed_trunk_is_redundant(tree, trunk_pos, is_h, floorplan_)))
                 results.push_back(std::move(tree));
             // A simple hybrid that can't be cleanly completed is DROPPED (the base
             // trunk + standalone MST already cover the bundle).
@@ -3472,9 +3538,14 @@ void TopologyGenerator::add_trunk_mst_candidates(
         if (legacy.connected_block_names.empty())
             for (const auto& b : blocks)
                 legacy.connected_block_names.push_back(b.block_name);
-        if (topology_is_clean_tree(legacy, floorplan_)) {
+        // A single-point seed trunk here is a dangling overshoot: drop the whole
+        // candidate (and don't pool it as a fallback either — the plain trunk
+        // still covers the bundle).
+        bool legacy_dangling = !is_oob &&
+            seed_trunk_is_redundant(legacy, trunk_pos, is_h, floorplan_);
+        if (topology_is_clean_tree(legacy, floorplan_) && !legacy_dangling) {
             results.push_back(std::move(legacy));
-        } else if (blocks.size() < 4) {
+        } else if (blocks.size() < 4 && !legacy_dangling) {
             // Completion could not yield a clean tree (e.g. a multi-rect/TEG branch
             // whose stubs can't be dropped without dangling its bridge, or no
             // stub-owning root).  Defer it to the post-loop coverage fallback rather
