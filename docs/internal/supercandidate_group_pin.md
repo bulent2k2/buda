@@ -70,8 +70,15 @@ one nominal.
   the `pinned_group` precedence already constrains every trial's replan to the
   family, and `_rr_candidate_order` additionally restricts a group-pinned
   bundle's alternate set to the family members, so ripup can never move it out
-  of the family. **BDB / sidecar persistence** of a group pin remains the last
-  follow-up (a group pin is a `run_planner`-time, in-session constraint today).
+  of the family. **Persistence** (both paths, uid-keyed so a re-ordered
+  candidate pool still resolves): the BDB stores a group pin as meta
+  `pinned_group:<bid>` = a JSON list of the family members' `topo_uid`s
+  (`_persist_group_pin`, written on every `_persist_topologies`; empty clears a
+  stale pin), restored by `_restore_wrapper` on `load_pipeline` so a resumed
+  `run_planner` still refines within the family. The explorer writes the
+  family's `group_uids` into its JSON sidecar entry (`_group_select_current`),
+  restored by `_apply_selections` on the next `generate_topologies` — a baseline
+  load that yields to a script single-pin, mirroring the single-pin precedence.
 
 ### C. Interactive explorer (`TopologyExplorer`)
 The explorer takes an optional `groups_fn` (the session's `_loci_groups`, wired
@@ -84,8 +91,9 @@ from both `visualize_topologies` and the main viz's `v`). With it:
   `s` pin), and **`x`** clears a group pin as well as a single pin.
 
 Grouping is off (every candidate its own) when no `groups_fn` is supplied
-(orphan explorer). The group pin is live/in-session — not written to the sidecar
-(that rides on the BDB-persistence follow-up).
+(orphan explorer). `S` also **persists** the family to the JSON sidecar
+(`_group_select_current` → `group_uids`), so a later session with the same
+script path restores the pin via `_apply_selections`.
 
 ## Why this is the byte-identical answer (and dedup is not)
 
@@ -106,7 +114,10 @@ planner resolves it (B).
 - `src/buda_viz.py` — `groups_fn` on `TopologyExplorer` + `BudaVisualizer`.
 - `src/viz_explorer/nav.py` — `_explorer_groups`/`_group_of`/`_group_position`, family-aware `_step_topo`, `_toggle_group_step` (`G`), `_group_pin_current` (`S`).
 - `src/viz_explorer/draw.py` — title `▸fam F/M +K` + `◆ GROUP-PINNED` badge.
-- `src/viz_explorer/sidecar.py` — `_deselect_current` clears a group pin.
+- `src/viz_explorer/sidecar.py` — `_group_select_current` persists the family (`group_uids`); `_deselect_current` clears a group pin.
+- `src/buda_session/persist.py` — `_persist_group_pin` (BDB meta `pinned_group:<bid>`) + `_restore_wrapper` restore on `load_pipeline`.
+- `src/buda_session/hier.py` — group-pin branch in `_apply_selections` (sidecar restore, yields to a script pin).
 - `src/buda_cmds/verify_viz_cmds.py`, `src/viz_main/view.py` — wire `groups_fn`.
 - `test/tests/test_supercandidate.py` — grouping, restrict, refine, byte-identical, clear.
 - `test/tests/test_topo_explorer_grouping.py` — explorer families, family-step, group-pin, `x`-clear, singleton fallback, off-without-groups_fn.
+- `test/tests/test_supercandidate_persist.py` — BDB resume round-trip (restore + planner refines in family, empty-clears, unpin-repersist) and explorer sidecar round-trip (restore + yields to a script pin).

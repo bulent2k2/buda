@@ -111,9 +111,9 @@ class ExplorerNavMixin:
     def _group_pin_current(self):
         """'S': pin the current candidate's FAMILY as a super-candidate (live
         `input.pinned_group`, like the CLI `select_topology group:`) so the
-        planner refines WHICH member wins.  In-session only — not written to the
-        sidecar (group-pin persistence is a separate follow-up); a plain 's'
-        single-pin or 'x' still overrides it."""
+        planner refines WHICH member wins.  Persisted to the sidecar as
+        `group_uids` (restored by `_apply_selections`); a plain 's' single-pin or
+        'x' still overrides it."""
         members = self._group_of(self.idx)
         w = self.wrappers[self.bidx]
         if len(members) < 2:
@@ -131,6 +131,7 @@ class ExplorerNavMixin:
         w.plan.selected_topology_index = members[0]
         self.idx = members[0]
         self.sidx = -1
+        self._group_select_current(members)     # sidecar-persist the family
         self._draw()
 
 

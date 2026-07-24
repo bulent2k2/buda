@@ -518,6 +518,25 @@ class HierMixin:
             first_w = matching[0]
             bid = first_w.input.original_bundle.id
 
+            # Super-candidate group pin ('S' / select_topology group:): the
+            # entry stores the family's member `group_uids`.  Resolve them to
+            # this session's candidate indices and set `pinned_group` on every
+            # matching wrapper that is not already SCRIPT-pinned (baseline-load
+            # precedence, mirroring the single-pin path below).
+            grp_uids = sel.get('group_uids')
+            if grp_uids:
+                guset = set(grp_uids)
+                for w in matching:
+                    if (getattr(w.input, 'topology_pinned', False)
+                            or getattr(w.input, 'pinned_group', [])):
+                        continue                    # a script pin wins
+                    members = [i for i, c in enumerate(w.input.candidates)
+                               if buda.topo_uid(c) in guset]
+                    if members:
+                        w.input.pinned_group = members
+                        w.plan.selected_topology_index = members[0]
+                continue                            # group entry fully handled
+
             # 1. Resolve which topology the sidecar points to.  Chain
             #    (Phase E1b): stable content uid (survives regeneration and
             #    list reordering) -> type+WL -> warned index hint.
