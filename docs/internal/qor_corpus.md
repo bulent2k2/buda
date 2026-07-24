@@ -136,7 +136,9 @@ trends, not absolute values, are the result. Harness:
 - **Runtime** is dominated by the `both`-healer flows (`mix`-family 15–28s,
   `bigHalf` ~8s); every healer-less flow finishes in ≤4.2s.
 
-See also: [`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md) and
-[`healer_effectiveness_2026-07.md`](healer_effectiveness_2026-07.md) (same
-corpus, different experiments); [`dedup_default_2026-07.md`](dedup_default_2026-07.md)
+See also: [`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md),
+[`healer_effectiveness_2026-07.md`](healer_effectiveness_2026-07.md), and
+[`gentopo_loci_multitrunk_2026-07.md`](gentopo_loci_multitrunk_2026-07.md) (same
+corpus, different experiments — the last is the `no_hanan_loci` × `multi_trunk`
+gen-topo knob sweep); [`dedup_default_2026-07.md`](dedup_default_2026-07.md)
 (the `kSegsRel`/`script_path` measurement caveat).
