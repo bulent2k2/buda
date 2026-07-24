@@ -1,0 +1,25 @@
+# Repro: Category-C unbounded slide windows in bigHalf — the "OTHER" (non-OOB-
+# detour) unbounded windows scan_dangling.py surfaces once the by-design OOB
+# trunk openings are set aside.  These are sentinel-unbounded (+/-2^30) windows
+# on segments that SHOULD be bounded by their connections: MST legs / connectors
+# (non-trunk segments), windows open on BOTH sides (fully unclamped), or windows
+# on non-OOB candidates.  Same phantom-window family as the relay-jog issue, just
+# not on a detour trunk.
+#
+# Runs per-bundle generation for three representative C-hit bundles of the
+# bigHalf design (bus_007: non-trunk MST-leg windows; bus_033: a both-sided
+# fully-unclamped window on an OOB+MST; bus_044: a mix).  Inspect with:
+#
+#   python3 tools/scan_dangling.py flow/big_data_test/bigHalf_c_hits.buda bus_007
+#   python3 tools/scan_dangling.py flow/big_data_test/bigHalf_c_hits.buda bus_033
+#   python3 tools/scan_dangling.py flow/big_data_test/bigHalf_c_hits.buda bus_044
+#
+# The "=== C: unbounded slide window — OTHER (investigate) ===" section lists the
+# offending candidates and the per-segment reason.
+source ../tracks/tracks4top.buda
+source tc3a_flat_5x.buda
+run_bundler
+generate_topologies_for_bundle bus_007
+generate_topologies_for_bundle bus_033
+generate_topologies_for_bundle bus_044
+dump_topologies bus_007 --conn
