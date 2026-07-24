@@ -928,6 +928,12 @@ class RipupMixin:
         alternates: map each overlap/open segment of this bundle -> its seg's
         edge_id (>= 0, deduped).  Empty unless the selected candidate is an MST
         type carrying edge tags, so non-MST bundles pay nothing."""
+        # A group-pinned bundle must stay within its nominal-locus family: a
+        # flip mutates the selected candidate's geometry IN PLACE (outside the
+        # family), so — unlike an index alternate — it would escape the user's
+        # super-candidate pin.  Offer no flips for it (Codex).
+        if getattr(w.input, 'pinned_group', None):
+            return []
         sel = w.plan.selected_topology_index
         cands = w.input.candidates
         if sel < 0 or sel >= len(cands):

@@ -66,6 +66,23 @@ def test_ripup_candidate_order_restricted_to_family():
     assert w.plan.selected_topology_index not in order     # old index excluded
 
 
+def test_group_pin_suppresses_edge_flips():
+    # A flip mutates an MST candidate's geometry IN PLACE, escaping the family,
+    # so ripup offers no flips for a group-pinned bundle (Codex).  Force an MST
+    # candidate as the selection so the guard — not the "non-MST" early-out — is
+    # what returns [].
+    s = _session()
+    w = s.bundles[0]
+    fam = _family(s, w)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command(f"select_topology 1 group:{fam[0] + 1}")
+    mst = next((i for i, c in enumerate(w.input.candidates)
+                if "MST" in c.type), None)
+    if mst is not None:
+        w.plan.selected_topology_index = mst
+    assert s._rr_flip_edges(w, 'a') == []
+
+
 def test_ripup_candidate_order_unpinned_uses_full_pool():
     # Sanity: WITHOUT a group pin the alternate pool is the normal (larger,
     # non-family) set — the restriction is scoped to group-pinned bundles.
