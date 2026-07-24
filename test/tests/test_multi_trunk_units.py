@@ -236,13 +236,35 @@ def test_bitrunk_trunk_endpoint_grazing_a_face_stays_a_junction():
 
 
 def test_optin_guard_default_has_no_bitrunk_trees():
-    """Without the multi_trunk flag the two-level trees are suppressed, but the
-    legacy single-level BITRUNK_H stays on the default path (byte-identical set)."""
+    """Without the multi_trunk flag the two-level trees AND the legacy BITRUNK_V
+    mirror are suppressed, but the legacy single-level BITRUNK_H stays on the
+    default path (byte-identical set)."""
     fp, cands = _gen(_COLUMN, "S", _COLUMN_DSTS, multi_trunk=False)
     assert not _types(cands, "BITRUNK_HVH"), "HVH leaked onto the default path"
     assert not _types(cands, "BITRUNK_VHV"), "VHV leaked onto the default path"
+    assert not any(c.type == "BITRUNK_V" for c in cands), \
+        "BITRUNK_V is opt-in — it must not appear on the default path"
     assert any(c.type == "BITRUNK_H" for c in cands), \
         "legacy BITRUNK_H must remain on the default path"
+
+
+def test_legacy_bitrunk_v_is_opt_in_mirror():
+    """The legacy BITRUNK_V ladder (two V rungs + an H backbone) fills the
+    row-of-receivers case that BITRUNK_H cannot, but only under multi_trunk: a
+    QoR net-negative on-by-default (corpus unplaced +594), so it rides the same
+    opt-in as the two-level trees.  _COLUMN has two receiver x-columns, so the V
+    rungs are viable."""
+    _, cands_off  = _gen(_COLUMN, "S", _COLUMN_DSTS, multi_trunk=False)
+    fp, cands_on  = _gen(_COLUMN, "S", _COLUMN_DSTS, multi_trunk=True)
+    assert not any(c.type == "BITRUNK_V" for c in cands_off), \
+        "BITRUNK_V must be suppressed without the flag"
+    assert any(c.type == "BITRUNK_V" for c in cands_on), \
+        "BITRUNK_V must appear under multi_trunk for a two-column receiver set"
+    # And it is a real ladder: two V rungs + an H backbone + leaf stubs, fully
+    # connected and acyclic (same clean-tree contract as BITRUNK_H).
+    v = next(c for c in cands_on if c.type == "BITRUNK_V")
+    ct = buda.ConnTopology(); ct.build(v, fp)
+    assert _acyclic(ct), "BITRUNK_V must be acyclic"
 
 
 # --- mid-tier end-to-end regression -----------------------------------------
@@ -310,5 +332,9 @@ def test_multi_trunk_flag_leaves_default_flow_unchanged():
     assert len(default) == len(multi)
     for d, m in zip(default, multi):
         # Everything in the default set survives; the flag only ADDS BITRUNK trees.
-        m_minus_new = [t for t in m if not t.startswith(("BITRUNK_HVH", "BITRUNK_VHV"))]
+        # The flag ADDS the two-level trees (HVH/VHV) AND the legacy BITRUNK_V
+        # mirror (opt-in, a QoR net-negative on-by-default); everything else must
+        # survive unchanged.
+        m_minus_new = [t for t in m if t not in ("BITRUNK_V",)
+                       and not t.startswith(("BITRUNK_HVH", "BITRUNK_VHV"))]
         assert m_minus_new == d, "default candidate set changed under multi_trunk"
