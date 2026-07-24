@@ -649,6 +649,16 @@ class RipupMixin:
         window-infeasible candidates) would be lost.  None (the default)
         keeps the derive-from-own-contention behavior byte-identically."""
         cap = _RR_MAX_CANDIDATES_PER_BUNDLE
+        # Group-pinned bundle (a super-candidate): ripup may only move it WITHIN
+        # its pinned family — never to a candidate outside it, which would
+        # silently break the user's `select_topology group:` / 'S' pin.  The
+        # alternate set is therefore exactly the family members (no farness rank
+        # or beyond-window promotion): each trial's replan already re-selects
+        # within the family via the planner's `pinned_group` precedence, so the
+        # members collapse to the same family-best and their order is immaterial.
+        if getattr(w.input, 'pinned_group', None):
+            return [i for i in w.input.pinned_group
+                    if 0 <= i < len(w.input.candidates) and i != old_tidx]
         n = min(len(w.input.candidates), cap)
         idxs = [i for i in range(n) if i != old_tidx]
         if sites is None:
