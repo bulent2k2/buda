@@ -31,8 +31,9 @@ The four settings:
   (Σ|span| over placed segments — the metric topology decisions move). **runtime**
   = wall time for the whole flow.
 - Counts are host-sensitive (`-march=native` FP) and single-run wall times —
-  **trends, not absolute values**, are the result. Harness:
-  `scratchpad/gentopo_sweep.py` (this session).
+  **trends, not absolute values**, are the result. Reproduce with
+  `python3 tools/qor_gentopo_sweep.py` (prints these three tables; `--json OUT`
+  saves the raw dict, `--only SUBSTR …` runs a subset).
 - **Caveat — `mix`:** it is the *only* corpus flow that sets a knob as-written
   (`generate_hier_topologies no_hanan_loci`), so `mix`'s **shipped** endpoint is
   the **no_hanan_loci** column here, not baseline. Every other flow's baseline
