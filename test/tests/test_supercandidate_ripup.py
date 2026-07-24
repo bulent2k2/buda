@@ -106,3 +106,19 @@ def test_ripup_preserves_group_pin_and_stays_in_family():
             s.do_command(c)
     assert set(w.input.pinned_group) == set(fam)            # family preserved
     assert w.plan.selected_topology_index in fam            # stayed in family
+
+
+def test_negotiate_congestion_preserves_group_pin_and_stays_in_family():
+    # The OTHER healer: negotiate_congestion clears topology_pinned before
+    # replanning but leaves pinned_group, so the C++ selection loop's
+    # pinned_group precedence keeps the bundle in its family — negotiation can
+    # never move a group-pinned bundle out of the pinned family.
+    s = _session()
+    w = s.bundles[0]
+    fam = _family(s, w)
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in (f"select_topology 1 group:{fam[0] + 1}",
+                  "run_planner", "run_nuts", "negotiate_congestion"):
+            s.do_command(c)
+    assert set(w.input.pinned_group) == set(fam)            # family preserved
+    assert w.plan.selected_topology_index in fam            # stayed in family

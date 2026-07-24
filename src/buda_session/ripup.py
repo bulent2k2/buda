@@ -1362,6 +1362,15 @@ class RipupMixin:
                 # (including H/V mismatches that charge no cuts).
                 w.input.topology_pinned = False
                 w.input.pinned_seg_layers = []
+                # NOTE: pinned_group is deliberately NOT cleared — a
+                # super-candidate group pin must survive negotiation.  The C++
+                # selection loop gives pinned_group precedence over the (now
+                # cleared) single pin, so replan_bundle_ripup re-selects WITHIN
+                # the family; the injected prices still steer WHICH member wins,
+                # but negotiation can never move a group-pinned bundle out of the
+                # family the user pinned (mirrors _rr_candidate_order for ripup).
+                # The victim stage is likewise family-safe: C++ only reads
+                # pinned_group, never clears it.
                 # The ripup-capable replan (v2b): when the target has no
                 # overflow-free candidate under the injected prices, the
                 # planner's own ladder may also displace the committed
