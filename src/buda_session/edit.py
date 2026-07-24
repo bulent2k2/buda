@@ -946,6 +946,10 @@ class EditMixin:
                     return [], f"invalid bundle id '{rest}' after 'id:'"
             if head in ("net", "name", "hint"):
                 forced_hint, pfx = True, rest
+        # An empty prefix would startswith()-match EVERY bundle (a `net:` typo
+        # silently pinning the whole design); reject it instead (Codex P2 #423).
+        if not pfx:
+            return [], f"empty net-name prefix in selector '{sel}'"
         if not forced_hint and pfx.lstrip("-").isdigit():
             return [int(pfx)], None
         bids = self._bids_by_net_prefix(pfx)

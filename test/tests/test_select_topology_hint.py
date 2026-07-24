@@ -107,6 +107,16 @@ def test_error_when_hint_matches_nothing():
     assert "no bundle whose first net starts with 'busZZZ'" in out
 
 
+def test_empty_net_prefix_is_rejected_not_matching_all():
+    # `net:` with no prefix must NOT startswith()-match every bundle (Codex P2).
+    s = _sess()
+    out = _run(s, "select_topology net: 1")
+    assert "empty net-name prefix" in out
+    assert "Pinned" not in out
+    assert _pinned(s, "busA")[0] in (False, None)
+    assert _pinned(s, "busB")[0] in (False, None)
+
+
 def test_select_topologies_mixes_hints_and_numeric_ranges():
     s = _sess()
     out = _run(s, "select_topologies busA,busB 1")
