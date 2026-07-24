@@ -3658,58 +3658,78 @@ void TopologyGenerator::add_multi_trunk_candidates(
     const int n = (int)blocks.size();
     if (n < 4) return;
 
-    // Legacy BITRUNK_H (two parallel H trunks + a central V backbone).  Emitted
-    // unconditionally, exactly as before this change, so the DEFAULT candidate set
-    // and planner choices are preserved — the opt-in flag below only ADDS the new
-    // two-level trees.
-    [&]() {
-        std::vector<int> y_coords;
-        for (const auto& p : pins) y_coords.push_back(p.y);
-        std::sort(y_coords.begin(), y_coords.end());
-        int y_mid = y_coords[y_coords.size() / 2];
-        int y_t1  = y_coords[y_coords.size() / 4];
-        int y_t2  = y_coords[3 * y_coords.size() / 4];
-        if (y_t1 == y_t2) return;
+    // Legacy BITRUNK_H/BITRUNK_V (two parallel rung trunks + a central
+    // perpendicular backbone).  Emitted unconditionally; the opt-in flag below
+    // only ADDS the two-level trees.  Written ONCE against the Axis abstraction
+    // and emitted in BOTH orientations: rungs_horiz => two H rungs + a V
+    // backbone (BITRUNK_H, a ROW of receivers — byte-identical to the historical
+    // hard-coded H shape); !rungs_horiz => two V rungs + an H backbone
+    // (BITRUNK_V, a COLUMN of receivers — the previously-missing mirror, see
+    // docs/internal/topology_tree_gen_design.md).  Coordinates read the "along"
+    // (rung) axis and "perp" (backbone/stub) axis via Axis.
+    auto emit_legacy_bitrunk = [&](bool rungs_horiz) {
+        const Axis axis{rungs_horiz};
+        const int rung_layer = rungs_horiz ? h_layer_ : v_layer_;
+        const int perp_layer = rungs_horiz ? v_layer_ : h_layer_;  // backbone + stubs
+        // Stub runs perpendicular to the rung: V (dir 1) for H rungs, H (dir 0)
+        // for V rungs.
+        const int stub_dir = rungs_horiz ? 1 : 0;
+        std::vector<int> perp_coords;
+        for (const auto& p : pins) perp_coords.push_back(axis.perp(p));
+        std::sort(perp_coords.begin(), perp_coords.end());
+        int p_mid = perp_coords[perp_coords.size() / 2];
+        int p_t1  = perp_coords[perp_coords.size() / 4];
+        int p_t2  = perp_coords[3 * perp_coords.size() / 4];
+        if (p_t1 == p_t2) return;
         Topology t;
-        t.type = "BITRUNK_H";
-        int x_min = INT_MAX, x_max = INT_MIN;
-        for (const auto& p : pins) { x_min = std::min(x_min, p.x); x_max = std::max(x_max, p.x); }
-        // A perfectly x-aligned column collapses both H trunks to points —
-        // a zero-length wire has no conn-segs to pin it, carries no bus,
-        // and cannot be placed by NUTS (kAbutmentSpanEpsilon invariant).
-        // Mirror the y_t1==y_t2 guard (audit C4-02); TRUNK_V shapes cover
-        // the column.
-        if (x_min == x_max) return;
-        int x_backbone = (x_min + x_max) / 2;
-        t.segments.push_back(make_seg(x_min, y_t1, x_max, y_t1, h_layer_));
-        t.segments.push_back(make_seg(x_min, y_t2, x_max, y_t2, h_layer_));
-        t.segments.push_back(make_seg(x_backbone, y_t1, x_backbone, y_t2, v_layer_));
-        int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
+        t.type = rungs_horiz ? "BITRUNK_H" : "BITRUNK_V";
+        int a_min = INT_MAX, a_max = INT_MIN;
+        for (const auto& p : pins) { a_min = std::min(a_min, axis.along(p));
+                                     a_max = std::max(a_max, axis.along(p)); }
+        // A pin-set with no along-extent collapses both rungs to points — a
+        // zero-length wire has no conn-segs to pin it, carries no bus, and
+        // cannot be placed by NUTS (kAbutmentSpanEpsilon invariant).  Mirror the
+        // p_t1==p_t2 guard (audit C4-02); the perpendicular TRUNK shapes cover it.
+        if (a_min == a_max) return;
+        int a_backbone = (a_min + a_max) / 2;
+        t.segments.push_back(axis.mkseg(a_min, p_t1, a_max, p_t1, rung_layer));
+        t.segments.push_back(axis.mkseg(a_min, p_t2, a_max, p_t2, rung_layer));
+        t.segments.push_back(axis.mkseg(a_backbone, p_t1, a_backbone, p_t2, perp_layer));
+        int m_stub = floorplan_.get_min_stub_length(stub_dir, perp_layer);
         for (int i = 0; i < (int)blocks.size(); ++i) {
-            int yt = (pins[i].y <= y_mid) ? y_t1 : y_t2;
-            int src_y = blocks[i].orig_bbox.face_y(yt);
-            if (std::abs(yt - src_y) >= m_v) {
-                emit_tap_segment(t, make_seg(pins[i].x, src_y, pins[i].x, yt, v_layer_),
+            int pt    = (axis.perp(pins[i]) <= p_mid) ? p_t1 : p_t2;
+            int src_p = axis.perp_face(blocks[i].orig_bbox, pt);
+            if (std::abs(pt - src_p) >= m_stub) {
+                emit_tap_segment(t, axis.mkseg(axis.along(pins[i]), src_p,
+                                               axis.along(pins[i]), pt, perp_layer),
                                  &blocks[i]);
-            } else if (yt != src_y) {
-                return;   // a stub too short → legacy BITRUNK_H is not viable
+            } else if (pt != src_p) {
+                return;   // a stub too short → this legacy BITRUNK is not viable
             }
         }
-        // Give the two H trunks + V backbone a seg_busterms entry (the leaf
+        // Give the two rung trunks + backbone a seg_busterms entry (the leaf
         // stubs are seeded above) so ConnTopology uses the authoritative path for
         // EVERY segment, never the geometric fallback.  These trunk endpoints tap
         // no block — they are free ends or wire junctions — so their entries stay
-        // null/null and the backbone↔trunk and stub↔trunk joins are inferred as
+        // null/null and the backbone↔rung and stub↔rung joins are inferred as
         // SEG.  We deliberately do NOT call annotate_endpoints here: it would
         // geometrically fill a trunk endpoint that coincidentally grazes a
         // neighbour block face, turning a junction into a spurious busterm (the
         // very corner-feedthru this effort removes).
         for (size_t i = 0; i < t.segments.size(); ++i) (void)t.seg_busterms[i];
         results.push_back(std::move(t));
-    }();
+    };
+    emit_legacy_bitrunk(true);    // BITRUNK_H — always-on (grandfathered shape)
 
-    // New two-level BITRUNK_HVH / BITRUNK_VHV trees — opt-in only.
+    // New two-level BITRUNK_HVH / BITRUNK_VHV trees AND the legacy BITRUNK_V
+    // mirror — all opt-in only.  BITRUNK_V is a measured QoR net-negative
+    // on-by-default (corpus: unplaced +594, runtime +35% — like BITRUNK_H it is
+    // realization-fragile and the planner over-selects it), so it rides the same
+    // `multi_trunk` opt-in as the two-level trees rather than the always-on H
+    // path.  It fills the row-of-receivers gap only for callers who ask for the
+    // extra datapath shapes.
     if (!allow_multi_trunk_) return;   // need enough fan-out for a ≥2-branch tree
+    emit_legacy_bitrunk(false);   // BITRUNK_V (row of receivers) — opt-in mirror
 
     // Split leaf indices into K clusters by a per-leaf key, cutting at the K-1
     // largest gaps in the sorted keys (natural columns/rows of a datapath).
@@ -3936,6 +3956,10 @@ std::vector<Topology> TopologyGenerator::generate_candidates(
     // add_trunk_v stub-suppression) remain the first line; this is the backstop
     // that keeps an uncovered candidate from ever reaching the planner.
     filter_uncovered(candidates);
+    // Realization guard on top of the nominal coverage gate: a BITRUNK whose
+    // endpoint block is only grazed by a free-sliding trunk passes check_topo
+    // at nominal but opens at NUTS time (BUSTERM_OPEN — bigHalf bus_038).
+    filter_unanchored_bitrunk(candidates);
     return candidates;
 }
 
@@ -4047,6 +4071,76 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
         std::cerr << ", first open: " << first_type << " missing block '"
                   << first_block << "'";
     std::cerr << "); " << kept.size() << " remain.\n";
+    candidates = std::move(kept);
+}
+
+void TopologyGenerator::filter_unanchored_bitrunk(
+    std::vector<Topology>& candidates) const {
+    if (candidates.empty()) return;
+    std::vector<char> drop(candidates.size(), 0);
+    int n_clean = 0, dropped = 0;
+    std::string first_type, first_block;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        const Topology& t = candidates[i];
+        // Scoped to the LEGACY BITRUNK_H / BITRUNK_V shapes (exact match), so
+        // every other pool is byte-identical.  The two-level BITRUNK_HVH/VHV
+        // trees are deliberately EXCLUDED: their branch trunks cover a column of
+        // aligned blocks as a genuine MULTI-TAP pass-through (no per-block stub,
+        // by design), so "no busterm tap" is normal for them and their own
+        // topology_is_clean_tree gate already validates connectivity/coverage.
+        // The legacy ladders have no multi-tap logic — an un-tapped endpoint is
+        // always the face-on-trunk edge-graze that opens at DNUTS.
+        if (t.type != "BITRUNK_H" && t.type != "BITRUNK_V") { ++n_clean; continue; }
+        ConnTopology ct;
+        ct.build(candidates[i], floorplan_);
+        const auto& segs = ct.segs();
+        // An endpoint block is safely connected only if it carries a BUSTERM
+        // tap (a perpendicular STUB landing on its face — the same
+        // `explicitly_connected` set verify's per-bit dnuts audit exempts).  A
+        // block with NO tap is "covered" only by a trunk passing over it, which
+        // works solely if the whole bit-band physically fits inside the block —
+        // a realization property NUTS decides, invisible here.  The legacy
+        // BITRUNK_H leaves face-on-trunk blocks entirely untapped (bigHalf
+        // bus_038: all 4 endpoints untapped → every bit opens at dnuts).  Drop
+        // such a candidate so the planner falls to an anchored shape.
+        std::set<std::string> tapped;
+        for (const auto& cs : segs)
+            for (const auto& c : cs.conns)
+                if (c.kind == SegConn::BUSTERM) tapped.insert(c.block_name);
+        // Trigger only on the PROVABLY-broken degenerate case: NO endpoint block
+        // is anchored at all (every block is a free-sliding trunk graze, bigHalf
+        // bus_038's tapped={}).  A partially-stubbed BITRUNK_H (some blocks off
+        // the trunk lines got real stubs) is left alone — its pass-through
+        // coverage of the remaining blocks may still fit the bit-band, a
+        // realization property this generation-time gate cannot decide, so we
+        // conservatively defer to NUTS rather than risk dropping a routable
+        // small-bus column datapath.
+        bool bad = tapped.empty();
+        std::string bad_block =
+            bad && !t.connected_block_names.empty() ? t.connected_block_names[0]
+                                                    : std::string();
+        if (bad) {
+            drop[i] = 1;
+            ++dropped;
+            if (first_type.empty()) { first_type = t.type; first_block = bad_block; }
+        } else {
+            ++n_clean;
+        }
+    }
+    // Nothing to drop → leave `candidates` untouched (must NOT std::move it into
+    // a discarded `kept` first — that would empty every pool with no BITRUNK to
+    // drop).  Also never strand a bundle: keep an all-unanchored list.
+    if (dropped == 0 || n_clean == 0) return;
+    std::vector<Topology> kept;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        if (drop[i]) continue;
+        kept.push_back(std::move(candidates[i]));
+    }
+    std::cerr << "[TopoGen] dropped " << dropped
+              << " unanchored BITRUNK candidate(s) (endpoint block has no "
+                 "busterm tap → per-bit BUSTERM_OPEN at DNUTS; first: "
+              << first_type << " block '" << first_block << "'); "
+              << kept.size() << " remain.\n";
     candidates = std::move(kept);
 }
 

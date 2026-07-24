@@ -20,6 +20,48 @@ generates these as `BITRUNK_HVH` / `BITRUNK_VHV` candidates.
 → H branches (receiver **rows**). Both orientations are always emitted; the
 planner ranks by honest wirelength (`annotate_and_sort`).
 
+### Legacy single-level ladders (`BITRUNK_H`, `BITRUNK_V`)
+
+Beside the two-level trees, `add_multi_trunk_candidates` also emits the **legacy
+single-level ladder** — two parallel rung trunks + one perpendicular backbone,
+each block stubbing to its nearer rung:
+
+- **`BITRUNK_H`** (two H rungs + a V backbone) is **always on** (grandfathered):
+  the default candidate set is unchanged.
+- **`BITRUNK_V`** (two V rungs + an H backbone — the previously-missing mirror,
+  see `topology_tree_gen_design.md`) is **opt-in under `multi_trunk`**, alongside
+  the two-level trees. It fills the row-of-receivers case `BITRUNK_H` cannot, but
+  is a **QoR net-negative on-by-default** (corpus: unplaced +594, runtime +35% —
+  like `BITRUNK_H` it is realization-fragile and the planner over-selects it), so
+  it does not join the always-on path.
+
+Both ladders are written once against the `Axis` abstraction and emitted in both
+orientations (`emit_legacy_bitrunk(rungs_horiz)`); the H path is byte-identical
+to the historical hard-coded shape.
+
+### Anchoring gate (`filter_unanchored_bitrunk`)
+
+A legacy ladder covers a block either by a real perpendicular **stub** (an
+anchored busterm tap) or — where a block face lands on a rung — by a **free
+sliding graze** with no tap. A *fully-degenerate* ladder (NO endpoint block
+tapped at all) is covered only by grazes: it passes `check_topo` at nominal but a
+NUTS-time slide moves every rung off its blocks, opening every bit at
+DetailedNUTS (bigHalf **bus_038**: a `0/0` route that is electrically open at all
+four endpoints). The generation gate (run at the uniform coverage gate, after
+`filter_uncovered`) drops such a candidate **when a clean alternative survives**,
+so the planner falls to an anchored shape. Scoped to the exact legacy types
+(`BITRUNK_H`/`BITRUNK_V`); the two-level trees keep their own
+`topology_is_clean_tree` gate (their column pass-throughs are legitimate
+multi-taps). Corpus: bus_038 + wide_fan_stress go `0/0/1 → 0/0/0`; totals
+net-neutral (overlaps +1, unplaced +30, viol_bundles +0) — it converts the
+silent-open failure mode into clean routes.
+
+> The gate triggers only on the *provably-broken* fully-degenerate case. The
+> general discriminator — does the whole bit-band fit inside the endpoint block?
+> — is a NUTS-time realization property a generation-time geometric gate cannot
+> decide, so a partially-stubbed ladder is deferred to NUTS rather than risk
+> dropping a routable small-bus column.
+
 ## How it works (`src/topology.cpp::add_multi_trunk_candidates`)
 
 1. Gated on the opt-in `set_multi_trunk` flag and `n >= 4` leaves.

@@ -119,8 +119,13 @@ topology.  The I/L/Z/U/UU shapes remain exactly as implemented.
 > `generate_npin` (`topology.cpp:1130`) runs the aligned-case pre-check, sweeps trunk
 > positions via `add_trunk_h`/`add_trunk_v` (`:734`/`:918`), and falls back to
 > `add_mst_candidates` (`:1298`). Phase 4 is only **partially** built —
-> `add_multi_trunk_candidates` (`:1506`) emits a single `BITRUNK_H` split, not the
-> general recursive multi-level trunk described here (no `BITRUNK_V`, no depth>1).
+> `add_multi_trunk_candidates` (`:1506`) emits the single-level `BITRUNK_H`
+> ladder (always-on) plus its `BITRUNK_V` mirror (opt-in under `multi_trunk`, a
+> QoR net-negative on-by-default — see `multi_trunk_datapath.md`) and the
+> two-level `BITRUNK_HVH`/`VHV` trees (opt-in), but not the general recursive
+> multi-level trunk described here (no depth>1). A `filter_unanchored_bitrunk`
+> gate drops a fully-degenerate (all-untapped) legacy ladder that would open at
+> DNUTS (bus_038).
 > Phase 5 `deduplicate` is **[MISSING]** (no candidate-level dedup exists) and
 > `annotate_and_sort` (`:634`) sorts by raw `estimated_wirelength`, **not** `adjusted_wl`
 > (the flexibility score of §10 is unbuilt). The signature here,
