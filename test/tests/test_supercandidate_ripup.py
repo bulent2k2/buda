@@ -108,17 +108,28 @@ def test_ripup_preserves_group_pin_and_stays_in_family():
     assert w.plan.selected_topology_index in fam            # stayed in family
 
 
-def test_negotiate_congestion_preserves_group_pin_and_stays_in_family():
-    # The OTHER healer: negotiate_congestion clears topology_pinned before
-    # replanning but leaves pinned_group, so the C++ selection loop's
-    # pinned_group precedence keeps the bundle in its family — negotiation can
-    # never move a group-pinned bundle out of the pinned family.
+def test_negotiate_replan_keeps_group_pinned_bundle_in_family():
+    # The OTHER healer: negotiate_congestion re-plans overlap bundles via
+    # `replan_bundle_ripup` after clearing topology_pinned but LEAVING
+    # pinned_group.  This drives that exact replan directly — the single-bundle
+    # fixture has no NUTS overlap, so `negotiate_congestion` itself would return
+    # at its `metric already 0` guard without reaching the replan (Codex) — and
+    # asserts the C++ pinned_group precedence keeps the re-selection inside the
+    # family (negotiation can never move a group-pinned bundle out of it).
     s = _session()
     w = s.bundles[0]
     fam = _family(s, w)
     with contextlib.redirect_stdout(io.StringIO()):
         for c in (f"select_topology 1 group:{fam[0] + 1}",
-                  "run_planner", "run_nuts", "negotiate_congestion"):
+                  "run_planner", "run_nuts"):
             s.do_command(c)
-    assert set(w.input.pinned_group) == set(fam)            # family preserved
-    assert w.plan.selected_topology_index in fam            # stayed in family
+    bid = w.input.original_bundle.id
+    # Mimic _negotiate_iteration's unpin-then-replan on the group-pinned bundle.
+    w.input.topology_pinned = False
+    w.input.pinned_seg_layers = []
+    with contextlib.redirect_stdout(io.StringIO()):
+        asns = s.planner.replan_bundle_ripup(s.bundles, bid)
+    moved = [a for a in asns if a.bundle_id == bid]
+    assert moved, "replan should return an assignment for the target bundle"
+    assert moved[0].topo_index in fam                       # re-selected in family
+    assert set(w.input.pinned_group) == set(fam)            # pin untouched
