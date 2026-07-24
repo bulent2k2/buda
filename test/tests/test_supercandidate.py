@@ -137,6 +137,52 @@ def test_single_pin_clears_group_pin():
     assert w.input.topology_pinned is True
 
 
+def test_unpin_star_clears_group_pin():
+    # unpin_topology * must clear the new field too, or the "unpinned" bundle
+    # stays constrained to the old family (Codex).
+    s = _session()
+    w = s.bundles[0]
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("select_topology 1 group:1")
+    assert list(w.input.pinned_group) != []
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("unpin_topology *")
+    assert list(w.input.pinned_group) == []
+    assert w.input.topology_pinned is False
+
+
+def test_group_pin_clears_stale_seg_overrides():
+    # A family the planner may re-choose within must not carry a prior
+    # candidate's per-segment overrides (Codex).
+    s = _session()
+    w = s.bundles[0]
+    w.plan.seg_slide_lo = [1, 2, 3]
+    w.plan.seg_slide_hi = [4, 5, 6]
+    w.plan.seg_net_pull = [7]
+    w.plan.seg_perp = [8]
+    fam = next(g for g in _groups(s, w) if len(g) > 1)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command(f"select_topology 1 group:{fam[0] + 1}")
+    assert list(w.plan.seg_slide_lo) == [] and list(w.plan.seg_slide_hi) == []
+    assert list(w.plan.seg_net_pull) == [] and list(w.plan.seg_perp) == []
+
+
+def test_group_pin_survives_pool_resort():
+    # After generate_more_topologies resorts the pool, the raw group indices
+    # must be remapped by uid so they still name the SAME family (Codex).
+    import buda
+    s = _session()
+    w = s.bundles[0]
+    fam = next(g for g in _groups(s, w) if len(g) > 1)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command(f"select_topology 1 group:{fam[0] + 1}")
+    before = {buda.topo_uid(w.input.candidates[i]) for i in w.input.pinned_group}
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("generate_more_topologies dbus")     # resorts the pool
+    after = {buda.topo_uid(w.input.candidates[i]) for i in w.input.pinned_group}
+    assert before == after and len(w.input.pinned_group) == len(fam)
+
+
 def test_dump_grouped_reduces_rows(capsys):
     s = _session()
     n = len(s.bundles[0].input.candidates)

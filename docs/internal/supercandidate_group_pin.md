@@ -59,11 +59,17 @@ one nominal.
   plan**: restricting to a set that contains the global best, then scoring by the
   same cost, re-selects that same best member (test:
   `test_group_pin_of_natural_family_is_byte_identical`).
-- A later single pin clears the group pin; `unpin_topology` clears both. The
-  refine pass honors the group automatically (it re-plans through the same
-  selection loop); ripup and BDB persistence of a group pin, and grouping in the
-  interactive explorer, are follow-ups (a group pin is a `run_planner`-time,
-  in-session constraint today).
+- A later single pin clears the group pin; `unpin_topology <b>` **and**
+  `unpin_topology *` clear it. The refine pass honors the group automatically
+  (it re-plans through the same selection loop). The raw-index storage is kept
+  consistent across the paths that move candidates: `generate_more_topologies` /
+  knob-replay remap the group by `topo_uid` in `_resort_pool_preserving_selection`,
+  hier expansion copies it to every instance wrapper (`_expand_hier_bundles`,
+  indices preserved), and a group pin clears any prior candidate's per-segment
+  overrides (the planner may re-choose within the family). **Ripup** and **BDB
+  persistence** of a group pin, and grouping in the **interactive explorer**,
+  remain follow-ups (a group pin is a `run_planner`-time, in-session constraint
+  today).
 
 ## Why this is the byte-identical answer (and dedup is not)
 

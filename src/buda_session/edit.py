@@ -208,6 +208,10 @@ class EditMixin:
         sel_uid = _uid_at(w.plan.selected_topology_index)
         dg_uid = _uid_at(self._dogleg_slot.get(bid, -1))
         og_uid = _uid_at(self._dogleg_originals.get(bid, -1))
+        # A super-candidate group pin is stored as raw indices too, so it must
+        # follow its members across the resort or it would constrain the planner
+        # to the WRONG family after generate_more_topologies (Codex).
+        grp_uids = [_uid_at(i) for i in getattr(w.input, "pinned_group", [])]
         # Same mode-aware key as C++ annotate_and_sort: the segments-first
         # EXPERIMENT toggle (BUDA_TOPO_SORT=segs) must survive accretion —
         # an unconditional WL sort here would silently revert the pool order
@@ -227,6 +231,8 @@ class EditMixin:
             self._dogleg_slot[bid] = posn[dg_uid]
         if og_uid is not None:
             self._dogleg_originals[bid] = posn[og_uid]
+        if grp_uids:
+            w.input.pinned_group = [posn[u] for u in grp_uids if u in posn]
         return pool
 
     def _merge_more_candidates(self, w, fresh):
@@ -1007,15 +1013,26 @@ class EditMixin:
 
         def _set_pin(w):
             """Apply the (single or group) pin to one wrapper; return member count."""
-            self._clear_stale_seg_overrides(w, tidx)
             if group:
                 fp = self._make_topo_fp_resolver()(w)
                 groups = self._loci_groups(w, fp)
                 members = next((g for g in groups if tidx in g), [tidx])
+                # Per-candidate overrides (seg_slide_*/net_pull/perp from a dogleg
+                # or edit_commit) can't stay valid across a family the planner may
+                # re-choose within, and the selection moves to members[0] (not
+                # `tidx`), so `_clear_stale_seg_overrides(w, tidx)` would no-op on
+                # them (Codex).  Clear unless this pins the single candidate already
+                # selected.
+                if members != [w.plan.selected_topology_index]:
+                    w.plan.seg_net_pull = []
+                    w.plan.seg_slide_lo = []
+                    w.plan.seg_slide_hi = []
+                    w.plan.seg_perp = []
                 w.input.pinned_group = list(members)
                 w.input.topology_pinned = False
                 w.plan.selected_topology_index = members[0]
                 return len(members)
+            self._clear_stale_seg_overrides(w, tidx)
             w.input.pinned_group = []      # single pin clears any prior group pin
             w.plan.selected_topology_index = tidx
             w.input.topology_pinned = True
