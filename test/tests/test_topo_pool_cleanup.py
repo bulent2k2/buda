@@ -194,9 +194,11 @@ def test_truly_dangling_predicate_flags_a_hand_built_stub():
     dang = buda.Topology(); dang.type = "USER"
     dang.connected_block_names = clean.connected_block_names
     seg0 = clean.segments[0]
-    dang.segments = list(clean.segments) + [
-        buda.Segment(buda.Point(seg0.start.x, seg0.start.y),
-                     buda.Point(seg0.start.x, seg0.start.y - 999), 5)]
+    stub = buda.Segment()
+    stub.start = buda.Point(seg0.start.x, seg0.start.y)
+    stub.end = buda.Point(seg0.start.x, seg0.start.y - 999)
+    stub.layer_hint = 5
+    dang.segments = list(clean.segments) + [stub]
     buda.annotate_topology(dang, fp)
     assert s._topo_truly_dangling_reason(dang, fp) is not None   # the stub IS flagged
 

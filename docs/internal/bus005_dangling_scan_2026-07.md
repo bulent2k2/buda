@@ -108,9 +108,9 @@ spine (seg0) plus a tangle of unbounded relay jogs (seg3/5/6/7/8/9).
 
 ## Fix (shipped) — drop the candidate when the seed trunk is REDUNDANT
 
-Implemented in `add_trunk_mst_candidates` (`topology.cpp`), scoped to **non-OOB**
-trunk+MST hybrids (the OOB unbounded-slide class stays with `set_drop_dangling`,
-per the investigation focus). After `complete_relay_junctions`,
+Implemented in `add_trunk_mst_candidates` (`topology.cpp`). Originally scoped to
+**non-OOB** trunk+MST hybrids (PR #418); **extended to OOB hybrids** in a
+follow-up (below). After `complete_relay_junctions`,
 `seed_trunk_is_redundant()`:
 
 1. finds the spine — the longest segment matching the trunk orientation at
@@ -158,6 +158,46 @@ ranks worse than its trunk-less equivalent, which the generator emits anyway).
 Only the candidate-pool snapshots move: the `topo_analysis` goldens shed their
 redundant `+MST` candidates (big / comprehensive / dogleg2 / four_blocks / mix).
 bus_005: non-OOB dangling stubs **3 → 0**.
+
+## Extension — OOB hybrids, with a dangling-spine discriminator (2026-07-24)
+
+The user's `flow/mst_bad.buda` repro pinned `bus_033` candidate 29
+(`TRUNK_V_OOB+MST@x5880`) — a vestigial **OOB** trunk that runs out of the die
+and hangs off the tree at one junction — which the non-OOB scope above missed.
+Un-scoping removability to OOB catches it, but a naive "drop every redundant OOB
+hybrid" is **too aggressive**: a genuine OOB detour trunk is a real bridge whose
+spine attaches at *both* ends — connectivity-redundant (the MST provides an
+alternate path) yet **congestion-load-bearing**. Dropping that class regresses
+the previously-clean `flow/rnr/slowdown_rnr.buda` from 0/0 to 2/8, because its
+`ripup_reroute`/`negotiate_congestion` healer *promotes* those OOB+MST candidates
+to escape congestion the planner's band model under-predicts.
+
+The discriminator (`seed_trunk_is_redundant`'s `require_dangling_spine`, on for
+OOB only): after confirming the spine is connectivity-redundant, additionally
+require the **spine itself to dangle** — build the annotated `ConnTopology` and
+check the spine's `ConnSeg` has ≤1 connection and no block face (the
+`set_drop_dangling` truly-dangling predicate). A vestigial OOB trunk (cand 29)
+has a dangling spine and is dropped; a real OOB detour bridge does not and is
+kept. (The `topo` handed to the gate has only `annotate_endpoints`, not the full
+`annotate_topology` — so the check annotates a copy first, else every seg reads
+zero conns and the discriminator silently no-ops.)
+
+**QoR of the OOB extension** (corpus, vs baseline; the user accepted this
+trade-off — a *net-positive* five-better / one-worse):
+
+| flow | baseline | with drop |
+|---|---|---|
+| rnr/mix | 2/44 | **0/0** |
+| rnr/mix2_fast_bottomup | 19/210 | **17/196** |
+| rnr/mix2_fast (×2 variants) | 33/256 | 34/241 |
+| big/tc3a (already hopeless) | 817/8360 | 764/8342 |
+| **rnr/slowdown_rnr** | **0/0** | **2/8** |
+
+The dual-use nature is fundamental: no generation-time geometry separates cand 29
+from slowdown_rnr's copies — the same class the planner auto-selects *badly* in
+congested flows (dropping helps) is what a healer promotes to *escape* congestion
+(dropping hurts). A future "deprioritize, don't drop" candidate-tier could keep
+both; it was scoped out here.
 
 ## Reproduce
 
