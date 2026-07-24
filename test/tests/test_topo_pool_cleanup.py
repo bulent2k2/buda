@@ -164,15 +164,43 @@ def test_clamp_mode_keeps_all_and_bounds_windows():
     assert _n_unbounded(s) == 0                   # every window bounded
 
 
-def test_clamp_drop_drops_only_truly_dangling_and_clamps_the_rest():
+def test_clamp_drop_clamps_survivors_no_truly_dangling_left():
+    # The generation-time seed-trunk removability gate now removes the redundant
+    # trunk hybrids that were b44's truly-dangling class (single non-block conn),
+    # so nothing truly-dangling reaches clamp_drop's DROP half — it degenerates to
+    # clamp here (bounds every window, drops nothing).  clamp_drop's drop
+    # predicate is still exercised directly by
+    # test_truly_dangling_predicate_flags_a_hand_built_stub.
     base = _gen()
-    td = _n_truly_dangling(base)
-    assert td > 0
+    assert _n_truly_dangling(base) == 0           # gate removed them at generation
+    assert _n_unbounded(base) > 0                  # legit OOB-detour windows remain
     s = _gen("set_drop_dangling clamp_drop")
-    assert _n(base) - _n(s) == td                 # exactly the truly-dangling dropped
-    assert 0 < _n(s) < _n(base)
-    assert _n_unbounded(s) == 0                   # survivors clamped
-    assert _n_truly_dangling(s) == 0              # dangling stubs gone
+    assert _n(s) == _n(base)                      # nothing to drop
+    assert _n_unbounded(s) == 0                   # every survivor window clamped
+
+
+def test_truly_dangling_predicate_flags_a_hand_built_stub():
+    # The corpus no longer produces a truly-dangling candidate (the generation
+    # gate removes the redundant-trunk class), so exercise clamp_drop's drop
+    # predicate directly on a hand-built stub whose far end reaches open space.
+    import buda
+    s = buda_cli.BudaSession(); s.no_viz = True
+    _run(s, "def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
+         "add_block A 0 0 100 100", "add_block B 400 0 500 100",
+         "add_bus busA[2] A.p B.p", "run_bundler", "generate_topologies")
+    fp = s.fp
+    clean = s.bundles[0].input.candidates[0]
+    assert s._topo_truly_dangling_reason(clean, fp) is None    # a clean one is not flagged
+    dang = buda.Topology(); dang.type = "USER"
+    dang.connected_block_names = clean.connected_block_names
+    seg0 = clean.segments[0]
+    stub = buda.Segment()
+    stub.start = buda.Point(seg0.start.x, seg0.start.y)
+    stub.end = buda.Point(seg0.start.x, seg0.start.y - 999)
+    stub.layer_hint = 5
+    dang.segments = list(clean.segments) + [stub]
+    buda.annotate_topology(dang, fp)
+    assert s._topo_truly_dangling_reason(dang, fp) is not None   # the stub IS flagged
 
 
 @pytest.mark.mid

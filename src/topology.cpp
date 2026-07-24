@@ -1618,8 +1618,17 @@ static bool has_collinear_overlap(const Topology& topo, int n_orig) {
 // and the coverage gate runs after, so a bundle is never stranded.
 //
 // The spine is the longest segment matching the trunk orientation at trunk_pos.
+// require_dangling_spine: when true, a spine that is merely connectivity-
+// redundant is NOT enough — the spine must ALSO be truly dangling (a free
+// along-endpoint with a single SEG connection).  This is the OOB discriminator:
+// a genuine OOB detour trunk is a real bridge attached at BOTH ends, and though
+// the MST may make it connectivity-redundant it can still be the geometry a
+// healer uses to escape congestion (slowdown_rnr regresses 0/0→2/8 if such a
+// detour is dropped).  Only a vestigial OOB trunk that hangs off the tree at ONE
+// point (bus_033 cand 29) is both redundant and dangling — that one we drop.
 static bool seed_trunk_is_redundant(const Topology& topo, int trunk_pos, bool is_h,
-                                    const Floorplan& fp) {
+                                    const Floorplan& fp,
+                                    bool require_dangling_spine = false) {
     int spine = -1;
     long best_len = -1;
     for (int j = 0; j < (int)topo.segments.size(); ++j) {
@@ -1631,6 +1640,33 @@ static bool seed_trunk_is_redundant(const Topology& topo, int trunk_pos, bool is
         if (len > best_len) { best_len = len; spine = j; }
     }
     if (spine < 0) return false;                 // no spine found — leave it
+
+    // OOB discriminator: a genuine OOB detour trunk is a real bridge whose spine
+    // attaches at both ends — connectivity-redundant (the MST gives an alternate
+    // path) yet congestion-load-bearing (slowdown_rnr regresses 0/0→2/8 if such a
+    // detour is dropped).  A VESTIGIAL OOB trunk (bus_033 cand 29) instead has a
+    // spine that hangs off the tree at a single junction — a ConnSeg with ≤1
+    // connection and no block face, the set_drop_dangling predicate.  So for OOB
+    // we drop only when the SPINE itself dangles.
+    if (require_dangling_spine) {
+        // The caller's `topo` has had annotate_endpoints but not the full
+        // annotate_topology ConnTopology needs — build on an annotated copy so the
+        // SEG-junction inference is real (otherwise every seg reads 0 conns).
+        Topology oc = topo;
+        annotate_topology(oc, fp);
+        ConnTopology oct;
+        oct.build(oc, fp);
+        // The SPINE itself must dangle: a vestigial OOB trunk (bus_033 cand 29)
+        // runs out of the die and hangs off the tree at a SINGLE junction, so its
+        // own ConnSeg has ≤1 connection and no block face.  A genuine OOB detour
+        // (slowdown_rnr) is a real bridge whose spine attaches at BOTH ends — some
+        // minor seg may dangle, but the load-bearing spine does not, so we keep it.
+        if (spine >= (int)oct.segs().size()) return false;
+        const auto& sc = oct.segs()[spine].conns;
+        bool spine_dangling = (sc.size() <= 1 &&
+                               (sc.empty() || sc[0].block_name.empty()));
+        if (!spine_dangling) return false;       // real detour bridge — keep it
+    }
 
     // Build the trunk-less topology and re-derive its connectivity from scratch
     // (annotate_topology, like a hand-built candidate), then audit it.
@@ -3259,6 +3295,13 @@ void TopologyGenerator::add_trunk_mst_candidates(
     // so configs that already have clean coverage don't get an extra relay candidate.
     std::vector<Topology> fallback_pool;
 
+    // Observability for the seed-trunk removability drop (docs/internal/
+    // bus005_dangling_scan): a redundant trunk hybrid is dropped silently
+    // otherwise, and silent drops are exactly what this line of work set out to
+    // make visible.  Counted across all trunk positions; logged once below.
+    int n_redundant_dropped = 0;
+    std::string first_redundant;
+
     for (int ti = 0; ti < orig_count; ++ti) {
         const Topology& trunk_topo = results[ti];
         bool is_h = (trunk_topo.type.find("TRUNK_H") != std::string::npos);
@@ -3268,11 +3311,6 @@ void TopologyGenerator::add_trunk_mst_candidates(
         if (trunk_topo.type.find("+MST") != std::string::npos) continue;
 
         int trunk_pos = trunk_topo.trunk_location;
-        // The single-point-spine drop is scoped to IN-bbox (non-OOB) trunks for
-        // now; an OOB detour trunk's dangling is the separate unbounded-slide
-        // class handled by set_drop_dangling (docs/internal/bus005_dangling_scan).
-        bool is_oob = (trunk_topo.type.find("_OOB") != std::string::npos);
-
         // BRANCH blocks: blocks whose orig_bbox does NOT contain trunk_pos.
         // Pass-through (spine) blocks straddle the trunk; they need no stub
         // and are already connected via the trunk passing through their bbox.
@@ -3498,11 +3536,21 @@ void TopologyGenerator::add_trunk_mst_candidates(
             if (tree.connected_block_names.empty())
                 for (const auto& b : blocks)
                     tree.connected_block_names.push_back(b.block_name);
-            // Drop a hybrid whose seed trunk ended up attached at a single point
-            // (a dangling overshoot the clean-tree gate does not model).
-            if (topology_is_clean_tree(tree, floorplan_) &&
-                (is_oob || !seed_trunk_is_redundant(tree, trunk_pos, is_h, floorplan_)))
-                results.push_back(std::move(tree));
+            // Drop a hybrid whose seed trunk is redundant — removing it leaves a
+            // valid route (the MST edges already connect everything, so the trunk
+            // is vestigial).  Applies to OOB detour trunks too: a genuine detour
+            // is NOT removable (removing it disconnects), while a redundant OOB
+            // trunk that hangs off the tree at one point IS (bus_033 cand 29).
+            if (topology_is_clean_tree(tree, floorplan_)) {
+                bool is_oob = (tree.type.find("_OOB") != std::string::npos);
+                if (seed_trunk_is_redundant(tree, trunk_pos, is_h, floorplan_,
+                                            /*require_dangling_spine=*/is_oob)) {
+                    ++n_redundant_dropped;
+                    if (first_redundant.empty()) first_redundant = tree.type;
+                } else {
+                    results.push_back(std::move(tree));
+                }
+            }
             // A simple hybrid that can't be cleanly completed is DROPPED (the base
             // trunk + standalone MST already cover the bundle).
             continue;
@@ -3541,8 +3589,15 @@ void TopologyGenerator::add_trunk_mst_candidates(
         // A single-point seed trunk here is a dangling overshoot: drop the whole
         // candidate (and don't pool it as a fallback either — the plain trunk
         // still covers the bundle).
-        bool legacy_dangling = !is_oob &&
-            seed_trunk_is_redundant(legacy, trunk_pos, is_h, floorplan_);
+        bool legacy_is_oob = (legacy.type.find("_OOB") != std::string::npos);
+        bool legacy_dangling =
+            seed_trunk_is_redundant(legacy, trunk_pos, is_h, floorplan_,
+                                    /*require_dangling_spine=*/legacy_is_oob);
+        if (legacy_dangling &&
+            (topology_is_clean_tree(legacy, floorplan_) || blocks.size() < 4)) {
+            ++n_redundant_dropped;                 // would have emitted/pooled but for redundancy
+            if (first_redundant.empty()) first_redundant = legacy.type;
+        }
         if (topology_is_clean_tree(legacy, floorplan_) && !legacy_dangling) {
             results.push_back(std::move(legacy));
         } else if (blocks.size() < 4 && !legacy_dangling) {
@@ -3560,6 +3615,11 @@ void TopologyGenerator::add_trunk_mst_candidates(
             fallback_pool.push_back(std::move(uncompleted));
         }
     }
+
+    if (n_redundant_dropped > 0)
+        std::cerr << "[TopoGen] dropped " << n_redundant_dropped
+                  << " redundant trunk+MST hybrid(s) (removable seed trunk; first: "
+                  << first_redundant << ").\n";
 
     // Emit a single un-completed fallback ONLY if the whole bundle produced no clean
     // MST-type candidate (neither here nor in the completed-tree path above) -- so a
