@@ -232,5 +232,49 @@ Where the sweep fires (`mix2`), trial volume drops with a byte-identical metric
 endpoint; where it does not (`bigHalf`, `mix` reach improvers in the screened
 scan), E is provably inert. The saving scales with how often the screened scan
 stalls into the deferred sweep — modest on this corpus, larger on flows that
-lean on the sweep. Fast tier green (1189 passed). **D** (default-on warm
-pre-filter for bottom-up flows) remains the last follow-up.
+lean on the sweep. Fast tier green (1189 passed).
+
+## D measured out — the warm pre-filter's margin is gone
+
+A default-on warm pre-filter (item **D**) was measured on the **post-A/B/
+`_open_segments`/E** build with the warm-study probe (`BUDA_RR_WARM_STUDY=1`,
+which samples the warm single-bundle re-solve alongside every cold trial and
+reports fidelity + per-solve cost) on `mix2_fast_bottomup`:
+
+| stage | trials | accept agreement | false-reject | warm ms | cold ms | cold/warm |
+|---|--:|--:|--:|--:|--:|--:|
+| a | 104 | 84/104 (81%) | 0 | 23.8 | 26.6 | **1.1×** |
+| b | 241 | 241/241 (100%) | 0 | 45.3 | 65.6 | **1.45×** |
+
+**Fidelity is not the problem** — stage b is a perfect 241/241 accept agreement
+with **zero false-rejects** in both stages, so D would be *safe*: a warm-rejected
+move is still cold-swept at the completeness certificate, and warm never wrongly
+discards a real improver.
+
+**The cost margin is the problem.** D's premise is "cold trials are expensive, so
+pre-filter them cheaply." The warm pre-filter only pays off past the documented
+crossover of **cold ≥ 3× the warm eval**. On the current build cold is only
+**1.1–1.45×** the warm eval — nowhere near 3×. Historically the warm eval was
+4.6–6× cheaper on bigHalf; that gap is exactly what the A/B (DNUTS-plan cache −3.3 s,
+disconnected-bits memo −4.2 s) and `_open_segments` wins closed. By cutting the
+per-trial *cold* cost, those merges lowered the very cost D was meant to avoid,
+and E then trimmed the sweep *volume* D was meant to filter — each prior win
+narrowed D's remaining margin.
+
+The arithmetic on the dominant regime: stage b is mostly stall-sweep trials
+(~135 + ~127 deferred moves), and the certificate cold-sweeps every
+warm-rejected move in a stalling iteration *anyway* — so warm's ~45 ms/eval on
+those is unrecovered overhead. Expected wall-clock on `mix2_fast_bottomup`, D's
+own target flow: **≈ 0 %, plausibly net-negative.**
+
+**Disposition:** like C, **D is measured out, not shipped.** The one regime where
+it could still win is a flow whose cold trial is genuinely expensive (a huge
+locked fixed-context making the NUTS `context` rebuild hundreds of ms, so
+cold ≥ 3× warm). If such a flow appears, re-run this same probe on it and gate a
+default-on warm pre-filter to that flow class only if `cold/warm ≥ 3×` holds
+there. On today's corpus it does not.
+
+This closes the `ripup_reroute` speed-up arc: **A/B** (−27 % stage b) was the
+prize, **`_open_segments`** and **E** were clean marginal trims, and **C** and
+**D** are both correct-in-principle but not worth the complexity at current
+scale.
