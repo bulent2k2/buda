@@ -257,6 +257,11 @@ class ExplorerSidecarMixin:
                     # load→save cycle, or one unrelated re-save silently strands
                     # the USER candidate on the next flow run (Codex #305)
                     self._selections[entry['bundle_hint']]['user_topo'] = entry['user_topo']
+                if 'group_uids' in entry:  # super-candidate group pin — same
+                    # load→save survival: without this an unrelated re-save
+                    # downgrades the group pin to a plain single pin and the
+                    # next generate_topologies can't restore pinned_group (Codex)
+                    self._selections[entry['bundle_hint']]['group_uids'] = entry['group_uids']
 
             print(f"Loaded {len(self._selections)} selection(s) from {self._sidecar_path}")
         except Exception as e:

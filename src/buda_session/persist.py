@@ -1151,6 +1151,10 @@ class PersistMixin:
             # Logical seg-busterm links + TEG-over bridges (load_pipeline
             # restores both; never re-derived from geometry).
             self._persist_topology_annotations(bid, ci, topo)
+        # A live group pin (e.g. restored from the sidecar before the BDB was
+        # opened) must be checkpointed on THIS first-persist path too, or a
+        # later load_pipeline resumes without the group constraint (Codex).
+        self._persist_group_pin(w, bid)
 
     def _selected_bdb_cand_index(self, bid, w, sel):
         """BDB cand_index of the wrapper's selected candidate, resolved by

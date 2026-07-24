@@ -136,6 +136,30 @@ def test_group_pin_cleared_then_repersisted(tmp_path):
     assert list(s2.bundles[0].input.pinned_group) == []
 
 
+@pytest.mark.mid
+def test_group_pin_persists_via_planner_output_path(tmp_path):
+    # The BDB may be opened AFTER generate_topologies (candidates never persisted
+    # up front), so a live group pin — e.g. one restored from the sidecar — is
+    # first checkpointed on the planner-output path (_persist_normal_bundle ->
+    # _persist_bundle_candidates), NOT _persist_topologies.  That path must write
+    # the group meta too, or load_pipeline resumes without the constraint (Codex).
+    db = str(tmp_path / "pp.bdb")
+    # Pin the family with NO BDB open (live pin only), then open the BDB and plan.
+    s1 = _fresh(*_SETUP, *_BUNDLE)
+    fam = _family(s1, s1.bundles[0])
+    _quiet(s1, f"select_topology 1 group:{fam[0] + 1}",
+           f"open_bdb {db}", "run_planner 3")
+    assert list(s1.bundles[0].input.pinned_group) == fam
+    fam_uids = {buda.topo_uid(s1.bundles[0].input.candidates[i]) for i in fam}
+    del s1
+
+    s2 = _fresh(*_SETUP, f"open_bdb {db}", "load_pipeline")
+    w2 = s2.bundles[0]
+    assert w2.input.pinned_group, "group pin restored from the planner-output persist"
+    restored = {buda.topo_uid(w2.input.candidates[i]) for i in w2.input.pinned_group}
+    assert restored == fam_uids
+
+
 # ---------------------------------------------------------------------------
 # Explorer sidecar round-trip
 # ---------------------------------------------------------------------------
@@ -202,3 +226,41 @@ def test_sidecar_group_pin_yields_to_script_pin(tmp_path):
     assert w2.input.topology_pinned is True              # script single-pin won
     assert list(w2.input.pinned_group) == []             # not group-pinned
     assert w2.plan.selected_topology_index == 0
+
+
+def test_sidecar_group_pin_survives_reopen_and_resave(tmp_path):
+    # `group_uids` must survive an explorer load->save cycle: `_load_sidecar`
+    # rebuilds `_selections` from a fixed whitelist and `_save_sidecar` writes
+    # only that dict, so without carrying `group_uids` an unrelated re-save (a
+    # different bundle's 's', say) would silently downgrade the group pin to a
+    # plain single pin and the next generate_topologies could not restore it
+    # (Codex).
+    import json
+    side = str(tmp_path / "flow.json")
+
+    s = _fresh(*_SETUP, *_BUNDLE)
+    fam = _family(s, s.bundles[0])
+    exp = buda_viz.TopologyExplorer(
+        s.fp, s.bundles, sidecar_path=side, layer_stack=s.layers,
+        fp_resolver=s._make_topo_fp_resolver(), groups_fn=s._loci_groups)
+    exp.bidx = 0
+    exp.idx = fam[1]
+    exp._group_pin_current()
+    saved = json.load(open(side))['selections'][0]['group_uids']
+    assert saved                                          # written on 'S'
+
+    # A FRESH explorer opens the sidecar (_load_sidecar) and re-saves it for an
+    # unrelated reason (_save_sidecar) — the group pin must not be lost.
+    exp2 = buda_viz.TopologyExplorer(
+        s.fp, s.bundles, sidecar_path=side, layer_stack=s.layers,
+        fp_resolver=s._make_topo_fp_resolver(), groups_fn=s._loci_groups)
+    exp2._save_sidecar()
+    reloaded = json.load(open(side))['selections'][0]
+    assert reloaded.get('group_uids') == saved           # survived load->save
+
+    # And it still restores in a fresh session.
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    s2.script_path = str(tmp_path / "flow.buda")
+    _quiet(s2, *_SETUP, *_BUNDLE)
+    assert s2.bundles[0].input.pinned_group
