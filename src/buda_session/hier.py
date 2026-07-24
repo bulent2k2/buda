@@ -3148,9 +3148,13 @@ class HierMixin:
                 # (block-name qualification now done inside offset_topology above)
                 # Propagate topology pinning from template to each instance.
                 # Candidate indices are preserved (expansion offsets coordinates
-                # but keeps the same ordering as the template candidate list).
+                # but keeps the same ordering as the template candidate list), so
+                # a super-candidate group pin (raw indices) copies directly too
+                # (Codex — else a pre-`run_planner hier` group pin was dropped and
+                # every instance did a full sweep).
                 new_w.input.topology_pinned = w.input.topology_pinned
                 new_w.plan.selected_topology_index = w.plan.selected_topology_index
+                new_w.input.pinned_group = list(w.input.pinned_group)
                 if w.input.pinned_seg_layers:
                     if oi in ("W", "E", "FW", "FE"):
                         # 90/270 swaps every segment H<->V: the pinned layers

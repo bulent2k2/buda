@@ -208,6 +208,10 @@ class EditMixin:
         sel_uid = _uid_at(w.plan.selected_topology_index)
         dg_uid = _uid_at(self._dogleg_slot.get(bid, -1))
         og_uid = _uid_at(self._dogleg_originals.get(bid, -1))
+        # A super-candidate group pin is stored as raw indices too, so it must
+        # follow its members across the resort or it would constrain the planner
+        # to the WRONG family after generate_more_topologies (Codex).
+        grp_uids = [_uid_at(i) for i in getattr(w.input, "pinned_group", [])]
         # Same mode-aware key as C++ annotate_and_sort: the segments-first
         # EXPERIMENT toggle (BUDA_TOPO_SORT=segs) must survive accretion —
         # an unconditional WL sort here would silently revert the pool order
@@ -227,6 +231,8 @@ class EditMixin:
             self._dogleg_slot[bid] = posn[dg_uid]
         if og_uid is not None:
             self._dogleg_originals[bid] = posn[og_uid]
+        if grp_uids:
+            w.input.pinned_group = [posn[u] for u in grp_uids if u in posn]
         return pool
 
     def _merge_more_candidates(self, w, fresh):
@@ -630,6 +636,30 @@ class EditMixin:
                   f"candidate(s) across {nb} bundle(s).")
         return total
 
+    def _loci_groups(self, w, fp):
+        """Group a bundle's candidates into nominal-locus FAMILIES
+        ("super-candidates") using the same key as set_dedup_loci
+        (`_topo_loci_canon`), but WITHOUT dropping any — a read-only,
+        presentation-only grouping (the engine candidate list is untouched, so
+        this changes nothing about planning).
+
+        Returns a list of groups; each group is a list of candidate indices in
+        original (WL-sorted) order, so `group[0]` is the lowest-WL
+        representative.  A candidate whose canon is None (TEG bridge, fan-in
+        taper, dogleg jog, perp clamp) or a USER candidate is its own singleton
+        group — exactly the ones dedup refuses to collapse, so the grouping and
+        the group-pin see the same families dedup would."""
+        groups, by_key = [], {}
+        for i, c in enumerate(w.input.candidates):
+            key = None if c.type == "USER" else self._topo_loci_canon(c, fp)
+            if key is not None and key in by_key:
+                groups[by_key[key]].append(i)
+            else:
+                if key is not None:
+                    by_key[key] = len(groups)
+                groups.append([i])
+        return groups
+
     def _topo_dangling_reason(self, t, fp):
         """A candidate is 'dangling' when some ConnSeg has (a) a single
         connection that is NOT a block tap — a wire whose other end connects to
@@ -957,11 +987,18 @@ class EditMixin:
             return [], f"no bundle whose first net starts with '{pfx}'"
         return bids, None
 
-    def _select_single_topology_internal(self, bid, tid):
+    def _select_single_topology_internal(self, bid, tid, group=False):
         """Helper for select_topology/select_topologies: set a pin without
         re-planning layers.  Returns True only when a pin was actually APPLIED
         (a found bundle with an in-range topology id); prints a specific error —
         naming the bus and its candidate count — otherwise.
+
+        `group=True` (select_topology group:<tid>): pin the whole nominal-locus
+        FAMILY containing candidate `tid` — a super-candidate — instead of the
+        single index, leaving the planner to refine WHICH member wins.  Sets
+        `input.pinned_group` (the member indices) and clears `topology_pinned`;
+        a single pin does the inverse (clears pinned_group), so the two pin
+        modes are mutually exclusive per bundle.
         """
         tidx = tid - 1  # Convert 1-based id to 0-based index
 
@@ -974,15 +1011,49 @@ class EditMixin:
                 print(f"Error: invalid topology id {tid} for bundle {bid} "
                       f"({label}): valid range is 1..{n}")
 
+        def _set_pin(w):
+            """Apply the (single or group) pin to one wrapper; return member count."""
+            if group:
+                fp = self._make_topo_fp_resolver()(w)
+                groups = self._loci_groups(w, fp)
+                members = next((g for g in groups if tidx in g), [tidx])
+                # Per-candidate overrides (seg_slide_*/net_pull/perp from a dogleg
+                # or edit_commit) can't stay valid across a family the planner may
+                # re-choose within, and the selection moves to members[0] (not
+                # `tidx`), so `_clear_stale_seg_overrides(w, tidx)` would no-op on
+                # them (Codex).  Clear unless this pins the single candidate already
+                # selected.
+                if members != [w.plan.selected_topology_index]:
+                    w.plan.seg_net_pull = []
+                    w.plan.seg_slide_lo = []
+                    w.plan.seg_slide_hi = []
+                    w.plan.seg_perp = []
+                w.input.pinned_group = list(members)
+                w.input.topology_pinned = False
+                w.plan.selected_topology_index = members[0]
+                return len(members)
+            self._clear_stale_seg_overrides(w, tidx)
+            w.input.pinned_group = []      # single pin clears any prior group pin
+            w.plan.selected_topology_index = tidx
+            w.input.topology_pinned = True
+            return 1
+
+        def _pin_msg(bid_, label, n_members, rep_idx, suffix=""):
+            if group:
+                print(f"Pinned bundle {bid_} ({label}) to a super-candidate of "
+                      f"{n_members} nominal-locus variant(s) (rep topo {rep_idx})"
+                      f"{suffix} — the planner will refine within the family")
+            else:
+                print(f"Pinned bundle {bid_} ({label}) to topology {tid}{suffix}")
+
         for w in self.bundles:
             if w.input.original_bundle.id == bid:
                 if tidx < 0 or tidx >= len(w.input.candidates):
                     _bad_id(w, self._bundle_label(w))
                     return False
-                self._clear_stale_seg_overrides(w, tidx)
-                w.plan.selected_topology_index = tidx
-                w.input.topology_pinned = True
-                print(f"Pinned bundle {bid} ({self._bundle_label(w)}) to topology {tid}")
+                nm = _set_pin(w)
+                _pin_msg(bid, self._bundle_label(w), nm,
+                         w.plan.selected_topology_index + 1)
                 return True
 
         # Hier mode: the original bundle was expanded into synthetic-ID wrappers.
@@ -995,13 +1066,13 @@ class EditMixin:
             if tidx < 0 or tidx >= len(wrappers[0].input.candidates):
                 _bad_id(wrappers[0], self._bundle_label(wrappers[0]))
                 return False
+            nm = 0
             for w in wrappers:
-                self._clear_stale_seg_overrides(w, tidx)
-                w.plan.selected_topology_index = tidx
-                w.input.topology_pinned = True
+                nm = _set_pin(w)
             n = len(wrappers)
-            print(f"Pinned bundle {bid} ({self._bundle_label(wrappers[0])}) to "
-                  f"topology {tid} ({n} expanded instance{'s' if n > 1 else ''})")
+            _pin_msg(bid, self._bundle_label(wrappers[0]), nm,
+                     wrappers[0].plan.selected_topology_index + 1,
+                     suffix=f" ({n} expanded instance{'s' if n > 1 else ''})")
             return True
 
         print(f"Error: bundle {bid} not found")
@@ -1022,6 +1093,7 @@ class EditMixin:
             if w.input.original_bundle.id == bid:
                 w.input.topology_pinned = False
                 w.input.pinned_seg_layers = []
+                w.input.pinned_group = []      # also clear a group pin
                 print(f"Unpinned bundle {bid}")
                 found = True
                 break
@@ -1031,6 +1103,7 @@ class EditMixin:
                 for w in wrappers:
                     w.input.topology_pinned = False
                     w.input.pinned_seg_layers = []
+                    w.input.pinned_group = []
                 n = len(wrappers)
                 print(f"Unpinned bundle {bid} "
                       f"({n} expanded instance{'s' if n > 1 else ''})")

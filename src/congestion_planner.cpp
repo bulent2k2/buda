@@ -973,7 +973,21 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     auto h_layers_rev = h_layers; std::reverse(h_layers_rev.begin(), h_layers_rev.end());
     auto v_layers_rev = v_layers; std::reverse(v_layers_rev.begin(), v_layers_rev.end());
 
-    res.best_topo     = bw.input.topology_pinned ? bw.plan.selected_topology_index : 0;
+    // Candidate indices to evaluate.  A GROUP pin (pinned_group) restricts the
+    // search to a super-candidate's members; a SINGLE pin to one index; else the
+    // full sweep.  With no group pin this reproduces the historical
+    // [ci_lo, ci_hi) range exactly, so planning is byte-identical.
+    std::vector<int> cand_indices;
+    for (int ci : bw.input.pinned_group)
+        if (ci >= 0 && ci < (int)bw.input.candidates.size())
+            cand_indices.push_back(ci);
+    if (cand_indices.empty()) {
+        int ci_lo = bw.input.topology_pinned ? bw.plan.selected_topology_index     : 0;
+        int ci_hi = bw.input.topology_pinned ? bw.plan.selected_topology_index + 1 : (int)bw.input.candidates.size();
+        for (int ci = ci_lo; ci < ci_hi; ++ci) cand_indices.push_back(ci);
+    }
+
+    res.best_topo     = cand_indices.empty() ? 0 : cand_indices.front();
     double best_score = std::numeric_limits<double>::max();
 
     // Snapshot cut state so each topology candidate is scored from the same base.
@@ -997,10 +1011,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         else                                     max_v_load = std::max(max_v_load, u);
     }
 
-    int ci_lo = bw.input.topology_pinned ? bw.plan.selected_topology_index     : 0;
-    int ci_hi = bw.input.topology_pinned ? bw.plan.selected_topology_index + 1 : (int)bw.input.candidates.size();
-
-    for (int ci = ci_lo; ci < ci_hi; ++ci) {
+    for (int ci : cand_indices) {
         const Topology& topo = bw.input.candidates[ci];
 
         // Greedy per-segment layer assignment within this topology.

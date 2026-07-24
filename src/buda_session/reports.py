@@ -235,7 +235,24 @@ class ReportsMixin:
         except Exception:
             return []
 
-    def _dump_topologies(self, hint, problems_only, conn_detail=False):
+    @staticmethod
+    def _locus_coord(typ):
+        """Parse the nominal trunk locus out of a candidate type string
+        (`TRUNK_H@y10830` → 10830, `TRUNK_V_OOB@x-246` → -246,
+        `TRUNK_H+MST@y12000` → 12000).  None when there is no `@<axis><n>`."""
+        if "@" not in typ:
+            return None
+        tail = typ.split("@", 1)[1]
+        if not tail or tail[0] not in "xy":
+            return None
+        j = 2 if len(tail) > 1 and tail[1] == '-' else 1
+        k = j
+        while k < len(tail) and tail[k].isdigit():
+            k += 1
+        return int(tail[1:k]) if k > j else None
+
+    def _dump_topologies(self, hint, problems_only, conn_detail=False,
+                         grouped=False):
         if not self.bundles:
             print("Warning: no bundles — run the bundler and generate_topologies first.")
             return
@@ -327,10 +344,17 @@ class ReportsMixin:
             if has_passthru: flags.append(f"PASSTHRU({len(passthru_idx)})")
             if has_tug:      flags.append(f"TUG({len(tug)})")
             net0 = (b.get_net_names()[0] if b.get_net_names() else "?")
-            pin_s = " PINNED" if pinned else ""
+            grp_pinned = bool(getattr(w.input, "pinned_group", []))
+            pin_s = (" GROUP-PINNED" if grp_pinned
+                     else " PINNED" if pinned else "")
+            # --grouped: collapse nominal-locus families to representatives.
+            loci_groups = self._loci_groups(w, w_fp) if grouped else None
+            cand_s = f"cands={len(cands)}"
+            if loci_groups is not None:
+                cand_s += f" → {len(loci_groups)} famil{'y' if len(loci_groups)==1 else 'ies'}"
             print(f"\n── bundle {b.id}  nets={len(b.net_names)} ({net0}…)  "
                   f"width={w.input.width}  sel={sel}{pin_s}  "
-                  f"cands={len(cands)}  {' '.join(flags)}")
+                  f"{cand_s}  {' '.join(flags)}")
             # Size the type column to the widest type so every later column
             # stays aligned regardless of long names like TRUNK_V_OOB@x6282.
             type_w = max([len("type")] + [len(r[1]) for r in rows])
@@ -340,11 +364,26 @@ class ReportsMixin:
             # the candidate has lots of routing freedom for NUTS to exploit.
             print(f"   {'idx':>3} {'type':<{type_w}} {'wl':>8} {'wl[lo..hi]':>17} "
                   f"{'segs':>4} {'pass':>4} {'mslide':>7}  notes")
+            # --grouped: only the lowest-WL representative of each nominal-locus
+            # family is printed; its notes carry the variant count + perp span.
+            reps = grp_of_rep = None
+            if loci_groups is not None:
+                grp_of_rep = {g[0]: g for g in loci_groups}
+                reps = set(grp_of_rep)
             for (i, typ, wl, nsegs, pt, ms, lo, hi) in rows:
+                if reps is not None and i not in reps:
+                    continue
                 marks = []
                 if i == sel:      marks.append("*SEL")
                 if i in dup_idx:  marks.append("dup")
                 if i in pinch_idx: marks.append("pinch")
+                if grp_of_rep is not None:
+                    g = grp_of_rep[i]
+                    if len(g) > 1:
+                        cs = [self._locus_coord(rows[j][1]) for j in g]
+                        cs = [c for c in cs if c is not None]
+                        marks.append(f"family:+{len(g) - 1}@{min(cs)}..{max(cs)}"
+                                     if cs else f"family:+{len(g) - 1}")
                 ms_s = ("-" if ms is None
                         else "free" if ms >= self._SLIDE_SENTINEL
                         else str(ms))

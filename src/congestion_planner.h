@@ -85,6 +85,13 @@ struct BundleInput {
     int assigned_v_layer = -1;
     int assigned_h_layer = -1;
     bool topology_pinned = false;
+    // Group-pin (select_topology group:<rep>): restrict the planner's candidate
+    // search to this set of candidate indices — a "super-candidate" of
+    // nominal-locus variants the user pinned as a family, leaving the planner to
+    // refine WHICH member (perp/skeleton) wins.  Empty = no group pin, so the
+    // selection loop falls back to the historical single-pin / full sweep and is
+    // byte-identical.  Takes precedence over topology_pinned when non-empty.
+    std::vector<int> pinned_group;
 };
 
 struct BundlePlan {
