@@ -16,9 +16,11 @@
 tool for any branch that touches topology / planner / NUTS.
 
 Each flow is sourced end-to-end and its final routing quality captured as
-`(num_overlaps, num_unplaced)` — the two numbers a routing change most often
-moves.  The value for a branch is the DIFF against a baseline: build `main`,
-capture a baseline; build the branch, capture again; `--compare` the two.
+`(num_overlaps, num_unplaced, viol_bundles)` — the overlap/unplaced counts plus
+the number of bundles with `check_design` violations (a route can be overlap-
+free yet electrically broken).  The value for a branch is the DIFF against a
+baseline: build `main`, capture a baseline; build the branch, capture again;
+`--compare` the two.
 
 Usage:
   # capture this build's QoR over the default corpus
@@ -39,8 +41,11 @@ movers) — runtime is single-run and noisy, so it is reported but never gates.
 
 Notes:
   * A flow that raises is recorded with an "err" field, not skipped silently.
-  * `overlaps`/`unplaced` are None when the flow never reached that stage
-    (e.g. no run_detailed_nuts) — reported as such, never coerced to 0.
+  * `overlaps`/`unplaced`/`viol_bundles` are None when the flow never reached
+    that stage (e.g. no run_detailed_nuts) — reported as such, never coerced
+    to 0.
+  * `viol_bundles` re-runs `check_design` at the deepest completed stage and
+    parses its own summary ('... across N bundle(s)'), so it matches the CLI.
   * The corpus below is the subset of flow/ that runs the full pipeline
     through run_detailed_nuts.  Edit CORPUS to add/remove vehicles.
 """
@@ -49,6 +54,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 import time
 
@@ -75,6 +81,7 @@ CORPUS = [
     "flow/big_data_test/big2/big2_noviz.buda",
     "flow/big_data_test/big2/tc3b_flat.buda",
     "flow/big_data_test/bigHalf.buda",
+    "flow/big_data_test/bigHalf_bus038_bitrunk.buda",
     "flow/big_data_test/big_3bundles_sel_pure_mst_topo.buda",
     "flow/big_data_test/big_3bundles_sel_trunk+mst_topo.buda",
     "flow/big_data_test/tc3a.buda",
@@ -130,13 +137,36 @@ def run_flow(flow):
     dt = time.time() - t0
     ov = getattr(getattr(s, "nuts_result", None), "num_overlaps", None)
     un = getattr(getattr(s, "detailed_result", None), "num_unplaced", None)
-    return {"flow": flow, "overlaps": ov, "unplaced": un, "sec": round(dt, 1)}
+    vb = _check_design_bundles(s)
+    return {"flow": flow, "overlaps": ov, "unplaced": un,
+            "viol_bundles": vb, "sec": round(dt, 1)}
+
+
+def _check_design_bundles(s):
+    """Run `check_design` at the deepest completed stage and return the number
+    of BUNDLES with design violations (0 = clean).  Parses check_design's own
+    summary line ('... across N bundle(s)') so the count matches exactly what
+    the CLI reports.  None if the audit could not run (e.g. no routed stage)."""
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf), \
+                contextlib.redirect_stderr(io.StringIO()):
+            s.do_command("check_design")           # bare = deepest stage, read-only
+    except SystemExit:
+        pass
+    except Exception:                              # noqa: BLE001
+        return None
+    out = buf.getvalue()
+    if "no violations found" in out:
+        return 0
+    m = re.search(r"across (\d+) bundle\(s\)", out)
+    return int(m.group(1)) if m else None
 
 
 def _fmt(r):
     if "err" in r:
         return r["err"]
-    return f"{r.get('overlaps')}/{r.get('unplaced')}"
+    return f"{r.get('overlaps')}/{r.get('unplaced')}/{r.get('viol_bundles')}"
 
 
 def cmd_run(flows, out):
@@ -155,19 +185,21 @@ def cmd_run(flows, out):
 
 def _rank(r):
     """Sort key for regression detection (higher = worse), as a tuple:
-    (n_missing_metrics, overlaps + unplaced).
+    (n_missing_metrics, overlaps + unplaced + viol_bundles).
 
     A None metric means a pipeline STAGE DID NOT RUN on this build.  It ranks
     worse than any real count, so a branch that stops reaching NUTS/DNUTS where
     the baseline produced a number is flagged WORSE — not a clean 'changed' that
     slips past the guard (Codex P2).  A flow that is None on BOTH builds (never
     runs DNUTS by design) is caught earlier by the string-equality skip, so its
-    missing metric is never mistaken for a regression.  err rows rank worst."""
+    missing metric is never mistaken for a regression.  viol_bundles (bundles
+    with check_design violations) counts toward worseness too — a route can be
+    overlap-free yet electrically broken.  err rows rank worst."""
     if "err" in r:
-        return (3, 0)
-    ov, un = r.get("overlaps"), r.get("unplaced")
-    n_missing = (ov is None) + (un is None)
-    return (n_missing, (ov or 0) + (un or 0))
+        return (4, 0)
+    ov, un, vb = r.get("overlaps"), r.get("unplaced"), r.get("viol_bundles")
+    n_missing = (ov is None) + (un is None) + (vb is None)
+    return (n_missing, (ov or 0) + (un or 0) + (vb or 0))
 
 
 def _runtime_report(paired):
@@ -222,7 +254,7 @@ def cmd_compare(base_path, mine_path):
             n_worse += 1
         print(f"{f.replace('flow/', ''):<48} {bf:>14} {mf:>14}  {tag}")
     print(f"\n{n_better} better, {n_worse} worse, {n_same} unchanged "
-          f"(of {len(flows)} flows).  Metric = overlaps/unplaced.")
+          f"(of {len(flows)} flows).  Metric = overlaps/unplaced/viol_bundles.")
     _runtime_report([(f, base[f], mine[f]) for f in flows
                      if f in base and f in mine])
     return n_worse
