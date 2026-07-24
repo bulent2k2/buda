@@ -212,59 +212,73 @@ def cmd_run_planner(session, cmd, args, cmd_line):
 
 
 def cmd_select_topology(session, cmd, args, cmd_line):
-    # Usage: select_topology <bundle_id> <topo_id>
+    # Usage: select_topology <bundle_id | hint | id:N | net:PREFIX> <topo_id>
+    #   bare integer  -> bundle ID (legacy);  bare non-numeric -> net-name hint
+    #   id:N          -> force bundle ID;     net:PFX (name:/hint:) -> force hint
     if len(args) < 2:
-        print("Error: select_topology requires bundle_id and topo_id (1-based)")
+        print("Error: select_topology requires <bundle_id|hint> and <topo_id> (1-based)")
         return
-    bid = int(args[0])
-    tid = int(args[1])
-    if session._select_single_topology_internal(bid, tid):
+    try:
+        tid = int(args[1])
+    except ValueError:
+        print(f"Error: invalid topology id '{args[1]}'")
+        return
+    bids, err = session._resolve_bundle_selector(args[0])
+    if err:
+        print(f"Error: {err}")
+        return
+    applied = False
+    for bid in bids:
+        if session._select_single_topology_internal(bid, tid):
+            applied = True
+    if applied:
         session._replan_layers()
         session._persist_topologies()   # refresh is_selected in the BDB
 
 
+def _parse_selector_list(session, sel_str):
+    """Expand a comma list of bundle selectors — numeric IDs, numeric ranges
+    (a-b), and net-name hints — into a flat list of bundle IDs.  Prints an error
+    per unresolved chunk; returns whatever resolved."""
+    bids = []
+    for chunk in sel_str.split(','):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = chunk.split('-', 1)
+        is_num_range = ('-' in chunk and len(parts) == 2 and
+                        all(p.strip().lstrip('-').isdigit() for p in parts))
+        if is_num_range:
+            b_start, b_end = int(parts[0]), int(parts[1])
+            bids.extend(range(b_start, b_end + 1) if b_start <= b_end
+                        else range(b_start, b_end - 1, -1))
+        else:
+            sub, err = session._resolve_bundle_selector(chunk)
+            if err:
+                print(f"Error: {err}")
+                continue
+            bids.extend(sub)
+    return bids
+
+
 def cmd_select_topologies(session, cmd, args, cmd_line):
     # Usage: select_topologies <bundle_ids> <topo_id> [<bundle_ids> <topo_id> ...]
-    # bundle_ids can be comma-separated or ranges, e.g. "1,5-9,11"
+    #   bundle_ids: comma list of IDs, ranges (1,5-9,11), and/or net-name hints
+    #   (e.g. bus_007,bus_044).  Same id:/net: disambiguation as select_topology.
     if len(args) < 2 or len(args) % 2 != 0:
         print("Error: select_topologies requires (bundle_ids, topo_id) pairs")
         return
-    any_found = False
+    applied = False
     for i in range(0, len(args), 2):
-        bid_str = args[i]
         try:
             tid = int(args[i+1])
         except ValueError:
             print(f"Error: invalid topology ID '{args[i+1]}'")
             continue
-
-        # Parse comma-separated IDs and ranges (e.g. "1,5-9,11")
-        bids = []
-        for chunk in bid_str.split(','):
-            chunk = chunk.strip()
-            if not chunk: continue
-            if '-' in chunk:
-                try:
-                    s_start, s_end = chunk.split('-', 1)
-                    b_start, b_end = int(s_start), int(s_end)
-                    if b_start <= b_end:
-                        bids.extend(range(b_start, b_end + 1))
-                    else:
-                        bids.extend(range(b_start, b_end - 1, -1))
-                except ValueError:
-                    print(f"Error: invalid range '{chunk}' in bundle ID list")
-                    continue
-            else:
-                try:
-                    bids.append(int(chunk))
-                except ValueError:
-                    print(f"Error: invalid bundle ID '{chunk}' in list")
-                    continue
-        
-        for bid in bids:
+        for bid in _parse_selector_list(session, args[i]):
             if session._select_single_topology_internal(bid, tid):
-                any_found = True
-    if any_found:
+                applied = True
+    if applied:
         session._replan_layers()
         session._persist_topologies()   # refresh is_selected in the BDB
 

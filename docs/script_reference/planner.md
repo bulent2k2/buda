@@ -227,10 +227,26 @@ Demonstrated end-to-end by `flow/hbundles/08_cross_level.buda` and
 ### `select_topology`
 
 ```
-select_topology <bundle_id> <topo_id>
+select_topology <bundle> <topo_id>
 ```
 
-Manually pin a specific topology candidate for a given bundle by its numeric bundle ID and topology candidate ID (1-based index). This manually overrides the planner's selection.
+Manually pin a specific topology candidate for a given bundle, overriding the
+planner's selection. `<bundle>` may be a **numeric bundle ID** *or* a **net-name
+hint** — the same kind of hint `generate_topologies_for_bundle` and
+`dump_topologies` accept — so you can pin by bus name instead of hunting for the
+ID:
+
+- a bare integer (`2`) is a **bundle ID**;
+- a bare token containing any non-digit (`bus_033`) is a **net-name prefix hint**
+  and pins **every** bundle whose first net starts with it;
+- `id:<N>` forces a bundle ID and `net:<prefix>` (aliases `name:` / `hint:`)
+  forces a hint — use these to disambiguate a bus whose name starts with a digit
+  (e.g. `net:10` matches a bus `10net`, while bare `10` is bundle ID 10).
+
+> **Tip:** the bundle ID is *not* the ordinal of the buses you generated — after
+> `generate_topologies_for_bundle bus_007 / bus_033 / bus_044` those may be
+> bundles 1 / 8 / 11, not 1 / 2 / 3. Pin by name (`select_topology bus_033 29`)
+> to avoid the mix-up.
 
 If the planner has already run, layer assignment is automatically re-run with
 the pin in place (logged with a `[pinned]` marker), so per-segment layers
@@ -239,13 +255,18 @@ always describe the pinned topology's segment list. Pins set before
 
 | Argument | Type | Description |
 |---|---|---|
-| `bundle_id` | int | Numeric ID of the bundle (e.g. `2`). |
+| `bundle` | int \| string | Bundle ID, net-name hint, or `id:<N>` / `net:<prefix>`. |
 | `topo_id` | int | 1-based ID of the topology candidate to pin (e.g. `2` for the second topology). |
+
+An out-of-range or unmatched selector reports a specific error naming the bus and
+its candidate count, e.g. `invalid topology id 29 for bundle 8 (bus_033): valid
+range is 1..33`, or `bundle 2 (bus_039) has no candidates — run
+generate_topologies[_for_bundle] for it first`.
 
 **Example:**
 ```buda
-# Pin topology candidate 2 for bundle 2
-select_topology 2 2
+select_topology bus_033 29   # pin bus_033's 29th candidate (by name)
+select_topology 8 29         # equivalent, by numeric bundle ID
 ```
 
 ---
@@ -253,14 +274,16 @@ select_topology 2 2
 ### `select_topologies`
 
 ```
-select_topologies <bundle_ids> <topo_id> [<bundle_ids> <topo_id> ...]
+select_topologies <bundles> <topo_id> [<bundles> <topo_id> ...]
 ```
 
-Batch pin multiple bundles to specific topology candidates. Bundle IDs within a group can be comma-separated or specify ranges (e.g. `5-9`).
+Batch pin multiple bundles to specific topology candidates. Each `<bundles>`
+group is a comma-separated list mixing numeric IDs, numeric ranges (`5-9`), and
+net-name hints, with the same `id:` / `net:` disambiguation as `select_topology`.
 
 | Argument | Type | Description |
 |---|---|---|
-| `bundle_ids` | string | Comma-separated list and/or ranges of numeric bundle IDs (e.g. `1,5-9,11`). |
+| `bundles` | string | Comma list of bundle IDs, ranges, and/or net-name hints (e.g. `1,5-9,11` or `bus_007,bus_044`). |
 | `topo_id` | int | 1-based ID of the topology candidate to pin for the preceding group. |
 
 **Example:**
@@ -268,6 +291,9 @@ Batch pin multiple bundles to specific topology candidates. Bundle IDs within a 
 # Pin bundles 1, 5 through 9, 11, and 15 through 19, and 22 to topology 3
 # Pin bundles 2 through 4, 10, 12 through 14, 20, 21, and 23 through 30 to topology 1
 select_topologies 1,5-9,11,15-19,22 3 2-4,10,12-14,20,21,23-30 1
+
+# Or pin by name
+select_topologies bus_007,bus_044 5
 ```
 
 ---

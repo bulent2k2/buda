@@ -888,45 +888,124 @@ class EditMixin:
         w.plan.seg_slide_hi = []
         w.plan.seg_perp = []
 
+    @staticmethod
+    def _bundle_label(w):
+        """Human-readable bus/net name for a wrapper (bit suffix _bNN stripped)."""
+        try:
+            names = w.input.original_bundle.get_net_names()
+        except Exception:
+            names = None
+        nm = names[0] if names else "?"
+        return nm.rsplit("_b", 1)[0] if "_b" in nm else nm
+
+    def _bids_by_net_prefix(self, prefix):
+        """Bundle IDs whose first net name starts with `prefix` (dedup, in order)."""
+        bids = []
+        for w in self.bundles:
+            try:
+                names = w.input.original_bundle.get_net_names()
+            except Exception:
+                names = None
+            if names and names[0].startswith(prefix):
+                b = w.input.original_bundle.id
+                if b not in bids:
+                    bids.append(b)
+        # hier mode: also match original bundles behind the expansion map
+        for b, wrappers in getattr(self, "_hier_expansion_map", {}).items():
+            for w in wrappers:
+                try:
+                    names = w.input.original_bundle.get_net_names()
+                except Exception:
+                    names = None
+                if names and names[0].startswith(prefix) and b not in bids:
+                    bids.append(b)
+                    break
+        return bids
+
+    def _resolve_bundle_selector(self, sel):
+        """Resolve a select_topology bundle selector to (bundle_ids, error).
+
+        Backward compatible — a bare integer is still a bundle ID:
+          'id:N'                       -> [N]            (explicit numeric ID)
+          'net:PFX' / 'name:' / 'hint:'-> prefix match   (explicit; PFX may be numeric)
+          bare all-digits              -> [int]          (numeric bundle ID — legacy)
+          bare containing a non-digit  -> prefix match    (net-name hint, e.g. 'bus_033')
+
+        The 'net:'/'id:' prefixes disambiguate a bus whose name starts with a
+        number (e.g. 'net:10' matches a bus '10net', while bare '10' is ID 10).
+        Returns ([], msg) on an empty/failed match.
+        """
+        forced_hint = False
+        pfx = sel
+        if ":" in sel:
+            head, rest = sel.split(":", 1)
+            if head == "id":
+                try:
+                    return [int(rest)], None
+                except ValueError:
+                    return [], f"invalid bundle id '{rest}' after 'id:'"
+            if head in ("net", "name", "hint"):
+                forced_hint, pfx = True, rest
+        # An empty prefix would startswith()-match EVERY bundle (a `net:` typo
+        # silently pinning the whole design); reject it instead (Codex P2 #423).
+        if not pfx:
+            return [], f"empty net-name prefix in selector '{sel}'"
+        if not forced_hint and pfx.lstrip("-").isdigit():
+            return [int(pfx)], None
+        bids = self._bids_by_net_prefix(pfx)
+        if not bids:
+            return [], f"no bundle whose first net starts with '{pfx}'"
+        return bids, None
+
     def _select_single_topology_internal(self, bid, tid):
-        """Helper for select_topology/select_topologies: set a pin without re-planning layers.
-        Returns True if the bundle (or its hierarchical expansion) was found.
+        """Helper for select_topology/select_topologies: set a pin without
+        re-planning layers.  Returns True only when a pin was actually APPLIED
+        (a found bundle with an in-range topology id); prints a specific error —
+        naming the bus and its candidate count — otherwise.
         """
         tidx = tid - 1  # Convert 1-based id to 0-based index
-        found = False
+
+        def _bad_id(w_or_n, label):
+            n = w_or_n if isinstance(w_or_n, int) else len(w_or_n.input.candidates)
+            if n == 0:
+                print(f"Error: bundle {bid} ({label}) has no candidates — run "
+                      f"generate_topologies[_for_bundle] for it first")
+            else:
+                print(f"Error: invalid topology id {tid} for bundle {bid} "
+                      f"({label}): valid range is 1..{n}")
+
         for w in self.bundles:
             if w.input.original_bundle.id == bid:
                 if tidx < 0 or tidx >= len(w.input.candidates):
-                    print(f"Error: invalid topology id {tid} for bundle {bid}")
-                else:
-                    self._clear_stale_seg_overrides(w, tidx)
-                    w.plan.selected_topology_index = tidx
-                    w.input.topology_pinned = True
-                    print(f"Pinned bundle {bid} to topology {tid}")
-                found = True
-                break
-        if not found:
-            # Hier mode: the original bundle was expanded into synthetic-ID wrappers.
-            # Look up the original ID in the expansion map and apply to all instances.
-            wrappers = self._hier_expansion_map.get(bid, [])
-            if wrappers:
-                # BundleWrapper has no bare .candidates — the pool lives on
-                # .input (audit P3-02: this branch crashed with
-                # AttributeError before any pin was applied).
-                if tidx < 0 or tidx >= len(wrappers[0].input.candidates):
-                    print(f"Error: invalid topology id {tid} for bundle {bid}")
-                else:
-                    for w in wrappers:
-                        self._clear_stale_seg_overrides(w, tidx)
-                        w.plan.selected_topology_index = tidx
-                        w.input.topology_pinned = True
-                    n = len(wrappers)
-                    print(f"Pinned bundle {bid} to topology {tid} "
-                          f"({n} expanded instance{'s' if n > 1 else ''})")
-                found = True
-        if not found:
-            print(f"Error: bundle {bid} not found")
-        return found
+                    _bad_id(w, self._bundle_label(w))
+                    return False
+                self._clear_stale_seg_overrides(w, tidx)
+                w.plan.selected_topology_index = tidx
+                w.input.topology_pinned = True
+                print(f"Pinned bundle {bid} ({self._bundle_label(w)}) to topology {tid}")
+                return True
+
+        # Hier mode: the original bundle was expanded into synthetic-ID wrappers.
+        # Look up the original ID in the expansion map and apply to all instances.
+        wrappers = self._hier_expansion_map.get(bid, [])
+        if wrappers:
+            # BundleWrapper has no bare .candidates — the pool lives on .input
+            # (audit P3-02: this branch crashed with AttributeError before any
+            # pin was applied).
+            if tidx < 0 or tidx >= len(wrappers[0].input.candidates):
+                _bad_id(wrappers[0], self._bundle_label(wrappers[0]))
+                return False
+            for w in wrappers:
+                self._clear_stale_seg_overrides(w, tidx)
+                w.plan.selected_topology_index = tidx
+                w.input.topology_pinned = True
+            n = len(wrappers)
+            print(f"Pinned bundle {bid} ({self._bundle_label(wrappers[0])}) to "
+                  f"topology {tid} ({n} expanded instance{'s' if n > 1 else ''})")
+            return True
+
+        print(f"Error: bundle {bid} not found")
+        return False
 
     def _unpin_topology_internal(self, bid):
         """Inverse of select_topology: clear a bundle's pin so the next planner

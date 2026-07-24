@@ -8,9 +8,9 @@ generate_topologies_for_bundle bus_033 no_hanan_loci  # 4 terms: 51 candidates -
 generate_topologies_for_bundle bus_044 no_hanan_loci  # 5 terms: 56 candidates -> 34
 dump_topologies bus_007 --conn
 check_design topo all
-select_topology 1 8  # multiple segs with an open-ended slide, some with two open ends
-select_topology 2 29 # dangling trunk, too!
-select_topology 3 10 # three segs with one open-ended slide
+select_topology bus_007 8  # multiple segs with an open-ended slide, some with two open ends
+select_topology bus_033 29 # dangling trunk, too!
+select_topology bus_044 10 # three segs with one open-ended slide
 run_planner
 run_nuts
 run_detailed_nuts
