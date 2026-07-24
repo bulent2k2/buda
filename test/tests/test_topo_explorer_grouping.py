@@ -119,6 +119,28 @@ def test_x_clears_group_pin():
     assert list(s.bundles[0].input.pinned_group) == []
 
 
+def test_single_pin_overrides_group_pin(tmp_path):
+    # A single pin ('s') must clear a prior group pin — the planner reads
+    # pinned_group before topology_pinned, so a stale family would keep
+    # constraining the bundle (Codex).
+    s = _session()
+    exp = buda_viz.TopologyExplorer(
+        s.fp, s.bundles, sidecar_path=str(tmp_path / "sc.json"),
+        layer_stack=s.layers, fp_resolver=s._make_topo_fp_resolver(),
+        groups_fn=s._loci_groups)
+    exp.bidx = 0
+    fam = next(g for g in exp._explorer_groups() if len(g) > 1)
+    exp.idx = fam[0]
+    exp._group_pin_current()
+    assert list(s.bundles[0].input.pinned_group) != []
+    exp.idx = fam[1]
+    exp._select_current()                             # the 's' key
+    w = s.bundles[0]
+    assert list(w.input.pinned_group) == []           # group pin cleared
+    assert w.input.topology_pinned is True
+    assert w.plan.selected_topology_index == fam[1]
+
+
 def test_group_pin_singleton_falls_back_to_single_pin():
     # 'S' on a candidate that is its own family is never a silent no-op — it
     # single-pins instead.
