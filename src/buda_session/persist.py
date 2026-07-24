@@ -294,7 +294,21 @@ class PersistMixin:
                     self.bdb.add_topology_segment(sr)
                 self._persist_topology_annotations(bid, ci, topo, seen_busterms)
                 n_cands += 1
+            self._persist_group_pin(w, bid)
         return n_cands
+
+    def _persist_group_pin(self, w, bid):
+        """Persist a super-candidate group pin (`input.pinned_group`) as BDB meta
+        `pinned_group:<bid>` = JSON list of the family members' `topo_uid`s.
+        Keyed by uid (not index) so a resumed `load_pipeline` maps it back to
+        indices even if the candidate pool re-orders.  Always written — an empty
+        value clears a stale group pin so an unpinned re-persist doesn't leave
+        one behind."""
+        import json
+        grp = list(getattr(w.input, "pinned_group", []) or [])
+        uids = [buda.topo_uid(w.input.candidates[i]) for i in grp
+                if 0 <= i < len(w.input.candidates)]
+        self.bdb.meta_set(f"pinned_group:{bid}", json.dumps(uids) if uids else "")
 
     def _persist_topology_annotations(self, bid, ci, topo, seen_busterms=None):
         """Persist ONE candidate's derived annotations — ALWAYS as a pair:
@@ -728,6 +742,19 @@ class PersistMixin:
                 w.hier.locked = True
                 w.input.topology_pinned = True
                 w.input.pinned_seg_layers = list(w.plan.seg_layers)
+        # Restore a super-candidate group pin (BDB meta, uid-keyed): map the
+        # persisted family uids back to the reloaded candidates' indices, so a
+        # resumed run_planner still refines within the pinned family.
+        raw = self.bdb.meta_get(f"pinned_group:{br.id}", "")
+        if raw:
+            try:
+                uids = set(json.loads(raw))
+            except (ValueError, TypeError):
+                uids = set()
+            if uids:
+                w.input.pinned_group = [
+                    i for i, t in enumerate(w.input.candidates)
+                    if buda.topo_uid(t) in uids]
         return w
 
     def _restore_bottom_up_templates(self, exp_map, all_rows,
@@ -1124,6 +1151,10 @@ class PersistMixin:
             # Logical seg-busterm links + TEG-over bridges (load_pipeline
             # restores both; never re-derived from geometry).
             self._persist_topology_annotations(bid, ci, topo)
+        # A live group pin (e.g. restored from the sidecar before the BDB was
+        # opened) must be checkpointed on THIS first-persist path too, or a
+        # later load_pipeline resumes without the group constraint (Codex).
+        self._persist_group_pin(w, bid)
 
     def _selected_bdb_cand_index(self, bid, w, sel):
         """BDB cand_index of the wrapper's selected candidate, resolved by

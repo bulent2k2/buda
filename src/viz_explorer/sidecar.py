@@ -177,6 +177,34 @@ class ExplorerSidecarMixin:
         self._draw()
 
 
+    def _group_select_current(self, members):
+        """Sidecar-persist a super-candidate group pin: store the family's member
+        `group_uids` (not a single topo_uid) so `_apply_selections` restores it
+        as `input.pinned_group`.  Mirrors `_select_current`'s bookkeeping (one
+        entry per bundle hint, stale-key cleanup)."""
+        hint = self._bundle_hint()
+        old_sel = self._find_selection()
+        if old_sel is not None:
+            stale_key = next((k for k, v in self._selections.items()
+                              if v is old_sel), None)
+            if stale_key and stale_key != hint:
+                del self._selections[stale_key]
+        wrapper = self.wrappers[self.bidx]
+        cands = wrapper.input.candidates
+        rep = cands[members[0]]
+        self._selections[hint] = {
+            'bundle_id':       wrapper.input.original_bundle.id,
+            'topo_type':       rep.type,
+            'topo_wl':         rep.estimated_wirelength,
+            'group_uids':      [ic.topo_uid(cands[i]) for i in members
+                                if 0 <= i < len(cands)],
+            'topo_index_hint': members[0],
+            'note':            '',
+            'selected_at':     datetime.now().isoformat(timespec='seconds'),
+        }
+        self._save_sidecar()
+
+
     def _deselect_current(self):
         hint    = self._bundle_hint()
         old_sel = self._find_selection()
@@ -197,9 +225,8 @@ class ExplorerSidecarMixin:
             wrapper.plan.seg_slide_lo = []
             wrapper.plan.seg_slide_hi = []
 
-        # A group pin ('S') has no sidecar entry, so the block above (gated on a
-        # sidecar selection) never reaches it — clear it here so 'x' un-pins a
-        # group-pinned bundle too.
+        # Clear the LIVE group pin too (the sidecar entry — if any — was popped
+        # by the old_sel block above): 'x' un-pins a group-pinned bundle.
         w = self.wrappers[self.bidx]
         if getattr(w.input, 'pinned_group', []):
             w.input.pinned_group = []
@@ -230,6 +257,11 @@ class ExplorerSidecarMixin:
                     # load→save cycle, or one unrelated re-save silently strands
                     # the USER candidate on the next flow run (Codex #305)
                     self._selections[entry['bundle_hint']]['user_topo'] = entry['user_topo']
+                if 'group_uids' in entry:  # super-candidate group pin — same
+                    # load→save survival: without this an unrelated re-save
+                    # downgrades the group pin to a plain single pin and the
+                    # next generate_topologies can't restore pinned_group (Codex)
+                    self._selections[entry['bundle_hint']]['group_uids'] = entry['group_uids']
 
             print(f"Loaded {len(self._selections)} selection(s) from {self._sidecar_path}")
         except Exception as e:
