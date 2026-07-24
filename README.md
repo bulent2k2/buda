@@ -1,4 +1,4 @@
-BUDA (BUndled Design Automation) is an open-source EDA interconnect planning system for hierarchical chip design. It has five major components:
+BUDA (BUndled Design Assistant) is an open-source EDA interconnect planning system for hierarchical chip design. It has five major components:
 1. **Bundling**: Grouping nets into buses (flat and hierarchical `HBundle` templates).
 2. **Topology Generation**: Generating physical routing shapes on Hanan grids (L/Z/U-shapes, hybrid MST, relay completion).
 3. **Congestion Planning**: Global planning and layer assignment with healer lookahead coupling and bottom-up template support.
@@ -40,7 +40,7 @@ buda/
 source bin/activate                   # per shell: puts bin/ on PATH, sets PYTHONPATH
 bb                                    # build the C++/pybind11 engine into build/
 buda demo/comprehensive_demo.buda     # run a routing flow
-fp chip_designs/ariane136.bdb         # open the interactive Floorplanner GUI
+fp flow/rnr/mix2_aligned.bdb.sql      # open the interactive Floorplanner GUI
 u2b test_column_datapath_hvh          # convert a topology unit test to .buda + visualize
 ```
 
