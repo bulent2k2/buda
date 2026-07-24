@@ -618,6 +618,18 @@ public:
     // unchanged and a warning is printed (the planner ladder still commits one).
     void filter_uncovered(std::vector<Topology>& candidates) const;
 
+    // Slide-safe endpoint-anchoring gate for BITRUNK candidates.  A BITRUNK
+    // trunk may "cover" an endpoint block only by grazing/passing over it at the
+    // NOMINAL position (no busterm face tap); check_topo accepts that, but a
+    // NUTS-time slide moves the trunk off the block and every bit opens
+    // (BUSTERM_OPEN — bigHalf bus_038).  Drop a BITRUNK candidate whose any
+    // endpoint block is covered ONLY by a pass-through whose perp slide window
+    // is NOT contained in that block's perp extent (so it can slide away).
+    // Anchored blocks and slide-bounded pass-throughs survive.  Keep-if-only-
+    // option, like filter_uncovered — never strands a bundle.  Scoped to
+    // BITRUNK types, so non-BITRUNK pools are byte-identical.
+    void filter_unanchored_bitrunk(std::vector<Topology>& candidates) const;
+
 private:
     // Internal dispatch targets.
     std::vector<Topology> generate_2pin(

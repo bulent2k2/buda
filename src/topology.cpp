@@ -3936,6 +3936,10 @@ std::vector<Topology> TopologyGenerator::generate_candidates(
     // add_trunk_v stub-suppression) remain the first line; this is the backstop
     // that keeps an uncovered candidate from ever reaching the planner.
     filter_uncovered(candidates);
+    // Realization guard on top of the nominal coverage gate: a BITRUNK whose
+    // endpoint block is only grazed by a free-sliding trunk passes check_topo
+    // at nominal but opens at NUTS time (BUSTERM_OPEN — bigHalf bus_038).
+    filter_unanchored_bitrunk(candidates);
     return candidates;
 }
 
@@ -4047,6 +4051,76 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
         std::cerr << ", first open: " << first_type << " missing block '"
                   << first_block << "'";
     std::cerr << "); " << kept.size() << " remain.\n";
+    candidates = std::move(kept);
+}
+
+void TopologyGenerator::filter_unanchored_bitrunk(
+    std::vector<Topology>& candidates) const {
+    if (candidates.empty()) return;
+    std::vector<char> drop(candidates.size(), 0);
+    int n_clean = 0, dropped = 0;
+    std::string first_type, first_block;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        const Topology& t = candidates[i];
+        // Scoped to the LEGACY always-on BITRUNK_H (exact match), so every other
+        // pool is byte-identical.  The opt-in two-level BITRUNK_HVH/VHV trees are
+        // deliberately EXCLUDED: their branch trunks cover a column of aligned
+        // blocks as a genuine MULTI-TAP pass-through (no per-block stub, by
+        // design), so "no busterm tap" is normal for them and their own
+        // topology_is_clean_tree gate already validates connectivity/coverage.
+        // Legacy BITRUNK_H has no multi-tap logic — an un-tapped endpoint is
+        // always the face-on-trunk edge-graze that opens at DNUTS.
+        if (t.type != "BITRUNK_H") { ++n_clean; continue; }
+        ConnTopology ct;
+        ct.build(candidates[i], floorplan_);
+        const auto& segs = ct.segs();
+        // An endpoint block is safely connected only if it carries a BUSTERM
+        // tap (a perpendicular STUB landing on its face — the same
+        // `explicitly_connected` set verify's per-bit dnuts audit exempts).  A
+        // block with NO tap is "covered" only by a trunk passing over it, which
+        // works solely if the whole bit-band physically fits inside the block —
+        // a realization property NUTS decides, invisible here.  The legacy
+        // BITRUNK_H leaves face-on-trunk blocks entirely untapped (bigHalf
+        // bus_038: all 4 endpoints untapped → every bit opens at dnuts).  Drop
+        // such a candidate so the planner falls to an anchored shape.
+        std::set<std::string> tapped;
+        for (const auto& cs : segs)
+            for (const auto& c : cs.conns)
+                if (c.kind == SegConn::BUSTERM) tapped.insert(c.block_name);
+        // Trigger only on the PROVABLY-broken degenerate case: NO endpoint block
+        // is anchored at all (every block is a free-sliding trunk graze, bigHalf
+        // bus_038's tapped={}).  A partially-stubbed BITRUNK_H (some blocks off
+        // the trunk lines got real stubs) is left alone — its pass-through
+        // coverage of the remaining blocks may still fit the bit-band, a
+        // realization property this generation-time gate cannot decide, so we
+        // conservatively defer to NUTS rather than risk dropping a routable
+        // small-bus column datapath.
+        bool bad = tapped.empty();
+        std::string bad_block =
+            bad && !t.connected_block_names.empty() ? t.connected_block_names[0]
+                                                    : std::string();
+        if (bad) {
+            drop[i] = 1;
+            ++dropped;
+            if (first_type.empty()) { first_type = t.type; first_block = bad_block; }
+        } else {
+            ++n_clean;
+        }
+    }
+    // Nothing to drop → leave `candidates` untouched (must NOT std::move it into
+    // a discarded `kept` first — that would empty every pool with no BITRUNK to
+    // drop).  Also never strand a bundle: keep an all-unanchored list.
+    if (dropped == 0 || n_clean == 0) return;
+    std::vector<Topology> kept;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        if (drop[i]) continue;
+        kept.push_back(std::move(candidates[i]));
+    }
+    std::cerr << "[TopoGen] dropped " << dropped
+              << " unanchored BITRUNK candidate(s) (endpoint block has no "
+                 "busterm tap → per-bit BUSTERM_OPEN at DNUTS; first: "
+              << first_type << " block '" << first_block << "'); "
+              << kept.size() << " remain.\n";
     candidates = std::move(kept);
 }
 
