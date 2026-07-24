@@ -1,0 +1,13 @@
+# From bigHalf_bus005_dangling.buda
+source ../tracks/tracks4top.buda
+source tc3a_flat_5x.buda
+run_bundler
+generate_topologies_for_bundle bus_038 no_hanan_loci
+dump_topologies bus_038
+check_design topo all
+select_topology bus_038 20
+run_planner
+run_nuts
+run_detailed_nuts
+check_design
+visualize
