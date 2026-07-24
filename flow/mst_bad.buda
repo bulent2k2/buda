@@ -1,0 +1,18 @@
+# from: big_data_test/bigHalf_c_hits.buda
+source tracks/tracks4top.buda
+source big_data_test/tc3a_flat_5x.buda
+run_bundler
+#                                                                with hanan-loci  w/o
+generate_topologies_for_bundle bus_007 no_hanan_loci  # 6 terms: 81 candidates -> 48
+generate_topologies_for_bundle bus_033 no_hanan_loci  # 4 terms: 51 candidates -> 33
+generate_topologies_for_bundle bus_044 no_hanan_loci  # 5 terms: 56 candidates -> 34
+dump_topologies bus_007 --conn
+check_design topo all
+select_topology 1 8  # multiple segs with an open-ended slide, some with two open ends
+select_topology 2 29 # dangling trunk, too!
+select_topology 3 10 # three segs with one open-ended slide
+run_planner
+run_nuts
+run_detailed_nuts
+check_design
+visualize
