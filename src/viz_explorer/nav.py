@@ -43,10 +43,94 @@ class ExplorerNavMixin:
             self._btn_rerun.ax.set_facecolor('#ffe0b0')
 
 
+    def _explorer_groups(self):
+        """Nominal-locus families for the current bundle — list of member-index
+        lists, representative (lowest-WL) first — or None when no grouping
+        function is wired (orphan explorer) or it fails.  Cached per (bundle,
+        candidate-count) so stepping doesn't rebuild ConnTopologies each key."""
+        fn = getattr(self, '_groups_fn', None)
+        if fn is None:
+            return None
+        key = (self.bidx, len(self.topos))
+        cache = getattr(self, '_group_cache', None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        try:
+            groups = fn(self.wrapper, self.fp)
+        except Exception:
+            groups = None
+        self._group_cache = (key, groups)
+        return groups
+
+    def _group_of(self, idx):
+        """The family (list of member indices) containing candidate `idx`,
+        or [idx] when grouping is off / idx is its own singleton."""
+        groups = self._explorer_groups()
+        if not groups:
+            return [idx]
+        return next((g for g in groups if idx in g), [idx])
+
+    def _group_position(self):
+        """(family_index, n_families) for the current candidate, or None."""
+        groups = self._explorer_groups()
+        if not groups:
+            return None
+        fam = next((k for k, g in enumerate(groups) if self.idx in g), 0)
+        return fam, len(groups)
+
+    def _toggle_group_step(self):
+        """'G': toggle family-stepping.  On entry snap to the current family's
+        representative so a/d stepping is well-defined."""
+        groups = self._explorer_groups()
+        if not groups:
+            return                       # nothing to group (orphan / all singletons)
+        self._group_step = not getattr(self, '_group_step', False)
+        if self._group_step:
+            self.idx = self._group_of(self.idx)[0]
+        self.sidx = -1
+        self._draw()
+
     def _step_topo(self, delta):
+        # Family-stepping ('G'): jump to the next/prev family's representative
+        # instead of the adjacent candidate — the reduced set to inspect.
+        if getattr(self, '_group_step', False):
+            groups = self._explorer_groups()
+            if groups and len(groups) > 1:
+                cur = next((k for k, g in enumerate(groups)
+                            if self.idx in g), 0)
+                self.idx = groups[(cur + delta) % len(groups)][0]
+                self.sidx = -1
+                self._reset_rerun_btn()
+                self._draw()
+                return
         self.idx = (self.idx + delta) % len(self.topos)
         self.sidx = -1
         self._reset_rerun_btn()
+        self._draw()
+
+    def _group_pin_current(self):
+        """'S': pin the current candidate's FAMILY as a super-candidate (live
+        `input.pinned_group`, like the CLI `select_topology group:`) so the
+        planner refines WHICH member wins.  In-session only — not written to the
+        sidecar (group-pin persistence is a separate follow-up); a plain 's'
+        single-pin or 'x' still overrides it."""
+        members = self._group_of(self.idx)
+        w = self.wrappers[self.bidx]
+        if len(members) < 2:
+            # Degenerate family (singleton) — nothing to group; fall back to the
+            # ordinary single-candidate select so 'S' is never a silent no-op.
+            self._select_current()
+            return
+        if members != [w.plan.selected_topology_index]:
+            w.plan.seg_net_pull = []
+            w.plan.seg_slide_lo = []
+            w.plan.seg_slide_hi = []
+            w.plan.seg_perp = []
+        w.input.pinned_group = list(members)
+        w.input.topology_pinned = False
+        w.plan.selected_topology_index = members[0]
+        self.idx = members[0]
+        self.sidx = -1
         self._draw()
 
 
@@ -227,6 +311,8 @@ class ExplorerNavMixin:
         if event.key == 's':
             if self._current_is_selected(): self._deselect_current()
             else:                           self._select_current()
+        if event.key == 'G':                    self._toggle_group_step()
+        if event.key == 'S':                    self._group_pin_current()
         if event.key == 'x':                    self._deselect_current()
         if event.key == 'r':                    self._rerun_and_refresh()
 

@@ -192,6 +192,18 @@ class ExplorerSidecarMixin:
             wrapper.plan.seg_slide_lo = []
             wrapper.plan.seg_slide_hi = []
 
+        # A group pin ('S') has no sidecar entry, so the block above (gated on a
+        # sidecar selection) never reaches it — clear it here so 'x' un-pins a
+        # group-pinned bundle too.
+        w = self.wrappers[self.bidx]
+        if getattr(w.input, 'pinned_group', []):
+            w.input.pinned_group = []
+            w.input.topology_pinned = False
+            w.plan.seg_net_pull = []
+            w.plan.seg_slide_lo = []
+            w.plan.seg_slide_hi = []
+            w.plan.seg_perp = []
+
         self._draw()
 
 

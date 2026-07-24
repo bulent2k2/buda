@@ -73,7 +73,7 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
                  rerun_fn=None, refresh_fn=None, layer_stack=None,
                  ui_state: ViewState = None, start_bidx=0, layer_visible=None,
                  on_focus_bundle=None, bundle_order_fn=None, fp_resolver=None,
-                 user_ops_sink=None):
+                 user_ops_sink=None, groups_fn=None):
         self.fp          = fp
         # Per-bundle frame resolution (hier): fp_resolver is the session's
         # _make_topo_fp_resolver — wrapper -> the Floorplan its candidates were
@@ -85,6 +85,13 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         # frame.  None (flat session / orphan explorer) = never swap.
         self._session_fp  = fp
         self._fp_resolver = fp_resolver
+        # Optional (wrapper, fp) -> [[idx,...], ...] grouping of a bundle's
+        # candidates into nominal-locus FAMILIES (super-candidates), the
+        # session's _loci_groups.  When set, 'G' toggles family-stepping (a/d
+        # jump family-to-family) and 'S' group-pins the current family.  None
+        # (orphan explorer / no session) -> grouping off, every candidate its own.
+        self._groups_fn   = groups_fn
+        self._group_step  = False   # 'G' toggles: step by family vs by candidate
         self.layer_stack = layer_stack
         self.ui_state    = ui_state or ViewState()
         # Live reference to the main viz's {layer_id: visible} map so a layer
@@ -360,9 +367,14 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
     def __init__(self, floorplan, bundles, sidecar_path=None, rerun_layer_fn=None,
                  rerun_fn=None, routing_grid=None, layer_stack=None,
                  net_endpoints=None, ipc_session=None, ipc_verbose=False,
-                 fp_resolver=None, cuts_provider=None, user_ops_sink=None):
+                 fp_resolver=None, cuts_provider=None, user_ops_sink=None,
+                 groups_fn=None):
         self.fp           = floorplan
         self.bundles      = bundles
+        # Forwarded to the TopologyExplorer it opens ('v'): the session's
+        # _loci_groups, so the explorer can group nominal-locus super-candidates
+        # ('G' family-step / 'S' group-pin).  None (orphan viz) -> grouping off.
+        self._groups_fn   = groups_fn
         # Forwarded to the TopologyExplorer it opens ('v'): the session's
         # _record_user_ops, so a GUI edit_commit stores BDB op-log
         # provenance (see TopologyExplorer.__init__).

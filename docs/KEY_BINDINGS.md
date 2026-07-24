@@ -52,7 +52,9 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `+`, `=` | **Layer Up**: Assign the selected segment to the next higher valid routing layer. |
 | `-`, `_` | **Layer Down**: Assign the selected segment to the next lower valid routing layer. |
 | `s` | **Select/Pin**: Pin the currently viewed topology (and any manual layer assignments) so the planner uses it. |
-| `x` | **Deselect/Unpin**: Remove the manual pin, letting the planner choose automatically. |
+| `G` (Shift+g) | **Family-step toggle**: step `a`/`d` between nominal-locus **families** (super-candidates) instead of every candidate — the near-identical trunk-perp variants collapse to one representative each, so you page through the *distinct* choices. The title shows `▸fam F/M +K` (family F of M, K other variants). No-op when the bundle has no families. |
+| `S` (Shift+s) | **Group-pin**: pin the current candidate's whole **family** as a super-candidate (the GUI twin of `select_topology <b> group:<N>`) — the planner refines WHICH member wins. Live/in-session (not written to the sidecar); a plain `s` or `x` overrides it. On a singleton family it falls back to a single `s` pin. |
+| `x` | **Deselect/Unpin**: Remove the manual pin (single **or** group), letting the planner choose automatically. |
 | `r` | **Re-run Planner**: Re-evaluate global routing and NUTS track assignment after changing a pin. |
 | `b` | Toggle visibility of the floorplan **blocks**. |
 | `t` | Toggle visibility of **busterms**. |
