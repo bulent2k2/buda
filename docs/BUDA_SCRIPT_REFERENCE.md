@@ -40,8 +40,8 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 2 setup | `set_drop_dangling` | Opt-in handling of candidates with a dangling segment or an unclamped slide window (default off): `clamp` bounds unbounded windows to the design extent, `clamp_drop` also drops truly-dangling candidates, `drop`/`on` drops any such candidate |
 | 3 | `set_planner_param` | Tune planner cost coefficients (applied at the next `run_planner`) |
 | 3 | `run_planner` | Select topology + assign layers per segment |
-| 3b | `select_topology` | Manually pin a specific topology candidate for a bundle by its 1-based ID |
-| 3b | `select_topologies` | Batch pin multiple bundles to specific topologies |
+| 3b | `select_topology` | Manually pin a bundle's topology candidate (1-based); bundle given by numeric ID or net-name hint (`bus_033`; `id:`/`net:` to disambiguate) |
+| 3b | `select_topologies` | Batch pin multiple bundles (IDs, ranges, and/or net-name hints) to specific topologies |
 | 3b | `unpin_topology` | Clear a bundle's pin (inverse of `select_topology`); `*` clears all |
 | 3 | `run_nuts` | Abstract 1.5-D track placement |
 | 4b | `run_nuts_on_layer` | Re-solve one layer after inspection |
