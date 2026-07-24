@@ -47,7 +47,14 @@ sys.path[:0] = [str(_ROOT / "build"), str(_ROOT / "src"), str(_ROOT / "tools")]
 import buda        # noqa: E402
 import buda_cli    # noqa: E402
 
-_SENTINEL = 1 << 30   # matches BudaSession._DANGLING_SENTINEL scale
+# Matches BudaSession._DANGLING_SENTINEL (src/buda_session/edit.py).  Must be
+# LOOSE, not exactly 2^30: ConnTopology's unbounded markers are asymmetric —
+# perp_lo = INT_MIN/2 = -1073741824 (|.| = 2^30) but perp_hi = INT_MAX/2 =
+# 1073741823 (= 2^30 - 1).  A `>= 1<<30` test catches the low sentinel and
+# MISSES the high one by one, so a high-side-only unbounded window (e.g. bus_005
+# cand 30/33, slide=[.., 1073741823]) went unreported.  1e8 is far above any
+# real slide coordinate and catches both.
+_SENTINEL = 100_000_000
 
 
 def _dangling_segs(topo, fp):
