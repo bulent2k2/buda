@@ -72,7 +72,14 @@ SETTINGS = {
 }
 _ORDER = list(SETTINGS)
 
-_GEN = ("generate_topologies", "generate_hier_topologies")
+# All the bulk AND per-bundle generation commands that accept the two knobs
+# (generate_topologies_for_bundle/_for_hbundle parse them too — see
+# src/buda_cmds/topologies_cmds.py), so a flow that generates per bundle (e.g.
+# hbundles/03_priority_ordering) is swept, not left on the as-written pool.
+# generate_more_topologies is deliberately NOT here: it is ADDITIVE (appends to
+# an existing pool), so forcing knobs onto it would double-generate.
+_GEN = ("generate_topologies", "generate_hier_topologies",
+        "generate_topologies_for_bundle", "generate_topologies_for_hbundle")
 _CTRL = {"multi_trunk", "no_hanan_loci", "hanan_loci"}
 _SKIP = {"visualize", "visualize_topologies", "report_wl",
          "report_wirelength", "exit"}
@@ -141,8 +148,14 @@ def run_flow(path, extra):
         try:
             s.run_command(f"source {abspath}")
             s._flush_bdb_writeback()
-        except SystemExit:
-            pass                       # a stray exit slipped through (shouldn't)
+        except SystemExit as e:
+            # `exit` is intercepted in _SKIP and never runs, so ANY SystemExit
+            # reaching here is a fatal flow error (unknown command, missing
+            # source, invalid endpoint, missing signal-track grid, …) that
+            # aborted the run — record it so a broken run can't masquerade as a
+            # valid QoR result with partial metrics.
+            if e.code not in (0, None):
+                err = f"SystemExit({e.code})"
         except BaseException as e:     # noqa: BLE001
             err = f"{type(e).__name__}: {e}"
     m = _metrics(s)

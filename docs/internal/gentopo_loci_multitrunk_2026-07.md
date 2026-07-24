@@ -34,10 +34,24 @@ The four settings:
   **trends, not absolute values**, are the result. Reproduce with
   `python3 tools/qor_gentopo_sweep.py` (prints these three tables; `--json OUT`
   saves the raw dict, `--only SUBSTR …` runs a subset).
-- **Caveat — `mix`:** it is the *only* corpus flow that sets a knob as-written
-  (`generate_hier_topologies no_hanan_loci`), so `mix`'s **shipped** endpoint is
-  the **no_hanan_loci** column here, not baseline. Every other flow's baseline
-  column *is* its shipped default.
+- **Caveat — `mix` (its shipped column is `no_loci`, and it differs from
+  qor_corpus.md):** `mix` is the *only* corpus flow that sets a knob as-written
+  (`generate_hier_topologies no_hanan_loci`), so its **shipped** endpoint is the
+  **no_hanan_loci** column here, not baseline (every other flow's baseline column
+  *is* its shipped default). On this measurement host that column ends at
+  **44 opens / 2 ov**, whereas [`qor_corpus.md`](qor_corpus.md) records shipped
+  `mix` as clean (0/0). This is **not** a swapped/mismeasured row — the
+  no_loci = 44/2 endpoint was **confirmed against the real `bin/buda` CLI** run
+  on `flow/rnr/mix.buda` (`ripup_reroute … 173→44 (ovl 2)`) — it is a
+  cross-session **healer host-sensitivity** (both docs flag counts as
+  `-march=native`-sensitive and single-run). Notably, `mix`'s *baseline* column
+  (loci **on**, not the shipped config) heals to 0/0 on this host, i.e. loci-on
+  helps `mix` converge here — the opposite of the corpus-wide no_loci trend, and
+  a single-flow reminder that healer endpoints are pool-path-dependent.
+- **Caveat — per-bundle generation (`hbundles/03`):** it is the only corpus flow
+  that generates with `generate_topologies_for_bundle` (which also accepts the
+  two knobs); the harness rewrites those commands too, so its row *is* swept —
+  it just comes out knob-insensitive (0/0, WL 1950 in all four).
 - **Caveat — healer flows:** on the 5 healer flows (`big2`, `bigHalf`, `mix`,
   `mix2`, `slowdown_rnr`, + the `mix2_repro` debug dup) the endpoint opens depend
   on the healer's convergence path through the candidate pool, which the pool
