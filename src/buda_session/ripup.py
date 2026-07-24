@@ -649,6 +649,16 @@ class RipupMixin:
         window-infeasible candidates) would be lost.  None (the default)
         keeps the derive-from-own-contention behavior byte-identically."""
         cap = _RR_MAX_CANDIDATES_PER_BUNDLE
+        # Group-pinned bundle (a super-candidate): ripup may only move it WITHIN
+        # its pinned family — never to a candidate outside it, which would
+        # silently break the user's `select_topology group:` / 'S' pin.  The
+        # alternate set is therefore exactly the family members (no farness rank
+        # or beyond-window promotion): each trial's replan already re-selects
+        # within the family via the planner's `pinned_group` precedence, so the
+        # members collapse to the same family-best and their order is immaterial.
+        if getattr(w.input, 'pinned_group', None):
+            return [i for i in w.input.pinned_group
+                    if 0 <= i < len(w.input.candidates) and i != old_tidx]
         n = min(len(w.input.candidates), cap)
         idxs = [i for i in range(n) if i != old_tidx]
         if sites is None:
@@ -918,6 +928,12 @@ class RipupMixin:
         alternates: map each overlap/open segment of this bundle -> its seg's
         edge_id (>= 0, deduped).  Empty unless the selected candidate is an MST
         type carrying edge tags, so non-MST bundles pay nothing."""
+        # A group-pinned bundle must stay within its nominal-locus family: a
+        # flip mutates the selected candidate's geometry IN PLACE (outside the
+        # family), so — unlike an index alternate — it would escape the user's
+        # super-candidate pin.  Offer no flips for it (Codex).
+        if getattr(w.input, 'pinned_group', None):
+            return []
         sel = w.plan.selected_topology_index
         cands = w.input.candidates
         if sel < 0 or sel >= len(cands):

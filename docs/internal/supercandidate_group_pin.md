@@ -66,9 +66,12 @@ one nominal.
   knob-replay remap the group by `topo_uid` in `_resort_pool_preserving_selection`,
   hier expansion copies it to every instance wrapper (`_expand_hier_bundles`,
   indices preserved), and a group pin clears any prior candidate's per-segment
-  overrides (the planner may re-choose within the family). **Ripup** and **BDB
-  persistence** of a group pin remain follow-ups (a group pin is a
-  `run_planner`-time, in-session constraint today).
+  overrides (the planner may re-choose within the family). **Ripup** honors it:
+  the `pinned_group` precedence already constrains every trial's replan to the
+  family, and `_rr_candidate_order` additionally restricts a group-pinned
+  bundle's alternate set to the family members, so ripup can never move it out
+  of the family. **BDB / sidecar persistence** of a group pin remains the last
+  follow-up (a group pin is a `run_planner`-time, in-session constraint today).
 
 ### C. Interactive explorer (`TopologyExplorer`)
 The explorer takes an optional `groups_fn` (the session's `_loci_groups`, wired
