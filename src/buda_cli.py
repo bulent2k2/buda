@@ -123,7 +123,13 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         overwritten by every re-run.  With --log (-l), all logs go into the
         run's archive dir log/<cell>/<timestamp>/<suffix> instead, next to
         copies of the exact scripts that produced them, so exploratory re-runs
-        never collide (see _archive_script / main)."""
+        never collide (see _archive_script / main).  With --tag (-t), the tag
+        is inserted immediately before the suffix (<stem>_<tag>_<suffix>), so
+        parallel experiments on one script write to distinct log files instead
+        of overwriting each other."""
+        # --tag: fold the tag in right before the suffix, in every layout below.
+        if self._log_tag:
+            suffix = f"{self._log_tag}_{suffix}"
         if self._log_run_dir:
             os.makedirs(self._log_run_dir, exist_ok=True)
             return os.path.join(self._log_run_dir, suffix)
@@ -264,6 +270,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._flow_log_path = None     # its path (for the "Full detail →" line)
         self._log_run_dir = None       # --log: log/<cell>/<timestamp>/ archive dir (logs + script copies)
         self._log_archived = set()     # --log: origin abspaths already archived this run
+        self._log_tag = None           # --tag: extra token inserted before the log suffix (e.g. rr_experiment)
         self._cmd_stats = []           # per-command (cmd_line, elapsed, nlines, nwarn, nerr) for runtime summary
         self._end_report_done = False  # runtime summary emitted (idempotent guard)
         self._at_last_command = True   # True while running the flow's final command
@@ -464,6 +471,11 @@ def main():
                              'suffix is added automatically')
     parser.add_argument('-nv', '--no-viz', action='store_true',
                         help='skip visualize commands (useful for batch/CI runs)')
+    parser.add_argument('-t', '--tag', metavar='TAG',
+                        help='insert TAG into every log file name for this run '
+                             '(<stem>_<TAG>_flow.log etc.), so parallel '
+                             'experiments on one script keep separate logs '
+                             'instead of overwriting each other')
     parser.add_argument('-l', '--log', action='store_true',
                         help='archive this run: logs go to log/<cell>/<timestamp>/ '
                              '(never overwriting a previous run) together with '
@@ -481,6 +493,15 @@ def main():
     session.no_viz = args.no_viz
     session.verbose_conn = args.verbose_conn
     session.ipc_verbose = args.ipc_verbose
+    if args.tag:
+        # Sanitize to a filename-safe token (the tag becomes part of a path):
+        # keep alphanumerics, dash, underscore and dot; fold everything else
+        # (spaces, slashes, …) to '_'.  Underscore is itself legal, so it is
+        # NOT stripped — `--tag exp` and `--tag exp/` must stay distinct (the
+        # latter folds to `exp_`), and `--tag _` is a real tag.  Only a tag
+        # that sanitizes to empty (e.g. `--tag ""`) falls back to no tag.
+        tag = re.sub(r'[^0-9A-Za-z._-]', '_', args.tag)
+        session._log_tag = tag or None
     if args.script:
         script = args.script
         if not os.path.exists(script) and not script.endswith('.buda'):

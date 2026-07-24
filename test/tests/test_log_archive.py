@@ -129,3 +129,63 @@ def test_default_logging_unchanged_without_flag(tmp_path):
     _run_main(flow)
     assert (tmp_path / "log" / "cellA_flow.log").is_file()
     assert not (tmp_path / "log" / "cellA").exists()
+
+
+# --- -t / --tag: insert a token before the log suffix -----------------------
+
+def test_tag_inserted_into_log_name(tmp_path):
+    flow = _write_flow(tmp_path)
+    out = _run_main(flow, "-t", "expA")
+    # <stem>_<tag>_flow.log — and the pointer line names it.
+    tagged = tmp_path / "log" / "cellA_expA_flow.log"
+    assert tagged.is_file()
+    assert str(tagged) in out
+    # The untagged default name is NOT written.
+    assert not (tmp_path / "log" / "cellA_flow.log").exists()
+
+
+def test_two_tags_dont_collide(tmp_path):
+    flow = _write_flow(tmp_path)
+    _run_main(flow, "--tag", "baseline")
+    _run_main(flow, "--tag", "variant")
+    assert (tmp_path / "log" / "cellA_baseline_flow.log").is_file()
+    assert (tmp_path / "log" / "cellA_variant_flow.log").is_file()
+
+
+def test_tag_sanitized_to_filename_safe_token(tmp_path):
+    flow = _write_flow(tmp_path)
+    # Slashes / spaces would break the path — they fold to '_'.
+    _run_main(flow, "-t", "exp/B run 2")
+    assert (tmp_path / "log" / "cellA_exp_B_run_2_flow.log").is_file()
+
+
+def test_underscores_preserved_so_similar_tags_stay_distinct(tmp_path):
+    # Underscore is a legal tag char, so it must NOT be stripped: `exp` and
+    # `exp/` (the slash folds to `_`) have to keep separate logs, and a
+    # bare `_` is a real tag — otherwise the flag fails its one job.
+    flow = _write_flow(tmp_path)
+    _run_main(flow, "-t", "exp")
+    _run_main(flow, "-t", "exp/")      # -> exp_
+    _run_main(flow, "-t", "_")         # kept, not folded back to untagged
+    assert (tmp_path / "log" / "cellA_exp_flow.log").is_file()
+    assert (tmp_path / "log" / "cellA_exp__flow.log").is_file()
+    assert (tmp_path / "log" / "cellA___flow.log").is_file()
+    # The three are distinct files, and none is the untagged default.
+    assert not (tmp_path / "log" / "cellA_flow.log").exists()
+
+
+def test_empty_tag_falls_back_to_untagged(tmp_path):
+    # A tag that sanitizes to empty (only `""` can) is a no-op, not a crash.
+    flow = _write_flow(tmp_path)
+    _run_main(flow, "--tag", "")
+    assert (tmp_path / "log" / "cellA_flow.log").is_file()
+
+
+def test_tag_composes_with_log_archive(tmp_path):
+    flow = _write_flow(tmp_path)
+    _run_main(flow, "-l", "-t", "combo")
+    (run,) = _run_dirs(tmp_path)
+    # Inside the archive dir the file is <tag>_flow.log (no stem prefix there,
+    # mirroring the untagged run-dir layout).
+    assert (run / "combo_flow.log").is_file()
+    assert not (run / "flow.log").exists()

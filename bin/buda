@@ -24,10 +24,13 @@ if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] \
    && open --help 2>&1 | grep -q -- '--stdout'; then
   # First non-option arg is the script; skip the reroute for --no-viz batch runs
   # (no window to name) and when no script is given (let the CLI print help).
-  SCRIPT_ARG=""; NOVIZ=""
+  SCRIPT_ARG=""; NOVIZ=""; SKIP=""
   for a in "$@"; do
+    # The token after -t/--tag is the tag VALUE, not the script — skip it.
+    if [ -n "$SKIP" ]; then SKIP=""; continue; fi
     case "$a" in
       -nv|--no-viz) NOVIZ=1 ;;
+      -t|--tag) SKIP=1 ;;
       -*) ;;
       *) [ -z "$SCRIPT_ARG" ] && SCRIPT_ARG="$a" ;;
     esac
@@ -70,8 +73,14 @@ PLIST
     # `open` launches from a different cwd, so anchor every relative path arg to
     # THIS cwd — including the `.buda`-less script form the CLI would infer
     # (`buda demo/foo` → demo/foo.buda). Absolute paths and options pass through.
-    ARGS=()
+    ARGS=(); SKIP=""
     for a in "$@"; do
+      # The token after -t/--tag is an opaque tag VALUE — pass it through
+      # verbatim, never anchor it to a path (the CLI sanitizes it itself).
+      if [ -n "$SKIP" ]; then ARGS+=("$a"); SKIP=""; continue; fi
+      case "$a" in
+        -t|--tag) ARGS+=("$a"); SKIP=1; continue ;;
+      esac
       if [ -e "$a" ]; then
         ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" )")
       elif [ -e "$a.buda" ]; then

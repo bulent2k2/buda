@@ -15,7 +15,7 @@ the standard flow, see the [User Guide](USER_GUIDE.md).
 ## Synopsis
 
 ```
-buda [-nv | --no-viz] [-l | --log] [--verbose-conn] [--ipc-verbose] [-h] <script.buda>
+buda [-nv | --no-viz] [-t | --tag TAG] [-l | --log] [--verbose-conn] [--ipc-verbose] [-h] <script.buda>
 ```
 
 The CLI itself is `src/buda_cli.py`; you normally invoke it through the `bin/buda`
@@ -50,6 +50,7 @@ relative to the sourcing script's directory.
 |---|---|---|
 | `-h`, `--help` | — | Print usage (auto-generated from the flags below) and exit. |
 | `-nv`, `--no-viz` | off | Skip `visualize` / `visualize_topologies` commands so no GUI window opens. Use for batch runs, tests, and CI. The full pipeline still runs and all logs are written. |
+| `-t`, `--tag TAG` | none | Insert `TAG` into every log file name for this run, immediately before the suffix: `log/<cell>_<TAG>_flow.log`, `…_<TAG>_nuts.log`, etc. (with `-l`, `log/<cell>/<timestamp>/<TAG>_flow.log`). The default log names are overwritten by every re-run of the same script; a tag gives parallel experiments on one script (say two planner-knob settings, or the two `ripup_reroute` calls) their own log files instead. `TAG` is sanitized to a filename-safe token — anything outside `[0-9A-Za-z._-]` (spaces, slashes, …) becomes `_`. |
 | `-l`, `--log` | off | **Archive the run.** All logs go to a fresh `log/<cell>/<timestamp>/` dir (never overwriting a previous run's) together with a copy of the **exact scripts executed** — the top-level `.buda` and every `source`d file, snapshotted the moment each is sourced, with a `MANIFEST` mapping each copy to its origin path (same-basename collisions are uniquified; a re-sourced file is archived once, but every distinct origin path gets its own copy and `MANIFEST` line, even when byte-identical). Made for exploratory tweak-and-re-run loops: each run keeps its logs *and* the script text that produced them. The dir is printed at start (`Run archive → …`). Without the flag, logging is unchanged (`log/<cell>_flow.log`, overwritten per run). |
 | `--verbose-conn` | off | Make `check_design` (alias `check_connectivity`) print **every** per-bit violation individually. By default per-bit violations are collapsed into one line per (bundle, topology, kind, locus) group with a total — on a large design this turns tens of thousands of lines into a few hundred. |
 | `--ipc-verbose` | off | Surface the `buda_viz` ↔ `def_viz` IPC socket **status** chatter (`[viz_ipc] listening on …`, `[buda_viz] IPC session=… connected=…`, `[buda_viz] IPC timer started …`). These are debugging lines and are hidden by default. Socket **errors** are always printed regardless of this flag. |
@@ -125,6 +126,11 @@ cat flow/rnr/log/mix_flow.log
 bin/buda -l flow/rnr/mix.buda
 ls flow/rnr/log/mix/            # one <timestamp>/ dir per run
 cat flow/rnr/log/mix/20260712-153042/MANIFEST
+
+# Tag the logs so two experiments on one script don't overwrite each other
+bin/buda --no-viz -t baseline  flow/rnr/mix.buda   # → log/mix_baseline_flow.log
+bin/buda --no-viz -t kseg500   flow/rnr/mix.buda   # → log/mix_kseg500_flow.log
+diff flow/rnr/log/mix_baseline_flow.log flow/rnr/log/mix_kseg500_flow.log
 
 # Full per-bit connectivity detail on the terminal
 bin/buda --no-viz --verbose-conn flow/rnr/mix.buda
