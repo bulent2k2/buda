@@ -159,13 +159,18 @@ def _spans_block(horiz, along_lo, along_hi, perp, rect):
     return rect.x1 <= perp <= rect.x2 and along_lo <= rect.y2 and along_hi >= rect.y1
 
 
-def _draw_blocks(ax, blocks, highlight):
+def _draw_blocks(ax, blocks, contained, busterms=frozenset()):
     for name, r in blocks:
-        fc, ec = ("#ffd27f", "#d08a00") if name in highlight else ("#eef1f5", "#9aa6b2")
+        if name in busterms:                        # green = driver/receiver busterm tap
+            fc, ec, lw = "#a6e3a1", "#2e7d32", 2.0
+        elif name in contained:                     # orange = pass-through containment
+            fc, ec, lw = "#ffd27f", "#d08a00", 1.4
+        else:
+            fc, ec, lw = "#eef1f5", "#9aa6b2", 1.4
         ax.add_patch(Rectangle((r.x1, r.y1), r.x2 - r.x1, r.y2 - r.y1,
-                               fc=fc, ec=ec, lw=1.4, alpha=0.7, zorder=1))
+                               fc=fc, ec=ec, lw=lw, alpha=0.7, zorder=1))
         ax.text((r.x1 + r.x2) / 2, (r.y1 + r.y2) / 2, name, ha="center", va="center",
-                fontsize=7, color="#555", zorder=2, clip_on=True)
+                fontsize=7, color="#333" if name in busterms else "#555", zorder=2, clip_on=True)
 
 
 def _draw_topology(ax, s, w, blocks):
@@ -185,7 +190,7 @@ def _draw_topology(ax, s, w, blocks):
             if name not in busterm and _spans_block(seg.horiz, seg.along_lo,
                                                      seg.along_hi, seg.perp_pos, r):
                 contained.add(name)
-    _draw_blocks(ax, blocks, contained)
+    _draw_blocks(ax, blocks, contained, busterm)
     for i, seg in enumerate(segs):
         col = _layer_color(seg.layer_id)
         if seg.horiz:
@@ -205,8 +210,8 @@ def _draw_topology(ax, s, w, blocks):
             ax.text(x, (seg.along_lo + seg.along_hi) / 2, f"s{i}", fontsize=7,
                     ha="left", va="center", color=col, zorder=6)
     ax.set_title(f"TOPOLOGY — {topo.type}\n{len(topo.segments)} segs · wl={topo.estimated_wirelength}"
-                 "\norange = containment · faint band = slide range", fontsize=9)
-    return contained
+                 "\ngreen = busterm tap · orange = containment · band = slide range", fontsize=9)
+    return contained, busterm
 
 
 def _involved_blocks(s, w, blocks):
@@ -228,8 +233,8 @@ def _involved_blocks(s, w, blocks):
     return [(n, r) for n, r in blocks if n in names]
 
 
-def _draw_nuts(ax, s, bundle_id, blocks, highlight):
-    _draw_blocks(ax, blocks, highlight)
+def _draw_nuts(ax, s, bundle_id, blocks, contained, busterms=frozenset()):
+    _draw_blocks(ax, blocks, contained, busterms)
     segs = [g for g in s.nuts_result.segments if g.bundle_id == bundle_id]
     for g in segs:
         col = _layer_color(g.layer)
@@ -252,8 +257,8 @@ def _draw_nuts(ax, s, bundle_id, blocks, highlight):
                  f"{nr.num_violations} violations\nthick = bus centre · band = Hanan interval", fontsize=9)
 
 
-def _draw_dnuts(ax, s, bundle_id, blocks, highlight):
-    _draw_blocks(ax, blocks, highlight)
+def _draw_dnuts(ax, s, bundle_id, blocks, contained, busterms=frozenset()):
+    _draw_blocks(ax, blocks, contained, busterms)
     horiz_of = {g.seg_idx: g.horiz for g in s.nuts_result.segments if g.bundle_id == bundle_id}
     nets = [ns for ns in s.detailed_result.net_segments if ns.bundle_id == bundle_id]
     for ns in nets:
@@ -318,10 +323,10 @@ def main():
 
     n_panels = 2 if args.no_dnuts else 3
     fig, axes = plt.subplots(1, n_panels, figsize=(7 * n_panels, 7))
-    contained = _draw_topology(axes[0], s, w, blocks)
-    _draw_nuts(axes[1], s, bid, blocks, contained)
+    contained, busterms = _draw_topology(axes[0], s, w, blocks)
+    _draw_nuts(axes[1], s, bid, blocks, contained, busterms)
     if not args.no_dnuts:
-        _draw_dnuts(axes[2], s, bid, blocks, contained)
+        _draw_dnuts(axes[2], s, bid, blocks, contained, busterms)
 
     # Shared view extent (zoom to the bundle's NUTS segments when --zoom).
     segs_xy = []
