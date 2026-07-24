@@ -212,14 +212,22 @@ def cmd_run_planner(session, cmd, args, cmd_line):
 
 
 def cmd_select_topology(session, cmd, args, cmd_line):
-    # Usage: select_topology <bundle_id | hint | id:N | net:PREFIX> <topo_id>
+    # Usage: select_topology <bundle_id | hint | id:N | net:PREFIX> <topo_id | group:N>
     #   bare integer  -> bundle ID (legacy);  bare non-numeric -> net-name hint
     #   id:N          -> force bundle ID;     net:PFX (name:/hint:) -> force hint
+    #   <topo_id>     -> pin that single 1-based candidate
+    #   group:<N>     -> pin the whole nominal-locus FAMILY (super-candidate) that
+    #                    contains candidate N; the planner refines which member wins
     if len(args) < 2:
-        print("Error: select_topology requires <bundle_id|hint> and <topo_id> (1-based)")
+        print("Error: select_topology requires <bundle_id|hint> and "
+              "<topo_id|group:N> (1-based)")
         return
+    grp = False
+    tok = args[1]
+    if tok.lower().startswith("group:"):
+        grp, tok = True, tok.split(":", 1)[1]
     try:
-        tid = int(args[1])
+        tid = int(tok)
     except ValueError:
         print(f"Error: invalid topology id '{args[1]}'")
         return
@@ -229,7 +237,7 @@ def cmd_select_topology(session, cmd, args, cmd_line):
         return
     applied = False
     for bid in bids:
-        if session._select_single_topology_internal(bid, tid):
+        if session._select_single_topology_internal(bid, tid, group=grp):
             applied = True
     if applied:
         session._replan_layers()

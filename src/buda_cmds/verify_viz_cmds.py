@@ -144,10 +144,15 @@ def cmd_dump_topologies(session, cmd, args, cmd_line):
     # for the selected candidate: what each seg connects to (busterms +
     # other segs), the busterms it passes through, its slide range, and
     # its net-pull preference. Read-only: never mutates session state.
+    # `--grouped` collapses nominal-locus FAMILIES (super-candidates) to one
+    # representative row each (the lowest-WL member), annotated with the
+    # variant count + perp span — the reduced set the user inspects before a
+    # `select_topology <b> group:<rep>` group-pin.  Purely a display option.
     problems_only = "--problems" in args
     conn_detail = "--conn" in args
+    grouped = "--grouped" in args
     hint = next((a for a in args if not a.startswith("--")), None)
-    session._dump_topologies(hint, problems_only, conn_detail)
+    session._dump_topologies(hint, problems_only, conn_detail, grouped)
 
 
 def cmd_visualize(session, cmd, args, cmd_line):

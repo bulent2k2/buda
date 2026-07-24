@@ -543,7 +543,8 @@ void bind_routing(py::module_& m) {
         .def_readwrite("pinned_seg_layers", &BundleInput::pinned_seg_layers)
         .def_readwrite("assigned_v_layer",  &BundleInput::assigned_v_layer)
         .def_readwrite("assigned_h_layer",  &BundleInput::assigned_h_layer)
-        .def_readwrite("topology_pinned",   &BundleInput::topology_pinned);
+        .def_readwrite("topology_pinned",   &BundleInput::topology_pinned)
+        .def_readwrite("pinned_group",      &BundleInput::pinned_group);
 
     py::class_<BundlePlan>(m, "BundlePlan")
         .def(py::init<>())
