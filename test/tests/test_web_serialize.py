@@ -122,16 +122,28 @@ def test_serialize_topology_and_analysis():
 
 
 def test_free_slide_windows_serialize_as_null():
-    """Open-space MST legs keep the ConnTopology sentinel; it must become JSON
-    null (not a ~1e9 int) so the client can tell 'unconstrained' from a bound."""
+    """A free (unbounded) ConnTopology slide window keeps the sentinel; it must
+    become JSON null (not a ~1e9 int) so the client can tell 'unconstrained' from
+    a bound.  The surviving free-window carriers are the LEGIT OOB detour trunks
+    (each open on its outward side) — the redundant OOB+MST hybrids that used to
+    carry many free legs are now dropped at generation by the seed-trunk
+    removability gate."""
+    import buda
     s = _b44_generated()
     w = s.bundles[0]
     fp = serialize.bundle_floorplan(s, w)
-    oob = next(c for c in w.input.candidates if c.type == "TRUNK_V_OOB+MST@x-246")
-    t = _json_roundtrip(serialize.serialize_topology(oob, fp))
+    # pick any candidate with at least one free slide window
+    target = None
+    for c in w.input.candidates:
+        ct = buda.ConnTopology(); ct.build(c, s.fp)
+        if any(abs(cs.perp_lo) >= serialize._SENTINEL or
+               abs(cs.perp_hi) >= serialize._SENTINEL for cs in ct.segs()):
+            target = c; break
+    assert target is not None, "expected a candidate with a free slide window"
+    t = _json_roundtrip(serialize.serialize_topology(target, fp))
     nulls = sum(1 for a in t["analysis"]
                 if a["perp_lo"] is None or a["perp_hi"] is None)
-    assert nulls >= 5    # the documented 5/9 FREE legs on this candidate
+    assert nulls >= 1    # the free leg(s) serialized as null, not a sentinel int
     # no residual sentinel-magnitude ints leaked through
     for a in t["analysis"]:
         for k in ("perp_lo", "perp_hi"):
@@ -194,7 +206,7 @@ def test_render_none_before_stages():
 
 
 def test_generation_golden_snapshot():
-    """The generation render payload (floorplan + all 35 b44 candidates + their
+    """The generation render payload (floorplan + all b44 candidates + their
     ConnTopology analysis) is byte-frozen.  This catches any serializer drift AND
     is the reference the ported Renderer/DisplayGeom is validated against, so the
     client math cannot silently diverge from the server payload.  The payload is

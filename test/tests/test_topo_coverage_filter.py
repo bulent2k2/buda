@@ -136,4 +136,9 @@ def test_undeclared_feedthru_relay_dropped_when_clean_alternative_exists(capfd):
     assert not survivors_with_relay, f"relay candidate survived the gate: {survivors_with_relay}"
     # ...and clean trunk candidates remain (the bundle is not stranded).
     assert any(buda.ViolationKind.BUSTERM_OPEN not in _relay_kinds(c, fp) for c in cands)
-    assert "feedthru-relay" in capfd.readouterr().err   # the drop was logged
+    # The drop is logged.  A relay hybrid whose seed trunk is redundant is now
+    # dropped earlier by the seed-trunk removability gate ("redundant trunk+MST")
+    # rather than by filter_uncovered's FEEDTHRU_RELAY cull ("feedthru-relay");
+    # either way it is not silent.
+    err = capfd.readouterr().err
+    assert "feedthru-relay" in err or "redundant trunk+MST" in err

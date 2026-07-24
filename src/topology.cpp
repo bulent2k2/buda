@@ -3259,6 +3259,13 @@ void TopologyGenerator::add_trunk_mst_candidates(
     // so configs that already have clean coverage don't get an extra relay candidate.
     std::vector<Topology> fallback_pool;
 
+    // Observability for the seed-trunk removability drop (docs/internal/
+    // bus005_dangling_scan): a redundant trunk hybrid is dropped silently
+    // otherwise, and silent drops are exactly what this line of work set out to
+    // make visible.  Counted across all trunk positions; logged once below.
+    int n_redundant_dropped = 0;
+    std::string first_redundant;
+
     for (int ti = 0; ti < orig_count; ++ti) {
         const Topology& trunk_topo = results[ti];
         bool is_h = (trunk_topo.type.find("TRUNK_H") != std::string::npos);
@@ -3498,9 +3505,14 @@ void TopologyGenerator::add_trunk_mst_candidates(
             // is vestigial).  Applies to OOB detour trunks too: a genuine detour
             // is NOT removable (removing it disconnects), while a redundant OOB
             // trunk that hangs off the tree at one point IS (bus_033 cand 29).
-            if (topology_is_clean_tree(tree, floorplan_) &&
-                !seed_trunk_is_redundant(tree, trunk_pos, is_h, floorplan_))
-                results.push_back(std::move(tree));
+            if (topology_is_clean_tree(tree, floorplan_)) {
+                if (seed_trunk_is_redundant(tree, trunk_pos, is_h, floorplan_)) {
+                    ++n_redundant_dropped;
+                    if (first_redundant.empty()) first_redundant = tree.type;
+                } else {
+                    results.push_back(std::move(tree));
+                }
+            }
             // A simple hybrid that can't be cleanly completed is DROPPED (the base
             // trunk + standalone MST already cover the bundle).
             continue;
@@ -3541,6 +3553,11 @@ void TopologyGenerator::add_trunk_mst_candidates(
         // still covers the bundle).
         bool legacy_dangling =
             seed_trunk_is_redundant(legacy, trunk_pos, is_h, floorplan_);
+        if (legacy_dangling &&
+            (topology_is_clean_tree(legacy, floorplan_) || blocks.size() < 4)) {
+            ++n_redundant_dropped;                 // would have emitted/pooled but for redundancy
+            if (first_redundant.empty()) first_redundant = legacy.type;
+        }
         if (topology_is_clean_tree(legacy, floorplan_) && !legacy_dangling) {
             results.push_back(std::move(legacy));
         } else if (blocks.size() < 4 && !legacy_dangling) {
@@ -3558,6 +3575,11 @@ void TopologyGenerator::add_trunk_mst_candidates(
             fallback_pool.push_back(std::move(uncompleted));
         }
     }
+
+    if (n_redundant_dropped > 0)
+        std::cerr << "[TopoGen] dropped " << n_redundant_dropped
+                  << " redundant trunk+MST hybrid(s) (removable seed trunk; first: "
+                  << first_redundant << ").\n";
 
     // Emit a single un-completed fallback ONLY if the whole bundle produced no clean
     // MST-type candidate (neither here nor in the completed-tree path above) -- so a
