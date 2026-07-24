@@ -556,9 +556,24 @@ class ExplorerDrawMixin:
         layer_summary = " ".join(layer_summary_parts)
         
         nterms = self.wrapper.input.original_bundle.num_terminals
+        # Super-candidate family annotation: `fam F/M` (this candidate's family
+        # index / family count) with a `▸` when family-stepping ('G') is active
+        # and `+K` for the K other nominal-locus variants in the family.
+        fam_str = ""
+        grp_pos = self._group_position()
+        if grp_pos is not None:
+            fam_i, n_fam = grp_pos
+            k = len(self._group_of(self.idx)) - 1
+            mark = "▸" if getattr(self, '_group_step', False) else ""
+            fam_str = (f" · {mark}fam {fam_i + 1}/{n_fam}"
+                       + (f" +{k}" if k > 0 else ""))
+        # GROUP-PINNED badge (the 'S' super-candidate pin has no sidecar entry).
+        gpin = getattr(self.wrapper.input, 'pinned_group', [])
+        grp_badge = (f"  ◆ GROUP-PINNED ({len(gpin)})"
+                     + (" • member" if self.idx in gpin else "")) if gpin else ""
         title_main = (
-            f"{bus_label}B{bid} ({nterms} terms/{len(topo.segments)} segs) · topo {self.idx + 1}/{n} "
-            f"· {topo.type} · WL={wl} · [{layer_summary}]{sel_badge}"
+            f"{bus_label}B{bid} ({nterms} terms/{len(topo.segments)} segs) · topo {self.idx + 1}/{n}"
+            f"{fam_str} · {topo.type} · WL={wl} · [{layer_summary}]{sel_badge}{grp_badge}"
         )
         
         title_color = 'black'

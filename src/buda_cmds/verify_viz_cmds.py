@@ -130,6 +130,7 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
                          layer_stack=session.layers,
                          start_bidx=start,
                          fp_resolver=session._make_topo_fp_resolver(),
+                         groups_fn=session._loci_groups,
                          user_ops_sink=session._record_user_ops).show()
 
 
@@ -187,6 +188,7 @@ def cmd_visualize(session, cmd, args, cmd_line):
                          ipc_verbose=session.ipc_verbose,
                          fp_resolver=session._make_topo_fp_resolver(),
                          cuts_provider=_cuts_provider,
+                         groups_fn=session._loci_groups,
                          user_ops_sink=session._record_user_ops)
     viz.draw_blocks()
     if session.planner is not None:

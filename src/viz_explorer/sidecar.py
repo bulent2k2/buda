@@ -166,7 +166,12 @@ class ExplorerSidecarMixin:
 
         wrapper.plan.selected_topology_index = self.idx
         wrapper.input.topology_pinned = True
-        
+        # A single pin ('s') must override any prior group pin ('S') — the
+        # planner consumes pinned_group BEFORE topology_pinned, so a stale family
+        # would keep constraining the bundle and the sidecar would misrecord the
+        # representative as a plain single pin (Codex).
+        wrapper.input.pinned_group = []
+
         self._selections[hint] = sel
         self._save_sidecar()
         self._draw()
@@ -191,6 +196,18 @@ class ExplorerSidecarMixin:
             wrapper.plan.seg_net_pull = []
             wrapper.plan.seg_slide_lo = []
             wrapper.plan.seg_slide_hi = []
+
+        # A group pin ('S') has no sidecar entry, so the block above (gated on a
+        # sidecar selection) never reaches it — clear it here so 'x' un-pins a
+        # group-pinned bundle too.
+        w = self.wrappers[self.bidx]
+        if getattr(w.input, 'pinned_group', []):
+            w.input.pinned_group = []
+            w.input.topology_pinned = False
+            w.plan.seg_net_pull = []
+            w.plan.seg_slide_lo = []
+            w.plan.seg_slide_hi = []
+            w.plan.seg_perp = []
 
         self._draw()
 

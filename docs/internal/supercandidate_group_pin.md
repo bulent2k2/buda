@@ -67,9 +67,22 @@ one nominal.
   hier expansion copies it to every instance wrapper (`_expand_hier_bundles`,
   indices preserved), and a group pin clears any prior candidate's per-segment
   overrides (the planner may re-choose within the family). **Ripup** and **BDB
-  persistence** of a group pin, and grouping in the **interactive explorer**,
-  remain follow-ups (a group pin is a `run_planner`-time, in-session constraint
-  today).
+  persistence** of a group pin remain follow-ups (a group pin is a
+  `run_planner`-time, in-session constraint today).
+
+### C. Interactive explorer (`TopologyExplorer`)
+The explorer takes an optional `groups_fn` (the session's `_loci_groups`, wired
+from both `visualize_topologies` and the main viz's `v`). With it:
+- **`G`** toggles *family-stepping* — `a`/`d` jump family-to-family (one
+  representative each) instead of candidate-to-candidate, so the user pages the
+  *distinct* choices; the title shows `▸fam F/M +K`.
+- **`S`** *group-pins* the current family (live `input.pinned_group`, the GUI
+  twin of `select_topology group:`; singleton families fall back to a single
+  `s` pin), and **`x`** clears a group pin as well as a single pin.
+
+Grouping is off (every candidate its own) when no `groups_fn` is supplied
+(orphan explorer). The group pin is live/in-session — not written to the sidecar
+(that rides on the BDB-persistence follow-up).
 
 ## Why this is the byte-identical answer (and dedup is not)
 
@@ -87,4 +100,10 @@ planner resolves it (B).
 - `src/buda_session/edit.py` — `_loci_groups`; group branch in `_select_single_topology_internal`; `_unpin_topology_internal` clears it.
 - `src/buda_cmds/planner_cmds.py` — `group:<N>` parse in `select_topology`.
 - `src/buda_session/reports.py` — `dump_topologies --grouped` + `_locus_coord`.
+- `src/buda_viz.py` — `groups_fn` on `TopologyExplorer` + `BudaVisualizer`.
+- `src/viz_explorer/nav.py` — `_explorer_groups`/`_group_of`/`_group_position`, family-aware `_step_topo`, `_toggle_group_step` (`G`), `_group_pin_current` (`S`).
+- `src/viz_explorer/draw.py` — title `▸fam F/M +K` + `◆ GROUP-PINNED` badge.
+- `src/viz_explorer/sidecar.py` — `_deselect_current` clears a group pin.
+- `src/buda_cmds/verify_viz_cmds.py`, `src/viz_main/view.py` — wire `groups_fn`.
 - `test/tests/test_supercandidate.py` — grouping, restrict, refine, byte-identical, clear.
+- `test/tests/test_topo_explorer_grouping.py` — explorer families, family-step, group-pin, `x`-clear, singleton fallback, off-without-groups_fn.
