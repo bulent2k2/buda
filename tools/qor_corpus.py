@@ -29,6 +29,11 @@ Usage:
   git checkout branch && bin/bb && tools/qor_corpus.py --out mine.json
   tools/qor_corpus.py --compare base.json mine.json
 
+`--compare` tags each moved flow BETTER/WORSE on the QoR metric
+(overlaps/unplaced) and exits non-zero if any regressed, then prints an
+informational runtime diff (total corpus wall-clock + the largest per-flow
+movers) — runtime is single-run and noisy, so it is reported but never gates.
+
   # just a subset (e.g. while iterating on one flow)
   tools/qor_corpus.py --flows flow/rnr/mix.buda flow/rnr/slowdown_rnr.buda
 
@@ -113,8 +118,13 @@ def run_flow(flow):
                 s.do_command(f"source {os.path.basename(flow)}")
             finally:
                 os.chdir(cwd)
-    except SystemExit:
-        pass                                    # `exit` in a flow is normal
+    except SystemExit as e:
+        # An intentional `exit` / `exit 0` ends a flow normally — fall through
+        # and capture its metrics.  A NONZERO code is a CLI fail-fast (unknown
+        # command, missing nested `source`, ...): a real abort that must surface
+        # as an err row, not masquerade as a completed None/None measurement.
+        if e.code not in (0, None):
+            return {"flow": flow, "err": f"SystemExit({e.code})"}
     except Exception as e:                      # noqa: BLE001 — record, don't crash the sweep
         return {"flow": flow, "err": f"{type(e).__name__}: {str(e)[:80]}"}
     dt = time.time() - t0
@@ -143,12 +153,45 @@ def cmd_run(flows, out):
     return results
 
 
-def _score(r):
-    """A single comparable number: overlaps + unplaced (None -> 0 for ordering
-    only).  err rows sort worst."""
+def _rank(r):
+    """Sort key for regression detection (higher = worse), as a tuple:
+    (n_missing_metrics, overlaps + unplaced).
+
+    A None metric means a pipeline STAGE DID NOT RUN on this build.  It ranks
+    worse than any real count, so a branch that stops reaching NUTS/DNUTS where
+    the baseline produced a number is flagged WORSE — not a clean 'changed' that
+    slips past the guard (Codex P2).  A flow that is None on BOTH builds (never
+    runs DNUTS by design) is caught earlier by the string-equality skip, so its
+    missing metric is never mistaken for a regression.  err rows rank worst."""
     if "err" in r:
-        return float("inf")
-    return (r.get("overlaps") or 0) + (r.get("unplaced") or 0)
+        return (3, 0)
+    ov, un = r.get("overlaps"), r.get("unplaced")
+    n_missing = (ov is None) + (un is None)
+    return (n_missing, (ov or 0) + (un or 0))
+
+
+def _runtime_report(paired):
+    """Informational runtime diff (single-run and noisy, so NOT part of the
+    pass/fail guard): total corpus wall-clock plus the largest per-flow movers."""
+    timed = [(f, b, m) for f, b, m in paired
+             if isinstance(b.get("sec"), (int, float))
+             and isinstance(m.get("sec"), (int, float))]
+    if not timed:
+        return
+    tb = sum(b["sec"] for _, b, _ in timed)
+    tm = sum(m["sec"] for _, _, m in timed)
+    d = tm - tb
+    pct = (100 * d / tb) if tb else 0.0
+    print("\nruntime (informational — single-run, noisy; not a guard):")
+    print(f"  total {tb:.1f}s -> {tm:.1f}s  ({d:+.1f}s, {pct:+.1f}%)")
+    movers = sorted(timed, key=lambda x: abs(x[2]["sec"] - x[1]["sec"]),
+                    reverse=True)
+    for f, b, m in movers:
+        ds = m["sec"] - b["sec"]
+        if abs(ds) < 1.0:                       # sub-second deltas are noise
+            break
+        print(f"  {f.replace('flow/', ''):<46} "
+              f"{b['sec']:>6.1f}s -> {m['sec']:>6.1f}s  {ds:+.1f}s")
 
 
 def cmd_compare(base_path, mine_path):
@@ -171,8 +214,8 @@ def cmd_compare(base_path, mine_path):
         if bf == mf:
             n_same += 1
             continue                            # unchanged rows are noise; skip
-        tag = "BETTER" if _score(m) < _score(b) else \
-              "WORSE" if _score(m) > _score(b) else "changed"
+        tag = "BETTER" if _rank(m) < _rank(b) else \
+              "WORSE" if _rank(m) > _rank(b) else "changed"
         if tag == "BETTER":
             n_better += 1
         elif tag == "WORSE":
@@ -180,6 +223,8 @@ def cmd_compare(base_path, mine_path):
         print(f"{f.replace('flow/', ''):<48} {bf:>14} {mf:>14}  {tag}")
     print(f"\n{n_better} better, {n_worse} worse, {n_same} unchanged "
           f"(of {len(flows)} flows).  Metric = overlaps/unplaced.")
+    _runtime_report([(f, base[f], mine[f]) for f in flows
+                     if f in base and f in mine])
     return n_worse
 
 
@@ -193,8 +238,8 @@ def main():
     ap.add_argument("--out", metavar="PATH",
                     help="write the run's results as JSON to PATH")
     ap.add_argument("--compare", nargs=2, metavar=("BASE", "BRANCH"),
-                    help="diff two result JSONs (from earlier --out runs); "
-                         "exits non-zero if any flow regressed")
+                    help="diff two result JSONs (from earlier --out runs) on "
+                         "QoR + runtime; exits non-zero if any flow regressed")
     args = ap.parse_args()
 
     if args.compare:
