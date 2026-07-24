@@ -496,8 +496,11 @@ def main():
     if args.tag:
         # Sanitize to a filename-safe token (the tag becomes part of a path):
         # keep alphanumerics, dash, underscore and dot; fold everything else
-        # (spaces, slashes, …) to '_'.  An all-illegal tag falls back to None.
-        tag = re.sub(r'[^0-9A-Za-z._-]', '_', args.tag).strip('_')
+        # (spaces, slashes, …) to '_'.  Underscore is itself legal, so it is
+        # NOT stripped — `--tag exp` and `--tag exp/` must stay distinct (the
+        # latter folds to `exp_`), and `--tag _` is a real tag.  Only a tag
+        # that sanitizes to empty (e.g. `--tag ""`) falls back to no tag.
+        tag = re.sub(r'[^0-9A-Za-z._-]', '_', args.tag)
         session._log_tag = tag or None
     if args.script:
         script = args.script

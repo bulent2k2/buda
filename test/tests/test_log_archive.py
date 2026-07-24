@@ -159,6 +159,28 @@ def test_tag_sanitized_to_filename_safe_token(tmp_path):
     assert (tmp_path / "log" / "cellA_exp_B_run_2_flow.log").is_file()
 
 
+def test_underscores_preserved_so_similar_tags_stay_distinct(tmp_path):
+    # Underscore is a legal tag char, so it must NOT be stripped: `exp` and
+    # `exp/` (the slash folds to `_`) have to keep separate logs, and a
+    # bare `_` is a real tag — otherwise the flag fails its one job.
+    flow = _write_flow(tmp_path)
+    _run_main(flow, "-t", "exp")
+    _run_main(flow, "-t", "exp/")      # -> exp_
+    _run_main(flow, "-t", "_")         # kept, not folded back to untagged
+    assert (tmp_path / "log" / "cellA_exp_flow.log").is_file()
+    assert (tmp_path / "log" / "cellA_exp__flow.log").is_file()
+    assert (tmp_path / "log" / "cellA___flow.log").is_file()
+    # The three are distinct files, and none is the untagged default.
+    assert not (tmp_path / "log" / "cellA_flow.log").exists()
+
+
+def test_empty_tag_falls_back_to_untagged(tmp_path):
+    # A tag that sanitizes to empty (only `""` can) is a no-op, not a crash.
+    flow = _write_flow(tmp_path)
+    _run_main(flow, "--tag", "")
+    assert (tmp_path / "log" / "cellA_flow.log").is_file()
+
+
 def test_tag_composes_with_log_archive(tmp_path):
     flow = _write_flow(tmp_path)
     _run_main(flow, "-l", "-t", "combo")
