@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+# Copyright 2026 Ben Bulent Basaran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Run the QoR corpus and compare two runs — the "did my change help or hurt?"
+tool for any branch that touches topology / planner / NUTS.
+
+Each flow is sourced end-to-end and its final routing quality captured as
+`(num_overlaps, num_unplaced)` — the two numbers a routing change most often
+moves.  The value for a branch is the DIFF against a baseline: build `main`,
+capture a baseline; build the branch, capture again; `--compare` the two.
+
+Usage:
+  # capture this build's QoR over the default corpus
+  PYTHONPATH=build:src:tools tools/qor_corpus.py --out mine.json
+
+  # baseline-vs-branch recipe (the point of this tool)
+  git checkout main   && bin/bb && tools/qor_corpus.py --out base.json
+  git checkout branch && bin/bb && tools/qor_corpus.py --out mine.json
+  tools/qor_corpus.py --compare base.json mine.json
+
+`--compare` tags each moved flow BETTER/WORSE on the QoR metric
+(overlaps/unplaced) and exits non-zero if any regressed, then prints an
+informational runtime diff (total corpus wall-clock + the largest per-flow
+movers) — runtime is single-run and noisy, so it is reported but never gates.
+
+  # just a subset (e.g. while iterating on one flow)
+  tools/qor_corpus.py --flows flow/rnr/mix.buda flow/rnr/slowdown_rnr.buda
+
+Notes:
+  * A flow that raises is recorded with an "err" field, not skipped silently.
+  * `overlaps`/`unplaced` are None when the flow never reached that stage
+    (e.g. no run_detailed_nuts) — reported as such, never coerced to 0.
+  * The corpus below is the subset of flow/ that runs the full pipeline
+    through run_detailed_nuts.  Edit CORPUS to add/remove vehicles.
+"""
+import argparse
+import contextlib
+import io
+import json
+import os
+import sys
+import time
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+for p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _HERE):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+# The curated corpus: flow/ vehicles that route the full pipeline through
+# run_detailed_nuts (so both overlaps and unplaced are meaningful).  Paths are
+# relative to the repo root.
+CORPUS = [
+    "flow/big_data_test/b44.buda",
+    "flow/big_data_test/b61.buda",
+    "flow/big_data_test/big.buda",
+    "flow/big_data_test/big2/b1_bus_007.buda",
+    "flow/big_data_test/big2/b24_bus_056.buda",
+    "flow/big_data_test/big2/b34_bus_028.buda",
+    "flow/big_data_test/big2/b3_bus_023.buda",
+    "flow/big_data_test/big2/b4_bus_077.buda",
+    "flow/big_data_test/big2/big2.buda",
+    "flow/big_data_test/big2/big2_b4_b24.buda",
+    "flow/big_data_test/big2/big2_noviz.buda",
+    "flow/big_data_test/big2/tc3b_flat.buda",
+    "flow/big_data_test/bigHalf.buda",
+    "flow/big_data_test/big_3bundles_sel_pure_mst_topo.buda",
+    "flow/big_data_test/big_3bundles_sel_trunk+mst_topo.buda",
+    "flow/big_data_test/tc3a.buda",
+    "flow/hbundles/01_pipeline_hier.buda",
+    "flow/hbundles/02_two_procs.buda",
+    "flow/hbundles/03_priority_ordering.buda",
+    "flow/hbundles/04_deep_hierarchy.buda",
+    "flow/hbundles/05_stress_grid.buda",
+    "flow/hbundles/06_multipin_stress.buda",
+    "flow/hbundles/07_wide_fan_stress.buda",
+    "flow/hbundles/08_cross_level.buda",
+    "flow/hbundles/09_local_global_compete.buda",
+    "flow/hbundles/10_chip_units_blocks_leaf.buda",
+    "flow/rnr/mix.buda",
+    "flow/rnr/mix2.buda",
+    "flow/rnr/mix2_fast.buda",
+    "flow/rnr/mix2_fast_bottomup.buda",
+    "flow/rnr/mix2_fast_on_aligned_sql.buda",
+    "flow/rnr/mix2_fast_topdown.buda",
+    "flow/rnr/mix2_repro.buda",
+    "flow/rnr/slowdown_rnr.buda",
+]
+
+
+def run_flow(flow):
+    """Source one flow end-to-end and capture its final QoR.  Returns a dict
+    with overlaps/unplaced/sec, or an err field if the flow raised."""
+    import buda_cli
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    d = os.path.dirname(flow)
+    t0 = time.time()
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            cwd = os.getcwd()
+            try:
+                # Flows use paths relative to their own directory (source ...).
+                if d:
+                    os.chdir(d)
+                s.do_command(f"source {os.path.basename(flow)}")
+            finally:
+                os.chdir(cwd)
+    except SystemExit as e:
+        # An intentional `exit` / `exit 0` ends a flow normally — fall through
+        # and capture its metrics.  A NONZERO code is a CLI fail-fast (unknown
+        # command, missing nested `source`, ...): a real abort that must surface
+        # as an err row, not masquerade as a completed None/None measurement.
+        if e.code not in (0, None):
+            return {"flow": flow, "err": f"SystemExit({e.code})"}
+    except Exception as e:                      # noqa: BLE001 — record, don't crash the sweep
+        return {"flow": flow, "err": f"{type(e).__name__}: {str(e)[:80]}"}
+    dt = time.time() - t0
+    ov = getattr(getattr(s, "nuts_result", None), "num_overlaps", None)
+    un = getattr(getattr(s, "detailed_result", None), "num_unplaced", None)
+    return {"flow": flow, "overlaps": ov, "unplaced": un, "sec": round(dt, 1)}
+
+
+def _fmt(r):
+    if "err" in r:
+        return r["err"]
+    return f"{r.get('overlaps')}/{r.get('unplaced')}"
+
+
+def cmd_run(flows, out):
+    os.chdir(_ROOT)                             # flow paths are repo-root-relative
+    results = []
+    for f in flows:
+        r = run_flow(f)
+        results.append(r)
+        print(json.dumps(r), flush=True)
+    if out:
+        with open(out, "w") as fh:
+            json.dump(results, fh, indent=1)
+        print(f"\nwrote {len(results)} results -> {out}")
+    return results
+
+
+def _rank(r):
+    """Sort key for regression detection (higher = worse), as a tuple:
+    (n_missing_metrics, overlaps + unplaced).
+
+    A None metric means a pipeline STAGE DID NOT RUN on this build.  It ranks
+    worse than any real count, so a branch that stops reaching NUTS/DNUTS where
+    the baseline produced a number is flagged WORSE — not a clean 'changed' that
+    slips past the guard (Codex P2).  A flow that is None on BOTH builds (never
+    runs DNUTS by design) is caught earlier by the string-equality skip, so its
+    missing metric is never mistaken for a regression.  err rows rank worst."""
+    if "err" in r:
+        return (3, 0)
+    ov, un = r.get("overlaps"), r.get("unplaced")
+    n_missing = (ov is None) + (un is None)
+    return (n_missing, (ov or 0) + (un or 0))
+
+
+def _runtime_report(paired):
+    """Informational runtime diff (single-run and noisy, so NOT part of the
+    pass/fail guard): total corpus wall-clock plus the largest per-flow movers."""
+    timed = [(f, b, m) for f, b, m in paired
+             if isinstance(b.get("sec"), (int, float))
+             and isinstance(m.get("sec"), (int, float))]
+    if not timed:
+        return
+    tb = sum(b["sec"] for _, b, _ in timed)
+    tm = sum(m["sec"] for _, _, m in timed)
+    d = tm - tb
+    pct = (100 * d / tb) if tb else 0.0
+    print("\nruntime (informational — single-run, noisy; not a guard):")
+    print(f"  total {tb:.1f}s -> {tm:.1f}s  ({d:+.1f}s, {pct:+.1f}%)")
+    movers = sorted(timed, key=lambda x: abs(x[2]["sec"] - x[1]["sec"]),
+                    reverse=True)
+    for f, b, m in movers:
+        ds = m["sec"] - b["sec"]
+        if abs(ds) < 1.0:                       # sub-second deltas are noise
+            break
+        print(f"  {f.replace('flow/', ''):<46} "
+              f"{b['sec']:>6.1f}s -> {m['sec']:>6.1f}s  {ds:+.1f}s")
+
+
+def cmd_compare(base_path, mine_path):
+    base = {r["flow"]: r for r in json.load(open(base_path))}
+    mine = {r["flow"]: r for r in json.load(open(mine_path))}
+    flows = list(base) + [f for f in mine if f not in base]
+    hdr = f"{'flow':<48} {'base':>14} {'branch':>14}  delta"
+    print(hdr)
+    print("-" * len(hdr))
+    n_better = n_worse = n_same = 0
+    for f in flows:
+        b, m = base.get(f), mine.get(f)
+        if b is None:
+            print(f"{f.replace('flow/', ''):<48} {'(new)':>14} {_fmt(m):>14}")
+            continue
+        if m is None:
+            print(f"{f.replace('flow/', ''):<48} {_fmt(b):>14} {'(gone)':>14}")
+            continue
+        bf, mf = _fmt(b), _fmt(m)
+        if bf == mf:
+            n_same += 1
+            continue                            # unchanged rows are noise; skip
+        tag = "BETTER" if _rank(m) < _rank(b) else \
+              "WORSE" if _rank(m) > _rank(b) else "changed"
+        if tag == "BETTER":
+            n_better += 1
+        elif tag == "WORSE":
+            n_worse += 1
+        print(f"{f.replace('flow/', ''):<48} {bf:>14} {mf:>14}  {tag}")
+    print(f"\n{n_better} better, {n_worse} worse, {n_same} unchanged "
+          f"(of {len(flows)} flows).  Metric = overlaps/unplaced.")
+    _runtime_report([(f, base[f], mine[f]) for f in flows
+                     if f in base and f in mine])
+    return n_worse
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Run the QoR corpus and/or compare two runs.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="See the module docstring for the baseline-vs-branch recipe.")
+    ap.add_argument("--flows", nargs="+", metavar="FLOW",
+                    help="run these flows instead of the default corpus")
+    ap.add_argument("--out", metavar="PATH",
+                    help="write the run's results as JSON to PATH")
+    ap.add_argument("--compare", nargs=2, metavar=("BASE", "BRANCH"),
+                    help="diff two result JSONs (from earlier --out runs) on "
+                         "QoR + runtime; exits non-zero if any flow regressed")
+    args = ap.parse_args()
+
+    if args.compare:
+        sys.exit(1 if cmd_compare(*args.compare) else 0)
+
+    cmd_run(args.flows or CORPUS, args.out)
+
+
+if __name__ == "__main__":
+    main()
