@@ -51,6 +51,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import sys
 import tempfile
 
@@ -343,10 +344,25 @@ def _write(work_path, target_path):
 
     Writes into a temp sibling first and os.replace()s it into place, so an
     interrupted or disk-full final write can never leave the target (which may be
-    the user's original BDB on an in-place edit) partial or corrupt."""
+    the user's original BDB on an in-place edit) partial or corrupt.
+
+    The temp inherits the existing target's permission mode (mkstemp is 0600, so
+    an in-place edit would otherwise silently downgrade a 0644 file), and after
+    the replace any stale WAL/SHM sidecars beside the target are removed: the
+    working copy is opened in SQLite's default rollback mode, so the file we write
+    is a complete standalone database and any leftover `-wal`/`-shm` from the
+    PREVIOUS database would be replayed over it on the next open and corrupt it.
+    Editing a BDB that is concurrently open in the engine/Floorplanner is not
+    supported (snapshot in, replace out)."""
     parent = os.path.dirname(os.path.abspath(target_path))
     if not os.path.isdir(parent):
         raise SystemExit(f"error: output directory does not exist: {parent}")
+    if os.path.exists(target_path):
+        mode = stat.S_IMODE(os.stat(target_path).st_mode)   # keep e.g. 0644
+    else:
+        umask = os.umask(0)          # new file: respect the process umask
+        os.umask(umask)
+        mode = 0o666 & ~umask
     fd, tmp_out = tempfile.mkstemp(dir=parent, prefix=".bdb_edit_bus.", suffix=".tmp")
     os.close(fd)
     try:
@@ -356,11 +372,19 @@ def _write(work_path, target_path):
             bdb_serialize.dump(work_path, tmp_out)
         else:
             shutil.copyfile(work_path, tmp_out)
+        os.chmod(tmp_out, mode)
         os.replace(tmp_out, target_path)   # atomic on the same filesystem
     except BaseException:
         if os.path.exists(tmp_out):
             os.unlink(tmp_out)
         raise
+    # Drop any stale WAL/SHM sidecars from the database we just replaced, so a
+    # subsequent open can't replay pre-edit frames over the new main file.
+    for side in ("-wal", "-shm"):
+        try:
+            os.unlink(target_path + side)
+        except FileNotFoundError:
+            pass
 
 
 def main(argv=None):

@@ -144,6 +144,13 @@ run_detailed_nuts
 - **No orphans.** Deletes cascade across all net-referencing tables, so no `pin`
   / `net_props` / `bundle_net` / routing row is left pointing at a removed net.
 - **Frame collision.** Grow refuses to overwrite an already-existing net name.
+- **Atomic, mode-preserving write.** The result is written to a temp sibling and
+  `os.replace`d into place, so an interrupted or disk-full write never leaves the
+  target partial; the temp inherits the existing target's permission mode (a
+  `0644` BDB stays `0644`), and any stale `-wal`/`-shm` sidecars beside the
+  target are dropped after the replace so a subsequent open can't replay pre-edit
+  frames over the new file. Editing a BDB that is **concurrently open** in the
+  engine/Floorplanner is not supported (snapshot in, replace out).
 - The edited BDB opens cleanly in the engine (`buda.BDB`) and the resized bus is
   visible to `all_nets` / the bundler.
 

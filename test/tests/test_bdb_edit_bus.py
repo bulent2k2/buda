@@ -270,3 +270,34 @@ def test_write_leaves_no_temp_siblings(tmp_path):
     assert beb.main([db, "--bus", "bus_011", "--set-bits", "2"]) == 0
     leftovers = [p for p in os.listdir(tmp_path) if p.startswith(".bdb_edit_bus.")]
     assert leftovers == []
+
+
+def test_write_preserves_target_mode(tmp_path):
+    # An in-place edit must keep the target's permission mode: mkstemp() creates
+    # the temp at 0600, so without an explicit chmod a 0644 BDB would silently
+    # become 0600 after os.replace().
+    db = str(tmp_path / "t.bdb")
+    _make_bdb(db, "bus_011", 4)
+    os.chmod(db, 0o644)
+    assert beb.main([db, "--bus", "bus_011", "--set-bits", "2"]) == 0
+    import stat as _stat
+    assert _stat.S_IMODE(os.stat(db).st_mode) == 0o644
+
+
+def test_write_removes_stale_wal_sidecars(tmp_path):
+    # A leftover -wal/-shm from the PREVIOUS database would be replayed over our
+    # freshly written (complete, rollback-mode) replacement on the next open and
+    # corrupt it, so the write path drops them after the atomic replace.
+    db = str(tmp_path / "t.bdb")
+    _make_bdb(db, "bus_011", 4)
+    for side in ("-wal", "-shm"):
+        with open(db + side, "wb") as fh:
+            fh.write(b"stale")
+    assert beb.main([db, "--bus", "bus_011", "--set-bits", "2"]) == 0
+    assert not os.path.exists(db + "-wal")
+    assert not os.path.exists(db + "-shm")
+    # The edit landed and the DB opens cleanly (no stale-WAL replay).
+    con = sqlite3.connect(db)
+    n = con.execute("SELECT COUNT(*) FROM net WHERE name LIKE 'bus_011%'").fetchone()[0]
+    con.close()
+    assert n == 2
