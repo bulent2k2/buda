@@ -22,8 +22,10 @@ image:
 
   TOPOLOGY              NUTS                       DETAILED NUTS
   abstract segments,    abstract bus tracks at     per-bit wires on concrete
-  slide ranges, and     placed track positions     signal tracks
-  busterm vs containment
+  slide ranges          placed track positions     signal tracks
+
+Green blocks are the bundle's net endpoints (any pin direction: driver /
+receiver / unknown / inout); OTC fly-over and non-endpoint blocks stay grey.
 
 Usage:
   tools/render.py <flow.buda> --bundle <id> --topo <id> [--out PREFIX] [--zoom] [--no-dnuts]
@@ -153,44 +155,49 @@ def _layer_name(s, lid):
     return f"L{lid}"
 
 
-def _spans_block(horiz, along_lo, along_hi, perp, rect):
-    if horiz:
-        return rect.y1 <= perp <= rect.y2 and along_lo <= rect.x2 and along_hi >= rect.x1
-    return rect.x1 <= perp <= rect.x2 and along_lo <= rect.y2 and along_hi >= rect.y1
+def _endpoint_blocks(s, w):
+    """Blocks that host a PIN of any net in the bundle — driver, receiver,
+    unknown, or inout, all treated alike (one highlight class).  This is the
+    NETLIST endpoint set, independent of how the topology geometrically taps
+    them: an endpoint reached by pass-through is still an endpoint, and an OTC
+    fly-over block (crossed but not a pin site) is not.  Falls back to the
+    topology's connected_block_names when the session exposes no endpoint map
+    (e.g. hier flows)."""
+    names = set()
+    eps = getattr(s, "_net_endpoints", None) or {}
+    for net in w.input.original_bundle.get_net_names():
+        ep = eps.get(net)
+        if not ep:
+            continue
+        if ep[0]:                       # driver (or positional/inout primary)
+            names.add(ep[0])
+        names.update(ep[1])             # receivers / other endpoints
+    if not names:
+        topo = w.input.candidates[w.plan.selected_topology_index]
+        names.update(topo.connected_block_names)
+    fp_names = {n for n, _ in s.fp.get_all_blocks()}
+    return names & fp_names
 
 
-def _draw_blocks(ax, blocks, contained, busterms=frozenset()):
+def _draw_blocks(ax, blocks, endpoints):
     for name, r in blocks:
-        if name in busterms:                        # green = driver/receiver busterm tap
-            fc, ec, lw = "#a6e3a1", "#2e7d32", 2.0
-        elif name in contained:                     # orange = pass-through containment
-            fc, ec, lw = "#ffd27f", "#d08a00", 1.4
+        if name in endpoints:                       # green = net endpoint (any pin dir)
+            fc, ec, lw, tc = "#a6e3a1", "#2e7d32", 2.0, "#333"
         else:
-            fc, ec, lw = "#eef1f5", "#9aa6b2", 1.4
+            fc, ec, lw, tc = "#eef1f5", "#9aa6b2", 1.4, "#555"
         ax.add_patch(Rectangle((r.x1, r.y1), r.x2 - r.x1, r.y2 - r.y1,
                                fc=fc, ec=ec, lw=lw, alpha=0.7, zorder=1))
         ax.text((r.x1 + r.x2) / 2, (r.y1 + r.y2) / 2, name, ha="center", va="center",
-                fontsize=7, color="#333" if name in busterms else "#555", zorder=2, clip_on=True)
+                fontsize=7, color=tc, zorder=2, clip_on=True)
 
 
-def _draw_topology(ax, s, w, blocks):
+def _draw_topology(ax, s, w, blocks, endpoints):
     """Abstract topology: segments at nominal positions, slide bands, conn kind."""
     topo = w.input.candidates[w.plan.selected_topology_index]
     ct = buda.ConnTopology()
     ct.build(topo, s.fp)
     segs = ct.segs()
-    busterm = set()
-    for seg in segs:
-        for c in seg.conns:
-            if c.kind == buda.SegConnKind.BUSTERM:
-                busterm.add(c.block_name)
-    contained = set()
-    for seg in segs:
-        for name, r in blocks:
-            if name not in busterm and _spans_block(seg.horiz, seg.along_lo,
-                                                     seg.along_hi, seg.perp_pos, r):
-                contained.add(name)
-    _draw_blocks(ax, blocks, contained, busterm)
+    _draw_blocks(ax, blocks, endpoints)
     for i, seg in enumerate(segs):
         col = _layer_color(seg.layer_id)
         if seg.horiz:
@@ -210,31 +217,11 @@ def _draw_topology(ax, s, w, blocks):
             ax.text(x, (seg.along_lo + seg.along_hi) / 2, f"s{i}", fontsize=7,
                     ha="left", va="center", color=col, zorder=6)
     ax.set_title(f"TOPOLOGY — {topo.type}\n{len(topo.segments)} segs · wl={topo.estimated_wirelength}"
-                 "\ngreen = busterm tap · orange = containment · band = slide range", fontsize=9)
-    return contained, busterm
+                 "\ngreen = net endpoint (driver/receiver) · band = slide range", fontsize=9)
 
 
-def _involved_blocks(s, w, blocks):
-    """Blocks the bundle connects to: busterm (driver/receiver) + containment."""
-    topo = w.input.candidates[w.plan.selected_topology_index]
-    ct = buda.ConnTopology()
-    ct.build(topo, s.fp)
-    names = set()
-    for seg in ct.segs():
-        for c in seg.conns:
-            if c.kind == buda.SegConnKind.BUSTERM:
-                names.add(c.block_name)
-    bt = set(names)
-    for seg in ct.segs():
-        for name, r in blocks:
-            if name not in bt and _spans_block(seg.horiz, seg.along_lo,
-                                                seg.along_hi, seg.perp_pos, r):
-                names.add(name)
-    return [(n, r) for n, r in blocks if n in names]
-
-
-def _draw_nuts(ax, s, bundle_id, blocks, contained, busterms=frozenset()):
-    _draw_blocks(ax, blocks, contained, busterms)
+def _draw_nuts(ax, s, bundle_id, blocks, endpoints):
+    _draw_blocks(ax, blocks, endpoints)
     segs = [g for g in s.nuts_result.segments if g.bundle_id == bundle_id]
     for g in segs:
         col = _layer_color(g.layer)
@@ -257,8 +244,8 @@ def _draw_nuts(ax, s, bundle_id, blocks, contained, busterms=frozenset()):
                  f"{nr.num_violations} violations\nthick = bus centre · band = Hanan interval", fontsize=9)
 
 
-def _draw_dnuts(ax, s, bundle_id, blocks, contained, busterms=frozenset()):
-    _draw_blocks(ax, blocks, contained, busterms)
+def _draw_dnuts(ax, s, bundle_id, blocks, endpoints):
+    _draw_blocks(ax, blocks, endpoints)
     horiz_of = {g.seg_idx: g.horiz for g in s.nuts_result.segments if g.bundle_id == bundle_id}
     nets = [ns for ns in s.detailed_result.net_segments if ns.bundle_id == bundle_id]
     for ns in nets:
@@ -323,10 +310,11 @@ def main():
 
     n_panels = 2 if args.no_dnuts else 3
     fig, axes = plt.subplots(1, n_panels, figsize=(7 * n_panels, 7))
-    contained, busterms = _draw_topology(axes[0], s, w, blocks)
-    _draw_nuts(axes[1], s, bid, blocks, contained, busterms)
+    endpoints = _endpoint_blocks(s, w)
+    _draw_topology(axes[0], s, w, blocks, endpoints)
+    _draw_nuts(axes[1], s, bid, blocks, endpoints)
     if not args.no_dnuts:
-        _draw_dnuts(axes[2], s, bid, blocks, contained, busterms)
+        _draw_dnuts(axes[2], s, bid, blocks, endpoints)
 
     # Shared view extent (zoom to the bundle's NUTS segments when --zoom).
     segs_xy = []
@@ -337,7 +325,7 @@ def main():
             segs_xy += [(g.span_lo, g.track_position), (g.span_hi, g.track_position)]
         else:
             segs_xy += [(g.track_position, g.span_lo), (g.track_position, g.span_hi)]
-    focus = _involved_blocks(s, w, blocks)
+    focus = [(n, r) for n, r in blocks if n in endpoints]
     x0, x1, y0, y1 = _extent(blocks, focus, segs_xy, args.zoom)
     for ax in axes:
         ax.set_aspect("equal")
