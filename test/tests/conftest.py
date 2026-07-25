@@ -24,6 +24,8 @@ import os
 
 # Default to headless Agg backend across all test runs so visualizer/explorer
 # tests never pop interactive GUI display windows or block headlessly.
+import matplotlib
+matplotlib.use("Agg")
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 # Insert build/ then src/ at the front of sys.path so the fresh .so in build/
