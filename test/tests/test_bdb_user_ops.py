@@ -34,6 +34,9 @@ import os
 import sys
 from types import SimpleNamespace
 
+import matplotlib
+matplotlib.use("Agg")   # headless; no window
+
 import pytest
 
 import buda
