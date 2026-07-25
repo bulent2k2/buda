@@ -130,6 +130,30 @@ def test_set_bits_zero_is_delete(tmp_path):
     assert _names(db, "bus_011%") == []
 
 
+def test_unpadded_bus_crosses_decimal_boundary(tmp_path):
+    # An unpadded bus s2p_0..s2p_15 mixes 1- and 2-digit suffixes; it must stay
+    # ONE bus (a prior width-in-frame bug split it and left bits 10-15 behind on
+    # delete/prune, and could collide on grow).  Codex P1.
+    db = str(tmp_path / "u.bdb")
+    _make_bdb(db, "s2p", 16, sep="_", width=1)   # width=1 => unpadded (s2p_10, not s2p_010)
+    con = sqlite3.connect(db)
+    bits = beb.find_bus_bits(con, "s2p")
+    con.close()
+    assert [b.index for b in bits] == list(range(16))   # all 16 seen, not just 0-9
+    # Delete removes ALL of them (including 10-15).
+    assert beb.main([db, "--bus", "s2p", "--delete"]) == 0
+    assert _names(db, "s2p%") == []
+
+
+def test_grow_unpadded_across_boundary_names(tmp_path):
+    # Growing an unpadded bus past bit 9 must produce natural-width names
+    # (s2p_10, never s2p_010).
+    db = str(tmp_path / "gu.bdb")
+    _make_bdb(db, "s2p", 8, sep="_", width=1)
+    assert beb.main([db, "--bus", "s2p", "--set-bits", "12"]) == 0
+    assert _names(db, "s2p%") == [f"s2p_{i}" for i in range(12)]
+
+
 def test_prefix_collision_not_matched(tmp_path):
     # bus_01 must not swallow bus_011's bits.
     db = str(tmp_path / "c.bdb")

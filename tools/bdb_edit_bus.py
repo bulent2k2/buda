@@ -67,8 +67,10 @@ _NET_REF_TABLES = [
 # the bundling and everything downstream of it).
 _ROUTE_TABLES = [
     "bundle_net", "bundle_busterm", "bundle",
-    "topology_segment", "topology_seg_busterm", "topology_bridge_segment",
-    "topology", "bus_segment", "bus_via", "net_segment", "net_via",
+    # topology children before the topology parent
+    "topology_segment", "topology_seg_busterm", "topology_seg_conn",
+    "topology_bridge_segment", "topology",
+    "bus_segment", "bus_via", "net_segment", "net_via",
     "route_snapshot",
 ]
 
@@ -79,11 +81,11 @@ _TOKEN_RE = re.compile(r"^(?P<sep>\D*?)(?P<num>\d+)(?P<tail>\D*)$")
 
 
 class Bit:
-    __slots__ = ("index", "net_id", "name", "sep", "width", "tail")
+    __slots__ = ("index", "net_id", "name", "sep", "num_str", "tail")
 
-    def __init__(self, index, net_id, name, sep, width, tail):
+    def __init__(self, index, net_id, name, sep, num_str, tail):
         self.index, self.net_id, self.name = index, net_id, name
-        self.sep, self.width, self.tail = sep, width, tail
+        self.sep, self.num_str, self.tail = sep, num_str, tail
 
 
 def _table_exists(con, name):
@@ -94,9 +96,15 @@ def _table_exists(con, name):
 
 def find_bus_bits(con, base):
     """Return the sorted list of Bit(s) whose net name is `base` + a bit token,
-    restricted to the single most common token frame (sep,tail,width) so a
+    restricted to the single most common token FRAME (separator + closing) so a
     prefix collision (bus_01 vs bus_011) or a stray same-prefix net can't leak
-    in."""
+    in.
+
+    The frame deliberately does NOT include the digit WIDTH: an unpadded bus that
+    crosses a decimal boundary (s2p_0 .. s2p_15) mixes 1- and 2-digit suffixes and
+    must stay ONE bus — grouping on width would split it and leave bits 10-15
+    behind on a delete/prune.  Zero-padding is handled purely as a naming-format
+    concern for grow (see make_namer)."""
     rows = con.execute(
         "SELECT id, name FROM net WHERE name LIKE ? ESCAPE '\\'",
         (_like_prefix(base),),
@@ -109,14 +117,13 @@ def find_bus_bits(con, base):
         if not m or m.group("tail") not in ("", "]"):
             continue
         cand.append(Bit(int(m.group("num")), nid, name,
-                        m.group("sep"), len(m.group("num")), m.group("tail")))
+                        m.group("sep"), m.group("num"), m.group("tail")))
     if not cand:
         return []
-    # Keep only the dominant token frame (separator + closing + digit width).
     from collections import Counter
-    frames = Counter((b.sep, b.tail, b.width) for b in cand)
+    frames = Counter((b.sep, b.tail) for b in cand)
     best = frames.most_common(1)[0][0]
-    bits = [b for b in cand if (b.sep, b.tail, b.width) == best]
+    bits = [b for b in cand if (b.sep, b.tail) == best]
     bits.sort(key=lambda b: b.index)
     return bits
 
@@ -126,9 +133,17 @@ def _like_prefix(base):
     return base.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
-def make_namer(base, template):
-    """Return f(index) -> bit net name in the template bit's frame."""
-    sep, width, tail = template.sep, template.width, template.tail
+def make_namer(base, bits):
+    """Return f(index) -> bit net name in this bus's frame.
+
+    Zero-padding is inferred from the EXISTING bits: the bus is padded iff some
+    bit's digit string is wider than its minimal decimal form (e.g. `05`, `00`).
+    A padded bus keeps its common width (`bus_011_b02`); an UNPADDED bus formats
+    each index at its natural width (`s2p_10`, never `s2p_010`), so growing a bus
+    across a decimal boundary produces the right names."""
+    sep, tail = bits[-1].sep, bits[-1].tail
+    padded = any(len(b.num_str) > len(str(b.index)) for b in bits)
+    width = max((len(b.num_str) for b in bits), default=1) if padded else 0
     return lambda i: f"{base}{sep}{str(i).zfill(width)}{tail}"
 
 
@@ -137,27 +152,28 @@ def list_buses(con, prefix=None):
     rows = con.execute("SELECT id, name FROM net ORDER BY name").fetchall()
     buses = {}
     # A bit token is anchored on a real separator (`_`, `_b`, or `[`) so a base
-    # that itself contains digits (bus_011) is split correctly.
+    # that itself contains digits (bus_011) is split correctly.  The digit WIDTH
+    # is NOT part of the key — an unpadded bus crossing a decimal boundary
+    # (s2p_0..s2p_15) is ONE bus (mirrors find_bus_bits).
     bit_re = re.compile(r"^(?P<base>.+?)(?P<sep>[_\[]b?)(?P<num>\d+)(?P<tail>\]?)$")
     for nid, name in rows:
         mm = bit_re.fullmatch(name)
         if not mm:
-            buses.setdefault((name, "", "", 0), []).append((nid, name))
+            buses.setdefault(("scalar", name, "", ""), []).append(None)
             continue
-        key = (mm.group("base"), mm.group("sep"), mm.group("tail"),
-               len(mm.group("num")))
-        buses.setdefault(key, []).append((nid, int(mm.group("num"))))
+        key = ("bus", mm.group("base"), mm.group("sep"), mm.group("tail"))
+        buses.setdefault(key, []).append(int(mm.group("num")))
     printed = 0
-    for (base, sep, tail, width), members in sorted(buses.items()):
+    for (kind, base, sep, tail), members in sorted(buses.items()):
         if prefix and not base.startswith(prefix):
             continue
-        if width == 0:            # scalar net (no bit token)
+        if kind == "scalar":      # a net with no bit token
             if prefix:            # only show scalars when a prefix was asked for
                 print(f"  {base:32} (scalar net)")
                 printed += 1
             continue
-        idxs = sorted(i for _, i in members)
-        frame = f"{sep}{'#'*width}{tail}"
+        idxs = sorted(members)
+        frame = f"{sep}#{tail}"
         gap = "" if idxs == list(range(idxs[0], idxs[-1] + 1)) else "  [non-contiguous]"
         print(f"  {base:28} {len(idxs):4d} bits  "
               f"[{idxs[0]}..{idxs[-1]}] frame='{base}{frame}'{gap}")
@@ -184,7 +200,7 @@ def _grow_bits(con, base, bits, target, verbose):
     """Add bits until the bus has `target` bits, cloning the highest-index bit's
     pin structure (and bundle membership, if bundled)."""
     template = bits[-1]                    # highest existing index
-    namer = make_namer(base, template)
+    namer = make_namer(base, bits)
     template_pins = con.execute(
         "SELECT comp_id, pin_name, dir, px, py FROM pin WHERE net_id=?",
         (template.net_id,)).fetchall()
@@ -248,9 +264,9 @@ def _resize(con, base, target, verbose):
         raise SystemExit(f"error: no bus '{base}' found (no nets named "
                          f"'{base}<sep><digits>')")
     cur_n = len(bits)
+    frame = f"{base}{bits[-1].sep}#{bits[-1].tail}"
     print(f"bus '{base}': {cur_n} bit(s) "
-          f"[{bits[0].index}..{bits[-1].index}], frame "
-          f"'{base}{bits[-1].sep}{'#'*bits[-1].width}{bits[-1].tail}'")
+          f"[{bits[0].index}..{bits[-1].index}], frame '{frame}'")
     if target == cur_n:
         print(f"  already {target} bits — nothing to do")
         return
