@@ -22,6 +22,10 @@ import re
 import sys
 import os
 
+# Default to headless Agg backend across all test runs so visualizer/explorer
+# tests never pop interactive GUI display windows or block headlessly.
+os.environ.setdefault("MPLBACKEND", "Agg")
+
 # Insert build/ then src/ at the front of sys.path so the fresh .so in build/
 # always wins over any stale copy elsewhere.
 _repo = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..'))
