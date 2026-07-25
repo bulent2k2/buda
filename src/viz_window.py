@@ -276,6 +276,9 @@ def extract_from_fullscreen_tab(fig, settle_ms=180, regain_ms=300):
 
 def set_icon(win_or_fig, icon_name="buda_icon.png"):
     """Set the application icon for the window or figure."""
+    import matplotlib
+    if matplotlib.get_backend().lower() in ("agg", "svg", "pdf", "ps", "template"):
+        return
     # 1. Resolve absolute path to the icon file
     try:
         _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -347,6 +350,9 @@ def set_dock_icon(icon_name="buda_icon.png"):
     label* (that is derived from the executable and needs a .app bundle)."""
     if sys.platform != "darwin":
         return
+    import matplotlib
+    if matplotlib.get_backend().lower() in ("agg", "svg", "pdf", "ps", "template"):
+        return
     try:
         _HERE = os.path.dirname(os.path.abspath(__file__))
         icon_path = os.path.join(_HERE, "..", icon_name)   # project root
@@ -376,6 +382,9 @@ def set_app_name(name, fig=None):
     Cmd-Tab name; the per-figure call here still sets the Tk appname and
     window title and is otherwise a no-op."""
     if not name:
+        return
+    import matplotlib
+    if matplotlib.get_backend().lower() in ("agg", "svg", "pdf", "ps", "template"):
         return
     # 1. Process title — `ps`/`top` and some Linux docks. Optional dependency.
     try:
