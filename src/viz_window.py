@@ -77,6 +77,9 @@ def _toggle_fullscreen(fig):
 
 def raise_window(win_or_fig):
     """Bring a window or figure to the front and ensure it has keyboard focus."""
+    import matplotlib
+    if matplotlib.get_backend().lower() in ("agg", "svg", "pdf", "ps", "template"):
+        return
     win = None
     canvas = None
     if hasattr(win_or_fig, "canvas") and hasattr(win_or_fig.canvas, "manager"):

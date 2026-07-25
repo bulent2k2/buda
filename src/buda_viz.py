@@ -34,7 +34,9 @@ from datetime import datetime
 # sentinel (non-str) until a choice is made, and a plain string afterwards.
 if sys.platform == 'darwin':
     import matplotlib
-    if not isinstance(dict.__getitem__(matplotlib.rcParams, 'backend'), str):
+    if os.environ.get('MPLBACKEND'):
+        matplotlib.use(os.environ['MPLBACKEND'])
+    elif not isinstance(dict.__getitem__(matplotlib.rcParams, 'backend'), str):
         matplotlib.use('TkAgg')
 
 import matplotlib.pyplot as plt
