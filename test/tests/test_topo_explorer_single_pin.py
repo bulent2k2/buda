@@ -27,9 +27,13 @@ import json
 import matplotlib
 matplotlib.use("Agg")   # headless; no window
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 import buda_cli  # noqa: E402
 import buda_viz  # noqa: E402
+
+pytestmark = pytest.mark.mid
 
 
 def _session():

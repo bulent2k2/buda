@@ -31,6 +31,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 import buda_cli  # noqa: E402
 import buda_viz  # noqa: E402
 
+pytestmark = pytest.mark.mid
+
 # A 3-block fan-out bus with several Hanan-line trunk loci → real families
 # (same fixture as test_supercandidate.py).
 _SETUP = [

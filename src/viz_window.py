@@ -23,6 +23,21 @@ import types
 import matplotlib.pyplot as plt
 
 
+_HEADLESS_BACKENDS = {
+    "agg", "cairo", "pdf", "pgf", "ps", "svg", "template",
+    "module://matplotlib_inline.backend_inline",
+}
+
+
+def _is_headless_backend():
+    """True when pyplot is using a backend with no OS window to manage."""
+    try:
+        backend = plt.get_backend()
+    except Exception:
+        return False
+    return str(backend).lower() in _HEADLESS_BACKENDS
+
+
 
 def _resync_canvas_to_widget(fig, settle_ms=80, max_tries=12):
     """Re-run TkAgg's ``resize`` with the widget's SETTLED size until it stops
@@ -66,6 +81,8 @@ def _resync_canvas_to_widget(fig, settle_ms=80, max_tries=12):
 
 
 def _toggle_fullscreen(fig):
+    if _is_headless_backend():
+        return
     mgr = fig.canvas.manager
     if mgr:
         mgr.full_screen_toggle()
@@ -77,6 +94,8 @@ def _toggle_fullscreen(fig):
 
 def raise_window(win_or_fig):
     """Bring a window or figure to the front and ensure it has keyboard focus."""
+    if _is_headless_backend():
+        return
     win = None
     canvas = None
     if hasattr(win_or_fig, "canvas") and hasattr(win_or_fig.canvas, "manager"):
@@ -273,6 +292,8 @@ def extract_from_fullscreen_tab(fig, settle_ms=180, regain_ms=300):
 
 def set_icon(win_or_fig, icon_name="buda_icon.png"):
     """Set the application icon for the window or figure."""
+    if _is_headless_backend():
+        return
     # 1. Resolve absolute path to the icon file
     try:
         _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -344,6 +365,8 @@ def set_dock_icon(icon_name="buda_icon.png"):
     label* (that is derived from the executable and needs a .app bundle)."""
     if sys.platform != "darwin":
         return
+    if _is_headless_backend():
+        return
     try:
         _HERE = os.path.dirname(os.path.abspath(__file__))
         icon_path = os.path.join(_HERE, "..", icon_name)   # project root
@@ -373,6 +396,8 @@ def set_app_name(name, fig=None):
     Cmd-Tab name; the per-figure call here still sets the Tk appname and
     window title and is otherwise a no-op."""
     if not name:
+        return
+    if _is_headless_backend():
         return
     # 1. Process title — `ps`/`top` and some Linux docks. Optional dependency.
     try:

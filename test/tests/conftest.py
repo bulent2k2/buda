@@ -22,13 +22,16 @@ import re
 import sys
 import os
 
-# Default to headless Agg backend across all test runs so visualizer/explorer
-# tests never pop interactive GUI display windows or block headlessly.
+# Default to headless Agg for direct pytest runs too.  bin/bb sets this earlier
+# for pytest/xdist worker startup; this late fallback intentionally does not
+# import matplotlib.
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 # Insert build/ then src/ at the front of sys.path so the fresh .so in build/
 # always wins over any stale copy elsewhere.
 _repo = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..'))
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(_repo, "log", "matplotlib"))
+os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
 _build = os.path.join(_repo, 'build')
 _src   = os.path.join(_repo, 'src')
 for _p in (_src, _build):   # insert src then build; each insert(0) pushes prior down,

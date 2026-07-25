@@ -42,6 +42,8 @@ import buda  # noqa: E402
 import buda_cli  # noqa: E402
 import buda_viz  # noqa: E402
 
+pytestmark = pytest.mark.mid
+
 # The same 3-block fan-out fixture as test_supercandidate.py: several Hanan-line
 # trunk loci -> a candidate pool with genuine nominal-locus families.
 _SETUP = [
