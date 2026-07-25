@@ -77,10 +77,13 @@ _ROUTE_TABLES = [
     "route_snapshot",
 ]
 
-# A bit token is the tail of a net name after the bus base: an optional
-# non-digit separator (``_``, ``_b``, ``[`` ...), the bit digits, and an
-# optional closing non-digit (``]``).  The base + token must be the WHOLE name.
-_TOKEN_RE = re.compile(r"^(?P<sep>\D*?)(?P<num>\d+)(?P<tail>\D*)$")
+# A bus bit net name = base + a bit token, where the token is a real separator
+# (`_`, `_b`, or `[`), the bit digits, and an optional closing `]`.  Requiring an
+# actual separator (rather than "any non-digits") is what stops `--bus data` from
+# swallowing `data_out_0` — that parses to base='data_out', not base='data'.  The
+# SAME regex drives both find_bus_bits and list_buses, so an editable bus and a
+# listed bus are identical by construction.
+_BIT_RE = re.compile(r"^(?P<base>.+?)(?P<sep>[_\[]b?)(?P<num>\d+)(?P<tail>\]?)$")
 
 
 class Bit:
@@ -107,17 +110,19 @@ def find_bus_bits(con, base):
     crosses a decimal boundary (s2p_0 .. s2p_15) mixes 1- and 2-digit suffixes and
     must stay ONE bus — grouping on width would split it and leave bits 10-15
     behind on a delete/prune.  Zero-padding is handled purely as a naming-format
-    concern for grow (see make_namer)."""
+    concern for grow (see make_namer).
+
+    The bus base must match EXACTLY (`_BIT_RE`'s `base` group), so a shorter base
+    can never capture a longer bus — `--bus data` won't touch `data_out` (which
+    parses to base='data_out')."""
     rows = con.execute(
         "SELECT id, name FROM net WHERE name LIKE ? ESCAPE '\\'",
         (_like_prefix(base),),
     ).fetchall()
     cand = []
     for nid, name in rows:
-        if not name.startswith(base):
-            continue
-        m = _TOKEN_RE.fullmatch(name[len(base):])
-        if not m or m.group("tail") not in ("", "]"):
+        m = _BIT_RE.fullmatch(name)
+        if not m or m.group("base") != base:
             continue
         cand.append(Bit(int(m.group("num")), nid, name,
                         m.group("sep"), m.group("num"), m.group("tail")))
@@ -154,13 +159,12 @@ def list_buses(con, prefix=None):
     """Group every net into buses by (base, token frame) and print bit counts."""
     rows = con.execute("SELECT id, name FROM net ORDER BY name").fetchall()
     buses = {}
-    # A bit token is anchored on a real separator (`_`, `_b`, or `[`) so a base
-    # that itself contains digits (bus_011) is split correctly.  The digit WIDTH
-    # is NOT part of the key — an unpadded bus crossing a decimal boundary
-    # (s2p_0..s2p_15) is ONE bus (mirrors find_bus_bits).
-    bit_re = re.compile(r"^(?P<base>.+?)(?P<sep>[_\[]b?)(?P<num>\d+)(?P<tail>\]?)$")
+    # Shared _BIT_RE anchors the token on a real separator, so a base with digits
+    # (bus_011) splits correctly; the digit WIDTH is NOT part of the key — an
+    # unpadded bus crossing a decimal boundary (s2p_0..s2p_15) is ONE bus
+    # (identical to find_bus_bits by construction).
     for nid, name in rows:
-        mm = bit_re.fullmatch(name)
+        mm = _BIT_RE.fullmatch(name)
         if not mm:
             buses.setdefault(("scalar", name, "", ""), []).append(None)
             continue
@@ -278,7 +282,7 @@ def _resize(con, base, target, verbose):
           f"[{bits[0].index}..{bits[-1].index}], frame '{frame}'")
     if target == cur_n:
         print(f"  already {target} bits — nothing to do")
-        return
+        return False                     # no netlist change → routing NOT stale
     if target < cur_n:
         drop = bits[target:]              # keep the lowest-index `target` bits
         print(f"  PRUNE {cur_n} -> {target}: dropping {len(drop)} high bit(s) "
@@ -288,6 +292,7 @@ def _resize(con, base, target, verbose):
         print(f"  GROW {cur_n} -> {target}: adding {target - cur_n} bit(s), "
               f"cloning template bit {bits[-1].index} ({bits[-1].name})")
         _grow_bits(con, base, bits, target, verbose)
+    return True
 
 
 def _delete(con, base, verbose):
@@ -297,13 +302,17 @@ def _delete(con, base, verbose):
     print(f"bus '{base}': DELETE all {len(bits)} bit(s) "
           f"[{bits[0].index}..{bits[-1].index}]")
     _delete_bits(con, bits, verbose)
+    return True
 
 
 def _load(input_path):
     """Materialize a binary working copy of the input BDB and open it.  Returns
     (con, work_path); the caller removes work_path.  A *.bdb.sql text input is
-    round-tripped through bdb_serialize; a *.bdb binary is copied (so the input
-    is never touched — writes go to the target chosen in main())."""
+    round-tripped through bdb_serialize; a *.bdb binary is snapshotted through
+    SQLite's backup API (NOT a raw byte copy), so committed changes that live only
+    in a `-wal` sidecar — the engine opens every BDB with journal_mode=WAL — are
+    included and an in-place edit can't overwrite the source from a stale copy.
+    The input is never mutated."""
     tmp = tempfile.NamedTemporaryFile(suffix=".bdb", delete=False)
     tmp.close()
     if input_path.endswith(".sql"):
@@ -318,22 +327,40 @@ def _load(input_path):
         if not os.path.exists(input_path):
             os.unlink(tmp.name)
             raise SystemExit(f"error: {input_path} not found")
-        shutil.copyfile(input_path, tmp.name)
+        src = sqlite3.connect(input_path)
+        dst = sqlite3.connect(tmp.name)
+        try:
+            src.backup(dst)                # WAL-aware, consistent snapshot
+        finally:
+            src.close()
+            dst.close()
     return sqlite3.connect(tmp.name), tmp.name
 
 
 def _write(work_path, target_path):
-    """Write the edited working binary to `target_path`, format by extension:
-    *.bdb.sql -> diffable text (bdb_serialize.dump), else a binary copy."""
+    """Write the edited working binary to `target_path`, format by extension
+    (*.bdb.sql -> diffable text via bdb_serialize.dump, else a binary copy).
+
+    Writes into a temp sibling first and os.replace()s it into place, so an
+    interrupted or disk-full final write can never leave the target (which may be
+    the user's original BDB on an in-place edit) partial or corrupt."""
     parent = os.path.dirname(os.path.abspath(target_path))
     if not os.path.isdir(parent):
         raise SystemExit(f"error: output directory does not exist: {parent}")
-    if target_path.endswith(".sql"):
-        sys.path.insert(0, _HERE)
-        import bdb_serialize
-        bdb_serialize.dump(work_path, target_path)
-    else:
-        shutil.copyfile(work_path, target_path)
+    fd, tmp_out = tempfile.mkstemp(dir=parent, prefix=".bdb_edit_bus.", suffix=".tmp")
+    os.close(fd)
+    try:
+        if target_path.endswith(".sql"):
+            sys.path.insert(0, _HERE)
+            import bdb_serialize
+            bdb_serialize.dump(work_path, tmp_out)
+        else:
+            shutil.copyfile(work_path, tmp_out)
+        os.replace(tmp_out, target_path)   # atomic on the same filesystem
+    except BaseException:
+        if os.path.exists(tmp_out):
+            os.unlink(tmp_out)
+        raise
 
 
 def main(argv=None):
@@ -381,20 +408,29 @@ def main(argv=None):
 
         verbose = True
         if args.delete or args.set_bits == 0:
-            _delete(con, args.bus, verbose)
+            changed = _delete(con, args.bus, verbose)
         else:
-            _resize(con, args.bus, args.set_bits, verbose)
+            changed = _resize(con, args.bus, args.set_bits, verbose)
 
-        if args.clear_routing:
-            _clear_routing(con, verbose)
-        else:
-            print("  NOTE: bundling/routing is now stale — re-run the flow "
-                  "(run_bundler/run_hier_bundler -> generate_topologies -> ...) "
-                  "or pass --clear-routing.")
+        # Routing is stale ONLY when the netlist actually changed — a no-op
+        # resize must never clear valid routing (nor warn about it).
+        if changed:
+            if args.clear_routing:
+                _clear_routing(con, verbose)
+            else:
+                print("  NOTE: bundling/routing is now stale — re-run the flow "
+                      "(run_bundler/run_hier_bundler -> generate_topologies -> "
+                      "...) or pass --clear-routing.")
 
         if args.dry_run:
             con.rollback()
             print("dry-run: rolled back, no changes written")
+            return 0
+        # Nothing changed and no format-conversion output requested: leave the
+        # input untouched rather than rewrite an identical file.
+        if not changed and not args.output:
+            con.rollback()
+            print("  no change — input left untouched")
             return 0
         con.commit()
         con.close()

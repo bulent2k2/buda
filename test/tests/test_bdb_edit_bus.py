@@ -206,3 +206,67 @@ def test_output_rejected_for_list(tmp_path):
     _make_bdb(db, "bus_011", 2)
     with pytest.raises(SystemExit):
         beb.main([db, "--list", "-o", str(tmp_path / "x.bdb")])
+
+
+def test_shorter_base_does_not_match_longer_bus(tmp_path):
+    # `--bus data` must NOT capture `data_out` (base match is EXACT).  Codex P1.
+    db = str(tmp_path / "s.bdb")
+    _make_bdb(db, "data", 2, sep="_", width=1)
+    con = sqlite3.connect(db)
+    for i in range(3):
+        con.execute("INSERT INTO net(name) VALUES(?)", (f"data_out_{i}",))
+    con.commit(); con.close()
+    con = sqlite3.connect(db)
+    picked = sorted(b.name for b in beb.find_bus_bits(con, "data"))
+    con.close()
+    assert picked == ["data_0", "data_1"]                 # not data_out_*
+    assert beb.main([db, "--bus", "data", "--delete"]) == 0
+    assert _names(db, "data%") == ["data_out_0", "data_out_1", "data_out_2"]  # sibling intact
+
+
+def test_noop_resize_does_not_clear_routing(tmp_path):
+    # --set-bits N when already N bits is a no-op: it must NOT clear routing even
+    # with --clear-routing, and must leave the file untouched.  Codex P2.
+    db = str(tmp_path / "n.bdb")
+    _make_bdb(db, "bus_011", 4)
+    con = sqlite3.connect(db)
+    con.execute("INSERT INTO net_segment VALUES('7', 0, 0, 1)")   # some routing
+    con.commit(); con.close()
+    assert beb.main([db, "--bus", "bus_011", "--set-bits", "4",
+                     "--clear-routing"]) == 0
+    assert _count(db, "bundle_net") == 4          # routing preserved
+    assert _count(db, "net_segment") == 1
+    assert _names(db, "bus_011%") == [f"bus_011_b{i:02d}" for i in range(4)]
+
+
+def test_wal_only_committed_rows_are_snapshotted(tmp_path):
+    # If the input's committed rows live only in a -wal sidecar (the engine opens
+    # every BDB with journal_mode=WAL), _load must snapshot them via SQLite's
+    # backup API — a raw byte copy of the main file would miss them.  Codex P1.
+    db = str(tmp_path / "w.bdb")
+    hold = sqlite3.connect(db)
+    hold.execute("PRAGMA journal_mode=WAL")
+    hold.execute("PRAGMA wal_autocheckpoint=0")   # keep commits in the -wal file
+    hold.executescript(
+        "CREATE TABLE net(id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL);")
+    for i in range(6):
+        hold.execute("INSERT INTO net(name) VALUES(?)", (f"bus_011_b{i:02d}",))
+    hold.commit()                                  # committed, but only in -wal
+    try:
+        con, work = beb._load(db)
+        try:
+            bits = [b.name for b in beb.find_bus_bits(con, "bus_011")]
+        finally:
+            con.close()
+            os.unlink(work)
+    finally:
+        hold.close()
+    assert bits == [f"bus_011_b{i:02d}" for i in range(6)]   # saw the WAL rows
+
+
+def test_write_leaves_no_temp_siblings(tmp_path):
+    db = str(tmp_path / "t.bdb")
+    _make_bdb(db, "bus_011", 4)
+    assert beb.main([db, "--bus", "bus_011", "--set-bits", "2"]) == 0
+    leftovers = [p for p in os.listdir(tmp_path) if p.startswith(".bdb_edit_bus.")]
+    assert leftovers == []
