@@ -1,7 +1,30 @@
+source ../tracks/tracks4top.buda
+
 # > 1000% congested.
 # x10 expansion in tc3a_flat.buda ~= big.buda
-source ../tracks/tracks4top.buda
-open_bdb tc3a.bdb.sql
+# open_bdb tc3a.bdb.sql
+
+# copied tc3a.bdb.sql and reduced bit count of some of the failing bundles
+# E.g.,
+#   tools/bdb_edit_bus.py flow/big_data_test/tc3a_bit_pruned.bdb.sql --set-bit 2 --bus bus_010
+# There are a total of 72 failures out of 80! Pruned buses:
+#   From 60 to 4: 003 066 075 014 077 074 012
+#   From 56 to 4: 050 058 033 038 045 059 047 018 062 079 026 073 016
+#   From 52 to 4: 071 068 060
+#   From 48 to 4: 005 022 041 056 013
+#   From 44 to 4: 072 054 010 027 025 031
+#   From 40 to 4: 002 036 040 021
+#   From 36 to 4: 006 032 019
+#   From 32 to 4: 030 042 049
+#   From 28 to 4: 001 007 004 015 035 028
+#   From 24 to 4: 065 053 000 057 044
+#   From 20 to 4: 048 078 051 055 076 039
+#   From 16 to 4: 011 046 070 023 034
+#   From 12 to 2: 008 063 069 052
+#   From  8 to 2: 009 067 037 024 020
+#   From  4 to 2: 043 010
+open_bdb tc3a_bit_pruned.bdb.sql
+
 derive_busterms 1
 add_blocks_from_bdb 0
 add_blocks_from_bdb 1 skip
@@ -10,6 +33,7 @@ dump_hbundles
 generate_hier_topologies
 run_planner hier
 run_nuts
+negotiate_congestion
 check_design nuts
 run_detailed_nuts
 check_design dnuts
