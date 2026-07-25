@@ -26,10 +26,12 @@ set:
              (2-bit -> 16-bit);
   * DELETE — remove every bit of the bus.
 
-It operates directly on the SQLite BDB (`.bdb` binary) or its diffable text form
-(`.bdb.sql`, round-tripped via tools/bdb_serialize.py), deleting/inserting across
-every net-referencing table: net, pin, net_props, bundle_net, net_segment,
-net_via.
+It reads a `.bdb` (SQLite binary) OR a `.bdb.sql` (diffable text, round-tripped
+via tools/bdb_serialize.py) and edits every net-referencing table: net, pin,
+net_props, bundle_net, net_segment, net_via.  By default it writes back in place;
+`-o/--output` writes to a new file instead, and — since the format follows the
+extension — also converts between `.bdb` and `.bdb.sql`.  The input is never
+modified when `-o` is given.
 
 A bit-count change invalidates any existing bundling/routing: the tool prints a
 WARNING and, with --clear-routing, also drops the derived route tables so the BDB
@@ -42,11 +44,12 @@ Usage:
     tools/bdb_edit_bus.py <db> --bus bus_011 --set-bits 4     # prune or grow to 4
     tools/bdb_edit_bus.py <db> --bus bus_011 --delete
     tools/bdb_edit_bus.py <db> --bus bus_011 --set-bits 16 --dry-run
-    tools/bdb_edit_bus.py <db> --bus bus_011 --delete --clear-routing
+    tools/bdb_edit_bus.py in.bdb --bus bus_011 --set-bits 8 -o out.bdb.sql  # + convert
 """
 import argparse
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -201,12 +204,18 @@ def _grow_bits(con, base, bits, target, verbose):
     pin structure (and bundle membership, if bundled)."""
     template = bits[-1]                    # highest existing index
     namer = make_namer(base, bits)
-    template_pins = con.execute(
-        "SELECT comp_id, pin_name, dir, px, py FROM pin WHERE net_id=?",
-        (template.net_id,)).fetchall()
-    template_props = con.execute(
-        "SELECT hpwl, fanout, driver_comp, bus_name, bit_index, bundle_id "
-        "FROM net_props WHERE net_id=?", (template.net_id,)).fetchone()
+    # Each of these tables always exists in a full BDB, but guard so the tool
+    # also works on a partial/minimal netlist (e.g. a net-only fixture).
+    template_pins = []
+    if _table_exists(con, "pin"):
+        template_pins = con.execute(
+            "SELECT comp_id, pin_name, dir, px, py FROM pin WHERE net_id=?",
+            (template.net_id,)).fetchall()
+    template_props = None
+    if _table_exists(con, "net_props"):
+        template_props = con.execute(
+            "SELECT hpwl, fanout, driver_comp, bus_name, bit_index, bundle_id "
+            "FROM net_props WHERE net_id=?", (template.net_id,)).fetchone()
     template_bundle = []
     if _table_exists(con, "bundle_net"):
         template_bundle = con.execute(
@@ -290,37 +299,51 @@ def _delete(con, base, verbose):
     _delete_bits(con, bits, verbose)
 
 
-def _open(db_path):
-    """Open the BDB.  Returns (con, commit_fn).  For a *.bdb.sql text file, load
-    it into a temp binary, and on commit re-dump the text in place."""
-    if db_path.endswith(".sql"):
+def _load(input_path):
+    """Materialize a binary working copy of the input BDB and open it.  Returns
+    (con, work_path); the caller removes work_path.  A *.bdb.sql text input is
+    round-tripped through bdb_serialize; a *.bdb binary is copied (so the input
+    is never touched — writes go to the target chosen in main())."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".bdb", delete=False)
+    tmp.close()
+    if input_path.endswith(".sql"):
         sys.path.insert(0, _HERE)
         import bdb_serialize
-        tmp = tempfile.NamedTemporaryFile(suffix=".bdb", delete=False)
-        tmp.close()
-        bdb_serialize.load(db_path, tmp.name)
-        con = sqlite3.connect(tmp.name)
-
-        def commit():
-            con.commit()
-            con.close()
-            bdb_serialize.dump(tmp.name, db_path)
+        try:
+            bdb_serialize.load(input_path, tmp.name)   # raises if missing
+        except FileNotFoundError:
             os.unlink(tmp.name)
-        return con, commit, tmp.name
-    if not os.path.exists(db_path):
-        raise SystemExit(f"error: {db_path} not found")
-    con = sqlite3.connect(db_path)
+            raise SystemExit(f"error: {input_path} not found")
+    else:
+        if not os.path.exists(input_path):
+            os.unlink(tmp.name)
+            raise SystemExit(f"error: {input_path} not found")
+        shutil.copyfile(input_path, tmp.name)
+    return sqlite3.connect(tmp.name), tmp.name
 
-    def commit():
-        con.commit()
-        con.close()
-    return con, commit, db_path
+
+def _write(work_path, target_path):
+    """Write the edited working binary to `target_path`, format by extension:
+    *.bdb.sql -> diffable text (bdb_serialize.dump), else a binary copy."""
+    parent = os.path.dirname(os.path.abspath(target_path))
+    if not os.path.isdir(parent):
+        raise SystemExit(f"error: output directory does not exist: {parent}")
+    if target_path.endswith(".sql"):
+        sys.path.insert(0, _HERE)
+        import bdb_serialize
+        bdb_serialize.dump(work_path, target_path)
+    else:
+        shutil.copyfile(work_path, target_path)
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Edit a bus's bit count (or delete it) in a BDB netlist.")
-    ap.add_argument("db", help="BDB file (.bdb binary or .bdb.sql text)")
+    ap.add_argument("db", help="input BDB file (.bdb binary or .bdb.sql text)")
+    ap.add_argument("-o", "--output", metavar="PATH",
+                    help="write the result here instead of editing in place; the "
+                         "format follows the extension (.bdb binary / .bdb.sql "
+                         "text), so this also converts between the two")
     ap.add_argument("--bus", help="bus base name, e.g. bus_011 or s2p")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--set-bits", type=int, metavar="N",
@@ -342,22 +365,22 @@ def main(argv=None):
     if not is_edit and args.list is None:
         # Default action with no --bus/--list: list everything.
         args.list = ""
+    if args.output and not is_edit:
+        ap.error("--output only applies to an edit (--set-bits/--delete)")
 
-    con, commit, path = _open(args.db)
+    con, work = _load(args.db)
+    target = args.output or args.db
     try:
         if args.list is not None and not is_edit:
             print(f"buses in {args.db}:")
             list_buses(con, args.list or None)
-            con.close()
             return 0
 
         if not args.bus:
             ap.error("--bus is required for --set-bits/--delete")
 
         verbose = True
-        if args.set_bits is not None and args.set_bits == 0:
-            _delete(con, args.bus, verbose)
-        elif args.delete:
+        if args.delete or args.set_bits == 0:
             _delete(con, args.bus, verbose)
         else:
             _resize(con, args.bus, args.set_bits, verbose)
@@ -371,16 +394,21 @@ def main(argv=None):
 
         if args.dry_run:
             con.rollback()
-            con.close()
             print("dry-run: rolled back, no changes written")
             return 0
-        commit()
-        print(f"written to {args.db}")
-        return 0
-    except SystemExit:
-        con.rollback()
+        con.commit()
         con.close()
-        raise
+        _write(work, target)
+        print(f"written to {target}"
+              + (f" (from {args.db})" if target != args.db else ""))
+        return 0
+    finally:
+        try:
+            con.close()
+        except sqlite3.Error:
+            pass
+        if os.path.exists(work):
+            os.unlink(work)
 
 
 if __name__ == "__main__":

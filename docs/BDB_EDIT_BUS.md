@@ -52,7 +52,8 @@ python3 tools/bdb_edit_bus.py <db> --bus <base> --delete
 
 | Argument / option | Description |
 |---|---|
-| `<db>` | BDB file: `.bdb` (SQLite binary) or `.bdb.sql` (diffable text; round-tripped via [`bdb_serialize`](internal/bdb_test_data.md)) |
+| `<db>` | **Input** BDB: `.bdb` (SQLite binary) or `.bdb.sql` (diffable text; round-tripped via [`bdb_serialize`](internal/bdb_test_data.md)). Both are fully supported for reading |
+| `-o`, `--output <path>` | Write the result to a **new** file instead of editing in place — the input is left untouched. The output format follows the extension (`.bdb` binary / `.bdb.sql` text), so this **also converts** between the two (e.g. edit a `.bdb`, emit a `.bdb.sql`). Applies only to an edit, not `--list` |
 | `--list [PREFIX]` | Enumerate detected buses (base, bit count, index range, name frame); optional prefix filter. This is the default action when no `--bus` is given |
 | `--bus <base>` | The bus base name, e.g. `bus_011` or `s2p` (required for an edit) |
 | `--set-bits <N>` | Resize the bus to **N** bits — prunes if fewer than current, grows if more. `--set-bits 0` is equivalent to `--delete` |
@@ -77,7 +78,14 @@ tools/bdb_edit_bus.py design.bdb --bus bus_011 --set-bits 16 --dry-run
 
 # Delete a bus and wipe the now-stale routing in one go.
 tools/bdb_edit_bus.py design.bdb --bus bus_011 --delete --clear-routing
+
+# Write to a new file (input untouched) — and convert .bdb -> diffable .bdb.sql.
+tools/bdb_edit_bus.py design.bdb --bus bus_011 --set-bits 8 -o widened.bdb.sql
 ```
+
+Both `.bdb` and `.bdb.sql` work as input and as `-o` output, in any combination
+(the tool round-trips through `bdb_serialize`), so `-o` doubles as a format
+converter.
 
 ---
 

@@ -173,3 +173,36 @@ def test_missing_bus_errors(tmp_path):
     _make_bdb(db, "bus_011", 2)
     with pytest.raises(SystemExit):
         beb.main([db, "--bus", "nope", "--set-bits", "4"])
+
+
+def test_output_leaves_input_untouched(tmp_path):
+    src = str(tmp_path / "src.bdb")
+    out = str(tmp_path / "out.bdb")
+    _make_bdb(src, "bus_011", 8)
+    assert beb.main([src, "--bus", "bus_011", "--set-bits", "4", "-o", out]) == 0
+    assert _names(src, "bus_011%") == [f"bus_011_b{i:02d}" for i in range(8)]  # input intact
+    assert _names(out, "bus_011%") == [f"bus_011_b{i:02d}" for i in range(4)]  # output pruned
+
+
+def test_output_converts_binary_to_sql_and_back(tmp_path):
+    src = str(tmp_path / "src.bdb")
+    sql = str(tmp_path / "out.bdb.sql")
+    back = str(tmp_path / "back.bdb")
+    _make_bdb(src, "bus_011", 4)
+    # .bdb -> grow -> .bdb.sql (text)
+    assert beb.main([src, "--bus", "bus_011", "--set-bits", "8", "-o", sql]) == 0
+    assert os.path.exists(sql)
+    with open(sql) as f:
+        head = f.read(64)
+    assert head.startswith("-- BUDA BDB text dump")
+    # .bdb.sql -> prune -> .bdb (binary), pins survive the round-trip
+    assert beb.main([sql, "--bus", "bus_011", "--set-bits", "2", "-o", back]) == 0
+    assert _names(back, "bus_011%") == ["bus_011_b00", "bus_011_b01"]
+    assert _count(back, "pin") == 2 * 2
+
+
+def test_output_rejected_for_list(tmp_path):
+    db = str(tmp_path / "l.bdb")
+    _make_bdb(db, "bus_011", 2)
+    with pytest.raises(SystemExit):
+        beb.main([db, "--list", "-o", str(tmp_path / "x.bdb")])
