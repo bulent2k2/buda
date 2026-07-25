@@ -39,6 +39,10 @@ Block geometry (repo convention **y1=bottom=south, y2=top=north**):
 | blk_03 | 3500,2020,4870,2570 | receiver |
 | blk_11 | 1250,1790,2000,2720 | receiver |
 
+(Rects are the `add_block` lines in `flow/big_data_test/big2/tc3b_flat_x5.buda`
+— the circuit `big2.buda` sources — `blk_01`:4, `blk_03`:6, `blk_10`:13, `blk_11`
+alongside; `big2_b4_b24.buda` lists the same rects inline.)
+
 The **intended** assignment for this shape is:
 
 - **seg0 (trunk)** → 3 busterms: face-tap **blk_03** (south face y=2020, top end),
@@ -139,13 +143,26 @@ bits reaching the face, so it does not reproduce it; only the full flow does.)
    This gives `seg0` the two receiver face-taps and leaves blk_10 to the
    pass-through pass — it strictly crosses blk_10, so it stays covered, now
    correctly as a pass-through. blk_01/blk_03 gain real face-taps, which anchor
-   the bits to the face and remove the DNUTS shortfall. Tie-break when two blocks
-   both abut from outside (rare): keep today's iteration order.
+   the bits to the face and remove the DNUTS shortfall.
+
+   **Corner case — an endpoint on a block CORNER lies on two faces at once**
+   (an x-face and a y-face of the same rect), so the "which side is the segment's
+   body" test is ambiguous: the segment is axis-aligned, so it abuts one face
+   from outside while running *along* the other. Resolve with an explicit
+   tie-break rather than iteration order: prefer the face **perpendicular to the
+   segment's travel** (the one the endpoint actually terminates against) — a V
+   stub landing on a rect's bottom-left corner taps the *bottom* (y) face, not
+   the *left* (x) face it merely grazes. When two *distinct* blocks each abut
+   from outside on the same relevant face (genuinely rare), fall back to today's
+   iteration order.
 
 2. **Pass-through attribution cleanup** (secondary). A block strictly crossed by
    the trunk should not additionally be booked as a pass-through of a stub that
    only reaches a junction inside it; attribute coverage to the strict coverer.
-   Mostly cosmetic once (1) lands.
+   Mostly cosmetic once (1) lands — but it can itself shift a block's
+   pass-through coverage bookkeeping (and thus `connected_block_names` /
+   `check_topo` coverage counts), so it must ride the **same** `qor_corpus
+   --compare` sweep as (1), not land unmeasured.
 
 **Alternatives** (weaker; keep as fallbacks): a DNUTS-side fix that guarantees a
 graze-covered endpoint's per-bit span reaches the face; or a generation gate that
