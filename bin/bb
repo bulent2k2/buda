@@ -179,6 +179,7 @@ echo "=== BUDA build successful ==="
 TEST_DURATION=0
 if [ "$RUN_TESTS" = true ]; then
     echo "=== Running Tests ==="
+    export MPLBACKEND=Agg
     TEST_START=$(date +%s)
 
     cd ..
