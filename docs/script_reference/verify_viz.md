@@ -99,7 +99,7 @@ preserved in `<script>.json` and loaded by the next `run_planner` invocation.
 ### `dump_topologies`
 
 ```
-dump_topologies [<hint>] [--problems] [--conn]
+dump_topologies [<hint>] [--problems] [--conn] [--grouped]
 ```
 
 Text (non-GUI) inspection of the candidate topologies generated for each bundle.
@@ -113,6 +113,7 @@ generation.
 | `<hint>` | Only bundles whose first net name starts with `<hint>`. |
 | `--problems` | Only bundles with a flagged candidate (see below), plus the summary. |
 | `--conn` | After each shown bundle's table, print a per-segment connectivity detail for the selected candidate (see below). |
+| `--grouped` | Collapse **nominal-locus families** to one representative row each — the set-up for a `group:<N>` super-candidate pin (see below). |
 
 Each candidate row prints: `idx`, `type`, `wl` (estimated / as-generated
 wirelength), `wl[lo..hi]` (the routing **WL envelope** the candidate's slide/span
@@ -128,6 +129,30 @@ perpendicular slide freedom across the candidate's ConnSegs, via `ConnTopology`;
 pass-through candidates. The summary reports the candidate-count distribution,
 duplicate / pinched / single / pass-through bundle counts, and a shape-family
 histogram (trunk `@coord` suffixes collapsed).
+
+**`--grouped` — one row per nominal-locus family.** A bundle's pool usually
+holds **families** of near-identical candidates that differ only in where the
+trunk sits (its perpendicular locus) within one shared slide window — since the
+trunk slides with its stubs, every member routes within NUTS realization-noise
+of the others. `--grouped` collapses each family to a single representative row
+(its lowest-WL member) under a `cands=N → M families` header, and adds two
+notes to that row:
+
+- `family:+K@lo..hi` — this family has **K** other members, their trunk loci
+  spanning `lo..hi`.
+- `group:<N>` — the **exact, pinnable token**: paste it verbatim after the
+  bundle hint to pin the whole family, `select_topology <bundle> group:<N>`. `N`
+  is the representative's **1-based** candidate id (the `idx` column is 0-based,
+  and the ordinal position among families is neither — so always copy this mark
+  rather than deriving it).
+
+`--grouped` is read-only display: it never drops or reorders candidates, so a
+plain dump and the whole pipeline are unchanged. It is the discovery step for a
+super-candidate pin, which restricts the planner to a family and lets it refine
+*which* member wins instead of hand-picking one nominal — see
+[**Super-candidate (family) pins**](planner.md#super-candidate-family-pins--groupn)
+in the planner reference (and [`set_dedup_loci`](topologies.md), which collapses
+the same families destructively).
 
 **Hierarchical flow — slide columns resolve against the generation-time
 floorplan.** The slide-derived columns (`mslide` and the `wl[lo..hi]` envelope)
@@ -172,6 +197,7 @@ unexpected slide/pull.
 dump_topologies                 # every bundle + summary
 dump_topologies bus_007         # bundles whose first net starts with bus_007
 dump_topologies --problems      # only flagged bundles + summary
+dump_topologies bus_044 --grouped   # families + the group:<N> pin token for each
 ```
 
 See [internal/topology_tc3a_findings.md](../internal/topology_tc3a_findings.md) for an
