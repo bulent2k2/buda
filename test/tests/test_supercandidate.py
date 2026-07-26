@@ -198,32 +198,34 @@ def test_dump_grouped_reduces_rows(capsys):
 
 
 def test_dump_grouped_emits_pinnable_token():
-    """Every --grouped row prints the exact `pin=group:<N>` it takes.
+    """Every --grouped row prints the exact `group:<N>` token it takes.
 
     The `idx` column is 0-based and the ordinal position among families is NOT
     the pin id, so users must copy the representative's 1-based candidate id.
-    The dump prints it verbatim as `pin=group:<N>`; feeding that token back to
-    `select_topology <bundle> group:<N>` must pin the SAME family (the row's
-    representative candidate becomes the selection).
+    The dump prints it verbatim as `group:<N>`; feeding THAT TOKEN back —
+    unedited — to `select_topology <bundle> <token>` must pin the SAME family
+    (the row's representative candidate becomes the selection). No `pin=` label
+    or reconstruction: what the dump shows is what the command accepts.
     """
     s = _session()
     with contextlib.redirect_stdout(io.StringIO()) as buf:
         s.do_command("dump_topologies --grouped")
     out = buf.getvalue()
-    assert "pin=group:" in out
-    # Pull the first row's (idx, pin=group:N) pair and prove the token pins the
-    # family whose representative is that idx candidate.
+    assert "group:" in out
+    # Pull the first row's (idx, group:N mark) pair and feed the mark BACK
+    # verbatim — it must pin the family whose representative is that idx cand.
     for ln in out.splitlines():
         toks = ln.strip().split()
-        if toks and toks[0].isdigit() and "pin=group:" in ln:
+        if toks and toks[0].isdigit() and "group:" in ln:
             idx = int(toks[0])
-            pin_n = int(ln.split("pin=group:")[1].split(",")[0].split()[0])
-            assert pin_n == idx + 1              # 1-based candidate id of the rep
+            token = next(m for m in ln.split()[-1].split(",")
+                         if m.startswith("group:"))
+            assert token == f"group:{idx + 1}"   # 1-based candidate id, verbatim
             with contextlib.redirect_stdout(io.StringIO()):
-                s.do_command(f"select_topology 1 group:{pin_n}")
+                s.do_command(f"select_topology 1 {token}")  # token unedited
             w = s.bundles[0]
             assert idx in w.input.pinned_group   # the rep is in the pinned family
             assert w.plan.selected_topology_index == w.input.pinned_group[0]
             break
     else:
-        raise AssertionError("no `pin=group:` row found in --grouped output")
+        raise AssertionError("no `group:` row found in --grouped output")

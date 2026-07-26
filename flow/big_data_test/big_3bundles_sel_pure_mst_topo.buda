@@ -23,8 +23,9 @@ generate_topologies
 # `select_topology <bundle> group:<N>` pins the nominal-locus FAMILY that
 # CONTAINS candidate id N (1-based) — N is the representative's candidate id, NOT
 # the family's ordinal position in the `--grouped` list. Read the exact token off
-# `dump_topologies <bundle> --grouped` (the `pin=group:<N>` mark on each family
-# row); e.g. bus_069's MST_HV family is `pin=group:16`.
+# `dump_topologies <bundle> --grouped` (the `group:<N>` mark on each family row,
+# emitted verbatim so you paste it straight after the bundle hint); e.g.
+# bus_069's MST_HV family is `group:16`.
 #
 # bundle   MST family (rep type @ candidate id)
 # bus_069  MST_HV @ 16   (MST_VH @ 17)
