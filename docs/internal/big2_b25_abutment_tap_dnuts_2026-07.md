@@ -228,8 +228,36 @@ re-baselined to the new raw level (both still guard, just higher):
 absorb it (`big2.buda` 0/0/0). Landed per owner decision on PR #448 (viol_bundles —
 the electrical-correctness metric — is the priority; b25's real open is fixed).
 
-**Follow-up (open):** a *surgical* form — redistribute only when it rescues a
-would-be-stranded busterm (e.g. gate on the crossed block being the bundle's
-DRIVER, as in b25, vs a crossed receiver as in x5772) — would keep b25's win
-without the raw-packing trade-off, but needs driver-awareness threaded into
-`annotate_endpoints` and its own measured sweep. Deferred.
+**Follow-up (measured 2026-07-26, net-negative — NOT landed).** The *surgical*
+form was prototyped: driver-awareness was threaded into `annotate_endpoints` (a
+`Busterm::is_driver` flag set on the topology src in `generate_npin` /
+`generate_candidates`, and an optional `driver` arg on `annotate_topology`), and
+the endpoint re-attribution was **gated to fire only when the crossed block is the
+bundle's DRIVER** (the b25 pathology, blk_10), keeping the historical
+first-coincident-face rule when the crossed block is a receiver (the x≈5772
+datapath). It behaves exactly as intended — b25 heals, x5772 reverts (the
+`double_detour`-gated `test_topo_flexible_trunk` test is restored), and across the
+full 35-flow `qor_corpus` the gate differs from the shipped blanket fix on **only
+the two big2/tc3b raw siblings**. But the hypothesis it was built to prove is
+**wrong**: the gate does *not* recover the raw-packing regression — it makes it
+**worse**.
+
+Pin-free three-way sweep (`select_topology` neutralized on all three; overlaps /
+unplaced / viol_bundles):
+
+| flow | main (pre-fix) | blanket #448 | driver-gate |
+|---|---|---|---|
+| `big2/big2.buda` (healers) | 0/0/**1** | 0/0/0 | 0/0/0 |
+| `big2/big2_noviz` · `tc3b_flat` (no healers, ×2) | 2/28/2 | 8/40/3 | **9/140/4** |
+
+The gate is *strictly more conservative* than the blanket (fires in fewer places),
+yet the raw pre-heal residue rises further (unplaced 40 → 140). The premise —
+"the raw regression came from the receiver-crossing cases, so gating them out
+recovers it" — does not hold: un-gating the receiver cases cascades through
+pinch-dropping and greedy planner selection in a direction that hurts the raw
+metric *more*, not less. It is not a monotone knob. Since the gate buys nothing
+over the shipped blanket fix on the healer-equipped flow that ships (b25 identical,
+0/0/0) and regresses the two raw siblings, it was reverted. **The blanket fix (PR
+#448) stands as the b25 resolution.** Lesson: on this corpus the raw no-healer
+residue is not a reliable proxy for "less annotation churn is better" — only the
+healer-equipped endpoint and `viol_bundles` are.
