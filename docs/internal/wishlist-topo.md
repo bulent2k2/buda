@@ -155,9 +155,13 @@ when the pool shifts — caught by @codex); pin-free, only the big2/tc3b_flat_x5
 circuit moves, and only its RAW no-healer residue rises (healer-equipped
 `big2.buda` recovers). The residue rise is because the fix also unlocks the
 pinch-dropped `x≈5772` pure-pass-through trunks; two raw-packing guard tests were
-re-baselined. A **surgical** follow-up (redistribute only when it rescues a
-would-be-stranded busterm — e.g. gate on the crossed block being the DRIVER) would
-remove that raw-packing trade-off; still open.
+re-baselined. A **surgical** follow-up (redistribute only when the crossed block is
+the bundle's DRIVER) was **prototyped and measured net-negative 2026-07-26 — NOT
+landed**: it heals b25 identically to the blanket fix but, being strictly more
+conservative, makes the two raw big2/tc3b siblings *worse* (`8/40/3 → 9/140/4`), not
+better — the raw no-healer residue is not a monotone function of annotation churn.
+Reverted; the blanket fix stands. See the b25 doc's "Follow-up (measured,
+net-negative)" section.
 
 ## Nominal-WL comparability across shape families (the b44 root causes) — (a)+(b)+(c) SHIPPED
 
