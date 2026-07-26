@@ -177,3 +177,59 @@ carrying the `viol_bundles` column): the target is bundle-25-class opens droppin
 with neutral overlaps/unplaced. Gate behind the sweep; land only if net-positive.
 
 Filed 2026-07-24 (fix deferred to a measured follow-up).
+
+## Fix (1) SHIPPED — interior-side discrimination in `annotate_endpoints` (2026-07-26)
+
+Implemented as a two-pass per-endpoint assignment: **pass 1** taps a block the
+segment *abuts from outside* (endpoint on the block's face perpendicular to travel
+AND the body `P→other` points away from the block's interior); **pass 2**, only if
+nothing abuts from outside, falls back to the old first-coincident-face rule so a
+terminus that merely lands on a face (with no adjoining block) still taps —
+coverage is never lost.
+
+**It fixes b25 exactly.** `seg0`'s taps move `blk_10/blk_10 → blk_01/blk_03` (the
+crossed driver no longer steals the receivers' taps; it is left for the
+pass-through pass), and `big2.buda` heals `0/0/1 → 0/0/0`. Regression test:
+`test_topo_abutment.py::test_trunk_through_driver_taps_abutting_receivers_not_the_crossed_block`.
+
+### Measurement — the honest, pin-free result
+
+The first sweep looked net-negative, but that was a **measurement artifact** (a
+`tools/qor_corpus.py` reviewer — @codex on PR #448 — caught it). Two of the corpus
+flows carry **index-based `select_topology` pins** (`big2_b4_b24`: `1 4`/`2 10`;
+`b24_bus_056`: `1 10`); this fix unlocks previously-filtered candidates, which
+**renumbers** the pool, so those pins select a *different* topology → phantom
+opens. Re-measured with `select_topology` neutralized on **both** sides, only the
+`big2`/`tc3b_flat_x5` circuit actually moves:
+
+| flow | main | branch | |
+|---|---|---|---|
+| `big2/big2.buda` (healer-equipped) | 0/0/1 | **0/0/0** | b25 heals |
+| `big2/big2_noviz` · `tc3b_flat` (same circuit, **no healers**, ×2) | 2/28/2 | 8/40/3 | raw residue up |
+
+`b24_bus_056` and `big2_b4_b24` are **byte-identical** once their stale pins are
+neutralized. So the true effect is: **fixes b25 on the flow that ships (with
+healers), at the cost of a higher raw pre-heal residue on that one circuit**,
+which the healers recover.
+
+### The raw-packing trade-off (why it is a real, bounded cost)
+
+The re-attribution is unconditional — it corrects *every* crossed-vs-abutting tap,
+not only b25's. In the `io_pad_tr` / `x≈5772` flexible-trunk geometry that means a
+trunk endpoint mis-attributed to a *crossed* block (which pinned a segment and got
+the candidate dropped) is now attributed to the *abutting* block, so the
+**pinch-dropped pure-pass-through trunk becomes valid and available** — even
+without `double_detour` (`test_topo_flexible_trunk.py` updated accordingly). Those
+tighter pass-through trunks pack closer to the channel limit, so the RAW
+(no-healer) residue rises on the big2/tc3b family. Concretely two guard tests were
+re-baselined to the new raw level (both still guard, just higher):
+`test_channel_stress_packs_clean` (`<=1 → <=6`) and
+`test_big2_prenegotiation_spreadfit_residue` (`<=6 → <=7`). Healer-equipped flows
+absorb it (`big2.buda` 0/0/0). Landed per owner decision on PR #448 (viol_bundles —
+the electrical-correctness metric — is the priority; b25's real open is fixed).
+
+**Follow-up (open):** a *surgical* form — redistribute only when it rescues a
+would-be-stranded busterm (e.g. gate on the crossed block being the bundle's
+DRIVER, as in b25, vs a crossed receiver as in x5772) — would keep b25's win
+without the raw-packing trade-off, but needs driver-awareness threaded into
+`annotate_endpoints` and its own measured sweep. Deferred.

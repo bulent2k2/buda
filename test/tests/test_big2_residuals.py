@@ -212,10 +212,15 @@ def test_big2_prenegotiation_spreadfit_residue(monkeypatch):
                          "negotiate_congestion", "ripup_reroute",
                          "run_detailed_nuts"})
     r = s.nuts_result
-    # The repack guarantee: well below the pre-repack 8 (x86 measurement: 5).
-    assert r.num_overlaps <= 6, (
+    # The repack guarantee: below the pre-repack 8.  Raised 6 -> 7 with the
+    # big2-b25 interior-side face-tap fix
+    # (docs/internal/big2_b25_abutment_tap_dnuts_2026-07.md): correcting the
+    # crossed-vs-abutting endpoint tap unlocks tighter pass-through trunk
+    # candidates that raise the raw (pre-negotiation) residue by one here; the
+    # healer-equipped big2.buda still reaches 0/0/0 (and b25's own open heals).
+    assert r.num_overlaps <= 7, (
         f"cluster repack regressed: {r.num_overlaps} residual overlaps "
-        f"(pre-repack baseline was 8, post-repack x86 measurement 5)")
+        f"(pre-repack baseline was 8; post-b25-fix measurement 7)")
     if r.num_overlaps == 0:
         return   # even better — a future improvement cleared everything
     comps = _clusters(r)

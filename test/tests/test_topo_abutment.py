@@ -545,3 +545,49 @@ def test_overlap_corner_u_family_routes_clear_of_far_block():
             f"{kind}: {s.detailed_result.num_unplaced}/8 bits unplaced"
         hit = _bit_in_B_interior(s.detailed_result, sel, wrapped)
         assert hit is None, f"{kind}: bit-wire seg {hit[0]} bit {hit[1]} penetrates the wrapped block at {hit[2]}"
+
+
+# --- big2 b25: a trunk spanning a driver face-to-face must tap the abutting
+# --- receivers, NOT the crossed driver -------------------------------------
+
+def _seg_taps(topo, i):
+    """(start_block, end_block) face-taps of segment i, or None where unset."""
+    se = topo.seg_busterms.get(i)
+    if se is None:
+        return (None, None)
+    return (getattr(se[0], "block_name", None) if se[0] is not None else None,
+            getattr(se[1], "block_name", None) if se[1] is not None else None)
+
+
+def test_trunk_through_driver_taps_abutting_receivers_not_the_crossed_block():
+    """big2 bundle 25 (`docs/internal/big2_b25_abutment_tap_dnuts_2026-07.md`):
+    the V trunk (4145,1425)->(4145,2020) spans the driver blk_10 exactly
+    face-to-face; its two endpoints lie on faces shared with receivers blk_01
+    (north, y=1425) and blk_03 (south, y=2020).  annotate_endpoints must assign
+    those endpoint face-taps to the receivers that ABUT from outside — not to the
+    driver the trunk CROSSES — so the receivers are anchored to the face instead
+    of surviving on a zero-margin graze that opens at DetailedNUTS.  blk_10 is
+    left for the pass-through pass (the trunk strictly crosses it)."""
+    fp = buda.Floorplan()
+    fp.add_block("blk_10", 3500, 1425, 4870, 2020)   # driver — trunk crosses it
+    fp.add_block("blk_01", 4145, 1000, 6100, 1425)   # receiver — abuts trunk start face
+    fp.add_block("blk_03", 3500, 2020, 4870, 2570)   # receiver — abuts trunk end face
+    fp.add_block("blk_11", 1250, 1790, 2000, 2720)   # receiver — stub target
+
+    t = buda.Topology()
+    t.type = "TRUNK_V@x4145"
+    trunk = buda.Segment()
+    trunk.start, trunk.end, trunk.layer_hint = buda.Point(4145, 1425), buda.Point(4145, 2020), 7
+    stub = buda.Segment()
+    stub.start, stub.end, stub.layer_hint = buda.Point(2000, 1790), buda.Point(4145, 1790), 6
+    t.segments = [trunk, stub]
+    buda.annotate_topology(t, fp)
+
+    start_tap, end_tap = _seg_taps(t, 0)          # the trunk
+    assert start_tap == "blk_01", f"trunk start should tap the abutting receiver blk_01, got {start_tap}"
+    assert end_tap == "blk_03", f"trunk end should tap the abutting receiver blk_03, got {end_tap}"
+    assert start_tap != "blk_10" and end_tap != "blk_10", \
+        "the crossed driver blk_10 must not steal the receivers' face-taps"
+
+    stub_start, _ = _seg_taps(t, 1)               # the stub still taps blk_11
+    assert stub_start == "blk_11", f"stub should tap blk_11 from outside, got {stub_start}"

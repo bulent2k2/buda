@@ -23,10 +23,14 @@ flow/big_data_test/big2/b4_bus_077.buda geometry, where a V trunk inside
 io_pad_tr's x-span (x≈5772) taps all four right-column receivers
 (blk_22/blk_12/blk_29/io_pad_tr) by pass-through and stubs only the driver blk_02.
 
-Previously that candidate was silently dropped: at x5772 nearly every block is
-pass-through, the stub-only span was degenerate / the lone driver stub pinned
-against its own face, and filter_pinched removed it.  Without double_detour the
-span stays tight (unchanged behaviour), so this candidate only appears under it.
+Previously that candidate was silently dropped without double_detour: at x5772
+nearly every block is pass-through, and a trunk endpoint landing on a block's
+face was mis-attributed to a block the spine CROSSES (first-coincident-face
+rule), which pinned a segment so filter_pinched removed it.  The big2-b25
+interior-side face-tap discrimination (annotate_endpoints now taps the block the
+segment ABUTS from outside, not the one it crosses — see
+docs/internal/big2_b25_abutment_tap_dnuts_2026-07.md) removes that spurious pin,
+so the tight-span candidate is now valid and appears WITHOUT double_detour too.
 """
 import buda
 
@@ -87,14 +91,26 @@ def test_region4_trunk_generated_under_double_detour():
     assert not _pinched(c, fp), "region-4 trunk must not have a zero-slide segment"
 
 
-def test_flexible_trunk_is_double_detour_gated():
-    """Without double_detour the coverage extension is OFF: the purely-pass-through
-    x5772 trunk is not emitted (tight-span behaviour unchanged)."""
+def test_flexible_trunk_valid_without_double_detour_after_b25_fix():
+    """After the big2-b25 interior-side face-tap fix, the x5772 pass-through trunk
+    is no longer pinned-and-dropped without double_detour: it appears with a tight
+    span AND is valid (spine + 1 driver stub, every block covered, not pinched).
+
+    Before the fix a trunk endpoint on a block's face was mis-attributed to a
+    block the spine CROSSES, pinning a segment; annotate_endpoints now taps the
+    block the segment ABUTS from outside, so the spurious pin is gone."""
     fp = _make_fp()
     cands = _gen(fp, double_detour=False).generate_candidates(_DRV, _RCV)
-    assert not any(c.type == "TRUNK_V@x5772" for c in cands), (
-        "region-4 trunk should only appear under double_detour"
+    region4 = [c for c in cands if c.type == "TRUNK_V@x5772"]
+    assert region4, (
+        "x5772 trunk should now appear without double_detour after the b25 fix; "
+        f"got {sorted({c.type for c in cands})}"
     )
+    c = region4[0]
+    assert len(c.segments) == 2, f"expected spine + 1 driver stub, got {len(c.segments)}"
+    assert "BUSTERM_OPEN" not in _violations(c, fp), _violations(c, fp)
+    assert "FEEDTHRU_RELAY" not in _violations(c, fp), _violations(c, fp)
+    assert not _pinched(c, fp), "x5772 trunk must not have a zero-slide segment"
 
 
 def test_recenter_keeps_suppressed_block_covered():
