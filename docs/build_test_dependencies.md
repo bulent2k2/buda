@@ -28,7 +28,7 @@ comment in `CMakeLists.txt` and `docs/internal/test/`).
 | Dependency | pip name | Used by |
 |---|---|---|
 | **NumPy** | `numpy` | matplotlib; and directly in `buda_viz` (home-fit geometry). |
-| **matplotlib** | `matplotlib` | the visualizer (`buda_viz`) and the Floorplanner GUI. |
+| **matplotlib** | `matplotlib>=3.9` | the visualizer (`buda_viz`) and the Floorplanner GUI. `buda_viz` uses `get_backend(auto_select=False)` when available to avoid lazy backend selection; older Matplotlib falls back to a guarded raw backend peek. |
 | **Tk** | *(system Tk; `tkinter` ships with Python)* | interactive GUI windows (viz, Floorplanner). Tests use the headless **Agg** backend, so Tk is **not** needed to run the suite — only for live windows. |
 | **pytest** | `pytest` | the whole test suite. |
 | **pytest-bdd** | `pytest-bdd` | the `.feature` files under `test/tests/features/`. |
@@ -57,7 +57,7 @@ install.
 
 ```bash
 # Required to build + test:
-pip install pybind11 numpy matplotlib pytest pytest-bdd
+pip install pybind11 numpy 'matplotlib>=3.9' pytest pytest-bdd
 
 # Optional:
 pip install pytest-xdist                 # parallel test runs (any OS)

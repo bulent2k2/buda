@@ -29,12 +29,18 @@ from datetime import datetime
 # Only override the IMPLICIT default ('macosx'): respect a backend the caller
 # already selected explicitly — via MPLBACKEND or a prior matplotlib.use(...) —
 # so headless macOS contexts (tests / PNG rendering that pick Agg) keep their
-# choice instead of being dragged onto Tk.  dict.__getitem__ peeks the raw
-# rcParams value without triggering lazy backend resolution: it is the auto
-# sentinel (non-str) until a choice is made, and a plain string afterwards.
+# choice instead of being dragged onto Tk.  Matplotlib 3.9+'s
+# get_backend(auto_select=False) checks for an already selected backend without
+# triggering lazy backend resolution; older Matplotlib falls back to the raw
+# rcParams peek used here originally.
 if sys.platform == 'darwin':
     import matplotlib
-    if not isinstance(dict.__getitem__(matplotlib.rcParams, 'backend'), str):
+    try:
+        _backend_selected = matplotlib.get_backend(auto_select=False) is not None
+    except TypeError:
+        _backend_selected = isinstance(
+            dict.__getitem__(matplotlib.rcParams, 'backend'), str)
+    if not _backend_selected:
         matplotlib.use('TkAgg')
 
 import matplotlib.pyplot as plt

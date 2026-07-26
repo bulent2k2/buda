@@ -179,10 +179,13 @@ echo "=== BUDA build successful ==="
 TEST_DURATION=0
 if [ "$RUN_TESTS" = true ]; then
     echo "=== Running Tests ==="
+    export MPLBACKEND="${MPLBACKEND:-Agg}"
     TEST_START=$(date +%s)
 
     cd ..
     mkdir -p log
+    export MPLCONFIGDIR="${MPLCONFIGDIR:-$REPO_DIR/log/matplotlib}"
+    mkdir -p "$MPLCONFIGDIR"
     TEST_LOG="log/pytest_$(date +%Y%m%d_%H%M%S).log"
     # Define awk filter for milestone-based progress indicator
     AWK_FILTER='
