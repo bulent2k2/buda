@@ -1,0 +1,64 @@
+# from hbundles/06_multipin_stress.buda
+source ../tracks/tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+open_bdb :memory:
+
+add_cell blk_cell   300 230
+add_cell sub_cell   120  90
+add_cell leaf_cell   45  50
+
+add_inst_to_cell  blk_cell  s1   sub_cell   15   15
+add_inst_to_cell  blk_cell  s2   sub_cell  155   15
+add_inst_to_cell  blk_cell  s3   sub_cell   15  125
+add_inst_to_cell  blk_cell  s4   sub_cell  155  125
+
+add_inst_to_cell  sub_cell  l    leaf_cell  10   20
+add_inst_to_cell  sub_cell  r    leaf_cell  65   20
+
+add_inst u1  blk_cell  -    50   50
+add_inst u2  blk_cell  -   400   50
+add_inst u3  blk_cell  -   750   50
+add_inst u4  blk_cell  -    50  330
+add_inst u5  blk_cell  -   400  330
+add_inst u6  blk_cell  -   750  330
+
+derive_busterms 2
+
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+
+bdb_net_mode on
+
+# 6-pin ── broad intra-blk fan plus cross-blk tail
+add_bus mp6_b[2]   u6/s1/l.out   u6/s2/l.in,u6/s3/l.in,u6/s4/l.in,u3/s1/l.in,u2/s1/l.in
+
+run_hier_bundler depth 2
+
+generate_hier_topologies
+
+run_planner hier
+
+run_nuts
+#negotiate_congestion
+#ripup_reroute
+check_design nuts
+
+# Full glory (bb :-)
+run_detailed_nuts
+check_design
+
+#negotiate_congestion
+#check_design
+
+# clean after 8 iterations (rr takes 9 of 11 seconds total. Total without rr: 2.4 seconds. No heal default: 1.5s).
+#   with rr: log/06_multipin_stress/20260722-134300/flow.log
+#   without: log/06_multipin_stress/20260722-134705/flow.log
+#   default: log/06_multipin_stress/20260722-135030/flow.log
+# ripup_reroute
+#check_design
+
+visualize

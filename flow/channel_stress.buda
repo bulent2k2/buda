@@ -30,16 +30,19 @@ run_bundler strict
 # source test4_gen_topo.buda
 generate_topologies
 
+# Z-topos:
 select_topologies 2,8,10,17,18,25,27,34,36,43,45,52,54,61 3
+# I-topos
 select_topologies 1,9,26,35,44,53,62 1 3-7,11-16,19-24,28-32,37-42,46,47,49-51,55,57-60 4
 # Rip-up and reroute bundle 33 with a detour.  Required since the Issue #22
 # congestion fix (closed-interval for_each_band counts trunk-junction arms
 # honestly): bundle 33's straight route now over-subscribes the channel, so we
 # pin its detour explicitly.
 select_topology 33 5
-# bundles 48 and 56 are free
+# bundles 48 and 56 are free..
+# July 26: ..no more!
+select_topologies 48,56 4
 run_planner 5
-#run_nuts 2.0
 run_nuts
 # Overlaps: 54  (M4=1, M5=53).  All 62 bundles are crammed onto the two initial
 # layers (M4/M5), so the channel is genuinely over-subscribed — these are
@@ -72,7 +75,9 @@ run_nuts
 #run_nuts_on_layer M5   # was: 10 → 4
 #run_nuts_on_layer M3   # was: no effect
 check_design nuts
-
+# clear two final opens:
+negotiate_congestion
+check_design nuts
 run_detailed_nuts
 check_design dnuts
 

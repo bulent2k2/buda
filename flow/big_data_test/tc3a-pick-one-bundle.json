@@ -1,0 +1,14 @@
+{
+  "selections": [
+    {
+      "bundle_hint": "bus_070_b00",
+      "bundle_id": 68,
+      "topo_type": "BITRUNK_H",
+      "topo_wl": 1898,
+      "topo_uid": "e27c8834b15a1e3e",
+      "topo_index_hint": 29,
+      "note": "",
+      "selected_at": "2026-07-26T13:20:23"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+# from tc3a.buda
+source ../tracks/tracks4top.buda
+open_bdb tc3a_bit_pruned.bdb.sql
+
+derive_busterms 1
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+run_hier_bundler depth 1
+dump_hbundles
+# hb-68   D0  cross-block               "DRV:blk_35|REC:blk_10,blk_15,blk_25"  nets=4  cands=0
+generate_topologies_for_hbundle 68 # todo: in addition to bundle id, support hint: [-cell .] -net bus_070
+dump_topologies --conn
+run_planner hier
+run_nuts
+negotiate_congestion
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+visualize

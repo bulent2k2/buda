@@ -2,14 +2,15 @@
 source tracks/tracks4top.buda
 source big_data_test/tc3a_flat_5x.buda
 run_bundler
-#                                                                with hanan-loci  w/o
-generate_topologies_for_bundle bus_007 no_hanan_loci  # 6 terms: 81 candidates -> 48
-generate_topologies_for_bundle bus_033 no_hanan_loci  # 4 terms: 51 candidates -> 33
-generate_topologies_for_bundle bus_044 no_hanan_loci  # 5 terms: 56 candidates -> 34
+#                                                                with hanan-loci  w/o   after fix (topo/family)
+generate_topologies_for_bundle bus_007 no_hanan_loci  # 6 terms: 81 candidates -> 48 -> 45/45
+generate_topologies_for_bundle bus_033 no_hanan_loci  # 4 terms: 51 candidates -> 33 -> 32/31
+generate_topologies_for_bundle bus_044 no_hanan_loci  # 5 terms: 56 candidates -> 34 -> 34/34
+dump_topologies --problems
 dump_topologies bus_007 --conn
 check_design topo all
 select_topology bus_007 8  # multiple segs with an open-ended slide, some with two open ends
-select_topology bus_033 29 # dangling trunk, too!
+select_topology bus_033 29 # (dangling trunk is gone)
 select_topology bus_044 10 # three segs with one open-ended slide
 run_planner
 run_nuts
