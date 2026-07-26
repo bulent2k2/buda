@@ -381,8 +381,26 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
         bool covered = false;
         for (const auto& cs : segs) {
             if (covered) break;
-            for (const Rect& r : rects)
-                if (seg_spans_rect(cs, (double)cs.perp_pos, r)) { covered = true; break; }
+            for (const Rect& r : rects) {
+                if (!seg_spans_rect(cs, (double)cs.perp_pos, r)) continue;
+                // Robust-cover gate (issue #438): a nominal pass-through only counts
+                // if the segment can actually be PLACED to cover the block — its
+                // slide window [perp_lo, perp_hi] must reach the block's perp-extent.
+                // A boundary graze whose window is pushed entirely off the face
+                // (tc3a bundle 68: seg1 grazes blk_10's left edge x=809 but its
+                // window [740,806] — capped by the min-stub floor — can never reach
+                // x∈[809,969]) is NOT a real cover: NUTS seats the trunk off the face
+                // and the block's bits open. Normal covers are unaffected — their
+                // nominal perp_pos lies inside the window, so the window necessarily
+                // reaches the block. Dropping the fragile candidate lets a robust
+                // interior-pass-through sibling win (filter_uncovered keeps the pool
+                // if EVERY candidate is broken, so a bundle is never stranded).
+                int blo = cs.horiz ? r.y1 : r.x1;
+                int bhi = cs.horiz ? r.y2 : r.x2;
+                if (cs.perp_hi < blo || cs.perp_lo > bhi) continue;  // window can't reach
+                covered = true;
+                break;
+            }
         }
         if (!covered) {
             ConnViolation v;
