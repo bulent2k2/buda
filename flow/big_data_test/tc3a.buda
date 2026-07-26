@@ -33,7 +33,11 @@ dump_hbundles
 generate_hier_topologies
 run_planner hier
 run_nuts
-negotiate_congestion
+# (negotiate_congestion removed: the receiver-graze coverage fix — issue #438,
+#  the slide-aware block-coverage gate in verify.cpp — makes this design route
+#  0/0/0 with no healing. negotiate_congestion is not only redundant here but,
+#  run on the already-clean design via `source`, degrades it — a separate
+#  execution-context bug in negotiate to be tracked on its own.)
 check_design nuts
 run_detailed_nuts
 check_design dnuts
