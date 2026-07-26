@@ -1352,25 +1352,48 @@ static void annotate_endpoints(Topology& topo,
     for (int i = 0; i < (int)topo.segments.size(); ++i) {
         const Segment& seg = topo.segments[i];
         bool horiz = (seg.start.y == seg.end.y);
-        for (const Busterm& bt : blocks) {
-            // For multi-rect blocks check each individual rect so that a stubbed
-            // block whose union-bbox y-range contains the trunk y is NOT falsely
-            // annotated as a Direct connection.
-            auto on_face = [&](const Point& P) -> bool {
-                auto check_rect = [&](const Rect& r) -> bool {
-                    return horiz
-                        ? (P.x == r.x1 || P.x == r.x2) && P.y >= r.y1 && P.y <= r.y2
-                        : (P.y == r.y1 || P.y == r.y2) && P.x >= r.x1 && P.x <= r.x2;
-                };
-                if (bt.rects.empty()) return check_rect(bt.orig_bbox) || check_rect(bt.bbox);
-                for (const Rect& ri : bt.rects)
-                    if (check_rect(ri)) return true;
+        // Two-pass per-endpoint assignment: PREFER a block the segment ABUTS FROM
+        // OUTSIDE (endpoint on the block's face perpendicular to travel AND the
+        // body P->other points AWAY from the block's interior); only if nothing
+        // abuts does an endpoint fall back to the old first-coincident-face rule
+        // (so a terminus that merely lands on a face still taps).  Stops a block
+        // the segment passes THROUGH (big2 b25: driver blk_10) from stealing the
+        // face-tap of a receiver abutting the same trunk endpoint (blk_01/blk_03).
+        // See docs/internal/big2_b25_abutment_tap_dnuts_2026-07.md.
+        auto rects_of = [&](const Busterm& bt) -> std::vector<Rect> {
+            if (!bt.rects.empty()) return bt.rects;
+            return {bt.orig_bbox, bt.bbox};
+        };
+        auto abuts_rect = [&](const Point& P, const Point& other, const Rect& r) -> bool {
+            if (horiz) {
+                if (!(P.y >= r.y1 && P.y <= r.y2)) return false;
+                if (P.x == r.x1) return other.x < P.x;
+                if (P.x == r.x2) return other.x > P.x;
                 return false;
-            };
-            auto& ep = topo.seg_busterms[i];
-            if (!ep.first.has_value()  && on_face(seg.start)) ep.first  = bt;
-            if (!ep.second.has_value() && on_face(seg.end))   ep.second = bt;
-        }
+            }
+            if (!(P.x >= r.x1 && P.x <= r.x2)) return false;
+            if (P.y == r.y1) return other.y < P.y;
+            if (P.y == r.y2) return other.y > P.y;
+            return false;
+        };
+        auto on_face_rect = [&](const Point& P, const Rect& r) -> bool {
+            return horiz
+                ? (P.x == r.x1 || P.x == r.x2) && P.y >= r.y1 && P.y <= r.y2
+                : (P.y == r.y1 || P.y == r.y2) && P.x >= r.x1 && P.x <= r.x2;
+        };
+        auto assign = [&](std::optional<Busterm>& slot,
+                          const Point& P, const Point& other) {
+            if (slot.has_value()) return;
+            for (const Busterm& bt : blocks)
+                for (const Rect& r : rects_of(bt))
+                    if (abuts_rect(P, other, r)) { slot = bt; return; }
+            for (const Busterm& bt : blocks)
+                for (const Rect& r : rects_of(bt))
+                    if (on_face_rect(P, r)) { slot = bt; return; }
+        };
+        auto& ep = topo.seg_busterms[i];
+        assign(ep.first,  seg.start, seg.end);
+        assign(ep.second, seg.end,   seg.start);
     }
 }
 

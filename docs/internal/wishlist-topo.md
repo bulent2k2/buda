@@ -148,13 +148,16 @@ open on `big2.buda`; see
 [`big2_b25_abutment_tap_dnuts_2026-07.md`](big2_b25_abutment_tap_dnuts_2026-07.md)).
 That case wants a REAL face-tap (not a stub), so its fix is interior-side
 discrimination in `annotate_endpoints`, not the stub emission above — but both
-chase the same symptom. **Measured 2026-07-26:** the blanket abut-vs-cross rule
-heals b25 (and `slowdown_rnr`) but is net-negative corpus-wide (4 worse, 2
-previously-clean flows broken) because it also demotes *correct* crossed-block
-taps, unlocking pinch-dropped pure-pass-through trunks (the `x≈5772` b4/b24
-family) that the planner then selects and opens at DNUTS. Reverted; both fixes
-need to be **surgical** (act only when the redistribution rescues a would-be
-stranded busterm), which is the shared open problem.
+chase the same symptom. **SHIPPED 2026-07-26** (PR #448): the two-pass
+abut-vs-cross rule heals b25 (`big2.buda` `0/0/1 → 0/0/0`). The first sweep looked
+net-negative but was a stale-`select_topology`-pin artifact (index pins renumber
+when the pool shifts — caught by @codex); pin-free, only the big2/tc3b_flat_x5
+circuit moves, and only its RAW no-healer residue rises (healer-equipped
+`big2.buda` recovers). The residue rise is because the fix also unlocks the
+pinch-dropped `x≈5772` pure-pass-through trunks; two raw-packing guard tests were
+re-baselined. A **surgical** follow-up (redistribute only when it rescues a
+would-be-stranded busterm — e.g. gate on the crossed block being the DRIVER) would
+remove that raw-packing trade-off; still open.
 
 ## Nominal-WL comparability across shape families (the b44 root causes) — (a)+(b)+(c) SHIPPED
 
