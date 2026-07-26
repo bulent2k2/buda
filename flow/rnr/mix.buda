@@ -16,6 +16,8 @@ dump_hbundles
 # root-cause follow-on).
 generate_hier_topologies no_hanan_loci
 # improvement (1) due to signal_tracks:
+# Heals below → opt into the kSegsRel proactive default explicitly (issue #444).
+set_planner_param healersAhead 1
 run_planner hier 5 signal_tracks
 run_nuts
 check_design nuts

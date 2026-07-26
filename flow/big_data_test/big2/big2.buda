@@ -7,6 +7,10 @@ run_bundler
 # nuts: 6 overlaps,  dnuts: 52
 generate_topologies
 check_design topo all
+# This flow heals (ripup_reroute/negotiate_congestion below), so opt into the
+# kSegsRel proactive default explicitly (issue #444 — replaces the old
+# script-text lookahead so source/line-by-line/interactive all agree).
+set_planner_param healersAhead 1
 run_planner signal_tracks
 run_nuts
 negotiate_congestion

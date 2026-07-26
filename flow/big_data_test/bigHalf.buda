@@ -4,6 +4,8 @@ source tc3a_flat_5x.buda
 run_bundler
 generate_topologies
 check_design topo all
+# Heals below → opt into the kSegsRel proactive default explicitly (issue #444).
+set_planner_param healersAhead 1
 run_planner signal_tracks
 run_nuts
 check_design nuts

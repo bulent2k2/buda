@@ -73,17 +73,26 @@ class NutsFlowMixin:
         return found
 
     def _apply_healers_ahead(self, planner, healing_now=False):
-        """Audit G1/G2 gate: declare `healersAhead` to the planner when the
-        flow runs a healer, so the non-explicit kSegsRel default (compiled
-        0.02 / env BUDA_KSEGS_REL override) may apply —
-        the penalty's two measured correctness regressions are both
-        ripup-healed, and real only without healers.  An explicit
-        set_planner_param healersAhead (the harness escape) always wins.
-        `healing_now` = the caller IS a healer (ripup's re-plan) — declare
-        regardless of the script scan (an interactive ripup counts too)."""
+        """Audit G1/G2 gate: declare `healersAhead` to the planner so the
+        non-explicit kSegsRel default (compiled 0.02 / env BUDA_KSEGS_REL
+        override) may apply — the penalty's two measured correctness
+        regressions are both ripup-healed, and real only without healers.
+
+        The declaration is now EXPLICIT (issue #444): a flow that intends to
+        heal declares `set_planner_param healersAhead 1` BEFORE run_planner.
+        The previous script-TEXT lookahead (`_healers_in_flow`, scanning the
+        sourced flow for a later ripup_reroute/negotiate_congestion) made the
+        result depend on how the identical commands were factored across
+        `source` files — sourced-as-one-file routed differently from the same
+        commands line-by-line or interactive.  An explicit param is a runtime
+        fact, so every execution structure agrees.
+
+        `healing_now` = the caller IS a healer re-plan (ripup's incremental
+        re-plan), so the gate is satisfied by construction — an interactive
+        ripup with no prior declaration still counts."""
         if "healersAhead" in self._planner_params:
             return
-        if healing_now or self._healers_in_flow():
+        if healing_now:
             planner.set_planner_param("healersAhead", 1.0)
 
     @staticmethod

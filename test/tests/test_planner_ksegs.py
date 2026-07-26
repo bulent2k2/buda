@@ -248,14 +248,15 @@ def test_ksegs_env_default_stands_down_for_kpeak(monkeypatch):
 def test_ksegs_env_default_healer_gated(monkeypatch, tmp_path):
     """Audit G1/G2: the env default is only SAFE with healers in the flow
     (the 07_wide_fan structural loser and big2's jagged alpha response are
-    both ripup-healed, and real only without).  Without a healer the env
-    default stands down; the session detects ripup_reroute /
-    negotiate_congestion in the flow SCRIPT (through `source`) and declares
-    healersAhead; harnesses may declare it explicitly."""
+    both ripup-healed, and real only without).  A flow that intends to heal
+    DECLARES `set_planner_param healersAhead 1` before run_planner (issue #444
+    replaced the old flow-SCRIPT text scan — an explicit param is a runtime
+    fact, so source/line-by-line/interactive all agree); without the
+    declaration the env default stands down."""
     monkeypatch.setenv("BUDA_KSEGS_REL", "0.02")
 
-    # 1. Interactive/scriptless session, no healers → suppressed: the
-    #    WL-cheapest candidate keeps winning, and the note names the reason.
+    # 1. No declaration → suppressed: the WL-cheapest candidate keeps winning,
+    #    and the note names the reason.
     s = buda_cli.BudaSession()
     s.no_viz = True
     buf = io.StringIO()
@@ -266,7 +267,7 @@ def test_ksegs_env_default_healer_gated(monkeypatch, tmp_path):
     assert s.bundles[0].plan.selected_topology_index == 0
     assert "no healer" in buf.getvalue()
 
-    # 2. Explicit healersAhead (harness escape) → the default applies.
+    # 2. Explicit healersAhead declaration → the default applies.
     s2 = buda_cli.BudaSession()
     s2.no_viz = True
     with contextlib.redirect_stdout(io.StringIO()):
@@ -278,14 +279,11 @@ def test_ksegs_env_default_healer_gated(monkeypatch, tmp_path):
     assert len(w2.input.candidates[w2.plan.selected_topology_index]
                .segments) == 5             # the 0.02 sweet spot
 
-    # 3. Script detection: a flow whose SOURCED sub-script runs
-    #    ripup_reroute is a healer flow — the default applies with no
-    #    explicit declaration.
-    sub = tmp_path / "heal.buda"
-    sub.write_text("ripup_reroute\n")
+    # 3. The declaration works identically when it rides in a SOURCED flow —
+    #    it is the runtime param, not the file structure, that matters.
     flow = tmp_path / "f.buda"
     flow.write_text("\n".join(_B61)
-                    + "\nrun_planner\nrun_nuts\nsource heal.buda\n")
+                    + "\nset_planner_param healersAhead 1\nrun_planner\n")
     s3 = buda_cli.BudaSession()
     s3.no_viz = True
     s3.script_path = str(flow)
@@ -299,9 +297,9 @@ def test_ksegs_env_default_healer_gated(monkeypatch, tmp_path):
 def test_healers_ahead_declaration_paths(tmp_path):
     """The _apply_healers_ahead wiring shared by ALL planner-construction
     sites — global (flat + hier), the bottom-up cell-local template solve,
-    and ripup's hier re-plan (Codex #342): script detection through
-    `source`, the healing_now=True unconditional path (the caller IS a
-    healer), and the explicit-param override."""
+    and ripup's hier re-plan (Codex #342).  Issue #444 removed the flow-script
+    text scan: the only auto path left is healing_now=True (the caller IS a
+    healer), plus the explicit-param override — no lookahead."""
     class FakePlanner:
         def __init__(self):
             self.calls = []
@@ -311,11 +309,14 @@ def test_healers_ahead_declaration_paths(tmp_path):
     s = buda_cli.BudaSession()
     s.no_viz = True
     p = FakePlanner()
-    s._apply_healers_ahead(p)                 # scriptless: nothing declared
+    s._apply_healers_ahead(p)                 # nothing declared: no lookahead
     assert p.calls == []
     s._apply_healers_ahead(p, healing_now=True)   # ripup's re-plan: always
     assert p.calls == [("healersAhead", 1.0)]
 
+    # A healer LATER in the sourced flow is NOT auto-detected — the flow must
+    # declare healersAhead itself (issue #444). Without a declaration the gate
+    # stays closed regardless of script text.
     flow = tmp_path / "f.buda"
     sub = tmp_path / "heal.buda"
     sub.write_text("negotiate_congestion\n")
@@ -324,12 +325,11 @@ def test_healers_ahead_declaration_paths(tmp_path):
     s2.no_viz = True
     s2.script_path = str(flow)
     p2 = FakePlanner()
-    s2._apply_healers_ahead(p2)               # detected through source
-    assert p2.calls == [("healersAhead", 1.0)]
+    s2._apply_healers_ahead(p2)               # no declaration → no call
+    assert p2.calls == []
 
     s3 = buda_cli.BudaSession()
     s3.no_viz = True
-    s3.script_path = str(flow)
     s3._planner_params["healersAhead"] = 0.0  # explicit set wins, even 0
     p3 = FakePlanner()
     s3._apply_healers_ahead(p3, healing_now=True)
@@ -344,7 +344,8 @@ def test_ksegs_compiled_default_engages_gated(monkeypatch, tmp_path):
     monkeypatch.delenv("BUDA_KSEGS_REL", raising=False)
     flow = tmp_path / "f.buda"
     flow.write_text("\n".join(_B61)
-                    + "\nrun_planner\nrun_nuts\nripup_reroute\n")
+                    + "\nset_planner_param healersAhead 1\nrun_planner\n"
+                    + "run_nuts\nripup_reroute\n")
 
     def run():
         s = buda_cli.BudaSession()
@@ -355,7 +356,7 @@ def test_ksegs_compiled_default_engages_gated(monkeypatch, tmp_path):
         w = s.bundles[0]
         return len(w.input.candidates[w.plan.selected_topology_index].segments)
 
-    # Healer flow, nothing set anywhere → the compiled default engages.
+    # Healer flow (declares healersAhead), env unset → the compiled default engages.
     assert run() == 5                     # the 0.02 sweet spot
     # The env override at "0" DISABLES it, healers or not (study escape).
     monkeypatch.setenv("BUDA_KSEGS_REL", "0")
@@ -370,3 +371,45 @@ def test_ksegs_default_off_keeps_selection():
     assert sel == 0                       # pool is WL-sorted; cheapest wins
     assert t0.estimated_wirelength == min(
         c.estimated_wirelength for c in s.bundles[0].input.candidates)
+
+
+def _selection_via(commands, tmp_path, as_source):
+    """Run `commands` either as ONE sourced .buda file or line-by-line, and
+    return the bundle-0 selected candidate's segment count."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        if as_source:
+            flow = tmp_path / "flow.buda"
+            flow.write_text("\n".join(commands) + "\n")
+            s.script_path = str(flow)
+            s.do_command(f"source {flow}")
+        else:
+            for c in commands:
+                s.do_command(c)
+    w = s.bundles[0]
+    return len(w.input.candidates[w.plan.selected_topology_index].segments)
+
+
+def test_healers_gate_is_execution_structure_independent(tmp_path, monkeypatch):
+    """Determinism regression (issue #444): a flow containing a healer but NO
+    explicit `healersAhead` declaration must route IDENTICALLY whether it is
+    sourced-as-one-file or run line-by-line.  Before the fix the sourced case
+    detected the healer by scanning script text and silently enabled the
+    kSegsRel default (→ the 5-seg tree), while the line-by-line case did not
+    (→ the 10-seg WL-cheapest), so the same commands diverged.  With the
+    script-text scan gone, both agree."""
+    monkeypatch.delenv("BUDA_KSEGS_REL", raising=False)   # exercise the compiled 0.02
+    cmds = list(_B61) + ["run_planner", "run_nuts", "ripup_reroute"]
+    sourced = _selection_via(cmds, tmp_path, as_source=True)
+    inline = _selection_via(cmds, tmp_path, as_source=False)
+    assert sourced == inline, (sourced, inline)
+    assert sourced == 10          # no declaration → kSegsRel suppressed both ways
+
+    # And WITH an explicit declaration, both structures agree the other way.
+    cmds2 = (list(_B61) + ["set_planner_param healersAhead 1",
+                           "run_planner", "run_nuts", "ripup_reroute"])
+    sourced2 = _selection_via(cmds2, tmp_path, as_source=True)
+    inline2 = _selection_via(cmds2, tmp_path, as_source=False)
+    assert sourced2 == inline2, (sourced2, inline2)
+    assert sourced2 == 5          # declared → kSegsRel 0.02 sweet spot both ways
