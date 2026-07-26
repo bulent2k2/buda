@@ -16,9 +16,16 @@ Pytest can import plugins and worker hooks before test/tests/conftest.py runs.
 If those hooks import matplotlib first, conftest is too late to keep the test
 process headless.  Python imports sitecustomize during interpreter startup, so
 set the backend environment default here without importing matplotlib.
+
+Because this file lives at the repo root, Python will import it for any
+interpreter started with the checkout on sys.path, and it can shadow another
+sitecustomize module while running from the repo.  Keep non-pytest startup a
+strict no-op.
 """
 import os
 import sys
+
+_REPO_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _looks_like_pytest_startup():
@@ -36,5 +43,5 @@ if _looks_like_pytest_startup():
     os.environ.setdefault("MPLBACKEND", "Agg")
     os.environ.setdefault(
         "MPLCONFIGDIR",
-        os.path.join(os.getcwd(), "log", "matplotlib"))
+        os.path.join(_REPO_DIR, "log", "matplotlib"))
     os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)

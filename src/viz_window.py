@@ -23,6 +23,8 @@ import types
 import matplotlib.pyplot as plt
 
 
+# Known headless backends allowlist.  Unknown backends are treated as windowed so
+# GUI helper behavior fails open for new interactive backends.
 _HEADLESS_BACKENDS = {
     "agg", "cairo", "pdf", "pgf", "ps", "svg", "template",
     "module://matplotlib_inline.backend_inline",
