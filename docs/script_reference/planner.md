@@ -278,34 +278,39 @@ with its stubs, every member of a family routes within NUTS realization-noise of
 the others — picking one specific nominal by ID over-constrains the choice.
 
 Instead, pin the whole family and let the planner **refine which member wins**
-(perpendicular / skeleton):
-
-```buda
-select_topology bus_044 group:12   # pin the FAMILY that contains candidate 12
-```
-
-`<N>` is *any* candidate index inside the family — every member resolves to the
-same super-candidate, so you don't need the "canonical" one. The planner is then
-restricted to that family and optimizes within it. It is **byte-identical to an
-unpinned plan** when the pinned family is already the natural winner, and
-`select_topology` is byte-identical to the historical single-candidate path when
-you don't use `group:`.
-
-**Find the families first** with the grouped dump, which collapses each family to
-one representative row (its lowest-WL member), annotated `family:+K@lo..hi` (K
-other variants spanning trunk perp `lo..hi`) under a header `cands=N → M
-families`:
+(perpendicular / skeleton). **Find the families first** with the grouped dump,
+which collapses each family to one representative row (its lowest-WL member),
+annotated `family:+K@lo..hi` (K other variants spanning trunk perp `lo..hi`)
+under a header `cands=N → M families`:
 
 ```buda
 dump_topologies bus_044 --grouped
 ```
 
-A `group:` pin sets the bundle's `pinned_group` (the family's member indices) and
-**clears** any single-candidate pin; conversely a later single
-`select_topology <bundle> <id>` clears the group, and `unpin_topology` clears
-either kind. (The nominal-locus families are the same ones
-[`set_dedup_loci`](topologies.md) would collapse — `group:` keeps them all and
-lets the planner choose, rather than dropping all but one.)
+Then pin a family by any of its members:
+
+```buda
+select_topology bus_044 group:12   # pin the FAMILY containing candidate id 12
+```
+
+> **Numbering — add one to the displayed `idx`.** `dump_topologies` prints a
+> **0-based** `idx` column, but `select_topology` candidate ids (single *and*
+> `group:`) are **1-based**. So a representative shown at `idx 11` is pinned with
+> `group:12`; feeding the raw index in (`group:11`) would pin the *previous*
+> candidate — possibly a different family — and the `idx 0` row would error
+> (`valid range is 1..N`). `<N>` may be **any** member's id — each resolves to the
+> same super-candidate — so you don't need the "canonical" one.
+
+The planner is then restricted to that family and optimizes within it. It is
+**byte-identical to an unpinned plan** when the pinned family is already the
+natural winner, and `select_topology` is byte-identical to the historical
+single-candidate path when you don't use `group:`. A `group:` pin sets the
+bundle's `pinned_group` (the family's member indices) and **clears** any
+single-candidate pin; conversely a later single `select_topology <bundle> <id>`
+clears the group, and `unpin_topology` clears either kind. (The nominal-locus
+families are the same ones [`set_dedup_loci`](topologies.md) would collapse —
+`group:` keeps them all and lets the planner choose, rather than dropping all but
+one.)
 
 ---
 
