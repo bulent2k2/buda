@@ -63,31 +63,36 @@ the mix topo golden moved (see #445). Extracted geometry (global coords):
   underneath it. A robust sibling (candidate 22 `TRUNK_V_OOB+MST@x1924`) taps u12
   with its window actually reaching the face, which is what the gate lets win.
 
-### Why a min-stub retrofit is not a NUTS-time fix (the obstacles)
+### Where the retrofit lives, and what it actually costs
 
 1. **NUTS never synthesizes segments** — it only places the frozen segment set
    within its windows. "Add a stub" is a *generation-stage* transformation
    (`complete_relay_junctions`, `topology.cpp`), the same stage the #443 gate
-   runs in.
+   runs in. This is the one hard structural constraint: the fix is proactive
+   generation, not a placement patch.
 2. **The graze exists because the pass-through optimization SUPPRESSED the stub**
    — flying an edge across a face is treated as covering the block precisely to
    save the stub wire. Here that coverage was a false positive (on-face nominal,
    off-face window).
-3. **The min-stub floor turns a 10-unit gap into a ≥20-unit placement pin.** A
-   sub-`min_stub` stub is unroutable (`filter_pinched` rejects it), so a legal
-   stub's base must sit at `y ≤ face − min_stub` (810 here). The covering edge —
-   and, because per-bit wires follow it, *every bit of the bus* — is then pinned
-   ≥20 below the face, consuming the edge's slide slack rather than just
-   appending a wire.
-4. **Tapping u12 re-roots the MST.** The load-bearing edge must split into
-   `(top3-column → tap-x)` + `(tap-x → trunk)` with a new T-junction and a
-   down-stub at some `x∈[1200,1600]∩u12`, then have all its ConnSeg
-   windows/junctions re-derived — non-local surgery, not a local patch.
-5. **The window top (820) is itself a junction constraint** (the edge's junction
-   with the left vertical segment at x=1060 + its min-stub floor there). Pushing
-   the edge to 810 for the u12 stub is feasible but couples two independent
-   min-stub constraints onto one segment — the over-constraint pattern that
-   produces zero-slide pinches on neighbouring bundles.
+3. **The added stub is a leaf; it does NOT re-root the edge.** A perpendicular
+   stub whose base endpoint lands anywhere in the covering edge's inclusive span
+   is recorded as a reciprocal T-junction by `annotate_seg_conns`
+   (`topology.cpp:281-323`, `P.x∈[alo,ahi]`), so the load-bearing edge stays one
+   whole segment and the new stub is a leaf — no split, and there is no retained
+   MST-root structure to re-root after realization. *(Corrected from an earlier
+   draft that framed this as MST surgery — thanks @codex.)*
+4. **`min_stub` is a relaxable PREFERENCE, not a hard floor** — so the 10-unit
+   gap need not pin the edge 20 below the face. `filter_pinched`
+   (`topology.cpp:4463-4483`) drops only a *zero-slide* segment (`perp_lo ==
+   perp_hi`); `derive_slide_ranges` (`topology_analysis.cpp:397-405`) explicitly
+   relaxes the `f±m` clearance to the face `f` itself when the full-clearance
+   window would empty against a pass-1 busterm bound ("connectivity wins over the
+   stub-length floor"), and `complete_relay_junctions` already permits short
+   completion connectors. So a face-reaching stub as short as the gap is
+   *accepted*; the real cost is the added stub wire + one new junction (plus
+   whatever slide slack the new busterm bound consumes), not a mandatory ≥20-unit
+   edge pin. The experiment must therefore *measure* the cheap relaxed-stub case,
+   not rule it out.
 
 ### The experiment
 
@@ -97,18 +102,20 @@ new opt-in knob (proposed `set_slide_aware_passthru on`, default off →
 byte-identical). At the point the generator decides "this block is covered by a
 pass-through, emit no stub", additionally require that the covering ConnSeg's
 window `[perp_lo, perp_hi]` reach the block's perp-extent (the exact
-`verify.cpp:381` test). When it does not:
+`verify.cpp:381` test). When it does not, emit a perpendicular **leaf stub** from
+the covering segment to the face at an `x` inside the block's along-extent, and
+register it as a real tap (busterm landing) so the block is covered by
+construction. This is ONE path for every edge, load-bearing or not (obstacle 3):
 
-- **(a) minimal** — emit a perpendicular min-stub from the covering segment to
-  the face at an `x` inside the block's along-extent, length clamped to
-  `max(min_stub, face − window_edge)`, and register it as a real tap (busterm
-  landing) so the block is covered by construction. Re-derive the edge's slide
-  window under the new junction.
-- **(b) re-root** — for a load-bearing MST edge (the mix-b11 case), split the
-  edge at the tap `x` and re-root so the stub is a proper leaf, then re-run the
-  existing junction completion. This is the correct-but-invasive form (obstacle
-  4); (a) is the cheap first cut and may suffice where the edge is not
-  load-bearing.
+- **Stub length is preference-then-relax**, mirroring `derive_slide_ranges`:
+  prefer full `min_stub` clearance, but relax to the face when the full-clearance
+  window would empty — so a sub-`min_stub` gap yields a short (down to
+  face-reaching) stub rather than a rejection or an edge pin (obstacle 4). The
+  edge's slide window is re-derived under the new busterm bound; `filter_pinched`
+  still culls only if the result is genuinely zero-slide.
+- **Fallback (rare):** only if the block's along-extent offers no legal interior
+  tap `x` on the edge at all does the candidate stay broken and fall to the #443
+  drop — the existing safety net.
 
 ### Measurement plan & decision criteria
 
@@ -118,10 +125,10 @@ window `[perp_lo, perp_hi]` reach the block's perp-extent (the exact
 - **Ship only if** it strictly helps a bundle that has *no robust sibling* (the
   all-broken case #443 keeps flagged) without regressing detWL/opens elsewhere;
   the mix-b11 graze itself is already dominated by a robust sibling, so it is
-  **not** the justification — it is the reproducible vehicle. Expect the win to
-  be narrow (the retrofit adds WL and couples constraints per obstacles 3/5),
-  which is why this stays **opt-in / deferred** until a no-sibling case is found
-  on the corpus.
+  **not** the justification — it is the reproducible vehicle. The retrofit is
+  cheaper than first estimated (a relaxable leaf stub, no re-root — obstacles
+  3/4), so the added stub WL is the only real cost; the deferral is about *when
+  it's needed* (a no-sibling case), not about the fix being invasive.
 - Fresh-generation only (like every generation knob): accretion via
   `generate_more_topologies` and the persisted knob memo (v15) must carry the
   polarity, mirroring `no_hanan_loci` / `multi_trunk`.
