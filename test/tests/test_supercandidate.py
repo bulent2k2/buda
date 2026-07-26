@@ -195,3 +195,35 @@ def test_dump_grouped_reduces_rows(capsys):
     n_rows = sum(1 for ln in out.splitlines()
                  if ln.strip()[:1].isdigit() and "TRUNK" in ln)
     assert 0 < n_rows < n
+
+
+def test_dump_grouped_emits_pinnable_token():
+    """Every --grouped row prints the exact `pin=group:<N>` it takes.
+
+    The `idx` column is 0-based and the ordinal position among families is NOT
+    the pin id, so users must copy the representative's 1-based candidate id.
+    The dump prints it verbatim as `pin=group:<N>`; feeding that token back to
+    `select_topology <bundle> group:<N>` must pin the SAME family (the row's
+    representative candidate becomes the selection).
+    """
+    s = _session()
+    with contextlib.redirect_stdout(io.StringIO()) as buf:
+        s.do_command("dump_topologies --grouped")
+    out = buf.getvalue()
+    assert "pin=group:" in out
+    # Pull the first row's (idx, pin=group:N) pair and prove the token pins the
+    # family whose representative is that idx candidate.
+    for ln in out.splitlines():
+        toks = ln.strip().split()
+        if toks and toks[0].isdigit() and "pin=group:" in ln:
+            idx = int(toks[0])
+            pin_n = int(ln.split("pin=group:")[1].split(",")[0].split()[0])
+            assert pin_n == idx + 1              # 1-based candidate id of the rep
+            with contextlib.redirect_stdout(io.StringIO()):
+                s.do_command(f"select_topology 1 group:{pin_n}")
+            w = s.bundles[0]
+            assert idx in w.input.pinned_group   # the rep is in the pinned family
+            assert w.plan.selected_topology_index == w.input.pinned_group[0]
+            break
+    else:
+        raise AssertionError("no `pin=group:` row found in --grouped output")

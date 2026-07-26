@@ -384,6 +384,13 @@ class ReportsMixin:
                         cs = [c for c in cs if c is not None]
                         marks.append(f"family:+{len(g) - 1}@{min(cs)}..{max(cs)}"
                                      if cs else f"family:+{len(g) - 1}")
+                    # The directly-pinnable token for this family — the rep's
+                    # 1-based candidate id, exactly what `select_topology
+                    # <bundle> group:<N>` expects. Printed so users copy it
+                    # instead of deriving it (the `idx` column is 0-based, and
+                    # the ordinal position among families is NOT the pin id —
+                    # see docs/script_reference/planner.md).
+                    marks.append(f"pin=group:{i + 1}")
                 ms_s = ("-" if ms is None
                         else "free" if ms >= self._SLIDE_SENTINEL
                         else str(ms))
