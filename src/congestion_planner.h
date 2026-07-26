@@ -551,11 +551,12 @@ private:
     // gratuitous complexity, and flat kSegs + ripup heals every measured
     // regression (07: 0/0 at +5.8% WL, -25% vias; channel_stress: 0/0).
     double kSegs_             = 0.0;
-    // Set by the SESSION when the flow script contains a healer command
-    // (ripup_reroute / negotiate_congestion) — the audit G1/G2 gate: the
-    // non-explicit kSegsRel default (compiled 0.02 / env override) applies
-    // only then (the penalty's two measured correctness regressions are
-    // both ripup-healed; without healers they are real).  Settable
+    // Declared by the flow (`set_planner_param healersAhead 1`, before
+    // run_planner — issue #444 replaced the old flow-script text scan) or set
+    // by ripup's own re-plan — the audit G1/G2 gate: the non-explicit kSegsRel
+    // default (compiled 0.02 / env override) applies only then (the penalty's
+    // two measured correctness regressions are both ripup-healed; without
+    // healers they are real).  Settable
     // explicitly for harnesses.
     double healersAhead_      = 0.0;
     // Relative kSegs (kSegsRel): fraction of the design's max-possible HPWL

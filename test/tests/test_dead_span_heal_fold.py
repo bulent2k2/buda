@@ -158,21 +158,21 @@ def test_heal_no_checkpoint_when_nothing_dead(monkeypatch):
     assert calls == []
 
 
-def _run_nuts_session(with_healer_script, tmp_path, auto=True):
-    """Build the dead-M2-stub scenario, point script_path at a .buda file that
-    does (or does not) contain a healer, then run run_nuts.  Returns the
-    session + pinned H-seg index.  No manual escalation flag and no healer is
-    actually executed — this isolates the run_nuts auto-escalation gate."""
+def _run_nuts_session(declare_healers, tmp_path, auto=True):
+    """Build the dead-M2-stub scenario, optionally DECLARE healers ahead
+    (`set_planner_param healersAhead 1` — issue #444 replaced the old
+    script-text scan), then run run_nuts.  Returns the session + pinned H-seg
+    index.  No manual escalation flag and no healer is actually executed — this
+    isolates the run_nuts auto-escalation gate."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     s._dead_span_auto_at_run_nuts = auto
-    script = tmp_path / "flow.buda"
-    script.write_text("ripup_reroute\n" if with_healer_script else "check_design\n")
-    s.script_path = str(script)
     with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
         for c in _SETUP:
             s.do_command(c)
         s.do_command("add_keepout 0 0 200 500 2")
+        if declare_healers:
+            s.do_command("set_planner_param healersAhead 1")
     w = s.bundles[0]
     topo = w.input.candidates[w.plan.selected_topology_index]
     sl = list(w.plan.seg_layers)
@@ -187,26 +187,26 @@ def _run_nuts_session(with_healer_script, tmp_path, auto=True):
     return s, h_idx
 
 
-def test_run_nuts_auto_escalates_when_healer_in_flow(tmp_path):
-    """A healer in the flow script makes run_nuts auto-escalate the dead M2
-    stub to TOP (M4) — before the healers run, the measured-better timing —
-    with no manual `set_dead_span_escalate`."""
-    s, h_idx = _run_nuts_session(with_healer_script=True, tmp_path=tmp_path)
+def test_run_nuts_auto_escalates_when_healers_declared(tmp_path):
+    """A declared `healersAhead` makes run_nuts auto-escalate the dead M2 stub
+    to TOP (M4) — before the healers run, the measured-better timing — with no
+    manual `set_dead_span_escalate`."""
+    s, h_idx = _run_nuts_session(declare_healers=True, tmp_path=tmp_path)
     assert list(s.bundles[0].plan.seg_layers)[h_idx] == 4   # TOP M4
 
 
-def test_run_nuts_no_escalate_without_healer_in_flow(tmp_path):
-    """No healer in the flow → run_nuts does not auto-escalate (the stage-b
-    fold would handle it if a healer were run interactively); the dead stub
-    stays on LOW M2."""
-    s, h_idx = _run_nuts_session(with_healer_script=False, tmp_path=tmp_path)
+def test_run_nuts_no_escalate_without_healers_declared(tmp_path):
+    """No `healersAhead` declaration → run_nuts does not auto-escalate (the
+    stage-b fold would handle it if a healer were run interactively); the dead
+    stub stays on LOW M2."""
+    s, h_idx = _run_nuts_session(declare_healers=False, tmp_path=tmp_path)
     assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # unchanged LOW M2
 
 
 def test_run_nuts_auto_knob_off(tmp_path):
     """The `_dead_span_auto_at_run_nuts` rollback knob disables the run_nuts
-    auto-escalation even with a healer in the flow."""
-    s, h_idx = _run_nuts_session(with_healer_script=True, tmp_path=tmp_path,
+    auto-escalation even with healers declared."""
+    s, h_idx = _run_nuts_session(declare_healers=True, tmp_path=tmp_path,
                                  auto=False)
     assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # unchanged LOW M2
 
@@ -217,13 +217,11 @@ def test_run_nuts_escalation_persists_planner_output(tmp_path, monkeypatch):
     load_pipeline resume does not restore the stale LOW pin (Codex #351 P2)."""
     s = buda_cli.BudaSession()
     s.no_viz = True
-    script = tmp_path / "flow.buda"
-    script.write_text("ripup_reroute\n")            # healer ahead → auto-escalate
-    s.script_path = str(script)
     with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
         for c in _SETUP:
             s.do_command(c)
         s.do_command("add_keepout 0 0 200 500 2")
+        s.do_command("set_planner_param healersAhead 1")  # declared → auto-escalate
     w = s.bundles[0]
     topo = w.input.candidates[w.plan.selected_topology_index]
     sl = list(w.plan.seg_layers)

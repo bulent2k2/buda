@@ -55,10 +55,12 @@
 # picks the 5-seg tree, 0.1+ over-compacts to the 3-seg at +25% WL.
 #   PROMOTED: 0.02 is now the COMPILED default (kDefaultKSegsRel), gated
 #   on healers-ahead / no multi_trunk / no kPeak; BUDA_KSEGS_REL demotes
-#   to a study override ("0" disables).  This flow has no healer, so a
-#   plain run still selects the 10-seg tree (the gate stands the default
-#   down, note printed); append ripup_reroute or set healersAhead 1 to
-#   see the 5-seg selection.
+#   to a study override ("0" disables).  This flow does not declare
+#   healersAhead, so a plain run still selects the 10-seg tree (the gate
+#   stands the default down, note printed); add
+#   `set_planner_param healersAhead 1` to see the 5-seg selection.
+#   (Issue #444: a healer command later in the flow no longer auto-enables
+#   the gate — declare the intent explicitly before run_planner.)
 
 source ../tracks/tracks4top.buda
 #source tc3a_flat_x10.buda

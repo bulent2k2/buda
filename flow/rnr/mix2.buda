@@ -7,6 +7,8 @@ add_blocks_from_bdb 2 skip
 run_hier_bundler depth 2
 dump_hbundles
 generate_hier_topologies
+# Heals below → opt into the kSegsRel proactive default explicitly (issue #444).
+set_planner_param healersAhead 1
 run_planner hier 5 signal_tracks
 run_nuts
 negotiate_congestion

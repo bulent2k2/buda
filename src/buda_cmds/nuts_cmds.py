@@ -81,13 +81,16 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
     # recovers the one flow this early pass alone regresses (mix2 stays 42,
     # not 66).  The two passes compose: a dead LOW segment moved to TOP here
     # is not re-found at stage b.  Fires on the explicit opt-in flag, or
-    # AUTOMATICALLY when a healer is ahead in the flow (the `_healers_in_flow`
-    # gate the kSegsRel default also uses) — off for a scriptless/interactive
-    # run, where the stage-b fold remains the sole path.
+    # AUTOMATICALLY when the flow has DECLARED healers ahead (issue #444:
+    # explicit `set_planner_param healersAhead 1`, the same gate the kSegsRel
+    # default uses — no script-text scan, so every execution structure agrees)
+    # — off for a scriptless/interactive run with no declaration, where the
+    # stage-b fold remains the sole path.
+    _healers_declared = session._planner_params.get("healersAhead", 0.0) > 0.0
     do_escalate = (getattr(session, "_dead_span_escalate", False) or
                    (getattr(session, "_heal_dead_spans_in_healers", True)
                     and getattr(session, "_dead_span_auto_at_run_nuts", True)
-                    and session._healers_in_flow()))
+                    and _healers_declared))
     if do_escalate:
         n_esc = session._escalate_dead_low_segments()
         if n_esc:

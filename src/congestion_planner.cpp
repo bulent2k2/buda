@@ -1604,15 +1604,16 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         // G1/G2 (audit): the default is only SAFE with healers in the
         // flow — the 07_wide_fan structural loser and big2's jagged alpha
         // response are both healed by ripup_reroute (and never without it).
-        // The session declares healersAhead when the flow script contains a
-        // healer command (ripup_reroute / negotiate_congestion); interactive
-        // sessions and harnesses can set it explicitly.  No healers -> the
-        // default stands down.
+        // A flow that intends to heal DECLARES healersAhead explicitly
+        // (`set_planner_param healersAhead 1`, before run_planner — issue #444
+        // replaced the old flow-script text scan so every execution structure
+        // agrees); ripup's own re-plan sets it by construction.  Not declared
+        // -> the default stands down.
         if (healersAhead_ <= 0.0) {
-            std::cout << "[Planner] kSegsRel default suppressed: no "
-                         "healer (ripup_reroute/negotiate_congestion) in the "
-                         "flow (explicit set_planner_param kSegs/kSegsRel "
-                         "still applies).\n";
+            std::cout << "[Planner] kSegsRel default suppressed: healersAhead "
+                         "not declared (a flow that heals should set "
+                         "'set_planner_param healersAhead 1'; an explicit "
+                         "set_planner_param kSegs/kSegsRel still applies).\n";
             rel = 0.0;
         }
         // G4 (audit): a segment penalty is a DETOUR penalty — it was
