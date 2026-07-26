@@ -24,6 +24,122 @@ along-overlap requirement in `seg_spans_rect` with the perp-face inclusive
 bounds kept (face landings are real).  The display predicate
 (`reports.py::_seg_crosses_rect`) is deliberately stricter — see its docstring.
 
+## Slide-aware pass-through DECISION (proactive stub, not reactive drop) — EXPERIMENT / DEFERRED
+
+**Context (2026-07-26, follow-on to #438/#443's receiver-graze coverage gate).**
+PR #443 (`fix(#438): slide-aware block-coverage gate`, `verify.cpp:381`) made
+`check_topo`'s coverage test — and therefore generation's `filter_uncovered`
+gate — *slide-aware*: a nominal pass-through counts as covering a block only if
+the covering segment's slide window `[perp_lo, perp_hi]` actually reaches the
+block's perp-extent. A trunk/edge whose nominal locus lands ON a block's face
+but whose window is pushed entirely off it (a min-stub / junction constraint) is
+an **unreachable graze**: NUTS seats the wire off the face and the block's bits
+open. The gate now **drops** such candidates (a robust interior-pass-through
+sibling wins; `filter_uncovered` keeps the pool only if EVERY candidate is
+broken, so a bundle is never stranded).
+
+That fix is *reactive* — it detects the false pass-through and discards the
+candidate. This entry scopes the *proactive* alternative the owner asked about:
+instead of dropping, **make the pass-through decision itself slide-aware at
+generation** so a **real min-stub** is emitted up front (with correct MST
+rooting) whenever the covering segment's window cannot reach the face.
+
+### The reference graze (measured)
+
+`flow/rnr/mix.buda`, HBundle **11** (`top_bus9_w8`, 8-bit), candidate 16
+`TRUNK_V+MST@x1775` — the candidate #443 drops (`BUSTERM_OPEN`), which is why
+the mix topo golden moved (see #445). Extracted geometry (global coords):
+
+- Grazed block **`chip/i_dnuts1_0/u12`** = `x[1200..1600] y[830..880]`.
+- The covering segment is the **horizontal MST edge** `(1060,830)→(1775,830)`
+  (layer 6). Its nominal perp sits at **y=830 = u12's bottom face**, and its
+  x-span [1060,1775] ⊇ u12's [1200,1600], so the *nominal* `seg_spans_rect`
+  counts it as a pass-through cover.
+- But its **slide window is `y∈[350,820]`** — the nominal (830) lies OUTSIDE its
+  own window, which tops out at **820, a 10-unit gap below the face**. NUTS can
+  never seat it at 830 → u12 opens. (`min_stub` on this V layer = 20.)
+- The edge is *load-bearing in the MST*: it carries **top3's column** (x≈1010–1060,
+  left) across to the **V trunk** at x=1775 (right); u12 is an incidental graze
+  underneath it. A robust sibling (candidate 22 `TRUNK_V_OOB+MST@x1924`) taps u12
+  with its window actually reaching the face, which is what the gate lets win.
+
+### Where the retrofit lives, and what it actually costs
+
+1. **NUTS never synthesizes segments** — it only places the frozen segment set
+   within its windows. "Add a stub" is a *generation-stage* transformation
+   (`complete_relay_junctions`, `topology.cpp`), the same stage the #443 gate
+   runs in. This is the one hard structural constraint: the fix is proactive
+   generation, not a placement patch.
+2. **The graze exists because the pass-through optimization SUPPRESSED the stub**
+   — flying an edge across a face is treated as covering the block precisely to
+   save the stub wire. Here that coverage was a false positive (on-face nominal,
+   off-face window).
+3. **The added stub is a leaf; it does NOT re-root the edge.** A perpendicular
+   stub whose base endpoint lands anywhere in the covering edge's inclusive span
+   is recorded as a reciprocal T-junction by `annotate_seg_conns`
+   (`topology.cpp:281-323`, `P.x∈[alo,ahi]`), so the load-bearing edge stays one
+   whole segment and the new stub is a leaf — no split, and there is no retained
+   MST-root structure to re-root after realization. *(Corrected from an earlier
+   draft that framed this as MST surgery — thanks @codex.)*
+4. **`min_stub` is a relaxable PREFERENCE, not a hard floor** — so the 10-unit
+   gap need not pin the edge 20 below the face. `filter_pinched`
+   (`topology.cpp:4463-4483`) drops only a *zero-slide* segment (`perp_lo ==
+   perp_hi`); `derive_slide_ranges` (`topology_analysis.cpp:397-405`) explicitly
+   relaxes the `f±m` clearance to the face `f` itself when the full-clearance
+   window would empty against a pass-1 busterm bound ("connectivity wins over the
+   stub-length floor"), and `complete_relay_junctions` already permits short
+   completion connectors. So a face-reaching stub as short as the gap is
+   *accepted*; the real cost is the added stub wire + one new junction (plus
+   whatever slide slack the new busterm bound consumes), not a mandatory ≥20-unit
+   edge pin. The experiment must therefore *measure* the cheap relaxed-stub case,
+   not rule it out.
+
+### The experiment
+
+Fold #443's robust-cover predicate into the pass-through *decision* in
+`complete_relay_junctions` (and the relay-tap logic feeding it), gated behind a
+new opt-in knob (proposed `set_slide_aware_passthru on`, default off →
+byte-identical). At the point the generator decides "this block is covered by a
+pass-through, emit no stub", additionally require that the covering ConnSeg's
+window `[perp_lo, perp_hi]` reach the block's perp-extent (the exact
+`verify.cpp:381` test). When it does not, emit a perpendicular **leaf stub** from
+the covering segment to the face at an `x` inside the block's along-extent, and
+register it as a real tap (busterm landing) so the block is covered by
+construction. This is ONE path for every edge, load-bearing or not (obstacle 3):
+
+- **Stub length is preference-then-relax**, mirroring `derive_slide_ranges`:
+  prefer full `min_stub` clearance, but relax to the face when the full-clearance
+  window would empty — so a sub-`min_stub` gap yields a short (down to
+  face-reaching) stub rather than a rejection or an edge pin (obstacle 4). The
+  edge's slide window is re-derived under the new busterm bound; `filter_pinched`
+  still culls only if the result is genuinely zero-slide.
+- **Fallback (rare):** only if the block's along-extent offers no legal interior
+  tap `x` on the edge at all does the candidate stay broken and fall to the #443
+  drop — the existing safety net.
+
+### Measurement plan & decision criteria
+
+- Baseline vs knob-on through `tools/qor_corpus.py` (the `(overlaps, unplaced,
+  viol_bundles)` triple), plus the mix repro's DNUTS opens and detWL, and a
+  `topo_snapshot` golden diff to see which bundles' pools change.
+- **Ship only if** it strictly helps a bundle that has *no robust sibling* (the
+  all-broken case #443 keeps flagged) without regressing detWL/opens elsewhere;
+  the mix-b11 graze itself is already dominated by a robust sibling, so it is
+  **not** the justification — it is the reproducible vehicle. The retrofit is
+  cheaper than first estimated (a relaxable leaf stub, no re-root — obstacles
+  3/4), so the added stub WL is the only real cost; the deferral is about *when
+  it's needed* (a no-sibling case), not about the fix being invasive.
+- Fresh-generation only (like every generation knob): accretion via
+  `generate_more_topologies` and the persisted knob memo (v15) must carry the
+  polarity, mirroring `no_hanan_loci` / `multi_trunk`.
+
+**Status: DEFERRED.** The reactive drop (#443) is the right default; this proactive
+form is a measured follow-up to run when a bundle with no robust pass-through
+sibling surfaces. The graze geometry above is fully reproducible from the mix
+hier flow (generate up through `generate_hier_topologies no_hanan_loci`, then
+inspect `s.bundles[10].input.candidates[16]` and its `ConnTopology.segs()` slide
+windows against the u12 component rect).
+
 ## Nominal-WL comparability across shape families (the b44 root causes) — (a)+(b)+(c) SHIPPED
 
 **Context (2026-07-16, `flow/big_data_test/b44.buda`; deep-dive after the
