@@ -62,6 +62,17 @@ import qor_corpus as qc  # noqa: E402 — after sys.path setup (reuse its corpus
 _PIN_CMDS = ("select_topology", "select_topologies")
 
 
+def _is_pin_cmd(cmd_line):
+    """True iff CMD_LINE is a topology-pin command, using the SAME normalization
+    the CLI applies before dispatch (`buda_cli.do_command`: strip, split on
+    arbitrary whitespace, lowercase the verb).  Matching that exactly is what
+    lets the neutralizer catch an uppercase `SELECT_TOPOLOGY`, a tab- or
+    multi-space-delimited pin, or a trailing-comment pin — every form the CLI
+    itself would execute — instead of only the bare `select_topology <sp>` case."""
+    parts = cmd_line.strip().split()
+    return bool(parts) and parts[0].lower() in _PIN_CMDS
+
+
 def run_flow_nopin(flow):
     """Source one flow end-to-end with every `select_topology[ies]` neutralized,
     and capture its final QoR.  Same return shape as `qor_corpus.run_flow` (an
@@ -74,7 +85,7 @@ def run_flow_nopin(flow):
     _orig = s.do_command
 
     def _patched(cmd):
-        if cmd.strip().split(" ", 1)[0] in _PIN_CMDS:
+        if _is_pin_cmd(cmd):
             return None
         return _orig(cmd)
 
