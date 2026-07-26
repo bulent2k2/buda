@@ -140,6 +140,22 @@ hier flow (generate up through `generate_hier_topologies no_hanan_loci`, then
 inspect `s.bundles[10].input.candidates[16]` and its `ConnTopology.segs()` slide
 windows against the u12 component rect).
 
+**Sibling problem — the endpoint face-tap mis-assignment (big2 b25).** A related,
+UPSTREAM facet of the same "fragile graze → DNUTS open" family is
+`annotate_endpoints` handing an endpoint face-tap to a block the segment *crosses*
+instead of the receiver that *abuts* the same face from outside (a `viol_bundles=1`
+open on `big2.buda`; see
+[`big2_b25_abutment_tap_dnuts_2026-07.md`](big2_b25_abutment_tap_dnuts_2026-07.md)).
+That case wants a REAL face-tap (not a stub), so its fix is interior-side
+discrimination in `annotate_endpoints`, not the stub emission above — but both
+chase the same symptom. **Measured 2026-07-26:** the blanket abut-vs-cross rule
+heals b25 (and `slowdown_rnr`) but is net-negative corpus-wide (4 worse, 2
+previously-clean flows broken) because it also demotes *correct* crossed-block
+taps, unlocking pinch-dropped pure-pass-through trunks (the `x≈5772` b4/b24
+family) that the planner then selects and opens at DNUTS. Reverted; both fixes
+need to be **surgical** (act only when the redistribution rescues a would-be
+stranded busterm), which is the shared open problem.
+
 ## Nominal-WL comparability across shape families (the b44 root causes) — (a)+(b)+(c) SHIPPED
 
 **Context (2026-07-16, `flow/big_data_test/b44.buda`; deep-dive after the

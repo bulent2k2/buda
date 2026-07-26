@@ -177,3 +177,55 @@ carrying the `viol_bundles` column): the target is bundle-25-class opens droppin
 with neutral overlaps/unplaced. Gate behind the sweep; land only if net-positive.
 
 Filed 2026-07-24 (fix deferred to a measured follow-up).
+
+## Measured attempt — interior-side discrimination is NET-NEGATIVE as a blanket rule (2026-07-26)
+
+Fix (1) was implemented and swept. `annotate_endpoints` was changed to a
+two-pass per-endpoint assignment: **pass 1** taps a block the segment *abuts from
+outside* (endpoint on the block's face perpendicular to travel AND the body
+`P→other` points away from the block's interior); **pass 2**, only if nothing
+abuts from outside, falls back to the old first-coincident-face rule so a terminus
+that merely lands on a face (with no adjoining block) still taps — coverage is
+never lost.
+
+**It fixes b25 exactly as designed.** `seg0`'s taps move `blk_10/blk_10 →
+blk_01/blk_03` (the crossed driver no longer steals the receivers' taps; it is
+left for the pass-through pass), and `big2.buda` heals `0/0/1 → 0/0/0`.
+
+**But the blanket rule is net-negative on the corpus** (`tools/qor_corpus.py
+--compare`, 35 flows):
+
+| flow | base | branch | |
+|---|---|---|---|
+| `big2/big2.buda` | 0/0/1 | **0/0/0** | BETTER (the target) |
+| `rnr/slowdown_rnr.buda` | 2/8/1 | **0/0/0** | BETTER |
+| `big2/b24_bus_056.buda` | 0/0/0 | 0/48/1 | WORSE (was clean) |
+| `big2/big2_b4_b24.buda` | 0/0/0 | 0/108/2 | WORSE (was clean) |
+| `big2/big2_noviz.buda` | 2/28/2 | 6/48/1 | WORSE |
+| `big2/tc3b_flat.buda` | 2/28/2 | 6/48/1 | WORSE |
+
+→ **2 better, 4 worse, 2 previously-clean flows broken.** Fails the doc's own
+gate ("land only if net-positive"), so it was **reverted** — `main` stays
+byte-identical.
+
+**Root cause of the regressions — the re-attribution is UNCONDITIONAL.** It
+changes *correct* attributions too, not just b25's pathological one. In the
+`b4/b24` family (the `io_pad_tr` / `x≈5772` flexible-trunk geometry, see
+`test_topo_flexible_trunk.py`), demoting a face-tap on a crossed block to a
+pass-through **unlocks pure-pass-through trunk candidates** that were previously
+pinned-and-dropped: e.g. the `TRUNK_V@x5772` candidate now passes
+`check_topo`/`check_nuts` (segs=2, no violation, not pinched) and the planner
+picks it — but it **opens at DetailedNUTS** (`big2_b4_b24`: topo/nuts clean, then
+60 bits unplaced). Trading b25's open for new DNUTS-fragile selections elsewhere.
+
+**Refinement direction (for a future surgical attempt).** The blanket
+abut-vs-cross rule is too broad. The b25 pathology is specifically *a receiver
+left with NO tap because a crossed block stole it*. A surgical fix should
+redistribute a tap **only when doing so rescues a would-be-stranded busterm** —
+i.e. demote the crossed block's endpoint tap only if a competing block abuts that
+same endpoint from outside AND that competitor would otherwise have no face-tap /
+pass-through coverage. That keeps b25's win while leaving the already-correct
+`b4/b24`-family attributions (and their pinch-dropped pass-through trunks)
+untouched. Until such a targeted gate is built and measured net-positive, b25
+stays a documented `viol_bundles=1` open. The implementation + baseline/branch
+`qor_corpus` JSONs from this attempt are in the issue session notes for reuse.
