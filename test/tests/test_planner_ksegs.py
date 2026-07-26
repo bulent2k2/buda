@@ -265,7 +265,7 @@ def test_ksegs_env_default_healer_gated(monkeypatch, tmp_path):
             s.do_command(c)
         s.do_command("run_planner")
     assert s.bundles[0].plan.selected_topology_index == 0
-    assert "no healer" in buf.getvalue()
+    assert "healersAhead not declared" in buf.getvalue()
 
     # 2. Explicit healersAhead declaration → the default applies.
     s2 = buda_cli.BudaSession()
