@@ -18,16 +18,23 @@ add_bus bus_069[12] blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
 run_bundler
 generate_topologies
 
-# Select the first standalone MST (MST_HV/MST_VH) candidate for each bundle.
-# bundle     num-group num-topo   pure mst groups (in order of topo-exp)
-# --         --        --         --
-# bus_030    41        69	  10 (MST_HV) 11 (MST_VH)
-# bus_047    28        48         12 (MST_VH) 14 (MST_HV)
-# bus_069    32        52         11 (MST_HV) 12 (MST_VH)
+# Select a standalone MST (MST_HV/MST_VH) super-candidate for each bundle.
 #
-select_topology  bus_069  group:10
-select_topology  bus_047  group:12
-select_topology  bus_030  group:11
+# `select_topology <bundle> group:<N>` pins the nominal-locus FAMILY that
+# CONTAINS candidate id N (1-based) — N is the representative's candidate id, NOT
+# the family's ordinal position in the `--grouped` list. Read the exact token off
+# `dump_topologies <bundle> --grouped` (the `group:<N>` mark on each family row,
+# emitted verbatim so you paste it straight after the bundle hint); e.g.
+# bus_069's MST_HV family is `group:16`.
+#
+# bundle   MST family (rep type @ candidate id)
+# bus_069  MST_HV @ 16   (MST_VH @ 17)
+# bus_047  MST_VH @ 23   (MST_HV @ 26)
+# bus_030  MST_HV @ 19   (MST_VH @ 20)
+#
+select_topology  bus_069  group:16
+select_topology  bus_047  group:23
+select_topology  bus_030  group:19
 run_planner
 run_nuts
 check_design nuts
