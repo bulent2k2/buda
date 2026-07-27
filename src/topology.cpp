@@ -1721,7 +1721,8 @@ static bool seed_trunk_is_redundant(const Topology& topo, int trunk_pos, bool is
 static void complete_relay_junctions(Topology& topo,
                                      const std::vector<Busterm>& blocks,
                                      const Floorplan& fp,
-                                     int h_layer, int v_layer) {
+                                     int h_layer, int v_layer,
+                                     bool spine_relays = false) {
     // min-stub is intentionally not enforced on completion connectors: a relay
     // MUST be completed (correctness over the min-stub heuristic).  fp is used by
     // the verified de-overlap pass at the end.
@@ -1981,8 +1982,97 @@ static void complete_relay_junctions(Topology& topo,
         otc_handled.insert(bi);
     }
 
+    // ── degree-≥3 STAR→SPINE relay (opt-in) ──────────────────────────────────
+    // A high-degree relay whose incident stubs split as ≥2 PARALLEL (majority) +
+    // exactly 1 PERPENDICULAR (minority) is wired by one collector SPINE instead
+    // of a chain of bracket connectors.  The spine runs along the minority axis;
+    // the minority stub is EXTENDED across the block to the opposite face (that
+    // face landing is the block's single busterm-conn, keeping a bounded slide);
+    // every majority stub is repositioned to T-tap the spine at its OWN
+    // perpendicular coordinate — so the parallels are never merged onto one
+    // shared track and each keeps its full independent slide (docs/internal/
+    // wishlist-topo.md).  No new segments, no busterm tap lost.  Conservative:
+    // fires only on the clean single-rect 2-1 split whose spine provably covers
+    // every tap; anything else falls through to the general chaining below.
+    std::set<int> spine_handled;
+    if (spine_relays) {
+        for (auto& [bi, pts] : incident) {
+            if (otc_handled.count(bi)) continue;
+            if (pts.size() < 3) continue;                       // degree ≥ 3 only
+            if (all_land[bi].size() != pts.size()) continue;    // no coincident double-landings
+            if (!blocks[bi].rects.empty()) continue;            // single-rect blocks only
+            std::vector<const Inc*> P, M;                       // parallel / perpendicular groups
+            for (const Inc& q : pts) (q.seg_horiz ? M : P).push_back(&q);
+            // Classify so P = majority orientation (the taps), M = the 1 minority.
+            if (P.size() >= 2 && M.size() == 1) { /* P vertical, M horizontal */ }
+            else if (M.size() >= 2 && P.size() == 1) { std::swap(P, M); }
+            else continue;                                      // 2-2 / all-same → fallback
+            const Inc* Mi = M[0];
+            const Rect& bb = blocks[bi].orig_bbox;
+            const bool spine_h = Mi->seg_horiz;                 // spine along minority axis
+            const int  spine_perp = spine_h ? Mi->p.y : Mi->p.x; // the shared tap line
+            // Extend the minority stub across the block to the face OPPOSITE its
+            // neighbour (its far endpoint), so it spans the block and lands on
+            // the far face as the busterm-conn.
+            Segment& sM = topo.segments[Mi->seg_idx];
+            const Point M_far = (Mi->ep == 0) ? sM.end : sM.start;
+            int opp;
+            if (spine_h) opp = (M_far.x > Mi->p.x) ? bb.x1 : bb.x2;
+            else         opp = (M_far.y > Mi->p.y) ? bb.y1 : bb.y2;
+            const Point M_new = spine_h ? Point{opp, spine_perp}
+                                        : Point{spine_perp, opp};
+            // The spine must cover every tap's along-coord (between the opposite
+            // face and the neighbour side) — else a tap would fall off it.
+            const int span_lo = spine_h ? std::min(opp, M_far.x) : std::min(opp, M_far.y);
+            const int span_hi = spine_h ? std::max(opp, M_far.x) : std::max(opp, M_far.y);
+            bool coverable = true;
+            for (const Inc* q : P) {
+                const int along = spine_h ? q->p.x : q->p.y;
+                if (along < span_lo || along > span_hi) { coverable = false; break; }
+            }
+            if (!coverable) continue;                           // fallback to chaining
+            // A repositioned endpoint that also lies on ANOTHER block's boundary
+            // could strand that block's coverage — leave such a relay to chaining.
+            auto on_other_boundary = [&](const Point& Pn) {
+                for (int bj = 0; bj < (int)blocks.size(); ++bj) {
+                    if (bj == bi) continue;
+                    const Rect& r = blocks[bj].orig_bbox;
+                    bool onx = (Pn.x == r.x1 || Pn.x == r.x2) && Pn.y >= r.y1 && Pn.y <= r.y2;
+                    bool ony = (Pn.y == r.y1 || Pn.y == r.y2) && Pn.x >= r.x1 && Pn.x <= r.x2;
+                    if (onx || ony) return true;
+                }
+                return false;
+            };
+            bool safe = !on_other_boundary(M_new);
+            for (const Inc* q : P) {
+                const Point np = spine_h ? Point{q->p.x, spine_perp}
+                                         : Point{spine_perp, q->p.y};
+                if (on_other_boundary(np)) { safe = false; break; }
+            }
+            if (!safe) continue;                                // fallback to chaining
+            // Commit: move the minority landing to the opposite face (the spine),
+            ((Mi->ep == 0) ? sM.start : sM.end) = M_new;
+            // and each majority stub onto the spine line (an independent T-tap).
+            for (const Inc* q : P) {
+                Segment& sq = topo.segments[q->seg_idx];
+                const Point np = spine_h ? Point{q->p.x, spine_perp}
+                                         : Point{spine_perp, q->p.y};
+                ((q->ep == 0) ? sq.start : sq.end) = np;
+            }
+            // Busterm: the minority stub's new far-face landing is the single tap;
+            // every majority landing is demoted to an internal SEG junction.
+            { auto& ep = topo.seg_busterms[Mi->seg_idx];
+              ((Mi->ep == 0) ? ep.first : ep.second) = blocks[bi]; }
+            for (const Inc* q : P) {
+                auto& ep = topo.seg_busterms[q->seg_idx];
+                ((q->ep == 0) ? ep.first : ep.second) = std::nullopt;
+            }
+            spine_handled.insert(bi);
+        }
+    }
+
     for (auto& [bi, pts] : incident) {
-        if (otc_handled.count(bi)) continue; // wired by the OTC extension above
+        if (otc_handled.count(bi) || spine_handled.count(bi)) continue; // wired above
         if (pts.size() < 2) continue;        // leaf terminal: nothing to relay
         // Chain the landings (sorted) so all incident segments end up in one
         // wire-connected component through the block's junction.
@@ -2016,6 +2106,7 @@ static void complete_relay_junctions(Topology& topo,
     // keeps the single anchor cleanly on the block.
     for (auto& [bi, lands] : all_land) {
         if (otc_handled.count(bi)) continue; // no tap: covered by the OTC crossing
+        if (spine_handled.count(bi)) continue; // tap set on the spine's far-face landing
         const Rect& bb = blocks[bi].orig_bbox;
         auto flex = [&](const Inc& q) {
             return q.seg_horiz ? (bb.y2 - bb.y1) : (bb.x2 - bb.x1);
@@ -3136,7 +3227,7 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
             // relay busterm taps (single tap + SEG junctions) and annotates the
             // connectors it appends, so it must run after the baseline annotation.
             annotate_endpoints(mst, blocks);
-            complete_relay_junctions(mst, blocks, floorplan_, h_layer_, v_layer_);
+            complete_relay_junctions(mst, blocks, floorplan_, h_layer_, v_layer_, allow_spine_relays_);
             if (mst.connected_block_names.empty())
                 for (const auto& b : blocks)
                     mst.connected_block_names.push_back(b.block_name);
@@ -3552,7 +3643,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
             // the extreme kept landing so no phantom overhang remains (defect 1).
             clip_spine_to_landings(tree, trunk_pos, is_h, blocks);
             annotate_endpoints(tree, blocks);
-            complete_relay_junctions(tree, blocks, floorplan_, h_layer_, v_layer_);
+            complete_relay_junctions(tree, blocks, floorplan_, h_layer_, v_layer_, allow_spine_relays_);
             // connected_block_names is populated globally only after this pass
             // (generate_candidates), so set it here so the gate's coverage check
             // knows which blocks the tree must cover.
@@ -3605,7 +3696,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
         // <4-block coverage fallback below.
         Topology uncompleted = legacy;
         annotate_endpoints(legacy, blocks);
-        complete_relay_junctions(legacy, blocks, floorplan_, h_layer_, v_layer_);
+        complete_relay_junctions(legacy, blocks, floorplan_, h_layer_, v_layer_, allow_spine_relays_);
         if (legacy.connected_block_names.empty())
             for (const auto& b : blocks)
                 legacy.connected_block_names.push_back(b.block_name);

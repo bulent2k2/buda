@@ -21,6 +21,7 @@
 #include <climits>
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <set>
@@ -557,7 +558,12 @@ private:
 };
 class TopologyGenerator {
 public:
-    explicit TopologyGenerator(const Floorplan& fp) : floorplan_(fp) {}
+    explicit TopologyGenerator(const Floorplan& fp) : floorplan_(fp) {
+        // Opt-in default from the environment so a whole corpus can be A/B'd
+        // without editing every flow (a later set_spine_relays(v) still wins).
+        if (const char* e = std::getenv("BUDA_SPINE_RELAYS"))
+            allow_spine_relays_ = (std::string(e) == "1");
+    }
 
     // Busterm mode (default true): route segments terminate at the nearest
     // block face rather than at the block centre.  Set to false to restore
@@ -604,6 +610,21 @@ public:
     // with `no_hanan_loci` (the CLI calls set_hanan_loci(false)), and the
     // legacy `hanan_loci` flag is still accepted as a keep-on no-op.
     void set_hanan_loci(bool v) { allow_hanan_loci_ = v; }
+
+    // Star→spine relay completion (default false — bit-identical when off;
+    // opt in per generator via this setter or corpus-wide via the study-run
+    // env `BUDA_SPINE_RELAYS=1`.  A per-command `.buda` token is a follow-up).
+    // At a degree-≥3 MST relay whose incident stubs split as ≥2 parallel
+    // (majority) + exactly 1 perpendicular (minority), complete_relay_junctions
+    // builds a single collector SPINE (along the minority axis) that all the
+    // majority stubs T-tap independently, instead of chaining the landings with
+    // over-the-cell bracket connectors.  The minority stub is extended across
+    // the block to the opposite face — that face landing is the block's single
+    // busterm-conn and keeps a bounded slide, while every majority tap keeps its
+    // OWN full perpendicular slide (never merged into one shared track).  Fewer
+    // segments and more NUTS freedom at star hubs; see
+    // docs/internal/wishlist-topo.md "star→spine relay completion".
+    void set_spine_relays(bool v) { allow_spine_relays_ = v; }
 
     // Unified entry point: 1 dst → L/Z/U shapes; N dsts → trunk+branch shapes.
     std::vector<Topology> generate_candidates(
@@ -655,6 +676,7 @@ private:
     bool allow_double_detour_ = false;
     bool allow_multi_trunk_   = false;
     bool allow_hanan_loci_    = true;
+    bool allow_spine_relays_  = false;
     int  h_layer_             = 4;
     int  v_layer_             = 5;
     std::vector<int> all_h_layers_ = {4};
