@@ -101,8 +101,12 @@ ships default-off and is measured before any default flip. Tests:
   variants), threaded through `_parse_gen_flags` + the ~6 call sites and recorded in
   the v15 per-bundle knob memo (index 4 of the knob tuple), so it round-trips a bulk
   regeneration exactly like `multi_trunk`. The Python `set_spine_relays` setter and
-  `BUDA_SPINE_RELAYS` env remain; `_make_topo_gen` stamps the flag unconditionally so
-  the token's off-state overrides any ambient env.
+  `BUDA_SPINE_RELAYS` env remain. Since there is NO opt-OUT token (spine is opt-in
+  only, unlike the default-on `hanan_loci` with its `no_hanan_loci`), `_make_topo_gen`
+  stamps the flag ONLY when opting in — a tokenless flow keeps the constructor's
+  env-derived default, so the `BUDA_SPINE_RELAYS` global opt-in still enables the
+  spine for an un-edited corpus. Precedence: **token > `BUDA_SPINE_RELAYS` > compiled
+  default (off)**.
 - **D — default-flip measurement — OPEN.** Re-measure a corpus A/B toward flipping
   the default on (gated like `kSegsRel` / `multi_trunk` if it lands mixed). The B
   measurement above (3 better / 2 worse, one near-noise viol regression) keeps the
