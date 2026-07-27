@@ -160,19 +160,26 @@ def test_all_same_orientation_hub_gets_a_collector_spine():
     # a horizontal collector segment now spans the tap range
     assert any(s.start.y == s.end.y and abs(s.end.x - s.start.x) > 1000
                for s in m_on.segments), "expected a horizontal collector spine"
-    # Overstretch fix (follow-up E, all-same case): no stub spikes across the
-    # block to its FAR face — HUB is tapped by the COLLECTOR's own face endpoint,
-    # so every vertical tap stops at the collector line and none reaches y==H.y1.
-    hub = _ALLSAME["H"]                        # (500, 1000, 3500, 1200)
-    spine_perp = (hub[1] + hub[3]) // 2        # the collector line
-    far_face_y = hub[1]                        # the old overshoot target (top face)
-    assert not any(p.y == far_face_y and hub[0] <= p.x <= hub[2]
+    # Overstretch fix (follow-up E, all-same case): the leaves all land on HUB's
+    # near face, so the collector RIDES that face at the taps' own line with NO
+    # along-overhang past the outermost tap, and no stub spikes across the block
+    # to the far face.
+    hub = _ALLSAME["H"]                                     # (500,1000,3500,1200)
+    verts = [s for s in m_on.segments if s.start.x == s.end.x]      # vertical taps
+    horiz = [s for s in m_on.segments if s.start.y == s.end.y]      # the collector
+    tap_xs = [s.start.x for s in verts]
+    collector = max(horiz, key=lambda s: abs(s.end.x - s.start.x))
+    c_lo, c_hi = sorted((collector.start.x, collector.end.x))
+    # no overhang: the collector spans no wider than the tap columns
+    assert min(tap_xs) <= c_lo and c_hi <= max(tap_xs), (
+        f"collector [{c_lo},{c_hi}] overhangs the taps {sorted(tap_xs)}")
+    # the collector rides a HUB face (its near face), not spiking to the far one
+    assert collector.start.y in (hub[1], hub[3]), (
+        f"collector should ride a HUB face; y={collector.start.y}")
+    far = hub[3] if collector.start.y == hub[1] else hub[1]
+    assert not any(p.y == far and hub[0] <= p.x <= hub[2]
                    for s in m_on.segments for p in (s.start, s.end)), (
-        "no endpoint should reach HUB's far face — the collector face-tap covers it")
-    # the collector taps HUB on a left/right (along) face at the collector line
-    assert any(p.y == spine_perp and p.x in (hub[0], hub[2])
-               for s in m_on.segments for p in (s.start, s.end)), (
-        "the collector should tap HUB's left/right face at the collector line")
+        "no endpoint should reach HUB's far face")
 
 
 # ── the `.buda` `spine_relays` token (follow-up C) ───────────────────────────

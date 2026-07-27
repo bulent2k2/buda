@@ -77,12 +77,18 @@ ships default-off and is measured before any default flip. Tests:
   serve as the spine, so it fell back to bracket chaining (worst exactly there — a
   3-seg Z per stub pair). Now it ADDS a dedicated collector: a new segment
   perpendicular to the stubs that every stub T-taps at its own coordinate
-  (independent slide) and STOPS there. The block is tapped by the **collector's own
-  face endpoint** — the collector is extended along-axis to the NEARER block face
-  (never both, which would feed the receiver through) and that face landing is the
-  single busterm tap. This is the follow-up-E overstretch fix applied to the
-  all-same case: an earlier scheme spiked the outermost stub across the block to the
-  FAR face, so that one stub visibly overshot the collector. Measured on `big.buda` (generated
+  (independent slide) and STOPS there. When every stub lands on the SAME block face
+  (the common comb — all leaves on one side), the collector **rides that near face**
+  at the taps' own line: the stubs tap the face directly (their MST landing), so the
+  collector spans exactly `[t_min..t_max]` with **no along-overhang** and the busterm
+  tap stays on the outermost stub. When the taps straddle faces, it falls back to an
+  interior collector extended along-axis to the NEARER face only (never both — a
+  face-to-face span would feed the receiver through), the busterm on that face
+  landing. This is the follow-up-E overstretch fix applied to the all-same case: an
+  earlier scheme spiked the outermost stub across the block to the FAR face (a
+  perpendicular spike), then a second cut extended the collector sideways to a face
+  (a small along-overhang past the outermost tap); the near-face-ride removes even
+  that. Measured on `big.buda` (generated
   MST-family pools): pure `MST_HV/VH` connectors **329 → 127 (−61%)**, total
   MST-family segments 10387 → 9425 (**−9.3%**), all 1573 MST candidates stay
   `check_topo`-clean and un-pinched. all-same is the common unhandled case (73 relays

@@ -2047,46 +2047,69 @@ static void complete_relay_junctions(Topology& topo,
                 const bool spine_h = M.empty();                 // all-vertical taps → H spine
                 const int  p_lo = spine_h ? bb.y1 : bb.x1;
                 const int  p_hi = spine_h ? bb.y2 : bb.x2;
-                const int  spine_perp = (p_lo + p_hi) / 2;      // interior collector line
-                if (spine_perp <= p_lo || spine_perp >= p_hi) continue;  // degenerate block
                 auto along = [&](const Point& p) { return spine_h ? p.x : p.y; };
+                auto perp  = [&](const Point& p) { return spine_h ? p.y : p.x; };
                 auto mk    = [&](int a, int p)   { return spine_h ? Point{a, p} : Point{p, a}; };
                 int t_min = INT_MAX, t_max = INT_MIN;
                 for (const Inc* q : TAPS) { int a = along(q->p); t_min = std::min(t_min, a); t_max = std::max(t_max, a); }
                 if (t_min == t_max) continue;                   // all collinear → let chaining merge
-                // Extend the collector along-axis to the NEARER block face for the
-                // tap; the OTHER end stops at the far outermost stub (never BOTH
-                // faces — a face-to-face span would feed the receiver through).
                 const int a_lo = spine_h ? bb.x1 : bb.y1;       // block's along-extent faces
                 const int a_hi = spine_h ? bb.x2 : bb.y2;
-                const bool tap_lo = (t_min - a_lo) <= (a_hi - t_max);
-                const int  c_lo = tap_lo ? a_lo : t_min;        // collector along-span
-                const int  c_hi = tap_lo ? t_max : a_hi;
-                const Point face_pt = mk(tap_lo ? a_lo : a_hi, spine_perp);  // the busterm tap
+                // Do all stubs land on the SAME block face?  Then the collector can
+                // ride THAT face at the taps' own line: the stubs already tap the
+                // face (their MST landing), so no perp reposition and — crucially —
+                // no along-overhang is needed to reach a face for coverage.  The
+                // collector spans exactly [t_min..t_max]; block coverage is the
+                // stubs' own geometric face contacts (a busterm tap kept on the
+                // outermost stub).  Falls back to an interior collector + a minimal
+                // extension to the nearer face only when the taps straddle faces.
+                const int face_perp = perp(TAPS[0]->p);
+                bool common_face = (face_perp == p_lo || face_perp == p_hi);
+                for (const Inc* q : TAPS) if (perp(q->p) != face_perp) { common_face = false; break; }
+                int spine_perp, c_lo, c_hi;
+                const Inc* face_stub = nullptr;                 // stub carrying the busterm tap
+                bool tap_lo = false;                            // (interior path) which face
+                if (common_face) {
+                    spine_perp = face_perp;                     // collector rides the shared face
+                    c_lo = t_min; c_hi = t_max;                 // tight — no overhang
+                    for (const Inc* q : TAPS) if (along(q->p) == t_min) { face_stub = q; break; }
+                } else {
+                    spine_perp = (p_lo + p_hi) / 2;             // interior collector line
+                    if (spine_perp <= p_lo || spine_perp >= p_hi) continue;   // degenerate block
+                    tap_lo = (t_min - a_lo) <= (a_hi - t_max);  // nearer face
+                    c_lo = tap_lo ? a_lo : t_min;
+                    c_hi = tap_lo ? t_max : a_hi;
+                }
                 auto on_other_boundary = [&](const Point& Pn) { return on_any_other_face(Pn, bi); };
-                bool safe = !on_other_boundary(face_pt);
+                bool safe = common_face ? true
+                                        : !on_other_boundary(mk(tap_lo ? a_lo : a_hi, spine_perp));
                 for (const Inc* q : TAPS)
                     if (on_other_boundary(q->p) || on_other_boundary(mk(along(q->p), spine_perp)))
                         { safe = false; break; }
                 if (!safe) continue;                            // fallback to chaining
                 // Commit: every stub taps the collector at its OWN along-coord and
-                // stops there (independent slide, no overshoot); its busterm tag
-                // moves to the collector.
+                // stops there (independent slide, no overshoot).  Busterm: on the
+                // common-face path the outermost stub keeps the tap (its endpoint is
+                // on the face); on the interior path it moves to the collector's
+                // face landing.  All others demote to SEG junctions.
                 for (const Inc* q : TAPS) {
                     Segment& sq = topo.segments[q->seg_idx];
                     ((q->ep == 0) ? sq.start : sq.end) = mk(along(q->p), spine_perp);
                     auto& ep = topo.seg_busterms[q->seg_idx];
-                    ((q->ep == 0) ? ep.first : ep.second) = std::nullopt;
+                    ((q->ep == 0) ? ep.first : ep.second)
+                        = (q == face_stub) ? std::optional<Busterm>{blocks[bi]}
+                                           : std::optional<Busterm>{};
                 }
-                // Add the collector as a NEW segment [c_lo..c_hi] @ spine_perp: one
-                // end is the block's single busterm tap (its FACE landing), the
-                // other shares the far outermost stub's endpoint (a junction);
-                // interior stubs T-junction it.
+                // Add the collector as a NEW segment [c_lo..c_hi] @ spine_perp.  On
+                // the interior path one end is the block's busterm FACE landing; on
+                // the common-face path the tap lives on the outermost stub and the
+                // collector is pure internal wire (busterms cleared for appended
+                // connectors below, so no explicit tag is needed there).
                 const int c_idx = (int)topo.segments.size();
                 const Point cs = mk(c_lo, spine_perp), ce = mk(c_hi, spine_perp);
                 topo.segments.push_back(make_seg(cs.x, cs.y, ce.x, ce.y, spine_h ? h_layer : v_layer));
-                { auto& ep = topo.seg_busterms[c_idx];
-                  (tap_lo ? ep.first : ep.second) = blocks[bi]; }
+                if (!common_face) { auto& ep = topo.seg_busterms[c_idx];
+                                    (tap_lo ? ep.first : ep.second) = blocks[bi]; }
                 spine_handled.insert(bi);
                 continue;
             }
