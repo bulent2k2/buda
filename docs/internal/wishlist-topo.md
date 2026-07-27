@@ -57,12 +57,40 @@ to the same result.
 **Why opt-in, not default.** The correctness metric is net-better and the shape is
 strictly cleaner, but the raw overlap/unplaced trade is mixed on stress flows and
 bigHalf's healer cost is real, so — like `multi_trunk` / `set_dedup_loci` — it
-ships default-off and is measured before any default flip. Follow-ups: the
-`argmin(free_window − perpendicular_face_extent)` busterm-conn pick (currently the
-minority stub is always the anchor); the 2-2 and all-same-orientation splits (a
-dedicated perpendicular collector segment); and a per-command `.buda`
-`spine_relays` token (today: the Python `set_spine_relays` setter + the
-`BUDA_SPINE_RELAYS` env). Tests: `test/tests/test_topo_spine_relay.py`.
+ships default-off and is measured before any default flip. Tests:
+`test/tests/test_topo_spine_relay.py`.
+
+**Follow-ups (open):**
+
+- **A — busterm-conn anchor pick.** Today the minority stub is *always* the
+  anchor (extended to the opposite face). Pick instead the incident stub minimizing
+  `max(0, free_slide_window − perpendicular_face_extent)` — the one that gives up
+  the least bounded slide when clamped to the block face — so a small-window / long-
+  face stub carries the tap and the wider-window stubs stay free.
+- **B — the 2-2 and all-same-orientation splits.** The branch fires only on the
+  clean ≥2-parallel + exactly-1-perpendicular split; a 2-2 hub (or an all-same
+  hub with no perpendicular to tap onto) still falls back to bracket chaining.
+  Handle them with a dedicated short perpendicular collector segment the stubs tap.
+- **C — per-command `.buda` `spine_relays` token.** Today opt-in is the Python
+  `set_spine_relays` setter or the `BUDA_SPINE_RELAYS` env; a script-level token on
+  `generate_[hier_]topologies` needs threading through `_parse_gen_flags` + its ~6
+  call sites and the v15 per-bundle knob memo (like `multi_trunk`).
+- **D — default-flip measurement.** Re-measure a corpus A/B toward flipping the
+  default on (gated like `kSegsRel` / `multi_trunk` if it lands mixed).
+- **E — spine overstretch.** The busterm-end is always extended to the OPPOSITE
+  face for coverage, so when the outermost tap sits *inside* the block the segment
+  from that tap to the face is dead overhang (measured b64 hub 19: spine `x[200..
+  10710]`, leftmost tap `x=800` → **600-unit** overhang `[200..800]`). Can't just
+  clamp to the outermost tap (the block would then be neither tapped nor passed-
+  through → open); eliminating it requires the hub's face-tap to come from a
+  perpendicular tap instead (COUPLED with A), or a dedicated short tap-stub.
+- **F — TRUNK+MST hybrids.** The same `complete_relay_junctions` runs on the
+  trunk+MST hybrid path, so the spine ALREADY fires there under the flag — measured
+  on `big.buda`: hybrid-pool connectors **6271 → 5585 (−11%)**, e.g. bundle 1's
+  `TRUNK_V+MST@x8210` 9→5 segs / conns 6→2. But this is UNMEASURED end-to-end (the
+  corpus A/B + unit test pin pure MST only), and hybrids are the planner's genuine
+  choice far more often than pure MST — so a hybrid-selected A/B + a hybrid-hub unit
+  test is where the real QoR win (and the strongest default-flip case) likely lives.
 
 ## Coverage by zero-length abutment (`seg_spans_rect` inclusive bounds) — NOTED
 
