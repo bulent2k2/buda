@@ -57,12 +57,55 @@ to the same result.
 **Why opt-in, not default.** The correctness metric is net-better and the shape is
 strictly cleaner, but the raw overlap/unplaced trade is mixed on stress flows and
 bigHalf's healer cost is real, so — like `multi_trunk` / `set_dedup_loci` — it
-ships default-off and is measured before any default flip. Follow-ups: the
-`argmin(free_window − perpendicular_face_extent)` busterm-conn pick (currently the
-minority stub is always the anchor); the 2-2 and all-same-orientation splits (a
-dedicated perpendicular collector segment); and a per-command `.buda`
-`spine_relays` token (today: the Python `set_spine_relays` setter + the
-`BUDA_SPINE_RELAYS` env). Tests: `test/tests/test_topo_spine_relay.py`.
+ships default-off and is measured before any default flip. Tests:
+`test/tests/test_topo_spine_relay.py`.
+
+**Follow-ups (open):**
+
+- **A — busterm-conn anchor pick.** Today the minority stub is *always* the
+  anchor (extended to the opposite face). Pick instead the incident stub minimizing
+  `max(0, free_slide_window − perpendicular_face_extent)` — the one that gives up
+  the least bounded slide when clamped to the block face — so a small-window / long-
+  face stub carries the tap and the wider-window stubs stay free.
+- **B — the 2-2 and all-same-orientation splits.** The branch fires only on the
+  clean ≥2-parallel + exactly-1-perpendicular split; a 2-2 hub (or an all-same
+  hub with no perpendicular to tap onto) still falls back to bracket chaining.
+  Handle them with a dedicated short perpendicular collector segment the stubs tap.
+- **C — per-command `.buda` `spine_relays` token.** Today opt-in is the Python
+  `set_spine_relays` setter or the `BUDA_SPINE_RELAYS` env; a script-level token on
+  `generate_[hier_]topologies` needs threading through `_parse_gen_flags` + its ~6
+  call sites and the v15 per-bundle knob memo (like `multi_trunk`).
+- **D — default-flip measurement.** Re-measure a corpus A/B toward flipping the
+  default on (gated like `kSegsRel` / `multi_trunk` if it lands mixed).
+- **E — spine overstretch.** The busterm-end is always extended to the OPPOSITE
+  face for coverage, so when the outermost tap sits *inside* the block the segment
+  from that tap to the face is dead overhang (measured b64 hub 19: spine `x[200..
+  10710]`, leftmost tap `x=800` → **600-unit** overhang `[200..800]`). Can't just
+  clamp to the outermost tap (the block would then be neither tapped nor passed-
+  through → open); eliminating it requires the hub's face-tap to come from a
+  perpendicular tap instead (COUPLED with A), or a dedicated short tap-stub.
+- **F — TRUNK+MST hybrids — MEASURED, hypothesis REFUTED.** The same
+  `complete_relay_junctions` runs on the trunk+MST hybrid path, so the spine already
+  fires there under the flag (big.buda GENERATED hybrid-pool connectors 6271 → 5585,
+  −11%). Note the corpus A/B above is pin-FREE (`qor_nopin` removes every
+  `select_topology`, so the planner draws from the full pool) — it therefore already
+  exercised these hybrid changes end-to-end; it just never ISOLATED or attributed
+  them. The *hypothesis* was that hybrids — the planner's genuine choice far more
+  often than pure MST — are where the real QoR win lives. The isolating end-to-end A/B on
+  `big.buda` (2026-07-27, spine off vs on) refutes it:
+  - **Natural flow** (planner free): abstract WL 767,207 → 767,613 (**+0.05%, flat**),
+    QoR 0/0/0 both — a near-total no-op (only 13-14 of 80 selected are MST-family).
+  - **Hybrid-pinned** (all 70 forced to their cheapest hybrid): selected-hybrid
+    connectors 194 → 184 (**−5.2%**), abstract WL 801,339 → 801,179 (**−0.02%, flat**),
+    QoR 7/356/10 **identical**.
+
+  Why: the **trunk already IS the collector** — it absorbs the fan-out, leaving the
+  MST portion with only ~2.8 connectors/hybrid (194/70) and few high-degree hubs, so
+  the spine's collapse is marginal and WL-invisible (the trunk dominates WL). The
+  spine's real win is concentrated in the *pure-MST-selected* case (16→6 segs on
+  b63/b0), which is rare; on hybrids it is **largely redundant with the trunk**. Net:
+  this WEAKENS the default-flip case (D), not strengthens it — the feature is narrow
+  (fixes the pure-MST pathology) and there is little global upside to turning it on.
 
 ## Coverage by zero-length abutment (`seg_spans_rect` inclusive bounds) — NOTED
 

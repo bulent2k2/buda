@@ -1986,14 +1986,24 @@ static void complete_relay_junctions(Topology& topo,
     // A high-degree relay whose incident stubs split as ≥2 PARALLEL (majority) +
     // exactly 1 PERPENDICULAR (minority) is wired by one collector SPINE instead
     // of a chain of bracket connectors.  The spine runs along the minority axis;
-    // the minority stub is EXTENDED across the block to the opposite face (that
-    // face landing is the block's single busterm-conn, keeping a bounded slide);
-    // every majority stub is repositioned to T-tap the spine at its OWN
-    // perpendicular coordinate — so the parallels are never merged onto one
-    // shared track and each keeps its full independent slide (docs/internal/
-    // wishlist-topo.md).  No new segments, no busterm tap lost.  Conservative:
-    // fires only on the clean single-rect 2-1 split whose spine provably covers
-    // every tap; anything else falls through to the general chaining below.
+    // every majority stub T-taps it at its OWN perpendicular coordinate — the
+    // parallels are never merged onto one shared track, so each keeps its full
+    // independent slide (docs/internal/wishlist-topo.md).
+    //
+    // The hub needs exactly one busterm-conn + coverage, done by the CHEAPER of two
+    // strategies (follow-up E — the earlier scheme unconditionally ran the minority
+    // stub to the OPPOSITE face, overshooting the last tap by up to a block width):
+    //   • M-anchor: run the minority spine to the busterm-side block face and tap
+    //     there (overstretch = face − outermost tap).
+    //   • P-anchor: stop the spine AT the outermost tap and extend THAT tap across
+    //     the block to its far face (pass-through + face tap; reach = far face −
+    //     spine line).  The anchor must be the outermost tap so the spine ENDS on it
+    //     (a T-junction); an interior stub is only X-crossed by the spine, which
+    //     ConnTopology does not infer, and would strand the block.
+    // Whichever costs less wins, so this never regresses the old WL and removes the
+    // overhang where the tap-extension is shorter.  No new segments, no tap lost.
+    // Conservative: single-rect blocks, the clean ≥2-parallel + 1-perpendicular
+    // split, spine line strictly interior; else general chaining.
     std::set<int> spine_handled;
     if (spine_relays) {
         for (auto& [bi, pts] : incident) {
@@ -2011,28 +2021,44 @@ static void complete_relay_junctions(Topology& topo,
             const Rect& bb = blocks[bi].orig_bbox;
             const bool spine_h = Mi->seg_horiz;                 // spine along minority axis
             const int  spine_perp = spine_h ? Mi->p.y : Mi->p.x; // the shared tap line
-            // Extend the minority stub across the block to the face OPPOSITE its
-            // neighbour (its far endpoint), so it spans the block and lands on
-            // the far face as the busterm-conn.
+            const int  p_lo = spine_h ? bb.y1 : bb.x1;          // block's perp extent
+            const int  p_hi = spine_h ? bb.y2 : bb.x2;
+            // The anchor must STRADDLE the spine line to both cover the block and
+            // tap the spine, so the line has to be strictly interior in perp.
+            if (spine_perp <= p_lo || spine_perp >= p_hi) continue;
+            auto along = [&](const Point& p) { return spine_h ? p.x : p.y; };
+            auto mk    = [&](int a, int p)   { return spine_h ? Point{a, p} : Point{p, a}; };
             Segment& sM = topo.segments[Mi->seg_idx];
             const Point M_far = (Mi->ep == 0) ? sM.end : sM.start;
-            int opp;
-            if (spine_h) opp = (M_far.x > Mi->p.x) ? bb.x1 : bb.x2;
-            else         opp = (M_far.y > Mi->p.y) ? bb.y1 : bb.y2;
-            const Point M_new = spine_h ? Point{opp, spine_perp}
-                                        : Point{spine_perp, opp};
-            // The spine must cover every tap's along-coord (between the opposite
-            // face and the neighbour side) — else a tap would fall off it.
-            const int span_lo = spine_h ? std::min(opp, M_far.x) : std::min(opp, M_far.y);
-            const int span_hi = spine_h ? std::max(opp, M_far.x) : std::max(opp, M_far.y);
-            bool coverable = true;
-            for (const Inc* q : P) {
-                const int along = spine_h ? q->p.x : q->p.y;
-                if (along < span_lo || along > span_hi) { coverable = false; break; }
-            }
-            if (!coverable) continue;                           // fallback to chaining
+            const int a_lo = spine_h ? bb.x1 : bb.y1;           // block's along extent
+            const int a_hi = spine_h ? bb.x2 : bb.y2;
+            int t_min = INT_MAX, t_max = INT_MIN;
+            for (const Inc* q : P) { int a = along(q->p); t_min = std::min(t_min, a); t_max = std::max(t_max, a); }
+            // Busterm-side extreme tap (side away from the neighbour M_far).
+            const int bus_along = (along(M_far) >= t_max) ? t_min : t_max;
+            // Anchor candidate = the OUTERMOST-tap stub (the spine ENDS on it, a
+            // T-junction; an interior stub would only be X-crossed by the spine,
+            // which ConnTopology does not infer, and be stranded).
+            const Inc* anchor = nullptr;
+            for (const Inc* q : P) if (along(q->p) == bus_along) { anchor = q; break; }
+            if (!anchor) continue;                              // defensive; bus_along is a P tap
+            const int a_pf  = spine_h ? anchor->p.y : anchor->p.x;   // anchor's landing perp face
+            const int anchor_far = (std::abs(a_pf - p_lo) <= std::abs(a_pf - p_hi)) ? p_hi : p_lo;
+            // Two coverage strategies — use the CHEAPER (never worse than the old
+            // overstretch):
+            //   M-anchor: run the minority spine to the busterm-side block face
+            //             (overstretch |m_opp − bus_along|) and tap there.
+            //   P-anchor: stop the spine at the outermost tap and extend THAT tap
+            //             across the block to its far face (reach |anchor_far − spine_perp|).
+            const int m_opp  = (along(M_far) >= t_max) ? a_lo : a_hi;  // busterm-side along face
+            const int m_cost = std::abs(m_opp - bus_along);
+            const int p_cost = std::abs(anchor_far - spine_perp);
+            const bool use_p = (p_cost < m_cost);
+            const Point M_new      = use_p ? mk(bus_along, spine_perp) : mk(m_opp, spine_perp);
+            const Point anchor_new = mk(along(anchor->p), anchor_far);   // used only when use_p
             // A repositioned endpoint that also lies on ANOTHER block's boundary
-            // could strand that block's coverage — leave such a relay to chaining.
+            // could strand that block's coverage — leave such a relay to chaining
+            // (guard both the ORIGINAL landing and the new one, per the OTC path).
             auto on_other_boundary = [&](const Point& Pn) {
                 for (int bj = 0; bj < (int)blocks.size(); ++bj) {
                     if (bj == bi) continue;
@@ -2043,30 +2069,34 @@ static void complete_relay_junctions(Topology& topo,
                 }
                 return false;
             };
-            // Guard BOTH the ORIGINAL landing (moving it could strip an adjacent
-            // block's only endpoint/pass-through coverage — mirrors the two-stub
-            // OTC path) AND the new landing.
             bool safe = !on_other_boundary(Mi->p) && !on_other_boundary(M_new);
+            if (use_p) safe = safe && !on_other_boundary(anchor->p) && !on_other_boundary(anchor_new);
             for (const Inc* q : P) {
-                const Point np = spine_h ? Point{q->p.x, spine_perp}
-                                         : Point{spine_perp, q->p.y};
+                if (use_p && q == anchor) continue;
+                const Point np = mk(along(q->p), spine_perp);
                 if (on_other_boundary(q->p) || on_other_boundary(np)) { safe = false; break; }
             }
             if (!safe) continue;                                // fallback to chaining
-            // Commit: move the minority landing to the opposite face (the spine),
+            // Commit.  M becomes the spine; every majority stub taps it at its own
+            // along-coord (independent slide).  Coverage: P-anchor extends the
+            // outermost tap across the block; M-anchor runs the spine to the face.
             ((Mi->ep == 0) ? sM.start : sM.end) = M_new;
-            // and each majority stub onto the spine line (an independent T-tap).
+            if (use_p) { Segment& sa = topo.segments[anchor->seg_idx];
+                         ((anchor->ep == 0) ? sa.start : sa.end) = anchor_new; }
             for (const Inc* q : P) {
+                if (use_p && q == anchor) continue;
                 Segment& sq = topo.segments[q->seg_idx];
-                const Point np = spine_h ? Point{q->p.x, spine_perp}
-                                         : Point{spine_perp, q->p.y};
-                ((q->ep == 0) ? sq.start : sq.end) = np;
+                ((q->ep == 0) ? sq.start : sq.end) = mk(along(q->p), spine_perp);
             }
-            // Busterm: the minority stub's new far-face landing is the single tap;
-            // every majority landing is demoted to an internal SEG junction.
+            // Busterm: exactly one tap — the anchor's far face (P) or the spine's
+            // face landing (M); every other landing → internal SEG junction.
+            if (use_p) { auto& ep = topo.seg_busterms[anchor->seg_idx];
+                         ((anchor->ep == 0) ? ep.first : ep.second) = blocks[bi]; }
             { auto& ep = topo.seg_busterms[Mi->seg_idx];
-              ((Mi->ep == 0) ? ep.first : ep.second) = blocks[bi]; }
+              ((Mi->ep == 0) ? ep.first : ep.second)
+                  = use_p ? std::optional<Busterm>{} : std::optional<Busterm>{blocks[bi]}; }
             for (const Inc* q : P) {
+                if (use_p && q == anchor) continue;
                 auto& ep = topo.seg_busterms[q->seg_idx];
                 ((q->ep == 0) ? ep.first : ep.second) = std::nullopt;
             }
