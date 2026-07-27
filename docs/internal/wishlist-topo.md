@@ -84,13 +84,25 @@ ships default-off and is measured before any default flip. Tests:
   clamp to the outermost tap (the block would then be neither tapped nor passed-
   through → open); eliminating it requires the hub's face-tap to come from a
   perpendicular tap instead (COUPLED with A), or a dedicated short tap-stub.
-- **F — TRUNK+MST hybrids.** The same `complete_relay_junctions` runs on the
-  trunk+MST hybrid path, so the spine ALREADY fires there under the flag — measured
-  on `big.buda`: hybrid-pool connectors **6271 → 5585 (−11%)**, e.g. bundle 1's
-  `TRUNK_V+MST@x8210` 9→5 segs / conns 6→2. But this is UNMEASURED end-to-end (the
-  corpus A/B + unit test pin pure MST only), and hybrids are the planner's genuine
-  choice far more often than pure MST — so a hybrid-selected A/B + a hybrid-hub unit
-  test is where the real QoR win (and the strongest default-flip case) likely lives.
+- **F — TRUNK+MST hybrids — MEASURED, hypothesis REFUTED.** The same
+  `complete_relay_junctions` runs on the trunk+MST hybrid path, so the spine already
+  fires there under the flag (big.buda GENERATED hybrid-pool connectors 6271 → 5585,
+  −11%). The *hypothesis* was that hybrids — the planner's genuine choice far more
+  often than pure MST — are where the real QoR win lives. The end-to-end A/B on
+  `big.buda` (2026-07-27, spine off vs on) refutes it:
+  - **Natural flow** (planner free): abstract WL 767,207 → 767,613 (**+0.05%, flat**),
+    QoR 0/0/0 both — a near-total no-op (only 13-14 of 80 selected are MST-family).
+  - **Hybrid-pinned** (all 70 forced to their cheapest hybrid): selected-hybrid
+    connectors 194 → 184 (**−5.2%**), abstract WL 801,339 → 801,179 (**−0.02%, flat**),
+    QoR 7/356/10 **identical**.
+
+  Why: the **trunk already IS the collector** — it absorbs the fan-out, leaving the
+  MST portion with only ~2.8 connectors/hybrid (194/70) and few high-degree hubs, so
+  the spine's collapse is marginal and WL-invisible (the trunk dominates WL). The
+  spine's real win is concentrated in the *pure-MST-selected* case (16→6 segs on
+  b63/b0), which is rare; on hybrids it is **largely redundant with the trunk**. Net:
+  this WEAKENS the default-flip case (D), not strengthens it — the feature is narrow
+  (fixes the pure-MST pathology) and there is little global upside to turning it on.
 
 ## Coverage by zero-length abutment (`seg_spans_rect` inclusive bounds) — NOTED
 
