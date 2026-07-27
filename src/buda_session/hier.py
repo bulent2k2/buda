@@ -1046,7 +1046,8 @@ class HierMixin:
 
     def _generate_hier_topo_one(self, w, use_center, use_double_detour,
                                 fp_cache, comps_by_name, use_multi_trunk=False,
-                                additive=False, use_hanan_loci=True):
+                                additive=False, use_hanan_loci=True,
+                                use_spine_relays=False):
         """Generate topology candidates for a single HBundle wrapper.
 
         Updates w.input.candidates in place. Returns candidate count.
@@ -1098,7 +1099,8 @@ class HierMixin:
                 print(f"  Warning: could not build cell-local fp for {parent_name!r} — skipping")
                 return 0
             tg = self._make_topo_gen(cell_fp, use_center, use_double_detour,
-                                     use_multi_trunk, use_hanan_loci)
+                                     use_multi_trunk, use_hanan_loci,
+                                     use_spine_relays)
             entries = [e.removeprefix('bt:').rsplit('/', 1)[-1]
                        for e in b.entry_busterm_ids]
             exits = [e.removeprefix('bt:').rsplit('/', 1)[-1]
@@ -1163,7 +1165,8 @@ class HierMixin:
             if not ok:
                 return 0
             tg = self._make_topo_gen(fp, use_center, use_double_detour,
-                                     use_multi_trunk, use_hanan_loci)
+                                     use_multi_trunk, use_hanan_loci,
+                                     use_spine_relays)
             n, detail = install(tg.generate_candidates(src, dsts))
             if fanin_c:
                 # Per-bit taper (no-op / conservative full width on a resumed
@@ -1195,7 +1198,8 @@ class HierMixin:
                 fp_cache[cache_key] = self._build_bdb_floorplan(ep_depth)
             depth_fp = fp_cache[cache_key]
             tg = self._make_topo_gen(depth_fp, use_center, use_double_detour,
-                                     use_multi_trunk, use_hanan_loci)
+                                     use_multi_trunk, use_hanan_loci,
+                                     use_spine_relays)
             if src is None:
                 print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
                 return 0
@@ -1234,7 +1238,8 @@ class HierMixin:
         # Loci polarity (see the memo-encoding note at _record_gen_knob_memo,
         # topologies_cmds.py): a memo token wins for this bundle — either
         # polarity — else the bulk command's effective setting applies.
-        bulk = getattr(self, "_hier_gen_knobs", (False, False, False, True))
+        bulk = getattr(self, "_hier_gen_knobs",
+                       (False, False, False, True, False))
         if "no_hanan_loci" in ks:
             replay_loci = False
         elif "hanan_loci" in ks:
@@ -1248,7 +1253,8 @@ class HierMixin:
             # USER candidates kept by the non-additive install).
             self._generate_hier_topo_one(
                 w, bulk[0], bulk[1], fp_cache, comps_by_name, bulk[2],
-                additive=False, use_hanan_loci=False)
+                additive=False, use_hanan_loci=False,
+                use_spine_relays=bulk[4])
             print(f"  Re-applied knob memo '{knobs}' for bundle "
                   f"{w.input.original_bundle.id}: regenerated midpoint-only "
                   f"(no_hanan_loci).")
@@ -1266,7 +1272,7 @@ class HierMixin:
         added = self._generate_hier_topo_one(
             w, "center_mode" in ks, "double_detour" in ks, fp_cache,
             comps_by_name, "multi_trunk" in ks, additive=True,
-            use_hanan_loci=replay_loci)
+            use_hanan_loci=replay_loci, use_spine_relays="spine_relays" in ks)
         if added:
             print(f"  Re-applied knob memo '{knobs}' for bundle "
                   f"{w.input.original_bundle.id}: +{added} candidate(s).")
@@ -1439,11 +1445,11 @@ class HierMixin:
 
     def _clone_gen_knobs(self, base, bundle_id):
         """Overlay a bundle's persisted v15 generation-knob memo on `base`
-        (the bulk/default (center, double_detour, multi_trunk, hanan_loci)
-        tuple), returning the effective clone-generation knobs.  On the
-        load_pipeline resume path `_hier_gen_knobs` is unset and `base` is the
-        all-default fallback, so without this the clone candidates would be
-        generated coarser than the pool they mirror (audit P2-02)."""
+        (the bulk/default (center, double_detour, multi_trunk, hanan_loci,
+        spine_relays) tuple), returning the effective clone-generation knobs.
+        On the load_pipeline resume path `_hier_gen_knobs` is unset and `base`
+        is the all-default fallback, so without this the clone candidates would
+        be generated coarser than the pool they mirror (audit P2-02)."""
         if self.bdb is None:
             return base
         memo = self.bdb.bundle_gen_knobs(str(bundle_id))
@@ -1458,7 +1464,8 @@ class HierMixin:
         return (base[0] or "center_mode" in ks,
                 base[1] or "double_detour" in ks,
                 base[2] or "multi_trunk" in ks,
-                loci)
+                loci,
+                base[4] or "spine_relays" in ks)
 
     def _split_bottom_up_rotation_classes(self):
         """Give each marked cell's 90°-rotated instance class its OWN
@@ -1511,8 +1518,10 @@ class HierMixin:
         next_id = max((w.input.original_bundle.id
                        for w in self.bundles), default=-1) + 1
         # Generation knobs remembered from generate_hier_topologies; the
-        # fallback keeps hanan_loci ON (its post-flip default).
-        knobs = getattr(self, "_hier_gen_knobs", (False, False, False, True))
+        # fallback keeps hanan_loci ON (its post-flip default) and spine
+        # relays OFF (its opt-in default).
+        knobs = getattr(self, "_hier_gen_knobs",
+                        (False, False, False, True, False))
         ocache, fp_cache = {}, {}
 
         # Pass 1 — classify per cell_context against the per-cell
@@ -1615,14 +1624,16 @@ class HierMixin:
                 self._generate_hier_topo_one(nw, bk[0], bk[1],
                                              fp_cache, comps_by_name,
                                              bk[2],
-                                             use_hanan_loci=bk[3])
+                                             use_hanan_loci=bk[3],
+                                             use_spine_relays=bk[4])
                 if ref_moved:
                     # The kept side lost the instance its candidates were
                     # generated from — regenerate in its new frame.
                     self._generate_hier_topo_one(w, bk[0], bk[1],
                                                  fp_cache, comps_by_name,
                                                  bk[2],
-                                                 use_hanan_loci=bk[3])
+                                                 use_hanan_loci=bk[3],
+                                                 use_spine_relays=bk[4])
             else:
                 # Rotated-only template: the WHOLE bundle belongs to the
                 # clone class — re-context in place (same id, nets, and
@@ -1642,7 +1653,8 @@ class HierMixin:
                     self._generate_hier_topo_one(w, bk[0], bk[1],
                                                  fp_cache, comps_by_name,
                                                  bk[2],
-                                                 use_hanan_loci=bk[3])
+                                                 use_hanan_loci=bk[3],
+                                                 use_spine_relays=bk[4])
         if not made:
             return 0
         self.bundles = result
@@ -3220,14 +3232,22 @@ class HierMixin:
         return result, expansion_map
 
     def _make_topo_gen(self, fp, use_center=False, use_double_detour=False,
-                       use_multi_trunk=False, use_hanan_loci=True):
+                       use_multi_trunk=False, use_hanan_loci=True,
+                       use_spine_relays=False):
         """Create a TopologyGenerator on fp with the current layer stack.
 
         use_hanan_loci defaults to True (the hanan_loci default flip) and is
         ALWAYS stamped on the generator explicitly, so a caller that resolved
         an opt-out (`no_hanan_loci` command flag or a per-bundle
         `no_hanan_loci` knob memo) gets a midpoint-only generator regardless
-        of the C++ member default."""
+        of the C++ member default.
+
+        use_spine_relays (default off — the `spine_relays` command flag /
+        knob-memo opt-in) switches MST relay-hub completion from the
+        over-the-cell bracket chain to a single collector SPINE the majority
+        stubs T-tap independently (src/topology.cpp complete_relay_junctions).
+        Stamped explicitly like use_hanan_loci so it overrides any ambient
+        BUDA_SPINE_RELAYS the C++ constructor read."""
         tg = buda.TopologyGenerator(fp)
         h = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
         v = self.layers.get_top_layer(buda.LayerDir.VERTICAL)
@@ -3253,6 +3273,9 @@ class HierMixin:
         # Default-on knob: set unconditionally (see docstring) so an opt-out
         # actually reaches the generator.
         tg.set_hanan_loci(bool(use_hanan_loci))
+        # Default-off opt-in: stamp unconditionally so it overrides ambient
+        # BUDA_SPINE_RELAYS in either direction (see docstring).
+        tg.set_spine_relays(bool(use_spine_relays))
         return tg
 
     def _make_layer_names(self):

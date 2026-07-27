@@ -23,7 +23,11 @@ Opt-in: the generator's default leaves the completion untouched (the bracket
 chain), so pools are bit-identical unless `set_spine_relays(True)` is called
 (or `BUDA_SPINE_RELAYS=1` is set).
 """
+import io
+import contextlib
+
 import buda
+import buda_cli
 
 # A minimal "double-star": two hubs (A, B) on one row joined by an edge, each
 # with two leaf blocks above/below at DIFFERENT x so the two vertical stubs into
@@ -156,3 +160,39 @@ def test_all_same_orientation_hub_gets_a_collector_spine():
     # a horizontal collector segment now spans the tap range
     assert any(s.start.y == s.end.y and abs(s.end.x - s.start.x) > 1000
                for s in m_on.segments), "expected a horizontal collector spine"
+
+
+# ── the `.buda` `spine_relays` token (follow-up C) ───────────────────────────
+def _session_gen(spine_token):
+    """Drive a BudaSession through the all-same double-star with (or without)
+    the `spine_relays` token on generate_topologies.  Returns the bundle's
+    MST_HV candidate."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), buda.ostream_redirect():
+        cmds = ["def_layer 6 M6 H TOP 20",
+                "def_layer 7 M7 V TOP 20"]
+        for name, (x1, y1, x2, y2) in _ALLSAME.items():
+            cmds.append(f"add_block {name} {x1} {y1} {x2} {y2}")
+        cmds += ["add_bus b[8] L1.p L2.p,L3.p,H.p",
+                 "run_bundler",
+                 "generate_topologies spine_relays" if spine_token
+                 else "generate_topologies"]
+        for c in cmds:
+            s.do_command(c)
+    return _mst_hv(s.bundles[0].input.candidates)
+
+
+def test_buda_token_activates_the_spine():
+    """`generate_topologies spine_relays` reaches the C++ generator: the token
+    run's MST is the collector-spine form (fewer segments than the default
+    bracket-chain run), and OMITTING the token is byte-identical to the
+    default — the opt-in is genuinely off without it (no ambient env leak,
+    because _make_topo_gen stamps the flag unconditionally)."""
+    m_off = _session_gen(spine_token=False)
+    m_on = _session_gen(spine_token=True)
+    assert m_off is not None and m_on is not None
+    assert len(m_on.segments) < len(m_off.segments), (
+        f"the spine_relays token should shrink the MST: "
+        f"on={len(m_on.segments)} off={len(m_off.segments)}")
