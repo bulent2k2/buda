@@ -982,8 +982,18 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         if (ci >= 0 && ci < (int)bw.input.candidates.size())
             cand_indices.push_back(ci);
     if (cand_indices.empty()) {
-        int ci_lo = bw.input.topology_pinned ? bw.plan.selected_topology_index     : 0;
-        int ci_hi = bw.input.topology_pinned ? bw.plan.selected_topology_index + 1 : (int)bw.input.candidates.size();
+        // Guard the single-pin path exactly as the pinned_group path above:
+        // an out-of-range selected_topology_index (its default is -1, or a stale
+        // pin after the pool shrank) must not index candidates[] out of bounds.
+        // An incoherent pin is treated as "not usefully pinned" → full sweep,
+        // turning a SIGSEGV into well-defined behavior (issue #454). The
+        // supported CLI never hits this (select_topology sets the flag AND a
+        // valid index together); the pybind fields are independently writable.
+        const int n = (int)bw.input.candidates.size();
+        const int sel = bw.plan.selected_topology_index;
+        const bool valid_pin = bw.input.topology_pinned && sel >= 0 && sel < n;
+        int ci_lo = valid_pin ? sel     : 0;
+        int ci_hi = valid_pin ? sel + 1 : n;
         for (int ci = ci_lo; ci < ci_hi; ++ci) cand_indices.push_back(ci);
     }
 
