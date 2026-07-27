@@ -130,7 +130,11 @@ So the hybrid's identity is literally "a copied trunk candidate with some stubs
 swapped for MST edges." Its type string is the trunk's with `+MST` spliced around
 the `@locus` suffix (`3460–3466`).
 
-### Reuse of the pure-MST path: **absent at the routine level**
+### Reuse of the pure-MST path: **absent at the routine level** *(as audited — since fixed)*
+
+> This subsection is the **pre-refactor** picture. Both duplications below have
+> since been removed (byte-identical by construction, measured QoR-neutral) —
+> see [§4.1](#41-status-both-mst-duplications-deduplicated-landed).
 
 It does **not** call `add_mst_candidates`. The MST logic is duplicated in two
 layers:
@@ -272,47 +276,73 @@ cluster counts.
 
 ## 4. Reuse scorecard
 
+> **Update (landed).** The two MST duplications this scorecard flagged are now
+> fully deduplicated — see [§4.1](#41-status-both-mst-duplications-deduplicated-landed).
+> The scorecard below is kept as the *pre-refactor* picture the audit started
+> from; the current shared helpers are `realize_mst_edge` (edge geometry) and the
+> multi-rect `compute_mst` (tree computation).
+
 | Path | Reuses pure-trunk | Reuses pure-MST | Shared helpers |
 |---|---|---|---|
-| `add_trunk_mst_candidates` | **Yes** — copies each trunk `Topology` and mutates it (`3532`); no re-derivation | **No routine reuse** — inline `compute_mst` vs standalone's own Kruskal; `realize_edges` duplicates the standalone edge loop | `complete_relay_junctions`, `annotate_endpoints`, `topology_is_clean_tree`, edge primitives |
+| `add_trunk_mst_candidates` | **Yes** — copies each trunk `Topology` and mutates it (`3532`); no re-derivation | ~~No routine reuse~~ → **now shares `realize_mst_edge` + `compute_mst`** | `complete_relay_junctions`, `annotate_endpoints`, `topology_is_clean_tree`, edge primitives |
 | `add_mst_candidates` | n/a | (is the pure path) | same edge primitives, `complete_relay_junctions`, `topology_is_connected` |
 | `add_multi_trunk_candidates` | independent (own spine/cluster logic) | none | `Axis`, `emit_tap_segment`, `prepend_segment`, `topology_is_clean_tree` |
 | all paths | — | — | `annotate_endpoints`/`restore_face_graze_junctions` (stub paths), `finalize_candidates` tail |
 
-### The refactor target — and one thing that is NOT a pure dedup
+### 4.1 Status: both MST duplications deduplicated (landed)
 
-The `add_trunk_mst_candidates` ↔ `add_mst_candidates` **edge-realization**
-duplication is the clean, byte-identical-preserving win:
+Both duplications the audit identified have since been removed. Each is
+**byte-identical by construction** (argued per step below) and was **measured
+QoR-neutral** on the full corpus (`tools/qor_corpus.py --compare`: 0 better, 0
+worse, 35/35 unchanged), with the geometry-checking fast test tier passing
+unchanged.
 
-1. Extract a shared `realize_mst_edge(rect_u, rect_v, prefer_h_first,
-   gate_straight, m_h, m_v, h_layer, v_layer, out) -> bool` covering the
-   abutment / corner-L / straight / diagonal-L cascade + `edge_id` tagging, and
-   call it from both loops. The `prefer_h_first` flag unifies the orientation
-   arguments (`strategy==0` standalone / `!is_h` hybrid both map to
-   `corner_diagonal_L(…, prefer_h_first?0:1, …)` and
-   `choose_edge_h_first(…, prefer_h_first)`); the `gate_straight` flag preserves
-   the straight-leg gating difference called out above. Rect *selection* stays in
-   each caller (standalone picks the closest rect pair across multi-rect blocks;
-   the hybrid pre-selects the trunk-nearest rect), so the helper takes two rects
-   already chosen. This is a mechanical dedup: candidate pools should be
-   byte-identical.
+> **What the corpus does and does not prove.** `qor_corpus.py --compare` diffs
+> only three aggregate values per flow — `overlaps`, `unplaced`, `viol_bundles`.
+> A `35/35 unchanged` result establishes **QoR-neutrality**, not byte identity:
+> in principle a different MST edge or candidate pool could net out to the same
+> three numbers. The byte-identity claim here rests on the **construction
+> arguments** below (identical algorithm + identical inputs → identical output),
+> for which the QoR-neutral corpus and the passing geometry tests are
+> corroborating evidence, not the proof. A true byte-for-byte guard would diff
+> serialized candidate/topology output across the corpus (not yet wired up).
 
-2. **Unifying the MST *computation* is NOT byte-identical — treat it separately.**
-   `add_mst_candidates` weights each edge by the **minimum manhattan distance over
-   every physical rect pair** of two (possibly multi-rect) blocks (`rect_min_dist`,
-   `3019–3034`), whereas the shared `compute_mst` accepts only **one `Rect` per
-   node** (the hybrid supplies the trunk-nearest rect). For a multi-rect bundle the
-   two metrics can pick a **different MST — different edges, different endpoints,
-   different candidate**. So routing the standalone path through `compute_mst` as-is
-   would change routes; it is a behavior change, not a dedup, and must not be sold
-   as one. Doing it safely first requires extending `compute_mst` to accept
-   multi-rect nodes (min-over-rect-pairs weighting) and confirming the hybrid's
-   single-rect callers are unaffected — a larger, separately-measured change.
+**Step 1 — edge realization → `TopologyGenerator::realize_mst_edge`.** The
+abutment / corner-L / straight / diagonal-L cascade (with `edge_id` tagging) is
+now one private member called from both loops. Two flags reconcile the callers:
 
-Both paths already share the *hard* part (`complete_relay_junctions`); only the
-edge geometry is copy-pasted. Verify step 1 byte-identical via
-`tools/qor_corpus.py --compare` before/after (endpoints unchanged — a dedup, not
-a behavior change). Step 2, if pursued, is a measured QoR change on its own.
+- `prefer_h_first` unifies the orientation argument — `strategy==0` (standalone)
+  and `!is_h` (hybrid) both map to `corner_diagonal_L(…, prefer_h_first?0:1, …)`
+  and `choose_edge_h_first(…, prefer_h_first)`.
+- `gate_straight` preserves the one real divergence: the hybrid rejects a
+  too-short **straight** leg, the standalone path does not (only its diagonals).
+
+Rect *selection* stays in each caller (standalone picks the closest rect pair
+across multi-rect blocks; the hybrid pre-selects the trunk-nearest rect), so the
+helper takes two already-chosen rects.
+
+**Step 2 — MST computation → multi-rect `compute_mst`.** The audit warned that
+routing the standalone path through `compute_mst` **as-is** would change routes:
+`add_mst_candidates` weighted each edge by the **minimum manhattan distance over
+every physical rect pair** of two blocks, whereas `compute_mst` accepted only
+**one `Rect` per node** — for a multi-rect bundle the two metrics can pick a
+different MST. The safe fix — and the one that landed — was to **extend**
+`compute_mst` with a multi-rect overload (`vector<pair<string, vector<Rect>>>`,
+weight = min over rect pairs) and have the single-rect overload wrap-and-delegate
+(a 1-rect node reduces to `manhattan_nearest`, so the `hybrid` and `trunk_mst`
+callers are untouched). Because the Kruskal is otherwise identical (same edge
+enumeration, sort, union-find), feeding it the same rects reproduces the
+standalone tree exactly. `add_mst_candidates`' inline Kruskal is gone; both MST
+computations now share this one implementation.
+
+> The lesson worth keeping: the "behavior change" only existed for the *naive*
+> unification (single-rect `compute_mst`). Extending the shared helper to carry
+> the standalone's multi-rect weighting made it a true, measured 0-change dedup.
+
+Both paths already shared the *hard* part (`complete_relay_junctions`); with the
+edge geometry and the tree computation now shared too, the only per-caller code
+left is the genuinely divergent machinery (§2's hybrid-only spine handling,
+§3's BITRUNK clustering).
 
 ---
 
