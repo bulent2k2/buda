@@ -133,8 +133,8 @@ the `@locus` suffix (`3460–3466`).
 ### Reuse of the pure-MST path: **absent at the routine level** *(as audited — since fixed)*
 
 > This subsection is the **pre-refactor** picture. Both duplications below have
-> since been removed and measured byte-identical — see
-> [§4.1](#41-status-both-mst-duplications-deduplicated-landed).
+> since been removed (byte-identical by construction, measured QoR-neutral) —
+> see [§4.1](#41-status-both-mst-duplications-deduplicated-landed).
 
 It does **not** call `add_mst_candidates`. The MST logic is duplicated in two
 layers:
@@ -291,9 +291,21 @@ cluster counts.
 
 ### 4.1 Status: both MST duplications deduplicated (landed)
 
-Both duplications the audit identified have since been removed, each **measured
-byte-identical** on the full QoR corpus (`tools/qor_corpus.py --compare`: 0
-better, 0 worse, 35/35 unchanged on `overlaps/unplaced/viol_bundles`).
+Both duplications the audit identified have since been removed. Each is
+**byte-identical by construction** (argued per step below) and was **measured
+QoR-neutral** on the full corpus (`tools/qor_corpus.py --compare`: 0 better, 0
+worse, 35/35 unchanged), with the geometry-checking fast test tier passing
+unchanged.
+
+> **What the corpus does and does not prove.** `qor_corpus.py --compare` diffs
+> only three aggregate values per flow — `overlaps`, `unplaced`, `viol_bundles`.
+> A `35/35 unchanged` result establishes **QoR-neutrality**, not byte identity:
+> in principle a different MST edge or candidate pool could net out to the same
+> three numbers. The byte-identity claim here rests on the **construction
+> arguments** below (identical algorithm + identical inputs → identical output),
+> for which the QoR-neutral corpus and the passing geometry tests are
+> corroborating evidence, not the proof. A true byte-for-byte guard would diff
+> serialized candidate/topology output across the corpus (not yet wired up).
 
 **Step 1 — edge realization → `TopologyGenerator::realize_mst_edge`.** The
 abutment / corner-L / straight / diagonal-L cascade (with `edge_id` tagging) is
