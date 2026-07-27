@@ -149,12 +149,17 @@ layers:
    | closest points across rect pairs | `closest_points` (`3479`) | `closest_block_points` → `closest_points` (`3091`) |
    | coincident faces → shared edge | `shared_edge_segment` (`3484`) | `shared_edge_segment` (`3096`) |
    | single-point projection → corner L | `corner_diagonal_L` (`3497`) | `corner_diagonal_L` (`3109`) |
-   | straight V / straight H | `make_seg` (`3503`,`3506`) | `make_seg` (`3112`,`3114`) |
+   | straight V / straight H | `make_seg`, **min-stub-gated** (`3501–3506`) | `make_seg`, **NOT gated** (`3111–3114`) |
    | diagonal L + min-stub gate | `choose_edge_h_first` + `m_h`/`m_v` (`3509–3519`) | `choose_edge_h_first` + `m_h`/`m_v` (`3118–3130`) |
    | tag legs with `edge_id` | yes (`3486`,`3498`,`3521`) | `tag_edge` (`3085`,`3132`) |
 
-   Same shape decisions, same helpers, same min-stub gating — but two copies that
-   can drift.
+   Same shape decisions and helpers — but two copies that can drift, and they are
+   **not** already identical: for aligned rects closer than the min-stub floor the
+   **hybrid rejects the whole candidate** at the straight leg (`3501–3506`), while
+   **standalone MST emits the short straight segment** with no gate (`3111–3114`)
+   — only its *diagonal* legs are min-stub-gated. So a shared realizer must
+   **parameterize the straight-edge gate** (a `gate_straight` flag) to keep each
+   caller's candidate pool byte-for-byte; unify the gate and the pools change.
 
 ### Genuinely shared helpers (both hybrid and standalone MST)
 
@@ -163,10 +168,16 @@ layers:
 - **`annotate_endpoints`** on the raw stubs before completion (`3554` / `3138`).
 - **Clean-topology gates** — the hybrid uses `topology_is_clean_tree`
   (`topology.cpp:3168`; must be connected **and acyclic**, because it adds a
-  second path and cycles are the risk); standalone MST uses the weaker
-  `topology_is_connected` (a tree by construction, so only a collinear butt-joint
-  disconnection is the risk). Coverage checks (`connected_block_names` + span)
-  are shared inside `topology_is_clean_tree` (`3193–3208`).
+  second path between blocks the trunk already reaches, so a leftover redundant
+  path would close a real loop). Standalone MST uses the weaker
+  `topology_is_connected`: its abstract edges form a tree, but the *realized*
+  wire is not guaranteed acyclic — an incidental collinear overlap between two
+  edges' legs adds a SEG connection `ConnTopology` infers, creating a cycle even
+  though the chosen MST edges don't. That connected-but-cyclic case is still
+  routable, so the standalone path **deliberately keeps it** (`topology.cpp:3150`)
+  and only drops a genuinely *disconnected* result (a collinear butt-joint
+  `ConnTopology` can't wire-join). Coverage checks (`connected_block_names` +
+  span) are shared inside `topology_is_clean_tree` (`3193–3208`).
 - Primitives: `closest_points`, `shared_edge_segment`, `corner_diagonal_L`,
   `make_seg`, `choose_edge_h_first`, `manhattan_nearest`, `get_min_stub_length`.
 
@@ -268,21 +279,40 @@ cluster counts.
 | `add_multi_trunk_candidates` | independent (own spine/cluster logic) | none | `Axis`, `emit_tap_segment`, `prepend_segment`, `topology_is_clean_tree` |
 | all paths | — | — | `annotate_endpoints`/`restore_face_graze_junctions` (stub paths), `finalize_candidates` tail |
 
-### The obvious refactor target
+### The refactor target — and one thing that is NOT a pure dedup
 
 The `add_trunk_mst_candidates` ↔ `add_mst_candidates` **edge-realization**
-duplication (and the two MST computations) is the clearest place code can drift:
+duplication is the clean, byte-identical-preserving win:
 
-1. Extract a shared `realize_mst_edge(rect_u, rect_v, prefer_h_first, out) ->
-   bool` covering the abutment / corner-L / straight / diagonal-L cascade with
-   the min-stub gate and `edge_id` tagging, and call it from both loops.
-2. Route `add_mst_candidates` through the shared `compute_mst` helper so both
-   paths compute the tree the same way.
+1. Extract a shared `realize_mst_edge(rect_u, rect_v, prefer_h_first,
+   gate_straight, m_h, m_v, h_layer, v_layer, out) -> bool` covering the
+   abutment / corner-L / straight / diagonal-L cascade + `edge_id` tagging, and
+   call it from both loops. The `prefer_h_first` flag unifies the orientation
+   arguments (`strategy==0` standalone / `!is_h` hybrid both map to
+   `corner_diagonal_L(…, prefer_h_first?0:1, …)` and
+   `choose_edge_h_first(…, prefer_h_first)`); the `gate_straight` flag preserves
+   the straight-leg gating difference called out above. Rect *selection* stays in
+   each caller (standalone picks the closest rect pair across multi-rect blocks;
+   the hybrid pre-selects the trunk-nearest rect), so the helper takes two rects
+   already chosen. This is a mechanical dedup: candidate pools should be
+   byte-identical.
 
-Both already share the *hard* part (`complete_relay_junctions`); only the edge
-geometry is copy-pasted. Any such change should be verified byte-identical via
-`tools/qor_corpus.py --compare` before/after (the endpoints should be unchanged —
-this is a dedup, not a behavior change).
+2. **Unifying the MST *computation* is NOT byte-identical — treat it separately.**
+   `add_mst_candidates` weights each edge by the **minimum manhattan distance over
+   every physical rect pair** of two (possibly multi-rect) blocks (`rect_min_dist`,
+   `3019–3034`), whereas the shared `compute_mst` accepts only **one `Rect` per
+   node** (the hybrid supplies the trunk-nearest rect). For a multi-rect bundle the
+   two metrics can pick a **different MST — different edges, different endpoints,
+   different candidate**. So routing the standalone path through `compute_mst` as-is
+   would change routes; it is a behavior change, not a dedup, and must not be sold
+   as one. Doing it safely first requires extending `compute_mst` to accept
+   multi-rect nodes (min-over-rect-pairs weighting) and confirming the hybrid's
+   single-rect callers are unaffected — a larger, separately-measured change.
+
+Both paths already share the *hard* part (`complete_relay_junctions`); only the
+edge geometry is copy-pasted. Verify step 1 byte-identical via
+`tools/qor_corpus.py --compare` before/after (endpoints unchanged — a dedup, not
+a behavior change). Step 2, if pursued, is a measured QoR change on its own.
 
 ---
 
