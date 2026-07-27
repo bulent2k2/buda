@@ -61,17 +61,25 @@ Rect seg_bbox(const ConnSeg& cs) {
 }
 
 std::vector<MSTEdge> compute_mst(
-    const std::vector<std::pair<std::string, Rect>>& nodes)
+    const std::vector<std::pair<std::string, std::vector<Rect>>>& nodes)
 {
     int n = (int)nodes.size();
     if (n <= 1) return {};
+    // Edge weight = MIN manhattan_nearest over every rect-pair of the two nodes.
+    // For single-rect nodes this reduces to manhattan_nearest(bbox_i, bbox_j).
+    auto rect_min = [&](int i, int j) {
+        int d = INT_MAX;
+        for (const Rect& a : nodes[i].second)
+            for (const Rect& b : nodes[j].second)
+                d = std::min(d, manhattan_nearest(a, b));
+        return d;
+    };
     struct RawEdge { int u, v, dist; };
     std::vector<RawEdge> edges;
     edges.reserve(n * (n - 1) / 2);
     for (int i = 0; i < n; i++)
         for (int j = i + 1; j < n; j++)
-            edges.push_back({i, j, manhattan_nearest(nodes[i].second,
-                                                     nodes[j].second)});
+            edges.push_back({i, j, rect_min(i, j)});
 
     std::sort(edges.begin(), edges.end(),
               [](const RawEdge& a, const RawEdge& b){ return a.dist < b.dist; });
@@ -93,6 +101,18 @@ std::vector<MSTEdge> compute_mst(
         if ((int)mst.size() == n - 1) break;
     }
     return mst;
+}
+
+// Single-rect convenience overload: wrap each rect as a 1-element rect list and
+// delegate.  Byte-identical to the historical implementation (min over one pair
+// == manhattan_nearest of the two rects).
+std::vector<MSTEdge> compute_mst(
+    const std::vector<std::pair<std::string, Rect>>& nodes)
+{
+    std::vector<std::pair<std::string, std::vector<Rect>>> mr;
+    mr.reserve(nodes.size());
+    for (const auto& [name, r] : nodes) mr.push_back({name, std::vector<Rect>{r}});
+    return compute_mst(mr);
 }
 
 std::vector<MSTEdge> ConnTopology::trunk_mst(int trunk_idx,
