@@ -1738,6 +1738,23 @@ static void complete_relay_junctions(Topology& topo,
         return false;
     };
 
+    // Rect-aware "does Pn land on ANY other block's face" — the spine-relay
+    // guards use this before relocating a tap / clearing its busterm, so a
+    // repositioned endpoint that would sit on another endpoint block's face is
+    // left to chaining.  MUST inspect every blocks[bj].rects face (via on_face),
+    // not just the union orig_bbox: a multi-rect/TEG block can be tapped on an
+    // INTERIOR component face that lies inside its union bbox, which a
+    // union-boundary check would miss — wrongly clearing that block's only
+    // contact (Codex #461 P2).  Same predicate the landing scan / far_taps_block use.
+    auto on_any_other_face = [&](const Point& Pn, int self_bi) -> bool {
+        for (int bj = 0; bj < (int)blocks.size(); ++bj) {
+            if (bj == self_bi) continue;
+            if (on_face(Pn, true, blocks[bj]) || on_face(Pn, false, blocks[bj]))
+                return true;
+        }
+        return false;
+    };
+
     // Gather the distinct landing points on each block's face, tagging each with
     // the orientation of the segment whose endpoint lands there plus the
     // (segment, endpoint) it came from so we can later rewrite its busterm
@@ -2039,16 +2056,7 @@ static void complete_relay_junctions(Topology& topo,
                 const int a_pf = spine_h ? anchor->p.y : anchor->p.x;
                 const int anchor_far = (std::abs(a_pf - p_lo) <= std::abs(a_pf - p_hi)) ? p_hi : p_lo;
                 const Point anchor_new = mk(t_min, anchor_far);
-                auto on_other_boundary = [&](const Point& Pn) {
-                    for (int bj = 0; bj < (int)blocks.size(); ++bj) {
-                        if (bj == bi) continue;
-                        const Rect& r = blocks[bj].orig_bbox;
-                        bool onx = (Pn.x == r.x1 || Pn.x == r.x2) && Pn.y >= r.y1 && Pn.y <= r.y2;
-                        bool ony = (Pn.y == r.y1 || Pn.y == r.y2) && Pn.x >= r.x1 && Pn.x <= r.x2;
-                        if (onx || ony) return true;
-                    }
-                    return false;
-                };
+                auto on_other_boundary = [&](const Point& Pn) { return on_any_other_face(Pn, bi); };
                 bool safe = !on_other_boundary(anchor->p) && !on_other_boundary(anchor_new);
                 for (const Inc* q : TAPS) {
                     if (q == anchor) continue;
@@ -2123,19 +2131,11 @@ static void complete_relay_junctions(Topology& topo,
             const bool use_p = (p_cost < m_cost);
             const Point M_new      = use_p ? mk(bus_along, spine_perp) : mk(m_opp, spine_perp);
             const Point anchor_new = mk(along(anchor->p), anchor_far);   // used only when use_p
-            // A repositioned endpoint that also lies on ANOTHER block's boundary
+            // A repositioned endpoint that also lies on ANOTHER block's face
             // could strand that block's coverage — leave such a relay to chaining
-            // (guard both the ORIGINAL landing and the new one, per the OTC path).
-            auto on_other_boundary = [&](const Point& Pn) {
-                for (int bj = 0; bj < (int)blocks.size(); ++bj) {
-                    if (bj == bi) continue;
-                    const Rect& r = blocks[bj].orig_bbox;
-                    bool onx = (Pn.x == r.x1 || Pn.x == r.x2) && Pn.y >= r.y1 && Pn.y <= r.y2;
-                    bool ony = (Pn.y == r.y1 || Pn.y == r.y2) && Pn.x >= r.x1 && Pn.x <= r.x2;
-                    if (onx || ony) return true;
-                }
-                return false;
-            };
+            // (guard both the ORIGINAL landing and the new one, per the OTC path;
+            // on_any_other_face is rect-aware — see its definition for Codex #461 P2).
+            auto on_other_boundary = [&](const Point& Pn) { return on_any_other_face(Pn, bi); };
             bool safe = !on_other_boundary(Mi->p) && !on_other_boundary(M_new);
             if (use_p) safe = safe && !on_other_boundary(anchor->p) && !on_other_boundary(anchor_new);
             for (const Inc* q : P) {
