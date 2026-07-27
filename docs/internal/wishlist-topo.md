@@ -87,8 +87,11 @@ ships default-off and is measured before any default flip. Tests:
 - **F — TRUNK+MST hybrids — MEASURED, hypothesis REFUTED.** The same
   `complete_relay_junctions` runs on the trunk+MST hybrid path, so the spine already
   fires there under the flag (big.buda GENERATED hybrid-pool connectors 6271 → 5585,
-  −11%). The *hypothesis* was that hybrids — the planner's genuine choice far more
-  often than pure MST — are where the real QoR win lives. The end-to-end A/B on
+  −11%). Note the corpus A/B above is pin-FREE (`qor_nopin` removes every
+  `select_topology`, so the planner draws from the full pool) — it therefore already
+  exercised these hybrid changes end-to-end; it just never ISOLATED or attributed
+  them. The *hypothesis* was that hybrids — the planner's genuine choice far more
+  often than pure MST — are where the real QoR win lives. The isolating end-to-end A/B on
   `big.buda` (2026-07-27, spine off vs on) refutes it:
   - **Natural flow** (planner free): abstract WL 767,207 → 767,613 (**+0.05%, flat**),
     QoR 0/0/0 both — a near-total no-op (only 13-14 of 80 selected are MST-family).
