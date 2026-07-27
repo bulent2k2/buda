@@ -47,8 +47,9 @@ def _gen(spine):
         fp.add_block(name, x1, y1, x2, y2)
     g = buda.TopologyGenerator(fp)
     g.set_layer_ids(6, 7)              # M6 H, M7 V
-    if spine:
-        g.set_spine_relays(True)
+    # Set unconditionally so the test overrides any ambient BUDA_SPINE_RELAYS
+    # (the constructor reads it) — the off-state must be genuinely off.
+    g.set_spine_relays(spine)
     return fp, g.generate_candidates(_DRV, _RCV)
 
 

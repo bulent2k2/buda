@@ -2043,11 +2043,14 @@ static void complete_relay_junctions(Topology& topo,
                 }
                 return false;
             };
-            bool safe = !on_other_boundary(M_new);
+            // Guard BOTH the ORIGINAL landing (moving it could strip an adjacent
+            // block's only endpoint/pass-through coverage — mirrors the two-stub
+            // OTC path) AND the new landing.
+            bool safe = !on_other_boundary(Mi->p) && !on_other_boundary(M_new);
             for (const Inc* q : P) {
                 const Point np = spine_h ? Point{q->p.x, spine_perp}
                                          : Point{spine_perp, q->p.y};
-                if (on_other_boundary(np)) { safe = false; break; }
+                if (on_other_boundary(q->p) || on_other_boundary(np)) { safe = false; break; }
             }
             if (!safe) continue;                                // fallback to chaining
             // Commit: move the minority landing to the opposite face (the spine),
