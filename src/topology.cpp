@@ -2035,8 +2035,12 @@ static void complete_relay_junctions(Topology& topo,
             // No perpendicular minority to serve as the spine — so ADD one: a new
             // collector segment perpendicular to the stubs, tapped by every stub.
             // This is the case the general chaining handles worst (a 3-segment Z
-            // per stub pair).  Coverage is the outermost tap extended across the
-            // block (as in the 2-1 P-anchor); the spine ENDS on it (a T-junction).
+            // per stub pair).  The block is tapped by the COLLECTOR's own FACE
+            // endpoint (a perpendicular busterm landing → bounded slide), so every
+            // stub STOPS at the collector line with no perp overshoot past it — the
+            // follow-up-E overstretch fix for the all-same case (an earlier scheme
+            // spiked the outermost stub across the block to the FAR face, so that
+            // one stub visibly overshot the collector).
             if (P.empty() != M.empty()) {                       // exactly one group empty
                 const std::vector<const Inc*>& TAPS = P.empty() ? M : P;
                 const Rect& bb = blocks[bi].orig_bbox;
@@ -2050,40 +2054,39 @@ static void complete_relay_junctions(Topology& topo,
                 int t_min = INT_MAX, t_max = INT_MIN;
                 for (const Inc* q : TAPS) { int a = along(q->p); t_min = std::min(t_min, a); t_max = std::max(t_max, a); }
                 if (t_min == t_max) continue;                   // all collinear → let chaining merge
-                const Inc* anchor = nullptr;                    // extreme tap: the spine ends on it
-                for (const Inc* q : TAPS) if (along(q->p) == t_min) { anchor = q; break; }
-                if (!anchor) continue;
-                const int a_pf = spine_h ? anchor->p.y : anchor->p.x;
-                const int anchor_far = (std::abs(a_pf - p_lo) <= std::abs(a_pf - p_hi)) ? p_hi : p_lo;
-                const Point anchor_new = mk(t_min, anchor_far);
+                // Extend the collector along-axis to the NEARER block face for the
+                // tap; the OTHER end stops at the far outermost stub (never BOTH
+                // faces — a face-to-face span would feed the receiver through).
+                const int a_lo = spine_h ? bb.x1 : bb.y1;       // block's along-extent faces
+                const int a_hi = spine_h ? bb.x2 : bb.y2;
+                const bool tap_lo = (t_min - a_lo) <= (a_hi - t_max);
+                const int  c_lo = tap_lo ? a_lo : t_min;        // collector along-span
+                const int  c_hi = tap_lo ? t_max : a_hi;
+                const Point face_pt = mk(tap_lo ? a_lo : a_hi, spine_perp);  // the busterm tap
                 auto on_other_boundary = [&](const Point& Pn) { return on_any_other_face(Pn, bi); };
-                bool safe = !on_other_boundary(anchor->p) && !on_other_boundary(anchor_new);
-                for (const Inc* q : TAPS) {
-                    if (q == anchor) continue;
+                bool safe = !on_other_boundary(face_pt);
+                for (const Inc* q : TAPS)
                     if (on_other_boundary(q->p) || on_other_boundary(mk(along(q->p), spine_perp)))
                         { safe = false; break; }
-                }
                 if (!safe) continue;                            // fallback to chaining
-                // Commit: extend the anchor across the block (coverage + tap); tap
-                // the rest onto the spine line; add the collector spine as a NEW
-                // segment [t_min .. t_max] (its endpoints land on the two extreme
-                // stubs; interior taps T-junction it).
-                { Segment& sa = topo.segments[anchor->seg_idx];
-                  ((anchor->ep == 0) ? sa.start : sa.end) = anchor_new; }
+                // Commit: every stub taps the collector at its OWN along-coord and
+                // stops there (independent slide, no overshoot); its busterm tag
+                // moves to the collector.
                 for (const Inc* q : TAPS) {
-                    if (q == anchor) continue;
                     Segment& sq = topo.segments[q->seg_idx];
                     ((q->ep == 0) ? sq.start : sq.end) = mk(along(q->p), spine_perp);
-                }
-                const Point s0 = mk(t_min, spine_perp), s1 = mk(t_max, spine_perp);
-                topo.segments.push_back(make_seg(s0.x, s0.y, s1.x, s1.y, spine_h ? h_layer : v_layer));
-                { auto& ep = topo.seg_busterms[anchor->seg_idx];
-                  ((anchor->ep == 0) ? ep.first : ep.second) = blocks[bi]; }
-                for (const Inc* q : TAPS) {
-                    if (q == anchor) continue;
                     auto& ep = topo.seg_busterms[q->seg_idx];
                     ((q->ep == 0) ? ep.first : ep.second) = std::nullopt;
                 }
+                // Add the collector as a NEW segment [c_lo..c_hi] @ spine_perp: one
+                // end is the block's single busterm tap (its FACE landing), the
+                // other shares the far outermost stub's endpoint (a junction);
+                // interior stubs T-junction it.
+                const int c_idx = (int)topo.segments.size();
+                const Point cs = mk(c_lo, spine_perp), ce = mk(c_hi, spine_perp);
+                topo.segments.push_back(make_seg(cs.x, cs.y, ce.x, ce.y, spine_h ? h_layer : v_layer));
+                { auto& ep = topo.seg_busterms[c_idx];
+                  (tap_lo ? ep.first : ep.second) = blocks[bi]; }
                 spine_handled.insert(bi);
                 continue;
             }
