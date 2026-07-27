@@ -138,6 +138,52 @@ def _gen_allsame(spine):
     return fp, g.generate_candidates("L1", ["L2", "L3", "H"])
 
 
+# all-same orientation (all VERTICAL stubs) but the taps STRADDLE faces: two
+# leaves above HUB (land on its top face) and two below (bottom face).  No shared
+# near face, so the collector can't ride a face — it falls back to the INTERIOR
+# collector line + a minimal extension to the nearer along-face for coverage.
+_STRADDLE = {
+    "HUB": (500, 2000, 3500, 2200),
+    "AU1": (800, 1000, 1000, 1200),   # above
+    "AU2": (3000, 1000, 3200, 1200),  # above
+    "AD1": (800, 3000, 1000, 3200),   # below
+    "AD2": (3000, 3000, 3200, 3200),  # below
+}
+
+
+def _gen_straddle(spine):
+    fp = buda.Floorplan()
+    for name, (x1, y1, x2, y2) in _STRADDLE.items():
+        fp.add_block(name, x1, y1, x2, y2)
+    g = buda.TopologyGenerator(fp)
+    g.set_layer_ids(6, 7)
+    g.set_spine_relays(spine)
+    return fp, g.generate_candidates("AU1", ["AU2", "AD1", "AD2", "HUB"])
+
+
+def test_straddled_face_interior_collector_survives():
+    """When the all-vertical taps straddle HUB's top/bottom faces there is no
+    shared near face, so the collector takes the INTERIOR line and extends to one
+    along-face for coverage.  The candidate must SURVIVE generation (not be
+    dropped by filter_uncovered) and be check_topo-clean — HUB coverage is
+    geometric (the collector's endpoint on the extended-to face), so the blanket
+    appended-connector busterm-clear does not strand it (Codex #461 P2)."""
+    fp, cands = _gen_straddle(spine=True)
+    m = _mst_hv(cands)
+    assert m is not None, "the straddled-face all-same MST must not be dropped"
+    for bad in ("BUSTERM_OPEN", "FEEDTHRU_RELAY", "DISCONNECTED", "SEG_OPEN"):
+        assert bad not in _violations(m, fp), _violations(m, fp)
+    assert not _pinched(m, fp)
+    # the interior collector reaches a HUB along-face (its geometric coverage tap)
+    hub = _STRADDLE["HUB"]
+    horiz = [s for s in m.segments if s.start.y == s.end.y]
+    collector = max(horiz, key=lambda s: abs(s.end.x - s.start.x))
+    c_lo, c_hi = sorted((collector.start.x, collector.end.x))
+    assert c_lo == hub[0] or c_hi == hub[2], (
+        f"interior collector should reach a HUB along-face for coverage; "
+        f"[{c_lo},{c_hi}] vs HUB x[{hub[0]},{hub[2]}]")
+
+
 def test_all_same_orientation_hub_gets_a_collector_spine():
     """When every incident stub shares one orientation there is no perpendicular
     stub to serve as the spine, so the completion ADDS a dedicated collector

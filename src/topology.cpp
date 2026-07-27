@@ -2100,16 +2100,21 @@ static void complete_relay_junctions(Topology& topo,
                         = (q == face_stub) ? std::optional<Busterm>{blocks[bi]}
                                            : std::optional<Busterm>{};
                 }
-                // Add the collector as a NEW segment [c_lo..c_hi] @ spine_perp.  On
-                // the interior path one end is the block's busterm FACE landing; on
-                // the common-face path the tap lives on the outermost stub and the
-                // collector is pure internal wire (busterms cleared for appended
-                // connectors below, so no explicit tag is needed there).
-                const int c_idx = (int)topo.segments.size();
+                // Add the collector as a NEW segment [c_lo..c_hi] @ spine_perp.
+                // Block coverage is GEOMETRIC (verify's face/pass-through test on
+                // placed extents), never annotation-driven: on the common-face path
+                // the stubs land on the near face (and the outermost keeps an
+                // explicit busterm above); on the interior path the collector's end
+                // sits ON the extended-to (c_lo==a_lo or c_hi==a_hi) block face, so
+                // that endpoint covers the block by geometry alone.  We deliberately
+                // do NOT tag the collector: as an APPENDED segment its busterms are
+                // cleared unconditionally below (the same rule that keeps OTC
+                // connectors from being re-tagged where they graze a face), so any
+                // tag here would be dead — the geometric face contact is what
+                // matters, and check_topo/NUTS/DNUTS confirm the interior-path hub
+                // stays covered (the straddled-face regression test).
                 const Point cs = mk(c_lo, spine_perp), ce = mk(c_hi, spine_perp);
                 topo.segments.push_back(make_seg(cs.x, cs.y, ce.x, ce.y, spine_h ? h_layer : v_layer));
-                if (!common_face) { auto& ep = topo.seg_busterms[c_idx];
-                                    (tap_lo ? ep.first : ep.second) = blocks[bi]; }
                 spine_handled.insert(bi);
                 continue;
             }
