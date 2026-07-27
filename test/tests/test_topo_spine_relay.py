@@ -250,15 +250,31 @@ def _session_gen(spine_token):
     return _mst_hv(s.bundles[0].input.candidates)
 
 
-def test_buda_token_activates_the_spine():
+def test_buda_token_activates_the_spine(monkeypatch):
     """`generate_topologies spine_relays` reaches the C++ generator: the token
     run's MST is the collector-spine form (fewer segments than the default
-    bracket-chain run), and OMITTING the token is byte-identical to the
-    default — the opt-in is genuinely off without it (no ambient env leak,
-    because _make_topo_gen stamps the flag unconditionally)."""
+    bracket-chain run), and OMITTING the token leaves the compiled default.
+    Cleared BUDA_SPINE_RELAYS so the OFF case is deterministic (the token, not
+    an ambient env, is what flips it here)."""
+    monkeypatch.delenv("BUDA_SPINE_RELAYS", raising=False)
     m_off = _session_gen(spine_token=False)
     m_on = _session_gen(spine_token=True)
     assert m_off is not None and m_on is not None
     assert len(m_on.segments) < len(m_off.segments), (
         f"the spine_relays token should shrink the MST: "
         f"on={len(m_on.segments)} off={len(m_off.segments)}")
+
+
+def test_env_opt_in_survives_a_tokenless_command(monkeypatch):
+    """The documented global opt-in (BUDA_SPINE_RELAYS=1) must still enable the
+    spine for a flow that does NOT pass the token — `_make_topo_gen` stamps the
+    flag only when opting IN, so a tokenless command keeps the generator's
+    env-derived constructor default instead of forcing it off (Codex #463 P2)."""
+    monkeypatch.setenv("BUDA_SPINE_RELAYS", "1")
+    m_env = _session_gen(spine_token=False)   # env on, no token
+    monkeypatch.setenv("BUDA_SPINE_RELAYS", "0")
+    m_off = _session_gen(spine_token=False)   # env off, no token
+    assert m_env is not None and m_off is not None
+    assert len(m_env.segments) < len(m_off.segments), (
+        f"BUDA_SPINE_RELAYS=1 should enable the spine without the token: "
+        f"env-on={len(m_env.segments)} env-off={len(m_off.segments)}")

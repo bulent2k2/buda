@@ -3246,8 +3246,11 @@ class HierMixin:
         knob-memo opt-in) switches MST relay-hub completion from the
         over-the-cell bracket chain to a single collector SPINE the majority
         stubs T-tap independently (src/topology.cpp complete_relay_junctions).
-        Stamped explicitly like use_hanan_loci so it overrides any ambient
-        BUDA_SPINE_RELAYS the C++ constructor read."""
+        Unlike use_hanan_loci there is NO opt-OUT token, so it is stamped ONLY
+        when opting IN: a caller without the token keeps the generator's
+        constructor default, which honors the BUDA_SPINE_RELAYS env hook (the
+        documented global opt-in for A/B-ing a corpus without editing each
+        flow — topology.h).  An explicit token / knob memo wins over the env."""
         tg = buda.TopologyGenerator(fp)
         h = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
         v = self.layers.get_top_layer(buda.LayerDir.VERTICAL)
@@ -3273,9 +3276,12 @@ class HierMixin:
         # Default-on knob: set unconditionally (see docstring) so an opt-out
         # actually reaches the generator.
         tg.set_hanan_loci(bool(use_hanan_loci))
-        # Default-off opt-in: stamp unconditionally so it overrides ambient
-        # BUDA_SPINE_RELAYS in either direction (see docstring).
-        tg.set_spine_relays(bool(use_spine_relays))
+        # Default-off opt-in with NO opt-out token: stamp ONLY when opting in,
+        # so a flow without the token keeps the constructor's env-derived
+        # default and the BUDA_SPINE_RELAYS global opt-in still works (Codex
+        # #463 P2).  An explicit token / knob memo passes True and wins.
+        if use_spine_relays:
+            tg.set_spine_relays(True)
         return tg
 
     def _make_layer_names(self):
