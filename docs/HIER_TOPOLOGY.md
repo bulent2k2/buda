@@ -10,7 +10,9 @@
 > `('depth', d)` (the cross-level path rebuilds per call); §6's priority rule
 > **is implemented** (`priority = -(level*10000 + n_candidates)` in
 > `planner_cmds.py`, width-DESC tie-break in the C++ sort); all three hier
-> generate commands also accept `multi_trunk` (two-level BITRUNK trees) and
+> generate commands also accept `multi_trunk` (two-level BITRUNK trees),
+> `no_hanan_loci` (midpoint-only trunk loci), and `spine_relays` (opt-in MST
+> relay-hub collector spine) and
 > persist their candidates into the open BDB; generation ends in the coverage
 > gate (`filter_uncovered`); and sidecar pins are re-applied on regeneration.
 > Bottom-up template planning (a per-cell `set_bottom_up` mode: plan/NUTS/DNUTS
@@ -112,8 +114,11 @@ same cell-local candidates serve all instances.  No per-instance regeneration.
 ### `generate_hier_topologies`
 
 ```
-generate_hier_topologies [center_mode] [double_detour]
+generate_hier_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
 ```
+
+See the [BUDA Script reference](script_reference/topologies.md) for the full flag
+semantics (`spine_relays` = opt-in MST relay-hub collector spine).
 
 Requires: `open_bdb` and `run_hier_bundler` called first.
 
