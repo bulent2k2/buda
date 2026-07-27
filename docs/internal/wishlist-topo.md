@@ -92,9 +92,9 @@ ships default-off and is measured before any default flip. Tests:
   MST-family pools): pure `MST_HV/VH` connectors **329 → 127 (−61%)**, total
   MST-family segments 10387 → 9425 (**−9.3%**), all 1573 MST candidates stay
   `check_topo`-clean and un-pinched. all-same is the common unhandled case (73 relays
-  vs 2 for the 2-2 split, still on chaining as rare). Corpus A/B (pin-free): 3 flows
-  better / 2 worse; `mix2_fast_topdown` viol_bundles regresses **11 → 12** (near-noise,
-  flagged to revisit) vs A/E's 11 → 10 — hence B stays opt-in with the others.
+  vs 2 for the 2-2 split, still on chaining as rare). Full-corpus A/B in follow-up D
+  below (the B-time snapshot's `mix2_fast_topdown` viol regression **healed to an
+  improvement** once the collector overhang/near-face fixes landed).
 - **C — per-command `.buda` `spine_relays` token — ✅ IMPLEMENTED (this PR).** The
   opt-in now also has a script-level token on `generate_topologies` /
   `generate_hier_topologies` (and the per-bundle / `generate_more_topologies`
@@ -107,10 +107,26 @@ ships default-off and is measured before any default flip. Tests:
   env-derived default, so the `BUDA_SPINE_RELAYS` global opt-in still enables the
   spine for an un-edited corpus. Precedence: **token > `BUDA_SPINE_RELAYS` > compiled
   default (off)**.
-- **D — default-flip measurement — OPEN.** Re-measure a corpus A/B toward flipping
-  the default on (gated like `kSegsRel` / `multi_trunk` if it lands mixed). The B
-  measurement above (3 better / 2 worse, one near-noise viol regression) keeps the
-  default off for now.
+- **D — default-flip measurement — MEASURED (net-positive on correctness; kept
+  opt-in).** Full-corpus pin-free A/B (35 flows, `tools/qor_nopin.py`, spine OFF vs
+  `BUDA_SPINE_RELAYS=1` ON on the SAME build — the env hook makes the whole corpus
+  flip without editing a flow; metric overlaps/unplaced/viol_bundles):
+  **3 better / 2 worse / 30 unchanged.**
+    - `rnr/mix2_fast` 34/241/14 → 31/235/13; `rnr/mix2_fast_on_aligned_sql`
+      34/241/14 → 31/235/13; `rnr/slowdown_rnr` 2/8/1 → **0/0/0** (fully heals).
+    - `hbundles/06_multipin_stress` 1/54/5 → 2/54/5 (+1 overlap, viol flat);
+      `rnr/mix2_fast_topdown` 16/175/11 → 13/191/10 (overlaps −3, viol −1, unplaced +16).
+  On the **electrical-correctness metric (viol_bundles) the flip is net-BETTER with
+  ZERO regressions** — 4 flows improve, none worsen. `mix2_fast_topdown`'s viol now
+  IMPROVES 11 → 10, reversing the +1 the B-only snapshot saw (the collector
+  overhang/near-face fixes healed it). Runtime −11% total (informational, noisy;
+  `slowdown_rnr` −21s, `bigHalf` +7s).
+  **Decision: kept OPT-IN.** The two residual RAW-metric regressions
+  (`06_multipin_stress` +1 overlap; `mix2_fast_topdown` +16 unplaced) keep it below the
+  clean-flip bar, matching `multi_trunk`. The wins cluster on rnr/healer flows, so a
+  **healers-ahead-style gate** (the `kSegsRel` precedent — engage the default only when
+  the flow declares `healersAhead`) is the path to a default-on if wanted; not taken
+  here.
 - **F — TRUNK+MST hybrids — MEASURED, hypothesis REFUTED.** The same
   `complete_relay_junctions` runs on the trunk+MST hybrid path, so the spine already
   fires there under the flag (big.buda GENERATED hybrid-pool connectors 6271 → 5585,
