@@ -229,3 +229,28 @@ def test_dump_grouped_emits_pinnable_token():
             break
     else:
         raise AssertionError("no `group:` row found in --grouped output")
+
+
+def test_incoherent_single_pin_does_not_crash_planner():
+    """topology_pinned=True with an out-of-range selected_topology_index must
+    NOT segfault the planner (issue #454).
+
+    The supported CLI never produces this state (select_topology sets the flag
+    AND a valid index together), but the pybind fields are independently
+    writable, so Python can set the pin flag while the index is still at its
+    default -1 (or leave a stale index after the pool shrank). The planner must
+    treat an incoherent pin as "not usefully pinned" and plan from the full
+    pool rather than index candidates[] out of bounds.
+    """
+    n = len(_session().bundles[0].input.candidates)
+    assert n > 1
+
+    for bad_index, label in [(-1, "default -1"), (n + 5, "stale over-range")]:
+        s = _session()
+        w = s.bundles[0]
+        w.input.topology_pinned = True
+        w.plan.selected_topology_index = bad_index
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command("run_planner")          # must not SIGSEGV
+        # Fell back to the full sweep and chose a valid candidate.
+        assert 0 <= w.plan.selected_topology_index < n, label
