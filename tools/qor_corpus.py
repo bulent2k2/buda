@@ -32,9 +32,13 @@ Usage:
   tools/qor_corpus.py --compare base.json mine.json
 
 `--compare` tags each moved flow BETTER/WORSE on the QoR metric
-(overlaps/unplaced) and exits non-zero if any regressed, then prints an
-informational runtime diff (total corpus wall-clock + the largest per-flow
-movers) — runtime is single-run and noisy, so it is reported but never gates.
+(overlaps/unplaced/viol_bundles) and exits non-zero if any regressed, then
+prints two informational diffs that are reported but never gate: a
+**wirelength** diff (total abstract WL after NUTS + detailed WL after DNUTS,
+base->branch, plus the largest per-flow movers — a topology/planner change
+legitimately MOVES wirelength, so it is shown but not a pass/fail signal) and a
+**runtime** diff (total corpus wall-clock + the largest per-flow movers —
+single-run and noisy).
 
   # just a subset (e.g. while iterating on one flow)
   tools/qor_corpus.py --flows flow/rnr/mix.buda flow/rnr/slowdown_rnr.buda
@@ -106,9 +110,29 @@ CORPUS = [
 ]
 
 
+def _seg_wl(seg):
+    """Routing-direction length of a placed segment (its span extent)."""
+    return abs(seg.span_hi - seg.span_lo)
+
+
+def _wirelengths(s):
+    """(abstract WL after NUTS, detailed WL after DNUTS) for a solved session —
+    each the sum of placed-segment span lengths (the metric `report_wirelength`
+    prints, computed straight off the placed structs).  `None` when that stage
+    did not run, mirroring the None-means-stage-absent convention the other
+    metrics use, so a build that stops before NUTS/DNUTS is distinguishable from
+    a zero-length route."""
+    nr = getattr(s, "nuts_result", None)
+    dr = getattr(s, "detailed_result", None)
+    awl = round(sum(_seg_wl(x) for x in nr.segments)) if nr is not None else None
+    dwl = round(sum(_seg_wl(x) for x in dr.net_segments)) if dr is not None else None
+    return awl, dwl
+
+
 def run_flow(flow):
     """Source one flow end-to-end and capture its final QoR.  Returns a dict
-    with overlaps/unplaced/sec, or an err field if the flow raised."""
+    with overlaps/unplaced/viol_bundles/abstract_wl/detailed_wl/sec, or an err
+    field if the flow raised."""
     import buda_cli
     s = buda_cli.BudaSession()
     s.no_viz = True
@@ -138,8 +162,10 @@ def run_flow(flow):
     ov = getattr(getattr(s, "nuts_result", None), "num_overlaps", None)
     un = getattr(getattr(s, "detailed_result", None), "num_unplaced", None)
     vb = _check_design_bundles(s)
+    awl, dwl = _wirelengths(s)
     return {"flow": flow, "overlaps": ov, "unplaced": un,
-            "viol_bundles": vb, "sec": round(dt, 1)}
+            "viol_bundles": vb, "abstract_wl": awl, "detailed_wl": dwl,
+            "sec": round(dt, 1)}
 
 
 def _check_design_bundles(s):
@@ -236,6 +262,44 @@ def _runtime_report(paired):
               f"{b['sec']:>6.1f}s -> {m['sec']:>6.1f}s  {ds:+.1f}s")
 
 
+def _wirelength_report(paired):
+    """Informational wirelength diff (a topology/planner change legitimately
+    MOVES wirelength, so it is reported but is NOT part of the pass/fail guard,
+    like runtime): total abstract WL (after NUTS) + detailed WL (after DNUTS)
+    base->branch, plus the largest per-flow abstract-WL movers.  Silently skips
+    a pre-WL baseline that never captured these keys, and any flow where either
+    side lacks the value (the stage didn't run on that build)."""
+    def _rows(key):
+        return [(f, b.get(key), m.get(key)) for f, b, m in paired
+                if isinstance(b.get(key), (int, float))
+                and isinstance(m.get(key), (int, float))]
+    aw, dw = _rows("abstract_wl"), _rows("detailed_wl")
+    if not aw and not dw:
+        return
+    print("\nwirelength (informational — topology changes move it; not a guard):")
+    for label, rows in (("abstract WL (after NUTS)", aw),
+                        ("detailed WL (after DNUTS)", dw)):
+        if not rows:
+            continue
+        tb = sum(bv for _, bv, _ in rows)
+        tm = sum(mv for _, _, mv in rows)
+        d = tm - tb
+        pct = (100 * d / tb) if tb else 0.0
+        print(f"  {label:<26} {tb:>15,.0f} -> {tm:>15,.0f}  ({d:+,.0f}, {pct:+.2f}%)"
+              f"  [{len(rows)} flows]")
+    printed_hdr = False
+    for f, bv, mv in sorted(aw, key=lambda x: abs(x[2] - x[1]), reverse=True)[:12]:
+        d = mv - bv
+        pct = (100 * d / bv) if bv else 0.0
+        if abs(pct) < 0.1:                       # sub-0.1% per-flow deltas are noise
+            break
+        if not printed_hdr:
+            print("  abstract-WL movers (|Δ| ≥ 0.1%):")
+            printed_hdr = True
+        print(f"    {f.replace('flow/', ''):<44} "
+              f"{bv:>12,.0f} -> {mv:>12,.0f}  {d:+,.0f} ({pct:+.2f}%)")
+
+
 def _present_metrics(rows):
     """The metrics a result file actually MEASURED — a key present on any of its
     non-err rows.  An older two-column baseline has no 'viol_bundles' key."""
@@ -286,8 +350,9 @@ def cmd_compare(base_path, mine_path):
         print(f"{f.replace('flow/', ''):<48} {bf:>14} {mf:>14}  {tag}")
     print(f"\n{n_better} better, {n_worse} worse, {n_same} unchanged "
           f"(of {len(flows)} flows).  Metric = {'/'.join(keys) or '(none)'}.")
-    _runtime_report([(f, base[f], mine[f]) for f in flows
-                     if f in base and f in mine])
+    paired = [(f, base[f], mine[f]) for f in flows if f in base and f in mine]
+    _wirelength_report(paired)
+    _runtime_report(paired)
     return n_worse
 
 
