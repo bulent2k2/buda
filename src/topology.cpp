@@ -3072,15 +3072,6 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                : blocks[i].rects;
     };
 
-    // MST edge weights: minimum manhattan distance across all rect pairs.
-    auto rect_min_dist = [&](int u, int v) -> int {
-        int d = INT_MAX;
-        for (const Rect& ru : block_rects(u))
-            for (const Rect& rv : block_rects(v))
-                d = std::min(d, manhattan_nearest(ru, rv));
-        return d;
-    };
-
     // Closest point pair across all individual rect pairs of two blocks; also
     // reports the chosen rect pair (br_u/br_v) so an abutment can be realized as a
     // shared-edge segment rather than dropped.
@@ -3096,29 +3087,18 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
         }
     };
 
-    // Build MST on closest-rect distances.
+    // Build MST via the shared multi-rect Kruskal (compute_mst): edge weight =
+    // min manhattan over all rect pairs.  Byte-identical to the previous inline
+    // rect_min_dist Kruskal — same edge enumeration, sort, and union-find — now
+    // that compute_mst carries the multi-rect weighting.
     int n = (int)blocks.size();
-    struct RawEdge { int u, v, dist; };
-    std::vector<RawEdge> all_edges;
-    all_edges.reserve(n * (n - 1) / 2);
+    std::vector<std::pair<std::string, std::vector<Rect>>> mst_nodes;
+    mst_nodes.reserve(n);
     for (int i = 0; i < n; ++i)
-        for (int j = i + 1; j < n; ++j)
-            all_edges.push_back({i, j, rect_min_dist(i, j)});
-    std::sort(all_edges.begin(), all_edges.end(),
-              [](const RawEdge& a, const RawEdge& b){ return a.dist < b.dist; });
-    std::vector<int> par(n); std::iota(par.begin(), par.end(), 0);
-    std::function<int(int)> find = [&](int x) {
-        return par[x] == x ? x : par[x] = find(par[x]);
-    };
+        mst_nodes.push_back({blocks[i].block_name, block_rects(i)});
     std::vector<std::pair<int,int>> mst_edges;
-    mst_edges.reserve(n - 1);
-    for (const auto& e : all_edges) {
-        int pu = find(e.u), pv = find(e.v);
-        if (pu == pv) continue;
-        par[pu] = pv;
+    for (const auto& e : compute_mst(mst_nodes))
         mst_edges.push_back({e.u, e.v});
-        if ((int)mst_edges.size() == n - 1) break;
-    }
 
     int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
     int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);

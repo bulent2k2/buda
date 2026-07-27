@@ -137,6 +137,15 @@ struct MSTEdge {
 std::vector<MSTEdge> compute_mst(
     const std::vector<std::pair<std::string, Rect>>& nodes);
 
+// Multi-rect overload: each node carries all of a (possibly multi-rect) block's
+// physical rects, and an edge weight is the MINIMUM manhattan_nearest over every
+// rect-pair of the two nodes.  Same Kruskal (identical edge enumeration, sort,
+// and union-find) — so a single-rect node set produces exactly the same tree as
+// the Rect overload.  Lets the standalone MST path (which is multi-rect aware)
+// share this one implementation instead of an inline Kruskal.
+std::vector<MSTEdge> compute_mst(
+    const std::vector<std::pair<std::string, std::vector<Rect>>>& nodes);
+
 // ── ConnTopology ──────────────────────────────────────────────────────────────
 //
 // Augments a raw Topology with:

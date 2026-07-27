@@ -81,7 +81,9 @@ void bind_nuts(py::module_& m) {
 
     m.def("manhattan_nearest", &manhattan_nearest);
     m.def("seg_bbox",          &seg_bbox);
-    m.def("compute_mst",       &compute_mst);
+    m.def("compute_mst",
+          static_cast<std::vector<MSTEdge>(*)(
+              const std::vector<std::pair<std::string, Rect>>&)>(&compute_mst));
 
     // ── Abstract NUTS ─────────────────────────────────────────────────────
     // Placed-segment hierarchy (Phase G, docs/internal/placed_segment_preroutes.md).
