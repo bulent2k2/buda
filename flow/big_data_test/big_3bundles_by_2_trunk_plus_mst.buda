@@ -1,0 +1,29 @@
+# from big_3bundles_sel_pure_mst_topo.buda
+source ../tracks/tracks4top.buda
+source tc3a_flat_x10_blocks.buda
+
+add_bus sub_069[64]  blk_21.p blk_25.p,blk_27.p,blk_18.p,io_pad_tl.p # --- bundle 1
+add_bus sub_030[128] blk_22.p blk_29.p,blk_08.p,blk_14.p,blk_18.p    # --- bundle 2
+add_bus bus_069[64]  blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p # --- bundle 3 (was 46)
+add_bus bus_047[128] blk_27.p blk_36.p,blk_11.p,blk_26.p             # --- bundle 4 (was 50)
+add_bus bus_030[128] blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p    # --- bundle 5 (was 57)
+add_bus sub_047[128] blk_36.p blk_27.p,blk_11.p,blk_26.p             # --- bundle 6
+
+run_bundler
+generate_topologies
+dump_topologies --grouped
+
+select_topology  sub_069  group:13
+select_topology  sub_030  group:12
+select_topology  bus_069  group:26
+
+select_topology  bus_047  group:12
+select_topology  bus_030  group:19
+select_topology  sub_047  group:31
+
+run_planner
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design
+visualize
