@@ -7,6 +7,63 @@ See also [`mst_edge_realization.md`](mst_edge_realization.md) — trunk-tail
 tightening and the per-edge MST L/Z DOF (avoiding the 2ᴺ candidate explosion),
 grounded in the current generator code with a measured prototype result.
 
+## Star→spine relay completion (`set_spine_relays`) — SHIPPED opt-in, measured net-positive on viol_bundles
+
+**Context (2026-07-27, pure-MST study on `flow/big_data_test/bigHalf.buda`).** A
+pure-MST candidate's segment count is dominated NOT by per-edge shape but by
+`complete_relay_junctions` connectors at high-degree hubs. Measured over the 54
+bigHalf bundles that carry an MST candidate: every MST edge is an I (69%) or L
+(31%) — never a per-edge Z — so the raw tree is always ≤ 2n−2 (n = busterms); the
+overshoot to ~3n−1 is *entirely* relay connectors, and they explode at a degree-3
+hub (mean connectors 1.1 → 5.5 from max-degree 2 → 3). The worst cases (b63: 6
+raw legs + **10** connectors = 16 segs; b0: 6 + 9 = 15) are "double-stars": two
+degree-3 hubs joined by one edge, each hub's three incident stubs chained by
+over-the-cell brackets.
+
+**The fix.** At a degree-≥3 relay whose incident stubs split as ≥2 PARALLEL
+(majority) + exactly 1 PERPENDICULAR (minority), build a single collector SPINE
+along the minority axis and let the majority stubs T-tap it independently:
+- The minority stub is EXTENDED across the block to the face OPPOSITE its
+  neighbour — that face landing is the block's single busterm-conn and keeps a
+  bounded slide (a horizontal seg on a vertical face keeps its y-slide, and
+  vice-versa; landing on the PARALLEL face would pin it to zero and `filter_pinched`
+  would drop it). No dangling end, no lost tap.
+- Each majority stub is repositioned to tap the spine at its OWN perpendicular
+  coordinate. The parallels are NEVER merged onto one shared track — merging
+  couples their slide to a single DOF (the intersection of their windows), while
+  independent taps each keep the full spine span. This is the slide-DOF-preserving
+  core of the design.
+
+No new segments, no busterm tap lost. Conservative: fires only on the clean
+single-rect 2-1 split whose spine provably covers every tap (`coverable` guard) and
+whose repositioned endpoints don't sit on another block's boundary; anything else
+(2-2, all-same-orientation, multi-rect, uncoverable) falls through to the existing
+bracket chaining. Byte-identical when off.
+
+**Measured (b63/b0 candidate):** 16 → **6** segs, 15 → **6** segs; 0 relay
+connectors, `check_topo`-clean, un-pinched, taps on independent columns.
+
+**Corpus A/B** (pin-free `tools/qor_nopin.py`, flag off vs `BUDA_SPINE_RELAYS=1`;
+overlaps/unplaced/viol_bundles): 30/35 flows unchanged, and **viol_bundles — the
+electrical-correctness metric — improves on 3 flows and regresses on 0**:
+`slowdown_rnr` 2/8/1 → **0/0/0** (fully heals), `mix2_fast`(+aligned_sql)
+34/241/14 → 31/235/13, `mix2_fast_topdown` viol 11 → **10** (overlaps 16→13,
+unplaced 175→191). Two flows are raw-metric WORSE without a viol regression:
+`06_multipin_stress` +1 overlap (viol 5→5) and `mix2_fast_topdown`'s
+overlap/unplaced trade. Runtime: bigHalf's *endpoint* is unchanged (0/0/0) but its
+wall-clock rose 5→30s — the cheaper MSTs get selected and the healers grind more
+to the same result.
+
+**Why opt-in, not default.** The correctness metric is net-better and the shape is
+strictly cleaner, but the raw overlap/unplaced trade is mixed on stress flows and
+bigHalf's healer cost is real, so — like `multi_trunk` / `set_dedup_loci` — it
+ships default-off and is measured before any default flip. Follow-ups: the
+`argmin(free_window − perpendicular_face_extent)` busterm-conn pick (currently the
+minority stub is always the anchor); the 2-2 and all-same-orientation splits (a
+dedicated perpendicular collector segment); and a per-command `.buda`
+`spine_relays` token (today: the Python `set_spine_relays` setter + the
+`BUDA_SPINE_RELAYS` env). Tests: `test/tests/test_topo_spine_relay.py`.
+
 ## Coverage by zero-length abutment (`seg_spans_rect` inclusive bounds) — NOTED
 
 **Found 2026-07-17 while fixing the passthru report scope (big2 b61):** verify's
