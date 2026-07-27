@@ -3006,6 +3006,54 @@ static bool topology_is_connected(const Topology& topo, const Floorplan& fp) {
     return true;
 }
 
+// Shared MST-edge realizer (see header for the contract).  Extracted from the
+// two byte-identical copies that used to live in add_mst_candidates and
+// add_trunk_mst_candidates::realize_edges; the only historical divergence — the
+// straight-leg min-stub gate — is preserved via `gate_straight`.
+bool TopologyGenerator::realize_mst_edge(const Rect& r_u, const Rect& r_v,
+                                         bool prefer_h_first, bool gate_straight,
+                                         int m_h, int m_v,
+                                         std::vector<Segment>& out) const {
+    Point p1, p2;
+    closest_points(r_u, r_v, p1, p2);
+    if (p1.x == p2.x && p1.y == p2.y) {
+        // Abutting (or coincident) rects: realize the shared edge as a real wire
+        // so the block stays connected, instead of dropping it.
+        Segment es;
+        if (shared_edge_segment(r_u, r_v, h_layer_, v_layer_, es))
+            out.push_back(es);
+        return true;
+    }
+    // Corner-diagonal? A straight edge whose shared projection is a single point
+    // is pinned (zero slide); route it around the corner as an L.
+    const int cox_lo = std::max(r_u.x1, r_v.x1), cox_hi = std::min(r_u.x2, r_v.x2);
+    const int coy_lo = std::max(r_u.y1, r_v.y1), coy_hi = std::min(r_u.y2, r_v.y2);
+    if ((p1.x == p2.x && cox_lo == cox_hi) || (p1.y == p2.y && coy_lo == coy_hi)) {
+        corner_diagonal_L(r_u, r_v, prefer_h_first ? 0 : 1, h_layer_, v_layer_, out);
+        return true;
+    }
+    if (p1.x == p2.x) {
+        if (gate_straight && std::abs(p2.y - p1.y) < m_v) return false;
+        out.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
+    } else if (p1.y == p2.y) {
+        if (gate_straight && std::abs(p2.x - p1.x) < m_h) return false;
+        out.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
+    } else {
+        // Diagonal: both L's have the same two leg lengths, so the min-stub gate
+        // is orientation-independent; check once, then keep the strategy
+        // orientation unless it is keepout-blocked and the alternate is clear.
+        if (std::abs(p2.x - p1.x) < m_h || std::abs(p2.y - p1.y) < m_v) return false;
+        if (choose_edge_h_first(p1, p2, /*default_h_first=*/prefer_h_first)) {
+            out.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
+            out.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
+        } else {
+            out.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
+            out.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
+        }
+    }
+    return true;
+}
+
 void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                                            std::vector<Topology>& results) {
     // MST topologies model daisy-chain connections (each block connects to its
@@ -3082,54 +3130,20 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
         for (int ei = 0; ei < (int)mst_edges.size(); ++ei) {
             const auto& [eu, ev] = mst_edges[ei];
             const size_t before = mst.segments.size();   // tag this edge's legs
-            auto tag_edge = [&] {
-                for (size_t k = before; k < mst.segments.size(); ++k)
-                    mst.segments[k].edge_id = ei;
-            };
+            // closest_block_points selects the closest rect PAIR across the two
+            // (possibly multi-rect) blocks; only br_u/br_v are used below (the
+            // shared realizer recomputes p1/p2 from them, identically).
             Point p1, p2;
             Rect  br_u, br_v;
             closest_block_points(eu, ev, p1, p2, br_u, br_v);
-            if (p1.x == p2.x && p1.y == p2.y) {
-                // Abutting (or coincident) rects: realize the shared edge as a
-                // real wire so the block stays connected, instead of dropping it.
-                Segment es;
-                if (shared_edge_segment(br_u, br_v, h_layer_, v_layer_, es))
-                    mst.segments.push_back(es);
-                tag_edge();
-                continue;
+            // Standalone MST does NOT gate straight legs (gate_straight=false);
+            // only its diagonal legs meet the min-stub floor.
+            if (!realize_mst_edge(br_u, br_v, /*prefer_h_first=*/strategy == 0,
+                                  /*gate_straight=*/false, m_h, m_v, mst.segments)) {
+                valid = false; break;
             }
-            // Corner-diagonal? A straight edge whose shared projection is a single
-            // point is pinned (zero slide); route it around the corner as an L.
-            const int cox_lo = std::max(br_u.x1, br_v.x1), cox_hi = std::min(br_u.x2, br_v.x2);
-            const int coy_lo = std::max(br_u.y1, br_v.y1), coy_hi = std::min(br_u.y2, br_v.y2);
-            const bool corner = (p1.x == p2.x && cox_lo == cox_hi)
-                             || (p1.y == p2.y && coy_lo == coy_hi);
-            if (corner) {
-                std::vector<Segment> ls;
-                corner_diagonal_L(br_u, br_v, strategy, h_layer_, v_layer_, ls);
-                for (const auto& s : ls) mst.segments.push_back(s);
-            } else if (p1.x == p2.x) {
-                mst.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
-            } else if (p1.y == p2.y) {
-                mst.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
-            } else {
-                // Both L's have the same two leg lengths, so the min-stub gate is
-                // orientation-independent; check once.
-                if (std::abs(p2.x - p1.x) < m_h || std::abs(p2.y - p1.y) < m_v) {
-                    valid = false; break;
-                }
-                // Smart per-edge default: keep the candidate's strategy orientation
-                // (0 = H-first, 1 = V-first) unless it is keepout-blocked and the
-                // other L is clear.
-                if (choose_edge_h_first(p1, p2, /*default_h_first=*/strategy == 0)) {
-                    mst.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
-                    mst.segments.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
-                } else {
-                    mst.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
-                    mst.segments.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
-                }
-            }
-            tag_edge();
+            for (size_t k = before; k < mst.segments.size(); ++k)
+                mst.segments[k].edge_id = ei;
         }
         if (valid) {
             // Annotate the raw stubs first, then complete: completion rewrites the
@@ -3475,49 +3489,13 @@ void TopologyGenerator::add_trunk_mst_candidates(
                 const size_t before = out.size();   // tag this edge's legs below
                 const Rect& r_u = nodes[mst_edges[e].u].second;
                 const Rect& r_v = nodes[mst_edges[e].v].second;
-                Point p1, p2;
-                closest_points(r_u, r_v, p1, p2);
-                if (p1.x == p2.x && p1.y == p2.y) {
-                    // Abutting rects: realize the shared edge instead of dropping
-                    // it (a dropped edge would disconnect the replaced child).
-                    Segment es;
-                    if (shared_edge_segment(r_u, r_v, h_layer_, v_layer_, es))
-                        out.push_back(es);
-                    for (size_t k = before; k < out.size(); ++k) out[k].edge_id = e;
-                    continue;
-                }
-                // Corner-diagonal shortcut: faces meet at a single point, so a
-                // straight edge would be pinned (zero slide) and filter_pinched
-                // would drop the hybrid.  Route it around the corner as an L
-                // (same fix as the standalone MST path).  <4-block hybrids have no
-                // standalone-MST fallback, so this is the only MST coverage.
-                const int cox_lo = std::max(r_u.x1, r_v.x1), cox_hi = std::min(r_u.x2, r_v.x2);
-                const int coy_lo = std::max(r_u.y1, r_v.y1), coy_hi = std::min(r_u.y2, r_v.y2);
-                if ((p1.x == p2.x && cox_lo == cox_hi) || (p1.y == p2.y && coy_lo == coy_hi)) {
-                    corner_diagonal_L(r_u, r_v, is_h ? 1 : 0, h_layer_, v_layer_, out);
-                    for (size_t k = before; k < out.size(); ++k) out[k].edge_id = e;
-                    continue;
-                }
-                if (p1.x == p2.x) {
-                    if (std::abs(p2.y - p1.y) < m_v) return false;
-                    out.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
-                } else if (p1.y == p2.y) {
-                    if (std::abs(p2.x - p1.x) < m_h) return false;
-                    out.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
-                } else {
-                    // Diagonal L-shape: both legs must meet their minimum length.
-                    if (std::abs(p2.x - p1.x) < m_h || std::abs(p2.y - p1.y) < m_v)
-                        return false;
-                    // Default orientation follows the trunk (H-trunk hybrid -> V-leg
-                    // first, i.e. !h_first); flip only to dodge a keepout-blocked leg.
-                    if (choose_edge_h_first(p1, p2, /*default_h_first=*/!is_h)) {
-                        out.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
-                        out.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
-                    } else {
-                        out.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
-                        out.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
-                    }
-                }
+                // Hybrid orientation follows the trunk (H-trunk -> V-leg first,
+                // i.e. prefer_h_first = !is_h) and GATES straight legs: an aligned
+                // shortcut shorter than the min-stub floor would be pinned/zero-
+                // slide, so it rejects the whole hybrid (gate_straight=true).
+                if (!realize_mst_edge(r_u, r_v, /*prefer_h_first=*/!is_h,
+                                      /*gate_straight=*/true, m_h, m_v, out))
+                    return false;
                 for (size_t k = before; k < out.size(); ++k) out[k].edge_id = e;
             }
             return true;

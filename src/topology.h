@@ -688,6 +688,19 @@ private:
                      int x_trunk, bool out_of_bbox, std::vector<Topology>& results);
     void add_mst_candidates(const std::vector<Busterm>& blocks, std::vector<Topology>& results);
     void add_trunk_mst_candidates(const std::vector<Busterm>& blocks, std::vector<Topology>& results);
+    // Realize ONE MST edge between two already-chosen rects into `out` — the
+    // shared geometry of the standalone MST path and the trunk+MST hybrid
+    // (abutment -> corner-L -> straight -> diagonal-L cascade).  `prefer_h_first`
+    // is the candidate's strategy orientation (H-then-V when true: MST_HV /
+    // !is_h trunk).  `gate_straight` also rejects a too-short STRAIGHT leg — the
+    // hybrid gates straight legs, the standalone path historically does NOT (only
+    // its diagonal legs), so the flag preserves each caller byte-for-byte.
+    // Returns false iff a gated leg is under the min-stub floor (caller drops the
+    // whole candidate).  Rect SELECTION stays in the caller (standalone picks the
+    // closest rect pair across multi-rect blocks; the hybrid pre-picks one rect).
+    bool realize_mst_edge(const Rect& r_u, const Rect& r_v,
+                          bool prefer_h_first, bool gate_straight,
+                          int m_h, int m_v, std::vector<Segment>& out) const;
     void add_multi_trunk_candidates(const std::vector<Point>& pins, const std::vector<Busterm>& blocks, std::vector<Topology>& results);
     // Keepout helpers (used by generate_2pin and generate_npin)
     bool segment_blocked_on_all_layers(const Segment& seg) const;
