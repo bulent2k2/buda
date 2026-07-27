@@ -33,10 +33,11 @@ use plain `qor_corpus.py` when the pins are meaningful (the flow is pinned on
 purpose to hold a topology fixed).
 
 Everything else — the corpus list, the `(overlaps, unplaced, viol_bundles)`
-metric, `check_design`'s bundle-violation count, and the `--compare` diff/guard —
-is REUSED verbatim from `qor_corpus.py`, so a `--compare` here reads and reports
-identically (and the two tools' JSONs are the same shape; just don't cross
-pinned-vs-neutralized files).
+metric, `check_design`'s bundle-violation count, the informational abstract/
+detailed **wirelength** capture (`qc._wirelengths`), and the `--compare`
+diff/guard — is REUSED verbatim from `qor_corpus.py`, so a `--compare` here reads
+and reports identically (and the two tools' JSONs are the same shape; just don't
+cross pinned-vs-neutralized files).
 
 Usage (mirrors qor_corpus.py — capture on each build, then compare):
   git checkout main   && bin/bb && tools/qor_nopin.py --out base.json
@@ -112,8 +113,10 @@ def run_flow_nopin(flow):
     ov = getattr(getattr(s, "nuts_result", None), "num_overlaps", None)
     un = getattr(getattr(s, "detailed_result", None), "num_unplaced", None)
     vb = qc._check_design_bundles(s)
+    awl, dwl = qc._wirelengths(s)                    # same WL capture as qor_corpus
     return {"flow": flow, "overlaps": ov, "unplaced": un,
-            "viol_bundles": vb, "sec": round(dt, 1)}
+            "viol_bundles": vb, "abstract_wl": awl, "detailed_wl": dwl,
+            "sec": round(dt, 1)}
 
 
 def cmd_run(flows, out):
