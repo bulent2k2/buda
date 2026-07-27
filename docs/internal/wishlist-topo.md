@@ -121,6 +121,13 @@ ships default-off and is measured before any default flip. Tests:
   IMPROVES 11 → 10, reversing the +1 the B-only snapshot saw (the collector
   overhang/near-face fixes healed it). Runtime −11% total (informational, noisy;
   `slowdown_rnr` −21s, `bigHalf` +7s).
+  **Wirelength is ~flat (marginally UP):** abstract WL (after NUTS) **+0.29%**
+  corpus-wide, **+0.16%** on the QoR-unchanged flows (the cleanest apples-to-apples);
+  detailed WL (after DNUTS) **+0.21%**. The spine is NOT a WL win — it trades a
+  fraction-of-a-percent more wire for the −61% connector / −9.3% segment (fewer
+  junction vias) and the correctness gains. Largest per-flow bumps: `bigHalf` +0.97%
+  (QoR unchanged), and `slowdown_rnr` +6.1% — which is a GOOD sign, wire for nets it
+  left UNPLACED when off (2/8/1 → 0/0/0).
   **Decision: kept OPT-IN.** The two residual RAW-metric regressions
   (`06_multipin_stress` +1 overlap; `mix2_fast_topdown` +16 unplaced) keep it below the
   clean-flip bar, matching `multi_trunk`. The wins cluster on rnr/healer flows, so a
