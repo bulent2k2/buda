@@ -47,7 +47,8 @@ def test_clone_gen_knobs_overlays_persisted_memo(tmp_path):
     for bid in ("7", "8"):
         br = buda_db.BundleRow(); br.id = bid
         s.bdb.add_bundle(br)          # the memo FKs to a bundle row
-    base = (False, False, False, True)   # the all-default resume fallback
+    # (center, double_detour, multi_trunk, hanan_loci, spine_relays)
+    base = (False, False, False, True, False)   # the all-default resume fallback
 
     # No memo → base is returned unchanged.
     assert s._clone_gen_knobs(base, 9) == base
@@ -55,11 +56,11 @@ def test_clone_gen_knobs_overlays_persisted_memo(tmp_path):
     # An opt-in memo turns its knob on and an opt-out flips loci off — the
     # resume path (base = all-default) would otherwise generate coarser.
     s.bdb.set_bundle_gen_knobs("7", "multi_trunk no_hanan_loci")
-    assert s._clone_gen_knobs(base, 7) == (False, False, True, False)
+    assert s._clone_gen_knobs(base, 7) == (False, False, True, False, False)
 
-    s.bdb.set_bundle_gen_knobs("8", "center_mode hanan_loci")
-    assert s._clone_gen_knobs((False, False, False, False), 8) == \
-        (True, False, False, True)
+    s.bdb.set_bundle_gen_knobs("8", "center_mode hanan_loci spine_relays")
+    assert s._clone_gen_knobs((False, False, False, False, False), 8) == \
+        (True, False, False, True, True)
 
 
 def _mini_session():

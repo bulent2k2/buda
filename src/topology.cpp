@@ -1738,6 +1738,23 @@ static void complete_relay_junctions(Topology& topo,
         return false;
     };
 
+    // Rect-aware "does Pn land on ANY other block's face" — the spine-relay
+    // guards use this before relocating a tap / clearing its busterm, so a
+    // repositioned endpoint that would sit on another endpoint block's face is
+    // left to chaining.  MUST inspect every blocks[bj].rects face (via on_face),
+    // not just the union orig_bbox: a multi-rect/TEG block can be tapped on an
+    // INTERIOR component face that lies inside its union bbox, which a
+    // union-boundary check would miss — wrongly clearing that block's only
+    // contact (Codex #461 P2).  Same predicate the landing scan / far_taps_block use.
+    auto on_any_other_face = [&](const Point& Pn, int self_bi) -> bool {
+        for (int bj = 0; bj < (int)blocks.size(); ++bj) {
+            if (bj == self_bi) continue;
+            if (on_face(Pn, true, blocks[bj]) || on_face(Pn, false, blocks[bj]))
+                return true;
+        }
+        return false;
+    };
+
     // Gather the distinct landing points on each block's face, tagging each with
     // the orientation of the segment whose endpoint lands there plus the
     // (segment, endpoint) it came from so we can later rewrite its busterm
@@ -2013,10 +2030,99 @@ static void complete_relay_junctions(Topology& topo,
             if (!blocks[bi].rects.empty()) continue;            // single-rect blocks only
             std::vector<const Inc*> P, M;                       // parallel / perpendicular groups
             for (const Inc& q : pts) (q.seg_horiz ? M : P).push_back(&q);
-            // Classify so P = majority orientation (the taps), M = the 1 minority.
+
+            // ── all-same-orientation (follow-up B) ───────────────────────────────
+            // No perpendicular minority to serve as the spine — so ADD one: a new
+            // collector segment perpendicular to the stubs, tapped by every stub.
+            // This is the case the general chaining handles worst (a 3-segment Z
+            // per stub pair).  The block is tapped by the COLLECTOR's own FACE
+            // endpoint (a perpendicular busterm landing → bounded slide), so every
+            // stub STOPS at the collector line with no perp overshoot past it — the
+            // follow-up-E overstretch fix for the all-same case (an earlier scheme
+            // spiked the outermost stub across the block to the FAR face, so that
+            // one stub visibly overshot the collector).
+            if (P.empty() != M.empty()) {                       // exactly one group empty
+                const std::vector<const Inc*>& TAPS = P.empty() ? M : P;
+                const Rect& bb = blocks[bi].orig_bbox;
+                const bool spine_h = M.empty();                 // all-vertical taps → H spine
+                const int  p_lo = spine_h ? bb.y1 : bb.x1;
+                const int  p_hi = spine_h ? bb.y2 : bb.x2;
+                auto along = [&](const Point& p) { return spine_h ? p.x : p.y; };
+                auto perp  = [&](const Point& p) { return spine_h ? p.y : p.x; };
+                auto mk    = [&](int a, int p)   { return spine_h ? Point{a, p} : Point{p, a}; };
+                int t_min = INT_MAX, t_max = INT_MIN;
+                for (const Inc* q : TAPS) { int a = along(q->p); t_min = std::min(t_min, a); t_max = std::max(t_max, a); }
+                if (t_min == t_max) continue;                   // all collinear → let chaining merge
+                const int a_lo = spine_h ? bb.x1 : bb.y1;       // block's along-extent faces
+                const int a_hi = spine_h ? bb.x2 : bb.y2;
+                // Do all stubs land on the SAME block face?  Then the collector can
+                // ride THAT face at the taps' own line: the stubs already tap the
+                // face (their MST landing), so no perp reposition and — crucially —
+                // no along-overhang is needed to reach a face for coverage.  The
+                // collector spans exactly [t_min..t_max]; block coverage is the
+                // stubs' own geometric face contacts (a busterm tap kept on the
+                // outermost stub).  Falls back to an interior collector + a minimal
+                // extension to the nearer face only when the taps straddle faces.
+                const int face_perp = perp(TAPS[0]->p);
+                bool common_face = (face_perp == p_lo || face_perp == p_hi);
+                for (const Inc* q : TAPS) if (perp(q->p) != face_perp) { common_face = false; break; }
+                int spine_perp, c_lo, c_hi;
+                const Inc* face_stub = nullptr;                 // stub carrying the busterm tap
+                bool tap_lo = false;                            // (interior path) which face
+                if (common_face) {
+                    spine_perp = face_perp;                     // collector rides the shared face
+                    c_lo = t_min; c_hi = t_max;                 // tight — no overhang
+                    for (const Inc* q : TAPS) if (along(q->p) == t_min) { face_stub = q; break; }
+                } else {
+                    spine_perp = (p_lo + p_hi) / 2;             // interior collector line
+                    if (spine_perp <= p_lo || spine_perp >= p_hi) continue;   // degenerate block
+                    tap_lo = (t_min - a_lo) <= (a_hi - t_max);  // nearer face
+                    c_lo = tap_lo ? a_lo : t_min;
+                    c_hi = tap_lo ? t_max : a_hi;
+                }
+                auto on_other_boundary = [&](const Point& Pn) { return on_any_other_face(Pn, bi); };
+                bool safe = common_face ? true
+                                        : !on_other_boundary(mk(tap_lo ? a_lo : a_hi, spine_perp));
+                for (const Inc* q : TAPS)
+                    if (on_other_boundary(q->p) || on_other_boundary(mk(along(q->p), spine_perp)))
+                        { safe = false; break; }
+                if (!safe) continue;                            // fallback to chaining
+                // Commit: every stub taps the collector at its OWN along-coord and
+                // stops there (independent slide, no overshoot).  Busterm: on the
+                // common-face path the outermost stub keeps the tap (its endpoint is
+                // on the face); on the interior path it moves to the collector's
+                // face landing.  All others demote to SEG junctions.
+                for (const Inc* q : TAPS) {
+                    Segment& sq = topo.segments[q->seg_idx];
+                    ((q->ep == 0) ? sq.start : sq.end) = mk(along(q->p), spine_perp);
+                    auto& ep = topo.seg_busterms[q->seg_idx];
+                    ((q->ep == 0) ? ep.first : ep.second)
+                        = (q == face_stub) ? std::optional<Busterm>{blocks[bi]}
+                                           : std::optional<Busterm>{};
+                }
+                // Add the collector as a NEW segment [c_lo..c_hi] @ spine_perp.
+                // Block coverage is GEOMETRIC (verify's face/pass-through test on
+                // placed extents), never annotation-driven: on the common-face path
+                // the stubs land on the near face (and the outermost keeps an
+                // explicit busterm above); on the interior path the collector's end
+                // sits ON the extended-to (c_lo==a_lo or c_hi==a_hi) block face, so
+                // that endpoint covers the block by geometry alone.  We deliberately
+                // do NOT tag the collector: as an APPENDED segment its busterms are
+                // cleared unconditionally below (the same rule that keeps OTC
+                // connectors from being re-tagged where they graze a face), so any
+                // tag here would be dead — the geometric face contact is what
+                // matters, and check_topo/NUTS/DNUTS confirm the interior-path hub
+                // stays covered (the straddled-face regression test).
+                const Point cs = mk(c_lo, spine_perp), ce = mk(c_hi, spine_perp);
+                topo.segments.push_back(make_seg(cs.x, cs.y, ce.x, ce.y, spine_h ? h_layer : v_layer));
+                spine_handled.insert(bi);
+                continue;
+            }
+
+            // ── 2-1 split ─ P = majority orientation (the taps), M = the 1 minority.
             if (P.size() >= 2 && M.size() == 1) { /* P vertical, M horizontal */ }
             else if (M.size() >= 2 && P.size() == 1) { std::swap(P, M); }
-            else continue;                                      // 2-2 / all-same → fallback
+            else continue;                                      // 2-2 / other → fallback
             const Inc* Mi = M[0];
             const Rect& bb = blocks[bi].orig_bbox;
             const bool spine_h = Mi->seg_horiz;                 // spine along minority axis
@@ -2056,19 +2162,11 @@ static void complete_relay_junctions(Topology& topo,
             const bool use_p = (p_cost < m_cost);
             const Point M_new      = use_p ? mk(bus_along, spine_perp) : mk(m_opp, spine_perp);
             const Point anchor_new = mk(along(anchor->p), anchor_far);   // used only when use_p
-            // A repositioned endpoint that also lies on ANOTHER block's boundary
+            // A repositioned endpoint that also lies on ANOTHER block's face
             // could strand that block's coverage — leave such a relay to chaining
-            // (guard both the ORIGINAL landing and the new one, per the OTC path).
-            auto on_other_boundary = [&](const Point& Pn) {
-                for (int bj = 0; bj < (int)blocks.size(); ++bj) {
-                    if (bj == bi) continue;
-                    const Rect& r = blocks[bj].orig_bbox;
-                    bool onx = (Pn.x == r.x1 || Pn.x == r.x2) && Pn.y >= r.y1 && Pn.y <= r.y2;
-                    bool ony = (Pn.y == r.y1 || Pn.y == r.y2) && Pn.x >= r.x1 && Pn.x <= r.x2;
-                    if (onx || ony) return true;
-                }
-                return false;
-            };
+            // (guard both the ORIGINAL landing and the new one, per the OTC path;
+            // on_any_other_face is rect-aware — see its definition for Codex #461 P2).
+            auto on_other_boundary = [&](const Point& Pn) { return on_any_other_face(Pn, bi); };
             bool safe = !on_other_boundary(Mi->p) && !on_other_boundary(M_new);
             if (use_p) safe = safe && !on_other_boundary(anchor->p) && !on_other_boundary(anchor_new);
             for (const Inc* q : P) {

@@ -60,30 +60,80 @@ bigHalf's healer cost is real, so — like `multi_trunk` / `set_dedup_loci` — 
 ships default-off and is measured before any default flip. Tests:
 `test/tests/test_topo_spine_relay.py`.
 
-**Follow-ups (open):**
+**Follow-ups:**
 
-- **A — busterm-conn anchor pick.** Today the minority stub is *always* the
-  anchor (extended to the opposite face). Pick instead the incident stub minimizing
-  `max(0, free_slide_window − perpendicular_face_extent)` — the one that gives up
-  the least bounded slide when clamped to the block face — so a small-window / long-
-  face stub carries the tap and the wider-window stubs stay free.
-- **B — the 2-2 and all-same-orientation splits.** The branch fires only on the
-  clean ≥2-parallel + exactly-1-perpendicular split; a 2-2 hub (or an all-same
-  hub with no perpendicular to tap onto) still falls back to bracket chaining.
-  Handle them with a dedicated short perpendicular collector segment the stubs tap.
-- **C — per-command `.buda` `spine_relays` token.** Today opt-in is the Python
-  `set_spine_relays` setter or the `BUDA_SPINE_RELAYS` env; a script-level token on
-  `generate_[hier_]topologies` needs threading through `_parse_gen_flags` + its ~6
-  call sites and the v15 per-bundle knob memo (like `multi_trunk`).
-- **D — default-flip measurement.** Re-measure a corpus A/B toward flipping the
-  default on (gated like `kSegsRel` / `multi_trunk` if it lands mixed).
-- **E — spine overstretch.** The busterm-end is always extended to the OPPOSITE
-  face for coverage, so when the outermost tap sits *inside* the block the segment
-  from that tap to the face is dead overhang (measured b64 hub 19: spine `x[200..
-  10710]`, leftmost tap `x=800` → **600-unit** overhang `[200..800]`). Can't just
-  clamp to the outermost tap (the block would then be neither tapped nor passed-
-  through → open); eliminating it requires the hub's face-tap to come from a
-  perpendicular tap instead (COUPLED with A), or a dedicated short tap-stub.
+- **A + E — anchor pick + overstretch removal — ✅ IMPLEMENTED (PR #460).**
+  Merged as a single *min-of-two* choice: for the minority-anchor stub, compute
+  BOTH the old M-anchor cost (`|m_opp − bus_along|`, the opposite-face extend) and
+  the P-anchor cost (`|anchor_far − spine_perp|`, tapping the outermost majority
+  stub's far end) and take the cheaper. That both picks the anchor that gives up the
+  least reach (A) and removes the dead opposite-face overhang when the P-anchor wins
+  (E) — measured never worse than the old WL (b64 hub 19 back to nomWL 23160 from the
+  overstretched 23880), all candidates `check_topo`-clean. The anchor MUST end on the
+  outermost tap so the spine terminates in a T-junction ConnTopology can infer (an
+  interior anchor is X-crossed by the spine → stranded block → dropped candidate).
+- **B — the all-same-orientation split — ✅ IMPLEMENTED (this PR).** A degree-≥3
+  hub whose incident stubs are ALL one orientation has no perpendicular minority to
+  serve as the spine, so it fell back to bracket chaining (worst exactly there — a
+  3-seg Z per stub pair). Now it ADDS a dedicated collector: a new segment
+  perpendicular to the stubs that every stub T-taps at its own coordinate
+  (independent slide) and STOPS there. When every stub lands on the SAME block face
+  (the common comb — all leaves on one side), the collector **rides that near face**
+  at the taps' own line: the stubs tap the face directly (their MST landing), so the
+  collector spans exactly `[t_min..t_max]` with **no along-overhang** and the busterm
+  tap stays on the outermost stub. When the taps straddle faces, it falls back to an
+  interior collector extended along-axis to the NEARER face only (never both — a
+  face-to-face span would feed the receiver through), the busterm on that face
+  landing. This is the follow-up-E overstretch fix applied to the all-same case: an
+  earlier scheme spiked the outermost stub across the block to the FAR face (a
+  perpendicular spike), then a second cut extended the collector sideways to a face
+  (a small along-overhang past the outermost tap); the near-face-ride removes even
+  that. Measured on `big.buda` (generated
+  MST-family pools): pure `MST_HV/VH` connectors **329 → 127 (−61%)**, total
+  MST-family segments 10387 → 9425 (**−9.3%**), all 1573 MST candidates stay
+  `check_topo`-clean and un-pinched. all-same is the common unhandled case (73 relays
+  vs 2 for the 2-2 split, still on chaining as rare). Full-corpus A/B in follow-up D
+  below (the B-time snapshot's `mix2_fast_topdown` viol regression **healed to an
+  improvement** once the collector overhang/near-face fixes landed).
+- **C — per-command `.buda` `spine_relays` token — ✅ IMPLEMENTED (this PR).** The
+  opt-in now also has a script-level token on `generate_topologies` /
+  `generate_hier_topologies` (and the per-bundle / `generate_more_topologies`
+  variants), threaded through `_parse_gen_flags` + the ~6 call sites and recorded in
+  the v15 per-bundle knob memo (index 4 of the knob tuple), so it round-trips a bulk
+  regeneration exactly like `multi_trunk`. The Python `set_spine_relays` setter and
+  `BUDA_SPINE_RELAYS` env remain. Since there is NO opt-OUT token (spine is opt-in
+  only, unlike the default-on `hanan_loci` with its `no_hanan_loci`), `_make_topo_gen`
+  stamps the flag ONLY when opting in — a tokenless flow keeps the constructor's
+  env-derived default, so the `BUDA_SPINE_RELAYS` global opt-in still enables the
+  spine for an un-edited corpus. Precedence: **token > `BUDA_SPINE_RELAYS` > compiled
+  default (off)**.
+- **D — default-flip measurement — MEASURED (net-positive on correctness; kept
+  opt-in).** Full-corpus pin-free A/B (35 flows, `tools/qor_nopin.py`, spine OFF vs
+  `BUDA_SPINE_RELAYS=1` ON on the SAME build — the env hook makes the whole corpus
+  flip without editing a flow; metric overlaps/unplaced/viol_bundles):
+  **3 better / 2 worse / 30 unchanged.**
+    - `rnr/mix2_fast` 34/241/14 → 31/235/13; `rnr/mix2_fast_on_aligned_sql`
+      34/241/14 → 31/235/13; `rnr/slowdown_rnr` 2/8/1 → **0/0/0** (fully heals).
+    - `hbundles/06_multipin_stress` 1/54/5 → 2/54/5 (+1 overlap, viol flat);
+      `rnr/mix2_fast_topdown` 16/175/11 → 13/191/10 (overlaps −3, viol −1, unplaced +16).
+  On the **electrical-correctness metric (viol_bundles) the flip is net-BETTER with
+  ZERO regressions** — 4 flows improve, none worsen. `mix2_fast_topdown`'s viol now
+  IMPROVES 11 → 10, reversing the +1 the B-only snapshot saw (the collector
+  overhang/near-face fixes healed it). Runtime −11% total (informational, noisy;
+  `slowdown_rnr` −21s, `bigHalf` +7s).
+  **Wirelength is ~flat (marginally UP):** abstract WL (after NUTS) **+0.29%**
+  corpus-wide, **+0.16%** on the QoR-unchanged flows (the cleanest apples-to-apples);
+  detailed WL (after DNUTS) **+0.21%**. The spine is NOT a WL win — it trades a
+  fraction-of-a-percent more wire for the −61% connector / −9.3% segment (fewer
+  junction vias) and the correctness gains. Largest per-flow bumps: `bigHalf` +0.97%
+  (QoR unchanged), and `slowdown_rnr` +6.1% — which is a GOOD sign, wire for nets it
+  left UNPLACED when off (2/8/1 → 0/0/0).
+  **Decision: kept OPT-IN.** The two residual RAW-metric regressions
+  (`06_multipin_stress` +1 overlap; `mix2_fast_topdown` +16 unplaced) keep it below the
+  clean-flip bar, matching `multi_trunk`. The wins cluster on rnr/healer flows, so a
+  **healers-ahead-style gate** (the `kSegsRel` precedent — engage the default only when
+  the flow declares `healersAhead`) is the path to a default-on if wanted; not taken
+  here.
 - **F — TRUNK+MST hybrids — MEASURED, hypothesis REFUTED.** The same
   `complete_relay_junctions` runs on the trunk+MST hybrid path, so the spine already
   fires there under the flag (big.buda GENERATED hybrid-pool connectors 6271 → 5585,

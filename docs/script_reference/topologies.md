@@ -11,7 +11,7 @@ Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pip
 ### `generate_topologies_for_bundle`
 
 ```
-generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
+generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
 ```
 
 Generate routing topology candidates for the bundle whose first net name
@@ -32,6 +32,7 @@ automatically from the netlist.
 | `double_detour` | Also generate `UU_VHV` / `UU_HVH` high-detour candidates for very congested situations. |
 | `multi_trunk` | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees (opt-in — see the multicast table below). |
 | `no_hanan_loci` | Opt OUT of the default Hanan-line trunk loci for this run: n-pin trunk loci are sampled only at the channel midpoints (the pre-flip behavior). Since the default flip, loci ON the in-bbox Hanan lines (block/keepout edges) are sampled BY DEFAULT, so a block-edge-aligned trunk can nominal at the geometric WL floor; the default pool is ~1.3-1.6x the midpoint-only pool and the WL-sorted candidate indices `select_topology` pins DIFFER between the two settings, so pins must come from the matching run. The legacy `hanan_loci` flag remains accepted as a keep-on no-op (backward compatibility for pre-flip scripts and v15 knob memos). The degenerate-loci soundness gate is built in (see wishlist-topo piece (a) / hanan_loci_flip_audit.md): face/abutment-coincident loci get their stub↔spine junctions restored, a loci-only candidate whose slide window collapses under the final block contract is dropped with a note, and `DISCONNECTED` island-split candidates are dropped by generation's coverage gate (declared-feedthru candidates exempt). |
+| `spine_relays` | Complete MST relay hubs with a single collector SPINE the majority stubs tap independently, instead of the over-the-cell bracket chain — fixes the segment blow-up at high-degree hubs in pure-`MST_HV/VH` candidates (double-star geometry). Opt-in, default OFF (byte-identical without it); recorded in the v15 per-bundle knob memo so it round-trips a bulk regeneration, exactly like `multi_trunk`. See wishlist-topo "Star→spine relay completion". |
 
 **Candidate shapes generated (2-pin):**
 
@@ -92,7 +93,7 @@ generate_topologies_for_bundle bus_rsp  # multicast
 ### `generate_more_topologies`
 
 ```
-generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
+generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
 ```
 
 **Additive** sibling of `generate_topologies_for_bundle` /
@@ -209,7 +210,7 @@ edit_commit pin               # pin the hand-built route; then run_planner…
 ### `generate_topologies`
 
 ```
-generate_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
+generate_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
 ```
 
 Generate routing topology candidates for **all** bundles produced by `run_bundler`.
@@ -224,6 +225,7 @@ Source and destination block names are derived automatically from the netlist
 | `double_detour` | Also generate `UU_VHV` / `UU_HVH` high-detour candidates for very congested situations. |
 | `multi_trunk` | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees for high-fan-out column/row-aligned buses (opt-in; wins on datapaths, QoR-neutral elsewhere at a small candidate-count cost). |
 | `no_hanan_loci` | Opt OUT of the default Hanan-line trunk loci for this run: n-pin trunk loci are sampled only at the channel midpoints (the pre-flip behavior). Since the default flip, loci ON the in-bbox Hanan lines (block/keepout edges) are sampled BY DEFAULT, so a block-edge-aligned trunk can nominal at the geometric WL floor; the default pool is ~1.3-1.6x the midpoint-only pool and the WL-sorted candidate indices `select_topology` pins DIFFER between the two settings, so pins must come from the matching run. The legacy `hanan_loci` flag remains accepted as a keep-on no-op (backward compatibility for pre-flip scripts and v15 knob memos). The degenerate-loci soundness gate is built in (see wishlist-topo piece (a) / hanan_loci_flip_audit.md): face/abutment-coincident loci get their stub↔spine junctions restored, a loci-only candidate whose slide window collapses under the final block contract is dropped with a note, and `DISCONNECTED` island-split candidates are dropped by generation's coverage gate (declared-feedthru candidates exempt). |
+| `spine_relays` | Complete MST relay hubs with a single collector SPINE the majority stubs tap independently, instead of the over-the-cell bracket chain — fixes the segment blow-up at high-degree hubs in pure-`MST_HV/VH` candidates (double-star geometry). Opt-in, default OFF (byte-identical without it); recorded in the v15 per-bundle knob memo so it round-trips a bulk regeneration, exactly like `multi_trunk`. See wishlist-topo "Star→spine relay completion". |
 
 **Notes:**
 - Replaces N individual `generate_topologies_for_bundle` calls with one line.
@@ -277,7 +279,7 @@ run_planner
 ### `generate_hier_topologies`
 
 ```
-generate_hier_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
+generate_hier_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
 ```
 
 Generate routing topology candidates for all HBundles generated by `run_hier_bundler`. Must be called after `run_hier_bundler` and before `run_planner`.
@@ -294,6 +296,7 @@ The topology generator automatically determines the routing context for each HBu
 | `double_detour` | Also generate `UU_VHV` / `UU_HVH` high-detour candidates for very congested situations. |
 | `multi_trunk` | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees, exactly as in the flat `generate_topologies` (opt-in). Applied per HBundle across all three routing cases (cell-local / cross-level / cross-block). |
 | `no_hanan_loci` | Opt OUT of the default Hanan-line trunk loci, exactly as in the flat `generate_topologies` (see its flag table for the full semantics; `hanan_loci` = keep-on no-op). Applied per HBundle across all three routing cases (cell-local / cross-level / cross-block), and round-tripped by the v15 knob memo across bulk regenerations. |
+| `spine_relays` | Complete MST relay hubs with a single collector SPINE the majority stubs tap independently, instead of the over-the-cell bracket chain — fixes the segment blow-up at high-degree hubs in pure-`MST_HV/VH` candidates (double-star geometry). Opt-in, default OFF (byte-identical without it); recorded in the v15 per-bundle knob memo so it round-trips a bulk regeneration, exactly like `multi_trunk`. See wishlist-topo "Star→spine relay completion". |
 
 **Zero-candidate warning:** If any HBundle ends up with 0 topology candidates, the CLI prints:
 ```
@@ -313,7 +316,7 @@ run_planner hier 5
 ### `generate_topologies_for_hbundle`
 
 ```
-generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
+generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
 ```
 
 Re-run topology generation for a single HBundle identified by its integer ID. Uses the same 3-case dispatch as `generate_hier_topologies` (cell-local / cross-level / cross-block). Useful for debugging when a specific bundle has zero candidates or when experimenting with flags without re-running all bundles.
@@ -325,6 +328,7 @@ Re-run topology generation for a single HBundle identified by its integer ID. Us
 | `double_detour` | keyword | Also generate `UU_VHV` / `UU_HVH` high-detour candidates. |
 | `multi_trunk` | keyword | Also generate two-level `BITRUNK_HVH` / `BITRUNK_VHV` datapath trees (opt-in). |
 | `no_hanan_loci` | keyword | Opt OUT of the default Hanan-line trunk loci (midpoint-only pool; `hanan_loci` = keep-on no-op). An explicit polarity is recorded in the bundle's v15 knob memo, so a later bulk `generate_hier_topologies` keeps this bundle's pool as generated. |
+| `spine_relays` | Complete MST relay hubs with a single collector SPINE the majority stubs tap independently, instead of the over-the-cell bracket chain — fixes the segment blow-up at high-degree hubs in pure-`MST_HV/VH` candidates (double-star geometry). Opt-in, default OFF (byte-identical without it); recorded in the v15 per-bundle knob memo so it round-trips a bulk regeneration, exactly like `multi_trunk`. See wishlist-topo "Star→spine relay completion". |
 
 **Requirements:** open BDB, `run_hier_bundler` already called.
 

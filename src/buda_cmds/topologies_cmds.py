@@ -35,26 +35,30 @@ def _endpoint_label(src, dsts, fanin=False):
 # All keyword flags a generation command accepts (used to split them from the
 # positional hint/bundle_id arguments).
 _GEN_FLAGS = ("center_mode", "double_detour", "multi_trunk",
-              "hanan_loci", "no_hanan_loci")
+              "hanan_loci", "no_hanan_loci", "spine_relays")
 
 
 def _parse_gen_flags(args):
     """Parse a generation command's keyword flags.
 
     Returns (use_center, use_double_detour, use_multi_trunk, use_hanan_loci,
-    loci_explicit).  `hanan_loci` is DEFAULT-ON since the default flip
-    (TopologyGenerator::allow_hanan_loci_, src/topology.h): `no_hanan_loci`
-    is the per-command opt-out (midpoint-only trunk loci), and the legacy
-    `hanan_loci` flag remains accepted as a keep-on no-op so pre-flip
-    scripts and v15 knob memos keep working.  If both are passed,
+    loci_explicit, use_spine_relays).  `hanan_loci` is DEFAULT-ON since the
+    default flip (TopologyGenerator::allow_hanan_loci_, src/topology.h):
+    `no_hanan_loci` is the per-command opt-out (midpoint-only trunk loci), and
+    the legacy `hanan_loci` flag remains accepted as a keep-on no-op so
+    pre-flip scripts and v15 knob memos keep working.  If both are passed,
     `no_hanan_loci` wins.  loci_explicit is True when either loci flag was
     given — the per-bundle commands record the explicit polarity in the
-    knob memo then (see _record_gen_knob_memo)."""
+    knob memo then (see _record_gen_knob_memo).  `spine_relays` (default OFF —
+    byte-identical without it) opts MST relay-hub completion into the
+    collector-spine form (src/topology.cpp complete_relay_junctions); it is an
+    opt-in knob-memo token like multi_trunk."""
     return ("center_mode" in args,
             "double_detour" in args,
             "multi_trunk" in args,
             "no_hanan_loci" not in args,
-            ("hanan_loci" in args) or ("no_hanan_loci" in args))
+            ("hanan_loci" in args) or ("no_hanan_loci" in args),
+            "spine_relays" in args)
 
 
 def _record_gen_knob_memo(session, wrappers, tokens):
@@ -63,7 +67,8 @@ def _record_gen_knob_memo(session, wrappers, tokens):
 
     ENCODING: a space-separated, sorted SET of knob tokens per bundle id —
     the opt-in tokens `center_mode` / `double_detour` / `multi_trunk` /
-    `hanan_loci`, plus the default-flip opt-OUT token `no_hanan_loci`.
+    `hanan_loci` / `spine_relays`, plus the default-flip opt-OUT token
+    `no_hanan_loci`.
     Merging is a union with any previously recorded tokens, EXCEPT that
     `hanan_loci` and `no_hanan_loci` are mutually exclusive in the store:
     recording either polarity discards the other, so the LAST explicit
@@ -181,7 +186,7 @@ def cmd_set_drop_dangling(session, cmd, args, cmd_line):
 
 
 def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
-    # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
+    # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
     # Single dst  → 2-pin L/Z/U candidates
     # Multiple dst → multicast trunk+branch candidates
     # Append "center_mode"    to use block centres instead of busterm faces.
@@ -189,15 +194,18 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
     # Append "multi_trunk"    to add two-level BITRUNK_HVH/VHV datapath trees.
     # Append "no_hanan_loci"  for midpoint-only trunk loci (Hanan-line loci
     #                         are the default; "hanan_loci" = keep-on no-op).
+    # Append "spine_relays"   to complete MST relay hubs with a collector spine
+    #                         instead of the over-the-cell bracket chain.
     (use_center, use_double_detour, use_multi_trunk,
-     use_hanan_loci, loci_explicit) = _parse_gen_flags(args)
+     use_hanan_loci, loci_explicit, use_spine_relays) = _parse_gen_flags(args)
     pos_args = [a for a in args if a not in _GEN_FLAGS]
     if not pos_args:
         print("Error: generate_topologies_for_bundle requires a hint")
         return
     hint = pos_args[0]
     topo_gen = session._make_topo_gen(session.fp, use_center, use_double_detour,
-                                   use_multi_trunk, use_hanan_loci)
+                                   use_multi_trunk, use_hanan_loci,
+                                   use_spine_relays)
     found = False
     remembered = []
     for w in session.bundles:
@@ -230,19 +238,23 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
             found = True
     if not found: print(f"Warning: Could not find bundle matching hint {hint}")
     else:
-        # An explicit loci polarity is recorded in the knob memo so a later
-        # bulk generate_topologies cannot silently flip this bundle's pool
-        # back (the opt-out especially — see _record_gen_knob_memo).
+        # An explicit loci polarity (and a spine_relays opt-in) is recorded in
+        # the knob memo so a later bulk generate_topologies cannot silently
+        # flip this bundle's pool back (the loci opt-out especially — see
+        # _record_gen_knob_memo).
+        memo_tokens = []
         if loci_explicit:
-            _record_gen_knob_memo(
-                session, remembered,
-                ["hanan_loci" if use_hanan_loci else "no_hanan_loci"])
+            memo_tokens.append("hanan_loci" if use_hanan_loci else "no_hanan_loci")
+        if use_spine_relays:
+            memo_tokens.append("spine_relays")
+        if memo_tokens:
+            _record_gen_knob_memo(session, remembered, memo_tokens)
         if session._persist_topologies():
             print("[BDB] re-persisted candidate topologies to the open BDB.")
 
 
 def cmd_generate_more_topologies(session, cmd, args, cmd_line):
-    # Usage: generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
+    # Usage: generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
     # ADDITIVE variant of generate_topologies_for_bundle /
     # generate_topologies_for_hbundle (Phase E2 of topo_conn_unification.md):
     # run the generator with the given knobs and merge the new candidates
@@ -267,8 +279,10 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
     # hanan_loci is default-ON since the default flip; "no_hanan_loci"
     # generates the accretion midpoint-only (a subset — additive, so it
     # removes nothing) AND records the opt-out in the knob memo below.
+    # "spine_relays" accretes spine-completed MST variants (recorded in the
+    # memo, replayed additively like multi_trunk).
     (use_center, use_double_detour, use_multi_trunk,
-     use_hanan_loci, loci_explicit) = _parse_gen_flags(args)
+     use_hanan_loci, loci_explicit, use_spine_relays) = _parse_gen_flags(args)
     pos_args = [a for a in args if a not in _GEN_FLAGS]
     if not pos_args:
         print("Error: generate_more_topologies requires a hint")
@@ -332,11 +346,12 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
             session._generate_hier_topo_one(w, use_center, use_double_detour,
                                             fp_cache, comps_by_name,
                                             use_multi_trunk, additive=True,
-                                            use_hanan_loci=use_hanan_loci)
+                                            use_hanan_loci=use_hanan_loci,
+                                            use_spine_relays=use_spine_relays)
     else:
         topo_gen = session._make_topo_gen(session.fp, use_center,
                                           use_double_detour, use_multi_trunk,
-                                          use_hanan_loci)
+                                          use_hanan_loci, use_spine_relays)
         for w in session.bundles:
             net_name = w.input.original_bundle.get_net_names()[0]
             if not net_name.startswith(hint):
@@ -371,21 +386,24 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
         ("double_detour", use_double_detour),
         ("multi_trunk", use_multi_trunk),
         ("hanan_loci", loci_explicit and use_hanan_loci),
-        ("no_hanan_loci", loci_explicit and not use_hanan_loci)) if on]
+        ("no_hanan_loci", loci_explicit and not use_hanan_loci),
+        ("spine_relays", use_spine_relays)) if on]
     _record_gen_knob_memo(session, targets, tokens)
     if session._persist_topologies():
         print("[BDB] re-persisted candidate topologies to the open BDB.")
 
 
 def cmd_generate_topologies(session, cmd, args, cmd_line):
-    # Usage: generate_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
+    # Usage: generate_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
     # Generates topologies for every bundle produced by run_bundler,
     # deriving src/dst block names from the netlist automatically.
     # Hanan-line trunk loci are DEFAULT-ON (the hanan_loci default flip);
     # "no_hanan_loci" opts this run out (midpoint-only), "hanan_loci" is a
-    # keep-on no-op for backward compatibility.  Bulk flags are
-    # per-invocation (not sticky); a per-bundle no_hanan_loci knob memo is
-    # honored in _apply_gen_knobs.
+    # keep-on no-op for backward compatibility.  "spine_relays" opts MST
+    # relay-hub completion into the collector-spine form (default off —
+    # byte-identical without it).  Bulk flags are per-invocation (not sticky);
+    # a per-bundle no_hanan_loci / spine_relays knob memo is honored in
+    # _apply_gen_knobs.
     if not session.bundles:
         if session._net_endpoints:
             print("Warning: no bundles to generate topologies for — nets are "
@@ -396,11 +414,12 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
                   "with add_net/add_bus, then run `run_bundler` first.")
         return
     (use_center, use_double_detour, use_multi_trunk,
-     use_hanan_loci, _loci_explicit) = _parse_gen_flags(args)
+     use_hanan_loci, _loci_explicit, use_spine_relays) = _parse_gen_flags(args)
     topo_gen = session._make_topo_gen(session.fp, use_center, use_double_detour,
-                                   use_multi_trunk, use_hanan_loci)
+                                   use_multi_trunk, use_hanan_loci,
+                                   use_spine_relays)
     bulk_knobs = (use_center, use_double_detour, use_multi_trunk,
-                  use_hanan_loci)
+                  use_hanan_loci, use_spine_relays)
     for w in session.bundles:
         net_name = w.input.original_bundle.get_net_names()[0]
         ep = session._bundle_endpoints(w)
@@ -446,7 +465,7 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
 
 
 def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
-    # generate_hier_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
+    # generate_hier_topologies [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
     # Generates topology candidates for all HBundles produced by
     # run_hier_bundler.  Three cases per bundle:
     #   (a) cell-level (cell_context set)     → cell-local floorplan
@@ -460,14 +479,16 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
         return
     # Hanan-line trunk loci are DEFAULT-ON (the hanan_loci default flip);
     # "no_hanan_loci" opts this run out, "hanan_loci" is a keep-on no-op.
+    # "spine_relays" opts MST relay-hub completion into the collector-spine
+    # form (default off — byte-identical without it).
     (use_center, use_double_detour, use_multi_trunk,
-     use_hanan_loci, _loci_explicit) = _parse_gen_flags(args)
+     use_hanan_loci, _loci_explicit, use_spine_relays) = _parse_gen_flags(args)
     # Remembered so a rotation-class clone created later (at run_planner
     # hier) generates its candidates with the same knobs, and so the knob
-    # memo replay (_apply_hier_gen_knobs) knows this run's effective loci
-    # setting.
+    # memo replay (_apply_hier_gen_knobs) knows this run's effective loci /
+    # spine setting.
     session._hier_gen_knobs = (use_center, use_double_detour, use_multi_trunk,
-                               use_hanan_loci)
+                               use_hanan_loci, use_spine_relays)
 
     # Cache floorplans keyed by (depth, is_cell_local, instance_or_empty)
     fp_cache = {}
@@ -479,7 +500,8 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
         n = session._generate_hier_topo_one(w, use_center, use_double_detour,
                                           fp_cache, comps_by_name,
                                           use_multi_trunk,
-                                          use_hanan_loci=use_hanan_loci)
+                                          use_hanan_loci=use_hanan_loci,
+                                          use_spine_relays=use_spine_relays)
         # Honor the bundle's persisted generation-knob memo (v15): re-apply
         # prior generate_more_topologies accretions additively so the pool
         # does not silently revert on a bulk regeneration (Phase E2b — the
@@ -502,11 +524,13 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
 
 
 def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
-    # Usage: generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci]
+    # Usage: generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
     # ("no_hanan_loci" opts out of the default-on Hanan-line trunk loci;
-    #  "hanan_loci" = keep-on no-op.  An explicit polarity is recorded in the
-    #  knob memo so a bulk generate_hier_topologies can't silently flip the
-    #  pool back — see _record_gen_knob_memo.)
+    #  "hanan_loci" = keep-on no-op.  "spine_relays" opts MST relay-hub
+    #  completion into the collector-spine form.  An explicit loci polarity /
+    #  spine opt-in is recorded in the knob memo so a bulk
+    #  generate_hier_topologies can't silently flip the pool back — see
+    #  _record_gen_knob_memo.)
     if not args:
         print("Error: generate_topologies_for_hbundle requires a bundle_id"); return
     if session.bdb is None:
@@ -516,7 +540,7 @@ def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
     except ValueError:
         print(f"Error: invalid bundle_id {args[0]!r}"); return
     (use_center, use_double_detour, use_multi_trunk,
-     use_hanan_loci, loci_explicit) = _parse_gen_flags(args[1:])
+     use_hanan_loci, loci_explicit, use_spine_relays) = _parse_gen_flags(args[1:])
     target_w = next((w for w in session.bundles if w.input.original_bundle.id == bid), None)
     if target_w is None:
         orig_w = next((w for w in session._hier_bundles_orig
@@ -531,12 +555,16 @@ def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
     comps_by_name = {c.name: c for c in session.bdb.all_components()}
     n = session._generate_hier_topo_one(target_w, use_center, use_double_detour,
                                       fp_cache, comps_by_name, use_multi_trunk,
-                                      use_hanan_loci=use_hanan_loci)
+                                      use_hanan_loci=use_hanan_loci,
+                                      use_spine_relays=use_spine_relays)
     session._cleanup_candidate_pools([target_w])
+    memo_tokens = []
     if loci_explicit:
-        _record_gen_knob_memo(
-            session, [target_w],
-            ["hanan_loci" if use_hanan_loci else "no_hanan_loci"])
+        memo_tokens.append("hanan_loci" if use_hanan_loci else "no_hanan_loci")
+    if use_spine_relays:
+        memo_tokens.append("spine_relays")
+    if memo_tokens:
+        _record_gen_knob_memo(session, [target_w], memo_tokens)
     print(f"generate_topologies_for_hbundle: bundle {bid} — {n} candidates")
     if session._persist_topologies():
         print("[BDB] re-persisted candidate topologies to the open BDB.")

@@ -259,15 +259,15 @@ class EditMixin:
         return added, len(fresh) - added
 
     def _apply_gen_knobs(self, w, src, dsts, old_pin_uid=None,
-                         bulk_knobs=(False, False, False, True)):
+                         bulk_knobs=(False, False, False, True, False)):
         """Honor the bundle's persisted generation-knob memo (v15): re-run the
         knob-configured generator additively after a bulk regeneration, so a
         pool accreted with generate_more_topologies does not silently revert.
         Re-attempts the uid pin reattach among the appended extras.
 
         bulk_knobs = the bulk command's effective (center_mode, double_detour,
-        multi_trunk, hanan_loci) — the knobs the base pool was just generated
-        with.  A `no_hanan_loci` memo token (the default-flip opt-out) cannot
+        multi_trunk, hanan_loci, spine_relays) — the knobs the base pool was
+        just generated with.  A `no_hanan_loci` memo token (the default-flip opt-out) cannot
         be replayed additively (an additive merge only ADDS candidates), so it
         is honored by REGENERATING the base pool midpoint-only with the bulk's
         other knobs (pin re-attached by uid, USER candidates kept) before the
@@ -292,7 +292,8 @@ class EditMixin:
             kept_user = self._user_candidates(w)
             tg_off = self._make_topo_gen(self.fp, bulk_knobs[0],
                                          bulk_knobs[1], bulk_knobs[2],
-                                         use_hanan_loci=False)
+                                         use_hanan_loci=False,
+                                         use_spine_relays=bulk_knobs[4])
             w.input.candidates = tg_off.generate_candidates(src, dsts)
             self._reset_plan_for_regen(w, pin_uid, kept_user)
             print(f"  Re-applied knob memo '{knobs}' for bundle "
@@ -311,7 +312,7 @@ class EditMixin:
             return
         tg = self._make_topo_gen(self.fp, "center_mode" in ks,
                                  "double_detour" in ks, "multi_trunk" in ks,
-                                 replay_loci)
+                                 replay_loci, "spine_relays" in ks)
         pool = list(w.input.candidates)
         seen = {buda.topo_uid(c) for c in pool}
         added = 0
