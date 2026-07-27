@@ -117,15 +117,20 @@ def _seg_wl(seg):
 
 def _wirelengths(s):
     """(abstract WL after NUTS, detailed WL after DNUTS) for a solved session —
-    each the sum of placed-segment span lengths (the metric `report_wirelength`
-    prints, computed straight off the placed structs).  `None` when that stage
-    did not run, mirroring the None-means-stage-absent convention the other
-    metrics use, so a build that stops before NUTS/DNUTS is distinguishable from
-    a zero-length route."""
+    each the sum of PLACED-segment span lengths (the metric `report_wirelength`
+    prints, computed straight off the placed structs).  A `placed=False`
+    TrackSegment carries no wire and is EXCLUDED, matching the canonical
+    `_wirelength_by_bundle` (nutsflow.py) — otherwise an incomplete route would
+    report an inflated, non-comparable abstract WL.  `None` when that stage did
+    not run, mirroring the None-means-stage-absent convention the other metrics
+    use, so a build that stops before NUTS/DNUTS is distinguishable from a
+    zero-length route."""
     nr = getattr(s, "nuts_result", None)
     dr = getattr(s, "detailed_result", None)
-    awl = round(sum(_seg_wl(x) for x in nr.segments)) if nr is not None else None
-    dwl = round(sum(_seg_wl(x) for x in dr.net_segments)) if dr is not None else None
+    awl = (round(sum(_seg_wl(x) for x in nr.segments if getattr(x, "placed", True)))
+           if nr is not None else None)
+    dwl = (round(sum(_seg_wl(x) for x in dr.net_segments if getattr(x, "placed", True)))
+           if dr is not None else None)
     return awl, dwl
 
 
@@ -266,19 +271,48 @@ def _wirelength_report(paired):
     """Informational wirelength diff (a topology/planner change legitimately
     MOVES wirelength, so it is reported but is NOT part of the pass/fail guard,
     like runtime): total abstract WL (after NUTS) + detailed WL (after DNUTS)
-    base->branch, plus the largest per-flow abstract-WL movers.  Silently skips
-    a pre-WL baseline that never captured these keys, and any flow where either
-    side lacks the value (the stage didn't run on that build)."""
-    def _rows(key):
-        return [(f, b.get(key), m.get(key)) for f, b, m in paired
-                if isinstance(b.get(key), (int, float))
-                and isinstance(m.get(key), (int, float))]
-    aw, dw = _rows("abstract_wl"), _rows("detailed_wl")
-    if not aw and not dw:
+    base->branch, plus the largest per-flow abstract-WL movers.
+
+    Only flows whose ROUTE COMPLETENESS is unchanged — same (overlaps, unplaced)
+    on both builds — are summed into the totals.  A completeness change (e.g. the
+    branch drops MORE bit-wires, so its detailed_wl covers fewer net_segments)
+    would otherwise read as a phantom WL 'improvement' (Codex #464 P2); such
+    flows are excluded from the totals but still listed among the movers, flagged
+    with their (overlaps, unplaced) change so the heal/regress stays visible.
+    Silently skips a pre-WL baseline / any flow where a side lacks the value."""
+    pmap = {f: (b, m) for f, b, m in paired}
+
+    def _num(r, k):
+        v = r.get(k)
+        return v if isinstance(v, (int, float)) else None
+
+    def _same_completeness(b, m):
+        return (_num(b, "overlaps") == _num(m, "overlaps")
+                and _num(b, "unplaced") == _num(m, "unplaced"))
+
+    def _rows(key, comparable_only):
+        out = []
+        for f, (b, m) in pmap.items():
+            bv, mv = _num(b, key), _num(m, key)
+            if bv is None or mv is None:
+                continue
+            if comparable_only and not _same_completeness(b, m):
+                continue
+            out.append((f, bv, mv))
+        return out
+
+    aw_all = _rows("abstract_wl", False)
+    if not aw_all and not _rows("detailed_wl", False):
         return
+    n_excl = sum(1 for _, (b, m) in pmap.items()
+                 if _num(b, "abstract_wl") is not None
+                 and _num(m, "abstract_wl") is not None
+                 and not _same_completeness(b, m))
+
     print("\nwirelength (informational — topology changes move it; not a guard):")
-    for label, rows in (("abstract WL (after NUTS)", aw),
-                        ("detailed WL (after DNUTS)", dw)):
+    for label, key in (("abstract WL (after NUTS)", "abstract_wl"),
+                       ("detailed WL (after DNUTS)", "detailed_wl")):
+        rows = _rows(key, True)
         if not rows:
             continue
         tb = sum(bv for _, bv, _ in rows)
@@ -286,18 +320,26 @@ def _wirelength_report(paired):
         d = tm - tb
         pct = (100 * d / tb) if tb else 0.0
         print(f"  {label:<26} {tb:>15,.0f} -> {tm:>15,.0f}  ({d:+,.0f}, {pct:+.2f}%)"
-              f"  [{len(rows)} flows]")
-    printed_hdr = False
-    for f, bv, mv in sorted(aw, key=lambda x: abs(x[2] - x[1]), reverse=True)[:12]:
-        d = mv - bv
-        pct = (100 * d / bv) if bv else 0.0
-        if abs(pct) < 0.1:                       # sub-0.1% per-flow deltas are noise
-            break
-        if not printed_hdr:
-            print("  abstract-WL movers (|Δ| ≥ 0.1%):")
-            printed_hdr = True
+              f"  [{len(rows)} comparable flows]")
+    if n_excl:
+        print(f"  ({n_excl} flow(s) excluded from the totals — route completeness "
+              f"changed, WL not comparable; flagged below)")
+
+    # Per-flow abstract-WL movers: filter by |Δ%| FIRST, then sort desc, then cap
+    # (a large flow's sub-0.1% move must not truncate a smaller flow's ≥0.1% one).
+    movers = [(f, bv, mv, mv - bv, (100 * (mv - bv) / bv) if bv else 0.0)
+              for f, bv, mv in aw_all]
+    movers = sorted((r for r in movers if abs(r[4]) >= 0.1),
+                    key=lambda x: abs(x[4]), reverse=True)
+    if movers:
+        print("  abstract-WL movers (|Δ| ≥ 0.1%):")
+    for f, bv, mv, d, pct in movers[:12]:
+        b, m = pmap[f]
+        flag = ("" if _same_completeness(b, m) else
+                f"  [!] ov {_num(b,'overlaps')}->{_num(m,'overlaps')} "
+                f"unpl {_num(b,'unplaced')}->{_num(m,'unplaced')}")
         print(f"    {f.replace('flow/', ''):<44} "
-              f"{bv:>12,.0f} -> {mv:>12,.0f}  {d:+,.0f} ({pct:+.2f}%)")
+              f"{bv:>12,.0f} -> {mv:>12,.0f}  {d:+,.0f} ({pct:+.2f}%){flag}")
 
 
 def _present_metrics(rows):
