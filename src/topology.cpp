@@ -2013,10 +2013,77 @@ static void complete_relay_junctions(Topology& topo,
             if (!blocks[bi].rects.empty()) continue;            // single-rect blocks only
             std::vector<const Inc*> P, M;                       // parallel / perpendicular groups
             for (const Inc& q : pts) (q.seg_horiz ? M : P).push_back(&q);
-            // Classify so P = majority orientation (the taps), M = the 1 minority.
+
+            // ── all-same-orientation (follow-up B) ───────────────────────────────
+            // No perpendicular minority to serve as the spine — so ADD one: a new
+            // collector segment perpendicular to the stubs, tapped by every stub.
+            // This is the case the general chaining handles worst (a 3-segment Z
+            // per stub pair).  Coverage is the outermost tap extended across the
+            // block (as in the 2-1 P-anchor); the spine ENDS on it (a T-junction).
+            if (P.empty() != M.empty()) {                       // exactly one group empty
+                const std::vector<const Inc*>& TAPS = P.empty() ? M : P;
+                const Rect& bb = blocks[bi].orig_bbox;
+                const bool spine_h = M.empty();                 // all-vertical taps → H spine
+                const int  p_lo = spine_h ? bb.y1 : bb.x1;
+                const int  p_hi = spine_h ? bb.y2 : bb.x2;
+                const int  spine_perp = (p_lo + p_hi) / 2;      // interior collector line
+                if (spine_perp <= p_lo || spine_perp >= p_hi) continue;  // degenerate block
+                auto along = [&](const Point& p) { return spine_h ? p.x : p.y; };
+                auto mk    = [&](int a, int p)   { return spine_h ? Point{a, p} : Point{p, a}; };
+                int t_min = INT_MAX, t_max = INT_MIN;
+                for (const Inc* q : TAPS) { int a = along(q->p); t_min = std::min(t_min, a); t_max = std::max(t_max, a); }
+                if (t_min == t_max) continue;                   // all collinear → let chaining merge
+                const Inc* anchor = nullptr;                    // extreme tap: the spine ends on it
+                for (const Inc* q : TAPS) if (along(q->p) == t_min) { anchor = q; break; }
+                if (!anchor) continue;
+                const int a_pf = spine_h ? anchor->p.y : anchor->p.x;
+                const int anchor_far = (std::abs(a_pf - p_lo) <= std::abs(a_pf - p_hi)) ? p_hi : p_lo;
+                const Point anchor_new = mk(t_min, anchor_far);
+                auto on_other_boundary = [&](const Point& Pn) {
+                    for (int bj = 0; bj < (int)blocks.size(); ++bj) {
+                        if (bj == bi) continue;
+                        const Rect& r = blocks[bj].orig_bbox;
+                        bool onx = (Pn.x == r.x1 || Pn.x == r.x2) && Pn.y >= r.y1 && Pn.y <= r.y2;
+                        bool ony = (Pn.y == r.y1 || Pn.y == r.y2) && Pn.x >= r.x1 && Pn.x <= r.x2;
+                        if (onx || ony) return true;
+                    }
+                    return false;
+                };
+                bool safe = !on_other_boundary(anchor->p) && !on_other_boundary(anchor_new);
+                for (const Inc* q : TAPS) {
+                    if (q == anchor) continue;
+                    if (on_other_boundary(q->p) || on_other_boundary(mk(along(q->p), spine_perp)))
+                        { safe = false; break; }
+                }
+                if (!safe) continue;                            // fallback to chaining
+                // Commit: extend the anchor across the block (coverage + tap); tap
+                // the rest onto the spine line; add the collector spine as a NEW
+                // segment [t_min .. t_max] (its endpoints land on the two extreme
+                // stubs; interior taps T-junction it).
+                { Segment& sa = topo.segments[anchor->seg_idx];
+                  ((anchor->ep == 0) ? sa.start : sa.end) = anchor_new; }
+                for (const Inc* q : TAPS) {
+                    if (q == anchor) continue;
+                    Segment& sq = topo.segments[q->seg_idx];
+                    ((q->ep == 0) ? sq.start : sq.end) = mk(along(q->p), spine_perp);
+                }
+                const Point s0 = mk(t_min, spine_perp), s1 = mk(t_max, spine_perp);
+                topo.segments.push_back(make_seg(s0.x, s0.y, s1.x, s1.y, spine_h ? h_layer : v_layer));
+                { auto& ep = topo.seg_busterms[anchor->seg_idx];
+                  ((anchor->ep == 0) ? ep.first : ep.second) = blocks[bi]; }
+                for (const Inc* q : TAPS) {
+                    if (q == anchor) continue;
+                    auto& ep = topo.seg_busterms[q->seg_idx];
+                    ((q->ep == 0) ? ep.first : ep.second) = std::nullopt;
+                }
+                spine_handled.insert(bi);
+                continue;
+            }
+
+            // ── 2-1 split ─ P = majority orientation (the taps), M = the 1 minority.
             if (P.size() >= 2 && M.size() == 1) { /* P vertical, M horizontal */ }
             else if (M.size() >= 2 && P.size() == 1) { std::swap(P, M); }
-            else continue;                                      // 2-2 / all-same → fallback
+            else continue;                                      // 2-2 / other → fallback
             const Inc* Mi = M[0];
             const Rect& bb = blocks[bi].orig_bbox;
             const bool spine_h = Mi->seg_horiz;                 // spine along minority axis

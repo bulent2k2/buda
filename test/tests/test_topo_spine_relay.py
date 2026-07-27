@@ -110,3 +110,49 @@ def test_spine_taps_stay_on_independent_columns():
                    if s.start.x == s.end.x and 1000 <= s.start.x <= 1400})
     assert len(cols) >= 2, (
         f"the two vertical taps into hub A must keep independent columns; got {cols}")
+
+
+# ── all-same-orientation hub (follow-up B) ───────────────────────────────────
+# A wide hub with three leaves just ABOVE it, far apart in x, MST-stars at the hub
+# with all three stubs vertical (landing on the hub's top face) -- the case with no
+# perpendicular minority stub, so the spine adds a dedicated collector segment.
+_ALLSAME = {
+    "H":  (500, 1000, 3500, 1200),   # wide hub
+    "L1": (500, 1300,  700, 1500),   # leaf above-left
+    "L2": (1900, 1300, 2100, 1500),  # leaf above-middle
+    "L3": (3300, 1300, 3500, 1500),  # leaf above-right
+}
+
+
+def _gen_allsame(spine):
+    fp = buda.Floorplan()
+    for name, (x1, y1, x2, y2) in _ALLSAME.items():
+        fp.add_block(name, x1, y1, x2, y2)
+    g = buda.TopologyGenerator(fp)
+    g.set_layer_ids(6, 7)
+    g.set_spine_relays(spine)
+    return fp, g.generate_candidates("L1", ["L2", "L3", "H"])
+
+
+def test_all_same_orientation_hub_gets_a_collector_spine():
+    """When every incident stub shares one orientation there is no perpendicular
+    stub to serve as the spine, so the completion ADDS a dedicated collector
+    segment the stubs tap.  Result: fewer segments than the chain, still
+    clean/un-pinched, and the three stubs keep independent columns."""
+    fp_off, off = _gen_allsame(spine=False)
+    fp_on, on = _gen_allsame(spine=True)
+    m_off, m_on = _mst_hv(off), _mst_hv(on)
+    assert m_on is not None and m_off is not None
+    assert len(m_on.segments) < len(m_off.segments), (
+        f"the collector spine should be smaller than the chain: "
+        f"on={len(m_on.segments)} off={len(m_off.segments)}")
+    for bad in ("BUSTERM_OPEN", "FEEDTHRU_RELAY", "DISCONNECTED", "SEG_OPEN"):
+        assert bad not in _violations(m_on, fp_on), _violations(m_on, fp_on)
+    assert not _pinched(m_on, fp_on)
+    # the three vertical stubs keep their own columns (independent slide)
+    cols = sorted({s.start.x for s in m_on.segments
+                   if s.start.x == s.end.x and 500 <= s.start.x <= 3500})
+    assert len(cols) >= 3, f"three independent vertical taps expected; got {cols}"
+    # a horizontal collector segment now spans the tap range
+    assert any(s.start.y == s.end.y and abs(s.end.x - s.start.x) > 1000
+               for s in m_on.segments), "expected a horizontal collector spine"
