@@ -74,9 +74,6 @@ def cmd_check_design(session, cmd, args, cmd_line):
 
 
 def cmd_visualize_topologies(session, cmd, args, cmd_line):
-    if session.no_viz:
-        return
-    from buda_viz import TopologyExplorer, collect_candidate_bundles
     # Usage:
     #   visualize_topologies [hint]         — load ALL bundles; a hint just
     #                                         picks which one it opens on, and
@@ -94,6 +91,33 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
     args  = [a for a in args if a.lower() != "debug"]
     all_mode = bool(args) and args[0] == '-all'
     hints    = args[1:] if all_mode else args[:1]
+
+    # Option validation (state-independent, like the #467 guards — run BEFORE the
+    # no_viz early-out so a typo is caught in batch/CI runs too).  The only
+    # keyword options are `debug` (stripped above) and `-all`; every other token
+    # is a free-form bundle HINT, which never starts with '-'.
+    #   (a) a '-'-prefixed token that isn't a LEADING `-all` is a mistyped flag;
+    #   (b) without `-all`, only the FIRST hint is honored (the CLI used `args[:1]`
+    #       and silently dropped the rest) — turn that footgun into a clear error.
+    bad_flags = [t for t in args if t.startswith('-') and t != '-all']
+    if bad_flags:
+        reject_unknown_options("visualize_topologies", bad_flags, ("-all", "debug"))
+    # `-all` is a mode flag valid only as the FIRST token; anywhere else the CLI
+    # silently dropped it — make that a clear error instead.
+    if '-all' in args and not all_mode:
+        print("Error: visualize_topologies: '-all' must be the first argument "
+              "(before any hint).")
+        raise SystemExit(1)
+    positional = [t for t in args if not t.startswith('-')]
+    if not all_mode and len(positional) > 1:
+        print(f"Error: visualize_topologies: at most one bundle hint without "
+              f"'-all' (got {', '.join(repr(h) for h in positional)}). "
+              f"Use '-all {' '.join(positional)}' to open several.")
+        raise SystemExit(1)
+
+    if session.no_viz:
+        return
+    from buda_viz import TopologyExplorer, collect_candidate_bundles
 
     # Collect every candidate-bearing bundle once — including each hier
     # per-instance bundle (they route independently); shared with the GUI
@@ -174,14 +198,19 @@ def cmd_dump_topologies(session, cmd, args, cmd_line):
 
 
 def cmd_visualize(session, cmd, args, cmd_line):
-    if session.no_viz:
-        return
-    from buda_viz import BudaVisualizer
     # `debug` flag: the TopologyExplorer this window opens ('v' / "View
     # Topologies") starts in the debug cost view (candidates stepped by
     # increasing planner cost, cost + components shown), exactly as
-    # `visualize_topologies … debug`.
+    # `visualize_topologies … debug`.  It is the ONLY option `visualize` takes —
+    # there are no free-form args — so reject anything else (state-independent,
+    # before the no_viz early-out, like the #467 guards).  Lowercased so the
+    # check matches the case-insensitive `debug` detection below (a `DEBUG` token
+    # must not both enable the view and fail validation).
+    reject_unknown_options("visualize", [a.lower() for a in args], ("debug",))
     debug = any(a.lower() == "debug" for a in args)
+    if session.no_viz:
+        return
+    from buda_viz import BudaVisualizer
     rerun_layer_fn = session._rerun_nuts_layer if session.nuts_result is not None else None
     rerun_all_fn   = session._rerun_all        if session.nuts_result is not None else None
     ipc_session = (os.path.splitext(os.path.basename(session.script_path))[0]
