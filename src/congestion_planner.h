@@ -292,6 +292,10 @@ public:
     // Score EVERY candidate of one bundle against the planner's CURRENT
     // committed band state (recharged others-only — the target's own committed
     // charge excluded), returning per-candidate + per-segment cost breakdowns.
+    // Scored under the planner's OWN STRICT layer selection (an overflowing
+    // layer is skipped, the dead-span gate fires) so a feasible candidate's
+    // cost/layer match what the optimizer committed; a STRICT-infeasible
+    // candidate takes a complete BEST_EFFORT breakdown flagged !feasible.
     // Read-only: recharges committed around the call and plan_bundle leaves the
     // cut state untouched, so the planner is unchanged on return.  Empty when
     // the planner isn't set up yet (no grid) — the pre-plan case, where the

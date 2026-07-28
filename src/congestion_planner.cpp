@@ -2123,18 +2123,50 @@ CongestionPlanner::candidate_costs(
     recharge_committed_(bundles, target);
 
     // Score ALL candidates: clear both pin forms so plan_bundle sweeps the full
-    // pool (cand_indices == [0, n)).  BEST_EFFORT disables overflow/window
-    // enforcement, so no candidate breaks out early and every one gets a
-    // complete cost breakdown.  Restore the pin state afterward.
+    // pool (cand_indices == [0, n)).  Restore the pin state afterward.
     const int  old_sel = target->plan.selected_topology_index;
     const bool old_pin = target->input.topology_pinned;
     const auto old_grp = target->input.pinned_group;
     target->input.topology_pinned = false;
     target->input.pinned_group.clear();
-    plan_bundle(*target, PlanMode::BEST_EFFORT, nullptr, &out);
+
+    // Two passes so the debug view shows the SAME layer/cost the planner would
+    // actually charge (issue: BEST_EFFORT alone under-reports congested
+    // candidates).  Under STRICT, plan_bundle SKIPS an overflowing layer and the
+    // dead-span gate fires, so a feasible candidate's chosen layer + cost match
+    // what the optimizer's STRICT sweep committed.  STRICT breaks out of a truly
+    // infeasible candidate (every layer of some segment overflows), leaving a
+    // PARTIAL score — so a second BEST_EFFORT pass (no overflow/window
+    // enforcement, never breaks) supplies a COMPLETE, comparable breakdown for
+    // exactly those, flagged infeasible.  Both passes score against the same
+    // recharged others-only state (plan_bundle restores cuts_ to the entry
+    // snapshot per candidate), and both sweep the full pool, so each records one
+    // entry per candidate.
+    std::vector<CandidateCost> strict, effort;
+    plan_bundle(*target, PlanMode::STRICT,      nullptr, &strict);
+    plan_bundle(*target, PlanMode::BEST_EFFORT, nullptr, &effort);
+
     target->plan.selected_topology_index = old_sel;
     target->input.topology_pinned = old_pin;
     target->input.pinned_group = old_grp;
+
+    // Merge: a STRICT-feasible candidate keeps its real STRICT cost/layer; an
+    // infeasible one takes the complete BEST_EFFORT breakdown, flagged
+    // !feasible (the caller sinks it below the feasible candidates, mirroring
+    // the ladder — the planner only reaches such a candidate under duress).
+    std::map<int, CandidateCost> eff_by_idx;
+    for (auto& e : effort) eff_by_idx[e.cand_index] = std::move(e);
+    out.reserve(strict.size());
+    for (auto& s : strict) {
+        if (s.feasible) { out.push_back(std::move(s)); continue; }
+        auto it = eff_by_idx.find(s.cand_index);
+        if (it != eff_by_idx.end()) {
+            it->second.feasible = false;      // STRICT rejected it (overflow)
+            out.push_back(std::move(it->second));
+        } else {
+            out.push_back(std::move(s));      // no fallback row (shouldn't happen)
+        }
+    }
 
     // Restore the full committed state (re-include the target) so a subsequent
     // planner/NUTS/ripup call sees exactly the books it had before this probe.

@@ -82,14 +82,22 @@ class ExplorerNavMixin:
     def _debug_costs(self):
         """The current bundle's `({cand_index: CandidateCost}, is_real)` from the
         session's HYBRID cost source, or None when the `debug` flag is off / the
-        source failed.  Cached per (bundle, candidate-count) so stepping doesn't
-        re-invoke the C++ scorer every key — the same pattern as
-        `_explorer_groups`.  `is_real` is True for the real planner cost
-        (post-`run_planner`), False for the pre-plan intrinsic wirelength."""
+        source failed.  Cached so stepping doesn't re-invoke the C++ scorer every
+        key — the same pattern as `_explorer_groups`.  `is_real` is True for the
+        real planner cost (post-`run_planner`), False for the pre-plan intrinsic
+        wirelength.
+
+        The cache key includes the bundle's `pinned_seg_layers` so a live layer
+        change (`+`/`-`, which rewrites those and feeds `candidate_costs` a new
+        forced layer) — or a pin/unpin that (re)sets them — invalidates this
+        bundle's entry instead of showing the previous assignment's cost.  A
+        re-run (`r`), which changes the COMMITTED state every bundle is scored
+        against, clears the whole cache in `_rerun_and_refresh`."""
         fn = getattr(self, '_cost_fn', None)
         if fn is None:
             return None
-        key = (self.bidx, len(self.topos))
+        key = (self.bidx, len(self.topos),
+               tuple(self.wrapper.input.pinned_seg_layers))
         cache = getattr(self, '_cost_cache', None)
         if cache is not None and key in cache:
             return cache[key]
@@ -103,9 +111,11 @@ class ExplorerNavMixin:
 
     def _cost_order(self):
         """Candidate indices ordered by INCREASING planner cost (the debug
-        stepping permutation), or None when the debug view is off.  A candidate
-        with no cost row (a lookup miss) sorts last on +inf; ties break by the
-        real candidate index so the order is stable and reproducible."""
+        stepping permutation), or None when the debug view is off.  STRICT-
+        INFEASIBLE candidates (overflow — ones the planner rejects unless forced)
+        sink below every feasible candidate, mirroring the escalation ladder; a
+        candidate with no cost row (a lookup miss) sorts last on +inf.  Ties
+        break by the real candidate index so the order is stable."""
         res = self._debug_costs()
         if not res:
             return None
@@ -114,7 +124,9 @@ class ExplorerNavMixin:
 
         def key(i):
             c = mapping.get(i)
-            return (float('inf') if c is None else c.total, i)
+            if c is None:
+                return (2, float('inf'), i)
+            return (0 if c.feasible else 1, c.total, i)
         return sorted(range(n), key=key)
 
     def _cost_rank(self, idx):
@@ -499,6 +511,12 @@ class ExplorerNavMixin:
         except Exception as e:
             print(f"[Viz] Re-run failed: {e}")
             result = None
+        if result is not None:
+            # The re-plan changed the committed band state every candidate is
+            # scored against, so every cached debug cost is now stale — drop them
+            # all (lazily recomputed on the next _draw).
+            if getattr(self, '_cost_cache', None) is not None:
+                self._cost_cache.clear()
         if self._btn_rerun is not None:
             if result is not None:
                 self._btn_rerun.label.set_text('✓  Done')
