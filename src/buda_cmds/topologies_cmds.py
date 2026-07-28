@@ -441,6 +441,10 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
     # byte-identical without it).  Bulk flags are per-invocation (not sticky);
     # a per-bundle no_hanan_loci / spine_relays knob memo is honored in
     # _apply_gen_knobs.
+    # Validate the option syntax FIRST — a malformed command is rejected
+    # regardless of session state, so it can't slip past the prerequisite
+    # warning below (Codex #466).
+    _reject_unknown_gen_flags(cmd, args)
     if not session.bundles:
         if session._net_endpoints:
             print("Warning: no bundles to generate topologies for — nets are "
@@ -450,7 +454,6 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
             print("Warning: no bundles to generate topologies for — define nets "
                   "with add_net/add_bus, then run `run_bundler` first.")
         return
-    _reject_unknown_gen_flags(cmd, args)
     (use_center, use_double_detour, use_multi_trunk,
      use_hanan_loci, _loci_explicit, use_spine_relays) = _parse_gen_flags(args)
     topo_gen = session._make_topo_gen(session.fp, use_center, use_double_detour,
@@ -509,17 +512,19 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
     #   (a) cell-level (cell_context set)     → cell-local floorplan
     #   (c) cross-level (drv_spec_depth >= 0) → custom floorplan from actual endpoint blocks
     #   (b) same-level cross-block             → BDB depth-D floorplan
+    # Validate the option syntax FIRST — a malformed command is rejected
+    # regardless of session state (open BDB / bundles), so it can't slip past
+    # the prerequisite checks below (Codex #466).
+    # "no_hanan_loci" opts this run out of the default-on Hanan-line trunk loci,
+    # "hanan_loci" is a keep-on no-op; "spine_relays" opts MST relay-hub
+    # completion into the collector-spine form (default off).
+    _reject_unknown_gen_flags(cmd, args)
     if session.bdb is None:
         print("Error: generate_hier_topologies requires an open BDB"); return
     if not session.bundles:
         print("Warning: no HBundles to generate topologies for — run "
               "`run_hier_bundler` first.")
         return
-    # Hanan-line trunk loci are DEFAULT-ON (the hanan_loci default flip);
-    # "no_hanan_loci" opts this run out, "hanan_loci" is a keep-on no-op.
-    # "spine_relays" opts MST relay-hub completion into the collector-spine
-    # form (default off — byte-identical without it).
-    _reject_unknown_gen_flags(cmd, args)
     (use_center, use_double_detour, use_multi_trunk,
      use_hanan_loci, _loci_explicit, use_spine_relays) = _parse_gen_flags(args)
     # Remembered so a rotation-class clone created later (at run_planner

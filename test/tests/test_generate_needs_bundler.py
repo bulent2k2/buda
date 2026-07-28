@@ -116,3 +116,20 @@ def test_generate_accepts_valid_option(capsys):
     out = capsys.readouterr().out
     assert "unknown option" not in out
     assert sess.bundles[0].input.candidates
+
+
+def test_unknown_option_rejected_even_before_bundler(capsys):
+    """Option validation is state-independent: a malformed command is a hard
+    error even when the prerequisite (run_bundler) hasn't run — it must not slip
+    past the missing-bundler warning and continue (Codex #466)."""
+    sess = _session()
+    sess.do_command("add_block A 0 0 100 100")
+    sess.do_command("add_block B 200 0 300 100")
+    sess.do_command("add_net n1 A.o B.i")
+    # NOTE: no run_bundler.
+    with pytest.raises(SystemExit) as ei:
+        sess.do_command("generate_topologies multi_trunc")
+    assert ei.value.code != 0
+    out = capsys.readouterr().out
+    assert "unknown option" in out               # the hard error, not the warning
+    assert "no bundles to generate" not in out   # the prereq warning did NOT win
