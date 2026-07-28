@@ -940,7 +940,8 @@ std::vector<Segment> CongestionPlanner::junction_extended_segments(
 // with commit_plan().
 CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         const BundleWrapper& bw, PlanMode mode,
-        std::set<std::pair<int,int>>* contended) {
+        std::set<std::pair<int,int>>* contended,
+        std::vector<CandidateCost>* costs_out) {
     PlanResult res;
     if (bw.input.candidates.empty()) return res;
 
@@ -1032,6 +1033,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         // for multicast trees whose H-spine and V-stubs can share bands).
         std::vector<int> seg_layers;
         std::vector<int> seg_perp;   // perp-centre overrides for band lookup
+        std::vector<SegCost> seg_costs;   // per-segment breakdown (debug view only)
         double topo_overflow = 0.0;
         double topo_score    = 0.0;
         double topo_peak_fill = 0.0; // worst chosen-band fill (kSegs gate)
@@ -1201,6 +1203,10 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             double best_s   = std::numeric_limits<double>::max();
             double best_ov  = 0.0;
             int    best_pp  = INT_MIN;
+            // Cost components of the chosen layer, captured for the debug view
+            // (costs_out); zero-cost otherwise (no overhead — plain writes).
+            double best_cong = 0.0, best_span = 0.0, best_base = 0.0,
+                   best_bal = 0.0, best_hgt = 0.0, best_pk = 0.0;
 
             // Respect manual layer overrides if present for this segment.
             if (si < (int)bw.input.pinned_seg_layers.size() && bw.input.pinned_seg_layers[si] != -1) {
@@ -1320,7 +1326,9 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                                                         slide_lo, slide_hi,
                                                         (double)seg_n(topo, si));
                     double s    = cong + span + base + bal + hgt + pk;
-                    if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp; }
+                    if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp;
+                                      best_cong = cong; best_span = span; best_base = base;
+                                      best_bal = bal; best_hgt = hgt; best_pk = pk; }
                 }
                 if (best_s == std::numeric_limits<double>::max())
                     topo_infeasible = true;   // STRICT: every layer overflows
@@ -1359,6 +1367,9 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             apply_segment(seg, best_lid, eff + track_pitch_, perp_pos);
             seg_layers.push_back(best_lid);
             seg_perp.push_back(perp_pos);
+            if (costs_out)
+                seg_costs.push_back({si, best_lid, best_cong, best_span, best_base,
+                                     best_bal, best_hgt, best_pk, best_s});
             topo_overflow = std::max(topo_overflow, best_ov);
             topo_score    = std::max(topo_score,    best_s);
         }
@@ -1420,6 +1431,17 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             wl_est += ksegs_eff_ * gate * w_segs;
         }
         topo_score += kWL_ * wl_est;
+
+        if (costs_out) {                       // debug cost view: record this candidate
+            CandidateCost cc;
+            cc.cand_index = ci;
+            cc.total      = topo_score;
+            cc.wl_term    = kWL_ * wl_est;
+            cc.seg_cost   = topo_score - cc.wl_term;   // max-over-segments seg score
+            cc.feasible   = !topo_infeasible;
+            cc.segs       = std::move(seg_costs);
+            costs_out->push_back(std::move(cc));
+        }
 
         if (topo_infeasible) {
             cuts_ = cuts_snapshot;
@@ -2074,6 +2096,49 @@ CongestionPlanner::replan_candidates(
     }
     target->plan.selected_topology_index = old_sel;
     target->input.topology_pinned = old_pin;
+    return out;
+}
+
+std::vector<CongestionPlanner::CandidateCost>
+CongestionPlanner::candidate_costs(
+        std::vector<BundleWrapper>& bundles, int target_bundle_id) {
+    // Read-only debug scorer: return the planner cost of EVERY candidate of one
+    // bundle against the current committed state, with the per-segment and
+    // WL/seg-score breakdown.  Charges nothing (plan_bundle restores cuts_ per
+    // candidate), so the committed plan is unchanged on return.  Needs the state
+    // a prior optimize_topologies established (grid + cuts + span reference); an
+    // empty return tells the caller to fall back to the intrinsic estimate.
+    std::vector<CandidateCost> out;
+    if (x_grid_.empty() || cuts_.empty() || span_ref_eff_ <= 0.0) return out;
+
+    BundleWrapper* target = nullptr;
+    for (auto& bw : bundles)
+        if (bw.input.original_bundle.id == target_bundle_id) { target = &bw; break; }
+    if (!target || target->input.candidates.empty()) return out;
+
+    // Charge every OTHER bundle's committed assignment so each candidate is
+    // scored against the true congestion the planner saw (the hybrid view's
+    // "real cost" source); the target itself is excluded so it doesn't pay for
+    // its own committed metal.
+    recharge_committed_(bundles, target);
+
+    // Score ALL candidates: clear both pin forms so plan_bundle sweeps the full
+    // pool (cand_indices == [0, n)).  BEST_EFFORT disables overflow/window
+    // enforcement, so no candidate breaks out early and every one gets a
+    // complete cost breakdown.  Restore the pin state afterward.
+    const int  old_sel = target->plan.selected_topology_index;
+    const bool old_pin = target->input.topology_pinned;
+    const auto old_grp = target->input.pinned_group;
+    target->input.topology_pinned = false;
+    target->input.pinned_group.clear();
+    plan_bundle(*target, PlanMode::BEST_EFFORT, nullptr, &out);
+    target->plan.selected_topology_index = old_sel;
+    target->input.topology_pinned = old_pin;
+    target->input.pinned_group = old_grp;
+
+    // Restore the full committed state (re-include the target) so a subsequent
+    // planner/NUTS/ripup call sees exactly the books it had before this probe.
+    recharge_committed_(bundles, nullptr);
     return out;
 }
 

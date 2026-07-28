@@ -79,7 +79,7 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
                  rerun_fn=None, refresh_fn=None, layer_stack=None,
                  ui_state: ViewState = None, start_bidx=0, layer_visible=None,
                  on_focus_bundle=None, bundle_order_fn=None, fp_resolver=None,
-                 user_ops_sink=None, groups_fn=None):
+                 user_ops_sink=None, groups_fn=None, cost_fn=None):
         self.fp          = fp
         # Per-bundle frame resolution (hier): fp_resolver is the session's
         # _make_topo_fp_resolver — wrapper -> the Floorplan its candidates were
@@ -98,6 +98,16 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         # (orphan explorer / no session) -> grouping off, every candidate its own.
         self._groups_fn   = groups_fn
         self._group_step  = False   # 'G' toggles: step by family vs by candidate
+        # Optional wrapper -> ({cand_index: CandidateCost}, is_real) HYBRID cost
+        # source, the session's _candidate_costs.  When set (the `debug` flag on
+        # visualize_topologies), the explorer ORDERS candidate stepping (a/d) by
+        # INCREASING planner cost — the real charged cost post-plan, the
+        # intrinsic wirelength pre-plan — while keeping self.idx the REAL
+        # candidate index (pins, group IDs, the `topo i/n` display unchanged),
+        # and shows the cost + its components in the title and per-segment panel.
+        # None (no debug flag) -> byte-identical to the historical WL-ordered view.
+        self._cost_fn     = cost_fn
+        self._cost_cache  = {}      # (bidx, npool) -> (mapping, is_real), lazily filled
         self.layer_stack = layer_stack
         self.ui_state    = ui_state or ViewState()
         # Live reference to the main viz's {layer_id: visible} map so a layer

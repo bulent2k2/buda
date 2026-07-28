@@ -84,6 +84,14 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
     #                                         with the ◀/▶ Bundle buttons.
     #   visualize_topologies -all [hints…]  — load only bundles matching hints
     #                                         (no hints = every bundle)
+    #   visualize_topologies [...] debug    — order candidates by INCREASING
+    #                                         planner cost (real cost post-plan,
+    #                                         intrinsic wirelength pre-plan) and
+    #                                         show the cost + its components; the
+    #                                         candidate/group IDs are unchanged.
+    # `debug` is a flag anywhere in the args, not a hint.
+    debug = any(a.lower() == "debug" for a in args)
+    args  = [a for a in args if a.lower() != "debug"]
     all_mode = bool(args) and args[0] == '-all'
     hints    = args[1:] if all_mode else args[:1]
 
@@ -133,7 +141,8 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
                          start_bidx=start,
                          fp_resolver=session._make_topo_fp_resolver(),
                          groups_fn=session._loci_groups,
-                         user_ops_sink=session._record_user_ops).show()
+                         user_ops_sink=session._record_user_ops,
+                         cost_fn=(session._candidate_costs if debug else None)).show()
 
 
 def cmd_dump_topologies(session, cmd, args, cmd_line):

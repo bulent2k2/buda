@@ -264,6 +264,41 @@ public:
     std::optional<std::vector<BundleAssignment>> replan_candidates(
             std::vector<BundleWrapper>& bundles, int target_bundle_id,
             const std::vector<int>& tidxs);
+
+    // ── Debug cost inspection (the topology explorer's `debug` view) ──────────
+    // Per-segment cost breakdown at the segment's best-scored layer — the exact
+    // terms plan_bundle minimizes (see its scoring loop).
+    struct SegCost {
+        int    seg_idx = 0;
+        int    layer   = -1;
+        double cong    = 0.0;   // kCong overflow
+        double span    = 0.0;   // span-mismatch
+        double non_top = 0.0;   // non-TOP layer penalty
+        double balance = 0.0;   // TOP load-balance bias
+        double height  = 0.0;   // short-seg via-height
+        double peak    = 0.0;   // kPeak routability
+        double total   = 0.0;   // sum of the six above (the segment's score)
+    };
+    // One candidate's planner cost, as plan_bundle scores it: the topology
+    // score is max-over-segments of SegCost.total, plus the wirelength term.
+    struct CandidateCost {
+        int    cand_index = -1;
+        double total      = 0.0;   // the value plan_bundle compares (lower wins)
+        double seg_cost   = 0.0;   // max over segments of SegCost.total
+        double wl_term    = 0.0;   // kWL * (wl_est [+ kWLSpread envelope] [+ kSegs])
+        bool   feasible   = true;  // false if a segment overflowed every layer / window infeasible
+        std::vector<SegCost> segs;
+    };
+    // Score EVERY candidate of one bundle against the planner's CURRENT
+    // committed band state (recharged others-only — the target's own committed
+    // charge excluded), returning per-candidate + per-segment cost breakdowns.
+    // Read-only: recharges committed around the call and plan_bundle leaves the
+    // cut state untouched, so the planner is unchanged on return.  Empty when
+    // the planner isn't set up yet (no grid) — the pre-plan case, where the
+    // caller falls back to the intrinsic wirelength cost.
+    std::vector<CandidateCost> candidate_costs(
+            std::vector<BundleWrapper>& bundles, int target_bundle_id);
+
     // replan_bundle WITH the ladder's victim rip-up stage (wishlist-ripup item
     // 1 v2b): if the target has no overflow-free candidate, rip up the
     // committed bundle holding the most demand on the contended bands and
@@ -413,8 +448,12 @@ private:
     // contended (optional, STRICT only): receives the (cut_index, band) pairs
     // whose overflow disqualified a layer choice — i.e. the bands rip-up must
     // relieve for this bundle to become plannable.
+    // costs_out (optional): when non-null, records a CandidateCost per scored
+    // candidate (with per-segment breakdown) — the read-only source for the
+    // debug cost view.  Null (the default) is byte-identical to before.
     PlanResult plan_bundle(const BundleWrapper& bw, PlanMode mode,
-                           std::set<std::pair<int,int>>* contended = nullptr);
+                           std::set<std::pair<int,int>>* contended = nullptr,
+                           std::vector<CandidateCost>* costs_out = nullptr);
     // sign=+1 applies the plan's demand to the cut state; sign=-1 rips it up.
     void commit_plan(const BundleWrapper& bw, const PlanResult& plan, double sign = 1.0);
     BundleAssignment make_assignment(const BundleWrapper& bw, const PlanResult& plan) const;

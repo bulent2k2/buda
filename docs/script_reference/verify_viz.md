@@ -206,8 +206,8 @@ analysis driven by this command.
 ### `visualize_topologies`
 
 ```
-visualize_topologies <hint>
-visualize_topologies -all [<hint1> <hint2> …]
+visualize_topologies <hint> [debug]
+visualize_topologies -all [<hint1> <hint2> …] [debug]
 ```
 
 Opens the topology explorer for one or more bundles. Allows stepping through
@@ -218,6 +218,7 @@ all generated topology candidates and pinning a selection for the planner.
 | `visualize_topologies <hint>` | Open explorer for the first bundle whose first net name starts with `<hint>`. |
 | `visualize_topologies -all` | Open explorers for every bundle (one window per bundle, opened sequentially). |
 | `visualize_topologies -all <hint1> <hint2> …` | Open explorers for all bundles matching any of the given hints. |
+| `… debug` (flag, anywhere in the args) | Order candidate stepping by **increasing planner cost** and show the cost + its components (see **Debug cost view** below). |
 
 **Explorer controls:**
 
@@ -239,6 +240,28 @@ overriding the congestion-based choice for pinned bundles.
 **Window title:** `<first_net_name> (Bundle N)` — identifies which bundle is
 being explored.
 
+**Debug cost view (`debug` flag):** Candidates ship (and step, by default) in
+**increasing wirelength** order. Passing `debug` re-orders the `a`/`d` stepping
+by **increasing planner cost** instead — a *hybrid* source:
+
+- **After `run_planner`** the explorer shows the **real** cost the planner would
+  charge each candidate against the current committed band state — the true
+  congestion the *other* committed bundles impose — computed read-only by
+  `CongestionPlanner::candidate_costs` (it recharges the committed usage around
+  the probe and leaves the committed plan untouched). The title's second line
+  reads `[debug] cost=<total>  rank R/N  =  seg <seg_cost>  +  wl <wl_term>`,
+  where `seg_cost` is the max-over-segments segment score (congestion + span +
+  layer terms) and `wl_term` is `kWL·(wirelength [+ envelope] [+ kSegs])`. When a
+  segment is selected (`j`/`k`), its info panel gains a `[debug] seg cost … = cong
+  … + span … + …` line — the congestion (and other) cost that segment contributes.
+- **Before planning** there is no committed state, so the cost falls back to the
+  candidate's **intrinsic wirelength** (`cost≈WL <wl>`, congestion unknown); the
+  ordering is then just the wirelength ordering the pool already ships in.
+
+The candidate index and group/family IDs are **unchanged and still displayed**
+(`topo i/n`, `▸fam …`) — only the traversal *order* changes, so pins,
+`select_topology`, and group-pins all keep referring to the same candidates.
+
 **Hierarchical flow deduplication:** After `run_planner hier`, `self.bundles` holds one wrapper per cell instance. Without deduplication, `visualize_topologies -all` would open the same cell-level bundle template once per instance (e.g. two windows for `pa→pb` if there are two proc instances). Instead, cell-level bundles are deduplicated by `(cell_context, reason)`. The first instance is shown with a title annotation: `(N instances — showing first)`. This avoids redundant exploration windows while still accurately representing the template topology.
 
 **Example:**
@@ -246,6 +269,7 @@ being explored.
 visualize_topologies t0_b3          # explore one bundle
 visualize_topologies -all           # explore every bundle
 visualize_topologies -all t0_ t1_   # explore all bundles starting with t0_ or t1_
+visualize_topologies t0_b3 debug    # step candidates in increasing planner cost
 ```
 
 ---

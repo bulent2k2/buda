@@ -42,8 +42,8 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 
 | Key(s) | Action |
 | :--- | :--- |
-| `d`, `n`, `cmd+n` | View the **next** topology candidate for this bundle. |
-| `a`, `p`, `cmd+p` | View the **previous** topology candidate for this bundle. |
+| `d`, `n`, `cmd+n` | View the **next** topology candidate for this bundle. In `debug` mode (`visualize_topologies … debug`) `a`/`d` step in **increasing planner-cost** order rather than wirelength order; the candidate/group IDs and the `topo i/n` display are unchanged (only the traversal order changes), and the title carries the cost + its components with a cost-rank. |
+| `a`, `p`, `cmd+p` | View the **previous** topology candidate for this bundle (increasing-cost order in `debug` mode — see `d`). |
 | `]`, `pagedown` | Switch to the **next bundle** and view its selected topology. When launched from a BUDA viz window, steps in that window's **bundle-panel order** (opens-first), so the two stay in step; standalone, it steps in numeric bundle-id order. |
 | `[`, `pageup` | Switch to the **previous bundle** (same order as `]`). |
 | `k` | Select the **previous segment** of the current topology. |
