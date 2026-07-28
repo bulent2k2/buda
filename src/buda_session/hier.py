@@ -2219,7 +2219,15 @@ class HierMixin:
         ch = int(round(ref_c.y2 - ref_c.y1))
         h_layers = set(self.layers.get_layer_ids_by_dir(
             buda.LayerDir.HORIZONTAL))
-        out = []
+        # Coalesce identical translated windows (review #478 suggestion 1):
+        # congruent instances frequently map contention at the same
+        # relative position to the SAME cell-frame rectangle — the summing
+        # intent — so merging duplicate (layer, windows) keys into one
+        # record with the summed amount is arithmetically identical to
+        # injecting each separately (add_usage is linear) and cuts the
+        # per-record for_each_band walks, the pass's dominant cost on a
+        # many-open stage-b iteration.  Order-preserving for determinism.
+        agg, order = {}, []
         for inst in insts:
             c = comps.get(inst)
             if c is None:
@@ -2232,7 +2240,11 @@ class HierMixin:
                 horiz = lid in h_layers
                 gx1, gx2 = (s_lo, s_hi) if horiz else (p_lo, p_hi)
                 gy1, gy2 = (p_lo, p_hi) if horiz else (s_lo, s_hi)
-                # Clip to the instance bbox.
+                # Clip to the instance bbox — the REFERENCE dims are every
+                # instance's dims: a locked class is congruent by the
+                # expansion guard (direction-preserving orients over the
+                # same outline), which is also what makes the reflection
+                # below use cw/ch soundly for all of them.
                 cx1, cx2 = max(gx1, dx), min(gx2, dx + cw)
                 cy1, cy2 = max(gy1, dy), min(gy2, dy + ch)
                 if cx1 > cx2 or cy1 > cy2:
@@ -2244,11 +2256,13 @@ class HierMixin:
                     lx1, lx2 = cw - lx2, cw - lx1
                 if oi in ("S", "FN"):
                     ly1, ly2 = ch - ly2, ch - ly1
-                if horiz:
-                    out.append((lid, lx1, lx2, ly1, ly2, amt))
-                else:
-                    out.append((lid, ly1, ly2, lx1, lx2, amt))
-        return out
+                key = ((lid, lx1, lx2, ly1, ly2) if horiz
+                       else (lid, ly1, ly2, lx1, lx2))
+                if key not in agg:
+                    agg[key] = 0.0
+                    order.append(key)
+                agg[key] += amt
+        return [key + (agg[key],) for key in order]
 
     def _persist_bottom_up_dogleg_adoptions(self):
         """Replay the BDB persistence `_adopt_bottom_up_doglegs` deferred

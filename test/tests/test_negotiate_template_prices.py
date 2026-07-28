@@ -102,13 +102,16 @@ def test_translate_clips_and_offsets_per_instance():
     recs = s._translate_injections_to_cell(
         "proc_cell", cell_ws, [(6, 0.0, 2000.0, 350.0, 360.0, 2.0)])
     assert recs == [(6, 0.0, 420.0, 50.0, 60.0, 2.0)]
-    # One record per intersecting instance, summed by injection.
+    # Two GLOBAL records that land on the SAME cell-frame window from
+    # different instances (y 100-110 in proc_i1; y 400-410 in proc_i2,
+    # which is local 100-110 after the -300 offset) COALESCE into one
+    # record with the SUMMED amount — the summing intent made explicit
+    # (review #478 suggestion 1; add_usage is linear, so this is
+    # arithmetically identical to injecting each separately).
     recs = s._translate_injections_to_cell(
         "proc_cell", cell_ws, [(6, 0.0, 2000.0, 100.0, 110.0, 2.0),
                                (6, 0.0, 2000.0, 400.0, 410.0, 3.0)])
-    assert (6, 0.0, 420.0, 100.0, 110.0, 2.0) in recs   # proc_i1, as-is
-    assert (6, 0.0, 420.0, 100.0, 110.0, 3.0) in recs   # proc_i2, -300
-    assert len(recs) == 2
+    assert recs == [(6, 0.0, 420.0, 100.0, 110.0, 5.0)]
     # Outside both instances entirely.
     assert s._translate_injections_to_cell(
         "proc_cell", cell_ws, [(6, 0.0, 100.0, 900.0, 910.0, 1.0)]) == []
