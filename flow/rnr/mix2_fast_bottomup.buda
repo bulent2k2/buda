@@ -18,13 +18,17 @@ generate_hier_topologies
 run_planner hier 5 signal_tracks
 dump_topologies
 run_nuts
-#   negotiate_congestion
-#   ripup_reroute
+# Healing stage a: feed the measured NUTS overlaps back as band demand
+# (negotiate), then the rnr hill-climb finishes the residual — the locked
+# bottom-up copies are respected (never re-routed).
+negotiate_congestion
+ripup_reroute
 check_design nuts
 check_template_tracks on_mismatch independent
 run_detailed_nuts
-#   negotiate_congestion
-#   ripup_reroute
+# Healing stage b: negotiate each DNUTS-open segment's window, then hill-climb.
+negotiate_congestion
+ripup_reroute
 check_design
 visualize
 exit
