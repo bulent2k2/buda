@@ -24,6 +24,8 @@ import os
 
 import buda
 
+from ._options import looks_numeric, reject_unknown_options
+
 
 def cmd_set_planner_param(session, cmd, args, cmd_line):
     name_p, value_p = args[0], float(args[1])
@@ -36,6 +38,14 @@ def cmd_set_planner_param(session, cmd, args, cmd_line):
 
 
 def cmd_run_planner(session, cmd, args, cmd_line):
+    # Reject unknown options up front (state-independent).  `post_nuts` has its
+    # own V/H/top/threshold sub-grammar (validated in its branch below); the
+    # flat and hier forms accept only an iteration COUNT (numeric) plus the
+    # keywords `hier` and `signal_tracks`.  Without this, `run_planner foo bar`
+    # silently planned with defaults.
+    if not (args and args[0] == "post_nuts"):
+        opts = [a for a in args if not looks_numeric(a)]
+        reject_unknown_options("run_planner", opts, ("hier", "signal_tracks"))
     if args and args[0] == "post_nuts":
         # Stage 4c: post-NUTS stub layer reassignment.
         # Syntax: post_nuts [V [short [long]]] [H [short [long]]]

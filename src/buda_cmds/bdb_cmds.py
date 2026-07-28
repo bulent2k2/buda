@@ -23,6 +23,8 @@ full registry that buda_cli.do_command dispatches through.
 import buda
 import os
 
+from ._options import reject_unknown_options
+
 
 def cmd_bdb_net_mode(session, cmd, args, cmd_line):
     # bdb_net_mode on|off
@@ -101,6 +103,9 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # open_bdb <path> [writeback]
     if not args:
         print("Error: open_bdb requires a file path"); return
+    # `writeback` is the only option after the path — a typo must not silently
+    # leave write-back disarmed (and drop changes at exit).
+    reject_unknown_options("open_bdb", args[1:], ("writeback",))
     # Persist any fixture armed by a previous open_bdb before switching.
     session._flush_bdb_writeback()
     # `writeback` must be the explicit optional argument immediately after
@@ -164,6 +169,13 @@ def cmd_import_gds(session, cmd, args, cmd_line):
     # are excluded from cell footprints (wires, not macro outlines).
     if not args:
         print("Error: import_gds requires a file path"); return
+    # `labels` is the only keyword after the file — a typo must not silently
+    # fall back to the default label layers.  (The layer CSV after it is a
+    # free-form value, not validated here.)
+    if len(args) >= 2:
+        reject_unknown_options("import_gds", [args[1]], ("labels",))
+        if len(args) < 3:
+            print("Error: import_gds labels requires a layer CSV"); return
     if session.bdb is None:
         print("Error: open_bdb first"); return
     label_layers = list(session._gds_label_layers)
@@ -381,6 +393,9 @@ def cmd_load_pipeline(session, cmd, args, cmd_line):
     # deep as was persisted) from the open BDB, so the pipeline resumes
     # where a previous session stopped. Requires the Floorplan/LayerStack
     # setup to be re-declared first (see docs/BDB_REFERENCE.md).
+    # `expanded` is the only option — a typo must not silently load the
+    # non-expanded view.
+    reject_unknown_options("load_pipeline", args, ("expanded",))
     session._load_pipeline_from_bdb(
         expanded=bool(args) and args[0] == "expanded")
 

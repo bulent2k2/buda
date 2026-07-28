@@ -27,6 +27,8 @@ Cross-level nets keep STRICT/BIDIRECTIONAL grouping (documented follow-on)."""
 import contextlib
 import io
 
+import pytest
+
 import buda
 import buda_cli
 
@@ -341,7 +343,12 @@ def test_hier_fanin_replica_taper_realigned_to_donor_net_order():
 
 def test_hier_bundler_rejects_bad_strategy_and_accepts_new_ones():
     s = _session(_fanin_db())
-    assert "Error" in _run(s, "run_hier_bundler SOMETHING")
+    # An unknown strategy is a hard error that STOPS the flow (sys.exit),
+    # consistent with every other unknown-option guard.
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), pytest.raises(SystemExit):
+        s.do_command("run_hier_bundler SOMETHING")
+    assert "unknown option" in out.getvalue()
     for strat in ("CONVERGENT", "COMBINED"):
         s2 = _session(_fanin_db())
         out = _run(s2, f"run_hier_bundler {strat}")

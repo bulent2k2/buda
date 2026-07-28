@@ -21,6 +21,8 @@ in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
 import os
+
+from ._options import reject_unknown_options
 # NOTE: `buda_viz` is imported LAZILY inside the two visualize handlers below,
 # not at module load.  Importing it pulls in matplotlib/numpy, and this module
 # is eagerly imported by the buda_cmds registry (and thus by buda_cli) — a
@@ -149,6 +151,12 @@ def cmd_dump_topologies(session, cmd, args, cmd_line):
     # representative row each (the lowest-WL member), annotated with the
     # variant count + perp span — the reduced set the user inspects before a
     # `select_topology <b> group:<rep>` group-pin.  Purely a display option.
+    # Reject an unknown `--flag` — the first non-`--` token is the (free-form)
+    # hint, so a typo like `--problem`/`--groupd` is neither a flag nor a hint
+    # and used to be silently dropped (running a full unfiltered dump).
+    reject_unknown_options("dump_topologies",
+                           [a for a in args if a.startswith("--")],
+                           ("--problems", "--conn", "--grouped"))
     problems_only = "--problems" in args
     conn_detail = "--conn" in args
     grouped = "--grouped" in args
