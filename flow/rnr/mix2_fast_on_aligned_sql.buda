@@ -14,9 +14,10 @@ generate_hier_topologies
 run_planner hier 5 signal_tracks
 dump_topologies
 run_nuts
-# Optional healing (respects the locked bottom-up copies — they are never re-routed)
-#   negotiate_congestion
-#   ripup_reroute
+# Healing stage a (respects the locked bottom-up copies — never re-routed):
+# negotiate the measured NUTS overlaps as band demand, then rnr hill-climbs.
+negotiate_congestion
+ripup_reroute
 check_design nuts
 # Post-routing verification (per routed-segment window) — the DNUTS gate.
 # Aligned cells solve DNUTS once per template and copy bits to siblings;
@@ -24,8 +25,9 @@ check_design nuts
 # residual misaligned instances individually instead).
 check_template_tracks
 run_detailed_nuts
-#   negotiate_congestion
-#   ripup_reroute
+# Healing stage b: negotiate each DNUTS-open segment's window, then hill-climb.
+negotiate_congestion
+ripup_reroute
 check_design
 visualize
 exit
