@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Corpus SNAPSHOT table — run every corpus flow through the full pipeline and
-dump the two-table QoR + wirelength snapshot that lives in `flow/qor_table.md`.
+dump the two-table QoR + wirelength snapshot that lives in `qor_table.md`.
 
 The companion to `qor_corpus.py`: that tool A/B-COMPARES two builds and gates on
 regressions; THIS tool produces a single-build point-in-time SNAPSHOT.  Per flow
@@ -30,7 +30,7 @@ Reuses `qor_corpus`'s CORPUS list, `_wirelengths`, and `_check_design_bundles`
 so the snapshot always tracks the same corpus the comparison tool sweeps.
 
   tools/qor_table.py                          # print both tables to stdout
-  tools/qor_table.py --out flow/qor_table.md  # (re)write the checked-in snapshot
+  tools/qor_table.py --out qor_table.md  # (re)write the checked-in snapshot
   tools/qor_table.py --flows flow/rnr/mix.buda flow/big_data_test/b44.buda
 """
 import argparse
@@ -189,7 +189,7 @@ def render(rows, stamp):
     parts = [
         f"# QoR corpus snapshot — {stamp}",
         "",
-        "Regenerate with `tools/qor_table.py --out flow/qor_table.md`.  Columns: "
+        "Regenerate with `tools/qor_table.py --out qor_table.md`.  Columns: "
         "`bund`/`busS`/`netS` = bundle / bus-segment / net-segment counts; "
         "`busWL`/`netWL` = abstract (after NUTS) / detailed (after DNUTS) "
         "wirelength, placed-only; `ovl`/`unpl`/`viol` = overlaps / unplaced bits "
@@ -213,7 +213,7 @@ def render(rows, stamp):
 def main():
     ap = argparse.ArgumentParser(
         description="Run the corpus and dump the two-table QoR + wirelength "
-                    "snapshot (flow/qor_table.md).")
+                    "snapshot (qor_table.md).")
     ap.add_argument("--out", help="write the markdown snapshot to this path "
                                   "(default: print to stdout)")
     ap.add_argument("--flows", nargs="+",
