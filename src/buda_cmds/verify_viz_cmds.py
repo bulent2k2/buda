@@ -102,11 +102,12 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
     bad_flags = [t for t in args if t.startswith('-') and t != '-all']
     if bad_flags:
         reject_unknown_options("visualize_topologies", bad_flags, ("-all", "debug"))
-    # `-all` is a mode flag valid only as the FIRST token; anywhere else the CLI
-    # silently dropped it — make that a clear error instead.
-    if '-all' in args and not all_mode:
+    # `-all` is a mode flag valid only as the FIRST token and only once; ANY
+    # later occurrence (`… -all foo -all`, `foo -all`) was silently dropped into
+    # hints where it matches nothing — make that a clear error instead.
+    if any(t == '-all' for t in args[1:]):
         print("Error: visualize_topologies: '-all' must be the first argument "
-              "(before any hint).")
+              "(before any hint) and may appear only once.")
         raise SystemExit(1)
     positional = [t for t in args if not t.startswith('-')]
     if not all_mode and len(positional) > 1:

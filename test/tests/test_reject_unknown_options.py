@@ -189,6 +189,10 @@ def test_visualize_topologies_rejects_mistyped_flag():
 def test_visualize_topologies_rejects_misplaced_all():
     _expect_reject("visualize_topologies foo -all",
                    needle="'-all' must be the first argument")
+    # A REPEATED `-all` past the first token is also a silent no-op (Codex #476):
+    # the leading one sets -all mode, so the later one must still be rejected.
+    _expect_reject("visualize_topologies -all foo -all",
+                   needle="'-all' must be the first argument")
 
 
 def test_visualize_commands_accept_valid_usage():
