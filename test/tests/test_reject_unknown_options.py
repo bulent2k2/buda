@@ -168,6 +168,47 @@ def test_detour_channel_rejects_unpaired_trailing_token():
     _expect_reject("detour_channel N 50 Q", needle="unpaired trailing token")
 
 
+# ── the visualize commands (validated even under no_viz — state-independent) ──
+def test_visualize_rejects_unknown():
+    # `visualize` takes ONLY `debug`; `foo`/`bar` are not hints (it has none).
+    _expect_reject("visualize foo bar")
+    _expect_reject("visualize foo")
+
+
+def test_visualize_topologies_rejects_extra_hints_without_all():
+    # Without `-all`, only the first hint is honored; a second was dropped.
+    _expect_reject("visualize_topologies foo bar",
+                   needle="at most one bundle hint")
+
+
+def test_visualize_topologies_rejects_mistyped_flag():
+    _expect_reject("visualize_topologies -al foo")           # typo of -all
+    _expect_reject("visualize_topologies --debug")           # dashed debug
+
+
+def test_visualize_topologies_rejects_misplaced_all():
+    _expect_reject("visualize_topologies foo -all",
+                   needle="'-all' must be the first argument")
+    # A REPEATED `-all` past the first token is also a silent no-op (Codex #476):
+    # the leading one sets -all mode, so the later one must still be rejected.
+    _expect_reject("visualize_topologies -all foo -all",
+                   needle="'-all' must be the first argument")
+
+
+def test_visualize_commands_accept_valid_usage():
+    """The debug/-all/hint forms must NOT be rejected (no_viz -> no window)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ("visualize", "visualize debug", "visualize DEBUG",
+                  "visualize_topologies", "visualize_topologies debug",
+                  "visualize_topologies bus_03",
+                  "visualize_topologies bus_03 debug",
+                  "visualize_topologies -all",
+                  "visualize_topologies -all foo bar"):
+            s.do_command(c)   # none should raise
+
+
 def test_valid_options_still_work():
     """Guards must not reject legitimate usage."""
     s = buda_cli.BudaSession()

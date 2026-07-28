@@ -75,6 +75,10 @@ there for the full description). Without the flag that explorer opens in the
 plain wirelength-ordered view. The flag only affects the spawned explorer; the
 main NUTS/layout window is unchanged.
 
+`debug` is the only option `visualize` accepts — it takes no other arguments, so
+any other token (`visualize foo`) is a hard error (the PR #467 unknown-option
+guard), caught before the window opens (so `--no-viz` runs catch it too).
+
 **What is shown:**
 - Floorplan blocks (grey rectangles, always visible).
 - Hanan grid (faint dashed lines).
@@ -227,6 +231,15 @@ all generated topology candidates and pinning a selection for the planner.
 | `visualize_topologies -all` | Open explorers for every bundle (one window per bundle, opened sequentially). |
 | `visualize_topologies -all <hint1> <hint2> …` | Open explorers for all bundles matching any of the given hints. |
 | `… debug` (flag, anywhere in the args) | Order candidate stepping by **increasing planner cost** and show the cost + its components (see **Debug cost view** below). |
+
+**Option validation:** the only keyword options are `-all` and `debug`; every
+other token is a free-form bundle hint. Unknown options are a hard error (not a
+silent skip), the same guard PR #467 added across the CLI: a mistyped flag
+(`-al`, `--debug`), a misplaced `-all` (valid only as the first argument), or —
+because without `-all` only the first hint is honored — **more than one hint
+without `-all`** all stop the flow with a message (use `-all <h1> <h2> …` to
+open several). Validated before the window opens, so `--no-viz` batch/CI runs
+catch the typo too.
 
 **Explorer controls:**
 
