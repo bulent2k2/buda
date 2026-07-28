@@ -199,6 +199,73 @@ def test_single_segment_topology_is_not_an_antenna():
                                         _layers(), 1))
 
 
+def test_pass_through_block_counts_as_an_attachment():
+    """Codex review on #483 (P2): a segment that CROSSES a connected block's
+    footprint is electrically joined there — the block-coverage checks accept
+    exactly that as a valid connection — so it must count toward the two-point
+    bar.  Without this term a trunk crossing its driver and joining one
+    junction would be reported on an otherwise clean design (false positive).
+
+    Built explicitly (block C added to the floorplan and to the topology's
+    connected-block contract, positioned ON the appended stub) so the test
+    states the property directly instead of hunting for a generator shape
+    that happens to produce a pass-through."""
+    fp, topo, ct = _gen_z()
+    trunk = next(i for i, cs in enumerate(ct.segs()) if not cs.horiz)
+    tx = ct.segs()[trunk].perp_pos
+    lo, hi = ct.segs()[trunk].along_lo, ct.segs()[trunk].along_hi
+    mid = (lo + hi) // 2
+    # C straddles the appended stub's row, to the right of the trunk.
+    fp.add_block("C", tx + 40, mid - 30, tx + 120, mid + 30)
+    segs = list(topo.segments)
+    segs.append(_seg(tx, mid, tx + 80, mid, LAYER_H))   # ends INSIDE C
+    topo.segments = segs
+    topo.connected_block_names = list(topo.connected_block_names) + ["C"]
+    buda.annotate_seg_conns(topo)
+    ct2 = buda.ConnTopology()
+    ct2.build(topo, fp)
+    added = len(ct2.segs()) - 1
+    cs = ct2.segs()[added]
+    # Preconditions: ONE conn record, and it really does cross C — so the
+    # record-count rule would have called this an antenna.
+    assert len(cs.conns) == 1
+    c = fp.get_block_bounds("C")
+    assert c.y1 <= cs.perp_pos <= c.y2 and cs.along_hi >= c.x1
+    res = buda.check_nuts(ct2, _nominal_nuts(ct2), topo, fp, _layers(), 1)
+    assert not _antennas(res), [v.message for v in res.violations]
+
+
+def test_multiway_junction_conns_count_as_one_point():
+    """Codex review on #483 (P2): a segment whose end meets a MULTI-WAY
+    junction collects one SegConn per neighbour, all at the same `at_pos`.
+    Counting records would read 2+ and hide the antenna; counting distinct
+    attachment POSITIONS surfaces it.  Fixture: a collinear-split trunk (the
+    dogleg shape) with a stub landing exactly on the split point."""
+    fp, topo, ct = _gen_z()
+    trunk = next(i for i, cs in enumerate(ct.segs()) if not cs.horiz)
+    tx = ct.segs()[trunk].perp_pos
+    lo, hi = ct.segs()[trunk].along_lo, ct.segs()[trunk].along_hi
+    split = (lo + hi) // 2
+    segs = list(topo.segments)
+    segs[trunk] = _seg(tx, lo, tx, split, LAYER_V)        # lower piece
+    segs.append(_seg(tx, split, tx, hi, LAYER_V))         # upper piece
+    segs.append(_seg(tx, split, tx + 120, split, LAYER_H))  # the antenna
+    topo.segments = segs
+    buda.annotate_seg_conns(topo)
+    ct2 = buda.ConnTopology()
+    ct2.build(topo, fp)
+    ant = len(ct2.segs()) - 1
+    cs = ct2.segs()[ant]
+    seg_conns = [c for c in cs.conns if c.kind == buda.SegConnKind.SEG]
+    # The precondition that makes this test discriminating: MORE THAN ONE
+    # conn record, all at a SINGLE position — a record count would pass it.
+    assert len(seg_conns) >= 2, [(c.seg_idx, c.at_pos) for c in cs.conns]
+    assert len({c.at_pos for c in seg_conns}) == 1
+    res = buda.check_nuts(ct2, _nominal_nuts(ct2), topo, fp, _layers(), 1)
+    ants = _antennas(res)
+    assert [v.seg_idx for v in ants] == [ant], [v.message for v in ants]
+
+
 # ── 2. the generator fix ─────────────────────────────────────────────────────
 
 def _bus011_candidates():
