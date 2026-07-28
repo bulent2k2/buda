@@ -62,10 +62,18 @@ check_design dnuts
 ### `visualize`
 
 ```
-visualize
+visualize [debug]
 ```
 
-Opens the interactive NUTS result viewer (matplotlib window). No arguments.
+Opens the interactive NUTS result viewer (matplotlib window).
+
+**`debug` flag:** the topology explorer this window opens (the `v` key /
+"View Topologies" button) starts in the **debug cost view** — candidates stepped
+by increasing planner cost, with the cost + its components shown — exactly as
+[`visualize_topologies … debug`](#visualize_topologies) (see **Debug cost view**
+there for the full description). Without the flag that explorer opens in the
+plain wirelength-ordered view. The flag only affects the spawned explorer; the
+main NUTS/layout window is unchanged.
 
 **What is shown:**
 - Floorplan blocks (grey rectangles, always visible).

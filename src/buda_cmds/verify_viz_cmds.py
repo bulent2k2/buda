@@ -177,6 +177,11 @@ def cmd_visualize(session, cmd, args, cmd_line):
     if session.no_viz:
         return
     from buda_viz import BudaVisualizer
+    # `debug` flag: the TopologyExplorer this window opens ('v' / "View
+    # Topologies") starts in the debug cost view (candidates stepped by
+    # increasing planner cost, cost + components shown), exactly as
+    # `visualize_topologies … debug`.
+    debug = any(a.lower() == "debug" for a in args)
     rerun_layer_fn = session._rerun_nuts_layer if session.nuts_result is not None else None
     rerun_all_fn   = session._rerun_all        if session.nuts_result is not None else None
     ipc_session = (os.path.splitext(os.path.basename(session.script_path))[0]
@@ -206,7 +211,8 @@ def cmd_visualize(session, cmd, args, cmd_line):
                          fp_resolver=session._make_topo_fp_resolver(),
                          cuts_provider=_cuts_provider,
                          groups_fn=session._loci_groups,
-                         user_ops_sink=session._record_user_ops)
+                         user_ops_sink=session._record_user_ops,
+                         cost_fn=(session._candidate_costs if debug else None))
     viz.draw_blocks()
     if session.planner is not None:
         cuts = session.planner.get_cuts()

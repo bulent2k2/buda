@@ -384,13 +384,18 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
                  rerun_fn=None, routing_grid=None, layer_stack=None,
                  net_endpoints=None, ipc_session=None, ipc_verbose=False,
                  fp_resolver=None, cuts_provider=None, user_ops_sink=None,
-                 groups_fn=None):
+                 groups_fn=None, cost_fn=None):
         self.fp           = floorplan
         self.bundles      = bundles
         # Forwarded to the TopologyExplorer it opens ('v'): the session's
         # _loci_groups, so the explorer can group nominal-locus super-candidates
         # ('G' family-step / 'S' group-pin).  None (orphan viz) -> grouping off.
         self._groups_fn   = groups_fn
+        # Forwarded to the TopologyExplorer it opens ('v' / "View Topologies"):
+        # the session's _candidate_costs, set only under `visualize … debug`, so
+        # that explorer opens in the debug cost view (increasing-cost stepping +
+        # cost display).  None -> the explorer opens in the plain WL-ordered view.
+        self._cost_fn     = cost_fn
         # Forwarded to the TopologyExplorer it opens ('v'): the session's
         # _record_user_ops, so a GUI edit_commit stores BDB op-log
         # provenance (see TopologyExplorer.__init__).

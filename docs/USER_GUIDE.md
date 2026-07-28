@@ -156,6 +156,9 @@ about — increasing *cost* — add the `debug` flag:
 visualize_topologies bus_033 debug
 ```
 
+The same view is reachable from the main window: add `debug` to `visualize`,
+then open the explorer with the `v` key / "View Topologies" button.
+
 Now `a`/`d` step in increasing planner cost, and the title shows each
 candidate's cost with its breakdown (`cost=<total> = seg <…> + wl <…>`) and its
 cost-rank. After `run_planner` the cost is the **real** cost the planner would
