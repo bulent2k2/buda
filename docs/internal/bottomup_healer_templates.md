@@ -175,18 +175,39 @@ keeps today's snapshot cost.
   layers + expanded instance rows — the persist paths already run from the
   commit's full pipeline re-run.
 
-### D. Negotiate (v2, separate)
+### D. Does this apply to `negotiate_congestion`?  v1: NO — v2: yes, with a price-translation layer
 
-Negotiation's move is "replan unpinned under injected prices", which for a
-class means: translate each instance's injected band demand into the cell
-frame, SUM across instances, and replan the template in the cell-local
-planner under that aggregated price field — then propagate and re-measure.
-This is the principled multi-context version of the local solve (today's
-local solve prices intra-cell congestion only, blind to every instance's
-surroundings).  It is strictly more code than the ripup move (a price
-translation layer into `_plan_bottom_up_templates`) and the ripup move
-already covers the endpoint; recommend deferring until ripup class moves
-are measured.  v1: negotiation keeps refusing locked wrappers.
+**The class move above is a `ripup_reroute` mechanism only.  In v1,
+`negotiate_congestion` keeps refusing locked wrappers exactly as today.**
+The reason is structural, not a scoping shortcut — the two healers move
+bundles through different mechanisms, and only ripup's fits a class
+natively:
+
+- **Ripup is trial-based**: "mutate → re-run → measure the design metric →
+  keep iff strictly better, else restore."  That loop is agnostic to WHAT
+  was mutated, so a class re-pin (template + all instances + cache
+  invalidation) slots straight into the existing trial/snapshot machinery.
+- **Negotiate is price-based**: one `replan_bundle` pass per affected
+  bundle, UNPINNED, where the corrected (injected + history) band prices —
+  not a per-candidate trial — choose the topology.  There is no "try k'"
+  loop to reuse.  For a template, the injected prices live on GLOBAL
+  Hanan bands, but the template plans in the CELL-LOCAL frame; letting the
+  local planner feel measured congestion means translating each
+  instance's injected band demand into cell coordinates and SUMMING
+  across instances, then replanning the template under that aggregated
+  field and propagating.  That price-translation layer into
+  `_plan_bottom_up_templates` is the v2 work — the principled
+  multi-context version of the local solve (which today prices intra-cell
+  congestion only, blind to every instance's surroundings).
+
+Negotiate still participates in v1, in three unchanged-but-real ways:
+its replans of FREE bundles around locked blockers keep working; its
+stage-b dead-span preconditioning and injections keep feeding the loop;
+and once a ripup class move COMMITS, subsequent negotiate iterations run
+against the new template placement.  Recommend deferring v2 until ripup
+class moves are measured — they already cover the endpoint (the stuck
+residual heals or it doesn't), and the measurement will show whether
+price-guided class selection adds anything over farness-ranked trials.
 
 ### E. Adjacent, out of scope here
 
