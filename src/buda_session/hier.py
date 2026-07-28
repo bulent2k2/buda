@@ -1785,13 +1785,25 @@ class HierMixin:
         for cell in deepest_first:
             self._plan_bottom_up_cell(cell, by_cell[cell], iterations)
 
-    def _plan_bottom_up_cell(self, cell, wrappers, iterations, persist=True):
+    def _plan_bottom_up_cell(self, cell, wrappers, iterations, persist=True,
+                             inject=()):
         """One cell's local template solve — the per-cell body of
         _plan_bottom_up_templates, factored so a healer template-class trial
         (ripup class moves) can re-plan a single cell with a forced pin and
         WITHOUT the BDB persist (persist=False; the accept path persists via
         _persist_bottom_up_cell_decision).  A wrapper whose topology_pinned
-        is set keeps its pin — the planner only assigns layers for it."""
+        is set keeps its pin — the planner only assigns layers for it.
+
+        `inject` (negotiate v2 price translation): CELL-FRAME measured-
+        congestion demand records `(layer_id, span_lo, span_hi, perp_lo,
+        perp_hi, amount)` — each instance's injected global band demand
+        translated into cell coordinates by _translate_injections_to_cell
+        and summed here across instances — applied to the local planner
+        before the solve, so an UNPINNED template's selection is steered by
+        the aggregated multi-instance congestion field instead of intra-cell
+        congestion alone.  The grid is pre-extended from the candidates
+        first (extend_grid_for) because the optimizer's own extension
+        rebuilds the cuts and would wipe the injections."""
         self._check_bottom_up_frame(wrappers, None, cell)
         fp = self._build_cell_local_floorplan(
             wrappers[0].input.original_bundle.instances[0])
@@ -1810,6 +1822,10 @@ class HierMixin:
         self._apply_hier_refine_default(planner)
         planner.set_track_pitch(self._nuts_pitch)
         planner.build_congestion_map()
+        if inject:
+            planner.extend_grid_for(wrappers)
+            for (lid, s_lo, s_hi, p_lo, p_hi, amt) in inject:
+                planner.inject_band_demand(lid, s_lo, s_hi, p_lo, p_hi, amt)
         # Opt-in kWLSpread: the local planner is seeded from
         # _planner_params above, so it WILL apply the spread term —
         # stamp the templates' envelopes against the cell-local
@@ -2153,6 +2169,74 @@ class HierMixin:
             print(f"[BottomUp] cell '{cell}': local NUTS split template "
                   f"bundle {tid} with a dogleg — split candidate adopted "
                   f"on the template and {n_inst} locked instance(s)")
+
+    def _translate_injections_to_cell(self, cell, wrappers, inj_recs):
+        """Negotiate v2 price translation (docs/internal/
+        bottomup_healer_templates.md item D): map GLOBAL-frame injected
+        band-demand records `(layer_id, span_lo, span_hi, perp_lo, perp_hi,
+        amount)` into the CELL-LOCAL frame the template plans in, one
+        translated record per (instance x intersecting record) — injecting
+        them all into one local planner SUMS the demand across instances,
+        so the local solve prices the aggregated multi-instance congestion
+        field.
+
+        Per instance: the record's geometric rectangle (layer direction
+        decides which window is x and which is y) is clipped to the
+        instance bbox (demand outside the cell footprint cannot be felt by
+        cell-local geometry), then mapped through the INVERSE instance
+        transform.  Locked classes are direction-preserving by the
+        expansion guard, so the orientation maps are the involutions
+        N/S/FN/FS over the reference box (`orient_map` in topology.cpp:
+        S = (w-x, h-y), FN = (x, h-y), FS = (w-x, y)) — a 90-degree family
+        plans via its own rotation-class clone template whose instance
+        orients are again direction-preserving relative to the clone
+        reference.  Layer ids are frame-independent."""
+        if not inj_recs or self.bdb is None or not wrappers:
+            return []
+        comps = {c.name: c for c in self.bdb.all_components()}
+        insts = wrappers[0].input.original_bundle.instances
+        if not insts:
+            return []
+        ref_inst = insts[0]
+        ref_c = comps.get(ref_inst)
+        if ref_c is None:
+            return []
+        orients = self._detect_instance_orients(
+            self._bu_cell_of(cell), comps.values(), ref_name=ref_inst)
+        cw = int(round(ref_c.x2 - ref_c.x1))
+        ch = int(round(ref_c.y2 - ref_c.y1))
+        h_layers = set(self.layers.get_layer_ids_by_dir(
+            buda.LayerDir.HORIZONTAL))
+        out = []
+        for inst in insts:
+            c = comps.get(inst)
+            if c is None:
+                continue
+            oi = orients.get(inst) or "N"
+            if oi not in ("N", "S", "FN", "FS"):
+                continue          # guarded away at expansion; belt-and-braces
+            dx, dy = int(round(c.x1)), int(round(c.y1))
+            for (lid, s_lo, s_hi, p_lo, p_hi, amt) in inj_recs:
+                horiz = lid in h_layers
+                gx1, gx2 = (s_lo, s_hi) if horiz else (p_lo, p_hi)
+                gy1, gy2 = (p_lo, p_hi) if horiz else (s_lo, s_hi)
+                # Clip to the instance bbox.
+                cx1, cx2 = max(gx1, dx), min(gx2, dx + cw)
+                cy1, cy2 = max(gy1, dy), min(gy2, dy + ch)
+                if cx1 > cx2 or cy1 > cy2:
+                    continue
+                # Instance frame -> cell frame (involutions: N/S/FN/FS).
+                lx1, lx2 = cx1 - dx, cx2 - dx
+                ly1, ly2 = cy1 - dy, cy2 - dy
+                if oi in ("S", "FS"):
+                    lx1, lx2 = cw - lx2, cw - lx1
+                if oi in ("S", "FN"):
+                    ly1, ly2 = ch - ly2, ch - ly1
+                if horiz:
+                    out.append((lid, lx1, lx2, ly1, ly2, amt))
+                else:
+                    out.append((lid, ly1, ly2, lx1, lx2, amt))
+        return out
 
     def _persist_bottom_up_dogleg_adoptions(self):
         """Replay the BDB persistence `_adopt_bottom_up_doglegs` deferred

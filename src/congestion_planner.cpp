@@ -1556,40 +1556,10 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                          "Did a def_layer or source fail?\n";
     }
 
-    // Ensure base grid is populated from floorplan.
-    if (x_grid_.empty()) build_congestion_map();
-
-    // Extend the Hanan grid only with segment endpoint coordinates that fall
-    // OUTSIDE the current grid's range.  Topology generators place in-grid
-    // segments at Hanan-cell midpoints; inserting those as new grid lines would
-    // split cells into tiny sub-bands with zero capacity and cause violations.
-    // Out-of-range coordinates (e.g. U-shape trunks beyond the chip boundary)
-    // have no covering cell at all and would receive the ±50 fallback interval.
-    {
-        size_t nx0 = x_grid_.size(), ny0 = y_grid_.size();
-        auto extend_oob = [](std::vector<int>& grid, int val) {
-            if (grid.size() < 2) return;
-            if (val >= grid.front() && val <= grid.back()) return; // inside — skip
-            auto it = std::lower_bound(grid.begin(), grid.end(), val);
-            if (it == grid.end() || *it != val) grid.insert(it, val);
-        };
-        for (const auto& bw : bundles) {
-            for (const auto& cand : bw.input.candidates) {
-                for (const auto& seg : cand.segments) {
-                    extend_oob(x_grid_, seg.start.x);
-                    extend_oob(x_grid_, seg.end.x);
-                    extend_oob(y_grid_, seg.start.y);
-                    extend_oob(y_grid_, seg.end.y);
-                }
-            }
-        }
-        if (x_grid_.size() != nx0 || y_grid_.size() != ny0) {
-            std::cout << "[Planner] Grid extended: "
-                      << (x_grid_.size() - nx0) << " X, "
-                      << (y_grid_.size() - ny0) << " Y points from topology candidates.\n";
-            rebuild_cuts_();
-        }
-    }
+    // Ensure base grid is populated from floorplan, then extend it from the
+    // candidates (no-op when extend_grid_for was already called — the
+    // pre-injection hook of the bottom-up negotiate price translation).
+    extend_grid_for(bundles);
 
     // Resolve the span reference for non-TOP penalty scaling: unset means
     // 25% of the larger Hanan grid extent — segments longer than that pay
@@ -2238,6 +2208,48 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
     out.push_back(make_assignment(*target, plan));
     if (moved_victim) out.push_back(victim_asn);
     return out;
+}
+
+void CongestionPlanner::extend_grid_for(
+        const std::vector<BundleWrapper>& bundles) {
+    // Ensure base grid is populated from floorplan.
+    if (x_grid_.empty()) build_congestion_map();
+
+    // Extend the Hanan grid only with segment endpoint coordinates that fall
+    // OUTSIDE the current grid's range.  Topology generators place in-grid
+    // segments at Hanan-cell midpoints; inserting those as new grid lines would
+    // split cells into tiny sub-bands with zero capacity and cause violations.
+    // Out-of-range coordinates (e.g. U-shape trunks beyond the chip boundary)
+    // have no covering cell at all and would receive the ±50 fallback interval.
+    //
+    // Public (and idempotent) because a rebuild_cuts_ here WIPES injected
+    // demand: a caller that wants inject_band_demand to survive the
+    // optimize_topologies run (the bottom-up negotiate price translation)
+    // must pre-extend with the same bundles BEFORE injecting, so the
+    // optimizer's own call finds nothing new and never rebuilds.
+    size_t nx0 = x_grid_.size(), ny0 = y_grid_.size();
+    auto extend_oob = [](std::vector<int>& grid, int val) {
+        if (grid.size() < 2) return;
+        if (val >= grid.front() && val <= grid.back()) return; // inside — skip
+        auto it = std::lower_bound(grid.begin(), grid.end(), val);
+        if (it == grid.end() || *it != val) grid.insert(it, val);
+    };
+    for (const auto& bw : bundles) {
+        for (const auto& cand : bw.input.candidates) {
+            for (const auto& seg : cand.segments) {
+                extend_oob(x_grid_, seg.start.x);
+                extend_oob(x_grid_, seg.end.x);
+                extend_oob(y_grid_, seg.start.y);
+                extend_oob(y_grid_, seg.end.y);
+            }
+        }
+    }
+    if (x_grid_.size() != nx0 || y_grid_.size() != ny0) {
+        std::cout << "[Planner] Grid extended: "
+                  << (x_grid_.size() - nx0) << " X, "
+                  << (y_grid_.size() - ny0) << " Y points from topology candidates.\n";
+        rebuild_cuts_();
+    }
 }
 
 void CongestionPlanner::inject_band_demand(int layer_id,

@@ -243,12 +243,28 @@ def cmd_ripup_reroute(session, cmd, args, cmd_line):
 
 
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):
-    # Usage: negotiate_congestion [max_iter]
+    # Usage: negotiate_congestion [max_iter] [class_moves|no_class_moves]
     # Measured-congestion feedback (run after run_nuts): inject the
     # actual NUTS overlaps as band demand and let the planner re-price
     # both sides of each overlap off the contended bands.
-    max_iter = int(args[0]) if args else 5
-    session._negotiate_congestion(max_iter=max_iter)
+    # `class_moves` (OPT-IN, default off): when an affected bundle is a
+    # hier.locked bottom-up template instance, negotiate its TEMPLATE
+    # class in the cell-local frame under the price-translated injected
+    # demand (negotiate v2 — docs/internal/bottomup_healer_templates.md
+    # item D).  Opt-in because it was measured endpoint-neutral at best:
+    # on mix2_fast_bottomup the stage-a metric (abstract overlaps) is
+    # blind to DNUTS quality, so the bigger negotiated shuffles trade it
+    # away (final opens 8->16 at default ripup budgets; equal at 30),
+    # and the stage-b iteration is price-rejected — ripup's class moves
+    # already cover the endpoint.
+    flags = ("class_moves", "no_class_moves")
+    use_class_moves = "class_moves" in args
+    leftover = [a for a in args if a not in flags]
+    unknown = [a for a in leftover if not looks_numeric(a)]
+    reject_unknown_options("negotiate_congestion", unknown, flags)
+    max_iter = int(leftover[0]) if leftover else 5
+    session._negotiate_congestion(max_iter=max_iter,
+                                  use_class_moves=use_class_moves)
 
 
 def cmd_run_nuts_on_layer(session, cmd, args, cmd_line):

@@ -641,6 +641,13 @@ void bind_routing(py::module_& m) {
              py::arg("layer_id"), py::arg("span_lo"), py::arg("span_hi"),
              py::arg("perp_lo"), py::arg("perp_hi"), py::arg("amount"))
         .def("clear_injected_demand", &CongestionPlanner::clear_injected_demand)
+        .def("extend_grid_for",      &CongestionPlanner::extend_grid_for,
+             py::arg("bundles"),
+             "Pre-extend the Hanan grid from the bundles' out-of-range "
+             "candidate endpoints (idempotent; optimize_topologies runs the "
+             "same pass) — call BEFORE inject_band_demand so the injections "
+             "survive the optimize run (the extension's cuts rebuild wipes "
+             "injected records)")
         .def("recharge_committed",   &CongestionPlanner::recharge_committed,
              py::arg("bundles"))
         .def("candidate_costs",      &CongestionPlanner::candidate_costs,

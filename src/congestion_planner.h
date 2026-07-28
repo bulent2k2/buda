@@ -325,6 +325,13 @@ public:
     void inject_band_demand(int layer_id, double span_lo, double span_hi,
                             double perp_lo, double perp_hi, double amount);
     void clear_injected_demand();
+    // Extend the Hanan grid with the bundles' out-of-range candidate
+    // endpoints (the exact pass optimize_topologies runs first) — public and
+    // idempotent so a caller can pre-extend BEFORE inject_band_demand: the
+    // extension's cuts rebuild wipes injected records, so injections meant
+    // to price an upcoming optimize_topologies run must come after it (the
+    // bottom-up negotiate price translation).
+    void extend_grid_for(const std::vector<BundleWrapper>& bundles);
     // Rebuild band usage from every wrapper's COMMITTED assignment (charging
     // only, no scoring) + the injected demand.  For callers that changed
     // wrapper state without going through a replan — e.g. ripup's

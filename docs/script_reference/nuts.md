@@ -385,7 +385,7 @@ stage b alone.
 ### `negotiate_congestion`
 
 ```
-negotiate_congestion [max_iter]
+negotiate_congestion [max_iter] [class_moves|no_class_moves]
 ```
 
 Measured-congestion negotiation — a faster, complementary alternative to
@@ -402,6 +402,7 @@ finisher for whatever negotiation leaves.
 | Argument | Type | Default | Description |
 |---|---|---|---|
 | `max_iter` | int | `5` | Maximum number of negotiation rounds. Each round injects the current failures and re-plans; it is kept only if it strictly improves the metric, otherwise it is rolled back and the loop stops. |
+| `class_moves` | flag | off | **Opt-in bottom-up template price translation** (negotiate v2). Normally a `hier.locked` bottom-up template instance is never a negotiation target (its routing is a uniform copy of the cell template's local solve). With `class_moves`, a locked affected bundle's TEMPLATE class is negotiated instead: the iteration's injected band demand is clipped to each instance's bbox, mapped through the inverse orientation transform into the cell frame, and summed across instances into the cell-local planner; the target templates then re-plan **unpinned** under that aggregated price field and the result propagates to every instance of the class (accept/rollback covers the template state; user-pinned templates are never touched; BDB persistence is deferred to the accept). Opt-in because it measured endpoint-neutral at best on the corpus: the stage-a overlap metric is blind to the DNUTS quality its bigger multi-class shuffles trade away (mix2_fast_bottomup final opens 8→16 at default ripup budgets, equal at `ripup_reroute 30`), and the stage-b priced iteration is rejected by its own accept guard — `ripup_reroute`'s class moves already cover the endpoint. Measurement table in `docs/internal/bottomup_healer_templates.md`. `no_class_moves` states the default explicitly. |
 
 **Two stages, auto-detected from pipeline state** (same as `ripup_reroute`):
 
