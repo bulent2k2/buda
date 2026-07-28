@@ -1754,6 +1754,16 @@ class HierMixin:
         bu_cells = set(self.bdb.bottom_up_cells()) if self.bdb else set()
         if not bu_cells or not self.bundles:
             return
+        # Templates the USER pinned before the local solve (the solve keeps
+        # those pins and only assigns layers).  Healer template-class moves
+        # must never override an explicit user choice — record provenance
+        # here, before the solve below sets topology_pinned on everything.
+        self._bu_user_pinned = {w.input.original_bundle.id
+                                for w in self.bundles
+                                if w.input.topology_pinned}
+        # The local-solve iteration budget, reused by a healer class trial's
+        # per-cell re-plan so the trial runs under the same objective.
+        self._bu_local_iterations = iterations
         # Same replica detection as _expand_hier_bundles: a replica's routing
         # is carried by its template's per-instance expansion, so only the
         # template participates in the local solve.
@@ -1773,76 +1783,91 @@ class HierMixin:
             key=lambda c: -max(w.input.original_bundle.level
                                for w in by_cell[c]))
         for cell in deepest_first:
-            wrappers = by_cell[cell]
-            self._check_bottom_up_frame(wrappers, None, cell)
-            fp = self._build_cell_local_floorplan(
-                wrappers[0].input.original_bundle.instances[0])
-            if fp is None:
-                print(f"WARNING: bottom-up cell '{cell}': no placed instance "
-                      f"to derive the cell-local floorplan — skipped")
+            self._plan_bottom_up_cell(cell, by_cell[cell], iterations)
+
+    def _plan_bottom_up_cell(self, cell, wrappers, iterations, persist=True):
+        """One cell's local template solve — the per-cell body of
+        _plan_bottom_up_templates, factored so a healer template-class trial
+        (ripup class moves) can re-plan a single cell with a forced pin and
+        WITHOUT the BDB persist (persist=False; the accept path persists via
+        _persist_bottom_up_cell_decision).  A wrapper whose topology_pinned
+        is set keeps its pin — the planner only assigns layers for it."""
+        self._check_bottom_up_frame(wrappers, None, cell)
+        fp = self._build_cell_local_floorplan(
+            wrappers[0].input.original_bundle.instances[0])
+        if fp is None:
+            print(f"WARNING: bottom-up cell '{cell}': no placed instance "
+                  f"to derive the cell-local floorplan — skipped")
+            return
+        planner = buda.CongestionPlanner(fp, self.layers)
+        for pname, pval in self._planner_params.items():
+            planner.set_planner_param(pname, pval)
+        # Same healer-gate declaration as the global planner (Codex
+        # #342): the cell-local template solve must run under the SAME
+        # objective, or expansion locks in selections a suppressed env
+        # default made differently.
+        self._apply_healers_ahead(planner)
+        self._apply_hier_refine_default(planner)
+        planner.set_track_pitch(self._nuts_pitch)
+        planner.build_congestion_map()
+        # Opt-in kWLSpread: the local planner is seeded from
+        # _planner_params above, so it WILL apply the spread term —
+        # stamp the templates' envelopes against the cell-local
+        # floorplan it plans in, or every candidate would fall back to
+        # the nominal here and expansion would lock that choice in.
+        if self._planner_params.get("kWLSpread", -1.0) >= 0.0:
+            self._annotate_wl_envelopes(wrappers, fp=fp)
+        assignments = planner.optimize_topologies(wrappers, iterations)
+        # The local NUTS solve must see the same candidate-extended
+        # Hanan grid the local planner charged (exactly as run_nuts
+        # hands the global planner's grid to the global engine) — the
+        # grid defines each segment's interval constraint, and a
+        # coarser one lets contending trunks drift apart instead of
+        # surfacing the overlap the dogleg pass classifies.
+        if getattr(self, "_bu_planner_grids", None) is None:
+            self._bu_planner_grids = {}
+        self._bu_planner_grids[cell] = (list(planner.get_x_grid()),
+                                        list(planner.get_y_grid()))
+        bid_to_w = {w.input.original_bundle.id: w for w in wrappers}
+        for asn in assignments:
+            w = bid_to_w.get(asn.bundle_id)
+            if w is None:
                 continue
-            planner = buda.CongestionPlanner(fp, self.layers)
-            for pname, pval in self._planner_params.items():
-                planner.set_planner_param(pname, pval)
-            # Same healer-gate declaration as the global planner (Codex
-            # #342): the cell-local template solve must run under the SAME
-            # objective, or expansion locks in selections a suppressed env
-            # default made differently.
-            self._apply_healers_ahead(planner)
-            self._apply_hier_refine_default(planner)
-            planner.set_track_pitch(self._nuts_pitch)
-            planner.build_congestion_map()
-            # Opt-in kWLSpread: the local planner is seeded from
-            # _planner_params above, so it WILL apply the spread term —
-            # stamp the templates' envelopes against the cell-local
-            # floorplan it plans in, or every candidate would fall back to
-            # the nominal here and expansion would lock that choice in.
-            if self._planner_params.get("kWLSpread", -1.0) >= 0.0:
-                self._annotate_wl_envelopes(wrappers, fp=fp)
-            assignments = planner.optimize_topologies(wrappers, iterations)
-            # The local NUTS solve must see the same candidate-extended
-            # Hanan grid the local planner charged (exactly as run_nuts
-            # hands the global planner's grid to the global engine) — the
-            # grid defines each segment's interval constraint, and a
-            # coarser one lets contending trunks drift apart instead of
-            # surfacing the overlap the dogleg pass classifies.
-            if getattr(self, "_bu_planner_grids", None) is None:
-                self._bu_planner_grids = {}
-            self._bu_planner_grids[cell] = (list(planner.get_x_grid()),
-                                            list(planner.get_y_grid()))
-            bid_to_w = {w.input.original_bundle.id: w for w in wrappers}
-            for asn in assignments:
-                w = bid_to_w.get(asn.bundle_id)
-                if w is None:
-                    continue
-                w.plan.selected_topology_index = asn.topo_index
-                w.plan.seg_layers = list(asn.seg_layers)
-                # Mirror the flat planner handoff (planner_cmds): the local
-                # NUTS honors the local planner's charged-band centres, so
-                # contention materializes as raw overlaps (the dogleg pass's
-                # cycle detection needs them) instead of trunks scattering.
-                w.plan.seg_perp = list(asn.seg_perp)
-                w.input.assigned_v_layer = asn.v_layer_id
-                w.input.assigned_h_layer = asn.h_layer_id
-                w.input.topology_pinned = True
-                w.input.pinned_seg_layers = list(asn.seg_layers)
-            # Persist the template's own decision (is_selected + assigned
-            # layers on the TEMPLATE bundle rows) — the canonical record of
-            # the local solve, so a resumed session re-enters bottom-up with
-            # the same pinned assignment instead of re-deciding.
-            if self.bdb is not None:
-                persisted_ids = {b.id for b in self.bdb.all_bundles()}
-                for w in wrappers:
-                    bid = str(w.input.original_bundle.id)
-                    sel = w.plan.selected_topology_index
-                    if bid in persisted_ids and sel >= 0:
-                        self.bdb.set_topology_selected(bid, sel)
-                        self.bdb.reset_assigned_layers(bid)
-                        self._persist_assigned_layers(bid, sel, w)
-            n_inst = len(wrappers[0].input.original_bundle.instances)
-            print(f"[BottomUp] cell '{cell}': {len(assignments)} template "
-                  f"bundle(s) planned locally; decision pinned for "
-                  f"{n_inst} instance(s)")
+            w.plan.selected_topology_index = asn.topo_index
+            w.plan.seg_layers = list(asn.seg_layers)
+            # Mirror the flat planner handoff (planner_cmds): the local
+            # NUTS honors the local planner's charged-band centres, so
+            # contention materializes as raw overlaps (the dogleg pass's
+            # cycle detection needs them) instead of trunks scattering.
+            w.plan.seg_perp = list(asn.seg_perp)
+            w.input.assigned_v_layer = asn.v_layer_id
+            w.input.assigned_h_layer = asn.h_layer_id
+            w.input.topology_pinned = True
+            w.input.pinned_seg_layers = list(asn.seg_layers)
+        if persist:
+            self._persist_bottom_up_cell_decision(wrappers)
+        n_inst = len(wrappers[0].input.original_bundle.instances)
+        print(f"[BottomUp] cell '{cell}': {len(assignments)} template "
+              f"bundle(s) planned locally; decision pinned for "
+              f"{n_inst} instance(s)")
+
+    def _persist_bottom_up_cell_decision(self, wrappers):
+        """Persist the templates' own decisions (is_selected + assigned
+        layers on the TEMPLATE bundle rows) — the canonical record of the
+        local solve, so a resumed session re-enters bottom-up with the same
+        pinned assignment instead of re-deciding.  Called by the local solve
+        (persist=True) and by an ACCEPTED healer template-class move (whose
+        trial re-plan ran with persist=False)."""
+        if self.bdb is None:
+            return
+        persisted_ids = {b.id for b in self.bdb.all_bundles()}
+        for w in wrappers:
+            bid = str(w.input.original_bundle.id)
+            sel = w.plan.selected_topology_index
+            if bid in persisted_ids and sel >= 0:
+                self.bdb.set_topology_selected(bid, sel)
+                self.bdb.reset_assigned_layers(bid)
+                self._persist_assigned_layers(bid, sel, w)
 
     def _bottom_up_fixed_segments(self):
         """Stage (b) of bottom-up template planning: solve each marked cell's
@@ -2110,12 +2135,20 @@ class HierMixin:
                 # selection; the run_nuts bus rows will carry the split's
                 # segment indices, and a load_pipeline-expanded resume
                 # must restore matching candidates — Codex #256).
-                if self.bdb is not None:
+                # NEVER inside a healer trial: a class-move trial recomputes
+                # the fixed cache (and hence may re-adopt) mid-trial, and a
+                # rejected trial's rows must not reach the BDB — the accept
+                # path recomputes the cache OUTSIDE the trial flag, so the
+                # committed adoption persists then (idempotent upserts).
+                if self.bdb is not None \
+                        and not getattr(self, '_rr_in_trial', False):
                     self._add_expanded_bundle(iw, islot, {bid: tid})
                     self.bdb.set_topology_selected(str(bid), islot)
             # Same for the TEMPLATE row (the canonical local-solve record
-            # a pre-expansion resume re-enters bottom-up with).
-            if self.bdb is not None:
+            # a pre-expansion resume re-enters bottom-up with) — same
+            # trial guard as above.
+            if self.bdb is not None \
+                    and not getattr(self, '_rr_in_trial', False):
                 self._persist_template_dogleg(w, tid, slot, layers)
             print(f"[BottomUp] cell '{cell}': local NUTS split template "
                   f"bundle {tid} with a dogleg — split candidate adopted "

@@ -137,7 +137,7 @@ run_detailed_nuts hi_lo
 ### `ripup_reroute`
 
 ```
-ripup_reroute [max_iter] [use_edge_candidates] [no_global]
+ripup_reroute [max_iter] [use_edge_candidates] [no_global] [no_class_moves]
               [fast_trials|no_fast_trials] [screen|no_screen]
               [warm_trials|no_warm_trials]
 ```
@@ -154,6 +154,7 @@ the pipeline, and keeps only moves that reduce the metric.
 | `max_iter` | int | `10` | Maximum number of outer hill-climb iterations (each commits at most one re-route). |
 | `use_edge_candidates` | flag | off | Also try the per-edge MST L/Z **flip** move-source (below) on contended MST candidates. Off by default. |
 | `no_global` | flag | off | Disable the **global-occupant pass** (below), which otherwise runs when the contender scan stalls above zero. |
+| `no_class_moves` | flag | off | Disable the **bottom-up template class-move pass** (below), the stall chain's last tier: when the residual contention sits on `hier.locked` bottom-up template instances, re-pin the cell TEMPLATE and re-route the whole rotation class in one measured move. A no-op on non-bottom-up flows either way. |
 | `no_fast_trials` / `fast_trials` | flag | fast on | Disable / force **fast trials** (below): trials skip metric-neutral solve passes; commits always re-run the full pipeline. |
 | `no_screen` / `screen` | flag | screen on | Disable / force the **fixed-context screen** (below): rank each contender's alternates by a ~ms frozen-context placement and full-trial only the top few, deferring the rest to the iteration's stall sweep. |
 | `warm_trials` / `no_warm_trials` | flag | warm OFF | Enable / force-off **warm trials** (below): pre-filter each move with the warm-start single-bundle re-solve, cold-trialing only warm-improving moves; warm-rejected moves are cold-swept at the stall point (the stop certificate stays a full cold sweep). Off by default — corpus-measured cost-neutral once the screen has cut trial volume; opt in on designs whose per-trial cold cost dominates. All tokens are order-independent — `ripup_reroute 20 no_global` and `ripup_reroute no_global 20` are equivalent. |
@@ -314,6 +315,30 @@ trials per stall; a `GLOBAL` progress line marks the pass. Like the
 contender scan, the pass may override a `topology_pinned` occupant's pin
 (only a `hier.locked` template copy is inviolable). Flows that never stall
 above zero are byte-identical with the pass on (the whole corpus today).
+
+**Bottom-up template class-move pass (default on; `no_class_moves`
+disables).** The stall chain's last tier, after the global pass. A
+`hier.locked` wrapper is a bottom-up (`set_bottom_up`) template instance:
+its routing is a uniform fixed copy of the cell template's local solve, so
+every pass above must skip it — and a design whose residual contention sits
+ON locked bundles is stuck (the `mix2_fast_bottomup` plateau). The class
+pass moves the **template** instead: for each locked-contender class (up to
+8 alternates each, ranked by the contended instance's contention sites —
+expansion preserves candidate order, so instance-ranked indices are valid
+on the template pool), it force-pins the alternate on the template, re-runs
+the **cell-local solve** for its layers (the pin is kept; the other
+templates of the cell keep their pins and layers), propagates the pin to
+every instance of the rotation class, and measures a **no-replan** pipeline
+re-run — every other wrapper keeps its committed assignment, and the moved
+class's routing is the fixed copies NUTS recomputes from the re-pinned
+template. One move re-routes ALL instances of the class; strict-improvement
+accept; a template the user pinned before the local solve is never moved;
+BDB persistence is deferred to the accept path (rejected trials leave no
+rows). `CLASS` progress lines mark the pass; non-bottom-up flows are
+byte-identical (the pass is a structural no-op). Measured on
+`mix2_fast_bottomup` + healers: stage-a residual 2→1 overlaps, final DNUTS
+opens 16 (2 locked bundles)→8 (1); see
+`docs/internal/bottomup_healer_templates.md`.
 
 **Notes:**
 - It is an explicit congestion-fix pass, so it may re-route any contended bundle —

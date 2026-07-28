@@ -1,6 +1,42 @@
 # Healers × bottom-up templates: class-level moves (investigation)
 
-**Status: DESIGN — investigation of what it takes; nothing implemented.**
+**Status: item A (ripup v1 class moves) IMPLEMENTED** — `ripup_reroute`
+runs the class pass as the stall chain's last tier (after the
+global-occupant pass; `no_class_moves` opts out).  Measured on
+`mix2_fast_bottomup` + healers: stage a commits a `dnuts1` class move
+(2 → 1 residual NUTS overlaps) and the final DNUTS opens halve — 16 opens
+on 2 locked bundles → 8 opens on 1 (the endpoint is a genuine stall, not
+budget-bound: `max_iter 30` converges to the same point).  Non-bottom-up
+flows are byte-identical (`mix`, `mix2_fast_topdown`, and the healer-less
+`mix2_fast_bottomup` verified).  Regression: `test_ripup_class_moves.py`
+(apply/propagate, extended snapshot/restore round-trip, user-pin skip,
+no-op guarantees, slow-tier end-to-end).  Implementation notes that
+differ from the sketch below:
+
+- **Trials replan NOTHING** (`_rr_rerun(..., skip_replan=True)`), not even
+  incrementally: a full hier replan re-decides every unpinned bundle and
+  destroys the incremental commits (first attempt measured trials at
+  8–25 against a committed metric of 2), and the moved class needs no
+  planner turn at all — locked instances are never NUTS-extracted; their
+  routing is the fixed copies the trial's NUTS re-run recomputes from the
+  re-pinned template.  Every other wrapper keeps its committed
+  assignment, so the trial metric is directly comparable.
+- **Propagation is scoped to the MOVED template's instances** (index +
+  layers — layer ids are frame-independent — pin, locked recompute,
+  per-segment overrides cleared as `_rr_trial` does).  The other cell
+  templates keep their pins + pinned layers through the cell-local
+  re-plan (honored), so their instances' committed state — including
+  adopted dogleg-slot selections, which do NOT equal the template index —
+  is never touched.
+- **Deferred persistence**: `_plan_bottom_up_cell(persist=False)` inside
+  the trial, `_adopt_bottom_up_doglegs`' BDB writes guarded by
+  `_rr_in_trial`; the accept path replays both outside the flag
+  (`_persist_bottom_up_cell_decision` + a fixed-copy recompute, both
+  idempotent).
+
+Items B/C are folded into the implementation as specified; item D
+(negotiate) and item E remain future work as scoped below.  The original
+investigation follows.
 
 The healers (`negotiate_congestion`, `ripup_reroute`) currently refuse
 bottom-up (`hier.locked`) wrappers as movers and victims, so on a bottom-up

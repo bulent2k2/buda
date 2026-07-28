@@ -104,7 +104,11 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
    Implementation: a `hier.locked` flag on `BundleHierMeta`; priority sort
    puts locked wrappers first; the ladder's rip-up, `negotiate_congestion`'s
    `replan_bundle`, and `ripup_reroute` all skip `locked` wrappers as victims
-   *and* as movers.
+   *and* as movers.  (Since the healer class-move work, `ripup_reroute` can
+   still heal contention ON a locked bundle — not by moving the instance,
+   but by re-pinning its TEMPLATE and re-routing the whole rotation class as
+   one measured move at a stall; see
+   docs/internal/bottomup_healer_templates.md.)
 4. **Overflow at a locked wrapper** (its pinned route lands on a band a
    sibling instance's context can't afford) is reported as a `WARNING` with
    the instance path — it is the price of uniformity, and the
