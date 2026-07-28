@@ -46,6 +46,41 @@ class ExplorerDrawMixin:
             return f"{v:.2f}"
         return f"{v:.3f}"
 
+    def _fit_title_fontsize(self, title):
+        """A title font size (7.5–12pt) whose widest line fits the figure width.
+
+        A char-count estimate (~0.55pt of width per character per point of font
+        for the default sans face), so a long title — many segments, a
+        group-pinned super-candidate, the debug cost line — shrinks to fit
+        rather than clipping at the window edges; a short title stays at 12pt.
+        Robust with no renderer (used on the first draw); `_shrink_title_to_fit`
+        refines it once the canvas can measure."""
+        longest = max((len(ln) for ln in title.split('\n')), default=0)
+        if longest <= 0:
+            return 12.0
+        fig_w_in = self.fig.get_size_inches()[0]
+        max_fs = (0.96 * fig_w_in * 72.0) / (0.55 * longest)
+        return max(7.5, min(12.0, max_fs))
+
+    def _shrink_title_to_fit(self, title_artist):
+        """Fine-tune the title font using the REAL rendered width when the canvas
+        has a renderer (Agg/TkAgg).  Scales the size by the width ratio so the
+        widest line fits ~98% of the figure width — one linear step, floored at
+        7pt.  A no-op (leaving the char-count estimate) when no renderer is
+        available or measurement fails."""
+        try:
+            renderer = self.fig.canvas.get_renderer()
+        except Exception:
+            return
+        try:
+            avail = self.fig.bbox.width * 0.98
+            bb = title_artist.get_window_extent(renderer=renderer)
+        except Exception:
+            return
+        if bb.width > avail and bb.width > 0:
+            new_fs = max(7.0, title_artist.get_fontsize() * avail / bb.width)
+            title_artist.set_fontsize(new_fs)
+
     def _debug_cost_title(self):
         """The debug view's second title line: this candidate's planner cost, its
         cost-rank (position in the increasing-cost stepping order), and the cost
@@ -655,7 +690,16 @@ class ExplorerDrawMixin:
         elif is_planner_active:
             title_color = '#005588'  # blue
 
-        ax.set_title(title_main, fontsize=12, pad=10, color=title_color)
+        # Shrink the title font so a long title (many segments, a group-pinned
+        # super-candidate, or the debug cost line) fits the figure width instead
+        # of clipping at both window edges (a centered title overflows equally
+        # left and right).  A short title keeps the full 12pt.
+        t = ax.set_title(title_main, fontsize=self._fit_title_fontsize(title_main),
+                         pad=10, color=title_color)
+        # Refine with the real text metrics when a renderer is available (Agg /
+        # TkAgg): the char-count estimate is conservative, so this only ever
+        # relaxes it back up toward 12 or nudges it down a touch — never clips.
+        self._shrink_title_to_fit(t)
 
         # Selected-segment info line: "Selected V segment 3 on M5." — sits under
         # the edit banner in a TopoEdit session, else standalone at top-left

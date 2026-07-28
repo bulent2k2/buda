@@ -167,6 +167,23 @@ def _rects_disconnected(rects_raw):
 
 
 
+def _short_block_label(name, maxlen=16):
+    """Compact on-screen block label.
+
+    Hierarchical instance paths (`chip/i_dnuts1_0/u0`) overlap badly on dense
+    floorplans — their FULL length swamps neighbouring blocks.  For a `a/b/c`
+    path show the LEAF component (`u0`), which identifies the block within its
+    parent, with the spatial position carrying the instance context; a flat name
+    (no `/`, e.g. `blk_20`) is returned unchanged.  A still-over-long leaf is
+    tail-ellipsised to `maxlen` (the tail is the most-identifying part).  This is
+    display only — the block's identity for click/highlight stays the full
+    `name`."""
+    label = name.rsplit('/', 1)[-1] if '/' in name else name
+    if len(label) > maxlen:
+        label = '…' + label[-(maxlen - 1):]
+    return label
+
+
 def _draw_block(ax, name, bbox, fp, lw=1.0, edge='#888888', face='#e8e8e8',
                 alpha=0.20, fontsize=8, zorder=1):
     """Draw one floorplan block.
@@ -210,7 +227,7 @@ def _draw_block(ax, name, bbox, fp, lw=1.0, edge='#888888', face='#e8e8e8',
     import matplotlib.transforms as mtransforms
     offset_trans = mtransforms.offset_copy(
         ax.transData, fig=ax.figure, x=4, y=4, units='points')
-    txt = ax.text(bbox.x1, bbox.y1, name, transform=offset_trans,
+    txt = ax.text(bbox.x1, bbox.y1, _short_block_label(name), transform=offset_trans,
                   ha='left', va='bottom',
                   fontsize=fontsize, fontweight='bold', color='#444444',
                   alpha=min(1.0, alpha * 4.0), # label slightly brighter than block
