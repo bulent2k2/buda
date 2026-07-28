@@ -231,6 +231,66 @@ static std::vector<int> island_roots(const std::vector<ConnSeg>& segs)
     return uf;
 }
 
+// ── detect_antennas ───────────────────────────────────────────────────────────
+//
+// A segment must be attached to the rest of the wire graph at TWO points at
+// least: a real wire runs BETWEEN things (block face → junction, junction →
+// junction, face → face).  A segment carrying at most one conn is attached at
+// one point and dangles from there — electrically inert metal that no route
+// needs (an "antenna": it loads the net with capacitance and can violate
+// antenna rules), and a sure sign the generator emitted a segment it should
+// not have.  The canonical producer (issue #482) is an MST edge leg laid
+// COLLINEAR on top of a trunk stub leaving the same block face: the relay
+// single-tap model demotes the duplicate landing to a nullopt junction, and
+// ConnTopology cannot infer a junction between collinear segments, so the
+// leg's near end connects to nothing.
+//
+// Structural (conn records, not placement), like detect_disconnected — the
+// same detector answers at every placed stage.  DISCONNECTED is the
+// complementary global property (the graph splits); an antenna keeps the
+// graph connected, it just hangs off it.
+static void detect_antennas(const std::vector<ConnSeg>& segs,
+                            int bundle_id, const char* stage,
+                            ConnResult& result)
+{
+    const int n = (int)segs.size();
+    // A single-segment topology has no junctions by construction; a missing
+    // block tap there is BUSTERM_OPEN's business, not an antenna.
+    if (n < 2) return;
+    for (int i = 0; i < n; ++i) {
+        const ConnSeg& cs = segs[i];
+        if (cs.conns.size() >= 2) continue;
+        int n_bt = 0, n_seg = 0;
+        std::string where;
+        for (const auto& c : cs.conns) {
+            if (c.kind == SegConn::BUSTERM) {
+                ++n_bt;
+                where = " (only tap: block " + c.block_name + ")";
+            } else {
+                ++n_seg;
+                where = " (only junction: segment "
+                      + std::to_string(c.seg_idx) + ")";
+            }
+        }
+        ConnViolation v;
+        v.kind      = ViolationKind::ANTENNA;
+        v.bundle_id = bundle_id;
+        v.seg_idx   = i;
+        std::ostringstream msg;
+        msg << "Segment " << i << " (" << (cs.horiz ? "H" : "V")
+            << " along [" << cs.along_lo << "," << cs.along_hi
+            << "] @ " << cs.perp_pos << ") has "
+            << cs.conns.size() << " connection(s)"
+            << (cs.conns.empty() ? "" : where)
+            << " — a dangling 'antenna' wire: it attaches to the route at "
+            << "fewer than two points, so the rest of it terminates in "
+            << "nothing (" << n_bt << " busterm, " << n_seg << " seg) ("
+            << stage << ")";
+        v.message = msg.str();
+        result.violations.push_back(std::move(v));
+    }
+}
+
 static void detect_disconnected(const std::vector<ConnSeg>& segs,
                                 int bundle_id, const char* stage,
                                 ConnResult& result)
@@ -637,6 +697,8 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
     // FEEDTHRU_RELAY (structural; see detect_feedthru_relay).
     detect_feedthru_relay(segs, topo, fp, bundle_id, "nuts", result);
     detect_disconnected(segs, bundle_id, "nuts", result);
+    // Dangling wires (structural; see detect_antennas — issue #482).
+    detect_antennas(segs, bundle_id, "nuts", result);
 
     return result;
 }
@@ -916,6 +978,8 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
     detect_feedthru_relay(ct.segs(), topo, fp, bundle_id, "dnuts", result);
     // Whole-graph connectivity (structural; see detect_disconnected).
     detect_disconnected(ct.segs(), bundle_id, "dnuts", result);
+    // Dangling wires (structural; see detect_antennas — issue #482).
+    detect_antennas(ct.segs(), bundle_id, "dnuts", result);
 
     // BIT_SHORT: two DIFFERENT bits of this bundle are two different NETS,
     // so their wires sharing a layer + track with overlapping (or touching —

@@ -37,6 +37,30 @@ zones are taken from the session floorplan the NUTS engine placed against,
 so hierarchical bundles' cell-local generation floorplans cannot mask a
 conflict. See `docs/internal/keepout_model_audit.md`.
 
+The `nuts` and `dnuts` stages also flag **antennas** (`ANTENNA`, issue
+#482): a segment attached to the route at **fewer than two points** — at
+most one busterm tap or seg junction — so everything past that single
+attachment is a dangling wire that terminates in nothing. That is
+electrically inert metal (it loads the net with capacitance and can violate
+antenna rules) and a sign the generator emitted a segment no route needs.
+The detector is structural (conn records, not placement), so both stages
+give the same verdict; the message names the segment, its geometry, and its
+one attachment:
+
+```
+Bundle 22: Segment 3 (H along [1250,1740] @ 2985) has 1 connection(s)
+  (only junction: segment 4) — a dangling 'antenna' wire: it attaches to the
+  route at fewer than two points, so the rest of it terminates in nothing
+  (0 busterm, 1 seg) (dnuts)
+```
+
+`DISCONNECTED` is the complementary global property (the wire graph splits
+into islands); an antenna keeps the graph connected, it just hangs off it. A
+one-segment topology is never flagged — it has no junctions by construction,
+and a missing block tap there is `BUSTERM_OPEN`'s business. Generation's own
+candidate-level knob for dangling shapes is
+[`set_drop_dangling`](topologies.md).
+
 | Argument | Type | Default | Description |
 |---|---|---|---|
 | `stage` | str | `dnuts` | Routing stage to verify: `topo` (topology candidates), `nuts` (abstract track sharing), or `dnuts` (detailed bit placement). |
