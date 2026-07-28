@@ -519,10 +519,21 @@ class VizAbstractDrawMixin:
                                       phys=_phys(seg_idx, conn.seg_idx))
 
 
+    def _clear_endpoint_labels(self):
+        """Detach any existing B<id> endpoint labels from the axes, then reset the
+        list.  They are NOT in the highlight registry (`_bundle_artists`), so the
+        reroute cleanup (`_redraw_nuts_tracks`) that removes registered artists
+        won't catch them — resetting the list alone would orphan the old text on
+        the axes and leave stale/duplicate labels after a re-run (Codex #484)."""
+        for _bid, a in getattr(self, '_endpoint_label_artists', ()):
+            try: a.remove()
+            except Exception: pass
+        self._endpoint_label_artists = []
+
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
         self._busterm_artists = []
-        self._endpoint_label_artists = []
+        self._clear_endpoint_labels()
         self._vias_conns_artists = []
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         for i, wrapper in enumerate(self.bundles):
@@ -562,7 +573,7 @@ class VizAbstractDrawMixin:
     def draw_nuts_tracks(self, nuts_result):
         """Draw segments at NUTS-assigned track positions with interval bands."""
         self._busterm_artists = []
-        self._endpoint_label_artists = []
+        self._clear_endpoint_labels()
         self._vias_conns_artists = []
         self._nuts_result = nuts_result   # saved for overlap panel in show()
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
