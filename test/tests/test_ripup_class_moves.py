@@ -171,6 +171,11 @@ def test_class_apply_repins_template_and_all_instances():
             list(tw.input.pinned_seg_layers)
         assert list(iw.plan.seg_net_pull) == []
         assert list(iw.plan.seg_slide_lo) == []
+        # seg_perp must be cleared: the planner's recharge (commit_plan)
+        # consumes it as a band-charge override for the NEW candidate, so
+        # stale old-candidate values would mischarge congestion for every
+        # later replan (Codex #472 P1).
+        assert list(iw.plan.seg_perp) == []
     # Derived caches invalidated — the next NUTS recomputes the fixed
     # copies from the new pin.
     assert s._bu_fixed_cache is None
@@ -262,6 +267,32 @@ def test_user_pinned_template_is_skipped():
     assert (ok, trials) == (False, 0)
     assert "user-pinned" in buf.getvalue()
     assert _tmpl_state(tw) == before                   # untouched
+
+
+def test_replica_contender_resolves_canonical_template():
+    """_hier_expansion_map also aliases REPLICA bundle ids to their
+    instance's wrapper; the class pass must map a locked contender to its
+    CANONICAL template, not the alias — else the class is silently skipped
+    (the replica id is not a cell template; Codex #472 P1)."""
+    s = _bottom_up_session(_two_inst_db())
+    tw, _cell_ws = _template(s)
+    tid = tw.input.original_bundle.id
+    canon = {w.input.original_bundle.id
+             for ws in s._rr_class_cell_wrappers().values() for w in ws}
+    # The wrapper a replica id aliases (proc_i2's instance).
+    aliased = [iws[0] for rid, iws in s._hier_expansion_map.items()
+               if rid not in canon]
+    assert aliased, "fixture should produce a replica alias"
+    inst_bid = aliased[0].input.original_bundle.id
+    assert inst_bid in {iw.input.original_bundle.id
+                        for iw in s._hier_expansion_map[tid]}
+    s._rr_locked_contenders = lambda stage: [inst_bid]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        ok, trials = s._rr_class_pass('a', lambda: (1 << 30), 0)
+    assert not ok                       # nothing improves a metric of 0
+    assert trials > 0, buf.getvalue()   # but the class WAS found and tried
+    assert "CLASS pass" in buf.getvalue()
 
 
 # ── end-to-end heal (slow): the mix2 bottom-up plateau ───────────────────────

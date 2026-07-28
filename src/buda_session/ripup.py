@@ -1134,11 +1134,18 @@ class RipupMixin:
         # frame-independent, so index + layers copy directly; the per-
         # segment dogleg overrides are cleared exactly as _rr_trial does
         # when moving a bundle off its split (the snapshot restores them
-        # on rejection).  seg_perp is left stale-but-inert: a locked
-        # bundle is never NUTS-extracted — its routing is the fixed
-        # copies.  Mirrors _expand_hier_bundles' pin propagation + locked
-        # rule (bottom-up cells never expand 90°-rotated instances; the
-        # rotation classes have their own clone templates).
+        # on rejection).  seg_perp is cleared too — NUTS never reads it
+        # for a locked bundle (its routing is the fixed copies), but the
+        # planner's recharge (commit_plan via recharge_committed /
+        # replan_bundle, on accept and in every later trial) consumes it
+        # as a per-segment band-charge override for the SELECTED
+        # candidate, and the stale values index the OLD candidate's
+        # geometry — cleared, each new segment charges at its own nominal
+        # perp, the same convention as any wrapper without overrides
+        # (Codex #472 P1).  Mirrors _expand_hier_bundles' pin propagation
+        # + locked rule (bottom-up cells never expand 90°-rotated
+        # instances; the rotation classes have their own clone
+        # templates).
         exp_map = getattr(self, "_hier_expansion_map", None) or {}
         for iw in exp_map.get(tw.input.original_bundle.id, []):
             iw.input.topology_pinned = True
@@ -1146,6 +1153,7 @@ class RipupMixin:
                 tw.plan.selected_topology_index
             iw.input.pinned_seg_layers = list(tw.input.pinned_seg_layers)
             iw.plan.seg_layers = list(tw.plan.seg_layers)
+            iw.plan.seg_perp = []
             iw.plan.seg_net_pull = []
             iw.plan.seg_slide_lo = []
             iw.plan.seg_slide_hi = []
@@ -1202,8 +1210,16 @@ class RipupMixin:
             return False, 0
         cell_of = {w.input.original_bundle.id: cell
                    for cell, ws in by_cell.items() for w in ws}
+        # Wrapper -> CANONICAL template only.  exp_map also aliases every
+        # REPLICA bundle id to its instance's wrapper (inserted after the
+        # canonical entries by _expand_hier_bundles), so an unfiltered walk
+        # would overwrite the canonical mapping with the replica id — and a
+        # locked contender on that wrapper would silently skip its class
+        # (the replica id is not in cell_of; Codex #472 P1).
         tmpl_of = {}
         for tid, iws in exp_map.items():
+            if tid not in cell_of:            # replica alias / non-bottom-up
+                continue
             for iw in iws:
                 tmpl_of[iw.input.original_bundle.id] = tid
         user_pinned = getattr(self, "_bu_user_pinned", None) or set()
