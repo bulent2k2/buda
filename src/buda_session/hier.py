@@ -2194,7 +2194,19 @@ class HierMixin:
         if not inj_recs or self.bdb is None or not wrappers:
             return []
         comps = {c.name: c for c in self.bdb.all_components()}
-        insts = wrappers[0].input.original_bundle.instances
+        # De-duplicated UNION of every template's instance list — cell-local
+        # templates normally share one list, but a template whose occurrences
+        # are a different subset must still have contention around ITS
+        # instances priced (Codex #478: first-wrapper-only would silently
+        # skip an omitted occurrence's surroundings).  Order-preserving so
+        # the reference instance (wrappers[0]'s first — the frame
+        # _build_cell_local_floorplan derives from) stays first.
+        insts, seen = [], set()
+        for w in wrappers:
+            for inst in w.input.original_bundle.instances:
+                if inst not in seen:
+                    seen.add(inst)
+                    insts.append(inst)
         if not insts:
             return []
         ref_inst = insts[0]

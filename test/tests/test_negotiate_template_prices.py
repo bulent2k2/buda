@@ -142,6 +142,22 @@ def test_translate_mirrored_instance_reflects():
     assert recs == [(6, 220.0, 360.0, 140.0, 150.0, 5.0)]
 
 
+def test_translate_unions_instances_without_double_count():
+    """The instance walk is the de-duplicated UNION of every template's
+    list (Codex #478: a template whose occurrences are a different subset
+    must still have its surroundings priced) — and a shared instance must
+    contribute its translated records exactly ONCE, or the aggregated
+    price field would be inflated by the number of templates in the
+    cell."""
+    s = _bottom_up_session(_two_inst_db(x2=500, y2=300))
+    tw, cell_ws = _template(s)
+    rec = [(6, 560.0, 700.0, 350.0, 360.0, 5.0)]
+    base = s._translate_injections_to_cell("proc_cell", cell_ws, rec)
+    doubled = s._translate_injections_to_cell("proc_cell",
+                                              cell_ws + cell_ws, rec)
+    assert doubled == base
+
+
 # ── target derivation ────────────────────────────────────────────────────────
 
 def test_neg_template_targets_locked_affected_only():
