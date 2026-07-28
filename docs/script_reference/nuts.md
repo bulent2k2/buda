@@ -139,7 +139,7 @@ run_detailed_nuts hi_lo
 ```
 ripup_reroute [max_iter] [use_edge_candidates] [no_global] [no_class_moves]
               [fast_trials|no_fast_trials] [screen|no_screen]
-              [warm_trials|no_warm_trials]
+              [warm_trials|no_warm_trials] [converge_guard|no_converge_guard]
 ```
 
 Feedback-driven rip-up & re-route. The congestion planner's band-capacity model is

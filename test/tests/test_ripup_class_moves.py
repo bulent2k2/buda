@@ -104,7 +104,7 @@ def _inst_state(iw):
     return (iw.plan.selected_topology_index, iw.input.topology_pinned,
             bool(iw.hier.locked), len(iw.input.candidates),
             list(iw.plan.seg_layers), list(iw.input.pinned_seg_layers),
-            list(iw.plan.seg_net_pull))
+            list(iw.plan.seg_net_pull), list(iw.plan.seg_perp))
 
 
 # ── no-op guarantees ─────────────────────────────────────────────────────────
@@ -267,6 +267,39 @@ def test_user_pinned_template_is_skipped():
     assert (ok, trials) == (False, 0)
     assert "user-pinned" in buf.getvalue()
     assert _tmpl_state(tw) == before                   # untouched
+
+
+def test_class_restore_recovers_flipped_locked():
+    """hier.locked is written by the apply propagation and is not in the
+    base snapshot — a rejected trial whose cell re-plan failed to assign
+    the moved template (locked flips False) must not leave the class
+    permanently unlocked (issue #475)."""
+    s = _bottom_up_session(_two_inst_db())
+    tw, _cell_ws = _template(s)
+    tid = tw.input.original_bundle.id
+    iw = s._hier_expansion_map[tid][0]
+    assert iw.hier.locked
+    snap = s._rr_class_snapshot()
+    iw.hier.locked = False                  # the failure mode's footprint
+    s._rr_class_restore(snap)
+    assert iw.hier.locked
+
+
+def test_class_pass_honors_trial_budget(monkeypatch):
+    """The aggregate _RR_CLASS_MAX_TRIALS cap must stop the pass before
+    another trial runs (issue #474)."""
+    import buda_session.ripup as ripup_mod
+    s = _bottom_up_session(_two_inst_db())
+    tw, _cell_ws = _template(s)
+    tid = tw.input.original_bundle.id
+    inst_bid = s._hier_expansion_map[tid][0].input.original_bundle.id
+    s._rr_locked_contenders = lambda stage: [inst_bid]
+    monkeypatch.setattr(ripup_mod, "_RR_CLASS_MAX_TRIALS", 0)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        ok, trials = s._rr_class_pass('a', lambda: (1 << 30), 0)
+    assert (ok, trials) == (False, 0)
+    assert "trial budget" in buf.getvalue()
 
 
 def test_replica_contender_resolves_canonical_template():

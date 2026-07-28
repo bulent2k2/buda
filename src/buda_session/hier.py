@@ -2154,6 +2154,40 @@ class HierMixin:
                   f"bundle {tid} with a dogleg — split candidate adopted "
                   f"on the template and {n_inst} locked instance(s)")
 
+    def _persist_bottom_up_dogleg_adoptions(self):
+        """Replay the BDB persistence `_adopt_bottom_up_doglegs` deferred
+        under `_rr_in_trial` — the accept path of a healer template-class
+        move: for every template with an adopted dogleg slot, upsert the
+        template's split row and each locked instance's expanded-bundle row
+        + selection.  Idempotent (upserts), so pre-trial adoptions
+        re-persist identical rows.  Replaying from the LIVE state instead
+        of re-running the cell-local solve keeps the accepted trial's
+        nuts_result and fixed-copy cache authoritative: re-solving an
+        already-split pinned template could re-dogleg into a
+        split-of-a-split and silently diverge from the accepted routing
+        (review #472 / issue #473) — and it saves a cell-local NUTS solve
+        per accepted move."""
+        if self.bdb is None:
+            return
+        slots = getattr(self, "_bu_dogleg_slot", None) or {}
+        exp_map = getattr(self, "_hier_expansion_map", None) or {}
+        for tid, slot in slots.items():
+            w = self._rr_template_wrapper(tid)
+            if w is None or not (0 <= slot < len(w.input.candidates)):
+                continue
+            self._persist_template_dogleg(w, tid, slot,
+                                          list(w.plan.seg_layers))
+            for iw in exp_map.get(tid, []):
+                if not iw.hier.locked:
+                    continue
+                bid = iw.input.original_bundle.id
+                islot = self._dogleg_slot.get(bid)
+                if islot is None \
+                        or not (0 <= islot < len(iw.input.candidates)):
+                    continue
+                self._add_expanded_bundle(iw, islot, {bid: tid})
+                self.bdb.set_topology_selected(str(bid), islot)
+
     def _persist_template_dogleg(self, w, tid, slot, layers):
         """Persist a template's adopted dogleg split as a candidate row at
         its live slot (source='dogleg', selected, per-segment assigned
