@@ -137,6 +137,37 @@ def test_detour_channel_rejects_bad_dir():
     _expect_reject("detour_channel Q 50", needle="unknown direction char")
 
 
+def test_corner_margin_missing_value_does_not_hang():
+    """A recognized key with no value must error, NOT loop forever (Codex P1).
+    pytest would time out if the guard fell through without advancing."""
+    _expect_reject("corner_margin dx", needle="requires a value")
+
+
+def test_add_block_corner_margin_missing_value_does_not_hang():
+    _expect_reject("add_block C 0 0 50 50 corner_margin dy",
+                   needle="requires a value")
+
+
+def test_run_planner_rejects_two_iteration_counts():
+    s = _planned_session()
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), pytest.raises(SystemExit):
+        s.do_command("run_planner 3 30")
+    assert "at most one iteration count" in out.getvalue()
+
+
+def test_run_planner_rejects_non_integer_iterations():
+    s = _planned_session()
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), pytest.raises(SystemExit):
+        s.do_command("run_planner 2.5")
+    assert "must be an integer" in out.getvalue()
+
+
+def test_detour_channel_rejects_unpaired_trailing_token():
+    _expect_reject("detour_channel N 50 Q", needle="unpaired trailing token")
+
+
 def test_valid_options_still_work():
     """Guards must not reject legitimate usage."""
     s = buda_cli.BudaSession()

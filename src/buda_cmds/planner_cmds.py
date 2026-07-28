@@ -21,6 +21,7 @@ in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
 import os
+import sys
 
 import buda
 
@@ -46,6 +47,16 @@ def cmd_run_planner(session, cmd, args, cmd_line):
     if not (args and args[0] == "post_nuts"):
         opts = [a for a in args if not looks_numeric(a)]
         reject_unknown_options("run_planner", opts, ("hier", "signal_tracks"))
+        # The iteration count is a single INTEGER; reject `3 30` (two counts,
+        # only the first used) and `2.5` (non-integer, silently ignored → the
+        # default effort limit).
+        nums = [a for a in args if looks_numeric(a)]
+        if len(nums) > 1:
+            print(f"Error: run_planner: at most one iteration count, got "
+                  f"{', '.join(nums)}"); sys.exit(1)
+        if nums and not nums[0].lstrip("-").isdigit():
+            print(f"Error: run_planner: iteration count must be an integer, "
+                  f"got '{nums[0]}'"); sys.exit(1)
     if args and args[0] == "post_nuts":
         # Stage 4c: post-NUTS stub layer reassignment.
         # Syntax: post_nuts [V [short [long]]] [H [short [long]]]

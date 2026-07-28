@@ -22,6 +22,7 @@ full registry that buda_cli.do_command dispatches through.
 """
 import buda
 import os
+import sys
 
 from ._options import reject_unknown_options
 
@@ -176,6 +177,13 @@ def cmd_import_gds(session, cmd, args, cmd_line):
         reject_unknown_options("import_gds", [args[1]], ("labels",))
         if len(args) < 3:
             print("Error: import_gds labels requires a layer CSV"); return
+        if len(args) > 3:
+            # The layer list is ONE comma-separated token — `labels 63 64`
+            # (space-separated) used to import only layer 63, dropping 64.
+            print(f"Error: import_gds: unexpected trailing argument(s) "
+                  f"{', '.join(repr(a) for a in args[3:])} — the layer list is "
+                  f"one comma-separated token (e.g. `labels 63,64`)")
+            sys.exit(1)
     if session.bdb is None:
         print("Error: open_bdb first"); return
     label_layers = list(session._gds_label_layers)

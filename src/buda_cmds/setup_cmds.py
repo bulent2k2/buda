@@ -73,7 +73,13 @@ def cmd_add_block(session, cmd, args, cmd_line):
         i = 0
         while i < len(rest):
             kw = rest[i].lower()
-            if kw in ("dx", "dy", "pct_h", "pct_v") and i + 1 < len(rest):
+            if kw in ("dx", "dy", "pct_h", "pct_v"):
+                # A recognized key MUST be followed by a value — erroring here
+                # (rather than falling to the reject branch, which would return
+                # without advancing i) avoids an infinite loop on a trailing key.
+                if i + 1 >= len(rest):
+                    print(f"Error: add_block corner_margin {kw} requires a value")
+                    sys.exit(1)
                 kws[kw] = float(rest[i + 1]); i += 2
             else:
                 # A bad corner_margin sub-keyword used to be silently skipped.
@@ -101,7 +107,12 @@ def cmd_corner_margin(session, cmd, args, cmd_line):
     i = 0
     while i < len(args):
         kw = args[i].lower()
-        if kw in ("dx", "dy") and i + 1 < len(args):
+        if kw in ("dx", "dy"):
+            # A recognized key MUST be followed by a value — error here rather
+            # than fall to the reject branch (which returns without advancing i
+            # and would loop forever on a trailing `dx`/`dy`).
+            if i + 1 >= len(args):
+                print(f"Error: corner_margin {kw} requires a value"); sys.exit(1)
             kws[kw] = float(args[i + 1]); i += 2
         elif kw[0].isdigit() or (kw[0] == '-' and len(kw) > 1 and kw[1].isdigit()): # Positional
             if "dx" not in kws: kws["dx"] = float(kw)
@@ -241,9 +252,15 @@ def cmd_detour_channel(session, cmd, args, cmd_line):
             size = int(args[i + 1])
         except ValueError:
             print(f"Error: detour_channel size must be an integer, got '{args[i+1]}'")
-            break
+            sys.exit(1)
         session.fp.set_detour_channel(dirs, size)
         i += 2
+    # An odd final token (e.g. `detour_channel N 50 Q`) is a direction with no
+    # size — the pair loop skips it; reject it instead of silently ignoring.
+    if i < len(args):
+        print(f"Error: detour_channel: unpaired trailing token '{args[i]}' — "
+              f"needs <dir> <size> pair(s)")
+        sys.exit(1)
 
 
 def cmd_add_keepout(session, cmd, args, cmd_line):
