@@ -20,6 +20,9 @@ Each handler takes (session, cmd, args, cmd_line) and is registered
 in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
+import difflib
+import sys
+
 import buda
 
 
@@ -59,6 +62,40 @@ def _parse_gen_flags(args):
             "no_hanan_loci" not in args,
             ("hanan_loci" in args) or ("no_hanan_loci" in args),
             "spine_relays" in args)
+
+
+def _reject_unknown_gen_flags(cmd, args):
+    """Fail loudly (stop the flow) when a FLAG-ONLY generation command is given a
+    token that is not a known option.
+
+    `_parse_gen_flags` only tests membership (`"multi_trunk" in args`), so an
+    unrecognized token — a typo like `multi_trunc`, or a stray `foo` — was
+    silently ignored, and the command ran with the feature the user thought they
+    asked for quietly disabled.  This mirrors the unknown-COMMAND guard in
+    do_command: unknown input is a hard error, not a silent skip.  Prints the
+    offending token(s) and the valid options (plus a close-match hint) and exits
+    non-zero so the script stops.
+
+    Only for commands whose every argument is a flag (`generate_topologies`,
+    `generate_hier_topologies`).  The positional variants (`..._for_bundle`,
+    `..._for_hbundle`, `generate_more_topologies`) take a hint/id first, so an
+    unknown token there cannot be told apart from a bundle name and is left
+    alone."""
+    unknown = [a for a in args if a not in _GEN_FLAGS]
+    if not unknown:
+        return
+    valid = " ".join(_GEN_FLAGS)
+    hint = ""
+    for u in unknown:
+        m = difflib.get_close_matches(u, _GEN_FLAGS, n=1)
+        if m:
+            hint = f" Did you mean '{m[0]}'?"
+            break
+    plural = "s" if len(unknown) > 1 else ""
+    print(f"Error: {cmd}: unknown option{plural} "
+          f"{', '.join(repr(u) for u in unknown)}. "
+          f"Valid options: {valid}.{hint}")
+    sys.exit(1)
 
 
 def _record_gen_knob_memo(session, wrappers, tokens):
@@ -413,6 +450,7 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
             print("Warning: no bundles to generate topologies for — define nets "
                   "with add_net/add_bus, then run `run_bundler` first.")
         return
+    _reject_unknown_gen_flags(cmd, args)
     (use_center, use_double_detour, use_multi_trunk,
      use_hanan_loci, _loci_explicit, use_spine_relays) = _parse_gen_flags(args)
     topo_gen = session._make_topo_gen(session.fp, use_center, use_double_detour,
@@ -481,6 +519,7 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
     # "no_hanan_loci" opts this run out, "hanan_loci" is a keep-on no-op.
     # "spine_relays" opts MST relay-hub completion into the collector-spine
     # form (default off — byte-identical without it).
+    _reject_unknown_gen_flags(cmd, args)
     (use_center, use_double_detour, use_multi_trunk,
      use_hanan_loci, _loci_explicit, use_spine_relays) = _parse_gen_flags(args)
     # Remembered so a rotation-class clone created later (at run_planner
