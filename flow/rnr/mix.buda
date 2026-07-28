@@ -20,15 +20,14 @@ generate_hier_topologies no_hanan_loci
 set_planner_param healersAhead 1
 run_planner hier 5 signal_tracks
 run_nuts
-check_design nuts
 # improvement (2) negotiated congestion: feed the measured NUTS overlaps
 # back into the planner as band demand (bundles re-route by cost, no
 # trial-and-error), then the rnr stage-a hill-climb finishes the residual:
 negotiate_congestion
 ripup_reroute
+check_design nuts
 report_wirelength
 run_detailed_nuts
-check_design dnuts
 # improvement (3) (rnr stage b) to reduce number of bit seg opens — negotiate
 # first (each open segment's window is injected as band demand, teaching the
 # planner what DetailedNUTS measured), then the hill-climb finishes:

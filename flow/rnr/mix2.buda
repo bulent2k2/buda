@@ -16,5 +16,13 @@ ripup_reroute
 check_design nuts
 run_detailed_nuts
 negotiate_congestion
+ripup_reroute # resolves the three remaining failures (bundles 11, 13, 146)
+# see e.g. in ~/src/git/buda/cc/flow/rnr/log/mix2_rr-b_flow.log:
+#[ripup_reroute] iter 1: COMMIT bundle 11 topo 2->5, metric 18 (ovl 2)->10 (ovl 1)
+#[ripup_reroute] iter 2: COMMIT bundle 13 topo 6->1, metric 10 (ovl 1)->4 (ovl 1)
+#[ripup_reroute] iter 3: COMMIT bundle 146 topo 1->5, metric 4 (ovl 1)->0 (ovl 1)
+#[ripup_reroute] iter 4: COMMIT bundle 174 topo 2->4, metric 0 (ovl 1)->0 (ovl 0)
+
 check_design dnuts
+report_wirelength
 visualize

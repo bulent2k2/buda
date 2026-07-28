@@ -1,3 +1,4 @@
+# identical to mix.buda. use as repo only
 source mix_tracks.buda
 # Diffable serialized BDB (see docs/internal/bdb_test_data.md): open_bdb loads the
 # *.sql text into a throwaway temp binary, so this flow never dirties the fixture.
@@ -8,17 +9,15 @@ add_blocks_from_bdb 1 skip
 add_blocks_from_bdb 2 skip
 run_hier_bundler depth 2
 dump_hbundles
-generate_hier_topologies
+generate_hier_topologies no_hanan_loci
 # Heals below → opt into the kSegsRel proactive default explicitly (issue #444).
 set_planner_param healersAhead 1
 run_planner hier 5 signal_tracks
 run_nuts
-check_design nuts
 negotiate_congestion
 ripup_reroute
 check_design nuts
 run_detailed_nuts
-check_design dnuts
 negotiate_congestion
 ripup_reroute
 check_design dnuts
