@@ -81,6 +81,23 @@ class ExplorerDrawMixin:
             new_fs = max(7.0, title_artist.get_fontsize() * avail / bb.width)
             title_artist.set_fontsize(new_fs)
 
+    def _refit_title_on_resize(self, _event=None):
+        """Re-fit the title font to the CURRENT window size (resize_event hook).
+
+        `_draw` fits the title against the figure size at draw time, but a
+        resize does not re-run `_draw` (the shared home-fit tracker only refits
+        the data view).  Re-run the same fit against the live title text — from
+        scratch, so a narrowed window shrinks it and a widened one restores it
+        toward 12pt.  The resize's own redraw renders the new size."""
+        t = getattr(self.ax, 'title', None)
+        if t is None:
+            return
+        text = t.get_text()
+        if not text:
+            return
+        t.set_fontsize(self._fit_title_fontsize(text))
+        self._shrink_title_to_fit(t)
+
     def _debug_cost_title(self):
         """The debug view's second title line: this candidate's planner cost, its
         cost-rank (position in the increasing-cost stepping order), and the cost

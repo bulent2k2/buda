@@ -348,6 +348,12 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
 
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
         self.fig.canvas.mpl_connect('close_event', self._on_close)
+        # Re-fit the title font on window resize: the fit in _draw ran against
+        # the size at that draw, so a window realized smaller than nominal (or
+        # later narrowed) would clip a long title until the next navigation. The
+        # fit helpers recompute from the CURRENT figure size, so this also
+        # restores a larger font when the window grows.
+        self.fig.canvas.mpl_connect('resize_event', self._refit_title_on_resize)
         # Two-step trunk placement (T/Y): hover previews the target cell, a
         # left-click places it (right-click-drag stays the zoom-to-box gesture).
         self.fig.canvas.mpl_connect('motion_notify_event', self._on_trunk_motion)
