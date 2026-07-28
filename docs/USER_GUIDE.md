@@ -147,6 +147,30 @@ You can prohibit routing in specific rectangular regions for one or more layers:
 *   **Detailed Routing**: `run_detailed_nuts` will skip any tracks that pass through a keepout zone for the assigned layer.
 *   **Visualization**: Keepout zones appear as red hatched rectangles in the visualizer.
 
+### Comparing Topology Candidates by Cost
+The topology explorer normally steps through a bundle's candidates in
+**increasing wirelength** order. To see them in the order the **planner** cares
+about — increasing *cost* — add the `debug` flag:
+
+```python
+visualize_topologies bus_033 debug
+```
+
+The same view is reachable from the main window: add `debug` to `visualize`,
+then open the explorer with the `v` key / "View Topologies" button.
+
+Now `a`/`d` step in increasing planner cost, and the title shows each
+candidate's cost with its breakdown (`cost=<total> = seg <…> + wl <…>`) and its
+cost-rank. After `run_planner` the cost is the **real** cost the planner would
+charge that candidate against the actual congestion from the other bundles, so
+you can see *why* it picked the one it did — a shorter candidate that loses to a
+slightly longer one is usually paying a congestion penalty. Select a segment
+with `j`/`k` and the info box adds that segment's congestion cost. Before
+planning there is no congestion yet, so the cost falls back to plain
+wirelength. The candidate and family IDs are unchanged — only the stepping order
+does — so any pin you make still refers to the same candidate. (Details:
+[Script Reference → Verification & visualisation](script_reference/verify_viz.md#visualize_topologies).)
+
 ### Hand-Editing a Topology
 When none of the generated candidates is quite what you want, you can draw your
 own route and drop it into the pool — every edit is checked immediately, so you

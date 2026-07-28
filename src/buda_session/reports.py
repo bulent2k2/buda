@@ -52,7 +52,60 @@ def _fidelity_union(block, nets):
         f"single-source topology?)"))
 
 
+class _IntrinsicCost:
+    """Pre-plan fallback standing in for the C++ `CandidateCost` (same duck-typed
+    fields the explorer's debug view reads).  Before `run_planner` there is no
+    committed congestion state, so the only cost signal is the candidate's own
+    estimated wirelength: `total == wl_term == estimated_wirelength`, congestion
+    zero, and no per-segment breakdown (layers aren't assigned yet).  Ordering by
+    this is the wirelength ordering the pool already ships in."""
+    __slots__ = ("cand_index", "total", "seg_cost", "wl_term", "feasible", "segs")
+
+    def __init__(self, cand_index, wl):
+        self.cand_index = cand_index
+        self.total      = wl
+        self.seg_cost   = 0.0
+        self.wl_term    = wl
+        self.feasible   = True
+        self.segs       = []
+
+
 class ReportsMixin:
+
+    # ── debug cost inspection (topology explorer `debug` view) ─────────────
+    def _candidate_costs(self, w):
+        """HYBRID cost source for the explorer's `debug` view.  Returns
+        `(mapping, is_real)` where `mapping` is `{candidate_index -> cost}` and
+        `cost` is duck-typed to the C++ `CandidateCost` (`total`, `seg_cost`,
+        `wl_term`, `feasible`, `segs`).
+
+        POST-`run_planner` (`is_real=True`): the REAL planner cost of every
+        candidate against the current committed band state — the true congestion
+        other bundles impose — via `CongestionPlanner::candidate_costs`
+        (read-only; it recharges around itself and leaves the committed plan
+        untouched).  `segs` carries the per-segment breakdown the j/k stepper
+        shows (the congestion cost this segment pays).
+
+        PRE-plan (`is_real=False`): no committed state exists, so fall back to
+        the intrinsic estimate — each candidate's `estimated_wirelength` with
+        congestion 0 (`_IntrinsicCost`).  Ordering by it is the wirelength order
+        the pool already ships in.
+
+        Never raises: a planner lookup miss / empty result degrades to the
+        intrinsic estimate rather than failing the view."""
+        planner = getattr(self, "planner", None)
+        if planner is not None:
+            try:
+                rows = planner.candidate_costs(
+                    self.bundles, w.input.original_bundle.id)
+            except Exception:                       # noqa: BLE001 — degrade, don't crash
+                rows = []
+            if rows:
+                return {r.cand_index: r for r in rows}, True
+        # Pre-plan (or no charged state): intrinsic wirelength cost.
+        mapping = {i: _IntrinsicCost(i, c.estimated_wirelength)
+                   for i, c in enumerate(w.input.candidates)}
+        return mapping, False
 
     # ── topology inspection (dump_topologies) ──────────────────────────────
     @staticmethod

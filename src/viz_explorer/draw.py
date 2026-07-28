@@ -35,6 +35,71 @@ import viz_window
 
 class ExplorerDrawMixin:
 
+    @staticmethod
+    def _fmt_cost(v):
+        """Compact cost number: integer-ish values without a decimal tail, small
+        ones to 3 sig-figs — costs span WL (thousands) and soft terms (<1)."""
+        av = abs(v)
+        if av >= 100:
+            return f"{v:.0f}"
+        if av >= 1:
+            return f"{v:.2f}"
+        return f"{v:.3f}"
+
+    def _debug_cost_title(self):
+        """The debug view's second title line: this candidate's planner cost, its
+        cost-rank (position in the increasing-cost stepping order), and the cost
+        components.  Empty string when the `debug` flag is off.
+
+        REAL cost (post-`run_planner`): `cost=<total> [rank R/N] = seg <seg_cost>
+        + wl <wl_term>`, seg_cost being the max-over-segments segment score
+        (congestion + span + layer terms).  Pre-plan: `cost≈WL <wl> (intrinsic;
+        congestion unknown until run_planner) [rank R/N]`."""
+        res = self._debug_costs()
+        if not res:
+            return ""
+        mapping, is_real = res
+        cc = mapping.get(self.idx)
+        rank = self._cost_rank(self.idx)
+        rank_str = (f"  rank {rank[0]}/{rank[1]}"
+                    if rank and rank[0] is not None else "")
+        if cc is None:
+            return f"[debug] cost=n/a{rank_str}"
+        if not is_real:
+            return (f"[debug] cost≈WL {self._fmt_cost(cc.wl_term)} "
+                    f"(intrinsic; congestion unknown until run_planner)"
+                    f"{rank_str}")
+        feas = "" if cc.feasible else "  ⚠ infeasible"
+        return (f"[debug] cost={self._fmt_cost(cc.total)}{rank_str}"
+                f"  =  seg {self._fmt_cost(cc.seg_cost)}"
+                f"  +  wl {self._fmt_cost(cc.wl_term)}{feas}")
+
+    def _debug_seg_cost_line(self):
+        """The per-segment congestion-cost line for the j/k selected-segment
+        panel (debug view only): the cost the CURRENTLY SELECTED segment
+        contributes, broken into its terms.  Empty string when the debug flag is
+        off, no segment is selected, or the segment has no cost row (pre-plan —
+        no per-segment breakdown exists)."""
+        res = self._debug_costs()
+        if not res or self.sidx < 0:
+            return ""
+        mapping, is_real = res
+        cc = mapping.get(self.idx)
+        if cc is None or not is_real:
+            return ""
+        sc = next((s for s in cc.segs if s.seg_idx == self.sidx), None)
+        if sc is None:
+            return ""
+        parts = [f"cong {self._fmt_cost(sc.cong)}"]
+        # Only show the terms that are non-zero, to keep the line short.
+        for label, val in (("span", sc.span), ("non_top", sc.non_top),
+                           ("bal", sc.balance), ("hgt", sc.height),
+                           ("peak", sc.peak)):
+            if abs(val) > 1e-9:
+                parts.append(f"{label} {self._fmt_cost(val)}")
+        return (f"[debug] seg cost {self._fmt_cost(sc.total)}  =  "
+                + " + ".join(parts))
+
     def _draw_busterm_markers(self, topo, ct, viz_lw):
         """Draw a diamond at every busterm connection point.
 
@@ -575,6 +640,12 @@ class ExplorerDrawMixin:
             f"{bus_label}B{bid} ({nterms} terms/{len(topo.segments)} segs) · topo {self.idx + 1}/{n}"
             f"{fam_str} · {topo.type} · WL={wl} · [{layer_summary}]{sel_badge}{grp_badge}"
         )
+        # Debug view ('debug' flag): a second title line with the planner cost of
+        # THIS candidate + its cost-rank (candidates are stepped in increasing
+        # cost, so the rank is the traversal position) and the cost components.
+        cost_line = self._debug_cost_title()
+        if cost_line:
+            title_main += "\n" + cost_line
         
         title_color = 'black'
         if is_planner_active and is_current_selection:
@@ -621,6 +692,10 @@ class ExplorerDrawMixin:
                 # Third line: net-pull + the segment's connectivity — busterm
                 # taps, pass-through blocks, and connected segs (if any).
                 info += "\n" + self._seg_conn_line(cs_i, self.sidx)
+                # Debug view: the congestion cost this segment contributes.
+                _dbg = self._debug_seg_cost_line()
+                if _dbg:
+                    info += "\n" + _dbg
             y_info = 0.93 if (self._edit_topo is not None or self._edit_msg) else 0.985
             ax.text(0.01, y_info, info, transform=ax.transAxes, fontsize=8.5,
                     color='#20304a', va='top', ha='left', zorder=60,

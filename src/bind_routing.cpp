@@ -593,6 +593,25 @@ void bind_routing(py::module_& m) {
         .value("WIDTH",         CapacityMode::WIDTH)
         .value("SIGNAL_TRACKS", CapacityMode::SIGNAL_TRACKS);
 
+    // Debug cost-inspection rows (the topology explorer's `debug` view).
+    py::class_<CongestionPlanner::SegCost>(m, "SegCost")
+        .def_readonly("seg_idx", &CongestionPlanner::SegCost::seg_idx)
+        .def_readonly("layer",   &CongestionPlanner::SegCost::layer)
+        .def_readonly("cong",    &CongestionPlanner::SegCost::cong)
+        .def_readonly("span",    &CongestionPlanner::SegCost::span)
+        .def_readonly("non_top", &CongestionPlanner::SegCost::non_top)
+        .def_readonly("balance", &CongestionPlanner::SegCost::balance)
+        .def_readonly("height",  &CongestionPlanner::SegCost::height)
+        .def_readonly("peak",    &CongestionPlanner::SegCost::peak)
+        .def_readonly("total",   &CongestionPlanner::SegCost::total);
+    py::class_<CongestionPlanner::CandidateCost>(m, "CandidateCost")
+        .def_readonly("cand_index", &CongestionPlanner::CandidateCost::cand_index)
+        .def_readonly("total",      &CongestionPlanner::CandidateCost::total)
+        .def_readonly("seg_cost",   &CongestionPlanner::CandidateCost::seg_cost)
+        .def_readonly("wl_term",    &CongestionPlanner::CandidateCost::wl_term)
+        .def_readonly("feasible",   &CongestionPlanner::CandidateCost::feasible)
+        .def_readonly("segs",       &CongestionPlanner::CandidateCost::segs);
+
     py::class_<CongestionPlanner>(m, "CongestionPlanner")
         // Planner keeps references to both args (floorplan_/layers_); keep them
         // alive as long as the planner so temporaries are not freed early.
@@ -624,6 +643,12 @@ void bind_routing(py::module_& m) {
         .def("clear_injected_demand", &CongestionPlanner::clear_injected_demand)
         .def("recharge_committed",   &CongestionPlanner::recharge_committed,
              py::arg("bundles"))
+        .def("candidate_costs",      &CongestionPlanner::candidate_costs,
+             py::arg("bundles"), py::arg("target_bundle_id"),
+             "Read-only debug scorer: planner cost of every candidate of one "
+             "bundle vs the current committed state, with per-segment + WL/seg "
+             "breakdown; empty if the planner isn't set up (caller falls back "
+             "to the intrinsic wirelength cost)")
         .def("band_occupants",       &CongestionPlanner::band_occupants,
              py::arg("bundles"), py::arg("layer_id"), py::arg("span_lo"),
              py::arg("span_hi"), py::arg("perp_lo"), py::arg("perp_hi"),

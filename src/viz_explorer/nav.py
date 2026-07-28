@@ -78,6 +78,68 @@ class ExplorerNavMixin:
         fam = next((k for k, g in enumerate(groups) if self.idx in g), 0)
         return fam, len(groups)
 
+    # ── debug cost view (visualize_topologies `debug`) ─────────────────────
+    def _debug_costs(self):
+        """The current bundle's `({cand_index: CandidateCost}, is_real)` from the
+        session's HYBRID cost source, or None when the `debug` flag is off / the
+        source failed.  Cached so stepping doesn't re-invoke the C++ scorer every
+        key — the same pattern as `_explorer_groups`.  `is_real` is True for the
+        real planner cost (post-`run_planner`), False for the pre-plan intrinsic
+        wirelength.
+
+        The cache key includes the bundle's `pinned_seg_layers` so a live layer
+        change (`+`/`-`, which rewrites those and feeds `candidate_costs` a new
+        forced layer) — or a pin/unpin that (re)sets them — invalidates this
+        bundle's entry instead of showing the previous assignment's cost.  A
+        re-run (`r`), which changes the COMMITTED state every bundle is scored
+        against, clears the whole cache in `_rerun_and_refresh`."""
+        fn = getattr(self, '_cost_fn', None)
+        if fn is None:
+            return None
+        key = (self.bidx, len(self.topos),
+               tuple(self.wrapper.input.pinned_seg_layers))
+        cache = getattr(self, '_cost_cache', None)
+        if cache is not None and key in cache:
+            return cache[key]
+        try:
+            res = fn(self.wrapper)
+        except Exception:
+            res = None
+        if cache is not None:
+            cache[key] = res
+        return res
+
+    def _cost_order(self):
+        """Candidate indices ordered by INCREASING planner cost (the debug
+        stepping permutation), or None when the debug view is off.  STRICT-
+        INFEASIBLE candidates (overflow — ones the planner rejects unless forced)
+        sink below every feasible candidate, mirroring the escalation ladder; a
+        candidate with no cost row (a lookup miss) sorts last on +inf.  Ties
+        break by the real candidate index so the order is stable."""
+        res = self._debug_costs()
+        if not res:
+            return None
+        mapping, _real = res
+        n = len(self.topos)
+
+        def key(i):
+            c = mapping.get(i)
+            if c is None:
+                return (2, float('inf'), i)
+            return (0 if c.feasible else 1, c.total, i)
+        return sorted(range(n), key=key)
+
+    def _cost_rank(self, idx):
+        """(rank, N) 1-based position of candidate `idx` in the cost order, or
+        None when the debug view is off."""
+        order = self._cost_order()
+        if not order:
+            return None
+        try:
+            return order.index(idx) + 1, len(order)
+        except ValueError:
+            return None, len(order)
+
     def _toggle_group_step(self):
         """'G': toggle family-stepping.  On entry snap to the current family's
         representative so a/d stepping is well-defined."""
@@ -103,7 +165,19 @@ class ExplorerNavMixin:
                 self._reset_rerun_btn()
                 self._draw()
                 return
-        self.idx = (self.idx + delta) % len(self.topos)
+        # Debug view ('debug' flag): step in INCREASING-cost order rather than
+        # candidate-index (WL) order.  self.idx stays the REAL candidate index —
+        # only the traversal sequence changes, so pins / group IDs / the
+        # `topo i/n` display are unaffected.
+        order = self._cost_order()
+        if order:
+            try:
+                cur = order.index(self.idx)
+            except ValueError:
+                cur = 0
+            self.idx = order[(cur + delta) % len(order)]
+        else:
+            self.idx = (self.idx + delta) % len(self.topos)
         self.sidx = -1
         self._reset_rerun_btn()
         self._draw()
@@ -437,6 +511,12 @@ class ExplorerNavMixin:
         except Exception as e:
             print(f"[Viz] Re-run failed: {e}")
             result = None
+        if result is not None:
+            # The re-plan changed the committed band state every candidate is
+            # scored against, so every cached debug cost is now stale — drop them
+            # all (lazily recomputed on the next _draw).
+            if getattr(self, '_cost_cache', None) is not None:
+                self._cost_cache.clear()
         if self._btn_rerun is not None:
             if result is not None:
                 self._btn_rerun.label.set_text('✓  Done')
