@@ -1150,23 +1150,27 @@ class RipupMixin:
         # the other templates of the cell kept their pins + pinned layers
         # (honored by the local planner), so their instances' committed
         # state (including any adopted dogleg-slot selection, which does
-        # NOT equal the template index) must not be touched.  Candidate
-        # indices are preserved by expansion, and layer ids are
-        # frame-independent, so index + layers copy directly; the per-
-        # segment dogleg overrides are cleared exactly as _rr_trial does
-        # when moving a bundle off its split (the snapshot restores them
-        # on rejection).  seg_perp is cleared too — NUTS never reads it
-        # for a locked bundle (its routing is the fixed copies), but the
-        # planner's recharge (commit_plan via recharge_committed /
-        # replan_bundle, on accept and in every later trial) consumes it
-        # as a per-segment band-charge override for the SELECTED
-        # candidate, and the stale values index the OLD candidate's
-        # geometry — cleared, each new segment charges at its own nominal
-        # perp, the same convention as any wrapper without overrides
-        # (Codex #472 P1).  Mirrors _expand_hier_bundles' pin propagation
-        # + locked rule (bottom-up cells never expand 90°-rotated
-        # instances; the rotation classes have their own clone
-        # templates).
+        # NOT equal the template index) must not be touched.
+        self._rr_propagate_template_pin(tw)
+        self._rr_invalidate_bottom_up_caches()
+
+    def _rr_propagate_template_pin(self, tw):
+        """Copy template `tw`'s pin (index + layers) to every instance
+        wrapper of its class.  Candidate indices are preserved by
+        expansion, and layer ids are frame-independent, so index + layers
+        copy directly; the per-segment dogleg overrides are cleared
+        exactly as _rr_trial does when moving a bundle off its split (the
+        class snapshot restores them on rejection).  seg_perp is cleared
+        too — NUTS never reads it for a locked bundle (its routing is the
+        fixed copies), but the planner's recharge (commit_plan via
+        recharge_committed / replan_bundle) consumes it as a per-segment
+        band-charge override for the SELECTED candidate, and the stale
+        values index the OLD candidate's geometry — cleared, each new
+        segment charges at its own nominal perp, the convention for any
+        wrapper without overrides (Codex #472 P1).  Mirrors
+        _expand_hier_bundles' pin propagation + locked rule (bottom-up
+        cells never expand 90°-rotated instances; the rotation classes
+        have their own clone templates)."""
         exp_map = getattr(self, "_hier_expansion_map", None) or {}
         for iw in exp_map.get(tw.input.original_bundle.id, []):
             iw.input.topology_pinned = True
@@ -1180,13 +1184,38 @@ class RipupMixin:
             iw.plan.seg_slide_hi = []
             iw.hier.locked = (tw.input.topology_pinned
                               and bool(tw.input.pinned_seg_layers))
-        # Template geometry changed — every cache derived from it is stale.
-        # The trial's _rr_rerun recomputes the fixed copies (and re-adopts
-        # any dogleg) under _rr_in_trial, so nothing reaches the BDB.
+
+    def _rr_invalidate_bottom_up_caches(self):
+        """Template geometry changed — every cache derived from it is
+        stale.  A trial's re-run recomputes the fixed copies (and
+        re-adopts any dogleg) under _rr_in_trial, so nothing reaches the
+        BDB until the accept path replays the deferred persistence."""
         self._bu_fixed_cache = None
         self._template_track_verdict = None
         self._bu_dnuts_plan_cache = None
         self._bu_fixed_from_resume = False
+
+    def _rr_class_maps(self):
+        """(by_cell, cell_of, tmpl_of) for the bottom-up template classes:
+        cell -> template wrappers, canonical template id -> cell, and
+        instance-wrapper bid -> CANONICAL template id.  exp_map also
+        aliases every REPLICA bundle id to its instance's wrapper
+        (inserted after the canonical entries by _expand_hier_bundles), so
+        the walk skips non-canonical tids — an unfiltered walk would
+        overwrite the canonical mapping with the replica id and a locked
+        contender on that wrapper would silently skip its class
+        (Codex #472 P1)."""
+        by_cell = self._rr_class_cell_wrappers()
+        cell_of = {w.input.original_bundle.id: cell
+                   for cell, ws in by_cell.items() for w in ws}
+        exp_map = getattr(self, "_hier_expansion_map", None) or {}
+        tmpl_of = {}
+        for tid, iws in exp_map.items():
+            if tid not in cell_of:            # replica alias / non-bottom-up
+                continue
+            for iw in iws:
+                tmpl_of[iw.input.original_bundle.id] = tid
+        return by_cell, cell_of, tmpl_of
 
     def _rr_class_moves(self, tw, iw, stage):
         """Alternate template candidate indices for one class, best-first:
@@ -1226,23 +1255,9 @@ class RipupMixin:
         locked = self._rr_locked_contenders(stage)
         if not locked:
             return False, 0
-        by_cell = self._rr_class_cell_wrappers()
+        by_cell, cell_of, tmpl_of = self._rr_class_maps()
         if not by_cell:
             return False, 0
-        cell_of = {w.input.original_bundle.id: cell
-                   for cell, ws in by_cell.items() for w in ws}
-        # Wrapper -> CANONICAL template only.  exp_map also aliases every
-        # REPLICA bundle id to its instance's wrapper (inserted after the
-        # canonical entries by _expand_hier_bundles), so an unfiltered walk
-        # would overwrite the canonical mapping with the replica id — and a
-        # locked contender on that wrapper would silently skip its class
-        # (the replica id is not in cell_of; Codex #472 P1).
-        tmpl_of = {}
-        for tid, iws in exp_map.items():
-            if tid not in cell_of:            # replica alias / non-bottom-up
-                continue
-            for iw in iws:
-                tmpl_of[iw.input.original_bundle.id] = tid
         user_pinned = getattr(self, "_bu_user_pinned", None) or set()
         classes, seen = [], set()
         for bid in locked:
@@ -1735,69 +1750,159 @@ class RipupMixin:
         self._open_seg_cache = (dr, out)
         return out
 
-    def _negotiate_iteration(self, affected, stage, sink):
-        """One negotiation iteration's mutation body, silenced: replan every
-        affected bundle UNPINNED under the injected prices, then re-run
-        NUTS (+ DNUTS for stage b).  Extracted so _negotiate_congestion can
-        wrap it in exception hygiene (restore + clear injected demand)."""
+    def _neg_template_targets(self, affected):
+        """Negotiate v2 (docs/internal/bottomup_healer_templates.md item D):
+        the bottom-up template classes whose LOCKED instances appear in this
+        iteration's affected list — the bundles today's iteration skips.
+        Returns [(cell, [target template wrappers], cell_wrappers)] with one
+        entry per cell (a cell's local re-plan handles all its targets at
+        once); canonical templates only (_rr_class_maps), user-pinned and
+        single-candidate templates excluded.  Empty on flat flows / no
+        locked contention — the v2 path is then structurally inert."""
+        if not getattr(self, "_planner_is_hier", False):
+            return []
+        locked = [bid for bid in affected
+                  if (w := self._rr_wrapper(bid)) is not None
+                  and w.hier.locked]
+        if not locked:
+            return []
+        by_cell, cell_of, tmpl_of = self._rr_class_maps()
+        if not by_cell:
+            return []
+        user_pinned = getattr(self, "_bu_user_pinned", None) or set()
+        per_cell = {}
+        for bid in locked:
+            tid = tmpl_of.get(bid)
+            if tid is None or tid in user_pinned:
+                continue
+            tw = self._rr_template_wrapper(tid)
+            if tw is None or len(tw.input.candidates) < 2:
+                continue
+            per_cell.setdefault(cell_of[tid], {})[tid] = tw
+        return [(cell, list(tws.values()), by_cell[cell])
+                for cell, tws in per_cell.items()]
+
+    def _neg_replan_cell_templates(self, cell, targets, cell_wrappers,
+                                   inj_recs):
+        """Negotiate v2's per-cell mutation: UNPIN the target templates (the
+        corrected prices, not a pinned index, choose the topology — the
+        negotiate convention; a user-pinned template never reaches here),
+        translate the iteration's injected demand into the cell frame
+        summed across instances, re-run the cell-local solve under that
+        aggregated price field, and propagate the resulting pins to every
+        instance of each target class.  The caller owns accept/restore
+        (class snapshot) and the deferred-persistence replay on accept."""
+        for tw in targets:
+            tw.input.topology_pinned = False
+            tw.input.pinned_seg_layers = []
+            # Dogleg per-segment overrides are indexed by the current
+            # (possibly split) selection — they must not leak onto whatever
+            # the priced re-plan selects (the class snapshot restores them
+            # on rejection).
+            tw.plan.seg_net_pull = []
+            tw.plan.seg_slide_lo = []
+            tw.plan.seg_slide_hi = []
+        local_inj = self._translate_injections_to_cell(cell, cell_wrappers,
+                                                       inj_recs)
+        iters = (getattr(self, "_bu_local_iterations", None)
+                 or self._planner_iterations)
+        self._plan_bottom_up_cell(cell, cell_wrappers, iters,
+                                  persist=False, inject=local_inj)
+        for tw in targets:
+            self._rr_propagate_template_pin(tw)
+        self._rr_invalidate_bottom_up_caches()
+
+    def _negotiate_iteration(self, affected, stage, sink, tmpl_neg=(),
+                             inj_recs=()):
+        """One negotiation iteration's mutation body, silenced: first the
+        template-class re-plans (negotiate v2 — `tmpl_neg` cells re-planned
+        in their local frames under the translated `inj_recs` prices, so
+        the free-bundle replans below charge the NEW template placement),
+        then replan every affected FREE bundle UNPINNED under the injected
+        prices, then re-run NUTS (+ DNUTS for stage b).  Extracted so
+        _negotiate_congestion can wrap it in exception hygiene (restore +
+        clear injected demand).  When templates are re-planned the body
+        runs under _rr_in_trial so a REJECTED iteration's fixed-copy
+        recompute (dogleg adoption) cannot reach the BDB — the accept path
+        replays the deferred persistence."""
         with contextlib.redirect_stdout(sink), buda.ostream_redirect():
             t0 = time.perf_counter()
-            for bid in affected:
-                w = self._rr_wrapper(bid)
-                if w is None:
+            if tmpl_neg:
+                self._rr_in_trial = True
+            try:
+                self._negotiate_iteration_body(affected, stage, tmpl_neg,
+                                               inj_recs, t0)
+            finally:
+                if tmpl_neg:
+                    self._rr_in_trial = False
+
+    def _negotiate_iteration_body(self, affected, stage, tmpl_neg,
+                                  inj_recs, t0):
+        """The mutation sequence of one negotiation iteration (see
+        _negotiate_iteration, which owns the output redirect and the
+        _rr_in_trial guard): template-class re-plans first, then the free
+        affected bundles, then the NUTS (+ DNUTS) re-solve."""
+        for cell, targets, cell_ws in tmpl_neg:
+            self._neg_replan_cell_templates(cell, targets, cell_ws,
+                                            inj_recs)
+        for bid in affected:
+            w = self._rr_wrapper(bid)
+            if w is None:
+                continue
+            # A hier.locked wrapper (bottom-up template instance) is never
+            # an INDIVIDUAL negotiation target: its pinned assignment is a
+            # uniform copy shared by all sibling instances.  Its class is
+            # negotiated at the TEMPLATE level instead (the tmpl_neg loop
+            # above — negotiate v2 price translation); its overlap partner
+            # (if unlocked) still replans around it, and
+            # replan_bundle_ripup's victim stage skips locked blockers
+            # C++-side too.
+            if w.hier.locked:
+                continue
+            # Unpin: the corrected prices, not a pinned index, choose
+            # the topology (snapshot restores the pins on rejection).
+            # Per-segment layer pins must go too — plan_bundle applies
+            # pinned_seg_layers[si] to EVERY candidate regardless of
+            # topology_pinned, so a stale sidecar pin would force
+            # layers onto whatever topology negotiation picks
+            # (including H/V mismatches that charge no cuts).
+            w.input.topology_pinned = False
+            w.input.pinned_seg_layers = []
+            # NOTE: pinned_group is deliberately NOT cleared — a
+            # super-candidate group pin must survive negotiation.  The C++
+            # selection loop gives pinned_group precedence over the (now
+            # cleared) single pin, so replan_bundle_ripup re-selects WITHIN
+            # the family; the injected prices still steer WHICH member wins,
+            # but negotiation can never move a group-pinned bundle out of the
+            # family the user pinned (mirrors _rr_candidate_order for ripup).
+            # The victim stage is likewise family-safe: C++ only reads
+            # pinned_group, never clears it.
+            # The ripup-capable replan (v2b): when the target has no
+            # overflow-free candidate under the injected prices, the
+            # planner's own ladder may also displace the committed
+            # bundle blocking it — both assignments come back and the
+            # outer accept/restore guard still owns safety.
+            asns = self.planner.replan_bundle_ripup(self.bundles, bid)
+            for asn in asns:
+                w2 = self._rr_wrapper(asn.bundle_id)
+                if w2 is None:
                     continue
-                # A hier.locked wrapper (bottom-up template instance) is
-                # never a negotiation target: its pinned assignment is a
-                # uniform copy shared by all sibling instances.  Its
-                # overlap partner (if unlocked) still replans around it —
-                # and replan_bundle_ripup's victim stage skips locked
-                # blockers C++-side too.
-                if w.hier.locked:
-                    continue
-                # Unpin: the corrected prices, not a pinned index, choose
-                # the topology (snapshot restores the pins on rejection).
-                # Per-segment layer pins must go too — plan_bundle applies
-                # pinned_seg_layers[si] to EVERY candidate regardless of
-                # topology_pinned, so a stale sidecar pin would force
-                # layers onto whatever topology negotiation picks
-                # (including H/V mismatches that charge no cuts).
-                w.input.topology_pinned = False
-                w.input.pinned_seg_layers = []
-                # NOTE: pinned_group is deliberately NOT cleared — a
-                # super-candidate group pin must survive negotiation.  The C++
-                # selection loop gives pinned_group precedence over the (now
-                # cleared) single pin, so replan_bundle_ripup re-selects WITHIN
-                # the family; the injected prices still steer WHICH member wins,
-                # but negotiation can never move a group-pinned bundle out of the
-                # family the user pinned (mirrors _rr_candidate_order for ripup).
-                # The victim stage is likewise family-safe: C++ only reads
-                # pinned_group, never clears it.
-                # The ripup-capable replan (v2b): when the target has no
-                # overflow-free candidate under the injected prices, the
-                # planner's own ladder may also displace the committed
-                # bundle blocking it — both assignments come back and the
-                # outer accept/restore guard still owns safety.
-                asns = self.planner.replan_bundle_ripup(self.bundles, bid)
-                for asn in asns:
-                    w2 = self._rr_wrapper(asn.bundle_id)
-                    if w2 is None:
-                        continue
-                    w2.plan.selected_topology_index = asn.topo_index
-                    w2.input.assigned_v_layer = asn.v_layer_id
-                    w2.input.assigned_h_layer = asn.h_layer_id
-                    w2.plan.seg_layers = list(asn.seg_layers)
-                    w2.plan.seg_perp = list(asn.seg_perp)
-            self._rr_t_add('replan', time.perf_counter() - t0)
+                w2.plan.selected_topology_index = asn.topo_index
+                w2.input.assigned_v_layer = asn.v_layer_id
+                w2.input.assigned_h_layer = asn.h_layer_id
+                w2.plan.seg_layers = list(asn.seg_layers)
+                w2.plan.seg_perp = list(asn.seg_perp)
+        self._rr_t_add('replan', time.perf_counter() - t0)
+        t0 = time.perf_counter()
+        self._run_nuts_internal()
+        self._rr_t_add('nuts', time.perf_counter() - t0)
+        self._rr_t_add_passes('nuts', self.nuts_result.pass_seconds)
+        if stage == 'b':
             t0 = time.perf_counter()
-            self._run_nuts_internal()
-            self._rr_t_add('nuts', time.perf_counter() - t0)
-            self._rr_t_add_passes('nuts', self.nuts_result.pass_seconds)
-            if stage == 'b':
-                t0 = time.perf_counter()
-                self._run_detailed_nuts(bit_order=self._detailed_bit_order)
-                self._rr_t_add('dnuts', time.perf_counter() - t0)
-                self._rr_t_add_passes('dnuts',
-                                      self.detailed_result.pass_seconds)
+            self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+            self._rr_t_add('dnuts', time.perf_counter() - t0)
+            self._rr_t_add_passes('dnuts',
+                                  self.detailed_result.pass_seconds)
 
     def _heal_dead_spans(self, stage):
         """Preconditioning step folded into the stage-b healers.
@@ -1851,7 +1956,7 @@ class RipupMixin:
                       f"escalation ({n} segment(s)).")
         return n
 
-    def _negotiate_congestion(self, max_iter=5):
+    def _negotiate_congestion(self, max_iter=5, use_class_moves=False):
         """Measured-congestion negotiation (wishlist-ripup item 1).  Instead of
         guess-and-test over topology candidates, feed the ACTUAL failures back
         into the planner as demand on the exact bands where they happened
@@ -1915,9 +2020,11 @@ class RipupMixin:
             cur = metric()
             if cur == ((0, 0) if isinstance(cur, tuple) else 0):
                 break
-            snap = self._rr_snapshot()
             self.planner.clear_injected_demand()
             affected = []
+            inj_recs = []     # (layer, s_lo, s_hi, p_lo, p_hi, amount) —
+            #                   this iteration's injections, kept for the
+            #                   template price translation (negotiate v2)
             n_sites = 0
             if stage == 'a':
                 for od in self.nuts_result.overlap_details:
@@ -1932,6 +2039,8 @@ class RipupMixin:
                     self.planner.inject_band_demand(
                         od.layer, od.span_lo, od.span_hi,
                         od.perp_lo, od.perp_hi, amount)
+                    inj_recs.append((od.layer, od.span_lo, od.span_hi,
+                                     od.perp_lo, od.perp_hi, amount))
                     n_sites += 1
                     for bid in (od.bid_a, od.bid_b):
                         if bid not in affected:
@@ -1955,6 +2064,8 @@ class RipupMixin:
                     self.planner.inject_band_demand(
                         ts.layer, s_lo, s_hi,
                         ts.interval_lo, ts.interval_hi, amount)
+                    inj_recs.append((ts.layer, s_lo, s_hi,
+                                     ts.interval_lo, ts.interval_hi, amount))
                     n_sites += 1
                     if bid not in affected:
                         affected.append(bid)
@@ -1962,24 +2073,48 @@ class RipupMixin:
             affected.sort(
                 key=lambda b: -(self._rr_wrapper(b).input.width
                                 if self._rr_wrapper(b) is not None else 0.0))
+            # Negotiate v2: the locked members of `affected` map to bottom-up
+            # template classes negotiated in their cell-local frames under
+            # the translated prices.  Empty on flat / no-locked-contention
+            # flows — the base snapshot then keeps the historical iteration
+            # byte-identical; with template targets the EXTENDED snapshot
+            # covers the template-side state the iteration now mutates.
+            tmpl_neg = (self._neg_template_targets(affected)
+                        if use_class_moves else [])
+            snap = (self._rr_class_snapshot() if tmpl_neg
+                    else self._rr_snapshot())
+            restore = (self._rr_class_restore if tmpl_neg
+                       else self._rr_restore)
             sink = io.StringIO()
             try:
-                self._negotiate_iteration(affected, stage, sink)
+                self._negotiate_iteration(affected, stage, sink,
+                                          tmpl_neg=tmpl_neg,
+                                          inj_recs=inj_recs)
             except BaseException:
                 # A mid-iteration exception (e.g. the bottom-up DNUTS 'stop'
                 # policy raising) must not leave speculative state live
                 # (#286 retrospective note).
-                self._rr_restore(snap)
+                restore(snap)
                 self.planner.clear_injected_demand()
                 raise
             new = metric()
             if new < cur:
                 accepted += 1
+                if tmpl_neg:
+                    # Replay the persistence the _rr_in_trial guard deferred
+                    # (template decisions + any dogleg adoption) — the same
+                    # accept contract as a ripup class move.
+                    for _cell, _targets, cell_ws in tmpl_neg:
+                        self._persist_bottom_up_cell_decision(cell_ws)
+                    self._persist_bottom_up_dogleg_adoptions()
+                n_cls = sum(len(t) for _c, t, _w in tmpl_neg)
+                cls_note = (f" (+{n_cls} template class(es))"
+                            if n_cls else "")
                 print(f"[negotiate] iter {it}: {n_sites} contention site(s) -> "
-                      f"replanned {len(affected)} bundle(s), metric "
+                      f"replanned {len(affected)} bundle(s){cls_note}, metric "
                       f"{self._rr_m_str(cur)}->{self._rr_m_str(new)}", flush=True)
             else:
-                self._rr_restore(snap)
+                restore(snap)
                 print(f"[negotiate] iter {it}: no improvement "
                       f"(metric {self._rr_m_str(cur)}->{self._rr_m_str(new)}) "
                       f"— restored, stop.", flush=True)

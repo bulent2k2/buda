@@ -34,9 +34,46 @@ differ from the sketch below:
   (`_persist_bottom_up_cell_decision` + a fixed-copy recompute, both
   idempotent).
 
-Items B/C are folded into the implementation as specified; item D
-(negotiate) and item E remain future work as scoped below.  The original
-investigation follows.
+Items B/C are folded into the implementation as specified.
+
+**Item D (negotiate v2 price translation) is also IMPLEMENTED — as an
+OPT-IN** (`negotiate_congestion class_moves`, default off).  The
+translation layer works exactly as scoped: each iteration's injected
+band-demand records are clipped to every instance bbox, mapped through
+the inverse orientation transform into the cell frame
+(`_translate_injections_to_cell` — locked classes are
+direction-preserving, so the maps are the involutions N/S/FN/FS), and
+summed by injecting them all into the cell-local planner
+(`_plan_bottom_up_cell(inject=...)`, with a new
+`CongestionPlanner::extend_grid_for` pre-extension so the optimizer's
+grid rebuild cannot wipe the injections); the locked-affected templates
+are re-planned UNPINNED under that aggregated field
+(`_neg_replan_cell_templates`), propagated, and the iteration accepts or
+class-restores under the extended snapshot with the same deferred-BDB
+contract as a ripup class trial.
+
+Why opt-in — the measurement the v1 note asked for came back negative on
+the default question (mix2_fast_bottomup + healers, 2026-07-28):
+
+| variant | stage-a negotiate | stage-b entry | final opens |
+|---|---|---|---|
+| v1 (ripup class moves only) | 17→15 | 78 | **8** on 1 bundle |
+| + v2 both stages, default budgets | 17→**13** | **148** | 16 on 2 |
+| + v2 both stages, `ripup_reroute 30` | 17→13 | 148 | 8 on 1 (ovl 3 vs 2) |
+| + v2 stage b only | 17→15 | 78 | 8 on 1 (iteration price-rejected) |
+
+The stage-a metric (abstract overlaps) is blind to DNUTS quality, and
+the bigger multi-class shuffles v2 legitimately wins on it (17→13) trade
+that quality away — the healed endpoint is equal at best and needs ~3×
+the stage-b ripup moves to converge back; the stage-b priced re-plan is
+rejected by its own accept guard.  Ripup's farness-ranked class trials
+already cover the endpoint, exactly as the v1 note predicted.  The
+machinery stays available for designs where a locked class must be
+steered by measured prices (e.g. many classes contending at once, where
+per-class trials are too expensive).
+
+Item E remains future work as scoped below.  The original investigation
+follows.
 
 The healers (`negotiate_congestion`, `ripup_reroute`) currently refuse
 bottom-up (`hier.locked`) wrappers as movers and victims, so on a bottom-up
