@@ -344,6 +344,10 @@ class VizHighlightMixin:
         # Layer visibility also gates the pre-route bands (any view mode).
         self._apply_preroute_visibility()
 
+        # B<id> endpoint labels follow the SELECTION (shown only for the
+        # highlighted/soloed bundle) so they don't pile up across all drivers.
+        self._apply_endpoint_label_visibility()
+
         # Apply layer visibility to non-bundle detailed artists (grid rails).
         # These are only shown when detailed_mode is active.
         if self.ui_state.detailed_mode:

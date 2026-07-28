@@ -522,6 +522,7 @@ class VizAbstractDrawMixin:
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
         self._busterm_artists = []
+        self._endpoint_label_artists = []
         self._vias_conns_artists = []
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         for i, wrapper in enumerate(self.bundles):
@@ -561,6 +562,7 @@ class VizAbstractDrawMixin:
     def draw_nuts_tracks(self, nuts_result):
         """Draw segments at NUTS-assigned track positions with interval bands."""
         self._busterm_artists = []
+        self._endpoint_label_artists = []
         self._vias_conns_artists = []
         self._nuts_result = nuts_result   # saved for overlap panel in show()
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
@@ -675,6 +677,20 @@ class VizAbstractDrawMixin:
         self._hook_lw_sync()
 
 
+    def _add_endpoint_label(self, bundle_id, pos):
+        """Create a `B<id>` endpoint label, tracked in `_endpoint_label_artists`
+        for HIGHLIGHT-gated visibility.  Every bundle's driver lands one, and on
+        a dense design their drivers cluster so all-on would pile the labels up
+        (the reported overlap).  So a label is shown only for the highlighted /
+        soloed bundle (see `_apply_endpoint_label_visibility`); it starts hidden.
+        Nudged just above the marker so it doesn't sit on top of it."""
+        lbl = self.ax.text(pos[0], pos[1], f"B{bundle_id}",
+                           fontsize=8, color='black', fontweight='bold',
+                           ha='center', va='bottom', zorder=21, clip_on=True)
+        lbl.set_visible(False)
+        self._endpoint_label_artists.append((bundle_id, lbl))
+        return lbl
+
     def _draw_terminals(self, bundle_id, drv_pos, rcv_positions, viz_lw, alpha,
                         bidir=False):
         """Draw driver (cyan square) and receiver (magenta circle) terminals.
@@ -705,12 +721,7 @@ class VizAbstractDrawMixin:
                 self._register(bundle_id, m, alpha=alpha, lw=msz)
                 new_artists.append(m)
             if positions and positions[0] is not None:
-                lbl = self.ax.text(positions[0][0], positions[0][1], f"B{bundle_id}",
-                                   fontsize=8, color='black', fontweight='bold',
-                                   ha='center', va='center', zorder=21, clip_on=True)
-                lbl.set_alpha(alpha)
-                self._register(bundle_id, lbl, alpha=alpha)
-                new_artists.append(lbl)
+                self._add_endpoint_label(bundle_id, positions[0])
             self._busterm_artists.extend(new_artists)
             if not self.ui_state.busterms:
                 for a in new_artists:
@@ -722,12 +733,7 @@ class VizAbstractDrawMixin:
                                 markersize=msz, alpha=alpha, zorder=20)
             self._register(bundle_id, drv, alpha=alpha, lw=msz)
             new_artists.append(drv)
-            lbl = self.ax.text(drv_pos[0], drv_pos[1], f"B{bundle_id}",
-                               fontsize=8, color='black', fontweight='bold',
-                               ha='center', va='center', zorder=21, clip_on=True)
-            lbl.set_alpha(alpha)
-            self._register(bundle_id, lbl, alpha=alpha)
-            new_artists.append(lbl)
+            self._add_endpoint_label(bundle_id, drv_pos)
 
         if rcv_positions is not None:
             # Accept single tuple or list of tuples
