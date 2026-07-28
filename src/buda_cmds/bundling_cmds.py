@@ -25,6 +25,8 @@ import re
 
 import buda
 
+from ._options import reject_unknown_options
+
 
 # ── generalized bundling (COMBINED + per-prefix overrides) ────────────────────
 #
@@ -654,6 +656,10 @@ def cmd_set_max_bundle_bits(session, cmd, args, cmd_line):
     if not args:
         print("Error: usage: set_max_bundle_bits <N|auto|off> [auto]")
         return
+    # The only valid SECOND token is `auto` (arg0 is a count / auto / off,
+    # validated below).  Reject anything else instead of silently dropping it.
+    reject_unknown_options("set_max_bundle_bits",
+                           [a.lower() for a in args[1:]], ("auto",))
     a0 = args[0].lower()
     if a0 == "off":
         session._max_bundle_bits = None
@@ -689,17 +695,24 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     if session.bdb is None:
         print("Error: run_hier_bundler requires an open BDB (use open_bdb first)"); return
     max_depth = 1
+    depth_val_idx = -1
     if "depth" in args:
         idx = list(args).index("depth")
-        if idx + 1 < len(args):
-            max_depth = int(args[idx + 1])
-    # Optional strategy token (anything that isn't 'depth'/its value).
-    strat_toks = [a.upper() for a in args
-                  if a.lower() != "depth" and not a.isdigit()]
+        if idx + 1 >= len(args) or not args[idx + 1].isdigit():
+            print("Error: run_hier_bundler depth requires an integer value"); return
+        max_depth = int(args[idx + 1])
+        depth_val_idx = idx + 1
+    # Optional strategy token: any arg that isn't `depth` or its value.  Reject
+    # an unknown token instead of silently keeping only the first (the old
+    # strat_toks[0] dropped a typo like `CONVERGENT foo`).
+    strat_toks = [a.upper() for i, a in enumerate(args)
+                  if a.lower() != "depth" and i != depth_val_idx]
+    reject_unknown_options("run_hier_bundler", strat_toks,
+                           ("STRICT", "CONVERGENT", "BIDIRECTIONAL", "COMBINED"))
+    if len(strat_toks) > 1:
+        print(f"Error: run_hier_bundler: at most one strategy, got "
+              f"{', '.join(strat_toks)}"); return
     strat = strat_toks[0] if strat_toks else "STRICT"
-    if strat not in ("STRICT", "CONVERGENT", "BIDIRECTIONAL", "COMBINED"):
-        print(f"Error: run_hier_bundler strategy must be STRICT, CONVERGENT, "
-              f"BIDIRECTIONAL or COMBINED, got '{strat}'"); return
     hb = buda.HierarchicalBundler(session.bdb)
     # BIDIRECTIONAL is direction-agnostic and connects the same blocks, so
     # (like the flat run_bundler) it routes correctly — no warning needed.
@@ -765,12 +778,20 @@ def cmd_dump_hbundles(session, cmd, args, cmd_line):
     # Without 'expanded': prints the pre-expansion HBundle list (from _hier_bundles_orig).
     # With 'expanded':    prints the current session.bundles (post-expansion after run_planner hier).
     # With 'depth N':     filters to bundles at level N only.
-    use_expanded = "expanded" in args
+    # Options are `expanded` and `depth <N>` — reject anything else (a typo
+    # used to silently run the default pre-expansion, unfiltered dump).
     filter_depth = None
+    depth_val_idx = -1
     if "depth" in args:
         idx = list(args).index("depth")
-        if idx + 1 < len(args):
-            filter_depth = int(args[idx + 1])
+        if idx + 1 >= len(args) or not args[idx + 1].lstrip("-").isdigit():
+            print("Error: dump_hbundles depth requires an integer value"); return
+        filter_depth = int(args[idx + 1])
+        depth_val_idx = idx + 1
+    opts = [a for i, a in enumerate(args)
+            if a != "depth" and i != depth_val_idx]
+    reject_unknown_options("dump_hbundles", opts, ("expanded", "depth"))
+    use_expanded = "expanded" in args
     source = session.bundles if use_expanded else session._hier_bundles_orig
     if not source:
         label = "expanded bundles" if use_expanded else "original HBundles"

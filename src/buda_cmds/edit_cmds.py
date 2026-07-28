@@ -24,6 +24,8 @@ import re
 
 import buda
 
+from ._options import reject_unknown_options
+
 # Coordinate arguments of edit_* commands accept BLOCK/FACE REFERENCES in
 # place of absolute numbers: `<block>.<ref>[+N|-N]` with ref one of
 # left/right (x faces), bottom/top (y faces), cx/cy (centres) — resolved
@@ -336,6 +338,9 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
     # session; 'pin' also selects it.  A not-ok verdict is a WARNING,
     # not a rejection: the user candidate stays visible to
     # check_design, exactly like generation's never-strand rule.
+    # `pin` is the only option — a typo (edit_commit pn) must not silently
+    # commit WITHOUT pinning.
+    reject_unknown_options("edit_commit", args, ("pin",))
     if session._edit_session() is None: return
     w, topo = session._edit_w, session._edit_topo
     if not topo.segments:

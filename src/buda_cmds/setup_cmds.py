@@ -24,6 +24,8 @@ import buda
 import sys
 import re
 
+from ._options import reject_unknown_options
+
 
 def cmd_add_block(session, cmd, args, cmd_line):
     # Single-rect: add_block <name> <x1> <y1> <x2> <y2> [corner_margin ...]
@@ -41,6 +43,9 @@ def cmd_add_block(session, cmd, args, cmd_line):
         if i < len(args) and args[i].lower() == "teg_mode":
             i += 1
             if i < len(args):
+                # A bad teg_mode value used to silently fall back to THRU.
+                reject_unknown_options("add_block teg_mode",
+                                       [args[i].lower()], ("over", "thru"))
                 teg_mode = buda.TegMode.OVER if args[i].lower() == "over" else buda.TegMode.THRU
                 i += 1
         session.fp.add_block_rects(name, rects, teg_mode)
@@ -56,15 +61,30 @@ def cmd_add_block(session, cmd, args, cmd_line):
     if any(t.lower() == "container" for t in rest):
         session.fp.set_container(name)
         rest = [t for t in rest if t.lower() != "container"]
+    if rest and rest[0].lower() != "corner_margin":
+        # Unknown trailing token(s) after the geometry — `container` was already
+        # stripped above, so the only thing left may be `corner_margin`.  A
+        # stray token (e.g. `add_block b 0 0 10 10 garbage`) used to be dropped.
+        reject_unknown_options("add_block", [rest[0].lower()],
+                               ("container", "corner_margin"))
     if rest and rest[0].lower() == "corner_margin":
         rest = rest[1:]
         kws = {}
         i = 0
         while i < len(rest):
             kw = rest[i].lower()
-            if kw in ("dx", "dy", "pct_h", "pct_v") and i + 1 < len(rest):
+            if kw in ("dx", "dy", "pct_h", "pct_v"):
+                # A recognized key MUST be followed by a value — erroring here
+                # (rather than falling to the reject branch, which would return
+                # without advancing i) avoids an infinite loop on a trailing key.
+                if i + 1 >= len(rest):
+                    print(f"Error: add_block corner_margin {kw} requires a value")
+                    sys.exit(1)
                 kws[kw] = float(rest[i + 1]); i += 2
-            else: i += 1
+            else:
+                # A bad corner_margin sub-keyword used to be silently skipped.
+                reject_unknown_options("add_block corner_margin", [kw],
+                                       ("dx", "dy", "pct_h", "pct_v"))
         # Resolve to absolute dx, dy
         cm_dx = cm_dy = 0
         if "dx" in kws:    cm_dx = int(round(kws["dx"]))
@@ -87,7 +107,12 @@ def cmd_corner_margin(session, cmd, args, cmd_line):
     i = 0
     while i < len(args):
         kw = args[i].lower()
-        if kw in ("dx", "dy") and i + 1 < len(args):
+        if kw in ("dx", "dy"):
+            # A recognized key MUST be followed by a value — error here rather
+            # than fall to the reject branch (which returns without advancing i
+            # and would loop forever on a trailing `dx`/`dy`).
+            if i + 1 >= len(args):
+                print(f"Error: corner_margin {kw} requires a value"); sys.exit(1)
             kws[kw] = float(args[i + 1]); i += 2
         elif kw[0].isdigit() or (kw[0] == '-' and len(kw) > 1 and kw[1].isdigit()): # Positional
             if "dx" not in kws: kws["dx"] = float(kw)
@@ -98,7 +123,9 @@ def cmd_corner_margin(session, cmd, args, cmd_line):
                   f"(no single block dimension to use). Use dx/dy instead.")
             i += 2
         else:
-            i += 1
+            # An unknown token used to be silently skipped.
+            reject_unknown_options("corner_margin", [kw],
+                                   ("dx", "dy", "pct_h", "pct_v"))
     cm_dx = int(round(kws.get("dx", 0)))
     cm_dy = int(round(kws.get("dy", 0)))
     if "dx" in kws and "dy" not in kws: cm_dy = cm_dx
@@ -209,15 +236,31 @@ def cmd_detour_channel(session, cmd, args, cmd_line):
     # Multiple dir/size pairs may appear in one command, e.g.:
     #   detour_channel Y 50 X 30
     i = 0
+    _VALID_DIR_CHARS = set("NSEWYXA")
     while i + 1 < len(args):
         dirs = args[i]
+        # Validate every direction char — the C++ set_detour_channel silently
+        # ignores an unrecognized char (its switch has a `default: break`), so a
+        # typo like `Q` would be a no-op with no diagnostic.
+        bad = [c for c in dirs.upper() if c not in _VALID_DIR_CHARS]
+        if bad:
+            print(f"Error: detour_channel: unknown direction char(s) "
+                  f"{', '.join(repr(c) for c in bad)} in '{dirs}'. Valid: "
+                  f"N S E W (single side), Y (N+S), X (E+W), A (all four).")
+            sys.exit(1)
         try:
             size = int(args[i + 1])
         except ValueError:
             print(f"Error: detour_channel size must be an integer, got '{args[i+1]}'")
-            break
+            sys.exit(1)
         session.fp.set_detour_channel(dirs, size)
         i += 2
+    # An odd final token (e.g. `detour_channel N 50 Q`) is a direction with no
+    # size — the pair loop skips it; reject it instead of silently ignoring.
+    if i < len(args):
+        print(f"Error: detour_channel: unpaired trailing token '{args[i]}' — "
+              f"needs <dir> <size> pair(s)")
+        sys.exit(1)
 
 
 def cmd_add_keepout(session, cmd, args, cmd_line):
@@ -260,6 +303,11 @@ def cmd_add_net(session, cmd, args, cmd_line):
     # Syntax A (directed):       add_net <name> <drv_pin> <rcv_pins_csv>
     # Syntax B (undirected):     add_net <name> <pin1> <pin2_csv> unknown
     # Syntax C (bidirectional):  add_net <name> <pin1> <pin2_csv> inout
+    # The optional 4th token is a direction keyword — reject anything else (a
+    # typo like `unkown` used to be dropped, silently making a DIRECTED net).
+    if len(args) >= 4:
+        reject_unknown_options("add_net", [a.lower() for a in args[3:]],
+                               ("unknown", "inout"))
     last_kw = args[3].lower() if len(args) >= 4 else ""
     unknown_dir = (last_kw == "unknown")
     inout_dir   = (last_kw == "inout")
@@ -286,6 +334,12 @@ def cmd_add_bus(session, cmd, args, cmd_line):
     # Syntax B (undirected):     add_bus <prefix>[N] <pin1> <pin2> unknown
     # Syntax C (bidirectional):  add_bus <prefix>[N] <pin1> <pin2> inout
     import re
+    # A directed bus has exactly 3 args; a 4th (trailing) token must be a
+    # direction keyword — reject anything else (a typo used to be silently
+    # dropped, keeping the bus directed).
+    if len(args) >= 4:
+        reject_unknown_options("add_bus", [a.lower() for a in args[3:]],
+                               ("unknown", "inout"))
     last_kw = args[-1].lower() if args else ""
     unknown_dir = (last_kw == "unknown")
     inout_dir   = (last_kw == "inout")
@@ -344,7 +398,10 @@ def cmd_def_layer(session, cmd, args, cmd_line):
         if kw == "span_min":    span_min = int(rest[i+1]);    i += 2
         elif kw == "span_max":  span_max = int(rest[i+1]);    i += 2
         elif kw == "kspan":     kspan_override = float(rest[i+1]); i += 2
-        else: i += 1
+        else:
+            # An unknown trailing keyword used to be silently skipped.
+            reject_unknown_options("def_layer", [kw],
+                                   ("span_min", "span_max", "kspan"))
     # Fail fast on a bad direction token: anything that is not exactly H or V
     # (e.g. a typo, or arguments passed in the wrong order) used to fall
     # through SILENTLY to VERTICAL — a wrong-direction layer makes every

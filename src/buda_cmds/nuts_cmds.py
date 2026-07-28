@@ -24,6 +24,16 @@ import buda
 
 from buda_session.util import _RR_DEFAULT_MAX_ITER
 
+from ._options import looks_numeric, reject_unknown_options
+
+# The complete flag vocabulary of ripup_reroute (besides an optional integer
+# max_iter).  Used both to strip flags from the numeric arg and to reject typos.
+_RR_FLAGS = ("use_edge_candidates", "no_global",
+             "fast_trials", "no_fast_trials",
+             "screen", "no_screen",
+             "warm_trials", "no_warm_trials",
+             "converge_guard", "no_converge_guard")
+
 
 def cmd_run_nuts(session, cmd, args, cmd_line):
     # Usage: run_nuts [track_pitch]
@@ -204,11 +214,16 @@ def cmd_ripup_reroute(session, cmd, args, cmd_line):
         converge_guard = False
     elif "converge_guard" in args:
         converge_guard = True
-    nums = [a for a in args if a not in ("use_edge_candidates", "no_global",
-                                         "fast_trials", "no_fast_trials",
-                                         "screen", "no_screen",
-                                         "warm_trials", "no_warm_trials",
-                                         "converge_guard", "no_converge_guard")]
+    # Everything that isn't a known flag must be the single numeric max_iter —
+    # a misspelled flag (e.g. `no_screeen`) used to be silently dropped when a
+    # numeric token was also present (only nums[0] was consumed).
+    leftover = [a for a in args if a not in _RR_FLAGS]
+    unknown = [a for a in leftover if not looks_numeric(a)]
+    reject_unknown_options("ripup_reroute", unknown, _RR_FLAGS)
+    nums = [a for a in leftover if looks_numeric(a)]
+    if len(nums) > 1:
+        print(f"Error: ripup_reroute: at most one max_iter, got "
+              f"{', '.join(nums)}"); return
     max_iter = int(nums[0]) if nums else _RR_DEFAULT_MAX_ITER
     session._ripup_reroute(max_iter=max_iter,
                            use_edge_candidates=use_edge_candidates,
