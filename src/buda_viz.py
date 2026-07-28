@@ -238,12 +238,20 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         set_icon(self.fig)
         raise_window(self.fig)
 
-        # Main axes — two button rows below; leave y=0.14 for buttons and x-tick labels
-        self.ax = self.fig.add_axes([0.05, 0.14, 0.90, 0.81])
+        # Main axes.  The top margin (0.075) holds the up-to-two-line title —
+        # the `debug` cost view adds a second line, which the old 0.05 margin
+        # clipped.  The bottom margin holds the x-tick labels with the button
+        # rows packed right beneath them.
+        self.ax = self.fig.add_axes([0.05, 0.13, 0.90, 0.795])
 
-        # ── Navigation row (y=0.015) ─────────────────────────────────────────
-        _BY1, _BH1  = 0.015, 0.038   # row y and height
-        _BY2, _BH2  = 0.065, 0.038   # tuning row y and height (above nav)
+        # ── Button rows, packed just under the x-tick labels ─────────────────
+        # The nav row is the PRIMARY full-width toolbar and sits directly below
+        # the axes; the segment-tuning row (usually hidden — shown only for the
+        # pinned topology) sits BELOW it, so when hidden its empty strip falls at
+        # the window's bottom edge instead of opening a gap between the plot and
+        # the toolbar (the reported dead space).
+        _BY1, _BH1  = 0.058, 0.040   # nav row (primary): just under the x labels
+        _BY2, _BH2  = 0.014, 0.038   # tuning row: below the nav row
         _MARGIN    = 0.010
         _GAP       = 0.008
 
@@ -298,7 +306,7 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
             _bax1[0].set_visible(False)
             _bax1[idx+1].set_visible(False)
 
-        # ── Tuning row (y=0.065) ─────────────────────────────────────────
+        # ── Tuning row (below the nav row) ───────────────────────────────
         _tune_specs = [
             ('◀  Seg',    '#f5f5f5', 0.8),
             ('Seg  ▶',    '#f5f5f5', 0.8),
