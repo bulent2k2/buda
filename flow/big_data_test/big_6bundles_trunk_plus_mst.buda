@@ -1,4 +1,6 @@
-# from big_3bundles_sel_pure_mst_topo.buda
+# from big_6bundles_mst.buda
+# Testing that trunk+mst generation with spine relays and group selection work.
+# Don't worry about the congestion. Planner would take care of it without the selections.
 source ../tracks/tracks4top.buda
 source tc3a_flat_x10_blocks.buda
 
@@ -10,16 +12,15 @@ add_bus bus_030[128] blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p    # --- bundl
 add_bus sub_047[128] blk_36.p blk_27.p,blk_11.p,blk_26.p             # --- bundle 6
 
 run_bundler
-generate_topologies
+generate_topologies spine_relays # improve mst's
 dump_topologies --grouped
 
-select_topology  sub_069  group:13
+select_topology  bus_030  group:14
 select_topology  sub_030  group:12
-select_topology  bus_069  group:26
-
-select_topology  bus_047  group:12
-select_topology  bus_030  group:19
-select_topology  sub_047  group:31
+select_topology  bus_047  group:31
+select_topology  sub_047  group:35
+select_topology  bus_069  group:25
+select_topology  sub_069  group:11
 
 run_planner
 run_nuts
