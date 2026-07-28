@@ -184,6 +184,28 @@ def _short_block_label(name, maxlen=16):
     return label
 
 
+# Label anchor per hierarchy depth: (x-attr, y-attr, ha, va, dx_pt, dy_pt).
+# A block labels at a CORNER chosen by its depth so a parent and its nested
+# child — which share the bottom-left corner — anchor at DIFFERENT corners and
+# their labels no longer overlap.  Cycles through the four corners (depth % 4);
+# depth 0 keeps the historical bottom-left placement, so flat designs are
+# unchanged.  The point offsets inset the text toward the block interior.
+_LABEL_CORNERS = [
+    ('x1', 'y1', 'left',  'bottom',  4,  4),   # depth 0: bottom-left
+    ('x1', 'y2', 'left',  'top',     4, -4),   # depth 1: top-left
+    ('x2', 'y1', 'right', 'bottom', -4,  4),   # depth 2: bottom-right
+    ('x2', 'y2', 'right', 'top',    -4, -4),   # depth 3: top-right
+]
+
+
+def _label_anchor(bbox, depth):
+    """(x, y, ha, va, dx_pt, dy_pt) for a block label at the corner chosen by
+    its hierarchy `depth` — cycling the four corners so a parent (depth d) and
+    its child (depth d+1) never share a label position."""
+    xk, yk, ha, va, dx, dy = _LABEL_CORNERS[depth % len(_LABEL_CORNERS)]
+    return getattr(bbox, xk), getattr(bbox, yk), ha, va, dx, dy
+
+
 def _draw_block(ax, name, bbox, fp, lw=1.0, edge='#888888', face='#e8e8e8',
                 alpha=0.20, fontsize=8, zorder=1):
     """Draw one floorplan block.
@@ -225,10 +247,13 @@ def _draw_block(ax, name, bbox, fp, lw=1.0, edge='#888888', face='#e8e8e8',
         return added_patches, None
 
     import matplotlib.transforms as mtransforms
+    # Anchor the label at a depth-selected corner (see _LABEL_CORNERS) so a
+    # parent cell and its bottom-left child no longer stack their names.
+    lx, ly, ha, va, dx, dy = _label_anchor(bbox, name.count('/'))
     offset_trans = mtransforms.offset_copy(
-        ax.transData, fig=ax.figure, x=4, y=4, units='points')
-    txt = ax.text(bbox.x1, bbox.y1, _short_block_label(name), transform=offset_trans,
-                  ha='left', va='bottom',
+        ax.transData, fig=ax.figure, x=dx, y=dy, units='points')
+    txt = ax.text(lx, ly, _short_block_label(name), transform=offset_trans,
+                  ha=ha, va=va,
                   fontsize=fontsize, fontweight='bold', color='#444444',
                   alpha=min(1.0, alpha * 4.0), # label slightly brighter than block
                   zorder=zorder + 1, clip_on=True)
