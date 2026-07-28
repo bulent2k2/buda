@@ -81,9 +81,6 @@ CORPUS = [
     "flow/big_data_test/big2/b3_bus_023.buda",
     "flow/big_data_test/big2/b4_bus_077.buda",
     "flow/big_data_test/big2/big2.buda",
-    "flow/big_data_test/big2/big2_b4_b24.buda",
-    "flow/big_data_test/big2/big2_noviz.buda",
-    "flow/big_data_test/big2/tc3b_flat.buda",
     "flow/big_data_test/bigHalf.buda",
     "flow/big_data_test/bigHalf_bus038_bitrunk.buda",
     "flow/big_data_test/big_3bundles_sel_pure_mst_topo.buda",
@@ -105,7 +102,6 @@ CORPUS = [
     "flow/rnr/mix2_fast_bottomup.buda",
     "flow/rnr/mix2_fast_on_aligned_sql.buda",
     "flow/rnr/mix2_fast_topdown.buda",
-    "flow/rnr/mix2_repro.buda",
     "flow/rnr/slowdown_rnr.buda",
 ]
 

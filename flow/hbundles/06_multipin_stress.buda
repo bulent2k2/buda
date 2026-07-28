@@ -159,14 +159,17 @@ run_hier_bundler depth 2
 
 generate_hier_topologies
 
-run_planner hier 5
+set_planner_param healersAhead 1
+run_planner hier signal_tracks
 
 run_nuts
-
-check_design nuts
+negotiate_congestion
+ripup_reroute
 
 # Full glory (bb :-)
 run_detailed_nuts
-check_design dnuts
+negotiate_congestion
+ripup_reroute
+check_design
 
 visualize
