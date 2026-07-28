@@ -30,6 +30,19 @@ _RR_GLOBAL_TOP_K = 3                # band occupants ranked per contention site
 _RR_GLOBAL_MOVES_PER_OCC = 6        # index alternates tried per occupant
 _RR_GLOBAL_MAX_TRIALS = 36          # hard trial budget per stall
 
+# Bottom-up template CLASS moves (runs after the global pass at a stall;
+# docs/internal/bottomup_healer_templates.md plan item A).  A `hier.locked`
+# instance can't be re-pinned individually — its routing is a fixed copy of
+# its cell template — so when a locked bundle holds the residual contention
+# the healer re-pins the TEMPLATE (one move re-routes every instance of the
+# rotation class) and re-runs the cell-local solve for correct layers.
+_RR_CLASS_TOP_N = 8                 # template alternates tried per class / stall
+_RR_CLASS_MAX_TRIALS = 32           # hard trial budget per stall (the
+#                                     _RR_GLOBAL_MAX_TRIALS symmetry — class
+#                                     trials are the most expensive kind, so a
+#                                     many-class stall must not cost
+#                                     TOP_N x N_classes of them; issue #474)
+
 # Fast trials (RR round 3): trials skip metric-neutral passes (tighten_pulls
 # in stage a — overlap-non-increasing, so the trial metric is an upper bound
 # and accepts stay sound; via emission in stage b — pure output).  Commits

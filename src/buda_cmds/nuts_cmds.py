@@ -32,7 +32,8 @@ _RR_FLAGS = ("use_edge_candidates", "no_global",
              "fast_trials", "no_fast_trials",
              "screen", "no_screen",
              "warm_trials", "no_warm_trials",
-             "converge_guard", "no_converge_guard")
+             "converge_guard", "no_converge_guard",
+             "no_class_moves")
 
 
 def cmd_run_nuts(session, cmd, args, cmd_line):
@@ -169,6 +170,7 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
 
 def cmd_ripup_reroute(session, cmd, args, cmd_line):
     # Usage: ripup_reroute [max_iter] [use_edge_candidates] [no_global]
+    #                      [no_class_moves]
     #                      [fast_trials|no_fast_trials] [screen|no_screen]
     # Stage auto-detected: after run_detailed_nuts ⇒ drive down DNUTS opens;
     # else after run_nuts ⇒ drive down NUTS overlaps.
@@ -214,6 +216,11 @@ def cmd_ripup_reroute(session, cmd, args, cmd_line):
         converge_guard = False
     elif "converge_guard" in args:
         converge_guard = True
+    # Bottom-up template CLASS moves (default on): when the residual
+    # contention sits on hier.locked template instances, re-pin the cell
+    # TEMPLATE and re-route the whole class in one measured move.  A no-op
+    # on flat / non-bottom-up designs; `no_class_moves` disables it.
+    use_class_moves = "no_class_moves" not in args
     # Everything that isn't a known flag must be the single numeric max_iter —
     # a misspelled flag (e.g. `no_screeen`) used to be silently dropped when a
     # numeric token was also present (only nums[0] was consumed).
@@ -231,7 +238,8 @@ def cmd_ripup_reroute(session, cmd, args, cmd_line):
                            fast_trials=fast_trials,
                            screen=screen,
                            warm=warm,
-                           converge_guard=converge_guard)
+                           converge_guard=converge_guard,
+                           use_class_moves=use_class_moves)
 
 
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):

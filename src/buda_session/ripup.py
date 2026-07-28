@@ -30,7 +30,8 @@ import time
 
 import buda
 
-from .util import (_RR_CONVERGE_FLOOR, _RR_CONVERGE_FRAC,
+from .util import (_RR_CLASS_MAX_TRIALS,
+                   _RR_CLASS_TOP_N, _RR_CONVERGE_FLOOR, _RR_CONVERGE_FRAC,
                    _RR_CONVERGE_GUARD_DEFAULT, _RR_CONVERGE_WINDOW,
                    _RR_DEFAULT_MAX_ITER, _RR_FAST_TRIALS_DEFAULT,
                    _RR_GLOBAL_MAX_TRIALS, _RR_GLOBAL_MOVES_PER_OCC,
@@ -303,24 +304,30 @@ class RipupMixin:
             if w is not None and w.hier.locked:
                 return
             order.append(bid)
-        if stage == 'b':
-            for bid in self._rr_open_bundles():
-                add(bid)
-        for bid in self._rr_overlap_bundles():
+        for bid in self._rr_contention_sources(stage):
             add(bid)
-        # Junction infeasibilities (Part B): a bundle whose junction edge could
-        # only close by a large partner stretch is a re-route contender even
-        # when the stretch produced no overlap — an alternate topology may
-        # avoid the compromise entirely.  Listed after overlaps: they are a
-        # quality signal, overlaps are a hard one.
-        if self.nuts_result is not None:
-            for ji in self.nuts_result.junction_infeasibilities:
-                add(ji.bundle_id)
         if not order:                       # fallback: any re-routable bundle
             for w in self.bundles:
                 if len(w.input.candidates) > 1:
                     add(w.input.original_bundle.id)
         return order
+
+    def _rr_contention_sources(self, stage):
+        """Contention-derived bundle ids in priority order (duplicates
+        included — callers dedup): stage b's OPEN bundles first (a DNUTS
+        open is caused by a NUTS overlap, so re-routing either side of the
+        overlap can clear it), then the NUTS-overlap partners, then
+        junction-infeasibility bundles (Part B: a bundle whose junction
+        edge could only close by a large partner stretch is a contender
+        even with no overlap — a quality signal, listed after the hard
+        ones).  The shared walk under _rr_contenders (locked excluded) and
+        _rr_locked_contenders (locked only)."""
+        if stage == 'b':
+            yield from self._rr_open_bundles()
+        yield from self._rr_overlap_bundles()
+        if self.nuts_result is not None:
+            for ji in self.nuts_result.junction_infeasibilities:
+                yield ji.bundle_id
 
     def _rr_wrapper(self, bid):
         for w in self.bundles:
@@ -507,7 +514,7 @@ class RipupMixin:
         self._adopt_doglegs()
 
     def _rr_rerun(self, stage, target_bid=None, full=False,
-                  abort_opens=-1):
+                  abort_opens=-1, skip_replan=False):
         """Silently re-run planner + NUTS (+ DNUTS for stage b).
 
         When `target_bid` names the one bundle a trial moved, the replan is
@@ -530,7 +537,14 @@ class RipupMixin:
         `run_detailed_nuts` *command* resets `_detailed_bit_order` to LO_HI before
         parsing its (here absent) arg, so driving it via `do_command` would
         silently flip a HI_LO flow to LO_HI and change detailed wiring semantics
-        unrelated to the topology move."""
+        unrelated to the topology move.
+
+        `skip_replan` (template class trials) skips the planner turn
+        entirely: every wrapper keeps its committed assignment, and the
+        moved class's routing is the fixed copies the NUTS re-run
+        recomputes from the re-pinned template — nothing needs planning,
+        and any replan would perturb the committed state the trial must be
+        measured against."""
         exact = False
         sink = io.StringIO()
         # A trial's state must NEVER reach the BDB: the full-replan fallback
@@ -544,21 +558,32 @@ class RipupMixin:
         try:
             with contextlib.redirect_stdout(sink), buda.ostream_redirect():
                 t0 = time.perf_counter()
+                # skip_replan (template class trial): every wrapper keeps
+                # its committed assignment (a full replan would re-decide
+                # all unpinned bundles and destroy the incremental commits
+                # — the exact hazard the main loop's commit comment
+                # documents), and the moved class needs no replan at all:
+                # locked instances are never planner-placed — their routing
+                # is the fixed copies _run_nuts_internal recomputes from
+                # the re-pinned template below.
                 asn = None
-                if target_bid is not None and self.planner is not None:
-                    asn = self.planner.replan_bundle(self.bundles, target_bid)
-                if asn is not None:
-                    w = self._rr_wrapper(target_bid)
-                    w.plan.selected_topology_index = asn.topo_index
-                    w.input.assigned_v_layer = asn.v_layer_id
-                    w.input.assigned_h_layer = asn.h_layer_id
-                    w.plan.seg_layers = list(asn.seg_layers)
-                    w.plan.seg_perp = list(asn.seg_perp)
-                    exact = True
-                elif self._planner_is_hier:
-                    self._rr_replan_hier(self._planner_iterations)
-                else:
-                    self.do_command(f"run_planner {self._planner_iterations}")
+                if not skip_replan:
+                    if target_bid is not None and self.planner is not None:
+                        asn = self.planner.replan_bundle(self.bundles,
+                                                         target_bid)
+                    if asn is not None:
+                        w = self._rr_wrapper(target_bid)
+                        w.plan.selected_topology_index = asn.topo_index
+                        w.input.assigned_v_layer = asn.v_layer_id
+                        w.input.assigned_h_layer = asn.h_layer_id
+                        w.plan.seg_layers = list(asn.seg_layers)
+                        w.plan.seg_perp = list(asn.seg_perp)
+                        exact = True
+                    elif self._planner_is_hier:
+                        self._rr_replan_hier(self._planner_iterations)
+                    else:
+                        self.do_command(
+                            f"run_planner {self._planner_iterations}")
                 self._rr_t_add('replan', time.perf_counter() - t0)
                 t0 = time.perf_counter()
                 fast = (getattr(self, '_rr_fast_trials', False)
@@ -921,6 +946,382 @@ class RipupMixin:
         extras = [t for t in order if t >= n]
         k_ex = min(_RR_GLOBAL_MOVES_PER_OCC // 2, len(extras))
         return (in_win[:_RR_GLOBAL_MOVES_PER_OCC - k_ex] + extras[:k_ex])
+
+    # ---- Bottom-up template CLASS moves (stall tier 3) ------------------
+    # docs/internal/bottomup_healer_templates.md, plan item A.  A
+    # `hier.locked` wrapper is a bottom-up template instance: its routing is
+    # a uniform fixed copy of the cell template's local solve, so no
+    # per-instance move exists — every contender/global pass skips it, and a
+    # design whose residual contention sits ON a locked bundle is stuck (the
+    # mix2_fast_bottomup 2-overlap/16-open plateau).  The class pass moves
+    # the TEMPLATE instead: force-pin an alternate candidate on the template,
+    # re-run the cell-local solve for correct layers (the pin is kept, the
+    # planner only assigns layers), propagate the pin to every instance of
+    # the class, invalidate the fixed-copy caches, and measure a full
+    # pipeline re-run — one move re-routes ALL instances of the class, and
+    # it commits only on a strictly better measured metric.
+
+    def _rr_template_wrapper(self, tid):
+        """The pre-expansion TEMPLATE wrapper for a template bundle id
+        (self.bundles holds only the expanded per-instance wrappers)."""
+        for w in getattr(self, "_hier_bundles_orig", None) or []:
+            if w.input.original_bundle.id == tid:
+                return w
+        return None
+
+    def _rr_locked_contenders(self, stage):
+        """Contender bundle ids RESTRICTED to hier.locked wrappers — the
+        exact complement of _rr_contenders' locked-skip, same source walk
+        (_rr_contention_sources) and order, and no any-bundle fallback:
+        with no locked contention there is no class to move."""
+        order, seen = [], set()
+        for bid in self._rr_contention_sources(stage):
+            if bid in seen:
+                continue
+            seen.add(bid)
+            w = self._rr_wrapper(bid)
+            if w is not None and w.hier.locked:
+                order.append(bid)
+        return order
+
+    def _rr_class_cell_wrappers(self):
+        """cell_context -> [template wrappers] for every bottom-up cell —
+        the same grouping (incl. the replica filter) as
+        _plan_bottom_up_templates, so a class trial's per-cell re-plan runs
+        on exactly the wrapper set the original local solve did."""
+        bu_cells = set(self.bdb.bottom_up_cells()) if self.bdb else set()
+        templates = getattr(self, "_hier_bundles_orig", None) or []
+        if not bu_cells or not templates:
+            return {}
+        cell_ids = {w.input.original_bundle.id for w in templates
+                    if w.input.original_bundle.cell_context}
+        by_cell = {}
+        for w in templates:
+            b = w.input.original_bundle
+            if (not b.cell_context or not b.instances
+                    or self._bu_cell_of(b.cell_context) not in bu_cells
+                    or b.parent_id in cell_ids            # replica
+                    or not w.input.candidates):
+                continue
+            by_cell.setdefault(b.cell_context, []).append(w)
+        return by_cell
+
+    def _rr_class_snapshot(self):
+        """The base trial snapshot EXTENDED with the template-side state a
+        class trial mutates: per-template plan/pin state (same 11-tuple
+        shape as snap['wrap']), the bottom-up dogleg bookkeeping (slot map,
+        pre-split selections, and a REAL copy of each adopted slot's
+        Topology — the trial's fixed-copy recompute may overwrite the slot
+        in place, exactly the base snapshot's dl_cand hazard), the
+        cell-local planner grids, and the derived caches (fixed copies,
+        track verdict, DNUTS copy plan, resume preference)."""
+        snap = self._rr_snapshot()
+        templates = getattr(self, "_hier_bundles_orig", None) or []
+        snap['tmpl'] = {w.input.original_bundle.id:
+                        (w.plan.selected_topology_index,
+                         w.input.topology_pinned,
+                         len(w.input.candidates),
+                         list(w.plan.seg_layers), list(w.plan.seg_perp),
+                         list(w.plan.seg_net_pull),
+                         list(w.plan.seg_slide_lo),
+                         list(w.plan.seg_slide_hi),
+                         w.input.assigned_v_layer, w.input.assigned_h_layer,
+                         list(w.input.pinned_seg_layers))
+                        for w in templates}
+        snap['bu_dl_slot'] = dict(getattr(self, "_bu_dogleg_slot", None)
+                                  or {})
+        snap['bu_dl_orig'] = dict(getattr(self, "_bu_dogleg_originals", None)
+                                  or {})
+        snap['bu_dl_cand'] = {}
+        for tid, slot in snap['bu_dl_slot'].items():
+            w = self._rr_template_wrapper(tid)
+            if w is not None and 0 <= slot < len(w.input.candidates):
+                snap['bu_dl_cand'][tid] = copy.copy(w.input.candidates[slot])
+        snap['bu_grids'] = dict(getattr(self, "_bu_planner_grids", None)
+                                or {})
+        # hier.locked is written by _rr_class_apply's propagation and is NOT
+        # in the base snapshot's wrap tuple.  True->True in the happy path,
+        # but if the cell re-plan returns no assignment for the moved
+        # template its pinned_seg_layers stay empty and locked flips False —
+        # a REJECTED trial must not leave the class permanently unlocked
+        # (issue #475).
+        snap['locked'] = {w.input.original_bundle.id: bool(w.hier.locked)
+                          for w in self.bundles}
+        snap['bu_fixed'] = getattr(self, "_bu_fixed_cache", None)
+        snap['bu_verdict'] = getattr(self, "_template_track_verdict", None)
+        snap['bu_dnuts_plan'] = getattr(self, "_bu_dnuts_plan_cache", None)
+        snap['bu_from_resume'] = getattr(self, "_bu_fixed_from_resume",
+                                         False)
+        return snap
+
+    def _rr_class_restore(self, snap):
+        """Restore a rejected class trial: the base restore (expanded
+        wrappers, results, instance dogleg bookkeeping) plus the template
+        side.  A class trial can only GROW a template pool (the fixed-copy
+        recompute's _adopt_bottom_up_doglegs appends or overwrites its
+        slot; _reset_bottom_up_doglegs — the only deleter — never runs in a
+        trial), so the pool restore is trim + slot-content overwrite."""
+        self._rr_restore(snap)
+        for w in self.bundles:               # issue #475: see snapshot note
+            lk = snap['locked'].get(w.input.original_bundle.id)
+            if lk is not None:
+                w.hier.locked = lk
+        for w in getattr(self, "_hier_bundles_orig", None) or []:
+            tid = w.input.original_bundle.id
+            cap = snap['tmpl'].get(tid)
+            if cap is None:
+                continue
+            (sel, pinned, ncand, seg_layers, seg_perp,
+             seg_net_pull, seg_slide_lo, seg_slide_hi, av, ah,
+             pinned_layers) = cap
+            cands = w.input.candidates
+            while len(cands) > ncand:    # drop trial-appended dogleg splits
+                del cands[len(cands) - 1]
+            w.input.candidates = cands
+            w.plan.selected_topology_index = sel
+            w.input.topology_pinned = pinned
+            w.plan.seg_layers = seg_layers
+            w.plan.seg_perp = seg_perp
+            w.plan.seg_net_pull = seg_net_pull
+            w.plan.seg_slide_lo = seg_slide_lo
+            w.plan.seg_slide_hi = seg_slide_hi
+            w.input.assigned_v_layer = av
+            w.input.assigned_h_layer = ah
+            w.input.pinned_seg_layers = pinned_layers
+        # Put back the committed split geometry where the trial's recompute
+        # overwrote an adopted template slot in place (same count, new
+        # content — the trim above cannot see it).
+        for tid, topo in snap['bu_dl_cand'].items():
+            slot = snap['bu_dl_slot'].get(tid)
+            w = self._rr_template_wrapper(tid)
+            if w is None or slot is None:
+                continue
+            cands = w.input.candidates
+            if 0 <= slot < len(cands):
+                cands[slot] = topo
+                w.input.candidates = cands
+        self._bu_dogleg_slot = dict(snap['bu_dl_slot'])
+        self._bu_dogleg_originals = dict(snap['bu_dl_orig'])
+        self._bu_planner_grids = dict(snap['bu_grids'])
+        # The pre-trial fixed-copy cache is the committed state's — putting
+        # the object back (instead of None) spares the next trial a full
+        # local re-solve; it stays consistent because the template pins it
+        # was computed from were just restored above.
+        self._bu_fixed_cache = snap['bu_fixed']
+        self._template_track_verdict = snap['bu_verdict']
+        self._bu_dnuts_plan_cache = snap['bu_dnuts_plan']
+        self._bu_fixed_from_resume = snap['bu_from_resume']
+
+    def _rr_class_apply(self, tw, cell, cell_wrappers, tidx):
+        """Apply one class move: force-pin candidate `tidx` on template
+        `tw`, re-run the cell-local solve (the pin is kept — the local
+        planner only assigns layers for it, and re-decides the OTHER
+        templates of the cell under the new congestion picture; their own
+        pins keep their selections), propagate the resulting pins to every
+        instance wrapper of the cell, and invalidate the caches derived
+        from the template geometry.  BDB persistence is deferred to the
+        accept path (_plan_bottom_up_cell persist=False + the trial-guarded
+        dogleg adoption)."""
+        tw.input.topology_pinned = True
+        tw.plan.selected_topology_index = tidx
+        # NOTE: if the template's committed selection was its adopted
+        # dogleg slot, _bu_dogleg_originals[tid] still records the
+        # PRE-SPLIT selection after this move — a later
+        # _reset_bottom_up_doglegs would restore that instead of tidx.
+        # Harmless by construction: its only caller is a full
+        # _plan_bottom_up_templates re-plan, which re-decides every
+        # selection anyway.
+        # The old candidate's per-segment state must not leak onto the new
+        # one: pinned layers are honored for ANY candidate (wrong layers),
+        # and a same-segment-count dogleg override array would silently
+        # apply (build_nuts_maps only checks lengths).  The local solve
+        # below re-fills layers/perp from its assignment.
+        tw.input.pinned_seg_layers = []
+        tw.plan.seg_net_pull = []
+        tw.plan.seg_slide_lo = []
+        tw.plan.seg_slide_hi = []
+        iters = (getattr(self, "_bu_local_iterations", None)
+                 or self._planner_iterations)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                buda.ostream_redirect():
+            self._plan_bottom_up_cell(cell, cell_wrappers, iters,
+                                      persist=False)
+        # Propagate the new pin to the MOVED template's instances only —
+        # the other templates of the cell kept their pins + pinned layers
+        # (honored by the local planner), so their instances' committed
+        # state (including any adopted dogleg-slot selection, which does
+        # NOT equal the template index) must not be touched.  Candidate
+        # indices are preserved by expansion, and layer ids are
+        # frame-independent, so index + layers copy directly; the per-
+        # segment dogleg overrides are cleared exactly as _rr_trial does
+        # when moving a bundle off its split (the snapshot restores them
+        # on rejection).  seg_perp is cleared too — NUTS never reads it
+        # for a locked bundle (its routing is the fixed copies), but the
+        # planner's recharge (commit_plan via recharge_committed /
+        # replan_bundle, on accept and in every later trial) consumes it
+        # as a per-segment band-charge override for the SELECTED
+        # candidate, and the stale values index the OLD candidate's
+        # geometry — cleared, each new segment charges at its own nominal
+        # perp, the same convention as any wrapper without overrides
+        # (Codex #472 P1).  Mirrors _expand_hier_bundles' pin propagation
+        # + locked rule (bottom-up cells never expand 90°-rotated
+        # instances; the rotation classes have their own clone
+        # templates).
+        exp_map = getattr(self, "_hier_expansion_map", None) or {}
+        for iw in exp_map.get(tw.input.original_bundle.id, []):
+            iw.input.topology_pinned = True
+            iw.plan.selected_topology_index = \
+                tw.plan.selected_topology_index
+            iw.input.pinned_seg_layers = list(tw.input.pinned_seg_layers)
+            iw.plan.seg_layers = list(tw.plan.seg_layers)
+            iw.plan.seg_perp = []
+            iw.plan.seg_net_pull = []
+            iw.plan.seg_slide_lo = []
+            iw.plan.seg_slide_hi = []
+            iw.hier.locked = (tw.input.topology_pinned
+                              and bool(tw.input.pinned_seg_layers))
+        # Template geometry changed — every cache derived from it is stale.
+        # The trial's _rr_rerun recomputes the fixed copies (and re-adopts
+        # any dogleg) under _rr_in_trial, so nothing reaches the BDB.
+        self._bu_fixed_cache = None
+        self._template_track_verdict = None
+        self._bu_dnuts_plan_cache = None
+        self._bu_fixed_from_resume = False
+
+    def _rr_class_moves(self, tw, iw, stage):
+        """Alternate template candidate indices for one class, best-first:
+        ranked by the CONTENDED INSTANCE's measured contention sites (its
+        coordinates are absolute — the template's are cell-local), which is
+        valid on the template pool because expansion preserves candidate
+        order.  Excludes indices past the template pool (instance-local
+        dogleg appends), the template's own adopted dogleg slot (a split of
+        the OLD selection), and the current selection; capped at
+        _RR_CLASS_TOP_N."""
+        old_inst = iw.plan.selected_topology_index
+        order = self._rr_candidate_order(iw, old_inst, stage)
+        ntc = len(tw.input.candidates)
+        old_t = tw.plan.selected_topology_index
+        bu_slot = (getattr(self, "_bu_dogleg_slot", None)
+                   or {}).get(tw.input.original_bundle.id)
+        return [t for t in order
+                if t < ntc and t != old_t and t != bu_slot
+                ][:_RR_CLASS_TOP_N]
+
+    def _rr_class_pass(self, stage, metric, cur):
+        """Template-class move pass, the stall chain's last tier (after the
+        global-occupant pass): for each locked-contender CLASS, trial up to
+        _RR_CLASS_TOP_N alternate template candidates via
+        apply -> full re-run -> measure, committing the first strictly
+        better one (the trial state IS a full-pipeline state — kept as-is,
+        with the deferred BDB persistence replayed outside the trial flag).
+        Returns (committed, trials).  No-op (False, 0) on flat flows and on
+        designs whose residual contention holds no locked bundle — routes
+        byte-identical.  A template the USER pinned before the local solve
+        is never moved (_bu_user_pinned provenance)."""
+        if not getattr(self, "_planner_is_hier", False):
+            return False, 0
+        exp_map = getattr(self, "_hier_expansion_map", None) or {}
+        if not exp_map:
+            return False, 0
+        locked = self._rr_locked_contenders(stage)
+        if not locked:
+            return False, 0
+        by_cell = self._rr_class_cell_wrappers()
+        if not by_cell:
+            return False, 0
+        cell_of = {w.input.original_bundle.id: cell
+                   for cell, ws in by_cell.items() for w in ws}
+        # Wrapper -> CANONICAL template only.  exp_map also aliases every
+        # REPLICA bundle id to its instance's wrapper (inserted after the
+        # canonical entries by _expand_hier_bundles), so an unfiltered walk
+        # would overwrite the canonical mapping with the replica id — and a
+        # locked contender on that wrapper would silently skip its class
+        # (the replica id is not in cell_of; Codex #472 P1).
+        tmpl_of = {}
+        for tid, iws in exp_map.items():
+            if tid not in cell_of:            # replica alias / non-bottom-up
+                continue
+            for iw in iws:
+                tmpl_of[iw.input.original_bundle.id] = tid
+        user_pinned = getattr(self, "_bu_user_pinned", None) or set()
+        classes, seen = [], set()
+        for bid in locked:
+            tid = tmpl_of.get(bid)
+            if tid is None or tid in seen:
+                continue
+            seen.add(tid)
+            tw = self._rr_template_wrapper(tid)
+            if tw is None or tid not in cell_of:
+                continue
+            if tid in user_pinned:
+                print(f"[ripup_reroute] CLASS: template {tid} is "
+                      f"user-pinned — skipped", flush=True)
+                continue
+            if len(tw.input.candidates) < 2:
+                continue
+            classes.append((tw, self._rr_wrapper(bid)))
+        if not classes:
+            return False, 0
+        print(f"[ripup_reroute] CLASS pass: locked template instance(s) "
+              f"hold the residual contention at {self._rr_m_str(cur)} — "
+              f"trying template moves for {len(classes)} class(es)",
+              flush=True)
+        trials = 0
+        for tw, iw in classes:
+            tid = tw.input.original_bundle.id
+            cell = cell_of[tid]
+            n_inst = len(exp_map.get(tid, []))
+            old_tidx = tw.plan.selected_topology_index
+            moves = self._rr_class_moves(tw, iw, stage)
+            improved = False
+            for tidx in moves:
+                if trials >= _RR_CLASS_MAX_TRIALS:
+                    print(f"[ripup_reroute] CLASS: trial budget "
+                          f"({_RR_CLASS_MAX_TRIALS}) exhausted — stop.",
+                          flush=True)
+                    return False, trials
+                snap = self._rr_class_snapshot()
+                self._rr_class_apply(tw, cell, by_cell[cell], tidx)
+                # No replan: every wrapper keeps its committed assignment
+                # (the incremental commits survive), and the moved class
+                # needs none — its routing is the fixed copies the NUTS
+                # re-run recomputes from the re-pinned template.
+                self._rr_rerun(stage, full=True, skip_replan=True)
+                m = metric()
+                trials += 1
+                if os.environ.get("BUDA_RR_TRACE"):
+                    print(f"[rr-trace] CLASS template {tid} topo "
+                          f"{old_tidx + 1}->{tidx + 1}: "
+                          f"{self._rr_m_str(m)}", flush=True)
+                if m < cur:
+                    improved = True
+                    break
+                self._rr_class_restore(snap)
+            if not improved:
+                print(f"[ripup_reroute] CLASS: template {tid} "
+                      f"(cell '{cell}', {n_inst} instance(s)) — no "
+                      f"improvement", flush=True)
+                continue
+            # Commit: the trial state is already a FULL pipeline state,
+            # and the trial's fixed-copy cache is exactly what produced
+            # the accepted nuts_result — keep both authoritative.  Replay
+            # the persistence the trial guard deferred: the template rows
+            # (_persist_bottom_up_cell_decision) and any dogleg
+            # adoption's template/instance rows, from the LIVE adopted
+            # state — NOT by re-running the cell-local solve, which on an
+            # already-split pinned template could re-dogleg into a
+            # split-of-a-split and silently diverge from the accepted
+            # routing (issue #473).
+            self._persist_bottom_up_cell_decision(by_cell[cell])
+            self._persist_bottom_up_dogleg_adoptions()
+            self.planner.recharge_committed(self.bundles)
+            print(f"[ripup_reroute] CLASS COMMIT: template {tid} "
+                  f"(cell '{cell}') topo {old_tidx + 1}->"
+                  f"{tw.plan.selected_topology_index + 1} across "
+                  f"{n_inst} instance(s), metric {self._rr_m_str(cur)}->"
+                  f"{self._rr_m_str(metric())}", flush=True)
+            return True, trials
+        return False, trials
 
     def _rr_flip_edges(self, w, stage):
         """MST edge_ids of w's SELECTED candidate that a current contention touches
@@ -1603,7 +2004,7 @@ class RipupMixin:
     def _ripup_reroute(self, max_iter=_RR_DEFAULT_MAX_ITER,
                        use_edge_candidates=False, use_global=True,
                        fast_trials=None, screen=None, warm=None,
-                       converge_guard=None):
+                       converge_guard=None, use_class_moves=True):
         if not self.bundles:
             print("Error: ripup_reroute has no bundles.")
             return
@@ -1847,6 +2248,21 @@ class RipupMixin:
                 best, g_trials = self._rr_global_pass(stage, metric, snap,
                                                       cur, set(contenders))
                 n_trials += g_trials
+            if best is None and use_class_moves:
+                # Everything above stalled: bottom-up template CLASS moves —
+                # when the residual contention sits on hier.locked template
+                # instances (which every pass above must skip), re-pin the
+                # TEMPLATE and re-route the whole class in one measured
+                # move.  Commits internally (the trial state is a full
+                # pipeline state, persisted via the deferred path).  No-op
+                # on flat / non-bottom-up designs.  Opt out with
+                # `no_class_moves`.
+                cls_ok, c_trials = self._rr_class_pass(stage, metric, cur)
+                n_trials += c_trials
+                if cls_ok:
+                    committed += 1
+                    prim_hist.append(self._rr_m_primary(metric()))
+                    continue
             if best is None:
                 print(f"[ripup_reroute] iter {it}: no improving re-route "
                       f"(metric={self._rr_m_str(cur)}) — stop.")
