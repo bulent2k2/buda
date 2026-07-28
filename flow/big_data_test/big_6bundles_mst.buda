@@ -22,7 +22,7 @@ select_topology  sub_069  24
 select_topology  sub_047  26
 select_topology  sub_030  20
 
-run_planner foo bar
+run_planner
 run_nuts
 check_design nuts 
 run_detailed_nuts

@@ -98,7 +98,6 @@ CORPUS = [
     "flow/hbundles/10_chip_units_blocks_leaf.buda",
     "flow/rnr/mix.buda",
     "flow/rnr/mix2.buda",
-    "flow/rnr/mix2_fast.buda",
     "flow/rnr/mix2_fast_bottomup.buda",
     "flow/rnr/mix2_fast_on_aligned_sql.buda",
     "flow/rnr/mix2_fast_topdown.buda",
