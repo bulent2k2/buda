@@ -112,7 +112,34 @@ designs and fail LOUD, never silent:)*
    resume, GDS round-trip incl. rotation/mirror); the OA half is **gated on
    the proprietary Si2 OA C++ libraries** — waits on external access, then
    follows the documented pattern (own translation unit behind a CMake flag).
-8. **NUTS-side alignment pre-solve — the honest-books member (2) closer**
+14. **Bottom-up uniformity residual: a locked copy stranded by ONE
+   instance's surroundings** (added 2026-07-28, the healer×templates arc's
+   endpoint — [`bottomup_healer_templates.md`](bottomup_healer_templates.md)
+   carries the full measurement record). `flow/rnr/mix2_fast_bottomup` +
+   healers converges to **8 DNUTS opens on bundle 166** — the expanded
+   instance of template 74 (cell `dogleg1`, 4-instance class) at
+   `chip/i_dogleg1_3`: NUTS reports its seg 0↔seg 1 junction infeasible
+   (slide window closed by partner stretch) and the copy's placed window
+   has no signal track at DNUTS, stranding all 8 bits. **Every
+   topology-selection DOF is exhausted against it**: ripup's class pass
+   (PR #472) trialed all 8 template alternates for the class — none
+   strictly better; negotiate v2's priced template re-plan (PR #478,
+   opt-in) is rejected by its own accept guard; per-instance re-pins are
+   impossible by design (`hier.locked` — the routing is a uniform copy
+   that works at 3 of the 4 instances; the 4th's surroundings are the
+   conflict). The fix space is therefore NOT healer moves: (a) a
+   **measured-infeasibility uniformity break** — extend the
+   `check_template_tracks on_mismatch independent` policy (which today
+   triggers only on track-PHASE mismatch) to also release an instance
+   whose copied routing is measured DNUTS-open, solving just that
+   instance individually while the aligned siblings keep the copy; (b) a
+   **placement/track-supply fix** (nudge `i_dogleg1_3` or widen the local
+   supply via pattern/override) — the by-hand answer today; or (c) a
+   cell-local candidate DOF the pool may lack (unverified — only that
+   none of the 8 existing candidates measures better at any instance
+   simultaneously). (a) is the bounded, principled piece:
+   it reuses the existing independent-policy machinery and fails LOUD
+   into per-instance solving instead of silently stranding bits.
    (added 2026-07-20) — [`wishlist-planner.md`](wishlist-planner.md) →
    *"The NUTS-side alignment pre-solve"*. `charge_pull_target` predicts 3 of
    NUTS's 4 placement members (pull target L1, junction anchor L2); the last,

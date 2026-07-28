@@ -123,3 +123,16 @@ Feature: Roadmap — documented open items & future directions
     Given the RR arc took bigHalf's clean endpoint to ~12.4s flow wall
     When the two commented ripup_reroute lines are re-enabled
     Then the checked-in flow reaches 0 overlaps / 0 opens
+
+  # ── Bottom-up uniformity residual (opens #14, bottomup_healer_templates.md) ─
+
+  Scenario: measured-infeasibility uniformity break for a stranded locked copy
+    # see docs/internal/opens.md #14 + docs/internal/bottomup_healer_templates.md
+    # mix2_fast_bottomup bundle 166 (cell dogleg1, instance chip/i_dogleg1_3):
+    # the uniform copy works at 3 of 4 instances; the 4th's surroundings leave
+    # its placed window with no DNUTS signal track, and every healer DOF is
+    # exhausted (ripup class trials, negotiate v2 priced re-plan) — a
+    # topology-selection fix does not exist for it.
+    Given a bottom-up class whose copied routing is measured DNUTS-open at one instance only
+    When check_template_tracks' independent policy also releases measured-infeasible instances
+    Then that instance solves individually while the aligned siblings keep the uniform copy
