@@ -112,53 +112,6 @@ designs and fail LOUD, never silent:)*
    resume, GDS round-trip incl. rotation/mirror); the OA half is **gated on
    the proprietary Si2 OA C++ libraries** — waits on external access, then
    follows the documented pattern (own translation unit behind a CMake flag).
-14. **Bottom-up uniformity residual: a locked copy stranded by ONE
-   instance's surroundings** (added 2026-07-28, the healer×templates arc's
-   endpoint — [`bottomup_healer_templates.md`](bottomup_healer_templates.md)
-   carries the full measurement record). `flow/rnr/mix2_fast_bottomup` +
-   healers converges to **8 DNUTS opens on bundle 166** — the expanded
-   instance of template 74 (cell `dogleg1`, 4-instance class) at
-   `chip/i_dogleg1_3`: NUTS reports its seg 0↔seg 1 junction infeasible
-   (slide window closed by partner stretch) and the copy's placed window
-   has no signal track at DNUTS, stranding all 8 bits. **Every
-   topology-selection DOF is exhausted against it**: ripup's class pass
-   (PR #472) trialed all 8 template alternates for the class — none
-   strictly better; negotiate v2's priced template re-plan (PR #478,
-   opt-in) is rejected by its own accept guard; per-instance re-pins are
-   impossible by design (`hier.locked` — the routing is a uniform copy
-   that works at 3 of the 4 instances; the 4th's surroundings are the
-   conflict). The fix space is therefore NOT healer moves: (a) a
-   **measured-infeasibility uniformity break** — extend the
-   `check_template_tracks on_mismatch independent` policy (which today
-   triggers on PLAN-TIME track-pool differences vs the reference —
-   phase, missing/extra tracks, widths, absolute grid overrides,
-   keepout-carved windows; `_check_template_tracks`'s span-aware pool
-   comparison) to also release an instance whose pools MATCH but whose
-   copied routing is measured DNUTS-open anyway — the genuinely new
-   trigger here: bundle 166's conflict is dynamic (neighbors/occupancy
-   at that instance), invisible to any static pool comparison — solving
-   just that instance individually while the aligned siblings keep the
-   copy; (b)
-   **move the occurrences to align better — the EXISTING, shipped
-   solution**: `align_bottom_up` nudges the cell's instances onto a
-   common track phase with minimal total movement, and the
-   `flow/rnr/mix2_align_and_save.buda` → `mix2_fast_on_aligned_sql.buda`
-   pair is the worked example (align the placement once, save the
-   fixture, run the flow on it).  **Measured 2026-07-28 (post
-   #472/#478): on the aligned fixture the locked-copy residual class
-   VANISHES** — the aligned flow's remaining opens (30 on bundles 25/61
-   at default healer budgets) sit entirely on FREE top-level buses the
-   healers can keep grinding, with no locked bundle among them.
-   `mix2_fast_bottomup` deliberately skips alignment (it leans on the
-   `independent` policy instead), which is exactly why it exhibits the
-   residual; the manual variants (nudge `i_dogleg1_3` by hand, widen the
-   local supply via a pattern override) remain the finer-grained
-   fallback; or (c) a
-   cell-local candidate DOF the pool may lack (unverified — only that
-   none of the 8 existing candidates measures better at any instance
-   simultaneously). (a) is the bounded, principled piece:
-   it reuses the existing independent-policy machinery and fails LOUD
-   into per-instance solving instead of silently stranding bits.
 8. **NUTS-side alignment pre-solve — the honest-books member (2) closer**
    (added 2026-07-20) — [`wishlist-planner.md`](wishlist-planner.md) →
    *"The NUTS-side alignment pre-solve"*. `charge_pull_target` predicts 3 of
@@ -184,6 +137,38 @@ designs and fail LOUD, never silent:)*
    (opens/overlaps/WL) — or the reference host taking up the default flip and
    wanting member (2) closed for completeness. Design + measurement recorded in
    PR #366.
+
+## Resolved (by 2026-07-29)
+
+- **Bottom-up uniformity residual: a locked copy stranded by ONE
+  instance's surroundings** ✅ — **DONE (2026-07-29)**, closing item 14
+  the day after it was filed, via fix space **(a)**: ripup_reroute's
+  **RELEASE pass** (the stage-b stall chain's last tier, after the class
+  pass; gated on the `check_template_tracks on_mismatch independent`
+  policy — the user's declared willingness to solve instances
+  individually; `no_release_moves` opts out).  The item's case:
+  `mix2_fast_bottomup` + healers converged to 8 DNUTS opens on bundle 166
+  (`dogleg1` at `chip/i_dogleg1_3`) — plan-time track pools MATCH the
+  reference, but that instance's surroundings close its junction slide
+  window (a dynamic neighbors/occupancy conflict no static pool
+  comparison sees), and every class-level healer move was exhausted
+  (PRs #472/#478).  The pass unlocks exactly the measured-open instance
+  (fixed copy withdrawn, pin kept, FORCED per-segment layers cleared —
+  the unpin_topology hazard, caught live: the first cut re-pinned onto
+  the old candidate's H/V layers, an unbuildable LAYER_DIR route the
+  opens metric can't see), re-solves it individually, tries its
+  candidate alternates when the free re-solve alone does not improve
+  (bundle 166: free re-solve 14 opens — the pinned L IS the infeasible
+  shape; release + topo 1→2 = **0 opens**), strict-improvement accept,
+  aggregate `_RR_RELEASE_MAX_TRIALS` budget, LOUD `RELEASE COMMIT`.  The
+  flow now ends `check_design` **"Success: no violations found"** at the
+  detailed level, matching its top-down twin, with the three aligned
+  siblings still on the uniform copy.  Fix space **(b)** (the shipped
+  placement fix) was measured too: `align_bottom_up` via the
+  `mix2_align_and_save` fixture pair makes the locked-copy residual
+  vanish — the complement for designs whose placement CAN move.  Tests:
+  `test_ripup_release_moves.py`; full record in
+  [`bottomup_healer_templates.md`](bottomup_healer_templates.md).
 
 ## Resolved (by 2026-07-16)
 

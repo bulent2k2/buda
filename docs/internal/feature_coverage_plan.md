@@ -118,6 +118,7 @@ Updated as files land. `L` = `@landed`, `F` = `@future`, `D` = `@doc`.
 | Arc / capability | Feature file | Tag | Executable coverage |
 |---|---|---|---|
 | Bottom-up hier planning | `bottom_up_planning.feature` | L | `test_hier_*`, bottom-up tests |
+| Healer × bottom-up templates (opens #14: class moves PR #472, negotiate v2 PR #478, RELEASE pass PR #487) | `bottom_up_planning.feature` (the class-move + uniformity-break scenarios) | L | `test_ripup_class_moves.py`, `test_negotiate_template_prices.py`, `test_ripup_release_moves.py` |
 | Ripup speedup arc | `ripup_reroute.feature` | L | `test_ripup_reroute.py` |
 | Bundling strategies / fan-in | `bundling_strategies.feature` | L | `test_bundler.py`, `test_hier_bundler.py` |
 | TopoEdit | `topo_edit.feature` | L | `test_topo_explorer_edit_mode.py` |
