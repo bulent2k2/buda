@@ -1657,7 +1657,10 @@ class HierMixin:
                                                  use_spine_relays=bk[4])
         if not made:
             return 0
-        self.bundles = result
+        # P2: C++-backed container; _hier_bundles_orig then holds element
+        # REFERENCES into it, so the template solve's pin write-back and the
+        # snapshot stay one storage.
+        self.bundles = buda.BundleWrapperVec(result)
         self._hier_bundles_orig = list(self.bundles)
         # Re-persist bundles + candidates: _persist_topologies rewrites the
         # bundle rows from self.bundles (clone rows carry cloned_from via

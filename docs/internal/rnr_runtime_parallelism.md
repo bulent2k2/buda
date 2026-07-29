@@ -205,3 +205,52 @@ un-bucketed time (wall − timing buckets — where the metric evals live)
 drops **7.1 → 2.5 s** (bottomup) and **7.5 → 2.1 s** (aligned), and the
 `nuts` bucket loses the per-trial clone (aligned stage a: 8.35 → 7.38 s).
 Next per the recommended order: **P2** (opaque wrapper vector), then N3.
+
+## Implemented — P2: opaque `BundleWrapperVec` (2026-07-29)
+
+`PYBIND11_MAKE_OPAQUE(std::vector<BundleWrapper>)` (`bind_opaque.h`,
+included FIRST in bind_routing.cpp + bind_nuts.cpp — the only TUs binding
+functions with the type) + `py::bind_vector` as `buda.BundleWrapperVec`.
+Every engine call taking `vector<BundleWrapper>` — `run`,
+`optimize_topologies`, `make_bus_segments`, `screen_candidates`,
+`replan_bundle[_ripup]`, `replan_candidates`, `candidate_costs`,
+`band_occupants`, `recharge_committed`, `extend_grid_for`,
+`rerun_layer`, `rerun_bundle_warm` — now takes the container by
+REFERENCE with zero copying.  The containment that kept the blast radius
+small:
+
+- **Sequence fallbacks everywhere**: each native def is followed by a
+  `py::sequence` overload (`wrappers_from_seq`) so plain lists of
+  wrappers — hand-built test fixtures, tools, resumed sessions, the
+  pre-expansion template re-plan path — keep the historical copy
+  semantics unchanged.  Native-first ordering guarantees a vec always
+  takes the zero-copy path.
+- **Conversion only at the pipeline's creation sites**, where aliasing
+  is controlled: the two bundler creation loops, the hier-expansion
+  assembly (with the expansion map REMAPPED onto the vec's elements by
+  identity, so exp_map instance lists and replica entries mutate the
+  same storage the engines see), and the clone-split reassembly
+  (`_hier_bundles_orig` then holds element references).  `load_pipeline`
+  and the `_hier_bundles_orig`-restore re-plan path deliberately stay
+  lists (fallback semantics).
+- **Mutation-safety precondition verified**: a full sweep of the planner
+  found the ONLY wrapper writes through these entry points are the
+  refine pass's probe pin, which restores both fields unconditionally —
+  so by-reference passing is behavior-identical (the write-back contract
+  remains the returned assignments).  The bind_vector aliasing contract
+  (structural mutation invalidates element references) holds because the
+  pipeline only ever replaces the container wholesale.
+- One latent single-vs-collection type test fixed on the way:
+  `TopologyExplorer.__init__`'s `isinstance(wrappers, list)` wrapped the
+  vec itself as a single "wrapper"; it now detects the single-wrapper
+  case by type and materializes any other iterable.
+
+**Measured**: the `run()` boundary gap drops **6.7 → 2.0 ms/call**, and
+end-to-end (same box): `mix2_fast_bottomup` **48.8 → 36.6 s**,
+`mix2_fast_on_aligned_sql` **55.6 → 39.0 s** — combined with N1+N2 that
+is **−35–40 % from the arc's start** (65/56 s), with all four gate
+vehicles byte-identical (same moves, same trials, same endpoints) and
+the full fast+mid tiers green (the slow-tier healer end-to-end itself
+dropped 153 → 110 s).  Next: N3 (sweep ranking + `warm_trials`
+re-measure), then P1 (the parallel sweep, which fans out from exactly
+this by-reference container).

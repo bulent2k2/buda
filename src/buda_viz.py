@@ -145,7 +145,18 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         self.ui_state.add_listener(self.fig_redraw)
 
         # Accept a single wrapper or a list for backward compatibility.
-        self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
+        # `wrappers` may be one wrapper, a list, or the session's C++-backed
+        # BundleWrapperVec (P2) — the old `isinstance(list)` test wrapped the
+        # VEC itself as a single "wrapper".  Detect the single-wrapper case
+        # by type; any other input is an iterable of wrappers (a vec
+        # materializes as element REFERENCES, so mutations through the
+        # explorer still reach the session's storage).
+        if isinstance(wrappers, list):
+            self.wrappers = wrappers
+        elif isinstance(wrappers, ic.BundleWrapper):
+            self.wrappers = [wrappers]
+        else:
+            self.wrappers = list(wrappers)
         # Open on the requested bundle (e.g. the one matched by a viz hint).
         self.bidx     = start_bidx if 0 <= start_bidx < len(self.wrappers) else 0
         self._sync_bundle_fp()         # the opening bundle's own frame (hier)

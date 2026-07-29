@@ -18,8 +18,11 @@
 // Registers: geometry types (Point/Rect/Segment/Busterm/Topology), Floorplan,
 //            LayerStack, TopologyGenerator, CongestionPlanner, FloorplannerEngine.
 // bind_db(m) and bind_bundler(m) must be called before this.
+#include "bind_opaque.h"   // FIRST: opaque vector<BundleWrapper> (P2)
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl_bind.h>
 #include <cstdio>
 #include <iostream>
 #include "topology.h"
@@ -595,6 +598,17 @@ void bind_routing(py::module_& m) {
         .def_readwrite("plan",  &BundleWrapper::plan)
         .def_readwrite("hier",  &BundleWrapper::hier);
 
+    // C++-backed wrapper container (rnr runtime P2, see bind_opaque.h):
+    // element access / iteration return REFERENCES into the vector, and
+    // every engine call taking vector<BundleWrapper> accepts it by
+    // reference with zero copying.  The session's pipeline holds
+    // `session.bundles` as one of these; plain lists still work through
+    // the per-function sequence fallbacks (copy semantics, as before).
+    // NOTE the bind_vector aliasing contract: structural mutation
+    // (append/insert/del) invalidates outstanding element references, so
+    // the pipeline only ever REPLACES the container wholesale.
+    py::bind_vector<std::vector<BundleWrapper>>(m, "BundleWrapperVec");
+
     // ── CongestionPlanner ─────────────────────────────────────────────────
     py::class_<GlobalCut>(m, "GlobalCut")
         .def(py::init<>())
@@ -680,6 +694,57 @@ void bind_routing(py::module_& m) {
              "to the intrinsic wirelength cost)")
         .def("band_occupants",       &CongestionPlanner::band_occupants,
              py::arg("bundles"), py::arg("layer_id"), py::arg("span_lo"),
+             py::arg("span_hi"), py::arg("perp_lo"), py::arg("perp_hi"),
+             py::arg("top_k"),
+             py::arg("placed") = std::vector<std::tuple<int,int,int>>{})
+        // Sequence FALLBACKS (P2, bind_opaque.h): the natives above take the
+        // zero-copy BundleWrapperVec; plain lists of wrappers land here and
+        // keep the historical copy semantics (C++-side vector mutations
+        // discarded — the write-back contract is the returned assignments).
+        .def("optimize_topologies",
+             [](CongestionPlanner& p, py::sequence seq, int iters) {
+                 auto v = wrappers_from_seq(seq);
+                 return p.optimize_topologies(v, iters);
+             })
+        .def("replan_bundle",
+             [](CongestionPlanner& p, py::sequence seq, int bid) {
+                 auto v = wrappers_from_seq(seq);
+                 return p.replan_bundle(v, bid);
+             }, py::arg("bundles"), py::arg("target_bundle_id"))
+        .def("replan_candidates",
+             [](CongestionPlanner& p, py::sequence seq, int bid,
+                const std::vector<int>& tidxs) {
+                 auto v = wrappers_from_seq(seq);
+                 return p.replan_candidates(v, bid, tidxs);
+             }, py::arg("bundles"), py::arg("target_bundle_id"),
+             py::arg("tidxs"))
+        .def("replan_bundle_ripup",
+             [](CongestionPlanner& p, py::sequence seq, int bid) {
+                 auto v = wrappers_from_seq(seq);
+                 return p.replan_bundle_ripup(v, bid);
+             }, py::arg("bundles"), py::arg("target_bundle_id"))
+        .def("extend_grid_for",
+             [](CongestionPlanner& p, py::sequence seq) {
+                 p.extend_grid_for(wrappers_from_seq(seq));
+             }, py::arg("bundles"))
+        .def("recharge_committed",
+             [](CongestionPlanner& p, py::sequence seq) {
+                 p.recharge_committed(wrappers_from_seq(seq));
+             }, py::arg("bundles"))
+        .def("candidate_costs",
+             [](CongestionPlanner& p, py::sequence seq, int bid) {
+                 auto v = wrappers_from_seq(seq);
+                 return p.candidate_costs(v, bid);
+             }, py::arg("bundles"), py::arg("target_bundle_id"))
+        .def("band_occupants",
+             [](CongestionPlanner& p, py::sequence seq, int layer_id,
+                double s_lo, double s_hi, double p_lo, double p_hi,
+                int top_k,
+                const std::vector<std::tuple<int,int,int>>& placed) {
+                 return p.band_occupants(wrappers_from_seq(seq), layer_id,
+                                         s_lo, s_hi, p_lo, p_hi, top_k,
+                                         placed);
+             }, py::arg("bundles"), py::arg("layer_id"), py::arg("span_lo"),
              py::arg("span_hi"), py::arg("perp_lo"), py::arg("perp_hi"),
              py::arg("top_k"),
              py::arg("placed") = std::vector<std::tuple<int,int,int>>{})
