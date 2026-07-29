@@ -249,6 +249,35 @@ def test_class_snapshot_restore_roundtrip():
     assert after_pos == before_pos
 
 
+def test_selected_topo_key_matches_topo_uid():
+    """The hot-metric accessor (rnr runtime N1) must return exactly the
+    selected candidate's topo_uid + the bundle id — the memo keys built
+    from it must equal the historical `(buda.topo_uid(topo), bid)` keys,
+    or the per-run disconnected-verdict memo would silently miss/collide.
+    An invalid selection returns uid == \"\" (the historical bounds-check
+    skip)."""
+    import buda
+    s = _bottom_up_session(_two_inst_db())
+    checked = 0
+    for w in s.bundles:
+        uid, bid = buda.selected_topo_key(w)
+        assert bid == w.input.original_bundle.id
+        sel = w.plan.selected_topology_index
+        if 0 <= sel < len(w.input.candidates):
+            assert uid == buda.topo_uid(w.input.candidates[sel])
+            checked += 1
+        else:
+            assert uid == ""
+    assert checked > 0
+    # Invalid selection -> empty uid.
+    w = s.bundles[0]
+    old = w.plan.selected_topology_index
+    w.plan.selected_topology_index = -1
+    uid, _bid = buda.selected_topo_key(w)
+    assert uid == ""
+    w.plan.selected_topology_index = old
+
+
 # ── provenance: user pins are inviolable ─────────────────────────────────────
 
 def test_user_pinned_template_is_skipped():

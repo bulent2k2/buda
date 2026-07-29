@@ -172,3 +172,36 @@ A realistic composite: N1+N2+P2 ≈ **−35–40 % of the healer time with no
 parallelism at all**; P1 on 4 cores takes the remaining sweep-bound
 majority down by another ~2–3×.  Endpoints must stay byte-identical
 throughout (the corpus diff harness used for #472/#478/#487).
+
+## Implemented — N1 + N2 (2026-07-29)
+
+Both landed together (one bounded C++/binding change each), routes
+**byte-identical** on all four gate vehicles (`mix2_fast_on_aligned_sql`,
+`mix2_fast_bottomup`, `mix`, `mix2_fast_topdown` — non-timing flow-log
+diff empty):
+
+- **N1** — `buda.selected_topo_key(wrapper)`: the selected candidate's
+  `topo_uid` + bundle id in ONE zero-copy crossing (a bound
+  `BundleWrapper` argument passes by reference).  `_rr_disconnected_bits`'
+  per-eval walk keys the memo through it, so the full candidate-POOL copy
+  (`w.input.candidates` materializes every Topology per access) and the
+  `original_bundle` copy are paid only on a memo miss.  Measured: warm
+  metric eval **6 ms → 0.15 ms** (40×; ~13 ms → ~0.3 ms per stage-b
+  trial at ~2.2 evals/trial).  The memo keys are equal to the historical
+  `(buda.topo_uid(topo), bid)` by construction (same fingerprint, same
+  hex format) — guarded by `test_selected_topo_key_matches_topo_uid`.
+- **N2** — copy-on-first-dogleg in `NUTSEngine::run`: the mutable
+  whole-wrapper clone (every candidate of every bundle) is made only when
+  the first solve actually detected cycle plans; the common healer-trial
+  re-solve of a stable selection skips it (and the fallback call — whose
+  loop is gated on `!out.plans.empty()`, so skipping is
+  behavior-identical).  `pass_seconds` keeps the `bundle_copy` key at 0.0
+  for schema stability.
+
+**Measured end-to-end** (best-of-N, same box):
+`mix2_fast_bottomup` **56.0 → 48.8 s (−13 %)**,
+`mix2_fast_on_aligned_sql` **64.9 → 55.6 s (−14 %)**.  The stage-b
+un-bucketed time (wall − timing buckets — where the metric evals live)
+drops **7.1 → 2.5 s** (bottomup) and **7.5 → 2.1 s** (aligned), and the
+`nuts` bucket loses the per-trial clone (aligned stage a: 8.35 → 7.38 s).
+Next per the recommended order: **P2** (opaque wrapper vector), then N3.

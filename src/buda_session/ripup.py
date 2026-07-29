@@ -94,26 +94,36 @@ class RipupMixin:
         _rr_t_init, cleared at exit) caches the boolean, so a metric eval only
         pays the ConnTopology + union-find for a candidate it has not seen —
         the moved bundle's new topo — instead of rescanning every bundle each
-        eval.  None outside a run → compute directly (behavior unchanged)."""
+        eval.  None outside a run → compute directly (behavior unchanged).
+
+        The per-eval walk itself is C++-keyed (rnr runtime N1,
+        docs/internal/rnr_runtime_parallelism.md): `buda.selected_topo_key`
+        fingerprints the SELECTED candidate in one zero-copy crossing —
+        the old loop paid a full candidate-POOL copy per bundle
+        (`w.input.candidates` materializes every Topology) plus an
+        original_bundle copy for the id, per metric evaluation.  The pool
+        copy is now paid only on a memo MISS (the moved bundle's new
+        candidate) and on the rare no-memo path."""
         import buda
         fp = self.fp
         memo = getattr(self, "_rr_disc_memo", None)
         total = 0
         for w in self.bundles:
-            cands = w.input.candidates
-            sel = w.plan.selected_topology_index
-            if not (0 <= sel < len(cands)):
+            uid, bid = buda.selected_topo_key(w)
+            if not uid:                       # no valid selection
                 continue
-            topo = cands[sel]
-            bid = w.input.original_bundle.id
             try:
                 if memo is not None:
-                    key = (buda.topo_uid(topo), bid)
+                    key = (uid, bid)
                     dc = memo.get(key)
                     if dc is None:
+                        topo = w.input.candidates[
+                            w.plan.selected_topology_index]
                         dc = self._rr_topo_disconnected(topo, fp, bid)
                         memo[key] = dc
                 else:
+                    topo = w.input.candidates[
+                        w.plan.selected_topology_index]
                     dc = self._rr_topo_disconnected(topo, fp, bid)
                 if dc:
                     total += len(w.input.original_bundle.get_net_names())
