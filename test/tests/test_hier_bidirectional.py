@@ -129,5 +129,8 @@ def test_hier_run_bundler_rejects_bad_strategy(tmp_path, capsys):
     sess.no_viz = True
     sess.do_command(f"open_bdb {tmp_path / 'mix.bdb'}")
     capsys.readouterr()
-    sess.do_command("run_hier_bundler depth 1 SOMETHING")
-    assert "error" in capsys.readouterr().out.lower()
+    # An unknown strategy is a hard error that STOPS the flow (sys.exit), per
+    # the PR #467 unknown-option guard — not a print-and-continue.
+    with pytest.raises(SystemExit):
+        sess.do_command("run_hier_bundler depth 1 SOMETHING")
+    assert "unknown option" in capsys.readouterr().out.lower()
