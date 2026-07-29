@@ -123,11 +123,47 @@ Then two post-passes over the emitted bit-wires:
    byte-identical, and restorations are reported (`[DetailedNUTS] restored N
    pass-through crossing(s) …`) rather than applied silently.
 
-   Both anchors are scoped to a block's **sole** coverage — one untapped block,
-   exactly one segment nominally crossing it. A block several segments cross
-   stays covered when any one retracts, so anchoring them all keeps phantom
-   span for nothing: measured, b44's pinned 6-segment `TRUNK_H+MST` realizes
-   4552 instead of 3510 (+30%) under an unscoped anchor.
+   Anchors are scoped to **exactly one placeable crossing per untapped block**
+   — never all of them, never none:
+
+   - *Not all*: a block several segments cross does not need every one held.
+     Anchoring the extras keeps phantom span for nothing — b44's pinned
+     6-segment `TRUNK_H+MST` realizes 4552 instead of 3510 (+30%) unscoped.
+   - *Not none*: nominal multiplicity is **not** placement redundancy. Several
+     crossings can all be contracted past the block, reopening the very
+     `BUSTERM_OPEN` the anchor prevents. Skipping the anchor whenever two
+     segments happened to cross nominally left 48 blocks unprotected across
+     mix / big / comprehensive_demo alone.
+
+   "Placeable" is the robust-cover gate `check_topo` already applies (issue
+   #438): the segment's slide window must be able to reach the block's perp
+   extent, so a boundary graze pushed off the face is not mistaken for a
+   sibling cover.
+
+   The election happens in `tighten_spans_to_reach`, **after placement is
+   final** — not up front on nominal geometry. An anchor holds the along-span
+   only; it never constrains `track_position`. A crossing chosen before
+   placement can therefore be seated perpendicular-*outside* the very block it
+   was chosen to protect, while the sibling that did land inside stays
+   unanchored and is contracted away (measured on big2: 7 blocks in exactly
+   that state, each covered only by the unanchored sibling). Electing at
+   tighten time picks a crossing that demonstrably covers the block.
+   Determinism survives: the tighten is the last span mutation and never moves
+   `track_position`, so the election is a pure function of the final placement,
+   with the lowest `(segment, rect)` breaking ties. Each segment's list is
+   pruned to its elected anchors, so downstream consumers see exactly what was
+   honored.
+
+   Crossings are recorded **per rect**, not per block. `derive_slide_ranges`
+   unions the perpendicular extents of every rect a segment spans, so a
+   multi-rect block's slide window legitimately lets placement seat the segment
+   in a *sibling* rect; recording only the nominally-crossed one would make the
+   election reject that valid cover and leave the block unanchored. The
+   per-block gate ("does this segment nominally cover this block at all",
+   `check_topo`'s relation) still decides *whether* to record — only the choice
+   of rects within a covered block is widened. **Note:** no flow in the repo
+   currently produces an untapped multi-rect pass-through, so this path is
+   defensive and unexercised; a fixture for it is wanted.
 
 7. **Per-bit via emission (step 5 in the source).** For every connection where
    the two bits sit on **different layers**, one `NetVia` is emitted at the

@@ -40,11 +40,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+import contextlib
+import io
+
 import pytest
 
 import buda
 
 _ROOT = Path(__file__).parents[2]
+sys.path.insert(0, str(_ROOT / "src"))
+import buda_cli  # noqa: E402
+
 LAYER = 4
 
 
@@ -185,3 +191,155 @@ def test_mix_flow_has_no_passthrough_open():
     assert rc == 0, f"non-zero exit {rc}\n{out[-4000:]}"
     assert "no pass-through segment" not in out, out[-4000:]
     assert "no pass-through/busterm connection" not in out, out[-4000:]
+
+
+# ── the anchor invariant (Codex P1, second review on #499) ───────────────────
+
+def _untapped_crossings(s, w):
+    """Per untapped connected block, the segments that PLACEABLY cross it.
+
+    Placeable = the robust-cover gate check_topo applies (issue #438): the
+    segment's slide window must be able to reach the block's perp extent, so a
+    boundary graze pushed off the face is not counted as a cover.
+    """
+    sel = w.plan.selected_topology_index
+    if sel is None or sel < 0 or sel >= len(w.input.candidates):
+        return {}
+    topo = w.input.candidates[sel]
+    ct = buda.ConnTopology()
+    ct.build(topo, s.fp)
+    tapped = {c.block_name for cs in ct.segs() for c in cs.conns
+              if c.kind == buda.SegConnKind.BUSTERM}
+    out = {}
+    for bname in topo.connected_block_names:
+        if bname in tapped:
+            continue
+        rects = s.fp.get_block_rects(bname) or [s.fp.get_block_bounds(bname)]
+        crossers = []
+        for i, cs in enumerate(ct.segs()):
+            lo, hi = min(cs.along_lo, cs.along_hi), max(cs.along_lo, cs.along_hi)
+            for r in rects:
+                plo, phi = (r.y1, r.y2) if cs.horiz else (r.x1, r.x2)
+                alo, ahi = (r.x1, r.x2) if cs.horiz else (r.y1, r.y2)
+                if cs.perp_pos < plo or cs.perp_pos > phi:
+                    continue
+                if lo > ahi or hi < alo:
+                    continue
+                if cs.perp_hi < plo or cs.perp_lo > phi:
+                    continue                       # not placeable
+                crossers.append(i)
+                break
+        if crossers:
+            out[bname] = crossers
+    return out
+
+
+@pytest.mark.mid
+@pytest.mark.parametrize("flow", ["flow/rnr/mix.buda",
+                                  "flow/big_data_test/big.buda",
+                                  "demo/comprehensive_demo.buda"])
+def test_every_placeable_crossing_block_keeps_an_anchor(flow):
+    """Every untapped block with a placeable crossing must have AT LEAST ONE
+    anchored segment holding it.
+
+    The first version of the fix anchored a crossing only when it was the
+    block's *sole* nominal cover, on the reasoning that a block several
+    segments cross stays covered when any one retracts.  That does not follow:
+    nominal multiplicity is not placement redundancy, and several crossings can
+    ALL be contracted past the block, which reopens exactly the `BUSTERM_OPEN`
+    the anchor exists to prevent (Codex, second review on #499).
+
+    The hole was not hypothetical — on `main` at 18b631e these three flows had
+    10, 34 and 4 multi-crosser blocks respectively, every one of them
+    unanchored.  The rule is now "exactly one placeable crossing per block":
+    never all of them (b44 realizes +30% that way), and never none.
+    """
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cwd = os.getcwd()
+    os.chdir(str(_ROOT / os.path.dirname(flow)))
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+            for line in open(os.path.basename(flow)):
+                c = line.strip()
+                if not c or c.startswith("#"):
+                    continue
+                if c.split()[0] in {"visualize", "exit", "check_design",
+                                    "report_wirelength"}:
+                    continue
+                s.do_command(c)
+    finally:
+        os.chdir(cwd)
+
+    placed = {(t.bundle_id, t.seg_idx): t for t in s.nuts_result.segments}
+    unanchored, multi = [], 0
+    for w in s.bundles:
+        bid = w.input.original_bundle.id
+        for bname, crossers in _untapped_crossings(s, w).items():
+            if len(crossers) > 1:
+                multi += 1
+            if not any(placed.get((bid, i)) is not None
+                       and len(placed[(bid, i)].passthru_spans) > 0
+                       for i in crossers):
+                unanchored.append((bid, bname, crossers))
+    assert not unanchored, (
+        f"{len(unanchored)} block(s) with a placeable crossing carry no anchor: "
+        f"{unanchored[:5]}")
+    # Non-vacuity: the flow must actually contain the multi-crosser case the
+    # rule is about, or this proves nothing.
+    assert multi > 0, f"{flow} has no multi-crosser block — fixture is vacuous"
+
+
+@pytest.mark.mid
+@pytest.mark.parametrize("flow", ["flow/rnr/mix.buda",
+                                  "flow/big_data_test/big2/big2.buda"])
+def test_elected_anchor_is_seated_inside_its_block(flow):
+    """Every honored anchor must belong to a segment actually seated inside the
+    block it protects — and each block must have exactly one.
+
+    An anchor holds a segment's ALONG span; it does not constrain
+    `track_position`. So a crossing elected on nominal geometry can be placed
+    perpendicular-OUTSIDE the block it was chosen for, leaving the sibling that
+    did land inside unanchored and free to be contracted away — the same
+    `BUSTERM_OPEN` the anchor exists to prevent (Codex, third review on
+    #499/#505).
+
+    Measured on `big2` before the fix: 7 blocks whose nominal-elected anchor
+    sat outside, each covered only by an unanchored sibling. The election
+    therefore happens in `tighten_spans_to_reach`, where placement is final.
+
+    `TrackSegment.passthru_spans` is the post-tighten (honored) set, so this
+    reads the real decision rather than re-deriving it.
+    """
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cwd = os.getcwd()
+    os.chdir(str(_ROOT / os.path.dirname(flow)))
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+            for line in open(os.path.basename(flow)):
+                c = line.strip()
+                if not c or c.startswith("#"):
+                    continue
+                if c.split()[0] in {"visualize", "exit", "check_design",
+                                    "report_wirelength"}:
+                    continue
+                s.do_command(c)
+    finally:
+        os.chdir(cwd)
+
+    outside, per_block = [], {}
+    for t in s.nuts_result.segments:
+        if not t.placed:
+            continue
+        for pc in t.passthru_spans:
+            per_block.setdefault((t.bundle_id, pc.block), []).append(t.seg_idx)
+            if not (pc.perp_lo <= t.track_position <= pc.perp_hi):
+                outside.append((t.bundle_id, t.seg_idx, pc.block,
+                                t.track_position, (pc.perp_lo, pc.perp_hi)))
+    assert not outside, (
+        f"{len(outside)} anchor(s) held by a segment seated outside the block "
+        f"they protect: {outside[:5]}")
+    dupes = {k: v for k, v in per_block.items() if len(v) > 1}
+    assert not dupes, f"block(s) with more than one anchor: {list(dupes)[:5]}"
+    assert per_block, f"{flow} elected no anchors — fixture is vacuous"
