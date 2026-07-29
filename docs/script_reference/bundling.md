@@ -15,11 +15,23 @@ run_bundler strict
 run_bundler convergent
 run_bundler bidirectional
 run_bundler combined
+run_bundler [strategy] --dump
 ```
 
 Group all nets in the netlist into `Bundle` objects (default `strict`). Must be
 called after all `add_net` / `add_bus` commands and before
 `generate_topologies_for_bundle`.
+
+**`--dump`** prints one line per created bundle — the flat-flow counterpart of
+`dump_hbundles` — after the `Bundler created N hbundles.` summary:
+
+```
+  b-1    nets=4     "DRV:A|REC:B"  [bus_03_0, bus_03_1, bus_03_2…]
+  b-2    nets=2     "DRV:A|REC:C"  [bus_07_0, bus_07_1]
+```
+
+Each line shows the bundle id, its net count, the grouping **reason** (the
+driver/receiver signature), and the first few net names.
 
 | Strategy | Grouping rule |
 |---|---|

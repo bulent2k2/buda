@@ -554,12 +554,33 @@ def _split_hier_bundles(session, raw_bundles):
     return out
 
 
+def _dump_flat_bundles(bundles):
+    """One line per flat bundle (run_bundler --dump): id, net count, grouping
+    reason, and the first net names — the flat-flow counterpart of
+    dump_hbundles' per-HBundle line."""
+    for w in bundles:
+        b = w.input.original_bundle
+        names = b.get_net_names()
+        n = len(names)
+        shown = names[:3]
+        ell = "…" if n > 3 else ""
+        nets_str = ", ".join(shown) + ell
+        short_reason = (b.reason or "")[:50].rstrip(',')
+        print(f"  b-{b.id:<3}  nets={n:<4}  \"{short_reason}\"  [{nets_str}]")
+
+
 def cmd_run_bundler(session, cmd, args, cmd_line):
-    # run_bundler [STRICT|CONVERGENT|BIDIRECTIONAL|COMBINED]  (default STRICT)
-    strat_arg = args[0].upper() if args else "STRICT"
+    # run_bundler [STRICT|CONVERGENT|BIDIRECTIONAL|COMBINED] [--dump]  (default STRICT)
+    # --dump prints one line per created bundle (id, net count, grouping reason,
+    # first net names) — the flat-flow counterpart of dump_hbundles.
+    reject_unknown_options("run_bundler",
+                           [a for a in args if a.startswith("--")], ("--dump",))
+    dump = "--dump" in args
+    pos = [a for a in args if not a.startswith("--")]
+    strat_arg = pos[0].upper() if pos else "STRICT"
     if strat_arg not in ("STRICT", "CONVERGENT", "BIDIRECTIONAL", "COMBINED"):
         print(f"Error: run_bundler strategy must be STRICT, CONVERGENT, "
-              f"BIDIRECTIONAL or COMBINED, got '{args[0]}'"); return
+              f"BIDIRECTIONAL or COMBINED, got '{pos[0]}'"); return
     if strat_arg == "CONVERGENT":
         # CONVERGENT groups nets by shared receiver only, so a bundle can
         # span several DIFFERENT driver blocks at different locations (a
@@ -612,6 +633,8 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
         session.bundles.append(w)
     session._bu_clone_from = {}   # fresh ids: drop stale clone provenance
     print(f"Bundler created {len(session.bundles)} hbundles.")
+    if dump:
+        _dump_flat_bundles(session.bundles)
     session._bundler_strategy = strat_arg
     n = session._persist_bundles(strat_arg)
     if n:

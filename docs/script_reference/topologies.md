@@ -11,18 +11,17 @@ Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pip
 ### `generate_topologies_for_bundle`
 
 ```
-generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
+generate_topologies_for_bundle <bundle_id | hint | id:N | net:PFX> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
 ```
 
-Generate routing topology candidates for the bundle whose first net name
-starts with `<hint>`. Source and destination block names are derived
-automatically from the netlist.
+Generate routing topology candidates for a specific bundle. Source and
+destination block names are derived automatically from the netlist.
 
 **Positional arguments:**
 
 | Argument | Description |
 |---|---|
-| `hint` | Prefix of the first net name in the target bundle, e.g. `t0_b3`. |
+| selector | Which bundle(s) to (re)generate. Resolves exactly like `select_topology`'s bundle argument: a **bare integer** is a **bundle ID**; a **bare non-numeric** token is a **net-name prefix** (hint), e.g. `t0_b3`, matching every bundle whose first net starts with it; `id:N` forces a numeric ID and `net:PFX` forces a prefix (so `net:10` matches a bus `10net` while bare `10` is bundle ID 10). |
 
 **Optional flags** (append anywhere after the hint):
 
@@ -83,7 +82,8 @@ ranked after `thru` candidates when all else is equal.
 
 **Example:**
 ```
-generate_topologies_for_bundle t0_b3
+generate_topologies_for_bundle t0_b3           # by net-name hint
+generate_topologies_for_bundle 12              # by bundle ID
 generate_topologies_for_bundle t0_b3  center_mode
 generate_topologies_for_bundle bus_rsp  # multicast
 ```
