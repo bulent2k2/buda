@@ -90,18 +90,22 @@ so this is the *second* time the pinned index drifted.
 (`qor_table.md`: `0/0/0`, 448 net segments), so the design routes correctly — the
 test's chosen probe point just no longer exists.
 
-**Recommended fix (test-only), preferred → fallback.**
-1. **Make it selection-robust:** assert the phantom-tail invariant (abstract span
-   within realization noise of the segment's own bit-wires' extent) over **every**
-   placed segment of bundle 30 (or every trunk segment), rather than hard-coding
-   `seg_idx == 7`. This is what the test's docstring says it's really checking, and
-   it survives future selection changes.
-2. **Or** re-anchor to the current winner: dump `bundle 30`'s selected topology on
-   `main`, pick the trunk segment that carries the long span, and update the index
-   — accepting it will drift again on the next selection change.
+**Recommended fix (test-only): delete the redundant pinned test.** The
+selection-robust "phantom tail over every segment" invariant this test is really
+after is **already implemented in the same file** by
+`test_no_phantom_abstract_span_beyond_detailed_extent`
+(`test_nuts_span_tighten.py:58-87`): it runs the same `FLOW` and applies the same
+40-unit overhang check to **every** selected segment — including all of
+bundle 30's realized segments. So `test_bundle30_mp6b_seg7_span_is_tight` adds no
+coverage the all-segment test doesn't already give; rewriting it as a
+selection-robust invariant would merely duplicate that test (and pay for a second
+full-pipeline run). Remove the pinned test.
 
-Recommendation: option 1 — the invariant is the real intent; the index is an
-incidental coupling.
+*Only* if a genuinely distinct property is wanted, redefine it around something
+the all-segment invariant does not cover — e.g. bundle 30's topology **type/shape**
+rather than a specific `seg_idx` — but note that too will drift with selection.
+
+*(Credit: Codex flagged the overlap with the existing all-segment test.)*
 
 ---
 
@@ -130,18 +134,27 @@ healed; that residual is gone.
 **Not a regression** — this is the routing getting strictly better. The test is
 guarding a scenario that no longer occurs on this vehicle.
 
-**Recommended fix (test-only), in priority order.**
-1. **Re-home the test to a still-congested vehicle** — one that still enters
-   ripup stage-b with DNUTS opens > 0 (e.g. a `mix2_fast*` residual vehicle, or a
-   trimmed variant of `06_multipin_stress` with a tighter grid). The test's value
-   is the *mechanism* (stage-b re-pins a per-instance wrapper and drives opens to
-   0), so it needs an input that still exercises it.
-2. **Or** convert it to a monotonicity/idempotence check: assert stage-b never
-   *increases* opens and leaves a clean flow clean (a weaker but still meaningful
-   guard that survives the vehicle going clean).
-3. Retiring it outright is **not** recommended — the stage-b uniformity-break
-   path (#487) is exactly the kind of code that benefits from a regression guard;
-   it just needs a live input.
+**Recommended fix (test-only): re-home to a still-congested vehicle.** The test's
+value is the stage-b **mechanism** (re-pin a per-instance wrapper, drive DNUTS
+opens to 0), which only runs when the flow **enters** stage-b with opens > 0.
+Point it at an input that still carries nonzero DNUTS opens at baseline — a
+residual `mix2_fast*` vehicle, or a tighter-grid variant of `06_multipin_stress`
+that keeps an open.
+
+A clean-flow "monotonicity / idempotence" variant is **not** a viable fallback:
+when the metric is already 0, `_ripup_reroute` prints `metric already 0 — nothing
+to do.` and **returns before the hill-climb** (`src/buda_session/ripup.py:~2320`),
+so it exercises none of stage-b. It would only duplicate
+`test_hier_supported_and_noop_when_clean` (`test_ripup_reroute.py:293-305`), which
+already covers the clean-hier no-op, and would leave the uniformity-break path
+(#487) untested. So the vehicle **must** start dirty; do not keep this test on a
+clean flow.
+
+Retiring the test outright is still not recommended — the stage-b
+uniformity-break path deserves a live regression guard; it just needs a dirty
+input.
+
+*(Credit: Codex flagged that a clean flow short-circuits before stage-b.)*
 
 ---
 
@@ -152,10 +165,12 @@ selection or a specific residual, which legitimately move as the router
 improves.** Two mitigations:
 
 1. **Prefer invariants over pinned states.** Assert *properties* (no phantom
-   tail on any segment; stage-b never worsens opens; a bad option is rejected)
-   rather than a hard-coded `seg_idx`, a specific bundle's residual count, or a
-   print-vs-raise contract. Failures 2 and 3 would have survived if written this
-   way.
+   tail on any segment; a bad option is rejected) rather than a hard-coded
+   `seg_idx` or a print-vs-raise contract — F1 and F2 would not have drifted
+   this way (indeed F2's invariant form already exists). The caveat is F3: an
+   invariant survives the flow going clean, but a healer/ripup regression guard
+   is only *meaningful* on an input that still exercises the path, so those tests
+   additionally need a **live dirty vehicle**, not just a robust assertion.
 2. **Run the mid tier before planner/ripup/option-validation merges.** With no
    CI, the mid tier drifts silently. `bin/bb mid` (or `pytest -m "not slow"`)
    before merging anything that can move a topology selection would have caught
