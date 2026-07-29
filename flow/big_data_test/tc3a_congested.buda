@@ -1,0 +1,26 @@
+# qor-exclude: intentionally over-capacity (>1000% congested) — a non-converging
+# vehicle for the stage-b ripup convergence-guard test.  It must NOT enter any
+# benchmark corpus (qor_gentopo_sweep auto-globs this dir), so it opts out here.
+#
+# Same design as tc3a.buda but opens the FULL, UNPRUNED tc3a.bdb.sql instead of
+# tc3a_bit_pruned.bdb.sql — 72 of 80 bundles fail, thousands of DNUTS opens the
+# stage-b ripup cannot clear.  This is what makes the convergence guard fire.
+source ../tracks/tracks4top.buda
+
+# > 1000% congested.
+# x10 expansion in tc3a_flat.buda ~= big.buda
+open_bdb tc3a.bdb.sql
+# open_bdb tc3a_bit_pruned.bdb.sql  # in tc3a.buda now
+
+derive_busterms 1
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+run_hier_bundler depth 1
+dump_hbundles
+generate_hier_topologies
+run_planner hier
+run_nuts
+negotiate_congestion
+run_detailed_nuts
+negotiate_congestion
+check_design
