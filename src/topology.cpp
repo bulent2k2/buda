@@ -1665,9 +1665,9 @@ static bool has_collinear_overlap(const Topology& topo, int n_orig) {
 // healer uses to escape congestion (slowdown_rnr regresses 0/0→2/8 if such a
 // detour is dropped).  Only a vestigial OOB trunk that hangs off the tree at ONE
 // point (bus_033 cand 29) is both redundant and dangling — that one we drop.
-static bool seed_trunk_is_redundant(const Topology& topo, int trunk_pos, bool is_h,
-                                    const Floorplan& fp,
-                                    bool require_dangling_spine = false) {
+// The spine: the longest segment matching the trunk orientation at trunk_pos.
+// -1 when the completed tree has none (every spine segment was consumed).
+static int find_spine_index(const Topology& topo, int trunk_pos, bool is_h) {
     int spine = -1;
     long best_len = -1;
     for (int j = 0; j < (int)topo.segments.size(); ++j) {
@@ -1678,6 +1678,41 @@ static bool seed_trunk_is_redundant(const Topology& topo, int trunk_pos, bool is
         long len = std::abs(is_h ? sg.end.x - sg.start.x : sg.end.y - sg.start.y);
         if (len > best_len) { best_len = len; spine = j; }
     }
+    return spine;
+}
+
+// Is the completed hybrid's seed trunk an ANTENNA — attached to the rest of the
+// route at fewer than two distinct points (verify's seg_attachment)?  Then the
+// candidate carries electrically inert metal by construction and the caller
+// drops it: there is no reason to offer the planner a shape whose spine is a
+// wire terminating in nothing when the plain trunk and the standalone MST cover
+// the bundle anyway (issue #485 question 1).
+//
+// This is DELIBERATELY independent of seed_trunk_is_redundant below.  An antenna
+// spine can still be the only thing holding two COLLINEAR stubs together at its
+// single junction — ConnTopology infers a SEG link only for perpendicular pairs,
+// so removing it reports DISCONNECTED and the removability test (correctly) says
+// "load-bearing, keep".  That reasoning is about the trunk-LESS topology, which
+// we never emit; the question here is whether to keep a candidate that is
+// antenna-flagged as it stands.  It is not (issue #485's in-bbox family:
+// comprehensive_demo b5 cand17, big b4 cand21, mix b18 cand11 — six candidates
+// whose spine hangs off one point where two collinear stubs meet).
+static bool seed_trunk_is_antenna(const Topology& topo, int trunk_pos, bool is_h,
+                                  const Floorplan& fp) {
+    const int spine = find_spine_index(topo, trunk_pos, is_h);
+    if (spine < 0) return false;
+    Topology oc = topo;
+    annotate_seg_conns(oc);                      // see the note in the gate below
+    ConnTopology oct;
+    oct.build(oc, fp);
+    if (spine >= (int)oct.segs().size()) return false;
+    return seg_attachment(oct.segs()[spine], oc, fp).count() < 2;
+}
+
+static bool seed_trunk_is_redundant(const Topology& topo, int trunk_pos, bool is_h,
+                                    const Floorplan& fp,
+                                    bool require_dangling_spine = false) {
+    const int spine = find_spine_index(topo, trunk_pos, is_h);
     if (spine < 0) return false;                 // no spine found — leave it
 
     // OOB discriminator: a genuine OOB detour trunk is a real bridge whose spine
@@ -1688,23 +1723,35 @@ static bool seed_trunk_is_redundant(const Topology& topo, int trunk_pos, bool is
     // connection and no block face, the set_drop_dangling predicate.  So for OOB
     // we drop only when the SPINE itself dangles.
     if (require_dangling_spine) {
-        // The caller's `topo` has had annotate_endpoints but not the full
-        // annotate_topology ConnTopology needs — build on an annotated copy so the
-        // SEG-junction inference is real (otherwise every seg reads 0 conns).
+        // The caller's `topo` has had annotate_endpoints + complete_relay_junctions
+        // but not the seg_conns derivation ConnTopology needs (otherwise every seg
+        // reads 0 conns), so derive JUST that on a copy.
+        //
+        // It must be annotate_seg_conns, NOT annotate_topology: the latter also
+        // re-derives seg_busterms GEOMETRICALLY, re-adding the very face landings
+        // complete_relay_junctions deliberately demoted to nullopt under the
+        // single-tap model.  The gate then judged a topology that is not the one
+        // being pooled — on the corpus the re-annotated spine picked up a phantom
+        // BUSTERM conn in ALL 20 OOB cases, reading "not dangling" while the
+        // pooled candidate's spine hangs off a single junction.  That is issue
+        // #485's OOB family: 20 of its 26 antennas are candidates this gate meant
+        // to drop and did not.
         Topology oc = topo;
-        annotate_topology(oc, fp);
+        annotate_seg_conns(oc);
         ConnTopology oct;
         oct.build(oc, fp);
         // The SPINE itself must dangle: a vestigial OOB trunk (bus_033 cand 29)
-        // runs out of the die and hangs off the tree at a SINGLE junction, so its
-        // own ConnSeg has ≤1 connection and no block face.  A genuine OOB detour
-        // (slowdown_rnr) is a real bridge whose spine attaches at BOTH ends — some
-        // minor seg may dangle, but the load-bearing spine does not, so we keep it.
+        // runs out of the die and hangs off the tree at a SINGLE junction.  A
+        // genuine OOB detour (slowdown_rnr) is a real bridge whose spine attaches
+        // at BOTH ends — some minor seg may dangle, but the load-bearing spine
+        // does not, so we keep it.  "Dangles" is the ANTENNA predicate itself
+        // (verify's seg_attachment: distinct busterm/junction POSITIONS plus
+        // pass-through blocks), shared rather than re-rolled — the hand-rolled
+        // conn-RECORD count this replaces is the same defect the #483 review found
+        // in the checker, and a second copy would drift again.
         if (spine >= (int)oct.segs().size()) return false;
-        const auto& sc = oct.segs()[spine].conns;
-        bool spine_dangling = (sc.size() <= 1 &&
-                               (sc.empty() || sc[0].block_name.empty()));
-        if (!spine_dangling) return false;       // real detour bridge — keep it
+        if (seg_attachment(oct.segs()[spine], oc, fp).count() >= 2)
+            return false;                        // real detour bridge — keep it
     }
 
     // Build the trunk-less topology and re-derive its connectivity from scratch
@@ -3620,6 +3667,11 @@ void TopologyGenerator::add_trunk_mst_candidates(
     // otherwise, and silent drops are exactly what this line of work set out to
     // make visible.  Counted across all trunk positions; logged once below.
     int n_redundant_dropped = 0;
+    // Counted separately from the removability drop above: an ANTENNA spine is a
+    // different fault (inert metal in the candidate AS IT STANDS, issue #485) and
+    // the two reasons must stay distinguishable in the log — a candidate can be
+    // antenna-flagged while its spine is NOT removable (the collinear-stub case).
+    int n_antenna_dropped = 0;
     std::string first_redundant;
 
     for (int ti = 0; ti < orig_count; ++ti) {
@@ -3825,11 +3877,14 @@ void TopologyGenerator::add_trunk_mst_candidates(
             // is vestigial).  Applies to OOB detour trunks too: a genuine detour
             // is NOT removable (removing it disconnects), while a redundant OOB
             // trunk that hangs off the tree at one point IS (bus_033 cand 29).
+            // Also drop one whose spine is an ANTENNA as it stands (issue #485).
             if (topology_is_clean_tree(tree, floorplan_)) {
                 bool is_oob = (tree.type.find("_OOB") != std::string::npos);
-                if (seed_trunk_is_redundant(tree, trunk_pos, is_h, floorplan_,
+                bool antenna = seed_trunk_is_antenna(tree, trunk_pos, is_h, floorplan_);
+                if (antenna ||
+                    seed_trunk_is_redundant(tree, trunk_pos, is_h, floorplan_,
                                             /*require_dangling_spine=*/is_oob)) {
-                    ++n_redundant_dropped;
+                    if (antenna) ++n_antenna_dropped; else ++n_redundant_dropped;
                     if (first_redundant.empty()) first_redundant = tree.type;
                 } else {
                     results.push_back(std::move(tree));
@@ -3874,12 +3929,16 @@ void TopologyGenerator::add_trunk_mst_candidates(
         // candidate (and don't pool it as a fallback either — the plain trunk
         // still covers the bundle).
         bool legacy_is_oob = (legacy.type.find("_OOB") != std::string::npos);
+        bool legacy_antenna =
+            seed_trunk_is_antenna(legacy, trunk_pos, is_h, floorplan_);
         bool legacy_dangling =
+            legacy_antenna ||
             seed_trunk_is_redundant(legacy, trunk_pos, is_h, floorplan_,
                                     /*require_dangling_spine=*/legacy_is_oob);
         if (legacy_dangling &&
             (topology_is_clean_tree(legacy, floorplan_) || blocks.size() < 4)) {
-            ++n_redundant_dropped;                 // would have emitted/pooled but for redundancy
+            // would have emitted/pooled but for redundancy
+            if (legacy_antenna) ++n_antenna_dropped; else ++n_redundant_dropped;
             if (first_redundant.empty()) first_redundant = legacy.type;
         }
         if (topology_is_clean_tree(legacy, floorplan_) && !legacy_dangling) {
@@ -3900,10 +3959,16 @@ void TopologyGenerator::add_trunk_mst_candidates(
         }
     }
 
-    if (n_redundant_dropped > 0)
-        std::cerr << "[TopoGen] dropped " << n_redundant_dropped
-                  << " redundant trunk+MST hybrid(s) (removable seed trunk; first: "
-                  << first_redundant << ").\n";
+    if (n_redundant_dropped > 0 || n_antenna_dropped > 0) {
+        std::cerr << "[TopoGen] dropped " << (n_redundant_dropped + n_antenna_dropped)
+                  << " redundant trunk+MST hybrid(s) (";
+        if (n_redundant_dropped > 0) {
+            std::cerr << n_redundant_dropped << " removable seed trunk";
+            if (n_antenna_dropped > 0) std::cerr << ", ";
+        }
+        if (n_antenna_dropped > 0) std::cerr << n_antenna_dropped << " antenna seed trunk";
+        std::cerr << "; first: " << first_redundant << ").\n";
+    }
 
     // Emit a single un-completed fallback ONLY if the whole bundle produced no clean
     // MST-type candidate (neither here nor in the completed-tree path above) -- so a

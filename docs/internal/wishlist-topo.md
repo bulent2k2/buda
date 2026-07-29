@@ -856,6 +856,16 @@ stay opt-in.
 See [`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md) for the
 per-flow numbers behind each of these.
 
+**Partly overtaken by the seed-trunk work (issue #485).**  Item 4's
+"generation-time tail trim beats a post-hoc drop" instinct was right, and the
+`TRUNK+MST` dead-wire family it points at is the same one: the generator now
+drops a hybrid whose SEED TRUNK is an antenna, taking the corpus antenna
+census 26 → 0 with no knob (default behaviour, not opt-in).  What that does
+NOT cover is a tail on a segment attached at two or more points — a trunk that
+overshoots its last junction while still being properly connected — so the
+along-DOF trim remains open.  See
+[`seed_trunk_antenna_2026-07.md`](seed_trunk_antenna_2026-07.md).
+
 ## Promote `set_dedup_loci` to default-on in generation — MEASURED, keep opt-in
 
 **Full root-cause + measurement:
