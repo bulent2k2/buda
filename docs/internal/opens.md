@@ -132,9 +132,22 @@ designs and fail LOUD, never silent:)*
    `check_template_tracks on_mismatch independent` policy (which today
    triggers only on track-PHASE mismatch) to also release an instance
    whose copied routing is measured DNUTS-open, solving just that
-   instance individually while the aligned siblings keep the copy; (b) a
-   **placement/track-supply fix** (nudge `i_dogleg1_3` or widen the local
-   supply via pattern/override) — the by-hand answer today; or (c) a
+   instance individually while the aligned siblings keep the copy; (b)
+   **move the occurrences to align better — the EXISTING, shipped
+   solution**: `align_bottom_up` nudges the cell's instances onto a
+   common track phase with minimal total movement, and the
+   `flow/rnr/mix2_align_and_save.buda` → `mix2_fast_on_aligned_sql.buda`
+   pair is the worked example (align the placement once, save the
+   fixture, run the flow on it).  **Measured 2026-07-28 (post
+   #472/#478): on the aligned fixture the locked-copy residual class
+   VANISHES** — the aligned flow's remaining opens (30 on bundles 25/61
+   at default healer budgets) sit entirely on FREE top-level buses the
+   healers can keep grinding, with no locked bundle among them.
+   `mix2_fast_bottomup` deliberately skips alignment (it leans on the
+   `independent` policy instead), which is exactly why it exhibits the
+   residual; the manual variants (nudge `i_dogleg1_3` by hand, widen the
+   local supply via a pattern override) remain the finer-grained
+   fallback; or (c) a
    cell-local candidate DOF the pool may lack (unverified — only that
    none of the 8 existing candidates measures better at any instance
    simultaneously). (a) is the bounded, principled piece:

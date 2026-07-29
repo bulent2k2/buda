@@ -132,7 +132,10 @@ Feature: Roadmap — documented open items & future directions
     # the uniform copy works at 3 of 4 instances; the 4th's surroundings leave
     # its placed window with no DNUTS signal track, and every healer DOF is
     # exhausted (ripup class trials, negotiate v2 priced re-plan) — a
-    # topology-selection fix does not exist for it.
+    # topology-selection fix does not exist for it.  The shipped PLACEMENT
+    # fix already works: align_bottom_up (the mix2_align_and_save fixture
+    # pair) makes the locked-copy residual vanish — this scenario is the
+    # routing-side complement for placements that cannot move.
     Given a bottom-up class whose copied routing is measured DNUTS-open at one instance only
     When check_template_tracks' independent policy also releases measured-infeasible instances
     Then that instance solves individually while the aligned siblings keep the uniform copy
