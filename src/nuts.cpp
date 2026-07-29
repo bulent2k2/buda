@@ -2264,10 +2264,30 @@ void NUTSEngine::orientation_fixpoint(
         }
         return total - largest >= kP3MinParallelWork;
     };
+    // The independence argument partitions by LAYER direction, but it only
+    // holds when every segment's own orientation matches its layer's
+    // declared direction: edit_set_layer warns-but-commits a mismatched
+    // assignment (a LAYER_DIR violation check_design reports post-NUTS),
+    // and a geometrically perpendicular junction partner riding the same
+    // direction group would then be read through jn_segs while its worker
+    // mutates it (Codex #504 P2).  A group carrying any mismatched segment
+    // solves SEQUENTIALLY — a correctness fallback, so it applies even
+    // when an explicit thread count bypasses the size gate.
+    auto group_dir_clean = [&](const std::vector<int>& group) {
+        for (int lid : group) {
+            const bool h = h_set.count(lid) > 0;
+            auto lit = by_layer.find(lid);
+            if (lit == by_layer.end()) continue;
+            for (const TrackSegment* ts : lit->second)
+                if (ts->horiz != h) return false;
+        }
+        return true;
+    };
     auto solve_group = [&](const std::vector<int>& group) {
         const int nt = std::min<int>(nuts_threads, (int)group.size());
         if (nt <= 1 || group.size() < 2 ||
-            (!gate_bypassed && !group_is_heavy(group))) {
+            (!gate_bypassed && !group_is_heavy(group)) ||
+            !group_dir_clean(group)) {
             for (int lid : group) {
                 for (auto* ts : by_layer[lid]) {
                     ts->track_position = std::numeric_limits<double>::quiet_NaN();
