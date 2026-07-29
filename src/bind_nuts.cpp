@@ -27,6 +27,7 @@
 #include "routing_grid.h"
 #include "detailed_nuts.h"
 #include "verify.h"
+#include "trial_sweep.h"
 
 namespace py = pybind11;
 using namespace buda;
@@ -438,6 +439,79 @@ void bind_nuts(py::module_& m) {
           },
           py::arg("bundles"), py::arg("nuts_result"), py::arg("floorplan"),
           py::arg("bit_order") = "LO_HI");
+
+    // ── Parallel trial sweep (rnr runtime P1, trial_sweep.h) ─────────────
+    // Evaluate k ('idx', tidx) ripup moves against the committed baseline on
+    // worker threads (GIL released — inputs are converted up front and the
+    // workers never touch Python state).  Returns [(primary, secondary,
+    // ok), ...] per move in input order; the caller picks the first
+    // in-order strict improver and REPLAYS it through the normal sequential
+    // trial before committing (metrics here carry the stall certificate and
+    // the pick order, never the committed state).
+    m.def("parallel_sweep",
+          [](const std::vector<BundleWrapper>& bundles,
+             const std::vector<std::pair<int, int>>& moves,
+             CongestionPlanner& planner, const Floorplan& fp,
+             const LayerStack& layers, double track_pitch,
+             const std::vector<TrackSegment>& fixed_segs,
+             const std::vector<int>& extra_x,
+             const std::vector<int>& extra_y,
+             bool stage_b, bool skip_tighten_stage_a,
+             const std::set<int>& dogleg_slot_bids,
+             const std::map<int, int>& base_disc,
+             const std::map<int, int>& net_counts,
+             const RoutingGridStack* grid, const std::string& bit_order,
+             int abort_unplaced,
+             const std::set<int>& ref_ids, const std::set<int>& skip_ids,
+             const std::vector<std::tuple<int, int, std::string, int, int,
+                                          int, int, int, int>>& copy_specs,
+             const std::map<std::pair<int, int>, bool>& horiz_of,
+             int n_threads) {
+              std::vector<SweepMove> mv;
+              mv.reserve(moves.size());
+              for (const auto& [bid, tidx] : moves)
+                  mv.push_back(SweepMove{bid, tidx});
+              SweepDnutsCtx dn;
+              dn.enabled = stage_b;
+              dn.grid = grid;
+              dn.bit_order = bit_order;
+              dn.abort_unplaced = abort_unplaced;
+              dn.ref_ids = ref_ids;
+              dn.skip_ids = skip_ids;
+              for (const auto& t : copy_specs) {
+                  SweepDnutsCtx::CopySpec cs;
+                  std::tie(cs.ref_bid, cs.sib_bid, cs.orient, cs.cw, cs.ch,
+                           cs.rx, cs.ry, cs.sx, cs.sy) = t;
+                  dn.copy_specs.push_back(std::move(cs));
+              }
+              dn.horiz_of = horiz_of;
+              std::vector<std::tuple<int, int, bool>> out;
+              {
+                  py::gil_scoped_release release;
+                  auto res = parallel_sweep(
+                      bundles, mv, planner, fp, layers, track_pitch,
+                      fixed_segs, extra_x, extra_y, stage_b,
+                      skip_tighten_stage_a, dogleg_slot_bids, base_disc,
+                      net_counts, dn, n_threads);
+                  out.reserve(res.size());
+                  for (const auto& r : res)
+                      out.emplace_back(r.primary, r.secondary, r.ok);
+              }
+              return out;
+          },
+          py::arg("bundles"), py::arg("moves"), py::arg("planner"),
+          py::arg("floorplan"), py::arg("layers"), py::arg("track_pitch"),
+          py::arg("fixed_segs"), py::arg("extra_x"), py::arg("extra_y"),
+          py::arg("stage_b"), py::arg("skip_tighten_stage_a"),
+          py::arg("dogleg_slot_bids"), py::arg("base_disc"),
+          py::arg("net_counts"), py::arg("grid") = nullptr,
+          py::arg("bit_order") = "LO_HI", py::arg("abort_unplaced") = -1,
+          py::arg("ref_ids") = std::set<int>{},
+          py::arg("skip_ids") = std::set<int>{},
+          py::arg("copy_specs") = std::vector<std::tuple<
+              int, int, std::string, int, int, int, int, int, int>>{},
+          py::arg("horiz_of") = std::map<std::pair<int, int>, bool>{},
+          py::arg("n_threads") = 0);
 
     // ── Verify ────────────────────────────────────────────────────────────
     py::enum_<ViolationKind>(m, "ViolationKind")

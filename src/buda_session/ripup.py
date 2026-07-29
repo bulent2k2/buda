@@ -31,6 +31,7 @@ import time
 import buda
 
 from .util import (_RR_CLASS_MAX_TRIALS, _RR_RELEASE_MAX_TRIALS,
+                   _RR_PARALLEL_SWEEP_DEFAULT,
                    _RR_CLASS_TOP_N, _RR_CONVERGE_FLOOR, _RR_CONVERGE_FRAC,
                    _RR_CONVERGE_GUARD_DEFAULT, _RR_CONVERGE_WINDOW,
                    _RR_DEFAULT_MAX_ITER, _RR_FAST_TRIALS_DEFAULT,
@@ -187,10 +188,10 @@ class RipupMixin:
 
     def _rr_t_init(self):
         self._rr_t = {'replan': 0.0, 'nuts': 0.0, 'dnuts': 0.0,
-                      'screen': 0.0, 'warm': 0.0,
+                      'screen': 0.0, 'warm': 0.0, 'psweep': 0.0,
                       'snapshot': 0.0, 'restore': 0.0,
                       'n_replan': 0, 'n_nuts': 0, 'n_dnuts': 0,
-                      'n_screen': 0, 'n_warm': 0,
+                      'n_screen': 0, 'n_warm': 0, 'n_psweep': 0,
                       'n_snapshot': 0, 'n_restore': 0,
                       'passes': {}}
         # Per-run memo for _rr_disconnected_bits: the floorplan is fixed for a
@@ -228,6 +229,8 @@ class RipupMixin:
             s += f"screen {t['screen']:.2f}s/{t['n_screen']}, "
         if t.get('n_warm'):
             s += f"warm {t['warm']:.2f}s/{t['n_warm']}, "
+        if t.get('n_psweep'):
+            s += f"psweep {t['psweep']:.2f}s/{t['n_psweep']}, "
         return s + (f"snapshot {t['snapshot']:.2f}s/{t['n_snapshot']}, "
                     f"restore {t['restore']:.2f}s/{t['n_restore']}")
 
@@ -798,6 +801,120 @@ class RipupMixin:
                        key=lambda i: (scores[idx_moves[i][1]], i))
         return ([idx_moves[i] for i in order[:_RR_SCREEN_TOP_N]],
                 [idx_moves[i] for i in order[_RR_SCREEN_TOP_N:]])
+
+    def _rr_parallel_deferred_sweep(self, deferred, cur, stage, metric,
+                                    snap, n_cont, it):
+        """Parallel stall-certificate sweep (rnr runtime P1,
+        trial_sweep.cpp): evaluate every deferred ('idx', tidx) move on C++
+        worker threads against the committed baseline — private wrapper/
+        planner copies per move, GIL released — with metrics implementing
+        the sequential fast-trial semantics exactly (stage-a skip_tighten;
+        stage-b vias-off + plain-path abort; the moved bundle's
+        DISCONNECTED term on the caller-side base decomposition).  Walks
+        the outcomes in the sequential visit order: the first in-order
+        strict improver is REPLAYED through the normal single-move
+        sequential trial (its result is the accept basis and the committed
+        state — the sweep's metrics only order the pick and carry the
+        stall certificate), and a move the workers could not evaluate
+        (incremental replan unavailable) is trialed sequentially at its
+        original position.  A sweep-vs-replay disagreement is LOUD and the
+        replay verdict wins.  Returns (best-or-None, trials)."""
+        import buda
+        flat = []                     # (ci, bid, old_tidx, tidx)
+        for ci, bid, old_tidx, moves in deferred:
+            for kind, t in moves:
+                if kind != 'idx':     # structurally impossible today
+                    continue
+                flat.append((ci, bid, old_tidx, t))
+        if not flat:
+            return None, 0
+        # Stage-b DISCONNECTED decomposition: base = total minus the moved
+        # bundle's CURRENT contribution (other bundles' contributions cannot
+        # change with the move; trial dogleg-adoption drift is excluded by
+        # the dogleg pass's non-severing guarantee, #405).
+        base_disc, net_counts = {}, {}
+        dn_kwargs = {}
+        if stage == 'b':
+            total = self._rr_disconnected_bits()
+            memo = getattr(self, "_rr_disc_memo", None) or {}
+            for _ci, bid, _o, _t in flat:
+                if bid in base_disc:
+                    continue
+                w = self._rr_wrapper(bid)
+                nets = len(w.input.original_bundle.get_net_names())
+                uid, _b = buda.selected_topo_key(w)
+                contrib = nets if (uid and memo.get((uid, bid))) else 0
+                base_disc[bid] = total - contrib
+                net_counts[bid] = nets
+            plan = self._bottom_up_dnuts_plan()
+            if plan is not None:
+                ref_ids, copy_specs, skip_ids = plan
+                dn_kwargs.update(
+                    ref_ids=set(ref_ids), skip_ids=set(skip_ids),
+                    copy_specs=[tuple(cs) for cs in copy_specs],
+                    horiz_of={(ts.bundle_id, ts.seg_idx): ts.horiz
+                              for ts in self._bottom_up_fixed_segments()})
+            self._install_leaf_keepouts()
+            dn_kwargs.update(grid=self.routing_grid,
+                             bit_order=self._detailed_bit_order,
+                             abort_unplaced=self._rr_m_primary(metric()))
+        print(f"[ripup_reroute] iter {it}: screened scan stalled — "
+              f"sweeping {len(flat)} deferred move(s) in parallel",
+              flush=True)
+        t0 = time.perf_counter()
+        outcomes = buda.parallel_sweep(
+            self.bundles,
+            [(bid, t) for _ci, bid, _o, t in flat],
+            self.planner, self.fp, self.layers, self._nuts_pitch,
+            self._bottom_up_fixed_segments(),
+            list(self.planner.get_x_grid()),
+            list(self.planner.get_y_grid()),
+            stage == 'b',
+            bool(getattr(self, '_rr_fast_trials', False)),
+            set(self._dogleg_slot), base_disc, net_counts,
+            n_threads=int(os.environ.get("BUDA_SWEEP_THREADS", "0") or 0),
+            **dn_kwargs)
+        self._rr_t_add('psweep', time.perf_counter() - t0)
+        trials = 0
+        for (ci, bid, old_tidx, tidx), (prim, sec, ok) in zip(flat,
+                                                              outcomes):
+            if ok:
+                m = (prim, sec) if stage == 'b' else prim
+                if os.environ.get("BUDA_RR_TRACE"):
+                    print(f"[rr-trace] psweep bundle {bid} topo "
+                          f"{old_tidx + 1}->{tidx + 1}: "
+                          f"{self._rr_m_str(m)}", flush=True)
+                if not (m < cur):
+                    trials += 1   # counted as the sequential trial it replaces
+                    continue
+                # Improving: do NOT count the sweep eval — the replay below
+                # is the trial (keeps the done-line trial count identical to
+                # the sequential path).
+            # Improving per the sweep (or unevaluable): the sequential
+            # single-move trial decides — and produces the committed state.
+            w = self._rr_wrapper(bid)
+            if w is None:
+                continue
+            cand_best, t2 = self._rr_scan_moves(w, bid, old_tidx,
+                                                [('idx', tidx)], cur,
+                                                stage, metric, snap,
+                                                trial_base=trials,
+                                                first_improving=True)
+            trials += t2
+            if cand_best is not None:
+                print(f"[ripup_reroute] iter {it}: contender "
+                      f"{ci}/{n_cont} bundle {bid} improves "
+                      f"{self._rr_m_str(cur)}->"
+                      f"{self._rr_m_str(cand_best[0])} "
+                      f"({self._rr_move_str(old_tidx, cand_best[3])}"
+                      f", deferred)", flush=True)
+                return cand_best, trials
+            if ok:
+                print(f"[ripup_reroute] WARNING: parallel-sweep divergence "
+                      f"on bundle {bid} topo {old_tidx + 1}->{tidx + 1} "
+                      f"(sweep {self._rr_m_str(m)} vs replay non-improving) "
+                      f"— replay verdict kept", flush=True)
+        return None, trials
 
     def _gen_hv(self):
         """The generator's top H / top V layer ids (used to hint flipped MST legs
@@ -2277,7 +2394,7 @@ class RipupMixin:
                        use_edge_candidates=False, use_global=True,
                        fast_trials=None, screen=None, warm=None,
                        converge_guard=None, use_class_moves=True,
-                       use_release_moves=True):
+                       use_release_moves=True, use_parallel_sweep=None):
         if not self.bundles:
             print("Error: ripup_reroute has no bundles.")
             return
@@ -2308,6 +2425,14 @@ class RipupMixin:
         # converge (see util.py).  Default on; `no_converge_guard` disables.
         converge_guard = (_RR_CONVERGE_GUARD_DEFAULT
                           if converge_guard is None else converge_guard)
+        # Parallel stall sweep (rnr runtime P1): default per
+        # _RR_PARALLEL_SWEEP_DEFAULT; `no_parallel_sweep` opts out (the
+        # sequential sweep, the pre-P1 behavior).  Also auto-disabled when
+        # the trial semantics differ from what the C++ workers implement
+        # (no_fast_trials / warm_trials) — see the sweep call site.
+        use_parallel_sweep = (_RR_PARALLEL_SWEEP_DEFAULT
+                              if use_parallel_sweep is None
+                              else use_parallel_sweep)
 
         # Fold in the dead-span escalation before the hill-climb (stage b):
         # a dead LOW segment is a guaranteed open no candidate re-pin reaches,
@@ -2455,9 +2580,26 @@ class RipupMixin:
                 # trial set as an unscreened run — the screen can reorder
                 # WHICH improving move is found first (like fast trials'
                 # trajectory effect) but never remove the stall certificate.
+                #
+                # PARALLEL path (rnr runtime P1, trial_sweep.cpp): the sweep
+                # is embarrassingly parallel — k independent moves against
+                # one frozen baseline, and the certificate case needs all k.
+                # Gated on the default trial semantics the C++ workers
+                # implement faithfully (fast trials, no warm pre-filter);
+                # any winning move is REPLAYED through the sequential trial
+                # before committing, so a wrong commit is impossible.
+                use_par = (use_parallel_sweep
+                           and getattr(self, '_rr_fast_trials', False)
+                           and not warm)
+                if use_par:
+                    best, t = self._rr_parallel_deferred_sweep(
+                        deferred, cur, stage, metric, snap, n_cont, it)
+                    n_trials += t
+                    deferred = []            # fully consumed by the sweep
                 n_def = sum(len(mv) for _c, _b, _o, mv in deferred)
-                print(f"[ripup_reroute] iter {it}: screened scan stalled — "
-                      f"sweeping {n_def} deferred move(s)", flush=True)
+                if deferred:
+                    print(f"[ripup_reroute] iter {it}: screened scan stalled "
+                          f"— sweeping {n_def} deferred move(s)", flush=True)
                 for ci, bid, old_tidx, moves in deferred:
                     w = self._rr_wrapper(bid)
                     if w is None:
