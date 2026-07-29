@@ -77,3 +77,19 @@ Feature: Bottom-up hierarchical planning (solve-once, copy to instances)
     Given a bottom-up cell whose instances are ALIGNED
     When I run run_detailed_nuts
     Then DNUTS solves on a reference instance and copies bits + per-bit vias to every sibling (pre-reserved)
+
+  Scenario: measured-infeasibility uniformity break for a stranded locked copy
+    # ✅ SHIPPED 2026-07-29 as ripup_reroute's RELEASE pass (the stage-b stall
+    # chain's last tier, gated on `check_template_tracks on_mismatch
+    # independent`; `no_release_moves` opts out) — opens #14 fix space (a).
+    # Coverage: test/tests/test_ripup_release_moves.py.  The measured case:
+    # mix2_fast_bottomup bundle 166 (dogleg1 at chip/i_dogleg1_3) — pools
+    # MATCH the reference, but the 4th instance's surroundings close its
+    # junction slide window (dynamic occupancy no static pool comparison
+    # sees); release + topo 1->2 heals 8 opens -> 0 with a clean detailed
+    # check_design.  The shipped PLACEMENT fix (align_bottom_up, the
+    # mix2_align_and_save fixture pair) remains the complement for designs
+    # whose placement CAN move.
+    Given a bottom-up class whose copied routing is measured DNUTS-open at one instance only
+    When ripup_reroute stalls at stage b under the on_mismatch independent policy
+    Then the RELEASE pass unlocks exactly that instance and solves it individually while the aligned siblings keep the uniform copy
