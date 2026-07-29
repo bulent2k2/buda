@@ -402,3 +402,56 @@ on heavy balanced groups and stays out of the way everywhere else.  P4
 (parallel screening) remains deferred — same reasoning as P3's corpus
 verdict: the screen bucket is ~1.2–1.6 s and already amortized by the
 P1 sweep's deferral flow.
+
+## Implemented — corner/repair pass runtime (2026-07-29)
+
+The P3 measurement named the corner-overlap resolution loop the true
+at-scale hotspot (synthetic 3813-seg design: `corner` 121 s + `repair`
+50 s of a 190 s `run_nuts`).  Instrumentation split it precisely: the
+cost is NOT the constraint derivation or the dirty-layer re-solves
+(~0.17 s/iter) but `repair_overlaps` (~11 s per corner iteration) — and
+inside it, the **accept guards' full-design overlap recounts**: two
+`find_overlaps` sweeps per attempted single-victim move, and ~5 per
+cluster-repack attempt (before/after totals + the cset-filtered
+in-cluster counts), across hundreds of attempts per stalled round.
+
+**The fix is an exactness-preserving delta.**  Every guard only needs
+the SIGN of the overlap-count change against a snapshot the pass
+already takes, and a pair whose both endpoints are unchanged since that
+snapshot has identical overlap status in both states — so
+`overlap_delta_vs(segments, snap)` (nuts_geom.h) evaluates only pairs
+touching a CHANGED segment (victim + settle-touched followers), with
+before-geometry read from the snapshot rows (bitwise-exact: restore
+writes those exact values back).  `count(after) OP count(before) ⟺
+delta OP 0` for any ordering — an identity, not an approximation —
+pinned directly by `test_overlap_delta.py` (randomized populations vs
+the full recount) and end-to-end by byte-identical flow logs.  Also:
+in-cluster counts test the m² member pairs directly instead of
+filtering a global sweep; per-layer segment indexes replace the
+per-victim / per-cluster full-design scans; and `repack_members`
+memoizes each member's base (non-member) occupancy LAZILY across its
+two pack modes — lazy because the all-or-nothing placement-time pack
+aborts at the first infeasible member, and an eager build for members
+never reached was a measured net loss on the fixpoint path (83 → 119 s
+before the laziness fix).
+
+**Measured** (same 4-core box, byte-identical output everywhere):
+
+- Synthetic 3813-seg / 16386-overlap design: **208 → 79 s wall**
+  (`run_nuts` 195 → ~65 s; `corner` 121 → ~33 s, `repair` 50 → ~20 s;
+  the 8.5 s corner-repair call → 2.4 s, cluster-repack rounds 1.7–2.0 →
+  ~0.5 s each) — decision-identical (same repack move counts per round,
+  same final overlaps/violations).
+- Corpus: all four rnr vehicles + bigHalf + big2 + tc3a byte-identical
+  (their corner/repair buckets were already small, so wall times are
+  unchanged within noise).
+
+**Remaining at-scale profile** (post-fix, same synthetic): the residual
+`corner`/`repair` time is now real algorithmic work — `repack_cluster`
+packing (~4 ms/attempt) and the per-attempt global `settle_spans`
+(~2 ms) — and the stalled-round pattern (the same cluster set re-packed
+each outer iteration, e.g. "moved 184" × 4 rounds) is a CONVERGENCE
+question, not a bookkeeping one.  A scoped settle (follower-closure of
+the moved set) is the next mechanical lever but carries identity risk;
+the round-repetition is the algorithmic one.  Both deferred until a
+real design (not an over-congested synthetic) motivates them.

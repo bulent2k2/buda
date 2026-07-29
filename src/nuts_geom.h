@@ -58,6 +58,8 @@ inline void span_cover(double& span_lo, double& span_hi, double c) {
 // same vector.
 class PlacementSnapshot {
 public:
+    struct Row { double pos, lo, hi; bool placed; };
+
     explicit PlacementSnapshot(bool with_placed = false)
         : with_placed_(with_placed) {}
 
@@ -78,8 +80,12 @@ public:
         }
     }
 
+    // Read access for delta evaluation (overlap_delta_vs below): the rows are
+    // the BEFORE-geometry of every segment, bitwise (restore writes back these
+    // exact values, so a restored state compares equal to its snapshot).
+    const std::vector<Row>& rows() const { return rows_; }
+
 private:
-    struct Row { double pos, lo, hi; bool placed; };
     bool             with_placed_;
     std::vector<Row> rows_;
 };
@@ -205,6 +211,75 @@ inline std::vector<std::pair<int,int>> find_overlaps(
         }
     }
     return pairs;
+}
+
+// segs_overlap evaluated at EXPLICIT geometry (a PlacementSnapshot::Row) —
+// the before-state twin of the predicate above for overlap_delta_vs.  The
+// immutable identity fields (layer, bundle_id, width) come from the segments
+// (no repair/repack/settle pass mutates them); pos/span/placed come from the
+// rows.  Must mirror segs_overlap exactly: closed span test on min/max-
+// normalized bounds, strict track test.
+inline bool segs_overlap_at(const TrackSegment& a, const PlacementSnapshot::Row& ra,
+                            const TrackSegment& b, const PlacementSnapshot::Row& rb)
+{
+    if (a.layer != b.layer || !ra.placed || !rb.placed) return false;
+    if (a.bundle_id == b.bundle_id) return false;
+    const double alo = std::min(ra.lo, ra.hi), ahi = std::max(ra.lo, ra.hi);
+    const double blo = std::min(rb.lo, rb.hi), bhi = std::max(rb.lo, rb.hi);
+    if (ahi < blo || bhi < alo) return false;
+    return ra.pos + a.width / 2.0 > rb.pos - b.width / 2.0 &&
+           rb.pos + b.width / 2.0 > ra.pos - a.width / 2.0;
+}
+
+// Overlap-count DELTA between a snapshot (before) state and the current
+// state: (total overlaps now) − (total overlaps at the snapshot).  A pair
+// whose BOTH endpoints are unchanged since the snapshot has identical
+// overlap status in both states and cancels, so only pairs touching a
+// CHANGED segment are evaluated — O(|changed| · same-layer segments)
+// instead of two full sweeps.  Exactness: restore() writes back the
+// snapshot's bitwise values, and untouched segments compare equal, so
+// "changed" (any of pos/lo/hi/placed differing) is a sound partition and
+//     find_overlaps(now).size() OP find_overlaps(snapshot-state).size()
+//     ⟺  overlap_delta_vs(...) OP 0
+// for any ordering OP.  This is what lets the repair/repack accept guards
+// drop their per-move global recounts (the corner-pass hotspot).
+inline long overlap_delta_vs(const std::vector<TrackSegment>& segments,
+                             const PlacementSnapshot& snap)
+{
+    const auto& rows = snap.rows();
+    assert(rows.size() == segments.size());
+    const int n = (int)segments.size();
+    std::vector<int> changed;
+    std::vector<char> is_changed(n, 0);
+    for (int i = 0; i < n; ++i) {
+        const auto& ts = segments[i];
+        const auto& r  = rows[i];
+        if (ts.track_position != r.pos || ts.span_lo != r.lo ||
+            ts.span_hi != r.hi || ts.placed != r.placed) {
+            // NaN-safe: an unplaced segment's track_position is NaN and
+            // NaN != NaN, so compare placement first — both unplaced with
+            // equal spans is unchanged regardless of the NaN payload.
+            if (!ts.placed && !r.placed &&
+                ts.span_lo == r.lo && ts.span_hi == r.hi)
+                continue;
+            changed.push_back(i);
+            is_changed[i] = 1;
+        }
+    }
+    if (changed.empty()) return 0;
+    long delta = 0;
+    for (int i : changed) {
+        const auto& si = segments[i];
+        const auto& ri = rows[i];
+        for (int j = 0; j < n; ++j) {
+            if (j == i) continue;
+            if (is_changed[j] && j < i) continue;   // changed pair: count once
+            if (segments[j].layer != si.layer) continue;
+            if (segs_overlap(si, segments[j]))          ++delta;
+            if (segs_overlap_at(si, ri, segments[j], rows[j])) --delta;
+        }
+    }
+    return delta;
 }
 
 // Placed segments whose track (± half width) falls outside their hard interval.
