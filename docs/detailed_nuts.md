@@ -96,6 +96,39 @@ Then two post-passes over the emitted bit-wires:
    span conns extend-to-cover, busterm faces re-extend), so bit *i* of segment A
    physically meets bit *i* of segment B.
 
+   The snap is the only place a bit-wire gets **shorter** than its abstract
+   parent, so it is also the only place per-bit *realization* can lose
+   something the abstract route had. Two anchors exist to stop that, both
+   extend-only:
+
+   | anchor | what it protects | when it was needed |
+   |---|---|---|
+   | `busterm_faces` | a block-face **tap** whose end the snap pulled onto a connected stub's track | big2 `bus_077` / `blk_12` |
+   | `passthru_spans` | a block covered by **crossing** it, lying beyond the segment's outermost junction | issue #496 |
+
+   The second case is the harsher one: a face tap is at an end, so the snap
+   merely clips it, but a pass-through block past the last junction sits wholly
+   outside the snapped extent, so the trim *deletes* the crossing.
+
+   **The primary guard is one stage earlier.** The abstract span itself was
+   being contracted past such a block by `tighten_spans_to_reach` (nuts.cpp),
+   whose reach set was junction partners plus busterm faces — it now includes
+   pass-through crossings too, so the placed span keeps covering the block and
+   the per-bit stage inherits a correct parent. That is the fix for issue #496;
+   the `passthru_spans` entry here is the subordinate half, and its intervals
+   come from the **placed** `TrackSegment` (not the nominal `ConnSeg`) and are
+   clipped to the placed span, so a restored bit can never leave the extent
+   abstract NUTS reserved for it. The repair is conditional on the crossing
+   having actually been lost, so a flow whose crossings survive is
+   byte-identical, and restorations are reported (`[DetailedNUTS] restored N
+   pass-through crossing(s) …`) rather than applied silently.
+
+   Both anchors are scoped to a block's **sole** coverage — one untapped block,
+   exactly one segment nominally crossing it. A block several segments cross
+   stays covered when any one retracts, so anchoring them all keeps phantom
+   span for nothing: measured, b44's pinned 6-segment `TRUNK_H+MST` realizes
+   4552 instead of 3510 (+30%) under an unscoped anchor.
+
 7. **Per-bit via emission (step 5 in the source).** For every connection where
    the two bits sit on **different layers**, one `NetVia` is emitted at the
    per-bit crossing — deduped on `(bundle_id, min_seg, max_seg, bit_index)`

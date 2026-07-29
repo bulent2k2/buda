@@ -61,6 +61,22 @@ struct TrackSegment : PlacedSegmentBase {
     // so do_span_adjustments uses these as extend-only anchors to guarantee a
     // face-tapped segment's along-span always reaches its block face after slides.
     std::vector<double> busterm_faces;
+    // Along-axis intervals where this segment covers a connected block by
+    // PASS-THROUGH — it crosses the footprint with no tap of its own, the joint
+    // every block-coverage check accepts as a connection.  The sibling of
+    // busterm_faces, and needed for the same reason: rev_conn_map carries only
+    // SEG connectivity, so the span passes would otherwise be free to move an
+    // end past a block whose coverage depends on it.
+    //
+    // The tap case is milder — a face tap sits AT an end, so a span pass merely
+    // clips it — but a pass-through block can lie BEYOND the outermost junction,
+    // and then tighten_spans_to_reach's contraction does not clip the crossing,
+    // it deletes it (issue #496; its comment used to assert "a pass-through
+    // block sits BETWEEN the real endpoints, so it stays covered" — mix.buda
+    // bundle 90 seg1 crosses chip/i_dnuts2_2/u4 at x in [1680,1730] with
+    // junctions only at 1095 and 1455, so the tighten cut the span to
+    // [1095,1455] and the block opened).
+    std::vector<std::pair<double,double>> passthru_spans;
 };
 
 // Exact geometry of one overlap pair, after placement.
@@ -212,6 +228,8 @@ struct NutsContext {
     std::map<std::pair<int,int>, int>                        net_pull_map;
     AlignMap                                                 align_map;
     std::map<std::pair<int,int>, std::vector<double>>        busterm_face_map;
+    std::map<std::pair<int,int>, std::vector<std::pair<double,double>>>
+                                                            passthru_map;
     std::map<std::pair<int,int>, TrackSegment*>              ts_ptr_map;
 };
 

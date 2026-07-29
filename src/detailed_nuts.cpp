@@ -655,6 +655,12 @@ void DetailedNUTSEngine::adjust_bit_spans(
         for (const auto& bs : bus_segs)
             bs_map[{bs.bundle_id, bs.seg_idx}] = &bs;
 
+        // A repair this stage performs on the caller's behalf is reported, not
+        // applied silently — the same reason the keepout cull above announces
+        // itself.  A non-zero count means the plain snap would have opened that
+        // many (segment, bit) pass-through crossings.
+        int n_passthru_restored = 0;
+
         for (auto& ns : result.net_segments) {
             const auto* bs_ptr = bs_map[{ns.bundle_id, ns.seg_idx}];
             if (!bs_ptr) continue;
@@ -717,7 +723,31 @@ void DetailedNUTSEngine::adjust_bit_spans(
             // span to its block face (extend-only) so the tap always lands on the
             // block (big2 bus_077 / blk_12).
             for (double fc : bs_ptr->busterm_faces) cover(fc);
+
+            // PASS-THROUGH coverage: the same snap can strand a block this
+            // segment covers by crossing it, and does so more brutally — a block
+            // beyond the outermost junction lies wholly outside the snapped
+            // extent, so the trim does not merely clip the crossing, it deletes
+            // it (issue #496).  Re-extend to the crossing, but only when it was
+            // actually lost: a bit that still overlaps the block is already
+            // covered by check_dnuts's test, and extending it anyway would move
+            // metal on every pass-through segment in the corpus for no
+            // correctness gain.  The interval is clipped to the abstract span at
+            // construction, so this can only give back wire abstract NUTS
+            // already reserved for this segment.
+            for (const auto& pt : bs_ptr->passthru_spans) {
+                const double s_lo = std::min(ns.span_lo, ns.span_hi);
+                const double s_hi = std::max(ns.span_lo, ns.span_hi);
+                if (s_lo <= pt.second && s_hi >= pt.first) continue;  // still covered
+                cover(pt.first);
+                cover(pt.second);
+                ++n_passthru_restored;
+            }
         }
+        if (n_passthru_restored > 0)
+            std::cout << "[DetailedNUTS] restored " << n_passthru_restored
+                      << " pass-through crossing(s) the per-bit span snap had "
+                      << "trimmed away (issue #496).\n";
     }
 }
 
@@ -817,11 +847,12 @@ std::vector<BusSegment> make_bus_segments(
             bid_to_cs[bid] = {};
             continue;
         }
+        const Topology& topo = w.input.candidates[sel];
         ConnTopology ct;
-        ct.build(w.input.candidates[sel], floorplan);
+        ct.build(topo, floorplan);
         bid_to_cs[bid] = ct.segs();
-        if (!w.input.candidates[sel].seg_bits.empty())
-            bid_to_bits[bid] = &w.input.candidates[sel].seg_bits;
+        if (!topo.seg_bits.empty())
+            bid_to_bits[bid] = &topo.seg_bits;
     }
 
     std::vector<BusSegment> out;
@@ -869,6 +900,22 @@ std::vector<BusSegment> make_bus_segments(
                 } else {  // BUSTERM: keep the block-face tap reachable per-bit
                     bs.busterm_faces.push_back((double)conn.face_coord);
                 }
+            }
+        }
+        // Pass-through anchors come from the PLACED TrackSegment, not from the
+        // nominal ConnSeg: NUTS may have contracted the span, and an anchor
+        // computed off the nominal geometry could then push a bit outside the
+        // span detailed placement reserved (Codex P1 on #499).  Clipped to the
+        // placed span here, which after the abstract-stage fix (nuts.cpp) is
+        // guaranteed to contain the crossing — the clip is a belt-and-braces
+        // invariant, not the mechanism.
+        {
+            const double p_lo = std::min(bs.span_lo, bs.span_hi);
+            const double p_hi = std::max(bs.span_lo, bs.span_hi);
+            for (const auto& pt : ts.passthru_spans) {
+                const double lo = std::max(pt.first,  p_lo);
+                const double hi = std::min(pt.second, p_hi);
+                if (lo <= hi) bs.passthru_spans.emplace_back(lo, hi);
             }
         }
         out.push_back(std::move(bs));

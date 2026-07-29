@@ -63,7 +63,8 @@ static void build_nuts_maps(
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&       rev_conn_map,
     std::map<std::pair<int,int>, int>&                            net_pull_map,
     AlignMap&                                                     align_map,
-    std::map<std::pair<int,int>, std::vector<double>>&            busterm_face_map)
+    std::map<std::pair<int,int>, std::vector<double>>&            busterm_face_map,
+    std::map<std::pair<int,int>, std::vector<std::pair<double,double>>>& passthru_map)
 {
     std::set<std::pair<int,int>> jog_set;   // dogleg jogs: excluded from alignment
     // Pass 1 — nominal perpendicular position from the topology.
@@ -96,6 +97,14 @@ static void build_nuts_maps(
         ConnTopology ct;
         ct.build(topo, floorplan);
         const auto& conn_segs = ct.segs();
+
+        // Blocks with a real tap somewhere in this topology: their coverage does
+        // not depend on any crossing, so they need no pass-through anchor (the
+        // coverage checks skip them for the same reason).
+        std::set<std::string> tapped_blocks;
+        for (const auto& cs : conn_segs)
+            for (const auto& c : cs.conns)
+                if (c.kind == SegConn::BUSTERM) tapped_blocks.insert(c.block_name);
 
         // The dogleg's per-segment overrides (seg_net_pull / seg_slide_*) are
         // indexed by the doglegged topology's segments.  A later run_planner may
@@ -131,6 +140,7 @@ static void build_nuts_maps(
                     busterm_face_map[key].push_back(static_cast<double>(c.face_coord));
                 }
             }
+
             if (n_seg >= 2 && n_bt == 0) trunk_set.insert(key);
             if (n_bt >= 1)               busterm_set.insert(key);
 
@@ -209,6 +219,52 @@ static void build_nuts_maps(
                 // nominal/bound pulls (those encode face containment and
                 // min-stub length).
                 pull_map[key] = static_cast<double>(bw.plan.seg_perp[si]);
+            }
+        }
+
+        // Pass-through coverage anchors (issue #496).  A block this bundle
+        // covers only by a segment CROSSING it has no conn record, so the span
+        // passes are free to move an end past it — and when the block lies
+        // beyond the outermost junction, tighten_spans_to_reach's contraction
+        // does not clip the crossing, it deletes it.
+        //
+        // Anchored only where the crossing is the block's SOLE coverage: one
+        // untapped block, exactly one segment nominally crossing it.  A block
+        // that several segments cross stays covered when any one of them
+        // retracts, so anchoring all of them would keep phantom span for
+        // nothing — measured: b44's pinned 6-seg TRUNK_H+MST realizes 4552
+        // instead of 3510 (+30%) if every crossing is anchored, because its
+        // extra crossings are redundant (Codex P2 on #499).  Scoping to sole
+        // coverage is decided on NOMINAL geometry, so it is deterministic and
+        // order-independent — unlike a post-placement "is it still covered?"
+        // test, which would depend on the order spans are adjusted in.
+        {
+            std::map<std::string, std::vector<std::pair<int, std::pair<double,double>>>>
+                crossings;                       // block -> [(seg, interval)]
+            for (int si = 0; si < (int)conn_segs.size(); ++si) {
+                const ConnSeg& cs = conn_segs[si];
+                const double s_lo = std::min((double)cs.along_lo, (double)cs.along_hi);
+                const double s_hi = std::max((double)cs.along_lo, (double)cs.along_hi);
+                for (const auto& bname : topo.connected_block_names) {
+                    if (tapped_blocks.count(bname)) continue;
+                    auto rects = floorplan.get_block_rects(bname);
+                    if (rects.empty()) rects.push_back(floorplan.get_block_bounds(bname));
+                    for (const Rect& r : rects) {
+                        const double p_lo = cs.horiz ? (double)r.y1 : (double)r.x1;
+                        const double p_hi = cs.horiz ? (double)r.y2 : (double)r.x2;
+                        const double a_lo = cs.horiz ? (double)r.x1 : (double)r.y1;
+                        const double a_hi = cs.horiz ? (double)r.x2 : (double)r.y2;
+                        if (cs.perp_pos < p_lo || cs.perp_pos > p_hi) continue;
+                        if (s_lo > a_hi || s_hi < a_lo) continue;     // no crossing
+                        crossings[bname].push_back(
+                            {si, {std::max(s_lo, a_lo), std::min(s_hi, a_hi)}});
+                        break;                    // one crossing per (seg, block)
+                    }
+                }
+            }
+            for (const auto& [bname, list] : crossings) {
+                if (list.size() != 1) continue;   // redundantly covered — no anchor
+                passthru_map[{bid, list[0].first}].push_back(list[0].second);
             }
         }
     }
@@ -440,6 +496,23 @@ static void do_span_adjustments(
         for (double fc : other->busterm_faces)
             span_cover(other->span_lo, other->span_hi, fc);
 
+        // NOT extended here for pass-through crossings, deliberately.  The
+        // symmetric hook (span_cover each passthru_spans interval, exactly as
+        // above) was implemented and MEASURED: it costs abstract WL +0.37% and
+        // runtime +18% corpus-wide (bigHalf 6.7s -> 53.6s, its span inflation
+        // giving the healers more to clear) and fixes NOTHING the contraction
+        // guard in tighten_spans_to_reach does not already fix — same 1
+        // better / 0 worse endpoint either way.  The loss mechanism on the
+        // corpus is contraction, not this span-setting: a segment with
+        // junctions gets its ends set to the junction envelope here, and a
+        // crossing beyond that envelope is deleted later, by the tighten.
+        //
+        // Residual case, knowingly left: if span-setting alone ever moves an
+        // end past a crossing, the tighten cannot restore it (it only
+        // contracts) and the block opens at check_dnuts — the same symptom
+        // issue #496 describes, diagnosable the same way.  Re-add this hook if
+        // that is ever observed; do not add it speculatively.
+
         // span_lo/span_hi intentionally keep NOMINAL endpoint identity (span_lo
         // is the lo_end coordinate, span_hi the hi_end) even when placement
         // leaves span_lo > span_hi: corner/dogleg logic derives the fixed anchor
@@ -468,10 +541,13 @@ static void settle_spans(std::vector<TrackSegment>& segments, NutsContext& ctx)
 // has fully converged, re-derive each placed segment's span as the TIGHT min/max
 // of the coordinates it must actually reach: its placed junction partners' tracks
 // (rev_conn_map[ts] — the same set the coverage guarantee covers) plus its own
-// busterm faces.  This can only SHRINK a span to the exact envelope of what it
-// connects to (a pass-through block sits BETWEEN the real endpoints, so it stays
-// covered), so it never opens a junction; it removes the phantom overlap/WL the
-// inflated span reports.  Endpoint identity is preserved (span_lo stays the
+// busterm faces, and every block it covers by CROSSING.  This can only SHRINK a
+// span to the exact envelope of what it connects to, so it never opens a
+// junction; it removes the phantom overlap/WL the inflated span reports.  The
+// reach set must include everything the span is responsible for: this comment
+// used to assert that a pass-through block "sits BETWEEN the real endpoints, so
+// it stays covered", which holds only while the block is inside the junction
+// envelope — outside it, the contraction deleted the crossing (issue #496).  Endpoint identity is preserved (span_lo stays the
 // lo-end coordinate even when placement leaves span_lo > span_hi).  MUST be the
 // last span mutation before metrics — settle_spans/repair_overlaps are
 // extend-only and would re-inflate.
@@ -497,6 +573,16 @@ static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
         for (double fc : ts.busterm_faces) {
             rmin = std::min(rmin, fc);
             rmax = std::max(rmax, fc);
+        }
+        // ...and every block this segment covers by CROSSING it.  The comment
+        // above used to claim "a pass-through block sits BETWEEN the real
+        // endpoints, so it stays covered"; that is false whenever the block
+        // lies beyond the outermost junction, and then this contraction does
+        // not clip the crossing — it deletes it, opening the block with no
+        // warning at any stage before check_dnuts (issue #496).
+        for (const auto& pt : ts.passthru_spans) {
+            rmin = std::min(rmin, pt.first);
+            rmax = std::max(rmax, pt.second);
         }
         if (!std::isfinite(rmin) || !std::isfinite(rmax)) continue;  // nothing to reach
         const double cur_lo = std::min(ts.span_lo, ts.span_hi);
@@ -700,10 +786,13 @@ static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
     NutsContext ctx;
     build_nuts_maps(bundles, floorplan, ctx.pull_map, ctx.slide_map,
                     ctx.trunk_set, ctx.busterm_set, ctx.rev_conn_map,
-                    ctx.net_pull_map, ctx.align_map, ctx.busterm_face_map);
+                    ctx.net_pull_map, ctx.align_map, ctx.busterm_face_map,
+                    ctx.passthru_map);
     for (auto& ts : segments) {
         auto bf = ctx.busterm_face_map.find({ts.bundle_id, ts.seg_idx});
         if (bf != ctx.busterm_face_map.end()) ts.busterm_faces = bf->second;
+        auto pt = ctx.passthru_map.find({ts.bundle_id, ts.seg_idx});
+        if (pt != ctx.passthru_map.end()) ts.passthru_spans = pt->second;
     }
     if (prep) {
         apply_interval_constraints(segments, ctx.slide_map, ctx.trunk_set,
@@ -1216,6 +1305,10 @@ TrackSegment transform_track_segment(const TrackSegment& ts,
     out.track_hi_bound = std::max(b_lo, b_hi);
     if (perp_refl) out.net_pull = -ts.net_pull;
     for (double& f : out.busterm_faces) f = along(f);
+    for (auto& p : out.passthru_spans) {          // a reflection swaps the ends
+        const double a = along(p.first), b = along(p.second);
+        p = {std::min(a, b), std::max(a, b)};
+    }
     return out;
 }
 
@@ -1234,6 +1327,7 @@ TrackSegment offset_track_segment(const TrackSegment& ts, int dx, int dy,
     if (std::isfinite(out.track_lo_bound)) out.track_lo_bound += perp;
     if (std::isfinite(out.track_hi_bound)) out.track_hi_bound += perp;
     for (double& f : out.busterm_faces) f += along;
+    for (auto& p : out.passthru_spans) { p.first += along; p.second += along; }
     return out;
 }
 

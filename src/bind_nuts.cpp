@@ -127,7 +127,8 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("pull_target",    &TrackSegment::pull_target)
         .def_readwrite("is_jog",         &TrackSegment::is_jog)
         .def_readwrite("track_lo_bound", &TrackSegment::track_lo_bound)
-        .def_readwrite("track_hi_bound", &TrackSegment::track_hi_bound);
+        .def_readwrite("track_hi_bound", &TrackSegment::track_hi_bound)
+        .def_readwrite("passthru_spans", &TrackSegment::passthru_spans);
 
     py::class_<OverlapDetail>(m, "OverlapDetail")
         .def_readwrite("layer",   &OverlapDetail::layer)
@@ -359,6 +360,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("timing_critical", &BusSegment::timing_critical)
         .def_readwrite("connections",     &BusSegment::connections)
         .def_readwrite("busterm_faces",   &BusSegment::busterm_faces)
+        .def_readwrite("passthru_spans",  &BusSegment::passthru_spans)
         .def_readwrite("abstract_pos",    &BusSegment::abstract_pos)
         .def_readwrite("track_lo_bound",  &BusSegment::track_lo_bound)
         .def_readwrite("track_hi_bound",  &BusSegment::track_hi_bound);

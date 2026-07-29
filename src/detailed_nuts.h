@@ -63,6 +63,24 @@ struct BusSegment {
     // TrackSegment::busterm_faces in the abstract stage).
     std::vector<double> busterm_faces;
 
+    // Along-axis intervals where this segment covers a connected block by
+    // PASS-THROUGH — it crosses the block's footprint with no tap of its own,
+    // the joint every block-coverage check accepts as a valid connection.
+    //
+    // The same span-follow that can drop a face tap can drop one of these, and
+    // more easily: a pass-through block beyond the segment's outermost junction
+    // is covered by the abstract span but sits entirely outside the per-bit
+    // extent the snap leaves behind (issue #496 — mix.buda bundle 90 covers
+    // chip/i_dnuts2_2/u4 at x∈[1680,1730] with a segment whose junctions are at
+    // 1095 and 1455, so every bit was trimmed to [1085,1479] and the block
+    // opened).  Each interval is already CLIPPED to the abstract span, so
+    // re-extending to it can never claim metal abstract NUTS did not reserve.
+    //
+    // Only blocks with no BUSTERM tap anywhere in the topology are listed —
+    // check_dnuts's pass-through coverage check skips explicitly-tapped blocks,
+    // and this must police exactly what that check requires.
+    std::vector<std::pair<double,double>> passthru_spans;
+
     // Abstract NUTS track_position used as anchor for Option B ordering; NaN = unset (fallback)
     double      abstract_pos      = std::numeric_limits<double>::quiet_NaN();
 
