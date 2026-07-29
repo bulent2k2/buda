@@ -253,22 +253,48 @@ static void build_nuts_maps(
                 if (tapped_blocks.count(bname)) continue;
                 auto rects = floorplan.get_block_rects(bname);
                 if (rects.empty()) rects.push_back(floorplan.get_block_bounds(bname));
+                // Does this segment cover this BLOCK at all?  Same relation
+                // check_topo's coverage test uses: some rect with the nominal
+                // perp inside it and an along overlap.  This gate is what keeps
+                // the anchor set to blocks the topology actually claims to
+                // cover; it is deliberately per-BLOCK, not per-rect.
+                bool covers_block = false;
                 for (const Rect& r : rects) {
                     const double p_lo = cs.horiz ? (double)r.y1 : (double)r.x1;
                     const double p_hi = cs.horiz ? (double)r.y2 : (double)r.x2;
                     const double a_lo = cs.horiz ? (double)r.x1 : (double)r.y1;
                     const double a_hi = cs.horiz ? (double)r.x2 : (double)r.y2;
                     if (cs.perp_pos < p_lo || cs.perp_pos > p_hi) continue;
-                    if (s_lo > a_hi || s_hi < a_lo) continue;      // no crossing
-                    if (cs.perp_hi < p_lo || cs.perp_lo > p_hi) continue;  // unplaceable
+                    if (s_lo > a_hi || s_hi < a_lo) continue;
+                    covers_block = true;
+                    break;
+                }
+                if (!covers_block) continue;
+                // It does — so record EVERY rect of that block the segment can
+                // be seated in, not just the one it nominally sits in.
+                // derive_slide_ranges unions the perp extents of all the rects
+                // a segment spans, so placement may legally move it into a
+                // SIBLING rect; recording only the nominal one would make the
+                // post-placement election reject that valid cover and leave the
+                // block unanchored (Codex, fourth review on #505).
+                for (int ri = 0; ri < (int)rects.size(); ++ri) {
+                    const Rect& r = rects[ri];
+                    const double p_lo = cs.horiz ? (double)r.y1 : (double)r.x1;
+                    const double p_hi = cs.horiz ? (double)r.y2 : (double)r.x2;
+                    const double a_lo = cs.horiz ? (double)r.x1 : (double)r.y1;
+                    const double a_hi = cs.horiz ? (double)r.x2 : (double)r.y2;
+                    if (s_lo > a_hi || s_hi < a_lo) continue;      // not spanned
+                    // Reachable: the slide window must reach THIS rect's perp
+                    // extent (the #438 robust-cover gate, per rect).
+                    if (cs.perp_hi < p_lo || cs.perp_lo > p_hi) continue;
                     PassthruCrossing pc;
                     pc.along_lo = std::max(s_lo, a_lo);
                     pc.along_hi = std::min(s_hi, a_hi);
                     pc.perp_lo  = p_lo;
                     pc.perp_hi  = p_hi;
                     pc.block    = bname;
+                    pc.rect     = ri;
                     passthru_map[{bid, si}].push_back(std::move(pc));
-                    break;                        // one crossing per (seg, block)
                 }
             }
         }
@@ -587,18 +613,20 @@ static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
     // consumers (detailed NUTS) see exactly what was honored.
     {
         // (bundle, block) -> the elected (seg_idx, crossing)
-        std::map<std::pair<int,std::string>, std::pair<int, PassthruCrossing>> elected;
+        // (bundle, block) -> the elected (seg_idx, rect)
+        std::map<std::pair<int,std::string>, std::pair<int,int>> elected;
         for (const auto& ts : segments) {
             if (!ts.placed) continue;
             for (const auto& pc : ts.passthru_spans) {
-                // Only a crossing whose segment ACTUALLY got seated inside the
-                // block can protect it.
+                // Only a crossing whose segment ACTUALLY got seated inside this
+                // RECT can protect the block.
                 if (ts.track_position < pc.perp_lo || ts.track_position > pc.perp_hi)
                     continue;
                 auto key = std::make_pair(ts.bundle_id, pc.block);
                 auto it  = elected.find(key);
-                if (it == elected.end() || ts.seg_idx < it->second.first)
-                    elected[key] = {ts.seg_idx, pc};
+                if (it == elected.end() ||
+                    std::make_pair(ts.seg_idx, pc.rect) < it->second)
+                    elected[key] = {ts.seg_idx, pc.rect};
             }
         }
         for (auto& ts : segments) {
@@ -606,7 +634,11 @@ static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
             std::vector<PassthruCrossing> kept;
             for (const auto& pc : ts.passthru_spans) {
                 auto it = elected.find({ts.bundle_id, pc.block});
-                if (it != elected.end() && it->second.first == ts.seg_idx)
+                // Keep the elected RECT only — not every entry sharing the
+                // elected segment index, which would re-admit rects the segment
+                // was not seated in.
+                if (it != elected.end() &&
+                    it->second == std::make_pair(ts.seg_idx, pc.rect))
                     kept.push_back(pc);
             }
             ts.passthru_spans.swap(kept);

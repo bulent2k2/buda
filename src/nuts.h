@@ -27,14 +27,22 @@
 
 namespace buda {
 
-// One block a segment covers by crossing it: the crossing's extent along the
-// segment, plus the block's PERPENDICULAR extent and identity — both needed
-// because the anchor is elected after placement, when it is finally known
-// which crossing segment actually got seated inside the block.
+// One RECT of a connected block that a segment covers by crossing it: the
+// crossing's extent along the segment, plus that rect's PERPENDICULAR extent
+// and the block's identity — all needed because the anchor is elected after
+// placement, when it is finally known which crossing segment got seated, and
+// in which rect.
+//
+// Per-RECT, not per-block, deliberately.  derive_slide_ranges unions the perp
+// extents of every rect a segment spans, so a multi-rect block's slide window
+// legitimately lets placement seat the segment in a DIFFERENT rect than the
+// one it nominally crossed; recording only the first rect would make the
+// election reject that perfectly valid cover (Codex, fourth review on #505).
 struct PassthruCrossing {
     double      along_lo = 0, along_hi = 0;   // crossing extent along the segment
-    double      perp_lo  = 0, perp_hi  = 0;   // the block's perp extent
+    double      perp_lo  = 0, perp_hi  = 0;   // the covered RECT's perp extent
     std::string block;                        // block name (bundle-local key)
+    int         rect = 0;                     // which rect of that block
 };
 
 // One bus segment after track assignment (kind BUS in the placed-segment

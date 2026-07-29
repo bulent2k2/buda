@@ -116,7 +116,8 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("along_hi", &PassthruCrossing::along_hi)
         .def_readwrite("perp_lo",  &PassthruCrossing::perp_lo)
         .def_readwrite("perp_hi",  &PassthruCrossing::perp_hi)
-        .def_readwrite("block",    &PassthruCrossing::block);
+        .def_readwrite("block",    &PassthruCrossing::block)
+        .def_readwrite("rect",     &PassthruCrossing::rect);
 
     py::class_<TrackSegment>(m, "TrackSegment")
         .def(py::init<>())
