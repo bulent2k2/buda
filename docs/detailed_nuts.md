@@ -96,6 +96,27 @@ Then two post-passes over the emitted bit-wires:
    span conns extend-to-cover, busterm faces re-extend), so bit *i* of segment A
    physically meets bit *i* of segment B.
 
+   The snap is the only place a bit-wire gets **shorter** than its abstract
+   parent, so it is also the only place per-bit realization can lose something
+   the abstract route had. Two anchors exist to stop that, both extend-only:
+
+   | anchor | what it protects | when it was needed |
+   |---|---|---|
+   | `busterm_faces` | a block-face **tap** whose end the snap pulled onto a connected stub's track | big2 `bus_077` / `blk_12` |
+   | `passthru_spans` | a block covered by **crossing** it, lying beyond the segment's outermost junction | issue #496 |
+
+   The second case is the harsher one: a face tap is at an end, so the snap
+   merely clips it, but a pass-through block past the last junction sits wholly
+   outside the snapped extent, so the trim *deletes* the crossing. Nominal and
+   abstract coverage both still pass — the abstract segment keeps its full span
+   — so only `check_dnuts` sees the resulting `BUSTERM_OPEN`, and no healer
+   metric counts it. Each interval is clipped to the abstract span when the
+   `BusSegment` is built, so re-extending can only give back wire abstract NUTS
+   already reserved; and the repair is conditional on the crossing having
+   actually been lost, so a flow whose crossings survive is byte-identical.
+   Restorations are reported (`[DetailedNUTS] restored N pass-through
+   crossing(s) …`) rather than applied silently.
+
 7. **Per-bit via emission (step 5 in the source).** For every connection where
    the two bits sit on **different layers**, one `NetVia` is emitted at the
    per-bit crossing — deduped on `(bundle_id, min_seg, max_seg, bit_index)`

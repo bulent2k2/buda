@@ -655,6 +655,12 @@ void DetailedNUTSEngine::adjust_bit_spans(
         for (const auto& bs : bus_segs)
             bs_map[{bs.bundle_id, bs.seg_idx}] = &bs;
 
+        // A repair this stage performs on the caller's behalf is reported, not
+        // applied silently — the same reason the keepout cull above announces
+        // itself.  A non-zero count means the plain snap would have opened that
+        // many (segment, bit) pass-through crossings.
+        int n_passthru_restored = 0;
+
         for (auto& ns : result.net_segments) {
             const auto* bs_ptr = bs_map[{ns.bundle_id, ns.seg_idx}];
             if (!bs_ptr) continue;
@@ -717,7 +723,31 @@ void DetailedNUTSEngine::adjust_bit_spans(
             // span to its block face (extend-only) so the tap always lands on the
             // block (big2 bus_077 / blk_12).
             for (double fc : bs_ptr->busterm_faces) cover(fc);
+
+            // PASS-THROUGH coverage: the same snap can strand a block this
+            // segment covers by crossing it, and does so more brutally — a block
+            // beyond the outermost junction lies wholly outside the snapped
+            // extent, so the trim does not merely clip the crossing, it deletes
+            // it (issue #496).  Re-extend to the crossing, but only when it was
+            // actually lost: a bit that still overlaps the block is already
+            // covered by check_dnuts's test, and extending it anyway would move
+            // metal on every pass-through segment in the corpus for no
+            // correctness gain.  The interval is clipped to the abstract span at
+            // construction, so this can only give back wire abstract NUTS
+            // already reserved for this segment.
+            for (const auto& pt : bs_ptr->passthru_spans) {
+                const double s_lo = std::min(ns.span_lo, ns.span_hi);
+                const double s_hi = std::max(ns.span_lo, ns.span_hi);
+                if (s_lo <= pt.second && s_hi >= pt.first) continue;  // still covered
+                cover(pt.first);
+                cover(pt.second);
+                ++n_passthru_restored;
+            }
         }
+        if (n_passthru_restored > 0)
+            std::cout << "[DetailedNUTS] restored " << n_passthru_restored
+                      << " pass-through crossing(s) the per-bit span snap had "
+                      << "trimmed away (issue #496).\n";
     }
 }
 
@@ -807,6 +837,10 @@ std::vector<BusSegment> make_bus_segments(
     // Tapered fan-in: the selected topology's per-segment bit membership
     // (empty for every non-fan-in bundle).
     std::map<int, const std::map<int, std::vector<int>>*> bid_to_bits;
+    // Per (bundle, seg): the along-intervals where the segment covers a
+    // connected block by pass-through, clipped to its own abstract span.  See
+    // BusSegment::passthru_spans (issue #496).
+    std::map<std::pair<int,int>, std::vector<std::pair<double,double>>> bid_to_pt;
     for (const auto& w : bundles) {
         const int bid = w.input.original_bundle.id;
         bid_to_nbits[bid] =
@@ -817,11 +851,40 @@ std::vector<BusSegment> make_bus_segments(
             bid_to_cs[bid] = {};
             continue;
         }
+        const Topology& topo = w.input.candidates[sel];
         ConnTopology ct;
-        ct.build(w.input.candidates[sel], floorplan);
+        ct.build(topo, floorplan);
         bid_to_cs[bid] = ct.segs();
-        if (!w.input.candidates[sel].seg_bits.empty())
-            bid_to_bits[bid] = &w.input.candidates[sel].seg_bits;
+        if (!topo.seg_bits.empty())
+            bid_to_bits[bid] = &topo.seg_bits;
+
+        // Pass-through coverage anchors, derived from the SAME nominal geometry
+        // check_dnuts's coverage check uses, so the two cannot disagree about
+        // which block needs which segment.
+        std::set<std::string> tapped;
+        for (const auto& cs : ct.segs())
+            for (const auto& conn : cs.conns)
+                if (conn.kind == SegConn::BUSTERM) tapped.insert(conn.block_name);
+        for (const auto& bname : topo.connected_block_names) {
+            if (tapped.count(bname)) continue;      // has a real tap; not our business
+            auto rects = floorplan.get_block_rects(bname);
+            if (rects.empty()) rects.push_back(floorplan.get_block_bounds(bname));
+            for (int i = 0; i < (int)ct.segs().size(); ++i) {
+                const ConnSeg& cs = ct.segs()[i];
+                const double s_lo = std::min((double)cs.along_lo, (double)cs.along_hi);
+                const double s_hi = std::max((double)cs.along_lo, (double)cs.along_hi);
+                for (const Rect& r : rects) {
+                    const double p_lo = cs.horiz ? (double)r.y1 : (double)r.x1;
+                    const double p_hi = cs.horiz ? (double)r.y2 : (double)r.x2;
+                    const double a_lo = cs.horiz ? (double)r.x1 : (double)r.y1;
+                    const double a_hi = cs.horiz ? (double)r.x2 : (double)r.y2;
+                    if (cs.perp_pos < p_lo || cs.perp_pos > p_hi) continue;
+                    if (s_lo > a_hi || s_hi < a_lo) continue;      // no crossing
+                    bid_to_pt[{bid, i}].emplace_back(std::max(s_lo, a_lo),
+                                                     std::min(s_hi, a_hi));
+                }
+            }
+        }
     }
 
     std::vector<BusSegment> out;
@@ -871,6 +934,8 @@ std::vector<BusSegment> make_bus_segments(
                 }
             }
         }
+        auto ptit = bid_to_pt.find({ts.bundle_id, ts.seg_idx});
+        if (ptit != bid_to_pt.end()) bs.passthru_spans = ptit->second;
         out.push_back(std::move(bs));
     }
     return out;

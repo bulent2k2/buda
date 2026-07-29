@@ -162,6 +162,16 @@ is its own issue, filed as a follow-up — a close cousin of the antenna
 family (dead metal / lost coverage at a segment's ends) but in
 `detailed_nuts`, not the generator.
 
+**Resolved by issue #496**: `BusSegment::passthru_spans` carries each crossing
+interval (clipped to the abstract span) and `adjust_bit_spans` re-extends to
+it when the snap would otherwise have deleted it, alongside the pre-existing
+`busterm_faces` anchor. `mix` returns to a clean `check_design`
+(1/0/1 -> 1/0/0); the residual overlap is the selection-trajectory artifact
+described above, not a coverage fault. The repair fires far more widely than
+the one flow whose metric moved — 76 crossings on bigHalf, 41 on mix, 5 on
+big, 2 on comprehensive_demo — because a block is usually covered by more than
+one segment, so most trims were latent rather than fatal.
+
 ## Files
 
 - `src/verify.h` / `src/verify.cpp` — `SegAttachment` + `seg_attachment()`,
