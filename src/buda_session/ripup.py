@@ -30,7 +30,7 @@ import time
 
 import buda
 
-from .util import (_RR_CLASS_MAX_TRIALS,
+from .util import (_RR_CLASS_MAX_TRIALS, _RR_RELEASE_MAX_TRIALS,
                    _RR_CLASS_TOP_N, _RR_CONVERGE_FLOOR, _RR_CONVERGE_FRAC,
                    _RR_CONVERGE_GUARD_DEFAULT, _RR_CONVERGE_WINDOW,
                    _RR_DEFAULT_MAX_ITER, _RR_FAST_TRIALS_DEFAULT,
@@ -1338,6 +1338,133 @@ class RipupMixin:
             return True, trials
         return False, trials
 
+    # ---- Measured-infeasibility uniformity break (stall tier 4) ---------
+    # opens #14 fix space (a) / docs/internal/bottomup_healer_templates.md.
+    # A locked instance whose plan-time track pools MATCH its reference can
+    # still strand bits at DNUTS: the conflict is dynamic — neighbors and
+    # occupancy at THAT instance — invisible to any static pool comparison
+    # (mix2_fast_bottomup bundle 166: the uniform copy works at 3 of 4
+    # instances, the 4th's surroundings close its window).  When even the
+    # class pass stalls, the release pass breaks uniformity for exactly
+    # the measured-infeasible instance: unlock it (pin + layers kept, the
+    # PLACEMENT freed — its fixed copy is withdrawn and NUTS solves it
+    # individually), and if the free re-solve alone does not strictly
+    # improve, try the freed wrapper's candidate alternates before
+    # restoring.  Gated on the user's declared
+    # `check_template_tracks on_mismatch independent` policy — the same
+    # opt-in that already accepts per-instance solving for environmental
+    # mismatches; `stop`-policy flows are structurally untouched.  The
+    # aligned siblings keep the uniform copy; every commit is LOUD.
+
+    def _rr_release_pass(self, stage, metric, cur):
+        """Release-move pass: returns (committed, trials).  No-op (False, 0)
+        outside stage b, without the `independent` policy, or when no
+        locked bundle holds measured DNUTS opens."""
+        if stage != 'b':
+            return False, 0
+        if getattr(self, "_bu_mismatch_policy", "stop") != "independent":
+            return False, 0
+        if not getattr(self, "_planner_is_hier", False):
+            return False, 0
+        open_bids = {bid for bid, _si, _m, _e in self._open_segments()}
+        locked_open = [w for w in self.bundles
+                       if w.hier.locked
+                       and w.input.original_bundle.id in open_bids]
+        if not locked_open:
+            return False, 0
+        by_cell, cell_of, tmpl_of = self._rr_class_maps()
+        print(f"[ripup_reroute] RELEASE pass: {len(locked_open)} locked "
+              f"instance(s) still hold measured DNUTS opens at "
+              f"{self._rr_m_str(cur)} — trying measured-infeasibility "
+              f"uniformity breaks (policy: independent)", flush=True)
+        trials = 0
+        for w in locked_open:
+            # Aggregate budget (the _RR_GLOBAL/_RR_CLASS_MAX_TRIALS
+            # symmetry, Codex #487): each instance costs up to
+            # 1 + _RR_CLASS_TOP_N full NUTS/DNUTS reruns — a
+            # many-instance infeasible design must not run unbounded.
+            # Checked per INSTANCE (not per inner trial) so a started
+            # instance's release + alternates finish as one unit.
+            if trials >= _RR_RELEASE_MAX_TRIALS:
+                print(f"[ripup_reroute] RELEASE: trial budget "
+                      f"({_RR_RELEASE_MAX_TRIALS}) exhausted — stop.",
+                      flush=True)
+                return False, trials
+            bid = w.input.original_bundle.id
+            inst = (w.input.original_bundle.instances[0]
+                    if w.input.original_bundle.instances else "?")
+            tid = tmpl_of.get(bid)
+            cell = cell_of.get(tid, w.input.original_bundle.cell_context)
+            snap = self._rr_class_snapshot()
+            old_tidx = w.plan.selected_topology_index
+            # Release: the wrapper keeps its pin (selected index + plan
+            # seg_layers); hier.locked False withdraws it from the
+            # fixed-copy compute (the locked filter) and from the DNUTS
+            # copy plan, so the re-run below NUTS-solves it individually
+            # against real occupancy.  The FORCED per-segment layers from
+            # the bottom-up propagation must go: the planner applies
+            # pinned_seg_layers[si] to EVERY candidate (the unpin_topology
+            # hazard), so a repin trial below would carry the OLD
+            # candidate's H/V layers onto a different-direction shape —
+            # an unbuildable LAYER_DIR route the (opens, overlaps) metric
+            # cannot see.  The release-alone path keeps its current
+            # direction-correct plan.seg_layers; a repin's incremental
+            # replan then assigns fresh direction-correct layers.
+            w.hier.locked = False
+            w.input.pinned_seg_layers = []
+            self._rr_invalidate_bottom_up_caches()
+            self._rr_rerun(stage, full=True, skip_replan=True)
+            m = metric()
+            trials += 1
+            if os.environ.get("BUDA_RR_TRACE"):
+                print(f"[rr-trace] RELEASE bundle {bid} ({inst}): "
+                      f"{self._rr_m_str(m)}", flush=True)
+            move = None                      # None = release alone won
+            if not (m < cur):
+                # The free re-solve alone did not improve — the pinned
+                # candidate itself may be the infeasible shape (bundle
+                # 166's junction-closed L).  Now that the wrapper is
+                # unlocked, the normal incremental-replan trial machinery
+                # applies: try its farness-ranked alternates on top of the
+                # release before giving up.
+                snap2 = self._rr_snapshot()
+                for tidx in self._rr_candidate_order(w, old_tidx,
+                                                     stage)[:_RR_CLASS_TOP_N]:
+                    m = self._rr_trial(w, tidx, stage, metric, full=True)
+                    trials += 1
+                    if os.environ.get("BUDA_RR_TRACE"):
+                        print(f"[rr-trace] RELEASE bundle {bid} topo "
+                              f"{old_tidx + 1}->{tidx + 1}: "
+                              f"{self._rr_m_str(m)}", flush=True)
+                    if m < cur:
+                        move = tidx
+                        break
+                    self._rr_restore(snap2, only=self._rr_dirty)
+                if not (m < cur):
+                    self._rr_class_restore(snap)
+                    print(f"[ripup_reroute] RELEASE: bundle {bid} "
+                          f"({inst}) — no improvement, copy kept",
+                          flush=True)
+                    continue
+            # Commit: replay the trial-deferred persistence (any dogleg
+            # adoption from the fixed-copy recompute), update the released
+            # instance's expanded row (bu_locked=False — a resumed session
+            # must restore it unlocked), and recharge the planner cuts.
+            self._persist_bottom_up_dogleg_adoptions()
+            if self.bdb is not None and tid is not None:
+                self._add_expanded_bundle(
+                    w, w.plan.selected_topology_index, {bid: tid})
+            self.planner.recharge_committed(self.bundles)
+            how = ("free re-solve" if move is None
+                   else f"topo {old_tidx + 1}->{move + 1}")
+            print(f"[ripup_reroute] RELEASE COMMIT: bundle {bid} "
+                  f"({inst}, cell '{cell}') released from the uniform "
+                  f"copy — solved individually ({how}), metric "
+                  f"{self._rr_m_str(cur)}->{self._rr_m_str(metric())}; "
+                  f"the aligned siblings keep the copy", flush=True)
+            return True, trials
+        return False, trials
+
     def _rr_flip_edges(self, w, stage):
         """MST edge_ids of w's SELECTED candidate that a current contention touches
         (step 4b).  A per-edge L/Z flip is an alternate move alongside the index
@@ -2139,7 +2266,8 @@ class RipupMixin:
     def _ripup_reroute(self, max_iter=_RR_DEFAULT_MAX_ITER,
                        use_edge_candidates=False, use_global=True,
                        fast_trials=None, screen=None, warm=None,
-                       converge_guard=None, use_class_moves=True):
+                       converge_guard=None, use_class_moves=True,
+                       use_release_moves=True):
         if not self.bundles:
             print("Error: ripup_reroute has no bundles.")
             return
@@ -2395,6 +2523,19 @@ class RipupMixin:
                 cls_ok, c_trials = self._rr_class_pass(stage, metric, cur)
                 n_trials += c_trials
                 if cls_ok:
+                    committed += 1
+                    prim_hist.append(self._rr_m_primary(metric()))
+                    continue
+            if best is None and use_release_moves:
+                # Even the class pass stalled: measured-infeasibility
+                # uniformity break (opens #14 (a)) — release a locked
+                # instance whose copied routing is measured DNUTS-open and
+                # solve it individually.  Gated on the `independent`
+                # policy; `no_release_moves` disables.
+                rel_ok, r_trials = self._rr_release_pass(stage, metric,
+                                                         cur)
+                n_trials += r_trials
+                if rel_ok:
                     committed += 1
                     prim_hist.append(self._rr_m_primary(metric()))
                     continue

@@ -42,6 +42,12 @@ _RR_CLASS_MAX_TRIALS = 32           # hard trial budget per stall (the
 #                                     trials are the most expensive kind, so a
 #                                     many-class stall must not cost
 #                                     TOP_N x N_classes of them; issue #474)
+_RR_RELEASE_MAX_TRIALS = 24         # release-pass hard trial budget per stall
+#                                     (same rationale: each locked-open
+#                                     instance costs up to 1 + _RR_CLASS_TOP_N
+#                                     full NUTS/DNUTS reruns — a many-instance
+#                                     infeasible design must not run
+#                                     unbounded; Codex #487)
 
 # Fast trials (RR round 3): trials skip metric-neutral passes (tighten_pulls
 # in stage a — overlap-non-increasing, so the trial metric is an upper bound

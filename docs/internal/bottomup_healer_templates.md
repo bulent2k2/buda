@@ -72,6 +72,29 @@ machinery stays available for designs where a locked class must be
 steered by measured prices (e.g. many classes contending at once, where
 per-class trials are too expensive).
 
+**The residual the two implementations left — and its closer (opens #14
+fix space (a), IMPLEMENTED 2026-07-29 as ripup's RELEASE pass).**  With
+both class-move mechanisms in, `mix2_fast_bottomup` + healers still
+converged to 8 DNUTS opens on bundle 166 (`dogleg1` at
+`chip/i_dogleg1_3`): the uniform copy works at 3 of 4 instances, the
+4th's surroundings close its junction slide window — a dynamic
+neighbors/occupancy conflict whose plan-time track pools MATCH the
+reference, so no static pool comparison and no class-level move can fix
+it.  The **measured-infeasibility uniformity break** is the stall
+chain's true last tier (stage b, after the class pass; gated on the
+`check_template_tracks on_mismatch independent` policy;
+`no_release_moves` opts out): release exactly the measured-open locked
+instance (fixed copy withdrawn, pin kept, forced per-segment layers
+cleared — the unpin_topology hazard, caught live: the first cut re-pinned
+onto the old candidate's H/V layers and produced an unbuildable
+LAYER_DIR route the opens metric cannot see), re-solve it individually,
+try its candidate alternates when the free re-solve alone does not
+improve, strict-improvement accept.  Measured: the free re-solve alone
+scores 14 (the pinned L IS the infeasible shape), release + topo 1→2
+scores **0 opens** — the flow ends with a clean detailed `check_design`,
+matching the top-down twin's endpoint, with the three aligned siblings
+still on the uniform copy.  Tests: `test_ripup_release_moves.py`.
+
 Item E remains future work as scoped below.  The original investigation
 follows.
 
