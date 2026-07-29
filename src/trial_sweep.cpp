@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <iostream>
+#include <mutex>
 #include <thread>
 
 #include "conn_topology.h"
@@ -31,6 +32,11 @@ namespace {
 // Engines print [NUTS]/[DetailedNUTS] progress via std::cout; the sweep runs
 // them from worker threads with the GIL released, so silence cout globally
 // for the sweep's duration (matching the sequential trials' redirect-to-sink).
+// The redirection swaps the PROCESS-GLOBAL cout buffer, so overlapping sweeps
+// from two Python threads would restore each other's dangling NullBuf —
+// parallel_sweep serializes itself on g_sweep_mutex for its whole body
+// (Codex #502 P1), which also keeps the pool + outcome writes single-sweep.
+std::mutex g_sweep_mutex;
 struct NullBuf : std::streambuf {
     int overflow(int c) override { return c; }
 };
@@ -220,6 +226,7 @@ std::vector<SweepOutcome> parallel_sweep(
     int                               n_threads) {
     std::vector<SweepOutcome> out(moves.size());
     if (moves.empty()) return out;
+    std::lock_guard<std::mutex> sweep_lock(g_sweep_mutex);
     CoutSilencer silence;
     unsigned hw = std::thread::hardware_concurrency();
     int nt = n_threads > 0 ? n_threads : (hw ? (int)hw : 2);
@@ -244,7 +251,17 @@ std::vector<SweepOutcome> parallel_sweep(
     } else {
         std::vector<std::thread> pool;
         pool.reserve(nt);
-        for (int t = 0; t < nt; ++t) pool.emplace_back(worker);
+        // Exception-safe construction (Codex #502 P1): a thread/resource
+        // limit can make emplace_back throw after earlier workers started —
+        // unwinding would destroy joinable threads (std::terminate).  Keep
+        // whatever workers DID start (the shared atomic index means fewer
+        // workers still drain every move) and join them on every path; if
+        // none could start, run the worker inline (sequential fallback).
+        try {
+            for (int t = 0; t < nt; ++t) pool.emplace_back(worker);
+        } catch (const std::system_error&) {
+        }
+        if (pool.empty()) worker();
         for (auto& th : pool) th.join();
     }
     return out;
