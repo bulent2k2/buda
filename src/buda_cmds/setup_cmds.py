@@ -31,6 +31,14 @@ def cmd_add_block(session, cmd, args, cmd_line):
     # Single-rect: add_block <name> <x1> <y1> <x2> <y2> [corner_margin ...]
     # Multi-rect:  add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [corner_margin ...]
     name = args[0]
+    # Block names must be unique.  Floorplan::add_block silently OVERWRITES an
+    # existing block (last-wins), so a redefinition — or a typo'd name that
+    # collides with a real block — silently moves/resizes it or drops one of two
+    # intended blocks.  Reject it (like the duplicate add_net guard).
+    if session.fp.has_block(name):
+        print(f"Error: block '{name}' is already defined — "
+              f"duplicate add_block (block names must be unique)")
+        sys.exit(1)
     if len(args) > 1 and args[1].lower() == "rect":
         rects = []
         i = 1
@@ -402,6 +410,20 @@ def cmd_def_layer(session, cmd, args, cmd_line):
     # TOP/LOW is optional; omitting it means non-TOP. LOW is accepted for
     # backward compatibility and treated as non-TOP.
     lid, name, dirstr = args[0], args[1], args[2]
+    # Layer id AND name must be unique.  LayerStack::add_layer silently keeps the
+    # FIRST layer for a duplicate id (the redefinition is dropped), while a reused
+    # NAME silently clobbers the name->id map (last-wins), so name-based lookups
+    # (set_min_stub_length_layer, def_track_pattern dir, …) resolve to the wrong
+    # layer.  Reject both (like the duplicate add_net guard).
+    if session.layers.has_layer(int(lid)):
+        print(f"Error: layer id {int(lid)} is already defined — "
+              f"duplicate def_layer (layer ids must be unique)")
+        sys.exit(1)
+    if name in session._layer_name_map:
+        print(f"Error: layer name '{name}' is already used by layer "
+              f"{session._layer_name_map[name]} — "
+              f"duplicate def_layer (layer names must be unique)")
+        sys.exit(1)
     rest = list(args[3:])
     if rest and rest[0].upper() in ("TOP", "LOW"):
         typestr = rest.pop(0).upper()

@@ -104,9 +104,13 @@ def test_basename_collision_uniquified(tmp_path):
     # #278: content-dedup silently dropped that origin's provenance).
     for d in ("a", "b", "c"):
         (tmp_path / d).mkdir()
-    (tmp_path / "a" / "inc.buda").write_text("def_layer 4 M4 H TOP 0.0\n")
-    (tmp_path / "b" / "inc.buda").write_text("def_layer 5 M5 V TOP 0.0\n")
-    (tmp_path / "c" / "inc.buda").write_text("def_layer 4 M4 H TOP 0.0\n")
+    # Comment-only payloads: this test exercises log-archive basename
+    # uniquification by ORIGIN PATH, not routing — using no-op comments keeps
+    # a/c byte-identical (and re-sourceable) without tripping the def_layer
+    # duplicate-name guard when the same layer id would be declared twice.
+    (tmp_path / "a" / "inc.buda").write_text("# include payload alpha\n")
+    (tmp_path / "b" / "inc.buda").write_text("# include payload beta\n")
+    (tmp_path / "c" / "inc.buda").write_text("# include payload alpha\n")
     flow = tmp_path / "cellA.buda"
     flow.write_text("source a/inc.buda\n"
                     "source b/inc.buda\n"

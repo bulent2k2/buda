@@ -12,10 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A net name must be unique.  `Netlist::add_net` only appends, so a redefined
-net/bus name would silently create a second net (double-counted bits, or — with
-different endpoints — two same-named bundles plus a clobbered endpoint map).
-`add_net` / `add_bus` reject a duplicate name with a flow-stopping error."""
+"""Setup-command name uniqueness.  Several setup commands used to accept a
+duplicate name SILENTLY, each corrupting state a different way:
+  * `add_net`/`add_bus` — `Netlist::add_net` only appends, so a redefined name
+    created a second net (double-counted bits, or two same-named bundles plus a
+    clobbered endpoint map when the endpoints differ).
+  * `add_block` — `Floorplan::add_block` overwrites (last-wins), silently
+    moving/resizing the block or dropping one of two intended blocks.
+  * `def_layer` — `LayerStack::add_layer` keeps the first for a duplicate id
+    (redefinition dropped) and clobbers the name->id map for a reused name.
+  * `def_track_pattern` — `define_layer` overwrites a layer's pattern.
+Each is now a flow-stopping error."""
 import contextlib
 import io
 import os
@@ -89,4 +96,50 @@ def test_distinct_names_ok():
 def test_piecewise_bus_ranges_ok():
     # Building one bus in disjoint index ranges is legitimate (no overlap).
     code, out = _run("add_bus b[0:1] A.p B.p", "add_bus b[2:3] A.p C.p")
+    assert code is None and not _err(out)
+
+
+# --- add_block / def_layer / def_track_pattern name-uniqueness ---
+# Same footgun as add_net: Floorplan::add_block silently overwrites (last-wins);
+# LayerStack::add_layer silently keeps the first for a dup id and clobbers the
+# name->id map for a reused name; RoutingGridStack::define_layer silently
+# overwrites a layer's pattern.  All are hard errors now.
+
+def test_duplicate_add_block_errors():
+    code, out = _run("add_block X 0 0 100 100", "add_block X 200 200 300 300")
+    assert code == 1
+    assert "block 'X' is already defined" in _err(out)
+
+
+def test_duplicate_layer_id_errors():
+    code, out = _run("def_layer 7 P7 H TOP 30", "def_layer 7 P7b V LOW 30")
+    assert code == 1
+    assert "layer id 7 is already defined" in _err(out)
+
+
+def test_duplicate_layer_name_errors():
+    code, out = _run("def_layer 7 P7 H TOP 30", "def_layer 8 P7 V TOP 30")
+    assert code == 1
+    assert "layer name 'P7' is already used" in _err(out)
+
+
+def test_duplicate_track_pattern_errors():
+    code, out = _run("def_track_pattern 4 0.0 SIGNAL 1 1",
+                     "def_track_pattern 4 0.0 SIGNAL 2 2")
+    assert code == 1
+    assert "layer 4 already has a track pattern" in _err(out)
+
+
+def test_distinct_layers_blocks_tracks_ok():
+    code, out = _run("add_block X 0 0 100 100", "add_block Y 200 200 300 300",
+                     "def_layer 7 P7 H TOP 30", "def_layer 8 P8 V TOP 30",
+                     "def_track_pattern 4 0.0 SIGNAL 1 1",
+                     "def_track_pattern 5 0.0 SIGNAL 2 2")
+    assert code is None and not _err(out)
+
+
+def test_grid_override_is_not_a_redefinition_ok():
+    # add_grid_override adds a region-scoped pattern; it must NOT trip the guard.
+    code, out = _run("def_track_pattern 4 0.0 SIGNAL 1 1",
+                     "add_grid_override 4 0 0 50 50 0.0 SIGNAL 2 2")
     assert code is None and not _err(out)
