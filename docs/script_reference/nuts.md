@@ -141,6 +141,7 @@ ripup_reroute [max_iter] [use_edge_candidates] [no_global] [no_class_moves]
               [no_release_moves]
               [fast_trials|no_fast_trials] [screen|no_screen]
               [warm_trials|no_warm_trials] [converge_guard|no_converge_guard]
+              [no_parallel_sweep]
 ```
 
 Feedback-driven rip-up & re-route. The congestion planner's band-capacity model is
@@ -159,7 +160,8 @@ the pipeline, and keeps only moves that reduce the metric.
 | `no_release_moves` | flag | off | Disable the **measured-infeasibility uniformity break** (below), the stall chain's true last tier (stage b only, and ALSO gated on `check_template_tracks on_mismatch independent`): release a locked instance whose copied routing is measured DNUTS-open and solve it individually. A no-op without the policy / without locked opens either way. |
 | `no_fast_trials` / `fast_trials` | flag | fast on | Disable / force **fast trials** (below): trials skip metric-neutral solve passes; commits always re-run the full pipeline. |
 | `no_screen` / `screen` | flag | screen on | Disable / force the **fixed-context screen** (below): rank each contender's alternates by a ~ms frozen-context placement and full-trial only the top few, deferring the rest to the iteration's stall sweep. |
-| `warm_trials` / `no_warm_trials` | flag | warm OFF | Enable / force-off **warm trials** (below): pre-filter each move with the warm-start single-bundle re-solve, cold-trialing only warm-improving moves; warm-rejected moves are cold-swept at the stall point (the stop certificate stays a full cold sweep). Off by default — corpus-measured cost-neutral once the screen has cut trial volume; opt in on designs whose per-trial cold cost dominates. All tokens are order-independent — `ripup_reroute 20 no_global` and `ripup_reroute no_global 20` are equivalent. |
+| `warm_trials` / `no_warm_trials` | flag | warm OFF | Enable / force-off **warm trials** (below): pre-filter each move with the warm-start single-bundle re-solve, cold-trialing only warm-improving moves; warm-rejected moves are cold-swept at the stall point (the stop certificate stays a full cold sweep). Off by default — corpus-measured cost-neutral once the screen has cut trial volume, and measured WORSE post-parallel-sweep on the rnr vehicles (the sequential warm pre-filter gates the parallel sweep off). |
+| `no_parallel_sweep` | flag | sweep on | Disable the **parallel stall sweep** (below): evaluate the deferred stall-certificate moves sequentially instead of on C++ worker threads. Decision-identical either way (the parallel path replays its winner through the sequential trial); the token exists for triage and single-core determinism studies. `BUDA_SWEEP_THREADS` caps the pool size (0 = hardware concurrency). All tokens are order-independent — `ripup_reroute 20 no_global` and `ripup_reroute no_global 20` are equivalent. |
 
 **Two stages, auto-detected from pipeline state:**
 
@@ -273,6 +275,29 @@ slowdown_rnr stage-b ~2.5s → ~1.5s.  When the incremental replan is
 unavailable for a candidate the contender falls back to the unscreened
 order; the global-occupant pass is never screened (its per-stall budget
 already bounds it).
+
+**Parallel stall sweep (rnr runtime P1, default on; `no_parallel_sweep`
+opts out).** The deferred stall-certificate sweep is the dominant trial
+volume on healer-heavy flows (120+ moves per stalled iteration), and its
+moves are independent evaluations against the SAME committed baseline —
+embarrassingly parallel.  With fast trials on and warm trials off, the
+sweep runs on a C++ thread pool (`buda.parallel_sweep`, GIL released):
+each worker deep-copies the wrapper container and planner privately, pins
+its move, replans incrementally, and re-runs NUTS (stage b: + bit
+placement, incl. the bottom-up DNUTS copy-plan path) with metrics that
+implement the sequential fast-trial semantics exactly.  Outcomes are
+walked in the sequential visit order and the first in-order strict
+improver is **replayed through the normal sequential trial** — the replay
+is the accept basis and the committed state, so the sweep's numbers only
+order the pick and carry the stall certificate; a move the workers cannot
+evaluate falls back to a sequential trial at its position, and a
+sweep-vs-replay disagreement is a LOUD warning with the replay verdict
+kept.  Decision-identical to the sequential sweep by construction
+(validated byte-identical on the rnr vehicles, incl. trial counts).
+Measured (4 cores): `mix2_fast_bottomup` 40.2 → 29.8 s end-to-end (the
+stage-b ripup 25.9 → 16.8 s), `mix2_fast_on_aligned_sql` 33.5 → 29.7 s;
+flows that never stall are unchanged.  `BUDA_SWEEP_THREADS` caps the pool
+(0 = hardware concurrency).
 
 **Warm trials (round 4, default OFF; `warm_trials` opts in).** A cold trial
 re-solves the whole design's abstract NUTS from scratch; the warm-start

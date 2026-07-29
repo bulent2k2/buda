@@ -254,3 +254,93 @@ the full fast+mid tiers green (the slow-tier healer end-to-end itself
 dropped 153 → 110 s).  Next: N3 (sweep ranking + `warm_trials`
 re-measure), then P1 (the parallel sweep, which fans out from exactly
 this by-reference container).
+
+## Implemented — P1: batched parallel C++ trial sweep (2026-07-29)
+
+`src/trial_sweep.h/.cpp` + the `buda.parallel_sweep` binding
+(`bind_nuts.cpp`, `py::gil_scoped_release` around the whole call) +
+`_rr_parallel_deferred_sweep` (ripup.py).  When the screened contender
+scan stalls, the deferred stall-certificate moves — the dominant trial
+volume (120–137 moves × 5–6 stalled iterations) — are evaluated on a
+C++ thread pool instead of one sequential Python-orchestrated trial
+each:
+
+- **Per-move private state**: each worker deep-copies the wrapper vec
+  (the P2 container, copied ONCE per move C++-side — no binding
+  crossings) and clones the planner by value (verified safely copyable:
+  const refs, value members, a raw `const RoutingGridStack*`;
+  `Topology`'s analysis cache is a per-object shared_ptr with atomic
+  refcount and const payload).  Pin the move, `replan_bundle`
+  incrementally, NUTS with the bottom-up fixed segments + planner extra
+  grids, dogleg adoption on the private copy, and for stage b
+  `make_bus_segments` + a DNUTS run that ports the copy-plan path
+  (reference solve → oriented sibling copies via `transform_net_segment`
+  → rest solve with `add_fixed_bits`).
+- **Metric fidelity**: the sweep implements the sequential *fast-trial*
+  semantics exactly — stage a replicates `skip_tighten`, stage b runs
+  vias-off with the plain-path abort clamped at the committed bar
+  (aborts only above the bar, so improving/non-improving verdicts are
+  unaffected), and the stage-b primary adds the moved bundle's
+  DISCONNECTED term on a caller-side base decomposition (base = total −
+  the moved bundle's current contribution; other bundles' contributions
+  cannot change with the move, and trial dogleg drift is excluded by the
+  dogleg pass's non-severing guarantee, #405).
+- **Replay-confirm accept**: outcomes are walked in the sequential visit
+  order; the first in-order strict improver is REPLAYED through the
+  normal single-move sequential trial — the replay is the accept basis
+  and the committed state, so the sweep's numbers only order the pick
+  and carry the stall certificate.  A worker that cannot evaluate a move
+  (incremental replan unavailable) falls back to the sequential trial at
+  its original position; a sweep-vs-replay disagreement is a LOUD
+  warning with the replay verdict kept.  Trial counting mirrors the
+  sequential path exactly (non-improving swept move = the trial it
+  replaces; the winner counts via its replay), so the `done:` lines are
+  byte-identical.
+- **Gating**: on by default (`_RR_PARALLEL_SWEEP_DEFAULT`), only when
+  fast trials are on and warm trials are off (`use_par = use_parallel
+  and _rr_fast_trials and not warm` — the sweep implements the
+  fast-trial metric, and the warm path must warm-eval each move
+  first).  `no_parallel_sweep` opts a run out; `BUDA_SWEEP_THREADS`
+  caps the pool (0 = hardware concurrency).  A winner is committed only
+  through the replay, so BDB persistence and dogleg-slot handling ride
+  the existing sequential machinery untouched.
+
+**Validated**: all four gate vehicles decision-identical par vs seq
+(same contender improvements, same moves, same trial counts, same
+endpoints; `BUDA_SWEEP_THREADS=1` also identical; zero divergence
+warnings).  **Measured** (paired runs, same 4-core box):
+`mix2_fast_bottomup` **40.2 → 29.8 s (−26 %)** — the stage-b ripup call
+25.9 → 16.8 s, its sequential 465-trial nuts+dnuts cost (11.3 + 6.3 s)
+collapsing to 219 trials + 2.9 s of parallel sweep; stage-a ripup 7.6 →
+6.3 s.  `mix2_fast_on_aligned_sql` **33.5 → 29.7 s (−11 %)**.  `mix` /
+`mix2_fast_topdown` never stall into the sweep and are unchanged.  From
+the arc's start (65/56 s) the two rnr flows now sit at **~30 s each
+(−47 % / −25 %)**.  Regression cover:
+`test/tests/test_ripup_parallel_sweep.py` (sweep fires + deferred
+winner accept with all moves force-deferred, par-vs-seq done-line +
+selection agreement, the `no_parallel_sweep` token, and a slow-tier
+end-to-end decision-line diff on the real mix2 bottom-up vehicle).
+
+## N3 verdicts (2026-07-29)
+
+- **Stall-sweep reordering** (rank the deferred list globally by screen
+  score): SKIPPED.  The deferred lists are already screen-score-ordered
+  *per contender*, and the sweeps accept the first in-order improver —
+  a global reorder changes which improver is found first, i.e. the
+  committed trajectory, breaking the byte-identity gate for a
+  volume-only win P1 already collects (the sweep pays ~the slowest
+  single trial per stall regardless of order).
+- **`warm_trials` re-measure** (the item-D crossover claim): measured
+  WORSE post-P1 — `mix2_fast_bottomup` 45.0 s, `mix2_fast_on_aligned_sql`
+  40.6 s vs the 29.8/29.7 s defaults (endpoints identical).  Warm
+  trials gate the parallel sweep off (each move must warm-eval before
+  its cold trial, an inherently sequential pre-filter), so the opt-in
+  now pays the warm overhead AND forfeits the sweep.  `warm_trials`
+  stays default-OFF; the crossover argument is obsolete on stall-sweep-
+  bound flows — a future case for it needs per-trial cold cost to
+  dominate *outside* the parallel sweep's reach (e.g. the main
+  contender scan on a much larger design).
+
+Remaining from the ranked plan: P3 (per-layer solver threads) and P4
+(parallel screening), both deferred to a larger-corpus measurement
+where the solve itself dominates.
