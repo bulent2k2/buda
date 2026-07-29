@@ -309,6 +309,21 @@ class VizDetailedDrawMixin:
         vis = self.ui_state.busterms and not self.ui_state.detailed_mode
         for a in self._busterm_artists:
             a.set_visible(vis)
+        self._apply_endpoint_label_visibility()
+
+
+    def _apply_endpoint_label_visibility(self):
+        """The `B<id>` endpoint labels show ONLY for the highlighted / soloed
+        bundle (and only with Terminals on, not in detailed mode).  Every bundle
+        drives one label, so showing all at once piles them up wherever drivers
+        cluster (the reported overlap); gating on the selection keeps exactly the
+        label the user is inspecting.  Nothing selected -> none shown."""
+        show = self.ui_state.busterms and not self.ui_state.detailed_mode
+        active = set(getattr(self, '_highlighted_set', None) or set())
+        if getattr(self, '_highlighted', None) is not None:
+            active.add(self._highlighted)
+        for bid, a in getattr(self, '_endpoint_label_artists', ()):
+            a.set_visible(show and bid in active)
 
 
     def _apply_vias_conns_visibility(self):
