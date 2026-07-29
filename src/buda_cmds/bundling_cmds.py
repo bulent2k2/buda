@@ -604,7 +604,10 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
     else:
         raw_bundles = session.bundler.run(session.netlist)
     raw_bundles = _split_oversized_bundles(session, raw_bundles)
-    session.bundles = []
+    # P2 (docs/internal/rnr_runtime_parallelism.md): the C++-backed container
+    # makes every engine call zero-copy; element access returns references,
+    # so all later per-wrapper mutation reaches the same storage.
+    session.bundles = buda.BundleWrapperVec()
     for b in raw_bundles:
         w = buda.BundleWrapper()
         w.input.original_bundle = b
@@ -735,7 +738,8 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     # so the split propagates identically to every instance (each part is its
     # own template, replicated at run_planner hier).
     raw_bundles = _split_hier_bundles(session, raw_bundles)
-    session.bundles = []
+    # P2: C++-backed container (see the flat site above).
+    session.bundles = buda.BundleWrapperVec()
     for b in raw_bundles:
         w = buda.BundleWrapper()
         w.input.original_bundle = b

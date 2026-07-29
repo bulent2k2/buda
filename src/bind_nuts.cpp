@@ -17,6 +17,8 @@
 // bind_nuts.cpp — Python bindings for NUTS, detailed NUTS, routing grid,
 //                 connectivity topology, and verify functions.
 // bind_routing(m) must be called before this (Floorplan/LayerStack are referenced).
+#include "bind_opaque.h"   // FIRST: opaque vector<BundleWrapper> (P2)
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
@@ -215,7 +217,35 @@ void bind_nuts(py::module_& m) {
              "Warm-start single-bundle re-solve: place target_bid against "
              "prev frozen, then run the safety passes on the unfrozen "
              "union.  Exact metrics for the WARM state — a predictor of "
-             "the cold run()'s metric, never a substitute");
+             "the cold run()'s metric, never a substitute")
+        // Sequence FALLBACKS (P2, bind_opaque.h): the natives above take
+        // the zero-copy BundleWrapperVec; plain lists of wrappers land
+        // here and keep the historical copy semantics.
+        .def("run", [](NUTSEngine& e, py::sequence seq) {
+                 return e.run(wrappers_from_seq(seq));
+             })
+        .def("screen_candidates",
+             [](NUTSEngine& e, py::sequence seq, int target_bid,
+                const std::vector<int>& tidxs, CongestionPlanner& planner,
+                bool clear_dogleg_overrides) {
+                 return e.screen_candidates(wrappers_from_seq(seq),
+                                            target_bid, tidxs, planner,
+                                            clear_dogleg_overrides);
+             },
+             py::arg("bundles"), py::arg("target_bid"), py::arg("tidxs"),
+             py::arg("planner"), py::arg("clear_dogleg_overrides") = false)
+        .def("rerun_layer",
+             [](NUTSEngine& e, const NUTSResult& prev, py::sequence seq,
+                int layer_id) {
+                 return e.rerun_layer(prev, wrappers_from_seq(seq),
+                                      layer_id);
+             })
+        .def("rerun_bundle_warm",
+             [](NUTSEngine& e, const NUTSResult& prev, py::sequence seq,
+                int target_bid) {
+                 return e.rerun_bundle_warm(prev, wrappers_from_seq(seq),
+                                            target_bid);
+             }, py::arg("prev"), py::arg("bundles"), py::arg("target_bid"));
 
     m.def("transform_track_segment", &transform_track_segment,
           py::arg("ts"), py::arg("orient"), py::arg("cell_w"),
@@ -397,6 +427,15 @@ void bind_nuts(py::module_& m) {
           py::arg("bundles"), py::arg("nuts_result"), py::arg("floorplan"),
           py::arg("bit_order") = "LO_HI",
           "Build DetailedNUTSEngine.run() input from the placed NUTS result");
+    // Sequence fallback (P2): plain wrapper lists keep the copy path.
+    m.def("make_bus_segments",
+          [](py::sequence seq, const NUTSResult& nr, const Floorplan& fp,
+             const std::string& bit_order) {
+              return make_bus_segments(wrappers_from_seq(seq), nr, fp,
+                                       bit_order);
+          },
+          py::arg("bundles"), py::arg("nuts_result"), py::arg("floorplan"),
+          py::arg("bit_order") = "LO_HI");
 
     // ── Verify ────────────────────────────────────────────────────────────
     py::enum_<ViolationKind>(m, "ViolationKind")
