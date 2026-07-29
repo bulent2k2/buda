@@ -659,8 +659,9 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
     // round: the cluster repack's contract explicitly allows a globally
     // neutral commit (in-cluster drop, collateral elsewhere) that the NEXT
     // single-victim sweep cleans up — a neutral round reaches that sweep,
-    // and only an exact state repeat (bitwise hash of placed/track/span)
-    // ends the loop (Codex #507).  Still QoR-gated rather than
+    // and only an exact state repeat (bitwise placed/track/span words,
+    // compared element-wise) ends the loop (Codex #507).  Still
+    // QoR-gated rather than
     // byte-identity: a cycle's cap-exit parity can differ from its
     // first-repeat state.
     // The comparison is the FULL bitwise state, not a hash: a hash
