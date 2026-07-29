@@ -223,7 +223,10 @@ def cmd_set_drop_dangling(session, cmd, args, cmd_line):
 
 
 def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
-    # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
+    # Usage: generate_topologies_for_bundle <bundle_id | hint | id:N | net:PFX> [center_mode] [double_detour] [multi_trunk] [no_hanan_loci] [spine_relays]
+    # The selector resolves like select_topology's: a bare integer is a bundle
+    # ID, a bare non-numeric token is a net-name prefix (hint), and id:/net:
+    # force one or the other (net:10 matches a bus '10net' vs bare 10 = ID 10).
     # Single dst  → 2-pin L/Z/U candidates
     # Multiple dst → multicast trunk+branch candidates
     # Append "center_mode"    to use block centres instead of busterm faces.
@@ -237,17 +240,23 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
      use_hanan_loci, loci_explicit, use_spine_relays) = _parse_gen_flags(args)
     pos_args = [a for a in args if a not in _GEN_FLAGS]
     if not pos_args:
-        print("Error: generate_topologies_for_bundle requires a hint")
+        print("Error: generate_topologies_for_bundle requires a bundle id or hint")
         return
-    hint = pos_args[0]
+    selector = pos_args[0]
+    bids, err = session._resolve_bundle_selector(selector)
+    if err:
+        print(f"Error: generate_topologies_for_bundle: {err}")
+        return
+    bid_set = set(bids)
     topo_gen = session._make_topo_gen(session.fp, use_center, use_double_detour,
                                    use_multi_trunk, use_hanan_loci,
                                    use_spine_relays)
     found = False
     remembered = []
     for w in session.bundles:
-        net_name = w.input.original_bundle.get_net_names()[0]
-        if net_name.startswith(hint):
+        names = w.input.original_bundle.get_net_names()
+        net_name = names[0] if names else ""
+        if w.input.original_bundle.id in bid_set:
             ep = session._bundle_endpoints(w)
             if ep is None:
                 print(f"Warning: no endpoint info for net '{net_name}' — skipping bundle {w.input.original_bundle.id}")
@@ -273,7 +282,7 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
             session._cleanup_candidate_pools([w])
             remembered.append(w)
             found = True
-    if not found: print(f"Warning: Could not find bundle matching hint {hint}")
+    if not found: print(f"Warning: Could not find bundle matching '{selector}'")
     else:
         # An explicit loci polarity (and a spine_relays opt-in) is recorded in
         # the knob memo so a later bulk generate_topologies cannot silently
