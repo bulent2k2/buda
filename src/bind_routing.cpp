@@ -337,6 +337,28 @@ void bind_routing(py::module_& m) {
         return std::string(buf);
     }, py::arg("topo"));
 
+    // Hot-metric accessor (rnr runtime N1): the SELECTED candidate's uid +
+    // the bundle id in ONE zero-copy crossing.  The Python-side equivalent
+    // costs a full candidate-POOL copy per access (`w.input.candidates`
+    // materializes every Topology as a Python list) plus an original_bundle
+    // copy for the id — paid per bundle per metric evaluation in ripup's
+    // stage-b loop.  A bound BundleWrapper argument passes by reference, so
+    // this reads the selection in place.  uid == "" means no valid
+    // selection (skip the bundle, matching the historical bounds check).
+    m.def("selected_topo_key", [](const BundleWrapper& w) {
+        const int sel = w.plan.selected_topology_index;
+        const int bid = w.input.original_bundle.id;
+        if (sel < 0 || sel >= (int)w.input.candidates.size())
+            return py::make_tuple(std::string(), bid);
+        char buf[17];
+        std::snprintf(buf, sizeof buf, "%016llx",
+                      (unsigned long long)topology_fingerprint(
+                          w.input.candidates[sel]));
+        return py::make_tuple(std::string(buf), bid);
+    }, py::arg("wrapper"),
+       "(selected candidate's topo_uid or \"\", bundle id) without copying "
+       "the candidate pool");
+
     // ── TopoEdit (Phase E3): transactional expert edits, each returning an
     // EditVerdict (check_topo violations + pinch) so a hand edit can never
     // silently corrupt annotations.  Undo = snapshot/restore the Topology.

@@ -1,0 +1,207 @@
+# rnr flow runtimes — bottleneck taxonomy & parallelization plan
+
+**Vehicles:** `flow/rnr/mix2_fast_on_aligned_sql.buda` (63.0 s) and
+`flow/rnr/mix2_fast_bottomup.buda` (59.2 s), measured 2026-07-29 on
+Linux/glibc, 4 cores, `-O3 -march=native` (`main` @ b0b9ad0).  Continues
+[`ripup_runtime_analysis.md`](ripup_runtime_analysis.md) (items A/B/
+`_open_segments` memo shipped; C investigated → root-caused to the
+binding boundary; D/E open) — this note re-measures post-heal flows,
+answers "what can we parallelize", and ranks everything found.
+
+## 1. Where the ~60 s goes (per-command)
+
+| command | aligned | bottomup |
+|---|--:|--:|
+| **ripup_reroute (stage b)** | **38.2 s** | **39.8 s** |
+| **ripup_reroute (stage a)** | **13.6 s** | **12.5 s** |
+| negotiate (a + b) | 7.1 s | 2.6 s |
+| run_planner hier 5 | 1.7 s | 1.6 s |
+| dump_topologies | 1.0 s | 1.0 s |
+| generate_hier_topologies | 0.7 s | 0.7 s |
+| everything else | < 1 s | < 1 s |
+
+The two ripup calls are **~85 %** of both flows.  Everything below is
+about them; the only non-healer notes are §5.
+
+## 2. The taxonomy: it is NOT the solver
+
+Stage-b ripup (bottomup): 39.8 s, 461 trials, buckets
+`replan 2.6 + nuts 14.0 + dnuts 11.7 + screen 2.2 + snapshot 0.4 +
+restore 1.0 = 32 s` (+ ~8 s un-bucketed Python).  But the instrumented
+C++ **solve passes** inside those buckets sum to only:
+
+- `nuts` passes ≈ 7.3 s of the 14.0 s bucket,
+- `dnuts` passes ≈ 1.3 s of the 11.7 s bucket.
+
+Micro-timing one representative trial statement-by-statement (100
+bundles, 1705 candidates, 150 fixed segments):
+
+| per stage-b trial (~68 ms) | ms | what it is |
+|---|--:|---|
+| `NUTSEngine.run(self.bundles)` | ~28–31 | instrumented passes (~16 ms flow-average; 24.4 ms on the measured baseline solve) + a directly-measured **6.7 ms/call boundary gap** — the pybind list→`vector<BundleWrapper>` conversion, every wrapper + every candidate copied at the call boundary (engine ctor / `add_fixed_segments` / grid setters are ≈ 0.1 ms combined) |
+| `make_bus_segments(self.bundles, …)` | 10–11 | the SAME whole-corpus copy again (the item-C dig attributed ~9 ms to marshalling + analysis in a mismatched frame) |
+| metric evals (`_rr_disconnected_bits` residual) | ~13 | ~6 ms × ~2.2 evals/trial — the post-memo per-bundle loop + `topo_uid` keying |
+| `replan_bundle` | 5.7 | recharge-all + plan-one (another list→vector crossing) |
+| DNUTS engine solves (×2) | ~1.3 | **the actual bit placement** |
+| screen (amortized), snapshot/restore, glue | remainder | |
+
+**The C++ solvers are ~1–16 ms; the orchestration around them is
+~50 ms.**  The single biggest mechanism is the pybind copy of the whole
+wrapper list (with all candidate pools) on every `vector<BundleWrapper>`
+crossing — ≥ 2 full crossings per stage-b trial (`run`,
+`make_bus_segments`), plus `replan_bundle` and each `screen_candidates`
+batch.  `run()`'s internal mutable re-copy (`bundle_copy` pass, 1.6 ms)
+is separate and additional.
+
+The second mechanism is **trial volume**: 461 stage-b trials, and the
+`iter N: sweeping 120–137 deferred move(s)` full-fidelity stall sweeps
+(5–6 of them, re-run after every later-tier commit) are the bulk.  The
+sweep is the stall certificate — when nothing improves it MUST evaluate
+every deferred move, and it re-runs whenever a global/class/release
+commit changes the baseline.
+
+## 3. Parallelization opportunities (ranked, 4-core host)
+
+### P1. Batched parallel trial sweep (C++) — the big one
+The deferred stall sweep is **embarrassingly parallel**: k independent
+`('idx', tidx)` moves evaluated against the SAME committed baseline,
+accept = first *in order* that strictly improves (deterministic under
+parallel evaluation: evaluate all k, take the lowest-index improver —
+identical accept to today's sequential scan when none improves, and the
+certificate needs all k anyway).  A C++ `sweep_trials(bundles, moves)`
+entry point that (a) crosses the binding ONCE, (b) for each move: clones
+the touched state, replans incrementally, runs NUTS (+ the DNUTS bit
+placement — `make_bus_segments` is already C++), (c) fans the moves
+across a thread pool with the GIL released, and (d) returns per-move
+metrics.  Combines the marshalling fix (one crossing for k trials) with
+real 4× parallelism on the dominant cost.  The engines are
+self-contained (no Python callbacks), so `py::gil_scoped_release` is
+safe.  **Effort: high** (a per-move state-clone discipline in C++;
+determinism gate: byte-identical accepts vs the sequential sweep on the
+corpus).  **Stake: the majority of the ~52 s healer time; realistically
+−50–70 % of stage b.**
+
+### P2. Opaque `BundleWrapperVec` — kill the per-call copy everywhere
+`py::bind_vector<std::vector<BundleWrapper>>` (opaque) and hold
+`session.bundles` as that C++-backed container: every existing
+`vector<BundleWrapper>` call (`run`, `optimize_topologies`,
+`make_bus_segments`, `screen_candidates`, `replan_bundle*`,
+`band_occupants`, …) becomes zero-copy pass-by-reference with no
+signature changes C++-side.  **Stake: ~16–18 ms of the ~68 ms stage-b
+trial (~25 %; the measured 6.7 ms `run()` boundary gap + ~9 ms
+`make_bus_segments` marshalling + shares in `replan_bundle`/screen),
+roughly 8–10 s across the two flows** — and it is the enabling step for
+P1 (which wants a reference it can fan out from).  **Effort:
+medium; risk: aliasing semantics** — Python-side code that relies on
+element access returning copies must be audited (the `w.input.candidates
+= cands` write-back idiom stays; `self.bundles = list(...)` sites become
+container constructions).  Gate: full byte-identity corpus.
+
+### P3. Per-layer threads inside `orientation_fixpoint`
+Within one orientation half-iteration, `solve_layer` runs per layer in a
+loop (`nuts.cpp:2111`) and layers of one direction are independent
+(cross-layer coupling is between the H and V *groups*, which alternate).
+Threading the per-group loop parallelizes the biggest instrumented pass
+cluster (`context`+`fixpoint` ≈ 4.6 s of stage b).  On THIS design
+(~16 ms/solve, 2–4 layers/group) the win is bounded (≤ 2×) — it matters
+more for larger designs.  **Effort: medium** (shared `NutsContext`
+occupancy must be partitioned per layer — verify no cross-layer writes).
+Do after P1/P2; measure on `bigHalf`/`big2` where solves are larger.
+
+### P4. Parallel screening
+`screen_candidates` is 31 ms/batch × 29 (0.9–2.2 s/flow); candidates in
+a batch are independent single-bundle placements against frozen
+occupancy — a natural thread-pool map.  **Effort: low-medium**, small
+stake alone, but free once P1's pool exists.
+
+### NOT parallelizable (by design)
+- The **hill-climb accept chain** (sequential strict-improvement commits
+  — order IS the algorithm); only each stall's *evaluation set* is
+  parallel (P1).
+- The **planner's greedy commit order** (widest-first, band charging is
+  order-dependent) and negotiate's `replan_bundle_ripup` victim ladder.
+- Stage a ↔ stage b (data dependency).
+
+## 4. Non-parallel bottlenecks (cheap, do first)
+
+### N1. Metric residual (`_rr_disconnected_bits`) — ~6 s/flow
+Still ~6 ms/eval after the uid-memo: the per-eval loop walks EVERY
+bundle calling `topo_uid` on its selected candidate to key the memo.
+Key by `(bid, id(candidates), selected_index)` or maintain a running
+total adjusted only for `_rr_dirty` bundles (the plan already sketched
+in ripup_runtime_analysis.md item B, second half).  **Low risk, ~10 %
+of stage b.**
+
+### N2. `run()`'s internal mutable copy when doglegs cannot fire
+`bundle_copy` ≈ 1.6 ms/solve (0.75 s/flow) pays for the dogleg
+fallback's mutable clone on every trial solve, but a re-solve of an
+already-adopted, stable selection almost never doglegs.  A
+`copy-on-first-dogleg` (solve from `bundles_in`, clone lazily only when
+`detect_dogleg_plans` returns work) removes it from the common path.
+**Low risk.**
+
+### N3. Trial-volume levers already scoped (item E)
+Rank each stall sweep by the screen scores already computed (improvers
+surface early; the no-improver certificate cost is unchanged — that is
+P1's job), and re-measure `warm_trials` default-on for bottom-up flows
+(item D: the warm eval is 4.6–6× cheaper than these 68 ms cold trials,
+and the crossover condition "cold ≥ 3× warm" is now clearly met).
+
+### N4. Flow-level trims
+`dump_topologies` costs ~1.0 s in BOTH checked-in flows purely for a
+text dump mid-flow (drop it or make it opt-in verbose); negotiate
+stage-a on the aligned flow spends 3.6 s in 3 full `replan` passes
+(inherent); `run_planner hier 5` at 1.7 s and `generate_hier_topologies`
+at 0.7 s are one-shot and fine (per-bundle generation is independent and
+could thread, but the stake is < 1 s).
+
+## 5. Recommended order
+
+1. **N1 + N2** — bounded Python/C++ tweaks, ~6–7 s combined, byte-identity
+   verifiable, no new machinery.
+2. **P2 (opaque vector)** — the structural marshalling fix, ~12 s, and
+   the foundation P1 builds on.
+3. **N3** — screen-ranked sweeps + the bottom-up `warm_trials` re-measure
+   (config-level, cheap to try).
+4. **P1 (parallel C++ sweep)** — the headline parallel feature; gate on
+   byte-identical accepts vs sequential.
+5. **P3/P4** — solver/screen threading, measured on the bigger corpus
+   where the solve itself dominates.
+
+A realistic composite: N1+N2+P2 ≈ **−35–40 % of the healer time with no
+parallelism at all**; P1 on 4 cores takes the remaining sweep-bound
+majority down by another ~2–3×.  Endpoints must stay byte-identical
+throughout (the corpus diff harness used for #472/#478/#487).
+
+## Implemented — N1 + N2 (2026-07-29)
+
+Both landed together (one bounded C++/binding change each), routes
+**byte-identical** on all four gate vehicles (`mix2_fast_on_aligned_sql`,
+`mix2_fast_bottomup`, `mix`, `mix2_fast_topdown` — non-timing flow-log
+diff empty):
+
+- **N1** — `buda.selected_topo_key(wrapper)`: the selected candidate's
+  `topo_uid` + bundle id in ONE zero-copy crossing (a bound
+  `BundleWrapper` argument passes by reference).  `_rr_disconnected_bits`'
+  per-eval walk keys the memo through it, so the full candidate-POOL copy
+  (`w.input.candidates` materializes every Topology per access) and the
+  `original_bundle` copy are paid only on a memo miss.  Measured: warm
+  metric eval **6 ms → 0.15 ms** (40×; ~13 ms → ~0.3 ms per stage-b
+  trial at ~2.2 evals/trial).  The memo keys are equal to the historical
+  `(buda.topo_uid(topo), bid)` by construction (same fingerprint, same
+  hex format) — guarded by `test_selected_topo_key_matches_topo_uid`.
+- **N2** — copy-on-first-dogleg in `NUTSEngine::run`: the mutable
+  whole-wrapper clone (every candidate of every bundle) is made only when
+  the first solve actually detected cycle plans; the common healer-trial
+  re-solve of a stable selection skips it (and the fallback call — whose
+  loop is gated on `!out.plans.empty()`, so skipping is
+  behavior-identical).  `pass_seconds` keeps the `bundle_copy` key at 0.0
+  for schema stability.
+
+**Measured end-to-end** (best-of-N, same box):
+`mix2_fast_bottomup` **56.0 → 48.8 s (−13 %)**,
+`mix2_fast_on_aligned_sql` **64.9 → 55.6 s (−14 %)**.  The stage-b
+un-bucketed time (wall − timing buckets — where the metric evals live)
+drops **7.1 → 2.5 s** (bottomup) and **7.5 → 2.1 s** (aligned), and the
+`nuts` bucket loses the per-trial clone (aligned stage a: 8.35 → 7.38 s).
+Next per the recommended order: **P2** (opaque wrapper vector), then N3.

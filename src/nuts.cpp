@@ -2416,28 +2416,38 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         return out;
     };
 
-    // Doglegs mutate topologies, so the fallback needs a MUTABLE copy of
-    // the whole wrapper list — a deep copy (every candidate topology) that
-    // is the single biggest fixed cost of a ~ms fixed-context screen run.
-    // Screen mode (skip_doglegs_) never runs the fallback, so it solves
-    // straight from the caller's list (solve takes const&).
-    auto t_copy = pclock::now();
+    // Copy-on-first-dogleg (rnr runtime N2): doglegs mutate topologies, so
+    // the fallback needs a MUTABLE copy of the whole wrapper list — a deep
+    // copy (every candidate topology of every bundle) that used to be paid
+    // on EVERY non-screen solve.  The overwhelmingly common solve — a
+    // healer trial re-solving a stable selection — detects no cycle plans,
+    // so the first solve now runs straight from the caller's list (solve
+    // takes const&) and the clone is made only when the fallback actually
+    // has plans to apply.  run_dogleg_fallback's loop is gated on
+    // !out.plans.empty(), so skipping the call entirely on empty plans is
+    // behavior-identical.
+    DoglegSolveOut out = solve(bundles_in, {});
+    pass_t["bundle_copy"];   // keep the profile schema stable: 0.0 when the
+                             // copy-on-first-dogleg path skips the clone
     std::vector<BundleWrapper> bundles_mut;
-    if (!skip_doglegs_)
+    bool copied = false;
+    std::set<int> doglegged_bids;
+    if (!skip_doglegs_ && !out.plans.empty()) {
+        auto t_copy = pclock::now();
         bundles_mut = bundles_in;          // mutable: doglegs edit topologies
+        copied = true;
+        charge("bundle_copy", t_copy);
+        // Dogleg fallback (nuts_dogleg.cpp): a genuine vertical-constraint
+        // cycle survived the corner pass — split one trunk on the cycle
+        // across two tracks joined by a jog and re-solve; returns the
+        // mutated bundle ids.  Screen mode skips it: a screen's result is
+        // discarded (candidate ordering only), so the topology surgery
+        // must not happen (see setter).
+        doglegged_bids = run_dogleg_fallback(bundles_mut, out, solve,
+                                             track_pitch_, floorplan_);
+    }
     const std::vector<BundleWrapper>& bundles =
-        skip_doglegs_ ? bundles_in : bundles_mut;
-    charge("bundle_copy", t_copy);
-    DoglegSolveOut out = solve(bundles, {});
-
-    // Dogleg fallback (nuts_dogleg.cpp): when a genuine vertical-constraint
-    // cycle survives the corner pass, split one trunk on the cycle across two
-    // tracks joined by a jog and re-solve; returns the mutated bundle ids.
-    // Screen mode skips it: a screen's result is discarded (candidate
-    // ordering only), so the topology surgery must not happen (see setter).
-    const std::set<int> doglegged_bids = skip_doglegs_
-        ? std::set<int>{}
-        : run_dogleg_fallback(bundles_mut, out, solve, track_pitch_, floorplan_);
+        copied ? bundles_mut : bundles_in;
 
     // Export the dogleg-mutated topologies so the CLI can adopt them before it
     // rebuilds ConnTopology for detailed NUTS — otherwise the split bundle's
