@@ -27,6 +27,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <numeric>
 #include <set>
 #include <thread>
@@ -2275,18 +2276,36 @@ void NUTSEngine::orientation_fixpoint(
                 solve_layer(by_layer[lid], ctx, cons_for(lid));
             }
         } else {
+            // Exception containment (Codex #504 P2): an exception escaping a
+            // child std::thread is std::terminate, and an inline throw would
+            // unwind past the still-joinable pool (terminate again).  The
+            // sequential path propagates solve errors normally — match it:
+            // every worker (incl. the inline one) traps into a shared
+            // exception_ptr (first one wins; later workers stop claiming
+            // layers), the pool is ALWAYS joined, and the error is rethrown
+            // after the join.
             std::atomic<size_t> next{0};
+            std::atomic<bool>   failed{false};
+            std::exception_ptr  err;
+            std::mutex          err_mu;
             auto worker = [&]() {
-                for (size_t i = next.fetch_add(1); i < group.size();
-                     i = next.fetch_add(1)) {
-                    auto lit = by_layer.find(group[i]);  // const lookup only:
-                    if (lit == by_layer.end()) continue; // no concurrent op[]
-                    for (auto* ts : lit->second) {
-                        ts->track_position =
-                            std::numeric_limits<double>::quiet_NaN();
-                        ts->placed = false;
+                try {
+                    for (size_t i = next.fetch_add(1);
+                         i < group.size() && !failed.load();
+                         i = next.fetch_add(1)) {
+                        auto lit = by_layer.find(group[i]);  // const lookup:
+                        if (lit == by_layer.end()) continue; // no op[] race
+                        for (auto* ts : lit->second) {
+                            ts->track_position =
+                                std::numeric_limits<double>::quiet_NaN();
+                            ts->placed = false;
+                        }
+                        solve_layer(lit->second, ctx, cons_for(group[i]));
                     }
-                    solve_layer(lit->second, ctx, cons_for(group[i]));
+                } catch (...) {
+                    std::lock_guard<std::mutex> g(err_mu);
+                    if (!err) err = std::current_exception();
+                    failed.store(true);
                 }
             };
             std::vector<std::thread> pool;
@@ -2297,6 +2316,7 @@ void NUTSEngine::orientation_fixpoint(
             }
             worker();                       // this thread is a worker too
             for (auto& th : pool) th.join();
+            if (err) std::rethrow_exception(err);
         }
         settle_spans(segments, ctx);
     };
