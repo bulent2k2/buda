@@ -33,7 +33,7 @@ _RR_FLAGS = ("use_edge_candidates", "no_global",
              "screen", "no_screen",
              "warm_trials", "no_warm_trials",
              "converge_guard", "no_converge_guard",
-             "no_class_moves")
+             "no_class_moves", "no_release_moves")
 
 
 def cmd_run_nuts(session, cmd, args, cmd_line):
@@ -221,6 +221,13 @@ def cmd_ripup_reroute(session, cmd, args, cmd_line):
     # TEMPLATE and re-route the whole class in one measured move.  A no-op
     # on flat / non-bottom-up designs; `no_class_moves` disables it.
     use_class_moves = "no_class_moves" not in args
+    # Measured-infeasibility uniformity break (default on, but ALSO gated
+    # on the `check_template_tracks on_mismatch independent` policy — the
+    # user's declared willingness to solve instances individually): at a
+    # stage-b stall with even the class pass exhausted, release a locked
+    # instance whose copied routing is measured DNUTS-open and solve it
+    # individually (opens #14 (a)).  `no_release_moves` disables.
+    use_release_moves = "no_release_moves" not in args
     # Everything that isn't a known flag must be the single numeric max_iter —
     # a misspelled flag (e.g. `no_screeen`) used to be silently dropped when a
     # numeric token was also present (only nums[0] was consumed).
@@ -239,7 +246,8 @@ def cmd_ripup_reroute(session, cmd, args, cmd_line):
                            screen=screen,
                            warm=warm,
                            converge_guard=converge_guard,
-                           use_class_moves=use_class_moves)
+                           use_class_moves=use_class_moves,
+                           use_release_moves=use_release_moves)
 
 
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):

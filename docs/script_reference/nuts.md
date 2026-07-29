@@ -138,6 +138,7 @@ run_detailed_nuts hi_lo
 
 ```
 ripup_reroute [max_iter] [use_edge_candidates] [no_global] [no_class_moves]
+              [no_release_moves]
               [fast_trials|no_fast_trials] [screen|no_screen]
               [warm_trials|no_warm_trials] [converge_guard|no_converge_guard]
 ```
@@ -154,7 +155,8 @@ the pipeline, and keeps only moves that reduce the metric.
 | `max_iter` | int | `10` | Maximum number of outer hill-climb iterations (each commits at most one re-route). |
 | `use_edge_candidates` | flag | off | Also try the per-edge MST L/Z **flip** move-source (below) on contended MST candidates. Off by default. |
 | `no_global` | flag | off | Disable the **global-occupant pass** (below), which otherwise runs when the contender scan stalls above zero. |
-| `no_class_moves` | flag | off | Disable the **bottom-up template class-move pass** (below), the stall chain's last tier: when the residual contention sits on `hier.locked` bottom-up template instances, re-pin the cell TEMPLATE and re-route the whole rotation class in one measured move. A no-op on non-bottom-up flows either way. |
+| `no_class_moves` | flag | off | Disable the **bottom-up template class-move pass** (below): when the residual contention sits on `hier.locked` bottom-up template instances, re-pin the cell TEMPLATE and re-route the whole rotation class in one measured move. A no-op on non-bottom-up flows either way. |
+| `no_release_moves` | flag | off | Disable the **measured-infeasibility uniformity break** (below), the stall chain's true last tier (stage b only, and ALSO gated on `check_template_tracks on_mismatch independent`): release a locked instance whose copied routing is measured DNUTS-open and solve it individually. A no-op without the policy / without locked opens either way. |
 | `no_fast_trials` / `fast_trials` | flag | fast on | Disable / force **fast trials** (below): trials skip metric-neutral solve passes; commits always re-run the full pipeline. |
 | `no_screen` / `screen` | flag | screen on | Disable / force the **fixed-context screen** (below): rank each contender's alternates by a ~ms frozen-context placement and full-trial only the top few, deferring the rest to the iteration's stall sweep. |
 | `warm_trials` / `no_warm_trials` | flag | warm OFF | Enable / force-off **warm trials** (below): pre-filter each move with the warm-start single-bundle re-solve, cold-trialing only warm-improving moves; warm-rejected moves are cold-swept at the stall point (the stop certificate stays a full cold sweep). Off by default — corpus-measured cost-neutral once the screen has cut trial volume; opt in on designs whose per-trial cold cost dominates. All tokens are order-independent — `ripup_reroute 20 no_global` and `ripup_reroute no_global 20` are equivalent. |
@@ -339,6 +341,33 @@ byte-identical (the pass is a structural no-op). Measured on
 `mix2_fast_bottomup` + healers: stage-a residual 2→1 overlaps, final DNUTS
 opens 16 (2 locked bundles)→8 (1); see
 `docs/internal/bottomup_healer_templates.md`.
+
+**Measured-infeasibility uniformity break (stage b; default on, gated on
+`check_template_tracks on_mismatch independent`; `no_release_moves`
+disables).** The stall chain's true last tier, after the class pass. A
+locked instance whose plan-time track pools MATCH its reference can still
+strand bits at DNUTS: the conflict is dynamic — neighbors and occupancy at
+THAT instance — invisible to any static pool comparison (opens #14:
+`mix2_fast_bottomup` bundle 166, where the uniform copy works at 3 of 4
+instances and the 4th's surroundings close its window, exhausting every
+class-level move). The RELEASE pass breaks uniformity for exactly the
+measured-infeasible instance: unlock it (its fixed copy is withdrawn and
+NUTS solves it individually; the pin is kept, and the FORCED per-segment
+layers are cleared — the planner applies `pinned_seg_layers` to any
+candidate, so a repin would otherwise carry the old candidate's H/V layers
+onto a different-direction shape, an unbuildable route the (opens,
+overlaps) metric cannot see), re-solve with every other wrapper's committed
+assignment untouched, and — when the free re-solve alone does not strictly
+improve — try the freed wrapper's farness-ranked candidate alternates
+before restoring. Strict-improvement accept; the aligned siblings keep the
+uniform copy; the released instance's `bu_locked` is persisted so a resume
+restores it unlocked; every commit is LOUD (`RELEASE COMMIT` names the
+instance and cell). The `independent` policy is the opt-in: it already
+declares the user accepts per-instance solving for environmental
+mismatches — this extends it to measured infeasibility. Measured: bundle
+166's stuck 8-open residual heals to **0 opens with a clean detailed
+`check_design`** (release + topo 1→2), matching the top-down twin's
+endpoint.
 
 **Notes:**
 - It is an explicit congestion-fix pass, so it may re-route any contended bundle —
