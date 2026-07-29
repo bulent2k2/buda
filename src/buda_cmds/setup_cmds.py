@@ -312,6 +312,14 @@ def cmd_add_net(session, cmd, args, cmd_line):
     unknown_dir = (last_kw == "unknown")
     inout_dir   = (last_kw == "inout")
     name, drv_pin, rcv_str = args[0], args[1], args[2]
+    # A net name must be unique: Netlist::add_net only appends, so a redefinition
+    # silently creates a SECOND net of the same name (double-counted bits, or —
+    # with different endpoints — two same-named bundles plus a clobbered
+    # _net_endpoints entry).  Reject it, like the unknown-command guard.
+    if name in session._net_endpoints:
+        print(f"Error: net '{name}' is already defined — "
+              f"duplicate add_net (net names must be unique)")
+        sys.exit(1)
     rcv_pins = rcv_str.split(',')
     drv_inst = session._pin_instance(drv_pin)
     rcv_insts = [session._pin_instance(r) for r in rcv_pins]
@@ -364,6 +372,16 @@ def cmd_add_bus(session, cmd, args, cmd_line):
     rcv_insts = [session._pin_instance(r) for r in rcv_pins]
     if not (unknown_dir or inout_dir) and drv_inst in rcv_insts:
         print(f"Error: block '{drv_inst}' is used as both driver and receiver in bus '{prefix}'")
+        sys.exit(1)
+    # Net names must be unique — reject a bus that redefines any already-defined
+    # bit (else Netlist::add_net silently doubles it).  Check the whole range
+    # BEFORE inserting any bit, so a collision leaves the netlist untouched.
+    dup = [f"{prefix}_{i}" for i in range(lo, hi + 1)
+           if f"{prefix}_{i}" in session._net_endpoints]
+    if dup:
+        shown = ", ".join(dup[:4]) + (" …" if len(dup) > 4 else "")
+        print(f"Error: bus '{prefix}' redefines already-defined net(s): {shown} — "
+              f"duplicate add_bus (net names must be unique)")
         sys.exit(1)
     for i in range(lo, hi + 1):
         net_name = f"{prefix}_{i}"

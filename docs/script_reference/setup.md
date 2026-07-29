@@ -219,9 +219,14 @@ add_net <name> <pin1> <pin2>[,<pin3>…] inout
 
 Add a single net to the netlist.
 
+> **Net names must be unique.** `Netlist::add_net` only *appends*, so redefining
+> a name would silently create a second net (double-counted bits, or — with
+> different endpoints — two same-named bundles plus a clobbered endpoint map).
+> A duplicate name is therefore a **hard error** that stops the flow.
+
 | Argument | Type | Description |
 |---|---|---|
-| `name` | str | Net name. Used as a bundle hint key — the first net name in a bundle identifies the bundle in sidecar files and `generate_topologies_for_bundle`. |
+| `name` | str | Net name (must be unique). Used as a bundle hint key — the first net name in a bundle identifies the bundle in sidecar files and `generate_topologies_for_bundle`. |
 | `driver_pin` | str | Driver pin in `instance.port` form, e.g. `u_cpu.tx`. When `unknown` or `inout` is appended this is the first (positional) pin. |
 | `receiver_pins` | str | Comma-separated list of receiver pins (no spaces), e.g. `u_mem.rx` or `u_a.rx,u_b.rx`. |
 | `unknown` | keyword | Optional. Marks the net as having no known pin direction. All listed pins are stored in BDB with `dir="UNKNOWN"`. `run_hier_bundler` uses positional order as a last-resort fallback (after OUTPUT and INOUT checks). |
@@ -266,6 +271,11 @@ Convenience macro that expands to a sequence of `add_net` calls.
 |---|---|
 | `bu[4]` | `bu_0`, `bu_1`, `bu_2`, `bu_3` |
 | `bu[2:5]` | `bu_2`, `bu_3`, `bu_4`, `bu_5` |
+
+Each expanded bit name must be unique (see `add_net`): a bus that redefines any
+already-defined net — from another `add_bus`/`add_net`, or an overlapping index
+range — is a **hard error** naming the colliding bit(s). Building one bus in
+DISJOINT ranges (`b[0:1]` then `b[2:3]`) is fine.
 
 The driver and receiver pins are the same for every expanded net — this
 describes a parallel bus where every bit shares the same source and
