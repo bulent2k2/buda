@@ -78,6 +78,23 @@ Feature: Bottom-up hierarchical planning (solve-once, copy to instances)
     When I run run_detailed_nuts
     Then DNUTS solves on a reference instance and copies bits + per-bit vias to every sibling (pre-reserved)
 
+  Scenario: ripup heals locked-copy contention by moving the template class
+    # ✅ SHIPPED (PR #472) as ripup_reroute's CLASS pass (default on;
+    # `no_class_moves` opts out) — the stall chain's tier after the
+    # global-occupant pass.  Coverage: test/tests/test_ripup_class_moves.py.
+    Given residual contention sitting on hier.locked bottom-up template instances
+    When ripup_reroute stalls with no per-instance move available
+    Then the CLASS pass re-pins the cell TEMPLATE and re-routes the whole rotation class as one measured, strict-improvement move
+
+  Scenario: negotiate prices a locked template class in its cell-local frame
+    # ✅ SHIPPED (PR #478) as the OPT-IN `negotiate_congestion class_moves`
+    # (default off — measured endpoint-neutral at best; the stage-a metric is
+    # blind to the DNUTS quality its bigger shuffles trade away).  Coverage:
+    # test/tests/test_negotiate_template_prices.py.
+    Given an affected hier.locked bundle in a negotiate_congestion iteration with class_moves
+    When the iteration's injected band demand is translated into the cell frame and summed across instances
+    Then the target templates re-plan unpinned under that aggregated price field and the pins propagate to every instance
+
   Scenario: measured-infeasibility uniformity break for a stranded locked copy
     # ✅ SHIPPED 2026-07-29 as ripup_reroute's RELEASE pass (the stage-b stall
     # chain's last tier, gated on `check_template_tracks on_mismatch
