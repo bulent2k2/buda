@@ -663,27 +663,33 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
     // ends the loop (Codex #507).  Still QoR-gated rather than
     // byte-identity: a cycle's cap-exit parity can differ from its
     // first-repeat state.
-    auto state_key = [&]() {
-        size_t h = 0;
-        auto mix = [&](unsigned long long v) {
-            h ^= std::hash<unsigned long long>{}(v)
-               + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
-        };
+    // The comparison is the FULL bitwise state, not a hash: a hash
+    // collision would declare a false repeat and cut off exactly the
+    // neutral-rearrangement sweep the guard exists to preserve (Codex
+    // #507 P2).  The loop is capped at 8 iterations, so storing ≤ 8
+    // states and comparing element-wise is microseconds against the
+    // solves.
+    auto state_of = [&]() {
+        std::vector<unsigned long long> v;
+        v.reserve(segments.size() * 3);
         for (const auto& ts : segments) {
-            mix(ts.placed
+            v.push_back(ts.placed
                 ? std::bit_cast<unsigned long long>(ts.track_position)
                 : 0x517EULL);
-            mix(std::bit_cast<unsigned long long>(ts.span_lo));
-            mix(std::bit_cast<unsigned long long>(ts.span_hi));
+            v.push_back(std::bit_cast<unsigned long long>(ts.span_lo));
+            v.push_back(std::bit_cast<unsigned long long>(ts.span_hi));
         }
-        return h;
+        return v;
     };
-    std::set<size_t> seen_states;
+    std::vector<std::vector<unsigned long long>> seen_states;
     for (int iter = 0; iter < 8; ++iter) {
         auto pairs = find_overlaps(segments);
         if (pairs.empty()) break;
-        if (!seen_states.insert(state_key()).second)
+        auto st = state_of();
+        if (std::find(seen_states.begin(), seen_states.end(), st)
+                != seen_states.end())
             break;                    // exact repeat: deterministic cycle
+        seen_states.push_back(std::move(st));
         bool progress = false;
         for (auto [i, j] : pairs) {
             TrackSegment& a = segments[i];
