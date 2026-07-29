@@ -138,9 +138,21 @@ Then two post-passes over the emitted bit-wires:
    "Placeable" is the robust-cover gate `check_topo` already applies (issue
    #438): the segment's slide window must be able to reach the block's perp
    extent, so a boundary graze pushed off the face is not mistaken for a
-   sibling cover. The pick among placeable crossings is the lowest segment
-   index — purely for determinism; no placement state is consulted, so the
-   pass stays order-independent.
+   sibling cover.
+
+   The election happens in `tighten_spans_to_reach`, **after placement is
+   final** — not up front on nominal geometry. An anchor holds the along-span
+   only; it never constrains `track_position`. A crossing chosen before
+   placement can therefore be seated perpendicular-*outside* the very block it
+   was chosen to protect, while the sibling that did land inside stays
+   unanchored and is contracted away (measured on big2: 7 blocks in exactly
+   that state, each covered only by the unanchored sibling). Electing at
+   tighten time picks a crossing that demonstrably covers the block.
+   Determinism survives: the tighten is the last span mutation and never moves
+   `track_position`, so the election is a pure function of the final placement,
+   with the lowest segment index breaking ties. Each segment's list is pruned
+   to its elected anchors, so downstream consumers see exactly what was
+   honored.
 
 7. **Per-bit via emission (step 5 in the source).** For every connection where
    the two bits sit on **different layers**, one `NetVia` is emitted at the

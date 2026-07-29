@@ -288,3 +288,58 @@ def test_every_placeable_crossing_block_keeps_an_anchor(flow):
     # Non-vacuity: the flow must actually contain the multi-crosser case the
     # rule is about, or this proves nothing.
     assert multi > 0, f"{flow} has no multi-crosser block — fixture is vacuous"
+
+
+@pytest.mark.mid
+@pytest.mark.parametrize("flow", ["flow/rnr/mix.buda",
+                                  "flow/big_data_test/big2/big2.buda"])
+def test_elected_anchor_is_seated_inside_its_block(flow):
+    """Every honored anchor must belong to a segment actually seated inside the
+    block it protects — and each block must have exactly one.
+
+    An anchor holds a segment's ALONG span; it does not constrain
+    `track_position`. So a crossing elected on nominal geometry can be placed
+    perpendicular-OUTSIDE the block it was chosen for, leaving the sibling that
+    did land inside unanchored and free to be contracted away — the same
+    `BUSTERM_OPEN` the anchor exists to prevent (Codex, third review on
+    #499/#505).
+
+    Measured on `big2` before the fix: 7 blocks whose nominal-elected anchor
+    sat outside, each covered only by an unanchored sibling. The election
+    therefore happens in `tighten_spans_to_reach`, where placement is final.
+
+    `TrackSegment.passthru_spans` is the post-tighten (honored) set, so this
+    reads the real decision rather than re-deriving it.
+    """
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cwd = os.getcwd()
+    os.chdir(str(_ROOT / os.path.dirname(flow)))
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+            for line in open(os.path.basename(flow)):
+                c = line.strip()
+                if not c or c.startswith("#"):
+                    continue
+                if c.split()[0] in {"visualize", "exit", "check_design",
+                                    "report_wirelength"}:
+                    continue
+                s.do_command(c)
+    finally:
+        os.chdir(cwd)
+
+    outside, per_block = [], {}
+    for t in s.nuts_result.segments:
+        if not t.placed:
+            continue
+        for pc in t.passthru_spans:
+            per_block.setdefault((t.bundle_id, pc.block), []).append(t.seg_idx)
+            if not (pc.perp_lo <= t.track_position <= pc.perp_hi):
+                outside.append((t.bundle_id, t.seg_idx, pc.block,
+                                t.track_position, (pc.perp_lo, pc.perp_hi)))
+    assert not outside, (
+        f"{len(outside)} anchor(s) held by a segment seated outside the block "
+        f"they protect: {outside[:5]}")
+    dupes = {k: v for k, v in per_block.items() if len(v) > 1}
+    assert not dupes, f"block(s) with more than one anchor: {list(dupes)[:5]}"
+    assert per_block, f"{flow} elected no anchors — fixture is vacuous"

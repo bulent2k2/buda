@@ -110,6 +110,14 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("slot_type",      &PreRoutedSegment::slot_type)
         .def_readwrite("track_index",    &PreRoutedSegment::track_index);
 
+    py::class_<PassthruCrossing>(m, "PassthruCrossing")
+        .def(py::init<>())
+        .def_readwrite("along_lo", &PassthruCrossing::along_lo)
+        .def_readwrite("along_hi", &PassthruCrossing::along_hi)
+        .def_readwrite("perp_lo",  &PassthruCrossing::perp_lo)
+        .def_readwrite("perp_hi",  &PassthruCrossing::perp_hi)
+        .def_readwrite("block",    &PassthruCrossing::block);
+
     py::class_<TrackSegment>(m, "TrackSegment")
         .def(py::init<>())
         .def_readonly ("kind",      &TrackSegment::kind)

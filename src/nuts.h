@@ -27,6 +27,16 @@
 
 namespace buda {
 
+// One block a segment covers by crossing it: the crossing's extent along the
+// segment, plus the block's PERPENDICULAR extent and identity — both needed
+// because the anchor is elected after placement, when it is finally known
+// which crossing segment actually got seated inside the block.
+struct PassthruCrossing {
+    double      along_lo = 0, along_hi = 0;   // crossing extent along the segment
+    double      perp_lo  = 0, perp_hi  = 0;   // the block's perp extent
+    std::string block;                        // block name (bundle-local key)
+};
+
 // One bus segment after track assignment (kind BUS in the placed-segment
 // hierarchy — see placed_segment.h; layer/span/track_position/width/placed
 // live on the base with the same names, so every consumer and binding is
@@ -61,12 +71,12 @@ struct TrackSegment : PlacedSegmentBase {
     // so do_span_adjustments uses these as extend-only anchors to guarantee a
     // face-tapped segment's along-span always reaches its block face after slides.
     std::vector<double> busterm_faces;
-    // Along-axis intervals where this segment covers a connected block by
-    // PASS-THROUGH — it crosses the footprint with no tap of its own, the joint
-    // every block-coverage check accepts as a connection.  The sibling of
-    // busterm_faces, and needed for the same reason: rev_conn_map carries only
-    // SEG connectivity, so the span passes would otherwise be free to move an
-    // end past a block whose coverage depends on it.
+    // Where this segment covers a connected block by PASS-THROUGH — it crosses
+    // the footprint with no tap of its own, the joint every block-coverage
+    // check accepts as a connection.  The sibling of busterm_faces, and needed
+    // for the same reason: rev_conn_map carries only SEG connectivity, so the
+    // span passes would otherwise be free to move an end past a block whose
+    // coverage depends on it.
     //
     // The tap case is milder — a face tap sits AT an end, so a span pass merely
     // clips it — but a pass-through block can lie BEYOND the outermost junction,
@@ -76,7 +86,16 @@ struct TrackSegment : PlacedSegmentBase {
     // bundle 90 seg1 crosses chip/i_dnuts2_2/u4 at x in [1680,1730] with
     // junctions only at 1095 and 1455, so the tighten cut the span to
     // [1095,1455] and the block opened).
-    std::vector<std::pair<double,double>> passthru_spans;
+    //
+    // BEFORE the tighten this lists EVERY placeable crossing; the tighten then
+    // elects one anchor per block and PRUNES the rest, so after the solve the
+    // field means "the anchors actually honored for this segment".  Electing at
+    // that point (rather than up front on nominal geometry) is what makes the
+    // anchor sound: an anchor holds the along-span only, so a segment chosen
+    // before placement can be seated perpendicular-OUTSIDE the very block it
+    // was picked to protect while an unanchored sibling is the one that lands
+    // inside (measured on big2: 7 blocks).  See the election in nuts.cpp.
+    std::vector<PassthruCrossing> passthru_spans;
 };
 
 // Exact geometry of one overlap pair, after placement.
@@ -228,8 +247,7 @@ struct NutsContext {
     std::map<std::pair<int,int>, int>                        net_pull_map;
     AlignMap                                                 align_map;
     std::map<std::pair<int,int>, std::vector<double>>        busterm_face_map;
-    std::map<std::pair<int,int>, std::vector<std::pair<double,double>>>
-                                                            passthru_map;
+    std::map<std::pair<int,int>, std::vector<PassthruCrossing>> passthru_map;
     std::map<std::pair<int,int>, TrackSegment*>              ts_ptr_map;
 };
 

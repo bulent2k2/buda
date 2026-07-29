@@ -68,7 +68,7 @@ static void build_nuts_maps(
     std::map<std::pair<int,int>, int>&                            net_pull_map,
     AlignMap&                                                     align_map,
     std::map<std::pair<int,int>, std::vector<double>>&            busterm_face_map,
-    std::map<std::pair<int,int>, std::vector<std::pair<double,double>>>& passthru_map)
+    std::map<std::pair<int,int>, std::vector<PassthruCrossing>>&  passthru_map)
 {
     std::set<std::pair<int,int>> jog_set;   // dogleg jogs: excluded from alignment
     // Pass 1 — nominal perpendicular position from the topology.
@@ -232,65 +232,44 @@ static void build_nuts_maps(
         // beyond the outermost junction, tighten_spans_to_reach's contraction
         // does not clip the crossing, it deletes it.
         //
-        // Exactly ONE placeable crossing per untapped block is anchored — never
-        // zero, never all of them; the reasoning for both bounds is at the pick
-        // below.  The choice is made on NOMINAL geometry, so the pass is
-        // deterministic and order-independent — unlike a post-placement "is it
-        // still covered?" test, which would depend on the order spans are
-        // adjusted in.
-        {
-            std::map<std::string, std::vector<std::pair<int, std::pair<double,double>>>>
-                crossings;                       // block -> [(seg, interval)]
-            for (int si = 0; si < (int)conn_segs.size(); ++si) {
-                const ConnSeg& cs = conn_segs[si];
-                const double s_lo = std::min((double)cs.along_lo, (double)cs.along_hi);
-                const double s_hi = std::max((double)cs.along_lo, (double)cs.along_hi);
-                for (const auto& bname : topo.connected_block_names) {
-                    if (tapped_blocks.count(bname)) continue;
-                    auto rects = floorplan.get_block_rects(bname);
-                    if (rects.empty()) rects.push_back(floorplan.get_block_bounds(bname));
-                    for (const Rect& r : rects) {
-                        const double p_lo = cs.horiz ? (double)r.y1 : (double)r.x1;
-                        const double p_hi = cs.horiz ? (double)r.y2 : (double)r.x2;
-                        const double a_lo = cs.horiz ? (double)r.x1 : (double)r.y1;
-                        const double a_hi = cs.horiz ? (double)r.x2 : (double)r.y2;
-                        if (cs.perp_pos < p_lo || cs.perp_pos > p_hi) continue;
-                        if (s_lo > a_hi || s_hi < a_lo) continue;     // no crossing
-                        // PLACEABILITY, the same robust-cover gate check_topo
-                        // applies (issue #438): a nominal crossing only counts if
-                        // the segment's slide window can actually reach the block's
-                        // perp extent.  A boundary graze whose window is pushed off
-                        // the face can never cover it however the solve goes, so it
-                        // must not be mistaken for a sibling cover below.
-                        if (cs.perp_hi < p_lo || cs.perp_lo > p_hi) continue;
-                        crossings[bname].push_back(
-                            {si, {std::max(s_lo, a_lo), std::min(s_hi, a_hi)}});
-                        break;                    // one crossing per (seg, block)
-                    }
+        // EVERY placeable crossing is recorded here; tighten_spans_to_reach
+        // elects one anchor per block afterwards and prunes the rest.  The
+        // election cannot happen here: an anchor constrains the along-span only,
+        // so a segment picked on nominal geometry can be seated perpendicular-
+        // OUTSIDE the block it was picked to protect, leaving the sibling that
+        // did land inside unanchored and free to be contracted away (Codex, third
+        // review on #499/#505 — measured on big2: 7 blocks in exactly that state,
+        // each covered only by the unanchored sibling).
+        //
+        // "Placeable" is check_topo's robust-cover gate (issue #438): a nominal
+        // crossing counts only if the segment's slide window can reach the block's
+        // perp extent, so a boundary graze that can never cover anything is not
+        // mistaken for a candidate anchor.
+        for (int si = 0; si < (int)conn_segs.size(); ++si) {
+            const ConnSeg& cs = conn_segs[si];
+            const double s_lo = std::min((double)cs.along_lo, (double)cs.along_hi);
+            const double s_hi = std::max((double)cs.along_lo, (double)cs.along_hi);
+            for (const auto& bname : topo.connected_block_names) {
+                if (tapped_blocks.count(bname)) continue;
+                auto rects = floorplan.get_block_rects(bname);
+                if (rects.empty()) rects.push_back(floorplan.get_block_bounds(bname));
+                for (const Rect& r : rects) {
+                    const double p_lo = cs.horiz ? (double)r.y1 : (double)r.x1;
+                    const double p_hi = cs.horiz ? (double)r.y2 : (double)r.x2;
+                    const double a_lo = cs.horiz ? (double)r.x1 : (double)r.y1;
+                    const double a_hi = cs.horiz ? (double)r.x2 : (double)r.y2;
+                    if (cs.perp_pos < p_lo || cs.perp_pos > p_hi) continue;
+                    if (s_lo > a_hi || s_hi < a_lo) continue;      // no crossing
+                    if (cs.perp_hi < p_lo || cs.perp_lo > p_hi) continue;  // unplaceable
+                    PassthruCrossing pc;
+                    pc.along_lo = std::max(s_lo, a_lo);
+                    pc.along_hi = std::min(s_hi, a_hi);
+                    pc.perp_lo  = p_lo;
+                    pc.perp_hi  = p_hi;
+                    pc.block    = bname;
+                    passthru_map[{bid, si}].push_back(std::move(pc));
+                    break;                        // one crossing per (seg, block)
                 }
-            }
-            // Anchor exactly ONE placeable crossing per block — never zero, never
-            // all of them.
-            //
-            // "None" was wrong (Codex P1, second review): nominal multiplicity does
-            // not survive placement.  Several crossings can ALL be contracted past
-            // the block, and the block then opens with exactly the BUSTERM_OPEN this
-            // anchor exists to prevent — dropping every anchor whenever two segments
-            // happen to cross nominally leaves the guarantee with a hole.
-            //
-            // "All" was also wrong (Codex P2, first review): redundant anchors keep
-            // phantom span for nothing — b44's pinned 6-segment TRUNK_H+MST realizes
-            // 4552 instead of 3510 (+30%).
-            //
-            // One is sufficient: the anchored segment is guaranteed to keep reaching
-            // the block, so the block's coverage cannot be lost no matter what the
-            // other crossings do.  The pick is the LOWEST segment index, purely for
-            // determinism (crossings are gathered in segment order, so this is the
-            // first entry) — no placement state is consulted, keeping the whole pass
-            // order-independent.
-            for (const auto& [bname, list] : crossings) {
-                if (list.empty()) continue;       // no placeable cover to protect
-                passthru_map[{bid, list[0].first}].push_back(list[0].second);
             }
         }
     }
@@ -584,6 +563,56 @@ static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
     for (const auto& ts : segments)
         if (ts.placed) ptr[{ts.bundle_id, ts.seg_idx}] = &ts;
 
+    // ── Elect one pass-through anchor per block (issue #496, Codex's third P1)
+    //
+    // An anchor holds a segment's ALONG span; it does not constrain
+    // track_position.  So a crossing chosen on nominal geometry can be seated
+    // perpendicular-OUTSIDE the very block it was chosen to protect, while the
+    // sibling that did land inside stays unanchored and is contracted away —
+    // the same BUSTERM_OPEN the anchor exists to prevent.  Measured on big2: 7
+    // blocks whose nominal-elected anchor sat outside, each covered only by an
+    // unanchored sibling.
+    //
+    // Electing HERE removes the guesswork: placement is final (the tighten is
+    // the last span mutation and never moves track_position), so we can pick a
+    // crossing that demonstrably covers the block.  Determinism survives — the
+    // election is a pure function of the final placement, and among equally
+    // valid crossings the lowest segment index wins.
+    //
+    // Exactly one per block: anchoring all of them keeps phantom span for
+    // nothing (b44's pinned 6-segment TRUNK_H+MST realizes 4552 instead of
+    // 3510, +30%), anchoring none reopens the block.
+    //
+    // Each segment's list is PRUNED to its elected anchors, so downstream
+    // consumers (detailed NUTS) see exactly what was honored.
+    {
+        // (bundle, block) -> the elected (seg_idx, crossing)
+        std::map<std::pair<int,std::string>, std::pair<int, PassthruCrossing>> elected;
+        for (const auto& ts : segments) {
+            if (!ts.placed) continue;
+            for (const auto& pc : ts.passthru_spans) {
+                // Only a crossing whose segment ACTUALLY got seated inside the
+                // block can protect it.
+                if (ts.track_position < pc.perp_lo || ts.track_position > pc.perp_hi)
+                    continue;
+                auto key = std::make_pair(ts.bundle_id, pc.block);
+                auto it  = elected.find(key);
+                if (it == elected.end() || ts.seg_idx < it->second.first)
+                    elected[key] = {ts.seg_idx, pc};
+            }
+        }
+        for (auto& ts : segments) {
+            if (ts.passthru_spans.empty()) continue;
+            std::vector<PassthruCrossing> kept;
+            for (const auto& pc : ts.passthru_spans) {
+                auto it = elected.find({ts.bundle_id, pc.block});
+                if (it != elected.end() && it->second.first == ts.seg_idx)
+                    kept.push_back(pc);
+            }
+            ts.passthru_spans.swap(kept);
+        }
+    }
+
     for (auto& ts : segments) {
         if (!ts.placed) continue;
         double rmin =  std::numeric_limits<double>::infinity();
@@ -606,9 +635,9 @@ static void tighten_spans_to_reach(std::vector<TrackSegment>& segments,
         // lies beyond the outermost junction, and then this contraction does
         // not clip the crossing — it deletes it, opening the block with no
         // warning at any stage before check_dnuts (issue #496).
-        for (const auto& pt : ts.passthru_spans) {
-            rmin = std::min(rmin, pt.first);
-            rmax = std::max(rmax, pt.second);
+        for (const auto& pt : ts.passthru_spans) {   // elected anchors only
+            rmin = std::min(rmin, pt.along_lo);
+            rmax = std::max(rmax, pt.along_hi);
         }
         if (!std::isfinite(rmin) || !std::isfinite(rmax)) continue;  // nothing to reach
         const double cur_lo = std::min(ts.span_lo, ts.span_hi);
@@ -1332,8 +1361,10 @@ TrackSegment transform_track_segment(const TrackSegment& ts,
     if (perp_refl) out.net_pull = -ts.net_pull;
     for (double& f : out.busterm_faces) f = along(f);
     for (auto& p : out.passthru_spans) {          // a reflection swaps the ends
-        const double a = along(p.first), b = along(p.second);
-        p = {std::min(a, b), std::max(a, b)};
+        const double a = along(p.along_lo), b = along(p.along_hi);
+        p.along_lo = std::min(a, b);  p.along_hi = std::max(a, b);
+        const double c = perp(p.perp_lo), d = perp(p.perp_hi);
+        p.perp_lo  = std::min(c, d);  p.perp_hi  = std::max(c, d);
     }
     return out;
 }
@@ -1353,7 +1384,10 @@ TrackSegment offset_track_segment(const TrackSegment& ts, int dx, int dy,
     if (std::isfinite(out.track_lo_bound)) out.track_lo_bound += perp;
     if (std::isfinite(out.track_hi_bound)) out.track_hi_bound += perp;
     for (double& f : out.busterm_faces) f += along;
-    for (auto& p : out.passthru_spans) { p.first += along; p.second += along; }
+    for (auto& p : out.passthru_spans) {
+        p.along_lo += along;  p.along_hi += along;
+        p.perp_lo  += perp;   p.perp_hi  += perp;
+    }
     return out;
 }
 

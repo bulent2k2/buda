@@ -913,8 +913,8 @@ std::vector<BusSegment> make_bus_segments(
             const double p_lo = std::min(bs.span_lo, bs.span_hi);
             const double p_hi = std::max(bs.span_lo, bs.span_hi);
             for (const auto& pt : ts.passthru_spans) {
-                const double lo = std::max(pt.first,  p_lo);
-                const double hi = std::min(pt.second, p_hi);
+                const double lo = std::max(pt.along_lo, p_lo);
+                const double hi = std::min(pt.along_hi, p_hi);
                 if (lo <= hi) bs.passthru_spans.emplace_back(lo, hi);
             }
         }
