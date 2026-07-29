@@ -455,3 +455,50 @@ question, not a bookkeeping one.  A scoped settle (follower-closure of
 the moved set) is the next mechanical lever but carries identity risk;
 the round-repetition is the algorithmic one.  Both deferred until a
 real design (not an over-congested synthetic) motivates them.
+
+## Implemented — repair-round convergence guard (2026-07-29)
+
+The stalled-round question above, answered by measurement
+(`BUDA_REPAIR_TRACE`-style per-iteration trajectory: overlap count,
+pair/repack moves, placement hash):
+
+- On moderately congested designs the repeat rounds are a genuine
+  **staircase** — every round strictly reduces overlaps, all hashes
+  distinct — with sharply diminishing returns (synth7: 597 → 321 → 61 →
+  6 overlaps cleared per successive repack round).
+- On the heavily congested synthetic the staircase flattens into a true
+  **period-2 limit cycle**: two placements alternating with identical
+  hashes and overlaps frozen (e.g. `12b2… → a616… → 12b2… → a616…` at
+  17 981), burning ~0.5 s per wasted round until the 8-iteration cap —
+  in EVERY repair call once it flattens.
+
+**The guard exploits the loop's monotonicity.**  An accepted pair move
+strictly reduces the global overlap count (its delta-guard accepts only
+`< 0`) and a committed cluster repack is at worst globally neutral
+(`≤ 0`), so the count is monotone non-increasing — which means any
+state cycle must sit at CONSTANT overlaps, and a globally-neutral
+iteration is the necessary precursor of every cycle.  `repair_overlaps`
+now breaks on the FIRST iteration that cleared no overlap globally (one
+integer compare against the previous iteration's pair count — the loop
+already recounts at each iteration top).  The only theoretical cost is
+a neutral rearrangement that would have enabled a later improving
+sweep; never observed in any trajectory — every observed neutral round
+is followed only by more neutral rounds.
+
+**Gating: QoR corpus, not byte-identity** (a cycle's cap-exit parity
+can differ from its entry state, so final placements may legitimately
+differ).  `tools/qor_corpus.py` base (main) vs branch: **0 better, 0
+worse, 29 unchanged** on overlaps/unplaced/viol_bundles; one abstract-WL
+mover (rnr/mix2 +0.24%, endpoints still 0/0/0).  The corpus flow logs
+show exactly the expected footprint: bottomup drops 21 repeated
+"cluster repack: separated a 2-segment cluster" prints (the same tiny
+clusters were being re-separated in cycles), mix's single diff is
+inside a REJECTED negotiate trial (restored either way), everything
+else is byte-identical.  **Measured at scale**: the congested synthetic
+drops **79 → 69 s wall** (`run_nuts` 65 → 56 s) with the identical
+final overlap count — the guard removed only provably-wasted rounds.
+Fast/mid/slow tiers green.
+
+Still open from the corner-pass section: the scoped `settle_spans`
+(identity risk, ~0.5–1 s/repair call at scale) and P4 (parallel
+screening, likely not worth it) — both unchanged in priority.

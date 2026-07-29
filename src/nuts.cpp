@@ -645,9 +645,29 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
     // just that move is rolled back — earlier accepted moves are kept.
     int moved = 0;
     PlacementSnapshot pre_move;
+    // Global-progress convergence guard (repair-round measurement,
+    // docs/internal/rnr_runtime_parallelism.md): the loop's overlap count is
+    // MONOTONE non-increasing — an accepted pair move strictly reduces it
+    // (delta < 0) and a committed cluster repack is at worst globally
+    // neutral (delta <= 0, in-cluster strict drop) — so any state cycle
+    // must sit at CONSTANT overlaps, and a globally-neutral iteration is
+    // the necessary precursor of every cycle.  Measured on the congested
+    // synthetic: after the improving rounds the loop enters a period-2
+    // limit cycle (two placements alternating, identical hashes, zero
+    // overlap change, ~0.5 s per wasted round until the iteration cap).
+    // Breaking on the FIRST zero-reduction iteration ends every such cycle
+    // at its entry; the only theoretical cost is a neutral rearrangement
+    // that would have enabled a later improving sweep — never observed in
+    // any trajectory (corpus or synthetic; every observed neutral round is
+    // followed only by more neutral rounds), and gated on the QoR corpus
+    // rather than byte-identity since a cycle's cap-exit parity could
+    // differ from its entry state.
+    size_t prev_pairs = std::numeric_limits<size_t>::max();
     for (int iter = 0; iter < 8; ++iter) {
         auto pairs = find_overlaps(segments);
         if (pairs.empty()) break;
+        if (pairs.size() == prev_pairs) break;   // last round was globally
+        prev_pairs = pairs.size();               // neutral: cycle territory
         bool progress = false;
         for (auto [i, j] : pairs) {
             TrackSegment& a = segments[i];
