@@ -42,6 +42,14 @@ _RR_CLASS_MAX_TRIALS = 32           # hard trial budget per stall (the
 #                                     trials are the most expensive kind, so a
 #                                     many-class stall must not cost
 #                                     TOP_N x N_classes of them; issue #474)
+# Parallel stall sweep (rnr runtime P1, trial_sweep.cpp): evaluate the
+# deferred stall-certificate moves on C++ worker threads (GIL released) —
+# metrics implement the sequential fast-trial semantics exactly, and any
+# winning move is replayed through the sequential trial before committing.
+# `no_parallel_sweep` opts out; BUDA_SWEEP_THREADS caps the thread count
+# (0 = hardware concurrency).
+_RR_PARALLEL_SWEEP_DEFAULT = True
+
 _RR_RELEASE_MAX_TRIALS = 24         # release-pass hard trial budget per stall
 #                                     (same rationale: each locked-open
 #                                     instance costs up to 1 + _RR_CLASS_TOP_N

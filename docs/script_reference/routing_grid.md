@@ -29,7 +29,7 @@ Define the repeating track pattern for a layer. The pattern tiles from `origin` 
 Each `<type> <w> <sp>` triple defines one slot in the repeating unit. Slots are listed in order from low to high perpendicular position. The unit pitch is the sum of all `(w + sp)` values.
 
 **Notes:**
-- Each layer may have at most one global pattern. Calling `def_track_pattern` a second time on the same layer replaces the existing pattern.
+- Each layer may have at most one global pattern, defined **once**. Calling `def_track_pattern` a second time on the same layer is a **hard error** (it silently replaced the existing pattern before, dropping the earlier one) — use `add_grid_override` for a region-scoped pattern variation.
 - The `origin` should be consistent across layers and with the power-grid intent — mismatched origins produce phase drift across layers.
 - At least one `SIGNAL` slot is required for `run_detailed_nuts` to place any bit-wires.
 - Calling `run_detailed_nuts` without a defined pattern for a bus segment's layer causes that bus to be counted as unplaced.

@@ -151,6 +151,7 @@ set(SOURCE_FILES
     src/nuts_dogleg.cpp
     src/routing_grid.cpp
     src/detailed_nuts.cpp
+    src/trial_sweep.cpp
     src/floorplanner.cpp
     src/placement_optimizer.cpp
     # ── v3 ───────────────────────────────────────────────────────

@@ -31,6 +31,11 @@ Register a metal routing layer.
 - At least one H layer and one V layer must be defined before `run_planner`.
 - Multiple V layers (e.g. M3, M5, M7) are all considered by the global router; the planner assigns each segment to the layer that minimises its score.
 - The layer name is used by `run_nuts_on_layer`.
+- **Both the id and the name must be unique** — redefining either is a hard
+  error. A duplicate id would otherwise be silently ignored (`LayerStack`
+  keeps the first), and a reused name would silently clobber the name→id map
+  (last-wins), so a name-based lookup (`set_min_stub_length_layer`, the
+  `def_track_pattern` direction, …) would resolve to the wrong layer.
 
 **Example:**
 ```
@@ -65,7 +70,7 @@ margin calculations.
 
 | Argument | Type | Description |
 |---|---|---|
-| `name` | str | Instance name, e.g. `u_cpu`. Referred to in `add_net` pin names and `generate_topologies_for_bundle`. |
+| `name` | str | Instance name (must be unique), e.g. `u_cpu`. Referred to in `add_net` pin names and `generate_topologies_for_bundle`. Redefining a block name is a hard error — `Floorplan::add_block` would otherwise silently overwrite it (last-wins), moving/resizing the block or dropping one of two intended blocks. |
 | `x1 y1` | int | Lower-left corner (layout units) |
 | `x2 y2` | int | Upper-right corner (layout units) |
 | `rect x1 y1 x2 y2` | keyword | Multi-rect form: one candidate connection rectangle. Repeat for each rect. |
@@ -219,9 +224,14 @@ add_net <name> <pin1> <pin2>[,<pin3>…] inout
 
 Add a single net to the netlist.
 
+> **Net names must be unique.** `Netlist::add_net` only *appends*, so redefining
+> a name would silently create a second net (double-counted bits, or — with
+> different endpoints — two same-named bundles plus a clobbered endpoint map).
+> A duplicate name is therefore a **hard error** that stops the flow.
+
 | Argument | Type | Description |
 |---|---|---|
-| `name` | str | Net name. Used as a bundle hint key — the first net name in a bundle identifies the bundle in sidecar files and `generate_topologies_for_bundle`. |
+| `name` | str | Net name (must be unique). Used as a bundle hint key — the first net name in a bundle identifies the bundle in sidecar files and `generate_topologies_for_bundle`. |
 | `driver_pin` | str | Driver pin in `instance.port` form, e.g. `u_cpu.tx`. When `unknown` or `inout` is appended this is the first (positional) pin. |
 | `receiver_pins` | str | Comma-separated list of receiver pins (no spaces), e.g. `u_mem.rx` or `u_a.rx,u_b.rx`. |
 | `unknown` | keyword | Optional. Marks the net as having no known pin direction. All listed pins are stored in BDB with `dir="UNKNOWN"`. `run_hier_bundler` uses positional order as a last-resort fallback (after OUTPUT and INOUT checks). |
@@ -266,6 +276,11 @@ Convenience macro that expands to a sequence of `add_net` calls.
 |---|---|
 | `bu[4]` | `bu_0`, `bu_1`, `bu_2`, `bu_3` |
 | `bu[2:5]` | `bu_2`, `bu_3`, `bu_4`, `bu_5` |
+
+Each expanded bit name must be unique (see `add_net`): a bus that redefines any
+already-defined net — from another `add_bus`/`add_net`, or an overlapping index
+range — is a **hard error** naming the colliding bit(s). Building one bus in
+DISJOINT ranges (`b[0:1]` then `b[2:3]`) is fine.
 
 The driver and receiver pins are the same for every expanded net — this
 describes a parallel bus where every bit shares the same source and

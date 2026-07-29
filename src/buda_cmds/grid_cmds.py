@@ -20,6 +20,8 @@ Each handler takes (session, cmd, args, cmd_line) and is registered
 in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
+import sys
+
 import buda
 
 
@@ -47,6 +49,20 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
     pat = buda.TrackPattern(origin=origin, slots=slots)
     if session.routing_grid is None:
         session.routing_grid = buda.RoutingGridStack()
+    # A layer's global track pattern must be defined once.  define_layer silently
+    # OVERWRITES an existing pattern (last-wins), so a duplicate — e.g. two
+    # def_track_pattern lines for the same layer — silently drops the earlier one.
+    # Reject it (region-scoped variation is add_grid_override, not a re-def).
+    # Guard on the GLOBAL pattern actually being defined (non-empty slots), NOT
+    # on has_layer(): add_grid_override creates the layer map entry too, so an
+    # override BEFORE the global def would otherwise false-trip this — a valid
+    # ordering (init sets the global, keeping the earlier overrides).
+    elif (session.routing_grid.has_layer(layer_id) and
+          len(session.routing_grid.get_layer_grid(layer_id).global_pattern().slots) > 0):
+        print(f"Error: layer {layer_id} already has a track pattern — "
+              f"duplicate def_track_pattern (use add_grid_override for a "
+              f"region-scoped pattern)")
+        sys.exit(1)
 
     # Resolve layer direction.
     is_h = True

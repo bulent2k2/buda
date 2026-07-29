@@ -31,6 +31,14 @@ def cmd_add_block(session, cmd, args, cmd_line):
     # Single-rect: add_block <name> <x1> <y1> <x2> <y2> [corner_margin ...]
     # Multi-rect:  add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [corner_margin ...]
     name = args[0]
+    # Block names must be unique.  Floorplan::add_block silently OVERWRITES an
+    # existing block (last-wins), so a redefinition — or a typo'd name that
+    # collides with a real block — silently moves/resizes it or drops one of two
+    # intended blocks.  Reject it (like the duplicate add_net guard).
+    if session.fp.has_block(name):
+        print(f"Error: block '{name}' is already defined — "
+              f"duplicate add_block (block names must be unique)")
+        sys.exit(1)
     if len(args) > 1 and args[1].lower() == "rect":
         rects = []
         i = 1
@@ -312,6 +320,14 @@ def cmd_add_net(session, cmd, args, cmd_line):
     unknown_dir = (last_kw == "unknown")
     inout_dir   = (last_kw == "inout")
     name, drv_pin, rcv_str = args[0], args[1], args[2]
+    # A net name must be unique: Netlist::add_net only appends, so a redefinition
+    # silently creates a SECOND net of the same name (double-counted bits, or —
+    # with different endpoints — two same-named bundles plus a clobbered
+    # _net_endpoints entry).  Reject it, like the unknown-command guard.
+    if name in session._net_endpoints:
+        print(f"Error: net '{name}' is already defined — "
+              f"duplicate add_net (net names must be unique)")
+        sys.exit(1)
     rcv_pins = rcv_str.split(',')
     drv_inst = session._pin_instance(drv_pin)
     rcv_insts = [session._pin_instance(r) for r in rcv_pins]
@@ -365,6 +381,16 @@ def cmd_add_bus(session, cmd, args, cmd_line):
     if not (unknown_dir or inout_dir) and drv_inst in rcv_insts:
         print(f"Error: block '{drv_inst}' is used as both driver and receiver in bus '{prefix}'")
         sys.exit(1)
+    # Net names must be unique — reject a bus that redefines any already-defined
+    # bit (else Netlist::add_net silently doubles it).  Check the whole range
+    # BEFORE inserting any bit, so a collision leaves the netlist untouched.
+    dup = [f"{prefix}_{i}" for i in range(lo, hi + 1)
+           if f"{prefix}_{i}" in session._net_endpoints]
+    if dup:
+        shown = ", ".join(dup[:4]) + (" …" if len(dup) > 4 else "")
+        print(f"Error: bus '{prefix}' redefines already-defined net(s): {shown} — "
+              f"duplicate add_bus (net names must be unique)")
+        sys.exit(1)
     for i in range(lo, hi + 1):
         net_name = f"{prefix}_{i}"
         session.netlist.add_net(net_name, drv_pin, rcv_pins)
@@ -384,6 +410,20 @@ def cmd_def_layer(session, cmd, args, cmd_line):
     # TOP/LOW is optional; omitting it means non-TOP. LOW is accepted for
     # backward compatibility and treated as non-TOP.
     lid, name, dirstr = args[0], args[1], args[2]
+    # Layer id AND name must be unique.  LayerStack::add_layer silently keeps the
+    # FIRST layer for a duplicate id (the redefinition is dropped), while a reused
+    # NAME silently clobbers the name->id map (last-wins), so name-based lookups
+    # (set_min_stub_length_layer, def_track_pattern dir, …) resolve to the wrong
+    # layer.  Reject both (like the duplicate add_net guard).
+    if session.layers.has_layer(int(lid)):
+        print(f"Error: layer id {int(lid)} is already defined — "
+              f"duplicate def_layer (layer ids must be unique)")
+        sys.exit(1)
+    if name in session._layer_name_map:
+        print(f"Error: layer name '{name}' is already used by layer "
+              f"{session._layer_name_map[name]} — "
+              f"duplicate def_layer (layer names must be unique)")
+        sys.exit(1)
     rest = list(args[3:])
     if rest and rest[0].upper() in ("TOP", "LOW"):
         typestr = rest.pop(0).upper()

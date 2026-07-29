@@ -258,6 +258,16 @@ public:
     // Default off: run() is byte-identical unless explicitly enabled.
     void set_skip_doglegs(bool v) { skip_doglegs_ = v; }
 
+    // Per-layer solver threads inside one orientation-group sweep (rnr
+    // runtime P3).  Layers of one direction group are independent (alignment
+    // lookups are same-layer, junction preferences read only perpendicular —
+    // other-group — partners, occupancy is per layer), so a group's
+    // solve_layer calls may run concurrently with results identical to the
+    // sequential loop.  0 = auto (hardware concurrency, overridable via the
+    // BUDA_NUTS_THREADS env var); 1 = sequential.  parallel_sweep's workers
+    // set 1 — the move fan-out already owns the cores (no nested pools).
+    void set_layer_threads(int n) { layer_threads_ = n; }
+
     // Supply additional Hanan grid coordinates (e.g. segment endpoints outside
     // the floorplan bounding box) that the NUTSEngine should use when deriving
     // perpendicular intervals.  Must be called before run() / rerun_layer().
@@ -340,6 +350,7 @@ private:
     double track_pitch_ = 1.0;
     bool skip_tighten_ = false;            // fast-trial mode (see setter)
     bool skip_doglegs_ = false;            // screen mode (see setter)
+    int  layer_threads_ = 0;               // P3 group-solve threads (see setter)
     std::vector<int> extra_x_, extra_y_;   // additional grid points from CongestionPlanner
 
     // User keepouts plus implicit solid-leaf-cell keepouts on every non-TOP
