@@ -130,9 +130,15 @@ designs and fail LOUD, never silent:)*
    conflict). The fix space is therefore NOT healer moves: (a) a
    **measured-infeasibility uniformity break** — extend the
    `check_template_tracks on_mismatch independent` policy (which today
-   triggers only on track-PHASE mismatch) to also release an instance
-   whose copied routing is measured DNUTS-open, solving just that
-   instance individually while the aligned siblings keep the copy; (b)
+   triggers on PLAN-TIME track-pool differences vs the reference —
+   phase, missing/extra tracks, widths, absolute grid overrides,
+   keepout-carved windows; `_check_template_tracks`'s span-aware pool
+   comparison) to also release an instance whose pools MATCH but whose
+   copied routing is measured DNUTS-open anyway — the genuinely new
+   trigger here: bundle 166's conflict is dynamic (neighbors/occupancy
+   at that instance), invisible to any static pool comparison — solving
+   just that instance individually while the aligned siblings keep the
+   copy; (b)
    **move the occurrences to align better — the EXISTING, shipped
    solution**: `align_bottom_up` nudges the cell's instances onto a
    common track phase with minimal total movement, and the
@@ -153,6 +159,7 @@ designs and fail LOUD, never silent:)*
    simultaneously). (a) is the bounded, principled piece:
    it reuses the existing independent-policy machinery and fails LOUD
    into per-instance solving instead of silently stranding bits.
+8. **NUTS-side alignment pre-solve — the honest-books member (2) closer**
    (added 2026-07-20) — [`wishlist-planner.md`](wishlist-planner.md) →
    *"The NUTS-side alignment pre-solve"*. `charge_pull_target` predicts 3 of
    NUTS's 4 placement members (pull target L1, junction anchor L2); the last,
