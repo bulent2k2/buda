@@ -344,3 +344,61 @@ end-to-end decision-line diff on the real mix2 bottom-up vehicle).
 Remaining from the ranked plan: P3 (per-layer solver threads) and P4
 (parallel screening), both deferred to a larger-corpus measurement
 where the solve itself dominates.
+
+## Implemented — P3: per-layer threads in the orientation sweep (2026-07-29)
+
+`orientation_fixpoint`'s group solve (`solve_group`) now runs the
+per-layer `solve_layer` calls of one orientation group on worker
+threads.  Safety was established by audit, not assumption: a
+`LayerSolver` reads/writes only its own layer's segments — alignment
+siblings resolve through the SAME-LAYER map, the junction-anchored
+preference reads only PERPENDICULAR partners (the other group, quiescent
+during this group's sweep; the partner loop's direction check was moved
+ahead of its `placed` read so a same-direction partner's mutable fields
+are never touched from a worker), occupancy/keepouts/constraints are per
+layer, and neither ctx nor engine state is written — so the parallel
+group solve is **result-identical to the sequential loop by
+construction** (pinned by `test_nuts_layer_threads.py`, which forces the
+threaded path on a small design and asserts placement equality).
+
+Controls: `NUTSEngine::set_layer_threads(n)` (1 = sequential — what
+`parallel_sweep`'s workers set, the move fan-out already owns the
+cores), `BUDA_NUTS_THREADS` env, auto = hardware concurrency behind a
+**size gate**: auto threads only when the group's parallelizable work
+remainder — Σ segs² over its non-largest layers, the O(segs²)
+placement-occupancy proxy for everything that can overlap the heaviest
+layer — is worth a spawn (≈ two 256-seg layers).  An explicit thread
+count bypasses the gate.  The gate affects speed only (results identical
+either way), so it needs no byte-identity guard.
+
+**Measured — the honest verdict is that the P2-era stake is gone:**
+
+- **Corpus (mix2 vehicles, bigHalf, big2, tc3a): no stake left.**  P1
+  moved the dominant trial volume into `parallel_sweep` (whose workers
+  solve sequentially — the right grain), leaving residual sequential
+  `fixpoint` buckets of 0.03–0.9 s per flow.  Ungated threads actively
+  REGRESSED them (bottomup 0.82 → 1.07 s — spawn cost vs ~ms solves);
+  with the gate every corpus flow takes the sequential path and is
+  byte-identical AND perf-neutral vs pre-P3.
+- **At scale the sweep is real but Amdahl-bounded.**  On a synthetic
+  3813-segment 6-layer design (1400 buses, heavily congested) the gate
+  engages and `run_nuts` drops 199.4 → 194.9 s — the fixpoint bucket's
+  parallelizable remainder (13.5 s total, groups of 3) — with
+  byte-identical output.  Two structural limits cap the win: (a) the
+  planner concentrates load on the lowest TOP layer (measured group
+  skew 553/245/180 segs), so the heaviest layer dominates the group and
+  parallel wall ≈ max(layer); (b) at scale the solve is dominated by
+  passes P3 does not touch — `corner` 121 s + `repair` 50 s vs
+  `fixpoint` 13.5 s on that synthetic.
+- **Follow-up candidate (new):** the `corner` pass (the
+  corner-overlap resolution loop — repeated dirty-layer re-solves +
+  `repair_overlaps` per accepted iteration) is the true at-scale
+  hotspot.  Its dirty-layer loop can mix directions, so it is NOT
+  trivially parallel; any attack on it is an algorithmic item
+  (incremental re-solve, bounded repair), not a threading one.
+
+Net: P3 lands as cheap, provably-identical machinery that auto-engages
+on heavy balanced groups and stays out of the way everywhere else.  P4
+(parallel screening) remains deferred — same reasoning as P3's corpus
+verdict: the screen bucket is ~1.2–1.6 s and already amortized by the
+P1 sweep's deferral flow.

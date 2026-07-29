@@ -175,6 +175,7 @@ SweepOutcome eval_move(const std::vector<BundleWrapper>& baseline,
     w->plan.seg_perp   = asn->seg_perp;
     NUTSEngine nuts(fp, layers);
     nuts.set_track_pitch(pitch);
+    nuts.set_layer_threads(1);   // the move fan-out owns the cores (P3 nests off)
     nuts.set_skip_tighten(!stage_b && skip_tighten_a);
     if (!fixed_segs.empty()) nuts.add_fixed_segments(fixed_segs);
     nuts.set_extra_grid_points(extra_x, extra_y);

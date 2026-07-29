@@ -19,14 +19,17 @@
 #include "nuts_dogleg.h"
 #include "conn_topology.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <numeric>
 #include <set>
+#include <thread>
 
 namespace buda {
 
@@ -1813,9 +1816,14 @@ private:
                                         : (ts->interval_lo + ts->interval_hi) / 2.0;
                     for (const auto& sc : jit->second) {
                         auto pj = jn_segs.find({sc.src_bid, sc.src_si});
-                        if (pj == jn_segs.end() || !pj->second->placed) continue;
+                        if (pj == jn_segs.end()) continue;
                         const TrackSegment* pt = pj->second;
+                        // Direction check FIRST (horiz is immutable): a
+                        // same-direction partner may be mid-solve on another
+                        // thread of the same orientation group (P3), so its
+                        // mutable placed/track fields must not be read.
                         if (pt->horiz == ts->horiz) continue;   // partners are perpendicular
+                        if (!pt->placed) continue;
                         const double plo = std::min(pt->span_lo, pt->span_hi);
                         const double phi = std::max(pt->span_lo, pt->span_hi);
                         if (base >= plo && base <= phi) break;  // already covered: keep base
@@ -2201,13 +2209,94 @@ void NUTSEngine::orientation_fixpoint(
     // Solve every layer in a group (reset first — GLOBAL re-solve), then
     // propagate the freshly-pinned trunk positions to all connected spans so the
     // perpendicular group packs against true (already-stretched) extents.
-    auto solve_group = [&](const std::vector<int>& group) {
+    //
+    // P3 (rnr runtime): the group's per-layer solves are INDEPENDENT — a
+    // LayerSolver reads/writes only its own layer's segments (alignment
+    // siblings resolve through the same-layer map, the junction preference
+    // reads only perpendicular partners, whose group is not being solved,
+    // and occupancy/keepouts/constraints are per layer) — so with 2+
+    // populated layers they run on worker threads with results identical to
+    // the sequential loop.  Thread budget: set_layer_threads > 0 wins (an
+    // EXPLICIT count > 1 also bypasses the size gate below), else
+    // BUDA_NUTS_THREADS (same bypass), else hardware concurrency; 1 =
+    // sequential (parallel_sweep's workers pass 1 — the move fan-out owns
+    // the cores).  Exception-safe construction as in trial_sweep.cpp:
+    // started workers are kept and joined, zero started workers fall back
+    // to inline.
+    //
+    // SIZE GATE (auto mode only): a layer solve on the current corpus is
+    // ~ms — spawning threads for it costs more than it saves (measured:
+    // mix2_fast_bottomup's residual sequential fixpoint bucket 0.82 ->
+    // 1.07 s with unconditional threads).  The win is also Amdahl-bounded
+    // by the group's HEAVIEST layer (the planner concentrates load on the
+    // lowest TOP layer, so real groups are skewed — e.g. 553/245/180 segs):
+    // parallel wall = max(layer) while sequential = sum, so the profit is
+    // exactly the work OUTSIDE the heaviest layer.  Auto therefore threads
+    // only when that parallelizable remainder — Σ segs² over the group's
+    // non-largest layers, the O(segs²) placement-occupancy proxy — is worth
+    // a spawn (kP3MinParallelWork ≈ two 256-seg layers).  The gate affects
+    // SPEED only — parallel and sequential group solves produce identical
+    // placements (independence above), so the threshold needs no
+    // byte-identity guard.
+    constexpr double kP3MinParallelWork = 131072.0;   // ≈ 2 × 256²
+    int  nuts_threads = layer_threads_;
+    bool gate_bypassed = nuts_threads > 1;
+    if (nuts_threads <= 0) {
+        if (const char* e = std::getenv("BUDA_NUTS_THREADS")) {
+            nuts_threads = std::atoi(e);
+            gate_bypassed = nuts_threads > 1;
+        }
+        if (nuts_threads <= 0) {
+            unsigned hw = std::thread::hardware_concurrency();
+            nuts_threads = hw ? (int)hw : 1;
+        }
+    }
+    auto group_is_heavy = [&](const std::vector<int>& group) {
+        double total = 0.0, largest = 0.0;
         for (int lid : group) {
-            for (auto* ts : by_layer[lid]) {
-                ts->track_position = std::numeric_limits<double>::quiet_NaN();
-                ts->placed = false;
+            auto lit = by_layer.find(lid);
+            if (lit == by_layer.end()) continue;
+            const double w = (double)lit->second.size()
+                           * (double)lit->second.size();
+            total += w;
+            largest = std::max(largest, w);
+        }
+        return total - largest >= kP3MinParallelWork;
+    };
+    auto solve_group = [&](const std::vector<int>& group) {
+        const int nt = std::min<int>(nuts_threads, (int)group.size());
+        if (nt <= 1 || group.size() < 2 ||
+            (!gate_bypassed && !group_is_heavy(group))) {
+            for (int lid : group) {
+                for (auto* ts : by_layer[lid]) {
+                    ts->track_position = std::numeric_limits<double>::quiet_NaN();
+                    ts->placed = false;
+                }
+                solve_layer(by_layer[lid], ctx, cons_for(lid));
             }
-            solve_layer(by_layer[lid], ctx, cons_for(lid));
+        } else {
+            std::atomic<size_t> next{0};
+            auto worker = [&]() {
+                for (size_t i = next.fetch_add(1); i < group.size();
+                     i = next.fetch_add(1)) {
+                    auto lit = by_layer.find(group[i]);  // const lookup only:
+                    if (lit == by_layer.end()) continue; // no concurrent op[]
+                    for (auto* ts : lit->second) {
+                        ts->track_position =
+                            std::numeric_limits<double>::quiet_NaN();
+                        ts->placed = false;
+                    }
+                    solve_layer(lit->second, ctx, cons_for(group[i]));
+                }
+            };
+            std::vector<std::thread> pool;
+            pool.reserve(nt - 1);
+            try {
+                for (int t = 0; t < nt - 1; ++t) pool.emplace_back(worker);
+            } catch (const std::system_error&) {
+            }
+            worker();                       // this thread is a worker too
+            for (auto& th : pool) th.join();
         }
         settle_spans(segments, ctx);
     };
