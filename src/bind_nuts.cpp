@@ -24,6 +24,7 @@
 #include <pybind11/stl_bind.h>
 #include "conn_topology.h"
 #include "nuts.h"
+#include "nuts_geom.h"
 #include "routing_grid.h"
 #include "detailed_nuts.h"
 #include "verify.h"
@@ -439,6 +440,23 @@ void bind_nuts(py::module_& m) {
           },
           py::arg("bundles"), py::arg("nuts_result"), py::arg("floorplan"),
           py::arg("bit_order") = "LO_HI");
+
+    // ── Test support: overlap-delta exactness probes (corner-pass work) ──
+    // The repair/repack accept guards replaced their per-move full
+    // find_overlaps recounts with overlap_delta_vs; these two hooks let the
+    // test suite pin the identity  delta == count(after) − count(before)
+    // on arbitrary segment sets (test_overlap_delta.py).
+    m.def("_find_overlap_count",
+          [](const std::vector<TrackSegment>& segs) {
+              return find_overlaps(segs).size();
+          });
+    m.def("_overlap_delta_vs",
+          [](const std::vector<TrackSegment>& before,
+             const std::vector<TrackSegment>& after) {
+              PlacementSnapshot snap;
+              snap.take(before);
+              return overlap_delta_vs(after, snap);
+          });
 
     // ── Parallel trial sweep (rnr runtime P1, trial_sweep.h) ─────────────
     // Evaluate k ('idx', tidx) ripup moves against the committed baseline on

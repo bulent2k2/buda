@@ -629,6 +629,16 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
         return it == net_pull_map.end() ? 0 : it->second;
     };
 
+    // Per-layer segment index, built once: a victim's occupancy can only
+    // come from same-layer segments (occupancy_from filters on layer), so
+    // the per-move occ build scans one layer's list instead of the whole
+    // design (identical occ set — the appended intervals are sorted before
+    // use, so iteration order is immaterial).  Layers never change during
+    // the repair, so one build serves every iteration.
+    std::map<int, std::vector<const TrackSegment*>> segs_by_layer;
+    for (const auto& ts : segments)
+        segs_by_layer[ts.layer].push_back(&ts);
+
     // Per-move snapshot: a move re-adjusts follower spans globally, so a
     // locally good move can surface overlaps elsewhere.  Each move is
     // accepted only if the global overlap count strictly drops; otherwise
@@ -665,9 +675,9 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
 
             std::vector<std::pair<double,double>> occ;
             keepout_occupied(kozs, victim, occ);
-            for (const auto& o : segments) {
-                if (&o == victim) continue;
-                occupancy_from(*victim, o, occ);
+            for (const TrackSegment* o : segs_by_layer[victim->layer]) {
+                if (o == victim) continue;
+                occupancy_from(*victim, *o, occ);
             }
             std::sort(occ.begin(), occ.end());
 
@@ -697,12 +707,17 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
                                        victim->width, occ, preferred);
             if (std::isnan(pos) || pos == victim->track_position) continue;
 
-            const size_t before = find_overlaps(segments).size();
             pre_move.take(segments);
             victim->track_position = pos;
             // Settle followers of the moved segment (and theirs, cheaply).
             settle_spans(segments, ctx);
-            if (find_overlaps(segments).size() >= before) {
+            // Accept guard on the overlap-count DELTA vs the pre-move
+            // snapshot (overlap_delta_vs: pairs with both endpoints
+            // unchanged cancel, so only the victim + settle-touched
+            // segments are evaluated).  after >= before ⟺ delta >= 0 —
+            // identical verdict to the former two full find_overlaps
+            // sweeps per move, the repair loop's dominant cost at scale.
+            if (overlap_delta_vs(segments, pre_move) >= 0) {
                 pre_move.restore(segments);   // this move made things no better
                 continue;
             }
@@ -1648,6 +1663,33 @@ private:
                      < (b->interval_hi - b->interval_lo) - b->width;
             });
 
+        // Per-member BASE occupancy (keepouts + placed non-members whose
+        // spans overlap), memoized LAZILY on first use: it is invariant
+        // across the two pack modes below — non-members do not move during
+        // a pack, and member positions never enter it (member_set is
+        // skipped; the already-repacked members are appended separately per
+        // pack) — so the dense fallback reuses the pull-aware pack's scans
+        // (the repack's dominant O(members × layer) term).  Lazy, not
+        // eager: the all-or-nothing pack (placement-time try_repack) aborts
+        // at the first infeasible member, and an upfront build for members
+        // it never reaches was a measured net LOSS on the fixpoint path.
+        std::vector<std::vector<std::pair<double,double>>> base_occ(
+            members.size());
+        std::vector<char> occ_built(members.size(), 0);
+        auto base_of = [&](size_t k)
+                -> const std::vector<std::pair<double,double>>& {
+            if (!occ_built[k]) {
+                TrackSegment* m = members[k];
+                add_keepout_occ(m, base_occ[k]);
+                for (const TrackSegment* o : segs) {
+                    if (member_set.count(o)) continue;
+                    occupancy_from(*m, *o, base_occ[k]);
+                }
+                occ_built[k] = 1;
+            }
+            return base_occ[k];
+        };
+
         // Pack the members in deadline order.  In pull-aware mode each member
         // seeks its own pull target (pull_map) — so a phase-1 anchor swept into a
         // repack keeps its pull instead of being bottom-edged — while pull-free
@@ -1657,7 +1699,8 @@ private:
         auto pack = [&](bool pull_aware)
                     -> std::vector<std::pair<TrackSegment*,double>> {
             std::vector<std::pair<TrackSegment*,double>> repacked;
-            for (TrackSegment* m : members) {
+            for (size_t k = 0; k < members.size(); ++k) {
+                TrackSegment* m = members[k];
                 // Committed cross-layer split bounds (corner resolution) are
                 // hard CENTER bounds — clamp the member's window so a repair-
                 // time repack can never move a bounded trunk across its split.
@@ -1667,15 +1710,10 @@ private:
                     w_lo = std::max(w_lo, m->track_lo_bound - m->width / 2.0);
                 if (m->track_hi_bound < kInf)
                     w_hi = std::min(w_hi, m->track_hi_bound + m->width / 2.0);
-                std::vector<std::pair<double,double>> occ;
-                add_keepout_occ(m, occ);
-                // Placed segments outside the repack set (including ones whose
-                // sweep interval already ended) that overlap m's span.
-                // Same-bundle segments never conflict (bits may share tracks).
-                for (const TrackSegment* o : segs) {
-                    if (member_set.count(o)) continue;
-                    occupancy_from(*m, *o, occ);
-                }
+                // Keepouts + placed segments outside the repack set that
+                // overlap m's span (same-bundle never conflicts): the cached
+                // base occupancy from above.
+                std::vector<std::pair<double,double>> occ = base_of(k);
                 for (const auto& [pm, ppos] : repacked) {
                     if (pm->bundle_id == m->bundle_id) continue;
                     // Members conflict only where their spans overlap — same
@@ -2067,6 +2105,14 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
         });
 
     const LayerConstraints no_cons;   // named: LayerSolver stores references
+
+    // Per-layer segment lists, built once in segment-index order — exactly
+    // the order the former per-cluster full scan produced, so LayerSolver
+    // sees an identical sequence; layers never change during the repack.
+    std::map<int, std::vector<TrackSegment*>> segs_of_layer;
+    for (auto& ts : segments)
+        segs_of_layer[ts.layer].push_back(&ts);
+
     int moved = 0;
     for (const auto& cluster : clusters) {
         const int layer = segments[cluster[0]].layer;
@@ -2085,9 +2131,7 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
         if (sumw + (double)(cluster.size() - 1) * track_pitch > hi - lo)
             continue;   // over-capacity: not a packing problem
 
-        std::vector<TrackSegment*> layer_segs;
-        for (auto& ts : segments)
-            if (ts.layer == layer) layer_segs.push_back(&ts);
+        std::vector<TrackSegment*>& layer_segs = segs_of_layer[layer];
 
         // Two attempts per cluster, each individually guarded:
         //   narrow — the cluster members only (least collateral: neighbours
@@ -2112,11 +2156,16 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
 
         // In-cluster overlap count: pairs whose BOTH endpoints are cluster
         // members (indexes into `segments` are stable across the repack).
-        std::set<int> cset(cluster.begin(), cluster.end());
+        // Counted DIRECTLY over the member pairs — find_overlaps emits
+        // exactly the segs_overlap-true pairs, so filtering a global sweep
+        // to cset and testing the m² member pairs are the same count, at
+        // O(m²) instead of a full-design sweep per call.
         auto in_cluster_ov = [&]() {
             size_t n = 0;
-            for (auto [i, j] : find_overlaps(segments))
-                if (cset.count(i) && cset.count(j)) ++n;
+            for (size_t x = 0; x < cluster.size(); ++x)
+                for (size_t y = x + 1; y < cluster.size(); ++y)
+                    if (segs_overlap(segments[cluster[x]],
+                                     segments[cluster[y]])) ++n;
             return n;
         };
 
@@ -2129,7 +2178,6 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
         }
 
         for (const auto& members : {narrow, wide}) {
-            const size_t ov_before = find_overlaps(segments).size();
             const size_t ic_before = in_cluster_ov();
             const int    vi_before = count_violations(segments);
             PlacementSnapshot snap;
@@ -2143,7 +2191,12 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
             // overlap for collateral elsewhere (follower spans stretch), which
             // the caller's next single-victim sweep cleans up; the pass-level
             // non-regression snapshot in repair_overlaps backstops the total.
-            if (find_overlaps(segments).size() > ov_before ||
+            // The world-does-not-get-worse term is the overlap-count DELTA
+            // vs the pre-attempt snapshot (after > before ⟺ delta > 0 —
+            // overlap_delta_vs cancels every pair both of whose endpoints
+            // are unchanged), replacing the two full find_overlaps sweeps
+            // this guard cost per attempt — the corner-pass hotspot.
+            if (overlap_delta_vs(segments, snap) > 0 ||
                 in_cluster_ov() >= ic_before ||
                 count_violations(segments) > vi_before) {
                 snap.restore(segments);     // repack made things no better
