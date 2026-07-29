@@ -20,6 +20,7 @@
 #include "layering.h"
 #include "nuts.h"
 #include "detailed_nuts.h"
+#include <set>
 #include <string>
 #include <vector>
 
@@ -105,6 +106,20 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
 // no feedthru is declared or the graph is not split.
 bool disconnected_islands_bridged(const ConnTopology& ct, const Topology& topo,
                                   const Floorplan& fp);
+
+// How `cs` is attached to the rest of the route — the ANTENNA predicate's
+// working set, exposed so the generator's own gates test the SAME property the
+// checker reports instead of re-deriving it (the #483 review found a
+// hand-rolled conn-RECORD count drifting from this; issue #485 found a second
+// copy in the seed-trunk gate).  `count() < 2` IS the antenna condition.
+struct SegAttachment {
+    std::set<int>         positions;  // distinct busterm face coords + junction at_pos
+    std::set<std::string> through;    // connected blocks the segment merely crosses
+    int n_busterm = 0, n_seg = 0;     // raw record counts, for reporting only
+    int count() const { return (int)(positions.size() + through.size()); }
+};
+SegAttachment seg_attachment(const ConnSeg& cs, const Topology& topo,
+                             const Floorplan& fp);
 
 // NUTS-level check: same topology structure but positions from TrackSegments.
 // Includes block-coverage check for pass-through blocks at placed positions,

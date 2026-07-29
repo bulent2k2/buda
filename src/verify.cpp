@@ -268,6 +268,30 @@ static std::vector<int> island_roots(const std::vector<ConnSeg>& segs)
 // same detector answers at every placed stage.  DISCONNECTED is the
 // complementary global property (the graph splits); an antenna keeps the graph
 // connected, it just hangs off it.
+SegAttachment seg_attachment(const ConnSeg& cs, const Topology& topo,
+                             const Floorplan& fp)
+{
+    SegAttachment a;
+    // Distinct attachment POSITIONS along this segment (conn records at one
+    // physical point count once) ...
+    for (const auto& c : cs.conns) {
+        if (c.kind == SegConn::BUSTERM) { ++a.n_busterm; a.positions.insert(c.face_coord); }
+        else                            { ++a.n_seg;     a.positions.insert(c.at_pos); }
+    }
+    // ... plus every connected block this segment merely CROSSES (a
+    // pass-through joint, which carries no conn record).
+    for (const auto& bname : topo.connected_block_names) {
+        auto rects = fp.get_block_rects(bname);
+        if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        for (const Rect& r : rects)
+            if (seg_spans_rect(cs, (double)cs.perp_pos, r)) {
+                a.through.insert(bname);
+                break;
+            }
+    }
+    return a;
+}
+
 static void detect_antennas(const std::vector<ConnSeg>& segs,
                             const Topology& topo, const Floorplan& fp,
                             int bundle_id, const char* stage,
@@ -279,27 +303,8 @@ static void detect_antennas(const std::vector<ConnSeg>& segs,
     if (n < 2) return;
     for (int i = 0; i < n; ++i) {
         const ConnSeg& cs = segs[i];
-        // Distinct attachment POSITIONS along this segment (conn records at
-        // one physical point count once) ...
-        std::set<int> at;
-        int n_bt = 0, n_seg = 0;
-        for (const auto& c : cs.conns) {
-            if (c.kind == SegConn::BUSTERM) { ++n_bt;  at.insert(c.face_coord); }
-            else                            { ++n_seg; at.insert(c.at_pos); }
-        }
-        // ... plus every connected block this segment merely CROSSES (a
-        // pass-through joint, which carries no conn record).
-        std::set<std::string> through;
-        for (const auto& bname : topo.connected_block_names) {
-            auto rects = fp.get_block_rects(bname);
-            if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
-            for (const Rect& r : rects)
-                if (seg_spans_rect(cs, (double)cs.perp_pos, r)) {
-                    through.insert(bname);
-                    break;
-                }
-        }
-        if (at.size() + through.size() >= 2) continue;
+        const SegAttachment a = seg_attachment(cs, topo, fp);
+        if (a.count() >= 2) continue;
         ConnViolation v;
         v.kind      = ViolationKind::ANTENNA;
         v.bundle_id = bundle_id;
@@ -308,10 +313,10 @@ static void detect_antennas(const std::vector<ConnSeg>& segs,
         msg << "Segment " << i << " (" << (cs.horiz ? "H" : "V")
             << " along [" << cs.along_lo << "," << cs.along_hi
             << "] @ " << cs.perp_pos << ") attaches to the route at "
-            << (at.size() + through.size()) << " point(s) ("
-            << n_bt << " busterm, " << n_seg << " seg, "
-            << through.size() << " pass-through)";
-        if (!at.empty()) msg << " at along=" << *at.begin();
+            << a.count() << " point(s) ("
+            << a.n_busterm << " busterm, " << a.n_seg << " seg, "
+            << a.through.size() << " pass-through)";
+        if (!a.positions.empty()) msg << " at along=" << *a.positions.begin();
         msg << " — a dangling 'antenna' wire: the rest of it terminates in "
                "nothing (" << stage << ")";
         v.message = msg.str();
