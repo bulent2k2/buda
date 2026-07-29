@@ -20,6 +20,7 @@
 #include "conn_topology.h"
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -728,9 +729,51 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
     // just that move is rolled back — earlier accepted moves are kept.
     int moved = 0;
     PlacementSnapshot pre_move;
+    // Repeated-state convergence guard (repair-round measurement,
+    // docs/internal/rnr_runtime_parallelism.md): measured on the congested
+    // synthetic, once the improving rounds flatten the loop enters a
+    // period-2 limit cycle — two placements alternating with overlaps
+    // frozen, ~0.5 s per wasted round until the iteration cap, in every
+    // repair call.  The loop is deterministic and memoryless (each
+    // iteration is a pure function of `segments` — ctx/constraints are
+    // immutable here), so revisiting an EXACT placement state can only
+    // replay the same trajectory forever; breaking on the first repeat is
+    // provably lossless.  Deliberately NOT a break on a merely-neutral
+    // round: the cluster repack's contract explicitly allows a globally
+    // neutral commit (in-cluster drop, collateral elsewhere) that the NEXT
+    // single-victim sweep cleans up — a neutral round reaches that sweep,
+    // and only an exact state repeat (bitwise placed/track/span words,
+    // compared element-wise) ends the loop (Codex #507).  Still
+    // QoR-gated rather than
+    // byte-identity: a cycle's cap-exit parity can differ from its
+    // first-repeat state.
+    // The comparison is the FULL bitwise state, not a hash: a hash
+    // collision would declare a false repeat and cut off exactly the
+    // neutral-rearrangement sweep the guard exists to preserve (Codex
+    // #507 P2).  The loop is capped at 8 iterations, so storing ≤ 8
+    // states and comparing element-wise is microseconds against the
+    // solves.
+    auto state_of = [&]() {
+        std::vector<unsigned long long> v;
+        v.reserve(segments.size() * 3);
+        for (const auto& ts : segments) {
+            v.push_back(ts.placed
+                ? std::bit_cast<unsigned long long>(ts.track_position)
+                : 0x517EULL);
+            v.push_back(std::bit_cast<unsigned long long>(ts.span_lo));
+            v.push_back(std::bit_cast<unsigned long long>(ts.span_hi));
+        }
+        return v;
+    };
+    std::vector<std::vector<unsigned long long>> seen_states;
     for (int iter = 0; iter < 8; ++iter) {
         auto pairs = find_overlaps(segments);
         if (pairs.empty()) break;
+        auto st = state_of();
+        if (std::find(seen_states.begin(), seen_states.end(), st)
+                != seen_states.end())
+            break;                    // exact repeat: deterministic cycle
+        seen_states.push_back(std::move(st));
         bool progress = false;
         for (auto [i, j] : pairs) {
             TrackSegment& a = segments[i];
