@@ -1,5 +1,17 @@
 # ==========================================
-# BUDA Demo: L, Z, and U Topologies
+# Comprehensive-flow REGRESSION fixture (frozen)
+# ==========================================
+# Frozen snapshot of demo/comprehensive_demo.buda as of the point its
+# end-to-end counts were pinned by the tests below.  Kept SEPARATE from the
+# live demo so demo/comprehensive_demo.buda is free to be tweaked for
+# demonstrations without breaking these regression asserts.  Do not edit for
+# demo purposes — edit the demo instead.
+#
+# Pinned by:
+#   test/tests/test_flow_scripts.py::test_comprehensive_regression
+#       5 hbundles, 26 NUTS segments, 153 detailed-NUTS bits, all clean
+#   test/tests/test_planner_charge_pull_target.py::test_level2_junction_prediction_heals_demo_b3
+#       bundle id 3 == the b3 keepout-strand (TRUNK_V+MST@x285 candidate)
 # ==========================================
 
 # 1. Define Layers (for channel routing only: M2=H, M3=V, over the blocks: M4=H, M5=V, long-haul trunks: M6=H M7=V)
@@ -36,15 +48,6 @@ add_net n2 u_io_src.tx u_io_dst.rx,u_noc_b.rx,u_noc_a.rx,u_gpu.rx
 # This stays alone
 add_net n3 u_io_src.tx u_io_dst.rx,u_noc_b.rx,u_noc_a.rx,u_gpu.rx,u_disp.rx
 
-# Add some more to see different topologies (no need for pin names)
-add_bus c1[8] u_cpu u_gpu
-add_bus c2[8] u_cpu u_io_src
-add_bus c3[8] u_cpu u_gpu,u_io_src
-add_bus c4[8] u_gpu u_io_dst
-add_bus c5[8] u_gpu u_disp
-add_bus c6[16] u_gpu u_io_dst
-add_bus c7[4] u_io_src u_disp
-
 # Wide obstacle between them forces a U-shape (except for M7 vertical)
 # Try re-running after changing M5 with M7:
 add_keepout 320 420 700 600 M4 M5 M6
@@ -61,7 +64,7 @@ generate_topologies
 set_track_pitch 2.0
 
 # Run the planner (uses mock selection based on 'b2_'/'b3_' hints)
-run_planner
+run_planner 5
 
 # Non-Uniform Track Sharing: assign actual perpendicular track positions
 # per layer so that no two buses with overlapping spans collide.
@@ -69,9 +72,6 @@ run_planner
 # the set_track_pitch above so the planner and NUTS agree (run_nuts with no arg
 # would also reuse that pitch).
 run_nuts 2.0
-
-check_design # Look for opens, shorts, antennas
-report_wl    # Wirelength info on bus/bundle segments
 
 # Run the Detailed NUTS engine for placement of every bit on every segment on every bus/bundle and the vias:
 
@@ -85,8 +85,3 @@ def_track_pattern 6 -400  POWER 3 1  SIGNAL 1 1  SIGNAL 1 1 SIGNAL 1 1  SIGNAL 1
 def_track_pattern 7 -600  POWER 6 2  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  GROUND 6 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
 
 run_detailed_nuts
-
-check_design # Look for opens, shorts, antennas
-report_wl    # Wirelength info on wires/bits
-
-visualize

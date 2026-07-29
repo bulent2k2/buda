@@ -172,18 +172,23 @@ def test_global_pass_heals_under_knob():
 
 
 def _demo(level):
-    """demo/comprehensive_demo.buda with the knob at the given level.
+    """flow/comprehensive_regression.buda with the knob at the given level.
+
+    A FROZEN snapshot of demo/comprehensive_demo.buda: the b3 keepout-strand
+    repro depends on bundle id 3 being the b3 net with a strand-forming MST leg,
+    so it reads the frozen fixture (not the live demo, which is free to be
+    tweaked for demonstrations and would otherwise dislodge bundle 3).
 
     Bundle 3 is pinned BY CONTENT to the strand-forming `TRUNK_V+MST@x285`
     candidate (what the planner auto-selects from today's default pool), so the
-    b3 keepout-strand repro below survives candidate-pool growth under a
-    different generation default (e.g. the `hanan_loci` flip): the repro is a
-    property of that candidate's MST-leg geometry, not of its pool index.
-    Under today's default the pin matches the planner's own choice."""
+    repro also survives candidate-pool growth under a different generation
+    default (e.g. the `hanan_loci` flip): it is a property of that candidate's
+    MST-leg geometry, not of its pool index.  Under today's default the pin
+    matches the planner's own choice."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     pinned = False
-    with open("demo/comprehensive_demo.buda") as f:
+    with open("flow/comprehensive_regression.buda") as f:
         for raw in f:
             line = raw.strip()
             if not line or line.startswith("#") or line.startswith("visualize"):
