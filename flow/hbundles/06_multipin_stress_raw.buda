@@ -13,6 +13,11 @@
 # longer exercise stage-b — this twin preserves the "enters ripup
 # with opens, ripup drives them down" scenario. Intentionally NOT
 # clean; do not add it to the QoR corpus or any assert_clean list.
+#
+# qor-exclude: this marker keeps the flow out of qor_gentopo_sweep's
+#   auto-discovered corpus (tools/qor_gentopo_sweep.py::corpus) — it
+#   runs run_detailed_nuts and lives in an auto-globbed dir, but is a
+#   test fixture with deliberate residual opens, not a benchmark.
 # ============================================================
 
 source ../tracks/tracks.buda

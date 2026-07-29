@@ -86,14 +86,23 @@ _SKIP = {"visualize", "visualize_topologies", "report_wl",
 
 
 def corpus():
-    """The 34 full-pipeline corpus flows (repo-relative), sorted+deduped."""
+    """The full-pipeline corpus flows (repo-relative), sorted+deduped.
+
+    A flow qualifies if it runs `run_detailed_nuts`.  A flow OPTS OUT with a
+    `# qor-exclude` marker comment — used by intentionally-dirty test fixtures
+    (e.g. flow/hbundles/06_multipin_stress_raw.buda) that live in a corpus dir
+    but must not skew benchmark comparisons.
+    """
     out = set()
     for d in _CORPUS_DIRS:
         for f in glob.glob(os.path.join(ROOT, d, "*.buda")):
             with open(f) as fh:
-                if any(line.split("#", 1)[0].split()[:1] == ["run_detailed_nuts"]
-                       for line in fh):
-                    out.add(os.path.relpath(f, ROOT))
+                lines = fh.readlines()
+            if any("qor-exclude" in ln for ln in lines):
+                continue
+            if any(ln.split("#", 1)[0].split()[:1] == ["run_detailed_nuts"]
+                   for ln in lines):
+                out.add(os.path.relpath(f, ROOT))
     return sorted(out)
 
 
