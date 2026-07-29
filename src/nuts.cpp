@@ -20,6 +20,7 @@
 #include "conn_topology.h"
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -645,29 +646,44 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
     // just that move is rolled back — earlier accepted moves are kept.
     int moved = 0;
     PlacementSnapshot pre_move;
-    // Global-progress convergence guard (repair-round measurement,
-    // docs/internal/rnr_runtime_parallelism.md): the loop's overlap count is
-    // MONOTONE non-increasing — an accepted pair move strictly reduces it
-    // (delta < 0) and a committed cluster repack is at worst globally
-    // neutral (delta <= 0, in-cluster strict drop) — so any state cycle
-    // must sit at CONSTANT overlaps, and a globally-neutral iteration is
-    // the necessary precursor of every cycle.  Measured on the congested
-    // synthetic: after the improving rounds the loop enters a period-2
-    // limit cycle (two placements alternating, identical hashes, zero
-    // overlap change, ~0.5 s per wasted round until the iteration cap).
-    // Breaking on the FIRST zero-reduction iteration ends every such cycle
-    // at its entry; the only theoretical cost is a neutral rearrangement
-    // that would have enabled a later improving sweep — never observed in
-    // any trajectory (corpus or synthetic; every observed neutral round is
-    // followed only by more neutral rounds), and gated on the QoR corpus
-    // rather than byte-identity since a cycle's cap-exit parity could
-    // differ from its entry state.
-    size_t prev_pairs = std::numeric_limits<size_t>::max();
+    // Repeated-state convergence guard (repair-round measurement,
+    // docs/internal/rnr_runtime_parallelism.md): measured on the congested
+    // synthetic, once the improving rounds flatten the loop enters a
+    // period-2 limit cycle — two placements alternating with overlaps
+    // frozen, ~0.5 s per wasted round until the iteration cap, in every
+    // repair call.  The loop is deterministic and memoryless (each
+    // iteration is a pure function of `segments` — ctx/constraints are
+    // immutable here), so revisiting an EXACT placement state can only
+    // replay the same trajectory forever; breaking on the first repeat is
+    // provably lossless.  Deliberately NOT a break on a merely-neutral
+    // round: the cluster repack's contract explicitly allows a globally
+    // neutral commit (in-cluster drop, collateral elsewhere) that the NEXT
+    // single-victim sweep cleans up — a neutral round reaches that sweep,
+    // and only an exact state repeat (bitwise hash of placed/track/span)
+    // ends the loop (Codex #507).  Still QoR-gated rather than
+    // byte-identity: a cycle's cap-exit parity can differ from its
+    // first-repeat state.
+    auto state_key = [&]() {
+        size_t h = 0;
+        auto mix = [&](unsigned long long v) {
+            h ^= std::hash<unsigned long long>{}(v)
+               + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        };
+        for (const auto& ts : segments) {
+            mix(ts.placed
+                ? std::bit_cast<unsigned long long>(ts.track_position)
+                : 0x517EULL);
+            mix(std::bit_cast<unsigned long long>(ts.span_lo));
+            mix(std::bit_cast<unsigned long long>(ts.span_hi));
+        }
+        return h;
+    };
+    std::set<size_t> seen_states;
     for (int iter = 0; iter < 8; ++iter) {
         auto pairs = find_overlaps(segments);
         if (pairs.empty()) break;
-        if (pairs.size() == prev_pairs) break;   // last round was globally
-        prev_pairs = pairs.size();               // neutral: cycle territory
+        if (!seen_states.insert(state_key()).second)
+            break;                    // exact repeat: deterministic cycle
         bool progress = false;
         for (auto [i, j] : pairs) {
             TrackSegment& a = segments[i];
