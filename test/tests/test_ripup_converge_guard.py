@@ -64,8 +64,13 @@ def test_converge_guard_keyword_parsed(monkeypatch):
 
 def _run_tc3a_to_stage_b(s, monkeypatch):
     """Drive tc3a through its pipeline (healers stripped) to a stage-b state
-    with many DNUTS opens, ready for a single stage-b ripup."""
-    absf = _ROOT / "flow" / "big_data_test" / "tc3a.buda"
+    with many DNUTS opens, ready for a single stage-b ripup.
+
+    Uses tc3a_congested.buda — the FULL, unpruned tc3a.bdb.sql (>1000%
+    congested, 72/80 bundles failing).  The shipped tc3a.buda now opens the
+    bit-pruned BDB and routes 0/0/0, so it can no longer exercise the guard;
+    this fixture restores the over-capacity design the guard was measured on."""
+    absf = _ROOT / "flow" / "big_data_test" / "tc3a_congested.buda"
     # monkeypatch.chdir restores the previous cwd at test teardown, so this
     # setup can't leave later tests resolving files from flow/big_data_test
     # (Codex #359 — the helper used a bare os.chdir with no restore).
