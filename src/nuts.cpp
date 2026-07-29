@@ -228,16 +228,12 @@ static void build_nuts_maps(
         // beyond the outermost junction, tighten_spans_to_reach's contraction
         // does not clip the crossing, it deletes it.
         //
-        // Anchored only where the crossing is the block's SOLE coverage: one
-        // untapped block, exactly one segment nominally crossing it.  A block
-        // that several segments cross stays covered when any one of them
-        // retracts, so anchoring all of them would keep phantom span for
-        // nothing — measured: b44's pinned 6-seg TRUNK_H+MST realizes 4552
-        // instead of 3510 (+30%) if every crossing is anchored, because its
-        // extra crossings are redundant (Codex P2 on #499).  Scoping to sole
-        // coverage is decided on NOMINAL geometry, so it is deterministic and
-        // order-independent — unlike a post-placement "is it still covered?"
-        // test, which would depend on the order spans are adjusted in.
+        // Exactly ONE placeable crossing per untapped block is anchored — never
+        // zero, never all of them; the reasoning for both bounds is at the pick
+        // below.  The choice is made on NOMINAL geometry, so the pass is
+        // deterministic and order-independent — unlike a post-placement "is it
+        // still covered?" test, which would depend on the order spans are
+        // adjusted in.
         {
             std::map<std::string, std::vector<std::pair<int, std::pair<double,double>>>>
                 crossings;                       // block -> [(seg, interval)]
@@ -256,14 +252,40 @@ static void build_nuts_maps(
                         const double a_hi = cs.horiz ? (double)r.x2 : (double)r.y2;
                         if (cs.perp_pos < p_lo || cs.perp_pos > p_hi) continue;
                         if (s_lo > a_hi || s_hi < a_lo) continue;     // no crossing
+                        // PLACEABILITY, the same robust-cover gate check_topo
+                        // applies (issue #438): a nominal crossing only counts if
+                        // the segment's slide window can actually reach the block's
+                        // perp extent.  A boundary graze whose window is pushed off
+                        // the face can never cover it however the solve goes, so it
+                        // must not be mistaken for a sibling cover below.
+                        if (cs.perp_hi < p_lo || cs.perp_lo > p_hi) continue;
                         crossings[bname].push_back(
                             {si, {std::max(s_lo, a_lo), std::min(s_hi, a_hi)}});
                         break;                    // one crossing per (seg, block)
                     }
                 }
             }
+            // Anchor exactly ONE placeable crossing per block — never zero, never
+            // all of them.
+            //
+            // "None" was wrong (Codex P1, second review): nominal multiplicity does
+            // not survive placement.  Several crossings can ALL be contracted past
+            // the block, and the block then opens with exactly the BUSTERM_OPEN this
+            // anchor exists to prevent — dropping every anchor whenever two segments
+            // happen to cross nominally leaves the guarantee with a hole.
+            //
+            // "All" was also wrong (Codex P2, first review): redundant anchors keep
+            // phantom span for nothing — b44's pinned 6-segment TRUNK_H+MST realizes
+            // 4552 instead of 3510 (+30%).
+            //
+            // One is sufficient: the anchored segment is guaranteed to keep reaching
+            // the block, so the block's coverage cannot be lost no matter what the
+            // other crossings do.  The pick is the LOWEST segment index, purely for
+            // determinism (crossings are gathered in segment order, so this is the
+            // first entry) — no placement state is consulted, keeping the whole pass
+            // order-independent.
             for (const auto& [bname, list] : crossings) {
-                if (list.size() != 1) continue;   // redundantly covered — no anchor
+                if (list.empty()) continue;       // no placeable cover to protect
                 passthru_map[{bid, list[0].first}].push_back(list[0].second);
             }
         }

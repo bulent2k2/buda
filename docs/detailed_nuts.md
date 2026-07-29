@@ -123,11 +123,24 @@ Then two post-passes over the emitted bit-wires:
    byte-identical, and restorations are reported (`[DetailedNUTS] restored N
    pass-through crossing(s) …`) rather than applied silently.
 
-   Both anchors are scoped to a block's **sole** coverage — one untapped block,
-   exactly one segment nominally crossing it. A block several segments cross
-   stays covered when any one retracts, so anchoring them all keeps phantom
-   span for nothing: measured, b44's pinned 6-segment `TRUNK_H+MST` realizes
-   4552 instead of 3510 (+30%) under an unscoped anchor.
+   Anchors are scoped to **exactly one placeable crossing per untapped block**
+   — never all of them, never none:
+
+   - *Not all*: a block several segments cross does not need every one held.
+     Anchoring the extras keeps phantom span for nothing — b44's pinned
+     6-segment `TRUNK_H+MST` realizes 4552 instead of 3510 (+30%) unscoped.
+   - *Not none*: nominal multiplicity is **not** placement redundancy. Several
+     crossings can all be contracted past the block, reopening the very
+     `BUSTERM_OPEN` the anchor prevents. Skipping the anchor whenever two
+     segments happened to cross nominally left 48 blocks unprotected across
+     mix / big / comprehensive_demo alone.
+
+   "Placeable" is the robust-cover gate `check_topo` already applies (issue
+   #438): the segment's slide window must be able to reach the block's perp
+   extent, so a boundary graze pushed off the face is not mistaken for a
+   sibling cover. The pick among placeable crossings is the lowest segment
+   index — purely for determinism; no placement state is consulted, so the
+   pass stays order-independent.
 
 7. **Per-bit via emission (step 5 in the source).** For every connection where
    the two bits sit on **different layers**, one `NetVia` is emitted at the
