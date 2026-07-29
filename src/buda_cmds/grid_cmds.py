@@ -53,7 +53,12 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
     # OVERWRITES an existing pattern (last-wins), so a duplicate — e.g. two
     # def_track_pattern lines for the same layer — silently drops the earlier one.
     # Reject it (region-scoped variation is add_grid_override, not a re-def).
-    elif session.routing_grid.has_layer(layer_id):
+    # Guard on the GLOBAL pattern actually being defined (non-empty slots), NOT
+    # on has_layer(): add_grid_override creates the layer map entry too, so an
+    # override BEFORE the global def would otherwise false-trip this — a valid
+    # ordering (init sets the global, keeping the earlier overrides).
+    elif (session.routing_grid.has_layer(layer_id) and
+          len(session.routing_grid.get_layer_grid(layer_id).global_pattern().slots) > 0):
         print(f"Error: layer {layer_id} already has a track pattern — "
               f"duplicate def_track_pattern (use add_grid_override for a "
               f"region-scoped pattern)")

@@ -143,3 +143,22 @@ def test_grid_override_is_not_a_redefinition_ok():
     code, out = _run("def_track_pattern 4 0.0 SIGNAL 1 1",
                      "add_grid_override 4 0 0 50 50 0.0 SIGNAL 2 2")
     assert code is None and not _err(out)
+
+
+def test_grid_override_before_global_pattern_ok():
+    # add_grid_override creates the layer's map entry, so has_layer() is already
+    # true before the global def.  The guard must key off the GLOBAL pattern
+    # (empty until def_track_pattern), not has_layer() — an override-first
+    # ordering is valid (init sets the global, keeping the earlier override).
+    code, out = _run("add_grid_override 4 0 0 50 50 0.0 SIGNAL 2 2",
+                     "def_track_pattern 4 0.0 SIGNAL 1 1")
+    assert code is None and not _err(out)
+
+
+def test_duplicate_track_pattern_still_errors_after_override():
+    # A genuine duplicate global still errors even with an override present.
+    code, out = _run("def_track_pattern 4 0.0 SIGNAL 1 1",
+                     "add_grid_override 4 0 0 50 50 0.0 SIGNAL 2 2",
+                     "def_track_pattern 4 0.0 SIGNAL 3 3")
+    assert code == 1
+    assert "layer 4 already has a track pattern" in _err(out)
