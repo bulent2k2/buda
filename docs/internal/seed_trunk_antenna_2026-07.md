@@ -162,8 +162,15 @@ is its own issue, filed as a follow-up — a close cousin of the antenna
 family (dead metal / lost coverage at a segment's ends) but in
 `detailed_nuts`, not the generator.
 
-**Resolved by issue #496**: `BusSegment::passthru_spans` carries each crossing
-interval (clipped to the abstract span) and `adjust_bit_spans` re-extends to
+**Resolved by issue #496 — but one stage earlier than this section predicted.**
+The per-bit trim is not where the coverage is lost: abstract NUTS's
+`tighten_spans_to_reach` had already contracted seg1's span to its junction
+envelope [1095,1455], so DetailedNUTS merely inherited a parent that no longer
+reached the block.  The fix adds pass-through crossings to that pass's reach
+set (they were already there for busterm faces), scoped to a block's SOLE
+coverage.  What follows describes the original per-bit-only attempt, kept
+because its `BusSegment::passthru_spans` half survives as the subordinate
+guard: `adjust_bit_spans` re-extends to
 it when the snap would otherwise have deleted it, alongside the pre-existing
 `busterm_faces` anchor. `mix` returns to a clean `check_design`
 (1/0/1 -> 1/0/0); the residual overlap is the selection-trajectory artifact

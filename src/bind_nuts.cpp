@@ -125,7 +125,8 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("pull_target",    &TrackSegment::pull_target)
         .def_readwrite("is_jog",         &TrackSegment::is_jog)
         .def_readwrite("track_lo_bound", &TrackSegment::track_lo_bound)
-        .def_readwrite("track_hi_bound", &TrackSegment::track_hi_bound);
+        .def_readwrite("track_hi_bound", &TrackSegment::track_hi_bound)
+        .def_readwrite("passthru_spans", &TrackSegment::passthru_spans);
 
     py::class_<OverlapDetail>(m, "OverlapDetail")
         .def_readwrite("layer",   &OverlapDetail::layer)

@@ -837,10 +837,6 @@ std::vector<BusSegment> make_bus_segments(
     // Tapered fan-in: the selected topology's per-segment bit membership
     // (empty for every non-fan-in bundle).
     std::map<int, const std::map<int, std::vector<int>>*> bid_to_bits;
-    // Per (bundle, seg): the along-intervals where the segment covers a
-    // connected block by pass-through, clipped to its own abstract span.  See
-    // BusSegment::passthru_spans (issue #496).
-    std::map<std::pair<int,int>, std::vector<std::pair<double,double>>> bid_to_pt;
     for (const auto& w : bundles) {
         const int bid = w.input.original_bundle.id;
         bid_to_nbits[bid] =
@@ -857,34 +853,6 @@ std::vector<BusSegment> make_bus_segments(
         bid_to_cs[bid] = ct.segs();
         if (!topo.seg_bits.empty())
             bid_to_bits[bid] = &topo.seg_bits;
-
-        // Pass-through coverage anchors, derived from the SAME nominal geometry
-        // check_dnuts's coverage check uses, so the two cannot disagree about
-        // which block needs which segment.
-        std::set<std::string> tapped;
-        for (const auto& cs : ct.segs())
-            for (const auto& conn : cs.conns)
-                if (conn.kind == SegConn::BUSTERM) tapped.insert(conn.block_name);
-        for (const auto& bname : topo.connected_block_names) {
-            if (tapped.count(bname)) continue;      // has a real tap; not our business
-            auto rects = floorplan.get_block_rects(bname);
-            if (rects.empty()) rects.push_back(floorplan.get_block_bounds(bname));
-            for (int i = 0; i < (int)ct.segs().size(); ++i) {
-                const ConnSeg& cs = ct.segs()[i];
-                const double s_lo = std::min((double)cs.along_lo, (double)cs.along_hi);
-                const double s_hi = std::max((double)cs.along_lo, (double)cs.along_hi);
-                for (const Rect& r : rects) {
-                    const double p_lo = cs.horiz ? (double)r.y1 : (double)r.x1;
-                    const double p_hi = cs.horiz ? (double)r.y2 : (double)r.x2;
-                    const double a_lo = cs.horiz ? (double)r.x1 : (double)r.y1;
-                    const double a_hi = cs.horiz ? (double)r.x2 : (double)r.y2;
-                    if (cs.perp_pos < p_lo || cs.perp_pos > p_hi) continue;
-                    if (s_lo > a_hi || s_hi < a_lo) continue;      // no crossing
-                    bid_to_pt[{bid, i}].emplace_back(std::max(s_lo, a_lo),
-                                                     std::min(s_hi, a_hi));
-                }
-            }
-        }
     }
 
     std::vector<BusSegment> out;
@@ -934,8 +902,22 @@ std::vector<BusSegment> make_bus_segments(
                 }
             }
         }
-        auto ptit = bid_to_pt.find({ts.bundle_id, ts.seg_idx});
-        if (ptit != bid_to_pt.end()) bs.passthru_spans = ptit->second;
+        // Pass-through anchors come from the PLACED TrackSegment, not from the
+        // nominal ConnSeg: NUTS may have contracted the span, and an anchor
+        // computed off the nominal geometry could then push a bit outside the
+        // span detailed placement reserved (Codex P1 on #499).  Clipped to the
+        // placed span here, which after the abstract-stage fix (nuts.cpp) is
+        // guaranteed to contain the crossing — the clip is a belt-and-braces
+        // invariant, not the mechanism.
+        {
+            const double p_lo = std::min(bs.span_lo, bs.span_hi);
+            const double p_hi = std::max(bs.span_lo, bs.span_hi);
+            for (const auto& pt : ts.passthru_spans) {
+                const double lo = std::max(pt.first,  p_lo);
+                const double hi = std::min(pt.second, p_hi);
+                if (lo <= hi) bs.passthru_spans.emplace_back(lo, hi);
+            }
+        }
         out.push_back(std::move(bs));
     }
     return out;
