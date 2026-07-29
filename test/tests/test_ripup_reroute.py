@@ -307,12 +307,18 @@ def test_hier_supported_and_noop_when_clean():
 
 @pytest.mark.mid
 def test_hier_stage_b_clears_opens():
-    """A congested hier flow: ripup re-routes a per-instance wrapper and drives the
-    DNUTS opens to zero (validated 8 -> 0 by re-pinning expanded bundle 26)."""
-    s = _source_hier_flow("06_multipin_stress.buda")
+    """Ripup stage-b re-routes per-instance wrappers and drives DNUTS opens down.
+
+    Vehicle: the HEALER-FREE twin `06_multipin_stress_raw.buda`. The full
+    `06_multipin_stress` now self-heals to 0/0/0 (its own negotiate/ripup), so it
+    can no longer enter stage-b with opens — see
+    docs/internal/mid_tier_failures_2026-07-29.md. The raw twin stops after
+    `run_detailed_nuts` with a real residual (~60 opens), so the test's own
+    `ripup_reroute` is what clears them — the actual mechanism under test."""
+    s = _source_hier_flow("06_multipin_stress_raw.buda")
     assert s._planner_is_hier
     base = s.detailed_result.num_unplaced
-    assert base > 0, "06_multipin_stress should start with DNUTS opens"
+    assert base > 0, "raw twin should land with DNUTS opens for ripup to clear"
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         s.do_command("ripup_reroute")

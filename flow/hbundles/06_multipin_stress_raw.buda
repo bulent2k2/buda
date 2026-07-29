@@ -1,0 +1,133 @@
+# ============================================================
+# hbundles/06_multipin_stress_raw.buda
+#
+# HEALER-FREE twin of 06_multipin_stress.buda — same congested
+# multicast design, but the pipeline stops right after
+# run_detailed_nuts with NO negotiate_congestion / ripup_reroute
+# and WITHOUT declaring healersAhead.  It therefore lands with a
+# real residual of DNUTS opens ON PURPOSE.
+#
+# Purpose: a stable, deterministic vehicle for the ripup stage-b
+# regression test (test_ripup_reroute.py::test_hier_stage_b_clears_opens).
+# The full 06_multipin_stress now self-heals to 0/0/0, so it can no
+# longer exercise stage-b — this twin preserves the "enters ripup
+# with opens, ripup drives them down" scenario. Intentionally NOT
+# clean; do not add it to the QoR corpus or any assert_clean list.
+# ============================================================
+
+source ../tracks/tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+# ── BDB: cell sizes ────────────────────────────────────────
+open_bdb :memory:
+
+add_cell blk_cell   300 230
+add_cell sub_cell   120  90
+add_cell leaf_cell   45  50
+
+# ── BDB: cell hierarchy ────────────────────────────────────
+add_inst_to_cell  blk_cell  s1   sub_cell   15   15
+add_inst_to_cell  blk_cell  s2   sub_cell  155   15
+add_inst_to_cell  blk_cell  s3   sub_cell   15  125
+add_inst_to_cell  blk_cell  s4   sub_cell  155  125
+
+add_inst_to_cell  sub_cell  l    leaf_cell  10   20
+add_inst_to_cell  sub_cell  r    leaf_cell  65   20
+
+# ── BDB: place top-level instances (3-col × 2-row grid) ────
+add_inst u1  blk_cell  -    50   50
+add_inst u2  blk_cell  -   400   50
+add_inst u3  blk_cell  -   750   50
+add_inst u4  blk_cell  -    50  330
+add_inst u5  blk_cell  -   400  330
+add_inst u6  blk_cell  -   750  330
+
+# ── Derive busterms (all three levels) ────────────────────
+derive_busterms 2
+
+# ── Populate floorplan with blocks at all routing levels ───
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+
+# ── Buses (written to BDB) ─────────────────────────────────
+bdb_net_mode on
+
+# ── Depth-0: cross-blk multicast buses ─────────────────────
+# b-style: pure cross-blk, 2 receivers
+
+# 3-pin ── horizontal row fans (widest, least routing stretch)
+add_bus mp3_a[8]   u1/s1/r.out   u2/s1/l.in,u3/s1/l.in
+add_bus mp3_b[8]   u4/s2/r.out   u5/s1/l.in,u6/s1/l.in
+
+# 3-pin ── vertical + diagonal spreads
+add_bus mp3_c[4]   u3/s3/l.out   u4/s3/l.in,u6/s3/l.in
+add_bus mp3_d[4]   u2/s3/l.out   u5/s3/l.in,u1/s3/l.in
+
+# c-style: one intra-blk receiver + cross-blk receivers (like c1/c2)
+
+# 4-pin ── one receiver in same blk as driver, two in different blks
+add_bus mp4_a[4]   u1/s2/r.out   u1/s4/r.in,u2/s2/l.in,u3/s2/l.in
+add_bus mp4_b[4]   u3/s3/l.out   u3/s4/l.in,u4/s4/l.in,u6/s4/l.in
+add_bus mp4_c[4]   u5/s1/r.out   u5/s3/l.in,u2/s1/l.in,u6/s1/l.in
+
+# d-style: intra-sub or intra-blk receiver + multiple cross-blk (like d1/d2)
+
+# 5-pin ── driver fans into its own blk AND multiple remote blks
+add_bus mp5_a[2]   u1/s2/l.out   u1/s4/l.in,u4/s2/l.in,u4/s3/r.in,u4/s4/l.in
+add_bus mp5_b[2]   u6/s4/r.out   u6/s1/r.in,u1/s4/r.in,u2/s4/r.in,u3/s4/r.in
+
+# e-style: intra-blk fan to all 4 subs + cross-blk receivers (like e1/e2)
+
+# 6-pin ── broad intra-blk fan plus cross-blk tail
+add_bus mp6_a[2]   u1/s1/l.out   u1/s2/l.in,u1/s3/l.in,u1/s4/l.in,u4/s1/l.in,u5/s1/l.in
+add_bus mp6_b[2]   u6/s1/l.out   u6/s2/l.in,u6/s3/l.in,u6/s4/l.in,u3/s1/l.in,u2/s1/l.in
+
+# ── Depth-1: intra-blk cell-level multicast ────────────────
+# Each template is written for all 6 blk instances so the
+# HierarchicalBundler detects the shared pattern and creates
+# one cell-level HBundle per template.
+
+# d1_mp3 (3-pin): s2/r → s1/r, s4/l  (top-right → top-left + bot-right)
+add_bus d1_mp3_u1[4]  u1/s2/r.out  u1/s1/r.in,u1/s4/l.in
+add_bus d1_mp3_u2[4]  u2/s2/r.out  u2/s1/r.in,u2/s4/l.in
+add_bus d1_mp3_u3[4]  u3/s2/r.out  u3/s1/r.in,u3/s4/l.in
+add_bus d1_mp3_u4[4]  u4/s2/r.out  u4/s1/r.in,u4/s4/l.in
+add_bus d1_mp3_u5[4]  u5/s2/r.out  u5/s1/r.in,u5/s4/l.in
+add_bus d1_mp3_u6[4]  u6/s2/r.out  u6/s1/r.in,u6/s4/l.in
+
+# d1_mp4 (4-pin): s1/r → s2/l, s3/l, s4/l  (top-left fans to all others)
+add_bus d1_mp4_u1[4]  u1/s1/r.out  u1/s2/l.in,u1/s3/l.in,u1/s4/l.in
+add_bus d1_mp4_u2[4]  u2/s1/r.out  u2/s2/l.in,u2/s3/l.in,u2/s4/l.in
+add_bus d1_mp4_u3[4]  u3/s1/r.out  u3/s2/l.in,u3/s3/l.in,u3/s4/l.in
+add_bus d1_mp4_u4[4]  u4/s1/r.out  u4/s2/l.in,u4/s3/l.in,u4/s4/l.in
+add_bus d1_mp4_u5[4]  u5/s1/r.out  u5/s2/l.in,u5/s3/l.in,u5/s4/l.in
+add_bus d1_mp4_u6[4]  u6/s1/r.out  u6/s2/l.in,u6/s3/l.in,u6/s4/l.in
+
+# d1_mp5 (5-pin): s3/l → s3/r, s1/l, s2/l, s4/l
+#   (bot-left fans across its own sub then up and across)
+add_bus d1_mp5_u1[2]  u1/s3/l.out  u1/s3/r.in,u1/s1/l.in,u1/s2/l.in,u1/s4/l.in
+add_bus d1_mp5_u2[2]  u2/s3/l.out  u2/s3/r.in,u2/s1/l.in,u2/s2/l.in,u2/s4/l.in
+add_bus d1_mp5_u3[2]  u3/s3/l.out  u3/s3/r.in,u3/s1/l.in,u3/s2/l.in,u3/s4/l.in
+add_bus d1_mp5_u4[2]  u4/s3/l.out  u4/s3/r.in,u4/s1/l.in,u4/s2/l.in,u4/s4/l.in
+add_bus d1_mp5_u5[2]  u5/s3/l.out  u5/s3/r.in,u5/s1/l.in,u5/s2/l.in,u5/s4/l.in
+add_bus d1_mp5_u6[2]  u6/s3/l.out  u6/s3/r.in,u6/s1/l.in,u6/s2/l.in,u6/s4/l.in
+
+# d1_mp6 (6-pin): s4/r → s1/l, s2/l, s3/l, s1/r, s2/r
+#   (bot-right fans to all other subs — two receive pins in s1 and s2)
+add_bus d1_mp6_u1[2]  u1/s4/r.out  u1/s1/l.in,u1/s2/l.in,u1/s3/l.in,u1/s1/r.in,u1/s2/r.in
+add_bus d1_mp6_u2[2]  u2/s4/r.out  u2/s1/l.in,u2/s2/l.in,u2/s3/l.in,u2/s1/r.in,u2/s2/r.in
+add_bus d1_mp6_u3[2]  u3/s4/r.out  u3/s1/l.in,u3/s2/l.in,u3/s3/l.in,u3/s1/r.in,u3/s2/r.in
+add_bus d1_mp6_u4[2]  u4/s4/r.out  u4/s1/l.in,u4/s2/l.in,u4/s3/l.in,u4/s1/r.in,u4/s2/r.in
+add_bus d1_mp6_u5[2]  u5/s4/r.out  u5/s1/l.in,u5/s2/l.in,u5/s3/l.in,u5/s1/r.in,u5/s2/r.in
+add_bus d1_mp6_u6[2]  u6/s4/r.out  u6/s1/l.in,u6/s2/l.in,u6/s3/l.in,u6/s1/r.in,u6/s2/r.in
+
+# ── HBundle pipeline (RAW — no healers, lands dirty on purpose) ──
+run_hier_bundler depth 2
+generate_hier_topologies
+run_planner hier signal_tracks
+run_nuts
+run_detailed_nuts
+check_design
