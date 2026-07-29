@@ -173,6 +173,23 @@ def test_release_clears_forced_layers_and_unlocks():
     assert seen["pl"] == []          # forced layers cleared
 
 
+def test_release_pass_honors_trial_budget(monkeypatch):
+    """The aggregate _RR_RELEASE_MAX_TRIALS cap must stop the pass before
+    another instance's trials start (Codex #487) — each locked-open
+    instance costs up to 1 + _RR_CLASS_TOP_N full reruns, so a
+    many-instance infeasible design must not run unbounded."""
+    import buda_session.ripup as ripup_mod
+    s = _bottom_up_session(_two_inst_db(), policy="independent")
+    bid = _locked_wrapper(s).input.original_bundle.id
+    s._open_segments = lambda: [(bid, 0, 4, 4)]
+    monkeypatch.setattr(ripup_mod, "_RR_RELEASE_MAX_TRIALS", 0)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        ok, trials = s._rr_release_pass('b', lambda: (0, 0), (0, 0))
+    assert (ok, trials) == (False, 0)
+    assert "trial budget" in buf.getvalue()
+
+
 def test_no_release_moves_token_accepted():
     s = buda_cli.BudaSession()
     s.no_viz = True

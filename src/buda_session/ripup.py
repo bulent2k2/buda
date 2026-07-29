@@ -30,7 +30,7 @@ import time
 
 import buda
 
-from .util import (_RR_CLASS_MAX_TRIALS,
+from .util import (_RR_CLASS_MAX_TRIALS, _RR_RELEASE_MAX_TRIALS,
                    _RR_CLASS_TOP_N, _RR_CONVERGE_FLOOR, _RR_CONVERGE_FRAC,
                    _RR_CONVERGE_GUARD_DEFAULT, _RR_CONVERGE_WINDOW,
                    _RR_DEFAULT_MAX_ITER, _RR_FAST_TRIALS_DEFAULT,
@@ -1379,6 +1379,17 @@ class RipupMixin:
               f"uniformity breaks (policy: independent)", flush=True)
         trials = 0
         for w in locked_open:
+            # Aggregate budget (the _RR_GLOBAL/_RR_CLASS_MAX_TRIALS
+            # symmetry, Codex #487): each instance costs up to
+            # 1 + _RR_CLASS_TOP_N full NUTS/DNUTS reruns — a
+            # many-instance infeasible design must not run unbounded.
+            # Checked per INSTANCE (not per inner trial) so a started
+            # instance's release + alternates finish as one unit.
+            if trials >= _RR_RELEASE_MAX_TRIALS:
+                print(f"[ripup_reroute] RELEASE: trial budget "
+                      f"({_RR_RELEASE_MAX_TRIALS}) exhausted — stop.",
+                      flush=True)
+                return False, trials
             bid = w.input.original_bundle.id
             inst = (w.input.original_bundle.instances[0]
                     if w.input.original_bundle.instances else "?")
