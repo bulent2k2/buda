@@ -408,6 +408,7 @@ void bind_nuts(py::module_& m) {
         .value("FEEDTHRU_RELAY", ViolationKind::FEEDTHRU_RELAY)
         .value("BIT_SHORT",    ViolationKind::BIT_SHORT)
         .value("KEEPOUT_CROSS", ViolationKind::KEEPOUT_CROSS)
+        .value("ANTENNA",      ViolationKind::ANTENNA)
         .value("DISCONNECTED", ViolationKind::DISCONNECTED);
 
     py::class_<ConnViolation>(m, "ConnViolation")

@@ -1544,6 +1544,22 @@ std::vector<int> derive_fanin_seg_bits(
     return fallback_bits;
 }
 
+// Per-segment conn COUNT under the connections ConnTopology infers (BUSTERM
+// taps + SEG junctions) -- the attachment count the placed stages see, and the
+// ANTENNA predicate's input (a segment attached at < 2 points dangles).
+// Same mid-generation derivation as conn_seg_components below.
+static std::vector<size_t> conn_counts(const Topology& topo,
+                                       const Floorplan& fp) {
+    Topology t2 = topo;
+    annotate_seg_conns(t2);
+    ConnTopology ct;
+    ct.build(t2, fp);
+    std::vector<size_t> out;
+    out.reserve(ct.segs().size());
+    for (const auto& cs : ct.segs()) out.push_back(cs.conns.size());
+    return out;
+}
+
 // Number of connected components of `topo` under the SEG (wire-junction)
 // connections ConnTopology infers -- the connectivity the downstream stages see.
 static int conn_seg_components(const Topology& topo, const Floorplan& fp) {
@@ -2314,6 +2330,71 @@ static void complete_relay_junctions(Topology& topo,
                     changed = true;
                     break;
                 }
+            }
+        }
+    }
+
+    // Redundant ANTENNA drop (issue #482).  The de-overlap pass above only
+    // considers the connectors IT appended (index >= n_seg), but the hybrid
+    // construction can lay an ORIGINAL segment redundantly too: an MST edge
+    // leg leaving the same block face as that block's trunk stub is collinear
+    // with — and contained in — the stub.  The single-tap model then demotes
+    // the leg's landing to a nullopt junction, and ConnTopology never infers a
+    // junction between COLLINEAR segments, so the leg's near end connects to
+    // nothing: a dangling wire (verify's ANTENNA) that no route needs, and one
+    // whose free slide window later drags NUTS around.  Drop such a segment
+    // when ALL of:
+    //   (a) it is attached at fewer than two points (the antenna predicate —
+    //       a segment carrying real connectivity is never touched here),
+    //   (b) neither endpoint is busterm-annotated, so no block tap is lost,
+    //   (c) it is collinear-CONTAINED in another segment, so every block its
+    //       geometry covered (pass-through included) stays covered, and
+    //   (d) erasing it does not increase the component count.
+    // One at a time with re-derivation, like the pass above: erase_segment
+    // renumbers, and dropping one antenna can only ever reduce the next one's
+    // conn count (never create connectivity), so the loop converges.
+    {
+        auto contained_in_other = [](const Topology& t, int c) {
+            const Segment& cs = t.segments[c];
+            const bool c_h = cs.start.y == cs.end.y;
+            const int clo = c_h ? std::min(cs.start.x, cs.end.x)
+                                : std::min(cs.start.y, cs.end.y);
+            const int chi = c_h ? std::max(cs.start.x, cs.end.x)
+                                : std::max(cs.start.y, cs.end.y);
+            for (int o = 0; o < (int)t.segments.size(); ++o) {
+                if (o == c) continue;
+                const Segment& os = t.segments[o];
+                const bool o_h = os.start.y == os.end.y;
+                if (o_h != c_h) continue;
+                if (c_h ? (os.start.y != cs.start.y)
+                        : (os.start.x != cs.start.x)) continue;
+                const int olo = o_h ? std::min(os.start.x, os.end.x)
+                                    : std::min(os.start.y, os.end.y);
+                const int ohi = o_h ? std::max(os.start.x, os.end.x)
+                                    : std::max(os.start.y, os.end.y);
+                if (olo <= clo && chi <= ohi) return true;
+            }
+            return false;
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            const std::vector<size_t> counts = conn_counts(topo, fp);
+            const int n = (int)topo.segments.size();
+            if ((int)counts.size() != n) break;      // defensive: shape drift
+            for (int c = 0; c < n; ++c) {
+                if (counts[c] >= 2) continue;                        // (a)
+                auto bt = topo.seg_busterms.find(c);
+                if (bt != topo.seg_busterms.end() &&
+                    (bt->second.first || bt->second.second)) continue; // (b)
+                if (!contained_in_other(topo, c)) continue;          // (c)
+                Topology trial = topo;
+                erase_segment(trial, c);
+                if (conn_seg_components(trial, fp)
+                        > conn_seg_components(topo, fp)) continue;   // (d)
+                topo = std::move(trial);
+                changed = true;
+                break;
             }
         }
     }

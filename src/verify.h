@@ -49,6 +49,19 @@ enum class ViolationKind {
                   // dnuts: a bit's track centre is inside the zone (same
                   // predicate as DetailedNUTS's cull_keepout_crossers —
                   // defense-in-depth: the cull prevents this in production)
+    ANTENNA,      // a segment is attached to the rest of the wire graph at
+                  // FEWER THAN TWO points — it has at most one conn (BUSTERM
+                  // tap or SEG junction), so everything beyond that single
+                  // attachment is a dangling wire that terminates in nothing.
+                  // Electrically inert metal (an "antenna"): it adds
+                  // capacitance and can violate antenna rules, and it means
+                  // the generator emitted a segment no route needs — the
+                  // canonical case is an MST edge leg laid collinear on top
+                  // of a trunk stub out of the same block face, whose
+                  // demoted (nullopt) landing then has no inferable junction
+                  // (issue #482).  Structural, so one detector serves the
+                  // placed stages; generation's own knob for candidate-level
+                  // dangles is `set_drop_dangling`
     DISCONNECTED, // the topology's wire graph splits into 2+ islands: SEG
                   // junctions + same-tapped-block continuity (a through-block
                   // joint is either a declared feedthru or flagged separately

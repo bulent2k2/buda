@@ -231,6 +231,94 @@ static std::vector<int> island_roots(const std::vector<ConnSeg>& segs)
     return uf;
 }
 
+// ── detect_antennas ───────────────────────────────────────────────────────────
+//
+// A segment must be attached to the rest of the route at TWO points at least:
+// a real wire runs BETWEEN things (block face -> junction, junction ->
+// junction, face -> face).  A segment attached at one point dangles from
+// there — electrically inert metal that no route needs (an "antenna": it
+// loads the net with capacitance and can violate antenna rules), and a sure
+// sign the generator emitted a segment it should not have.  The canonical
+// producer (issue #482) is an MST edge leg laid COLLINEAR on top of a trunk
+// stub leaving the same block face: the relay single-tap model demotes the
+// duplicate landing to a nullopt junction, and ConnTopology cannot infer a
+// junction between collinear segments, so the leg's near end connects to
+// nothing.
+//
+// "Attached at two points" counts DISTINCT ATTACHMENT POSITIONS, not conn
+// records, and includes the three ways a segment can be electrically joined:
+//
+//   * a BUSTERM tap            -> attaches at its face coordinate
+//   * a SEG junction           -> attaches at `at_pos` along this segment
+//   * a PASS-THROUGH block     -> the segment crosses a connected block's
+//                                 footprint without tapping it (the joint the
+//                                 block-coverage checks above accept as a
+//                                 valid connection); each such block is one
+//                                 attachment, keyed by name
+//
+// Both refinements matter (Codex review on #483).  Without the pass-through
+// term a trunk that crosses its driver block and joins one junction would be
+// reported though it is properly connected — a false positive on otherwise
+// clean designs.  Without position dedup, a segment whose end meets a
+// MULTI-WAY junction collects one SegConn per neighbour, all at the same
+// at_pos, so a record count of 2+ would hide the very shape this detects —
+// every attachment at one physical point and the opposite end free.
+//
+// Structural (conn records + nominal geometry), like detect_disconnected — the
+// same detector answers at every placed stage.  DISCONNECTED is the
+// complementary global property (the graph splits); an antenna keeps the graph
+// connected, it just hangs off it.
+static void detect_antennas(const std::vector<ConnSeg>& segs,
+                            const Topology& topo, const Floorplan& fp,
+                            int bundle_id, const char* stage,
+                            ConnResult& result)
+{
+    const int n = (int)segs.size();
+    // A single-segment topology has no junctions by construction; a missing
+    // block tap there is BUSTERM_OPEN's business, not an antenna.
+    if (n < 2) return;
+    for (int i = 0; i < n; ++i) {
+        const ConnSeg& cs = segs[i];
+        // Distinct attachment POSITIONS along this segment (conn records at
+        // one physical point count once) ...
+        std::set<int> at;
+        int n_bt = 0, n_seg = 0;
+        for (const auto& c : cs.conns) {
+            if (c.kind == SegConn::BUSTERM) { ++n_bt;  at.insert(c.face_coord); }
+            else                            { ++n_seg; at.insert(c.at_pos); }
+        }
+        // ... plus every connected block this segment merely CROSSES (a
+        // pass-through joint, which carries no conn record).
+        std::set<std::string> through;
+        for (const auto& bname : topo.connected_block_names) {
+            auto rects = fp.get_block_rects(bname);
+            if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+            for (const Rect& r : rects)
+                if (seg_spans_rect(cs, (double)cs.perp_pos, r)) {
+                    through.insert(bname);
+                    break;
+                }
+        }
+        if (at.size() + through.size() >= 2) continue;
+        ConnViolation v;
+        v.kind      = ViolationKind::ANTENNA;
+        v.bundle_id = bundle_id;
+        v.seg_idx   = i;
+        std::ostringstream msg;
+        msg << "Segment " << i << " (" << (cs.horiz ? "H" : "V")
+            << " along [" << cs.along_lo << "," << cs.along_hi
+            << "] @ " << cs.perp_pos << ") attaches to the route at "
+            << (at.size() + through.size()) << " point(s) ("
+            << n_bt << " busterm, " << n_seg << " seg, "
+            << through.size() << " pass-through)";
+        if (!at.empty()) msg << " at along=" << *at.begin();
+        msg << " — a dangling 'antenna' wire: the rest of it terminates in "
+               "nothing (" << stage << ")";
+        v.message = msg.str();
+        result.violations.push_back(std::move(v));
+    }
+}
+
 static void detect_disconnected(const std::vector<ConnSeg>& segs,
                                 int bundle_id, const char* stage,
                                 ConnResult& result)
@@ -637,6 +725,8 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
     // FEEDTHRU_RELAY (structural; see detect_feedthru_relay).
     detect_feedthru_relay(segs, topo, fp, bundle_id, "nuts", result);
     detect_disconnected(segs, bundle_id, "nuts", result);
+    // Dangling wires (structural; see detect_antennas — issue #482).
+    detect_antennas(segs, topo, fp, bundle_id, "nuts", result);
 
     return result;
 }
@@ -916,6 +1006,8 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
     detect_feedthru_relay(ct.segs(), topo, fp, bundle_id, "dnuts", result);
     // Whole-graph connectivity (structural; see detect_disconnected).
     detect_disconnected(ct.segs(), bundle_id, "dnuts", result);
+    // Dangling wires (structural; see detect_antennas — issue #482).
+    detect_antennas(ct.segs(), topo, fp, bundle_id, "dnuts", result);
 
     // BIT_SHORT: two DIFFERENT bits of this bundle are two different NETS,
     // so their wires sharing a layer + track with overlapping (or touching —
