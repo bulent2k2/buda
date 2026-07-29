@@ -38,20 +38,22 @@ so hierarchical bundles' cell-local generation floorplans cannot mask a
 conflict. See `docs/internal/keepout_model_audit.md`.
 
 The `nuts` and `dnuts` stages also flag **antennas** (`ANTENNA`, issue
-#482): a segment attached to the route at **fewer than two points** — at
-most one busterm tap or seg junction — so everything past that single
-attachment is a dangling wire that terminates in nothing. That is
-electrically inert metal (it loads the net with capacitance and can violate
-antenna rules) and a sign the generator emitted a segment no route needs.
-The detector is structural (conn records, not placement), so both stages
-give the same verdict; the message names the segment, its geometry, and its
-one attachment:
+#482): a segment attached to the route at **fewer than two DISTINCT
+points**, so everything past that single attachment is a dangling wire that
+terminates in nothing. That is electrically inert metal (it loads the net
+with capacitance and can violate antenna rules) and a sign the generator
+emitted a segment no route needs. Three joints count as an attachment — a
+busterm tap (at its face coordinate), a seg junction (at its `at_pos`), and
+a **pass-through block** (a connected block the segment merely crosses) —
+and they are counted by *position*, so several conn records meeting at one
+physical point count once. The detector is structural (conn records +
+nominal geometry, not placement), so both stages give the same verdict; the
+message names the segment, its geometry, and its one attachment:
 
 ```
-Bundle 22: Segment 3 (H along [1250,1740] @ 2985) has 1 connection(s)
-  (only junction: segment 4) — a dangling 'antenna' wire: it attaches to the
-  route at fewer than two points, so the rest of it terminates in nothing
-  (0 busterm, 1 seg) (dnuts)
+Bundle 22: Segment 3 (H along [1250,1740] @ 2985) attaches to the route at
+  1 point(s) (0 busterm, 1 seg, 0 pass-through) at along=1740 — a dangling
+  'antenna' wire: the rest of it terminates in nothing (dnuts)
 ```
 
 `DISCONNECTED` is the complementary global property (the wire graph splits
@@ -60,6 +62,16 @@ one-segment topology is never flagged — it has no junctions by construction,
 and a missing block tap there is `BUSTERM_OPEN`'s business. Generation's own
 candidate-level knob for dangling shapes is
 [`set_drop_dangling`](topologies.md).
+
+The generator does not merely get audited by this check — it **applies the
+same predicate itself**. `verify` exposes `seg_attachment()` and the
+trunk+MST pass drops a hybrid whose seed trunk is an antenna, alongside its
+older "removable seed trunk" drop (the two reasons are counted separately in
+the `[TopoGen] dropped N redundant trunk+MST hybrid(s) (…)` line). Sharing
+one implementation is deliberate: the predicate had been re-rolled by hand
+three times as a conn-*record* count, and each copy was wrong in the same
+way. See [seed-trunk antenna family](../internal/seed_trunk_antenna_2026-07.md)
+(issue #485).
 
 | Argument | Type | Default | Description |
 |---|---|---|---|

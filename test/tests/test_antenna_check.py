@@ -289,12 +289,19 @@ def _bus011_candidates():
 
 
 def _antenna_segs(topo, fp):
+    """Antenna count via the AUTHORITATIVE detector, never a proxy.
+
+    This helper used to re-roll the predicate as `len(cs.conns) < 2` — the
+    conn-RECORD count.  That is precisely the defect the #483 review found in
+    the checker and issue #485 found a third copy of in the generator's seed-
+    trunk gate: it misses a segment whose records all sit at ONE point, and it
+    falsely accuses one attached via a pass-through block.  Ask check_nuts.
+    """
     ct = buda.ConnTopology()
     ct.build(topo, fp)
-    segs = ct.segs()
-    if len(segs) < 2:
-        return 0
-    return sum(1 for cs in segs if len(cs.conns) < 2)
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        res = buda.check_nuts(ct, _nominal_nuts(ct), topo, fp, _layers(), 1)
+    return len(_antennas(res))
 
 
 @pytest.mark.mid
@@ -327,3 +334,107 @@ def test_hybrid_and_pure_mst_candidates_are_present_and_clean():
     for kind, topos in fams.items():
         for t in topos:
             assert _antenna_segs(t, s.fp) == 0, f"{kind} {t.type} has an antenna"
+
+
+# ── 3. the seed trunk (issue #485) ───────────────────────────────────────────
+#
+# #482's census left 26 antennas, every one of them seg 0 — the trunk+MST
+# hybrid's SEED TRUNK.  Two independent defects in the gate meant to drop
+# exactly that shape, one per family:
+#
+#   OOB (20)     the dangling-spine gate judged a copy re-annotated by
+#                annotate_topology, which re-derives seg_busterms
+#                GEOMETRICALLY and so re-adds the face landings
+#                complete_relay_junctions demoted to nullopt.  The gate saw a
+#                topology that is not the one being pooled.
+#   in-bbox (6)  the removability test is RIGHT to keep these (the spine is
+#                the only thing joining two collinear stubs at its single
+#                junction), but that is a fact about the trunk-less topology,
+#                which is never emitted.  The candidate as it stands carries
+#                an antenna, so it is dropped on that ground.
+
+def _corpus_pool(flow):
+    """Every candidate of every bundle at the generation stage of `flow`."""
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import topo_snapshot as ts
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        s = ts.run_flow_generation(flow)
+    return s, [(w.input.original_bundle.id, t)
+               for w in s.bundles for t in w.input.candidates]
+
+
+def test_reannotation_clobbers_the_completed_annotation():
+    """The OOB defect's MECHANISM, pinned so the gate cannot regress to it.
+
+    complete_relay_junctions demotes a relay's duplicate face landing to
+    nullopt on purpose (the single-tap model) — that demotion is what makes
+    the junction a real SEG junction instead of a silent through-block relay.
+    annotate_topology re-derives seg_busterms from geometry and puts the
+    landing back; annotate_seg_conns derives only the junctions and leaves the
+    annotation alone.  The seed-trunk gate must use the latter, or it judges a
+    topology nobody will route.
+    """
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 100, 100)
+    fp.add_block("B", 400, 200, 500, 300)
+    g = buda.TopologyGenerator(fp)
+    g.set_layer_ids(LAYER_H, LAYER_V)
+    topo = next(c for c in g.generate_candidates("A", ["B"])
+                if c.type.startswith("Z_HVH"))
+
+    def taps(t):
+        out = {}
+        for i in range(len(t.segments)):
+            e = t.seg_busterms.get(i)
+            out[i] = (None if e is None else
+                      (e[0].block_name if e[0] else None,
+                       e[1].block_name if e[1] else None))
+        return out
+
+    before = taps(topo)
+    buda.annotate_seg_conns(topo)
+    assert taps(topo) == before, "annotate_seg_conns must not touch seg_busterms"
+
+    # Demote a landing the way complete_relay_junctions does, then show the two
+    # annotators disagree about it.
+    seg, entry = next((i, e) for i, e in before.items()
+                      if e is not None and (e[0] or e[1]))
+    demoted = dict(topo.seg_busterms)
+    del demoted[seg]
+    topo.seg_busterms = demoted
+    buda.annotate_seg_conns(topo)
+    assert taps(topo)[seg] is None, "annotate_seg_conns re-added a demoted tap"
+    buda.annotate_topology(topo, fp)
+    assert taps(topo)[seg] == entry, (
+        "annotate_topology no longer re-derives taps geometrically — if that is "
+        "intentional, the seed-trunk gate's comment needs updating")
+
+
+@pytest.mark.mid
+@pytest.mark.parametrize("flow", ["demo/comprehensive_demo.buda",
+                                  "flow/rnr/mix.buda",
+                                  "flow/big_data_test/big.buda"])
+def test_no_antenna_survives_generation(flow):
+    """The issue's headline: zero antennas generated, corpus-wide.
+
+    These three flows carried all 26 (demo 3, mix 8, big 15).  Asserted with
+    the authoritative detector over EVERY candidate of EVERY bundle, not just
+    the selected ones — a non-selected antenna is still a candidate the
+    planner may pick under different congestion, which is why #485 exists.
+    """
+    s, pool = _corpus_pool(flow)
+    offenders = [(bid, t.type) for bid, t in pool if _antenna_segs(t, s.fp)]
+    assert not offenders, f"{len(offenders)} antenna candidate(s): {offenders[:8]}"
+
+
+@pytest.mark.mid
+def test_seed_trunk_families_are_still_generated():
+    """Non-vacuity guard for the test above: the drop must not have emptied
+    the hybrid families it polices.  Both the OOB and in-bbox TRUNK+MST
+    shapes must still reach the pool — a gate that drops everything would
+    also report zero antennas."""
+    _, pool = _corpus_pool("flow/big_data_test/big.buda")
+    types = {t.type.split("@")[0] for _, t in pool}
+    assert "TRUNK_H+MST" in types or "TRUNK_V+MST" in types, types
+    assert any(x.endswith("_OOB+MST") for x in types), (
+        f"no OOB hybrid survived — the gate is over-dropping: {sorted(types)}")
