@@ -136,7 +136,18 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         session._plan_bottom_up_templates(iterations)
         # Expand cell-level bundles → per-instance absolute-coord wrappers.
         # Each expanded wrapper gets a unique HBundle ID.
-        expanded, session._hier_expansion_map = session._expand_hier_bundles(session.bundles)
+        expanded_l, exp_map_raw = session._expand_hier_bundles(session.bundles)
+        # P2: freeze the expanded set into the C++-backed container NOW and
+        # remap the expansion map onto the vec's ELEMENTS (same objects as
+        # `expanded_l` by identity), so every alias — exp_map instance
+        # lists, replica entries — mutates the same storage the engines see
+        # and every healer call from here on crosses the binding zero-copy.
+        expanded = buda.BundleWrapperVec(expanded_l)
+        _idx_of = {id(w): i for i, w in enumerate(expanded_l)}
+        session._hier_expansion_map = {
+            tid: [expanded[_idx_of[id(w)]] for w in ws]
+            for tid, ws in exp_map_raw.items()}
+        del expanded_l, exp_map_raw, _idx_of
         # priority = -(level * 10000 + n_candidates): higher routes first.
         # Depth-0 before depth-1; fewer candidates (less flexibility) first.
         # BUDA_HIER_DEEP_FIRST=1 (experiment): invert the level key only —

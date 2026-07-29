@@ -183,15 +183,17 @@ def test_two_rotated():
 
 
 # ---------------------------------------------------------------------------
-# comprehensive_demo.buda — 5 bundles, 26 segments, 0 track overlaps
-# ("add to comprehensive demo flow" extended the demo: bundle 5 commits with
-# a planner overflow WARNING, but NUTS and DetailedNUTS still end fully
-# clean — 0 overlaps, 0 unplaced bits)
+# comprehensive_regression.buda — 5 bundles, 26 segments, 0 track overlaps
+#
+# A FROZEN snapshot of demo/comprehensive_demo.buda (in flow/, not demo/) so
+# the live demo stays free to tweak for demonstrations without disturbing these
+# pinned counts.  Bundle 5 commits with a planner overflow WARNING, but NUTS and
+# DetailedNUTS still end fully clean — 0 overlaps, 0 unplaced bits.
 # ---------------------------------------------------------------------------
 
-def test_comprehensive_demo():
-    out, rc = _run_path(DEMO / "comprehensive_demo.buda")   # moved to demo/
-    assert_clean(out, rc, "comprehensive_demo.buda")
+def test_comprehensive_regression():
+    out, rc = run_script("comprehensive_regression.buda")
+    assert_clean(out, rc, "comprehensive_regression.buda")
     assert "Bundler created 5 hbundles." in out
     segs, _viols, ovlps = nuts_summary(out)
     assert segs  == 26
