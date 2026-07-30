@@ -32,6 +32,39 @@ namespace buda {
 DetailedNUTSEngine::DetailedNUTSEngine(const RoutingGridStack& stack)
     : stack_(stack) {}
 
+// Track-IDENTITY quantizer (1e-6 µm quantum, the same scale as verify.cpp's
+// BIT_SHORT bucketing): two positions are the same physical track iff their
+// keys are NEAR — |key_a - key_b| <= 1, not equal.  Same-run positions are
+// bit-identical (all enumerated through the one origin + n*pitch + prefix
+// walk, with an absolute unit index), so an exact double compare works
+// there — but a bottom-up fixed-bit copy (offset/transform_net_segment)
+// reaches the same track via `+dy` / `perp_dim - p`, a DIFFERENT arithmetic
+// path that for non-representable decimal patterns (0.07, 0.095, 0.14 µm …)
+// can land ~1 ulp away.  An exact compare then misses the reservation — a
+// silent cross-bundle track share the same-bundle BIT_SHORT audit never
+// sees.  Plain bucket EQUALITY is not enough either (Codex P1 on #528):
+// rounding each representation independently is boundary-dependent — a
+// track whose exact centre sits ON a half-quantum boundary (e.g. w=0.010001
+// sp=0.269999, unit 25: enumeration 7.0050004999999995 vs copy 7.0050005)
+// puts the two ulp-close values in ADJACENT buckets.  Hence the ±1-key
+// tolerance below: boundary-independent for ulp-scale noise, and still
+// ~4 orders of magnitude below any physical pitch (≫ 2e-6 µm), so it can
+// never merge two real tracks.
+static long long track_key(double pos) { return std::llround(pos * 1e6); }
+
+// Near-identity in key space (see above): ulp-close representations of one
+// physical track have keys differing by AT MOST 1 (a 1e-6 bucket is ~1e9
+// ulps wide at µm scale, so ulp noise can cross at most one boundary).
+static bool track_key_near(long long a, long long b) {
+    return (a > b ? a - b : b - a) <= 1;
+}
+
+// Membership under near-identity for an ordered set of track keys.
+static bool reserved_has(const std::set<long long>& s, long long k) {
+    auto it = s.lower_bound(k - 1);
+    return it != s.end() && *it <= k + 1;
+}
+
 void DetailedNUTSEngine::add_fixed_bits(const std::vector<NetSegment>& bits) {
     fixed_bits_.insert(fixed_bits_.end(), bits.begin(), bits.end());
 }
@@ -369,7 +402,7 @@ void DetailedNUTSEngine::place_by_layer(
             // bit-span adjustment staggers each bit's endpoint to its
             // junction partner's per-bit track, so wires reach up to about
             // one bus extent past the abstract span endpoint.
-            std::set<double> reserved;
+            std::set<long long> reserved;   // track_key identities
             std::vector<const LayerAssignment*> hazards;
             // Normalized extent of this segment's span: make_bus_segments
             // deliberately preserves reversed NUTS spans (span_lo > span_hi,
@@ -399,7 +432,8 @@ void DetailedNUTSEngine::place_by_layer(
                 bool itvl_ov = asgn.interval_lo < bs.interval_hi &&
                                asgn.interval_hi > bs.interval_lo;
                 if (span_ov && itvl_ov)
-                    for (double p : asgn.track_positions) reserved.insert(p);
+                    for (double p : asgn.track_positions)
+                        reserved.insert(track_key(p));
             }
 
             // Cache timing-critical data once per segment.
@@ -444,14 +478,14 @@ void DetailedNUTSEngine::place_by_layer(
             // resolution below can re-run it with the hazard tracks added.
             // Returns the bw chosen signal-track indices ascending, or empty
             // on failure (prints the corresponding warning).
-            auto choose = [&](const std::set<double>& resv) -> std::vector<int> {
+            auto choose = [&](const std::set<long long>& resv) -> std::vector<int> {
                 std::vector<int> chosen;
                 if (use_anchor && !bs.timing_critical) {
                     // Path A: N closest available tracks.
                     std::vector<int> avail;
                     avail.reserve(n_sig);
                     for (int k = 0; k < n_sig; ++k)
-                        if (!resv.count(signal_tracks[k].first))
+                        if (!reserved_has(resv, track_key(signal_tracks[k].first)))
                             avail.push_back(k);
 
                     if ((int)avail.size() < bw) {
@@ -483,7 +517,9 @@ void DetailedNUTSEngine::place_by_layer(
                 for (int j = 0; j + bw <= n_sig; ++j) {
                     bool avail = true;
                     for (int k = j; k < j + bw; ++k) {
-                        if (resv.count(signal_tracks[k].first)) { avail = false; break; }
+                        if (reserved_has(resv, track_key(signal_tracks[k].first))) {
+                            avail = false; break;
+                        }
                     }
                     if (!avail) continue;
 
@@ -540,14 +576,29 @@ void DetailedNUTSEngine::place_by_layer(
             if (!hazards.empty()) {
                 auto conflicted = [&](const std::vector<int>& picks) {
                     for (int i = 0; i < (int)picks.size(); ++i) {
-                        const double t   = signal_tracks[picks[i]].first;
-                        const int    bit = bit_on_rank(i);
+                        // track_key near-identity (see the helper above): a
+                        // fixed-bit copy's position may differ from this
+                        // run's enumeration by ~1 ulp — an exact `==` would
+                        // miss the conflict, and so would bucket equality
+                        // on a half-quantum boundary.  track_positions is
+                        // sorted ascending and track_key is monotone, so a
+                        // key-space lower_bound at tk-1 finds the first
+                        // candidate; walk while keys stay within tk+1
+                        // (at most one real track fits — spacing ≫ quanta).
+                        const long long tk =
+                            track_key(signal_tracks[picks[i]].first);
+                        const int bit = bit_on_rank(i);
                         for (const LayerAssignment* H : hazards) {
-                            auto lb = std::lower_bound(H->track_positions.begin(),
-                                                       H->track_positions.end(), t);
-                            if (lb != H->track_positions.end() && *lb == t &&
-                                H->bits_on_track[lb - H->track_positions.begin()] != bit)
-                                return true;
+                            auto lb = std::lower_bound(
+                                H->track_positions.begin(),
+                                H->track_positions.end(), tk - 1,
+                                [](double p, long long k) {
+                                    return track_key(p) < k;
+                                });
+                            for (; lb != H->track_positions.end() &&
+                                   track_key(*lb) <= tk + 1; ++lb)
+                                if (H->bits_on_track[lb - H->track_positions.begin()] != bit)
+                                    return true;
                         }
                     }
                     return false;
@@ -564,9 +615,14 @@ void DetailedNUTSEngine::place_by_layer(
                     // junction as one net — the exemption's sound case.
                     std::vector<int> repaired;
                     if (use_anchor && !bs.timing_critical) {
-                        std::map<double, int> pos_to_idx;
+                        // Keyed by track_key, matched by NEAR-identity (±1
+                        // key, see the helper above): an ALIGN with a
+                        // fixed-bit hazard must find this run's enumeration
+                        // of the same physical track even when the two
+                        // representations straddle a half-quantum boundary.
+                        std::map<long long, int> pos_to_idx;
                         for (int k = 0; k < n_sig; ++k)
-                            pos_to_idx[signal_tracks[k].first] = k;
+                            pos_to_idx[track_key(signal_tracks[k].first)] = k;
                         for (const LayerAssignment* A : hazards) {
                             if ((int)A->track_positions.size() != bw) continue;
                             bool ok = true;
@@ -574,9 +630,11 @@ void DetailedNUTSEngine::place_by_layer(
                             idxs.reserve(bw);
                             for (int i = 0; i < bw; ++i) {
                                 if (A->bits_on_track[i] != bit_on_rank(i)) { ok = false; break; }
-                                auto pit = pos_to_idx.find(A->track_positions[i]);
+                                const long long ak = track_key(A->track_positions[i]);
+                                auto pit = pos_to_idx.lower_bound(ak - 1);
                                 if (pit == pos_to_idx.end() ||
-                                    reserved.count(A->track_positions[i])) { ok = false; break; }
+                                    !track_key_near(pit->first, ak) ||
+                                    reserved_has(reserved, ak)) { ok = false; break; }
                                 idxs.push_back(pit->second);
                             }
                             if (ok && conflicted(idxs)) ok = false;   // vs the OTHER hazards
@@ -590,9 +648,10 @@ void DetailedNUTSEngine::place_by_layer(
                     // rather than silently shorting — the same policy as
                     // the cross-layer corner bound.
                     if (repaired.empty()) {
-                        std::set<double> resv2 = reserved;
+                        std::set<long long> resv2 = reserved;
                         for (const LayerAssignment* H : hazards)
-                            for (double p : H->track_positions) resv2.insert(p);
+                            for (double p : H->track_positions)
+                                resv2.insert(track_key(p));
                         repaired = choose(resv2);
                     }
                     if (repaired.empty()) {
