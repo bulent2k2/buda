@@ -20,6 +20,7 @@ Here are the keyboard shortcuts available in each view.
 | `←` `→` `↑` `↓` | **Pan** the view left / right / up / down. |
 | `a` | **Toggle Reset/Highlight**: Toggle between clear/reset mode (showing all/reset view) and highlighting the last selected bundle. Works in both abstract and detailed modes. |
 | `b` | Toggle visibility of the floorplan **blocks**. |
+| `N` (Shift+n) | Toggle visibility of the block-**name** labels (start OFF). |
 | `t` | Toggle visibility of **busterms**. |
 | `g` | Toggle visibility of the **Hanan** grid. |
 | `s` | Toggle **Solo** mode (ON/OFF): show only the highlighted bundle, fully hiding the rest. |
