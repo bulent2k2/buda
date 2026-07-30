@@ -26,7 +26,14 @@
 
 namespace buda {
 CongestionPlanner::CongestionPlanner(const Floorplan& fp, const LayerStack& ls)
-    : floorplan_(fp), layers_(ls) {}
+    : floorplan_(fp), layers_(ls) {
+    // Study hook for corpus sweeps (issue #518), mirroring BUDA_KSEGS_REL:
+    // flip band_span_charge on for every planner in a run without editing 29
+    // flow scripts.  An explicit `set_planner_param band_span_charge` still
+    // wins, since it runs after construction.
+    if (const char* e = std::getenv("BUDA_BAND_SPAN_CHARGE"))
+        band_span_charge_ = std::atoi(e);
+}
 
 void CongestionPlanner::set_planner_param(const std::string& name, double value) {
 
@@ -47,6 +54,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "refine_passes")     refine_passes_     = (int)value;
     else if (name == "nontop_dead_span_gate") nontop_dead_span_gate_ = (value != 0.0);
     else if (name == "charge_pull_target")    charge_pull_target_    = (int)value;
+    else if (name == "band_span_charge")      band_span_charge_      = (int)value;
     else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
 }
 
@@ -323,9 +331,9 @@ void CongestionPlanner::routed_extent(const Segment& seg, int layer_id,
     }
 }
 
-void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
+void CongestionPlanner::for_each_cut_(const Segment& seg, int layer_id,
                                       int perp_pos_override,
-                                      const std::function<void(int, int)>& fn) const {
+                                      const std::function<void(int, bool, int)>& fn) const {
     bool is_h = (seg.start.y == seg.end.y);
     int  pp_h = (perp_pos_override != INT_MIN) ? perp_pos_override : seg.start.y;
     int  pp_v = (perp_pos_override != INT_MIN) ? perp_pos_override : seg.start.x;
@@ -361,14 +369,72 @@ void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
         if (c.layer_id != layer_id) continue;
         if (is_h && c.dir == LayerDir::VERTICAL) {
             if (!(c.cut_coord_2x >= lo2 && c.cut_coord_2x <= hi2)) continue;
-            int b = find_band(/*is_vcut=*/true, pp_h);
-            if (b >= 0 && b < c.num_bands()) fn(ci, b);
+            fn(ci, /*is_vcut=*/true, pp_h);
         } else if (!is_h && c.dir == LayerDir::HORIZONTAL) {
             if (!(c.cut_coord_2x >= lo2 && c.cut_coord_2x <= hi2)) continue;
-            int b = find_band(/*is_vcut=*/false, pp_v);
-            if (b >= 0 && b < c.num_bands()) fn(ci, b);
+            fn(ci, /*is_vcut=*/false, pp_v);
         }
     }
+}
+
+void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
+                                      int perp_pos_override,
+                                      const std::function<void(int, int)>& fn) const {
+    for_each_cut_(seg, layer_id, perp_pos_override,
+                  [&](int ci, bool is_vcut, int pp) {
+        int b = find_band(is_vcut, pp);
+        if (b >= 0 && b < cuts_[ci].num_bands()) fn(ci, b);
+    });
+}
+
+// Width-aware band charge (issue #518) — see the header for the rationale.
+void CongestionPlanner::for_each_band_w(const Segment& seg, int layer_id,
+                                        int perp_pos_override, double eff_width,
+                                        const std::function<void(int, int, double)>& fn) const {
+    if (band_span_charge_ <= 0 || eff_width <= 0.0) {
+        for_each_band(seg, layer_id, perp_pos_override,
+                      [&](int ci, int b) { fn(ci, b, 1.0); });
+        return;
+    }
+    const double half = 0.5 * eff_width;
+    // Scratch reused across cuts so a hot scoring loop does not allocate.
+    std::vector<std::pair<int, double>> share;
+    for_each_cut_(seg, layer_id, perp_pos_override,
+                  [&](int ci, bool is_vcut, int pp) {
+        const GlobalCut& c    = cuts_[ci];
+        const auto&      grid = is_vcut ? y_grid_ : x_grid_;
+        const int        nb   = std::min((int)grid.size() - 1, c.num_bands());
+        if (nb <= 0) return;
+
+        const double flo = pp - half, fhi = pp + half;
+        // Clamp the footprint to the band range it can reach.  find_band
+        // returns -1 off the grid, so fall back to the extremes: a footprint
+        // hanging off the edge still charges the outermost band it touches
+        // rather than vanishing.
+        int b_lo = find_band(is_vcut, (int)std::floor(flo));
+        int b_hi = find_band(is_vcut, (int)std::ceil(fhi));
+        if (b_lo < 0) b_lo = (flo < (double)grid.front()) ? 0 : nb - 1;
+        if (b_hi < 0) b_hi = (fhi > (double)grid.back())  ? nb - 1 : 0;
+        b_lo = std::max(0, std::min(b_lo, nb - 1));
+        b_hi = std::max(0, std::min(b_hi, nb - 1));
+        if (b_lo > b_hi) std::swap(b_lo, b_hi);
+
+        share.clear();
+        double total = 0.0;
+        for (int b = b_lo; b <= b_hi; ++b) {
+            const double ov = std::min(fhi, (double)grid[b + 1])
+                            - std::max(flo, (double)grid[b]);
+            if (ov > 0.0) { share.emplace_back(b, ov); total += ov; }
+        }
+        // Degenerate footprint (zero overlap everywhere — e.g. a zero-width
+        // band range): fall back to the centre band, i.e. legacy behaviour.
+        if (total <= 0.0) {
+            int b = find_band(is_vcut, pp);
+            if (b >= 0 && b < c.num_bands()) fn(ci, b, 1.0);
+            return;
+        }
+        for (const auto& [b, ov] : share) fn(ci, b, ov / total);
+    });
 }
 
 // True if a non-TOP segment is obstructed by a leaf cell at this perp (Gap A).
@@ -451,10 +517,13 @@ double CongestionPlanner::score_segment(const Segment& seg, int layer_id,
     if (low_seg_obstructed(seg, layer_id, perp_pos_override)) return 9999.0;
     bool   is_vcut_dir = (seg.start.y == seg.end.y);   // H-seg crosses V-cuts
     double peak = 0.0;
-    for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
+    for_each_band_w(seg, layer_id, perp_pos_override, eff_width,
+                    [&](int ci, int b, double w) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
-        double ov  = (c.usage(b) + eff_width + track_pitch_) - cap;  // +pitch: Gap 1
+        // Demand AND the Gap-1 pitch allowance scale with the band's share, so
+        // the total charged across the footprint is exactly eff_width + pitch.
+        double ov  = (c.usage(b) + (eff_width + track_pitch_) * w) - cap;
         if (ov > peak) peak = ov;
     });
     return std::max(peak, 0.0);
@@ -490,10 +559,13 @@ void CongestionPlanner::collect_overflow_bands(const Segment& seg, int layer_id,
                                                int slide_lo, int slide_hi,
                                                std::set<std::pair<int,int>>& out) const {
     bool is_vcut_dir = (seg.start.y == seg.end.y);
-    for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
+    // Must stay the exact predicate score_segment peaks over, or the victim
+    // ranking would chase bands the scorer never charged.
+    for_each_band_w(seg, layer_id, perp_pos_override, eff_width,
+                    [&](int ci, int b, double w) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
-        if ((c.usage(b) + eff_width + track_pitch_) - cap > 0.0) out.insert({ci, b});  // +pitch: Gap 1
+        if ((c.usage(b) + (eff_width + track_pitch_) * w) - cap > 0.0) out.insert({ci, b});
     });
 }
 
@@ -514,8 +586,9 @@ double CongestionPlanner::plan_band_overlap(const BundleWrapper& bw,
                              ? bw.input.width * ((double)n / (double)nbits)
                              : bw.input.width;
         double eff = layers_.eff_bus_width(n, w, lid) + track_pitch_;  // +pitch: Gap 1
-        for_each_band(t.segments[si], lid, pp, [&](int ci, int b) {
-            if (contended.count({ci, b})) overlap += eff;
+        for_each_band_w(t.segments[si], lid, pp, eff,
+                        [&](int ci, int b, double wt) {
+            if (contended.count({ci, b})) overlap += eff * wt;
         });
     }
     return overlap;
@@ -573,8 +646,11 @@ double CongestionPlanner::usable_band_cap(const GlobalCut& c, int b, bool is_vcu
 
 void CongestionPlanner::apply_segment(const Segment& seg, int layer_id, double eff_width,
                                       int perp_pos_override) {
-    for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
-        cuts_[ci].add_usage(b, eff_width);
+    // The actual charge — must spread exactly as score_segment prices it, or
+    // the books and the scorer disagree about where the demand went.
+    for_each_band_w(seg, layer_id, perp_pos_override, eff_width,
+                    [&](int ci, int b, double w) {
+        cuts_[ci].add_usage(b, eff_width * w);
     });
 }
 
@@ -628,11 +704,12 @@ double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
     bool   is_vcut_dir = (seg.start.y == seg.end.y);   // H-seg crosses V-cuts
     double peak_cost   = 0.0;
     bool   blocked     = false;
-    for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
+    for_each_band_w(seg, layer_id, perp_pos_override, eff_width,
+                    [&](int ci, int b, double w) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
         if (cap <= 0.0) { blocked = true; return; }
-        double ov = c.usage(b) + eff_width + track_pitch_ - cap;  // +pitch: Gap 1
+        double ov = c.usage(b) + (eff_width + track_pitch_) * w - cap;
         if (ov <= 0.0) return;     // fits — no cost
         peak_cost = std::max(peak_cost, kCong_ * ov / cap);
     });
@@ -667,6 +744,10 @@ double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
                                             bool proportional_floor) const {
     bool   is_vcut_dir = (seg.start.y == seg.end.y);   // H-seg crosses V-cuts
     double peak = 0.0;
+    // Deliberately NOT width-spread (issue #518): this term takes no eff_width
+    // — it prices EXISTING fill, and its own absolute-supply floor below
+    // already reasons about the span's real track pool.  Both knobs are
+    // opt-in, so the pairing is an edge case; revisit if kPeak's default flips.
     for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);

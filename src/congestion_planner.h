@@ -480,6 +480,28 @@ private:
     // the same matching rule as apply_segment, factored for reuse.
     void for_each_band(const Segment& seg, int layer_id, int perp_pos_override,
                        const std::function<void(int, int)>& fn) const;
+    // Every cut this segment crosses, with the perpendicular position and cut
+    // orientation resolved.  The delicate closed-interval matching rule lives
+    // here ONCE; for_each_band and for_each_band_w are both thin wrappers.
+    void for_each_cut_(const Segment& seg, int layer_id, int perp_pos_override,
+                       const std::function<void(int, bool, int)>& fn) const;
+    // Width-aware sibling of for_each_band (issue #518): a bus of eff_width
+    // centred at perp occupies [perp - w/2, perp + w/2], which need not lie
+    // inside one Hanan band — charging it all to the band holding its centre
+    // makes any bus wider than that band overflow BY CONSTRUCTION, even on an
+    // empty layer.  Invokes fn(cut, band, weight) over the bands the footprint
+    // actually covers, weight = that band's share of the footprint.
+    //
+    // Weights are NORMALIZED to sum to 1 per cut, so the total charge is
+    // exactly eff_width either way: this redistributes demand, it never
+    // creates or destroys it (a footprint hanging off the grid edge would
+    // otherwise silently under-charge and mask real congestion).
+    //
+    // With band_span_charge_ off — the default — this delegates to
+    // for_each_band with weight 1.0, i.e. literally the old code path.
+    void for_each_band_w(const Segment& seg, int layer_id, int perp_pos_override,
+                         double eff_width,
+                         const std::function<void(int, int, double)>& fn) const;
     // Insert into `out` the (cut_index, band) pairs where placing the segment
     // would overflow (the band-set sibling of score_segment).
     void collect_overflow_bands(const Segment& seg, int layer_id, double eff_width,
@@ -706,6 +728,17 @@ private:
     // distinguish genuine culls from survivors whose final adjusted spans
     // clear the keepout).
     bool   nontop_dead_span_gate_ = false;
+    // Issue #518: spread a bus's band charge over the bands its width actually
+    // covers instead of dumping it all on the band holding its centre.
+    // Opt-in (`set_planner_param band_span_charge 1`, env BUDA_BAND_SPAN_CHARGE
+    // for sweeps); 0 = off = bit-identical, and it STAYS the default: the
+    // measured corpus result is 3 better / 3 worse, because spreading lowers
+    // the per-band feasibility bar for every bus and the planner then
+    // over-packs.  The single-band charge's conservatism turns out to be
+    // load-bearing.  See docs/internal/band_span_charge.md for the sweep and
+    // for the narrower "spread only an oversized bus" variant, which measured
+    // WORSE still (1 better / 4 worse) and is deliberately not implemented.
+    int    band_span_charge_      = 0;
     // One-shot guard for the above-TOP config-smell warning.
     bool   warned_above_top_ = false;
 };
