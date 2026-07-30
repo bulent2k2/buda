@@ -896,8 +896,12 @@ byte-identical. Tests: `test/tests/test_refine_selection.py` (+
 **Composition follow-up (2026-07-30):** a second healer round AFTER
 refine can crack a stuck endpoint — refine's commits change the
 contention geometry the healers stalled on, negotiate re-plans its
-targets UNPINNED (refine's pins don't block it), and its strict-accept
-means it can never undo refine's result. The recipe
+targets UNPINNED (refine's pins don't block it), and its strict accept
+on the healers' LEXICOGRAPHIC (opens, overlaps) metric means opens
+never rise and a no-accept round restores byte-identically — though an
+accepted iteration may transiently trade overlaps up for ripup to
+finish (84/2 -> 32/6 mid-recipe), so the round is lexicographically,
+not componentwise, protective. The recipe
 `refine_selection -> negotiate_congestion -> ripup_reroute ->
 refine_selection` heals the healerless topdown flow to a fully clean
 endpoint (175 opens/16 ovl -> 0/0 Success, WL 69621 — ~+6% vs the

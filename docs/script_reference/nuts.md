@@ -598,13 +598,21 @@ refine_selection         # claw back the WL the healers spent
 check_design
 ```
 
-The composition is safe by construction: negotiate/ripup accept only on
-strict endpoint improvement (snapshot/restore otherwise), so they can never
-undo refine's result, and refine's committed pins don't block them — the
-healers build their target sets from the failure sites and re-plan each
-target *unpinned*. The one cost: when the healers do move things they spend
-WL (their metrics don't track it), which is why the trailing second
-`refine_selection` belongs in the recipe. Measured (2026-07-30):
+The composition is safe **on the healers' own terms** — but note the terms:
+negotiate/ripup accept only on strict improvement of their **lexicographic**
+`(opens, overlaps)` metric (snapshot/restore otherwise), so opens never
+increase and a round that finds nothing restores byte-identically (the
+aligned case below). It is *not* componentwise-safe the way refine's own
+accept is: an accepted negotiate iteration may trade overlaps **up** while
+opens come down (84/2 → 32/6 in the measurement below), so if the following
+`ripup_reroute` stalls before clearing them, the endpoint is lexicographically
+better but mixed versus the post-refine state — the final `check_design` is
+the arbiter, and re-running `ripup_reroute` with a larger `max_iter` is the
+finisher. Refine's committed pins don't block the round — the healers build
+their target sets from the failure sites and re-plan each target *unpinned*.
+The other cost: when the healers do move things they spend WL (their metrics
+don't track it), which is why the trailing second `refine_selection` belongs
+in the recipe. Measured (2026-07-30):
 
 - **topdown** (the plain healerless mix2 pipeline — the checked-in QoR
   vehicle `flow/rnr/mix2_topdown_refine.buda`): 175 opens/16 ovl →
@@ -618,7 +626,9 @@ WL (their metrics don't track it), which is why the trailing second
   a byte-identical safe no-op costing ~15–20s of trials.
 
 So: on a clean endpoint a second healer round no-ops immediately; on a
-residual it is worst-case a cheap no-op, best-case a full heal.
+residual, a round that accepts nothing is a cheap byte-identical no-op, a
+round that accepts strictly improves opens (with a possible transient
+overlap trade for ripup to finish), and the best case is a full heal.
 
 ---
 

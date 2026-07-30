@@ -231,11 +231,14 @@ def test_topdown_recipe_heals_to_clean():
     `refine_selection` recovers part of the WL the healers spent without
     ever worsening the endpoint.
 
-    Exact counts are machine-sensitive (double-based NUTS math under
-    -march=native, as in the big2 tests), so the guards here are the
-    CPU-invariant ones — the componentwise no-worse guarantees + strict
-    overall progress; the exact per-host endpoint is pinned by the QoR
-    corpus compare (`tools/qor_corpus.py`), which this flow is part of."""
+    The leg-by-leg guards are the CPU-invariant guarantees (componentwise
+    no-worse at every refine leg, strict healer progress); the END state
+    pins the advertised clean 0/0 + check_design Success outright — the
+    central result of the recipe, and the assertion the QoR compare cannot
+    supply when the flow's corpus row is first introduced (a baseline from
+    the parent commit lacks the row; review #526).  Exact-zero endpoint
+    assertions on these vehicles are established repo practice
+    (test_hier_bottom_up et al.)."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     with contextlib.redirect_stdout(io.StringIO()):
@@ -277,3 +280,10 @@ def test_topdown_recipe_heals_to_clean():
     # lengthens the route (it commits only on strictly lower WL).
     assert final[0] <= healed[0] and final[1] <= healed[1], (healed, final)
     assert wl_after <= wl_before, (wl_before, wl_after)
+    # The headline: the recipe finishes CLEAN — 0 opens, 0 overlaps, and a
+    # clean full audit.
+    assert final == (0, 0), (base, r1, healed, final)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("check_design")
+    assert "Success: no violations found" in buf.getvalue(), buf.getvalue()
