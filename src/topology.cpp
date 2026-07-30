@@ -2070,20 +2070,19 @@ static void complete_relay_junctions(Topology& topo,
     // parallels are never merged onto one shared track, so each keeps its full
     // independent slide (docs/internal/wishlist-topo.md).
     //
-    // The hub needs exactly one busterm-conn + coverage, done by the CHEAPER of two
-    // strategies (follow-up E — the earlier scheme unconditionally ran the minority
-    // stub to the OPPOSITE face, overshooting the last tap by up to a block width):
-    //   • M-anchor: run the minority spine to the busterm-side block face and tap
-    //     there (overstretch = face − outermost tap).
-    //   • P-anchor: stop the spine AT the outermost tap and extend THAT tap across
-    //     the block to its far face (pass-through + face tap; reach = far face −
-    //     spine line).  The anchor must be the outermost tap so the spine ENDS on it
-    //     (a T-junction); an interior stub is only X-crossed by the spine, which
-    //     ConnTopology does not infer, and would strand the block.
-    // Whichever costs less wins, so this never regresses the old WL and removes the
-    // overhang where the tap-extension is shorter.  No new segments, no tap lost.
-    // Conservative: single-rect blocks, the clean ≥2-parallel + 1-perpendicular
-    // split, spine line strictly interior; else general chaining.
+    // Hub coverage is GEOMETRIC (issue #514): the spine stops AT the outermost
+    // tap (J-anchor) and the block is covered by the spine's own crossing of
+    // the footprint — spine_perp strictly interior, the taps' along-coords on
+    // the footprint — the same seg_spans_rect pass-through every
+    // block-coverage check accepts, with the nominal perp inside the block
+    // (the robust-cover gate's "normal cover" case).  No busterm tap is kept:
+    // the earlier follow-up-E strategies (run the spine to the busterm-side
+    // face, or extend the outermost stub across the block to its far face)
+    // extended wire past the last junction purely to END on a face — a
+    // tap-overhang antenna over the very block being tapped, now flagged by
+    // detect_antennas.  Conservative: single-rect blocks, the clean
+    // ≥2-parallel + 1-perpendicular split, spine line strictly interior; else
+    // general chaining.
     std::set<int> spine_handled;
     if (spine_relays) {
         for (auto& [bi, pts] : incident) {
@@ -2131,7 +2130,6 @@ static void complete_relay_junctions(Topology& topo,
                 for (const Inc* q : TAPS) if (perp(q->p) != face_perp) { common_face = false; break; }
                 int spine_perp, c_lo, c_hi;
                 const Inc* face_stub = nullptr;                 // stub carrying the busterm tap
-                bool tap_lo = false;                            // (interior path) which face
                 if (common_face) {
                     spine_perp = face_perp;                     // collector rides the shared face
                     c_lo = t_min; c_hi = t_max;                 // tight — no overhang
@@ -2139,13 +2137,17 @@ static void complete_relay_junctions(Topology& topo,
                 } else {
                     spine_perp = (p_lo + p_hi) / 2;             // interior collector line
                     if (spine_perp <= p_lo || spine_perp >= p_hi) continue;   // degenerate block
-                    tap_lo = (t_min - a_lo) <= (a_hi - t_max);  // nearer face
-                    c_lo = tap_lo ? a_lo : t_min;
-                    c_hi = tap_lo ? t_max : a_hi;
+                    // Tight span [t_min..t_max] — no face extension (issue
+                    // #514).  The interior collector already covers the block
+                    // by geometry (perp strictly interior, taps' alongs on the
+                    // footprint), so the former minimal extension to the
+                    // nearer face bought nothing and was exactly the
+                    // tap-overhang shape detect_antennas now flags.
+                    c_lo = t_min;
+                    c_hi = t_max;
                 }
                 auto on_other_boundary = [&](const Point& Pn) { return on_any_other_face(Pn, bi); };
-                bool safe = common_face ? true
-                                        : !on_other_boundary(mk(tap_lo ? a_lo : a_hi, spine_perp));
+                bool safe = true;
                 for (const Inc* q : TAPS)
                     if (on_other_boundary(q->p) || on_other_boundary(mk(along(q->p), spine_perp)))
                         { safe = false; break; }
@@ -2167,15 +2169,16 @@ static void complete_relay_junctions(Topology& topo,
                 // Block coverage is GEOMETRIC (verify's face/pass-through test on
                 // placed extents), never annotation-driven: on the common-face path
                 // the stubs land on the near face (and the outermost keeps an
-                // explicit busterm above); on the interior path the collector's end
-                // sits ON the extended-to (c_lo==a_lo or c_hi==a_hi) block face, so
-                // that endpoint covers the block by geometry alone.  We deliberately
-                // do NOT tag the collector: as an APPENDED segment its busterms are
-                // cleared unconditionally below (the same rule that keeps OTC
-                // connectors from being re-tagged where they graze a face), so any
-                // tag here would be dead — the geometric face contact is what
-                // matters, and check_topo/NUTS/DNUTS confirm the interior-path hub
-                // stays covered (the straddled-face regression test).
+                // explicit busterm above); on the interior path the collector's
+                // strictly-interior line over [t_min..t_max] IS the footprint
+                // crossing that covers the block (issue #514 — no face
+                // extension anymore).  We deliberately do NOT tag the
+                // collector: as an APPENDED segment its busterms are cleared
+                // unconditionally below (the same rule that keeps OTC
+                // connectors from being re-tagged where they graze a face), so
+                // any tag here would be dead — the geometric coverage is what
+                // matters, and check_topo/NUTS/DNUTS confirm the interior-path
+                // hub stays covered (the straddled-face regression test).
                 const Point cs = mk(c_lo, spine_perp), ce = mk(c_hi, spine_perp);
                 topo.segments.push_back(make_seg(cs.x, cs.y, ce.x, ce.y, spine_h ? h_layer : v_layer));
                 spine_handled.insert(bi);
@@ -2205,59 +2208,45 @@ static void complete_relay_junctions(Topology& topo,
             for (const Inc* q : P) { int a = along(q->p); t_min = std::min(t_min, a); t_max = std::max(t_max, a); }
             // Busterm-side extreme tap (side away from the neighbour M_far).
             const int bus_along = (along(M_far) >= t_max) ? t_min : t_max;
-            // Anchor candidate = the OUTERMOST-tap stub (the spine ENDS on it, a
-            // T-junction; an interior stub would only be X-crossed by the spine,
-            // which ConnTopology does not infer, and be stranded).
-            const Inc* anchor = nullptr;
-            for (const Inc* q : P) if (along(q->p) == bus_along) { anchor = q; break; }
-            if (!anchor) continue;                              // defensive; bus_along is a P tap
-            const int a_pf  = spine_h ? anchor->p.y : anchor->p.x;   // anchor's landing perp face
-            const int anchor_far = (std::abs(a_pf - p_lo) <= std::abs(a_pf - p_hi)) ? p_hi : p_lo;
-            // Two coverage strategies — use the CHEAPER (never worse than the old
-            // overstretch):
-            //   M-anchor: run the minority spine to the busterm-side block face
-            //             (overstretch |m_opp − bus_along|) and tap there.
-            //   P-anchor: stop the spine at the outermost tap and extend THAT tap
-            //             across the block to its far face (reach |anchor_far − spine_perp|).
-            const int m_opp  = (along(M_far) >= t_max) ? a_lo : a_hi;  // busterm-side along face
-            const int m_cost = std::abs(m_opp - bus_along);
-            const int p_cost = std::abs(anchor_far - spine_perp);
-            const bool use_p = (p_cost < m_cost);
-            const Point M_new      = use_p ? mk(bus_along, spine_perp) : mk(m_opp, spine_perp);
-            const Point anchor_new = mk(along(anchor->p), anchor_far);   // used only when use_p
+            // J-anchor (issue #514): stop the spine AT the outermost tap — no
+            // face extension, no tap.  The trimmed spine still covers the hub
+            // by geometry: spine_perp is strictly interior (gate above) and
+            // bus_along lies within the block's along extent (every majority
+            // tap is an MST landing ON a block face), so the spine's overlap
+            // with the footprint is the same seg_spans_rect pass-through
+            // coverage every block-coverage check accepts, with the nominal
+            // perp inside the block (the robust-cover gate's own "normal
+            // cover" case).  The former M-/P-anchor strategies extended wire
+            // past the outermost junction purely to END on a face — a
+            // tap-overhang antenna over the very block being tapped (the
+            // detect_antennas rule now flags that shape); the extension bought
+            // nothing coverage could not already have.
+            if (bus_along < a_lo || bus_along > a_hi) continue;  // defensive
+            const Point M_new = mk(bus_along, spine_perp);
             // A repositioned endpoint that also lies on ANOTHER block's face
             // could strand that block's coverage — leave such a relay to chaining
             // (guard both the ORIGINAL landing and the new one, per the OTC path;
             // on_any_other_face is rect-aware — see its definition for Codex #461 P2).
             auto on_other_boundary = [&](const Point& Pn) { return on_any_other_face(Pn, bi); };
             bool safe = !on_other_boundary(Mi->p) && !on_other_boundary(M_new);
-            if (use_p) safe = safe && !on_other_boundary(anchor->p) && !on_other_boundary(anchor_new);
             for (const Inc* q : P) {
-                if (use_p && q == anchor) continue;
                 const Point np = mk(along(q->p), spine_perp);
                 if (on_other_boundary(q->p) || on_other_boundary(np)) { safe = false; break; }
             }
             if (!safe) continue;                                // fallback to chaining
-            // Commit.  M becomes the spine; every majority stub taps it at its own
-            // along-coord (independent slide).  Coverage: P-anchor extends the
-            // outermost tap across the block; M-anchor runs the spine to the face.
+            // Commit.  M becomes the spine, trimmed to the outermost tap; every
+            // majority stub taps it at its own along-coord (independent slide).
             ((Mi->ep == 0) ? sM.start : sM.end) = M_new;
-            if (use_p) { Segment& sa = topo.segments[anchor->seg_idx];
-                         ((anchor->ep == 0) ? sa.start : sa.end) = anchor_new; }
             for (const Inc* q : P) {
-                if (use_p && q == anchor) continue;
                 Segment& sq = topo.segments[q->seg_idx];
                 ((q->ep == 0) ? sq.start : sq.end) = mk(along(q->p), spine_perp);
             }
-            // Busterm: exactly one tap — the anchor's far face (P) or the spine's
-            // face landing (M); every other landing → internal SEG junction.
-            if (use_p) { auto& ep = topo.seg_busterms[anchor->seg_idx];
-                         ((anchor->ep == 0) ? ep.first : ep.second) = blocks[bi]; }
+            // Busterm: NONE — the hub is covered by the spine's geometric
+            // crossing (like the OTC relay shapes); every landing becomes an
+            // internal SEG junction.
             { auto& ep = topo.seg_busterms[Mi->seg_idx];
-              ((Mi->ep == 0) ? ep.first : ep.second)
-                  = use_p ? std::optional<Busterm>{} : std::optional<Busterm>{blocks[bi]}; }
+              ((Mi->ep == 0) ? ep.first : ep.second) = std::nullopt; }
             for (const Inc* q : P) {
-                if (use_p && q == anchor) continue;
                 auto& ep = topo.seg_busterms[q->seg_idx];
                 ((q->ep == 0) ? ep.first : ep.second) = std::nullopt;
             }

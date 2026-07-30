@@ -16,7 +16,9 @@
 
 #include "verify.h"
 #include <algorithm>
+#include <cmath>
 #include <functional>
+#include <limits>
 #include <map>
 #include <numeric>
 #include <set>
@@ -319,6 +321,99 @@ static void detect_antennas(const std::vector<ConnSeg>& segs,
         if (!a.positions.empty()) msg << " at along=" << *a.positions.begin();
         msg << " — a dangling 'antenna' wire: the rest of it terminates in "
                "nothing (" << stage << ")";
+        v.message = msg.str();
+        result.violations.push_back(std::move(v));
+    }
+
+    // Tap-overhang antenna (issue #514): a terminal piece that exists ONLY to
+    // tap a face of a block the wire already covers.  The attachment-count
+    // rule above cannot see it — the far-face tap IS an attachment, so the
+    // span ends exactly on a "valid" landing — but the piece between the tap
+    // and the segment's nearest OTHER attachment runs over the tapped block's
+    // own footprint and serves nothing: remove it and the block stays
+    // covered (the remainder still overlaps the footprint — the same
+    // seg_spans_rect coverage every block-coverage check accepts).  The
+    // canonical producer was the spine-relay completion's face-extension
+    // strategies (repro: mix.bdb clone bundle, spine extended 35 units past
+    // its last junction to the block's FAR face); generation no longer emits
+    // the shape, and this flags any persisted/hand-built instance LOUD.
+    //
+    // Guards keep the legitimate tap idioms out:
+    //   - piece must lie INSIDE the tapped block (a normal outside-approach
+    //     tap's terminal piece is outside the footprint);
+    //   - redundancy is required (remainder or a sibling still covers the
+    //     block) — a tap whose removal would open the block is a real tap;
+    //   - exactly ONE busterm conn on the segment (multi-tap shapes — the
+    //     ABUT shared-edge crossing — are their own contract);
+    //   - declared feedthru blocks are exempt (their split-at-face landings
+    //     are the feedthru contract, not overhang).
+    for (int i = 0; i < n; ++i) {
+        const ConnSeg& cs = segs[i];
+        const SegConn* tap = nullptr;
+        int nbt = 0;
+        for (const auto& c : cs.conns)
+            if (c.kind == SegConn::BUSTERM) { ++nbt; tap = &c; }
+        if (nbt != 1) continue;
+        if (std::find(topo.feedthru_blocks.begin(), topo.feedthru_blocks.end(),
+                      tap->block_name) != topo.feedthru_blocks.end())
+            continue;
+        const double F = tap->at_pos;
+        const bool at_lo = (F == (double)cs.along_lo);
+        const bool at_hi = (F == (double)cs.along_hi);
+        if (at_lo == at_hi) continue;      // mid-segment graze (or degenerate)
+        // Nearest OTHER attachment position along this segment.
+        double A = std::numeric_limits<double>::quiet_NaN();
+        for (const auto& c : cs.conns) {
+            if (&c == tap) continue;
+            const double p = c.at_pos;
+            if (std::isnan(A) || (at_lo ? p < A : p > A)) A = p;
+        }
+        if (std::isnan(A) || A == F) continue;   // no piece: count rule's business
+        const double plo = std::min(F, A), phi = std::max(F, A);
+        // The piece must lie inside the tapped block (rect-aware) at cs's perp.
+        auto rects = fp.get_block_rects(tap->block_name);
+        if (rects.empty()) rects.push_back(fp.get_block_bounds(tap->block_name));
+        bool inside = false;
+        for (const Rect& r : rects) {
+            const int alo = cs.horiz ? r.x1 : r.y1, ahi = cs.horiz ? r.x2 : r.y2;
+            const int blo = cs.horiz ? r.y1 : r.x1, bhi = cs.horiz ? r.y2 : r.x2;
+            if (cs.perp_pos >= blo && cs.perp_pos <= bhi &&
+                plo >= alo && phi <= ahi) { inside = true; break; }
+        }
+        if (!inside) continue;
+        // Redundancy: with the piece removed, the block must remain covered —
+        // by this segment's trimmed remainder or by any sibling's tap /
+        // pass-through.
+        ConnSeg trimmed = cs;
+        if (at_lo) trimmed.along_lo = (int)A; else trimmed.along_hi = (int)A;
+        bool covered = false;
+        for (const Rect& r : rects)
+            if (seg_spans_rect(trimmed, (double)cs.perp_pos, r)) { covered = true; break; }
+        for (int j = 0; j < n && !covered; ++j) {
+            if (j == i) continue;
+            for (const auto& c : segs[j].conns)
+                if (c.kind == SegConn::BUSTERM && c.block_name == tap->block_name)
+                    { covered = true; break; }
+            for (const Rect& r : rects) {
+                if (covered) break;
+                if (seg_spans_rect(segs[j], (double)segs[j].perp_pos, r))
+                    covered = true;
+            }
+        }
+        if (!covered) continue;            // the tap is load-bearing: keep it
+        ConnViolation v;
+        v.kind       = ViolationKind::ANTENNA;
+        v.bundle_id  = bundle_id;
+        v.seg_idx    = i;
+        v.block_name = tap->block_name;
+        std::ostringstream msg;
+        msg << "Segment " << i << " (" << (cs.horiz ? "H" : "V")
+            << " along [" << cs.along_lo << "," << cs.along_hi
+            << "] @ " << cs.perp_pos << ") overhangs [" << plo << "," << phi
+            << "] past its last junction, entirely over block '"
+            << tap->block_name << "', only to tap its far face at " << F
+            << " — the block stays covered without it: a tap-overhang "
+               "'antenna' (" << stage << ")";
         v.message = msg.str();
         result.violations.push_back(std::move(v));
     }

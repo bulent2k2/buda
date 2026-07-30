@@ -438,3 +438,155 @@ def test_seed_trunk_families_are_still_generated():
     assert "TRUNK_H+MST" in types or "TRUNK_V+MST" in types, types
     assert any(x.endswith("_OOB+MST") for x in types), (
         f"no OOB hybrid survived — the gate is over-dropping: {sorted(types)}")
+
+
+# ── 3. tap-overhang antennas (issue #514) ────────────────────────────────────
+#
+# The attachment-count rule cannot see a dangling piece that ENDS on a face
+# tap: the tap is an attachment, so the span terminates on a "valid" landing —
+# but when the piece between the tap and the segment's nearest other
+# attachment runs entirely over the tapped block's own footprint and the block
+# stays covered without it, the piece is redundant metal (the repro: a
+# spine-relay hub spine extended 35 units past its last junction to the hub's
+# FAR face).  detect_antennas now flags that shape; the spine-relay completion
+# no longer produces it (J-anchor: the spine stops at the outermost tap and
+# the hub is covered by the crossing).
+
+def _hub_fixture(overhang):
+    """The issue-514 shape, flat.  An H spine runs westward over hub block H
+    from east block C; two V stubs junction ON the spine inside the hub's
+    footprint (the spine-relay 2-1 split).  overhang=True reproduces the
+    retired M-anchor form — spine extended past the last junction (x=140) to
+    the hub's FAR face (x=100) and tapped there; False is the J-anchor form
+    (spine ends at the outermost junction, hub covered by the crossing)."""
+    fp = buda.Floorplan()
+    fp.add_block("HUB", 100, 100, 300, 200)
+    fp.add_block("B1", 120, 0, 160, 50)       # below; stub at x=140
+    fp.add_block("B2", 160, 260, 200, 310)    # above; stub at x=180
+    fp.add_block("C", 580, 100, 660, 200)     # east; spine terminates inside
+    topo = buda.Topology()
+    topo.type = "TEST_HUB_SPINE"
+    spine_w = 100 if overhang else 140
+    topo.segments = [
+        _seg(spine_w, 150, 600, 150, LAYER_H),   # 0: the spine
+        _seg(140, 50, 140, 150, LAYER_V),        # 1: stub to B1's top face
+        _seg(180, 150, 180, 260, LAYER_V),       # 2: stub to B2's bottom face
+    ]
+    topo.connected_block_names = ["HUB", "B1", "B2", "C"]
+    buda.annotate_topology(topo, fp)             # geometric taps (incl. HUB @100)
+    buda.annotate_seg_conns(topo)                # junction records
+    ct = buda.ConnTopology()
+    ct.build(topo, fp)
+    return fp, topo, ct
+
+
+def test_tap_overhang_antenna_is_flagged():
+    """The retired M-anchor shape: the spine's [100,140] piece lies entirely
+    over HUB, exists only to tap HUB's far face at 100, and HUB stays covered
+    without it — a tap-overhang antenna at both placed stages."""
+    fp, topo, ct = _hub_fixture(overhang=True)
+    spine = ct.segs()[0]
+    # Fixture preconditions: the tap really is at the far face, with the
+    # nearest other attachment at 140, and attachments >= 2 (so the plain
+    # count rule stays quiet — this is exactly the blind spot).
+    assert any(c.kind == buda.SegConnKind.BUSTERM and c.block_name == "HUB"
+               and c.at_pos == 100 for c in spine.conns), \
+        [f"{c.kind} {c.block_name} {c.at_pos}" for c in spine.conns]
+    res = buda.check_nuts(ct, _nominal_nuts(ct), topo, fp, _layers(), 1)
+    ants = _antennas(res)
+    assert len(ants) == 1, [v.message for v in res.violations]
+    assert ants[0].seg_idx == 0
+    assert ants[0].block_name == "HUB"
+    assert "tap-overhang" in ants[0].message
+    res_d = buda.check_dnuts(ct, _nominal_dnuts(ct, 2), topo, fp, _layers(), 1, 2)
+    assert len(_antennas(res_d)) == 1
+
+
+def test_j_anchor_spine_is_clean_and_covers_the_hub():
+    """The replacement shape: spine trimmed to the outermost junction, no
+    tap.  No antenna of either kind, and the hub is still covered (by the
+    crossing) — no BUSTERM_OPEN."""
+    fp, topo, ct = _hub_fixture(overhang=False)
+    res = buda.check_nuts(ct, _nominal_nuts(ct), topo, fp, _layers(), 1)
+    assert not _antennas(res), [v.message for v in res.violations]
+    opens = [v for v in res.violations
+             if v.kind == buda.ViolationKind.BUSTERM_OPEN]
+    assert not opens, [v.message for v in opens]
+
+
+def test_load_bearing_far_face_tap_is_not_flagged():
+    """A far-face tap whose removal WOULD open the block is a real tap, not
+    overhang: same spine shape but with no other coverage of the tapped block
+    (stub junctions outside its footprint) — the redundancy clause must keep
+    it."""
+    fp = buda.Floorplan()
+    fp.add_block("HUB", 100, 100, 180, 200)   # narrow: junctions lie EAST of it
+    fp.add_block("B1", 300, 0, 340, 50)
+    fp.add_block("C", 580, 100, 660, 200)
+    topo = buda.Topology()
+    topo.type = "TEST_HUB_TAP"
+    topo.segments = [
+        _seg(100, 150, 600, 150, LAYER_H),    # spine taps HUB's west face
+        _seg(320, 50, 320, 150, LAYER_V),     # junction at x=320 (outside HUB)
+    ]
+    topo.connected_block_names = ["HUB", "B1", "C"]
+    buda.annotate_topology(topo, fp)
+    buda.annotate_seg_conns(topo)
+    ct = buda.ConnTopology()
+    ct.build(topo, fp)
+    # The piece [100,320] is NOT inside HUB (HUB ends at 180), so the inside
+    # guard alone skips it; this pins the rule stays quiet on ordinary
+    # outside-approach spans that happen to start on a face.
+    res = buda.check_nuts(ct, _nominal_nuts(ct), topo, fp, _layers(), 1)
+    assert not _antennas(res), [v.message for v in res.violations]
+
+
+@pytest.mark.mid
+def test_issue_514_repro_spine_has_no_overhang():
+    """The reported vehicle end-to-end (mix.bdb clone bundle, spine_relays):
+    the TRUNK_V+MST hub spine must stop at its outermost junction (x=1035)
+    instead of extending to the hub's far face (x=1000), and the full
+    pipeline pinned to that candidate must pass check_design clean."""
+    rnr = _ROOT / "flow" / "rnr"
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        for c in ["def_layer 5 M5 V TOP 63.64",
+                  "def_layer 6 M6 H TOP 63.64",
+                  "def_track_pattern 5 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 "
+                  "VSS 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1",
+                  "def_track_pattern 6 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 "
+                  "VSS 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1",
+                  f"open_bdb {rnr / 'mix.bdb.sql'}",
+                  "derive_busterms 2",
+                  "add_blocks_from_bdb 0",
+                  "add_blocks_from_bdb 1 skip",
+                  "add_blocks_from_bdb 2 skip",
+                  "bdb_net_mode on",
+                  "add_bus clone[4] chip/i_dnuts1_0/u0 chip/i_dogleg2_0/top3,"
+                  "chip/i_dnuts2_2/u4,chip/i_dogleg1_1/top2,"
+                  "chip/i_dogleg2_2/top3,chip/i_dogleg2_3/bot2",
+                  "run_hier_bundler depth 2",
+                  "generate_topologies_for_hbundle 91 no_hanan_loci spine_relays"]:
+            s.do_command(c)
+    w = next(w for w in s.bundles if w.input.original_bundle.id == 91)
+    spine_cands = [(k, t) for k, t in enumerate(w.input.candidates)
+                   if t.type.startswith("TRUNK_V+MST@x1705")]
+    assert spine_cands, [t.type for t in w.input.candidates]
+    k, topo = spine_cands[0]
+    # The hub block is (1000,1130)-(1200,1230); the H spine at y=1180 must
+    # start at the outermost junction (1035), not the far face (1000).
+    spine = next(sg for sg in topo.segments
+                 if sg.start.y == 1180 and sg.end.y == 1180)
+    assert min(spine.start.x, spine.end.x) == 1035, \
+        f"spine spans [{spine.start.x},{spine.end.x}] — far-face overhang is back"
+    with contextlib.redirect_stdout(out):
+        for c in [f"select_topology 91 {k + 1}",
+                  "run_planner hier signal_tracks",
+                  "run_nuts",
+                  "run_detailed_nuts",
+                  "check_design"]:
+            s.do_command(c)
+    assert "Success: no violations found" in out.getvalue(), \
+        out.getvalue()[-2000:]
