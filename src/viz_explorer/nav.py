@@ -381,6 +381,7 @@ class ExplorerNavMixin:
         if event.key in ('+', '='):             self._cycle_layer(+1)
         if event.key in ('-', '_'):             self._cycle_layer(-1)
         if event.key == 'b':                    self.ui_state.toggle_blocks()
+        if event.key == 'N':                    self.ui_state.toggle_block_names()
         if event.key == 'g':                    self.ui_state.toggle_hanan_grid()
         if event.key == 't':                    self.ui_state.toggle_busterms()
         if event.key == 's':

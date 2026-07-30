@@ -209,6 +209,14 @@ def test_explorer_names_terminals_off_by_default(monkeypatch):
     try:
         assert exp.ui_state.block_names is False
         assert exp.ui_state.busterms is False
+        # The OFF default must be RECOVERABLE: 'N' re-enables the block-name
+        # labels, 't' the terminals — so a standalone explorer isn't stuck
+        # without endpoint context.
+        from types import SimpleNamespace
+        key = lambda k: exp._on_key(SimpleNamespace(key=k, xdata=None, ydata=None))
+        key('N'); assert exp.ui_state.block_names is True
+        key('N'); assert exp.ui_state.block_names is False
+        key('t'); assert exp.ui_state.busterms is True
     finally:
         plt.close(exp.fig)
 

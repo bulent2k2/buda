@@ -58,6 +58,7 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `o` | **Toggle `otc-over` detail** in the j/k segment info box: the over-the-cell fly-over blocks (unrelated blocks a wire merely passes over — often a long, topo-irrelevant list) show as a terse `otc:N` count by default; `o` expands them to the full `otc-over: names` (and back). The topo-relevant `low-cross:` field is always shown. |
 | `r` | **Re-run Planner**: Re-evaluate global routing and NUTS track assignment after changing a pin. |
 | `b` | Toggle visibility of the floorplan **blocks**. |
+| `N` (Shift+n) | Toggle visibility of the block-**name** labels (start OFF in a standalone explorer). |
 | `t` | Toggle visibility of **busterms**. |
 | `g` | Toggle visibility of the **Hanan** grid. |
 | `v`, `cmd+1`, `ctrl+1` | Bring the **Main View** window to the front. Since the Main View's `v` opens/raises this explorer, tapping `v` cycles between the two windows. |
