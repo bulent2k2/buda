@@ -396,6 +396,10 @@ void CongestionPlanner::for_each_band_w(const Segment& seg, int layer_id,
                       [&](int ci, int b) { fn(ci, b, 1.0); });
         return;
     }
+    // Policy split (see the header): WHEN to spread, and HOW to allocate.
+    const bool oversized_only = (band_span_charge_ == 1 || band_span_charge_ == 4);
+    const bool greedy_fill    = (band_span_charge_ >= 3);
+
     const double half = 0.5 * eff_width;
     // Scratch reused across cuts so a hot scoring loop does not allocate.
     std::vector<std::pair<int, double>> share;
@@ -405,6 +409,70 @@ void CongestionPlanner::for_each_band_w(const Segment& seg, int layer_id,
         const auto&      grid = is_vcut ? y_grid_ : x_grid_;
         const int        nb   = std::min((int)grid.size() - 1, c.num_bands());
         if (nb <= 0) return;
+
+        const int bc = find_band(is_vcut, pp);
+        if (oversized_only) {
+            // Spread ONLY a bus too wide for the band holding its centre —
+            // #518's "no perp inside this band could ever hold it" case.
+            // A bus that merely straddles a boundary was never mis-charged,
+            // so spreading it only lowers its feasibility bar for free.
+            if (bc < 0 || bc >= c.num_bands()) return;
+            if (eff_width <= (double)(grid[bc + 1] - grid[bc])) {
+                fn(ci, bc, 1.0);
+                return;
+            }
+        }
+
+        if (greedy_fill && bc >= 0 && bc < c.num_bands()) {
+            // Capacity-aware fill: saturate the preferred band, then spill
+            // outward to the nearest band with room — NUTS's own preferred_fit
+            // ("target the pull, spread to the nearest free track"), rather
+            // than diluting the bus uniformly across bands that may already be
+            // full.  Unlike the proportional rule this reads the CURRENT
+            // usage, so demand routes around a locally-saturated neighbour
+            // instead of piling phantom overflow onto it.
+            auto free_of = [&](int b) {
+                const double cap = usable_band_cap(c, b, is_vcut, INT_MIN, INT_MIN);
+                return std::max(0.0, cap - c.usage(b));
+            };
+            // The spill reach is deliberately UNBOUNDED (to the grid edges).
+            // Capping it at one bus-width beyond the footprint was measured:
+            // QoR fell from 2 better/1 worse to 0 better/3 worse and runtime
+            // did not improve at all (+209% vs +207%) — the cost is
+            // best_band_perp's relaxed candidate loop, not this walk.
+            const int r_lo = 0, r_hi = nb - 1;
+
+            share.clear();
+            double remaining = eff_width;
+            const double take0 = std::min(remaining, free_of(bc));
+            if (take0 > 0.0) { share.emplace_back(bc, take0); remaining -= take0; }
+            int lo = bc, hi = bc;
+            while (remaining > 1e-9 && (lo > r_lo || hi < r_hi)) {
+                // Expand to whichever neighbour is geometrically nearer to pp.
+                const bool can_lo = (lo > r_lo), can_hi = (hi < r_hi);
+                bool take_lo;
+                if (can_lo && can_hi) {
+                    const double d_lo = (double)pp - (double)grid[lo];
+                    const double d_hi = (double)grid[hi + 1] - (double)pp;
+                    take_lo = (d_lo <= d_hi);
+                } else {
+                    take_lo = can_lo;
+                }
+                const int b = take_lo ? --lo : ++hi;
+                const double take = std::min(remaining, free_of(b));
+                if (take > 0.0) { share.emplace_back(b, take); remaining -= take; }
+            }
+            // Nothing anywhere has room: the residue must still surface as
+            // overflow, and it belongs on the band the bus actually prefers.
+            if (remaining > 1e-9) {
+                bool merged = false;
+                for (auto& s : share)
+                    if (s.first == bc) { s.second += remaining; merged = true; break; }
+                if (!merged) share.emplace_back(bc, remaining);
+            }
+            for (const auto& [b, amt] : share) fn(ci, b, amt / eff_width);
+            return;
+        }
 
         const double flo = pp - half, fhi = pp + half;
         // Clamp the footprint to the band range it can reach.  find_band
@@ -919,7 +987,15 @@ int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
     for (int b = 0; b + 1 < (int)grid.size(); ++b) {
         int win_lo = std::max(grid[b],     slide_lo);
         int win_hi = std::min(grid[b + 1], slide_hi);
-        if (win_hi - win_lo < eff_width) continue;   // band can't host the bus
+        // "Band can't host the bus" — skip it.  Kept even under
+        // band_span_charge, where the bus MAY occupy neighbouring bands and
+        // this skip therefore looks too strict: relaxing it was implemented
+        // and measured, and it lost on both axes — QoR 3 better/1 worse ->
+        // 2 better/1 worse, and runtime +12% -> +207%, because every band
+        // then enters the candidate loop and runs a full cost evaluation.
+        // For an oversized bus the fallback (slide-window centre) is both
+        // cheaper and a better spreading centre.  See band_span_charge.md.
+        if (win_hi - win_lo < eff_width) continue;
         int pp = (win_lo + win_hi) / 2;              // centre of the usable window
         double cost = band_cost(pp);
         int dist = std::abs(pp - centre);

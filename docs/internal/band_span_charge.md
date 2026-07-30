@@ -69,6 +69,52 @@ Deliberately **not** converted:
   an explicit perp *range* rather than a bus width. Spreading those over the
   measured overlap rectangle is a separate, plausible follow-up.
 
+## How the bus is positioned, and what "optimum band" means
+
+Worth stating plainly, because it is not what one might assume:
+
+- **The planner does not choose the band by net pull.** `best_band_perp`
+  ranks candidate perps by `cong_cost_segment` (+ the `kPeak` term when
+  enabled), tie-broken by distance to the slide-window centre. `net_pull` is
+  a *NUTS* placement preference and never enters the planner's band choice.
+  The existing opt-in `charge_pull_target` is precisely the knob that makes
+  the CHARGE follow the predicted pull target instead — that is the
+  books-vs-metal arc, and what the `[NUTS] books-vs-metal` line measures.
+  So under `charge_pull_target`, spreading centres on the pull target; by
+  default it centres on the cost-chosen band.
+
+- **`best_band_perp` skips any band narrower than the bus**
+  (`if (win_hi - win_lo < eff_width) continue;`). For a bus wider than every
+  band that rejects *all* candidates and falls back to the raw slide-window
+  centre — which the single-band charge then prices as overflow. That is the
+  other half of #518's pathology.
+
+  Relaxing that skip under `band_span_charge` looks obviously right (the bus
+  may now occupy neighbours, so a narrow band is a legitimate centre). It was
+  implemented and measured, and it **lost on both axes**: QoR 3 better/1 worse
+  → 2 better/1 worse, and runtime **+12% → +207%**, because every band then
+  enters the candidate loop and runs a full cost evaluation. The cheap
+  fallback is also the better spreading centre. The skip stays.
+
+## Allocation: proportional vs greedy fill
+
+Two ways to split a bus across the bands it covers:
+
+- **Proportional** — each band gets its geometric share of the footprint.
+  Simple, but blind to occupancy: it dumps demand into neighbours that may
+  already be full, manufacturing overflow there.
+- **Greedy fill** — saturate the preferred band, then spill to the nearest
+  band with room, reading CURRENT usage. This mirrors NUTS's own
+  `preferred_fit` ("target the pull, spread to the nearest free track"), and
+  routes demand around a locally-saturated neighbour instead of piling
+  phantom overflow onto it.
+
+Greedy fill measures better (see below). Its spill reach is deliberately
+**unbounded** to the grid edges: capping it at one bus-width beyond the
+footprint was measured and lost QoR (2 better/1 worse → 0 better/3 worse)
+while saving no runtime at all (+209% vs +207%) — confirming the cost was
+never this walk.
+
 ## The sweep
 
 `tools/qor_corpus.py`, 29 flows, baseline = `main` at 3665314. Metric is
@@ -78,46 +124,65 @@ Deliberately **not** converted:
 to the byte. The off path delegates to `for_each_band` with weight 1.0, i.e.
 literally the old code.
 
-**Knob on (always spread): 3 better, 3 worse, 23 unchanged.**
+**All four modes, same build, same baseline.** Runtime is single-run and
+noisy; the ±9% figures are not meaningful, the +207% one was.
 
-| flow | base | knob on | |
+| mode | when | allocation | QoR | runtime |
+|---|---|---|---|---|
+| 1 | oversized-only | proportional | 1 better / 4 worse | −8.7% |
+| 2 | always | proportional | 3 better / 3 worse | −8.5% |
+| **3** | **always** | **greedy fill** | **3 better / 1 worse** | **+11.9%** |
+| 4 | oversized-only | greedy fill | 2 better / 3 worse | +35.6% |
+
+Mode 3 per flow:
+
+| flow | base | mode 3 | |
 |---|---|---|---|
-| `big_data_test/big` | 0/0/0 | 1/56/1 | WORSE |
-| `big_data_test/tc3a` | 0/0/0 | 0/21/1 | WORSE |
-| `rnr/mix2` | 0/0/0 | 0/2/1 | WORSE |
 | `rnr/mix` | 1/0/0 | 0/0/0 | BETTER |
 | `rnr/mix2_fast_bottomup` | 1/0/0 | 0/0/0 | BETTER |
-| `rnr/mix2_fast_on_aligned_sql` | 0/30/2 | 1/13/1 | BETTER |
+| `rnr/mix2_fast_on_aligned_sql` | 0/30/2 | 2/14/1 | BETTER |
+| `rnr/mix2` | 0/0/0 | 1/6/1 | WORSE |
 
-Abstract WL +0.40%, detailed +0.27% over the 23 comparable flows.
+Two results stand out.
 
-**Rejected variant — spread only an OVERSIZED bus: 1 better, 4 worse.**
-The narrower rule (`eff_width > grid[b+1] - grid[b]`, i.e. spread only when no
-perp inside the band could ever hold the bus — exactly #518's condition,
-leaving every bus that already fits on the legacy path) measured *worse* than
-always-spreading: `tc3a` 0/0/0→0/44/1, `mix` 1/0/0→0/14/1,
-`mix2_fast_bottomup` 1/0/0→3/12/2, `mix2_fast_topdown` 0/0/0→1/0/0, with only
-`mix2_fast_on_aligned_sql` 0/30/2→1/0/0 improving. Not implemented; this
-paragraph is the record.
+**Greedy fill beats proportional** (mode 3 vs 2: 3 better/1 worse vs
+3 better/3 worse). Reading occupancy before spilling is what removes the
+regressions — proportional spreading's phantom overflow on already-full
+neighbours was causing them.
 
-## Why the principled fix loses
+**Gating on "oversized only" is consistently WORSE than always spreading** —
+mode 1 vs 2, and mode 4 vs 3, both lose. This is counter-intuitive: mode 1
+touches strictly fewer segments, all of them genuinely mis-charged. The
+likely reason is discontinuity — two nearly-identical candidates, one just
+over the band width and one just under, get charged under different models,
+so the comparison between them is no longer apples-to-apples and selection
+gets noisy. A uniform rule, even a less targeted one, ranks candidates
+consistently.
 
-Spreading lowers the **per-band feasibility bar**. Previously a bus had to fit
-its full width in one band to pass STRICT; now only its share must fit in each
-band it covers. More candidates clear STRICT, the planner packs the region
-denser, and the density shows up downstream as real DetailedNUTS opens — which
-is exactly the shape of the regressions (`big` picking up 56 unplaced bits from
-a clean 0).
+## Why it is still not the default
+
+Mode 3 is a genuine net win (3 better / 1 worse, +11.9% runtime), but it
+still breaks one clean flow: `rnr/mix2` 0/0/0 → 1/6/1. The corpus guard exits
+non-zero on any regression, and turning a clean design broken is exactly the
+failure the guard exists to catch.
+
+The mechanism behind that one regression is the same one that sinks modes 1,
+2 and 4 more broadly: spreading lowers the **per-band feasibility bar**.
+Previously a bus had to fit its whole width in one band to pass STRICT; now
+only its share must fit in each band it covers. More candidates clear STRICT,
+the planner packs denser, and the density comes back as real DetailedNUTS
+opens. Greedy fill mitigates this (it will not claim space a neighbour has
+already committed) but does not eliminate it.
 
 So the single-band charge is not merely a crude approximation: its
-over-conservatism is **load-bearing**. It buys routability margin that the
-honest model gives away. Any future attempt should pair the width-aware charge
-with something that restores that margin — a density term, or a track-supply
-feasibility test at the chosen perp — rather than assuming the more accurate
-model is automatically the better one.
+over-conservatism is partly **load-bearing**, buying routability margin the
+honest model gives away. The remaining work for a default flip is to restore
+that margin explicitly — a density term, or a track-supply feasibility test
+at the chosen perp — rather than assuming the more accurate model is
+automatically better.
 
-That is the real finding of #518, and it is why the issue stays open with the
-default unchanged.
+That is the finding of #518, and why the issue stays open with the default
+unchanged.
 
 ## Using it
 

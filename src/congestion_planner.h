@@ -730,14 +730,28 @@ private:
     bool   nontop_dead_span_gate_ = false;
     // Issue #518: spread a bus's band charge over the bands its width actually
     // covers instead of dumping it all on the band holding its centre.
-    // Opt-in (`set_planner_param band_span_charge 1`, env BUDA_BAND_SPAN_CHARGE
-    // for sweeps); 0 = off = bit-identical, and it STAYS the default: the
-    // measured corpus result is 3 better / 3 worse, because spreading lowers
-    // the per-band feasibility bar for every bus and the planner then
-    // over-packs.  The single-band charge's conservatism turns out to be
-    // load-bearing.  See docs/internal/band_span_charge.md for the sweep and
-    // for the narrower "spread only an oversized bus" variant, which measured
-    // WORSE still (1 better / 4 worse) and is deliberately not implemented.
+    // Opt-in (`set_planner_param band_span_charge N`, env BUDA_BAND_SPAN_CHARGE
+    // for sweeps).  Two independent policy axes — WHEN to spread, and HOW to
+    // allocate the bus across the bands it covers:
+    //   0 = off (bit-identical default)
+    //   1 = oversized-only  + proportional
+    //   2 = always          + proportional
+    //   3 = always          + greedy capacity-aware fill
+    //   4 = oversized-only  + greedy capacity-aware fill
+    // "oversized-only" spreads just the bus too wide for its own band (#518's
+    // overflows-by-construction case) and leaves every bus that already fits
+    // on the legacy path.  "greedy fill" saturates the preferred band, then
+    // spills to the nearest band with room — NUTS's preferred_fit — instead of
+    // diluting uniformly across bands that may already be full.
+    //
+    // Measured (29-flow corpus, same build): mode 1 = 1 better/4 worse,
+    // mode 2 = 3 better/3 worse, mode 3 = 3 better/1 worse at +11.9% runtime,
+    // mode 4 = 2 better/3 worse.  **Mode 3 is the best** — reading occupancy
+    // before spilling is what removes proportional's regressions — but it
+    // still turns one clean flow (rnr/mix2) broken, so the default stays 0.
+    // Note the counter-intuitive result that the TARGETED "oversized-only"
+    // gating loses to always-spreading in both allocation schemes; see
+    // docs/internal/band_span_charge.md.
     int    band_span_charge_      = 0;
     // One-shot guard for the above-TOP config-smell warning.
     bool   warned_above_top_ = false;
