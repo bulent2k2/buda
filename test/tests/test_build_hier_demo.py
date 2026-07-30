@@ -103,6 +103,76 @@ def test_resolve_cells_bdb_and_named_entries():
         bd._resolve_cells(["dnuts1", "dnuts1=flow/rnr/mix2.bdb.sql"], None)
 
 
+def test_bdb_cell_import_unplaced_root_rebases_on_leaves(tmp_path):
+    """A source whose root is the canonical UNPLACED placeholder (-1..-1
+    bbox, the DEF+Verilog merge state) must rebase on the placed leaves'
+    extent — not on the -1 corner (review #529: every leaf shifted by +1)."""
+    src_path = str(tmp_path / "unplaced_root.bdb")
+    src = buda_db.BDB(src_path)
+    src.add_cell("leafc", 10.0, 10.0)
+    src.add_cell("topc", 20.0, 20.0)
+    src.add_comp("rootX", "topc", "", -1.0, -1.0, -1.0, -1.0)
+    src.add_comp("rootX/u1", "leafc", "rootX", 3.0, 4.0, 13.0, 14.0)
+    src.add_comp("rootX/u2", "leafc", "rootX", 23.0, 4.0, 33.0, 14.0)
+    del src
+
+    out = buda_db.BDB(str(tmp_path / "target.bdb"))
+    w, h, blocks, nets, centers = build_hier_demo._define_bdb_cell(
+        out, "sub", src_path)
+    # Size and origin from the leaves' own extent (not -1, not the die).
+    assert (w, h) == (30.0, 10.0)
+    assert blocks == ["u1", "u2"]
+    assert centers["u1"] == (5.0, 5.0)      # 3..13 rebased to 0..10
+    assert centers["u2"] == (25.0, 5.0)
+
+
+def test_bdb_cell_import_drops_directed_self_receiver(tmp_path):
+    """A directed source net with driver AND receiver pins on the same leaf
+    keeps only the off-block receivers (bdb2buda's filter — review #529);
+    the flat CLI rejects same-block directed endpoints."""
+    src_path = str(tmp_path / "selfrcv.bdb")
+    src = buda_db.BDB(src_path)
+    src.add_cell("leafc", 10.0, 10.0)
+    src.add_cell("topc", 40.0, 20.0)
+    src.add_inst_to_cell("topc", "u1", "leafc", 0.0, 0.0)
+    src.add_inst_to_cell("topc", "u2", "leafc", 20.0, 0.0)
+    src.add_inst("rootY", "topc", "", 0.0, 0.0)
+    src.add_net_pins("n_self", "rootY/u1.tx", ["rootY/u1.rx", "rootY/u2.rx"])
+    src.add_net_pins("n_only_self", "rootY/u1.tx2", ["rootY/u1.rx2"])
+    del src
+
+    out = buda_db.BDB(str(tmp_path / "target2.bdb"))
+    _w, _h, _blocks, nets, _c = build_hier_demo._define_bdb_cell(
+        out, "sub", src_path)
+    by_name = {n["name"]: n for n in nets}
+    # The self-receiver is dropped, the cross-block one kept.
+    assert by_name["n_self"]["rcvs"] == ["u2.rx"]
+    # A directed net left with NO receivers is skipped entirely.
+    assert "n_only_self" not in by_name
+
+
+def test_bdb_cell_import_rejects_folded_name_collision(tmp_path):
+    """'/'->'__' folding is not injective (a/b__c vs a__b/c); a silent
+    collision would overwrite one child's definition (review #529) — the
+    import must refuse loudly instead."""
+    src_path = str(tmp_path / "collide.bdb")
+    src = buda_db.BDB(src_path)
+    src.add_cell("leafc", 5.0, 5.0)
+    src.add_cell("m1", 10.0, 10.0)
+    src.add_cell("m2", 10.0, 10.0)
+    src.add_inst_to_cell("m1", "b__c", "leafc", 0.0, 0.0)
+    src.add_inst_to_cell("m2", "c", "leafc", 0.0, 0.0)
+    src.add_cell("topc", 30.0, 10.0)
+    src.add_inst_to_cell("topc", "a", "m1", 0.0, 0.0)
+    src.add_inst_to_cell("topc", "a__b", "m2", 15.0, 0.0)
+    src.add_inst("rootZ", "topc", "", 0.0, 0.0)
+    del src
+
+    out = buda_db.BDB(str(tmp_path / "target3.bdb"))
+    with pytest.raises(SystemExit):
+        build_hier_demo._define_bdb_cell(out, "sub", src_path)
+
+
 def test_bdb_cell_import_roundtrip(tmp_path, default_demo_bdb):
     """Import a previously-built hierarchical BDB as a CELL of a new chip
     (_define_bdb_cell): its leaf blocks appear as '__'-folded child blocks of

@@ -147,20 +147,40 @@ def _define_bdb_cell(db, cell, bdb_path):
         sys.exit(f"Error: {bdb_path} must contain exactly one top component "
                  f"to import as a cell (found {len(roots)})")
     root = roots[0]
-    w, h = root.x2 - root.x1, root.y2 - root.y1
-    if w <= 0 or h <= 0:
-        w, h = src.die_w(), src.die_h()
-    ox, oy = root.x1, root.y1
     prefix = root.name + "/"
 
     def _flat(name):
         n = name[len(prefix):] if name.startswith(prefix) else name
         return n.replace("/", "__")
 
-    leaves = sorted((c for c in comps.values() if c.is_leaf),
+    leaves = sorted((c for c in comps.values()
+                     if c.is_leaf and c.id != root.id),
                     key=lambda c: c.name)
     if not leaves:
         sys.exit(f"Error: no leaf components in {bdb_path}")
+    if root.x2 > root.x1 and root.y2 > root.y1 and root.x1 >= 0 and root.y1 >= 0:
+        w, h = root.x2 - root.x1, root.y2 - root.y1
+        ox, oy = root.x1, root.y1
+    else:
+        # The canonical UNPLACED root (-1..-1 bbox, the DEF+Verilog merge
+        # state) has no meaningful corner: derive origin AND size from the
+        # placed leaves' own extent, as bdb2buda's export path does (review
+        # #529 — the die-size fallback alone left ox/oy at -1, shifting
+        # every leaf by +1).
+        ox = min(c.x1 for c in leaves)
+        oy = min(c.y1 for c in leaves)
+        w = max(c.x2 for c in leaves) - ox
+        h = max(c.y2 for c in leaves) - oy
+    # '/' -> '__' folding is not injective when a source hierarchy segment
+    # itself contains '__' (a/b__c vs a__b/c) — a silent collision would
+    # overwrite one child's definition and merge the nets (review #529).
+    folded = {}
+    for c in leaves:
+        bn = _flat(c.name)
+        if bn in folded:
+            sys.exit(f"Error: {bdb_path}: folded block name collision — "
+                     f"'{folded[bn]}' and '{c.name}' both fold to '{bn}'")
+        folded[bn] = c.name
     db.add_cell(cell, w, h)
     centers, blocks, leaf_ids = {}, [], set()
     for c in leaves:
@@ -186,6 +206,7 @@ def _define_bdb_cell(db, cell, bdb_path):
         return f"{_flat(c.name)}.{pn}"
 
     nets = []
+    seen_net_names = set()
     for nid in sorted(pins_by_net):
         pins = pins_by_net[nid]
         if len(pins) < 2:
@@ -200,9 +221,20 @@ def _define_bdb_cell(db, cell, bdb_path):
             d = "unknown"
         else:
             d = ""
-        nets.append({"name": _flat(net_name.get(nid, f"net_{nid}")),
-                     "drv": _ep(drv), "rcvs": [_ep(p) for p in rcvs],
-                     "dir": d})
+        if d == "":
+            # A directed net must not keep a receiver pin on its own driver
+            # block — the flat CLI rejects the same-block endpoint and the
+            # hier bundler degenerates on it; inout/unknown keep every
+            # endpoint, exactly as bdb2buda's export filters (review #529).
+            rcvs = [p for p in rcvs if p.comp_id != drv.comp_id]
+            if not rcvs:
+                continue
+        nm = _flat(net_name.get(nid, f"net_{nid}"))
+        if nm in seen_net_names:
+            sys.exit(f"Error: {bdb_path}: folded net name collision on '{nm}'")
+        seen_net_names.add(nm)
+        nets.append({"name": nm, "drv": _ep(drv),
+                     "rcvs": [_ep(p) for p in rcvs], "dir": d})
     return w, h, blocks, nets, centers
 
 
