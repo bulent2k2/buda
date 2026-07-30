@@ -590,3 +590,32 @@ def test_issue_514_repro_spine_has_no_overhang():
             s.do_command(c)
     assert "Success: no violations found" in out.getvalue(), \
         out.getvalue()[-2000:]
+
+
+def test_piece_covering_a_nested_block_is_not_flagged():
+    """Codex #517: the terminal piece may be the ONLY pass-through coverage
+    for a DIFFERENT connected block (nested/overlapping footprints) even
+    though the tapped block stays covered after trimming — then the piece is
+    load-bearing and must not be reported."""
+    fp = buda.Floorplan()
+    fp.add_block("HUB", 100, 100, 300, 200)
+    fp.add_block("INNER", 105, 140, 130, 160)   # nested; only [100,140] covers it
+    fp.add_block("B1", 120, 0, 160, 50)
+    fp.add_block("B2", 160, 260, 200, 310)
+    fp.add_block("C", 580, 100, 660, 200)
+    topo = buda.Topology()
+    topo.type = "TEST_HUB_NESTED"
+    topo.segments = [
+        _seg(100, 150, 600, 150, LAYER_H),      # spine taps HUB's far face
+        _seg(140, 50, 140, 150, LAYER_V),
+        _seg(180, 150, 180, 260, LAYER_V),
+    ]
+    topo.connected_block_names = ["HUB", "INNER", "B1", "B2", "C"]
+    buda.annotate_topology(topo, fp)
+    buda.annotate_seg_conns(topo)
+    ct = buda.ConnTopology()
+    ct.build(topo, fp)
+    # Preconditions: the spine's [100,140] piece is INNER's only coverage —
+    # the trimmed remainder [140,600] misses INNER ([105,130]).
+    res = buda.check_nuts(ct, _nominal_nuts(ct), topo, fp, _layers(), 1)
+    assert not _antennas(res), [v.message for v in res.violations]

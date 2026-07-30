@@ -381,26 +381,47 @@ static void detect_antennas(const std::vector<ConnSeg>& segs,
                 plo >= alo && phi <= ahi) { inside = true; break; }
         }
         if (!inside) continue;
-        // Redundancy: with the piece removed, the block must remain covered —
-        // by this segment's trimmed remainder or by any sibling's tap /
-        // pass-through.
+        // Redundancy: with the piece removed, the TAPPED block must remain
+        // covered — by this segment's trimmed remainder or by any sibling's
+        // tap / pass-through — and so must EVERY OTHER connected block the
+        // piece touches: overlapping or contained neighbours may be
+        // pass-through-covered ONLY by the piece, which makes it
+        // load-bearing metal even though the tapped block is fine without
+        // it (Codex #517).
         ConnSeg trimmed = cs;
         if (at_lo) trimmed.along_lo = (int)A; else trimmed.along_hi = (int)A;
-        bool covered = false;
-        for (const Rect& r : rects)
-            if (seg_spans_rect(trimmed, (double)cs.perp_pos, r)) { covered = true; break; }
-        for (int j = 0; j < n && !covered; ++j) {
-            if (j == i) continue;
-            for (const auto& c : segs[j].conns)
-                if (c.kind == SegConn::BUSTERM && c.block_name == tap->block_name)
-                    { covered = true; break; }
-            for (const Rect& r : rects) {
-                if (covered) break;
-                if (seg_spans_rect(segs[j], (double)segs[j].perp_pos, r))
-                    covered = true;
+        auto covered_without_piece = [&](const std::string& bname,
+                                         const std::vector<Rect>& brs) {
+            for (const Rect& r : brs)
+                if (seg_spans_rect(trimmed, (double)cs.perp_pos, r)) return true;
+            for (int j = 0; j < n; ++j) {
+                if (j == i) continue;
+                for (const auto& c : segs[j].conns)
+                    if (c.kind == SegConn::BUSTERM && c.block_name == bname)
+                        return true;
+                for (const Rect& r : brs)
+                    if (seg_spans_rect(segs[j], (double)segs[j].perp_pos, r))
+                        return true;
             }
+            return false;
+        };
+        bool redundant = covered_without_piece(tap->block_name, rects);
+        for (const auto& bname : topo.connected_block_names) {
+            if (!redundant) break;
+            if (bname == tap->block_name) continue;
+            auto brs = fp.get_block_rects(bname);
+            if (brs.empty()) brs.push_back(fp.get_block_bounds(bname));
+            bool touches = false;
+            for (const Rect& r : brs) {
+                const int alo = cs.horiz ? r.x1 : r.y1, ahi = cs.horiz ? r.x2 : r.y2;
+                const int blo = cs.horiz ? r.y1 : r.x1, bhi = cs.horiz ? r.y2 : r.x2;
+                if (cs.perp_pos >= blo && cs.perp_pos <= bhi &&
+                    plo <= ahi && phi >= alo) { touches = true; break; }
+            }
+            if (touches && !covered_without_piece(bname, brs))
+                redundant = false;
         }
-        if (!covered) continue;            // the tap is load-bearing: keep it
+        if (!redundant) continue;          // the piece is load-bearing: keep it
         ConnViolation v;
         v.kind       = ViolationKind::ANTENNA;
         v.bundle_id  = bundle_id;
