@@ -309,6 +309,7 @@ class VizViewMixin:
         if event.key in (']', 'pagedown'): self._step_bundle(+1)
         if event.key in ('v', 'cmd+t', 'ctrl+t'): self._open_topo_explorer()
         if event.key == 'b':                  self._toggle_blocks()
+        if event.key == 'N':                  self._toggle_block_names()
         if event.key == 't':                  self._toggle_bustermss()
         if event.key == 'g':                  self._toggle_hanan()
         if event.key == 's':                  self._toggle_solo()

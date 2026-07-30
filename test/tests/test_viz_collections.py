@@ -985,6 +985,19 @@ def test_terminals_hidden_in_detailed_mode(monkeypatch):
     assert n() > 0, "terminals must return when leaving detailed"
 
 
+def test_main_view_names_key_toggles(monkeypatch):
+    """The main visualizer starts with Names OFF, and 'N' (Shift+n; plain 'n'
+    steps bundles) toggles the block-name labels back on/off — the keyboard
+    twin of the Names button."""
+    from types import SimpleNamespace
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    key = lambda k: viz._on_key(SimpleNamespace(key=k, xdata=None, ydata=None))
+
+    assert viz.ui_state.block_names is False            # new default
+    key('N'); assert viz.ui_state.block_names is True
+    key('N'); assert viz.ui_state.block_names is False
+
+
 def test_entering_detailed_respects_vias_conns_off(monkeypatch):
     # The detailed toggle's bulk reveal of _detailed_bundle_artists must not
     # leak the via scatters while Vias/Conns is off.
