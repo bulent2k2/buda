@@ -416,7 +416,8 @@ static void do_span_adjustments(
     const std::vector<TrackSegment*>&                               layer_segs,
     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&   rev_conn_map,
     std::map<std::pair<int,int>, TrackSegment*>&                     ts_ptr_map,
-    bool                                                             only_unplaced = false)
+    bool                                                             only_unplaced = false,
+    const std::set<std::pair<int,int>>*                              only_targets = nullptr)
 {
     struct AdjReq { double center; bool lo_end; bool is_endpoint; bool from_jog; };
     std::map<std::pair<int,int>, std::vector<AdjReq>> adj_map;
@@ -427,6 +428,11 @@ static void do_span_adjustments(
         if (it == rev_conn_map.end()) continue;
 
         for (const auto& sc : it->second) {
+            // Scoped settle (settle_spans_scoped): adjust only the requested
+            // follower set — a source's OTHER followers would receive a
+            // partial req set here and could be mis-SET from it.
+            if (only_targets && !only_targets->count({sc.src_bid, sc.src_si}))
+                continue;
             auto jt = ts_ptr_map.find({sc.src_bid, sc.src_si});
             if (jt == ts_ptr_map.end()) continue;
             TrackSegment* other = jt->second;
@@ -562,6 +568,57 @@ static void settle_spans(std::vector<TrackSegment>& segments, NutsContext& ctx)
     std::vector<TrackSegment*> all_placed;
     for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
     do_span_adjustments(all_placed, ctx.rev_conn_map, ctx.ts_ptr_map);
+}
+
+// Scoped settle after a SMALL move set (a repair victim, a tighten slide, a
+// repacked cluster): recompute exactly the followers a global settle could
+// change, each against its FULL partner set.  Exactness argument:
+//   - A follower's settled span is a function of (its own current span, its
+//     placed partners' TRACKS, its busterm faces) — do_span_adjustments never
+//     reads a partner's SPAN, so span changes do not cascade: the "fixpoint"
+//     is single-step.
+//   - Only the moved segments' tracks changed, so only their junction
+//     followers (rev_conn_map neighbors — the map records both directions)
+//     have a changed input; every other segment's recomputation is idempotent
+//     (same inputs -> same span) PROVIDED the entering state is itself a
+//     global-settle fixpoint — which the solve's settle-after-every-mutation
+//     discipline maintains at the converted call sites (each is preceded by a
+//     global settle or a restore to a settled snapshot; validated
+//     byte-identical corpus-wide).
+//   - Each target must aggregate reqs from ALL its placed partners (the SET
+//     branches min/max over the whole req set), so the source list is the
+//     union of the targets' partner sets and phase 1 is restricted to the
+//     target set (a source's other followers would see partial reqs).
+// Req/iteration order differs from the global call but every aggregation is
+// order-independent (min/max/bool-OR; adj_map is key-ordered either way).
+static void settle_spans_scoped(NutsContext& ctx,
+                                const std::vector<const TrackSegment*>& moved)
+{
+    using Key = std::pair<int, int>;
+    std::set<Key> targets;
+    for (const TrackSegment* m : moved) {
+        auto it = ctx.rev_conn_map.find({m->bundle_id, m->seg_idx});
+        if (it == ctx.rev_conn_map.end()) continue;
+        for (const auto& sc : it->second)
+            targets.insert({sc.src_bid, sc.src_si});
+    }
+    if (targets.empty()) return;
+    std::set<Key> src_keys;
+    for (const Key& t : targets) {
+        auto it = ctx.rev_conn_map.find(t);
+        if (it == ctx.rev_conn_map.end()) continue;
+        for (const auto& sc : it->second)
+            src_keys.insert({sc.src_bid, sc.src_si});
+    }
+    std::vector<TrackSegment*> sources;
+    sources.reserve(src_keys.size());
+    for (const Key& k : src_keys) {
+        auto pt = ctx.ts_ptr_map.find(k);
+        if (pt != ctx.ts_ptr_map.end() && pt->second->placed)
+            sources.push_back(pt->second);
+    }
+    do_span_adjustments(sources, ctx.rev_conn_map, ctx.ts_ptr_map,
+                        /*only_unplaced=*/false, &targets);
 }
 
 // Post-convergence span RE-TIGHTEN (Option B, relay_jog_phantom_span_2026-07.md).
@@ -835,8 +892,10 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
 
             pre_move.take(segments);
             victim->track_position = pos;
-            // Settle followers of the moved segment (and theirs, cheaply).
-            settle_spans(segments, ctx);
+            // Settle followers of the moved segment — scoped: only the
+            // victim's track changed, so only its followers can settle
+            // differently (settle_spans_scoped's exactness argument).
+            settle_spans_scoped(ctx, {victim});
             // Accept guard on the overlap-count DELTA vs the pre-move
             // snapshot (overlap_delta_vs: pairs with both endpoints
             // unchanged cancel, so only the victim + settle-touched
@@ -1049,7 +1108,7 @@ void NUTSEngine::tighten_pulls(std::vector<TrackSegment>& segments,
         const double wl_before = total_wl();
         pre_move.take(segments);
         ts.track_position = pos;
-        settle_spans(segments, ctx);
+        settle_spans_scoped(ctx, {&ts});   // one track moved: settle its followers
         if (find_overlaps(segments).size() > ov_before ||
             count_violations(segments)    > vi_before ||
             total_wl() + 0.5 >= wl_before) { pre_move.restore(segments); return false; }
@@ -1136,9 +1195,13 @@ void NUTSEngine::tighten_pulls(std::vector<TrackSegment>& segments,
         const int    vi_before = count_violations(segments);
         const double wl_before = total_wl();
         pre_move.take(segments);
-        for (size_t mi = 0; mi < members.size(); ++mi)
+        std::vector<const TrackSegment*> moved;
+        moved.reserve(members.size());
+        for (size_t mi = 0; mi < members.size(); ++mi) {
             segments[members[mi]].track_position = tgtpos[mi];
-        settle_spans(segments, ctx);
+            moved.push_back(&segments[members[mi]]);
+        }
+        settle_spans_scoped(ctx, moved);   // group slide: settle its followers
         if (find_overlaps(segments).size() > ov_before ||
             count_violations(segments)    > vi_before ||
             total_wl() + 0.5 >= wl_before) {
@@ -2316,7 +2379,14 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
             LayerSolver solver(eng, layer_segs, ctx, *cons);
             if (!solver.repack_cluster(members))
                 continue;                   // nothing would move: state untouched
-            settle_spans(segments, ctx);
+            // Scoped settle over the repack's member set (a SUPERSET of the
+            // actually-moved segments is exact: an unmoved member's
+            // followers recompute idempotently).
+            {
+                std::vector<const TrackSegment*> moved(members.begin(),
+                                                       members.end());
+                settle_spans_scoped(ctx, moved);
+            }
             // Accept when the cluster itself strictly improves and the world
             // does not get worse — a committed repack may trade an in-cluster
             // overlap for collateral elsewhere (follower spans stretch), which

@@ -501,6 +501,46 @@ final overlap count (the stricter neutral-break measured 69 s — the
 ~7 s gap is the price of the provable-losslessness + cleanup-contract
 guarantee).  Fast/mid/slow tiers green.
 
-Still open from the corner-pass section: the scoped `settle_spans`
-(identity risk, ~0.5–1 s/repair call at scale) and P4 (parallel
-screening, likely not worth it) — both unchanged in priority.
+Still open from the corner-pass section: P4 (parallel screening,
+likely not worth it).  The scoped `settle_spans` shipped — next section.
+
+## Implemented — scoped settle_spans (2026-07-29)
+
+The last mechanical lever in the repair loop: `settle_spans` re-fit the
+WHOLE design's spans after every attempted single-victim move, tighten
+slide, and cluster-repack attempt.  The identity risk flagged earlier
+dissolved under audit: `do_span_adjustments` never reads a partner's
+SPAN — a follower's settled span is a function of (its own current
+span, its placed partners' TRACKS, its busterm faces) — so span changes
+do not cascade and the "fixpoint" is single-step.  That makes an
+exactly-equivalent scoped form possible: after moving a set M, only M's
+junction followers (rev_conn_map neighbors, both directions recorded)
+have a changed input; every other segment's recomputation is idempotent
+PROVIDED the entering state is itself a global-settle fixpoint, which
+the solve's settle-after-every-mutation discipline maintains at the
+converted sites (each is entered after a global settle or a restore to
+a settled snapshot).
+
+`settle_spans_scoped(ctx, moved)`: targets = followers of `moved`,
+sources = the targets' FULL placed partner sets (the SET branches
+min/max over the whole req set, so partial sources would mis-set), and
+`do_span_adjustments` gained an `only_targets` filter so a source's
+OTHER followers never see a partial req set.  A SUPERSET of the truly
+moved segments is exact (unmoved members' followers recompute
+idempotently), which is what the cluster-repack site passes.  Converted
+sites: the repair per-victim move, tighten_pulls' single and group
+slides, and the cluster-repack attempt; the whole-layer re-solve sites
+(corner dirty-layers, orientation group, rerun/warm) keep the global
+settle — their moved sets ARE the design.
+
+**Gate: byte-identity, all clean** — the four rnr vehicles, bigHalf,
+big2, tc3a, and both congested synthetics produce identical flow logs
+(the entering-fixpoint precondition held everywhere tested).
+**Measured** (paired A/B, same box, same day): the congested synthetic
+drops **~96 → ~90 s wall (−7 %)**; corpus flows unchanged within noise
+(their per-move settle volume is small).  Fast/mid/slow tiers green.
+
+With this, the repair loop's bookkeeping is fully move-scoped: accept
+guards on overlap deltas (#506), cycle exit on exact repeated states
+(#507), and settles on follower closures — what remains inside
+`corner`/`repair` at scale is genuine packing work.
