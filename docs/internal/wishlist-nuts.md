@@ -445,3 +445,59 @@ single-layer re-solve's context (junction preferences see other layers
 frozen; `resolve_corner_overlaps` is deliberately not run, per the
 documented contract). Worth a look if the per-layer ↺ is ever used as a
 quality tool rather than a what-if probe.
+
+## Corner/repair at scale — the residual after the runtime arc — OPEN (three items)
+
+Context: the 2026-07 runtime arc (PRs #506/#507/#509;
+[rnr_runtime_parallelism.md](rnr_runtime_parallelism.md)) made the
+repair loop's bookkeeping fully move-scoped — accept guards on overlap
+DELTAS vs the pre-move snapshot, cycle exit on an exact repeated
+placement state, settles on the moved set's follower closure.  On the
+3813-segment congested synthetic that took `run_nuts` 195 → ~60 s
+(`corner` 121 → ~33 s, `repair` 50 → ~20 s), byte-identical throughout
+(the cycle guard QoR-gated, 0 better / 0 worse / 29 unchanged).  What
+remains inside `corner`/`repair` is genuine packing computation, and it
+only matters at scale — **on the whole corpus the two passes now cost
+0.03–0.9 s total**, so none of these carries urgency; they are recorded
+for when a real large design makes them live.
+
+**(1) Span-indexed occupancy in `repack_members` — mechanical,
+identity-preserving.**  The dominant residual is the cluster repack's
+per-member obstacle scan: for each member, walk the LAYER's segment
+list appending span-overlapping occupancy, then fit over the sorted
+intervals (~4 ms per cluster attempt × ~280 attempts/round; the lazy
+base-occupancy memo across the two pack modes already halved it —
+lazy deliberately, the all-or-nothing placement-time pack aborts at the
+first infeasible member and an eager build measured a net LOSS).  A
+span-sorted per-layer index (or interval tree) would make each member's
+scan O(overlapping) instead of O(layer).  Small constant already;
+do only if big designs become routine.
+
+**(2) Marginal-yield stop for improving repack rounds — QoR knob, add
+on demand.**  The exact-state cycle guard (#507) kills true cycles, but
+the IMPROVING rounds staircase with sharply diminishing returns
+(measured per-round overlap clearances 597 → 321 → 61 → 6 on the
+mid-size synthetic).  A "break when a round clears < X %" policy would
+trade a small endpoint change for time on hopeless designs — the
+`ripup_reroute` convergence guard's pattern (tc3a 56.8 → 16.3 s), and
+like it, QoR-gated and only worth adding when over-capacity runtime
+actually hurts someone.
+
+**(3) Over-capacity classification — the conceptually real one.**  The
+synthetic holds 16,386 overlaps NO repair can fix (band demand simply
+exceeds signal-track supply), yet the passes still spend their ~50 s
+trying: the cluster tier's spread-fit precheck skips provably
+over-capacity CLUSTERS, but the per-pair sweep and the corner
+constraint machinery churn regardless.  An up-front supply/demand
+classification per layer/band — cap repair effort in regions that are
+over capacity and report them as the planner's ALLOW_OVERFLOW problem,
+which they are — would collapse most of the remaining at-scale cost
+while being a no-op on feasible designs.  This is a RESPONSIBILITY
+BOUNDARY item, not just a speed one: repair exists to fix the band
+model's mispredictions, not infeasibility, and today it cannot tell the
+difference.  Sketch: reuse the planner's per-band capacity bookkeeping
+(or `count_signal_tracks_in_span` for the detailed-honest form) to tag
+over-capacity bands before the repair loop; skip per-pair victims whose
+pair sits wholly in a tagged band; report the tagged demand excess on
+the `[NUTS]` summary line so the infeasibility is LOUD instead of
+silently half-repaired.

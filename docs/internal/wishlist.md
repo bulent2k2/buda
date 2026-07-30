@@ -74,7 +74,10 @@ priority view** — what's actually open right now, ranked by value/effort — s
   Band-level repack for spread-fit overlap clusters (✅ implemented —
   `nuts_band_repack.md`); PlacedSegmentBase + first-class pre-routes (✅
   implemented — `placed_segment_preroutes.md`); pull-repack test failure (✅
-  resolved, PR #69).
+  resolved, PR #69); corner/repair at-scale residual after the 2026-07
+  runtime arc (open, three items: span-indexed repack occupancy,
+  marginal-yield round stop, over-capacity classification — the
+  responsibility-boundary one).
 - **[wishlist-bundler.md](wishlist-bundler.md)** — Bundler.
   Multi-source (fan-in) topology to make CONVERGENT bundling sound.
 - **[wishlist-ripup.md](wishlist-ripup.md)** — Rip-up & re-route.

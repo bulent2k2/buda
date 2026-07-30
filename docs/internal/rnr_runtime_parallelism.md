@@ -543,4 +543,7 @@ drops **~96 → ~90 s wall (−7 %)**; corpus flows unchanged within noise
 With this, the repair loop's bookkeeping is fully move-scoped: accept
 guards on overlap deltas (#506), cycle exit on exact repeated states
 (#507), and settles on follower closures — what remains inside
-`corner`/`repair` at scale is genuine packing work.
+`corner`/`repair` at scale is genuine packing work, recorded as three
+wishlist items (span-indexed repack occupancy, marginal-yield round
+stop, over-capacity classification) in
+[wishlist-nuts.md](wishlist-nuts.md).
