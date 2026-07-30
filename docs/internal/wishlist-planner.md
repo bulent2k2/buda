@@ -893,6 +893,24 @@ ovl → **84/2** with WL −3.1%. Opt-in — flows that do not call it are
 byte-identical. Tests: `test/tests/test_refine_selection.py` (+
 `features/refine_selection.feature`); docs:
 `docs/script_reference/nuts.md`.
+**Composition follow-up (2026-07-30):** a second healer round AFTER
+refine can crack a stuck endpoint — refine's commits change the
+contention geometry the healers stalled on, negotiate re-plans its
+targets UNPINNED (refine's pins don't block it), and its strict accept
+on the healers' LEXICOGRAPHIC (opens, overlaps) metric means opens
+never rise and a no-accept round restores byte-identically — though an
+accepted iteration may transiently trade overlaps up for ripup to
+finish (84/2 -> 32/6 mid-recipe), so the round is lexicographically,
+not componentwise, protective. The recipe
+`refine_selection -> negotiate_congestion -> ripup_reroute ->
+refine_selection` heals the healerless topdown flow to a fully clean
+endpoint (175 opens/16 ovl -> 0/0 Success, WL 69621 — ~+6% vs the
+broken state; the trailing refine claws back 273 of the WL the healers
+spent), while on aligned's already-stalled 30-open residual it is a
+byte-identical no-op. Checked in as the QoR vehicle
+`flow/rnr/mix2_topdown_refine.buda` (corpus row + the @mid recipe test
+in test_refine_selection.py); recipe documented in
+`docs/script_reference/nuts.md`.
 
 **`kPeak` default decision (2026-07-11): stays opt-in (default 0).
 Confirmed after the supply-aware follow-on shipped — the reopener premise
