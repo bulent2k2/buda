@@ -33,6 +33,10 @@ CongestionPlanner::CongestionPlanner(const Floorplan& fp, const LayerStack& ls)
     // wins, since it runs after construction.
     if (const char* e = std::getenv("BUDA_BAND_SPAN_CHARGE"))
         band_span_charge_ = std::atoi(e);
+    // Same study hook for kPeak, so a corpus sweep can pair the two without
+    // editing 29 flow scripts (mirrors BUDA_KSEGS_REL).
+    if (const char* e = std::getenv("BUDA_KPEAK"))
+        kPeak_ = std::atof(e);
 }
 
 void CongestionPlanner::set_planner_param(const std::string& name, double value) {
@@ -626,6 +630,7 @@ double CongestionPlanner::score_segment(const Segment& seg, int layer_id,
         double ov  = (c.usage(b) + charged * w) - cap;
         if (ov > peak) peak = ov;
     });
+
     return std::max(peak, 0.0);
 }
 

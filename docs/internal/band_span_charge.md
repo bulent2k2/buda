@@ -170,6 +170,48 @@ retracted.)
 on the reasoning that metal cannot hop over a saturated band to claim capacity
 on its far side. It measures the same as plain greedy fill (2 better/3 worse).
 
+## Can mode 1 be the default?
+
+Mode 1 is **3 better / 1 worse at +7.1%** with WL −0.35%/−0.41%. Two flows go
+from broken to fully clean (`mix`, `mix2_fast_bottomup` both 1/0/0 → 0/0/0)
+and a third improves a lot (`mix2_fast_on_aligned_sql` 0/30/2 → 2/16/1). The
+single cost is `rnr/mix2` 0/0/0 → 0/16/1.
+
+That regression is **understood and concentrated**: one segment,
+`bundle 61 seg 2`, 16 bits, "no track in DetailedNUTS". It is not a healer
+budget artifact — the hill-climb runs to a genuine stall (6 iterations, 511
+trials, "no improving re-route"). It is the **absolute-supply blind spot**:
+the width books say the spread bus fits, but DetailedNUTS still needs real
+SIGNAL tracks at the placed position. That margin is what the single-band
+charge was implicitly buying.
+
+Three attempts to recover it, all measured, all rejected:
+
+| attempt | result |
+|---|---|
+| `kPeak 1` alongside mode 1 | heals mix2 completely (0/0/0) but kPeak alone is 2 better/4 worse corpus-wide, and the pair is 1 better/5 worse |
+| Contiguity (mode 5) | 2 better/3 worse — no better than plain greedy fill |
+| Spread-local supply guard (shortfall priced as overflow inside `score_segment`, only when the charge spread) | 1 better/4 worse, WL +1.6% |
+
+The narrow guard is worth a note: it is the *right-shaped* idea — kPeak's
+global floor prices every segment, whereas this one fires only on buses that
+actually spread — and it still lost. Pricing a span-supply shortfall as
+overflow pushes those buses onto other layers, and the displacement costs more
+than the stranding it prevents.
+
+So the regression resists targeted repair, and the choice is a judgment call
+rather than a technical blocker:
+
+- **Flip to mode 1**: net +2 flows, better WL, +7.1% runtime, and #518's
+  phantom overflow stops distorting selection by default — at the price of one
+  knowingly-broken flow.
+- **Stay at 0**: no regression, but every flow keeps paying the phantom.
+
+Worth weighing: `mix2`'s clean state is knife-edge. Its own script comments
+record the exact 4-iteration rip-up trace that walks it to 0/0 — any change to
+selection re-rolls that sequence. That does not make the 16 stranded bits
+acceptable, but it does mean the flow was never robustly clean.
+
 ## Two accounting bugs (found in review of PR #524)
 
 Both were real, both silently corrupted the corpus measurements above, and
