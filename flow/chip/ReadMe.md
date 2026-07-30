@@ -27,3 +27,21 @@ Both flows run WITHOUT healers for fast experimentation — add
 when studying healing at this scale.  `chip_tracks.buda` is the shared
 6-layer stack + track patterns (same technology as big2's `tracks4top.buda`
 and mix2's `mix_tracks.buda`, which are identical).
+
+Baseline endpoints (2026-07-30, x86 reference build; both in the QoR corpus)
+===
+| Flow | overlaps | unplaced | viol_bundles | abstract WL | detailed WL | sec |
+|---|---|---|---|---|---|---|
+| chip_topdown | 452 | 3341 | 163 | 2933096 | 58807417 | 391 |
+| chip_bottomup | 527 | 2610 | 136 | 2628905 | 45332336 | 187 |
+
+The pipeline profile at this scale: bundling 0.95s → 640 hbundles (100
+top-bus + 540 cell-level), generation ~12s → 16792 candidates, and the
+planner dominates (374s topdown / 148s bottomup — the bottom-up templates
+shrink the top-down problem 2.5x).  `align_bottom_up` (1.9s) gets both
+cells to **ALIGNED** (3 instances each seeing identical signal-track pools;
+508/496 windows compared), so DNUTS solves each cell once and copies.
+Bottom-up trades +75 abstract overlaps for −22% unplaced bits, −17%
+violating bundles, −10% abstract WL, −23% detailed WL, and 2.1x total
+runtime — the genuine congestion (168 ALLOW_OVERFLOW commits topdown) is
+the vehicle's point: plenty of headroom for healer / selection studies.
