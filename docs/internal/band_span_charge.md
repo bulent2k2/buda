@@ -4,8 +4,9 @@
 proportional). `band_span_charge 0` is the escape hatch back to the legacy
 single-band charge. This note records the mechanism, the sweep across all five
 modes, the two accounting bugs that invalidated an earlier version of the
-table, and the three rejected attempts to remove the one regression — so none
-of it is re-derived.
+table, and the three rejected attempts to remove the regressions — so none of
+it is re-derived.  **Known cost: two corpus flows** (`rnr/mix2` and
+`rnr/mix2_topdown_refine`), both the same mix2 design and the same 16 bits.
 
 ## The defect
 
@@ -157,6 +158,14 @@ Mode 1 per flow (abstract WL −0.35%, detailed −0.41%):
 | `rnr/mix2_fast_bottomup` | 1/0/0 | 0/0/0 | BETTER |
 | `rnr/mix2_fast_on_aligned_sql` | 0/30/2 | 2/16/1 | BETTER |
 | `rnr/mix2` | 0/0/0 | 0/16/1 | WORSE |
+| `rnr/mix2_topdown_refine` | 0/0/0 | 3/16/1 | WORSE |
+
+> **Correction.** The sweep above was taken against a baseline that predated
+> `flow/rnr/mix2_topdown_refine.buda`, which PR #526 added to the corpus while
+> this work was in flight — so that row was in NO sweep, and the flip was
+> proposed and approved on "3 better / 1 worse".  Against today's corpus the
+> honest tally is **3 better / 2 worse**.  Both regressions are the same mix2
+> design, the same 16 bits (`bundle 61 seg 2`), and the same blind spot.
 
 **Targeting beats blanket spreading.** Modes 1 and 4 (oversized-only) beat
 modes 2 and 3 (always). Spreading a bus that already fits in its band was

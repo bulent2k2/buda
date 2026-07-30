@@ -1,3 +1,18 @@
+# KNOWN REGRESSION (issue #518).  Along with flow/rnr/mix2.buda, this is one
+# of the two corpus vehicles the `band_span_charge` default flip costs: it now
+# ends 3 overlaps / 16 unplaced bits instead of fully clean 0/0/0.  Same mix2
+# design, same residual (bundle 61 seg 2), same root cause — the
+# absolute-supply blind spot, where the width books say the spread bus fits
+# but DetailedNUTS still needs real SIGNAL tracks at the placed position.
+# Three repair attempts were measured and all lost corpus-wide; see
+# docs/internal/band_span_charge.md.
+#
+# Uncomment before run_planner to restore the clean endpoint on this flow:
+#set_planner_param band_span_charge 0
+#
+# Deliberately NOT applied: this is a corpus row, and silencing it would make
+# the QoR guard stop reporting a known real regression.
+#
 # Selection-basis lever 3 composition vehicle (the refine_selection docs
 # recipe, measured 2026-07-30): the PLAIN top-down mix2 pipeline (no healers)
 # ends at 175 DNUTS opens / 16 NUTS overlaps on the reference x86 build; the
