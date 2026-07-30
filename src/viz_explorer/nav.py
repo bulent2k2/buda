@@ -389,6 +389,7 @@ class ExplorerNavMixin:
         if event.key == 'G':                    self._toggle_group_step()
         if event.key == 'S':                    self._group_pin_current()
         if event.key == 'x':                    self._deselect_current()
+        if event.key == 'o':                    self._toggle_otc_over()
         if event.key == 'r':                    self._rerun_and_refresh()
 
 
@@ -398,6 +399,13 @@ class ExplorerNavMixin:
         if n == 0: return
         self.sidx = (self.sidx + delta) % n
         self._zoom_sel_mode = 'bundle'   # cmd-z targets the NEW selection first
+        self._draw()
+
+
+    def _toggle_otc_over(self):
+        """'o': toggle the j/k segment banner's `otc-over:` field between the
+        terse `otc:N` count (default) and the full over-the-cell block names."""
+        self._show_otc_over = not self._show_otc_over
         self._draw()
 
 
