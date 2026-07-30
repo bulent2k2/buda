@@ -25,6 +25,42 @@ import sys
 import buda
 
 
+# Canonical track-slot types (routing_grid.h TrackSlot).  Only "SIGNAL" carries
+# FUNCTIONAL meaning — bits land only on SIGNAL slots, a case-sensitive string
+# compare (`type == "SIGNAL"`) throughout routing_grid.cpp / detailed_nuts.cpp;
+# the other types just categorize pre-route rails for viz (the [Preroutes]
+# filter cycles POWER/GROUND/CLOCK/SHIELD).  An unrecognized type used to be
+# accepted verbatim and SILENTLY became a non-signal rail — so a mistyped or
+# lower-cased SIGNAL lost all its tracks (guaranteed DetailedNUTS opens) with no
+# warning.  These two tables turn that into a hard error.
+_CANONICAL_SLOT_TYPES = ("POWER", "GROUND", "CLOCK", "SHIELD", "SIGNAL", "CUSTOM")
+# Established EDA shorthand accepted and normalized to the canonical type (so the
+# viz preroute filter, which matches the canonical names, groups them correctly).
+# `_` is a terse shorthand for SIGNAL, by far the most common (and only routable)
+# slot type, so a dense pattern reads `_ 1 1 _ 1 1` instead of `SIGNAL 1 1 …`.
+_SLOT_TYPE_ALIASES = {
+    "_": "SIGNAL",
+    "GND": "GROUND", "CLK": "CLOCK", "VDD": "POWER", "VSS": "GROUND",
+}
+
+
+def _canonical_slot_type(cmd_name, raw):
+    """Resolve a `def_track_pattern` / `add_grid_override` slot-type token to its
+    canonical TrackSlot type (case-insensitive; the aliases above are accepted).
+    An unknown token is a flow-stopping error — silently accepting it would make
+    a mistyped SIGNAL a non-signal rail (lost tracks, no warning)."""
+    up = raw.upper()
+    if up in _CANONICAL_SLOT_TYPES:
+        return up
+    if up in _SLOT_TYPE_ALIASES:
+        return _SLOT_TYPE_ALIASES[up]
+    valid = ", ".join(_CANONICAL_SLOT_TYPES)
+    aliases = ", ".join(f"{a}->{c}" for a, c in _SLOT_TYPE_ALIASES.items())
+    print(f"Error: {cmd_name} unknown slot type '{raw}' — "
+          f"valid types: {valid} (aliases: {aliases})")
+    sys.exit(1)
+
+
 def cmd_def_track_pattern(session, cmd, args, cmd_line):
     # Usage: def_track_pattern <layer_id> <origin> [<type> <width> <space_after>] ...
     # Example: def_track_pattern 4 0.0  POWER 2.0 1.0  SIGNAL 1.0 1.0  GROUND 2.0 1.0
@@ -40,7 +76,8 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
         width       = float(args[i + 1])
         space_after = float(args[i + 2])
         slots.append(buda.TrackSlot(
-            type=slot_type, label=slot_type.lower(),
+            type=_canonical_slot_type("def_track_pattern", slot_type),
+            label=slot_type.lower(),
             width=width, space_after=space_after))
         i += 3
     if not slots:
@@ -158,7 +195,8 @@ def cmd_add_grid_override(session, cmd, args, cmd_line):
         width       = float(args[i + 1])
         space_after = float(args[i + 2])
         slots.append(buda.TrackSlot(
-            type=slot_type, label=slot_type.lower(),
+            type=_canonical_slot_type("add_grid_override", slot_type),
+            label=slot_type.lower(),
             width=width, space_after=space_after))
         i += 3
     if not slots:

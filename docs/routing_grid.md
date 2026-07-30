@@ -23,8 +23,8 @@ One track position within a repeating unit.
 
 | Field | Type | Description |
 |---|---|---|
-| `type` | string | Track kind: `POWER`, `GROUND`, `CLOCK`, `SHIELD`, `SIGNAL`, or `CUSTOM` |
-| `label` | string | Human-readable label, e.g. `"VDD"`, `"GND"`, `"CLK1"` |
+| `type` | string | Track kind: `POWER`, `GROUND`, `CLOCK`, `SHIELD`, `SIGNAL`, or `CUSTOM`. Only `SIGNAL` is routable (bits land only on `SIGNAL` slots); the rest are pre-route rails. The `def_track_pattern` / `add_grid_override` CLI validates this token case-insensitively and accepts the aliases `_`→`SIGNAL` (terse shorthand for the common signal slot), `GND`→`GROUND`, `CLK`→`CLOCK`, `VDD`→`POWER`, `VSS`→`GROUND` (unknown types are a hard error — see the [script reference](script_reference/routing_grid.md)). |
+| `label` | string | Human-readable label, e.g. `"VDD"`, `"GND"`, `"CLK1"`. From the CLI, the raw (pre-alias) type token lower-cased. |
 | `width` | double | Track width in layout units |
 | `space_after` | double | Gap between this track and the next slot in the unit |
 

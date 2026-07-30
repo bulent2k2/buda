@@ -22,7 +22,11 @@ duplicate name SILENTLY, each corrupting state a different way:
   * `def_layer` — `LayerStack::add_layer` keeps the first for a duplicate id
     (redefinition dropped) and clobbers the name->id map for a reused name.
   * `def_track_pattern` — `define_layer` overwrites a layer's pattern.
-Each is now a flow-stopping error."""
+Each is now a flow-stopping error.
+
+Also covers `def_track_pattern` / `add_grid_override` slot-TYPE validation: an
+unknown type silently became a non-signal rail (a mistyped SIGNAL lost its
+tracks), now a hard error with case-insensitive matching + EDA aliases."""
 import contextlib
 import io
 import os
@@ -162,3 +166,71 @@ def test_duplicate_track_pattern_still_errors_after_override():
                      "def_track_pattern 4 0.0 SIGNAL 3 3")
     assert code == 1
     assert "layer 4 already has a track pattern" in _err(out)
+
+
+# --- def_track_pattern / add_grid_override slot-type validation ---
+# Only "SIGNAL" carries functional meaning (bits land only on SIGNAL slots, a
+# case-sensitive string compare); any other token used to be accepted verbatim
+# and silently became a non-signal rail — so a mistyped/lower-cased SIGNAL lost
+# all its tracks with no warning.  The type is now validated (case-insensitive,
+# established aliases accepted) and stored canonical, with the raw token kept as
+# the viz label.
+
+def _slots(*cmds):
+    """Return layer-4's global-pattern slots as (type, label) tuples, or the
+    SystemExit code if a command errored out."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        try:
+            for c in _BASE + cmds:
+                s.do_command(c)
+        except SystemExit as e:
+            return e.code
+    g = s.routing_grid.get_layer_grid(4).global_pattern()
+    return [(sl.type, sl.label) for sl in g.slots]
+
+
+def test_canonical_slot_types_stored_uppercase():
+    slots = _slots("def_track_pattern 4 0.0 POWER 2 1 SIGNAL 1 1 GROUND 2 1")
+    assert slots == [("POWER", "power"), ("SIGNAL", "signal"), ("GROUND", "ground")]
+
+
+def test_slot_type_aliases_normalized_label_preserved():
+    # GND/CLK/VDD/VSS normalize to the canonical type (so the viz preroute
+    # filter groups them) while the raw token is kept as the label.
+    slots = _slots("def_track_pattern 4 0.0 VDD 2 1 SIGNAL 1 1 GND 2 1 CLK 1 1 VSS 2 1")
+    assert slots == [("POWER", "vdd"), ("SIGNAL", "signal"),
+                     ("GROUND", "gnd"), ("CLOCK", "clk"), ("GROUND", "vss")]
+
+
+def test_lowercase_signal_becomes_real_signal_slot():
+    # Previously a silent footgun: lowercase "signal" != "SIGNAL" -> non-signal.
+    slots = _slots("def_track_pattern 4 0.0 signal 1 1 gnd 2 1")
+    assert slots == [("SIGNAL", "signal"), ("GROUND", "gnd")]
+
+
+def test_underscore_is_shorthand_for_signal():
+    # `_` is terse shorthand for the common SIGNAL slot: `_ 1 1` == `SIGNAL 1 1`.
+    slots = _slots("def_track_pattern 4 0.0 POWER 2 1 _ 1 1 _ 1 1 GND 2 1")
+    assert slots == [("POWER", "power"), ("SIGNAL", "_"),
+                     ("SIGNAL", "_"), ("GROUND", "gnd")]
+
+
+def test_mistyped_signal_is_a_hard_error():
+    code, out = _run("def_track_pattern 4 0.0 SIGANL 1 1")
+    assert code == 1
+    assert "unknown slot type 'SIGANL'" in _err(out)
+
+
+def test_unknown_slot_type_is_a_hard_error():
+    code, out = _run("def_track_pattern 4 0.0 FOO 1 1")
+    assert code == 1
+    assert "unknown slot type 'FOO'" in _err(out)
+
+
+def test_add_grid_override_slot_type_validated():
+    code, out = _run("def_track_pattern 4 0.0 SIGNAL 1 1",
+                     "add_grid_override 4 0 0 50 50 0.0 BADTYPE 1 1")
+    assert code == 1
+    assert "add_grid_override unknown slot type 'BADTYPE'" in _err(out)
