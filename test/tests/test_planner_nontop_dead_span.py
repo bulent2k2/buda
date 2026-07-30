@@ -78,15 +78,32 @@ def _run_bighalf(gate):
 
 
 @pytest.mark.mid
-def test_gate_slashes_bighalf_dead_span_opens():
-    """The gate escalates the dead-span LOW stubs onto TOP, cutting the
-    no-rr DNUTS opens by a wide margin (measured 566 -> 135, −76%; the
-    exact residual is host-sensitive, so the invariant is a large, strict
-    reduction with no new overlaps)."""
+def test_bighalf_dead_span_opens_are_largely_gone_by_default():
+    """bigHalf's no-rr dead-span opens are now mostly fixed BEFORE this gate.
+
+    History: the gate was measured escalating bigHalf's dead-span LOW stubs
+    onto TOP for 566 -> 135 opens (−76%), and this test asserted the baseline
+    carried >300 opens for the gate to cut.  That premise no longer holds.
+    Defaulting `band_span_charge` to 1 (issue #518) drops the gate-OFF
+    baseline to ~39 opens on its own — the phantom overflow was pushing those
+    stubs onto layers where their spans had no tracks, and charging the bus
+    honestly across the bands it covers keeps them where they fit.
+
+    With the deficit gone the gate has nothing left to recover here: it now
+    measures neutral-to-slightly-negative on this vehicle (39 -> 40).  So the
+    invariant this test can still hold is the WEAKER, honest one — the
+    baseline is good and the gate does not materially damage it.  It is
+    deliberately NOT rewritten to assert a reduction the gate no longer
+    delivers.  The gate remains opt-in and may still pay on other designs;
+    that is not measured here.
+    """
     ov0, un0 = _run_bighalf(gate=False)
     ov1, un1 = _run_bighalf(gate=True)
-    assert un0 > 300, f"baseline should carry the dead-span opens, got {un0}"
-    assert un1 <= un0 // 2, f"gate should at least halve opens: {un0} -> {un1}"
+    assert un0 < 100, (
+        f"band_span_charge should keep bigHalf's no-rr opens low; got {un0} "
+        "(historically 566 before the #518 default flip)"
+    )
+    assert un1 <= un0 + 5, f"gate must not materially worsen opens: {un0} -> {un1}"
     assert ov1 <= ov0 + 1, f"no material new overlaps: {ov0} -> {ov1}"
 
 

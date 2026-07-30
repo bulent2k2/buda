@@ -734,7 +734,7 @@ private:
     // Opt-in (`set_planner_param band_span_charge N`, env BUDA_BAND_SPAN_CHARGE
     // for sweeps).  Two independent policy axes — WHEN to spread, and HOW to
     // allocate the bus across the bands it covers:
-    //   0 = off (bit-identical default)
+    //   0 = off (the legacy single-band charge; escape hatch)
     //   1 = oversized-only  + proportional
     //   2 = always          + proportional
     //   3 = always          + greedy capacity-aware fill
@@ -754,7 +754,7 @@ private:
     // lowers its feasibility bar and the planner over-packs.  Still not the
     // default: mode 1 turns one clean flow broken (rnr/mix2 0/0/0 -> 0/16/1).
     // See docs/internal/band_span_charge.md.
-    int    band_span_charge_      = 0;
+    int    band_span_charge_      = 1;   // DEFAULT: oversized-only + proportional
     // Per-(bundle,segment) record of how a committed charge was distributed,
     // so a rip-up can subtract EXACTLY what was added.  Only populated when
     // band_span_charge_ is on; the legacy single-band charge is its own

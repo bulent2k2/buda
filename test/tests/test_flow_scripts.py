@@ -187,8 +187,12 @@ def test_two_rotated():
 #
 # A FROZEN snapshot of demo/comprehensive_demo.buda (in flow/, not demo/) so
 # the live demo stays free to tweak for demonstrations without disturbing these
-# pinned counts.  Bundle 5 commits with a planner overflow WARNING, but NUTS and
-# DetailedNUTS still end fully clean — 0 overlaps, 0 unplaced bits.
+# pinned counts.  Bundle 5 USED to commit with a planner overflow WARNING while
+# NUTS and DetailedNUTS still ended fully clean — that warning was #518's
+# phantom overflow (a bus charged entirely into one Hanan band narrower than
+# itself).  Since band_span_charge defaulted to 1 the warning is gone and the
+# route is shorter: 26 -> 24 segments, 153 -> 121 bit-wires, still 0 overlaps
+# and 0 unplaced.
 # ---------------------------------------------------------------------------
 
 def test_comprehensive_regression():
@@ -196,13 +200,16 @@ def test_comprehensive_regression():
     assert_clean(out, rc, "comprehensive_regression.buda")
     assert "Bundler created 5 hbundles." in out
     segs, _viols, ovlps = nuts_summary(out)
-    assert segs  == 26
+    assert segs  == 24
     assert ovlps == 0
+    # The phantom-overflow WARNING this flow used to emit must stay gone.
+    assert "no overflow-free candidate" not in out
+    assert "overflows and cannot be rerouted" not in out
     dm = re.search(
         r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out
     )
     assert dm, "DetailedNUTS summary not found"
-    assert int(dm.group(1)) == 153
+    assert int(dm.group(1)) == 121
     assert int(dm.group(2)) == 0
 
 
