@@ -24,10 +24,15 @@ cleanly, since the metal simply spans several bands (Hanan bands are
 accounting buckets from block edges, not physical barriers).
 
 The knob spreads the charge over the bands the footprint actually covers,
-weighted by each band's share.  It is OPT-IN and stays off by default — the
-measured corpus result is 3 better / 3 worse (see
-docs/internal/band_span_charge.md), so these tests pin the mechanism and the
-off-path guarantee, NOT a default-behaviour change.
+weighted by each band's share.
+
+**Mode 1 is now the DEFAULT** (oversized-only + proportional): spread only a
+bus too wide for its own band — exactly the mis-charged case — and leave every
+bus that already fits on the legacy path.  Measured 3 better / 1 worse on the
+29-flow corpus at +7.1% runtime, with two flows going from broken to fully
+clean; the one regression (rnr/mix2) is documented and resisted three separate
+repair attempts.  `band_span_charge 0` is the escape hatch back to the legacy
+single-band charge.  See docs/internal/band_span_charge.md.
 """
 import pytest
 import buda
@@ -84,13 +89,50 @@ def _plan(fp, ls, w, knob):
 
 # ── The off-path guarantee ────────────────────────────────────────────────────
 
-def test_off_by_default_is_legacy():
-    """Unset and explicitly-0 must agree: the knob defaults to the old path."""
-    fp, ls, w = _one_band_design(bus_width=60.0)
-    default = _plan(*_one_band_design(bus_width=60.0), knob=None)
-    explicit = _plan(fp, ls, w, knob=0)
-    assert [(a.bundle_id, a.topo_index, a.seg_layers) for a in default] == \
-           [(a.bundle_id, a.topo_index, a.seg_layers) for a in explicit]
+def _key(assignments):
+    return [(a.bundle_id, a.topo_index, list(a.seg_layers)) for a in assignments]
+
+
+def test_default_is_mode_1():
+    """The compiled default is mode 1, not off.
+
+    Pins the default-flip itself: leaving the knob unset must behave exactly
+    like asking for mode 1, so a flow that says nothing gets the width-aware
+    charge.
+    """
+    unset = _plan(*_one_band_design(bus_width=60.0), knob=None)
+    mode1 = _plan(*_one_band_design(bus_width=60.0), knob=1)
+    assert _key(unset) == _key(mode1)
+
+
+def test_explicit_zero_is_the_legacy_escape_hatch():
+    """`band_span_charge 0` still reaches the old single-band charge.
+
+    The escape hatch has to be REACHABLE and has to differ from the default on
+    a bus wide enough to be mis-charged — otherwise the flip would be
+    unrevertable in practice and this whole knob inert.  Distinguished by the
+    band usage, since that is what the two models actually disagree about: the
+    legacy charge dumps the bus on one band, mode 1 spreads it.
+    """
+    def usage_profile(knob):
+        fp, ls, w = _one_band_design(bus_width=60.0)
+        p = buda.CongestionPlanner(fp, ls)
+        if knob is not None:
+            p.set_planner_param("band_span_charge", knob)
+        p.build_congestion_map()
+        with buda.ostream_redirect():
+            p.optimize_topologies([w], 1)
+        return sorted(c.usage(b) for c in p.get_cuts()
+                      for b in range(c.num_bands()) if c.usage(b) > 0)
+
+    legacy, default = usage_profile(0), usage_profile(None)
+    assert len(legacy) < len(default), (
+        f"explicit 0 should concentrate the charge on fewer bands than the "
+        f"spreading default; got legacy={legacy} default={default}"
+    )
+    assert sum(legacy) == pytest.approx(sum(default), rel=1e-9), (
+        "the escape hatch must charge the same TOTAL, only differently spread"
+    )
 
 
 def test_narrow_bus_unaffected_by_the_knob():

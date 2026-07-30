@@ -16,8 +16,27 @@ ripup_reroute
 check_design nuts
 run_detailed_nuts
 negotiate_congestion
-ripup_reroute # resolves the three remaining failures (bundles 11, 13, 146)
-# see e.g. in ~/src/git/buda/cc/flow/rnr/log/mix2_rr-b_flow.log:
+ripup_reroute
+#
+# KNOWN REGRESSION (issue #518).  This flow is the one corpus vehicle that the
+# `band_span_charge` default flip costs: it now ends 0 overlaps / 16 unplaced
+# bits (bundle 61 seg 2, "no track in DetailedNUTS") instead of the fully
+# clean 0/0 it reached before.  The stage-b hill-climb runs to a genuine stall
+# (42 (ovl 2) -> 16 (ovl 0), 5 moves, 511 trials, "no improving re-route"), so
+# this is NOT a healer-budget shortfall — it is the absolute-supply blind
+# spot: the width books say the spread bus fits, but DetailedNUTS still needs
+# real SIGNAL tracks at the placed position.  Three repair attempts (kPeak
+# pairing, contiguity, a spread-local supply guard) were measured and all lost
+# corpus-wide; see docs/internal/band_span_charge.md.
+#
+# Uncomment to restore the historical clean endpoint on this flow:
+#set_planner_param band_span_charge 0    # (put it BEFORE run_planner above)
+#
+# The override is deliberately NOT applied here.  Silencing the one flow that
+# regressed would make the QoR corpus report 3 better / 0 worse and quietly
+# retire a known real cost; leaving it visible is the point.
+#
+# The historical trace, for reference (pre-flip, band_span_charge 0):
 #[ripup_reroute] iter 1: COMMIT bundle 11 topo 2->5, metric 18 (ovl 2)->10 (ovl 1)
 #[ripup_reroute] iter 2: COMMIT bundle 13 topo 6->1, metric 10 (ovl 1)->4 (ovl 1)
 #[ripup_reroute] iter 3: COMMIT bundle 146 topo 1->5, metric 4 (ovl 1)->0 (ovl 1)

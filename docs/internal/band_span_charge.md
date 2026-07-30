@@ -1,9 +1,11 @@
 # Width-aware band charging (`band_span_charge`) — issue #518
 
-**Status: implemented, measured, and deliberately left OPT-IN (default off).**
-The corpus says it is not default-worthy. This note records the mechanism, the
-sweep, and — more usefully — *why* the obvious fix does not pay off, so the
-next person does not re-derive it.
+**Status: mode 1 is the DEFAULT** (`band_span_charge = 1`, oversized-only +
+proportional). `band_span_charge 0` is the escape hatch back to the legacy
+single-band charge. This note records the mechanism, the sweep across all five
+modes, the two accounting bugs that invalidated an earlier version of the
+table, and the three rejected attempts to remove the one regression — so none
+of it is re-derived.
 
 ## The defect
 
@@ -170,7 +172,7 @@ retracted.)
 on the reasoning that metal cannot hop over a saturated band to claim capacity
 on its far side. It measures the same as plain greedy fill (2 better/3 worse).
 
-## Can mode 1 be the default?
+## Mode 1 as the default — what flipping it actually did
 
 Mode 1 is **3 better / 1 worse at +7.1%** with WL −0.35%/−0.41%. Two flows go
 from broken to fully clean (`mix`, `mix2_fast_bottomup` both 1/0/0 → 0/0/0)
@@ -199,18 +201,38 @@ actually spread — and it still lost. Pricing a span-supply shortfall as
 overflow pushes those buses onto other layers, and the displacement costs more
 than the stranding it prevents.
 
-So the regression resists targeted repair, and the choice is a judgment call
-rather than a technical blocker:
+The regression resists targeted repair, so the flip was made as a judgment
+call: net +2 flows, WL −0.35%/−0.41%, +7.3% runtime, and #518's phantom
+overflow stops distorting selection by default. `mix2`'s clean state was also
+knife-edge — its own script comments record the exact 4-iteration rip-up trace
+that walks it to 0/0, so any selection change re-rolls that sequence. That
+does not make 16 stranded bits acceptable; it is the known cost, and
+`set_planner_param band_span_charge 0` reverts it per flow.
 
-- **Flip to mode 1**: net +2 flows, better WL, +7.1% runtime, and #518's
-  phantom overflow stops distorting selection by default — at the price of one
-  knowingly-broken flow.
-- **Stay at 0**: no regression, but every flow keeps paying the phantom.
+**What the flip surfaced beyond the corpus metric.** Three pinned tests moved,
+and every one moved in the right direction:
 
-Worth weighing: `mix2`'s clean state is knife-edge. Its own script comments
-record the exact 4-iteration rip-up trace that walks it to 0/0 — any change to
-selection re-rolls that sequence. That does not make the 16 stranded bits
-acceptable, but it does mean the flow was never robustly clean.
+| vehicle | before | after |
+|---|---|---|
+| `channel_stress` (golden) | 172 segs, **7 unplaced** | 163 segs, **0 unplaced** |
+| `rnr/mix` (golden) | 280 segs, **1 overlap** | 248 segs, **0 overlaps** |
+| `big` (golden) | 266 segs, 8680 netsegs | 261 segs, 8672 netsegs |
+| `comprehensive_demo` (golden) | 37 segs, 265 netsegs | 35 segs, 233 netsegs |
+| `comprehensive_regression` | 26 segs, 153 bit-wires, **overflow WARNING** | 24 segs, 121 bit-wires, **no warning** |
+| `bigHalf` no-rr opens | **566** (gate off) | **39** (gate off) |
+
+`comprehensive_regression` is the cleanest demonstration: that flow's test
+preamble documented a planner overflow WARNING on a route that nevertheless
+finished clean — precisely #518's phantom. It is now gone.
+
+**One consequence worth flagging:** `nontop_dead_span_gate` was measured
+cutting bigHalf's no-rr opens 566 → 135. With the flip the gate-OFF baseline
+is already ~39, and the gate now measures neutral-to-slightly-negative there
+(39 → 40) — the honest charge subsumed most of what the gate was recovering.
+`test_planner_nontop_dead_span.py` was rewritten to assert the weaker,
+still-true invariant (baseline is good, gate does not damage it) rather than a
+reduction the gate no longer delivers. The gate stays opt-in and may still pay
+on other designs; that is not measured.
 
 ## Two accounting bugs (found in review of PR #524)
 
