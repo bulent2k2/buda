@@ -909,6 +909,13 @@ class NutsFlowMixin:
         # the metal did not go (and vice versa) — the systematic source of
         # "unpredicted" overlaps on the congested corpus (bigHalf: 141/185
         # pulled segments diverged >100 units before the charge fix).
+        #
+        # Reported only when at least one segment actually diverges (issue
+        # #516).  Gating on n_pulled instead printed a line on every run with
+        # a pulled segment, so a clean result announced itself as
+        # "0/2 ... (worst Δ=11)" — a healthy flow phrased like a finding,
+        # which is exactly the noise that trains the reader to skip the line
+        # on the runs where n_div is nonzero and it matters.
         if target_layer is None:
             sp_by_key = {}
             for w in self.bundles:
@@ -929,7 +936,7 @@ class NutsFlowMixin:
                 if d > 100.0:
                     n_div += 1
                 worst = max(worst, d)
-            if n_pulled:
+            if n_div:
                 emit(f"[NUTS] books-vs-metal: {n_div}/{n_pulled} pulled "
                      f"segment(s) placed >100 units from the planner's "
                      f"charged band (worst Δ={worst:.0f})")

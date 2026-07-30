@@ -1680,7 +1680,17 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     // earlier-planned bundles leave room inside reserved regions (cell
     // interiors).  Each bundle's reservation is released right before its
     // own turn — from then on its demand is real, not reserved.
-    for (int idx : order) apply_reservation(bundles[idx], +1.0);
+    //
+    // A candidate-less wrapper is EXCLUDED: it is skipped by the plan loop
+    // below, so it never becomes metal and its "reservation" is demand that
+    // no wire can ever consume.  Parking it anyway charged earlier-planned
+    // bundles for phantom congestion — a top-down hier global plans before
+    // every cell-local turn, so it saw the full parked set (issue #516:
+    // one D1 bundle, 100 candidate-less D2 wrappers, overflow 346 -> 19.25
+    // once the phantom is gone, with NUTS/DNUTS clean either way).
+    for (int idx : order)
+        if (!bundles[idx].input.candidates.empty())
+            apply_reservation(bundles[idx], +1.0);
 
     std::vector<BundleAssignment> assignments;
     assignments.reserve(bundles.size());
@@ -1703,10 +1713,14 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
 
     for (int idx : order) {
         auto& bw = bundles[idx];
-        // Release this bundle's own reservation: its demand is now planned
-        // for real (or dropped, if it has no candidates).
-        apply_reservation(bw, -1.0);
+        // Skip BEFORE releasing: a candidate-less wrapper never parked a
+        // reservation above, so releasing one here would subtract demand
+        // that was never added and drive the band usage negative.  Park and
+        // release must stay gated on the same predicate.
         if (bw.input.candidates.empty()) continue;
+        // Release this bundle's own reservation: its demand is now planned
+        // for real.
+        apply_reservation(bw, -1.0);
 
         // (1) Overflow is a hard constraint: first look for a candidate that
         //     is both slide-feasible and overflow-free.  A detour only loses
