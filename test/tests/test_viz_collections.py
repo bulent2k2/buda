@@ -193,6 +193,39 @@ def test_explorer_orphan_steps_numeric(monkeypatch):
         plt.close(exp.fig)
 
 
+def test_explorer_names_terminals_off_by_default(monkeypatch):
+    """A STANDALONE explorer (owns its ViewState) starts with Names and
+    Terminals OFF — same default as the main visualizer.  An explorer that
+    INHERITS a ViewState (opened from a BudaVisualizer) must NOT clobber it,
+    so the two windows stay in sync on the user's live toggles."""
+    import buda_viz
+    from buda_viz import collect_candidate_bundles
+    from ui_state import ViewState
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    wrappers, _ = collect_candidate_bundles(viz.bundles)
+
+    # Standalone: no ui_state passed -> owns it -> both OFF.
+    exp = buda_viz.TopologyExplorer(viz.fp, wrappers, layer_stack=viz.layer_stack)
+    try:
+        assert exp.ui_state.block_names is False
+        assert exp.ui_state.busterms is False
+    finally:
+        plt.close(exp.fig)
+
+    # Inherited: a passed-in state is respected verbatim (not overwritten).
+    shared = ViewState()
+    shared.block_names = True
+    shared.busterms = True
+    exp2 = buda_viz.TopologyExplorer(viz.fp, wrappers,
+                                     layer_stack=viz.layer_stack, ui_state=shared)
+    try:
+        assert exp2.ui_state is shared
+        assert exp2.ui_state.block_names is True
+        assert exp2.ui_state.busterms is True
+    finally:
+        plt.close(exp2.fig)
+
+
 def test_scroll_buttons_page_by_visible_minus_one(monkeypatch):
     """The ▲/▼ scroll buttons page by (visible rows − 1), sized to the CURRENT
     dynamic panel height — not a fixed step — so a tall list (Overlap panel
