@@ -17,6 +17,7 @@
 #pragma once
 #include <climits>
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <tuple>
@@ -480,6 +481,28 @@ private:
     // the same matching rule as apply_segment, factored for reuse.
     void for_each_band(const Segment& seg, int layer_id, int perp_pos_override,
                        const std::function<void(int, int)>& fn) const;
+    // Every cut this segment crosses, with the perpendicular position and cut
+    // orientation resolved.  The delicate closed-interval matching rule lives
+    // here ONCE; for_each_band and for_each_band_w are both thin wrappers.
+    void for_each_cut_(const Segment& seg, int layer_id, int perp_pos_override,
+                       const std::function<void(int, bool, int)>& fn) const;
+    // Width-aware sibling of for_each_band (issue #518): a bus of eff_width
+    // centred at perp occupies [perp - w/2, perp + w/2], which need not lie
+    // inside one Hanan band — charging it all to the band holding its centre
+    // makes any bus wider than that band overflow BY CONSTRUCTION, even on an
+    // empty layer.  Invokes fn(cut, band, weight) over the bands the footprint
+    // actually covers, weight = that band's share of the footprint.
+    //
+    // Weights are NORMALIZED to sum to 1 per cut, so the total charge is
+    // exactly eff_width either way: this redistributes demand, it never
+    // creates or destroys it (a footprint hanging off the grid edge would
+    // otherwise silently under-charge and mask real congestion).
+    //
+    // With band_span_charge_ off — the default — this delegates to
+    // for_each_band with weight 1.0, i.e. literally the old code path.
+    void for_each_band_w(const Segment& seg, int layer_id, int perp_pos_override,
+                         double eff_width,
+                         const std::function<void(int, int, double)>& fn) const;
     // Insert into `out` the (cut_index, band) pairs where placing the segment
     // would overflow (the band-set sibling of score_segment).
     void collect_overflow_bands(const Segment& seg, int layer_id, double eff_width,
@@ -706,6 +729,38 @@ private:
     // distinguish genuine culls from survivors whose final adjusted spans
     // clear the keepout).
     bool   nontop_dead_span_gate_ = false;
+    // Issue #518: spread a bus's band charge over the bands its width actually
+    // covers instead of dumping it all on the band holding its centre.
+    // Opt-in (`set_planner_param band_span_charge N`, env BUDA_BAND_SPAN_CHARGE
+    // for sweeps).  Two independent policy axes — WHEN to spread, and HOW to
+    // allocate the bus across the bands it covers:
+    //   0 = off (bit-identical default)
+    //   1 = oversized-only  + proportional
+    //   2 = always          + proportional
+    //   3 = always          + greedy capacity-aware fill
+    //   4 = oversized-only  + greedy capacity-aware fill
+    // "oversized-only" spreads just the bus too wide for its own band (#518's
+    // overflows-by-construction case) and leaves every bus that already fits
+    // on the legacy path.  "greedy fill" saturates the preferred band, then
+    // spills to the nearest band with room — NUTS's preferred_fit — instead of
+    // diluting uniformly across bands that may already be full.
+    //
+    // Measured (29-flow corpus, same build, AFTER the two rip-up/footprint
+    // accounting fixes — the pre-fix numbers ranked these modes differently
+    // and were wrong): mode 1 = 3 better/1 worse at +7.1%, mode 2 = 0/6,
+    // mode 3 = 2/3, mode 4 = 2/2, mode 5 = 2/3.  **Mode 1 is the best** —
+    // targeting only the genuinely mis-charged (oversized) bus beats
+    // spreading every bus, because spreading one that already fits merely
+    // lowers its feasibility bar and the planner over-packs.  Still not the
+    // default: mode 1 turns one clean flow broken (rnr/mix2 0/0/0 -> 0/16/1).
+    // See docs/internal/band_span_charge.md.
+    int    band_span_charge_      = 0;
+    // Per-(bundle,segment) record of how a committed charge was distributed,
+    // so a rip-up can subtract EXACTLY what was added.  Only populated when
+    // band_span_charge_ is on; the legacy single-band charge is its own
+    // inverse and needs no record.  Cleared whenever the cut state is rebuilt
+    // or its usage reset, since the indices and the baseline both move.
+    std::map<std::pair<int, int>, std::vector<std::tuple<int, int, double>>> charge_log_;
     // One-shot guard for the above-TOP config-smell warning.
     bool   warned_above_top_ = false;
 };
