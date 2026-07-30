@@ -20,6 +20,8 @@ Each handler takes (session, cmd, args, cmd_line) and is registered
 in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
+import sys
+
 import buda
 
 from buda_session.util import _RR_DEFAULT_MAX_ITER
@@ -263,8 +265,8 @@ def cmd_refine_selection(session, cmd, args, cmd_line):
     # Measured selection WL polish (selection-basis lever 3,
     # wishlist-planner): sweep every eligible bundle's SELECTION on the
     # MEASURED result — screen all alternates against the frozen placement,
-    # full-trial the best two, adopt only when opens and overlaps are
-    # parity-or-better componentwise AND realized WL is strictly lower
+    # full-trial the best two, adopt only when opens, overlaps and interval
+    # violations are parity-or-better componentwise AND realized WL is lower
     # (chase_overlaps: plain lexicographic — the aggressive pre-healer
     # form).  Run it at the END of the flow, after the healers.  Skips
     # user pins and hier.locked bottom-up copies.  Opt-in: flows that do
@@ -273,6 +275,13 @@ def cmd_refine_selection(session, cmd, args, cmd_line):
     unknown = [a for a in args if not looks_numeric(a) and a not in flags]
     reject_unknown_options("refine_selection", unknown, flags)
     nums = [a for a in args if looks_numeric(a)]
+    # looks_numeric admits floats ("2.5") and any count of values; the syntax
+    # promises at most ONE integer max_moves — reject the rest loudly instead
+    # of crashing on int() or silently dropping the extras (review #525).
+    if len(nums) > 1 or (nums and not nums[0].isdigit()):
+        print(f"Error: refine_selection takes at most one non-negative "
+              f"integer max_moves argument, got: {' '.join(nums)}")
+        sys.exit(1)
     max_moves = int(nums[0]) if nums else 30
     session._refine_selection(max_moves,
                               chase_overlaps="chase_overlaps" in args)

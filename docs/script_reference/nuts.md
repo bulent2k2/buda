@@ -533,15 +533,17 @@ against the other bundles' frozen placement (the fixed-context screen,
 ordering only), full-trialing the best two, and adopting a move only when the
 endpoint cannot get worse:
 
-- **Default accept (WL polish):** opens and overlaps must be
+- **Default accept (WL polish):** opens, overlaps and NUTS interval
+  violations must be
   **parity-or-better componentwise** AND realized abstract WL (the placed
   spans' total length) strictly lower — so the healers' endpoint can never be
   traded for length. Run it at the **end of the flow**, after the last
   `ripup_reroute`: both pre-healer placements were measured to perturb the
   healers' basins (even overlap-parity selection changes shifted their
   trajectories).
-- **`chase_overlaps`:** plain lexicographic accept (`(overlaps, WL)` stage a;
-  `(opens, overlaps, WL)` stage b) — the aggressive pre-healer form, measured
+- **`chase_overlaps`:** plain lexicographic accept (`(overlaps, violations,
+  WL)` stage a; `(opens, overlaps, violations, WL)` stage b) — the aggressive
+  pre-healer form, measured
   mixed on the vehicles (it perturbs downstream healing; kept as the
   documented escape hatch for healerless experiments).
 

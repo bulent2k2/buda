@@ -949,7 +949,8 @@ class RipupMixin:
         to perturb the healers' basins (even overlap-parity selection
         changes shifted their trajectories — bottomup 0->16 opens under
         the WL-polish accept), so the default accept is componentwise —
-        opens and overlaps PARITY-OR-BETTER with WL strictly lower — which
+        opens, overlaps AND interval violations PARITY-OR-BETTER with WL
+        strictly lower — which
         makes an endpoint regression impossible by construction.  The
         `chase_overlaps` token switches to the plain lexicographic accept
         (the aggressive pre-healer form; measured mixed on the vehicles)."""
@@ -971,31 +972,39 @@ class RipupMixin:
         # overlaps, so the accept guard can protect the HEALED endpoint
         # componentwise; before it, (overlaps, WL) as in the stage-a form.
         stage = 'b' if self.detailed_result is not None else 'a'
+        # Interval violations (a segment committed OUTSIDE its hard Hanan
+        # interval — the exhausted-window fallback) are a reported routing
+        # failure the healers' own metrics don't carry; a WL win must not
+        # smuggle one in, so they get their own parity component (review
+        # #525).
         if stage == 'b':
             metric = lambda: (self.detailed_result.num_unplaced  # noqa: E731
                               + self._rr_disconnected_bits(),
-                              self.nuts_result.num_overlaps, wl_now())
+                              self.nuts_result.num_overlaps,
+                              self.nuts_result.num_violations, wl_now())
 
             def m_str(m):
-                return f"{m[0]} open (ovl {m[1]}, wl {m[2]})"
+                return f"{m[0]} open (ovl {m[1]}, viol {m[2]}, wl {m[3]})"
 
             def accept(m, cur):
-                # componentwise no-worse on opens AND overlaps, WL strictly
-                # better (chase_overlaps: plain lexicographic)
+                # componentwise no-worse on opens, overlaps AND interval
+                # violations, WL strictly better (chase_overlaps: plain
+                # lexicographic)
+                if chase_overlaps:
+                    return m < cur
+                return (m[0] <= cur[0] and m[1] <= cur[1]
+                        and m[2] <= cur[2] and m[3] < cur[3])
+        else:
+            metric = lambda: (self.nuts_result.num_overlaps,  # noqa: E731
+                              self.nuts_result.num_violations, wl_now())
+
+            def m_str(m):
+                return f"{m[0]} ov (viol {m[1]}, wl {m[2]})"
+
+            def accept(m, cur):
                 if chase_overlaps:
                     return m < cur
                 return (m[0] <= cur[0] and m[1] <= cur[1] and m[2] < cur[2])
-        else:
-            metric = lambda: (self.nuts_result.num_overlaps,  # noqa: E731
-                              wl_now())
-
-            def m_str(m):
-                return f"{m[0]} ov (wl {m[1]})"
-
-            def accept(m, cur):
-                if chase_overlaps:
-                    return m < cur
-                return m[0] <= cur[0] and m[1] < cur[1]
 
         saved_fast = getattr(self, '_rr_fast_trials', False)
         self._rr_fast_trials = False       # WL-fair full trials + fwd snapshots

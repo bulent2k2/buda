@@ -159,6 +159,16 @@ def run_bogus(ctx):
     _run(ctx, "frobnicate")
 
 
+@when("I run refine_selection with max_moves 2.5")
+def run_float(ctx):
+    _run(ctx, "2.5")
+
+
+@when("I run refine_selection with two numeric arguments")
+def run_two_nums(ctx):
+    _run(ctx, "3 4")
+
+
 # --- Then -------------------------------------------------------------------
 
 @then("the realized wirelength strictly decreases")
@@ -190,6 +200,12 @@ def sel_unchanged(ctx):
 @then("refine_selection reports the unknown option")
 def bad_option(ctx):
     assert "frobnicate" in ctx["out"], ctx["out"]
+    assert "[refine_selection] COMMIT" not in ctx["out"], ctx["out"]
+
+
+@then("refine_selection reports the invalid max_moves")
+def bad_max_moves(ctx):
+    assert "integer max_moves" in ctx["out"], ctx["out"]
     assert "[refine_selection] COMMIT" not in ctx["out"], ctx["out"]
 
 

@@ -40,6 +40,16 @@ Feature: refine_selection recovers realized wirelength on measured routes
     When I run refine_selection with a bogus option
     Then refine_selection reports the unknown option
 
+  Scenario: A non-integer max_moves is rejected
+    Given a one-bus floorplan planned normally
+    When I run refine_selection with max_moves 2.5
+    Then refine_selection reports the invalid max_moves
+
+  Scenario: Multiple numeric arguments are rejected
+    Given a one-bus floorplan planned normally
+    When I run refine_selection with two numeric arguments
+    Then refine_selection reports the invalid max_moves
+
   Scenario: refine_selection requires the pipeline to have run
     Given a fresh session with no routed design
     When I run refine_selection
