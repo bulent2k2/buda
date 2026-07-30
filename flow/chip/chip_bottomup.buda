@@ -1,0 +1,28 @@
+# chip — the next-level hier vehicle, BOTTOM-UP variant: mark both cell
+# templates (big2 + mix2) for bottom-up planning — each cell's local
+# interconnect is planned/NUTS'd ONCE and copied to its three instances (the
+# copies become keepouts for the top-level buses) — with OCCURRENCE ALIGNMENT:
+# align_bottom_up nudges the instances of each cell onto a common track phase
+# (minimal total movement, per rotation class) so the copied routing lands on
+# real tracks at every occurrence and check_template_tracks agrees.  Order
+# matters: set_bottom_up + align_bottom_up run after open_bdb (flags persist in
+# the BDB; align needs the track pitches from chip_tracks) and BEFORE
+# derive_busterms / add_blocks_from_bdb.  No healers (fast experimentation).
+source chip_tracks.buda
+open_bdb chip.bdb.sql
+set_bottom_up big2
+set_bottom_up mix2
+align_bottom_up
+derive_busterms 2
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+run_hier_bundler depth 2
+generate_hier_topologies
+run_planner hier 5 signal_tracks
+run_nuts
+check_template_tracks on_mismatch independent
+run_detailed_nuts
+report_wl
+check_design
+exit

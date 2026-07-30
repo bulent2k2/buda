@@ -61,22 +61,80 @@ def test_resolve_cells_path_and_extension():
     flow = os.path.join(ROOT, "flow")
     # Bare names (no --path): looked up in flow/, .buda inferred.
     assert bd._resolve_cells(["dnuts1", "dnuts2"], None) == [
-        os.path.join(flow, "dnuts1.buda"), os.path.join(flow, "dnuts2.buda")]
+        ("dnuts1", os.path.join(flow, "dnuts1.buda")),
+        ("dnuts2", os.path.join(flow, "dnuts2.buda"))]
     # An explicit .buda extension is not doubled.
-    assert bd._resolve_cells(["dnuts1.buda"], None) == [os.path.join(flow, "dnuts1.buda")]
+    assert bd._resolve_cells(["dnuts1.buda"], None) == [
+        ("dnuts1", os.path.join(flow, "dnuts1.buda"))]
     # The defaults resolve to the historical flow/*.buda set.
     assert bd._resolve_cells(bd._DEFAULT_CELLS, None) == [
-        os.path.join(flow, f) for f in
+        (os.path.splitext(f)[0], os.path.join(flow, f)) for f in
         ("dnuts1.buda", "dnuts2.buda", "channel_stress.buda")]
     # --path directory is used for bare names.
     assert bd._resolve_cells(["foo", "bar"], "/tmp/cells") == [
-        "/tmp/cells/foo.buda", "/tmp/cells/bar.buda"]
+        ("foo", "/tmp/cells/foo.buda"), ("bar", "/tmp/cells/bar.buda")]
     # A directory-qualified entry stays relative to the repo root (back-compat).
-    assert bd._resolve_cells(["flow/two.buda"], None) == [os.path.join(ROOT, "flow/two.buda")]
-    assert bd._resolve_cells(["flow/two"], None) == [os.path.join(ROOT, "flow/two.buda")]
+    assert bd._resolve_cells(["flow/two.buda"], None) == [
+        ("two", os.path.join(ROOT, "flow/two.buda"))]
+    assert bd._resolve_cells(["flow/two"], None) == [
+        ("two", os.path.join(ROOT, "flow/two.buda"))]
     # An absolute path is used as-is (extension still inferred), --path ignored.
-    assert bd._resolve_cells(["/abs/foo"], None) == ["/abs/foo.buda"]
-    assert bd._resolve_cells(["/abs/foo.buda"], "/ignored") == ["/abs/foo.buda"]
+    assert bd._resolve_cells(["/abs/foo"], None) == [("foo", "/abs/foo.buda")]
+    assert bd._resolve_cells(["/abs/foo.buda"], "/ignored") == [
+        ("foo", "/abs/foo.buda")]
+
+
+def test_resolve_cells_bdb_and_named_entries():
+    """The chip-scale enhancement: NAME=PATH entries and .bdb/.bdb.sql cell
+    sources (imported as BDB cells rather than parsed as flat scripts)."""
+    bd = build_hier_demo
+    ROOT = bd._ROOT
+    # NAME=PATH names the cell explicitly.
+    assert bd._resolve_cells(
+        ["big2=flow/big_data_test/big2/tc3b_flat_x5.buda"], None) == [
+        ("big2", os.path.join(ROOT, "flow/big_data_test/big2/tc3b_flat_x5.buda"))]
+    # A .bdb.sql entry keeps its extension (no .buda inference) and derives
+    # its default cell name from the basename minus the compound extension.
+    assert bd._resolve_cells(["flow/rnr/mix2.bdb.sql"], None) == [
+        ("mix2", os.path.join(ROOT, "flow/rnr/mix2.bdb.sql"))]
+    assert bd._resolve_cells(["/abs/x.bdb"], None) == [("x", "/abs/x.bdb")]
+    # Duplicate resolved names are a hard error (SystemExit).
+    with pytest.raises(SystemExit):
+        bd._resolve_cells(["dnuts1", "dnuts1=flow/rnr/mix2.bdb.sql"], None)
+
+
+def test_bdb_cell_import_roundtrip(tmp_path, default_demo_bdb):
+    """Import a previously-built hierarchical BDB as a CELL of a new chip
+    (_define_bdb_cell): its leaf blocks appear as '__'-folded child blocks of
+    every instance, and its nets (cell-internal AND its own top buses) are
+    replicated per instance as the new chip's cell-internal nets."""
+    src_db = buda_db.BDB(default_demo_bdb)
+    n_src_leaves = sum(1 for c in src_db.all_components() if c.is_leaf)
+    out = str(tmp_path / "chip2.bdb")
+    build_hier_demo.build(out, [("sub", default_demo_bdb)],
+                          seed=1, n_instances=2, n_buses=2)
+    db = buda_db.BDB(out)
+    comps = db.all_components()
+    insts = [c for c in comps if c.depth == 1]
+    assert sorted(c.name for c in insts) == ["chip/i_sub_0", "chip/i_sub_1"]
+    leaves = [c for c in comps if c.is_leaf]
+    # Every source leaf appears once per instance, path-folded with '__'.
+    assert len(leaves) == 2 * n_src_leaves
+    assert any("__" in c.name.rsplit("/", 1)[-1] for c in leaves)
+    # The source's nets are replicated into BOTH instances with
+    # instance-qualified names (source top buses become cell-internal here).
+    names = [n.name for n in db.all_nets()]
+    for inst in ("chip/i_sub_0", "chip/i_sub_1"):
+        assert any(nm.startswith(f"{inst}/") for nm in names)
+    # Net-count identity: each instance carries every >=2-leaf-pin source net.
+    src_leaf_ids = {c.id for c in src_db.all_components() if c.is_leaf}
+    per_net = {}
+    for p in src_db.all_pins():
+        if p.comp_id in src_leaf_ids:
+            per_net[p.net_id] = per_net.get(p.net_id, 0) + 1
+    n_expected = sum(1 for k, v in per_net.items() if v >= 2)
+    n_cell_nets = sum(1 for nm in names if nm.startswith("chip/i_sub_"))
+    assert n_cell_nets == 2 * n_expected
 
 
 def test_optimizer_param_parsing():

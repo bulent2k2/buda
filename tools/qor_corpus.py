@@ -102,6 +102,8 @@ CORPUS = [
     "flow/rnr/mix2_fast_on_aligned_sql.buda",
     "flow/rnr/mix2_fast_topdown.buda",
     "flow/rnr/mix2_topdown_refine.buda",
+    "flow/chip/chip_topdown.buda",
+    "flow/chip/chip_bottomup.buda",
 ]
 
 

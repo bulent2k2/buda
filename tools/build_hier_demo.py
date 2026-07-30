@@ -116,6 +116,96 @@ def _define_leaf_cell(db, cell, buda_path):
     return w, h, list(parsed.blocks.keys()), parsed.nets, centers
 
 
+# Pin directions that mark a net's driver endpoint (bdb2buda's convention).
+_DRIVER_DIRS = {"OUTPUT", "DRIVER"}
+
+
+def _define_bdb_cell(db, cell, bdb_path):
+    """Create `cell` from an EXISTING hierarchical BDB (`.bdb` / `.bdb.sql`) —
+    the enhancement that lets a whole routed-design fixture (mix2, a prior
+    build of this very tool, an imported design) be instantiated as a reusable
+    cell inside a bigger chip.
+
+    The source design is flattened ONE structural level deep: every LEAF
+    component becomes a child block of the new cell, named by its
+    root-relative path with '/' folded to '__' (so multiply-instantiated
+    sub-blocks stay unique: chip/i_dnuts1_0/u0 -> i_dnuts1_0__u0), and every
+    net with >=2 leaf-pin endpoints is carried over with the same folded
+    names.  Interface pins on intermediate ancestors are skipped — they are
+    the SAME logical connection propagated upward (add_net_pins recreates
+    them in the target hierarchy).  Driver selection, the 'unknown'/'inout'
+    direction classes, and the '.p' port fallback mirror bdb2buda's export
+    walk.  Same return shape as _define_leaf_cell."""
+    import bdb_serialize   # accepts *.bdb.sql transparently (temp binary)
+    try:
+        src = buda_db.BDB(bdb_serialize.materialize_if_sql(bdb_path))
+    except Exception as exc:
+        sys.exit(f"Error: could not read BDB cell {bdb_path}: {exc}")
+    comps = {c.id: c for c in src.all_components()}
+    roots = [c for c in comps.values() if c.parent_id == -1]
+    if len(roots) != 1:
+        sys.exit(f"Error: {bdb_path} must contain exactly one top component "
+                 f"to import as a cell (found {len(roots)})")
+    root = roots[0]
+    w, h = root.x2 - root.x1, root.y2 - root.y1
+    if w <= 0 or h <= 0:
+        w, h = src.die_w(), src.die_h()
+    ox, oy = root.x1, root.y1
+    prefix = root.name + "/"
+
+    def _flat(name):
+        n = name[len(prefix):] if name.startswith(prefix) else name
+        return n.replace("/", "__")
+
+    leaves = sorted((c for c in comps.values() if c.is_leaf),
+                    key=lambda c: c.name)
+    if not leaves:
+        sys.exit(f"Error: no leaf components in {bdb_path}")
+    db.add_cell(cell, w, h)
+    centers, blocks, leaf_ids = {}, [], set()
+    for c in leaves:
+        bn = _flat(c.name)
+        child = f"{cell}__{bn}"
+        db.add_cell(child, c.x2 - c.x1, c.y2 - c.y1)
+        db.add_inst_to_cell(cell, bn, child, c.x1 - ox, c.y1 - oy)
+        centers[bn] = ((c.x1 + c.x2) / 2 - ox, (c.y1 + c.y2) / 2 - oy)
+        blocks.append(bn)
+        leaf_ids.add(c.id)
+
+    pins_by_net = {}
+    for p in src.all_pins():
+        if p.comp_id in leaf_ids:
+            pins_by_net.setdefault(p.net_id, []).append(p)
+    net_name = {n.id: n.name for n in src.all_nets()}
+
+    def _ep(p):
+        c = comps[p.comp_id]
+        pn = p.pin_name
+        if not pn or pn == c.name or pn == c.name.rsplit("/", 1)[-1]:
+            pn = "p"                      # bdb2buda's bare-name port fallback
+        return f"{_flat(c.name)}.{pn}"
+
+    nets = []
+    for nid in sorted(pins_by_net):
+        pins = pins_by_net[nid]
+        if len(pins) < 2:
+            continue                      # boundary-only net — nothing to route
+        drivers = [p for p in pins if p.dir in _DRIVER_DIRS]
+        drv = drivers[0] if drivers else pins[0]
+        rcvs = [p for p in pins if p is not drv]
+        dirs = {p.dir for p in pins}
+        if dirs <= {"INOUT"}:
+            d = "inout"
+        elif dirs <= {"UNKNOWN", ""}:
+            d = "unknown"
+        else:
+            d = ""
+        nets.append({"name": _flat(net_name.get(nid, f"net_{nid}")),
+                     "drv": _ep(drv), "rcvs": [_ep(p) for p in rcvs],
+                     "dir": d})
+    return w, h, blocks, nets, centers
+
+
 # ── Optimizer option parsing (--optimize / --param / --bloat) ────────────────
 
 # Keys whose value is a runtime budget (parsed as seconds, not a k/m count).
@@ -457,16 +547,21 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
         os.remove(out_path)
     db = buda_db.BDB(out_path)
 
-    # 1. Define each leaf cell from its .buda file.
+    # 1. Define each cell — from a flat .buda script, or (the chip-scale
+    #    enhancement) from an existing hierarchical BDB flattened one level.
     cells = []                  # (name, w, h, blocks, nets, centers)
     cell_meta = {}              # name -> (w, h, centers)
-    for path in cell_files:
-        name = os.path.splitext(os.path.basename(path))[0]
-        w, h, blocks, nets, centers = _define_leaf_cell(db, name, path)
+    for entry in cell_files:
+        name, path = entry if isinstance(entry, tuple) \
+            else (_cell_default_name(entry), entry)
+        define = (_define_bdb_cell
+                  if path.lower().endswith(_BDB_EXTS) else _define_leaf_cell)
+        w, h, blocks, nets, centers = define(db, name, path)
         cells.append((name, w, h, blocks, nets, centers))
         cell_meta[name] = (w, h, centers)
+        src = " [bdb]" if define is _define_bdb_cell else ""
         print(f"  cell {name:16s} {w:6.0f} x {h:6.0f}  "
-              f"({len(blocks)} blocks, {len(nets)} internal nets)")
+              f"({len(blocks)} blocks, {len(nets)} internal nets){src}")
 
     # 2. Name the instances of each cell (count per cell) and lay them in a row.
     inst_counts = _normalize_instances(n_instances, [c[0] for c in cells])
@@ -576,29 +671,57 @@ _DEFAULT_CELLS = ["dnuts1", "dnuts2", "channel_stress"]
 _DEFAULT_CELL_DIR = os.path.join(_ROOT, "flow")
 
 
-def _resolve_cell(entry: str, base_dir: str) -> str:
-    """Resolve one --cells entry to a `.buda` path.
+_BDB_EXTS = (".bdb", ".bdb.sql", ".sql")
 
-    - the `.buda` extension is inferred when missing (`dnuts1` → `dnuts1.buda`);
-    - an absolute path is used as-is;
-    - a path that already names a directory (`flow/two.buda`) is taken relative
-      to the repo root (backward compatible);
-    - a bare cell name is looked up in `base_dir` (the `--path` directory)."""
+
+def _cell_default_name(path: str) -> str:
+    """Cell name from a source path: basename minus .buda/.bdb/.bdb.sql/.sql."""
+    base = os.path.basename(path)
+    low = base.lower()
+    for ext in (".bdb.sql", ".bdb", ".sql", ".buda"):
+        if low.endswith(ext):
+            return base[:-len(ext)]
+    return os.path.splitext(base)[0]
+
+
+def _resolve_cell(entry: str, base_dir: str):
+    """Resolve one --cells entry to a (cell_name, source_path) pair.
+
+    - `NAME=PATH` names the cell explicitly (`big2=flow/.../tc3b_flat_x5.buda`);
+      otherwise the name is the basename minus its extension;
+    - a `.bdb` / `.bdb.sql` / `.sql` entry is an EXISTING hierarchical BDB,
+      imported as a cell (see _define_bdb_cell); anything else is a flat
+      `.buda` script (the extension is inferred when missing);
+    - an absolute path is used as-is; a dir-qualified entry (`flow/two.buda`)
+      is taken relative to the repo root (backward compatible); a bare name is
+      looked up in `base_dir` (the `--path` directory)."""
     e = entry.strip()
-    if not e.lower().endswith(".buda"):
+    name = None
+    if "=" in e:
+        name, e = (s.strip() for s in e.split("=", 1))
+    if not e.lower().endswith(_BDB_EXTS + (".buda",)):
         e += ".buda"
     if os.path.isabs(e):
-        return e
-    if os.path.dirname(e):                 # dir-qualified → relative to repo root
-        return os.path.join(_ROOT, e)
-    return os.path.join(base_dir, e)       # bare cell name → the --path directory
+        path = e
+    elif os.path.dirname(e):               # dir-qualified → relative to repo root
+        path = os.path.join(_ROOT, e)
+    else:
+        path = os.path.join(base_dir, e)   # bare cell name → the --path directory
+    return (name or _cell_default_name(path), path)
 
 
 def _resolve_cells(entries, path_arg):
     """Resolve --cells entries against the optional --path directory (default:
-    the repo's flow/ directory)."""
+    the repo's flow/ directory).  Returns [(cell_name, source_path), …]."""
     base_dir = os.path.abspath(path_arg) if path_arg else _DEFAULT_CELL_DIR
-    return [_resolve_cell(e, base_dir) for e in entries]
+    resolved = [_resolve_cell(e, base_dir) for e in entries]
+    seen = set()
+    for name, _p in resolved:
+        if name in seen:
+            sys.exit(f"Error: duplicate cell name '{name}' in --cells "
+                     f"(use NAME=PATH to disambiguate)")
+        seen.add(name)
+    return resolved
 
 
 def main():
@@ -659,7 +782,7 @@ def main():
     if not cell_entries:
         sys.exit("Error: --cells must name at least one cell")
     cell_files = _resolve_cells(cell_entries, path_arg)
-    missing = [c for c in cell_files if not os.path.exists(c)]
+    missing = [p for _n, p in cell_files if not os.path.exists(p)]
     if missing:
         sys.exit(f"Error: cell file(s) not found: {missing}")
 

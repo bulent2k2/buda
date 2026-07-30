@@ -25,7 +25,7 @@ python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a,b,c]
 |---|---|---|
 | `out.bdb` | `/tmp/hier_demo.bdb` | Output BDB path (overwritten if it exists) |
 | `--seed N` | `1` | Seed for the random bus wiring (reproducible) |
-| `--cells …` | `dnuts1,dnuts2,channel_stress` | Comma-separated leaf cells. The `.buda` extension is inferred when omitted; a bare name is looked up in `--path` (default `flow/`), an absolute path is used as-is, and a directory-qualified entry (`flow/two.buda`) stays relative to the repo root |
+| `--cells …` | `dnuts1,dnuts2,channel_stress` | Comma-separated cells. Each entry is a flat `.buda` script **or an existing hierarchical BDB** (`.bdb` / `.bdb.sql` — see [BDB cells](#bdb-cells-instantiate-a-whole-design-as-a-cell)), optionally named `NAME=PATH` (`big2=flow/big_data_test/big2/tc3b_flat_x5.buda`). The `.buda` extension is inferred when omitted; a bare name is looked up in `--path` (default `flow/`), an absolute path is used as-is, and a directory-qualified entry (`flow/two.buda`) stays relative to the repo root |
 | `--path DIR` | `flow/` | Directory holding the leaf `.buda` files for bare `--cells` names |
 | `--instances SPEC` | `2` | Instances per cell: one int (all cells), a positional list in `--cells` order (`1,4,2`), or named (`dnuts1=3,channel_stress=1`; unlisted → 2). Each count ≥1 |
 | `--buses N` | `7` | **Base** top-level cross-instance buses; bit widths cycle `[4,6,8,10,12,14,16]` (≥0). Extra buses are appended so every instance is wired to ≥3 top buses |
@@ -55,6 +55,36 @@ python3 tools/build_hier_demo.py /tmp/mix.bdb --instances 1,4,2
 # Per-cell instance counts (named); unlisted cells default to 2
 python3 tools/build_hier_demo.py /tmp/mix.bdb --instances dnuts2=4,channel_stress=1
 ```
+
+## BDB cells — instantiate a whole design as a cell
+
+A `--cells` entry ending in `.bdb` / `.bdb.sql` names an **existing
+hierarchical BDB** to import as a cell — so a whole routed-design fixture
+(mix2, a prior build of this very tool, an imported design) becomes a reusable
+cell inside a bigger chip.  The source design is flattened **one structural
+level deep**: every LEAF component becomes a child block of the new cell,
+named by its root-relative path with `/` folded to `__` (so
+multiply-instantiated sub-blocks stay unique: `chip/i_dnuts1_0/u0` →
+`i_dnuts1_0__u0`), and every net with ≥2 leaf-pin endpoints is carried over
+with the same folded names — the source's own *top-level* buses simply become
+cell-internal nets of the imported cell.  Interface pins on intermediate
+ancestors are skipped (they are the same logical connection propagated upward;
+`add_net_pins` recreates them in the new hierarchy).  Driver selection and the
+`unknown`/`inout` direction classes mirror `bdb2buda`'s export walk.
+
+The chip-scale vehicle in `flow/chip/` is built exactly this way — three
+instances each of big2 (flat script) and mix2 (BDB cell) with 100 top buses:
+
+```bash
+python3 tools/build_hier_demo.py chip.bdb \
+    --cells big2=flow/big_data_test/big2/tc3b_flat_x5.buda,mix2=flow/rnr/mix2.bdb.sql \
+    --instances 3 --buses 100 --optimize sa --param iter=60k --bloat 25%
+```
+
+`NAME=PATH` names a cell explicitly (the default is the basename minus its
+extension); duplicate resolved cell names are a hard error.
+
+---
 
 Whatever the instance count, **every instance is guaranteed to be wired to at
 least three top-level buses**.  `--buses N` sets the count of *base* random
