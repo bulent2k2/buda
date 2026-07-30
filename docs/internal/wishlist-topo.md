@@ -9,6 +9,8 @@ grounded in the current generator code with a measured prototype result.
 
 ## Star→spine relay completion (`set_spine_relays`) — SHIPPED opt-in, measured net-positive on viol_bundles
 
+**Default-flip re-measured 2026-07-30: keep opt-in — see "Default-flip study" at the end of this file.**
+
 **Context (2026-07-27, pure-MST study on `flow/big_data_test/bigHalf.buda`).** A
 pure-MST candidate's segment count is dominated NOT by per-edge shape but by
 `complete_relay_junctions` connectors at high-degree hubs. Measured over the 54
@@ -1066,6 +1068,9 @@ where the flag is the right mechanism; default-on would add candidate-count /
 persist cost to every design for no corpus gain, with residual loss risk on some
 datapath shapes. Revisit only if a datapath becomes a common default workload.
 
+**Re-measured 2026-07-30 on the full QoR corpus — the verdict HARDENS from
+"no benefit" to "real regressions": see "Default-flip study" below.**
+
 ## Incremental re-analysis (topo/conn unification Phase D) — DEFERRED BY MEASUREMENT
 
 **Context.**  The topo/conn unification
@@ -1318,3 +1323,72 @@ lost candidate (pool completeness), not a silent open. Fix shape: extend
 the pre-pass to suppressed TEG-over gap blocks too (their gap stubs are the
 real connection; the suppression logic models only the single-stub form),
 then re-measure the pool on the TEG flows.
+
+
+## Default-flip study: `multi_trunk` + `spine_relays` (2026-07-30) — keep BOTH opt-in
+
+Question: post the #514 tap-overhang fix (J-anchor spine completion), can
+either generation knob become the default?  Harness: `BUDA_MULTI_TRUNK`
+env added beside `BUDA_SPINE_RELAYS` (both ctor-read, token > env >
+compiled default), so the whole 29-flow QoR corpus is swept as-written.
+Four cells: base / spine / multi / both, `tools/qor_corpus.py --compare`
+on `(overlaps, unplaced, viol_bundles)`.
+
+**Artifact control first.**  Two corpus flows pin candidates by INDEX and
+mis-measure under a pool change:
+
+- `bigHalf_bus038_bitrunk`: its pin 20 is ALREADY DEAD on main (the
+  anchoring gate shrank the pool to 19; the select errors and the flow
+  runs unpinned to 0/0/0).  Under `BUDA_MULTI_TRUNK=1` the pool grows to
+  24 and the stale pin RE-ARMS onto a degenerate BITRUNK — the 0/56/1
+  "regression" is 100 % artifact (unpinned under multi: clean 0/0/0,
+  same TRUNK_H selected).  The dead pin is now retired in the flow with
+  a warning comment.
+- `big_3bundles_sel_pure_mst_topo` (spine cell): group pins re-mapped to
+  the equivalent candidates (spine changes the MST completion, so
+  type-matched) → clean 0/0/0.  The apparent 0/32/1 was artifact.
+
+**Corrected real movers** (all remaining rows are unpinned flows):
+
+| flow (ov/unpl/viol) | base | spine | multi | both |
+|---|---|---|---|---|
+| rnr/mix | 1/0/0 | **2/0/0 ✗** | **0/0/0 ✓** | **0/0/0 ✓** |
+| rnr/mix2_fast_bottomup | 1/0/0 | **1/16/1 ✗** | **1/8/1 ✗** | **1/8/1 ✗** |
+| rnr/mix2_fast_on_aligned_sql | 0/30/2 | 2/16/1 ~ | **10/47/3 ✗** | 4/24/2 ~ |
+| rnr/mix2_fast_topdown | 0/0/0 | **1/1/1 ✗** | = | = |
+| big_data_test/tc3a | 0/0/0 | = | **0/4/1 ✗** | **0/4/1 ✗** |
+
+WL (comparable flows): spine +0.5 % abstract / +0.55 % detailed (bigHalf
++2.1 % with endpoint unchanged); multi +1.2 % / +1.8 % overall but with
+real per-flow wins (topdown −8.2 %, mix2 −2.4 %) against bigHalf +6.2 %.
+Corpus runtime: base 188 s → spine 253 s (+35 %) / multi 262 s (+40 %) —
+the larger pools tax generation, planning and the healers everywhere.
+
+**Verdicts.**
+
+- **`spine_relays`: keep opt-in.**  Three of the four rnr healer vehicles
+  regress for real (topdown to 1/1/1 from clean, bottomup 0→16 unplaced,
+  mix +1 overlap) against one mixed improvement (aligned 30→16 unplaced
+  at +2 overlaps).  The #514 J-anchor fixed the SHAPE, not the
+  selection-vs-realization gap: the planner picks the fewer-segment
+  spine forms on estimate and DNUTS realizes them worse on these
+  congested hier flows — the same pattern the original opt-in decision
+  recorded.
+- **`multi_trunk`: keep opt-in — the earlier "no corpus benefit" verdict
+  hardens to "real regressions" on the current healer-heavy hier
+  corpus** (aligned collapses to 10/47/3, bottomup 0→8, tc3a 0→4).  The
+  per-flow value is real (mix HEALS to 0/0/0 — the only cell that
+  clears its base overlap — and topdown/mix2 take −8.2 %/−2.4 % WL), so
+  the flag remains the right mechanism where a datapath/fan-out shape is
+  known.
+- **`both`: interactions exist** (aligned lands between the singles at
+  4/24/2; mix still heals) but the regression set is the union's —
+  not flippable either.
+
+**If a flip is ever revisited**, two prerequisites this study surfaced:
+(1) index pins are pool-fragile — every pinned flow needs re-mapping
+(exact-geometry match, the #517 procedure) or hint/group pins; (2) the
+realization gap is the real blocker — the selection-basis item ("rank on
+measured routability, not the generation-time WL estimate",
+wishlist-planner) would have to land first, or the new families need
+kSegsRel-style gates that engage them only where they win.

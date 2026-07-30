@@ -559,10 +559,13 @@ private:
 class TopologyGenerator {
 public:
     explicit TopologyGenerator(const Floorplan& fp) : floorplan_(fp) {
-        // Opt-in default from the environment so a whole corpus can be A/B'd
-        // without editing every flow (a later set_spine_relays(v) still wins).
+        // Opt-in defaults from the environment so a whole corpus can be A/B'd
+        // without editing every flow (a later set_*(v) still wins) — the
+        // default-flip study harness for both opt-in generation knobs.
         if (const char* e = std::getenv("BUDA_SPINE_RELAYS"))
             allow_spine_relays_ = (std::string(e) == "1");
+        if (const char* e = std::getenv("BUDA_MULTI_TRUNK"))
+            allow_multi_trunk_ = (std::string(e) == "1");
     }
 
     // Busterm mode (default true): route segments terminate at the nearest

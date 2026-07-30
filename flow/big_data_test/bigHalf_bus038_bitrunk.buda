@@ -5,7 +5,15 @@ run_bundler
 generate_topologies_for_bundle bus_038 no_hanan_loci
 dump_topologies bus_038
 check_design topo all
-select_topology bus_038 20
+# The original vehicle pinned candidate 20 — the fully-degenerate legacy
+# BITRUNK_H whose free-sliding trunk grazed every endpoint block untapped and
+# opened all 56 bits at DNUTS.  The generation-time anchoring gate
+# (filter_unanchored_bitrunk) now drops that candidate, so the pool is 19 and
+# the pin is retired: the flow now demonstrates the HEALTHY default (the gate
+# keeps only anchored shapes; planner picks freely, 0/0/0).  Do NOT re-add a
+# blind index pin here — under `multi_trunk` (or BUDA_MULTI_TRUNK=1) the pool
+# grows and a stale index lands on a degenerate tree again (the 2026-07-30
+# default-flip study measured exactly that: 0/56/1 from the re-armed pin).
 run_planner
 run_nuts
 run_detailed_nuts
