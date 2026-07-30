@@ -16,11 +16,11 @@ dump_topologies --grouped
 
 select_topology  bus_069  44
 select_topology  bus_047  23
-select_topology  bus_030  22
+select_topology  bus_030  19
 
 select_topology  sub_069  24
 select_topology  sub_047  26
-select_topology  sub_030  20
+select_topology  sub_030  21
 
 run_planner
 run_nuts
