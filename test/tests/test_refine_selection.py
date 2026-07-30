@@ -40,6 +40,9 @@ from pytest_bdd import scenarios, given, when, then
 sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 import buda_cli  # noqa: E402
 
+_ROOT = Path(__file__).parents[2]
+_RNR = _ROOT / "flow" / "rnr"
+
 scenarios("features/refine_selection.feature")
 
 
@@ -212,3 +215,65 @@ def bad_max_moves(ctx):
 @then("refine_selection reports it has nothing to refine")
 def nothing(ctx):
     assert "Error: refine_selection" in ctx["out"], ctx["out"]
+
+
+# --- the stuck-endpoint recipe (@mid): refine -> negotiate -> ripup -> refine
+
+@pytest.mark.mid
+def test_topdown_recipe_heals_to_clean():
+    """The composition recipe on a residual-laden flow (the checked-in QoR
+    vehicle `flow/rnr/mix2_topdown_refine.buda`): the plain top-down mix2
+    pipeline ends with triple-digit DNUTS opens (175/16 ovl on the x86
+    reference build); `refine_selection`'s componentwise accept pre-shrinks
+    the problem (its accept lets endpoint improvements through on a
+    healerless flow), `negotiate_congestion` + `ripup_reroute` heal the
+    residual (0/0 on the reference build), and a trailing
+    `refine_selection` recovers part of the WL the healers spent without
+    ever worsening the endpoint.
+
+    Exact counts are machine-sensitive (double-based NUTS math under
+    -march=native, as in the big2 tests), so the guards here are the
+    CPU-invariant ones — the componentwise no-worse guarantees + strict
+    overall progress; the exact per-host endpoint is pinned by the QoR
+    corpus compare (`tools/qor_corpus.py`), which this flow is part of."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command(f"source {_RNR / 'mix_tracks.buda'}")
+        s.do_command(f"open_bdb {_RNR / 'mix2.bdb.sql'}")
+        s.do_command("derive_busterms 2")
+        s.do_command("add_blocks_from_bdb 0")
+        s.do_command("add_blocks_from_bdb 1 skip")
+        s.do_command("add_blocks_from_bdb 2 skip")
+        s.do_command("run_hier_bundler depth 2")
+        s.do_command("generate_hier_topologies")
+        s.do_command("run_planner hier 5 signal_tracks")
+        s.do_command("run_nuts")
+        s.do_command("run_detailed_nuts")
+    base = (s.detailed_result.num_unplaced, s.nuts_result.num_overlaps)
+    assert base[0] > 0, "fixture should start with DNUTS opens"
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("refine_selection")
+    r1 = (s.detailed_result.num_unplaced, s.nuts_result.num_overlaps)
+    # The componentwise accept can only improve the endpoint (hard guarantee).
+    assert r1[0] <= base[0] and r1[1] <= base[1], (base, r1)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("negotiate_congestion")
+        s.do_command("ripup_reroute")
+    healed = (s.detailed_result.num_unplaced, s.nuts_result.num_overlaps)
+    # The healers make real progress from a triple-digit-open start.
+    assert healed[0] < base[0], (base, healed)
+
+    wl_before = sum(abs(ts.span_hi - ts.span_lo)
+                    for ts in s.nuts_result.segments if ts.placed)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("refine_selection")
+    final = (s.detailed_result.num_unplaced, s.nuts_result.num_overlaps)
+    wl_after = sum(abs(ts.span_hi - ts.span_lo)
+                   for ts in s.nuts_result.segments if ts.placed)
+    # The trailing polish never worsens the healed endpoint and never
+    # lengthens the route (it commits only on strictly lower WL).
+    assert final[0] <= healed[0] and final[1] <= healed[1], (healed, final)
+    assert wl_after <= wl_before, (wl_before, wl_after)

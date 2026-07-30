@@ -1,0 +1,30 @@
+# Selection-basis lever 3 composition vehicle (the refine_selection docs
+# recipe, measured 2026-07-30): the PLAIN top-down mix2 pipeline (no healers)
+# ends at 175 DNUTS opens / 16 NUTS overlaps on the reference x86 build; the
+# end-of-flow recipe
+#   refine_selection -> negotiate_congestion -> ripup_reroute -> refine_selection
+# heals it to a fully clean check_design (0 opens / 0 overlaps, Success):
+# refine's componentwise pre-shrink (175->84 opens, WL 67558->65480) hands the
+# healers a much smaller problem, negotiate cracks the residual (84->32),
+# ripup finishes to 0/0 (WL spent up to 69894 -- the healers' metrics don't
+# track WL), and the trailing refine claws part of it back (69894->69621).
+# The first refine doubles as a healer here BECAUSE the flow is healerless:
+# its componentwise accept lets opens/overlap improvements through too.
+source mix_tracks.buda
+open_bdb mix2.bdb.sql
+derive_busterms 2
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+run_hier_bundler depth 2
+generate_hier_topologies
+run_planner hier 5 signal_tracks
+run_nuts
+run_detailed_nuts
+refine_selection
+negotiate_congestion
+ripup_reroute
+refine_selection
+report_wl
+check_design
+exit

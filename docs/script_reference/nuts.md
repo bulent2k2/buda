@@ -585,6 +585,41 @@ refine_selection         # then recover the realized-WL gap — endpoint frozen
 check_design
 ```
 
+**Composing with the healers on a stuck endpoint.** When residual
+opens/overlaps survive the flow, refine's commits change the contention
+geometry the healers stalled on — so a second healer round *after* refine can
+crack what the first could not:
+
+```buda
+refine_selection         # componentwise pre-shrink (also heals on a healerless flow)
+negotiate_congestion     # reprice the (now different) residual contention
+ripup_reroute            # finish it
+refine_selection         # claw back the WL the healers spent
+check_design
+```
+
+The composition is safe by construction: negotiate/ripup accept only on
+strict endpoint improvement (snapshot/restore otherwise), so they can never
+undo refine's result, and refine's committed pins don't block them — the
+healers build their target sets from the failure sites and re-plan each
+target *unpinned*. The one cost: when the healers do move things they spend
+WL (their metrics don't track it), which is why the trailing second
+`refine_selection` belongs in the recipe. Measured (2026-07-30):
+
+- **topdown** (the plain healerless mix2 pipeline — the checked-in QoR
+  vehicle `flow/rnr/mix2_topdown_refine.buda`): 175 opens/16 ovl →
+  refine 84/2 (WL 67558→65480) → negotiate 32/6 → ripup **0/0**
+  (WL 69894) → refine 0/0 at WL **69621**, final `check_design`
+  **Success** — a flow that had never reached a clean endpoint, healed at
+  ~+6% WL vs its broken state.
+- **aligned** (a 30-open residual that already resisted the full healer
+  chain): the post-refine negotiate found nothing (its one trial measured
+  worse and was restored), ripup and the second refine committed nothing —
+  a byte-identical safe no-op costing ~15–20s of trials.
+
+So: on a clean endpoint a second healer round no-ops immediately; on a
+residual it is worst-case a cheap no-op, best-case a full heal.
+
 ---
 
 ## Wirelength reporting
