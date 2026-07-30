@@ -16,3 +16,8 @@ python3 tools/bdb_serialize.py dump mix2.bdb mix2.bdb.sql
 fp mix2.bdb.sql
 # Run: Export flow
 > buda mix2.buda
+
+Note: since `band_span_charge` defaulted to 1 (issue #518) this flow ends
+0 overlaps / 16 unplaced bits rather than fully clean — the one known cost
+of that flip. `mix2.buda` documents it inline, including the one-line
+override that restores the historical clean endpoint.
