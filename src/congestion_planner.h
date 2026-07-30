@@ -17,6 +17,7 @@
 #pragma once
 #include <climits>
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <tuple>
@@ -744,15 +745,22 @@ private:
     // spills to the nearest band with room — NUTS's preferred_fit — instead of
     // diluting uniformly across bands that may already be full.
     //
-    // Measured (29-flow corpus, same build): mode 1 = 1 better/4 worse,
-    // mode 2 = 3 better/3 worse, mode 3 = 3 better/1 worse at +11.9% runtime,
-    // mode 4 = 2 better/3 worse.  **Mode 3 is the best** — reading occupancy
-    // before spilling is what removes proportional's regressions — but it
-    // still turns one clean flow (rnr/mix2) broken, so the default stays 0.
-    // Note the counter-intuitive result that the TARGETED "oversized-only"
-    // gating loses to always-spreading in both allocation schemes; see
-    // docs/internal/band_span_charge.md.
+    // Measured (29-flow corpus, same build, AFTER the two rip-up/footprint
+    // accounting fixes — the pre-fix numbers ranked these modes differently
+    // and were wrong): mode 1 = 3 better/1 worse at +7.1%, mode 2 = 0/6,
+    // mode 3 = 2/3, mode 4 = 2/2, mode 5 = 2/3.  **Mode 1 is the best** —
+    // targeting only the genuinely mis-charged (oversized) bus beats
+    // spreading every bus, because spreading one that already fits merely
+    // lowers its feasibility bar and the planner over-packs.  Still not the
+    // default: mode 1 turns one clean flow broken (rnr/mix2 0/0/0 -> 0/16/1).
+    // See docs/internal/band_span_charge.md.
     int    band_span_charge_      = 0;
+    // Per-(bundle,segment) record of how a committed charge was distributed,
+    // so a rip-up can subtract EXACTLY what was added.  Only populated when
+    // band_span_charge_ is on; the legacy single-band charge is its own
+    // inverse and needs no record.  Cleared whenever the cut state is rebuilt
+    // or its usage reset, since the indices and the baseline both move.
+    std::map<std::pair<int, int>, std::vector<std::tuple<int, int, double>>> charge_log_;
     // One-shot guard for the above-TOP config-smell warning.
     bool   warned_above_top_ = false;
 };

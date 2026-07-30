@@ -163,6 +163,9 @@ void CongestionPlanner::warn_above_top_layers_() {
 }
 
 void CongestionPlanner::rebuild_cuts_() {
+    // Cut indices and band indices both move here, so any recorded charge
+    // distribution is stale — drop it rather than replay it onto new bands.
+    charge_log_.clear();
     cuts_.clear();
     // Injected-demand records key cuts by index; a rebuild reorders/resizes
     // cuts_, so the records are meaningless afterward (audit C3-03).  Drop
@@ -391,7 +394,15 @@ void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
 void CongestionPlanner::for_each_band_w(const Segment& seg, int layer_id,
                                         int perp_pos_override, double eff_width,
                                         const std::function<void(int, int, double)>& fn) const {
-    if (band_span_charge_ <= 0 || eff_width <= 0.0) {
+    // GEOMETRY uses the magnitude: a rip-up passes the charged demand NEGATED
+    // (commit_plan's `sign`), and a negative width must still describe the same
+    // footprint it was charged over — otherwise removal would fall through to
+    // the single-band path and subtract the whole amount from the centre band
+    // while the original was spread, leaving stale usage in the neighbours and
+    // driving the centre negative (Codex #524 P1).  The sign rides the weights
+    // via the caller's multiplication.
+    const double footprint = std::fabs(eff_width);
+    if (band_span_charge_ <= 0 || footprint <= 0.0) {
         for_each_band(seg, layer_id, perp_pos_override,
                       [&](int ci, int b) { fn(ci, b, 1.0); });
         return;
@@ -399,8 +410,9 @@ void CongestionPlanner::for_each_band_w(const Segment& seg, int layer_id,
     // Policy split (see the header): WHEN to spread, and HOW to allocate.
     const bool oversized_only = (band_span_charge_ == 1 || band_span_charge_ == 4);
     const bool greedy_fill    = (band_span_charge_ >= 3);
+    const bool contiguous     = (band_span_charge_ == 5);
 
-    const double half = 0.5 * eff_width;
+    const double half = 0.5 * footprint;
     // Scratch reused across cuts so a hot scoring loop does not allocate.
     std::vector<std::pair<int, double>> share;
     for_each_cut_(seg, layer_id, perp_pos_override,
@@ -417,7 +429,7 @@ void CongestionPlanner::for_each_band_w(const Segment& seg, int layer_id,
             // A bus that merely straddles a boundary was never mis-charged,
             // so spreading it only lowers its feasibility bar for free.
             if (bc < 0 || bc >= c.num_bands()) return;
-            if (eff_width <= (double)(grid[bc + 1] - grid[bc])) {
+            if (footprint <= (double)(grid[bc + 1] - grid[bc])) {
                 fn(ci, bc, 1.0);
                 return;
             }
@@ -443,13 +455,16 @@ void CongestionPlanner::for_each_band_w(const Segment& seg, int layer_id,
             const int r_lo = 0, r_hi = nb - 1;
 
             share.clear();
-            double remaining = eff_width;
+            double remaining = footprint;
             const double take0 = std::min(remaining, free_of(bc));
             if (take0 > 0.0) { share.emplace_back(bc, take0); remaining -= take0; }
-            int lo = bc, hi = bc;
-            while (remaining > 1e-9 && (lo > r_lo || hi < r_hi)) {
+            int  lo = bc, hi = bc;
+            bool wall_lo = false, wall_hi = false;
+            while (remaining > 1e-9 &&
+                   ((lo > r_lo && !wall_lo) || (hi < r_hi && !wall_hi))) {
                 // Expand to whichever neighbour is geometrically nearer to pp.
-                const bool can_lo = (lo > r_lo), can_hi = (hi < r_hi);
+                const bool can_lo = (lo > r_lo && !wall_lo);
+                const bool can_hi = (hi < r_hi && !wall_hi);
                 bool take_lo;
                 if (can_lo && can_hi) {
                     const double d_lo = (double)pp - (double)grid[lo];
@@ -459,7 +474,21 @@ void CongestionPlanner::for_each_band_w(const Segment& seg, int layer_id,
                     take_lo = can_lo;
                 }
                 const int b = take_lo ? --lo : ++hi;
-                const double take = std::min(remaining, free_of(b));
+                const double avail = free_of(b);
+                // CONTIGUITY (mode 5).  Plain greedy fill spills to "the
+                // nearest band with room", which lets the bus hop OVER a
+                // saturated band and claim capacity on its far side — but
+                // metal is contiguous and cannot skip a full band.  Treating a
+                // zero-free band as a wall confines the bus to the contiguous
+                // run of free capacity around its preferred band, which is the
+                // conservatism the plain fill gives away.  On an empty layer
+                // there are no walls, so #518's phantom overflow still
+                // vanishes; the margin returns only under real congestion.
+                if (contiguous && avail <= 1e-9) {
+                    (take_lo ? wall_lo : wall_hi) = true;
+                    continue;
+                }
+                const double take = std::min(remaining, avail);
                 if (take > 0.0) { share.emplace_back(b, take); remaining -= take; }
             }
             // Nothing anywhere has room: the residue must still surface as
@@ -470,7 +499,7 @@ void CongestionPlanner::for_each_band_w(const Segment& seg, int layer_id,
                     if (s.first == bc) { s.second += remaining; merged = true; break; }
                 if (!merged) share.emplace_back(bc, remaining);
             }
-            for (const auto& [b, amt] : share) fn(ci, b, amt / eff_width);
+            for (const auto& [b, amt] : share) fn(ci, b, amt / footprint);
             return;
         }
 
@@ -585,13 +614,16 @@ double CongestionPlanner::score_segment(const Segment& seg, int layer_id,
     if (low_seg_obstructed(seg, layer_id, perp_pos_override)) return 9999.0;
     bool   is_vcut_dir = (seg.start.y == seg.end.y);   // H-seg crosses V-cuts
     double peak = 0.0;
-    for_each_band_w(seg, layer_id, perp_pos_override, eff_width,
+    // The footprint MUST be the same width that is charged (eff + pitch), not
+    // the raw eff_width: commit_plan/apply_segment distribute over eff + pitch,
+    // and deriving the weights here from a narrower footprint would let STRICT
+    // score one set of bands and commit another (Codex #524 P1).
+    const double charged = eff_width + track_pitch_;   // Gap 1
+    for_each_band_w(seg, layer_id, perp_pos_override, charged,
                     [&](int ci, int b, double w) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
-        // Demand AND the Gap-1 pitch allowance scale with the band's share, so
-        // the total charged across the footprint is exactly eff_width + pitch.
-        double ov  = (c.usage(b) + (eff_width + track_pitch_) * w) - cap;
+        double ov  = (c.usage(b) + charged * w) - cap;
         if (ov > peak) peak = ov;
     });
     return std::max(peak, 0.0);
@@ -629,11 +661,12 @@ void CongestionPlanner::collect_overflow_bands(const Segment& seg, int layer_id,
     bool is_vcut_dir = (seg.start.y == seg.end.y);
     // Must stay the exact predicate score_segment peaks over, or the victim
     // ranking would chase bands the scorer never charged.
-    for_each_band_w(seg, layer_id, perp_pos_override, eff_width,
+    const double charged = eff_width + track_pitch_;   // same footprint as score_segment
+    for_each_band_w(seg, layer_id, perp_pos_override, charged,
                     [&](int ci, int b, double w) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
-        if ((c.usage(b) + (eff_width + track_pitch_) * w) - cap > 0.0) out.insert({ci, b});
+        if ((c.usage(b) + charged * w) - cap > 0.0) out.insert({ci, b});
     });
 }
 
@@ -772,12 +805,13 @@ double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
     bool   is_vcut_dir = (seg.start.y == seg.end.y);   // H-seg crosses V-cuts
     double peak_cost   = 0.0;
     bool   blocked     = false;
-    for_each_band_w(seg, layer_id, perp_pos_override, eff_width,
+    const double charged = eff_width + track_pitch_;   // same footprint as score_segment
+    for_each_band_w(seg, layer_id, perp_pos_override, charged,
                     [&](int ci, int b, double w) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
         if (cap <= 0.0) { blocked = true; return; }
-        double ov = c.usage(b) + (eff_width + track_pitch_) * w - cap;
+        double ov = c.usage(b) + charged * w - cap;
         if (ov <= 0.0) return;     // fits — no cost
         peak_cost = std::max(peak_cost, kCong_ * ov / cap);
     });
@@ -1648,8 +1682,37 @@ void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& p
         const double w = (nbits > 0 && n != nbits)
                              ? bw.input.width * ((double)n / (double)nbits)
                              : bw.input.width;
-        apply_segment(t.segments[si], lid,
-                      sign * (layers_.eff_bus_width(n, w, lid) + track_pitch_), pp);
+        const double demand = sign * (layers_.eff_bus_width(n, w, lid) + track_pitch_);
+
+        if (band_span_charge_ <= 0) {          // legacy: single band, self-inverse
+            apply_segment(t.segments[si], lid, demand, pp);
+            continue;
+        }
+        // Spread charges must be reversed EXACTLY as they were applied (Codex
+        // #524 P1).  For the proportional modes the distribution is pure
+        // geometry and re-deriving it would suffice, but the greedy modes read
+        // live band occupancy — which has moved on by the time a rip-up runs —
+        // so replaying a recorded distribution is the only exact inverse.
+        const auto key = std::make_pair(bw.input.original_bundle.id, si);
+        if (sign < 0.0) {
+            auto it = charge_log_.find(key);
+            if (it != charge_log_.end()) {
+                for (const auto& [ci, b, amt] : it->second)
+                    cuts_[ci].add_usage(b, -amt);
+                charge_log_.erase(it);
+                continue;
+            }
+            // No record (e.g. charged before the knob was enabled): fall back
+            // to re-deriving, which is still correct for the geometric modes.
+        }
+        std::vector<std::tuple<int, int, double>> rec;
+        for_each_band_w(t.segments[si], lid, pp, demand,
+                        [&](int ci, int b, double wt) {
+            const double amt = demand * wt;
+            cuts_[ci].add_usage(b, amt);
+            rec.emplace_back(ci, b, amt);
+        });
+        if (sign > 0.0) charge_log_[key] = std::move(rec);
     }
 }
 
@@ -2155,6 +2218,9 @@ void CongestionPlanner::recharge_committed_(
     // No reservations: every bundle is already planned, so all demand is real.
     // Injected measured-congestion demand rides on top (the reset wiped it).
     for (auto& cut : cuts_) cut.reset_usage();
+    // Usage is back to zero, so every recorded distribution describes a charge
+    // that no longer exists; the loop below re-records as it re-commits.
+    charge_log_.clear();
     for (const auto& bw : bundles) {
         if (&bw == exclude || !has_committed_plan_(bw)) continue;
         commit_plan(bw, fixed_plan_of_(bw));

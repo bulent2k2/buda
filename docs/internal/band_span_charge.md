@@ -91,10 +91,12 @@ Worth stating plainly, because it is not what one might assume:
 
   Relaxing that skip under `band_span_charge` looks obviously right (the bus
   may now occupy neighbours, so a narrow band is a legitimate centre). It was
-  implemented and measured, and it **lost on both axes**: QoR 3 better/1 worse
-  → 2 better/1 worse, and runtime **+12% → +207%**, because every band then
-  enters the candidate loop and runs a full cost evaluation. The cheap
-  fallback is also the better spreading centre. The skip stays.
+  implemented and measured, and it **lost on both axes**: QoR fell and runtime
+  went **+12% → +207%**, because every band then enters the candidate loop and
+  runs a full cost evaluation. The cheap fallback is also the better spreading
+  centre. The skip stays. (The QoR half of this comparison was measured
+  pre-fix; the runtime half is unaffected by the accounting bugs and is the
+  decisive one.)
 
 ## Allocation: proportional vs greedy fill
 
@@ -109,11 +111,16 @@ Two ways to split a bus across the bands it covers:
   routes demand around a locally-saturated neighbour instead of piling
   phantom overflow onto it.
 
-Greedy fill measures better (see below). Its spill reach is deliberately
-**unbounded** to the grid edges: capping it at one bus-width beyond the
-footprint was measured and lost QoR (2 better/1 worse → 0 better/3 worse)
-while saving no runtime at all (+209% vs +207%) — confirming the cost was
-never this walk.
+Greedy fill was expected to win, and did under the buggy accounting. With the
+books corrected it does **not**: proportional mode 1 (3 better/1 worse) beats
+greedy mode 4 (2 better/2 worse) and mode 3 (2 better/3 worse). Reading live
+occupancy turns out to matter far less than only touching the buses that were
+actually mis-charged.
+
+Greedy's spill reach is unbounded to the grid edges. Capping it at one
+bus-width beyond the footprint was measured (pre-fix) and lost QoR while
+saving no runtime at all (+209% vs +207%), confirming the cost was never this
+walk.
 
 ## The sweep
 
@@ -124,65 +131,82 @@ never this walk.
 to the byte. The off path delegates to `for_each_band` with weight 1.0, i.e.
 literally the old code.
 
-**All four modes, same build, same baseline.** Runtime is single-run and
-noisy; the ±9% figures are not meaningful, the +207% one was.
+**All modes, same build, same baseline.** Runtime is single-run and noisy.
+
+> **These numbers are the POST-FIX ones.** An earlier revision of this table
+> was measured with two accounting bugs live (see "Two accounting bugs" below)
+> and every conclusion drawn from it was wrong — including the mode ranking.
+> Corrupted band usage reads back as free capacity that does not exist, which
+> flattered the always-spread modes.
 
 | mode | when | allocation | QoR | runtime |
 |---|---|---|---|---|
-| 1 | oversized-only | proportional | 1 better / 4 worse | −8.7% |
-| 2 | always | proportional | 3 better / 3 worse | −8.5% |
-| **3** | **always** | **greedy fill** | **3 better / 1 worse** | **+11.9%** |
-| 4 | oversized-only | greedy fill | 2 better / 3 worse | +35.6% |
+| **1** | **oversized-only** | **proportional** | **3 better / 1 worse** | **+7.1%** |
+| 2 | always | proportional | 0 better / 6 worse | +34.0% |
+| 3 | always | greedy fill | 2 better / 3 worse | −25.3% |
+| 4 | oversized-only | greedy fill | 2 better / 2 worse | −1.9% |
+| 5 | always | greedy + contiguity | 2 better / 3 worse | −8.3% |
 
-Mode 3 per flow:
+Mode 1 per flow (abstract WL −0.35%, detailed −0.41%):
 
-| flow | base | mode 3 | |
+| flow | base | mode 1 | |
 |---|---|---|---|
 | `rnr/mix` | 1/0/0 | 0/0/0 | BETTER |
 | `rnr/mix2_fast_bottomup` | 1/0/0 | 0/0/0 | BETTER |
-| `rnr/mix2_fast_on_aligned_sql` | 0/30/2 | 2/14/1 | BETTER |
-| `rnr/mix2` | 0/0/0 | 1/6/1 | WORSE |
+| `rnr/mix2_fast_on_aligned_sql` | 0/30/2 | 2/16/1 | BETTER |
+| `rnr/mix2` | 0/0/0 | 0/16/1 | WORSE |
 
-Two results stand out.
+**Targeting beats blanket spreading.** Modes 1 and 4 (oversized-only) beat
+modes 2 and 3 (always). Spreading a bus that already fits in its band was
+never fixing a mis-charge — it only lowered that bus's feasibility bar for
+free, and the planner then over-packs. Only the genuinely mis-charged bus
+should be touched.
 
-**Greedy fill beats proportional** (mode 3 vs 2: 3 better/1 worse vs
-3 better/3 worse). Reading occupancy before spilling is what removes the
-regressions — proportional spreading's phantom overflow on already-full
-neighbours was causing them.
+(An earlier revision of this document asserted the *opposite*, calling it a
+counter-intuitive result. That claim came from the buggy measurements and is
+retracted.)
 
-**Gating on "oversized only" is consistently WORSE than always spreading** —
-mode 1 vs 2, and mode 4 vs 3, both lose. This is counter-intuitive: mode 1
-touches strictly fewer segments, all of them genuinely mis-charged. The
-likely reason is discontinuity — two nearly-identical candidates, one just
-over the band width and one just under, get charged under different models,
-so the comparison between them is no longer apples-to-apples and selection
-gets noisy. A uniform rule, even a less targeted one, ranks candidates
-consistently.
+**Contiguity did not help.** Mode 5 stops the greedy walk at a zero-free band,
+on the reasoning that metal cannot hop over a saturated band to claim capacity
+on its far side. It measures the same as plain greedy fill (2 better/3 worse).
 
-## Why it is still not the default
+## Two accounting bugs (found in review of PR #524)
 
-Mode 3 is a genuine net win (3 better / 1 worse, +11.9% runtime), but it
-still breaks one clean flow: `rnr/mix2` 0/0/0 → 1/6/1. The corpus guard exits
-non-zero on any regression, and turning a clean design broken is exactly the
-failure the guard exists to catch.
+Both were real, both silently corrupted the corpus measurements above, and
+both are fixed:
 
-The mechanism behind that one regression is the same one that sinks modes 1,
-2 and 4 more broadly: spreading lowers the **per-band feasibility bar**.
-Previously a bus had to fit its whole width in one band to pass STRICT; now
-only its share must fit in each band it covers. More candidates clear STRICT,
-the planner packs denser, and the density comes back as real DetailedNUTS
-opens. Greedy fill mitigates this (it will not claim space a neighbour has
-already committed) but does not eliminate it.
+1. **Rip-up did not reverse a spread charge.** `commit_plan` passes the demand
+   NEGATED (`sign * (eff + pitch)`), and a negative width fell through
+   `for_each_band_w`'s `eff_width <= 0` guard onto the legacy single-band
+   path. Removal therefore subtracted the whole amount from the centre band
+   while the original had been spread across several — stranding usage in the
+   neighbours and driving the centre band NEGATIVE. Negative usage reads back
+   as free capacity that does not exist, and every later replan prices against
+   it. Fixed by taking the footprint from `std::fabs(eff_width)` so the sign
+   rides only the weights, plus a `charge_log_` recording each committed
+   distribution so a rip-up replays its exact inverse — necessary because the
+   greedy modes allocate against LIVE occupancy, which has moved on by the
+   time the rip-up runs, so re-deriving could not reproduce the split.
 
-So the single-band charge is not merely a crude approximation: its
-over-conservatism is partly **load-bearing**, buying routability margin the
-honest model gives away. The remaining work for a default flip is to restore
-that margin explicitly — a density term, or a track-supply feasibility test
-at the chosen perp — rather than assuming the more accurate model is
-automatically better.
+2. **The scorer and the committer used different footprints.**
+   `score_segment` derived weights from raw `eff_width` but charged
+   `eff_width + track_pitch_`, while `apply_segment` was handed the combined
+   width and derived weights from that. Near a band boundary STRICT could
+   score one set of bands and commit another. Fixed by deriving weights from
+   the same `eff + pitch` that is charged, in all three scorers.
 
-That is the finding of #518, and why the issue stays open with the default
-unchanged.
+`charge_log_` is cleared in `rebuild_cuts_` and `recharge_committed_`, where
+band indices and the usage baseline respectively move out from under it.
+
+**Test-coverage limitation, stated plainly:** the rip-up fix is verified by
+inspection and by the corpus re-measure, NOT by a unit test. Three attempts to
+exercise `commit_plan(..., -1.0)` from Python — via `replan_bundle`,
+`replan_bundle_ripup`, and a deliberately contended two-bus fixture — all
+failed to reach the victim path, and each candidate test passed unchanged
+against a build with both bugs deliberately reintroduced. A test that cannot
+fail on broken code is worse than no test, so none was kept. What the corpus
+*does* prove is that the bugs were live: fixing them moved mode 3 from
+3 better/1 worse to 2 better/3 worse.
 
 ## Using it
 
