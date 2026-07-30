@@ -229,7 +229,10 @@ consistent with the table's `pass` column; a declared feedthru is marked
 `[feedthru]`). Unrelated floorplan blocks the wire crosses split by the
 segment's **effective layer**: on a TOP layer (or over a container envelope,
 transparent to LOW layers) the crossing is ordinary over-the-cell routing —
-listed as **`otc-over:`**, not a problem indicator; on a **non-TOP** layer a
+**opt-in** as **`otc-over:`**, not a problem indicator: this list is often long
+and rarely relevant to topo design, so it shows by default as a terse **`otc:N`**
+count and the `o` key toggles the full `otc-over: names` (and back). On a
+**non-TOP** layer a
 leaf footprint is an implicit keepout, so the crossing is flagged
 **`low-cross:`** — a real problem to notice (a pinned or best-effort plan, or a
 `+`/`-` restyle, can land a segment there). Both lines are omitted when empty. Crossing is tested against

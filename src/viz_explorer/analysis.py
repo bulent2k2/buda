@@ -184,7 +184,15 @@ class ExplorerAnalysisMixin:
                     if low and not self.fp.is_container(n)]
             rest = [n for n in otc if n not in lowx]
             if rest:
-                parts.append("otc-over: " + ",".join(rest))
+                # `otc-over` (benign over-the-cell fly-overs of unrelated blocks)
+                # is opt-in: the block list is often long and rarely relevant to
+                # topo design, so OFF (default) shows just a `otc:N` count and
+                # 'o' toggles the full `otc-over: names`.  `low-cross` (a non-TOP
+                # keepout crossing) is a real concern and always shown.
+                if self._show_otc_over:
+                    parts.append("otc-over: " + ",".join(rest))
+                else:
+                    parts.append(f"otc:{len(rest)}")
             if lowx:
                 parts.append("low-cross: " + ",".join(lowx))
         if sgs:

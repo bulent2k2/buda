@@ -162,6 +162,10 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         self._sync_bundle_fp()         # the opening bundle's own frame (hier)
         self.idx      = 0
         self.sidx     = -1  # current selected segment index within current topology
+        # 'o' toggles the j/k segment banner's `otc-over:` field (the unrelated
+        # blocks a wire merely flies over — often a long, topo-irrelevant list).
+        # Opt-in: OFF shows only a terse `otc:N` count; ON shows the full names.
+        self._show_otc_over = False
         # TopoEdit mode (Phase E3b GUI): a working COPY being edited in place of
         # the shown candidate.  Opened with 'e' (copy) / 'E' (empty), committed
         # with enter (appended to the pool as a USER candidate + pinned),
