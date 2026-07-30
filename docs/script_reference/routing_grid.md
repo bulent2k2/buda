@@ -22,7 +22,7 @@ Define the repeating track pattern for a layer. The pattern tiles from `origin` 
 |---|---|---|
 | `layer_id` | int | Layer ID as registered with `def_layer` |
 | `origin` | float | Anchor position of the first unit in layout units (use `0.0` to align with chip origin) |
-| `type` | string | Track type: `POWER`, `GROUND`, `CLOCK`, `SHIELD`, `SIGNAL`, or `CUSTOM` (case-insensitive; the aliases `GND`→`GROUND`, `CLK`→`CLOCK`, `VDD`→`POWER`, `VSS`→`GROUND` are accepted). **Only `SIGNAL` is routable** — bits land only on `SIGNAL` slots; the others are pre-route rails. An unrecognized type is a hard error (it silently became a non-signal rail before, so a mistyped `SIGNAL` lost its tracks). The canonical type is stored; the raw token is kept as the slot's viz label. |
+| `type` | string | Track type: `POWER`, `GROUND`, `CLOCK`, `SHIELD`, `SIGNAL`, or `CUSTOM` (case-insensitive; the aliases `_`→`SIGNAL`, `GND`→`GROUND`, `CLK`→`CLOCK`, `VDD`→`POWER`, `VSS`→`GROUND` are accepted — `_` is a terse shorthand for the common `SIGNAL` slot, so a dense pattern reads `_ 1 1 _ 1 1`). **Only `SIGNAL` is routable** — bits land only on `SIGNAL` slots; the others are pre-route rails. An unrecognized type is a hard error (it silently became a non-signal rail before, so a mistyped `SIGNAL` lost its tracks). The canonical type is stored; the raw token is kept as the slot's viz label. |
 | `w` | float | Track width in layout units |
 | `sp` | float | Space after this track (gap to the next slot), in layout units |
 

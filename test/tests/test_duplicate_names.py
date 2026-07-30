@@ -210,6 +210,13 @@ def test_lowercase_signal_becomes_real_signal_slot():
     assert slots == [("SIGNAL", "signal"), ("GROUND", "gnd")]
 
 
+def test_underscore_is_shorthand_for_signal():
+    # `_` is terse shorthand for the common SIGNAL slot: `_ 1 1` == `SIGNAL 1 1`.
+    slots = _slots("def_track_pattern 4 0.0 POWER 2 1 _ 1 1 _ 1 1 GND 2 1")
+    assert slots == [("POWER", "power"), ("SIGNAL", "_"),
+                     ("SIGNAL", "_"), ("GROUND", "gnd")]
+
+
 def test_mistyped_signal_is_a_hard_error():
     code, out = _run("def_track_pattern 4 0.0 SIGANL 1 1")
     assert code == 1

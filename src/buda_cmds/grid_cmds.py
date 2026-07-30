@@ -36,7 +36,10 @@ import buda
 _CANONICAL_SLOT_TYPES = ("POWER", "GROUND", "CLOCK", "SHIELD", "SIGNAL", "CUSTOM")
 # Established EDA shorthand accepted and normalized to the canonical type (so the
 # viz preroute filter, which matches the canonical names, groups them correctly).
+# `_` is a terse shorthand for SIGNAL, by far the most common (and only routable)
+# slot type, so a dense pattern reads `_ 1 1 _ 1 1` instead of `SIGNAL 1 1 …`.
 _SLOT_TYPE_ALIASES = {
+    "_": "SIGNAL",
     "GND": "GROUND", "CLK": "CLOCK", "VDD": "POWER", "VSS": "GROUND",
 }
 
