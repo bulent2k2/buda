@@ -258,6 +258,26 @@ def cmd_ripup_reroute(session, cmd, args, cmd_line):
                            use_parallel_sweep=use_parallel_sweep)
 
 
+def cmd_refine_selection(session, cmd, args, cmd_line):
+    # Usage: refine_selection [max_moves] [chase_overlaps]
+    # Measured selection WL polish (selection-basis lever 3,
+    # wishlist-planner): sweep every eligible bundle's SELECTION on the
+    # MEASURED result — screen all alternates against the frozen placement,
+    # full-trial the best two, adopt only when opens and overlaps are
+    # parity-or-better componentwise AND realized WL is strictly lower
+    # (chase_overlaps: plain lexicographic — the aggressive pre-healer
+    # form).  Run it at the END of the flow, after the healers.  Skips
+    # user pins and hier.locked bottom-up copies.  Opt-in: flows that do
+    # not call it are byte-identical.
+    flags = ("chase_overlaps",)
+    unknown = [a for a in args if not looks_numeric(a) and a not in flags]
+    reject_unknown_options("refine_selection", unknown, flags)
+    nums = [a for a in args if looks_numeric(a)]
+    max_moves = int(nums[0]) if nums else 30
+    session._refine_selection(max_moves,
+                              chase_overlaps="chase_overlaps" in args)
+
+
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):
     # Usage: negotiate_congestion [max_iter] [class_moves|no_class_moves]
     # Measured-congestion feedback (run after run_nuts): inject the
@@ -327,6 +347,7 @@ COMMANDS = {
     "run_detailed_nuts": cmd_run_detailed_nuts,
     "ripup_reroute": cmd_ripup_reroute,
     "negotiate_congestion": cmd_negotiate_congestion,
+    "refine_selection": cmd_refine_selection,
     "run_nuts_on_layer": cmd_run_nuts_on_layer,
     "set_dead_span_escalate": cmd_set_dead_span_escalate,
 }

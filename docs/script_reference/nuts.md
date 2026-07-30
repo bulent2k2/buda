@@ -1,6 +1,6 @@
 # BUDA Script Reference — Stages 4 & 9 — Track assignment (NUTS)
 
-Abstract bus-level track placement and bit-level detailed placement, plus the two feedback passes: `run_nuts`, `run_nuts_on_layer`, `run_detailed_nuts`, `ripup_reroute`, `negotiate_congestion`.
+Abstract bus-level track placement and bit-level detailed placement, plus the feedback passes: `run_nuts`, `run_nuts_on_layer`, `run_detailed_nuts`, `ripup_reroute`, `negotiate_congestion`, `refine_selection`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -511,6 +511,77 @@ ripup_reroute            # finish the residual DetailedNUTS opens
 
 See [wishlist-ripup.md](../internal/wishlist-ripup.md) (item 1) for the design
 rationale and the measured negotiate-then-ripup results.
+
+---
+
+### `refine_selection`
+
+```
+refine_selection [max_moves] [chase_overlaps]
+```
+
+Measured selection **WL polish** — selection-basis lever 3 (wishlist-planner
+"Selection basis"). The two existing measured loops cannot recover realized
+wirelength: `ripup_reroute`'s metric is overlap/opens-only (it stops at parity
+and never improves WL), and the planner's `refine_passes` re-scores through
+the cost model whose WL term is the generation-time **estimate** — so a
+candidate that *routes* shorter than it estimates structurally loses (the
+BITRUNK/spine realization gap the 2026-07-30 default-flip study measured).
+`refine_selection` closes that gap: it sweeps every eligible bundle's
+selection on the **measured** result — screening all alternate candidates
+against the other bundles' frozen placement (the fixed-context screen,
+ordering only), full-trialing the best two, and adopting a move only when the
+endpoint cannot get worse:
+
+- **Default accept (WL polish):** opens and overlaps must be
+  **parity-or-better componentwise** AND realized abstract WL (the placed
+  spans' total length) strictly lower — so the healers' endpoint can never be
+  traded for length. Run it at the **end of the flow**, after the last
+  `ripup_reroute`: both pre-healer placements were measured to perturb the
+  healers' basins (even overlap-parity selection changes shifted their
+  trajectories).
+- **`chase_overlaps`:** plain lexicographic accept (`(overlaps, WL)` stage a;
+  `(opens, overlaps, WL)` stage b) — the aggressive pre-healer form, measured
+  mixed on the vehicles (it perturbs downstream healing; kept as the
+  documented escape hatch for healerless experiments).
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `max_moves` | int | `30` | Commit budget. Sweeps repeat until a full sweep commits nothing or the budget is spent. |
+| `chase_overlaps` | flag | off | Plain lexicographic accept instead of the componentwise WL-polish guard (see above). |
+
+Stage-aware like the healers (stage a after `run_nuts`, stage b after
+`run_detailed_nuts` — the stage-b metric carries the DNUTS opens ahead of the
+abstract overlaps). Trials run **full** (fast trials forced off for the pass:
+`tighten_pulls` is WL-only, so a tighten-skipped trial's WL would be biased
+against the move), which also makes every winning trial forward-restorable —
+commits reuse ripup's snapshot-restore + recharge path. Skips user-pinned
+bundles (inviolable), `hier.locked` bottom-up copies, and single-candidate
+pools. Deterministic; **opt-in** — flows that do not call it are
+byte-identical.
+
+Measured on the rnr vehicles (end-of-flow placement, default accept —
+endpoints preserved *exactly*, by construction):
+
+| Vehicle | Endpoint (opens/ovl) | Realized WL | Cost |
+|---|---|---|---|
+| mix | 0/1 → 0/1 | 64893 → 59424 (**−8.4%**) | 44.8s (28 moves, 605 trials) |
+| aligned | 30/0 → 30/0 | 75369 → 74058 (−1.7%) | 5.2s (8 moves) |
+| bottomup | 0/1 → 0/1 | 73155 → 72991 (−0.2%) | 4.6s (5 moves) |
+| topdown (healerless) | 175/16 → **84/2** | 67558 → 65480 (−3.1%) | 42.9s (25 moves) |
+
+On a healerless flow the componentwise accept also lets opens/overlap
+improvements through, so the pass doubles as a healer (the topdown row).
+
+**Requires:** `run_planner` and at least `run_nuts` to have run first.
+
+```buda
+run_detailed_nuts
+negotiate_congestion
+ripup_reroute            # heal to the endpoint first
+refine_selection         # then recover the realized-WL gap — endpoint frozen
+check_design
+```
 
 ---
 

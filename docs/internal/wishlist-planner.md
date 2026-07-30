@@ -804,7 +804,7 @@ annotated (Codex #312): the local solve's planner is seeded from
 cell-local floorplan the solve plans in, so the spread term applies before
 the pin that expansion locks in.
 
-## Selection basis: rank on measured routability, not the generation-time WL estimate — LEVERS 1+2 SHIPPED; `kPeak` default DECIDED (stays opt-in)
+## Selection basis: rank on measured routability, not the generation-time WL estimate — LEVERS 1+2+3 SHIPPED; `kPeak` default DECIDED (stays opt-in)
 
 **Lever 1 as-built (2026-07-10):** `set_planner_param kPeak <w>` adds a
 peak-EXISTING-band-utilization term to the per-segment soft cost
@@ -858,6 +858,41 @@ there (and lever 1's `kPeak` is the knob that biases that model toward
 routability). Tests: `test/tests/test_ripup_class_rerank.py` (pool
 composition: legacy-first, beyond-cap extras, farness ranking, self-trial
 exclusion).
+
+**Lever 3 as-built (2026-07-30): `refine_selection` — the measured WL
+polish.** Levers 1+2 left a residual gap neither measured loop could
+close: ripup's metric is overlap/opens-only (it stops at parity and
+never improves WL), and the planner's `refine_passes` re-scores through
+the cost model whose WL term is the ESTIMATE — so a candidate that
+routes shorter than it estimates still structurally loses (the
+2026-07-30 default-flip study pinned this as the `multi_trunk` /
+`spine_relays` flip blocker). The new opt-in `refine_selection
+[max_moves] [chase_overlaps]` command (`_refine_selection`,
+`src/buda_session/ripup.py`) sweeps every eligible bundle's selection on
+the MEASURED result, reusing ripup's machinery end to end: the
+fixed-context screen orders all alternates (ordering only, never a
+metric), the top-2 are full-trialed (fast trials forced off — a
+tighten-skipped trial's WL would be biased against the move, and full
+trials make winners forward-restorable), commits ride the fwd-snapshot +
+`recharge_committed` path. The accept metric is realized abstract WL
+(Σ placed span lengths — the post-settle geometry the estimate only
+approximates). **Placement matters — it runs at the END of the flow,
+after the healers**: both pre-healer placements were implemented and
+measured first, and BOTH perturbed the healers' basins (lexicographic
+(ovl, WL): aligned 30/0 → 16 opens/6 ovl; even the overlap-parity
+WL-polish accept: bottomup 0 → 16 opens, mix 1 ovl → 4 opens — a
+selection change at parity still shifts the healers' trajectories).
+End-of-flow, the default accept is componentwise — opens AND overlaps
+parity-or-better with WL strictly lower — so an endpoint regression is
+impossible by construction (`chase_overlaps` keeps the aggressive
+lexicographic form for healerless experiments). Measured (rnr vehicles,
+endpoints preserved exactly): mix realized WL 64893→59424 (**−8.4%**,
+44.8s), aligned −1.7% (5.2s), bottomup −0.2% (4.6s); on the healerless
+topdown flow the componentwise accept doubles as a healer: 175 opens/16
+ovl → **84/2** with WL −3.1%. Opt-in — flows that do not call it are
+byte-identical. Tests: `test/tests/test_refine_selection.py` (+
+`features/refine_selection.feature`); docs:
+`docs/script_reference/nuts.md`.
 
 **`kPeak` default decision (2026-07-11): stays opt-in (default 0).
 Confirmed after the supply-aware follow-on shipped — the reopener premise
@@ -969,7 +1004,9 @@ cost model**, not a margin/slide bug — which is exactly why `multi_trunk` rema
 a correct narrow opt-in (see [`wishlist-topo.md`](wishlist-topo.md) →
 "`multi_trunk` as a default — keep opt-in") rather than a default.
 
-**The lever (deferred).** Bias selection by *routed* quality, not just estimated
+**The lever (original analysis — since shipped as levers 1–3; the
+realized-WL side is lever 3's `refine_selection`, as-built above).** Bias
+selection by *routed* quality, not just estimated
 WL, for the candidate classes that route better than they estimate:
 - a **congestion-/track-aware selection term** — e.g. weight a candidate by the
   peak band demand it induces (the planner already knows per-band load), so a tree
