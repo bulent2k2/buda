@@ -2115,16 +2115,16 @@ static void complete_relay_junctions(Topology& topo,
                 int t_min = INT_MAX, t_max = INT_MIN;
                 for (const Inc* q : TAPS) { int a = along(q->p); t_min = std::min(t_min, a); t_max = std::max(t_max, a); }
                 if (t_min == t_max) continue;                   // all collinear → let chaining merge
-                const int a_lo = spine_h ? bb.x1 : bb.y1;       // block's along-extent faces
-                const int a_hi = spine_h ? bb.x2 : bb.y2;
                 // Do all stubs land on the SAME block face?  Then the collector can
                 // ride THAT face at the taps' own line: the stubs already tap the
                 // face (their MST landing), so no perp reposition and — crucially —
                 // no along-overhang is needed to reach a face for coverage.  The
                 // collector spans exactly [t_min..t_max]; block coverage is the
                 // stubs' own geometric face contacts (a busterm tap kept on the
-                // outermost stub).  Falls back to an interior collector + a minimal
-                // extension to the nearer face only when the taps straddle faces.
+                // outermost stub).  When the taps straddle faces the collector
+                // drops to an interior line instead — but keeps the SAME tight
+                // [t_min..t_max] span, so neither branch needs the block's
+                // along-extent faces (issue #514 retired that extension).
                 const int face_perp = perp(TAPS[0]->p);
                 bool common_face = (face_perp == p_lo || face_perp == p_hi);
                 for (const Inc* q : TAPS) if (perp(q->p) != face_perp) { common_face = false; break; }
