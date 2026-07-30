@@ -461,6 +461,12 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
             set_app_name(stem, self.fig)
 
         self.ui_state = ViewState()
+        # Names (block labels) and Terminals (busterm markers) start OFF in the
+        # main visualizer — they clutter the routed view; the user toggles them
+        # on when needed.  Scoped to BudaVisualizer; TopologyExplorer keeps them
+        # on by default (it shares no state with this window).
+        self.ui_state.block_names = False
+        self.ui_state.busterms    = False
         self.ui_state.add_listener(self.fig_redraw)
 
         # bundle_id -> list of dicts {artist, alpha, lw, is_band, layer}
@@ -653,7 +659,10 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
         self._btn_blocks.on_clicked(lambda _: self._toggle_blocks())
 
         ax_blknames = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
-        self._btn_blknames = Button(ax_blknames, '☑ Names', color='#e8f4e8')
+        self._btn_blknames = Button(
+            ax_blknames,
+            '☑ Names' if self.ui_state.block_names else '☐ Names',
+            color='#e8f4e8')
         self._btn_blknames.label.set_fontsize(7.5)
         self._btn_blknames.on_clicked(lambda _: self._toggle_block_names())
 
@@ -663,7 +672,10 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
         self._btn_hanan.on_clicked(lambda _: self._toggle_hanan())
 
         ax_bustermss = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
-        self._btn_bustermss = Button(ax_bustermss, '☑ Terminals', color='#e8f4e8')
+        self._btn_bustermss = Button(
+            ax_bustermss,
+            '☑ Terminals' if self.ui_state.busterms else '☐ Terminals',
+            color='#e8f4e8')
         self._btn_bustermss.label.set_fontsize(7.5)
         self._btn_bustermss.on_clicked(lambda _: self._toggle_bustermss())
 

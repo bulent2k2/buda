@@ -918,6 +918,10 @@ def test_terminals_hidden_in_detailed_mode(monkeypatch):
     # toggle) used to re-reveal them, gated on the Terminals toggle alone.
     viz = _build_viz("dnuts1.buda", monkeypatch)
     assert viz._busterm_artists                        # this design has some
+    # Terminals start OFF in the main visualizer; enable them so this test can
+    # exercise the abstract-view -> detailed-mode HIDE behavior it covers.
+    assert viz.ui_state.busterms is False              # new default
+    viz._toggle_bustermss()
     assert viz.ui_state.busterms is True
     n = lambda: sum(1 for a in viz._busterm_artists if a.get_visible())
 
