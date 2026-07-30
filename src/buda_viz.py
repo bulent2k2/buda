@@ -110,6 +110,14 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         self._cost_cache  = {}      # (bidx, npool) -> (mapping, is_real), lazily filled
         self.layer_stack = layer_stack
         self.ui_state    = ui_state or ViewState()
+        # Names (block labels) and Terminals (busterm markers) start OFF here too
+        # — same as the main visualizer.  Only when the explorer owns its state
+        # (standalone `visualize_topologies`): when opened from a BudaVisualizer
+        # it SHARES that window's ViewState (already OFF) and must not clobber
+        # the user's live toggles.  The Floorplanner keeps its own defaults.
+        if ui_state is None:
+            self.ui_state.block_names = False
+            self.ui_state.busterms    = False
         # Live reference to the main viz's {layer_id: visible} map so a layer
         # toggled off there is hidden here too (None = show every layer).
         self._layer_visible = layer_visible
@@ -461,6 +469,13 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
             set_app_name(stem, self.fig)
 
         self.ui_state = ViewState()
+        # Names (block labels) and Terminals (busterm markers) start OFF — they
+        # clutter the routed view; the user toggles them on when needed.  The
+        # TopologyExplorer applies the same default (see its __init__); when it
+        # is opened from THIS window it shares this ViewState, so both stay in
+        # sync.  The Floorplanner keeps its own ViewState defaults.
+        self.ui_state.block_names = False
+        self.ui_state.busterms    = False
         self.ui_state.add_listener(self.fig_redraw)
 
         # bundle_id -> list of dicts {artist, alpha, lw, is_band, layer}
@@ -653,7 +668,10 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
         self._btn_blocks.on_clicked(lambda _: self._toggle_blocks())
 
         ax_blknames = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
-        self._btn_blknames = Button(ax_blknames, '☑ Names', color='#e8f4e8')
+        self._btn_blknames = Button(
+            ax_blknames,
+            '☑ Names' if self.ui_state.block_names else '☐ Names',
+            color='#e8f4e8')
         self._btn_blknames.label.set_fontsize(7.5)
         self._btn_blknames.on_clicked(lambda _: self._toggle_block_names())
 
@@ -663,7 +681,10 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
         self._btn_hanan.on_clicked(lambda _: self._toggle_hanan())
 
         ax_bustermss = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
-        self._btn_bustermss = Button(ax_bustermss, '☑ Terminals', color='#e8f4e8')
+        self._btn_bustermss = Button(
+            ax_bustermss,
+            '☑ Terminals' if self.ui_state.busterms else '☐ Terminals',
+            color='#e8f4e8')
         self._btn_bustermss.label.set_fontsize(7.5)
         self._btn_bustermss.on_clicked(lambda _: self._toggle_bustermss())
 
