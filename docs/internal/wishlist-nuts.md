@@ -454,12 +454,17 @@ repair loop's bookkeeping fully move-scoped — accept guards on overlap
 DELTAS vs the pre-move snapshot, cycle exit on an exact repeated
 placement state, settles on the moved set's follower closure.  On the
 3813-segment congested synthetic that took `run_nuts` 195 → ~60 s
-(`corner` 121 → ~33 s, `repair` 50 → ~20 s), byte-identical throughout
-(the cycle guard QoR-gated, 0 better / 0 worse / 29 unchanged).  What
-remains inside `corner`/`repair` is genuine packing computation, and it
-only matters at scale — **on the whole corpus the two passes now cost
-0.03–0.9 s total**, so none of these carries urgency; they are recorded
-for when a real large design makes them live.
+(`corner` 121 → ~33 s, `repair` 50 → ~20 s).  Gates: #506 and #509 are
+byte-identical by construction; #507 is QoR-equivalent (a cycle's
+cap-exit parity can change final placements — gated 0 better / 0
+worse / 29 unchanged with zero wirelength movement).  What remains
+inside `corner`/`repair` is genuine packing computation, and it only
+matters at scale — **the two passes' instrumented buckets total
+≤ ~0.2 s per corpus flow in the arc's solve-pass profiling** (e.g.
+bigHalf ripup `corner` 0.04–0.15 s / `repair` 0.03–0.12 s, tc3a
+0.03–0.06 s each, mix2 vehicles similar), so none of these carries
+urgency; they are recorded for when a real large design makes them
+live.
 
 **(1) Span-indexed occupancy in `repack_members` — mechanical,
 identity-preserving.**  The dominant residual is the cluster repack's
