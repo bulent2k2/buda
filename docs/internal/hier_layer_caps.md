@@ -280,10 +280,50 @@ The parent is **not** restricted to the complement: it sees the full
 pattern minus the child's *actual placed routing* (the existing
 copied-routing keepouts).  A child using 12% of its 30% M4 slice leaves 88%
 of M4 to the parent.  The guarantee the parent needs is an upper bound on
-child consumption, and the thinned pattern enforces that physically.  (A
-hard parent-side reservation would be the same mechanism pointed the other
-way — a parent-view thinning — and becomes a floor knob if ever needed;
-§13, Phase 5 Q2.)
+child consumption, and the thinned pattern enforces that physically.
+
+#### The parent-side floor knob (PARKED — Phase 5 Q3)
+
+A *share* is one-sided by construction: it bounds the child from above and
+says nothing about what the parent may use.  The symmetric knob — "reserve
+30% of M4 over this instance **for the parent**, whatever the child does" —
+is a **floor**, and it is deliberately NOT implemented.  What it would be,
+and why it is parked:
+
+* **The mechanism already exists, pointed the other way.**  A floor is the
+  same thinned-pattern derivation applied to the *parent's* view of the
+  instance bbox: the kept slots become the ones the child is forbidden, and
+  the parent plans over an instance region whose supply is guaranteed no
+  matter how the child solves.  Concretely it would be one more
+  `PatternOverride` — the *complement* of `_thinned_pattern`'s keep set —
+  installed on the parent's grid view over the instance bbox, plus the
+  Tier-2 mirror (a capacity floor rather than a `s × capacity` ceiling).
+  Roughly a day's work on top of Phase 3; nothing structural is missing.
+* **Why it changes the contract.**  Today a child's unused slice is real
+  slack the parent's planner can take, and every measurement in §12 depends
+  on that: the capped/shared vehicles come out *shorter* than their
+  uncapped twins partly because upper levels absorb the leaf's leftovers.
+  A floor converts that slack into a hard partition — the parent gets its
+  reservation even when the instance is empty, and the child can no longer
+  spill into it under pressure.  That is a strictly worse default and a
+  genuinely different design contract, so it must be opt-in per cell/layer
+  and can never be inferred from a share.
+* **Why nothing has needed it.**  The failure a floor prevents is "the
+  child ate the layer and the parent had nowhere to cross".  On every
+  vehicle built for this arc that failure is already prevented by the
+  *ceiling* side — a cell whose band stops at M3 cannot touch M4 at all,
+  and a 75% M4 lease leaves a measured 25% the parent's bundles used
+  without contention (`mix2_fast_bottomup_shared` ends 0/0/0).  The only
+  observed hard failure was the opposite one — a 50% lease **starves the
+  child** (64 stranded bits at the misaligned independent instance, §12) —
+  which a floor makes worse, not better.
+* **The trigger to un-park it.**  A design where the parent's crossing
+  demand over an instance is known *a priori* and the child's is elastic
+  (e.g. a fixed top-level bus that must cross a leaf whose own bundling is
+  data-dependent), and where the share ceiling can't be tightened because
+  the child genuinely needs the average-case supply.  Until such a vehicle
+  exists, the knob would be untested surface area on a hot path, so it
+  stays a documented non-goal rather than dead code.
 
 ## 7. Persistence
 
@@ -635,11 +675,40 @@ Capped and shared QoR vehicles, the measurement table, CLAUDE.md command
 rows, BDB_REFERENCE schema, HIER_* doc updates, `set_layer_caps_by_depth`.
 *Deliverable: the §12 study, published; docs current.*
 
-Open questions to settle **before** Phase 5:
-* **Q1 — depth convenience.**  `set_layer_caps_by_depth` maps BDB depth to
-  caps; the counting direction (deepest-first as written, or top-first?)
-  needs one decision.
-* **Q2 — floors: RESOLVED early**, absorbed into Phase 1 by the `-min`
-  band syntax (§4).  The stub-economics caveat (short stubs love cheap LOW
-  layers) stays: the §12 study reports per-layer WL with and without
-  floors so the cost is measured, not assumed.
+Open questions — **all RESOLVED** (plan owner, 2026-07-31):
+* **Q1 — RESOLVED: bottom-anchored intrinsic LEVELS, container-aware.**
+  `set_layer_caps_by_depth <cap1> <cap2> ...` counts DEEPEST-FIRST, and a
+  cell's level is INTRINSIC — computed from its own subtree, not from
+  where it is instantiated:
+  - a childless NON-container cell is **level 1** (capped by the first
+    argument);
+  - a childless CONTAINER cell is **level 2** — it has no children *yet*
+    but is declared to acquire them, so it behaves as if holding invisible
+    level-1 content (one level of reserved headroom; a container that
+    will hold a deeper subtree is capped explicitly — an explicit
+    `set_cell_layer_cap` always outranks the by-depth default);
+  - otherwise **level = 1 + max over child cells' levels** (the tallest
+    subtree governs, so a cell is never capped below what its deepest
+    content needs).
+  Levels above the argument list are UNRESTRICTED — a short list fails in
+  the right direction (top levels get everything).  Bands are
+  **cumulative**: level *i* gets `[min..cap_i]` (the BKM's "next level up
+  ADDS M4/M5" — upper levels keep cheap LOW stubs); disjoint bands stay
+  expressible per-cell via `-min`.
+* **Q1b — RESOLVED (dissolved): multi-depth cells.**  Because the level
+  is intrinsic to the cell, a cell instantiated at several hierarchy
+  depths has ONE well-defined level and the per-instance-depth ambiguity
+  the question anticipated does not arise.  Assessed for confusion at the
+  owner's request: the bottom-anchored rule is *simpler* than
+  instance-depth counting, needing only the three conventions above.
+* **Q2 — RESOLVED: the policy vehicles join the QoR corpus.**
+  `mix2_fast_bottomup_caps`, `mix2_fast_bottomup_shared` and
+  `chip_bottomup_caps` become permanent corpus rows, so the policy path
+  is regression-guarded by every corpus compare.
+* **Q3 — RESOLVED: the parent-side floor knob stays PARKED** (see the
+  expanded §6 note) — nothing has needed it; the budget-not-reservation
+  semantics has been sufficient on every vehicle.
+* **(former Q2) floors: RESOLVED early**, absorbed into Phase 1 by the
+  `-min` band syntax (§4).  The stub-economics caveat (short stubs love
+  cheap LOW layers) stays: the §12 study reports per-layer WL with and
+  without floors so the cost is measured, not assumed.
