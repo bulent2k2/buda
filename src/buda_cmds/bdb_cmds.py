@@ -428,6 +428,7 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
     if cell == "*" and len(args) > 1 and args[1].lower() == "off":
         n = len(getattr(session, "_cell_layer_policy", {}) or {})
         session._cell_layer_policy = {}
+        session._cell_layer_policy_restored = set()
         if session.bdb is not None:
             # Write-through (v20): clear every persisted band + the '*'
             # default so a later open/resume does not resurrect the policy.
@@ -488,6 +489,10 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
             session._cell_layer_policy is None:
         session._cell_layer_policy = {}
     session._cell_layer_policy[cell] = (floor, cap)
+    # An explicit declaration is session-typed from here on — it survives a
+    # BDB switch, unlike an entry a restore added (see
+    # _restore_layer_policies).
+    getattr(session, "_cell_layer_policy_restored", set()).discard(cell)
     if session.bdb is not None:
         # Write-through (v20): the policy is a design attribute — persist it
         # so a resumed session (open_bdb / load_pipeline) plans under the

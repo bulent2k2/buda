@@ -1012,6 +1012,14 @@ class PersistMixin:
             nr = buda.NUTSResult()
             nr.segments = ts_list
             self.nuts_result = nr             # persisted routing = final, clean
+        elif cap_voided and self.nuts_result is not None:
+            # Every restored bundle with routing was cap-voided: a nuts_result
+            # left over from earlier in THIS session is stale (potentially
+            # above-cap) metal the audit just excluded — clearing it keeps
+            # run_detailed_nuts from consuming it (Codex #546).
+            self.nuts_result = None
+            print("[LayerCap] cleared the session's previous NUTS result — "
+                  "the cap audit voided every restored routed bundle")
 
         n_cand = sum(len(w.input.candidates) for w in self.bundles)
         n_planned = sum(1 for w in self.bundles

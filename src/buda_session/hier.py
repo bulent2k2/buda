@@ -1478,13 +1478,26 @@ class HierMixin:
     def _restore_layer_policies(self):
         """Rebuild _cell_layer_policy from the open BDB (v20): per-cell bands
         from cell.layer_floor/layer_cap, the '*' default from
-        meta.layer_cap_default.  Entries already declared THIS session win —
+        meta.layer_cap_default.  Entries the user TYPED this session win —
         a user who sets a band before/after open_bdb keeps what they typed
         (set_cell_layer_cap writes through, so the two stay in sync anyway).
-        Returns the number of entries restored."""
+        Entries a PREVIOUS restore added are NOT session-typed: switching to
+        another BDB must not carry the old design's bands along (Codex #546),
+        so restored keys are tracked in _cell_layer_policy_restored and
+        dropped before this BDB's policies merge in.  Returns the number of
+        entries restored."""
         if self.bdb is None:
             return 0
         pol = getattr(self, "_cell_layer_policy", None) or {}
+        prev = getattr(self, "_cell_layer_policy_restored", None) or set()
+        dropped = {k for k in prev if k in pol}
+        for k in dropped:
+            del pol[k]
+        if dropped:
+            self._cell_layer_policy = pol
+            print(f"[LayerCap] dropped {len(dropped)} polic"
+                  f"{'y' if len(dropped) == 1 else 'ies'} restored from the "
+                  f"previously open BDB: {', '.join(sorted(dropped))}")
         restored = {}
         for c in self.bdb.layer_capped_cells():
             if c not in pol:
@@ -1498,6 +1511,7 @@ class HierMixin:
             except ValueError:
                 print(f"WARNING: malformed meta.layer_cap_default "
                       f"{dflt!r} — ignored")
+        self._cell_layer_policy_restored = set(restored)
         if restored:
             pol.update(restored)
             self._cell_layer_policy = pol
@@ -1522,8 +1536,25 @@ class HierMixin:
             inp = w.input
             if not inp.allowed_layers or w.plan.selected_topology_index < 0:
                 continue
-            bad = [(i, l) for i, l in enumerate(w.plan.seg_layers)
-                   if l >= 0 and not inp.allows_layer(l)]
+            # An above-cap layer the user explicitly PINNED (edit_set_layer +
+            # edit_commit pin / restored pinned_seg_layers) is the documented
+            # exception — pins override the mask, so a pinned assignment is
+            # not stale illegal routing and must resume faithfully
+            # (Codex #546).  Only unpinned violations void the plan.
+            pins = list(inp.pinned_seg_layers) if inp.pinned_seg_layers else []
+            bad, pinned_kept = [], []
+            for i, l in enumerate(w.plan.seg_layers):
+                if l < 0 or inp.allows_layer(l):
+                    continue
+                if i < len(pins) and pins[i] == l:
+                    pinned_kept.append((i, l))
+                else:
+                    bad.append((i, l))
+            if pinned_kept and not bad:
+                b = inp.original_bundle
+                det = ", ".join(f"seg{i}=L{l}" for i, l in pinned_kept)
+                print(f"[LayerCap] bundle {b.id}: above-cap layer(s) {det} "
+                      f"kept — explicitly pinned (pins override the mask)")
             if not bad:
                 continue
             b = inp.original_bundle

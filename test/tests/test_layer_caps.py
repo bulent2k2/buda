@@ -519,3 +519,97 @@ def test_bottom_up_capped_cell_local_solve_and_copies():
     assert s.detailed_result.num_unplaced == 0
     assert all(ns.layer in (2, 3)
                for ns in s.detailed_result.net_segments)
+
+
+# ── Codex #546 round: BDB switch, stale NUTS, pinned exceptions ──────────────
+
+def test_open_bdb_switch_drops_restored_policies(tmp_path):
+    """Codex #546: a policy RESTORED from BDB A must not survive a switch to
+    BDB B (another design's bands would silently govern B's planning);
+    entries the user TYPED this session do survive."""
+    pa = str(tmp_path / "a.bdb")
+    db = _hier_db(path=pa)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ("def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+                  "def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+                  "set_cell_layer_cap proc_cell M5"):
+            s.do_command(c)
+    del s, db
+
+    pb = str(tmp_path / "b.bdb")
+    buda.BDB(pb).add_cell("other_cell", 10, 10)    # B: no policy
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s2.do_command(f"open_bdb {pa}")
+        for c in ("def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+                  "def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+                  "set_cell_layer_cap * 6 -min 4"):   # session-TYPED
+            s2.do_command(c)
+        s2.do_command(f"open_bdb {pb}")
+    out = buf.getvalue()
+    assert "dropped 1" in out and "proc_cell" in out
+    assert "proc_cell" not in s2._cell_layer_policy   # A's restore gone
+    assert s2._cell_layer_policy.get("*") == (4, 6)   # typed entry survives
+
+
+def test_load_pipeline_cap_audit_clears_stale_nuts(tmp_path):
+    """Codex #546: when the cap audit voids EVERY restored routed bundle,
+    ts_list is empty and a nuts_result left from earlier in the session
+    would survive as stale above-cap metal — it must be cleared."""
+    p = str(tmp_path / "stale.bdb")
+    db = _hier_db(path=p)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ("def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+                  "def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+                  "run_hier_bundler", "generate_hier_topologies",
+                  "run_planner hier", "run_nuts"):
+            s.do_command(c)
+    del s, db
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        for c in (f"open_bdb {p}",
+                  "def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+                  "def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+                  "add_blocks_from_bdb 0", "add_blocks_from_bdb 1 skip",
+                  "set_cell_layer_cap proc_cell M5"):
+            s2.do_command(c)
+        s2.nuts_result = buda.NUTSResult()    # stale earlier-session result
+        s2.do_command("load_pipeline expanded")
+    assert "cleared the session's previous NUTS result" in buf.getvalue()
+    assert s2.nuts_result is None
+
+
+def test_cap_audit_keeps_pinned_exception():
+    """Codex #546: pins override the mask (the P1 contract), so a restored
+    above-cap assignment that matches an explicit pinned_seg_layers entry
+    resumes faithfully; the same assignment unpinned is voided."""
+    s = _session()
+    w = _plan(s)                              # unmasked plan → TOP pair used
+    assert any(l in (4, 5) for l in w.plan.seg_layers)
+    w.input.allowed_layers = [2, 3]
+    w.input.layer_cap = 3
+    w.input.pinned_seg_layers = list(w.plan.seg_layers)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        voided = s._audit_restored_layer_caps()
+    assert voided == set()
+    assert "explicitly pinned" in buf.getvalue()
+    assert w.plan.selected_topology_index >= 0    # selection intact
+    # Unpinned, the identical assignment is stale illegal routing.
+    w.input.pinned_seg_layers = []
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        voided = s._audit_restored_layer_caps()
+    assert voided and "VOIDED" in buf.getvalue()
+    assert w.plan.selected_topology_index == -1
