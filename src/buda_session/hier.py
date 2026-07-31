@@ -788,15 +788,17 @@ class HierMixin:
     _ORIENT_MAPS = _ORIENT_MAPS
     _DIR_PRESERVING = _DIR_PRESERVING
 
-    def _mirror_const(self, horiz_flag):
+    def _mirror_const(self, horiz_flag, lids=None):
         """K with K ≡ 2σ_l (mod pitch_l) for every grid layer of the
         direction (CRT-combined, in layout units, mod the direction's pitch
         LCM); None when any pattern is asymmetric or the congruences are
         inconsistent.  A mirrored instance at coordinate c (extent E on the
-        axis) sees the phase-φ tracks iff c ≡ K − E − φ (mod LCM)."""
+        axis) sees the phase-φ tracks iff c ≡ K − E − φ (mod LCM).
+        `lids` restricts the combination to a layer subset (a capped cell's
+        band — fewer congruences can only make K exist more often)."""
         K, M = 0, 1
         for l, horiz in self._grid_layer_dirs().items():
-            if horiz != horiz_flag:
+            if horiz != horiz_flag or (lids is not None and l not in lids):
                 continue
             pat = self.routing_grid.get_layer_grid(l).global_pattern()
             a = _pattern_two_sigma(pat)
@@ -1472,6 +1474,103 @@ class HierMixin:
         if n_gov:
             print(f"[LayerCap] {n_gov} bundle(s) governed by cell layer "
                   f"policies ({len(pol)} polic{'y' if len(pol) == 1 else 'ies'})")
+
+    def _restore_layer_policies(self):
+        """Rebuild _cell_layer_policy from the open BDB (v20): per-cell bands
+        from cell.layer_floor/layer_cap, the '*' default from
+        meta.layer_cap_default.  Entries the user TYPED this session win —
+        a user who sets a band before/after open_bdb keeps what they typed
+        (set_cell_layer_cap writes through, so the two stay in sync anyway).
+        Entries a PREVIOUS restore added are NOT session-typed: switching to
+        another BDB must not carry the old design's bands along (Codex #546),
+        so restored keys are tracked in _cell_layer_policy_restored and
+        dropped before this BDB's policies merge in.  Returns the number of
+        entries restored."""
+        if self.bdb is None:
+            return 0
+        pol = getattr(self, "_cell_layer_policy", None) or {}
+        prev = getattr(self, "_cell_layer_policy_restored", None) or set()
+        dropped = {k for k in prev if k in pol}
+        for k in dropped:
+            del pol[k]
+        if dropped:
+            self._cell_layer_policy = pol
+            print(f"[LayerCap] dropped {len(dropped)} polic"
+                  f"{'y' if len(dropped) == 1 else 'ies'} restored from the "
+                  f"previously open BDB: {', '.join(sorted(dropped))}")
+        restored = {}
+        for c in self.bdb.layer_capped_cells():
+            if c not in pol:
+                floor, cap = self.bdb.cell_layer_band(c)
+                restored[c] = (floor, cap)
+        dflt = self.bdb.meta_get("layer_cap_default", "")
+        if dflt and "*" not in pol:
+            try:
+                floor_s, cap_s = dflt.split(":")
+                restored["*"] = (int(floor_s), int(cap_s))
+            except ValueError:
+                print(f"WARNING: malformed meta.layer_cap_default "
+                      f"{dflt!r} — ignored")
+        self._cell_layer_policy_restored = set(restored)
+        if restored:
+            pol.update(restored)
+            self._cell_layer_policy = pol
+            print(f"[LayerCap] restored {len(restored)} persisted cell layer "
+                  f"polic{'y' if len(restored) == 1 else 'ies'}: "
+                  + ", ".join(
+                      f"{c}=[{f if f >= 0 else 'min'}..{cp}]"
+                      for c, (f, cp) in sorted(restored.items())))
+        return len(restored)
+
+    def _audit_restored_layer_caps(self):
+        """Failure mode 5 of docs/internal/hier_layer_caps.md §9: a cap
+        tighter than already-persisted routing (band declared or tightened
+        after the checkpoint was routed).  For every wrapper whose mask is
+        set, any restored assigned layer OUTSIDE the mask voids that
+        bundle's restored plan — reported LOUD per segment and the selection
+        cleared, so continuing REQUIRES an explicit re-plan; the persisted
+        rows are untouched (a re-run of run_planner rewrites them).
+        Returns the set of voided bundle ids."""
+        voided = set()
+        for w in self.bundles:
+            inp = w.input
+            if not inp.allowed_layers or w.plan.selected_topology_index < 0:
+                continue
+            # An above-cap layer the user explicitly PINNED (edit_set_layer +
+            # edit_commit pin / restored pinned_seg_layers) is the documented
+            # exception — pins override the mask, so a pinned assignment is
+            # not stale illegal routing and must resume faithfully
+            # (Codex #546).  Only unpinned violations void the plan.
+            pins = list(inp.pinned_seg_layers) if inp.pinned_seg_layers else []
+            bad, pinned_kept = [], []
+            for i, l in enumerate(w.plan.seg_layers):
+                if l < 0 or inp.allows_layer(l):
+                    continue
+                if i < len(pins) and pins[i] == l:
+                    pinned_kept.append((i, l))
+                else:
+                    bad.append((i, l))
+            if pinned_kept and not bad:
+                b = inp.original_bundle
+                det = ", ".join(f"seg{i}=L{l}" for i, l in pinned_kept)
+                print(f"[LayerCap] bundle {b.id}: above-cap layer(s) {det} "
+                      f"kept — explicitly pinned (pins override the mask)")
+            if not bad:
+                continue
+            b = inp.original_bundle
+            name = b.net_names[0] if b.net_names else "?"
+            det = ", ".join(f"seg{i}=L{l}" for i, l in bad)
+            print(f"WARNING: [LayerCap] bundle {b.id} ({name}): persisted "
+                  f"routing violates the cell band [..{inp.layer_cap}] "
+                  f"({det}) — restored plan VOIDED; re-run the planner "
+                  f"(the cap was added/tightened after this checkpoint "
+                  f"was routed)")
+            w.plan.selected_topology_index = -1
+            w.plan.seg_layers = []
+            inp.assigned_h_layer = -1
+            inp.assigned_v_layer = -1
+            voided.add(int(b.id))
+        return voided
 
     def _bu_cell_of(self, cell_context):
         """Real cell type behind a bundle cell_context — identity unless the
@@ -2672,6 +2771,27 @@ class HierMixin:
                 out[lid] = False
         return out
 
+    def _cell_band_grid_layers(self, group, dirs):
+        """`dirs` ({layer_id: horiz?}, from _grid_layer_dirs) restricted to
+        `group`'s cell layer band (docs/internal/hier_layer_caps.md Phase 2).
+        `group` may be a rotation-class clone name — resolved to the real
+        cell via _bu_cell_of; explicit policy first, then the '*' default.
+        No policy => `dirs` unchanged (the byte-identity guarantee).  A
+        capped cell's copied routing can only land inside its band, so the
+        alignment LCM and the placement-stage pool comparison must range
+        over the band's layers only — a coarser full-stack phase would
+        demand agreement (and nudges) the cell's routing cannot observe."""
+        pol = getattr(self, "_cell_layer_policy", None)
+        if not pol:
+            return dirs
+        cell = self._bu_cell_of(group)
+        entry = pol.get(cell, pol.get("*"))
+        if entry is None:
+            return dirs
+        floor, cap = entry
+        lo = floor if floor >= 0 else -(10 ** 9)
+        return {l: h for l, h in dirs.items() if lo <= l <= cap}
+
     def _bottom_up_placed_instances(self):
         """{group: [placed ComponentRows]} for every marked cell with >= 2
         placed instances — the placement-stage unit of work (no bundler,
@@ -2773,12 +2893,19 @@ class HierMixin:
             orients = self._detect_instance_orients(
                 self._bu_cell_of(cell), self.bdb.all_components(),
                 ref_name=ref.name)
+            # Band-scoped comparison (layer caps, Phase 2): a capped cell's
+            # routing only ever lands inside its band, so a phase mismatch
+            # on an out-of-band layer is invisible to its copies — comparing
+            # it would contradict the band-scoped align_bottom_up.
+            dirs_c = self._cell_band_grid_layers(cell, dirs)
+            scoped = (f" (band-scoped to {sorted(dirs_c)})"
+                      if dirs_c is not dirs else "")
             aligned, misaligned = [ref.name], {}
             for c in insts[1:]:
                 issues = []
                 oi = orients.get(c.name) or "N"
                 _, rx, ry = self._ORIENT_MAPS.get(oi, (0, 0, 0))
-                for lid, horiz in sorted(dirs.items()):
+                for lid, horiz in sorted(dirs_c.items()):
                     a = rel_tracks(ref, lid, horiz)
                     b = rel_tracks(c, lid, horiz,
                                    refl=bool(ry if horiz else rx))
@@ -2804,12 +2931,12 @@ class HierMixin:
                                           if len(v) > 1 else "")
                         for i, v in sorted(misaligned.items()))
                     print(f"[TemplateTracks] (placement-stage) cell "
-                          f"'{cell}': MISALIGNED — {detail}")
+                          f"'{cell}': MISALIGNED{scoped} — {detail}")
                 else:
                     print(f"[TemplateTracks] (placement-stage) cell "
-                          f"'{cell}': ALIGNED — {len(aligned)} instance(s) "
-                          f"see identical signal tracks over their whole "
-                          f"window (ref {ref.name})")
+                          f"'{cell}': ALIGNED{scoped} — {len(aligned)} "
+                          f"instance(s) see identical signal tracks over "
+                          f"their whole window (ref {ref.name})")
         if verbose:
             print("[TemplateTracks] placement-stage verdict is advisory: "
                   "the post-run_nuts check (per routed window) gates "
@@ -3007,6 +3134,27 @@ class HierMixin:
             insts = snap.get(cell, [])
             if len(insts) < 2:
                 continue
+            # Band-scoped phases (layer caps, Phase 2): a capped cell's
+            # routing lives inside its band, so its alignment period is the
+            # LCM of the BAND's pitches only (smaller or equal — more
+            # instance pairs already agree, nudges shrink), and the mirror
+            # constant combines only the band's congruences.
+            dirs_c = self._cell_band_grid_layers(cell, dirs)
+            if dirs_c is not dirs:
+                lx_c = self._pitch_lcm(
+                    [self.routing_grid.get_layer_grid(l).global_pattern()
+                         .unit_pitch()
+                     for l, horiz in dirs_c.items() if not horiz])
+                ly_c = self._pitch_lcm(
+                    [self.routing_grid.get_layer_grid(l).global_pattern()
+                         .unit_pitch()
+                     for l, horiz in dirs_c.items() if horiz])
+                kx_c = self._mirror_const(False, lids=dirs_c)
+                ky_c = self._mirror_const(True, lids=dirs_c)
+                print(f"[Align] cell '{cell}': band-scoped to layer(s) "
+                      f"{sorted(dirs_c)} (periods x={lx_c} y={ly_c})")
+            else:
+                lx_c, ly_c, kx_c, ky_c = lx, ly, kx, ky
             marked = all_marked_names()
             def inside_marked(name):
                 parts = name.split("/")
@@ -3031,8 +3179,8 @@ class HierMixin:
                       f"unmoved")
 
             def axis_recs(axis):
-                # axis 0 = x (V layers, const kx), 1 = y (H layers, ky).
-                K = kx if axis == 0 else ky
+                # axis 0 = x (V layers, const kx_c), 1 = y (H layers, ky_c).
+                K = kx_c if axis == 0 else ky_c
                 recs = []
                 for c in insts:
                     o = orients.get(c.name)
@@ -3058,8 +3206,8 @@ class HierMixin:
                                  c.name not in movable, skip))
                 return recs
 
-            dxs, off_x = shifts(axis_recs(0), lx)
-            dys, off_y = shifts(axis_recs(1), ly)
+            dxs, off_x = shifts(axis_recs(0), lx_c)
+            dys, off_y = shifts(axis_recs(1), ly_c)
             for n in sorted(set(off_x) | set(off_y)):
                 print(f"WARNING: align_bottom_up: {n} (inside a marked "
                       f"parent) sits off cell '{cell}'s chosen phase — the "

@@ -420,7 +420,7 @@ Open questions — **both RESOLVED** (plan owner, 2026-07-31):
 * **Q2 — RESOLVED: ancestor policy.**  Cross-level bundles take the
   common-ancestor cell's policy, per the compositional reading.
 
-### Phase 2 — bottom-up wiring (Python)
+### Phase 2 — bottom-up wiring (Python) — LANDED 2026-07-31
 
 Mask resolution at template / expansion / clone / `load_pipeline`;
 cell-local solves; `align_bottom_up` LCM; `check_template_tracks` scoping;
@@ -428,6 +428,59 @@ persistence v20.  *Deliverable: capped `mix2_fast_bottomup` end-to-end with
 per-layer WL evidence.*
 
 Open questions: none beyond Phase 1's — this phase is wiring.
+
+As built:
+
+* **Schema v20** — `cell.layer_cap`/`cell.layer_floor` (upsert-preserved,
+  the `bottom_up` v17 pattern) + the `cell_layer_share` table (created
+  now, consumed by Phase 3); `set_cell_layer_band` / `cell_layer_band` /
+  `layer_capped_cells` accessors + `CellRow` fields; idempotent
+  migration; fixtures regenerated.
+* **Write-through + restore** — `set_cell_layer_cap` persists to the open
+  BDB (`*` default in `meta.layer_cap_default`; `* off` clears both);
+  `open_bdb` restores persisted policies with session-typed entries
+  winning the merge; `load_pipeline` re-resolves masks onto the restored
+  wrappers.
+* **§9.5 audit** — a cap tighter than already-persisted routing voids the
+  violating bundles' restored plan at `load_pipeline` (LOUD per segment,
+  their bus segments excluded from the NUTS rehydration, explicit
+  re-plan required).
+* **Band-scoped `align_bottom_up`** — per rotation-class group, the
+  alignment period is the LCM of the BAND's pitches only, and the mirror
+  constant CRT-combines only the band's congruences: fewer pitches →
+  finer equivalence → smaller nudges.  The placement-stage
+  `check_template_tracks` compares only the band's layers (one criterion
+  with the aligner); the routed check was already scoped by construction
+  — it walks the copied segments' own layers.
+* **Clone ordering** — `_apply_layer_policies` runs AFTER the
+  rotation-class split (clone wrappers are fresh `BundleInput`s; the
+  clone context resolves to the base cell via `_bu_cell_of`), BEFORE the
+  cell-local solves plan under the masks.
+* **Vehicle + evidence** — `flow/rnr/mix2_fast_bottomup_caps.buda`
+  (dnuts2 at M3; dnuts1/dogleg1/dogleg2 at M5) ends `Success: no
+  violations found` / 0 unplaced.  Per-cell per-layer detailed WL:
+
+  | context | M2 | M3 | M4 | M5 | M6 | M7 |
+  |---|---|---|---|---|---|---|
+  | capped: TOP-LEVEL | 10516 | 5437 | 63466 | 111150 | 167098 | 105531 |
+  | capped: dnuts1 (≤M5) | 10728 | 0 | 114228 | 174424 | **0** | **0** |
+  | capped: dnuts2 (≤M3) | 3795 | 3786 | **0** | **0** | **0** | **0** |
+  | capped: dogleg1 (≤M5) | 0 | 0 | 8890 | 25512 | **0** | **0** |
+  | capped: dogleg2 (≤M5) | 0 | 0 | 11790 | 24844 | **0** | **0** |
+  | uncapped: dnuts1 | 0 | 0 | 49608 | 130344 | 75924 | 47488 |
+  | uncapped: dnuts2 | 0 | 0 | 2595 | 2825 | 1200 | 1200 |
+
+  Every leaf template's WL is confined to its band; M6/M7 become
+  exclusively top-level (the uncapped leaves had spread 123k+ units onto
+  them); total detailed WL 841195 capped vs ~885k uncapped (−5%).  The
+  tighter bands measured while choosing the vehicle are the §12
+  honest-trade evidence: all four cells at M3 → dnuts1's 32-bit bus
+  commits with planner overflow 13–35.5 and strands all 32 bits at
+  DNUTS; the child-dense dogleg cells at M3 (leaf footprints are LOW
+  keepouts; TOP flies over) strand 32 dogleg2 bits.  Those are the
+  wiring-limited shapes Phase 3's shares price.
+* **Byte-identity corpus** (no policy declared): 0 better / 0 worse /
+  34 unchanged; abstract + detailed WL both +0.00%.
 
 ### Phase 3 — fractional shares
 

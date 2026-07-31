@@ -384,10 +384,18 @@ void BDB::_create_schema() {
             PRIMARY KEY (grp_id, kind, ref)
         );
         CREATE TABLE IF NOT EXISTS cell (
-            name      TEXT PRIMARY KEY,
-            width     REAL NOT NULL,
-            height    REAL NOT NULL,
-            bottom_up INTEGER NOT NULL DEFAULT 0
+            name        TEXT PRIMARY KEY,
+            width       REAL NOT NULL,
+            height      REAL NOT NULL,
+            bottom_up   INTEGER NOT NULL DEFAULT 0,
+            layer_cap   INTEGER NOT NULL DEFAULT -1,
+            layer_floor INTEGER NOT NULL DEFAULT -1
+        );
+        CREATE TABLE IF NOT EXISTS cell_layer_share (
+            cell     TEXT NOT NULL REFERENCES cell(name),
+            layer_id INTEGER NOT NULL,
+            share    REAL NOT NULL,
+            PRIMARY KEY (cell, layer_id)
         );
         CREATE TABLE IF NOT EXISTS cell_children (
             parent_cell TEXT NOT NULL REFERENCES cell(name),
@@ -719,6 +727,19 @@ void BDB::_migrate() {
         // Idempotent ALTER.
         sqlite3_exec(_db,
             "ALTER TABLE bundle ADD COLUMN cloned_from TEXT DEFAULT ''",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 20) {
+        // v19 -> v20: per-cell layer band (docs/internal/hier_layer_caps.md)
+        // plus the fractional-share table (Phase-3 consumer).  Pre-v20
+        // designs carry no policy, so the -1 defaults are correct.
+        // Idempotent ALTERs; the share table is created by the fresh-DB DDL
+        // (CREATE IF NOT EXISTS) before _migrate runs.
+        sqlite3_exec(_db,
+            "ALTER TABLE cell ADD COLUMN layer_cap INTEGER NOT NULL DEFAULT -1",
+            nullptr, nullptr, nullptr);
+        sqlite3_exec(_db,
+            "ALTER TABLE cell ADD COLUMN layer_floor INTEGER NOT NULL DEFAULT -1",
             nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
@@ -2120,7 +2141,8 @@ int BDB::add_comp(const std::string& name, const std::string& cell,
 }
 
 void BDB::add_cell(const std::string& name, double w, double h) {
-    // Upsert (not REPLACE) so re-declaring a cell's size keeps its bottom_up flag.
+    // Upsert (not REPLACE) so re-declaring a cell's size keeps its bottom_up
+    // flag and layer band.
     Stmt ins(_db, "INSERT INTO cell(name,width,height) VALUES(?,?,?)"
                   " ON CONFLICT(name) DO UPDATE SET"
                   " width=excluded.width, height=excluded.height");
@@ -2132,13 +2154,16 @@ void BDB::add_cell(const std::string& name, double w, double h) {
 }
 
 std::vector<CellRow> BDB::all_cells() const {
-    Stmt q(_db, "SELECT name, width, height, bottom_up FROM cell ORDER BY name");
+    Stmt q(_db, "SELECT name, width, height, bottom_up, layer_cap, layer_floor"
+                " FROM cell ORDER BY name");
     std::vector<CellRow> result;
     while (sqlite3_step(q) == SQLITE_ROW)
         result.push_back({ (const char*)sqlite3_column_text(q,0),
                            sqlite3_column_double(q,1),
                            sqlite3_column_double(q,2),
-                           sqlite3_column_int(q,3) != 0 });
+                           sqlite3_column_int(q,3) != 0,
+                           sqlite3_column_int(q,4),
+                           sqlite3_column_int(q,5) });
     return result;
 }
 
@@ -2159,6 +2184,32 @@ bool BDB::cell_bottom_up(const std::string& cell) const {
 
 std::vector<std::string> BDB::bottom_up_cells() const {
     Stmt q(_db, "SELECT name FROM cell WHERE bottom_up!=0 ORDER BY name");
+    std::vector<std::string> result;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        result.push_back((const char*)sqlite3_column_text(q, 0));
+    return result;
+}
+
+void BDB::set_cell_layer_band(const std::string& cell, int floor, int cap) {
+    Stmt u(_db, "UPDATE cell SET layer_floor=?, layer_cap=? WHERE name=?");
+    sqlite3_bind_int (u, 1, floor);
+    sqlite3_bind_int (u, 2, cap);
+    sqlite3_bind_text(u, 3, cell.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(u);
+    if (sqlite3_changes(_db) == 0)
+        throw std::runtime_error("set_cell_layer_band: cell not defined: " + cell);
+}
+
+std::pair<int,int> BDB::cell_layer_band(const std::string& cell) const {
+    Stmt q(_db, "SELECT layer_floor, layer_cap FROM cell WHERE name=?");
+    sqlite3_bind_text(q, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) == SQLITE_ROW)
+        return { sqlite3_column_int(q, 0), sqlite3_column_int(q, 1) };
+    return { -1, -1 };
+}
+
+std::vector<std::string> BDB::layer_capped_cells() const {
+    Stmt q(_db, "SELECT name FROM cell WHERE layer_cap>=0 ORDER BY name");
     std::vector<std::string> result;
     while (sqlite3_step(q) == SQLITE_ROW)
         result.push_back((const char*)sqlite3_column_text(q, 0));

@@ -972,10 +972,22 @@ class PersistMixin:
         if pol in ("stop", "independent"):
             self._bu_mismatch_policy = pol
 
+        # Per-cell layer policies (v20): restore from the BDB, resolve the
+        # masks onto the restored wrappers, then audit the restored plan
+        # against them — a cap declared/tightened AFTER the checkpoint was
+        # routed voids the violating bundles' restored selection (LOUD),
+        # never silently keeps illegal metal (hier_layer_caps.md §9.5).
+        self._restore_layer_policies()
+        self._apply_layer_policies()
+        cap_voided = self._audit_restored_layer_caps()
+
         # Rehydrate the abstract-NUTS result (if run_nuts was persisted) so
-        # run_detailed_nuts can resume from it.
+        # run_detailed_nuts can resume from it.  A cap-voided bundle's
+        # persisted routing is equally illegal — leave it out.
         ts_list = []
         for w in self.bundles:
+            if int(w.input.original_bundle.id) in cap_voided:
+                continue
             bid = str(w.input.original_bundle.id)
             for g in self.bdb.bus_segments(bid):
                 ts = buda.TrackSegment()
@@ -1000,6 +1012,14 @@ class PersistMixin:
             nr = buda.NUTSResult()
             nr.segments = ts_list
             self.nuts_result = nr             # persisted routing = final, clean
+        elif cap_voided and self.nuts_result is not None:
+            # Every restored bundle with routing was cap-voided: a nuts_result
+            # left over from earlier in THIS session is stale (potentially
+            # above-cap) metal the audit just excluded — clearing it keeps
+            # run_detailed_nuts from consuming it (Codex #546).
+            self.nuts_result = None
+            print("[LayerCap] cleared the session's previous NUTS result — "
+                  "the cap audit voided every restored routed bundle")
 
         n_cand = sum(len(w.input.candidates) for w in self.bundles)
         n_planned = sum(1 for w in self.bundles

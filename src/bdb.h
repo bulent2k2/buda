@@ -285,6 +285,12 @@ struct CellRow {
     // NUTSes this cell's local interconnect once and copies the result to
     // every instance (see docs/internal/hier_bottom_up_planning.md).
     bool        bottom_up = false;
+    // Per-cell layer band [layer_floor..layer_cap] (v20): the cell's own
+    // interconnect defaults to full use of layers inside the band and none
+    // outside (docs/internal/hier_layer_caps.md). -1 = unset (cap: uncapped;
+    // floor: no lower bound).
+    int         layer_cap   = -1;
+    int         layer_floor = -1;
 };
 
 struct CellPinRow {
@@ -332,7 +338,12 @@ public:
     // v19 = bundle.cloned_from (rotation-class clone template provenance:
     //       the 90°-instance class of a marked cell gets its own template,
     //       named e.g. "alu90", linked to the original template's id).
-    static constexpr int SCHEMA_VERSION = 19;
+    // v20 = cell.layer_cap/layer_floor (per-cell layer band, the binary
+    //       policy of docs/internal/hier_layer_caps.md; '*' default lives in
+    //       meta.layer_cap_default) + the cell_layer_share table (fractional
+    //       per-layer shares — schema landed with the band, consumed by
+    //       Phase 3).
+    static constexpr int SCHEMA_VERSION = 20;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -378,6 +389,13 @@ public:
     bool cell_bottom_up(const std::string& cell) const;
     // Names of all cells with bottom_up set, sorted (empty when none).
     std::vector<std::string> bottom_up_cells() const;
+    // Per-cell layer band (v20). set_cell_layer_band throws if the cell is
+    // not defined; (-1,-1) clears. cell_layer_band returns {floor, cap}
+    // ({-1,-1} for unknown/unset cells); layer_capped_cells lists cells with
+    // a cap set, sorted.
+    void set_cell_layer_band(const std::string& cell, int floor, int cap);
+    std::pair<int,int> cell_layer_band(const std::string& cell) const;
+    std::vector<std::string> layer_capped_cells() const;
 
     // ── Cell-level pins (port interface) ──────────────────────────────────
     // Define or update a port on a cell type.  px/py are offsets from the
