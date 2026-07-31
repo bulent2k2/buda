@@ -408,6 +408,80 @@ def cmd_load_pipeline(session, cmd, args, cmd_line):
         expanded=bool(args) and args[0] == "expanded")
 
 
+def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
+    # set_cell_layer_cap <cell>|* <cap_layer> [-min <floor_layer>]  |  * off
+    # Per-cell layer policy, binary band form (docs/internal/hier_layer_caps.md,
+    # Q1 resolved): the cell's OWN interconnect defaults to FULL use of layers
+    # in [floor..cap] and NO use outside it.  '*' sets the default policy for
+    # cells without an explicit one; '* off' clears everything (byte-identical
+    # to never declaring a policy).  Fractional shares (set_cell_layer_share)
+    # are Phase 3.  Validation is LOUD at declaration time: unknown layer,
+    # floor above cap, or a band granting no H or no V routing layer are all
+    # hard errors here, never BEST_EFFORT surprises later.
+    if not args:
+        print("Error: set_cell_layer_cap requires <cell>|* <cap_layer> "
+              "[-min <floor_layer>] (or '* off')"); return
+    cell = args[0]
+    if cell == "*" and len(args) > 1 and args[1].lower() == "off":
+        n = len(getattr(session, "_cell_layer_policy", {}) or {})
+        session._cell_layer_policy = {}
+        print(f"[LayerCap] cleared {n} polic{'y' if n == 1 else 'ies'} "
+              f"(byte-identical to no caps)")
+        return
+    if len(args) < 2:
+        print("Error: set_cell_layer_cap requires a cap layer"); return
+
+    def _lid(tok):
+        # Accept a numeric layer id or a declared layer name (the session's
+        # def_layer name map, same source _make_layer_names reads).
+        if tok.isdigit():
+            lid = int(tok)
+            return lid if session.layers.has_layer(lid) else None
+        lid = session._layer_name_map.get(tok)
+        return lid if (lid is not None and session.layers.has_layer(lid)) \
+            else None
+
+    cap = _lid(args[1])
+    if cap is None:
+        print(f"Error: set_cell_layer_cap: unknown layer '{args[1]}' "
+              f"(declare it with def_layer first)"); return
+    floor = -1
+    rest = list(args[2:])
+    if rest:
+        if rest[0] != "-min" or len(rest) < 2:
+            print(f"Error: set_cell_layer_cap: unexpected '{' '.join(rest)}' "
+                  f"(only '-min <floor_layer>' is accepted)"); return
+        floor = _lid(rest[1])
+        if floor is None:
+            print(f"Error: set_cell_layer_cap: unknown floor layer "
+                  f"'{rest[1]}'"); return
+        if floor > cap:
+            print(f"Error: set_cell_layer_cap: floor {rest[1]} is above the "
+                  f"cap {args[1]} — the band [floor..cap] is empty"); return
+    # The band must grant at least one H and one V routing layer, or nothing
+    # in it is routable (a corner no ladder can escape).
+    lo = floor if floor >= 0 else -(10 ** 9)
+    have = {buda.LayerDir.HORIZONTAL: False, buda.LayerDir.VERTICAL: False}
+    for d in have:
+        for lid in session.layers.get_layer_ids_by_dir(d):
+            if lo <= lid <= cap:
+                have[d] = True
+    if not (have[buda.LayerDir.HORIZONTAL] and have[buda.LayerDir.VERTICAL]):
+        missing = "H" if not have[buda.LayerDir.HORIZONTAL] else "V"
+        print(f"Error: set_cell_layer_cap: band grants no {missing} routing "
+              f"layer — an unroutable policy"); return
+    # Cell must exist when a BDB is open (mirrors set_bottom_up); '*' always ok.
+    if cell != "*" and session.bdb is not None:
+        if not any(c.cell == cell for c in session.bdb.all_components()):
+            print(f"Error: set_cell_layer_cap: unknown cell '{cell}'"); return
+    if not hasattr(session, "_cell_layer_policy") or             session._cell_layer_policy is None:
+        session._cell_layer_policy = {}
+    session._cell_layer_policy[cell] = (floor, cap)
+    band = (f"[{rest[1] if floor >= 0 else 'lowest'}..{args[1]}]")
+    print(f"[LayerCap] {cell}: band {band} "
+          f"(ids {'%d' % floor if floor >= 0 else 'min'}..{cap})")
+
+
 def cmd_set_bottom_up(session, cmd, args, cmd_line):
     # set_bottom_up <cell>|* [on|off]
     # Mark a cell template for bottom-up planning: its cell-local interconnect
@@ -613,5 +687,6 @@ COMMANDS = {
     "load_pipeline": cmd_load_pipeline,
     "save_bdb": cmd_save_bdb,
     "set_bottom_up": cmd_set_bottom_up,
+    "set_cell_layer_cap": cmd_set_cell_layer_cap,
     "align_bottom_up": cmd_align_bottom_up,
 }

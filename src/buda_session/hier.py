@@ -1403,6 +1403,47 @@ class HierMixin:
         nb.net_receivers     = b.net_receivers
         return nb
 
+    def _apply_layer_policies(self):
+        """Resolve per-cell layer policies onto wrapper masks (Phase 1 of
+        docs/internal/hier_layer_caps.md).
+
+        For every wrapper whose bundle has a cell_context, look up the cell's
+        band [floor..cap] — explicit policy first, then the '*' default — and
+        set input.allowed_layers to the declared layers inside the band.
+        Rotation-class clone templates (<cell>90) inherit the base cell's
+        policy via _bu_cell_of.  cell_context "" (top-level) stays
+        unrestricted in Phase 1.  Idempotent and cheap, so the hier command
+        path calls it at each wrapper-set transition (templates before the
+        bottom-up solves; expanded per-instance wrappers before the global
+        planner) — expansion builds fresh BundleInput objects, so masks must
+        be re-resolved, never assumed to ride along.
+
+        No policy declared anywhere => every wrapper keeps an empty mask and
+        every consumer short-circuits: the byte-identity guarantee."""
+        pol = getattr(self, "_cell_layer_policy", None)
+        if not pol:
+            return
+        all_lids = sorted(
+            list(self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL)) +
+            list(self.layers.get_layer_ids_by_dir(buda.LayerDir.VERTICAL)))
+        n_gov = 0
+        for w in self.bundles:
+            ctx = self._bu_cell_of(w.input.original_bundle.cell_context)
+            if not ctx:
+                continue
+            entry = pol.get(ctx, pol.get("*"))
+            if entry is None:
+                continue
+            floor, cap = entry
+            lo = floor if floor >= 0 else -(10 ** 9)
+            w.input.allowed_layers = [l for l in all_lids if lo <= l <= cap]
+            w.input.layer_cap = cap
+            w.input.layer_floor = floor
+            n_gov += 1
+        if n_gov:
+            print(f"[LayerCap] {n_gov} bundle(s) governed by cell layer "
+                  f"policies ({len(pol)} polic{'y' if len(pol) == 1 else 'ies'})")
+
     def _bu_cell_of(self, cell_context):
         """Real cell type behind a bundle cell_context — identity unless the
         context is a rotation-class CLONE name (e.g. 'alu90'), in which case

@@ -97,6 +97,27 @@ struct BundleInput {
     // selection loop falls back to the historical single-pin / full sweep and is
     // byte-identical.  Takes precedence over topology_pinned when non-empty.
     std::vector<int> pinned_group;
+    // ── Per-cell layer policy, binary form (Phase 1 of
+    // docs/internal/hier_layer_caps.md) ──────────────────────────────────────
+    // The layers this bundle's segments may be ASSIGNED, resolved from the
+    // owning cell's band [layer_floor .. layer_cap] (the owning-frame rule:
+    // a bundle is governed by the cell whose frame plans it; cross-level
+    // bundles take the common ancestor's policy).  EMPTY = unrestricted —
+    // every enforcement site short-circuits on empty, which is the whole
+    // feature's byte-identity guarantee.  Sorted ascending (binary_search).
+    // Enforced in plan_bundle's layer enumeration — the single choke point
+    // the STRICT ladder, replan_bundle/replan_bundle_ripup, negotiate and
+    // ripup trials all flow through — so no consumer can silently assign a
+    // governed segment outside its cell's band.  Explicit pinned_seg_layers
+    // stay honored even above the cap (user pins are inviolable; check_design
+    // gains a LAYER_CAP advisory for them in a later phase).
+    std::vector<int> allowed_layers;
+    int layer_cap   = -1;   // declared ceiling (reporting; -1 = none)
+    int layer_floor = -1;   // declared -min floor (reporting; -1 = none)
+    bool allows_layer(int lid) const {
+        return allowed_layers.empty() ||
+               std::binary_search(allowed_layers.begin(), allowed_layers.end(), lid);
+    }
 };
 
 struct BundlePlan {
@@ -563,6 +584,21 @@ private:
     // short-segment cost: via-stack depth grows with every metal above the
     // lowest same-direction TOP layer, so short runs should not float to the
     // top of the stack for free.  Non-TOP layers return 0 (they never pay).
+    // ── Effective-TOP under a layer policy (hier_layer_caps.md §4.3) ─────────
+    // ECONOMIC TOP-ness for one bundle: global is_top when unmasked; under a
+    // mask, the allowed globally-TOP layers of the lid's direction if any
+    // exist, else the HIGHEST allowed layer of that direction is promoted.
+    // A scoring context only — physical predicates (leaf clamping in
+    // routed_extent, NUTS low-layer keepouts) deliberately stay on the global
+    // Layer::type: promotion cannot make M2 stop being low metal.
+    bool is_top_for(const BundleInput& in, int lid) const;
+    // Height rank within the bundle's effective-TOP set of lid's direction
+    // (the kHeight via-stack term); global rank when unmasked.
+    int  top_height_rank_for(const BundleInput& in, int lid) const;
+    // The bundle's effective TOP layer of a direction (reservations target
+    // this instead of the global top under a mask).  -1 if none allowed.
+    int  effective_top_layer(const BundleInput& in, LayerDir dir) const;
+
     int    top_height_rank(int layer_id) const;
     // Warn once (build_congestion_map) about non-TOP layers declared ABOVE
     // the TOP band — a config smell the planner now costs as TOP.

@@ -124,6 +124,9 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # Apply user-pinned selections to template wrappers BEFORE expansion
         # so topology_pinned + pinned_seg_layers propagate to all instances.
         session._apply_selections()
+        # Per-cell layer policies onto the TEMPLATE wrappers (before the
+        # bottom-up cell-local solves plan under them).
+        session._apply_layer_policies()
         # Bottom-up cells (set_bottom_up): first give any 90°-rotated
         # instance class its own clone template (candidates generated from
         # the rotated reference's cell-local floorplan), then solve each
@@ -194,6 +197,9 @@ def cmd_run_planner(session, cmd, args, cmd_line):
                 w.plan.seg_layers = list(asn.seg_layers)
                 w.plan.seg_perp = list(asn.seg_perp)
         session.bundles = expanded
+        # Expansion built FRESH BundleInput objects — re-resolve the layer
+        # policies onto the per-instance wrappers before the global planner.
+        session._apply_layer_policies()
         session._planner_is_hier = True
         print(f"run_planner hier: {len(session.bundles)} wrappers after expansion")
     else:

@@ -718,6 +718,11 @@ class RipupMixin:
                             else buda.LayerDir.VERTICAL)
                 pitches = []
                 for lid in self.layers.get_layer_ids_by_dir(dir_enum):
+                    # Per-cell layer policy: the best-case pitch must range
+                    # over the ALLOWED layers only, or the bound is unsound
+                    # for a governed bundle (hier_layer_caps.md F9).
+                    if not w.input.allows_layer(lid):
+                        continue
                     if (self.routing_grid is None
                             or not self.routing_grid.has_layer(lid)):
                         pitches = []

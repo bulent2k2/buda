@@ -653,11 +653,21 @@ class NutsFlowMixin:
                 if bid not in bid_max_span:
                     continue
                 max_span = bid_max_span[bid]
+                # Per-cell layer policy: a governed bundle's short/long targets
+                # come from ITS allowed subset of this direction's layers; with
+                # fewer than two allowed there is nothing to spread — skip.
+                b_lo, b_hi = lo_layer, hi_layer
+                if w.input.allowed_layers:
+                    asub = [l for l in layers_sorted if w.input.allows_layer(l)]
+                    if len(asub) < 2:
+                        medium_count += 1
+                        continue
+                    b_lo, b_hi = asub[0], asub[-1]
                 if max_span < short_thresh:
-                    new_layer = lo_layer
+                    new_layer = b_lo
                     short_count += 1
                 elif max_span > long_thresh:
-                    new_layer = hi_layer
+                    new_layer = b_hi
                     long_count += 1
                 else:
                     medium_count += 1
@@ -878,6 +888,31 @@ class NutsFlowMixin:
                 # Guaranteed full strand — escalate to the same-direction
                 # TOP layer.
                 new_layer = top_h if seg.horiz else top_v
+                # Per-cell layer policy (hier_layer_caps.md Phase 1): a
+                # governed segment escalates only WITHIN its cell's band — to
+                # the cheapest same-direction allowed layer that is
+                # effective-TOP for the bundle (the highest allowed layer of
+                # the direction when the band holds no global TOP).  Already
+                # at the band's ceiling => the cap made this dead span
+                # unhealable by layer; report LOUD and leave it, never
+                # silently escalate past the cap.
+                if w.input.allowed_layers:
+                    want_dir = (buda.LayerDir.HORIZONTAL if seg.horiz
+                                else buda.LayerDir.VERTICAL)
+                    allowed = [l for l in w.input.allowed_layers
+                               if self.layers.has_layer(l)
+                               and self.layers.get_layer_dir(l) == want_dir]
+                    tops = [l for l in allowed if self.layers.is_top(l)]
+                    pool = [l for l in (tops if tops else allowed[-1:])
+                            if l != seg.layer]
+                    if not pool:
+                        print(f"[LayerCap] dead LOW segment b{seg.bundle_id} "
+                              f"seg{seg.seg_idx} is at its cell band's "
+                              f"ceiling (cap {w.input.layer_cap}) — layer "
+                              f"escalation refused, span left dead (the "
+                              f"declared trade).", flush=True)
+                        continue
+                    new_layer = min(pool)
                 if new_layer is None or new_layer == seg.layer:
                     continue
                 sl = list(w.plan.seg_layers)

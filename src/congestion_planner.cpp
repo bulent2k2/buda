@@ -628,6 +628,48 @@ int CongestionPlanner::top_height_rank(int layer_id) const {
     return (it == ids.end()) ? 0 : (int)(it - ids.begin());
 }
 
+// ── Effective-TOP under a layer policy (hier_layer_caps.md §4.3) ────────────
+bool CongestionPlanner::is_top_for(const BundleInput& in, int lid) const {
+    if (in.allowed_layers.empty()) return layers_.is_top(lid);
+    if (!in.allows_layer(lid)) return false;
+    const Layer* L = layers_.get_layer(lid);
+    if (!L) return false;
+    bool any_top = false;
+    int  hi      = -1;
+    for (int a : in.allowed_layers) {
+        const Layer* A = layers_.get_layer(a);
+        if (!A || A->dir != L->dir) continue;
+        if (layers_.is_top(a)) any_top = true;
+        hi = std::max(hi, a);
+    }
+    // Allowed global-TOP layers exist in this direction: TOP-ness unchanged.
+    // None: promote the highest allowed layer of the direction.
+    return any_top ? layers_.is_top(lid) : (lid == hi);
+}
+
+int CongestionPlanner::top_height_rank_for(const BundleInput& in, int lid) const {
+    if (in.allowed_layers.empty()) return top_height_rank(lid);
+    const Layer* L = layers_.get_layer(lid);
+    if (!L || !is_top_for(in, lid)) return 0;
+    std::vector<int> ids;
+    for (int a : layers_.get_layer_ids_by_dir(L->dir))
+        if (is_top_for(in, a)) ids.push_back(a);
+    std::sort(ids.begin(), ids.end());
+    auto it = std::find(ids.begin(), ids.end(), lid);
+    return (it == ids.end()) ? 0 : (int)(it - ids.begin());
+}
+
+int CongestionPlanner::effective_top_layer(const BundleInput& in, LayerDir dir) const {
+    if (in.allowed_layers.empty()) return layers_.get_top_layer(dir);
+    int best = -1;
+    for (int a : in.allowed_layers) {
+        const Layer* A = layers_.get_layer(a);
+        if (!A || A->dir != dir) continue;
+        if (is_top_for(in, a)) best = std::max(best, a);
+    }
+    return best;
+}
+
 // Score the marginal peak overflow from adding one segment at a specific layer.
 double CongestionPlanner::score_segment(const Segment& seg, int layer_id,
                                    double eff_width, int perp_pos_override,
@@ -792,8 +834,11 @@ void CongestionPlanner::apply_segment(const Segment& seg, int layer_id, double e
 void CongestionPlanner::apply_reservation(const BundleWrapper& bw, double sign) {
     if (!bw.hier.has_reservation) return;
     const int nbits = (int)bw.input.original_bundle.get_net_names().size();
-    int top_h = layers_.get_top_layer(LayerDir::HORIZONTAL);
-    int top_v = layers_.get_top_layer(LayerDir::VERTICAL);
+    // Under a layer policy the reservation parks on the cell's EFFECTIVE top
+    // layers — a capped leaf must not reserve room on high metal it can never
+    // use (hier_layer_caps.md F3).  Unmasked = the global top pair, unchanged.
+    int top_h = effective_top_layer(bw.input, LayerDir::HORIZONTAL);
+    int top_v = effective_top_layer(bw.input, LayerDir::VERTICAL);
     for (auto& c : cuts_) {
         // The bundle's H demand rides V-cuts on the TOP H layer; its V demand
         // rides H-cuts on the TOP V layer.
@@ -1459,6 +1504,12 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             } else {
                 // Iterate highest-ID first so equal-cost layers prefer higher metal.
                 for (int lid : layers_rev) {
+                    // Per-cell layer policy (hier_layer_caps.md): a governed
+                    // bundle may only be ASSIGNED layers in its cell's band.
+                    // This one skip is what the whole STRICT ladder, the
+                    // replans and the trial paths inherit — empty mask (the
+                    // default) changes nothing.
+                    if (!bw.input.allows_layer(lid)) continue;
                     double eff  = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), lid);
                     int    pp   = band_perp(lid, eff);
                     double ov   = score_segment(seg, lid, eff, pp, slide_lo, slide_hi);
@@ -1500,7 +1551,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     // post-placement-aware predictor) is the follow-on tracked in
                     // wishlist-planner / opens item 4.  TOP layers are exempt.
                     if (nontop_dead_span_gate_ && enforce_overflow
-                        && !layers_.is_top(lid) && pp != INT_MIN
+                        && !is_top_for(bw.input, lid) && pp != INT_MIN
                         && seg_n(topo, si) > 0) {
                         int sup = span_signal_supply(seg, lid, pp,
                                                      slide_lo, slide_hi,
@@ -1519,7 +1570,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     // pays little to drop down a layer, so locals offload to
                     // lower layers instead of detouring on TOP — preserving
                     // TOP capacity for long-haul trunks (which pay in full).
-                    double base = layers_.is_top(lid) ? 0.0
+                    double base = is_top_for(bw.input, lid) ? 0.0
                                 : base_cost_non_top_ *
                                   ((span_ref_eff_ > 0.0)
                                        ? std::min(1.0, seg_span / span_ref_eff_)
@@ -1530,7 +1581,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     // piling on the highest metal.  Only TOP layers compete for
                     // balancing; LOW layers already carry the base penalty.
                     double bal = 0.0;
-                    if (layers_.is_top(lid)) {
+                    if (is_top_for(bw.input, lid)) {
                         bool is_hl  = (seg.start.y == seg.end.y);
                         double maxl = is_hl ? max_h_load : max_v_load;
                         auto   it   = layer_load.find(lid);
@@ -1543,8 +1594,8 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     // a taller via stack), while a long trunk (span >= ref)
                     // pays 0 and keeps the TOP-most trunk preference.
                     double hgt = 0.0;
-                    if (layers_.is_top(lid) && span_ref_eff_ > 0.0)
-                        hgt = kHeight_ * top_height_rank(lid) *
+                    if (is_top_for(bw.input, lid) && span_ref_eff_ > 0.0)
+                        hgt = kHeight_ * top_height_rank_for(bw.input, lid) *
                               std::max(0.0, 1.0 - seg_span / span_ref_eff_);
                     // Routability term (kPeak, default 0 = skipped entirely):
                     // pay for the worst band's EXISTING fill fraction (pre-
