@@ -106,6 +106,13 @@ CORPUS = [
     "flow/rnr/mix.buda",
     "flow/rnr/mix2.buda",
     "flow/rnr/mix2_fast_bottomup.buda",
+    # Per-cell layer policy vehicles (docs/internal/hier_layer_caps.md §12):
+    # bands, fractional shares, and the by-depth bulk declaration — permanent
+    # corpus rows so the policy path is regression-guarded like everything
+    # else (Phase 5 Q2).
+    "flow/rnr/mix2_fast_bottomup_caps.buda",
+    "flow/rnr/mix2_fast_bottomup_shared.buda",
+    "flow/chip/chip_bottomup_caps.buda",
     "flow/rnr/mix2_fast_on_aligned_sql.buda",
     "flow/rnr/mix2_fast_topdown.buda",
     "flow/rnr/mix2_topdown_refine.buda",
