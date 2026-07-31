@@ -470,6 +470,7 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
                 for lid, _s in session.bdb.cell_layer_shares(c):
                     session.bdb.set_cell_layer_share(c, lid, 0.0)
             session.bdb.meta_set("layer_cap_default", "")
+            session.bdb.meta_set("layer_caps_by_depth", "")
         print(f"[LayerCap] cleared {n} polic{'y' if n == 1 else 'ies'}"
               + (f" + {ns} share(s)" if ns else "")
               + " (byte-identical to no caps; re-run the planner to lift "
@@ -517,9 +518,11 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
     # _restore_layer_policies).
     getattr(session, "_cell_layer_policy_restored", set()).discard(cell)
     # ... and it outranks a by-depth default, now and on a later re-run of
-    # set_layer_caps_by_depth (Phase 5 Q1: explicit always wins).
+    # set_layer_caps_by_depth (Phase 5 Q1: explicit always wins) — including
+    # after a reload, hence the persisted provenance memo.
     getattr(session, "_cell_layer_policy_by_depth", set()).discard(cell)
     if session.bdb is not None:
+        _persist_by_depth(session)
         # Write-through (v20): the policy is a design attribute — persist it
         # so a resumed session (open_bdb / load_pipeline) plans under the
         # same bands.  '*' lives in meta; a cell not yet in the cell table
@@ -535,6 +538,24 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
     band = (f"[{rest[1] if floor >= 0 else 'lowest'}..{args[1]}]")
     print(f"[LayerCap] {cell}: band {band} "
           f"(ids {'%d' % floor if floor >= 0 else 'min'}..{cap})")
+
+
+def _persist_by_depth(session):
+    """Write the by-depth PROVENANCE memo into the open BDB's meta.
+
+    A persisted `cell.layer_cap` alone cannot say whether it came from an
+    explicit `set_cell_layer_cap` or from the bulk `set_layer_caps_by_depth`
+    — and after a reload that difference decides both precedence (explicit
+    always outranks) and what `set_layer_caps_by_depth off` may clear.  So
+    the set of by-depth cells rides in meta beside `layer_cap_default`
+    (Codex #551); `_restore_layer_policies` reads it back.  Cells with no
+    band are dropped, so the memo can never resurrect a cleared entry."""
+    if session.bdb is None:
+        return
+    pol = getattr(session, "_cell_layer_policy", None) or {}
+    cells = sorted(c for c in getattr(session, "_cell_layer_policy_by_depth",
+                                      set()) if c in pol)
+    session.bdb.meta_set("layer_caps_by_depth", ",".join(cells))
 
 
 def cmd_set_layer_caps_by_depth(session, cmd, args, cmd_line):
@@ -571,6 +592,7 @@ def cmd_set_layer_caps_by_depth(session, cmd, args, cmd_line):
             except RuntimeError:
                 pass
         by_depth.clear()
+        _persist_by_depth(session)
         print(f"[LayerCaps] cleared {len(cleared)} by-depth polic"
               f"{'y' if len(cleared) == 1 else 'ies'}"
               + (f": {', '.join(cleared)}" if cleared else "")
@@ -620,14 +642,29 @@ def cmd_set_layer_caps_by_depth(session, cmd, args, cmd_line):
     if not levels:
         print("[LayerCaps] no cells in the open BDB — nothing to cap"); return
     per_level, kept_explicit, unrestricted, no_row = {}, [], [], []
+    freed = []
     for cell in sorted(levels):
         lvl = levels[cell]
+        # An entry this command owns is by-depth; ANY other entry (typed this
+        # session OR restored from the BDB, where a persisted band can only
+        # have come from an explicit set_cell_layer_cap unless this command
+        # recorded it — see the by-depth meta memo) is explicit and wins.
+        is_explicit = cell in pol and cell not in by_depth
         if lvl > len(caps):
             unrestricted.append(cell)
+            # A SHORTENED cap list must actually free the levels it no longer
+            # names: without this the stale band survives in the session, in
+            # by_depth and in the BDB while the report claims unrestricted.
+            if cell in by_depth:
+                pol.pop(cell, None)
+                by_depth.discard(cell)
+                try:
+                    session.bdb.set_cell_layer_band(cell, -1, -1)
+                except RuntimeError:
+                    pass
+                freed.append(cell)
             continue
-        if cell in pol and cell not in by_depth and \
-                cell not in getattr(session, "_cell_layer_policy_restored",
-                                    set()):
+        if is_explicit:
             kept_explicit.append(cell)          # explicit declaration wins
             continue
         cap = caps[lvl - 1][1]
@@ -639,6 +676,7 @@ def cmd_set_layer_caps_by_depth(session, cmd, args, cmd_line):
         except RuntimeError:
             no_row.append(cell)                 # session-only (no cell row)
         per_level.setdefault(lvl, []).append(cell)
+    _persist_by_depth(session)
 
     lo_s = floor_tok or "lowest"
     for lvl in sorted(per_level):
@@ -651,7 +689,9 @@ def cmd_set_layer_caps_by_depth(session, cmd, args, cmd_line):
         shown = ", ".join(unrestricted[:6]) + (
             "" if len(unrestricted) <= 6 else f" (+{len(unrestricted) - 6} more)")
         print(f"[LayerCaps] level {len(caps) + 1}+ unrestricted: "
-              f"{len(unrestricted)} cell(s): {shown}")
+              f"{len(unrestricted)} cell(s): {shown}"
+              + (f" ({len(freed)} freed by the shorter list: "
+                 f"{', '.join(freed)})" if freed else ""))
     if kept_explicit:
         print(f"[LayerCaps] kept {len(kept_explicit)} explicit polic"
               f"{'y' if len(kept_explicit) == 1 else 'ies'} "

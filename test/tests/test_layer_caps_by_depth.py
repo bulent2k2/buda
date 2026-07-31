@@ -242,6 +242,91 @@ def test_decreasing_caps_are_noted_not_refused():
     assert s._cell_layer_policy["leaf_cell"] == (-1, 5)
 
 
+# ── Codex #551 round: shortened list, provenance across a reload ────────────
+
+def test_shorter_list_frees_the_levels_it_no_longer_names():
+    """Codex #551: re-running with a SHORTER cap list reported the dropped
+    levels as unrestricted while their stale band survived in the session
+    and in the BDB — the report and the policy disagreed."""
+    s = _session(_three_level_db())
+    _quiet(s, "set_layer_caps_by_depth M3 M5 M7")
+    assert s._cell_layer_policy["top_cell"] == (-1, 7)
+    out = _cmd(s, "set_layer_caps_by_depth M3")
+    assert "top_cell" not in s._cell_layer_policy      # session cleared
+    assert "mid_cell" not in s._cell_layer_policy
+    assert s.bdb.cell_layer_band("top_cell") == (-1, -1)   # BDB cleared
+    assert s.bdb.cell_layer_band("mid_cell") == (-1, -1)
+    assert "freed by the shorter list" in out
+    assert s._cell_layer_policy["leaf_cell"] == (-1, 3)    # still capped
+
+
+def test_shorter_list_does_not_free_explicit_entries():
+    s = _session(_three_level_db())
+    _quiet(s, "set_layer_caps_by_depth M3 M5 M7",
+              "set_cell_layer_cap top_cell M5")
+    _quiet(s, "set_layer_caps_by_depth M3")
+    assert s._cell_layer_policy["top_cell"] == (-1, 5)     # untouched
+    assert s.bdb.cell_layer_band("top_cell") == (-1, 5)
+
+
+def _reopen(path):
+    """Fresh session over the same on-disk BDB — the reload path."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s,
+           "def_layer 2 M2 H LOW 50", "def_layer 3 M3 V LOW 50",
+           "def_layer 4 M4 H LOW 50", "def_layer 5 M5 V LOW 50",
+           "def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+           f"open_bdb {path}")
+    return s
+
+
+def test_explicit_cap_survives_a_reload_and_still_outranks(tmp_path):
+    """Codex #551: after a reload every persisted band looked 'restored', so
+    a bulk declaration overwrote a persisted EXPLICIT cap — the advertised
+    precedence held only within one session."""
+    path = str(tmp_path / "lv.bdb")
+    s = _session(_three_level_db())
+    _quiet(s, "set_layer_caps_by_depth M3 M5", "set_cell_layer_cap leaf_cell M7",
+              f"save_bdb {path}")
+    s2 = _reopen(path)
+    assert s2._cell_layer_policy["leaf_cell"] == (-1, 7)
+    _quiet(s2, "set_layer_caps_by_depth M3 M5")
+    assert s2._cell_layer_policy["leaf_cell"] == (-1, 7)   # explicit wins
+    assert s2._cell_layer_policy["mid_cell"] == (-1, 5)    # by-depth reapplied
+
+
+def test_off_clears_persisted_by_depth_bands_after_a_reload(tmp_path):
+    """The same provenance gap made `off` a no-op after a reload: with an
+    empty by_depth set it could not identify the bands it had written."""
+    path = str(tmp_path / "lv2.bdb")
+    s = _session(_three_level_db())
+    _quiet(s, "set_layer_caps_by_depth M3 M5", "set_cell_layer_cap top_cell M7",
+              f"save_bdb {path}")
+    s2 = _reopen(path)
+    out = _cmd(s2, "set_layer_caps_by_depth off")
+    assert "leaf_cell" not in s2._cell_layer_policy
+    assert "mid_cell" not in s2._cell_layer_policy
+    assert s2.bdb.cell_layer_band("leaf_cell") == (-1, -1)
+    assert s2._cell_layer_policy["top_cell"] == (-1, 7)    # explicit survives
+    assert "cleared 3 by-depth policies" in out
+
+
+def test_by_depth_memo_does_not_leak_across_bdbs(tmp_path):
+    """Switching BDBs must not carry the previous design's by-depth typing:
+    the new BDB's memo governs its own restored bands."""
+    p1, p2 = str(tmp_path / "a.bdb"), str(tmp_path / "b.bdb")
+    s = _session(_three_level_db())
+    _quiet(s, "set_layer_caps_by_depth M3 M5", f"save_bdb {p1}")
+    s2 = _session(_three_level_db())
+    _quiet(s2, "set_cell_layer_cap leaf_cell M7", f"save_bdb {p2}")
+    s3 = _reopen(p1)
+    assert s3._cell_layer_policy_by_depth               # a's bands are bulk
+    _quiet(s3, f"open_bdb {p2}")
+    assert s3._cell_layer_policy["leaf_cell"] == (-1, 7)
+    assert "leaf_cell" not in s3._cell_layer_policy_by_depth   # b's is explicit
+
+
 def test_requires_an_open_bdb():
     s = buda_cli.BudaSession()
     s.no_viz = True

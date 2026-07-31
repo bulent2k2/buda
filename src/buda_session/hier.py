@@ -1570,6 +1570,17 @@ class HierMixin:
                 print(f"WARNING: malformed meta.layer_cap_default "
                       f"{dflt!r} — ignored")
         self._cell_layer_policy_restored = set(restored)
+        # By-depth PROVENANCE (Codex #551): a persisted band alone cannot say
+        # whether it was declared explicitly or by set_layer_caps_by_depth,
+        # and that difference decides precedence (explicit always outranks)
+        # and what `set_layer_caps_by_depth off` may clear.  The memo rides in
+        # meta; session-typed by-depth entries survive a BDB switch like any
+        # other typed entry, restored ones do not (they left `pol` above).
+        bd = getattr(self, "_cell_layer_policy_by_depth", None) or set()
+        bd -= dropped
+        memo = self.bdb.meta_get("layer_caps_by_depth", "")
+        bd |= {c for c in memo.split(",") if c and (c in pol or c in restored)}
+        self._cell_layer_policy_by_depth = bd
         if restored:
             pol.update(restored)
             self._cell_layer_policy = pol

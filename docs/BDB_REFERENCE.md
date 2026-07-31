@@ -957,8 +957,16 @@ this default, in either declaration order; `set_layer_caps_by_depth off`
 clears only the by-depth entries and leaves explicit ones alone.  Each
 level's band is validated exactly as a hand-declared one (unknown layer,
 floor above a cap, and a band with no H or no V layer are hard errors); a
-cap list that *decreases* is noted, not refused.  Every assigned band is
-persisted like a hand-declared one, and the level assignment is reported:
+cap list that *decreases* is noted, not refused.  Re-running with a
+**shorter** list frees the levels it no longer names — their bands are
+cleared from the session and the BDB, not merely reported as unrestricted.
+
+Every assigned band is persisted like a hand-declared one, and which cells
+this command owns is persisted alongside them (`meta.layer_caps_by_depth`)
+— a band alone cannot say whether it was declared explicitly or in bulk,
+and after a reload that difference is what keeps an explicit cap from being
+overwritten and lets `off` find the bands to clear.  The level assignment
+is reported:
 
 ```
 set_layer_caps_by_depth M3 M5
