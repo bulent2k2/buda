@@ -165,6 +165,11 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
         # 'check_template_tracks on_mismatch independent' and re-run).
         print(f"Error: {e}")
         return
+    # Measured keepout-cull heal (the #523 spreader outcome): escalate
+    # cull-doomed LOW segments under the refold's accept contract, so
+    # healerless flows get the cover ripup's refold gives healered ones.
+    # No-op without culled bits; persists below only the accepted state.
+    session._final_cull_heal()
     n_ns, n_nv = session._persist_detailed_nuts()
     if n_ns:
         print(f"[BDB] persisted {n_ns} net segment(s) and {n_nv} "

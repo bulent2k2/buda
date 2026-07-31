@@ -725,7 +725,8 @@ class NutsFlowMixin:
             self._run_detailed_nuts(bit_order=self._detailed_bit_order)
 
     def _escalate_dead_low_segments(self, max_iter: int = 5,
-                                    cull_risk: bool = False) -> int:
+                                    cull_risk: bool = False,
+                                    only=None) -> int:
         """Post-NUTS dead-span escalation (opt-in: `set_dead_span_escalate on`).
 
         After abstract NUTS, a LOW-layer segment whose ACTUAL placed geometry
@@ -816,6 +817,9 @@ class NutsFlowMixin:
         for _ in range(max_iter):
             moved = 0
             for seg in self.nuts_result.segments:
+                if only is not None and (seg.bundle_id,
+                                         seg.seg_idx) not in only:
+                    continue          # caller-restricted batch (cull heal)
                 if not seg.placed or self.layers.is_top(seg.layer):
                     continue
                 if not self.routing_grid.has_layer(seg.layer):
@@ -903,6 +907,111 @@ class NutsFlowMixin:
             with buda.ostream_redirect():
                 self.nuts_result = nuts.run(self.bundles)
             self._adopt_doglegs()
+        return total
+
+    def _final_cull_heal(self, max_rounds: int = 3) -> int:
+        """Measured keepout-cull heal at run_detailed_nuts (the #523 spreader
+        outcome, part 2 — the healerless-flow cover).
+
+        The cull-risk escalation tier (measured stranding + span-clear
+        survival predictor) lives in ripup's post-climb refold, so a flow
+        with no healers never reaches it: its cull-doomed LOW segments —
+        span-clear pool < member bits, bits admitted via the midpoint pool
+        and then stranded by cull_keepout_crossers — stay stranded (bigHalf
+        no-rr: 102 culled bits across 4 LOW segments, every one reachable by
+        the LOW->TOP escalation).  Run the same tier here, under the same
+        accept contract: snapshot, escalate + re-solve NUTS + re-run DNUTS,
+        keep only a strictly better (opens, overlaps), restore otherwise.
+        A no-op whenever the detailed result has no keepout-culled bits, and
+        self-guarding everywhere else — the metric can only improve.
+
+        The accept is COMPONENTWISE — opens strictly down AND overlaps not
+        up — not the refold's lexicographic (opens, overlaps): a healered
+        flow's ripup grinds collateral overlaps back down, but a healerless
+        flow keeps every overlap the trade buys, and on chip scale the
+        lexicographic batch bought −735 opens with +230 overlaps (a corpus
+        regression).  When the full batch fails componentwise, it BISECTS —
+        retry the half with the most culled bits, halving until a sub-batch
+        passes or the trial budget runs out — so an accepted escalation is
+        always pure improvement.
+
+        Honors the dead-span family opt-out (_heal_dead_spans_in_healers)
+        plus its own bisect hook (_final_cull_heal_in_dnuts)."""
+        if (self.detailed_result is None or self.nuts_result is None
+                or self.detailed_result.num_keepout_bits <= 0):
+            return 0
+        if not getattr(self, '_final_cull_heal_in_dnuts', True):
+            return 0
+        if not getattr(self, '_heal_dead_spans_in_healers', True):
+            return 0
+
+        def _culled_by_seg():
+            """(bundle, seg) -> culled bit count, from the live results."""
+            placed = {}
+            for ns in self.detailed_result.net_segments:
+                k = (ns.bundle_id, ns.seg_idx)
+                placed[k] = placed.get(k, 0) + 1
+            wmap = {w.input.original_bundle.id: w for w in self.bundles
+                    if not w.hier.locked}
+            out = {}
+            for ts in self.nuts_result.segments:
+                if not ts.placed or self.layers.is_top(ts.layer):
+                    continue
+                w = wmap.get(ts.bundle_id)
+                if w is None:
+                    continue
+                sel = w.plan.selected_topology_index
+                if sel < 0 or sel >= len(w.input.candidates):
+                    continue
+                try:
+                    nb = len(w.input.original_bundle.get_net_names())
+                    sb = w.input.candidates[sel].seg_bits
+                    need = (len(sb[ts.seg_idx])
+                            if ts.seg_idx in sb and
+                               0 < len(sb[ts.seg_idx]) < nb else max(1, nb))
+                except Exception:
+                    need = 1
+                miss = need - placed.get((ts.bundle_id, ts.seg_idx), 0)
+                if miss > 0:
+                    out[(ts.bundle_id, ts.seg_idx)] = miss
+            return out
+
+        total = 0
+        trials = 0
+        for _ in range(max_rounds):
+            if self.detailed_result.num_keepout_bits <= 0 or trials >= 6:
+                break
+            base = (self.detailed_result.num_unplaced,
+                    self.nuts_result.num_overlaps)
+            # Candidate set for this round, worst culls first, then bisect.
+            ranked = sorted(_culled_by_seg().items(),
+                            key=lambda kv: -kv[1])
+            batch = [k for k, _ in ranked]
+            accepted = False
+            while batch and trials < 6:
+                snap = self._rr_snapshot()
+                n = self._escalate_dead_low_segments(cull_risk=True,
+                                                     only=set(batch))
+                if not n:
+                    break
+                self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+                trials += 1
+                cur = (self.detailed_result.num_unplaced,
+                       self.nuts_result.num_overlaps)
+                if cur[0] < base[0] and cur[1] <= base[1]:
+                    print(f"[DetailedNUTS] CULL-HEAL: escalated {n} "
+                          f"span-starved LOW segment(s), opens "
+                          f"{base[0]}->{cur[0]} (ovl {base[1]}->{cur[1]})",
+                          flush=True)
+                    if self.planner is not None:
+                        self.planner.recharge_committed(self.bundles)
+                    total += n
+                    accepted = True
+                    break
+                self._rr_restore(snap)
+                batch = batch[:len(batch) // 2]   # bisect: worst-cull half
+            if not accepted:
+                break
         return total
 
     def _segment_states_from_topology(self) -> dict:
