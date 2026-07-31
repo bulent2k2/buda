@@ -106,6 +106,27 @@ designs and fail LOUD, never silent:)*
    **blocked** by regressions upstream of NUTS (far-face traversal inflates
    V-trunk WL and flips planner selections) — that investigation gates any
    NUTS-side work.
+6b. **Class-level TRACK negotiation — the #536 b61 residual** (added
+   2026-07-31) — [`wishlist-ripup.md`](wishlist-ripup.md) → *"Class-level
+   TRACK negotiation"*. The last open of issue #536, after its census (PR
+   #548) and TOP re-seat heal (PR #550) shipped. `mix2_fast_on_aligned_sql`
+   sticks at 2 ov / 16 opens: b61 seg0's 16 bits sit on M6 (12 tracks in the
+   window — width-infeasible on EMPTY metal) because the only viable seat,
+   M4, is 16/17 held by bottom-up **fixed copies**. Every existing mechanism
+   is verified to stand down for a structural reason — RELEASE needs opens on
+   a *locked* instance (these are on an unlocked bundle), ripup CLASS moves
+   re-pin *topologies* not *tracks* (all 11 classes trialed at a raised
+   budget: no improvement), negotiate `class_moves` measures worse (44/3 vs
+   16/2), the #531 width gate passes it exactly (`16 × 2.25 = 36.0` = window),
+   and every heal needs a free destination layer. **The mechanism:** re-solve
+   a locked class's cell-local NUTS with its topology pinned under
+   instance-aggregated price, then propagate the new track phase class-wide.
+   **Blocked on being worth it:** the entire measured market is one seat / 16
+   bits on one vehicle whose *unaligned* twin lands 0/0/0 — `align_bottom_up`
+   creates this geometry, so **alignment-aware planning** (and simply
+   accepting the uniformity price) are the cheaper angles to exhaust first.
+   **Trigger to build:** the doomed-seat census reporting this shape on more
+   than one vehicle, or at a cost beyond a handful of bits.
 7. **OA bridge (import/export)** — [`wishlist-bdb.md`](wishlist-bdb.md) →
    *"Persist the routing pipeline into the BDB"* (the export consumer) and
    `gds_oa_interchange.md`. Everything BDB-side is ✅ (persist stages 1–5,

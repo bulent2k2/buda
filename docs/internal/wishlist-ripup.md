@@ -33,6 +33,12 @@ band-injection ladder end-state (item 1 below; `negotiate_congestion`
 already covers the practical need).  Nothing is blocked; nothing fails
 silent.
 
+Separately — a CAPABILITY gap, not a speed one — **class-level TRACK
+negotiation** (last section of this file, added 2026-07-31): the #536 b61
+residual, where locked bottom-up copies hold the only supply-adequate
+layer and no existing move kind can shift them off it.  Trigger-gated on
+the doomed-seat census showing the shape on more than one vehicle.
+
 ## Incremental trial replan + no-persist reruns — ✅ IMPLEMENTED
 
 **Symptom.** On `flow/rnr/slowdown_rnr.buda` (the hier repro), stage-a ripup
@@ -664,3 +670,80 @@ frozen context; further trimming would attack run()'s per-call context
 rebuild — not worth it while the screen bucket sits at ~5% of the rr
 stages.  Warm evals (`rerun_bundle_warm`, opt-in) inherit the copy skip
 for free (their scratch engine is skip_doglegs).
+
+## Class-level TRACK negotiation — the #536 b61 residual (NOT built; trigger-gated)
+
+The last open of issue #536, and the only mechanism that can reach it.
+Everything else in the #536 arc shipped: the **supply-doomed seat census**
+(PR #548, `check_design` names statically width-infeasible seats) and the
+**TOP re-seat heal** (PR #550, `_final_reseat_heal` moves such a seat to a
+same-direction TOP layer that can host it).  What neither can fix is a seat
+with **no free alternative anywhere**.
+
+**The residual, measured** (`flow/rnr/mix2_fast_on_aligned_sql.buda`, stuck
+at 2 overlaps / 16 opens / 1 viol bundle): bundle 61 seg 0 — the 16-bit
+`top_bus20_w16` — is committed on M6, which offers **12 signal tracks with
+zero occupants** in its 36-unit window (pitch 3.0 × 16 bits = 48 > 36): the
+bits strand on empty metal.  The one viable seat is **M4** (17 clear tracks,
+16 bits fit exactly at pitch 2.25), and 16 of its 17 tracks are held by the
+bottom-up **fixed copies** b152(4) + b170(8) + b174(8) plus unlocked b18(10).
+M2's span-clear pool is 0.  So: a top-level bus and locked template copies
+contend for the design's only viable window.
+
+**Why every existing mechanism stands down** (all verified, not assumed):
+
+- **RELEASE pass** (uniformity break) — wrong trigger shape: it unlocks a
+  *locked instance whose own copied routing is measured-open*.  Here the
+  opens sit on **unlocked** b61; the copies are clean, they merely hold the
+  tracks.  Re-running the flow under `check_template_tracks on_mismatch
+  independent` leaves 2/16 unchanged and never fires the pass.
+- **Ripup CLASS moves** — they run and commit twice in this flow, then
+  genuinely stall: raising `_RR_CLASS_MAX_TRIALS` 32 → 300 trials all 11
+  classes (instead of 5) and every one reports "no improvement", endpoint
+  byte-identical.  A class move re-pins a template's **topology**; it cannot
+  shift the **tracks** its copies sit on.
+- **Negotiate `class_moves`** (price translation) — measured WORSE here: 0
+  accepted iterations, flow ends 44 opens / 3 ov vs the baseline 16 / 2.
+- **#531 width gate** — scoped out of locked sessions, and even active it
+  passes this candidate exactly (`16 × min-pitch 2.25 = 36.0 = window`); the
+  infeasibility is the *per-layer* M6 assignment, which a min-over-layers
+  bound is deliberately blind to.
+- **Dead-span / cull / re-seat heals** — all need a *free* destination
+  layer; here there is none (M4 occupied, M2 dead), so the re-seat heal
+  correctly no-ops rather than churning.
+- **b61's own 72 alternates** — all trialed by ripup, none improve.
+
+**The sketch.** Negotiate a locked class's **placed track choices**,
+uniformly across its instances — one level finer than the class topology
+re-pin, one level coarser than the per-instance release:
+
+1. Price the contention as today (`inject_band_demand` on the measured
+   overlap/open windows), then clip + inverse-transform each instance's
+   demand into the **cell-local frame** and sum across instances — the
+   aggregation negotiate v2 already implements for class price translation
+   (§4.D of [`bottomup_healer_templates.md`](bottomup_healer_templates.md)).
+2. Re-run the cell-local **NUTS** solve for the class under that price
+   field with the template's topology **pinned** (only the perpendicular
+   track choice is free), so the reference copy vacates the contended
+   tracks where a cheaper phase exists.
+3. Propagate the new reference placement to every instance (the existing
+   fixed-copy path), re-run the pipeline, accept only on a strictly better
+   measured metric — the class-move contract, unchanged.
+
+**Why it is not built.** The whole measured market today is **one seat / 16
+bits on one vehicle**, and the vehicle's unaligned twin
+(`mix2_fast_bottomup`) lands 0/0/0 — `align_bottom_up`'s phase snapping is
+what creates this contention geometry in the first place.  Against that,
+this is a new solve mode (track-only cell-local re-solve) plus a new
+snapshot surface.  Two cheaper angles should be exhausted first:
+**alignment-aware planning** (let the aligner see top-level track demand
+when choosing a phase, so the geometry never forms) and simply accepting
+the residual as the documented price of strict template uniformity.
+
+**Trigger to build:** the doomed-seat census (now on by default in
+`check_design`) reporting this shape — a doomed seat whose only
+supply-adequate sibling layer is held by locked copies — on **more than one
+vehicle**, or a design where it costs more than a handful of bits.  The
+census is exactly the instrument that will say so: it separates these from
+the LOW-layer class the escalation family already heals, and from DNUTS's
+dynamic reservation conflicts.
