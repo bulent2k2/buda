@@ -1066,6 +1066,7 @@ class RipupMixin:
         makes an endpoint regression impossible by construction.  The
         `chase_overlaps` token switches to the plain lexicographic accept
         (the aggressive pre-healer form; measured mixed on the vehicles)."""
+        self._healers_ran = True   # past-healer stamp (reseat-heal gate)
         if not self.bundles:
             print("Error: refine_selection has no bundles.")
             return
@@ -2518,6 +2519,7 @@ class RipupMixin:
         more expensive.  Iterations are accepted only on strict metric
         improvement (snapshot/restore otherwise) — a safe hill-climb;
         ripup_reroute remains the finisher for whatever negotiation leaves."""
+        self._healers_ran = True   # past-healer stamp (reseat-heal gate)
         if not self.bundles:
             print("Error: negotiate_congestion has no bundles.")
             return
@@ -2678,6 +2680,7 @@ class RipupMixin:
                        fast_trials=None, screen=None, warm=None,
                        converge_guard=None, use_class_moves=True,
                        use_release_moves=True, use_parallel_sweep=None):
+        self._healers_ran = True   # past-healer stamp (reseat-heal gate)
         if not self.bundles:
             print("Error: ripup_reroute has no bundles.")
             return

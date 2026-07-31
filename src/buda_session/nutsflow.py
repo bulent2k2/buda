@@ -750,6 +750,29 @@ class NutsFlowMixin:
         except Exception:
             return 1
 
+    def _seg_admission_pool(self, seg, g, need):
+        """The DNUTS admission pool for a placed segment on grid `g` — the
+        exact `place_by_layer` arithmetic (span-clear pool over the full
+        Hanan interval, midpoint fallback when it falls short of `need`,
+        corner bounds filtering whichever pool won, no re-fallback).  Shared
+        by the doomed-seat census and the TOP re-seat heal; the dead-span
+        escalation keeps its own inline copy (its branches interleave with
+        the cull-risk tier)."""
+        b_lo = max(seg.interval_lo, seg.track_lo_bound)
+        b_hi = min(seg.interval_hi, seg.track_hi_bound)
+        span_all = g.count_signal_tracks_in_span(
+            seg.span_lo, seg.span_hi, seg.interval_lo, seg.interval_hi)
+        if b_lo > b_hi:
+            return 0          # corner bounds exclude the whole interval
+        if span_all >= need:
+            # Span pool wins admission; the corner bounds then filter it.
+            return (span_all
+                    if (b_lo, b_hi) == (seg.interval_lo, seg.interval_hi)
+                    else g.count_signal_tracks_in_span(
+                        seg.span_lo, seg.span_hi, b_lo, b_hi))
+        x = (seg.span_lo + seg.span_hi) / 2.0
+        return g.count_signal_tracks_in(x, b_lo, b_hi)
+
     def _report_doomed_seats(self) -> int:
         """Report-only census of SUPPLY-DOOMED SEATS (#536 option 1): placed
         segments — any layer, TOP included — whose assigned layer's real
@@ -789,22 +812,7 @@ class NutsFlowMixin:
                 continue
             g = self.routing_grid.get_layer_grid(seg.layer)
             need = self._seg_member_bits(w, sel, seg.seg_idx)
-            b_lo = max(seg.interval_lo, seg.track_lo_bound)
-            b_hi = min(seg.interval_hi, seg.track_hi_bound)
-            span_all = g.count_signal_tracks_in_span(
-                seg.span_lo, seg.span_hi,
-                seg.interval_lo, seg.interval_hi)
-            if b_lo > b_hi:
-                pool = 0      # corner bounds exclude the whole interval
-            elif span_all >= need:
-                # Span pool wins admission; the corner bounds then filter it.
-                pool = (span_all
-                        if (b_lo, b_hi) == (seg.interval_lo, seg.interval_hi)
-                        else g.count_signal_tracks_in_span(
-                            seg.span_lo, seg.span_hi, b_lo, b_hi))
-            else:
-                x = (seg.span_lo + seg.span_hi) / 2.0
-                pool = g.count_signal_tracks_in(x, b_lo, b_hi)
+            pool = self._seg_admission_pool(seg, g, need)
             if pool < need:
                 doomed.append((seg, need, pool,
                                self.layers.is_top(seg.layer)))
@@ -1146,6 +1154,199 @@ class NutsFlowMixin:
                     break
                 self._rr_restore(snap)
                 batch = batch[:len(batch) // 2]   # bisect: worst-cull half
+            if not accepted:
+                break
+        return total
+
+    def _reseat_doomed_top_segments(self, max_iter: int = 3,
+                                    only=None) -> int:
+        """Move supply-doomed TOP segments to an alternate same-direction TOP
+        layer that can actually host them (#536 follow-up to the census).
+
+        The dead-span escalation family's only move is LOW -> TOP, so a TOP
+        seat whose placed window's real signal-track supply falls short of
+        its member bits (the census predicate: chip_bottomup's 6 TOP seats,
+        the mix2 b61 12-tracks-for-16-bits M6 window) has no escape.  This
+        mover re-seats such a segment on another same-direction TOP layer
+        whose SPAN-CLEAR supply in the same bounded window covers the member
+        bits — deliberately the conservative pool (no midpoint optimism): a
+        re-seat is only worth its perturbation when the new seat is a
+        guaranteed host under the current geometry.  Honors the layer-cap
+        contract (`w.input.allowed_layers`) and skips locked bottom-up
+        copies, like the whole family.  Lowest-id (cheapest) qualifying
+        layer wins; no qualifying layer (the b61 shape — M4 full is not
+        detectable here, but M4 keepout-carved is) leaves the seat alone.
+        Re-solves NUTS after each pass; returns total re-seats."""
+        if self.nuts_result is None or self.routing_grid is None:
+            return 0
+        wmap = {w.input.original_bundle.id: w for w in self.bundles
+                if not w.hier.locked}
+        total = 0
+        for _ in range(max_iter):
+            moved = 0
+            for seg in self.nuts_result.segments:
+                if only is not None and (seg.bundle_id,
+                                         seg.seg_idx) not in only:
+                    continue
+                if not seg.placed or not self.layers.is_top(seg.layer):
+                    continue          # TOP seats only — LOW is escalation's
+                if not self.routing_grid.has_layer(seg.layer):
+                    continue
+                w = wmap.get(seg.bundle_id)
+                if w is None or not w.plan.seg_layers:
+                    continue
+                sel = w.plan.selected_topology_index
+                if sel < 0 or sel >= len(w.input.candidates):
+                    continue
+                g = self.routing_grid.get_layer_grid(seg.layer)
+                need = self._seg_member_bits(w, sel, seg.seg_idx)
+                if self._seg_admission_pool(seg, g, need) >= need:
+                    continue
+                want_dir = (buda.LayerDir.HORIZONTAL if seg.horiz
+                            else buda.LayerDir.VERTICAL)
+                pool = [l for l in self.layers.get_layer_ids_by_dir(want_dir)
+                        if self.layers.is_top(l) and l != seg.layer
+                        and self.routing_grid.has_layer(l)]
+                if w.input.allowed_layers:
+                    pool = [l for l in pool if l in w.input.allowed_layers]
+                b_lo = max(seg.interval_lo, seg.track_lo_bound)
+                b_hi = min(seg.interval_hi, seg.track_hi_bound)
+                new_layer = None
+                for l in sorted(pool):
+                    g2 = self.routing_grid.get_layer_grid(l)
+                    if b_lo <= b_hi and g2.count_signal_tracks_in_span(
+                            seg.span_lo, seg.span_hi, b_lo, b_hi) >= need:
+                        new_layer = l
+                        break
+                if new_layer is None:
+                    continue
+                sl = list(w.plan.seg_layers)
+                if seg.seg_idx >= len(sl) or sl[seg.seg_idx] == new_layer:
+                    continue
+                sl[seg.seg_idx] = new_layer
+                w.plan.seg_layers = sl
+                moved += 1
+            if not moved:
+                break
+            total += moved
+            # Re-solve with the re-seated assignments (the escalation's
+            # re-solve block: mirrors cmd_run_nuts's core, minus persist/log).
+            pitch = (self._nuts_pitch
+                     if getattr(self, '_nuts_pitch', None) else 1.0)
+            nuts = buda.NUTSEngine(self.fp, self.layers)
+            nuts.set_track_pitch(pitch)
+            self._derive_fanin_bits_all(selected_only=True)
+            self._inject_bottom_up_fixed(nuts)
+            if self.planner is not None:
+                nuts.set_extra_grid_points(
+                    list(self.planner.get_x_grid()),
+                    list(self.planner.get_y_grid()))
+            with buda.ostream_redirect():
+                self.nuts_result = nuts.run(self.bundles)
+            self._adopt_doglegs()
+        return total
+
+    def _final_reseat_heal(self, max_rounds: int = 3) -> int:
+        """Measured TOP re-seat heal at run_detailed_nuts (#536 follow-up):
+        `_reseat_doomed_top_segments` under `_final_cull_heal`'s exact accept
+        contract — snapshot, re-seat + re-solve NUTS + re-run DNUTS, keep
+        only a COMPONENTWISE improvement (opens strictly down AND overlaps
+        not up), restore + bisect to the worst-stranded half otherwise — so
+        an accepted re-seat is always pure improvement.
+
+        The batch is MEASURED stranding only (bits missing from the live
+        detailed result AND the census doom predicate), the surgical gate
+        the cull-risk tier established.  Boundary: instead of the cull
+        heal's blanket locked-session scope-out, this heal skips when a
+        healer has ALREADY RUN in this session (`_healers_ran`, stamped by
+        negotiate/ripup/refine) — the re-roll hazard that scope-out guards
+        (aligned_sql: a locally-accepted heal walked 2/16/1 -> 6/58/9 under
+        the downstream healers) needs healers to re-roll, and the market
+        for TOP re-seats (chip_bottomup, 6 seats / ~102 bits) IS a locked
+        session with no healers at all.  A locked session that runs healers
+        BEFORE run_detailed_nuts is therefore skipped; locked sessions
+        without them are healed, with the componentwise accept as the
+        stage-local guarantee.  Locked wrappers' own seats are excluded
+        either way (the mover's wmap).  Honors the family opt-out
+        (_heal_dead_spans_in_healers) plus its own switch
+        (_final_reseat_heal_in_dnuts)."""
+        if (self.detailed_result is None or self.nuts_result is None
+                or self.detailed_result.num_unplaced <= 0):
+            return 0
+        if not getattr(self, '_final_reseat_heal_in_dnuts', True):
+            return 0
+        if not getattr(self, '_heal_dead_spans_in_healers', True):
+            return 0
+        if getattr(self, '_healers_ran', False):
+            return 0
+
+        def _stranded_doomed_top():
+            """(bundle, seg) -> missing bits, for measured-stranded segments
+            that are also census-doomed TOP seats."""
+            placed = {}
+            for ns in self.detailed_result.net_segments:
+                k = (ns.bundle_id, ns.seg_idx)
+                placed[k] = placed.get(k, 0) + 1
+            wmap = {w.input.original_bundle.id: w for w in self.bundles
+                    if not w.hier.locked}
+            out = {}
+            for ts in self.nuts_result.segments:
+                if not ts.placed or not self.layers.is_top(ts.layer):
+                    continue
+                if not self.routing_grid.has_layer(ts.layer):
+                    continue
+                w = wmap.get(ts.bundle_id)
+                if w is None:
+                    continue
+                sel = w.plan.selected_topology_index
+                if sel < 0 or sel >= len(w.input.candidates):
+                    continue
+                need = self._seg_member_bits(w, sel, ts.seg_idx)
+                miss = need - placed.get((ts.bundle_id, ts.seg_idx), 0)
+                if miss <= 0:
+                    continue
+                g = self.routing_grid.get_layer_grid(ts.layer)
+                if self._seg_admission_pool(ts, g, need) < need:
+                    out[(ts.bundle_id, ts.seg_idx)] = miss
+            return out
+
+        total = 0
+        trials = 0
+        for _ in range(max_rounds):
+            if self.detailed_result.num_unplaced <= 0 or trials >= 6:
+                break
+            base = (self.detailed_result.num_unplaced,
+                    self.nuts_result.num_overlaps)
+            ranked = sorted(_stranded_doomed_top().items(),
+                            key=lambda kv: -kv[1])
+            batch = [k for k, _ in ranked]
+            accepted = False
+            while batch and trials < 6:
+                snap = self._rr_snapshot()
+                n = self._reseat_doomed_top_segments(only=set(batch))
+                if not n:
+                    break
+                self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+                trials += 1
+                cur = (self.detailed_result.num_unplaced,
+                       self.nuts_result.num_overlaps)
+                if cur[0] < base[0] and cur[1] <= base[1]:
+                    print(f"[DetailedNUTS] RESEAT-HEAL: re-seated {n} "
+                          f"supply-doomed TOP segment(s), opens "
+                          f"{base[0]}->{cur[0]} (ovl {base[1]}->{cur[1]})",
+                          flush=True)
+                    if self.planner is not None:
+                        self.planner.recharge_committed(self.bundles)
+                    # Same staleness contract as the cull heal (Codex P1 on
+                    # #543): the accepted re-seat changed plan.seg_layers
+                    # and the abstract solve — re-checkpoint the route.
+                    if self.bdb is not None:
+                        self._checkpoint_routing()
+                    total += n
+                    accepted = True
+                    break
+                self._rr_restore(snap)
+                batch = batch[:len(batch) // 2]   # bisect: worst-strand half
             if not accepted:
                 break
         return total
