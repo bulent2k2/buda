@@ -4,8 +4,9 @@
 proportional). `band_span_charge 0` is the escape hatch back to the legacy
 single-band charge. This note records the mechanism, the sweep across all five
 modes, the two accounting bugs that invalidated an earlier version of the
-table, and the three rejected attempts to remove the one regression — so none
-of it is re-derived.
+table, and the three rejected attempts to remove the regressions — so none of
+it is re-derived.  **Known cost: two corpus flows** (`rnr/mix2` and
+`rnr/mix2_topdown_refine`), both the same mix2 design and the same 16 bits.
 
 ## The defect
 
@@ -141,7 +142,24 @@ literally the old code.
 > Corrupted band usage reads back as free capacity that does not exist, which
 > flattered the always-spread modes.
 
-| mode | when | allocation | QoR | runtime |
+All five modes were swept against the SAME baseline, which predated the
+`mix2_topdown_refine` corpus row — so every QoR figure in this table
+undercounts by one "worse" (see the correction below the per-flow table).
+Measured on that flow afterwards, every spreading mode regresses it relative
+to mode 0's clean 0/0/0, so the table's relative RANKING is not disturbed:
+
+| mode | 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|---|
+| `mix2_topdown_refine` | 0/0/0 | 3/16/1 | 1/0/0 | 1/15/2 | 0/2/1 | 1/11/2 |
+
+Worth noting for any future attempt: on THIS vehicle mode 1 is the *worst* of
+the five, and modes 2 and 4 are much milder (1 overlap and 2 stranded bits
+respectively). Mode 1 still wins across the 29-flow corpus — this is one flow,
+not a ranking — but it shows the oversized-only+proportional choice is not
+uniformly the gentlest, and a future fix for the blind spot might be easier to
+find from mode 4's shape.
+
+| mode | when | allocation | QoR (as swept) | runtime |
 |---|---|---|---|---|
 | **1** | **oversized-only** | **proportional** | **3 better / 1 worse** | **+7.1%** |
 | 2 | always | proportional | 0 better / 6 worse | +34.0% |
@@ -157,6 +175,14 @@ Mode 1 per flow (abstract WL −0.35%, detailed −0.41%):
 | `rnr/mix2_fast_bottomup` | 1/0/0 | 0/0/0 | BETTER |
 | `rnr/mix2_fast_on_aligned_sql` | 0/30/2 | 2/16/1 | BETTER |
 | `rnr/mix2` | 0/0/0 | 0/16/1 | WORSE |
+| `rnr/mix2_topdown_refine` | 0/0/0 | 3/16/1 | WORSE |
+
+> **Correction.** The sweep above was taken against a baseline that predated
+> `flow/rnr/mix2_topdown_refine.buda`, which PR #526 added to the corpus while
+> this work was in flight — so that row was in NO sweep, and the flip was
+> proposed and approved on "3 better / 1 worse".  Against today's corpus the
+> honest tally is **3 better / 2 worse**.  Both regressions are the same mix2
+> design, the same 16 bits (`bundle 61 seg 2`), and the same blind spot.
 
 **Targeting beats blanket spreading.** Modes 1 and 4 (oversized-only) beat
 modes 2 and 3 (always). Spreading a bus that already fits in its band was
@@ -174,13 +200,17 @@ on its far side. It measures the same as plain greedy fill (2 better/3 worse).
 
 ## Mode 1 as the default — what flipping it actually did
 
-Mode 1 is **3 better / 1 worse at +7.1%** with WL −0.35%/−0.41%. Two flows go
-from broken to fully clean (`mix`, `mix2_fast_bottomup` both 1/0/0 → 0/0/0)
-and a third improves a lot (`mix2_fast_on_aligned_sql` 0/30/2 → 2/16/1). The
-single cost is `rnr/mix2` 0/0/0 → 0/16/1.
+Mode 1 is **3 better / 2 worse at +7.1%** with WL −0.35%/−0.41% (it was
+measured and approved as 3 better / 1 worse — see the correction above). Two
+flows go from broken to fully clean (`mix`, `mix2_fast_bottomup` both 1/0/0 →
+0/0/0) and a third improves a lot (`mix2_fast_on_aligned_sql` 0/30/2 →
+2/16/1). The costs are `rnr/mix2` 0/0/0 → 0/16/1 and
+`rnr/mix2_topdown_refine` 0/0/0 → 3/16/1 — the same design, the same 16 bits,
+the same blind spot.
 
-That regression is **understood and concentrated**: one segment,
-`bundle 61 seg 2`, 16 bits, "no track in DetailedNUTS". It is not a healer
+Both regressions are **understood and concentrated**, and are the same fault:
+one segment, 16 bits, "no track in DetailedNUTS" (`bundle 61 seg 2` on
+`mix2`; the corresponding segment on `mix2_topdown_refine`). It is not a healer
 budget artifact — the hill-climb runs to a genuine stall (6 iterations, 511
 trials, "no improving re-route"). It is the **absolute-supply blind spot**:
 the width books say the spread bus fits, but DetailedNUTS still needs real
@@ -202,7 +232,7 @@ overflow pushes those buses onto other layers, and the displacement costs more
 than the stranding it prevents.
 
 The regression resists targeted repair, so the flip was made as a judgment
-call: net +2 flows, WL −0.35%/−0.41%, +7.3% runtime, and #518's phantom
+call: net +1 flow, WL −0.35%/−0.41%, +7.3% runtime, and #518's phantom
 overflow stops distorting selection by default. `mix2`'s clean state was also
 knife-edge — its own script comments record the exact 4-iteration rip-up trace
 that walks it to 0/0, so any selection change re-rolls that sequence. That
