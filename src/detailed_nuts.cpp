@@ -357,9 +357,25 @@ void DetailedNUTSEngine::place_by_layer(
             // bit whose FINAL span still crosses a keepout.
             auto signal_tracks = grid.signal_tracks_in_span(
                 bs.span_lo, bs.span_hi, bs.interval_lo, bs.interval_hi);
-            if ((int)signal_tracks.size() < bus_seg_nbits(bs))
+            // Span-clear-first ranking (the #523 spreader outcome): when the
+            // midpoint fallback engages, the pool MIXES tracks that are clear
+            // across the whole abstract span (bits on them can never be
+            // keepout-culled) with midpoint-only tracks (bits on them survive
+            // only if their final junction-snapped span happens to dodge the
+            // keepout).  Path A's nearest-to-anchor pick was blind to the
+            // difference and left guaranteed-survivor tracks unused while
+            // whole segments culled (bigHalf b21: 8 clear tracks idle, all 36
+            // bits culled).  Record the clear set so the choice below banks
+            // the survivable bits first; empty when the span pool sufficed
+            // (all tracks clear — ranking would be a no-op), keeping that
+            // path byte-identical.
+            std::set<long long> span_clear_keys;
+            if ((int)signal_tracks.size() < bus_seg_nbits(bs)) {
+                for (const auto& t : signal_tracks)
+                    span_clear_keys.insert(track_key(t.first));
                 signal_tracks = grid.signal_tracks_in(x, bs.interval_lo,
                                                       bs.interval_hi);
+            }
 
             // Cross-layer corner bound (carried from abstract NUTS): keep only
             // signal tracks on this trunk's committed side of the split, so it
@@ -498,8 +514,19 @@ void DetailedNUTSEngine::place_by_layer(
                         return chosen;
                     }
 
-                    // Sort available by distance from abstract_pos.
+                    // Sort available by SPAN-CLEAR-ness first (a clear track's
+                    // bit cannot be keepout-culled — bank the guaranteed
+                    // survivors), then by distance from abstract_pos.  With no
+                    // fallback the clear set is empty and this reduces to the
+                    // pure distance sort, bit for bit.
+                    auto is_clear = [&](int k) {
+                        return !span_clear_keys.empty() &&
+                               span_clear_keys.count(
+                                   track_key(signal_tracks[k].first)) > 0;
+                    };
                     std::sort(avail.begin(), avail.end(), [&](int a, int b) {
+                        const bool ca = is_clear(a), cb = is_clear(b);
+                        if (ca != cb) return ca;
                         return std::abs(signal_tracks[a].first - bs.abstract_pos) <
                                std::abs(signal_tracks[b].first - bs.abstract_pos);
                     });
