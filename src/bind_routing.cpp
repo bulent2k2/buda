@@ -570,7 +570,12 @@ void bind_routing(py::module_& m) {
         .def_readwrite("assigned_v_layer",  &BundleInput::assigned_v_layer)
         .def_readwrite("assigned_h_layer",  &BundleInput::assigned_h_layer)
         .def_readwrite("topology_pinned",   &BundleInput::topology_pinned)
-        .def_readwrite("pinned_group",      &BundleInput::pinned_group);
+        .def_readwrite("pinned_group",      &BundleInput::pinned_group)
+        // Per-cell layer policy, binary form (hier_layer_caps.md Phase 1).
+        .def_readwrite("allowed_layers",    &BundleInput::allowed_layers)
+        .def_readwrite("layer_cap",         &BundleInput::layer_cap)
+        .def_readwrite("layer_floor",       &BundleInput::layer_floor)
+        .def("allows_layer",                &BundleInput::allows_layer);
 
     py::class_<BundlePlan>(m, "BundlePlan")
         .def(py::init<>())

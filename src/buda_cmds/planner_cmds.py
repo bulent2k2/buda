@@ -124,6 +124,9 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # Apply user-pinned selections to template wrappers BEFORE expansion
         # so topology_pinned + pinned_seg_layers propagate to all instances.
         session._apply_selections()
+        # Per-cell layer policies onto the TEMPLATE wrappers (before the
+        # bottom-up cell-local solves plan under them).
+        session._apply_layer_policies()
         # Bottom-up cells (set_bottom_up): first give any 90°-rotated
         # instance class its own clone template (candidates generated from
         # the rotated reference's cell-local floorplan), then solve each
@@ -148,6 +151,11 @@ def cmd_run_planner(session, cmd, args, cmd_line):
             tid: [expanded[_idx_of[id(w)]] for w in ws]
             for tid, ws in exp_map_raw.items()}
         del expanded_l, exp_map_raw, _idx_of
+        # Expansion built FRESH BundleInput objects — re-resolve the layer
+        # policies onto the per-instance wrappers NOW, before
+        # optimize_topologies plans them (a post-assignment application
+        # would let a capped non-bottom-up instance plan unrestricted).
+        session._apply_layer_policies(expanded)
         # priority = -(level * 10000 + n_candidates): higher routes first.
         # Depth-0 before depth-1; fewer candidates (less flexibility) first.
         # BUDA_HIER_DEEP_FIRST=1 (experiment): invert the level key only —

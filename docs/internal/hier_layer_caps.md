@@ -93,12 +93,12 @@ sound.
 ### Commands
 
 ```buda
-# Ceiling per cell: this cell's OWN interconnect may use layers with id <= cap.
-set_cell_layer_cap <cell>|* <layer_id|layer_name>
+# Band per cell: this cell's OWN interconnect defaults to FULL use of layers
+# in [floor .. cap] and NO use outside it.  -min omitted = no floor.
+set_cell_layer_cap <cell>|* <cap_layer> [-min <floor_layer>]
 
-# Fractional share: this cell may additionally use PCT percent of the given
-# layer's signal tracks within its footprint.  Overrides the cap for that
-# layer (a cap is just shorthand for shares 1.0 / 0).
+# Fractional share: override ANY layer's share — thin a layer inside the
+# band (keep some for the parent) or grant a slice above/below it.
 set_cell_layer_share <cell> <layer_id|layer_name> <pct>
 
 # Convenience: assign caps by hierarchy level in one line, deepest first.
@@ -108,12 +108,27 @@ set_layer_caps_by_depth <cap_deepest> [<cap_next> ...]
 set_cell_layer_cap * off
 ```
 
+* **Resolution rule (Q1 RESOLVED — band defaults, shares override):**
+  `share(L)` = the explicit `set_cell_layer_share` if declared, else `1.0`
+  for `L ∈ [floor..cap]`, else `0`.  The cap is NOT a hard bound on shares —
+  a hard bound would outlaw the escape-valve case below, the original
+  motivation for shares.  The derived ceiling `max(cap, highest shared
+  layer)` is surfaced in reporting (`dump_hbundles`:
+  `policy=[M3..M5], M4@30%`), so nothing widens silently.
 * `set_cell_layer_cap dnuts1 M3` — cell `dnuts1`'s bundles use M2/M3 only.
+* `set_cell_layer_cap mid M5 -min M3` — a BAND: M2 forbidden, M3–M5 full
+  use (whether globally TOP or LOW — allowance is orthogonal to typing),
+  nothing above M5.  The `-min` floor is the former Phase-5 floors question,
+  resolved early by this syntax; its stub-economics caveat (short stubs
+  favor cheap low metal) moves to the §12 measurement plan.
+* `set_cell_layer_cap mid M5 -min M3` + `set_cell_layer_share mid M4 30` —
+  thinning INSIDE the band: mid may use only 30% of M4's tracks so the
+  levels above can share the layer.
 * `set_cell_layer_cap dnuts1 M3` + `set_cell_layer_share dnuts1 M4 30` +
-  `set_cell_layer_share dnuts1 M5 10` — the wiring-limited form: full M2/M3,
-  plus a 30% slice of M4 and a 10% slice of M5 inside the cell's footprint.
-  The parent keeps everything the child does not consume — the share is a
-  **budget on the child**, not a reservation grant (§6).
+  `set_cell_layer_share dnuts1 M5 10` — the wiring-limited escape valve:
+  full M2/M3, plus a 30% slice of M4 and a 10% slice of M5.  The parent
+  keeps everything the child does not consume — the share is a **budget on
+  the child**, not a reservation grant (§6).
 * `*` sets the default cap for cells without an explicit one; explicit wins.
 * Declaration **hard-errors** unless the resulting policy grants at least
   one H and one V routing layer with share > 0, and when a share rounds to
@@ -297,7 +312,8 @@ way — a parent-view thinning — and becomes a floor knob if ever needed;
 
 ## 9. Failure modes (all LOUD, per house style)
 
-1. **Policy without both directions** — hard error at declaration.
+1. **Policy without both directions** — hard error at declaration; likewise
+   a floor above the cap (`-min M5` with cap M3).
 2. **Capped bundle infeasible under STRICT** — the existing ladder already
    reports ALLOW_OVERFLOW/BEST_EFFORT commits with WARNINGs; the message
    gains the cap so the user sees *why* the layer set was small.
@@ -393,14 +409,16 @@ its cap on the first `run_nuts`; Codex P1 on #542);
 *Deliverable: capped flat-hier flow routes under caps — including through
 `run_nuts` — and the corpus is unchanged without caps.*
 
-Open questions to settle **before** Phase 1:
-* **Q1 — cap granularity.**  Is the id-ceiling sufficient, or is an
-  explicit allow-list wanted from day one (e.g. {M2,M3,M6} skipping the
-  middle)?  Ceiling is simpler and matches the stated BKM; the mask
-  underneath supports lists whenever the command grows.
-* **Q2 — cross-level default.**  Plan says cross-level bundles take the
-  common-ancestor's policy.  Alternative: unrestricted unless explicitly
-  set.  Ancestor-policy is the compositional reading; confirm.
+Open questions — **both RESOLVED** (plan owner, 2026-07-31):
+* **Q1 — RESOLVED: the band form.**  `set_cell_layer_cap <cell> <cap>
+  [-min <floor>]` defines the default-full band; explicit shares override
+  any layer in either direction (thin inside the band, grant above it) —
+  the cap is deliberately NOT a hard bound on shares, which would outlaw
+  the escape-valve case.  See the §4 resolution rule.  This subsumes both
+  the allow-list question (the band + share overrides express every
+  practical set) and the former Phase-5 floors question.
+* **Q2 — RESOLVED: ancestor policy.**  Cross-level bundles take the
+  common-ancestor cell's policy, per the compositional reading.
 
 ### Phase 2 — bottom-up wiring (Python)
 
@@ -467,9 +485,7 @@ Open questions to settle **before** Phase 5:
 * **Q1 — depth convenience.**  `set_layer_caps_by_depth` maps BDB depth to
   caps; the counting direction (deepest-first as written, or top-first?)
   needs one decision.
-* **Q2 — floors.**  Should upper levels also be pushed OFF the leaf layers
-  (a floor: top-level bundles use ≥ M4 except pin access)?  The mask
-  supports `allowed = [floor..cap]`, but it changes stub economics (short
-  stubs love cheap LOW layers).  Proposal: measure ceiling-only first; add
-  floors only if the per-layer WL breakdown shows real leaf-layer pollution
-  from above.
+* **Q2 — floors: RESOLVED early**, absorbed into Phase 1 by the `-min`
+  band syntax (§4).  The stub-economics caveat (short stubs love cheap LOW
+  layers) stays: the §12 study reports per-layer WL with and without
+  floors so the cost is measured, not assumed.
