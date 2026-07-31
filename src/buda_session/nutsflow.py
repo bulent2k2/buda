@@ -1172,8 +1172,11 @@ class NutsFlowMixin:
         bits — deliberately the conservative pool (no midpoint optimism): a
         re-seat is only worth its perturbation when the new seat is a
         guaranteed host under the current geometry.  Honors the layer-cap
-        contract (`w.input.allowed_layers`) and skips locked bottom-up
-        copies, like the whole family.  Lowest-id (cheapest) qualifying
+        contract (`w.input.allowed_layers`), never touches a segment with a
+        user-forced layer pin (`pinned_seg_layers`), never re-seats ONTO a
+        fractionally-leased layer (`layer_shares` — the share budget is a
+        STRICT-enumeration gate this mover bypasses), and skips locked
+        bottom-up copies, like the whole family.  Lowest-id (cheapest) qualifying
         layer wins; no qualifying layer (the b61 shape — M4 full is not
         detectable here, but M4 keepout-carved is) leaves the seat alone.
         Re-solves NUTS after each pass; returns total re-seats."""
@@ -1198,6 +1201,15 @@ class NutsFlowMixin:
                 sel = w.plan.selected_topology_index
                 if sel < 0 or sel >= len(w.input.candidates):
                     continue
+                # A user-forced per-segment layer (edit_set_layer +
+                # edit_commit pin / restored sidecar) is inviolable: the
+                # planner re-applies pinned_seg_layers to any candidate, so
+                # a silent re-seat would both violate the user's pin and be
+                # snapped back by the next planner run (Codex P1 on #550).
+                pins = (list(w.input.pinned_seg_layers)
+                        if w.input.pinned_seg_layers else [])
+                if seg.seg_idx < len(pins) and pins[seg.seg_idx] >= 0:
+                    continue
                 g = self.routing_grid.get_layer_grid(seg.layer)
                 need = self._seg_member_bits(w, sel, seg.seg_idx)
                 if self._seg_admission_pool(seg, g, need) >= need:
@@ -1209,6 +1221,16 @@ class NutsFlowMixin:
                         and self.routing_grid.has_layer(l)]
                 if w.input.allowed_layers:
                     pool = [l for l in pool if l in w.input.allowed_layers]
+                # Never re-seat ONTO a fractionally-leased layer
+                # (set_cell_layer_share): the collective share budget is
+                # enforced inside the planner's STRICT enumeration, which
+                # this post-plan mover bypasses — a re-seat could silently
+                # spend past the lease (Codex P1 on #550).  Moving OFF a
+                # leased layer only frees budget, so the current seat needs
+                # no gate.
+                if w.input.layer_shares:
+                    leased = {lid for lid, _s in w.input.layer_shares}
+                    pool = [l for l in pool if l not in leased]
                 b_lo = max(seg.interval_lo, seg.track_lo_bound)
                 b_hi = min(seg.interval_hi, seg.track_hi_bound)
                 new_layer = None

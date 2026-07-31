@@ -157,6 +157,40 @@ def test_healer_commands_stamp_the_gate():
     assert getattr(s, "_healers_ran", False)     # ...but the stamp is set
 
 
+def test_reseat_heal_respects_forced_layer_pins():
+    """A user-forced per-segment layer (edit_set_layer + edit_commit pin /
+    restored sidecar, recorded in pinned_seg_layers) is inviolable: the
+    doomed M4 seat stays on M4 even though clean M6 could host it (Codex
+    P1 on #550 — a silent re-seat would violate the pin and be snapped
+    back by the next planner run anyway)."""
+    s, h_idx = _build([_DOOM_M4])
+    w = s.bundles[0]
+    sel = w.plan.selected_topology_index
+    nseg = len(w.input.candidates[sel].segments)
+    pins = [-1] * nseg
+    pins[h_idx] = 4                     # the user forced M4 for this seg
+    w.input.pinned_seg_layers = pins
+    out = _nuts(s)
+    assert "RESEAT-HEAL" not in out
+    assert s.detailed_result.num_unplaced == 8
+    assert list(w.plan.seg_layers)[h_idx] == 4
+
+
+def test_reseat_heal_never_targets_leased_layers():
+    """A fractionally-leased layer (set_cell_layer_share, recorded in
+    layer_shares) is never a re-seat HOST: the collective share budget is
+    enforced inside the planner's STRICT enumeration, which the post-plan
+    mover bypasses (Codex P1 on #550).  With M6 leased, the doomed M4 seat
+    has no qualifying host and stays put."""
+    s, h_idx = _build([_DOOM_M4])
+    w = s.bundles[0]
+    w.input.layer_shares = [(6, 50.0)]  # M6 carries a fractional lease
+    out = _nuts(s)
+    assert "RESEAT-HEAL" not in out
+    assert s.detailed_result.num_unplaced == 8
+    assert list(w.plan.seg_layers)[h_idx] == 4
+
+
 def test_reseat_heal_excludes_locked_wrappers():
     """A hier.locked wrapper's seats are never re-seated (its routing is a
     uniform fixed copy) — with the only doomed seat on a locked bundle the
