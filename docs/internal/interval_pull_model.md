@@ -118,6 +118,21 @@ corners, #534's member-bits escalation heals partial-supply strands, and the
 cull-risk refold tier (this work) heals cull-dooms.  Each is measured-accept
 or predicate-exact, so none can regress a flow that never needed it.
 
+## Measured and rejected: exact net slopes (Codex P2 on #539)
+
+`pull_f_lo/hi` are deliberately GROSS same-side anchor counts, not the net
+cost derivative.  The review correctly observed they overcount when anchors
+lie on both sides of the optimum (anchors 0/10/20: optimum {10}, net slope
+1, gross count 2).  The exact netting — finite differences of the cost
+itself, sound and direction-preserving — was implemented and **measured
+worse**: it flips which knife-edge mix2 flow lands clean (`rnr/mix2`
+0/0/0 → 2/8/1 against `mix2_topdown_refine` 1/0/0 → 0/0/0; A/B isolated —
+the repack-interval fix from the same review is QoR-free and kept).  As a
+phase-1 priority signal, "how many anchors want this move" beats the true
+gradient on the corpus; only the SIGN of the derived `net_pull` carries
+model semantics, and the optimum interval fixes that exactly either way.
+Recorded in the code comment at the counts.
+
 ## Still open (the spreader)
 
 The `pull_f_lo`/`pull_f_hi` slopes are the currency for an **explicit

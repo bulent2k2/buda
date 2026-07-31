@@ -777,9 +777,21 @@ void derive_net_pull(const Topology& topo, const Floorplan& fp,
             p_hi = std::max(p_hi, x);
         }
 
-        // Slope magnitudes just outside the interval: below p_lo every anchor
-        // still ahead of it pulls up; above p_hi every anchor already behind
-        // it pulls back down.
+        // Same-side anchor COUNTS just outside the interval — deliberately
+        // GROSS, not the net cost slope.  Codex P2 on #539 correctly
+        // observed these are not derivatives when anchors lie on both sides
+        // of the optimum (point anchors at 0/10/20: optimum {10}, net slope
+        // below it is 1, this records 2).  The exact netting was
+        // implemented (finite differences of `cost` itself — sound, and
+        // direction-preserving since the net slope outside the argmin is
+        // >= 1) and MEASURED WORSE: it flips which knife-edge mix2 flow
+        // lands clean — rnr/mix2 0/0/0 -> 2/8/1 against
+        // mix2_topdown_refine 1/0/0 -> 0/0/0, net -1 corpus flow.  As a
+        // phase-1 priority signal, "how many anchors want this move" beats
+        // the true gradient on the corpus, so the gross count stays; the
+        // magnitudes are an ORDERING heuristic, and only the SIGN of the
+        // derived net_pull carries model semantics (which the optimum
+        // interval fixes exactly either way).
         int f_lo = 0, f_hi = 0;
         for (const Anchor& a : anchors) {
             if (a.lo >= p_lo) ++f_lo;

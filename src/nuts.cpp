@@ -900,16 +900,33 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
                     if (p >= c_lo && p <= c_hi) { preferred = p; break; }
                 }
             }
+            bool from_pull = false;
             if (std::isnan(preferred)) {
                 auto it = pull_map.find(vkey);
-                preferred = (it != pull_map.end())
+                from_pull = (it != pull_map.end());
+                preferred = from_pull
                             ? it->second
                             : (victim->interval_lo + victim->interval_hi) / 2.0;
             }
             preferred = std::clamp(preferred, c_lo, c_hi);
 
-            double pos = preferred_fit(victim->interval_lo, victim->interval_hi,
-                                       victim->width, occ, preferred);
+            // Interval objective for pull-derived preferences (Codex P2 on
+            // #539): the repair re-place must score candidates against the
+            // flat optimum [pull_lo, pull_hi], exactly as place_seg does —
+            // the point form could prefer a nearby slot OUTSIDE the
+            // zero-cost span over a farther slot inside it.
+            double pos;
+            auto wit = from_pull ? ctx.pull_win_map.find(vkey)
+                                 : ctx.pull_win_map.end();
+            if (wit != ctx.pull_win_map.end() && c_lo <= c_hi) {
+                const double w_plo = std::clamp(wit->second.first,  c_lo, c_hi);
+                const double w_phi = std::clamp(wit->second.second, c_lo, c_hi);
+                pos = preferred_fit(victim->interval_lo, victim->interval_hi,
+                                    victim->width, occ, w_plo, w_phi);
+            } else {
+                pos = preferred_fit(victim->interval_lo, victim->interval_hi,
+                                    victim->width, occ, preferred);
+            }
             if (std::isnan(pos) || pos == victim->track_position) continue;
 
             pre_move.take(segments);
@@ -1984,7 +2001,9 @@ private:
                     // cannot honor.  Placement-time behavior is unchanged
                     // (pull-free members pack low, as before).
                     double pref;
-                    if (m->net_pull != 0 && pit != pull_map.end())
+                    const bool anchored_pull =
+                        (m->net_pull != 0 && pit != pull_map.end());
+                    if (anchored_pull)
                         pref = pit->second;               // anchor: keep its pull
                     else if (best_effort)
                         pref = (pit != pull_map.end()) ? pit->second
@@ -2001,7 +2020,25 @@ private:
                     const double c_lo = w_lo + half;
                     const double c_hi = w_hi - half;
                     if (c_lo <= c_hi) pref = std::clamp(pref, c_lo, c_hi);
-                    p = eng_.preferred_fit(w_lo, w_hi, m->width, occ, pref);
+                    // A pulled anchor keeps the INTERVAL objective through the
+                    // repack (Codex P2 on #539): the point form could park it
+                    // just outside the flat optimum with a zero-cost slot
+                    // available farther inside.  Non-pull preferences (charged
+                    // band centre / pack-low) are specific coordinates and
+                    // keep the point form.
+                    auto wit2 = anchored_pull
+                        ? pull_win_map.find({m->bundle_id, m->seg_idx})
+                        : pull_win_map.end();
+                    if (wit2 != pull_win_map.end() && c_lo <= c_hi) {
+                        const double wp_lo =
+                            std::clamp(wit2->second.first,  c_lo, c_hi);
+                        const double wp_hi =
+                            std::clamp(wit2->second.second, c_lo, c_hi);
+                        p = eng_.preferred_fit(w_lo, w_hi, m->width, occ,
+                                               wp_lo, wp_hi);
+                    } else {
+                        p = eng_.preferred_fit(w_lo, w_hi, m->width, occ, pref);
+                    }
                 } else {
                     p = eng_.first_fit(w_lo, w_hi, m->width, occ);
                 }
