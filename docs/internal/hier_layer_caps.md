@@ -1,14 +1,18 @@
-# Per-Cell Layer Caps — Design Plan
+# Per-Cell Layer Caps and Fractional Layer Shares — Design Plan
 
 Status: **PROPOSED PLAN** — awaiting review of the open questions in §10.
 Scope: reserve higher routing layers for higher levels of the hierarchy in
-bottom-up flows.  Each cell gets a **layer cap** (a ceiling in the metal
-stack); its cell-local interconnect may only use layers at or below the cap.
-Leaf cells route in e.g. M2/M3 only; the next level up adds M4/M5; the top
-adds M6/M7.  This is the standard custom-layout BKM: lower levels must not
-consume the routing resource the levels above them will need, and the copied
-leaf routing then leaves the high layers *entirely* clean over every instance
-instead of merely keeping keepout-shaped holes in them.
+bottom-up flows.  Each cell gets a **per-layer policy**: for every layer,
+FULL use (1.0), NO use (0), or — the practice-rooted generalization — a
+**fractional share** of that layer's tracks (e.g. a cell capped at M3 may
+additionally use 30% of M4's tracks and 10% of M5's inside its footprint).
+The simple **layer cap** (a ceiling in the metal stack) is the shorthand:
+share 1.0 at and below the cap, 0 above.  Leaf cells route in e.g. M2/M3
+only; the next level up adds M4/M5; the top adds M6/M7 — and where the
+design is wiring-limited, a level may lease a measured slice of the layers
+above it instead of hitting a hard wall.  This is the standard custom-layout
+BKM: lower levels must not consume the routing resource the levels above
+them will need — but the resource wall is a budget, not a cliff.
 
 Companion docs: [hier_bottom_up_planning.md](hier_bottom_up_planning.md) (the
 bottom-up template machinery this builds on),
@@ -56,22 +60,41 @@ bundle**.
 # Ceiling per cell: this cell's OWN interconnect may use layers with id <= cap.
 set_cell_layer_cap <cell>|* <layer_id|layer_name>
 
+# Fractional share: this cell may additionally use PCT percent of the given
+# layer's signal tracks within its footprint.  Overrides the cap for that
+# layer (a cap is just shorthand for shares 1.0 / 0).
+set_cell_layer_share <cell> <layer_id|layer_name> <pct>
+
 # Convenience: assign caps by hierarchy level in one line, deepest first.
 # Equivalent to per-cell caps derived from each cell's depth.
 set_layer_caps_by_depth <cap_deepest> [<cap_next> ...]
 
-# Clearing: '*  off' removes every cap (byte-identical to no caps).
+# Clearing: '*  off' removes every cap/share (byte-identical to no caps).
 set_cell_layer_cap * off
 ```
 
 * `set_cell_layer_cap dnuts1 M3` — cell `dnuts1`'s bundles use M2/M3 only.
+* `set_cell_layer_cap dnuts1 M3` + `set_cell_layer_share dnuts1 M4 30` +
+  `set_cell_layer_share dnuts1 M5 10` — the wiring-limited form: full M2/M3,
+  plus a 30% slice of M4 and a 10% slice of M5 inside the cell's footprint.
+  The parent level keeps everything the child does not consume — the share
+  is a **budget on the child**, not a reservation grant (see §3b).
 * `*` sets the default cap for cells without an explicit one; explicit wins.
-* The command **hard-errors** unless the capped set contains at least one H
-  and one V routing layer (an unroutable cap must fail LOUD at declaration,
-  not surface as BEST_EFFORT commits later).
+* The command **hard-errors** unless the resulting policy grants at least one
+  H and one V routing layer with share > 0 (an unroutable policy must fail
+  LOUD at declaration, not surface as BEST_EFFORT commits later).  A share
+  that rounds to **zero whole tracks per pattern period** on its layer is
+  likewise a declaration-time error, not a silent no-op (§6.6).
 * Declared any time before `run_planner hier`; like `set_bottom_up`, it is a
   cell-template attribute, so rotation-class clone templates (`<cell>90`)
-  **inherit the base cell's cap**.
+  **inherit the base cell's policy**.
+
+### Policy model
+
+The per-cell policy is a vector `share(layer) ∈ [0,1]` with `1` at and below
+the cap, `0` above, and explicit fractions where declared.  The **binary
+subset** (`share ∈ {0,1}`) is the mask design of §3 — Phase 1 — and every
+mechanism below degrades to it exactly when no fractional share exists.
 
 ### Semantics
 
@@ -143,12 +166,96 @@ a mask check (or an argument why none is needed):
 
 ---
 
+## 3b. Fractional shares — the thinned-pattern realization
+
+The load-bearing observation: **every stage already reads track supply
+through the effective `TrackPattern`** — the planner's `signal_tracks`
+capacity (`count_signal_tracks_in` at `congestion_planner.cpp:550`), NUTS's
+per-bit width (`LayerStack::eff_bus_width` from the pattern-derived
+`bit_pitch`) and dilution fallback, DetailedNUTS's placement
+(`signal_tracks_in`), and the dead-span/supply tests
+(`count_signal_tracks_in_span`).  And the slot model already has a
+non-routable type: only `SIGNAL` is routable; `CUSTOM` is a first-class
+blocked slot (`routing_grid.h:32`).
+
+So a fractional share needs **no new capacity arithmetic anywhere**: realize
+`share(L) = s` for a cell as a **derived thinned pattern** — the layer's
+global pattern with only `ceil(s × n_signal)` of each period's SIGNAL slots
+kept SIGNAL, the rest re-typed CUSTOM — installed as the view the cell-local
+solve sees on that layer.  Every consumer then prices and places against the
+thinned supply automatically, at every stage, with one mechanism:
+
+* planner `signal_tracks` capacity counts only the kept slots;
+* NUTS `bit_pitch` = `unit_pitch / n_kept` — the abstract width honestly
+  reflects the share (a 30% share makes each bit ~3.3× wider in channel
+  terms, which is exactly the right pressure to keep the cell mostly on its
+  own layers and spill upward only when genuinely wiring-limited);
+* DNUTS can only land bits on kept slots;
+* the dead-span discriminator and `check_template_tracks` pool counts see
+  the thinned supply with no code change beyond using the view.
+
+### Slot allocation policy (which tracks the child gets)
+
+Deterministic and pattern-periodic: within each repeating unit, keep the
+**first contiguous run** of `ceil(s × n_signal)` SIGNAL slots (per power
+rail group), re-type the rest.  Contiguous-per-period rather than an
+interleaved comb because the parent's leftover then also stays contiguous
+per period — an interleaved comb would fragment the parent's supply and
+break `timing_critical`'s contiguous-window requirement for wide parent
+buses.  Periodicity preserves `unit_pitch`, so **instance phase congruence
+and `align_bottom_up` are untouched** (the thinned pattern has the same
+period and origin as the global one).
+
+### Two enforcement tiers, by where the bundle is planned
+
+* **Tier 1 — cell-local solves (the main consumer).**  The bottom-up
+  template solve already constructs its own planner and NUTS engine
+  (`hier.py:1817,1993`); it additionally receives a **derived
+  `RoutingGridStack` view**: the global stack with the cell's thinned
+  patterns substituted on shared layers.  Class-move re-plans re-run the
+  cell-local solve and inherit the view.  This is exact, DNUTS-real, and
+  cheap — and it is safe *here* precisely because the cell-local solve is a
+  closed context (the objection that killed view-based enforcement for the
+  binary mask in §1 does not apply: the mask must hold in the GLOBAL solve
+  too, where no per-solve view exists; a fractional share below applies
+  there differently).
+* **Tier 2 — the global solve** (top-down-planned bundles of a shared-layer
+  cell, cross-level bundles, and a RELEASE-pass instance re-solved
+  individually).  No per-solve grid view exists, so the share is enforced as
+  a **capacity scale in the planner**: for a wrapper with `share(L)=s`, the
+  slide-clamped band capacity on layer L inside the instance bbox is
+  `s × capacity` (one multiply in `CongestionPlanner::capacity()`'s
+  track-mode branch, keyed by the wrapper under evaluation).  This is a
+  *per-bundle* approximation of the collective budget — several bundles of
+  one cell could together exceed `s` — documented as such; the exact
+  collective form (per-band usage split by budget group) is deliberately
+  deferred until a measured flow needs it (§10 Q6).  For a released
+  instance, Tier 2 plus the copied siblings' keepouts in practice bounds it
+  tightly.
+
+### The share is a budget, not a reservation
+
+The parent is **not** restricted to the complement: it sees the full
+pattern minus the child's *actual placed routing* (the existing copied-
+routing keepouts).  A child that uses 12% of its 30% M4 slice leaves 88% of
+M4 to the parent.  This is the wiring-limited-design semantics the BKM
+wants — the guarantee the parent needs is an upper bound on child
+consumption, which the thinned pattern enforces physically.  (If a hard
+parent-side reservation is ever wanted, it is the same mechanism pointed
+the other way — a parent-view thinning — and becomes a floor knob, §10 Q3.)
+
+---
+
 ## 4. Persistence
 
-* Schema: `ALTER TABLE cell ADD COLUMN layer_cap INTEGER NOT NULL DEFAULT -1`
-  (v20; precedent: `cell.bottom_up` v17 at `src/bdb.cpp:390,702`).  `-1` =
-  uncapped.  The `*` default cap is session state persisted in BDB meta
-  (`layer_cap_default`), like other flow knob memos.
+* Schema (v20): a `cell_layer_share` table — `(cell_id, layer_id, share
+  REAL)` — rather than a single column, since the policy is a vector.  A
+  plain cap stores only the rows it implies differ from default (share 0
+  above the cap is representable implicitly via a `cell.layer_cap INTEGER
+  DEFAULT -1` column for the common case + share rows for the fractional
+  exceptions; precedent for the column: `cell.bottom_up` v17 at
+  `src/bdb.cpp:390,702`).  The `*` default cap is session state persisted in
+  BDB meta (`layer_cap_default`), like other flow knob memos.
 * `load_pipeline [expanded]` re-resolves masks from the persisted caps before
   re-validating bundles — a resumed session must plan under the same caps.
 * `save_bdb` / fixtures: the column appears in the diffable `.bdb.sql`; the
@@ -203,6 +310,15 @@ a mask check (or an argument why none is needed):
    reports every violating persisted segment and refuses to continue without
    an explicit `run_planner hier` re-plan; never silently keeps illegal
    metal.
+6. **Share that rounds to zero kept tracks per period** (e.g. 5% of a
+   4-signal-slot pattern) — declaration-time hard error naming the layer,
+   the period's slot count, and the minimum meaningful share.  A share the
+   pattern cannot express must not silently become a cap.
+7. **Tier-2 over-consumption** (several global-solve bundles of one cell
+   collectively exceeding the per-bundle-scaled share) — an advisory audit
+   after `run_planner hier` sums each capped cell's committed usage per
+   shared layer against `share × supply` in its bbox and WARNs on excess,
+   so the per-bundle approximation's slack is visible, never silent.
 
 ---
 
@@ -242,6 +358,17 @@ a mask check (or an argument why none is needed):
 7. **Byte-identity corpus guard**: full `qor_corpus.py --compare` with no
    caps declared — **must be 0 better / 0 worse / all unchanged with WL
    +0.00%** (the F-sites all short-circuit on empty mask).
+8. **Unit — thinned pattern**: `share 0.3` on an 8-signal-slot period keeps
+   `ceil(2.4)=3` contiguous SIGNAL slots per period, same `unit_pitch` and
+   origin; `count_signal_tracks_in` and `eff_bus_width` reflect it;
+   `share 1.0` is the identity pattern (bit-identical view).
+9. **Bottom-up integration — shared layer (mid)**: leaf capped at M3 with
+   `share M4 30`; assert (a) every leaf-template bit on M4 lands on a kept
+   slot, (b) leaf M4 usage ≤ 30% of M4's tracks in the instance bbox,
+   (c) the parent uses M4 tracks the child left free (the budget-not-
+   reservation semantics), (d) phase congruence across instances still
+   holds (`check_template_tracks` clean on the thinned view).
+10. **Tier-2 audit fires**: a constructed over-consumption WARNs.
 
 ## 9. Measurement plan
 
@@ -276,11 +403,27 @@ a mask check (or an argument why none is needed):
 4. **Depth convenience command** — `set_layer_caps_by_depth` maps BDB depth
    to caps.  Depth counting must be pinned down (deepest-first as written,
    or top-first?) — trivially bikesheddable, needs one decision.
+5. **Slot allocation comb** — contiguous-per-period is the plan (parent
+   contiguity, `timing_critical` safety).  Alternative: an offset parameter
+   so *sibling cell types* sharing the same parent layer get disjoint runs
+   (cell A the first 30%, cell B the next 20%) instead of all children
+   competing for the same low slots.  Worth deciding before Phase 3; the
+   pattern derivation supports an offset trivially.
+6. **Tier-2 exactness** — the global-solve share is enforced per-bundle
+   (capacity scale), which several bundles of one cell can collectively
+   exceed; the audit (§6.7) makes the slack visible.  Exact collective
+   budgeting needs per-band usage split by budget group inside `GlobalCut`
+   — real complexity.  Proposal: ship the approximation + audit, revisit
+   only if a measured flow shows the audit warning with real DNUTS damage.
+7. **Do shares imply demand-reservation changes?**  An unplanned capped
+   cell's reservation (§3, F3) should park `share-weighted` width on shared
+   layers — proposal: reserve `s × eff_width` on a shared layer's bands,
+   full width on fully-owned layers.  Confirm the weighting.
 
 ## 11. Phasing
 
-* **Phase 1 — core (C++)**: mask field + effective-TOP scoring context;
-  enforcement in `optimize_topologies` / ladder / reservations /
+* **Phase 1 — binary core (C++)**: mask field + effective-TOP scoring
+  context; enforcement in `optimize_topologies` / ladder / reservations /
   `post_nuts`; `set_cell_layer_cap` command + validation; no-cap
   byte-identity corpus run.  *Deliverable: capped flat-hier flow routes
   under caps; corpus unchanged without caps.*
@@ -288,13 +431,20 @@ a mask check (or an argument why none is needed):
   expansion / clone / load_pipeline; cell-local solves; `align_bottom_up`
   LCM; `check_template_tracks` scoping; persistence v20.  *Deliverable:
   capped `mix2_fast_bottomup` end-to-end with per-layer WL evidence.*
-* **Phase 3 — healer compliance**: dead-span escalation, width gate pitch,
+* **Phase 3 — fractional shares**: thinned-pattern derivation +
+  `set_cell_layer_share`; the Tier-1 grid view for cell-local solves; the
+  Tier-2 capacity scale + over-consumption audit; share-aware reservations
+  (Q7).  *Deliverable: the wiring-limited leaf (M3 cap + 30% M4 + 10% M5)
+  routes end to end; budget-not-reservation semantics tested.*
+* **Phase 4 — healer compliance**: dead-span escalation, width gate pitch,
   release/class-move verification, `LAYER_CAP` advisory check, cap-aware
-  reporting (`dump_hbundles`, ladder warnings).  *Deliverable: healers never
-  violate a cap; violations impossible by audit.*
-* **Phase 4 — flows, study, docs**: the two capped QoR vehicles, the
-  measurement table, CLAUDE.md command rows, BDB_REFERENCE schema,
-  HIER_* doc updates, `set_layer_caps_by_depth` once Q4 is settled.
+  reporting (`dump_hbundles`, ladder warnings) — all over the full policy
+  vector, not just the binary mask.  *Deliverable: healers never violate a
+  cap or exceed a share; violations impossible by audit.*
+* **Phase 5 — flows, study, docs**: capped AND shared QoR vehicles (the
+  share study wants a deliberately wiring-limited leaf so the M4 spill is
+  exercised), the measurement table, CLAUDE.md command rows, BDB_REFERENCE
+  schema, HIER_* doc updates, `set_layer_caps_by_depth` once Q4 is settled.
 
 Each phase lands with its tests green and the no-cap corpus byte-identical;
-Phases 1–2 are the minimum for a usable capped bottom-up flow.
+Phases 1–2 are the minimum usable capped flow, Phase 3 adds the shared form.
