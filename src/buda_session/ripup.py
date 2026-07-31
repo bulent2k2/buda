@@ -722,6 +722,16 @@ class RipupMixin:
                             or not self.routing_grid.has_layer(lid)):
                         pitches = []
                         break                 # width-mode layer: no track bound
+                    # has_layer() proves a RoutingGrid EXISTS, not that a
+                    # global pattern set the per-track bit pitch: an
+                    # add_grid_override on an undefined layer default-
+                    # constructs the grid, and eff_bus_width then returns the
+                    # width/dilution fallback — not a pitch — which must not
+                    # be multiplied by a bit count (Codex P2 on #531).
+                    pat = self.routing_grid.get_layer_grid(lid).global_pattern()
+                    if not pat.slots or pat.signal_density() <= 0:
+                        pitches = []
+                        break                 # override-only / degenerate: stand down
                     pitches.append(self.layers.eff_bus_width(1, 1.0, lid))
                 if not pitches:
                     continue
@@ -3036,7 +3046,12 @@ class RipupMixin:
         # snapshot, escalate + re-solve, accept only on a strictly better
         # metric, restore otherwise.  Runs once — _escalate_dead_low_segments
         # loops internally until no dead LOW segment remains.
-        if stage == 'b' and self._rr_m_primary(metric()) > 0:
+        if (stage == 'b' and self._rr_m_primary(metric()) > 0
+                and getattr(self, '_heal_dead_spans_in_healers',
+                            _RR_HEAL_DEAD_SPANS_DEFAULT)):
+            # Same opt-out the entry heal honors: a study / regression bisect
+            # that sets _heal_dead_spans_in_healers=False must retain the
+            # pre-feature healer behavior end to end (Codex P2 on #531).
             cur_end = metric()
             heal_snap = self._rr_snapshot()
             n_refold = self._escalate_dead_low_segments()

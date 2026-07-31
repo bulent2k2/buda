@@ -121,6 +121,23 @@ def test_no_track_pattern_never_gates():
     assert not any(v.values())
 
 
+def test_override_only_layer_stands_down():
+    """has_layer() proves a RoutingGrid exists, not that a global pattern set
+    the per-track bit pitch: an add_grid_override on an undefined layer
+    default-constructs the grid, and eff_bus_width then returns the
+    width/dilution fallback — not a pitch — which must not be multiplied by a
+    bit count (Codex P2 on #531).  The gate stands down for the direction."""
+    s = _session(32, patterns=False)
+    stack = buda.RoutingGridStack()
+    empty = buda.TrackPattern(0.0, [])
+    stack.add_override(4, 0, 0, 3000, 3000, empty)
+    stack.add_override(5, 0, 0, 3000, 3000, empty)
+    assert stack.has_layer(4) and stack.has_layer(5)   # the trap Codex named
+    s.routing_grid = stack
+    _, v = _verdicts(s)
+    assert not any(v.values())
+
+
 def test_env_optout_disables_the_gate(monkeypatch):
     """BUDA_RR_WIDTH_GATE=0 is the study opt-out: the gated fixture's
     verdicts all flip to feasible."""
