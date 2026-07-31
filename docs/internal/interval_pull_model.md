@@ -133,9 +133,42 @@ gradient on the corpus; only the SIGN of the derived `net_pull` carries
 model semantics, and the optimum interval fixes that exactly either way.
 Recorded in the code comment at the counts.
 
-## Still open (the spreader)
+## The spreader, resolved (measured redirect)
 
-The `pull_f_lo`/`pull_f_hi` slopes are the currency for an **explicit
-spreading mechanism** (staggering segments that share a pull target) — the
-lever for healerless flows like `chip_topdown` where no measured-accept loop
-exists to absorb concentration.  Tracked on issue #523.
+The imagined mechanism — staggering segments that share a pull target,
+priced by `pull_f_lo/hi` — was probed on the motivating vehicle and
+**measurably cannot win**: on bigHalf no-rr, 14 of 15 span-starved segments
+have NO supply-rich seat anywhere in their slide window (and the 15th's is
+already inside its flat optimum).  Spreading segments apart manufactures no
+keepout-clear tracks.  The healerless concentration loss is the
+**keepout-cull class** — 102/102 of the vehicle's opens were bits admitted
+via the midpoint pool and then stranded by `cull_keepout_crossers` — and
+the affordable levers are supply-honest:
+
+1. **Span-clear-first ranking** (`detailed_nuts.cpp`, Path A): when the
+   midpoint fallback engages, the pool mixes guaranteed-survivor tracks
+   (clear across the whole abstract span) with midpoint-only ones;
+   nearest-to-anchor was blind to the difference (b21: 8 clear tracks idle,
+   all 36 bits culled).  Clear tracks rank first; byte-identical when the
+   span pool suffices.
+
+2. **The cull heal** (`_final_cull_heal`, hooked at `run_detailed_nuts`):
+   the refold's cull-risk tier for flows that never reach ripup, under a
+   **componentwise** accept — opens strictly down AND overlaps not up (the
+   refold's lexicographic trade is safe only when a later ripup grinds the
+   collateral; on chip scale it bought −735 opens with +230 overlaps and
+   was rejected) — bisecting the batch to its worst-cull half on rejection.
+   Scoped out of bottom-up sessions (any `hier.locked` wrapper, the width
+   gate's boundary): the accept protects THIS stage, but a locked-template
+   flow's downstream healers re-roll from the changed start state
+   (aligned_sql walked 2/16/1 → 6/58/9 before the scope-out; its motivating
+   corners are healerless and unlocked, so the boundary costs nothing).
+
+Measured (base = post-#542 main): **2 better / 0 worse / 32 unchanged** —
+bigHalf no-rr 102 → **0/0** (better than the pre-interval-model 39, better
+than any recorded state of that fixture), `chip3_topdown` 123/1993/141 →
+**121/1731/133** (unplaced −13%), `chip_topdown` 3311 → 3307.  The chip
+flows' remaining residual mass is the **reservation-conflict class** (1652
+warnings on chip_topdown — occupancy at scale, the #536-adjacent decision),
+not culls; the `pull_f` slopes remain available as pricing currency if a
+future mechanism attacks that class.

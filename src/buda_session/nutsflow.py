@@ -944,6 +944,16 @@ class NutsFlowMixin:
             return 0
         if not getattr(self, '_heal_dead_spans_in_healers', True):
             return 0
+        # Scope-out: bottom-up sessions (any hier.locked wrapper) — the same
+        # blunt boundary as ripup's width gate, for the same measured reason:
+        # the componentwise accept protects THIS stage, but a locked-template
+        # flow's downstream healers re-roll from the changed start state, and
+        # class-move granularity amplifies any perturbation (aligned_sql:
+        # a locally-accepted heal walked the endpoint 2/16/1 -> 6/58/9).  The
+        # heal's motivating corners — the HEALERLESS vehicles — have no
+        # locked wrappers, so the boundary costs nothing there.
+        if any(w.hier.locked for w in self.bundles):
+            return 0
 
         def _culled_by_seg():
             """(bundle, seg) -> culled bit count, from the live results."""

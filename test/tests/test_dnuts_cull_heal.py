@@ -130,6 +130,22 @@ def test_cull_heal_noop_without_culls():
     assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # unchanged LOW M2
 
 
+def test_cull_heal_scoped_out_of_bottom_up_sessions():
+    """A session with any hier.locked wrapper (a bottom-up flow) must not
+    run the heal — the same blunt boundary as ripup's width gate: the
+    componentwise accept protects THIS stage, but a locked-template flow's
+    downstream healers re-roll from the changed start state (aligned_sql
+    walked 2/16/1 -> 6/58/9 before the scope-out).  The doomed stub
+    therefore stays stranded on its LOW layer, exactly as with the heal
+    family opted out."""
+    s, h_idx = _build("add_keepout 56 0 68 500 2")
+    s.bundles[0].hier.locked = True
+    out = _nuts(s, heal=True)
+    assert "CULL-HEAL" not in out
+    assert s.detailed_result.num_unplaced == 8
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # untouched LOW M2
+
+
 def test_span_clear_tracks_rank_first():
     """The ranking lever, isolated on a raw engine fixture: a keepout at
     y <= 32, x in [56, 68] overlaps the span [40, 100] but misses its
