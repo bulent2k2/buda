@@ -1,7 +1,11 @@
 # Per-Cell Layer Caps and Fractional Layer Shares — Design Plan
 
-Status: **PROPOSED PLAN** — awaiting review of the per-phase open questions
-in §13.  Doc-only: no code changes ride with this plan.
+Status: **LANDED** — all five phases of §13 are built, tested and merged
+(PRs #544 P1, #546 P2, #547 P3, #549 P4, plus Phase 5), every one of them
+byte-identical on the no-policy QoR corpus.  The §12 study is measured.
+The one deliberate non-goal is the parent-side floor knob (§6).
+User-facing command docs live in [BDB_REFERENCE.md](../BDB_REFERENCE.md);
+this document is the design record and the enforcement inventory.
 
 Companion docs: [hier_bottom_up_planning.md](hier_bottom_up_planning.md) (the
 bottom-up template machinery this builds on),
@@ -755,6 +759,28 @@ Open questions: none — this phase closes the inventory of §5/§6.
 Capped and shared QoR vehicles, the measurement table, CLAUDE.md command
 rows, BDB_REFERENCE schema, HIER_* doc updates, `set_layer_caps_by_depth`.
 *Deliverable: the §12 study, published; docs current.*
+
+**LANDED (as built).**
+
+* `set_layer_caps_by_depth <cap1> [<cap2> …] [-min <floor>] | off`
+  (`buda_cmds/bdb_cmds.py`) over intrinsic bottom-anchored cell levels
+  (`BudaSession._cell_levels`, `buda_session/hier.py`): childless
+  non-container = 1, childless container = 2, else 1 + max over child
+  cells' levels.  The child graph unions the new BDB accessor
+  `cell_child_edges()` (cell-type edges) with the elaborated component
+  tree; container-ness is `component.is_leaf == 0` or a floorplan
+  container block.  By-depth entries are typed
+  (`_cell_layer_policy_by_depth`) so an explicit `set_cell_layer_cap`
+  outranks them in either declaration order and `off` clears only them.
+  18 tests in `test/tests/test_layer_caps_by_depth.py`.
+* `flow/chip/chip_bottomup_caps.buda` — `chip_bottomup` plus that one
+  line; the three policy vehicles are permanent `qor_corpus.py` rows.
+* §12 measured and published (separation, cost, and the wrong prediction).
+* User docs: `BDB_REFERENCE.md` gained full sections for all three policy
+  commands plus the v20 schema entry; `HIER_PLANNER.md` §7c places the
+  policy beside the demand-reservation mechanism; CLAUDE.md row added.
+* Byte-identity corpus: **0 better / 0 worse / 34 unchanged** (of 37 — the
+  3 new rows are the policy vehicles), abstract and detailed WL +0.00%.
 
 Open questions — **all RESOLVED** (plan owner, 2026-07-31):
 * **Q1 — RESOLVED: bottom-anchored intrinsic LEVELS, container-aware.**
