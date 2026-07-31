@@ -1,0 +1,25 @@
+# chip — the next-level hier vehicle (2026-07-30): three instances each of
+# big2 (flow/big_data_test/big2/tc3b_flat_x5.buda, 44 blocks / 2840 nets, as a
+# flat-script cell) and mix2 (flow/rnr/mix2.bdb.sql, 100 leaf blocks / 1270
+# nets, imported as a BDB cell — build_hier_demo's one-level flatten), SA-placed
+# with 25% bloat channels, plus 100 random cross-instance top buses:
+# 6 instances, 432 leaf blocks, 13320 nets.  Rebuild recipe (deterministic
+# iteration budget) in flow/chip/ReadMe.md.
+#
+# TOP-DOWN variant: the plain hier pipeline, NO healers (fast experimentation —
+# add negotiate_congestion / ripup_reroute / refine_selection rounds manually
+# when studying healing at this scale).
+source chip_tracks.buda
+open_bdb chip.bdb.sql
+derive_busterms 2
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+run_hier_bundler depth 2
+generate_hier_topologies
+run_planner hier 5 signal_tracks
+run_nuts
+run_detailed_nuts
+report_wl
+check_design
+exit
