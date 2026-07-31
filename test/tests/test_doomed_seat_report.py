@@ -126,6 +126,32 @@ def test_locked_copies_excluded():
     assert "doomed" not in _check(s)
 
 
+def test_advisory_uses_configured_layer_name():
+    """A layer's id and name are independent (`def_layer 2 Hmetal H 50`);
+    the advisory must print the configured name, not a synthesized M{id}
+    (Codex P2 on #548)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    setup = ["def_layer 2 Hmetal H 50" if c.startswith("def_layer 2")
+             else c for c in _SETUP]
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        for c in setup:
+            s.do_command(c)
+        s.do_command("add_keepout 0 0 200 500 2")
+    w = s.bundles[0]
+    sel = w.plan.selected_topology_index
+    sl = list(w.plan.seg_layers)
+    for si, seg in enumerate(w.input.candidates[sel].segments):
+        if seg.start.y == seg.end.y:
+            sl[si] = 2
+    w.plan.seg_layers = sl
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        s.do_command("run_nuts")
+    out = _check(s)
+    assert "on Hmetal (LOW)" in out
+    assert "on M2" not in out
+
+
 def test_advisory_does_not_disturb_qor_parse():
     """tools/qor_corpus.py parses check_design's summary via the regex
     `across (\\d+) bundle\\(s\\)` (first match wins) and the literal

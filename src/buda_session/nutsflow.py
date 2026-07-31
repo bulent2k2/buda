@@ -800,10 +800,16 @@ class NutsFlowMixin:
                                self.layers.is_top(seg.layer)))
         if not doomed:
             return 0
+        # Configured layer names (Codex P2 on #548): a layer's id and name
+        # are independent (`def_layer 2 Hmetal H 50`), so resolve through
+        # the def_layer mapping with the L{id} fallback rather than
+        # synthesizing M{id}.
+        lnames = self._make_layer_names()
         for seg, need, pool, is_top in doomed:
             tag = "TOP" if is_top else "LOW"
+            lname = lnames.get(seg.layer, f"L{seg.layer}")
             print(f"  Advisory: supply-doomed seat: bundle {seg.bundle_id} "
-                  f"seg {seg.seg_idx} on M{seg.layer} ({tag}) — "
+                  f"seg {seg.seg_idx} on {lname} ({tag}) — "
                   f"{pool} signal track(s) in the placed window < {need} "
                   f"member bit(s); every bit strands at DNUTS.")
         n_top = sum(1 for *_, t in doomed if t)
