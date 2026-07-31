@@ -396,6 +396,14 @@ public:
     void set_cell_layer_band(const std::string& cell, int floor, int cap);
     std::pair<int,int> cell_layer_band(const std::string& cell) const;
     std::vector<std::string> layer_capped_cells() const;
+    // Fractional layer shares (v20 cell_layer_share table, Phase 3).
+    // set_cell_layer_share upserts (share <= 0 deletes the row); throws if
+    // the cell is not defined. cell_layer_shares returns the cell's
+    // (layer_id, share) rows sorted by layer; layer_share_cells lists cells
+    // holding any share row, sorted.
+    void set_cell_layer_share(const std::string& cell, int layer_id, double share);
+    std::vector<std::pair<int,double>> cell_layer_shares(const std::string& cell) const;
+    std::vector<std::string> layer_share_cells() const;
 
     // ── Cell-level pins (port interface) ──────────────────────────────────
     // Define or update a port on a cell type.  px/py are offsets from the

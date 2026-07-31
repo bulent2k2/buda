@@ -1430,16 +1430,24 @@ class HierMixin:
         of leaving stale masks behind."""
         if wrappers is None:
             wrappers = self.bundles
-        pol = getattr(self, "_cell_layer_policy", None)
-        if not pol:
-            n_cleared = 0
-            for w in wrappers:
-                if w.input.allowed_layers or w.input.layer_cap >= 0 \
-                        or w.input.layer_floor >= 0:
-                    w.input.allowed_layers = []
-                    w.input.layer_cap = -1
-                    w.input.layer_floor = -1
-                    n_cleared += 1
+        pol = getattr(self, "_cell_layer_policy", None) or {}
+        shares = getattr(self, "_cell_layer_shares", None) or {}
+
+        def _clear(w):
+            if w.input.allowed_layers or w.input.layer_cap >= 0 \
+                    or w.input.layer_floor >= 0 or w.input.layer_shares \
+                    or w.input.share_group:
+                w.input.allowed_layers = []
+                w.input.layer_cap = -1
+                w.input.layer_floor = -1
+                w.input.layer_shares = []
+                w.input.share_group = ""
+                w.input.share_budgets = []
+                return True
+            return False
+
+        if not pol and not shares:
+            n_cleared = sum(1 for w in wrappers if _clear(w))
             if n_cleared:
                 print(f"[LayerCap] cleared stale masks on {n_cleared} "
                       f"bundle(s) (no cell layer policies declared)")
@@ -1447,14 +1455,10 @@ class HierMixin:
         all_lids = sorted(
             list(self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL)) +
             list(self.layers.get_layer_ids_by_dir(buda.LayerDir.VERTICAL)))
-        n_gov = 0
-
-        def _clear(w):
-            if w.input.allowed_layers or w.input.layer_cap >= 0 \
-                    or w.input.layer_floor >= 0:
-                w.input.allowed_layers = []
-                w.input.layer_cap = -1
-                w.input.layer_floor = -1
+        bu_cells = set(self.bdb.bottom_up_cells()) if self.bdb else set()
+        comps = ({c.name: c for c in self.bdb.all_components()}
+                 if (self.bdb is not None and shares) else {})
+        n_gov = n_shared = 0
 
         for w in wrappers:
             ctx = self._bu_cell_of(w.input.original_bundle.cell_context)
@@ -1462,18 +1466,70 @@ class HierMixin:
                 _clear(w)
                 continue
             entry = pol.get(ctx, pol.get("*"))
-            if entry is None:
+            cell_shares = {lid: s for (c, lid), s in shares.items()
+                           if c == ctx and s < 1.0}
+            if entry is None and not cell_shares:
                 _clear(w)
                 continue
-            floor, cap = entry
-            lo = floor if floor >= 0 else -(10 ** 9)
-            w.input.allowed_layers = [l for l in all_lids if lo <= l <= cap]
-            w.input.layer_cap = cap
-            w.input.layer_floor = floor
-            n_gov += 1
-        if n_gov:
-            print(f"[LayerCap] {n_gov} bundle(s) governed by cell layer "
-                  f"policies ({len(pol)} polic{'y' if len(pol) == 1 else 'ies'})")
+            if entry is not None:
+                floor, cap = entry
+                lo = floor if floor >= 0 else -(10 ** 9)
+                # The band, PLUS any shared layer — a share overrides the
+                # band in either direction (§4 resolution: thin inside it,
+                # or grant a bounded slice above the cap).
+                w.input.allowed_layers = sorted(
+                    {l for l in all_lids if lo <= l <= cap}
+                    | set(cell_shares))
+                w.input.layer_cap = cap
+                w.input.layer_floor = floor
+                n_gov += 1
+            else:
+                # Share-only cell: unrestricted band (empty mask), the
+                # shared layers still fractionally leased.
+                w.input.allowed_layers = []
+                w.input.layer_cap = -1
+                w.input.layer_floor = -1
+            w.input.layer_shares = sorted(cell_shares.items())
+            if cell_shares:
+                n_shared += 1
+            # Tier-2 collective-budget identity (Q3 resolved): only for
+            # bundles the GLOBAL planner plans — a bottom-up cell's
+            # templates get the Tier-1 thinned views instead (their local
+            # width model uses the derived bit pitch, whose units the
+            # scalar budget's global-basis books would not match).
+            w.input.share_group = ""
+            w.input.share_budgets = []
+            insts = list(w.input.original_bundle.instances)
+            if (cell_shares and ctx not in bu_cells and insts
+                    and self.routing_grid is not None):
+                comp = comps.get(insts[0])
+                if comp is not None and comp.x1 >= 0:
+                    budgets = []
+                    for lid, s in sorted(cell_shares.items()):
+                        if not self.routing_grid.has_layer(lid):
+                            continue
+                        g = self.routing_grid.get_layer_grid(lid)
+                        horiz = (self.layers.get_layer_dir(lid)
+                                 == buda.LayerDir.HORIZONTAL)
+                        # An H layer's tracks stack along y; V along x.
+                        if horiz:
+                            trks = g.signal_tracks_in(
+                                0.5 * (comp.x1 + comp.x2), comp.y1, comp.y2)
+                        else:
+                            trks = g.signal_tracks_in(
+                                0.5 * (comp.y1 + comp.y2), comp.x1, comp.x2)
+                        bit_pitch = self.layers.eff_bus_width(1, 1.0, lid)
+                        budgets.append((lid, s * len(trks) * bit_pitch))
+                    if budgets:
+                        w.input.share_group = f"{ctx}@{insts[0]}"
+                        w.input.share_budgets = budgets
+        if n_gov or n_shared:
+            msg = f"[LayerCap] {n_gov} bundle(s) governed by cell layer " \
+                  f"policies ({len(pol)} polic{'y' if len(pol) == 1 else 'ies'})"
+            if n_shared:
+                msg += (f"; {n_shared} carrying fractional shares "
+                        f"({len(shares)} share(s))")
+            print(msg)
 
     def _restore_layer_policies(self):
         """Rebuild _cell_layer_policy from the open BDB (v20): per-cell bands
@@ -1520,7 +1576,167 @@ class HierMixin:
                   + ", ".join(
                       f"{c}=[{f if f >= 0 else 'min'}..{cp}]"
                       for c, (f, cp) in sorted(restored.items())))
-        return len(restored)
+        # Fractional shares (v20 cell_layer_share, Phase 3): same contract —
+        # typed entries win, a previous BDB's restored entries drop first.
+        shr = getattr(self, "_cell_layer_shares", None) or {}
+        prev_s = getattr(self, "_cell_layer_shares_restored", None) or set()
+        dropped_s = {k for k in prev_s if k in shr}
+        for k in dropped_s:
+            del shr[k]
+        restored_s = {}
+        for c in self.bdb.layer_share_cells():
+            for lid, s in self.bdb.cell_layer_shares(c):
+                if (c, lid) not in shr:
+                    restored_s[(c, lid)] = s
+        self._cell_layer_shares_restored = set(restored_s)
+        if restored_s or dropped_s:
+            shr.update(restored_s)
+            self._cell_layer_shares = shr
+        if restored_s:
+            print(f"[LayerShare] restored {len(restored_s)} persisted "
+                  f"share(s): "
+                  + ", ".join(f"{c}:L{lid}={s:g}"
+                              for (c, lid), s in sorted(restored_s.items())))
+        return len(restored) + len(restored_s)
+
+    def _cell_share_layers(self, group):
+        """{layer_id: share} of `group`'s cell (clone names resolve to the
+        base cell); empty when the cell has no fractional shares."""
+        shares = getattr(self, "_cell_layer_shares", None) or {}
+        cell = self._bu_cell_of(group)
+        return {lid: s for (c, lid), s in shares.items()
+                if c == cell and s < 1.0}
+
+    def _thinned_pattern(self, pat, share):
+        """The derived THINNED TrackPattern of hier_layer_caps.md §6: keep
+        the FIRST floor(share x n_signal) SIGNAL slots of the period
+        (Q1 resolved: contiguous-first for every cell type), re-type the
+        rest CUSTOM (non-routable).  Same origin, widths and spacings —
+        unit_pitch and phase congruence are untouched, so align_bottom_up
+        and the instance phase machinery never notice."""
+        n_sig = sum(1 for s in pat.slots if s.type == "SIGNAL")
+        keep = int(share * n_sig + 1e-9)              # floor: budget rounding
+        slots, kept = [], 0
+        for s in pat.slots:
+            t, lbl = s.type, s.label
+            if t == "SIGNAL":
+                if kept < keep:
+                    kept += 1
+                else:
+                    t, lbl = "CUSTOM", "share_cut"
+            slots.append(buda.TrackSlot(type=t, label=lbl,
+                                        width=s.width,
+                                        space_after=s.space_after))
+        return buda.TrackPattern(origin=pat.origin, slots=slots)
+
+    def _cell_share_views(self, group):
+        """Tier-1 view pair for a shared cell's cell-local solves
+        (hier_layer_caps.md §6): (layers_view, {lid: thinned_pattern}).
+        layers_view is a LayerStack clone whose shared layers carry
+        bit_pitch = unit_pitch / n_kept — the honest per-bit channel cost
+        under the thinned supply (a 30%-declared share on an 8-slot period
+        keeps 2, making each bit 4x wider: the economic pressure that keeps
+        the cell on its own layers).  No shares => (self.layers, {}) — the
+        byte-identity short-circuit."""
+        cell_shares = self._cell_share_layers(group)
+        if not cell_shares or self.routing_grid is None:
+            return self.layers, {}
+        layers_view = self.layers.clone()
+        thinned = {}
+        for lid, s in sorted(cell_shares.items()):
+            if not self.routing_grid.has_layer(lid):
+                continue
+            pat = self.routing_grid.get_layer_grid(lid).global_pattern()
+            if not pat.slots:
+                continue
+            tp = self._thinned_pattern(pat, s)
+            n_kept = sum(1 for sl in tp.slots if sl.type == "SIGNAL")
+            if n_kept <= 0:
+                continue          # declaration-time validation prevents this
+            thinned[lid] = tp
+            layers_view.set_bit_pitch(lid, pat.unit_pitch() / n_kept)
+        return (layers_view, thinned) if thinned else (self.layers, {})
+
+    def _bu_share_dnuts_overrides(self, ref_ids):
+        """Tier-1 DNUTS view (Phase 3): for every bottom-up REFERENCE
+        instance whose cell holds fractional shares, the shared layers'
+        thinned patterns as instance-bbox override specs
+        [(lid, x1, y1, x2, y2, pattern)].  The reference DNUTS engine
+        installs them on a grid CLONE, so the reference bits can only land
+        on kept slots — the copies then inherit legality (phase-aligned
+        siblings share the kept-slot positions) — while every other bundle
+        (and the parent over the cell) keeps the full pattern: the share is
+        a budget on the CELL, never a reservation against the parent."""
+        out = []
+        if self.bdb is None or self.routing_grid is None:
+            return out
+        comps = {c.name: c for c in self.bdb.all_components()}
+        seen = set()
+        for w in self.bundles:
+            b = w.input.original_bundle
+            if b.id not in ref_ids or not b.instances:
+                continue
+            cell_shares = self._cell_share_layers(b.cell_context)
+            if not cell_shares:
+                continue
+            comp = comps.get(b.instances[0])
+            if comp is None or comp.x1 < 0:
+                continue
+            for lid, s in sorted(cell_shares.items()):
+                key = (b.instances[0], lid)
+                if key in seen or not self.routing_grid.has_layer(lid):
+                    continue
+                seen.add(key)
+                pat = self.routing_grid.get_layer_grid(lid).global_pattern()
+                if not pat.slots:
+                    continue
+                out.append((lid, int(round(comp.x1)), int(round(comp.y1)),
+                            int(round(comp.x2)), int(round(comp.y2)),
+                            self._thinned_pattern(pat, s)))
+        return out
+
+    def _audit_share_budgets(self, wrappers):
+        """§9.7 defense-in-depth: after planning, sum each share group's
+        COMMITTED usage per shared layer (global-basis eff widths — the
+        budget's own units) and WARN on any excess.  The STRICT gate makes
+        this unreachable on the strict path; ALLOW_OVERFLOW/BEST_EFFORT
+        commits can legally exceed and must be visible, never silent."""
+        used, budgets = {}, {}
+        for w in wrappers:
+            inp = w.input
+            if not inp.share_group or not inp.layer_shares:
+                continue
+            sel = w.plan.selected_topology_index
+            if not (0 <= sel < len(inp.candidates)) or not w.plan.seg_layers:
+                continue
+            for lid, b in inp.share_budgets:
+                budgets[(inp.share_group, lid)] = b
+            shared = {lid for lid, _s in inp.layer_shares}
+            t = inp.candidates[sel]
+            nbits = len(inp.original_bundle.net_names)
+            for si, lid in enumerate(w.plan.seg_layers):
+                if lid not in shared or si >= len(t.segments):
+                    continue
+                n = nbits
+                if t.seg_bits and si < len(t.seg_bits) and t.seg_bits[si]:
+                    n = len(t.seg_bits[si])
+                frac = (n / nbits) if nbits else 1.0
+                eff = self.layers.eff_bus_width(
+                    n, inp.width * frac, lid)
+                key = (inp.share_group, lid)
+                used[key] = used.get(key, 0.0) + eff
+        n_over = 0
+        for key, u in sorted(used.items()):
+            b = budgets.get(key, -1.0)
+            if b >= 0.0 and u > b + 1e-6:
+                grp, lid = key
+                print(f"WARNING: [LayerShare] {grp}: committed usage on "
+                      f"L{lid} = {u:.1f} exceeds the collective budget "
+                      f"{b:.1f} (share x supply in the instance bbox) — a "
+                      f"non-STRICT commit spent past the lease; re-plan or "
+                      f"raise the share")
+                n_over += 1
+        return n_over
 
     def _audit_restored_layer_caps(self):
         """Failure mode 5 of docs/internal/hier_layer_caps.md §9: a cap
@@ -1983,7 +2199,17 @@ class HierMixin:
             print(f"WARNING: bottom-up cell '{cell}': no placed instance "
                   f"to derive the cell-local floorplan — skipped")
             return
-        planner = buda.CongestionPlanner(fp, self.layers)
+        # Tier-1 share view (Phase 3): a shared cell's local solve prices
+        # its shared layers at the THINNED bit pitch (unit_pitch / n_kept)
+        # via a derived LayerStack — the width model then charges the honest
+        # per-bit channel cost of the leased slice.  layers_view must
+        # outlive the planner (it holds a reference) — both are locals of
+        # this call.  No shares => self.layers, byte-identical.
+        layers_view, thinned = self._cell_share_views(cell)
+        if thinned:
+            print(f"[LayerShare] cell '{cell}': local solve under thinned "
+                  f"view on layer(s) {sorted(thinned)}")
+        planner = buda.CongestionPlanner(fp, layers_view)
         for pname, pval in self._planner_params.items():
             planner.set_planner_param(pname, pval)
         # Same healer-gate declaration as the global planner (Codex
@@ -2159,7 +2385,11 @@ class HierMixin:
                 wrappers[0].input.original_bundle.instances[0])
             if fp is None:
                 continue
-            nuts = buda.NUTSEngine(fp, self.layers)
+            # Tier-1 share view: the local NUTS widths must match what the
+            # local planner charged (same derived LayerStack; locals keep
+            # it alive through the run).
+            layers_view, _thin = self._cell_share_views(cell)
+            nuts = buda.NUTSEngine(fp, layers_view)
             nuts.set_track_pitch(self._nuts_pitch)
             # The local planner's candidate-extended Hanan grid (mirrors
             # run_nuts handing the global planner's grid to the global

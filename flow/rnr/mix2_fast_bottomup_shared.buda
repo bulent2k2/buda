@@ -1,0 +1,48 @@
+source mix_tracks.buda
+open_bdb mix2.bdb.sql
+
+# Bottom-up: plan/NUTS each cell template once, copy to all instances.
+set_bottom_up dnuts1
+set_bottom_up dnuts2
+set_bottom_up dogleg1
+set_bottom_up dogleg2
+
+# The WIRING-LIMITED shared vehicle (docs/internal/hier_layer_caps.md §12,
+# Phase 3): the caps vehicle measured that dnuts1's 32-bit cell-local buses
+# genuinely exceed the LOW pair's supply (M3-capped it commits with planner
+# overflow 13-35.5 and strands all 32 bits at DNUTS).  Instead of the mid
+# band, dnuts1 keeps the M3 cap and LEASES a bounded slice of M4/M5 — the
+# escape valve the shares exist for: the cell-local solve prices the leased
+# slice at its thinned bit pitch and spills only what M2/M3 cannot carry;
+# the parent keeps everything the lease leaves unused (budget, not
+# reservation).  The other leaf cells stay hard-capped as in the caps twin.
+set_cell_layer_cap dnuts1 M3
+set_cell_layer_share dnuts1 M4 75
+set_cell_layer_share dnuts1 M5 75
+set_cell_layer_cap dnuts2 M3
+set_cell_layer_cap dogleg1 M5
+set_cell_layer_cap dogleg2 M5
+
+derive_busterms 2
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+run_hier_bundler depth 2
+generate_hier_topologies
+run_planner hier 5 signal_tracks
+dump_topologies
+run_nuts
+# Healing stage a: negotiate the measured NUTS overlaps, then the rnr
+# hill-climb finishes the residual (locked bottom-up copies respected).
+negotiate_congestion
+ripup_reroute
+check_design nuts
+check_template_tracks on_mismatch independent
+run_detailed_nuts
+# Healing stage b: negotiate each DNUTS-open segment's window, then hill-climb.
+negotiate_congestion
+ripup_reroute
+check_design
+report_wirelength
+visualize
+exit

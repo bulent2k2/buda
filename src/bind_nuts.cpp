@@ -332,6 +332,11 @@ void bind_nuts(py::module_& m) {
 
     py::class_<RoutingGridStack>(m, "RoutingGridStack")
         .def(py::init<>())
+        // Deep copy for derived per-cell views (hier_layer_caps.md Phase 3
+        // Tier 1: the bottom-up DNUTS reference solve gets a clone with the
+        // shared cells' thinned patterns installed as instance-bbox
+        // overrides).
+        .def("clone", [](const RoutingGridStack& s) { return s; })
         .def("define_layer",  &RoutingGridStack::define_layer,
              py::arg("layer_id"), py::arg("pattern"), py::arg("is_horizontal"))
         .def("add_override",  &RoutingGridStack::add_override,

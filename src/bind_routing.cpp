@@ -479,6 +479,10 @@ void bind_routing(py::module_& m) {
 
     // ── LayerStack ────────────────────────────────────────────────────────
     py::class_<LayerStack>(m, "LayerStack").def(py::init<>())
+        // Deep copy for derived per-cell views (hier_layer_caps.md Phase 3
+        // Tier 1: a shared cell's cell-local solve gets a clone with
+        // bit_pitch = unit_pitch / n_kept on its shared layers).
+        .def("clone", [](const LayerStack& s) { return s; })
         .def("add_layer",               &LayerStack::add_layer)
         .def("set_layer_dilution",      &LayerStack::set_layer_dilution)
         .def("set_layer_overhead",      &LayerStack::set_layer_overhead)
@@ -575,7 +579,13 @@ void bind_routing(py::module_& m) {
         .def_readwrite("allowed_layers",    &BundleInput::allowed_layers)
         .def_readwrite("layer_cap",         &BundleInput::layer_cap)
         .def_readwrite("layer_floor",       &BundleInput::layer_floor)
-        .def("allows_layer",                &BundleInput::allows_layer);
+        .def("allows_layer",                &BundleInput::allows_layer)
+        // Fractional layer shares, Tier-2 state (hier_layer_caps.md Phase 3).
+        .def_readwrite("layer_shares",      &BundleInput::layer_shares)
+        .def_readwrite("share_group",       &BundleInput::share_group)
+        .def_readwrite("share_budgets",     &BundleInput::share_budgets)
+        .def("share_of",                    &BundleInput::share_of)
+        .def("share_budget_of",             &BundleInput::share_budget_of);
 
     py::class_<BundlePlan>(m, "BundlePlan")
         .def(py::init<>())

@@ -137,6 +137,7 @@ static double band_available_length(
 void CongestionPlanner::build_congestion_map() {
     floorplan_.get_hanan_grid(x_grid_, y_grid_);
     rebuild_cuts_();
+    share_used_.clear();      // fresh books with fresh cuts (Phase 3)
     warn_above_top_layers_();
 }
 
@@ -762,6 +763,40 @@ double CongestionPlanner::plan_band_overlap(const BundleWrapper& bw,
     return overlap;
 }
 
+void CongestionPlanner::share_usage_of_(const BundleWrapper& bw, const Topology& t,
+                                        const std::vector<int>& seg_layers,
+                                        std::map<int,double>& out) const {
+    // The budget's usage metric: the plan's summed effective widths per
+    // SHARED layer — physical demand only (no +pitch margin), matching the
+    // session-side budget units (s × tracks-in-bbox × bit_pitch).
+    const int nbits = (int)bw.input.original_bundle.get_net_names().size();
+    for (int si = 0; si < (int)t.segments.size() && si < (int)seg_layers.size(); ++si) {
+        const int lid = seg_layers[si];
+        if (lid < 0 || bw.input.share_of(lid) >= 1.0) continue;
+        const int    n = seg_bit_count(t, si, nbits);
+        const double w = (nbits > 0 && n != nbits)
+                             ? bw.input.width * ((double)n / (double)nbits)
+                             : bw.input.width;
+        out[lid] += layers_.eff_bus_width(n, w, lid);
+    }
+}
+
+bool CongestionPlanner::share_budget_ok_(const BundleWrapper& bw, const Topology& t,
+                                         const std::vector<int>& seg_layers) const {
+    if (bw.input.share_group.empty() || bw.input.layer_shares.empty())
+        return true;
+    std::map<int,double> usage;
+    share_usage_of_(bw, t, seg_layers, usage);
+    for (const auto& [lid, u] : usage) {
+        const double budget = bw.input.share_budget_of(lid);
+        if (budget < 0.0) continue;              // no budget declared
+        auto it = share_used_.find({bw.input.share_group, lid});
+        const double used = (it == share_used_.end()) ? 0.0 : it->second;
+        if (used + u > budget + 1e-9) return false;
+    }
+    return true;
+}
+
 double CongestionPlanner::usable_band_cap(const GlobalCut& c, int b, bool is_vcut,
                                           int slide_lo, int slide_hi) const {
     // Signal-track capacity (Gap A part 2): count the discrete SIGNAL tracks the
@@ -791,6 +826,12 @@ double CongestionPlanner::usable_band_cap(const GlobalCut& c, int b, bool is_vcu
                                           (double)lo, (double)hi);
         double cap = ((double)ntrk + track_cap_slack_) *
                      layers_.eff_bus_width(1, 1.0, c.layer_id);   // * bit pitch
+        // Fractional share (Phase 3 Tier 2): the wrapper under evaluation
+        // sees s × supply on a layer its cell only fractionally leases —
+        // the one multiply of hier_layer_caps.md §6.  Null context / share
+        // 1.0 = unchanged.
+        if (cur_share_input_ != nullptr)
+            cap *= cur_share_input_->share_of(c.layer_id);
         if (cap <= 0.0) return 0.0;
         return cap + track_pitch_;
     }
@@ -841,15 +882,37 @@ void CongestionPlanner::apply_reservation(const BundleWrapper& bw, double sign) 
     int top_v = effective_top_layer(bw.input, LayerDir::VERTICAL);
     for (auto& c : cuts_) {
         // The bundle's H demand rides V-cuts on the TOP H layer; its V demand
-        // rides H-cuts on the TOP V layer.
+        // rides H-cuts on the TOP V layer.  Fractional shares (Phase 3 Q2,
+        // resolved: proportional, never over-reserve): a SHARED layer of the
+        // matching direction additionally parks s × eff — the share is the
+        // legal upper bound on the cell's eventual consumption there.  The
+        // eff basis is the session LayerStack's (global-pattern) width — the
+        // thinned view's is ~1/s inflated, so s × thinned would silently
+        // rebuild the full-width over-reservation the resolution rejects.
         bool is_vcut = (c.dir == LayerDir::VERTICAL);
         int  lid     = is_vcut ? top_h : top_v;
-        if (lid < 0 || c.layer_id != lid) continue;
+        double frac  = 0.0;
+        if (lid >= 0 && c.layer_id == lid) {
+            // An effective-TOP layer that ALSO carries a share (thinned
+            // inside the band) reserves the leased fraction, not full
+            // width — share_of is 1.0 for unshared layers, so the plain
+            // policy is unchanged (Codex #547).
+            frac = bw.input.share_of(c.layer_id);
+        } else if (!bw.input.layer_shares.empty()) {
+            double s = bw.input.share_of(c.layer_id);
+            if (s < 1.0 &&
+                layers_.get_layer_dir(c.layer_id) ==
+                    (is_vcut ? LayerDir::HORIZONTAL : LayerDir::VERTICAL))
+                frac = s;
+        }
+        if (frac <= 0.0) continue;
+        lid = c.layer_id;
         // Cut must lie inside the region along the cut axis.
         int clo = is_vcut ? bw.hier.res_x1 : bw.hier.res_y1;
         int chi = is_vcut ? bw.hier.res_x2 : bw.hier.res_y2;
         if (c.cut_coord < clo || c.cut_coord > chi) continue;
-        double eff = layers_.eff_bus_width(nbits, bw.input.width, lid) + track_pitch_;  // +pitch: Gap 1
+        double eff = frac * (layers_.eff_bus_width(nbits, bw.input.width, lid)
+                             + track_pitch_);   // +pitch: Gap 1
         // Every band overlapping the region's perpendicular range could be
         // the bundle's eventual home, so each carries the reservation.
         const auto& grid = is_vcut ? y_grid_ : x_grid_;
@@ -1210,6 +1273,16 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     PlanResult res;
     if (bw.input.candidates.empty()) return res;
 
+    // Fractional-share context (Phase 3 Tier 2): every capacity read below
+    // sees this wrapper's s × supply on its shared layers.  Cleared on exit
+    // (single-threaded per planner instance; parallel sweeps use per-thread
+    // planner copies).
+    cur_share_input_ = &bw.input;
+    struct ShareCtxReset {
+        const BundleInput*& p;
+        ~ShareCtxReset() { p = nullptr; }
+    } share_ctx_reset_{cur_share_input_};
+
     const bool enforce_window   = (mode != PlanMode::BEST_EFFORT);
     const bool enforce_overflow = (mode == PlanMode::STRICT);
     constexpr double kOvEps = 1e-6;   // float noise only — any real overflow is hard
@@ -1315,6 +1388,10 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         double topo_score    = 0.0;
         double topo_peak_fill = 0.0; // worst chosen-band fill (kSegs gate)
         bool   topo_infeasible = false;
+        // This candidate's own running usage per SHARED layer — the budget
+        // gate in the layer enumeration must count earlier segments of the
+        // same candidate, not just the committed books (Phase 3 Q3).
+        std::map<int,double> cand_share_use;
 
         // Build ConnTopology for this candidate to obtain authoritative
         // perp_lo/perp_hi ranges (including spines/trunks via Pass 2).
@@ -1511,6 +1588,28 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     // default) changes nothing.
                     if (!bw.input.allows_layer(lid)) continue;
                     double eff  = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), lid);
+                    // Scalar collective budget (Phase 3 Q3), STRICT: a
+                    // shared layer whose group lease cannot host this
+                    // segment on top of the books + this candidate's own
+                    // earlier segments is not a choice — the enumeration
+                    // steers to an in-band alternative INSIDE the mode,
+                    // instead of every candidate failing on the exhausted
+                    // layer and the ladder escalating past the promise.
+                    if (enforce_overflow &&
+                            !bw.input.share_group.empty() &&
+                            bw.input.share_of(lid) < 1.0) {
+                        const double budget = bw.input.share_budget_of(lid);
+                        if (budget >= 0.0) {
+                            auto itb = share_used_.find(
+                                {bw.input.share_group, lid});
+                            double used = (itb == share_used_.end())
+                                              ? 0.0 : itb->second;
+                            auto itc = cand_share_use.find(lid);
+                            if (itc != cand_share_use.end())
+                                used += itc->second;
+                            if (used + eff > budget + 1e-9) continue;
+                        }
+                    }
                     int    pp   = band_perp(lid, eff);
                     double ov   = score_segment(seg, lid, eff, pp, slide_lo, slide_hi);
                     if (charge_pull_target_ >= 2 && enforce_overflow && ov <= kOvEps &&
@@ -1648,6 +1747,8 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             // books mirror NUTS inter-bus spacing (Gap 1).
             double eff = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), best_lid);
             apply_segment(seg, best_lid, eff + track_pitch_, perp_pos);
+            if (bw.input.share_of(best_lid) < 1.0)
+                cand_share_use[best_lid] += eff;
             seg_layers.push_back(best_lid);
             seg_perp.push_back(perp_pos);
             if (costs_out)
@@ -1731,6 +1832,17 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             continue;
         }
 
+        // Scalar collective budget gate (Phase 3 Q3, STRICT only): a
+        // candidate whose commit would push this wrapper's share_group past
+        // a shared layer's budget is refused here and the ladder moves on —
+        // ALLOW_OVERFLOW/BEST_EFFORT may still commit it (LOUD via the
+        // ladder's own warnings + the §9.7 post-plan audit), never strand.
+        if (mode == PlanMode::STRICT &&
+                !share_budget_ok_(bw, topo, seg_layers)) {
+            rollback_candidate();
+            continue;
+        }
+
         bool is_better = false;
         if (topo_score < best_score - 1e-6) {
             is_better = true;
@@ -1762,6 +1874,16 @@ void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& p
                                     double sign) {
     const int nbits = (int)bw.input.original_bundle.get_net_names().size();
     const Topology& t = bw.input.candidates[plan.best_topo];
+    // Scalar collective budget books (Phase 3 Q3): commit_plan is the single
+    // charge/uncharge chokepoint, so keeping the per-(group, shared layer)
+    // counter here makes every trial / rip-up / recharge path consistent by
+    // construction.  No shares anywhere = no-op.
+    if (!bw.input.share_group.empty() && !bw.input.layer_shares.empty()) {
+        std::map<int,double> usage;
+        share_usage_of_(bw, t, plan.seg_layers, usage);
+        for (const auto& [lid, u] : usage)
+            share_used_[{bw.input.share_group, lid}] += sign * u;
+    }
     for (int si = 0; si < (int)t.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
         int pp  = (si < (int)plan.seg_perp.size()) ? plan.seg_perp[si] : INT_MIN;
         int lid = plan.seg_layers[si];
@@ -2314,6 +2436,7 @@ void CongestionPlanner::recharge_committed_(
     // Usage is back to zero, so every recorded distribution describes a charge
     // that no longer exists; the loop below re-records as it re-commits.
     charge_log_.clear();
+    share_used_.clear();      // the share books rebuild with the re-commits
     for (const auto& bw : bundles) {
         if (&bw == exclude || !has_committed_plan_(bw)) continue;
         commit_plan(bw, fixed_plan_of_(bw));

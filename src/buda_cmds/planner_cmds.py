@@ -206,6 +206,10 @@ def cmd_run_planner(session, cmd, args, cmd_line):
                 w.plan.seg_perp = list(asn.seg_perp)
         session.bundles = expanded
         session._planner_is_hier = True
+        # §9.7 share audit (Phase 3): committed usage vs each cell
+        # instance's collective budget — the STRICT gate keeps the strict
+        # path clean; a non-STRICT commit past the lease must be LOUD.
+        session._audit_share_budgets(session.bundles)
         print(f"run_planner hier: {len(session.bundles)} wrappers after expansion")
     else:
         # Re-planning invalidates any adopted dogleg (and its pins): the

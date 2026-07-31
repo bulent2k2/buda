@@ -236,13 +236,19 @@ automatically:
 ### Slot allocation policy
 
 Deterministic and pattern-periodic: within each repeating unit, keep the
-**first contiguous run** of `ceil(s × n_signal)` SIGNAL slots (per power
-rail group), re-type the rest.  Contiguous-per-period rather than an
-interleaved comb: the parent's leftover then also stays contiguous per
-period — an interleaved comb would fragment the parent's supply and break
-`timing_critical`'s contiguous-window requirement for wide parent buses.
-Periodicity preserves `unit_pitch`, so **instance phase congruence and
-`align_bottom_up` are untouched**.
+**first contiguous run** of `floor(s × n_signal)` SIGNAL slots (per power
+rail group; floor per the budget-rounding rule above — this paragraph
+predated that resolution), re-type the rest.  Contiguous-per-period rather
+than an interleaved comb: the parent's leftover then also stays contiguous
+per period — an interleaved comb would fragment the parent's supply and
+break `timing_critical`'s contiguous-window requirement for wide parent
+buses.  Periodicity preserves `unit_pitch`, so **instance phase congruence
+and `align_bottom_up` are untouched**.  RESOLVED (plan owner, 2026-07-31,
+Phase 3 Q1): ship contiguous-first-slots for every cell type; the
+per-sibling OFFSET (disjoint runs so a track index is leased to at most
+one child type) stays unexposed until a measured design shows the
+contention — same-index leases maximize the parent's uniformly-clean
+corridor, so the default is not just simpler but plausibly better.
 
 ### Two enforcement tiers, by where the bundle is planned
 
@@ -262,9 +268,11 @@ Periodicity preserves `unit_pitch`, so **instance phase congruence and
   instance bbox is `s × capacity` (one multiply in
   `CongestionPlanner::capacity()`'s track-mode branch, keyed by the wrapper
   under evaluation).  A *per-bundle* approximation of the collective budget
-  — several bundles of one cell could together exceed `s` — documented as
-  such and made visible by the audit of §9.7; the exact collective form is
-  deferred (§13, Phase 3 Q3).
+  — several bundles of one cell could together exceed `s` — closed by the
+  **scalar collective budget** (§13 Phase 3 Q3, RESOLVED): one running
+  counter per (cell-instance, shared layer) refuses any candidate whose
+  commit would push the cell's total past `s × supply(bbox)`, with the
+  §9.7 audit kept as defense-in-depth.
 
 ### The share is a budget, not a reservation
 
@@ -482,7 +490,7 @@ As built:
 * **Byte-identity corpus** (no policy declared): 0 better / 0 worse /
   34 unchanged; abstract + detailed WL both +0.00%.
 
-### Phase 3 — fractional shares
+### Phase 3 — fractional shares — LANDED 2026-07-31
 
 Thinned-pattern derivation + `set_cell_layer_share`; Tier-1 grid view for
 cell-local solves; Tier-2 capacity scale + over-consumption audit;
@@ -490,32 +498,98 @@ share-aware reservations.  *Deliverable: the wiring-limited leaf (M3 cap +
 30% M4 + 10% M5) routes end to end; budget-not-reservation semantics
 tested.*
 
-Open questions to settle **before** Phase 3:
-* **Q1 — slot allocation comb.**  Contiguous-per-period is the plan (parent
-  contiguity, `timing_critical` safety).  Alternative: an offset parameter
-  so *sibling cell types* sharing a parent layer get disjoint runs (cell A
-  the first 30%, cell B the next 20%) instead of all children competing for
-  the same low slots.  The pattern derivation supports an offset trivially.
-* **Q2 — reservation weighting.**  An unplanned policied cell's demand
-  reservation should park `s × eff_width` on a shared layer's bands, full
-  width on fully-owned layers.  Confirm the weighting.
-* **Q3 — Tier-2 exactness.**  Per-bundle capacity scaling does NOT uphold
-  the user-visible budget: two 30% bundles of one cell can collectively
-  take 60%, and a post-plan audit warns without restoring the tracks
-  (Codex P1 on #542 — review position: enforce collectively before
-  shipping, or reject Tier-2 shared bundles until exact).  The option
-  space, cheapest first:
-  (a) audit-only — rejected by review as under-delivering the promise;
-  (b) **scalar collective budget** — track committed usage per
-  (cell-instance, shared layer) as one number and refuse a candidate that
-  would push the cell's total past `s × supply(bbox)`; coarser than
-  per-band but enforces the promise, cheap, and sequential-commit order
-  makes it exact for the budget scalar;
-  (c) exact per-band group accounting inside `GlobalCut` — the full
-  mechanism, real complexity.
-  Proposal: (b) as the Phase-3 minimum, (c) only if a measured flow shows
-  per-band violations that the scalar budget misses.  Decision owner: this
-  question — the review's position is recorded, not adopted unilaterally.
+Open questions — **all three RESOLVED** (plan owner, 2026-07-31):
+* **Q1 — RESOLVED: contiguous-first, no offset knob yet.**
+  Contiguous-per-period with every cell type keeping the FIRST slots of
+  each period (parent contiguity, `timing_critical` safety).  The
+  per-sibling offset (disjoint runs so a track index is leased to at most
+  one child type) stays unexposed until a measured design shows the
+  contention: same-index leases concentrate all child consumption on the
+  same track indices, which maximizes the parent's uniformly-clean
+  corridor over a mixed row of instances — the default is not just
+  simpler but plausibly better for long parent trunks.  The derivation
+  supports an offset trivially if that call is ever revisited.
+* **Q2 — RESOLVED: proportional, never over-reserve.**  An unplanned
+  policied cell's demand reservation parks `s × eff_width` on a shared
+  layer's bands and full width on fully-owned effective-TOP layers — the
+  reservation is a forecast of eventual consumption, and the share is the
+  legal upper bound on it.  Implementation nuance pinned with the
+  decision: `eff_width` here is the GLOBAL-pattern effective width — the
+  thinned-view width is already `~1/s` inflated per bit
+  (`unit_pitch / n_kept`), so `s × thinned_width ≈ full width`, silently
+  reconstructing the over-reservation this resolution rejects.
+* **Q3 — RESOLVED: (b), the scalar collective budget.**  Per-bundle
+  capacity scaling alone does NOT uphold the user-visible budget: two 30%
+  bundles of one cell can collectively take 60% (Codex P1 on #542).  The
+  decided form: one running counter per (cell-instance, shared layer);
+  a candidate whose commit would push the cell's total past
+  `s × supply(bbox)` is refused and the ladder moves on.  Coarser than
+  per-band accounting but it enforces the promise, costs one counter, and
+  sequential-commit order makes it exact for the budget scalar; the §9.7
+  audit stays as defense-in-depth.  Escalate to (c) exact per-band group
+  accounting inside `GlobalCut` only if a measured flow shows per-band
+  violations the scalar bound misses (quantity legal, placement crowded
+  into one band).  Option (a) audit-only stays rejected.
+
+As built:
+
+* **Command** — `set_cell_layer_share <cell> <layer> <pct>`: LOUD
+  declaration-time validation (unknown layer/cell, missing track pattern,
+  a share whose `floor(s × n_signal)` keeps zero slots names the minimum
+  meaningful share); `pct 100` = explicit full use (share removed);
+  persisted in the v20 `cell_layer_share` table (write-through, restore
+  with the typed-wins/BDB-switch contract, `* off` clears shares too).
+* **Thinned derivation** (Q1) — first `floor(s × n_signal)` SIGNAL slots
+  kept per period, rest re-typed CUSTOM; origin and `unit_pitch`
+  unchanged, so phase congruence and `align_bottom_up` are untouched.
+* **Tier 1** — the derived PAIR (thinned grid + LayerStack clone with
+  `bit_pitch = unit_pitch / n_kept`) handed to the cell-local planner and
+  NUTS; the bottom-up DNUTS reference solve runs on a grid clone with
+  each shared cell's thinned pattern installed as an instance-bbox
+  override — reference bits (hence all copies) land only on kept slots;
+  eng2 (and the parent over the cell) keeps the full grid: budget, not
+  reservation.
+* **Tier 2** — `usable_band_cap` track-mode capacity × `share_of(layer)`
+  under the plan_bundle share context; the SCALAR COLLECTIVE BUDGET (Q3)
+  enforced INSIDE the STRICT layer enumeration (committed books + the
+  candidate's own earlier segments vs `s × supply(bbox)`), so the
+  enumeration steers to an in-band alternative within the mode — measured
+  necessity: a candidate-level gate alone made every candidate fail on
+  the exhausted layer and ALLOW_OVERFLOW committed past the promise.
+  The books live in `commit_plan(±1)` — the single charge chokepoint —
+  and reset with band usage, so every trial/rip-up/recharge path is
+  consistent by construction.  A candidate-level gate remains as backstop.
+* **Reservations** (Q2) — `s × eff_width` parked on shared layers of the
+  matching direction (global-pattern basis; the thinned view's width is
+  ~1/s inflated and would rebuild the rejected over-reservation); full
+  width on the owned effective-TOP pair.
+* **§9.7 audit** — after `run_planner hier`, WARN on any non-STRICT
+  commit past a lease.
+* **Vehicle** — `flow/rnr/mix2_fast_bottomup_shared.buda`: dnuts1 keeps
+  the M3 cap and leases 75% of M4/M5 (the caps twin measured its 32-bit
+  buses genuinely exceeding LOW supply).  Ends `Success` / 0 overlaps /
+  0 unplaced.  Per-cell per-layer detailed WL:
+
+  | context | M2 | M3 | M4 | M5 | M6 | M7 |
+  |---|---|---|---|---|---|---|
+  | TOP-LEVEL | 13176 | 6752 | 66478 | 113690 | 164800 | 121382 |
+  | dnuts1 (M3 + 75% M4/M5) | 13230 | 19200 | 134496 | 159133 | **0** | **0** |
+  | dnuts2 (≤M3) | 3795 | 3786 | **0** | **0** | **0** | **0** |
+  | dogleg1 (≤M5) | 0 | 0 | 8890 | 25512 | **0** | **0** |
+  | dogleg2 (≤M5) | 0 | 0 | 11790 | 24844 | **0** | **0** |
+
+  dnuts1 carries real M2/M3 load under its cap (the caps twin at band
+  ≤M5 kept M3 at 0) and stays off M6/M7 entirely.  At 50% shares the
+  lease is measurably too tight for the `independent`-solved misaligned
+  instance (64 bits strand — the honest wiring-limited boundary); 75%
+  routes clean.
+* **Tests** — 9 in `test_layer_shares.py` (plan §11 items 5/7/8 + the
+  resolution/persistence paths), incl. the collective-budget vehicle:
+  with a budget that fits one, exactly one of two same-group bundles
+  gets the shared layer under STRICT and the other lands in-band;
+  without shares both take it.
+* **Byte-identity corpus** (no shares declared): 0 better / 0 worse /
+  34 unchanged; abstract + detailed WL both +0.00%.
 
 ### Phase 4 — healer compliance
 

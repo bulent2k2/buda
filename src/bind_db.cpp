@@ -428,6 +428,10 @@ void bind_db(py::module_& m) {
              py::arg("cell"), py::arg("floor"), py::arg("cap"))
         .def("cell_layer_band", &BDB::cell_layer_band, py::arg("cell"))
         .def("layer_capped_cells", &BDB::layer_capped_cells)
+        .def("set_cell_layer_share", &BDB::set_cell_layer_share,
+             py::arg("cell"), py::arg("layer_id"), py::arg("share"))
+        .def("cell_layer_shares", &BDB::cell_layer_shares, py::arg("cell"))
+        .def("layer_share_cells", &BDB::layer_share_cells)
         .def("add_inst",        &BDB::add_inst,
              py::arg("inst_name"), py::arg("cell_name"), py::arg("parent_name"),
              py::arg("x"), py::arg("y"))
