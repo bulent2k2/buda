@@ -236,13 +236,19 @@ automatically:
 ### Slot allocation policy
 
 Deterministic and pattern-periodic: within each repeating unit, keep the
-**first contiguous run** of `ceil(s × n_signal)` SIGNAL slots (per power
-rail group), re-type the rest.  Contiguous-per-period rather than an
-interleaved comb: the parent's leftover then also stays contiguous per
-period — an interleaved comb would fragment the parent's supply and break
-`timing_critical`'s contiguous-window requirement for wide parent buses.
-Periodicity preserves `unit_pitch`, so **instance phase congruence and
-`align_bottom_up` are untouched**.
+**first contiguous run** of `floor(s × n_signal)` SIGNAL slots (per power
+rail group; floor per the budget-rounding rule above — this paragraph
+predated that resolution), re-type the rest.  Contiguous-per-period rather
+than an interleaved comb: the parent's leftover then also stays contiguous
+per period — an interleaved comb would fragment the parent's supply and
+break `timing_critical`'s contiguous-window requirement for wide parent
+buses.  Periodicity preserves `unit_pitch`, so **instance phase congruence
+and `align_bottom_up` are untouched**.  RESOLVED (plan owner, 2026-07-31,
+Phase 3 Q1): ship contiguous-first-slots for every cell type; the
+per-sibling OFFSET (disjoint runs so a track index is leased to at most
+one child type) stays unexposed until a measured design shows the
+contention — same-index leases maximize the parent's uniformly-clean
+corridor, so the default is not just simpler but plausibly better.
 
 ### Two enforcement tiers, by where the bundle is planned
 
@@ -262,9 +268,11 @@ Periodicity preserves `unit_pitch`, so **instance phase congruence and
   instance bbox is `s × capacity` (one multiply in
   `CongestionPlanner::capacity()`'s track-mode branch, keyed by the wrapper
   under evaluation).  A *per-bundle* approximation of the collective budget
-  — several bundles of one cell could together exceed `s` — documented as
-  such and made visible by the audit of §9.7; the exact collective form is
-  deferred (§13, Phase 3 Q3).
+  — several bundles of one cell could together exceed `s` — closed by the
+  **scalar collective budget** (§13 Phase 3 Q3, RESOLVED): one running
+  counter per (cell-instance, shared layer) refuses any candidate whose
+  commit would push the cell's total past `s × supply(bbox)`, with the
+  §9.7 audit kept as defense-in-depth.
 
 ### The share is a budget, not a reservation
 
@@ -490,32 +498,38 @@ share-aware reservations.  *Deliverable: the wiring-limited leaf (M3 cap +
 30% M4 + 10% M5) routes end to end; budget-not-reservation semantics
 tested.*
 
-Open questions to settle **before** Phase 3:
-* **Q1 — slot allocation comb.**  Contiguous-per-period is the plan (parent
-  contiguity, `timing_critical` safety).  Alternative: an offset parameter
-  so *sibling cell types* sharing a parent layer get disjoint runs (cell A
-  the first 30%, cell B the next 20%) instead of all children competing for
-  the same low slots.  The pattern derivation supports an offset trivially.
-* **Q2 — reservation weighting.**  An unplanned policied cell's demand
-  reservation should park `s × eff_width` on a shared layer's bands, full
-  width on fully-owned layers.  Confirm the weighting.
-* **Q3 — Tier-2 exactness.**  Per-bundle capacity scaling does NOT uphold
-  the user-visible budget: two 30% bundles of one cell can collectively
-  take 60%, and a post-plan audit warns without restoring the tracks
-  (Codex P1 on #542 — review position: enforce collectively before
-  shipping, or reject Tier-2 shared bundles until exact).  The option
-  space, cheapest first:
-  (a) audit-only — rejected by review as under-delivering the promise;
-  (b) **scalar collective budget** — track committed usage per
-  (cell-instance, shared layer) as one number and refuse a candidate that
-  would push the cell's total past `s × supply(bbox)`; coarser than
-  per-band but enforces the promise, cheap, and sequential-commit order
-  makes it exact for the budget scalar;
-  (c) exact per-band group accounting inside `GlobalCut` — the full
-  mechanism, real complexity.
-  Proposal: (b) as the Phase-3 minimum, (c) only if a measured flow shows
-  per-band violations that the scalar budget misses.  Decision owner: this
-  question — the review's position is recorded, not adopted unilaterally.
+Open questions — **all three RESOLVED** (plan owner, 2026-07-31):
+* **Q1 — RESOLVED: contiguous-first, no offset knob yet.**
+  Contiguous-per-period with every cell type keeping the FIRST slots of
+  each period (parent contiguity, `timing_critical` safety).  The
+  per-sibling offset (disjoint runs so a track index is leased to at most
+  one child type) stays unexposed until a measured design shows the
+  contention: same-index leases concentrate all child consumption on the
+  same track indices, which maximizes the parent's uniformly-clean
+  corridor over a mixed row of instances — the default is not just
+  simpler but plausibly better for long parent trunks.  The derivation
+  supports an offset trivially if that call is ever revisited.
+* **Q2 — RESOLVED: proportional, never over-reserve.**  An unplanned
+  policied cell's demand reservation parks `s × eff_width` on a shared
+  layer's bands and full width on fully-owned effective-TOP layers — the
+  reservation is a forecast of eventual consumption, and the share is the
+  legal upper bound on it.  Implementation nuance pinned with the
+  decision: `eff_width` here is the GLOBAL-pattern effective width — the
+  thinned-view width is already `~1/s` inflated per bit
+  (`unit_pitch / n_kept`), so `s × thinned_width ≈ full width`, silently
+  reconstructing the over-reservation this resolution rejects.
+* **Q3 — RESOLVED: (b), the scalar collective budget.**  Per-bundle
+  capacity scaling alone does NOT uphold the user-visible budget: two 30%
+  bundles of one cell can collectively take 60% (Codex P1 on #542).  The
+  decided form: one running counter per (cell-instance, shared layer);
+  a candidate whose commit would push the cell's total past
+  `s × supply(bbox)` is refused and the ladder moves on.  Coarser than
+  per-band accounting but it enforces the promise, costs one counter, and
+  sequential-commit order makes it exact for the budget scalar; the §9.7
+  audit stays as defense-in-depth.  Escalate to (c) exact per-band group
+  accounting inside `GlobalCut` only if a measured flow shows per-band
+  violations the scalar bound misses (quantity legal, placement crowded
+  into one band).  Option (a) audit-only stays rejected.
 
 ### Phase 4 — healer compliance
 
