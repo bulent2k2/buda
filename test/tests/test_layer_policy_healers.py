@@ -234,3 +234,42 @@ def test_flat_ripup_respects_the_mask():
         assert all(l in (2, 3) for l in w.plan.seg_layers)
     unpinned, _pins, _so = s._layer_policy_advisories("nuts")
     assert unpinned == []
+
+
+# ── Codex #549 round: share-only audit scope, pre-planner dump ───────────────
+
+def test_advisory_audits_share_only_cells():
+    """Codex #549: a cell with shares but NO band leaves allowed_layers
+    empty by design — the advisory must still re-audit its collective
+    lease (a pinned non-STRICT commit past a share-only cell's budget was
+    silently missed by the mask-only filter)."""
+    s = _flat_session()
+    w = s.bundles[0]
+    eff = s.layers.eff_bus_width(8, w.input.width, 4)
+    w.input.layer_shares = [(4, 0.5)]          # share-only: no mask
+    w.input.share_group = "leaf@i0"
+    w.input.share_budgets = [(4, 0.5 * eff)]   # less than one commit
+    n_segs = len(w.input.candidates[0].segments)
+    pins = []
+    for si in range(n_segs):
+        seg = w.input.candidates[0].segments[si]
+        pins.append(4 if seg.start.y == seg.end.y else 5)
+    w.input.topology_pinned = True
+    w.plan.selected_topology_index = 0
+    w.input.pinned_seg_layers = pins
+    _quiet(s, "run_planner")
+    unpinned, pinned_ex, share_over = s._layer_policy_advisories("topo")
+    assert share_over >= 1                     # the lease excess is seen
+    assert unpinned == []                      # no band => no band check
+    out = _cmd(s, "check_design topo")
+    assert "over their collective lease" in out
+
+
+def test_dump_hbundles_annotates_before_planner():
+    """Codex #549: the dump is documented as usable right after the
+    bundler — the band/shares annotation must appear on a PRE-planner
+    dump, not only after run_planner hier resolved the masks."""
+    s = _hier_policy_session()
+    out = _cmd(s, "dump_hbundles")             # no run_planner hier yet
+    assert "band=[min..3]" in out
+    assert "shares={L4:50%}" in out

@@ -824,6 +824,14 @@ def cmd_dump_hbundles(session, cmd, args, cmd_line):
         label = "expanded bundles" if use_expanded else "original HBundles"
         print(f"  (no {label} — run run_hier_bundler first)")
     else:
+        # Resolve declared policies onto the dumped wrappers so a
+        # PRE-planner dump already shows the promised band/shares
+        # (masks are otherwise resolved at run_planner hier; the call is
+        # idempotent and the planner re-resolves at its own turn —
+        # Codex #549).  Quiet: the dump is a report, not a plan step.
+        import contextlib as _ctx, io as _io
+        with _ctx.redirect_stdout(_io.StringIO()):
+            session._apply_layer_policies(source)
         for w in source:
             b = w.input.original_bundle
             if filter_depth is not None and b.level != filter_depth:

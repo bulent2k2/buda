@@ -1678,8 +1678,14 @@ class HierMixin:
         string.  Ungoverned sessions return empty everything — the
         no-policy print silence the corpus guards."""
         unpinned, pinned = [], []
+        # Governed = masked OR share-only (a share without a band leaves
+        # allowed_layers empty by design — §4 resolution — but its
+        # collective lease must still be re-audited; Codex #549).  The
+        # band loop below naturally no-ops for share-only wrappers
+        # (allows_layer is vacuously true on an empty mask).
         governed = [w for w in self.bundles
-                    if w.input.allowed_layers and w.input.candidates]
+                    if (w.input.allowed_layers or w.input.layer_shares)
+                    and w.input.candidates]
         if not governed:
             return [], [], 0
         placed = {}
