@@ -189,6 +189,39 @@ extract the entry/exit face of each depth-0 endpoint block and filter depth-1
 cross-block candidates to only those that terminate within the chosen face.
 This turns the approximate cost signal into a hard constraint.
 
+## 7c. Per-Cell Layer Policy — Bands and Shares
+
+The reservation mechanism above is *economic*: it makes a global bundle pay
+to sit over a cell interior, but nothing stops a cell-local bundle from
+taking the top metal either.  The **per-cell layer policy** turns the
+classic hierarchical BKM into a declared constraint instead:
+
+* `set_cell_layer_cap <cell> <cap> [-min <floor>]` — the cell's own
+  interconnect may use layers in `[floor..cap]` and nothing outside it.
+* `set_layer_caps_by_depth <cap1> <cap2> …` — the same, for every cell at
+  once, counting deepest-first over intrinsic cell levels.
+* `set_cell_layer_share <cell> <layer> <pct>` — a bounded fractional slice,
+  used to thin a layer inside the band or lease a slice above the cap
+  (the wiring-limited escape valve).
+
+Bands become an `allowed_layers` mask on the `BundleInput`, resolved by the
+**owning-frame rule** — a cell-local template and its expanded per-instance
+wrappers take that cell's band (a rotation-class clone via its base cell); a
+cross-level bundle takes the common ancestor's — and enforced inside the
+planner core's layer enumeration, so the STRICT ladder, rip-up replans and
+both healers comply by construction.  Within an all-LOW band the highest
+layer per direction is promoted to **effective-TOP** for cost purposes only,
+so a capped cell's trunks are not priced as stubs; the reservations above
+park on the capped pair rather than the global TOP.
+
+Measured on the chip vehicle, the separation is the point: with
+`set_layer_caps_by_depth M3 M5`, cell-template metal above M5 goes to zero
+and the top level's M6/M7 exactly doubles.  It is not free — a mask removes
+the healers' cheap escalate-to-TOP repair, so tighter bands need more healer
+budget.  Full design, enforcement inventory and the study:
+[internal/hier_layer_caps.md](internal/hier_layer_caps.md); user-facing
+command docs: [BDB_REFERENCE.md](BDB_REFERENCE.md).
+
 ---
 
 ## 8. Files Modified
