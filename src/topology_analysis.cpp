@@ -675,148 +675,132 @@ void pin_relay_taps(const Topology& topo, const Floorplan& fp,
     }
 }
 
-// Is stub cs (index ci) the BINDING far-extreme stub of trunk nb on the side
-// away from a busterm in direction sign (+1 toward perp_hi → cs must be a lowest
-// stub; -1 → highest)?  Only the extreme stub sets that trunk endpoint; a stub
-// with another strictly further from the busterm, or a co-located stub that
-// reaches less far toward it, does not.  Equal-reach co-located stubs all bind
-// (they shorten the trunk only by sliding together — e.g. a TRUNK_V's symmetric
-// top branch stubs), so there is no index tie-break.
-static bool stub_binds_trunk_end(const std::vector<ConnSeg>& segs, int ci,
-                                 const ConnSeg& cs, const ConnSeg& nb, int sign) {
-    for (const auto& sc : nb.conns) {
-        if (sc.kind == SegConn::BUSTERM) {
-            // A direct trunk tap is an IMMOVABLE endpoint-setter: a tap further
-            // from the target busterm than cs already pins that trunk end, so cs
-            // sliding cannot shorten the trunk.  Without this, a TRUNK_H tapping
-            // blocks at both ends with an interior stub would treat the stub as
-            // the binding endpoint (no SEG lies past it) and pull it spuriously.
-            if (sign > 0) { if (sc.face_coord < cs.perp_pos) return false; }
-            else          { if (sc.face_coord > cs.perp_pos) return false; }
-            continue;
-        }
-        if (sc.seg_idx == ci) continue;
-        const ConnSeg& o = segs[sc.seg_idx];
-        if (sign > 0) {
-            if (o.perp_pos < cs.perp_pos) return false;
-            if (o.perp_pos == cs.perp_pos && o.perp_hi < cs.perp_hi) return false;
-        } else {
-            if (o.perp_pos > cs.perp_pos) return false;
-            if (o.perp_pos == cs.perp_pos && o.perp_lo > cs.perp_lo) return false;
-        }
-    }
-    return true;
-}
-
+// ── derive_net_pull ──────────────────────────────────────────────────────────
+//
+// Pull as an INTERVAL (issue #523).  A segment's perpendicular position enters
+// the total wirelength through exactly one channel: the perpendicular
+// NEIGHBOURS attached to it, each of which must stretch to reach it.
+//
+// For neighbour nb, everything that matters is where nb's OTHER attachments
+// can sit — call that span the anchor interval [a_lo, a_hi] (a busterm is the
+// degenerate [face, face]; a junction with segment k is k's own slide window
+// [perp_lo, perp_hi]; several attachments span from the lowest reachable to
+// the highest).  nb's length as cs slides to x is then
+//
+//     max(0, a_lo - x) + max(0, x - a_hi)
+//
+// — flat while cs stays within reach of what nb must connect anyway, growing
+// 1:1 once cs leaves it.  That single formula subsumes all three cases the
+// previous vote machinery hand-coded and gated separately:
+//
+//   * a busterm-bearing neighbour  → a degenerate anchor, always binding
+//   * a floating spine             → the far segment's window (the old
+//                                    "outside-interval" gate, now continuous
+//                                    instead of a cliff)
+//   * a T-junction cs sits INSIDE  → the anchors straddle cs, so the term is
+//                                    flat: sliding ALONG a neighbour cannot
+//                                    change its length.  This is the exact
+//                                    form of what stub_binds_trunk_end used to
+//                                    approximate by comparing positions.
+//
+// Each term is convex, so the sum is convex and its argmin is a single
+// INTERVAL [pull_lo, pull_hi] — every position in it is wirelength-identical
+// and NUTS may spend it on packing.  The old encoding could not represent that
+// and had to pick a point, which is what mis-scored the reported jog: the gain
+// from one neighbour was counted while the equal, opposite stretch of the
+// other was withheld by a gate, leaving a direction where the truth is a flat
+// interval.
+//
+// net_pull and pull_break stay as DERIVED values so every consumer (NUTS's
+// placement preference, the tug detector, dump_topologies --conn, the planner's
+// charge_pull_target, ripup) keeps its present semantics.
 void derive_net_pull(const Topology& topo, const Floorplan& fp,
                      std::vector<ConnSeg>& segs) {
     (void)topo; (void)fp;
+    struct Anchor { long long lo, hi; };
     for (int ci = 0; ci < (int)segs.size(); ++ci) {
         ConnSeg& cs = segs[ci];
-        int pos = 0, neg = 0;
-        // Each vote's SATURATION coordinate (see ConnSeg::pull_break): the
-        // position where that vote's wirelength gain stops.  Collected per
-        // direction so the net pull's slope-crossing breakpoint can be
-        // resolved after the votes are in.
-        std::vector<int> pos_bps, neg_bps;
+
+        std::vector<Anchor> anchors;
         for (const auto& conn : cs.conns) {
             if (conn.kind != SegConn::SEG) continue;
             const ConnSeg& nb = segs[conn.seg_idx];
+            long long a_lo = LLONG_MAX, a_hi = LLONG_MIN;
             for (const auto& sc : nb.conns) {
-                if (sc.kind != SegConn::BUSTERM) continue;
-                int sign = (sc.face_coord > cs.perp_pos) ? +1
-                         : (sc.face_coord < cs.perp_pos) ? -1 : 0;
-                if (sign == 0) continue;
-                // Pull cs toward nb's busterm only when cs actually sets a trunk
-                // endpoint — otherwise an interior or freely-sliding stub gets
-                // dragged to its slide bound for no wirelength gain (the spurious
-                // blk_29 / io_pad_tr right-drift in big2 bus_077's TRUNK_H, where
-                // only blk_02's capped stub should pull).  Two ways cs sets an
-                // endpoint:
-                //   (a) BINDING far-extreme: no other stub is further from the
-                //       busterm, so cs holds the trunk's near end; or
-                //   (b) ANCHORED at its busterm-side bound (perp_pos == perp_hi
-                //       for +1 / perp_lo for -1): its block face already holds it
-                //       as close to the busterm as it can get, and the pull keeps
-                //       it there against being dragged off — e.g. an aligned
-                //       sibling sinking to its interval floor (flow tc3a B20's
-                //       two top stubs both anchored), or a dogleg spine endpoint.
-                bool anchored = (sign > 0) ? (cs.perp_pos >= cs.perp_hi)
-                                           : (cs.perp_pos <= cs.perp_lo);
-                if (anchored || stub_binds_trunk_end(segs, ci, cs, nb, sign)) {
-                    // A busterm vote saturates at the face itself: moving cs
-                    // toward the face shortens nb's stub until cs reaches it.
-                    // (The anchored case is already at its bound; face_coord
-                    // lies beyond it and clamps back to the bound downstream —
-                    // preserving the hold-at-bound behavior.)
-                    if (sign > 0) { ++pos; pos_bps.push_back(sc.face_coord); }
-                    else          { ++neg; neg_bps.push_back(sc.face_coord); }
+                if (sc.kind == SegConn::SEG && sc.seg_idx == ci) continue;  // the tie back to cs
+                long long lo, hi;
+                if (sc.kind == SegConn::BUSTERM) {
+                    lo = hi = sc.face_coord;          // immovable
+                } else {
+                    const ConnSeg& o = segs[sc.seg_idx];
+                    lo = o.perp_lo; hi = o.perp_hi;   // free within its own window
                 }
+                a_lo = std::min(a_lo, lo);
+                a_hi = std::max(a_hi, hi);
             }
+            if (a_lo > a_hi) continue;                // nb attaches nowhere else
+            anchors.push_back({a_lo, a_hi});
         }
-        for (const auto& conn : cs.conns) {
-            if (conn.kind != SegConn::SEG) continue;
-            const ConnSeg& nb = segs[conn.seg_idx];
-            bool nb_has_bt = false;
-            for (const auto& sc : nb.conns)
-                if (sc.kind == SegConn::BUSTERM) { nb_has_bt = true; break; }
-            if (nb_has_bt) continue;
-            // nb is a floating spine (no busterm of its own): the pull comes
-            // from the far segments reachable through it.  Compare against each
-            // far segment's anchored slide interval [perp_lo, perp_hi], not its
-            // nominal position — a far stub can slide anywhere within its block
-            // face, so only a perp_pos OUTSIDE that interval produces a pull.
-            // NUTS turns any nonzero pull into "slide to my own range extreme";
-            // emitting a pull while already inside the far interval makes the
-            // segment overshoot past its target (see flow/pull2.buda).
-            //
-            // This spine contributes a SINGLE unit of pull, not one per far
-            // segment: sliding cs only shortens the spine if cs is an extreme
-            // endpoint of it (all far segments on one side).  Shortening the
-            // spine is worth one unit regardless of how many segments hang off
-            // the other end — so a multi-fanout (multicast) spine must not
-            // multiply the pull.  If far segments lie on both sides, cs is
-            // interior and exerts no pull.
-            int far_hi = 0, far_lo = 0;
-            int near_lo_bound = INT_MAX;   // min far.perp_lo over the above set
-            int near_hi_bound = INT_MIN;   // max far.perp_hi over the below set
-            for (const auto& sc : nb.conns) {
-                if (sc.kind != SegConn::SEG || sc.seg_idx == ci) continue;
-                const ConnSeg& far = segs[sc.seg_idx];
-                if (cs.perp_pos < far.perp_lo) {          // far is above/right of cs
-                    ++far_hi;
-                    near_lo_bound = std::min(near_lo_bound, far.perp_lo);
-                } else if (cs.perp_pos > far.perp_hi) {   // far is below/left  of cs
-                    ++far_lo;
-                    near_hi_bound = std::max(near_hi_bound, far.perp_hi);
-                }
-            }
-            // A spine vote saturates at the NEAREST far segment's slide bound:
-            // moving cs toward the far side shortens the spine until cs meets
-            // the first far interval — the exact overshoot boundary the
-            // outside-interval gate above exists for (see flow/pull2.buda).
-            if (far_hi > 0 && far_lo == 0) {
-                ++pos; pos_bps.push_back(near_lo_bound);
-            } else if (far_lo > 0 && far_hi == 0) {
-                ++neg; neg_bps.push_back(near_hi_bound);
-            }
+
+        // No coupling at all → flat everywhere, no preference.
+        if (anchors.empty()) {
+            cs.pull_lo = INT_MIN; cs.pull_hi = INT_MAX;
+            cs.pull_f_lo = cs.pull_f_hi = 0;
+            cs.net_pull = 0; cs.pull_break = INT_MIN;
+            continue;
         }
-        cs.net_pull = pos - neg;
-        // Slope-crossing breakpoint of the net pull.  Travelling in the net
-        // direction, total-WL slope starts at -(same_dir - opp_dir) votes and
-        // gains +2 per same-direction breakpoint passed (that vote flips from
-        // shortening to lengthening), so the optimum is the ceil(net/2)-th
-        // same-direction breakpoint in travel order.  Opposite-direction
-        // breakpoints lie behind the travel and never flip.
-        cs.pull_break = INT_MIN;
-        if (cs.net_pull > 0 && !pos_bps.empty()) {
-            std::sort(pos_bps.begin(), pos_bps.end());          // travel = ascending
-            int k = std::min((cs.net_pull + 1) / 2, (int)pos_bps.size());
-            cs.pull_break = pos_bps[k - 1];
-        } else if (cs.net_pull < 0 && !neg_bps.empty()) {
-            std::sort(neg_bps.begin(), neg_bps.end(), std::greater<int>());  // descending
-            int k = std::min((-cs.net_pull + 1) / 2, (int)neg_bps.size());
-            cs.pull_break = neg_bps[k - 1];
+
+        // The cost is piecewise linear with breakpoints only at the anchor
+        // ends, so the argmin is attained there: evaluate each and take the
+        // extreme minimizers.  Anchor counts are tiny (couplings per segment),
+        // so the quadratic scan is cheaper than being clever.
+        auto cost = [&anchors](long long x) {
+            long long c = 0;
+            for (const Anchor& a : anchors) {
+                if      (x < a.lo) c += a.lo - x;
+                else if (x > a.hi) c += x - a.hi;
+            }
+            return c;
+        };
+        std::vector<long long> cand;
+        cand.reserve(anchors.size() * 2);
+        for (const Anchor& a : anchors) { cand.push_back(a.lo); cand.push_back(a.hi); }
+        std::sort(cand.begin(), cand.end());
+        cand.erase(std::unique(cand.begin(), cand.end()), cand.end());
+
+        long long best = LLONG_MAX;
+        for (long long x : cand) best = std::min(best, cost(x));
+        long long p_lo = LLONG_MAX, p_hi = LLONG_MIN;
+        for (long long x : cand) {
+            if (cost(x) != best) continue;
+            p_lo = std::min(p_lo, x);
+            p_hi = std::max(p_hi, x);
+        }
+
+        // Slope magnitudes just outside the interval: below p_lo every anchor
+        // still ahead of it pulls up; above p_hi every anchor already behind
+        // it pulls back down.
+        int f_lo = 0, f_hi = 0;
+        for (const Anchor& a : anchors) {
+            if (a.lo >= p_lo) ++f_lo;
+            if (a.hi <= p_hi) ++f_hi;
+        }
+
+        auto clampi = [](long long v) {
+            return (int)std::max<long long>(INT_MIN, std::min<long long>(INT_MAX, v));
+        };
+        cs.pull_lo   = clampi(p_lo);
+        cs.pull_hi   = clampi(p_hi);
+        cs.pull_f_lo = f_lo;
+        cs.pull_f_hi = f_hi;
+
+        // Derived direction + saturation coordinate (the legacy pair).
+        if (cs.perp_pos < p_lo) {
+            cs.net_pull = f_lo;  cs.pull_break = clampi(p_lo);
+        } else if (cs.perp_pos > p_hi) {
+            cs.net_pull = -f_hi; cs.pull_break = clampi(p_hi);
+        } else {
+            cs.net_pull = 0;     cs.pull_break = INT_MIN;
         }
     }
 }

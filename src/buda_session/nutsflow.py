@@ -724,7 +724,8 @@ class NutsFlowMixin:
         if self.detailed_result is not None:
             self._run_detailed_nuts(bit_order=self._detailed_bit_order)
 
-    def _escalate_dead_low_segments(self, max_iter: int = 5) -> int:
+    def _escalate_dead_low_segments(self, max_iter: int = 5,
+                                    cull_risk: bool = False) -> int:
         """Post-NUTS dead-span escalation (opt-in: `set_dead_span_escalate on`).
 
         After abstract NUTS, a LOW-layer segment whose ACTUAL placed geometry
@@ -749,9 +750,37 @@ class NutsFlowMixin:
         and re-solve, iterating until none remains (a segment pinned to TOP
         never returns to LOW, so the LOW set strictly shrinks — max_iter is
         only a safety bound).  Returns the total escalations.
+
+        `cull_risk` (ripup's refold tier ONLY — measured-accept, so a false
+        positive costs one rejected trial, never a regression): escalate on
+        MEASURED stranding + the SURVIVAL predictor — the segment's placed
+        bit count in the CURRENT detailed result falls short of its member
+        bits AND its bounded span-clear pool < member bits, ignoring the
+        midpoint retry.  The midpoint pool is an admission optimism whose
+        safety net is cull_keepout_crossers: bits it admits whose final span
+        still crosses the keepout are culled into opens (the #523
+        interval-pull residual: b61 seg6, span-clear 0, midpoint 19, all 16
+        admitted bits culled — no admission-mirror predicate can see it).
+        The measured-stranding gate is what makes the tier surgical: the
+        span-pool shortfall alone is the NORM for surviving segments (the
+        junction snap routinely shortens bits off the keepout), and a
+        predictor-only batch escalates ~22 segments on the mix2 vehicle and
+        wrecks the placement (16 -> 140 opens, correctly rejected).  Only
+        the refold uses this tier — its accept contract prices the residual
+        uncertainty at zero; the unconditional entry/auto heals never do.
         """
         if self.nuts_result is None or self.routing_grid is None:
             return 0
+        placed_bits = None
+        if cull_risk:
+            # Measured stranding, from the live detailed result: how many
+            # bits of each (bundle, seg) actually survived placement + cull.
+            if self.detailed_result is None:
+                return 0
+            placed_bits = {}
+            for ns in self.detailed_result.net_segments:
+                k = (ns.bundle_id, ns.seg_idx)
+                placed_bits[k] = placed_bits.get(k, 0) + 1
 
         # Skip locked bottom-up copies: their plan must stay identical to the
         # placed fixed routing (extraction skips fixed bundles — a reassign
@@ -821,6 +850,20 @@ class NutsFlowMixin:
                     seg.interval_lo, seg.interval_hi)
                 if b_lo > b_hi:
                     pass          # bounds exclude the whole interval: 0 pool
+                elif cull_risk:
+                    # Measured stranding + SURVIVAL predictor (refold tier):
+                    # bits actually missing in the detailed result, and a
+                    # bounded span-clear pool that cannot host the member
+                    # bits — no midpoint retry (see the docstring).
+                    if placed_bits.get((seg.bundle_id, seg.seg_idx),
+                                       0) >= need:
+                        continue
+                    span_bnd = (span_all if (b_lo == seg.interval_lo and
+                                             b_hi == seg.interval_hi)
+                                else g.count_signal_tracks_in_span(
+                                    seg.span_lo, seg.span_hi, b_lo, b_hi))
+                    if span_bnd >= need:
+                        continue
                 elif span_all >= need:
                     span_bnd = (span_all if (b_lo == seg.interval_lo and
                                              b_hi == seg.interval_hi)

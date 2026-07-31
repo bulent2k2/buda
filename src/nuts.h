@@ -248,6 +248,12 @@ struct LayerConstraints {
 // (ts_ptr_map points into it).
 struct NutsContext {
     std::map<std::pair<int,int>, double>                     pull_map;
+    // Pull as an INTERVAL (issue #523 Phase 2): every position inside is
+    // wirelength-identical, so the placer may spend the whole span on packing
+    // instead of crowding one point.  Derived from ConnSeg::pull_lo/pull_hi
+    // clipped to the effective slide window.  An absent entry — or a
+    // DEGENERATE one — reproduces the point behavior exactly.
+    std::map<std::pair<int,int>, std::pair<double,double>>   pull_win_map;
     std::map<std::pair<int,int>, std::pair<double,double>>   slide_map;
     std::set<std::pair<int,int>>                             trunk_set;
     std::set<std::pair<int,int>>                             busterm_set;
@@ -486,6 +492,14 @@ private:
     double preferred_fit(double lo, double hi, double width,
                          const std::vector<std::pair<double,double>>& occupied,
                          double preferred) const;
+
+    // Interval form: every position in [pref_lo, pref_hi] is equally preferred,
+    // so the cost is the distance TO THAT INTERVAL (zero inside) and the placer
+    // is free to pick whichever point in it packs best.  Collapses to the point
+    // overload above when pref_lo == pref_hi.
+    double preferred_fit(double lo, double hi, double width,
+                         const std::vector<std::pair<double,double>>& occupied,
+                         double pref_lo, double pref_hi) const;
 };
 
 } // namespace buda

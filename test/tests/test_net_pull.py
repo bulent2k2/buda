@@ -101,15 +101,23 @@ def test_pull1_z_stubs_pull_toward_far_block():
     assert seg2 > 0, "bottom stub (y=92) must pull UP toward topl [208,292]"
 
 
-def test_pull1_multicast_stubs_pull_toward_anchored_trunk():
+def test_pull1_multicast_stubs_are_flat_per_segment():
     """TRUNK_V bottom->{topl,topr}: the trunk is anchored at bottom's top
-    face (y=100); both branch stubs (y=208) are pulled down toward it."""
+    face (y=100) and both branch stubs sit at y=208.  The old model pulled
+    both stubs down (-1) — a JOINT-gain claim: the trunk's top end is
+    min-bound by BOTH stubs, so moving either one alone leaves the trunk
+    extent unchanged (the sibling holds the bound) and gains nothing.  The
+    anchor-interval model (issue #523) scores the per-segment partial
+    derivative honestly: each stub is FLAT (0), its nominal inside the flat
+    span between the bottom anchor and the sibling's window.  The joint
+    two-stub move is real but belongs to the aligned-group machinery
+    (tighten_pulls' atomic group move), not to a per-segment gradient."""
     fp = _pull1_fp()
     t = _candidate(fp, "bottom", ["topl", "topr"], "TRUNK_V@x250")
     trunk, stub_l, stub_r = _pulls(t, fp)
     assert trunk == 0
-    assert stub_l < 0, "topl stub must pull DOWN toward the bottom anchor"
-    assert stub_r < 0, "topr stub must pull DOWN toward the bottom anchor"
+    assert stub_l == 0, "per-segment gradient is flat (sibling holds the bound)"
+    assert stub_r == 0, "per-segment gradient is flat (sibling holds the bound)"
 
 
 # ---------------------------------------------------------------------------
@@ -160,16 +168,18 @@ def _b4_fp():
 
 
 def test_multicast_trunk_only_endpoint_stub_pulls():
-    """A V stub of a busterm-tapped trunk pulls toward the tap ONLY when it sets
-    the trunk's near endpoint — i.e. it is the binding far-extreme or is anchored
-    at its busterm-side slide bound.  Interior or freely-sliding stubs must not be
-    dragged to their slide bound for no wirelength gain.
+    """A stub may claim a pull only for a wirelength gain its OWN slide
+    actually realizes.  Interior or freely-sliding stubs must never be
+    dragged to a bound for no gain — and under the anchor-interval model
+    (issue #523) neither may a bound-setting stub whose co-located sibling
+    would hold the trunk's end the moment it moved alone.
 
-    big2 bus_077 / TRUNK_H@y4887 taps blk_12 at x=6100.  Of the four V stubs only
-    blk_02's (capped at x=5445 = the trunk's left end) is anchored/binding, so
-    only it pulls; blk_29 (interior) and io_pad_tr (co-located but free to slide
-    right) and blk_22 (already at the tap) must read 0.  Pre-fix all three of
-    blk_02/blk_29/io_pad_tr pulled +1.
+    big2 bus_077 / TRUNK_H@y4887 taps blk_12 at x=6100.  Historically all of
+    blk_02/blk_29/io_pad_tr pulled +1 (the original defect); the first fix
+    narrowed that to blk_02 alone (the binding far-extreme); the interval
+    model completes it: blk_02 is co-located with io_pad_tr at x=5445, its
+    per-segment partial derivative is therefore flat, and all four stubs
+    honestly read 0.
     """
     fp = _b4_fp()
     topo = _candidate(fp, "blk_02", ["blk_22", "blk_12", "blk_29", "io_pad_tr"],
@@ -185,11 +195,18 @@ def test_multicast_trunk_only_endpoint_stub_pulls():
                 return cs
         raise AssertionError(f"no stub taps {block}")
 
-    assert stub_for("blk_02").net_pull > 0, "blk_02's binding/anchored stub must pull"
-    for blk in ("blk_29", "io_pad_tr", "blk_22"):
+    # Under the anchor-interval model even blk_02's stub reads 0: it is
+    # co-located with io_pad_tr's stub at x=5445, so moving it ALONE leaves
+    # the trunk's left end held by the sibling — the per-segment partial
+    # derivative is flat, and the old +1 was a joint-gain claim (both
+    # co-located stubs moving together), which is the aligned-group
+    # machinery's job, not a per-segment gradient.  The test's original
+    # concern — interior / free-sliding stubs must never be dragged to a
+    # bound for no gain — is preserved and strengthened: ALL four read 0.
+    for blk in ("blk_02", "blk_29", "io_pad_tr", "blk_22"):
         assert stub_for(blk).net_pull == 0, (
-            f"{blk}'s stub does not set the trunk endpoint and must not pull "
-            f"(got {stub_for(blk).net_pull})"
+            f"{blk}'s stub has no per-segment wirelength gradient and must "
+            f"not pull (got {stub_for(blk).net_pull})"
         )
 
 

@@ -3054,16 +3054,36 @@ class RipupMixin:
             # Same opt-out the entry heal honors: a study / regression bisect
             # that sets _heal_dead_spans_in_healers=False must retain the
             # pre-feature healer behavior end to end (Codex P2 on #531).
-            cur_end = metric()
-            heal_snap = self._rr_snapshot()
-            n_refold = self._escalate_dead_low_segments()
-            if n_refold:
+            #
+            # Two tiers, each independently measured (snapshot / escalate +
+            # re-solve / accept only on a strictly better metric):
+            #   1. "dead" — the exact DNUTS admission predicate (the entry
+            #      heal's), for dead spans the climb itself introduced.
+            #   2. "cull-risk" — the SURVIVAL predictor (bounded span-clear
+            #      pool < member bits, no midpoint retry): the midpoint pool
+            #      admits bits whose final span still crosses the keepout,
+            #      and cull_keepout_crossers then strands them (the #523
+            #      interval-pull residual — b61 seg6: span-clear 0, midpoint
+            #      19, all 16 admitted bits culled).  A superset of tier 1,
+            #      run separately so a rejected aggressive batch cannot
+            #      cancel an accepted conservative one.  Only HERE — the
+            #      accept contract prices its false positives at zero, which
+            #      the unconditional entry/auto heals cannot.
+            for tier_name, tier_kw in (("dead", {}),
+                                       ("cull-risk", {"cull_risk": True})):
+                if self._rr_m_primary(metric()) == 0:
+                    break
+                cur_end = metric()
+                heal_snap = self._rr_snapshot()
+                n_refold = self._escalate_dead_low_segments(**tier_kw)
+                if not n_refold:
+                    continue
                 self._run_detailed_nuts(bit_order=self._detailed_bit_order)
                 m_heal = metric()
                 if m_heal < cur_end:
-                    print(f"[ripup_reroute] HEAL-REFOLD: escalated "
-                          f"{n_refold} dead LOW segment(s) the climb "
-                          f"introduced, metric {self._rr_m_str(cur_end)}->"
+                    print(f"[ripup_reroute] HEAL-REFOLD ({tier_name}): "
+                          f"escalated {n_refold} starved LOW segment(s), "
+                          f"metric {self._rr_m_str(cur_end)}->"
                           f"{self._rr_m_str(m_heal)}", flush=True)
                     self.planner.recharge_committed(self.bundles)
                     if self.bdb is not None:

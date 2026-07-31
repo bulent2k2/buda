@@ -69,7 +69,8 @@ static void build_nuts_maps(
     std::map<std::pair<int,int>, int>&                            net_pull_map,
     AlignMap&                                                     align_map,
     std::map<std::pair<int,int>, std::vector<double>>&            busterm_face_map,
-    std::map<std::pair<int,int>, std::vector<PassthruCrossing>>&  passthru_map)
+    std::map<std::pair<int,int>, std::vector<PassthruCrossing>>&  passthru_map,
+    std::map<std::pair<int,int>, std::pair<double,double>>&       pull_win_map)
 {
     std::set<std::pair<int,int>> jog_set;   // dogleg jogs: excluded from alignment
     // Pass 1 — nominal perpendicular position from the topology.
@@ -211,6 +212,27 @@ static void build_nuts_maps(
                         preferred = bp;
                 }
                 pull_map[key] = preferred;
+                // Interval form (issue #523 Phase 2): the pull's gain is flat
+                // across [pull_lo, pull_hi], so hand the placer that whole span
+                // clipped to the window it may actually use.  Suppressed for a
+                // dogleg-pinned slide or an overridden net_pull for the same
+                // reason the breakpoint clamp is: the pin's bound IS the intent,
+                // and the split topology's recomputed interval is not
+                // authoritative.  The clip keeps `preferred` inside, so a
+                // degenerate result is exactly today's point.
+                if (!slide_pinned && !np_overridden &&
+                    cs.pull_lo != INT_MIN && cs.pull_hi != INT_MAX) {
+                    double w_lo = std::max(static_cast<double>(cs.pull_lo), lo);
+                    double w_hi = std::min(static_cast<double>(cs.pull_hi), hi);
+                    if (w_lo <= w_hi) {
+                        // Never widen AWAY from the pull past its own target:
+                        // the far side of the interval is where the gain ends,
+                        // the near side is where it starts.
+                        if (eff_net_pull > 0) w_lo = std::max(w_lo, preferred);
+                        else                  w_hi = std::min(w_hi, preferred);
+                        if (w_lo <= w_hi) pull_win_map[key] = {w_lo, w_hi};
+                    }
+                }
             } else if (n_bt == 0 && perp_ok &&
                        bw.plan.seg_perp[si] != INT_MIN) {
                 // Planner band preference: the slide-aware congestion lookup
@@ -991,7 +1013,7 @@ static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
     build_nuts_maps(bundles, floorplan, ctx.pull_map, ctx.slide_map,
                     ctx.trunk_set, ctx.busterm_set, ctx.rev_conn_map,
                     ctx.net_pull_map, ctx.align_map, ctx.busterm_face_map,
-                    ctx.passthru_map);
+                    ctx.passthru_map, ctx.pull_win_map);
     for (auto& ts : segments) {
         auto bf = ctx.busterm_face_map.find({ts.bundle_id, ts.seg_idx});
         if (bf != ctx.busterm_face_map.end()) ts.busterm_faces = bf->second;
@@ -1664,12 +1686,35 @@ double NUTSEngine::preferred_fit(
     const std::vector<std::pair<double,double>>& occupied,
     double preferred) const
 {
+    return preferred_fit(lo, hi, width, occupied, preferred, preferred);
+}
+
+// Interval form (issue #523 Phase 2).  Identical machinery to the point form —
+// same candidate list, same epsilon-hysteresis tie rule — with two changes:
+// the cost is the distance to the INTERVAL [pref_lo, pref_hi] (zero anywhere
+// inside it), and both interval ends join the candidate list.  A degenerate
+// interval therefore reproduces the point behavior bit for bit: the distance
+// collapses to |c - preferred| and the two extra candidates are duplicates of
+// one already present.
+//
+// The point that this buys: a pull whose wirelength gain is flat over a span
+// no longer crowds every segment sharing that span onto one coordinate.  Any
+// free track inside the span scores zero, so the occupancy-derived candidates
+// (the slots beside each occupied run) win on the first-candidate tie rule and
+// the segments spread across the span for free.
+double NUTSEngine::preferred_fit(
+    double lo, double hi, double width,
+    const std::vector<std::pair<double,double>>& occupied,
+    double pref_lo, double pref_hi) const
+{
+    if (pref_hi < pref_lo) std::swap(pref_lo, pref_hi);
     const double half = width / 2.0;
     const double c_lo = lo + half;
     const double c_hi = hi - half;
     if (c_lo > c_hi) return std::numeric_limits<double>::quiet_NaN();
     std::vector<double> candidates;
-    candidates.push_back(preferred);
+    candidates.push_back(pref_lo);
+    if (pref_hi != pref_lo) candidates.push_back(pref_hi);
     candidates.push_back(c_lo);
     for (const auto& [occ_lo, occ_hi] : occupied) {
         candidates.push_back(occ_hi + track_pitch_ + half);
@@ -1698,7 +1743,10 @@ double NUTSEngine::preferred_fit(
     double best_dist = std::numeric_limits<double>::max();
     for (double c : candidates) {
         if (!valid(c)) continue;
-        double dist = std::abs(c - preferred);
+        // Distance to the interval — zero anywhere inside it.
+        double dist = (c < pref_lo) ? (pref_lo - c)
+                    : (c > pref_hi) ? (c - pref_hi)
+                                    : 0.0;
         if (std::isnan(best) || dist < best_dist - kFpTieTol) {
             best_dist = dist;
             best = c;
@@ -1722,7 +1770,8 @@ public:
                 NutsContext& ctx,
                 const LayerConstraints& constraints)
         : eng_(eng), segs(segs_in),
-          pull_map(ctx.pull_map), align_map(ctx.align_map),
+          pull_map(ctx.pull_map), pull_win_map(ctx.pull_win_map),
+          align_map(ctx.align_map),
           jn_map(ctx.rev_conn_map),   // junction edges (Part B)
           jn_segs(ctx.ts_ptr_map),    // global segment lookup
           order_preds(constraints.preds), order_bounds(constraints.bounds),
@@ -1778,6 +1827,7 @@ private:
     const NUTSEngine&                  eng_;
     std::vector<TrackSegment*>&        segs;
     const std::map<std::pair<int,int>, double>&                    pull_map;
+    const std::map<std::pair<int,int>, std::pair<double,double>>&  pull_win_map;
     const AlignMap&                                                align_map;
     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&  jn_map;
     const std::map<std::pair<int,int>, TrackSegment*>&             jn_segs;
@@ -2065,17 +2115,36 @@ private:
                     }
                 }
             }
+            // The pull INTERVAL (issue #523 Phase 2) applies only when the
+            // preference actually comes from the pull — an alignment sibling,
+            // a junction anchor or a cross-layer target is a specific
+            // coordinate, not a flat span, so those keep the point form.
+            bool use_window = false;
+            double win_lo = 0.0, win_hi = 0.0;
             if (std::isnan(preferred)) {
                 auto it = pull_map.find(key);
                 preferred = (it != pull_map.end())
                             ? it->second
                             : (ts->interval_lo + ts->interval_hi) / 2.0;
+                auto wit = pull_win_map.find(key);
+                if (wit != pull_win_map.end()) {
+                    use_window = true;
+                    win_lo = wit->second.first;
+                    win_hi = wit->second.second;
+                }
             }
             // Guard against an inverted range (bus wider than its interval):
             // std::clamp requires lo <= hi.  preferred_fit returns NaN there
             // anyway, so the value is irrelevant — just avoid the UB.
             if (c_lo <= c_hi) preferred = std::clamp(preferred, c_lo, c_hi);
-            pos = eng_.preferred_fit(eff_lo, eff_hi, ts->width, occupied, preferred);
+            if (use_window && c_lo <= c_hi) {
+                win_lo = std::clamp(win_lo, c_lo, c_hi);
+                win_hi = std::clamp(win_hi, c_lo, c_hi);
+                pos = eng_.preferred_fit(eff_lo, eff_hi, ts->width, occupied,
+                                         win_lo, win_hi);
+            } else {
+                pos = eng_.preferred_fit(eff_lo, eff_hi, ts->width, occupied, preferred);
+            }
         }
         // try_repack re-places members with first_fit over their FULL intervals,
         // ignoring lb/ub — so it must not run for a phase-0 constrained placement

@@ -30,8 +30,9 @@ breakpoint when it lies within the travel to the bound (a tightening,
 never a new direction); dogleg-pinned slides and overridden pulls keep the
 bound semantics.
 """
-import io
 import contextlib
+import io
+import math
 
 import buda
 import buda_cli
@@ -85,20 +86,24 @@ def test_spine_vote_breakpoint_recorded():
     assert segs[1].pull_break == 1200
 
 
-def test_anchored_vote_keeps_bound_behavior():
-    """b44 MST staircase seg3: the ANCHORED busterm vote (already at its
-    busterm-side bound).  Its breakpoint is the face_coord (2960) beyond the
-    bound, so the clamp is inert and the hold-at-bound behavior survives —
-    pull_target stays the bus-clamped window edge."""
+def test_anchored_vote_flattened_by_interval_model():
+    """b44 MST staircase seg3: the old model's ANCHORED busterm vote gave it
+    +1 toward blk_07's face (2960) — a gain-only claim that never priced the
+    trunk wire the slide stretched (the #523 defect, the '+' half of the b44
+    tug).  The interval model prices both: seg3's nominal (2700) sits at the
+    LOW end of its flat optimum [2700, 2960], so the pull is honestly 0, no
+    breakpoint is recorded, and NUTS receives no pull_target for it."""
     s = _b44_session()
     ct = buda.ConnTopology()
     ct.build(_mst_cand(s), s.fp)
     segs = ct.segs()
-    assert segs[3].net_pull == 1
-    assert segs[3].pull_break == 2960    # blk_07's tapped face
+    assert segs[3].net_pull == 0
+    assert segs[3].pull_break == -2147483648        # INT_MIN: no saturation
+    assert (segs[3].pull_lo, segs[3].pull_hi) == (2700, 2960)
+    assert segs[3].pull_lo <= segs[3].perp_pos <= segs[3].pull_hi
     ts = {t.seg_idx: t for t in s.nuts_result.segments}
-    # bus-clamped window edge: interval_hi 2700 - half width 58.5
-    assert abs(ts[3].pull_target - (ts[3].interval_hi - ts[3].width / 2)) < 1e-6
+    assert ts[3].net_pull == 0
+    assert math.isnan(ts[3].pull_target)            # no pull, no target
 
 
 def test_b44_mst_realization_no_overshoot():
