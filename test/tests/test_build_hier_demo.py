@@ -202,6 +202,46 @@ def test_nested_bdb_cell_import_deepens_hierarchy(tmp_path, default_demo_bdb):
     assert any(p.comp_id in leaf_ids for p in db.all_pins())
 
 
+def test_nested_bdb_cell_import_unplaced_root_rebases(tmp_path):
+    """The nested importer needs the same unplaced-root fallback as the flat
+    one (review #538): a -1..-1 root rebases origin AND size on its placed
+    depth-1 children's extent."""
+    src_path = str(tmp_path / "nested_unplaced.bdb")
+    src = buda_db.BDB(src_path)
+    src.add_cell("leafc", 4.0, 4.0)
+    src.add_cell("midc", 10.0, 10.0)
+    src.add_comp("rootN", "midc_top", "", -1.0, -1.0, -1.0, -1.0)
+    src.add_comp("rootN/a", "midc", "rootN", 3.0, 4.0, 13.0, 14.0)
+    src.add_comp("rootN/a/u", "leafc", "rootN/a", 5.0, 6.0, 9.0, 10.0)
+    src.add_comp("rootN/b", "midc", "rootN", 23.0, 4.0, 33.0, 14.0)
+    src.add_comp("rootN/b/u", "leafc", "rootN/b", 25.0, 6.0, 29.0, 10.0)
+    del src
+
+    out = buda_db.BDB(str(tmp_path / "target.bdb"))
+    w, h, blocks, _nets, centers = build_hier_demo._define_bdb_cell_nested(
+        out, "sub", src_path)
+    assert (w, h) == (30.0, 10.0)           # children's extent, not -1/die
+    assert blocks == ["a/u", "b/u"]
+    assert centers["a/u"] == (4.0, 4.0)     # rebased to origin (3,4)
+    assert centers["b/u"] == (24.0, 4.0)
+
+
+def test_build_derives_busterms_to_max_depth(tmp_path, default_demo_bdb):
+    """With --nest-bdb-cells the built BDB has depth-3 leaves; busterm
+    derivation (and the printed recipe) must reach the ACTUAL max depth, not
+    the historical 2 (review #538) — else the deepest cell-internal buses
+    never enter hierarchical bundling."""
+    out = str(tmp_path / "deep.bdb")
+    build_hier_demo.build(out, [("sub", default_demo_bdb)],
+                          seed=1, n_instances=2, n_buses=2,
+                          nest_bdb_cells=True)
+    db = buda_db.BDB(out)
+    max_comp_depth = max(c.depth for c in db.all_components())
+    assert max_comp_depth == 3
+    bt_depths = {bt.depth for bt in db.all_busterms()}
+    assert max(bt_depths) == 3, bt_depths
+
+
 def test_align_occurrences_snaps_to_shared_rows(tmp_path):
     """--align-occurrences: same-cell instances snap to the class-median
     row/column when the move stays overlap-free, so their congruent block

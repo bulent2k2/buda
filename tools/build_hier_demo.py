@@ -494,6 +494,23 @@ def _define_bdb_cell_nested(db, cell, bdb_path):
         kids.setdefault(c.parent_id, []).append(c)
     for v in kids.values():
         v.sort(key=lambda c: c.name)
+    # The canonical UNPLACED root (-1..-1 bbox, the DEF+Verilog merge state)
+    # has no meaningful corner or size: rebase on the placed depth-1
+    # children's extent, as the flat importer does (review #538).  The
+    # rebased values feed the cell size, the child offsets, and the leaf
+    # centers below via root_x1/y1/w/h.
+    if (root.x2 > root.x1 and root.y2 > root.y1
+            and root.x1 >= 0 and root.y1 >= 0):
+        root_x1, root_y1 = root.x1, root.y1
+        root_w, root_h = root.x2 - root.x1, root.y2 - root.y1
+    else:
+        top_kids = kids.get(root.id, [])
+        if not top_kids:
+            sys.exit(f"Error: no components under the root in {bdb_path}")
+        root_x1 = min(c.x1 for c in top_kids)
+        root_y1 = min(c.y1 for c in top_kids)
+        root_w = max(c.x2 for c in top_kids) - root_x1
+        root_h = max(c.y2 for c in top_kids) - root_y1
 
     def rel(name):
         pre = root.name + "/"
@@ -524,20 +541,24 @@ def _define_bdb_cell_nested(db, cell, bdb_path):
             db.add_inst_to_cell(tcell(src_cell), ch.name.rsplit("/", 1)[-1],
                                 tcell(ch.cell), ch.x1 - r.x1, ch.y1 - r.y1)
     # The imported cell itself = the renamed root cell.
-    w, h = root.x2 - root.x1, root.y2 - root.y1
+    w, h = root_w, root_h
     db.add_cell(cell, w, h)
     for ch in kids.get(root.id, []):
         db.add_inst_to_cell(cell, ch.name.rsplit("/", 1)[-1],
-                            tcell(ch.cell), ch.x1 - root.x1, ch.y1 - root.y1)
+                            tcell(ch.cell), ch.x1 - root_x1, ch.y1 - root_y1)
 
+    # Leaf-ness derived STRUCTURALLY (no children) rather than from the
+    # stored is_leaf flag — an add_comp-built source can leave the flag
+    # stale on mid-level components (review #538 test hazard).
     leaves = sorted((c for c in comps.values()
-                     if c.is_leaf and c.id != root.id), key=lambda c: c.name)
+                     if c.id != root.id and not kids.get(c.id)),
+                    key=lambda c: c.name)
     blocks, centers, leaf_ids = [], {}, set()
     for c in leaves:
         bn = rel(c.name)                        # hierarchical, '/' preserved
         blocks.append(bn)
-        centers[bn] = ((c.x1 + c.x2) / 2 - root.x1,
-                       (c.y1 + c.y2) / 2 - root.y1)
+        centers[bn] = ((c.x1 + c.x2) / 2 - root_x1,
+                       (c.y1 + c.y2) / 2 - root_y1)
         leaf_ids.add(c.id)
 
     pins_by_net = {}
@@ -862,9 +883,14 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
             n_nets += 1
         print(f"  bus  {name:16s} [{w:2d}]  {di}/{dblk} -> {len(rcvs)} rcv")
 
-    # 8. Derive busterms so the BDB is ready for the hier bundler / topology gen.
+    # 8. Derive busterms so the BDB is ready for the hier bundler / topology
+    #    gen — to the ACTUAL max component depth: a nested BDB cell
+    #    (--nest-bdb-cells) materializes depth-3+ leaves, and a depth-2
+    #    derivation would leave the deepest cell-internal buses out of
+    #    hierarchical bundling (review #538).
+    max_depth = max((c.depth for c in db.all_components()), default=2)
     if busterms:
-        buda_db.BustermGen(db).derive(2)
+        buda_db.BustermGen(db).derive(max_depth)
 
     db.compute_all()
     total_nets = n_cell_nets + n_nets
@@ -875,7 +901,7 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
           f"nets, {total_nets} nets total.")
     if busterms:
         print("\nPlan all buses together with the hier flow "
-              "(depth 2 reaches the cell-internal buses):")
+              f"(depth {max_depth} reaches the cell-internal buses):")
         print(f"  PYTHONPATH=build python3 src/buda_cli.py <<'EOF'")
         print(f"  open_bdb {out_path}")
         # Layer technology: the BDB carries none, so define the TOP routing
@@ -887,9 +913,9 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
         # Hanan grid / keepouts from real block edges (chip=0, instances=1,
         # leaf blocks=2; 'skip' = only that exact depth).
         print(f"  add_blocks_from_bdb 0")
-        print(f"  add_blocks_from_bdb 1 skip")
-        print(f"  add_blocks_from_bdb 2 skip")
-        print(f"  run_hier_bundler depth 2")
+        for d in range(1, max_depth + 1):
+            print(f"  add_blocks_from_bdb {d} skip")
+        print(f"  run_hier_bundler depth {max_depth}")
         print(f"  generate_hier_topologies")
         print(f"  run_planner hier")
         print(f"  run_nuts")
