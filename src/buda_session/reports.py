@@ -672,6 +672,14 @@ class ReportsMixin:
                   f"on {tug_bundles} bundle(s) — opposite-pull riders stretch an "
                   f"interior trunk; see 'dump_topologies --problems'.")
 
+        # Supply-doomed seat census (#536 option 1, report-only): placed
+        # segments whose layer's real signal-track supply cannot host their
+        # member bits — static width-infeasibility, the class behind
+        # "unexplained" DNUTS opens on TOP layers.  NUTS-placed geometry, so
+        # nuts/dnuts stages only.
+        if stage in ("nuts", "dnuts"):
+            self._report_doomed_seats()
+
     # Reason text per ViolationKind, used when collapsing per-bit violations.
     _CONN_KIND_REASON = {
         "UNPLACED":     "unplaced (no track in DetailedNUTS)",

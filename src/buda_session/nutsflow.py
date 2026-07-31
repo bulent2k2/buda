@@ -724,6 +724,96 @@ class NutsFlowMixin:
         if self.detailed_result is not None:
             self._run_detailed_nuts(bit_order=self._detailed_bit_order)
 
+    def _seg_member_bits(self, w, sel, seg_idx):
+        """The segment's DNUTS track demand: the bundle's net count, or the
+        tapered fan-in subset when the selected topology declares one
+        (`Topology::seg_bits` — the same accounting `bus_seg_nbits` and
+        ripup's width gate use).  Falls back to 1 — the historical
+        zero-threshold behavior — when the lookup fails, so unknown data
+        can only narrow the predicate, never widen it."""
+        try:
+            nbits = len(w.input.original_bundle.get_net_names())
+            sb = w.input.candidates[sel].seg_bits
+            if seg_idx in sb and 0 < len(sb[seg_idx]) < nbits:
+                return len(sb[seg_idx])
+            return max(1, nbits)
+        except Exception:
+            return 1
+
+    def _report_doomed_seats(self) -> int:
+        """Report-only census of SUPPLY-DOOMED SEATS (#536 option 1): placed
+        segments — any layer, TOP included — whose assigned layer's real
+        signal-track supply in the PLACED window falls short of the member
+        bits by the exact DNUTS admission arithmetic (`place_by_layer`:
+        span-clear pool, midpoint fallback, corner bounds, then the
+        all-or-nothing `n_sig < bus_seg_nbits` strand).  Every such seat is
+        a static width-infeasibility: not one bit can land, knowable before
+        DNUTS runs, and distinct from a DYNAMIC reservation conflict (enough
+        tracks, but occupied — DNUTS warns about those itself).
+
+        This is `_escalate_dead_low_segments`'s predicate widened to all
+        layers, with no heal attached: the LOW cases are the escalation
+        family's market; the TOP cases (the mix2 b61 seat — 12 tracks on M6
+        vs 16 bits, committed by a measured ripup move that was still net
+        positive) have no escape layer and today only surface as unexplained
+        DNUTS opens.  Naming them separates the two residual classes in every
+        flow log.  Locked bottom-up copies are excluded, as everywhere in the
+        family — their bits arrive via the template-copy path, which never
+        runs per-instance admission (the aligned_sql copies flag pool-0 seats
+        here yet place every bit), and their pool story is
+        `check_template_tracks`'s.  Returns the doomed-segment count; silent
+        when zero."""
+        if self.nuts_result is None or self.routing_grid is None:
+            return 0
+        wmap = {w.input.original_bundle.id: w for w in self.bundles
+                if not w.hier.locked}
+        doomed = []          # (seg, need, pool, is_top, locked)
+        for seg in self.nuts_result.segments:
+            if not seg.placed or not self.routing_grid.has_layer(seg.layer):
+                continue
+            w = wmap.get(seg.bundle_id)
+            if w is None or not w.plan.seg_layers:
+                continue
+            sel = w.plan.selected_topology_index
+            if sel < 0 or sel >= len(w.input.candidates):
+                continue
+            g = self.routing_grid.get_layer_grid(seg.layer)
+            need = self._seg_member_bits(w, sel, seg.seg_idx)
+            b_lo = max(seg.interval_lo, seg.track_lo_bound)
+            b_hi = min(seg.interval_hi, seg.track_hi_bound)
+            span_all = g.count_signal_tracks_in_span(
+                seg.span_lo, seg.span_hi,
+                seg.interval_lo, seg.interval_hi)
+            if b_lo > b_hi:
+                pool = 0      # corner bounds exclude the whole interval
+            elif span_all >= need:
+                # Span pool wins admission; the corner bounds then filter it.
+                pool = (span_all
+                        if (b_lo, b_hi) == (seg.interval_lo, seg.interval_hi)
+                        else g.count_signal_tracks_in_span(
+                            seg.span_lo, seg.span_hi, b_lo, b_hi))
+            else:
+                x = (seg.span_lo + seg.span_hi) / 2.0
+                pool = g.count_signal_tracks_in(x, b_lo, b_hi)
+            if pool < need:
+                doomed.append((seg, need, pool,
+                               self.layers.is_top(seg.layer)))
+        if not doomed:
+            return 0
+        for seg, need, pool, is_top in doomed:
+            tag = "TOP" if is_top else "LOW"
+            print(f"  Advisory: supply-doomed seat: bundle {seg.bundle_id} "
+                  f"seg {seg.seg_idx} on M{seg.layer} ({tag}) — "
+                  f"{pool} signal track(s) in the placed window < {need} "
+                  f"member bit(s); every bit strands at DNUTS.")
+        n_top = sum(1 for *_, t in doomed if t)
+        bits = sum(need for _, need, _, _ in doomed)   # all-or-nothing strand
+        print(f"  Advisory: {len(doomed)} supply-doomed seat(s) "
+              f"({n_top} TOP, {len(doomed) - n_top} LOW; {bits} "
+              f"guaranteed-stranded bit(s)) — static width-infeasibility, "
+              f"not reservation conflicts.")
+        return len(doomed)
+
     def _escalate_dead_low_segments(self, max_iter: int = 5,
                                     cull_risk: bool = False,
                                     only=None) -> int:
@@ -797,21 +887,7 @@ class NutsFlowMixin:
         top_h = _cheapest_top(buda.LayerDir.HORIZONTAL)
         top_v = _cheapest_top(buda.LayerDir.VERTICAL)
 
-        def _member_bits(w, sel, seg_idx):
-            """The segment's DNUTS track demand: the bundle's net count, or the
-            tapered fan-in subset when the selected topology declares one
-            (`Topology::seg_bits` — the same accounting `bus_seg_nbits` and
-            ripup's width gate use).  Falls back to 1 — the historical
-            zero-threshold behavior — when the lookup fails, so unknown data
-            can only narrow the predicate, never widen it."""
-            try:
-                nbits = len(w.input.original_bundle.get_net_names())
-                sb = w.input.candidates[sel].seg_bits
-                if seg_idx in sb and 0 < len(sb[seg_idx]) < nbits:
-                    return len(sb[seg_idx])
-                return max(1, nbits)
-            except Exception:
-                return 1
+        _member_bits = self._seg_member_bits
 
         total = 0
         for _ in range(max_iter):
