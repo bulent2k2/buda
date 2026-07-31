@@ -591,7 +591,7 @@ As built:
 * **Byte-identity corpus** (no shares declared): 0 better / 0 worse /
   34 unchanged; abstract + detailed WL both +0.00%.
 
-### Phase 4 — healer compliance
+### Phase 4 — healer compliance — LANDED 2026-07-31
 
 Width-gate pitch, release/class-move verification (dead-span escalation
 already landed in Phase 1),
@@ -599,6 +599,33 @@ already landed in Phase 1),
 warnings) — over the full policy vector, not just the binary mask.
 *Deliverable: healers never violate a cap or exceed a share; violations
 impossible by audit.*
+
+As built (the mechanics — mask in the planner core, dead-span ceiling
+refusal, width-gate pitch, class/release moves through the same
+chokepoints, the STRICT budget gate — landed with Phases 1–3; this phase
+closed the audit + reporting inventory):
+
+* **LAYER_CAP / LAYER_SHARE advisory** in `check_design`, all stages,
+  defense-in-depth like the keepout audit: in-effect metal per governed
+  bundle vs its band — assigned layers at the topo stage, PLACED
+  TrackSegments at nuts/dnuts (post-plan escalations judged by where the
+  metal ended up).  Unpinned out-of-band metal reports LOUD with a
+  please-report warning (the mask should make it impossible); pinned
+  exceptions surface as the documented override, visible never silent;
+  the §9.7 share audit re-runs at check time.  No policy = silent.
+* **Policy-aware reporting** — `dump_hbundles` shows `band=[floor..cap]`
+  + `shares={L4:50%}` per governed bundle; the ALLOW_OVERFLOW /
+  BEST_EFFORT ladder warnings append the band/shares context (§9.2),
+  byte-identical for ungoverned bundles.
+* **Healer-compliance verification** (9 tests,
+  `test_layer_policy_healers.py`): capped+shared bottom-up and flat
+  flows driven through `negotiate_congestion` + `ripup_reroute` at both
+  stages — every governed bundle's plan, NUTS segments and DNUTS bits
+  in-band-or-leased, advisory clean; plus the advisory's
+  silent/pinned/impossible/stage-aware paths and the warning naming the
+  band.
+* **Byte-identity corpus**: 0 better / 0 worse / 34 unchanged,
+  abstract + detailed WL +0.00%.
 
 Open questions: none — this phase closes the inventory of §5/§6.
 
