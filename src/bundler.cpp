@@ -752,6 +752,56 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                     b.rcv_spec_paths = info0.rcv_spec_paths;
                     b.num_terminals  = 1 + (int)info0.rcv_spec_paths.size();
                 }
+                // Recursive bottom-up on the CROSS-LEVEL path (review #540
+                // P2): a cross-depth net can still be CELL-LOCAL — an
+                // intermediate cell wiring a nested child's leaf to a direct
+                // child leaf.  Apply the same non-root-LCA mapping; the
+                // root-level guard in lca_blocks leaves genuine top-level
+                // cross-level bundles untouched (mixed-depth endpoints are
+                // never all direct children of a root-level component), so
+                // the depth-3 chip vehicles are byte-identical.  Busterm
+                // blocks are the children-of-LCA, deduped, with the empty-
+                // exit guard from the same-level deep path.
+                {
+                    std::vector<int> eps;
+                    std::vector<int> drv_eps, rcv_eps;
+                    for (int nid : net_ids) {
+                        const auto& li = net_leaf.at(nid);
+                        drv_eps.push_back(li.drv_spec_comp_id);
+                        eps.push_back(li.drv_spec_comp_id);
+                        for (int rid : li.rcv_spec_comp_ids) {
+                            rcv_eps.push_back(rid);
+                            eps.push_back(rid);
+                        }
+                    }
+                    auto [lca, below] = lca_blocks(eps);
+                    if (lca >= 0) {
+                        const auto& par = comp_by_id.at(lca);
+                        b.cell_context = par.cell;
+                        b.instances.push_back(par.name);
+                        auto add_tag = [&](std::vector<std::string>& v,
+                                           int ep, bool skip_entries) {
+                            auto bit2 = below.find(ep);
+                            if (bit2 == below.end()) return;
+                            const std::string tag =
+                                "bt:" + comp_by_id.at(bit2->second).name;
+                            if (skip_entries &&
+                                    std::find(b.entry_busterm_ids.begin(),
+                                              b.entry_busterm_ids.end(), tag)
+                                        != b.entry_busterm_ids.end())
+                                return;
+                            if (std::find(v.begin(), v.end(), tag) == v.end())
+                                v.push_back(tag);
+                        };
+                        for (int e : drv_eps)
+                            add_tag(b.entry_busterm_ids, e, false);
+                        for (int e : rcv_eps)
+                            add_tag(b.exit_busterm_ids, e, true);
+                        if (b.exit_busterm_ids.empty())
+                            for (int e : rcv_eps)
+                                add_tag(b.exit_busterm_ids, e, false);
+                    }
+                }
                 id_to_idx[b.id] = (int)bundles.size();
                 bundles.push_back(std::move(b));
             }
@@ -1125,6 +1175,23 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                                           b.exit_busterm_ids.end(), tag)
                                     == b.exit_busterm_ids.end())
                                 b.exit_busterm_ids.push_back(tag);
+                        }
+                        if (b.exit_busterm_ids.empty()) {
+                            // Fan-in root under a DRIVER's child: every
+                            // receiver child equaled an entry, and an empty
+                            // exit list crashes generation (src_local =
+                            // exits[0]).  Keep the receiver children even
+                            // when entry-equal — the direct-parent path
+                            // keeps such exits verbatim (review #540 P1).
+                            for (const auto& r : receivers) {
+                                std::string cn = child_name(r);
+                                if (cn.empty()) continue;
+                                const std::string tag = "bt:" + cn;
+                                if (std::find(b.exit_busterm_ids.begin(),
+                                              b.exit_busterm_ids.end(), tag)
+                                        == b.exit_busterm_ids.end())
+                                    b.exit_busterm_ids.push_back(tag);
+                            }
                         }
                     }
                 } else {

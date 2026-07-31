@@ -146,3 +146,110 @@ def test_mixed_depth_endpoints_are_retained(deep_bdb):
             (nm, b.reason[:120])
         # And it is NOT mis-claimed as cell-local to the sub instance.
         assert b.cell_context != "sub", (nm, b.cell_context)
+
+
+def _two_occurrence_db(tmp_path, fanin_sink_under_driver=False):
+    """Hand-built nested shape: cell 'midc' has a DIRECT leaf child ('regf')
+    AND a sub-instance ('u_core' of 'corec') with its own leaves — the
+    cross-depth cell-local case.  Two congruent occurrences under one chip."""
+    db = buda_db.BDB(str(tmp_path / "xdepth.bdb"))
+    db.add_cell("leafc", 40.0, 40.0)
+    db.add_cell("corec", 120.0, 100.0)
+    db.add_inst_to_cell("corec", "alu", "leafc", 10.0, 10.0)
+    db.add_inst_to_cell("corec", "lsu", "leafc", 70.0, 10.0)
+    db.add_cell("midc", 320.0, 140.0)
+    db.add_inst_to_cell("midc", "u_core", "corec", 10.0, 20.0)
+    db.add_inst_to_cell("midc", "regf", "leafc", 200.0, 20.0)
+    db.add_cell("topc", 800.0, 200.0)
+    db.add_inst_to_cell("topc", "m0", "midc", 20.0, 20.0)
+    db.add_inst_to_cell("topc", "m1", "midc", 420.0, 20.0)
+    db.add_inst("chipX", "topc", "", 0.0, 0.0)
+    for m in ("m0", "m1"):
+        for i in range(4):
+            # Cross-depth cell-local bus: depth-3 leaf -> depth-2 direct leaf.
+            db.add_net_pins(f"chipX/{m}/xd_{i}",
+                            f"chipX/{m}/u_core/alu.out",
+                            [f"chipX/{m}/regf.in"])
+            if fanin_sink_under_driver:
+                # Deep-LCA multi-driver group whose shared sink shares a
+                # child with one driver: drivers alu (in u_core) + regf
+                # (direct), sink lsu (in u_core — same child as alu).
+                db.add_net_pins(f"chipX/{m}/fi_a_{i}",
+                                f"chipX/{m}/u_core/alu.o2",
+                                [f"chipX/{m}/u_core/lsu.in"])
+                db.add_net_pins(f"chipX/{m}/fi_b_{i}",
+                                f"chipX/{m}/regf.o2",
+                                [f"chipX/{m}/u_core/lsu.in"])
+    return db
+
+
+def _session_from_db(db_path):
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("def_layer 4 M4 H TOP 44.44")
+        s.do_command("def_layer 5 M5 V TOP 50.00")
+        s.do_command(f"open_bdb {db_path}")
+        s.do_command("derive_busterms 3")
+        s.do_command("add_blocks_from_bdb 0")
+        s.do_command("add_blocks_from_bdb 1 skip")
+        s.do_command("add_blocks_from_bdb 2 skip")
+        s.do_command("add_blocks_from_bdb 3 skip")
+    return s
+
+
+def test_cross_depth_cell_local_nets_are_templated(tmp_path):
+    """Review #540 P2: a cell-internal net wiring a nested child's leaf to a
+    DIRECT child leaf classifies cross-level (mixed depths) but is still
+    cell-local — the LCA mapping applies on the cross-level path too, so the
+    two occurrences merge template+replica and generation routes it in the
+    cell frame without crashing."""
+    db = _two_occurrence_db(tmp_path)
+    path = str(tmp_path / "xdepth.bdb")
+    del db
+    s = _session_from_db(path)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_hier_bundler depth 3")
+    xd = [w.input.original_bundle for w in s.bundles
+          if any(n.startswith("chipX/m0/xd") or n.startswith("chipX/m1/xd")
+                 for n in w.input.original_bundle.get_net_names())]
+    assert xd, "expected the cross-depth bundles"
+    for b in xd:
+        assert b.cell_context == "midc", (b.id, b.cell_context, b.reason[:60])
+    templates = [b for b in xd if b.parent_id < 0]
+    assert len(templates) == 1 and len(list(templates[0].instances)) == 2
+    # Busterm blocks at the children-of-LCA level: u_core + regf.
+    tags = set(templates[0].entry_busterm_ids) | set(templates[0].exit_busterm_ids)
+    assert any(tag.endswith("/u_core") for tag in tags), tags
+    assert any(tag.endswith("/regf") for tag in tags), tags
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("generate_hier_topologies")
+    for b in templates:
+        w = next(w for w in s.bundles
+                 if w.input.original_bundle.id == b.id)
+        assert w.input.candidates, buf.getvalue()[-500:]
+
+
+def test_deep_lca_fanin_sink_under_driver_child_keeps_exit(tmp_path):
+    """Review #540 P1: a deep-LCA multi-driver group whose shared sink lives
+    under the SAME child as one driver must keep a non-empty exit list (the
+    entry-equal skip alone would empty it and crash generation on
+    exits[0])."""
+    db = _two_occurrence_db(tmp_path, fanin_sink_under_driver=True)
+    path = str(tmp_path / "xdepth.bdb")
+    del db
+    s = _session_from_db(path)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_hier_bundler depth 3 COMBINED")
+    fi = [w.input.original_bundle for w in s.bundles
+          if any("/fi_" in n for n in w.input.original_bundle.get_net_names())]
+    assert fi, "expected the fan-in bundles"
+    for b in fi:
+        if not b.cell_context:
+            continue
+        assert list(b.exit_busterm_ids), \
+            (b.id, b.reason[:80], list(b.entry_busterm_ids))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("generate_hier_topologies")   # must not crash
