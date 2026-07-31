@@ -32,6 +32,10 @@ comparison tool sweeps.  The sweep is PARALLEL by default (`--jobs`, default =
 CPU count): flows are independent, so every column is byte-identical to a
 serial run EXCEPT `sec`, which inflates with CPU contention under parallel
 load — pass `-j 1` when the per-flow timing itself is what you are measuring.
+The `sec1` column keeps the last known SERIAL timings comparable across
+parallel refreshes: a full-corpus `-j 1 --out` run re-stamps the checked-in
+sidecar `qor_serial_times.json` (date + commit), and every later render shows
+those per-flow times beside the current run's `sec` ('-' = flow added since).
 
   tools/qor_table.py                          # print both tables to stdout
   tools/qor_table.py --out qor_table.md  # (re)write the checked-in snapshot
@@ -41,6 +45,7 @@ load — pass `-j 1` when the per-flow timing itself is what you are measuring.
 import argparse
 import contextlib
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -145,11 +150,53 @@ def _c(v):
     return "null" if v is None else str(v)
 
 
-def _dirty_table(rows):
+# The serial-timing sidecar: the last known FULL `-j 1` run's per-flow
+# wall-clocks, checked in next to qor_table.md.  A parallel snapshot's `sec`
+# column is contention-inflated, so the table keeps this stamped serial
+# reference as its own `sec1` column.  Rewritten ONLY by a full-corpus
+# `-j 1 --out` run (a --flows subset or a stdout run never clobbers it).
+_SERIAL_PATH = os.path.join(_ROOT, "qor_serial_times.json")
+
+
+def load_serial_times(path=None):
+    """The sidecar as {'stamp': <date + commit>, 'times': {flow: sec}}, or
+    None when absent/unreadable/incomplete.  Both fields are validated: a
+    hand-edited or conflict-resolved sidecar missing its stamp must fall back
+    to the documented 'none recorded yet' render, not KeyError AFTER the
+    (lengthy) corpus sweep (Codex #545)."""
+    try:
+        with open(path or _SERIAL_PATH) as fh:
+            data = json.load(fh)
+        ok = (isinstance(data.get("times"), dict)
+              and isinstance(data.get("stamp"), str) and data["stamp"].strip())
+        return data if ok else None
+    except Exception:                               # noqa: BLE001
+        return None
+
+
+def save_serial_times(rows, stamp, path=None):
+    """Record a full serial run's per-flow `sec` (err rows excluded) with the
+    run's date + commit stamp."""
+    data = {"stamp": stamp,
+            "times": {r["flow"]: r["sec"] for r in rows if "err" not in r}}
+    with open(path or _SERIAL_PATH, "w") as fh:
+        json.dump(data, fh, indent=1)
+        fh.write("\n")
+
+
+def _c1(times, flow):
+    """The `sec1` cell: the flow's last known serial time, '-' when unknown
+    (e.g. a flow added to the corpus after the last -j 1 run)."""
+    v = (times or {}).get(flow)
+    return f"{v:.1f}" if isinstance(v, (int, float)) else "-"
+
+
+def _dirty_table(rows, serial_times=None):
     out = ["```"]
     out.append(f"{'flow':<46}{'bund':>4} {'busS':>5} {'netS':>6} {'busWL':>8} "
-               f"{'netWL':>10} | {'ovl':>4} {'unpl':>4} {'viol':>4} {'sec':>6}   note")
-    out.append("-" * 132)
+               f"{'netWL':>10} | {'ovl':>4} {'unpl':>4} {'viol':>4} {'sec':>6} "
+               f"{'sec1':>7}   note")
+    out.append("-" * 140)
     for r in rows:
         if "err" in r:
             out.append(f"{_display(r['flow']):<46}ERR: {r['err']}")
@@ -158,21 +205,22 @@ def _dirty_table(rows):
             f"{_display(r['flow']):<46}{r['bund']:>4} {_c(r['busS']):>5} "
             f"{_c(r['netS']):>6} {_c(r['busWL']):>8} {_c(r['netWL']):>10} | "
             f"{_c(r['ovl']):>4} {_c(r['unpl']):>4} {_c(r['viol']):>4} "
-            f"{r['sec']:>6.1f}   {_NOTES.get(r['flow'], '')}".rstrip())
+            f"{r['sec']:>6.1f} {_c1(serial_times, r['flow']):>7}   "
+            f"{_NOTES.get(r['flow'], '')}".rstrip())
     out.append("```")
     return "\n".join(out)
 
 
-def _clean_table(rows):
+def _clean_table(rows, serial_times=None):
     out = ["```"]
     out.append(f"{'flow':<46}{'bund':>4} {'busS':>5} {'netS':>6} {'busWL':>8} "
-               f"{'netWL':>10} {'sec':>7}")
-    out.append("-" * 90)
+               f"{'netWL':>10} {'sec':>7} {'sec1':>7}")
+    out.append("-" * 98)
     for r in rows:
         out.append(
             f"{_display(r['flow']):<46}{r['bund']:>4} {_c(r['busS']):>5} "
             f"{_c(r['netS']):>6} {_c(r['busWL']):>8} {_c(r['netWL']):>10} "
-            f"{r['sec']:>7.1f}")
+            f"{r['sec']:>7.1f} {_c1(serial_times, r['flow']):>7}")
     out.append("```")
     return "\n".join(out)
 
@@ -186,16 +234,27 @@ def _git_commit():
         return "unknown"
 
 
-def render(rows, stamp):
+def render(rows, stamp, serial=None):
     """The full markdown snapshot: a header (date + commit), the DIRTY table,
     then the CLEAN table.  `netWL`/`netS` show `null` for a flow that stopped
-    before DNUTS.  Sorted within each table by net-segment count, descending."""
+    before DNUTS.  Sorted within each table by net-segment count, descending.
+    `serial` is the serial-timing sidecar dict (load_serial_times()); when
+    present, each table carries a `sec1` column — the last known full `-j 1`
+    run's per-flow wall-clock, stamped in the legend — since a parallel run's
+    own `sec` is contention-inflated."""
     def key(r):
         n = r.get("netS")
         return -(n if isinstance(n, int) else -1)
     dirty = sorted([r for r in rows if "err" in r or not _is_clean(r)], key=key)
     clean = sorted([r for r in rows if "err" not in r and _is_clean(r)], key=key)
     n_ok = len(clean)
+    times = (serial or {}).get("times")
+    sec1_legend = (
+        f"  `sec1` = last known SERIAL (-j 1) wall-clock, captured "
+        f"{serial['stamp']} — refresh with a full `-j 1 --out` run "
+        f"('-' = no serial timing yet)." if times else
+        "  `sec1` = last known serial (-j 1) wall-clock (none recorded yet — "
+        "run a full `-j 1 --out` sweep to capture it).")
     parts = [
         f"# QoR corpus snapshot — {stamp}",
         "",
@@ -203,18 +262,19 @@ def render(rows, stamp):
         "`bund`/`busS`/`netS` = bundle / bus-segment / net-segment counts; "
         "`busWL`/`netWL` = abstract (after NUTS) / detailed (after DNUTS) "
         "wirelength, placed-only; `ovl`/`unpl`/`viol` = overlaps / unplaced bits "
-        "/ bundles with `check_design` violations; `sec` = wall-clock.  `null` = "
-        "that stage did not run.",
+        "/ bundles with `check_design` violations; `sec` = wall-clock of THIS "
+        "run (contention-inflated when the sweep ran parallel).  `null` = "
+        "that stage did not run." + sec1_legend,
         "",
         f"{n_ok} clean · {len(dirty)} with residuals · {len(rows)} flows.",
         "",
         "## DIRTY — residual overlaps / unplaced / viol_bundles (or incomplete)",
         "",
-        _dirty_table(dirty),
+        _dirty_table(dirty, times),
         "",
         "## CLEAN — 0 overlaps / 0 unplaced / 0 viol_bundles",
         "",
-        _clean_table(clean),
+        _clean_table(clean, times),
         "",
     ]
     return "\n".join(parts)
@@ -246,7 +306,13 @@ def main():
     print(f"  swept {len(rows)} flows in {time.time() - t0:.1f}s "
           f"(jobs={max(1, args.jobs)})", file=sys.stderr, flush=True)
     stamp = args.stamp or f"{time.strftime('%Y-%m-%d')} (main @ {_git_commit()})"
-    md = render(rows, stamp)
+    if args.jobs <= 1 and not args.flows and args.out:
+        # A FULL serial snapshot refresh is the (only) source of truth for the
+        # serial-timing sidecar: re-stamp it from this run.  Subset (--flows)
+        # and stdout-only runs never clobber it.
+        save_serial_times(rows, stamp)
+        print(f"  serial timings -> {_SERIAL_PATH}", file=sys.stderr, flush=True)
+    md = render(rows, stamp, load_serial_times())
     if args.out:
         with open(args.out, "w") as fh:
             fh.write(md if md.endswith("\n") else md + "\n")
