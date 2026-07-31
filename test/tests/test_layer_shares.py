@@ -340,3 +340,40 @@ def test_share_extends_mask_above_cap():
     assert list(w.input.allowed_layers) == [2, 3, 4]
     assert list(w.input.layer_shares) == [(4, 0.3)]
     assert abs(w.input.share_of(4) - 0.3) < 1e-9
+
+
+# ── Codex #547 round: clear_design FK, effective-TOP reservation, 0-signal ───
+
+def test_clear_design_with_persisted_shares(tmp_path):
+    """Codex #547 P1: cell_layer_share FKs cell(name), so a fresh design
+    import into a BDB holding persisted shares must delete the share rows
+    before the cells — without it, DELETE FROM cell trips the FK constraint
+    mid-clear and leaves the database partially wiped."""
+    db = buda.BDB(str(tmp_path / "cd.bdb"))
+    db.add_cell("leaf", 10, 10)
+    db.set_cell_layer_share("leaf", 4, 0.3)
+    lef = tmp_path / "t.lef"
+    lef.write_text(
+        "MACRO ram\n  SIZE 10 BY 10 ;\n  PIN d\n    DIRECTION INPUT ;\n"
+        "    PORT\n      RECT 1 1 2 2 ;\n    END\n  END d\nEND ram\n")
+    deff = tmp_path / "t.def"
+    deff.write_text(
+        "VERSION 5.8 ;\nUNITS DISTANCE MICRONS 1000 ;\n"
+        "DIEAREA ( 0 0 ) ( 100000 100000 ) ;\nCOMPONENTS 1 ;\n"
+        "- u1 ram + PLACED ( 1000 1000 ) N ;\nEND COMPONENTS\n"
+        "NETS 0 ;\nEND NETS\nEND DESIGN\n")
+    db.import_def_lef(str(deff), str(lef))          # clear_design inside
+    assert db.layer_share_cells() == []             # old shares gone
+    assert any(c.name == "u1" for c in db.all_components())
+
+
+def test_share_command_rejects_zero_signal_pattern():
+    """Codex #547 P2: a pattern with slots but no SIGNAL ones must produce
+    the declaration-time error, not a ZeroDivisionError from the
+    minimum-share arithmetic."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, "def_layer 4 M4 H TOP 50",
+           "def_track_pattern 4 0 POWER 2 1 GND 2 1")
+    out = _cmd(s, "set_cell_layer_share someCell M4 30")
+    assert "no SIGNAL slots" in out

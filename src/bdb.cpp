@@ -1238,6 +1238,7 @@ void BDB::clear_design() {
     _exec("DELETE FROM busterm; "
           "DELETE FROM pin; DELETE FROM net_props; DELETE FROM net; "
           "DELETE FROM cell_pin; DELETE FROM cell_children; "
+          "DELETE FROM cell_layer_share; "         // FKs cell (v20)
           "DELETE FROM component; DELETE FROM cell;");
 }
 

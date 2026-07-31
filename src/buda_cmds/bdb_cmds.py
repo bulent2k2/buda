@@ -561,6 +561,9 @@ def cmd_set_cell_layer_share(session, cmd, args, cmd_line):
               f"the pattern's signal slots)"); return
     pat = session.routing_grid.get_layer_grid(lid).global_pattern()
     n_sig = sum(1 for s in pat.slots if s.type == "SIGNAL")
+    if n_sig == 0:
+        print(f"Error: set_cell_layer_share: layer {args[1]}'s track "
+              f"pattern has no SIGNAL slots — nothing to share"); return
     share = pct / 100.0
     kept = int(share * n_sig + 1e-9)
     if share < 1.0 and kept == 0:

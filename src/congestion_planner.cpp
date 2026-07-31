@@ -893,7 +893,11 @@ void CongestionPlanner::apply_reservation(const BundleWrapper& bw, double sign) 
         int  lid     = is_vcut ? top_h : top_v;
         double frac  = 0.0;
         if (lid >= 0 && c.layer_id == lid) {
-            frac = 1.0;
+            // An effective-TOP layer that ALSO carries a share (thinned
+            // inside the band) reserves the leased fraction, not full
+            // width — share_of is 1.0 for unshared layers, so the plain
+            // policy is unchanged (Codex #547).
+            frac = bw.input.share_of(c.layer_id);
         } else if (!bw.input.layer_shares.empty()) {
             double s = bw.input.share_of(c.layer_id);
             if (s < 1.0 &&
