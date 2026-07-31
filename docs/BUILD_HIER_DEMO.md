@@ -84,6 +84,19 @@ python3 tools/build_hier_demo.py chip.bdb \
 `NAME=PATH` names a cell explicitly (the default is the basename minus its
 extension); duplicate resolved cell names are a hard error.
 
+**`--nest-bdb-cells`** switches BDB cell entries from the one-level flatten to
+a **nested** import that PRESERVES the source's internal hierarchy: the
+source's cell tree is reconstructed from its component tree (one
+representative instance per cell type defines the cell — congruent replicas
+required, a size mismatch is a loud error; non-root cell types are namespaced
+`<cell>__<srccell>`), and nets keep root-relative *hierarchical* paths that
+`add_net_pins` re-propagates through the deep tree.  Instantiating the
+imported cell then materializes the source's own instances one level deeper —
+a 2-level source becomes a 3-level chip (`chip/i_mix2_0/i_dnuts1_0/u0` at
+depth 3).  The depth-3 vehicles `flow/chip/chip3*.buda` are built this way;
+drive them with `derive_busterms 3`, `add_blocks_from_bdb 3 skip`, and
+`run_hier_bundler depth 3`.
+
 ## `--align-occurrences` — shared-row/column occurrence alignment
 
 After placement (SA/GA or the default row), snap same-cell instances onto

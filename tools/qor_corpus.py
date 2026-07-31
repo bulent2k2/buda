@@ -104,6 +104,8 @@ CORPUS = [
     "flow/rnr/mix2_topdown_refine.buda",
     "flow/chip/chip_topdown.buda",
     "flow/chip/chip_bottomup.buda",
+    "flow/chip/chip3_topdown.buda",
+    "flow/chip/chip3a_bottomup.buda",
 ]
 
 

@@ -101,7 +101,37 @@ The deeper templating HALVES the planner (the dnuts-level bundles solve
 in tiny cell-local frames and expand 6-18x each) and improves most QoR
 metrics too (overlaps −27%, unplaced −8%, detailed WL −14%, abstract WL
 −24%) at slightly more violating bundles (163→180).  Same congestion
-profile (90 ALLOW_OVERFLOW commits), healerless like its 2-level twin.  `align_bottom_up` (1.9s) gets both
+profile (90 ALLOW_OVERFLOW commits), healerless like its 2-level twin.
+
+chip3 bottom-up — nested templates at TWO levels (2026-07-31)
+===
+`chip3_bottomup.buda` marks bottom-up at BOTH hierarchy levels — big2 +
+mix2 (depth-1 cells) AND mix2's nested depth-2 classes (mix2__dnuts1/2,
+mix2__dogleg1/2 with 18/18/12/12 congruent occurrences).  Two fixtures
+tell the composed-alignment story:
+
+- **chip3 (built from plain mix2.bdb.sql)**: `align_bottom_up` correctly
+  refuses to move a nested instance independently ("inside a marked
+  parent … not fixable by translation" — it would break the parent
+  template's congruence), so only the first occurrence per parent lands
+  on the class phase; `check_template_tracks` reports the four nested
+  classes MISALIGNED and the `independent` policy solves those
+  occurrences individually.  50.8s, 301 ovl / 2108 unplaced / 118
+  viol_bundles.
+- **chip3a (built from mix2_aligned.bdb.sql — `chip3a_bottomup.buda`,
+  the QoR-corpus row)**: nested alignment MUST BE COMPOSED BOTTOM-UP —
+  align inside the cell first (mix2's own `align_and_save` checkpoint),
+  then across the cell's instances.  With the pre-aligned source, ZERO
+  unfixable-phase warnings and every nested class reports **ALIGNED**
+  (18/18/12/12 instances seeing identical signal tracks): each nested
+  template plans locally, pins all its occurrences, and DNUTS solves the
+  reference once — 8872 reference bits copied to 23288 across 379
+  sibling instances.  49.9s, 305 ovl / 2254 unplaced / 121 viol_bundles.
+
+Open (future work): the INTERMEDIATE level's own cell-local bundles
+(mix2's buses between its dnuts children) are not bottom-up-templated —
+they connect already-locked child copies and go top-down; a true
+recursive bottom-up would solve mix2's frame once too.  `align_bottom_up` (1.9s) gets both
 cells to **ALIGNED** (3 instances each seeing identical signal-track pools;
 508/496 windows compared), so DNUTS solves each cell once and copies.
 Bottom-up trades +75 abstract overlaps for −22% unplaced bits, −17%

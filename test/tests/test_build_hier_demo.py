@@ -173,6 +173,35 @@ def test_bdb_cell_import_rejects_folded_name_collision(tmp_path):
         build_hier_demo._define_bdb_cell(out, "sub", src_path)
 
 
+def test_nested_bdb_cell_import_deepens_hierarchy(tmp_path, default_demo_bdb):
+    """--nest-bdb-cells: a BDB cell is imported PRESERVING its internal
+    hierarchy — instantiating it materializes the source's own instances one
+    level deeper (a 2-level source becomes depth 1..3 in the target), with
+    hierarchical net names add_net_pins resolves through the deep tree."""
+    src_db = buda_db.BDB(default_demo_bdb)
+    src_leaves = sum(1 for c in src_db.all_components() if c.is_leaf)
+    src_insts = sum(1 for c in src_db.all_components() if c.depth == 1)
+    out = str(tmp_path / "chip3.bdb")
+    build_hier_demo.build(out, [("sub", default_demo_bdb)],
+                          seed=1, n_instances=2, n_buses=2,
+                          nest_bdb_cells=True)
+    db = buda_db.BDB(out)
+    comps = db.all_components()
+    hist = {}
+    for c in comps:
+        hist[c.depth] = hist.get(c.depth, 0) + 1
+    # chip -> 2x sub -> sub's instances -> sub's leaves.
+    assert hist[1] == 2
+    assert hist[2] == 2 * src_insts
+    assert hist[3] == 2 * src_leaves
+    # Deep hierarchical net names (no '__' folding in the nested mode).
+    deep = [n.name for n in db.all_nets() if n.name.count("/") >= 3]
+    assert deep, "expected depth-3 hierarchical net names"
+    # Deep leaf pins exist at depth 3 (interface pins re-propagated).
+    leaf_ids = {c.id: c for c in comps if c.depth == 3}
+    assert any(p.comp_id in leaf_ids for p in db.all_pins())
+
+
 def test_align_occurrences_snaps_to_shared_rows(tmp_path):
     """--align-occurrences: same-cell instances snap to the class-median
     row/column when the move stays overlap-free, so their congruent block
