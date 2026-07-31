@@ -1494,11 +1494,11 @@
        ],
        "horiz": false,
        "layer_id": 7,
-       "net_pull": 1,
+       "net_pull": 0,
        "perp_hi": 2700,
        "perp_lo": 200,
        "perp_pos": 2700,
-       "pull_break": 2960
+       "pull_break": null
       },
       {
        "along_cover_hi": 2960,
@@ -1899,11 +1899,11 @@
        ],
        "horiz": false,
        "layer_id": 7,
-       "net_pull": 1,
+       "net_pull": 0,
        "perp_hi": 2700,
        "perp_lo": 200,
        "perp_pos": 2700,
-       "pull_break": 2960
+       "pull_break": null
       },
       {
        "along_cover_hi": 2960,
@@ -1971,7 +1971,7 @@
        "perp_hi": 11830,
        "perp_lo": 10830,
        "perp_pos": 11330,
-       "pull_break": 10250
+       "pull_break": 10830
       }
      ],
      "bridge_segments": {},
@@ -2240,7 +2240,7 @@
        ],
        "horiz": true,
        "layer_id": 6,
-       "net_pull": -1,
+       "net_pull": -2,
        "perp_hi": 11980,
        "perp_lo": 11850,
        "perp_pos": 11915,
@@ -2342,11 +2342,11 @@
        ],
        "horiz": false,
        "layer_id": 7,
-       "net_pull": 1,
+       "net_pull": 0,
        "perp_hi": 1200,
        "perp_lo": 200,
        "perp_pos": 1200,
-       "pull_break": 2960
+       "pull_break": null
       }
      ],
      "bridge_segments": {},
@@ -2569,7 +2569,7 @@
        ],
        "horiz": false,
        "layer_id": 7,
-       "net_pull": -1,
+       "net_pull": -2,
        "perp_hi": 2940,
        "perp_lo": 2720,
        "perp_pos": 2830,
@@ -2970,7 +2970,7 @@
        "perp_hi": 4660,
        "perp_lo": 2960,
        "perp_pos": 2960,
-       "pull_break": 1200
+       "pull_break": 2700
       }
      ],
      "bridge_segments": {},
@@ -3235,7 +3235,7 @@
        "perp_hi": 12800,
        "perp_lo": 12000,
        "perp_pos": 12000,
-       "pull_break": 10250
+       "pull_break": 11830
       }
      ],
      "bridge_segments": {},
@@ -3428,7 +3428,7 @@
        ],
        "horiz": true,
        "layer_id": 6,
-       "net_pull": 1,
+       "net_pull": 2,
        "perp_hi": 10810,
        "perp_lo": 10270,
        "perp_pos": 10540,
@@ -3530,11 +3530,11 @@
        ],
        "horiz": false,
        "layer_id": 7,
-       "net_pull": 1,
+       "net_pull": 0,
        "perp_hi": 1200,
        "perp_lo": 200,
        "perp_pos": 1200,
-       "pull_break": 2960
+       "pull_break": null
       }
      ],
      "bridge_segments": {},
@@ -3817,11 +3817,11 @@
        ],
        "horiz": false,
        "layer_id": 7,
-       "net_pull": 1,
+       "net_pull": 0,
        "perp_hi": 2700,
        "perp_lo": 200,
        "perp_pos": 2700,
-       "pull_break": 2960
+       "pull_break": null
       },
       {
        "along_cover_hi": 2960,
@@ -5296,7 +5296,7 @@
        "perp_hi": 11830,
        "perp_lo": 10830,
        "perp_pos": 11330,
-       "pull_break": 12000
+       "pull_break": 11830
       }
      ],
      "bridge_segments": {},
@@ -5603,11 +5603,11 @@
        ],
        "horiz": false,
        "layer_id": 7,
-       "net_pull": 1,
+       "net_pull": 0,
        "perp_hi": 1200,
        "perp_lo": 200,
        "perp_pos": 1200,
-       "pull_break": 2960
+       "pull_break": null
       }
      ],
      "bridge_segments": {},
@@ -6141,11 +6141,11 @@
        ],
        "horiz": false,
        "layer_id": 7,
-       "net_pull": -1,
+       "net_pull": 0,
        "perp_hi": 4660,
        "perp_lo": 2960,
        "perp_pos": 2960,
-       "pull_break": 2700
+       "pull_break": null
       },
       {
        "along_cover_hi": 12000,
@@ -6179,7 +6179,7 @@
        "perp_hi": null,
        "perp_lo": 2720,
        "perp_pos": 2960,
-       "pull_break": 1200
+       "pull_break": 2700
       },
       {
        "along_cover_hi": 2960,
@@ -6502,7 +6502,7 @@
        "perp_hi": 4660,
        "perp_lo": 2960,
        "perp_pos": 2960,
-       "pull_break": 1200
+       "pull_break": 2700
       }
      ],
      "bridge_segments": {},
@@ -6763,11 +6763,11 @@
        ],
        "horiz": false,
        "layer_id": 7,
-       "net_pull": 1,
+       "net_pull": 0,
        "perp_hi": 1200,
        "perp_lo": 200,
        "perp_pos": 1200,
-       "pull_break": 2960
+       "pull_break": null
       }
      ],
      "bridge_segments": {},
@@ -7275,7 +7275,7 @@
        "perp_hi": 12800,
        "perp_lo": 12000,
        "perp_pos": 12000,
-       "pull_break": 10250
+       "pull_break": 11830
       }
      ],
      "bridge_segments": {},
@@ -7797,7 +7797,7 @@
        ],
        "horiz": true,
        "layer_id": 6,
-       "net_pull": 3,
+       "net_pull": 2,
        "perp_hi": 9730,
        "perp_lo": null,
        "perp_pos": 9445,
@@ -7899,11 +7899,11 @@
        ],
        "horiz": false,
        "layer_id": 7,
-       "net_pull": 1,
+       "net_pull": 0,
        "perp_hi": 1200,
        "perp_lo": 200,
        "perp_pos": 1200,
-       "pull_break": 2960
+       "pull_break": null
       }
      ],
      "bridge_segments": {},
@@ -8126,7 +8126,7 @@
        ],
        "horiz": true,
        "layer_id": 6,
-       "net_pull": -3,
+       "net_pull": -2,
        "perp_hi": null,
        "perp_lo": 12820,
        "perp_pos": 13105,
@@ -8228,11 +8228,11 @@
        ],
        "horiz": false,
        "layer_id": 7,
-       "net_pull": 1,
+       "net_pull": 0,
        "perp_hi": 1200,
        "perp_lo": 200,
        "perp_pos": 1200,
-       "pull_break": 2960
+       "pull_break": null
       }
      ],
      "bridge_segments": {},
@@ -8455,7 +8455,7 @@
        ],
        "horiz": false,
        "layer_id": 7,
-       "net_pull": -3,
+       "net_pull": -2,
        "perp_hi": null,
        "perp_lo": 4680,
        "perp_pos": 5106,

@@ -118,11 +118,18 @@ def test_pulled_anchors_end_near_pull(big_nuts_session):
     total, n = _pull_deviation(big_nuts_session)
     # Sanity: the design really does exercise many pulled segments (so this test
     # is meaningful, not vacuously passing on an all-pull_target==NaN result).
-    assert n > 100, f"expected many pulled segments, got {n}"
-    assert total < 47_000.0, (
+    # 87 under the anchor-interval model (issue #523) — the dissolved gain-only
+    # votes took the count below the old 100+.
+    assert n > 80, f"expected many pulled segments, got {n}"
+    # Under the interval model the resolved targets are almost all exactly
+    # reachable and the aggregate deviation collapses to ≈ 2.3k (was ≈ 43.5k
+    # with the group move, ≈ 50.1k without it, under the old overshooting
+    # targets).  The 10k threshold guards BOTH regressions: losing the atomic
+    # group move and re-introducing overshooting targets.
+    assert total < 10_000.0, (
         f"pulled segments stray {total:.0f} from their pull_target across {n} "
-        f"segments — the aligned-sibling group move is not pulling trunks in "
-        f"(expected < 47k; group-move ≈ 43.5k, per-segment-only ≈ 50.1k)"
+        f"segments — expected ≈ 2.3k under the interval model "
+        f"(old-model group-move ≈ 43.5k)"
     )
 
 
@@ -138,12 +145,18 @@ def _pulled_fraction(ts):
 
 def test_reported_bundles_reach_their_pull(big_nuts_session):
     """The trunk segments from the bug report must be pulled WELL toward their
-    pull side, not bottom-edged.  B20's two M7 stubs are aligned siblings that
-    used to deadlock at x=219 (fraction ≈ 0); the group move now lifts them into
-    the upper part of their interval.  B9/B28 reach their pull_target tightly."""
+    pull side, not bottom-edged.  B9/B28 keep genuine upward pulls under the
+    anchor-interval model and now reach their pull_target EXACTLY.  B20's two
+    M7 stubs — the historical aligned-sibling deadlock — are honestly FLAT
+    under the interval model: two siblings hanging off one trunk junction are
+    exactly the WL-neutral coupling the old gain-only votes mis-scored (each
+    sibling's partial derivative is zero while the other holds the trunk's
+    bound), so the deadlock scenario dissolves at the model level rather than
+    needing the group move to break it.  The group move's guard lives on in
+    B9/B28's tight reach."""
     segs = {(ts.bundle_id, ts.seg_idx): ts
             for ts in big_nuts_session.nuts_result.segments}
-    for bid, sidx in ((9, 1), (20, 2), (28, 1)):
+    for bid, sidx in ((9, 1), (28, 1)):
         ts = segs.get((bid, sidx))
         assert ts is not None and ts.placed, f"B{bid} seg{sidx} missing/unplaced"
         assert ts.net_pull > 0, f"B{bid} seg{sidx} expected an upward pull"
@@ -154,13 +167,15 @@ def test_reported_bundles_reach_their_pull(big_nuts_session):
             f"[{ts.interval_lo:.0f},{ts.interval_hi:.0f}]) — it is bottom-edged, "
             f"the aligned-sibling deadlock is back"
         )
-    # B9 and B28 are not congestion-bound and should reach pull_target tightly.
-    for bid, sidx in ((9, 1), (28, 1)):
-        ts = segs[(bid, sidx)]
+        # Not congestion-bound: the accurate target is exactly reachable.
         assert abs(ts.track_position - ts.pull_target) < 250.0, (
             f"B{bid} seg{sidx} is {abs(ts.track_position - ts.pull_target):.0f} "
             f"from its pull_target {ts.pull_target:.0f}"
         )
+    ts20 = segs.get((20, 2))
+    assert ts20 is not None and ts20.placed
+    assert ts20.net_pull == 0, "B20's sibling coupling is WL-flat now"
+    assert math.isnan(ts20.pull_target)
 
 
 def test_tighten_does_not_trade_pull_for_overlaps(big_nuts_session):

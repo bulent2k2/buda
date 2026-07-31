@@ -96,10 +96,19 @@ def test_bighalf_dead_span_opens_are_largely_gone_by_default():
     deliberately NOT rewritten to assert a reduction the gate no longer
     delivers.  The gate remains opt-in and may still pay on other designs;
     that is not measured here.
+
+    The anchor-interval pull model (issue #523) moved this HEALERLESS
+    intermediate from ~39 to ~102 opens — the accurate pull concentrates
+    segments the old overshoot incidentally scattered, and with no ripup in
+    this fixture nothing re-spreads them (the documented healerless
+    spreading loss; bigHalf's FULL flow stays 0/0/0 on the corpus).  The
+    threshold moves to 200: still a factor of ~3 below the 566 dead-span
+    class this guard exists to catch, without pinning the healerless
+    intermediate to a value the model no longer produces.
     """
     ov0, un0 = _run_bighalf(gate=False)
     ov1, un1 = _run_bighalf(gate=True)
-    assert un0 < 100, (
+    assert un0 < 200, (
         f"band_span_charge should keep bigHalf's no-rr opens low; got {un0} "
         "(historically 566 before the #518 default flip)"
     )

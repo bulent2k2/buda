@@ -28,6 +28,7 @@ The **Floorplanner** (`bin/fp`, `bin/bfp`) is a separate interactive GUI tool th
 - [Hier Bundler](docs/HIER_BUNDLER.md), [Hier Topology](docs/HIER_TOPOLOGY.md), [Hier Planner](docs/HIER_PLANNER.md) — Hierarchy-aware pipeline internals.
 - [Cross-Level Bundling](docs/cross_level_bundling.md) and [HBundle Pipeline session notes](docs/session_hbundle_pipeline.md) — How the hier flow was built (Phases A–E).
 - [Congestion Planner](docs/congestion_planner.md) — Internal design of the bundle planner: cost model, hard overflow constraint, rip-up & replan.
+- [Interval Pull Model](docs/internal/interval_pull_model.md) — `net_pull` as an anchor-interval cost model (issue #523): the flat-optimum interval + slopes, the dissolved b44 tug artifact, the cull-risk refold tier, and the measurement history that made it affordable.
 - [Detailed NUTS](docs/detailed_nuts.md) — Internal design of bit-level track assignment.
 - [Routing Grid](docs/routing_grid.md), [Detailed Viz](docs/detailed_viz.md), [Key Bindings](docs/KEY_BINDINGS.md).
 - [BDB → Flat Script Converter](docs/BDB2BUDA.md) — `tools/bdb2buda.py`: export a BDB as a flat `.buda` routing script.

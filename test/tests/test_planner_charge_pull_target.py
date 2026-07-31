@@ -102,15 +102,33 @@ def test_knob_charges_at_pull_target():
     w = s.bundles[0]
     assert w.plan.seg_perp[1] == 1200
     div = _divergences(s)
-    assert div[1] < 1          # charge == metal for the breakpoint-clamped pull
+    # Under the anchor-interval pull model (issue #523) seg1's optimum is the
+    # FLAT interval [200, 1200]: every coordinate in it is
+    # wirelength-identical, and NUTS may park the bus anywhere inside it for
+    # packing (the placed 1141.5 = alignment/packing inside the flat span).
+    # The charge stays at the breakpoint end (1200), so "charge == metal" now
+    # means: same flat optimum, divergence bounded well below the 100-unit
+    # books-vs-metal threshold — not the exact-coordinate identity the point
+    # model gave (div < 1).
+    ts1 = next(t for t in s.nuts_result.segments if t.seg_idx == 1)
+    ct = buda.ConnTopology()
+    ct.build(w.input.candidates[w.plan.selected_topology_index], s.fp)
+    cs1 = ct.segs()[1]
+    assert cs1.pull_lo <= ts1.track_position <= cs1.pull_hi  # metal in the flat optimum
+    assert div[1] < 100        # bounded by the flat span, below the report threshold
     off = _divergences(_b44(knob=False))
-    # 3 of 4 pulled charges become exact (<1 unit); legacy had none.  The
-    # remaining outlier (seg3) is the documented alignment-sibling residual:
-    # NUTS aligned it onto seg1's track, which no static prediction sees —
-    # that's what the band_occupants placed overlay exists for.
+    # Under the interval model 3 segments stay pulled (1, 4, 5 — the old
+    # seg3 vote was the dissolved gain-only artifact).  Knob on: 2 of 3
+    # charges are exact (<1 unit) and ALL sit below the 100-unit
+    # books-vs-metal threshold (seg1's 58.5 is packing inside its flat
+    # optimum, asserted above).  Knob off: every pulled charge diverges
+    # >100 (308.5 / 191.5 / 441.5) — the phantom-reservation class the
+    # knob exists to remove.
     assert sum(1 for d in div.values() if d < 1) > \
            sum(1 for d in off.values() if d < 1)
-    assert sum(1 for d in div.values() if d < 1) >= 3
+    assert sum(1 for d in div.values() if d < 1) >= 2
+    assert all(d < 100 for d in div.values())
+    assert all(d > 100 for d in off.values())
 
 
 def _occupant_session(knob):

@@ -85,6 +85,30 @@ struct ConnSeg {
     // no derivable breakpoint (net_pull == 0, or votes without a coordinate);
     // consumers fall back to the window bound.
     int  pull_break = INT_MIN;
+    // ── Pull as an INTERVAL, not a direction (the primary form) ──────────────
+    // [pull_lo, pull_hi] is the argmin SET of the connected wirelength as a
+    // function of this segment's perpendicular position — every point in it is
+    // wirelength-identical, so NUTS may spend the whole interval on packing.
+    // Well-posed by convexity: each coupling contributes
+    // max(0, a_lo - x) + max(0, x - a_hi) for the anchor interval [a_lo, a_hi]
+    // its neighbour's far end can occupy, and a sum of convex piecewise-linear
+    // terms is convex, so the minimizer is always a single interval.
+    //
+    // pull_f_lo / pull_f_hi are the slope MAGNITUDES just outside it — the
+    // wirelength paid per unit below pull_lo / above pull_hi.  They differ when
+    // the two sides carry different numbers of couplings (three stubs below and
+    // one above costs 3/unit one way, 1/unit the other) — an asymmetry the
+    // single signed net_pull cannot express, since it conflates how-many with
+    // which-way.  Recorded now; a placer that trades pull against congestion in
+    // common units is the consumer (Phase 2).
+    //
+    // net_pull and pull_break above are DERIVED from these (perp_pos inside the
+    // interval => 0, else the sign and the near edge), so every existing
+    // consumer keeps its semantics.
+    int  pull_lo   = INT_MIN;      // argmin interval, lo end
+    int  pull_hi   = INT_MAX;      // argmin interval, hi end (INT_MIN..INT_MAX = flat everywhere)
+    int  pull_f_lo = 0;            // |slope| below pull_lo
+    int  pull_f_hi = 0;            // |slope| above pull_hi
 
     // ── Along-flex DOF (Stage C of the flexible-root re-arch) ─────────────────
     // The perp slide above moves the whole segment rigidly.  A trunk spine has a
