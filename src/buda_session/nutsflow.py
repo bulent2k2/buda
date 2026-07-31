@@ -799,22 +799,39 @@ class NutsFlowMixin:
                     continue
                 g = self.routing_grid.get_layer_grid(seg.layer)
                 # The exact DNUTS admission arithmetic on the PLACED
-                # geometry: the segment strands ALL its bits iff
-                # max(span-clear pool, midpoint-fallback pool) < member bits
-                # (place_by_layer swaps in the midpoint pool only when the
-                # span pool falls short, then strands the whole segment on
-                # n_sig < bw — so max(...) >= need is exactly admission).
+                # geometry (place_by_layer): the span-clear pool is built
+                # over the FULL Hanan interval and the midpoint pool
+                # replaces it only when that unbounded span count falls
+                # short of the member bits; the cross-layer corner bounds
+                # (track_lo/hi_bound) then filter WHICHEVER pool won — no
+                # re-fallback — and the segment strands ALL its bits on
+                # `n_sig < bw`.  So admission is:
+                #     (span_all >= need ? span_bounded : mid_bounded) >= need
+                # With no corner bounds this reduces to
+                # max(span, mid) >= need, of which the historical zero
+                # threshold was the 1-bit special case.  (Codex P2 on #534:
+                # counting the whole interval over-counted a corner-bounded
+                # segment's pool and skipped an escalation DNUTS then
+                # stranded in full.)
                 need = _member_bits(w, sel, seg.seg_idx)
-                span_pool = g.count_signal_tracks_in_span(
+                b_lo = max(seg.interval_lo, seg.track_lo_bound)
+                b_hi = min(seg.interval_hi, seg.track_hi_bound)
+                span_all = g.count_signal_tracks_in_span(
                     seg.span_lo, seg.span_hi,
                     seg.interval_lo, seg.interval_hi)
-                if span_pool >= need:
-                    continue
-                x = (seg.span_lo + seg.span_hi) / 2.0
-                mid_pool = g.count_signal_tracks_in(
-                    x, seg.interval_lo, seg.interval_hi)
-                if max(span_pool, mid_pool) >= need:
-                    continue
+                if b_lo > b_hi:
+                    pass          # bounds exclude the whole interval: 0 pool
+                elif span_all >= need:
+                    span_bnd = (span_all if (b_lo == seg.interval_lo and
+                                             b_hi == seg.interval_hi)
+                                else g.count_signal_tracks_in_span(
+                                    seg.span_lo, seg.span_hi, b_lo, b_hi))
+                    if span_bnd >= need:
+                        continue
+                else:
+                    x = (seg.span_lo + seg.span_hi) / 2.0
+                    if g.count_signal_tracks_in(x, b_lo, b_hi) >= need:
+                        continue
                 # Guaranteed full strand — escalate to the same-direction
                 # TOP layer.
                 new_layer = top_h if seg.horiz else top_v

@@ -155,3 +155,45 @@ def test_escalation_fires_on_partial_supply():
     _nuts(s, escalate=True)
     assert s.detailed_result.num_unplaced == 0
     assert list(s.bundles[0].plan.seg_layers)[h_idx] == 4   # TOP M4
+
+
+def _bound_m2_seg(s, lo_bound):
+    """Clamp the placed M2 segment's cross-layer corner bound (the DNUTS
+    track_lo_bound carried by make_bus_segments) and return its seg count."""
+    n = 0
+    for seg in s.nuts_result.segments:
+        if seg.layer == 2:
+            seg.track_lo_bound = lo_bound
+            n += 1
+    return n
+
+
+def test_corner_bounds_shrink_the_admission_pool():
+    """DNUTS filters the chosen pool to the segment's cross-layer corner
+    bounds BEFORE the n_sig check (place_by_layer), so the escalation
+    predicate must count inside the bounds too (Codex P2 on #534): with no
+    keepout the M2 stub's midpoint pool is 20 tracks, but a lo-bound at 34
+    leaves only 3 in [34, 40] against 8 bits — a guaranteed full strand the
+    interval-wide count would miss.  The predicate must escalate it."""
+    s, h_idx = _build(pin_low=True, keepout_m2=False)
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        s.do_command("run_nuts")
+    assert _bound_m2_seg(s, 34.0) == 1
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        n = s._escalate_dead_low_segments()
+    assert n == 1
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 4   # TOP M4
+
+
+def test_corner_bounds_with_enough_tracks_do_not_escalate():
+    """No false positives from the bounds path: a lo-bound at 20 leaves 10
+    of the 20 tracks — enough for the 8-bit bus — so the bounded predicate
+    must leave the live LOW segment in place."""
+    s, h_idx = _build(pin_low=True, keepout_m2=False)
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        s.do_command("run_nuts")
+    assert _bound_m2_seg(s, 20.0) == 1
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        n = s._escalate_dead_low_segments()
+    assert n == 0
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # unchanged LOW M2
