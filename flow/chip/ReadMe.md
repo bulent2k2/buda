@@ -32,8 +32,14 @@ Baseline endpoints (2026-07-30, x86 reference build; both in the QoR corpus)
 ===
 | Flow | overlaps | unplaced | viol_bundles | abstract WL | detailed WL | sec |
 |---|---|---|---|---|---|---|
-| chip_topdown | 452 | 3341 | 163 | 2933096 | 58807417 | 391 |
-| chip_bottomup | 527 | 2610 | 136 | 2628905 | 45332336 | 187 |
+| chip_topdown | 255 | 3185 | 163 | 3036142 | 61969962 | 148 |
+| chip_bottomup | 490 | 2285 | 110 | 2659098 | 46670260 | 130 |
+
+(Refreshed 2026-07-31 after the `band_span_charge` default flip (#530) —
+which helps this vehicle: topdown overlaps 452→255, bottomup unplaced
+2610→2285 — and the planner-runtime fixes below, which cut the topdown
+total 391s→148s.  The original 2026-07-30 baseline: topdown 452/3341/163
+at 391s, bottomup 527/2610/136 at 187s.)
 
 The pipeline profile at this scale: bundling 0.95s → 640 hbundles (100
 top-bus + 540 cell-level), generation ~12s → 16792 candidates, and the
@@ -48,8 +54,10 @@ memcpy (plan_bundle's per-candidate rollback), the rest in the
 for_each_band full-cut scan and blocks_cache_ string-set lookups.  Three
 byte-identical fixes (candidate undo log, per-(layer,dir) sorted cut
 index, leaf-only blocks cache) took chip_topdown's planner **374.5s →
-109.7s (3.4x)** with the endpoint bit-identical (452/3341); five
-planner-heavy corpus flows verified byte-identical.
+109.7s (3.4x)** with the endpoint bit-identical (452/3341, the pre-#530
+baseline); re-confirmed after rebasing onto the `band_span_charge` flip
+(#530): **376.9s → 125.1s**, endpoint byte-equal (255/3185).  Five
+planner-heavy corpus flows verified byte-identical against both mains.
 
 **Occurrence-alignment twin** (`chip_aligned.bdb.sql` +
 `chip_topdown_aligned.buda`, built with `--align-occurrences`): snapping

@@ -330,8 +330,10 @@ Demo scripts:
 
 The chip-scale vehicle (`flow/chip/`, 640 hbundles / 16.8k candidates /
 63k Hanan crossings) exposed three planner hotspots, all fixed
-**byte-identically** (chip planner 374.5s → 109.7s, 3.4×; endpoints
-bit-identical; five planner-heavy corpus flows verified byte-identical):
+**byte-identically** (chip planner 374.5s → 109.7s, 3.4×, re-confirmed
+after the #530 `band_span_charge` flip at 376.9s → 125.1s; endpoints
+bit-identical; five planner-heavy corpus flows verified byte-identical
+against both mains):
 
 1. **Candidate undo log** — `plan_bundle` used to snapshot the ENTIRE cut
    state (`cuts_ = cuts_snapshot`, every band's cap/usage/sig-track vector)
