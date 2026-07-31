@@ -728,18 +728,27 @@ class NutsFlowMixin:
         """Post-NUTS dead-span escalation (opt-in: `set_dead_span_escalate on`).
 
         After abstract NUTS, a LOW-layer segment whose ACTUAL placed geometry
-        (its span + Hanan interval) offers ZERO keepout-clear signal tracks —
-        by the exact DetailedNUTS admission test (span-clear pool OR the
-        midpoint-fallback pool) — is a guaranteed DNUTS open: its bits have
-        nowhere to land.  The plan-time `nontop_dead_span_gate` cannot
-        separate these from survivors (the wide slide window vs the narrow
-        final interval — see wishlist-planner "dead-span discriminator"), but
-        the FINAL placed geometry can: the same test on placed spans fires on
-        ZERO survivor segments.  Move each genuinely-dead LOW segment to the
+        (its span + Hanan interval) offers FEWER keepout-clear signal tracks
+        than the segment's MEMBER-BIT count — by the exact DetailedNUTS
+        admission arithmetic (`place_by_layer`: span-clear pool, midpoint-
+        fallback pool, then `n_sig < bus_seg_nbits` strands the WHOLE
+        segment) — is a guaranteed DNUTS open: not one bit lands, because
+        admission is all-or-nothing.  The historical form of this test used
+        threshold ZERO ("no track at all"), which is exactly the member-
+        bits predicate specialized to a 1-bit bus — a 16-bit segment over a
+        keepout-carved window with 4 surviving tracks passed it and then
+        stranded all 16 bits with no healer able to reach the fault (the
+        #518/#527 mix2 residual: the honest band-spread charge admits a wide
+        bus onto a LOW layer whose real track supply cannot host it).  The
+        plan-time `nontop_dead_span_gate` cannot separate these from
+        survivors (the wide slide window vs the narrow final interval — see
+        wishlist-planner "dead-span discriminator"), but the FINAL placed
+        geometry can: this test on placed spans fires only on segments whose
+        every bit is already lost.  Move each such LOW segment to the
         cheapest same-direction TOP layer (which carries full signal supply)
-        and re-solve, iterating until no dead LOW segment remains (a segment
-        pinned to TOP never returns to LOW, so the LOW set strictly shrinks —
-        max_iter is only a safety bound).  Returns the total escalations.
+        and re-solve, iterating until none remains (a segment pinned to TOP
+        never returns to LOW, so the LOW set strictly shrinks — max_iter is
+        only a safety bound).  Returns the total escalations.
         """
         if self.nuts_result is None or self.routing_grid is None:
             return 0
@@ -758,6 +767,22 @@ class NutsFlowMixin:
         top_h = _cheapest_top(buda.LayerDir.HORIZONTAL)
         top_v = _cheapest_top(buda.LayerDir.VERTICAL)
 
+        def _member_bits(w, sel, seg_idx):
+            """The segment's DNUTS track demand: the bundle's net count, or the
+            tapered fan-in subset when the selected topology declares one
+            (`Topology::seg_bits` — the same accounting `bus_seg_nbits` and
+            ripup's width gate use).  Falls back to 1 — the historical
+            zero-threshold behavior — when the lookup fails, so unknown data
+            can only narrow the predicate, never widen it."""
+            try:
+                nbits = len(w.input.original_bundle.get_net_names())
+                sb = w.input.candidates[sel].seg_bits
+                if seg_idx in sb and 0 < len(sb[seg_idx]) < nbits:
+                    return len(sb[seg_idx])
+                return max(1, nbits)
+            except Exception:
+                return 1
+
         total = 0
         for _ in range(max_iter):
             moved = 0
@@ -766,24 +791,51 @@ class NutsFlowMixin:
                     continue
                 if not self.routing_grid.has_layer(seg.layer):
                     continue
-                g = self.routing_grid.get_layer_grid(seg.layer)
-                # The exact DNUTS admission test on the PLACED geometry:
-                # span-clear pool, then the midpoint-fallback pool.
-                if g.count_signal_tracks_in_span(seg.span_lo, seg.span_hi,
-                                                 seg.interval_lo, seg.interval_hi) > 0:
-                    continue
-                x = (seg.span_lo + seg.span_hi) / 2.0
-                if g.count_signal_tracks_in(x, seg.interval_lo, seg.interval_hi) > 0:
-                    continue
-                # Genuinely dead — escalate to the same-direction TOP layer.
-                new_layer = top_h if seg.horiz else top_v
-                if new_layer is None or new_layer == seg.layer:
-                    continue
                 w = wmap.get(seg.bundle_id)
                 if w is None or not w.plan.seg_layers:
                     continue
                 sel = w.plan.selected_topology_index
                 if sel < 0 or sel >= len(w.input.candidates):
+                    continue
+                g = self.routing_grid.get_layer_grid(seg.layer)
+                # The exact DNUTS admission arithmetic on the PLACED
+                # geometry (place_by_layer): the span-clear pool is built
+                # over the FULL Hanan interval and the midpoint pool
+                # replaces it only when that unbounded span count falls
+                # short of the member bits; the cross-layer corner bounds
+                # (track_lo/hi_bound) then filter WHICHEVER pool won — no
+                # re-fallback — and the segment strands ALL its bits on
+                # `n_sig < bw`.  So admission is:
+                #     (span_all >= need ? span_bounded : mid_bounded) >= need
+                # With no corner bounds this reduces to
+                # max(span, mid) >= need, of which the historical zero
+                # threshold was the 1-bit special case.  (Codex P2 on #534:
+                # counting the whole interval over-counted a corner-bounded
+                # segment's pool and skipped an escalation DNUTS then
+                # stranded in full.)
+                need = _member_bits(w, sel, seg.seg_idx)
+                b_lo = max(seg.interval_lo, seg.track_lo_bound)
+                b_hi = min(seg.interval_hi, seg.track_hi_bound)
+                span_all = g.count_signal_tracks_in_span(
+                    seg.span_lo, seg.span_hi,
+                    seg.interval_lo, seg.interval_hi)
+                if b_lo > b_hi:
+                    pass          # bounds exclude the whole interval: 0 pool
+                elif span_all >= need:
+                    span_bnd = (span_all if (b_lo == seg.interval_lo and
+                                             b_hi == seg.interval_hi)
+                                else g.count_signal_tracks_in_span(
+                                    seg.span_lo, seg.span_hi, b_lo, b_hi))
+                    if span_bnd >= need:
+                        continue
+                else:
+                    x = (seg.span_lo + seg.span_hi) / 2.0
+                    if g.count_signal_tracks_in(x, b_lo, b_hi) >= need:
+                        continue
+                # Guaranteed full strand — escalate to the same-direction
+                # TOP layer.
+                new_layer = top_h if seg.horiz else top_v
+                if new_layer is None or new_layer == seg.layer:
                     continue
                 sl = list(w.plan.seg_layers)
                 if seg.seg_idx >= len(sl) or sl[seg.seg_idx] == new_layer:

@@ -2437,14 +2437,16 @@ class RipupMixin:
     def _heal_dead_spans(self, stage):
         """Preconditioning step folded into the stage-b healers.
 
-        A LOW-layer segment whose ACTUAL placed geometry offers zero
-        keepout-clear signal tracks (the exact DetailedNUTS admission test —
-        `_escalate_dead_low_segments`) is a guaranteed DNUTS open that NO
-        candidate re-pin can fix: it is a layer-assignment fault, not a
-        topology-selection one, so the healers' hill-climb (which re-pins
-        candidates / replans off contended bands) can grind on it forever.
-        Escalating each such segment to the cheapest same-direction TOP layer
-        strictly reduces opens (a dead LOW segment strands 100% of its bits;
+        A LOW-layer segment whose ACTUAL placed geometry offers fewer
+        keepout-clear signal tracks than its member bits (the exact
+        DetailedNUTS admission arithmetic — `_escalate_dead_low_segments`;
+        admission is all-or-nothing, so a partial-supply shortfall strands
+        EVERY bit) is a guaranteed DNUTS open that NO candidate re-pin can
+        fix: it is a layer-assignment fault, not a topology-selection one, so
+        the healers' hill-climb (which re-pins candidates / replans off
+        contended bands) can grind on it forever.  Escalating each such
+        segment to the cheapest same-direction TOP layer strictly reduces
+        opens (a starved LOW segment strands 100% of its bits;
         TOP carries full supply), so we run it ONCE before the hill-climb and
         let the healer's own loop absorb any collateral overlap the re-solve
         surfaces — the same "escalate, then heal the fallout" contract the
