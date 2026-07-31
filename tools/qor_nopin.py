@@ -49,6 +49,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import sys
 import time
 
@@ -92,6 +93,7 @@ def run_flow_nopin(flow):
 
     s.do_command = _patched
 
+    tmp_logs = qc.private_log_dir(s)                # parallel worker: isolate logs
     d = os.path.dirname(flow)
     t0 = time.time()
     try:
@@ -109,6 +111,9 @@ def run_flow_nopin(flow):
             return {"flow": flow, "err": f"SystemExit({e.code})"}
     except Exception as e:                          # noqa: BLE001 — record, don't crash the sweep
         return {"flow": flow, "err": f"{type(e).__name__}: {str(e)[:80]}"}
+    finally:
+        if tmp_logs:
+            shutil.rmtree(tmp_logs, ignore_errors=True)
     dt = time.time() - t0
     ov = getattr(getattr(s, "nuts_result", None), "num_overlaps", None)
     un = getattr(getattr(s, "detailed_result", None), "num_unplaced", None)

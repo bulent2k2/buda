@@ -42,6 +42,7 @@ import argparse
 import contextlib
 import io
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -81,6 +82,7 @@ def run_flow(flow):
     import buda_cli
     s = buda_cli.BudaSession()
     s.no_viz = True
+    tmp_logs = qc.private_log_dir(s)                # parallel worker: isolate logs
     d = os.path.dirname(flow)
     cwd = os.getcwd()
     t0 = time.time()
@@ -102,6 +104,9 @@ def run_flow(flow):
             return {"flow": flow, "err": f"SystemExit({e.code})"}
     except Exception as e:                          # noqa: BLE001 — record, don't crash the sweep
         return {"flow": flow, "err": f"{type(e).__name__}: {str(e)[:60]}"}
+    finally:
+        if tmp_logs:
+            shutil.rmtree(tmp_logs, ignore_errors=True)
     dt = time.time() - t0
     nr = getattr(s, "nuts_result", None)
     dr = getattr(s, "detailed_result", None)
