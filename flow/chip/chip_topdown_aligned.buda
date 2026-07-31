@@ -1,0 +1,25 @@
+# chip — occurrence-ALIGNED placement twin of chip_topdown (study fixture,
+# NOT in the QoR corpus): built with build_hier_demo's --align-occurrences,
+# which snaps same-cell instances onto shared rows/columns after SA so their
+# congruent block edges COINCIDE in the flat Hanan grid (2/3 of each cell
+# class aligned here; the third would overlap).  Hanan crossings drop 33%
+# (242x262=63404 -> 227x187=42449).  Study verdict (2026-07-31, planner 2x2
+# matrix in flow/chip/ReadMe.md): the grid reduction paid on the OLD
+# copy-dominated planner (374.5 -> 300.5s) but is a wash after the undo-log/
+# cut-index/leaf-cache fixes (~110 -> ~120s) — the remaining cost is
+# congestion-driven, and the snap costs QoR (unplaced 3341 -> 3877: it closes
+# part of the SA bloat channels).  Kept as the test-with-both twin.
+source chip_tracks.buda
+open_bdb chip_aligned.bdb.sql
+derive_busterms 2
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+run_hier_bundler depth 2
+generate_hier_topologies
+run_planner hier 5 signal_tracks
+run_nuts
+run_detailed_nuts
+report_wl
+check_design
+exit

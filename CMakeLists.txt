@@ -81,6 +81,19 @@ else()
     set(BUDA_PYBIND_EXTRAS "")
 endif()
 
+# Opt-in profiling build (2026-07 planner-runtime work): identical -O3
+# codegen with symbols KEPT for stack-sampling profilers (gdb batch bt,
+# perf) — pybind's post-build strip would gut them (NO_EXTRAS skips it),
+# -g adds line info, frame pointers make sampled stacks walkable:
+#   cmake -B build-prof -DBUDA_PROFILE=ON && cmake --build build-prof -j
+#   PYTHONPATH=build-prof:src python3 …   (then sample with gdb/perf)
+# Composes with BUDA_SANITIZE (which already keeps symbols).
+option(BUDA_PROFILE "Keep symbols + -g for profilers (still -O3)" OFF)
+if(BUDA_PROFILE AND NOT BUDA_SANITIZE)
+    add_compile_options(-g -fno-omit-frame-pointer)
+    set(BUDA_PYBIND_EXTRAS NO_EXTRAS)
+endif()
+
 execute_process(
     COMMAND python3 -c "import pybind11; print(pybind11.get_cmake_dir())"
     OUTPUT_VARIABLE PYBIND11_CMAKE_DIR

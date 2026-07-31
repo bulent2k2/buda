@@ -178,7 +178,13 @@ void CongestionPlanner::rebuild_cuts_() {
     if (x_grid_.size() < 2 || y_grid_.size() < 2) return;
 
     auto blocks   = floorplan_.get_all_blocks();
-    blocks_cache_ = blocks;
+    // Cache LEAF blocks only: every consumer (routed_extent,
+    // low_seg_obstructed) skips hierarchy containers, and the per-iteration
+    // is_container() string-set lookup was a measured chip-scale hotspot —
+    // filter once here instead (same subset, same order: byte-identical).
+    blocks_cache_.clear();
+    for (const auto& b : blocks)
+        if (!floorplan_.is_container(b.first)) blocks_cache_.push_back(b);
     int n_ybands = (int)y_grid_.size() - 1;
     int n_xbands = (int)x_grid_.size() - 1;
 
@@ -255,6 +261,17 @@ void CongestionPlanner::rebuild_cuts_() {
         }
     }
 
+    // Rebuild the for_each_band range index (see cut_index_ in the header):
+    // per (layer_id, dir), the (coord_2x, ci) pairs in ci order — which is
+    // coordinate-ascending per layer by the build loops above, so the vector
+    // is binary-searchable on coord_2x.
+    cut_index_.clear();
+    for (int ci = 0; ci < (int)cuts_.size(); ++ci) {
+        const GlobalCut& c = cuts_[ci];
+        cut_index_[{c.layer_id, (int)c.dir}]
+            .emplace_back((long)c.cut_coord_2x, ci);
+    }
+
     // Report minimum per-band capacity per layer.  In SIGNAL_TRACKS mode the
     // figure is the minimum count of discrete SIGNAL tracks in a band (the unit
     // the planner now charges against); otherwise it is the geometric band
@@ -323,9 +340,8 @@ void CongestionPlanner::routed_extent(const Segment& seg, int layer_id,
         for (const auto& [name, r] : blocks_cache_) {
             // Only true leaf cells clamp a non-TOP segment to their face (the
             // in-cell portion is internal pin access).  Hierarchy containers are
-            // transparent (Gap 2): a segment inside one keeps its full extent and
-            // is charged across the child-edge cuts it crosses.
-            if (floorplan_.is_container(name)) continue;
+            // transparent (Gap 2) — already filtered out of blocks_cache_.
+            (void)name;
             int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
             int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
             if (perp < plo || perp > phi) continue;
@@ -371,17 +387,21 @@ void CongestionPlanner::for_each_cut_(const Segment& seg, int layer_id,
     // truncates onto the lower grid line, let a neighbour segment ending there
     // falsely charge this cell's cut.
     const long lo2 = 2L * lo, hi2 = 2L * hi;
-    for (int ci = 0; ci < (int)cuts_.size(); ++ci) {
-        const GlobalCut& c = cuts_[ci];
-        if (c.layer_id != layer_id) continue;
-        if (is_h && c.dir == LayerDir::VERTICAL) {
-            if (!(c.cut_coord_2x >= lo2 && c.cut_coord_2x <= hi2)) continue;
-            fn(ci, /*is_vcut=*/true, pp_h);
-        } else if (!is_h && c.dir == LayerDir::HORIZONTAL) {
-            if (!(c.cut_coord_2x >= lo2 && c.cut_coord_2x <= hi2)) continue;
-            fn(ci, /*is_vcut=*/false, pp_v);
-        }
-    }
+    // Range lookup via cut_index_ (byte-identical to the historical full
+    // scan: the per-(layer,dir) pairs are in ci order — the scan's own visit
+    // order restricted to the matching cuts).  An H-seg crosses V-cuts, a
+    // V-seg H-cuts.
+    const auto it = cut_index_.find(
+        {layer_id, (int)(is_h ? LayerDir::VERTICAL : LayerDir::HORIZONTAL)});
+    if (it == cut_index_.end()) return;
+    const auto& vec = it->second;
+    auto lb = std::lower_bound(
+        vec.begin(), vec.end(), std::make_pair(lo2, INT_MIN),
+        [](const std::pair<long, int>& a, const std::pair<long, int>& b2) {
+            return a.first < b2.first;
+        });
+    for (; lb != vec.end() && lb->first <= hi2; ++lb)
+        fn(lb->second, /*is_vcut=*/is_h, is_h ? pp_h : pp_v);
 }
 
 void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
@@ -560,8 +580,8 @@ bool CongestionPlanner::low_seg_obstructed(const Segment& seg, int layer_id,
     // Endpoint leaf cells (at this perp): the ones owning a pin-access tail.
     const Rect* lo_cell = nullptr;
     const Rect* hi_cell = nullptr;
-    for (const auto& [name, r] : blocks_cache_) {
-        if (floorplan_.is_container(name)) continue;
+    for (const auto& [name, r] : blocks_cache_) {   // leaf blocks only
+        (void)name;
         int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
         int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
         if (perp < plo || perp > phi) continue;
@@ -587,8 +607,8 @@ bool CongestionPlanner::low_seg_obstructed(const Segment& seg, int layer_id,
         return lo_cell && hi_cell && lo_cell != hi_cell;
     }
 
-    for (const auto& [name, r] : blocks_cache_) {
-        if (floorplan_.is_container(name)) continue;
+    for (const auto& [name, r] : blocks_cache_) {   // leaf blocks only
+        (void)name;
         int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
         int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
         if (perp < plo || perp > phi) continue;
@@ -753,9 +773,13 @@ double CongestionPlanner::usable_band_cap(const GlobalCut& c, int b, bool is_vcu
 void CongestionPlanner::apply_segment(const Segment& seg, int layer_id, double eff_width,
                                       int perp_pos_override) {
     // The actual charge — must spread exactly as score_segment prices it, or
-    // the books and the scorer disagree about where the demand went.
+    // the books and the scorer disagree about where the demand went.  While
+    // the candidate undo log records (plan_bundle), save each touched band's
+    // pre-charge value for the exact-restore rollback.
     for_each_band_w(seg, layer_id, perp_pos_override, eff_width,
                     [&](int ci, int b, double w) {
+        if (cand_undo_on_)
+            cand_undo_.emplace_back(ci, b, cuts_[ci].usage(b));
         cuts_[ci].add_usage(b, eff_width * w);
     });
 }
@@ -1197,8 +1221,20 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     res.best_topo     = cand_indices.empty() ? 0 : cand_indices.front();
     double best_score = std::numeric_limits<double>::max();
 
-    // Snapshot cut state so each topology candidate is scored from the same base.
-    auto cuts_snapshot = cuts_;
+    // Each topology candidate is scored from the same base cut state.  The
+    // within-candidate charges (apply_segment, so later segments of the SAME
+    // candidate see the updated congestion) are recorded in the candidate
+    // undo log and rolled back in reverse — an exact-value restore of only
+    // the touched bands, replacing the full cuts_ deep copy whose memcpy
+    // dominated chip-scale planning (see cand_undo_ in the header).
+    cand_undo_on_ = true;
+    cand_undo_.clear();
+    auto rollback_candidate = [&]() {
+        for (auto it = cand_undo_.rbegin(); it != cand_undo_.rend(); ++it)
+            cuts_[std::get<0>(*it)].set_usage(std::get<1>(*it),
+                                              std::get<2>(*it));
+        cand_undo_.clear();
+    };
 
     // Per-layer committed load (summed band usage) at this bundle's turn, and the
     // max over each direction's layers, for the load-balancing tie-breaker.  The
@@ -1640,7 +1676,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         }
 
         if (topo_infeasible) {
-            cuts_ = cuts_snapshot;
+            rollback_candidate();
             continue;
         }
 
@@ -1662,9 +1698,10 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             res.found      = true;
         }
 
-        // Roll back to snapshot before scoring the next candidate.
-        cuts_ = cuts_snapshot;
+        // Roll back this candidate's charges before scoring the next one.
+        rollback_candidate();
     }
+    cand_undo_on_ = false;
     return res;
 }
 

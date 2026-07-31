@@ -459,6 +459,72 @@ def _optimize_instances(placements, cell_meta, buses, method, params, bloat, see
     return top_w, top_h
 
 
+def _align_occurrences(placements, cell_meta):
+    """Snap same-cell instances onto SHARED coordinates so their (congruent)
+    block edges COINCIDE in the flat Hanan grid — the hierarchical
+    occurrence-alignment study knob: every leaf-block edge of an instance is
+    its cell-local edge + the instance origin, so giving a cell's instances a
+    common y (row) collapses their ~2*n_blocks distinct y-Hanan-lines to ONE
+    set, shrinking the planner's cut/band grid.
+
+    Per cell class: try snapping every instance's y to the class MEDIAN y
+    (minimal total movement for an odd count); any instance whose snap would
+    overlap another instance's REAL rect reverts (kept where SA put it).
+    Then the same for x — an instance already y-aligned usually stays put,
+    while stacked pairs share their column edges instead.  Deterministic;
+    prints per-class what aligned."""
+    def rects(skip=None, override=None):
+        out = []
+        for p in placements:
+            if p is skip:
+                continue
+            w, h, _c = cell_meta[p["cell"]]
+            x, y = p["x"], p["y"]
+            if override and p in override:
+                x, y = override[p["inst"]]
+            out.append((x, y, x + w, y + h))
+        return out
+
+    def overlaps(x, y, w, h, others):
+        for (ox1, oy1, ox2, oy2) in others:
+            if x < ox2 and x + w > ox1 and y < oy2 and y + h > oy1:
+                return True
+        return False
+
+    by_cell = {}
+    for p in placements:
+        by_cell.setdefault(p["cell"], []).append(p)
+    for cell, insts in sorted(by_cell.items()):
+        if len(insts) < 2:
+            continue
+        w, h, _c = cell_meta[cell]
+        for axis in ("y", "x"):
+            vals = sorted(pp[axis] for pp in insts)
+            target = _snap(vals[len(vals) // 2])          # median, grid-snapped
+            moved = 0
+            for pp in sorted(insts, key=lambda q: abs(q[axis] - target)):
+                if pp[axis] == target:
+                    continue
+                nx = target if axis == "x" else pp["x"]
+                ny = target if axis == "y" else pp["y"]
+                others = [(q["x"], q["y"],
+                           q["x"] + cell_meta[q["cell"]][0],
+                           q["y"] + cell_meta[q["cell"]][1])
+                          for q in placements if q is not pp]
+                if overlaps(nx, ny, w, h, others):
+                    continue                              # keep SA's position
+                pp["x"], pp["y"] = nx, ny
+                moved += 1
+            aligned = sum(1 for pp in insts if pp[axis] == target)
+            print(f"  align {cell:12s} {axis}={target:.0f}: "
+                  f"{aligned}/{len(insts)} instance(s) share the "
+                  f"{'row' if axis == 'y' else 'column'} ({moved} moved)")
+    # Re-derive the top-cell extent from the (possibly moved) instances.
+    top_w = max(p["x"] + cell_meta[p["cell"]][0] for p in placements)
+    top_h = max(p["y"] + cell_meta[p["cell"]][1] for p in placements)
+    return top_w, top_h
+
+
 def _add_cell_internal_nets(db, top_inst, placements):
     """Replicate each cell's internal nets into every instance, with endpoints
     qualified by the instance path and globally-unique hierarchical net names
@@ -568,7 +634,7 @@ def _ensure_min_buses_per_instance(buses, placements, pool, rng,
 
 def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
           cell_nets=True, busterms=True, optimize=None, opt_params=None,
-          bloat=None, n_instances=2, n_buses=7):
+          bloat=None, n_instances=2, n_buses=7, align_occurrences=False):
     rng = random.Random(seed)
     # Leaf .buda files carry full pipeline/tech commands buda2bdb doesn't read;
     # silence its per-line "ignored command" warnings while defining cells.
@@ -638,6 +704,14 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
     if optimize:
         top_w, top_h = _optimize_instances(placements, cell_meta, buses,
                                            optimize, opt_params or {}, bloat, seed)
+
+    # 4b. Optional hierarchical occurrence alignment: snap same-cell instances
+    #     onto shared rows/columns so their congruent block edges coincide in
+    #     the flat Hanan grid (fewer unique lines -> smaller planner cut/band
+    #     grid).  Runs AFTER the optimizer so it is a minimal-movement snap of
+    #     the optimized placement, overlap-checked per instance.
+    if align_occurrences:
+        top_w, top_h = _align_occurrences(placements, cell_meta)
 
     # 5. Top cell + its six child instances + materialize the hierarchy.
     db.add_cell(top_cell, top_w, top_h)
@@ -770,6 +844,7 @@ def main():
     bloat = None
     n_instances = 2
     n_buses = 7
+    align_occurrences = False
     i = 0
     pos = []
     while i < len(argv):
@@ -784,6 +859,8 @@ def main():
             n_instances = _parse_instances(argv[i + 1]); i += 2
         elif argv[i] in ("--buses", "-buses") and i + 1 < len(argv):
             n_buses = int(argv[i + 1]); i += 2
+        elif argv[i] in ("--align-occurrences", "-align-occurrences"):
+            align_occurrences = True; i += 1
         elif argv[i] == "--no-cell-nets":
             cell_nets = False; i += 1
         elif argv[i] == "--no-busterms":
@@ -821,7 +898,8 @@ def main():
     print(f"Building hierarchical demo BDB (seed={seed}) …")
     build(out_path, cell_files, seed=seed, cell_nets=cell_nets,
           busterms=busterms, optimize=optimize, opt_params=opt_params,
-          bloat=bloat, n_instances=n_instances, n_buses=n_buses)
+          bloat=bloat, n_instances=n_instances, n_buses=n_buses,
+          align_occurrences=align_occurrences)
 
 
 if __name__ == "__main__":
