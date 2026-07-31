@@ -651,6 +651,98 @@ class RipupMixin:
                                   0.5 * (ts.interval_lo + ts.interval_hi)))
         return sites
 
+    def _rr_width_infeasible(self, w, tidx):
+        """STATIC WIDTH GATE (issue #523): True iff candidate `tidx` carries a
+        segment whose bit demand cannot physically fit its own slide window —
+        `bits x best-case bit-pitch > window` — so every placement on every
+        layer strands bits at DetailedNUTS.  The unpinned planner's STRICT
+        refuses such a candidate naturally (charging its width into a smaller
+        window overflows in signal_tracks mode); only ripup's PINNED trials
+        (whose ladder ends in BEST_EFFORT, by design) can commit one, which is
+        how mix2's climb walked into b101's Z_HVH: a 32-bit stub over a
+        50-unit window (72 track-units of demand), measured locally better at
+        commit time, then unfixable — the fault is width, which no layer
+        escalation or re-place can reach.  Gating the TRIAL SET keeps the
+        climb out of those corners.
+
+        Conservative by construction — never gates a feasible candidate:
+        * bit-pitch is the MINIMUM over the segment's same-direction layers
+          (the best case any layer assignment could achieve);
+        * a direction where ANY layer lacks a track pattern is skipped (the
+          width-mode demand model is not per-track, so no reliable bound);
+        * unbounded slide windows (the +-2^30 no-clamp sentinel) never gate;
+        * tapered fan-in segments count only their member bits.
+        User pins are respected by the caller (a pinned_group returns before
+        the gate; the hard single pin never reaches the alternate list).
+        Memoized per ripup run — pools only grow mid-run (dogleg appends), so
+        (bundle_id, tidx) stays a stable key within one invocation."""
+        if os.environ.get('BUDA_RR_WIDTH_GATE', '1') == '0':
+            return False                      # study opt-out
+        # Scope-out: bottom-up sessions (any hier.locked wrapper) run CLASS
+        # moves — one template re-pin re-routes every instance, the coarsest
+        # move in the healer, and the most sensitive to trial-list
+        # perturbation.  Measured on mix2_fast_bottomup (main + refold): gate
+        # off heals 1/0/0 -> 0/0/0, gate on lands 6/60/4 with the gate never
+        # excluding a winning move — pure path chaos amplified by class-move
+        # granularity.  The gate's motivating corners (mix/mix2) have no
+        # locked wrappers, so the blunt boundary costs nothing there.
+        if any(w.hier.locked for w in self.bundles):
+            return False
+        memo = getattr(self, '_rr_width_memo', None)
+        if memo is None:
+            memo = self._rr_width_memo = {}
+            self._rr_width_logged = set()
+        try:
+            key = (w.input.original_bundle.id, buda.topo_uid(
+                w.input.candidates[tidx]))
+        except Exception:
+            key = (w.input.original_bundle.id, tidx)
+        hit = memo.get(key)
+        if hit is not None:
+            return hit
+        verdict = False
+        try:
+            cand = w.input.candidates[tidx]
+            nbits = len(w.input.original_bundle.get_net_names())
+            ct = buda.ConnTopology()
+            ct.build(cand, self.fp)          # served by the analysis cache
+            sb = cand.seg_bits
+            for si, cs in enumerate(ct.segs()):
+                win = cs.perp_hi - cs.perp_lo
+                if win >= 10 ** 8 or win < 0:
+                    continue                  # unbounded / degenerate: no bound
+                need = nbits
+                if si in sb and 0 < len(sb[si]) < nbits:
+                    need = len(sb[si])        # tapered fan-in subset
+                dir_enum = (buda.LayerDir.HORIZONTAL if cs.horiz
+                            else buda.LayerDir.VERTICAL)
+                pitches = []
+                for lid in self.layers.get_layer_ids_by_dir(dir_enum):
+                    if (self.routing_grid is None
+                            or not self.routing_grid.has_layer(lid)):
+                        pitches = []
+                        break                 # width-mode layer: no track bound
+                    # has_layer() proves a RoutingGrid EXISTS, not that a
+                    # global pattern set the per-track bit pitch: an
+                    # add_grid_override on an undefined layer default-
+                    # constructs the grid, and eff_bus_width then returns the
+                    # width/dilution fallback — not a pitch — which must not
+                    # be multiplied by a bit count (Codex P2 on #531).
+                    pat = self.routing_grid.get_layer_grid(lid).global_pattern()
+                    if not pat.slots or pat.signal_density() <= 0:
+                        pitches = []
+                        break                 # override-only / degenerate: stand down
+                    pitches.append(self.layers.eff_bus_width(1, 1.0, lid))
+                if not pitches:
+                    continue
+                if need * min(pitches) > win:
+                    verdict = True
+                    break
+        except Exception:
+            verdict = False                   # a gate must never break the healer
+        memo[key] = verdict
+        return verdict
+
     def _rr_candidate_order(self, w, old_tidx, stage, sites=None):
         """Alternate-candidate trial order for one contender (wishlist-ripup
         item 4 + QoR-measured class re-rank): candidates whose
@@ -699,12 +791,27 @@ class RipupMixin:
                     if 0 <= i < len(w.input.candidates) and i != old_tidx]
         n = min(len(w.input.candidates), cap)
         idxs = [i for i in range(n) if i != old_tidx]
+        # STATIC WIDTH GATE (issue #523): drop alternates that are dead on
+        # arrival at DetailedNUTS — see _rr_width_infeasible.  Applied to the
+        # auto trial set only (group pins returned above; the incumbent is
+        # not in the list), logged once per bundle per run.
+        gated = {i for i in idxs if self._rr_width_infeasible(w, i)}
+        if gated:
+            bid = w.input.original_bundle.id
+            if bid not in self._rr_width_logged:
+                self._rr_width_logged.add(bid)
+                print(f"[ripup_reroute] width-gate: bundle {bid}: "
+                      f"{len(gated)} candidate(s) statically width-infeasible "
+                      f"(bit demand exceeds slide window) — excluded from "
+                      f"trials.", flush=True)
+            idxs = [i for i in idxs if i not in gated]
         if sites is None:
             sites = self._rr_contention_centres(stage,
                                                 w.input.original_bundle.id)
         if not sites:
             return idxs
-        extras = [i for i in range(n, len(w.input.candidates)) if i != old_tidx]
+        extras = [i for i in range(n, len(w.input.candidates))
+                  if i != old_tidx and not self._rr_width_infeasible(w, i)]
         def farness(i):
             cand = w.input.candidates[i]
             worst = None
@@ -2631,6 +2738,8 @@ class RipupMixin:
               flush=True)
 
         self._rr_t_init()
+        self._rr_width_memo = {}         # static width gate, per-run memo
+        self._rr_width_logged = set()
         self._rr_dirty = None            # set per trial by _rr_rerun
         committed = 0
         it = 0
@@ -2925,6 +3034,41 @@ class RipupMixin:
                               f"continue).", flush=True)
                         stopped_early = True
                         break
+
+        # POST-CLIMB DEAD-SPAN REFOLD (issue #523 regression tail).  The
+        # entry heal ran before the climb, but the climb itself can CREATE
+        # dead spans: a committed re-pin lands a candidate whose stub sits in
+        # a starved interval (mix2 iter 8: b101 -> topo 3, a 32-bit stub over
+        # a 22-track cell — measured better overall at commit time, then
+        # unreachable, because every later trial moved TOPOLOGIES while the
+        # fault was the LAYER).  Whether the climb ended by stall or by
+        # max_iter, re-run the same escalation the entry heal uses, measured:
+        # snapshot, escalate + re-solve, accept only on a strictly better
+        # metric, restore otherwise.  Runs once — _escalate_dead_low_segments
+        # loops internally until no dead LOW segment remains.
+        if (stage == 'b' and self._rr_m_primary(metric()) > 0
+                and getattr(self, '_heal_dead_spans_in_healers',
+                            _RR_HEAL_DEAD_SPANS_DEFAULT)):
+            # Same opt-out the entry heal honors: a study / regression bisect
+            # that sets _heal_dead_spans_in_healers=False must retain the
+            # pre-feature healer behavior end to end (Codex P2 on #531).
+            cur_end = metric()
+            heal_snap = self._rr_snapshot()
+            n_refold = self._escalate_dead_low_segments()
+            if n_refold:
+                self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+                m_heal = metric()
+                if m_heal < cur_end:
+                    print(f"[ripup_reroute] HEAL-REFOLD: escalated "
+                          f"{n_refold} dead LOW segment(s) the climb "
+                          f"introduced, metric {self._rr_m_str(cur_end)}->"
+                          f"{self._rr_m_str(m_heal)}", flush=True)
+                    self.planner.recharge_committed(self.bundles)
+                    if self.bdb is not None:
+                        self._checkpoint_routing()
+                    committed += 1
+                else:
+                    self._rr_restore(heal_snap)
 
         if not stopped_early and self._rr_m_primary(metric()) > 0:
             print(f"[ripup_reroute] reached max_iter={max_iter} while still "
