@@ -26,17 +26,23 @@ wall-clock, split into:
     or one that stops before DNUTS (the interesting-to-watch vehicles), and
   * a CLEAN table — the 0/0/0 flows, listed for their sizes/WL only.
 
-Reuses `qor_corpus`'s CORPUS list, `_wirelengths`, and `_check_design_bundles`
-so the snapshot always tracks the same corpus the comparison tool sweeps.
+Reuses `qor_corpus`'s CORPUS list, `_wirelengths`, `_check_design_bundles`, and
+its parallel `sweep` so the snapshot always tracks the same corpus the
+comparison tool sweeps.  The sweep is PARALLEL by default (`--jobs`, default =
+CPU count): flows are independent, so every column is byte-identical to a
+serial run EXCEPT `sec`, which inflates with CPU contention under parallel
+load — pass `-j 1` when the per-flow timing itself is what you are measuring.
 
   tools/qor_table.py                          # print both tables to stdout
   tools/qor_table.py --out qor_table.md  # (re)write the checked-in snapshot
   tools/qor_table.py --flows flow/rnr/mix.buda flow/big_data_test/b44.buda
+  tools/qor_table.py -j 1                     # serial (timing-faithful sec)
 """
 import argparse
 import contextlib
 import io
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -76,6 +82,7 @@ def run_flow(flow):
     import buda_cli
     s = buda_cli.BudaSession()
     s.no_viz = True
+    tmp_logs = qc.private_log_dir(s)                # parallel worker: isolate logs
     d = os.path.dirname(flow)
     cwd = os.getcwd()
     t0 = time.time()
@@ -97,6 +104,9 @@ def run_flow(flow):
             return {"flow": flow, "err": f"SystemExit({e.code})"}
     except Exception as e:                          # noqa: BLE001 — record, don't crash the sweep
         return {"flow": flow, "err": f"{type(e).__name__}: {str(e)[:60]}"}
+    finally:
+        if tmp_logs:
+            shutil.rmtree(tmp_logs, ignore_errors=True)
     dt = time.time() - t0
     nr = getattr(s, "nuts_result", None)
     dr = getattr(s, "detailed_result", None)
@@ -220,14 +230,21 @@ def main():
                     help="run these flows instead of the default corpus")
     ap.add_argument("--stamp", help="header stamp (default: today's date + "
                                     "the short git commit)")
+    ap.add_argument("-j", "--jobs", type=int, default=qc.default_jobs(),
+                    metavar="N",
+                    help="worker processes for the sweep (default: CPU count "
+                         "= %(default)s; 1 = serial, timing-faithful sec)")
     args = ap.parse_args()
 
     os.chdir(_ROOT)                                 # flow paths are repo-root-relative
     flows = args.flows or qc.CORPUS
-    rows = []
-    for f in flows:
-        rows.append(run_flow(f))
-        print(f"  done {f}", file=sys.stderr, flush=True)
+    t0 = time.time()
+    rows = qc.sweep(
+        run_flow, flows, args.jobs,
+        progress=lambda r: print(f"  done {r['flow']}", file=sys.stderr,
+                                 flush=True))
+    print(f"  swept {len(rows)} flows in {time.time() - t0:.1f}s "
+          f"(jobs={max(1, args.jobs)})", file=sys.stderr, flush=True)
     stamp = args.stamp or f"{time.strftime('%Y-%m-%d')} (main @ {_git_commit()})"
     md = render(rows, stamp)
     if args.out:
