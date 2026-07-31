@@ -231,10 +231,12 @@ void bind_db(py::module_& m) {
         .def_readwrite("n_net_vias",     &RouteSnapshotRow::n_net_vias);
 
     py::class_<CellRow>(m, "CellRow")
-        .def_readwrite("name",      &CellRow::name)
-        .def_readwrite("width",     &CellRow::width)
-        .def_readwrite("height",    &CellRow::height)
-        .def_readwrite("bottom_up", &CellRow::bottom_up);
+        .def_readwrite("name",        &CellRow::name)
+        .def_readwrite("width",       &CellRow::width)
+        .def_readwrite("height",      &CellRow::height)
+        .def_readwrite("bottom_up",   &CellRow::bottom_up)
+        .def_readwrite("layer_cap",   &CellRow::layer_cap)
+        .def_readwrite("layer_floor", &CellRow::layer_floor);
 
     py::class_<CellPinRow>(m, "CellPinRow")
         .def_readwrite("cell",     &CellPinRow::cell)
@@ -422,6 +424,10 @@ void bind_db(py::module_& m) {
              py::arg("cell"), py::arg("on"))
         .def("cell_bottom_up",  &BDB::cell_bottom_up, py::arg("cell"))
         .def("bottom_up_cells", &BDB::bottom_up_cells)
+        .def("set_cell_layer_band", &BDB::set_cell_layer_band,
+             py::arg("cell"), py::arg("floor"), py::arg("cap"))
+        .def("cell_layer_band", &BDB::cell_layer_band, py::arg("cell"))
+        .def("layer_capped_cells", &BDB::layer_capped_cells)
         .def("add_inst",        &BDB::add_inst,
              py::arg("inst_name"), py::arg("cell_name"), py::arg("parent_name"),
              py::arg("x"), py::arg("y"))

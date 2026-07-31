@@ -1,0 +1,51 @@
+source mix_tracks.buda
+open_bdb mix2.bdb.sql
+
+# Bottom-up: plan/NUTS each cell template once, copy to all instances.
+# Must come after open_bdb (flags persist in the BDB) and before run_planner hier.
+set_bottom_up dnuts1
+set_bottom_up dnuts2
+set_bottom_up dogleg1
+set_bottom_up dogleg2
+
+# Per-cell layer caps (docs/internal/hier_layer_caps.md, Phase 2 vehicle):
+# the sparse dnuts2 (4-bit buses, few children) keeps its interconnect on
+# the LOW pair [M2..M3] (all-LOW band — effective-TOP promotion carries the
+# cost model); the wide/child-dense cells get the mid band [..M5], leaving
+# M6/M7 to the top level.  Measured while choosing these bands (the honest
+# trade the plan states up front): dnuts1's 32-bit bus at M3 commits with
+# planner overflow 13-35.5 and strands all 32 bits at DNUTS, and the
+# child-dense dogleg cells at M3 (leaf footprints are LOW keepouts; TOP
+# flies over) strand 32 dogleg2 bits — the wiring-limited cases Phase 3's
+# shares are designed to price.  The separation evidence is
+# report_wirelength's per-layer breakdown: zero leaf-template WL above
+# each cell's cap.
+set_cell_layer_cap dnuts1 M5
+set_cell_layer_cap dnuts2 M3
+set_cell_layer_cap dogleg1 M5
+set_cell_layer_cap dogleg2 M5
+
+derive_busterms 2
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+run_hier_bundler depth 2
+generate_hier_topologies
+run_planner hier 5 signal_tracks
+dump_topologies
+run_nuts
+# Healing stage a: feed the measured NUTS overlaps back as band demand
+# (negotiate), then the rnr hill-climb finishes the residual — the locked
+# bottom-up copies are respected (never re-routed).
+negotiate_congestion
+ripup_reroute
+check_design nuts
+check_template_tracks on_mismatch independent
+run_detailed_nuts
+# Healing stage b: negotiate each DNUTS-open segment's window, then hill-climb.
+negotiate_congestion
+ripup_reroute
+check_design
+report_wirelength
+visualize
+exit

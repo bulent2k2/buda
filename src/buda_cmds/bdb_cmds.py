@@ -140,6 +140,9 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # Codex #253); load_pipeline rebuilds both from this BDB's rows.
     session._bu_clone_cells = {}
     session._bu_clone_from = {}
+    # Per-cell layer policies persisted in this BDB (v20) come back so the
+    # resumed flow plans under the same bands (session-typed entries win).
+    session._restore_layer_policies()
 
 
 def cmd_import_def_lef(session, cmd, args, cmd_line):
@@ -425,6 +428,12 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
     if cell == "*" and len(args) > 1 and args[1].lower() == "off":
         n = len(getattr(session, "_cell_layer_policy", {}) or {})
         session._cell_layer_policy = {}
+        if session.bdb is not None:
+            # Write-through (v20): clear every persisted band + the '*'
+            # default so a later open/resume does not resurrect the policy.
+            for c in session.bdb.layer_capped_cells():
+                session.bdb.set_cell_layer_band(c, -1, -1)
+            session.bdb.meta_set("layer_cap_default", "")
         print(f"[LayerCap] cleared {n} polic{'y' if n == 1 else 'ies'} "
               f"(byte-identical to no caps; re-run the planner to lift "
               f"masks already applied)")
@@ -475,9 +484,23 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
     if cell != "*" and session.bdb is not None:
         if not any(c.cell == cell for c in session.bdb.all_components()):
             print(f"Error: set_cell_layer_cap: unknown cell '{cell}'"); return
-    if not hasattr(session, "_cell_layer_policy") or             session._cell_layer_policy is None:
+    if not hasattr(session, "_cell_layer_policy") or \
+            session._cell_layer_policy is None:
         session._cell_layer_policy = {}
     session._cell_layer_policy[cell] = (floor, cap)
+    if session.bdb is not None:
+        # Write-through (v20): the policy is a design attribute — persist it
+        # so a resumed session (open_bdb / load_pipeline) plans under the
+        # same bands.  '*' lives in meta; a cell not yet in the cell table
+        # (busterm-only flows) keeps the session-only entry with a note.
+        if cell == "*":
+            session.bdb.meta_set("layer_cap_default", f"{floor}:{cap}")
+        else:
+            try:
+                session.bdb.set_cell_layer_band(cell, floor, cap)
+            except RuntimeError:
+                print(f"[LayerCap] note: cell '{cell}' has no cell-table row "
+                      f"— policy kept for this session only")
     band = (f"[{rest[1] if floor >= 0 else 'lowest'}..{args[1]}]")
     print(f"[LayerCap] {cell}: band {band} "
           f"(ids {'%d' % floor if floor >= 0 else 'min'}..{cap})")

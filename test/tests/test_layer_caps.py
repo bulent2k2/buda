@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Per-cell layer caps, Phase 1 (docs/internal/hier_layer_caps.md).
+"""Per-cell layer caps, Phases 1-2 (docs/internal/hier_layer_caps.md).
 
 The binary band mask: a bundle whose owning cell is capped may only be
 ASSIGNED layers inside [floor..cap], enforced in plan_bundle's layer
@@ -174,11 +174,11 @@ def test_star_off_clears_stale_wrapper_masks():
 
 # ── hier ordering: masks must precede optimize_topologies ────────────────────
 
-def _hier_db():
+def _hier_db(path=":memory:"):
     """proc_cell (two pipe_cell children, 4-bit cell-local bus) placed twice
     — NOT bottom-up, so the cell-instance bundles are planned by the global
     optimize_topologies over the EXPANDED wrappers (the Codex P1 path)."""
-    db = buda.BDB(":memory:")
+    db = buda.BDB(path)
     db.add_cell("proc_cell", 420, 200)
     db.add_cell("pipe_cell", 110, 80)
     db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
@@ -277,3 +277,245 @@ def test_width_gate_pitch_over_allowed_layers():
     v_m = {i: s._rr_width_infeasible(w, i)
            for i in range(len(w.input.candidates))}
     assert set(v_m.values()) <= {True, False}
+
+
+# ── Phase 2: persistence (v20) ───────────────────────────────────────────────
+
+def test_v20_band_write_through_and_restore(tmp_path):
+    """set_cell_layer_cap writes through to the open BDB (cell.layer_cap/
+    layer_floor + meta.layer_cap_default for '*'), and a fresh session's
+    open_bdb restores the policy — session-typed entries win the merge."""
+    p = str(tmp_path / "caps.bdb")
+    db = _hier_db(path=p)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ("def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+                  "def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+                  "set_cell_layer_cap proc_cell M5",
+                  "set_cell_layer_cap * 6 -min 4"):
+            s.do_command(c)
+    assert db.cell_layer_band("proc_cell") == (-1, 5)
+    assert db.meta_get("layer_cap_default") == "4:6"
+    del s, db
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s2.do_command(f"open_bdb {p}")
+    assert "restored 2 persisted cell layer policies" in buf.getvalue()
+    assert s2._cell_layer_policy == {"proc_cell": (-1, 5), "*": (4, 6)}
+    del s2
+
+    # Session-typed entry wins over the persisted one on open.
+    s3 = buda_cli.BudaSession()
+    s3.no_viz = True
+    s3._cell_layer_policy = {"proc_cell": (-1, 3)}
+    with contextlib.redirect_stdout(io.StringIO()):
+        s3.do_command(f"open_bdb {p}")
+    assert s3._cell_layer_policy["proc_cell"] == (-1, 3)
+    assert s3._cell_layer_policy["*"] == (4, 6)
+
+    # '* off' clears the persisted policy too — nothing to resurrect.
+    with contextlib.redirect_stdout(io.StringIO()):
+        s3.do_command("set_cell_layer_cap * off")
+    assert s3.bdb.layer_capped_cells() == []
+    assert s3.bdb.meta_get("layer_cap_default") == ""
+    del s3
+    s4 = buda_cli.BudaSession()
+    s4.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        s4.do_command(f"open_bdb {p}")
+    assert not getattr(s4, "_cell_layer_policy", None)
+
+
+def test_v19_to_v20_migration_adds_band_columns(tmp_path):
+    """Opening a pre-v20 DB adds cell.layer_cap/layer_floor (default -1) and
+    the cell_layer_share table, stamping the new schema version — old
+    fixtures keep working (hier_layer_caps.md §7)."""
+    import sqlite3
+    p = str(tmp_path / "v19.bdb")
+    con = sqlite3.connect(p)
+    con.executescript(
+        """
+        CREATE TABLE cell (name TEXT PRIMARY KEY,
+                           width REAL NOT NULL, height REAL NOT NULL,
+                           bottom_up INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO cell VALUES('old_cell', 10, 20, 1);
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO meta VALUES('schema_version','19');
+        PRAGMA user_version = 19;
+        """
+    )
+    con.commit()
+    con.close()
+    db = buda.BDB(p)
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    assert db.cell_layer_band("old_cell") == (-1, -1)
+    assert db.cell_bottom_up("old_cell") is True      # untouched by v20
+    db.set_cell_layer_band("old_cell", 2, 3)
+    assert db.layer_capped_cells() == ["old_cell"]
+
+
+def test_clone_context_resolves_base_cell_policy():
+    """A rotation-class clone template (cell_context '<cell>90') inherits
+    the BASE cell's band via _bu_cell_of — layer directions are global, so
+    the same mask applies verbatim to the clone (hier_layer_caps.md §8)."""
+    s = _session()
+    w = s.bundles[0]
+    w.input.original_bundle.cell_context = "proc_cell90"
+    s._bu_clone_cells = {"proc_cell90": "proc_cell"}
+    s._cell_layer_policy = {"proc_cell": (-1, 3)}
+    with contextlib.redirect_stdout(io.StringIO()):
+        s._apply_layer_policies()
+    assert list(w.input.allowed_layers) == [2, 3]
+    assert w.input.layer_cap == 3
+
+
+# ── Phase 2: band-scoped alignment + placement-stage check ───────────────────
+
+def _align_fixture(cap):
+    """Two placed instances of a bottom-up leaf cell, x-offset 198: aligned
+    mod the band's V pitch (6) but NOT mod the full-stack V LCM (6,8 -> 24).
+    The capped cell's routing can only land on the band layers, so the
+    band-scoped aligner must see them as already aligned."""
+    db = buda.BDB(":memory:")
+    db.add_cell("leaf", 100, 80)
+    db.add_inst("L1", "leaf", "", 0, 0)
+    db.add_inst("L2", "leaf", "", 198, 0)
+    db.set_cell_bottom_up("leaf", True)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    cmds = ["def_layer 2 M2 H 50", "def_layer 3 M3 V 50",
+            "def_layer 5 M5 V TOP 50",
+            "def_track_pattern 2 0 _ 1 5",     # pitch 6 (y)
+            "def_track_pattern 3 0 _ 1 5",     # pitch 6 (x)
+            "def_track_pattern 5 0 _ 1 7"]     # pitch 8 (x)
+    if cap:
+        cmds.append("set_cell_layer_cap leaf M3")
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    return s
+
+
+def test_align_bottom_up_band_scoped_lcm():
+    """Uncapped, the x period is LCM(6,8)=24 and offset 198 (mod 24 = 6)
+    forces a nudge; capped to the pitch-6 band the period is 6 and the
+    instances already agree — no move (the strict win: fewer pitches, finer
+    equivalence, smaller nudges)."""
+    s = _align_fixture(cap=False)
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert s._align_bottom_up() == 1
+    s = _align_fixture(cap=True)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        assert s._align_bottom_up() == 0
+    assert "band-scoped" in buf.getvalue()
+
+
+def test_placement_check_band_scoped():
+    """The placement-stage check_template_tracks compares only the band's
+    layers for a capped cell: the pitch-8 phase mismatch is invisible to
+    the cell's copies, so reporting it would contradict the band-scoped
+    aligner (the two must share one criterion)."""
+    s = _align_fixture(cap=False)
+    with contextlib.redirect_stdout(io.StringIO()):
+        v = s._check_template_tracks_placement(verbose=False)
+    assert v["leaf"]["misaligned"], "pitch-8 layer must flag uncapped"
+    s = _align_fixture(cap=True)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        v = s._check_template_tracks_placement()
+    assert not v["leaf"]["misaligned"], v["leaf"]["misaligned"]
+    assert "band-scoped" in buf.getvalue()
+
+
+# ── Phase 2: cap-tighter-than-persisted-routing audit (failure mode 5) ───────
+
+def test_load_pipeline_cap_audit_voids_violations(tmp_path):
+    """A cap declared AFTER a checkpoint was routed above it: load_pipeline
+    reports every violating bundle LOUD and voids its restored plan (and
+    bus segments), so continuing requires an explicit re-plan — never
+    silently keeps illegal metal (hier_layer_caps.md §9.5)."""
+    p = str(tmp_path / "audit.bdb")
+    db = _hier_db(path=p)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ("def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+                  "def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+                  "run_hier_bundler", "generate_hier_topologies",
+                  "run_planner hier"):
+            s.do_command(c)
+    # The uncapped plan uses the TOP pair somewhere (the audit's target).
+    assert any(l in (6, 7) for w in s.bundles for l in w.plan.seg_layers
+               if w.input.original_bundle.cell_context == "proc_cell")
+    del s, db
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        for c in (f"open_bdb {p}",
+                  "def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+                  "def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+                  "add_blocks_from_bdb 0", "add_blocks_from_bdb 1 skip",
+                  "set_cell_layer_cap proc_cell M5",
+                  "load_pipeline expanded"):
+            s2.do_command(c)
+    out = buf.getvalue()
+    assert "VOIDED" in out and "re-run the planner" in out
+    governed = [w for w in s2.bundles
+                if w.input.original_bundle.cell_context == "proc_cell"]
+    assert governed
+    for w in governed:
+        assert w.plan.selected_topology_index == -1
+        assert not list(w.plan.seg_layers)
+
+
+# ── Phase 2: capped bottom-up flow end-to-end ────────────────────────────────
+
+def test_bottom_up_capped_cell_local_solve_and_copies():
+    """A marked (bottom-up) capped cell end-to-end: the cell-local template
+    solve honors the band (all copied instance routing inside it), the
+    copies survive run_nuts + run_detailed_nuts, and nothing lands above
+    the cap — the Phase 2 deliverable in unit form."""
+    db = buda.BDB(":memory:")
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst_to_cell("proc_cell", "pb_i", "pipe_cell", 155, 60)
+    db.add_inst("proc_i1", "proc_cell", "", 0, 0)
+    db.add_inst("proc_i2", "proc_cell", "", 540, 0)   # 540 = 90*6: on phase
+    for i in range(4):
+        db.add_net_pins(f"ab1_{i}", "proc_i1/pa_i.out", ["proc_i1/pb_i.in"])
+        db.add_net_pins(f"ab2_{i}", "proc_i2/pa_i.out", ["proc_i2/pb_i.in"])
+    buda.BustermGen(db).derive(1)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ("def_layer 2 M2 H 50", "def_layer 3 M3 V 50",
+                  "def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
+                  "def_track_pattern 2 0 _ 1 5", "def_track_pattern 3 0 _ 1 5",
+                  "def_track_pattern 4 0 _ 1 5", "def_track_pattern 5 0 _ 1 5",
+                  "set_bottom_up proc_cell",
+                  "set_cell_layer_cap proc_cell M3",
+                  "run_hier_bundler", "generate_hier_topologies",
+                  "run_planner hier", "run_nuts", "run_detailed_nuts"):
+            s.do_command(c)
+    locked = [w for w in s.bundles if w.hier.locked]
+    assert locked, "bottom-up copies must exist"
+    for w in locked:
+        assert all(l in (2, 3) for l in w.plan.seg_layers), \
+            list(w.plan.seg_layers)
+    assert all(ts.layer in (2, 3) for ts in s.nuts_result.segments)
+    assert s.detailed_result is not None
+    assert s.detailed_result.num_unplaced == 0
+    assert all(ns.layer in (2, 3)
+               for ns in s.detailed_result.net_segments)
