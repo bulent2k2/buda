@@ -174,7 +174,7 @@ check (or an argument why none is needed):
 | TOP-dependent cost terms (`base_cost_non_top`, `kBalance`, `kHeight`, trunk preference, `top_height_rank`) | evaluate against the wrapper's **effective-TOP** set (§4.3) instead of raw `is_top` when a mask is present. |
 | Demand reservations (F3) | park the unplanned cell-local width on the cell's **effective-TOP** bands only — a correctness *and* QoR improvement: capped leaves stop reserving M6/M7 room they can never use. |
 | `run_planner post_nuts` (F5) | candidate target layers filtered by each bundle's mask. |
-| Dead-span escalation (F4) | "cheapest same-direction TOP" becomes "cheapest same-direction **effective-TOP within the bundle's mask**".  A dead segment already at the mask's ceiling is reported LOUD and left — the cap made it unhealable by layer; that declared trade must be visible, never silently violated. |
+| Dead-span escalation (F4) | "cheapest same-direction TOP" becomes "cheapest same-direction **effective-TOP within the bundle's mask**".  A dead segment already at the mask's ceiling is reported LOUD and left — the cap made it unhealable by layer; that declared trade must be visible, never silently violated.  **Lands in Phase 1, not Phase 4** (Codex P1 on #542): `run_nuts` under `healersAhead` auto-invokes this escalation (`src/buda_cmds/nuts_cmds.py:103-109`) outside any planner-core path, so a "usable capped flow" claim without it is false — a plain capped flow could silently move a governed segment above its cap on its very first `run_nuts`. |
 | ripup width gate (F9) | minimum bit-pitch over the **allowed** same-direction layers. |
 | Dogleg jog layer (F8) | no change — inherits assigned layers, compliant by construction. |
 | DNUTS / check_design / viz | no change — they consume assigned layers.  `dump_hbundles` gains a `cap=M3` annotation; `check_design` gains an advisory `LAYER_CAP` violation (a placed segment above its bundle's cap — defense-in-depth, like the keepout audit). |
@@ -189,16 +189,31 @@ supply through the effective `TrackPattern`**, and the slot model already
 has a first-class non-routable type.  So a fractional share needs **no new
 capacity arithmetic anywhere**: realize `share(L) = s` for a cell as a
 **derived thinned pattern** — the layer's global pattern with only
-`ceil(s × n_signal)` of each period's SIGNAL slots kept SIGNAL, the rest
+`floor(s × n_signal)` of each period's SIGNAL slots kept SIGNAL, the rest
 re-typed CUSTOM — installed as the view the cell-local solve sees on that
-layer.  Every consumer then prices and places against the thinned supply
+layer.  **Floor, not ceil** (Codex P1 on #542): the share is a budget, so
+rounding must never grant MORE than declared — `ceil` would turn 5% of a
+4-slot period into 25% and 30% of 8 into 37.5%, contradicting the ≤ share
+guarantee and making the zero-track declaration error unreachable.  With
+floor, the granted fraction is always ≤ the declared one, and a share whose
+floor is zero kept tracks is exactly the §9.6 declaration-time error.  Every consumer then prices and places against the thinned supply
 automatically:
 
 * planner `signal_tracks` capacity counts only the kept slots;
 * NUTS `bit_pitch` = `unit_pitch / n_kept` — the abstract width honestly
-  reflects the share (a 30% share makes each bit ~3.3× wider in channel
-  terms: exactly the economic pressure that keeps the cell on its own
-  layers and spills upward only when genuinely wiring-limited);
+  reflects the share (a 30%-declared share on an 8-slot period keeps 2
+  slots, making each bit 4× wider in channel terms: exactly the economic
+  pressure that keeps the cell on its own layers and spills upward only
+  when genuinely wiring-limited).  **This requires a derived `LayerStack`,
+  not just a derived grid** (Codex P1 on #542): `bit_pitch` is copied into
+  the session `LayerStack` once at `def_track_pattern`
+  (`src/buda_cmds/grid_cmds.py:110-116`) and `eff_bus_width` reads that
+  stored value (`src/layering.cpp:67-71`) — thinning only the
+  `RoutingGridStack` would constrain DNUTS placement while leaving
+  planner/NUTS demand at the full-pattern width.  The Tier-1 view is
+  therefore a PAIR: thinned grid + a derived `LayerStack` with
+  `bit_pitch = unit_pitch / n_kept` on shared layers, handed together to
+  the cell-local planner and NUTS constructors (`hier.py:1817,1993`);
 * DNUTS can only land bits on kept slots;
 * the dead-span discriminator and `check_template_tracks` pools see the
   thinned supply with no code change beyond using the view.
@@ -324,7 +339,9 @@ way — a parent-view thinning — and becomes a floor knob if ever needed;
 4. **Unit — escalation compliance**: a dead LOW segment in a capped bundle
    escalates only within the mask; at the ceiling it reports instead.
 5. **Unit — thinned pattern**: `share 0.3` on an 8-signal-slot period keeps
-   `ceil(2.4)=3` contiguous SIGNAL slots, same `unit_pitch`/origin;
+   `floor(2.4)=2` contiguous SIGNAL slots (granted 25% ≤ declared 30%),
+   same `unit_pitch`/origin; a 5%-of-4-slots share floors to zero and
+   hard-errors at declaration;
    `count_signal_tracks_in` and `eff_bus_width` reflect it; `share 1.0` is
    the identity view.
 6. **Bottom-up integration (mid)** — caps: `mix2_fast_bottomup` variant
@@ -365,13 +382,16 @@ Each phase lands with its tests green and the no-policy corpus
 byte-identical.  Phases 1–2 are the minimum usable capped flow; Phase 3
 adds the shared form.
 
-### Phase 1 — binary core (C++)
+### Phase 1 — binary core (C++ + the one healer that fires without healers)
 
 Mask field + effective-TOP scoring context; enforcement in
-`optimize_topologies` / ladder / reservations / `post_nuts`;
+`optimize_topologies` / ladder / reservations / `post_nuts`; **dead-span
+escalation mask compliance** (the `run_nuts healersAhead` auto path invokes
+it outside the planner core — without this, a plain capped flow violates
+its cap on the first `run_nuts`; Codex P1 on #542);
 `set_cell_layer_cap` + validation; byte-identity corpus run.
-*Deliverable: capped flat-hier flow routes under caps; corpus unchanged
-without caps.*
+*Deliverable: capped flat-hier flow routes under caps — including through
+`run_nuts` — and the corpus is unchanged without caps.*
 
 Open questions to settle **before** Phase 1:
 * **Q1 — cap granularity.**  Is the id-ceiling sufficient, or is an
@@ -408,15 +428,28 @@ Open questions to settle **before** Phase 3:
 * **Q2 — reservation weighting.**  An unplanned policied cell's demand
   reservation should park `s × eff_width` on a shared layer's bands, full
   width on fully-owned layers.  Confirm the weighting.
-* **Q3 — Tier-2 exactness.**  Ship the per-bundle approximation + LOUD
-  audit, or build exact collective per-band budgeting (usage split by
-  budget group inside `GlobalCut` — real complexity) now?  Proposal:
-  approximation first; revisit only if a measured flow shows the audit
-  warning with real DNUTS damage.
+* **Q3 — Tier-2 exactness.**  Per-bundle capacity scaling does NOT uphold
+  the user-visible budget: two 30% bundles of one cell can collectively
+  take 60%, and a post-plan audit warns without restoring the tracks
+  (Codex P1 on #542 — review position: enforce collectively before
+  shipping, or reject Tier-2 shared bundles until exact).  The option
+  space, cheapest first:
+  (a) audit-only — rejected by review as under-delivering the promise;
+  (b) **scalar collective budget** — track committed usage per
+  (cell-instance, shared layer) as one number and refuse a candidate that
+  would push the cell's total past `s × supply(bbox)`; coarser than
+  per-band but enforces the promise, cheap, and sequential-commit order
+  makes it exact for the budget scalar;
+  (c) exact per-band group accounting inside `GlobalCut` — the full
+  mechanism, real complexity.
+  Proposal: (b) as the Phase-3 minimum, (c) only if a measured flow shows
+  per-band violations that the scalar budget misses.  Decision owner: this
+  question — the review's position is recorded, not adopted unilaterally.
 
 ### Phase 4 — healer compliance
 
-Dead-span escalation, width-gate pitch, release/class-move verification,
+Width-gate pitch, release/class-move verification (dead-span escalation
+already landed in Phase 1),
 `LAYER_CAP` advisory check, policy-aware reporting (`dump_hbundles`, ladder
 warnings) — over the full policy vector, not just the binary mask.
 *Deliverable: healers never violate a cap or exceed a share; violations
