@@ -2216,6 +2216,46 @@ std::vector<std::string> BDB::layer_capped_cells() const {
     return result;
 }
 
+void BDB::set_cell_layer_share(const std::string& cell, int layer_id, double share) {
+    {   // The FK target must exist (matches set_cell_layer_band's contract).
+        Stmt q(_db, "SELECT 1 FROM cell WHERE name=?");
+        sqlite3_bind_text(q, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(q) != SQLITE_ROW)
+            throw std::runtime_error("set_cell_layer_share: cell not defined: " + cell);
+    }
+    if (share <= 0.0) {
+        Stmt d(_db, "DELETE FROM cell_layer_share WHERE cell=? AND layer_id=?");
+        sqlite3_bind_text(d, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (d, 2, layer_id);
+        sqlite3_step(d);
+        return;
+    }
+    Stmt s(_db, "INSERT INTO cell_layer_share(cell,layer_id,share) VALUES(?,?,?)"
+                " ON CONFLICT(cell,layer_id) DO UPDATE SET share=excluded.share");
+    sqlite3_bind_text  (s, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 2, layer_id);
+    sqlite3_bind_double(s, 3, share);
+    sqlite3_step(s);
+}
+
+std::vector<std::pair<int,double>> BDB::cell_layer_shares(const std::string& cell) const {
+    Stmt q(_db, "SELECT layer_id, share FROM cell_layer_share WHERE cell=?"
+                " ORDER BY layer_id");
+    sqlite3_bind_text(q, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+    std::vector<std::pair<int,double>> result;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        result.emplace_back(sqlite3_column_int(q, 0), sqlite3_column_double(q, 1));
+    return result;
+}
+
+std::vector<std::string> BDB::layer_share_cells() const {
+    Stmt q(_db, "SELECT DISTINCT cell FROM cell_layer_share ORDER BY cell");
+    std::vector<std::string> result;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        result.push_back((const char*)sqlite3_column_text(q, 0));
+    return result;
+}
+
 int BDB::add_inst(const std::string& inst_name, const std::string& cell_name,
                   const std::string& parent_name, double x, double y) {
     // Look up cell size

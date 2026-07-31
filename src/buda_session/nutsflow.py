@@ -1531,7 +1531,22 @@ class NutsFlowMixin:
                          and b.bundle_id not in skip_ids]
             horiz_of = {(ts.bundle_id, ts.seg_idx): ts.horiz
                         for ts in self._bottom_up_fixed_segments()}
-            eng1 = buda.DetailedNUTSEngine(self.routing_grid)
+            # Tier-1 share view (hier_layer_caps.md Phase 3): the reference
+            # solve runs on a grid CLONE with each shared cell's thinned
+            # pattern installed over its reference bbox, so reference bits
+            # (and therefore the copies) land only on kept slots; eng2 —
+            # everyone else, including the parent over the cell — keeps the
+            # full grid (budget, not reservation).  No shares => the plain
+            # grid, byte-identical.  ref_grid must outlive eng1 (local).
+            share_ovr = self._bu_share_dnuts_overrides(ref_ids)
+            ref_grid = self.routing_grid
+            if share_ovr:
+                ref_grid = self.routing_grid.clone()
+                for lid, x1, y1, x2, y2, pat in share_ovr:
+                    ref_grid.add_override(lid, x1, y1, x2, y2, pat)
+                print(f"[LayerShare] DNUTS reference solve under "
+                      f"{len(share_ovr)} thinned override(s)")
+            eng1 = buda.DetailedNUTSEngine(ref_grid)
             with buda.ostream_redirect():
                 r1 = eng1.run(ref_segs, emit_vias)
             # Per-instance copies of the reference bits + vias.  Unplaced

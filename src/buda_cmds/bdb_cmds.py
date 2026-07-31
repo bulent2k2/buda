@@ -411,46 +411,57 @@ def cmd_load_pipeline(session, cmd, args, cmd_line):
         expanded=bool(args) and args[0] == "expanded")
 
 
+def _resolve_layer_id(session, tok):
+    # Accept a numeric layer id or a declared layer name (the session's
+    # def_layer name map, same source _make_layer_names reads).
+    if tok.isdigit():
+        lid = int(tok)
+        return lid if session.layers.has_layer(lid) else None
+    lid = session._layer_name_map.get(tok)
+    return lid if (lid is not None and session.layers.has_layer(lid)) \
+        else None
+
+
 def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
     # set_cell_layer_cap <cell>|* <cap_layer> [-min <floor_layer>]  |  * off
     # Per-cell layer policy, binary band form (docs/internal/hier_layer_caps.md,
     # Q1 resolved): the cell's OWN interconnect defaults to FULL use of layers
     # in [floor..cap] and NO use outside it.  '*' sets the default policy for
-    # cells without an explicit one; '* off' clears everything (byte-identical
-    # to never declaring a policy).  Fractional shares (set_cell_layer_share)
-    # are Phase 3.  Validation is LOUD at declaration time: unknown layer,
-    # floor above cap, or a band granting no H or no V routing layer are all
-    # hard errors here, never BEST_EFFORT surprises later.
+    # cells without an explicit one; '* off' clears everything — bands AND
+    # fractional shares (byte-identical to never declaring a policy).
+    # Validation is LOUD at declaration time: unknown layer, floor above cap,
+    # or a band granting no H or no V routing layer are all hard errors here,
+    # never BEST_EFFORT surprises later.
     if not args:
         print("Error: set_cell_layer_cap requires <cell>|* <cap_layer> "
               "[-min <floor_layer>] (or '* off')"); return
     cell = args[0]
     if cell == "*" and len(args) > 1 and args[1].lower() == "off":
         n = len(getattr(session, "_cell_layer_policy", {}) or {})
+        ns = len(getattr(session, "_cell_layer_shares", {}) or {})
         session._cell_layer_policy = {}
         session._cell_layer_policy_restored = set()
+        session._cell_layer_shares = {}
+        session._cell_layer_shares_restored = set()
         if session.bdb is not None:
-            # Write-through (v20): clear every persisted band + the '*'
-            # default so a later open/resume does not resurrect the policy.
+            # Write-through (v20): clear every persisted band + share + the
+            # '*' default so a later open/resume does not resurrect them.
             for c in session.bdb.layer_capped_cells():
                 session.bdb.set_cell_layer_band(c, -1, -1)
+            for c in session.bdb.layer_share_cells():
+                for lid, _s in session.bdb.cell_layer_shares(c):
+                    session.bdb.set_cell_layer_share(c, lid, 0.0)
             session.bdb.meta_set("layer_cap_default", "")
-        print(f"[LayerCap] cleared {n} polic{'y' if n == 1 else 'ies'} "
-              f"(byte-identical to no caps; re-run the planner to lift "
-              f"masks already applied)")
+        print(f"[LayerCap] cleared {n} polic{'y' if n == 1 else 'ies'}"
+              + (f" + {ns} share(s)" if ns else "")
+              + " (byte-identical to no caps; re-run the planner to lift "
+                "masks already applied)")
         return
     if len(args) < 2:
         print("Error: set_cell_layer_cap requires a cap layer"); return
 
     def _lid(tok):
-        # Accept a numeric layer id or a declared layer name (the session's
-        # def_layer name map, same source _make_layer_names reads).
-        if tok.isdigit():
-            lid = int(tok)
-            return lid if session.layers.has_layer(lid) else None
-        lid = session._layer_name_map.get(tok)
-        return lid if (lid is not None and session.layers.has_layer(lid)) \
-            else None
+        return _resolve_layer_id(session, tok)
 
     cap = _lid(args[1])
     if cap is None:
@@ -509,6 +520,82 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
     band = (f"[{rest[1] if floor >= 0 else 'lowest'}..{args[1]}]")
     print(f"[LayerCap] {cell}: band {band} "
           f"(ids {'%d' % floor if floor >= 0 else 'min'}..{cap})")
+
+
+def cmd_set_cell_layer_share(session, cmd, args, cmd_line):
+    # set_cell_layer_share <cell> <layer> <pct>
+    # Fractional layer share (docs/internal/hier_layer_caps.md Phase 3): the
+    # cell's OWN interconnect may use at most pct% of <layer>'s signal
+    # tracks — realized as a derived THINNED pattern for cell-local solves
+    # (keep the first floor(s x n_signal) SIGNAL slots per period; Q1
+    # resolved: contiguous-first) and as the s x capacity scale + scalar
+    # collective budget for globally-planned bundles (Q3 resolved).  The
+    # share overrides the band in either direction: thin a layer inside it,
+    # or grant a bounded slice above the cap (the escape valve).  pct 100
+    # removes the share (explicit full use).  Validation is LOUD at
+    # declaration: unknown layer/cell, a share whose floor keeps ZERO
+    # tracks per period (§9.6), or a layer with no def_track_pattern (the
+    # thinning needs the period) are hard errors.
+    if len(args) < 3:
+        print("Error: set_cell_layer_share requires <cell> <layer> <pct>")
+        return
+    cell = args[0]
+    lid = _resolve_layer_id(session, args[1])
+    if lid is None:
+        print(f"Error: set_cell_layer_share: unknown layer '{args[1]}' "
+              f"(declare it with def_layer first)"); return
+    try:
+        pct = float(args[2])
+    except ValueError:
+        print(f"Error: set_cell_layer_share: pct must be a number, "
+              f"got '{args[2]}'"); return
+    if not (0.0 < pct <= 100.0):
+        print(f"Error: set_cell_layer_share: pct must be in (0, 100], "
+              f"got {pct}"); return
+    if (session.routing_grid is None
+            or not session.routing_grid.has_layer(lid)
+            or not session.routing_grid.get_layer_grid(lid)
+                       .global_pattern().slots):
+        print(f"Error: set_cell_layer_share: layer {args[1]} has no track "
+              f"pattern — declare def_track_pattern first (the share thins "
+              f"the pattern's signal slots)"); return
+    pat = session.routing_grid.get_layer_grid(lid).global_pattern()
+    n_sig = sum(1 for s in pat.slots if s.type == "SIGNAL")
+    share = pct / 100.0
+    kept = int(share * n_sig + 1e-9)
+    if share < 1.0 and kept == 0:
+        import math
+        min_pct = math.ceil(100.0 / n_sig)
+        print(f"Error: set_cell_layer_share: {pct}% of layer {args[1]}'s "
+              f"{n_sig} signal slot(s)/period keeps floor({share:.3f} x "
+              f"{n_sig}) = 0 tracks — the budget rounds to nothing; the "
+              f"minimum meaningful share is {min_pct}%"); return
+    if cell != "*" and session.bdb is not None:
+        if not any(c.cell == cell for c in session.bdb.all_components()):
+            print(f"Error: set_cell_layer_share: unknown cell '{cell}'")
+            return
+    if not hasattr(session, "_cell_layer_shares") or \
+            session._cell_layer_shares is None:
+        session._cell_layer_shares = {}
+    if share >= 1.0:
+        session._cell_layer_shares.pop((cell, lid), None)
+        if session.bdb is not None:
+            session.bdb.set_cell_layer_share(cell, lid, 0.0)
+        print(f"[LayerShare] {cell}: layer {args[1]} share 100% — explicit "
+              f"full use (share removed)")
+        return
+    session._cell_layer_shares[(cell, lid)] = share
+    getattr(session, "_cell_layer_shares_restored", set()).discard((cell, lid))
+    if session.bdb is not None:
+        try:
+            session.bdb.set_cell_layer_share(cell, lid, share)
+        except RuntimeError:
+            print(f"[LayerShare] note: cell '{cell}' has no cell-table row "
+                  f"— share kept for this session only")
+    granted = 100.0 * kept / n_sig
+    print(f"[LayerShare] {cell}: layer {args[1]} share {pct:g}% -> "
+          f"{kept}/{n_sig} slot(s)/period kept (granted {granted:.1f}% "
+          f"<= declared)")
 
 
 def cmd_set_bottom_up(session, cmd, args, cmd_line):
@@ -717,5 +804,6 @@ COMMANDS = {
     "save_bdb": cmd_save_bdb,
     "set_bottom_up": cmd_set_bottom_up,
     "set_cell_layer_cap": cmd_set_cell_layer_cap,
+    "set_cell_layer_share": cmd_set_cell_layer_share,
     "align_bottom_up": cmd_align_bottom_up,
 }

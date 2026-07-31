@@ -118,6 +118,34 @@ struct BundleInput {
         return allowed_layers.empty() ||
                std::binary_search(allowed_layers.begin(), allowed_layers.end(), lid);
     }
+    // ── Fractional layer shares (Phase 3, hier_layer_caps.md §6) ──────────
+    // (layer_id, share in (0,1)) for the layers the owning cell may use only
+    // fractionally, sorted by layer_id.  Empty = no shares (byte-identical).
+    // Tier-2 enforcement (global-frame bundles): usable_band_cap's
+    // track-mode capacity is scaled by share_of(lid) for the wrapper under
+    // evaluation, and the SCALAR COLLECTIVE BUDGET refuses a STRICT
+    // candidate whose commit would push share_group's total usage on a
+    // shared layer past its budget (Q3 resolution: one counter per
+    // (cell-instance, shared layer); commit_plan keeps the books, so every
+    // trial/recharge/rip-up path stays consistent by construction).
+    std::vector<std::pair<int,double>> layer_shares;
+    // Collective-budget identity: "<cell>@<instance>" for expanded
+    // per-instance wrappers ("" = no budget tracking for this wrapper).
+    std::string share_group;
+    // Per shared layer: the budget in width units — s × (signal tracks in
+    // the instance bbox × bit_pitch) — computed session-side where the
+    // routing grid and instance bbox are both known.  Sorted by layer_id.
+    std::vector<std::pair<int,double>> share_budgets;
+    double share_of(int lid) const {
+        for (const auto& [l, s] : layer_shares)
+            if (l == lid) return s;
+        return 1.0;
+    }
+    double share_budget_of(int lid) const {   // <0 = no budget declared
+        for (const auto& [l, b] : share_budgets)
+            if (l == lid) return b;
+        return -1.0;
+    }
 };
 
 struct BundlePlan {
@@ -642,6 +670,27 @@ private:
     // instead of O(all bands); byte-identical by construction.
     std::vector<std::tuple<int, int, double>> cand_undo_;
     bool cand_undo_on_ = false;
+    // ── Fractional-share state (Phase 3, hier_layer_caps.md §6 Tier 2) ────
+    // Share context of the wrapper plan_bundle is currently evaluating:
+    // usable_band_cap's track-mode branch scales capacity by
+    // cur_share_input_->share_of(layer) so a shared bundle sees s × supply.
+    // Null outside plan_bundle = full capacity (byte-identical).
+    const BundleInput* cur_share_input_ = nullptr;
+    // Scalar collective budget books (Q3 resolution): committed usage per
+    // (share_group, shared layer), in the same width units as the budgets.
+    // Maintained EXCLUSIVELY by commit_plan(±1) and reset alongside band
+    // usage (build_congestion_map / recharge_committed_), so every trial,
+    // rip-up and recharge path stays consistent by construction.
+    std::map<std::pair<std::string,int>, double> share_used_;
+    // Sum of a plan's effective widths per SHARED layer (the budget's usage
+    // metric; excludes the +pitch margin so books match physical demand).
+    void share_usage_of_(const BundleWrapper& bw, const Topology& t,
+                         const std::vector<int>& seg_layers,
+                         std::map<int,double>& out) const;
+    // False iff committing (t, seg_layers) would push bw's share_group past
+    // any shared layer's budget (the STRICT-mode candidate gate).
+    bool share_budget_ok_(const BundleWrapper& bw, const Topology& t,
+                          const std::vector<int>& seg_layers) const;
     // for_each_band range index: per (layer_id, dir) the cuts' (coord_2x, ci)
     // pairs, ci-ascending (the build order is coordinate-ascending per layer,
     // so the pairs are sorted by BOTH — a binary search finds the segment's
