@@ -31,6 +31,7 @@ pin-kept twin proves user pins are inviolable.
 """
 import io
 import contextlib
+import re
 import sys
 from pathlib import Path
 
@@ -294,3 +295,26 @@ def test_topdown_recipe_heals_most_of_the_residual():
     # (0, 0); the residual is that issue's known cost, not a recipe failure.)
     assert final[0] <= base[0] // 4, (base, r1, healed, final)
     assert final[1] <= base[1], (base, r1, healed, final)
+
+    # The full design audit still runs, and ONLY the known #518 residual may
+    # appear in it.  Dropping the check_design call along with the exact-zero
+    # assertion would have silently retired every OTHER audit dimension —
+    # LAYER_DIR, KEEPOUT_CROSS, NET_DRIVER_OPEN, BIT_SHORT, SEG_OPEN,
+    # ANTENNA, DISCONNECTED — none of which #518 touches (review #530).
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("check_design")
+    audit = buf.getvalue()
+    offenders = [ln.strip() for ln in audit.splitlines()
+                 if "Bundle" in ln and "unplaced (no track in DetailedNUTS)" not in ln]
+    assert not offenders, (
+        f"audit reported a violation class #518 does not explain: {offenders}"
+    )
+    # Every reported violation must be one of the accepted unplaced bits, so a
+    # new failure mode cannot hide inside the permitted residual.
+    m = re.search(r"Total: (\d+) violation", audit)
+    total = int(m.group(1)) if m else 0
+    assert total == final[0], (
+        f"audit total {total} != unplaced bits {final[0]} — something beyond "
+        f"the accepted residual is being reported\n{audit}"
+    )
