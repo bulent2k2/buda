@@ -52,6 +52,11 @@ Notes:
     parses its own summary ('... across N bundle(s)'), so it matches the CLI.
   * The corpus below is the subset of flow/ that runs the full pipeline
     through run_detailed_nuts.  Edit CORPUS to add/remove vehicles.
+  * The sweep is PARALLEL by default (`--jobs`, default = CPU count): each flow
+    runs in its own worker process (flows are independent — fresh session, own
+    cwd — so the QoR/WL metrics are byte-identical to a serial run).  Only the
+    per-flow `sec` column is affected: under parallel load it inflates with CPU
+    contention, so pass `-j 1` when the per-flow timing itself is the point.
 """
 import argparse
 import contextlib
@@ -202,17 +207,88 @@ def _fmt(r, keys=_METRICS):
     return "/".join(str(r.get(k)) for k in keys)
 
 
-def cmd_run(flows, out):
+def _flow_weight(flow):
+    """Scheduling weight for the parallel sweep: the flow file's size plus any
+    file it references via a top-level `source` / `open_bdb` line (one level,
+    no recursion).  Heavy-BDB flows (the chip/* vehicles) are submitted FIRST
+    so the longest flow cannot start last and become the wall-clock tail.
+    Scheduling only — results are always returned in input order."""
+    total = 0
+    try:
+        path = flow if os.path.isabs(flow) else os.path.join(_ROOT, flow)
+        total += os.path.getsize(path)
+        d = os.path.dirname(path)
+        with open(path) as fh:
+            for ln in fh:
+                toks = ln.split("#", 1)[0].split()
+                if len(toks) >= 2 and toks[0] in ("source", "open_bdb"):
+                    ref = os.path.join(d, toks[1])
+                    if os.path.isfile(ref):
+                        total += os.path.getsize(ref)
+    except OSError:
+        pass
+    return total
+
+
+def _worker_init():
+    """Initializer for sweep worker processes.  A parallel sweep already runs
+    `jobs` flows at once, and ripup_reroute's own C++ stall-sweep pool
+    (BUDA_SWEEP_THREADS, 0 = hardware concurrency) would multiply that into
+    jobs x cores threads.  Pin it to 1 per worker — the stall sweep is
+    decision-identical by construction, so the flows' results do not change.
+    An explicit user setting always wins (setdefault)."""
+    os.environ.setdefault("BUDA_SWEEP_THREADS", "1")
+
+
+def default_jobs():
+    """The CLI default for --jobs: one worker per CPU."""
+    return os.cpu_count() or 1
+
+
+def sweep(run_fn, flows, jobs, progress=None):
+    """Map `run_fn` (a top-level, picklable flow runner returning a result
+    dict) over `flows`, in `jobs` worker processes.  Results are returned in
+    INPUT order regardless of completion order; `progress(result)` is called as
+    each flow finishes.  jobs<=1 runs serially in-process (the historical
+    behavior — timing-faithful `sec`, easier pdb).  A worker that dies (e.g. a
+    hard crash) yields an `err` row for its flow instead of killing the sweep."""
+    if jobs <= 1 or len(flows) <= 1:
+        out = []
+        for f in flows:
+            r = run_fn(f)
+            if progress:
+                progress(r)
+            out.append(r)
+        return out
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    results = {}
+    order = sorted(flows, key=_flow_weight, reverse=True)   # longest-first
+    with ProcessPoolExecutor(max_workers=min(jobs, len(flows)),
+                             initializer=_worker_init) as ex:
+        futs = {ex.submit(run_fn, f): f for f in order}
+        for fut in as_completed(futs):
+            f = futs[fut]
+            try:
+                r = fut.result()
+            except Exception as e:              # noqa: BLE001 — worker died
+                r = {"flow": f, "err": f"worker: {type(e).__name__}: {str(e)[:60]}"}
+            results[f] = r
+            if progress:
+                progress(r)
+    return [results[f] for f in flows]
+
+
+def cmd_run(flows, out, jobs=1):
     os.chdir(_ROOT)                             # flow paths are repo-root-relative
-    results = []
-    for f in flows:
-        r = run_flow(f)
-        results.append(r)
-        print(json.dumps(r), flush=True)
+    t0 = time.time()
+    results = sweep(run_flow, flows, jobs,
+                    progress=lambda r: print(json.dumps(r), flush=True))
+    print(f"\nswept {len(results)} flows in {time.time() - t0:.1f}s "
+          f"(jobs={max(1, jobs)})")
     if out:
         with open(out, "w") as fh:
             json.dump(results, fh, indent=1)
-        print(f"\nwrote {len(results)} results -> {out}")
+        print(f"wrote {len(results)} results -> {out}")
     return results
 
 
@@ -409,12 +485,16 @@ def main():
     ap.add_argument("--compare", nargs=2, metavar=("BASE", "BRANCH"),
                     help="diff two result JSONs (from earlier --out runs) on "
                          "QoR + runtime; exits non-zero if any flow regressed")
+    ap.add_argument("-j", "--jobs", type=int, default=default_jobs(),
+                    metavar="N",
+                    help="worker processes for the sweep (default: CPU count "
+                         "= %(default)s; 1 = serial, timing-faithful sec)")
     args = ap.parse_args()
 
     if args.compare:
         sys.exit(1 if cmd_compare(*args.compare) else 0)
 
-    cmd_run(args.flows or CORPUS, args.out)
+    cmd_run(args.flows or CORPUS, args.out, jobs=args.jobs)
 
 
 if __name__ == "__main__":

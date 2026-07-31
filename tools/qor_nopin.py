@@ -119,17 +119,17 @@ def run_flow_nopin(flow):
             "sec": round(dt, 1)}
 
 
-def cmd_run(flows, out):
+def cmd_run(flows, out, jobs=1):
     os.chdir(_ROOT)                                 # flow paths are repo-root-relative
-    results = []
-    for f in flows:
-        r = run_flow_nopin(f)
-        results.append(r)
-        print(json.dumps(r), flush=True)
+    t0 = time.time()
+    results = qc.sweep(run_flow_nopin, flows, jobs,
+                       progress=lambda r: print(json.dumps(r), flush=True))
+    print(f"\nswept {len(results)} flows in {time.time() - t0:.1f}s "
+          f"(jobs={max(1, jobs)})")
     if out:
         with open(out, "w") as fh:
             json.dump(results, fh, indent=1)
-        print(f"\nwrote {len(results)} results (pins neutralized) -> {out}")
+        print(f"wrote {len(results)} results (pins neutralized) -> {out}")
     return results
 
 
@@ -146,12 +146,16 @@ def main():
     ap.add_argument("--compare", nargs=2, metavar=("BASE", "BRANCH"),
                     help="diff two result JSONs (from earlier --out runs) on "
                          "QoR + runtime; exits non-zero if any flow regressed")
+    ap.add_argument("-j", "--jobs", type=int, default=qc.default_jobs(),
+                    metavar="N",
+                    help="worker processes for the sweep (default: CPU count "
+                         "= %(default)s; 1 = serial, timing-faithful sec)")
     args = ap.parse_args()
 
     if args.compare:
         sys.exit(1 if qc.cmd_compare(*args.compare) else 0)   # identical diff/guard
 
-    cmd_run(args.flows or qc.CORPUS, args.out)
+    cmd_run(args.flows or qc.CORPUS, args.out, jobs=args.jobs)
 
 
 if __name__ == "__main__":
