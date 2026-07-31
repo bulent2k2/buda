@@ -74,7 +74,64 @@ Verdict: grid reduction paid while memcpy dominated; after the algorithmic
 fixes the planner cost is congestion-driven and the snap **costs QoR**
 (+16% unplaced — it closes part of the SA bloat channels), so the
 algorithmic path strictly dominates.  The aligned twin stays checked in as
-the test-with-both study fixture (not in the QoR corpus).  `align_bottom_up` (1.9s) gets both
+the test-with-both study fixture (not in the QoR corpus).
+
+chip3 — the TRUE 3-level variant (2026-07-31)
+===
+`chip3.bdb.sql` + `chip3_topdown.buda`: same composition and SA placement
+as chip_topdown, but mix2 imported with `--nest-bdb-cells`, PRESERVING its
+internal hierarchy — chip (d0) → i_big2_k / i_mix2_k (d1) → big2 blocks +
+i_dnuts*/i_dogleg* (d2) → mix2 leaves (d3); 1+6+192+300 components,
+13320 nets with deep names (`chip/i_mix2_0/i_dnuts1_0/bv1_0`).  The flow
+derives busterms to depth 3, loads blocks at every depth, and bundles at
+depth 3 — the maiden depth-3 run of the hier pipeline, and it worked
+first try, including cross-level **D3→D2** bundles (a mix2 leaf three
+levels down driving big2 blocks two levels down):
+
+| | chip (2-level) | chip3 (3-level) |
+|---|---|---|
+| hbundles | 640 (100 D1 / 540 D2) | 640 (95 D1 / 311 D2 / 234 D3) |
+| candidates | 16792 | 15073 |
+| planner | 125.1s | **59.7s** |
+| total | 148s | **76s** |
+| overlaps / unplaced / viol_bundles | 255 / 3185 / 163 | 185 / 2925 / 180 |
+| abstract / detailed WL | 3036142 / 61969962 | 2303254 / 53318203 |
+
+The deeper templating HALVES the planner (the dnuts-level bundles solve
+in tiny cell-local frames and expand 6-18x each) and improves most QoR
+metrics too (overlaps −27%, unplaced −8%, detailed WL −14%, abstract WL
+−24%) at slightly more violating bundles (163→180).  Same congestion
+profile (90 ALLOW_OVERFLOW commits), healerless like its 2-level twin.
+
+chip3 bottom-up — nested templates at TWO levels (2026-07-31)
+===
+`chip3_bottomup.buda` marks bottom-up at BOTH hierarchy levels — big2 +
+mix2 (depth-1 cells) AND mix2's nested depth-2 classes (mix2__dnuts1/2,
+mix2__dogleg1/2 with 18/18/12/12 congruent occurrences).  Two fixtures
+tell the composed-alignment story:
+
+- **chip3 (built from plain mix2.bdb.sql)**: `align_bottom_up` correctly
+  refuses to move a nested instance independently ("inside a marked
+  parent … not fixable by translation" — it would break the parent
+  template's congruence), so only the first occurrence per parent lands
+  on the class phase; `check_template_tracks` reports the four nested
+  classes MISALIGNED and the `independent` policy solves those
+  occurrences individually.  50.8s, 301 ovl / 2108 unplaced / 118
+  viol_bundles.
+- **chip3a (built from mix2_aligned.bdb.sql — `chip3a_bottomup.buda`,
+  the QoR-corpus row)**: nested alignment MUST BE COMPOSED BOTTOM-UP —
+  align inside the cell first (mix2's own `align_and_save` checkpoint),
+  then across the cell's instances.  With the pre-aligned source, ZERO
+  unfixable-phase warnings and every nested class reports **ALIGNED**
+  (18/18/12/12 instances seeing identical signal tracks): each nested
+  template plans locally, pins all its occurrences, and DNUTS solves the
+  reference once — 8872 reference bits copied to 23288 across 379
+  sibling instances.  49.9s, 305 ovl / 2254 unplaced / 121 viol_bundles.
+
+Open (future work): the INTERMEDIATE level's own cell-local bundles
+(mix2's buses between its dnuts children) are not bottom-up-templated —
+they connect already-locked child copies and go top-down; a true
+recursive bottom-up would solve mix2's frame once too.  `align_bottom_up` (1.9s) gets both
 cells to **ALIGNED** (3 instances each seeing identical signal-track pools;
 508/496 windows compared), so DNUTS solves each cell once and copies.
 Bottom-up trades +75 abstract overlaps for −22% unplaced bits, −17%

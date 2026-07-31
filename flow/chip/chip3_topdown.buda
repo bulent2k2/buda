@@ -1,0 +1,25 @@
+# chip3 — the TRUE 3-LEVEL variant of chip_topdown (2026-07-31): same
+# composition (3x big2 + 3x mix2 + 100 top buses, identical SA placement),
+# but mix2 is imported with build_hier_demo's --nest-bdb-cells, PRESERVING
+# its internal hierarchy instead of flattening it one level:
+#   chip (d0) -> i_big2_k / i_mix2_k (d1) -> big2 blocks + i_dnuts*_j (d2)
+#     -> mix2 leaf blocks (d3)
+# 1 + 6 + 192 + 300 components, 13320 nets (deep names like
+# chip/i_mix2_0/i_dnuts1_0/bv1_0).  Busterms derived to depth 3, blocks
+# loaded at every depth incl. 3, bundler reaches depth 3 — the maiden
+# depth-3 run of the hier pipeline.  Healerless, like chip_topdown.
+source chip_tracks.buda
+open_bdb chip3.bdb.sql
+derive_busterms 3
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+add_blocks_from_bdb 3 skip
+run_hier_bundler depth 3
+generate_hier_topologies
+run_planner hier 5 signal_tracks
+run_nuts
+run_detailed_nuts
+report_wl
+check_design
+exit

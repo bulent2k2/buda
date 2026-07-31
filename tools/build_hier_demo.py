@@ -459,6 +459,146 @@ def _optimize_instances(placements, cell_meta, buses, method, params, bloat, see
     return top_w, top_h
 
 
+def _define_bdb_cell_nested(db, cell, bdb_path):
+    """Import an existing hierarchical BDB as a cell PRESERVING its internal
+    hierarchy — the 3+-level chip variant: where _define_bdb_cell flattens
+    the source one level (leaves become direct children), this reconstructs
+    the source's CELL TREE from its component tree and nests it, so
+    instantiating the imported cell materializes the source's own instances
+    one level deeper (chip -> mix2 -> i_dnuts1_0 -> u0 at depth 3).
+
+    Cell definitions are derived per source cell TYPE from a REPRESENTATIVE
+    instance (the name-sorted first) — sound for the congruent-replica BDBs
+    this tool and import_verilog produce; a size mismatch between instances
+    of one type is a loud error.  Non-root cell types are namespaced
+    '<cell>__<srccell>' so they cannot collide with other --cells entries'
+    cells.  Nets keep root-relative HIERARCHICAL paths ('/' preserved, no
+    '__' folding): the build replicates them per instance as
+    chip/i_<cell>_k/<path>, and add_net_pins re-propagates interface pins
+    through the deep tree.  Return shape matches _define_leaf_cell, with
+    `blocks` = the root-relative LEAF paths (the top-bus endpoint pool) and
+    `centers` in root-local coords (the SA pin model)."""
+    import bdb_serialize
+    try:
+        src = buda_db.BDB(bdb_serialize.materialize_if_sql(bdb_path))
+    except Exception as exc:
+        sys.exit(f"Error: could not read BDB cell {bdb_path}: {exc}")
+    comps = {c.id: c for c in src.all_components()}
+    roots = [c for c in comps.values() if c.parent_id == -1]
+    if len(roots) != 1:
+        sys.exit(f"Error: {bdb_path} must contain exactly one top component "
+                 f"to import as a cell (found {len(roots)})")
+    root = roots[0]
+    kids = {}
+    for c in comps.values():
+        kids.setdefault(c.parent_id, []).append(c)
+    for v in kids.values():
+        v.sort(key=lambda c: c.name)
+    # The canonical UNPLACED root (-1..-1 bbox, the DEF+Verilog merge state)
+    # has no meaningful corner or size: rebase on the placed depth-1
+    # children's extent, as the flat importer does (review #538).  The
+    # rebased values feed the cell size, the child offsets, and the leaf
+    # centers below via root_x1/y1/w/h.
+    if (root.x2 > root.x1 and root.y2 > root.y1
+            and root.x1 >= 0 and root.y1 >= 0):
+        root_x1, root_y1 = root.x1, root.y1
+        root_w, root_h = root.x2 - root.x1, root.y2 - root.y1
+    else:
+        top_kids = kids.get(root.id, [])
+        if not top_kids:
+            sys.exit(f"Error: no components under the root in {bdb_path}")
+        root_x1 = min(c.x1 for c in top_kids)
+        root_y1 = min(c.y1 for c in top_kids)
+        root_w = max(c.x2 for c in top_kids) - root_x1
+        root_h = max(c.y2 for c in top_kids) - root_y1
+
+    def rel(name):
+        pre = root.name + "/"
+        return name[len(pre):] if name.startswith(pre) else name
+
+    def tcell(src_cell):                       # namespaced target cell name
+        return cell if src_cell == root.cell else f"{cell}__{src_cell}"
+
+    # One representative instance per source cell type, deepest types first
+    # so add_inst_to_cell always references an already-defined child cell.
+    rep = {}
+    for c in sorted(comps.values(), key=lambda c: (c.depth, c.name)):
+        if c.id == root.id:
+            continue
+        if c.cell not in rep:
+            rep[c.cell] = c
+        else:
+            r = rep[c.cell]
+            if (abs((c.x2 - c.x1) - (r.x2 - r.x1)) > 1e-6 or
+                    abs((c.y2 - c.y1) - (r.y2 - r.y1)) > 1e-6):
+                sys.exit(f"Error: {bdb_path}: instances of cell '{c.cell}' "
+                         f"differ in size ({r.name} vs {c.name}) — nested "
+                         f"import needs congruent replicas")
+    for src_cell, r in sorted(rep.items(),
+                              key=lambda kv: -kv[1].depth):
+        db.add_cell(tcell(src_cell), r.x2 - r.x1, r.y2 - r.y1)
+        for ch in kids.get(r.id, []):
+            db.add_inst_to_cell(tcell(src_cell), ch.name.rsplit("/", 1)[-1],
+                                tcell(ch.cell), ch.x1 - r.x1, ch.y1 - r.y1)
+    # The imported cell itself = the renamed root cell.
+    w, h = root_w, root_h
+    db.add_cell(cell, w, h)
+    for ch in kids.get(root.id, []):
+        db.add_inst_to_cell(cell, ch.name.rsplit("/", 1)[-1],
+                            tcell(ch.cell), ch.x1 - root_x1, ch.y1 - root_y1)
+
+    # Leaf-ness derived STRUCTURALLY (no children) rather than from the
+    # stored is_leaf flag — an add_comp-built source can leave the flag
+    # stale on mid-level components (review #538 test hazard).
+    leaves = sorted((c for c in comps.values()
+                     if c.id != root.id and not kids.get(c.id)),
+                    key=lambda c: c.name)
+    blocks, centers, leaf_ids = [], {}, set()
+    for c in leaves:
+        bn = rel(c.name)                        # hierarchical, '/' preserved
+        blocks.append(bn)
+        centers[bn] = ((c.x1 + c.x2) / 2 - root_x1,
+                       (c.y1 + c.y2) / 2 - root_y1)
+        leaf_ids.add(c.id)
+
+    pins_by_net = {}
+    for p in src.all_pins():
+        if p.comp_id in leaf_ids:
+            pins_by_net.setdefault(p.net_id, []).append(p)
+    net_name = {n.id: n.name for n in src.all_nets()}
+
+    def _ep(p):
+        c = comps[p.comp_id]
+        pn = p.pin_name
+        if not pn or pn == c.name or pn == c.name.rsplit("/", 1)[-1]:
+            pn = "p"
+        return f"{rel(c.name)}.{pn}"
+
+    nets = []
+    for nid in sorted(pins_by_net):
+        pins = pins_by_net[nid]
+        if len(pins) < 2:
+            continue
+        drivers = [p for p in pins if p.dir in _DRIVER_DIRS]
+        drv = drivers[0] if drivers else pins[0]
+        rcvs = [p for p in pins if p is not drv]
+        dirs = {p.dir for p in pins}
+        if dirs <= {"INOUT"}:
+            d = "inout"
+        elif dirs <= {"UNKNOWN", ""}:
+            d = "unknown"
+        else:
+            d = ""
+        if d == "":
+            rcvs = [p for p in rcvs if p.comp_id != drv.comp_id]
+            if not rcvs:
+                continue
+        nets.append({"name": rel(net_name.get(nid, f"net_{nid}")),
+                     "drv": _ep(drv), "rcvs": [_ep(p) for p in rcvs],
+                     "dir": d})
+    return w, h, blocks, nets, centers
+
+
 def _align_occurrences(placements, cell_meta):
     """Snap same-cell instances onto SHARED coordinates so their (congruent)
     block edges COINCIDE in the flat Hanan grid — the hierarchical
@@ -634,7 +774,8 @@ def _ensure_min_buses_per_instance(buses, placements, pool, rng,
 
 def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
           cell_nets=True, busterms=True, optimize=None, opt_params=None,
-          bloat=None, n_instances=2, n_buses=7, align_occurrences=False):
+          bloat=None, n_instances=2, n_buses=7, align_occurrences=False,
+          nest_bdb_cells=False):
     rng = random.Random(seed)
     # Leaf .buda files carry full pipeline/tech commands buda2bdb doesn't read;
     # silence its per-line "ignored command" warnings while defining cells.
@@ -652,12 +793,16 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
     for entry in cell_files:
         name, path = entry if isinstance(entry, tuple) \
             else (_cell_default_name(entry), entry)
-        define = (_define_bdb_cell
-                  if path.lower().endswith(_BDB_EXTS) else _define_leaf_cell)
+        if path.lower().endswith(_BDB_EXTS):
+            define = (_define_bdb_cell_nested if nest_bdb_cells
+                      else _define_bdb_cell)
+        else:
+            define = _define_leaf_cell
         w, h, blocks, nets, centers = define(db, name, path)
         cells.append((name, w, h, blocks, nets, centers))
         cell_meta[name] = (w, h, centers)
-        src = " [bdb]" if define is _define_bdb_cell else ""
+        src = (" [bdb nested]" if define is _define_bdb_cell_nested
+               else " [bdb]" if define is _define_bdb_cell else "")
         print(f"  cell {name:16s} {w:6.0f} x {h:6.0f}  "
               f"({len(blocks)} blocks, {len(nets)} internal nets){src}")
 
@@ -738,9 +883,14 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
             n_nets += 1
         print(f"  bus  {name:16s} [{w:2d}]  {di}/{dblk} -> {len(rcvs)} rcv")
 
-    # 8. Derive busterms so the BDB is ready for the hier bundler / topology gen.
+    # 8. Derive busterms so the BDB is ready for the hier bundler / topology
+    #    gen — to the ACTUAL max component depth: a nested BDB cell
+    #    (--nest-bdb-cells) materializes depth-3+ leaves, and a depth-2
+    #    derivation would leave the deepest cell-internal buses out of
+    #    hierarchical bundling (review #538).
+    max_depth = max((c.depth for c in db.all_components()), default=2)
     if busterms:
-        buda_db.BustermGen(db).derive(2)
+        buda_db.BustermGen(db).derive(max_depth)
 
     db.compute_all()
     total_nets = n_cell_nets + n_nets
@@ -751,7 +901,7 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
           f"nets, {total_nets} nets total.")
     if busterms:
         print("\nPlan all buses together with the hier flow "
-              "(depth 2 reaches the cell-internal buses):")
+              f"(depth {max_depth} reaches the cell-internal buses):")
         print(f"  PYTHONPATH=build python3 src/buda_cli.py <<'EOF'")
         print(f"  open_bdb {out_path}")
         # Layer technology: the BDB carries none, so define the TOP routing
@@ -763,9 +913,9 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
         # Hanan grid / keepouts from real block edges (chip=0, instances=1,
         # leaf blocks=2; 'skip' = only that exact depth).
         print(f"  add_blocks_from_bdb 0")
-        print(f"  add_blocks_from_bdb 1 skip")
-        print(f"  add_blocks_from_bdb 2 skip")
-        print(f"  run_hier_bundler depth 2")
+        for d in range(1, max_depth + 1):
+            print(f"  add_blocks_from_bdb {d} skip")
+        print(f"  run_hier_bundler depth {max_depth}")
         print(f"  generate_hier_topologies")
         print(f"  run_planner hier")
         print(f"  run_nuts")
@@ -845,6 +995,7 @@ def main():
     n_instances = 2
     n_buses = 7
     align_occurrences = False
+    nest_bdb_cells = False
     i = 0
     pos = []
     while i < len(argv):
@@ -861,6 +1012,8 @@ def main():
             n_buses = int(argv[i + 1]); i += 2
         elif argv[i] in ("--align-occurrences", "-align-occurrences"):
             align_occurrences = True; i += 1
+        elif argv[i] in ("--nest-bdb-cells", "-nest-bdb-cells"):
+            nest_bdb_cells = True; i += 1
         elif argv[i] == "--no-cell-nets":
             cell_nets = False; i += 1
         elif argv[i] == "--no-busterms":
@@ -899,7 +1052,7 @@ def main():
     build(out_path, cell_files, seed=seed, cell_nets=cell_nets,
           busterms=busterms, optimize=optimize, opt_params=opt_params,
           bloat=bloat, n_instances=n_instances, n_buses=n_buses,
-          align_occurrences=align_occurrences)
+          align_occurrences=align_occurrences, nest_bdb_cells=nest_bdb_cells)
 
 
 if __name__ == "__main__":
