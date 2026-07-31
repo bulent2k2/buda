@@ -74,7 +74,34 @@ Verdict: grid reduction paid while memcpy dominated; after the algorithmic
 fixes the planner cost is congestion-driven and the snap **costs QoR**
 (+16% unplaced — it closes part of the SA bloat channels), so the
 algorithmic path strictly dominates.  The aligned twin stays checked in as
-the test-with-both study fixture (not in the QoR corpus).  `align_bottom_up` (1.9s) gets both
+the test-with-both study fixture (not in the QoR corpus).
+
+chip3 — the TRUE 3-level variant (2026-07-31)
+===
+`chip3.bdb.sql` + `chip3_topdown.buda`: same composition and SA placement
+as chip_topdown, but mix2 imported with `--nest-bdb-cells`, PRESERVING its
+internal hierarchy — chip (d0) → i_big2_k / i_mix2_k (d1) → big2 blocks +
+i_dnuts*/i_dogleg* (d2) → mix2 leaves (d3); 1+6+192+300 components,
+13320 nets with deep names (`chip/i_mix2_0/i_dnuts1_0/bv1_0`).  The flow
+derives busterms to depth 3, loads blocks at every depth, and bundles at
+depth 3 — the maiden depth-3 run of the hier pipeline, and it worked
+first try, including cross-level **D3→D2** bundles (a mix2 leaf three
+levels down driving big2 blocks two levels down):
+
+| | chip (2-level) | chip3 (3-level) |
+|---|---|---|
+| hbundles | 640 (100 D1 / 540 D2) | 640 (95 D1 / 311 D2 / 234 D3) |
+| candidates | 16792 | 15073 |
+| planner | 125.1s | **59.7s** |
+| total | 148s | **76s** |
+| overlaps / unplaced / viol_bundles | 255 / 3185 / 163 | 185 / 2925 / 180 |
+| abstract / detailed WL | 3036142 / 61969962 | 2303254 / 53318203 |
+
+The deeper templating HALVES the planner (the dnuts-level bundles solve
+in tiny cell-local frames and expand 6-18x each) and improves most QoR
+metrics too (overlaps −27%, unplaced −8%, detailed WL −14%, abstract WL
+−24%) at slightly more violating bundles (163→180).  Same congestion
+profile (90 ALLOW_OVERFLOW commits), healerless like its 2-level twin.  `align_bottom_up` (1.9s) gets both
 cells to **ALIGNED** (3 instances each seeing identical signal-track pools;
 508/496 windows compared), so DNUTS solves each cell once and copies.
 Bottom-up trades +75 abstract overlaps for −22% unplaced bits, −17%
