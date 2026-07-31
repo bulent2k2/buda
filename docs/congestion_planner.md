@@ -326,6 +326,41 @@ Demo scripts:
 
 ---
 
+## Runtime at chip scale (2026-07-31)
+
+The chip-scale vehicle (`flow/chip/`, 640 hbundles / 16.8k candidates /
+63k Hanan crossings) exposed three planner hotspots, all fixed
+**byte-identically** (chip planner 374.5s → 109.7s, 3.4×, re-confirmed
+after the #530 `band_span_charge` flip at 376.9s → 125.1s; endpoints
+bit-identical; five planner-heavy corpus flows verified byte-identical
+against both mains):
+
+1. **Candidate undo log** — `plan_bundle` used to snapshot the ENTIRE cut
+   state (`cuts_ = cuts_snapshot`, every band's cap/usage/sig-track vector)
+   and restore it by full copy per candidate — ~50% of the 374s was band-
+   vector memcpy, multiplied by the escalation ladder's re-entries.  The
+   within-candidate charges now record only the touched `(cut, band,
+   old_value)` triples (`cand_undo_`), rolled back in reverse — an
+   exact-value restore (an additive undo would not be bit-exact in floating
+   point), O(touched) instead of O(all bands).
+2. **Cut range index** — `for_each_band` scanned every cut of every layer
+   per call; `cut_index_` (per `(layer, dir)`, coordinate-sorted `(coord_2x,
+   ci)` pairs) binary-searches the segment's span range, preserving the full
+   scan's ci visit order exactly; the loop-invariant `find_band` is hoisted.
+3. **Leaf-only blocks cache** — `routed_extent` / `low_seg_obstructed`
+   skipped hierarchy containers with a per-iteration `is_container()`
+   string-set lookup over all 432 blocks; containers are filtered ONCE at
+   `blocks_cache_` rebuild (same subset, same order).
+
+Profiling recipe: `cmake -B build-prof -DBUDA_PROFILE=ON` (symbols kept,
+`-g`, frame pointers, still `-O3`), then gdb batch `bt` sampling.  The
+**occurrence-alignment** counter-experiment (snap same-cell instances onto
+shared rows/columns → −33% Hanan crossings) helped only the old
+copy-dominated planner (−20%) and costs QoR on dense placements — the 2×2
+matrix and verdict live in `flow/chip/ReadMe.md`.
+
+---
+
 ## Future Work
 
 Residual planner→NUTS packing gaps observed at scale

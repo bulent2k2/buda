@@ -173,6 +173,30 @@ def test_bdb_cell_import_rejects_folded_name_collision(tmp_path):
         build_hier_demo._define_bdb_cell(out, "sub", src_path)
 
 
+def test_align_occurrences_snaps_to_shared_rows(tmp_path):
+    """--align-occurrences: same-cell instances snap to the class-median
+    row/column when the move stays overlap-free, so their congruent block
+    edges coincide in the flat Hanan grid.  The default single-row layout is
+    already y-aligned; verify the invariants on a built BDB: every cell
+    class's instances share y, and no two instances overlap."""
+    out = str(tmp_path / "aligned.bdb")
+    build_hier_demo.build(out, _CELLS[:2], seed=1, n_instances=3, n_buses=2,
+                          align_occurrences=True)
+    db = buda_db.BDB(out)
+    insts = [c for c in db.all_components() if c.depth == 1]
+    by_cell = {}
+    for c in insts:
+        by_cell.setdefault(c.cell, []).append(c)
+    for cell, group in by_cell.items():
+        ys = {c.y1 for c in group}
+        assert len(ys) == 1, f"{cell} instances not row-aligned: {ys}"
+    for i, a in enumerate(insts):
+        for b in insts[i + 1:]:
+            assert not (a.x1 < b.x2 and a.x2 > b.x1
+                        and a.y1 < b.y2 and a.y2 > b.y1), \
+                f"overlap {a.name} vs {b.name}"
+
+
 def test_bdb_cell_import_roundtrip(tmp_path, default_demo_bdb):
     """Import a previously-built hierarchical BDB as a CELL of a new chip
     (_define_bdb_cell): its leaf blocks appear as '__'-folded child blocks of

@@ -58,6 +58,10 @@ struct GlobalCut {
     }
     void reset_usage() { std::fill(band_usage_.begin(), band_usage_.end(), 0.0); }
     void add_usage(int b, double delta) { band_usage_[b] += delta; }
+    // Exact-restore hook for the candidate undo log (plan_bundle): assign the
+    // RECORDED pre-charge value back — an additive undo (x+e-e) would not be
+    // bit-exact in floating point.
+    void set_usage(int b, double v) { band_usage_[b] = v; }
 
     // Signal-track count per FULL band, precomputed once in SIGNAL_TRACKS mode so
     // usable_band_cap can skip the per-call pattern walk when the slide window does
@@ -592,6 +596,24 @@ private:
     // Tunable via set_planner_param("track_cap_slack"); default 0 (exact).
     double track_cap_slack_ = 0.0;
     std::vector<GlobalCut> cuts_;
+    // Candidate undo log (plan_bundle): while recording, apply_segment saves
+    // each touched band's PRE-charge usage as (cut, band, old_value); the
+    // per-candidate rollback replays it in REVERSE, restoring the exact
+    // doubles.  Replaces the full `cuts_ = cuts_snapshot` deep copy that
+    // dominated chip-scale planning (~50% of a 374s run was band-vector
+    // memcpy: one snapshot per plan_bundle + one restore per candidate,
+    // multiplied by the escalation ladder's re-entries).  O(touched bands)
+    // instead of O(all bands); byte-identical by construction.
+    std::vector<std::tuple<int, int, double>> cand_undo_;
+    bool cand_undo_on_ = false;
+    // for_each_band range index: per (layer_id, dir) the cuts' (coord_2x, ci)
+    // pairs, ci-ascending (the build order is coordinate-ascending per layer,
+    // so the pairs are sorted by BOTH — a binary search finds the segment's
+    // [lo2, hi2] span range without scanning every cut of every layer, and
+    // iterating the range preserves the full scan's ci visit order exactly).
+    // Rebuilt with cuts_ (rebuild_cuts_); copies stay valid (indices, not
+    // pointers).
+    std::map<std::pair<int, int>, std::vector<std::pair<long, int>>> cut_index_;
     std::vector<int> x_grid_, y_grid_;
     // Block footprints, cached at cut-rebuild time; used by for_each_band to
     // clamp block-attached segments to their endpoint-block faces on non-TOP

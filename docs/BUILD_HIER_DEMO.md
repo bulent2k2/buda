@@ -84,6 +84,19 @@ python3 tools/build_hier_demo.py chip.bdb \
 `NAME=PATH` names a cell explicitly (the default is the basename minus its
 extension); duplicate resolved cell names are a hard error.
 
+## `--align-occurrences` — shared-row/column occurrence alignment
+
+After placement (SA/GA or the default row), snap same-cell instances onto
+SHARED coordinates: per cell class, each instance's y (then x) is snapped to
+the class **median** — minimal total movement — unless the move would overlap
+another instance's real rect (that instance keeps its position).  Congruent
+instances sharing a row/column make their block edges **coincide** in the
+flat Hanan grid, shrinking the planner's cut/band grid (the chip twin
+measured −33% Hanan crossings).  A study knob: the measured verdict (see
+`flow/chip/ReadMe.md`) is that the grid reduction helped the old
+copy-dominated planner but is QoR-negative on dense placements (the snap
+closes bloat channels), so it is off by default.
+
 ---
 
 Whatever the instance count, **every instance is guaranteed to be wired to at
