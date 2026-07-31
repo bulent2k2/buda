@@ -160,11 +160,16 @@ _SERIAL_PATH = os.path.join(_ROOT, "qor_serial_times.json")
 
 def load_serial_times(path=None):
     """The sidecar as {'stamp': <date + commit>, 'times': {flow: sec}}, or
-    None when absent/unreadable."""
+    None when absent/unreadable/incomplete.  Both fields are validated: a
+    hand-edited or conflict-resolved sidecar missing its stamp must fall back
+    to the documented 'none recorded yet' render, not KeyError AFTER the
+    (lengthy) corpus sweep (Codex #545)."""
     try:
         with open(path or _SERIAL_PATH) as fh:
             data = json.load(fh)
-        return data if isinstance(data.get("times"), dict) else None
+        ok = (isinstance(data.get("times"), dict)
+              and isinstance(data.get("stamp"), str) and data["stamp"].strip())
+        return data if ok else None
     except Exception:                               # noqa: BLE001
         return None
 

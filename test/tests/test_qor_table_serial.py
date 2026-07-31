@@ -48,6 +48,22 @@ def test_load_missing_or_malformed_is_none(tmp_path):
     assert qt.load_serial_times(path=str(bad)) is None
 
 
+def test_load_rejects_missing_or_blank_stamp(tmp_path):
+    # A hand-edited/conflict-resolved sidecar with times but no usable stamp
+    # must load as None (the 'none recorded yet' fallback), not KeyError in
+    # render() after the lengthy sweep (Codex #545).
+    for content in ('{"times": {"flow/a.buda": 1.0}}',
+                    '{"stamp": "  ", "times": {"flow/a.buda": 1.0}}',
+                    '{"stamp": 7, "times": {"flow/a.buda": 1.0}}'):
+        p = tmp_path / "s.json"
+        p.write_text(content)
+        assert qt.load_serial_times(path=str(p)) is None, content
+    # And the render of such a load is the documented fallback, crash-free.
+    md = qt.render([_row("flow/a.buda", 1.0)], "stamp",
+                   qt.load_serial_times(path=str(tmp_path / "s.json")))
+    assert "none recorded yet" in md
+
+
 def test_render_shows_stamped_sec1_column():
     rows = [_row("flow/a.buda", 9.0), _row("flow/new.buda", 3.0),
             _row("flow/d.buda", 8.0, clean=False)]
