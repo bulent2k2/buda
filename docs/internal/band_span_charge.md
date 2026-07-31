@@ -8,6 +8,32 @@ table, and the three rejected attempts to remove the regressions — so none of
 it is re-derived.  **Known cost: two corpus flows** (`rnr/mix2` and
 `rnr/mix2_topdown_refine`), both the same mix2 design and the same 16 bits.
 
+> **Known-cost update (2026-07-31, post-#531).** The recorded regressions
+> have largely healed on main: #531's ripup width gate + post-climb dead-span
+> refold recover `rnr/mix2` to **0/0/0** (fully clean) and heal
+> `rnr/mix2_topdown_refine`'s 16 opens, leaving **3/0/0** (3 overlaps vs the
+> pre-flip 0/0/0 — the stage-b lexicographic trade: opens healed at overlap
+> cost, then the climb stalls).  Separately, the **escalation-threshold gap**
+> behind the 16-bit shape is closed at the source: the dead-span escalation
+> predicate (`_escalate_dead_low_segments`, shared by the run_nuts auto path,
+> the stage-b heal fold, and the refold) historically fired only on ZERO
+> surviving tracks, while DetailedNUTS admission strands the WHOLE segment on
+> `n_sig < member bits` — so a 16-bit segment over a keepout-carved window
+> with 1..15 surviving tracks passed every heal predicate and still lost all
+> 16 bits.  The predicate now uses the admission arithmetic itself
+> (`max(span-clear pool, midpoint pool) < member bits`), of which the zero
+> threshold was the 1-bit special case.  Byte-identical on all 32 corpus
+> flows (the current instances are healed by #531's gate; the widened
+> predicate is the structural cover for the next partial-supply placement),
+> discriminator-tested in `test_dead_span_escalate.py`.
+>
+> Note for future triage: `rnr/mix2_fast_on_aligned_sql`'s residual (2/16/1,
+> `bundle 61 seg 0`) is **not** this blind spot — its tracks exist but are
+> RESERVED by locked bottom-up fixed copies (`reservation conflict` in the
+> DNUTS log, 8 unreserved of 16 needed).  That is RELEASE-pass territory
+> (`check_template_tracks on_mismatch independent`), which the flow's default
+> `stop` policy deliberately gates off — a design-intent choice, not a bug.
+
 ## The defect
 
 `CongestionPlanner::score_segment` charges a segment's whole bus width into the

@@ -15,14 +15,20 @@
 """Post-NUTS dead-span escalation (opt-in `set_dead_span_escalate on`).
 
 A LOW-layer segment whose ACTUAL placed geometry (span + Hanan interval)
-offers zero keepout-clear signal tracks is a guaranteed DetailedNUTS open —
-its bits have nowhere to land.  The plan-time `nontop_dead_span_gate` cannot
-tell such a cull from a survivor (the wide slide window vs the narrow final
-interval), but the same admission test on the FINAL placed geometry can:
-it fires on zero survivor segments.  The escalation moves each genuinely dead
-LOW segment to the cheapest same-direction TOP layer (full signal supply) and
-re-solves.  Measured clean wins: bigHalf no-rr opens 315→171, mix-loci 42→16;
-no-op on the rest of the corpus.  See wishlist-planner "dead-span discriminator".
+offers fewer keepout-clear signal tracks than its MEMBER BITS is a
+guaranteed DetailedNUTS open — admission is all-or-nothing
+(`place_by_layer`: span-clear pool, midpoint fallback, then the whole
+segment strands on `n_sig < bus_seg_nbits`), so a partial-supply shortfall
+loses every bit, not just the overflow.  (The historical threshold was
+ZERO tracks — the member-bits predicate specialized to a 1-bit bus — and
+was blind to the #518/#527 16-bits-over-4-tracks shape.)  The plan-time
+`nontop_dead_span_gate` cannot tell such a cull from a survivor (the wide
+slide window vs the narrow final interval), but the admission arithmetic on
+the FINAL placed geometry fires only on segments whose every bit is already
+lost.  The escalation moves each such LOW segment to the cheapest
+same-direction TOP layer (full signal supply) and re-solves.  Measured
+clean wins: bigHalf no-rr opens 315→171, mix-loci 42→16; byte-identical on
+the rest of the corpus.  See wishlist-planner "dead-span discriminator".
 
 The feature is OFF by default (every checked-in flow stays bit-identical); a
 regression on the pathological mempool_tile stress demo is why it is opt-in.
@@ -55,17 +61,20 @@ _SETUP = [
 ]
 
 
-def _build(pin_low, keepout_m2):
+def _build(pin_low, keepout_m2, partial=False):
     """Set up the L-shape flow; optionally pin its H stub to LOW M2 and/or
-    lay a full-design keepout that kills every M2 signal track.  Returns the
-    session and the pinned H-segment index (or None)."""
+    lay a keepout on M2 — full-design (kills every M2 signal track) or
+    `partial` (y <= 32: leaves 4 of the interval's 20 tracks alive, fewer
+    than the 8-bit bus needs).  Returns the session and the pinned
+    H-segment index (or None)."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
         for c in _SETUP:
             s.do_command(c)
         if keepout_m2:
-            s.do_command("add_keepout 0 0 200 500 2")
+            s.do_command("add_keepout 0 0 200 32 2" if partial
+                         else "add_keepout 0 0 200 500 2")
     h_idx = None
     if pin_low:
         w = s.bundles[0]
@@ -122,3 +131,27 @@ def test_default_off_is_identical():
     assert s._dead_span_escalate is False
     _nuts(s, escalate=False)
     assert s.detailed_result.num_unplaced == 8
+
+
+def test_partial_supply_strands_all_bits_without_escalation():
+    """PARTIAL supply is a full strand, not a partial one: DetailedNUTS
+    admission is all-or-nothing (`n_sig < bus_seg_nbits` strands the whole
+    segment), so 4 surviving tracks against an 8-bit bus lose all 8 bits —
+    the #518/#527 mix2 residual shape (16 bits, supply > 0, every healer's
+    zero-threshold test blind to it)."""
+    s, h_idx = _build(pin_low=True, keepout_m2=True, partial=True)
+    _nuts(s, escalate=False)
+    assert s.detailed_result.num_unplaced == 8
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # still LOW M2
+
+
+def test_escalation_fires_on_partial_supply():
+    """The escalation predicate is DNUTS's admission arithmetic — fewer
+    keepout-clear tracks than the segment's member bits — not merely "zero
+    tracks".  4 < 8 must escalate the stub to TOP M4 and place all 8 bits.
+    (The historical zero threshold was the member-bits predicate specialized
+    to a 1-bit bus; this pins the generalization.)"""
+    s, h_idx = _build(pin_low=True, keepout_m2=True, partial=True)
+    _nuts(s, escalate=True)
+    assert s.detailed_result.num_unplaced == 0
+    assert list(s.bundles[0].plan.seg_layers)[h_idx] == 4   # TOP M4
