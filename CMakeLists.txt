@@ -88,9 +88,17 @@ endif()
 #   cmake -B build-prof -DBUDA_PROFILE=ON && cmake --build build-prof -j
 #   PYTHONPATH=build-prof:src python3 …   (then sample with gdb/perf)
 # Composes with BUDA_SANITIZE (which already keeps symbols).
-option(BUDA_PROFILE "Keep symbols + -g for profilers (still -O3)" OFF)
+option(BUDA_PROFILE "Keep symbols + debug info for profilers (still optimized)" OFF)
 if(BUDA_PROFILE AND NOT BUDA_SANITIZE)
-    add_compile_options(-g -fno-omit-frame-pointer)
+    if(MSVC)
+        # /Z7 embeds the debug info in the objects (no PDB juggling for a
+        # throwaway profiling build); MSVC profilers unwind via that info,
+        # so no frame-pointer flag is needed (and /Oy- is x86-only noise).
+        add_compile_options(/Z7)
+        add_link_options(/DEBUG)
+    else()
+        add_compile_options(-g -fno-omit-frame-pointer)
+    endif()
     set(BUDA_PYBIND_EXTRAS NO_EXTRAS)
 endif()
 
