@@ -154,6 +154,84 @@ def test_command_validation():
     assert not s._cell_layer_policy
 
 
+def test_star_off_clears_stale_wrapper_masks():
+    """Codex P2 regression (PR #544): with the policy dict emptied
+    (`set_cell_layer_cap * off`), _apply_layer_policies must actively CLEAR
+    a previously governed wrapper's mask, not early-return around it —
+    otherwise the next re-plan keeps enforcing the lifted cap."""
+    s = _session()
+    w = s.bundles[0]
+    w.input.allowed_layers = [2, 3]
+    w.input.layer_cap = 3
+    s._cell_layer_policy = {}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s._apply_layer_policies()
+    assert "cleared stale masks on 1" in buf.getvalue()
+    assert list(w.input.allowed_layers) == []
+    assert w.input.layer_cap == -1 and w.input.layer_floor == -1
+
+
+# ── hier ordering: masks must precede optimize_topologies ────────────────────
+
+def _hier_db():
+    """proc_cell (two pipe_cell children, 4-bit cell-local bus) placed twice
+    — NOT bottom-up, so the cell-instance bundles are planned by the global
+    optimize_topologies over the EXPANDED wrappers (the Codex P1 path)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst_to_cell("proc_cell", "pb_i", "pipe_cell", 155, 60)
+    db.add_inst("proc_i1", "proc_cell", "", 0, 0)
+    db.add_inst("proc_i2", "proc_cell", "", 500, 0)
+    for i in range(4):
+        db.add_net_pins(f"ab1_{i}", "proc_i1/pa_i.out", ["proc_i1/pb_i.in"])
+        db.add_net_pins(f"ab2_{i}", "proc_i2/pa_i.out", ["proc_i2/pb_i.in"])
+    buda.BustermGen(db).derive(1)
+    return db
+
+
+def test_hier_capped_non_bottom_up_instance_stays_in_band():
+    """Codex P1 regression (PR #544): expansion builds FRESH BundleInputs,
+    so the per-instance masks must be applied BEFORE optimize_topologies —
+    a post-assignment application lets a capped non-bottom-up instance plan
+    unrestricted (the capped bottom-up smoke never caught it because locked
+    wrappers are masked at the template call site and skipped by the global
+    planner).  Then `* off` + re-plan must LIFT the caps (P2 end-to-end)."""
+    db = _hier_db()
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ("def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+                  "def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+                  "set_cell_layer_cap proc_cell M5",
+                  "run_hier_bundler", "generate_hier_topologies",
+                  "run_planner hier"):
+            s.do_command(c)
+    governed = [w for w in s.bundles
+                if w.input.original_bundle.cell_context == "proc_cell"]
+    assert governed, "expected expanded proc_cell instance wrappers"
+    for w in governed:
+        assert list(w.input.allowed_layers) == [4, 5]
+        assert w.plan.seg_layers, "planner must assign layers"
+        assert all(l in (4, 5) for l in w.plan.seg_layers), \
+            list(w.plan.seg_layers)
+    # '* off' + re-plan really lifts the cap: masks cleared on the fresh
+    # expansion, and the unmasked plan goes back to the TOP pair.
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("set_cell_layer_cap * off")
+        s.do_command("run_planner hier")
+    lifted = [w for w in s.bundles
+              if w.input.original_bundle.cell_context == "proc_cell"]
+    assert lifted
+    for w in lifted:
+        assert list(w.input.allowed_layers) == []
+        assert w.input.layer_cap == -1
+    assert any(l in (6, 7) for w in lifted for l in w.plan.seg_layers)
+
+
 def test_escalation_respects_the_mask():
     """The dead-span escalation helper's target selection: a governed
     segment already at its band's ceiling is refused LOUD (never silently

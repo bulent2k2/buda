@@ -151,6 +151,11 @@ def cmd_run_planner(session, cmd, args, cmd_line):
             tid: [expanded[_idx_of[id(w)]] for w in ws]
             for tid, ws in exp_map_raw.items()}
         del expanded_l, exp_map_raw, _idx_of
+        # Expansion built FRESH BundleInput objects — re-resolve the layer
+        # policies onto the per-instance wrappers NOW, before
+        # optimize_topologies plans them (a post-assignment application
+        # would let a capped non-bottom-up instance plan unrestricted).
+        session._apply_layer_policies(expanded)
         # priority = -(level * 10000 + n_candidates): higher routes first.
         # Depth-0 before depth-1; fewer candidates (less flexibility) first.
         # BUDA_HIER_DEEP_FIRST=1 (experiment): invert the level key only —
@@ -197,9 +202,6 @@ def cmd_run_planner(session, cmd, args, cmd_line):
                 w.plan.seg_layers = list(asn.seg_layers)
                 w.plan.seg_perp = list(asn.seg_perp)
         session.bundles = expanded
-        # Expansion built FRESH BundleInput objects — re-resolve the layer
-        # policies onto the per-instance wrappers before the global planner.
-        session._apply_layer_policies()
         session._planner_is_hier = True
         print(f"run_planner hier: {len(session.bundles)} wrappers after expansion")
     else:

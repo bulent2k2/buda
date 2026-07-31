@@ -1403,7 +1403,7 @@ class HierMixin:
         nb.net_receivers     = b.net_receivers
         return nb
 
-    def _apply_layer_policies(self):
+    def _apply_layer_policies(self, wrappers=None):
         """Resolve per-cell layer policies onto wrapper masks (Phase 1 of
         docs/internal/hier_layer_caps.md).
 
@@ -1414,25 +1414,54 @@ class HierMixin:
         policy via _bu_cell_of.  cell_context "" (top-level) stays
         unrestricted in Phase 1.  Idempotent and cheap, so the hier command
         path calls it at each wrapper-set transition (templates before the
-        bottom-up solves; expanded per-instance wrappers before the global
-        planner) — expansion builds fresh BundleInput objects, so masks must
-        be re-resolved, never assumed to ride along.
+        bottom-up solves; the EXPANDED per-instance wrappers before
+        optimize_topologies plans them) — expansion builds fresh BundleInput
+        objects, so masks must be re-resolved, never assumed to ride along.
+        `wrappers` overrides the target set (default self.bundles): the hier
+        path passes the expanded vec BEFORE it becomes session.bundles, so
+        the global planner never sees an unmasked capped instance.
 
-        No policy declared anywhere => every wrapper keeps an empty mask and
-        every consumer short-circuits: the byte-identity guarantee."""
+        No policy declared anywhere => wrappers carry empty masks and every
+        consumer short-circuits: the byte-identity guarantee.  A previously
+        governed wrapper is actively CLEARED on that path, so
+        `set_cell_layer_cap * off` + re-plan really lifts the caps instead
+        of leaving stale masks behind."""
+        if wrappers is None:
+            wrappers = self.bundles
         pol = getattr(self, "_cell_layer_policy", None)
         if not pol:
+            n_cleared = 0
+            for w in wrappers:
+                if w.input.allowed_layers or w.input.layer_cap >= 0 \
+                        or w.input.layer_floor >= 0:
+                    w.input.allowed_layers = []
+                    w.input.layer_cap = -1
+                    w.input.layer_floor = -1
+                    n_cleared += 1
+            if n_cleared:
+                print(f"[LayerCap] cleared stale masks on {n_cleared} "
+                      f"bundle(s) (no cell layer policies declared)")
             return
         all_lids = sorted(
             list(self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL)) +
             list(self.layers.get_layer_ids_by_dir(buda.LayerDir.VERTICAL)))
         n_gov = 0
-        for w in self.bundles:
+
+        def _clear(w):
+            if w.input.allowed_layers or w.input.layer_cap >= 0 \
+                    or w.input.layer_floor >= 0:
+                w.input.allowed_layers = []
+                w.input.layer_cap = -1
+                w.input.layer_floor = -1
+
+        for w in wrappers:
             ctx = self._bu_cell_of(w.input.original_bundle.cell_context)
             if not ctx:
+                _clear(w)
                 continue
             entry = pol.get(ctx, pol.get("*"))
             if entry is None:
+                _clear(w)
                 continue
             floor, cap = entry
             lo = floor if floor >= 0 else -(10 ** 9)

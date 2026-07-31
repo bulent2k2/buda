@@ -426,7 +426,8 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
         n = len(getattr(session, "_cell_layer_policy", {}) or {})
         session._cell_layer_policy = {}
         print(f"[LayerCap] cleared {n} polic{'y' if n == 1 else 'ies'} "
-              f"(byte-identical to no caps)")
+              f"(byte-identical to no caps; re-run the planner to lift "
+              f"masks already applied)")
         return
     if len(args) < 2:
         print("Error: set_cell_layer_cap requires a cap layer"); return
