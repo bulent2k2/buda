@@ -2236,6 +2236,25 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
 
         // (3) Overflow is unavoidable even after rip-up: fall back to soft
         //     pricing so the least-cost overflowing candidate is committed.
+        // Policy context for the ladder warnings (hier_layer_caps.md §9.2):
+        // a governed bundle's escalation message names the band/shares so
+        // the user sees WHY the layer set was small.  Empty for ungoverned
+        // bundles — their messages are byte-identical.
+        std::string pol_note;
+        if (bw.input.layer_cap >= 0) {
+            pol_note = " [cell band ";
+            pol_note += (bw.input.layer_floor >= 0)
+                            ? "[" + std::to_string(bw.input.layer_floor)
+                            : std::string("[min");
+            pol_note += ".." + std::to_string(bw.input.layer_cap) + "]]";
+        }
+        if (!bw.input.layer_shares.empty()) {
+            pol_note += " [shared:";
+            for (const auto& [lid, s] : bw.input.layer_shares)
+                pol_note += " L" + std::to_string(lid) + "="
+                          + std::to_string((int)std::lround(s * 100)) + "%";
+            pol_note += "]";
+        }
         if (!plan.found) {
             plan = plan_bundle(bw, PlanMode::ALLOW_OVERFLOW);
             if (plan.found) {
@@ -2247,12 +2266,12 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                               << ": pinned topology overflows and cannot be rerouted"
                               << " (rip-up of other bundles did not help); committing"
                               << " the pinned topology with overflow="
-                              << plan.overflow << ".\n";
+                              << plan.overflow << "." << pol_note << "\n";
                 } else {
                     std::cout << "[Planner] WARNING: Bundle " << bw.input.original_bundle.id
                               << ": no overflow-free candidate (even after rip-up); "
                               << "committing least-cost candidate with overflow="
-                              << plan.overflow << ".\n";
+                              << plan.overflow << "." << pol_note << "\n";
                 }
             }
         }
@@ -2270,7 +2289,8 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                           << ": no candidate fits its slide windows (bus width "
                           << "exceeds them); committing best-effort "
                           << bw.input.candidates[plan.best_topo].type
-                          << (bw.input.topology_pinned ? " [pinned]" : "") << ".\n";
+                          << (bw.input.topology_pinned ? " [pinned]" : "")
+                          << "." << pol_note << "\n";
             }
         }
 

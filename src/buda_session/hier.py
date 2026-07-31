@@ -24,6 +24,8 @@ Methods extracted verbatim from buda_cli.BudaSession (the CLI mixin
 split); bodies unchanged — `self` is the composed BudaSession, so
 cross-mixin helper calls resolve through the class as before.
 """
+import contextlib
+import io
 import json
 import math
 import os
@@ -1656,6 +1658,65 @@ class HierMixin:
             thinned[lid] = tp
             layers_view.set_bit_pitch(lid, pat.unit_pitch() / n_kept)
         return (layers_view, thinned) if thinned else (self.layers, {})
+
+    def _layer_policy_advisories(self, stage):
+        """The LAYER_CAP / LAYER_SHARE advisory of hier_layer_caps.md
+        Phase 4 (defense-in-depth, like the keepout audit): report every
+        segment whose IN-EFFECT layer lies outside its bundle's band —
+        split into UNPINNED violations (should be impossible: the mask is
+        enforced in the planner core and every healer path; a nonzero
+        count is a bug or a hand-forced state) and PINNED exceptions (the
+        documented pins-override-the-mask contract, surfaced so the
+        exception is visible, never silent) — plus the share groups over
+        their collective lease (§9.7 re-audited at check time).
+
+        The in-effect layer source is stage-aware: the topo stage reads
+        the plan's assigned seg_layers; nuts/dnuts read the PLACED
+        TrackSegments, so a post-plan escalation (dead-span) is judged by
+        where the metal actually ended up.  Returns (unpinned list,
+        pinned list, n_share_over); each list entry is a printable
+        string.  Ungoverned sessions return empty everything — the
+        no-policy print silence the corpus guards."""
+        unpinned, pinned = [], []
+        # Governed = masked OR share-only (a share without a band leaves
+        # allowed_layers empty by design — §4 resolution — but its
+        # collective lease must still be re-audited; Codex #549).  The
+        # band loop below naturally no-ops for share-only wrappers
+        # (allows_layer is vacuously true on an empty mask).
+        governed = [w for w in self.bundles
+                    if (w.input.allowed_layers or w.input.layer_shares)
+                    and w.input.candidates]
+        if not governed:
+            return [], [], 0
+        placed = {}
+        if stage in ("nuts", "dnuts") and self.nuts_result is not None:
+            for ts in self.nuts_result.segments:
+                placed[(ts.bundle_id, ts.seg_idx)] = ts.layer
+        for w in governed:
+            inp = w.input
+            sel = w.plan.selected_topology_index
+            if not (0 <= sel < len(inp.candidates)):
+                continue
+            bid = inp.original_bundle.id
+            pins = list(inp.pinned_seg_layers) if inp.pinned_seg_layers else []
+            n_segs = len(inp.candidates[sel].segments)
+            for si in range(n_segs):
+                lid = placed.get((bid, si))
+                if lid is None and si < len(w.plan.seg_layers):
+                    lid = w.plan.seg_layers[si]
+                if lid is None or lid < 0 or inp.allows_layer(lid):
+                    continue
+                band = (f"[{inp.layer_floor if inp.layer_floor >= 0 else 'min'}"
+                        f"..{inp.layer_cap}]")
+                msg = (f"Bundle {bid}: Seg {si} on layer L{lid} outside the "
+                       f"cell band {band}")
+                if si < len(pins) and pins[si] == lid:
+                    pinned.append(msg + " (pinned exception — honored)")
+                else:
+                    unpinned.append(msg)
+        with contextlib.redirect_stdout(io.StringIO()):
+            n_share_over = self._audit_share_budgets(governed)
+        return unpinned, pinned, n_share_over
 
     def _bu_share_dnuts_overrides(self, ref_ids):
         """Tier-1 DNUTS view (Phase 3): for every bottom-up REFERENCE

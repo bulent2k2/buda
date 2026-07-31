@@ -824,6 +824,14 @@ def cmd_dump_hbundles(session, cmd, args, cmd_line):
         label = "expanded bundles" if use_expanded else "original HBundles"
         print(f"  (no {label} — run run_hier_bundler first)")
     else:
+        # Resolve declared policies onto the dumped wrappers so a
+        # PRE-planner dump already shows the promised band/shares
+        # (masks are otherwise resolved at run_planner hier; the call is
+        # idempotent and the planner re-resolves at its own turn —
+        # Codex #549).  Quiet: the dump is a report, not a plan step.
+        import contextlib as _ctx, io as _io
+        with _ctx.redirect_stdout(_io.StringIO()):
+            session._apply_layer_policies(source)
         for w in source:
             b = w.input.original_bundle
             if filter_depth is not None and b.level != filter_depth:
@@ -842,8 +850,21 @@ def cmd_dump_hbundles(session, cmd, args, cmd_line):
                 shown = insts[:3]
                 ellipsis = "…" if len(insts) > 3 else ""
                 inst_str = f"  [{', '.join(shown)}{ellipsis}]"
+            # Policy-aware reporting (hier_layer_caps.md Phase 4): a
+            # governed bundle shows its band + shares so the reader sees
+            # WHICH layer set it planned under.  Ungoverned = unchanged.
+            pol_str = ""
+            if w.input.allowed_layers:
+                floor = w.input.layer_floor
+                pol_str = (f"  band=[{floor if floor >= 0 else 'min'}"
+                           f"..{w.input.layer_cap}]")
+            if w.input.layer_shares:
+                pol_str += "  shares={" + ", ".join(
+                    f"L{lid}:{int(round(s * 100))}%"
+                    for lid, s in w.input.layer_shares) + "}"
             print(f"hb-{b.id:<3}  D{b.level}  {kind:<24}  \"{short_reason}\"  "
-                  f"nets={len(b.get_net_names())}  cands={cands}{inst_str}")
+                  f"nets={len(b.get_net_names())}  cands={cands}{inst_str}"
+                  f"{pol_str}")
 
 
 COMMANDS = {
