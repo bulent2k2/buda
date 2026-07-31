@@ -490,7 +490,7 @@ As built:
 * **Byte-identity corpus** (no policy declared): 0 better / 0 worse /
   34 unchanged; abstract + detailed WL both +0.00%.
 
-### Phase 3 — fractional shares
+### Phase 3 — fractional shares — LANDED 2026-07-31
 
 Thinned-pattern derivation + `set_cell_layer_share`; Tier-1 grid view for
 cell-local solves; Tier-2 capacity scale + over-consumption audit;
@@ -530,6 +530,66 @@ Open questions — **all three RESOLVED** (plan owner, 2026-07-31):
   accounting inside `GlobalCut` only if a measured flow shows per-band
   violations the scalar bound misses (quantity legal, placement crowded
   into one band).  Option (a) audit-only stays rejected.
+
+As built:
+
+* **Command** — `set_cell_layer_share <cell> <layer> <pct>`: LOUD
+  declaration-time validation (unknown layer/cell, missing track pattern,
+  a share whose `floor(s × n_signal)` keeps zero slots names the minimum
+  meaningful share); `pct 100` = explicit full use (share removed);
+  persisted in the v20 `cell_layer_share` table (write-through, restore
+  with the typed-wins/BDB-switch contract, `* off` clears shares too).
+* **Thinned derivation** (Q1) — first `floor(s × n_signal)` SIGNAL slots
+  kept per period, rest re-typed CUSTOM; origin and `unit_pitch`
+  unchanged, so phase congruence and `align_bottom_up` are untouched.
+* **Tier 1** — the derived PAIR (thinned grid + LayerStack clone with
+  `bit_pitch = unit_pitch / n_kept`) handed to the cell-local planner and
+  NUTS; the bottom-up DNUTS reference solve runs on a grid clone with
+  each shared cell's thinned pattern installed as an instance-bbox
+  override — reference bits (hence all copies) land only on kept slots;
+  eng2 (and the parent over the cell) keeps the full grid: budget, not
+  reservation.
+* **Tier 2** — `usable_band_cap` track-mode capacity × `share_of(layer)`
+  under the plan_bundle share context; the SCALAR COLLECTIVE BUDGET (Q3)
+  enforced INSIDE the STRICT layer enumeration (committed books + the
+  candidate's own earlier segments vs `s × supply(bbox)`), so the
+  enumeration steers to an in-band alternative within the mode — measured
+  necessity: a candidate-level gate alone made every candidate fail on
+  the exhausted layer and ALLOW_OVERFLOW committed past the promise.
+  The books live in `commit_plan(±1)` — the single charge chokepoint —
+  and reset with band usage, so every trial/rip-up/recharge path is
+  consistent by construction.  A candidate-level gate remains as backstop.
+* **Reservations** (Q2) — `s × eff_width` parked on shared layers of the
+  matching direction (global-pattern basis; the thinned view's width is
+  ~1/s inflated and would rebuild the rejected over-reservation); full
+  width on the owned effective-TOP pair.
+* **§9.7 audit** — after `run_planner hier`, WARN on any non-STRICT
+  commit past a lease.
+* **Vehicle** — `flow/rnr/mix2_fast_bottomup_shared.buda`: dnuts1 keeps
+  the M3 cap and leases 75% of M4/M5 (the caps twin measured its 32-bit
+  buses genuinely exceeding LOW supply).  Ends `Success` / 0 overlaps /
+  0 unplaced.  Per-cell per-layer detailed WL:
+
+  | context | M2 | M3 | M4 | M5 | M6 | M7 |
+  |---|---|---|---|---|---|---|
+  | TOP-LEVEL | 13176 | 6752 | 66478 | 113690 | 164800 | 121382 |
+  | dnuts1 (M3 + 75% M4/M5) | 13230 | 19200 | 134496 | 159133 | **0** | **0** |
+  | dnuts2 (≤M3) | 3795 | 3786 | **0** | **0** | **0** | **0** |
+  | dogleg1 (≤M5) | 0 | 0 | 8890 | 25512 | **0** | **0** |
+  | dogleg2 (≤M5) | 0 | 0 | 11790 | 24844 | **0** | **0** |
+
+  dnuts1 carries real M2/M3 load under its cap (the caps twin at band
+  ≤M5 kept M3 at 0) and stays off M6/M7 entirely.  At 50% shares the
+  lease is measurably too tight for the `independent`-solved misaligned
+  instance (64 bits strand — the honest wiring-limited boundary); 75%
+  routes clean.
+* **Tests** — 9 in `test_layer_shares.py` (plan §11 items 5/7/8 + the
+  resolution/persistence paths), incl. the collective-budget vehicle:
+  with a budget that fits one, exactly one of two same-group bundles
+  gets the shared layer under STRICT and the other lands in-band;
+  without shares both take it.
+* **Byte-identity corpus** (no shares declared): 0 better / 0 worse /
+  34 unchanged; abstract + detailed WL both +0.00%.
 
 ### Phase 4 — healer compliance
 
