@@ -130,6 +130,46 @@ def test_cull_heal_noop_without_culls():
     assert list(s.bundles[0].plan.seg_layers)[h_idx] == 2   # unchanged LOW M2
 
 
+def test_cull_heal_checkpoints_route_when_bdb_open(monkeypatch):
+    """An ACCEPTED heal changed plan.seg_layers and the abstract solve; with
+    an open BDB the pre-heal bus_segment/bus_via rows and planner
+    assignments would otherwise go stale under the healed detailed rows,
+    and load_pipeline would resume the un-healed abstract route (Codex P1
+    on #543).  The accept path must re-checkpoint the whole routing state,
+    exactly as the refold and the stage-b heal do."""
+    s, h_idx = _build("add_keepout 56 0 68 500 2")
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        s.do_command("run_nuts")
+        s._run_detailed_nuts(bit_order="LO_HI")   # solve only, no heal yet
+    assert s.detailed_result.num_keepout_bits == 8
+    calls = []
+    s.bdb = object()   # non-None sentinel; _checkpoint_routing is stubbed
+    monkeypatch.setattr(s, "_checkpoint_routing",
+                        lambda *a, **k: calls.append(1))
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        n = s._final_cull_heal()
+    assert n >= 1
+    assert calls == [1]        # the heal persisted its own route
+    assert s.detailed_result.num_unplaced == 0
+
+
+def test_cull_heal_no_checkpoint_when_nothing_culled(monkeypatch):
+    """No culled bits → the heal is a true no-op and must not touch the
+    BDB."""
+    s, h_idx = _build("corner_margin dx 0")
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        s.do_command("run_nuts")
+        s._run_detailed_nuts(bit_order="LO_HI")
+    calls = []
+    s.bdb = object()
+    monkeypatch.setattr(s, "_checkpoint_routing",
+                        lambda *a, **k: calls.append(1))
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        n = s._final_cull_heal()
+    assert n == 0
+    assert calls == []
+
+
 def test_cull_heal_scoped_out_of_bottom_up_sessions():
     """A session with any hier.locked wrapper (a bottom-up flow) must not
     run the heal — the same blunt boundary as ripup's width gate: the

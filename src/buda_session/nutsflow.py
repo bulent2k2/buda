@@ -1015,6 +1015,15 @@ class NutsFlowMixin:
                           flush=True)
                     if self.planner is not None:
                         self.planner.recharge_committed(self.bundles)
+                    # The accepted escalation changed plan.seg_layers and the
+                    # abstract solve; an open BDB still holds the pre-heal
+                    # bus_segment/bus_via rows and planner assignments, so a
+                    # load_pipeline resume would restore the STALE abstract
+                    # route under the healed detailed rows (Codex P1 on
+                    # #543).  Re-checkpoint the whole routing state, exactly
+                    # as the refold and the stage-b heal do.
+                    if self.bdb is not None:
+                        self._checkpoint_routing()
                     total += n
                     accepted = True
                     break
