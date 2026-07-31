@@ -490,3 +490,22 @@ Requested after the feature merged: run the alignment verification BEFORE
   issue diff), and — resolving the slack-cap idea as exact geometry — the
   default auto-revert of any move that introduces a NEW issue (`force`
   keeps them; `max_shift` remains the explicit user cap).
+
+## Recursive bottom-up (2026-07-31)
+
+The intermediate level's own cell-local bundles are now bottom-up-templated
+too: the bundler's LCA cell-context generalization (see HIER_BUNDLER.md)
+recognizes an intermediate cell's buses BETWEEN its child instances (mix2's
+dnuts→dogleg buses in the 3-level chip) as cell-local templates of that
+cell, with the child INSTANCES as busterm blocks — so `set_bottom_up` marks
+at every hierarchy level compose: the deepest classes solve first (their
+copies lock), then the intermediate cell's own frame solves once around its
+locked children and copies to its occurrences, then the top level plans
+around all of it.  On `flow/chip/chip3a_bottomup.buda` (marks at BOTH
+levels, built from the pre-aligned mix2 so nested phases compose — see
+flow/chip/ReadMe.md): every class reports ALIGNED — big2, mix2 (22 template
+bundles, 70 local segments copied ×3), and the four nested classes — with
+9512 reference bits DNUTS-solved once and 24016 copied across 423 sibling
+instances.  The same arc fixed two silent mixed-depth bundler defects the
+depth-3 vehicle exposed (path-maximal receivers; per-receiver is_cross) —
+five chip3 top buses had been losing their big2 endpoints entirely.

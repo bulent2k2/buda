@@ -250,6 +250,73 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
     comp_by_id.reserve(all_comps.size());
     for (const auto& c : all_comps) comp_by_id[c.id] = c;
 
+    // ── Generalized cell-context detection (recursive bottom-up) ─────────
+    // A bundle is CELL-LOCAL iff all its endpoints share a NON-ROOT common
+    // ancestor — the lowest common ancestor (LCA) component.  The historical
+    // test required a shared DIRECT parent, which recognizes leaf-level
+    // cells but silently demoted an INTERMEDIATE cell's own buses (endpoints
+    // in different child instances — e.g. mix2's dnuts→dogleg buses in a
+    // 3-level chip) to per-occurrence one-offs, unreachable by bottom-up
+    // templating.  Per endpoint the busterm BLOCK is its ancestor ONE level
+    // below the LCA; for a direct-parent LCA that is the endpoint itself,
+    // so 1- and 2-level designs are byte-identical.  A root LCA (a genuine
+    // top-level bundle) keeps the cross-block path.
+    auto chain_of = [&](int cid) {
+        std::vector<int> chain;                 // self, parent, …, root
+        int guard = 0;
+        while (cid >= 0 && guard++ < 256) {
+            auto it = comp_by_id.find(cid);
+            if (it == comp_by_id.end()) return std::vector<int>();
+            chain.push_back(cid);
+            cid = it->second.parent_id;
+        }
+        return chain;
+    };
+    // LCA of the endpoint comp ids + each endpoint's child-of-LCA ancestor.
+    // Returns lca_id = -1 when there is no usable non-root LCA.
+    auto lca_blocks = [&](const std::vector<int>& eps)
+            -> std::pair<int, std::unordered_map<int, int>> {
+        std::unordered_map<int, int> below;     // endpoint id -> child-of-LCA id
+        if (eps.empty()) return {-1, below};
+        std::vector<std::vector<int>> chains;
+        chains.reserve(eps.size());
+        for (int e : eps) {
+            chains.push_back(chain_of(e));
+            if (chains.back().empty()) return {-1, below};
+        }
+        int lca = -1;
+        for (size_t ai = 1; ai < chains[0].size(); ++ai) {  // ep0's parent up
+            int anc = chains[0][ai];
+            bool in_all = true;
+            for (const auto& ch : chains)
+                if (std::find(ch.begin(), ch.end(), anc) == ch.end()) {
+                    in_all = false; break;
+                }
+            if (in_all) { lca = anc; break; }               // deepest common
+        }
+        if (lca < 0) return {-1, below};
+        auto lit = comp_by_id.find(lca);
+        if (lit == comp_by_id.end()) return {-1, below};
+        bool all_direct = true;
+        for (size_t i = 0; i < eps.size(); ++i) {
+            const auto& ch = chains[i];
+            auto pos = std::find(ch.begin(), ch.end(), lca);
+            if (pos == ch.begin() || pos == ch.end())
+                return {-1, below};             // endpoint IS the lca: bail
+            below[eps[i]] = *(pos - 1);
+            if (*(pos - 1) != eps[i]) all_direct = false;
+        }
+        // A ROOT-LEVEL LCA (parent_id < 0) is cell-local only in the
+        // historical shared-DIRECT-parent form (a top-level instance whose
+        // own blocks bundle — multi-root fixtures rely on it).  With DEEPER
+        // endpoints a root-level LCA is genuinely top-level routing (a chip
+        // bus between instances must never become a 1-occurrence "template
+        // of the top cell"), so it keeps the cross-block path.
+        if (lit->second.parent_id < 0 && !all_direct)
+            return {-1, below};
+        return {lca, below};
+    };
+
     std::unordered_map<int, std::string> net_name;
     net_name.reserve(all_nets.size());
     for (const auto& n : all_nets) net_name[n.id] = n.name;
@@ -327,10 +394,22 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
     std::unordered_map<int, NetLeafInfo> net_leaf;
     for (const auto& [net_id, pins] : pins_by_net) {
         NetLeafInfo info;
+        // Receiver endpoints are PATH-MAXIMAL pins, not globally-deepest
+        // pins: a shallower INPUT pin is an ancestor interface projection
+        // only when some pin of this net sits on a DESCENDANT path — a leaf
+        // receiver that is simply shallower than its siblings (a depth-2
+        // big2 block beside depth-3 mix2 leaves) is a genuine endpoint the
+        // deepest-only rule silently dropped from the block contract (the
+        // five chip3 top buses).  Uniform-depth designs filter identically
+        // (every shallow pin has a leaf descendant pin), so ≤2-level flows
+        // are byte-identical.  Collected here, filtered after the scan.
+        std::vector<std::tuple<int, int, std::string>> input_pins;
+        std::vector<std::string> all_pin_paths;
         for (const auto& p : pins) {
             auto it = comp_by_id.find(p.comp_id);
             if (it == comp_by_id.end()) continue;
             int d = it->second.depth;
+            all_pin_paths.push_back(it->second.name);
             if (p.dir == "OUTPUT") {
                 if (d > info.drv_spec_depth) {
                     // A deeper OUTPUT supersedes: shallower OUTPUT pins are
@@ -349,14 +428,7 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                     info.extra_drv_paths.push_back(it->second.name);
                 }
             } else if (p.dir == "INPUT") {
-                if (d > info.rcv_spec_depth) {
-                    info.rcv_spec_depth    = d;
-                    info.rcv_spec_comp_ids = {p.comp_id};
-                    info.rcv_spec_paths    = {it->second.name};
-                } else if (d == info.rcv_spec_depth) {
-                    info.rcv_spec_comp_ids.push_back(p.comp_id);
-                    info.rcv_spec_paths.push_back(it->second.name);
-                }
+                input_pins.emplace_back(p.comp_id, d, it->second.name);
             } else if (p.dir == "INOUT") {
                 if (d > info.inout_spec_depth) {
                     info.inout_spec_depth    = d;
@@ -380,6 +452,19 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                     info.unk_spec_paths.push_back(it->second.name);
                 }
             }
+        }
+        // Path-maximal receiver filter (see the collection note above).
+        for (const auto& [cid, d, path] : input_pins) {
+            bool has_desc = false;
+            for (const auto& op : all_pin_paths)
+                if (op.size() > path.size() && is_prefix(path, op)) {
+                    has_desc = true;
+                    break;
+                }
+            if (has_desc) continue;          // ancestor interface projection
+            info.rcv_spec_comp_ids.push_back(cid);
+            info.rcv_spec_paths.push_back(path);
+            info.rcv_spec_depth = std::max(info.rcv_spec_depth, d);
         }
         // INOUT fallback: secondary driver when no OUTPUT exists;
         // otherwise INOUT pins at deepest depth are added as receivers.
@@ -437,7 +522,24 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
             ++_unk_fallback_count;
         }
         if (info.drv_spec_depth < 0 || info.rcv_spec_depth < 0) continue;
-        info.is_cross = (info.drv_spec_depth != info.rcv_spec_depth);
+        // Cross-level iff ANY receiver's leaf depth differs from the driver's
+        // — the historical single rcv_spec_depth comparison missed a MIXED
+        // receiver set (one receiver at the driver's depth, another
+        // shallower: a depth-3 mix2 leaf driving a depth-3 mix2 leaf AND a
+        // depth-2 big2 block).  Such a net classified same-level, and the
+        // same-depth endpoint survey then silently DROPPED the odd-depth
+        // endpoint from the bundle's block contract — five chip3 top buses
+        // lost their big2 receivers this way.  Uniform-depth receiver sets
+        // (every design ≤2 levels) classify exactly as before.
+        info.is_cross = false;
+        for (int rid : info.rcv_spec_comp_ids) {
+            auto rit = comp_by_id.find(rid);
+            if (rit != comp_by_id.end()
+                    && rit->second.depth != info.drv_spec_depth) {
+                info.is_cross = true;
+                break;
+            }
+        }
         if (info.is_cross) {
             int min_common = INT_MAX;
             for (const auto& rp : info.rcv_spec_paths)
@@ -896,29 +998,50 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 // byte-identical.
                 auto drv_it = comp_by_id.find(ep0.driver_comp_id);
                 if (drv_it != comp_by_id.end()) {
-                    int par_id = drv_it->second.parent_id;
-                    bool has_parent = (par_id >= 0);
-                    bool same_par = false;
-                    if (has_parent) {
-                        same_par = true;
-                        for (int rid : ep0.receiver_comp_ids) {
-                            auto rit = comp_by_id.find(rid);
-                            if (rit == comp_by_id.end() || rit->second.parent_id != par_id) {
-                                same_par = false; break;
-                            }
-                        }
-                    }
-                    if (same_par) {
-                        // Intra-cell: all endpoints share the same parent component.
-                        auto par_it = comp_by_id.find(par_id);
-                        if (par_it != comp_by_id.end()) {
-                            b.cell_context = par_it->second.cell;
-                            b.instances.push_back(par_it->second.name);
-                            b.entry_busterm_ids = {"bt:" + drv_it->second.name};
+                    std::vector<int> eps = {ep0.driver_comp_id};
+                    eps.insert(eps.end(), ep0.receiver_comp_ids.begin(),
+                               ep0.receiver_comp_ids.end());
+                    auto [lca, below] = lca_blocks(eps);
+                    bool all_direct = lca >= 0;
+                    for (int e : eps)
+                        if (all_direct && below.at(e) != e) all_direct = false;
+                    if (lca >= 0) {
+                        // Intra-cell: all endpoints share a usable common
+                        // ancestor (direct parent OR deeper hierarchy — the
+                        // recursive bottom-up case).  The DIRECT-parent
+                        // shape emits the historical entry/exit lists
+                        // verbatim (downstream — e.g. generation's fan-in
+                        // root filter — depends on those exact lists); the
+                        // DEEP case maps each endpoint to its child-of-LCA
+                        // block, dedupes, and skips an exit equal to the
+                        // entry (that pair is internal to the child).
+                        const auto& par = comp_by_id.at(lca);
+                        b.cell_context = par.cell;
+                        b.instances.push_back(par.name);
+                        if (all_direct) {
+                            b.entry_busterm_ids =
+                                {"bt:" + comp_by_id.at(ep0.driver_comp_id).name};
                             for (int rid : ep0.receiver_comp_ids) {
                                 auto rit = comp_by_id.find(rid);
                                 if (rit != comp_by_id.end())
-                                    b.exit_busterm_ids.push_back("bt:" + rit->second.name);
+                                    b.exit_busterm_ids.push_back(
+                                        "bt:" + rit->second.name);
+                            }
+                        } else {
+                            const std::string ent =
+                                comp_by_id.at(below.at(ep0.driver_comp_id)).name;
+                            b.entry_busterm_ids = {"bt:" + ent};
+                            for (int rid : ep0.receiver_comp_ids) {
+                                auto bit2 = below.find(rid);
+                                if (bit2 == below.end()) continue;
+                                const std::string ex =
+                                    comp_by_id.at(bit2->second).name;
+                                if (ex == ent) continue;
+                                const std::string tag = "bt:" + ex;
+                                if (std::find(b.exit_busterm_ids.begin(),
+                                              b.exit_busterm_ids.end(), tag)
+                                        == b.exit_busterm_ids.end())
+                                    b.exit_busterm_ids.push_back(tag);
                             }
                         }
                     } else {
@@ -942,33 +1065,67 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 // net (all drivers must share the parent for the bundle to
                 // be a cell-local template); entry ids carry ALL drivers,
                 // exit ids the unique receivers.
-                int par_id = -2;
-                bool same_par = true;
+                std::vector<int> eps;
                 for (int nid : net_ids) {
                     const auto& epn = ep_map.at(nid);
-                    std::vector<int> comp_ids = epn.receiver_comp_ids;
-                    comp_ids.push_back(epn.driver_comp_id);
-                    for (int cid : comp_ids) {
-                        auto cit = comp_by_id.find(cid);
-                        if (cit == comp_by_id.end() || cit->second.parent_id < 0) {
-                            same_par = false; break;
-                        }
-                        if (par_id == -2) par_id = cit->second.parent_id;
-                        else if (cit->second.parent_id != par_id) {
-                            same_par = false; break;
-                        }
-                    }
-                    if (!same_par) break;
+                    for (int rid : epn.receiver_comp_ids) eps.push_back(rid);
+                    eps.push_back(epn.driver_comp_id);
                 }
-                if (same_par && par_id >= 0) {
-                    auto par_it = comp_by_id.find(par_id);
-                    if (par_it != comp_by_id.end()) {
-                        b.cell_context = par_it->second.cell;
-                        b.instances.push_back(par_it->second.name);
+                auto [lca, below] = lca_blocks(eps);
+                bool all_direct = lca >= 0;
+                for (int e : eps)
+                    if (all_direct && below.at(e) != e) all_direct = false;
+                if (lca >= 0) {
+                    const auto& par = comp_by_id.at(lca);
+                    b.cell_context = par.cell;
+                    b.instances.push_back(par.name);
+                    if (all_direct) {
+                        // Historical direct-parent lists, verbatim —
+                        // generation's fan-in root filter depends on an
+                        // exit that duplicates an entry staying in place.
                         for (const auto& d : drivers)
                             b.entry_busterm_ids.push_back("bt:" + d);
                         for (const auto& r : receivers)
                             b.exit_busterm_ids.push_back("bt:" + r);
+                    } else {
+                        // Deep LCA: endpoints map to their children-of-LCA
+                        // blocks (survey order); duplicates dedupe, and an
+                        // exit equal to an entry is internal to that child.
+                        auto child_name = [&](const std::string& ep_name)
+                                -> std::string {
+                            for (int e : eps) {
+                                auto cit = comp_by_id.find(e);
+                                if (cit != comp_by_id.end()
+                                        && cit->second.name == ep_name) {
+                                    auto bit2 = below.find(e);
+                                    if (bit2 == below.end()) return {};
+                                    return comp_by_id.at(bit2->second).name;
+                                }
+                            }
+                            return {};
+                        };
+                        for (const auto& d : drivers) {
+                            std::string cn = child_name(d);
+                            if (cn.empty()) continue;
+                            const std::string tag = "bt:" + cn;
+                            if (std::find(b.entry_busterm_ids.begin(),
+                                          b.entry_busterm_ids.end(), tag)
+                                    == b.entry_busterm_ids.end())
+                                b.entry_busterm_ids.push_back(tag);
+                        }
+                        for (const auto& r : receivers) {
+                            std::string cn = child_name(r);
+                            if (cn.empty()) continue;
+                            const std::string tag = "bt:" + cn;
+                            if (std::find(b.entry_busterm_ids.begin(),
+                                          b.entry_busterm_ids.end(), tag)
+                                    != b.entry_busterm_ids.end())
+                                continue;
+                            if (std::find(b.exit_busterm_ids.begin(),
+                                          b.exit_busterm_ids.end(), tag)
+                                    == b.exit_busterm_ids.end())
+                                b.exit_busterm_ids.push_back(tag);
+                        }
                     }
                 } else {
                     for (const auto& d : drivers) {

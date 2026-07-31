@@ -143,20 +143,42 @@ Fields set here:
 
 ### Step 3 — Cell context
 
-After creating the HBundle, examine the first net's endpoints at depth D:
+After creating the HBundle, examine the first net's endpoints at depth D.
+Since the recursive-bottom-up generalization (2026-07-31), the intra-cell
+test is the **lowest common ancestor**, not the direct parent:
 
 ```
-drv_comp = comp_by_id[ep0.driver_comp_id]
-if drv_comp.parent_id >= 0:                          // not a root component
-  par = comp_by_id[drv_comp.parent_id]
-  if ALL receiver endpoints also have parent == par:  // same parent → intra-cell
-    b.cell_context          = par.cell               // e.g. "proc_cell"
-    b.instances             = [par.name]             // e.g. ["proc_i"]
-    b.entry_busterm_ids     = ["bt:" + drv_comp.name]
-    b.exit_busterm_ids      = ["bt:" + rcv.name for each rcv]
+lca = lowest common ancestor COMPONENT of ALL endpoints
+if lca exists and lca is not the root:               // non-root LCA → intra-cell
+  b.cell_context          = lca.cell                 // e.g. "proc_cell", "mix2"
+  b.instances             = [lca.name]
+  // Busterm blocks are each endpoint's ancestor ONE level below the LCA —
+  // for a direct-parent LCA that is the endpoint itself (historical bytes
+  // preserved for every ≤2-level design); for a deeper LCA it is the
+  // intermediate child instance (mix2's dnuts→dogleg buses become
+  // templates of cell mix2 with the dnuts/dogleg INSTANCES as blocks).
+  // Deep-case duplicates dedupe; an exit equal to an entry is internal to
+  // that child block and skipped.
+  b.entry_busterm_ids     = ["bt:" + child_of_lca(drv).name]
+  b.exit_busterm_ids      = ["bt:" + child_of_lca(rcv).name for each rcv]
 ```
 
-Cross-block bundles (different parents) leave `cell_context` empty.
+Root-LCA bundles (genuinely top-level) leave `cell_context` empty and take
+the cross-block path.  The direct-parent special case is what the historical
+implementation recognized — it found leaf-level cells but silently demoted an
+INTERMEDIATE cell's own buses to per-occurrence one-offs, unreachable by
+bottom-up templating.
+
+**Mixed-depth endpoints** (a depth-3 leaf driving a depth-3 leaf AND a
+depth-2 block — possible whenever cells of different internal depths share a
+chip): receiver endpoints are the **path-maximal** pins — a pin is an
+ancestor interface projection only when some pin of the net sits on a
+descendant path — not the globally-deepest pins, and a net is cross-level
+iff ANY receiver's leaf depth differs from the driver's.  The historical
+deepest-only rule silently dropped the shallower endpoint from the block
+contract, and the single-depth `is_cross` comparison mis-classified the net
+same-level (five chip3 top buses lost their big2 receivers this way).
+Uniform-depth designs filter and classify identically.
 
 ### Step 4 — (removed) Cross-depth linkage
 

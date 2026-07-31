@@ -128,10 +128,23 @@ tell the composed-alignment story:
   reference once — 8872 reference bits copied to 23288 across 379
   sibling instances.  49.9s, 305 ovl / 2254 unplaced / 121 viol_bundles.
 
-Open (future work): the INTERMEDIATE level's own cell-local bundles
-(mix2's buses between its dnuts children) are not bottom-up-templated —
-they connect already-locked child copies and go top-down; a true
-recursive bottom-up would solve mix2's frame once too.  `align_bottom_up` (1.9s) gets both
+Recursive bottom-up (2026-07-31) — the open above is CLOSED: the
+bundler's LCA cell-context generalization recognizes mix2's own buses
+between its child instances as cell-local templates of mix2 (22
+templates × 3 occurrences, busterm blocks = the dnuts/dogleg
+instances), so marks at BOTH levels now compose fully — the nested
+classes solve first, then mix2's frame solves ONCE around its locked
+children and copies, then the top level plans around everything.  On
+chip3a_bottomup every class reports ALIGNED including mix2 itself
+(9512 reference bits DNUTS-solved once, 24016 copied across 423
+sibling instances).  The same arc fixed two silent MIXED-DEPTH bundler
+defects this vehicle exposed (five top buses reaching both depth-3
+mix2 leaves and depth-2 big2 blocks had their big2 receivers DROPPED
+from the block contract): receivers are now path-maximal pins rather
+than globally-deepest, and is_cross compares per receiver.  Routing
+the recovered endpoints costs planner time but pays QoR — see the
+refreshed corpus numbers above; details in docs/HIER_BUNDLER.md and
+docs/internal/hier_bottom_up_planning.md.  `align_bottom_up` (1.9s) gets both
 cells to **ALIGNED** (3 instances each seeing identical signal-track pools;
 508/496 windows compared), so DNUTS solves each cell once and copies.
 Bottom-up trades +75 abstract overlaps for −22% unplaced bits, −17%
