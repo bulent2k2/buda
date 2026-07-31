@@ -423,22 +423,103 @@ and why it is parked:
 10. **Byte-identity corpus guard**: full `qor_corpus.py --compare` with no
     policy declared — **0 better / 0 worse / all unchanged, WL +0.00%**.
 
-## 12. Measurement plan
+## 12. Measurement plan — and the results
 
-* New QoR vehicles: `flow/rnr/mix2_fast_bottomup_caps.buda` (leaf M3 / mid
-  M5 / top M7), a **deliberately wiring-limited** shared variant (leaf
-  M3 + 30% M4) so the spill mechanism is actually exercised, and a capped
-  `flow/chip/chip_bottomup_caps.buda` (the 432-leaf corpus vehicle is where
-  level separation should pay most).
+* QoR vehicles (all three are permanent corpus rows since Phase 5):
+  `flow/rnr/mix2_fast_bottomup_caps.buda` (leaf bands),
+  `flow/rnr/mix2_fast_bottomup_shared.buda` — the **deliberately
+  wiring-limited** variant (dnuts1 capped at M3 with a 75% M4/M5 lease) so
+  the spill mechanism is actually exercised — and
+  `flow/chip/chip_bottomup_caps.buda` (the 432-leaf vehicle, one
+  `set_layer_caps_by_depth M3 M5` line, where level separation should pay
+  most).
 * Metrics: endpoints (overlaps/unplaced/viol_bundles), per-layer WL
-  breakdown (the separation evidence), healer iteration counts (expected
-  DOWN at upper levels), runtime.
+  breakdown (the separation evidence), healer iteration counts, runtime.
 * Honest expectations, stated up front: caps *remove freedom*, so leaf
   endpoints may degrade where low-layer supply is genuinely tight — that is
   the BKM's trade (leaf slack for top-level routability and
   predictability), and shares exist precisely to price that trade instead
   of hitting a wall.  The study reports both directions; the feature stays
   **opt-in** regardless (the byte-identity guarantee makes that free).
+
+### 12.1 The separation is real, and it is what was asked for
+
+Detailed per-bit WL by cell context and layer, same design, same flow, the
+only difference being the policy lines (`tools/`-style probe over
+`detailed_result.net_segments`, grouped by each bundle's `cell_context`):
+
+**`mix2_fast_bottomup`** (4 bottom-up cells, healers at both stages)
+
+| context | policy | M2 | M3 | M4 | M5 | M6 | M7 |
+|---|---|---|---|---|---|---|---|
+| TOP-LEVEL | — | 17224 | 8290 | 119224 | 174726 | 101684 | 81608 |
+| dnuts1 | uncapped | 0 | 0 | 49608 | 130344 | **75924** | **47488** |
+| dnuts2 | uncapped | 0 | 0 | 2595 | 2825 | **1200** | **1200** |
+| dogleg1 | uncapped | 0 | 0 | 4120 | 16656 | **5070** | **8288** |
+| dogleg2 | uncapped | 0 | 0 | 4036 | 16662 | **8000** | **8294** |
+| TOP-LEVEL | (capped run) | 10516 | 5437 | 63466 | 111150 | **167098** | **105531** |
+| dnuts1 | `M5` | 10728 | 0 | 114228 | 174424 | **0** | **0** |
+| dnuts2 | `M3` | 3795 | 3786 | 0 | 0 | **0** | **0** |
+| dogleg1 | `M5` | 0 | 0 | 8890 | 25512 | **0** | **0** |
+| dogleg2 | `M5` | 0 | 0 | 11790 | 24844 | **0** | **0** |
+
+Zero cell-template metal above each cell's cap, and the top level's M6/M7
+grows by +64% / +29% — the layers the caps freed are the layers the top
+level took.  The shared vehicle shows the escape valve working the same
+way: dnuts1 capped at M3 but leasing 75% of M4/M5 routes M3 19200 / M4
+134496 / M5 159133 and still **0** on M6/M7 — the lease is bounded use
+above the cap, not a hole in it.
+
+**`chip_bottomup_caps`** (432 leaf blocks, 13320 nets, healerless,
+`set_layer_caps_by_depth M3 M5`)
+
+| context | M4 | M5 | M6 | M7 |
+|---|---|---|---|---|
+| big2 (uncapped) | 9144327 | 13055175 | **6824469** | **5999808** |
+| TOP-LEVEL (uncapped run) | 2236711 | 2193814 | **2153914** | **2106040** |
+| big2 (capped) | 17412678 | 21062828 | **0** | **0** |
+| TOP-LEVEL (capped run) | 703290 | 1037716 | **4316218** | **4190298** |
+
+The top level's M6/M7 **exactly doubles** (4.26M → 8.51M) when the cell
+templates stop competing for it.  `mix2` behaves identically (M6/M7 423282
++ 386919 → 0).
+
+### 12.2 What it costs
+
+| vehicle | policy | overlaps | unplaced | `check_design` | runtime |
+|---|---|---|---|---|---|
+| `mix2_fast_bottomup` | none | 0 | 0 | Success | 6.1s |
+| `mix2_fast_bottomup_caps` | 4 bands | 2 | 0 | Success | 23.0s |
+| `mix2_fast_bottomup_shared` | band + 75% lease | 0 | 0 | Success | 31.8s |
+| `chip_bottomup` | none | 485 | 2207 | 2547 viol / 106 bundles | 135.3s |
+| `chip_bottomup_caps` | by-depth `M3 M5` | 458 | 3131 | 3943 viol / 126 bundles | 130.1s |
+
+The healed mix2 vehicles all reach a clean endpoint; the healerless chip
+vehicle pays for the policy in stranded bits (2207 → 3131) and detailed WL
+(46.3M → 51.4M) as the cell templates crowd onto the metal left to them.
+That is the trade the BKM buys top-level predictability with, measured
+rather than assumed — and it is exactly the pressure `set_cell_layer_share`
+exists to relieve (the shared vehicle is the capped one's residual 2
+overlaps healed to 0 by leasing back 75% of M4/M5).
+
+### 12.3 The expectation that was wrong
+
+§12's plan predicted healer iteration counts DOWN at upper levels.
+Measured, they go decisively **UP**:
+
+| vehicle | stage a | stage b |
+|---|---|---|
+| uncapped | neg 7→2 (2 iters), ripup 2→0 (1 move / **1 trial**) | neg 54→12 (3), ripup 12→0 (1 move / **1 trial**) |
+| caps | neg 4→0 (1 iter) | neg 178→116 (3), ripup 116→0 (5 moves / **872 trials**) |
+| shared | neg 30→21 (3), ripup 21→0 (5 moves / **321 trials**) | neg 558→480 (3), ripup 480→0 (9 moves / **1280 trials**) |
+
+The reason is structural, not a defect: a mask *removes* the cheap
+escalation the healers normally take (drop the contended segment onto a
+free TOP layer), so every remaining fix has to be found by moving
+topologies within the band.  The healers still converge — every mix2
+endpoint is clean — they just work harder, and the runtime column above is
+that work.  The lesson for the BKM: a cap is a routability budget, and the
+tighter it is the more healer budget the flow should be given.
 
 ## 13. Phasing, with open questions per phase
 
