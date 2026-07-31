@@ -672,6 +672,33 @@ class ReportsMixin:
                   f"on {tug_bundles} bundle(s) — opposite-pull riders stretch an "
                   f"interior trunk; see 'dump_topologies --problems'.")
 
+        # LAYER_CAP / LAYER_SHARE advisory (hier_layer_caps.md Phase 4,
+        # defense-in-depth): in-effect layers vs each governed bundle's band
+        # + the collective share leases.  Unpinned out-of-band metal should
+        # be IMPOSSIBLE (mask enforced in the planner core and every healer
+        # path) — a nonzero count is LOUD; pinned exceptions are the
+        # documented override, surfaced so they are visible, never silent.
+        # No policy in the session => completely silent (byte-identical).
+        if not (all_candidates and stage == "topo"):
+            cap_bad, cap_pinned, share_over = \
+                self._layer_policy_advisories(stage)
+            for msg in cap_bad:
+                print(f"  LAYER_CAP: {msg}")
+            if cap_bad:
+                print(f"  WARNING: {len(cap_bad)} segment(s) hold metal "
+                      f"outside their cell band with NO pin — the mask "
+                      f"should make this impossible; please report.")
+            if cap_pinned:
+                print(f"  Advisory: {len(cap_pinned)} pinned above-cap "
+                      f"exception(s) honored (pins override the mask):")
+                for msg in cap_pinned:
+                    print(f"    {msg}")
+            if share_over:
+                print(f"  Advisory: {share_over} share group(s) over their "
+                      f"collective lease (LAYER_SHARE) — a non-STRICT "
+                      f"commit spent past the budget; see the run_planner "
+                      f"hier audit.")
+
     # Reason text per ViolationKind, used when collapsing per-bit violations.
     _CONN_KIND_REASON = {
         "UNPLACED":     "unplaced (no track in DetailedNUTS)",

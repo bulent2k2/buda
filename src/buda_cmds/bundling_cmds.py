@@ -842,8 +842,21 @@ def cmd_dump_hbundles(session, cmd, args, cmd_line):
                 shown = insts[:3]
                 ellipsis = "…" if len(insts) > 3 else ""
                 inst_str = f"  [{', '.join(shown)}{ellipsis}]"
+            # Policy-aware reporting (hier_layer_caps.md Phase 4): a
+            # governed bundle shows its band + shares so the reader sees
+            # WHICH layer set it planned under.  Ungoverned = unchanged.
+            pol_str = ""
+            if w.input.allowed_layers:
+                floor = w.input.layer_floor
+                pol_str = (f"  band=[{floor if floor >= 0 else 'min'}"
+                           f"..{w.input.layer_cap}]")
+            if w.input.layer_shares:
+                pol_str += "  shares={" + ", ".join(
+                    f"L{lid}:{int(round(s * 100))}%"
+                    for lid, s in w.input.layer_shares) + "}"
             print(f"hb-{b.id:<3}  D{b.level}  {kind:<24}  \"{short_reason}\"  "
-                  f"nets={len(b.get_net_names())}  cands={cands}{inst_str}")
+                  f"nets={len(b.get_net_names())}  cands={cands}{inst_str}"
+                  f"{pol_str}")
 
 
 COMMANDS = {
