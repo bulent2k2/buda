@@ -170,6 +170,12 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
     # healerless flows get the cover ripup's refold gives healered ones.
     # No-op without culled bits; persists below only the accepted state.
     session._final_cull_heal()
+    # Measured TOP re-seat heal (#536 follow-up): re-seat supply-doomed TOP
+    # segments — the class the LOW->TOP escalation family cannot reach — on
+    # an alternate same-direction TOP layer with real supply, same
+    # componentwise accept.  Skips itself when a healer already ran this
+    # session (the flow owns its healing then).
+    session._final_reseat_heal()
     n_ns, n_nv = session._persist_detailed_nuts()
     if n_ns:
         print(f"[BDB] persisted {n_ns} net segment(s) and {n_nv} "
