@@ -90,18 +90,22 @@ levels down driving big2 blocks two levels down):
 
 | | chip (2-level) | chip3 (3-level) |
 |---|---|---|
-| hbundles | 640 (100 D1 / 540 D2) | 640 (95 D1 / 311 D2 / 234 D3) |
-| candidates | 16792 | 15073 |
-| planner | 125.1s | **59.7s** |
-| total | 148s | **76s** |
-| overlaps / unplaced / viol_bundles | 255 / 3185 / 163 | 185 / 2925 / 180 |
-| abstract / detailed WL | 3036142 / 61969962 | 2303254 / 53318203 |
+| hbundles | 640 (100 D1 / 540 D2) | 640 (100 D1 / 306 D2 / 234 D3) |
+| planner | 125.1s | 138s |
+| overlaps / unplaced / viol_bundles | 255 / 3185 / 163 | **109 / 2088 / 143** |
 
-The deeper templating HALVES the planner (the dnuts-level bundles solve
-in tiny cell-local frames and expand 6-18x each) and improves most QoR
-metrics too (overlaps −27%, unplaced −8%, detailed WL −14%, abstract WL
-−24%) at slightly more violating bundles (163→180).  Same congestion
-profile (90 ALLOW_OVERFLOW commits), healerless like its 2-level twin.
+(Re-baselined 2026-07-31 after the recursive-bottom-up bundler fixes —
+the maiden-run numbers (95 D1 bundles, 185/2925/180 at a 59.7s planner)
+were partly an artifact of five top buses silently LOSING their big2
+receivers to the mixed-depth defects fixed in that arc: routing the
+recovered endpoints costs planner time and pays QoR.  The 2-level chip
+rows are byte-identical under the fixes.)
+
+The deeper templating improves every headline QoR metric (overlaps −57%,
+unplaced −34%, viol_bundles −12% vs the 2-level twin at comparable
+planner time) — the dnuts- and mix2-level bundles solve in small
+cell-local frames and expand per template.  Healerless like its 2-level
+twin.
 
 chip3 bottom-up — nested templates at TWO levels (2026-07-31)
 ===
@@ -125,13 +129,29 @@ tell the composed-alignment story:
   unfixable-phase warnings and every nested class reports **ALIGNED**
   (18/18/12/12 instances seeing identical signal tracks): each nested
   template plans locally, pins all its occurrences, and DNUTS solves the
-  reference once — 8872 reference bits copied to 23288 across 379
-  sibling instances.  49.9s, 305 ovl / 2254 unplaced / 121 viol_bundles.
+  reference once.  With the recursive fixes: mix2 itself joins the
+  bottom-up set (22 template bundles, 70 local segments solved once,
+  copied ×3), 9512 reference bits copied to 24016 across 423 sibling
+  instances, and the corpus row lands at 449 ovl / 2303 unplaced /
+  **105 viol_bundles** — the best viol_bundles of any chip flow.
 
-Open (future work): the INTERMEDIATE level's own cell-local bundles
-(mix2's buses between its dnuts children) are not bottom-up-templated —
-they connect already-locked child copies and go top-down; a true
-recursive bottom-up would solve mix2's frame once too.  `align_bottom_up` (1.9s) gets both
+Recursive bottom-up (2026-07-31) — the open above is CLOSED: the
+bundler's LCA cell-context generalization recognizes mix2's own buses
+between its child instances as cell-local templates of mix2 (22
+templates × 3 occurrences, busterm blocks = the dnuts/dogleg
+instances), so marks at BOTH levels now compose fully — the nested
+classes solve first, then mix2's frame solves ONCE around its locked
+children and copies, then the top level plans around everything.  On
+chip3a_bottomup every class reports ALIGNED including mix2 itself
+(9512 reference bits DNUTS-solved once, 24016 copied across 423
+sibling instances).  The same arc fixed two silent MIXED-DEPTH bundler
+defects this vehicle exposed (five top buses reaching both depth-3
+mix2 leaves and depth-2 big2 blocks had their big2 receivers DROPPED
+from the block contract): receivers are now path-maximal pins rather
+than globally-deepest, and is_cross compares per receiver.  Routing
+the recovered endpoints costs planner time but pays QoR — see the
+refreshed corpus numbers above; details in docs/HIER_BUNDLER.md and
+docs/internal/hier_bottom_up_planning.md.  `align_bottom_up` (1.9s) gets both
 cells to **ALIGNED** (3 instances each seeing identical signal-track pools;
 508/496 windows compared), so DNUTS solves each cell once and copies.
 Bottom-up trades +75 abstract overlaps for −22% unplaced bits, −17%
