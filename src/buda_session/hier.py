@@ -1601,6 +1601,80 @@ class HierMixin:
                               for (c, lid), s in sorted(restored_s.items())))
         return len(restored) + len(restored_s)
 
+    def _cell_levels(self):
+        """Intrinsic bottom-anchored LEVEL of every cell type in the open BDB.
+
+        The level a cell is CAPPED BY (`set_layer_caps_by_depth`,
+        docs/internal/hier_layer_caps.md §13 Phase 5 Q1) is a property of the
+        cell's own subtree, not of where it happens to be instantiated —
+        counting DEEPEST-FIRST so a cell instantiated at several hierarchy
+        depths still has one well-defined level:
+
+        * a childless NON-container cell is **level 1** (the deepest leaves,
+          capped by the first argument);
+        * a childless CONTAINER cell is **level 2** — it has no children yet
+          but is declared to acquire them, so it carries one level of
+          reserved headroom;
+        * otherwise **level = 1 + max over child cells' levels** — the
+          tallest subtree governs, so a cell is never capped below what its
+          deepest content needs.
+
+        Container-ness comes from the design itself: a component of the cell
+        marked non-leaf in the BDB (`import_verilog` marks every DEFINED
+        module non-leaf, childless or not) or a block of that cell marked a
+        container in the session floorplan.  The child graph unions the
+        `cell_children` cell-type edges with the elaborated component tree,
+        so both construction paths (add_inst_to_cell, import_verilog) level
+        identically.
+
+        Returns `(levels, containers)`: {cell: level} over every cell the BDB
+        knows, and the set of cells judged containers.
+        """
+        if self.bdb is None:
+            return {}, set()
+        children: dict[str, set] = {}
+        cells: set[str] = set()
+        for parent, child in self.bdb.cell_child_edges():
+            children.setdefault(parent, set()).add(child)
+            cells.add(parent)
+            cells.add(child)
+        comps = self.bdb.all_components()
+        by_id = {c.id: c for c in comps}
+        containers: set[str] = set()
+        for c in comps:
+            cells.add(c.cell)
+            if not c.is_leaf:
+                containers.add(c.cell)
+            par = by_id.get(c.parent_id)
+            if par is not None and par.cell != c.cell:
+                children.setdefault(par.cell, set()).add(c.cell)
+        fp = getattr(self, "fp", None)
+        if fp is not None:
+            for c in comps:
+                if c.cell not in containers and fp.is_container(c.name):
+                    containers.add(c.cell)
+        for row in self.bdb.all_cells():
+            cells.add(row.name)
+
+        memo: dict[str, int] = {}
+
+        def level_of(cell, stack):
+            if cell in memo:
+                return memo[cell]
+            if cell in stack:            # malformed cyclic hierarchy
+                return 1
+            stack.add(cell)
+            kids = [k for k in children.get(cell, ()) if k != cell]
+            if kids:
+                lv = 1 + max(level_of(k, stack) for k in kids)
+            else:
+                lv = 2 if cell in containers else 1
+            stack.discard(cell)
+            memo[cell] = lv
+            return lv
+
+        return ({c: level_of(c, set()) for c in sorted(cells)}, containers)
+
     def _cell_share_layers(self, group):
         """{layer_id: share} of `group`'s cell (clone names resolve to the
         base cell); empty when the cell has no fractional shares."""

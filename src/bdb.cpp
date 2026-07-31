@@ -2217,6 +2217,16 @@ std::vector<std::string> BDB::layer_capped_cells() const {
     return result;
 }
 
+std::vector<std::pair<std::string,std::string>> BDB::cell_child_edges() const {
+    Stmt q(_db, "SELECT DISTINCT parent_cell, child_cell FROM cell_children"
+                " ORDER BY parent_cell, child_cell");
+    std::vector<std::pair<std::string,std::string>> result;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        result.emplace_back((const char*)sqlite3_column_text(q, 0),
+                            (const char*)sqlite3_column_text(q, 1));
+    return result;
+}
+
 void BDB::set_cell_layer_share(const std::string& cell, int layer_id, double share) {
     {   // The FK target must exist (matches set_cell_layer_band's contract).
         Stmt q(_db, "SELECT 1 FROM cell WHERE name=?");
