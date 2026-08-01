@@ -1379,6 +1379,58 @@ class NutsFlowMixin:
                 break
         return total
 
+    def _final_pair_align_heal(self) -> int:
+        """Measured-accept pairwise-overlap alignment (path 1 — the safe form
+        of the DNUTS pair-align prototype).
+
+        Two same-net stubs straddling a trunk align — share one track window,
+        a tidier route — only when the first-placed one lands where the second
+        can reach; the greedy ordered-anchor placer often splits them (the
+        seat repro's right column).  The UNCONDITIONAL fix (restrict each
+        stub's pool to the pair overlap) was corpus NET-NEGATIVE: on congested
+        designs the concentration starves signal tracks and strands MORE bits
+        (0 better / 7 worse).  This heal keeps the win without the loss: solve
+        DNUTS once more with pair-align on, and ACCEPT the aligned result only
+        when unplaced and overlaps do NOT rise and detailed WL strictly drops
+        — else restore the baseline.  By construction it cannot regress a flow
+        it does not help (the 7 worse all raise unplaced → rejected).
+
+        Opt-in (`set_pair_align_heal on`, default off — the extra full DNUTS
+        solve is pure cost on a flow with no misaligned pairs).  Scoped out of
+        bottom-up (locked) sessions, like the cull/reseat heals: their copies
+        must stay uniform and their downstream healers re-roll from a changed
+        start.  Returns 1 on accept, 0 otherwise."""
+        if self.detailed_result is None or self.nuts_result is None:
+            return 0
+        if not getattr(self, "_pair_align_heal", False):
+            return 0
+        if any(w.hier.locked for w in self.bundles):
+            return 0
+
+        def _wl(dr):
+            return sum(abs(ns.span_hi - ns.span_lo) for ns in dr.net_segments)
+
+        base = (self.detailed_result.num_unplaced,
+                self.nuts_result.num_overlaps, _wl(self.detailed_result))
+        saved = self.detailed_result
+        self._run_detailed_nuts(bit_order=self._detailed_bit_order,
+                                pair_align=True)
+        cur = (self.detailed_result.num_unplaced,
+               self.nuts_result.num_overlaps, _wl(self.detailed_result))
+        # Componentwise accept: opens/overlaps parity-or-better, WL strictly
+        # lower (the pair-align solve is DNUTS-only, so overlaps — an abstract
+        # metric — never move; the check documents the contract).
+        if (cur[0] <= base[0] and cur[1] <= base[1]
+                and cur[2] < base[2] - 1e-6):
+            print(f"[DetailedNUTS] PAIR-ALIGN: aligned same-net stub pair(s), "
+                  f"detailed WL {base[2]:.0f}->{cur[2]:.0f} "
+                  f"(unplaced {base[0]}->{cur[0]})", flush=True)
+            if self.bdb is not None:
+                self._checkpoint_routing()
+            return 1
+        self.detailed_result = saved
+        return 0
+
     def _segment_states_from_topology(self) -> dict:
         """Build a 'before' snapshot from topology geometry (no track assignment yet).
 
@@ -1798,7 +1850,7 @@ class NutsFlowMixin:
         self.planner.set_capacity_mode(buda.CapacityMode.SIGNAL_TRACKS)
 
     def _run_detailed_nuts(self, bit_order="LO_HI", emit_vias=True,
-                           abort_unplaced=-1):
+                           abort_unplaced=-1, pair_align=False):
         """Execute bit-level track assignment using DetailedNUTSEngine.
 
         emit_vias=False (RR fast trials): skip the per-bit via emission —
@@ -1831,6 +1883,7 @@ class NutsFlowMixin:
         bu_plan = self._bottom_up_dnuts_plan()
         if bu_plan is None:
             engine = buda.DetailedNUTSEngine(self.routing_grid)
+            engine.set_pair_align(pair_align)
             with buda.ostream_redirect():
                 self.detailed_result = engine.run(bus_segs, emit_vias,
                                               abort_unplaced)

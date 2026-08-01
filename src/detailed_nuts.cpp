@@ -31,7 +31,11 @@
 namespace buda {
 
 DetailedNUTSEngine::DetailedNUTSEngine(const RoutingGridStack& stack)
-    : stack_(stack) {}
+    : stack_(stack) {
+    // Seed the pair-align default from the env (the raw study path); the
+    // measured-accept heal overrides it per-engine via set_pair_align.
+    pair_align_ = std::getenv("BUDA_DNUTS_PAIR_ALIGN") != nullptr;
+}
 
 // Track-IDENTITY quantizer (1e-6 µm quantum, the same scale as verify.cpp's
 // BIT_SHORT bucketing): two positions are the same physical track iff their
@@ -255,10 +259,13 @@ void DetailedNUTSEngine::place_by_layer(
     // MORE bits (big.buda 0/0/0 -> 0/8/1; mix2_fast_on_aligned_sql unplaced
     // 16 -> 68; the four chip flows +8..12% unplaced), while corpus WL barely
     // moves (-0.04%).  The dual of the documented concentration loss
-    // (interval_pull_model.md "The spreader, resolved").  Kept OFF — an
-    // opt-in study knob only; do NOT default-enable.
-    static const bool kPairAlign =
-        std::getenv("BUDA_DNUTS_PAIR_ALIGN") != nullptr;
+    // (interval_pull_model.md "The spreader, resolved").  Kept OFF as an
+    // unconditional default — reachable two ways: the BUDA_DNUTS_PAIR_ALIGN
+    // env (raw study) seeds pair_align_ in the constructor, and the Python
+    // measured-accept heal (`_final_pair_align_heal`) sets it per-run and
+    // keeps the result only when unplaced/overlaps do not rise (the accept
+    // that makes it SAFE — it cannot regress a flow it does not help).
+    const bool kPairAlign = pair_align_;
     // Sound early abort (RR fast trials): checked after every unplaced
     // increment via this helper — see run()'s header comment.
     auto over_budget = [&]() {

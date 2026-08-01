@@ -427,6 +427,10 @@ void bind_nuts(py::module_& m) {
         .def(py::init<const RoutingGridStack&>(), py::keep_alive<1, 2>())
         .def("add_fixed_bits", &DetailedNUTSEngine::add_fixed_bits,
              py::arg("bits"))
+        .def("set_pair_align", &DetailedNUTSEngine::set_pair_align,
+             py::arg("on"),
+             "Pairwise-overlap seating for this engine (prototype); the "
+             "measured-accept alignment heal toggles it per-run.")
         .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"),
              py::arg("emit_vias") = true, py::arg("abort_unplaced") = -1);
 

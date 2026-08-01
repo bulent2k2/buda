@@ -176,6 +176,10 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
     # componentwise accept.  Skips itself when a healer already ran this
     # session (the flow owns its healing then).
     session._final_reseat_heal()
+    # Measured-accept pairwise-overlap alignment (opt-in): re-solve DNUTS with
+    # same-net stub pairs aligned, keep only when unplaced/overlaps don't rise
+    # and WL strictly drops.  No-op unless set_pair_align_heal on.
+    session._final_pair_align_heal()
     n_ns, n_nv = session._persist_detailed_nuts()
     if n_ns:
         print(f"[BDB] persisted {n_ns} net segment(s) and {n_nv} "
@@ -362,6 +366,26 @@ def cmd_set_dead_span_escalate(session, cmd, args, cmd_line):
     session._dead_span_escalate = (val == "on")
 
 
+def cmd_set_pair_align_heal(session, cmd, args, cmd_line):
+    # Usage: set_pair_align_heal [on|off]
+    # Opt-in MEASURED-ACCEPT pairwise-overlap alignment at run_detailed_nuts:
+    # re-solve DNUTS with same-net stub pairs aligned to a shared track
+    # window and KEEP it only when unplaced/overlaps do not rise and detailed
+    # WL strictly drops (else restore).  Off by default = bit-identical.  The
+    # accept is what makes it safe: the unconditional form was corpus
+    # net-negative (concentration starves tracks); the gate keeps only the
+    # designs it helps.  Scoped out of bottom-up (locked) sessions.
+    if not args:
+        state = "on" if getattr(session, "_pair_align_heal", False) else "off"
+        print(f"pair_align_heal is {state}")
+        return
+    val = args[0].lower()
+    if val not in ("on", "off"):
+        print(f"Error: set_pair_align_heal expects on|off, got {args[0]!r}")
+        return
+    session._pair_align_heal = (val == "on")
+
+
 COMMANDS = {
     "run_nuts": cmd_run_nuts,
     "run_detailed_nuts": cmd_run_detailed_nuts,
@@ -370,4 +394,5 @@ COMMANDS = {
     "refine_selection": cmd_refine_selection,
     "run_nuts_on_layer": cmd_run_nuts_on_layer,
     "set_dead_span_escalate": cmd_set_dead_span_escalate,
+    "set_pair_align_heal": cmd_set_pair_align_heal,
 }
