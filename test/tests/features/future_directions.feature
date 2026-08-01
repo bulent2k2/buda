@@ -128,10 +128,10 @@ Feature: Roadmap — documented open items & future directions
   # ripup_reroute's RELEASE pass; its scenario moved to the @landed
   # bottom_up_planning.feature (coverage: test_ripup_release_moves.py).
 
-  # ── Class-level TRACK negotiation (opens #6b, wishlist-ripup.md) ───────────
+  # ── Class-level TRACK negotiation (opens #6b, wishlist-healer.md) ───────────
 
   Scenario: a locked template class vacates tracks a top-level bus needs
-    # see docs/internal/wishlist-ripup.md "Class-level TRACK negotiation" + opens.md #6b
+    # see docs/internal/wishlist-healer.md "Class-level TRACK negotiation" + opens.md #6b
     # The last open of #536: class moves re-pin a template's TOPOLOGY, which cannot
     # shift the TRACKS its fixed copies occupy, so mix2_fast_on_aligned_sql sticks
     # at 2 ov / 16 opens with b61's only viable layer held by locked copies.

@@ -1,8 +1,11 @@
-# Wishlist — Rip-up & re-route
+# Wishlist — Healers (rip-up, negotiate, refine)
 
-Deferred follow-ups for the feedback-driven `ripup_reroute` pass (Python
-hill-climb in `src/buda_session/ripup.py`, driving planner + NUTS +
-DetailedNUTS). Index: [`wishlist.md`](wishlist.md).
+Deferred follow-ups for the feedback-driven **measured-metric healers** — the
+`ripup_reroute` hill-climb, `negotiate_congestion`, and `refine_selection`
+(Python in `src/buda_session/ripup.py`, driving planner + NUTS + DetailedNUTS),
+plus their bottom-up class-move machinery. Index: [`wishlist.md`](wishlist.md).
+(Renamed from `wishlist-ripup.md` 2026-08-01 — the file outgrew ripup once
+negotiate, refine, and the class/track moves joined it.)
 
 ## Status (2026-07-15, post PR #298) — the RR speedup arc is CLOSED OUT
 

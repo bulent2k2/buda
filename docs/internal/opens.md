@@ -107,7 +107,7 @@ designs and fail LOUD, never silent:)*
    V-trunk WL and flips planner selections) — that investigation gates any
    NUTS-side work.
 6b. **Class-level TRACK negotiation — the #536 b61 residual** (added
-   2026-07-31) — [`wishlist-ripup.md`](wishlist-ripup.md) → *"Class-level
+   2026-07-31) — [`wishlist-healer.md`](wishlist-healer.md) → *"Class-level
    TRACK negotiation"*. The last open of issue #536, after its census (PR
    #548) and TOP re-seat heal (PR #550) shipped. `mix2_fast_on_aligned_sql`
    sticks at 2 ov / 16 opens: b61 seg0's 16 bits sit on M6 (12 tracks in the
@@ -293,7 +293,7 @@ designs and fail LOUD, never silent:)*
   `_RR_WARM_TRIALS_DEFAULT = False`: default routes byte-identical,
   `warm_trials` opts in.  The flip bar (post-screen cold trials ≥3× the
   ~41–70ms warm eval — designs several times bigHalf's size) is recorded
-  in [`wishlist-ripup.md`](wishlist-ripup.md), which now carries the
+  in [`wishlist-healer.md`](wishlist-healer.md), which now carries the
   complete round 1–5 history including all measured negative results.
 
 ## Resolved (by 2026-07-14)
@@ -324,7 +324,7 @@ designs and fail LOUD, never silent:)*
   abort study (repair+corner are the PRIMARY overlap reducers — no
   post-fixpoint abort, no pass-skipping them) were the recorded
   constraints item 9 was then closed under — see *Resolved (by
-  2026-07-15)* above.  Details: [`wishlist-ripup.md`](wishlist-ripup.md).
+  2026-07-15)* above.  Details: [`wishlist-healer.md`](wishlist-healer.md).
 
 - **Hier bundler: CONVERGENT + COMBINED + fan-in bundles** ✅ — **DONE
   (2026-07-14, PR #276)**, closing the fan-in item's hier follow-on: the
@@ -649,7 +649,7 @@ evidence in the per-subsystem wishlist files as cited.)*
   toggle** rather than a removal: `ripup_reroute [max_iter]
   [use_edge_candidates]` keeps the measured-redundant flip source off by
   default (zero trial cost, routes unaffected) while preserving it for
-  exploration. See [`wishlist-ripup.md`](wishlist-ripup.md) → *"Per-edge MST
+  exploration. See [`wishlist-healer.md`](wishlist-healer.md) → *"Per-edge MST
   flip move-source … ✅ RESOLVED (opt-in toggle)"*.
 - **Corner-touch generation gap** ✅ — rescued at generation independent of
   `corner_margin` via `CORNER_HV`/`CORNER_VH` diagonal L's (reusing the MST

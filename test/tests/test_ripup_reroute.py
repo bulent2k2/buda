@@ -443,7 +443,7 @@ def test_negotiate_reroutes_canned_overlap():
 
 @pytest.mark.mid
 def test_negotiate_big2_then_ripup_clears_overlaps():
-    """The headline v1 validation (wishlist-ripup item 1): replaying big2's
+    """The headline v1 validation (wishlist-healer item 1): replaying big2's
     measured overlaps into the planner as band demand lets its own cost model
     steer the offenders off the contended bands, and the ripup hill-climb
     finishes the residual to 0.
@@ -492,7 +492,7 @@ def test_negotiate_clears_stale_seg_layer_pins():
 # ---- item 5: deterministic tiny stage-b (DNUTS-open) canned fixture ---------
 
 def _build_dnuts_open_session():
-    """Deterministic stage-b fixture (wishlist-ripup item 5): an all-POWER
+    """Deterministic stage-b fixture (wishlist-healer item 5): an all-POWER
     add_grid_override kills M4's signal tracks exactly under the pinned L_HV
     trunk's Hanan window (x[600,2600] y[900,1550]), so DetailedNUTS finds 0
     tracks and all 8 bits open — while the alternate L_VH's trunk (y>=1600)
@@ -611,7 +611,7 @@ def test_commit_by_forward_restore_matches_rerun_commit_stage_b(monkeypatch):
     assert _cut_usages(s_fwd) == _cut_usages(s_leg)
 
 
-# --- Global-occupant pass (wishlist-ripup "global-overlap re-route of ------
+# --- Global-occupant pass (wishlist-healer "global-overlap re-route of ------
 # --- NON-contended bundles", the big2 b61 class) ----------------------------
 
 def _build_occupant_session(truncate=True):

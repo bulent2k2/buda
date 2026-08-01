@@ -357,7 +357,7 @@ public:
     std::vector<CandidateCost> candidate_costs(
             std::vector<BundleWrapper>& bundles, int target_bundle_id);
 
-    // replan_bundle WITH the ladder's victim rip-up stage (wishlist-ripup item
+    // replan_bundle WITH the ladder's victim rip-up stage (wishlist-healer item
     // 1 v2b): if the target has no overflow-free candidate, rip up the
     // committed bundle holding the most demand on the contended bands and
     // replan the pair (accepted only if both end up overflow-free).  Returns
@@ -367,7 +367,7 @@ public:
     // not move other bundles).
     std::vector<BundleAssignment> replan_bundle_ripup(
             std::vector<BundleWrapper>& bundles, int target_bundle_id);
-    // Measured-congestion feedback (negotiate_congestion, wishlist-ripup item
+    // Measured-congestion feedback (negotiate_congestion, wishlist-healer item
     // 1): map a REAL NUTS overlap rectangle back onto the planner's bands and
     // charge it as extra demand, so the next replan_bundle prices the actual
     // contention the width/track model under-predicted (it reported
