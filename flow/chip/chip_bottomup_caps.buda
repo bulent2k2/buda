@@ -4,25 +4,38 @@
 # 432 leaf blocks / 13320 nets, healerless for fast experimentation), with
 # ONE extra line declaring the whole policy:
 #
-#   set_layer_caps_by_depth M3 M5
+#   set_layer_caps_by_depth M5 M9
 #
 # Counting DEEPEST-FIRST over intrinsic cell levels: the leaf cells (level 1,
-# no interconnect of their own) get [lowest..M3], the big2/mix2 cell templates
+# no interconnect of their own) get [lowest..M5], the big2/mix2 cell templates
 # (level 2 — this is the band that bites, their cell-local buses) get
-# [lowest..M5], and the top cell (level 3, past the argument list) stays
-# UNRESTRICTED so the 100 cross-instance top buses keep M6/M7 to themselves.
+# [lowest..M9], and the top cell (level 3, past the argument list) stays
+# UNRESTRICTED so the 100 cross-instance top buses keep M10/M11 to themselves.
 # That is the BKM the whole feature exists to express, in one line instead of
 # a set_cell_layer_cap per cell type.
 #
+# THE BAND MUST SCALE WITH THE STACK.  This vehicle was written for the
+# original 6-layer stack, where [..M5] left M6/M7 (the top pair) to the top
+# level.  On the 10-layer stack that same [..M5] starves the cell templates
+# — measured 3192 unplaced bits vs 1604 uncapped — because it reserves SIX
+# layers for a top level that only needs two.  Reserving the top pair again
+# (cells [..M9]) recovers almost all of it at 1708, while keeping M10/M11
+# exclusively top-level.  Measured alternatives on this stack, cell band:
+# M5 -> 3192 unplaced, M7 -> 1898, M9 -> 1708, uncapped -> 1604.
+#
+# Note the leaf argument is a free choice here: the level-1 cells are true
+# leaves with no cell-local bundles, so `M5 M9` and `M7 M9` produce byte-
+# identical results.  Only the level-2 band bites in this design.
+#
 # The separation is visible in report_wirelength's per-layer breakdown: zero
-# cell-template WL above M5, and M6/M7 exclusively top-level.  Compare against
-# chip_bottomup.buda (identical but uncapped) for the §12 study.
+# cell-template WL above M9, and M10/M11 exclusively top-level.  Compare
+# against chip_bottomup.buda (identical but uncapped) for the §12 study.
 source chip_tracks.buda
 open_bdb chip.bdb.sql
 set_bottom_up big2
 set_bottom_up mix2
 align_bottom_up
-set_layer_caps_by_depth M3 M5
+set_layer_caps_by_depth M5 M9
 derive_busterms 2
 add_blocks_from_bdb 0
 add_blocks_from_bdb 1 skip

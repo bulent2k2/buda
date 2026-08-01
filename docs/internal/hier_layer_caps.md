@@ -490,34 +490,56 @@ templates stop competing for it.  `mix2` behaves identically (M6/M7 423282
 + 386919 → 0).
 
 The vehicle's stack has since grown to **10 layers** (M8/M9 then M10/M11,
-2026-08-01 — `flow/chip/ReadMe.md`).  The separation conclusion is
-unchanged and sharper at every stack size: the capped run keeps **every**
-upper layer for the top level, whatever their number.  At ten layers:
+2026-08-01 — `flow/chip/ReadMe.md`), and that sweep produced the single
+most practically useful result in this study: **a cap band is relative to
+the stack it was written for.**
+
+`[..M5]` reserved the top *pair* on a 6-layer stack.  The identical text on
+a 10-layer stack reserves *six* layers for a top level that needs two, and
+the capped run degrades badly — while the uncapped twin improves:
+
+| stack | uncapped | capped, band as-written |
+|---|---|---|
+| 6 layers | 485/2207 | 458/3131 (`M3 M5`) |
+| 8 layers | 397/1921 | 442/2996 (`M3 M5`) |
+| 10 layers | **353/1604** | 424/**3192** (`M3 M5`) |
+
+Rescaling the band to again reserve just the top pair (cells `[..M9]`)
+recovers nearly all of it — measured on the 10-layer stack, varying only
+the level-2 cap:
+
+| cell band | overlaps | unplaced | viol |
+|---|---|---|---|
+| `[..M5]` (written for 6 layers) | 424 | 3192 | 124 |
+| `[..M7]` | 395 | 1898 | 104 |
+| **`[..M9]`** (vehicle default now) | **358** | **1708** | **93** |
+| no policy at all | 353 | 1604 | 91 |
+
+So a correctly-scaled band costs ~6% in unplaced bits for total top-layer
+reservation, where the stale one cost ~99%.  The separation is unaffected —
+the capped run keeps **every** reserved layer for the top level, whatever
+their number:
 
 | context | M6 | M7 | M8 | M9 | M10 | M11 |
 |---|---|---|---|---|---|---|
-| big2 (capped) | 0 | 0 | **0** | **0** | **0** | **0** |
-| TOP-LEVEL (capped) | 2109534 | 2163575 | 1436982 | 1504546 | 1134130 | 1208830 |
+| big2 (capped, `[..M9]`) | 5263747 | 5104639 | 2888958 | 3391640 | **0** | **0** |
+| TOP-LEVEL (capped run) | 1102668 | 1035758 | 480722 | 518646 | **2007678** | **2257736** |
 
-Endpoints per stack size — uncapped `chip_bottomup` vs capped
-`chip_bottomup_caps`:
+Two lessons for the feature, both now measured rather than assumed:
 
-| stack | uncapped | capped |
-|---|---|---|
-| 6 layers | 485/2207 | 458/3131 |
-| 8 layers | 397/1921 | 442/2996 |
-| 10 layers | **353/1604** | 424/**3192** |
-
-The trade keeps its §12.2 shape, and the stack sweep adds a result worth
-recording: **extra top layers do not relieve a cell capped at the bottom of
-the stack.**  Going 8 → 10 improves the uncapped flow (1921 → 1604
-unplaced) but makes the capped one *worse* (2996 → 3192), because
-`set_layer_caps_by_depth M3 M5` confines every cell template to [M2..M5]
-— where the shortage actually is — while the new pair only spreads the
-top-level buses over coarser, less bit-dense metal (top-level upper WL
-9.578M at 8 layers, 9.558M at 10: the same metal, more layers).  The
-remedy for a supply-starved capped cell is a wider band or a
-`set_cell_layer_share` lease, not more metal above its ceiling.
+1. **Extra top layers do not relieve a cell capped at the bottom.**  At the
+   stale band, 8 → 10 layers left top-level upper WL flat (9.578M → 9.558M)
+   while unplaced rose 2996 → 3192: the same metal spread over more,
+   less bit-dense layers.  Relief for a starved capped cell comes from a
+   wider band or a `set_cell_layer_share` lease, never from metal above its
+   ceiling.
+2. **State bands as intent, and re-check them when the stack changes.**
+   `set_layer_caps_by_depth` makes the whole policy one line precisely so
+   this is a one-line fix — but nothing in the tool detects that a band has
+   gone stale, and §9's advisories cannot: an over-tight band is legal,
+   merely wasteful.  A "reserve the top N layers" spelling of the command
+   would remove the failure mode entirely; recorded as a wishlist item
+   rather than built, since one line is a cheap manual fix.
 
 ### 12.2 What it costs
 

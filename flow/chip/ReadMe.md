@@ -25,12 +25,14 @@ buda flow/chip/chip_bottomup.buda     # bottom-up templates + align_bottom_up
 Both flows run WITHOUT healers for fast experimentation — add
 `negotiate_congestion` / `ripup_reroute` / `refine_selection` rounds manually
 when studying healing at this scale.  `chip_tracks.buda` is the shared
-**8-layer** stack + track patterns: M2/M3 LOW plus six TOP layers M4–M9,
-each pair coarser than the one below it (M8/M9 use 3-wide signal wires on
-8-wide rails).  It extends big2's `tracks4top.buda` / mix2's
-`mix_tracks.buda` (identical 6-layer stacks) by two layers — chip is where
-a realistic top-metal count pays, and every chip flow improved on all three
-endpoint metrics when M8/M9 were added (see the table below).
+**10-layer** stack + track patterns: M2/M3 LOW plus eight TOP layers M4–M11,
+each pair coarser than the one below it (M10/M11 use 4-wide signal wires on
+10-wide rails).  It extends big2's `tracks4top.buda` / mix2's
+`mix_tracks.buda` (identical 6-layer stacks) by four layers — chip is where
+a realistic top-metal count pays.  The 6 → 8 → 10 study below is worth
+reading before copying this stack: the first extension is a clean win, the
+second is the diminishing-returns knee, and it exposed that a cap band
+written for one stack height is wrong on another.
 
 Baseline endpoints (2026-07-30, x86 reference build; both in the QoR corpus)
 ===
@@ -58,10 +60,14 @@ second extension behave differently from the first.
 | chip_topdown | 266 / 3307 / 159 | **164 / 2227 / 120** | 188 / 2170 / 112 |
 | chip_topdown_aligned | — | 206 / 1914 / 113 | 193 / 2027 / 112 |
 | chip_bottomup | 482 / 2205 / 105 | **397 / 1921 / 107** | **353 / 1604 / 91** |
-| chip_bottomup_caps | 458 / 3131 / 126 | **442 / 2996 / 116** | 424 / 3192 / 124 |
+| chip_bottomup_caps | 458 / 3131 / 126 | 442 / 2996 / 116 | **358 / 1708 / 93** † |
 | chip3_topdown | 121 / 1731 / 133 | **88 / 1687 / 123** | **63 / 1639 / 118** |
 | chip3_bottomup | — | 365 / 1623 / 93 | **311 / 1544 / 87** |
 | chip3a_bottomup | 447 / 2269 / 103 | **354 / 1698 / 84** | 297 / 1658 / 90 |
+
+† `chip_bottomup_caps` reads 424/3192/124 at ten layers if its bands are
+left at the 6-layer `M3 M5`; the row above is the rescaled `M5 M9` the
+vehicle now ships with — see the band discussion below.
 
 **6 → 8 was a clean win**: 5 better / 0 worse, every flow improving on all
 three metrics, abstract WL −1..−5%, and the sweep 23% faster because fewer
@@ -80,24 +86,47 @@ A 16-bit bus needs 148 units of M11 where it needs 78 on M7.  So the top
 pair adds *width* but poor *bit density*, and whether that helps depends on
 where the design is actually short of supply.
 
-`chip_bottomup_caps` is the clearest case, and it gets **worse** (unplaced
-2996 → 3192).  Its `set_layer_caps_by_depth M3 M5` puts every cell template
-in [M2..M5], so the constraint is at the BOTTOM of the stack — the new top
-layers cannot relieve it.  All they do is spread the top-level buses over
-coarser metal: top-level upper-layer WL is 9,577,640 at eight layers and
-9,557,597 at ten, i.e. the same metal on more, thinner-value layers.
+`chip_bottomup_caps` was the clearest case, and at its original bands it got
+**worse** (unplaced 2996 → 3192).  Its `set_layer_caps_by_depth M3 M5` put
+every cell template in [M2..M5], so the constraint sat at the BOTTOM of the
+stack where new top layers cannot reach it.  All they did was spread the
+top-level buses over coarser metal: top-level upper-layer WL was 9,577,640
+at eight layers and 9,557,597 at ten — the same metal on more,
+thinner-value layers.
+
+**The band has to scale with the stack.**  `[..M5]` was written when the
+stack ended at M7: it reserved the top *pair* for the top level.  On a
+10-layer stack the identical text reserves *six* layers for a top level that
+needs two.  Relaxing the cell band restores it — measured on this vehicle,
+varying only the level-2 cap:
+
+| cell band | overlaps | unplaced | viol | detailed WL |
+|---|---|---|---|---|
+| [..M5] (as written for 6 layers) | 424 | 3192 | 124 | 52,194,089 |
+| [..M7] | 395 | 1898 | 104 | 48,034,999 |
+| **[..M9] — now the vehicle default** | **358** | **1708** | **93** | **47,509,230** |
+| no caps at all (`chip_bottomup`) | 353 | 1604 | 91 | 47,502,937 |
+
+So reserving the top pair again costs ~6% in unplaced bits over routing
+with no policy at all — versus ~99% for the stale band — and the separation
+is total:
 
 | context | M6 | M7 | M8 | M9 | M10 | M11 |
 |---|---|---|---|---|---|---|
-| big2 (capped) | 0 | 0 | **0** | **0** | **0** | **0** |
-| TOP-LEVEL (capped) | 2,109,534 | 2,163,575 | 1,436,982 | 1,504,546 | 1,134,130 | 1,208,830 |
+| big2 (capped, [..M9]) | 5,263,747 | 5,104,639 | 2,888,958 | 3,391,640 | **0** | **0** |
+| TOP-LEVEL (capped run) | 1,102,668 | 1,035,758 | 480,722 | 518,646 | **2,007,678** | **2,257,736** |
 
-The uncapped flows keep improving because their cell templates *can* use
-the new layers — `chip_bottomup` is the best flow at ten layers
-(353/1604/91).  The lesson for the vehicle: **more top layers help a design
-whose congestion is at the top, and do nothing for one capped at the
-bottom.**  If a capped vehicle needs relief, widen its band (or lease a
-share) rather than adding metal above its ceiling.
+The lesson, now measured from both sides: **more top layers help a design
+whose congestion is at the top and do nothing for one capped at the bottom
+— and a cap written for one stack is wrong on another.**  Relief for a
+starved capped cell comes from widening its band (or a
+`set_cell_layer_share` lease), not from metal above its ceiling.
+
+One quirk worth knowing: in this design the *leaf* argument is a free
+choice — `M5 M9` and `M7 M9` are byte-identical, as are `M3 M7`/`M5 M7`.
+The level-1 cells are true leaves with no cell-local bundles
+(`HierBundler: 640 hbundles (D1: 100, D2: 540)`), so only the level-2 band
+ever bites.
 
 The pipeline profile at this scale: bundling 0.95s → 640 hbundles (100
 top-bus + 540 cell-level), generation ~12s → 16792 candidates, and the
