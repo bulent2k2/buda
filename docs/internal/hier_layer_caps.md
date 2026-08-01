@@ -475,7 +475,8 @@ way: dnuts1 capped at M3 but leasing 75% of M4/M5 routes M3 19200 / M4
 above the cap, not a hole in it.
 
 **`chip_bottomup_caps`** (432 leaf blocks, 13320 nets, healerless,
-`set_layer_caps_by_depth M3 M5`)
+`set_layer_caps_by_depth M3 M5`) — measured on the vehicle's original
+**6-layer** stack (M2–M7):
 
 | context | M4 | M5 | M6 | M7 |
 |---|---|---|---|---|
@@ -488,6 +489,23 @@ The top level's M6/M7 **exactly doubles** (4.26M → 8.51M) when the cell
 templates stop competing for it.  `mix2` behaves identically (M6/M7 423282
 + 386919 → 0).
 
+The vehicle's stack has since grown to **8 layers** (M8/M9 added
+2026-08-01, `flow/chip/ReadMe.md`), and the conclusion is unchanged and
+sharper — the capped run keeps every one of the four upper layers for the
+top level:
+
+| context | M6 | M7 | M8 | M9 |
+|---|---|---|---|---|
+| big2 (uncapped) | 5263851 | 5104846 | **2888334** | **3391496** |
+| TOP-LEVEL (uncapped run) | 2229213 | 2050624 | **1218366** | **1543568** |
+| big2 (capped) | 0 | 0 | **0** | **0** |
+| TOP-LEVEL (capped run) | 2514146 | 2669859 | **2169721** | **2223914** |
+
+Top-level upper metal 7.04M → 9.58M (+36%) with the cell templates evicted
+from all four layers.  Endpoints on the 8-layer stack: uncapped
+397/1921/107, capped 442/2996/116 — the same shape of trade as §12.2, on a
+stack where both runs are less supply-starved.
+
 ### 12.2 What it costs
 
 | vehicle | policy | overlaps | unplaced | `check_design` | runtime |
@@ -497,6 +515,9 @@ templates stop competing for it.  `mix2` behaves identically (M6/M7 423282
 | `mix2_fast_bottomup_shared` | band + 75% lease | 0 | 0 | Success | 31.8s |
 | `chip_bottomup` | none | 485 | 2207 | 2547 viol / 106 bundles | 135.3s |
 | `chip_bottomup_caps` | by-depth `M3 M5` | 458 | 3131 | 3943 viol / 126 bundles | 130.1s |
+
+(The two chip rows are the 6-layer stack the study was run on; on the
+8-layer stack they read 397/1921 and 442/2996.)
 
 The healed mix2 vehicles all reach a clean endpoint; the healerless chip
 vehicle pays for the policy in stranded bits (2207 → 3131) and detailed WL

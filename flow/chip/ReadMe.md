@@ -25,8 +25,12 @@ buda flow/chip/chip_bottomup.buda     # bottom-up templates + align_bottom_up
 Both flows run WITHOUT healers for fast experimentation — add
 `negotiate_congestion` / `ripup_reroute` / `refine_selection` rounds manually
 when studying healing at this scale.  `chip_tracks.buda` is the shared
-6-layer stack + track patterns (same technology as big2's `tracks4top.buda`
-and mix2's `mix_tracks.buda`, which are identical).
+**8-layer** stack + track patterns: M2/M3 LOW plus six TOP layers M4–M9,
+each pair coarser than the one below it (M8/M9 use 3-wide signal wires on
+8-wide rails).  It extends big2's `tracks4top.buda` / mix2's
+`mix_tracks.buda` (identical 6-layer stacks) by two layers — chip is where
+a realistic top-metal count pays, and every chip flow improved on all three
+endpoint metrics when M8/M9 were added (see the table below).
 
 Baseline endpoints (2026-07-30, x86 reference build; both in the QoR corpus)
 ===
@@ -40,6 +44,38 @@ which helps this vehicle: topdown overlaps 452→255, bottomup unplaced
 2610→2285 — and the planner-runtime fixes below, which cut the topdown
 total 391s→148s.  The original 2026-07-30 baseline: topdown 452/3341/163
 at 391s, bottomup 527/2610/136 at 187s.)
+
+Two more top layers — M8/M9 (2026-08-01)
+===
+`chip_tracks.buda` grew from six layers to eight (M8 H TOP / M9 V TOP,
+3-wide signal wires on 8-wide power rails, 57.14% overhead each).  All
+seven chip flows improved, several substantially:
+
+| Flow | 6 layers (ov/unpl/viol) | 8 layers | abstract WL |
+|---|---|---|---|
+| chip_topdown | 266 / 3307 / 159 | **164 / 2227 / 120** | −5.4% |
+| chip_topdown_aligned | — | 206 / 1914 / 113 | — |
+| chip_bottomup | 482 / 2205 / 105 | **397 / 1921 / 107** | −2.0% |
+| chip_bottomup_caps | 458 / 3131 / 126 | **442 / 2996 / 116** | −1.1% |
+| chip3_topdown | 121 / 1731 / 133 | **88 / 1687 / 123** | −3.2% |
+| chip3_bottomup | — | 365 / 1623 / 93 | — |
+| chip3a_bottomup | 447 / 2269 / 103 | **354 / 1698 / 84** | −2.2% |
+
+The new layers are genuinely used, not decoration: `chip_bottomup` puts
+4.2M + 5.1M detailed WL on M8/M9 (~20% of its total metal), and the extra
+supply is what removes the stranded bits — the same congestion that was
+overflowing six layers now spreads over eight.  Planner runtime drops with
+it (total sweep 849s → 654s, −23%) because fewer bundles have to grind
+through the escalation ladder.
+
+Under `chip_bottomup_caps`'s `set_layer_caps_by_depth M3 M5`, the extra
+layers land where the policy says they should — entirely at the top level:
+
+| context | M6 | M7 | M8 | M9 |
+|---|---|---|---|---|
+| big2 (capped) | 0 | 0 | **0** | **0** |
+| TOP-LEVEL (capped run) | 2,514,146 | 2,669,859 | **2,169,721** | **2,223,914** |
+| big2 (uncapped run) | 5,263,851 | 5,104,846 | **2,888,334** | **3,391,496** |
 
 The pipeline profile at this scale: bundling 0.95s → 640 hbundles (100
 top-bus + 540 cell-level), generation ~12s → 16792 candidates, and the
