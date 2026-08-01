@@ -307,7 +307,7 @@ machinery), then unfreezes and runs the real safety passes over the union —
 so its cost tracks the move's blast radius, not the design.  Its metric is
 exact *for the warm state* and a measured PREDICTOR of the cold metric
 (Phase-0 study, `BUDA_RR_WARM_STUDY=1` harness: 91-100% accept agreement,
-4.6-6× cheaper per solve on bigHalf; full record in `wishlist-ripup.md`).
+4.6-6× cheaper per solve on bigHalf; full record in `wishlist-healer.md`).
 With `warm_trials` on, each move is warm-evaluated first: only
 warm-improving moves pay the cold trial (accepts stay on the true cold
 metric — a warm false-accept costs one cold trial), and warm-rejected moves
@@ -509,7 +509,7 @@ negotiate_congestion     # stage b: reprice the capacity-short bands
 ripup_reroute            # finish the residual DetailedNUTS opens
 ```
 
-See [wishlist-ripup.md](../internal/wishlist-ripup.md) (item 1) for the design
+See [wishlist-healer.md](../internal/wishlist-healer.md) (item 1) for the design
 rationale and the measured negotiate-then-ripup results.
 
 ---

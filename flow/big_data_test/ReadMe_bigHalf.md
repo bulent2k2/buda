@@ -15,10 +15,10 @@ config measured 48.5-50.8s and row 7 ~5.7s here, so compare within this block):
 10. row 6 + commit-by-forward-restore + scoped restore      ~46/0/0
     (identical 9-commit trajectory; timing breakdown shows the residual is
      the per-trial full solves: stage-b nuts 20.4s + dnuts 7.1s over 116
-     trials — see wishlist-ripup "RR efficiency round 2")
+     trials — see wishlist-healer "RR efficiency round 2")
 11. row 10 + layer-scoped two-tier cheap trials            ~160/0/0  -> REVERTED
     (layers too coarse a partition on a 4-layer flat design; ranking noise
-     blew trials 116->1136; negative result recorded in wishlist-ripup)
+     blew trials 116->1136; negative result recorded in wishlist-healer)
 
 The checked-in flow stays row 7 (the 0/0 endpoint is exercised by the
 slow-tier test `test_bighalf_rr_reaches_clean_endpoint`, which generates the

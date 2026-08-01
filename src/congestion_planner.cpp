@@ -2619,7 +2619,7 @@ CongestionPlanner::candidate_costs(
 
 std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
         std::vector<BundleWrapper>& bundles, int target_bundle_id) {
-    // replan_bundle WITH the ladder's victim rip-up stage (wishlist-ripup item
+    // replan_bundle WITH the ladder's victim rip-up stage (wishlist-healer item
     // 1 v2b): when the target has no overflow-free candidate against the
     // committed+injected demand, rip up the committed bundle holding the most
     // demand on the contended bands, replan the pair, and accept only if BOTH

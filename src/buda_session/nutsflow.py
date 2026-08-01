@@ -752,12 +752,15 @@ class NutsFlowMixin:
 
     def _seg_admission_pool(self, seg, g, need):
         """The DNUTS admission pool for a placed segment on grid `g` — the
-        exact `place_by_layer` arithmetic (span-clear pool over the full
-        Hanan interval, midpoint fallback when it falls short of `need`,
-        corner bounds filtering whichever pool won, no re-fallback).  Shared
-        by the doomed-seat census and the TOP re-seat heal; the dead-span
-        escalation keeps its own inline copy (its branches interleave with
-        the cull-risk tier)."""
+        exact `place_by_layer` arithmetic over the segment's SEAT (span ×
+        slide): the span-clear pool over the full slide window (stored as
+        `seg.interval_lo/hi` — the slide clipped to any hard Hanan/keepout
+        boundary, so it typically spans SEVERAL between-grid-lines Hanan
+        intervals, not one), the midpoint fallback when it falls short of
+        `need`, then the corner bounds filtering whichever pool won (no
+        re-fallback).  Shared by the doomed-seat census and the TOP re-seat
+        heal; the dead-span escalation keeps its own inline copy (its
+        branches interleave with the cull-risk tier)."""
         b_lo = max(seg.interval_lo, seg.track_lo_bound)
         b_hi = min(seg.interval_hi, seg.track_hi_bound)
         span_all = g.count_signal_tracks_in_span(
@@ -776,13 +779,14 @@ class NutsFlowMixin:
     def _report_doomed_seats(self) -> int:
         """Report-only census of SUPPLY-DOOMED SEATS (#536 option 1): placed
         segments — any layer, TOP included — whose assigned layer's real
-        signal-track supply in the PLACED window falls short of the member
-        bits by the exact DNUTS admission arithmetic (`place_by_layer`:
-        span-clear pool, midpoint fallback, corner bounds, then the
-        all-or-nothing `n_sig < bus_seg_nbits` strand).  Every such seat is
-        a static width-infeasibility: not one bit can land, knowable before
-        DNUTS runs, and distinct from a DYNAMIC reservation conflict (enough
-        tracks, but occupied — DNUTS warns about those itself).
+        signal-track supply in the SEAT (span × slide — the routing span and
+        the slide window `_seg_admission_pool` measures over) falls short of
+        the member bits by the exact DNUTS admission arithmetic
+        (`place_by_layer`: span-clear pool, midpoint fallback, corner bounds,
+        then the all-or-nothing `n_sig < bus_seg_nbits` strand).  Every such
+        seat is a static width-infeasibility: not one bit can land, knowable
+        before DNUTS runs, and distinct from a DYNAMIC reservation conflict
+        (enough tracks, but occupied — DNUTS warns about those itself).
 
         This is `_escalate_dead_low_segments`'s predicate widened to all
         layers, with no heal attached: the LOW cases are the escalation
@@ -844,8 +848,8 @@ class NutsFlowMixin:
         """Post-NUTS dead-span escalation (opt-in: `set_dead_span_escalate on`).
 
         After abstract NUTS, a LOW-layer segment whose ACTUAL placed geometry
-        (its span + Hanan interval) offers FEWER keepout-clear signal tracks
-        than the segment's MEMBER-BIT count — by the exact DetailedNUTS
+        (its seat: span × slide window) offers FEWER keepout-clear signal
+        tracks than the segment's MEMBER-BIT count — by the exact DetailedNUTS
         admission arithmetic (`place_by_layer`: span-clear pool, midpoint-
         fallback pool, then `n_sig < bus_seg_nbits` strands the WHOLE
         segment) — is a guaranteed DNUTS open: not one bit lands, because
@@ -933,7 +937,9 @@ class NutsFlowMixin:
                 g = self.routing_grid.get_layer_grid(seg.layer)
                 # The exact DNUTS admission arithmetic on the PLACED
                 # geometry (place_by_layer): the span-clear pool is built
-                # over the FULL Hanan interval and the midpoint pool
+                # over the FULL slide window (`interval_lo/hi` — the slide
+                # clipped to hard boundaries, usually several Hanan
+                # intervals wide) and the midpoint pool
                 # replaces it only when that unbounded span count falls
                 # short of the member bits; the cross-layer corner bounds
                 # (track_lo/hi_bound) then filter WHICHEVER pool won — no

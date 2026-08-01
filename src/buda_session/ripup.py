@@ -749,7 +749,7 @@ class RipupMixin:
         return verdict
 
     def _rr_candidate_order(self, w, old_tidx, stage, sites=None):
-        """Alternate-candidate trial order for one contender (wishlist-ripup
+        """Alternate-candidate trial order for one contender (wishlist-healer
         item 4 + QoR-measured class re-rank): candidates whose
         same-orientation segments sit FARTHEST from the bundle's measured
         contention sites are tried first — they are the likeliest to move the
@@ -838,7 +838,7 @@ class RipupMixin:
 
     def _rr_screen_scores(self, w, tidxs):
         """Fixed-context screen scores for one contender's index alternates
-        (RR round 3, the final lever — wishlist-ripup "fixed-context
+        (RR round 3, the final lever — wishlist-healer "fixed-context
         single-bundle placement"; batched in round 5).
 
         Per candidate: pin it, replan its layers incrementally, then place
@@ -1234,7 +1234,7 @@ class RipupMixin:
         return sites
 
     def _rr_global_pass(self, stage, metric, snap, cur, exclude):
-        """Global-occupant pass (wishlist-ripup "global-overlap re-route of
+        """Global-occupant pass (wishlist-healer "global-overlap re-route of
         NON-contended bundles" — the big2 b61 class).  Runs only when the
         normal first-improving contender scan stalls above zero: a bundle
         that appears in no overlap/open can still HOLD the contended bands,
@@ -2495,7 +2495,7 @@ class RipupMixin:
         return n
 
     def _negotiate_congestion(self, max_iter=5, use_class_moves=False):
-        """Measured-congestion negotiation (wishlist-ripup item 1).  Instead of
+        """Measured-congestion negotiation (wishlist-healer item 1).  Instead of
         guess-and-test over topology candidates, feed the ACTUAL failures back
         into the planner as demand on the exact bands where they happened
         (inject_band_demand), then re-plan the offending bundles UNPINNED

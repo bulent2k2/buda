@@ -80,12 +80,14 @@ priority view** — what's actually open right now, ranked by value/effort — s
   responsibility-boundary one).
 - **[wishlist-bundler.md](wishlist-bundler.md)** — Bundler.
   Multi-source (fan-in) topology to make CONVERGENT bundling sound.
-- **[wishlist-ripup.md](wishlist-ripup.md)** — Rip-up & re-route.
-  Rounds 1–5 all landed (incremental trials → negotiation → global-occupant
-  pass → fast trials + place-abort → fixed-context screen → batched screen;
-  warm-start re-solve shipped as a measured opt-in): bigHalf's clean 0/0
-  endpoint ~49s → ~12.4s.  Remaining levers are trigger-gated (fixed-bits
-  DNUTS, stage-b opens-proxy, warm-default flip) with the bars recorded.
+- **[wishlist-healer.md](wishlist-healer.md)** — Healers (rip-up, negotiate,
+  refine).  Rounds 1–5 all landed (incremental trials → negotiation →
+  global-occupant pass → fast trials + place-abort → fixed-context screen →
+  batched screen; warm-start re-solve shipped as a measured opt-in): bigHalf's
+  clean 0/0 endpoint ~49s → ~12.4s.  Remaining levers are trigger-gated
+  (fixed-bits DNUTS, stage-b opens-proxy, warm-default flip) with the bars
+  recorded — plus the CAPABILITY gap of class-level TRACK negotiation (the
+  #536 b61 residual).
 
 ## Cross-cutting (no subsystem file)
 

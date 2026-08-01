@@ -313,6 +313,16 @@ consider a class re-pin before ALLOW_OVERFLOW.  Same primitives (per-cell
 local replan + uniform propagate), different driver; worth a follow-up
 after the healer version proves the trial machinery.
 
+**Class-level TRACK negotiation** (added 2026-07-31, NOT built) is the
+other axis: this document's class moves re-pin a template's **topology**,
+which cannot shift the **tracks** its copies occupy — measured on the #536
+b61 residual, where all 11 classes trial without improvement while the
+locked copies keep holding the only supply-adequate layer.  The sketch
+(cell-local NUTS re-solve with the topology pinned, under §4.D's
+instance-aggregated price field, propagated class-wide) and its
+trigger-gate live in [`wishlist-healer.md`](wishlist-healer.md) →
+*"Class-level TRACK negotiation"*.
+
 ## 5. Costs
 
 - Class trial ≈ local planner (~10 ms) + fixed-cache recompute (~50 ms)
