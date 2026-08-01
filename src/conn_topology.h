@@ -94,21 +94,25 @@ struct ConnSeg {
     // its neighbour's far end can occupy, and a sum of convex piecewise-linear
     // terms is convex, so the minimizer is always a single interval.
     //
-    // pull_f_lo / pull_f_hi are the slope MAGNITUDES just outside it — the
-    // wirelength paid per unit below pull_lo / above pull_hi.  They differ when
-    // the two sides carry different numbers of couplings (three stubs below and
-    // one above costs 3/unit one way, 1/unit the other) — an asymmetry the
-    // single signed net_pull cannot express, since it conflates how-many with
-    // which-way.  Recorded now; a placer that trades pull against congestion in
-    // common units is the consumer (Phase 2).
+    // pull_f_lo / pull_f_hi are the same-side ANCHOR COUNTS just outside it —
+    // how many coupled anchors pull back below pull_lo / above pull_hi.  They
+    // are deliberately GROSS counts, NOT the marginal wirelength slope: when
+    // anchors lie on both sides of the optimum they OVERCOUNT it (point anchors
+    // at 0/10/20 → optimum {10}, true net slope 1, but this records 2), so a
+    // count is an UPPER BOUND on the true slope, never the slope itself.  The
+    // exact netting was implemented and MEASURED WORSE (see
+    // topology_analysis.cpp at the counts, and interval_pull_model.md "exact
+    // net slopes"); the counts serve as the phase-1 strongest-pull-first
+    // ORDERING signal, where "how many anchors want this move" beats the true
+    // gradient on the corpus.
     //
-    // net_pull and pull_break above are DERIVED from these (perp_pos inside the
-    // interval => 0, else the sign and the near edge), so every existing
-    // consumer keeps its semantics.
+    // net_pull and pull_break above are DERIVED from the INTERVAL (perp_pos
+    // inside => 0, else the sign and the near edge), so every existing consumer
+    // keeps its semantics; only the SIGN of net_pull carries model meaning.
     int  pull_lo   = INT_MIN;      // argmin interval, lo end
     int  pull_hi   = INT_MAX;      // argmin interval, hi end (INT_MIN..INT_MAX = flat everywhere)
-    int  pull_f_lo = 0;            // |slope| below pull_lo
-    int  pull_f_hi = 0;            // |slope| above pull_hi
+    int  pull_f_lo = 0;            // same-side anchor count below pull_lo (gross; upper-bounds the slope)
+    int  pull_f_hi = 0;            // same-side anchor count above pull_hi (gross; upper-bounds the slope)
 
     // ── Along-flex DOF (Stage C of the flexible-root re-arch) ─────────────────
     // The perp slide above moves the whole segment rigidly.  A trunk spine has a

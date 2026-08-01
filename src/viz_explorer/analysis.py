@@ -37,13 +37,15 @@ import viz_window
 def _fmt_pull_opt(cs):
     """The anchor-interval pull optimum for the segment info bar (#523/#539):
     the flat-optimum interval `[pull_lo, pull_hi]` connected wirelength is
-    minimized over, plus the |slopes| just outside it (`pull_f_lo`/`pull_f_hi`
-    — WL per unit of slide below `pull_lo` / above `pull_hi`).  The scalar
-    `pull=` shown beside it stays the DERIVED value (and may be a dogleg
-    override); this is the ConnSeg's model-computed interval.  '' when the
-    optimum is flat everywhere (INT_MIN..INT_MAX sentinel — no anchor
-    constrains the slide).  (Mirrors buda_session.reports._fmt_pull_opt, kept
-    local so the viz layer carries no dependency on the CLI session package.)"""
+    minimized over, plus the same-side ANCHOR COUNTS just outside it
+    (`pull_f_lo`/`pull_f_hi` — how many coupled anchors pull back below
+    `pull_lo` / above `pull_hi`; GROSS counts, an upper bound on the true WL
+    slope, not the slope — see interval_pull_model.md "exact net slopes").
+    '' when the optimum is flat everywhere (INT_MIN..INT_MAX sentinel — no
+    anchor constrains the slide).  The CALLER suppresses this for a
+    dogleg-overridden segment (the recomputed interval is not what NUTS used).
+    (Mirrors buda_session.reports._fmt_pull_opt, kept local so the viz layer
+    carries no dependency on the CLI session package.)"""
     lo, hi = cs.pull_lo, cs.pull_hi
     _SENT = 1_000_000_000
     lo_inf, hi_inf = lo <= -_SENT, hi >= _SENT
@@ -51,7 +53,7 @@ def _fmt_pull_opt(cs):
         return ""
     los = "-inf" if lo_inf else str(lo)
     his = "+inf" if hi_inf else str(hi)
-    return f"  opt=[{los}..{his}] f={cs.pull_f_lo}/{cs.pull_f_hi}"
+    return f"  opt=[{los}..{his}] anchors={cs.pull_f_lo}/{cs.pull_f_hi}"
 
 
 class ExplorerAnalysisMixin:
@@ -109,6 +111,20 @@ class ExplorerAnalysisMixin:
         slo = getattr(self.wrapper.plan, 'seg_slide_lo', None)
         return bool(self._show_overrides() and slo and len(slo) == self._n_segs()
                     and not math.isnan(slo[ci]))
+
+    def _pull_overridden(self, ci):
+        """True when a dogleg pin overrides this segment's pull/slide, so the
+        ConnSeg's recomputed optimum is NOT what NUTS placed with — the
+        `opt=` display must be suppressed (Codex P2 on #555).  Mirrors
+        build_nuts_maps' `slide_pinned || np_overridden` interval suppression
+        (nuts.cpp): a pinned slide window OR an overridden net_pull."""
+        if not self._show_overrides():
+            return False
+        snp = getattr(self.wrapper.plan, 'seg_net_pull', None)
+        if (snp and len(snp) == self._n_segs()
+                and snp[ci] != -2147483648):
+            return True
+        return self._is_dogleg_seg(ci)          # slide-pinned
 
 
     def _centered_perp(self, cs) -> float:
@@ -187,7 +203,8 @@ class ExplorerAnalysisMixin:
         sgs = list(dict.fromkeys(str(c.seg_idx) for c in cs.conns
                                  if c.kind == ic.SegConnKind.SEG))
         p_dir = '→hi' if pull > 0 else '→lo' if pull < 0 else 'none'
-        parts = [f"pull={p_dir}({pull}){_fmt_pull_opt(cs)}"]
+        opt = "" if self._pull_overridden(ci) else _fmt_pull_opt(cs)
+        parts = [f"pull={p_dir}({pull}){opt}"]
         if bts:
             parts.append("busterms: " + ",".join(bts))
         passt, otc = self._seg_passthru_names(cs, set(bts))

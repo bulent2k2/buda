@@ -85,9 +85,9 @@ def test_conn_dump_shows_pull_optimum_and_slopes():
         s.do_command("dump_topologies --conn")
     out = buf.getvalue()
     assert "opt=[" in out, out
-    assert "f=" in out, out
-    # The trunk seg0's flat optimum [300..500] with a multi-anchor slope.
-    assert "opt=[300..500] f=6/6" in out, out
+    assert "anchors=" in out, out
+    # The trunk seg0's flat optimum [300..500] with a 6-anchor same-side count.
+    assert "opt=[300..500] anchors=6/6" in out, out
     # Every conn-detail seg line that shows a pull also shows an optimum
     # (none of these segments is flat-everywhere).
     for line in out.splitlines():
@@ -109,7 +109,7 @@ def test_explorer_info_bar_shows_pull_optimum():
             lines.append(exp._seg_conn_line(cs, si))
     joined = "\n".join(lines)
     assert "opt=[" in joined, joined
-    assert any("opt=[300..500] f=6/6" in l for l in lines), joined
+    assert any("opt=[300..500] anchors=6/6" in l for l in lines), joined
 
 
 def test_both_formatters_agree_on_a_real_segment():
@@ -123,7 +123,39 @@ def test_both_formatters_agree_on_a_real_segment():
     cs0 = list(ct.segs())[0]          # the trunk, a bounded optimum
     fr, fe = _fmt_reports(), _fmt_explorer()
     assert fr(cs0) == fe(cs0)
-    assert fr(cs0) == "  opt=[300..500] f=6/6"
+    assert fr(cs0) == "  opt=[300..500] anchors=6/6"
+
+
+def test_conn_omits_optimum_for_dogleg_overridden_segment():
+    """When a segment carries a dogleg pull/slide override on the SELECTED
+    topology, its ConnSeg optimum is recomputed from split geometry and is
+    NOT what NUTS used (`build_nuts_maps` suppresses the interval), so
+    `--conn` must omit `opt=` for it — Codex P2 on #555.  Simulate the
+    override by pinning `plan.seg_net_pull` for one segment."""
+    s = _session()
+    w = s.bundles[0]
+    sel = w.plan.selected_topology_index
+    nseg = len(w.input.candidates[sel].segments)
+    # Pin seg0's net_pull (INT_MIN = "unset" for the rest) — the dogleg
+    # override shape build_nuts_maps keys on.
+    w.plan.seg_net_pull = [1 if i == 0 else -2147483648 for i in range(nseg)]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), buda.ostream_redirect():
+        s._dump_conn_detail(w, sel)
+    lines = [l for l in buf.getvalue().splitlines()
+             if l.strip().startswith("seg")]
+    assert lines
+    # seg0 (overridden) has no opt=; a non-overridden seg still shows it.
+    seg0 = next(l for l in lines if l.strip().startswith("seg0"))
+    assert "opt=[" not in seg0, seg0
+    assert any("opt=[" in l for l in lines if not l.strip().startswith("seg0"))
+    # An UNSELECTED candidate ignores the override array (indexed by the
+    # selected topology), so its segments keep showing opt=.
+    other = next(i for i in range(len(w.input.candidates)) if i != sel)
+    buf2 = io.StringIO()
+    with contextlib.redirect_stdout(buf2), buda.ostream_redirect():
+        s._dump_conn_detail(w, other)
+    assert "opt=[" in buf2.getvalue()
 
 
 def test_flat_everywhere_optimum_is_omitted():
@@ -159,5 +191,5 @@ def test_one_sided_infinite_optimum_is_shown():
         pull_f_lo = 0
         pull_f_hi = 6
 
-    assert fr(_HalfLo()) == "  opt=[300..+inf] f=6/0"
-    assert fr(_HalfHi()) == "  opt=[-inf..500] f=0/6"
+    assert fr(_HalfLo()) == "  opt=[300..+inf] anchors=6/0"
+    assert fr(_HalfHi()) == "  opt=[-inf..500] anchors=0/6"
