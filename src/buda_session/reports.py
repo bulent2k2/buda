@@ -25,6 +25,29 @@ cross-mixin helper calls resolve through the class as before.
 import buda
 
 
+def _fmt_pull_opt(cs):
+    """The anchor-interval pull optimum for the pull display (#523/#539): the
+    flat-optimum interval `[pull_lo, pull_hi]` the segment's connected
+    wirelength is minimized over (every position inside is WL-identical, so
+    NUTS may spend it on packing), plus the same-side ANCHOR COUNTS just
+    outside it (`pull_f_lo`/`pull_f_hi` — how many coupled anchors pull back
+    below `pull_lo` / above `pull_hi`).  Those counts are GROSS, an upper
+    bound on the true marginal WL slope, NOT the slope (the exact netting was
+    measured worse — interval_pull_model.md "exact net slopes"); they are the
+    phase-1 strongest-pull-first ORDERING signal.  `net_pull` shown beside it
+    stays the DERIVED scalar (only its SIGN carries model meaning).  Returns
+    '' when the optimum is flat everywhere (INT_MIN..INT_MAX sentinel — no
+    anchor constrains the slide, so there is nothing to show)."""
+    lo, hi = cs.pull_lo, cs.pull_hi
+    _SENT = 1_000_000_000            # well above any real coord, below INT_MAX
+    lo_inf, hi_inf = lo <= -_SENT, hi >= _SENT
+    if lo_inf and hi_inf:
+        return ""
+    los = "-inf" if lo_inf else str(lo)
+    his = "+inf" if hi_inf else str(hi)
+    return f"  opt=[{los}..{his}] anchors={cs.pull_f_lo}/{cs.pull_f_hi}"
+
+
 class _FidelityViolation:
     """Python-side violation for the net-driver fidelity check — duck-typed
     to the C++ ConnViolation interface the reporting paths consume
@@ -209,6 +232,25 @@ class ReportsMixin:
         # indexed by the selected topology's segments, so it only aligns here.
         seg_layers = (list(w.plan.seg_layers)
                       if cand_idx == w.plan.selected_topology_index else [])
+        # A dogleg pin overrides a segment's pull/slide only on the SELECTED
+        # topology (the override arrays are indexed by its segments); there
+        # the ConnSeg's recomputed optimum is not what NUTS placed with, so
+        # suppress `opt=` — mirroring build_nuts_maps' interval suppression
+        # (nuts.cpp) and the explorer's `_pull_overridden` (Codex P2 on #555).
+        is_sel = cand_idx == w.plan.selected_topology_index
+        _snp = list(getattr(w.plan, 'seg_net_pull', []) or [])
+        _sslo = list(getattr(w.plan, 'seg_slide_lo', []) or [])
+        nseg = len(topo.segments)
+
+        def _pull_overridden(i):
+            if not is_sel:
+                return False
+            if len(_snp) == nseg and _snp[i] != -2147483648:
+                return True
+            # seg_slide_lo[i] is NaN when unpinned; NaN != NaN detects a pin
+            # without importing math.
+            return len(_sslo) == nseg and _sslo[i] == _sslo[i]
+
         print(f"   conn detail — candidate {cand_idx}: {topo.type}"
               + (f"   feedthru={sorted(feedthru)}" if feedthru else ""))
         for si, cs in enumerate(segs):
@@ -222,9 +264,10 @@ class ReportsMixin:
             else:
                 slide = f"[{cs.perp_lo}..{cs.perp_hi}] = {rng}{' PINCHED' if rng == 0 else ''}"
             pull = ("→hi" if cs.net_pull > 0 else "→lo" if cs.net_pull < 0 else "none")
+            opt = "" if _pull_overridden(si) else _fmt_pull_opt(cs)
             print(f"     seg{si:<2} {orient} {lyr_s}  "
                   f"along[{cs.along_lo},{cs.along_hi}] perp={cs.perp_pos}  "
-                  f"slide={slide}  pull={pull}({cs.net_pull})")
+                  f"slide={slide}  pull={pull}({cs.net_pull}){opt}")
 
             bts, sgs, tapped = [], [], set()
             for c in cs.conns:
