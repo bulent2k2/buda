@@ -34,6 +34,7 @@ __all__ = [
     "_hover_color", "style_button",
     "_pan_axes", "_PAN_STEP", "_UNCONSTRAINED",
     "collect_candidate_bundles", "_get_nterms",
+    "snap_endpoint_extents",
 ]
 
 
@@ -527,3 +528,64 @@ def _get_nterms(topo):
     for bname in topo.bridge_segments.keys():
         names.add(bname)
     return len(names)
+
+
+def snap_endpoint_extents(along_lo, along_hi, endpoint_conns, perp):
+    """Display extents for a candidate's segments — draw.py's "Pass B".
+
+    THE one implementation of this rule.  Three renderers must agree on it —
+    matplotlib (`viz_explorer/draw.py`), the JS client
+    (`src/web/static/index.html` `computeDisplay`) and the Scala client
+    (`web/.../render/DisplayGeom.scala`) — because they draw the same topology
+    and a divergence shows up as segments meeting on one screen and detached on
+    another.  `test_web_displaygeom.py` pins the two ports against this
+    function; it used to hold its own private copy, so a change to draw.py
+    could (and did) diverge silently while the parity test stayed green.
+
+    Rule: a SEG connection whose `at_pos` sits within 1 unit of the segment's
+    `along_lo`/`along_hi` is incident to that endpoint; the endpoint is drawn at
+    the connected partner's display perp so the two visually meet.  Connections
+    that land mid-segment (a T-tap) are NOT snapped — snapping those stretched
+    a segment toward a far partner (the overextension bug: up to +1260 units on
+    the b44 demo).
+
+    Several partners can be incident to ONE endpoint, because the match carries
+    a +/-1 tolerance: a trunk whose outermost tap sits a unit from an interior
+    tap collects both at the same end.  Take the EXTREME of them — min at the
+    low end, max at the high end — so the drawn segment reaches every partner
+    that meets it there.  Assigning per match instead let whichever came LAST
+    win, and an interior partner could drag the end inside the outermost one,
+    drawing the extreme stubs detached from a trunk they are connected to
+    (issue #554).  With a single partner this is exactly that assignment, so
+    the overwhelmingly common case is unchanged.
+
+    Note this is NOT "extend-only": the extreme is taken over the incident
+    PARTNERS, never against the segment's own nominal along value, so an
+    endpoint whose partner moved inward still moves inward with it.
+
+    Args:
+        along_lo/along_hi: per-segment nominal along extents.
+        endpoint_conns:    per-segment iterable of (partner_seg_idx, at_pos)
+                           for its SEG connections.
+        perp:              per-segment display perp (slide-interval centre).
+
+    Returns:
+        (lo, hi) lists of drawn along extents.
+    """
+    n = len(perp)
+    lo = [float(v) for v in along_lo]
+    hi = [float(v) for v in along_hi]
+    for i in range(n):
+        lo_adj, hi_adj = [], []
+        for seg_idx, at_pos in endpoint_conns[i]:
+            if not (0 <= seg_idx < n):
+                continue
+            if abs(at_pos - along_lo[i]) <= 1:
+                lo_adj.append(perp[seg_idx])
+            elif abs(at_pos - along_hi[i]) <= 1:
+                hi_adj.append(perp[seg_idx])
+        if lo_adj:
+            lo[i] = min(lo_adj)
+        if hi_adj:
+            hi[i] = max(hi_adj)
+    return lo, hi

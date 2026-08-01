@@ -31,6 +31,7 @@ from matplotlib.widgets import Button
 import buda as ic
 from ui_state import ViewState              # noqa: F401
 from viz_common import *                    # noqa: F401,F403
+import viz_common as vc
 import viz_window
 
 class ExplorerDrawMixin:
@@ -553,24 +554,17 @@ class ExplorerDrawMixin:
             _draw_perp.append(dp)
             _pull_len.append(plen)
 
-        # Pass B: snap along endpoints to connected segments' display perp.
-        # Each SEG connection "at_pos" in segment i's along direction should
-        # equal one of cs.along_lo/hi; replace that endpoint with the
-        # connected segment's centered display position so segments visually meet.
-        _draw_lo = [float(cs.along_lo) for cs in cs_list]
-        _draw_hi = [float(cs.along_hi) for cs in cs_list]
-        for i, cs in enumerate(cs_list):
-            for conn in cs.conns:
-                if conn.kind != ic.SegConnKind.SEG:
-                    continue
-                adj_idx = conn.seg_idx
-                if not (0 <= adj_idx < len(cs_list)):
-                    continue
-                adj = _draw_perp[adj_idx]
-                if abs(conn.at_pos - cs.along_lo) <= 1:
-                    _draw_lo[i] = adj
-                elif abs(conn.at_pos - cs.along_hi) <= 1:
-                    _draw_hi[i] = adj
+        # Pass B: snap along endpoints to connected segments' display perp,
+        # so a segment and the partner meeting it there are drawn touching.
+        # The rule itself lives in viz_common.snap_endpoint_extents — shared
+        # with the two web renderers, which must agree with this one (see that
+        # docstring and test_web_displaygeom.py).
+        _draw_lo, _draw_hi = vc.snap_endpoint_extents(
+            [cs.along_lo for cs in cs_list],
+            [cs.along_hi for cs in cs_list],
+            [[(c.seg_idx, c.at_pos) for c in cs.conns
+              if c.kind == ic.SegConnKind.SEG] for cs in cs_list],
+            _draw_perp)
         # ──────────────────────────────────────────────────────────────────
 
         # Resolve each segment's layer once (pinned → planned → hint) and note

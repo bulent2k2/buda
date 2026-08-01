@@ -41,21 +41,31 @@ object DisplayGeom {
       val aLo = num(analysis(i), "along_lo")
       val aHi = num(analysis(i), "along_hi")
       val conns = analysis(i).conns.asInstanceOf[js.Array[js.Dynamic]]
+      // draw.py Pass B (viz_common.snap_endpoint_extents): snap ONLY a
+      // connection incident to an endpoint (at_pos within 1 unit of
+      // along_lo/hi) to the partner's display perp.  Snapping a mid-segment
+      // T-tap (no endpoint gate) stretches the line to a far partner — the
+      // overextension bug.  Several partners can be incident to ONE endpoint
+      // (the +/-1 tolerance), so take the EXTREME of them: min at the low end,
+      // max at the high end.  Doing it per match let the LAST one win and an
+      // interior tap could drag the end inside the outermost one, drawing
+      // extreme stubs detached from a trunk they are connected to (issue #554).
+      // One partner => same as replacing.  NOT extend-only: the extreme is over
+      // the incident PARTNERS, never against the segment's own along value.
+      val loAdj = scala.collection.mutable.ArrayBuffer.empty[Double]
+      val hiAdj = scala.collection.mutable.ArrayBuffer.empty[Double]
       conns.foreach { c =>
         val kind = c.kind.asInstanceOf[String]
         val j = c.seg_idx.asInstanceOf[Int]
         if (kind == "SEG" && j >= 0 && j < n) {
           val adj = perp(j)
           val at = num(c, "at_pos")
-          // draw.py Pass B: snap ONLY a connection incident to an endpoint
-          // (at_pos within 1 unit of along_lo/hi) and REPLACE that endpoint with
-          // the partner's display perp. NOT min/max — extend-only overdraws when
-          // the true endpoint moves inward, and snapping a mid-segment T-tap (no
-          // endpoint gate) stretches the line to a far partner (overextension).
-          if (math.abs(at - aLo) <= 1) alo(i) = adj
-          else if (math.abs(at - aHi) <= 1) ahi(i) = adj
+          if (math.abs(at - aLo) <= 1) loAdj += adj
+          else if (math.abs(at - aHi) <= 1) hiAdj += adj
         }
       }
+      if (loAdj.nonEmpty) alo(i) = loAdj.min
+      if (hiAdj.nonEmpty) ahi(i) = hiAdj.max
     }
     Placed(perp, alo, ahi)
   }
