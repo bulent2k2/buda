@@ -155,7 +155,11 @@ identity); v15 added `topology.source` + `bundle.gen_knobs`; v16 added
 template planning flag); v18 added `bundle.is_expanded` + `bundle.bu_locked`
 (planner-expanded / bottom-up-locked row provenance); v19 added
 **`bundle.cloned_from`** (rotation-class clone template provenance — see
-[`set_bottom_up`](#set_bottom_up)).
+[`set_bottom_up`](#set_bottom_up)); v20 added the **per-cell layer policy** —
+`cell.layer_cap` / `cell.layer_floor` (the band `[floor..cap]`, `-1` = unset)
+plus the `cell_layer_share (cell_id, layer_id, share)` table and the
+`layer_cap_default` meta key for the `*` default — see
+[`set_cell_layer_cap`](#set_cell_layer_cap).
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.
 
@@ -860,6 +864,167 @@ alignment.
 Python API: `db.translate_comp(name, dx, dy)` — translate a component and
 its whole subtree (unlike `move_comp`, which repositions only the named
 component's bbox).
+
+---
+
+### `set_cell_layer_cap`
+
+```
+set_cell_layer_cap <cell>|* <cap_layer> [-min <floor_layer>]
+set_cell_layer_cap * off
+```
+
+**Per-cell layer policy**: the cell's OWN interconnect (its cell-local
+bundles) may use layers in the band `[floor..cap]` and **nothing outside
+it**.  This is the classic hierarchical BKM — leaves stay on the low metal,
+the levels above them add the mid layers, the top level keeps the top
+layers to itself — declared per cell type instead of hoped for.  Layers are
+named or numbered (`M3` or `3`); `-min` sets the band's floor (default: no
+lower bound); `*` sets the default for cells with no policy of their own;
+`* off` clears **everything** (bands and shares), restoring byte-identical
+behavior to never having declared a policy.
+
+The band is resolved onto bundle wrappers by the **owning-frame rule**: a
+cell-local template and its expanded per-instance wrappers (and a
+rotation-class clone, via its base cell) take that cell's band; a
+cross-level bundle takes the common ancestor's.  Enforcement lives in the
+planner core's layer enumeration, so the STRICT ladder, rip-up trials,
+`negotiate_congestion`, `ripup_reroute` and `run_planner post_nuts` all
+comply.  Within an all-LOW band the highest layer per direction is promoted
+to **effective-TOP** for cost purposes only (so a capped cell's trunks are
+not taxed as if they were stubs); layer *physics* — leaf footprints as LOW
+keepouts, TOP flying over — is unchanged.
+
+Validation is LOUD at declaration: an unknown layer or cell, a floor above
+the cap, or a band containing no H or no V routing layer are hard errors.
+Bands are **persisted** (`cell.layer_cap`/`layer_floor`, schema v20; the
+`*` default in `meta.layer_cap_default`), so `open_bdb` restores them and
+`load_pipeline` re-resolves the masks — voiding, LOUDLY, any restored plan
+that a since-tightened cap outlaws.  `align_bottom_up` and
+`check_template_tracks` band-scope a capped cell's track-phase criterion to
+its band's pitches.
+
+One documented exception: an explicit `select_topology`/`edit_commit pin`
+with forced segment layers overrides the mask.  `check_design` surfaces
+every such pinned above-cap segment (and would report unpinned out-of-band
+metal LOUD, which the mask makes impossible).
+
+```
+set_cell_layer_cap leaf_cell M3          # leaves on M2/M3
+set_cell_layer_cap mid_cell  M5 -min M4  # a DISJOINT band, M4..M5 only
+```
+
+Python API: `db.set_cell_layer_band(cell, floor, cap)`,
+`db.cell_layer_band(cell)`, `db.layer_capped_cells()`, and
+`CellRow.layer_cap` / `.layer_floor` via `db.all_cells()`.
+
+---
+
+### `set_layer_caps_by_depth`
+
+```
+set_layer_caps_by_depth <cap1> [<cap2> ...] [-min <floor_layer>]
+set_layer_caps_by_depth off
+```
+
+Declare the whole policy in one line: cap every cell by **how deep its own
+content goes**, counting DEEPEST-FIRST.  `<cap1>` caps the deepest cells,
+`<cap2>` the level above them, and so on; levels past the argument list are
+**unrestricted**, so a short list fails in the right direction (the top
+keeps every layer).  Bands are cumulative — level *i* gets
+`[floor..cap_i]`, keeping the cheap low layers and *adding* what its
+argument grants.
+
+A cell's **level is intrinsic** — a property of its own subtree, not of
+where it happens to be instantiated, so a cell used at several hierarchy
+depths still has one well-defined level:
+
+| Cell | Level |
+|---|---|
+| childless, not a container | 1 |
+| childless **container** (declared to acquire children later) | 2 — one level of reserved headroom |
+| anything else | 1 + max over its child cells' levels |
+
+Container-ness comes from the design: a component marked non-leaf in the
+BDB (`import_verilog` marks every *defined* module non-leaf, childless or
+not) or a floorplan container block.  The child graph unions the
+`cell_children` cell-type edges with the elaborated component tree, so
+designs built by `add_inst_to_cell` and designs elaborated by
+`import_verilog` level identically.
+
+An explicit [`set_cell_layer_cap`](#set_cell_layer_cap) **always outranks**
+this default, in either declaration order; `set_layer_caps_by_depth off`
+clears only the by-depth entries and leaves explicit ones alone.  Each
+level's band is validated exactly as a hand-declared one (unknown layer,
+floor above a cap, and a band with no H or no V layer are hard errors); a
+cap list that *decreases* is noted, not refused.  Re-running with a
+**shorter** list frees the levels it no longer names — their bands are
+cleared from the session and the BDB, not merely reported as unrestricted.
+
+Every assigned band is persisted like a hand-declared one, and which cells
+this command owns is persisted alongside them (`meta.layer_caps_by_depth`)
+— a band alone cannot say whether it was declared explicitly or in bulk,
+and after a reload that difference is what keeps an explicit cap from being
+overwritten and lets `off` find the bands to clear.  The level assignment
+is reported:
+
+```
+set_layer_caps_by_depth M3 M5
+  [LayerCaps] level 1 -> band [lowest..M3]: 144 cell(s): big2__blk_00, …
+  [LayerCaps] level 2 -> band [lowest..M5]: 2 cell(s): big2, mix2
+  [LayerCaps] level 3+ unrestricted: 1 cell(s): top
+```
+
+Python API: `db.cell_child_edges()` returns the `(parent_cell, child_cell)`
+edges the levels are computed from.
+
+---
+
+### `set_cell_layer_share`
+
+```
+set_cell_layer_share <cell> <layer> <pct>
+```
+
+**Fractional layer share**: the cell's own interconnect may use at most
+`pct`% of `<layer>`'s signal tracks.  A share overrides the band in either
+direction — thin a layer *inside* the band, or lease a bounded slice
+*above* the cap.  The second is the wiring-limited escape valve: a cell
+whose band is genuinely too tight can be given, say, 75% of the next layer
+up instead of the whole thing.  `pct 100` removes the share (explicit full
+use).
+
+The share is realized per tier.  Cell-local solves see a **derived thinned
+view** — the first `floor(share × n_signal)` SIGNAL slots of each period
+are kept (same origin and pitch, so track phase and `align_bottom_up` are
+untouched) plus a layer-stack clone whose bit pitch prices the leased slice
+honestly.  Globally-planned bundles get `share × capacity` plus a **scalar
+collective budget**: one counter per (cell-instance, layer) enforced inside
+the planner's layer enumeration, so a cell's several bundles cannot
+together exceed the lease and the choice steers to an in-band alternative
+rather than escalating past it.
+
+The share is a **budget on the cell, never a reservation against the
+parent**: a child using 12% of its 30% slice leaves the other 88% to the
+levels above, which see the full grid minus the child's actual placed
+routing.
+
+Validation is LOUD: an unknown layer or cell, a layer with no
+`def_track_pattern` (the thinning needs the period), and a share that
+floors to **zero** kept slots are hard errors — the last names the minimum
+meaningful share for that pattern.  Shares are persisted
+(`cell_layer_share`, schema v20) and cleared by `set_cell_layer_cap * off`.
+
+```
+set_cell_layer_cap   dnuts1 M3        # band stops at M3 …
+set_cell_layer_share dnuts1 M4 75     # … but lease 75% of M4 above it
+set_cell_layer_share dnuts1 M5 75
+```
+
+Python API: `db.set_cell_layer_share(cell, layer_id, share)`,
+`db.cell_layer_shares(cell)`, `db.layer_share_cells()`.
+
+Design notes and the measured study: `docs/internal/hier_layer_caps.md`.
 
 ---
 

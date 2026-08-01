@@ -432,6 +432,7 @@ void bind_db(py::module_& m) {
              py::arg("cell"), py::arg("layer_id"), py::arg("share"))
         .def("cell_layer_shares", &BDB::cell_layer_shares, py::arg("cell"))
         .def("layer_share_cells", &BDB::layer_share_cells)
+        .def("cell_child_edges", &BDB::cell_child_edges)
         .def("add_inst",        &BDB::add_inst,
              py::arg("inst_name"), py::arg("cell_name"), py::arg("parent_name"),
              py::arg("x"), py::arg("y"))

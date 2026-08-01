@@ -422,6 +422,23 @@ def _resolve_layer_id(session, tok):
         else None
 
 
+def _band_missing_dir(session, floor, cap):
+    """"H"/"V" if the band [floor..cap] grants no routing layer of that
+    direction (an unroutable policy — a corner no ladder can escape), else
+    None.  floor < 0 = no lower bound."""
+    lo = floor if floor >= 0 else -(10 ** 9)
+    have = {buda.LayerDir.HORIZONTAL: False, buda.LayerDir.VERTICAL: False}
+    for d in have:
+        for lid in session.layers.get_layer_ids_by_dir(d):
+            if lo <= lid <= cap:
+                have[d] = True
+    if not have[buda.LayerDir.HORIZONTAL]:
+        return "H"
+    if not have[buda.LayerDir.VERTICAL]:
+        return "V"
+    return None
+
+
 def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
     # set_cell_layer_cap <cell>|* <cap_layer> [-min <floor_layer>]  |  * off
     # Per-cell layer policy, binary band form (docs/internal/hier_layer_caps.md,
@@ -441,6 +458,7 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
         ns = len(getattr(session, "_cell_layer_shares", {}) or {})
         session._cell_layer_policy = {}
         session._cell_layer_policy_restored = set()
+        session._cell_layer_policy_by_depth = set()
         session._cell_layer_shares = {}
         session._cell_layer_shares_restored = set()
         if session.bdb is not None:
@@ -452,6 +470,7 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
                 for lid, _s in session.bdb.cell_layer_shares(c):
                     session.bdb.set_cell_layer_share(c, lid, 0.0)
             session.bdb.meta_set("layer_cap_default", "")
+            session.bdb.meta_set("layer_caps_by_depth", "")
         print(f"[LayerCap] cleared {n} polic{'y' if n == 1 else 'ies'}"
               + (f" + {ns} share(s)" if ns else "")
               + " (byte-identical to no caps; re-run the planner to lift "
@@ -482,14 +501,8 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
                   f"cap {args[1]} — the band [floor..cap] is empty"); return
     # The band must grant at least one H and one V routing layer, or nothing
     # in it is routable (a corner no ladder can escape).
-    lo = floor if floor >= 0 else -(10 ** 9)
-    have = {buda.LayerDir.HORIZONTAL: False, buda.LayerDir.VERTICAL: False}
-    for d in have:
-        for lid in session.layers.get_layer_ids_by_dir(d):
-            if lo <= lid <= cap:
-                have[d] = True
-    if not (have[buda.LayerDir.HORIZONTAL] and have[buda.LayerDir.VERTICAL]):
-        missing = "H" if not have[buda.LayerDir.HORIZONTAL] else "V"
+    missing = _band_missing_dir(session, floor, cap)
+    if missing:
         print(f"Error: set_cell_layer_cap: band grants no {missing} routing "
               f"layer — an unroutable policy"); return
     # Cell must exist when a BDB is open (mirrors set_bottom_up); '*' always ok.
@@ -504,7 +517,12 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
     # BDB switch, unlike an entry a restore added (see
     # _restore_layer_policies).
     getattr(session, "_cell_layer_policy_restored", set()).discard(cell)
+    # ... and it outranks a by-depth default, now and on a later re-run of
+    # set_layer_caps_by_depth (Phase 5 Q1: explicit always wins) — including
+    # after a reload, hence the persisted provenance memo.
+    getattr(session, "_cell_layer_policy_by_depth", set()).discard(cell)
     if session.bdb is not None:
+        _persist_by_depth(session)
         # Write-through (v20): the policy is a design attribute — persist it
         # so a resumed session (open_bdb / load_pipeline) plans under the
         # same bands.  '*' lives in meta; a cell not yet in the cell table
@@ -520,6 +538,167 @@ def cmd_set_cell_layer_cap(session, cmd, args, cmd_line):
     band = (f"[{rest[1] if floor >= 0 else 'lowest'}..{args[1]}]")
     print(f"[LayerCap] {cell}: band {band} "
           f"(ids {'%d' % floor if floor >= 0 else 'min'}..{cap})")
+
+
+def _persist_by_depth(session):
+    """Write the by-depth PROVENANCE memo into the open BDB's meta.
+
+    A persisted `cell.layer_cap` alone cannot say whether it came from an
+    explicit `set_cell_layer_cap` or from the bulk `set_layer_caps_by_depth`
+    — and after a reload that difference decides both precedence (explicit
+    always outranks) and what `set_layer_caps_by_depth off` may clear.  So
+    the set of by-depth cells rides in meta beside `layer_cap_default`
+    (Codex #551); `_restore_layer_policies` reads it back.  Cells with no
+    band are dropped, so the memo can never resurrect a cleared entry."""
+    if session.bdb is None:
+        return
+    pol = getattr(session, "_cell_layer_policy", None) or {}
+    cells = sorted(c for c in getattr(session, "_cell_layer_policy_by_depth",
+                                      set()) if c in pol)
+    session.bdb.meta_set("layer_caps_by_depth", ",".join(cells))
+
+
+def cmd_set_layer_caps_by_depth(session, cmd, args, cmd_line):
+    # set_layer_caps_by_depth <cap1> [<cap2> ...] [-min <floor>]  |  off
+    # Bulk per-cell bands from the hierarchy, counting DEEPEST-FIRST over
+    # INTRINSIC cell levels (docs/internal/hier_layer_caps.md §13 Phase 5 Q1;
+    # levels computed by BudaSession._cell_levels): level i gets the band
+    # [floor..cap_i], so <cap1> caps the deepest leaves, <cap2> the level
+    # above them, and so on.  Bands are CUMULATIVE — each level keeps the
+    # cheap LOW layers and ADDS the metal its argument grants (disjoint bands
+    # stay expressible per-cell via set_cell_layer_cap -min).  Levels past the
+    # argument list are UNRESTRICTED, so a short list fails in the right
+    # direction (the top keeps everything).  An explicit set_cell_layer_cap
+    # ALWAYS outranks this default; 'off' clears only the by-depth entries.
+    if session.bdb is None:
+        print("Error: set_layer_caps_by_depth requires an open BDB "
+              "(open_bdb first)"); return
+    if not args:
+        print("Error: set_layer_caps_by_depth requires <cap1> [<cap2> ...] "
+              "[-min <floor_layer>] (or 'off')"); return
+    pol = getattr(session, "_cell_layer_policy", None)
+    if pol is None:
+        pol = session._cell_layer_policy = {}
+    by_depth = getattr(session, "_cell_layer_policy_by_depth", None)
+    if by_depth is None:
+        by_depth = session._cell_layer_policy_by_depth = set()
+
+    if args[0].lower() == "off":
+        cleared = sorted(c for c in by_depth if c in pol)
+        for c in cleared:
+            del pol[c]
+            try:
+                session.bdb.set_cell_layer_band(c, -1, -1)
+            except RuntimeError:
+                pass
+        by_depth.clear()
+        _persist_by_depth(session)
+        print(f"[LayerCaps] cleared {len(cleared)} by-depth polic"
+              f"{'y' if len(cleared) == 1 else 'ies'}"
+              + (f": {', '.join(cleared)}" if cleared else "")
+              + " (explicit set_cell_layer_cap entries untouched; re-run the "
+                "planner to lift masks already applied)")
+        return
+
+    toks = list(args)
+    floor, floor_tok = -1, None
+    if "-min" in toks:
+        i = toks.index("-min")
+        if i + 1 >= len(toks):
+            print("Error: set_layer_caps_by_depth: -min needs a floor layer")
+            return
+        floor_tok = toks[i + 1]
+        floor = _resolve_layer_id(session, floor_tok)
+        if floor is None:
+            print(f"Error: set_layer_caps_by_depth: unknown floor layer "
+                  f"'{floor_tok}'"); return
+        del toks[i:i + 2]
+    if not toks:
+        print("Error: set_layer_caps_by_depth requires at least one cap layer")
+        return
+    caps = []
+    for lvl, tok in enumerate(toks, 1):
+        cap = _resolve_layer_id(session, tok)
+        if cap is None:
+            print(f"Error: set_layer_caps_by_depth: unknown layer '{tok}' "
+                  f"(declare it with def_layer first)"); return
+        if floor >= 0 and floor > cap:
+            print(f"Error: set_layer_caps_by_depth: level {lvl}'s cap {tok} "
+                  f"is below the floor {floor_tok} — the band is empty")
+            return
+        missing = _band_missing_dir(session, floor, cap)
+        if missing:
+            print(f"Error: set_layer_caps_by_depth: level {lvl}'s band "
+                  f"[{floor_tok or 'lowest'}..{tok}] grants no {missing} "
+                  f"routing layer — an unroutable policy"); return
+        caps.append((tok, cap))
+    ids = [c for _t, c in caps]
+    if any(ids[i] > ids[i + 1] for i in range(len(ids) - 1)):
+        print("[LayerCaps] note: caps are not non-decreasing — a level is "
+              "capped BELOW the level under it (deepest-first order; "
+              "intended?)")
+
+    levels, _containers = session._cell_levels()
+    if not levels:
+        print("[LayerCaps] no cells in the open BDB — nothing to cap"); return
+    per_level, kept_explicit, unrestricted, no_row = {}, [], [], []
+    freed = []
+    for cell in sorted(levels):
+        lvl = levels[cell]
+        # An entry this command owns is by-depth; ANY other entry (typed this
+        # session OR restored from the BDB, where a persisted band can only
+        # have come from an explicit set_cell_layer_cap unless this command
+        # recorded it — see the by-depth meta memo) is explicit and wins.
+        is_explicit = cell in pol and cell not in by_depth
+        if lvl > len(caps):
+            unrestricted.append(cell)
+            # A SHORTENED cap list must actually free the levels it no longer
+            # names: without this the stale band survives in the session, in
+            # by_depth and in the BDB while the report claims unrestricted.
+            if cell in by_depth:
+                pol.pop(cell, None)
+                by_depth.discard(cell)
+                try:
+                    session.bdb.set_cell_layer_band(cell, -1, -1)
+                except RuntimeError:
+                    pass
+                freed.append(cell)
+            continue
+        if is_explicit:
+            kept_explicit.append(cell)          # explicit declaration wins
+            continue
+        cap = caps[lvl - 1][1]
+        pol[cell] = (floor, cap)
+        by_depth.add(cell)
+        getattr(session, "_cell_layer_policy_restored", set()).discard(cell)
+        try:
+            session.bdb.set_cell_layer_band(cell, floor, cap)
+        except RuntimeError:
+            no_row.append(cell)                 # session-only (no cell row)
+        per_level.setdefault(lvl, []).append(cell)
+    _persist_by_depth(session)
+
+    lo_s = floor_tok or "lowest"
+    for lvl in sorted(per_level):
+        cells = per_level[lvl]
+        shown = ", ".join(cells[:6]) + ("" if len(cells) <= 6
+                                        else f" (+{len(cells) - 6} more)")
+        print(f"[LayerCaps] level {lvl} -> band [{lo_s}..{caps[lvl - 1][0]}]: "
+              f"{len(cells)} cell(s): {shown}")
+    if unrestricted:
+        shown = ", ".join(unrestricted[:6]) + (
+            "" if len(unrestricted) <= 6 else f" (+{len(unrestricted) - 6} more)")
+        print(f"[LayerCaps] level {len(caps) + 1}+ unrestricted: "
+              f"{len(unrestricted)} cell(s): {shown}"
+              + (f" ({len(freed)} freed by the shorter list: "
+                 f"{', '.join(freed)})" if freed else ""))
+    if kept_explicit:
+        print(f"[LayerCaps] kept {len(kept_explicit)} explicit polic"
+              f"{'y' if len(kept_explicit) == 1 else 'ies'} "
+              f"(set_cell_layer_cap wins): {', '.join(kept_explicit)}")
+    if no_row:
+        print(f"[LayerCaps] note: {len(no_row)} cell(s) have no cell-table row "
+              f"— policy kept for this session only: {', '.join(no_row)}")
 
 
 def cmd_set_cell_layer_share(session, cmd, args, cmd_line):
@@ -808,5 +987,6 @@ COMMANDS = {
     "set_bottom_up": cmd_set_bottom_up,
     "set_cell_layer_cap": cmd_set_cell_layer_cap,
     "set_cell_layer_share": cmd_set_cell_layer_share,
+    "set_layer_caps_by_depth": cmd_set_layer_caps_by_depth,
     "align_bottom_up": cmd_align_bottom_up,
 }

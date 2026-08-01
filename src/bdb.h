@@ -404,6 +404,13 @@ public:
     void set_cell_layer_share(const std::string& cell, int layer_id, double share);
     std::vector<std::pair<int,double>> cell_layer_shares(const std::string& cell) const;
     std::vector<std::string> layer_share_cells() const;
+    // The cell-type child graph as (parent_cell, child_cell) edges, sorted and
+    // de-duplicated (one edge per distinct pair however many instances).  The
+    // structural source for intrinsic cell LEVELS (set_layer_caps_by_depth,
+    // docs/internal/hier_layer_caps.md §13 Phase 5 Q1); a design elaborated
+    // straight into component rows (import_verilog) has no cell_children rows,
+    // so callers union this with the component tree.
+    std::vector<std::pair<std::string,std::string>> cell_child_edges() const;
 
     // ── Cell-level pins (port interface) ──────────────────────────────────
     // Define or update a port on a cell type.  px/py are offsets from the
