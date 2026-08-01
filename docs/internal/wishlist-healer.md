@@ -743,10 +743,22 @@ snapshot surface.  Two cheaper angles should be exhausted first:
 when choosing a phase, so the geometry never forms) and simply accepting
 the residual as the documented price of strict template uniformity.
 
-**Trigger to build:** the doomed-seat census (now on by default in
-`check_design`) reporting this shape — a doomed seat whose only
-supply-adequate sibling layer is held by locked copies — on **more than one
-vehicle**, or a design where it costs more than a handful of bits.  The
-census is exactly the instrument that will say so: it separates these from
-the LOW-layer class the escalation family already heals, and from DNUTS's
-dynamic reservation conflicts.
+**Trigger to build:** a doomed **TOP** seat surviving the re-seat heal on
+**more than one vehicle**, or a design where it costs more than a handful of
+bits.  The doomed-seat census (now on by default in `check_design`) is the
+**coarse** detector: it names every under-supplied seat and separates the
+TOP class from the LOW class the escalation family heals and from DNUTS's
+dynamic reservation conflicts — but it stops there.  It does **not**
+distinguish this specific shape (an adequate sibling layer held by locked
+copies) from a doomed seat with no adequate layer anywhere: `_report_doomed_seats`
+only evaluates each *unlocked* wrapper's *assigned* layer — it never
+examines sibling-layer supply or locked-copy occupancy (both were
+established by hand for b61: the M4 census + who holds its tracks).  So the
+census surfaces the *candidates* (a TOP seat the re-seat heal could not
+place), and confirming any one is THIS shape — versus genuinely
+layer-starved — needs a **separate forensic check**: for the seat's
+same-direction TOP siblings, does one have span-clear supply ≥ member bits,
+and is that supply consumed by `hier.locked` copies?  That per-seat audit
+(a natural `check_design` extension, or a one-off probe) is the real
+build-decision instrument; the census is only what points it at the right
+seats.

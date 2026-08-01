@@ -125,8 +125,11 @@ designs and fail LOUD, never silent:)*
    bits on one vehicle whose *unaligned* twin lands 0/0/0 — `align_bottom_up`
    creates this geometry, so **alignment-aware planning** (and simply
    accepting the uniformity price) are the cheaper angles to exhaust first.
-   **Trigger to build:** the doomed-seat census reporting this shape on more
-   than one vehicle, or at a cost beyond a handful of bits.
+   **Trigger to build:** a doomed TOP seat surviving the re-seat heal on more
+   than one vehicle, or at a cost beyond a handful of bits.  The census flags
+   the *candidate* seats (coarse); confirming any is THIS shape (adequate
+   sibling layer held by locked copies, vs layer-starved) needs a separate
+   per-seat forensic check — see the wishlist entry.
 7. **OA bridge (import/export)** — [`wishlist-bdb.md`](wishlist-bdb.md) →
    *"Persist the routing pipeline into the BDB"* (the export consumer) and
    `gds_oa_interchange.md`. Everything BDB-side is ✅ (persist stages 1–5,
