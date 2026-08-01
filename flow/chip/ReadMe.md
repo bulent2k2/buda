@@ -45,37 +45,59 @@ which helps this vehicle: topdown overlaps 452→255, bottomup unplaced
 total 391s→148s.  The original 2026-07-30 baseline: topdown 452/3341/163
 at 391s, bottomup 527/2610/136 at 187s.)
 
-Two more top layers — M8/M9 (2026-08-01)
+Top-layer count study — 6 → 8 → 10 layers (2026-08-01)
 ===
-`chip_tracks.buda` grew from six layers to eight (M8 H TOP / M9 V TOP,
-3-wide signal wires on 8-wide power rails, 57.14% overhead each).  All
-seven chip flows improved, several substantially:
+`chip_tracks.buda` was extended twice: first to eight layers (M8 H / M9 V
+TOP, 3-wide wires on 8-wide rails, 57.14% overhead), then to ten (M10 H /
+M11 V TOP, 4-wide wires on 10-wide rails, 56.76%).  Each pair is coarser
+than the one below, as real top metal is — which is exactly what makes the
+second extension behave differently from the first.
 
-| Flow | 6 layers (ov/unpl/viol) | 8 layers | abstract WL |
+| Flow | 6 layers (ov/unpl/viol) | 8 layers | 10 layers |
 |---|---|---|---|
-| chip_topdown | 266 / 3307 / 159 | **164 / 2227 / 120** | −5.4% |
-| chip_topdown_aligned | — | 206 / 1914 / 113 | — |
-| chip_bottomup | 482 / 2205 / 105 | **397 / 1921 / 107** | −2.0% |
-| chip_bottomup_caps | 458 / 3131 / 126 | **442 / 2996 / 116** | −1.1% |
-| chip3_topdown | 121 / 1731 / 133 | **88 / 1687 / 123** | −3.2% |
-| chip3_bottomup | — | 365 / 1623 / 93 | — |
-| chip3a_bottomup | 447 / 2269 / 103 | **354 / 1698 / 84** | −2.2% |
+| chip_topdown | 266 / 3307 / 159 | **164 / 2227 / 120** | 188 / 2170 / 112 |
+| chip_topdown_aligned | — | 206 / 1914 / 113 | 193 / 2027 / 112 |
+| chip_bottomup | 482 / 2205 / 105 | **397 / 1921 / 107** | **353 / 1604 / 91** |
+| chip_bottomup_caps | 458 / 3131 / 126 | **442 / 2996 / 116** | 424 / 3192 / 124 |
+| chip3_topdown | 121 / 1731 / 133 | **88 / 1687 / 123** | **63 / 1639 / 118** |
+| chip3_bottomup | — | 365 / 1623 / 93 | **311 / 1544 / 87** |
+| chip3a_bottomup | 447 / 2269 / 103 | **354 / 1698 / 84** | 297 / 1658 / 90 |
 
-The new layers are genuinely used, not decoration: `chip_bottomup` puts
-4.2M + 5.1M detailed WL on M8/M9 (~20% of its total metal), and the extra
-supply is what removes the stranded bits — the same congestion that was
-overflowing six layers now spreads over eight.  Planner runtime drops with
-it (total sweep 849s → 654s, −23%) because fewer bundles have to grind
-through the escalation ladder.
+**6 → 8 was a clean win**: 5 better / 0 worse, every flow improving on all
+three metrics, abstract WL −1..−5%, and the sweep 23% faster because fewer
+bundles grind through the escalation ladder.  The layers carry real
+traffic — `chip_bottomup` put ~20% of its metal on M8/M9.
 
-Under `chip_bottomup_caps`'s `set_layer_caps_by_depth M3 M5`, the extra
-layers land where the policy says they should — entirely at the top level:
+**8 → 10 is the diminishing-returns knee**: 5 better / 2 worse.  The cause
+is the per-bit cost of coarse metal.  Each pair's channel cost per bit is
+`unit_pitch / n_signal_slots`:
 
-| context | M6 | M7 | M8 | M9 |
-|---|---|---|---|---|
-| big2 (capped) | 0 | 0 | **0** | **0** |
-| TOP-LEVEL (capped run) | 2,514,146 | 2,669,859 | **2,169,721** | **2,223,914** |
-| big2 (uncapped run) | 5,263,851 | 5,104,846 | **2,888,334** | **3,391,496** |
+| layers | M4/M5 | M6 | M7 | M8/M9 | M10/M11 |
+|---|---|---|---|---|---|
+| per-bit | 2.25 | 3.00 | 5.00 | 7.00 | **9.25** |
+
+A 16-bit bus needs 148 units of M11 where it needs 78 on M7.  So the top
+pair adds *width* but poor *bit density*, and whether that helps depends on
+where the design is actually short of supply.
+
+`chip_bottomup_caps` is the clearest case, and it gets **worse** (unplaced
+2996 → 3192).  Its `set_layer_caps_by_depth M3 M5` puts every cell template
+in [M2..M5], so the constraint is at the BOTTOM of the stack — the new top
+layers cannot relieve it.  All they do is spread the top-level buses over
+coarser metal: top-level upper-layer WL is 9,577,640 at eight layers and
+9,557,597 at ten, i.e. the same metal on more, thinner-value layers.
+
+| context | M6 | M7 | M8 | M9 | M10 | M11 |
+|---|---|---|---|---|---|---|
+| big2 (capped) | 0 | 0 | **0** | **0** | **0** | **0** |
+| TOP-LEVEL (capped) | 2,109,534 | 2,163,575 | 1,436,982 | 1,504,546 | 1,134,130 | 1,208,830 |
+
+The uncapped flows keep improving because their cell templates *can* use
+the new layers — `chip_bottomup` is the best flow at ten layers
+(353/1604/91).  The lesson for the vehicle: **more top layers help a design
+whose congestion is at the top, and do nothing for one capped at the
+bottom.**  If a capped vehicle needs relief, widen its band (or lease a
+share) rather than adding metal above its ceiling.
 
 The pipeline profile at this scale: bundling 0.95s → 640 hbundles (100
 top-bus + 540 cell-level), generation ~12s → 16792 candidates, and the

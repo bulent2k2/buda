@@ -489,22 +489,35 @@ The top level's M6/M7 **exactly doubles** (4.26M → 8.51M) when the cell
 templates stop competing for it.  `mix2` behaves identically (M6/M7 423282
 + 386919 → 0).
 
-The vehicle's stack has since grown to **8 layers** (M8/M9 added
-2026-08-01, `flow/chip/ReadMe.md`), and the conclusion is unchanged and
-sharper — the capped run keeps every one of the four upper layers for the
-top level:
+The vehicle's stack has since grown to **10 layers** (M8/M9 then M10/M11,
+2026-08-01 — `flow/chip/ReadMe.md`).  The separation conclusion is
+unchanged and sharper at every stack size: the capped run keeps **every**
+upper layer for the top level, whatever their number.  At ten layers:
 
-| context | M6 | M7 | M8 | M9 |
-|---|---|---|---|---|
-| big2 (uncapped) | 5263851 | 5104846 | **2888334** | **3391496** |
-| TOP-LEVEL (uncapped run) | 2229213 | 2050624 | **1218366** | **1543568** |
-| big2 (capped) | 0 | 0 | **0** | **0** |
-| TOP-LEVEL (capped run) | 2514146 | 2669859 | **2169721** | **2223914** |
+| context | M6 | M7 | M8 | M9 | M10 | M11 |
+|---|---|---|---|---|---|---|
+| big2 (capped) | 0 | 0 | **0** | **0** | **0** | **0** |
+| TOP-LEVEL (capped) | 2109534 | 2163575 | 1436982 | 1504546 | 1134130 | 1208830 |
 
-Top-level upper metal 7.04M → 9.58M (+36%) with the cell templates evicted
-from all four layers.  Endpoints on the 8-layer stack: uncapped
-397/1921/107, capped 442/2996/116 — the same shape of trade as §12.2, on a
-stack where both runs are less supply-starved.
+Endpoints per stack size — uncapped `chip_bottomup` vs capped
+`chip_bottomup_caps`:
+
+| stack | uncapped | capped |
+|---|---|---|
+| 6 layers | 485/2207 | 458/3131 |
+| 8 layers | 397/1921 | 442/2996 |
+| 10 layers | **353/1604** | 424/**3192** |
+
+The trade keeps its §12.2 shape, and the stack sweep adds a result worth
+recording: **extra top layers do not relieve a cell capped at the bottom of
+the stack.**  Going 8 → 10 improves the uncapped flow (1921 → 1604
+unplaced) but makes the capped one *worse* (2996 → 3192), because
+`set_layer_caps_by_depth M3 M5` confines every cell template to [M2..M5]
+— where the shortage actually is — while the new pair only spreads the
+top-level buses over coarser, less bit-dense metal (top-level upper WL
+9.578M at 8 layers, 9.558M at 10: the same metal, more layers).  The
+remedy for a supply-starved capped cell is a wider band or a
+`set_cell_layer_share` lease, not more metal above its ceiling.
 
 ### 12.2 What it costs
 
@@ -516,8 +529,8 @@ stack where both runs are less supply-starved.
 | `chip_bottomup` | none | 485 | 2207 | 2547 viol / 106 bundles | 135.3s |
 | `chip_bottomup_caps` | by-depth `M3 M5` | 458 | 3131 | 3943 viol / 126 bundles | 130.1s |
 
-(The two chip rows are the 6-layer stack the study was run on; on the
-8-layer stack they read 397/1921 and 442/2996.)
+(The two chip rows are the 6-layer stack the study was run on; see the
+per-stack-size table in §12.1 for the 8- and 10-layer readings.)
 
 The healed mix2 vehicles all reach a clean endpoint; the healerless chip
 vehicle pays for the policy in stranded bits (2207 → 3131) and detailed WL
