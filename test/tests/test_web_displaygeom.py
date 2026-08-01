@@ -25,6 +25,7 @@ test pins the authoritative behaviour: snap ONLY an endpoint-incident connection
 and REPLACE the endpoint with the partner's display perp.
 """
 import buda_cli
+from viz_common import snap_endpoint_extents
 from web import serialize
 
 B44 = [
@@ -47,25 +48,24 @@ def _perp(analysis):
 
 
 def _draw_pass_b(analysis):
-    """The authoritative display geometry (draw.py Pass B) — the SAME algorithm
-    the two web clients must implement: gate on an endpoint-incident SEG conn
-    (at_pos within 1 unit of along_lo/hi) and REPLACE that endpoint with the
-    partner's display perp.  Keep in sync with index.html/DisplayGeom.scala."""
-    lo = [a["along_lo"] for a in analysis]
-    hi = [a["along_hi"] for a in analysis]
+    """The authoritative display geometry, obtained by CALLING the one
+    implementation (viz_common.snap_endpoint_extents) that
+    src/viz_explorer/draw.py Pass B uses — not by re-implementing it.
+
+    This function used to hold its own copy of the rule.  That made the parity
+    test structurally unable to do its job: when draw.py's Pass B changed
+    (issue #554, taking the extreme partner when several are incident to one
+    endpoint) this test kept passing against its stale copy while the two web
+    ports silently diverged from the renderer they exist to mirror.  Delegating
+    means a change to the rule now shows up here as a real port mismatch.
+    """
     perp = _perp(analysis)
-    for i, a in enumerate(analysis):
-        for c in a["conns"]:
-            if c["kind"] != "SEG":
-                continue
-            j = c["seg_idx"]
-            if not (0 <= j < len(analysis)):
-                continue
-            if abs(c["at_pos"] - a["along_lo"]) <= 1:
-                lo[i] = perp[j]
-            elif abs(c["at_pos"] - a["along_hi"]) <= 1:
-                hi[i] = perp[j]
-    return lo, hi
+    return snap_endpoint_extents(
+        [a["along_lo"] for a in analysis],
+        [a["along_hi"] for a in analysis],
+        [[(c["seg_idx"], c["at_pos"]) for c in a["conns"] if c["kind"] == "SEG"]
+         for a in analysis],
+        perp)
 
 
 def _b44_candidates():
@@ -104,7 +104,14 @@ def test_display_geom_pins_known_b44_extents():
     cand#18 seg1 drew [700,2830] (buggy) vs [700,1570] (correct); cand#6 seg2
     drew [1200,2700] vs [1200,1960]."""
     cands = _b44_candidates()
-    expected = {(18, 1): (700, 1570), (6, 2): (1200, 1960)}
+    # (18,1) and (6,2) are the original overextension pins — each has a SINGLE
+    # endpoint-incident partner, so they pin the "snap to the partner" half of
+    # the rule.  (22,0) is the only b44 segment with TWO partners incident to
+    # one endpoint, so it is the only one that pins the "take the extreme"
+    # half (issue #554): under the old per-match assignment its hi end drew at
+    # 2960, detaching the partner sitting at 3810.  Without this row the ports
+    # could revert to last-match-wins and this suite would stay green.
+    expected = {(18, 1): (700, 1570), (6, 2): (1200, 1960), (22, 0): (2700, 3810)}
     for (ci, si), (elo, ehi) in expected.items():
         lo, hi = _draw_pass_b(cands[ci - 1]["analysis"])
         assert abs(lo[si] - elo) <= 1 and abs(hi[si] - ehi) <= 1, (

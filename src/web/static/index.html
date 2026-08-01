@@ -485,17 +485,26 @@ function computeDisplay(analysis) {
   const alo = analysis.map(a => a.along_lo);
   const ahi = analysis.map(a => a.along_hi);
   analysis.forEach((a, i) => {
+    // draw.py Pass B (viz_common.snap_endpoint_extents): snap ONLY a connection
+    // incident to an endpoint (at_pos within 1 unit of along_lo/hi) to the
+    // partner's display perp. Snapping a mid-segment T-tap (no endpoint gate)
+    // stretches the line to a far partner — the overextension bug.
+    // Several partners can be incident to ONE endpoint (the +/-1 tolerance), so
+    // take the EXTREME of them: min at the low end, max at the high end. Doing
+    // it per match let the LAST one win and an interior tap could drag the end
+    // inside the outermost one, drawing extreme stubs detached from a trunk
+    // they are connected to (issue #554). One partner => same as replacing.
+    // NOT extend-only: the extreme is over the incident PARTNERS, never against
+    // the segment's own along value, so an endpoint follows a partner inward.
+    const loAdj = [], hiAdj = [];
     for (const c of a.conns) {
       if (c.kind !== "SEG" || c.seg_idx < 0 || c.seg_idx >= perp.length) continue;
       const adj = perp[c.seg_idx];                // partner's display perp
-      // draw.py Pass B: snap ONLY a connection incident to an endpoint (at_pos
-      // within 1 unit of along_lo/hi) and REPLACE that endpoint with the
-      // partner's display perp. NOT min/max — extend-only overdraws a segment
-      // whose true endpoint moves inward, and snapping a mid-segment T-tap (no
-      // endpoint gate) stretches the line to a far partner (overextension bug).
-      if (Math.abs(c.at_pos - a.along_lo) <= 1) alo[i] = adj;
-      else if (Math.abs(c.at_pos - a.along_hi) <= 1) ahi[i] = adj;
+      if (Math.abs(c.at_pos - a.along_lo) <= 1) loAdj.push(adj);
+      else if (Math.abs(c.at_pos - a.along_hi) <= 1) hiAdj.push(adj);
     }
+    if (loAdj.length) alo[i] = Math.min(...loAdj);
+    if (hiAdj.length) ahi[i] = Math.max(...hiAdj);
   });
   return {perp, alo, ahi};
 }
