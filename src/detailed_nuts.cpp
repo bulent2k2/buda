@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -234,6 +235,30 @@ void DetailedNUTSEngine::cull_keepout_crossers(DetailedNUTSResult& result) const
 void DetailedNUTSEngine::place_by_layer(
         const std::vector<BusSegment>& bus_segs,
         DetailedNUTSResult& result, int abort_unplaced) const {
+    // PROTOTYPE (opt-in, BUDA_DNUTS_PAIR_ALIGN): pairwise-overlap seating.
+    // Two same-net stubs that straddle a trunk (u3/l3 in the seat repro)
+    // align — share one x-track, one via — only when the FIRST-placed one's
+    // tracks fall inside the SECOND's window.  The ordered-anchor placer
+    // seats each stub at its OWN abstract_pos, so a stub whose window
+    // extends past its partner (l3, seated left of the overlap) lands out of
+    // reach and the pair splits (extra trunk tracks + doubled vias).  With
+    // the flag: (A) restrict the stub's track pool to the interval overlap it
+    // shares with same-bundle same-width partners (+clamp the anchor in), and
+    // (B) proactively adopt a placed partner's exact tracks when fully usable.
+    // Byte-identical when off (env unset).
+    //
+    // MEASURED NET-NEGATIVE (2026-08-01, 37-flow corpus): 0 better / 7 worse
+    // / 30 unchanged.  It aligns the seat-repro right column (u3/l3 share one
+    // track window, detailed WL -1.5% on that clean case) but on CONGESTED
+    // designs the pool restriction concentrates same-net stubs into the
+    // overlap band and STARVES signal tracks there — every worse flow strands
+    // MORE bits (big.buda 0/0/0 -> 0/8/1; mix2_fast_on_aligned_sql unplaced
+    // 16 -> 68; the four chip flows +8..12% unplaced), while corpus WL barely
+    // moves (-0.04%).  The dual of the documented concentration loss
+    // (interval_pull_model.md "The spreader, resolved").  Kept OFF — an
+    // opt-in study knob only; do NOT default-enable.
+    static const bool kPairAlign =
+        std::getenv("BUDA_DNUTS_PAIR_ALIGN") != nullptr;
     // Sound early abort (RR fast trials): checked after every unplaced
     // increment via this helper — see run()'s header comment.
     auto over_budget = [&]() {
@@ -481,6 +506,48 @@ void DetailedNUTSEngine::place_by_layer(
             // span-follow) and net_names[bit_index] stay consistent.
             const int  bw = bus_seg_nbits(bs);
 
+            // Lever A (BUDA_DNUTS_PAIR_ALIGN): bias the perp anchor into the
+            // interval overlap this stub shares with same-bundle same-width
+            // partners on this layer, so a stub whose window extends past its
+            // partner is seated where the partner can adopt its tracks.  The
+            // band is the intersection of this segment's interval with every
+            // overlapping such partner's; clamp abstract_pos into it.  When
+            // off, eff_anchor == abstract_pos (the sort below is unchanged).
+            double eff_anchor = bs.abstract_pos;
+            double eff_band_lo = -std::numeric_limits<double>::infinity();
+            double eff_band_hi =  std::numeric_limits<double>::infinity();
+            if (kPairAlign && use_anchor && !bs.timing_critical) {
+                double band_lo = bs.interval_lo, band_hi = bs.interval_hi;
+                for (int oidx : indices) {
+                    if (oidx == idx) continue;
+                    const BusSegment& os = bus_segs[oidx];
+                    if (os.bundle_id != bs.bundle_id) continue;
+                    if (bus_seg_nbits(os) != bw) continue;
+                    if (os.interval_lo < bs.interval_hi &&
+                        os.interval_hi > bs.interval_lo) {
+                        band_lo = std::max(band_lo, os.interval_lo);
+                        band_hi = std::min(band_hi, os.interval_hi);
+                    }
+                }
+                // Only when a partner actually NARROWED the interval: restrict
+                // this stub's track pool to the overlap band and clamp the
+                // anchor into it.  Nudging the anchor alone is too weak — the
+                // bw tracks spread ~±half-window around it, so a stub seated at
+                // the band's near edge still spills its far tracks outside the
+                // partner's window (l3: seated at 601, tracks reach 589).
+                // Restricting the POOL keeps every chosen track in the band, so
+                // the whole window is adoptable.  Falls back to the full pool
+                // if the band cannot hold bw tracks (the restriction is applied
+                // in choose(), which counts availability).
+                if ((band_lo > bs.interval_lo || band_hi < bs.interval_hi) &&
+                    band_lo <= band_hi) {
+                    eff_band_lo = band_lo;
+                    eff_band_hi = band_hi;
+                    eff_anchor = std::min(std::max(bs.abstract_pos, band_lo),
+                                          band_hi);
+                }
+            }
+
             // The GLOBAL bit that rides ascending-track rank i of this
             // segment (mirrors the emission mapping below: rank -> local bit
             // via bit_order, local -> global via bit_list).
@@ -503,6 +570,20 @@ void DetailedNUTSEngine::place_by_layer(
                     for (int k = 0; k < n_sig; ++k)
                         if (!reserved_has(resv, track_key(signal_tracks[k].first)))
                             avail.push_back(k);
+
+                    // Lever A pool restriction: keep only in-band tracks when
+                    // the pair-align band holds enough of them (else fall back
+                    // to the full pool — never strand a stub to force a share).
+                    if (eff_band_lo > -std::numeric_limits<double>::infinity()) {
+                        std::vector<int> inband;
+                        inband.reserve(avail.size());
+                        for (int k : avail)
+                            if (signal_tracks[k].first >= eff_band_lo &&
+                                signal_tracks[k].first <= eff_band_hi)
+                                inband.push_back(k);
+                        if ((int)inband.size() >= bw)
+                            avail.swap(inband);
+                    }
 
                     if ((int)avail.size() < bw) {
                         std::cout << "[DetailedNUTS] Warning: Layer " << layer
@@ -527,8 +608,10 @@ void DetailedNUTSEngine::place_by_layer(
                     std::sort(avail.begin(), avail.end(), [&](int a, int b) {
                         const bool ca = is_clear(a), cb = is_clear(b);
                         if (ca != cb) return ca;
-                        return std::abs(signal_tracks[a].first - bs.abstract_pos) <
-                               std::abs(signal_tracks[b].first - bs.abstract_pos);
+                        // eff_anchor == abstract_pos unless pair-align biased
+                        // it into a same-bundle interval overlap (lever A).
+                        return std::abs(signal_tracks[a].first - eff_anchor) <
+                               std::abs(signal_tracks[b].first - eff_anchor);
                     });
 
                     // Take the bw closest; sort them by track index (= by position).
@@ -596,40 +679,80 @@ void DetailedNUTSEngine::place_by_layer(
                 continue;
             }
 
+            // conflicted(): does any pick land a DIFFERENT bit (net) of this
+            // bundle on a track a span-interacting sibling already holds — the
+            // BIT_SHORT hazard.  Hoisted here (was local to the conflict
+            // repair) so lever B can gate on it too; unchanged otherwise.
+            auto conflicted = [&](const std::vector<int>& picks) {
+                for (int i = 0; i < (int)picks.size(); ++i) {
+                    // track_key near-identity (see the helper above): a
+                    // fixed-bit copy's position may differ from this run's
+                    // enumeration by ~1 ulp — an exact `==` would miss the
+                    // conflict, and so would bucket equality on a half-quantum
+                    // boundary.  track_positions is sorted ascending and
+                    // track_key is monotone, so a key-space lower_bound at
+                    // tk-1 finds the first candidate; walk while keys stay
+                    // within tk+1 (at most one real track fits — spacing ≫
+                    // quanta).
+                    const long long tk =
+                        track_key(signal_tracks[picks[i]].first);
+                    const int bit = bit_on_rank(i);
+                    for (const LayerAssignment* H : hazards) {
+                        auto lb = std::lower_bound(
+                            H->track_positions.begin(),
+                            H->track_positions.end(), tk - 1,
+                            [](double p, long long k) {
+                                return track_key(p) < k;
+                            });
+                        for (; lb != H->track_positions.end() &&
+                               track_key(*lb) <= tk + 1; ++lb)
+                            if (H->bits_on_track[lb - H->track_positions.begin()] != bit)
+                                return true;
+                    }
+                }
+                return false;
+            };
+
+            // Lever B (BUDA_DNUTS_PAIR_ALIGN): PROACTIVE via-min alignment.
+            // The conflict-driven repair below aligns only to AVOID a short;
+            // it leaves a merely-suboptimal split pair (u3/l3) unaligned.
+            // When the natural choice does NOT short, still adopt a placed
+            // same-bundle partner's exact track list if it is bit-compatible
+            // and fully usable in this segment's pool — turning a partial
+            // overlap into a shared straight wire (one via, not two).  Uses
+            // the same adopt test as the conflict repair; runs only under the
+            // flag, so the default path is untouched.
+            if (kPairAlign && !hazards.empty() && use_anchor
+                    && !bs.timing_critical && !conflicted(chosen_indices)) {
+                std::map<long long, int> pos_to_idx;
+                for (int k = 0; k < n_sig; ++k)
+                    pos_to_idx[track_key(signal_tracks[k].first)] = k;
+                for (const LayerAssignment* A : hazards) {
+                    if ((int)A->track_positions.size() != bw) continue;
+                    bool ok = true;
+                    std::vector<int> idxs;
+                    idxs.reserve(bw);
+                    for (int i = 0; i < bw; ++i) {
+                        if (A->bits_on_track[i] != bit_on_rank(i)) {
+                            ok = false; break;
+                        }
+                        const long long ak = track_key(A->track_positions[i]);
+                        auto pit = pos_to_idx.lower_bound(ak - 1);
+                        if (pit == pos_to_idx.end() ||
+                            !track_key_near(pit->first, ak) ||
+                            reserved_has(reserved, ak)) { ok = false; break; }
+                        idxs.push_back(pit->second);
+                    }
+                    if (ok && conflicted(idxs)) ok = false;   // vs OTHER hazards
+                    if (ok) { chosen_indices = std::move(idxs); break; }
+                }
+            }
+
             // Same-bundle hazard resolution (see the hazards comment above):
             // intervene ONLY when the natural choice actually conflicts —
             // some chosen track already carries a DIFFERENT bit (a different
             // net) of this bundle on a span-interacting sibling.
             if (!hazards.empty()) {
-                auto conflicted = [&](const std::vector<int>& picks) {
-                    for (int i = 0; i < (int)picks.size(); ++i) {
-                        // track_key near-identity (see the helper above): a
-                        // fixed-bit copy's position may differ from this
-                        // run's enumeration by ~1 ulp — an exact `==` would
-                        // miss the conflict, and so would bucket equality
-                        // on a half-quantum boundary.  track_positions is
-                        // sorted ascending and track_key is monotone, so a
-                        // key-space lower_bound at tk-1 finds the first
-                        // candidate; walk while keys stay within tk+1
-                        // (at most one real track fits — spacing ≫ quanta).
-                        const long long tk =
-                            track_key(signal_tracks[picks[i]].first);
-                        const int bit = bit_on_rank(i);
-                        for (const LayerAssignment* H : hazards) {
-                            auto lb = std::lower_bound(
-                                H->track_positions.begin(),
-                                H->track_positions.end(), tk - 1,
-                                [](double p, long long k) {
-                                    return track_key(p) < k;
-                                });
-                            for (; lb != H->track_positions.end() &&
-                                   track_key(*lb) <= tk + 1; ++lb)
-                                if (H->bits_on_track[lb - H->track_positions.begin()] != bit)
-                                    return true;
-                        }
-                    }
-                    return false;
-                };
                 if (conflicted(chosen_indices)) {
                     // First repair — ALIGN: adopt a hazard sibling's exact
                     // track list when the per-bit mapping matches (same
