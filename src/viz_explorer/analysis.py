@@ -33,6 +33,27 @@ from ui_state import ViewState              # noqa: F401
 from viz_common import *                    # noqa: F401,F403
 import viz_window
 
+
+def _fmt_pull_opt(cs):
+    """The anchor-interval pull optimum for the segment info bar (#523/#539):
+    the flat-optimum interval `[pull_lo, pull_hi]` connected wirelength is
+    minimized over, plus the |slopes| just outside it (`pull_f_lo`/`pull_f_hi`
+    — WL per unit of slide below `pull_lo` / above `pull_hi`).  The scalar
+    `pull=` shown beside it stays the DERIVED value (and may be a dogleg
+    override); this is the ConnSeg's model-computed interval.  '' when the
+    optimum is flat everywhere (INT_MIN..INT_MAX sentinel — no anchor
+    constrains the slide).  (Mirrors buda_session.reports._fmt_pull_opt, kept
+    local so the viz layer carries no dependency on the CLI session package.)"""
+    lo, hi = cs.pull_lo, cs.pull_hi
+    _SENT = 1_000_000_000
+    lo_inf, hi_inf = lo <= -_SENT, hi >= _SENT
+    if lo_inf and hi_inf:
+        return ""
+    los = "-inf" if lo_inf else str(lo)
+    his = "+inf" if hi_inf else str(hi)
+    return f"  opt=[{los}..{his}] f={cs.pull_f_lo}/{cs.pull_f_hi}"
+
+
 class ExplorerAnalysisMixin:
 
     # ------------------------------------------------------------------
@@ -166,7 +187,7 @@ class ExplorerAnalysisMixin:
         sgs = list(dict.fromkeys(str(c.seg_idx) for c in cs.conns
                                  if c.kind == ic.SegConnKind.SEG))
         p_dir = '→hi' if pull > 0 else '→lo' if pull < 0 else 'none'
-        parts = [f"pull={p_dir}({pull})"]
+        parts = [f"pull={p_dir}({pull}){_fmt_pull_opt(cs)}"]
         if bts:
             parts.append("busterms: " + ",".join(bts))
         passt, otc = self._seg_passthru_names(cs, set(bts))

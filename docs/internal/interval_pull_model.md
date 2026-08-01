@@ -42,6 +42,19 @@ argmin is a single interval:
   placement preference, the tug detector, `--conn`, `charge_pull_target`,
   ripup — keeps its semantics.
 
+The two **inspection displays** surface the interval alongside the derived
+scalar (they showed only the scalar until the model's display pass): both
+`dump_topologies --conn` and the Topology Explorer segment info bar append
+`opt=[pull_lo..pull_hi] f=pull_f_lo/pull_f_hi` to the `pull=<dir>(net_pull)`
+field — omitted only when the optimum is flat everywhere (the
+`INT_MIN..INT_MAX` sentinel, no anchor constraining the slide). A symmetric
+star where every stub already sits WL-flat reads `pull=none(0)` on the
+scalar yet shows real wide optima (e.g. a mid-channel trunk's
+`opt=[300..500] f=6/6`) — the whole point of the display, since the scalar
+alone hid it. Formatter: `_fmt_pull_opt` (kept as independent copies in
+`buda_session/reports.py` and `viz_explorer/analysis.py` so the viz layer
+carries no dependency on the CLI session package; a test pins them equal).
+
 `net_pull`'s magnitude is now the **slope**: a dogleg sub-trunk with two
 same-side anchors honestly reports 2 (one unit of gain per anchor per unit of
 slide), which is what the phase-1 strongest-pull-first ordering should rank by.

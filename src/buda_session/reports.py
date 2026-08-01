@@ -25,6 +25,26 @@ cross-mixin helper calls resolve through the class as before.
 import buda
 
 
+def _fmt_pull_opt(cs):
+    """The anchor-interval pull optimum for the pull display (#523/#539): the
+    flat-optimum interval `[pull_lo, pull_hi]` the segment's connected
+    wirelength is minimized over (every position inside is WL-identical, so
+    NUTS may spend it on packing), plus the |slopes| just outside it
+    (`pull_f_lo`/`pull_f_hi` — WL paid per unit of slide below `pull_lo` /
+    above `pull_hi`).  `net_pull`/`pull_break` shown beside it stay the
+    DERIVED scalar (sign × slope toward the interval).  Returns '' when the
+    optimum is flat everywhere (INT_MIN..INT_MAX sentinel — no anchor
+    constrains the slide, so there is nothing to show)."""
+    lo, hi = cs.pull_lo, cs.pull_hi
+    _SENT = 1_000_000_000            # well above any real coord, below INT_MAX
+    lo_inf, hi_inf = lo <= -_SENT, hi >= _SENT
+    if lo_inf and hi_inf:
+        return ""
+    los = "-inf" if lo_inf else str(lo)
+    his = "+inf" if hi_inf else str(hi)
+    return f"  opt=[{los}..{his}] f={cs.pull_f_lo}/{cs.pull_f_hi}"
+
+
 class _FidelityViolation:
     """Python-side violation for the net-driver fidelity check — duck-typed
     to the C++ ConnViolation interface the reporting paths consume
@@ -224,7 +244,8 @@ class ReportsMixin:
             pull = ("→hi" if cs.net_pull > 0 else "→lo" if cs.net_pull < 0 else "none")
             print(f"     seg{si:<2} {orient} {lyr_s}  "
                   f"along[{cs.along_lo},{cs.along_hi}] perp={cs.perp_pos}  "
-                  f"slide={slide}  pull={pull}({cs.net_pull})")
+                  f"slide={slide}  pull={pull}({cs.net_pull})"
+                  f"{_fmt_pull_opt(cs)}")
 
             bts, sgs, tapped = [], [], set()
             for c in cs.conns:
