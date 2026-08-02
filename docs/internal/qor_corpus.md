@@ -136,6 +136,43 @@ trends, not absolute values, are the result. Harness:
 - **Runtime** is dominated by the `both`-healer flows (`mix`-family 15–28s,
   `bigHalf` ~8s); every healer-less flow finishes in ≤4.2s.
 
+## Measuring a per-flow COST — what this corpus cannot do
+
+`qor_corpus.py` prints runtime as **informational, never a gate** ("single-run
+and noisy") — and that caveat is load-bearing, not boilerplate.  A corpus
+wall-time delta cannot resolve a per-flow cost of a few percent or less.  Use
+it to spot a 2× blow-up; do NOT use it as evidence for or against a small
+one.
+
+**The worked example (2026-08-02, the pair-align default-flip).**  The
+measured-accept alignment heal adds one extra DNUTS solve per eligible flow.
+A single heal-on/heal-off corpus run put that at **+3.3% wall** (1270s →
+1312s), and that number was reported as the cost bar.  It was noise.  The
+corpus contains 6 bottom-up vehicles whose `hier.locked` bundles make the
+heal return BEFORE solving — they cannot pay the cost at all — and they moved
+**+4.2%**, MORE than the 31 flows that actually pay (+2.5%).  The warm
+microbenchmark put the true cost at **0.05–2.1% of flow wall**, an order of
+magnitude below what the corpus run "showed", and it changed the verdict's
+basis (the flip is refused for lack of benefit, not for cost).
+
+**Two techniques that catch this — both cheap:**
+
+1. **Look for an accidental control group.**  Is there a subset of flows the
+   change provably CANNOT affect (feature-gated off, scoped out, a different
+   code path)?  Measure it alongside.  If the control moves as much as the
+   treated set, the delta is host noise and the experiment has answered
+   nothing.  The gate conditions in a heal's early-return are usually a
+   ready-made control group, free of charge.
+2. **Microbenchmark the specific operation, warm, best-of-N**, then express it
+   as a fraction of the flow's wall time.  A `time.perf_counter()` loop around
+   the one call under test (5 reps, take the min) resolves milliseconds that a
+   whole-flow run buries under process start-up, I/O and scheduler jitter.
+
+The same discipline applies to the WL columns for small deltas, and is why
+both diffs print "informational … not a guard".  The QoR metrics
+(overlaps/unplaced/viol_bundles) ARE deterministic per host and remain the
+gate.
+
 See also: [`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md),
 [`healer_effectiveness_2026-07.md`](healer_effectiveness_2026-07.md), and
 [`gentopo_loci_multitrunk_2026-07.md`](gentopo_loci_multitrunk_2026-07.md) (same

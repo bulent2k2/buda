@@ -393,7 +393,16 @@ def _rank(r, keys):
 
 def _runtime_report(paired):
     """Informational runtime diff (single-run and noisy, so NOT part of the
-    pass/fail guard): total corpus wall-clock plus the largest per-flow movers."""
+    pass/fail guard): total corpus wall-clock plus the largest per-flow movers.
+
+    This CANNOT resolve a per-flow cost of a few percent or less — it is for
+    spotting a blow-up, not for costing a small change.  A measured case:
+    a heal adding one DNUTS solve per flow "showed" +3.3% here while the
+    flows that PROVABLY could not run it (gated out) moved +4.2%, i.e. pure
+    host noise; the warm microbenchmark put the real cost 10x lower.  Before
+    citing a small delta from this line, read "Measuring a per-flow COST" in
+    docs/internal/qor_corpus.md — it gives the two checks (an accidental
+    control group; a warm best-of-N microbenchmark) that catch it."""
     timed = [(f, b, m) for f, b, m in paired
              if isinstance(b.get("sec"), (int, float))
              and isinstance(m.get("sec"), (int, float))]
