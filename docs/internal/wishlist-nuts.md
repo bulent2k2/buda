@@ -554,12 +554,16 @@ recorded, not a promise):
 
 1. a corpus vehicle (or a real design) where the heal ACCEPTS on more than
    one bundle and moves detailed WL by ≥0.5%, and
-2. the accepted-solve cost measured as a fraction of `run_detailed_nuts` on
-   the flows where it is a no-op — the honest price of default-on is the
-   REJECTED solves, not the accepted ones.  A cheap pre-check (does any
-   same-bundle same-width pair have a non-degenerate interval overlap whose
-   current placement is NOT already shared?) would make the no-op path free
-   and is the natural prerequisite to any flip.
+2. the **REJECTED** (extra) pair-align solve cost, measured as a fraction of
+   `run_detailed_nuts` on the flows where the heal is a no-op.  That is the
+   population to measure by construction: acceptance requires a strict WL
+   drop, so on a no-op flow the candidate solve is always rejected — its
+   whole cost is pure overhead, and it is what every flow would pay under a
+   default-on.  (An accepted solve pays for itself; it is not the bar.)  A
+   cheap pre-check (does any same-bundle same-width pair have a
+   non-degenerate interval overlap whose current placement is NOT already
+   shared?) would skip that solve entirely, making the no-op path free — the
+   natural prerequisite to any flip.
 
 Until then it stays opt-in: safe by construction, and the accept means a
 flow that turns it on can never be made worse.
