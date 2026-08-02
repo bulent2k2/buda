@@ -47,11 +47,19 @@ Usage:
                      (default 0 = off; --layout stacked only).  Q is the LCM of
                      the track pitches of the layers the cells may use — the
                      caller knows the technology, this tool does not.
-  --align-tops       shift each column UP as a rigid block so every column's
-                     top edge is flush with the tallest one (--layout stacked
-                     only).  Shifting a WHOLE column leaves its intra-column
-                     pitches untouched, so --grid alignment survives; shifting
-                     only the top instances would not.
+  --column-align bottom|top|center
+                     where a column sits in the die (--layout stacked only).
+                     `bottom` (default) starts every column at y=0; `top` makes
+                     every column's top edge flush with the tallest; `center`
+                     splits a column's slack equally above and below, which is
+                     what makes the layout mirror-symmetric about the die
+                     centreline.  Columns move as RIGID blocks, so intra-column
+                     pitches — and therefore --grid alignment — are untouched;
+                     moving individual instances would break them.
+  --mirror-upper     flip every instance whose centre is above the die
+                     centreline upside down (--layout stacked only), so the
+                     upper half is the exact mirror image of the lower half,
+                     contents included.  Combine with --column-align center.
   --optimize sa|ga   place the top cell's instances in 2D (SA or GA) to
                      shorten the cross-instance top buses (default: row layout).
   --param KEY=VALUE  optimizer knob (repeatable). Values accept k/m suffixes
@@ -797,7 +805,7 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
           cell_nets=True, busterms=True, optimize=None, opt_params=None,
           bloat=None, n_instances=2, n_buses=7, align_occurrences=False,
           nest_bdb_cells=False, layout="row", channel=_GAP, grid=0.0,
-          align_tops=False):
+          column_align="bottom", mirror_upper=False):
     rng = random.Random(seed)
     # Leaf .buda files carry full pipeline/tech commands buda2bdb doesn't read;
     # silence its per-line "ignored command" warnings while defining cells.
@@ -858,22 +866,27 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
                       f"(cell {h:.0f} + channel {pitch - h:.0f})"
                       + (f", on a {grid:g} grid" if grid > 0 else ""))
         top_w = max(x_cursor - channel, 1.0)
-        if align_tops:
-            # Shift each column UP as a rigid block so every column's top edge
-            # is flush with the tallest one.  A whole-column shift leaves every
-            # intra-column delta-y untouched, so the on-grid phase survives —
-            # which shifting only the top instances would not (the gap to the
-            # tallest column is not generally a multiple of --grid).
+        if column_align != "bottom":
+            # Shift each column as a RIGID block: `top` makes every column's
+            # top edge flush with the tallest, `center` splits a column's slack
+            # equally above and below (which is what makes the whole layout
+            # mirror-symmetric about the die centreline).  A whole-column shift
+            # leaves every intra-column delta-y untouched, so the on-grid phase
+            # survives — shifting individual instances would not, since the
+            # slack is not generally a multiple of --grid.
             for name, _w, h, _b, _n, _c in cells:
                 col = [p for p in placements if p["cell"] == name]
                 col_top = max(p["y"] for p in col) + h
-                dy = top_h - col_top
+                slack = top_h - col_top
+                dy = slack if column_align == "top" else slack / 2.0
                 if dy <= 0:
                     continue
                 for p in col:
                     p["y"] += dy
-                print(f"  align {name:14s} column shifted up {dy:.0f} "
-                      f"(top edge flush at {top_h:.0f}"
+                where = ("top edge flush at %.0f" % top_h
+                         if column_align == "top"
+                         else "centred: %.0f margin above and below" % dy)
+                print(f"  align {name:14s} column shifted up {dy:.0f} ({where}"
                       + (f"; delta-y unchanged, still {grid:g}-aligned)"
                          if grid > 0 else ")"))
     else:
@@ -933,6 +946,22 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
     db.add_inst(top_inst, top_cell, "", 0.0, 0.0)
     print(f"  top  {top_cell:16s} {top_w:6.0f} x {top_h:6.0f}  "
           f"({len(placements)} instances)")
+
+    # 5b. Optional mirror: flip every instance whose centre is above the die
+    #     centreline about its own horizontal axis, so the upper half becomes
+    #     the exact mirror image of the lower half — contents included, not
+    #     just outlines.  Runs after materialization (flip_comp rewrites the
+    #     whole subtree) and before busterm derivation, which reads geometry.
+    if mirror_upper:
+        yc = top_h / 2.0
+        flipped = []
+        for p in placements:
+            h = cell_meta[p["cell"]][1]
+            if p["y"] + h / 2.0 > yc:
+                db.flip_comp(f"{top_inst}/{p['inst']}", False)
+                flipped.append(p["inst"])
+        print(f"  mirror {len(flipped)} instance(s) above y={yc:.0f} flipped "
+              f"upside down: {', '.join(flipped)}")
 
     # 6. Replicate each cell's internal buses into every instance so the hier
     #    flow plans them together (and templates the two instances per cell).
@@ -1067,7 +1096,8 @@ def main():
     layout = "row"
     channel = _GAP
     grid = 0.0
-    align_tops = False
+    column_align = "bottom"
+    mirror_upper = False
     i = 0
     pos = []
     while i < len(argv):
@@ -1095,8 +1125,13 @@ def main():
             channel = float(argv[i + 1]); i += 2
         elif argv[i] in ("--grid", "-grid") and i + 1 < len(argv):
             grid = float(argv[i + 1]); i += 2
-        elif argv[i] in ("--align-tops", "-align-tops"):
-            align_tops = True; i += 1
+        elif argv[i] in ("--column-align", "-column-align") and i + 1 < len(argv):
+            column_align = argv[i + 1].lower()
+            if column_align not in ("bottom", "top", "center"):
+                sys.exit("Error: --column-align must be bottom|top|center")
+            i += 2
+        elif argv[i] in ("--mirror-upper", "-mirror-upper"):
+            mirror_upper = True; i += 1
         elif argv[i] == "--no-cell-nets":
             cell_nets = False; i += 1
         elif argv[i] == "--no-busterms":
@@ -1119,9 +1154,11 @@ def main():
     if layout == "stacked" and optimize:
         sys.exit("Error: --layout stacked places instances explicitly on grid; "
                  "--optimize would move them off it (drop one or the other)")
-    if align_tops and layout != "stacked":
-        sys.exit("Error: --align-tops applies to --layout stacked (there is "
+    if column_align != "bottom" and layout != "stacked":
+        sys.exit("Error: --column-align applies to --layout stacked (there is "
                  "one row to align in the row layout)")
+    if mirror_upper and layout != "stacked":
+        sys.exit("Error: --mirror-upper applies to --layout stacked")
     if grid > 0 and layout != "stacked":
         sys.exit("Error: --grid applies to --layout stacked (the row layout "
                  "puts every instance on y=0)")
@@ -1148,7 +1185,7 @@ def main():
           bloat=bloat, n_instances=n_instances, n_buses=n_buses,
           align_occurrences=align_occurrences, nest_bdb_cells=nest_bdb_cells,
           layout=layout, channel=channel, grid=grid,
-          align_tops=align_tops)
+          column_align=column_align, mirror_upper=mirror_upper)
 
 
 if __name__ == "__main__":

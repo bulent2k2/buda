@@ -687,15 +687,15 @@ def test_row_layout_is_the_default_and_unchanged(tmp_path):
     assert all(c.y1 == 0.0 for c in _depth1(db).values())
 
 
-def test_align_tops_flushes_columns_without_breaking_the_grid(tmp_path):
-    """--align-tops shifts each column up as a RIGID block: the tops go flush
-    and every intra-column pitch is untouched, so --grid alignment survives.
-    (Shifting only the topmost instances would break it — the gap to the
-    tallest column is not generally a multiple of the grid.)"""
+def test_column_align_top_flushes_without_breaking_the_grid(tmp_path):
+    """--column-align top shifts each column up as a RIGID block: the tops go
+    flush and every intra-column pitch is untouched, so --grid alignment
+    survives.  (Shifting only the topmost instances would break it — the gap
+    to the tallest column is not generally a multiple of the grid.)"""
     path = str(tmp_path / "flush.bdb")
     build_hier_demo.build(path, _CELLS, seed=1, n_instances=3, n_buses=2,
                           layout="stacked", channel=100.0, grid=48.0,
-                          align_tops=True)
+                          column_align="top")
     db = buda_db.BDB(path)
     by_cell = {}
     for c in _depth1(db).values():
@@ -710,7 +710,46 @@ def test_align_tops_flushes_columns_without_breaking_the_grid(tmp_path):
     assert len(tops) == 1, tops                             # all columns flush
 
 
-def test_align_tops_is_off_by_default(tmp_path):
+def test_column_align_center_is_symmetric_and_on_grid(tmp_path):
+    """--column-align center splits each column's slack equally above and
+    below — the placement half of mirror symmetry — again as a rigid shift, so
+    the grid survives."""
+    path = str(tmp_path / "centred.bdb")
+    build_hier_demo.build(path, _CELLS, seed=1, n_instances=3, n_buses=2,
+                          layout="stacked", channel=100.0, grid=48.0,
+                          column_align="center")
+    db = buda_db.BDB(path)
+    comps = db.all_components()
+    H = [c for c in comps if c.depth == 0][0].y2
+    by_cell = {}
+    for c in _depth1(db).values():
+        by_cell.setdefault(c.cell, []).append(c)
+    for cell, insts in by_cell.items():
+        insts.sort(key=lambda c: c.y1)
+        assert abs(insts[0].y1 - (H - insts[-1].y2)) < 1e-6, cell   # symmetric
+        pitches = [insts[i + 1].y1 - insts[i].y1 for i in range(len(insts) - 1)]
+        assert pitches[0] % 48.0 == 0, (cell, pitches[0])           # grid kept
+
+
+def test_mirror_upper_reflects_every_block(tmp_path):
+    """--mirror-upper flips the instances above the centreline, so the whole
+    leaf-block set maps exactly onto its own reflection."""
+    path = str(tmp_path / "mirror.bdb")
+    build_hier_demo.build(path, _CELLS, seed=1, n_instances=2, n_buses=2,
+                          layout="stacked", channel=100.0, grid=48.0,
+                          column_align="center", mirror_upper=True)
+    db = buda_db.BDB(path)
+    comps = db.all_components()
+    H = [c for c in comps if c.depth == 0][0].y2
+    leaves = [c for c in comps if c.depth == 2]
+    assert leaves
+    S = {(round(c.x1, 3), round(c.y1, 3), round(c.x2, 3), round(c.y2, 3))
+         for c in leaves}
+    M = {(x1, round(H - y2, 3), x2, round(H - y1, 3)) for x1, y1, x2, y2 in S}
+    assert S == M
+
+
+def test_column_align_is_bottom_by_default(tmp_path):
     """Without it, columns are bottom-aligned at y=0 as before."""
     path = str(tmp_path / "noflush.bdb")
     build_hier_demo.build(path, _CELLS, seed=1, n_instances=2, n_buses=0,

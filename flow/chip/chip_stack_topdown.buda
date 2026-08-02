@@ -8,7 +8,7 @@
 # Design (see chip_stack_bottomup.buda for the full note on the 504 grid):
 #   LEFT  column  x=[0..6100]      2 x big2, pitch 7560  (multiple of 504)
 #   RIGHT column  x=[7100..9430]   4 x mix2, pitch 3528  (multiple of 504),
-#                                  shifted up 916 so both columns are top-flush
+#                                  centred (458 margins); upper half mirrored
 #   die 9430 x 13860, 100 top-level cross-hierarchy buses, 11750 nets
 source chip_tracks.buda
 open_bdb chip_stack.bdb.sql

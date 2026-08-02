@@ -5,16 +5,23 @@
 #   LEFT  column  x=[0..6100]      2 x big2, pitch 7560  (cell 6300 + ch 1260)
 #                                  y = 0, 7560
 #   RIGHT column  x=[7100..9430]   4 x mix2, pitch 3528  (cell 2360 + ch 1168)
-#                                  y = 916, 4444, 7972, 11500
+#                                  y = 458, 3986, 7514, 11042
 #   die 9430 x 13860, 100 top-level cross-hierarchy buses, 11750 nets
 #
-# TOP-FLUSH COLUMNS.  The mix2 column is shifted up 916 as a RIGID BLOCK so its
-# top edge meets big2's at 13860.  A whole-column shift leaves every intra-
-# column delta-y at 3528 = 7x504, so the phase survives — shifting only the top
-# instances would not (916 is not a multiple of 504).  Measured: it is worth
-# doing, bottom-up 64/364/37 -> 24/288/32 and top-down 61/1170/65 -> 26/755/54,
-# because the columns now span the die together instead of the right one
-# trailing off 916 short.
+# MIRROR-SYMMETRIC, ON GRID.  Columns are CENTRED (--column-align center: mix2
+# gets 458 margin top and bottom, which is forced — zero margins are
+# arithmetically impossible when the channels must be ≡160 mod 504) and the
+# three instances above y=6930 are FLIPPED upside down (--mirror-upper), so all
+# 488 leaf blocks map exactly onto their reflections about the centreline.
+#
+# The mirror costs the track phase, and that is structural, not a tuning miss:
+# a flipped instance needs 2*y1 + h ≡ d (mod p) on every H layer, and M2/M4/M8
+# admit only HALF-INTEGER d (their signal pitch is 1+0.5 and 3+1.5), which an
+# integer 2*y1 + h can never hit.  So check_template_tracks reports MISALIGNED
+# for the flipped instances and the flow solves them individually via
+# `on_mismatch independent`.  Mirroring and solve-once-copy are mutually
+# exclusive under this technology.  Endpoints and the retraction of some
+# earlier numbers are in flow/chip/ReadMe.md.
 #
 # WHY IT IS ON GRID.  Every instance of a cell shares ONE x, so their vertical
 # (V-layer) track phase is identical by construction.  The vertical pitches are
@@ -23,11 +30,10 @@
 # horizontal phase is identical too.  Delta-y contributes ZERO track offset
 # between stacked instances.
 #
-# The payoff: `align_bottom_up` is NOT called here.  The instances are already
-# phase-aligned as placed, so check_template_tracks reports ALIGNED and the
-# bottom-up solve copies each cell's routing to its siblings with no nudging —
-# compare chip_bottomup.buda, which must nudge an SA placement onto a common
-# phase before it can do the same.
+# `align_bottom_up` is NOT called here: the UNFLIPPED instances are already
+# phase-aligned as placed (compare chip_bottomup.buda, which must nudge an SA
+# placement onto a common phase first).  Drop --mirror-upper from the generator
+# line and every cell reports ALIGNED.
 #
 # The 504 grid is only valid while the cells stay at or below M9: the full
 # 10-layer stack would need LCM(18,18,24,56,74) = 18648, which for a 6300-tall
@@ -38,7 +44,8 @@
 #   python3 tools/build_hier_demo.py flow/chip/chip_stack.bdb \
 #     --cells big2=flow/big_data_test/big2/tc3b_flat_x5.buda,mix2=flow/rnr/mix2.bdb.sql \
 #     --instances big2=2,mix2=4 --buses 100 \
-#     --layout stacked --channel 1000 --grid 504 --align-tops
+#     --layout stacked --channel 1000 --grid 504 \
+#     --column-align center --mirror-upper
 #   python3 tools/bdb_serialize.py dump flow/chip/chip_stack.bdb flow/chip/chip_stack.bdb.sql
 source chip_tracks.buda
 open_bdb chip_stack.bdb.sql

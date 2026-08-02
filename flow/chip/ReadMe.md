@@ -122,8 +122,8 @@ whose congestion is at the top and do nothing for one capped at the bottom
 starved capped cell comes from widening its band (or a
 `set_cell_layer_share` lease), not from metal above its ceiling.
 
-This is why the vehicle now declares **`reserve_top_layers 2`** rather than
-an absolute band: it derives the M9 cap from the stack itself, so the same
+This is why `chip_bottomup_caps` declares **`reserve_top_layers 2`** rather
+than an absolute band: it derives the M9 cap from the stack itself, so the same
 line stays correct if the stack grows again.  It is byte-identical to the
 hand-computed `set_layer_caps_by_depth M5 M9` here (358/1708/93, WL equal to
 the unit).
@@ -146,7 +146,7 @@ from the bottom-up flow:
 
 ```
   LEFT  column  x=[0..6100]      2 x big2, pitch 7560   y = 0, 7560
-  RIGHT column  x=[7100..9430]   4 x mix2, pitch 3528   y = 916, 4444, 7972, 11500
+  RIGHT column  x=[7100..9430]   4 x mix2, pitch 3528   y = 458, 3986, 7514, 11042
   die 9430 x 13860, 100 top-level cross-hierarchy buses, 11750 nets
 ```
 
@@ -164,30 +164,51 @@ the placement (big2: 2 instances, 249 windows compared; mix2: 4 instances, 774
 windows) — where the SA-placed `chip_bottomup.buda` has to nudge instances onto
 a common phase first.
 
-**Top-flush columns.**  The mix2 column is shifted up 916 as a *rigid block*
-so its top edge meets big2's at 13860.  A whole-column shift leaves every
-intra-column Δy at 3528 = 7×504, so the phase survives — shifting only the top
-instances would not, since 916 is not a multiple of 504.  Column origins are
-therefore no longer multiples of 504 in absolute terms, and they do not need to
-be: what `check_template_tracks` requires is that the instances of one cell
-agree with *each other*.
+**Mirror-symmetric, on grid.**  `--column-align center` splits each column's
+slack equally above and below (mix2 gets 458 top and bottom — and 458 is
+forced: 4x2360 plus three channels ≡ 160 mod 504 cannot fill 13860 with zero
+margins).  `--mirror-upper` then flips the three instances above y=6930
+(i_big2_1, i_mix2_2, i_mix2_3), so all **488 leaf blocks map exactly onto
+their reflections** about the centreline — verified as a set comparison, not
+by eye.  Column origins are no longer multiples of 504 in absolute terms and
+need not be: `check_template_tracks` asks that a cell's instances agree with
+*each other*.
 
-It is worth doing on the numbers, not just the picture:
+**The mirror costs the track phase, structurally.**  A flipped instance needs
+`2*y1 + h ≡ d (mod p)` on every H layer, and the reflection-valid `d` are
+{0.5, 9.5} mod 18 (M2), {7.5, 16.5} mod 18 (M4), {7, 19} mod 24 (M6),
+{4.5, 32.5} mod 56 (M8).  `2*y1 + h` is an integer, but M2/M4/M8 admit only
+HALF-INTEGER axes — their signal pitch is 1+0.5 = 1.5 and 3+1.5 = 4.5 — so no
+integer placement can satisfy them.  Under this technology mirroring and
+solve-once-copy are mutually exclusive: `check_template_tracks` reports
+MISALIGNED for the flipped instances and the flow falls back to
+`on_mismatch independent`.
 
-| Flow | overlaps | unplaced | viol | abstract WL | detailed WL | sec |
-|---|---|---|---|---|---|---|
-| chip_stack_bottomup | 24 | 288 | 32 | 968,930 | 26,339,489 | 29 |
-| chip_stack_topdown | 26 | 755 | 54 | 1,065,914 | 30,053,613 | 57 |
+Endpoints, all four geometries measured back-to-back in one session state:
 
-(Before the top-flush shift: bottom-up 64/364/37 at abstract WL 1,035,830;
-top-down 61/1170/65 at 1,174,291.  Overlaps drop ~60% on both flows and
-abstract WL 6-9%, because the columns now span the die together instead of the
-right one trailing 916 short — the cross-hierarchy buses stop skewing to reach
-it.)
+| geometry | overlaps | unplaced | viol | abstract WL | sec |
+|---|---|---|---|---|---|
+| bottom-aligned columns | 661 | 2271 | 106 | 2,359,622 | 155 |
+| top-flush columns | 619 | 2253 | 111 | 2,363,777 | 123 |
+| centred columns | 586 | 2212 | 115 | 2,350,369 | 124 |
+| **centred + mirrored upper half** | **26** | **278** | **35** | **973,233** | **23** |
 
-The bottom-up/top-down gap is the cleanest in the chip family — 288 vs 755
-unplaced — because the templates are copied onto instances that already agree
-on tracks, with no alignment residue to route around.
+The three unmirrored variants are within noise of each other — where a column
+sits does not much matter.  The mirror is what moves the needle, and it does
+so while *losing* solve-once-copy, which is the surprise worth following up.
+
+> **Measurement note (2026-08-02).**  Earlier revisions of this file and of the
+> flow headers quoted much better endpoints for the unmirrored variants
+> (64/364 bottom-aligned, 24/288 top-flush).  Those do NOT reproduce: rebuilt
+> from the same generator arguments and re-measured they give the 661 and 619
+> above, and the good runs also completed in ~30s against ~120-155s now, so
+> they were doing substantially less work.  The cause has not been isolated,
+> so those numbers are RETRACTED rather than explained.  The table above is one
+> self-consistent set, each row re-measured at least twice.
+
+The top-down twin of the mirrored build measures 49/1056/65 — the bottom-up
+gap is still large (278 vs 1056 unplaced) even though the flipped instances
+are solved individually rather than copied.
 
 The layer policy holds as designed: `big2` and `mix2` place **zero** metal on
 M10/M11, which carry top-level wiring only.
@@ -197,7 +218,7 @@ The picture above is `tools/render_stack_placement.py <design.bdb> <out.png>
 as a multiple of the grid quantum.
 
 Generated with `build_hier_demo.py --layout stacked --channel 1000 --grid 504
---align-tops`
+--column-align center --mirror-upper`
 (see [BUILD_HIER_DEMO](../../docs/BUILD_HIER_DEMO.md#on-grid-stacking)); the
 regeneration command is in the flow header.  Note the 504 grid is valid only
 while the cells stay at or below M9 — the full 10-layer stack would need
