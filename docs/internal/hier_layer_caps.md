@@ -533,13 +533,24 @@ Two lessons for the feature, both now measured rather than assumed:
    less bit-dense layers.  Relief for a starved capped cell comes from a
    wider band or a `set_cell_layer_share` lease, never from metal above its
    ceiling.
-2. **State bands as intent, and re-check them when the stack changes.**
-   `set_layer_caps_by_depth` makes the whole policy one line precisely so
-   this is a one-line fix — but nothing in the tool detects that a band has
-   gone stale, and §9's advisories cannot: an over-tight band is legal,
-   merely wasteful.  A "reserve the top N layers" spelling of the command
-   would remove the failure mode entirely; recorded as a wishlist item
-   rather than built, since one line is a cheap manual fix.
+2. **State bands as intent, not as absolute layers.**  Nothing in the tool
+   detects a stale band, and §9's advisories cannot: an over-tight band is
+   legal, merely wasteful.  **LANDED** as `reserve_top_layers <N>` — the
+   stack-relative spelling that re-derives the cap from the declared stack,
+   so the same line is correct at six layers and at ten:
+
+   ```buda
+   reserve_top_layers 2      # the top pair is the top level's, on any stack
+   ```
+
+   It caps every cell below the top level at the highest non-reserved
+   layer, sharing the by-depth command's intrinsic levels, precedence
+   (explicit `set_cell_layer_cap` wins), persistence and bulk-ownership
+   memo — so `off` is one operation for both and re-running either replaces
+   what the other declared, including freeing a cell it no longer governs.
+   On the 10-layer chip stack `reserve_top_layers 2` is byte-identical to
+   the hand-computed `set_layer_caps_by_depth M5 M9` (358/1708/93, WL equal
+   to the unit), which is how the vehicle now declares its policy.
 
 ### 12.2 What it costs
 

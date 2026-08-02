@@ -122,11 +122,17 @@ whose congestion is at the top and do nothing for one capped at the bottom
 starved capped cell comes from widening its band (or a
 `set_cell_layer_share` lease), not from metal above its ceiling.
 
-One quirk worth knowing: in this design the *leaf* argument is a free
-choice — `M5 M9` and `M7 M9` are byte-identical, as are `M3 M7`/`M5 M7`.
-The level-1 cells are true leaves with no cell-local bundles
-(`HierBundler: 640 hbundles (D1: 100, D2: 540)`), so only the level-2 band
-ever bites.
+This is why the vehicle now declares **`reserve_top_layers 2`** rather than
+an absolute band: it derives the M9 cap from the stack itself, so the same
+line stays correct if the stack grows again.  It is byte-identical to the
+hand-computed `set_layer_caps_by_depth M5 M9` here (358/1708/93, WL equal to
+the unit).
+
+One quirk worth knowing: in this design the *leaf* argument of the by-depth
+spelling is a free choice — `M5 M9` and `M7 M9` are byte-identical, as are
+`M3 M7`/`M5 M7`.  The level-1 cells are true leaves with no cell-local
+bundles (`HierBundler: 640 hbundles (D1: 100, D2: 540)`), so only the
+level-2 band ever bites.
 
 The pipeline profile at this scale: bundling 0.95s → 640 hbundles (100
 top-bus + 540 cell-level), generation ~12s → 16792 candidates, and the
