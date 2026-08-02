@@ -172,9 +172,13 @@ designs and fail LOUD, never silent:)*
    → *"Pairwise-overlap stub alignment"*. The measured-accept alignment heal
    shipped opt-in (`set_pair_align_heal`, PR #557: 0 better / 0 worse / 37
    unchanged — the accept rejects every regressor the unconditional form
-   caused). Its **default-flip is measured and REFUSED** (2026-08-02): 1 of 37
-   corpus flows accepts, at −0.02% WL, for **+3.3% corpus wall time** — every
-   flow pays one extra full DNUTS solve so that one benefits. The guard that
+   caused). Its **default-flip is measured and REFUSED** (2026-08-02) on the
+   absence of BENEFIT: only 1 of 37 corpus flows accepts, at −0.02% WL. The
+   cost side is small — one extra DNUTS solve on each of the 31 ELIGIBLE flows
+   (the 6 bottom-up vehicles skip it, `hier.locked`), measured warm at
+   0.05–2.1% of flow wall; an initial "+3.3% corpus wall" figure was noise,
+   disproved by the locked flows moving MORE (+4.2%) than the eligible ones
+   despite being unable to pay at all. The guard that
    would have made a flip affordable is **refuted, not merely unbuilt**: a
    pair-predicate pre-check was implemented, measured on 12 flows and reverted
    — it does not discriminate (9 of 12 flows carry 2–24 alignable pairs,

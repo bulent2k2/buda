@@ -556,10 +556,21 @@ real market — uncongested designs with misaligned pairs, like the
 `seat_repro` (−1.5%) — is barely represented in the corpus, and no corpus
 vehicle stands in for it.
 
-**Bar 2 — the rejected-solve cost: +3.3% corpus wall time** (1270s → 1312s
-with the heal forced on everywhere).  That is one extra full DNUTS solve
-per flow, and under a default-on **every** flow pays it while 1 in 37
-gets anything back.
+**Bar 2 — the rejected-solve cost: SMALL, and smaller than the first
+measurement suggested.**  The cost is one extra full DNUTS solve on each
+ELIGIBLE flow — 31 of the 37, since the 6 bottom-up vehicles hold
+`hier.locked` bundles and the heal returns before solving (Codex #563).
+Measured warm, that solve is **0.05–2.1% of the flow's wall time**
+(`big` 32ms/1.5s = 2.1%, `big2` 19ms/1.2s = 1.6%, `bigHalf` 26ms/51.7s =
+0.05%, `mix` 6.5ms/5.0s = 0.13%).
+
+*Correction to the first pass:* this bar was initially reported as "+3.3%
+corpus wall time" from a single heal-on/heal-off corpus run.  That number
+is NOISE, not signal — the 6 locked flows are an accidental CONTROL GROUP
+(they cannot pay the solve at all) and they moved **+4.2%** while the 31
+eligible flows moved +2.5%.  Single-run wall time on this corpus cannot
+resolve a per-flow cost this small; the warm microbenchmark above can, and
+it is the number to trust.
 
 **The prerequisite is refuted: the "cheap pre-check" cannot work.**  The
 idea was to skip the solve when no same-bundle same-width pair has a
@@ -584,11 +595,14 @@ Two independent reasons it fails:
    whether a pair already shares tracks, and a Python pass over that data
    costs multiples of the C++ DNUTS solve it is trying to avoid.
 
-**Verdict: keep it opt-in.**  A flip would tax every flow ~3.3% to help one,
-and the guard that would have made it free is not buildable as specified.
-The heal stays exactly what it is — safe by construction (the accept means a
-flow that turns it on can never be made worse), and correct to enable per
-design when you have the geometry it targets.
+**Verdict: keep it opt-in — on the absence of BENEFIT, not on cost.**  The
+cost is real but small (above); what is missing is any reason to pay it.  A
+flip would add a solve to 31 flows so that ONE gains 0.02% wirelength, and
+the pre-check that would have made even that free is refuted.  The heal
+stays exactly what it is — safe by construction (the accept means a flow
+that turns it on can never be made worse), and correct to enable per design
+when you have the geometry it targets.  If a corpus vehicle ever meets Bar 1,
+the cost side is cheap enough that the flip becomes a straightforward yes.
 
 ### OPEN follow-on — the only thing that re-opens the flip (opens.md #8b)
 

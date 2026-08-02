@@ -80,9 +80,11 @@ priority view** — what's actually open right now, ranked by value/effort — s
   responsibility-boundary one); pairwise-overlap stub alignment (heal ✅
   shipped opt-in as `set_pair_align_heal`, PR #557 — the unconditional form
   measured 0 better / 7 worse, the accept makes it 0/0/37; the DEFAULT-FLIP
-  is measured and REFUSED 2026-08-02: 1 of 37 flows accepts at −0.02% WL for
-  +3.3% corpus wall, and the "cheap pre-check" prerequisite is refuted —
-  it does not discriminate and costs 2.5–48× the solve it would skip).
+  is measured and REFUSED 2026-08-02 on the absence of benefit — 1 of 37 flows
+  accepts at −0.02% WL; the cost is small (one solve on each of 31 eligible
+  flows, 0.05–2.1% of wall) but buys nothing, and the "cheap pre-check"
+  prerequisite is refuted — it does not discriminate and costs 2.5–48× the
+  solve it would skip).
 - **[wishlist-bundler.md](wishlist-bundler.md)** — Bundler.
   Multi-source (fan-in) topology to make CONVERGENT bundling sound.
 - **[wishlist-healer.md](wishlist-healer.md)** — Healers (rip-up, negotiate,
