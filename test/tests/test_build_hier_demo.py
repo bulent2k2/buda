@@ -627,3 +627,61 @@ def test_build_hier_demo_seed_is_deterministic(tmp_path):
         return out
 
     assert _conn(a) == _conn(b)
+
+
+# ── --layout stacked: on-grid vertical stacking ─────────────────────────────
+
+def _depth1(db):
+    return {c.name.split("/")[-1]: c for c in db.all_components() if c.depth == 1}
+
+
+def test_stacked_layout_columns_and_grid(tmp_path):
+    """Each cell type gets its own COLUMN (shared x), its instances stacked
+    vertically on a pitch that is a multiple of --grid.  Both together are what
+    make the instances phase-aligned as placed."""
+    path = str(tmp_path / "stacked.bdb")
+    build_hier_demo.build(path, _CELLS, seed=1, n_instances=3, n_buses=2,
+                          layout="stacked", channel=100.0, grid=48.0)
+    db = buda_db.BDB(path)
+    comps = _depth1(db)
+    by_cell = {}
+    for c in comps.values():
+        by_cell.setdefault(c.cell, []).append(c)
+    assert len(by_cell) == 3
+    xs = []
+    for cell, insts in by_cell.items():
+        insts.sort(key=lambda c: c.y1)
+        assert len(insts) == 3
+        # one shared x per column
+        assert len({round(c.x1, 6) for c in insts}) == 1, cell
+        xs.append(insts[0].x1)
+        # vertical pitch is uniform AND a multiple of the grid
+        pitches = [insts[i + 1].y1 - insts[i].y1 for i in range(len(insts) - 1)]
+        assert len(set(round(p, 6) for p in pitches)) == 1, cell
+        assert pitches[0] % 48.0 == 0, (cell, pitches[0])
+        # ... and leaves at least the requested channel
+        assert pitches[0] >= (insts[0].y2 - insts[0].y1) + 100.0
+        # every instance origin is on the grid, so all share one track phase
+        assert all(c.y1 % 48.0 == 0 for c in insts), cell
+    assert len(set(xs)) == 3          # columns are distinct, left to right
+
+
+def test_stacked_layout_channel_is_a_minimum(tmp_path):
+    """The realized gap is the grid round-UP of the requested channel, never
+    less than it."""
+    path = str(tmp_path / "stacked2.bdb")
+    build_hier_demo.build(path, _CELLS[:1], seed=1, n_instances=2, n_buses=0,
+                          layout="stacked", channel=10.0, grid=1000.0)
+    db = buda_db.BDB(path)
+    insts = sorted(_depth1(db).values(), key=lambda c: c.y1)
+    pitch = insts[1].y1 - insts[0].y1
+    assert pitch % 1000.0 == 0
+    assert pitch - (insts[0].y2 - insts[0].y1) >= 10.0
+
+
+def test_row_layout_is_the_default_and_unchanged(tmp_path):
+    """No layout argument = the historical row at y=0."""
+    path = str(tmp_path / "row.bdb")
+    build_hier_demo.build(path, _CELLS[:2], seed=1, n_instances=2, n_buses=0)
+    db = buda_db.BDB(path)
+    assert all(c.y1 == 0.0 for c in _depth1(db).values())

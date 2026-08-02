@@ -139,6 +139,48 @@ top-bus + 540 cell-level), generation ~12s → 16792 candidates, and the
 planner dominates (374s topdown / 148s bottomup at the 2026-07-30 baseline —
 the bottom-up templates shrink the top-down problem 2.5x).
 
+chip_stack — the on-grid stacked variant (2026-08-02)
+===
+A deliberately *placed* sibling of chip, built to remove instance-phase noise
+from the bottom-up flow:
+
+```
+  LEFT  column  x=[0..6100]      2 x big2, pitch 7560  (cell 6300 + channel 1260)
+  RIGHT column  x=[7100..9430]   4 x mix2, pitch 3528  (cell 2360 + channel 1168)
+  die 9430 x 13860, 100 top-level cross-hierarchy buses, 11750 nets
+```
+
+Every instance of a cell shares one **x**, so their vertical-layer track phase
+is identical by construction; the vertical pitches are multiples of
+**504 = LCM(18, 18, 24, 56)** — the unit pitches of M2/M4/M6/M8, the horizontal
+layers a cell may use under `reserve_top_layers 2` — so the horizontal phase is
+identical too.  Δy contributes **zero** track offset between stacked instances.
+
+The payoff: `chip_stack_bottomup.buda` never calls `align_bottom_up`, and
+`check_template_tracks` still reports **ALIGNED** for both cells straight from
+the placement (big2: 2 instances, 249 windows compared; mix2: 4 instances, 774
+windows) — where the SA-placed `chip_bottomup.buda` has to nudge instances onto
+a common phase first.
+
+| Flow | overlaps | unplaced | viol | abstract WL | detailed WL | sec |
+|---|---|---|---|---|---|---|
+| chip_stack_bottomup | 64 | 364 | 37 | 1,035,830 | 26,684,932 | 31 |
+| chip_stack_topdown | 61 | 1170 | 65 | 1,174,291 | 30,168,999 | 57 |
+
+The bottom-up/top-down gap is the cleanest in the chip family — 364 vs 1170
+unplaced — because the templates are copied onto instances that already agree
+on tracks, with no alignment residue to route around.
+
+The layer policy holds as designed: `big2` and `mix2` place **zero** metal on
+M10/M11, which carry top-level wiring only.
+
+Generated with `build_hier_demo.py --layout stacked --channel 1000 --grid 504`
+(see [BUILD_HIER_DEMO](../../docs/BUILD_HIER_DEMO.md#on-grid-stacking)); the
+regeneration command is in the flow header.  Note the 504 grid is valid only
+while the cells stay at or below M9 — the full 10-layer stack would need
+LCM(18,18,24,56,74) = 18648, i.e. 12k of dead channel around a 6300-tall cell.
+Reserving the top pair is what makes a tight on-grid pitch affordable.
+
 Planner-runtime study (2026-07-31)
 ===
 Profiling the 374s planner (gdb stack sampling via the new `BUDA_PROFILE`

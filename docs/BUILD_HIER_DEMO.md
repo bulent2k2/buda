@@ -29,6 +29,9 @@ python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a,b,c]
 | `--path DIR` | `flow/` | Directory holding the leaf `.buda` files for bare `--cells` names |
 | `--instances SPEC` | `2` | Instances per cell: one int (all cells), a positional list in `--cells` order (`1,4,2`), or named (`dnuts1=3,channel_stress=1`; unlisted → 2). Each count ≥1 |
 | `--buses N` | `7` | **Base** top-level cross-instance buses; bit widths cycle `[4,6,8,10,12,14,16]` (≥0). Extra buses are appended so every instance is wired to ≥3 top buses |
+| `--layout row\|stacked` | `row` | Instance placement. `row` lays every instance in one row at y=0; **`stacked`** gives each cell type its own COLUMN in `--cells` order and stacks that cell's instances vertically. Incompatible with `--optimize` |
+| `--channel V` | `200` | Minimum gap between stacked instances and between columns. The realized vertical gap is whatever `--grid` rounds the pitch up to, so it is ≥ V |
+| `--grid Q` | *(off)* | Snap the vertical stack pitch UP to a multiple of Q (`--layout stacked` only) — see [on-grid stacking](#on-grid-stacking) |
 | `--no-cell-nets` | *(off)* | Emit only the top-level buses (lean ~70-net demo) |
 | `--no-busterms` | *(off)* | Skip busterm derivation |
 | `--optimize sa\|ga` | *(off)* | Place the top cell's instances in 2D to shorten the top buses |
@@ -96,6 +99,46 @@ a 2-level source becomes a 3-level chip (`chip/i_mix2_0/i_dnuts1_0/u0` at
 depth 3).  The depth-3 vehicles `flow/chip/chip3*.buda` are built this way;
 drive them with `derive_busterms 3`, `add_blocks_from_bdb 3 skip`, and
 `run_hier_bundler depth 3`.
+
+## On-grid stacking
+
+`--layout stacked` places each cell type in its own **column** (left to right in
+`--cells` order) and stacks that cell's instances **vertically**.  Two properties
+follow, and together they make the instances *phase-aligned as placed*:
+
+* every instance of a cell shares one **x**, so their vertical-layer track phase
+  is identical by construction;
+* with `--grid Q` the vertical pitch is snapped **up** to a multiple of Q, so
+  their horizontal-layer phase is identical too.
+
+Choose Q as the **LCM of the track pitches of the horizontal layers the cells
+may use**.  The tool deliberately does not know the technology — the caller
+does.  For `flow/chip/chip_tracks.buda` with `reserve_top_layers 2` (cells
+capped at M9) the horizontal pitches are M2 18, M4 18, M6 24, M8 56, so
+Q = 504.
+
+```bash
+python3 tools/build_hier_demo.py flow/chip/chip_stack.bdb \
+    --cells big2=flow/big_data_test/big2/tc3b_flat_x5.buda,mix2=flow/rnr/mix2.bdb.sql \
+    --instances big2=2,mix2=4 --buses 100 --layout stacked --channel 1000 --grid 504
+```
+
+```
+  stack big2           2 x  pitch     7560 (cell 6300 + channel 1260), on a 504 grid
+  stack mix2           4 x  pitch     3528 (cell 2360 + channel 1168), on a 504 grid
+  top  top                9430 x  13860  (6 instances)
+```
+
+The payoff is that a bottom-up flow needs **no `align_bottom_up`**:
+`check_template_tracks` reports `ALIGNED` straight from the placement (built
+vehicle: `flow/chip/chip_stack_bottomup.buda`, big2 2 instances / mix2 4
+instances, both ALIGNED), where an SA-placed design has to be nudged onto a
+common phase first.
+
+Pick Q against the layers the cells will actually use: the full 10-layer chip
+stack would need LCM(18,18,24,56,74) = 18648, which is 12k of dead channel
+around a 6300-tall cell.  Reserving the top pair for the top level is what
+makes a tight on-grid pitch affordable.
 
 ## `--align-occurrences` — shared-row/column occurrence alignment
 

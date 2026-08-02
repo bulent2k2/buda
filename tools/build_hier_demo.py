@@ -31,6 +31,22 @@ Usage:
                      bit widths cycle the palette [4,6,8,10,12,14,16]). Extra
                      buses are appended automatically so every instance is wired
                      to at least three top buses.
+  --layout row|stacked
+                     instance placement. `row` (default) lays every instance in
+                     one row at y=0. `stacked` gives each cell type its own
+                     COLUMN in --cells order (left to right) and stacks that
+                     cell's instances vertically — so all its instances share
+                     one x, and with --grid their vertical pitch is a multiple
+                     of the track LCM, making them congruent AND phase-aligned
+                     as placed (check_template_tracks reports ALIGNED with no
+                     align_bottom_up).  Incompatible with --optimize.
+  --channel V        minimum gap between stacked instances and between columns
+                     (default 200).  The realized vertical gap is whatever
+                     --grid rounds the pitch up to, so it is >= V.
+  --grid Q           snap the vertical stack pitch UP to a multiple of Q
+                     (default 0 = off; --layout stacked only).  Q is the LCM of
+                     the track pitches of the layers the cells may use — the
+                     caller knows the technology, this tool does not.
   --optimize sa|ga   place the top cell's instances in 2D (SA or GA) to
                      shorten the cross-instance top buses (default: row layout).
   --param KEY=VALUE  optimizer knob (repeatable). Values accept k/m suffixes
@@ -775,7 +791,7 @@ def _ensure_min_buses_per_instance(buses, placements, pool, rng,
 def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
           cell_nets=True, busterms=True, optimize=None, opt_params=None,
           bloat=None, n_instances=2, n_buses=7, align_occurrences=False,
-          nest_bdb_cells=False):
+          nest_bdb_cells=False, layout="row", channel=_GAP, grid=0.0):
     rng = random.Random(seed)
     # Leaf .buda files carry full pipeline/tech commands buda2bdb doesn't read;
     # silence its per-line "ignored command" warnings while defining cells.
@@ -806,19 +822,47 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
         print(f"  cell {name:16s} {w:6.0f} x {h:6.0f}  "
               f"({len(blocks)} blocks, {len(nets)} internal nets){src}")
 
-    # 2. Name the instances of each cell (count per cell) and lay them in a row.
+    # 2. Name the instances of each cell (count per cell) and place them.
     inst_counts = _normalize_instances(n_instances, [c[0] for c in cells])
     placements = []             # mutable dicts: {inst, cell, x, y, blocks, nets}
-    x_cursor, row_h = 0.0, 0.0
-    for name, w, h, blocks, nets, _centers in cells:
-        for k in range(inst_counts[name]):
+    if layout == "stacked":
+        # One COLUMN per cell type, in --cells order (left to right), with that
+        # cell's instances stacked vertically.  Every instance of a cell shares
+        # one x, so their VERTICAL track phase is identical by construction; the
+        # vertical pitch is snapped UP to a multiple of --grid so the horizontal
+        # tracks agree too.  The result is congruent AND phase-aligned without
+        # align_bottom_up: check_template_tracks reports ALIGNED as placed.
+        # (--grid is the LCM of the pitches of the layers the cells may use —
+        # the caller knows the technology, this tool does not.)
+        x_cursor, top_h = 0.0, 0.0
+        for name, w, h, blocks, nets, _centers in cells:
+            n = inst_counts[name]
+            pitch = h + channel
+            if grid > 0:
+                pitch = math.ceil(pitch / grid) * grid
             short = "chan" if name == "channel_stress" else name
-            placements.append({"inst": f"i_{short}_{k}", "cell": name,
-                               "x": x_cursor, "y": 0.0,
-                               "blocks": blocks, "nets": nets})
-            x_cursor += w + _GAP
-            row_h = max(row_h, h)
-    top_w, top_h = max(x_cursor - _GAP, 1.0), row_h
+            for k in range(n):
+                placements.append({"inst": f"i_{short}_{k}", "cell": name,
+                                   "x": x_cursor, "y": k * pitch,
+                                   "blocks": blocks, "nets": nets})
+            top_h = max(top_h, (n - 1) * pitch + h)
+            x_cursor += w + channel
+            if n > 1:
+                print(f"  stack {name:14s} {n} x  pitch {pitch:8.0f} "
+                      f"(cell {h:.0f} + channel {pitch - h:.0f})"
+                      + (f", on a {grid:g} grid" if grid > 0 else ""))
+        top_w = max(x_cursor - channel, 1.0)
+    else:
+        x_cursor, row_h = 0.0, 0.0
+        for name, w, h, blocks, nets, _centers in cells:
+            for k in range(inst_counts[name]):
+                short = "chan" if name == "channel_stress" else name
+                placements.append({"inst": f"i_{short}_{k}", "cell": name,
+                                   "x": x_cursor, "y": 0.0,
+                                   "blocks": blocks, "nets": nets})
+                x_cursor += w + _GAP
+                row_h = max(row_h, h)
+        top_w, top_h = max(x_cursor - _GAP, 1.0), row_h
 
     # 3. Pick the top-bus connectivity (seeded, position-independent) so the
     #    optimizer can use it before instances are placed.  At least one receiver
@@ -996,6 +1040,9 @@ def main():
     n_buses = 7
     align_occurrences = False
     nest_bdb_cells = False
+    layout = "row"
+    channel = _GAP
+    grid = 0.0
     i = 0
     pos = []
     while i < len(argv):
@@ -1014,6 +1061,15 @@ def main():
             align_occurrences = True; i += 1
         elif argv[i] in ("--nest-bdb-cells", "-nest-bdb-cells"):
             nest_bdb_cells = True; i += 1
+        elif argv[i] in ("--layout", "-layout") and i + 1 < len(argv):
+            layout = argv[i + 1].lower()
+            if layout not in ("row", "stacked"):
+                sys.exit("Error: --layout must be 'row' or 'stacked'")
+            i += 2
+        elif argv[i] in ("--channel", "-channel") and i + 1 < len(argv):
+            channel = float(argv[i + 1]); i += 2
+        elif argv[i] in ("--grid", "-grid") and i + 1 < len(argv):
+            grid = float(argv[i + 1]); i += 2
         elif argv[i] == "--no-cell-nets":
             cell_nets = False; i += 1
         elif argv[i] == "--no-busterms":
@@ -1033,6 +1089,14 @@ def main():
             pos.append(argv[i]); i += 1
     if pos:
         out_path = pos[0]
+    if layout == "stacked" and optimize:
+        sys.exit("Error: --layout stacked places instances explicitly on grid; "
+                 "--optimize would move them off it (drop one or the other)")
+    if grid > 0 and layout != "stacked":
+        sys.exit("Error: --grid applies to --layout stacked (the row layout "
+                 "puts every instance on y=0)")
+    if channel < 0:
+        sys.exit("Error: --channel must be >= 0")
     if (opt_params or bloat) and not optimize:
         print("buda2bdb: warning: --param/--bloat ignored without --optimize",
               file=sys.stderr)
@@ -1052,7 +1116,8 @@ def main():
     build(out_path, cell_files, seed=seed, cell_nets=cell_nets,
           busterms=busterms, optimize=optimize, opt_params=opt_params,
           bloat=bloat, n_instances=n_instances, n_buses=n_buses,
-          align_occurrences=align_occurrences, nest_bdb_cells=nest_bdb_cells)
+          align_occurrences=align_occurrences, nest_bdb_cells=nest_bdb_cells,
+          layout=layout, channel=channel, grid=grid)
 
 
 if __name__ == "__main__":
