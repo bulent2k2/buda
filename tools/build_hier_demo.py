@@ -31,6 +31,35 @@ Usage:
                      bit widths cycle the palette [4,6,8,10,12,14,16]). Extra
                      buses are appended automatically so every instance is wired
                      to at least three top buses.
+  --layout row|stacked
+                     instance placement. `row` (default) lays every instance in
+                     one row at y=0. `stacked` gives each cell type its own
+                     COLUMN in --cells order (left to right) and stacks that
+                     cell's instances vertically — so all its instances share
+                     one x, and with --grid their vertical pitch is a multiple
+                     of the track LCM, making them congruent AND phase-aligned
+                     as placed (check_template_tracks reports ALIGNED with no
+                     align_bottom_up).  Incompatible with --optimize.
+  --channel V        minimum gap between stacked instances and between columns
+                     (default 200).  The realized vertical gap is whatever
+                     --grid rounds the pitch up to, so it is >= V.
+  --grid Q           snap the vertical stack pitch UP to a multiple of Q
+                     (default 0 = off; --layout stacked only).  Q is the LCM of
+                     the track pitches of the layers the cells may use — the
+                     caller knows the technology, this tool does not.
+  --column-align bottom|top|center
+                     where a column sits in the die (--layout stacked only).
+                     `bottom` (default) starts every column at y=0; `top` makes
+                     every column's top edge flush with the tallest; `center`
+                     splits a column's slack equally above and below, which is
+                     what makes the layout mirror-symmetric about the die
+                     centreline.  Columns move as RIGID blocks, so intra-column
+                     pitches — and therefore --grid alignment — are untouched;
+                     moving individual instances would break them.
+  --mirror-upper     flip every instance whose centre is above the die
+                     centreline upside down (--layout stacked only), so the
+                     upper half is the exact mirror image of the lower half,
+                     contents included.  Combine with --column-align center.
   --optimize sa|ga   place the top cell's instances in 2D (SA or GA) to
                      shorten the cross-instance top buses (default: row layout).
   --param KEY=VALUE  optimizer knob (repeatable). Values accept k/m suffixes
@@ -85,7 +114,16 @@ except ModuleNotFoundError:
 
 import math
 import random
+import signal
 import time
+
+# `... | head -N` closes the pipe early; the default Python behaviour raises
+# BrokenPipeError at the next flush and kills the build mid-write.  Restore the
+# shell default so a truncated reader cannot corrupt the output BDB.
+try:
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+except (AttributeError, ValueError):
+    pass
 import buda2bdb  # reuse the .buda parser + cell-size helper
 
 _GAP = 200.0   # spacing between instances laid out in a row
@@ -775,16 +813,25 @@ def _ensure_min_buses_per_instance(buses, placements, pool, rng,
 def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
           cell_nets=True, busterms=True, optimize=None, opt_params=None,
           bloat=None, n_instances=2, n_buses=7, align_occurrences=False,
-          nest_bdb_cells=False):
+          nest_bdb_cells=False, layout="row", channel=_GAP, grid=0.0,
+          column_align="bottom", mirror_upper=False):
     rng = random.Random(seed)
     # Leaf .buda files carry full pipeline/tech commands buda2bdb doesn't read;
     # silence its per-line "ignored command" warnings while defining cells.
     buda2bdb._warn = lambda *_a, **_k: None
 
-    # Fresh BDB.
-    if os.path.exists(out_path):
-        os.remove(out_path)
-    db = buda_db.BDB(out_path)
+    # Fresh BDB, written to a .part file and moved into place only once the
+    # build RUNS TO COMPLETION.  A build that dies partway — the classic being
+    # SIGPIPE from `... | head -N`, since this tool prints one line per bus —
+    # otherwise leaves a plausible-looking BDB missing nets, pins and every
+    # busterm.  Serialized into a fixture that reads as a valid design and
+    # routes clean because most of the work is absent, it is a silent
+    # correctness trap; costing one rename to remove it is cheap.
+    part = out_path + ".part"
+    for stale in (out_path, part):
+        if os.path.exists(stale):
+            os.remove(stale)
+    db = buda_db.BDB(part)
 
     # 1. Define each cell — from a flat .buda script, or (the chip-scale
     #    enhancement) from an existing hierarchical BDB flattened one level.
@@ -806,19 +853,70 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
         print(f"  cell {name:16s} {w:6.0f} x {h:6.0f}  "
               f"({len(blocks)} blocks, {len(nets)} internal nets){src}")
 
-    # 2. Name the instances of each cell (count per cell) and lay them in a row.
+    # 2. Name the instances of each cell (count per cell) and place them.
     inst_counts = _normalize_instances(n_instances, [c[0] for c in cells])
     placements = []             # mutable dicts: {inst, cell, x, y, blocks, nets}
-    x_cursor, row_h = 0.0, 0.0
-    for name, w, h, blocks, nets, _centers in cells:
-        for k in range(inst_counts[name]):
+    if layout == "stacked":
+        # One COLUMN per cell type, in --cells order (left to right), with that
+        # cell's instances stacked vertically.  Every instance of a cell shares
+        # one x, so their VERTICAL track phase is identical by construction; the
+        # vertical pitch is snapped UP to a multiple of --grid so the horizontal
+        # tracks agree too.  The result is congruent AND phase-aligned without
+        # align_bottom_up: check_template_tracks reports ALIGNED as placed.
+        # (--grid is the LCM of the pitches of the layers the cells may use —
+        # the caller knows the technology, this tool does not.)
+        x_cursor, top_h = 0.0, 0.0
+        for name, w, h, blocks, nets, _centers in cells:
+            n = inst_counts[name]
+            pitch = h + channel
+            if grid > 0:
+                pitch = math.ceil(pitch / grid) * grid
             short = "chan" if name == "channel_stress" else name
-            placements.append({"inst": f"i_{short}_{k}", "cell": name,
-                               "x": x_cursor, "y": 0.0,
-                               "blocks": blocks, "nets": nets})
-            x_cursor += w + _GAP
-            row_h = max(row_h, h)
-    top_w, top_h = max(x_cursor - _GAP, 1.0), row_h
+            for k in range(n):
+                placements.append({"inst": f"i_{short}_{k}", "cell": name,
+                                   "x": x_cursor, "y": k * pitch,
+                                   "blocks": blocks, "nets": nets})
+            top_h = max(top_h, (n - 1) * pitch + h)
+            x_cursor += w + channel
+            if n > 1:
+                print(f"  stack {name:14s} {n} x  pitch {pitch:8.0f} "
+                      f"(cell {h:.0f} + channel {pitch - h:.0f})"
+                      + (f", on a {grid:g} grid" if grid > 0 else ""))
+        top_w = max(x_cursor - channel, 1.0)
+        if column_align != "bottom":
+            # Shift each column as a RIGID block: `top` makes every column's
+            # top edge flush with the tallest, `center` splits a column's slack
+            # equally above and below (which is what makes the whole layout
+            # mirror-symmetric about the die centreline).  A whole-column shift
+            # leaves every intra-column delta-y untouched, so the on-grid phase
+            # survives — shifting individual instances would not, since the
+            # slack is not generally a multiple of --grid.
+            for name, _w, h, _b, _n, _c in cells:
+                col = [p for p in placements if p["cell"] == name]
+                col_top = max(p["y"] for p in col) + h
+                slack = top_h - col_top
+                dy = slack if column_align == "top" else slack / 2.0
+                if dy <= 0:
+                    continue
+                for p in col:
+                    p["y"] += dy
+                where = ("top edge flush at %.0f" % top_h
+                         if column_align == "top"
+                         else "centred: %.0f margin above and below" % dy)
+                print(f"  align {name:14s} column shifted up {dy:.0f} ({where}"
+                      + (f"; delta-y unchanged, still {grid:g}-aligned)"
+                         if grid > 0 else ")"))
+    else:
+        x_cursor, row_h = 0.0, 0.0
+        for name, w, h, blocks, nets, _centers in cells:
+            for k in range(inst_counts[name]):
+                short = "chan" if name == "channel_stress" else name
+                placements.append({"inst": f"i_{short}_{k}", "cell": name,
+                                   "x": x_cursor, "y": 0.0,
+                                   "blocks": blocks, "nets": nets})
+                x_cursor += w + _GAP
+                row_h = max(row_h, h)
+        top_w, top_h = max(x_cursor - _GAP, 1.0), row_h
 
     # 3. Pick the top-bus connectivity (seeded, position-independent) so the
     #    optimizer can use it before instances are placed.  At least one receiver
@@ -866,6 +964,40 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
     print(f"  top  {top_cell:16s} {top_w:6.0f} x {top_h:6.0f}  "
           f"({len(placements)} instances)")
 
+    # 5b. Optional mirror: flip every instance whose centre is above the die
+    #     centreline about its own horizontal axis, so the upper half becomes
+    #     the exact mirror image of the lower half — contents included, not
+    #     just outlines.  Runs after materialization (flip_comp rewrites the
+    #     whole subtree) and before busterm derivation, which reads geometry.
+    if mirror_upper:
+        yc = top_h / 2.0
+        # An instance whose interior CROSSES the centreline cannot map onto its
+        # own reflection unless its contents happen to be self-symmetric, and
+        # cell contents generally are not.  Flipping it does not help either —
+        # it would still be asymmetric about yc.  So refuse rather than emit a
+        # layout that silently misses the contents-included guarantee (Codex
+        # #568; the classic trigger is an ODD instance count in a centred
+        # column, which puts the middle occurrence exactly on the centreline).
+        straddle = [p["inst"] for p in placements
+                    if p["y"] < yc < p["y"] + cell_meta[p["cell"]][1]]
+        if straddle:
+            sys.exit(
+                f"Error: --mirror-upper: {len(straddle)} instance(s) straddle "
+                f"the die centreline y={yc:g} and cannot mirror onto "
+                f"themselves: {', '.join(straddle)}.\n"
+                f"       Use an EVEN instance count per column (an odd count "
+                f"in a centred column puts the middle occurrence on the "
+                f"centreline), or change --channel/--grid so no instance "
+                f"crosses it.")
+        flipped = []
+        for p in placements:
+            h = cell_meta[p["cell"]][1]
+            if p["y"] + h / 2.0 > yc:
+                db.flip_comp(f"{top_inst}/{p['inst']}", False)
+                flipped.append(p["inst"])
+        print(f"  mirror {len(flipped)} instance(s) above y={yc:.0f} flipped "
+              f"upside down: {', '.join(flipped)}")
+
     # 6. Replicate each cell's internal buses into every instance so the hier
     #    flow plans them together (and templates the two instances per cell).
     n_cell_nets = _add_cell_internal_nets(db, top_inst, placements) if cell_nets else 0
@@ -893,6 +1025,9 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
         buda_db.BustermGen(db).derive(max_depth)
 
     db.compute_all()
+    db.close() if hasattr(db, "close") else None
+    del db                      # flush SQLite before the rename
+    os.replace(part, out_path)
     total_nets = n_cell_nets + n_nets
     n_repair = len(buses) - n_random_buses
     repair_note = f" ({n_repair} for ≥3/instance coverage)" if n_repair else ""
@@ -996,6 +1131,11 @@ def main():
     n_buses = 7
     align_occurrences = False
     nest_bdb_cells = False
+    layout = "row"
+    channel = _GAP
+    grid = 0.0
+    column_align = "bottom"
+    mirror_upper = False
     i = 0
     pos = []
     while i < len(argv):
@@ -1014,6 +1154,22 @@ def main():
             align_occurrences = True; i += 1
         elif argv[i] in ("--nest-bdb-cells", "-nest-bdb-cells"):
             nest_bdb_cells = True; i += 1
+        elif argv[i] in ("--layout", "-layout") and i + 1 < len(argv):
+            layout = argv[i + 1].lower()
+            if layout not in ("row", "stacked"):
+                sys.exit("Error: --layout must be 'row' or 'stacked'")
+            i += 2
+        elif argv[i] in ("--channel", "-channel") and i + 1 < len(argv):
+            channel = float(argv[i + 1]); i += 2
+        elif argv[i] in ("--grid", "-grid") and i + 1 < len(argv):
+            grid = float(argv[i + 1]); i += 2
+        elif argv[i] in ("--column-align", "-column-align") and i + 1 < len(argv):
+            column_align = argv[i + 1].lower()
+            if column_align not in ("bottom", "top", "center"):
+                sys.exit("Error: --column-align must be bottom|top|center")
+            i += 2
+        elif argv[i] in ("--mirror-upper", "-mirror-upper"):
+            mirror_upper = True; i += 1
         elif argv[i] == "--no-cell-nets":
             cell_nets = False; i += 1
         elif argv[i] == "--no-busterms":
@@ -1033,6 +1189,19 @@ def main():
             pos.append(argv[i]); i += 1
     if pos:
         out_path = pos[0]
+    if layout == "stacked" and optimize:
+        sys.exit("Error: --layout stacked places instances explicitly on grid; "
+                 "--optimize would move them off it (drop one or the other)")
+    if column_align != "bottom" and layout != "stacked":
+        sys.exit("Error: --column-align applies to --layout stacked (there is "
+                 "one row to align in the row layout)")
+    if mirror_upper and layout != "stacked":
+        sys.exit("Error: --mirror-upper applies to --layout stacked")
+    if grid > 0 and layout != "stacked":
+        sys.exit("Error: --grid applies to --layout stacked (the row layout "
+                 "puts every instance on y=0)")
+    if channel < 0:
+        sys.exit("Error: --channel must be >= 0")
     if (opt_params or bloat) and not optimize:
         print("buda2bdb: warning: --param/--bloat ignored without --optimize",
               file=sys.stderr)
@@ -1052,7 +1221,9 @@ def main():
     build(out_path, cell_files, seed=seed, cell_nets=cell_nets,
           busterms=busterms, optimize=optimize, opt_params=opt_params,
           bloat=bloat, n_instances=n_instances, n_buses=n_buses,
-          align_occurrences=align_occurrences, nest_bdb_cells=nest_bdb_cells)
+          align_occurrences=align_occurrences, nest_bdb_cells=nest_bdb_cells,
+          layout=layout, channel=channel, grid=grid,
+          column_align=column_align, mirror_upper=mirror_upper)
 
 
 if __name__ == "__main__":

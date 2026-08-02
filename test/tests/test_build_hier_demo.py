@@ -627,3 +627,191 @@ def test_build_hier_demo_seed_is_deterministic(tmp_path):
         return out
 
     assert _conn(a) == _conn(b)
+
+
+# ── --layout stacked: on-grid vertical stacking ─────────────────────────────
+
+def _depth1(db):
+    return {c.name.split("/")[-1]: c for c in db.all_components() if c.depth == 1}
+
+
+def test_stacked_layout_columns_and_grid(tmp_path):
+    """Each cell type gets its own COLUMN (shared x), its instances stacked
+    vertically on a pitch that is a multiple of --grid.  Both together are what
+    make the instances phase-aligned as placed."""
+    path = str(tmp_path / "stacked.bdb")
+    build_hier_demo.build(path, _CELLS, seed=1, n_instances=3, n_buses=2,
+                          layout="stacked", channel=100.0, grid=48.0)
+    db = buda_db.BDB(path)
+    comps = _depth1(db)
+    by_cell = {}
+    for c in comps.values():
+        by_cell.setdefault(c.cell, []).append(c)
+    assert len(by_cell) == 3
+    xs = []
+    for cell, insts in by_cell.items():
+        insts.sort(key=lambda c: c.y1)
+        assert len(insts) == 3
+        # one shared x per column
+        assert len({round(c.x1, 6) for c in insts}) == 1, cell
+        xs.append(insts[0].x1)
+        # vertical pitch is uniform AND a multiple of the grid
+        pitches = [insts[i + 1].y1 - insts[i].y1 for i in range(len(insts) - 1)]
+        assert len(set(round(p, 6) for p in pitches)) == 1, cell
+        assert pitches[0] % 48.0 == 0, (cell, pitches[0])
+        # ... and leaves at least the requested channel
+        assert pitches[0] >= (insts[0].y2 - insts[0].y1) + 100.0
+        # every instance origin is on the grid, so all share one track phase
+        assert all(c.y1 % 48.0 == 0 for c in insts), cell
+    assert len(set(xs)) == 3          # columns are distinct, left to right
+
+
+def test_stacked_layout_channel_is_a_minimum(tmp_path):
+    """The realized gap is the grid round-UP of the requested channel, never
+    less than it."""
+    path = str(tmp_path / "stacked2.bdb")
+    build_hier_demo.build(path, _CELLS[:1], seed=1, n_instances=2, n_buses=0,
+                          layout="stacked", channel=10.0, grid=1000.0)
+    db = buda_db.BDB(path)
+    insts = sorted(_depth1(db).values(), key=lambda c: c.y1)
+    pitch = insts[1].y1 - insts[0].y1
+    assert pitch % 1000.0 == 0
+    assert pitch - (insts[0].y2 - insts[0].y1) >= 10.0
+
+
+def test_row_layout_is_the_default_and_unchanged(tmp_path):
+    """No layout argument = the historical row at y=0."""
+    path = str(tmp_path / "row.bdb")
+    build_hier_demo.build(path, _CELLS[:2], seed=1, n_instances=2, n_buses=0)
+    db = buda_db.BDB(path)
+    assert all(c.y1 == 0.0 for c in _depth1(db).values())
+
+
+def test_column_align_top_flushes_without_breaking_the_grid(tmp_path):
+    """--column-align top shifts each column up as a RIGID block: the tops go
+    flush and every intra-column pitch is untouched, so --grid alignment
+    survives.  (Shifting only the topmost instances would break it — the gap
+    to the tallest column is not generally a multiple of the grid.)"""
+    path = str(tmp_path / "flush.bdb")
+    build_hier_demo.build(path, _CELLS, seed=1, n_instances=3, n_buses=2,
+                          layout="stacked", channel=100.0, grid=48.0,
+                          column_align="top")
+    db = buda_db.BDB(path)
+    by_cell = {}
+    for c in _depth1(db).values():
+        by_cell.setdefault(c.cell, []).append(c)
+    tops = set()
+    for cell, insts in by_cell.items():
+        insts.sort(key=lambda c: c.y1)
+        tops.add(round(insts[-1].y2, 6))
+        pitches = [insts[i + 1].y1 - insts[i].y1 for i in range(len(insts) - 1)]
+        assert len(set(round(p, 6) for p in pitches)) == 1, cell
+        assert pitches[0] % 48.0 == 0, (cell, pitches[0])   # grid survives
+    assert len(tops) == 1, tops                             # all columns flush
+
+
+def test_column_align_center_is_symmetric_and_on_grid(tmp_path):
+    """--column-align center splits each column's slack equally above and
+    below — the placement half of mirror symmetry — again as a rigid shift, so
+    the grid survives."""
+    path = str(tmp_path / "centred.bdb")
+    build_hier_demo.build(path, _CELLS, seed=1, n_instances=3, n_buses=2,
+                          layout="stacked", channel=100.0, grid=48.0,
+                          column_align="center")
+    db = buda_db.BDB(path)
+    comps = db.all_components()
+    H = [c for c in comps if c.depth == 0][0].y2
+    by_cell = {}
+    for c in _depth1(db).values():
+        by_cell.setdefault(c.cell, []).append(c)
+    for cell, insts in by_cell.items():
+        insts.sort(key=lambda c: c.y1)
+        assert abs(insts[0].y1 - (H - insts[-1].y2)) < 1e-6, cell   # symmetric
+        pitches = [insts[i + 1].y1 - insts[i].y1 for i in range(len(insts) - 1)]
+        assert pitches[0] % 48.0 == 0, (cell, pitches[0])           # grid kept
+
+
+def test_mirror_upper_reflects_every_block(tmp_path):
+    """--mirror-upper flips the instances above the centreline, so the whole
+    leaf-block set maps exactly onto its own reflection."""
+    path = str(tmp_path / "mirror.bdb")
+    build_hier_demo.build(path, _CELLS, seed=1, n_instances=2, n_buses=2,
+                          layout="stacked", channel=100.0, grid=48.0,
+                          column_align="center", mirror_upper=True)
+    db = buda_db.BDB(path)
+    comps = db.all_components()
+    H = [c for c in comps if c.depth == 0][0].y2
+    leaves = [c for c in comps if c.depth == 2]
+    assert leaves
+    S = {(round(c.x1, 3), round(c.y1, 3), round(c.x2, 3), round(c.y2, 3))
+         for c in leaves}
+    M = {(x1, round(H - y2, 3), x2, round(H - y1, 3)) for x1, y1, x2, y2 in S}
+    assert S == M
+
+
+def test_column_align_is_bottom_by_default(tmp_path):
+    """Without it, columns are bottom-aligned at y=0 as before."""
+    path = str(tmp_path / "noflush.bdb")
+    build_hier_demo.build(path, _CELLS, seed=1, n_instances=2, n_buses=0,
+                          layout="stacked", channel=100.0, grid=48.0)
+    db = buda_db.BDB(path)
+    assert min(c.y1 for c in _depth1(db).values()) == 0.0
+    by_cell = {}
+    for c in _depth1(db).values():
+        by_cell.setdefault(c.cell, []).append(c)
+    assert all(min(i.y1 for i in v) == 0.0 for v in by_cell.values())
+
+
+def test_mirror_upper_refuses_a_centreline_straddler(tmp_path):
+    """Codex #568: an odd instance count in a centred column puts the middle
+    occurrence exactly on the centreline, where it cannot mirror onto itself —
+    the layout would silently miss the contents-included guarantee.  Refuse."""
+    with pytest.raises(SystemExit) as exc:
+        build_hier_demo.build(str(tmp_path / "odd.bdb"), _CELLS[:2], seed=1,
+                              n_instances=3, n_buses=1, layout="stacked",
+                              channel=100.0, grid=48.0,
+                              column_align="center", mirror_upper=True)
+    msg = str(exc.value)
+    assert "straddle" in msg and "EVEN instance count" in msg
+
+
+def test_build_is_atomic_under_a_closed_pipe(tmp_path):
+    """A build killed partway must leave NO output BDB.
+
+    Regression for a silent-correctness trap: this tool prints one line per
+    bus, so `... | head -N` closed the pipe, SIGPIPE killed the build
+    mid-write, and the half-finished BDB — missing nets, pins and every
+    busterm — got serialized into a checked-in fixture.  It read as a valid
+    design and routed fast and clean because most of the work was absent.
+    """
+    import subprocess
+    out = tmp_path / "trunc.bdb"
+    root = build_hier_demo._ROOT
+    # -u is REQUIRED, not incidental: block-buffered stdout would hold the ~40
+    # bus lines until exit, `head` would never close the pipe early, and the
+    # test would fail without ever exercising SIGPIPE — passing or failing on
+    # whether PYTHONUNBUFFERED happens to be set (bin/bb exports it; a bare
+    # pytest run does not).  Codex #568.
+    p1 = subprocess.Popen(
+        [sys.executable, "-u",
+         os.path.join(root, "tools", "build_hier_demo.py"),
+         str(out), "--cells", "dnuts1,dnuts2", "--instances", "2",
+         "--buses", "40"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=root,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"})
+    p2 = subprocess.Popen(["head", "-3"], stdin=p1.stdout,
+                          stdout=subprocess.DEVNULL)
+    p1.stdout.close()
+    p2.wait()
+    p1.wait()
+    assert not out.exists(), "a truncated build must not leave an output BDB"
+
+
+def test_build_leaves_no_part_file_on_success(tmp_path):
+    out = tmp_path / "ok.bdb"
+    build_hier_demo.build(str(out), _CELLS[:2], seed=1, n_instances=2,
+                          n_buses=2)
+    assert out.exists()
+    assert not (tmp_path / "ok.bdb.part").exists()
+    db = buda_db.BDB(str(out))
+    assert db.all_nets() and db.all_pins()      # fully written

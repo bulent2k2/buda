@@ -113,6 +113,9 @@ CORPUS = [
     "flow/rnr/mix2_fast_bottomup_caps.buda",
     "flow/rnr/mix2_fast_bottomup_shared.buda",
     "flow/chip/chip_bottomup_caps.buda",
+    # On-grid stacked variant: cheap (~30s) and the guard for instance-phase
+    # alignment — a regression in placement phase shows up as a QoR change.
+    "flow/chip/chip_stack_bottomup.buda",
     "flow/rnr/mix2_fast_on_aligned_sql.buda",
     "flow/rnr/mix2_fast_topdown.buda",
     "flow/rnr/mix2_topdown_refine.buda",

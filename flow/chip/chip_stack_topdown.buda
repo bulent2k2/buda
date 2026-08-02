@@ -1,0 +1,27 @@
+# chip_stack — the ON-GRID STACKED chip variant, TOP-DOWN.
+#
+# The comparison twin of chip_stack_bottomup.buda: same design, same layer
+# policy, but no bottom-up templates — every instance's interconnect is planned
+# individually in the global frame.  Use the pair to separate what the on-grid
+# stacked placement buys from what solve-once-copy buys.
+#
+# Design (see chip_stack_bottomup.buda for the full note on the 504 grid):
+#   LEFT  column  x=[0..6100]      2 x big2, pitch 7560  (multiple of 504)
+#   RIGHT column  x=[7100..9430]   4 x mix2, pitch 3528  (multiple of 504),
+#                                  centred (458 margins); upper half mirrored
+#   die 9430 x 13860, 100 top-level cross-hierarchy buses, 11750 nets
+source chip_tracks.buda
+open_bdb chip_stack.bdb.sql
+reserve_top_layers 2
+derive_busterms 2
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+run_hier_bundler depth 2
+generate_hier_topologies
+run_planner hier 5 signal_tracks
+run_nuts
+run_detailed_nuts
+report_wl
+check_design
+exit
