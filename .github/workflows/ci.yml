@@ -34,6 +34,14 @@ jobs:
       # (CMakeLists' -ffp-contract=off already removes the FMA-contraction half
       # of the same problem; this removes the vectorization half.)
       BUDA_ARCH: x86-64-v2
+      # CI is the golden REFERENCE HOST.  Without this the four
+      # HOST_SENSITIVE_FLOWS xfail on ANY mismatch — and pytest.xfail() is
+      # imperative, so it swallows a genuine regression exactly as readily as
+      # an environmental one.  That left all four large goldens decorative
+      # here.  Strict is only defensible because this environment is
+      # controlled (pinned ISA, fixed runner image); developer machines are
+      # heterogeneous and keep the lenient xfail by leaving this unset.
+      BUDA_NUTS_GOLDEN_STRICT: '1'
       # Headless: the suite uses matplotlib's Agg backend and needs no Tk or
       # display server (docs/build_test_dependencies.md).
       MPLBACKEND: Agg

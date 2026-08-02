@@ -67,21 +67,41 @@ This is the second half of a problem the repo already half-solved:
 contraction so the double-based congestion/NUTS math rounds identically across
 CPUs. Pinning `-march` removes the vectorization half.
 
-**Measured:** under `-march=x86-64-v2` the suite is byte-for-byte as green as
-under `native` — 2077 passed either way — and the golden file itself is
-8 passed / 1 xfailed. The single xfail is
-`test_nuts_placement_matches_golden_large[flow/rnr/mix.buda]`, one of the four
-`HOST_SENSITIVE_FLOWS`, which xfail off their generation host by design rather
-than failing. Three of the four still match exactly.
+**Measured:** under `-march=x86-64-v2` the suite is as green as under `native`.
+
+## CI is the golden reference host
+
+The workflow sets `BUDA_NUTS_GOLDEN_STRICT=1`. Without it the four
+`HOST_SENSITIVE_FLOWS` xfail on *any* mismatch — and `pytest.xfail()` is
+imperative, so it swallows a genuine regression exactly as readily as an
+environmental one. All four large goldens were therefore **decorative** in CI:
+a refactor that really moved wires would have reported xfail and stayed green.
+
+Strict is only defensible because this environment is controlled (pinned ISA,
+fixed runner image). Developer machines are heterogeneous and keep the lenient
+xfail by leaving the variable unset.
+
+`flow/rnr/mix.buda`'s golden was regenerated for this. Its diff is
+QoR-neutral — identical `248 segments overlaps=0 violations=0` and
+`3132 netsegs 1862 vias unplaced=0`, with one 16-bit bus segment reassigned
+M3→M5 (abstract 10→9 / 96→97, detailed 184→168 / 1176→1192). The other eight
+goldens were byte-identical when regenerated and were left untouched.
+
+**The flag is wider than its name.** `BUDA_NUTS_GOLDEN_STRICT` is a repo-wide
+"I am the generation host" declaration, and it has a **second consumer**:
+`test_flow_scripts.py::test_10_four_level_scale_one_bundle_per_bus` switches
+from tolerant bounds to a hand-calibrated QoR ratchet (`segs == 209`,
+`ovlps == 0`, `net_segs >= 1220`, `unplaced == 0`, no keepout culls). Unlike
+the placement goldens that ratchet is **not** regenerable by any tool — the
+numbers are hardcoded in the test, calibrated on the original generation host
+under `-march=native`. Enabling strict adopts it too.
 
 ## What CI deliberately does NOT do
 
-Three, each a real gap rather than an oversight — the reasoning, evidence and
+Two, each a real gap rather than an oversight — the reasoning, evidence and
 where-to-start notes are in [`opens_ci.md`](opens_ci.md):
 
-1. **CI does not own the goldens** — `BUDA_NUTS_GOLDEN_STRICT` stays unset, so
-   `flow/rnr/mix.buda`'s large golden is currently unenforced in CI.
-2. **The QoR corpus does not run** — it is a comparison tool and needs cached
+1. **The QoR corpus does not run** — it is a comparison tool and needs cached
    merge-base baselines, so it belongs in a nightly, not the PR path.
-3. **The web ports are not executed** — `test_web_displaygeom.py` pins the
+2. **The web ports are not executed** — `test_web_displaygeom.py` pins the
    authoritative geometry but never runs the JS or Scala mirrors of it.

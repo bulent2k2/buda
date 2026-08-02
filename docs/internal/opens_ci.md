@@ -44,29 +44,27 @@ has no answer to.
   flow itself), so expect the occasional legitimate churn — the guard should
   report the diff, not auto-fail on noise it cannot distinguish.
 
-## 2. Own the placement goldens in CI  *(small effort; needs a decision first)*
+## 2. ~~Own the placement goldens in CI~~ — RESOLVED 2026-08-02
 
-**Uncovered:** `test_nuts_placement_golden.py` xfails the four
-`HOST_SENSITIVE_FLOWS` off their generation host rather than failing.
-`BUDA_NUTS_GOLDEN_STRICT=1` turns those into hard failures, and the test's own
-docstring suggests setting it "on the golden-generation host's CI". It is
-**not** set, because CI is not currently that host.
+CI is now the golden reference host: `BUDA_NUTS_GOLDEN_STRICT=1` is set in the
+workflow and `flow/rnr/mix.buda`'s golden was regenerated (QoR-neutral: one
+16-bit bus segment M3→M5, identical totals). The other eight goldens were
+byte-identical and untouched. See [`ci.md`](ci.md).
 
-Concretely: under the workflow's pinned `-march=x86-64-v2`, three of the four
-match exactly and **`flow/rnr/mix.buda`'s large golden is unenforced**. The
-five stable small flows are always enforced.
+**What this cost, recorded because it was not obvious:** the flag is wider than
+its name. `BUDA_NUTS_GOLDEN_STRICT` is a repo-wide "I am the generation host"
+declaration and also switches
+`test_flow_scripts.py::test_10_four_level_scale_one_bundle_per_bus` from
+tolerant bounds to a hand-calibrated QoR ratchet (`segs == 209`, `unplaced == 0`,
+no culls) that **no tool regenerates** — those numbers are hardcoded, calibrated
+on the original generation host under `-march=native`, which is not CI's ISA.
 
-**Why it was left out.** Enabling it requires regenerating the goldens on the CI
-image first, and that is a real decision rather than a workflow tweak: it
-changes what the committed goldens *mean* (CI's ISA becomes the reference) and
-who can reproduce a failure locally (a developer on `-march=native` would then
-see mismatches CI does not, inverting today's situation).
-
-**Where to start.** Decide whether CI is the reference host. If yes: regenerate
-via `tools/nuts_snapshot.py` on the CI image, commit the diff for review, then
-set `BUDA_NUTS_GOLDEN_STRICT=1` in the workflow. If no: leave as is and accept
-that one large golden is advisory — but say so in the golden docstring, which
-currently implies CI *should* enforce.
+If that ratchet ever fails in CI, the honest options are (a) split the flag so
+placement-golden strictness and the flow ratchet can be enabled independently —
+they are genuinely different concerns that happen to share a variable — or
+(b) re-calibrate the ratchet against CI and say so in its comment. Do **not**
+quietly edit the numbers to whatever CI produces without recording that the
+calibration host changed.
 
 ## 3. Execute the web ports  *(largest effort; independent of the rest)*
 
