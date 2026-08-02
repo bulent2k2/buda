@@ -31,6 +31,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
 
+    permissions:
+      # Least privilege for what the snapshot-table refresh below needs: push a
+      # side branch and open one PR.  Deliberately NOT enough to write to main.
+      contents: write
+      pull-requests: write
+
     env:
       # Same pin as the PR gate: routing decisions are ISA-sensitive, so an
       # unpinned -march would produce corpus churn indistinguishable from a
@@ -40,6 +46,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the snapshot-table step below pushes a branch, and a
+          # push from the default depth-1 shallow clone can be rejected with
+          # "shallow update not allowed".
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -146,3 +157,145 @@ jobs:
         with:
           path: qor-baseline.json
           key: qor-baseline-${{ github.run_id }}
+
+      # ---------------------------------------------------------------------
+      # Refresh the checked-in corpus SNAPSHOT (qor_table.md).
+      #
+      # Different tool, different purpose from everything above: qor_corpus.py
+      # A/B-compares two builds and gates; qor_table.py renders a single-build
+      # point-in-time table that docs/ cite as evidence.  Nothing refreshed it,
+      # so it drifted 46 commits stale before anyone noticed.
+      #
+      # This costs a SECOND full sweep (~6.5 min).  The two tools' run_flow's
+      # measure the same pipeline and could share one sweep with a key rename,
+      # but that would re-point the regression GATE at the other tool's
+      # row-builder and invalidate the cached baseline's key schema — a bad
+      # trade for ~6 min of unattended runner time.  See opens_ci.md.
+      # ---------------------------------------------------------------------
+
+      - name: Refresh the corpus snapshot table
+        # always() + a compare that RAN: refresh on clean, established AND
+        # regressed (a regressed main is exactly when the snapshot most needs to
+        # tell the truth), but NOT when the sweep errored out above — that
+        # table would be garbage.
+        if: always() && steps.compare.outputs.status != ''
+        run: |
+          cp qor_table_rows.json /tmp/rows-before.json 2>/dev/null || true
+          # --fail-on-err for the same reason the regression sweep has its own
+          # reject step: qc.sweep records a flow that RAISES as an `err` row and
+          # still exits 0, the table renders it as `ERR: ...` in place of the
+          # metrics, and semantic_diff reads that as a change — so an unguarded
+          # failure would open the AUTHORITATIVE snapshot PR publishing ERR as
+          # if it were data (review #566 P2).  Fails before writing anything.
+          python3 tools/qor_table.py --fail-on-err \
+            --out qor_table.md --json qor_table_rows.json
+
+      - name: Detect a semantic change
+        id: table
+        if: always() && steps.compare.outputs.status != ''
+        # The `sec` column is THIS run's wall-clock, so the rendered file
+        # differs on every single run even when the QoR is identical.  A plain
+        # `git diff --quiet` gate would therefore open a PR every night forever
+        # and bury the real signal.
+        #
+        # The predicate lives in qor_table.py (semantic_diff + --diff), NOT
+        # inline here: logic embedded in YAML cannot be unit-tested, and this is
+        # the load-bearing decision of the whole step.  See test_qor_sweep.py.
+        run: |
+          {
+            echo '## Corpus snapshot diff'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          python3 tools/qor_table.py --diff /tmp/rows-before.json qor_table_rows.json \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Discard timing-only churn
+        # Not cosmetic: leaving the sec-only rewrite in the tree would make the
+        # commit step below see a dirty tree and push a no-op change.
+        # `|| true` per path: the sidecar is untracked until the first snapshot
+        # PR merges, and `git checkout --` on an unknown path is an error.
+        if: always() && steps.table.outputs.changed == 'false'
+        run: |
+          git checkout -- qor_table.md 2>/dev/null || true
+          git checkout -- qor_table_rows.json 2>/dev/null || true
+
+      - name: Open or update the snapshot PR
+        if: always() && steps.table.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # A PR, not a direct commit to main.  This file is CITED by docs/ as
+        # evidence for design decisions, so a change to it is a claim about the
+        # design, not a build artifact — a human should see it.  A FIXED branch
+        # that is force-pushed means at most ONE such PR is ever open, so this
+        # cannot pile up.
+        run: |
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          SHORT="$(git rev-parse --short HEAD)"
+
+          # Bodies via heredoc, NOT inline -m strings: a multi-line string
+          # written inside `run: |` carries the YAML block's indentation into
+          # every continuation line.
+          #
+          # The file holds the COMPLETE message (subject, blank line, body) and
+          # is passed with -F alone: git rejects `-m` and `-F` together with
+          # `fatal: options '-m' and '-F' cannot be used together`, which would
+          # abort this step before the push on every semantic change (review
+          # #566 P1 — verified against git 2.43).
+          cat > /tmp/commit-msg.txt <<EOF
+          qor: refresh qor_table.md snapshot (main @ $SHORT)
+
+          Regenerated by the nightly QoR workflow from ${{ github.sha }} ($RUN_URL).
+          Semantic columns changed; the per-flow diff is in the job summary.
+
+          'sec' is contention-inflated (parallel sweep); 'sec1' still carries the
+          last full serial timings.  Measured at -march=x86-64-v2, CI's pinned ISA.
+          EOF
+
+          cat > /tmp/pr-body.md <<EOF
+          Automated refresh of \`qor_table.md\` by the nightly QoR workflow.
+
+          The semantic columns (sizes / wirelength / ovl / unpl / viol) moved against the
+          committed snapshot — the per-flow diff is in the [job summary]($RUN_URL).
+
+          Timing-only churn does **not** open a PR: \`sec\` is this run's own wall-clock and
+          changes every night, so the gate (\`qor_table.semantic_diff\`) compares semantic
+          fields only.
+
+          Measured at \`-march=x86-64-v2\`, CI's pinned ISA and the reference host for this
+          table — see \`docs/internal/ci.md\`.
+          EOF
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B nightly/qor-table
+          git add qor_table.md qor_table_rows.json
+          git commit -F /tmp/commit-msg.txt
+          # Plain --force, not --force-with-lease: the lease needs a
+          # remote-tracking ref that does not exist the first time this branch
+          # is created, and the branch is wholly bot-owned and regenerated from
+          # scratch each night, so there is no human work to protect.  Hand
+          # edits to it WILL be overwritten — fix the tool or the flow instead.
+          git push --force origin nightly/qor-table
+          # --state open, not `gh pr view`: view also matches a CLOSED PR for this
+          # branch, which would leave the push orphaned with no PR ever reopened.
+          if [ -n "$(gh pr list --head nightly/qor-table --state open --json number --jq '.[].number')" ]; then
+            echo "PR already open for nightly/qor-table — the force-push updated it."
+          else
+            gh pr create --base main --head nightly/qor-table \
+              --title "qor: refresh the corpus snapshot table" \
+              --body-file /tmp/pr-body.md
+          fi
+
+      - name: Summarize the snapshot outcome
+        if: always() && steps.compare.outputs.status != ''
+        run: |
+          {
+            echo '## Corpus snapshot table'
+            if [ "${{ steps.table.outputs.changed }}" = "true" ]; then
+              echo 'Semantic columns changed — PR opened/updated on `nightly/qor-table`.'
+            else
+              echo 'No semantic change (timing-only churn discarded).'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

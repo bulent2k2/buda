@@ -120,8 +120,14 @@ nightly**, so a routing-quality regression on `main` surfaces within a day
 instead of waiting for someone to remember `tools/qor_corpus.py`.
 
 It is deliberately not part of the PR gate: the corpus is a *comparison* tool —
-a single run says nothing without a baseline — and it costs ~4m20s of sweep on
-top of a ~1m50s build.
+a single run says nothing without a baseline — and it costs a full sweep on top
+of a build.
+
+**Measured on the hosted runner** (first real run, 2026-08-02): build 1m52s +
+corpus sweep 6m34s (`swept 37 flows in 393.9s (jobs=4)`) = **8m49s**. The
+"~4m20s sweep" figure this page carried before that run was measured in a
+developer container; the hosted runner is ~50% slower for the same work. Adding
+the snapshot-table refresh below takes the job to roughly **16 min**.
 
 **The baseline is only promoted on a clean run.** That is the design decision
 worth knowing: promoting a regressed sweep would make the regression the new
@@ -141,7 +147,51 @@ by every later nightly. The workflow fails on any `err` row instead.
 The run JSON and the diff upload as an artifact on **every** run, including
 failures — that is when they are most useful.
 
-Two caveats on reading its output:
+### The snapshot table is refreshed by the same job
+
+`qor_table.md` is a *different* artifact from everything above, and the two are
+easy to confuse:
+
+| | `tools/qor_corpus.py` | `tools/qor_table.py` |
+|---|---|---|
+| purpose | A/B **compare** two builds, gate on regressions | single-build **snapshot** |
+| output | `qor-current.json` + a diff + an exit code | `qor_table.md` (+ `qor_table_rows.json`) |
+| in the nightly | the regression gate | the table refresh |
+
+Nothing refreshed the table, so it drifted **46 commits stale** before anyone
+noticed — while `docs/` pages cite its numbers as evidence. The nightly now
+regenerates it and, when the numbers actually move, opens a PR on the fixed
+branch `nightly/qor-table`.
+
+**A PR rather than a commit to `main`,** because this file is *cited*: a change
+to it is a claim about the design, not a build artifact, and a scheduled job
+rewriting a cited document unattended makes the stale-but-authoritative problem
+worse rather than better. The branch is fixed and force-pushed, so at most one
+such PR is ever open. The job's `permissions:` are scoped to exactly that —
+`contents: write` + `pull-requests: write`, which is deliberately *not* enough
+to write to `main`.
+
+**The change gate ignores `sec`.** That column is the run's own wall-clock, so
+the rendered table differs on *every* run even when the QoR is identical; a
+plain `git diff --quiet` would open a PR nightly forever and bury the signal.
+The predicate is `qor_table.semantic_diff` (exposed as `--diff`), deliberately
+in Python rather than inline YAML so it is unit-tested — `test_qor_sweep.py`
+covers both directions (timing-only churn is *not* a change; a real metric move
+*is*). The `--json` sidecar it compares is sorted by flow, so reordering the
+`CORPUS` list does not read as a whole-file change.
+
+**This costs a second full sweep** (~6.5 min). The two tools' `run_flow`s
+measure the same pipeline and could share one sweep with a key rename
+(`ovl/unpl/viol` vs `overlaps/unplaced/viol_bundles`), but that would re-point
+the regression *gate* at the other tool's row-builder and invalidate the cached
+baseline's key schema — a bad trade for six minutes of unattended runner time.
+Recorded in [`opens_ci.md`](opens_ci.md).
+
+The refresh runs on a clean, established **or regressed** result — a regressed
+`main` is exactly when the snapshot most needs to tell the truth — but not when
+the sweep errored, since that table would be garbage.
+
+### Caveats on reading the nightly's output
 
 - **Per-flow `sec` is not timing-faithful.** The sweep runs parallel (jobs =
   CPU count), so those are wall-clock under contention. The compare prints them
