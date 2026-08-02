@@ -73,7 +73,12 @@ import qor_corpus as qc  # noqa: E402
 
 
 def run_flow(flow):
-    """Source one flow end-to-end (viz/exit stripped) and return the session."""
+    """Source one flow end-to-end and return the session.
+
+    `visualize` is skipped (headless) but `exit` TERMINATES, exactly as the
+    CLI does: a flow that exits before the physical end of the file (e.g. a
+    healer experiment parked below the terminator) must be audited at its
+    REAL endpoint, not with its unreachable tail executed (Codex P2)."""
     absf = os.path.join(_ROOT, flow)
     cwd = os.getcwd()
     s = buda_cli.BudaSession()
@@ -83,37 +88,81 @@ def run_flow(flow):
         os.chdir(os.path.dirname(absf))
         for raw in open(absf):
             line = raw.strip()
-            if not line or line.startswith(("#", "visualize", "exit")):
+            if not line or line.startswith(("#", "visualize")):
                 continue
+            if line == "exit" or line.startswith("exit "):
+                break                                  # the flow's real end
             with contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()), \
                     buda.ostream_redirect():
                 try:
                     s.do_command(line)
                 except SystemExit as e:
-                    # An intentional `exit 0` ends a flow normally.
+                    # A nested `source`d script may exit; 0/None is normal.
                     if e.code not in (0, None):
                         raise
+                    break
     finally:
         os.chdir(cwd)
     return s
 
 
-def _window_holders(s, layer, seg, locked_ids):
-    """Placed segments on `layer` that actually consume the seat's window:
-    span overlapping the seat's span AND track inside its slide window.
-    Returns (locked_bundle_ids, unlocked_bundle_ids)."""
-    lo, hi = seg.interval_lo, seg.interval_hi
-    locked, unlocked = set(), set()
-    for t in s.nuts_result.segments:
-        if t.layer != layer or not t.placed or t is seg:
-            continue
-        if t.span_hi < seg.span_lo or t.span_lo > seg.span_hi:
-            continue                                   # no span overlap
-        if not (lo <= t.track_position <= hi):
-            continue                                   # outside the window
-        (locked if t.bundle_id in locked_ids else unlocked).add(t.bundle_id)
-    return sorted(locked), sorted(unlocked)
+def _track_claims(s, layer, seg, locked_ids):
+    """Which of the sibling layer's SIGNAL tracks in this seat's window are
+    actually claimed, and by whom.
+
+    Measures the EXACT per-bit reservations DetailedNUTS makes (`net_segments`
+    carry one placed track per bit) rather than testing a bus's single
+    abstract `track_position` — a wide bus reserves a RANGE of tracks, so the
+    point test both misses claims that enter the window and credits holders
+    whose bits do not (Codex P1).  Falls back to the abstract anchor only when
+    the flow never ran detailed NUTS.
+
+    Returns (tracks, claimed_by_locked, claimed_by_unlocked, locked_ids_seen,
+    unlocked_ids_seen) where the two `claimed_*` are SETS OF TRACK POSITIONS."""
+    g = s.routing_grid.get_layer_grid(layer)
+    tracks = [p for p, _slot in g.signal_tracks_in_span(
+        seg.span_lo, seg.span_hi, seg.interval_lo, seg.interval_hi)]
+    if not tracks:
+        return [], set(), set(), set(), set()
+    tol = 1e-6
+
+    def _nearest(pos):
+        best = min(tracks, key=lambda t: abs(t - pos))
+        return best if abs(best - pos) <= max(tol, 0.5) else None
+
+    dr = getattr(s, "detailed_result", None)
+    claims = []          # (bundle_id, track_position)
+    if dr is not None and dr.net_segments:
+        for ns in dr.net_segments:
+            if ns.layer != layer:
+                continue
+            if ns.bundle_id == seg.bundle_id and ns.seg_idx == seg.seg_idx:
+                continue                               # the seat itself
+            if ns.span_hi < seg.span_lo or ns.span_lo > seg.span_hi:
+                continue
+            t = _nearest(ns.track_position)
+            if t is not None:
+                claims.append((ns.bundle_id, t))
+    else:                                              # pre-DNUTS fallback
+        for t_seg in s.nuts_result.segments:
+            if t_seg.layer != layer or not t_seg.placed or t_seg is seg:
+                continue
+            if t_seg.span_hi < seg.span_lo or t_seg.span_lo > seg.span_hi:
+                continue
+            half = t_seg.width / 2.0
+            for t in tracks:
+                if (t_seg.track_position - half) <= t <= \
+                        (t_seg.track_position + half):
+                    claims.append((t_seg.bundle_id, t))
+
+    lk_tracks, un_tracks, lk_ids, un_ids = set(), set(), set(), set()
+    for bid, t in claims:
+        if bid in locked_ids:
+            lk_tracks.add(t); lk_ids.add(bid)
+        else:
+            un_tracks.add(t); un_ids.add(bid)
+    return tracks, lk_tracks, un_tracks, sorted(lk_ids), sorted(un_ids)
 
 
 def audit(s, flow):
@@ -145,34 +194,65 @@ def audit(s, flow):
             continue                       # seat is adequately supplied
         if not s.layers.is_top(seg.layer):
             continue                       # LOW = the escalation family's market
+        # A user-forced per-segment layer is inviolable — the re-seat heal
+        # refuses to move it, so no sibling is a legal destination and the
+        # seat is not a negotiation candidate at all (Codex P2).
+        pins = list(w.input.pinned_seg_layers) if w.input.pinned_seg_layers else []
+        if seg.seg_idx < len(pins) and pins[seg.seg_idx] >= 0:
+            rows.append(dict(flow=flow, bid=seg.bundle_id, seg=seg.seg_idx,
+                             layer=lnames.get(seg.layer, seg.layer),
+                             need=need, pool=pool, verdict="USER_PINNED",
+                             sibs=[], holders=None))
+            continue
 
-        # What would this seat's supply be on each same-direction TOP sibling?
-        sibs = []
-        for lid in s.layers.get_layer_ids_by_dir(
-                s.layers.get_layer_dir(seg.layer)):
-            if lid == seg.layer or not s.routing_grid.has_layer(lid):
-                continue
-            if not s.layers.is_top(lid):
-                continue
-            sibs.append((lid, s._seg_admission_pool(
-                seg, s.routing_grid.get_layer_grid(lid), need)))
+        # Candidate siblings: EXACTLY the re-seat heal's legal pool
+        # (nutsflow.py `_final_reseat_heal`) — same-direction TOP layers with
+        # a grid, intersected with `allowed_layers`, minus fractionally
+        # leased layers (a re-seat there would spend past the lease).
+        want_dir = (buda.LayerDir.HORIZONTAL if seg.horiz
+                    else buda.LayerDir.VERTICAL)
+        pool_ids = [l for l in s.layers.get_layer_ids_by_dir(want_dir)
+                    if s.layers.is_top(l) and l != seg.layer
+                    and s.routing_grid.has_layer(l)]
+        if w.input.allowed_layers:
+            pool_ids = [l for l in pool_ids if l in w.input.allowed_layers]
+        if w.input.layer_shares:
+            leased = {lid for lid, _sh in w.input.layer_shares}
+            pool_ids = [l for l in pool_ids if l not in leased]
 
+        sibs = [(lid, s._seg_admission_pool(
+            seg, s.routing_grid.get_layer_grid(lid), need)) for lid in pool_ids]
         adequate = [(lid, sp) for lid, sp in sibs if sp >= need]
-        holders = None
-        if not adequate:
-            verdict = "LAYER_STARVED"
-        else:
-            # Report the sibling with the strongest locked-copy claim: that is
-            # the one a class-level track negotiation would have to move.
-            best = max(
-                ((lid, sp) + _window_holders(s, lid, seg, locked_ids)
-                 for lid, sp in adequate),
-                key=lambda r: (len(r[2]), r[1]))
-            lid, sp, lk, un = best
-            verdict = ("BLOCKED_BY_LOCKED" if lk else
-                       "BLOCKED_BY_UNLOCKED" if un else "FREE_SIBLING")
-            holders = dict(layer=lnames.get(lid, lid), supply=sp,
-                           locked=lk, unlocked=un)
+
+        holders, verdict = None, "LAYER_STARVED"
+        best = None
+        for lid, sp in adequate:
+            tracks, lk_t, un_t, lk_ids, un_ids = _track_claims(
+                s, lid, seg, locked_ids)
+            # Room available NOW, and room if every locked copy vacated.
+            free_now = len([t for t in tracks if t not in lk_t and t not in un_t])
+            free_if_released = len([t for t in tracks if t not in un_t])
+            if free_now >= need:
+                v = "FREE_SIBLING"
+            elif lk_t and free_if_released >= need:
+                # Releasing the locked copies genuinely creates room: the
+                # only case a class-level track negotiation can convert.
+                v = "BLOCKED_BY_LOCKED"
+            else:
+                # Unlocked reservations alone still prevent placement, so
+                # moving locked copies would NOT free enough capacity.
+                v = "BLOCKED_BY_UNLOCKED"
+            rank = {"BLOCKED_BY_LOCKED": 3, "FREE_SIBLING": 2,
+                    "BLOCKED_BY_UNLOCKED": 1}[v]
+            cand = (rank, sp, lid, v, dict(
+                layer=lnames.get(lid, lid), supply=sp, tracks=len(tracks),
+                free_now=free_now, free_if_locked_released=free_if_released,
+                locked=lk_ids, unlocked=un_ids))
+            if best is None or cand[:2] > best[:2]:
+                best = cand
+        if best is not None:
+            _r, _sp, _lid, verdict, holders = best
+
         rows.append(dict(flow=flow, bid=seg.bundle_id, seg=seg.seg_idx,
                          layer=lnames.get(seg.layer, seg.layer),
                          need=need, pool=pool, verdict=verdict,
@@ -209,6 +289,8 @@ def main():
             if d["holders"]:
                 h = d["holders"]
                 print(f"{'':40}   sibling {h['layer']} supply={h['supply']} "
+                      f"tracks={h['tracks']} free_now={h['free_now']} "
+                      f"free_if_locked_released={h['free_if_locked_released']} "
                       f"locked={h['locked']} unlocked={h['unlocked']}",
                       flush=True)
         rows.extend(rows_f)
