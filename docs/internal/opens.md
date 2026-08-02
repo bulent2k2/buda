@@ -7,6 +7,12 @@ wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
 lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved (by \<date\>)*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
 items this page doesn't see).
 
+> **Continuous integration:** CI landed 2026-08-01
+> ([`ci.md`](ci.md)) — build + full suite on every push and PR, ~5 min. What it
+> deliberately does NOT cover yet (nightly QoR corpus, owning the placement
+> goldens, executing the web ports) is tracked separately in
+> [`opens_ci.md`](opens_ci.md).
+
 > **Feature-suite coverage:** the Gherkin narrative spec layer
 > (`test/tests/features/`) is mapped to these arcs & opens in
 > [`feature_coverage_plan.md`](feature_coverage_plan.md). The open items below
@@ -161,6 +167,32 @@ designs and fail LOUD, never silent:)*
    (opens/overlaps/WL) — or the reference host taking up the default flip and
    wanting member (2) closed for completeness. Design + measurement recorded in
    PR #366.
+8b. **A cheap WL-gain predictor (or partial DNUTS re-solve) for the
+   pair-align heal** (added 2026-08-02) — [`wishlist-nuts.md`](wishlist-nuts.md)
+   → *"Pairwise-overlap stub alignment"*. The measured-accept alignment heal
+   shipped opt-in (`set_pair_align_heal`, PR #557: 0 better / 0 worse / 37
+   unchanged — the accept rejects every regressor the unconditional form
+   caused). Its **default-flip is measured and REFUSED** (2026-08-02) on the
+   absence of BENEFIT: only 1 of 37 corpus flows accepts, at −0.02% WL. The
+   cost side is small — one extra DNUTS solve on each of the 31 ELIGIBLE flows
+   (the 6 bottom-up vehicles skip it, `hier.locked`), measured warm at
+   0.05–2.1% of flow wall; an initial "+3.3% corpus wall" figure was noise,
+   disproved by the locked flows moving MORE (+4.2%) than the eligible ones
+   despite being unable to pay at all. The guard that
+   would have made a flip affordable is **refuted, not merely unbuilt**: a
+   pair-predicate pre-check was implemented, measured on 12 flows and reverted
+   — it does not discriminate (9 of 12 flows carry 2–24 alignable pairs,
+   including every flow where the heal is ultimately REJECTED) and it is not
+   cheap (the per-BIT pass it needs costs 2.5–48× the C++ solve it would
+   skip). **What remains open is the narrower thing:** either a cheap
+   **WL-gain predictor** — estimate the trunk jog alignment would remove
+   WITHOUT solving, since "would this shorten wire" is the only question that
+   discriminates — or a **partial/warm DNUTS re-solve** scoped to the affected
+   bundles (the `rerun_bundle_warm` analogue for stage 9), so a rejection
+   costs a fraction of a full solve instead of all of it. Either one turns the
+   flip back into an open question; absent both, the answer is settled and the
+   heal stays opt-in (safe by construction — a flow that enables it can never
+   be made worse). Measurement recorded in PR #563.
 
 ## Resolved (by 2026-07-29)
 

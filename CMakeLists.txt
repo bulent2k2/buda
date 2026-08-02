@@ -19,7 +19,23 @@ else()
     # (e.g. big2's DNUTS-open baseline) fail on a different host than they were
     # validated on.  Kept alongside -march=native (perf) — tests also assert
     # bounds rather than exact goldens as a second line of defence.
-    add_compile_options(-O3 -march=native -ffp-contract=off -Wall -Wextra -fPIC)
+    # Target ISA.  "native" is the developer default (fastest on the machine
+    # doing the build).  CI must NOT use it: hosted runners are a heterogeneous
+    # fleet, so "native" means a different instruction set per run, and the
+    # placement goldens above are exactly what that perturbs -- a golden
+    # generated on one runner can fail on the next for no code reason.  Set
+    # -DBUDA_ARCH=x86-64-v2 (or another explicit baseline) to pin it, or
+    # -DBUDA_ARCH=none to omit -march entirely.
+    set(BUDA_ARCH "native" CACHE STRING "-march= value; 'none' omits the flag")
+    add_compile_options(-O3 -ffp-contract=off -Wall -Wextra -fPIC)
+    if(NOT BUDA_ARCH STREQUAL "none")
+        add_compile_options(-march=${BUDA_ARCH})
+    endif()
+    if(BUDA_ARCH STREQUAL "none")
+        message(STATUS "BUDA target ISA: -march omitted (BUDA_ARCH=none)")
+    else()
+        message(STATUS "BUDA target ISA: -march=${BUDA_ARCH}")
+    endif()
 endif()
 
 # assert()s are cheap correctness guards (e.g. ConnTopology's slide-window

@@ -157,7 +157,9 @@ mkdir -p build
 cd build
 
 echo "Configuring with CMake..."
-cmake ..
+# BUDA_ARCH forwards the target ISA (default "native"; CI pins an explicit
+# baseline so placement goldens do not drift across runner microarchitectures).
+cmake .. ${BUDA_ARCH:+-DBUDA_ARCH="$BUDA_ARCH"}
 
 if [ "$CLEAN" = true ]; then
     echo "Cleaning previous build..."

@@ -762,3 +762,73 @@ and is that supply consumed by `hier.locked` copies?  That per-seat audit
 (a natural `check_design` extension, or a one-off probe) is the real
 build-decision instrument; the census is only what points it at the right
 seats.
+
+### The forensic check, built — and b61 turns out NOT to be this shape (2026-08-02)
+
+The per-seat audit above is now a tool: **`tools/doomed_seat_forensics.py`**.
+For every supply-doomed TOP seat it re-runs the session's own
+`_seg_admission_pool` (the exact DNUTS `place_by_layer` arithmetic) against
+each same-direction TOP sibling, restricted to the **re-seat heal's own legal
+pool** (user pins refuse; `allowed_layers` intersected; fractionally leased
+layers excluded), then measures who holds that sibling's window using the
+**exact per-bit `net_segment` reservations** — not a bus's single abstract
+anchor, which both misses claims that enter the window and credits holders
+whose bits do not.
+
+The decisive test is not "are any locked copies present" but **"would
+releasing them actually make room":** enumerate the sibling's signal tracks
+in the seat's window, subtract those claimed by UNLOCKED bundles, and compare
+to the member bits.  Verdicts: `BLOCKED_BY_LOCKED` (releasing the locked
+copies frees ≥ need — the only convertible case) / `BLOCKED_BY_UNLOCKED`
+(unlocked reservations alone still block, so a class move cannot help) /
+`FREE_SIBLING` / `LAYER_STARVED` / `USER_PINNED`.
+
+**Full 37-flow corpus sweep (main @ c8f1ab6):**
+
+| flow | seat | need/pool | sibling: tracks / free_now / free_if_locked_released | verdict |
+|---|---|---|---|---|
+| `chip/chip_bottomup` | b449 seg2 M7 | 10 / 9 | M5: 23 / 0 / **23** (locked b970/b973/b1039/b1045/b1063; **no unlocked**) | **BLOCKED_BY_LOCKED** |
+| `chip/chip_bottomup_caps` | b390 seg1 M7 | 10 / 9 | M5: 23 / 3 / **23** (locked b1019/b1160; **no unlocked**) | **BLOCKED_BY_LOCKED** |
+| `rnr/mix2_fast_on_aligned_sql` | b61 seg0 M6 | 16 / 12 | M4: 17 / 1 / **7** (locked b152/b170/b174; unlocked **b18**) | **BLOCKED_BY_UNLOCKED** |
+| `chip/chip_bottomup` | b448 seg6 M5 | 6 / 0 | M7 supply 0 | LAYER_STARVED |
+| `chip/chip_bottomup` | b449 seg3 M7 | 10 / 0 | M5 supply 0 | LAYER_STARVED |
+| `chip/chip_bottomup` | b616 seg2 M5 | 14 / 7 | M7 supply 3 | LAYER_STARVED |
+| the other 33 flows | — | — | — | no doomed TOP seats |
+
+**The headline correction: b61 — the seat this whole open was written around
+— is NOT convertible by class-level track negotiation.** Its one adequate
+sibling M4 has 17 tracks, but the **unlocked** b18 alone claims 10 of them,
+so even if *every* locked copy vacated, 7 tracks remain against 16 member
+bits.  The open's own numbers already said this (`b18(10)` of 17) — what was
+missing was the arithmetic step from "locked copies hold tracks" to "moving
+them frees enough".  A class-level track move on b61 would have to be paired
+with moving an unlocked top-level bus, which is a different mechanism.
+
+**So the trigger is met only in the weaker form, and on a different design
+than expected:** 2 vehicles, both **chip** (`chip_bottomup` and its caps
+variant — one design in two configurations), **20 bits**.  Those two are
+*cleaner* cases than b61 ever was: the contended M5 window is claimed
+**entirely by locked copies with zero unlocked interference**, so releasing
+them frees the full 23 tracks for 10 bits — exactly the shape the mechanism
+targets.  But the motivating vehicle has dropped out of the market.
+
+Two further findings from the sweep:
+
+- **The shape is specific to bottom-up flows with locked copies**, as
+  theory predicts: `chip_topdown` / `chip3_topdown` (no locked copies) have
+  **no** doomed TOP seats at all, and `chip3a_bottomup` has none either.
+- **Not every doomed TOP seat is negotiable — and the census could not tell.**
+  `chip_bottomup` carries 4 doomed TOP seats: **1** BLOCKED_BY_LOCKED, **3**
+  LAYER_STARVED (two with sibling supply *0*).  A negotiation would move 10
+  of that flow's 30 doomed bits; the other 20 need supply that does not
+  exist.  Expected yield must be scored per seat, not per census line.
+
+**Recommendation.** The market is 20 bits on one design, and the case that
+motivated the open is no longer in it — so the measured-change discipline
+still argues against building the negotiation now.  The open's two cheaper
+angles remain the better next step, and the sweep points at the first one:
+every convertible seat sits in a *phase-snapped bottom-up* vehicle, i.e.
+alignment is implicated in creating the contention geometry.  What has
+changed is that the decision is now backed by a corpus-wide reproducible
+instrument, and that the instrument corrected a premise the open had carried
+since it was filed.
