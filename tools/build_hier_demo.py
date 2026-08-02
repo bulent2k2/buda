@@ -114,7 +114,16 @@ except ModuleNotFoundError:
 
 import math
 import random
+import signal
 import time
+
+# `... | head -N` closes the pipe early; the default Python behaviour raises
+# BrokenPipeError at the next flush and kills the build mid-write.  Restore the
+# shell default so a truncated reader cannot corrupt the output BDB.
+try:
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+except (AttributeError, ValueError):
+    pass
 import buda2bdb  # reuse the .buda parser + cell-size helper
 
 _GAP = 200.0   # spacing between instances laid out in a row
@@ -811,10 +820,18 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
     # silence its per-line "ignored command" warnings while defining cells.
     buda2bdb._warn = lambda *_a, **_k: None
 
-    # Fresh BDB.
-    if os.path.exists(out_path):
-        os.remove(out_path)
-    db = buda_db.BDB(out_path)
+    # Fresh BDB, written to a .part file and moved into place only once the
+    # build RUNS TO COMPLETION.  A build that dies partway — the classic being
+    # SIGPIPE from `... | head -N`, since this tool prints one line per bus —
+    # otherwise leaves a plausible-looking BDB missing nets, pins and every
+    # busterm.  Serialized into a fixture that reads as a valid design and
+    # routes clean because most of the work is absent, it is a silent
+    # correctness trap; costing one rename to remove it is cheap.
+    part = out_path + ".part"
+    for stale in (out_path, part):
+        if os.path.exists(stale):
+            os.remove(stale)
+    db = buda_db.BDB(part)
 
     # 1. Define each cell — from a flat .buda script, or (the chip-scale
     #    enhancement) from an existing hierarchical BDB flattened one level.
@@ -990,6 +1007,9 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
         buda_db.BustermGen(db).derive(max_depth)
 
     db.compute_all()
+    db.close() if hasattr(db, "close") else None
+    del db                      # flush SQLite before the rename
+    os.replace(part, out_path)
     total_nets = n_cell_nets + n_nets
     n_repair = len(buses) - n_random_buses
     repair_note = f" ({n_repair} for ≥3/instance coverage)" if n_repair else ""

@@ -102,6 +102,17 @@ depth 3).  The depth-3 vehicles `flow/chip/chip3*.buda` are built this way;
 drive them with `derive_busterms 3`, `add_blocks_from_bdb 3 skip`, and
 `run_hier_bundler depth 3`.
 
+## Output is written atomically
+
+The build writes to `<out>.part` and renames it into place **only on
+completion**, and it ignores SIGPIPE.  A build that dies partway — the classic
+being `... | head -N`, since this tool prints one line per bus — therefore
+leaves no output BDB at all, rather than a plausible-looking one missing nets,
+pins and every busterm.  That failure is worth designing against: such a file
+reads as a valid design and routes fast and clean because most of the work is
+simply absent, so it silently corrupts any measurement taken from it (it did
+exactly that to `flow/chip/chip_stack` — see that ReadMe's correction note).
+
 ## On-grid stacking
 
 `--layout stacked` places each cell type in its own **column** (left to right in

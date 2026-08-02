@@ -760,3 +760,38 @@ def test_column_align_is_bottom_by_default(tmp_path):
     for c in _depth1(db).values():
         by_cell.setdefault(c.cell, []).append(c)
     assert all(min(i.y1 for i in v) == 0.0 for v in by_cell.values())
+
+
+def test_build_is_atomic_under_a_closed_pipe(tmp_path):
+    """A build killed partway must leave NO output BDB.
+
+    Regression for a silent-correctness trap: this tool prints one line per
+    bus, so `... | head -N` closed the pipe, SIGPIPE killed the build
+    mid-write, and the half-finished BDB — missing nets, pins and every
+    busterm — got serialized into a checked-in fixture.  It read as a valid
+    design and routed fast and clean because most of the work was absent.
+    """
+    import subprocess
+    out = tmp_path / "trunc.bdb"
+    root = build_hier_demo._ROOT
+    p1 = subprocess.Popen(
+        [sys.executable, os.path.join(root, "tools", "build_hier_demo.py"),
+         str(out), "--cells", "dnuts1,dnuts2", "--instances", "2",
+         "--buses", "40"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=root)
+    p2 = subprocess.Popen(["head", "-3"], stdin=p1.stdout,
+                          stdout=subprocess.DEVNULL)
+    p1.stdout.close()
+    p2.wait()
+    p1.wait()
+    assert not out.exists(), "a truncated build must not leave an output BDB"
+
+
+def test_build_leaves_no_part_file_on_success(tmp_path):
+    out = tmp_path / "ok.bdb"
+    build_hier_demo.build(str(out), _CELLS[:2], seed=1, n_instances=2,
+                          n_buses=2)
+    assert out.exists()
+    assert not (tmp_path / "ok.bdb.part").exists()
+    db = buda_db.BDB(str(out))
+    assert db.all_nets() and db.all_pins()      # fully written
