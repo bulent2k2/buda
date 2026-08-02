@@ -242,6 +242,152 @@ def test_decreasing_caps_are_noted_not_refused():
     assert s._cell_layer_policy["leaf_cell"] == (-1, 5)
 
 
+# ── reserve_top_layers — the STACK-RELATIVE spelling ────────────────────────
+
+def _session_n(db, n_layers):
+    """Session over a stack of `n_layers` alternating H/V layers, ids 2..N+1."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    dirs = "HV" * n_layers
+    _quiet(s, *[f"def_layer {2 + i} M{2 + i} {dirs[i]} "
+                f"{'LOW' if i < 2 else 'TOP'} 50" for i in range(n_layers)])
+    return s
+
+
+def test_reserve_top_layers_caps_everything_below_the_top():
+    s = _session(_three_level_db())          # 6 layers, M2..M7
+    out = _cmd(s, "reserve_top_layers 2")
+    assert s._cell_layer_policy["leaf_cell"] == (-1, 5)   # M6/M7 reserved
+    assert s._cell_layer_policy["mid_cell"] == (-1, 5)
+    assert s._cell_layer_policy["empty_env"] == (-1, 5)
+    assert "top_cell" not in s._cell_layer_policy         # the top level
+    assert "reserving the top 2 layer(s) (M6, M7) for level 3" in out
+    assert "[lowest..M5]" in out
+
+
+def test_reserve_top_layers_is_stack_relative():
+    """The whole point: the SAME command re-derives a different cap when the
+    stack grows, where an absolute `set_layer_caps_by_depth M3 M5` would go
+    silently stale (the chip vehicle's 3192-vs-1708 unplaced regression)."""
+    s6 = _session_n(_three_level_db(), 6)    # M2..M7
+    s10 = _session_n(_three_level_db(), 10)  # M2..M11
+    _quiet(s6, "reserve_top_layers 2")
+    _quiet(s10, "reserve_top_layers 2")
+    assert s6._cell_layer_policy["mid_cell"] == (-1, 5)    # reserves M6/M7
+    assert s10._cell_layer_policy["mid_cell"] == (-1, 9)   # reserves M10/M11
+
+
+def test_reserve_top_layers_matches_the_explicit_spelling():
+    """On a fixed stack it is exactly the by-depth declaration a user would
+    have to compute by hand."""
+    a = _session_n(_three_level_db(), 10)
+    b = _session_n(_three_level_db(), 10)
+    _quiet(a, "reserve_top_layers 2")
+    _quiet(b, "set_layer_caps_by_depth M9 M9")
+    assert a._cell_layer_policy == b._cell_layer_policy
+
+
+def test_reserve_top_layers_honors_a_floor():
+    s = _session(_three_level_db())
+    _quiet(s, "reserve_top_layers 2 -min M3")
+    assert s._cell_layer_policy["mid_cell"] == (3, 5)
+
+
+def test_reserve_top_layers_persists_and_explicit_still_wins():
+    s = _session(_three_level_db())
+    _quiet(s, "set_cell_layer_cap leaf_cell M7")
+    out = _cmd(s, "reserve_top_layers 2")
+    assert s._cell_layer_policy["leaf_cell"] == (-1, 7)    # untouched
+    assert s._cell_layer_policy["mid_cell"] == (-1, 5)
+    assert "kept 1 explicit policy" in out
+    assert s.bdb.cell_layer_band("mid_cell") == (-1, 5)
+
+
+def test_reserve_top_layers_off_clears_it():
+    s = _session(_three_level_db())
+    _quiet(s, "reserve_top_layers 2")
+    out = _cmd(s, "reserve_top_layers off")
+    assert not s._cell_layer_policy
+    assert s.bdb.cell_layer_band("mid_cell") == (-1, -1)
+    assert "cleared 3 by-depth policies" in out
+
+
+def test_reserve_top_layers_rerun_retightens():
+    s = _session(_three_level_db())
+    _quiet(s, "reserve_top_layers 2", "reserve_top_layers 3")
+    assert s._cell_layer_policy["mid_cell"] == (-1, 4)     # M5/M6/M7 reserved
+
+
+def test_reserve_top_layers_frees_a_cell_that_became_top_level():
+    """A band this command set on a cell it no longer governs must be
+    cleared, not left behind (the shortened-list lesson, Codex #551)."""
+    s = _session(_three_level_db())
+    _quiet(s, "set_layer_caps_by_depth M3 M5 M7")          # caps top_cell too
+    assert s._cell_layer_policy["top_cell"] == (-1, 7)
+    out = _cmd(s, "reserve_top_layers 2")
+    assert "top_cell" not in s._cell_layer_policy
+    assert s.bdb.cell_layer_band("top_cell") == (-1, -1)
+    assert "freed 1 top-level cell(s): top_cell" in out
+
+
+def test_reserve_top_layers_validation():
+    s = _session(_three_level_db())          # 6 layers
+    assert "at least 1" in _cmd(s, "reserve_top_layers 0")
+    assert "leaves no layer" in _cmd(s, "reserve_top_layers 6")
+    assert "no V routing layer" in _cmd(s, "reserve_top_layers 5")
+    assert "takes ONE count" in _cmd(s, "reserve_top_layers 2 3")
+    assert "must be an integer" in _cmd(s, "reserve_top_layers two")
+    assert "unknown floor layer" in _cmd(s, "reserve_top_layers 2 -min M9")
+    assert not getattr(s, "_cell_layer_policy", {})   # nothing applied
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    assert "open BDB" in _cmd(s2, "reserve_top_layers 2")
+
+
+def test_reserve_top_layers_noop_on_a_flat_design():
+    """Nothing above level 1 means nothing to reserve FOR — say so instead
+    of capping every cell against an empty top."""
+    db = buda.BDB(":memory:")
+    db.add_cell("leaf_cell", 100, 60)
+    db.add_inst("l", "leaf_cell", "", 0, 0)
+    s = _session(db)
+    out = _cmd(s, "reserve_top_layers 2")
+    assert "no level above" in out
+    assert not getattr(s, "_cell_layer_policy", {})
+
+
+def test_reserve_top_layers_noop_path_still_frees_prior_bulk_caps():
+    """Codex #558: on a flat design the command has nothing to reserve for,
+    but a PRIOR bulk declaration may still be in force — "nothing capped"
+    must not mean "still capped".  A bulk declaration always REPLACES the
+    other, so the no-op path frees what it no longer governs."""
+    db = buda.BDB(":memory:")
+    db.add_cell("leaf_cell", 100, 60)
+    db.add_inst("l", "leaf_cell", "", 0, 0)
+    s = _session(db)
+    _quiet(s, "set_layer_caps_by_depth M5")          # flat design, level 1
+    assert s._cell_layer_policy["leaf_cell"] == (-1, 5)
+    out = _cmd(s, "reserve_top_layers 2")
+    assert "leaf_cell" not in s._cell_layer_policy   # session cleared
+    assert s.bdb.cell_layer_band("leaf_cell") == (-1, -1)   # BDB cleared
+    assert "1 prior bulk policy cleared: leaf_cell" in out
+
+
+def test_reserve_top_layers_noop_path_keeps_explicit_caps():
+    """...but only the bulk-owned ones: an explicit set_cell_layer_cap
+    outranks both spellings and survives the no-op path."""
+    db = buda.BDB(":memory:")
+    db.add_cell("leaf_cell", 100, 60)
+    db.add_inst("l", "leaf_cell", "", 0, 0)
+    s = _session(db)
+    _quiet(s, "set_cell_layer_cap leaf_cell M5")
+    out = _cmd(s, "reserve_top_layers 2")
+    assert s._cell_layer_policy["leaf_cell"] == (-1, 5)
+    assert s.bdb.cell_layer_band("leaf_cell") == (-1, 5)
+    assert "prior bulk" not in out
+
+
 # ── Codex #551 round: shortened list, provenance across a reload ────────────
 
 def test_shorter_list_frees_the_levels_it_no_longer_names():

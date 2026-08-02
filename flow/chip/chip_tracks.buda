@@ -1,11 +1,19 @@
-# From tracks_for_channel_stress.buda, but with four top:
+# From tracks_for_channel_stress.buda, but with EIGHT top layers: the stack
+# continues the alternating H/V ladder up to M11, each pair coarser than the
+# one below it (wider wires, wider power rails) as real top metal is.
+# Overhead percentages are the patterns' measured values (1 - signal
+# density) — see report_overhead below.
 
-def_layer 2 M2 H LOW 55.56
-def_layer 3 M3 V LOW 55.56
-def_layer 4 M4 H TOP 55.56
-def_layer 5 M5 V TOP 55.56
-def_layer 6 M6 H TOP 66.67
-def_layer 7 M7 V TOP 58.97
+def_layer  2 M2  H LOW 55.56
+def_layer  3 M3  V LOW 55.56
+def_layer  4 M4  H TOP 55.56
+def_layer  5 M5  V TOP 55.56
+def_layer  6 M6  H TOP 66.67
+def_layer  7 M7  V TOP 58.97
+def_layer  8 M8  H TOP 57.14
+def_layer  9 M9  V TOP 57.14
+def_layer 10 M10 H TOP 56.76
+def_layer 11 M11 V TOP 56.76
 
 # Track patterns are REQUIRED for Detailed NUTS
 # Format: <layer_id> <origin> [<type> <width> <spacing>] ...
@@ -15,5 +23,9 @@ def_track_pattern 4 -200  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  S
 def_track_pattern 5    0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
 def_track_pattern 6 -400  POWER 3 1  SIGNAL 1 1  SIGNAL 1 1 SIGNAL 1 1  SIGNAL 1 1  GROUND 3 1  SIGNAL 1 1 SIGNAL 1 1  SIGNAL 1 1  SIGNAL 1 1
 def_track_pattern 7 -600  POWER 6 2  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  GROUND 6 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 8 -800  POWER 8 2  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5  GROUND 8 2  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5
+def_track_pattern 9 -1000 POWER 8 2  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5  GROUND 8 2  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5
+def_track_pattern 10 -1200 POWER 10 3  SIGNAL 4 2  SIGNAL 4 2  SIGNAL 4 2  SIGNAL 4 2  GROUND 10 3  SIGNAL 4 2  SIGNAL 4 2  SIGNAL 4 2  SIGNAL 4 2
+def_track_pattern 11 -1400 POWER 10 3  SIGNAL 4 2  SIGNAL 4 2  SIGNAL 4 2  SIGNAL 4 2  GROUND 10 3  SIGNAL 4 2  SIGNAL 4 2  SIGNAL 4 2  SIGNAL 4 2
 
 report_overhead

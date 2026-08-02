@@ -980,6 +980,48 @@ edges the levels are computed from.
 
 ---
 
+### `reserve_top_layers`
+
+```
+reserve_top_layers <N> [-min <floor_layer>]
+reserve_top_layers off
+```
+
+The **stack-relative** way to say the same thing: reserve the top `N`
+layers of the declared stack for the top level, and cap every cell below it
+just under them.  Prefer this over
+[`set_layer_caps_by_depth`](#set_layer_caps_by_depth) whenever the intent is
+"the top level gets the top *N*" — which is the usual BKM.
+
+The difference matters because a band naming absolute layers is only correct
+for the stack it was written against.  `set_layer_caps_by_depth M3 M5`
+reserved the top **pair** on a 6-layer stack; the identical line on a
+10-layer stack reserves the top **six**, starving the cells it governs, and
+nothing reports it — an over-tight band is legal, merely wasteful.
+`reserve_top_layers 2` states the intent, so it re-derives the right cap on
+either stack.
+
+Everything else matches the by-depth command: cell levels are intrinsic and
+bottom-anchored, an explicit `set_cell_layer_cap` always outranks it, bands
+persist, and the two share one bulk-declaration provenance memo — so
+`reserve_top_layers off` and `set_layer_caps_by_depth off` are the same
+operation, and re-running either replaces whatever the other declared
+(including freeing a cell that is no longer governed).
+
+Validation is LOUD: `N` below 1, an `N` that leaves no layer for the cells
+below the top, an unknown floor, a floor above the derived cap, and a
+reservation leaving the cells no H or no V layer are all hard errors.  A
+design with no level above the deepest one is reported as a no-op rather
+than capping every cell against an absent top.
+
+```
+reserve_top_layers 2
+  [LayerCaps] reserving the top 2 layer(s) (M10, M11) for level 3:
+              146 cell(s) below it capped to [lowest..M9]: big2, mix2, …
+```
+
+---
+
 ### `set_cell_layer_share`
 
 ```

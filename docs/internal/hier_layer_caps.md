@@ -475,7 +475,8 @@ way: dnuts1 capped at M3 but leasing 75% of M4/M5 routes M3 19200 / M4
 above the cap, not a hole in it.
 
 **`chip_bottomup_caps`** (432 leaf blocks, 13320 nets, healerless,
-`set_layer_caps_by_depth M3 M5`)
+`set_layer_caps_by_depth M3 M5`) — measured on the vehicle's original
+**6-layer** stack (M2–M7):
 
 | context | M4 | M5 | M6 | M7 |
 |---|---|---|---|---|
@@ -488,6 +489,69 @@ The top level's M6/M7 **exactly doubles** (4.26M → 8.51M) when the cell
 templates stop competing for it.  `mix2` behaves identically (M6/M7 423282
 + 386919 → 0).
 
+The vehicle's stack has since grown to **10 layers** (M8/M9 then M10/M11,
+2026-08-01 — `flow/chip/ReadMe.md`), and that sweep produced the single
+most practically useful result in this study: **a cap band is relative to
+the stack it was written for.**
+
+`[..M5]` reserved the top *pair* on a 6-layer stack.  The identical text on
+a 10-layer stack reserves *six* layers for a top level that needs two, and
+the capped run degrades badly — while the uncapped twin improves:
+
+| stack | uncapped | capped, band as-written |
+|---|---|---|
+| 6 layers | 485/2207 | 458/3131 (`M3 M5`) |
+| 8 layers | 397/1921 | 442/2996 (`M3 M5`) |
+| 10 layers | **353/1604** | 424/**3192** (`M3 M5`) |
+
+Rescaling the band to again reserve just the top pair (cells `[..M9]`)
+recovers nearly all of it — measured on the 10-layer stack, varying only
+the level-2 cap:
+
+| cell band | overlaps | unplaced | viol |
+|---|---|---|---|
+| `[..M5]` (written for 6 layers) | 424 | 3192 | 124 |
+| `[..M7]` | 395 | 1898 | 104 |
+| **`[..M9]`** (vehicle default now) | **358** | **1708** | **93** |
+| no policy at all | 353 | 1604 | 91 |
+
+So a correctly-scaled band costs ~6% in unplaced bits for total top-layer
+reservation, where the stale one cost ~99%.  The separation is unaffected —
+the capped run keeps **every** reserved layer for the top level, whatever
+their number:
+
+| context | M6 | M7 | M8 | M9 | M10 | M11 |
+|---|---|---|---|---|---|---|
+| big2 (capped, `[..M9]`) | 5263747 | 5104639 | 2888958 | 3391640 | **0** | **0** |
+| TOP-LEVEL (capped run) | 1102668 | 1035758 | 480722 | 518646 | **2007678** | **2257736** |
+
+Two lessons for the feature, both now measured rather than assumed:
+
+1. **Extra top layers do not relieve a cell capped at the bottom.**  At the
+   stale band, 8 → 10 layers left top-level upper WL flat (9.578M → 9.558M)
+   while unplaced rose 2996 → 3192: the same metal spread over more,
+   less bit-dense layers.  Relief for a starved capped cell comes from a
+   wider band or a `set_cell_layer_share` lease, never from metal above its
+   ceiling.
+2. **State bands as intent, not as absolute layers.**  Nothing in the tool
+   detects a stale band, and §9's advisories cannot: an over-tight band is
+   legal, merely wasteful.  **LANDED** as `reserve_top_layers <N>` — the
+   stack-relative spelling that re-derives the cap from the declared stack,
+   so the same line is correct at six layers and at ten:
+
+   ```buda
+   reserve_top_layers 2      # the top pair is the top level's, on any stack
+   ```
+
+   It caps every cell below the top level at the highest non-reserved
+   layer, sharing the by-depth command's intrinsic levels, precedence
+   (explicit `set_cell_layer_cap` wins), persistence and bulk-ownership
+   memo — so `off` is one operation for both and re-running either replaces
+   what the other declared, including freeing a cell it no longer governs.
+   On the 10-layer chip stack `reserve_top_layers 2` is byte-identical to
+   the hand-computed `set_layer_caps_by_depth M5 M9` (358/1708/93, WL equal
+   to the unit), which is how the vehicle now declares its policy.
+
 ### 12.2 What it costs
 
 | vehicle | policy | overlaps | unplaced | `check_design` | runtime |
@@ -497,6 +561,9 @@ templates stop competing for it.  `mix2` behaves identically (M6/M7 423282
 | `mix2_fast_bottomup_shared` | band + 75% lease | 0 | 0 | Success | 31.8s |
 | `chip_bottomup` | none | 485 | 2207 | 2547 viol / 106 bundles | 135.3s |
 | `chip_bottomup_caps` | by-depth `M3 M5` | 458 | 3131 | 3943 viol / 126 bundles | 130.1s |
+
+(The two chip rows are the 6-layer stack the study was run on; see the
+per-stack-size table in §12.1 for the 8- and 10-layer readings.)
 
 The healed mix2 vehicles all reach a clean endpoint; the healerless chip
 vehicle pays for the policy in stranded bits (2207 → 3131) and detailed WL

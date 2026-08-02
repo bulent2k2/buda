@@ -701,6 +701,163 @@ def cmd_set_layer_caps_by_depth(session, cmd, args, cmd_line):
               f"— policy kept for this session only: {', '.join(no_row)}")
 
 
+def _all_layer_ids(session):
+    """Every declared layer id, ascending (H and V unioned)."""
+    ids = set()
+    for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL):
+        ids.update(session.layers.get_layer_ids_by_dir(d))
+    return sorted(ids)
+
+
+def cmd_reserve_top_layers(session, cmd, args, cmd_line):
+    # reserve_top_layers <N> [-min <floor>]  |  off
+    # The STACK-RELATIVE spelling of the per-cell band (Phase 5 follow-up,
+    # docs/internal/hier_layer_caps.md §12): reserve the top N layers of the
+    # declared stack for the TOP LEVEL, and cap every other cell just below
+    # them.  `set_layer_caps_by_depth M3 M5` names absolute layers, so it
+    # silently goes stale when the stack grows — on the chip vehicle the same
+    # text meant "reserve the top 2" at six layers and "reserve the top 6" at
+    # ten, starving the cell templates (3192 unplaced vs 1708 correctly
+    # scaled).  This command states the INTENT instead, so it re-derives
+    # correctly on any stack.  Bulk-declared like set_layer_caps_by_depth:
+    # it shares that command's ownership set and provenance memo, so an
+    # explicit set_cell_layer_cap still outranks it and `off` clears it.
+    if session.bdb is None:
+        print("Error: reserve_top_layers requires an open BDB "
+              "(open_bdb first)"); return
+    if not args:
+        print("Error: reserve_top_layers requires <N> [-min <floor_layer>] "
+              "(or 'off')"); return
+    if args[0].lower() == "off":
+        cmd_set_layer_caps_by_depth(session, cmd, ["off"], cmd_line)
+        return
+
+    toks = list(args)
+    floor, floor_tok = -1, None
+    if "-min" in toks:
+        i = toks.index("-min")
+        if i + 1 >= len(toks):
+            print("Error: reserve_top_layers: -min needs a floor layer"); return
+        floor_tok = toks[i + 1]
+        floor = _resolve_layer_id(session, floor_tok)
+        if floor is None:
+            print(f"Error: reserve_top_layers: unknown floor layer "
+                  f"'{floor_tok}'"); return
+        del toks[i:i + 2]
+    if len(toks) != 1:
+        print(f"Error: reserve_top_layers takes ONE count "
+              f"(got '{' '.join(toks)}') — use set_layer_caps_by_depth for "
+              f"a per-level ladder"); return
+    try:
+        n = int(toks[0])
+    except ValueError:
+        print(f"Error: reserve_top_layers: <N> must be an integer, got "
+              f"'{toks[0]}'"); return
+    if n < 1:
+        print(f"Error: reserve_top_layers: N must be at least 1 (got {n}) — "
+              f"reserving nothing is the same as declaring no policy"); return
+
+    ids = _all_layer_ids(session)
+    if n >= len(ids):
+        print(f"Error: reserve_top_layers: N={n} leaves no layer for the "
+              f"cells below the top ({len(ids)} layer(s) declared)"); return
+    cap = ids[-(n + 1)]                       # highest layer NOT reserved
+    reserved = ids[-n:]
+    if floor >= 0 and floor > cap:
+        print(f"Error: reserve_top_layers: floor {floor_tok} is above the "
+              f"derived cap (layer {cap}) — the band is empty"); return
+    missing = _band_missing_dir(session, floor, cap)
+    if missing:
+        print(f"Error: reserve_top_layers: reserving the top {n} leaves the "
+              f"cells no {missing} routing layer — an unroutable policy")
+        return
+
+    pol = getattr(session, "_cell_layer_policy", None)
+    if pol is None:
+        pol = session._cell_layer_policy = {}
+    by_depth = getattr(session, "_cell_layer_policy_by_depth", None)
+    if by_depth is None:
+        by_depth = session._cell_layer_policy_by_depth = set()
+
+    def _free_bulk(cells):
+        """Drop the bands this command family owns for `cells` — session
+        entry, ownership memo and persisted band.  A bulk declaration
+        REPLACES whatever the other one left, so every exit path that stops
+        governing a cell has to free it; otherwise the command reports one
+        thing while the planner still sees another (Codex #558)."""
+        out = []
+        for c in sorted(cells):
+            if c not in by_depth:
+                continue
+            pol.pop(c, None)
+            by_depth.discard(c)
+            try:
+                session.bdb.set_cell_layer_band(c, -1, -1)
+            except RuntimeError:
+                pass
+            out.append(c)
+        return out
+
+    # Every cell BELOW the top level is capped; the top level keeps the
+    # reserved layers (and everything else).  The level ladder is the
+    # by-depth command's: a cell's level is intrinsic to its own subtree.
+    levels, _containers = session._cell_levels()
+    if not levels or max(levels.values()) < 2:
+        # Nothing to reserve FOR — but a previous bulk declaration may still
+        # be in force, and "nothing capped" must not mean "still capped".
+        released = _free_bulk(set(by_depth))
+        if released:
+            _persist_by_depth(session)
+        why = ("no cells in the open BDB" if not levels
+               else "every cell is at level 1 — no level above to reserve for")
+        print(f"[LayerCaps] {why}; nothing capped"
+              + (f" ({len(released)} prior bulk polic"
+                 f"{'y' if len(released) == 1 else 'ies'} cleared: "
+                 f"{', '.join(released)})" if released else ""))
+        return
+    top_level = max(levels.values())
+
+    capped, kept_explicit, freed, no_row = [], [], [], []
+    for cell in sorted(levels):
+        below_top = levels[cell] < top_level
+        if cell in pol and cell not in by_depth:
+            kept_explicit.append(cell)        # explicit declaration wins
+            continue
+        if not below_top:                     # top level: unrestricted
+            freed += _free_bulk({cell})       # drop a band this family set
+            continue
+        pol[cell] = (floor, cap)
+        by_depth.add(cell)
+        getattr(session, "_cell_layer_policy_restored", set()).discard(cell)
+        try:
+            session.bdb.set_cell_layer_band(cell, floor, cap)
+        except RuntimeError:
+            no_row.append(cell)
+        capped.append(cell)
+    _persist_by_depth(session)
+
+    names = session._make_layer_names()
+    def lname(i):
+        return names.get(i, f"L{i}")
+    res_s = ", ".join(lname(i) for i in reserved)
+    lo_s = floor_tok or "lowest"
+    shown = ", ".join(capped[:6]) + ("" if len(capped) <= 6
+                                     else f" (+{len(capped) - 6} more)")
+    print(f"[LayerCaps] reserving the top {n} layer(s) ({res_s}) for level "
+          f"{top_level}: {len(capped)} cell(s) below it capped to "
+          f"[{lo_s}..{lname(cap)}]: {shown}")
+    if freed:
+        print(f"[LayerCaps] freed {len(freed)} top-level cell(s): "
+              f"{', '.join(freed)}")
+    if kept_explicit:
+        print(f"[LayerCaps] kept {len(kept_explicit)} explicit polic"
+              f"{'y' if len(kept_explicit) == 1 else 'ies'} "
+              f"(set_cell_layer_cap wins): {', '.join(kept_explicit)}")
+    if no_row:
+        print(f"[LayerCaps] note: {len(no_row)} cell(s) have no cell-table row "
+              f"— policy kept for this session only: {', '.join(no_row)}")
+
+
 def cmd_set_cell_layer_share(session, cmd, args, cmd_line):
     # set_cell_layer_share <cell> <layer> <pct>
     # Fractional layer share (docs/internal/hier_layer_caps.md Phase 3): the
@@ -988,5 +1145,6 @@ COMMANDS = {
     "set_cell_layer_cap": cmd_set_cell_layer_cap,
     "set_cell_layer_share": cmd_set_cell_layer_share,
     "set_layer_caps_by_depth": cmd_set_layer_caps_by_depth,
+    "reserve_top_layers": cmd_reserve_top_layers,
     "align_bottom_up": cmd_align_bottom_up,
 }
