@@ -1850,7 +1850,7 @@ class NutsFlowMixin:
         self.planner.set_capacity_mode(buda.CapacityMode.SIGNAL_TRACKS)
 
     def _run_detailed_nuts(self, bit_order="LO_HI", emit_vias=True,
-                           abort_unplaced=-1, pair_align=False):
+                           abort_unplaced=-1, pair_align=None):
         """Execute bit-level track assignment using DetailedNUTSEngine.
 
         emit_vias=False (RR fast trials): skip the per-bit via emission —
@@ -1861,7 +1861,13 @@ class NutsFlowMixin:
         stops once the running unplaced count exceeds the committed metric's
         opens (a certain rejection; unplaced never decreases).  Normal path
         only: the bottom-up merge path ignores it (partial r1/r2 results
-        cannot be merged meaningfully) — conservative, never wrong."""
+        cannot be merged meaningfully) — conservative, never wrong.
+
+        pair_align: None (default) = leave the engine's own default, which its
+        constructor seeds from BUDA_DNUTS_PAIR_ALIGN (the raw study path);
+        True/False explicitly OVERRIDES it (the measured-accept heal passes
+        True).  The sentinel matters: an unconditional False here silently
+        disabled the env flag on this path (Codex P2 on #557)."""
         if self.nuts_result is None or self.routing_grid is None:
             return None
 
@@ -1883,7 +1889,14 @@ class NutsFlowMixin:
         bu_plan = self._bottom_up_dnuts_plan()
         if bu_plan is None:
             engine = buda.DetailedNUTSEngine(self.routing_grid)
-            engine.set_pair_align(pair_align)
+            # Only OVERRIDE when the caller explicitly asked (the heal passes
+            # True): the engine's constructor already seeded pair_align_ from
+            # BUDA_DNUTS_PAIR_ALIGN, and an unconditional set(False) here made
+            # the documented raw study path a silent no-op on this path while
+            # the bottom-up engines (which skip the setter) still honored it
+            # — Codex P2 on #557.
+            if pair_align is not None:
+                engine.set_pair_align(pair_align)
             with buda.ostream_redirect():
                 self.detailed_result = engine.run(bus_segs, emit_vias,
                                               abort_unplaced)

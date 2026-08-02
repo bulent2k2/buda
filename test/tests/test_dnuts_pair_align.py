@@ -131,6 +131,33 @@ def test_heal_scoped_out_of_locked_sessions():
     assert t[3] != t[6]        # untouched — still split
 
 
+def test_env_study_path_survives_the_session(monkeypatch):
+    """The documented RAW study path (`BUDA_DNUTS_PAIR_ALIGN=1`, unconditional
+    pair-align, no accept) must work on the ordinary session path.  The
+    engine's constructor seeds pair_align_ from the env; `_run_detailed_nuts`
+    must therefore only OVERRIDE that default when a caller explicitly asks
+    (`pair_align=True/False`), never unconditionally — an unconditional False
+    made the env a silent no-op here while bottom-up engines still honored it
+    (Codex P2 on #557)."""
+    monkeypatch.setenv("BUDA_DNUTS_PAIR_ALIGN", "1")
+    s, out = _session(heal=False)          # heal OFF — only the env is at work
+    assert "PAIR-ALIGN" not in out         # no heal ran; this is the raw path
+    t = _v_tracks(s)
+    assert t[3] == t[6], "env study path did not align the right pair"
+
+
+def test_explicit_false_still_overrides_the_env(monkeypatch):
+    """The sentinel keeps the override available in both directions: an
+    explicit pair_align=False disables alignment even with the env set (what
+    the heal's baseline solve would need)."""
+    monkeypatch.setenv("BUDA_DNUTS_PAIR_ALIGN", "1")
+    s, _ = _session(heal=False)
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        s._run_detailed_nuts(bit_order="LO_HI", pair_align=False)
+    t = _v_tracks(s)
+    assert t[3] != t[6]                    # explicit False wins over the env
+
+
 def test_heal_returns_zero_when_no_win():
     """`_final_pair_align_heal` is self-guarding: once a design is already
     aligned (the heal ran and was accepted), a REPEAT finds no further WL
