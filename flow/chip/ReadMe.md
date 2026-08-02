@@ -150,6 +150,8 @@ from the bottom-up flow:
   die 9430 x 13860, 100 top-level cross-hierarchy buses, 11750 nets
 ```
 
+![chip_stack placement](chip_stack_placement.png)
+
 Every instance of a cell shares one **x**, so their vertical-layer track phase
 is identical by construction; the vertical pitches are multiples of
 **504 = LCM(18, 18, 24, 56)** — the unit pitches of M2/M4/M6/M8, the horizontal
@@ -173,6 +175,10 @@ on tracks, with no alignment residue to route around.
 
 The layer policy holds as designed: `big2` and `mix2` place **zero** metal on
 M10/M11, which carry top-level wiring only.
+
+The picture above is `tools/render_stack_placement.py <design.bdb> <out.png>
+[grid]` — die, instances by cell type, leaf blocks, channels, and each origin
+as a multiple of the grid quantum.
 
 Generated with `build_hier_demo.py --layout stacked --channel 1000 --grid 504`
 (see [BUILD_HIER_DEMO](../../docs/BUILD_HIER_DEMO.md#on-grid-stacking)); the
