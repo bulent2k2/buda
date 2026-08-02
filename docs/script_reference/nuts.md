@@ -134,6 +134,71 @@ run_detailed_nuts hi_lo
 
 ---
 
+### `set_pair_align_heal`
+
+```
+set_pair_align_heal [on|off]
+```
+
+Opt-in **measured-accept pairwise-overlap alignment**, applied at the end of
+every `run_detailed_nuts`. Default **off** — a flow that never calls it is
+bit-identical. With no argument, prints the current state.
+
+**The artifact it targets.** Two same-net stubs straddling a trunk should
+*align*: share one track window, so each bit runs as a single straight wire
+with no per-bit trunk jog. Stage 9's ordered-anchor placer sorts segments by
+`abstract_pos` and seats each at its **own** anchor, so a later same-net
+segment can reuse an earlier one's tracks only if they fall inside its own
+window. Alignment is therefore opportunistic, and the processing order is not
+mirror-invariant: on a mirror-symmetric floorplan one stub pair aligns while
+its mirror splits.
+
+**What the heal does.** Re-solves stage 9 with pair-align on — restrict a
+stub's track pool to the interval overlap it shares with same-bundle
+same-width partners, then proactively adopt a placed partner's exact tracks —
+and **keeps** that result only when unplaced and overlaps do **not** rise and
+detailed wirelength strictly drops. Otherwise the baseline is restored. On
+accept it prints `[DetailedNUTS] PAIR-ALIGN: …` with the WL before/after.
+
+**The accept is what makes it safe.** The *unconditional* form of the same
+mechanism is corpus **net-negative** (0 better / 7 worse): restricting stubs
+to their overlap band concentrates same-net wires and starves signal tracks on
+congested designs, stranding more bits. Behind the accept the same mechanism
+measures **0 better / 0 worse / 37 unchanged** — it rejects every regressor —
+so enabling it cannot make a design worse. Its wins are on *uncongested*
+designs with misaligned pairs.
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `on` / `off` | keyword | *(prints state)* | Enable/disable the heal for subsequent `run_detailed_nuts` calls. |
+
+**Scope:** applies to flat and hier flows alike, **including bottom-up
+(`hier.locked`) sessions** — unlike the cull/reseat heals, which are scoped
+out of those because they mutate layer assignment and re-run the abstract
+solve. This heal re-runs stage 9 only, so `nuts_result` and `plan.seg_layers`
+are untouched; and the bottom-up path aligns the **reference** instance, whose
+bits are then copied to the siblings, so template uniformity is preserved by
+construction.
+
+**Requires:** set it **before** `run_detailed_nuts` — the heal reads the flag
+when that command completes.
+
+**Example:**
+```buda
+run_planner
+run_nuts
+set_pair_align_heal on
+run_detailed_nuts
+check_design
+```
+
+**Study path:** `BUDA_DNUTS_PAIR_ALIGN=1` in the environment forces the
+alignment **unconditionally**, with no accept gate — the measured
+net-negative configuration. Use it for experiments only; use the command for
+real flows.
+
+---
+
 ### `ripup_reroute`
 
 ```
