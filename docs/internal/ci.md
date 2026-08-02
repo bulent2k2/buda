@@ -61,39 +61,12 @@ than failing. Three of the four still match exactly.
 
 ## What CI deliberately does NOT do
 
-### Own the goldens
+Three, each a real gap rather than an oversight — the reasoning, evidence and
+where-to-start notes are in [`opens_ci.md`](opens_ci.md):
 
-`BUDA_NUTS_GOLDEN_STRICT=1` turns the host-sensitive xfails into hard failures,
-and the golden docstring suggests setting it "on the golden-generation host's
-CI". That is deliberately **not** set here, because CI is not currently that
-host — enabling it would require regenerating the goldens on the CI image
-first, which is a real decision (it changes what the committed goldens mean and
-who can reproduce them locally) rather than a workflow tweak.
-
-Consequence, stated so it is not discovered later: `flow/rnr/mix.buda`'s large
-golden is currently unenforced in CI. The five stable small flows are always
-enforced, and the other three large ones happen to match.
-
-### Run the QoR corpus
-
-`tools/qor_corpus.py` sweeps 36 full flows (~2-4 minutes) but is a *comparison*
-tool — a run alone means nothing without a baseline from the merge-base. Making
-it a gate needs baseline artifacts cached per commit, so it belongs in a
-nightly or label-triggered job, not the per-PR path.
-
-It is worth building. Two regressions in the #518 arc were caught only by a
-corpus diff, and one (`mix2_topdown_refine`) was *missed* because the baseline
-predated a corpus row added mid-flight — exactly the failure a cached,
-automatically-refreshed baseline prevents.
-
-### Check the web ports
-
-`test_web_displaygeom.py` pins the authoritative display geometry
-(`viz_common.snap_endpoint_extents`) but never executes the JavaScript
-(`src/web/static/index.html`) or Scala
-(`web/.../render/DisplayGeom.scala`) ports of it. They are kept in sync by
-hand, and issue #554 showed that discipline failing — the fix landed in the
-Python renderer and both mirrors stayed broken until review caught it.
-
-Closing that means running the ports under Node and Scala.js in CI. It is the
-largest of the follow-ups and independent of everything above.
+1. **CI does not own the goldens** — `BUDA_NUTS_GOLDEN_STRICT` stays unset, so
+   `flow/rnr/mix.buda`'s large golden is currently unenforced in CI.
+2. **The QoR corpus does not run** — it is a comparison tool and needs cached
+   merge-base baselines, so it belongs in a nightly, not the PR path.
+3. **The web ports are not executed** — `test_web_displaygeom.py` pins the
+   authoritative geometry but never runs the JS or Scala mirrors of it.
