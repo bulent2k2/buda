@@ -5,8 +5,10 @@ proportional). `band_span_charge 0` is the escape hatch back to the legacy
 single-band charge. This note records the mechanism, the sweep across all five
 modes, the two accounting bugs that invalidated an earlier version of the
 table, and the three rejected attempts to remove the regressions — so none of
-it is re-derived.  **Known cost: two corpus flows** (`rnr/mix2` and
+it is re-derived.  **Known cost as filed: two corpus flows** (`rnr/mix2` and
 `rnr/mix2_topdown_refine`), both the same mix2 design and the same 16 bits.
+**Both are clean on main as of 2026-08-02** — see the two updates below; the
+residual cost is now ~0.44% wirelength on one flow, not overlaps or opens.
 
 > **Known-cost update (2026-07-31, post-#531).** The recorded regressions
 > have largely healed on main: #531's ripup width gate + post-climb dead-span
@@ -33,6 +35,34 @@ it is re-derived.  **Known cost: two corpus flows** (`rnr/mix2` and
 > DNUTS log, 8 unreserved of 16 needed).  That is RELEASE-pass territory
 > (`check_template_tracks on_mismatch independent`), which the flow's default
 > `stop` policy deliberately gates off — a design-intent choice, not a bug.
+> *(Superseded 2026-08-02: the RELEASE pass provably cannot reach it either —
+> the opens sit on an UNLOCKED bundle, and per-bit forensics show the unlocked
+> b18 alone holds 10 of the 17 candidate tracks, so freeing every locked copy
+> still leaves 7 against 16 bits.  See issue #536 and `tools/doomed_seat_forensics.py`.)*
+
+> **Known-cost update (2026-08-02): `mix2_topdown_refine` is CLEAN — the last
+> overlap was a search-neighbourhood limit, not a budget or metric one.**
+> The flow drifted 3 → 1 overlap on later planner/healer work, and the final
+> one now clears: its trailing `refine_selection` runs in `chase_overlaps`
+> (plain lexicographic accept).  **Endpoint 0/0/0, `check_design` Success**,
+> for **abstract WL 68200 → 68500 (+0.44%)**, detailed +0.15%, +2.6s.
+>
+> Why nothing else reached it (issue #535's directions, both now measured):
+> the winning move — `bundle 62 topo 1->30`, ovl 1→0 — **costs +301 WL**.
+> refine's DEFAULT componentwise accept demands WL strictly lower with
+> everything else parity-or-better, so it structurally refuses that move no
+> matter how many rounds run; and ripup never reaches `topo 30` because its
+> trial pool is contention-derived and screened, while refine sweeps every
+> eligible bundle's alternates.  Measured dead ends, all **byte-identical**
+> to the 1-overlap baseline (same WL, same everything): `ripup_reroute 30`,
+> `ripup_reroute 60`, a 3rd healer round, a 4th round, and 3rd round + rr 30.
+> So issue #535's "larger budget / more rounds" direction is disproved, and
+> its proposed new "overlap-targeted stall pass" is unnecessary —
+> `chase_overlaps` already is that lever.
+>
+> This is NOT the rejected `band_span_charge 0` pin: the charging model stays
+> at its default and the flip's cost is still paid and visible, now as
+> wirelength rather than as an overlap.
 
 ## The defect
 
