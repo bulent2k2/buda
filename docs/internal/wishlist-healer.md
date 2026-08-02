@@ -762,3 +762,58 @@ and is that supply consumed by `hier.locked` copies?  That per-seat audit
 (a natural `check_design` extension, or a one-off probe) is the real
 build-decision instrument; the census is only what points it at the right
 seats.
+
+### The forensic check, built — and the trigger has FIRED (2026-08-02)
+
+The per-seat audit above is now a tool: **`tools/doomed_seat_forensics.py`**.
+For every supply-doomed TOP seat it re-runs the session's own
+`_seg_admission_pool` (the exact DNUTS `place_by_layer` arithmetic) against
+each same-direction TOP sibling's grid over the SAME seat, then asks who
+holds that sibling's window, and classifies:
+`BLOCKED_BY_LOCKED` (adequate sibling, locked copies hold it — negotiable) /
+`BLOCKED_BY_UNLOCKED` / `FREE_SIBLING` / `LAYER_STARVED` (no adequate sibling
+anywhere — no mechanism helps).  It reproduces the hand-established b61
+forensics exactly (M6 pool 12 vs need 16; sibling M4 supply 17; locked
+holders b152/b170/b174 plus unlocked b18), which is its validation.
+
+**Full 37-flow corpus sweep (main @ c8f1ab6):**
+
+| flow | seat | need/pool | verdict |
+|---|---|---|---|
+| `rnr/mix2_fast_on_aligned_sql` | b61 seg0 M6 | 16 / 12 | **BLOCKED_BY_LOCKED** (M4 supply 17; locked b152/b170/b174 + unlocked b18) |
+| `chip/chip_bottomup` | b449 seg2 M7 | 10 / 9 | **BLOCKED_BY_LOCKED** (M5 supply 23; locked b970/b1039/b1045/b1063 + unlocked b213) |
+| `chip/chip_bottomup_caps` | b390 seg1 M7 | 10 / 9 | **BLOCKED_BY_LOCKED** (M5 supply 23; locked b1019/b1160 + unlocked b277) |
+| `chip/chip_bottomup` | b448 seg6 M5 | 6 / 0 | LAYER_STARVED |
+| `chip/chip_bottomup` | b449 seg3 M7 | 10 / 0 | LAYER_STARVED |
+| `chip/chip_bottomup` | b616 seg2 M5 | 14 / 7 | LAYER_STARVED |
+| the other 33 flows | — | — | no doomed TOP seats |
+
+(The non-corpus twin `rnr/mix2_fast` shows the same b61 seat — same design,
+`align_bottom_up` at runtime instead of the pre-aligned BDB.)
+
+**So the stated trigger — "a doomed TOP seat surviving the re-seat heal on
+more than one vehicle" — is MET:** 3 corpus vehicles across **2 distinct
+designs** (mix2 and chip), 36 bits at stake, where the open was written
+against 1 vehicle / 1 design.  The market is no longer a single seat on a
+single fixture.
+
+Two findings that sharpen the build, both from the sweep:
+
+- **The shape is specific to bottom-up flows with locked copies**, as
+  theory predicts: `chip_topdown` / `chip3_topdown` (no locked copies) have
+  **no** doomed TOP seats at all, and `chip3a_bottomup` has none either.
+- **Not every doomed TOP seat is negotiable — and the census could not tell.**
+  `chip_bottomup` carries 4 doomed TOP seats: **1** is BLOCKED_BY_LOCKED,
+  **3** are LAYER_STARVED (no sibling with adequate supply — b449 seg3 and
+  b448 seg6 have sibling supply *0*).  A negotiation mechanism would move
+  10 of that flow's 30 doomed bits; the other 20 need supply that does not
+  exist.  This is exactly the separation the census was missing, and it
+  means the negotiation's expected yield must be scored per seat, not per
+  census line.
+
+**Still to decide before building** (the open's own two cheaper angles are
+untouched by this measurement): alignment-aware planning — note the
+BLOCKED_BY_LOCKED seats remain concentrated in *aligned* / phase-snapped
+bottom-up vehicles — versus accepting the residual as the price of strict
+template uniformity.  What has changed is that the decision is now backed by
+a corpus-wide, reproducible instrument rather than one hand-worked seat.
