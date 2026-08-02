@@ -11,38 +11,29 @@ rather than forgotten, and where to start.
 
 ---
 
-## 1. Nightly QoR corpus  *(highest value; medium effort)*
+## 1. ~~Nightly QoR corpus~~ — RESOLVED 2026-08-02 (nightly half)
 
-**Uncovered:** `tools/qor_corpus.py` sweeps 36 full flows and captures each
-one's `(overlaps, unplaced, viol_bundles)` plus wirelength. Nothing runs it
-automatically, so a QoR regression reaches `main` unless a human remembers to
-sweep — which is exactly the recipe `CLAUDE.md` prescribes for every
-topology/planner/NUTS change.
+`.github/workflows/nightly-qor.yml` sweeps the corpus at 03:17 UTC and diffs it
+against the previous successful nightly. The baseline is promoted **only** on a
+clean run, so a regression keeps being reported until fixed rather than becoming
+the new normal after one night. See [`ci.md`](ci.md).
 
-**Why it is not a PR gate.** The corpus is a **comparison** tool. A single run
-is meaningless; it only says something against a baseline from the merge-base.
-Making it a gate therefore needs baseline artifacts cached per commit, not just
-a job that runs the script.
+Corrected while building it: the corpus is **37** flows and takes **~4m20s**
+parallel (jobs=4), not the "36 flows, ~2-4 min serial" this page previously
+estimated — that figure predated the corpus growing.
 
-**Why it is worth building anyway — evidence, not speculation.** Two
-regressions in the #518 arc were caught *only* by a corpus diff and by nothing
-in the test suite. A third (`flow/rnr/mix2_topdown_refine`, 0/0/0 → 3/16/1) was
-**missed entirely** and reached `main`, because the hand-captured baseline
-predated a corpus row that another PR added while the work was in flight. An
-automatically-refreshed baseline is precisely the mechanism that failure mode
-has no answer to.
+**Still open — the PR half.** The nightly compares `main` against itself over
+time, so it catches a regression a day AFTER it lands. What it does not do is
+stop one landing. A `run-qor` PR label that diffs a branch against its
+**merge-base** would, and that is the shape the evidence argues for: the
+`mix2_topdown_refine` regression (0/0/0 → 3/16/1) reached `main` precisely
+because a hand-captured baseline predated a corpus row another PR added
+mid-flight.
 
-**Where to start.**
-- Schedule: nightly on `main`, plus a `run-qor` PR label for opt-in.
-- Baseline: cache keyed on the merge-base SHA; on a miss, build the merge-base
-  and sweep it first. `--compare base.json branch.json` already exits non-zero
-  on regression, so the gate logic exists.
-- Runtime: ~2-4 min serial for 36 flows, plus a build. Budget ~10 min; the
-  heavy flows (`rnr/mix2_fast_*`, `chip*`) dominate.
-- Caution: a couple of corpus flows sit on knife-edge endpoints (`rnr/mix2`'s
-  clean result depends on an exact 4-iteration rip-up trace, documented in the
-  flow itself), so expect the occasional legitimate churn — the guard should
-  report the diff, not auto-fail on noise it cannot distinguish.
+Where to start: build + sweep the merge-base, then the PR head, and
+`--compare`. It costs two builds and two sweeps (~12-15 min), which is why it
+belongs behind a label rather than on every PR. The nightly's cache cannot be
+reused for it — its baseline is a `main` commit, not the branch's merge-base.
 
 ## 2. ~~Own the placement goldens in CI~~ — RESOLVED 2026-08-02
 

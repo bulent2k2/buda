@@ -112,12 +112,46 @@ when the goldens were baselined, so the pin is behaviour-preserving today.
 Bump it deliberately, together with a golden rebaseline
 (`tools/nuts_snapshot.py`) in the same commit.
 
+## Nightly QoR corpus
+
+`.github/workflows/nightly-qor.yml` sweeps the 37-flow QoR corpus at 03:17 UTC
+(and on `workflow_dispatch`) and diffs it against the **previous successful
+nightly**, so a routing-quality regression on `main` surfaces within a day
+instead of waiting for someone to remember `tools/qor_corpus.py`.
+
+It is deliberately not part of the PR gate: the corpus is a *comparison* tool —
+a single run says nothing without a baseline — and it costs ~4m20s of sweep on
+top of a ~1m50s build.
+
+**The baseline is only promoted on a clean run.** That is the design decision
+worth knowing: promoting a regressed sweep would make the regression the new
+normal — reported once, then absent from every later diff. Leaving the baseline
+at the last good result means a regression keeps being reported until it is
+actually fixed. First run (or after a cache eviction) establishes a baseline and
+passes; the tool itself raises an uncaught `FileNotFoundError` on a missing
+baseline, so the workflow handles that case rather than letting it crash.
+
+The run JSON and the diff upload as an artifact on **every** run, including
+failures — that is when they are most useful.
+
+Two caveats on reading its output:
+
+- **Per-flow `sec` is not timing-faithful.** The sweep runs parallel (jobs =
+  CPU count), so those are wall-clock under contention. The compare prints them
+  as informational and nothing gates on them; use `-j 1` for real timings.
+- **Some corpus flows sit on knife-edge endpoints.** `rnr/mix2`'s clean result
+  depends on an exact 4-iteration rip-up trace, documented in the flow itself,
+  so occasional legitimate churn is expected. A red nightly is a report to
+  triage, not proof of a bug — it blocks nothing.
+
 ## What CI deliberately does NOT do
 
-Two, each a real gap rather than an oversight — the reasoning, evidence and
-where-to-start notes are in [`opens_ci.md`](opens_ci.md):
+One real gap remains — reasoning and where-to-start notes in
+[`opens_ci.md`](opens_ci.md):
 
-1. **The QoR corpus does not run** — it is a comparison tool and needs cached
-   merge-base baselines, so it belongs in a nightly, not the PR path.
-2. **The web ports are not executed** — `test_web_displaygeom.py` pins the
+1. **The web ports are not executed** — `test_web_displaygeom.py` pins the
    authoritative geometry but never runs the JS or Scala mirrors of it.
+
+Plus one narrower piece: the nightly compares `main` against itself over time,
+so it catches a regression a day *after* it lands. A `run-qor` PR label that
+diffs a branch against its merge-base would catch it before — see `opens_ci.md`.

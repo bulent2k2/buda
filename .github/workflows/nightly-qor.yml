@@ -1,0 +1,126 @@
+name: Nightly QoR
+
+# Sweep the QoR corpus (37 full flows) and diff it against the previous
+# successful nightly, so a routing-quality regression on `main` surfaces within
+# a day instead of waiting for someone to remember `tools/qor_corpus.py`.
+#
+# This is NOT part of the PR gate.  The corpus is a COMPARISON tool — a single
+# run says nothing without a baseline — and the flows take ~4-5 min on top of a
+# build, so it runs on a schedule against the last good result instead.
+#
+# Measured on a 4-core box: build ~1m50s + sweep ~4m20s (37 flows, jobs=4).
+# See docs/internal/ci.md.
+
+on:
+  schedule:
+    # 03:17 UTC — off the hour, because every cron on the hour contends for
+    # runners.  Nothing here is time-critical.
+    - cron: '17 3 * * *'
+  # Manual trigger, so this can be exercised without waiting for a night to
+  # pass (and re-run after a fix without an empty commit).
+  workflow_dispatch:
+
+concurrency:
+  # Never run two sweeps at once: they would race on the baseline cache and the
+  # loser's result would silently become the baseline.
+  group: nightly-qor
+  cancel-in-progress: false
+
+jobs:
+  qor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    env:
+      # Same pin as the PR gate: routing decisions are ISA-sensitive, so an
+      # unpinned -march would produce corpus churn indistinguishable from a
+      # real regression.
+      BUDA_ARCH: x86-64-v2
+      MPLBACKEND: Agg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pybind11 matplotlib
+
+      - name: Restore previous baseline
+        id: baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: qor-baseline.json
+          # Unique key so the save step below always writes a NEW entry;
+          # restore-keys then picks up the most recent previous one.
+          key: qor-baseline-${{ github.run_id }}
+          restore-keys: qor-baseline-
+
+      - name: Build
+        run: bin/bb
+
+      - name: Sweep the corpus
+        # Parallel by default (jobs = CPU count).  NOTE: the per-flow `sec`
+        # figures are then wall-clock under contention and are NOT
+        # timing-faithful — the compare prints them as informational only, and
+        # nothing gates on them.  Use `-j 1` if you want real per-flow timings.
+        run: python3 tools/qor_corpus.py --out qor-current.json
+
+      - name: Compare against the previous nightly
+        id: compare
+        # The corpus tool exits non-zero when any flow regressed on
+        # overlaps/unplaced/viol_bundles, which is exactly the gate we want.
+        # It does NOT tolerate a missing baseline (uncaught FileNotFoundError),
+        # so the first run — and any run after a cache eviction — is handled
+        # here rather than by letting it crash.
+        run: |
+          set -o pipefail
+          if [ ! -f qor-baseline.json ]; then
+            echo "no previous baseline (first run, or cache evicted) — establishing one" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "status=established" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo '## QoR vs previous nightly' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          rc=0
+          python3 tools/qor_corpus.py --compare qor-baseline.json qor-current.json \
+            2>&1 | tee compare.txt >> "$GITHUB_STEP_SUMMARY" || rc=$?
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -ne 0 ]; then
+            echo "status=regressed" >> "$GITHUB_OUTPUT"
+            echo "::error::QoR regression against the previous nightly — see the job summary"
+            exit 1
+          fi
+          echo "status=clean" >> "$GITHUB_OUTPUT"
+
+      - name: Upload results
+        # always(): the JSON is most valuable precisely when the compare failed.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qor-${{ github.sha }}
+          path: |
+            qor-current.json
+            compare.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Promote to baseline
+        # ONLY on a clean or first run.  Promoting a regressed sweep would make
+        # the regression the new normal: it would be reported once and then
+        # vanish from every later diff.  Leaving the baseline at the last good
+        # result means the regression keeps being reported until it is fixed.
+        if: steps.compare.outputs.status == 'clean' || steps.compare.outputs.status == 'established'
+        run: cp qor-current.json qor-baseline.json
+
+      - name: Save baseline
+        if: steps.compare.outputs.status == 'clean' || steps.compare.outputs.status == 'established'
+        uses: actions/cache/save@v4
+        with:
+          path: qor-baseline.json
+          key: qor-baseline-${{ github.run_id }}
