@@ -357,6 +357,37 @@ def test_reserve_top_layers_noop_on_a_flat_design():
     assert not getattr(s, "_cell_layer_policy", {})
 
 
+def test_reserve_top_layers_noop_path_still_frees_prior_bulk_caps():
+    """Codex #558: on a flat design the command has nothing to reserve for,
+    but a PRIOR bulk declaration may still be in force — "nothing capped"
+    must not mean "still capped".  A bulk declaration always REPLACES the
+    other, so the no-op path frees what it no longer governs."""
+    db = buda.BDB(":memory:")
+    db.add_cell("leaf_cell", 100, 60)
+    db.add_inst("l", "leaf_cell", "", 0, 0)
+    s = _session(db)
+    _quiet(s, "set_layer_caps_by_depth M5")          # flat design, level 1
+    assert s._cell_layer_policy["leaf_cell"] == (-1, 5)
+    out = _cmd(s, "reserve_top_layers 2")
+    assert "leaf_cell" not in s._cell_layer_policy   # session cleared
+    assert s.bdb.cell_layer_band("leaf_cell") == (-1, -1)   # BDB cleared
+    assert "1 prior bulk policy cleared: leaf_cell" in out
+
+
+def test_reserve_top_layers_noop_path_keeps_explicit_caps():
+    """...but only the bulk-owned ones: an explicit set_cell_layer_cap
+    outranks both spellings and survives the no-op path."""
+    db = buda.BDB(":memory:")
+    db.add_cell("leaf_cell", 100, 60)
+    db.add_inst("l", "leaf_cell", "", 0, 0)
+    s = _session(db)
+    _quiet(s, "set_cell_layer_cap leaf_cell M5")
+    out = _cmd(s, "reserve_top_layers 2")
+    assert s._cell_layer_policy["leaf_cell"] == (-1, 5)
+    assert s.bdb.cell_layer_band("leaf_cell") == (-1, 5)
+    assert "prior bulk" not in out
+
+
 # ── Codex #551 round: shortened list, provenance across a reload ────────────
 
 def test_shorter_list_frees_the_levels_it_no_longer_names():

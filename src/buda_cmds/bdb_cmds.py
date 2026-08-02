@@ -772,23 +772,51 @@ def cmd_reserve_top_layers(session, cmd, args, cmd_line):
               f"cells no {missing} routing layer — an unroutable policy")
         return
 
-    # Every cell BELOW the top level is capped; the top level keeps the
-    # reserved layers (and everything else).  The level ladder is the
-    # by-depth command's: a cell's level is intrinsic to its own subtree.
-    levels, _containers = session._cell_levels()
-    if not levels:
-        print("[LayerCaps] no cells in the open BDB — nothing to cap"); return
-    top_level = max(levels.values())
-    if top_level < 2:
-        print(f"[LayerCaps] every cell is at level 1 — no level above to "
-              f"reserve for; nothing capped"); return
-
     pol = getattr(session, "_cell_layer_policy", None)
     if pol is None:
         pol = session._cell_layer_policy = {}
     by_depth = getattr(session, "_cell_layer_policy_by_depth", None)
     if by_depth is None:
         by_depth = session._cell_layer_policy_by_depth = set()
+
+    def _free_bulk(cells):
+        """Drop the bands this command family owns for `cells` — session
+        entry, ownership memo and persisted band.  A bulk declaration
+        REPLACES whatever the other one left, so every exit path that stops
+        governing a cell has to free it; otherwise the command reports one
+        thing while the planner still sees another (Codex #558)."""
+        out = []
+        for c in sorted(cells):
+            if c not in by_depth:
+                continue
+            pol.pop(c, None)
+            by_depth.discard(c)
+            try:
+                session.bdb.set_cell_layer_band(c, -1, -1)
+            except RuntimeError:
+                pass
+            out.append(c)
+        return out
+
+    # Every cell BELOW the top level is capped; the top level keeps the
+    # reserved layers (and everything else).  The level ladder is the
+    # by-depth command's: a cell's level is intrinsic to its own subtree.
+    levels, _containers = session._cell_levels()
+    if not levels or max(levels.values()) < 2:
+        # Nothing to reserve FOR — but a previous bulk declaration may still
+        # be in force, and "nothing capped" must not mean "still capped".
+        released = _free_bulk(set(by_depth))
+        if released:
+            _persist_by_depth(session)
+        why = ("no cells in the open BDB" if not levels
+               else "every cell is at level 1 — no level above to reserve for")
+        print(f"[LayerCaps] {why}; nothing capped"
+              + (f" ({len(released)} prior bulk polic"
+                 f"{'y' if len(released) == 1 else 'ies'} cleared: "
+                 f"{', '.join(released)})" if released else ""))
+        return
+    top_level = max(levels.values())
+
     capped, kept_explicit, freed, no_row = [], [], [], []
     for cell in sorted(levels):
         below_top = levels[cell] < top_level
@@ -796,14 +824,7 @@ def cmd_reserve_top_layers(session, cmd, args, cmd_line):
             kept_explicit.append(cell)        # explicit declaration wins
             continue
         if not below_top:                     # top level: unrestricted
-            if cell in by_depth:              # free a band this command set
-                pol.pop(cell, None)
-                by_depth.discard(cell)
-                try:
-                    session.bdb.set_cell_layer_band(cell, -1, -1)
-                except RuntimeError:
-                    pass
-                freed.append(cell)
+            freed += _free_bulk({cell})       # drop a band this family set
             continue
         pol[cell] = (floor, cap)
         by_depth.add(cell)
