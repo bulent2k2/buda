@@ -1,17 +1,20 @@
-# KNOWN REGRESSION (issue #518).  Along with flow/rnr/mix2.buda, this is one
-# of the two corpus vehicles the `band_span_charge` default flip costs: it now
-# ends 3 overlaps / 16 unplaced bits instead of fully clean 0/0/0.  Same mix2
-# design, same residual (bundle 61 seg 2), same root cause — the
-# absolute-supply blind spot, where the width books say the spread bus fits
-# but DetailedNUTS still needs real SIGNAL tracks at the placed position.
-# Three repair attempts were measured and all lost corpus-wide; see
-# docs/internal/band_span_charge.md.
+# `band_span_charge` default-flip vehicle (issue #518) — HEALED, at a WL cost.
+# This flow and flow/rnr/mix2.buda are the two corpus vehicles the flip cost.
+# History: 0/0/0 pre-flip -> 3/16/1 at the flip (#527/#530) -> 16 opens healed
+# by #531/#534, leaving 3 overlaps (issue #535) -> 1 overlap by 2026-08-02 (a
+# free ride from later planner/healer work) -> 0/0/0 now, via the trailing
+# `chase_overlaps` refine documented at the end of this script.  The residual
+# root cause was the absolute-supply blind spot: the width books say the
+# spread bus fits, but DetailedNUTS still needs real SIGNAL tracks at the
+# placed position.  See docs/internal/band_span_charge.md.
 #
-# Uncomment before run_planner to restore the clean endpoint on this flow:
+# Uncomment before run_planner to restore the PRE-FLIP endpoint on this flow:
 #set_planner_param band_span_charge 0
 #
-# Deliberately NOT applied: this is a corpus row, and silencing it would make
-# the QoR guard stop reporting a known real regression.
+# Deliberately NOT applied: this is a corpus row, and silencing the charging
+# model would make the QoR guard stop reporting its known real cost.  The
+# `chase_overlaps` fix below is NOT that — it leaves band_span_charge at its
+# default and pays the cost visibly in wirelength instead of in overlaps.
 #
 # Selection-basis lever 3 composition vehicle (the refine_selection docs
 # recipe, measured 2026-07-30): the PLAIN top-down mix2 pipeline (no healers)
@@ -39,7 +42,19 @@ run_detailed_nuts
 refine_selection
 negotiate_congestion
 ripup_reroute
-refine_selection
+# The trailing refine runs in `chase_overlaps` (plain lexicographic accept)
+# rather than the default componentwise one — issue #535.  After the healers
+# this flow stalls at ONE overlap whose only exit COSTS wirelength: refine's
+# winning move is `bundle 62 topo 1->30`, ovl 1->0 at wl 68208->68509.  The
+# default accept requires WL strictly lower with everything else parity-or-
+# better, so it can never take that move no matter how many rounds run (a
+# third and fourth round, and ripup budgets 30/60, were all measured
+# byte-identical at 1 overlap), and ripup never reaches topo 30 either — its
+# trial pool is contention-derived and screened, while refine sweeps every
+# eligible bundle's alternates.  The plateau was a SEARCH-NEIGHBOURHOOD limit,
+# not a budget or metric one.  Endpoint: 0/0/0, `check_design` Success, for
+# +0.44% abstract WL (68200 -> 68500).
+refine_selection 30 chase_overlaps
 report_wl
 check_design
 exit
