@@ -139,3 +139,15 @@ Feature: Roadmap — documented open items & future directions
     Given a supply-doomed seat whose only supply-adequate layer is held by locked bottom-up copies
     When the class is re-solved cell-locally with its topology pinned under the instance-aggregated price
     Then the new track phase propagates to every instance and the top-level bus is admitted
+
+  # ── Pair-align heal: the WL-gain predictor (opens #8b, wishlist-nuts.md) ───
+
+  Scenario: the pair-align heal skips a solve it cannot win
+    # see docs/internal/wishlist-nuts.md "Pairwise-overlap stub alignment" + opens.md #8b
+    # The default-flip is REFUSED today: every flow pays a full extra DNUTS solve
+    # (+3.3% corpus wall) so 1 in 37 benefits, and a pair-PREDICATE pre-check was
+    # measured and refuted (it does not discriminate; it costs 2.5-48x the solve).
+    # Only a WL-GAIN predictor — or a partial/warm DNUTS re-solve — re-opens it.
+    Given same-net stub pairs whose alignment would not shorten any wire
+    When the pair-align heal estimates the removable trunk jog before solving
+    Then it skips the re-solve entirely, so a flow it cannot help pays nothing

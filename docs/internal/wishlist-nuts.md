@@ -590,9 +590,21 @@ The heal stays exactly what it is — safe by construction (the accept means a
 flow that turns it on can never be made worse), and correct to enable per
 design when you have the geometry it targets.
 
-**What would genuinely re-open this** is narrower than before: a cheap
-*WL-gain predictor* (not a pair predicate) — something that estimates the
-jog length alignment would remove without solving — or a partial/warm DNUTS
-re-solve scoped to the affected bundles, so the rejected case costs a
-fraction of a full solve instead of all of it.  Absent one of those, the
-answer is settled.
+### OPEN follow-on — the only thing that re-opens the flip (opens.md #8b)
+
+Narrower than the refuted pre-check, and either half suffices:
+
+1. **A cheap WL-gain predictor** (NOT a pair predicate).  "Would aligning
+   this pair shorten wire" is the only question that discriminates, and the
+   refuted check answered the wrong one.  A predictor would estimate the
+   trunk jog alignment removes — the per-bit detour between the two stubs'
+   track sets, which is arithmetic over data already in hand — without
+   running a solve.  It only has to be good enough to skip the clear
+   no-gain cases.
+2. **A partial/warm DNUTS re-solve** scoped to the affected bundles — the
+   stage-9 analogue of `NUTSEngine::rerun_bundle_warm`.  DNUTS today solves
+   every layer globally, so a rejection costs a FULL solve; scoping it to
+   the handful of bundles with alignable pairs makes the rejected case
+   cheap and the +3.3% wall-time bar disappear.
+
+Absent both, the answer is settled and the heal stays opt-in.
