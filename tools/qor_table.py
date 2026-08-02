@@ -41,6 +41,18 @@ those per-flow times beside the current run's `sec` ('-' = flow added since).
   tools/qor_table.py --out qor_table.md  # (re)write the checked-in snapshot
   tools/qor_table.py --flows flow/rnr/mix.buda flow/big_data_test/b44.buda
   tools/qor_table.py -j 1                     # serial (timing-faithful sec)
+
+The nightly workflow refreshes the checked-in snapshot and opens a PR only when
+the QoR actually moved.  Two flags serve that, and neither runs a flow beyond
+the sweep itself:
+
+  tools/qor_table.py --out qor_table.md --json qor_table_rows.json
+  tools/qor_table.py --diff old_rows.json qor_table_rows.json   # runs NO flows
+
+`--json` is the markdown's machine-readable twin (sorted by flow, so reordering
+the CORPUS list is not a diff); `--diff` reports whether anything but the `sec`
+timing changed.  Without that distinction the table differs on EVERY run — `sec`
+is the run's own wall-clock — and the nightly would open a PR every night.
 """
 import argparse
 import contextlib
@@ -184,6 +196,33 @@ def save_serial_times(rows, stamp, path=None):
         fh.write("\n")
 
 
+#: Fields that change on EVERY run without the QoR having moved.  `sec` is this
+#: run's wall-clock; comparing it would make the snapshot differ every night.
+VOLATILE_FIELDS = frozenset({"sec"})
+
+
+def semantic_diff(before, after):
+    """Compare two --json row lists ignoring VOLATILE_FIELDS.
+
+    Returns (added, removed, moved) as sorted flow-name lists, where `moved` is
+    a list of (flow, [changed_field, ...]).  This is the nightly workflow's
+    open-a-PR predicate: it lives here, not in the YAML, so it can be tested.
+    """
+    def index(rows):
+        return {r["flow"]: {k: v for k, v in r.items() if k not in VOLATILE_FIELDS}
+                for r in rows}
+    b, a = index(before), index(after)
+    added = sorted(set(a) - set(b))
+    removed = sorted(set(b) - set(a))
+    moved = []
+    for flow in sorted(set(b) & set(a)):
+        fields = sorted(k for k in set(b[flow]) | set(a[flow])
+                        if b[flow].get(k) != a[flow].get(k))
+        if fields:
+            moved.append((flow, fields))
+    return added, removed, moved
+
+
 def _c1(times, flow):
     """The `sec1` cell: the flow's last known serial time, '-' when unknown
     (e.g. a flow added to the corpus after the last -j 1 run)."""
@@ -290,11 +329,59 @@ def main():
                     help="run these flows instead of the default corpus")
     ap.add_argument("--stamp", help="header stamp (default: today's date + "
                                     "the short git commit)")
+    ap.add_argument("--json", metavar="PATH",
+                    help="also write the raw sweep rows as JSON.  The "
+                         "machine-readable twin of the markdown: the nightly "
+                         "workflow diffs it to tell a REAL QoR change from the "
+                         "`sec` column's per-run timing churn, which would "
+                         "otherwise make the table differ every single night.")
     ap.add_argument("-j", "--jobs", type=int, default=qc.default_jobs(),
                     metavar="N",
                     help="worker processes for the sweep (default: CPU count "
                          "= %(default)s; 1 = serial, timing-faithful sec)")
+    ap.add_argument("--diff", nargs=2, metavar=("OLD", "NEW"),
+                    help="compare two --json files ignoring per-run timing and "
+                         "report whether the QoR actually moved; prints "
+                         "'changed=true|false' and appends it to $GITHUB_OUTPUT "
+                         "when set.  Runs NO flows.")
     args = ap.parse_args()
+
+    if args.diff:
+        old_p, new_p = args.diff
+        try:
+            with open(new_p) as fh:
+                after = json.load(fh)
+        except Exception as e:                      # noqa: BLE001
+            sys.exit(f"--diff: cannot read {new_p}: {e}")
+        try:
+            with open(old_p) as fh:
+                before = json.load(fh)
+        except Exception:                           # noqa: BLE001
+            # No committed sidecar yet (first run, or it was just added): treat
+            # as changed so the snapshot gets published rather than silently
+            # skipped forever.
+            print(f"no readable {old_p} — treating as changed")
+            before = None
+        if before is None:
+            changed = True
+        else:
+            added, removed, moved = semantic_diff(before, after)
+            for f in added:
+                print(f"  + {f} (new corpus flow)")
+            for f in removed:
+                print(f"  - {f} (left the corpus)")
+            for f, fields in moved:
+                b = {r["flow"]: r for r in before}[f]
+                a = {r["flow"]: r for r in after}[f]
+                print(f"  ~ {f}: " + ", ".join(
+                    f"{k} {b.get(k)}->{a.get(k)}" for k in fields))
+            changed = bool(added or removed or moved)
+        print(f"changed={'true' if changed else 'false'}")
+        gh_out = os.environ.get("GITHUB_OUTPUT")
+        if gh_out:
+            with open(gh_out, "a") as fh:
+                fh.write(f"changed={'true' if changed else 'false'}\n")
+        return
 
     os.chdir(_ROOT)                                 # flow paths are repo-root-relative
     flows = args.flows or qc.CORPUS
@@ -312,6 +399,15 @@ def main():
         # and stdout-only runs never clobber it.
         save_serial_times(rows, stamp)
         print(f"  serial timings -> {_SERIAL_PATH}", file=sys.stderr, flush=True)
+    if args.json:
+        # Sorted by flow, not left in `sweep`'s input (= CORPUS list) order:
+        # that order is already stable run-to-run, but it makes the file hostage
+        # to the LIST's ordering, so merely moving a corpus entry would render
+        # as a whole-file diff and a spurious "QoR changed" PR.
+        with open(args.json, "w") as fh:
+            json.dump(sorted(rows, key=lambda r: r["flow"]), fh, indent=1)
+            fh.write("\n")
+        print(f"  rows -> {args.json}", file=sys.stderr, flush=True)
     md = render(rows, stamp, load_serial_times())
     if args.out:
         with open(args.out, "w") as fh:

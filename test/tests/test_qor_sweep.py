@@ -22,6 +22,7 @@ scheduling weight) without running any real flow — the real-flow
 equivalence was measured at introduction (6-flow subset: rows identical,
 19.9s -> 10.2s at -j 4).
 """
+import json
 import os
 import signal
 import sys
@@ -134,3 +135,103 @@ def test_flow_weight_counts_referenced_bdb(tmp_path):
 
 def test_default_jobs_at_least_one():
     assert qc.default_jobs() >= 1
+
+
+# --- qor_table --json: the nightly's change-detection input -----------------
+#
+# The nightly workflow refreshes qor_table.md and decides whether to open a PR
+# by diffing this JSON with `sec` dropped.  Two properties make that gate work,
+# and both are silent-failure modes if they break: a `sec`-only difference must
+# NOT read as a change (else a PR opens every night and buries the signal), and
+# the row order must not depend on the CORPUS list's order (else moving an
+# entry renders as a whole-file diff).
+
+def _rows_json(tmp_path, rows, order):
+    """Run qor_table.main() with --json over a fake corpus, return the file."""
+    import qor_table as qt
+    out = tmp_path / "rows.json"
+    fake = {r["flow"]: r for r in rows}
+    monkey = types.SimpleNamespace(
+        sweep=lambda run_fn, flows, jobs, progress=None: [fake[f] for f in flows],
+        CORPUS=order, default_jobs=lambda: 1)
+    old_qc, old_argv = qt.qc, sys.argv
+    try:
+        qt.qc = types.SimpleNamespace(**{**vars(old_qc), **vars(monkey)})
+        sys.argv = ["qor_table.py", "--json", str(out), "--stamp", "fixed"]
+        qt.main()
+    finally:
+        qt.qc, sys.argv = old_qc, old_argv
+    return json.loads(out.read_text())
+
+
+def _row(flow, sec, netS=10):
+    return {"flow": flow, "bund": 1, "busS": 2, "netS": netS, "busWL": 3,
+            "netWL": 4, "ovl": 0, "unpl": 0, "viol": 0, "sec": sec}
+
+
+def test_table_json_is_sorted_independently_of_corpus_order(tmp_path, capsys):
+    rows = [_row("z.buda", 1.0), _row("a.buda", 2.0), _row("m.buda", 3.0)]
+    one = _rows_json(tmp_path, rows, ["z.buda", "a.buda", "m.buda"])
+    two = _rows_json(tmp_path, rows, ["m.buda", "z.buda", "a.buda"])
+    assert [r["flow"] for r in one] == ["a.buda", "m.buda", "z.buda"]
+    assert one == two            # reordering the corpus list changes nothing
+
+
+def test_semantic_diff_ignores_timing_only_churn():
+    """A re-run differing ONLY in `sec` must not read as a change -- the exact
+    predicate that stops the nightly opening a no-op PR every single night."""
+    import qor_table as qt
+    before = [_row("a.buda", 1.0), _row("b.buda", 2.0)]
+    after = [_row("a.buda", 9.9), _row("b.buda", 8.8)]
+    assert before != after                                # sec really did move
+    assert qt.semantic_diff(before, after) == ([], [], [])
+
+
+def test_semantic_diff_surfaces_a_real_qor_change():
+    """...and a genuine metric move must NOT be masked by that same tolerance."""
+    import qor_table as qt
+    before = [_row("a.buda", 1.0)]
+    after = [dict(_row("a.buda", 1.0), unpl=16)]
+    assert qt.semantic_diff(before, after) == ([], [], [("a.buda", ["unpl"])])
+
+
+def test_semantic_diff_reports_corpus_membership_changes():
+    """A flow ADDED to or REMOVED from the corpus is a change: qor_corpus's own
+    compare prints a new row as '(new)' without counting it, which is how an
+    errored new row could once have been promoted silently."""
+    import qor_table as qt
+    before = [_row("a.buda", 1.0), _row("gone.buda", 1.0)]
+    after = [_row("a.buda", 1.0), _row("fresh.buda", 1.0)]
+    added, removed, moved = qt.semantic_diff(before, after)
+    assert added == ["fresh.buda"] and removed == ["gone.buda"] and moved == []
+
+
+def test_diff_cli_writes_github_output(tmp_path, monkeypatch, capsys):
+    """The --diff CLI is what the workflow actually invokes: it must emit the
+    step output the `if:` conditions branch on."""
+    import qor_table as qt
+    old = tmp_path / "old.json"
+    new_ = tmp_path / "new.json"
+    old.write_text(json.dumps([_row("a.buda", 1.0)]))
+    new_.write_text(json.dumps([dict(_row("a.buda", 5.0), ovl=3)]))
+    gh = tmp_path / "gh_out"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(gh))
+    monkeypatch.setattr(sys, "argv",
+                        ["qor_table.py", "--diff", str(old), str(new_)])
+    qt.main()                       # must NOT sweep any flow
+    assert "changed=true" in gh.read_text()
+    assert "ovl 0->3" in capsys.readouterr().out
+
+
+def test_diff_cli_treats_a_missing_baseline_as_changed(tmp_path, monkeypatch, capsys):
+    """First run, or the sidecar just added: publish rather than skip forever."""
+    import qor_table as qt
+    new_ = tmp_path / "new.json"
+    new_.write_text(json.dumps([_row("a.buda", 1.0)]))
+    gh = tmp_path / "gh_out"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(gh))
+    monkeypatch.setattr(sys, "argv",
+                        ["qor_table.py", "--diff", str(tmp_path / "nope.json"),
+                         str(new_)])
+    qt.main()
+    assert "changed=true" in gh.read_text()
