@@ -121,14 +121,19 @@ def test_heal_off_is_noop():
     assert t[3] != t[6]
 
 
-def test_heal_scoped_out_of_locked_sessions():
-    """A bottom-up (any hier.locked) session must not run the heal — its
-    copies stay uniform and its downstream healers re-roll from a changed
-    start, the same boundary as the cull/reseat heals."""
+def test_locked_sessions_are_in_scope():
+    """A bottom-up (hier.locked) session IS in scope — unlike the cull/reseat
+    heals, whose scope-out exists because they mutate plan.seg_layers and
+    re-run the ABSTRACT solve.  This heal re-runs stage 9 only and the accept
+    keeps opens/overlaps from rising, so neither hazard applies; uniformity is
+    safe too, since the bottom-up path aligns the REFERENCE solve and copies
+    propagate it identically.  (The scope-out it used to carry was inherited
+    boilerplate — and while it stood, the bottom-up engines were never handed
+    the flag, so the re-solve would have been a guaranteed-rejected no-op.)"""
     s, out = _session(heal=True, lock=True)
-    assert "PAIR-ALIGN" not in out
+    assert "PAIR-ALIGN" in out
     t = _v_tracks(s)
-    assert t[3] != t[6]        # untouched — still split
+    assert t[3] == t[6]        # aligned, exactly as in an unlocked session
 
 
 def test_env_study_path_survives_the_session(monkeypatch):
