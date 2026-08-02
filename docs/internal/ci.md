@@ -87,14 +87,30 @@ QoR-neutral — identical `248 segments overlaps=0 violations=0` and
 M3→M5 (abstract 10→9 / 96→97, detailed 184→168 / 1176→1192). The other eight
 goldens were byte-identical when regenerated and were left untouched.
 
-**The flag is wider than its name.** `BUDA_NUTS_GOLDEN_STRICT` is a repo-wide
-"I am the generation host" declaration, and it has a **second consumer**:
-`test_flow_scripts.py::test_10_four_level_scale_one_bundle_per_bus` switches
-from tolerant bounds to a hand-calibrated QoR ratchet (`segs == 209`,
-`ovlps == 0`, `net_segs >= 1220`, `unplaced == 0`, no keepout culls). Unlike
-the placement goldens that ratchet is **not** regenerable by any tool — the
-numbers are hardcoded in the test, calibrated on the original generation host
-under `-march=native`. Enabling strict adopts it too.
+**The flag is scoped to the placement goldens.** It used to be wider than its
+name: `test_flow_scripts.py::test_10_four_level_scale_one_bundle_per_bus` read
+the same variable to switch from tolerant bounds to a hand-calibrated QoR
+ratchet (`segs == 209`, `unplaced == 0`, no keepout culls). Unlike the
+placement goldens that ratchet is **not** regenerable by any tool — the numbers
+are hardcoded, calibrated on the original generation host under
+`-march=native`, which is not CI's ISA.
+
+Coupling them meant "enforce the NUTS goldens" silently also meant "enforce
+this unrelated ratchet", and the flow's own documented-as-acceptable
+host-sensitive alternative would fail the whole run. Measured on CI: it yields
+**206 segments**, not 209 — the same as an ordinary developer container — so
+the coupling was not a theoretical risk. The ratchet now has its own
+`BUDA_FLOW_QOR_STRICT`, which CI deliberately does **not** set.
+
+## Why the runner image is pinned
+
+`runs-on: ubuntu-24.04`, not `ubuntu-latest`. Strict golden mode compares
+SHA-256 placement digests, so a label migration that swaps the compiler or
+system libraries would fail every PR with no repository change — the ISA pin
+does not protect against that. `ubuntu-latest` resolved to 24.04 (GCC 13.3.0)
+when the goldens were baselined, so the pin is behaviour-preserving today.
+Bump it deliberately, together with a golden rebaseline
+(`tools/nuts_snapshot.py`) in the same commit.
 
 ## What CI deliberately does NOT do
 

@@ -51,20 +51,25 @@ workflow and `flow/rnr/mix.buda`'s golden was regenerated (QoR-neutral: one
 16-bit bus segment M3→M5, identical totals). The other eight goldens were
 byte-identical and untouched. See [`ci.md`](ci.md).
 
-**What this cost, recorded because it was not obvious:** the flag is wider than
-its name. `BUDA_NUTS_GOLDEN_STRICT` is a repo-wide "I am the generation host"
-declaration and also switches
+**What this cost, recorded because it was not obvious.** The flag was wider
+than its name: `BUDA_NUTS_GOLDEN_STRICT` also switched
 `test_flow_scripts.py::test_10_four_level_scale_one_bundle_per_bus` from
-tolerant bounds to a hand-calibrated QoR ratchet (`segs == 209`, `unplaced == 0`,
-no culls) that **no tool regenerates** — those numbers are hardcoded, calibrated
-on the original generation host under `-march=native`, which is not CI's ISA.
+tolerant bounds to a hand-calibrated QoR ratchet (`segs == 209`,
+`unplaced == 0`, no culls) that **no tool regenerates** — hardcoded numbers,
+calibrated on the original host under `-march=native`, which is not CI's ISA.
 
-If that ratchet ever fails in CI, the honest options are (a) split the flag so
-placement-golden strictness and the flow ratchet can be enabled independently —
-they are genuinely different concerns that happen to share a variable — or
-(b) re-calibrate the ratchet against CI and say so in its comment. Do **not**
-quietly edit the numbers to whatever CI produces without recording that the
-calibration host changed.
+CI measured **206**, the same as an ordinary developer container, so the
+coupling would have failed every run for a reason unrelated to golden
+enforcement. The ratchet now has its own `BUDA_FLOW_QOR_STRICT`, which CI does
+not set; the two are independent concerns that merely shared a variable.
+
+**Still open on that ratchet:** nothing enforces it anywhere now. It is
+reachable via `BUDA_FLOW_QOR_STRICT=1` on whatever host it was calibrated for.
+If that host no longer exists, the honest move is to re-calibrate it against a
+host that does — and say so in its comment — rather than leave numbers nobody
+can reproduce. Not urgent: the tolerant branch still asserts real bounds
+(segment range, overlap cap, and that every unplaced bit is an accounted-for
+keepout cull).
 
 ## 3. Execute the web ports  *(largest effort; independent of the rest)*
 

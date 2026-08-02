@@ -22,7 +22,11 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    # PINNED, not ubuntu-latest.  Strict golden mode compares SHA-256 placement
+    # digests, so a label migration that swaps the compiler or system libs would
+    # fail every PR with no repository change.  Bump this deliberately, together
+    # with a golden rebaseline (tools/nuts_snapshot.py) in the same commit.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     env:
@@ -39,8 +43,13 @@ jobs:
       # imperative, so it swallows a genuine regression exactly as readily as
       # an environmental one.  That left all four large goldens decorative
       # here.  Strict is only defensible because this environment is
-      # controlled (pinned ISA, fixed runner image); developer machines are
-      # heterogeneous and keep the lenient xfail by leaving this unset.
+      # controlled (pinned ISA above, pinned runner image); developer machines
+      # are heterogeneous and keep the lenient xfail by leaving this unset.
+      #
+      # Scoped to the placement goldens ONLY.  The flow QoR ratchet in
+      # test_flow_scripts.py has its own BUDA_FLOW_QOR_STRICT and is
+      # deliberately NOT set: its numbers are hardcoded, unregenerable, and
+      # calibrated under -march=native, which is not this job's ISA.
       BUDA_NUTS_GOLDEN_STRICT: '1'
       # Headless: the suite uses matplotlib's Agg backend and needs no Tk or
       # display server (docs/build_test_dependencies.md).
