@@ -685,3 +685,39 @@ def test_row_layout_is_the_default_and_unchanged(tmp_path):
     build_hier_demo.build(path, _CELLS[:2], seed=1, n_instances=2, n_buses=0)
     db = buda_db.BDB(path)
     assert all(c.y1 == 0.0 for c in _depth1(db).values())
+
+
+def test_align_tops_flushes_columns_without_breaking_the_grid(tmp_path):
+    """--align-tops shifts each column up as a RIGID block: the tops go flush
+    and every intra-column pitch is untouched, so --grid alignment survives.
+    (Shifting only the topmost instances would break it — the gap to the
+    tallest column is not generally a multiple of the grid.)"""
+    path = str(tmp_path / "flush.bdb")
+    build_hier_demo.build(path, _CELLS, seed=1, n_instances=3, n_buses=2,
+                          layout="stacked", channel=100.0, grid=48.0,
+                          align_tops=True)
+    db = buda_db.BDB(path)
+    by_cell = {}
+    for c in _depth1(db).values():
+        by_cell.setdefault(c.cell, []).append(c)
+    tops = set()
+    for cell, insts in by_cell.items():
+        insts.sort(key=lambda c: c.y1)
+        tops.add(round(insts[-1].y2, 6))
+        pitches = [insts[i + 1].y1 - insts[i].y1 for i in range(len(insts) - 1)]
+        assert len(set(round(p, 6) for p in pitches)) == 1, cell
+        assert pitches[0] % 48.0 == 0, (cell, pitches[0])   # grid survives
+    assert len(tops) == 1, tops                             # all columns flush
+
+
+def test_align_tops_is_off_by_default(tmp_path):
+    """Without it, columns are bottom-aligned at y=0 as before."""
+    path = str(tmp_path / "noflush.bdb")
+    build_hier_demo.build(path, _CELLS, seed=1, n_instances=2, n_buses=0,
+                          layout="stacked", channel=100.0, grid=48.0)
+    db = buda_db.BDB(path)
+    assert min(c.y1 for c in _depth1(db).values()) == 0.0
+    by_cell = {}
+    for c in _depth1(db).values():
+        by_cell.setdefault(c.cell, []).append(c)
+    assert all(min(i.y1 for i in v) == 0.0 for v in by_cell.values())

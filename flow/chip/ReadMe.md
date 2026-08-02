@@ -145,8 +145,8 @@ A deliberately *placed* sibling of chip, built to remove instance-phase noise
 from the bottom-up flow:
 
 ```
-  LEFT  column  x=[0..6100]      2 x big2, pitch 7560  (cell 6300 + channel 1260)
-  RIGHT column  x=[7100..9430]   4 x mix2, pitch 3528  (cell 2360 + channel 1168)
+  LEFT  column  x=[0..6100]      2 x big2, pitch 7560   y = 0, 7560
+  RIGHT column  x=[7100..9430]   4 x mix2, pitch 3528   y = 916, 4444, 7972, 11500
   die 9430 x 13860, 100 top-level cross-hierarchy buses, 11750 nets
 ```
 
@@ -164,12 +164,28 @@ the placement (big2: 2 instances, 249 windows compared; mix2: 4 instances, 774
 windows) — where the SA-placed `chip_bottomup.buda` has to nudge instances onto
 a common phase first.
 
+**Top-flush columns.**  The mix2 column is shifted up 916 as a *rigid block*
+so its top edge meets big2's at 13860.  A whole-column shift leaves every
+intra-column Δy at 3528 = 7×504, so the phase survives — shifting only the top
+instances would not, since 916 is not a multiple of 504.  Column origins are
+therefore no longer multiples of 504 in absolute terms, and they do not need to
+be: what `check_template_tracks` requires is that the instances of one cell
+agree with *each other*.
+
+It is worth doing on the numbers, not just the picture:
+
 | Flow | overlaps | unplaced | viol | abstract WL | detailed WL | sec |
 |---|---|---|---|---|---|---|
-| chip_stack_bottomup | 64 | 364 | 37 | 1,035,830 | 26,684,932 | 31 |
-| chip_stack_topdown | 61 | 1170 | 65 | 1,174,291 | 30,168,999 | 57 |
+| chip_stack_bottomup | 24 | 288 | 32 | 968,930 | 26,339,489 | 29 |
+| chip_stack_topdown | 26 | 755 | 54 | 1,065,914 | 30,053,613 | 57 |
 
-The bottom-up/top-down gap is the cleanest in the chip family — 364 vs 1170
+(Before the top-flush shift: bottom-up 64/364/37 at abstract WL 1,035,830;
+top-down 61/1170/65 at 1,174,291.  Overlaps drop ~60% on both flows and
+abstract WL 6-9%, because the columns now span the die together instead of the
+right one trailing 916 short — the cross-hierarchy buses stop skewing to reach
+it.)
+
+The bottom-up/top-down gap is the cleanest in the chip family — 288 vs 755
 unplaced — because the templates are copied onto instances that already agree
 on tracks, with no alignment residue to route around.
 
@@ -180,7 +196,8 @@ The picture above is `tools/render_stack_placement.py <design.bdb> <out.png>
 [grid]` — die, instances by cell type, leaf blocks, channels, and each origin
 as a multiple of the grid quantum.
 
-Generated with `build_hier_demo.py --layout stacked --channel 1000 --grid 504`
+Generated with `build_hier_demo.py --layout stacked --channel 1000 --grid 504
+--align-tops`
 (see [BUILD_HIER_DEMO](../../docs/BUILD_HIER_DEMO.md#on-grid-stacking)); the
 regeneration command is in the flow header.  Note the 504 grid is valid only
 while the cells stay at or below M9 — the full 10-layer stack would need

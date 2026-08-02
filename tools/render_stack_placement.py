@@ -58,16 +58,25 @@ for lf in leaves:
     ax.add_patch(Rectangle((lf.x1, lf.y1), lf.x2 - lf.x1, lf.y2 - lf.y1,
                            fc=c, ec=c, alpha=0.42, lw=0.25, zorder=3))
 
-# instance labels + the on-grid arithmetic
+# instance labels + the on-grid arithmetic.  What makes a column phase-aligned
+# is that every intra-column delta-y is a multiple of GRID — the column's
+# absolute offset is free (and is used to flush the tops), so the labels are
+# written relative to each column's base instance.
+col_base = {}
+for inst in insts:
+    col_base[inst.cell] = min(col_base.get(inst.cell, inst.y1), inst.y1)
 for inst in insts:
     c = CELL_C.get(inst.cell, "#777")
     short = inst.name.split("/")[-1]
     k = inst.y1 / GRID
     bbox = dict(boxstyle="round,pad=0.28", fc="#faf9f7", ec=c, lw=0.5,
                 alpha=0.94)
+    base = col_base[inst.cell]
+    steps = (inst.y1 - base) / GRID
+    tag = ("  (column base)" if inst.y1 == base
+           else f" = base + {steps:.0f}×{GRID:.0f}")
     ax.text(inst.x1 + 70, inst.y2 - 300,
-            f"{short}\ny = {inst.y1:.0f}"
-            + (f" = {k:.0f}×{GRID:.0f}" if k else "  (origin)"),
+            f"{short}\ny = {inst.y1:.0f}{tag}",
             color=c, fontsize=6.6, fontweight="bold", zorder=10,
             va="top", bbox=bbox, family="DejaVu Sans", linespacing=1.5)
 
@@ -95,8 +104,8 @@ ax.set_ylim(-900, H + 700)
 ax.set_aspect("equal")
 ax.axis("off")
 ax.set_title("chip_stack — on-grid stacked placement\n"
-             f"die {W:.0f} × {H:.0f} · every instance origin a multiple of "
-             f"{GRID:.0f}",
+             f"die {W:.0f} × {H:.0f} · within each column every Δy is a "
+             f"multiple of {GRID:.0f} → one shared track phase",
              fontsize=9, color="#2c3844", pad=14, family="DejaVu Sans")
 fig.tight_layout()
 out = sys.argv[2]

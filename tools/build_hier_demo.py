@@ -47,6 +47,11 @@ Usage:
                      (default 0 = off; --layout stacked only).  Q is the LCM of
                      the track pitches of the layers the cells may use — the
                      caller knows the technology, this tool does not.
+  --align-tops       shift each column UP as a rigid block so every column's
+                     top edge is flush with the tallest one (--layout stacked
+                     only).  Shifting a WHOLE column leaves its intra-column
+                     pitches untouched, so --grid alignment survives; shifting
+                     only the top instances would not.
   --optimize sa|ga   place the top cell's instances in 2D (SA or GA) to
                      shorten the cross-instance top buses (default: row layout).
   --param KEY=VALUE  optimizer knob (repeatable). Values accept k/m suffixes
@@ -791,7 +796,8 @@ def _ensure_min_buses_per_instance(buses, placements, pool, rng,
 def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
           cell_nets=True, busterms=True, optimize=None, opt_params=None,
           bloat=None, n_instances=2, n_buses=7, align_occurrences=False,
-          nest_bdb_cells=False, layout="row", channel=_GAP, grid=0.0):
+          nest_bdb_cells=False, layout="row", channel=_GAP, grid=0.0,
+          align_tops=False):
     rng = random.Random(seed)
     # Leaf .buda files carry full pipeline/tech commands buda2bdb doesn't read;
     # silence its per-line "ignored command" warnings while defining cells.
@@ -852,6 +858,24 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
                       f"(cell {h:.0f} + channel {pitch - h:.0f})"
                       + (f", on a {grid:g} grid" if grid > 0 else ""))
         top_w = max(x_cursor - channel, 1.0)
+        if align_tops:
+            # Shift each column UP as a rigid block so every column's top edge
+            # is flush with the tallest one.  A whole-column shift leaves every
+            # intra-column delta-y untouched, so the on-grid phase survives —
+            # which shifting only the top instances would not (the gap to the
+            # tallest column is not generally a multiple of --grid).
+            for name, _w, h, _b, _n, _c in cells:
+                col = [p for p in placements if p["cell"] == name]
+                col_top = max(p["y"] for p in col) + h
+                dy = top_h - col_top
+                if dy <= 0:
+                    continue
+                for p in col:
+                    p["y"] += dy
+                print(f"  align {name:14s} column shifted up {dy:.0f} "
+                      f"(top edge flush at {top_h:.0f}"
+                      + (f"; delta-y unchanged, still {grid:g}-aligned)"
+                         if grid > 0 else ")"))
     else:
         x_cursor, row_h = 0.0, 0.0
         for name, w, h, blocks, nets, _centers in cells:
@@ -1043,6 +1067,7 @@ def main():
     layout = "row"
     channel = _GAP
     grid = 0.0
+    align_tops = False
     i = 0
     pos = []
     while i < len(argv):
@@ -1070,6 +1095,8 @@ def main():
             channel = float(argv[i + 1]); i += 2
         elif argv[i] in ("--grid", "-grid") and i + 1 < len(argv):
             grid = float(argv[i + 1]); i += 2
+        elif argv[i] in ("--align-tops", "-align-tops"):
+            align_tops = True; i += 1
         elif argv[i] == "--no-cell-nets":
             cell_nets = False; i += 1
         elif argv[i] == "--no-busterms":
@@ -1092,6 +1119,9 @@ def main():
     if layout == "stacked" and optimize:
         sys.exit("Error: --layout stacked places instances explicitly on grid; "
                  "--optimize would move them off it (drop one or the other)")
+    if align_tops and layout != "stacked":
+        sys.exit("Error: --align-tops applies to --layout stacked (there is "
+                 "one row to align in the row layout)")
     if grid > 0 and layout != "stacked":
         sys.exit("Error: --grid applies to --layout stacked (the row layout "
                  "puts every instance on y=0)")
@@ -1117,7 +1147,8 @@ def main():
           busterms=busterms, optimize=optimize, opt_params=opt_params,
           bloat=bloat, n_instances=n_instances, n_buses=n_buses,
           align_occurrences=align_occurrences, nest_bdb_cells=nest_bdb_cells,
-          layout=layout, channel=channel, grid=grid)
+          layout=layout, channel=channel, grid=grid,
+          align_tops=align_tops)
 
 
 if __name__ == "__main__":

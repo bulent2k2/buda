@@ -32,6 +32,7 @@ python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a,b,c]
 | `--layout row\|stacked` | `row` | Instance placement. `row` lays every instance in one row at y=0; **`stacked`** gives each cell type its own COLUMN in `--cells` order and stacks that cell's instances vertically. Incompatible with `--optimize` |
 | `--channel V` | `200` | Minimum gap between stacked instances and between columns. The realized vertical gap is whatever `--grid` rounds the pitch up to, so it is ≥ V |
 | `--grid Q` | *(off)* | Snap the vertical stack pitch UP to a multiple of Q (`--layout stacked` only) — see [on-grid stacking](#on-grid-stacking) |
+| `--align-tops` | *(off)* | Shift each column UP as a rigid block so every column's top edge is flush with the tallest (`--layout stacked` only). A whole-column shift preserves `--grid` alignment; shifting only the top instances would not |
 | `--no-cell-nets` | *(off)* | Emit only the top-level buses (lean ~70-net demo) |
 | `--no-busterms` | *(off)* | Skip busterm derivation |
 | `--optimize sa\|ga` | *(off)* | Place the top cell's instances in 2D to shorten the top buses |
@@ -128,6 +129,14 @@ python3 tools/build_hier_demo.py flow/chip/chip_stack.bdb \
   stack mix2           4 x  pitch     3528 (cell 2360 + channel 1168), on a 504 grid
   top  top                9430 x  13860  (6 instances)
 ```
+
+`--align-tops` then shifts each column up as a **rigid block** so the columns
+are top-flush.  Only whole-column shifts are safe: the gap to the tallest
+column is not generally a multiple of Q, so moving just the topmost instances
+would break the very phase alignment `--grid` bought.  Because a column's
+*absolute* offset is free — only intra-column Δy matters — the shift costs
+nothing, and on `chip_stack` it measurably helps (overlaps ~−60%, abstract WL
+−6..−9% on both flows).
 
 The payoff is that a bottom-up flow needs **no `align_bottom_up`**:
 `check_template_tracks` reports `ALIGNED` straight from the placement (built
