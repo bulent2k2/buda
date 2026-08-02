@@ -399,10 +399,14 @@ def _runtime_report(paired):
     spotting a blow-up, not for costing a small change.  A measured case:
     a heal adding one DNUTS solve per flow "showed" +3.3% here while the
     flows that PROVABLY could not run it (gated out) moved +4.2%, i.e. pure
-    host noise; the warm microbenchmark put the real cost 10x lower.  Before
+    host noise; the warm microbenchmark put the real per-flow cost between
+    0.05% and 2.1% of flow wall — every flow below this line's figure, and
+    spread ~40x across flows, which one aggregate cannot express.  Before
     citing a small delta from this line, read "Measuring a per-flow COST" in
     docs/internal/qor_corpus.md — it gives the two checks (an accidental
-    control group; a warm best-of-N microbenchmark) that catch it."""
+    control group; a warm best-of-N microbenchmark) that catch it.  Applies
+    to RUNTIME only: the WL diff is informational for a different reason
+    (topology changes legitimately trade WL) and IS deterministic."""
     timed = [(f, b, m) for f, b, m in paired
              if isinstance(b.get("sec"), (int, float))
              and isinstance(m.get("sec"), (int, float))]

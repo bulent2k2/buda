@@ -144,16 +144,23 @@ wall-time delta cannot resolve a per-flow cost of a few percent or less.  Use
 it to spot a 2× blow-up; do NOT use it as evidence for or against a small
 one.
 
-**The worked example (2026-08-02, the pair-align default-flip).**  The
+**The worked example (2026-08-02, the pair-align default-flip).**  *(Run
+against the live 37-entry `CORPUS` in `tools/qor_corpus.py`, which has grown
+past the 34-flow table above — the 6/31 split below is of those 37.)*  The
 measured-accept alignment heal adds one extra DNUTS solve per eligible flow.
 A single heal-on/heal-off corpus run put that at **+3.3% wall** (1270s →
 1312s), and that number was reported as the cost bar.  It was noise.  The
 corpus contains 6 bottom-up vehicles whose `hier.locked` bundles make the
 heal return BEFORE solving — they cannot pay the cost at all — and they moved
-**+4.2%**, MORE than the 31 flows that actually pay (+2.5%).  The warm
-microbenchmark put the true cost at **0.05–2.1% of flow wall**, an order of
-magnitude below what the corpus run "showed", and it changed the verdict's
-basis (the flip is refused for lack of benefit, not for cost).
+**+4.2%**, MORE than the 31 flows that actually pay (+2.5%).
+
+The warm microbenchmark then measured the real per-flow cost of that one
+solve: **`big` 2.1% of flow wall, `big2` 1.6%, `tc3a` 0.15%, `mix` 0.13%,
+`mix2_fast_topdown` 0.10%, `bigHalf` 0.05%** — every one of them BELOW the
+corpus figure, and most of them far below it (the spread across flows is
+itself ~40×, which a single aggregate number cannot express at all).  That
+changed the verdict's basis: the flip is refused for lack of benefit, not
+for cost.
 
 **Two techniques that catch this — both cheap:**
 
@@ -168,10 +175,23 @@ basis (the flip is refused for lack of benefit, not for cost).
    the one call under test (5 reps, take the min) resolves milliseconds that a
    whole-flow run buries under process start-up, I/O and scheduler jitter.
 
-The same discipline applies to the WL columns for small deltas, and is why
-both diffs print "informational … not a guard".  The QoR metrics
-(overlaps/unplaced/viol_bundles) ARE deterministic per host and remain the
-gate.
+**This is about runtime ONLY — do not carry it over to the WL columns.**
+Both informational diffs say "not a guard", but for opposite reasons, and
+conflating them would throw away a good signal:
+
+- **runtime** is not a guard because it is *not reproducible* — single-run
+  wall time, and the parallel sweep inflates `sec` under CPU load.  Small
+  deltas are noise, which is what this section is about.
+- **wirelength** is not a guard because a topology/planner change may
+  *legitimately trade* WL for routability — not because the number is
+  unreliable.  WL is **deterministic** per host and byte-identical between
+  serial and parallel sweeps, so a small WL delta is real signal and should
+  be read, not discarded.  In this very experiment the accepted heal's
+  benefit was a −0.02% WL move on one flow: far too small to survive a
+  runtime-style noise argument, and entirely trustworthy as WL.
+
+The QoR metrics (overlaps/unplaced/viol_bundles) are likewise deterministic
+per host, and remain the gate.
 
 See also: [`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md),
 [`healer_effectiveness_2026-07.md`](healer_effectiveness_2026-07.md), and
