@@ -131,6 +131,13 @@ actually fixed. First run (or after a cache eviction) establishes a baseline and
 passes; the tool itself raises an uncaught `FileNotFoundError` on a missing
 baseline, so the workflow handles that case rather than letting it crash.
 
+**An errored sweep is rejected before either.** `cmd_run` records a flow that
+raises as `{"flow": ..., "err": ...}` and still exits 0, and `cmd_compare`
+prints a flow that is *new* to the corpus as `(new)` without counting it in
+`n_worse`. So a broken flow — on the first run, or a freshly added corpus row —
+would otherwise sail through as clean, get promoted, and be read as "unchanged"
+by every later nightly. The workflow fails on any `err` row instead.
+
 The run JSON and the diff upload as an artifact on **every** run, including
 failures — that is when they are most useful.
 

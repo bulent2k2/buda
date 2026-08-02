@@ -70,6 +70,28 @@ jobs:
         # nothing gates on them.  Use `-j 1` if you want real per-flow timings.
         run: python3 tools/qor_corpus.py --out qor-current.json
 
+      - name: Reject errored sweeps
+        # cmd_run records a flow that RAISES as {"flow": ..., "err": ...} and
+        # still exits 0, and cmd_compare prints a flow that is NEW to the corpus
+        # as "(new)" without counting it in n_worse.  So an errored flow — on
+        # the first run, or a newly added corpus row — would sail through as
+        # "established"/"clean", get promoted into the baseline, and every later
+        # nightly would then treat the breakage as unchanged.  That silently
+        # defeats the promote-on-clean property this job is built around, so an
+        # err row is a hard failure (review on PR #565).
+        run: |
+          python3 -c '
+          import json, sys
+          rows = json.load(open("qor-current.json"))
+          bad = [r for r in rows if "err" in r]
+          for r in bad:
+              print("::error::corpus flow errored: %s: %s" % (r["flow"], r["err"]))
+          if bad:
+              sys.exit("%d of %d corpus flow(s) errored — not comparing or promoting"
+                       % (len(bad), len(rows)))
+          print("all %d corpus flows completed" % len(rows))
+          '
+
       - name: Compare against the previous nightly
         id: compare
         # The corpus tool exits non-zero when any flow regressed on
