@@ -77,7 +77,10 @@ priority view** — what's actually open right now, ranked by value/effort — s
   resolved, PR #69); corner/repair at-scale residual after the 2026-07
   runtime arc (open, three items: span-indexed repack occupancy,
   marginal-yield round stop, over-capacity classification — the
-  responsibility-boundary one).
+  responsibility-boundary one); pairwise-overlap stub alignment (heal ✅
+  shipped opt-in as `set_pair_align_heal`, PR #557 — the DEFAULT-FLIP is
+  open and trigger-gated; the unconditional form measured 0 better / 7
+  worse, the accept makes it 0/0/37).
 - **[wishlist-bundler.md](wishlist-bundler.md)** — Bundler.
   Multi-source (fan-in) topology to make CONVERGENT bundling sound.
 - **[wishlist-healer.md](wishlist-healer.md)** — Healers (rip-up, negotiate,
