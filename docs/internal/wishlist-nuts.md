@@ -507,7 +507,7 @@ pair sits wholly in a tagged band; report the tagged demand excess on
 the `[NUTS]` summary line so the infeasibility is LOUD instead of
 silently half-repaired.
 
-## Pairwise-overlap stub alignment — heal SHIPPED opt-in (PR #557); DEFAULT-FLIP open
+## Pairwise-overlap stub alignment — heal SHIPPED opt-in (PR #557); DEFAULT-FLIP measured and REFUSED
 
 **The artifact.**  Two same-net stubs straddling a trunk should align — share
 ONE track window, so each bit runs as a single straight wire with no per-bit
@@ -543,27 +543,82 @@ worse / 37 unchanged** — it rejects all 7 regressors — with one accepted win
 (`tc3a` detailed WL −0.02%) and the `seat_repro` right column aligning
 (detailed WL −1.5%).
 
-**The open question: should the heal be DEFAULT-ON?**  No evidence yet.  The
-corpus is dominated by congested flows with few clean pairs, so the heal is
-almost always a no-op there and pays an extra full DNUTS solve for it — that
-cost is exactly why it is opt-in.  Its market is UNCONGESTED designs with
-misaligned same-net pairs, which the corpus barely represents.
+### The DEFAULT-FLIP question — MEASURED AND REFUSED (2026-08-02)
 
-**Trigger to flip** (the `kWLSpread`/`kSegs` default-flip pattern — bars
-recorded, not a promise):
+Both bars were measured.  Neither is met, and the prerequisite that was
+supposed to make a flip affordable is **refuted**.  Recorded here so the
+question is not re-opened from intuition.
 
-1. a corpus vehicle (or a real design) where the heal ACCEPTS on more than
-   one bundle and moves detailed WL by ≥0.5%, and
-2. the **REJECTED** (extra) pair-align solve cost, measured as a fraction of
-   `run_detailed_nuts` on the flows where the heal is a no-op.  That is the
-   population to measure by construction: acceptance requires a strict WL
-   drop, so on a no-op flow the candidate solve is always rejected — its
-   whole cost is pure overhead, and it is what every flow would pay under a
-   default-on.  (An accepted solve pays for itself; it is not the bar.)  A
-   cheap pre-check (does any same-bundle same-width pair have a
-   non-degenerate interval overlap whose current placement is NOT already
-   shared?) would skip that solve entirely, making the no-op path free — the
-   natural prerequisite to any flip.
+**Bar 1 — a vehicle where the heal accepts on >1 bundle at ≥0.5% WL: NOT
+MET.**  Across the 37-flow corpus exactly ONE flow accepts (`tc3a`,
+detailed WL **−0.02%**), an order of magnitude under the bar.  The heal's
+real market — uncongested designs with misaligned pairs, like the
+`seat_repro` (−1.5%) — is barely represented in the corpus, and no corpus
+vehicle stands in for it.
 
-Until then it stays opt-in: safe by construction, and the accept means a
-flow that turns it on can never be made worse.
+**Bar 2 — the rejected-solve cost: SMALL, and smaller than the first
+measurement suggested.**  The cost is one extra full DNUTS solve on each
+ELIGIBLE flow — 31 of the 37, since the 6 bottom-up vehicles hold
+`hier.locked` bundles and the heal returns before solving (Codex #563).
+Measured warm, that solve is **0.05–2.1% of the flow's wall time**
+(`big` 32ms/1.5s = 2.1%, `big2` 19ms/1.2s = 1.6%, `bigHalf` 26ms/51.7s =
+0.05%, `mix` 6.5ms/5.0s = 0.13%).
+
+*Correction to the first pass:* this bar was initially reported as "+3.3%
+corpus wall time" from a single heal-on/heal-off corpus run.  That number
+is NOISE, not signal — the 6 locked flows are an accidental CONTROL GROUP
+(they cannot pay the solve at all) and they moved **+4.2%** while the 31
+eligible flows moved +2.5%.  Single-run wall time on this corpus cannot
+resolve a per-flow cost this small; the warm microbenchmark above can, and
+it is the number to trust.
+
+**The prerequisite is refuted: the "cheap pre-check" cannot work.**  The
+idea was to skip the solve when no same-bundle same-width pair has a
+non-degenerate interval overlap that is not already sharing tracks.  Built
+and measured on 12 flows (`_pair_align_candidates`, since REVERTED — it
+was a measured loss, not shipped):
+
+| | flows | pre-check vs one solve |
+|---|---|---|
+| candidates == 0 (it CAN skip) | 3 of 12 (`b44`, `05_stress_grid`, `10_chip_units`) | 0.56–1.67× — breaks even at best |
+| candidates > 0 (skips nothing) | 9 of 12 | **2.5–48× the solve, pure added cost** |
+
+Two independent reasons it fails:
+
+1. **It does not discriminate.**  Real flows are full of same-bundle
+   interval-overlapping same-width pairs that are not sharing tracks — 2 to
+   24 of them on the flows above — including every flow where the heal is
+   ultimately REJECTED.  "Is there an alignable pair" is simply not the
+   question; the question is "would aligning them shorten wire", and that is
+   what the solve computes.  A predicate over pairs can never answer it.
+2. **It is not cheap.**  The check must read per-BIT placement to know
+   whether a pair already shares tracks, and a Python pass over that data
+   costs multiples of the C++ DNUTS solve it is trying to avoid.
+
+**Verdict: keep it opt-in — on the absence of BENEFIT, not on cost.**  The
+cost is real but small (above); what is missing is any reason to pay it.  A
+flip would add a solve to 31 flows so that ONE gains 0.02% wirelength, and
+the pre-check that would have made even that free is refuted.  The heal
+stays exactly what it is — safe by construction (the accept means a flow
+that turns it on can never be made worse), and correct to enable per design
+when you have the geometry it targets.  If a corpus vehicle ever meets Bar 1,
+the cost side is cheap enough that the flip becomes a straightforward yes.
+
+### OPEN follow-on — the only thing that re-opens the flip (opens.md #8b)
+
+Narrower than the refuted pre-check, and either half suffices:
+
+1. **A cheap WL-gain predictor** (NOT a pair predicate).  "Would aligning
+   this pair shorten wire" is the only question that discriminates, and the
+   refuted check answered the wrong one.  A predictor would estimate the
+   trunk jog alignment removes — the per-bit detour between the two stubs'
+   track sets, which is arithmetic over data already in hand — without
+   running a solve.  It only has to be good enough to skip the clear
+   no-gain cases.
+2. **A partial/warm DNUTS re-solve** scoped to the affected bundles — the
+   stage-9 analogue of `NUTSEngine::rerun_bundle_warm`.  DNUTS today solves
+   every layer globally, so a rejection costs a FULL solve; scoping it to
+   the handful of bundles with alignable pairs makes the rejected case
+   cheap and the +3.3% wall-time bar disappear.
+
+Absent both, the answer is settled and the heal stays opt-in.
