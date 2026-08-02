@@ -44,29 +44,32 @@ has no answer to.
   flow itself), so expect the occasional legitimate churn — the guard should
   report the diff, not auto-fail on noise it cannot distinguish.
 
-## 2. Own the placement goldens in CI  *(small effort; needs a decision first)*
+## 2. ~~Own the placement goldens in CI~~ — RESOLVED 2026-08-02
 
-**Uncovered:** `test_nuts_placement_golden.py` xfails the four
-`HOST_SENSITIVE_FLOWS` off their generation host rather than failing.
-`BUDA_NUTS_GOLDEN_STRICT=1` turns those into hard failures, and the test's own
-docstring suggests setting it "on the golden-generation host's CI". It is
-**not** set, because CI is not currently that host.
+CI is now the golden reference host: `BUDA_NUTS_GOLDEN_STRICT=1` is set in the
+workflow and `flow/rnr/mix.buda`'s golden was regenerated (QoR-neutral: one
+16-bit bus segment M3→M5, identical totals). The other eight goldens were
+byte-identical and untouched. See [`ci.md`](ci.md).
 
-Concretely: under the workflow's pinned `-march=x86-64-v2`, three of the four
-match exactly and **`flow/rnr/mix.buda`'s large golden is unenforced**. The
-five stable small flows are always enforced.
+**What this cost, recorded because it was not obvious.** The flag was wider
+than its name: `BUDA_NUTS_GOLDEN_STRICT` also switched
+`test_flow_scripts.py::test_10_four_level_scale_one_bundle_per_bus` from
+tolerant bounds to a hand-calibrated QoR ratchet (`segs == 209`,
+`unplaced == 0`, no culls) that **no tool regenerates** — hardcoded numbers,
+calibrated on the original host under `-march=native`, which is not CI's ISA.
 
-**Why it was left out.** Enabling it requires regenerating the goldens on the CI
-image first, and that is a real decision rather than a workflow tweak: it
-changes what the committed goldens *mean* (CI's ISA becomes the reference) and
-who can reproduce a failure locally (a developer on `-march=native` would then
-see mismatches CI does not, inverting today's situation).
+CI measured **206**, the same as an ordinary developer container, so the
+coupling would have failed every run for a reason unrelated to golden
+enforcement. The ratchet now has its own `BUDA_FLOW_QOR_STRICT`, which CI does
+not set; the two are independent concerns that merely shared a variable.
 
-**Where to start.** Decide whether CI is the reference host. If yes: regenerate
-via `tools/nuts_snapshot.py` on the CI image, commit the diff for review, then
-set `BUDA_NUTS_GOLDEN_STRICT=1` in the workflow. If no: leave as is and accept
-that one large golden is advisory — but say so in the golden docstring, which
-currently implies CI *should* enforce.
+**Still open on that ratchet:** nothing enforces it anywhere now. It is
+reachable via `BUDA_FLOW_QOR_STRICT=1` on whatever host it was calibrated for.
+If that host no longer exists, the honest move is to re-calibrate it against a
+host that does — and say so in its comment — rather than leave numbers nobody
+can reproduce. Not urgent: the tolerant branch still asserts real bounds
+(segment range, overlap cap, and that every unplaced bit is an accounted-for
+keepout cull).
 
 ## 3. Execute the web ports  *(largest effort; independent of the rest)*
 

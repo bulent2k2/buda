@@ -31,7 +31,11 @@ else()
     if(NOT BUDA_ARCH STREQUAL "none")
         add_compile_options(-march=${BUDA_ARCH})
     endif()
-    message(STATUS "BUDA target ISA: -march=${BUDA_ARCH}")
+    if(BUDA_ARCH STREQUAL "none")
+        message(STATUS "BUDA target ISA: -march omitted (BUDA_ARCH=none)")
+    else()
+        message(STATUS "BUDA target ISA: -march=${BUDA_ARCH}")
+    endif()
 endif()
 
 # assert()s are cheap correctness guards (e.g. ConnTopology's slide-window
