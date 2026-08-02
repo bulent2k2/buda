@@ -339,6 +339,12 @@ def main():
                     metavar="N",
                     help="worker processes for the sweep (default: CPU count "
                          "= %(default)s; 1 = serial, timing-faithful sec)")
+    ap.add_argument("--fail-on-err", action="store_true",
+                    help="exit non-zero if ANY flow errored, before writing "
+                         "anything.  For unattended use: a flow that raises is "
+                         "recorded as an `err` row and rendered as `ERR: ...` in "
+                         "place of its metrics, which a caller that only checks "
+                         "the exit status would publish as if it were data.")
     ap.add_argument("--diff", nargs=2, metavar=("OLD", "NEW"),
                     help="compare two --json files ignoring per-run timing and "
                          "report whether the QoR actually moved; prints "
@@ -392,6 +398,16 @@ def main():
                                  flush=True))
     print(f"  swept {len(rows)} flows in {time.time() - t0:.1f}s "
           f"(jobs={max(1, args.jobs)})", file=sys.stderr, flush=True)
+    if args.fail_on_err:
+        # BEFORE any write: an errored sweep must not leave a half-truthful
+        # table or sidecar behind for a later step to pick up.
+        bad = [r for r in rows if "err" in r]
+        for r in bad:
+            print(f"::error::corpus flow errored: {r['flow']}: {r['err']}",
+                  file=sys.stderr, flush=True)
+        if bad:
+            sys.exit(f"{len(bad)} of {len(rows)} flow(s) errored — refusing to "
+                     f"write a snapshot with ERR in place of metrics")
     stamp = args.stamp or f"{time.strftime('%Y-%m-%d')} (main @ {_git_commit()})"
     if args.jobs <= 1 and not args.flows and args.out:
         # A FULL serial snapshot refresh is the (only) source of truth for the

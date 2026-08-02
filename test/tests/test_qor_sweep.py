@@ -235,3 +235,46 @@ def test_diff_cli_treats_a_missing_baseline_as_changed(tmp_path, monkeypatch, ca
                          str(new_)])
     qt.main()
     assert "changed=true" in gh.read_text()
+
+
+def test_fail_on_err_refuses_to_write_a_snapshot(tmp_path, monkeypatch, capsys):
+    """A flow that RAISES is recorded as an err row and rendered as `ERR: ...`
+    in place of its metrics, while the sweep still exits 0.  Unattended, that
+    would be published to the authoritative snapshot as if it were data -- and
+    semantic_diff reads the vanished fields as a change, so it would open the
+    PR too.  --fail-on-err must stop BEFORE writing anything."""
+    import qor_table as qt
+    out_md = tmp_path / "t.md"
+    out_js = tmp_path / "t.json"
+    rows = [_row("ok.buda", 1.0), {"flow": "bad.buda", "err": "RuntimeError: boom"}]
+    fake = types.SimpleNamespace(
+        sweep=lambda run_fn, flows, jobs, progress=None: rows,
+        CORPUS=["ok.buda", "bad.buda"], default_jobs=lambda: 1)
+    old_qc = qt.qc
+    try:
+        qt.qc = types.SimpleNamespace(**{**vars(old_qc), **vars(fake)})
+        monkeypatch.setattr(sys, "argv",
+                            ["qor_table.py", "--fail-on-err", "--stamp", "s",
+                             "--out", str(out_md), "--json", str(out_js)])
+        try:
+            qt.main()
+        except SystemExit as e:
+            assert e.code not in (0, None), "must exit non-zero"
+        else:
+            raise AssertionError("--fail-on-err did not exit")
+    finally:
+        qt.qc = old_qc
+    # Nothing half-truthful left behind for a later step to pick up.
+    assert not out_md.exists() and not out_js.exists()
+    assert "bad.buda" in capsys.readouterr().err
+
+
+def test_err_row_would_otherwise_read_as_a_semantic_change():
+    """Why the guard above matters: without it the err row reaches the gate and
+    is indistinguishable from a real QoR move."""
+    import qor_table as qt
+    before = [_row("x.buda", 1.0)]
+    after = [{"flow": "x.buda", "err": "RuntimeError: boom"}]
+    added, removed, moved = qt.semantic_diff(before, after)
+    assert (added, removed) == ([], [])
+    assert moved and moved[0][0] == "x.buda"
