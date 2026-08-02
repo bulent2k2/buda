@@ -506,3 +506,64 @@ over-capacity bands before the repair loop; skip per-pair victims whose
 pair sits wholly in a tagged band; report the tagged demand excess on
 the `[NUTS]` summary line so the infeasibility is LOUD instead of
 silently half-repaired.
+
+## Pairwise-overlap stub alignment — heal SHIPPED opt-in (PR #557); DEFAULT-FLIP open
+
+**The artifact.**  Two same-net stubs straddling a trunk should align — share
+ONE track window, so each bit runs as a single straight wire with no per-bit
+trunk jog.  DNUTS's ordered-anchor placer (`place_by_layer`, "Option B")
+sorts segments by `abstract_pos` and seats each at its OWN anchor; a later
+same-net segment reuses an earlier one's tracks only if they fall inside its
+own window.  Alignment is therefore OPPORTUNISTIC, and the processing order
+is **not mirror-invariant**: on a mirror-symmetric floorplan the left pair
+aligns while the right pair splits, because the mirror flips which stub is
+placed first AND puts its self-centred placement at the far edge of the pair
+overlap, just out of the partner's reach (the `seat_repro` right column:
+u3 `[621..646]` vs l3 `[589..614]`, offset 32).
+
+**What shipped (PR #557).**  `set_pair_align_heal on` — a MEASURED-ACCEPT
+pass at `run_detailed_nuts`: re-solve with pair-align (restrict a stub's
+track pool to the interval overlap it shares with same-bundle same-width
+partners, then proactively adopt a placed partner's exact tracks), and KEEP
+it only when unplaced/overlaps do not rise and detailed WL strictly drops.
+Default OFF; scoped out of bottom-up (locked) sessions.  Raw study path:
+`BUDA_DNUTS_PAIR_ALIGN` (unconditional, no accept).
+
+**Why the accept is load-bearing — the measured record.**  The
+UNCONDITIONAL form is corpus NET-NEGATIVE: **0 better / 7 worse / 30
+unchanged**.  Restricting stubs to their overlap band concentrates same-net
+wires and STARVES signal tracks on congested designs — every worse flow
+strands MORE bits (`big.buda` 0/0/0 → 0/8/1; `mix2_fast_on_aligned_sql`
+unplaced 16 → 68; four chip flows +8–12%) while corpus WL moves −0.04%.
+This is the DUAL of the documented concentration loss
+([`interval_pull_model.md`](interval_pull_model.md) "The spreader,
+resolved"): spreading manufactures no keepout-clear tracks, concentrating
+starves them.  With the accept the same mechanism measures **0 better / 0
+worse / 37 unchanged** — it rejects all 7 regressors — with one accepted win
+(`tc3a` detailed WL −0.02%) and the `seat_repro` right column aligning
+(detailed WL −1.5%).
+
+**The open question: should the heal be DEFAULT-ON?**  No evidence yet.  The
+corpus is dominated by congested flows with few clean pairs, so the heal is
+almost always a no-op there and pays an extra full DNUTS solve for it — that
+cost is exactly why it is opt-in.  Its market is UNCONGESTED designs with
+misaligned same-net pairs, which the corpus barely represents.
+
+**Trigger to flip** (the `kWLSpread`/`kSegs` default-flip pattern — bars
+recorded, not a promise):
+
+1. a corpus vehicle (or a real design) where the heal ACCEPTS on more than
+   one bundle and moves detailed WL by ≥0.5%, and
+2. the **REJECTED** (extra) pair-align solve cost, measured as a fraction of
+   `run_detailed_nuts` on the flows where the heal is a no-op.  That is the
+   population to measure by construction: acceptance requires a strict WL
+   drop, so on a no-op flow the candidate solve is always rejected — its
+   whole cost is pure overhead, and it is what every flow would pay under a
+   default-on.  (An accepted solve pays for itself; it is not the bar.)  A
+   cheap pre-check (does any same-bundle same-width pair have a
+   non-degenerate interval overlap whose current placement is NOT already
+   shared?) would skip that solve entirely, making the no-op path free — the
+   natural prerequisite to any flip.
+
+Until then it stays opt-in: safe by construction, and the accept means a
+flow that turns it on can never be made worse.
