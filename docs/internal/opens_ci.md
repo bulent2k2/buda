@@ -18,9 +18,12 @@ against the previous successful nightly. The baseline is promoted **only** on a
 clean run, so a regression keeps being reported until fixed rather than becoming
 the new normal after one night. See [`ci.md`](ci.md).
 
-Corrected while building it: the corpus is **37** flows and takes **~4m20s**
-parallel (jobs=4), not the "36 flows, ~2-4 min serial" this page previously
-estimated — that figure predated the corpus growing.
+Corrected while building it: the corpus is **37** flows, not the "36 flows,
+~2-4 min serial" this page previously estimated — that figure predated the
+corpus growing. Corrected again after the first real run: the sweep takes
+**6m34s** on the hosted runner (jobs=4), not the ~4m20s measured in a developer
+container. The nightly also refreshes `qor_table.md` (see [`ci.md`](ci.md)),
+which adds a second sweep — item 3 below.
 
 **Still open — the PR half.** The nightly compares `main` against itself over
 time, so it catches a regression a day AFTER it lands. What it does not do is
@@ -62,7 +65,27 @@ can reproduce. Not urgent: the tolerant branch still asserts real bounds
 (segment range, overlap cap, and that every unplaced bit is an accounted-for
 keepout cull).
 
-## 3. Execute the web ports  *(largest effort; independent of the rest)*
+## 3. The nightly sweeps the corpus twice  *(cheap to fix; deliberately not fixed)*
+
+The nightly runs `qor_corpus.py` (the regression gate) **and**
+`qor_table.py` (the snapshot table), each doing its own full corpus sweep —
+~6.5 min apiece, ~16 min for the job.
+
+They measure the same pipeline. Both `run_flow`s source the flow the same way
+and call the same `_check_design_bundles` / `_wirelengths`; they differ only in
+the keys they return (`ovl`/`unpl`/`viol` vs
+`overlaps`/`unplaced`/`viol_bundles`) and in the extra size/WL columns the table
+carries. One sweep could feed both with a rename.
+
+**Left as-is on purpose.** Sharing a sweep means the regression *gate* — the
+nightly's primary job — starts consuming the other tool's row-builder, and the
+cached baseline's key schema is invalidated in the process. Six minutes of
+unattended runner time is not worth putting the gate's fidelity in play. If
+this is ever taken on, the safe direction is to make `qor_table.py` derive its
+extra columns from a `qor_corpus` sweep (gate unchanged, table follows), not
+the reverse.
+
+## 4. Execute the web ports  *(largest effort; independent of the rest)*
 
 **Uncovered:** the display-geometry rule
 (`viz_common.snap_endpoint_extents`) has three implementations — the
