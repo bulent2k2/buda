@@ -7,6 +7,12 @@ wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
 lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved (by \<date\>)*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
 items this page doesn't see).
 
+> **Continuous integration:** CI landed 2026-08-01
+> ([`ci.md`](ci.md)) — build + full suite on every push and PR, ~5 min. What it
+> deliberately does NOT cover yet (nightly QoR corpus, owning the placement
+> goldens, executing the web ports) is tracked separately in
+> [`opens_ci.md`](opens_ci.md).
+
 > **Feature-suite coverage:** the Gherkin narrative spec layer
 > (`test/tests/features/`) is mapped to these arcs & opens in
 > [`feature_coverage_plan.md`](feature_coverage_plan.md). The open items below

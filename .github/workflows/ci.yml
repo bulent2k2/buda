@@ -1,0 +1,98 @@
+name: CI
+
+# Build the C++ core and run the whole pytest suite on every push and PR.
+#
+# Measured on a 4-core Linux box at the time this landed:
+#   clean build            ~1m 54s
+#   full suite (-n 4)      ~3m 08s   (2105 passed, 3 skipped, 36 xfailed)
+#   total                  ~5m
+#
+# See docs/internal/ci.md for why the ISA is pinned, and
+# docs/internal/opens_ci.md for what is deliberately NOT run here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # A new push to a PR supersedes the run in flight — the old result is stale.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      # NOT "native".  Hosted runners are a heterogeneous fleet (Skylake through
+      # Sapphire Rapids), so -march=native compiles a different instruction set
+      # per run — and the placement goldens are exactly what that perturbs: a
+      # golden generated on one runner can fail on the next with no code change.
+      # x86-64-v2 is a conservative baseline every current runner supports.
+      # (CMakeLists' -ffp-contract=off already removes the FMA-contraction half
+      # of the same problem; this removes the vectorization half.)
+      BUDA_ARCH: x86-64-v2
+      # Headless: the suite uses matplotlib's Agg backend and needs no Tk or
+      # display server (docs/build_test_dependencies.md).
+      MPLBACKEND: Agg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        # SQLite is bundled in-tree (src/sqlite3.c) and there is no EDA-library
+        # dependency.  numpy arrives with matplotlib.  pytest-xdist is what
+        # makes the suite ~3x faster.
+        #
+        # src/web/requirements.txt (fastapi/uvicorn/httpx) is NOT optional for a
+        # full-suite gate: without it pytest skips test_web_ws.py wholesale and
+        # the _client() helpers in test_web_server/checkpoint/edit skip too, so
+        # the HTTP, WebSocket, checkpoint and topology-edit surfaces silently
+        # go unrun.  Measured: 2077 passed / 25 skipped without it, 2105 passed
+        # / 3 skipped with it -- 28 tests (review #559).
+        run: |
+          python -m pip install --upgrade pip
+          pip install pybind11 pytest pytest-bdd pytest-xdist matplotlib
+          pip install -r src/web/requirements.txt
+
+      - name: Build
+        run: bin/bb
+
+      - name: Report target ISA
+        # Surfaced so a golden failure can be told apart from an ISA change at a
+        # glance, without re-reading the workflow.
+        run: grep -m1 '^BUDA_ARCH:' build/CMakeCache.txt
+
+      - name: Test
+        # -o addopts="" clears pytest.ini's default deselection so ALL tiers run
+        # (the default excludes 'mid' and 'slow'); -n 4 matches the runner's core
+        # count.  Goldens: the four HOST_SENSITIVE_FLOWS xfail off their
+        # generation host rather than failing, so a pinned-ISA CI is green
+        # without owning them — see docs/internal/ci.md.
+        #
+        # pipefail so the pipe into tee cannot mask a pytest failure.
+        run: |
+          set -o pipefail
+          python -m pytest -q -o addopts="" -p xdist -n 4 -rs 2>&1 | tee pytest.log
+
+      - name: No module skipped for a missing import
+        # The failure mode this guards is how a hole got into this very
+        # workflow: pytest skips a whole module when its import fails, so a
+        # dependency missing from the step above silently removes tests while
+        # the gate still reports success.  An import-skip is therefore a CI
+        # configuration error, not a legitimate skip -- fail on it and name it.
+        # Legitimate skips (platform-specific, fixture-dependent) do not carry
+        # this reason and are unaffected; there are 3 of them today.
+        run: |
+          if grep -q "could not import" pytest.log; then
+            echo "::error::A test module was skipped because an import failed - a dependency is missing from the install step"
+            grep "could not import" pytest.log
+            exit 1
+          fi
+          echo "No import-skips: every test module was collected."
