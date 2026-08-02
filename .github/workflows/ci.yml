@@ -4,11 +4,11 @@ name: CI
 #
 # Measured on a 4-core Linux box at the time this landed:
 #   clean build            ~1m 54s
-#   full suite (-n 4)      ~3m 16s   (2077 passed, 25 skipped, 36 xfailed)
+#   full suite (-n 4)      ~3m 08s   (2105 passed, 3 skipped, 36 xfailed)
 #   total                  ~5m
 #
-# See docs/internal/ci.md for why the ISA is pinned and what is deliberately
-# NOT run here.
+# See docs/internal/ci.md for why the ISA is pinned, and
+# docs/internal/opens_ci.md for what is deliberately NOT run here.
 
 on:
   push:
@@ -47,11 +47,19 @@ jobs:
 
       - name: Install dependencies
         # SQLite is bundled in-tree (src/sqlite3.c) and there is no EDA-library
-        # dependency, so this is the complete list.  numpy arrives with
-        # matplotlib.  pytest-xdist is what makes the suite ~3x faster.
+        # dependency.  numpy arrives with matplotlib.  pytest-xdist is what
+        # makes the suite ~3x faster.
+        #
+        # src/web/requirements.txt (fastapi/uvicorn/httpx) is NOT optional for a
+        # full-suite gate: without it pytest skips test_web_ws.py wholesale and
+        # the _client() helpers in test_web_server/checkpoint/edit skip too, so
+        # the HTTP, WebSocket, checkpoint and topology-edit surfaces silently
+        # go unrun.  Measured: 2077 passed / 25 skipped without it, 2105 passed
+        # / 3 skipped with it -- 28 tests (review #559).
         run: |
           python -m pip install --upgrade pip
           pip install pybind11 pytest pytest-bdd pytest-xdist matplotlib
+          pip install -r src/web/requirements.txt
 
       - name: Build
         run: bin/bb
@@ -67,4 +75,24 @@ jobs:
         # count.  Goldens: the four HOST_SENSITIVE_FLOWS xfail off their
         # generation host rather than failing, so a pinned-ISA CI is green
         # without owning them — see docs/internal/ci.md.
-        run: python -m pytest -q -o addopts="" -p xdist -n 4
+        #
+        # pipefail so the pipe into tee cannot mask a pytest failure.
+        run: |
+          set -o pipefail
+          python -m pytest -q -o addopts="" -p xdist -n 4 -rs 2>&1 | tee pytest.log
+
+      - name: No module skipped for a missing import
+        # The failure mode this guards is how a hole got into this very
+        # workflow: pytest skips a whole module when its import fails, so a
+        # dependency missing from the step above silently removes tests while
+        # the gate still reports success.  An import-skip is therefore a CI
+        # configuration error, not a legitimate skip -- fail on it and name it.
+        # Legitimate skips (platform-specific, fixture-dependent) do not carry
+        # this reason and are unaffected; there are 3 of them today.
+        run: |
+          if grep -q "could not import" pytest.log; then
+            echo "::error::A test module was skipped because an import failed - a dependency is missing from the install step"
+            grep "could not import" pytest.log
+            exit 1
+          fi
+          echo "No import-skips: every test module was collected."

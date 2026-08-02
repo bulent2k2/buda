@@ -101,6 +101,10 @@ Recorded so they are not "fixed" by someone reading the list too eagerly:
 
 - **The suite runs headless.** Tk is not needed and `MPLBACKEND=Agg` is set; no
   display server or xvfb step is required.
+- **Silently-skipped modules are covered.** The workflow fails on any skip whose
+  reason is `could not import` — the mechanism that had left 28 web tests unrun
+  in the first draft of this very workflow.  A new optional dependency will
+  therefore break CI loudly instead of quietly shrinking the suite.
 - **`-march=native` is still the developer default.** The pin is CI-only, via
   `BUDA_ARCH`. Changing the default would slow every local build for no
   reproducibility gain on a single machine.

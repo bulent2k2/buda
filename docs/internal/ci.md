@@ -10,10 +10,11 @@ Measured on a 4-core Linux box when this landed:
 | stage | time |
 |---|---|
 | clean build (`bin/bb`) | ~1m 54s |
-| full suite, all tiers, `-n 4` | ~3m 16s |
+| full suite, all tiers, `-n 4` | ~3m 08s |
 | **total** | **~5m** |
 
-Endpoint: **2077 passed, 25 skipped, 36 xfailed**.
+Endpoint: **2105 passed, 3 skipped, 36 xfailed**.  First run on a hosted
+runner: **5m 21s**, green.
 
 The fast tier alone is ~10-16s, so if the 5-minute gate ever becomes a
 bottleneck the cheap split is fast-tier on push and the full suite on PR —
@@ -23,6 +24,7 @@ not dropping coverage.
 
 ```
 pip install pybind11 pytest pytest-bdd pytest-xdist matplotlib
+pip install -r src/web/requirements.txt
 ```
 
 plus CMake >= 3.15, a C++20 compiler and Python dev headers. That is the whole
@@ -35,6 +37,19 @@ list, verified by building this repo from nothing in a bare container:
   in the workflow so nothing can lazily select a GUI backend.
 - **pytest-xdist is not optional in practice** — it is the ~3x that keeps the
   run at five minutes.
+- **`src/web/requirements.txt` is not optional either** (fastapi/uvicorn/httpx).
+  Without it pytest skips `test_web_ws.py` wholesale and the `_client()`
+  helpers in `test_web_server` / `test_web_checkpoint` / `test_web_edit` skip
+  too, so the HTTP, WebSocket, checkpoint and topology-edit surfaces go unrun
+  while the gate still reports success.  Measured: **2077 passed / 25 skipped**
+  without it, **2105 passed / 3 skipped** with it — 28 tests.
+
+That last one is why the workflow has a `No module skipped for a missing
+import` step.  pytest skips a whole module when its import fails, so a missing
+dependency *removes* tests silently rather than failing; an import-skip is a CI
+configuration error and is treated as one.  The 3 remaining skips are
+legitimate (one macOS-only backend test, two fixture-dependent) and carry a
+different reason.
 
 ## Why the ISA is pinned
 
