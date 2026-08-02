@@ -33,7 +33,7 @@ python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a,b,c]
 | `--channel V` | `200` | Minimum gap between stacked instances and between columns. The realized vertical gap is whatever `--grid` rounds the pitch up to, so it is ≥ V |
 | `--grid Q` | *(off)* | Snap the vertical stack pitch UP to a multiple of Q (`--layout stacked` only) — see [on-grid stacking](#on-grid-stacking) |
 | `--column-align bottom\|top\|center` | `bottom` | Where a column sits (`--layout stacked` only): `bottom` starts every column at y=0, `top` makes the tops flush with the tallest, `center` splits the slack equally above and below. Columns move as RIGID blocks, so `--grid` alignment survives; moving individual instances would not |
-| `--mirror-upper` | *(off)* | Flip every instance whose centre is above the die centreline upside down, so the upper half mirrors the lower — contents included. Combine with `--column-align center` |
+| `--mirror-upper` | *(off)* | Flip every instance whose centre is above the die centreline upside down, so the upper half mirrors the lower — contents included. Combine with `--column-align center`. Refuses (LOUD) if any instance *straddles* the centreline, since such an occurrence cannot mirror onto itself — use an **even** instance count per column |
 | `--no-cell-nets` | *(off)* | Emit only the top-level buses (lean ~70-net demo) |
 | `--no-busterms` | *(off)* | Skip busterm derivation |
 | `--optimize sa\|ga` | *(off)* | Place the top cell's instances in 2D to shorten the top buses |
@@ -149,7 +149,12 @@ moving just some instances would break the very phase alignment `--grid`
 bought.  A column's *absolute* offset is free — only intra-column Δy matters.
 
 `--mirror-upper` goes further and flips the instances above the centreline, so
-the upper half mirrors the lower one, contents included.  **That costs the
+the upper half mirrors the lower one, contents included.  An instance whose
+interior *crosses* the centreline is refused rather than silently emitted: it
+cannot map onto its own reflection unless its contents happen to be
+self-symmetric, and flipping it would not help.  The usual trigger is an ODD
+instance count in a centred column, which puts the middle occurrence exactly on
+the centreline — use an even count per mirrored column.  **That costs the
 phase**: a flipped instance aligns only if the track pattern is
 reflection-symmetric about its centre, and with `flow/chip/chip_tracks.buda`
 M2/M4/M8 admit only half-integer reflection axes (signal pitch 1.5 and 4.5),

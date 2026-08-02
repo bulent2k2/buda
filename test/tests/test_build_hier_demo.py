@@ -762,6 +762,19 @@ def test_column_align_is_bottom_by_default(tmp_path):
     assert all(min(i.y1 for i in v) == 0.0 for v in by_cell.values())
 
 
+def test_mirror_upper_refuses_a_centreline_straddler(tmp_path):
+    """Codex #568: an odd instance count in a centred column puts the middle
+    occurrence exactly on the centreline, where it cannot mirror onto itself —
+    the layout would silently miss the contents-included guarantee.  Refuse."""
+    with pytest.raises(SystemExit) as exc:
+        build_hier_demo.build(str(tmp_path / "odd.bdb"), _CELLS[:2], seed=1,
+                              n_instances=3, n_buses=1, layout="stacked",
+                              channel=100.0, grid=48.0,
+                              column_align="center", mirror_upper=True)
+    msg = str(exc.value)
+    assert "straddle" in msg and "EVEN instance count" in msg
+
+
 def test_build_is_atomic_under_a_closed_pipe(tmp_path):
     """A build killed partway must leave NO output BDB.
 
@@ -774,11 +787,18 @@ def test_build_is_atomic_under_a_closed_pipe(tmp_path):
     import subprocess
     out = tmp_path / "trunc.bdb"
     root = build_hier_demo._ROOT
+    # -u is REQUIRED, not incidental: block-buffered stdout would hold the ~40
+    # bus lines until exit, `head` would never close the pipe early, and the
+    # test would fail without ever exercising SIGPIPE — passing or failing on
+    # whether PYTHONUNBUFFERED happens to be set (bin/bb exports it; a bare
+    # pytest run does not).  Codex #568.
     p1 = subprocess.Popen(
-        [sys.executable, os.path.join(root, "tools", "build_hier_demo.py"),
+        [sys.executable, "-u",
+         os.path.join(root, "tools", "build_hier_demo.py"),
          str(out), "--cells", "dnuts1,dnuts2", "--instances", "2",
          "--buses", "40"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=root)
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=root,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"})
     p2 = subprocess.Popen(["head", "-3"], stdin=p1.stdout,
                           stdout=subprocess.DEVNULL)
     p1.stdout.close()

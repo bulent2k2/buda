@@ -971,6 +971,24 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
     #     whole subtree) and before busterm derivation, which reads geometry.
     if mirror_upper:
         yc = top_h / 2.0
+        # An instance whose interior CROSSES the centreline cannot map onto its
+        # own reflection unless its contents happen to be self-symmetric, and
+        # cell contents generally are not.  Flipping it does not help either —
+        # it would still be asymmetric about yc.  So refuse rather than emit a
+        # layout that silently misses the contents-included guarantee (Codex
+        # #568; the classic trigger is an ODD instance count in a centred
+        # column, which puts the middle occurrence exactly on the centreline).
+        straddle = [p["inst"] for p in placements
+                    if p["y"] < yc < p["y"] + cell_meta[p["cell"]][1]]
+        if straddle:
+            sys.exit(
+                f"Error: --mirror-upper: {len(straddle)} instance(s) straddle "
+                f"the die centreline y={yc:g} and cannot mirror onto "
+                f"themselves: {', '.join(straddle)}.\n"
+                f"       Use an EVEN instance count per column (an odd count "
+                f"in a centred column puts the middle occurrence on the "
+                f"centreline), or change --channel/--grid so no instance "
+                f"crosses it.")
         flipped = []
         for p in placements:
             h = cell_meta[p["cell"]][1]
