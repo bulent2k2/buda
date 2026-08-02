@@ -171,9 +171,18 @@ public:
                            bool emit_vias = true,
                            int abort_unplaced = -1) const;
 
+    // Pairwise-overlap seating (prototype; see place_by_layer's header for
+    // the mechanism and its measured net-negative unconditional result).
+    // Toggled per-run so the measured-accept alignment heal can solve with it
+    // ON, keep the result only when it does not increase unplaced/overlaps,
+    // and restore otherwise.  Defaults to the BUDA_DNUTS_PAIR_ALIGN env (the
+    // raw study path); set_pair_align overrides it on this engine.
+    void set_pair_align(bool on) { pair_align_ = on; }
+
 private:
     const RoutingGridStack& stack_;
     std::vector<NetSegment> fixed_bits_;
+    bool pair_align_ = false;   // constructor seeds it from the env
 
     // The three stages of run(), in order (each mutates `result` in place):
     // per-layer bit placement in abstract_pos order (Option B), the per-bit
