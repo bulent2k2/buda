@@ -174,3 +174,51 @@ def test_heal_returns_zero_when_no_win():
         n = s._final_pair_align_heal()
     assert n == 0
     assert s.detailed_result is before
+
+
+def test_skipped_when_healers_are_declared_ahead():
+    """Forward gate: this heal hooks run_detailed_nuts, so on a healing flow
+    it fires MID-flow and the healers then re-solve stage 9 past it — the
+    aligned result is overwritten and the solve was pure cost (measured on
+    mix2_fast_bottomup: accepted at a 68-unplaced mid-state, endpoint
+    byte-identical to not running).  With `healersAhead` DECLARED and no
+    healer run yet, the heal stands down."""
+    s, _ = _session(heal=False)
+    s._pair_align_heal = True
+    s._planner_params["healersAhead"] = 1.0      # healers still ahead
+    before = s.detailed_result
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        n = s._final_pair_align_heal()
+    assert n == 0
+    assert s.detailed_result is before           # untouched, no solve spent
+
+
+def test_runs_again_once_the_healers_have_run():
+    """The gate is 'healers AHEAD', not 'this flow heals': once a healer has
+    run (`_healers_ran`), a later run_detailed_nuts IS the endpoint, so the
+    heal is worth its solve and fires normally."""
+    s, _ = _session(heal=False)
+    s._pair_align_heal = True
+    s._planner_params["healersAhead"] = 1.0
+    s._healers_ran = True                        # ...but they already ran
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), buda.ostream_redirect():
+        n = s._final_pair_align_heal()
+    assert n == 1
+    assert "PAIR-ALIGN" in buf.getvalue()
+    t = _v_tracks(s)
+    assert t[3] == t[6]
+
+
+def test_undeclared_healing_flow_still_heals():
+    """A flow that heals WITHOUT declaring healersAhead is unchanged — the
+    gate keys off the explicit declaration (issue #444's contract, shared
+    with the kSegsRel default and the run_nuts dead-span auto), never a
+    script scan."""
+    s, _ = _session(heal=False)
+    s._pair_align_heal = True                    # no healersAhead declared
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), buda.ostream_redirect():
+        n = s._final_pair_align_heal()
+    assert n == 1
+    assert "PAIR-ALIGN" in buf.getvalue()

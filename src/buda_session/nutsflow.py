@@ -1416,6 +1416,23 @@ class NutsFlowMixin:
             return 0
         if not getattr(self, "_pair_align_heal", False):
             return 0
+        # Forward gate: skip when healers are still AHEAD of us.  This heal
+        # hooks `run_detailed_nuts`, so on a healing flow it fires at a
+        # MID-FLOW invocation and the healers then re-solve stage 9 from
+        # their own trials — overwriting whatever it aligned.  Measured on
+        # mix2_fast_bottomup: it accepted at a 68-unplaced mid-state
+        # (WL 864848->860822) and the endpoint was byte-identical to not
+        # running it at all, i.e. the solve was pure cost.  The condition is
+        # exactly "my work will be overwritten": healers DECLARED ahead
+        # (`set_planner_param healersAhead 1` — the explicit declaration
+        # issue #444 introduced, already gating the kSegsRel default and the
+        # run_nuts dead-span auto) and none has run yet (`_healers_ran`,
+        # stamped by negotiate/ripup/refine).  After they run — or on a flow
+        # that never declares them — this DNUTS result is the endpoint and
+        # the heal is worth its solve.
+        if (self._planner_params.get("healersAhead", 0.0) > 0.0
+                and not getattr(self, "_healers_ran", False)):
+            return 0
 
         def _wl(dr):
             return sum(abs(ns.span_hi - ns.span_lo) for ns in dr.net_segments)

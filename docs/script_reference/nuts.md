@@ -183,6 +183,22 @@ construction.
 **Requires:** set it **before** `run_detailed_nuts` — the heal reads the flag
 when that command completes.
 
+**Healers ahead → the heal stands down.** Because it hooks
+`run_detailed_nuts`, on a healing flow it would fire at a *mid-flow*
+invocation and `negotiate_congestion` / `ripup_reroute` would then re-solve
+stage 9 from their own trials, overwriting whatever it aligned — the solve
+would be pure cost (measured on `mix2_fast_bottomup`: accepted at a
+68-unplaced mid-state, endpoint byte-identical to not running it). So the
+heal skips itself while healers are **declared ahead and have not run yet**
+— `set_planner_param healersAhead 1`, the same explicit declaration that
+gates the `kSegsRel` default and the `run_nuts` dead-span auto (issue #444;
+never a script scan). Once a healer has run, or on a flow that never
+declares one, this DNUTS result is the endpoint and the heal runs normally.
+
+A flow that heals but does **not** declare `healersAhead` therefore still
+pays the mid-flow solve — declaring it is the documented contract, and the
+same declaration is what the other two gated behaviors key off.
+
 **Example:**
 ```buda
 run_planner
