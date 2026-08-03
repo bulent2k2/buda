@@ -57,6 +57,15 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         if nums and not nums[0].lstrip("-").isdigit():
             print(f"Error: run_planner: iteration count must be an integer, "
                   f"got '{nums[0]}'"); sys.exit(1)
+        # A full plan starts a NEW routing cycle, so any healer that ran in
+        # an EARLIER cycle is no longer "already done" for the gates that ask
+        # whether healers are still ahead (the pair-align heal).  Clear the
+        # cycle-scoped stamp here — NOT the session-scoped `_healers_ran`,
+        # which the re-seat heal reads with deliberately session-wide
+        # semantics.  This is the FULL-PLAN branch; `post_nuts` is
+        # post-processing within the current cycle, not a new one, and does
+        # not clear (Codex P2 on #571).
+        session._healers_ran_cycle = False
     if args and args[0] == "post_nuts":
         # Stage 4c: post-NUTS stub layer reassignment.
         # Syntax: post_nuts [V [short [long]]] [H [short [long]]]

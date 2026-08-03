@@ -1416,6 +1416,33 @@ class NutsFlowMixin:
             return 0
         if not getattr(self, "_pair_align_heal", False):
             return 0
+        # Forward gate: skip when healers are still AHEAD of us.  This heal
+        # hooks `run_detailed_nuts`, so on a healing flow it fires at a
+        # MID-FLOW invocation and the healers then re-solve stage 9 from
+        # their own trials — overwriting whatever it aligned.  Measured on
+        # mix2_fast_bottomup: it accepted at a 68-unplaced mid-state
+        # (WL 864848->860822) and the endpoint was byte-identical to not
+        # running it at all, i.e. the solve was pure cost.  The condition is
+        # exactly "my work will be overwritten": healers DECLARED ahead
+        # (`set_planner_param healersAhead 1` — the explicit declaration
+        # issue #444 introduced, already gating the kSegsRel default and the
+        # run_nuts dead-span auto) and none has run yet IN THIS ROUTING
+        # CYCLE (`_healers_ran_cycle`, stamped by negotiate/ripup/refine and
+        # cleared by a fresh `run_planner`).  After they run — or on a flow
+        # that never declares them — this DNUTS result is the endpoint and
+        # the heal is worth its solve.
+        #
+        # The stamp is CYCLE-scoped, not session-scoped: a session that
+        # re-plans (`run_planner` again with new knobs) starts a new cycle
+        # whose healers are once more AHEAD of its pre-healer
+        # `run_detailed_nuts`.  The session-wide `_healers_ran` would still
+        # read True from the previous cycle and let exactly the pure-cost
+        # solve this gate exists to prevent through (Codex P2 on #571).  The
+        # re-seat heal keeps reading `_healers_ran`, whose session-wide
+        # semantics are deliberate.
+        if (self._planner_params.get("healersAhead", 0.0) > 0.0
+                and not getattr(self, "_healers_ran_cycle", False)):
+            return 0
 
         def _wl(dr):
             return sum(abs(ns.span_hi - ns.span_lo) for ns in dr.net_segments)
