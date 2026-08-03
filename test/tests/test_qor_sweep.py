@@ -146,6 +146,25 @@ def test_default_jobs_at_least_one():
 # the row order must not depend on the CORPUS list's order (else moving an
 # entry renders as a whole-file diff).
 
+def _isolate_sidecar(qt, tmp_path, monkeypatch=None):
+    """Point the serial-times sidecar at tmp_path.
+
+    main() chdir's to the REPO ROOT and save_serial_times() defaults to the
+    checked-in qor_serial_times.json, so ANY test that reaches it overwrites
+    real measured data.  That is not hypothetical: a mutation run that disabled
+    the --fail-on-err guard let a test fall through to save_serial_times and
+    replace 37 real serial timings with {"ok.buda": 1.0, stamp: "s"}, which was
+    then committed by `git add -A` and shipped.  Isolate unconditionally so no
+    ordering assumption inside main() is load-bearing for test safety.
+    """
+    path = str(tmp_path / "serial_times.json")
+    if monkeypatch is not None:
+        monkeypatch.setattr(qt, "_SERIAL_PATH", path)
+    else:
+        qt._SERIAL_PATH = path
+    return path
+
+
 def _rows_json(tmp_path, rows, order):
     """Run qor_table.main() with --json over a fake corpus, return the file."""
     import qor_table as qt
@@ -154,13 +173,14 @@ def _rows_json(tmp_path, rows, order):
     monkey = types.SimpleNamespace(
         sweep=lambda run_fn, flows, jobs, progress=None: [fake[f] for f in flows],
         CORPUS=order, default_jobs=lambda: 1)
-    old_qc, old_argv = qt.qc, sys.argv
+    old_qc, old_argv, old_sp = qt.qc, sys.argv, qt._SERIAL_PATH
     try:
+        _isolate_sidecar(qt, tmp_path)
         qt.qc = types.SimpleNamespace(**{**vars(old_qc), **vars(monkey)})
         sys.argv = ["qor_table.py", "--json", str(out), "--stamp", "fixed"]
         qt.main()
     finally:
-        qt.qc, sys.argv = old_qc, old_argv
+        qt.qc, sys.argv, qt._SERIAL_PATH = old_qc, old_argv, old_sp
     return json.loads(out.read_text())
 
 
@@ -251,6 +271,7 @@ def test_fail_on_err_refuses_to_write_a_snapshot(tmp_path, monkeypatch, capsys):
         sweep=lambda run_fn, flows, jobs, progress=None: rows,
         CORPUS=["ok.buda", "bad.buda"], default_jobs=lambda: 1)
     old_qc = qt.qc
+    _isolate_sidecar(qt, tmp_path, monkeypatch)
     try:
         qt.qc = types.SimpleNamespace(**{**vars(old_qc), **vars(fake)})
         monkeypatch.setattr(sys, "argv",
@@ -278,3 +299,31 @@ def test_err_row_would_otherwise_read_as_a_semantic_change():
     added, removed, moved = qt.semantic_diff(before, after)
     assert (added, removed) == ([], [])
     assert moved and moved[0][0] == "x.buda"
+
+
+def test_committed_serial_times_sidecar_is_real_data():
+    """The CHECKED-IN qor_serial_times.json must hold real measurements.
+
+    This is a data-integrity guard on a file that tooling writes and `git add`
+    can sweep up.  It exists because exactly that happened: a mutation run
+    disabled the --fail-on-err guard, a test fell through to save_serial_times()
+    against the real repo-root path, and {"stamp": "s", "times": {"ok.buda":
+    1.0}} was committed -- silently blanking the sec1 column of every row in
+    qor_table.md and reducing the legend to 'captured s'.  Nothing failed; the
+    corruption only surfaced when a nightly-generated PR was read by eye.
+
+    Cheap, and it fires on ANY future clobber regardless of cause.
+    """
+    import re
+    import qor_table as qt
+    data = qt.load_serial_times()
+    assert data is not None, f"{qt._SERIAL_PATH} missing or malformed"
+    # A real stamp is "<YYYY-MM-DD> (main @ <sha>)" -- test stamps are not.
+    assert re.match(r"^\d{4}-\d{2}-\d{2} \(main @ [0-9a-f]{7,40}\)$",
+                    data["stamp"]), f"implausible stamp: {data['stamp']!r}"
+    times = data["times"]
+    assert len(times) >= 25, f"only {len(times)} timings — looks truncated"
+    # Real corpus keys are flow paths, not bare fixture names like "ok.buda".
+    bad = [f for f in times if not f.startswith("flow/") or not f.endswith(".buda")]
+    assert not bad, f"non-corpus entries in the sidecar: {bad[:5]}"
+    assert all(isinstance(v, (int, float)) and v >= 0 for v in times.values())
