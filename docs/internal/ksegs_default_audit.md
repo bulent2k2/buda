@@ -168,3 +168,40 @@ with zero churn, slow tier green.  Lock-in:
 `test_ksegs_compiled_default_engages_gated` (scriptless-env healer flow
 selects the 5-seg shape; `BUDA_KSEGS_REL=0` restores the 10-seg
 WL-cheapest tree).
+
+## The six healing flows that deliberately do NOT declare `healersAhead`
+
+**Measured 2026-08-03 — declaring is 0 better / 3 worse / 3 QoR-neutral.**
+
+Six corpus flows run healers WITHOUT `set_planner_param healersAhead 1`,
+while their parent `flow/rnr/mix2.buda` declares it: the `mix2_fast*` family
+plus `mix2_topdown_refine`.  That reads as an oversight — and it is not.
+Adding the declaration turns on BOTH gated behaviors (this document's
+`kSegsRel` proactive default, which changes SELECTION, and the `run_nuts`
+dead-span auto-escalation), and on these congested vehicles the trajectory
+lands worse:
+
+| flow | baseline (ov/unpl/viol) | +`healersAhead` | detailed WL | verdict |
+|---|---|---|---|---|
+| `mix2_fast_bottomup_shared` | 0 / 0 / 0 | **10 / 112 / 13** | +5.3% | WORSE (badly) |
+| `mix2_fast_bottomup_caps` | 2 / 0 / 0 | **2 / 16 / 1** | −3.6% | WORSE |
+| `mix2_fast_on_aligned_sql` | 2 / 16 / 1 | **3 / 30 / 2** | +0.1% | WORSE |
+| `mix2_fast_bottomup` | 0 / 0 / 0 | 0 / 0 / 0 | +0.6% | QoR-neutral |
+| `mix2_fast_topdown` | 0 / 0 / 0 | 0 / 0 / 0 | **+8.0%** | QoR-neutral, worse WL |
+| `mix2_topdown_refine` | 0 / 0 / 0 | 0 / 0 / 0 | **−5.2%** | QoR-neutral, BETTER WL |
+
+This is not a counter-example to the G1–G4 gating conclusion above: that
+conclusion is that the default only ENGAGES where it was measured to win,
+and these ablation variants were never in the measured set.  Their
+checked-in QoR reflects the UNDECLARED configuration, so flipping them now
+is a QoR change, not a cleanup.
+
+Each of the six carries a NOTE at its `run_planner` line pointing here, so
+the omission is not "fixed" by a later reader.  `mix2_topdown_refine` is
+called out honestly as the one open judgment call — declaring would hold its
+QoR and improve detailed WL 5.2%; it is left undeclared only for family
+consistency, and taking that win is a legitimate future change.
+
+Method note: these are QoR metrics (deterministic per host), so single-run
+A/B is sound evidence here — unlike wall-time, see
+[`qor_corpus.md`](qor_corpus.md) "Measuring a per-flow COST".

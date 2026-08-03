@@ -29,6 +29,11 @@ add_blocks_from_bdb 1 skip
 add_blocks_from_bdb 2 skip
 run_hier_bundler depth 2
 generate_hier_topologies
+# NOTE: deliberately does NOT declare `set_planner_param healersAhead 1`
+# (mix2.buda, its parent, does) even though it heals below.  Measured
+# 2026-08-03: declaring REGRESSES this flow badly — 0/0/0 -> 10 overlaps /
+# 112 unplaced / 13 viol_bundles.  Do not 'fix' this.
+# See docs/internal/wishlist-planner.md.
 run_planner hier 5 signal_tracks
 dump_topologies
 run_nuts
