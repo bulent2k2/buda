@@ -1396,15 +1396,25 @@ class NutsFlowMixin:
         it does not help (the 7 worse all raise unplaced → rejected).
 
         Opt-in (`set_pair_align_heal on`, default off — the extra full DNUTS
-        solve is pure cost on a flow with no misaligned pairs).  Scoped out of
-        bottom-up (locked) sessions, like the cull/reseat heals: their copies
-        must stay uniform and their downstream healers re-roll from a changed
-        start.  Returns 1 on accept, 0 otherwise."""
+        solve is pure cost on a flow with no misaligned pairs).  Returns 1 on
+        accept, 0 otherwise.
+
+        BOTTOM-UP (locked) sessions ARE in scope, unlike the cull/reseat
+        heals.  Their scope-out exists because they mutate `plan.seg_layers`
+        and re-run the ABSTRACT solve, so a locked flow's downstream healers
+        re-roll from a changed start; this heal re-runs stage 9 ONLY —
+        `nuts_result` and the layer assignment are untouched — and the accept
+        keeps opens/overlaps from rising, so neither hazard applies.  Nor is
+        uniformity at risk: the bottom-up path solves the REFERENCE instance
+        once and copies its bits to the siblings, so an aligned reference
+        propagates identically to every copy (both engines get the flag —
+        see `_run_detailed_nuts`).  The scope-out this heal used to carry was
+        inherited boilerplate, and while it stood the bottom-up engines were
+        never handed the flag at all, which would have made the re-solve a
+        guaranteed-rejected no-op."""
         if self.detailed_result is None or self.nuts_result is None:
             return 0
         if not getattr(self, "_pair_align_heal", False):
-            return 0
-        if any(w.hier.locked for w in self.bundles):
             return 0
 
         def _wl(dr):
@@ -1924,6 +1934,8 @@ class NutsFlowMixin:
                 print(f"[LayerShare] DNUTS reference solve under "
                       f"{len(share_ovr)} thinned override(s)")
             eng1 = buda.DetailedNUTSEngine(ref_grid)
+            if pair_align is not None:
+                eng1.set_pair_align(pair_align)
             with buda.ostream_redirect():
                 r1 = eng1.run(ref_segs, emit_vias)
             # Per-instance copies of the reference bits + vias.  Unplaced
@@ -1957,6 +1969,8 @@ class NutsFlowMixin:
                 extra_unplaced += (exp_bits.get(ref_bid, 0)
                                    - placed_bits.get(ref_bid, 0))
             eng2 = buda.DetailedNUTSEngine(self.routing_grid)
+            if pair_align is not None:
+                eng2.set_pair_align(pair_align)
             eng2.add_fixed_bits(list(r1.net_segments) + copies)
             with buda.ostream_redirect():
                 r2 = eng2.run(rest_segs, emit_vias)
