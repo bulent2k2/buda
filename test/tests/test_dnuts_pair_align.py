@@ -200,7 +200,7 @@ def test_runs_again_once_the_healers_have_run():
     s, _ = _session(heal=False)
     s._pair_align_heal = True
     s._planner_params["healersAhead"] = 1.0
-    s._healers_ran = True                        # ...but they already ran
+    s._healers_ran_cycle = True                  # ...but they already ran
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), buda.ostream_redirect():
         n = s._final_pair_align_heal()
@@ -222,3 +222,36 @@ def test_undeclared_healing_flow_still_heals():
         n = s._final_pair_align_heal()
     assert n == 1
     assert "PAIR-ALIGN" in buf.getvalue()
+
+
+def test_stamp_is_cycle_scoped_not_session_scoped():
+    """A session that RE-PLANS starts a new routing cycle whose healers are
+    once more ahead of its pre-healer run_detailed_nuts.  The session-wide
+    `_healers_ran` would still read True from the previous cycle and let the
+    pure-cost solve through, so the gate reads a CYCLE-scoped stamp that a
+    fresh `run_planner` clears (Codex P2 on #571)."""
+    s, _ = _session(heal=False)
+    s._pair_align_heal = True
+    s._planner_params["healersAhead"] = 1.0
+    s._healers_ran = True            # cycle 1's healers ran (session-wide)
+    s._healers_ran_cycle = True
+    # A new full plan begins cycle 2 — its healers are ahead again.
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        s.do_command("run_planner")
+    assert s._healers_ran_cycle is False      # cleared by the new cycle
+    assert s._healers_ran is True             # session stamp untouched
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        s.do_command("run_nuts")
+        s.do_command("run_detailed_nuts")
+        n = s._final_pair_align_heal()
+    assert n == 0                             # gated, as in cycle 1
+
+
+def test_post_nuts_does_not_start_a_new_cycle():
+    """`run_planner post_nuts` is post-processing WITHIN the current cycle,
+    not a new one, so it must not clear the cycle stamp."""
+    s, _ = _session(heal=False)
+    s._healers_ran_cycle = True
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        s.do_command("run_planner post_nuts")
+    assert s._healers_ran_cycle is True

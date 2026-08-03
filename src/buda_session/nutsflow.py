@@ -1426,12 +1426,22 @@ class NutsFlowMixin:
         # exactly "my work will be overwritten": healers DECLARED ahead
         # (`set_planner_param healersAhead 1` — the explicit declaration
         # issue #444 introduced, already gating the kSegsRel default and the
-        # run_nuts dead-span auto) and none has run yet (`_healers_ran`,
-        # stamped by negotiate/ripup/refine).  After they run — or on a flow
+        # run_nuts dead-span auto) and none has run yet IN THIS ROUTING
+        # CYCLE (`_healers_ran_cycle`, stamped by negotiate/ripup/refine and
+        # cleared by a fresh `run_planner`).  After they run — or on a flow
         # that never declares them — this DNUTS result is the endpoint and
         # the heal is worth its solve.
+        #
+        # The stamp is CYCLE-scoped, not session-scoped: a session that
+        # re-plans (`run_planner` again with new knobs) starts a new cycle
+        # whose healers are once more AHEAD of its pre-healer
+        # `run_detailed_nuts`.  The session-wide `_healers_ran` would still
+        # read True from the previous cycle and let exactly the pure-cost
+        # solve this gate exists to prevent through (Codex P2 on #571).  The
+        # re-seat heal keeps reading `_healers_ran`, whose session-wide
+        # semantics are deliberate.
         if (self._planner_params.get("healersAhead", 0.0) > 0.0
-                and not getattr(self, "_healers_ran", False)):
+                and not getattr(self, "_healers_ran_cycle", False)):
             return 0
 
         def _wl(dr):
