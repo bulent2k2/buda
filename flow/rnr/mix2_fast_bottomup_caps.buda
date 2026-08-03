@@ -35,7 +35,7 @@ generate_hier_topologies
 # (mix2.buda, its parent, does) even though it heals below.  Measured
 # 2026-08-03: declaring REGRESSES this flow — unplaced 0 -> 16 and
 # viol_bundles 0 -> 1 (kSegsRel's proactive default changes selection).
-# Do not 'fix' this.  See docs/internal/wishlist-planner.md.
+# Do not 'fix' this.  See docs/internal/ksegs_default_audit.md.
 run_planner hier 5 signal_tracks
 dump_topologies
 run_nuts

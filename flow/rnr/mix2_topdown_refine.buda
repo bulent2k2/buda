@@ -41,7 +41,7 @@ generate_hier_topologies
 # unlike its siblings, declaring would HOLD QoR (0/0/0) and IMPROVE
 # detailed WL by 5.2% here — an open judgment call, not an oversight;
 # left undeclared so the family stays consistent.  See
-# docs/internal/wishlist-planner.md.
+# docs/internal/ksegs_default_audit.md.
 run_planner hier 5 signal_tracks
 run_nuts
 run_detailed_nuts

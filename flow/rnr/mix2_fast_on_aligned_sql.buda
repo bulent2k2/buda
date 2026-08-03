@@ -14,7 +14,7 @@ generate_hier_topologies
 # NOTE: deliberately does NOT declare `set_planner_param healersAhead 1`
 # (mix2.buda, its parent, does) even though it heals below.  Measured
 # 2026-08-03: declaring REGRESSES this flow — 2/16/1 -> 3/30/2.
-# Do not 'fix' this.  See docs/internal/wishlist-planner.md.
+# Do not 'fix' this.  See docs/internal/ksegs_default_audit.md.
 run_planner hier 5 signal_tracks
 dump_topologies
 run_nuts
