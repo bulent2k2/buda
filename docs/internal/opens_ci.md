@@ -11,7 +11,7 @@ rather than forgotten, and where to start.
 
 ---
 
-## 1. ~~Nightly QoR corpus~~ — RESOLVED 2026-08-02 (nightly half)
+## 1. ~~QoR corpus in CI~~ — RESOLVED (nightly 2026-08-02, PR gate 2026-08-04)
 
 `.github/workflows/nightly-qor.yml` sweeps the corpus at 03:17 UTC and diffs it
 against the previous successful nightly. The baseline is promoted **only** on a
@@ -25,18 +25,21 @@ corpus growing. Corrected again after the first real run: the sweep takes
 container. The nightly also refreshes `qor/qor_table.md` (see [`ci.md`](ci.md)),
 which adds a second sweep — item 3 below.
 
-**Still open — the PR half.** The nightly compares `main` against itself over
-time, so it catches a regression a day AFTER it lands. What it does not do is
-stop one landing. A `run-qor` PR label that diffs a branch against its
-**merge-base** would, and that is the shape the evidence argues for: the
-`mix2_topdown_refine` regression (0/0/0 → 3/16/1) reached `main` precisely
-because a hand-captured baseline predated a corpus row another PR added
-mid-flight.
+**Resolved 2026-08-04 — the PR half.** `.github/workflows/pr-qor.yml` sweeps the
+corpus on a `run-qor`-labelled PR and diffs it against the PR's own
+**merge-base**, so a regression is caught before it lands. The merge-base, not
+current `main`: comparing against a `main` that moved since branching would
+attribute other people's changes to the PR.
 
-Where to start: build + sweep the merge-base, then the PR head, and
-`--compare`. It costs two builds and two sweeps (~12-15 min), which is why it
-belongs behind a label rather than on every PR. The nightly's cache cannot be
-reused for it — its baseline is a `main` commit, not the branch's merge-base.
+Label-gated because it is two builds + two sweeps (~16 min). The merge-base
+sweep is cached by its commit SHA, so pushing again to the same PR re-sweeps only
+the head (~8 min), and the key can never serve a different base.
+
+Clean builds on both sides deliberately: incremental across a checkout risks a
+stale object making the two sides incomparable, which is the exact failure this
+job exists to detect. Both sweeps carry the nightly's errored-row guard — here it
+matters doubly, since an errored merge-base sweep would be *cached* and poison
+every later run.
 
 ## 2. ~~Own the placement goldens in CI~~ — RESOLVED 2026-08-02
 
@@ -57,13 +60,23 @@ coupling would have failed every run for a reason unrelated to golden
 enforcement. The ratchet now has its own `BUDA_FLOW_QOR_STRICT`, which CI does
 not set; the two are independent concerns that merely shared a variable.
 
-**Still open on that ratchet:** nothing enforces it anywhere now. It is
-reachable via `BUDA_FLOW_QOR_STRICT=1` on whatever host it was calibrated for.
-If that host no longer exists, the honest move is to re-calibrate it against a
-host that does — and say so in its comment — rather than leave numbers nobody
-can reproduce. Not urgent: the tolerant branch still asserts real bounds
-(segment range, overlap cap, and that every unplaced bit is an accounted-for
-keepout cull).
+**Resolved 2026-08-04.** The ratchet is now a REGENERABLE golden
+(`test/tests/data/flow_qor_golden.json`), rebaselined with
+`BUDA_FLOW_QOR_REGEN=1` on the reference host, and CI sets
+`BUDA_FLOW_QOR_STRICT=1` so it is actually enforced.
+
+The blocker was never the numbers being strict — it was that they were frozen in
+the test body, measured under `-march=native` on a host that no longer exists,
+and rebaselinable by no tool. The only honest options were to guess or to
+enforce it nowhere, and nowhere is what happened. Making it regenerable removes
+that dilemma: it is now owned exactly the way the placement goldens are.
+
+Calibrated at `x86-64-v2` and cross-checked: this container measures
+`segs=206`, the same as CI, and the corpus agrees with CI to the digit — so the
+golden holds on the gate. Verified in all four directions: strict passes on the
+committed golden, a moved golden **fails** strict, a missing golden **fails**
+rather than skipping, and the tolerant default still passes off the reference
+host.
 
 ## 3. The nightly sweeps the corpus twice  *(cheap to fix; deliberately not fixed)*
 
@@ -85,7 +98,7 @@ this is ever taken on, the safe direction is to make `qor_table.py` derive its
 extra columns from a `qor_corpus` sweep (gate unchanged, table follows), not
 the reverse.
 
-## 4. Execute the web ports — **JS half RESOLVED 2026-08-03; Scala half open**
+## 4. Execute the web ports — **RESOLVED 2026-08-03/04; only the Scala.js LINK step remains**
 
 The display-geometry rule (`viz_common.snap_endpoint_extents`) has three
 implementations — the matplotlib renderer, `src/web/static/index.html`
@@ -145,7 +158,30 @@ disables it outright. The auto-skip reason deliberately does not match the
 workflow's dependency-skip grep, so a gate with no Scala stays green — unlike an
 absent pip package, an absent Scala toolchain is an accepted configuration.
 
-**What it does not cover:** the *linked* Scala.js artifact. A divergence arising
+### The Scala.js link step — attempted, blocked, recorded
+
+Worth writing down so nobody repeats the dead end. Linking without sbt looked
+feasible: Scala 3 compiles to Scala.js IR via a plain `-scalajs` flag (no
+compiler plugin), and `scalajs-linker` is fetchable from Maven. It does not
+work in practice — `scalac -scalajs` dies with
+
+```
+java.lang.ClassCastException: Symbols$NoSymbol$ cannot be cast to Symbols$ClassSymbol
+    at dotty.tools.dotc.core.Definitions.UnitClass
+```
+
+i.e. the compiler cannot resolve its own standard library, from a hand-assembled
+`scala3-library_sjs1` + `scalajs-library` + `scalajs-scalalib` + `scalajs-javalib`
+classpath. Several pinned combinations were tried. **If this is taken on, use
+sbt** — the project already has `web/build.sbt` and `web/project/plugins.sbt`,
+and reproducing what sbt resolves by hand is the part that fails.
+
+Amusing footnote: the first attempt failed because `mvn dependency:get` had
+cached *three* versions of `scalajs-library`, and the ad-hoc classpath included
+all of them — the identical pollution bug Codex had flagged in the test itself an
+hour earlier.
+
+**What the JVM run does not cover:** the *linked* Scala.js artifact. A divergence arising
 from Scala.js semantics rather than from the source — JS numerics being
 uniformly `Double`, say — is invisible to a JVM run. Covering that needs sbt +
 the scalajs plugin + a JS runtime. This buys the logic, which is the part that

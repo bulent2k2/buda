@@ -239,13 +239,33 @@ auto-skip reason deliberately does **not** match the dependency-skip grep above.
 Neither port test covers the *linked* Scala.js artifact — a divergence from
 Scala.js semantics rather than from the source is invisible to a JVM run.
 
+## The `run-qor` PR label
+
+`.github/workflows/pr-qor.yml` sweeps the corpus on a PR labelled `run-qor` and
+diffs it against the PR's own **merge-base** — so a routing-quality regression is
+caught *before* it lands, which the nightly by construction cannot do.
+
+The merge-base, not current `main`: comparing against a `main` that moved since
+branching would attribute other people's changes to the PR. That window is not
+hypothetical — the `mix2_topdown_refine` regression reached `main` precisely
+because a hand-captured baseline predated a corpus row another PR added
+mid-flight.
+
+Label-gated because it costs two builds + two sweeps (~16 min); add it to a PR
+touching topology, planner or NUTS, which is when `CLAUDE.md` already prescribes
+a sweep. The merge-base sweep is cached by its commit SHA, so a further push
+re-sweeps only the head (~8 min). Both sides build **clean**: incremental across
+a checkout risks a stale object making the two sides incomparable, which is the
+exact fault the job exists to detect.
+
 ## What CI deliberately does NOT do
 
 Remaining gaps and reasoning in [`opens_ci.md`](opens_ci.md):
 
-1. **The Scala.js link step is not exercised** — only the port's logic is.
-2. **The `run-qor` PR label** — the nightly catches a corpus regression a day
-   *after* it lands, not before.
+1. **The Scala.js link step is not exercised** — only the port's logic is. The
+   no-sbt path was attempted and does not work; findings recorded there.
+2. **The nightly sweeps the corpus twice** — deliberately, to keep the
+   regression gate's fidelity.
 
 Plus one narrower piece: the nightly compares `main` against itself over time,
 so it catches a regression a day *after* it lands. A `run-qor` PR label that

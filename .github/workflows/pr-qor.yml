@@ -1,0 +1,156 @@
+name: PR QoR
+
+# Sweep the QoR corpus on a PR and diff it against the PR's OWN MERGE-BASE, so a
+# routing-quality regression is caught BEFORE it lands.
+#
+# The nightly (nightly-qor.yml) compares `main` against itself over time, which
+# catches a regression a day AFTER it merges.  What it cannot do is stop one.
+# This can, and the evidence says it is worth having: the mix2_topdown_refine
+# regression (0/0/0 -> 3/16/1) reached `main` precisely because a hand-captured
+# baseline predated a corpus row another PR added mid-flight.  A merge-base
+# comparison has no such window -- both sides are swept here, now, by this job.
+#
+# LABEL-GATED, not on by default: two builds + two sweeps is ~16 min, far too
+# much for every PR.  Add the `run-qor` label to a PR that touches topology,
+# planner or NUTS, which is exactly when CLAUDE.md already prescribes a corpus
+# sweep.
+#
+# The merge-base sweep is cached by its commit SHA, so pushing again to the same
+# PR re-sweeps only the head (~8 min).
+
+on:
+  pull_request:
+    # `labeled` so adding the label starts a run; the rest so a labelled PR
+    # re-checks itself when new commits arrive.
+    types: [labeled, opened, synchronize, reopened]
+
+concurrency:
+  # A new push supersedes the run in flight; the old measurement is stale.
+  group: pr-qor-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  qor:
+    if: contains(github.event.pull_request.labels.*.name, 'run-qor')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    env:
+      # Same pin as every other job: routing decisions are ISA-sensitive, so an
+      # unpinned -march would produce churn indistinguishable from a regression.
+      # It matters doubly here, where the whole point is comparing two builds.
+      BUDA_ARCH: x86-64-v2
+      MPLBACKEND: Agg
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # need real history to find the merge-base
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pybind11 matplotlib
+
+      - name: Resolve the merge-base
+        id: base
+        # The PR's own fork point, NOT current main: comparing against a main
+        # that moved since branching would attribute other people's changes to
+        # this PR.
+        run: |
+          set -euo pipefail
+          BASE="$(git merge-base origin/${{ github.base_ref }} HEAD)"
+          echo "sha=$BASE" >> "$GITHUB_OUTPUT"
+          echo "Merge-base: $BASE" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore the merge-base sweep
+        id: basecache
+        uses: actions/cache/restore@v4
+        with:
+          path: qor-base.json
+          # Keyed by the merge-base COMMIT, so it is reusable across pushes to
+          # this PR and across other PRs branched from the same commit, and can
+          # never be served for a different base.
+          key: qor-mergebase-${{ steps.base.outputs.sha }}
+
+      - name: Sweep the merge-base
+        if: steps.basecache.outputs.cache-hit != 'true'
+        # A CLEAN build on each side.  Incremental across a checkout is a
+        # correctness risk for a MEASUREMENT: a stale object silently makes the
+        # two sides incomparable, which is the failure mode this job exists to
+        # detect.  ~2 min is worth removing that doubt.
+        run: |
+          set -euo pipefail
+          git checkout --detach ${{ steps.base.outputs.sha }}
+          bin/bb --clean
+          python3 tools/qor_corpus.py --out qor-base.json
+          git checkout --detach ${{ github.event.pull_request.head.sha }}
+
+      - name: Save the merge-base sweep
+        if: steps.basecache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: qor-base.json
+          key: qor-mergebase-${{ steps.base.outputs.sha }}
+
+      - name: Sweep the PR head
+        run: |
+          set -euo pipefail
+          git checkout --detach ${{ github.event.pull_request.head.sha }}
+          bin/bb --clean
+          python3 tools/qor_corpus.py --out qor-head.json
+
+      - name: Reject errored sweeps
+        # Same guard as the nightly, for the same reason: qor_corpus records a
+        # flow that RAISES as {"flow", "err"} and still exits 0, and the compare
+        # prints a corpus-NEW row as "(new)" without counting it in n_worse.  An
+        # unguarded failure would therefore read as "no regression" -- and here
+        # it would also poison the cached merge-base for every later run.
+        run: |
+          python3 -c '
+          import json, sys
+          bad = 0
+          for name in ("qor-base.json", "qor-head.json"):
+              rows = json.load(open(name))
+              for r in rows:
+                  if "err" in r:
+                      bad += 1
+                      print("::error::%s: %s errored: %s" % (name, r["flow"], r["err"]))
+          if bad:
+              sys.exit("%d errored flow(s) — the comparison would be meaningless" % bad)
+          print("both sweeps completed with no errored flows")
+          '
+
+      - name: Compare head against merge-base
+        run: |
+          set -o pipefail
+          {
+            echo '## QoR: PR head vs merge-base'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rc=0
+          python3 tools/qor_corpus.py --compare qor-base.json qor-head.json \
+            2>&1 | tee compare.txt >> "$GITHUB_STEP_SUMMARY" || rc=$?
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::QoR regression against the merge-base — see the job summary"
+            exit 1
+          fi
+          echo 'No QoR regression against the merge-base.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        # always(): the JSONs matter most when the compare failed.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-qor-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: |
+            qor-base.json
+            qor-head.json
+            compare.txt
+          if-no-files-found: warn
+          retention-days: 30
