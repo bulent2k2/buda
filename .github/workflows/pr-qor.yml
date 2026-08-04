@@ -90,6 +90,21 @@ jobs:
           python3 tools/qor_corpus.py --out qor-base.json
           git checkout --detach ${{ github.event.pull_request.head.sha }}
 
+      - name: Reject an errored base sweep
+        if: steps.basecache.outputs.cache-hit != 'true'
+        # BEFORE the save, and that ordering is the whole point.  qor_corpus
+        # records a flow that RAISES as {"flow", "err"} and still exits 0, so a
+        # transient base-sweep failure would otherwise be CACHED under this
+        # merge-base and restored by every later run -- the job could never
+        # re-sweep its way out of it, and the compare would keep reading a
+        # broken baseline as "no regression".
+        #
+        # The original draft had this check after the save.  Its own comment
+        # said an errored base sweep "would be CACHED and poison every later
+        # run", which describes precisely what the ordering then permitted
+        # (review #580).
+        run: python3 tools/qor_corpus.py --check qor-base.json
+
       - name: Save the merge-base sweep
         if: steps.basecache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -104,26 +119,10 @@ jobs:
           bin/bb --clean
           python3 tools/qor_corpus.py --out qor-head.json
 
-      - name: Reject errored sweeps
-        # Same guard as the nightly, for the same reason: qor_corpus records a
-        # flow that RAISES as {"flow", "err"} and still exits 0, and the compare
-        # prints a corpus-NEW row as "(new)" without counting it in n_worse.  An
-        # unguarded failure would therefore read as "no regression" -- and here
-        # it would also poison the cached merge-base for every later run.
-        run: |
-          python3 -c '
-          import json, sys
-          bad = 0
-          for name in ("qor-base.json", "qor-head.json"):
-              rows = json.load(open(name))
-              for r in rows:
-                  if "err" in r:
-                      bad += 1
-                      print("::error::%s: %s errored: %s" % (name, r["flow"], r["err"]))
-          if bad:
-              sys.exit("%d errored flow(s) — the comparison would be meaningless" % bad)
-          print("both sweeps completed with no errored flows")
-          '
+      - name: Reject an errored head sweep
+        # Nothing is cached from the head, so this one only has to stop the
+        # comparison -- but an errored flow still makes the diff meaningless.
+        run: python3 tools/qor_corpus.py --check qor-head.json
 
       - name: Compare head against merge-base
         run: |

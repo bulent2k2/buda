@@ -90,18 +90,11 @@ jobs:
         # nightly would then treat the breakage as unchanged.  That silently
         # defeats the promote-on-clean property this job is built around, so an
         # err row is a hard failure (review on PR #565).
-        run: |
-          python3 -c '
-          import json, sys
-          rows = json.load(open("qor-current.json"))
-          bad = [r for r in rows if "err" in r]
-          for r in bad:
-              print("::error::corpus flow errored: %s: %s" % (r["flow"], r["err"]))
-          if bad:
-              sys.exit("%d of %d corpus flow(s) errored — not comparing or promoting"
-                       % (len(bad), len(rows)))
-          print("all %d corpus flows completed" % len(rows))
-          '
+        #
+        # Shared with the PR gate via qor_corpus --check rather than a second
+        # inline copy: two implementations of one guard are two things to keep
+        # in step, and this one is testable (test_qor_sweep.py).
+        run: python3 tools/qor_corpus.py --check qor-current.json
 
       - name: Compare against the previous nightly
         id: compare
