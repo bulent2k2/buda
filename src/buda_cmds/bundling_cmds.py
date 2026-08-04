@@ -69,6 +69,45 @@ def _net_allowed_relations(session, net_name):
     return _OVERRIDE_MODES[best] if best else _OVERRIDE_MODES["combined"]
 
 
+def _bundle_bit_cap(session, nets):
+    """The static bit cap that applies to ONE bundle: the longest matching
+    `set_max_bundle_bits <N> for <prefix>` scope, else the global cap.
+
+    The scoped form exists because the global knob is all-or-nothing: on a
+    design where a single bus is width-doomed, capping every wide bundle
+    pays a design-wide wirelength bill for one bundle's problem.  A bundle
+    matches a scope when ANY of its nets carries the prefix (a bundle is
+    usually one bus, and a mixed bundle should split if any member bus is
+    the doomed one).  `0` in a scope means EXEMPT — no static cap, even when
+    a global one is set.
+
+    Two scopes of EQUAL prefix length can both match — a hier occurrence
+    group is resolved against the union of `c1_bus_*` and `c2_bus_*`, so
+    `for c1_bus` and `for c2_bus` are equally specific.  The MOST RESTRICTIVE
+    (smallest) cap then wins, since it also satisfies the looser request;
+    `0` (exempt) is unbounded, so it loses every tie and wins only when it is
+    the sole longest match.
+
+    Returns `(cap, scoped)` — `scoped` says the cap came from a SCOPE, which
+    is what the split note reports; deriving that from `cap != global` would
+    mislabel a scope that merely repeats the global value."""
+    glob = getattr(session, "_max_bundle_bits", None)
+    scopes = getattr(session, "_max_bundle_bits_scoped", None) or {}
+    if not scopes:
+        return glob, False
+    inf = float("inf")
+    best, best_len = None, -1
+    for prefix, n in scopes.items():
+        if not any(net.startswith(prefix) for net in nets):
+            continue
+        if len(prefix) > best_len or (len(prefix) == best_len
+                                      and (n or inf) < (best or inf)):
+            best, best_len = n, len(prefix)
+    if best is None:
+        return glob, False
+    return (None if best == 0 else best), True
+
+
 def _generalized_bundles(session, strategy):
     """Union-find partition of the netlist under the strategy's relations ∩
     per-net permissions.  Reproduces the pure C++ partitions exactly when
@@ -246,7 +285,8 @@ def _split_oversized_bundles(session, raw_bundles):
     binding constraint."""
     max_bits = getattr(session, "_max_bundle_bits", None)
     auto = getattr(session, "_max_bundle_bits_auto", False)
-    if not max_bits and not auto:
+    scoped = getattr(session, "_max_bundle_bits_scoped", None) or {}
+    if not max_bits and not auto and not scoped:
         return raw_bundles
     eps = session._net_endpoints
     pitch = _min_bit_pitch(session) if auto else None
@@ -257,10 +297,12 @@ def _split_oversized_bundles(session, raw_bundles):
     for b in raw_bundles:
         nets = list(b.get_net_names())
         total = len(nets)
+        cap, cap_scoped = _bundle_bit_cap(session, nets)
         n_parts, why = 1, ""
-        if max_bits and total > max_bits:
-            n_parts = math.ceil(total / max_bits)
-            why = f"static limit {max_bits}"
+        if cap and total > cap:
+            n_parts = math.ceil(total / cap)
+            why = (f"static limit {cap}"
+                   + (" (scoped)" if cap_scoped else ""))
         if auto and pitch and pitch > 0:
             at_block = {}
             for n in nets:
@@ -398,7 +440,8 @@ def _split_hier_bundles(session, raw_bundles):
     cap with a one-line note."""
     max_bits = getattr(session, "_max_bundle_bits", None)
     auto = getattr(session, "_max_bundle_bits_auto", False)
-    if (not max_bits and not auto) or not raw_bundles:
+    scoped = getattr(session, "_max_bundle_bits_scoped", None) or {}
+    if (not max_bits and not auto and not scoped) or not raw_bundles:
         return raw_bundles
     pitch = _min_bit_pitch(session) if auto else None
     comps = list(session.bdb.all_components()) if (auto and session.bdb) else []
@@ -429,11 +472,19 @@ def _split_hier_bundles(session, raw_bundles):
         counter[0] += 1
         return counter[0]
 
-    def _split_one(b):
+    def _split_one(b, cap_ovr=None):
         """Return the HBundle parts b splits into (>=1; part 1 keeps b.id).
         Preserves every hier field per part; splits the per-net fan-in arrays
         and re-scopes a fan-in part's reason/busterm ids to the leaves its bits
-        touch."""
+        touch.
+
+        `cap_ovr` is the (cap, scoped) pair resolved once for a whole
+        template↔replica GROUP — see the caller.  Occurrences of one cell-local
+        bundle carry INSTANCE-SPECIFIC net names (`c1_bus_*` on the template,
+        `c2_bus_*` on the replica), so resolving a scope per bundle would let
+        `... for c1_bus` cap the template and not the replica, split them into
+        different part counts, and break the part-for-part parent linkage
+        (Codex P1 on #582)."""
         nets = list(b.get_net_names())
         total = len(nets)
         drvs = list(b.net_drivers)
@@ -449,10 +500,13 @@ def _split_hier_bundles(session, raw_bundles):
                 return tuple({drvs[i], *rcvs[i]} - {""})
             return shared
 
+        cap, cap_scoped = (_bundle_bit_cap(session, nets) if cap_ovr is None
+                           else cap_ovr)
         n_parts, why = 1, ""
-        if max_bits and total > max_bits:
-            n_parts = math.ceil(total / max_bits)
-            why = f"static limit {max_bits}"
+        if cap and total > cap:
+            n_parts = math.ceil(total / cap)
+            why = (f"static limit {cap}"
+                   + (" (scoped)" if cap_scoped else ""))
 
         caps, inc_all = {}, {}
         if auto and pitch and pitch > 0:
@@ -527,10 +581,19 @@ def _split_hier_bundles(session, raw_bundles):
     for b in raw_bundles:
         if _is_replica(b):
             continue                       # handled with its template below
-        tparts = _split_one(b)
+        # One cap for the whole occurrence group: resolve the scope against
+        # the UNION of every occurrence's nets, so a scope naming ANY single
+        # instance's prefix governs the class and all occurrences split in
+        # lockstep (they are the same logical bundle).
+        reps = replicas_of.get(b.id, ())
+        gnets = list(b.get_net_names())
+        for rb in reps:
+            gnets.extend(rb.get_net_names())
+        gcap = _bundle_bit_cap(session, gnets)
+        tparts = _split_one(b, gcap)
         out.extend(tparts)
-        for rb in replicas_of.get(b.id, ()):
-            rparts = _split_one(rb)
+        for rb in reps:
+            rparts = _split_one(rb, gcap)
             if len(rparts) == len(tparts):
                 for tp, rp in zip(tparts, rparts):
                     rp.parent_id = tp.id    # part k replica → part k template
@@ -680,7 +743,49 @@ def cmd_set_max_bundle_bits(session, cmd, args, cmd_line):
     # bundle is split before per-instance expansion, so the split propagates
     # identically to every occurrence (each part is its own template).
     if not args:
-        print("Error: usage: set_max_bundle_bits <N|auto|off> [auto]")
+        print("Error: usage: set_max_bundle_bits <N|auto|off> [auto]"
+              " | <N|off> for <prefix>")
+        return
+    if not hasattr(session, "_max_bundle_bits_scoped"):
+        session._max_bundle_bits_scoped = {}
+    # SCOPED form: `<N|off> for <prefix>` bounds only the bundles whose nets
+    # carry that prefix, leaving the rest of the design alone — the global
+    # knob is all-or-nothing and makes a whole design pay for one bus.
+    if len(args) >= 2 and args[1].lower() == "for":
+        if len(args) != 3:
+            print("Error: usage: set_max_bundle_bits <N|off> for <prefix>")
+            return
+        prefix = args[2]
+        a0 = args[0].lower()
+        if a0 == "off":
+            if session._max_bundle_bits_scoped.pop(prefix, None) is None:
+                print(f"Error: set_max_bundle_bits: no scope '{prefix}' to "
+                      f"clear")
+                return
+            print(f"[Bundler] bundle bit bound: scope '{prefix}' cleared "
+                  f"({len(session._max_bundle_bits_scoped)} scope(s) active)")
+            return
+        if a0 == "auto":
+            print("Error: set_max_bundle_bits: 'auto' has no scoped form "
+                  "(the AUTO cap is already per-bundle, from each bundle's "
+                  "own busterm edges)")
+            return
+        try:
+            n = int(args[0])
+        except ValueError:
+            print(f"Error: set_max_bundle_bits expects a bit count or 'off' "
+                  f"before 'for', got '{args[0]}'")
+            return
+        if n < 0:
+            print("Error: set_max_bundle_bits scoped bound must be >= 0 "
+                  "(0 = exempt this scope from the global cap)")
+            return
+        session._max_bundle_bits_scoped[prefix] = n
+        print(f"[Bundler] bundle bit bound: '{prefix}' -> "
+              f"{'EXEMPT (no static cap)' if n == 0 else n} "
+              f"({len(session._max_bundle_bits_scoped)} scope(s) active; "
+              f"longest prefix wins; applies at the next run_bundler / "
+              f"run_hier_bundler)")
         return
     # The only valid SECOND token is `auto` (arg0 is a count / auto / off,
     # validated below).  Reject anything else instead of silently dropping it.
@@ -690,6 +795,7 @@ def cmd_set_max_bundle_bits(session, cmd, args, cmd_line):
     if a0 == "off":
         session._max_bundle_bits = None
         session._max_bundle_bits_auto = False
+        session._max_bundle_bits_scoped = {}
         print("[Bundler] bundle bit bound: off")
         return
     if a0 == "auto":
