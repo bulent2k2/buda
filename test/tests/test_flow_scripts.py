@@ -913,6 +913,14 @@ def test_bighalf_rr_reaches_clean_endpoint(tmp_path):
     # doesn't have).
     text = text.replace("# ripup_reroute", "ripup_reroute")     # legacy commented form
     text = re.sub(r"(?m)^ripup_reroute\s*$", "ripup_reroute 30", text)  # bare -> budgeted
+    # Drive the HISTORICAL 8-track density.  tracks4top.buda was doubled to 16
+    # signals per period and bigHalf then routes CLEAN — ripup prints "metric
+    # already 0 — nothing to do" and emits no `done:` line at all, so this test
+    # cannot observe the stage-a/stage-b endpoints it exists to guard.  Same
+    # reason as the other *_8track redirects; see
+    # docs/internal/track_density_doubling.md.
+    text = text.replace("source ../tracks/tracks4top.buda",
+                        f"source {FLOW / 'tracks' / 'tracks4top_8track.buda'}")
     text = text.replace("source ../tracks/",
                         f"source {FLOW / 'tracks'}/")
     text = text.replace("source tc3a_flat_5x.buda",
