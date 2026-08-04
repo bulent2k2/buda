@@ -1830,15 +1830,21 @@ CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
 // so the gate is purely a performance threshold: tiny pools stay sequential
 // because their evaluations are microseconds-scale and thread spawn is not.
 int CongestionPlanner::resolved_plan_threads_(int ncand) const {
-    if (ncand < 8) return 1;                 // small-pool gate (perf only)
+    // An EXPLICIT request (set_plan_threads / BUDA_PLAN_THREADS) is honored
+    // as given, clamped only to the candidate count — the NUTS layer_threads
+    // convention (an explicit setting bypasses the auto policy, so scaling
+    // experiments above the auto cap are possible).  AUTO (no request) uses
+    // hardware concurrency capped at 8, and only for pools of 8+ candidates
+    // (tiny evaluations are microseconds-scale and thread spawn is not; the
+    // gate is perf-only — byte-identity never depends on the thread count).
     int n = plan_threads_;
-    if (n <= 0) {
+    if (n <= 0)
         if (const char* e = std::getenv("BUDA_PLAN_THREADS")) n = std::atoi(e);
-        if (n <= 0) {
-            unsigned hw = std::thread::hardware_concurrency();
-            n = hw ? (int)hw : 1;
-        }
-    }
+    if (n > 0)
+        return std::max(1, std::min(n, ncand));
+    if (ncand < 8) return 1;                 // small-pool gate (auto only)
+    unsigned hw = std::thread::hardware_concurrency();
+    n = hw ? (int)hw : 1;
     return std::max(1, std::min({n, ncand, 8}));
 }
 

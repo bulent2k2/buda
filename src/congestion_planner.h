@@ -289,9 +289,12 @@ public:
     // within-candidate charges live in per-thread overlays), and the winner
     // is picked by an ordered reduction that replays the sequential compare —
     // so results are identical to the sequential loop.  0 = auto (hardware
-    // concurrency, overridable via the BUDA_PLAN_THREADS env var, capped at
-    // 8); 1 = sequential.  parallel_sweep's trial workers set 1 — the move
-    // fan-out already owns the cores (no nested pools, as NUTS layer_threads).
+    // concurrency capped at 8); an explicit n (here or via the
+    // BUDA_PLAN_THREADS env var) is honored as given, clamped only to the
+    // candidate count — the NUTS layer_threads convention, so scaling
+    // experiments above the auto cap are possible.  1 = sequential.
+    // parallel_sweep's trial workers set 1 — the move fan-out already owns
+    // the cores (no nested pools, as NUTS layer_threads).
     void set_plan_threads(int n) { plan_threads_ = n; }
     void build_congestion_map();
     std::vector<BundleAssignment> optimize_topologies(

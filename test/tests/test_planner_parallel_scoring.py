@@ -95,8 +95,11 @@ def test_pool_is_large_enough_to_engage_threads():
 
 
 def test_parallel_scoring_is_decision_identical():
+    # 16 exceeds the AUTO cap of 8: an explicit request is honored as given
+    # (the NUTS layer_threads convention), so this also locks in the
+    # explicit-wins resolution path.
     serial = _plan(1)
-    for t in (2, 4, 8):
+    for t in (2, 4, 8, 16):
         assert _plan(t) == serial, f"threads={t} diverged from sequential"
 
 
