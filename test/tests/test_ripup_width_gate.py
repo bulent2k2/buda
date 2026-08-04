@@ -201,14 +201,6 @@ def test_mix_flow_gate_participates_and_endpoint_clean():
             for line in (_ROOT / "flow" / "rnr" / "mix.buda").read_text() \
                                                              .splitlines():
                 line = line.split("#")[0].strip()
-                # The gate refuses candidates whose bit demand cannot fit their
-                # slide window.  mix_tracks.buda was doubled to 16 signals per
-                # period, which halves the bit pitch and leaves nothing
-                # statically infeasible — the gate never fires and this test
-                # cannot observe it.  Replay against the preserved 8-track
-                # density so the mechanism under test still engages.
-                if line == "source mix_tracks.buda":
-                    line = "source mix_tracks_8track.buda"
                 if line:
                     s.do_command(line)
     finally:

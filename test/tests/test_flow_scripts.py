@@ -691,15 +691,9 @@ def test_10_four_level_scale_one_bundle_per_bus():
             f"host (pinned ISA, see docs/internal/ci.md) with "
             f"BUDA_FLOW_QOR_REGEN=1 and commit {FLOW_QOR_GOLDEN}.")
     else:
-        # 205-209 before flow/tracks/tracks.buda was doubled to 16 signals per
-        # period; the finer pitch lets the planner pick SIMPLER topologies, so
-        # the count DROPS to 178 (fewer segments, fewer vias — the same signal
-        # the NUTS goldens show).  Span kept at +-2 for host near-ties.
-        assert 176 <= segs <= 180         # host-sensitive topology near-ties
+        assert 205 <= segs <= 209         # host-sensitive topology near-ties
         assert ovlps <= 1                 # a residual corner overlap when a replan doesn't clear here
-        # 1180+ before the track doubling; the simpler topologies carry fewer
-        # bit-wires for the same nets (976), so the floor moves with them.
-        assert net_segs >= 960
+        assert net_segs >= 1180
         # Off the generation host, any unplaced bits must all be accounted-for
         # keepout culls (unplaced == removed) — nothing silently dropped — AND
         # capped: the host-sensitive residual is the 2 historical
@@ -913,14 +907,6 @@ def test_bighalf_rr_reaches_clean_endpoint(tmp_path):
     # doesn't have).
     text = text.replace("# ripup_reroute", "ripup_reroute")     # legacy commented form
     text = re.sub(r"(?m)^ripup_reroute\s*$", "ripup_reroute 30", text)  # bare -> budgeted
-    # Drive the HISTORICAL 8-track density.  tracks4top.buda was doubled to 16
-    # signals per period and bigHalf then routes CLEAN — ripup prints "metric
-    # already 0 — nothing to do" and emits no `done:` line at all, so this test
-    # cannot observe the stage-a/stage-b endpoints it exists to guard.  Same
-    # reason as the other *_8track redirects; see
-    # docs/internal/track_density_doubling.md.
-    text = text.replace("source ../tracks/tracks4top.buda",
-                        f"source {FLOW / 'tracks' / 'tracks4top_8track.buda'}")
     text = text.replace("source ../tracks/",
                         f"source {FLOW / 'tracks'}/")
     text = text.replace("source tc3a_flat_5x.buda",

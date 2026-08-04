@@ -3,7 +3,7 @@
 # end result is high WL.
 # this is B20. Also check out B1, 9 and 28 
 
-source tracks/tracks4top_8track.buda
+source tracks/tracks4top.buda
 
 add_block blk_00 2960 7760 4560 9160
 add_block blk_06 200 9460 2700 10560

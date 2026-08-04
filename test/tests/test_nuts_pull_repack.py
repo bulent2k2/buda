@@ -34,7 +34,6 @@ on TrackSegment so the test measures the code's true objective.
 """
 import math
 import os
-from pathlib import Path
 import pytest
 
 pytestmark = pytest.mark.mid
@@ -42,8 +41,6 @@ pytestmark = pytest.mark.mid
 _FLOW = os.path.normpath(os.path.join(
     os.path.dirname(__file__), '..', '..', 'flow'))
 _BIG_DIR = os.path.join(_FLOW, 'big_data_test')
-_BIG_DIR_P = Path(_BIG_DIR)
-_ROOT_P = Path(_FLOW).parent
 
 # Lines of big.buda (the tc3a flat design, sourcing tc3a_flat_x10) to execute.
 # Stop at run_nuts: the pull
@@ -84,24 +81,11 @@ def _run_through_nuts(script_name, loci_opt_out=False):
 
 
 @pytest.fixture(scope="module")
-def big_nuts_session(tmp_path_factory):
-    """big.buda on the HISTORICAL 8-track density.
-
-    These tests count PULLED segments and their deviation from pull_target.
-    flow/tracks/tracks4top.buda was doubled to 16 signals per period; at that
-    pitch far fewer segments need pulling at all (87 -> 74), so the guard stops
-    being meaningful.  The vehicle itself stays on the shared, doubled fixture —
-    only this test drives a sparse copy."""
-    src = (_BIG_DIR_P / "big.buda").read_text()
-    assert "source ../tracks/tracks4top.buda" in src, "big.buda tracks line moved"
-    sparse = tmp_path_factory.mktemp("pullrepack") / "big_8track.buda"
-    sparse.write_text(src.replace(
-        "source ../tracks/tracks4top.buda",
-        f"source {_ROOT_P / 'flow/tracks/tracks4top_8track.buda'}"))
+def big_nuts_session():
     cwd = os.getcwd()
-    os.chdir(_BIG_DIR)            # so `source tc3a_flat_x10.buda` resolves
+    os.chdir(_BIG_DIR)            # so `source ../tracks4top.buda` etc. resolve
     try:
-        yield _run_through_nuts(str(sparse), loci_opt_out=True)
+        yield _run_through_nuts("big.buda", loci_opt_out=True)
     finally:
         os.chdir(cwd)
 

@@ -1,6 +1,6 @@
 # planner fails to see congestion
 
-source tracks/tracks2top_8track.buda
+source tracks/tracks2top.buda
 add_block drv1    50  380  230  620
 add_block rcv1   680  120  880  500
 add_block rcv2   350   50  550  230

@@ -17,11 +17,11 @@ sys.path.insert(0, str(_ROOT / "tools"))
 
 import double_track_density as dtd  # noqa: E402
 
-# Every shared fixture the corpus routes on.
+# Every shared fixture the corpus routes on, plus the doubled twin.
 FIXTURES = sorted(
     set((_ROOT / "flow" / "tracks").glob("*.buda"))
     | {_ROOT / "flow" / "rnr" / "mix_tracks.buda",
-       _ROOT / "flow" / "rnr" / "mix_tracks_8track.buda",
+       _ROOT / "flow" / "rnr" / "mix_tracks_2x.buda",
        _ROOT / "demo" / "tracks_ariane136.buda"}
 )
 
@@ -71,6 +71,41 @@ def test_rails_are_untouched():
         rails_after = [(t, w, s) for t, w, s in dtd.double(slots)
                        if t.upper() in dtd.RAILS]
         assert rails_before == rails_after, f"L{lid}: rails moved"
+
+
+def test_the_2x_twin_is_the_doubling_of_its_original():
+    """flow/rnr/mix_tracks_2x.buda must be exactly what the tool produces from
+    mix_tracks.buda — same periods, same metal, twice the signals.  If someone
+    edits one and not the other the pair stops being a controlled comparison."""
+    orig = {lid: slots for lid, _o, slots in _patterns(_ROOT / "flow/rnr/mix_tracks.buda")}
+    twin = {lid: slots for lid, _o, slots in _patterns(_ROOT / "flow/rnr/mix_tracks_2x.buda")}
+    assert orig.keys() == twin.keys(), "layer sets diverged"
+    for lid in orig:
+        assert twin[lid] == dtd.double(orig[lid]), f"L{lid}: twin is not the doubling"
+        assert dtd.period(twin[lid]) == dtd.period(orig[lid]), f"L{lid}: period"
+        assert dtd.signal_metal(twin[lid]) == dtd.signal_metal(orig[lid]), f"L{lid}: metal"
+
+
+def test_the_2x_flow_clones_differ_only_in_the_tracks_line():
+    """Each `*_2x.buda` clone is its original with one line changed.  Anything
+    else drifting makes the pair measure two things at once."""
+    for name in ("mix2_fast_bottomup_caps", "mix2_fast_on_aligned_sql"):
+        orig = (_ROOT / f"flow/rnr/{name}.buda").read_text().splitlines()
+        twin = (_ROOT / f"flow/rnr/{name}_2x.buda").read_text().splitlines()
+        strip = lambda ls: [l for l in ls if not l.startswith("#")]  # noqa: E731
+        o, w = strip(orig), strip(twin)
+        assert len(o) == len(w), f"{name}: clone has a different command count"
+        diffs = [(a, b) for a, b in zip(o, w) if a != b]
+        assert diffs == [("source mix_tracks.buda", "source mix_tracks_2x.buda")], \
+            f"{name}: unexpected divergence {diffs}"
+
+
+def test_the_originals_are_not_doubled():
+    """The whole point of the clone scheme: the ORIGINAL fixtures keep the
+    historical density, because their congestion is what the healer and
+    doomed-seat vehicles exist to exercise."""
+    for lid, _o, slots in _patterns(_ROOT / "flow/rnr/mix_tracks.buda"):
+        assert dtd.n_signals(slots) == 8, f"mix_tracks L{lid} was doubled in place"
 
 
 def test_the_irregular_fixture_survives():

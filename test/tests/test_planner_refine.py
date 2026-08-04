@@ -41,26 +41,7 @@ import buda_cli
 _ROOT = Path(__file__).parents[2]
 
 
-def _sparse_variant(tmp_dir):
-    """01_pipeline_hier on the HISTORICAL 8-track density.
-
-    These tests observe the refinement pass STRAIGHTENING a detour, which needs
-    an input congested enough to detour in the first place.  `tracks.buda` was
-    doubled to 16 signals per period, and at that density the D0 buses go
-    straight immediately — `refine_passes 0` and `1` both land at WL 330 and
-    there is nothing left to observe.  So drive the same vehicle against
-    `tracks_8track.buda`, which exists precisely to keep a congested input
-    available.  The vehicle itself stays on the shared (doubled) fixture.
-    """
-    src = (_ROOT / "flow/hbundles/01_pipeline_hier.buda").read_text()
-    assert "source ../tracks/tracks.buda" in src, "vehicle's tracks line moved"
-    out = Path(tmp_dir) / "01_pipeline_hier_8track.buda"
-    out.write_text(src.replace("source ../tracks/tracks.buda",
-                               f"source {_ROOT / 'flow/tracks/tracks_8track.buda'}"))
-    return out
-
-
-def _run_01(refine_passes, set_param=True, flow=None):
+def _run_01(refine_passes, set_param=True):
     """Drive flow/hbundles/01_pipeline_hier.buda with the knob set on the
     session up front (planner params persist and are applied at planner
     construction, so the flow's own run_planner hier picks it up)."""
@@ -70,7 +51,7 @@ def _run_01(refine_passes, set_param=True, flow=None):
     with contextlib.redirect_stdout(buf):
         if set_param:
             s.do_command(f"set_planner_param refine_passes {refine_passes}")
-        s.do_command(f"source {flow or (_ROOT / 'flow/hbundles/01_pipeline_hier.buda')}")
+        s.do_command(f"source {_ROOT / 'flow/hbundles/01_pipeline_hier.buda'}")
     s._test_stdout = buf.getvalue()
     return s
 
@@ -82,16 +63,12 @@ def _abstract_wl(s):
     return total
 
 
-def test_refinement_straightens_phantom_detours(tmp_path):
+def test_refinement_straightens_phantom_detours():
     """01_pipeline_hier: pass-1 reservations detour two D0 buses into
     3-segment Z shapes; the refinement pass proves the straight I_H fits
-    against real usage and adopts it — abstract WL 418 -> 330, still clean.
-
-    Runs on the 8-track density (see _sparse_variant): the doubled default no
-    longer detours, so there would be nothing to straighten."""
-    flow = _sparse_variant(tmp_path)
-    base = _run_01(0, flow=flow)
-    ref = _run_01(1, flow=flow)
+    against real usage and adopts it — abstract WL 418 -> 330, still clean."""
+    base = _run_01(0)
+    ref = _run_01(1)
     assert base.nuts_result.num_overlaps == 0
     assert ref.nuts_result.num_overlaps == 0
     wl_base, wl_ref = _abstract_wl(base), _abstract_wl(ref)
@@ -115,16 +92,13 @@ def test_hier_defaults_to_one_pass():
     assert "Refine pass 1" in unset._test_stdout
 
 
-def test_explicit_zero_opts_out(tmp_path):
+def test_explicit_zero_opts_out():
     """An explicit `set_planner_param refine_passes 0` wins over the hier
-    default: the loop is skipped entirely (no refine line, pass-1 result).
-
-    On the 8-track density, so the two runs are distinguishable by WL."""
-    flow = _sparse_variant(tmp_path)
-    off = _run_01(0, set_param=True, flow=flow)
+    default: the loop is skipped entirely (no refine line, pass-1 result)."""
+    off = _run_01(0, set_param=True)
     assert "Refine pass" not in off._test_stdout
     # and it differs from the default (which straightens the detours)
-    unset = _run_01(0, set_param=False, flow=flow)
+    unset = _run_01(0, set_param=False)
     wl_off, wl_unset = _abstract_wl(off), _abstract_wl(unset)
     assert wl_unset < wl_off
 

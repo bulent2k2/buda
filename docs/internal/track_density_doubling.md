@@ -1,8 +1,26 @@
-# Doubling the corpus track density (2026-08-04)
+# Track-density doubling: the `_2x` clone vehicles (2026-08-04)
 
-Status: **LANDED**. Every shared track fixture outside `flow/chip/` now carries
-**twice** the signal tracks per period. The chip stack got the same treatment
-separately (PR #585); this is the port to the rest of the corpus.
+Status: **LANDED**, as *added* vehicles. No existing fixture or flow changed.
+
+The chip stack was doubled in place (PR #585) because its vehicles are QoR
+targets. The rest of the corpus is not: `rnr/*`, `big_data_test/*` and
+`hbundles/*` are **regression vehicles for the healers and the planner's
+congestion machinery**, and their congestion is the coverage. So here the
+doubling is offered as a *twin*, not a replacement.
+
+## The rule
+
+For each corpus flow:
+
+| the flow is… | what happens |
+|---|---|
+| already totally healed (0/0/0) | **nothing** — no clone, original untouched |
+| improved by doubling | a `*_2x` **clone** is added; the original stays as is |
+| not improved (neutral or worse) | **nothing** |
+
+Measured across all 38 corpus flows, that yields exactly **two** clones. 30
+flows are already 0/0/0 and 6 are the chip vehicles (already on the doubled
+`chip_tracks.buda` from #585, so this transform never touched them).
 
 ## The transform
 
@@ -17,133 +35,108 @@ construction* rather than by measurement:
 | **signal metal** unchanged | `2 * w/2 == w` |
 | **binary-exactness** preserved | halving a binary-exact value is binary-exact |
 
-The first keeps every placement grid valid (`align_bottom_up`, the chip
-vehicles' 504 = LCM(...), every checked-in floorplan). The second means the
-`def_layer` overheads are untouched — no declaration edits anywhere. The third
-is not cosmetic: `tracks_in_range` walks a period at a time with
-`pos += width + space_after`, so accumulated rounding decides whether a track
-sitting exactly *on* a window edge falls inside it. A fixture built from
+The first keeps every placement grid valid. The second means the `def_layer`
+overheads carry over untouched — the clone declares the same numbers as its
+original. The third is not cosmetic: `tracks_in_range` walks a period at a time
+with `pos += width + space_after`, so accumulated rounding decides whether a
+track sitting exactly *on* a window edge falls inside it. A fixture built from
 non-representable values breaks template alignment with an off-by-one at window
-edges — measured and documented in `flow/chip/ReadMe.md`.
+edges — measured, and documented in `flow/chip/ReadMe.md`.
 
-Rails are untouched, including their `space_after`, so each fixture's own
-structure survives: unequal rail widths (`tracks.buda` L7 is POWER 6 / GROUND
-2), an odd signal count per group (that same L7 has 3 per group), an already
-non-standard count (`tracks2topM4M5` L4 had 10). This is deliberately **not**
-the symmetric rewrite the chip stack uses — symmetry only buys anything for a
-*mirrored* placement, and none of these fixtures has one.
+Rails are untouched, including their `space_after`, so a fixture's own structure
+survives: unequal rail widths, an odd signal count per group, an already
+non-standard count. This is deliberately **not** the symmetric rewrite the chip
+stack uses — symmetry only buys anything for a *mirrored* placement.
 
 **The tool is not idempotent, and the fixtures contain a symlink**
 (`flow/big_data_test/big2/tracks4top.buda -> ../../tracks/tracks4top.buda`).
 Listing both paths doubles the target twice; the tool dedupes by real path and
 says so. Caught in practice, hence the guard.
 
-Non-idempotence also means **"has this been doubled?" is not a question the
-file can answer** — 16 signals per period could be natively 16 or a doubled 8,
-and nothing records which. An early `--check` mode claimed to verify exactly
-that and, because re-doubling always produces a different file, returned 1 for
-every non-empty fixture including ones it had just transformed (Codex, PR #586).
-It is now `--audit`, which checks the property that *is* well-defined and is the
-one worth guarding: every width, spacing and origin **binary-exact**, every slot
-list well-formed, with a per-layer period / signal-count / density report.
-`test_double_track_density.py` pins it, including that `--audit` passes on both
-densities and refuses the 0.8 / 0.4 scaling that broke the chip stack.
+Non-idempotence also means **"has this been doubled?" is not a question the file
+can answer** — 16 signals per period could be natively 16 or a doubled 8, and
+nothing records which. An early `--check` mode claimed to verify exactly that
+and, because re-doubling always produces a different file, returned 1 for every
+non-empty fixture including ones it had just transformed (Codex, PR #586). It is
+now `--audit`, which checks the property that *is* well-defined and worth
+guarding: every width, spacing and origin **binary-exact**, every slot list
+well-formed, with a per-layer period / signal-count / density report.
 
-## Measured
-
-Full corpus (38 flows), `tools/qor_corpus.py`:
+## What landed
 
 ```
-2 better, 1 worse, 35 unchanged.  Metric = overlaps/unplaced/viol_bundles.
-  abstract WL   16,997,915 -> 16,927,227   (-0.42%)
-  detailed WL  342,392,727 -> 340,318,617  (-0.61%)
-  runtime            1132.5s ->     920.3s (-18.7%)
+flow/rnr/mix_tracks_2x.buda                    16 signals/period (was 8)
+flow/rnr/mix2_fast_bottomup_caps_2x.buda       clone, one line changed
+flow/rnr/mix2_fast_on_aligned_sql_2x.buda      clone, one line changed
 ```
 
-| flow | before | after |
+Each clone is byte-identical to its original apart from `source
+mix_tracks.buda` → `source mix_tracks_2x.buda`, and a header explaining the
+pair. Both are in the QoR corpus **alongside** their originals — the pair *is*
+the measurement.
+
+| flow | original | `_2x` clone |
 |---|---|---|
-| `rnr/mix2_fast_on_aligned_sql` | 2/16/1 in 35.6s | **0/0/0 in 3.2s** |
-| `rnr/mix2_fast_bottomup_caps` | 2/0/0 | **0/0/0** |
-| `rnr/mix2_fast_bottomup` | 0/0/0 in 5.1s | **1/0/0** in 3.3s |
+| `mix2_fast_bottomup_caps` | 2/0/0, WL 68371, 42.3s | **0/0/0**, WL 62778 (−8.2%), 18.8s |
+| `mix2_fast_on_aligned_sql` | 2/16/1, WL 76368, 46.0s | **0/0/0**, WL 65160 (−14.7%), 4.7s |
 
-Most flows are *unchanged on the metric* because they were already clean — the
-win shows up as wirelength and, dramatically, as runtime: `bigHalf` holds 0/0/0
-but goes **63.1s → 2.0s**, `mix2` 29.0s → 1.9s. Those flows were spending
-almost all their time healing congestion the density removes.
+## Why the originals are kept — this is the whole point
 
-**The one regression is a healer trade, not a break.** `mix2_fast_bottomup`
-reaches DNUTS with 16 opens, and `negotiate` clears all 16 at the cost of one
-overlap — correct on its lexicographic `(opens, overlaps)` metric — after which
-`ripup` stops because opens are already 0. The endpoint is electrically clean:
-0 unplaced, 0 violating bundles, one abstract track overlap.
+Both originals carry their residual **on purpose**:
 
-## Goldens
+* **`mix2_fast_on_aligned_sql`** is the corpus's *last live supply-doomed seat*
+  outside chip3a. Its 2/16/1 is the exemplar that
+  `tools/doomed_seat_forensics.py` and the `check_design` doomed-seat census are
+  read against, and its own header already refuses an available
+  `set_max_bundle_bits` fix for precisely that reason. Doubling its tracks in
+  place would have erased the exemplar just as surely as applying that fix.
+* **`mix2_fast_bottomup_caps`** keeps 2 residual overlaps that are live exercise
+  for the bottom-up healer path under per-cell layer caps. A clean flow
+  exercises nothing.
 
-`nuts_golden` moved; `topo_golden` did **not** — topology *generation* is
-geometric and independent of the track patterns, so this is a good sanity
-signal that the change moves placement only. Regenerated with
-`PYTHONPATH=build:tools python3 tools/nuts_snapshot.py`.
+More generally: an in-place doubling of the shared fixtures **disarms
+congestion-dependent tests**. Measured on the first attempt at this change —
+fifteen tests failed, uniformly because their mechanism stopped engaging:
 
-The counts move in the direction of quality: `rnr_mix` 248 → 220 abstract
-segments and 1862 → **1472** vias (−21%), matching its −9.9% WL, with
-`unplaced=0` before and after. The finer pitch lets the planner pick simpler
-topologies. `test/tests/data/flow_qor_golden.json` was rebaselined the same way
-(`BUDA_FLOW_QOR_REGEN=1`).
-
-## The `*_8track.buda` fixtures — read this before "modernizing" them
-
-The doubling removes so much congestion that **behaviours the test suite exists
-to observe stop occurring at all**. 14 mid-tier tests failed on the first run,
-uniformly because their mechanism no longer engages:
-
-* ripup has no overlaps to reduce (`assert base > 0` → `0 > 0`);
-* negotiate has no opens to clear;
-* the width gate finds nothing statically infeasible, so it never fires;
-* the refinement pass has no phantom detour to straighten (WL 418 → 330 becomes
+* ripup had no overlaps to reduce (`assert base > 0` → `assert 0 > 0`);
+* negotiate had no opens to clear;
+* the width gate found nothing statically infeasible, so it never fired;
+* the refinement pass had no phantom detour to straighten (WL 418 → 330 became
   330 → 330);
 * `nuts_corner_overlap`, `planner3`'s double-booked trunk, `ripup2`'s actual
-  blocker — none of those situations arises.
+  blocker — none of those situations arose.
 
-This is the *router* getting better and the *coverage* getting worse. So four
-fixtures preserve the historical density:
+That is the *router* improving and the *coverage* degrading. Precedent:
+`docs/internal/mid_tier_failures_2026-07-29.md` records `06_multipin_stress`
+self-healing until it could no longer enter stage b with opens, which is why a
+healer-free `_raw` twin exists. **When a vehicle stops exhibiting the problem,
+you need a vehicle that still does — the clone scheme keeps both.**
 
-```
-flow/tracks/tracks_8track.buda
-flow/tracks/tracks2top_8track.buda
-flow/tracks/tracks4top_8track.buda
-flow/rnr/mix_tracks_8track.buda
-```
+The clone scheme also means **no goldens move and no test changes are needed**:
+`nuts_golden`, `topo_golden` and `flow_qor_golden.json` are all untouched,
+because every existing flow routes exactly as before.
 
-Two consumers, split by what the flow is *for*:
+## Adding another clone later
 
-1. **Congestion demo flows source them directly** — `planner3`, `planner5_span_drop`,
-   `ripup1`, `ripup2`, `nuts_corner_overlap`, `nuts_group_pull`. These exist to
-   exhibit a mechanism under congestion; they are executable documentation, not
-   designs anyone wants routed well. None is in the QoR corpus.
-2. **Tests build a sparse copy at runtime** when the vehicle *is* a corpus flow
-   and should keep the improvement — `test_planner_refine`, `test_ripup_reroute`,
-   `test_ripup_width_gate`, `test_nuts_pull_repack`, `test_planner_signal_tracks`.
-   Each swaps the `source …tracks….buda` line into a `tmp_path` copy and asserts
-   the line it expected was actually there, so a moved `source` fails loudly
-   instead of silently testing the wrong thing.
-
-A fifteenth turned up only in CI: `test_flow_scripts`'s bigHalf rip-up guard is
-**slow**-marked, so a `-m "not slow"` run never reaches it. Same failure shape
-(`assert len(done) >= 2` → `assert 0 >= 2`, because a clean bigHalf makes ripup
-print "nothing to do" instead of a `done:` line) and the same fix. **Run the
-full suite, all tiers, before calling a density change green.**
-
-There is precedent for this shape: `docs/internal/mid_tier_failures_2026-07-29.md`
-records `06_multipin_stress` self-healing until it could no longer enter stage b
-with opens, which is why a healer-free `_raw` twin exists. Same lesson, new
-cause — **when a vehicle stops exhibiting the problem, the test needs a vehicle
-that still does, not a weaker assertion.**
+1. Measure the flow both ways (`tools/qor_corpus.py --flows`). If the original
+   is already 0/0/0, stop — there is nothing to demonstrate.
+2. `cp` the tracks fixture to `*_2x.buda`, run
+   `tools/double_track_density.py` on the copy, add the explaining header.
+3. `cp` the flow, change only its `source` line, add a header stating what the
+   original's residual is *for*.
+4. Add **both** to `tools/qor_corpus.py`.
+5. `test_double_track_density.py` will then require the twin to be the exact
+   doubling of its original and the clone to differ by exactly one line.
 
 ## Not done
 
-* `demo/tracks_ariane136.buda` declares overheads as *fractions* (`0.25`, `0.33`)
-  rather than percentages, and they have never matched the actual density. The
-  transform preserves density exactly, so this is untouched and pre-existing —
-  but it means `report_overhead` disagrees with that fixture either way.
-* The `set_max_bundle_bits auto` lever that helped the chip vehicles is still
-  chip-only; a corpus-wide evaluation is its own change.
+* `demo/tracks_ariane136.buda` declares overheads as *fractions* (`0.25`,
+  `0.33`) rather than percentages, and they have never matched the actual
+  density. Untouched and pre-existing, but `report_overhead` disagrees with that
+  fixture either way.
+* An in-place doubling of the non-chip corpus measured **2 better / 1 worse / 35
+  unchanged**, WL −0.42%/−0.61%, runtime −18.7% — with the large runtime wins on
+  flows that were *already clean* (`bigHalf` 63.1s → 2.0s, `mix2` 29.0s → 1.9s),
+  i.e. exactly the flows this scheme leaves alone. That speed is available if
+  the coverage cost is ever judged acceptable; it is recorded here rather than
+  taken.

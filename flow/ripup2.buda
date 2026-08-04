@@ -4,7 +4,7 @@
 # Victim ranking by contended-band overlap must rip bundle a (the actual
 # blocker) directly and never touch bundle i (zero overlap, skipped).
 
-source tracks/tracks2top_8track.buda
+source tracks/tracks2top.buda
 
 add_block asrc    0   0  100 300
 add_block adst  900   0 1000 300

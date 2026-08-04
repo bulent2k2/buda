@@ -188,7 +188,7 @@ def _mix_to_dnuts(planner_cmd):
     s = buda_cli.BudaSession()
     s.no_viz = True
     with contextlib.redirect_stdout(io.StringIO()):
-        s.do_command(f"source {_ROOT / 'flow/rnr/mix_tracks_8track.buda'}")
+        s.do_command(f"source {_RNR / 'mix_tracks.buda'}")
         s.do_command(f"open_bdb {_RNR / 'mix.bdb.sql'}")
         s.do_command("derive_busterms 2")
         s.do_command("add_blocks_from_bdb 0")
