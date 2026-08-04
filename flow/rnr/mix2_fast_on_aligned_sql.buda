@@ -10,6 +10,24 @@ add_blocks_from_bdb 1 skip
 add_blocks_from_bdb 2 skip
 run_hier_bundler depth 2
 # dump_hbundles
+#
+# NOTE: this flow's 2/16/1 residual is the corpus's LAST live example of a
+# supply-doomed seat outside chip3a — b61's 16-bit `top_bus20_w16` cannot fit
+# the real signal-track supply anywhere (M6 seat: 12 tracks; only adequate
+# sibling M4: 17 tracks, 16 held by other buses).  It is kept BROKEN on
+# purpose, as the exemplar `tools/doomed_seat_forensics.py` and the
+# `check_design` doomed-seat census are read against.
+#
+# A fix is available and deliberately NOT applied — measured 2026-08-04:
+#     set_max_bundle_bits 8 for top_bus20_w16   (before run_hier_bundler)
+#     refine_selection                          (at the end)
+# gives 2/12/1 at abstract WL 75828 vs the baseline's 76368 — better
+# unplaced, parity on overlaps/viol, CHEAPER wire, and doomed TOP seats 1->0.
+# Applying it would erase the exemplar, which is the same trade the
+# `band_span_charge 0` pin is refused for at the top of
+# flow/rnr/mix2_topdown_refine.buda: do not silence a vehicle that exists to
+# report a known real residual.  See docs/script_reference/bundling.md
+# ("Scoped caps") and docs/internal/wishlist-healer.md.
 generate_hier_topologies
 # NOTE: deliberately does NOT declare `set_planner_param healersAhead 1`
 # (mix2.buda, its parent, does) even though it heals below.  Measured
