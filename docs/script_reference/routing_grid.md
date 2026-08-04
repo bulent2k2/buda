@@ -20,7 +20,7 @@ Define the repeating track pattern for a layer. The pattern tiles from `origin` 
 
 | Argument | Type | Description |
 |---|---|---|
-| `layer_id` | int | Layer ID as registered with `def_layer` |
+| `layer_id` | int | Layer ID as registered with `def_layer` — the **number**, not the layer name. Passing the name (`M4` instead of `4`) is a flow-stopping error that names the id to use. |
 | `origin` | float | Anchor position of the first unit in layout units (use `0.0` to align with chip origin) |
 | `type` | string | Track type: `POWER`, `GROUND`, `CLOCK`, `SHIELD`, `SIGNAL`, or `CUSTOM` (case-insensitive; the aliases `_`→`SIGNAL`, `GND`→`GROUND`, `CLK`→`CLOCK`, `VDD`→`POWER`, `VSS`→`GROUND` are accepted — `_` is a terse shorthand for the common `SIGNAL` slot, so a dense pattern reads `_ 1 1 _ 1 1`). **Only `SIGNAL` is routable** — bits land only on `SIGNAL` slots; the others are pre-route rails. An unrecognized type is a hard error (it silently became a non-signal rail before, so a mistyped `SIGNAL` lost its tracks). The canonical type is stored; the raw token is kept as the slot's viz label. |
 | `w` | float | Track width in layout units |
@@ -60,7 +60,7 @@ Override the track pattern for a rectangular region on a layer. Useful when a fl
 
 | Argument | Type | Description |
 |---|---|---|
-| `layer_id` | int | Layer to override |
+| `layer_id` | int | Layer to override — the **number** from `def_layer`, not the layer name (`4`, not `M4`; the name is a flow-stopping error that names the id to use) |
 | `x1 y1 x2 y2` | int | Bounding box of the override region (Hanan-grid-aligned) |
 | `origin` | float | Anchor for the local pattern within this region |
 | `type w sp …` | — | Same slot format as `def_track_pattern` |
