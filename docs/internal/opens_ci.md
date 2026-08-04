@@ -31,9 +31,10 @@ corpus on a `run-qor`-labelled PR and diffs it against the PR's own
 current `main`: comparing against a `main` that moved since branching would
 attribute other people's changes to the PR.
 
-Label-gated because it is two builds + two sweeps (~16 min). The merge-base
+Label-gated because it is two builds + two sweeps — **measured 19m 39s** on the
+first real run, base side alone 9m 44s. The merge-base
 sweep is cached by its commit SHA, so pushing again to the same PR re-sweeps only
-the head (~8 min), and the key can never serve a different base.
+the head (~10 min), and the key can never serve a different base.
 
 Clean builds on both sides deliberately: incremental across a checkout risks a
 stale object making the two sides incomparable, which is the exact failure this
