@@ -68,16 +68,35 @@ textbook parallel map.
 
 ## Measured (4-core container, chip_topdown)
 
+At landing (vs pre-change main, both byte-identical):
+
 | | main | branch `BUDA_PLAN_THREADS=1` | branch auto (4T) |
 |---|--:|--:|--:|
 | `run_planner hier 5` | 103.3s | 105.7s (+2.3%, noise-band) | **61.6s (1.68×)** |
 | flow total | 148.7s | 150.7s | **105.7s (−29%)** |
 | ov / unpl / WLs / all hashes | — | identical | identical |
 
-Sampling the parallel run shows the main thread doing its worker share and
-waiting at `join` — the residual is straggler imbalance plus the
-memory-bandwidth-bound leaves (`usable_band_cap` /
-`count_signal_tracks_in`), so scaling should improve on wider hosts (cap 8).
+Thread-count sweep (post-landing main, one batch — the flow had meanwhile
+improved on main, so absolute numbers differ from the table above; every
+row's selection/layer/perp/track hashes identical):
+
+| `BUDA_PLAN_THREADS` | planner | speedup | flow total |
+|--:|--:|--:|--:|
+| 1 | 70.2s | 1.00× | 127.7s |
+| 2 | 51.4s | 1.37× | 107.2s |
+| 4 | 44.9s | **1.56×** | 99.9s |
+| 8 | 45.7s | 1.54× | 102.0s |
+| 16 | 48.8s | 1.44× | 108.5s |
+
+The host has 4 physical cores (no SMT), so 8/16 measure OVERSUBSCRIPTION,
+not scaling: 8 threads is flat vs 4 (no cliff — the auto cap of 8 is safe on
+narrower hosts than it assumes) and 16 mildly degrades (~8% — scheduling
+overhead plus a per-thread overlay footprint), which is why AUTO stays
+capped while an explicit request is honored as given (the NUTS
+layer_threads convention) for experiments on wider hosts.  True 8/16-CORE
+scaling needs a wider machine; the 1→2→4 curve is sublinear because the hot
+leaves (`usable_band_cap` / `count_signal_tracks_in`) are memory-bandwidth-
+bound and the main thread waits on stragglers at the join.
 
 ## What was deliberately NOT parallelized
 
