@@ -260,6 +260,12 @@ def _worker_init():
     global _IN_WORKER
     _IN_WORKER = True
     os.environ.setdefault("BUDA_SWEEP_THREADS", "1")
+    # Same reasoning for the planner's candidate-scoring pool (chip-flow P1):
+    # `jobs` flows already saturate the cores, so nested planner threads would
+    # only add contention.  Results are identical either way (the scoring
+    # reduction is decision-identical at any thread count); a `-j 1` sweep
+    # keeps planner parallelism and gets the single-flow speedup.
+    os.environ.setdefault("BUDA_PLAN_THREADS", "1")
 
 
 def private_log_dir(session):

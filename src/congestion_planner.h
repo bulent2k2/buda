@@ -16,6 +16,7 @@
 
 #pragma once
 #include <climits>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -58,10 +59,6 @@ struct GlobalCut {
     }
     void reset_usage() { std::fill(band_usage_.begin(), band_usage_.end(), 0.0); }
     void add_usage(int b, double delta) { band_usage_[b] += delta; }
-    // Exact-restore hook for the candidate undo log (plan_bundle): assign the
-    // RECORDED pre-charge value back — an additive undo (x+e-e) would not be
-    // bit-exact in floating point.
-    void set_usage(int b, double v) { band_usage_[b] = v; }
 
     // Signal-track count per FULL band, precomputed once in SIGNAL_TRACKS mode so
     // usable_band_cap can skip the per-call pattern walk when the slide window does
@@ -287,6 +284,15 @@ public:
     // band books reserve one pitch of margin per additional bus in a band so a
     // band the planner books full is actually packable by NUTS (Gap 1).
     void set_track_pitch(double pitch) { track_pitch_ = pitch; }
+    // Worker threads for plan_bundle's candidate scoring (chip-flow P1).
+    // Candidates are scored against the SAME read-only base cut state (the
+    // within-candidate charges live in per-thread overlays), and the winner
+    // is picked by an ordered reduction that replays the sequential compare —
+    // so results are identical to the sequential loop.  0 = auto (hardware
+    // concurrency, overridable via the BUDA_PLAN_THREADS env var, capped at
+    // 8); 1 = sequential.  parallel_sweep's trial workers set 1 — the move
+    // fan-out already owns the cores (no nested pools, as NUTS layer_threads).
+    void set_plan_threads(int n) { plan_threads_ = n; }
     void build_congestion_map();
     std::vector<BundleAssignment> optimize_topologies(
             std::vector<BundleWrapper>& bundles, int max_iterations);
@@ -660,16 +666,91 @@ private:
     // Tunable via set_planner_param("track_cap_slack"); default 0 (exact).
     double track_cap_slack_ = 0.0;
     std::vector<GlobalCut> cuts_;
-    // Candidate undo log (plan_bundle): while recording, apply_segment saves
-    // each touched band's PRE-charge usage as (cut, band, old_value); the
-    // per-candidate rollback replays it in REVERSE, restoring the exact
-    // doubles.  Replaces the full `cuts_ = cuts_snapshot` deep copy that
-    // dominated chip-scale planning (~50% of a 374s run was band-vector
-    // memcpy: one snapshot per plan_bundle + one restore per candidate,
-    // multiplied by the escalation ladder's re-entries).  O(touched bands)
-    // instead of O(all bands); byte-identical by construction.
-    std::vector<std::tuple<int, int, double>> cand_undo_;
-    bool cand_undo_on_ = false;
+    // Candidate scoring overlay (plan_bundle): while a candidate is being
+    // scored, its within-candidate charges live in a per-thread overlay map
+    // (see t_cand_overlay in the .cpp) instead of being applied to cuts_ and
+    // undone — cuts_ stays READ-ONLY for the whole scoring pass.  The overlay
+    // stores exactly the values the historical charge-then-undo produced
+    // (first touch copies the band's current usage, later charges +=), so
+    // every read through cand_usage_ returns the bit-identical double, and
+    // rollback is overlay.clear().  This is what makes scoring candidates on
+    // worker threads race-free: threads share the read-only base cuts_ and
+    // each owns its overlay.  (Succeeds the cand_undo_ log, which itself
+    // replaced the cuts_ deep copy that dominated chip-scale planning.)
+    // Band usage as the CURRENTLY-SCORED candidate sees it: its own overlay
+    // charge when present, else the committed base value.
+    double cand_usage_(int ci, int b) const;
+    // The overlay itself: an epoch-stamped flat array over ALL bands
+    // (flattened by band_base_), so a read is one branch + one array access
+    // and the per-candidate rollback is ++epoch — O(1), no hashing.  A map
+    // was measured ~15% slower serially (a hash probe on every hot read).
+    struct CandOverlay {
+        std::vector<double>   val;
+        std::vector<uint32_t> stamp;
+        uint32_t epoch = 0;
+        uint64_t gen   = 0;             // cuts_gen_ this overlay is sized for
+        void clear() {                  // start a new candidate
+            if (++epoch == 0) {         // u32 wrap: re-zero once per 4G clears
+                std::fill(stamp.begin(), stamp.end(), 0);
+                epoch = 1;
+            }
+        }
+    };
+    // The calling thread's persistent overlay, (re)sized for THIS planner's
+    // cut grid.  thread_local so (a) worker threads each get their own with
+    // zero setup per plan_bundle call, and (b) planner copies (trial sweeps)
+    // share it rather than duplicating scratch — the generation stamp
+    // (cuts_gen_) re-zeros it whenever it last served a different grid.
+    CandOverlay& thread_overlay_() const;
+    // The scoring thread's active overlay (null outside scoring).  A static
+    // thread_local member so worker threads each see their own slot while
+    // the type stays private.
+    static thread_local CandOverlay* t_cand_overlay_;
+    // One candidate's packaged evaluation (score_candidate_): everything the
+    // ordered reduction in plan_bundle needs to reproduce the sequential
+    // loop's compare, skips, debug-view recording and contended collection.
+    struct CandScore {
+        bool   infeasible    = false;
+        bool   share_refused = false;   // STRICT collective-budget gate
+        double score    = 0.0;          // includes the kWL term
+        double overflow = 0.0;
+        double wl_term  = 0.0;
+        std::vector<int>     seg_layers;
+        std::vector<int>     seg_perp;
+        std::vector<SegCost> seg_costs;             // want_costs only
+        std::set<std::pair<int,int>> contended;     // want_contended only
+    };
+    // Read-only context shared by every candidate evaluation of one
+    // plan_bundle call.
+    struct CandCtx {
+        const std::vector<int>*     h_layers_rev = nullptr;
+        const std::vector<int>*     v_layers_rev = nullptr;
+        const std::map<int,double>* layer_load   = nullptr;
+        double max_h_load = 1.0, max_v_load = 1.0;
+        int    nbits = 0;
+        bool   enforce_window = true, enforce_overflow = true;
+        bool   want_contended = false, want_costs = false;
+    };
+    // Score ONE candidate against the shared read-only base cut state; the
+    // candidate's own charges go to `overlay` (cleared at entry).  Pure per
+    // candidate — safe to run concurrently on worker threads, each thread
+    // with its own overlay.
+    CandScore score_candidate_(const BundleWrapper& bw, int ci, PlanMode mode,
+                               const CandCtx& ctx, CandOverlay& overlay);
+    // plan_bundle's worker-thread count: set_plan_threads > 0 wins; else
+    // BUDA_PLAN_THREADS; else hardware concurrency; clamped to
+    // [1, min(ncand, 8)], and 1 below the small-pool gate.
+    int resolved_plan_threads_(int ncand) const;
+    int plan_threads_ = 0;
+    // Flattened band indexing for CandOverlay: band_base_[ci] is the first
+    // slot of cut ci's bands; band_base_.back() is the total.  Rebuilt with
+    // cuts_ (rebuild_cuts_ is the single builder).
+    std::vector<size_t> band_base_;
+    // Monotonic id of this planner's cut grid (stamped by rebuild_cuts_ from
+    // a process-wide counter): the overlay validity token.  Copied clones
+    // share it — their band_base_ is identical, which is all the overlay
+    // needs (values are seeded per touch from the CURRENT planner's cuts_).
+    uint64_t cuts_gen_ = 0;
     // ── Fractional-share state (Phase 3, hier_layer_caps.md §6 Tier 2) ────
     // Share context of the wrapper plan_bundle is currently evaluating:
     // usable_band_cap's track-mode branch scales capacity by

@@ -166,6 +166,7 @@ SweepOutcome eval_move(const std::vector<BundleWrapper>& baseline,
     // Incremental replan on a private planner clone (cuts state is mutated
     // by the recharge; the clone shares only const refs with the session's).
     CongestionPlanner pl = planner_proto;
+    pl.set_plan_threads(1);   // the move fan-out owns the cores (no nested pools)
     auto asn = pl.replan_bundle(b, m.bundle_id);
     if (!asn) return out;                              // sequential fallback
     w->plan.selected_topology_index = asn->topo_index;
