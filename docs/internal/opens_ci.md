@@ -118,15 +118,38 @@ Scope: `computeDisplay` only. It is pure over the serialized analysis and is the
 piece that has actually drifted; SVG element creation is a separate concern and
 is not what #554 was about.
 
-### Scala — still open
+### Scala — resolved, and OPTIONAL by design
 
-`DisplayGeom.scala` is not compiled, let alone run — CI installs no JDK or sbt.
-Options: a Scala.js test, or cross-compile `DisplayGeom` for the JVM (it takes
-`js.Dynamic`, so the JVM path needs a thin adapter). This is the expensive half:
-it adds a whole toolchain to the gate for one 72-line file. A cheaper interim is
-a lint asserting the implementations' rule comments stay identical — catches
-nothing semantically, but makes divergence visible in review, which is where
-#554 was eventually caught anyway.
+`test_web_scala_port.py` compiles the **real** `DisplayGeom.scala` unmodified
+against a small JVM stand-in for the sliver of `scala.scalajs` it uses
+(`web/src/test/jvm/JsShim.scala`) and runs it over the same b44 fixtures, via
+`web/src/test/jvm/Harness.scala`.
+
+Verified by reintroducing both historical bugs into the Scala — last-match-wins
+(the #554 shape) and extend-only `min`/`max` — plus a deliberate syntax error,
+which must surface as *"the Scala port does not COMPILE"* rather than a skip.
+`DisplayGeom.scala` restored byte-identical after each.
+
+**No sbt.** The compiler jars alone suffice:
+
+```
+mvn dependency:get -Dartifact=org.scala-lang:scala3-compiler_3:3.3.4
+```
+
+which populates `~/.m2`, where the test looks; or point `BUDA_SCALA_CP` at a
+classpath. Marked `mid` (compile ≈ 5-10 s), so the fast tier is untouched.
+
+**`BUDA_SCALA_PORT_TEST`** — unset/`auto` runs it when a toolchain is present
+and skips otherwise; `1`/`on` makes a missing toolchain a **failure**; `0`/`off`
+disables it outright. The auto-skip reason deliberately does not match the
+workflow's dependency-skip grep, so a gate with no Scala stays green — unlike an
+absent pip package, an absent Scala toolchain is an accepted configuration.
+
+**What it does not cover:** the *linked* Scala.js artifact. A divergence arising
+from Scala.js semantics rather than from the source — JS numerics being
+uniformly `Double`, say — is invisible to a JVM run. Covering that needs sbt +
+the scalajs plugin + a JS runtime. This buys the logic, which is the part that
+actually drifted; it does not claim to buy the link step.
 
 ---
 
