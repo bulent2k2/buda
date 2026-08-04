@@ -114,8 +114,14 @@ def derive_caps(s):
     return caps, detail
 
 
-def variant(flow, caps):
-    """Write a copy of `flow` with the scoped caps declared before bundling."""
+def variant(flow, caps, it):
+    """Write a copy of `flow` with the scoped caps declared before bundling.
+
+    One file PER ITERATION (`_sd<it>_<base>`): a single reused path would make
+    every pass overwrite the last, so the intermediate flows could not be
+    inspected afterwards and the cleanup list would hold the same path
+    repeatedly — which crashed the multi-pass run at teardown, after the
+    measurements printed (Codex P2 on #588)."""
     src = os.path.join(_ROOT, flow)
     lines = open(src).read().split("\n")
     out = []
@@ -126,7 +132,7 @@ def variant(flow, caps):
                 out.append(f"set_max_bundle_bits {n} for {p}")
         out.append(l)
     d, base = os.path.split(src)
-    path = os.path.join(d, "_sd_" + base)
+    path = os.path.join(d, f"_sd{it}_" + base)
     open(path, "w").write("\n".join(out))
     return os.path.relpath(path, _ROOT)
 
@@ -168,11 +174,13 @@ def main():
                 print(f"  iter {it}: no cap tightened — fixpoint "
                       f"({len(new)} seat(s) still doomed)")
                 break
-            cur = variant(flow, caps)
+            cur = variant(flow, caps, it)
             made.append(cur)
             print(f"  iter {it} ({len(caps)} cap(s)): {_q(qc.run_flow(cur))}")
-        for f in made:
-            os.remove(os.path.join(_ROOT, f))
+        for f in made:                       # unique by construction now
+            fp = os.path.join(_ROOT, f)
+            if os.path.exists(fp):           # tolerate a hand-deleted variant
+                os.remove(fp)
 
 
 if __name__ == "__main__":
