@@ -1,16 +1,23 @@
 # chip_stack — the ON-GRID STACKED chip variant, TOP-DOWN.
 #
 # The comparison twin of chip_stack_bottomup.buda: same design, same layer
-# policy, but no bottom-up templates — every instance's interconnect is planned
-# individually in the global frame.  Use the pair to separate what the on-grid
-# stacked placement buys from what solve-once-copy buys.
+# policy, SAME TRACK TECHNOLOGY, but no bottom-up templates — every instance's
+# interconnect is planned individually in the global frame.  Use the pair to
+# separate what the on-grid stacked placement buys from what solve-once-copy
+# buys; that only works if both halves route on the same technology, so this
+# one sources chip_tracks_mirror.buda too.
+#
+# It gains nothing from the mirror symmetry (no templates, so nothing to keep
+# in phase) and in fact pays a little for it — 253/2884/143 on chip_tracks vs
+# 277/3127/161 here.  That asymmetry is the point of the pair: the symmetric
+# technology is worth its cost exactly where solve-once-copy is in play.
 #
 # Design (see chip_stack_bottomup.buda for the full note on the 504 grid):
 #   LEFT  column  x=[0..6100]      2 x big2, pitch 7560  (multiple of 504)
 #   RIGHT column  x=[7100..9430]   4 x mix2, pitch 3528  (multiple of 504),
 #                                  centred (458 margins); upper half mirrored
 #   die 9430 x 13860, 100 top-level cross-hierarchy buses, 11750 nets
-source chip_tracks.buda
+source chip_tracks_mirror.buda
 open_bdb chip_stack.bdb.sql
 reserve_top_layers 2
 derive_busterms 2

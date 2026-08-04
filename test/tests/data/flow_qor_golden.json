@@ -1,0 +1,11 @@
+{
+ "flow": "flow/hbundles/10_chip_units_blocks_leaf.buda",
+ "arch": "x86-64-v2",
+ "counts": {
+  "segs": 206,
+  "overlaps": 0,
+  "net_segs": 1200,
+  "unplaced": 0,
+  "culls": 0
+ }
+}

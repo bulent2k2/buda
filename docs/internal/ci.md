@@ -149,13 +149,13 @@ failures — that is when they are most useful.
 
 ### The snapshot table is refreshed by the same job
 
-`qor_table.md` is a *different* artifact from everything above, and the two are
+`qor/qor_table.md` is a *different* artifact from everything above, and the two are
 easy to confuse:
 
 | | `tools/qor_corpus.py` | `tools/qor_table.py` |
 |---|---|---|
 | purpose | A/B **compare** two builds, gate on regressions | single-build **snapshot** |
-| output | `qor-current.json` + a diff + an exit code | `qor_table.md` (+ `qor_table_rows.json`) |
+| output | `qor-current.json` + a diff + an exit code | `qor/qor_table.md` (+ `qor/qor_table_rows.json`) |
 | in the nightly | the regression gate | the table refresh |
 
 Nothing refreshed the table, so it drifted **46 commits stale** before anyone
@@ -201,13 +201,71 @@ the sweep errored, since that table would be garbage.
   so occasional legitimate churn is expected. A red nightly is a report to
   triage, not proof of a bug — it blocks nothing.
 
+## The JS front end is executed; the Scala one is not
+
+Three layers, and they are easy to conflate:
+
+| layer | covered? |
+|---|---|
+| `src/web/*.py` — the FastAPI server | **yes**, 49 tests (`TestClient`, incl. real `websocket_connect` round-trips) |
+| `src/web/static/index.html` — JS `computeDisplay` | **yes**, `test_web_js_port.py` runs it under node |
+| `web/src/main/scala/…` — Scala.js port | **optional** — `test_web_scala_port.py` compiles and runs it when a Scala toolchain is present |
+
+The server tests run the ASGI app **in-process**, so they would not catch a
+fault in uvicorn startup, port binding, or static-file serving as deployed.
+
+`test_web_js_port.py` extracts `computeDisplay` from the HTML and diffs it
+against `viz_common.snap_endpoint_extents` over the b44 fixtures — the same
+rule, the same inputs. It needs no toolchain step (runners ship node), and a
+node-less runner is caught by the skip guard rather than silently shrinking the
+suite.
+
+`test_web_scala_port.py` does the same for the Scala, compiling the real
+`DisplayGeom.scala` unmodified against a JVM stand-in for the `scala.scalajs`
+sliver it uses. It is **off unless a toolchain is present**, because unlike a
+pip package an absent Scala compiler is an accepted configuration:
+
+| `BUDA_SCALA_PORT_TEST` | behaviour |
+|---|---|
+| unset / `auto` | run if a Scala compiler is found, else skip |
+| `1` / `on` | **required** — a missing toolchain is a failure |
+| `0` / `off` | skip unconditionally |
+
+Provision without sbt via
+`mvn dependency:get -Dartifact=org.scala-lang:scala3-compiler_3:3.3.4`, or point
+`BUDA_SCALA_CP` at a classpath. Marked `mid`, so the fast tier is untouched. Its
+auto-skip reason deliberately does **not** match the dependency-skip grep above.
+
+Neither port test covers the *linked* Scala.js artifact — a divergence from
+Scala.js semantics rather than from the source is invisible to a JVM run.
+
+## The `run-qor` PR label
+
+`.github/workflows/pr-qor.yml` sweeps the corpus on a PR labelled `run-qor` and
+diffs it against the PR's own **merge-base** — so a routing-quality regression is
+caught *before* it lands, which the nightly by construction cannot do.
+
+The merge-base, not current `main`: comparing against a `main` that moved since
+branching would attribute other people's changes to the PR. That window is not
+hypothetical — the `mix2_topdown_refine` regression reached `main` precisely
+because a hand-captured baseline predated a corpus row another PR added
+mid-flight.
+
+Label-gated because it costs two builds + two sweeps (~16 min); add it to a PR
+touching topology, planner or NUTS, which is when `CLAUDE.md` already prescribes
+a sweep. The merge-base sweep is cached by its commit SHA, so a further push
+re-sweeps only the head (~8 min). Both sides build **clean**: incremental across
+a checkout risks a stale object making the two sides incomparable, which is the
+exact fault the job exists to detect.
+
 ## What CI deliberately does NOT do
 
-One real gap remains — reasoning and where-to-start notes in
-[`opens_ci.md`](opens_ci.md):
+Remaining gaps and reasoning in [`opens_ci.md`](opens_ci.md):
 
-1. **The web ports are not executed** — `test_web_displaygeom.py` pins the
-   authoritative geometry but never runs the JS or Scala mirrors of it.
+1. **The Scala.js link step is not exercised** — only the port's logic is. The
+   no-sbt path was attempted and does not work; findings recorded there.
+2. **The nightly sweeps the corpus twice** — deliberately, to keep the
+   regression gate's fidelity.
 
 Plus one narrower piece: the nightly compares `main` against itself over time,
 so it catches a regression a day *after* it lands. A `run-qor` PR label that

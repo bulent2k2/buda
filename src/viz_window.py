@@ -299,10 +299,12 @@ def set_icon(win_or_fig, icon_name="buda_icon.png"):
     # 1. Resolve absolute path to the icon file
     try:
         _HERE = os.path.dirname(os.path.abspath(__file__))
-        # Icon is in project root, one level up from src/
-        icon_path = os.path.join(_HERE, "..", icon_name)
+        # Icons live in assets/ at the project root, one level up from src/.
+        icon_path = os.path.join(_HERE, "..", "assets", icon_name)
         if not os.path.exists(icon_path):
-            # Fallback: maybe we are in a flattened structure or frozen?
+            # Fallbacks: legacy project-root location, then a flattened/frozen tree.
+            icon_path = os.path.join(_HERE, "..", icon_name)
+        if not os.path.exists(icon_path):
             icon_path = os.path.join(_HERE, icon_name)
         
         if not os.path.exists(icon_path):
@@ -371,7 +373,9 @@ def set_dock_icon(icon_name="buda_icon.png"):
         return
     try:
         _HERE = os.path.dirname(os.path.abspath(__file__))
-        icon_path = os.path.join(_HERE, "..", icon_name)   # project root
+        icon_path = os.path.join(_HERE, "..", "assets", icon_name)   # assets/ at root
+        if not os.path.exists(icon_path):
+            icon_path = os.path.join(_HERE, "..", icon_name)         # legacy root
         if not os.path.exists(icon_path):
             icon_path = os.path.join(_HERE, icon_name)
         if not os.path.exists(icon_path):

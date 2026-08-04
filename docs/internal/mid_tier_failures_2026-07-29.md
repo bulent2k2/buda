@@ -87,7 +87,7 @@ SELECTION … its seg7 now routes a different (longer) but still tail-free span"
 so this is the *second* time the pinned index drifted.
 
 **Not a regression.** `06_multipin_stress` is fully clean at the corpus snapshot
-(`qor_table.md`: `0/0/0`, 448 net segments), so the design routes correctly — the
+(`qor/qor_table.md`: `0/0/0`, 448 net segments), so the design routes correctly — the
 test's chosen probe point just no longer exists.
 
 **Recommended fix (test-only): delete the redundant pinned test.** The
@@ -127,7 +127,7 @@ precondition (that there are opens for ripup to clear) is false.
 **Root cause.** The healer/ripup improvements this test was written to guard
 (bottom-up healer templates #472, ripup measured-release #487, dead-span
 escalation, etc.) now clear `06_multipin_stress` earlier in the pipeline — it is
-clean at baseline (`qor_table.md`: `06_multipin_stress → 0/0/0`). The test picked
+clean at baseline (`qor/qor_table.md`: `06_multipin_stress → 0/0/0`). The test picked
 this flow precisely because it *used* to carry a residual `8 → 0` that stage-b
 healed; that residual is gone.
 

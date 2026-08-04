@@ -35,8 +35,19 @@ This tool makes that distinction, per seat:
                        for the design's only viable window.
   BLOCKED_BY_UNLOCKED  adequate sibling, held only by unlocked bundles —
                        ordinary ripup / re-seat territory, not a class move.
-  FREE_SIBLING         adequate sibling with an EMPTY window: the TOP re-seat
-                       heal should already have taken it (investigate).
+  FREE_SIBLING         adequate sibling whose window is also FREE (enough
+                       tracks unclaimed right now).  This is a STATIC verdict
+                       and NOT a claim that the re-seat heal misbehaved: the
+                       heal proposes the move and then measures it, and a
+                       re-seat perturbs the whole abstract solve, so a
+                       statically-free sibling can still cost more bits than
+                       it saves.  Measured example (chip3a_bottomup b61 seg0,
+                       2026-08-04): sibling M5 has 26 span-clear tracks and 21
+                       free for 16 bits, the heal DOES propose it, and the
+                       re-solve lands unplaced 1658 -> 1672 / overlaps
+                       297 -> 300, so the componentwise accept correctly
+                       rejects (bisecting to the seat alone reproduces it).
+                       Treat FREE_SIBLING as "worth a look", not "a bug".
   LAYER_STARVED        no same-direction TOP sibling has adequate supply —
                        genuinely doomed; no negotiation mechanism helps.
 
