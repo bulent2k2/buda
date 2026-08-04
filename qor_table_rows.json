@@ -33,7 +33,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 1.2
+  "sec": 1.7
  },
  {
   "flow": "flow/big_data_test/big2/b1_bus_007.buda",
@@ -57,7 +57,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 0.0
+  "sec": 0.1
  },
  {
   "flow": "flow/big_data_test/big2/b34_bus_028.buda",
@@ -105,7 +105,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 0.9
+  "sec": 1.4
  },
  {
   "flow": "flow/big_data_test/bigHalf.buda",
@@ -117,7 +117,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 60.4
+  "sec": 62.6
  },
  {
   "flow": "flow/big_data_test/bigHalf_bus038_bitrunk.buda",
@@ -153,7 +153,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 0.0
+  "sec": 0.1
  },
  {
   "flow": "flow/big_data_test/tc3a.buda",
@@ -177,7 +177,7 @@
   "ovl": 63,
   "unpl": 1639,
   "viol": 118,
-  "sec": 109.8
+  "sec": 179.5
  },
  {
   "flow": "flow/chip/chip3a_bottomup.buda",
@@ -189,7 +189,7 @@
   "ovl": 297,
   "unpl": 1658,
   "viol": 90,
-  "sec": 146.2
+  "sec": 244.3
  },
  {
   "flow": "flow/chip/chip_bottomup.buda",
@@ -201,7 +201,7 @@
   "ovl": 353,
   "unpl": 1604,
   "viol": 91,
-  "sec": 138.7
+  "sec": 231.4
  },
  {
   "flow": "flow/chip/chip_bottomup_caps.buda",
@@ -213,7 +213,19 @@
   "ovl": 358,
   "unpl": 1708,
   "viol": 93,
-  "sec": 155.5
+  "sec": 251.4
+ },
+ {
+  "flow": "flow/chip/chip_stack_bottomup.buda",
+  "bund": 660,
+  "busS": 2065,
+  "netS": 32949,
+  "busWL": 2340551,
+  "netWL": 35014624,
+  "ovl": 604,
+  "unpl": 2339,
+  "viol": 120,
+  "sec": 234.4
  },
  {
   "flow": "flow/chip/chip_topdown.buda",
@@ -225,7 +237,7 @@
   "ovl": 188,
   "unpl": 2170,
   "viol": 112,
-  "sec": 157.4
+  "sec": 225.5
  },
  {
   "flow": "flow/hbundles/01_pipeline_hier.buda",
@@ -249,7 +261,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 0.0
+  "sec": 0.1
  },
  {
   "flow": "flow/hbundles/03_priority_ordering.buda",
@@ -285,7 +297,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 0.2
+  "sec": 0.3
  },
  {
   "flow": "flow/hbundles/06_multipin_stress.buda",
@@ -297,7 +309,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 15.6
+  "sec": 18.7
  },
  {
   "flow": "flow/hbundles/07_wide_fan_stress.buda",
@@ -309,7 +321,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 0.5
+  "sec": 0.7
  },
  {
   "flow": "flow/hbundles/08_cross_level.buda",
@@ -345,7 +357,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 0.7
+  "sec": 1.1
  },
  {
   "flow": "flow/rnr/mix.buda",
@@ -357,7 +369,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 6.1
+  "sec": 5.3
  },
  {
   "flow": "flow/rnr/mix2.buda",
@@ -369,7 +381,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 33.8
+  "sec": 33.6
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup.buda",
@@ -381,7 +393,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 5.2
+  "sec": 8.4
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup_caps.buda",
@@ -393,7 +405,7 @@
   "ovl": 2,
   "unpl": 0,
   "viol": 0,
-  "sec": 26.3
+  "sec": 37.5
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup_shared.buda",
@@ -405,7 +417,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 38.3
+  "sec": 54.0
  },
  {
   "flow": "flow/rnr/mix2_fast_on_aligned_sql.buda",
@@ -417,7 +429,7 @@
   "ovl": 2,
   "unpl": 16,
   "viol": 1,
-  "sec": 45.4
+  "sec": 42.9
  },
  {
   "flow": "flow/rnr/mix2_fast_topdown.buda",
@@ -429,18 +441,18 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 5.9
+  "sec": 8.4
  },
  {
   "flow": "flow/rnr/mix2_topdown_refine.buda",
   "bund": 100,
-  "busS": 276,
-  "netS": 3392,
-  "busWL": 68200,
-  "netWL": 835130,
-  "ovl": 1,
+  "busS": 272,
+  "netS": 3376,
+  "busWL": 68500,
+  "netWL": 836341,
+  "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 69.3
+  "sec": 77.1
  }
 ]
