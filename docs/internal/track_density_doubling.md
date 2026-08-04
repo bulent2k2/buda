@@ -127,6 +127,12 @@ Two consumers, split by what the flow is *for*:
    the line it expected was actually there, so a moved `source` fails loudly
    instead of silently testing the wrong thing.
 
+A fifteenth turned up only in CI: `test_flow_scripts`'s bigHalf rip-up guard is
+**slow**-marked, so a `-m "not slow"` run never reaches it. Same failure shape
+(`assert len(done) >= 2` → `assert 0 >= 2`, because a clean bigHalf makes ripup
+print "nothing to do" instead of a `done:` line) and the same fix. **Run the
+full suite, all tiers, before calling a density change green.**
+
 There is precedent for this shape: `docs/internal/mid_tier_failures_2026-07-29.md`
 records `06_multipin_stress` self-healing until it could no longer enter stage b
 with opens, which is why a healer-free `_raw` twin exists. Same lesson, new
