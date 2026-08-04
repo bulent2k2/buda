@@ -251,10 +251,11 @@ hypothetical — the `mix2_topdown_refine` regression reached `main` precisely
 because a hand-captured baseline predated a corpus row another PR added
 mid-flight.
 
-Label-gated because it costs two builds + two sweeps (~16 min); add it to a PR
+Label-gated because it costs two builds + two sweeps — **measured 19m 39s** on
+the first real run (base side alone 9m 44s); add it to a PR
 touching topology, planner or NUTS, which is when `CLAUDE.md` already prescribes
 a sweep. The merge-base sweep is cached by its commit SHA, so a further push
-re-sweeps only the head (~8 min). Both sides build **clean**: incremental across
+re-sweeps only the head (~10 min). Both sides build **clean**: incremental across
 a checkout risks a stale object making the two sides incomparable, which is the
 exact fault the job exists to detect.
 

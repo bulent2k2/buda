@@ -1,47 +1,41 @@
-# chip_tracks, with MIRROR-SYMMETRIC HORIZONTAL patterns.
+# chip_tracks, with the H ORIGINS PLACED FOR A MIRRORED LAYOUT.
 #
-# Same stack as chip_tracks.buda (M2..M11), same layer widths, same signal
-# counts, same periods and therefore the SAME 504 placement grid and the same
-# overhead percentages.  The only change is where the WHITESPACE sits on the
-# four H layers, plus a few-unit shift of three H origins.
+# The PATTERNS here are byte-identical to chip_tracks.buda — same stack, same
+# widths, same 10 signals per period, same periods, same overheads, same 504
+# grid.  THE ONLY DIFFERENCE IS THREE H ORIGINS: M4 -199, M6 -403.5, M8 -802
+# (against -200 / -400 / -800).  Everything else in this file is a copy.
 #
-# WHY.  A flipped instance's routing is its reference's routing reflected
-# about the instance's own centreline.  For the copy to land on real tracks
-# the layer's pattern must be invariant under that reflection, i.e. the
-# centreline must fall on a reflection axis of the pattern.  In chip_tracks
-# the H patterns have NO reflection axis at all: each rail carries a WIDER
-# GAP AFTER IT THAN BEFORE IT (M2/M4: 1 after, 0.5 before), so the unit is
-# not a palindrome and no axis exists at any offset.  M6 is the exception —
-# its gaps are 1 on both sides — and it is the only H layer in chip_tracks
-# that does have an axis.
+# WHY A SEPARATE FILE.  A flipped instance's routing is its reference's routing
+# reflected about the instance's own centreline, so the layer's pattern must be
+# invariant under that reflection — the centreline must land on a reflection
+# AXIS of the pattern.  Two things are needed and they are independent:
 #
-# THE FIX is to centre each rail in its own whitespace: give the signal that
-# PRECEDES a rail the same space_after as the rail itself.  Written per layer
-# as `... SIGNAL w g  POWER rail g ...`, the unit becomes a palindrome and
-# gains axes every half period.  The gap g is then solved to keep the period
-# unchanged (period/2 = rail + 2g + n*sig + (n-1)*s), which is what preserves
-# the 504 grid, the bit pitches and the overheads:
+#   1. the pattern must HAVE axes at all -- it must be a palindrome.  That is
+#      now true in chip_tracks.buda itself (each rail centred in its gap), so
+#      this file inherits it and no longer has to change any slot.
+#   2. the ORIGIN must put an axis ON the instance centrelines.  That is what
+#      is left, and it is placement-specific, which is why it cannot live in
+#      the shared file: chip_stack's three flipped instances sit at centres
+#      8694 / 10710 / 12222, all differing by multiples of 504, so one origin
+#      per layer serves all three -- but they are THIS design's centres.
 #
-#   layer  period  rail  sig  s     g      axis (mod p/2)
-#   M2/M4    18     2     1   0.5   0.75   1
-#   M6       24     3     1   1     1      1.5   (already symmetric)
-#   M8       56     8     3   1.5   1.75   4
-#   M10      74    10     4   2     2.5    5
+# The condition is  instance_centre - origin == axis  (mod period/2), and each
+# layer's axis sits at the power-rail centre (rail/2), so:
 #
-# ORIGINS.  Symmetry creates the axes; the origin decides WHERE they land.
-# The condition is  instance_centre - origin == axis  (mod period/2).  The
-# three flipped instances of chip_stack sit at centres 8694 / 10710 / 12222,
-# which differ by multiples of 504, so ONE origin per layer serves all three.
-# M2's origin already satisfied it; M4/M6/M8 are shifted by 1 / 3.5 / 2 units.
+#   layer  period  axis (mod p/2)  origin  shift
+#   M2       18     1  (mod 9)     -100    none needed
+#   M4       18     1  (mod 9)     -199    +1
+#   M6       24     1.5 (mod 12)   -403.5  -3.5
+#   M8       56     4  (mod 28)    -802    -2
 #
 # M10 CANNOT be satisfied and does not need to be: its half period 37 does not
-# divide 504, so the three flipped centres fall on three different residues.
-# That is precisely why `reserve_top_layers 2` caps cells at M9 — the grid is
-# the LCM over the layers the CELLS use, and M10 is not one of them.  It is
-# made symmetric here only so the stack is uniform.
+# divide 504, so the three flipped centres fall on three different residues and
+# no single origin serves them.  That is precisely why `reserve_top_layers 2`
+# caps cells at M9 — the grid is the LCM over the layers the CELLS use, and M10
+# is not one of them.
 #
-# The V layers (M3/M5/M7/M9/M11) are untouched: an upside-down flip maps
-# y -> 2d-y and leaves x alone, so vertical tracks are unaffected by it.
+# The V origins are the shared file's: an upside-down flip maps y -> 2d-y and
+# leaves x alone, so vertical tracks take no part in this.
 def_layer  2 M2  H LOW 55.56
 def_layer  3 M3  V LOW 55.56
 def_layer  4 M4  H TOP 55.56
@@ -54,17 +48,17 @@ def_layer 10 M10 H TOP 56.76
 def_layer 11 M11 V TOP 56.76
 
 # H layers — symmetric units (rail centred in its gap), periods unchanged.
-def_track_pattern 2  -100   POWER 2 0.75  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.75  GROUND 2 0.75  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.75
-def_track_pattern 4  -199   POWER 2 0.75  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.75  GROUND 2 0.75  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.75
-def_track_pattern 6  -403.5 POWER 3 1     SIGNAL 1 1    SIGNAL 1 1    SIGNAL 1 1    SIGNAL 1 1     GROUND 3 1     SIGNAL 1 1    SIGNAL 1 1    SIGNAL 1 1    SIGNAL 1 1
-def_track_pattern 8  -802   POWER 8 1.75  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.75  GROUND 8 1.75  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.75
-def_track_pattern 10 -1200  POWER 10 2.5  SIGNAL 4 2    SIGNAL 4 2    SIGNAL 4 2    SIGNAL 4 2.5   GROUND 10 2.5  SIGNAL 4 2    SIGNAL 4 2    SIGNAL 4 2    SIGNAL 4 2.5
+def_track_pattern 2  -100   POWER 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625  GROUND 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625
+def_track_pattern 4  -199   POWER 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625  GROUND 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625
+def_track_pattern 6  -403.5 POWER 3 0.75  SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.75  GROUND 3 0.75  SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.75
+def_track_pattern 8  -802   POWER 8 1.375  SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 1.375  GROUND 8 1.375  SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 1.375
+def_track_pattern 10 -1200  POWER 10 2  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 2  GROUND 10 2  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 2
 
 # V layers — unchanged from chip_tracks.buda (a y-flip does not move them).
-def_track_pattern 3     0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
-def_track_pattern 5     0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
-def_track_pattern 7  -600  POWER 6 2  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  GROUND 6 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
-def_track_pattern 9 -1000  POWER 8 2  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5  GROUND 8 2  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5  SIGNAL 3 1.5
-def_track_pattern 11 -1400 POWER 10 3  SIGNAL 4 2  SIGNAL 4 2  SIGNAL 4 2  SIGNAL 4 2  GROUND 10 3  SIGNAL 4 2  SIGNAL 4 2  SIGNAL 4 2  SIGNAL 4 2
+def_track_pattern 3  0      POWER 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625  GROUND 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625
+def_track_pattern 5  0      POWER 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625  GROUND 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625
+def_track_pattern 7  -600   POWER 6 1  SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 1  GROUND 6 1  SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 1
+def_track_pattern 9  -1000  POWER 8 1.375  SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 1.375  GROUND 8 1.375  SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 1.375
+def_track_pattern 11 -1400  POWER 10 2  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 2  GROUND 10 2  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 2
 
 report_overhead

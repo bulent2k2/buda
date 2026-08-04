@@ -7,7 +7,8 @@
 # 1 + 6 + 192 + 300 components, 13320 nets (deep names like
 # chip/i_mix2_0/i_dnuts1_0/bv1_0).  Busterms derived to depth 3, blocks
 # loaded at every depth incl. 3, bundler reaches depth 3 — the maiden
-# depth-3 run of the hier pipeline.  Healerless, like chip_topdown.
+# depth-3 run of the hier pipeline.  Heals with negotiate_congestion only,
+# like chip_topdown.
 source chip_tracks.buda
 open_bdb chip3.bdb.sql
 derive_busterms 3
@@ -15,11 +16,14 @@ add_blocks_from_bdb 0
 add_blocks_from_bdb 1 skip
 add_blocks_from_bdb 2 skip
 add_blocks_from_bdb 3 skip
+set_max_bundle_bits auto
 run_hier_bundler depth 3
 generate_hier_topologies
+set_planner_param healersAhead 1
 run_planner hier 5 signal_tracks
 run_nuts
 run_detailed_nuts
+negotiate_congestion
 report_wl
 check_design
 exit

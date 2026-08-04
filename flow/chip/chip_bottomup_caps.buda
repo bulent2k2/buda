@@ -1,7 +1,7 @@
 # chip — BOTTOM-UP + BY-DEPTH LAYER CAPS: the chip-scale policy vehicle
 # (docs/internal/hier_layer_caps.md §12/§13 Phase 5).  Same design and same
 # bottom-up flow as chip_bottomup.buda (3x big2 + 3x mix2 + 100 top buses,
-# 432 leaf blocks / 13320 nets, healerless for fast experimentation), with
+# 432 leaf blocks / 13320 nets, healing with negotiate_congestion only), with
 # ONE extra line declaring the whole policy:
 #
 #   reserve_top_layers 2
@@ -43,12 +43,15 @@ derive_busterms 2
 add_blocks_from_bdb 0
 add_blocks_from_bdb 1 skip
 add_blocks_from_bdb 2 skip
+set_max_bundle_bits auto
 run_hier_bundler depth 2
 generate_hier_topologies
+set_planner_param healersAhead 1
 run_planner hier 5 signal_tracks
 run_nuts
 check_template_tracks on_mismatch independent
 run_detailed_nuts
+negotiate_congestion
 report_wl
 check_design
 exit
