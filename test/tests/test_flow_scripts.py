@@ -18,6 +18,7 @@ End-to-end smoke tests for .buda flow scripts.
 Each test runs buda_cli.py --no-viz on a known-good script and asserts
 on key output: bundle count, NUTS placement stats, zero track overlaps.
 """
+import json
 import os
 import re
 import subprocess
@@ -71,6 +72,44 @@ def assert_clean(out: str, rc: int, name: str) -> None:
     assert rc == 0, f"{name}: non-zero exit {rc}\n{out}"
     bad = [l for l in out.splitlines() if l.startswith("Error:")]
     assert not bad, f"{name}: unexpected error lines:\n" + "\n".join(bad)
+
+
+#: The flow QoR ratchet's expected counts, as a REGENERABLE golden.
+#:
+#: This used to be numbers frozen in the test body, calibrated under
+#: -march=native on a host that no longer exists.  No tool could rebaseline it,
+#: so the honest options were to guess or to leave it enforced NOWHERE — which
+#: is what happened (docs/internal/opens_ci.md).  Regenerating it is now one
+#: command on the reference host, so CI can own it the way it owns the
+#: placement goldens.
+FLOW_QOR_GOLDEN = Path(__file__).parent / "data" / "flow_qor_golden.json"
+
+
+def load_flow_qor_golden():
+    """The committed expectations, or None when absent/malformed."""
+    try:
+        with open(FLOW_QOR_GOLDEN) as fh:
+            d = json.load(fh)
+        return d["counts"] if isinstance(d.get("counts"), dict) else None
+    except Exception:                              # noqa: BLE001
+        return None
+
+
+def save_flow_qor_golden(counts):
+    """Rebaseline. Run on the REFERENCE HOST (pinned ISA — docs/internal/ci.md):
+
+        BUDA_FLOW_QOR_REGEN=1 pytest test/tests/test_flow_scripts.py \
+            -k four_level_scale_one_bundle
+
+    then commit the file.  The `arch` field records what it was measured under,
+    so a mismatch is diagnosable rather than mysterious.
+    """
+    FLOW_QOR_GOLDEN.parent.mkdir(parents=True, exist_ok=True)
+    with open(FLOW_QOR_GOLDEN, "w") as fh:
+        json.dump({"flow": "flow/hbundles/10_chip_units_blocks_leaf.buda",
+                   "arch": os.environ.get("BUDA_ARCH", "unknown"),
+                   "counts": counts}, fh, indent=1)
+        fh.write("\n")
 
 
 def nuts_summary(out: str):
@@ -631,13 +670,26 @@ def test_10_four_level_scale_one_bundle_per_bus():
     dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
     net_segs, unplaced = int(dm.group(1)), int(dm.group(2))
+    km = re.search(r"\[DetailedNUTS\] WARNING: (\d+) bit\(s\) removed", out)
+    measured = {"segs": segs, "overlaps": ovlps, "net_segs": net_segs,
+                "unplaced": unplaced, "culls": int(km.group(1)) if km else 0}
+    if os.environ.get("BUDA_FLOW_QOR_REGEN"):
+        save_flow_qor_golden(measured)     # rebaseline; see the helper's docstring
+        pytest.skip(f"regenerated {FLOW_QOR_GOLDEN} — rerun without BUDA_FLOW_QOR_REGEN")
     if strict:
-        assert segs == 209                # 196→212→209 (congestion model, pitch, refine)
-        assert ovlps == 0                 # ratchet (10→4→1→0; refinement pass)
-        assert net_segs >= 1220           # ratchet (1112→1224→1232→1220 w/ fewer segs)
-        assert unplaced == 0, \
-            f"expected 0 unplaced (refinement cleared the keepout crossings), got {unplaced}"
-        assert "bit(s) removed" not in out, "no keepout-crossing culls expected"
+        # Compare against the REGENERABLE golden, not numbers frozen in this
+        # file.  The old form hardcoded 209/1220/0 calibrated under
+        # -march=native on a host that no longer exists, which is precisely why
+        # this ratchet ended up enforced nowhere (docs/internal/opens_ci.md).
+        want = load_flow_qor_golden()
+        assert want is not None, (
+            f"{FLOW_QOR_GOLDEN} missing — regenerate with "
+            f"BUDA_FLOW_QOR_REGEN=1 on the reference host")
+        assert measured == want, (
+            f"QoR ratchet moved:\n  measured {measured}\n  golden   {want}\n"
+            f"If this is an intended improvement, rebaseline on the reference "
+            f"host (pinned ISA, see docs/internal/ci.md) with "
+            f"BUDA_FLOW_QOR_REGEN=1 and commit {FLOW_QOR_GOLDEN}.")
     else:
         assert 205 <= segs <= 209         # host-sensitive topology near-ties
         assert ovlps <= 1                 # a residual corner overlap when a replan doesn't clear here
@@ -649,8 +701,7 @@ def test_10_four_level_scale_one_bundle_per_bus():
         # plus headroom but not a routing regression that lands MANY more bits
         # on keepouts (all culled would still satisfy the equality alone;
         # Codex #281).
-        km = re.search(r"\[DetailedNUTS\] WARNING: (\d+) bit\(s\) removed", out)
-        removed = int(km.group(1)) if km else 0
+        removed = measured["culls"]
         assert unplaced == removed, \
             f"unplaced {unplaced} != keepout-culled {removed} (a bit was dropped)"
         assert unplaced <= 30, \

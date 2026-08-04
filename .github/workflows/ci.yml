@@ -46,11 +46,15 @@ jobs:
       # controlled (pinned ISA above, pinned runner image); developer machines
       # are heterogeneous and keep the lenient xfail by leaving this unset.
       #
-      # Scoped to the placement goldens ONLY.  The flow QoR ratchet in
-      # test_flow_scripts.py has its own BUDA_FLOW_QOR_STRICT and is
-      # deliberately NOT set: its numbers are hardcoded, unregenerable, and
-      # calibrated under -march=native, which is not this job's ISA.
       BUDA_NUTS_GOLDEN_STRICT: '1'
+      # The flow QoR ratchet, on the same reasoning.  It used to be OFF here
+      # because its numbers were frozen in the test body, calibrated under
+      # -march=native on a host that no longer exists, and rebaselinable by no
+      # tool -- so it was enforced NOWHERE.  It is now a regenerable golden
+      # (test/tests/data/flow_qor_golden.json, BUDA_FLOW_QOR_REGEN=1) measured
+      # at THIS job's pinned ISA, which is what makes turning it on honest.
+      # Rebaseline deliberately, in the same commit as the change that moves it.
+      BUDA_FLOW_QOR_STRICT: '1'
       # Headless: the suite uses matplotlib's Agg backend and needs no Tk or
       # display server (docs/build_test_dependencies.md).
       MPLBACKEND: Agg

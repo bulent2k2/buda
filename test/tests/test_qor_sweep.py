@@ -29,6 +29,8 @@ import sys
 import time
 import types
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "tools"))
 import qor_corpus as qc  # noqa: E402
 
@@ -327,3 +329,47 @@ def test_committed_serial_times_sidecar_is_real_data():
     bad = [f for f in times if not f.startswith("flow/") or not f.endswith(".buda")]
     assert not bad, f"non-corpus entries in the sidecar: {bad[:5]}"
     assert all(isinstance(v, (int, float)) and v >= 0 for v in times.values())
+
+
+# --- qor_corpus --check: the errored-sweep guard shared by both CI gates -----
+
+def test_check_passes_a_clean_sweep(tmp_path, capsys):
+    import qor_corpus as q
+    p = tmp_path / "ok.json"
+    p.write_text(json.dumps([{"flow": "a.buda", "overlaps": 0, "unplaced": 0},
+                             {"flow": "b.buda", "overlaps": 1, "unplaced": 0}]))
+    assert q.cmd_check(str(p)) == 0
+    assert "all 2 corpus flows" in capsys.readouterr().out
+
+
+def test_check_rejects_and_names_errored_flows(tmp_path, capsys):
+    """An errored sweep must not be cached, promoted, or compared as data.
+    cmd_run records the row and still exits 0, so this is the only thing that
+    catches it."""
+    import qor_corpus as q
+    p = tmp_path / "bad.json"
+    p.write_text(json.dumps([{"flow": "a.buda", "overlaps": 0},
+                             {"flow": "b.buda", "err": "RuntimeError: boom"},
+                             {"flow": "c.buda", "err": "worker crash"}]))
+    assert q.cmd_check(str(p)) == 2
+    out = capsys.readouterr().out
+    assert "::error::" in out and "b.buda" in out and "c.buda" in out
+
+
+def test_check_cli_exits_nonzero_on_err(tmp_path, monkeypatch):
+    """The CLI form the workflows call: the exit CODE is what gates the cache
+    save, so a bad file must not exit 0."""
+    import qor_corpus as q
+    p = tmp_path / "bad.json"
+    p.write_text(json.dumps([{"flow": "a.buda", "err": "boom"}]))
+    monkeypatch.setattr(sys, "argv", ["qor_corpus.py", "--check", str(p)])
+    with pytest.raises(SystemExit) as e:
+        q.main()
+    assert e.value.code == 1                       # non-zero => cache not saved
+
+    good = tmp_path / "ok.json"
+    good.write_text(json.dumps([{"flow": "a.buda", "overlaps": 0}]))
+    monkeypatch.setattr(sys, "argv", ["qor_corpus.py", "--check", str(good)])
+    with pytest.raises(SystemExit) as e:
+        q.main()
+    assert e.value.code == 0                       # runs NO flows, just checks

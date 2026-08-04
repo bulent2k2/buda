@@ -562,6 +562,30 @@ def cmd_compare(base_path, mine_path):
     return n_worse
 
 
+def cmd_check(path):
+    """Exit non-zero if any flow in PATH errored.  Returns the bad-row count.
+
+    `cmd_run` records a flow that RAISES as {"flow": ..., "err": ...} and still
+    exits 0, and `cmd_compare` prints a row that is NEW to the corpus as "(new)"
+    without counting it in n_worse.  So an errored sweep silently reads as "no
+    regression" unless something looks for err rows explicitly.
+
+    Lives here rather than inline in a workflow so it is testable, and so the
+    nightly and the PR gate share one implementation instead of two copies that
+    can drift.
+    """
+    with open(path) as fh:
+        rows = json.load(fh)
+    bad = [r for r in rows if "err" in r]
+    for r in bad:
+        print(f"::error::corpus flow errored in {path}: {r['flow']}: {r['err']}")
+    if bad:
+        print(f"{len(bad)} of {len(rows)} flow(s) errored in {path}")
+    else:
+        print(f"all {len(rows)} corpus flows in {path} completed")
+    return len(bad)
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Run the QoR corpus and/or compare two runs.",
@@ -574,11 +598,18 @@ def main():
     ap.add_argument("--compare", nargs=2, metavar=("BASE", "BRANCH"),
                     help="diff two result JSONs (from earlier --out runs) on "
                          "QoR + runtime; exits non-zero if any flow regressed")
+    ap.add_argument("--check", metavar="PATH",
+                    help="exit non-zero if any flow in PATH errored.  For "
+                         "unattended use: an errored sweep must not be cached, "
+                         "promoted, or compared as if it were data.")
     ap.add_argument("-j", "--jobs", type=int, default=default_jobs(),
                     metavar="N",
                     help="worker processes for the sweep (default: CPU count "
                          "= %(default)s; 1 = serial, timing-faithful sec)")
     args = ap.parse_args()
+
+    if args.check:
+        sys.exit(1 if cmd_check(args.check) else 0)
 
     if args.compare:
         sys.exit(1 if cmd_compare(*args.compare) else 0)
