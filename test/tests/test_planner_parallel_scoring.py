@@ -52,6 +52,10 @@ _SETUP = [
 
 
 def _plan(threads):
+    # Save/restore rather than delete: a caller-configured BUDA_PLAN_THREADS
+    # (a controlled thread-count experiment, a constrained CI runner) must
+    # survive these tests (Codex #584).
+    prev = os.environ.get("BUDA_PLAN_THREADS")
     os.environ["BUDA_PLAN_THREADS"] = str(threads)
     try:
         s = buda_cli.BudaSession()
@@ -64,11 +68,15 @@ def _plan(threads):
                 list(w.plan.seg_layers),
                 list(w.plan.seg_perp))
     finally:
-        del os.environ["BUDA_PLAN_THREADS"]
+        if prev is None:
+            del os.environ["BUDA_PLAN_THREADS"]
+        else:
+            os.environ["BUDA_PLAN_THREADS"] = prev
 
 
 def test_pool_is_large_enough_to_engage_threads():
     sel, _, _ = _plan(1)
+    prev = os.environ.get("BUDA_PLAN_THREADS")
     os.environ["BUDA_PLAN_THREADS"] = "1"
     try:
         s = buda_cli.BudaSession()
@@ -79,7 +87,10 @@ def test_pool_is_large_enough_to_engage_threads():
         n = len(s.bundles[0].input.candidates)
         assert n >= 8, f"pool of {n} would not engage the parallel path"
     finally:
-        del os.environ["BUDA_PLAN_THREADS"]
+        if prev is None:
+            del os.environ["BUDA_PLAN_THREADS"]
+        else:
+            os.environ["BUDA_PLAN_THREADS"] = prev
     assert sel >= 0
 
 
