@@ -81,6 +81,13 @@ def _bundle_bit_cap(session, nets):
     the doomed one).  `0` in a scope means EXEMPT — no static cap, even when
     a global one is set.
 
+    Two scopes of EQUAL prefix length can both match — a hier occurrence
+    group is resolved against the union of `c1_bus_*` and `c2_bus_*`, so
+    `for c1_bus` and `for c2_bus` are equally specific.  The MOST RESTRICTIVE
+    (smallest) cap then wins, since it also satisfies the looser request;
+    `0` (exempt) is unbounded, so it loses every tie and wins only when it is
+    the sole longest match.
+
     Returns `(cap, scoped)` — `scoped` says the cap came from a SCOPE, which
     is what the split note reports; deriving that from `cap != global` would
     mislabel a scope that merely repeats the global value."""
@@ -88,12 +95,14 @@ def _bundle_bit_cap(session, nets):
     scopes = getattr(session, "_max_bundle_bits_scoped", None) or {}
     if not scopes:
         return glob, False
+    inf = float("inf")
     best, best_len = None, -1
     for prefix, n in scopes.items():
-        for net in nets:
-            if net.startswith(prefix) and len(prefix) > best_len:
-                best, best_len = n, len(prefix)
-                break
+        if not any(net.startswith(prefix) for net in nets):
+            continue
+        if len(prefix) > best_len or (len(prefix) == best_len
+                                      and (n or inf) < (best or inf)):
+            best, best_len = n, len(prefix)
     if best is None:
         return glob, False
     return (None if best == 0 else best), True
@@ -463,11 +472,19 @@ def _split_hier_bundles(session, raw_bundles):
         counter[0] += 1
         return counter[0]
 
-    def _split_one(b):
+    def _split_one(b, cap_ovr=None):
         """Return the HBundle parts b splits into (>=1; part 1 keeps b.id).
         Preserves every hier field per part; splits the per-net fan-in arrays
         and re-scopes a fan-in part's reason/busterm ids to the leaves its bits
-        touch."""
+        touch.
+
+        `cap_ovr` is the (cap, scoped) pair resolved once for a whole
+        template↔replica GROUP — see the caller.  Occurrences of one cell-local
+        bundle carry INSTANCE-SPECIFIC net names (`c1_bus_*` on the template,
+        `c2_bus_*` on the replica), so resolving a scope per bundle would let
+        `... for c1_bus` cap the template and not the replica, split them into
+        different part counts, and break the part-for-part parent linkage
+        (Codex P1 on #582)."""
         nets = list(b.get_net_names())
         total = len(nets)
         drvs = list(b.net_drivers)
@@ -483,7 +500,8 @@ def _split_hier_bundles(session, raw_bundles):
                 return tuple({drvs[i], *rcvs[i]} - {""})
             return shared
 
-        cap, cap_scoped = _bundle_bit_cap(session, nets)
+        cap, cap_scoped = (_bundle_bit_cap(session, nets) if cap_ovr is None
+                           else cap_ovr)
         n_parts, why = 1, ""
         if cap and total > cap:
             n_parts = math.ceil(total / cap)
@@ -563,10 +581,19 @@ def _split_hier_bundles(session, raw_bundles):
     for b in raw_bundles:
         if _is_replica(b):
             continue                       # handled with its template below
-        tparts = _split_one(b)
+        # One cap for the whole occurrence group: resolve the scope against
+        # the UNION of every occurrence's nets, so a scope naming ANY single
+        # instance's prefix governs the class and all occurrences split in
+        # lockstep (they are the same logical bundle).
+        reps = replicas_of.get(b.id, ())
+        gnets = list(b.get_net_names())
+        for rb in reps:
+            gnets.extend(rb.get_net_names())
+        gcap = _bundle_bit_cap(session, gnets)
+        tparts = _split_one(b, gcap)
         out.extend(tparts)
-        for rb in replicas_of.get(b.id, ()):
-            rparts = _split_one(rb)
+        for rb in reps:
+            rparts = _split_one(rb, gcap)
             if len(rparts) == len(tparts):
                 for tp, rp in zip(tparts, rparts):
                     rp.parent_id = tp.id    # part k replica → part k template

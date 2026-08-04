@@ -214,3 +214,86 @@ def test_hier_no_scope_match_is_identity():
     _quiet(s, "set_max_bundle_bits 4 for nothing_matches", "run_hier_bundler")
     assert all("|SPLIT:" not in w.input.original_bundle.reason
                for w in s.bundles)
+
+
+# ── template↔replica lockstep (Codex P1 on #582) ─────────────────────────────
+#
+# Occurrences of ONE cell-local bundle carry instance-specific net names —
+# `c1_bus_*` on the template, `c2_bus_*` on its replica.  Resolving a scope
+# per bundle would let a scope naming one instance cap only that occurrence:
+# the two split into different part counts, the part-for-part parent linkage
+# cannot be made, and every replica part gets pinned to template part 1 — so
+# `_expand_hier_bundles` either falls back to the reference instance's nets
+# for the later parts or overwrites donors and drops replica bits.  The cap is
+# therefore resolved ONCE for the whole occurrence group.
+
+def _occurrences(s):
+    """(template_parts, replica_parts) by their net-name instance prefix."""
+    t = [w.input.original_bundle for w in s.bundles
+         if list(w.input.original_bundle.get_net_names())[0].startswith("c1_")]
+    r = [w.input.original_bundle for w in s.bundles
+         if list(w.input.original_bundle.get_net_names())[0].startswith("c2_")]
+    return t, r
+
+
+def test_scope_naming_the_template_also_splits_the_replica():
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = _hier_bdb(12)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        s.do_command("set_max_bundle_bits 4 for c1_bus")
+        s.do_command("run_hier_bundler")
+    t, r = _occurrences(s)
+    assert len(t) == 3 and len(r) == 3, (len(t), len(r))
+    assert "parent linkage pinned to part 1" not in out.getvalue()
+
+
+def test_scope_naming_only_the_replica_still_splits_in_lockstep():
+    """The asymmetric direction: `c2_bus` names the REPLICA's nets only.  The
+    group is one logical bundle, so the scope governs the class."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = _hier_bdb(12)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        s.do_command("set_max_bundle_bits 4 for c2_bus")
+        s.do_command("run_hier_bundler")
+    t, r = _occurrences(s)
+    assert len(t) == 3 and len(r) == 3, (len(t), len(r))
+    assert "parent linkage pinned to part 1" not in out.getvalue()
+
+
+def test_replica_parts_link_part_for_part_to_template_parts():
+    """The linkage the lockstep exists to preserve: replica part k's parent is
+    template part k, never all-pinned-to-part-1."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = _hier_bdb(12)
+    _quiet(s, "set_max_bundle_bits 4 for c1_bus", "run_hier_bundler")
+    t, r = _occurrences(s)
+    assert sorted(x.parent_id for x in r) == sorted(x.id for x in t)
+
+
+def test_equal_length_scopes_resolve_to_the_tighter_cap():
+    """`c1_bus` and `c2_bus` are equally specific and both match the group, so
+    the resolution must be defined: the most restrictive cap wins (it also
+    satisfies the looser request)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = _hier_bdb(12)
+    _quiet(s, "set_max_bundle_bits 6 for c1_bus",
+           "set_max_bundle_bits 3 for c2_bus", "run_hier_bundler")
+    t, r = _occurrences(s)
+    assert len(t) == 4 and len(r) == 4      # ceil(12/3), not ceil(12/6)
+
+
+def test_equal_length_scopes_ignore_an_exempt_tie():
+    """`0` is unbounded, so it loses a tie rather than cancelling the cap."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = _hier_bdb(12)
+    _quiet(s, "set_max_bundle_bits 4 for c1_bus",
+           "set_max_bundle_bits 0 for c2_bus", "run_hier_bundler")
+    t, r = _occurrences(s)
+    assert len(t) == 3 and len(r) == 3

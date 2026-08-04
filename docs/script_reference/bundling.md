@@ -141,6 +141,17 @@ set. `auto` has no scoped form — it is already per-bundle, derived from each
 bundle's own busterm edges. Splits from a scope are reported as
 `static limit N (scoped)`.
 
+In the **hier** flow a cell-local bundle exists once per occurrence — a
+template plus one replica per extra instance — and each occurrence carries
+that instance's own net names (`core_i1/…` vs `core_i2/…`). Since they are
+one logical bundle that must split in lockstep (each replica part links to
+the corresponding template part), the scope is resolved **once for the whole
+occurrence group**, against the union of every occurrence's nets: naming any
+one instance's prefix governs the class. Two scopes can then be equally
+specific (`for c1_bus` and `for c2_bus` both match the group), in which case
+the **most restrictive** cap wins — it also satisfies the looser request —
+and `0` (unbounded) wins only when it is the sole longest match.
+
 Choosing the cap is manual today: the census names the doomed seats and their
 supply, and you cap the bus at or below that supply. Note the pool a seat
 gets is a property of *where it lands*, which re-bundling can change — on
