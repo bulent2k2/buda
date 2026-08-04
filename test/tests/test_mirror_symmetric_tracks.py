@@ -67,54 +67,99 @@ def signal_density(slots):
 
 
 # --------------------------------------------------------------------------- #
-# the defect the mirror file fixes
+# the stack's shape: 10 signals per period, periods held
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("lid", [2, 4, 8, 10])
-def test_plain_h_patterns_have_no_reflection_axis(lid):
-    """chip_tracks' rails carry a wider gap after than before, so the unit is
-    not a palindrome and NO axis exists -- at any origin.  This is why the
-    mirrored stack reports MISALIGNED on the plain technology."""
-    _, slots = read_patterns(PLAIN)[lid]
-    rails = [(i, s) for i, (t, _, s) in enumerate(slots) if t in ("POWER", "GROUND")]
-    for i, after in rails:
-        assert slots[i - 1][2] != after, "expected an asymmetric gap around the rail"
-    assert axes(slots)[1] == [], f"M{lid} unexpectedly has an axis"
+# The periods the 504 = LCM(18,18,24,56) placement grid is derived from.  A
+# change here invalidates every checked-in chip floorplan, so it is pinned.
+PERIODS = {2: 18, 3: 18, 4: 18, 5: 18, 6: 24, 7: 39, 8: 56, 9: 56, 10: 74, 11: 74}
 
 
-def test_plain_m6_is_the_symmetric_exception():
-    """M6 already has equal gaps, and is the one plain H layer with an axis --
-    the control that says the axis really does follow from the gap symmetry."""
-    _, slots = read_patterns(PLAIN)[6]
-    assert axes(slots)[1] != []
+@pytest.mark.parametrize("path", [PLAIN, MIRROR])
+@pytest.mark.parametrize("lid", sorted(PERIODS))
+def test_period_is_pinned(path, lid):
+    _, slots = read_patterns(path)[lid]
+    assert centres(slots)[1] == PERIODS[lid]
+
+
+@pytest.mark.parametrize("path", [PLAIN, MIRROR])
+@pytest.mark.parametrize("lid", sorted(PERIODS))
+def test_ten_signals_per_period(path, lid):
+    """Two extra tracks per layer over the historical eight."""
+    tr, _ = centres(read_patterns(path)[lid][1])
+    assert sum(1 for _, t, _ in tr if t == "SIGNAL") == 10
+
+
+def test_grid_is_the_lcm_of_the_layers_cells_may_use():
+    """504 must stay the LCM over the H layers a cell may use under
+    `reserve_top_layers 2` -- the property the stacked floorplans rely on."""
+    from math import lcm
+    per = [PERIODS[lid] for lid in H_LAYERS]
+    assert lcm(*per) == 504
+    assert all(504 % p == 0 for p in per)
+
+
+# --------------------------------------------------------------------------- #
+# binary-exactness: a hard requirement, not cosmetics
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("path", [PLAIN, MIRROR])
+@pytest.mark.parametrize("lid", sorted(PERIODS))
+def test_every_value_is_binary_exact(path, lid):
+    """`tracks_in_range` walks a period at a time with `pos += width +
+    space_after`, so hundreds of periods of accumulated rounding decide whether
+    a track sitting exactly ON a window edge falls inside it.  With values that
+    are not binary fractions the edge track drops out and template alignment
+    breaks (measured: "397 vs 396", both cells MISALIGNED, ZERO bits copied).
+
+    Every width, spacing and origin must therefore be exactly representable in
+    binary.  This is the guard that keeps the arithmetically-obvious-but-wrong
+    choice (scaling by 8/10 to hold the signal metal exactly: 0.8 / 0.4 / 0.7)
+    from coming back."""
+    origin, slots = read_patterns(path)[lid]
+    vals = [origin] + [v for _, w, s in slots for v in (w, s)]
+    for v in vals:
+        assert (v * 65536).denominator == 1, f"M{lid}: {v} is not binary-exact"
+
+
+def test_the_rejected_scaling_would_not_be_binary_exact():
+    """Documents WHY the density had to move: holding the signal metal exactly
+    needs w = 0.8*w_old, and 4/5 is never a binary fraction.  Exactness and
+    exact density are mutually exclusive here."""
+    assert (F(4, 5) * 65536).denominator != 1
 
 
 # --------------------------------------------------------------------------- #
 # what the mirror technology guarantees
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("lid", [2, 4, 6, 8, 10])
-def test_mirror_h_patterns_are_palindromes(lid):
-    _, slots = read_patterns(MIRROR)[lid]
+@pytest.mark.parametrize("path", [PLAIN, MIRROR])
+@pytest.mark.parametrize("lid", sorted(PERIODS))
+def test_every_unit_is_a_palindrome(path, lid):
+    """Each rail centred in its own whitespace, on BOTH files -- the shared
+    stack is symmetric now, so the mirror file inherits it and changes no
+    slot."""
+    _, slots = read_patterns(path)[lid]
     for i, (t, _, after) in enumerate(slots):
         if t in ("POWER", "GROUND"):
             assert slots[i - 1][2] == after, f"M{lid} rail not centred in its gap"
     assert axes(slots)[1], f"M{lid} has no reflection axis"
 
 
-@pytest.mark.parametrize("lid", [2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
-def test_mirror_preserves_period_and_density(lid):
-    """Only the whitespace moves: same period (so the 504 grid still holds) and
-    the same signal density (so `def_layer` overheads stay correct)."""
-    _, a = read_patterns(PLAIN)[lid]
-    _, b = read_patterns(MIRROR)[lid]
-    assert centres(a)[1] == centres(b)[1]
-    assert signal_density(a) == signal_density(b)
+def test_the_two_files_differ_only_in_three_h_origins():
+    """The mirror file is the shared stack plus a placement-specific origin
+    choice.  If a slot ever diverges, one of them has drifted."""
+    a, b = read_patterns(PLAIN), read_patterns(MIRROR)
+    assert a.keys() == b.keys()
+    for lid in a:
+        assert a[lid][1] == b[lid][1], f"M{lid} slots differ between the files"
+    moved = {lid for lid in a if a[lid][0] != b[lid][0]}
+    assert moved == {4, 6, 8}
+    assert {lid: b[lid][0] for lid in moved} == {4: F(-199), 6: F("-403.5"), 8: F(-802)}
 
 
 @pytest.mark.parametrize("lid", [3, 5, 7, 9, 11])
-def test_v_layers_are_untouched(lid):
+def test_v_origins_are_untouched(lid):
     """A y-flip maps y -> 2d-y and leaves x alone, so vertical tracks play no
-    part -- they must not drift."""
-    assert read_patterns(PLAIN)[lid] == read_patterns(MIRROR)[lid]
+    part -- their origins must not drift between the files."""
+    assert read_patterns(PLAIN)[lid][0] == read_patterns(MIRROR)[lid][0]
 
 
 @pytest.mark.parametrize("lid", H_LAYERS)

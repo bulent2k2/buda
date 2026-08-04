@@ -26,13 +26,15 @@ Both flows run WITHOUT healers for fast experimentation — add
 `negotiate_congestion` / `ripup_reroute` / `refine_selection` rounds manually
 when studying healing at this scale.  `chip_tracks.buda` is the shared
 **10-layer** stack + track patterns: M2/M3 LOW plus eight TOP layers M4–M11,
-each pair coarser than the one below it (M10/M11 use 4-wide signal wires on
+each pair coarser than the one below it (M10/M11 use 3.25-wide signal wires on
 10-wide rails).  It extends big2's `tracks4top.buda` / mix2's
 `mix_tracks.buda` (identical 6-layer stacks) by four layers — chip is where
-a realistic top-metal count pays.  `chip_tracks_mirror.buda` is the same stack
-with **mirror-symmetric H patterns**, used by the two `chip_stack` vehicles
-because their placement is mirrored; see "A mirrored layout needs a
-mirror-symmetric technology" below.  The 6 → 8 → 10 study below is worth
+a realistic top-metal count pays.  Every unit is **mirror-symmetric** and
+carries **ten** signal tracks per period; `chip_tracks_mirror.buda` is the same
+patterns with three H origins moved so a mirrored placement keeps its track
+phase, used by the two `chip_stack` vehicles.  See "A mirrored layout needs a
+mirror-symmetric technology" and "The 8 → 10 track study" below.  The 6 → 8 → 10
+layer study below is worth
 reading before copying this stack: the first extension is a clean win, the
 second is the diminishing-returns knee, and it exposed that a cap band
 written for one stack height is wrong on another.
@@ -179,34 +181,62 @@ instance's routing is its reference's reflected about the instance's own
 centreline, so the H patterns must be invariant under that reflection —
 i.e. the centreline must land on a reflection axis of the pattern.
 
-`chip_tracks.buda` has **no such axis on any H layer but M6** — not at some
-offsets, at *none*.  Each rail carries a wider gap after it than before it
-(M2/M4: 1 after, 0.5 before; M8: 2 vs 1.5; M10: 3 vs 2), so the repeating unit
-is not a palindrome and no axis exists at any origin.  M6 is the exception —
-gaps 1 on both sides — and it is the one H layer there that does have one.
+Historically `chip_tracks.buda` had **no such axis on any H layer but M6** —
+not at some offsets, at *none*.  Each rail carried a wider gap after it than
+before it (M2/M4: 1 after, 0.5 before), so the unit was not a palindrome and no
+axis existed at any origin.  **Every unit in the shared stack is a palindrome
+now** — each rail centred in its own whitespace — so the property is the
+technology's, not one vehicle's.
 
-`chip_tracks_mirror.buda` fixes it by **centring each rail in its own
-whitespace**: the signal preceding a rail gets the same `space_after` as the
-rail.  The gap is solved to keep the period unchanged
-(`period/2 = rail + 2g + n*sig + (n-1)*s`), so widths, signal counts,
-overheads, bit pitches and the 504 grid are all untouched — only the
-whitespace moves.  Three H origins shift by 1 / 3.5 / 2 units to put an axis
-on the flipped instances' centrelines (8694 / 10710 / 12222 — all differing by
-multiples of 504, so one origin per layer serves all three).
+That leaves the ORIGIN, and the two requirements are independent:
 
-| layer | period | rail | sig | s | g | axis (mod p/2) |
-|---|---|---|---|---|---|---|
-| M2/M4 | 18 | 2 | 1 | 0.5 | 0.75 | 1 |
-| M6 | 24 | 3 | 1 | 1 | 1 | 1.5 *(already symmetric)* |
-| M8 | 56 | 8 | 3 | 1.5 | 1.75 | 4 |
-| M10 | 74 | 10 | 4 | 2 | 2.5 | 5 |
+1. the pattern must **have** axes — it must be a palindrome.  True in
+   `chip_tracks.buda` itself, so `chip_tracks_mirror.buda` inherits it and
+   changes no slot;
+2. the origin must put an axis **on** the instance centrelines.  This is
+   placement-specific, which is why it cannot live in the shared file.
+
+So the two files differ in **exactly three H origins** — M4 `-199`, M6
+`-403.5`, M8 `-802` against `-200` / `-400` / `-800`.  Each layer's axis sits
+at the power-rail centre (`rail/2`), and chip_stack's flipped instances sit at
+centres 8694 / 10710 / 12222, all differing by multiples of 504, so one origin
+per layer serves all three.
+
+| layer | period | axis (mod p/2) | mirror origin | shift |
+|---|---|---|---|---|
+| M2 | 18 | 1 (mod 9) | −100 | none needed |
+| M4 | 18 | 1 (mod 9) | −199 | +1 |
+| M6 | 24 | 1.5 (mod 12) | −403.5 | −3.5 |
+| M8 | 56 | 4 (mod 28) | −802 | −2 |
 
 Both cells then report **ALIGNED** and solve-once-copy carries the mirror:
 
 | | bits copied | siblings served | bits solved individually |
 |---|---|---|---|
-| `chip_tracks` | 3,262 | 100 | 18,089 |
-| `chip_tracks_mirror` | **18,122** | **380** | **3,334** |
+| `chip_tracks` origins | 3,262 | 100 | 18,089 |
+| `chip_tracks_mirror` | **17,875** | **380** | **3,971** |
+
+### Binary-exactness is a hard requirement
+
+Every width, spacing and origin in both files is a multiple of **1/16**, and
+that is correctness, not tidiness.  `tracks_in_range` walks a period at a time
+with `pos += width + space_after`, so hundreds of periods of accumulated
+rounding decide whether a track sitting exactly **on** a window edge falls
+inside it.
+
+Going to ten tracks, the arithmetically obvious choice is to scale signal width
+and spacing by exactly 8/10 — which holds the signal metal per period *exactly*
+constant, so the `def_layer` overheads would not move at all.  It gives
+0.8 / 0.4 / 0.7 …, and **not one of those values is representable in binary.**
+Measured: an off-by-one track at window edges, `check_template_tracks`
+reporting "397 vs 396", both cells MISALIGNED, and **zero** bits copied — on a
+design whose placement had not changed at all.
+
+Exact density and binary-exactness are mutually exclusive here (holding the
+metal needs `w = 0.8·w_old`, and 4/5 is never a binary fraction).  Exactness
+wins; the density moves slightly and the overheads move with it — the widest
+miss is M2–M5, 55.56% → 58.33%.  A test pins it so the tempting version cannot
+come back.
 
 **M10 cannot be satisfied and does not need to be.**  Its half period 37 does
 not divide 504, so the three flipped centres fall on three different residues
@@ -229,24 +259,46 @@ other on every metric; neither top-flushing, nor centring, nor mirroring moves
 the endpoint.  The vehicle's value is the *phase* property (no
 `align_bottom_up` needed), not a QoR win.
 
-**What the symmetric technology buys** (mirrored geometry, bottom-up flow):
+## The 8 → 10 track study
 
-| tracks | template | overlaps | unplaced | viol | sec |
-|---|---|---|---|---|---|
-| `chip_tracks` (asymmetric) | MISALIGNED | 604 | 2339 | 120 | 157 |
-| symmetric slots, **original origins** | MISALIGNED | 610 | 2383 | 124 | 158 |
-| `chip_tracks_mirror` (symmetric + origins) | **ALIGNED** | **582** | **2292** | **107** | 166 |
+Going from four signals per group to five — same periods, same rail widths,
+signal width and spacing shrunk to fit — measured across every chip vehicle
+(`qor_corpus.py`, so the numbers are that tool's, which reads the engine's own
+`num_unplaced` and runs a little above the CLI's printed count):
 
-The middle row is the control that makes the claim causal.  Symmetric slots
-*alone* leave M4/M6/M8 off axis, and they measure slightly **worse** than the
-baseline — so the gain is not the new track positions, it is the alignment.
-Modest on the endpoint (−3.6% overlaps, −2.0% unplaced, −11% violating
-bundles); the structural result is that solve-once-copy and mirror symmetry
-are compatible after all, which the technology, not the placement, decides.
+| flow | overlaps | unplaced | viol | detWL |
+|---|---|---|---|---|
+| chip3_bottomup | 311 → **204** | 1544 → **896** | 87 → **54** | +0.2% |
+| chip3_topdown | 63 → **30** | 1639 → **1215** | 118 → **103** | −2.3% |
+| chip3a_bottomup | 297 → **160** | 1658 → **906** | 90 → **51** | +3.4% |
+| chip_bottomup | 353 → **236** | 1604 → **1441** | 91 → **82** | −0.5% |
+| chip_bottomup_caps | 358 → **259** | 1708 → **1493** | 93 → **83** | −0.8% |
+| chip_stack_bottomup | 582 → **357** | 2306 → **1537** | 107 → **92** | +4.7% |
+| chip_stack_topdown | 277 → **103** | 3262 → **2053** | 161 → **125** | −5.5% |
+| chip_topdown | 188 → **82** | 2170 → **1553** | 112 → **87** | −3.8% |
+| chip_topdown_aligned | 193 → **65** | 2027 → **1111** | 112 → **74** | −3.9% |
+| **TOTAL** | 2622 → **1496** (−43%) | 17918 → **12205** (−32%) | 971 → **751** (−23%) | −1.2% |
 
-DetailedNUTS gets *slower* (5.4s -> 19.3s) despite the extra reuse: the
-remaining 3,334 individually-solved bits must now fit around 18,122 fixed
-copies instead of 3,262.
+**9 of 9 better on all three metrics**, and wirelength down slightly too.
+
+### Which change did the work
+
+The stack moved twice at once — more tracks *and* symmetric units — so the
+control is 10 tracks with the **original lopsided gaps**, run over the seven
+non-mirrored vehicles:
+
+| step | overlaps | unplaced | viol |
+|---|---|---|---|
+| 8 tracks, asymmetric (baseline) | 1763 | 12350 | 703 |
+| **10 tracks**, asymmetric | 1081 (−38.7%) | 8548 (−30.8%) | 534 (−24.0%) |
+| 10 tracks, **symmetric** | 1035 (−4.3%) | 8602 (+0.6%) | 529 (−0.9%) |
+
+**The extra tracks do essentially all of it.**  Symmetry is within noise on
+these seven — per-flow it is mixed — which is exactly right: none of them has a
+mirrored instance, so there is no alignment for it to buy.  Its value shows up
+only on `chip_stack`, where it is what makes solve-once-copy legal at all.  So
+the symmetry is adopted as better-formed default technology and as the enabler
+for mirrored designs, **not** as a QoR win.
 
 > **Correction (2026-08-02).**  Earlier revisions of this file claimed large
 > wins for top-flushing (64/364 -> 24/288) and for mirroring (586 -> 26).  Both
