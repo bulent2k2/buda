@@ -113,7 +113,8 @@ designs and fail LOUD, never silent:)*
    V-trunk WL and flips planner selections) — that investigation gates any
    NUTS-side work.
 6b. **Class-level TRACK negotiation — the #536 b61 residual** (added
-   2026-07-31) — [`wishlist-healer.md`](wishlist-healer.md) → *"Class-level
+   2026-07-31; **trigger UN-fired 2026-08-04 — do not build**) —
+   [`wishlist-healer.md`](wishlist-healer.md) → *"Class-level
    TRACK negotiation"*. The last open of issue #536, after its census (PR
    #548) and TOP re-seat heal (PR #550) shipped. `mix2_fast_on_aligned_sql`
    sticks at 2 ov / 16 opens: b61 seg0's 16 bits sit on M6 (12 tracks in the
@@ -136,6 +137,18 @@ designs and fail LOUD, never silent:)*
    the *candidate* seats (coarse); confirming any is THIS shape (adequate
    sibling layer held by locked copies, vs layer-starved) needs a separate
    per-seat forensic check — see the wishlist entry.
+   **Re-measured 2026-08-04 (38-flow `doomed_seat_forensics.py` sweep, main @
+   5089e80): the trigger is NO LONGER MET — `BLOCKED_BY_LOCKED` is 0 seats on
+   0 vehicles.** The two chip seats that had fired it are gone, because PR
+   #558 landed after that sweep and took the chip stack from 6 layers to 10
+   (8 TOP), giving doomed seats siblings the re-seat heal can actually use —
+   a supply fix dissolving the market, exactly the open's own thesis. And b61
+   is out of reach by **arithmetic**, not tuning: it needs 16 of M4's 17
+   tracks, while this mechanism frees only the 6 the locked copies hold (7
+   total). The corpus's one remaining `FREE_SIBLING` seat (`chip3a_bottomup`)
+   was traced and is **not** a heal defect — the heal proposes the move and
+   the measured result is worse (unplaced 1658→1672, ovl 297→300), so the
+   accept correctly refuses. Re-check with the tool before reviving.
 7. **OA bridge (import/export)** — [`wishlist-bdb.md`](wishlist-bdb.md) →
    *"Persist the routing pipeline into the BDB"* (the export consumer) and
    `gds_oa_interchange.md`. Everything BDB-side is ✅ (persist stages 1–5,

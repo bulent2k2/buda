@@ -832,3 +832,72 @@ alignment is implicated in creating the contention geometry.  What has
 changed is that the decision is now backed by a corpus-wide reproducible
 instrument, and that the instrument corrected a premise the open had carried
 since it was filed.
+
+### Re-measured 2026-08-04: the trigger has UN-fired — market now ZERO
+
+Full 38-flow forensics sweep on main @ 5089e80.  **`BLOCKED_BY_LOCKED`: 0
+seats, 0 vehicles.**  The two chip seats that fired the trigger two days
+earlier are gone: `chip_bottomup` and `chip_bottomup_caps` now report **no
+doomed TOP seats at all**.
+
+The cause is not a healer improvement but a *supply* one: PR #558 landed
+**after** the sweep above and extended the chip stack from 6 layers to 10
+(M2–M11, 8 of them TOP).  A doomed seat on a 6-layer stack had one or two
+same-direction TOP siblings and usually neither was adequate; with four per
+direction the TOP re-seat heal finds a host and takes it.  This is the
+sharpest available statement of the open's own thesis — the two "cheaper
+angles" it recommended were about not building a negotiation for a supply
+problem, and adding supply did in fact dissolve the market.
+
+What the sweep found instead (unchanged verdicts re-verified per seat):
+
+| flow | seats | verdict |
+|---|---|---|
+| `chip3a_bottomup` | 8 | `LAYER_STARVED` — no sibling has adequate supply; no mechanism helps |
+| `chip3a_bottomup` | 1 | `FREE_SIBLING` — investigated below |
+| `rnr/mix2_fast_on_aligned_sql` | 1 | `BLOCKED_BY_UNLOCKED` (b61 — unchanged) |
+| the other 35 flows | 0 | — |
+
+**b61, the seat this open was written around, is out of reach by arithmetic,
+not by tuning.** Its one adequate sibling M4 holds 17 tracks for 16 bits, so
+16 of the 17 must be free.  Class-level track negotiation can vacate only
+what the *locked* copies hold — 6 tracks, total 7.  Moving the unlocked b18
+instead frees 10, total 11.  Neither reaches 16; only a joint evacuation of
+essentially the entire window does, and that is not one mechanism.  A width
+lever does clear it — `set_max_bundle_bits 8` on that vehicle measures
+2 ov/16 unpl/1 viol → **1/0/0** with detailed WL −8.6% — but at **+59%
+abstract WL** (76368 → 121313), because the global knob splits every wide
+bundle in the design; `12` gets unplaced 16→8 at +40% WL, and `auto` is
+worse than baseline (4/20/2).  So the residual is a *bundle-width* problem
+with no cheap lever, not a negotiation problem.
+
+**The `FREE_SIBLING` seat is not a defect in the shipped heal.**
+`chip3a_bottomup` b61 seg0 sits on M9 (pool 8 < 16 bits) with sibling M5 at
+26 span-clear tracks, 21 of them free — the mover's own acceptance test
+passes.  Traced end-to-end, the heal *does* propose exactly that move:
+
+```
+reseat-heal ENTER unplaced=1658 healers_ran=False
+  mover(only=9) -> 1 re-seat        dnuts: unplaced=1672 ovl=300   REJECTED
+  mover(only=4) -> 1 re-seat        dnuts: unplaced=1672 ovl=300   REJECTED
+  mover(only=2) -> 1 re-seat        dnuts: unplaced=1672 ovl=300   REJECTED
+  mover(only=1) -> 1 re-seat        dnuts: unplaced=1672 ovl=300   REJECTED
+reseat-heal EXIT -> 0
+```
+
+Baseline is 1658 unplaced / 297 overlaps; seating b61's 16 bits on M5
+displaces ~30 others and adds 3 overlaps, so the componentwise accept
+correctly refuses — and the bisect down to the single seat reproduces the
+same numbers, so it is the move itself, not batch collateral.  The lesson for
+the instrument: a statically free window is not a free move, because a
+re-seat perturbs the whole abstract solve.  `doomed_seat_forensics.py`'s
+verdict docs now say so (they used to read "the heal should already have
+taken it — investigate").
+
+**Status: NOT built, and the trigger is no longer met.**  Re-check with
+`tools/doomed_seat_forensics.py` before reviving; the build case needs
+`BLOCKED_BY_LOCKED` seats to reappear.  The one measurement that could still
+change the picture is untaken: whether that rejected chip3a re-seat becomes
+profitable on a flow that *heals* afterwards (the chip vehicles are
+deliberately healerless, so the +14/+3 is never given a chance to be
+recovered).
