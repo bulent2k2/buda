@@ -38,6 +38,17 @@ the symmetric rewrite the chip stack uses — symmetry only buys anything for a
 Listing both paths doubles the target twice; the tool dedupes by real path and
 says so. Caught in practice, hence the guard.
 
+Non-idempotence also means **"has this been doubled?" is not a question the
+file can answer** — 16 signals per period could be natively 16 or a doubled 8,
+and nothing records which. An early `--check` mode claimed to verify exactly
+that and, because re-doubling always produces a different file, returned 1 for
+every non-empty fixture including ones it had just transformed (Codex, PR #586).
+It is now `--audit`, which checks the property that *is* well-defined and is the
+one worth guarding: every width, spacing and origin **binary-exact**, every slot
+list well-formed, with a per-layer period / signal-count / density report.
+`test_double_track_density.py` pins it, including that `--audit` passes on both
+densities and refuses the 0.8 / 0.4 scaling that broke the chip stack.
+
 ## Measured
 
 Full corpus (38 flows), `tools/qor_corpus.py`:

@@ -25,7 +25,14 @@ MIRRORED placement, and none of these fixtures has one.
 Usage:
     tools/double_track_density.py FILE [FILE ...]     # rewrite in place
     tools/double_track_density.py --dry-run FILE      # print, do not write
-    tools/double_track_density.py --check FILE        # verify already doubled
+    tools/double_track_density.py --audit FILE        # check invariants (CI guard)
+
+`--audit` deliberately does NOT answer "has this been doubled?".  That is not a
+property of a file: a fixture with 16 signals per period could be natively 16
+or a doubled 8, and nothing records which.  What it audits is the invariant
+whose violation actually causes damage — every width, spacing and origin
+BINARY-EXACT, and every slot list well-formed — plus a per-layer report of
+period / signal count / density so a reviewer can see the shape at a glance.
 """
 import argparse
 import os
@@ -100,7 +107,45 @@ def transform_line(line):
     return head + body + "\n", note
 
 
-def process(path, dry_run=False, check=False):
+def audit(path):
+    """Verify the invariants that matter, and report the shape.  Returns 0 when
+    clean, 1 on any violation (so it works as a CI guard).
+
+    NOT "has this been doubled?" -- see the module docstring for why that
+    question has no answer from the file alone."""
+    print(f"=== {path} ===")
+    bad = 0
+    for lineno, line in enumerate(open(path), 1):
+        m = PAT.match(line.rstrip("\n"))
+        if not m:
+            continue
+        head, lid, origin, rest, _ = m.groups()
+        if not rest.strip():
+            continue
+        try:
+            slots = parse_slots(rest)
+        except ValueError as e:
+            print(f"   L{lid} (line {lineno}): MALFORMED — {e}")
+            bad += 1
+            continue
+        offenders = [f"{t} {w}/{s}" for t, w, s in slots
+                     if not (exact(w) and exact(s))]
+        try:
+            org_ok = exact(F(origin))
+        except (ValueError, ZeroDivisionError):
+            org_ok = False
+        if not org_ok:
+            offenders.append(f"origin {origin}")
+        p, n = period(slots), n_signals(slots)
+        status = "ok" if not offenders else "NOT BINARY-EXACT: " + ", ".join(offenders)
+        print(f"   L{lid}: period={fmt(p)} signals={n} "
+              f"density={float(signal_metal(slots) / p):.4f}  {status}")
+        if offenders:
+            bad += 1
+    return 1 if bad else 0
+
+
+def process(path, dry_run=False):
     with open(path) as fh:
         lines = fh.readlines()
     out, notes, changed = [], [], False
@@ -111,8 +156,6 @@ def process(path, dry_run=False, check=False):
             notes.append(note)
             if new != line:
                 changed = True
-    if check:
-        return 0 if not changed else 1
     print(f"=== {path} ===")
     for n in notes:
         print(f"   {n}")
@@ -131,8 +174,9 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("files", nargs="+")
     ap.add_argument("--dry-run", action="store_true", help="print, do not write")
-    ap.add_argument("--check", action="store_true",
-                    help="exit non-zero if a file would still change")
+    ap.add_argument("--audit", action="store_true",
+                    help="verify binary-exactness + well-formedness; exit "
+                         "non-zero on a violation (CI guard)")
     a = ap.parse_args(argv)
     rc = 0
     # The transform is NOT idempotent, and the fixtures contain symlinks
@@ -146,7 +190,7 @@ def main(argv=None):
                   f"({os.path.relpath(real)})")
             continue
         seen.add(real)
-        rc |= process(real, a.dry_run, a.check)
+        rc |= audit(real) if a.audit else process(real, a.dry_run)
     return rc
 
 
