@@ -1,0 +1,27 @@
+# The HISTORICAL 8-signal-per-period density of flow/tracks/tracks2top.buda,
+# preserved deliberately.
+#
+# tracks2top.buda was doubled to 16 signals per period.  The small congestion
+# DEMO flows (planner3, ripup1, ripup2, nuts_corner_overlap, ...) exist to
+# exhibit a mechanism under congestion — window capacity double-booking, ripup
+# picking the actual blocker, a corner overlap constraint — and at the doubled
+# density none of those situations arises.  They source this fixture instead.
+#
+# Do not "modernize" it — being the sparser technology is its whole value.
+#def_layer 5 M5 V TOP 10.0
+#def_layer 6 M6 H TOP 10.0
+# [report_overhead] Layer overhead analysis:
+#  Layer       def_layer%   actual%  dilution  status
+#  ---------- ----------- --------- ---------  ------
+#  M5              10.00%    50.00%    2.0000  MISMATCH (diff=40.00%)
+#    -> suggested: def_layer 5 M5 V TOP 50.00
+#  M6              10.00%    52.94%    2.1250  MISMATCH (diff=42.94%)
+#    -> suggested: def_layer 6 M6 H TOP 52.94
+def_layer 5 M5 V TOP 50.00
+def_layer 6 M6 H TOP 52.94
+
+# Format: <layer_id> <origin> [<type> <width> <spacing>] ...
+def_track_pattern 5    0  POWER 3 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 6 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
+
+report_overhead

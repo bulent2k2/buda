@@ -87,6 +87,9 @@ priority view** — what's actually open right now, ranked by value/effort — s
   solve it would skip).
 - **[wishlist-bundler.md](wishlist-bundler.md)** — Bundler.
   Multi-source (fan-in) topology to make CONVERGENT bundling sound.
+- **[track_density_doubling.md](track_density_doubling.md)** — the corpus-wide
+  track-density doubling: the exact transform, the 38-flow measurement, and the
+  `*_8track.buda` fixtures that keep congestion-dependent tests meaningful.
 - **[wishlist-healer.md](wishlist-healer.md)** — Healers (rip-up, negotiate,
   refine).  Rounds 1–5 all landed (incremental trials → negotiation →
   global-occupant pass → fast trials + place-abort → fixed-context screen →

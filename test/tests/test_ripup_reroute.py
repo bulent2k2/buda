@@ -30,6 +30,7 @@ import io
 import contextlib
 import os
 import sys
+import pathlib
 from pathlib import Path
 
 import pytest
@@ -162,7 +163,7 @@ def _big2_to_stage(stage):
     s = buda_cli.BudaSession()
     s.no_viz = True
     with contextlib.redirect_stdout(io.StringIO()):
-        s.do_command(f"source {_BIG2 / 'tracks4top.buda'}")
+        s.do_command(f"source {_ROOT / 'flow/tracks/tracks4top_8track.buda'}")
         s.do_command(f"source {_BIG2 / 'tc3b_flat_x5.buda'}")
         s.do_command("run_bundler")
         s.do_command("generate_topologies")
@@ -243,7 +244,7 @@ def test_big2_stage_b_preserves_hi_lo_bit_order():
     s = buda_cli.BudaSession()
     s.no_viz = True
     with contextlib.redirect_stdout(io.StringIO()):
-        s.do_command(f"source {_BIG2 / 'tracks4top.buda'}")
+        s.do_command(f"source {_ROOT / 'flow/tracks/tracks4top_8track.buda'}")
         s.do_command(f"source {_BIG2 / 'tc3b_flat_x5.buda'}")
         s.do_command("run_bundler")
         s.do_command("generate_topologies")
@@ -281,11 +282,26 @@ def test_big2_max_iter_bounds_moves():
 _HBUNDLES = _ROOT / "flow" / "hbundles"
 
 
-def _source_hier_flow(name):
+def _source_hier_flow(name, sparse_tracks=False, tmp_dir=None):
+    """`sparse_tracks` drives the vehicle against the HISTORICAL 8-track density
+    (flow/tracks/tracks_8track.buda) instead of the shared, doubled tracks.buda.
+
+    Needed by the tests that observe a healer WORKING: doubling the track count
+    removes so much congestion that these vehicles land clean and the mechanism
+    under test never engages.  Same reason the 06 twin is healer-free — see
+    docs/internal/mid_tier_failures_2026-07-29.md."""
+    src_path = _HBUNDLES / name
+    if sparse_tracks:
+        src = src_path.read_text()
+        assert "source ../tracks/tracks.buda" in src, f"{name}: tracks line moved"
+        src_path = pathlib.Path(tmp_dir) / f"sparse_{name}"
+        src_path.write_text(src.replace(
+            "source ../tracks/tracks.buda",
+            f"source {_ROOT / 'flow/tracks/tracks_8track.buda'}"))
     s = buda_cli.BudaSession()
     s.no_viz = True
     with contextlib.redirect_stdout(io.StringIO()):
-        s.do_command(f"source {_HBUNDLES / name}")
+        s.do_command(f"source {src_path}")
     return s
 
 
@@ -306,7 +322,7 @@ def test_hier_supported_and_noop_when_clean():
 
 
 @pytest.mark.mid
-def test_hier_stage_b_clears_opens():
+def test_hier_stage_b_clears_opens(tmp_path):
     """Ripup stage-b re-routes per-instance wrappers and drives DNUTS opens down.
 
     Vehicle: the HEALER-FREE twin `06_multipin_stress_raw.buda`. The full
@@ -315,7 +331,8 @@ def test_hier_stage_b_clears_opens():
     docs/internal/mid_tier_failures_2026-07-29.md. The raw twin stops after
     `run_detailed_nuts` with a real residual (~60 opens), so the test's own
     `ripup_reroute` is what clears them — the actual mechanism under test."""
-    s = _source_hier_flow("06_multipin_stress_raw.buda")
+    s = _source_hier_flow("06_multipin_stress_raw.buda",
+                          sparse_tracks=True, tmp_dir=tmp_path)
     assert s._planner_is_hier
     base = s.detailed_result.num_unplaced
     assert base > 0, "raw twin should land with DNUTS opens for ripup to clear"
@@ -342,7 +359,7 @@ def test_hier_large_repro_progress_and_bounded():
     s = buda_cli.BudaSession()
     s.no_viz = True
     with contextlib.redirect_stdout(io.StringIO()):
-        s.do_command(f"source {_RNR / 'mix_tracks.buda'}")
+        s.do_command(f"source {_ROOT / 'flow/rnr/mix_tracks_8track.buda'}")
         s.do_command(f"open_bdb {_RNR / 'mix.bdb.sql'}")
         s.do_command("derive_busterms 2")
         s.do_command("add_blocks_from_bdb 0")
