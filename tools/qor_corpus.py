@@ -117,6 +117,11 @@ CORPUS = [
     # alignment — a regression in placement phase shows up as a QoR change.
     "flow/chip/chip_stack_bottomup.buda",
     "flow/rnr/mix2_fast_on_aligned_sql.buda",
+    # The `_2x` twins: same flow on double the track density (16 signals per
+    # period, same metal).  Their ORIGINALS stay in the corpus too — the
+    # pair is the measurement.  docs/internal/track_density_doubling.md
+    "flow/rnr/mix2_fast_bottomup_caps_2x.buda",
+    "flow/rnr/mix2_fast_on_aligned_sql_2x.buda",
     "flow/rnr/mix2_fast_topdown.buda",
     "flow/rnr/mix2_topdown_refine.buda",
     "flow/chip/chip_topdown.buda",

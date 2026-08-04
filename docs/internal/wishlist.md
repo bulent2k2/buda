@@ -87,6 +87,10 @@ priority view** — what's actually open right now, ranked by value/effort — s
   solve it would skip).
 - **[wishlist-bundler.md](wishlist-bundler.md)** — Bundler.
   Multi-source (fan-in) topology to make CONVERGENT bundling sound.
+- **[track_density_doubling.md](track_density_doubling.md)** — the `_2x` clone
+  vehicles: doubling a flow's track density as an ADDED twin rather than an
+  in-place edit, so the original keeps the congestion its healer and
+  doomed-seat coverage depends on.
 - **[wishlist-healer.md](wishlist-healer.md)** — Healers (rip-up, negotiate,
   refine).  Rounds 1–5 all landed (incremental trials → negotiation →
   global-occupant pass → fast trials + place-abort → fixed-context screen →
