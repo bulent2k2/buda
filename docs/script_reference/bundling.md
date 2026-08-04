@@ -152,13 +152,22 @@ specific (`for c1_bus` and `for c2_bus` both match the group), in which case
 the **most restrictive** cap wins — it also satisfies the looser request —
 and `0` (unbounded) wins only when it is the sole longest match.
 
-Choosing the cap is manual today: the census names the doomed seats and their
-supply, and you cap the bus at or below that supply. Note the pool a seat
-gets is a property of *where it lands*, which re-bundling can change — on
+Choosing the cap is manual, and **deliberately so**. The pool a seat gets is
+a property of *where it lands*, which re-bundling changes: on
 `chip3a_bottomup`, halving all nine doomed buses cleared three of them
 outright (unplaced 1658 → 1511) while adding overlaps and 5% WL, because the
-parts landed on different windows than the wholes did. Treat a scoped cap as
-an experiment to measure, not a fix to apply blind.
+parts landed on different windows than the wholes did.
+
+Automating the choice was built and measured, and **rejected** — deriving
+each cap from its seat's real supply and iterating does not converge (each
+pass finds new doomed seats, including on buses it already capped), the cost
+outgrows the benefit (unplaced 1658 → 1386 → 1346 → 1330 while wirelength
+goes +7.6% → +24.3% → +25.6%), and it degenerates to `cap 1` on a
+zero-supply seat that no split can fix. Full record in
+[`wishlist-bundler.md`](../internal/wishlist-bundler.md) → *"Supply-driven
+bundle bit cap"*.
+
+So: treat a scoped cap as an experiment to measure, not a fix to apply blind.
 
 ---
 
