@@ -16,7 +16,7 @@
 
 A parallel snapshot's `sec` is contention-inflated, so the table carries the
 last known FULL `-j 1` run's per-flow wall-clocks as a stamped `sec1` column,
-persisted in qor_serial_times.json.  These tests cover the sidecar round-trip
+persisted in qor/qor_serial_times.json.  These tests cover the sidecar round-trip
 and the render wiring without running any real flow."""
 import os
 import sys

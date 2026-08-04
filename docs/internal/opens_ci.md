@@ -22,7 +22,7 @@ Corrected while building it: the corpus is **37** flows, not the "36 flows,
 ~2-4 min serial" this page previously estimated — that figure predated the
 corpus growing. Corrected again after the first real run: the sweep takes
 **6m34s** on the hosted runner (jobs=4), not the ~4m20s measured in a developer
-container. The nightly also refreshes `qor_table.md` (see [`ci.md`](ci.md)),
+container. The nightly also refreshes `qor/qor_table.md` (see [`ci.md`](ci.md)),
 which adds a second sweep — item 3 below.
 
 **Still open — the PR half.** The nightly compares `main` against itself over

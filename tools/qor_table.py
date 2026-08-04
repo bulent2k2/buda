@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Corpus SNAPSHOT table — run every corpus flow through the full pipeline and
-dump the two-table QoR + wirelength snapshot that lives in `qor_table.md`.
+dump the two-table QoR + wirelength snapshot that lives in `qor/qor_table.md`.
 
 The companion to `qor_corpus.py`: that tool A/B-COMPARES two builds and gates on
 regressions; THIS tool produces a single-build point-in-time SNAPSHOT.  Per flow
@@ -34,11 +34,11 @@ serial run EXCEPT `sec`, which inflates with CPU contention under parallel
 load — pass `-j 1` when the per-flow timing itself is what you are measuring.
 The `sec1` column keeps the last known SERIAL timings comparable across
 parallel refreshes: a full-corpus `-j 1 --out` run re-stamps the checked-in
-sidecar `qor_serial_times.json` (date + commit), and every later render shows
+sidecar `qor/qor_serial_times.json` (date + commit), and every later render shows
 those per-flow times beside the current run's `sec` ('-' = flow added since).
 
   tools/qor_table.py                          # print both tables to stdout
-  tools/qor_table.py --out qor_table.md  # (re)write the checked-in snapshot
+  tools/qor_table.py --out qor/qor_table.md  # (re)write the checked-in snapshot
   tools/qor_table.py --flows flow/rnr/mix.buda flow/big_data_test/b44.buda
   tools/qor_table.py -j 1                     # serial (timing-faithful sec)
 
@@ -46,8 +46,8 @@ The nightly workflow refreshes the checked-in snapshot and opens a PR only when
 the QoR actually moved.  Two flags serve that, and neither runs a flow beyond
 the sweep itself:
 
-  tools/qor_table.py --out qor_table.md --json qor_table_rows.json
-  tools/qor_table.py --diff old_rows.json qor_table_rows.json   # runs NO flows
+  tools/qor_table.py --out qor/qor_table.md --json qor/qor_table_rows.json
+  tools/qor_table.py --diff old_rows.json qor/qor_table_rows.json  # runs NO flows
 
 `--json` is the markdown's machine-readable twin (sorted by flow, so reordering
 the CORPUS list is not a diff); `--diff` reports whether anything but the `sec`
@@ -163,11 +163,11 @@ def _c(v):
 
 
 # The serial-timing sidecar: the last known FULL `-j 1` run's per-flow
-# wall-clocks, checked in next to qor_table.md.  A parallel snapshot's `sec`
+# wall-clocks, checked in next to qor/qor_table.md.  A parallel snapshot's `sec`
 # column is contention-inflated, so the table keeps this stamped serial
 # reference as its own `sec1` column.  Rewritten ONLY by a full-corpus
 # `-j 1 --out` run (a --flows subset or a stdout run never clobbers it).
-_SERIAL_PATH = os.path.join(_ROOT, "qor_serial_times.json")
+_SERIAL_PATH = os.path.join(_ROOT, "qor", "qor_serial_times.json")
 
 
 def load_serial_times(path=None):
@@ -297,7 +297,7 @@ def render(rows, stamp, serial=None):
     parts = [
         f"# QoR corpus snapshot — {stamp}",
         "",
-        "Regenerate with `tools/qor_table.py --out qor_table.md`.  Columns: "
+        "Regenerate with `tools/qor_table.py --out qor/qor_table.md`.  Columns: "
         "`bund`/`busS`/`netS` = bundle / bus-segment / net-segment counts; "
         "`busWL`/`netWL` = abstract (after NUTS) / detailed (after DNUTS) "
         "wirelength, placed-only; `ovl`/`unpl`/`viol` = overlaps / unplaced bits "
@@ -322,7 +322,7 @@ def render(rows, stamp, serial=None):
 def main():
     ap = argparse.ArgumentParser(
         description="Run the corpus and dump the two-table QoR + wirelength "
-                    "snapshot (qor_table.md).")
+                    "snapshot (qor/qor_table.md).")
     ap.add_argument("--out", help="write the markdown snapshot to this path "
                                   "(default: print to stdout)")
     ap.add_argument("--flows", nargs="+",

@@ -139,7 +139,7 @@ def test_default_jobs_at_least_one():
 
 # --- qor_table --json: the nightly's change-detection input -----------------
 #
-# The nightly workflow refreshes qor_table.md and decides whether to open a PR
+# The nightly workflow refreshes qor/qor_table.md and decides whether to open a PR
 # by diffing this JSON with `sec` dropped.  Two properties make that gate work,
 # and both are silent-failure modes if they break: a `sec`-only difference must
 # NOT read as a change (else a PR opens every night and buries the signal), and
@@ -150,7 +150,7 @@ def _isolate_sidecar(qt, tmp_path, monkeypatch=None):
     """Point the serial-times sidecar at tmp_path.
 
     main() chdir's to the REPO ROOT and save_serial_times() defaults to the
-    checked-in qor_serial_times.json, so ANY test that reaches it overwrites
+    checked-in qor/qor_serial_times.json, so ANY test that reaches it overwrites
     real measured data.  That is not hypothetical: a mutation run that disabled
     the --fail-on-err guard let a test fall through to save_serial_times and
     replace 37 real serial timings with {"ok.buda": 1.0, stamp: "s"}, which was
@@ -302,14 +302,14 @@ def test_err_row_would_otherwise_read_as_a_semantic_change():
 
 
 def test_committed_serial_times_sidecar_is_real_data():
-    """The CHECKED-IN qor_serial_times.json must hold real measurements.
+    """The CHECKED-IN qor/qor_serial_times.json must hold real measurements.
 
     This is a data-integrity guard on a file that tooling writes and `git add`
     can sweep up.  It exists because exactly that happened: a mutation run
     disabled the --fail-on-err guard, a test fell through to save_serial_times()
     against the real repo-root path, and {"stamp": "s", "times": {"ok.buda":
     1.0}} was committed -- silently blanking the sec1 column of every row in
-    qor_table.md and reducing the legend to 'captured s'.  Nothing failed; the
+    qor/qor_table.md and reducing the legend to 'captured s'.  Nothing failed; the
     corruption only surfaced when a nightly-generated PR was read by eye.
 
     Cheap, and it fires on ANY future clobber regardless of cause.
