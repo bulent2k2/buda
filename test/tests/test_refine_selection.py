@@ -248,7 +248,15 @@ def test_topdown_recipe_heals_most_of_the_residual():
 
     The exact-zero assertion is deliberately not restored by pinning
     `band_span_charge 0` here: this vehicle is a corpus row, and silencing it
-    would make the QoR guard stop reporting a known real regression."""
+    would make the QoR guard stop reporting a known real regression.
+
+    One deliberate divergence from the checked-in flow: since 2026-08-04 that
+    script declares `set_planner_param healersAhead 1` (measured win, see
+    docs/internal/ksegs_default_audit.md), and this test does NOT.  The
+    declaration changes the planner's selection basis, which is a different
+    starting problem for the recipe; what is protected here is the recipe's
+    invariants on the residual-laden UNDECLARED trajectory, which is also the
+    one the #518 residual above is stated against."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     with contextlib.redirect_stdout(io.StringIO()):

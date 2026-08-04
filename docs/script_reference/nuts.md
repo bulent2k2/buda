@@ -700,7 +700,11 @@ in the recipe. Measured (2026-07-30):
   refine 84/2 (WL 67558→65480) → negotiate 32/6 → ripup **0/0**
   (WL 69894) → refine 0/0 at WL **69621**, final `check_design`
   **Success** — a flow that had never reached a clean endpoint, healed at
-  ~+6% WL vs its broken state.
+  ~+6% WL vs its broken state. (That trajectory is the vehicle's UNDECLARED
+  configuration. On 2026-08-04 the flow took the `healersAhead` win — same
+  0/0/0 endpoint at −5.2% detailed WL, healers finishing far sooner; comment
+  the declaration out to reproduce the numbers above. See
+  [ksegs_default_audit.md](../internal/ksegs_default_audit.md).)
 - **aligned** (a 30-open residual that already resisted the full healer
   chain): the post-refine negotiate found nothing (its one trial measured
   worse and was restored), ripup and the second refine committed nothing —

@@ -63,6 +63,16 @@ residual cost is now ~0.44% wirelength on one flow, not overlaps or opens.
 > This is NOT the rejected `band_span_charge 0` pin: the charging model stays
 > at its default and the flip's cost is still paid and visible, now as
 > wirelength rather than as an overlap.
+>
+> **Follow-up (2026-08-04): the flow now declares `healersAhead`**, which was
+> measured to hold 0/0/0 while cutting abstract WL 68500 → 65339 and detailed
+> WL 836341 → 793215 (−5.2%) — so the +0.44% WL charged above is more than
+> repaid.  It also side-steps the plateau entirely: `ripup_reroute` reaches
+> 0/0 on its own, leaving the trailing `chase_overlaps` refine as pure WL
+> polish.  That does NOT fix #535's lever gap — comment the declaration out
+> and the 1-overlap plateau and everything above reproduces exactly.  Still
+> not a `band_span_charge 0` pin; the charging model is untouched.  See
+> [ksegs_default_audit.md](ksegs_default_audit.md).
 
 ## The defect
 
