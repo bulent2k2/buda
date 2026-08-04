@@ -98,18 +98,26 @@ jobs:
           set -o pipefail
           python -m pytest -q -o addopts="" -p xdist -n 4 -rs 2>&1 | tee pytest.log
 
-      - name: No module skipped for a missing import
+      - name: No test skipped for a missing dependency
         # The failure mode this guards is how a hole got into this very
         # workflow: pytest skips a whole module when its import fails, so a
         # dependency missing from the step above silently removes tests while
-        # the gate still reports success.  An import-skip is therefore a CI
-        # configuration error, not a legitimate skip -- fail on it and name it.
-        # Legitimate skips (platform-specific, fixture-dependent) do not carry
-        # this reason and are unaffected; there are 3 of them today.
+        # the gate still reports success.  Such a skip is a CI configuration
+        # error, not a legitimate skip -- fail on it and name it.  Legitimate
+        # skips (platform-specific, fixture-dependent) do not carry these
+        # reasons and are unaffected; there are 3 of them today.
+        #
+        # Two patterns, both meaning "a tool this gate needs was absent":
+        #   could not import    -- a missing pip package (the 28 web tests)
+        #   JS port unexecuted  -- node absent, so test_web_js_port.py did not
+        #                          run the browser's computeDisplay.  Without
+        #                          this line a runner image that dropped node
+        #                          would silently return the JS port to being
+        #                          guarded by review alone (issue #554).
         run: |
-          if grep -q "could not import" pytest.log; then
-            echo "::error::A test module was skipped because an import failed - a dependency is missing from the install step"
-            grep "could not import" pytest.log
+          if grep -qE "could not import|JS port unexecuted" pytest.log; then
+            echo "::error::A test was skipped because a dependency was missing - fix the environment, do not ignore"
+            grep -E "could not import|JS port unexecuted" pytest.log
             exit 1
           fi
-          echo "No import-skips: every test module was collected."
+          echo "No dependency-skips: every test module was collected and run."
