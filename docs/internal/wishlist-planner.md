@@ -910,7 +910,11 @@ spent), while on aligned's already-stalled 30-open residual it is a
 byte-identical no-op. Checked in as the QoR vehicle
 `flow/rnr/mix2_topdown_refine.buda` (corpus row + the @mid recipe test
 in test_refine_selection.py); recipe documented in
-`docs/script_reference/nuts.md`.
+`docs/script_reference/nuts.md`. Those trajectory numbers are the
+vehicle's UNDECLARED configuration — since 2026-08-04 the flow declares
+`healersAhead` (same 0/0/0 at −5.2% detailed WL; the @mid test keeps the
+undeclared form deliberately), see
+[ksegs_default_audit.md](ksegs_default_audit.md).
 
 **`kPeak` default decision (2026-07-11): stays opt-in (default 0).
 Confirmed after the supply-aware follow-on shipped — the reopener premise
