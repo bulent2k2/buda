@@ -85,30 +85,48 @@ this is ever taken on, the safe direction is to make `qor_table.py` derive its
 extra columns from a `qor_corpus` sweep (gate unchanged, table follows), not
 the reverse.
 
-## 4. Execute the web ports  *(largest effort; independent of the rest)*
+## 4. Execute the web ports — **JS half RESOLVED 2026-08-03; Scala half open**
 
-**Uncovered:** the display-geometry rule
-(`viz_common.snap_endpoint_extents`) has three implementations — the
-matplotlib renderer, `src/web/static/index.html` (`computeDisplay`), and
-`web/src/main/scala/buda/web/render/DisplayGeom.scala`.
-`test_web_displaygeom.py` pins the authoritative *behaviour*, but never
-executes the JS or Scala, so drift in either port is caught only by review.
+The display-geometry rule (`viz_common.snap_endpoint_extents`) has three
+implementations — the matplotlib renderer, `src/web/static/index.html`
+(`computeDisplay`), and `web/src/main/scala/buda/web/render/DisplayGeom.scala`.
+`test_web_displaygeom.py` pins the authoritative *behaviour* but executes no
+port, so drift was caught only by review.
 
 **Why this is a real gap, not a hypothetical.** Issue #554 is the demonstration:
 the fix landed in the Python renderer and **both mirrors stayed broken**, and
 the parity test stayed green throughout — it held its own private copy of the
-rule at the time. The copy is gone (all three now pin one implementation), but
-the ports are still synced by hand.
+rule at the time.
 
-**Where to start.** Run the ports headlessly against the same serialized
-`analysis` fixtures the Python test already builds:
-- JS: Node + a small harness importing `computeDisplay`; the function is
-  already pure over the serialized analysis.
-- Scala: Scala.js test, or cross-compile `DisplayGeom` for the JVM — it takes
-  `js.Dynamic`, so the JVM path needs a thin adapter.
-- Cheaper interim: a lint step asserting the three implementations' rule
-  comments stay identical. Catches nothing semantically, but makes divergence
-  visible in review — which is where #554 was eventually caught anyway.
+### JS — resolved
+
+`test_web_js_port.py` extracts `computeDisplay` from `index.html` (brace-matched,
+so it does not depend on a marker comment), runs it under **node** over the same
+b44 fixtures, and diffs it elementwise against `snap_endpoint_extents`.
+
+Verified by reintroducing both historical bugs into the JS: last-match-wins
+(the #554 shape) and extend-only `min`/`max` with no endpoint gate (the original
+port bug). Each fails the suite with numbers; `index.html` restored byte-identical
+after.
+
+No CI toolchain step — hosted runners ship node. A node-less runner would
+*skip*, which is the silent-shrink failure mode that once removed 28 web tests
+from a green run, so the workflow's skip guard greps for this test's reason
+(`JS port unexecuted`) as well as `could not import`.
+
+Scope: `computeDisplay` only. It is pure over the serialized analysis and is the
+piece that has actually drifted; SVG element creation is a separate concern and
+is not what #554 was about.
+
+### Scala — still open
+
+`DisplayGeom.scala` is not compiled, let alone run — CI installs no JDK or sbt.
+Options: a Scala.js test, or cross-compile `DisplayGeom` for the JVM (it takes
+`js.Dynamic`, so the JVM path needs a thin adapter). This is the expensive half:
+it adds a whole toolchain to the gate for one 72-line file. A cheaper interim is
+a lint asserting the implementations' rule comments stay identical — catches
+nothing semantically, but makes divergence visible in review, which is where
+#554 was eventually caught anyway.
 
 ---
 

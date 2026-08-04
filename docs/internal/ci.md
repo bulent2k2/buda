@@ -201,13 +201,32 @@ the sweep errored, since that table would be garbage.
   so occasional legitimate churn is expected. A red nightly is a report to
   triage, not proof of a bug — it blocks nothing.
 
+## The JS front end is executed; the Scala one is not
+
+Three layers, and they are easy to conflate:
+
+| layer | covered? |
+|---|---|
+| `src/web/*.py` — the FastAPI server | **yes**, 49 tests (`TestClient`, incl. real `websocket_connect` round-trips) |
+| `src/web/static/index.html` — JS `computeDisplay` | **yes**, `test_web_js_port.py` runs it under node |
+| `web/src/main/scala/…` — Scala.js port | **no** — not compiled, no JDK/sbt in the gate |
+
+The server tests run the ASGI app **in-process**, so they would not catch a
+fault in uvicorn startup, port binding, or static-file serving as deployed.
+
+`test_web_js_port.py` extracts `computeDisplay` from the HTML and diffs it
+against `viz_common.snap_endpoint_extents` over the b44 fixtures — the same
+rule, the same inputs. It needs no toolchain step (runners ship node), and a
+node-less runner is caught by the skip guard rather than silently shrinking the
+suite.
+
 ## What CI deliberately does NOT do
 
 One real gap remains — reasoning and where-to-start notes in
 [`opens_ci.md`](opens_ci.md):
 
-1. **The web ports are not executed** — `test_web_displaygeom.py` pins the
-   authoritative geometry but never runs the JS or Scala mirrors of it.
+1. **The Scala port is not executed** — `DisplayGeom.scala` is not even
+   compiled. Adding it means a JDK+sbt toolchain for one 72-line file.
 
 Plus one narrower piece: the nightly compares `main` against itself over time,
 so it catches a regression a day *after* it lands. A `run-qor` PR label that
