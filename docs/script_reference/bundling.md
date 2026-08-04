@@ -85,10 +85,13 @@ full permission for a sub-prefix under a stricter global default.
 ### `set_max_bundle_bits`
 
 ```
-set_max_bundle_bits <N>          # static cap
+set_max_bundle_bits <N>          # static cap, design-wide
 set_max_bundle_bits auto         # dynamic cap from the shortest busterm edge
 set_max_bundle_bits <N> auto     # both (the larger part count wins)
-set_max_bundle_bits off
+set_max_bundle_bits <N> for <prefix>    # SCOPED: cap only these bundles
+set_max_bundle_bits 0 for <prefix>      # SCOPED: exempt from the global cap
+set_max_bundle_bits off for <prefix>    # clear one scope
+set_max_bundle_bits off                 # clear everything (global + scopes)
 ```
 
 Optional bundle bit bound, applied as a **split pass** after bundling (any
@@ -106,6 +109,45 @@ partitioner closes a part before any block's cap would be exceeded (a
 balanced size target alone cannot bound bits that cluster on one block),
 falling back to net-level packing for a bus that violates a cap on its own. Every split is reported with its binding
 constraint, and the parts' reasons carry a `|SPLIT:k/n` suffix.
+
+#### Scoped caps (`for <prefix>`)
+
+The plain cap is **design-wide**, which makes the whole design pay for one
+bundle's problem. The motivating case is a **width-doomed bus**: a bundle
+whose bits cannot fit the real signal-track supply at its seat on *any*
+layer — the static width-infeasibility `check_design`'s supply-doomed seat
+census reports (issue #536). Splitting that one bus fixes it; splitting
+every wide bus in the design also fixes it, and costs far more wire.
+
+Measured on `flow/rnr/mix2_fast_on_aligned_sql.buda`, whose 16-bit
+`top_bus20_w16` is exactly that shape:
+
+| | ovl / unpl / viol | abstract WL | doomed TOP seats |
+|---|---|---|---|
+| baseline | 2 / 16 / 1 | 76368 | 1 |
+| `set_max_bundle_bits 8` (global) | 1 / 0 / 0 | 121313 (**+59%**) | — |
+| `set_max_bundle_bits 8 for top_bus20_w16` | 4 / 12 / 1 | 76647 (**+0.4%**) | **0** |
+| …plus a trailing `refine_selection` | 2 / 12 / 1 | 75828 (**−0.7%**) | **0** |
+
+The scoped cap removes the doomed-seat class at ~1/150th of the global
+knob's wirelength bill. It does **not** reproduce the global cap's clean
+`1/0/0` — that came from re-bundling the whole design, not from this bus —
+so the two are different trades, not two settings of one.
+
+A bundle matches a scope when **any** of its nets carries the prefix, and the
+**longest matching prefix wins** (the `set_bundling` idiom). A scope of `0`
+means *exempt*: no static cap for those bundles even when a global one is
+set. `auto` has no scoped form — it is already per-bundle, derived from each
+bundle's own busterm edges. Splits from a scope are reported as
+`static limit N (scoped)`.
+
+Choosing the cap is manual today: the census names the doomed seats and their
+supply, and you cap the bus at or below that supply. Note the pool a seat
+gets is a property of *where it lands*, which re-bundling can change — on
+`chip3a_bottomup`, halving all nine doomed buses cleared three of them
+outright (unplaced 1658 → 1511) while adding overlaps and 5% WL, because the
+parts landed on different windows than the wholes did. Treat a scoped cap as
+an experiment to measure, not a fix to apply blind.
 
 ---
 
