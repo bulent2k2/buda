@@ -23,8 +23,47 @@
 #include <map>
 #include <numeric>
 #include <cmath>
+#include <unordered_map>
+#include <atomic>
+#include <thread>
 
 namespace buda {
+
+// Per-candidate scoring overlay (plan_bundle).  While a candidate is being
+// scored, its own within-candidate charges live here instead of in cuts_ —
+// the committed cut state stays READ-ONLY for the whole scoring pass, which
+// is what makes scoring candidates on worker threads race-free (each thread
+// owns one overlay; the base is shared read-only).  Values are stored exactly
+// as the historical in-place charge stored them: the first touch of a band
+// copies its current usage, later charges of the same band `+=` — so every
+// read through cand_usage_ returns the bit-identical double the
+// charge-then-undo implementation produced, and per-candidate rollback is
+// overlay.clear() (an O(1) epoch bump — see CandOverlay in the header).
+thread_local CongestionPlanner::CandOverlay* CongestionPlanner::t_cand_overlay_ = nullptr;
+
+// Process-wide cut-grid generation source (rebuild_cuts_ stamps cuts_gen_).
+static std::atomic<uint64_t> g_cuts_generation{0};
+
+CongestionPlanner::CandOverlay& CongestionPlanner::thread_overlay_() const {
+    static thread_local CandOverlay ov;
+    const size_t n = band_base_.empty() ? 0 : band_base_.back();
+    if (ov.gen != cuts_gen_ || ov.val.size() != n) {
+        ov.val.assign(n, 0.0);
+        ov.stamp.assign(n, 0);
+        ov.epoch = 0;
+        ov.gen   = cuts_gen_;
+    }
+    return ov;
+}
+
+double CongestionPlanner::cand_usage_(int ci, int b) const {
+    if (t_cand_overlay_) {
+        const size_t k = band_base_[ci] + (size_t)b;
+        if (t_cand_overlay_->stamp[k] == t_cand_overlay_->epoch)
+            return t_cand_overlay_->val[k];
+    }
+    return cuts_[ci].usage(b);
+}
 CongestionPlanner::CongestionPlanner(const Floorplan& fp, const LayerStack& ls)
     : floorplan_(fp), layers_(ls) {
     // Study hook for corpus sweeps (issue #518), mirroring BUDA_KSEGS_REL:
@@ -266,6 +305,14 @@ void CongestionPlanner::rebuild_cuts_() {
     // per (layer_id, dir), the (coord_2x, ci) pairs in ci order — which is
     // coordinate-ascending per layer by the build loops above, so the vector
     // is binary-searchable on coord_2x.
+    // Flattened band offsets for the candidate scoring overlay (CandOverlay):
+    // band_base_[ci] = first slot of cut ci; back() = total bands.  The fresh
+    // generation stamp invalidates every thread's persistent overlay.
+    band_base_.assign(cuts_.size() + 1, 0);
+    for (int ci = 0; ci < (int)cuts_.size(); ++ci)
+        band_base_[ci + 1] = band_base_[ci] + (size_t)cuts_[ci].num_bands();
+    cuts_gen_ = ++g_cuts_generation;
+
     cut_index_.clear();
     for (int ci = 0; ci < (int)cuts_.size(); ++ci) {
         const GlobalCut& c = cuts_[ci];
@@ -470,7 +517,7 @@ void CongestionPlanner::for_each_band_w(const Segment& seg, int layer_id,
             // instead of piling phantom overflow onto it.
             auto free_of = [&](int b) {
                 const double cap = usable_band_cap(c, b, is_vcut, INT_MIN, INT_MIN);
-                return std::max(0.0, cap - c.usage(b));
+                return std::max(0.0, cap - cand_usage_(ci, b));
             };
             // The spill reach is deliberately UNBOUNDED (to the grid edges).
             // Capping it at one bus-width beyond the footprint was measured:
@@ -690,7 +737,7 @@ double CongestionPlanner::score_segment(const Segment& seg, int layer_id,
                     [&](int ci, int b, double w) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
-        double ov  = (c.usage(b) + charged * w) - cap;
+        double ov  = (cand_usage_(ci, b) + charged * w) - cap;
         if (ov > peak) peak = ov;
     });
 
@@ -734,7 +781,7 @@ void CongestionPlanner::collect_overflow_bands(const Segment& seg, int layer_id,
                     [&](int ci, int b, double w) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
-        if ((c.usage(b) + charged * w) - cap > 0.0) out.insert({ci, b});
+        if ((cand_usage_(ci, b) + charged * w) - cap > 0.0) out.insert({ci, b});
     });
 }
 
@@ -861,9 +908,20 @@ void CongestionPlanner::apply_segment(const Segment& seg, int layer_id, double e
     // pre-charge value for the exact-restore rollback.
     for_each_band_w(seg, layer_id, perp_pos_override, eff_width,
                     [&](int ci, int b, double w) {
-        if (cand_undo_on_)
-            cand_undo_.emplace_back(ci, b, cuts_[ci].usage(b));
-        cuts_[ci].add_usage(b, eff_width * w);
+        if (t_cand_overlay_) {
+            // Scoring: charge the candidate's overlay, not cuts_.  First touch
+            // seeds the band's committed value, so `+=` here is the same
+            // arithmetic the in-place charge performed (bit-identical reads).
+            auto&        ov = *t_cand_overlay_;
+            const size_t k  = band_base_[ci] + (size_t)b;
+            if (ov.stamp[k] != ov.epoch) {
+                ov.stamp[k] = ov.epoch;
+                ov.val[k]   = cuts_[ci].usage(b);
+            }
+            ov.val[k] += eff_width * w;
+        } else {
+            cuts_[ci].add_usage(b, eff_width * w);
+        }
     });
 }
 
@@ -948,7 +1006,7 @@ double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
         if (cap <= 0.0) { blocked = true; return; }
-        double ov = c.usage(b) + charged * w - cap;
+        double ov = cand_usage_(ci, b) + charged * w - cap;
         if (ov <= 0.0) return;     // fits — no cost
         peak_cost = std::max(peak_cost, kCong_ * ov / cap);
     });
@@ -991,7 +1049,7 @@ double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
         if (cap <= 0.0) return;
-        double util = c.usage(b) / cap;
+        double util = cand_usage_(ci, b) / cap;
         if (util > peak) peak = util;
     });
 
@@ -1266,34 +1324,23 @@ std::vector<Segment> CongestionPlanner::junction_extended_segments(
 // and return the cheapest admissible one for the given mode.  Pure scoring:
 // the cut state is restored before returning; the caller commits the winner
 // with commit_plan().
-CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
-        const BundleWrapper& bw, PlanMode mode,
-        std::set<std::pair<int,int>>* contended,
-        std::vector<CandidateCost>* costs_out) {
-    PlanResult res;
-    if (bw.input.candidates.empty()) return res;
 
-    // Fractional-share context (Phase 3 Tier 2): every capacity read below
-    // sees this wrapper's s × supply on its shared layers.  Cleared on exit
-    // (single-threaded per planner instance; parallel sweeps use per-thread
-    // planner copies).
-    cur_share_input_ = &bw.input;
-    struct ShareCtxReset {
-        const BundleInput*& p;
-        ~ShareCtxReset() { p = nullptr; }
-    } share_ctx_reset_{cur_share_input_};
-
-    const bool enforce_window   = (mode != PlanMode::BEST_EFFORT);
-    const bool enforce_overflow = (mode == PlanMode::STRICT);
+// Score ONE candidate topology against the shared base cut state.  The
+// candidate's within-charges go to `overlay` (cleared at entry — the
+// per-candidate rollback), reads route through cand_usage_, and cuts_ is
+// never written — so the evaluation is pure per candidate and safe to run
+// concurrently on worker threads, each with its own overlay.  The body is
+// the historical plan_bundle candidate-loop body verbatim; the loop's tail
+// (debug-view recording, skips, compare) lives in plan_bundle's ordered
+// reduction so the winner and every tie-break replay the sequential sweep.
+CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
+        const BundleWrapper& bw, int ci, PlanMode mode,
+        const CandCtx& ctx, CandOverlay& overlay) {
+    CandScore out;
     constexpr double kOvEps = 1e-6;   // float noise only — any real overflow is hard
-
-    // Bit count for the honest per-layer width model (eff_bus_width);
-    // 0 (hand-built wrappers without nets) falls back to width x dilution.
-    const int nbits = (int)bw.input.original_bundle.get_net_names().size();
-    // Tapered fan-in width model: a segment carrying a bit SUBSET (seg_bits)
-    // is charged for its member bits only — count for pattern layers, a
-    // proportional base width for the dilution fallback.  Non-fan-in
-    // bundles (empty seg_bits) are byte-identical to the bundle-level model.
+    const bool enforce_window   = ctx.enforce_window;
+    const bool enforce_overflow = ctx.enforce_overflow;
+    const int  nbits = ctx.nbits;
     auto seg_n = [&](const Topology& t, int si) {
         return seg_bit_count(t, si, nbits);
     };
@@ -1303,77 +1350,17 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                    ? bw.input.width * ((double)n / (double)nbits)
                    : bw.input.width;
     };
+    const auto&  h_layers_rev = *ctx.h_layers_rev;
+    const auto&  v_layers_rev = *ctx.v_layers_rev;
+    const auto&  layer_load   = *ctx.layer_load;
+    const double max_h_load   = ctx.max_h_load;
+    const double max_v_load   = ctx.max_v_load;
 
-    auto h_layers = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
-    auto v_layers = layers_.get_layer_ids_by_dir(LayerDir::VERTICAL);
-    if (h_layers.empty()) h_layers.push_back(4);
-    if (v_layers.empty()) v_layers.push_back(5);
-    // Reversed copies: highest layer ID first so ties break toward higher metal.
-    auto h_layers_rev = h_layers; std::reverse(h_layers_rev.begin(), h_layers_rev.end());
-    auto v_layers_rev = v_layers; std::reverse(v_layers_rev.begin(), v_layers_rev.end());
+    overlay.clear();
+    t_cand_overlay_ = &overlay;
+    struct OverlayReset { ~OverlayReset() { t_cand_overlay_ = nullptr; } } ovr;
 
-    // Candidate indices to evaluate.  A GROUP pin (pinned_group) restricts the
-    // search to a super-candidate's members; a SINGLE pin to one index; else the
-    // full sweep.  With no group pin this reproduces the historical
-    // [ci_lo, ci_hi) range exactly, so planning is byte-identical.
-    std::vector<int> cand_indices;
-    for (int ci : bw.input.pinned_group)
-        if (ci >= 0 && ci < (int)bw.input.candidates.size())
-            cand_indices.push_back(ci);
-    if (cand_indices.empty()) {
-        // Guard the single-pin path exactly as the pinned_group path above:
-        // an out-of-range selected_topology_index (its default is -1, or a stale
-        // pin after the pool shrank) must not index candidates[] out of bounds.
-        // An incoherent pin is treated as "not usefully pinned" → full sweep,
-        // turning a SIGSEGV into well-defined behavior (issue #454). The
-        // supported CLI never hits this (select_topology sets the flag AND a
-        // valid index together); the pybind fields are independently writable.
-        const int n = (int)bw.input.candidates.size();
-        const int sel = bw.plan.selected_topology_index;
-        const bool valid_pin = bw.input.topology_pinned && sel >= 0 && sel < n;
-        int ci_lo = valid_pin ? sel     : 0;
-        int ci_hi = valid_pin ? sel + 1 : n;
-        for (int ci = ci_lo; ci < ci_hi; ++ci) cand_indices.push_back(ci);
-    }
-
-    res.best_topo     = cand_indices.empty() ? 0 : cand_indices.front();
-    double best_score = std::numeric_limits<double>::max();
-
-    // Each topology candidate is scored from the same base cut state.  The
-    // within-candidate charges (apply_segment, so later segments of the SAME
-    // candidate see the updated congestion) are recorded in the candidate
-    // undo log and rolled back in reverse — an exact-value restore of only
-    // the touched bands, replacing the full cuts_ deep copy whose memcpy
-    // dominated chip-scale planning (see cand_undo_ in the header).
-    cand_undo_on_ = true;
-    cand_undo_.clear();
-    auto rollback_candidate = [&]() {
-        for (auto it = cand_undo_.rbegin(); it != cand_undo_.rend(); ++it)
-            cuts_[std::get<0>(*it)].set_usage(std::get<1>(*it),
-                                              std::get<2>(*it));
-        cand_undo_.clear();
-    };
-
-    // Per-layer committed load (summed band usage) at this bundle's turn, and the
-    // max over each direction's layers, for the load-balancing tie-breaker.  The
-    // load reflects only already-committed bundles (within-candidate charges are
-    // restored per candidate), so it grows monotonically across the greedy
-    // schedule and steers later bundles onto the layers earlier ones left empty.
-    std::map<int,double> layer_load;
-    for (const auto& c : cuts_) {
-        double u = 0.0;
-        for (int b = 0; b < c.num_bands(); ++b) u += c.usage(b);
-        layer_load[c.layer_id] += u;
-    }
-    double max_h_load = 1.0, max_v_load = 1.0;
-    for (const auto& [lid, u] : layer_load) {
-        const Layer* L = layers_.get_layer(lid);
-        if (L && L->dir == LayerDir::HORIZONTAL) max_h_load = std::max(max_h_load, u);
-        else                                     max_v_load = std::max(max_v_load, u);
-    }
-
-    for (int ci : cand_indices) {
-        const Topology& topo = bw.input.candidates[ci];
+    const Topology& topo = bw.input.candidates[ci];
 
         // Greedy per-segment layer assignment within this topology.
         // Each segment independently gets the layer that minimises its
@@ -1574,9 +1561,9 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     best_ov = 9999.0;
                 if (enforce_overflow && best_ov > kOvEps) {
                     topo_infeasible = true;
-                    if (contended)
+                    if (ctx.want_contended)
                         collect_overflow_bands(gate_seg, best_lid, eff, best_pp,
-                                               slide_lo, slide_hi, *contended);
+                                               slide_lo, slide_hi, out.contended);
                 }
             } else {
                 // Iterate highest-ID first so equal-cost layers prefer higher metal.
@@ -1620,9 +1607,9 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     // real overlap — so the layer is not a choice, however
                     // cheap its soft cost.
                     if (enforce_overflow && ov > kOvEps) {
-                        if (contended)
+                        if (ctx.want_contended)
                             collect_overflow_bands(gate_seg, lid, eff, pp,
-                                                   slide_lo, slide_hi, *contended);
+                                                   slide_lo, slide_hi, out.contended);
                         continue;
                     }
                     // Dead-span gate for NON-TOP layers (opt-in:
@@ -1657,9 +1644,9 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                                                      /*with_midpoint_fallback=*/false,
                                                      /*use_raw_span=*/true);
                         if (sup == 0) {          // dead span: no keepout-clear track
-                            if (contended)
+                            if (ctx.want_contended)
                                 collect_overflow_bands(seg, lid, eff, pp,
-                                                       slide_lo, slide_hi, *contended);
+                                                       slide_lo, slide_hi, out.contended);
                             continue;
                         }
                     }
@@ -1751,7 +1738,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                 cand_share_use[best_lid] += eff;
             seg_layers.push_back(best_lid);
             seg_perp.push_back(perp_pos);
-            if (costs_out)
+            if (ctx.want_costs)
                 seg_costs.push_back({si, best_lid, best_cong, best_span, best_base,
                                      best_bal, best_hgt, best_pk, best_s});
             topo_overflow = std::max(topo_overflow, best_ov);
@@ -1816,55 +1803,215 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         }
         topo_score += kWL_ * wl_est;
 
+        // Package the evaluation; plan_bundle's ordered reduction applies
+        // the debug-view recording, the infeasible/share skips and the serial
+        // compare exactly as the historical in-loop tail did.
+        out.score      = topo_score;
+        out.overflow   = topo_overflow;
+        out.wl_term    = kWL_ * wl_est;
+        out.infeasible = topo_infeasible;
+        out.seg_layers = std::move(seg_layers);
+        out.seg_perp   = std::move(seg_perp);
+        out.seg_costs  = std::move(seg_costs);
+        // Scalar collective budget gate (Phase 3 Q3, STRICT only): a
+        // candidate whose commit would push this wrapper's share_group past
+        // a shared layer's budget is refused at the reduction and the ladder
+        // moves on — ALLOW_OVERFLOW/BEST_EFFORT may still commit it (LOUD via
+        // the ladder's own warnings + the §9.7 post-plan audit), never strand.
+        if (!topo_infeasible && mode == PlanMode::STRICT &&
+                !share_budget_ok_(bw, topo, out.seg_layers))
+            out.share_refused = true;
+        return out;
+
+}
+
+// plan_bundle's candidate-scoring worker count.  Byte-identity never depends
+// on this (the ordered reduction is decision-identical at any thread count),
+// so the gate is purely a performance threshold: tiny pools stay sequential
+// because their evaluations are microseconds-scale and thread spawn is not.
+int CongestionPlanner::resolved_plan_threads_(int ncand) const {
+    if (ncand < 8) return 1;                 // small-pool gate (perf only)
+    int n = plan_threads_;
+    if (n <= 0) {
+        if (const char* e = std::getenv("BUDA_PLAN_THREADS")) n = std::atoi(e);
+        if (n <= 0) {
+            unsigned hw = std::thread::hardware_concurrency();
+            n = hw ? (int)hw : 1;
+        }
+    }
+    return std::max(1, std::min({n, ncand, 8}));
+}
+
+CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
+        const BundleWrapper& bw, PlanMode mode,
+        std::set<std::pair<int,int>>* contended,
+        std::vector<CandidateCost>* costs_out) {
+    PlanResult res;
+    if (bw.input.candidates.empty()) return res;
+
+    // Fractional-share context (Phase 3 Tier 2): every capacity read below
+    // sees this wrapper's s × supply on its shared layers.  Cleared on exit
+    // (single-threaded per planner instance; parallel sweeps use per-thread
+    // planner copies).
+    cur_share_input_ = &bw.input;
+    struct ShareCtxReset {
+        const BundleInput*& p;
+        ~ShareCtxReset() { p = nullptr; }
+    } share_ctx_reset_{cur_share_input_};
+
+    const bool enforce_window   = (mode != PlanMode::BEST_EFFORT);
+    const bool enforce_overflow = (mode == PlanMode::STRICT);
+    constexpr double kOvEps = 1e-6;   // float noise only — any real overflow is hard
+
+    // Bit count for the honest per-layer width model (eff_bus_width);
+    // 0 (hand-built wrappers without nets) falls back to width x dilution.
+    const int nbits = (int)bw.input.original_bundle.get_net_names().size();
+    // Tapered fan-in width model: a segment carrying a bit SUBSET (seg_bits)
+    // is charged for its member bits only — count for pattern layers, a
+    // proportional base width for the dilution fallback.  Non-fan-in
+    // bundles (empty seg_bits) are byte-identical to the bundle-level model.
+    auto seg_n = [&](const Topology& t, int si) {
+        return seg_bit_count(t, si, nbits);
+    };
+    auto seg_w = [&](const Topology& t, int si) {
+        const int n = seg_bit_count(t, si, nbits);
+        return (nbits > 0 && n != nbits)
+                   ? bw.input.width * ((double)n / (double)nbits)
+                   : bw.input.width;
+    };
+
+    auto h_layers = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
+    auto v_layers = layers_.get_layer_ids_by_dir(LayerDir::VERTICAL);
+    if (h_layers.empty()) h_layers.push_back(4);
+    if (v_layers.empty()) v_layers.push_back(5);
+    // Reversed copies: highest layer ID first so ties break toward higher metal.
+    auto h_layers_rev = h_layers; std::reverse(h_layers_rev.begin(), h_layers_rev.end());
+    auto v_layers_rev = v_layers; std::reverse(v_layers_rev.begin(), v_layers_rev.end());
+
+    // Candidate indices to evaluate.  A GROUP pin (pinned_group) restricts the
+    // search to a super-candidate's members; a SINGLE pin to one index; else the
+    // full sweep.  With no group pin this reproduces the historical
+    // [ci_lo, ci_hi) range exactly, so planning is byte-identical.
+    std::vector<int> cand_indices;
+    for (int ci : bw.input.pinned_group)
+        if (ci >= 0 && ci < (int)bw.input.candidates.size())
+            cand_indices.push_back(ci);
+    if (cand_indices.empty()) {
+        // Guard the single-pin path exactly as the pinned_group path above:
+        // an out-of-range selected_topology_index (its default is -1, or a stale
+        // pin after the pool shrank) must not index candidates[] out of bounds.
+        // An incoherent pin is treated as "not usefully pinned" → full sweep,
+        // turning a SIGSEGV into well-defined behavior (issue #454). The
+        // supported CLI never hits this (select_topology sets the flag AND a
+        // valid index together); the pybind fields are independently writable.
+        const int n = (int)bw.input.candidates.size();
+        const int sel = bw.plan.selected_topology_index;
+        const bool valid_pin = bw.input.topology_pinned && sel >= 0 && sel < n;
+        int ci_lo = valid_pin ? sel     : 0;
+        int ci_hi = valid_pin ? sel + 1 : n;
+        for (int ci = ci_lo; ci < ci_hi; ++ci) cand_indices.push_back(ci);
+    }
+
+    res.best_topo     = cand_indices.empty() ? 0 : cand_indices.front();
+    double best_score = std::numeric_limits<double>::max();
+
+    // Each topology candidate is scored from the same base cut state: the
+    // within-candidate charges go into a per-thread scoring OVERLAY (see
+    // score_candidate_ / t_cand_overlay) — cuts_ stays read-only for the
+    // whole scoring pass and rollback is the overlay clear at each entry.
+
+    // Per-layer committed load (summed band usage) at this bundle's turn, and the
+    // max over each direction's layers, for the load-balancing tie-breaker.  The
+    // load reflects only already-committed bundles (within-candidate charges are
+    // restored per candidate), so it grows monotonically across the greedy
+    // schedule and steers later bundles onto the layers earlier ones left empty.
+    std::map<int,double> layer_load;
+    for (const auto& c : cuts_) {
+        double u = 0.0;
+        for (int b = 0; b < c.num_bands(); ++b) u += c.usage(b);
+        layer_load[c.layer_id] += u;
+    }
+    double max_h_load = 1.0, max_v_load = 1.0;
+    for (const auto& [lid, u] : layer_load) {
+        const Layer* L = layers_.get_layer(lid);
+        if (L && L->dir == LayerDir::HORIZONTAL) max_h_load = std::max(max_h_load, u);
+        else                                     max_v_load = std::max(max_v_load, u);
+    }
+
+    // Scoring context shared by every candidate evaluation (read-only).
+    CandCtx ctx;
+    ctx.h_layers_rev     = &h_layers_rev;
+    ctx.v_layers_rev     = &v_layers_rev;
+    ctx.layer_load       = &layer_load;
+    ctx.max_h_load       = max_h_load;
+    ctx.max_v_load       = max_v_load;
+    ctx.nbits            = nbits;
+    ctx.enforce_window   = enforce_window;
+    ctx.enforce_overflow = enforce_overflow;
+    ctx.want_contended   = (contended != nullptr);
+    ctx.want_costs       = (costs_out != nullptr);
+
+    // Score every candidate.  Each evaluation reads the SAME base cut state
+    // (cuts_ is read-only during scoring; a candidate's own charges live in
+    // a per-thread overlay), so candidates may be scored on worker threads
+    // with per-candidate results identical to the sequential loop; the
+    // ordered reduction below then replays the sequential compare, so the
+    // winner — and every tie-break — is identical to the serial sweep.
+    std::vector<CandScore> scores(cand_indices.size());
+    const int n_threads = resolved_plan_threads_((int)cand_indices.size());
+    if (n_threads > 1) {
+        std::atomic<size_t> next{0};
+        auto worker = [&]() {
+            CandOverlay& ov = thread_overlay_();   // persistent per thread
+            for (size_t k; (k = next.fetch_add(1)) < cand_indices.size(); )
+                scores[k] = score_candidate_(bw, cand_indices[k], mode, ctx, ov);
+        };
+        std::vector<std::thread> pool;
+        pool.reserve(n_threads - 1);
+        for (int t = 1; t < n_threads; ++t) pool.emplace_back(worker);
+        worker();
+        for (auto& th : pool) th.join();
+    } else {
+        CandOverlay& ov = thread_overlay_();       // persistent per thread
+        for (size_t k = 0; k < cand_indices.size(); ++k)
+            scores[k] = score_candidate_(bw, cand_indices[k], mode, ctx, ov);
+    }
+
+    // Ordered reduction — the sequential loop's tail, verbatim semantics.
+    for (size_t k = 0; k < cand_indices.size(); ++k) {
+        const int ci = cand_indices[k];
+        CandScore& cs = scores[k];
+        if (contended)
+            contended->insert(cs.contended.begin(), cs.contended.end());
         if (costs_out) {                       // debug cost view: record this candidate
             CandidateCost cc;
             cc.cand_index = ci;
-            cc.total      = topo_score;
-            cc.wl_term    = kWL_ * wl_est;
-            cc.seg_cost   = topo_score - cc.wl_term;   // max-over-segments seg score
-            cc.feasible   = !topo_infeasible;
-            cc.segs       = std::move(seg_costs);
+            cc.total      = cs.score;
+            cc.wl_term    = cs.wl_term;
+            cc.seg_cost   = cs.score - cs.wl_term;   // max-over-segments seg score
+            cc.feasible   = !cs.infeasible;
+            cc.segs       = std::move(cs.seg_costs);
             costs_out->push_back(std::move(cc));
         }
-
-        if (topo_infeasible) {
-            rollback_candidate();
-            continue;
-        }
-
-        // Scalar collective budget gate (Phase 3 Q3, STRICT only): a
-        // candidate whose commit would push this wrapper's share_group past
-        // a shared layer's budget is refused here and the ladder moves on —
-        // ALLOW_OVERFLOW/BEST_EFFORT may still commit it (LOUD via the
-        // ladder's own warnings + the §9.7 post-plan audit), never strand.
-        if (mode == PlanMode::STRICT &&
-                !share_budget_ok_(bw, topo, seg_layers)) {
-            rollback_candidate();
-            continue;
-        }
+        if (cs.infeasible || cs.share_refused) continue;
 
         bool is_better = false;
-        if (topo_score < best_score - 1e-6) {
+        if (cs.score < best_score - 1e-6) {
             is_better = true;
-        } else if (std::abs(topo_score - best_score) < 1e-6) {
+        } else if (std::abs(cs.score - best_score) < 1e-6) {
             // Tie-breaker: stable selection by index.
             if (ci < res.best_topo) is_better = true;
         }
-
         if (is_better) {
-            best_score     = topo_score;
-            res.score      = topo_score;
-            res.overflow   = topo_overflow;
+            best_score     = cs.score;
+            res.score      = cs.score;
+            res.overflow   = cs.overflow;
             res.best_topo  = ci;
-            res.seg_layers = seg_layers;
-            res.seg_perp   = seg_perp;
+            res.seg_layers = std::move(cs.seg_layers);
+            res.seg_perp   = std::move(cs.seg_perp);
             res.found      = true;
         }
-
-        // Roll back this candidate's charges before scoring the next one.
-        rollback_candidate();
     }
-    cand_undo_on_ = false;
     return res;
 }
 
