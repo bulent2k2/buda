@@ -149,13 +149,13 @@ failures — that is when they are most useful.
 
 ### The snapshot table is refreshed by the same job
 
-`qor_table.md` is a *different* artifact from everything above, and the two are
+`qor/qor_table.md` is a *different* artifact from everything above, and the two are
 easy to confuse:
 
 | | `tools/qor_corpus.py` | `tools/qor_table.py` |
 |---|---|---|
 | purpose | A/B **compare** two builds, gate on regressions | single-build **snapshot** |
-| output | `qor-current.json` + a diff + an exit code | `qor_table.md` (+ `qor_table_rows.json`) |
+| output | `qor-current.json` + a diff + an exit code | `qor/qor_table.md` (+ `qor/qor_table_rows.json`) |
 | in the nightly | the regression gate | the table refresh |
 
 Nothing refreshed the table, so it drifted **46 commits stale** before anyone

@@ -37,7 +37,7 @@ Buda.app/Contents/
   Info.plist                 # CFBundleName=Buda, CFBundleExecutable=Buda, …
   MacOS/Buda                 # shell launcher: resolve repo root, set PYTHONPATH,
                              #   exec /usr/bin/env python3 <entry> "$@"
-  Resources/buda.icns        # from buda_icon.png (sips+iconutil); optional
+  Resources/buda.icns        # from assets/buda_icon.png (sips+iconutil); optional
 ```
 
 No interpreter is copied — `/usr/bin/env python3` resolves to whatever python is
@@ -48,7 +48,7 @@ MacOS/Buda` → up 4), so the bundle is relocatable within the checkout.
 ## Build & use
 
 ```bash
-python3 tools/make_macos_apps.py          # once, or after changing buda_icon.png
+python3 tools/make_macos_apps.py          # once, or after changing assets/buda_icon.png
 ```
 
 The bundles are host-specific build products, so `bin/*.app/` is git-ignored.

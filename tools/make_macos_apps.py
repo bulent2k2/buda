@@ -34,7 +34,7 @@ Usage:
     python3 tools/make_macos_apps.py          # build both bundles into bin/
     python3 tools/make_macos_apps.py --force  # rebuild even if up to date
 
-Run once (or after changing buda_icon.png). The bundles are host-specific
+Run once (or after changing assets/buda_icon.png). The bundles are host-specific
 build products, so bin/*.app is git-ignored. Off macOS this still writes the
 Info.plist + launcher (handy to inspect); the .icns step is skipped (it needs
 Apple's sips/iconutil), and buda_viz.set_dock_icon() supplies the icon at
@@ -49,7 +49,7 @@ import tempfile
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)                       # repo root (parent of tools/)
 _BIN = os.path.join(_ROOT, "bin")
-_ICON_PNG = os.path.join(_ROOT, "buda_icon.png")
+_ICON_PNG = os.path.join(_ROOT, "assets", "buda_icon.png")
 
 # (bundle name, entrypoint relative to repo root, bundle identifier)
 _APPS = [
@@ -95,7 +95,7 @@ def _plist(name, identifier, with_icon):
 
 
 def _build_icns(dst_icns):
-    """Render buda_icon.png → dst_icns via Apple's sips + iconutil.
+    """Render assets/buda_icon.png → dst_icns via Apple's sips + iconutil.
     Returns True on success. No-op (False) if the PNG or the tools are absent
     (e.g. running off macOS) — set_dock_icon() covers the icon at runtime."""
     if not os.path.exists(_ICON_PNG):
