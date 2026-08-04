@@ -856,7 +856,7 @@ What the sweep found instead (unchanged verdicts re-verified per seat):
 | `chip3a_bottomup` | 8 | `LAYER_STARVED` — no sibling has adequate supply; no mechanism helps |
 | `chip3a_bottomup` | 1 | `FREE_SIBLING` — investigated below |
 | `rnr/mix2_fast_on_aligned_sql` | 1 | `BLOCKED_BY_UNLOCKED` (b61 — unchanged) |
-| the other 35 flows | 0 | — |
+| the other 36 flows | 0 | — |
 
 **b61, the seat this open was written around, is out of reach by arithmetic,
 not by tuning.** Its one adequate sibling M4 holds 17 tracks for 16 bits, so
