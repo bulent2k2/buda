@@ -10,13 +10,16 @@ name: PR QoR
 # baseline predated a corpus row another PR added mid-flight.  A merge-base
 # comparison has no such window -- both sides are swept here, now, by this job.
 #
-# LABEL-GATED, not on by default: two builds + two sweeps is ~16 min, far too
-# much for every PR.  Add the `run-qor` label to a PR that touches topology,
+# LABEL-GATED, not on by default: two builds + two sweeps.  MEASURED 19m 39s on
+# the first real run (base side alone 9m 44s) -- far too much for every PR.  Add the `run-qor` label to a PR that touches topology,
 # planner or NUTS, which is exactly when CLAUDE.md already prescribes a corpus
 # sweep.
 #
 # The merge-base sweep is cached by its commit SHA, so pushing again to the same
-# PR re-sweeps only the head (~8 min).
+# PR re-sweeps only the head (~10 min).
+#
+# NOTE for anyone labelling a PR: the job GATES THE MERGE while it runs, so a
+# labelled PR is unmergeable for ~20 min.  Label deliberately, not reflexively.
 
 on:
   pull_request:
