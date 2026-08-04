@@ -50,6 +50,7 @@ classpath containing scala3-compiler_3 and its dependencies.
 """
 import glob
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -78,25 +79,67 @@ _NO_SCALA = ("Scala toolchain absent (optional) — "
              "set BUDA_SCALA_PORT_TEST=1 to require it")
 
 
-def _scala_classpath():
-    """A classpath containing the Scala 3 compiler, or None.
+def scala_version():
+    """The Scala version the PROJECT builds with, read from web/build.sbt.
 
-    BUDA_SCALA_CP wins; otherwise look where `mvn dependency:get` and coursier
-    put things.  Returns None rather than raising so the caller decides whether
-    absence is a skip or a failure.
+    Single source of truth on purpose: if the port is moved to a new Scala and
+    the cache still holds only the old one, this test must skip (or fail in
+    required mode) rather than quietly compile the port under a compiler the
+    project does not use.
+    """
+    sbt = os.path.join(_ROOT, "web", "build.sbt")
+    with open(sbt) as fh:
+        m = re.search(r'scalaVersion\s*:=\s*"([^"]+)"', fh.read())
+    assert m, f"scalaVersion not found in {sbt}"
+    return m.group(1)
+
+
+# Exactly the toolchain scala3-compiler needs — NOT "every jar in the cache".
+# Globbing the whole cache put ~70 unrelated jars (maven's own doxia/velocity/
+# plexus/commons tree) on the compiler classpath; it happened to work on a
+# single-version machine and would pick an arbitrary dotty.tools.dotc.Main on a
+# developer cache holding several Scala versions (review #578).
+_PINNED = ("scala3-compiler_3", "scala3-library_3", "scala3-interfaces",
+           "tasty-core_3")                      # must match scala_version()
+_SUPPORT = ("scala-library-2.13", "scala-asm-", "compiler-interface-",
+            "util-interface-")                  # version-independent
+
+
+def _scala_classpath():
+    """A classpath holding ONE coherent Scala toolchain, or None.
+
+    BUDA_SCALA_CP wins verbatim; otherwise assemble it from the pinned version's
+    jars wherever `mvn dependency:get` or coursier cached them.  Returns None
+    rather than raising, so the caller decides whether absence is a skip or a
+    failure.
     """
     explicit = os.environ.get("BUDA_SCALA_CP")
     if explicit:
         return explicit
+    ver = scala_version()
     roots = [os.path.expanduser("~/.m2/repository"),
              os.path.expanduser("~/.cache/coursier")]
     jars = []
     for root in roots:
         if os.path.isdir(root):
             jars += glob.glob(os.path.join(root, "**", "*.jar"), recursive=True)
-    if not any("scala3-compiler" in j for j in jars):
-        return None
-    return ":".join(jars)
+    picked, seen = [], set()
+
+    def take(basename_prefix):
+        for j in sorted(jars):
+            base = os.path.basename(j)
+            if base.startswith(basename_prefix) and base not in seen:
+                seen.add(base)
+                picked.append(j)
+                return True
+        return False
+
+    for art in _PINNED:                     # exact version — no substitutions
+        if not take(f"{art}-{ver}.jar"):
+            return None
+    for art in _SUPPORT:                    # any version of the support jars
+        take(art)
+    return os.pathsep.join(picked)
 
 
 _CP = None if _DISABLED else _scala_classpath()
@@ -154,7 +197,7 @@ def _fixture_text(analyses):
 def _run_scala(classes, analyses, tmp_path):
     fx = tmp_path / "fixtures.txt"
     fx.write_text(_fixture_text(analyses))
-    p = subprocess.run([_JAVA, "-cp", _CP + ":" + classes,
+    p = subprocess.run([_JAVA, "-cp", _CP + os.pathsep + classes,
                         "buda.web.test.Harness", str(fx)],
                        capture_output=True, text=True)
     assert p.returncode == 0, f"harness failed:\n{p.stdout}\n{p.stderr}"
