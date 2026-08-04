@@ -1,7 +1,7 @@
 # The shared 10-layer chip stack: M2/M3 LOW plus eight TOP layers M4-M11, each
 # pair coarser than the one below it, as real top metal is.
 #
-# SYMMETRIC UNITS, 10 SIGNAL TRACKS PER PERIOD.
+# SYMMETRIC UNITS, 16 SIGNAL TRACKS PER PERIOD.
 #
 # Every repeating unit is a PALINDROME: each rail carries the same gap before
 # it as after it, so the pattern is invariant under reflection and a flipped
@@ -11,60 +11,67 @@
 # not align a mirrored design: the ORIGIN has to put an axis on the instance
 # centrelines, which is what chip_tracks_mirror.buda adds on top of this.)
 #
-# Each group carries FIVE signals rather than four — 10 per period instead of
-# 8 — with the rail widths held and the signal width/spacing shrunk to fit.
-# The PERIOD of every layer is unchanged, so the 504 = LCM(18,18,24,56)
-# placement grid, `align_bottom_up` and every checked-in floorplan still hold;
-# the bit pitch is period/10, a uniform 20% finer than the old period/8.
+# SIXTEEN signals per period rather than the historical eight — eight per group
+# — and 16 = 2x8 is what makes this clean: every signal width and spacing simply
+# HALVES, and the gap g around each rail absorbs the rest.  Three consequences,
+# all of them exact rather than approximate:
 #
-# EVERY VALUE IS BINARY-EXACT (a multiple of 1/16), and that is a HARD
-# REQUIREMENT, not cosmetics.  `tracks_in_range` walks a period at a time with
-# `pos += width + space_after`, so hundreds of periods of accumulated rounding
-# decide whether a track sitting exactly ON a window edge is inside it.  The
-# first cut of this stack used the arithmetically obvious 0.8 / 0.4 / 0.7 …
-# (signal width and spacing scaled by exactly 8/10, which holds the signal
-# metal per period EXACTLY constant) — and not one of those values is
-# representable in binary.  The result was an off-by-one track at window edges
-# that broke template alignment: check_template_tracks reported "397 vs 396",
-# both cells went MISALIGNED, and the mirrored stack copied ZERO bits.
+#   * the PERIOD of every layer is unchanged, so the 504 = LCM(18,18,24,56)
+#     placement grid, `align_bottom_up` and every checked-in floorplan hold;
+#   * the signal METAL per period is unchanged on every layer (16 x w/2 == 8 x w),
+#     so the def_layer overheads below are the HISTORICAL numbers, untouched;
+#   * the bit pitch is exactly HALF the historical period/8.
 #
-# Exact density and binary-exactness are mutually exclusive here: holding the
-# metal needs w = 0.8*w_old, which is never a binary fraction.  Exactness wins,
-# so the density moves slightly and the def_layer overheads below move with it
-# (the widest miss is M2-M5, 55.56% -> 58.33%).  Widths keep each layer's
-# original width:spacing ratio.
+# EVERY VALUE IS BINARY-EXACT, and that is a HARD REQUIREMENT, not cosmetics.
+# `tracks_in_range` walks a period at a time with `pos += width + space_after`,
+# so hundreds of periods of accumulated rounding decide whether a track sitting
+# exactly ON a window edge is inside it.  An earlier cut of this stack used ten
+# signals per period via the arithmetically obvious scaling — width and spacing
+# x 8/10, which also holds the metal exactly constant — giving 0.8 / 0.4 / 0.7 …
+# and not one of those values is representable in binary.  The result was an
+# off-by-one track at window edges that broke template alignment:
+# check_template_tracks reported "397 vs 396", both cells went MISALIGNED, and
+# the mirrored stack copied ZERO bits, on a placement that had not changed.
 #
-#   layer  period  rail    w       s       g      overhead (was)   bit pitch (was)
-#   M2-M5    18     2     0.75   0.375   0.875    58.33 (55.56)    1.80  (2.25)
-#   M6       24     3     0.75   0.75    1.125    68.75 (66.67)    2.40  (3.00)
-#   M7       39     6     1.625  0.8125  1.0625   58.33 (58.97)    3.90  (4.875)
-#   M8/M9    56     8     2.375  1.1875  1.6875   57.59 (57.14)    5.60  (7.00)
-#   M10/M11  74    10     3.25   1.625   2.125    56.08 (56.76)    7.40  (9.25)
+# Doubling has no such tension: halving a binary-exact value is binary-exact, so
+# 16 tracks keeps BOTH the exact metal and the exact arithmetic, which 10 could
+# not.  That is the reason to jump to 2x rather than creep to 10 or 12.
+#
+#   layer  period  rail   w     s      g      overhead   bit pitch (was)
+#   M2-M5    18     2    0.5   0.25   0.625    55.56%     1.125  (2.25)
+#   M6       24     3    0.5   0.5    0.75     66.67%     1.500  (3.00)
+#   M7       39     6    1     0.5    1        58.97%     2.438  (4.875)
+#   M8/M9    56     8    1.5   0.75   1.375    57.14%     3.500  (7.00)
+#   M10/M11  74    10    2     1      2        56.76%     4.625  (9.25)
+#
+# The cost is OUTSIDE this model: minimum feature halves (M2 signal 1 -> 0.5,
+# spacing 0.5 -> 0.25 against the historical technology).  Whether that is
+# manufacturable is a technology decision, not a routing one.
 #
 # Overhead percentages are the patterns' measured values (1 - signal density) —
 # see report_overhead below.
-def_layer  2 M2  H LOW 58.33
-def_layer  3 M3  V LOW 58.33
-def_layer  4 M4  H TOP 58.33
-def_layer  5 M5  V TOP 58.33
-def_layer  6 M6  H TOP 68.75
-def_layer  7 M7  V TOP 58.33
-def_layer  8 M8  H TOP 57.59
-def_layer  9 M9  V TOP 57.59
-def_layer 10 M10 H TOP 56.08
-def_layer 11 M11 V TOP 56.08
+def_layer  2 M2  H LOW 55.56
+def_layer  3 M3  V LOW 55.56
+def_layer  4 M4  H TOP 55.56
+def_layer  5 M5  V TOP 55.56
+def_layer  6 M6  H TOP 66.67
+def_layer  7 M7  V TOP 58.97
+def_layer  8 M8  H TOP 57.14
+def_layer  9 M9  V TOP 57.14
+def_layer 10 M10 H TOP 56.76
+def_layer 11 M11 V TOP 56.76
 
 # Track patterns are REQUIRED for Detailed NUTS.
 # Format: <layer_id> <origin> [<type> <width> <spacing>] ...
-def_track_pattern 2  -100   POWER 2 0.875  SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.875  GROUND 2 0.875  SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.875
-def_track_pattern 3  0      POWER 2 0.875  SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.875  GROUND 2 0.875  SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.875
-def_track_pattern 4  -200   POWER 2 0.875  SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.875  GROUND 2 0.875  SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.875
-def_track_pattern 5  0      POWER 2 0.875  SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.875  GROUND 2 0.875  SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.375 SIGNAL 0.75 0.875
-def_track_pattern 6  -400   POWER 3 1.125  SIGNAL 0.75 0.75 SIGNAL 0.75 0.75 SIGNAL 0.75 0.75 SIGNAL 0.75 0.75 SIGNAL 0.75 1.125  GROUND 3 1.125  SIGNAL 0.75 0.75 SIGNAL 0.75 0.75 SIGNAL 0.75 0.75 SIGNAL 0.75 0.75 SIGNAL 0.75 1.125
-def_track_pattern 7  -600   POWER 6 1.0625  SIGNAL 1.625 0.8125 SIGNAL 1.625 0.8125 SIGNAL 1.625 0.8125 SIGNAL 1.625 0.8125 SIGNAL 1.625 1.0625  GROUND 6 1.0625  SIGNAL 1.625 0.8125 SIGNAL 1.625 0.8125 SIGNAL 1.625 0.8125 SIGNAL 1.625 0.8125 SIGNAL 1.625 1.0625
-def_track_pattern 8  -800   POWER 8 1.6875  SIGNAL 2.375 1.1875 SIGNAL 2.375 1.1875 SIGNAL 2.375 1.1875 SIGNAL 2.375 1.1875 SIGNAL 2.375 1.6875  GROUND 8 1.6875  SIGNAL 2.375 1.1875 SIGNAL 2.375 1.1875 SIGNAL 2.375 1.1875 SIGNAL 2.375 1.1875 SIGNAL 2.375 1.6875
-def_track_pattern 9  -1000  POWER 8 1.6875  SIGNAL 2.375 1.1875 SIGNAL 2.375 1.1875 SIGNAL 2.375 1.1875 SIGNAL 2.375 1.1875 SIGNAL 2.375 1.6875  GROUND 8 1.6875  SIGNAL 2.375 1.1875 SIGNAL 2.375 1.1875 SIGNAL 2.375 1.1875 SIGNAL 2.375 1.1875 SIGNAL 2.375 1.6875
-def_track_pattern 10 -1200  POWER 10 2.125  SIGNAL 3.25 1.625 SIGNAL 3.25 1.625 SIGNAL 3.25 1.625 SIGNAL 3.25 1.625 SIGNAL 3.25 2.125  GROUND 10 2.125  SIGNAL 3.25 1.625 SIGNAL 3.25 1.625 SIGNAL 3.25 1.625 SIGNAL 3.25 1.625 SIGNAL 3.25 2.125
-def_track_pattern 11 -1400  POWER 10 2.125  SIGNAL 3.25 1.625 SIGNAL 3.25 1.625 SIGNAL 3.25 1.625 SIGNAL 3.25 1.625 SIGNAL 3.25 2.125  GROUND 10 2.125  SIGNAL 3.25 1.625 SIGNAL 3.25 1.625 SIGNAL 3.25 1.625 SIGNAL 3.25 1.625 SIGNAL 3.25 2.125
+def_track_pattern 2  -100   POWER 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625  GROUND 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625
+def_track_pattern 3  0      POWER 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625  GROUND 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625
+def_track_pattern 4  -200   POWER 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625  GROUND 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625
+def_track_pattern 5  0      POWER 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625  GROUND 2 0.625  SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.25 SIGNAL 0.5 0.625
+def_track_pattern 6  -400   POWER 3 0.75  SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.75  GROUND 3 0.75  SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.5 SIGNAL 0.5 0.75
+def_track_pattern 7  -600   POWER 6 1  SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 1  GROUND 6 1  SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 1
+def_track_pattern 8  -800   POWER 8 1.375  SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 1.375  GROUND 8 1.375  SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 1.375
+def_track_pattern 9  -1000  POWER 8 1.375  SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 1.375  GROUND 8 1.375  SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 0.75 SIGNAL 1.5 1.375
+def_track_pattern 10 -1200  POWER 10 2  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 2  GROUND 10 2  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 2
+def_track_pattern 11 -1400  POWER 10 2  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 2  GROUND 10 2  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 2
 
 report_overhead

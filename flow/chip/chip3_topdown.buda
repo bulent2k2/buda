@@ -15,11 +15,14 @@ add_blocks_from_bdb 0
 add_blocks_from_bdb 1 skip
 add_blocks_from_bdb 2 skip
 add_blocks_from_bdb 3 skip
+set_max_bundle_bits auto
 run_hier_bundler depth 3
 generate_hier_topologies
+set_planner_param healersAhead 1
 run_planner hier 5 signal_tracks
 run_nuts
 run_detailed_nuts
+negotiate_congestion
 report_wl
 check_design
 exit

@@ -67,7 +67,7 @@ def signal_density(slots):
 
 
 # --------------------------------------------------------------------------- #
-# the stack's shape: 10 signals per period, periods held
+# the stack's shape: 16 signals per period, periods held
 # --------------------------------------------------------------------------- #
 # The periods the 504 = LCM(18,18,24,56) placement grid is derived from.  A
 # change here invalidates every checked-in chip floorplan, so it is pinned.
@@ -81,12 +81,49 @@ def test_period_is_pinned(path, lid):
     assert centres(slots)[1] == PERIODS[lid]
 
 
+# The historical technology: 8 signals per period, these widths/spacings.  The
+# current stack is exactly 2x it, which is what keeps the metal and the
+# arithmetic both exact -- see test_doubling_holds_the_metal_exactly.
+HISTORIC = {2: (F(1), F(1, 2)), 3: (F(1), F(1, 2)), 4: (F(1), F(1, 2)),
+            5: (F(1), F(1, 2)), 6: (F(1), F(1)), 7: (F(2), F(1)),
+            8: (F(3), F(3, 2)), 9: (F(3), F(3, 2)),
+            10: (F(4), F(2)), 11: (F(4), F(2))}
+SIGNALS_PER_PERIOD = 16
+
+
 @pytest.mark.parametrize("path", [PLAIN, MIRROR])
 @pytest.mark.parametrize("lid", sorted(PERIODS))
-def test_ten_signals_per_period(path, lid):
-    """Two extra tracks per layer over the historical eight."""
+def test_sixteen_signals_per_period(path, lid):
+    """Double the historical eight."""
     tr, _ = centres(read_patterns(path)[lid][1])
-    assert sum(1 for _, t, _ in tr if t == "SIGNAL") == 10
+    assert sum(1 for _, t, _ in tr if t == "SIGNAL") == SIGNALS_PER_PERIOD
+
+
+@pytest.mark.parametrize("path", [PLAIN, MIRROR])
+@pytest.mark.parametrize("lid", sorted(PERIODS))
+def test_doubling_holds_the_metal_exactly(path, lid):
+    """16 = 2x8 means every signal width and spacing simply HALVES, so the
+    signal metal per period is IDENTICAL to the historical technology and the
+    def_layer overheads do not move at all.  This is the property that made 16
+    the right jump: at 10 tracks, holding the metal needed a x8/10 scaling whose
+    values are not binary fractions, and the two goals could not both be had."""
+    ow, os_ = HISTORIC[lid]
+    _, slots = read_patterns(path)[lid]
+    sig = [(w, s) for t, w, s in slots if t == "SIGNAL"]
+    assert {w for w, _ in sig} == {ow / 2}
+    # spacings are s except the one before each rail, which is the gap g
+    assert os_ / 2 in {s for _, s in sig}
+    metal = sum(w for w, _ in sig)
+    assert metal == 8 * ow, "signal metal per period must match the historical 8-track"
+
+
+@pytest.mark.parametrize("lid", sorted(PERIODS))
+def test_overheads_are_the_historical_numbers(lid):
+    """def_layer's declared overhead must equal 1 - density, and because the
+    metal is unchanged that is the historical figure."""
+    _, slots = read_patterns(PLAIN)[lid]
+    ow, _ = HISTORIC[lid]
+    assert signal_density(slots) == F(8 * ow, PERIODS[lid])
 
 
 def test_grid_is_the_lcm_of_the_layers_cells_may_use():
@@ -112,19 +149,23 @@ def test_every_value_is_binary_exact(path, lid):
 
     Every width, spacing and origin must therefore be exactly representable in
     binary.  This is the guard that keeps the arithmetically-obvious-but-wrong
-    choice (scaling by 8/10 to hold the signal metal exactly: 0.8 / 0.4 / 0.7)
-    from coming back."""
+    choice (at ten tracks, scaling by 8/10 to hold the signal metal
+    exactly: 0.8 / 0.4 / 0.7) from coming back."""
     origin, slots = read_patterns(path)[lid]
     vals = [origin] + [v for _, w, s in slots for v in (w, s)]
     for v in vals:
         assert (v * 65536).denominator == 1, f"M{lid}: {v} is not binary-exact"
 
 
-def test_the_rejected_scaling_would_not_be_binary_exact():
-    """Documents WHY the density had to move: holding the signal metal exactly
-    needs w = 0.8*w_old, and 4/5 is never a binary fraction.  Exactness and
-    exact density are mutually exclusive here."""
-    assert (F(4, 5) * 65536).denominator != 1
+def test_the_rejected_ten_track_scaling_would_not_be_binary_exact():
+    """Why 16 and not 10.  At ten tracks, holding the signal metal exactly needs
+    w = 0.8*w_old, and 4/5 is never a binary fraction -- so exact metal and
+    exact arithmetic were mutually exclusive and the metal had to give.
+    Doubling has no such tension: w/2 of a binary-exact w is binary-exact, so 16
+    tracks keeps BOTH."""
+    assert (F(4, 5) * 65536).denominator != 1                 # the 10-track scale
+    assert all((F(1, 2) * w * 65536).denominator == 1         # the 16-track scale
+               for w, _ in HISTORIC.values())
 
 
 # --------------------------------------------------------------------------- #
