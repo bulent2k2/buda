@@ -6,9 +6,12 @@
 # 6 instances, 432 leaf blocks, 13320 nets.  Rebuild recipe (deterministic
 # iteration budget) in flow/chip/ReadMe.md.
 #
-# TOP-DOWN variant: the plain hier pipeline, NO healers (fast experimentation —
-# add negotiate_congestion / ripup_reroute / refine_selection rounds manually
-# when studying healing at this scale).
+# TOP-DOWN variant: the plain hier pipeline, healed with negotiate_congestion
+# ONLY.  ripup_reroute is not affordable at this scale — it ran >10 minutes
+# without converging here against a 135s base flow — and refine_selection is an
+# end-of-flow WL polish that wants a converged endpoint.  For the healerless
+# fast-iteration mode drop the negotiate_congestion line and the
+# `set_planner_param healersAhead 1` above it; see flow/chip/ReadMe.md.
 source chip_tracks.buda
 open_bdb chip.bdb.sql
 derive_busterms 2

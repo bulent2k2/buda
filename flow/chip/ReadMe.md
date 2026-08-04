@@ -18,15 +18,24 @@ python3 tools/bdb_serialize.py dump chip.bdb chip.bdb.sql
 Repro
 ===
 ```
-buda flow/chip/chip_topdown.buda      # plain hier pipeline, no healers
+buda flow/chip/chip_topdown.buda      # plain hier pipeline + negotiate_congestion
 buda flow/chip/chip_bottomup.buda     # bottom-up templates + align_bottom_up
 ```
 
 Every vehicle heals with **`negotiate_congestion` only**.  `ripup_reroute` is
 not affordable at this scale — on `chip_topdown` it ran >10 minutes without
 converging against a 135s base flow — and `refine_selection` is an end-of-flow
-WL polish that wants a converged endpoint.  Delete the `negotiate_congestion`
-line for the old healerless fast-iteration mode.
+WL polish that wants a converged endpoint.
+
+For the **healerless fast-iteration mode** these vehicles used to have, delete
+that line and the `set_planner_param healersAhead 1` above it (which gates the
+proactive `kSegsRel` default and the `run_nuts` dead-span auto-escalation):
+
+```
+sed -e '/^negotiate_congestion$/d' -e '/^set_planner_param healersAhead 1$/d' \
+    flow/chip/chip_topdown.buda > /tmp/chip_topdown_nohealers.buda
+buda /tmp/chip_topdown_nohealers.buda
+```
 
 `chip_tracks.buda` is the shared **10-layer** stack + track patterns: M2/M3 LOW
 plus eight TOP layers M4–M11, each pair coarser than the one below it (M10/M11
@@ -239,11 +248,17 @@ Measured: an off-by-one track at window edges, `check_template_tracks`
 reporting "397 vs 396", both cells MISALIGNED, and **zero** bits copied — on a
 design whose placement had not changed at all.
 
-Exact density and binary-exactness are mutually exclusive here (holding the
-metal needs `w = 0.8·w_old`, and 4/5 is never a binary fraction).  Exactness
-wins; the density moves slightly and the overheads move with it — the widest
-miss is M2–M5, 55.56% → 58.33%.  A test pins it so the tempting version cannot
-come back.
+**At ten tracks** exact density and binary-exactness are mutually exclusive
+(holding the metal needs `w = 0.8·w_old`, and 4/5 is never a binary fraction),
+so exactness had to win and the overheads drifted — M2–M5 would have gone
+55.56% → 58.33%.
+
+That tension is what sent the stack to **sixteen**, where it disappears: 16 =
+2×8 halves every width and spacing, so the metal per period is unchanged, the
+`def_layer` overheads are the historical numbers (M2–M5 stay **55.56%**), and
+binary-exactness comes free.  The shipped stack therefore gives up nothing
+here.  Tests pin both halves — the exactness of every value, and the metal
+matching the historical 8-track so the overheads cannot silently drift.
 
 **M10 cannot be satisfied and does not need to be.**  Its half period 37 does
 not divide 504, so the three flipped centres fall on three different residues
@@ -458,8 +473,8 @@ rows are byte-identical under the fixes.)
 The deeper templating improves every headline QoR metric (overlaps −57%,
 unplaced −34%, viol_bundles −12% vs the 2-level twin at comparable
 planner time) — the dnuts- and mix2-level bundles solve in small
-cell-local frames and expand per template.  Healerless like its 2-level
-twin.
+cell-local frames and expand per template.  Heals with
+negotiate_congestion only, like its 2-level twin.
 
 chip3 bottom-up — nested templates at TWO levels (2026-07-31)
 ===
