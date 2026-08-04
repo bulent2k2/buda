@@ -18,24 +18,42 @@ python3 tools/bdb_serialize.py dump chip.bdb chip.bdb.sql
 Repro
 ===
 ```
-buda flow/chip/chip_topdown.buda      # plain hier pipeline, no healers
+buda flow/chip/chip_topdown.buda      # plain hier pipeline + negotiate_congestion
 buda flow/chip/chip_bottomup.buda     # bottom-up templates + align_bottom_up
 ```
 
-Both flows run WITHOUT healers for fast experimentation — add
-`negotiate_congestion` / `ripup_reroute` / `refine_selection` rounds manually
-when studying healing at this scale.  `chip_tracks.buda` is the shared
-**10-layer** stack + track patterns: M2/M3 LOW plus eight TOP layers M4–M11,
-each pair coarser than the one below it (M10/M11 use 4-wide signal wires on
-10-wide rails).  It extends big2's `tracks4top.buda` / mix2's
-`mix_tracks.buda` (identical 6-layer stacks) by four layers — chip is where
-a realistic top-metal count pays.  `chip_tracks_mirror.buda` is the same stack
-with **mirror-symmetric H patterns**, used by the two `chip_stack` vehicles
-because their placement is mirrored; see "A mirrored layout needs a
-mirror-symmetric technology" below.  The 6 → 8 → 10 study below is worth
-reading before copying this stack: the first extension is a clean win, the
-second is the diminishing-returns knee, and it exposed that a cap band
-written for one stack height is wrong on another.
+Every vehicle heals with **`negotiate_congestion` only**.  `ripup_reroute` is
+not affordable at this scale — on `chip_topdown` it ran >10 minutes without
+converging against a 135s base flow — and `refine_selection` is an end-of-flow
+WL polish that wants a converged endpoint.
+
+For the **healerless fast-iteration mode** these vehicles used to have, delete
+that line and the `set_planner_param healersAhead 1` above it (which gates the
+proactive `kSegsRel` default and the `run_nuts` dead-span auto-escalation):
+
+```
+sed -e '/^negotiate_congestion$/d' -e '/^set_planner_param healersAhead 1$/d' \
+    flow/chip/chip_topdown.buda > /tmp/chip_topdown_nohealers.buda
+buda /tmp/chip_topdown_nohealers.buda
+```
+
+`chip_tracks.buda` is the shared **10-layer** stack + track patterns: M2/M3 LOW
+plus eight TOP layers M4–M11, each pair coarser than the one below it (M10/M11
+use 2-wide signal wires on 10-wide rails).  It extends big2's `tracks4top.buda`
+/ mix2's `mix_tracks.buda` (identical 6-layer stacks) by four layers — chip is
+where a realistic top-metal count pays.  Every unit is **mirror-symmetric** and
+carries **16** signal tracks per period (double the historical eight);
+`chip_tracks_mirror.buda` is the same patterns with three H origins moved so a
+mirrored placement keeps its track phase, used by the two `chip_stack`
+vehicles.  The vehicles also bound bundle width with `set_max_bundle_bits
+auto`.  See "A mirrored layout needs a mirror-symmetric technology" and "The
+track-count study: 8 → 10 → 16" below.
+
+The 6 → 8 → 10 *layer* study below is worth reading before copying this stack:
+the first extension is a clean win, the second is the diminishing-returns knee,
+and it exposed that a cap band written for one stack height is wrong on another.
+Note it predates the track-count and healer changes, so its absolute numbers are
+the 8-track healerless ones — the comparison within it still holds.
 
 Baseline endpoints (2026-07-30, x86 reference build; both in the QoR corpus)
 ===
@@ -179,34 +197,68 @@ instance's routing is its reference's reflected about the instance's own
 centreline, so the H patterns must be invariant under that reflection —
 i.e. the centreline must land on a reflection axis of the pattern.
 
-`chip_tracks.buda` has **no such axis on any H layer but M6** — not at some
-offsets, at *none*.  Each rail carries a wider gap after it than before it
-(M2/M4: 1 after, 0.5 before; M8: 2 vs 1.5; M10: 3 vs 2), so the repeating unit
-is not a palindrome and no axis exists at any origin.  M6 is the exception —
-gaps 1 on both sides — and it is the one H layer there that does have one.
+Historically `chip_tracks.buda` had **no such axis on any H layer but M6** —
+not at some offsets, at *none*.  Each rail carried a wider gap after it than
+before it (M2/M4: 1 after, 0.5 before), so the unit was not a palindrome and no
+axis existed at any origin.  **Every unit in the shared stack is a palindrome
+now** — each rail centred in its own whitespace — so the property is the
+technology's, not one vehicle's.
 
-`chip_tracks_mirror.buda` fixes it by **centring each rail in its own
-whitespace**: the signal preceding a rail gets the same `space_after` as the
-rail.  The gap is solved to keep the period unchanged
-(`period/2 = rail + 2g + n*sig + (n-1)*s`), so widths, signal counts,
-overheads, bit pitches and the 504 grid are all untouched — only the
-whitespace moves.  Three H origins shift by 1 / 3.5 / 2 units to put an axis
-on the flipped instances' centrelines (8694 / 10710 / 12222 — all differing by
-multiples of 504, so one origin per layer serves all three).
+That leaves the ORIGIN, and the two requirements are independent:
 
-| layer | period | rail | sig | s | g | axis (mod p/2) |
-|---|---|---|---|---|---|---|
-| M2/M4 | 18 | 2 | 1 | 0.5 | 0.75 | 1 |
-| M6 | 24 | 3 | 1 | 1 | 1 | 1.5 *(already symmetric)* |
-| M8 | 56 | 8 | 3 | 1.5 | 1.75 | 4 |
-| M10 | 74 | 10 | 4 | 2 | 2.5 | 5 |
+1. the pattern must **have** axes — it must be a palindrome.  True in
+   `chip_tracks.buda` itself, so `chip_tracks_mirror.buda` inherits it and
+   changes no slot;
+2. the origin must put an axis **on** the instance centrelines.  This is
+   placement-specific, which is why it cannot live in the shared file.
+
+So the two files differ in **exactly three H origins** — M4 `-199`, M6
+`-403.5`, M8 `-802` against `-200` / `-400` / `-800`.  Each layer's axis sits
+at the power-rail centre (`rail/2`), and chip_stack's flipped instances sit at
+centres 8694 / 10710 / 12222, all differing by multiples of 504, so one origin
+per layer serves all three.
+
+| layer | period | axis (mod p/2) | mirror origin | shift |
+|---|---|---|---|---|
+| M2 | 18 | 1 (mod 9) | −100 | none needed |
+| M4 | 18 | 1 (mod 9) | −199 | +1 |
+| M6 | 24 | 1.5 (mod 12) | −403.5 | −3.5 |
+| M8 | 56 | 4 (mod 28) | −802 | −2 |
 
 Both cells then report **ALIGNED** and solve-once-copy carries the mirror:
 
 | | bits copied | siblings served | bits solved individually |
 |---|---|---|---|
-| `chip_tracks` | 3,262 | 100 | 18,089 |
-| `chip_tracks_mirror` | **18,122** | **380** | **3,334** |
+| `chip_tracks` origins | 3,262 | 100 | 18,089 |
+| `chip_tracks_mirror` | **17,875** | **380** | **3,971** |
+
+### Binary-exactness is a hard requirement
+
+Every width, spacing and origin in both files is a multiple of **1/16**, and
+that is correctness, not tidiness.  `tracks_in_range` walks a period at a time
+with `pos += width + space_after`, so hundreds of periods of accumulated
+rounding decide whether a track sitting exactly **on** a window edge falls
+inside it.
+
+Going to ten tracks, the arithmetically obvious choice is to scale signal width
+and spacing by exactly 8/10 — which holds the signal metal per period *exactly*
+constant, so the `def_layer` overheads would not move at all.  It gives
+0.8 / 0.4 / 0.7 …, and **not one of those values is representable in binary.**
+Measured: an off-by-one track at window edges, `check_template_tracks`
+reporting "397 vs 396", both cells MISALIGNED, and **zero** bits copied — on a
+design whose placement had not changed at all.
+
+**At ten tracks** exact density and binary-exactness are mutually exclusive
+(holding the metal needs `w = 0.8·w_old`, and 4/5 is never a binary fraction),
+so exactness had to win and the overheads drifted — M2–M5 would have gone
+55.56% → 58.33%.
+
+That tension is what sent the stack to **sixteen**, where it disappears: 16 =
+2×8 halves every width and spacing, so the metal per period is unchanged, the
+`def_layer` overheads are the historical numbers (M2–M5 stay **55.56%**), and
+binary-exactness comes free.  The shipped stack therefore gives up nothing
+here.  Tests pin both halves — the exactness of every value, and the metal
+matching the historical 8-track so the overheads cannot silently drift.
 
 **M10 cannot be satisfied and does not need to be.**  Its half period 37 does
 not divide 504, so the three flipped centres fall on three different residues
@@ -229,24 +281,91 @@ other on every metric; neither top-flushing, nor centring, nor mirroring moves
 the endpoint.  The vehicle's value is the *phase* property (no
 `align_bottom_up` needed), not a QoR win.
 
-**What the symmetric technology buys** (mirrored geometry, bottom-up flow):
+## The track-count study: 8 → 10 → 16
 
-| tracks | template | overlaps | unplaced | viol | sec |
-|---|---|---|---|---|---|
-| `chip_tracks` (asymmetric) | MISALIGNED | 604 | 2339 | 120 | 157 |
-| symmetric slots, **original origins** | MISALIGNED | 610 | 2383 | 124 | 158 |
-| `chip_tracks_mirror` (symmetric + origins) | **ALIGNED** | **582** | **2292** | **107** | 166 |
+`chip_tracks.buda` now carries **16 signals per period**, double the historical
+eight.  16 is the right jump rather than 10 or 12 because **16 = 2×8** makes
+every signal width and spacing simply *halve*:
 
-The middle row is the control that makes the claim causal.  Symmetric slots
-*alone* leave M4/M6/M8 off axis, and they measure slightly **worse** than the
-baseline — so the gain is not the new track positions, it is the alignment.
-Modest on the endpoint (−3.6% overlaps, −2.0% unplaced, −11% violating
-bundles); the structural result is that solve-once-copy and mirror symmetry
-are compatible after all, which the technology, not the placement, decides.
+* the **period** of every layer is unchanged → the 504 grid, `align_bottom_up`
+  and every checked-in floorplan hold;
+* the signal **metal** per period is unchanged on every layer (16 × w/2 = 8 × w)
+  → the `def_layer` overheads are the historical numbers, untouched;
+* **binary-exactness is free** — halving an exact value is exact.
 
-DetailedNUTS gets *slower* (5.4s -> 19.3s) despite the extra reuse: the
-remaining 3,334 individually-solved bits must now fit around 18,122 fixed
-copies instead of 3,262.
+At ten tracks the last two fought each other: holding the metal exactly needs
+w = 0.8·w_old, which is never a binary fraction, so the metal had to give and
+the overheads drifted.  Doubling has no such tension.
+
+| layer | period | rail | w | s | g | overhead | bit pitch (was) |
+|---|---|---|---|---|---|---|---|
+| M2–M5 | 18 | 2 | 0.5 | 0.25 | 0.625 | 55.56% | 1.125 (2.25) |
+| M6 | 24 | 3 | 0.5 | 0.5 | 0.75 | 66.67% | 1.500 (3.00) |
+| M7 | 39 | 6 | 1 | 0.5 | 1 | 58.97% | 2.438 (4.875) |
+| M8/M9 | 56 | 8 | 1.5 | 0.75 | 1.375 | 57.14% | 3.500 (7.00) |
+| M10/M11 | 74 | 10 | 2 | 1 | 2 | 56.76% | 4.625 (9.25) |
+
+The cost is **outside this model**: minimum feature halves (M2 signal 1 → 0.5,
+spacing 0.5 → 0.25 against the historical technology).  Whether that is
+manufacturable is a technology decision, not a routing one.
+
+### Measured
+
+Every chip vehicle, `qor_corpus.py` (overlaps / unplaced / viol_bundles):
+
+| flow | 8 tracks | 10 tracks | 16 + `auto` | **+ negotiate** |
+|---|---|---|---|---|
+| chip3_bottomup | 311/1544/87 | 204/896/54 | 57/289/24 | **44/124/9** |
+| chip3_topdown | 63/1639/118 | 30/1215/103 | 0/552/70 | **6/260/34** |
+| chip3a_bottomup | 297/1658/90 | 160/906/51 | 58/328/29 | **38/78/9** |
+| chip_bottomup | 353/1604/91 | 236/1441/82 | 70/450/37 | **54/243/19** |
+| chip_bottomup_caps | 358/1708/93 | 259/1493/83 | 65/460/38 | **55/155/13** |
+| chip_stack_bottomup | 582/2306/107 | 357/1537/92 | 100/513/44 | **69/252/19** |
+| chip_stack_topdown | 277/3262/161 | 103/2053/125 | 49/571/45 | **21/241/18** |
+| chip_topdown | 188/2170/112 | 82/1553/87 | 8/264/16 | **4/134/9** |
+| chip_topdown_aligned | 193/2027/112 | 65/1111/74 | 18/358/26 | **5/216/11** |
+| **TOTAL** | 2622/17918/**971** | 1496/12205/**751** | 425/3785/**329** | **296/1703/141** |
+| runtime | 1160s | 1074s | 875s | 1222s |
+
+End to end: **−89% overlaps, −90% unplaced, −85% violating bundles**, with every
+flow but `chip3_topdown` landing in the low tens or single digits.
+
+Three levers, attacking different failure modes:
+
+1. **More tracks** — the dominant one.  The violations were *pure capacity*: a
+   `check_design` breakdown on `chip_topdown` at 10 tracks showed 94 unplaced
+   segments, 16 supply-doomed seats, 6 consequent busterm opens, and **zero**
+   structural violations (no `ANTENNA`, `DISCONNECTED`, `LAYER_DIR`,
+   `KEEPOUT_CROSS`, `SEG_OPEN`).  Nothing structural was capping the result.
+2. **`set_max_bundle_bits auto`** — costs no metal.  DNUTS admission is
+   all-or-nothing, so a 60-bit segment that finds 59 tracks strands all 60; at
+   10 tracks, 35% of stranded segments carried ≥16 bits and accounted for 60%
+   of stranded bits.  A hard `16` cap goes further on unplaced but costs +52%
+   abstract WL and 2× runtime — `auto` is the one worth having.
+3. **`negotiate_congestion` alone** — −57% violating bundles for +40% runtime.
+   `ripup_reroute` is not affordable here: on `chip_topdown` it ran **>10
+   minutes without converging** against a 135s base flow.  Delete the
+   `negotiate_congestion` line to get the healerless fast-iteration mode back.
+
+One honest regression: `chip3_topdown` overlaps go 0 → 6 under negotiate, which
+buys unplaced 552 → 260 and violating bundles 70 → 34.
+
+### What the symmetry itself did
+
+Measured separately at ten tracks, over the seven non-mirrored vehicles:
+
+| step | overlaps | unplaced | viol |
+|---|---|---|---|
+| 8 tracks, asymmetric (baseline) | 1763 | 12350 | 703 |
+| **10 tracks**, asymmetric | 1081 (−38.7%) | 8548 (−30.8%) | 534 (−24.0%) |
+| 10 tracks, **symmetric** | 1035 (−4.3%) | 8602 (+0.6%) | 529 (−0.9%) |
+
+**The track count does essentially all of it.**  Symmetry is within noise on
+flows with no mirrored instance — exactly right, since there is no alignment for
+it to buy there.  Its value shows up only on `chip_stack`, where it is what
+makes solve-once-copy legal at all.  So the symmetry is adopted as better-formed
+default technology and as the enabler for mirrored designs, **not** as a QoR win.
+
 
 > **Correction (2026-08-02).**  Earlier revisions of this file claimed large
 > wins for top-flushing (64/364 -> 24/288) and for mirroring (586 -> 26).  Both
@@ -354,8 +473,8 @@ rows are byte-identical under the fixes.)
 The deeper templating improves every headline QoR metric (overlaps −57%,
 unplaced −34%, viol_bundles −12% vs the 2-level twin at comparable
 planner time) — the dnuts- and mix2-level bundles solve in small
-cell-local frames and expand per template.  Healerless like its 2-level
-twin.
+cell-local frames and expand per template.  Heals with
+negotiate_congestion only, like its 2-level twin.
 
 chip3 bottom-up — nested templates at TWO levels (2026-07-31)
 ===

@@ -3,8 +3,8 @@
 # mix2) AND mix2's nested depth-2 cell types (mix2__dnuts1/2, mix2__dogleg1/2
 # — 18/18/12/12 congruent occurrences each across the three mix2 copies).
 # align_bottom_up nudges every marked cell's instances onto a common track
-# phase; check_template_tracks arbitrates before DNUTS copies.  Healerless,
-# like the other chip flows.
+# phase; check_template_tracks arbitrates before DNUTS copies.  Heals with
+# negotiate_congestion only, like the other chip flows.
 source chip_tracks.buda
 open_bdb chip3.bdb.sql
 set_bottom_up big2
@@ -19,12 +19,15 @@ add_blocks_from_bdb 0
 add_blocks_from_bdb 1 skip
 add_blocks_from_bdb 2 skip
 add_blocks_from_bdb 3 skip
+set_max_bundle_bits auto
 run_hier_bundler depth 3
 generate_hier_topologies
+set_planner_param healersAhead 1
 run_planner hier 5 signal_tracks
 run_nuts
 check_template_tracks on_mismatch independent
 run_detailed_nuts
+negotiate_congestion
 report_wl
 check_design
 exit
