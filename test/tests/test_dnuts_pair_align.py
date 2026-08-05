@@ -255,3 +255,57 @@ def test_post_nuts_does_not_start_a_new_cycle():
     with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
         s.do_command("run_planner post_nuts")
     assert s._healers_ran_cycle is True
+
+
+# ── the #8b WL-gain predictor (`pair_misalign_wl`) ───────────────────────────
+#
+# The engine reports, as a byproduct of the solve, the total per-bit trunk
+# jog across pair-align partner segments — the wirelength an aligning
+# re-solve targets.  The heal skips its re-solve when it is zero, which is
+# the NARROW predictor the refuted pair-existence pre-check was not
+# (PR #563): it answers "would aligning shorten wire", costs nothing (C++
+# computes it in passing), and only has to catch the clear no-gain cases.
+
+def test_predictor_reports_the_misalignment_jog():
+    """The split right column shows up as a positive misalignment jog, and
+    the aligned (healed) solve reports ZERO — the predictor is exactly the
+    quantity the heal removes."""
+    base, _ = _session(heal=False)
+    assert base.detailed_result.pair_misalign_wl > 0
+    healed, _ = _session(heal=True)
+    assert healed.detailed_result.pair_misalign_wl == 0
+
+
+def test_predictor_bounds_the_realized_gain_on_the_repro():
+    """The prediction is an OPTIMISTIC bound on the targeted gain, not an
+    exact forecast: it sums the full per-bit offset |tA-tB|, while the
+    re-solve may align the pair mid-overlap so each bit's trunk span shrinks
+    from both sides by only part of the offset (measured here: realized ==
+    predicted/2 — 128 vs 256).  The contract that matters is directional:
+    positive prediction accompanies a real gain, and zero prediction (the
+    skip gate) can never forgo one."""
+    base, _ = _session(heal=False)
+    predicted = base.detailed_result.pair_misalign_wl
+    healed, _ = _session(heal=True)
+    drop = _dwl(base) - _dwl(healed)
+    assert drop > 0
+    assert predicted >= drop - 1e-6, (drop, predicted)
+
+
+def test_zero_prediction_skips_the_solve():
+    """An already-aligned design predicts zero, and the heal returns WITHOUT
+    re-solving — the whole point of #8b: a no-gain case costs nothing."""
+    s, _ = _session(heal=True)          # aligned; predictor now reads 0
+    assert s.detailed_result.pair_misalign_wl == 0
+    calls = []
+    orig = s._run_detailed_nuts
+    s._run_detailed_nuts = lambda *a, **k: calls.append(1) or orig(*a, **k)
+    with contextlib.redirect_stdout(io.StringIO()), buda.ostream_redirect():
+        n = s._final_pair_align_heal()
+    assert n == 0
+    assert calls == [], "predictor==0 must skip the re-solve entirely"
+
+
+def test_accept_print_names_the_prediction():
+    _, out = _session(heal=True)
+    assert "predicted jog" in out, out

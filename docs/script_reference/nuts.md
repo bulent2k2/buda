@@ -199,6 +199,16 @@ A flow that heals but does **not** declare `healersAhead` therefore still
 pays the mid-flow solve — declaring it is the documented contract, and the
 same declaration is what the other two gated behaviors key off.
 
+**Zero-cost on no-gain designs (the #8b WL-gain predictor):** the DNUTS
+solve reports, in passing, the total per-bit trunk jog across the segment
+pairs the alignment could unify (`DetailedNUTSResult.pair_misalign_wl` —
+the wirelength the re-solve targets). When it is **zero** the heal skips
+its re-solve entirely, so enabling the heal on a design with nothing to
+align costs nothing. The prediction is an optimistic bound on the targeted
+gain (the pair may align mid-overlap and realize about half of it — the
+accept still measures the real thing); the accept line reports both
+(`predicted jog N`).
+
 **Example:**
 ```buda
 run_planner

@@ -134,6 +134,18 @@ struct DetailedNUTSResult {
     // (keepout-model audit).  Each is also counted in num_unplaced, so the
     // healing machinery (negotiate/ripup stage b) sees them as opens.
     int num_keepout_bits = 0;
+    // Total per-bit trunk-jog wirelength between PAIR-ALIGN PARTNER segments
+    // — same bundle, same bit count, overlapping intervals, one layer,
+    // anchored and not timing-critical: exactly the lever-A pair predicate of
+    // place_by_layer — measured on the FINAL placed tracks.  Bit i of a
+    // straddling pair runs stubA @ tA_i, a trunk jog |tA_i - tB_i|, stubB @
+    // tB_i; alignment collapses the jog to zero, so this sum is the
+    // wirelength the pair-align re-solve TARGETS (an upper bound on its
+    // aimed-for gain, not on incidental side effects).  0.0 = nothing to
+    // align: the measured-accept heal skips its re-solve entirely instead of
+    // paying a full solve to be rejected (the opens.md #8b WL-gain
+    // predictor).  Cost: one pass over the placed bits — noise vs the solve.
+    double pair_misalign_wl = 0.0;
     // Per-pass seconds of the run() that produced this result (the RR
     // round-3 profiling layer).  Keys: place / bit_spans / keepout_cull /
     // vias.  Pure observation: never read by any placement decision.

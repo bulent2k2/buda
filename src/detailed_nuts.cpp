@@ -167,6 +167,52 @@ bool DetailedNUTSEngine::signals_contiguous(
 // last valid window.
 // ---------------------------------------------------------------------------
 
+// The #8b WL-gain predictor: sum, over every pair of segments the pair-align
+// lever would partner (same layer + bundle + bit count, overlapping
+// intervals, anchored, not timing-critical — place_by_layer's lever-A
+// predicate verbatim), the per-bit track distance |tA_i - tB_i| on the FINAL
+// placed bits.  This is the trunk-jog wirelength an aligning re-solve
+// targets; zero means the re-solve has nothing to chase and its caller can
+// skip it.  Bits missing on either side (unplaced/culled) contribute
+// nothing.  Grouped by (layer, bundle) first, so the pair scan is over the
+// handful of same-bundle segments per layer, not all-pairs.
+static void compute_pair_misalign(const std::vector<BusSegment>& bus_segs,
+                                  DetailedNUTSResult& result) {
+    // (bundle_id, seg_idx) -> bit_index -> placed track.
+    std::map<std::pair<int,int>, std::map<int,double>> bits;
+    for (const NetSegment& ns : result.net_segments)
+        bits[{ns.bundle_id, ns.seg_idx}][ns.bit_index] = ns.track_position;
+
+    std::map<std::pair<int,int>, std::vector<int>> groups;  // (layer,bundle)
+    for (int i = 0; i < (int)bus_segs.size(); ++i) {
+        const BusSegment& bs = bus_segs[i];
+        if (bs.timing_critical || std::isnan(bs.abstract_pos)) continue;
+        groups[{bs.layer, bs.bundle_id}].push_back(i);
+    }
+    double total = 0.0;
+    for (const auto& [key, idxs] : groups) {
+        for (size_t a = 0; a < idxs.size(); ++a) {
+            const BusSegment& sa = bus_segs[idxs[a]];
+            auto ita = bits.find({sa.bundle_id, sa.seg_idx});
+            if (ita == bits.end()) continue;
+            for (size_t b = a + 1; b < idxs.size(); ++b) {
+                const BusSegment& sb = bus_segs[idxs[b]];
+                if (bus_seg_nbits(sa) != bus_seg_nbits(sb)) continue;
+                if (!(sb.interval_lo < sa.interval_hi &&
+                      sb.interval_hi > sa.interval_lo)) continue;
+                auto itb = bits.find({sb.bundle_id, sb.seg_idx});
+                if (itb == bits.end()) continue;
+                for (const auto& [bit, ta] : ita->second) {
+                    auto itbit = itb->second.find(bit);
+                    if (itbit != itb->second.end())
+                        total += std::fabs(ta - itbit->second);
+                }
+            }
+        }
+    }
+    result.pair_misalign_wl = total;
+}
+
 DetailedNUTSResult DetailedNUTSEngine::run(
         const std::vector<BusSegment>& bus_segs, bool emit_vias,
         int abort_unplaced) const {
@@ -192,6 +238,11 @@ DetailedNUTSResult DetailedNUTSEngine::run(
     // so the opens feed the stage-b healing machinery.
     cull_keepout_crossers(result);
     charge("keepout_cull");
+    // After the cull, so the metric covers exactly the bits the heal's
+    // accept will compare: the misalignment jog across pair-align partners
+    // (see the field's comment in the header).
+    compute_pair_misalign(bus_segs, result);
+    charge("pair_misalign");
     // Fast-trial mode: vias are pure output (the metric is placed by
     // place + cull), so an RR trial may skip them — see the header.
     if (emit_vias)

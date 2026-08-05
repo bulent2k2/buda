@@ -414,6 +414,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("net_vias",     &DetailedNUTSResult::net_vias)
         .def_readwrite("num_unplaced", &DetailedNUTSResult::num_unplaced)
         .def_readwrite("num_keepout_bits", &DetailedNUTSResult::num_keepout_bits)
+        .def_readwrite("pair_misalign_wl", &DetailedNUTSResult::pair_misalign_wl)
         .def_readwrite("aborted",          &DetailedNUTSResult::aborted)
         // Per-pass profile (RR round-3 Phase 0) — observation only.
         // readwrite: the bottom-up DNUTS path merges two engine results in

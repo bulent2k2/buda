@@ -181,7 +181,13 @@ designs and fail LOUD, never silent:)*
    wanting member (2) closed for completeness. Design + measurement recorded in
    PR #366.
 8b. **A cheap WL-gain predictor (or partial DNUTS re-solve) for the
-   pair-align heal** (added 2026-08-02) — [`wishlist-nuts.md`](wishlist-nuts.md)
+   pair-align heal** (added 2026-08-02; **half 1 SHIPPED 2026-08-05** —
+   `DetailedNUTSResult.pair_misalign_wl`, the C++-computed partner-jog
+   metric; the heal now skips its re-solve when it reads zero, so a no-gain
+   flow pays nothing.  The partial/warm re-solve half stays unbuilt — only
+   needed if the paying flows' solve cost ever matters.  The default flip
+   stays refused on Bar 1, unchanged) —
+   [`wishlist-nuts.md`](wishlist-nuts.md)
    → *"Pairwise-overlap stub alignment"*. The measured-accept alignment heal
    shipped opt-in (`set_pair_align_heal`, PR #557: 0 better / 0 worse / 37
    unchanged — the accept rejects every regressor the unconditional form
