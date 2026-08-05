@@ -117,14 +117,33 @@ import random
 import signal
 import time
 
-# `... | head -N` closes the pipe early; the default Python behaviour raises
-# BrokenPipeError at the next flush and kills the build mid-write.  Restore the
-# shell default so a truncated reader cannot corrupt the output BDB.
-try:
-    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-except (AttributeError, ValueError):
-    pass
 import buda2bdb  # reuse the .buda parser + cell-size helper
+
+
+def _sigpipe_shell_default():
+    """CLI-ONLY: die silently on a closed pipe, like a shell tool.
+
+    `... | head -N` closes the pipe early; Python's default behaviour raises
+    BrokenPipeError at the next flush and kills the build mid-write, so the
+    CLI restores the shell default and the atomic-rename output path never
+    sees a half-written BDB.
+
+    This MUST run from main(), never at import.  Signal dispositions are
+    process-global: when this module set SIG_DFL at import, every pytest-xdist
+    worker inherited it while COLLECTING test_build_hier_demo.py — and any
+    later test in that worker whose machinery takes an EPIPE died silently
+    with the whole worker ("[gwN] node down: Not properly terminated").
+    CPython ignores SIGPIPE at startup precisely so a broken pipe is an
+    exception, not a death; the qor sweep's crash-recovery test SIGKILLs a
+    pool worker, the executor's queue-feeder races a write into the dying
+    worker's pipe, and with SIG_DFL that EPIPE killed the innocent xdist
+    worker about every other whole-suite run.  Repro + forensics in the fix
+    commit; regression test: test_build_hier_demo.py::
+    test_import_leaves_sigpipe_disposition_alone."""
+    try:
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    except (AttributeError, ValueError):
+        pass
 
 _GAP = 200.0   # spacing between instances laid out in a row
 _GRID = 10.0   # snap grid used by the optimizer / applied placements
@@ -1116,6 +1135,7 @@ def _resolve_cells(entries, path_arg):
 
 
 def main():
+    _sigpipe_shell_default()          # CLI-only; see the docstring
     argv = sys.argv[1:]
     out_path = "/tmp/hier_demo.bdb"
     seed = 1
