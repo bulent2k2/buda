@@ -1444,6 +1444,22 @@ class NutsFlowMixin:
                 and not getattr(self, "_healers_ran_cycle", False)):
             return 0
 
+        # WL-gain predictor (opens.md #8b): the engine reports, as a free
+        # byproduct of the solve that already ran, the total per-bit trunk
+        # jog across pair-align partner segments (`pair_misalign_wl` — the
+        # exact wirelength an aligning re-solve targets).  Zero jog = the
+        # re-solve has nothing to chase, so skip it instead of paying a full
+        # DNUTS solve to be rejected.  This is the NARROW predictor the
+        # refuted pair-existence pre-check was not (PR #563): it answers
+        # "would aligning shorten wire", not "is there an alignable pair",
+        # and it costs nothing here because the C++ solve computed it in
+        # passing.  It bounds only the heal's TARGETED gain — an accept
+        # arising purely from side effects of the restricted pools would be
+        # forgone — which is the documented trade (wishlist-nuts.md).
+        predicted = getattr(self.detailed_result, "pair_misalign_wl", 0.0)
+        if predicted <= 0.0:
+            return 0
+
         def _wl(dr):
             return sum(abs(ns.span_hi - ns.span_lo) for ns in dr.net_segments)
 
@@ -1461,7 +1477,8 @@ class NutsFlowMixin:
                 and cur[2] < base[2] - 1e-6):
             print(f"[DetailedNUTS] PAIR-ALIGN: aligned same-net stub pair(s), "
                   f"detailed WL {base[2]:.0f}->{cur[2]:.0f} "
-                  f"(unplaced {base[0]}->{cur[0]})", flush=True)
+                  f"(unplaced {base[0]}->{cur[0]}; "
+                  f"predicted jog {predicted:.0f})", flush=True)
             if self.bdb is not None:
                 self._checkpoint_routing()
             return 1
@@ -2018,6 +2035,17 @@ class NutsFlowMixin:
             for k, v in r2.pass_seconds.items():
                 pp[k] = pp.get(k, 0.0) + v
             merged.pass_seconds = pp
+            # Carry the #8b WL-gain prediction through the merge too (Codex
+            # P2 on #594): without it the merged result reads the default
+            # 0.0 and the pair-align heal's skip gate would PERMANENTLY
+            # stand down on bottom-up sessions — the exact scope PR #570
+            # brought in.  The sum is the GATE signal, not a calibrated
+            # total: the copied instances replicate the reference's jog
+            # uniformly, so a positive reference jog undercounts the true
+            # design-wide jog here but can never read zero when there is
+            # wire to win — the only property the gate relies on.
+            merged.pair_misalign_wl = (r1.pair_misalign_wl
+                                       + r2.pair_misalign_wl)
             self.detailed_result = merged
             print(f"[BottomUp] DNUTS: {len(r1.net_segments)} reference "
                   f"bit(s) solved once, {len(copies)} copied to "

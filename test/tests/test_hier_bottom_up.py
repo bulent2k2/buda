@@ -1829,3 +1829,30 @@ def test_post_run_nuts_resume_still_prefers_persisted_routing(tmp_path):
     fixed3 = {(ts.bundle_id, ts.seg_idx): ts.track_position
               for ts in s2._bottom_up_fixed_segments()}
     assert fixed3 == pytest.approx(pos1)
+
+
+def test_dnuts_merge_carries_pair_misalign_wl(monkeypatch):
+    """The bottom-up merge must carry the #8b WL-gain prediction from BOTH
+    engines (Codex P2 on #594): it copies segments/vias/counts/pass_seconds,
+    and before the fix it dropped `pair_misalign_wl`, so the merged result
+    read the default 0.0 and the pair-align heal's skip gate would
+    permanently stand down on bottom-up sessions — the exact scope PR #570
+    brought in.  Sentinel-stamped engines make the carry deterministic
+    regardless of the fixture's real geometry: merged == eng1 + eng2."""
+    stamps = iter([3.25, 4.5])
+    real = buda.DetailedNUTSEngine
+
+    class Stamping(real):
+        def run(self, *a, **kw):
+            r = real.run(self, *a, **kw)
+            try:
+                r.pair_misalign_wl = next(stamps)
+            except StopIteration:
+                pass
+            return r
+
+    monkeypatch.setattr(buda, "DetailedNUTSEngine", Stamping)
+    s, _ = _dnuts_flow(_two_inst_db(x2=500, y2=300))
+    out = _run_cmd(s, "run_detailed_nuts")
+    assert "[BottomUp] DNUTS:" in out
+    assert s.detailed_result.pair_misalign_wl == pytest.approx(3.25 + 4.5)

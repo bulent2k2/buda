@@ -604,21 +604,58 @@ that turns it on can never be made worse), and correct to enable per design
 when you have the geometry it targets.  If a corpus vehicle ever meets Bar 1,
 the cost side is cheap enough that the flip becomes a straightforward yes.
 
-### OPEN follow-on — the only thing that re-opens the flip (opens.md #8b)
+### The #8b follow-on — half 1 SHIPPED: the WL-gain predictor (2026-08-05)
 
-Narrower than the refuted pre-check, and either half suffices:
+Narrower than the refuted pre-check, and either half suffices; **half 1 is
+built**:
 
-1. **A cheap WL-gain predictor** (NOT a pair predicate).  "Would aligning
-   this pair shorten wire" is the only question that discriminates, and the
-   refuted check answered the wrong one.  A predictor would estimate the
-   trunk jog alignment removes — the per-bit detour between the two stubs'
-   track sets, which is arithmetic over data already in hand — without
-   running a solve.  It only has to be good enough to skip the clear
-   no-gain cases.
+1. ✅ **A cheap WL-gain predictor** (NOT a pair predicate) —
+   **`DetailedNUTSResult.pair_misalign_wl`**: the C++ solve reports, as a
+   byproduct (its own `pass_seconds["pair_misalign"]` bucket — a single
+   pass over the placed bits), the total per-bit trunk jog across
+   pair-align PARTNER segments (lever A's predicate verbatim: same layer +
+   bundle + bit count, overlapping intervals, anchored, not
+   timing-critical).  That jog is the wirelength an aligning re-solve
+   TARGETS, so `_final_pair_align_heal` skips its re-solve outright when it
+   is zero — a no-gain case now costs nothing, which is what the refuted
+   Python pre-check could not deliver (it answered "is there a pair", cost
+   2.5–48× the solve; this answers "is there wire to win", costs ~nothing
+   because the solve computes it in passing).  Two calibration facts,
+   measured on the seat repro: the prediction is an OPTIMISTIC bound on the
+   targeted gain (the pair aligns mid-overlap, so realized = predicted/2
+   there — 128 vs 256), and it bounds only the TARGETED gain: an accept
+   arising purely from side effects of the restricted pools would be
+   forgone.  Tests: `test_dnuts_pair_align.py` (predictor value, zero-skip
+   without a solve, bound vs realized, accept print carries the
+   prediction).
 2. **A partial/warm DNUTS re-solve** scoped to the affected bundles — the
-   stage-9 analogue of `NUTSEngine::rerun_bundle_warm`.  DNUTS today solves
-   every layer globally, so a rejection costs a FULL solve; scoping it to
-   the handful of bundles with alignable pairs makes the rejected case
-   cheap and the +3.3% wall-time bar disappear.
+   stage-9 analogue of `NUTSEngine::rerun_bundle_warm` — remains unbuilt;
+   with half 1 shipped it is only needed if the PAYING flows' solve cost
+   ever matters (the predictor already zeroes the no-gain flows).
 
-Absent both, the answer is settled and the heal stays opt-in.
+**What this does and does not change.**  The heal (opt-in) is now cheaper:
+enabling it on a design without misaligned pairs costs nothing.  The
+DEFAULT-FLIP stays refused — Bar 1 (a real corpus benefit) is still not
+met, and the predictor does not manufacture benefit; it only removes cost
+on the no-gain side.  The flip question is re-opened in the narrow sense
+the open stated: its cost side now depends on how many corpus flows carry a
+POSITIVE jog (those still pay one solve under a flipped default).
+
+**Predictor census (2026-08-05, 41-flow corpus, heal off — the baseline
+jog a flipped default would read):** predictor cost 0.0–5.5 ms/solve (the
+5 ms end is the ~40k-bit chip flows) — noise against the solves.  Among
+the 31 heal-ELIGIBLE (non-locked) flows, **14 read jog = 0 and would skip
+the solve entirely; 17 would pay one**.  `tc3a` — the corpus's only
+accepting flow — reads jog = 17391 > 0, so the gate never blocks the one
+measured win.  (The 10 LOCKED flows' first-census zeros were an artifact —
+the bottom-up merge initially dropped the field, Codex P2 on #594.
+Re-measured with the carry fix, ALL TEN read positive jog (205.5 on
+`mix2_fast_bottomup_caps_2x` up to 330k on the chip bottom-up vehicles),
+so under a flipped default none of them would skip — and the gate's
+load-bearing property holds for them too: never falsely zero when there is
+wire to win; per-flow numbers in the PR.)  The 17 paying flows are dominated by the
+congested vehicles where the unconditional form REGRESSED (big 748k, chip
+flows 374–555k of jog the accept would refuse to chase), i.e. large jog on
+a congested design is precisely where alignment strands bits and the
+accept rejects — which is why the jog is a SKIP gate, not a ranking
+signal.  Full per-flow table in PR #594.
