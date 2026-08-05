@@ -2035,6 +2035,17 @@ class NutsFlowMixin:
             for k, v in r2.pass_seconds.items():
                 pp[k] = pp.get(k, 0.0) + v
             merged.pass_seconds = pp
+            # Carry the #8b WL-gain prediction through the merge too (Codex
+            # P2 on #594): without it the merged result reads the default
+            # 0.0 and the pair-align heal's skip gate would PERMANENTLY
+            # stand down on bottom-up sessions — the exact scope PR #570
+            # brought in.  The sum is the GATE signal, not a calibrated
+            # total: the copied instances replicate the reference's jog
+            # uniformly, so a positive reference jog undercounts the true
+            # design-wide jog here but can never read zero when there is
+            # wire to win — the only property the gate relies on.
+            merged.pair_misalign_wl = (r1.pair_misalign_wl
+                                       + r2.pair_misalign_wl)
             self.detailed_result = merged
             print(f"[BottomUp] DNUTS: {len(r1.net_segments)} reference "
                   f"bit(s) solved once, {len(copies)} copied to "

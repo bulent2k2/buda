@@ -643,11 +643,13 @@ POSITIVE jog (those still pay one solve under a flipped default).
 
 **Predictor census (2026-08-05, 41-flow corpus, heal off — the baseline
 jog a flipped default would read):** predictor cost 0.0–5.5 ms/solve (the
-5 ms end is the ~40k-bit chip flows) — noise against the solves.  21 of 41
-flows read jog = 0; among the 31 heal-ELIGIBLE (non-locked) flows, **14
-would skip the solve entirely and 17 would pay one**.  `tc3a` — the
-corpus's only accepting flow — reads jog = 17391 > 0, so the gate never
-blocks the one measured win.  The 17 paying flows are dominated by the
+5 ms end is the ~40k-bit chip flows) — noise against the solves.  Among
+the 31 heal-ELIGIBLE (non-locked) flows, **14 read jog = 0 and would skip
+the solve entirely; 17 would pay one**.  `tc3a` — the corpus's only
+accepting flow — reads jog = 17391 > 0, so the gate never blocks the one
+measured win.  (The 10 LOCKED flows' first-census zeros were an artifact —
+the bottom-up merge initially dropped the field, Codex P2 on #594 — and
+were re-measured after the carry fix; per-flow numbers in the PR.)  The 17 paying flows are dominated by the
 congested vehicles where the unconditional form REGRESSED (big 748k, chip
 flows 374–555k of jog the accept would refuse to chase), i.e. large jog on
 a congested design is precisely where alignment strands bits and the
