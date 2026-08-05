@@ -24,6 +24,14 @@ import sys
 
 import buda
 
+from ._options import require_layer_id, require_number
+
+_DEF_TRACK_PATTERN_USAGE = (
+    "def_track_pattern <layer_id> <origin> [<type> <width> <space_after>] ...")
+_ADD_GRID_OVERRIDE_USAGE = (
+    "add_grid_override <layer_id> <x1> <y1> <x2> <y2> <origin> "
+    "[<type> <width> <space_after>] ...")
+
 
 # Canonical track-slot types (routing_grid.h TrackSlot).  Only "SIGNAL" carries
 # FUNCTIONAL meaning — bits land only on SIGNAL slots, a case-sensitive string
@@ -65,16 +73,25 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
     # Usage: def_track_pattern <layer_id> <origin> [<type> <width> <space_after>] ...
     # Example: def_track_pattern 4 0.0  POWER 2.0 1.0  SIGNAL 1.0 1.0  GROUND 2.0 1.0
     if len(args) < 2:
-        print("Error: def_track_pattern requires layer_id and origin")
+        print("Error: def_track_pattern requires layer_id and origin\n"
+              f"  Usage: {_DEF_TRACK_PATTERN_USAGE}")
         return
-    layer_id = int(args[0])
-    origin   = float(args[1])
+    layer_id = require_layer_id("def_track_pattern", args[0], session,
+                                usage=_DEF_TRACK_PATTERN_USAGE)
+    origin   = require_number("def_track_pattern", "<origin>", args[1],
+                              usage=_DEF_TRACK_PATTERN_USAGE)
     slots = []
     i = 2
     while i + 2 < len(args):
         slot_type   = args[i]
-        width       = float(args[i + 1])
-        space_after = float(args[i + 2])
+        width       = require_number("def_track_pattern",
+                                     f"<width> of slot '{slot_type}'",
+                                     args[i + 1],
+                                     usage=_DEF_TRACK_PATTERN_USAGE)
+        space_after = require_number("def_track_pattern",
+                                     f"<space_after> of slot '{slot_type}'",
+                                     args[i + 2],
+                                     usage=_DEF_TRACK_PATTERN_USAGE)
         slots.append(buda.TrackSlot(
             type=_canonical_slot_type("def_track_pattern", slot_type),
             label=slot_type.lower(),
@@ -182,18 +199,32 @@ def cmd_report_overhead(session, cmd, args, cmd_line):
 def cmd_add_grid_override(session, cmd, args, cmd_line):
     # Usage: add_grid_override <layer_id> <x1> <y1> <x2> <y2> <origin> [<type> <w> <sp>] ...
     if len(args) < 6:
-        print("Error: add_grid_override requires layer_id x1 y1 x2 y2 origin [slots...]")
+        print("Error: add_grid_override requires layer_id x1 y1 x2 y2 origin "
+              "[slots...]\n"
+              f"  Usage: {_ADD_GRID_OVERRIDE_USAGE}")
         return
-    layer_id = int(args[0])
-    x1, y1 = int(float(args[1])), int(float(args[2]))
-    x2, y2 = int(float(args[3])), int(float(args[4]))
-    origin = float(args[5])
+    layer_id = require_layer_id("add_grid_override", args[0], session,
+                                usage=_ADD_GRID_OVERRIDE_USAGE)
+
+    def _coord(what, tok):
+        return require_number("add_grid_override", what, tok, integer=True,
+                              usage=_ADD_GRID_OVERRIDE_USAGE)
+    x1, y1 = _coord("<x1>", args[1]), _coord("<y1>", args[2])
+    x2, y2 = _coord("<x2>", args[3]), _coord("<y2>", args[4])
+    origin = require_number("add_grid_override", "<origin>", args[5],
+                            usage=_ADD_GRID_OVERRIDE_USAGE)
     slots = []
     i = 6
     while i + 2 < len(args):
         slot_type   = args[i]
-        width       = float(args[i + 1])
-        space_after = float(args[i + 2])
+        width       = require_number("add_grid_override",
+                                     f"<width> of slot '{slot_type}'",
+                                     args[i + 1],
+                                     usage=_ADD_GRID_OVERRIDE_USAGE)
+        space_after = require_number("add_grid_override",
+                                     f"<space_after> of slot '{slot_type}'",
+                                     args[i + 2],
+                                     usage=_ADD_GRID_OVERRIDE_USAGE)
         slots.append(buda.TrackSlot(
             type=_canonical_slot_type("add_grid_override", slot_type),
             label=slot_type.lower(),

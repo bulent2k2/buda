@@ -71,3 +71,66 @@ def looks_numeric(tok):
         return True
     except (TypeError, ValueError):
         return False
+
+
+def _usage_line(usage):
+    return f"\n  Usage: {usage}" if usage else ""
+
+
+def require_layer_id(cmd, tok, session=None, *, usage=""):
+    """Parse a layer-ID positional, or stop the flow with an actionable error.
+
+    These commands take the layer *id* — the number in
+    `def_layer <id> <name> …` — but the *name* ('M4') is what the rest of a
+    script reads back, so reaching for the name here is the single most common
+    beginner slip.  A bare `int(tok)` answered it with a raw
+    `ValueError: invalid literal for int() with base 10: 'M4'` traceback, which
+    names neither the command, nor the argument, nor the fix.
+
+    Resolve the token through the session's `def_layer` name map so the message
+    can name the exact id to type instead ("use layer id 4, not the name 'M4'"),
+    and list the declared layers when the name isn't one of them.  Returns the
+    int id.
+    """
+    try:
+        return int(tok)
+    except (TypeError, ValueError):
+        pass
+    name_map = dict(getattr(session, "_layer_name_map", {}) or {})
+    lid = name_map.get(tok)
+    if lid is None:                       # tolerate a case slip too ('m4')
+        lower = {n.lower(): i for n, i in name_map.items()}
+        lid = lower.get(str(tok).lower())
+    if lid is not None:
+        # Front-load the correction: the runtime summary truncates a headline
+        # to the terminal column, so "use layer id 4" has to come before the
+        # explanation or the beginner never sees the fix without the log.
+        print(f"Error: {cmd}: use layer id {lid}, not the name '{tok}' "
+              f"(this command takes the numeric id from "
+              f"def_layer <id> <name> …)."
+              + _usage_line(usage))
+        sys.exit(1)
+    known = ", ".join(f"{n}={i}" for n, i in sorted(name_map.items(),
+                                                    key=lambda kv: kv[1]))
+    known_str = (f"  Declared layers (name=id): {known}." if known
+                 else "  No layers are declared yet — declare one with "
+                      "def_layer <id> <name> <H|V> … first.")
+    print(f"Error: {cmd}: expected a numeric layer id, got '{tok}'.\n"
+          + known_str + _usage_line(usage))
+    sys.exit(1)
+
+
+def require_number(cmd, what, tok, *, integer=False, usage=""):
+    """Parse a numeric positional, or stop the flow naming the ARGUMENT.
+
+    Same motivation as `require_layer_id`: a mistyped coordinate used to raise a
+    bare `ValueError` traceback that never said which of a long positional line
+    ('<x1> <y1> <x2> <y2> <origin> …') was wrong.  `what` is the argument's name
+    in the usage string, e.g. "<x1>".
+    """
+    try:
+        return int(float(tok)) if integer else float(tok)
+    except (TypeError, ValueError):
+        print(f"Error: {cmd}: expected a number for {what}, got '{tok}'."
+              + _usage_line(usage))
+        sys.exit(1)

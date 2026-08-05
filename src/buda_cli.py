@@ -95,6 +95,15 @@ _SUMMARY_MARKERS = [re.compile(p, re.I) for p in (
     r'added \d+ blocks',
 )]
 
+# A line that IS the failure diagnostic (see _extract_headline).  `match`
+# anchors at the start, so only a line LEADING with the marker qualifies — not
+# prose mentioning an error, and not "Errors found: 3" (\b rejects the plural).
+# Deliberately ERROR-only: an error means the command failed, so its diagnostic
+# is the whole story, while a warning is usually incidental to a command whose
+# summary still is — and the '!' marker plus the [N warn] flag already surface
+# that one without displacing the summary.
+_ERROR_RE = re.compile(r'\s*Error\b', re.I)
+
 # Commands that must NOT be redirected/timed: `source` is a container whose
 # child commands are each summarized instead, and the visualize commands open
 # interactive windows whose output belongs on the terminal.
@@ -345,7 +354,17 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
 
     @staticmethod
     def _extract_headline(nonblank):
-        """Pick the most summary-like line from a command's (non-blank) output."""
+        """Pick the most summary-like line from a command's (non-blank) output.
+
+        A command that FAILED is summarized by its error, not by whatever it
+        printed last: a multi-line diagnostic (message + usage line) would
+        otherwise surface its trailing usage text and bury the actionable
+        first line in the flow log.  So an `Error:` line wins, and the FIRST
+        one is the primary complaint (later ones are continuations).
+        """
+        for ln in nonblank:
+            if _ERROR_RE.match(ln):
+                return ln.strip()
         for ln in reversed(nonblank):
             if any(m.search(ln) for m in _SUMMARY_MARKERS):
                 return ln.strip()
@@ -357,7 +376,12 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
     def _emit_cmd_summary(out, cmd_line, elapsed, nlines, nwarn, nerr, headline):
         marker = 'x ' if nerr else ('! ' if nwarn else '  ')
         flags  = ''
-        if nerr:  flags += f"[{nerr} err] "
+        # When the headline IS the error, "[1 err]" only repeats what the line
+        # already says and eats ~8 columns of the truncation budget — columns
+        # the actionable part of the message needs.  Only the redundant err
+        # count is dropped; a warn count still carries new information.
+        if nerr and not _ERROR_RE.match(headline):
+            flags += f"[{nerr} err] "
         if nwarn: flags += f"[{nwarn} warn] "
         detail = (flags + headline).strip()
         if len(detail) > 68:
