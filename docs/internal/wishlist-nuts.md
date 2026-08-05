@@ -648,8 +648,12 @@ the 31 heal-ELIGIBLE (non-locked) flows, **14 read jog = 0 and would skip
 the solve entirely; 17 would pay one**.  `tc3a` — the corpus's only
 accepting flow — reads jog = 17391 > 0, so the gate never blocks the one
 measured win.  (The 10 LOCKED flows' first-census zeros were an artifact —
-the bottom-up merge initially dropped the field, Codex P2 on #594 — and
-were re-measured after the carry fix; per-flow numbers in the PR.)  The 17 paying flows are dominated by the
+the bottom-up merge initially dropped the field, Codex P2 on #594.
+Re-measured with the carry fix, ALL TEN read positive jog (205.5 on
+`mix2_fast_bottomup_caps_2x` up to 330k on the chip bottom-up vehicles),
+so under a flipped default none of them would skip — and the gate's
+load-bearing property holds for them too: never falsely zero when there is
+wire to win; per-flow numbers in the PR.)  The 17 paying flows are dominated by the
 congested vehicles where the unconditional form REGRESSED (big 748k, chip
 flows 374–555k of jog the accept would refuse to chase), i.e. large jog on
 a congested design is precisely where alignment strands bits and the
