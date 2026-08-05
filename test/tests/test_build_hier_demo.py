@@ -775,6 +775,29 @@ def test_mirror_upper_refuses_a_centreline_straddler(tmp_path):
     assert "straddle" in msg and "EVEN instance count" in msg
 
 
+def test_import_leaves_sigpipe_disposition_alone():
+    """Importing this tool must NOT flip the process-wide SIGPIPE disposition.
+
+    The CLI legitimately restores the shell default (die silently on a closed
+    pipe — see the atomicity test below), but doing it at IMPORT time leaked
+    SIG_DFL into every process that imported the module.  Under pytest-xdist
+    each worker imports every test module at collection, so every worker ran
+    the whole suite with SIG_DFL — and the qor sweep's crash-recovery test,
+    whose broken pool makes the executor's queue-feeder thread take an EPIPE,
+    silently killed its whole worker ("[gwN] node down") about every other
+    full-suite run.  CPython's startup default (SIGPIPE ignored, EPIPE is an
+    exception) must survive the import; only main() may change it.
+    """
+    import signal
+    import importlib
+    assert signal.getsignal(signal.SIGPIPE) is not signal.SIG_DFL, (
+        "SIGPIPE already SIG_DFL before re-import — another import leaked it")
+    before = signal.getsignal(signal.SIGPIPE)
+    importlib.reload(build_hier_demo)
+    assert signal.getsignal(signal.SIGPIPE) == before, (
+        "importing build_hier_demo changed the SIGPIPE disposition")
+
+
 def test_build_is_atomic_under_a_closed_pipe(tmp_path):
     """A build killed partway must leave NO output BDB.
 
