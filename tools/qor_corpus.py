@@ -294,6 +294,35 @@ def default_jobs():
     return os.cpu_count() or 1
 
 
+def _mp_context():
+    """Start method for sweep worker pools: SPAWN, never the Linux default
+    fork.  A forked worker is a byte-for-byte copy of its parent — inheriting
+    the parent's open file descriptors, its threads' locked state at the
+    fork instant, and its whole (copy-on-write) memory footprint.  `sweep`
+    may run inside a LARGE, threaded host process (a pytest-xdist worker
+    with the compiled buda module and a suite's worth of state loaded), and
+    the crash-recovery tests deliberately SIGKILL a worker — under fork that
+    is a kill of a full copy of the host, entangled with the host's
+    descriptors and lock state.
+
+    Measured consequence (2026-08-04, cause pinned only to this hazard
+    class, not to one chain within it): under whole-suite `pytest -n 4`
+    load, test_qor_sweep.py::test_hard_crash_loses_only_the_crashing_flow
+    intermittently took down its ENTIRE xdist worker ("[gw0] node down: Not
+    properly terminated") — on CI and locally, roughly every other run —
+    while the same test alone, or the suite serial, never failed.  Spawn
+    starts a fresh minimal interpreter per worker, so a killed worker owns
+    nothing of the host's; the whole-suite failure has not reproduced under
+    spawn (repeated-run counts in the fix commit / PR).
+
+    The cost — each worker re-imports the run_fn's module — is real for the
+    sub-second unit tests (this file's test suite ~0.2s -> ~3s) and noise
+    against real flow runtimes.  `sweep`'s contract already requires a
+    top-level picklable run_fn, which is exactly what spawn requires."""
+    import multiprocessing
+    return multiprocessing.get_context("spawn")
+
+
 def _run_isolated(run_fn, flow):
     """One flow in a throwaway single-worker pool.  Used to re-run the flows a
     broken pool left unfinished: a hard crash here is attributable to exactly
@@ -301,7 +330,8 @@ def _run_isolated(run_fn, flow):
     from concurrent.futures import ProcessPoolExecutor
     from concurrent.futures.process import BrokenProcessPool
     try:
-        with ProcessPoolExecutor(max_workers=1, initializer=_worker_init) as ex:
+        with ProcessPoolExecutor(max_workers=1, initializer=_worker_init,
+                                 mp_context=_mp_context()) as ex:
             return ex.submit(run_fn, flow).result()
     except BrokenProcessPool:
         return {"flow": flow, "err": "worker: hard crash (process died)"}
@@ -341,7 +371,8 @@ def sweep(run_fn, flows, jobs, progress=None):
     order = sorted(range(len(flows)), key=lambda i: _flow_weight(flows[i]),
                    reverse=True)                # longest-first scheduling
     with ProcessPoolExecutor(max_workers=min(jobs, len(flows)),
-                             initializer=_worker_init) as ex:
+                             initializer=_worker_init,
+                             mp_context=_mp_context()) as ex:
         futs = {ex.submit(run_fn, flows[i]): i for i in order}
         for fut in as_completed(futs):
             i = futs[fut]
