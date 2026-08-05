@@ -57,7 +57,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 0.1
+  "sec": 0.0
  },
  {
   "flow": "flow/big_data_test/big2/b34_bus_028.buda",
@@ -117,7 +117,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 62.6
+  "sec": 65.7
  },
  {
   "flow": "flow/big_data_test/bigHalf_bus038_bitrunk.buda",
@@ -165,79 +165,79 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 2.9
+  "sec": 2.7
  },
  {
   "flow": "flow/chip/chip3_topdown.buda",
   "bund": 640,
-  "busS": 2033,
-  "netS": 41275,
-  "busWL": 2756329,
-  "netWL": 56162602,
-  "ovl": 63,
-  "unpl": 1639,
-  "viol": 118,
-  "sec": 179.5
+  "busS": 1705,
+  "netS": 35372,
+  "busWL": 2490996,
+  "netWL": 49182880,
+  "ovl": 6,
+  "unpl": 260,
+  "viol": 34,
+  "sec": 240.4
  },
  {
   "flow": "flow/chip/chip3a_bottomup.buda",
   "bund": 640,
-  "busS": 1941,
-  "netS": 37598,
-  "busWL": 2571623,
-  "netWL": 47192658,
-  "ovl": 297,
-  "unpl": 1658,
-  "viol": 90,
-  "sec": 244.3
+  "busS": 1729,
+  "netS": 35312,
+  "busWL": 2493698,
+  "netWL": 48262520,
+  "ovl": 38,
+  "unpl": 78,
+  "viol": 9,
+  "sec": 230.0
  },
  {
   "flow": "flow/chip/chip_bottomup.buda",
   "bund": 640,
-  "busS": 2048,
-  "netS": 38732,
-  "busWL": 2616364,
-  "netWL": 47502937,
-  "ovl": 353,
-  "unpl": 1604,
-  "viol": 91,
-  "sec": 231.4
+  "busS": 1809,
+  "netS": 35931,
+  "busWL": 2516788,
+  "netWL": 48243174,
+  "ovl": 54,
+  "unpl": 243,
+  "viol": 19,
+  "sec": 198.4
  },
  {
   "flow": "flow/chip/chip_bottomup_caps.buda",
   "bund": 640,
-  "busS": 2036,
-  "netS": 38402,
-  "busWL": 2622781,
-  "netWL": 47509230,
-  "ovl": 358,
-  "unpl": 1708,
-  "viol": 93,
-  "sec": 251.4
+  "busS": 1809,
+  "netS": 36007,
+  "busWL": 2527421,
+  "netWL": 48342575,
+  "ovl": 55,
+  "unpl": 155,
+  "viol": 13,
+  "sec": 236.1
  },
  {
   "flow": "flow/chip/chip_stack_bottomup.buda",
   "bund": 660,
-  "busS": 2065,
-  "netS": 32949,
-  "busWL": 2340551,
-  "netWL": 35014624,
-  "ovl": 604,
-  "unpl": 2339,
-  "viol": 120,
-  "sec": 234.4
+  "busS": 1797,
+  "netS": 30856,
+  "busWL": 2269788,
+  "netWL": 38124104,
+  "ovl": 69,
+  "unpl": 252,
+  "viol": 19,
+  "sec": 339.3
  },
  {
   "flow": "flow/chip/chip_topdown.buda",
   "bund": 640,
-  "busS": 2203,
-  "netS": 42386,
-  "busWL": 2832185,
-  "netWL": 57449808,
-  "ovl": 188,
-  "unpl": 2170,
-  "viol": 112,
-  "sec": 225.5
+  "busS": 1790,
+  "netS": 36464,
+  "busWL": 2541681,
+  "netWL": 49637160,
+  "ovl": 4,
+  "unpl": 134,
+  "viol": 9,
+  "sec": 252.5
  },
  {
   "flow": "flow/hbundles/01_pipeline_hier.buda",
@@ -261,7 +261,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 0.1
+  "sec": 0.0
  },
  {
   "flow": "flow/hbundles/03_priority_ordering.buda",
@@ -309,7 +309,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 18.7
+  "sec": 19.2
  },
  {
   "flow": "flow/hbundles/07_wide_fan_stress.buda",
@@ -321,7 +321,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 0.7
+  "sec": 0.6
  },
  {
   "flow": "flow/hbundles/08_cross_level.buda",
@@ -369,7 +369,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 5.3
+  "sec": 4.6
  },
  {
   "flow": "flow/rnr/mix2.buda",
@@ -381,7 +381,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 33.6
+  "sec": 37.2
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup.buda",
@@ -393,7 +393,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 8.4
+  "sec": 7.8
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup_caps.buda",
@@ -405,7 +405,19 @@
   "ovl": 2,
   "unpl": 0,
   "viol": 0,
-  "sec": 37.5
+  "sec": 35.8
+ },
+ {
+  "flow": "flow/rnr/mix2_fast_bottomup_caps_2x.buda",
+  "bund": 100,
+  "busS": 244,
+  "netS": 2888,
+  "busWL": 62778,
+  "netWL": 746026,
+  "ovl": 0,
+  "unpl": 0,
+  "viol": 0,
+  "sec": 18.3
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup_shared.buda",
@@ -417,7 +429,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 54.0
+  "sec": 54.5
  },
  {
   "flow": "flow/rnr/mix2_fast_on_aligned_sql.buda",
@@ -429,7 +441,19 @@
   "ovl": 2,
   "unpl": 16,
   "viol": 1,
-  "sec": 42.9
+  "sec": 43.0
+ },
+ {
+  "flow": "flow/rnr/mix2_fast_on_aligned_sql_2x.buda",
+  "bund": 100,
+  "busS": 228,
+  "netS": 2794,
+  "busWL": 65160,
+  "netWL": 781287,
+  "ovl": 0,
+  "unpl": 0,
+  "viol": 0,
+  "sec": 5.0
  },
  {
   "flow": "flow/rnr/mix2_fast_topdown.buda",
@@ -441,18 +465,18 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 8.4
+  "sec": 8.3
  },
  {
   "flow": "flow/rnr/mix2_topdown_refine.buda",
   "bund": 100,
-  "busS": 272,
-  "netS": 3376,
-  "busWL": 68500,
-  "netWL": 836341,
+  "busS": 259,
+  "netS": 3284,
+  "busWL": 65339,
+  "netWL": 793215,
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 77.1
+  "sec": 56.4
  }
 ]
