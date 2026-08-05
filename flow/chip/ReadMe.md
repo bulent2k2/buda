@@ -55,18 +55,29 @@ and it exposed that a cap band written for one stack height is wrong on another.
 Note it predates the track-count and healer changes, so its absolute numbers are
 the 8-track healerless ones — the comparison within it still holds.
 
-Baseline endpoints (2026-07-30, x86 reference build; both in the QoR corpus)
+Baseline endpoints (2026-08-05, x86 reference build; both in the QoR corpus)
 ===
 | Flow | overlaps | unplaced | viol_bundles | abstract WL | detailed WL | sec |
 |---|---|---|---|---|---|---|
-| chip_topdown | 255 | 3185 | 163 | 3036142 | 61969962 | 148 |
-| chip_bottomup | 490 | 2285 | 110 | 2659098 | 46670260 | 130 |
+| chip_topdown | 4 | 134 | 9 | 2541681 | 49637160 | 126 |
+| chip_bottomup | 54 | 243 | 19 | 2516788 | 48243174 | 96 |
 
-(Refreshed 2026-07-31 after the `band_span_charge` default flip (#530) —
-which helps this vehicle: topdown overlaps 452→255, bottomup unplaced
-2610→2285 — and the planner-runtime fixes below, which cut the topdown
-total 391s→148s.  The original 2026-07-30 baseline: topdown 452/3341/163
-at 391s, bottomup 527/2610/136 at 187s.)
+**`qor/qor_table.md` is the authoritative snapshot**, regenerated nightly
+across the whole corpus.  Prefer it.  This table is a hand-kept convenience
+copy for the two headline vehicles, and being hand-kept is exactly how it
+went stale: it sat at the 2026-07-30 numbers (topdown 255/3185/163,
+bottomup 490/2285/110) for five days after the track-count and healer
+changes below took topdown to 4/134/9 — a reader hitting this section first
+would have taken numbers ~18x off as current.  If you change routing and
+only refresh one of the two, refresh the other.
+
+(`sec` is from a `-j 2` sweep, so it is contention-inflated; `qor_table.md`
+carries serial `sec1` timings.  History, all superseded: 2026-07-30
+topdown 452/3341/163 at 391s, bottomup 527/2610/136 at 187s; 2026-07-31
+after the `band_span_charge` default flip (#530) and the planner-runtime
+fixes below, topdown 255/3185/163 at 148s, bottomup 490/2285/110 at 130s.
+The step from there to the row above is the track-count study — three
+levers, measured separately below.)
 
 Top-layer count study — 6 → 8 → 10 layers (2026-08-01)
 ===

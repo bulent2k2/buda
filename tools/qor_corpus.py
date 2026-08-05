@@ -116,6 +116,14 @@ CORPUS = [
     # On-grid stacked variant: cheap (~30s) and the guard for instance-phase
     # alignment — a regression in placement phase shows up as a QoR change.
     "flow/chip/chip_stack_bottomup.buda",
+    # Its top-down twin, and the ONLY corpus row that exercises the mirrored
+    # track origins (chip_tracks_mirror.buda) on the top-down path.  The
+    # bottom-up vehicle above cannot cover them: it is the copy path, where a
+    # broken origin shows up as bits solved alone rather than copied, so a
+    # regression there is loud in a way it is not here.  Worth its own row
+    # because the origins are three hand-placed numbers with no other guard.
+    # Not cheap, unlike its bottom-up twin: ~101s serial (21/241/18).
+    "flow/chip/chip_stack_topdown.buda",
     "flow/rnr/mix2_fast_on_aligned_sql.buda",
     # The `_2x` twins: same flow on double the track density (16 signals per
     # period, same metal).  Their ORIGINALS stay in the corpus too — the
