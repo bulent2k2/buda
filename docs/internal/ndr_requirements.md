@@ -97,17 +97,28 @@ Everything below is stated against this baseline.
 
 ### Demand model (the load-bearing abstraction)
 
-- **R4 — Track-demand units.**  Every stage that today counts "bits vs
-  signal tracks" must count **demand units**: a default bit costs 1; an NDR
-  bit costs its rule's equivalent in track-pitch units (width + spacing,
-  and its share of shield wires), rounded in a single, documented place.
+- **R4 — Track-demand units, defined at the GROUP level.**  Every stage
+  that today counts "bits vs signal tracks" must count **demand units**,
+  and the conversion's domain is a segment's **whole member-bit group plus
+  its shield arrangement** — never an independently rounded per-bit cost.
+  Shared resources make demand non-additive per bit: a flank-the-bus
+  8-bit group needs TWO shields while two 4-bit groups need FOUR;
+  shield-per-N amortizes across exactly the bits present; and interior
+  spacing is shared between neighbors while the group's outer edges are
+  not.  So the one shared function takes (rule, member-bit set, shield
+  spec) and returns the group's total demand — a default bit alone costs
+  1, and any per-bit figure is a derived VIEW of the group total, not an
+  input to it.  Every operation that changes a segment's member-bit set
+  (fan-in taper via `bit_list`, bundle splits, ripup re-pins) must
+  re-invoke the group conversion, not add/subtract per-bit costs.
   `bus_seg_nbits`-as-track-demand, `eff_bus_width`, the planner's
   `signal_tracks` capacity mode, kPeak's supply floor, dead-span
   escalation, the doomed-seat census, and DNUTS admission must all consume
   the **same** conversion — one function, shared, like
   `count_signal_tracks_in_span` is today.  (This is the #536 lesson
-  applied prospectively: if the census and the placer round differently,
-  we manufacture a new class of silent strands.)
+  applied prospectively: if the census and the placer round differently —
+  or amortize shared shields differently after a taper or split — we
+  manufacture a new class of silent strands.)
 
 ### Routing grid (stage 8)
 
@@ -119,10 +130,19 @@ Everything below is stated against this baseline.
   no-allocation `count_` sibling for the planner hot path, and the vector
   and count views must be structurally lockstep (the
   `for_each_signal_track_in_span` single-walker pattern).
-- **R5a — Pattern interplay.**  Pattern SHIELD/POWER rails may satisfy a
-  rule's shield requirement when adjacency works out (a bit placed beside a
-  static GND rail is already shielded on that side); the model must be able
-  to *credit* that rather than always emitting a redundant shield wire.
+- **R5a — Pattern interplay: credit by NET IDENTITY, not adjacency.**  A
+  pattern rail may satisfy a rule's shield requirement (a bit placed
+  beside a static GND rail is already shielded on that side, and the model
+  must be able to *credit* that rather than emitting a redundant shield
+  wire) — but only a rail **electrically identical to the rule's requested
+  shield net** qualifies: a POWER/VDD rail can never satisfy a GROUND
+  shield spec, and even a `SHIELD`-typed slot counts only once its label
+  resolves to the requested net.  `TrackSlot` carries only a type and a
+  free-form label today, so crediting requires a label→net-identity
+  resolution (compatible GROUND rails — e.g. `GND`/`VSS` aliases —
+  qualify for the default GROUND spec); that resolution is part of the
+  design, and R9's mis-connected-shield audit must apply the same
+  predicate, so credit and audit cannot disagree.
 
 ### Detailed NUTS (stage 9)
 
@@ -165,8 +185,13 @@ Everything below is stated against this baseline.
 ### Bundling & hier
 
 - **R8 — Mixed-rule bundles.**  Default position (to be confirmed in
-  design): a bundle may carry per-net rules; segments charge the sum of
-  their member bits' demand units.  If the design instead requires
+  design): a bundle may carry per-net rules; a segment charges the R4
+  GROUP conversion of its member-bit set (shared shields and interior
+  spacing counted once at the group level — never a sum of
+  independently rounded per-bit costs), and a bundle split must
+  re-derive each part's group demand, since splitting a flanked group
+  CHANGES the shield count (the split report should surface the demand
+  delta).  If the design instead requires
   rule-uniform bundles, the bundler must *split* by rule class LOUDLY (the
   `set_max_bundle_bits` split-report precedent) — never silently drop or
   merge constraints.  Either way `set_bundling`-style scoping must keep an
