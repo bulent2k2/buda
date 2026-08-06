@@ -272,6 +272,10 @@ def test_write_leaves_no_temp_siblings(tmp_path):
     assert leftovers == []
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="POSIX permission modes: Windows chmod models only "
+                           "the read-only bit, so 0o644 cannot round-trip "
+                           "(measured 0o666, windows-2022 doc-validation run 8)")
 def test_write_preserves_target_mode(tmp_path):
     # An in-place edit must keep the target's permission mode: mkstemp() creates
     # the temp at 0600, so without an explicit chmod a 0644 BDB would silently

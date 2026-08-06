@@ -91,6 +91,12 @@ def test_duplicate_flows_keep_both_runs():
     assert len(stamps) == 3                     # three distinct executions kept
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="SIGKILL does not exist on Windows.  Note the sweep "
+                           "harness itself held up there: the un-killable kill "
+                           "was still recorded as this flow's err row "
+                           "(doc-validation run 8) -- only the POSIX kill "
+                           "mechanism is untestable, not the recovery contract")
 def test_hard_crash_loses_only_the_crashing_flow():
     """A worker SIGKILL breaks the whole ProcessPoolExecutor (every pending
     future raises BrokenProcessPool, not just the culprit's) — the recovery

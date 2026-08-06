@@ -186,8 +186,16 @@ def main(argv=None):
     for p in a.files:
         real = os.path.realpath(p)
         if real in seen:
+            # relpath, absolute on failure: on Windows a path on another DRIVE
+            # (C: temp vs D: checkout) makes os.path.relpath raise ValueError,
+            # and a display nicety must not crash the tool (measured on the
+            # windows-2022 doc-validation, run 8).
+            try:
+                disp = os.path.relpath(real)
+            except ValueError:
+                disp = real
             print(f"=== {p} ===\n   skipped: same file as an earlier argument "
-                  f"({os.path.relpath(real)})")
+                  f"({disp})")
             continue
         seen.add(real)
         rc |= audit(real) if a.audit else process(real, a.dry_run)
