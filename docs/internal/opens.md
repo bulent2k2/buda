@@ -34,6 +34,20 @@ items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
 
+15. **NDR support — non-default width / spacing / shield constraints on
+   nets, buses, and bundles** (added 2026-08-06) — requirements written,
+   design NOT chosen: [`ndr_requirements.md`](ndr_requirements.md).  The
+   whole pipeline currently assumes one bit = one default SIGNAL slot;
+   NDR generalizes that to per-rule track-demand units, which must be
+   priced by ONE shared conversion everywhere tracks are counted (planner
+   band capacity, kPeak floor, dead-span escalation, doomed-seat census,
+   DNUTS admission — the #536 single-sourced-arithmetic lesson applied
+   prospectively).  Mostly a stage 8 (routing grid supply queries) +
+   stage 9 (DNUTS placement of wide/spaced/shielded bits) feature, with
+   upstream honesty requirements and a hard no-NDR byte-identity gate.
+   Next step: brainstorm the four solution paths sketched in the
+   requirements doc (§5) and pick one.
+
 13. **Nominal-WL comparability across shape families (b44 follow-ons)** —
    [`wishlist-topo.md`](wishlist-topo.md) → *"Nominal-WL comparability
    across shape families"*. The generation-side residue of the b44 arc
