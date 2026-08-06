@@ -120,7 +120,15 @@ def test_cli_end_to_end_reports_and_clamps(tmp_path):
     script = tmp_path / "tiny.buda"
     script.write_text("def_layer 4 M4 H 50\nexit\n")
     root = Path(__file__).parents[2]
-    env = {**os.environ, "PYTHONPATH": f"{root}/build:{root}/src"}
+    # PREPEND to the inherited PYTHONPATH with os.pathsep, never replace with
+    # a ':'-joined literal: on Windows ':' is not the separator (the drive
+    # colons made the old value ONE bogus entry) and replacing dropped the VS
+    # layout's build/Release — the exact documented subprocess trap
+    # (WINDOWS_BUILD.md; measured, windows-validate run 14 msbuild).
+    env = {**os.environ}
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(root / "build"), str(root / "src")]
+        + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     for v in _ENV_VARS:
         env.pop(v, None)
     out = subprocess.run(

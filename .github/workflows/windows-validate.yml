@@ -227,11 +227,13 @@ jobs:
 
       - name: Diagnose the Cygwin environment
         # The inventory step: which python, which native deps resolved, what
-        # pip can do.  continue-on-error — its job is to REPORT.
+        # pip can do.  continue-on-error — its job is to REPORT.  No -e: run
+        # 14's -e aborted at the (genuinely broken) matplotlib import, so the
+        # tkinter and pip probes after it never reported.
         shell: cmd
         continue-on-error: true
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "ls -la /usr/bin/python* 2>&1; python3 --version 2>&1; cygcheck -c -d | grep -iE 'python|gcc|cmake|ninja|make' 2>&1; python3 -c 'import numpy; print(\"numpy\", numpy.__version__)' 2>&1; python3 -c 'import matplotlib; print(\"matplotlib\", matplotlib.__version__)' 2>&1; python3 -c 'import tkinter; print(\"tkinter OK\")' 2>&1; python3 -m pip --version 2>&1"
+          C:\cygwin64\bin\bash.exe -lc "ls -la /usr/bin/python* 2>&1; python3 --version 2>&1; cygcheck -c -d | grep -iE 'python|gcc|cmake|ninja|make' 2>&1; python3 -c 'import numpy; print(\"numpy\", numpy.__version__)' 2>&1; python3 -c 'import matplotlib; print(\"matplotlib\", matplotlib.__version__)' 2>&1; python3 -c 'import tkinter; print(\"tkinter OK\")' 2>&1; python3 -m pip --version 2>&1; true"
 
       - name: pip install the pure-python test deps
         shell: cmd
@@ -239,10 +241,13 @@ jobs:
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pip install --user pybind11 pytest pytest-bdd pytest-xdist"
 
       - name: pip install the web deps (expected to fail — recording, not requiring)
+        # The fallback message MUST be quoted: run 14's unquoted parens were a
+        # bash syntax error, so pip never even ran and continue-on-error hid
+        # it — pydantic-core availability went UNMEASURED for two rounds.
         shell: cmd
         continue-on-error: true
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pip install --user -r src/web/requirements.txt && echo WEB DEPS OK || echo WEB DEPS UNAVAILABLE (expected: pydantic-core needs Rust; no Cygwin wheels)"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pip install --user -r src/web/requirements.txt && echo WEB DEPS OK || echo 'WEB DEPS UNAVAILABLE (expected: pydantic-core needs Rust; no Cygwin wheels)'"
 
       - name: Build with the repo's own wrapper (bin/bb)
         # THE point of this path: the documented-for-Linux command, verbatim.
@@ -260,15 +265,24 @@ jobs:
           C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && ls -la build/ | grep -E 'dll$|so$|pyd$' || true"
 
       - name: Import smoke
-        # PYTHONPATH was MISSING here in run 13 -- the MSVC jobs set it and
-        # this copy did not, so python 3.9 reported a plain ModuleNotFoundError
-        # with PYTHONPATH=None (not a Cygwin fault; a harness omission).
+        # PYTHONPATH was MISSING here in run 13 (harness omission); run 14's
+        # repair then OVER-ESCAPED it — bash treats \$ inside double quotes as
+        # a literal dollar, so PYTHONPATH arrived as the literal string
+        # '$PWD/build:...' (measured: the diag printed it verbatim).  cmd does
+        # not expand $, so no escaping is needed — $(cygpath ...) on this same
+        # line has always expanded fine for exactly that reason.
         shell: cmd
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PYTHONPATH=\$PWD/build:\$PWD/src:\$PWD/tools python3 -u -X faulthandler .github/scripts/windows_diag_import.py"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PYTHONPATH=$PWD/build:$PWD/src:$PWD/tools python3 -u -X faulthandler .github/scripts/windows_diag_import.py"
 
       - name: Fast test tier
+        # continue-on-error THIS round: run 14's inventory measured the distro
+        # python39-matplotlib (3.5.1) broken against python39-numpy (2.0.1) —
+        # '_ARRAY_API not found', an upstream Cygwin packaging skew, not ours.
+        # Tests importing matplotlib will fail on that alone; run to MEASURE
+        # the damage without blocking the flow step behind it.
         shell: cmd
+        continue-on-error: true
         run: |
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pytest -q -r fs"
 
@@ -281,7 +295,12 @@ jobs:
     # Fourth path: mingw-w64 — GCC producing NATIVE Windows binaries, driven
     # from bash.  One honesty note this job MEASURES rather than asserts:
     # "the mingw64 that comes with Git for Windows" is the SHELL, not the
-    # toolchain — Git Bash ships no gcc/make.  The compiler comes from MSYS2
+    # toolchain — Git Bash ships no gcc/make.  (Run 14's inventory step makes
+    # the illusion measurable: the runner's Git Bash DOES resolve gcc — at
+    # /c/mingw64/bin, a SEPARATE toolchain the runner image pre-installs, with
+    # ninja from Chocolatey and cmake from its own installer.  Nothing under
+    # Git's tree.  A dev box without those extras gets ABSENT for all of
+    # them.)  The compiler comes from MSYS2
     # (preinstalled on this runner; on a dev box: install MSYS2), and the
     # UCRT64 flavor is chosen deliberately: modern CPython links the UCRT, and
     # mixing CRTs across the extension boundary is the class of silent bug the
@@ -347,6 +366,17 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: Get-ChildItem -Recurse build -Include *.pyd,*.dll | Select-Object FullName,Length
+
+      - name: DLL dependency reality (objdump)
+        # The measured basis for every runtime-DLL claim in the docs: which
+        # DLLs each artifact ACTUALLY imports.  A self-contained build shows
+        # only system DLLs (KERNEL32, msvcrt/ucrt, python3xx) — any
+        # libstdc++-6/libgcc_s_seh-1/libwinpthread-1 line here means the
+        # static-runtime link options missed a target (run 14: buda_db.pyd).
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\msys64\usr\bin\bash.exe -lc "cd $(cygpath '%CD%') && for f in build/*.dll build/*.pyd; do echo \"== $f\"; /ucrt64/bin/objdump -p \"$f\" | grep 'DLL Name' || true; done"
 
       - name: Import smoke
         shell: cmd

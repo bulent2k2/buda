@@ -223,13 +223,16 @@ if(MINGW)
     # 13): the UCRT64 build succeeds and the import dies with "Could not find
     # module 'libbuda_core.dll' (or one of its dependencies)" -- the
     # dependencies being libstdc++-6/libgcc_s_seh-1/libwinpthread-1 from
-    # /ucrt64/bin.  pybind11 already static-links the GCC runtime into ITS
-    # module targets on MinGW (visible as the .pyd size delta); mirror the
-    # same treatment onto the plain shared library they link against.
-    target_link_options(buda_core PRIVATE
-        -static-libgcc -static-libstdc++
-        "LINKER:-Bstatic,--whole-archive" "LINKER:-lwinpthread"
-        "LINKER:--no-whole-archive" "LINKER:-Bdynamic")
+    # /ucrt64/bin.  ALL THREE artifacts need the treatment: run 14 measured
+    # that buda_core alone is not enough — the import then dies one layer up,
+    # inside buda_db.pyd (650KB: visibly no static runtime; the earlier
+    # assumption that pybind11 does this for its module targets was wrong).
+    foreach(_tgt buda_core buda_db buda)
+        target_link_options(${_tgt} PRIVATE
+            -static-libgcc -static-libstdc++
+            "LINKER:-Bstatic,--whole-archive" "LINKER:-lwinpthread"
+            "LINKER:--no-whole-archive" "LINKER:-Bdynamic")
+    endforeach()
 endif()
 
 if(CYGWIN)
