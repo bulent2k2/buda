@@ -1,0 +1,12 @@
+# from big2.buda
+source tracks4top.buda
+source tc3b_flat_x5.buda
+run_bundler
+generate_topologies_for_bundle bus_011
+check_design topo all
+select_topology bus_011 group:9  # TRUNK_H@y3100 has a disjointed V stub
+run_planner
+run_nuts
+run_detailed_nuts
+check_design
+visualize

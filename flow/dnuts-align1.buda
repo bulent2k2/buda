@@ -1,0 +1,39 @@
+# New DNUTS mode: `set_pair_align_heal on`
+# each bus segment is `seated` in a rectangle: span x slide
+
+def_layer 4 M4 H TOP 44.44
+def_layer 5 M5 V TOP 50.00
+def_track_pattern 4 -200  VDD 2 1  _ 2 1 _ 2 1 _ 2 1 _ 2 1 _ 2 1  VSS 2 1  _ 2 1 _ 2 1 _ 2 1 _ 2 1 _ 2 1
+def_track_pattern 5 -200  VDD 3 1  _ 2 1 _ 2 1 _ 2 1 _ 2 1        VSS 3 1  _ 2 1 _ 2 1 _ 2 1 _ 2 1
+report_overhead
+
+corner_margin dx 1 dy 2
+
+# half phase in x:
+add_block u1    100  500  200  700
+add_block l1    150  100  250  300
+
+add_block u2    300  500  500  700
+add_block l2    350  100  450  300
+
+add_block u3    600  500  700  700
+add_block l3    550  100  650  300
+
+add_bus bus1[8] u1 u2,u3,l1,l2,l3
+add_bus fig1[4] u3 l3
+add_bus fig2[4] u1 l1
+add_bus fig3[2] u1 l1,u2,l2,l3
+
+run_bundler
+generate_topologies
+check_design topo
+select_topology bus1 15  # TRUNK_H@y400 in the channel space between upper and lower blocks
+select_topology fig3 21  # TRUNK_H@y400 
+dump_topologies --conn
+run_planner
+run_nuts
+check_design
+set_pair_align_heal on # !!
+run_detailed_nuts
+check_design
+visualize

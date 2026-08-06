@@ -1,0 +1,22 @@
+source ../tracks/tracks4top.buda
+
+# > 1000% congested.
+# x10 expansion in tc3a_flat.buda ~= big.buda
+open_bdb tc3a.bdb.sql
+# open_bdb tc3a_bit_pruned.bdb.sql  # in tc3a.buda now
+
+derive_busterms 1
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+run_hier_bundler depth 1
+dump_hbundles
+generate_hier_topologies
+run_planner hier
+run_nuts
+negotiate_congestion
+ripup_reroute
+run_detailed_nuts
+negotiate_congestion
+ripup_reroute
+check_design
+visualize

@@ -1,0 +1,40 @@
+# from channel_stress_auto_track_overrides.buda
+# extend overrides to OOB
+source tracks/tracks4top.buda
+
+# few tracks to limit OTC/passthru
+add_grid_override 4  20 -100 640  80   0  VDD 10 1 _ 1 1 GND 10 1 _ 1 1
+add_grid_override 6  20 -100 640  80   0  VDD 10 1 _ 1 1 GND 10 1 _ 1 1
+add_grid_override 4  20  420 640 580   0  VDD 10 1 _ 1 1 GND 10 1 _ 1 1
+add_grid_override 6  20  420 640 580   0  VDD 10 1 _ 1 1 GND 10 1 _ 1 1
+
+add_block u_b0    20   20   80   80
+add_block u_b1   100   20  160   80
+add_block u_b2   180   20  240   80
+add_block u_b3   260   20  320   80
+add_block u_b4   340   20  400   80
+add_block u_b5   420   20  480   80
+add_block u_b6   500   20  560   80
+add_block u_b7   580   20  640   80
+
+add_block u_t0    20  420   80  480
+add_block u_t1   100  420  160  480
+add_block u_t2   180  420  240  480
+add_block u_t3   260  420  320  480
+add_block u_t4   340  420  400  480
+add_block u_t5   420  420  480  480
+add_block u_t6   500  420  560  480
+add_block u_t7   580  420  640  480
+
+source test4_nets.buda
+run_bundler strict
+generate_topologies
+run_planner signal_tracks
+run_nuts
+negotiate_congestion
+check_design
+run_detailed_nuts
+negotiate_congestion
+ripup_reroute # just added
+check_design
+visualize
