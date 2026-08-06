@@ -310,35 +310,32 @@ class VizPanelsMixin:
 
         has_rerun = self._rerun_layer_fn is not None
         for row, lid in enumerate(self._layer_ids):
-            # Two text lines per row: name on top, stats just below.
-            # 0.25/0.75 split gives ~9 pt separation at min chk_h — no overlap.
-            y_name  = 1.0 - (row + 0.25) / n
-            y_stats = 1.0 - (row + 0.75) / n
+            # ONE text line per row: "M4 V (6, 48)" — name with its actual
+            # orientation, then (segments, wires).  A two-line row (name over
+            # a separate stats line) collided with itself once a stack had
+            # ~10 layers: the rows compress and the 0.25/0.75 split no longer
+            # clears 9 pt of text.  One line is legible at any stack depth.
+            y_mid = 1.0 - (row + 0.5) / n
             on    = self._layer_visible.get(lid, True)
             col   = _LAYER_COLOR.get(lid, '#888888')
             vis_char  = '☑' if on else '☐'
             txt_color = col if on else '#bbbbbb'
-            dim_color = (col if on else '#bbbbbb')
 
-            # Checkbox glyph — centred vertically across the full row.
-            y_mid = 1.0 - (row + 0.5) / n
+            # Checkbox glyph.
             ax.text(0.04, y_mid, vis_char,
                     transform=ax.transAxes, fontsize=9, color=txt_color,
                     va='center', clip_on=True)
 
-            # Layer name with its actual orientation ("M4 V" when overridden).
-            ax.text(0.22, y_name, _layer_label(lid, self.layer_stack),
-                    transform=ax.transAxes, fontsize=9, color=txt_color,
-                    va='center', clip_on=True, fontweight='bold')
-
-            # Stats line ("6 segs, 48 wires").
             n_segs = layer_seg_count.get(lid, 0)
             n_bits = layer_bit_count.get(lid, 0)
+            label  = _layer_label(lid, self.layer_stack)
             if n_segs:
-                stats_txt = f'{n_segs} segs, {n_bits} wires'
-                ax.text(0.22, y_stats, stats_txt,
-                        transform=ax.transAxes, fontsize=8,
-                        color=dim_color, va='center', clip_on=True)
+                label = f'{label} ({n_segs}, {n_bits})'
+            # x=0.10 sits just clear of the checkbox glyph at this font size
+            # — the old 0.22 left a conspicuous gap between the two.
+            ax.text(0.10, y_mid, label,
+                    transform=ax.transAxes, fontsize=9, color=txt_color,
+                    va='center', clip_on=True, fontweight='bold')
 
             if has_rerun:
                 ax.text(0.88, y_mid, '↺',
