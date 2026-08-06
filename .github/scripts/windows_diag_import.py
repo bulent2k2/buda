@@ -1,34 +1,42 @@
 # Import diagnostics for the Windows validation workflow.
 #
-# A committed file, not a here-string generated in the step: runs 2 and 3
-# showed failing pwsh steps on the hosted runner losing the process output
-# ENTIRELY (exit 1, zero text, not even this script's first print when it was
-# generated inline).  cmd steps demonstrably keep their output, so the
-# workflow runs this via `shell: cmd` and everything prints to stdout.
+# Run with `python -u`: run 4 established the failure is a NATIVE fast-fail
+# (exit 0xC0000409, STATUS_STACK_BUFFER_OVERRUN == __fastfail/abort in the
+# modern CRT).  __fastfail is not interceptable in-process — no faulthandler
+# dump — and it kills the process with stdio buffers UNFLUSHED, which is why
+# runs 2-4 showed zero output under both pwsh and cmd.  Unbuffered, staged
+# prints localize the crashing stage; they cannot survive past it.
 import ctypes
 import os
 import sys
 import traceback
 
-print("cwd:", os.getcwd())
-print("python:", sys.version)
-print("PYTHONPATH:", os.environ.get("PYTHONPATH"))
+def stage(msg):
+    print(msg, flush=True)
 
-for d in ("build", os.path.join("build", "Release")):
+stage("stage 0: python %s" % sys.version.split()[0])
+stage("stage 0: cwd=%s" % os.getcwd())
+stage("stage 0: PYTHONPATH=%s" % os.environ.get("PYTHONPATH"))
+
+for d in ("build", os.path.join("build", "Release"), "build-noassert"):
     dll = os.path.join(os.getcwd(), d, "buda_core.dll")
     if os.path.exists(dll):
+        stage("stage 1: ctypes-loading %s ..." % dll)
         try:
             ctypes.WinDLL(dll)
-            print("ctypes loads OK:", dll)
+            stage("stage 1: ctypes loads OK: %s" % dll)
         except OSError as e:
-            # Distinguishes "buda_core.dll itself cannot load (missing
-            # dependency / bad image)" from "the .pyd cannot FIND it".
-            print("ctypes load FAILED:", dll, "->", e)
+            stage("stage 1: ctypes load FAILED: %s -> %s" % (dll, e))
 
 try:
-    import buda
+    stage("stage 2: import buda_db ...")
     import buda_db
-    print("import OK:", buda.__file__)
+    stage("stage 2: buda_db OK: %s" % buda_db.__file__)
+    stage("stage 3: import buda ...")
+    import buda
+    stage("stage 3: buda OK: %s" % buda.__file__)
+    stage("ALL STAGES PASSED")
 except BaseException:
     traceback.print_exc(file=sys.stdout)
+    sys.stdout.flush()
     sys.exit(1)

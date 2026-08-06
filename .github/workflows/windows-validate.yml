@@ -94,7 +94,26 @@ jobs:
         shell: cmd
         run: |
           set "PYTHONPATH=%CD%\build;%CD%\src;%CD%\tools"
-          python -X faulthandler .github\scripts\windows_diag_import.py
+          python -u -X faulthandler .github\scripts\windows_diag_import.py
+
+      - name: "A/B: rebuild with BUDA_ASSERTS=OFF and import"
+        # Hypothesis under test: the 0xC0000409 fast-fail is an assert() firing
+        # during DLL init / module import — BUDA_ASSERTS keeps asserts ACTIVE in
+        # release, and a failed assert in the modern MSVC CRT aborts via
+        # __fastfail with exactly that code and no output.  If this import
+        # SUCCEEDS while the asserts-ON one crashes, the hypothesis is
+        # confirmed and the firing assert needs finding; if it also crashes,
+        # the cause is elsewhere (and asserts are exonerated).
+        if: always()
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          cmake -S . -B build-noassert -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUDA_ASSERTS=OFF
+          if errorlevel 1 exit /b 1
+          cmake --build build-noassert
+          if errorlevel 1 exit /b 1
+          set "PYTHONPATH=%CD%\build-noassert;%CD%\src;%CD%\tools"
+          python -u -X faulthandler .github\scripts\windows_diag_import.py
 
       - name: Fast test tier
         shell: cmd
@@ -150,7 +169,7 @@ jobs:
         shell: cmd
         run: |
           set "PYTHONPATH=%CD%\build\Release;%CD%\build;%CD%\src;%CD%\tools"
-          python -X faulthandler .github\scripts\windows_diag_import.py
+          python -u -X faulthandler .github\scripts\windows_diag_import.py
 
       - name: Fast test tier
         shell: cmd
