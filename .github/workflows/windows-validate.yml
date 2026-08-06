@@ -270,3 +270,90 @@ jobs:
         shell: cmd
         run: |
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PYTHONPATH=build:src:tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda"
+
+  mingw:
+    # Fourth path: mingw-w64 — GCC producing NATIVE Windows binaries, driven
+    # from bash.  One honesty note this job MEASURES rather than asserts:
+    # "the mingw64 that comes with Git for Windows" is the SHELL, not the
+    # toolchain — Git Bash ships no gcc/make.  The compiler comes from MSYS2
+    # (preinstalled on this runner; on a dev box: install MSYS2), and the
+    # UCRT64 flavor is chosen deliberately: modern CPython links the UCRT, and
+    # mixing CRTs across the extension boundary is the class of silent bug the
+    # MSVC lane needed nine runs to characterize.
+    #
+    # Why this lane is interesting: unlike Cygwin, the binaries are native, so
+    # they link the NATIVE CPython — and every pip wheel works (numpy,
+    # matplotlib, even the web deps).  Cygwin's package-inventory problem does
+    # not exist here.  Unlike MSVC, it is the GCC branch of the build
+    # (-march, -ffp-contract=off) and mingw auto-exports DLL symbols.
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    env:
+      MPLBACKEND: Agg
+      PYTHONUTF8: '1'
+
+    steps:
+      - name: Force LF checkout
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: What does Git Bash actually provide? (the misconception, measured)
+        # `shell: bash` on a Windows runner IS Git for Windows' bash.  Record
+        # what a Git-Bash-only user really has before we reach for MSYS2.
+        shell: bash
+        continue-on-error: true
+        run: |
+          uname -a
+          for t in gcc g++ make cmake ninja python python3; do
+            printf '%-8s -> %s\n' "$t" "$(command -v $t || echo ABSENT)"
+          done
+
+      - name: Install the mingw-w64 toolchain (MSYS2 UCRT64)
+        shell: pwsh
+        run: |
+          C:\msys64\usr\bin\bash.exe -lc 'pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja'
+        env:
+          MSYSTEM: UCRT64
+
+      - name: Install Python packages (native CPython — wheels work here)
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pybind11 pytest pytest-bdd matplotlib numpy pytest-xdist
+          python -m pip install -r src/web/requirements.txt
+
+      - name: Configure and build (UCRT64 gcc + Ninja, native CPython)
+        # PATH gets the hosted CPython FIRST: its dir contains python3.exe, so
+        # CMakeLists' python3 lookup and PYBIND11_FINDPYTHON both resolve to
+        # the NATIVE interpreter (not an MSYS python — none is installed).
+        shell: cmd
+        run: |
+          C:\msys64\usr\bin\bash.exe -leo pipefail -c "export MSYSTEM=UCRT64 && source /etc/profile && export PATH=\"$(cygpath -u '%pythonLocation%'):$PATH\" && cd $(cygpath '%CD%') && which gcc g++ cmake ninja python3 && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build"
+
+      - name: Where did the artifacts land?
+        shell: pwsh
+        continue-on-error: true
+        run: Get-ChildItem -Recurse build -Include *.pyd,*.dll | Select-Object FullName,Length
+
+      - name: Import smoke
+        shell: cmd
+        run: |
+          set "PYTHONPATH=%CD%\build;%CD%\src;%CD%\tools"
+          python -u -X faulthandler .github\scripts\windows_diag_import.py
+
+      - name: Fast test tier (documented no-PYTHONPATH form)
+        shell: cmd
+        run: python -m pytest -q -r fs
+
+      - name: Run a .buda flow
+        shell: cmd
+        run: |
+          set "PYTHONPATH=%CD%\build;%CD%\src;%CD%\tools"
+          python src\buda_cli.py --no-viz flow\four_blocks.buda
