@@ -914,38 +914,23 @@ class RipupMixin:
         return ([idx_moves[i] for i in order[:_RR_SCREEN_TOP_N]],
                 [idx_moves[i] for i in order[_RR_SCREEN_TOP_N:]])
 
-    def _rr_parallel_deferred_sweep(self, deferred, cur, stage, metric,
-                                    snap, n_cont, it):
-        """Parallel stall-certificate sweep (rnr runtime P1,
-        trial_sweep.cpp): evaluate every deferred ('idx', tidx) move on C++
-        worker threads against the committed baseline — private wrapper/
-        planner copies per move, GIL released — with metrics implementing
-        the sequential fast-trial semantics exactly (stage-a skip_tighten;
-        stage-b vias-off + plain-path abort; the moved bundle's
-        DISCONNECTED term on the caller-side base decomposition).  Walks
-        the outcomes in the sequential visit order: the first in-order
-        strict improver is REPLAYED through the normal single-move
-        sequential trial (its result is the accept basis and the committed
-        state — the sweep's metrics only order the pick and carry the
-        stall certificate), and a move the workers could not evaluate
-        (incremental replan unavailable) is trialed sequentially at its
-        original position.  A sweep-vs-replay disagreement is LOUD and the
-        replay verdict wins.  Returns (best-or-None, trials)."""
+    def _rr_sweep_threads(self):
+        """The sweep pool size: BUDA_SWEEP_THREADS (explicit) wins; else the
+        CLI's machine-wide governor BUDA_THREADS caps the pool; else 0 =
+        hardware concurrency (resolved in C++)."""
+        return int(os.environ.get("BUDA_SWEEP_THREADS")
+                   or os.environ.get("BUDA_THREADS", "0") or 0)
+
+    def _rr_sweep_stage_setup(self, flat, stage, metric):
+        """(base_disc, net_counts, dn_kwargs) for a parallel_sweep call over
+        `flat` [(ci, bid, old_tidx, tidx)] — the stage-b DISCONNECTED
+        decomposition (base = total minus the moved bundle's CURRENT
+        contribution; other bundles' contributions cannot change with the
+        move, and trial dogleg-adoption drift is excluded by the dogleg
+        pass's non-severing guarantee, #405) plus the bottom-up DNUTS
+        copy-plan port.  Stage a returns empties."""
         import buda
-        flat = []                     # (ci, bid, old_tidx, tidx)
-        for ci, bid, old_tidx, moves in deferred:
-            for kind, t in moves:
-                if kind != 'idx':     # structurally impossible today
-                    continue
-                flat.append((ci, bid, old_tidx, t))
-        if not flat:
-            return None, 0
-        # Stage-b DISCONNECTED decomposition: base = total minus the moved
-        # bundle's CURRENT contribution (other bundles' contributions cannot
-        # change with the move; trial dogleg-adoption drift is excluded by
-        # the dogleg pass's non-severing guarantee, #405).
-        base_disc, net_counts = {}, {}
-        dn_kwargs = {}
+        base_disc, net_counts, dn_kwargs = {}, {}, {}
         if stage == 'b':
             total = self._rr_disconnected_bits()
             memo = getattr(self, "_rr_disc_memo", None) or {}
@@ -970,9 +955,13 @@ class RipupMixin:
             dn_kwargs.update(grid=self.routing_grid,
                              bit_order=self._detailed_bit_order,
                              abort_unplaced=self._rr_m_primary(metric()))
-        print(f"[ripup_reroute] iter {it}: screened scan stalled — "
-              f"sweeping {len(flat)} deferred move(s) in parallel",
-              flush=True)
+        return base_disc, net_counts, dn_kwargs
+
+    def _rr_sweep_eval(self, flat, stage, base_disc, net_counts, dn_kwargs):
+        """One parallel_sweep evaluation of `flat` — private wrapper/planner
+        copies per move on C++ worker threads, GIL released; returns the
+        per-move (prim, sec, ok) outcomes in flat order."""
+        import buda
         t0 = time.perf_counter()
         outcomes = buda.parallel_sweep(
             self.bundles,
@@ -984,12 +973,143 @@ class RipupMixin:
             stage == 'b',
             bool(getattr(self, '_rr_fast_trials', False)),
             set(self._dogleg_slot), base_disc, net_counts,
-            # BUDA_SWEEP_THREADS (explicit) wins; else the CLI's machine-wide
-            # governor BUDA_THREADS caps the pool; else 0 = hardware (C++).
-            n_threads=int(os.environ.get("BUDA_SWEEP_THREADS")
-                          or os.environ.get("BUDA_THREADS", "0") or 0),
+            n_threads=self._rr_sweep_threads(),
             **dn_kwargs)
         self._rr_t_add('psweep', time.perf_counter() - t0)
+        return outcomes
+
+    def _rr_parallel_scan_sweep(self, contenders, cur, stage, metric, snap,
+                                deferred, screen, n_cont, it):
+        """Parallel PRIMARY scan (rnr runtime P1b): evaluate the contenders'
+        SCREENED kept moves — the trials the sequential first-improving loop
+        runs one at a time — on the sweep pool, in visit-order chunks.
+
+        LAZY like the sequential loop: a chunk's contenders are screened
+        only when the chunk is reached, so an early improver leaves later
+        contenders unscreened (the sequential loop's cost profile — an
+        eager pre-pass measured 2x slower on improver-heavy flows), and
+        their screened-out tails join `deferred` (the caller's list) only
+        when actually scanned, exactly as the sequential scan accumulates
+        it.
+
+        Print- and decision-TRANSPARENT vs the sequential loop by
+        construction: a contender none of whose moves improves per the
+        sweep prints the sequential heartbeat and books the same trial
+        count; the FIRST contender (visit order) with a sweep-improving or
+        unevaluable move replays its ENTIRE kept list through the
+        sequential _rr_scan_moves — the per-contender best-of-list trial,
+        verbatim — so the committed move, the printed lines, and the trial
+        counts all match the sequential scan exactly (the sweep's metrics
+        only order the pick; a sweep-vs-replay disagreement is LOUD and
+        the replay verdict wins).  Chunking bounds the wasted evaluations
+        when an early contender improves while a stalled scan — the
+        dominant case on grinding stage-b runs — gets the full pool win.
+        Returns (best-or-None, trials)."""
+        n_thr = self._rr_sweep_threads() or (os.cpu_count() or 1)
+        chunk_moves = max(8, 2 * n_thr)
+        trials = 0
+        i, n_items = 0, len(contenders)
+        while i < n_items:
+            # Build (and screen) just enough contenders to fill this chunk.
+            group = []               # (ci, bid, old_tidx, kept moves)
+            nmv = 0
+            while i < n_items and nmv < chunk_moves:
+                ci, bid = i + 1, contenders[i]
+                i += 1
+                w = self._rr_wrapper(bid)
+                if w is None:
+                    continue
+                old_tidx = snap['wrap'][bid][0]
+                moves = [('idx', t)
+                         for t in self._rr_candidate_order(w, old_tidx,
+                                                           stage)]
+                if screen and len(moves) > _RR_SCREEN_TOP_N:
+                    moves, rest = self._rr_screen_prune(w, moves)
+                    if rest:
+                        deferred.append((ci, bid, old_tidx, rest))
+                if moves:
+                    group.append((ci, bid, old_tidx, moves))
+                    nmv += len(moves)
+            if not group:
+                continue
+            flat = [(ci, bid, old, t)
+                    for ci, bid, old, moves in group
+                    for _k, t in moves]
+            base_disc, net_counts, dn_kwargs = \
+                self._rr_sweep_stage_setup(flat, stage, metric)
+            outcomes = self._rr_sweep_eval(flat, stage, base_disc,
+                                           net_counts, dn_kwargs)
+            oi = 0
+            for ci, bid, old_tidx, moves in group:
+                outs = outcomes[oi:oi + len(moves)]
+                oi += len(moves)
+                w = self._rr_wrapper(bid)
+                if w is None:
+                    continue
+                sweep_improving = False
+                for (_kind, _t), (prim, sec, ok) in zip(moves, outs):
+                    if not ok:
+                        sweep_improving = True      # unevaluable: replay decides
+                        break
+                    m = (prim, sec) if stage == 'b' else prim
+                    if m < cur:
+                        sweep_improving = True
+                        break
+                if sweep_improving:
+                    cand_best, t2 = self._rr_scan_moves(
+                        w, bid, old_tidx, moves, cur, stage, metric, snap,
+                        trial_base=trials)
+                    trials += t2
+                    if cand_best is not None:
+                        print(f"[ripup_reroute] iter {it}: contender "
+                              f"{ci}/{n_cont} bundle {bid} improves "
+                              f"{self._rr_m_str(cur)}->"
+                              f"{self._rr_m_str(cand_best[0])} "
+                              f"({self._rr_move_str(old_tidx, cand_best[3])})",
+                              flush=True)
+                        return cand_best, trials
+                    if all(ok for _p, _s, ok in outs):
+                        print(f"[ripup_reroute] WARNING: parallel-sweep "
+                              f"divergence on bundle {bid} (screened scan) "
+                              f"— replay verdict kept", flush=True)
+                else:
+                    trials += len(moves)   # the sequential trials these replace
+                print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
+                      f"bundle {bid} — no improvement", flush=True)
+        return None, trials
+
+    def _rr_parallel_deferred_sweep(self, deferred, cur, stage, metric,
+                                    snap, n_cont, it):
+        """Parallel stall-certificate sweep (rnr runtime P1,
+        trial_sweep.cpp): evaluate every deferred ('idx', tidx) move on C++
+        worker threads against the committed baseline — private wrapper/
+        planner copies per move, GIL released — with metrics implementing
+        the sequential fast-trial semantics exactly (stage-a skip_tighten;
+        stage-b vias-off + plain-path abort; the moved bundle's
+        DISCONNECTED term on the caller-side base decomposition).  Walks
+        the outcomes in the sequential visit order: the first in-order
+        strict improver is REPLAYED through the normal single-move
+        sequential trial (its result is the accept basis and the committed
+        state — the sweep's metrics only order the pick and carry the
+        stall certificate), and a move the workers could not evaluate
+        (incremental replan unavailable) is trialed sequentially at its
+        original position.  A sweep-vs-replay disagreement is LOUD and the
+        replay verdict wins.  Returns (best-or-None, trials)."""
+        flat = []                     # (ci, bid, old_tidx, tidx)
+        for ci, bid, old_tidx, moves in deferred:
+            for kind, t in moves:
+                if kind != 'idx':     # structurally impossible today
+                    continue
+                flat.append((ci, bid, old_tidx, t))
+        if not flat:
+            return None, 0
+        base_disc, net_counts, dn_kwargs = \
+            self._rr_sweep_stage_setup(flat, stage, metric)
+        print(f"[ripup_reroute] iter {it}: screened scan stalled — "
+              f"sweeping {len(flat)} deferred move(s) in parallel",
+              flush=True)
+        outcomes = self._rr_sweep_eval(flat, stage, base_disc, net_counts,
+                                       dn_kwargs)
         trials = 0
         for (ci, bid, old_tidx, tidx), (prim, sec, ok) in zip(flat,
                                                               outcomes):
@@ -2818,57 +2938,84 @@ class RipupMixin:
             # scan contenders in priority order and commit the FIRST whose best
             # alternate candidate strictly lowers the metric; a per-contender
             # heartbeat (flushed) makes progress visible.
-            for ci, bid in enumerate(contenders, 1):
-                w = self._rr_wrapper(bid)
-                if w is None:
-                    continue
-                old_tidx = snap['wrap'][bid][0]
-                # Two move sources for this contender:
-                #   ('idx', t)  — pin an alternate candidate index (existing).
-                #   ('flip', e) — flip one contended MST edge's L/Z bend on the
-                #                 SELECTED candidate in place (step 4b), keeping
-                #                 the index.  Only contended edges are tried, so
-                #                 cost stays ~linear in overflows, not 2^N.
-                # Relevance-first index order (item 4): candidates farthest from
-                # the measured contention are the likeliest fixes.
-                moves = [('idx', t)
-                         for t in self._rr_candidate_order(w, old_tidx, stage)]
-                # Fixed-context screen (round 3, final lever): rank the idx
-                # alternates by a ~ms single-bundle placement against the
-                # frozen baseline and FULL-trial only the top few; the rest
-                # are deferred to this iteration's stall sweep below, so no
-                # reachable fix is ever pruned away — only postponed.
-                if screen and len(moves) > _RR_SCREEN_TOP_N:
-                    moves, rest = self._rr_screen_prune(w, moves)
-                    if rest:
-                        deferred.append((ci, bid, old_tidx, rest))
-                # The per-edge MST L/Z flip move-source is opt-in
-                # (`use_edge_candidates`): on the current corpus a flip is only
-                # ever *tried* on real contended MST edges — an index alternate
-                # always wins the commit — so it is off by default (routes
-                # unchanged) and enabled only when asked to explore edge flips.
-                if use_edge_candidates:
-                    moves += [('flip', e)
-                              for e in self._rr_flip_edges(w, stage)]
-                wr = []
-                cand_best, t = self._rr_scan_moves(w, bid, old_tidx, moves,
-                                                   cur, stage, metric, snap,
-                                                   trial_base=n_trials,
-                                                   warm=warm, warm_rej=wr)
+            #
+            # Parallel primary scan (rnr runtime P1b): the same gate as the
+            # deferred stall sweep (fast-trial semantics the C++ workers
+            # implement; no warm pre-filter) plus idx-only moves (the sweep
+            # cannot evaluate flips) — AND a real pool.  On a 1-thread pool
+            # (e.g. qor sweep workers pin BUDA_SWEEP_THREADS=1) the chunked
+            # sweep would serially evaluate whole chunks where the
+            # sequential loop commits after the first improving trial —
+            # measured 2.5x slower on improver-heavy flows (rnr/mix) — so
+            # single-thread pools keep the sequential scan.  The DEFERRED
+            # stall sweep stays engaged at any width: its certificate case
+            # needs every move evaluated regardless.
+            n_pool = self._rr_sweep_threads() or (os.cpu_count() or 1)
+            use_par_scan = (use_parallel_sweep and n_pool > 1
+                            and getattr(self, '_rr_fast_trials', False)
+                            and not warm and not use_edge_candidates)
+            if use_par_scan:
+                best, t = self._rr_parallel_scan_sweep(
+                    contenders, cur, stage, metric, snap, deferred, screen,
+                    n_cont, it)
                 n_trials += t
-                if wr:
-                    warm_pend.setdefault(bid, (ci, old_tidx, []))[2] \
-                        .extend(wr)
-                if cand_best is not None:
-                    best = cand_best
-                    print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
-                          f"bundle {bid} improves {self._rr_m_str(cur)}->"
-                          f"{self._rr_m_str(cand_best[0])} "
-                          f"({self._rr_move_str(old_tidx, cand_best[3])})",
+            else:
+                for ci, bid in enumerate(contenders, 1):
+                    w = self._rr_wrapper(bid)
+                    if w is None:
+                        continue
+                    old_tidx = snap['wrap'][bid][0]
+                    # Two move sources for this contender:
+                    #   ('idx', t)  — pin an alternate candidate index.
+                    #   ('flip', e) — flip one contended MST edge's L/Z bend
+                    #                 on the SELECTED candidate in place
+                    #                 (step 4b), keeping the index.  Only
+                    #                 contended edges are tried, so cost
+                    #                 stays ~linear in overflows, not 2^N.
+                    # Relevance-first index order (item 4): candidates
+                    # farthest from the measured contention are the
+                    # likeliest fixes.
+                    moves = [('idx', t)
+                             for t in self._rr_candidate_order(w, old_tidx,
+                                                               stage)]
+                    # Fixed-context screen (round 3, final lever): rank the idx
+                    # alternates by a ~ms single-bundle placement against the
+                    # frozen baseline and FULL-trial only the top few; the rest
+                    # are deferred to this iteration's stall sweep below, so no
+                    # reachable fix is ever pruned away — only postponed.
+                    if screen and len(moves) > _RR_SCREEN_TOP_N:
+                        moves, rest = self._rr_screen_prune(w, moves)
+                        if rest:
+                            deferred.append((ci, bid, old_tidx, rest))
+                    # The per-edge MST L/Z flip move-source is opt-in
+                    # (`use_edge_candidates`): on the current corpus a flip
+                    # is only ever *tried* on real contended MST edges — an
+                    # index alternate always wins the commit — so it is off
+                    # by default (routes unchanged) and enabled only when
+                    # asked to explore edge flips.
+                    if use_edge_candidates:
+                        moves += [('flip', e)
+                                  for e in self._rr_flip_edges(w, stage)]
+                    wr = []
+                    cand_best, t = self._rr_scan_moves(
+                        w, bid, old_tidx, moves, cur, stage, metric, snap,
+                        trial_base=n_trials, warm=warm, warm_rej=wr)
+                    n_trials += t
+                    if wr:
+                        warm_pend.setdefault(bid, (ci, old_tidx, []))[2] \
+                            .extend(wr)
+                    if cand_best is not None:
+                        best = cand_best
+                        print(f"[ripup_reroute] iter {it}: contender "
+                              f"{ci}/{n_cont} bundle {bid} improves "
+                              f"{self._rr_m_str(cur)}->"
+                              f"{self._rr_m_str(cand_best[0])} "
+                              f"({self._rr_move_str(old_tidx, cand_best[3])})",
+                              flush=True)
+                        break
+                    print(f"[ripup_reroute] iter {it}: contender "
+                          f"{ci}/{n_cont} bundle {bid} — no improvement",
                           flush=True)
-                    break
-                print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
-                      f"bundle {bid} — no improvement", flush=True)
             if best is None and deferred:
                 # Completeness fallback: the screened scan stalled, so sweep
                 # the deferred (screened-out) moves at full fidelity before

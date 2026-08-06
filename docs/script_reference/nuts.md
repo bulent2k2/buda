@@ -390,6 +390,26 @@ stage-b ripup 25.9 → 16.8 s), `mix2_fast_on_aligned_sql` 33.5 → 29.7 s;
 flows that never stall are unchanged.  `BUDA_SWEEP_THREADS` caps the pool
 (0 = hardware concurrency).
 
+**Parallel primary screened scan (rnr runtime P1b, default on with the
+same gate).** The primary contender scan — each contender's top-screened
+kept moves, the trials the first-improving loop runs one at a time — is
+evaluated on the same pool in **lazy visit-order chunks**: a chunk's
+contenders are move-listed and screened only when the chunk is reached,
+so an early improver costs what the sequential loop costs, while a
+grinding stalled scan gets the full pool win.  A contender with a
+sweep-improving (or unevaluable) move replays its ENTIRE kept list
+through the sequential best-of-list trial, so the committed move, the
+printed heartbeat/improver lines, and the trial counts are all identical
+to the sequential scan by construction.  Additional gate over P1: idx
+moves only (no `use_edge_candidates`) and a **>1-thread pool** — on a
+1-thread pool the chunked evaluation is strictly worse than committing
+at the first improving trial (measured 2.5× on `rnr/mix`), so
+single-thread pools (e.g. qor sweep workers) keep the sequential scan;
+the deferred stall sweep stays engaged at any width.  Measured
+(`BUDA_THREADS=4`): `mix2_fast_bottomup_caps` stage-b ripup
+25.6 → 19.2 s (−25 % on top of P1; fully sequential 47.9 s), decision
+lines byte-identical, corpus 0/0/41 with WL ±0.00%.
+
 **Warm trials (round 4, default OFF; `warm_trials` opts in).** A cold trial
 re-solves the whole design's abstract NUTS from scratch; the warm-start
 re-solve (`NUTSEngine::rerun_bundle_warm`) instead seeds the baseline
