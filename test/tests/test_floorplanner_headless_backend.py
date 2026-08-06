@@ -38,33 +38,58 @@ module takes the except branch and never touches the backend, so they pass
 trivially.  They fail (pre-fix) exactly where the bug was reachable — a
 developer machine or any runner with python3-tk installed.
 """
+import atexit
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 
+# A private, EMPTY matplotlib config dir for every probe below.  The suite
+# exports MPLCONFIGDIR (conftest points it at <repo>/log/matplotlib), and a
+# matplotlibrc there with a `backend:` line counts as an explicit selection —
+# which would make the "no backend was chosen" case below silently not be that
+# case at all, and fail.  A test whose whole premise is "nothing is selected"
+# has to own its config source instead of inheriting one (Codex #603).
+_MPLCONFIG = tempfile.mkdtemp(prefix="buda-mplconfig-")
+atexit.register(shutil.rmtree, _MPLCONFIG, True)
+
 
 def _run(code, env_extra=None):
     env = {**os.environ,
            "PYTHONPATH": os.pathsep.join(
-               [str(_ROOT), str(_ROOT / "build"), str(_ROOT / "src")])}
+               [str(_ROOT), str(_ROOT / "build"), str(_ROOT / "src")]),
+           "MPLCONFIGDIR": _MPLCONFIG}
     env.pop("MPLBACKEND", None)
+    env.pop("MATPLOTLIBRC", None)      # the other explicit-rc channel
     env.update(env_extra or {})
     return subprocess.run([sys.executable, "-c", code],
                           capture_output=True, text=True, env=env, timeout=180)
 
 
-_TK_PRESENT = (
-    "import importlib.util as u; print(u.find_spec('tkinter') is not None)")
+# Probe by IMPORTING what bdb_floorplanner's try-block imports, not by asking
+# whether the package is discoverable: a CPython built without Tcl/Tk still
+# ships the pure-Python `tkinter` package, so find_spec() says yes while
+# `import tkinter` raises on the missing `_tkinter` extension.  There the skip
+# would not fire, the module would report _TK_AVAILABLE=False, and the GUI case
+# would FAIL instead of skipping.  The gate must test the same predicate the
+# code under test does (Codex #603).
+_TK_PROBE = (
+    "try:\n"
+    "    import tkinter\n"
+    "    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg\n"
+    "    print('True')\n"
+    "except Exception:\n"
+    "    print('False')\n")
 
 
 def _tkinter_available():
-    r = _run(_TK_PRESENT)
-    return r.stdout.strip() == "True"
+    return _run(_TK_PROBE).stdout.strip() == "True"
 
 
 def test_explicit_agg_survives_importing_the_floorplanner():
