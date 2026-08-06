@@ -7,6 +7,11 @@ wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
 lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved (by \<date\>)*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
 items this page doesn't see).
 
+> **Curated menu (2026-08-06):** a one-page snapshot of what is genuinely
+> actionable now vs blocked-on-externals, with links back to the owning
+> docs, lives in [`work_menu_2026-08-06.md`](work_menu_2026-08-06.md) —
+> assembled after opens #8b half 1 closed (PR #594).
+
 > **Continuous integration:** CI landed 2026-08-01
 > ([`ci.md`](ci.md)) — build + full suite on every push and PR, ~5 min. What it
 > deliberately does NOT cover yet (nightly QoR corpus, owning the placement
@@ -28,6 +33,20 @@ items this page doesn't see).
 > notes in [`audit_2026-07.md`](audit_2026-07.md).
 
 ## Substantial features (bounded, clear plans)
+
+15. **NDR support — non-default width / spacing / shield constraints on
+   nets, buses, and bundles** (added 2026-08-06) — requirements written,
+   design NOT chosen: [`ndr_requirements.md`](ndr_requirements.md).  The
+   whole pipeline currently assumes one bit = one default SIGNAL slot;
+   NDR generalizes that to per-rule track-demand units, which must be
+   priced by ONE shared conversion everywhere tracks are counted (planner
+   band capacity, kPeak floor, dead-span escalation, doomed-seat census,
+   DNUTS admission — the #536 single-sourced-arithmetic lesson applied
+   prospectively).  Mostly a stage 8 (routing grid supply queries) +
+   stage 9 (DNUTS placement of wide/spaced/shielded bits) feature, with
+   upstream honesty requirements and a hard no-NDR byte-identity gate.
+   Next step: brainstorm the four solution paths sketched in the
+   requirements doc (§5) and pick one.
 
 13. **Nominal-WL comparability across shape families (b44 follow-ons)** —
    [`wishlist-topo.md`](wishlist-topo.md) → *"Nominal-WL comparability
