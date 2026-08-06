@@ -2610,6 +2610,14 @@ void NUTSEngine::orientation_fixpoint(
         if (nuts_threads <= 0) {
             unsigned hw = std::thread::hardware_concurrency();
             nuts_threads = hw ? (int)hw : 1;
+            // BUDA_THREADS (the CLI's machine-wide governor) is an AUTO-path
+            // CEILING: it lowers the pool but keeps the work-size gate below
+            // (gate_bypassed stays false) — unlike BUDA_NUTS_THREADS, which
+            // is an explicit request (Codex #598 P1).
+            if (const char* g = std::getenv("BUDA_THREADS")) {
+                const int cap = std::atoi(g);
+                if (cap > 0) nuts_threads = std::min(nuts_threads, cap);
+            }
         }
     }
     auto group_is_heavy = [&](const std::vector<int>& group) {

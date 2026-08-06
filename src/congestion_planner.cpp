@@ -1845,6 +1845,16 @@ int CongestionPlanner::resolved_plan_threads_(int ncand) const {
     if (ncand < 8) return 1;                 // small-pool gate (auto only)
     unsigned hw = std::thread::hardware_concurrency();
     n = hw ? (int)hw : 1;
+    // BUDA_THREADS (the CLI's machine-wide governor) is an AUTO-path CEILING,
+    // not an explicit request: it lowers the pool without bypassing the
+    // small-pool gate above — `buda --threads N` sets the per-engine var
+    // (explicit) instead, and the flag-absent default sets only this one
+    // (Codex #598 P1: a default that wrote BUDA_PLAN_THREADS masqueraded as
+    // an explicit request and spawned pools for tiny candidate sets).
+    if (const char* g = std::getenv("BUDA_THREADS")) {
+        const int cap = std::atoi(g);
+        if (cap > 0) n = std::min(n, cap);
+    }
     return std::max(1, std::min({n, ncand, 8}));
 }
 
