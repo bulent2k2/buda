@@ -41,7 +41,20 @@ PYBIND11_MODULE(buda, m) {
     // Line buffering costs one write() per line (negligible); a TTY is already
     // line-buffered. Runs first, before any module output. See buda_cli.py
     // main(), which line-buffers the Python side to match.
+    //
+    // NOT on Windows.  The MSVC CRT does not support _IOLBF (it is treated as
+    // full buffering), and a size of 0 is an INVALID PARAMETER for buffered
+    // modes (allowed range 2..INT_MAX) — the release CRT's validator then
+    // terminates the process via __fastfail, exit 0xC0000409, before the next
+    // statement runs and with all stdio buffers discarded.  Measured on
+    // windows-2022/MSVC 19.44: `import buda` died here with no output while
+    // buda_db (no setvbuf) imported fine; four validation runs chased the
+    // silent crash before this line confessed.  Skipping it merely keeps
+    // Windows at the CRT's default buffering — the issue-#31 interleaving nice-
+    // to-have is unattainable via setvbuf there anyway.
+#ifndef _WIN32
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
+#endif
 
     py::add_ostream_redirect(m, "ostream_redirect");
 

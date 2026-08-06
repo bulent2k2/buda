@@ -151,6 +151,17 @@ set_target_properties(buda_core PROPERTIES
     INSTALL_RPATH "${PLATFORM_RPATH}"
     BUILD_RPATH   "${CMAKE_CURRENT_BINARY_DIR}"
 )
+if(WIN32)
+    # ELF exports every symbol by default; a Windows DLL exports NOTHING unless
+    # told to — and MSVC does not even emit the import .lib for an export-less
+    # DLL, so the extension modules fail to link with
+    #   LNK1181: cannot open input file 'buda_core.lib'
+    # The sources carry no __declspec annotations (this is a Linux/macOS-first
+    # tree), so generate a .def exporting all symbols instead.  Measured on
+    # windows-2022 / MSVC 19.44: without this the build dies at [26/30]; the
+    # ~64K-exports .def limit is nowhere near reached.  See docs/WINDOWS_REQ.md.
+    set_target_properties(buda_core PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
 
 # ── buda_db: standalone database-layer module ─────────────────────────────
 # Registers BDB, row types, BustermGen, HierBusterm.  Can be imported without

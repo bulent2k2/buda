@@ -1,0 +1,179 @@
+name: Windows validation
+
+# Validate docs/WINDOWS_REQ.md + docs/WINDOWS_BUILD.md against a REAL Windows
+# machine (hosted windows-2022 runner, VS 2022), by executing the documented
+# steps as literally as CI allows.  This is a DOC-VALIDATION harness, not a
+# gate: it exists so those two pages describe measured reality instead of
+# untested intention, and it runs only on demand.
+#
+# Both documented paths are exercised as separate jobs:
+#   ninja    — "3. Build With Ninja"            (vcvars64 + Ninja, single-config)
+#   msbuild  — "4. Build With Visual Studio"    (VS 17 2022 generator, x64)
+#
+# Deviations from the docs, each deliberate and noted inline:
+#   * --no-viz on the flow run (flow/four_blocks.buda ends in `visualize`,
+#     which opens a Tk window; CI must not block on a GUI).
+#   * MPLBACKEND=Agg for tests, same as the Linux gate.
+#   * src/web/requirements.txt is installed — without it 28 web tests
+#     silently skip (the exact hole the Linux gate's skip-guard exists for).
+
+on:
+  # Manual only.  Nine iteration runs took the docs from untested intention to
+  # a green end-to-end pipeline; from here this is an on-demand re-validation
+  # vehicle for docs/WINDOWS_REQ.md + docs/WINDOWS_BUILD.md, not a gate.
+  workflow_dispatch:
+
+concurrency:
+  group: windows-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ninja:
+    # PINNED image, same philosophy as the ubuntu-24.04 pin in ci.yml: this
+    # harness measures "does the doc work on VS 2022 / Windows Server 2022";
+    # a silent label migration would change the question.
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    env:
+      MPLBACKEND: Agg
+      # Run 7 measured the classic Windows-Python trap: stdio defaults to the
+      # legacy ANSI code page (cp1252), and the engine's log lines use Δ/→/×,
+      # so prints die with UnicodeEncodeError('charmap', ...).  UTF-8 mode is
+      # the documented remedy (docs/WINDOWS_REQ.md).
+      PYTHONUTF8: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Which interpreters exist (python3 lookup reality)
+        # WINDOWS_REQ.md claims CMake's `python3` lookup is a portability
+        # hazard because native Windows installs expose `python`/`py`, not
+        # `python3`.  Record what THIS environment actually provides, so the
+        # doc's claim is measured rather than assumed.
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          where.exe python
+          where.exe python3
+          where.exe py
+          python --version
+
+      - name: Install Python packages (per WINDOWS_REQ.md, plus web deps)
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pybind11 pytest pytest-bdd matplotlib numpy pytest-xdist ninja
+          python -m pip install -r src/web/requirements.txt
+
+      - name: Configure and build (Ninja, per WINDOWS_BUILD.md section 3)
+        # Ninja needs the MSVC environment; the docs say "open a VS developer
+        # shell".  The CI equivalent is vcvars64.bat, located via vswhere —
+        # env vars do not persist across steps, so configure+build share one
+        # cmd step.
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          if errorlevel 1 exit /b 1
+          cmake --build build
+          if errorlevel 1 exit /b 1
+
+      - name: Where did the artifacts land?
+        # WINDOWS_BUILD.md claims Ninja puts the extension directly under
+        # build\.  Verify, and record the DLL/PYD layout the import depends on.
+        shell: pwsh
+        run: Get-ChildItem -Recurse build -Include *.pyd,*.dll | Select-Object FullName,Length
+
+      - name: Import smoke (diagnostics on stdout, via cmd)
+        # cmd, not pwsh: runs 2 and 3 showed failing pwsh steps losing the
+        # process output ENTIRELY (exit 1, zero text, not even the first
+        # print).  cmd steps kept their output in run 1's build failure.
+        # The diagnostics live in a committed file for the same reason —
+        # no here-string generation to go wrong invisibly.
+        shell: cmd
+        run: |
+          set "PYTHONPATH=%CD%\build;%CD%\src;%CD%\tools"
+          python -u -X faulthandler .github\scripts\windows_diag_import.py
+
+      - name: Fast test tier (documented command, NO PYTHONPATH)
+        # Deliberately no PYTHONPATH: WINDOWS_BUILD.md section 3 claims the
+        # Ninja layout needs none for pytest -- pytest.ini's `pythonpath =
+        # build src` covers the extension and src, and `python -m pytest` puts
+        # the CWD (= repo root) on sys.path for the `tools` package.  Injecting
+        # it here would let a break of that documented mechanism pass silently
+        # (review #600).  The flow step below keeps PYTHONPATH because the doc
+        # says plain `python` runs DO need it.
+        shell: cmd
+        run: python -m pytest -q -r fs
+
+      - name: Run a .buda flow
+        shell: cmd
+        run: |
+          set "PYTHONPATH=%CD%\build;%CD%\src;%CD%\tools"
+          python src\buda_cli.py --no-viz flow\four_blocks.buda
+
+  msbuild:
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    env:
+      MPLBACKEND: Agg
+      # Run 7 measured the classic Windows-Python trap: stdio defaults to the
+      # legacy ANSI code page (cp1252), and the engine's log lines use Δ/→/×,
+      # so prints die with UnicodeEncodeError('charmap', ...).  UTF-8 mode is
+      # the documented remedy (docs/WINDOWS_REQ.md).
+      PYTHONUTF8: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python packages
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pybind11 pytest pytest-bdd matplotlib numpy pytest-xdist
+          python -m pip install -r src/web/requirements.txt
+
+      - name: Configure and build (VS generator, per WINDOWS_BUILD.md section 4)
+        # The VS generator locates MSVC itself — no developer shell needed.
+        # Multi-config: the doc claims output lands under build\Release.
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          cmake --build build --config Release
+
+      - name: Where did the artifacts land?
+        shell: pwsh
+        run: Get-ChildItem -Recurse build -Include *.pyd,*.dll | Select-Object FullName,Length
+
+      - name: Import smoke (diagnostics on stdout, via cmd)
+        # cmd, not pwsh: runs 2 and 3 showed failing pwsh steps losing the
+        # process output ENTIRELY (exit 1, zero text, not even the first
+        # print).  cmd steps kept their output in run 1's build failure.
+        # The diagnostics live in a committed file for the same reason —
+        # no here-string generation to go wrong invisibly.
+        shell: cmd
+        run: |
+          set "PYTHONPATH=%CD%\build\Release;%CD%\build;%CD%\src;%CD%\tools"
+          python -u -X faulthandler .github\scripts\windows_diag_import.py
+
+      - name: Fast test tier
+        shell: cmd
+        run: |
+          set "PYTHONPATH=%CD%\build\Release;%CD%\build;%CD%\src;%CD%\tools"
+          python -m pytest -q -r fs
+
+      - name: Run a .buda flow
+        shell: cmd
+        run: |
+          set "PYTHONPATH=%CD%\build\Release;%CD%\build;%CD%\src;%CD%\tools"
+          python src\buda_cli.py --no-viz flow\four_blocks.buda

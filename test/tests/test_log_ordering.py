@@ -32,6 +32,8 @@ import subprocess
 import sys
 import textwrap
 
+import pytest
+
 import buda_cli
 
 
@@ -67,6 +69,13 @@ def _env_with_pythonpath():
     return env
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="the setvbuf line-buffering under test is "
+                           "DELIBERATELY absent on Windows -- _IOLBF is "
+                           "unsupported there and size 0 is a CRT invalid "
+                           "parameter that fast-fails the import (see "
+                           "bindings.cpp); the probe's ctypes.CDLL(None) is "
+                           "POSIX-only besides")
 def test_cpp_stdout_line_buffered_after_import_buda(tmp_path):
     """After `import buda`, a `\\n`-terminated C-stdio write with NO explicit
     flush reaches a redirected fd 1 before program exit, ahead of a later Python
