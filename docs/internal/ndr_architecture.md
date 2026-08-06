@@ -174,7 +174,7 @@ recorded in [../NDR_UI.md](../NDR_UI.md).
 |---|---|
 | R1/R3 | `def_ndr` handler (new `buda_cmds` module) + a C++ `NdrRule` in `buda_core`; R3 arithmetic against each declared layer's pattern at declaration/first-resolution |
 | R2 | prefix resolution beside `set_bundling`'s (longest-prefix, `*` default); hier occurrence-group resolution reuses the scoped-bit-cap union machinery |
-| R4 | ONE new function (working name `group_track_demand(rule, member_bits, shield_spec)`) in `buda_core`, consumed by `eff_bus_width`, planner `signal_tracks` capacity, kPeak floor, dead-span escalation, doomed-seat census, `_seg_admission_pool`, DNUTS admission |
+| R4 | ONE new function (working name `group_track_demand(members, layer)`, where `members` carries each bit's RESOLVED rule — a mixed-rule bundle (R8) means the group has no single rule, so a one-rule signature would either collapse members to the wrong rule or let planner and placement demand disagree; the shield arrangement is derived per rule-class within the group, and the layer/pattern context prices the quantization) in `buda_core`, consumed by `eff_bus_width`, planner `signal_tracks` capacity, kPeak floor, dead-span escalation, doomed-seat census, `_seg_admission_pool`, DNUTS admission |
 | R5 | generalize `for_each_signal_track_in_span` to run-of-k enumeration behind a rule-aware wrapper; `count_` sibling stays no-allocation, vector/count lockstep preserved |
 | R5a | phase 2: label→net-identity predicate shared between credit and the R9 audit |
 | R6 | `place_by_layer`: k-slot claims, guard slots, shield emission (`NetSegment` + shield flag + shield-net id); footprint-aware occupancy for the sharing exemption; keepout cull covers shields |

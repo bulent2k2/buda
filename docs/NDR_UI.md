@@ -64,7 +64,10 @@ commands**:
 
 - **`edit_set_layer <seg#> <layer_id>`** validates against the rule's
   effective layer set and prints the demand arithmetic in the per-edit
-  verdict line.  Open question (below): warn-and-allow vs refuse.
+  verdict line — **refusing** a layer outside the effective set (physical
+  unrealizability, R3) and **warn-and-allowing** an in-set layer whose
+  supply is merely tight (economic override); the two-case split is
+  argued in open question 1 below.
 - **`edit_status` / `dump_topologies --conn`** show per-segment demand
   (`ndr=clk2x demand=12u/8bits`), the way `dump_hbundles` shows
   `band=[..] shares={..}`.
@@ -107,10 +110,21 @@ check_design                  # gains the R9 NDR advisory
 
 ## Open questions for methodology feedback
 
-1. **`edit_set_layer` onto a rule-infeasible layer: warn-and-allow or
-   refuse?**  Leaning warn-and-allow with the LOUD pinned-exception
-   framing `check_design` already uses for layer-cap overrides — the
-   expert keeps the last word, the audit keeps the record.
+1. **`edit_set_layer` validation is TWO cases, not one** (sharpened in
+   review): a layer OUTSIDE the rule's effective layer set (R3) is
+   *physically unrealizable* — the rule cannot exist there, so the edit is
+   **refused** with the arithmetic (unlike a layer-cap exception, which is
+   an economic policy override, this pin could only strand at detailed
+   placement or silently violate the rule — there is no valid expert
+   override to preserve).  A layer IN the set whose current window/supply
+   is merely *tight* is an economic judgment — there the edit is
+   **warn-and-allow** with the LOUD pinned-exception framing
+   `check_design` already uses for layer-cap overrides: the expert keeps
+   the last word on economics, physics keeps the last word on
+   realizability.  Remaining question for methodology: does the refusal
+   need an escape hatch that stores the edit as explicitly-invalid,
+   unplannable state (visible, never planned), or is refusal-with-report
+   enough?
 2. **Is prefix scoping (2a) enough for phase 1**, or do your flows need
    the bundle-level override (2b) from day one?
 3. **Should abstract (bus-level) viz show the widened NDR footprint?**  A
