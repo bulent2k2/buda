@@ -1,0 +1,158 @@
+name: Windows validation
+
+# Validate docs/WINDOWS_REQ.md + docs/WINDOWS_BUILD.md against a REAL Windows
+# machine (hosted windows-2022 runner, VS 2022), by executing the documented
+# steps as literally as CI allows.  This is a DOC-VALIDATION harness, not a
+# gate: it exists so those two pages describe measured reality instead of
+# untested intention, and it runs only on demand.
+#
+# Both documented paths are exercised as separate jobs:
+#   ninja    — "3. Build With Ninja"            (vcvars64 + Ninja, single-config)
+#   msbuild  — "4. Build With Visual Studio"    (VS 17 2022 generator, x64)
+#
+# Deviations from the docs, each deliberate and noted inline:
+#   * --no-viz on the flow run (flow/four_blocks.buda ends in `visualize`,
+#     which opens a Tk window; CI must not block on a GUI).
+#   * MPLBACKEND=Agg for tests, same as the Linux gate.
+#   * src/web/requirements.txt is installed — without it 28 web tests
+#     silently skip (the exact hole the Linux gate's skip-guard exists for).
+
+on:
+  # Manual, from whatever ref you point it at.
+  workflow_dispatch:
+  # And on pushes to the doc-refresh branch while the docs are being iterated.
+  push:
+    branches: ['claude/windows-docs-refresh']
+
+concurrency:
+  group: windows-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ninja:
+    # PINNED image, same philosophy as the ubuntu-24.04 pin in ci.yml: this
+    # harness measures "does the doc work on VS 2022 / Windows Server 2022";
+    # a silent label migration would change the question.
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    env:
+      MPLBACKEND: Agg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Which interpreters exist (python3 lookup reality)
+        # WINDOWS_REQ.md claims CMake's `python3` lookup is a portability
+        # hazard because native Windows installs expose `python`/`py`, not
+        # `python3`.  Record what THIS environment actually provides, so the
+        # doc's claim is measured rather than assumed.
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          where.exe python
+          where.exe python3
+          where.exe py
+          python --version
+
+      - name: Install Python packages (per WINDOWS_REQ.md, plus web deps)
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pybind11 pytest pytest-bdd matplotlib numpy pytest-xdist ninja
+          python -m pip install -r src/web/requirements.txt
+
+      - name: Configure and build (Ninja, per WINDOWS_BUILD.md section 3)
+        # Ninja needs the MSVC environment; the docs say "open a VS developer
+        # shell".  The CI equivalent is vcvars64.bat, located via vswhere —
+        # env vars do not persist across steps, so configure+build share one
+        # cmd step.
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          if errorlevel 1 exit /b 1
+          cmake --build build
+          if errorlevel 1 exit /b 1
+
+      - name: Where did the artifacts land?
+        # WINDOWS_BUILD.md claims Ninja puts the extension directly under
+        # build\.  Verify, and record the DLL/PYD layout the import depends on.
+        shell: pwsh
+        run: Get-ChildItem -Recurse build -Include *.pyd,*.dll | Select-Object FullName,Length
+
+      - name: Import smoke (the DLL-search moment of truth)
+        # buda_core is a SHARED library; on Windows that is buda_core.dll and
+        # the .pyd extensions must find it at import time (RPATH does not
+        # exist on Windows).  This import is where that either works or fails.
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$PWD\build;$PWD\src;$PWD\tools"
+          python -c "import buda, buda_db; print('import OK:', buda.__file__)"
+
+      - name: Fast test tier
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$PWD\build;$PWD\src;$PWD\tools"
+          python -m pytest -q -rs
+
+      - name: Run a .buda flow
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$PWD\build;$PWD\src;$PWD\tools"
+          python src\buda_cli.py --no-viz flow\four_blocks.buda
+
+  msbuild:
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    env:
+      MPLBACKEND: Agg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python packages
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pybind11 pytest pytest-bdd matplotlib numpy pytest-xdist
+          python -m pip install -r src/web/requirements.txt
+
+      - name: Configure and build (VS generator, per WINDOWS_BUILD.md section 4)
+        # The VS generator locates MSVC itself — no developer shell needed.
+        # Multi-config: the doc claims output lands under build\Release.
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          cmake --build build --config Release
+
+      - name: Where did the artifacts land?
+        shell: pwsh
+        run: Get-ChildItem -Recurse build -Include *.pyd,*.dll | Select-Object FullName,Length
+
+      - name: Import smoke
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$PWD\build\Release;$PWD\build;$PWD\src;$PWD\tools"
+          python -c "import buda, buda_db; print('import OK:', buda.__file__)"
+
+      - name: Fast test tier
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$PWD\build\Release;$PWD\build;$PWD\src;$PWD\tools"
+          python -m pytest -q -rs
+
+      - name: Run a .buda flow
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$PWD\build\Release;$PWD\build;$PWD\src;$PWD\tools"
+          python src\buda_cli.py --no-viz flow\four_blocks.buda
