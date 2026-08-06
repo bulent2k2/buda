@@ -177,3 +177,96 @@ jobs:
         run: |
           set "PYTHONPATH=%CD%\build\Release;%CD%\build;%CD%\src;%CD%\tools"
           python src\buda_cli.py --no-viz flow\four_blocks.buda
+
+  cygwin:
+    # Third path: Cygwin64 — Windows with a POSIX personality.  Unlike the two
+    # MSVC jobs above this exercises the NON-MSVC branch of the build (Cygwin
+    # GCC: -march/-ffp-contract=off, auto-exported DLL symbols, a real fcntl
+    # and python3) and, most interestingly, the repo's own `bin/bb` wrapper —
+    # which the docs tell native-Windows users does not apply.  If this job is
+    # green, the Windows story gains a "the Linux instructions just work" lane.
+    #
+    # EXPERIMENTAL until measured green; known open questions this job is
+    # designed to ANSWER rather than assume:
+    #   * which Python Cygwin ships today (3.9 may be too old for the suite);
+    #   * whether numpy/matplotlib exist as Cygwin packages (there are NO pip
+    #     wheels for Cygwin — native deps come from setup.exe or not at all);
+    #   * whether the web deps are installable (pydantic-core needs Rust:
+    #     expected NO — recorded, not required).
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    env:
+      PYTHONUTF8: '1'
+      MPLBACKEND: Agg
+      # Cygwin bash reads CRLF scripts poorly; belt (autocrlf below) AND
+      # suspenders: igncr makes bash ignore stray \r in anything it sources.
+      SHELLOPTS: igncr
+
+    steps:
+      - name: Force LF checkout
+        # The Windows runner image configures git with autocrlf=true, which
+        # would hand Cygwin bash CRLF copies of bin/bb etc.
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: Install Cygwin64
+        # Official installer, quiet mode, kernel.org mirror.  The package list
+        # is a CANDIDATE set: the diagnose step below records what actually
+        # materialized (this container's proxy cannot reach the Cygwin package
+        # inventory, so the runner doubles as the inventory probe).
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://cygwin.com/setup-x86_64.exe -OutFile setup-x86_64.exe
+          .\setup-x86_64.exe -q -O -s https://mirrors.kernel.org/sourceware/cygwin/ `
+            -R C:\cygwin64 -l C:\cygpkgs `
+            -P gcc-g++,make,cmake,ninja,git,python3,python3-devel,python39-devel,python39-pip,python39-numpy,python39-tkinter,python39-matplotlib | Out-Null
+          C:\cygwin64\bin\bash.exe -lc 'uname -a'
+
+      - name: Diagnose the Cygwin environment
+        # The inventory step: which python, which native deps resolved, what
+        # pip can do.  continue-on-error — its job is to REPORT.
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "ls -la /usr/bin/python* 2>&1; python3 --version 2>&1; cygcheck -c -d | grep -iE 'python|gcc|cmake|ninja|make' 2>&1; python3 -c 'import numpy; print(\"numpy\", numpy.__version__)' 2>&1; python3 -c 'import matplotlib; print(\"matplotlib\", matplotlib.__version__)' 2>&1; python3 -c 'import tkinter; print(\"tkinter OK\")' 2>&1; python3 -m pip --version 2>&1"
+
+      - name: pip install the pure-python test deps
+        shell: cmd
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pip install --user pybind11 pytest pytest-bdd pytest-xdist"
+
+      - name: pip install the web deps (expected to fail — recording, not requiring)
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pip install --user -r src/web/requirements.txt && echo WEB DEPS OK || echo WEB DEPS UNAVAILABLE (expected: pydantic-core needs Rust; no Cygwin wheels)"
+
+      - name: Build with the repo's own wrapper (bin/bb)
+        # THE point of this path: the documented-for-Linux command, verbatim.
+        shell: cmd
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && ./bin/bb"
+
+      - name: Where did the artifacts land?
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && ls -la build/*.dll build/*.so build/*.pyd 2>/dev/null; true"
+
+      - name: Import smoke
+        shell: cmd
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -u -X faulthandler .github/scripts/windows_diag_import.py"
+
+      - name: Fast test tier
+        shell: cmd
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pytest -q -r fs"
+
+      - name: Run a .buda flow
+        shell: cmd
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PYTHONPATH=build:src:tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda"
