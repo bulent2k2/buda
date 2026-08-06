@@ -605,6 +605,189 @@ def cmd_check(path):
     return len(bad)
 
 
+# --------------------------------------------------------------------------
+# Candidate discovery (--candidates)
+#
+# ADVISORY ONLY.  Nothing here edits CORPUS; membership is the owner's call.
+# --------------------------------------------------------------------------
+
+CANDIDATE_ROOTS = ("flow", "demo")
+
+# Commands whose FIRST ARGUMENT selects the code path, so `run_bundler STRICT`
+# and `run_bundler COMBINED` are different coverage rather than the same token.
+_ARG_SIGNIFICANT = frozenset((
+    "run_bundler", "run_hier_bundler", "run_planner", "set_bundling",
+    "set_planner_param", "set_max_bundle_bits", "set_drop_dangling",
+    "set_prune_dominated", "set_dedup_loci", "set_pair_align_heal",
+    "set_dead_span_escalate", "set_feedthru", "set_bottom_up",
+    "check_template_tracks", "run_detailed_nuts", "load_pipeline",
+))
+
+# Commands whose OPTIONAL FLAGS are the feature (`generate_topologies
+# multi_trunk` vs plain).  Every non-numeric argument becomes its own token.
+# Report/inspection commands are deliberately NOT here: their arguments are
+# bus-name hints, so `dump_topologies bus_007` would read as a feature.
+_FLAG_COMMANDS = frozenset((
+    "generate_topologies", "generate_hier_topologies", "ripup_reroute",
+    "negotiate_congestion", "refine_selection", "align_bottom_up",
+    "generate_more_topologies",
+))
+
+# Commands that cannot change what gets routed, so they are not coverage.
+# The sweep runs headless (`no_viz`) and calls `check_design` itself, so a
+# flow containing these drives no code the harness would not drive anyway.
+_IGNORED_COMMANDS = frozenset((
+    "visualize", "visualize_topologies", "report_wl", "report_wirelength",
+    "report_overhead", "dump_topologies", "dump_hbundles", "dump_user_ops",
+    "check_design", "check_connectivity", "exit",
+))
+
+
+def _is_number(tok):
+    try:
+        float(tok)
+        return True
+    except ValueError:
+        return False
+
+
+def flow_tokens(path, _seen=None):
+    """The set of FEATURE TOKENS a flow exercises, following `source` one file
+    at a time until the transitive closure is read.
+
+    A token is normally just the command name.  For the two families above it
+    carries the argument that selects the path (`run_bundler:combined`,
+    `generate_topologies:multi_trunk`), because those flows differ in what they
+    exercise, not in which command they call.
+
+    This is a PROXY for coverage, not a proof of it.  Two flows can call an
+    identical command set and still drive different code — different geometry,
+    different congestion, a different candidate winning selection.  Read a
+    'no new tokens' verdict as 'nothing OBVIOUSLY new', never as 'redundant'.
+    """
+    _seen = _seen if _seen is not None else set()
+    real = os.path.realpath(path)
+    if real in _seen or not os.path.isfile(real):
+        return set()
+    _seen.add(real)
+    toks, base = set(), os.path.dirname(real)
+    with open(real, errors="replace") as fh:
+        for line in fh:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            cmd, args = parts[0], parts[1:]
+            if cmd == "source":
+                if args:
+                    toks |= flow_tokens(os.path.join(base, args[0]), _seen)
+                continue
+            if cmd in _IGNORED_COMMANDS:
+                continue
+            toks.add(cmd)
+            # A numeric first argument is a COUNT (iterations, pitch), never a
+            # mode — `run_planner 1` and `run_planner 200` are one feature.
+            if cmd in _ARG_SIGNIFICANT and args and not _is_number(args[0]):
+                toks.add(f"{cmd}:{args[0].lower()}")
+            elif cmd in _FLAG_COMMANDS:
+                toks |= {f"{cmd}:{a.lower()}" for a in args if not _is_number(a)}
+    return toks
+
+
+def corpus_coverage(corpus=None):
+    """Feature tokens the current corpus exercises, unioned over its flows."""
+    covered = set()
+    for f in (corpus or CORPUS):
+        covered |= flow_tokens(os.path.join(_ROOT, f))
+    return covered
+
+
+def discover_candidates(roots=CANDIDATE_ROOTS, corpus=None):
+    """Full-pipeline `.buda` flows under ROOTS that are NOT corpus members.
+
+    'Full-pipeline' means the flow reaches `run_detailed_nuts` — the same bar
+    the corpus is drawn to.  Sourced fragments (track fixtures, block lists)
+    fail it and are skipped, which is what keeps this from listing every file.
+    """
+    member = set(corpus or CORPUS)
+    found = []
+    for root in roots:
+        for dp, _, fns in os.walk(os.path.join(_ROOT, root)):
+            for fn in sorted(fns):
+                if not fn.endswith(".buda"):
+                    continue
+                rel = os.path.relpath(os.path.join(dp, fn), _ROOT)
+                if rel in member:
+                    continue
+                try:
+                    with open(os.path.join(dp, fn), errors="replace") as fh:
+                        if "run_detailed_nuts" not in fh.read():
+                            continue
+                except OSError:
+                    continue
+                found.append(rel)
+    return sorted(found)
+
+
+def cmd_candidates(roots=CANDIDATE_ROOTS, quantify=False, jobs=1):
+    """Report flows that could join the corpus, ranked by NEW coverage.
+
+    Prints and returns; it never edits CORPUS.  Adding or removing a row is a
+    judgement about what the benchmark should defend and what runtime that is
+    worth — the tool supplies the evidence, the owner makes the call.
+    """
+    os.chdir(_ROOT)
+    covered = corpus_coverage()
+    cands = discover_candidates(roots)
+    rows = []
+    for rel in cands:
+        new = sorted(flow_tokens(os.path.join(_ROOT, rel)) - covered)
+        rows.append({"flow": rel, "new_tokens": new})
+
+    fresh = [r for r in rows if r["new_tokens"]]
+    same = [r for r in rows if not r["new_tokens"]]
+    # Most-new-coverage first; ties alphabetical so the report is stable.
+    fresh.sort(key=lambda r: (-len(r["new_tokens"]), r["flow"]))
+
+    print(f"QoR corpus candidates — ADVISORY ONLY.  This tool never edits "
+          f"CORPUS;\nwhich flows to add or remove is the owner's decision.\n")
+    print(f"corpus:     {len(CORPUS)} flows, {len(covered)} distinct feature tokens")
+    print(f"scanned:    {', '.join(roots)}")
+    print(f"candidates: {len(cands)} full-pipeline flows outside the corpus "
+          f"({len(fresh)} with new coverage, {len(same)} without)\n")
+
+    if quantify:
+        import qor_table                            # local: qor_table imports us
+        measured = {r["flow"]: r for r in
+                    sweep(qor_table.run_flow, [r["flow"] for r in fresh], jobs)}
+        for r in fresh:
+            r.update({k: v for k, v in measured.get(r["flow"], {}).items()
+                      if k != "flow"})
+
+    print("== NEW COVERAGE — nothing in the corpus exercises these tokens ==\n")
+    for r in fresh:
+        print(f"  {r['flow']}")
+        if quantify:
+            if "err" in r:
+                print(f"      ERRORED: {r['err']}  (not a candidate until fixed)")
+            else:
+                print(f"      bund={r.get('bund')} busS={r.get('busS')} "
+                      f"netS={r.get('netS')} busWL={r.get('busWL')} | "
+                      f"{r.get('ovl')}/{r.get('unpl')}/{r.get('viol')} "
+                      f"| {r.get('sec')}s")
+        print(f"      new: {' '.join(r['new_tokens'])}")
+    if not fresh:
+        print("  (none — the corpus already covers every candidate's tokens)")
+
+    print(f"\n== NO NEW TOKENS — {len(same)} flows ==")
+    print("   Not proof of redundancy: identical commands can still drive")
+    print("   different geometry and congestion.  Judge these on what they")
+    print("   would DEFEND, not on this list.\n")
+    for r in same:
+        print(f"  {r['flow']}")
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Run the QoR corpus and/or compare two runs.",
@@ -621,6 +804,15 @@ def main():
                     help="exit non-zero if any flow in PATH errored.  For "
                          "unattended use: an errored sweep must not be cached, "
                          "promoted, or compared as if it were data.")
+    ap.add_argument("--candidates", action="store_true",
+                    help="report full-pipeline flows OUTSIDE the corpus, "
+                         "ranked by feature coverage the corpus lacks.  "
+                         "Advisory: never edits CORPUS — adding or removing a "
+                         "flow is the owner's call")
+    ap.add_argument("--quantify", action="store_true",
+                    help="with --candidates: also RUN each new-coverage "
+                         "candidate for its sizes, QoR and runtime, so its "
+                         "cost is on the table beside its coverage")
     ap.add_argument("-j", "--jobs", type=int, default=default_jobs(),
                     metavar="N",
                     help="worker processes for the sweep (default: CPU count "
@@ -629,6 +821,12 @@ def main():
 
     if args.check:
         sys.exit(1 if cmd_check(args.check) else 0)
+
+    if args.candidates:
+        cmd_candidates(quantify=args.quantify, jobs=args.jobs)
+        return
+    if args.quantify:
+        ap.error("--quantify is only meaningful with --candidates")
 
     if args.compare:
         sys.exit(1 if cmd_compare(*args.compare) else 0)
