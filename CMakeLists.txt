@@ -216,4 +216,20 @@ set_target_properties(buda PROPERTIES
     BUILD_RPATH   "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
+if(CYGWIN)
+    # Cygwin ld auto-exports EVERY symbol of a DLL by default, and on the
+    # pybind11 modules that trips a binutils pathology on lambda-heavy
+    # template instantiations:
+    #   ld: cannot export _ZZN8pybind11...: symbol wrong type (4 vs 3)
+    # (measured: doc-validation run 12, gcc 14 on cygwin64, at the final link
+    # of buda.cpython-39-x86_64-cygwin.dll).  The extension modules need no
+    # auto-export at all — their one required export, PyInit_<mod>, carries
+    # __declspec(dllexport) via PYBIND11_EXPORT (pybind11 defines it so for
+    # _WIN32 || __CYGWIN__), and explicit dllexports survive
+    # --exclude-all-symbols.  buda_core stays on default auto-export: its
+    # symbols are what the modules link against, and it links fine.
+    target_link_options(buda    PRIVATE "LINKER:--exclude-all-symbols")
+    target_link_options(buda_db PRIVATE "LINKER:--exclude-all-symbols")
+endif()
+
 install(TARGETS buda buda_db buda_core DESTINATION build)

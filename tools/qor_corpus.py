@@ -762,10 +762,22 @@ def discover_candidates(roots=CANDIDATE_ROOTS, corpus=None):
             for fn in sorted(fns):
                 if not fn.endswith(".buda"):
                     continue
-                rel = os.path.relpath(os.path.join(dp, fn), _ROOT)
+                path = os.path.join(dp, fn)
+                try:
+                    rel = os.path.relpath(path, _ROOT)
+                except ValueError:
+                    # Windows: an out-of-tree root on another DRIVE (pytest tmp
+                    # on C: vs the checkout on D:) has no repo-relative form.
+                    # Keep the absolute path: it can never collide with the
+                    # repo-relative corpus member names, so the exclusion
+                    # semantics are unchanged -- and on Linux an out-of-tree
+                    # root already yields a non-member '../..' form anyway.
+                    # (Measured: doc-validation run 12; third occurrence of
+                    # the cross-drive relpath pathology in this tree.)
+                    rel = path
                 if rel in member:
                     continue
-                if "run_detailed_nuts" in flow_tokens(os.path.join(dp, fn)):
+                if "run_detailed_nuts" in flow_tokens(path):
                     found.append(rel)
     return sorted(found)
 
