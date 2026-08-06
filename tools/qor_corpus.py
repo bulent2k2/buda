@@ -605,6 +605,230 @@ def cmd_check(path):
     return len(bad)
 
 
+# --------------------------------------------------------------------------
+# Candidate discovery (--candidates)
+#
+# ADVISORY ONLY.  Nothing here edits CORPUS; membership is the owner's call.
+# --------------------------------------------------------------------------
+
+CANDIDATE_ROOTS = ("flow", "demo")
+
+# Mode keywords per command: an argument is coverage IFF it appears here.
+#
+# A CLOSED VOCABULARY, not a position rule.  Position does not separate modes
+# from objects — `set_bundling <prefix> <mode>` and `set_bottom_up <cell>
+# [on|off]` put an OBJECT first, so a position rule emits the data-dependent
+# `set_bundling:clk_` (every new prefix looks like new coverage) while missing
+# `strict` vs `combined` entirely.  Position also cannot find a mode that
+# moves: `run_hier_bundler depth 3 COMBINED` has its strategy third.  Matching
+# a known vocabulary anywhere in the argument list fixes both, and an object
+# name can never collide with it.
+#
+# The trade is that an UNLISTED mode is silently not coverage.  That errs in
+# the safe direction — the report under-claims rather than manufacturing a
+# finding — but it means this table must grow when a command gains a mode.
+_MODE_WORDS = {
+    "run_bundler": ("strict", "convergent", "bidirectional", "combined"),
+    "run_hier_bundler": ("strict", "convergent", "bidirectional", "combined"),
+    "run_planner": ("hier", "post_nuts", "signal_tracks"),
+    "run_nuts_on_layer": (),
+    "run_detailed_nuts": ("lo_hi", "hi_lo"),
+    "load_pipeline": ("expanded",),
+    "set_bundling": ("strict", "no_convergent", "no_bidirectional", "combined"),
+    "set_bottom_up": ("on", "off"),
+    "set_feedthru": ("on", "off"),
+    "set_max_bundle_bits": ("auto", "off", "for"),
+    "set_drop_dangling": ("on", "off", "drop", "clamp", "clamp_drop"),
+    "set_prune_dominated": ("on", "off"),
+    "set_dedup_loci": ("on", "off"),
+    "set_pair_align_heal": ("on", "off"),
+    "set_dead_span_escalate": ("on", "off"),
+    "check_template_tracks": ("stop", "independent"),
+    "align_bottom_up": ("max_shift", "force"),
+    "negotiate_congestion": ("class_moves",),
+    "refine_selection": ("chase_overlaps",),
+    "ripup_reroute": (
+        "use_edge_candidates", "no_global", "no_class_moves",
+        "no_release_moves", "fast_trials", "no_fast_trials", "screen",
+        "no_screen", "warm_trials", "no_warm_trials", "converge_guard",
+        "no_converge_guard", "no_parallel_sweep"),
+    # The planner knobs are named features, not objects — `kPeak` and
+    # `charge_pull_target` are different coverage.
+    "set_planner_param": (
+        "kcong", "kspan", "base_cost_non_top", "kwl", "ksegs", "ksegsrel",
+        "healersahead", "kbalance", "kheight", "kpeak", "track_cap_slack",
+        "refine_passes", "nontop_dead_span_gate", "kwlspread",
+        "charge_pull_target", "band_span_charge"),
+}
+_GEN_FLAGS = ("center_mode", "double_detour", "multi_trunk", "no_hanan_loci",
+              "hanan_loci", "spine_relays")
+for _g in ("generate_topologies", "generate_hier_topologies",
+           "generate_more_topologies", "generate_topologies_for_bundle",
+           "generate_topologies_for_hbundle"):
+    _MODE_WORDS[_g] = _GEN_FLAGS
+
+# Commands that cannot change what gets routed, so they are not coverage.
+# The sweep runs headless (`no_viz`) and calls `check_design` itself, so a
+# flow containing these drives no code the harness would not drive anyway.
+_IGNORED_COMMANDS = frozenset((
+    "visualize", "visualize_topologies", "report_wl", "report_wirelength",
+    "report_overhead", "dump_topologies", "dump_hbundles", "dump_user_ops",
+    "check_design", "check_connectivity",
+))
+
+# Ends the run wherever it is reached, including inside a sourced file: the
+# CLI raises SystemExit, so nothing after it executes.
+_TERMINATOR = "exit"
+
+
+def _scan(path, seen):
+    """(tokens, terminated) for one file and everything it sources.
+
+    `terminated` means an `exit` was REACHED, so the caller must stop too —
+    the CLI raises SystemExit, and it does not matter which file it was raised
+    in.  Without this a flow's unreachable tail counts as coverage:
+    `rnr/mix2_repro.buda` exits on line 15 and has `run_detailed_nuts` on line
+    20, which a plain read would score as a full pipeline it never runs.
+    """
+    real = os.path.realpath(path)
+    if real in seen or not os.path.isfile(real):
+        return set(), False
+    seen.add(real)
+    toks, base = set(), os.path.dirname(real)
+    with open(real, errors="replace") as fh:
+        for line in fh:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            cmd, args = parts[0].lower(), [a.lower() for a in parts[1:]]
+            if cmd == _TERMINATOR:
+                return toks, True
+            if cmd == "source":
+                if args:
+                    sub, stop = _scan(os.path.join(base, parts[1]), seen)
+                    toks |= sub
+                    if stop:
+                        return toks, True
+                continue
+            if cmd in _IGNORED_COMMANDS:
+                continue
+            toks.add(cmd)
+            # An argument is coverage only if it is a KNOWN MODE WORD for this
+            # command — never by position, which cannot tell a mode from an
+            # object selector (a net prefix, a cell name, a bus hint).
+            modes = _MODE_WORDS.get(cmd)
+            if modes:
+                toks |= {f"{cmd}:{a}" for a in args if a in modes}
+    return toks, False
+
+
+def flow_tokens(path):
+    """The set of FEATURE TOKENS a flow exercises — the command names it
+    REACHES, plus `cmd:mode` for each recognised mode word it passes them.
+
+    This is a PROXY for coverage, not a proof of it.  Two flows can call an
+    identical command set and still drive different code — different geometry,
+    different congestion, a different candidate winning selection.  Read a
+    'no new tokens' verdict as 'nothing OBVIOUSLY new', never as 'redundant'.
+    """
+    return _scan(path, set())[0]
+
+
+def corpus_coverage(corpus=None):
+    """Feature tokens the current corpus exercises, unioned over its flows."""
+    covered = set()
+    for f in (corpus or CORPUS):
+        covered |= flow_tokens(os.path.join(_ROOT, f))
+    return covered
+
+
+def discover_candidates(roots=CANDIDATE_ROOTS, corpus=None):
+    """Full-pipeline `.buda` flows under ROOTS that are NOT corpus members.
+
+    'Full-pipeline' means the flow REACHES `run_detailed_nuts` — the same bar
+    the corpus is drawn to.  Reaches, not contains: `rnr/mix2_repro.buda` has
+    the command but `exit`s five lines above it, so under the shipped CLI it
+    stops at `run_nuts` and is not a full-pipeline flow.  Eligibility is read
+    off the same reachable-token scan as coverage, so the two cannot disagree.
+
+    Sourced fragments (track fixtures, block lists) never reach it either, and
+    that is what keeps this from listing every file in the tree.
+    """
+    member = set(corpus or CORPUS)
+    found = []
+    for root in roots:
+        for dp, _, fns in os.walk(os.path.join(_ROOT, root)):
+            for fn in sorted(fns):
+                if not fn.endswith(".buda"):
+                    continue
+                rel = os.path.relpath(os.path.join(dp, fn), _ROOT)
+                if rel in member:
+                    continue
+                if "run_detailed_nuts" in flow_tokens(os.path.join(dp, fn)):
+                    found.append(rel)
+    return sorted(found)
+
+
+def cmd_candidates(roots=CANDIDATE_ROOTS, quantify=False, jobs=1):
+    """Report flows that could join the corpus, ranked by NEW coverage.
+
+    Prints and returns; it never edits CORPUS.  Adding or removing a row is a
+    judgement about what the benchmark should defend and what runtime that is
+    worth — the tool supplies the evidence, the owner makes the call.
+    """
+    os.chdir(_ROOT)
+    covered = corpus_coverage()
+    cands = discover_candidates(roots)
+    rows = []
+    for rel in cands:
+        new = sorted(flow_tokens(os.path.join(_ROOT, rel)) - covered)
+        rows.append({"flow": rel, "new_tokens": new})
+
+    fresh = [r for r in rows if r["new_tokens"]]
+    same = [r for r in rows if not r["new_tokens"]]
+    # Most-new-coverage first; ties alphabetical so the report is stable.
+    fresh.sort(key=lambda r: (-len(r["new_tokens"]), r["flow"]))
+
+    print(f"QoR corpus candidates — ADVISORY ONLY.  This tool never edits "
+          f"CORPUS;\nwhich flows to add or remove is the owner's decision.\n")
+    print(f"corpus:     {len(CORPUS)} flows, {len(covered)} distinct feature tokens")
+    print(f"scanned:    {', '.join(roots)}")
+    print(f"candidates: {len(cands)} full-pipeline flows outside the corpus "
+          f"({len(fresh)} with new coverage, {len(same)} without)\n")
+
+    if quantify:
+        import qor_table                            # local: qor_table imports us
+        measured = {r["flow"]: r for r in
+                    sweep(qor_table.run_flow, [r["flow"] for r in fresh], jobs)}
+        for r in fresh:
+            r.update({k: v for k, v in measured.get(r["flow"], {}).items()
+                      if k != "flow"})
+
+    print("== NEW COVERAGE — nothing in the corpus exercises these tokens ==\n")
+    for r in fresh:
+        print(f"  {r['flow']}")
+        if quantify:
+            if "err" in r:
+                print(f"      ERRORED: {r['err']}  (not a candidate until fixed)")
+            else:
+                print(f"      bund={r.get('bund')} busS={r.get('busS')} "
+                      f"netS={r.get('netS')} busWL={r.get('busWL')} | "
+                      f"{r.get('ovl')}/{r.get('unpl')}/{r.get('viol')} "
+                      f"| {r.get('sec')}s")
+        print(f"      new: {' '.join(r['new_tokens'])}")
+    if not fresh:
+        print("  (none — the corpus already covers every candidate's tokens)")
+
+    print(f"\n== NO NEW TOKENS — {len(same)} flows ==")
+    print("   Not proof of redundancy: identical commands can still drive")
+    print("   different geometry and congestion.  Judge these on what they")
+    print("   would DEFEND, not on this list.\n")
+    for r in same:
+        print(f"  {r['flow']}")
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Run the QoR corpus and/or compare two runs.",
@@ -621,6 +845,15 @@ def main():
                     help="exit non-zero if any flow in PATH errored.  For "
                          "unattended use: an errored sweep must not be cached, "
                          "promoted, or compared as if it were data.")
+    ap.add_argument("--candidates", action="store_true",
+                    help="report full-pipeline flows OUTSIDE the corpus, "
+                         "ranked by feature coverage the corpus lacks.  "
+                         "Advisory: never edits CORPUS — adding or removing a "
+                         "flow is the owner's call")
+    ap.add_argument("--quantify", action="store_true",
+                    help="with --candidates: also RUN each new-coverage "
+                         "candidate for its sizes, QoR and runtime, so its "
+                         "cost is on the table beside its coverage")
     ap.add_argument("-j", "--jobs", type=int, default=default_jobs(),
                     metavar="N",
                     help="worker processes for the sweep (default: CPU count "
@@ -629,6 +862,12 @@ def main():
 
     if args.check:
         sys.exit(1 if cmd_check(args.check) else 0)
+
+    if args.candidates:
+        cmd_candidates(quantify=args.quantify, jobs=args.jobs)
+        return
+    if args.quantify:
+        ap.error("--quantify is only meaningful with --candidates")
 
     if args.compare:
         sys.exit(1 if cmd_compare(*args.compare) else 0)
