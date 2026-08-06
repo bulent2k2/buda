@@ -22,7 +22,28 @@ FloorplannerEngine so the same operations are testable without Tk.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    # Windows: the fcntl module does not exist, and the bare top-level import
+    # made this whole module UNIMPORTABLE there -- taking three test modules
+    # down at pytest collection (measured on windows-2022, doc-validation run
+    # 31109964371) -- even though every flock call site is already wrapped in
+    # try/except for exactly the "platform without fcntl" case the
+    # acquire_bdb_lock docstring promises to fall back on.  A no-op stub
+    # realizes that documented fallback (no inter-process lock: concurrent
+    # sessions are NOT excluded, same degraded semantics the docstring states)
+    # while keeping the fd bookkeeping on the cleanup paths intact.  Real
+    # Windows locking would use msvcrt.locking; deliberately not attempted
+    # here -- see docs/WINDOWS_REQ.md.
+    class _FcntlUnavailable:
+        LOCK_EX = LOCK_NB = LOCK_UN = 0
+
+        @staticmethod
+        def flock(fd, op):
+            pass
+
+    fcntl = _FcntlUnavailable()
 import os
 import shutil
 import subprocess
