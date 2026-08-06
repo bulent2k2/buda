@@ -38,6 +38,11 @@ jobs:
 
     env:
       MPLBACKEND: Agg
+      # Run 7 measured the classic Windows-Python trap: stdio defaults to the
+      # legacy ANSI code page (cp1252), and the engine's log lines use Δ/→/×,
+      # so prints die with UnicodeEncodeError('charmap', ...).  UTF-8 mode is
+      # the documented remedy (docs/WINDOWS_REQ.md).
+      PYTHONUTF8: '1'
 
     steps:
       - uses: actions/checkout@v4
@@ -100,7 +105,7 @@ jobs:
         shell: cmd
         run: |
           set "PYTHONPATH=%CD%\build;%CD%\src;%CD%\tools"
-          python -m pytest -q -rs
+          python -m pytest -q -r fs
 
       - name: Run a .buda flow
         shell: cmd
@@ -114,6 +119,11 @@ jobs:
 
     env:
       MPLBACKEND: Agg
+      # Run 7 measured the classic Windows-Python trap: stdio defaults to the
+      # legacy ANSI code page (cp1252), and the engine's log lines use Δ/→/×,
+      # so prints die with UnicodeEncodeError('charmap', ...).  UTF-8 mode is
+      # the documented remedy (docs/WINDOWS_REQ.md).
+      PYTHONUTF8: '1'
 
     steps:
       - uses: actions/checkout@v4
@@ -156,7 +166,7 @@ jobs:
         shell: cmd
         run: |
           set "PYTHONPATH=%CD%\build\Release;%CD%\build;%CD%\src;%CD%\tools"
-          python -m pytest -q -rs
+          python -m pytest -q -r fs
 
       - name: Run a .buda flow
         shell: cmd
