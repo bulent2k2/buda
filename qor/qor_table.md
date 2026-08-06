@@ -1,21 +1,22 @@
-# QoR corpus snapshot — 2026-08-05 (main @ cef74871)
+# QoR corpus snapshot — 2026-08-06 (main @ 0155e35c)
 
 Regenerate with `tools/qor_table.py --out qor/qor_table.md`.  Columns: `bund`/`busS`/`netS` = bundle / bus-segment / net-segment counts; `busWL`/`netWL` = abstract (after NUTS) / detailed (after DNUTS) wirelength, placed-only; `ovl`/`unpl`/`viol` = overlaps / unplaced bits / bundles with `check_design` violations; `sec` = wall-clock of THIS run (contention-inflated when the sweep ran parallel).  `null` = that stage did not run.  `sec1` = last known SERIAL (-j 1) wall-clock, captured 2026-08-02 (main @ 557c9de) — refresh with a full `-j 1 --out` run ('-' = no serial timing yet).
 
-32 clean · 8 with residuals · 40 flows.
+32 clean · 9 with residuals · 41 flows.
 
 ## DIRTY — residual overlaps / unplaced / viol_bundles (or incomplete)
 
 ```
 flow                                          bund  busS   netS    busWL      netWL |  ovl unpl viol    sec    sec1   note
 --------------------------------------------------------------------------------------------------------------------------------------------
-chip/chip_topdown                              640  1790  36464  2541681   49637160 |    4  134    9  252.5   138.2
-chip/chip_bottomup_caps                        640  1809  36007  2527421   48342575 |   55  155   13  236.1   140.5
-chip/chip_bottomup                             640  1809  35931  2516788   48243174 |   54  243   19  198.4   133.9
-chip/chip3_topdown                             640  1705  35372  2490996   49182880 |    6  260   34  240.4   103.6
-chip/chip3a_bottomup                           640  1729  35312  2493698   48262520 |   38   78    9  230.0   133.2
-chip/chip_stack_bottomup                       660  1797  30856  2269788   38124104 |   69  252   19  339.3       -
-rnr/mix2_fast_bottomup_caps                    100   267   3328    68371     841195 |    2    0    0   35.8    19.3
+chip/chip_topdown                              640  1790  36464  2541681   49637160 |    4  134    9  225.2   138.2
+chip/chip_bottomup_caps                        640  1809  36007  2527421   48342575 |   55  155   13  209.9   140.5
+chip/chip_bottomup                             640  1809  35931  2516788   48243174 |   54  243   19  177.5   133.9
+chip/chip3_topdown                             640  1705  35372  2490996   49182880 |    6  260   34  206.3   103.6
+chip/chip3a_bottomup                           640  1729  35312  2493698   48262520 |   38   78    9  193.7   133.2
+chip/chip_stack_topdown                        660  1798  32003  2281274   39384431 |   21  241   18  198.4       -
+chip/chip_stack_bottomup                       660  1797  30856  2269788   38124104 |   69  252   19  304.2       -
+rnr/mix2_fast_bottomup_caps                    100   267   3328    68371     841195 |    2    0    0   38.6    19.3
 rnr/mix2_fast_on_aligned_sql                   100   262   3326    76368     911840 |    2   16    1   43.0    25.4
 ```
 
@@ -24,32 +25,32 @@ rnr/mix2_fast_on_aligned_sql                   100   262   3326    76368     911
 ```
 flow                                          bund  busS   netS    busWL      netWL     sec    sec1
 --------------------------------------------------------------------------------------------------
-big_data_test/bigHalf                           80   259   8980   405139   14073009    65.7    33.8
+big_data_test/bigHalf                           80   259   8980   405139   14073009    61.8    33.8
 big_data_test/big                               80   261   8672   769850   26456791     1.7     1.4
 big_data_test/big2/big2                         80   243   8308   346340   11818258     1.4     0.9
-rnr/mix2_fast_bottomup_shared                  100   279   3530    72436     890954    54.5    28.6
-rnr/mix2_fast_topdown                          100   268   3412    66129     802202     8.3     5.7
-rnr/mix2_fast_bottomup                         100   262   3324    71805     885066     7.8     5.4
-rnr/mix2_topdown_refine                        100   259   3284    65339     793215    56.4    53.8
-rnr/mix2                                       100   244   3204    69713     866029    37.2    17.1
-rnr/mix                                        100   248   3132    62039     761520     4.6     3.6
-rnr/mix2_fast_bottomup_caps_2x                 100   244   2888    62778     746026    18.3       -
-rnr/mix2_fast_on_aligned_sql_2x                100   228   2794    65160     781287     5.0       -
+rnr/mix2_fast_bottomup_shared                  100   279   3530    72436     890954    55.5    28.6
+rnr/mix2_fast_topdown                          100   268   3412    66129     802202     7.8     5.7
+rnr/mix2_fast_bottomup                         100   262   3324    71805     885066     8.3     5.4
+rnr/mix2_topdown_refine                        100   259   3284    65339     793215    56.1    53.8
+rnr/mix2                                       100   244   3204    69713     866029    34.4    17.1
+rnr/mix                                        100   248   3132    62039     761520     5.1     3.6
+rnr/mix2_fast_bottomup_caps_2x                 100   244   2888    62778     746026    17.7       -
+rnr/mix2_fast_on_aligned_sql_2x                100   228   2794    65160     781287     5.9       -
 hbundles/10_chip_units_blocks_leaf             176   206   1200    46092     337719     1.1     0.6
-big_data_test/tc3a                              80   262   1108    78806     300930     2.7     2.0
+big_data_test/tc3a                              80   262   1108    78806     300930     2.8     2.0
 big_data_test/big_3bundles_sel_pure_mst_topo     3    24    668    43973    1096866     0.1     0.1
 big_3bundles_sel_trunk+mst_topo                  3    14    468    38826     973059     0.1     0.0
-hbundles/06_multipin_stress                     35   144    462    14475      49609    19.2     8.8
-big_data_test/big2/b24_bus_056                   1     8    384     4818     231264     0.0     0.0
+hbundles/06_multipin_stress                     35   144    462    14475      49609    19.5     8.8
+big_data_test/big2/b24_bus_056                   1     8    384     4818     231264     0.1     0.0
 hbundles/05_stress_grid                         61    86    372     6781      31978     0.3     0.2
-hbundles/07_wide_fan_stress                     24   153    269    19587      40373     0.6     0.4
+hbundles/07_wide_fan_stress                     24   153    269    19587      40373     0.7     0.4
 big_data_test/b61                                1    10    160    15333     245348     0.0     0.0
 big_data_test/big2/b1_bus_007                    1     5    140     4946     138502     0.0     0.0
 big_data_test/big2/b4_bus_077                    1     2    120     3199     191669     0.1     0.1
 big_data_test/b44                                1     2    104     3715     193376     0.0     0.0
 big_data_test/big2/b34_bus_028                   1     3     84      166       4732     0.0     0.0
 hbundles/08_cross_level                         14    19     76     2576      10322     0.1     0.0
-hbundles/02_two_procs                            8     8     64      660       5280     0.0     0.0
+hbundles/02_two_procs                            8     8     64      660       5280     0.1     0.0
 big_data_test/bigHalf_bus038_bitrunk            80     1     56     4245     237720     0.1     0.1
 hbundles/09_local_global_compete                 2     2     56      860      21920     0.0     0.0
 hbundles/01_pipeline_hier                        4     4     32      330       2640     0.0     0.0
