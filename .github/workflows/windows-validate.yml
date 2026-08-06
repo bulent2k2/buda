@@ -89,10 +89,32 @@ jobs:
         # buda_core is a SHARED library; on Windows that is buda_core.dll and
         # the .pyd extensions must find it at import time (RPATH does not
         # exist on Windows).  This import is where that either works or fails.
+        # Diagnostics print to STDOUT: run 2 showed pwsh steps can swallow a
+        # failing python's stderr entirely, leaving exit code 1 and no text.
         shell: pwsh
         run: |
+          @'
+          # Written by the workflow: import diagnostics that cannot lose their output.
+          import ctypes, os, sys, traceback
+          print("cwd:", os.getcwd())
+          print("PYTHONPATH:", os.environ.get("PYTHONPATH"))
+          for d in ("build", os.path.join("build", "Release")):
+              dll = os.path.join(os.getcwd(), d, "buda_core.dll")
+              if os.path.exists(dll):
+                  try:
+                      ctypes.WinDLL(dll)
+                      print("ctypes loads OK:", dll)
+                  except OSError as e:
+                      print("ctypes load FAILED:", dll, "->", e)
+          try:
+              import buda, buda_db
+              print("import OK:", buda.__file__)
+          except BaseException:
+              traceback.print_exc(file=sys.stdout)   # stdout: pwsh steps have eaten stderr
+              sys.exit(1)
+          '@ | Set-Content diag_import.py
           $env:PYTHONPATH = "$PWD\build;$PWD\src;$PWD\tools"
-          python -c "import buda, buda_db; print('import OK:', buda.__file__)"
+          python -X faulthandler diag_import.py
 
       - name: Fast test tier
         shell: pwsh
@@ -140,10 +162,31 @@ jobs:
         run: Get-ChildItem -Recurse build -Include *.pyd,*.dll | Select-Object FullName,Length
 
       - name: Import smoke
+        # Same diagnostics as the ninja job; see the note there.
         shell: pwsh
         run: |
+          @'
+          # Written by the workflow: import diagnostics that cannot lose their output.
+          import ctypes, os, sys, traceback
+          print("cwd:", os.getcwd())
+          print("PYTHONPATH:", os.environ.get("PYTHONPATH"))
+          for d in ("build", os.path.join("build", "Release")):
+              dll = os.path.join(os.getcwd(), d, "buda_core.dll")
+              if os.path.exists(dll):
+                  try:
+                      ctypes.WinDLL(dll)
+                      print("ctypes loads OK:", dll)
+                  except OSError as e:
+                      print("ctypes load FAILED:", dll, "->", e)
+          try:
+              import buda, buda_db
+              print("import OK:", buda.__file__)
+          except BaseException:
+              traceback.print_exc(file=sys.stdout)   # stdout: pwsh steps have eaten stderr
+              sys.exit(1)
+          '@ | Set-Content diag_import.py
           $env:PYTHONPATH = "$PWD\build\Release;$PWD\build;$PWD\src;$PWD\tools"
-          python -c "import buda, buda_db; print('import OK:', buda.__file__)"
+          python -X faulthandler diag_import.py
 
       - name: Fast test tier
         shell: pwsh
