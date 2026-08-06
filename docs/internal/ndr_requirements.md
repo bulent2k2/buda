@@ -142,7 +142,13 @@ Everything below is stated against this baseline.
   resolution (compatible GROUND rails — e.g. `GND`/`VSS` aliases —
   qualify for the default GROUND spec); that resolution is part of the
   design, and R9's mis-connected-shield audit must apply the same
-  predicate, so credit and audit cannot disagree.
+  predicate, so credit and audit cannot disagree.  *Phasing:* crediting
+  may land AFTER a pure always-emit phase (§5.1 leaning) — deferring it is
+  the conservative direction (redundant shields consume extra real
+  capacity but are never illegal, and R3/R7 must price the uncredited
+  worst-case demand in the meantime) — but R5a remains mandatory for the
+  feature to be considered complete, and an explicitly-phased deferral is
+  the only permitted form of not implementing it.
 
 ### Detailed NUTS (stage 9)
 
@@ -315,9 +321,15 @@ Reading the table:
 
 Pre-brainstorm leaning (to be confirmed or overturned in the design
 conversation): **start from A, and shape the group-conversion API so D's
-crediting is a later additive phase** — phase 1 ships A pure (byte-identity
-trivial, shields always emitted), phase 2 adds R5a crediting once the audit
-predicate exists.
+crediting is a later additive phase** — phase 1 ships A pure
+(byte-identity trivial, shields always emitted), phase 2 adds R5a
+crediting once the audit predicate exists.  This phasing **explicitly
+defers R5a out of phase 1** (the deferral form R5a itself permits): a
+phase-1 NDR near a matching GND rail emits a redundant shield and charges
+its capacity — conservative and legal, never a silent violation — so R3
+realizability and R7 planner pricing in phase 1 use the uncredited
+worst-case demand, and a rule that is only realizable WITH crediting
+simply fails LOUD until phase 2 lands.
 
 ## 6. Test vehicles & acceptance
 
