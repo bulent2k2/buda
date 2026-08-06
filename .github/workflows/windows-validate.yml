@@ -251,15 +251,21 @@ jobs:
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && ./bin/bb"
 
       - name: Where did the artifacts land?
+        # No -e here: `ls a b c` fails when any glob has no match (there is no
+        # *.so on Cygwin) and -e aborted the step BEFORE the trailing true
+        # (measured, run 13).
         shell: cmd
         continue-on-error: true
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && ls -la build/*.dll build/*.so build/*.pyd 2>/dev/null; true"
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && ls -la build/ | grep -E 'dll$|so$|pyd$' || true"
 
       - name: Import smoke
+        # PYTHONPATH was MISSING here in run 13 -- the MSVC jobs set it and
+        # this copy did not, so python 3.9 reported a plain ModuleNotFoundError
+        # with PYTHONPATH=None (not a Cygwin fault; a harness omission).
         shell: cmd
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -u -X faulthandler .github/scripts/windows_diag_import.py"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PYTHONPATH=\$PWD/build:\$PWD/src:\$PWD/tools python3 -u -X faulthandler .github/scripts/windows_diag_import.py"
 
       - name: Fast test tier
         shell: cmd
