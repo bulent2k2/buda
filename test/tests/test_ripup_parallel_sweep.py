@@ -159,6 +159,42 @@ def test_parallel_scan_books_psweep_time(monkeypatch):
     assert m and int(m.group(1)) >= 1, out
 
 
+def test_zero_move_contenders_keep_their_heartbeats(monkeypatch):
+    """Codex #604: a contender with NO index alternates (e.g. every
+    alternate width-gated away) must still print its sequential `— no
+    improvement` heartbeat on the parallel path — the sequential loop
+    passes the empty list through _rr_scan_moves and prints it."""
+    monkeypatch.setenv("BUDA_SWEEP_THREADS", "2")
+    monkeypatch.setattr(ripup_mod.RipupMixin, "_rr_candidate_order",
+                        lambda self, w, old_tidx, stage: [])
+    s_par = _build_session()
+    out_par = _run_ripup(s_par)
+    s_seq = _build_session()
+    out_seq = _run_ripup(s_seq, "no_parallel_sweep")
+    def heartbeats(out):
+        return [ln for ln in out.splitlines()
+                if "— no improvement" in ln]
+    assert heartbeats(out_par) == heartbeats(out_seq)
+    assert len(heartbeats(out_par)) >= 1, out_par
+    assert _done_line(out_par) == _done_line(out_seq)
+
+
+def test_sequential_paths_never_parse_thread_env(monkeypatch):
+    """Codex #604: an inherited nonnumeric BUDA_THREADS must not crash runs
+    that never use the pool (`no_parallel_sweep`), and the parallel path
+    falls back to auto instead of raising."""
+    monkeypatch.setenv("BUDA_THREADS", "not-a-number")
+    monkeypatch.delenv("BUDA_SWEEP_THREADS", raising=False)
+    s = _build_session()
+    out = _run_ripup(s, "no_parallel_sweep")
+    assert "done:" in out
+    assert s.nuts_result.num_overlaps == 0
+    s = _build_session()          # default path: tolerant parse -> auto
+    out = _run_ripup(s)
+    assert "done:" in out
+    assert s.nuts_result.num_overlaps == 0
+
+
 # ── the opt-out token ────────────────────────────────────────────────────────
 
 def test_no_parallel_sweep_token():

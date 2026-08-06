@@ -917,9 +917,15 @@ class RipupMixin:
     def _rr_sweep_threads(self):
         """The sweep pool size: BUDA_SWEEP_THREADS (explicit) wins; else the
         CLI's machine-wide governor BUDA_THREADS caps the pool; else 0 =
-        hardware concurrency (resolved in C++)."""
-        return int(os.environ.get("BUDA_SWEEP_THREADS")
-                   or os.environ.get("BUDA_THREADS", "0") or 0)
+        hardware concurrency (resolved in C++).  A nonnumeric value falls
+        back to 0 (auto) — the C++ engine env parsers are equally tolerant,
+        and the sequential paths never consulted these vars at all (Codex
+        #604)."""
+        try:
+            return int(os.environ.get("BUDA_SWEEP_THREADS")
+                       or os.environ.get("BUDA_THREADS", "0") or 0)
+        except ValueError:
+            return 0
 
     def _rr_sweep_stage_setup(self, flat, stage, metric):
         """(base_disc, net_counts, dn_kwargs) for a parallel_sweep call over
@@ -1027,18 +1033,22 @@ class RipupMixin:
                     moves, rest = self._rr_screen_prune(w, moves)
                     if rest:
                         deferred.append((ci, bid, old_tidx, rest))
-                if moves:
-                    group.append((ci, bid, old_tidx, moves))
-                    nmv += len(moves)
+                # A zero-move contender stays in the group so its sequential
+                # heartbeat still prints in visit order (Codex #604).
+                group.append((ci, bid, old_tidx, moves))
+                nmv += len(moves)
             if not group:
                 continue
             flat = [(ci, bid, old, t)
                     for ci, bid, old, moves in group
                     for _k, t in moves]
-            base_disc, net_counts, dn_kwargs = \
-                self._rr_sweep_stage_setup(flat, stage, metric)
-            outcomes = self._rr_sweep_eval(flat, stage, base_disc,
-                                           net_counts, dn_kwargs)
+            if flat:
+                base_disc, net_counts, dn_kwargs = \
+                    self._rr_sweep_stage_setup(flat, stage, metric)
+                outcomes = self._rr_sweep_eval(flat, stage, base_disc,
+                                               net_counts, dn_kwargs)
+            else:
+                outcomes = []
             oi = 0
             for ci, bid, old_tidx, moves in group:
                 outs = outcomes[oi:oi + len(moves)]
@@ -2950,10 +2960,15 @@ class RipupMixin:
             # single-thread pools keep the sequential scan.  The DEFERRED
             # stall sweep stays engaged at any width: its certificate case
             # needs every move evaluated regardless.
-            n_pool = self._rr_sweep_threads() or (os.cpu_count() or 1)
-            use_par_scan = (use_parallel_sweep and n_pool > 1
+            use_par_scan = (use_parallel_sweep
                             and getattr(self, '_rr_fast_trials', False)
                             and not warm and not use_edge_candidates)
+            if use_par_scan:
+                # Pool width is consulted only once the other gates pass, so
+                # sequential runs (no_parallel_sweep / no_fast_trials / warm
+                # / edge candidates) never parse the thread env (Codex #604).
+                n_pool = self._rr_sweep_threads() or (os.cpu_count() or 1)
+                use_par_scan = n_pool > 1
             if use_par_scan:
                 best, t = self._rr_parallel_scan_sweep(
                     contenders, cur, stage, metric, snap, deferred, screen,
