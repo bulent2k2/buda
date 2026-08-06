@@ -62,6 +62,46 @@ def test_numeric_argument_is_a_count_not_a_feature(tmp_path):
     assert qc.flow_tokens(a) == qc.flow_tokens(b) == {"run_planner"}
 
 
+def test_object_selector_is_not_a_feature(tmp_path):
+    """`set_bundling <prefix> <mode>` leads with an OBJECT.  A position rule
+    emits `set_bundling:clk_` — so every new net prefix would look like new
+    coverage — while missing the mode that actually selects the path."""
+    f = _write(tmp_path, "a.buda", "set_bundling clk_ strict\n")
+    t = qc.flow_tokens(f)
+    assert "set_bundling:strict" in t
+    assert "set_bundling:clk_" not in t
+    assert not any(":clk_" in x for x in t)
+
+
+def test_two_prefixes_same_mode_are_not_new_coverage(tmp_path):
+    """The consequence that matters: swapping the object must not read as a
+    different feature."""
+    a = _write(tmp_path, "a.buda", "set_bundling clk_ strict\n")
+    b = _write(tmp_path, "b.buda", "set_bundling data_ strict\n")
+    assert qc.flow_tokens(a) == qc.flow_tokens(b)
+
+
+def test_cell_name_is_not_a_feature(tmp_path):
+    """`set_bottom_up <cell> [on|off]` — same shape, a cell name first."""
+    t = qc.flow_tokens(_write(tmp_path, "a.buda", "set_bottom_up my_cell off\n"))
+    assert "set_bottom_up:off" in t and "set_bottom_up:my_cell" not in t
+
+
+def test_mode_is_found_wherever_it_sits(tmp_path):
+    """`run_hier_bundler depth 3 COMBINED` puts the strategy THIRD, so no
+    position rule finds it.  Matching a known vocabulary anywhere does."""
+    f = _write(tmp_path, "a.buda", "run_hier_bundler depth 3 COMBINED\n")
+    assert "run_hier_bundler:combined" in qc.flow_tokens(f)
+
+
+def test_unknown_mode_word_errs_toward_silence(tmp_path):
+    """The documented cost of a closed vocabulary: a mode not in the table is
+    not coverage.  That under-claims rather than manufacturing a finding — but
+    it is why _MODE_WORDS must grow when a command gains a mode."""
+    f = _write(tmp_path, "a.buda", "run_bundler NOT_A_REAL_STRATEGY\n")
+    assert qc.flow_tokens(f) == {"run_bundler"}
+
+
 def test_mode_argument_still_counts(tmp_path):
     """The numeric guard must not swallow the real modes."""
     f = _write(tmp_path, "a.buda", "run_planner hier 5\nrun_planner post_nuts\n")
@@ -121,6 +161,44 @@ def test_missing_source_target_is_not_fatal(tmp_path):
     """Discovery reads flows it never runs; a stale path must not crash it."""
     f = _write(tmp_path, "a.buda", "source nope.buda\nrun_nuts\n")
     assert qc.flow_tokens(f) == {"run_nuts"}
+
+
+# ---------------------------------------------------------------- reachable
+
+def test_commands_after_exit_are_not_coverage(tmp_path):
+    """`exit` raises SystemExit, so the tail never runs.  Counting it would
+    manufacture coverage out of dead script."""
+    f = _write(tmp_path, "a.buda", "run_nuts\nexit\nrun_detailed_nuts\n")
+    t = qc.flow_tokens(f)
+    assert "run_nuts" in t and "run_detailed_nuts" not in t
+
+
+def test_exit_inside_a_sourced_file_stops_the_parent(tmp_path):
+    """SystemExit does not care which file raised it."""
+    _write(tmp_path, "child.buda", "run_nuts\nexit\n")
+    f = _write(tmp_path, "top.buda", "source child.buda\nrun_detailed_nuts\n")
+    t = qc.flow_tokens(f)
+    assert "run_nuts" in t and "run_detailed_nuts" not in t
+
+
+def test_unreachable_run_detailed_nuts_is_not_a_full_pipeline_flow(tmp_path):
+    """Eligibility is 'REACHES run_detailed_nuts', not 'contains the string'."""
+    (tmp_path / "flow").mkdir()
+    _write(tmp_path, "flow/dead.buda", "run_nuts\nexit\nrun_detailed_nuts\n")
+    _write(tmp_path, "flow/live.buda", "run_nuts\nrun_detailed_nuts\n")
+    names = [f.split("/")[-1]
+             for f in qc.discover_candidates(roots=(str(tmp_path / "flow"),),
+                                             corpus=[])]
+    assert "live.buda" in names and "dead.buda" not in names
+
+
+def test_the_real_repro_flow_is_excluded():
+    """`rnr/mix2_repro.buda` is the case in the wild: `exit` on line 15,
+    `run_detailed_nuts` on line 20.  It is a mix2 debug repro that stops at
+    run_nuts under the shipped CLI, so it is not a full-pipeline candidate."""
+    assert "flow/rnr/mix2_repro.buda" not in qc.discover_candidates()
+    t = qc.flow_tokens("flow/rnr/mix2_repro.buda")
+    assert "run_nuts" in t and "run_detailed_nuts" not in t
 
 
 # --------------------------------------------------------------- discovery

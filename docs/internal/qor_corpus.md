@@ -22,8 +22,12 @@ directories". It has not been since: the corpus gained `flow/chip/` vehicles,
 per-cell layer-policy vehicles and `_2x` track-density twins, while several
 flows those directories contain were deliberately left out. The recipe now
 over-reports in one direction and under-reports in the other, so it is recorded
-here only to stop someone re-deriving the list from it. **97 full-pipeline flows
+here only to stop someone re-deriving the list from it. **96 full-pipeline flows
 sit outside the corpus** — membership is a judgement, not a filter.
+
+(The recipe was also wrong in a subtler way: `grep -l run_detailed_nuts` counts
+a flow that never reaches the command. `rnr/mix2_repro.buda` `exit`s five lines
+above its `run_detailed_nuts` and is not a full-pipeline flow at all.)
 
 Each row carries a comment saying what it defends. That is the standard for a
 new one: a corpus row costs runtime on every sweep, so it should be there to
@@ -90,21 +94,36 @@ tool supplies evidence. (`test_qor_candidates.py` pins this.)
 
 ### How coverage is measured, and what it is worth
 
-A flow's coverage is its set of **feature tokens**, taken over the flow and
-everything it `source`s transitively:
+A flow's coverage is its set of **feature tokens**, taken over the commands it
+**reaches** in the flow and everything it `source`s transitively:
 
 - the command name (`run_nuts`, `add_keepout`);
-- plus the argument where the argument selects the code path
-  (`run_bundler:combined`, `run_planner:post_nuts`);
-- plus each keyword flag on the generator/healer commands
-  (`generate_topologies:multi_trunk`).
+- plus `cmd:mode` for each argument that is a **known mode word** for that
+  command (`run_bundler:combined`, `generate_topologies:multi_trunk`).
 
-Three kinds of noise are excluded, each of which otherwise manufactures fake
-findings: a **numeric** first argument is a count, not a mode (`run_planner 1`
-and `run_planner 200` are one feature); **report/inspection** commands take
-bus-name hints, so `dump_topologies bus_007` would make every flow look unique;
-and **viz / audit** commands drive nothing the headless sweep would not drive
-anyway (it runs `no_viz` and calls `check_design` itself).
+Two rules do the real work, and both exist because the obvious implementation
+manufactures findings:
+
+**Modes come from a closed vocabulary (`_MODE_WORDS`), never from position.**
+Position cannot tell a mode from an object: `set_bundling <prefix> <mode>` and
+`set_bottom_up <cell> [on|off]` lead with an object, so a first-argument rule
+emits `set_bundling:clk_` — every new net prefix reads as new coverage — while
+missing `strict` vs `combined` entirely. Position also misses a mode that
+moves (`run_hier_bundler depth 3 COMBINED` has its strategy third). Matching a
+vocabulary anywhere in the argument list fixes both, and an object name can
+never collide with it. The cost is that an **unlisted** mode is silently not
+coverage — the report under-claims rather than inventing a finding, but
+`_MODE_WORDS` must grow when a command gains a mode.
+
+**Only REACHABLE commands count.** `exit` raises `SystemExit`, so everything
+after it — in that file or in whatever sourced it — is dead script. Counting it
+would score `rnr/mix2_repro.buda` as a full pipeline it never runs. Eligibility
+and coverage read the same scan, so the two cannot disagree.
+
+Two further exclusions: **report/inspection** commands take bus-name hints, so
+`dump_topologies bus_007` would make every flow look unique; and **viz / audit**
+commands drive nothing the headless sweep would not drive anyway (it runs
+`no_viz` and calls `check_design` itself).
 
 **This is a proxy, and the weak direction is "no new tokens".** Two flows can
 call an identical command set and still exercise different code — different
@@ -113,9 +132,9 @@ that verdict as *nothing obviously new*, never as *redundant*. The strong
 direction is the other one: if a token appears in no corpus flow, that feature
 genuinely has no corpus coverage.
 
-### What it found (2026-08-05, corpus at 41 flows / 56 tokens)
+### What it found (2026-08-06, corpus at 41 flows / 46 tokens)
 
-97 candidates: **37 with new coverage, 60 without.** The largest gaps, by what
+96 candidates: **36 with new coverage, 60 without.** The largest gaps, by what
 they would defend rather than by token count:
 
 | gap | flows | assessment |
@@ -212,8 +231,9 @@ analysis.
 One flow is not a shipped-CLI baseline: **`rnr/mix2_repro.buda`** has a
 mid-script `exit` right after `run_nuts`, ahead of its healers and
 `run_detailed_nuts`, so under the shipped CLI it stops there. It is a `mix2`
-debug repro — use `mix2` as the canonical row. (It is not currently a corpus
-member; the note is kept because the file is still in the tree and still
+debug repro — use `mix2` as the canonical row. It is not a corpus member, and
+`--candidates` excludes it too: reaching `run_detailed_nuts` is the bar, and it
+does not. (The note is kept because the file is still in the tree and still
 tempting to measure.)
 
 See also: [`drop_dangling_modes_2026-07.md`](drop_dangling_modes_2026-07.md),
