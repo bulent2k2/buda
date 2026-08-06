@@ -17,9 +17,11 @@
 Drives the planner's candidate scoring, NUTS's per-layer solvers and the
 healers' trial sweep through their env knobs (BUDA_PLAN/NUTS/SWEEP_THREADS).
 Min 1; max = the machine's logical-CPU count as this process may use it
-(cgroup/affinity-aware — on hybrid CPUs exactly P-cores x SMT + E-cores);
-default = half the max.  An explicit flag overrides the per-engine env vars;
-the default only fills unset ones.
+(affinity- and CFS-quota-aware — on hybrid CPUs exactly P-cores x SMT +
+E-cores); default = half the max.  An explicit flag overrides the per-engine
+env vars (explicit semantics); the flag-absent default sets only the
+BUDA_THREADS ceiling, which the engines' auto paths honor with their
+small-work gates intact.
 """
 import os
 import subprocess
@@ -35,11 +37,34 @@ _ENV_VARS = ("BUDA_PLAN_THREADS", "BUDA_NUTS_THREADS", "BUDA_SWEEP_THREADS")
 def test_detect_max_threads_positive_and_affinity_aware():
     n = buda_cli.detect_max_threads()
     assert n >= 1
-    # On Linux the count is the scheduling affinity (container-aware), which
-    # can never exceed os.cpu_count().
+    # On Linux the ceiling is the scheduling affinity (cpuset-aware), further
+    # lowered by any CFS quota — never above either bound.
     if hasattr(os, "sched_getaffinity"):
-        assert n == len(os.sched_getaffinity(0))
+        assert n <= len(os.sched_getaffinity(0))
         assert n <= (os.cpu_count() or n)
+        q = buda_cli._cgroup_cpu_quota()
+        if q is not None:
+            assert n <= q
+
+
+def test_cgroup_quota_v2_parsing(tmp_path):
+    # cgroup v2: "quota period" in cpu.max; "max" = unlimited (Codex #598 P2).
+    (tmp_path / "cpu.max").write_text("200000 100000\n")
+    assert buda_cli._cgroup_cpu_quota(str(tmp_path)) == 2
+    (tmp_path / "cpu.max").write_text("150000 100000\n")   # 1.5 CPUs -> ceil 2
+    assert buda_cli._cgroup_cpu_quota(str(tmp_path)) == 2
+    (tmp_path / "cpu.max").write_text("max 100000\n")
+    assert buda_cli._cgroup_cpu_quota(str(tmp_path)) is None
+
+
+def test_cgroup_quota_v1_parsing(tmp_path):
+    (tmp_path / "cpu").mkdir()
+    (tmp_path / "cpu" / "cpu.cfs_quota_us").write_text("300000\n")
+    (tmp_path / "cpu" / "cpu.cfs_period_us").write_text("100000\n")
+    assert buda_cli._cgroup_cpu_quota(str(tmp_path)) == 3
+    (tmp_path / "cpu" / "cpu.cfs_quota_us").write_text("-1\n")   # unlimited
+    assert buda_cli._cgroup_cpu_quota(str(tmp_path)) is None
+    assert buda_cli._cgroup_cpu_quota(str(tmp_path / "nope")) is None
 
 
 def test_resolve_default_is_half_the_max():
@@ -66,14 +91,27 @@ def test_explicit_flag_overrides_engine_env(monkeypatch):
     assert all(os.environ[v] == "3" for v in _ENV_VARS)
 
 
-def test_default_fills_only_unset_engine_env(monkeypatch):
+def test_default_sets_only_the_governor(monkeypatch):
+    """The flag-absent default must NOT write the per-engine vars — the
+    engines read those as EXPLICIT requests, which bypass their small-work
+    gates (Codex #598 P1: pools would spawn for tiny candidate/layer sets on
+    every default run).  It sets only BUDA_THREADS, the ceiling the engines'
+    AUTO paths honor with gates preserved."""
     monkeypatch.setenv("BUDA_PLAN_THREADS", "7")       # user's own override
     monkeypatch.delenv("BUDA_NUTS_THREADS", raising=False)
     monkeypatch.delenv("BUDA_SWEEP_THREADS", raising=False)
+    monkeypatch.delenv("BUDA_THREADS", raising=False)
     buda_cli.apply_thread_env(2, explicit=False)
     assert os.environ["BUDA_PLAN_THREADS"] == "7"      # kept
-    assert os.environ["BUDA_NUTS_THREADS"] == "2"      # filled
-    assert os.environ["BUDA_SWEEP_THREADS"] == "2"     # filled
+    assert "BUDA_NUTS_THREADS" not in os.environ       # NOT written
+    assert "BUDA_SWEEP_THREADS" not in os.environ      # NOT written
+    assert os.environ["BUDA_THREADS"] == "2"           # the governor
+
+
+def test_default_respects_preset_governor(monkeypatch):
+    monkeypatch.setenv("BUDA_THREADS", "3")
+    buda_cli.apply_thread_env(2, explicit=False)
+    assert os.environ["BUDA_THREADS"] == "3"           # setdefault semantics
 
 
 def test_cli_end_to_end_reports_and_clamps(tmp_path):

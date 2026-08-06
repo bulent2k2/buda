@@ -481,17 +481,50 @@ def _enable_line_buffered_stdio():
             pass
 
 
+def _cgroup_cpu_quota(root="/sys/fs/cgroup"):
+    """The container's CFS CPU quota as a CPU count (ceil), or None when
+    unlimited/undetectable.  A cgroup can throttle to N CPUs WITHOUT
+    narrowing the cpuset (cgroup v2 `cpu.max`, v1 cfs_quota_us), in which
+    case affinity alone over-reports the usable parallelism (Codex #598 P2).
+    Reads v2 first, then v1; any read/parse problem means None (no limit
+    assumed — affinity remains the bound)."""
+    try:
+        with open(f"{root}/cpu.max") as fh:            # cgroup v2
+            quota, period = fh.read().split()
+            if quota != "max" and int(period) > 0:
+                return max(1, -(-int(quota) // int(period)))   # ceil
+            return None
+    except (OSError, ValueError):
+        pass
+    try:
+        with open(f"{root}/cpu/cpu.cfs_quota_us") as fh:       # cgroup v1
+            quota = int(fh.read())
+        with open(f"{root}/cpu/cpu.cfs_period_us") as fh:
+            period = int(fh.read())
+        if quota > 0 and period > 0:
+            return max(1, -(-quota // period))                 # ceil
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def detect_max_threads():
     """The machine-dependent thread ceiling: the number of LOGICAL CPUs this
-    process may run on.  os.sched_getaffinity respects container/cgroup and
-    taskset limits, and on hybrid parts (performance cores with SMT +
-    efficiency cores) the logical count is exactly superscalar-cores x 2 +
-    low-power-cores — the accurate, automatic form of that estimate.  Falls
-    back to os.cpu_count() where affinity is unavailable (macOS/Windows)."""
+    process may run on.  os.sched_getaffinity respects cpuset/taskset limits,
+    and on hybrid parts (performance cores with SMT + efficiency cores) the
+    logical count is exactly superscalar-cores x 2 + low-power-cores — the
+    accurate, automatic form of that estimate.  A container can ALSO be
+    throttled by a CFS quota without a narrowed cpuset, so the quota (as a
+    CPU count) is folded in as a min (Codex #598 P2).  Falls back to
+    os.cpu_count() where affinity is unavailable (macOS/Windows)."""
     try:
-        return max(1, len(os.sched_getaffinity(0)))
+        n = max(1, len(os.sched_getaffinity(0)))
     except (AttributeError, OSError):
-        return max(1, os.cpu_count() or 1)
+        n = max(1, os.cpu_count() or 1)
+    q = _cgroup_cpu_quota()
+    if q is not None:
+        n = min(n, q)
+    return max(1, n)
 
 
 def resolve_threads(requested, max_threads):
@@ -516,17 +549,22 @@ _THREAD_ENV_VARS = ("BUDA_PLAN_THREADS", "BUDA_NUTS_THREADS",
 
 
 def apply_thread_env(n, explicit):
-    """Export the resolved count to every engine's env knob.  An EXPLICIT
-    --threads OVERRIDES the per-engine vars (one flag governs the run); the
-    flag-absent default only fills vars the user has not set, so per-engine
-    env overrides keep working without the flag.  Engine-internal safety
-    pins are unaffected either way (parallel_sweep's trial workers set their
-    private planners/engines to 1 thread directly — no nested pools)."""
-    for var in _THREAD_ENV_VARS:
-        if explicit:
+    """Export the resolved count to the engines.  An EXPLICIT --threads
+    OVERRIDES the per-engine vars (one flag governs the run — explicit
+    semantics, which also bypass the engines' small-work gates, as a hand-set
+    per-engine var always did).  The flag-absent DEFAULT must NOT masquerade
+    as an explicit request (Codex #598 P1: it would bypass the planner's
+    small-pool gate and NUTS's work-size gate, spawning pools for tiny work),
+    so it sets only BUDA_THREADS — the governor the engines' AUTO paths read
+    as a CEILING, gates preserved — and never touches a per-engine var the
+    user set.  Engine-internal safety pins are unaffected either way
+    (parallel_sweep's trial workers set their private planners/engines to 1
+    thread directly — no nested pools)."""
+    if explicit:
+        for var in _THREAD_ENV_VARS:
             os.environ[var] = str(n)
-        else:
-            os.environ.setdefault(var, str(n))
+    else:
+        os.environ.setdefault("BUDA_THREADS", str(n))
 
 
 def main():
@@ -563,14 +601,16 @@ def main():
     parser.add_argument('-j', '--threads', type=int, metavar='N',
                         help='worker threads for the parallel pipeline stages: '
                              'planner candidate scoring, NUTS per-layer '
-                             'solvers, and the healers\' trial sweep '
-                             '(BUDA_PLAN/NUTS/SWEEP_THREADS). Clamped to '
-                             '[1, <logical CPUs available to this process>] — '
-                             'on hybrid CPUs that count is P-cores x SMT + '
-                             'E-cores, cgroup/affinity-aware. Default: half '
-                             'the machine maximum. An explicit N overrides '
-                             'the per-engine env vars; the default fills only '
-                             'the ones you have not set')
+                             'solvers, and the healers\' trial sweep. '
+                             'Clamped to [1, <logical CPUs available to this '
+                             'process>] — affinity- AND cpu-quota-aware; on '
+                             'hybrid CPUs that count is P-cores x SMT + '
+                             'E-cores. Default: half the machine maximum. An '
+                             'explicit N overrides the per-engine env vars '
+                             '(BUDA_PLAN/NUTS/SWEEP_THREADS, explicit '
+                             'semantics); the default sets only the '
+                             'BUDA_THREADS ceiling, which the engines\' auto '
+                             'paths honor with their small-work gates intact')
     args = parser.parse_args()
     max_threads = detect_max_threads()
     n_threads = resolve_threads(args.threads, max_threads)

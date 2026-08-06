@@ -984,7 +984,10 @@ class RipupMixin:
             stage == 'b',
             bool(getattr(self, '_rr_fast_trials', False)),
             set(self._dogleg_slot), base_disc, net_counts,
-            n_threads=int(os.environ.get("BUDA_SWEEP_THREADS", "0") or 0),
+            # BUDA_SWEEP_THREADS (explicit) wins; else the CLI's machine-wide
+            # governor BUDA_THREADS caps the pool; else 0 = hardware (C++).
+            n_threads=int(os.environ.get("BUDA_SWEEP_THREADS")
+                          or os.environ.get("BUDA_THREADS", "0") or 0),
             **dn_kwargs)
         self._rr_t_add('psweep', time.perf_counter() - t0)
         trials = 0
