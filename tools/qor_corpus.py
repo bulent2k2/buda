@@ -775,6 +775,13 @@ def discover_candidates(roots=CANDIDATE_ROOTS, corpus=None):
                     # (Measured: doc-validation run 12; third occurrence of
                     # the cross-drive relpath pathology in this tree.)
                     rel = path
+                # Normalize to forward slashes: corpus member names use '/',
+                # and on Windows BOTH relpath and the absolute fallback return
+                # backslashes -- without this, corpus members would never match
+                # (and be listed as their own candidates).  Round-1's fix
+                # stopped the ValueError but missed this half (measured:
+                # doc-validation run 13, both MSVC lanes).
+                rel = rel.replace(os.sep, "/")
                 if rel in member:
                     continue
                 if "run_detailed_nuts" in flow_tokens(path):

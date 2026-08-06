@@ -216,6 +216,22 @@ set_target_properties(buda PROPERTIES
     BUILD_RPATH   "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
+if(MINGW)
+    # Native CPython does not search PATH for an extension's DLL dependencies
+    # (Python >= 3.8), so a mingw-built buda_core.dll must not depend on the
+    # GCC runtime DLLs living in the MSYS2 tree.  Measured (doc-validation run
+    # 13): the UCRT64 build succeeds and the import dies with "Could not find
+    # module 'libbuda_core.dll' (or one of its dependencies)" -- the
+    # dependencies being libstdc++-6/libgcc_s_seh-1/libwinpthread-1 from
+    # /ucrt64/bin.  pybind11 already static-links the GCC runtime into ITS
+    # module targets on MinGW (visible as the .pyd size delta); mirror the
+    # same treatment onto the plain shared library they link against.
+    target_link_options(buda_core PRIVATE
+        -static-libgcc -static-libstdc++
+        "LINKER:-Bstatic,--whole-archive" "LINKER:-lwinpthread"
+        "LINKER:--no-whole-archive" "LINKER:-Bdynamic")
+endif()
+
 if(CYGWIN)
     # Cygwin ld auto-exports EVERY symbol of a DLL by default, and on the
     # pybind11 modules that trips a binutils pathology on lambda-heavy
