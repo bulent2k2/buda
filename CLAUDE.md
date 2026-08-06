@@ -19,7 +19,7 @@ The **Floorplanner** (`bin/fp`, `bin/bfp`) is a separate interactive GUI tool th
 
 ## Useful Docs
 - [User Guide](docs/USER_GUIDE.md) — Prerequisites and standard flow for novices.
-- [BUDA CLI Reference](docs/BUDA_CLI.md) — `buda` command-line invocation and flags (`--no-viz`, `--tag`, `--log`, `--verbose-conn`, `--ipc-verbose`).
+- [BUDA CLI Reference](docs/BUDA_CLI.md) — `buda` command-line invocation and flags (`--no-viz`, `--tag`, `--log`, `--threads` — one knob for the planner/NUTS/healer thread pools, default half the machine's logical CPUs, `--verbose-conn`, `--ipc-verbose`).
 - [BUDA Script Reference](docs/BUDA_SCRIPT_REFERENCE.md) — Detailed command documentation (index + pipeline overview; per-stage command pages live under `docs/script_reference/`).
 - [BDB Reference](docs/BDB_REFERENCE.md) — Physical design database: schema, `.buda` commands, Python API.
 - [BDB Test-Data Management](docs/internal/bdb_test_data.md) — Diffable `*.bdb.sql` fixtures, the copy-to-temp `bdb_input` test fixture, and the write-back/OA versioning roadmap.

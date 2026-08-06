@@ -64,7 +64,10 @@ textbook parallel map.
    clones pin `set_plan_threads(1)` (the move fan-out owns the cores), and
    `qor_corpus`'s sweep workers `setdefault(BUDA_PLAN_THREADS, "1")`
    (flow-level parallelism already saturates); a `-j 1` sweep keeps planner
-   parallelism and gets the single-flow speedup.
+   parallelism and gets the single-flow speedup.  The `buda --threads N`
+   CLI flag sets all three engine knobs at once (planner / NUTS layer
+   solvers / healer trial sweep), default half the machine's logical CPUs —
+   see docs/BUDA_CLI.md.
 
 ## Measured (4-core container, chip_topdown)
 

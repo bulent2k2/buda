@@ -481,6 +481,54 @@ def _enable_line_buffered_stdio():
             pass
 
 
+def detect_max_threads():
+    """The machine-dependent thread ceiling: the number of LOGICAL CPUs this
+    process may run on.  os.sched_getaffinity respects container/cgroup and
+    taskset limits, and on hybrid parts (performance cores with SMT +
+    efficiency cores) the logical count is exactly superscalar-cores x 2 +
+    low-power-cores — the accurate, automatic form of that estimate.  Falls
+    back to os.cpu_count() where affinity is unavailable (macOS/Windows)."""
+    try:
+        return max(1, len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        return max(1, os.cpu_count() or 1)
+
+
+def resolve_threads(requested, max_threads):
+    """The run's worker-thread count: an explicit --threads N is clamped to
+    [1, max_threads] (LOUD when clamped — a request outside the machine's
+    range is honored as closely as possible, never errored); flag absent
+    defaults to half the machine maximum (min 1)."""
+    if requested is None:
+        return max(1, max_threads // 2)
+    n = max(1, min(requested, max_threads))
+    if n != requested:
+        print(f"Warning: --threads {requested} clamped to {n} "
+              f"(this machine allows 1..{max_threads})")
+    return n
+
+
+# One knob, three engines: the parallel stages each read their own env var
+# (planner candidate scoring / NUTS per-layer solvers / the healers' trial
+# sweep), and --threads drives all of them.
+_THREAD_ENV_VARS = ("BUDA_PLAN_THREADS", "BUDA_NUTS_THREADS",
+                    "BUDA_SWEEP_THREADS")
+
+
+def apply_thread_env(n, explicit):
+    """Export the resolved count to every engine's env knob.  An EXPLICIT
+    --threads OVERRIDES the per-engine vars (one flag governs the run); the
+    flag-absent default only fills vars the user has not set, so per-engine
+    env overrides keep working without the flag.  Engine-internal safety
+    pins are unaffected either way (parallel_sweep's trial workers set their
+    private planners/engines to 1 thread directly — no nested pools)."""
+    for var in _THREAD_ENV_VARS:
+        if explicit:
+            os.environ[var] = str(n)
+        else:
+            os.environ.setdefault(var, str(n))
+
+
 def main():
     _enable_line_buffered_stdio()
     parser = argparse.ArgumentParser(
@@ -512,7 +560,23 @@ def main():
     parser.add_argument('--ipc-verbose', action='store_true',
                         help='surface buda_viz/def_viz IPC socket status chatter '
                              '(listening/connected/timer lines); off by default')
+    parser.add_argument('-j', '--threads', type=int, metavar='N',
+                        help='worker threads for the parallel pipeline stages: '
+                             'planner candidate scoring, NUTS per-layer '
+                             'solvers, and the healers\' trial sweep '
+                             '(BUDA_PLAN/NUTS/SWEEP_THREADS). Clamped to '
+                             '[1, <logical CPUs available to this process>] — '
+                             'on hybrid CPUs that count is P-cores x SMT + '
+                             'E-cores, cgroup/affinity-aware. Default: half '
+                             'the machine maximum. An explicit N overrides '
+                             'the per-engine env vars; the default fills only '
+                             'the ones you have not set')
     args = parser.parse_args()
+    max_threads = detect_max_threads()
+    n_threads = resolve_threads(args.threads, max_threads)
+    apply_thread_env(n_threads, explicit=args.threads is not None)
+    print(f"[threads] {n_threads} of {max_threads} logical CPUs "
+          f"({'--threads' if args.threads is not None else 'default: max/2'})")
     session = BudaSession()
     session.no_viz = args.no_viz
     session.verbose_conn = args.verbose_conn
