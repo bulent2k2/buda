@@ -276,6 +276,49 @@ arithmetic simplest; which keeps R12 byte-identity trivially true; and which
 degrades most gracefully when a rule is only *partially* realizable on a
 layer.
 
+### 5.1 Path comparison (2026-08-06, pre-brainstorm assessment)
+
+Cells graded ●●● (best) to ● (worst) against the as-built constraints;
+reasoning below the table.
+
+| | (A) Slot-quantized consumption | (B) Pattern-declared classes | (C) Continuous packing | (D) Hybrid A+B |
+|---|---|---|---|---|
+| **Ease of use** | ●●● declare + attach; works on any existing pattern | ● every NDR layer needs a pattern redesign; supply fixed at pattern-design time | ●●● declare + attach; exact realization | ●●● works everywhere, exploits tuned patterns where present |
+| **Runtime impact** | ●● supply queries become run-of-k counting (slightly heavier walker); demand still integer | ●●● essentially today's cost — one bit one slot, filter by class; but planner tracks parallel supplies per band | ● continuous twin needed for every count/supply query; planner capacity goes real-valued | ●● A's cost + a credit check per shield requirement |
+| **Code complexity** | ●● every supply query + admission generalizes, but stays in the slot paradigm | ●● solver nearly untouched; complexity moves to planner bookkeeping (two supplies per band) and pattern validation | ● two placement geometries in one solver; sharing exemption, bottom-up copies, congruence all reworked | ● A's changes PLUS the credit path kept lockstep with it — two code paths, one arithmetic |
+| **R4 group-demand fit** | ●●● group = a window of consumed slots; integer, naturally group-scoped | ●● trivial per class, but default + NDR classes = parallel supplies the charging must not mix | ● real-valued footprints; the single-sourced rounding discipline gets delicate | ●● A's, with credit entering the same group conversion everywhere (R5a already forces the shared predicate) |
+| **Realization fidelity** | ●● quantized: 1.5× width pays 2 slots; spacing rounds up to slot pitch (conservative, never illegal) | ●●● exact — the pattern IS the contract | ●●● exact | ●● A's quantization, minus redundant shields where the pattern provides them |
+| **Invariant risk (R12/R13)** | ●● no pattern change → phase math + byte-identity easy; wrinkle: a k-slot wire's centre sits between slot centres (abstract_pos anchor, pair-align, via crossings) | ●● byte-identity holds only if patterns are untouched — declaring NDR slots changes DEFAULT supply too, and unused NDR slots are stranded capacity | ● touches the most assumptions (anchors, congruence, sharing exemption) — hardest to prove unchanged | ●● A's risks + credit/audit consistency (mitigated by R5a's shared-predicate requirement) |
+| **Partial-realizability degradation (R3)** | ●●● per-layer run availability is computable arithmetic — LOUD and precise | ●● trivially LOUD (no matching slots = cannot host) but static: no demand-driven flexibility | ●● flexible in principle, hard to state the failure arithmetic crisply | ●●● best: falls back to pure A wherever the pattern offers nothing |
+
+Reading the table:
+
+- **The real contest is A vs D.**  C buys exact fidelity at the cost of the
+  most invariants — it is the only path that breaks the slot paradigm the
+  entire supply/admission arithmetic is built on, exactly where R4 says not
+  to take risk.  B alone fails the ease-of-use bar (every layer needs
+  pattern surgery) and quietly taxes default nets: an NDR slot reserved in
+  the pattern is stranded supply whenever no NDR net uses that band.
+- **D is A plus an optimization, not a different architecture.**  Its extra
+  cost is precisely the "two paths kept lockstep" burden — but R5a's
+  net-identity predicate must exist for the audit anyway, so the credit
+  path's hardest piece is already mandatory.  D's marginal complexity over
+  A is smaller than the row suggests *if* credit is implemented as a term
+  inside the one group-conversion function, never a second conversion.
+- **A's sharpest hidden cost is the off-centre wire**: a 2-slot wire's
+  centre sits between track centres, which brushes `abstract_pos`
+  anchoring, pair-align partnering, and per-bit via crossings.  None are
+  correctness walls, but each is a place where "one bit = one slot centre"
+  is baked in and needs a footprint-aware generalization.
+- **B survives as D's ingredient**: pattern-declared resources get
+  *credited*, never *required*.
+
+Pre-brainstorm leaning (to be confirmed or overturned in the design
+conversation): **start from A, and shape the group-conversion API so D's
+crediting is a later additive phase** — phase 1 ships A pure (byte-identity
+trivial, shields always emitted), phase 2 adds R5a crediting once the audit
+predicate exists.
+
 ## 6. Test vehicles & acceptance
 
 - A small flat vehicle (comprehensive_demo-scale) with one shielded
