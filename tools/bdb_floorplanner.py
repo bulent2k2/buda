@@ -44,7 +44,27 @@ import matplotlib
 try:
     import tkinter as tk
     from tkinter import filedialog, messagebox, simpledialog, ttk
-    matplotlib.use("TkAgg")
+    # Select TkAgg for the GUI — but only when the caller has NOT already
+    # chosen a backend explicitly (MPLBACKEND or a prior matplotlib.use).
+    # matplotlib.use() is process-GLOBAL, and the tkinter guard below only
+    # covers tkinter being ABSENT: wherever tkinter exists (every macOS box,
+    # any Linux with python3-tk) an unconditional use("TkAgg") dragged a
+    # headless caller onto Tk.  In the test suite that meant importing this
+    # module mid-run flipped the session's Agg to TkAgg, after which
+    # viz_window's _is_headless_backend() no longer suppressed raise_window /
+    # set_icon — so a later BudaVisualizer/TopologyExplorer opened a REAL
+    # window and ran `osascript … set frontmost`, stealing focus.  Invisible
+    # on headless CI (no tkinter -> except branch), visible on any dev box.
+    # Same policy, and the same rationale, as src/buda_viz.py's darwin block.
+    try:
+        _backend_selected = matplotlib.get_backend(auto_select=False) is not None
+    except TypeError:                   # matplotlib < 3.9: raw rcParams peek
+        _backend_selected = isinstance(
+            dict.__getitem__(matplotlib.rcParams, 'backend'), str)
+    if not _backend_selected:
+        matplotlib.use("TkAgg")
+    # Importing the backend module does NOT switch the global backend, so the
+    # widget classes (and _TK_AVAILABLE) stay accurate either way.
     from matplotlib.backends.backend_tkagg import (
         FigureCanvasTkAgg, NavigationToolbar2Tk)
     _TK_AVAILABLE = True
