@@ -45,3 +45,6 @@ graphify-out
 docs/.obsidian/
 # Worktree-local symlink to the main checkout build/ (for pytest/uvicorn).
 /build
+
+# Windows/venv workflow (docs/WINDOWS_BUILD.md creates it in-repo)
+.venv/

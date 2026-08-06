@@ -1,193 +1,138 @@
 # BUDA Windows Requirements
 
-This document describes the software requirements for building and testing BUDA
-in a native Windows environment with MSVC. It documents the current project
-state; some Windows support gaps are still called out explicitly.
+Software requirements for building and testing BUDA natively on Windows with
+MSVC.
 
-For the cross-platform dependency reference (required / optional / bundled,
-versions, purposes) see [build_test_dependencies.md](build_test_dependencies.md);
-this page is the Windows-specific companion.
+**This page is validated, not aspirational.** Every claim marked *measured* was
+executed on a real Windows machine (GitHub `windows-2022` runner: Windows
+Server 2022, Visual Studio 2022 Enterprise, MSVC 19.44, CMake 4.x, Python
+3.13.14 x64) by `.github/workflows/windows-validate.yml`, which builds through
+**both** documented paths (Ninja and the Visual Studio generator), imports the
+extensions, runs the fast test tier, and executes a `.buda` flow end to end.
+Re-validate any time: *Actions → Windows validation → Run workflow*. Last
+green: run 9, 2026-08-06.
+
+For the cross-platform dependency reference see
+[build_test_dependencies.md](build_test_dependencies.md); this page is the
+Windows-specific companion. The build steps live in
+[WINDOWS_BUILD.md](WINDOWS_BUILD.md).
 
 ## Target Environment
 
-The recommended native Windows environment is:
+- Windows 10 or 11 (validated on Server 2022), 64-bit.
+- Visual Studio 2022 (Build Tools or full IDE): `Desktop development with C++`
+  workload, MSVC v143, a Windows 10/11 SDK.
+- CMake ≥ 3.15 (the project's `cmake_minimum_required`).
+- 64-bit Python. **3.13 is the validated version**; CI elsewhere runs 3.11.
+  The interpreter, compiler, and extension must all be x64.
+- Git for Windows.
 
-- Windows 10 or Windows 11, 64-bit.
-- Visual Studio 2022 Build Tools or full Visual Studio 2022.
-- Native MSVC compiler toolchain, not MinGW.
-- 64-bit Python matching the selected build architecture.
-- PowerShell for command examples.
+WSL, MSYS2, and MinGW are not the target described here (WSL simply follows the
+Linux docs).
 
-WSL, MSYS2, Git Bash, and MinGW may be useful development environments, but they
-are not the target described here.
-
-## Required Software
-
-### Visual Studio / MSVC
-
-Install Visual Studio 2022 Build Tools or full Visual Studio 2022 with:
-
-- `Desktop development with C++` workload.
-- MSVC v143 compiler toolset.
-- Windows 10 or Windows 11 SDK.
-- C++ CMake tools for Windows, or install CMake separately.
-
-BUDA builds a C++20 Python extension module through CMake and pybind11, so the
-Python interpreter, compiler, and generated extension must all use the same
-architecture. Use 64-bit Python with the x64 MSVC build.
-
-### CMake
-
-BUDA requires CMake 3.15 or newer:
-
-```text
-cmake_minimum_required(VERSION 3.15)
-```
-
-CMake 3.24 or newer is recommended for a smoother Python and Visual Studio
-generator experience.
-
-### Python
-
-Use a 64-bit Python installation. Python 3.10 through 3.13 are reasonable
-targets for the current codebase.
-
-Recommended options:
-
-- python.org CPython x64.
-- Miniforge or Conda x64, if Tk/Tcl is installed and working.
-
-The project currently assumes Python is available for:
-
-- Locating pybind11 during CMake configure.
-- Building the `buda` Python extension.
-- Running the BUDA CLI in `src/buda_cli.py`.
-- Running pytest and pytest-bdd tests.
-- Running GUI tools based on tkinter and Matplotlib.
-
-### Python Packages
-
-Install these packages in the active Python environment:
+## Required Python Packages
 
 ```powershell
 python -m pip install pybind11 pytest pytest-bdd matplotlib numpy
+python -m pip install -r src/web/requirements.txt
 ```
 
-Package purposes:
+`src/web/requirements.txt` (fastapi/uvicorn/httpx) is **not optional for a full
+test run**: without it pytest silently skips the 28 web-server/WebSocket/
+checkpoint/edit tests while still reporting success — the exact silent-shrink
+failure mode the Linux CI grew a guard against (`docs/internal/ci.md`).
 
-- `pybind11`: C++/Python extension binding and CMake integration.
-- `pytest`: Python test runner.
-- `pytest-bdd`: Gherkin/Cucumber-style behavior tests.
-- `matplotlib`: visualization and GUI plotting.
-- `numpy`: array math for the visualizer (and a matplotlib dependency).
+The standard-library `sqlite3` and `tkinter` modules are used; python.org
+Windows installers include both.
 
-The Python standard library modules `sqlite3` and `tkinter` are also used.
-`sqlite3` is normally included with CPython. `tkinter` requires a Python build
-with Tcl/Tk support.
+## Required Environment: `PYTHONUTF8=1`
 
-### Optional pytest-xdist (parallel tests)
-
-`pytest-xdist` parallelizes the heavier test tiers (integration/pipeline tests):
+Treat UTF-8 mode as a requirement, not a nicety. The engine's log lines use
+`Δ`, `→`, `×` and friends, and Python on Windows still defaults stdio to the
+legacy ANSI code page. *Measured:* without it, **87** fast-tier tests fail,
+almost all as
+`UnicodeEncodeError('charmap', "[NUTS] books-vs-metal: ... (worst Δ=373)")`;
+with it, those 87 drop to the 4 genuinely POSIX-only cases listed below.
 
 ```powershell
-python -m pip install pytest-xdist
+$env:PYTHONUTF8 = '1'          # current session
+setx PYTHONUTF8 1              # persistently, new shells
 ```
 
-The `bb` wrapper that enables this automatically is a Bash script (see the
-portability note below), so on native Windows run pytest directly with the same
-flags:
+## Optional
 
-```powershell
-python -m pytest -m "not slow" -n auto --dist loadfile
-```
+- **pytest-xdist** — parallel test runs (`python -m pip install pytest-xdist`).
+- **Ninja** — the simplest single-configuration build
+  (`python -m pip install ninja`).
+- **Node.js** — executes the JS front end's display geometry in
+  `test_web_js_port.py`; without node those tests skip.
+- **A Scala 3 toolchain** — executes the Scala.js port's logic in
+  `test_web_scala_port.py` (optional by design: `BUDA_SCALA_PORT_TEST`
+  unset/`auto` = run if found, `1` = required, `0` = off). Its classpath
+  handling uses `os.pathsep`, so a Windows `BUDA_SCALA_CP` works. Provision
+  without sbt: `mvn dependency:get -Dartifact=org.scala-lang:scala3-compiler_3:3.3.4`.
 
-`--dist loadfile` keeps each file on one worker so tests that share a fixture
-path can't race across workers. See
-[internal/test/parallelism.md](internal/test/parallelism.md).
+## Bundled
 
-### Optional Ninja
+SQLite is vendored (`src/sqlite3.c/h`) — no system SQLite. *Measured:* it
+compiles clean under MSVC. There is no external EDA-library dependency.
 
-Ninja is optional but recommended for a simple single-configuration build:
+## CMake Options on Windows
 
-```powershell
-python -m pip install ninja
-```
+| option | Windows behavior |
+|---|---|
+| (optimization) | `/O2 /fp:precise` — `/fp:precise` is the FP-determinism twin of the GCC side's `-ffp-contract=off` |
+| `BUDA_ARCH` | **not applicable** — it drives `-march` on the non-MSVC branch only |
+| `BUDA_ASSERTS` (default ON) | keeps `assert()` active via `/UNDEBUG`; the resulting per-file warning `D9025: overriding '/DNDEBUG' with '/UNDEBUG'` is **expected and benign** |
+| `BUDA_PROFILE` | supported: `/Z7` + `/DEBUG` (embedded debug info) |
+| `BUDA_SANITIZE` | **hard-errors on MSVC by design** (GCC-only; MSVC has no ASAN shared-module story) |
 
-You can also install Ninja through Visual Studio, Chocolatey, Scoop, or another
-Windows package manager.
+## Windows-Specific Facts About This Codebase
 
-### Git
+All discovered by the validation runs; each is now handled in-tree.
 
-Git is required to clone and manage the source tree. Git for Windows is
-sufficient.
+- **`buda_core` symbol export.** ELF exports everything by default; a Windows
+  DLL exports nothing, and MSVC emits no import `.lib` for an export-less DLL.
+  `CMakeLists.txt` sets `WINDOWS_EXPORT_ALL_SYMBOLS` on `buda_core` — without
+  it the extension modules fail to link (`LNK1181: cannot open input file
+  'buda_core.lib'`, *measured*).
+- **DLL search.** There is no RPATH on Windows; the import works because
+  `buda_core.dll` and the `.pyd` files are emitted into the **same directory**
+  (both generators do this, *measured*), and CPython searches an extension's
+  own directory for its DLL dependencies.
+- **`setvbuf` guard.** The `buda` module's stdout line-buffering
+  (issue #31) is `#ifndef _WIN32`: `_IOLBF` is unsupported by the MSVC CRT and
+  a size of 0 is an invalid parameter that fast-fails the process
+  (`0xC0000409`) during import, *measured* — see `src/bindings.cpp`.
+- **No inter-process floorplanner lock.** `fcntl` does not exist on Windows;
+  `tools/floorplanner_commands.py` falls back to a no-op lock (its documented
+  degraded mode). **Concurrent floorplanner sessions on one BDB are NOT
+  mutually excluded on Windows.** Real locking would use `msvcrt.locking`;
+  not implemented.
+- **Known POSIX-only tests** (skip on Windows, with measured reasons in each
+  marker): the file-mode round-trip in `test_bdb_edit_bus`, the stdout
+  line-buffering probe in `test_log_ordering`, and the `SIGKILL` worker-crash
+  recovery in `test_qor_sweep`. Everything else in the fast tier passes,
+  *measured*.
+- **Visualization IPC is Unix-only.** `tools/viz_ipc.py` uses `AF_UNIX` under
+  `/tmp`; CPython does not expose `AF_UNIX` on Windows. Core build, tests,
+  CLI flows and the web backend do not depend on it.
 
-## Bundled Dependencies
+## The `python3` Lookup, Precisely
 
-SQLite is vendored in the repository:
+`CMakeLists.txt` locates pybind11 by running `python3` — but the failure is
+soft (`ERROR_QUIET`, then `find_package(pybind11)` with `PYBIND11_FINDPYTHON`).
+*Measured:* on an environment whose Python provides a `python3.exe` shim
+(GitHub's setup-python, conda), configure just works — no `-Dpybind11_DIR`
+needed. A python.org installer provides no `python3.exe`, and worse, Windows
+ships a `python3` App-Execution-Alias that opens the Microsoft Store; if
+configure cannot find pybind11, pass
+`-Dpybind11_DIR="$(python -m pybind11 --cmakedir)"` (see WINDOWS_BUILD.md
+troubleshooting).
 
-- `src/sqlite3.c`
-- `src/sqlite3.h`
+## Bash Wrappers Do Not Apply
 
-No external SQLite development package is required for the core build.
-
-## Current Windows Portability Notes
-
-These are the main known issues to account for when building natively on
-Windows.
-
-### `python3` Lookup
-
-`CMakeLists.txt` currently locates pybind11 by running `python3`. Native Windows
-installations commonly provide `python` or the `py` launcher instead of
-`python3`.
-
-If configure fails with `python3` not found, either:
-
-- Use an environment where `python3` resolves to the desired interpreter.
-- Pass `pybind11_DIR` manually.
-- Update the CMake logic to use CMake's discovered Python interpreter.
-
-### Bash Build Wrapper
-
-The `bb` build/test wrapper is a Bash script. It uses Unix tools and shell
-features including:
-
-- `make`
-- `sysctl`
-- process substitution
-- `tee`
-- `awk`
-
-It is not a native PowerShell or CMD build script. Use direct CMake commands on
-Windows until a native `bb.ps1` wrapper exists.
-
-### Bash Runtime Wrapper
-
-The top-level `buda` wrapper is also a Bash script and calls `python3`. On native
-Windows, run `src/buda_cli.py` directly with Python or use a future PowerShell
-wrapper.
-
-### Extension Output Directory
-
-Ninja usually places the compiled `buda` extension under `build`. Visual Studio
-generators are multi-configuration and usually place it under `build\Release`
-for release builds.
-
-Set `PYTHONPATH` accordingly before running tests or scripts.
-
-### GUI Requirements
-
-GUI tools use tkinter and Matplotlib's `TkAgg` backend. If GUI startup fails,
-verify that:
-
-- `python -c "import tkinter"` succeeds.
-- `python -c "import matplotlib; matplotlib.use('TkAgg')"` succeeds.
-- The active Python environment has Tcl/Tk installed.
-
-### Visualization IPC
-
-`tools/viz_ipc.py` currently uses a Unix-style socket path under `/tmp`. This is
-not ideal for native Windows. Core build and non-GUI tests may still work, but
-interactive visualization IPC should be treated as a portability area until it
-is converted to a Windows-friendly transport or path strategy.
-
+The launcher/build wrappers live in **`bin/`** (`bin/bb`, `bin/buda`,
+`bin/fp`, `bin/activate`, …) and are Bash scripts. On native Windows use the
+explicit `cmake`/`pytest`/`python` commands in
+[WINDOWS_BUILD.md](WINDOWS_BUILD.md); there are no `.ps1` equivalents yet.

@@ -1,33 +1,30 @@
 # Building BUDA On Windows
 
-This guide shows how to configure, build, and test BUDA in a native Windows
-environment with MSVC. See `docs/WINDOWS_REQ.md` for software requirements and
-known portability notes.
+Configure, build, and test BUDA natively on Windows with MSVC. Requirements
+and Windows-specific background: [WINDOWS_REQ.md](WINDOWS_REQ.md).
 
-The commands below assume PowerShell and a 64-bit Python installation.
+**Every command below is executed on a real Windows machine** by
+`.github/workflows/windows-validate.yml` (windows-2022 runner, VS 2022, MSVC
+19.44, Python 3.13 x64), through both build paths, the import, the fast test
+tier, and a `.buda` flow. Re-validate any time: *Actions → Windows validation
+→ Run workflow*. Last green: run 9, 2026-08-06 — build ≈ 2m30s, fast tier
+≈ 60s per path on a 4-core runner.
 
 ## 1. Open A Developer Shell
 
-Use one of these shells:
+Any shell that can find MSVC and the Windows SDK:
 
-- `x64 Native Tools Command Prompt for VS 2022`
-- `Developer PowerShell for VS 2022`
-- PowerShell after loading the Visual Studio developer environment
+- `x64 Native Tools Command Prompt for VS 2022`, or
+- `Developer PowerShell for VS 2022`, or
+- a plain shell after `vcvars64.bat` (the validation workflow does this:
+  locate VS with `vswhere.exe`, then `call ...\VC\Auxiliary\Build\vcvars64.bat`).
 
-The shell must be able to find the MSVC compiler and Windows SDK.
+The **Visual Studio generator path (section 4) needs no developer shell** —
+CMake locates MSVC itself (measured). Ninja does need one.
 
-Verify the tools:
+Verify: `cl`, `cmake --version`, `python --version`.
 
-```powershell
-cl
-cmake --version
-python --version
-```
-
-If `python` is not available but the Python launcher is installed, use `py`
-where appropriate.
-
-## 2. Create A Python Environment
+## 2. Python Environment
 
 From the repository root:
 
@@ -36,172 +33,154 @@ py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 python -m pip install --upgrade pip
-python -m pip install pybind11 pytest pytest-bdd matplotlib numpy
-python -m pip install pytest-xdist          # optional: parallel test runs
+python -m pip install pybind11 pytest pytest-bdd matplotlib numpy ninja
+python -m pip install -r src/web/requirements.txt   # NOT optional for a full test run
+python -m pip install pytest-xdist                  # optional: parallel tests
+
+$env:PYTHONUTF8 = '1'    # effectively REQUIRED — see WINDOWS_REQ.md (measured: 87 test failures without it)
 ```
 
-If Python 3.13 is not installed, replace `py -3.13` with the installed 64-bit
-Python version, for example `py -3.12` or `python`.
-
-(See [build_test_dependencies.md](build_test_dependencies.md) for the full
-required / optional / bundled dependency reference.)
-
-Confirm tkinter is available if you plan to use the GUI tools:
+(`.venv/` is git-ignored.) If you plan to use the GUI tools, confirm Tk:
 
 ```powershell
 python -c "import tkinter; import matplotlib; matplotlib.use('TkAgg')"
 ```
 
-## 3. Build With Ninja
-
-Ninja is the recommended Windows path for a simple single-configuration build.
-
-Install Ninja if needed:
-
-```powershell
-python -m pip install ninja
-```
-
-Configure and build:
+## 3. Build With Ninja  *(recommended: single-config, simplest paths)*
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-Set `PYTHONPATH` so Python can find the compiled extension and BUDA scripts:
+Everything lands directly under `build\` (measured):
 
-```powershell
-$env:PYTHONPATH = "$PWD\build;$PWD\src;$PWD\tools;$env:PYTHONPATH"
+```text
+build\buda_core.dll
+build\buda_db.cp313-win_amd64.pyd
+build\buda.cp313-win_amd64.pyd
 ```
 
-Run tests (the fast tier; add `-m "not slow"` for the mid tier, `-o addopts=""`
-for everything):
+The DLL and the `.pyd`s must stay co-located — that same-directory layout is
+what lets the import find `buda_core.dll` (Windows has no RPATH).
+
+Run the fast test tier — **no PYTHONPATH needed**: `pytest.ini` already puts
+`build` and `src` on the path for this layout:
 
 ```powershell
-pytest -q
-pytest -q -m "not slow" -n auto --dist loadfile    # mid tier, parallel (needs pytest-xdist)
+python -m pytest -q                                   # fast tier
+python -m pytest -q -m "not slow" -n auto --dist loadfile   # + mid tier, parallel
+python -m pytest -q -o addopts=""                     # everything incl. slow
 ```
 
-Run a BUDA script:
+Run a `.buda` flow (here PYTHONPATH **is** needed — only pytest reads
+`pytest.ini`):
 
 ```powershell
-python src\buda_cli.py flow\four_blocks.buda
+$env:PYTHONPATH = "$PWD\build;$PWD\src;$PWD\tools"
+python src\buda_cli.py --no-viz flow\four_blocks.buda
 ```
 
-## 4. Build With Visual Studio Generator
+`--no-viz` (`-nv`) suppresses the interactive matplotlib window —
+`four_blocks.buda` ends in a `visualize` command, so without the flag this
+opens a GUI.
 
-Use this path if you prefer MSBuild or a Visual Studio solution.
-
-Configure and build:
+## 4. Build With The Visual Studio Generator
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
 
-Visual Studio generators are multi-configuration, so the compiled extension is
-usually under `build\Release`. Set `PYTHONPATH` accordingly:
+Multi-config: artifacts land under `build\Release\` (measured), again
+co-located. Here `PYTHONPATH` is needed for **everything**, tests included —
+`pytest.ini` only covers the single-config `build` layout:
 
 ```powershell
-$env:PYTHONPATH = "$PWD\build\Release;$PWD\build;$PWD\src;$PWD\tools;$env:PYTHONPATH"
+$env:PYTHONPATH = "$PWD\build\Release;$PWD\build;$PWD\src;$PWD\tools"
+python -m pytest -q
+python src\buda_cli.py --no-viz flow\four_blocks.buda
 ```
 
-Run tests (the fast tier; add `-m "not slow"` for the mid tier, `-o addopts=""`
-for everything):
+## 5. What To Expect From The Test Tier
 
-```powershell
-pytest -q
-pytest -q -m "not slow" -n auto --dist loadfile    # mid tier, parallel (needs pytest-xdist)
-```
+Measured on run 8/9 of the validation: the fast tier passes (~1780 tests, 35
+xfailed) with a handful of **named POSIX-only skips** — file-mode round-trip
+(`test_bdb_edit_bus`), the stdout line-buffering probe (`test_log_ordering`),
+and `SIGKILL` crash-recovery (`test_qor_sweep`); each marker states its
+measured reason. If you see *many* failures instead, check `PYTHONUTF8` first
+(section 2).
 
-Run a BUDA script:
+## 6. Troubleshooting
 
-```powershell
-python src\buda_cli.py flow\four_blocks.buda
-```
+Every entry below was actually hit during validation, in this order.
 
-## 5. Troubleshooting
+### `LNK1181: cannot open input file 'buda_core.lib'`
 
-### CMake Cannot Find `python3`
+You are building a checkout that predates the `WINDOWS_EXPORT_ALL_SYMBOLS`
+fix in `CMakeLists.txt`. A Windows DLL exports nothing by default and MSVC
+emits no import library for an export-less DLL. Update, or apply
+`set_target_properties(buda_core PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)`.
 
-The current CMake configuration locates pybind11 by invoking `python3`. Native
-Windows Python installs often expose `python` or `py`, not `python3`.
+### `import buda` dies with exit code `-1073740791` (0xC0000409), no output
 
-Workarounds:
+That code is `__fastfail`/`abort` from the CRT — **not** a Python exception:
+nothing is catchable, `faulthandler` prints nothing, and the process's
+*buffered stdout/stderr is discarded*, which can make earlier, already-
+successful output vanish too and misleadingly implicate the shell. Debug such
+crashes with `python -u` and per-line flushes.
 
-```powershell
-python -m pybind11 --cmakedir
-```
+On old checkouts the cause was the module init's
+`setvbuf(stdout, nullptr, _IOLBF, 0)` — `_IOLBF` is unsupported by the MSVC
+CRT and size 0 is an invalid parameter, which the release CRT punishes with
+exactly this fast-fail. Guarded `#ifndef _WIN32` since the fix; see
+`src/bindings.cpp`.
 
-Then pass the reported directory to CMake:
+### `UnicodeEncodeError('charmap', ...)` in tests or flows
 
-```powershell
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -Dpybind11_DIR="C:\path\to\pybind11\share\cmake\pybind11"
-```
-
-A future CMake update should replace the hardcoded `python3` lookup with
-CMake's discovered Python interpreter.
-
-### CMake Cannot Find pybind11
-
-Make sure pybind11 is installed in the active Python environment:
-
-```powershell
-python -m pip show pybind11
-python -m pybind11 --cmakedir
-```
-
-If needed, pass `-Dpybind11_DIR=...` using the directory printed by
-`python -m pybind11 --cmakedir`.
+The engine logs `Δ`/`→`/`×`; Windows Python defaults stdio to the ANSI code
+page. Set `PYTHONUTF8=1` (measured: this alone was 87 → 4 test failures).
 
 ### `ModuleNotFoundError: No module named 'buda'`
 
-Python cannot find the compiled extension. Check which generator you used:
+The compiled extension is not on the path *of the process that needs it*:
 
-- Ninja: include `build` in `PYTHONPATH`.
-- Visual Studio: include `build\Release` and `build` in `PYTHONPATH`.
+- Ninja layout: `build` (pytest gets it free via `pytest.ini`; anything else
+  needs `PYTHONPATH`).
+- VS layout: `build\Release` **and** `build`, always via `PYTHONPATH`.
+- If your own code spawns Python subprocesses, **prepend** to the inherited
+  `PYTHONPATH` with `os.pathsep` rather than replacing it — replacing it with
+  a hardcoded `build` orphaned a subprocess under the VS layout (measured;
+  see `test_audit3.py` for the pattern).
 
-Examples:
+### Warning spam: `D9025: overriding '/DNDEBUG' with '/UNDEBUG'`
+
+Expected and benign — `BUDA_ASSERTS` (default ON) keeps `assert()` active
+over the Release configuration. One warning per translation unit.
+
+### CMake cannot find pybind11 / `python3`
+
+Configure normally just works with pip-installed pybind11 (measured — the
+`python3` pre-lookup fails soft). If your environment has no `python3.exe`
+(python.org installs; beware the Microsoft-Store `python3` alias), pass the
+directory explicitly:
 
 ```powershell
-$env:PYTHONPATH = "$PWD\build;$PWD\src;$PWD\tools;$env:PYTHONPATH"
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+      -Dpybind11_DIR="$(python -m pybind11 --cmakedir)"
 ```
 
-```powershell
-$env:PYTHONPATH = "$PWD\build\Release;$PWD\build;$PWD\src;$PWD\tools;$env:PYTHONPATH"
-```
+### tkinter / TkAgg fails
 
-### tkinter Or TkAgg Fails
+`python -c "import tkinter"` and
+`python -c "import matplotlib; matplotlib.use('TkAgg')"` must both succeed;
+repair Tcl/Tk in the active Python (with conda: install `tk`).
 
-The GUI tools require tkinter and Matplotlib's `TkAgg` backend.
+### Architecture mismatch
 
-Check the active Python environment:
+x64 everywhere: x64 developer shell, `-A x64`, 64-bit Python. Mixing x86/x64
+yields configure, link, or import failures.
 
-```powershell
-python -c "import tkinter"
-python -c "import matplotlib; matplotlib.use('TkAgg')"
-```
+### `bb` / `buda` "not recognized"
 
-If either command fails, install or repair Tcl/Tk support for the selected
-Python distribution. With Conda, this may require installing the `tk` package in
-the active environment.
-
-### Architecture Mismatch
-
-Use x64 consistently:
-
-- x64 Visual Studio developer shell.
-- `-A x64` for Visual Studio generator.
-- 64-bit Python.
-
-Mixing x86 and x64 tools can produce configure, link, or import failures.
-
-### `bb` Or `buda` Does Not Run
-
-The top-level `bb` and `buda` wrappers are Bash scripts. They are not native
-PowerShell scripts.
-
-On Windows, use the explicit CMake, pytest, and Python commands in this guide
-until native wrappers are added.
-
+They are Bash scripts in `bin/`. Use the explicit commands in this guide.

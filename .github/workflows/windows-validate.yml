@@ -18,11 +18,10 @@ name: Windows validation
 #     silently skip (the exact hole the Linux gate's skip-guard exists for).
 
 on:
-  # Manual, from whatever ref you point it at.
+  # Manual only.  Nine iteration runs took the docs from untested intention to
+  # a green end-to-end pipeline; from here this is an on-demand re-validation
+  # vehicle for docs/WINDOWS_REQ.md + docs/WINDOWS_BUILD.md, not a gate.
   workflow_dispatch:
-  # And on pushes to the doc-refresh branch while the docs are being iterated.
-  push:
-    branches: ['claude/windows-docs-refresh']
 
 concurrency:
   group: windows-validate-${{ github.ref }}
