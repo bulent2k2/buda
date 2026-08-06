@@ -6,6 +6,68 @@
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 BUILD_DIR="$PROJECT_ROOT/build"
 
+# Options that take a VALUE which is NOT a path: the next token must pass
+# through verbatim — never taken as the script, never anchored to $PWD.
+# (`buda -j 4 flow/x.buda` once rewrote the 4 to "$PWD/4" and argparse died
+# with "invalid int value"; attached forms like -j4/--threads=4 were fine.)
+is_value_opt() {
+  case "$1" in
+    -t|--tag|-j|--threads) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Scan for the first non-option arg (the script) and the --no-viz flag,
+# skipping every value-taking option's value.  Sets SCRIPT_ARG / NOVIZ.
+scan_script_arg() {
+  SCRIPT_ARG=""; NOVIZ=""
+  local skip="" a
+  for a in "$@"; do
+    if [ -n "$skip" ]; then skip=""; continue; fi
+    if is_value_opt "$a"; then skip=1; continue; fi
+    case "$a" in
+      -nv|--no-viz) NOVIZ=1 ;;
+      -*) ;;
+      *) [ -z "$SCRIPT_ARG" ] && SCRIPT_ARG="$a" ;;
+    esac
+  done
+}
+
+# `open` launches from a different cwd, so anchor every relative path arg to
+# THIS cwd — including the `.buda`-less script form the CLI would infer
+# (`buda demo/foo` → demo/foo.buda).  Absolute paths, options, and the values
+# of non-path options pass through verbatim.  Sets ARGS.
+anchor_args() {
+  ARGS=()
+  local skip="" a
+  for a in "$@"; do
+    if [ -n "$skip" ]; then ARGS+=("$a"); skip=""; continue; fi
+    if is_value_opt "$a"; then ARGS+=("$a"); skip=1; continue; fi
+    if [ -e "$a" ]; then
+      ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" )")
+    elif [ -e "$a.buda" ]; then
+      ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" ).buda")
+    else
+      case "$a" in
+        -*|/*) ARGS+=("$a") ;;         # option or already-absolute
+        *)     ARGS+=("$PWD/$a") ;;     # relative (e.g. missing file): anchor
+      esac
+    fi
+  done
+}
+
+# Test hook (any OS): print what the macOS relaunch would compute — the
+# detected script arg, then one anchored arg per line — and exit.  Lets the
+# arg-handling logic above be unit-tested on Linux CI, where the Darwin
+# branch itself cannot run.
+if [ -n "$BUDA_TEST_ANCHOR" ]; then
+  scan_script_arg "$@"
+  echo "SCRIPT_ARG=$SCRIPT_ARG"
+  anchor_args "$@"
+  printf '%s\n' "${ARGS[@]}"
+  exit 0
+fi
+
 # macOS: relaunch through a per-cell .app so the Dock tile shows the CELL name
 # (the .buda basename) and icon — when you run many cells, that makes the right
 # window easy to pick out. LaunchServices sets that identity at launch, while
@@ -24,17 +86,7 @@ if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] \
    && open --help 2>&1 | grep -q -- '--stdout'; then
   # First non-option arg is the script; skip the reroute for --no-viz batch runs
   # (no window to name) and when no script is given (let the CLI print help).
-  SCRIPT_ARG=""; NOVIZ=""; SKIP=""
-  for a in "$@"; do
-    # The token after -t/--tag is the tag VALUE, not the script — skip it.
-    if [ -n "$SKIP" ]; then SKIP=""; continue; fi
-    case "$a" in
-      -nv|--no-viz) NOVIZ=1 ;;
-      -t|--tag) SKIP=1 ;;
-      -*) ;;
-      *) [ -z "$SCRIPT_ARG" ] && SCRIPT_ARG="$a" ;;
-    esac
-  done
+  scan_script_arg "$@"
   if [ -n "$SCRIPT_ARG" ] && [ -z "$NOVIZ" ]; then
     CELL="$( basename "$SCRIPT_ARG" )"; CELL="${CELL%.buda}"
     CELL_APP="${TMPDIR:-/tmp}/buda_cellapps/${CELL}.app"
@@ -70,28 +122,7 @@ $ICON_KEY
 </plist>
 PLIST
     TTY="$( tty )"
-    # `open` launches from a different cwd, so anchor every relative path arg to
-    # THIS cwd — including the `.buda`-less script form the CLI would infer
-    # (`buda demo/foo` → demo/foo.buda). Absolute paths and options pass through.
-    ARGS=(); SKIP=""
-    for a in "$@"; do
-      # The token after -t/--tag is an opaque tag VALUE — pass it through
-      # verbatim, never anchor it to a path (the CLI sanitizes it itself).
-      if [ -n "$SKIP" ]; then ARGS+=("$a"); SKIP=""; continue; fi
-      case "$a" in
-        -t|--tag) ARGS+=("$a"); SKIP=1; continue ;;
-      esac
-      if [ -e "$a" ]; then
-        ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" )")
-      elif [ -e "$a.buda" ]; then
-        ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" ).buda")
-      else
-        case "$a" in
-          -*|/*) ARGS+=("$a") ;;         # option or already-absolute
-          *)     ARGS+=("$PWD/$a") ;;     # relative (e.g. missing file): anchor
-        esac
-      fi
-    done
+    anchor_args "$@"
     # -n: force a NEW instance even if this cell is already open, so you can run
     # the same flow twice and inspect both windows side by side (without it,
     # `open` just re-activates the running instance and can't rewire stdio).
