@@ -123,6 +123,78 @@ def test_parallel_matches_sequential_when_all_deferred(monkeypatch):
     assert s_par.nuts_result.num_overlaps == s_seq.nuts_result.num_overlaps
 
 
+# ── the parallel PRIMARY scan (rnr runtime P1b) ──────────────────────────────
+
+def test_parallel_scan_matches_sequential_defaults(monkeypatch):
+    """With the DEFAULT screen (kept moves full-trialed), the primary scan
+    runs on the sweep pool — and must be print- and decision-transparent:
+    same selections, same done line (metric trajectory, move count AND trial
+    count), same contender lines.  This fixture improves at the FIRST
+    contender, so it also exercises the chunked early-exit path."""
+    monkeypatch.setenv("BUDA_SWEEP_THREADS", "2")   # a real pool on any host
+    s_par = _build_session()
+    out_par = _run_ripup(s_par)
+    s_seq = _build_session()
+    out_seq = _run_ripup(s_seq, "no_parallel_sweep")
+    assert _selections(s_par) == _selections(s_seq)
+    assert _done_line(out_par) == _done_line(out_seq)
+    # The decision lines (contender heartbeats + improver) are identical —
+    # the scan sweep prints exactly the sequential lines.
+    def decisions(out):
+        return [ln for ln in out.splitlines()
+                if ln.startswith("[ripup_reroute]")
+                and "timing:" not in ln and "solve passes:" not in ln]
+    assert decisions(out_par) == decisions(out_seq)
+    assert "parallel-sweep divergence" not in out_par
+    assert s_par.nuts_result.num_overlaps == 0
+
+
+def test_parallel_scan_books_psweep_time(monkeypatch):
+    """The scan sweep actually engages on the default path: the timing line
+    carries psweep evaluations (the sequential path books none)."""
+    monkeypatch.setenv("BUDA_SWEEP_THREADS", "2")   # a real pool on any host
+    s = _build_session()
+    out = _run_ripup(s)
+    m = re.search(r"psweep [0-9.]+s/(\d+)", out)
+    assert m and int(m.group(1)) >= 1, out
+
+
+def test_zero_move_contenders_keep_their_heartbeats(monkeypatch):
+    """Codex #604: a contender with NO index alternates (e.g. every
+    alternate width-gated away) must still print its sequential `— no
+    improvement` heartbeat on the parallel path — the sequential loop
+    passes the empty list through _rr_scan_moves and prints it."""
+    monkeypatch.setenv("BUDA_SWEEP_THREADS", "2")
+    monkeypatch.setattr(ripup_mod.RipupMixin, "_rr_candidate_order",
+                        lambda self, w, old_tidx, stage: [])
+    s_par = _build_session()
+    out_par = _run_ripup(s_par)
+    s_seq = _build_session()
+    out_seq = _run_ripup(s_seq, "no_parallel_sweep")
+    def heartbeats(out):
+        return [ln for ln in out.splitlines()
+                if "— no improvement" in ln]
+    assert heartbeats(out_par) == heartbeats(out_seq)
+    assert len(heartbeats(out_par)) >= 1, out_par
+    assert _done_line(out_par) == _done_line(out_seq)
+
+
+def test_sequential_paths_never_parse_thread_env(monkeypatch):
+    """Codex #604: an inherited nonnumeric BUDA_THREADS must not crash runs
+    that never use the pool (`no_parallel_sweep`), and the parallel path
+    falls back to auto instead of raising."""
+    monkeypatch.setenv("BUDA_THREADS", "not-a-number")
+    monkeypatch.delenv("BUDA_SWEEP_THREADS", raising=False)
+    s = _build_session()
+    out = _run_ripup(s, "no_parallel_sweep")
+    assert "done:" in out
+    assert s.nuts_result.num_overlaps == 0
+    s = _build_session()          # default path: tolerant parse -> auto
+    out = _run_ripup(s)
+    assert "done:" in out
+    assert s.nuts_result.num_overlaps == 0
+
+
 # ── the opt-out token ────────────────────────────────────────────────────────
 
 def test_no_parallel_sweep_token():

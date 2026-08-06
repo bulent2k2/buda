@@ -547,3 +547,56 @@ guards on overlap deltas (#506), cycle exit on exact repeated states
 wishlist items (span-indexed repack occupancy, marginal-yield round
 stop, over-capacity classification) in
 [wishlist-nuts.md](wishlist-nuts.md).
+
+## Implemented — P1b: parallel PRIMARY screened scan (2026-08-06)
+
+Post-P1 the profile moved: on `flow/rnr/mix2_fast_bottomup_caps.buda`
+(the capped bottom-up vehicle, `BUDA_THREADS=4`) stage-b ripup spent
+25.3 s, of which the DEFERRED sweep — P1's territory — was only
+~4.8 s/5 calls; the dominant residual was the sequential **primary
+screened scan**: 266 nuts (6.4 s) + 266 dnuts (6.9 s) trials, one at a
+time, walking each contender's top-2 screened moves.  P1b runs that
+scan on the same `buda.parallel_sweep` pool (`_rr_parallel_scan_sweep`,
+ripup.py):
+
+- **Lazy visit-order chunks.** Contenders are pulled, move-listed and
+  screen-pruned only when their chunk (`max(8, 2×pool)` moves) is
+  reached, so an early improver leaves later contenders untouched and
+  their screened-out tails join the deferred list only when actually
+  scanned — exactly the sequential loop's cost profile.  (An eager
+  build-and-screen-everything pre-pass was measured **2–2.5× slower**
+  on improver-heavy flows — `rnr/mix` commits after 1–2 trials per
+  iteration and never needed the rest — and was rewritten to this
+  form.)
+- **Replay-confirm per contender, print-transparent.** A contender none
+  of whose swept moves improves books the sequential trial count and
+  prints the sequential heartbeat verbatim; the FIRST contender (visit
+  order) with a sweep-improving or unevaluable move replays its ENTIRE
+  kept list through `_rr_scan_moves` — the sequential best-of-list
+  trial, verbatim — so the committed move, every printed line, and the
+  trial counts match the sequential scan exactly.  The sweep's metrics
+  only order the pick; a sweep-vs-replay disagreement is LOUD and the
+  replay verdict wins.
+- **Gating.** The P1 gate (default on, `no_parallel_sweep` opts out,
+  fast trials on, warm trials off) plus idx-only moves (no
+  `use_edge_candidates`) **and a real pool** (`BUDA_SWEEP_THREADS` /
+  `BUDA_THREADS` / hw > 1): on a 1-thread pool the chunked sweep would
+  serially evaluate whole chunks where the sequential loop commits
+  after the first improving trial (measured 2.5× slower on `rnr/mix`),
+  so 1-thread pools — e.g. the qor sweep's pinned workers — keep the
+  sequential scan.  The deferred stall sweep stays engaged at any
+  width (its certificate case needs every move regardless).
+
+**Validated:** decision lines (contender heartbeats, improver lines,
+done lines incl. trial counts) byte-identical par vs seq on
+`mix2_fast_bottomup_caps` at 4 threads and on the slow-tier mix2
+bottom-up agreement test; 1-thread `rnr/mix` at full parity
+(1.05–1.19 s both sides); qor corpus 0 better / 0 worse / 41 unchanged,
+WL ±0.00%.  **Measured** (paired, same 4-core box, `BUDA_THREADS=4`):
+`mix2_fast_bottomup_caps` stage-b ripup **25.6 → 19.2 s (−25 %)** vs
+main's P1-only default (the fully sequential `no_parallel_sweep` run
+is 47.9 s); flows that improve at the first contender or never enter
+ripup are unchanged.  Regression cover: the two `parallel_scan_*`
+tests in `test_ripup_parallel_sweep.py` (decision/print transparency
+with the DEFAULT screen on a forced 2-thread pool, and the psweep
+timing-line proof that the scan actually engages).
