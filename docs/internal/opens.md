@@ -36,7 +36,13 @@ items this page doesn't see).
 
 15. **NDR support — non-default width / spacing / shield constraints on
    nets, buses, and bundles** (added 2026-08-06) — requirements written,
-   design NOT chosen: [`ndr_requirements.md`](ndr_requirements.md).  The
+   design NOT chosen.  Three audience-split docs:
+   [`../NDR_REQUIREMENTS.md`](../NDR_REQUIREMENTS.md) (chip architects —
+   the R1–R13 contract), [`../NDR_UI.md`](../NDR_UI.md) (design
+   methodology — command/GUI surface options + the phase-1 strawman), and
+   [`ndr_architecture.md`](ndr_architecture.md) (implementers — as-built
+   baseline, path comparison + leaning, shield-materialization and
+   persistence decisions, per-requirement mapping, phasing).  The
    whole pipeline currently assumes one bit = one default SIGNAL slot;
    NDR generalizes that to per-rule track-demand units, which must be
    priced by ONE shared conversion everywhere tracks are counted (planner
@@ -45,8 +51,9 @@ items this page doesn't see).
    prospectively).  Mostly a stage 8 (routing grid supply queries) +
    stage 9 (DNUTS placement of wide/spaced/shielded bits) feature, with
    upstream honesty requirements and a hard no-NDR byte-identity gate.
-   Next step: brainstorm the four solution paths sketched in the
-   requirements doc (§5) and pick one.
+   Path leaning recorded (start from slot-quantized consumption, crediting
+   as phase 2) — next step: confirm the leaning + the UI strawman with
+   architect/methodology feedback, then prototype phase 1.
 
 13. **Nominal-WL comparability across shape families (b44 follow-ons)** —
    [`wishlist-topo.md`](wishlist-topo.md) → *"Nominal-WL comparability
