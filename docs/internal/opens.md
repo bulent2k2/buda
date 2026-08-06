@@ -7,6 +7,11 @@ wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
 lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved (by \<date\>)*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
 items this page doesn't see).
 
+> **Curated menu (2026-08-06):** a one-page snapshot of what is genuinely
+> actionable now vs blocked-on-externals, with links back to the owning
+> docs, lives in [`work_menu_2026-08-06.md`](work_menu_2026-08-06.md) —
+> assembled after opens #8b half 1 closed (PR #594).
+
 > **Continuous integration:** CI landed 2026-08-01
 > ([`ci.md`](ci.md)) — build + full suite on every push and PR, ~5 min. What it
 > deliberately does NOT cover yet (nightly QoR corpus, owning the placement
