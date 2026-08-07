@@ -24,7 +24,21 @@ CI-testable where the Darwin gate itself cannot run.
 """
 import os
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
+
+# bin/buda is a Bash script; on native Windows `bash` resolves to the
+# System32 WSL stub, which prints "Windows Subsystem for Linux has no
+# installed distributions" instead of running anything (measured,
+# windows-validate run 18 — all 5 tests fail on that output).  The docs
+# already state the bin/ wrappers do not apply on native Windows; Cygwin
+# (sys.platform == "cygwin") has a real bash and is not skipped.
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bin/buda needs a real bash; Windows' `bash` is the WSL stub "
+           "(measured, windows-validate run 18)")
 
 _BUDA = str(Path(__file__).parents[2] / "bin" / "buda")
 
