@@ -219,8 +219,10 @@ Python 3.9 (run 17). Known, measured limitations:
   `ast` sweep), and the one measured *runtime* incompatibility — PEP 604
   `X | Y` unions in evaluated annotations, which raise `TypeError` at import
   on 3.9 (run 18) — is fixed with `from __future__ import annotations` in
-  the three affected modules. Nothing guards new 3.10+ constructs from
-  landing; re-run the validation workflow to re-measure.
+  every module a repo-wide AST scan finds (four: `buda_session/nutsflow.py`,
+  `web/server.py`, `tools/build_hier_demo.py`, `demo/ariane/def2buda.py`).
+  Nothing guards new 3.10+ constructs from landing; re-run the validation
+  workflow to re-measure.
 - **No pip wheels exist for Cygwin** — native deps come from `setup.exe`
   packages or not at all. numpy 2.0.1 works; **the distro matplotlib (3.5.1)
   is broken out of the box** against that numpy (`_ARRAY_API not found`) —
