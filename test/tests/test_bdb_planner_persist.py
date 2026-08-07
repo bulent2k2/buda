@@ -266,3 +266,15 @@ def test_selective_falls_back_on_new_expansion(bdb_input, monkeypatch):
     with contextlib.redirect_stdout(io.StringIO()):
         s._persist_planner_output(selective=True)
     assert cleared                            # full path engaged
+
+
+def test_batch_rollback_invalidates_selective_memo(bdb_input):
+    # Codex #610 P1: the memo is published inside the batched body, and
+    # nested batches defer the real commit past the inner return — so ANY
+    # rollback must invalidate it, forcing the next persist to run full.
+    s = _hier_planned(bdb_input("hier_mixed"))
+    assert s._persisted_plan_fp
+    with pytest.raises(RuntimeError):
+        with s._bdb_batch():
+            raise RuntimeError("boom")
+    assert s._persisted_plan_fp is None

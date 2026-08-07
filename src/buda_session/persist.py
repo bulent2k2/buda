@@ -193,6 +193,13 @@ class PersistMixin:
             ok = True
         finally:
             if not ok:
+                # The selective-persist fingerprint memo may have been
+                # published inside the discarded body (nested batches defer
+                # the real commit past the inner function's return, so a
+                # post-call assignment would still be premature — Codex
+                # #610 P1); a rolled-back batch means the memo no longer
+                # describes the DB, so the next persist must run full.
+                self._persisted_plan_fp = None
                 self.bdb.rollback_batch()            # body failed → discard
             else:
                 # A failed COMMIT leaves the transaction open (begin/commit_batch
@@ -201,6 +208,7 @@ class PersistMixin:
                 try:
                     self.bdb.commit_batch()
                 except BaseException:
+                    self._persisted_plan_fp = None   # same contract as above
                     self.bdb.rollback_batch()
                     raise
 

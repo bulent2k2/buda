@@ -24,6 +24,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
 #include <atomic>
+#include <mutex>
 #include <cstdio>
 #include <iostream>
 #include <sstream>
@@ -564,17 +565,37 @@ void bind_routing(py::module_& m) {
             throw std::runtime_error("generate_candidates_batch: length mismatch");
         std::vector<std::vector<Topology>> pools(n);
         std::vector<std::string> notes(n);
+        std::exception_ptr first_err = nullptr;
         {
             py::gil_scoped_release release;
             unsigned hw = std::thread::hardware_concurrency();
             unsigned nt = n_threads > 0 ? (unsigned)n_threads : (hw ? hw : 1);
             nt = std::min<unsigned>(nt, (unsigned)std::max<size_t>(n, 1));
             std::atomic<size_t> next{0};
+            // Exception containment (Codex #610 P1): an exception escaping a
+            // spawned thread is std::terminate, and one unwinding the caller
+            // thread past joinable threads terminates too — so each worker
+            // catches, records the FIRST error, and the abort flag drains the
+            // remaining tasks; the pool always joins, note streams are always
+            // restored, and the error rethrows AFTER the join with the GIL
+            // held (pybind translates it to a Python exception, exactly like
+            // the sequential path's failure).
+            std::atomic<bool> abort_flag{false};
+            std::mutex err_mu;
             auto worker = [&]() {
                 for (size_t i; (i = next.fetch_add(1)) < n; ) {
+                    if (abort_flag.load(std::memory_order_relaxed))
+                        break;
                     std::ostringstream buf;
                     tg[i]->set_note_stream(&buf);
-                    pools[i] = tg[i]->generate_candidates(srcs[i], dsts[i]);
+                    try {
+                        pools[i] = tg[i]->generate_candidates(srcs[i], dsts[i]);
+                    } catch (...) {
+                        std::lock_guard<std::mutex> lk(err_mu);
+                        if (!first_err)
+                            first_err = std::current_exception();
+                        abort_flag.store(true, std::memory_order_relaxed);
+                    }
                     tg[i]->set_note_stream(&std::cerr);
                     notes[i] = buf.str();
                 }
@@ -589,6 +610,8 @@ void bind_routing(py::module_& m) {
                 for (auto& th : threads) th.join();
             }
         }
+        if (first_err)
+            std::rethrow_exception(first_err);
         py::list out;
         for (size_t i = 0; i < n; ++i)
             out.append(py::make_tuple(py::cast(std::move(pools[i])),
