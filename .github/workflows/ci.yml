@@ -14,6 +14,20 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual trigger, so a branch can be re-tested WITHOUT an empty commit.
+  # Added after an Actions outage (2026-08-06) left `main` with no CI signal
+  # at all: two merges landed while dispatch was wedged, and with only
+  # push/pull_request declared there was no way to ask for a run against the
+  # current HEAD -- the sole lever was re-running an OLD run, which tests the
+  # SHA that run was created for, not the branch tip. (Re-running also resets
+  # that run, discarding the previous attempt's job record.)
+  #
+  # Note the concurrency group below keys on github.ref, not the event, so a
+  # manual run on `main` shares a group with push runs on `main` and the two
+  # supersede each other. That is the intended behavior -- one run per ref,
+  # newest wins -- but it does mean a push landing mid-dispatch cancels the
+  # manual run.
+  workflow_dispatch:
 
 concurrency:
   # A new push to a PR supersedes the run in flight — the old result is stale.
