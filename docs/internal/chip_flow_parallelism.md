@@ -246,8 +246,10 @@ generation 6.6 → ~1.7 s; the remainder is the still-serial
 
 `chip_stack_topdown` **103.1 → 70.7 s (−31 %)** with a byte-identical
 endpoint: generate 10.7 → 6.2, planner 45.9 → 35.6, run_nuts 12.8 →
-4.2, dnuts 9.5 → 9.6, negotiate 22.2 → 13.1.  What remains on top:
-P8 (the dnuts cull-heal's full re-solves — now the biggest
+4.2, dnuts 9.5 → 9.6, negotiate 22.2 → 13.1.  Corpus guard: **0
+better / 0 worse / 41 unchanged**, abstract + detailed WL exactly ±0;
+every chip flow −9 to −28 s (corpus total −8.6 %).  What remains on
+top: P8 (the dnuts cull-heal's full re-solves — now the biggest
 non-planner residual), P6a, and the planner's sequential core.
 
 ## 4. Recommended order
