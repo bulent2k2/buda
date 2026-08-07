@@ -239,9 +239,15 @@ Two CRLF guards, both required (measured):
 
 ```bash
 git config --global core.autocrlf false   # BEFORE cloning: bash reads CRLF scripts poorly
-export SHELLOPTS=igncr                    # belt AND suspenders for sourced files
+set -o igncr                              # this shell: ignore stray \r in sourced files
 export PYTHONUTF8=1
 ```
+
+(`SHELLOPTS` itself is **readonly inside bash** — `export SHELLOPTS=igncr`
+fails with `readonly variable`. `set -o igncr` enables it for the current
+shell; to make child bash processes inherit it, set `SHELLOPTS=igncr` in the
+*Windows* environment before bash starts, which is what the validation
+workflow does via its job `env:`.)
 
 Then the pure-python test deps via pip (those wheels are pure-python, so
 they install fine):
