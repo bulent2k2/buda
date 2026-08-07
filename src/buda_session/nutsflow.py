@@ -1742,7 +1742,7 @@ class NutsFlowMixin:
         """
         if self.bdb is None:
             return
-        self._persist_planner_output()
+        self._persist_planner_output(selective=True)
         self._persist_nuts()
         if self.detailed_result is not None:
             self._persist_detailed_nuts()

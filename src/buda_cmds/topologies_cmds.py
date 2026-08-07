@@ -20,10 +20,19 @@ Each handler takes (session, cmd, args, cmd_line) and is registered
 in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
+import contextlib
 import difflib
+import io
+import os
 import sys
 
 import buda
+
+# Small-work gate for the parallel hier-generation batch (P5): below this
+# many bundles the pool-spawn cost outweighs the win and the sequential
+# loop runs.  Module-level so tests can lower it to force the batch path
+# on small fixtures.
+_BATCH_MIN_BUNDLES = 8
 
 
 def _endpoint_label(src, dsts, fanin=False):
@@ -548,20 +557,68 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
     total_candidates = 0
     comps_by_name = {c.name: c for c in session.bdb.all_components()}
 
-    for w in session.bundles:
-        old_pin_uid = session._pinned_uid(w)
-        n = session._generate_hier_topo_one(w, use_center, use_double_detour,
-                                          fp_cache, comps_by_name,
-                                          use_multi_trunk,
-                                          use_hanan_loci=use_hanan_loci,
-                                          use_spine_relays=use_spine_relays)
-        # Honor the bundle's persisted generation-knob memo (v15): re-apply
-        # prior generate_more_topologies accretions additively so the pool
-        # does not silently revert on a bulk regeneration (Phase E2b — the
-        # hier twin of the flat command's _apply_gen_knobs call).
-        session._apply_hier_gen_knobs(w, fp_cache, comps_by_name,
-                                      old_pin_uid)
-        total_candidates += n
+    # Parallel batch generation (chip_flow_parallelism.md P5): per-bundle
+    # generation is independent (private generators; shared floorplans are
+    # read-only), so the C++ calls fan out across a thread pool with the
+    # GIL released (buda.generate_candidates_batch) — decision-identical
+    # by construction, and print-identical too: each bundle's prep
+    # warnings are buffered and replayed in visit order, and each task's
+    # "[TopoGen]" notes come back as a string written just before its
+    # install line, exactly where the sequential loop printed them.
+    # BUDA_TOPO_THREADS (explicit) > BUDA_THREADS (the CLI governor) >
+    # hardware; a 1-thread pool or a small design keeps the sequential
+    # loop.  The knob-memo replay stays sequential in both paths (it can
+    # itself regenerate additively).
+    try:
+        n_thr = int(os.environ.get("BUDA_TOPO_THREADS")
+                    or os.environ.get("BUDA_THREADS", "0") or 0)
+    except ValueError:
+        n_thr = 0
+    n_thr = n_thr or (os.cpu_count() or 1)
+    if n_thr > 1 and len(session.bundles) >= _BATCH_MIN_BUNDLES:
+        preps = []
+        for w in session.bundles:
+            old_pin_uid = session._pinned_uid(w)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                prep = session._prep_hier_topo_gen(
+                    w, use_center, use_double_detour, fp_cache,
+                    comps_by_name, use_multi_trunk, use_hanan_loci,
+                    use_spine_relays)
+            preps.append((w, old_pin_uid, prep, buf.getvalue()))
+        live = [(i, p) for i, (_w, _u, p, _t) in enumerate(preps)
+                if p is not None]
+        results = buda.generate_candidates_batch(
+            [p[0] for _i, p in live], [p[1] for _i, p in live],
+            [list(p[2]) for _i, p in live], n_thr) if live else []
+        pool_of = {i: r for (i, _p), r in zip(live, results)}
+        for i, (w, old_pin_uid, prep, pre_text) in enumerate(preps):
+            if pre_text:
+                sys.stdout.write(pre_text)
+            n = 0
+            if prep is not None:
+                pool, notes = pool_of[i]
+                if notes:
+                    sys.stderr.write(notes)
+                n = session._install_hier_topo_result(w, pool, prep[3])
+            session._apply_hier_gen_knobs(w, fp_cache, comps_by_name,
+                                          old_pin_uid)
+            total_candidates += n
+    else:
+        for w in session.bundles:
+            old_pin_uid = session._pinned_uid(w)
+            n = session._generate_hier_topo_one(w, use_center, use_double_detour,
+                                              fp_cache, comps_by_name,
+                                              use_multi_trunk,
+                                              use_hanan_loci=use_hanan_loci,
+                                              use_spine_relays=use_spine_relays)
+            # Honor the bundle's persisted generation-knob memo (v15): re-apply
+            # prior generate_more_topologies accretions additively so the pool
+            # does not silently revert on a bulk regeneration (Phase E2b — the
+            # hier twin of the flat command's _apply_gen_knobs call).
+            session._apply_hier_gen_knobs(w, fp_cache, comps_by_name,
+                                          old_pin_uid)
+            total_candidates += n
     print(f"generate_hier_topologies: {len(session.bundles)} bundles, "
           f"{total_candidates} total candidates")
     # Opt-in WL-dominance prune (set_prune_dominated) — after the pool is

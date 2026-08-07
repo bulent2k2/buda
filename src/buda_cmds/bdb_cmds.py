@@ -140,6 +140,10 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # Codex #253); load_pipeline rebuilds both from this BDB's rows.
     session._bu_clone_cells = {}
     session._bu_clone_from = {}
+    # The selective-persist fingerprint memo describes rows in the PREVIOUS
+    # BDB — against a fresh file it would skip writes for rows that do not
+    # exist there.  A full persist rebuilds it.
+    session._persisted_plan_fp = None
     # Per-cell layer policies persisted in this BDB (v20) come back so the
     # resumed flow plans under the same bands (session-typed entries win).
     session._restore_layer_policies()
@@ -407,6 +411,10 @@ def cmd_load_pipeline(session, cmd, args, cmd_line):
     # `expanded` is the only option — a typo must not silently load the
     # non-expanded view.
     reject_unknown_options("load_pipeline", args, ("expanded",))
+    # The rehydrated wrappers replace self.bundles — the selective-persist
+    # fingerprint memo describes the PREVIOUS wrappers' persisted rows, so
+    # the next persist must rebuild it from a full pass.
+    session._persisted_plan_fp = None
     session._load_pipeline_from_bdb(
         expanded=bool(args) and args[0] == "expanded")
 

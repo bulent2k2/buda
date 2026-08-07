@@ -3309,7 +3309,7 @@ std::vector<Topology> TopologyGenerator::generate_npin(
             kept.reserve(results.size() - n_drop);
             for (size_t i = 0; i < results.size(); ++i)
                 if (!drop[i]) kept.push_back(std::move(results[i]));
-            std::cerr << "[TopoGen] dropped " << n_drop << " hanan-loci candidate(s) "
+            notes() << "[TopoGen] dropped " << n_drop << " hanan-loci candidate(s) "
                       << "with a post-contract zero-slide segment (first: "
                       << first_drop << "); " << kept.size() << " remain.\n";
             results = std::move(kept);
@@ -3949,14 +3949,14 @@ void TopologyGenerator::add_trunk_mst_candidates(
     }
 
     if (n_redundant_dropped > 0 || n_antenna_dropped > 0) {
-        std::cerr << "[TopoGen] dropped " << (n_redundant_dropped + n_antenna_dropped)
+        notes() << "[TopoGen] dropped " << (n_redundant_dropped + n_antenna_dropped)
                   << " redundant trunk+MST hybrid(s) (";
         if (n_redundant_dropped > 0) {
-            std::cerr << n_redundant_dropped << " removable seed trunk";
-            if (n_antenna_dropped > 0) std::cerr << ", ";
+            notes() << n_redundant_dropped << " removable seed trunk";
+            if (n_antenna_dropped > 0) notes() << ", ";
         }
-        if (n_antenna_dropped > 0) std::cerr << n_antenna_dropped << " antenna seed trunk";
-        std::cerr << "; first: " << first_redundant << ").\n";
+        if (n_antenna_dropped > 0) notes() << n_antenna_dropped << " antenna seed trunk";
+        notes() << "; first: " << first_redundant << ").\n";
     }
 
     // Emit a single un-completed fallback ONLY if the whole bundle produced no clean
@@ -4384,14 +4384,14 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
         // check_connectivity will report the open.  (Reachable only for the
         // all-open / all-disconnected case — relays are dropped solely when a
         // clean one survives.)
-        std::cerr << "[TopoGen] WARNING: all " << candidates.size()
+        notes() << "[TopoGen] WARNING: all " << candidates.size()
                   << " candidate(s) are broken (";
         if (!first_block.empty())
-            std::cerr << "block '" << first_block << "' unconnected";
+            notes() << "block '" << first_block << "' unconnected";
         if (dropped_disc > 0)
-            std::cerr << (first_block.empty() ? "" : "; ")
+            notes() << (first_block.empty() ? "" : "; ")
                       << dropped_disc << " with a disconnected wire graph";
-        std::cerr << "); keeping them (check_connectivity will report the "
+        notes() << "); keeping them (check_connectivity will report the "
                      "violations).\n";
         return;
     }
@@ -4400,15 +4400,15 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
     kept.reserve(candidates.size() - dropped);
     for (size_t i = 0; i < candidates.size(); ++i)
         if (!drop[i]) kept.push_back(std::move(candidates[i]));
-    std::cerr << "[TopoGen] dropped " << dropped << " candidate(s) "
+    notes() << "[TopoGen] dropped " << dropped << " candidate(s) "
               << "(" << dropped_relay << " feedthru-relay";
     if (dropped_disc > 0)
-        std::cerr << ", " << dropped_disc << " disconnected islands"
+        notes() << ", " << dropped_disc << " disconnected islands"
                   << " (first: " << first_disc_type << ")";
     if (!first_type.empty())
-        std::cerr << ", first open: " << first_type << " missing block '"
+        notes() << ", first open: " << first_type << " missing block '"
                   << first_block << "'";
-    std::cerr << "); " << kept.size() << " remain.\n";
+    notes() << "); " << kept.size() << " remain.\n";
     candidates = std::move(kept);
 }
 
@@ -4474,7 +4474,7 @@ void TopologyGenerator::filter_unanchored_bitrunk(
         if (drop[i]) continue;
         kept.push_back(std::move(candidates[i]));
     }
-    std::cerr << "[TopoGen] dropped " << dropped
+    notes() << "[TopoGen] dropped " << dropped
               << " unanchored BITRUNK candidate(s) (endpoint block has no "
                  "busterm tap → per-bit BUSTERM_OPEN at DNUTS; first: "
               << first_type << " block '" << first_block << "'); "
