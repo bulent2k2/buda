@@ -7,7 +7,7 @@ Configure, build, and test BUDA natively on Windows. Four validated paths:
 | 1 | **MSVC + Ninja** (§3) | VS 2022, MSVC 19.44 | native 3.13 | **green** — build, import, fast tier, flow |
 | 2 | **MSVC + VS generator** (§4) | VS 2022, MSVC 19.44 | native 3.13 | **green** — build, import, fast tier, flow |
 | 3 | **MinGW-w64** (§5) | MSYS2 UCRT64 GCC | native 3.13 | **green** — build, import, fast tier (1819 passed), flow |
-| 4 | **Cygwin64** (§6) | Cygwin GCC 14 | Cygwin 3.9 | **experimental** — build green via `bin/bb`; import/test validation in progress |
+| 4 | **Cygwin64** (§6) | Cygwin GCC 14 | Cygwin 3.9 | **experimental** — build (`bin/bb`) and full import stack green; test tier limited by a distro matplotlib/numpy skew |
 
 Requirements and Windows-specific background: [WINDOWS_REQ.md](WINDOWS_REQ.md).
 
@@ -15,8 +15,9 @@ Requirements and Windows-specific background: [WINDOWS_REQ.md](WINDOWS_REQ.md).
 `.github/workflows/windows-validate.yml` (windows-2022 runner, VS 2022, MSVC
 19.44, Python 3.13 x64), through all four paths: build, import, fast test
 tier, and a `.buda` flow. Re-validate any time: *Actions → Windows validation
-→ Run workflow*. Paths 1–3 last green: run 16, 2026-08-07 (MSVC build ≈
-2m30s, MinGW build ≈ 2m, fast tier ≈ 46–70s per path on a 4-core runner).
+→ Run workflow*. Paths 1–3 last green: run 17, 2026-08-07 (MSVC build ≈
+2m30s, MinGW build ≈ 2m, fast tier ≈ 46–70s per path on a 4-core runner);
+path 4 import stack first green the same run.
 
 ---
 
@@ -208,9 +209,10 @@ the point of this path — **the repo's own `bin/bb` wrapper just works**, CRLF
 guards aside. Unlike MinGW, binaries are Cygwin-native (`cygbuda_core.dll`,
 `buda.cpython-39-x86_64-cygwin.dll`) and link Cygwin's Python.
 
-**Measured so far** (validation runs 13–16): `bin/bb` drives a complete GCC
-14 build (≈ 8m), `cygbuda_core.dll` ctypes-loads, and the module-export fix
-for the import is in flight. Known, measured limitations:
+**Measured so far** (validation runs 13–17): `bin/bb` drives a complete GCC
+14 build (≈ 6–8m), and the full extension stack **imports clean** —
+`cygbuda_core.dll`, `import buda_db`, `import buda` all green on Cygwin's
+Python 3.9 (run 17). Known, measured limitations:
 
 - **Python is 3.9.16** — the newest Cygwin ships. The tree parses under 3.9
   (measured: full `ast` sweep), but 3.9 is past upstream EOL.
@@ -256,14 +258,23 @@ they install fine):
 python3 -m pip install --user pybind11 pytest pytest-bdd pytest-xdist
 ```
 
-### 6.3 Build and run — the Linux instructions, verbatim
+### 6.3 Build and run — the Linux instructions, plus one PATH line
 
 ```bash
 cd /cygdrive/c/path/to/buda
 ./bin/bb                                   # the repo's own wrapper (measured green)
+export PATH=$PWD/build:$PATH               # REQUIRED: see below
 PYTHONPATH=$PWD/build:$PWD/src:$PWD/tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda
 python3 -m pytest -q                       # expect matplotlib-dependent failures (distro skew above)
 ```
+
+The `PATH` line is the one real deviation from Linux: Cygwin's `dlopen`
+follows Windows LoadLibrary search rules (application dir, system dirs,
+PATH) and — unlike native CPython ≥ 3.8, which searches an extension's own
+directory for its dependencies — does **not** look next to the importing
+module. Without `build` on PATH the import dies with the misleading
+`ImportError: No such file or directory` (measured, run 17): the *module* is
+found; the dependent `cygbuda_core.dll` is what's missing.
 
 `CMakeLists.txt` carries one Cygwin-specific fix: `PYBIND11_EXPORT` is
 pre-defined as a PE `dllexport` for the module targets — Cygwin gcc defines
@@ -357,6 +368,17 @@ that PE ignores).
 
 The module built but exports nothing (the flip side of the previous entry —
 e.g. `--exclude-all-symbols` without an explicit export). Same fix.
+
+### Cygwin: `ImportError: No such file or directory` on `import buda`
+
+Misleading: the module file exists and is found — a **dependent DLL**
+(`cygbuda_core.dll`) is what's missing. Cygwin's `dlopen` searches
+application dir, system dirs, and PATH — never the importing module's own
+directory. Fix: `export PATH=$PWD/build:$PATH` (§6.2/6.3). Measured, run
+17 — where the import-smoke diagnostic *passed* while plain
+`python3`/`pytest` failed, because the diagnostic ctypes-loads the core DLL
+by absolute path first and later imports piggyback on the already-loaded
+copy.
 
 ### Warning spam: `D9025: overriding '/DNDEBUG' with '/UNDEBUG'`
 

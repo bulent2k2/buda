@@ -276,7 +276,15 @@ jobs:
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PYTHONPATH=$PWD/build:$PWD/src:$PWD/tools python3 -u -X faulthandler .github/scripts/windows_diag_import.py"
 
       - name: Fast test tier
-        # continue-on-error THIS round: run 14's inventory measured the distro
+        # PATH must carry build/: Cygwin's dlopen follows Windows LoadLibrary
+        # search (app dir, system dirs, PATH) and does NOT search the
+        # importing module's own directory, so without this the extension
+        # import dies with 'ImportError: No such file or directory' — the
+        # dependent cygbuda_core.dll, not the module, is what's missing
+        # (measured, run 17; the import-smoke step masks it by ctypes-loading
+        # the core DLL by absolute path first).
+        #
+        # continue-on-error: run 14's inventory measured the distro
         # python39-matplotlib (3.5.1) broken against python39-numpy (2.0.1) —
         # '_ARRAY_API not found', an upstream Cygwin packaging skew, not ours.
         # Tests importing matplotlib will fail on that alone; run to MEASURE
@@ -284,12 +292,13 @@ jobs:
         shell: cmd
         continue-on-error: true
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pytest -q -r fs"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH python3 -m pytest -q -r fs"
 
       - name: Run a .buda flow
+        # PATH carries build/ for the same dlopen reason as the fast tier.
         shell: cmd
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PYTHONPATH=build:src:tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH PYTHONPATH=build:src:tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda"
 
   mingw:
     # Fourth path: mingw-w64 — GCC producing NATIVE Windows binaries, driven
