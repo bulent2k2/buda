@@ -566,7 +566,7 @@ finisher for whatever negotiation leaves.
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `max_iter` | int | `5` | Maximum number of negotiation rounds. Each round injects the current failures and re-plans; it is kept only if it strictly improves the metric, otherwise it is rolled back and the loop stops. |
+| `max_iter` | int | `5` | Maximum number of negotiation rounds. Each round injects the current failures and re-plans; it is kept only if it strictly improves the metric, otherwise it is rolled back and the loop **retries under escalated pressure** — the history counters persist, so the same rectangles re-inject at grown amounts — until the budget runs out or a failed retry reproduces the **same** metric as the previous failure (the deterministic replans are insensitive to the grown amounts, so further escalation is certified waste and the loop stops). |
 | `class_moves` | flag | off | **Opt-in bottom-up template price translation** (negotiate v2). Normally a `hier.locked` bottom-up template instance is never a negotiation target (its routing is a uniform copy of the cell template's local solve). With `class_moves`, a locked affected bundle's TEMPLATE class is negotiated instead: the iteration's injected band demand is clipped to each instance's bbox, mapped through the inverse orientation transform into the cell frame, and summed across instances into the cell-local planner; the target templates then re-plan **unpinned** under that aggregated price field and the result propagates to every instance of the class (accept/rollback covers the template state; user-pinned templates are never touched; BDB persistence is deferred to the accept). Opt-in because it measured endpoint-neutral at best on the corpus: the stage-a overlap metric is blind to the DNUTS quality its bigger multi-class shuffles trade away (mix2_fast_bottomup final opens 8→16 at default ripup budgets, equal at `ripup_reroute 30`), and the stage-b priced iteration is rejected by its own accept guard — `ripup_reroute`'s class moves already cover the endpoint. Measurement table in `docs/internal/bottomup_healer_templates.md`. `no_class_moves` states the default explicitly. |
 
 **Two stages, auto-detected from pipeline state** (same as `ripup_reroute`):
@@ -588,18 +588,37 @@ finisher for whatever negotiation leaves.
    prices — and may even displace a committed bundle blocking the contended bands
    (the planner's own rip-up ladder);
 3. accepts the round only on **strict metric improvement** (snapshot/restore
-   otherwise), so it is a safe hill-climb.
+   otherwise), so it is a safe hill-climb. A rejected round does **not** end the
+   run: the loop retries with the grown history pressure (that escalation is the
+   whole point of the PathFinder scheme) until `max_iter` is exhausted — or a
+   failed retry lands on the **same metric as the previous failure**, which
+   certifies the replans' decisions are insensitive to the grown amounts and
+   stops the loop (`identical outcome under escalated pressure, stop`).
 
 It is a **no-op** when the metric is already 0 (`metric already 0 — nothing to
 do`). Injected demand is always cleared at the end, so it never leaks into later
 commands.
+
+**Stage-a scope advisory:** the stage-a metric is NUTS overlaps **only**, so a
+clean stage-a exit can sit right above a dirty `check_design` — keepout-seated
+segments (exhausted-window commits) and supply-doomed seats are invisible to
+the overlap metric and only surface as DNUTS opens at stage b. Both stage-a
+healers (`negotiate_congestion` and `ripup_reroute`) print an advisory at exit
+whenever such seats exist:
+
+```
+[negotiate] advisory: stage-a metric is overlaps-only — 29 keepout-seated
+segment(s), 2 supply-doomed seat(s) remain and will surface as DNUTS opens at
+stage b (details: check_design).
+```
 
 Output logs the start metric and each round:
 
 ```
 [negotiate] stage a (NUTS overlaps): start metric=10, max_iter=5
 [negotiate] iter 1: 10 contention site(s) -> replanned 13 bundle(s), metric 10->5
-[negotiate] iter 2: no improvement (metric 5->5) — restored, stop.
+[negotiate] iter 2: no improvement (metric 5->5) — restored, pressure escalates.
+[negotiate] iter 3: no improvement (metric 5->5) — restored; identical outcome under escalated pressure, stop.
 [negotiate] done: metric 10->5 after 1 accepted iteration(s).
 ```
 
