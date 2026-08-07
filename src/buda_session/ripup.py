@@ -2653,7 +2653,8 @@ class RipupMixin:
               f"{', '.join(parts)} remain and will surface as DNUTS opens "
               f"at stage b (details: check_design).", flush=True)
 
-    def _negotiate_congestion(self, max_iter=5, use_class_moves=False):
+    def _negotiate_congestion(self, max_iter=5, use_class_moves=False,
+                              use_press=False):
         """Measured-congestion negotiation (wishlist-healer item 1).  Instead of
         guess-and-test over topology candidates, feed the ACTUAL failures back
         into the planner as demand on the exact bands where they happened
@@ -2819,21 +2820,30 @@ class RipupMixin:
                       f"{self._rr_m_str(cur)}->{self._rr_m_str(new)}", flush=True)
             else:
                 restore(snap)
-                # Don't stop at the FIRST non-improving iteration ("gives up
-                # too soon", 2026-08-07): `history` persists across
-                # iterations, so a retry re-injects the SAME contention
-                # rectangles at grown PathFinder pressure (amount scales with
-                # history[key]) — the escalation the early stop used to
-                # compute and then throw away.  Accepts stay strict and every
-                # failed iteration restores, so the endpoint can only get
-                # better, and the cost is bounded by the max_iter budget AND
-                # by repeat detection: a failed retry that reproduces the
-                # SAME metric as the previous failure means the replans'
-                # decisions are insensitive to the grown amounts (the
-                # deterministic argmin repeated itself — measured on
-                # mix2_fast_bottomup_caps stage b, where the 116->132 failure
-                # repeats byte-identically at doubled pressure), so further
-                # escalation is certified waste and the loop stops.
+                # `press` (opt-in): don't stop at the FIRST non-improving
+                # iteration — `history` persists across iterations, so a
+                # retry re-injects the SAME contention rectangles at grown
+                # PathFinder pressure (amount scales with history[key]), the
+                # escalation the first-failure stop computes and then throws
+                # away.  Accepts stay strict and failed iterations restore;
+                # cost is bounded by max_iter AND by repeat detection: a
+                # failed retry reproducing the SAME metric as the previous
+                # failure means the deterministic replans are insensitive to
+                # the grown amounts (caps/mix stage b: the failure repeats
+                # byte-identically at doubled pressure) — certified waste,
+                # stop.  OPT-IN because the corpus measured 0 better/1 worse
+                # as a default: on mix2_fast_on_aligned_sql the pressed
+                # retries DO crack the stall on negotiate's own metric
+                # (150 (ovl 12) -> 130 (ovl 6)) but the improved hand-off
+                # shifts ripup's greedy basin and the flow ENDPOINT lands
+                # worse (2/16/1 -> 4/28/2).  Default = the historical
+                # first-failure stop, byte-identical.
+                if not use_press:
+                    print(f"[negotiate] iter {it}: no improvement "
+                          f"(metric {self._rr_m_str(cur)}->"
+                          f"{self._rr_m_str(new)}) — restored, stop.",
+                          flush=True)
+                    break
                 if new == last_fail:
                     print(f"[negotiate] iter {it}: no improvement "
                           f"(metric {self._rr_m_str(cur)}->"

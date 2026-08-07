@@ -578,12 +578,30 @@ def test_stage_a_advisory_silent_when_clean():
 
 
 @pytest.mark.mid
-def test_negotiate_escalates_pressure_then_stops_on_repeat():
-    """A non-improving iteration no longer ends the run: the loop restores and
-    retries under grown PathFinder history pressure — and stops as soon as a
-    failed retry reproduces the SAME metric (the deterministic replans are
-    insensitive to the grown amounts: certified waste).  Forced here by
-    no-op'ing the iteration body so every attempt fails identically."""
+def test_negotiate_press_escalates_then_stops_on_repeat():
+    """With the opt-in `press` flag a non-improving iteration no longer ends
+    the run: the loop restores and retries under grown PathFinder history
+    pressure — and stops as soon as a failed retry reproduces the SAME metric
+    (the deterministic replans are insensitive to the grown amounts:
+    certified waste).  Forced here by no-op'ing the iteration body so every
+    attempt fails identically."""
+    s = _build_session(narrow=True)
+    assert s.nuts_result.num_overlaps > 0
+    s._negotiate_iteration = lambda *a, **k: None   # every iteration fails
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion press")
+    out = buf.getvalue()
+    assert "pressure escalates" in out              # iter 1: retry, not stop
+    assert "identical outcome under escalated pressure, stop." in out  # iter 2
+    assert "iter 3" not in out                      # repeat detection bounds it
+
+
+@pytest.mark.mid
+def test_negotiate_default_stops_at_first_failure():
+    """Without `press` the historical contract holds: the first non-improving
+    iteration restores and stops (byte-identical default — the corpus
+    measured pressed retries 0 better / 1 worse as a default)."""
     s = _build_session(narrow=True)
     assert s.nuts_result.num_overlaps > 0
     s._negotiate_iteration = lambda *a, **k: None   # every iteration fails
@@ -591,9 +609,9 @@ def test_negotiate_escalates_pressure_then_stops_on_repeat():
     with contextlib.redirect_stdout(buf):
         s.do_command("negotiate_congestion")
     out = buf.getvalue()
-    assert "pressure escalates" in out              # iter 1: retry, not stop
-    assert "identical outcome under escalated pressure, stop." in out  # iter 2
-    assert "iter 3" not in out                      # repeat detection bounds it
+    assert "restored, stop." in out
+    assert "pressure escalates" not in out
+    assert "iter 2" not in out
 
 
 def _full_wrapper_state(s):
