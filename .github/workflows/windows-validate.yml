@@ -177,3 +177,219 @@ jobs:
         run: |
           set "PYTHONPATH=%CD%\build\Release;%CD%\build;%CD%\src;%CD%\tools"
           python src\buda_cli.py --no-viz flow\four_blocks.buda
+
+  cygwin:
+    # Third path: Cygwin64 — Windows with a POSIX personality.  Unlike the two
+    # MSVC jobs above this exercises the NON-MSVC branch of the build (Cygwin
+    # GCC: -march/-ffp-contract=off, auto-exported DLL symbols, a real fcntl
+    # and python3) and, most interestingly, the repo's own `bin/bb` wrapper —
+    # which the docs tell native-Windows users does not apply.  If this job is
+    # green, the Windows story gains a "the Linux instructions just work" lane.
+    #
+    # EXPERIMENTAL until measured green; known open questions this job is
+    # designed to ANSWER rather than assume:
+    #   * which Python Cygwin ships today (3.9 may be too old for the suite);
+    #   * whether numpy/matplotlib exist as Cygwin packages (there are NO pip
+    #     wheels for Cygwin — native deps come from setup.exe or not at all);
+    #   * whether the web deps are installable (pydantic-core needs Rust:
+    #     expected NO — recorded, not required).
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    env:
+      PYTHONUTF8: '1'
+      MPLBACKEND: Agg
+      # Cygwin bash reads CRLF scripts poorly; belt (autocrlf below) AND
+      # suspenders: igncr makes bash ignore stray \r in anything it sources.
+      SHELLOPTS: igncr
+
+    steps:
+      - name: Force LF checkout
+        # The Windows runner image configures git with autocrlf=true, which
+        # would hand Cygwin bash CRLF copies of bin/bb etc.
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: Install Cygwin64
+        # Official installer, quiet mode, kernel.org mirror.  The package list
+        # is a CANDIDATE set: the diagnose step below records what actually
+        # materialized (this container's proxy cannot reach the Cygwin package
+        # inventory, so the runner doubles as the inventory probe).
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://cygwin.com/setup-x86_64.exe -OutFile setup-x86_64.exe
+          .\setup-x86_64.exe -q -O -s https://mirrors.kernel.org/sourceware/cygwin/ `
+            -R C:\cygwin64 -l C:\cygpkgs `
+            -P gcc-g++,make,cmake,ninja,git,python3,python3-devel,python39-devel,python39-pip,python39-numpy,python39-tkinter,python39-matplotlib | Out-Null
+          C:\cygwin64\bin\bash.exe -lc 'uname -a'
+
+      - name: Diagnose the Cygwin environment
+        # The inventory step: which python, which native deps resolved, what
+        # pip can do.  continue-on-error — its job is to REPORT.  No -e: run
+        # 14's -e aborted at the (genuinely broken) matplotlib import, so the
+        # tkinter and pip probes after it never reported.
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\cygwin64\bin\bash.exe -lc "ls -la /usr/bin/python* 2>&1; python3 --version 2>&1; cygcheck -c -d | grep -iE 'python|gcc|cmake|ninja|make' 2>&1; python3 -c 'import numpy; print(\"numpy\", numpy.__version__)' 2>&1; python3 -c 'import matplotlib; print(\"matplotlib\", matplotlib.__version__)' 2>&1; python3 -c 'import tkinter; print(\"tkinter OK\")' 2>&1; python3 -m pip --version 2>&1; true"
+
+      - name: pip install the pure-python test deps
+        shell: cmd
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pip install --user pybind11 pytest pytest-bdd pytest-xdist"
+
+      - name: pip install the web deps (expected to fail — recording, not requiring)
+        # The fallback message MUST be quoted: run 14's unquoted parens were a
+        # bash syntax error, so pip never even ran and continue-on-error hid
+        # it — pydantic-core availability went UNMEASURED for two rounds.
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pip install --user -r src/web/requirements.txt && echo WEB DEPS OK || echo 'WEB DEPS UNAVAILABLE (expected: pydantic-core needs Rust; no Cygwin wheels)'"
+
+      - name: Build with the repo's own wrapper (bin/bb)
+        # THE point of this path: the documented-for-Linux command, verbatim.
+        shell: cmd
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && ./bin/bb"
+
+      - name: Where did the artifacts land?
+        # No -e here: `ls a b c` fails when any glob has no match (there is no
+        # *.so on Cygwin) and -e aborted the step BEFORE the trailing true
+        # (measured, run 13).
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\cygwin64\bin\bash.exe -lc "cd $(cygpath '%CD%') && ls -la build/ | grep -E 'dll$|so$|pyd$' || true"
+
+      - name: Import smoke
+        # PYTHONPATH was MISSING here in run 13 (harness omission); run 14's
+        # repair then OVER-ESCAPED it — bash treats \$ inside double quotes as
+        # a literal dollar, so PYTHONPATH arrived as the literal string
+        # '$PWD/build:...' (measured: the diag printed it verbatim).  cmd does
+        # not expand $, so no escaping is needed — $(cygpath ...) on this same
+        # line has always expanded fine for exactly that reason.
+        shell: cmd
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PYTHONPATH=$PWD/build:$PWD/src:$PWD/tools python3 -u -X faulthandler .github/scripts/windows_diag_import.py"
+
+      - name: Fast test tier
+        # continue-on-error THIS round: run 14's inventory measured the distro
+        # python39-matplotlib (3.5.1) broken against python39-numpy (2.0.1) —
+        # '_ARRAY_API not found', an upstream Cygwin packaging skew, not ours.
+        # Tests importing matplotlib will fail on that alone; run to MEASURE
+        # the damage without blocking the flow step behind it.
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pytest -q -r fs"
+
+      - name: Run a .buda flow
+        shell: cmd
+        run: |
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PYTHONPATH=build:src:tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda"
+
+  mingw:
+    # Fourth path: mingw-w64 — GCC producing NATIVE Windows binaries, driven
+    # from bash.  One honesty note this job MEASURES rather than asserts:
+    # "the mingw64 that comes with Git for Windows" is the SHELL, not the
+    # toolchain — Git Bash ships no gcc/make.  (Run 14's inventory step makes
+    # the illusion measurable: the runner's Git Bash DOES resolve gcc — at
+    # /c/mingw64/bin, a SEPARATE toolchain the runner image pre-installs, with
+    # ninja from Chocolatey and cmake from its own installer.  Nothing under
+    # Git's tree.  A dev box without those extras gets ABSENT for all of
+    # them.)  The compiler comes from MSYS2
+    # (preinstalled on this runner; on a dev box: install MSYS2), and the
+    # UCRT64 flavor is chosen deliberately: modern CPython links the UCRT, and
+    # mixing CRTs across the extension boundary is the class of silent bug the
+    # MSVC lane needed nine runs to characterize.
+    #
+    # Why this lane is interesting: unlike Cygwin, the binaries are native, so
+    # they link the NATIVE CPython — and every pip wheel works (numpy,
+    # matplotlib, even the web deps).  Cygwin's package-inventory problem does
+    # not exist here.  Unlike MSVC, it is the GCC branch of the build
+    # (-march, -ffp-contract=off) and mingw auto-exports DLL symbols.
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    env:
+      MPLBACKEND: Agg
+      PYTHONUTF8: '1'
+
+    steps:
+      - name: Force LF checkout
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: What does Git Bash actually provide? (the misconception, measured)
+        # `shell: bash` on a Windows runner IS Git for Windows' bash.  Record
+        # what a Git-Bash-only user really has before we reach for MSYS2.
+        shell: bash
+        continue-on-error: true
+        run: |
+          uname -a
+          for t in gcc g++ make cmake ninja python python3; do
+            printf '%-8s -> %s\n' "$t" "$(command -v $t || echo ABSENT)"
+          done
+
+      - name: Install the mingw-w64 toolchain (MSYS2 UCRT64)
+        shell: pwsh
+        run: |
+          C:\msys64\usr\bin\bash.exe -lc 'pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja'
+        env:
+          MSYSTEM: UCRT64
+
+      - name: Install Python packages (native CPython — wheels work here)
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pybind11 pytest pytest-bdd matplotlib numpy pytest-xdist
+          python -m pip install -r src/web/requirements.txt
+
+      - name: Configure and build (UCRT64 gcc + Ninja, native CPython)
+        # PATH gets the hosted CPython FIRST: its dir contains python3.exe, so
+        # CMakeLists' python3 lookup and PYBIND11_FINDPYTHON both resolve to
+        # the NATIVE interpreter (not an MSYS python — none is installed).
+        shell: cmd
+        run: |
+          C:\msys64\usr\bin\bash.exe -leo pipefail -c "export MSYSTEM=UCRT64 && source /etc/profile && export PATH=\"$(cygpath -u '%pythonLocation%'):$PATH\" && cd $(cygpath '%CD%') && which gcc g++ cmake ninja python3 && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build"
+
+      - name: Where did the artifacts land?
+        shell: pwsh
+        continue-on-error: true
+        run: Get-ChildItem -Recurse build -Include *.pyd,*.dll | Select-Object FullName,Length
+
+      - name: DLL dependency reality (objdump)
+        # The measured basis for every runtime-DLL claim in the docs: which
+        # DLLs each artifact ACTUALLY imports.  A self-contained build shows
+        # only system DLLs (KERNEL32, msvcrt/ucrt, python3xx) — any
+        # libstdc++-6/libgcc_s_seh-1/libwinpthread-1 line here means the
+        # static-runtime link options missed a target (run 14: buda_db.pyd).
+        shell: cmd
+        continue-on-error: true
+        run: |
+          C:\msys64\usr\bin\bash.exe -lc "cd $(cygpath '%CD%') && for f in build/*.dll build/*.pyd; do echo \"== $f\"; /ucrt64/bin/objdump -p \"$f\" | grep 'DLL Name' || true; done"
+
+      - name: Import smoke
+        shell: cmd
+        run: |
+          set "PYTHONPATH=%CD%\build;%CD%\src;%CD%\tools"
+          python -u -X faulthandler .github\scripts\windows_diag_import.py
+
+      - name: Fast test tier (documented no-PYTHONPATH form)
+        shell: cmd
+        run: python -m pytest -q -r fs
+
+      - name: Run a .buda flow
+        shell: cmd
+        run: |
+          set "PYTHONPATH=%CD%\build;%CD%\src;%CD%\tools"
+          python src\buda_cli.py --no-viz flow\four_blocks.buda

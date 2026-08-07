@@ -216,4 +216,62 @@ set_target_properties(buda PROPERTIES
     BUILD_RPATH   "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
+if(MINGW)
+    # Native CPython does not search PATH for an extension's DLL dependencies
+    # (Python >= 3.8), so a mingw-built buda_core.dll must not depend on the
+    # GCC runtime DLLs living in the MSYS2 tree.  Measured (doc-validation run
+    # 13): the UCRT64 build succeeds and the import dies with "Could not find
+    # module 'libbuda_core.dll' (or one of its dependencies)" -- the
+    # dependencies being libstdc++-6/libgcc_s_seh-1/libwinpthread-1 from
+    # /ucrt64/bin.  ALL THREE artifacts need the treatment: run 14 measured
+    # that buda_core alone is not enough — the import then dies one layer up,
+    # inside buda_db.pyd (650KB: visibly no static runtime; the earlier
+    # assumption that pybind11 does this for its module targets was wrong).
+    # --exclude-libs=ALL is the mandatory companion: MinGW auto-export
+    # otherwise re-EXPORTS the statically linked runtime's symbols from
+    # buda_core.dll, and linking buda_db against libbuda_core.dll.a plus its
+    # own static libgcc_eh then dies with
+    #   multiple definition of '_Unwind_Resume'
+    # (measured, run 15).  Excluding static-library members from the export
+    # table keeps buda_core's OWN API auto-exported while the runtime stays
+    # internal to each artifact.
+    foreach(_tgt buda_core buda_db buda)
+        target_link_options(${_tgt} PRIVATE
+            -static-libgcc -static-libstdc++
+            "LINKER:-Bstatic,--whole-archive" "LINKER:-lwinpthread"
+            "LINKER:--no-whole-archive" "LINKER:-Bdynamic"
+            "LINKER:--exclude-libs=ALL")
+    endforeach()
+endif()
+
+if(CYGWIN)
+    # Cygwin ld auto-exports EVERY symbol of a DLL by default, and on the
+    # pybind11 modules that trips a binutils pathology on lambda-heavy
+    # template instantiations:
+    #   ld: cannot export _ZZN8pybind11...: symbol wrong type (4 vs 3)
+    # (measured: doc-validation run 12, gcc 14 on cygwin64, at the final link
+    # of buda.cpython-39-x86_64-cygwin.dll).  The extension modules need
+    # exactly ONE export each — PyInit_<mod> — and it must be declared HERE:
+    # Cygwin gcc does not define _WIN32, so pybind11's PYBIND11_EXPORT
+    # degrades to ELF visibility("default"), which is NOT a PE dllexport
+    # (measured, run 15: --exclude-all-symbols alone linked fine but the
+    # import died with "dynamic module does not define module export function
+    # (PyInit_buda_db)"; run 13's auto-export pathology already implied no
+    # explicit dllexports existed, since any would have disabled auto-export).
+    # Fix at the SOURCE level: pre-define PYBIND11_EXPORT as a real PE
+    # dllexport — pybind11 guards it with #if !defined(PYBIND11_EXPORT), so
+    # this is its own sanctioned override, and it makes Cygwin behave exactly
+    # like pybind11's _WIN32 branch.  With explicit dllexports present, ld
+    # DISABLES auto-export (killing the run-12 lambda pathology) and exports
+    # PyInit_<mod>.  (A .def listed via target_sources was tried first and
+    # never reached the link line on the Cygwin platform — run 16 hit the
+    # verbatim run-12 auto-export error, proving the .def was dropped.)
+    # buda_core stays on default auto-export: its symbols are what the
+    # modules link against, and it links fine.
+    foreach(_mod buda buda_db)
+        target_compile_definitions(${_mod} PRIVATE
+            "PYBIND11_EXPORT=__attribute__((dllexport))")
+    endforeach()
+endif()
+
 install(TARGETS buda buda_db buda_core DESTINATION build)
