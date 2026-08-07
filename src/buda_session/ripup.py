@@ -2629,7 +2629,32 @@ class RipupMixin:
                       f"escalation ({n} segment(s)).")
         return n
 
-    def _negotiate_congestion(self, max_iter=5, use_class_moves=False):
+    def _stage_a_scope_advisory(self, who: str):
+        """Stage-a healer SCOPE advisory (caps-flow UX, 2026-08-07): the
+        stage-a metric is NUTS overlaps ONLY, so a clean stage-a line
+        ("metric already 0 — nothing to do" / "done: metric ...->0") can sit
+        right above a dirty `check_design` — keepout-seated segments (the
+        exhausted-window commits `NUTSResult.num_keepout_conflicts` counts)
+        and supply-doomed seats (the #536 census) are invisible to the
+        overlap metric and only surface as DNUTS opens at stage b.  Say so
+        whenever such seats exist, so a stage-a healer's clean exit is never
+        read as "design clean".  Print-only; silent when there is nothing to
+        report (a clean flow's log is unchanged)."""
+        n_keep = getattr(self.nuts_result, "num_keepout_conflicts", 0) or 0
+        n_doom = len(self._doomed_seats())
+        if not n_keep and not n_doom:
+            return
+        parts = []
+        if n_keep:
+            parts.append(f"{n_keep} keepout-seated segment(s)")
+        if n_doom:
+            parts.append(f"{n_doom} supply-doomed seat(s)")
+        print(f"[{who}] advisory: stage-a metric is overlaps-only — "
+              f"{', '.join(parts)} remain and will surface as DNUTS opens "
+              f"at stage b (details: check_design).", flush=True)
+
+    def _negotiate_congestion(self, max_iter=5, use_class_moves=False,
+                              use_press=False):
         """Measured-congestion negotiation (wishlist-healer item 1).  Instead of
         guess-and-test over topology candidates, feed the ACTUAL failures back
         into the planner as demand on the exact bands where they happened
@@ -2685,6 +2710,8 @@ class RipupMixin:
         # documented finisher).  The heal's own checkpoint persists the route.
         if self._rr_m_primary(m0) == 0:
             print(f"[negotiate] stage {stage}: metric already 0 — nothing to do.")
+            if stage == 'a':
+                self._stage_a_scope_advisory("negotiate")
             return
         what = "DNUTS opens" if stage == 'b' else "NUTS overlaps"
         print(f"[negotiate] stage {stage} ({what}): start "
@@ -2692,6 +2719,7 @@ class RipupMixin:
         self._rr_t_init()
         history = {}          # contention rectangle -> times seen (pressure)
         accepted = 0
+        last_fail = None      # failed retry's metric (repeat detection)
         for it in range(1, max_iter + 1):
             cur = metric()
             if cur == ((0, 0) if isinstance(cur, tuple) else 0):
@@ -2776,6 +2804,7 @@ class RipupMixin:
             new = metric()
             if new < cur:
                 accepted += 1
+                last_fail = None
                 if tmpl_neg:
                     # Replay the persistence the _rr_in_trial guard deferred
                     # (template decisions + any dogleg adoption) — the same
@@ -2791,16 +2820,56 @@ class RipupMixin:
                       f"{self._rr_m_str(cur)}->{self._rr_m_str(new)}", flush=True)
             else:
                 restore(snap)
-                print(f"[negotiate] iter {it}: no improvement "
-                      f"(metric {self._rr_m_str(cur)}->{self._rr_m_str(new)}) "
-                      f"— restored, stop.", flush=True)
-                break
+                # `press` (opt-in): don't stop at the FIRST non-improving
+                # iteration — `history` persists across iterations, so a
+                # retry re-injects the SAME contention rectangles at grown
+                # PathFinder pressure (amount scales with history[key]), the
+                # escalation the first-failure stop computes and then throws
+                # away.  Accepts stay strict and failed iterations restore;
+                # cost is bounded by max_iter AND by repeat detection: a
+                # failed retry reproducing the SAME metric as the previous
+                # failure means the deterministic replans are insensitive to
+                # the grown amounts (caps/mix stage b: the failure repeats
+                # byte-identically at doubled pressure) — certified waste,
+                # stop.  OPT-IN because the corpus measured 0 better/1 worse
+                # as a default: on mix2_fast_on_aligned_sql the pressed
+                # retries DO crack the stall on negotiate's own metric
+                # (150 (ovl 12) -> 130 (ovl 6)) but the improved hand-off
+                # shifts ripup's greedy basin and the flow ENDPOINT lands
+                # worse (2/16/1 -> 4/28/2).  Default = the historical
+                # first-failure stop, byte-identical.
+                if not use_press:
+                    print(f"[negotiate] iter {it}: no improvement "
+                          f"(metric {self._rr_m_str(cur)}->"
+                          f"{self._rr_m_str(new)}) — restored, stop.",
+                          flush=True)
+                    break
+                if new == last_fail:
+                    print(f"[negotiate] iter {it}: no improvement "
+                          f"(metric {self._rr_m_str(cur)}->"
+                          f"{self._rr_m_str(new)}) — restored; identical "
+                          f"outcome under escalated pressure, stop.",
+                          flush=True)
+                    break
+                last_fail = new
+                if it < max_iter:
+                    print(f"[negotiate] iter {it}: no improvement "
+                          f"(metric {self._rr_m_str(cur)}->"
+                          f"{self._rr_m_str(new)}) — restored, pressure "
+                          f"escalates.", flush=True)
+                else:
+                    print(f"[negotiate] iter {it}: no improvement "
+                          f"(metric {self._rr_m_str(cur)}->"
+                          f"{self._rr_m_str(new)}) — restored, stop.",
+                          flush=True)
         # Never leak injected demand into later commands: ripup_reroute's
         # replan_bundle trials would silently re-apply it.
         self.planner.clear_injected_demand()
         print(f"[negotiate] done: metric {self._rr_m_str(m0)}->"
               f"{self._rr_m_str(metric())} "
               f"after {accepted} accepted iteration(s).", flush=True)
+        if stage == 'a':
+            self._stage_a_scope_advisory("negotiate")
         print(f"[negotiate] timing: {self._rr_t_str()}", flush=True)
         _pp = self._rr_t_passes_str()
         if _pp:
@@ -2879,6 +2948,8 @@ class RipupMixin:
             entry_clean = (self._rr_m_primary(m0) == 0)
         if entry_clean:
             print(f"[ripup_reroute] stage {stage}: metric already 0 — nothing to do.")
+            if stage == 'a':
+                self._stage_a_scope_advisory("ripup_reroute")
             return
         what = "DNUTS opens" if stage == 'b' else "NUTS overlaps"
         print(f"[ripup_reroute] stage {stage} ({what}): "
@@ -3288,6 +3359,8 @@ class RipupMixin:
             print(f"[ripup_reroute] WARNING: {len(disc)} bundle(s) end "
                   f"DISCONNECTED (electrically severed, not a DNUTS open): "
                   f"{disc}", flush=True)
+        if stage == 'a':
+            self._stage_a_scope_advisory("ripup_reroute")
         print(f"[ripup_reroute] timing: {self._rr_t_str()}", flush=True)
         _pp = self._rr_t_passes_str()
         if _pp:

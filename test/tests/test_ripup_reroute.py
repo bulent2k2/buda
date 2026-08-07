@@ -491,7 +491,7 @@ def test_negotiate_clears_stale_seg_layer_pins():
 
 # ---- item 5: deterministic tiny stage-b (DNUTS-open) canned fixture ---------
 
-def _build_dnuts_open_session():
+def _build_dnuts_open_session(detailed=True):
     """Deterministic stage-b fixture (wishlist-healer item 5): an all-POWER
     add_grid_override kills M4's signal tracks exactly under the pinned L_HV
     trunk's Hanan window (x[600,2600] y[900,1550]), so DetailedNUTS finds 0
@@ -512,8 +512,10 @@ def _build_dnuts_open_session():
         "add_bus a[8] D1.p R.p",
         "run_bundler", "generate_topologies",
         "select_topology 1 1",                 # pin L_HV through the dead corridor
-        "run_planner", "run_nuts", "run_detailed_nuts",
+        "run_planner", "run_nuts",
     ]
+    if detailed:
+        cmds.append("run_detailed_nuts")
     with contextlib.redirect_stdout(io.StringIO()):
         for c in cmds:
             s.do_command(c)
@@ -538,6 +540,78 @@ def test_canned_stage_b_ripup_clears_open():
         s.do_command("ripup_reroute")
     assert s.detailed_result.num_unplaced == 0
     assert s.nuts_result.num_overlaps == 0
+
+
+# ---- stage-a scope advisory + negotiate pressure escalation (2026-08-07) ----
+
+def test_stage_a_advisory_names_doomed_seats():
+    """A stage-a healer's clean exit over a supply-doomed seat must say so:
+    the dead-corridor fixture stopped BEFORE run_detailed_nuts has zero NUTS
+    overlaps (the stage-a metric) yet its pinned M4 trunk sits on 0 signal
+    tracks vs 8 member bits — invisible to the overlap metric, a guaranteed
+    DNUTS open.  Both healers' stage-a exits print the scope advisory."""
+    s = _build_dnuts_open_session(detailed=False)
+    assert s.nuts_result.num_overlaps == 0
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion")
+    out = buf.getvalue()
+    assert "already 0" in out
+    assert "stage-a metric is overlaps-only" in out
+    assert "supply-doomed seat(s)" in out
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("ripup_reroute")
+    out = buf.getvalue()
+    assert "stage-a metric is overlaps-only" in out
+
+
+@pytest.mark.mid
+def test_stage_a_advisory_silent_when_clean():
+    """No keepout-seated segments and no doomed seats -> no advisory: a clean
+    flow's log is unchanged."""
+    s = _build_session(narrow=False)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion")
+    assert "advisory" not in buf.getvalue()
+
+
+@pytest.mark.mid
+def test_negotiate_press_escalates_then_stops_on_repeat():
+    """With the opt-in `press` flag a non-improving iteration no longer ends
+    the run: the loop restores and retries under grown PathFinder history
+    pressure — and stops as soon as a failed retry reproduces the SAME metric
+    (the deterministic replans are insensitive to the grown amounts:
+    certified waste).  Forced here by no-op'ing the iteration body so every
+    attempt fails identically."""
+    s = _build_session(narrow=True)
+    assert s.nuts_result.num_overlaps > 0
+    s._negotiate_iteration = lambda *a, **k: None   # every iteration fails
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion press")
+    out = buf.getvalue()
+    assert "pressure escalates" in out              # iter 1: retry, not stop
+    assert "identical outcome under escalated pressure, stop." in out  # iter 2
+    assert "iter 3" not in out                      # repeat detection bounds it
+
+
+@pytest.mark.mid
+def test_negotiate_default_stops_at_first_failure():
+    """Without `press` the historical contract holds: the first non-improving
+    iteration restores and stops (byte-identical default — the corpus
+    measured pressed retries 0 better / 1 worse as a default)."""
+    s = _build_session(narrow=True)
+    assert s.nuts_result.num_overlaps > 0
+    s._negotiate_iteration = lambda *a, **k: None   # every iteration fails
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion")
+    out = buf.getvalue()
+    assert "restored, stop." in out
+    assert "pressure escalates" not in out
+    assert "iter 2" not in out
 
 
 def _full_wrapper_state(s):
