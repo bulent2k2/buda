@@ -1072,6 +1072,12 @@ class PersistMixin:
                 expanded_to_template.setdefault(ew.input.original_bundle.id,
                                                 tid)
         original_ids = {b.id for b in self.bdb.all_bundles()}
+        # Busterm-row dedup across THIS pass (same contract as the
+        # generation-time persist): 'tb:' ids are geometry-fingerprinted, so
+        # a busterm shared by many expanded instances' topologies (e.g. the
+        # top-level blocks every cross-hierarchy bundle taps) writes its wide
+        # JSON row once; every candidate still writes its cheap link rows.
+        seen_busterms = set()
         n = 0
         for w in self.bundles:
             sel = w.plan.selected_topology_index
@@ -1080,7 +1086,8 @@ class PersistMixin:
             hbid = w.input.original_bundle.id
             bid = str(hbid)
             if hbid in expanded_to_template:        # genuine hier expanded instance
-                self._add_expanded_bundle(w, sel, expanded_to_template)
+                self._add_expanded_bundle(w, sel, expanded_to_template,
+                                          seen_busterms)
             else:                                   # normal bundle (flat / cross-block)
                 if bid not in original_ids:         # not persisted yet → persist fully
                     self._persist_normal_bundle(w)

@@ -291,7 +291,8 @@ def bottom_up_congruence_issues(comps, cell, ref_name=None, cache=None,
 
 class HierMixin:
 
-    def _add_expanded_bundle(self, w, sel, expanded_to_template):
+    def _add_expanded_bundle(self, w, sel, expanded_to_template,
+                             seen_busterms=None):
         """Add one expanded per-instance bundle row + its selected topology."""
         import json
         hb = w.input.original_bundle
@@ -383,7 +384,7 @@ class HierMixin:
             # Logical seg-busterm links + TEG-over bridges, so a
             # `load_pipeline expanded` resume restores connectivity (and any
             # bridge) for every persisted candidate.
-            self._persist_topology_annotations(bid, ci, topo)
+            self._persist_topology_annotations(bid, ci, topo, seen_busterms)
 
     def _restore_user_topos(self, data):
         """Replay sidecar-persisted TopoEdit op-logs ('user_topo': base uid +
