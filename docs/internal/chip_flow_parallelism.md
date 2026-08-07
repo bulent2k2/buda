@@ -180,6 +180,76 @@ C1's dirty-tracking leaves persistence visible in the profile.
 - The escalation loops' round structure (each round's dead-span set
   depends on the previous round's solve).
 
+## Implemented — C1: selective expanded-instance persistence (2026-08-07)
+
+Two composed levers, landed together:
+
+- **Busterm-row dedup in the planner path** (the measured prototype):
+  `_persist_planner_output` threads a per-pass `seen_busterms` set
+  through `_add_expanded_bundle` → `_persist_topology_annotations`, the
+  same contract the generation-time persist already used — the wide
+  JSON busterm row writes once per geometry-fingerprinted id, link rows
+  per candidate as before.  DB endstate identical by construction
+  (rows are content-identical per id).
+- **Dirty-tracking (`selective=True`)** at the RE-persist sites (the
+  run_nuts escalation re-persist, `_checkpoint_routing`; the
+  run_planner command itself stays a full rewrite — a fresh plan is a
+  semantic reset): each expanded wrapper gets a cheap fingerprint
+  (selected `topo_uid` via the zero-copy `selected_topo_key`, the
+  assigned `seg_layers`, the lock flag, and the instance-local USER
+  extra uids — every row-shaping input), memoized per persist
+  (`_persisted_plan_fp`).  A selective pass rewrites ONLY changed
+  bundles through the new per-bundle `BDB::clear_expanded_bundle(id)`
+  (the parameterized twin of the bulk clear, same child-before-parent
+  order); an id-set mismatch falls back to the full path.  The memo is
+  invalidated everywhere expanded rows can change under it (`open_bdb`,
+  `load_pipeline`, `_persist_bundles`' clear-and-rewrite).
+
+Guards: `test_bdb_planner_persist.py` — a no-change selective persist
+rewrites ZERO bundles and the serialized SQL dump is line-identical; a
+changed-bundle selective persist matches a forced full rewrite of the
+same state exactly; an id-set mismatch takes the full path.  Corpus:
+0/0/41, WL ±0.  Fast 1805 + mid 598 green.
+
+## Implemented — P5: parallel hier candidate generation (2026-08-07)
+
+`buda.generate_candidates_batch(generators, srcs, dsts, n_threads)`
+(bind_routing.cpp): fan a batch of PRE-CONFIGURED per-bundle
+`TopologyGenerator`s (1:1 task:generator; shared floorplans are
+read-only — audited: no mutable state, no const_cast, `get_hanan_grid`
+builds fresh) across a thread pool with the GIL released.
+Print-transparency machinery: `TopologyGenerator::set_note_stream`
+redirects the 15 "[TopoGen]" note sites (all generator members) into a
+per-task buffer, returned per task and written by the caller exactly
+where the sequential loop printed them.
+
+`cmd_generate_hier_topologies` splits the per-bundle work into
+`_prep_hier_topo_gen` (the 3-case endpoint/floorplan/knob resolution —
+skip warnings buffered and replayed in visit order) → the batch call →
+`_install_hier_topo_result` (pool install + fan-in taper + the
+HierTopo report line) sequentially in bundle order, with the knob-memo
+replay sequential as before.  Gate: >1-thread pool
+(`BUDA_TOPO_THREADS` explicit > `BUDA_THREADS` governor > hardware)
+AND ≥8 bundles; the sequential loop is otherwise unchanged, and every
+other generation caller (per-hbundle, additive, rotation-clone) stays
+sequential through the same shared pieces.
+
+Validated: the chip vehicle's generation flow-log is byte-identical
+seq vs batch (1145 content lines, all [TopoGen] notes in position;
+only timing digits differ); `test_hier_topo_batch.py` pins pool/print
+identity on the hier_mixed fixture with the gate lowered.  Measured:
+`generate_hier_topologies` **11.0 → 6.4 s** at 4 threads (the C++
+generation 6.6 → ~1.7 s; the remainder is the still-serial
+`_persist_topologies`).
+
+### Composite (C1 + P5, same box, `BUDA_THREADS=4`)
+
+`chip_stack_topdown` **103.1 → 70.7 s (−31 %)** with a byte-identical
+endpoint: generate 10.7 → 6.2, planner 45.9 → 35.6, run_nuts 12.8 →
+4.2, dnuts 9.5 → 9.6, negotiate 22.2 → 13.1.  What remains on top:
+P8 (the dnuts cull-heal's full re-solves — now the biggest
+non-planner residual), P6a, and the planner's sequential core.
+
 ## 4. Recommended order
 
 1. **C1 dirty-tracking + dedup** — the ~20 s that is pure waste; no

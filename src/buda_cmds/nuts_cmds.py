@@ -118,7 +118,7 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
             # could recreate the dead assignment.  Mirror the stage-b heal's
             # _checkpoint_routing (Codex #351 P2).  Trial-guarded inside.
             if session.bdb is not None:
-                session._persist_planner_output()
+                session._persist_planner_output(selective=True)
     # A fresh abstract solve invalidates any prior detailed result:
     # ripup_reroute / negotiate_congestion key their stage off
     # detailed_result, and hill-climbing against a detailed route of

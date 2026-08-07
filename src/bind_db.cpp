@@ -359,6 +359,7 @@ void bind_db(py::module_& m) {
         .def("reset_assigned_layers", &BDB::reset_assigned_layers,
              py::arg("bundle_id"))
         .def("clear_expanded_bundles", &BDB::clear_expanded_bundles)
+        .def("clear_expanded_bundle", &BDB::clear_expanded_bundle)
         .def("add_bus_segment",   &BDB::add_bus_segment, py::arg("r"))
         .def("add_bus_via",       &BDB::add_bus_via, py::arg("r"))
         .def("clear_bus_routing", &BDB::clear_bus_routing)

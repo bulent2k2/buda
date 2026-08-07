@@ -3333,6 +3333,28 @@ void BDB::clear_expanded_bundles() {
         "DELETE FROM bundle WHERE is_replicated=1;");
 }
 
+void BDB::clear_expanded_bundle(const std::string& bundle_id) {
+    // Per-bundle twin of clear_expanded_bundles (same child-before-parent
+    // order, same route_snapshot invalidation) for the selective re-persist
+    // path — only rows keyed to THIS bundle id are dropped.
+    static const char* kTables[] = {
+        "net_via", "net_segment", "bus_via", "bus_segment",
+        "topology_seg_busterm", "topology_seg_conn",
+        "topology_bridge_segment", "topology_segment", "topology",
+        "bundle_busterm", "bundle_net",
+    };
+    _exec("DELETE FROM route_snapshot;");
+    for (const char* t : kTables) {
+        Stmt s(_db, ("DELETE FROM " + std::string(t) +
+                     " WHERE bundle_id=?").c_str());
+        sqlite3_bind_text(s, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(s);
+    }
+    Stmt s(_db, "DELETE FROM bundle WHERE id=? AND is_replicated=1");
+    sqlite3_bind_text(s, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
 // ── Abstract-NUTS bus routing persistence ────────────────────────────────────
 
 void BDB::add_bus_segment(const BusSegRow& r) {

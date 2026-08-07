@@ -1049,60 +1049,33 @@ class HierMixin:
         return (f"{len(nets)} net{'' if len(nets) == 1 else 's'}: "
                 f"{self._bundle_net_summary(nets)}")
 
-    def _generate_hier_topo_one(self, w, use_center, use_double_detour,
-                                fp_cache, comps_by_name, use_multi_trunk=False,
-                                additive=False, use_hanan_loci=True,
-                                use_spine_relays=False):
-        """Generate topology candidates for a single HBundle wrapper.
+    def _prep_hier_topo_gen(self, w, use_center, use_double_detour,
+                            fp_cache, comps_by_name, use_multi_trunk,
+                            use_hanan_loci, use_spine_relays):
+        """Resolve one HBundle's generation task WITHOUT generating.
 
-        Updates w.input.candidates in place. Returns candidate count.
-        fp_cache is a dict shared across calls; pass {} for a fresh cache.
-        comps_by_name is {name: ComponentRow} from bdb.all_components().
-        use_multi_trunk adds two-level BITRUNK_HVH/VHV datapath trees (opt-in),
-        as in the flat generate_topologies.
-        use_hanan_loci samples trunk loci ON in-bbox Hanan lines as well as at
-        channel midpoints (DEFAULT-ON since the hanan_loci default flip; pass
-        False — the `no_hanan_loci` command flag / knob-memo opt-out — for a
-        midpoint-only pool), as in the flat generate_topologies.
-
-        additive=True is the generate_more_topologies contract: the fresh
-        candidates are MERGED into the existing pool (topo_uid dedup + WL
-        re-sort with the selection/dogleg refs remapped) instead of
-        replacing it — existing candidates, the pin, and plan state are
-        untouched.  Returns the number of NEW candidates then.
-        """
+        Returns (tg, src, dsts, meta) — a configured TopologyGenerator plus
+        the endpoints and the install/report context — or None when the
+        bundle is skipped (the skip warning prints here, exactly the
+        sequential text).  Extracted from _generate_hier_topo_one so the
+        parallel batch path (generate_candidates_batch) shares every line
+        of the 3-case dispatch with the sequential loop."""
         b = w.input.original_bundle
         nets_suffix = self._bundle_nets_suffix(w)   # rides on each per-bundle log line
-
-        def install(fresh):
-            # Shared install tail of the 3 cases: replace (bulk semantics —
-            # plan reset, pin re-attach by uid, USER candidates kept) or
-            # merge additively.  Returns (n_for_return, log_detail).
-            if additive:
-                added, dups = self._merge_more_candidates(w, fresh)
-                return added, (f"+{added} new candidate(s), {dups} "
-                               f"duplicate(s) skipped, pool now "
-                               f"{len(w.input.candidates)}")
-            old_pin_uid = self._pinned_uid(w)
-            kept_user = self._user_candidates(w)
-            w.input.candidates = fresh
-            self._reset_plan_for_regen(w, old_pin_uid, kept_user)
-            n = len(w.input.candidates)
-            return n, f"{n} candidates"
 
         if b.cell_context and b.entry_busterm_ids:
             # Case (a): cell-local floorplan
             parent_name = b.instances[0] if b.instances else None
             if parent_name is None:
                 print(f"  Warning: bundle {b.id} has cell_context but no instances — skipping")
-                return 0
+                return None
             cache_key = ('cell', parent_name)
             if cache_key not in fp_cache:
                 fp_cache[cache_key] = self._build_cell_local_floorplan(parent_name)
             cell_fp = fp_cache[cache_key]
             if cell_fp is None:
                 print(f"  Warning: could not build cell-local fp for {parent_name!r} — skipping")
-                return 0
+                return None
             tg = self._make_topo_gen(cell_fp, use_center, use_double_detour,
                                      use_multi_trunk, use_hanan_loci,
                                      use_spine_relays)
@@ -1131,17 +1104,12 @@ class HierMixin:
                 src_local = entries[0]
                 dsts_local = exits
                 fanin_a = False
-            n, detail = install(tg.generate_candidates(src_local, dsts_local))
-            self._derive_hier_fanin_bits(w, cell_fp, local=True)
             label = (f"[{','.join(dsts_local)}]→{src_local} fan-in" if fanin_a
                      else f"{src_local}→{dsts_local[0]}")
-            if n == 0 and not w.input.candidates:
-                print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
-                      f"0 candidates — bundle will be unrouted!  [cell:{b.cell_context}] {nets_suffix}")
-            else:
-                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
-                      f"{detail}  [cell:{b.cell_context}] {nets_suffix}")
-            return n
+            meta = dict(fp=cell_fp, fanin_local=True, label=label,
+                        tag=f"[cell:{b.cell_context}]", pad="  ",
+                        nets_suffix=nets_suffix)
+            return tg, src_local, dsts_local, meta
 
         elif b.drv_spec_depth >= 0:
             # Case (c): cross-level — custom floorplan from actual endpoint blocks.
@@ -1158,37 +1126,31 @@ class HierMixin:
                 src = b.drv_spec_path
                 dsts = list(b.rcv_spec_paths)
             fp = self._apply_fp_session_settings(buda.Floorplan())
-            ok = True
             for blk in [src, *dsts]:
                 c = comps_by_name.get(blk)
                 if c is None:
                     print(f"  Warning: endpoint comp {blk!r} not found — "
                           f"skipping bundle {b.id}")
-                    ok = False; break
+                    return None
                 fp.add_block(blk, int(round(c.x1)), int(round(c.y1)),
                              int(round(c.x2)), int(round(c.y2)))
-            if not ok:
-                return 0
             tg = self._make_topo_gen(fp, use_center, use_double_detour,
                                      use_multi_trunk, use_hanan_loci,
                                      use_spine_relays)
-            n, detail = install(tg.generate_candidates(src, dsts))
             if fanin_c:
-                # Per-bit taper (no-op / conservative full width on a resumed
-                # session whose net_drivers were not persisted).
-                self._derive_hier_fanin_bits(w, fp, local=False)
                 label = f"[{','.join(dsts)}]→{src} fan-in"
             else:
                 label = (f"{src}→{dsts[0]}" if len(dsts) == 1
                          else f"{src}→[{','.join(dsts)}]")
             tag = (f"[cross-level D{b.drv_spec_depth}→D{b.rcv_spec_depth}"
                    f"{' fan-in' if fanin_c else ''}]")
-            if n == 0 and not w.input.candidates:
-                print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
-                      f"0 candidates — bundle will be unrouted!  {tag} {nets_suffix}")
-            else:
-                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {detail}  {tag} {nets_suffix}")
-            return n
+            # Per-bit taper only for the fan-in form (no-op / conservative
+            # full width on a resumed session whose net_drivers were not
+            # persisted).
+            meta = dict(fp=fp, fanin_local=False if fanin_c else None,
+                        label=label, tag=tag, pad="  ",
+                        nets_suffix=nets_suffix)
+            return tg, src, dsts, meta
 
         else:
             # Case (b): same-level cross-block — BDB floorplan at the
@@ -1207,20 +1169,79 @@ class HierMixin:
                                      use_spine_relays)
             if src is None:
                 print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
-                return 0
-            n, detail = install(tg.generate_candidates(src, dsts))
-            self._derive_hier_fanin_bits(w, depth_fp, local=False)
+                return None
             if b.reason.startswith('FANIN:'):
                 label = f"[{','.join(dsts)}]→{src} fan-in"
             else:
                 label = (f"{src}→{dsts[0]}" if len(dsts) == 1
                          else f"{src}→[{','.join(dsts)}]")
-            if n == 0 and not w.input.candidates:
-                print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
-                      f"0 candidates — bundle will be unrouted! {nets_suffix}")
-            else:
-                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {detail} {nets_suffix}")
-            return n
+            meta = dict(fp=depth_fp, fanin_local=False, label=label,
+                        tag="", pad=" ", nets_suffix=nets_suffix)
+            return tg, src, dsts, meta
+
+    def _install_hier_topo_result(self, w, fresh, meta, additive=False):
+        """Install one HBundle's freshly generated pool and print the
+        per-bundle report line — the shared tail of the sequential and
+        batch generation paths.  Returns the candidate count (new-candidate
+        count under additive)."""
+        b = w.input.original_bundle
+        if additive:
+            added, dups = self._merge_more_candidates(w, fresh)
+            n, detail = added, (f"+{added} new candidate(s), {dups} "
+                                f"duplicate(s) skipped, pool now "
+                                f"{len(w.input.candidates)}")
+        else:
+            old_pin_uid = self._pinned_uid(w)
+            kept_user = self._user_candidates(w)
+            w.input.candidates = fresh
+            self._reset_plan_for_regen(w, old_pin_uid, kept_user)
+            n = len(w.input.candidates)
+            detail = f"{n} candidates"
+        if meta['fanin_local'] is not None:
+            self._derive_hier_fanin_bits(w, meta['fp'],
+                                         local=meta['fanin_local'])
+        label, tag, pad = meta['label'], meta['tag'], meta['pad']
+        suffix = (f"{tag} " if tag else "") + meta['nets_suffix']
+        if n == 0 and not w.input.candidates:
+            print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
+                  f"0 candidates — bundle will be unrouted!{pad}{suffix}")
+        else:
+            print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
+                  f"{detail}{pad}{suffix}")
+        return n
+
+    def _generate_hier_topo_one(self, w, use_center, use_double_detour,
+                                fp_cache, comps_by_name, use_multi_trunk=False,
+                                additive=False, use_hanan_loci=True,
+                                use_spine_relays=False):
+        """Generate topology candidates for a single HBundle wrapper.
+
+        Updates w.input.candidates in place. Returns candidate count.
+        fp_cache is a dict shared across calls; pass {} for a fresh cache.
+        comps_by_name is {name: ComponentRow} from bdb.all_components().
+        use_multi_trunk adds two-level BITRUNK_HVH/VHV datapath trees (opt-in),
+        as in the flat generate_topologies.
+        use_hanan_loci samples trunk loci ON in-bbox Hanan lines as well as at
+        channel midpoints (DEFAULT-ON since the hanan_loci default flip; pass
+        False — the `no_hanan_loci` command flag / knob-memo opt-out — for a
+        midpoint-only pool), as in the flat generate_topologies.
+
+        additive=True is the generate_more_topologies contract: the fresh
+        candidates are MERGED into the existing pool (topo_uid dedup + WL
+        re-sort with the selection/dogleg refs remapped) instead of
+        replacing it — existing candidates, the pin, and plan state are
+        untouched.  Returns the number of NEW candidates then.
+        """
+        prep = self._prep_hier_topo_gen(w, use_center, use_double_detour,
+                                        fp_cache, comps_by_name,
+                                        use_multi_trunk, use_hanan_loci,
+                                        use_spine_relays)
+        if prep is None:
+            return 0
+        tg, src, dsts, meta = prep
+        fresh = tg.generate_candidates(src, dsts)
+        return self._install_hier_topo_result(w, fresh, meta,
+                                              additive=additive)
 
     def _apply_hier_gen_knobs(self, w, fp_cache, comps_by_name,
                               old_pin_uid=None):

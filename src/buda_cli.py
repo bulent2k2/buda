@@ -238,6 +238,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._die_w = 0.0            # stored by set_die when no BDB is open (flat flow)
         self._die_h = 0.0
         self.bdb = None              # BDB (opened by open_bdb command)
+        self._persisted_plan_fp = None   # selective-persist fingerprint memo
         self._bdb_writeback_src = None  # *.sql to write back to on save_bdb/exit (opt-in)
         self._bdb_writeback_bin = None  # temp binary materialized from that .sql
         self._bdb_added_ids = set()  # component ids loaded into fp via add_blocks_from_bdb

@@ -22,6 +22,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <set>
@@ -654,7 +655,17 @@ public:
     // BITRUNK types, so non-BITRUNK pools are byte-identical.
     void filter_unanchored_bitrunk(std::vector<Topology>& candidates) const;
 
+    // Where generation notes (the "[TopoGen] …" drop/warning lines) go.
+    // Default std::cerr — byte-identical to the historical prints.  The
+    // parallel batch fan-out (generate_candidates_batch, bind_routing.cpp)
+    // points each task's generator at a private buffer and replays the
+    // notes in task order, so parallel generation prints exactly the
+    // sequential lines (chip_flow_parallelism.md P5).
+    void set_note_stream(std::ostream* os) { notes_ = os; }
+
 private:
+    std::ostream& notes() const { return *notes_; }
+    std::ostream* notes_ = &std::cerr;
     // Internal dispatch targets.
     std::vector<Topology> generate_2pin(
         const std::string& src_name,

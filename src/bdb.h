@@ -606,6 +606,12 @@ public:
     // Remove the expanded per-instance bundle rows (is_replicated=1) and the
     // topologies keyed to them (idempotency for re-running run_planner hier).
     void clear_expanded_bundles();
+    // The per-bundle twin: drop ONE expanded bundle's rows (bundle + nets +
+    // busterms + topologies + annotations + routing) so a selective
+    // re-persist can rewrite only the bundles whose plan changed
+    // (chip_flow_parallelism.md C1).  Invalidates the route_snapshot like
+    // the bulk clear — every selective site rewrites routing right after.
+    void clear_expanded_bundle(const std::string& bundle_id);
 
     // ── Abstract-NUTS bus routing persistence (Stage-4 output) ─────────────
     void add_bus_segment(const BusSegRow& r);       // INSERT OR REPLACE

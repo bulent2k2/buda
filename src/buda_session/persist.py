@@ -108,6 +108,9 @@ class PersistMixin:
         if self.bdb is None:
             return 0
         import json
+        # This clear-and-rewrite drops expanded-bundle rows too, so the
+        # selective-persist fingerprint memo no longer describes the DB.
+        self._persisted_plan_fp = None
         # The per-bundle generation-knob memo (v15) must survive this
         # clear-and-rewrite — it is written OUTSIDE this path (generate_more)
         # and would otherwise be wiped by every re-persist.
@@ -1034,8 +1037,25 @@ class PersistMixin:
               + (f"; {skipped} bundle(s) skipped (no candidates)" if skipped else ""))
         return len(self.bundles)
 
+    def _planner_persist_fp(self, w):
+        """Cheap content fingerprint of what _add_expanded_bundle would write
+        for this wrapper: the selected candidate's identity, the assigned
+        layers, the lock flag, and (only when the instance CAN carry
+        instance-local USER extras — an `_inherited_uids` entry exists) the
+        extra USER-candidate uids.  Equal fingerprints ⟺ identical persisted
+        rows, so the selective re-persist may skip the bundle."""
+        uid, _b = buda.selected_topo_key(w)
+        extras = ()
+        inherited = getattr(self, "_inherited_uids", {}) \
+            .get(w.input.original_bundle.id)
+        if inherited is not None:
+            extras = tuple(sorted(
+                buda.topo_uid(t) for t in w.input.candidates
+                if t.type == "USER" and buda.topo_uid(t) not in inherited))
+        return (uid, tuple(w.plan.seg_layers), bool(w.hier.locked), extras)
+
     @_batched
-    def _persist_planner_output(self):
+    def _persist_planner_output(self, selective=False):
         """Persist the planner's decision into the BDB after run_planner.
 
         For every current wrapper: record the selected topology (`is_selected`) and
@@ -1046,6 +1066,19 @@ class PersistMixin:
         their selected topology plus any per-instance USER candidates
         (TopoEdit follow-on #3), so `bus_segment` rows join back to a bundle. No-op
         without an open BDB. See docs/internal/wishlist-bdb.md.
+
+        `selective=True` (the RE-persist sites: the run_nuts escalation
+        re-persist, _checkpoint_routing, the FK fallbacks) rewrites only the
+        expanded bundles whose fingerprint changed since the last persist —
+        the chip-scale profile showed each re-persist rewriting all 560
+        expanded instances when a handful changed
+        (docs/internal/chip_flow_parallelism.md C1).  It engages only when
+        the expanded-bundle id set matches the previous persist exactly
+        (else the full clear+rewrite runs, exactly the historical
+        behavior); the run_planner command itself always persists fully — a
+        fresh plan is a semantic reset.  Either path leaves the BDB
+        byte-identical to a full rewrite (the fingerprint covers every
+        row-shaping input).
         """
         if self.bdb is None:
             return 0
@@ -1056,7 +1089,6 @@ class PersistMixin:
             # rehydrate it).  The accepted final state is persisted by
             # _checkpoint_routing when the run commits moves.
             return 0
-        self.bdb.clear_expanded_bundles()          # idempotent re-plan
         # An id is an expanded per-instance wrapper ONLY if it came from the hier
         # expansion map — NOT merely because it's absent from the BDB (a flat flow
         # can open_bdb after generate, so its normal bundles aren't persisted yet).
@@ -1071,6 +1103,23 @@ class PersistMixin:
             for ew in wrappers:
                 expanded_to_template.setdefault(ew.input.original_bundle.id,
                                                 tid)
+        # Fingerprint the expanded wrappers that WILL be persisted (valid
+        # selection only — mirrors the loop's guard below).
+        fp_now, exp_wrappers = {}, []
+        for w in self.bundles:
+            hbid = w.input.original_bundle.id
+            if hbid not in expanded_to_template:
+                continue
+            sel = w.plan.selected_topology_index
+            if sel < 0 or sel >= len(w.input.candidates):
+                continue
+            fp_now[hbid] = self._planner_persist_fp(w)
+            exp_wrappers.append(w)
+        memo = getattr(self, '_persisted_plan_fp', None)
+        use_selective = (selective and memo is not None
+                         and set(memo) == set(fp_now))
+        if not use_selective:
+            self.bdb.clear_expanded_bundles()      # idempotent re-plan
         original_ids = {b.id for b in self.bdb.all_bundles()}
         # Busterm-row dedup across THIS pass (same contract as the
         # generation-time persist): 'tb:' ids are geometry-fingerprinted, so
@@ -1086,6 +1135,11 @@ class PersistMixin:
             hbid = w.input.original_bundle.id
             bid = str(hbid)
             if hbid in expanded_to_template:        # genuine hier expanded instance
+                if use_selective and fp_now[hbid] == memo[hbid]:
+                    n += 1                          # rows already identical
+                    continue
+                if use_selective:
+                    self.bdb.clear_expanded_bundle(bid)
                 self._add_expanded_bundle(w, sel, expanded_to_template,
                                           seen_busterms)
             else:                                   # normal bundle (flat / cross-block)
@@ -1096,6 +1150,7 @@ class PersistMixin:
                 self.bdb.reset_assigned_layers(bid)  # drop stale layers from a prior plan
                 self._persist_assigned_layers(bid, ci, w)
             n += 1
+        self._persisted_plan_fp = fp_now
         return n
 
     def _persist_normal_bundle(self, w):
