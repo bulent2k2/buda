@@ -295,16 +295,24 @@ jobs:
         # pytest's default INTERRUPT on them hides how much of the rest of
         # the tier passes.  Keep collecting so the lane reports a real
         # passed/failed/error census.
+        # BUDA_THREADS=1: run 20 measured INTERMITTENT SIGSEGV (exit 2816 =
+        # SIGSEGV<<8) in the C++ engine under Cygwin — the tier died 3 tests
+        # in and the flow died in run_nuts, while run 19's identical-source
+        # flow was clean.  Suspect: worker-thread stack size (Cygwin pthreads
+        # default far smaller than Linux's 8MB; the main thread is fine).
+        # Single-threading the engine pools is the discriminating experiment.
         shell: cmd
         continue-on-error: true
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH python3 -m pytest -q -r fs --continue-on-collection-errors"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH BUDA_THREADS=1 python3 -m pytest -q -r fs --continue-on-collection-errors"
 
       - name: Run a .buda flow
-        # PATH carries build/ for the same dlopen reason as the fast tier.
+        # PATH carries build/ for the same dlopen reason as the fast tier;
+        # --threads 1 for the same segfault reason (run 20, see the tier
+        # step's comment).
         shell: cmd
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH PYTHONPATH=build:src:tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH PYTHONPATH=build:src:tools python3 src/buda_cli.py --threads 1 --no-viz flow/four_blocks.buda"
 
   mingw:
     # Fourth path: mingw-w64 — GCC producing NATIVE Windows binaries, driven

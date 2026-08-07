@@ -233,6 +233,13 @@ Known, measured limitations:
 - **Web deps are unavailable**: pydantic-core needs a Rust build via maturin,
   whose bootstrap fails under Cygwin (measured — even with a Rust toolchain
   present). The 28 web tests will always skip.
+- **Run the engine single-threaded** (`--threads 1`, or `BUDA_THREADS=1` for
+  pytest): the multi-threaded solve paths segfault *intermittently* under
+  Cygwin (measured: run 19's flow clean, run 20's identical-source flow and
+  tier both died with SIGSEGV in `run_nuts`/mid-tier at the default 2
+  threads). Suspected cause is Cygwin's small default pthread stack for the
+  engine's worker threads — the main thread is unaffected. Under
+  investigation; single-threading is the measured-safe configuration.
 
 ### 6.1 Install
 
@@ -274,9 +281,11 @@ python3 -m pip install --user pybind11 pytest pytest-bdd pytest-xdist
 cd /cygdrive/c/path/to/buda
 ./bin/bb                                   # the repo's own wrapper (measured green)
 export PATH=$PWD/build:$PATH               # REQUIRED: see below
-PYTHONPATH=$PWD/build:$PWD/src:$PWD/tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda
-python3 -m pytest -q                       # expect matplotlib-dependent failures (distro skew above)
+PYTHONPATH=$PWD/build:$PWD/src:$PWD/tools python3 src/buda_cli.py --threads 1 --no-viz flow/four_blocks.buda
+BUDA_THREADS=1 python3 -m pytest -q        # expect matplotlib-dependent failures (distro skew above)
 ```
+
+(`--threads 1` / `BUDA_THREADS=1` per the threading caveat above.)
 
 The `PATH` line is the one real deviation from Linux: Cygwin's `dlopen`
 follows Windows LoadLibrary search rules (application dir, system dirs,
