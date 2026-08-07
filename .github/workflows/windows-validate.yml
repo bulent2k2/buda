@@ -250,10 +250,17 @@ jobs:
           C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && python3 -m pip install --user -r src/web/requirements.txt && echo WEB DEPS OK || echo 'WEB DEPS UNAVAILABLE (expected: pydantic-core needs Rust; no Cygwin wheels)'"
 
       - name: Build with the repo's own wrapper (bin/bb)
-        # THE point of this path: the documented-for-Linux command, verbatim.
+        # THE point of this path: the documented-for-Linux command, verbatim —
+        # except BUDA_ARCH, pinned like the Linux CI (x86-64-v2, ci.md):
+        # runs 20/21 measured intermittent SIGSEGV inside the engine
+        # (run_nuts + 3 tests into the tier, exit 2816 = SIGSEGV<<8) that a
+        # single-threaded run 21 did NOT fix, on source whose run-19 flow was
+        # clean — thread-count-independent, run-to-run varying.  The next
+        # suspect is -march=native codegen from Cygwin's gcc 14 on modern
+        # runner CPUs; pinning the ISA is the discriminating experiment.
         shell: cmd
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && ./bin/bb"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && BUDA_ARCH=x86-64-v2 ./bin/bb"
 
       - name: Where did the artifacts land?
         # No -e here: `ls a b c` fails when any glob has no match (there is no
@@ -295,24 +302,21 @@ jobs:
         # pytest's default INTERRUPT on them hides how much of the rest of
         # the tier passes.  Keep collecting so the lane reports a real
         # passed/failed/error census.
-        # BUDA_THREADS=1: run 20 measured INTERMITTENT SIGSEGV (exit 2816 =
-        # SIGSEGV<<8) in the C++ engine under Cygwin — the tier died 3 tests
-        # in and the flow died in run_nuts, while run 19's identical-source
-        # flow was clean.  Suspect: worker-thread stack size (Cygwin pthreads
-        # default far smaller than Linux's 8MB; the main thread is fine).
-        # Single-threading the engine pools is the discriminating experiment.
+        # Default threads again: run 21 REFUTED the worker-thread-stack
+        # hypothesis (BUDA_THREADS=1 / --threads 1 still hit SIGSEGV in
+        # run_nuts and 3 tests into the tier).  The build step's BUDA_ARCH
+        # pin is the active experiment; keep everything else default so it
+        # changes one variable.
         shell: cmd
         continue-on-error: true
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH BUDA_THREADS=1 python3 -m pytest -q -r fs --continue-on-collection-errors"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH python3 -m pytest -q -r fs --continue-on-collection-errors"
 
       - name: Run a .buda flow
-        # PATH carries build/ for the same dlopen reason as the fast tier;
-        # --threads 1 for the same segfault reason (run 20, see the tier
-        # step's comment).
+        # PATH carries build/ for the same dlopen reason as the fast tier.
         shell: cmd
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH PYTHONPATH=build:src:tools python3 src/buda_cli.py --threads 1 --no-viz flow/four_blocks.buda"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH PYTHONPATH=build:src:tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda"
 
   mingw:
     # Fourth path: mingw-w64 — GCC producing NATIVE Windows binaries, driven

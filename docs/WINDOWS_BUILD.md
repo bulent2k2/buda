@@ -7,7 +7,7 @@ Configure, build, and test BUDA natively on Windows. Four validated paths:
 | 1 | **MSVC + Ninja** (§3) | VS 2022, MSVC 19.44 | native 3.13 | **green** — build, import, fast tier, flow |
 | 2 | **MSVC + VS generator** (§4) | VS 2022, MSVC 19.44 | native 3.13 | **green** — build, import, fast tier, flow |
 | 3 | **MinGW-w64** (§5) | MSYS2 UCRT64 GCC | native 3.13 | **green** — build, import, fast tier (1819 passed), flow |
-| 4 | **Cygwin64** (§6) | Cygwin GCC 14 | Cygwin 3.9 | **working, with caveats** — build (`bin/bb`), full import stack, and an end-to-end `.buda` flow all green (run 19); test tier limited by a distro matplotlib/numpy skew |
+| 4 | **Cygwin64** (§6) | Cygwin GCC 14 | Cygwin 3.9 | **experimental** — build (`bin/bb`) and full import stack green; a `.buda` flow has run end to end (run 19) but the engine segfaults intermittently (runs 20–21, §6 caveats) |
 
 Requirements and Windows-specific background: [WINDOWS_REQ.md](WINDOWS_REQ.md).
 
@@ -233,13 +233,15 @@ Known, measured limitations:
 - **Web deps are unavailable**: pydantic-core needs a Rust build via maturin,
   whose bootstrap fails under Cygwin (measured — even with a Rust toolchain
   present). The 28 web tests will always skip.
-- **Run the engine single-threaded** (`--threads 1`, or `BUDA_THREADS=1` for
-  pytest): the multi-threaded solve paths segfault *intermittently* under
-  Cygwin (measured: run 19's flow clean, run 20's identical-source flow and
-  tier both died with SIGSEGV in `run_nuts`/mid-tier at the default 2
-  threads). Suspected cause is Cygwin's small default pthread stack for the
-  engine's worker threads — the main thread is unaffected. Under
-  investigation; single-threading is the measured-safe configuration.
+- **Engine stability is still under investigation**: the C++ solve paths
+  segfault *intermittently* under Cygwin (measured: run 19's flow clean end
+  to end; runs 20–21 on identical source died with SIGSEGV in `run_nuts`
+  and a few tests into the tier). Measured **thread-count-independent** —
+  `--threads 1` did not help (run 21) — so the current suspect is
+  `-march=native` codegen from Cygwin's gcc 14 on modern CPUs, and the
+  validation lane now builds with `BUDA_ARCH=x86-64-v2` (the same pin the
+  Linux CI uses). Treat the lane as build/import-validated; do not rely on
+  it for production runs until this is resolved.
 
 ### 6.1 Install
 
@@ -279,13 +281,11 @@ python3 -m pip install --user pybind11 pytest pytest-bdd pytest-xdist
 
 ```bash
 cd /cygdrive/c/path/to/buda
-./bin/bb                                   # the repo's own wrapper (measured green)
+BUDA_ARCH=x86-64-v2 ./bin/bb               # the repo's own wrapper (ISA pinned per the stability caveat)
 export PATH=$PWD/build:$PATH               # REQUIRED: see below
-PYTHONPATH=$PWD/build:$PWD/src:$PWD/tools python3 src/buda_cli.py --threads 1 --no-viz flow/four_blocks.buda
-BUDA_THREADS=1 python3 -m pytest -q        # expect matplotlib-dependent failures (distro skew above)
+PYTHONPATH=$PWD/build:$PWD/src:$PWD/tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda
+python3 -m pytest -q                       # expect matplotlib-dependent failures (distro skew above)
 ```
-
-(`--threads 1` / `BUDA_THREADS=1` per the threading caveat above.)
 
 The `PATH` line is the one real deviation from Linux: Cygwin's `dlopen`
 follows Windows LoadLibrary search rules (application dir, system dirs,
