@@ -7,7 +7,7 @@ Configure, build, and test BUDA natively on Windows. Four validated paths:
 | 1 | **MSVC + Ninja** (§3) | VS 2022, MSVC 19.44 | native 3.13 | **green** — build, import, fast tier, flow |
 | 2 | **MSVC + VS generator** (§4) | VS 2022, MSVC 19.44 | native 3.13 | **green** — build, import, fast tier, flow |
 | 3 | **MinGW-w64** (§5) | MSYS2 UCRT64 GCC | native 3.13 | **green** — build, import, fast tier (1819 passed), flow |
-| 4 | **Cygwin64** (§6) | Cygwin GCC 14 | Cygwin 3.9 | **experimental** — build (`bin/bb`) and full import stack green; a `.buda` flow has run end to end (run 19) but the engine segfaults intermittently (runs 20–21, §6 caveats) |
+| 4 | **Cygwin64** (§6) | Cygwin GCC 14 | Cygwin 3.9 | **working, with caveats** — with `BUDA_ARCH=x86-64-v2` (required, §6): build, imports, flow, and 1741 tier tests green (run 22); remaining tier damage is the distro matplotlib skew |
 
 Requirements and Windows-specific background: [WINDOWS_REQ.md](WINDOWS_REQ.md).
 
@@ -15,9 +15,9 @@ Requirements and Windows-specific background: [WINDOWS_REQ.md](WINDOWS_REQ.md).
 `.github/workflows/windows-validate.yml` (windows-2022 runner, VS 2022, MSVC
 19.44, Python 3.13 x64), through all four paths: build, import, fast test
 tier, and a `.buda` flow. Re-validate any time: *Actions → Windows validation
-→ Run workflow*. Paths 1–3 last green: run 17, 2026-08-07 (MSVC build ≈
-2m30s, MinGW build ≈ 2m, fast tier ≈ 46–70s per path on a 4-core runner);
-path 4 import stack first green the same run.
+→ Run workflow*. **All four lanes green: run 22, 2026-08-07** (MSVC build ≈
+2m30s, MinGW build ≈ 2m, Cygwin `bin/bb` ≈ 9m; fast tier ≈ 46–75s per
+path on a 4-core runner).
 
 ---
 
@@ -233,15 +233,16 @@ Known, measured limitations:
 - **Web deps are unavailable**: pydantic-core needs a Rust build via maturin,
   whose bootstrap fails under Cygwin (measured — even with a Rust toolchain
   present). The 28 web tests will always skip.
-- **Engine stability is still under investigation**: the C++ solve paths
-  segfault *intermittently* under Cygwin (measured: run 19's flow clean end
-  to end; runs 20–21 on identical source died with SIGSEGV in `run_nuts`
-  and a few tests into the tier). Measured **thread-count-independent** —
-  `--threads 1` did not help (run 21) — so the current suspect is
-  `-march=native` codegen from Cygwin's gcc 14 on modern CPUs, and the
-  validation lane now builds with `BUDA_ARCH=x86-64-v2` (the same pin the
-  Linux CI uses). Treat the lane as build/import-validated; do not rely on
-  it for production runs until this is resolved.
+- **Pin the ISA: `BUDA_ARCH=x86-64-v2 ./bin/bb` is REQUIRED, not a
+  preference.** With the default `-march=native`, Cygwin gcc 14 generated
+  code that segfaulted *intermittently* in the C++ solve paths on modern
+  CPUs (measured, runs 19–21: one clean flow, then SIGSEGV in `run_nuts`
+  and a few tests into the tier on identical source; thread-count ruled out
+  — `--threads 1` crashed too). With `BUDA_ARCH=x86-64-v2` (the same pin
+  the Linux CI uses) the engine is stable: run 22 measured the flow clean
+  end to end at default threads and **1741 tier tests passing** (5 failed /
+  24 errors — the matplotlib-skew modules plus a few POSIX-assumption
+  cases), where the unpinned build crashed 3 tests in.
 
 ### 6.1 Install
 
