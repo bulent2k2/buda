@@ -214,8 +214,13 @@ guards aside. Unlike MinGW, binaries are Cygwin-native (`cygbuda_core.dll`,
 `cygbuda_core.dll`, `import buda_db`, `import buda` all green on Cygwin's
 Python 3.9 (run 17). Known, measured limitations:
 
-- **Python is 3.9.16** — the newest Cygwin ships. The tree parses under 3.9
-  (measured: full `ast` sweep), but 3.9 is past upstream EOL.
+- **Python is 3.9.16** — the newest Cygwin ships, past upstream EOL and
+  below the project's 3.13 floor. The tree parses under 3.9 (measured: full
+  `ast` sweep), and the one measured *runtime* incompatibility — PEP 604
+  `X | Y` unions in evaluated annotations, which raise `TypeError` at import
+  on 3.9 (run 18) — is fixed with `from __future__ import annotations` in
+  the three affected modules. Nothing guards new 3.10+ constructs from
+  landing; re-run the validation workflow to re-measure.
 - **No pip wheels exist for Cygwin** — native deps come from `setup.exe`
   packages or not at all. numpy 2.0.1 works; **the distro matplotlib (3.5.1)
   is broken out of the box** against that numpy (`_ARRAY_API not found`) —
@@ -290,8 +295,10 @@ symbol Python actually needs, `PyInit_<mod>`, goes unexported.
 Measured on runs 9–16 of the validation, identical across the MSVC and MinGW
 paths: the fast tier passes (~1819 tests, 35 xfailed) with a handful of
 **named POSIX-only skips** — file-mode round-trip (`test_bdb_edit_bus`), the
-stdout line-buffering probe (`test_log_ordering`), and `SIGKILL`
-crash-recovery (`test_qor_sweep`); each marker states its measured reason.
+stdout line-buffering probe (`test_log_ordering`), `SIGKILL`
+crash-recovery (`test_qor_sweep`), and the `bin/buda` wrapper-arg tests
+(`test_buda_wrapper_args` — native Windows' `bash` is the WSL stub, measured
+run 18; they run under Cygwin); each marker states its measured reason.
 If you see *many* failures instead, check `PYTHONUTF8` first (section 2).
 
 ## 8. Troubleshooting

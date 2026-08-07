@@ -23,6 +23,11 @@ Methods extracted verbatim from buda_cli.BudaSession (the CLI mixin
 split); bodies unchanged — `self` is the composed BudaSession, so
 cross-mixin helper calls resolve through the class as before.
 """
+# Cygwin's newest python is 3.9, where PEP 604 unions in EVALUATED
+# annotations raise at import (TypeError: unsupported operand type(s)
+# for |) -- measured, windows-validate run 18.  Lazy annotations keep
+# this module importable there; the project floor stays 3.13.
+from __future__ import annotations
 import math
 import os
 import sys
