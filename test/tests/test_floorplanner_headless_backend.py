@@ -61,10 +61,16 @@ atexit.register(shutil.rmtree, _MPLCONFIG, True)
 
 
 def _run(code, env_extra=None):
-    env = {**os.environ,
-           "PYTHONPATH": os.pathsep.join(
-               [str(_ROOT), str(_ROOT / "build"), str(_ROOT / "src")]),
-           "MPLCONFIGDIR": _MPLCONFIG}
+    # PREPEND to the inherited PYTHONPATH, never replace: the VS-generator
+    # layout keeps the extension in build/Release, which only the inherited
+    # value knows about (measured: windows-validate run 19, all three probes
+    # died with ModuleNotFoundError: buda; the documented subprocess trap —
+    # WINDOWS_BUILD.md).  Only the MPL env needs to be controlled here, and
+    # PYTHONPATH does not influence matplotlib's backend selection.
+    env = {**os.environ, "MPLCONFIGDIR": _MPLCONFIG}
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(_ROOT), str(_ROOT / "build"), str(_ROOT / "src")]
+        + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     env.pop("MPLBACKEND", None)
     env.pop("MATPLOTLIBRC", None)      # the other explicit-rc channel
     env.update(env_extra or {})
