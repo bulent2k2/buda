@@ -7,7 +7,7 @@ Configure, build, and test BUDA natively on Windows. Four validated paths:
 | 1 | **MSVC + Ninja** (§3) | VS 2022, MSVC 19.44 | native 3.13 | **green** — build, import, fast tier, flow |
 | 2 | **MSVC + VS generator** (§4) | VS 2022, MSVC 19.44 | native 3.13 | **green** — build, import, fast tier, flow |
 | 3 | **MinGW-w64** (§5) | MSYS2 UCRT64 GCC | native 3.13 | **green** — build, import, fast tier (1819 passed), flow |
-| 4 | **Cygwin64** (§6) | Cygwin GCC 14 | Cygwin 3.9 | **experimental** — build (`bin/bb`) and full import stack green; test tier limited by a distro matplotlib/numpy skew |
+| 4 | **Cygwin64** (§6) | Cygwin GCC 14 | Cygwin 3.9 | **working, with caveats** — build (`bin/bb`), full import stack, and an end-to-end `.buda` flow all green (run 19); test tier limited by a distro matplotlib/numpy skew |
 
 Requirements and Windows-specific background: [WINDOWS_REQ.md](WINDOWS_REQ.md).
 
@@ -209,10 +209,13 @@ the point of this path — **the repo's own `bin/bb` wrapper just works**, CRLF
 guards aside. Unlike MinGW, binaries are Cygwin-native (`cygbuda_core.dll`,
 `buda.cpython-39-x86_64-cygwin.dll`) and link Cygwin's Python.
 
-**Measured so far** (validation runs 13–17): `bin/bb` drives a complete GCC
-14 build (≈ 6–8m), and the full extension stack **imports clean** —
+**Measured** (validation runs 13–19): `bin/bb` drives a complete GCC 14
+build (≈ 6–8m), the full extension stack **imports clean** —
 `cygbuda_core.dll`, `import buda_db`, `import buda` all green on Cygwin's
-Python 3.9 (run 17). Known, measured limitations:
+Python 3.9 — and a **`.buda` flow runs end to end** (run 19:
+`four_blocks.buda` through bundler → topologies → planner → NUTS →
+DetailedNUTS, `check_design` clean at every stage, 0 bits unplaced).
+Known, measured limitations:
 
 - **Python is 3.9.16** — the newest Cygwin ships, past upstream EOL and
   below the project's 3.13 floor. The tree parses under 3.9 (measured: full

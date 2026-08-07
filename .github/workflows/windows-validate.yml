@@ -289,10 +289,16 @@ jobs:
         # '_ARRAY_API not found', an upstream Cygwin packaging skew, not ours.
         # Tests importing matplotlib will fail on that alone; run to MEASURE
         # the damage without blocking the flow step behind it.
+        # --continue-on-collection-errors: run 19 measured the 3.9 annotation
+        # fix complete (zero TypeErrors left) — the only collection errors are
+        # the 24 matplotlib-importing modules hitting the distro skew, and
+        # pytest's default INTERRUPT on them hides how much of the rest of
+        # the tier passes.  Keep collecting so the lane reports a real
+        # passed/failed/error census.
         shell: cmd
         continue-on-error: true
         run: |
-          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH python3 -m pytest -q -r fs"
+          C:\cygwin64\bin\bash.exe -leo pipefail -c "cd $(cygpath '%CD%') && PATH=$PWD/build:$PATH python3 -m pytest -q -r fs --continue-on-collection-errors"
 
       - name: Run a .buda flow
         # PATH carries build/ for the same dlopen reason as the fast tier.
