@@ -258,14 +258,19 @@ if(CYGWIN)
     # import died with "dynamic module does not define module export function
     # (PyInit_buda_db)"; run 13's auto-export pathology already implied no
     # explicit dllexports existed, since any would have disabled auto-export).
-    # A .def file IS the export set: it disables auto-export and exports the
-    # one listed symbol, replacing the earlier --exclude-all-symbols.
+    # Fix at the SOURCE level: pre-define PYBIND11_EXPORT as a real PE
+    # dllexport — pybind11 guards it with #if !defined(PYBIND11_EXPORT), so
+    # this is its own sanctioned override, and it makes Cygwin behave exactly
+    # like pybind11's _WIN32 branch.  With explicit dllexports present, ld
+    # DISABLES auto-export (killing the run-12 lambda pathology) and exports
+    # PyInit_<mod>.  (A .def listed via target_sources was tried first and
+    # never reached the link line on the Cygwin platform — run 16 hit the
+    # verbatim run-12 auto-export error, proving the .def was dropped.)
     # buda_core stays on default auto-export: its symbols are what the
     # modules link against, and it links fine.
     foreach(_mod buda buda_db)
-        file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${_mod}_exports.def
-             "EXPORTS\nPyInit_${_mod}\n")
-        target_sources(${_mod} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/${_mod}_exports.def)
+        target_compile_definitions(${_mod} PRIVATE
+            "PYBIND11_EXPORT=__attribute__((dllexport))")
     endforeach()
 endif()
 
