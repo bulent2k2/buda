@@ -66,6 +66,7 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
               f"Set the pitch with 'set_track_pitch <p>' before "
               f"run_planner (or re-run run_planner) so the planner's "
               f"pitch-aware band reservations match this NUTS run.")
+    session._validate_stage_entry("run_nuts")
     nuts = buda.NUTSEngine(session.fp, session.layers)
     nuts.set_track_pitch(pitch)
     # Tapered fan-in: (re)derive the selected candidates' per-segment bit

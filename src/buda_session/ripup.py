@@ -200,6 +200,10 @@ class RipupMixin:
         # did not move.  Cleared at run exit (both self._rr_t = None sites).
         self._rr_disc_memo = {}
 
+    def _validate_stage_entry(self, where):
+        from buda_session.util import _mixin_validate_stage_entry
+        _mixin_validate_stage_entry(self, where)
+
     def _rr_t_add(self, key, dt):
         t = getattr(self, '_rr_t', None)
         if t is not None:
