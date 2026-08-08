@@ -497,31 +497,49 @@ weighting off" silently starts treating keepout-carved bands as free.
 *Fix: de-duplicate the index list (or make the cache atomic); mirror the
 existing pool guards; scope the output redirect. Small each.*
 
-### A5. Unchecked indexing at four charge/commit sites
+### A5. Unchecked internal preconditions (not a reachable defect)
 
 `candidates[plan.best_topo]` is indexed without a bounds check in
 `plan_band_overlap` (`:815`), `commit_plan` (`:2082`),
-`make_assignment` (`:2145`) and `log_choice` (`:2163`), while
-`PlanResult::best_topo` defaults to `0` and `plan_bundle` returns that
-default for an empty candidate list (`:1911`). NUTS guards the
-analogous index and cites an audit for doing so (`src/nuts.cpp:78`).
-A hand-built or partially-populated wrapper from Python therefore
-charges the cut books from garbage or segfaults.
+`make_assignment` (`:2145`) and `log_choice` (`:2163`), while NUTS
+guards the analogous index and cites an audit for doing so
+(`src/nuts.cpp:78`).
 
-### A6. One formula duplicated five ways, and NUTS re-implements NDR
+**Checked, and the crash is not reachable through any exposed path**
+(this correction is owed to review on PR #640):
+`optimize_topologies` skips candidate-less wrappers before planning
+(`:2361`), `plan_bundle` returns `found == false` for an empty pool
+(`:1902`), every incremental entry point rejects an empty target
+(`:2688`, `:2717`, `:2766`, `:2852`), and callers commit/assign/log only
+after testing `found`. So these are unchecked *internal preconditions*
+that currently hold, not a live defect. What remains is a
+defensive-depth inconsistency with `nuts.cpp:78` — worth an assert if
+the preconditions are ever meant to be relied on from a new caller, and
+worth nothing otherwise. Recorded here at its true (low) severity rather
+than dropped, because the asymmetry is real even though the risk is not.
 
-The per-segment effective width — `width * (n / nbits)` — appears at
-`src/congestion_planner.cpp:822`, `:845`, `:1386`, `:2104` and
-`src/nuts.cpp:1645`. Worse, `nuts.cpp:1638` **re-implements**
-`ndr_units` inline rather than calling the shared helper, and the
-planner adds `+ track_pitch_` where NUTS does not. Any NDR or tapering
-change must land in five places or the planner's books and the wires
-NUTS actually places diverge silently — exactly the failure mode NDR's
-own design took care to avoid by single-sourcing `ndr_group_demand`.
+### A6. The demand mirrors in Python (the C++ half is smaller than it looks)
 
-The same pattern spans the language boundary, which is worse because no
-compiler can see it. The **DNUTS admission arithmetic** — authoritative
-in `src/detailed_nuts.cpp:490` — is mirrored *three times* in Python:
+The per-segment effective width — `width * (n / nbits)` — appears
+textually at `src/congestion_planner.cpp:822`, `:845`, `:1386`, `:2104`
+and `src/nuts.cpp:1645`.
+
+**Two corrections owed to review on PR #640**, because the first draft of
+this section overstated the C++ half. (a) NUTS does **not** re-implement
+the NDR arithmetic: `nuts.cpp:1642` calls the *same* `ndr_group_demand`
+the planner's `ndr_units` wrapper calls, so the group conversion is
+genuinely single-sourced exactly as `ndr.h` requires — only a two-line
+`active()` guard is inline-duplicated. (b) The planner's `+ track_pitch_`
+is not a divergence but a **deliberate charging margin** (Gap 1,
+`congestion_planner.cpp:751`): the scored footprint must equal the
+committed one, or STRICT would score one set of bands and commit
+another. Treating either as drift would have invited a harmful "fix".
+What remains in C++ is ordinary textual duplication of a small
+expression — worth a `seg_demand()` helper, but not a correctness risk.
+
+The real drift risk is in Python, where no compiler can see it. The
+**DNUTS admission arithmetic** — authoritative in
+`src/detailed_nuts.cpp:490` — is mirrored *three times*:
 `_seg_admission_pool` (`src/buda_session/nutsflow.py:769`, whose
 docstring calls itself "the exact `place_by_layer` arithmetic"), an
 inline copy in the dead-span escalation (`:988`, which the same
@@ -531,8 +549,9 @@ twice (`nutsflow.py:753` and `:1139`), and the bus-width convention
 `len(...) * 1.5` appears at `bundling_cmds.py:703`, `:890` and
 `persist.py:658` — so a resumed session can rehydrate a different width
 than a fresh run. A C++ admission change (shield accounting, corner
-bounds) silently desynchronizes every Python predicate built on it.
-*Fix: one `seg_demand()` helper in C++, exported to Python so the
+bounds) silently desynchronizes every Python predicate built on it —
+and unlike the C++ duplication above, nothing structural prevents it.
+*Fix: export the admission predicate from C++ so the three Python
 mirrors become calls. Small, and the highest-leverage item in this
 list.*
 
@@ -634,21 +653,30 @@ concrete hazards:
 invariant needs either a shift-aware update or an explicit
 re-adoption after any pool re-sort.*
 
-### A12. The safety nets are off in the default invocation
+### A12. Validation covers tests, not production runs (corrected)
 
-The wrapper-invariant validator — which checks exactly the fields these
-risks corrupt (`selected_topology_index` range, `seg_layers` length,
-`pinned_seg_layers` shape, `pinned_group` range) and is documented to
-"fail LOUD… catching the bad write where it was made" — runs only when
-`BUDA_VALIDATE=1` (`src/buda_session/util.py:260`). Meanwhile
-`pytest.ini` defaults to `-m "not slow and not mid"`, which deselects
-**641 of 2 589 tests (24.8%)** — and the `mid` tier is precisely the
-full-pipeline, BDB round-trip and resume coverage that would exercise
-A11's state handling. So the default developer and CI invocation runs
-neither the invariant checker nor the integration tests aimed at these
-bugs. *Fix: enable `BUDA_VALIDATE` in CI (it is already suite-wide via
-conftest when set) and run the mid tier on PRs. Small; the machinery
-exists and is merely not switched on.*
+**The first draft of this item was wrong in both halves and is corrected
+here** (review on PR #640). CI does *not* skip the integration tiers:
+`.github/workflows/ci.yml` runs pytest with `-o addopts=""`, explicitly
+clearing `pytest.ini`'s deselection so **all** tiers — `mid` and `slow`
+included — run on every PR. And the wrapper-invariant validator is *not*
+off in tests: `test/tests/conftest.py:444` does
+`environ.setdefault("BUDA_VALIDATE", "1")`, turning it on suite-wide,
+which is what the earlier section of this document already stated
+correctly. Both safety nets are on where it counts.
+
+Two narrower observations survive. First, the validator is gated on
+`BUDA_VALIDATE` (`src/buda_session/util.py:265`) and nothing sets it
+outside the test harness, so a **production/interactive run** — a user
+invoking `bin/buda flow.buda` — performs no stage-entry invariant
+checking. That is a defensible cost/benefit choice (validation walks
+every wrapper at every stage entry), but it means the net catches
+regressions in CI and not corruption in the field, which is worth being
+deliberate about rather than incidental. Second, the *default developer*
+invocation still deselects 641 of 2 589 tests (24.8%), so a local
+`pytest` run before pushing exercises none of the resume/round-trip
+coverage that A11's hazards live in — an argument for `bin/bb mid` as
+the pre-push habit, not for a CI change.
 
 ### A13. Session state surface, and two binding semantics that differ by provenance
 
@@ -660,19 +688,27 @@ only from a test). The snapshot-coverage contract test covers *wrapper*
 fields, not session fields, so each new healer knob is one `getattr`
 default away from being un-snapshotted.
 
-Two related pybind hazards were confirmed by live probe against the
+One related pybind asymmetry was confirmed by live probe against the
 built module: `BundleWrapperVec.append` **copies** while `vec[i]` and
-`list(vec)` yield **references**. Consequently (a) `self.bundles` is a
-C++ vector on the fresh path but a plain Python list on the
-`load_pipeline` resume path (`persist.py:943`) and after a second
-`run_planner hier` (`planner_cmds.py:129`) — and the sequence fallback's
+`list(vec)` yield **references**. The consequence worth tracking is that
+`self.bundles` is a C++ vector on the fresh path but a plain Python list
+on the `load_pipeline` resume path (`persist.py:943`) and after a second
+`run_planner hier` (`planner_cmds.py:129`). The sequence fallback's
 documented contract is that "C++-side vector mutations [are] discarded",
-so resume silently takes the copying path (~15 ms extra per healer
-trial, per `bind_opaque.h:18`); and (b) `_hier_bundles_orig`, commented
-as a "pre-expansion snapshot" (`buda_cli.py:287`), is built with
-`list(self.bundles)` and is therefore an **aliasing view** — the
-"restore" before re-expansion restores nothing, because the objects are
-the same ones the first run mutated.
+so a resumed session silently takes the copying path — ~15 ms extra per
+healer trial (`bind_opaque.h:18`), and any *future* C++-side wrapper
+mutation would be dropped on resume only. Value semantics that differ by
+provenance are a latent trap even where nothing exploits them today.
+
+*A claim withdrawn:* the first draft called `_hier_bundles_orig` a
+"broken snapshot" because `list(self.bundles)` aliases. Review on
+PR #640 established it is **deliberate shared storage** — `hier.py:2227`
+says so explicitly ("`_hier_bundles_orig` then holds element REFERENCES
+… so the template solve's pin write-back and the snapshot stay one
+storage"), and `_expand_hier_bundles` builds *fresh* per-instance
+wrappers that the engines mutate (`planner_cmds.py:154`), so a second
+`run_planner hier` restores untouched templates, not previously-planned
+objects. Deep-copying it would break template write-back.
 
 *One genuine positive, worth recording:* an AST/regex sweep for the
 classic pybind bug — binding a by-value property copy, mutating it, and
@@ -707,15 +743,14 @@ without the declaration.*
 
 ### Cross-cutting observation
 
-Most of the findings above share one shape: **a discipline is applied
-correctly in one place and not in its twin.** The index tiebreak exists
-at one sort and not the other (A1); the tolerant quantizer at the engine
-and not the verifier (A2); the unscaled sentinel at the STRICT gate and
-not at the cost (A3); the exception-safe pool guard in two of four pools
-(A4); the bounds check in NUTS and not in the planner (A5); the shared
-NDR helper in the planner and not in NUTS, and the admission arithmetic
-once in C++ and three more times in Python (A6); `_rr_guarded_move` at
-three of six trial sites (A11).
+Most of the surviving findings share one shape: **a discipline is
+applied correctly in one place and not in its twin.** The index tiebreak
+exists at one sort and not the other four (A1); the tolerant quantizer
+at the engine and not the verifier (A2); the unscaled sentinel at the
+STRICT gate and not at the cost (A3); the exception-safe pool guard in
+two of four pools (A4); the bounds check in NUTS and not in the planner
+(A5, benign); the admission arithmetic once in C++ and three more times
+in Python (A6); `_rr_guarded_move` at three of six trial sites (A11).
 
 That is not a review-quality problem — these are twins written by people
 who knew the rule, which is why one side is right. It is a *structural*
@@ -725,6 +760,29 @@ track quantizer, one demand function exported to Python, one
 infeasibility predicate, one guarded-trial wrapper. Each is a small,
 low-risk change, and each retires an entire class of future drift rather
 than one instance of it.
+
+### A method note, earned the hard way
+
+Four items in the first draft of this section (A5, A6's C++ half, A12,
+A13's snapshot claim) were **overstated or wrong**, and were corrected
+above after review on PR #640. The failure mode is worth recording
+because it will recur in any code audit: a pattern-level scan reliably
+finds *shapes* — an unchecked index, a duplicated expression, an aliased
+list, an environment-gated check — but whether a shape is a **defect**
+depends on reachability and intent, which live in the guards at the
+entry points and in the comments explaining why. Three of the four
+corrections were exactly that: the indexing is guarded at every exposed
+path, the NDR conversion is single-sourced with only a wrapper
+duplicated, the aliasing is deliberate shared storage. The fourth was
+plainer — the CI workflow clears `pytest.ini` and runs every tier, which
+this document had already stated correctly in an earlier section.
+
+The rule that would have caught all four: **before calling a pattern a
+risk, find the guard that makes it safe and show it is missing.** That is
+the same discipline the B1 arc arrived at from the other direction —
+where a green corpus proved a hazard did not *fire*, not that it *could
+not*. Absence of a guard and absence of a firing are both weak evidence;
+the audit needs the positive form.
 
 A second pattern is worth naming: **the known-issue backlog is not
 greppable.** There are zero `TODO`/`FIXME`/`HACK` markers anywhere in
@@ -935,8 +993,9 @@ So the near-term high-value work is no longer "finish the runtime
 items". It is, in order: **wire failure to the exit code and emit a
 machine-readable report** (days, and it makes every later claim
 checkable); **collapse the twins** (small, and it retires a class of
-latent drift); **turn on the safety nets that already exist** —
-`BUDA_VALIDATE` and the mid tier in CI; and then commit to the strategic
+latent drift); **extend validation from CI to production runs** — the
+invariant checker is already on suite-wide in tests but no field run
+performs it; and then commit to the strategic
 fork Lens B names. The advisory-planner path — exporting DEF guides,
 blockages and bus corridors, fed by real tech-LEF and `TRACKS` data —
 is reachable in a quarter or two, plays to what this tool is genuinely
