@@ -2876,8 +2876,11 @@ CongestionPlanner::candidate_costs(
 // enumeration consults (caps, patterns, keepouts, block obstruction, dead
 // bands, span costs) is static during a ladder trial.
 std::vector<CongestionPlanner::BandRect>
-CongestionPlanner::cand_band_footprint_(const BundleWrapper& bw, int ci) const {
+CongestionPlanner::cand_band_footprint_(const BundleWrapper& bw, int ci,
+                                        bool* window_sensitive) const {
     std::vector<BandRect> out;
+    if (window_sensitive) *window_sensitive = false;
+    constexpr int kSentinel = INT_MAX / 2;   // must match score_candidate_
     const int nbits = (int)bw.input.original_bundle.get_net_names().size();
     const Topology& topo = bw.input.candidates[ci];
     ConnTopology ct;
@@ -2898,6 +2901,11 @@ CongestionPlanner::cand_band_footprint_(const BundleWrapper& bw, int ci) const {
                                     : std::max(seg.start.y, seg.end.y));
         const int nominal = is_h ? seg.start.y : seg.start.x;
         int slide_lo = INT_MIN, slide_hi = INT_MIN;
+        // Raw ConnTopology window: the one score_candidate_'s post-selection
+        // window-fit check (enforce_window) tests against — DIFFERENT from the
+        // grid-clamped slide below, so keep it separately for the sensitivity
+        // test.
+        double win_w = -1.0;                        // <0 = unbounded (no check)
         if (si < (int)conn_segs.size()) {           // scorer's exact clamp
             const ConnSeg& cs = conn_segs[si];
             const auto& pgrid = is_h ? y_grid_ : x_grid_;
@@ -2906,6 +2914,8 @@ CongestionPlanner::cand_band_footprint_(const BundleWrapper& bw, int ci) const {
                 slide_hi = std::min(cs.perp_hi, pgrid.back());
                 if (slide_lo > slide_hi) { slide_lo = INT_MIN; slide_hi = INT_MIN; }
             }
+            if (cs.perp_lo > -kSentinel && cs.perp_hi < kSentinel)
+                win_w = (double)(cs.perp_hi - cs.perp_lo);
         }
         double p_base_lo = (double)nominal, p_base_hi = (double)nominal;
         if (slide_lo != INT_MIN) {
@@ -2916,11 +2926,19 @@ CongestionPlanner::cand_band_footprint_(const BundleWrapper& bw, int ci) const {
         const double w = (nbits > 0 && n != nbits)
                              ? bw.input.width * ((double)n / (double)nbits)
                              : bw.input.width;
+        // Window-sensitivity: if this bounded-window segment's allowed layers
+        // are MIXED on the fit test (some eff <= win_w, some not), then WHICH
+        // layer the kBalance-driven argmin picks can flip the candidate's
+        // window feasibility — a layer-choice-dependent feasibility that a
+        // disjoint rip can move via global layer_load even with the footprint
+        // untouched (Codex PR #634 P1).  Such a candidate is NOT prunable.
+        bool any_fit = false, any_nofit = false;
         auto add_rect = [&](int lid) {
-            const double half =
-                0.5 * (layers_.eff_bus_width(n, w, lid) + track_pitch_);
+            const double eff = layers_.eff_bus_width(n, w, lid);
+            const double half = 0.5 * (eff + track_pitch_);
             out.push_back({si, lid, /*vcut=*/is_h, lo2, hi2,
                            p_base_lo - half - 1.0, p_base_hi + half + 1.0});
+            if (win_w >= 0.0) { (win_w < eff ? any_nofit : any_fit) = true; }
         };
         if (si < (int)bw.input.pinned_seg_layers.size() &&
             bw.input.pinned_seg_layers[si] != -1) {
@@ -2929,6 +2947,7 @@ CongestionPlanner::cand_band_footprint_(const BundleWrapper& bw, int ci) const {
             for (int lid : (is_h ? h_layers : v_layers))
                 if (bw.input.allows_layer(lid)) add_rect(lid);
         }
+        if (window_sensitive && any_fit && any_nofit) *window_sensitive = true;
     }
     return out;
 }
@@ -3063,37 +3082,51 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
 
         // Footprint pruning (B1 PR2): every candidate is STRICT-infeasible
         // against the base state, and one victim's rip only LOWERS usage on the
-        // exact bands its commit charged.  For an OVERLAY-DECOUPLED candidate
-        // (no two segments share a cut+band) feasibility is a pure function of
-        // usage on its own footprint bands, so a candidate whose footprint is
-        // disjoint from the freed bands keeps its base infeasibility and its
-        // scoring can be skipped.  An overlay-COUPLED candidate is NEVER pruned:
-        // a rip changes global kBalance, which can flip its greedy layer choice
-        // on unchanged usage and cascade — through its own overlay — into a
-        // feasibility change even when disjoint (the #629 unsoundness Codex
-        // caught).  So the mask = {coupled} ∪ {footprint intersects freed}, a
-        // SUPERSET of the feasible set, and plan_bundle's ordered reduction over
-        // it elects the identical winner (pruned candidates are provably
-        // infeasible → never enter the reduction).  A victim intersecting no
-        // candidate (mask empty) is a provably !found trial, skipped whole
-        // (nothing observes the rip/restore, so eliding it is byte-identical).
-        // Disabled under the unbounded greedy spread modes (band_span_charge>=3)
-        // and for share-carrying wrappers (a rip also moves the collective share
-        // books, which the footprint does not model).
+        // exact bands its commit charged.  A candidate is PRUNABLE — its
+        // feasibility provably unchanged by a rip disjoint from its footprint —
+        // only when its feasibility is layer-CHOICE-independent, since a rip
+        // changes global kBalance and can flip the greedy's chosen layer even on
+        // unchanged usage.  Two ways a choice-flip can change feasibility, both
+        // excluded from pruning:
+        //   (1) OVERLAY COUPLING — two segments share a cut+band, so a flipped
+        //       layer's charge into the own-overlay changes a later segment's
+        //       admissibility (the #629 unsoundness Codex caught); and
+        //   (2) WINDOW SENSITIVITY — a bounded ConnTopology window fit by some
+        //       allowed layers and not others, so a flip to a narrower/wider
+        //       layer changes the post-selection window-fit verdict (#634 P1).
+        // cand_band_footprint_ reports (2); cand_is_decoupled_ tests (1).  For a
+        // prunable candidate each segment's feasibility is a pure function of
+        // usage on its own footprint bands (the overflow gate is kBalance-free),
+        // so disjoint-from-the-rip ⟹ still infeasible.  The mask is thus
+        // {non-prunable} ∪ {footprint intersects freed} — a SUPERSET of the
+        // feasible set — and plan_bundle's ordered reduction over it elects the
+        // identical winner (pruned candidates are provably infeasible → never
+        // enter the reduction).  A victim intersecting no prunable candidate
+        // (mask empty) is a provably !found trial, skipped whole (nothing
+        // observes the rip/restore, so eliding it is byte-identical).  Disabled
+        // under the unbounded greedy spread modes (band_span_charge>=3) and for
+        // share-carrying wrappers (a rip also moves the collective share books,
+        // which the footprint does not model).
         const bool prune_ok =
             band_span_charge_ < 3 && target->input.share_group.empty();
         std::vector<int> tgt_cands;
         std::vector<std::vector<BandRect>> foots;
-        std::vector<char> decoupled;
+        std::vector<char> prunable;   // decoupled AND not window-sensitive
         if (prune_ok && !ranked.empty()) {
             tgt_cands = collect_cand_indices_(*target);
             foots.reserve(tgt_cands.size());
-            decoupled.reserve(tgt_cands.size());
+            prunable.reserve(tgt_cands.size());
             for (int ci : tgt_cands) {
-                foots.push_back(cand_band_footprint_(*target, ci));
-                const bool dec = cand_is_decoupled_(foots.back());
-                decoupled.push_back(dec ? 1 : 0);
-                if (!dec) ++n_coupled;
+                bool ws = false;
+                foots.push_back(cand_band_footprint_(*target, ci, &ws));
+                // Prunable only when feasibility is layer-CHOICE-independent:
+                // no overlay coupling (else a kBalance layer flip cascades
+                // through the own-overlay) AND not window-sensitive (else a
+                // kBalance layer flip changes the window-fit verdict).  Either
+                // one present ⇒ a disjoint rip could flip feasibility ⇒ score it.
+                const bool ok = cand_is_decoupled_(foots.back()) && !ws;
+                prunable.push_back(ok ? 1 : 0);
+                if (!ok) ++n_coupled;   // "coupled" count = always-scored count
             }
         }
 
@@ -3108,9 +3141,10 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
                 mask.assign(target->input.candidates.size(), 0);
                 any_candidate = false;
                 for (size_t k = 0; k < tgt_cands.size(); ++k) {
-                    // Coupled candidates always score; decoupled ones only when
-                    // the rip touches their footprint.  (Superset of feasible.)
-                    if (!decoupled[k] || footprint_hits_(foots[k], freed)) {
+                    // Non-prunable candidates always score; prunable ones only
+                    // when the rip touches their footprint.  (Superset of the
+                    // feasible set, so the winner is identical.)
+                    if (!prunable[k] || footprint_hits_(foots[k], freed)) {
                         mask[tgt_cands[k]] = 1;
                         any_candidate = true;
                     } else {
@@ -3163,7 +3197,7 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
                   << " ladder=" << ms_ladder << "(ranked=" << n_ranked
                   << " tried=" << n_victims << " plans=" << n_ladder_plans
                   << " futile=" << n_futile << " pruned=" << n_pruned
-                  << " coupled=" << n_coupled << " committed=" << committed << ")"
+                  << " noprune=" << n_coupled << " committed=" << committed << ")"
                   << " fallback=" << ms_fallback << "(n=" << n_fallback << ")"
                   << " pb_cum[calls=" << prof_plan_calls_
                   << " cands=" << prof_cands_

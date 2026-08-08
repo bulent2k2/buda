@@ -458,8 +458,13 @@ private:
     // disagree about which candidates a sweep visits.
     std::vector<int> collect_cand_indices_(const BundleWrapper& bw) const;
     // Conservative usage-read footprint of one candidate (see BandRect).
-    std::vector<BandRect> cand_band_footprint_(const BundleWrapper& bw,
-                                               int ci) const;
+    // window_sensitive (optional out): set true when some segment's bounded
+    // ConnTopology window is fit by SOME allowed same-direction layers and not
+    // others — the post-selection window-fit check (enforce_window) then makes
+    // the candidate's feasibility depend on the kBalance-driven layer CHOICE, so
+    // a disjoint rip can flip it and it must NOT be pruned (Codex #634 P1).
+    std::vector<BandRect> cand_band_footprint_(const BundleWrapper& bw, int ci,
+                                               bool* window_sensitive = nullptr) const;
     // True when NO two segments of a candidate could ever charge the same
     // (cut, band): the greedy's per-segment feasibility is then independent of
     // its layer CHOICES (no overlay coupling), so — since the overflow gate is
