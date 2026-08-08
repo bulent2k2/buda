@@ -14,6 +14,7 @@ Stage 8 defines the physical track structure of each metal layer. Commands in th
 
 ```
 def_track_pattern <layer_id> <origin> <type1> <w1> <sp1> [<type2> <w2> <sp2> …]
+def_track_pattern <layer_id> <origin> … ( <slots> )x<count> …
 ```
 
 Define the repeating track pattern for a layer. The pattern tiles from `origin` outward across the full layer extent.
@@ -27,6 +28,45 @@ Define the repeating track pattern for a layer. The pattern tiles from `origin` 
 | `sp` | float | Space after this track (gap to the next slot), in layout units |
 
 Each `<type> <w> <sp>` triple defines one slot in the repeating unit. Slots are listed in order from low to high perpendicular position. The unit pitch is the sum of all `(w + sp)` values.
+
+#### Repetition groups — `( <slots> )x<count>`
+
+A dense pattern is mostly one slot repeated, and spelling the repeat out hides
+the intent (and any typo in the middle of the run). A parenthesised group
+followed by `x<count>` repeats its slots:
+
+```buda
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+```
+
+is exactly the 14-slot pattern you would otherwise write as `VDD 2 1` followed
+by twelve literal `_ 1 1` triples and `GND 2 1`.
+
+The expansion is **purely syntactic** — the resulting slot list, unit pitch and
+signal density are identical to the longhand, so a pattern can be rewritten in
+this form with no change to routing.
+
+- **Several groups, and plain slots between them**, compose freely — the
+  symmetric case reads naturally:
+  `def_track_pattern 3 0 (_ 1 1)x5 _ 2 1 (_ 1 1)x5`
+- **A group may hold more than one slot**, which is the useful case for a
+  repeating power/signal unit:
+  `def_track_pattern 3 0 (VDD 2 1 _ 1 1)x3 GND 2 1`
+- **Spacing is free.** `)x12`, `)x 12` and `) x 12` are the same, and `X` works
+  as well as `x`.
+- **Groups do not nest.** The grammar is deliberately flat so the errors can be
+  specific; `((_ 1 1)x2)x3` is a hard error rather than a silent mis-parse.
+
+Malformed groups are **flow-stopping errors**, never a silent mis-expansion: a
+missing or non-positive count, an unterminated `(`, an unmatched `)`, an empty
+`()`, a group whose token count is not a whole number of triples, and nesting
+each report what is wrong. A count above **4096** is refused too, before the
+expansion allocates — a track pattern is one repeating unit that tiles across
+the layer, so a count that large is a typo (`x100000000`), and the longhand
+could never express it.
+
+The same syntax works in [`add_grid_override`](#add_grid_override) — both
+commands share one slot-list parser, so it cannot drift between them.
 
 **Notes:**
 - Each layer may have at most one global pattern, defined **once**. Calling `def_track_pattern` a second time on the same layer is a **hard error** (it silently replaced the existing pattern before, dropping the earlier one) — use `add_grid_override` for a region-scoped pattern variation.
