@@ -352,3 +352,216 @@ def test_r3_restricted_rule_on_patternless_layer_is_loud():
         _run(s, c)      # note: NO pattern for layer 5
     with pytest.raises(SystemExit):
         _run(s, "run_detailed_nuts")
+
+
+# ── v21: BDB rule persistence (ndr_architecture.md §4) ─────────────────────
+
+_BDB_FLOW_NDR = ["def_ndr clk2x width x2 spacing x2 shield bus net GND",
+                 "set_ndr clk_ clk2x"]
+
+
+def _bdb_flow(tmp_path, ndr_cmds_list=None, pre_open_cmds=None):
+    """The standard flow with a BDB open from the start (persists bundles,
+    plan, and — v21 — rules/scopes)."""
+    s = _bare_session()
+    out = []
+    for c in ((pre_open_cmds or [])
+              + [f"open_bdb {tmp_path}/ndr.bdb"]
+              + _FLOW_SETUP
+              + (_BDB_FLOW_NDR if ndr_cmds_list is None else ndr_cmds_list)
+              + _FLOW_RUN):
+        out.append(_run(s, c))
+    return s, "".join(out)
+
+
+def test_v21_rules_and_scopes_roundtrip(tmp_path):
+    s1, _ = _bdb_flow(tmp_path)
+    del s1
+    s2 = _bare_session()
+    out = _run(s2, f"open_bdb {tmp_path}/ndr.bdb")
+    assert "restored 1 rule(s) and 1 scope(s)" in out
+    assert ndr_cmds.ndr_rule_for_net(s2, "clk_0") == "clk2x"
+    assert ndr_cmds.ndr_rule_for_net(s2, "data_0") is None
+    r = s2._ndr_rules["clk2x"]
+    assert r["width_x"] == 2.0 and r["spacing_x"] == 2.0
+    assert r["shield_mode"] == 1 and r["shield_net"] == "GND"
+    dump = _run(s2, "dump_ndr")
+    assert "(restored from BDB)" in dump
+
+
+def test_v21_session_typed_wins_and_converges(tmp_path):
+    s1, _ = _bdb_flow(tmp_path)
+    del s1
+    s2 = _bare_session()
+    _run(s2, "def_ndr clk2x width x3")            # typed BEFORE open
+    _run(s2, f"open_bdb {tmp_path}/ndr.bdb")
+    assert s2._ndr_rules["clk2x"]["width_x"] == 3.0   # session wins
+    # ...and the BDB converged to the session's declaration.
+    rows = {r.name: r for r in s2.bdb.ndr_rules()}
+    assert rows["clk2x"].width_x == 3.0
+
+
+def test_v21_bundle_rows_carry_the_governing_rule(tmp_path):
+    s, _ = _bdb_flow(tmp_path)
+    stamps = {b.id: b.ndr_rule for b in s.bdb.all_bundles()}
+    clk_bid = str(next(w.input.original_bundle.id for w in s.bundles
+                       if w.input.ndr.active()))
+    # The stamp is the PRICING FINGERPRINT (name + quantized spec), so the
+    # VOID audit is self-contained in the bundle row even if the rule row
+    # is later overwritten (Codex on #620).
+    assert stamps[clk_bid] == "clk2x|w2|g1|s1|p0|nGND|L"
+    assert all(v == "" for k, v in stamps.items() if k != clk_bid)
+
+
+def _resume_session(tmp_path, pre_load_cmds=None):
+    """Fresh session re-declaring the setup, then load_pipeline."""
+    s = _bare_session()
+    out = []
+    for c in ([f"open_bdb {tmp_path}/ndr.bdb"]
+              + _FLOW_SETUP
+              + [f"def_track_pattern 3 {_PATTERN}",
+                 f"def_track_pattern 4 {_PATTERN}",
+                 f"def_track_pattern 5 {_PATTERN}",
+                 f"def_track_pattern 6 {_PATTERN}"]
+              + (pre_load_cmds or [])
+              + ["load_pipeline"]):
+        out.append(_run(s, c))
+    return s, "".join(out)
+
+
+def test_v21_resume_keeps_plan_when_rules_unchanged(tmp_path):
+    s1, _ = _bdb_flow(tmp_path)
+    del s1
+    s2, out = _resume_session(tmp_path)
+    assert "VOIDED" not in out
+    w = next(w for w in s2.bundles if w.input.ndr.active())
+    assert w.input.ndr.rule_name == "clk2x"
+    assert w.input.ndr.width_slots == 2
+    assert w.plan.selected_topology_index >= 0    # plan survived
+
+
+def test_v21_void_on_scope_removed(tmp_path):
+    s1, _ = _bdb_flow(tmp_path)
+    clk_bid = next(w.input.original_bundle.id for w in s1.bundles
+                   if w.input.ndr.active())
+    del s1
+    # The scope is cleared AFTER open (restored, then typed away) — the
+    # governed bundle's plan was priced under clk2x and must VOID.
+    s2, out = _resume_session(tmp_path, pre_load_cmds=["set_ndr clk_ off"])
+    assert "VOIDED" in out and "clk2x" in out
+    w = next(w for w in s2.bundles
+             if w.input.original_bundle.id == clk_bid)
+    assert w.plan.selected_topology_index == -1
+    # The default-rule bundle's plan is untouched.
+    other = next(w for w in s2.bundles
+                 if w.input.original_bundle.id != clk_bid)
+    assert other.plan.selected_topology_index >= 0
+
+
+def test_v21_void_on_rule_content_change(tmp_path):
+    s1, _ = _bdb_flow(tmp_path)
+    del s1
+    # A session-typed same-name rule with DIFFERENT content shadows the
+    # persisted definition: same resolution name, different pricing basis.
+    s2 = _bare_session()
+    for c in ["def_ndr clk2x width x3"] + [f"open_bdb {tmp_path}/ndr.bdb"] \
+             + _FLOW_SETUP \
+             + [f"def_track_pattern 3 {_PATTERN}",
+                f"def_track_pattern 4 {_PATTERN}",
+                f"def_track_pattern 5 {_PATTERN}",
+                f"def_track_pattern 6 {_PATTERN}"]:
+        _run(s2, c)
+    out = _run(s2, "load_pipeline")
+    # x3 quantizes to 3 slots vs the checkpoint's 2 — the pricing
+    # fingerprints differ, so the plan voids (both fingerprints printed).
+    assert "VOIDED" in out and "demand was priced under the old rule" in out
+    assert "clk2x|w3" in out and "clk2x|w2" in out
+
+
+def test_v21_pre_v21_db_migrates(bdb_input, tmp_path):
+    # Build a GENUINE v20 database (the committed fixtures regenerate at
+    # the current version, so a real downgrade is constructed here: drop
+    # the v21 tables + column, stamp user_version=20) and reopen — the
+    # migration must bring it to v21 with usable empty NDR tables and the
+    # '' governing-rule default on every migrated bundle row.
+    import shutil
+    import sqlite3
+    src = bdb_input("hier_mixed")
+    path = str(tmp_path / "v20.bdb")
+    shutil.copy(src, path)
+    con = sqlite3.connect(path)
+    con.executescript(
+        "DROP TABLE ndr_scope; DROP TABLE ndr_rule;"
+        "ALTER TABLE bundle DROP COLUMN ndr_rule;"
+        "PRAGMA user_version = 20;")
+    con.close()
+    db = buda.BDB(path)
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    assert list(db.ndr_rules()) == []
+    assert list(db.ndr_scopes()) == []
+    r = buda.NdrRuleRow(); r.name = "post_migration"; r.width_x = 2.0
+    db.set_ndr_rule(r)                            # tables usable post-migrate
+    assert [x.name for x in db.ndr_rules()] == ["post_migration"]
+    assert b_ndr_default(db)
+
+
+def b_ndr_default(db):
+    # Migrated bundle rows read an empty governing rule (the '' default).
+    return all(b.ndr_rule == "" for b in db.all_bundles())
+
+
+def test_v21_scope_fk_is_loud(tmp_path):
+    db = buda.BDB(str(tmp_path / "fk.bdb"))
+    with pytest.raises(RuntimeError):
+        db.set_ndr_scope("clk_", "nosuchrule")
+
+
+def test_v21_void_survives_writethrough_before_load(tmp_path):
+    # Codex on #620 (P1): re-declare the rule under the same name with the
+    # BDB open, then EXIT WITHOUT load_pipeline — the converge write-through
+    # overwrites the only stored copy of the old definition.  The pricing
+    # fingerprint stamped on the bundle row must still void the plan in the
+    # NEXT session.
+    s1, _ = _bdb_flow(tmp_path)
+    del s1
+    s2 = _bare_session()
+    _run(s2, "def_ndr clk2x width x3")            # shadow, typed
+    _run(s2, f"open_bdb {tmp_path}/ndr.bdb")      # converge overwrites row
+    del s2                                        # exit before load_pipeline
+    s3, out = _resume_session(tmp_path)
+    assert "VOIDED" in out
+    w = next(w for w in s3.bundles if w.input.ndr.active())
+    assert w.plan.selected_topology_index == -1
+
+
+def test_v21_void_on_non_leading_net_scope_change(tmp_path):
+    # Codex on #620 (P1): a scope matching only a NON-leading net turns the
+    # checkpoint's rule-uniform bundle mixed — resolving nets[0] alone
+    # would accept the stale plan and split.
+    s1, _ = _bdb_flow(tmp_path)
+    del s1
+    s2, out = _resume_session(
+        tmp_path, pre_load_cmds=["def_ndr wide2 width x2",
+                                 "set_ndr clk_2 wide2"])   # matches clk_2 only
+    assert "MIXED rules" in out and "re-run the bundler" in out
+    assert "VOIDED" in out
+
+
+def test_v21_quantization_invariant_change_keeps_plan(tmp_path):
+    # A content change that does NOT move the quantized demand (x2 -> x1.7,
+    # both 2 slots / 1 guard) keeps the plan: the pricing is unchanged, so
+    # voiding would be false alarm.
+    s1, _ = _bdb_flow(tmp_path)
+    del s1
+    s2 = _bare_session()
+    _run(s2, "def_ndr clk2x width x1.7 spacing x1.7 shield bus net GND")
+    for c in [f"open_bdb {tmp_path}/ndr.bdb"] + _FLOW_SETUP \
+             + [f"def_track_pattern 3 {_PATTERN}",
+                f"def_track_pattern 4 {_PATTERN}",
+                f"def_track_pattern 5 {_PATTERN}",
+                f"def_track_pattern 6 {_PATTERN}"]:
+        _run(s2, c)
+    out = _run(s2, "load_pipeline")
+    assert "VOIDED" not in out
+    w = next(w for w in s2.bundles if w.input.ndr.active())
+    assert w.plan.selected_topology_index >= 0

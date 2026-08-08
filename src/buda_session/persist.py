@@ -164,6 +164,9 @@ class PersistMixin:
             # v19: rotation-class clone provenance survives every rewrite.
             row.cloned_from = str((getattr(self, "_bu_clone_from", None)
                                    or {}).get(hb.id, ""))
+            # v21: the governing NDR rule — load_pipeline's VOID basis.
+            from buda_cmds.ndr_cmds import stamp_bundle_ndr
+            stamp_bundle_ndr(self, row, w)
             self.bdb.add_bundle(row)
             for nm in hb.get_net_names():
                 self.bdb.add_bundle_net(row.id, nm)
@@ -1000,12 +1003,24 @@ class PersistMixin:
         self._apply_layer_policies()
         cap_voided = self._audit_restored_layer_caps()
 
+        # NDR rules + scopes (v21): restore, re-resolve specs onto the
+        # restored wrappers, and VOID any restored plan whose governing rule
+        # changed since the checkpoint — the plan was priced under a
+        # different demand (ndr_architecture.md §4; the same LOUD
+        # re-plan-required semantics as the cap audit above).
+        from buda_cmds import ndr_cmds
+        ndr_cmds.restore_ndr_from_bdb(self)
+        ndr_voided = ndr_cmds.audit_restored_ndr(
+            self, {int(b.id): b.ndr_rule for b in rows
+                   if str(b.id).lstrip("-").isdigit()})
+
         # Rehydrate the abstract-NUTS result (if run_nuts was persisted) so
-        # run_detailed_nuts can resume from it.  A cap-voided bundle's
-        # persisted routing is equally illegal — leave it out.
+        # run_detailed_nuts can resume from it.  A cap- or NDR-voided
+        # bundle's persisted routing is equally illegal — leave it out.
         ts_list = []
         for w in self.bundles:
-            if int(w.input.original_bundle.id) in cap_voided:
+            if int(w.input.original_bundle.id) in cap_voided \
+                    or int(w.input.original_bundle.id) in ndr_voided:
                 continue
             bid = str(w.input.original_bundle.id)
             for g in self.bdb.bus_segments(bid):
@@ -1031,14 +1046,14 @@ class PersistMixin:
             nr = buda.NUTSResult()
             nr.segments = ts_list
             self.nuts_result = nr             # persisted routing = final, clean
-        elif cap_voided and self.nuts_result is not None:
-            # Every restored bundle with routing was cap-voided: a nuts_result
+        elif (cap_voided or ndr_voided) and self.nuts_result is not None:
+            # Every restored bundle with routing was voided: a nuts_result
             # left over from earlier in THIS session is stale (potentially
-            # above-cap) metal the audit just excluded — clearing it keeps
+            # illegal) metal the audits just excluded — clearing it keeps
             # run_detailed_nuts from consuming it (Codex #546).
             self.nuts_result = None
-            print("[LayerCap] cleared the session's previous NUTS result — "
-                  "the cap audit voided every restored routed bundle")
+            print("[NDR/LayerCap] cleared the session's previous NUTS result "
+                  "— the audits voided every restored routed bundle")
 
         n_cand = sum(len(w.input.candidates) for w in self.bundles)
         n_planned = sum(1 for w in self.bundles
@@ -1191,6 +1206,9 @@ class PersistMixin:
         row.rcv_spec_paths = json.dumps(list(hb.rcv_spec_paths))
         row.cloned_from = str((getattr(self, "_bu_clone_from", None)
                                or {}).get(hb.id, ""))
+        # v21: the governing NDR rule — load_pipeline's VOID basis.
+        from buda_cmds.ndr_cmds import stamp_bundle_ndr
+        stamp_bundle_ndr(self, row, w)
         self.bdb.add_bundle(row)                    # is_replicated defaults to False
         for nm in hb.get_net_names():
             self.bdb.add_bundle_net(bid, nm)

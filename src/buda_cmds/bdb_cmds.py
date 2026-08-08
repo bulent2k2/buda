@@ -147,6 +147,10 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # Per-cell layer policies persisted in this BDB (v20) come back so the
     # resumed flow plans under the same bands (session-typed entries win).
     session._restore_layer_policies()
+    # NDR rules + scopes persisted in this BDB (v21) come back the same way
+    # (session-typed entries win; a previous BDB's restored entries drop).
+    from buda_cmds import ndr_cmds
+    ndr_cmds.restore_ndr_from_bdb(session)
 
 
 def cmd_import_def_lef(session, cmd, args, cmd_line):

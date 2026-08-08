@@ -140,6 +140,26 @@ struct BundleRow {
     // GDS/DEF/Verilog interchange is unaffected. Bottom-up gates resolve
     // the clone's marked-ness through this link.
     std::string cloned_from;
+    // v21: the NDR rule governing this bundle when it was persisted ("" =
+    // default rule).  load_pipeline compares it against the FRESH prefix
+    // resolution: a mismatch means the rules changed since the checkpoint,
+    // so the restored plan was priced under a different demand and is
+    // VOIDED (LOUD, re-plan required).
+    std::string ndr_rule;
+};
+
+// One declared NDR rule (v21 ndr_rule table).  Raw multiplier values as
+// declared by def_ndr — quantization to slots happens at resolution time
+// (buda_cmds/ndr_cmds.py), so the stored rule survives a policy change in
+// the quantizer.  layers is a CSV of layer ids ("" = any).
+struct NdrRuleRow {
+    std::string name;
+    double      width_x   = 1.0;
+    double      spacing_x = 1.0;
+    int         shield_mode  = 0;
+    int         shield_per_n = 0;
+    std::string shield_net   = "GND";
+    std::string layers;
 };
 
 struct GrpRow {
@@ -343,7 +363,14 @@ public:
     //       meta.layer_cap_default) + the cell_layer_share table (fractional
     //       per-layer shares — schema landed with the band, consumed by
     //       Phase 3).
-    static constexpr int SCHEMA_VERSION = 20;
+    // v21 = NDR rule persistence (docs/internal/ndr_architecture.md §4):
+    //       the ndr_rule table (declared rules, raw multiplier values so a
+    //       re-quantization policy change re-derives slots on load) + the
+    //       ndr_scope table (prefix → rule attachments; '*' = the global
+    //       default scope) + bundle.ndr_rule (the governing rule stamped on
+    //       each persisted bundle, so load_pipeline can detect a
+    //       since-changed resolution and VOID the restored plan).
+    static constexpr int SCHEMA_VERSION = 21;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -404,6 +431,20 @@ public:
     void set_cell_layer_share(const std::string& cell, int layer_id, double share);
     std::vector<std::pair<int,double>> cell_layer_shares(const std::string& cell) const;
     std::vector<std::string> layer_share_cells() const;
+
+    // ── NDR rule persistence (v21, docs/internal/ndr_architecture.md §4) ──
+    // set_ndr_rule upserts a declared rule; ndr_rules returns every rule
+    // sorted by name.  set_ndr_scope upserts a prefix→rule attachment
+    // (throws if the rule is not declared — the FK made LOUD);
+    // delete_ndr_scope removes one (missing = no-op); ndr_scopes returns
+    // every (prefix, rule) sorted by prefix.  clear_ndr drops all scopes
+    // and rules (the session-level 'forget everything' path).
+    void set_ndr_rule(const NdrRuleRow& r);
+    std::vector<NdrRuleRow> ndr_rules() const;
+    void set_ndr_scope(const std::string& prefix, const std::string& rule);
+    void delete_ndr_scope(const std::string& prefix);
+    std::vector<std::pair<std::string,std::string>> ndr_scopes() const;
+    void clear_ndr();
     // The cell-type child graph as (parent_cell, child_cell) edges, sorted and
     // de-duplicated (one edge per distinct pair however many instances).  The
     // structural source for intrinsic cell LEVELS (set_layer_caps_by_depth,

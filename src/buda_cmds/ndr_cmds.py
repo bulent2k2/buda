@@ -56,6 +56,178 @@ def _scopes(session):
     return session._ndr_scopes
 
 
+# ── v21 BDB persistence (docs/internal/ndr_architecture.md §4) ─────────────
+# Rules/scopes write through to an open BDB and restore on open_bdb /
+# load_pipeline, the v20 layer-policy pattern verbatim: entries the user
+# TYPED this session win on collision, entries a PREVIOUS restore added are
+# dropped before another BDB's merge in (a BDB switch must not carry the
+# old design's rules along).
+
+def _write_rule_through(session, name):
+    if getattr(session, "bdb", None) is None:
+        return
+    r = _rules(session)[name]
+    row = buda.NdrRuleRow()
+    row.name         = name
+    row.width_x      = r["width_x"]
+    row.spacing_x    = r["spacing_x"]
+    row.shield_mode  = r["shield_mode"]
+    row.shield_per_n = r["shield_per_n"]
+    row.shield_net   = r["shield_net"]
+    row.layers       = ",".join(str(l) for l in (r["layers"] or []))
+    session.bdb.set_ndr_rule(row)
+
+
+def _write_scope_through(session, prefix, rule_or_none):
+    if getattr(session, "bdb", None) is None:
+        return
+    if rule_or_none is None:
+        session.bdb.delete_ndr_scope(prefix)
+    else:
+        session.bdb.set_ndr_scope(prefix, rule_or_none)
+
+
+def restore_ndr_from_bdb(session):
+    """Merge the open BDB's rules + scopes into the session (session-typed
+    entries win; a previous restore's entries are dropped first).  Also
+    writes through any session-typed entries the BDB lacks, so declare-
+    then-open and open-then-declare converge on the same persisted state.
+    Returns (n_rules, n_scopes) restored."""
+    if getattr(session, "bdb", None) is None:
+        return (0, 0)
+    rules, scopes = _rules(session), _scopes(session)
+    typed_rules  = getattr(session, "_ndr_rules_typed", None) or set()
+    typed_scopes = getattr(session, "_ndr_scopes_typed", None) or set()
+    for name in (getattr(session, "_ndr_rules_restored", None) or set()):
+        if name in rules and name not in typed_rules:
+            del rules[name]
+    for pfx in (getattr(session, "_ndr_scopes_restored", None) or set()):
+        if pfx in scopes and pfx not in typed_scopes:
+            del scopes[pfx]
+    restored_rules, restored_scopes = set(), set()
+    for row in session.bdb.ndr_rules():
+        if row.name in rules:            # session-typed wins
+            continue
+        rules[row.name] = {
+            "width_x": row.width_x, "spacing_x": row.spacing_x,
+            "shield_mode": row.shield_mode, "shield_per_n": row.shield_per_n,
+            "shield_net": row.shield_net,
+            "layers": ([int(t) for t in row.layers.split(",")]
+                       if row.layers else None),
+        }
+        restored_rules.add(row.name)
+    for prefix, rule in session.bdb.ndr_scopes():
+        if prefix in scopes:             # session-typed wins
+            continue
+        if rule not in rules:
+            print(f"WARNING: [NDR] restored scope '{prefix}' names unknown "
+                  f"rule '{rule}' — ignored")
+            continue
+        scopes[prefix] = rule
+        restored_scopes.add(prefix)
+    session._ndr_rules_restored  = restored_rules
+    session._ndr_scopes_restored = restored_scopes
+    # Converge: session-typed entries the BDB lacks write through now.
+    for name in typed_rules:
+        if name in rules:
+            _write_rule_through(session, name)
+    for pfx in typed_scopes:
+        if pfx in scopes:
+            _write_scope_through(session, pfx, scopes[pfx])
+    if restored_rules or restored_scopes:
+        print(f"[NDR] restored {len(restored_rules)} rule(s) and "
+              f"{len(restored_scopes)} scope(s) from the open BDB")
+    return (len(restored_rules), len(restored_scopes))
+
+
+def ndr_pricing_fp(session, rule_name):
+    """Canonical PRICING-BASIS fingerprint of a rule: the QUANTIZED spec
+    (slots/guards/shield arrangement — exactly what the planner charged and
+    DNUTS placed) plus the layer restriction.  Stamped into
+    bundle.ndr_rule at persist time and compared verbatim by
+    audit_restored_ndr, so the VOID decision is self-contained in the
+    bundle row — it survives the rule row itself being overwritten by a
+    later session's converge write-through (Codex on #620: a re-declared
+    same-name rule + exit-before-load destroyed the only stored copy of
+    the checkpoint's definition).  A content change that does NOT move the
+    quantized demand (e.g. width x1.8 -> x2.0, both 2 slots) correctly
+    fingerprints identically: the plan's pricing is unchanged.  None for
+    an unknown rule."""
+    r = _rules(session).get(rule_name)
+    if r is None:
+        return None
+    ws = max(1, math.ceil(r["width_x"]))
+    gs = max(0, math.ceil(r["spacing_x"]) - 1)
+    lay = ",".join(str(l) for l in (r["layers"] or []))
+    return (f"{rule_name}|w{ws}|g{gs}|s{r['shield_mode']}"
+            f"|p{r['shield_per_n']}|n{r['shield_net']}|L{lay}")
+
+
+def stamp_bundle_ndr(session, row, wrapper):
+    """Stamp the wrapper's governing rule PRICING FINGERPRINT onto a
+    BundleRow about to be persisted (v21 provenance —
+    audit_restored_ndr's comparison basis; "" = default rule)."""
+    spec = wrapper.input.ndr
+    row.ndr_rule = (ndr_pricing_fp(session, spec.rule_name) or ""
+                    if spec.active() else "")
+
+
+def audit_restored_ndr(session, bid_to_stamp):
+    """The v21 VOID-on-change audit (load_pipeline): a restored bundle whose
+    persisted PRICING FINGERPRINT (bundle.ndr_rule, stamped at persist
+    time) differs from the FRESH resolution — the rules or scopes changed
+    since the checkpoint was routed, so the restored plan was priced under
+    a different demand — has its selection VOIDED (LOUD; continuing
+    requires an explicit re-plan; the persisted rows are untouched, a
+    re-run of the planner rewrites them).  EVERY net of the bundle is
+    resolved (Codex on #620: a scope change matching only a non-leading
+    net turns a checkpoint's rule-uniform bundle MIXED — nets[0] alone
+    would miss it), and a now-mixed bundle voids with a re-BUNDLE notice:
+    the rule-class split itself is stale, not just the plan.  Matching
+    governed bundles get their specs (re)stamped so the resumed session
+    stays governed.  Returns the set of voided bundle ids (ints)."""
+    if not getattr(session, "_ndr_scopes", None) and not bid_to_stamp:
+        return set()
+    voided = set()
+    for w in session.bundles:
+        b = w.input.original_bundle
+        nets = list(b.get_net_names())
+        resolutions = ({ndr_rule_for_net(session, n) for n in nets}
+                       if nets else {None})
+        stamped = bid_to_stamp.get(int(b.id), "") or ""
+        reason, fresh = None, None
+        if len(resolutions) > 1:
+            names = sorted((r or "default") for r in resolutions)
+            reason = (f"its nets now resolve to MIXED rules "
+                      f"[{', '.join(names)}] — the checkpoint's rule-class "
+                      f"split is stale; re-run the bundler and planner")
+        else:
+            fresh = next(iter(resolutions))
+            fresh_fp = (ndr_pricing_fp(session, fresh) or "") if fresh else ""
+            if fresh_fp != stamped:
+                old = stamped.split("|", 1)[0] if stamped else "default"
+                reason = (f"persisted under rule '{old}' "
+                          f"[{stamped or 'default'}] but now resolves to "
+                          f"'{fresh or 'default'}' "
+                          f"[{fresh_fp or 'default'}] — demand was priced "
+                          f"under the old rule; re-run the planner")
+        if reason and w.plan.selected_topology_index >= 0:
+            name = nets[0] if nets else "?"
+            print(f"WARNING: [NDR] bundle {b.id} ({name}): {reason} — "
+                  f"restored plan VOIDED")
+            w.plan.selected_topology_index = -1
+            w.plan.seg_layers = []
+            voided.add(int(b.id))
+        if fresh is not None and len(resolutions) == 1:
+            w.input.ndr = _spec_of(session, fresh)
+            layers = _rules(session)[fresh]["layers"]
+            if layers:
+                cur = list(w.input.allowed_layers)
+                w.input.allowed_layers = sorted(
+                    set(layers) & set(cur)) if cur else sorted(layers)
+    return voided
+
+
 def ndr_rule_for_net(session, net_name):
     """Resolved rule name for a net (longest matching set_ndr prefix; '*'
     is the global default), or None for the default rule.  Mirrors
@@ -170,6 +342,10 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
               f"spacing, no shield) — declare at least one constraint")
         sys.exit(1)
     _rules(session)[name] = rule
+    if not hasattr(session, "_ndr_rules_typed"):
+        session._ndr_rules_typed = set()
+    session._ndr_rules_typed.add(name)
+    _write_rule_through(session, name)       # v21: persists when a BDB is open
     ws = max(1, math.ceil(rule["width_x"]))
     gs = max(0, math.ceil(rule["spacing_x"]) - 1)
     sh = {0: "none", 1: "bus", 2: "bit", 3: f"per:{rule['shield_per_n']}"}[
@@ -189,8 +365,12 @@ def cmd_set_ndr(session, cmd, args, cmd_line):
         return
     prefix, rule = args[0], args[1]
     scopes = _scopes(session)
+    if not hasattr(session, "_ndr_scopes_typed"):
+        session._ndr_scopes_typed = set()
     if rule.lower() == "off":
         scopes.pop(prefix, None)
+        session._ndr_scopes_typed.discard(prefix)
+        _write_scope_through(session, prefix, None)   # v21: delete the row
         print(f"[NDR] scope '{prefix}' cleared "
               f"({len(scopes)} scope(s) active)")
         return
@@ -199,6 +379,8 @@ def cmd_set_ndr(session, cmd, args, cmd_line):
               f"first)")
         sys.exit(1)
     scopes[prefix] = rule
+    session._ndr_scopes_typed.add(prefix)
+    _write_scope_through(session, prefix, rule)       # v21: persists
     print(f"[NDR] scope '{prefix}' -> rule '{rule}' ({len(scopes)} scope(s) "
           f"active; applies at the next run_bundler)")
 
@@ -350,6 +532,8 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
     if not rules and not scopes:
         print("[NDR] no rules declared")
         return
+    r_rest = getattr(session, "_ndr_rules_restored", None) or set()
+    s_rest = getattr(session, "_ndr_scopes_restored", None) or set()
     for name, r in sorted(rules.items()):
         ws = max(1, math.ceil(r["width_x"]))
         gs = max(0, math.ceil(r["spacing_x"]) - 1)
@@ -357,12 +541,14 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
               3: f"per:{r['shield_per_n']}"}[r["shield_mode"]]
         lay = ("any" if r["layers"] is None
                else ",".join(str(l) for l in r["layers"]))
+        src = "  (restored from BDB)" if name in r_rest else ""
         print(f"[NDR] rule '{name}': width x{r['width_x']:g} "
               f"({ws} slot(s)/bit), spacing x{r['spacing_x']:g} "
               f"({gs} guard(s)/gap), shield {sh} net {r['shield_net']}, "
-              f"layers {lay}")
+              f"layers {lay}{src}")
     for prefix, rule in sorted(scopes.items()):
-        print(f"[NDR] scope '{prefix}' -> '{rule}'")
+        src = "  (restored from BDB)" if prefix in s_rest else ""
+        print(f"[NDR] scope '{prefix}' -> '{rule}'{src}")
     if getattr(session, "bundles", None):
         for w in session.bundles:
             spec = w.input.ndr
