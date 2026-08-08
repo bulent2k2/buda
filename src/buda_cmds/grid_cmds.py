@@ -20,11 +20,12 @@ Each handler takes (session, cmd, args, cmd_line) and is registered
 in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
+import math
 import sys
 
 import buda
 
-from ._options import require_layer_id, require_number
+from ._options import require_int, require_layer_id, require_number
 
 _DEF_TRACK_PATTERN_USAGE = (
     "def_track_pattern <layer_id> <origin> [<type> <width> <space_after>] ...")
@@ -158,6 +159,36 @@ def _expand_slot_groups(cmd_name, toks, usage):
     return out
 
 
+def _require_slot_geometry(cmd_name, slot_type, width, space_after, usage):
+    """Reject a slot whose geometry cannot describe a track.
+
+    Track widths and spacings are genuinely FRACTIONAL — `TrackSlot::width` and
+    `space_after` are `double`, and sub-unit patterns (`SIGNAL 0.4 0.4`) are a
+    supported, shipped case — so this validates the SIGN, not the fraction.
+
+    Nothing checked either before, and the value was taken at face value: a
+    `SIGNAL 0 0` slot yielded `unit_pitch=0.000` and a layer with no tracks at
+    all, which does not fail at the declaration.  It surfaces six stages later
+    as `[DetailedNUTS] Warning: Layer 4 has insufficient signal tracks (0)`
+    with every bit on the layer stranded — and the run still exits 0.  The
+    declaration is where a non-positive width is diagnosable: no downstream
+    circumstance makes such a layer routable.
+    """
+    def die(what, val, why):
+        print(f"Error: {cmd_name}: {what} of slot '{slot_type}' must be "
+              f"{why}, got {val:g}." + (f"\n  Usage: {usage}" if usage else ""))
+        sys.exit(1)
+
+    if not math.isfinite(width) or width <= 0:
+        die("<width>", width, "a positive, finite number — a zero-, negative- "
+                              "or infinite-width slot is not a track, and a "
+                              "pattern of them gives the layer no tracks at all")
+    if not math.isfinite(space_after) or space_after < 0:
+        die("<space_after>", space_after,
+            "zero or a positive, finite number — negative space would overlap "
+            "the next slot (0 is fine: abutting slots)")
+
+
 def _parse_slots(cmd_name, toks, usage):
     """Parse a `<type> <width> <space_after>` slot list (repetition groups
     expanded first) into TrackSlots.  Shared by def_track_pattern and
@@ -173,6 +204,7 @@ def _parse_slots(cmd_name, toks, usage):
         space_after = require_number(cmd_name,
                                      f"<space_after> of slot '{slot_type}'",
                                      toks[i + 2], usage=usage)
+        _require_slot_geometry(cmd_name, slot_type, width, space_after, usage)
         slots.append(buda.TrackSlot(
             type=_canonical_slot_type(cmd_name, slot_type),
             label=slot_type.lower(),
@@ -304,8 +336,12 @@ def cmd_add_grid_override(session, cmd, args, cmd_line):
                                 usage=_ADD_GRID_OVERRIDE_USAGE)
 
     def _coord(what, tok):
-        return require_number("add_grid_override", what, tok, integer=True,
-                              usage=_ADD_GRID_OVERRIDE_USAGE)
+        # The override REGION is integer geometry (PatternOverride::region is a
+        # Rect), so a fractional coordinate was silently truncated — same defect
+        # as add_keepout's, and it moves the seam between two track patterns.
+        return require_int("add_grid_override", what, tok,
+                           usage=_ADD_GRID_OVERRIDE_USAGE,
+                           why="The region bounds a pattern seam, not a track.")
     x1, y1 = _coord("<x1>", args[1]), _coord("<y1>", args[2])
     x2, y2 = _coord("<x2>", args[3]), _coord("<y2>", args[4])
     origin = require_number("add_grid_override", "<origin>", args[5],

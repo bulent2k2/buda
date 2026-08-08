@@ -74,6 +74,15 @@ margin calculations.
 | `x1 y1` | int | Lower-left corner (layout units) |
 | `x2 y2` | int | Upper-right corner (layout units) |
 | `rect x1 y1 x2 y2` | keyword | Multi-rect form: one candidate connection rectangle. Repeat for each rect. |
+
+Coordinates are **integers** — `Rect` is an integer bounding box and a block's
+corners become Hanan grid lines that every later stage snaps to. A fractional
+coordinate (`68.300`) is a flow-stopping error naming the argument; an integral
+value spelled as a float (`100.0`, `1e2`) is accepted, since it names an exact
+integer. To place a design whose natural units are fractional, **scale it** (µm
+→ nm) rather than rounding at the block — rounding a 1.4-unit-wide cell to
+integers distorts it by tens of percent.
+
 | `teg_mode thru\|over` | keyword | Optional; multi-rect form only. Controls how topology generation handles trunks that fall in the gap between rects. Default: `thru`. See **TEG mode** below. |
 | `corner_margin dx N` | keyword | Optional. Shrink the routing face by `N` units in X (top/bottom faces). If `dy` is omitted, the same value applies to Y as well. |
 | `corner_margin dy N` | keyword | Optional. Shrink the routing face by `N` units in Y (left/right faces). |
@@ -180,6 +189,11 @@ global planner and the detailed router respect these zones.
 | `x1 y1` | int | Lower-left corner of the prohibited region (layout units) |
 | `x2 y2` | int | Upper-right corner of the prohibited region (layout units) |
 | `layerN` | int or str | Layer ID or name (e.g. `4` or `M4`) to block in this zone. |
+
+Coordinates are **integers**, as for `add_block`. A fractional value is a
+flow-stopping error rather than a rounding: truncating would *shrink* the zone
+(`10.9` → `10` on both axes), leaving routing that looks legal over ground you
+meant to block — the wrong direction to be wrong in.
 
 **Effect:**
 - **Topology generation**: `generate_topologies` / `generate_topologies_for_bundle`

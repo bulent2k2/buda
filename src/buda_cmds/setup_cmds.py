@@ -24,7 +24,18 @@ import buda
 import sys
 import re
 
-from ._options import reject_unknown_options
+from ._options import reject_unknown_options, require_int
+
+_ADD_BLOCK_USAGE = (
+    "add_block <name> <x1> <y1> <x2> <y2> [container] [corner_margin ...]  |  "
+    "add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode thru|over]")
+_ADD_KEEPOUT_USAGE = "add_keepout <x1> <y1> <x2> <y2> <layer> [<layer> ...]"
+# Blocks and keepouts share the floorplan's integer coordinate space, so they
+# share the clause explaining what a fractional coordinate would have cost.
+_BLOCK_COORD_WHY = ("A block's corners define Hanan grid lines, which every "
+                    "later stage snaps to.")
+_KEEPOUT_COORD_WHY = ("Truncating would SHRINK the zone, leaving routing that "
+                      "looks legal over blocked ground.")
 
 
 def cmd_add_block(session, cmd, args, cmd_line):
@@ -39,12 +50,19 @@ def cmd_add_block(session, cmd, args, cmd_line):
         print(f"Error: block '{name}' is already defined — "
               f"duplicate add_block (block names must be unique)")
         sys.exit(1)
+
+    def _block_coord(what, tok):
+        return require_int("add_block", what, tok, usage=_ADD_BLOCK_USAGE,
+                           why=_BLOCK_COORD_WHY)
+
     if len(args) > 1 and args[1].lower() == "rect":
         rects = []
         i = 1
         while i < len(args) and args[i].lower() == "rect":
-            x1r, y1r, x2r, y2r = int(args[i+1]), int(args[i+2]), int(args[i+3]), int(args[i+4])
-            rects.append((x1r, y1r, x2r, y2r))
+            n = len(rects) + 1
+            rects.append(tuple(
+                _block_coord(f"<{ax}> of rect {n}", args[i + k])
+                for k, ax in enumerate(("x1", "y1", "x2", "y2"), start=1)))
             i += 5
         # Optional teg_mode keyword after rects
         teg_mode = buda.TegMode.THRU
@@ -61,7 +79,8 @@ def cmd_add_block(session, cmd, args, cmd_line):
         x2 = max(r[2] for r in rects); y2 = max(r[3] for r in rects)
         rest = list(args[i:])
     else:
-        x1, y1, x2, y2 = int(args[1]), int(args[2]), int(args[3]), int(args[4])
+        x1, y1, x2, y2 = (_block_coord(f"<{ax}>", args[k]) for k, ax
+                          in enumerate(("x1", "y1", "x2", "y2"), start=1))
         session.fp.add_block(name, x1, y1, x2, y2)
         rest = list(args[5:])
     # Optional 'container' flag: marks a hierarchy envelope (transparent
@@ -276,9 +295,13 @@ def cmd_add_keepout(session, cmd, args, cmd_line):
     if len(args) < 5:
         print("Error: add_keepout requires x1 y1 x2 y2 and at least one layer")
         return
+
+    def _ko_coord(what, tok):
+        return require_int("add_keepout", what, tok, usage=_ADD_KEEPOUT_USAGE,
+                           why=_KEEPOUT_COORD_WHY)
+    x1, y1 = _ko_coord("<x1>", args[0]), _ko_coord("<y1>", args[1])
+    x2, y2 = _ko_coord("<x2>", args[2]), _ko_coord("<y2>", args[3])
     try:
-        x1, y1 = int(float(args[0])), int(float(args[1]))
-        x2, y2 = int(float(args[2])), int(float(args[3]))
         layer_ids = []
         for name in args[4:]:
             if name.isdigit():

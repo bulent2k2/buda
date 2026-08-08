@@ -24,6 +24,7 @@ unknown-COMMAND guard.  Validate BEFORE any state/prerequisite check so a
 malformed command is rejected regardless of session state.
 """
 import difflib
+import math
 import sys
 
 
@@ -118,6 +119,45 @@ def require_layer_id(cmd, tok, session=None, *, usage=""):
     print(f"Error: {cmd}: expected a numeric layer id, got '{tok}'.\n"
           + known_str + _usage_line(usage))
     sys.exit(1)
+
+
+def require_int(cmd, what, tok, *, usage="", why=""):
+    """Parse an INTEGER positional, rejecting a fractional value outright.
+
+    For the coordinates of block / keepout / override geometry, which is an
+    INTEGER grid all the way down (`Rect` in topology.h is `int x1,y1,x2,y2`,
+    and the Hanan grid is built from those edges).  The two ways this was
+    handled before were both wrong in opposite directions:
+
+      * `int(tok)` (add_block) raised a bare `ValueError: invalid literal for
+        int()` traceback naming neither the command nor which of four
+        positionals was bad;
+      * `int(float(tok))` (add_keepout, add_grid_override) SILENTLY TRUNCATED,
+        so `add_keepout 0 0 10.9 10.9` blocked (0,0)-(10,10) — a keepout ~1
+        unit smaller than written on both axes, i.e. routing that looks legal
+        over ground the user meant to block.  Silently shrinking a blockage is
+        the worst direction to be wrong in.
+
+    A value that is integral in a non-integer spelling (`100.0`, `1e2`) is
+    ACCEPTED — it names an exact integer, so nothing is lost by taking it.
+    Only a genuinely fractional (or non-finite) value is refused, because that
+    is the only case where continuing would change the number.  `why` adds one
+    clause of command-specific context to that message.
+    """
+    try:
+        val = float(tok)
+    except (TypeError, ValueError):
+        print(f"Error: {cmd}: expected an integer for {what}, got '{tok}'."
+              + _usage_line(usage))
+        sys.exit(1)
+    if not math.isfinite(val) or val != int(val):
+        why_str = f" {why}" if why else ""
+        print(f"Error: {cmd}: {what} must be a whole number, got '{tok}' — "
+              f"coordinates are an integer grid.{why_str} Scale the design "
+              f"(e.g. state it in nm rather than um) instead of rounding here."
+              + _usage_line(usage))
+        sys.exit(1)
+    return int(val)
 
 
 def require_number(cmd, what, tok, *, integer=False, usage=""):
