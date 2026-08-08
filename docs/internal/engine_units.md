@@ -30,7 +30,7 @@ them just compares numbers.
 |---|---|---|
 | `import_def_lef` — DEF `COMPONENTS`, `DIEAREA` | in | DEF integers are DBU; `dbu × scale / UNITS` (`src/bdb.cpp`) |
 | `import_def_lef` — LEF `SIZE` / `RECT` | in | LEF is already µm; `µm × scale` |
-| `import_gds` / `export_gds` | in / out | GDS DBU ↔ µm via the file's `UNITS` record, then × / ÷ scale; export writes 1 nm DBU (`kDbuUm`, `src/gds_io.cpp`) |
+| `import_gds` / `export_gds` | in / out | GDS DBU ↔ µm via the file's `UNITS` record, then × / ÷ scale; export writes 1 nm DBU (`kDbuUm`, `src/gds_io.cpp`).  `export_gds … via_size <um>` describes the *file*, not the design, so it is the one distance here that stays in microns and is converted at the point of use |
 | BDB tables | store | `REAL` columns, in layout units |
 | BDB → `Floorplan` | in | `int(round(...))` — the quantization point (`src/buda_session/hier.py`), ~59 sites across the Python layer |
 | `.buda` script | in | **every declared distance is already in layout units — no conversion at all** |
@@ -136,10 +136,14 @@ test, and rightly — nobody claimed those numbers were physical.  *Declaring*
 a scale is what turns the claim on.  Same principle as "no track pattern, no
 verdict": the guard judges only what the design actually asserted.
 
-The check runs **once per session**, at the first stage that has both a
+The check runs **once per grid**, at the first stage that has both a
 floorplan and a routing grid — `run_planner` for most flows, `run_nuts` for
 the ones that declare their patterns after planning
-(`demo/comprehensive_demo.buda` does).  A design with no track pattern is
+(`demo/comprehensive_demo.buda` does).  "Once per grid", not once per
+session: the verdict is keyed on the patterns it judged, so declaring a new
+pattern re-arms it.  A flag set at `run_planner` would permanently retire the
+`run_nuts` hook, and a fine M4 before planning would then excuse a
+wrong-scale M5 after it.  A design with no track pattern is
 never judged: there is no second scale to disagree with, and inventing a
 verdict from the coordinates alone would need exactly the calibration this
 signal exists to avoid.

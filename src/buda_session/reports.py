@@ -122,14 +122,25 @@ class ReportsMixin:
         if mode not in ("on", "warn", "off"):
             mode = self._unit_check
         measuring = bool(os.environ.get("BUDA_UNIT_SIGNAL"))
-        if self._unit_check_done or (mode == "off" and not measuring):
+        if mode == "off" and not measuring:
             return
         if self.routing_grid is None or self.fp is None:
             return
         signals, extent = unit_consistency_signals(self.fp, self.routing_grid)
         if not signals:
             return
-        self._unit_check_done = True
+        # "Once per session" really means "once per unchanged grid".  A plain
+        # done-flag set at run_planner would permanently retire the run_nuts
+        # hook, so a design that declares M4 before planning and a
+        # wrong-scale M5 after would be judged on M4 alone and pass — and
+        # declaring patterns late is exactly the flow shape the second hook
+        # exists for (Codex P2 on #645).  Keyed on the patterns themselves, so
+        # a new grid command re-arms the check without any command handler
+        # having to remember to reset a flag.
+        sig_key = tuple((lid, up) for lid, up, _n in signals)
+        if self._unit_check_done == sig_key:
+            return
+        self._unit_check_done = sig_key
         if measuring:
             # The raw measurement, for re-calibrating the bounds against a
             # corpus.  The bounds are only as good as the range they were set

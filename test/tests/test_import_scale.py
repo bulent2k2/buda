@@ -130,6 +130,24 @@ def test_pin_positions_and_cell_sizes_scale_with_the_coordinates(tmp_path):
     assert abs(p0.py - (3000 + 2 * _UNITS)) < 1e-6
 
 
+def test_cell_footprints_scale_with_the_components_built_from_them(tmp_path):
+    """The cell table is populated from the same LEF sizes as the component
+    bboxes, so the two must agree.  They did not: cell rows kept raw microns
+    while components scaled, giving a 10 µm macro a 20000-unit component and a
+    cell width of 10 — `add_inst` would then create undersized instances and
+    `export_gds` would draw the outline 2000x smaller than the placement it
+    sits in.  (The DEF's UNITS is only known once the file has been read, so
+    the cell rows have to be written after the parse, not before it.)"""
+    db = _import(tmp_path, scale="dbu")
+    cells = {c.name: c for c in db.all_cells()}
+    assert cells, "no cells imported"
+    for c in cells.values():
+        assert (c.width, c.height) == (20_000.0, 8_000.0)     # 10x4 µm in DBU
+    comp = _by_name(db)["i0"]
+    assert comp.x2 - comp.x1 == cells[comp.cell].width
+    assert comp.y2 - comp.y1 == cells[comp.cell].height
+
+
 def test_die_area_scales_too(tmp_path):
     db = _import(tmp_path, scale="dbu")
     assert (db.die_w(), db.die_h()) == (40000.0, 20000.0)

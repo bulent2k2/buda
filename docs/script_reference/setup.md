@@ -649,9 +649,10 @@ claimed those numbers were physical.
 | `off` | Do not check. |
 
 **Behaviour:**
-- Checked **once per session**, at the first stage that has both a floorplan
-  and a routing grid — `run_planner` for most flows, `run_nuts` for flows that
-  declare their track patterns after planning.
+- Checked **once per grid**, at the first stage that has both a floorplan and
+  a routing grid — `run_planner` for most flows, `run_nuts` for flows that
+  declare their track patterns after planning. Declaring a new pattern re-arms
+  the check, so a valid early layer cannot excuse a wrong-scale later one.
 - A design with **no track pattern** is never judged: there is no second scale
   to disagree with.
 

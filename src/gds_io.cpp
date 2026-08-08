@@ -990,9 +990,15 @@ GdsExportStats export_gds(BDB& db, const std::string& path,
                         std::max(x1, x2), std::max(y1, y2));
         ++stats.n_wire_shapes;
     };
+    // `via_size` is documented and defaulted in MICRONS (`export_gds …
+    // via_size <um>`) — it describes the GDS boundary, not the design, so it
+    // is the one distance here that is NOT already in layout units.  Convert
+    // it, or the writer's ÷scale would take a 1 µm via to 0.0005 µm at 2000
+    // DBU/µm (Codex P1 on #645).  Identity at the default scale.
+    const double via_size_lu = via_size * db.import_scale();
     auto emit_via = [&](int from_layer, int to_layer, double x, double y) {
         auto [gl, dt] = gds_pair(std::max(from_layer, to_layer));
-        const double h = via_size / 2.0;
+        const double h = via_size_lu / 2.0;
         w.boundary_rect(gl, dt, x - h, y - h, x + h, y + h);
         ++stats.n_via_shapes;
     };

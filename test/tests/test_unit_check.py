@@ -185,6 +185,26 @@ def test_track_pitch_auto_refuses_rather_than_returning_the_literal(tmp_path):
     assert "needs a track pattern" in log, log[-1500:]
 
 
+def test_a_pattern_added_after_the_first_check_re_arms_it(tmp_path):
+    """"Once per session" has to mean "once per unchanged grid".  A plain
+    done-flag set at `run_planner` permanently retires the `run_nuts` hook, so
+    a design with a fine M4 pattern before planning and a wrong-scale M5 after
+    it would be judged on M4 alone and pass — and declaring patterns late is
+    exactly the flow shape the second hook exists for."""
+    ok = "VDD 1 1 _ 1 1 _ 1 1 GND 1 1"          # unit pitch 8, ~250 across
+    bad = "VDD 1e-7 1e-7 _ 1e-7 1e-7"           # ~2.5e9 across — implausible
+    r = _run(tmp_path, _HEAD
+             + f"def_track_pattern 4 0 {ok}\n"
+             + "add_block a 0 0 100 100\nadd_block b 1900 1900 2000 2000\n"
+             + "add_net n1 a.o b.i\nrun_bundler STRICT\n"
+             + "generate_topologies\nrun_planner 1\n"     # M4 alone: fine
+             + f"def_track_pattern 5 0 {bad}\n"           # …then a bad M5
+             + "run_nuts\n")
+    assert r.returncode != 0, r.stdout[-2000:]
+    out = r.stdout + r.stderr
+    assert "layer 5" in out, out[-1500:]
+
+
 def test_patterns_declared_after_the_planner_are_still_checked(tmp_path):
     """demo/comprehensive_demo.buda declares its track patterns AFTER
     run_planner, so plan entry alone is not a gate — run_nuts is the second

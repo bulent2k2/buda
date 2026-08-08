@@ -1350,16 +1350,11 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
     Stmt s_find_net (_db, "SELECT id FROM net WHERE name=?");
     Stmt s_find_cell(_db, "SELECT cell,x1,y1 FROM component WHERE id=?");
 
-    // Populate cell table from LEF sizes
-    {
-        Stmt sc(_db, "INSERT OR REPLACE INTO cell(name,width,height) VALUES(?,?,?)");
-        for (auto& [cname, sz] : lef_sizes) {
-            sqlite3_bind_text  (sc, 1, cname.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_double(sc, 2, sz.w);
-            sqlite3_bind_double(sc, 3, sz.h);
-            sqlite3_step(sc); sqlite3_reset(sc);
-        }
-    }
+    // The cell table is populated AFTER the DEF parse (see below), not here:
+    // in `dbu` mode the scale is the DEF's own UNITS, which is not known until
+    // the file has been read.  `component.cell` is a plain TEXT column with no
+    // foreign key, and the parse loop reads `lef_sizes` directly rather than
+    // the table, so nothing in between needs the rows to exist yet.
 
     _exec("BEGIN");
 
@@ -1542,6 +1537,21 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
         sqlite3_bind_text(sm,2,v.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_step(sm); sqlite3_reset(sm);
     };
+    // Cell footprints, in the same layout units as the component bboxes built
+    // from them.  Leaving these in raw microns gave a 10 µm macro a
+    // 20000-unit component and a cell width of 10 at 2000 DBU/µm — `add_inst`
+    // would then create undersized instances and `export_gds` would draw the
+    // outline 2000x smaller than the placement it sits in (Codex P1 on #645).
+    {
+        Stmt sc(_db, "INSERT OR REPLACE INTO cell(name,width,height) VALUES(?,?,?)");
+        for (auto& [cname, sz] : lef_sizes) {
+            sqlite3_bind_text  (sc, 1, cname.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_double(sc, 2, um_to_lu(sz.w));
+            sqlite3_bind_double(sc, 3, um_to_lu(sz.h));
+            sqlite3_step(sc); sqlite3_reset(sc);
+        }
+    }
+
     // DBU mode resolves only now — the DEF's own UNITS is what it means —
     // and is recorded as a NUMBER, so a reopened design carries the scale its
     // coordinates were written in rather than a mode that would re-resolve
