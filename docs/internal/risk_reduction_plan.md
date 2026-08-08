@@ -146,4 +146,12 @@ a change claims neutrality.
   (`test_wrapper_invariants.py`): every writable wrapper field must be
   classified snapshotted-or-exempt — it caught 7 unclassified hier
   fields on landing, exactly its job.
-- Phase D: not started.
+- **Phase D-1: landed** (this PR, stacked on #614): `rr_state.py` —
+  `_rr_wrapper`/`_rr_snapshot`/`_rr_restore` extracted VERBATIM from
+  RipupMixin as `RRStateMixin` (registered in the MIXINS disjointness
+  guard), with the coverage contract documented at the seam and
+  cross-referenced to `test_snapshot_coverage_contract`.  Gated: caps
+  vehicle decision lines byte-identical (152 lines), fast tier + slow
+  par-vs-seq agreement green.
+- Phase D-2 (negotiate/refine extraction) and D-3 (trials/sweeps): not
+  started.

@@ -26,9 +26,10 @@ from .nutsflow import NutsFlowMixin
 from .edit import EditMixin
 from .reports import ReportsMixin
 from .ripup import RipupMixin
+from .rr_state import RRStateMixin
 
 MIXINS = (PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
-          ReportsMixin, RipupMixin)
+          ReportsMixin, RipupMixin, RRStateMixin)
 
 _owner = {}
 for _m in MIXINS:
