@@ -1092,8 +1092,7 @@ class EditMixin:
         found = False
         for w in self.bundles:
             if w.input.original_bundle.id == bid:
-                w.input.topology_pinned = False
-                w.input.pinned_seg_layers = []
+                w.unpin()                      # pin + forced layers, atomically
                 w.input.pinned_group = []      # also clear a group pin
                 print(f"Unpinned bundle {bid}")
                 found = True
@@ -1102,8 +1101,7 @@ class EditMixin:
             wrappers = self._hier_expansion_map.get(bid, [])
             if wrappers:
                 for w in wrappers:
-                    w.input.topology_pinned = False
-                    w.input.pinned_seg_layers = []
+                    w.unpin()
                     w.input.pinned_group = []
                 n = len(wrappers)
                 print(f"Unpinned bundle {bid} "

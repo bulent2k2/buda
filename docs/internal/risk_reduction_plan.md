@@ -172,3 +172,27 @@ a change claims neutrality.
   green.  ripup.py 3430 (Phase D start) → 2077 lines across D-1..D-3;
   the healer package is now seven cohesive modules under the MIXINS
   disjointness guard.  Phase D complete.
+
+## Follow-ups (2026-08-08, after A-D)
+
+- **R2 complete**: `decision()` coverage extended to every remaining
+  decision site — ripup's start/noop/stop/commit lines, the
+  global/class/release pass announces + commits, warm-rescue,
+  heal-refold, converge-guard stop; negotiate's accept/reject/done;
+  refine's commit/done.  Diagnostics (width-gate notes, budget notes,
+  warnings) deliberately stay prints.  `qor_corpus --decisions` stores
+  per-flow decision traces beside `--out` and `--compare` reports which
+  flows' decision RECORDS differ — the wording-independent identity
+  check (verified: two identical runs -> "0 differ").
+- **R1 complete**: `w.pin(idx)` / `w.unpin()` intent methods on the C++
+  BundleWrapper keep the coupled pin fields atomic (pin drops stale
+  forced layers; unpin clears both; pinned_group stays a call-site
+  decision since sites legitimately differ).  The canonical unpin sites
+  (unpin_topology, negotiate's unpin block, the explorer's sidecar
+  unpin) migrated; the allowed-writers test pins the discipline — a new
+  raw write of the coupled fields outside the sanctioned
+  pin-establishing sites fails with the file:line.
+- **C++ engine-entry validator twin: intentionally NOT built** — no
+  violation class has needed sub-stage granularity; the Python
+  stage-entry validator catches every historical shape.  Revisit only
+  on evidence.

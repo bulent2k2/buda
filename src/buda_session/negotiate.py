@@ -78,8 +78,7 @@ class NegotiateMixin:
         instance of each target class.  The caller owns accept/restore
         (class snapshot) and the deferred-persistence replay on accept."""
         for tw in targets:
-            tw.input.topology_pinned = False
-            tw.input.pinned_seg_layers = []
+            tw.unpin()                         # pin + forced layers, atomically
             # Dogleg per-segment overrides are indexed by the current
             # (possibly split) selection — they must not leak onto whatever
             # the priced re-plan selects (the class snapshot restores them
@@ -151,8 +150,7 @@ class NegotiateMixin:
             # topology_pinned, so a stale sidecar pin would force
             # layers onto whatever topology negotiation picks
             # (including H/V mismatches that charge no cuts).
-            w.input.topology_pinned = False
-            w.input.pinned_seg_layers = []
+            w.unpin()                          # pin + forced layers, atomically
             # NOTE: pinned_group is deliberately NOT cleared — a
             # super-candidate group pin must survive negotiation.  The C++
             # selection loop gives pinned_group precedence over the (now
@@ -323,7 +321,8 @@ class NegotiateMixin:
         # to do and any overlap fallout is deferred to ripup_reroute (the
         # documented finisher).  The heal's own checkpoint persists the route.
         if self._rr_m_primary(m0) == 0:
-            print(f"[negotiate] stage {stage}: metric already 0 — nothing to do.")
+            self._decision(f"[negotiate] stage {stage}: metric already 0 "
+                           f"— nothing to do.", "neg_noop", stage=stage)
             if stage == 'a':
                 self._stage_a_scope_advisory("negotiate")
             return
@@ -429,9 +428,13 @@ class NegotiateMixin:
                 n_cls = sum(len(t) for _c, t, _w in tmpl_neg)
                 cls_note = (f" (+{n_cls} template class(es))"
                             if n_cls else "")
-                print(f"[negotiate] iter {it}: {n_sites} contention site(s) -> "
-                      f"replanned {len(affected)} bundle(s){cls_note}, metric "
-                      f"{self._rr_m_str(cur)}->{self._rr_m_str(new)}", flush=True)
+                self._decision(
+                    f"[negotiate] iter {it}: {n_sites} contention site(s) -> "
+                    f"replanned {len(affected)} bundle(s){cls_note}, metric "
+                    f"{self._rr_m_str(cur)}->{self._rr_m_str(new)}",
+                    "neg_accept", it=it, n_sites=n_sites,
+                    n_replanned=len(affected), n_classes=n_cls,
+                    m_from=cur, m_to=new)
             else:
                 restore(snap)
                 # `press` (opt-in): don't stop at the FIRST non-improving
@@ -453,35 +456,46 @@ class NegotiateMixin:
                 # worse (2/16/1 -> 4/28/2).  Default = the historical
                 # first-failure stop, byte-identical.
                 if not use_press:
-                    print(f"[negotiate] iter {it}: no improvement "
-                          f"(metric {self._rr_m_str(cur)}->"
-                          f"{self._rr_m_str(new)}) — restored, stop.",
-                          flush=True)
+                    self._decision(
+                        f"[negotiate] iter {it}: no improvement "
+                        f"(metric {self._rr_m_str(cur)}->"
+                        f"{self._rr_m_str(new)}) — restored, stop.",
+                        "neg_reject", it=it, m_from=cur, m_to=new,
+                        why="stop")
                     break
                 if new == last_fail:
-                    print(f"[negotiate] iter {it}: no improvement "
-                          f"(metric {self._rr_m_str(cur)}->"
-                          f"{self._rr_m_str(new)}) — restored; identical "
-                          f"outcome under escalated pressure, stop.",
-                          flush=True)
+                    self._decision(
+                        f"[negotiate] iter {it}: no improvement "
+                        f"(metric {self._rr_m_str(cur)}->"
+                        f"{self._rr_m_str(new)}) — restored; identical "
+                        f"outcome under escalated pressure, stop.",
+                        "neg_reject", it=it, m_from=cur, m_to=new,
+                        why="press_repeat")
                     break
                 last_fail = new
                 if it < max_iter:
-                    print(f"[negotiate] iter {it}: no improvement "
-                          f"(metric {self._rr_m_str(cur)}->"
-                          f"{self._rr_m_str(new)}) — restored, pressure "
-                          f"escalates.", flush=True)
+                    self._decision(
+                        f"[negotiate] iter {it}: no improvement "
+                        f"(metric {self._rr_m_str(cur)}->"
+                        f"{self._rr_m_str(new)}) — restored, pressure "
+                        f"escalates.",
+                        "neg_reject", it=it, m_from=cur, m_to=new,
+                        why="press_retry")
                 else:
-                    print(f"[negotiate] iter {it}: no improvement "
-                          f"(metric {self._rr_m_str(cur)}->"
-                          f"{self._rr_m_str(new)}) — restored, stop.",
-                          flush=True)
+                    self._decision(
+                        f"[negotiate] iter {it}: no improvement "
+                        f"(metric {self._rr_m_str(cur)}->"
+                        f"{self._rr_m_str(new)}) — restored, stop.",
+                        "neg_reject", it=it, m_from=cur, m_to=new,
+                        why="press_max_iter")
         # Never leak injected demand into later commands: ripup_reroute's
         # replan_bundle trials would silently re-apply it.
         self.planner.clear_injected_demand()
-        print(f"[negotiate] done: metric {self._rr_m_str(m0)}->"
-              f"{self._rr_m_str(metric())} "
-              f"after {accepted} accepted iteration(s).", flush=True)
+        self._decision(
+            f"[negotiate] done: metric {self._rr_m_str(m0)}->"
+            f"{self._rr_m_str(metric())} "
+            f"after {accepted} accepted iteration(s).",
+            "neg_done", m_from=m0, m_to=metric(), accepted=accepted)
         if stage == 'a':
             self._stage_a_scope_advisory("negotiate")
         print(f"[negotiate] timing: {self._rr_t_str()}", flush=True)

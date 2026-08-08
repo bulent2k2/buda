@@ -713,7 +713,29 @@ void bind_routing(py::module_& m) {
         .def(py::init<>())
         .def_readwrite("input", &BundleWrapper::input)
         .def_readwrite("plan",  &BundleWrapper::plan)
-        .def_readwrite("hier",  &BundleWrapper::hier);
+        .def_readwrite("hier",  &BundleWrapper::hier)
+        // Intent methods (risk_reduction_plan.md R1 step 3): keep the
+        // COUPLED fields atomic so Python-side healer/edit code cannot
+        // half-write the historical hazard states.  Raw field writes stay
+        // legal (tests, tools); session code routes through these — the
+        // allowed-writers test pins the discipline.
+        .def("pin", [](BundleWrapper& w, int idx) {
+            // Pin a candidate: selection + pin move together, and any
+            // forced per-segment layers from a PREVIOUS shape are dropped
+            // (the unpin hazard — they would apply to the new candidate).
+            w.plan.selected_topology_index = idx;
+            w.input.topology_pinned = true;
+            w.input.pinned_seg_layers.clear();
+        }, py::arg("idx"))
+        .def("unpin", [](BundleWrapper& w) {
+            // Clear the pin AND the forced layers (the coupled pair whose
+            // half-clear was the historical unpin hazard).  pinned_group is
+            // deliberately NOT touched: sites differ (unpin_topology clears
+            // it, negotiate preserves it) — keep that decision explicit at
+            // the call site.
+            w.input.topology_pinned = false;
+            w.input.pinned_seg_layers.clear();
+        });
 
     // C++-backed wrapper container (rnr runtime P2, see bind_opaque.h):
     // element access / iteration return REFERENCES into the vector, and

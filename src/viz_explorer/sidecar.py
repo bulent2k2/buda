@@ -216,8 +216,7 @@ class ExplorerSidecarMixin:
             
             # Update live object
             wrapper = self.wrappers[self.bidx]
-            wrapper.input.topology_pinned = False
-            wrapper.input.pinned_seg_layers = []
+            wrapper.unpin()            # pin + forced layers, atomically
             # Unpinned, the next run_planner may select a DIFFERENT candidate
             # — and it never clears slide/net-pull overrides, so stale ones
             # would ride onto whatever it picks (audit P7-01).
