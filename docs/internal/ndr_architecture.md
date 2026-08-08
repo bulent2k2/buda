@@ -304,6 +304,45 @@ R10 shipped on the §4 design, the v20 policy-table pattern verbatim:
   the census should adopt `bus_seg_demand` when NDR designs get big
   enough to census.
 
+### 7.5 R13 bottom-up composition — VERIFIED (2026-08-08)
+
+R13 was the last requirement never exercised: nothing combined `def_ndr`
+with `set_bottom_up`.  `flow/ndr_bottom_up.buda` closes that — a
+4-instance `sub_cell` template governed by a flank-the-bus rule, marked
+bottom-up and aligned, with a governed top-level bus planned around the
+frozen copies.
+
+**The mechanism holds by construction.**  `transform_net_segment` copies
+the whole `NetSegment` (`out = ns`) before transforming its geometry, so
+`is_shield` and the shield's negative bit ordinal ride along; the copy
+loop copies every reference row.  Measured: all four occurrences carry
+their 2 shields, at their own instance coordinates.  `align_bottom_up`
+and `check_template_tracks` need no NDR awareness — they compare raw
+per-instance signal-track POOLS, which is strictly stronger than a
+demand comparison (identical pools ⇒ identical NDR seating), and the
+class reports ALIGNED on the vehicle.
+
+**Two shield-counting faults surfaced and were fixed** — the #616 class
+(shield rows counted as signal bits) in paths that fix never reached:
+
+1. **Copy-path unplaced accounting** (`nutsflow.py`, the bottom-up copy
+   loop): `exp_bits` summed `bit_width` (member bits) but `placed_bits`
+   counted EVERY reference row including shields, so
+   `extra_unplaced += exp − placed` went NEGATIVE for a governed cell —
+   the vehicle reported **−6 bits unplaced**, a count that masks real
+   opens design-wide.  Now skips `is_shield` rows; the vehicle reports 0.
+2. **Cull-risk survival predictor** (`_escalate_dead_low_segments`,
+   `cull_risk=True`): the same inflated count fed `placed >= need`, so a
+   governed segment with bits genuinely stranded could read as fully
+   placed and skip its escalation.  Fixed by the same rule.  No dedicated
+   test: the predicate sits behind `wmap`, which excludes `hier.locked`
+   bundles, so bottom-up instances never reach it — observing it needs a
+   governed NON-locked LOW segment whose seat is starved yet still R3-
+   realizable (a coarse pattern hard-errors at declaration instead).
+
+Both fixes are `is_shield`-conditional, so no-NDR designs are untouched
+(corpus-guarded); an ungoverned run of the same vehicle is test-pinned.
+
 ### 7.2 R9 typed audit — LANDED (2026-08-08)
 
 The dedicated audit shipped as three typed violations in `check_design`'s

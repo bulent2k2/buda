@@ -962,3 +962,21 @@ def test_ndr_shield_hier_multi_rule():
     assert "0 bits unplaced" in out, out
     assert "no violations" in out and "NDR_" not in out, out
     assert "NDR shield metal:" in out, out
+
+
+def test_ndr_bottom_up_composition():
+    """flow/ndr_bottom_up.buda (requirement R13): a governed cell template
+    marked set_bottom_up is solved once and COPIED to every instance,
+    shield wires included, with an honest unplaced count.  Running this
+    vehicle is what exposed the copy path's shield-inflated accounting
+    (-6 unplaced before the fix)."""
+    out, rc = run_script("ndr_bottom_up.buda")
+    assert_clean(out, rc, "ndr_bottom_up.buda")
+    # The class aligned and the template was solved once, then copied.
+    assert "ALIGNED" in out, out
+    assert "reference bit(s) solved once" in out, out
+    assert "copied to 3 sibling instance(s)" in out, out
+    # Honest accounting: no negative/masked unplaced count.
+    assert "0 bits unplaced" in out, out
+    assert "no violations" in out and "NDR_" not in out, out
+    assert "NDR shield metal:" in out, out
