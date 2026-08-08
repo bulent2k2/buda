@@ -119,6 +119,9 @@ def test_big2_b3_bus_023_repro_routes_cleanly():
         capture_output=True, text=True, env=env,
     )
     out = r.stdout + r.stderr
+    _fl = repro.parent / "log" / f"{repro.stem}_flow.log"
+    if _fl.exists():                       # per-command detail now lives here
+        out += _fl.read_text()
     assert r.returncode == 0, f"non-zero exit {r.returncode}\n{out}"
     assert "no BUSTERM connection" not in out, out
     assert "0 bits unplaced" in out, out
