@@ -294,6 +294,59 @@ structural work).  The corpus rollups + `runtime_ab` (Phase A tooling)
 are the standing instruments — both were load-bearing in reaching
 today's verdict.
 
+## The bottom-up twin — chip_stack_bottomup (2026-08-08)
+
+Same die, same technology, bottom-up templates (`set_bottom_up big2/
+mix2`) — and a COMPLETELY different profile.  Clean run at
+`BUDA_THREADS=4`: **129.0 s**, of which:
+
+| command | s | share |
+|---|--:|--:|
+| **negotiate_congestion** | **79.8** | **62 %** |
+| run_planner hier 5 signal_tracks | 29.8 | 23 % |
+| generate_hier_topologies | 7.8 | 6 % |
+| run_detailed_nuts | 6.6 | 5 % |
+| run_nuts | 2.3 | 2 % |
+
+Negotiate's own timing line splits its 79.8 s as `replan 59.9s/4,
+dnuts 15.8s/4, nuts 0.7s/4` — and the cProfile attribution names both
+mechanisms precisely:
+
+- **B1 — `replan_bundle_ripup` at 569 ms/call** (105 calls = 59.8 s,
+  46 % of the flow) vs ~60 ms/call on the topdown twin (94 calls =
+  5.6 s).  The 10× per-call cost is specific to the bottom-up state:
+  most wrappers are `hier.locked`, so each affected free bundle's
+  ripup-capable replan (recharge-all + plan-one + the victim ladder)
+  grinds against band-holders it cannot move.  Hypotheses to test
+  C++-side, in order: (a) the victim ladder re-scanning locked
+  occupants per call — skip locked victims BEFORE ranking, or
+  precompute the movable-occupant set once per negotiate iteration;
+  (b) the demand-reservation re-park inside each recharge-all.  Either
+  way this is negotiate's whole story on bottom-up designs, and it is
+  sequential by design — the fix is per-call cost, not parallelism.
+- **B2 — the DNUTS copy fan-out is quadratic Python** (20.8 s SELF
+  time in `_run_detailed_nuts` over 5 calls ≈ 4.2 s/call, 16 % of the
+  flow — while the DNUTS engine passes total ~0.2 s).  The copy loop
+  iterates `for spec in copy_specs: for ns in r1.net_segments: if
+  ns.bundle_id == ref_bid` — O(specs × all reference bit-wires) with a
+  pybind attribute access per probe.  Fix shape: group
+  `r1.net_segments`/`net_vias` by bundle_id in ONE pass, then fan out
+  per spec from the group (O(N + copies)); or move the whole transform
+  fan-out into C++ beside `transform_net_segment`.  Decision-safe (the
+  copies are identical, only found faster); stake ~15 s here and on
+  every bottom-up stage-b healer trial that re-runs DNUTS.
+
+The planner's 29.8 s covers THREE `optimize_topologies` calls (23.4 s
+total — the two cell-local template solves + the global pass), each
+using the parallel scoring.  Generation/persist behave as on the
+topdown twin.
+
+**Bottom-up ranked order: B2 first** (mechanical, decision-safe,
+~12 % of this flow and it compounds into healer trials), **then B1**
+(the single biggest item anywhere in the chip corpus at 46 % of this
+flow, but it needs the C++ investigation above), then the shared
+P8/P6a items.
+
 ## 4. Recommended order
 
 1. **C1 dirty-tracking + dedup** — the ~20 s that is pure waste; no
