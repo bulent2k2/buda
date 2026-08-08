@@ -268,9 +268,10 @@ this VM's run-to-run variance is ±2–4 s per stage (negotiate observed
 - **No code-level regression** #610 → main within noise; the risk-arc
   and NDR merges are runtime-neutral on this vehicle (the planner core
   profiled 36.4 s vs 34.4 s — flat under profiler inflation).
-- **Instrument rule**: `runtime_ab -n 2` resolves ~≥6 % deltas on this
-  flow; use `-n 3`+ (or a bigger vehicle) before believing anything
-  smaller, and never a single run.
+- **Instrument rule**: n=2 itself PRODUCED the false +4.2 s (~6 %)
+  delta above, so its trustworthy resolution on this flow is only
+  ~≥10 %; use `-n 3`+ for anything smaller (and re-run before acting on
+  any delta near the boundary), never a single run.
 
 Current attribution (planner-stage profile + clean runs, ~72 s flow):
 
@@ -278,14 +279,14 @@ Current attribution (planner-stage profile + clean runs, ~72 s flow):
 |---|--:|---|
 | `optimize_topologies` | ~36 s (~50 %) | the dominant block; scoring already parallel — remaining levers are more cores (8-core: raise `BUDA_PLAN_THREADS`) or algorithmic |
 | negotiate | ~13.5–17.6 s | replans (~5.6 s, sequential by design) + solves; the highest-variance stage |
-| dnuts (incl. cull-heal re-solves) | ~10 s | P8's stake intact (~6–8 % of the flow) |
+| dnuts (incl. cull-heal re-solves) | ~10 s | P8's stake intact: ~5–8 s ≈ 7–11 % of the ~72 s flow |
 | generation (parallel) + its persist | ~8 s | the C++ fan-out holds at ~1.8 s; `_persist_topologies` (~4.6 s wall) is now the biggest persistence item left → P9's case |
 | `build_congestion_map` | 3.3 s | P6a unchanged |
 | run_nuts | ~4–5 s | solve ~1 s + escalation + bus persist |
 
 Ranked next steps, re-based: **P8** (scoped escalation re-solves) and
 **P6a** (congestion-map parallel-for) survive as the decision-safe
-short list (~10 % combined); **P9** (async persistence) now targets the
+short list (~11–15 % combined); **P9** (async persistence) now targets the
 generation-time persist specifically; the planner core's ~50 % share is
 the standing algorithmic frontier (its parallel fraction measured
 1.46× at 4 threads — an 8-core box should push further before any
