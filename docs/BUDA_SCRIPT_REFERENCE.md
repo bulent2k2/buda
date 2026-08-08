@@ -63,7 +63,12 @@ Commands run in the following order. Later stages depend on earlier ones.
 | BDB | `move_comp`, `resize_cell`, `add_comp`, `flip_comp`, `rotate_comp`, `add_cell`, `add_inst`, `add_inst_to_cell`, `add_cell_pin` | Mutate placement and cell/pin definition data in the database |
 | BDB | `bdb_net_mode` | Toggle whether netlist is written to BDB database |
 | BDB | `add_blocks_from_bdb` | Import floorplan block boundaries at a given hierarchy depth |
-| BDB | `derive_busterms` | Extract busterms from hierarchy |
+| BDB | `derive_busterms`, `refine_busterms` | Extract busterms from hierarchy |
+| Hier | `set_bottom_up`, `align_bottom_up` | Mark a cell to be planned/routed ONCE and copied to every instance, and nudge its instances onto a common track phase first |
+| Hier | `check_template_tracks` | Bottom-up uniformity gate: verify every instance sees the same tracks before the copies are made (after `run_nuts`, before `run_detailed_nuts`) |
+| Hier | `set_cell_layer_cap`, `set_cell_layer_share` | Per-cell layer band, and a fractional per-layer share inside or above it |
+| Hier | `set_layer_caps_by_depth`, `reserve_top_layers` | Bulk layer bands: by hierarchy depth, or by reserving the stack's top N layers for the top level |
+| Hier | `load_pipeline` | Resume a routing pipeline (bundles, topologies, plan, routing) from the open BDB |
 
 ---
 
@@ -255,6 +260,42 @@ Full reference: **[docs/BDB_REFERENCE.md](BDB_REFERENCE.md)**
 | `rotate_comp <name> 90\|180\|270` | Rotate component `name` by specified degrees. |
 | `add_comp <name> <cell> <parent\|-> <x1> <y1> <x2> <y2> [leaf\|nonleaf]` | Insert a new component. Use `−` as parent for a root instance. |
 | `derive_busterms [max_depth]` | Extract physical port locations from the hierarchy and write to BDB. |
+
+### Hierarchical routing quick reference
+
+These drive the *hierarchy-aware* flow (`run_hier_bundler` →
+`generate_hier_topologies` → `run_planner hier`). Each has a full section in
+**[docs/BDB_REFERENCE.md](BDB_REFERENCE.md)**.
+
+| Command | Description |
+|---|---|
+| [`set_bottom_up <cell>\|* [on\|off]`](BDB_REFERENCE.md#set_bottom_up) | Plan and route a cell's own interconnect **once**, then copy it to every instance (copies become keepouts for higher levels). `*` marks every eligible cell. Opt-in: the default hier flow marks nothing. |
+| [`align_bottom_up [max_shift <um>] [force]`](BDB_REFERENCE.md#align_bottom_up) | Nudge a marked cell's instances onto a **common track phase**, with minimal total movement, so the copies land on real signal tracks. Run after `def_track_pattern` + `set_bottom_up`, **before** `derive_busterms` / `add_blocks_from_bdb`. |
+| [`check_template_tracks [on_mismatch stop\|independent]`](BDB_REFERENCE.md#check_template_tracks) | The uniformity gate: verify every instance sees the same signal tracks before copying. Run after `run_nuts`, before `run_detailed_nuts`. |
+| [`set_cell_layer_cap <cell>\|* <cap> [-min <floor>]`](BDB_REFERENCE.md#set_cell_layer_cap) | Restrict a cell's own interconnect to the layer band `[floor..cap]`. |
+| [`set_cell_layer_share <cell> <layer> <pct>`](BDB_REFERENCE.md#set_cell_layer_share) | Lease a cell at most `pct`% of a layer's signal tracks — thins a layer inside its band, or grants a bounded slice above the cap. |
+| [`set_layer_caps_by_depth <cap1> [<cap2> …] [-min <floor>]`](BDB_REFERENCE.md#set_layer_caps_by_depth) | Bulk bands by how deep a cell's own content goes, deepest first. |
+| [`reserve_top_layers <N> [-min <floor>]`](BDB_REFERENCE.md#reserve_top_layers) | The stack-relative twin: reserve the top `N` layers for the top level and cap everything below. Prefer it when the intent is "the top level gets the top N" — an absolute band is only correct for the stack it was written against. |
+| [`load_pipeline [expanded]`](BDB_REFERENCE.md#load_pipeline) | Resume from a BDB checkpoint: bundles, candidate topologies, the plan, and as much routing as was persisted. |
+
+**Bottom-up command order** (the part that is easy to get wrong):
+
+```buda
+def_track_pattern …          # patterns first — alignment needs the pitches
+set_bottom_up my_cell
+align_bottom_up              # then phase-align the instances
+derive_busterms 1            # only now derive busterms / load blocks
+add_blocks_from_bdb 0
+…
+run_planner hier signal_tracks
+run_nuts
+check_template_tracks on_mismatch independent   # gate before copying
+run_detailed_nuts
+```
+
+Worked vehicles: `flow/rnr/mix2_fast_bottomup.buda` (with layer caps:
+`…_caps.buda`, with fractional shares: `…_shared.buda`) and
+`flow/chip/chip_bottomup.buda` at chip scale.
 
 **Common patterns:**
 

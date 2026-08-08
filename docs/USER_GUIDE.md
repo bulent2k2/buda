@@ -325,6 +325,64 @@ For larger designs, the usual top-down workflow is:
 4. Run `run_hier_bundler`, `generate_hier_topologies`, and `run_planner hier`.
 5. Inspect congestion and topology choices, refine the floorplan, and rerun.
 
+### Bottom-Up: Route a Repeated Cell Once
+
+The flow above is **top-down**: every instance of a repeated cell is planned and
+routed separately, so a design with 40 copies of one cell solves the same local
+problem 40 times — and can solve it 40 slightly different ways.
+
+**Bottom-up** planning inverts that for cells you nominate. The cell's own
+interconnect is planned and routed **once** on a reference instance, and that
+result is copied verbatim to every other instance. The copies then act as
+keepouts for higher levels, which route around them. Two things follow: the
+instances are guaranteed identical (a real requirement for repeated blocks), and
+the work is done once instead of N times.
+
+It is **opt-in** — the default hier flow marks nothing, so your results do not
+change unless you ask for this:
+
+```buda
+def_track_pattern 5 …          # patterns FIRST: alignment needs the pitches
+set_bottom_up proc_cell        # nominate the cell ('*' marks every eligible one)
+align_bottom_up                # nudge its instances onto a common track phase
+derive_busterms 1              # only now derive busterms / load blocks
+add_blocks_from_bdb 0
+…
+run_planner hier signal_tracks
+run_nuts
+check_template_tracks on_mismatch independent    # the uniformity gate
+run_detailed_nuts
+```
+
+Three commands, in this order, and the order matters:
+
+*   **`set_bottom_up <cell>`** nominates the cell. Its instances must be
+    congruent — any of the 8 orientations works, and the 90°-rotated family is
+    split into its own class solved separately. An instance that matches under no
+    orientation is refused loudly rather than copied wrongly.
+*   **`align_bottom_up`** nudges the instances onto a shared track phase, with
+    minimal total movement (usually the majority does not move at all). Copied
+    routing lands on real signal tracks only if the instances agree on where the
+    tracks are. Run it **after** `def_track_pattern` and `set_bottom_up`, but
+    **before** `derive_busterms` / `add_blocks_from_bdb` — it moves cells, and
+    those commands snapshot placement.
+*   **`check_template_tracks`** is the gate that proves it worked: it compares
+    the signal tracks each instance actually sees. `on_mismatch stop` (default)
+    refuses to copy; `on_mismatch independent` copies the aligned instances and
+    solves the misaligned ones individually. `run_detailed_nuts` runs the check
+    implicitly if you skip it — but then you do not get to choose the policy.
+
+**If a cell should keep its routing off the top-level layers**, cap it:
+`set_cell_layer_cap proc_cell M3` restricts the cell's own interconnect to the
+band up to M3, leaving the upper layers for the levels above. `reserve_top_layers
+2` expresses the common intent — "the top level gets the top two layers" —
+without hard-coding layer names against a particular stack.
+
+Full command reference (arguments, edge cases, persistence):
+[BDB Reference](BDB_REFERENCE.md#set_bottom_up). Worked vehicles:
+`flow/rnr/mix2_fast_bottomup.buda`, its capped and shared variants, and
+`flow/chip/chip_bottomup.buda` at chip scale.
+
 ## 7. Getting Help
 *   Check `docs/BUDA_SCRIPT_REFERENCE.md` for a full list of commands.
 *   Use `visualize` at different stages of your script to see what BUDA is doing!
