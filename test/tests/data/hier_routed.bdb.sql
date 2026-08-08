@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=20;
+PRAGMA user_version=21;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -19,7 +19,7 @@ CREATE TABLE bundle (
         is_expanded    INTEGER DEFAULT 0,   -- planner-expanded instance row (v18)
         bu_locked      INTEGER DEFAULT 0,   -- bottom-up template copy (v18)
         cloned_from    TEXT DEFAULT ''      -- rotation-class clone origin (v19)
-    );
+    , ndr_rule TEXT DEFAULT '');
 CREATE TABLE bundle_busterm (
         bundle_id  TEXT REFERENCES bundle(id),
         busterm_id TEXT,
@@ -184,8 +184,21 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','20');
+INSERT INTO "meta" VALUES('schema_version','21');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
+CREATE TABLE ndr_rule (
+            name         TEXT PRIMARY KEY,
+            width_x      REAL NOT NULL DEFAULT 1,
+            spacing_x    REAL NOT NULL DEFAULT 1,
+            shield_mode  INTEGER NOT NULL DEFAULT 0,
+            shield_per_n INTEGER NOT NULL DEFAULT 0,
+            shield_net   TEXT NOT NULL DEFAULT 'GND',
+            layers       TEXT NOT NULL DEFAULT ''
+        );
+CREATE TABLE ndr_scope (
+            prefix TEXT PRIMARY KEY,
+            rule   TEXT NOT NULL REFERENCES ndr_rule(name)
+        );
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
             name TEXT UNIQUE NOT NULL

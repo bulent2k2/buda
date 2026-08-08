@@ -105,22 +105,6 @@ def restore_ndr_from_bdb(session):
         if pfx in scopes and pfx not in typed_scopes:
             del scopes[pfx]
     restored_rules, restored_scopes = set(), set()
-    # Snapshot the BDB's rule CONTENTS before the converge write-through
-    # below can overwrite them: audit_restored_ndr compares a restored
-    # plan's pricing basis (what the checkpoint's session persisted) against
-    # the now-effective rule, and a session-typed rule shadowing a same-name
-    # BDB rule would otherwise erase the evidence of the content change.
-    # Taken ONCE per BDB (open_bdb restores first, load_pipeline restores
-    # again for the same BDB — by then the converge below has already
-    # written the session's shadowing content through, so a rebuilt
-    # snapshot would read the session's own values back and hide the
-    # change).
-    if getattr(session, "_ndr_snapshot_for", None) != id(session.bdb):
-        session._ndr_bdb_rule_snapshot = {
-            row.name: (row.width_x, row.spacing_x, row.shield_mode,
-                       row.shield_per_n, row.shield_net, row.layers)
-            for row in session.bdb.ndr_rules()}
-        session._ndr_snapshot_for = id(session.bdb)
     for row in session.bdb.ndr_rules():
         if row.name in rules:            # session-typed wins
             continue
@@ -156,59 +140,85 @@ def restore_ndr_from_bdb(session):
     return (len(restored_rules), len(restored_scopes))
 
 
+def ndr_pricing_fp(session, rule_name):
+    """Canonical PRICING-BASIS fingerprint of a rule: the QUANTIZED spec
+    (slots/guards/shield arrangement — exactly what the planner charged and
+    DNUTS placed) plus the layer restriction.  Stamped into
+    bundle.ndr_rule at persist time and compared verbatim by
+    audit_restored_ndr, so the VOID decision is self-contained in the
+    bundle row — it survives the rule row itself being overwritten by a
+    later session's converge write-through (Codex on #620: a re-declared
+    same-name rule + exit-before-load destroyed the only stored copy of
+    the checkpoint's definition).  A content change that does NOT move the
+    quantized demand (e.g. width x1.8 -> x2.0, both 2 slots) correctly
+    fingerprints identically: the plan's pricing is unchanged.  None for
+    an unknown rule."""
+    r = _rules(session).get(rule_name)
+    if r is None:
+        return None
+    ws = max(1, math.ceil(r["width_x"]))
+    gs = max(0, math.ceil(r["spacing_x"]) - 1)
+    lay = ",".join(str(l) for l in (r["layers"] or []))
+    return (f"{rule_name}|w{ws}|g{gs}|s{r['shield_mode']}"
+            f"|p{r['shield_per_n']}|n{r['shield_net']}|L{lay}")
+
+
 def stamp_bundle_ndr(session, row, wrapper):
-    """Stamp the wrapper's governing rule name onto a BundleRow about to be
-    persisted (v21 provenance — audit_restored_ndr's comparison basis)."""
+    """Stamp the wrapper's governing rule PRICING FINGERPRINT onto a
+    BundleRow about to be persisted (v21 provenance —
+    audit_restored_ndr's comparison basis; "" = default rule)."""
     spec = wrapper.input.ndr
-    row.ndr_rule = spec.rule_name if spec.active() else ""
+    row.ndr_rule = (ndr_pricing_fp(session, spec.rule_name) or ""
+                    if spec.active() else "")
 
 
 def audit_restored_ndr(session, bid_to_stamp):
     """The v21 VOID-on-change audit (load_pipeline): a restored bundle whose
-    persisted governing rule differs from the FRESH resolution — the rules
-    or scopes changed since the checkpoint was routed, so the restored plan
-    was priced under a different demand — has its selection VOIDED (LOUD;
-    continuing requires an explicit re-plan; the persisted rows are
-    untouched, a re-run of the planner rewrites them).  Matching governed
-    bundles get their specs (re)stamped so the resumed session stays
-    governed.  Returns the set of voided bundle ids (ints)."""
+    persisted PRICING FINGERPRINT (bundle.ndr_rule, stamped at persist
+    time) differs from the FRESH resolution — the rules or scopes changed
+    since the checkpoint was routed, so the restored plan was priced under
+    a different demand — has its selection VOIDED (LOUD; continuing
+    requires an explicit re-plan; the persisted rows are untouched, a
+    re-run of the planner rewrites them).  EVERY net of the bundle is
+    resolved (Codex on #620: a scope change matching only a non-leading
+    net turns a checkpoint's rule-uniform bundle MIXED — nets[0] alone
+    would miss it), and a now-mixed bundle voids with a re-BUNDLE notice:
+    the rule-class split itself is stale, not just the plan.  Matching
+    governed bundles get their specs (re)stamped so the resumed session
+    stays governed.  Returns the set of voided bundle ids (ints)."""
     if not getattr(session, "_ndr_scopes", None) and not bid_to_stamp:
         return set()
     voided = set()
-    snap = getattr(session, "_ndr_bdb_rule_snapshot", None) or {}
-
-    def _content(name):
-        r = _rules(session).get(name)
-        if r is None:
-            return None
-        return (r["width_x"], r["spacing_x"], r["shield_mode"],
-                r["shield_per_n"], r["shield_net"],
-                ",".join(str(l) for l in (r["layers"] or [])))
-
     for w in session.bundles:
         b = w.input.original_bundle
         nets = list(b.get_net_names())
-        fresh = ndr_rule_for_net(session, nets[0]) if nets else None
+        resolutions = ({ndr_rule_for_net(session, n) for n in nets}
+                       if nets else {None})
         stamped = bid_to_stamp.get(int(b.id), "") or ""
-        reason = None
-        if (fresh or "") != stamped:
-            reason = (f"persisted under rule '{stamped or 'default'}' but "
-                      f"now resolves to '{fresh or 'default'}'")
-        elif fresh is not None and fresh in snap \
-                and snap[fresh] != _content(fresh):
-            # Same rule NAME, different content: a session-typed rule
-            # shadowed the checkpoint's persisted definition.
-            reason = (f"rule '{fresh}' changed since the checkpoint "
-                      f"(session declaration shadows the persisted one)")
+        reason, fresh = None, None
+        if len(resolutions) > 1:
+            names = sorted((r or "default") for r in resolutions)
+            reason = (f"its nets now resolve to MIXED rules "
+                      f"[{', '.join(names)}] — the checkpoint's rule-class "
+                      f"split is stale; re-run the bundler and planner")
+        else:
+            fresh = next(iter(resolutions))
+            fresh_fp = (ndr_pricing_fp(session, fresh) or "") if fresh else ""
+            if fresh_fp != stamped:
+                old = stamped.split("|", 1)[0] if stamped else "default"
+                reason = (f"persisted under rule '{old}' "
+                          f"[{stamped or 'default'}] but now resolves to "
+                          f"'{fresh or 'default'}' "
+                          f"[{fresh_fp or 'default'}] — demand was priced "
+                          f"under the old rule; re-run the planner")
         if reason and w.plan.selected_topology_index >= 0:
             name = nets[0] if nets else "?"
             print(f"WARNING: [NDR] bundle {b.id} ({name}): {reason} — "
-                  f"restored plan VOIDED; re-run the planner (demand was "
-                  f"priced under the old rule)")
+                  f"restored plan VOIDED")
             w.plan.selected_topology_index = -1
             w.plan.seg_layers = []
             voided.add(int(b.id))
-        if fresh is not None:
+        if fresh is not None and len(resolutions) == 1:
             w.input.ndr = _spec_of(session, fresh)
             layers = _rules(session)[fresh]["layers"]
             if layers:
