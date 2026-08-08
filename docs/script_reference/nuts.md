@@ -551,6 +551,7 @@ stage b alone.
 
 ```
 negotiate_congestion [max_iter] [class_moves|no_class_moves]
+                     [press|no_press]
 ```
 
 Measured-congestion negotiation — a faster, complementary alternative to
