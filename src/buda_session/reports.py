@@ -639,6 +639,7 @@ class ReportsMixin:
         collected = []   # (prefix, violation) — aggregated below unless --verbose-conn
         tug_bundles = 0  # realization-risk advisory (NOT violations); nuts/dnuts only
         tug_pairs = 0
+        ndr_index = None  # shared detailed-row index, built on first governed bundle
         for w in self.bundles:
             if not w.input.candidates:
                 continue
@@ -688,8 +689,10 @@ class ReportsMixin:
                 # misplaced shields.  Duck-typed violations, same summary
                 # machinery.
                 if stage == "dnuts" and w.input.ndr.active():
-                    from buda_cmds.ndr_cmds import audit_ndr_dnuts
-                    violations += audit_ndr_dnuts(self, w)
+                    from buda_cmds import ndr_cmds
+                    if ndr_index is None:
+                        ndr_index = ndr_cmds.build_ndr_audit_index(self)
+                    violations += ndr_cmds.audit_ndr_dnuts(self, w, ndr_index)
                 for v in violations:
                     if all_candidates and stage == "topo":
                         prefix = f"Bundle {bid} topo {topo_idx + 1} ({topo.type})"

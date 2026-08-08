@@ -666,3 +666,80 @@ def test_r9_ungoverned_flow_output_unchanged():
     s, _ = _flow([])
     out = _audited(s)
     assert "NDR_" not in out and "no violations" in out
+
+
+def test_r9_culled_bit_keeps_intended_shield_layout():
+    # Codex #622: a keepout-culled SIGNAL bit shrinks the placed-bit list,
+    # but the expected shield arrangement must come from the segment's
+    # INTENDED membership — the surviving shields still match the declared
+    # bus, and the lost bit is already reported UNPLACED.  shield bit mode:
+    # layout for 4 bits has 5 shields; recomputing it for 3 surviving bits
+    # would expect 4 and spuriously flag the correct 5.
+    s, _ = _flow(["def_ndr clkb width x2 shield bit net GND",
+                  "set_ndr clk_ clkb"])
+    dr = s.detailed_result
+    clk_bid = next(w.input.original_bundle.id for w in s.bundles
+                   if w.input.ndr.active())
+    kept, dropped_one = [], False
+    for ns in dr.net_segments:
+        if not dropped_one and ns.bundle_id == clk_bid and not ns.is_shield:
+            dropped_one = True
+            continue                      # simulate a culled signal bit
+        kept.append(ns)
+    dr.net_segments = kept
+    out = _audited(s)
+    assert "NDR_SHIELD" not in out
+
+
+def test_r9_end_guard_foreign_wire_is_loud():
+    # Codex #622: an UNSHIELDED rule's layout reserves guard slots BEYOND
+    # the outermost wires too; the audited run must cover them, so a
+    # foreign wire on an end guard is a clearance violation even though it
+    # sits outside the placed rows' extent.
+    s, _ = _flow(["def_ndr sp spacing x2",
+                  "set_ndr clk_ sp"])
+    dr = s.detailed_result
+    clk_bid = next(w.input.original_bundle.id for w in s.bundles
+                   if w.input.ndr.active())
+    by_seg = {}
+    for ns in dr.net_segments:
+        if ns.bundle_id == clk_bid:
+            by_seg.setdefault(ns.seg_idx, []).append(ns)
+    rows = next(v for v in by_seg.values() if len(v) >= 2)
+    layer = rows[0].layer
+    run_hi = max(r.track_position + r.width / 2.0 for r in rows)
+    s_lo = min(min(r.span_lo, r.span_hi) for r in rows)
+    s_hi = max(max(r.span_lo, r.span_hi) for r in rows)
+    g = s.routing_grid.get_layer_grid(layer)
+    period = g.global_pattern().unit_pitch()
+    above = g.signal_tracks_in(0.5 * (s_lo + s_hi),
+                               run_hi + 1e-9, run_hi + 2 * period)
+    guard_pos = above[0][0]               # the end guard slot's centre
+    donor = next(ns for ns in dr.net_segments
+                 if ns.bundle_id != clk_bid and not ns.is_shield)
+    intruder = _ns_copy(donor, track_position=guard_pos, layer=layer,
+                        span_lo=rows[0].span_lo, span_hi=rows[0].span_hi)
+    dr.net_segments = list(dr.net_segments) + [intruder]
+    out = _audited(s)
+    assert "foreign wire inside a rule's reserved run" in out
+
+
+def test_r9_clock_preroute_inside_run_is_loud():
+    # Codex #622: fixed pre-route metal never appears in net_segments, so
+    # the audit inspects the pattern's rails too.  A CLOCK rail inside the
+    # reserved run is an aggressor — LOUD; the VDD/GND rails the same runs
+    # straddle stay exempt (the documented straddle-neutral phase-1 model,
+    # already pinned by test_r9_clean_shielded_flow_has_no_ndr_violations).
+    clk_pat = "0 VDD 2 1 _ 1 1 _ 1 1 CLK 1 1 _ 1 1 _ 1 1 GND 2 1"
+    s = _bare_session()
+    run = ["run_bundler STRICT", "generate_topologies", "set_track_pitch 3",
+           "run_planner 1"] + \
+          [f"def_track_pattern {lid} {clk_pat}" for lid in (3, 4, 5, 6)] + \
+          ["run_nuts", "run_detailed_nuts"]
+    for c in (_FLOW_SETUP
+              + ["def_ndr clkx shield bus net GND",
+                 "set_ndr clk_ clkx"] + run):
+        _run(s, c)
+    out = _audited(s)
+    assert "CLOCK pre-route" in out
+    assert "VDD" not in out and "GND pre-route" not in out

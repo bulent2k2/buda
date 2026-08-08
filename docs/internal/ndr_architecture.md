@@ -310,10 +310,13 @@ and its `_NdrViolation` objects flow through the existing summary/reason
 machinery beside the C++ `ConnViolation`s:
 
 - **NDR_SHIELD** — per governed segment, the placed shield-row count must
-  equal the rule's `ndr_run_layout` `'S'` count, and in flank-the-bus mode
-  the shields must actually be the run's outermost rows (a shield inside
-  the bits, or a bit outside the shields, is misplacement even at the
-  right count).
+  equal the rule's `ndr_run_layout` `'S'` count for the segment's
+  **intended membership** (`_seg_member_bits`, the same accounting DNUTS
+  admission uses — a keepout-culled signal bit is already UNPLACED and
+  must not re-shape the expected layout into a spurious mismatch), and in
+  flank-the-bus mode the shields must actually be the run's outermost rows
+  (a shield inside the bits, or a bit outside the shields, is misplacement
+  even at the right count).
 - **NDR_WIDTH** — each governed bit's placed extent must cover its
   `width_slots` SIGNAL slot centres (`signal_tracks_in` at the span
   midpoint over `track ± width/2`), so a bit that lost its continuation
@@ -321,7 +324,23 @@ machinery beside the C++ `ConnViolation`s:
 - **NDR_SPACING** — the rule's run is EXCLUSIVE: any foreign bundle's wire
   whose track centre lands strictly inside the run's extent with
   overlapping span violates the reserved clearance (guard slots are
-  reserved-empty, so any occupant is foreign by construction).
+  reserved-empty, so any occupant is foreign by construction).  For an
+  UNSHIELDED rule the audited extent extends over the **end guard slots**
+  beyond the outermost placed wires (the layout reserves them; the placed
+  rows alone stop at the outer bit edges), and **aggressor pre-routes**
+  are audited too: a CLOCK (or unknown-identity CUSTOM) pattern rail
+  running inside the reserved window is fixed metal `net_segments` can
+  never show — the pre-routes-vs-spacing case of R6 — while static
+  supply/shield rails (POWER/GROUND/SHIELD) stay exempt per the
+  documented straddle-neutral phase-1 model (a run's gaps may cross
+  rails, which only add isolation).
+
+The audit is indexed, not scanned: `build_ndr_audit_index` materializes
+`dr.net_segments` ONCE per `check_design` pass (the pybind vector converts
+to a fresh list on every property access) and groups rows by bundle and by
+layer sorted on track position, so each segment's foreign-wire lookup is a
+bisect over the run window instead of a full pass — linear-ish where the
+naive form was quadratic in placed rows.
 
 Beside the audit, the **R5a/R9 shared net-identity predicate** shipped in
 `src/ndr.h` as `ndr_shield_net_matches(requested, label)` (bound to
