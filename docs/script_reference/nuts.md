@@ -825,6 +825,11 @@ decisions move) once `run_nuts` has run, and adds the **detailed** bit-level WL
 breakdown. The full per-bundle table is captured to the flow log; the terminal
 shows the totals.
 
+**NDR shield metal** is reported on its own line, separately from signal WL:
+shields emitted by a [non-default rule](ndr.md) are real metal the design pays
+for, but they are not signal wirelength — keeping them apart is what lets a
+governed design's quality metrics stay comparable with an ungoverned one.
+
 **DOF envelope `[lo..hi]`.** Each bundle's routed WL is shown against the interval
 its selected topology's *degrees of freedom* permit — computed from the segments'
 slide ranges and min/max span (`ConnTopology`): a segment joined to a trunk at a

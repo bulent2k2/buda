@@ -26,6 +26,14 @@ unbuildable.
 > crossings, unplaced bits). `check_connectivity` remains registered as a
 > legacy alias with identical behavior, so existing scripts keep working.
 
+The `dnuts` stage additionally audits every bundle governed by a
+[non-default rule](ndr.md): **`NDR_WIDTH`** (a governed bit placed narrower
+than its rule's width), **`NDR_SPACING`** (foreign metal — another bundle's
+wire, or a CLOCK/CUSTOM pre-route rail — inside the rule's reserved run), and
+**`NDR_SHIELD`** (the shield count or arrangement does not match the rule,
+accounting for any rail-credited ends). A design with no rules declared
+produces no NDR output at all.
+
 The `nuts` and `dnuts` stages additionally audit **keepout crossings**
 (`KEEPOUT_CROSS`): at `nuts`, a placed bus segment whose physical extent
 lies on a keepout that overlaps its span (the exhausted-window fallback
