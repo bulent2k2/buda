@@ -102,7 +102,7 @@ class RRTrialsMixin:
         return wm
 
     def _rr_warm_study_sample(self, w, tidx, stage, cur, cold_m, snap):
-        """RR round-4 Phase-0 probe (`BUDA_ripup_mod._RR_WARM_STUDY=1`): after a COLD
+        """RR round-4 Phase-0 probe (`BUDA_RR_WARM_STUDY=1`): after a COLD
         trial computed its metric — the loop still runs entirely on cold, so
         trajectories are byte-identical with the study off — ALSO run the
         warm-start single-bundle re-solve from the same baseline and record
@@ -220,7 +220,7 @@ class RRTrialsMixin:
             # (restored below), so the warm re-solve samples exactly what a
             # production warm trial would see.  No-op without the env var.
             if (move[0] == 'idx'
-                    and os.environ.get("BUDA_ripup_mod._RR_WARM_STUDY")):
+                    and os.environ.get("BUDA_RR_WARM_STUDY")):
                 self._rr_warm_study_sample(w, move[1], stage, cur, m, snap)
             # New best so far: capture the trial's state BEFORE the
             # restore, so the commit can jump straight to it instead

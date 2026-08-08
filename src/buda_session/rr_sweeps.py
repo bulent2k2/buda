@@ -333,7 +333,7 @@ class RRSweepsMixin:
                                                               outcomes):
             if ok:
                 m = (prim, sec) if stage == 'b' else prim
-                if os.environ.get("BUDA_ripup_mod._RR_TRACE"):
+                if os.environ.get("BUDA_RR_TRACE"):
                     print(f"[rr-trace] psweep bundle {bid} topo "
                           f"{old_tidx + 1}->{tidx + 1}: "
                           f"{self._rr_m_str(m)}", flush=True)
