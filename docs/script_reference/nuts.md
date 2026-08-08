@@ -225,6 +225,44 @@ real flows.
 
 ---
 
+### `set_dead_span_escalate`
+
+```
+set_dead_span_escalate [on|off]
+```
+
+Force post-NUTS **dead-span escalation** at every `run_nuts`. Default **off**
+— a flow that never calls it is bit-identical. With no argument, prints the
+current state.
+
+**The artifact it targets.** A LOW-layer segment whose *final placed geometry*
+— its seat, span × slide window — offers **fewer keepout-clear signal tracks
+than the segment's member bits** is a guaranteed DetailedNUTS open: admission
+is all-or-nothing, so a partial-supply shortfall strands **every** bit of that
+segment. The pass moves such a segment to the cheapest same-direction TOP
+layer and re-solves NUTS, iterating until no dead LOW segment remains.
+
+This is the **final-geometry** form of the planner's `nontop_dead_span_gate`.
+The plan-time gate samples the conservative *abstract* span, so a zero pool
+there cannot distinguish a genuine cull from a survivor whose final span
+clears the keepout — which is why that gate stays off by default. The placed
+geometry has no such ambiguity: it fires only on real zero-survivor seats.
+
+**You usually do not need this command.** The escalation already runs
+automatically at `run_nuts` whenever the flow declares
+`set_planner_param healersAhead 1` — the same explicit declaration that gates
+the proactive `kSegsRel` default (issue #444). Running it *before* the healers
+measured better than the stage-b fold alone (`mix` 1/16 → 0/0, `bigHalf` 190 →
+94 opens), and the two compose. Use `set_dead_span_escalate on` to force the
+pass in a flow that has **no** healer ahead of it; set
+`_dead_span_auto_at_run_nuts = False` on the session to suppress the automatic
+path.
+
+See `docs/internal/wishlist-planner.md` → "dead-span discriminator" for the
+measurements behind the default.
+
+---
+
 ### `ripup_reroute`
 
 ```
