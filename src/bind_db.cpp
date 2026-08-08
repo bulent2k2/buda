@@ -106,7 +106,21 @@ void bind_db(py::module_& m) {
         .def_readwrite("rcv_spec_paths", &BundleRow::rcv_spec_paths)
         .def_readwrite("is_expanded",    &BundleRow::is_expanded)
         .def_readwrite("bu_locked",      &BundleRow::bu_locked)
-        .def_readwrite("cloned_from",    &BundleRow::cloned_from);
+        .def_readwrite("cloned_from",    &BundleRow::cloned_from)
+        .def_readwrite("ndr_rule",       &BundleRow::ndr_rule);
+
+    // NDR rule persistence (v21): the raw declared values — quantization to
+    // slots stays session-side (ndr_cmds), so the stored rule survives a
+    // quantizer policy change.
+    py::class_<NdrRuleRow>(m, "NdrRuleRow")
+        .def(py::init<>())
+        .def_readwrite("name",         &NdrRuleRow::name)
+        .def_readwrite("width_x",      &NdrRuleRow::width_x)
+        .def_readwrite("spacing_x",    &NdrRuleRow::spacing_x)
+        .def_readwrite("shield_mode",  &NdrRuleRow::shield_mode)
+        .def_readwrite("shield_per_n", &NdrRuleRow::shield_per_n)
+        .def_readwrite("shield_net",   &NdrRuleRow::shield_net)
+        .def_readwrite("layers",       &NdrRuleRow::layers);
 
     py::class_<TopoRow>(m, "TopoRow")
         .def(py::init<>())
@@ -433,6 +447,13 @@ void bind_db(py::module_& m) {
              py::arg("cell"), py::arg("layer_id"), py::arg("share"))
         .def("cell_layer_shares", &BDB::cell_layer_shares, py::arg("cell"))
         .def("layer_share_cells", &BDB::layer_share_cells)
+        .def("set_ndr_rule",     &BDB::set_ndr_rule, py::arg("rule"))
+        .def("ndr_rules",        &BDB::ndr_rules)
+        .def("set_ndr_scope",    &BDB::set_ndr_scope,
+             py::arg("prefix"), py::arg("rule"))
+        .def("delete_ndr_scope", &BDB::delete_ndr_scope, py::arg("prefix"))
+        .def("ndr_scopes",       &BDB::ndr_scopes)
+        .def("clear_ndr",        &BDB::clear_ndr)
         .def("cell_child_edges", &BDB::cell_child_edges)
         .def("add_inst",        &BDB::add_inst,
              py::arg("inst_name"), py::arg("cell_name"), py::arg("parent_name"),

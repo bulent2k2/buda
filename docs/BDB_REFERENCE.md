@@ -159,7 +159,16 @@ template planning flag); v18 added `bundle.is_expanded` + `bundle.bu_locked`
 `cell.layer_cap` / `cell.layer_floor` (the band `[floor..cap]`, `-1` = unset)
 plus the `cell_layer_share (cell_id, layer_id, share)` table and the
 `layer_cap_default` meta key for the `*` default — see
-[`set_cell_layer_cap`](#set_cell_layer_cap).
+[`set_cell_layer_cap`](#set_cell_layer_cap); v21 added **NDR rule
+persistence** — the `ndr_rule` table (declared rules, raw multiplier values:
+name, width_x, spacing_x, shield_mode, shield_per_n, shield_net, layers CSV),
+the `ndr_scope` table (prefix → rule attachments; `*` = the global default),
+and `bundle.ndr_rule` (the governing rule stamped per persisted bundle).
+`def_ndr`/`set_ndr` write through when a BDB is open; `open_bdb` restores
+rules + scopes (session-typed entries win, a previous BDB's restored entries
+drop), and `load_pipeline` VOIDs (LOUD, re-plan required) any restored plan
+whose governing rule changed — by name OR content — since the checkpoint
+(see docs/internal/ndr_architecture.md §4/§7).
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.
 

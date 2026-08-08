@@ -250,11 +250,35 @@ following as-built specifics and honest deviations:
   demand honesty, R3 refusal, R12 inertness of unattached rules, shield-WL
   separation, clean check_design).
 
+### 7.1 v21 BDB rule persistence — LANDED (2026-08-08)
+
+R10 shipped on the §4 design, the v20 policy-table pattern verbatim:
+
+- **Schema v21**: the `ndr_rule` table stores declared rules with their RAW
+  multiplier values (quantization to slots stays session-side, so a stored
+  rule survives a quantizer policy change), `ndr_scope` stores prefix→rule
+  attachments (`*` = the global default; the rule FK made LOUD —
+  `set_ndr_scope` refuses an undeclared rule), and `bundle.ndr_rule` stamps
+  each persisted bundle's governing rule.  Migration is one idempotent
+  ALTER (the tables ride the fresh-DB CREATE IF NOT EXISTS); pre-v21
+  fixtures open and migrate cleanly (test-pinned on the committed v20
+  fixture).
+- **Write-through + restore**: `def_ndr`/`set_ndr` write through when a BDB
+  is open; `open_bdb`/`load_pipeline` restore with session-typed entries
+  winning and a previous BDB's restored entries dropped (the Codex #546
+  BDB-switch rule); declare-then-open converges the BDB to the session's
+  typed entries.
+- **VOID-on-change**: `load_pipeline` re-resolves rules onto restored
+  wrappers and VOIDs (LOUD, re-plan required) a restored plan whose
+  governing rule changed since the checkpoint — by NAME (scope
+  added/removed/re-pointed) or by CONTENT (a session-typed rule shadowing
+  the persisted same-name definition; detected against a
+  once-per-BDB snapshot of the stored contents, taken BEFORE the converge
+  write-through can overwrite the pricing basis).  Voided bundles' restored
+  routing is excluded from the rehydrated NUTS result, exactly like the
+  v20 cap audit.
+
 **Prototype limitations (deliberate, each with its phase):**
-- **No BDB rule persistence yet** (R10): rules/scopes live in the session;
-  flat-flow scripts re-declare (their persistence model), and the v21
-  `ndr_rule`/`ndr_scope` tables + `load_pipeline` VOID semantics are the
-  next increment.  Shield `net_segment` rows DO persist (guarded).
 - **Flat flow only** (R2d): hier template propagation refused LOUDLY.
 - **No R5a crediting** (the documented phase-2 deferral): shields always
   emitted; R3/R7 price the uncredited worst case.

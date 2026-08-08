@@ -397,6 +397,19 @@ void BDB::_create_schema() {
             share    REAL NOT NULL,
             PRIMARY KEY (cell, layer_id)
         );
+        CREATE TABLE IF NOT EXISTS ndr_rule (
+            name         TEXT PRIMARY KEY,
+            width_x      REAL NOT NULL DEFAULT 1,
+            spacing_x    REAL NOT NULL DEFAULT 1,
+            shield_mode  INTEGER NOT NULL DEFAULT 0,
+            shield_per_n INTEGER NOT NULL DEFAULT 0,
+            shield_net   TEXT NOT NULL DEFAULT 'GND',
+            layers       TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS ndr_scope (
+            prefix TEXT PRIMARY KEY,
+            rule   TEXT NOT NULL REFERENCES ndr_rule(name)
+        );
         CREATE TABLE IF NOT EXISTS cell_children (
             parent_cell TEXT NOT NULL REFERENCES cell(name),
             inst_name   TEXT NOT NULL,
@@ -740,6 +753,15 @@ void BDB::_migrate() {
             nullptr, nullptr, nullptr);
         sqlite3_exec(_db,
             "ALTER TABLE cell ADD COLUMN layer_floor INTEGER NOT NULL DEFAULT -1",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 21) {
+        // v20 -> v21: NDR rule persistence.  The ndr_rule/ndr_scope tables
+        // are created by the fresh-DB DDL (CREATE IF NOT EXISTS) before
+        // _migrate runs; only the bundle provenance column needs an ALTER.
+        // Pre-v21 designs carry no rules, so the '' default is correct.
+        sqlite3_exec(_db,
+            "ALTER TABLE bundle ADD COLUMN ndr_rule TEXT DEFAULT ''",
             nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
@@ -2778,8 +2800,8 @@ void BDB::add_bundle(const BundleRow& br) {
     Stmt s(_db,
         "INSERT INTO bundle(id,level,strategy,reason,num_terminals,cell_context,"
         "instances,parent_id,is_replicated,drv_spec_depth,rcv_spec_depth,"
-        "drv_spec_path,rcv_spec_paths,is_expanded,bu_locked,cloned_from)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        "drv_spec_path,rcv_spec_paths,is_expanded,bu_locked,cloned_from,ndr_rule)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(id) DO UPDATE SET level=excluded.level,"
         " strategy=excluded.strategy, reason=excluded.reason,"
         " num_terminals=excluded.num_terminals, cell_context=excluded.cell_context,"
@@ -2788,7 +2810,7 @@ void BDB::add_bundle(const BundleRow& br) {
         " rcv_spec_depth=excluded.rcv_spec_depth, drv_spec_path=excluded.drv_spec_path,"
         " rcv_spec_paths=excluded.rcv_spec_paths,"
         " is_expanded=excluded.is_expanded, bu_locked=excluded.bu_locked,"
-        " cloned_from=excluded.cloned_from");
+        " cloned_from=excluded.cloned_from, ndr_rule=excluded.ndr_rule");
     sqlite3_bind_text  (s, 1, br.id.c_str(),           -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 2, br.level);
     sqlite3_bind_text  (s, 3, br.strategy.c_str(),     -1, SQLITE_TRANSIENT);
@@ -2806,7 +2828,87 @@ void BDB::add_bundle(const BundleRow& br) {
     sqlite3_bind_int   (s, 14, br.is_expanded ? 1 : 0);
     sqlite3_bind_int   (s, 15, br.bu_locked ? 1 : 0);
     sqlite3_bind_text  (s, 16, br.cloned_from.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (s, 17, br.ndr_rule.c_str(),    -1, SQLITE_TRANSIENT);
     step_checked(_db, s, "add_bundle");
+}
+
+// ── NDR rule persistence (v21) ───────────────────────────────────────────────
+
+void BDB::set_ndr_rule(const NdrRuleRow& r) {
+    Stmt s(_db,
+        "INSERT INTO ndr_rule(name,width_x,spacing_x,shield_mode,shield_per_n,"
+        "shield_net,layers) VALUES(?,?,?,?,?,?,?)"
+        " ON CONFLICT(name) DO UPDATE SET width_x=excluded.width_x,"
+        " spacing_x=excluded.spacing_x, shield_mode=excluded.shield_mode,"
+        " shield_per_n=excluded.shield_per_n, shield_net=excluded.shield_net,"
+        " layers=excluded.layers");
+    sqlite3_bind_text  (s, 1, r.name.c_str(),       -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(s, 2, r.width_x);
+    sqlite3_bind_double(s, 3, r.spacing_x);
+    sqlite3_bind_int   (s, 4, r.shield_mode);
+    sqlite3_bind_int   (s, 5, r.shield_per_n);
+    sqlite3_bind_text  (s, 6, r.shield_net.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (s, 7, r.layers.c_str(),     -1, SQLITE_TRANSIENT);
+    step_checked(_db, s, "set_ndr_rule");
+}
+
+std::vector<NdrRuleRow> BDB::ndr_rules() const {
+    Stmt q(_db, "SELECT name,width_x,spacing_x,shield_mode,shield_per_n,"
+                "shield_net,layers FROM ndr_rule ORDER BY name");
+    auto txt = [](sqlite3_stmt* st, int c) -> std::string {
+        const unsigned char* p = sqlite3_column_text(st, c);
+        return p ? reinterpret_cast<const char*>(p) : std::string();
+    };
+    std::vector<NdrRuleRow> rows;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        NdrRuleRow r;
+        r.name         = txt(q, 0);
+        r.width_x      = sqlite3_column_double(q, 1);
+        r.spacing_x    = sqlite3_column_double(q, 2);
+        r.shield_mode  = sqlite3_column_int(q, 3);
+        r.shield_per_n = sqlite3_column_int(q, 4);
+        r.shield_net   = txt(q, 5);
+        r.layers       = txt(q, 6);
+        rows.push_back(std::move(r));
+    }
+    return rows;
+}
+
+void BDB::set_ndr_scope(const std::string& prefix, const std::string& rule) {
+    // FK made LOUD: sqlite only enforces REFERENCES with foreign_keys=ON,
+    // and a dangling scope would silently resolve nets to a rule that no
+    // longer exists on reload.
+    { Stmt q(_db, "SELECT 1 FROM ndr_rule WHERE name=?");
+      sqlite3_bind_text(q, 1, rule.c_str(), -1, SQLITE_TRANSIENT);
+      if (sqlite3_step(q) != SQLITE_ROW)
+          throw std::runtime_error("set_ndr_scope: rule not declared: " + rule); }
+    Stmt s(_db, "INSERT INTO ndr_scope(prefix,rule) VALUES(?,?)"
+                " ON CONFLICT(prefix) DO UPDATE SET rule=excluded.rule");
+    sqlite3_bind_text(s, 1, prefix.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(s, 2, rule.c_str(),   -1, SQLITE_TRANSIENT);
+    step_checked(_db, s, "set_ndr_scope");
+}
+
+void BDB::delete_ndr_scope(const std::string& prefix) {
+    Stmt s(_db, "DELETE FROM ndr_scope WHERE prefix=?");
+    sqlite3_bind_text(s, 1, prefix.c_str(), -1, SQLITE_TRANSIENT);
+    step_checked(_db, s, "delete_ndr_scope");
+}
+
+std::vector<std::pair<std::string,std::string>> BDB::ndr_scopes() const {
+    Stmt q(_db, "SELECT prefix, rule FROM ndr_scope ORDER BY prefix");
+    auto txt = [](sqlite3_stmt* st, int c) -> std::string {
+        const unsigned char* p = sqlite3_column_text(st, c);
+        return p ? reinterpret_cast<const char*>(p) : std::string();
+    };
+    std::vector<std::pair<std::string,std::string>> out;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        out.emplace_back(txt(q, 0), txt(q, 1));
+    return out;
+}
+
+void BDB::clear_ndr() {
+    _exec("DELETE FROM ndr_scope; DELETE FROM ndr_rule;");
 }
 
 int BDB::_ensure_net(const std::string& name) {
@@ -2886,7 +2988,7 @@ std::vector<BundleRow> BDB::all_bundles() const {
     Stmt q(_db,
         "SELECT id,level,strategy,reason,num_terminals,cell_context,instances,"
         "parent_id,is_replicated,drv_spec_depth,rcv_spec_depth,drv_spec_path,"
-        "rcv_spec_paths,is_expanded,bu_locked,cloned_from"
+        "rcv_spec_paths,is_expanded,bu_locked,cloned_from,ndr_rule"
         " FROM bundle ORDER BY CAST(id AS INTEGER), id");
     auto txt = [](sqlite3_stmt* st, int c) -> std::string {
         const unsigned char* p = sqlite3_column_text(st, c);
@@ -2911,6 +3013,7 @@ std::vector<BundleRow> BDB::all_bundles() const {
         b.is_expanded    = sqlite3_column_int(q, 13) != 0;
         b.bu_locked      = sqlite3_column_int(q, 14) != 0;
         b.cloned_from    = txt(q, 15);
+        b.ndr_rule       = txt(q, 16);
         rows.push_back(std::move(b));
     }
     return rows;
