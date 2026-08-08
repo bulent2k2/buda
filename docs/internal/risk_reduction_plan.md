@@ -119,13 +119,22 @@ a change claims neutrality.
 
 ## Status
 
-- **Phase A: landed** (this PR): `test/tests/test_docs_guards.py`
+- **Phase A: landed** (PR #612): `test/tests/test_docs_guards.py`
   (links + command coverage), `tools/runtime_ab.py`, per-class runtime
   rollups in `tools/qor_corpus.py --compare`.
-- **Phase B: on PR #614**: `_decision(text, tag, **kv)` + trace-based
-  identity tests + `BUDA_DECISION_TRACE` JSONL dump (output verified
-  byte-identical against a main build).
-- **Phase C: landed** (this PR): `validate_wrappers` in
+- **Phase B: landed** (PR #614): `BudaSession._decision(text, tag,
+  **kv)` — prints the human line verbatim (output byte-identical,
+  verified against a main-build decision-line diff on the caps vehicle)
+  and appends a normalized `(tag, kv)` record when tracing is on.
+  Converted ripup's core decision sites
+  (improver/heartbeat/stall-sweep/divergence/done, sequential AND
+  parallel paths incl. the sequential deferred fallback); the fast
+  par-vs-seq identity tests compare TRACES, the slow mix2 end-to-end
+  test stays the byte-level formatting canary.
+  `BUDA_DECISION_TRACE=<path>` dumps the run's records as JSON lines.
+  Remaining B item: extend coverage to the passes the canary alone
+  covers (global/class/release/negotiate lines) as they come up.
+- **Phase C: landed** (PR #615): `validate_wrappers` in
   `buda_session/util.py` — the cross-field invariants of the historical
   bug classes (selection range, seg_layers shape, the unpin hazard as a
   SHAPE check since edit_commit legitimately forces layers pin-free,
