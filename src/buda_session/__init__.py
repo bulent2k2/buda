@@ -29,10 +29,12 @@ from .ripup import RipupMixin
 from .rr_state import RRStateMixin
 from .negotiate import NegotiateMixin
 from .refine import RefineMixin
+from .rr_trials import RRTrialsMixin
+from .rr_sweeps import RRSweepsMixin
 
 MIXINS = (PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
           ReportsMixin, RipupMixin, RRStateMixin,
-          NegotiateMixin, RefineMixin)
+          NegotiateMixin, RefineMixin, RRTrialsMixin, RRSweepsMixin)
 
 _owner = {}
 for _m in MIXINS:

@@ -161,4 +161,14 @@ a change claims neutrality.
   `ripup_mod._RR_SCREEN_TOP_N` so test monkeypatching keeps one source
   of truth.  Gated: caps decision lines byte-identical (152), fast tier
   + slow agreement green.  ripup.py 3300 → 2670 lines.
-- Phase D-3 (trials/sweeps extraction): not started.
+- **Phase D-3: landed** (this PR): `rr_trials.py` (`RRTrialsMixin` —
+  warm eval/study, `_rr_scan_moves`, `_rr_trial`) and `rr_sweeps.py`
+  (`RRSweepsMixin` — the fixed-context screen, sweep-pool plumbing, and
+  both parallel evaluation paths), VERBATIM moves with the module
+  globals read via `ripup_mod._RR_*` for monkeypatch parity.  The
+  driver loop, contender machinery, `_rr_rerun`, candidate ordering,
+  and the global/class/release passes stay in RipupMixin.  Gated: caps
+  decision lines byte-identical (152), fast tier + slow agreement
+  green.  ripup.py 3430 (Phase D start) → 2077 lines across D-1..D-3;
+  the healer package is now seven cohesive modules under the MIXINS
+  disjointness guard.  Phase D complete.
