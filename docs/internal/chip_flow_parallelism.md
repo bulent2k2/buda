@@ -410,14 +410,56 @@ windows already span most of the grid, so there is nothing to skip.
 The cost is the per-visit band walk, not the visit count.  A note in
 `best_band_perp` records this so it is not re-tried.
 
-**Where that leaves B1.**  The attribution is solid and the two
-cheapest ideas are dead.  What is left, in order of appeal: (a) make
-the per-visit `band_cost` cheaper or exploit that most bands are EMPTY
-(the sparse-usage structure `cong_cost_segment` re-derives per band);
-(b) an overlay-independent infeasibility certificate as above, which
-would revive the pruning soundly; (c) accept the cost.  Note (a) and
-(b) both touch the planner's decision surface, so either needs the
-decision-line + corpus gate this branch already exercises.
+**Where that leaves B1 (before the PR2 attempt).**  The attribution is
+solid and the two cheapest ideas were dead.  What remained, in order of
+appeal: (a) make the per-visit `band_cost` cheaper or exploit that most
+bands are EMPTY; (b) revive the pruning soundly; (c) accept the cost.
+
+### B1 pruning is a DEAD END — both levers inert once correct (PR #634, closed)
+
+Approach (b) was attempted and **closed unmerged**: pruning the victim
+ladder is admissible but INERT on the flows B1 targets.  The reasoning
+chain, and why each fix was necessary:
+
+- **The soundness precondition.** A rip changes global `layer_load`, so
+  `kBalance` can flip the greedy's chosen layer even on usage the rip
+  did not touch.  Pruning "a candidate disjoint from the freed bands is
+  still infeasible" is therefore sound only for candidates whose
+  feasibility is layer-CHOICE-independent.
+- **Two mechanisms break that**, both found by Codex review: **(1)
+  overlay coupling** — two segments sharing a `(cut, band)`, so a
+  flipped layer's own-overlay charge changes a later segment's
+  admissibility (#629); **(2) window sensitivity** — a bounded
+  ConnTopology window fit by some allowed same-direction layers and not
+  others (differing track pitch → differing `eff_bus_width`), so a flip
+  changes the post-selection window-fit verdict (#634).  A correct prune
+  must exclude candidates exhibiting either.
+- **The result:** excluding both leaves **0 prunes on
+  `chip_stack_bottomup` and `chip_bottomup`** (only `mix2_fast_bottomup`,
+  a ~5 s flow, keeps 305).  chip_stack's tight bottom-up template windows
+  × mixed-pitch layers (18 vs 24) make essentially every candidate
+  window-sensitive, so nothing is soundly prunable.  The −16.6 % (#629)
+  and −7 s (#634) numbers were BOTH unsound — each pruned candidates that
+  could flip feasibility; the corpus stayed byte-identical only because
+  the flips did not happen to change the final winner on those 41 flows,
+  NOT because they could not.  **A green corpus + a byte-identical flow
+  log prove a cascade did not FIRE, not that it CANNOT** — the recurring
+  lesson of this arc.
+
+The **floor-relievability gate** (skip a whole ladder when even removing
+ALL rippable load leaves no candidate viable) was independently INERT
+(1 skip / 105 calls): these ladders are "needs-multiple-rips" hopeless,
+not "blockers-locked" hopeless.  Shelved on `claude/b1-ladder-floor-gate`;
+the correct decoupled/window prune is on `claude/b1-ladder-decoupled-prune`
+(both closed/unmerged, kept for reference).
+
+**Conclusion: the victim-ladder cost is irreducible via candidate
+pruning on this corpus.**  The candidates genuinely have
+`kBalance`-dependent feasibility.  The only remaining lever is approach
+(a) — make the per-candidate SCORING cheaper (a sparse/empty-band-aware
+`band_cost`), speeding the candidates the ladder must still fully score.
+That is a larger effort on the planner's decision surface and needs the
+decision-line + corpus gate this arc established.
 
 `[ReplanProf]` (env `BUDA_REPLAN_PROF=1`) stays in as the instrument
 that produced all of the above — per call it reports the recharge /
