@@ -19,6 +19,63 @@ tier, and a `.buda` flow. Re-validate any time: *Actions → Windows validation
 2m30s, MinGW build ≈ 2m, Cygwin `bin/bb` ≈ 9m; fast tier ≈ 46–75s per
 path on a 4-core runner).
 
+## Choosing A Path
+
+### Pros and cons
+
+| Path | Pros | Cons |
+|---|---|---|
+| **1. MSVC + Ninja** | The reference path: simplest layout (everything in `build\`), fastest edit-build cycle (~2m full build, incremental via Ninja), `pytest` needs no PYTHONPATH, native CPython so **all** wheels work (incl. web deps), stable toolchain (VS releases, not rolling) | Needs a VS developer shell (`vcvars64`); MSVC-only quirks (`WINDOWS_EXPORT_ALL_SYMBOLS`, `/UNDEBUG` warning spam); `BUDA_SANITIZE` hard-errors by design |
+| **2. MSVC + VS generator** | Same toolchain as #1 but **no developer shell needed** (CMake finds MSVC itself); produces a `.sln` — full Visual Studio IDE debugging/profiling | Multi-config `build\Release` layout means PYTHONPATH for *everything*, tests included — this layout produced all three measured subprocess-PYTHONPATH traps (§8); slowest configure (~61s vs ~7s) |
+| **3. MinGW-w64 (MSYS2 UCRT64)** | GCC branch of the build (`-O3 -march=native`, `-ffp-contract=off`) with **native CPython** — all wheels work; artifacts are **self-contained** (objdump-verified: no MSYS2 DLL deps), so they run from any shell; bash-driven workflow closest to Linux muscle memory with native-speed binaries | Two-part setup (MSYS2 + native Python) with the pacman update ritual; **rolling release** — gcc jumped 14→16 between two validation runs; CRT discipline required (UCRT64 flavor only); GDB-style debugging, no VS IDE |
+| **4. Cygwin64** | The Linux instructions *verbatim*: `bin/bb` just works, real `fcntl` (the **only** lane where the floorplanner's inter-process lock actually locks), real POSIX paths/tools; 1741 fast-tier tests pass | **`BUDA_ARCH=x86-64-v2` is required** (`-march=native` codegen segfaults — measured, §6); Python is 3.9 (EOL, below the 3.13 floor); **no pip wheels exist** — distro matplotlib is broken (numpy-2 skew), web deps unbuildable (28 tests permanently skipped); slowest builds (6.5–9m); CRLF guards needed; `build` must be on `PATH` for dlopen |
+
+### Decision criteria
+
+| If you… | Choose |
+|---|---|
+| Just want BUDA working on Windows with least ceremony | **MSVC + Ninja** — it is the reference for a reason |
+| Live in Visual Studio (IDE debugging, profiling, `.sln` workflows) | **MSVC + VS generator** |
+| Want the Linux/GCC toolchain semantics with zero package compromises | **MinGW UCRT64** — the only path that is both GCC *and* full-wheel-ecosystem |
+| Need to reproduce a GCC-specific bug (codegen, `-ffp-contract`, warnings) on Windows | **MinGW** (or Cygwin if the POSIX layer matters too) |
+| Want to run the repo's own `bin/` wrappers or need working `fcntl` locking | **Cygwin** — accept the caveat list in §6 |
+| Care about redistributing the built artifacts | **MinGW** (self-contained) or MSVC (UCRT is in-box on Win10+); Cygwin drags its runtime along |
+| Need the GUI tools (floorplanner/viz) | MSVC or MinGW — Cygwin's matplotlib is broken upstream |
+| Want a toolchain that won't shift under you | MSVC; MSYS2 and Cygwin are rolling releases |
+
+### Performance — measured vs. not
+
+Wall clocks from the validation runs (4-core shared runners, small samples —
+treat ±30% as noise):
+
+| Metric | MSVC Ninja | MSVC VS gen | MinGW | Cygwin |
+|---|---|---|---|---|
+| Full build | ~2m0s | ~2m40s | ~2m0s | **6m30s–9m** |
+| Fast tier (pytest self-timed) | 45–75s | 45–75s | 45.8s best | 61s *for ~200 fewer tests* |
+| Cold environment setup (CI) | ~40s | ~40s | ~1m45s | ~5–8m |
+
+The honest reading:
+
+- **MSVC and MinGW are within runner noise of each other** on everything
+  measured — best-of-run tier times (45.4s vs 45.8s) are effectively
+  identical, so no engine-performance separation between `/O2 /fp:precise`
+  and `-O3 -march=native` was resolvable at this workload scale. A real
+  verdict would need per-lane `tools/qor_corpus.py` timings on a quiet
+  machine, which has not been run on Windows.
+- **Cygwin carries two structural handicaps**: builds are 3–4× slower
+  (Cygwin's process-emulation tax on the compiler driver), and it is the
+  only lane pinned *below* native ISA (`x86-64-v2`, out of correctness
+  necessity) — a theoretical engine-throughput deficit versus MinGW's
+  `-march=native` whose magnitude is unmeasured. Its per-test tier cost is
+  also visibly higher.
+- The tiny `four_blocks.buda` flow ran in 0.01s on every lane — flows of
+  that size discriminate nothing.
+
+In one line: **Ninja-MSVC to use it, VS generator to debug it, MinGW to have
+GCC without giving anything up, Cygwin to pretend you never left Linux — and
+pay for the pretense in build time, package availability, and one mandatory
+ISA pin.**
+
 ---
 
 ## Path 1 & 2 — MSVC (the reference paths)
