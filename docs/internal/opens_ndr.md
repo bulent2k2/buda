@@ -9,8 +9,10 @@ command/GUI surface), [`ndr_architecture.md`](ndr_architecture.md)
 [`../script_reference/ndr.md`](../script_reference/ndr.md).
 
 Snapshot index — last verified against `main`: **2026-08-08**, after R13
-(bottom-up composition) landed. Every requirement R1–R13 is implemented and
-exercised; what follows is the residue.
+(bottom-up composition) landed. Every requirement has a working implementation
+and a vehicle, and the feature is usable end to end — but **R1, R6 and R8 are
+met only in part**, by the decisions recorded below. What follows is that
+residue.
 
 **None of these is blocking.** Each is a bounded piece of work waiting for a
 design that needs it, and the current behaviour in each case is conservative

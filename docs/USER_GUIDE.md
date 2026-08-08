@@ -158,11 +158,17 @@ set_ndr clk_ clk2x
 ```
 
 Every `clk_*` net now routes 2 slots wide, keeps a guard slot of clearance, and
-the bus is flanked by GND shield wires. What matters for a novice:
+the bus is flanked by shield wires carrying the `GND` label. What matters for a
+novice:
 
 *   **Declare before bundling.** Rules attach at `run_bundler` /
     `run_hier_bundler`; a bundle mixing rules is split into rule-uniform parts,
     reported loudly.
+*   **An emitted shield is labeled, not bonded.** It is a real routed wire with
+    the shield net's identity and it reserves the track, but nothing straps it
+    to the power grid yet — so do not rely on it for electrical shielding as-is.
+    Add the bonding straps downstream, or use the `credit` token so an
+    **existing** power rail (already grid metal) serves as the shield instead.
 *   **The planner prices the cost.** Extra width, guards and shields are charged
     as track demand while layers are chosen, so a region that cannot afford an
     NDR bus in *aggregate* shows up as planner overflow at planning time rather
@@ -387,7 +393,7 @@ add_blocks_from_bdb 0
 …
 run_planner hier signal_tracks
 run_nuts
-check_template_tracks on_mismatch independent    # the uniformity gate
+check_template_tracks                            # the uniformity gate (stops on mismatch)
 run_detailed_nuts
 ```
 
@@ -404,10 +410,15 @@ Three commands, in this order, and the order matters:
     **before** `derive_busterms` / `add_blocks_from_bdb` — it moves cells, and
     those commands snapshot placement.
 *   **`check_template_tracks`** is the gate that proves it worked: it compares
-    the signal tracks each instance actually sees. `on_mismatch stop` (default)
-    refuses to copy; `on_mismatch independent` copies the aligned instances and
-    solves the misaligned ones individually. `run_detailed_nuts` runs the check
-    implicitly if you skip it — but then you do not get to choose the policy.
+    the signal tracks each instance actually sees. The default `on_mismatch
+    stop` refuses to copy and hands you the mismatch report — keep it, because
+    it is what makes the identical-instances promise above hold: if alignment
+    did not work, you want to know and fix the placement, not route on. Only if
+    you *accept* divergent instances (some designs do, when one stray instance
+    is not worth re-placing for) switch to `on_mismatch independent`, which
+    copies the aligned instances and solves the misaligned ones individually —
+    the copies stay uniform, the outliers do not. `run_detailed_nuts` runs the
+    check implicitly if you skip it, but then you do not get to choose.
 
 **If a cell should keep its routing off the top-level layers**, cap it:
 `set_cell_layer_cap proc_cell M3` restricts the cell's own interconnect to the

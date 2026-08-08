@@ -292,7 +292,9 @@ add_blocks_from_bdb 0
 …
 run_planner hier signal_tracks
 run_nuts
-check_template_tracks on_mismatch independent   # gate before copying
+check_template_tracks        # gate before copying; default policy STOPS on mismatch
+                             # (add `on_mismatch independent` only if you accept
+                             #  solving misaligned instances individually)
 run_detailed_nuts
 ```
 
