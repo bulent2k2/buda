@@ -213,3 +213,58 @@ def _batched(method):
         with self._bdb_batch():
             return method(self, *args, **kwargs)
     return wrapper
+
+
+# ── wrapper invariant validator (risk_reduction_plan.md R1, Phase C) ─────────
+# The mutable pybind surface means a bad Python-side write surfaces stages
+# later; these are the cross-field invariants of the historical bug classes.
+# Called at stage entries when BUDA_VALIDATE=1 (conftest turns it on for the
+# whole test suite; zero-cost otherwise).
+
+def validate_wrappers(bundles, where=""):
+    """Return a list of invariant-violation strings (empty = clean)."""
+    bad = []
+    for w in bundles:
+        bid = w.input.original_bundle.id
+        ncand = len(w.input.candidates)
+        sel = w.plan.selected_topology_index
+        if not (-1 <= sel < ncand):
+            bad.append(f"b{bid}: selected_topology_index {sel} out of "
+                       f"range (ncand {ncand})")
+            continue
+        if sel >= 0 and w.plan.seg_layers:
+            nseg = len(w.input.candidates[sel].segments)
+            if len(w.plan.seg_layers) != nseg:
+                bad.append(f"b{bid}: seg_layers len "
+                           f"{len(w.plan.seg_layers)} != selected "
+                           f"candidate's {nseg} segment(s)")
+        # pinned_seg_layers WITHOUT a pin is legitimate (edit_commit forces
+        # layers on the currently-selected candidate) — the historical
+        # hazard is the SHAPE mismatch: forced layers surviving a re-select
+        # onto a different-segment-count candidate (the unpin hazard).
+        if w.input.pinned_seg_layers and sel >= 0:
+            nseg = len(w.input.candidates[sel].segments)
+            if len(w.input.pinned_seg_layers) != nseg:
+                bad.append(f"b{bid}: pinned_seg_layers len "
+                           f"{len(w.input.pinned_seg_layers)} != selected "
+                           f"candidate's {nseg} segment(s) (the unpin "
+                           f"hazard — forced layers applied to a "
+                           f"different-shaped candidate)")
+        for gi in (w.input.pinned_group or []):
+            if not (0 <= gi < ncand):
+                bad.append(f"b{bid}: pinned_group index {gi} out of range "
+                           f"(ncand {ncand})")
+    return [f"[validate{':' + where if where else ''}] {m}" for m in bad]
+
+
+def _mixin_validate_stage_entry(self, where):
+    """Session hook: run validate_wrappers at a stage entry when
+    BUDA_VALIDATE=1 and fail LOUD (raise) on any violation — catching the
+    bad write where it was made, not stages later."""
+    import os
+    if os.environ.get("BUDA_VALIDATE") != "1" or not self.bundles:
+        return
+    bad = validate_wrappers(self.bundles, where)
+    if bad:
+        raise RuntimeError("wrapper invariant violation(s):\n" +
+                           "\n".join(bad))

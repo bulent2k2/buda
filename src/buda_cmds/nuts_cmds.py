@@ -48,6 +48,7 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
         print("Warning: run_nuts has no bundles — run run_bundler, "
               "generate_topologies, and run_planner first.")
         return
+    session._validate_stage_entry("run_nuts")
     if not any(0 <= w.plan.selected_topology_index < len(w.input.candidates)
                for w in session.bundles):
         print("Warning: run_nuts found no selected topology to place — run "
@@ -187,6 +188,7 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
 
 
 def cmd_ripup_reroute(session, cmd, args, cmd_line):
+    session._validate_stage_entry("ripup_reroute")
     # Usage: ripup_reroute [max_iter] [use_edge_candidates] [no_global]
     #                      [no_class_moves]
     #                      [fast_trials|no_fast_trials] [screen|no_screen]
@@ -303,6 +305,7 @@ def cmd_refine_selection(session, cmd, args, cmd_line):
 
 
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):
+    session._validate_stage_entry("negotiate_congestion")
     # Usage: negotiate_congestion [max_iter] [class_moves|no_class_moves]
     # Measured-congestion feedback (run after run_nuts): inject the
     # actual NUTS overlaps as band demand and let the planner re-price

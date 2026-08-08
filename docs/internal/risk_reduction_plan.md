@@ -122,17 +122,28 @@ a change claims neutrality.
 - **Phase A: landed** (PR #612): `test/tests/test_docs_guards.py`
   (links + command coverage), `tools/runtime_ab.py`, per-class runtime
   rollups in `tools/qor_corpus.py --compare`.
-- **Phase B: landed**: `BudaSession._decision(text, tag, **kv)` — prints
-  the human line verbatim (output byte-identical, verified against a
-  main-build decision-line diff on the caps vehicle) and appends a
-  normalized `(tag, kv)` record when tracing is on.  Converted ripup's
-  core decision sites (improver/heartbeat/stall-sweep/divergence/done,
-  both sequential and parallel paths); the fast par-vs-seq identity
-  tests now compare TRACES (records incl. structured trial counts), and
-  the slow mix2 end-to-end test stays a byte-level log diff — the
-  formatting canary.  `BUDA_DECISION_TRACE=<path>` makes the CLI dump
-  the run's records as JSON lines, so two runs diff decision-wise
-  without parsing log text.  Remaining B item: extend `decision()`
-  coverage to the healer passes the slow canary alone covers today
-  (global/class/release/negotiate lines) as they come up.
-- Phases C-D: not started.
+- **Phase B: landed** (PR #614): `BudaSession._decision(text, tag,
+  **kv)` — prints the human line verbatim (output byte-identical,
+  verified against a main-build decision-line diff on the caps vehicle)
+  and appends a normalized `(tag, kv)` record when tracing is on.
+  Converted ripup's core decision sites
+  (improver/heartbeat/stall-sweep/divergence/done, sequential AND
+  parallel paths incl. the sequential deferred fallback); the fast
+  par-vs-seq identity tests compare TRACES, the slow mix2 end-to-end
+  test stays the byte-level formatting canary.
+  `BUDA_DECISION_TRACE=<path>` dumps the run's records as JSON lines.
+  Remaining B item: extend coverage to the passes the canary alone
+  covers (global/class/release/negotiate lines) as they come up.
+- **Phase C: landed** (PR #615): `validate_wrappers` in
+  `buda_session/util.py` — the cross-field invariants of the historical
+  bug classes (selection range, seg_layers shape, the unpin hazard as a
+  SHAPE check since edit_commit legitimately forces layers pin-free,
+  group-pin range) — raised LOUD at stage entries (`run_nuts` + both
+  healer entries) under `BUDA_VALIDATE=1`, which conftest turns on for
+  the whole suite.  v1 is Python at stage boundaries (the C++
+  engine-entry twin remains open if a violation class ever needs
+  sub-stage granularity).  Plus R3's snapshot-coverage contract
+  (`test_wrapper_invariants.py`): every writable wrapper field must be
+  classified snapshotted-or-exempt — it caught 7 unclassified hier
+  fields on landing, exactly its job.
+- Phase D: not started.
