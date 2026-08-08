@@ -435,3 +435,10 @@ def at_least_one_connects_all(ctx, n):
         if len(blocks_reached) >= n:
             return
     pytest.fail(f'No candidate reaches all {n} blocks')
+
+# Wrapper-invariant validation ON for the whole suite (risk_reduction_plan.md
+# R1 Phase C): stage entries raise on cross-field violations, catching a bad
+# Python-side write where it was made instead of stages later.  Zero-cost
+# outside the suite (the env gate defaults off).
+import os as _os
+_os.environ.setdefault("BUDA_VALIDATE", "1")

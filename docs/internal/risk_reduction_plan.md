@@ -122,4 +122,19 @@ a change claims neutrality.
 - **Phase A: landed** (this PR): `test/tests/test_docs_guards.py`
   (links + command coverage), `tools/runtime_ab.py`, per-class runtime
   rollups in `tools/qor_corpus.py --compare`.
-- Phases B-D: not started.
+- **Phase B: on PR #614**: `_decision(text, tag, **kv)` + trace-based
+  identity tests + `BUDA_DECISION_TRACE` JSONL dump (output verified
+  byte-identical against a main build).
+- **Phase C: landed** (this PR): `validate_wrappers` in
+  `buda_session/util.py` — the cross-field invariants of the historical
+  bug classes (selection range, seg_layers shape, the unpin hazard as a
+  SHAPE check since edit_commit legitimately forces layers pin-free,
+  group-pin range) — raised LOUD at stage entries (`run_nuts` + both
+  healer entries) under `BUDA_VALIDATE=1`, which conftest turns on for
+  the whole suite.  v1 is Python at stage boundaries (the C++
+  engine-entry twin remains open if a violation class ever needs
+  sub-stage granularity).  Plus R3's snapshot-coverage contract
+  (`test_wrapper_invariants.py`): every writable wrapper field must be
+  classified snapshotted-or-exempt — it caught 7 unclassified hier
+  fields on landing, exactly its job.
+- Phase D: not started.
