@@ -1963,12 +1963,17 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     // load reflects only already-committed bundles (within-candidate charges are
     // restored per candidate), so it grows monotonically across the greedy
     // schedule and steers later bundles onto the layers earlier ones left empty.
+    const auto t_ll0 = std::chrono::steady_clock::now();
     std::map<int,double> layer_load;
     for (const auto& c : cuts_) {
         double u = 0.0;
         for (int b = 0; b < c.num_bands(); ++b) u += c.usage(b);
         layer_load[c.layer_id] += u;
     }
+    prof_layerload_us_ += (long long)std::chrono::duration_cast<
+        std::chrono::microseconds>(std::chrono::steady_clock::now() - t_ll0)
+        .count();
+    ++prof_plan_calls_;
     double max_h_load = 1.0, max_v_load = 1.0;
     for (const auto& [lid, u] : layer_load) {
         const Layer* L = layers_.get_layer(lid);
@@ -1995,6 +2000,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     // with per-candidate results identical to the sequential loop; the
     // ordered reduction below then replays the sequential compare, so the
     // winner — and every tie-break — is identical to the serial sweep.
+    const auto t_sc0 = std::chrono::steady_clock::now();
     std::vector<CandScore> scores(cand_indices.size());
     const int n_threads = resolved_plan_threads_((int)cand_indices.size());
     if (n_threads > 1) {
@@ -2014,6 +2020,10 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         for (size_t k = 0; k < cand_indices.size(); ++k)
             scores[k] = score_candidate_(bw, cand_indices[k], mode, ctx, ov);
     }
+    prof_scoring_us_ += (long long)std::chrono::duration_cast<
+        std::chrono::microseconds>(std::chrono::steady_clock::now() - t_sc0)
+        .count();
+    prof_cands_ += (long long)cand_indices.size();
 
     // Ordered reduction — the sequential loop's tail, verbatim semantics.
     for (size_t k = 0; k < cand_indices.size(); ++k) {
@@ -2902,7 +2912,11 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
                   << " ladder=" << ms_ladder << "(ranked=" << n_ranked
                   << " tried=" << n_victims << " plans=" << n_ladder_plans
                   << " committed=" << committed << ")"
-                  << " fallback=" << ms_fallback << "(n=" << n_fallback << ")\n";
+                  << " fallback=" << ms_fallback << "(n=" << n_fallback << ")"
+                  << " pb_cum[calls=" << prof_plan_calls_
+                  << " cands=" << prof_cands_
+                  << " layerload=" << prof_layerload_us_ / 1000.0
+                  << "ms scoring=" << prof_scoring_us_ / 1000.0 << "ms]\n";
     }
     if (!plan.found) return out;
     if (!committed) commit_plan(*target, plan);

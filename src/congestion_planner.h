@@ -904,6 +904,14 @@ private:
     // optimize_topologies run as 25% of the larger Hanan grid extent.
     double base_span_ref_     = -1.0;
     double span_ref_eff_      = 0.0;   // resolved value for the current run
+    // BUDA_REPLAN_PROF instrumentation accumulators (B1): time inside
+    // plan_bundle's serial layer_load setup vs the candidate-scoring block,
+    // reported cumulatively on each [ReplanProf] line.  Cost when the env is
+    // unset: two clock reads + three adds per plan_bundle call.
+    long long prof_layerload_us_ = 0;
+    long long prof_scoring_us_   = 0;
+    long long prof_plan_calls_   = 0;
+    long long prof_cands_        = 0;
     // Inter-bus spacing (mirrors NUTSEngine::track_pitch_).  Each segment is
     // charged eff_width + track_pitch_ and each band granted cap + track_pitch_,
     // so k buses in a band reserve the (k-1)*pitch of separation NUTS enforces.
