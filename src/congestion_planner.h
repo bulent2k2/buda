@@ -436,6 +436,29 @@ private:
                              const BundleWrapper* exclude);
 
     void rebuild_cuts_();
+    // ── Victim-ladder footprint pruning (replan_bundle_ripup, B1) ──────────
+    // Conservative rectangle over every (cut, band) whose USAGE a candidate's
+    // scoring could read: cuts of layer_id in the crossing direction (vcut)
+    // whose coord lies on the segment's raw along-span [lo2, hi2] (doubled
+    // coords, closed — routed_extent only ever shrinks), bands overlapping
+    // [p_lo, p_hi] (slide window ∪ nominal perp, inflated by half the charged
+    // width eff+pitch, ±1 rounding pad).  Capacities/patterns/keepouts are
+    // static during a trial, so usage is the only live input to feasibility.
+    struct BandRect {
+        int    layer_id;
+        bool   vcut;         // matching cuts' direction (H-seg → V-cuts)
+        long   lo2, hi2;     // along-span in doubled coords (cut_coord_2x)
+        double p_lo, p_hi;   // perpendicular usage-read range
+    };
+    // The candidate-index sweep plan_bundle runs (pinned_group > single pin >
+    // full), factored so the ladder's footprint pass and plan_bundle can never
+    // disagree about which candidates a sweep visits.
+    std::vector<int> collect_cand_indices_(const BundleWrapper& bw) const;
+    // Conservative usage-read footprint of one candidate (see BandRect).
+    std::vector<BandRect> cand_band_footprint_(const BundleWrapper& bw,
+                                               int ci) const;
+    bool footprint_hits_(const std::vector<BandRect>& foot,
+                         const std::vector<std::pair<int,int>>& bands) const;
     // Overflow congestion cost: kCong * max(0, (usage+eff-cap)/cap).  Zero below capacity.
     // perp_pos_override: if != INT_MIN, replaces seg.start.x/y for the perpendicular band
     // lookup.  Pass the ConnTopology interval centre so grid-boundary stubs land in the
@@ -530,11 +553,25 @@ private:
     // costs_out (optional): when non-null, records a CandidateCost per scored
     // candidate (with per-segment breakdown) — the read-only source for the
     // debug cost view.  Null (the default) is byte-identical to before.
+    // cand_mask (optional): when non-null, restrict the sweep to candidate
+    // indices with mask[ci] != 0 (applied AFTER the pin/group selection, so a
+    // pinned index outside the mask scores nothing).  Null (the default) is
+    // byte-identical to before.  Used by replan_bundle_ripup's victim-ladder
+    // footprint pruning, whose soundness argument requires the mask to be a
+    // superset of the feasible set — see the ladder comment there.
     PlanResult plan_bundle(const BundleWrapper& bw, PlanMode mode,
                            std::set<std::pair<int,int>>* contended = nullptr,
-                           std::vector<CandidateCost>* costs_out = nullptr);
+                           std::vector<CandidateCost>* costs_out = nullptr,
+                           const std::vector<char>* cand_mask = nullptr);
     // sign=+1 applies the plan's demand to the cut state; sign=-1 rips it up.
     void commit_plan(const BundleWrapper& bw, const PlanResult& plan, double sign = 1.0);
+    // The (cut, band) set a committed plan's rip-up frees: the recorded
+    // charge_log_ distributions when present (the exact inverse commit_plan
+    // replays), else the same for_each_band_w geometry commit_plan derives.
+    // (Declared here, after PlanResult; ladder-pruning siblings live beside
+    // BandRect above.)
+    void collect_charged_bands_(const BundleWrapper& bw, const PlanResult& plan,
+                                std::vector<std::pair<int,int>>& out) const;
     BundleAssignment make_assignment(const BundleWrapper& bw, const PlanResult& plan) const;
     void log_choice(const BundleWrapper& bw, const PlanResult& plan, const std::string& tag) const;
 
