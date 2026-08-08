@@ -548,8 +548,27 @@ void bind_routing(py::module_& m) {
         .def_readwrite("seg_layers", &BundleAssignment::seg_layers)
         .def_readwrite("seg_perp",   &BundleAssignment::seg_perp);
 
+    // Non-default rule spec (phase 1, path A — see src/ndr.h): resolved
+    // session-side per bundle, charged everywhere via ndr_group_demand.
+    py::class_<NdrSpec>(m, "NdrSpec")
+        .def(py::init<>())
+        .def_readwrite("width_slots",  &NdrSpec::width_slots)
+        .def_readwrite("guard_slots",  &NdrSpec::guard_slots)
+        .def_readwrite("shield_mode",  &NdrSpec::shield_mode)
+        .def_readwrite("shield_per_n", &NdrSpec::shield_per_n)
+        .def_readwrite("shield_net",   &NdrSpec::shield_net)
+        .def_readwrite("rule_name",    &NdrSpec::rule_name)
+        .def("active",                 &NdrSpec::active);
+    m.def("ndr_group_demand", &ndr_group_demand,
+          "The single-sourced R4 group demand conversion (slots for a "
+          "rule-uniform group of nbits bits)");
+    m.def("ndr_run_layout", &ndr_run_layout,
+          "Slot-role layout of the ascending run (B/b/S/G), lockstep with "
+          "ndr_group_demand");
+
     py::class_<BundleInput>(m, "BundleInput")
         .def(py::init<>())
+        .def_readwrite("ndr",               &BundleInput::ndr)
         .def_readwrite("original_bundle",   &BundleInput::original_bundle)
         // candidates: the getter returns the pool BY VALUE, so Python
         // receives OWNED Topology copies — never element views into the

@@ -29,6 +29,15 @@
 
 namespace buda {
 
+// NDR (phase 1): a governed bundle's per-segment charge is its member bits'
+// GROUP demand in slots — the single-sourced conversion of requirement R4
+// (ndr.h) shared with abstract-NUTS width and DNUTS admission, so no two
+// stages can disagree about whether a rule-governed group fits.  Identity
+// when the spec is inactive: the whole feature's byte-identity guarantee.
+static inline int ndr_units(const BundleInput& in, int n) {
+    return (n > 0 && in.ndr.active()) ? ndr_group_demand(in.ndr, n) : n;
+}
+
 // Per-candidate scoring overlay (plan_bundle).  While a candidate is being
 // scored, its own within-candidate charges live here instead of in cuts_ —
 // the committed cut state stays READ-ONLY for the whole scoring pass, which
@@ -797,7 +806,7 @@ double CongestionPlanner::plan_band_overlap(const BundleWrapper& bw,
     for (int si = 0; si < (int)t.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
         int pp  = (si < (int)plan.seg_perp.size()) ? plan.seg_perp[si] : INT_MIN;
         int lid = plan.seg_layers[si];
-        const int    n = seg_bit_count(t, si, nbits);
+        const int    n = ndr_units(bw.input, seg_bit_count(t, si, nbits));
         const double w = (nbits > 0 && n != nbits)
                              ? bw.input.width * ((double)n / (double)nbits)
                              : bw.input.width;
@@ -820,7 +829,7 @@ void CongestionPlanner::share_usage_of_(const BundleWrapper& bw, const Topology&
     for (int si = 0; si < (int)t.segments.size() && si < (int)seg_layers.size(); ++si) {
         const int lid = seg_layers[si];
         if (lid < 0 || bw.input.share_of(lid) >= 1.0) continue;
-        const int    n = seg_bit_count(t, si, nbits);
+        const int    n = ndr_units(bw.input, seg_bit_count(t, si, nbits));
         const double w = (nbits > 0 && n != nbits)
                              ? bw.input.width * ((double)n / (double)nbits)
                              : bw.input.width;
@@ -969,7 +978,11 @@ void CongestionPlanner::apply_reservation(const BundleWrapper& bw, double sign) 
         int clo = is_vcut ? bw.hier.res_x1 : bw.hier.res_y1;
         int chi = is_vcut ? bw.hier.res_x2 : bw.hier.res_y2;
         if (c.cut_coord < clo || c.cut_coord > chi) continue;
-        double eff = frac * (layers_.eff_bus_width(nbits, bw.input.width, lid)
+        const int    rn = ndr_units(bw.input, nbits);
+        const double rw = (nbits > 0 && rn != nbits)
+                              ? bw.input.width * ((double)rn / (double)nbits)
+                              : bw.input.width;
+        double eff = frac * (layers_.eff_bus_width(rn, rw, lid)
                              + track_pitch_);   // +pitch: Gap 1
         // Every band overlapping the region's perpendicular range could be
         // the bundle's eventual home, so each carries the reservation.
@@ -1342,10 +1355,14 @@ CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
     const bool enforce_overflow = ctx.enforce_overflow;
     const int  nbits = ctx.nbits;
     auto seg_n = [&](const Topology& t, int si) {
-        return seg_bit_count(t, si, nbits);
+        // NDR: a governed bundle's segments are counted in GROUP DEMAND
+        // UNITS (ndr.h) rather than raw member bits, so every consumer
+        // below prices the rule.  Identity when the spec is inactive
+        // (R12 byte-identity).
+        return ndr_units(bw.input, seg_bit_count(t, si, nbits));
     };
     auto seg_w = [&](const Topology& t, int si) {
-        const int n = seg_bit_count(t, si, nbits);
+        const int n = seg_n(t, si);
         return (nbits > 0 && n != nbits)
                    ? bw.input.width * ((double)n / (double)nbits)
                    : bw.input.width;
@@ -1887,10 +1904,14 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     // proportional base width for the dilution fallback.  Non-fan-in
     // bundles (empty seg_bits) are byte-identical to the bundle-level model.
     auto seg_n = [&](const Topology& t, int si) {
-        return seg_bit_count(t, si, nbits);
+        // NDR: a governed bundle's segments are counted in GROUP DEMAND
+        // UNITS (ndr.h) rather than raw member bits, so every consumer
+        // below prices the rule.  Identity when the spec is inactive
+        // (R12 byte-identity).
+        return ndr_units(bw.input, seg_bit_count(t, si, nbits));
     };
     auto seg_w = [&](const Topology& t, int si) {
-        const int n = seg_bit_count(t, si, nbits);
+        const int n = seg_n(t, si);
         return (nbits > 0 && n != nbits)
                    ? bw.input.width * ((double)n / (double)nbits)
                    : bw.input.width;
@@ -2056,7 +2077,7 @@ void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& p
         // junction-extended spans participate in overflow GATING only —
         // committing the conservative extension was measured and rejected
         // (mix healed endpoint 0->2 overlaps, big2 WL +13%).
-        const int    n = seg_bit_count(t, si, nbits);
+        const int    n = ndr_units(bw.input, seg_bit_count(t, si, nbits));
         const double w = (nbits > 0 && n != nbits)
                              ? bw.input.width * ((double)n / (double)nbits)
                              : bw.input.width;

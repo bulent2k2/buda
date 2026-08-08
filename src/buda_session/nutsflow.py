@@ -436,12 +436,23 @@ class NutsFlowMixin:
                   f"excludes them and is NOT comparable to a complete route.")
 
         if self.detailed_result is not None:
-            de_b, de_l, de_t, _ = self._wirelength_by_bundle(
-                self.detailed_result.net_segments)
-            n_wires = len(self.detailed_result.net_segments)
+            # NDR shields are real metal the design pays for but NOT signal
+            # wirelength (R11): excluded from the detailed table so the QoR
+            # totals stay comparable across designs with and without rules,
+            # and reported on their own line below.
+            sig_ns = [ns for ns in self.detailed_result.net_segments
+                      if not ns.is_shield]
+            shield_wl = sum(abs(ns.span_hi - ns.span_lo)
+                            for ns in self.detailed_result.net_segments
+                            if ns.is_shield)
+            de_b, de_l, de_t, _ = self._wirelength_by_bundle(sig_ns)
+            n_wires = len(sig_ns)
             n_unpl = self.detailed_result.num_unplaced   # authoritative bit count
             emit("Detailed bit-level wirelength (after run_detailed_nuts)",
                  de_b, de_l, de_t, "bits")
+            if shield_wl > 0:
+                print(f"  NDR shield metal: {shield_wl:.0f} (separate from "
+                      f"signal WL above)")
             # Bit-scaled envelope: the abstract interval is a per-bus (one-wire)
             # bound, so multiply each bundle's [lo, hi] by its bit count for a
             # bit-level envelope to bracket the detailed WL against.  Per-bit

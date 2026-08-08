@@ -86,9 +86,14 @@ commands**:
   exactly the coupling the architecture avoids.  Wait for a user who needs
   it.
 
-## The phase-1 strawman
+## The phase-1 strawman — PROTOTYPED (2026-08-06)
 
-The smallest surface that exercises the whole pipe:
+The smallest surface that exercises the whole pipe — now built exactly in
+this shape (as-built record + prototype limitations in
+[internal/ndr_architecture.md](internal/ndr_architecture.md) §7; demo
+vehicle `flow/ndr_demo.buda`; the multiplier-only value form and the R3
+check firing at `run_detailed_nuts` are the two as-built specifics worth
+knowing before methodology review):
 
 ```
 def_ndr  clk2x  width 2x spacing 2x shield bus net GND
