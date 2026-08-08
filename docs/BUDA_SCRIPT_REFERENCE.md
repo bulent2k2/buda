@@ -29,6 +29,8 @@ Commands run in the following order. Later stages depend on earlier ones.
 | Setup | `set_feedthru` | Mark a block×layer set as routable-through (opt-in feedthru) |
 | Setup | `set_track_pitch` | Declare inter-bus pitch so `run_planner` band reservations match the NUTS solve |
 | Setup | `add_net`, `add_bus` | Declare nets / buses in the netlist |
+| Setup | `def_ndr`, `set_ndr` | Declare a non-default rule (width / spacing / shielding) and attach it to nets by name prefix — before the bundler runs |
+| Setup | `dump_ndr` | Print declared rules, their attachment scopes, and each governed bundle's slot demand + layout |
 | Setup | `detour_channel` | Set outer-band width for U-shape / UU-shape detour trunks per compass direction |
 | 1 | `run_bundler`, `run_hier_bundler` | Group nets into flat or hierarchy-aware buses |
 | 1b | `dump_hbundles` | Print a summary of all HBundles (after `run_hier_bundler`) |
@@ -85,6 +87,7 @@ The per-command documentation lives in one page per pipeline stage under
 | [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` · `unpin_topology` |
 | [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `set_pair_align_heal` · `ripup_reroute` · `negotiate_congestion` · `refine_selection` |
 | [Routing grid](script_reference/routing_grid.md) | 8 | `def_track_pattern` · `add_grid_override` · `report_overhead` |
+| [Non-default rules (NDR)](script_reference/ndr.md) | setup | `def_ndr` · `set_ndr` · `dump_ndr` — per-net width / spacing / shielding, with the demand model and the worked vehicles |
 | [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_design` · `dump_topologies` · `visualize` · `visualize_topologies` |
 
 Script control (`source`, `exit`, comments), the output-files table, the typical
