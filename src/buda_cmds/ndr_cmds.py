@@ -76,6 +76,7 @@ def _write_rule_through(session, name):
     row.shield_per_n = r["shield_per_n"]
     row.shield_net   = r["shield_net"]
     row.layers       = ",".join(str(l) for l in (r["layers"] or []))
+    row.credit       = int(r.get("credit", 0))
     session.bdb.set_ndr_rule(row)
 
 
@@ -115,6 +116,7 @@ def restore_ndr_from_bdb(session):
             "shield_net": row.shield_net,
             "layers": ([int(t) for t in row.layers.split(",")]
                        if row.layers else None),
+            "credit": row.credit,
         }
         restored_rules.add(row.name)
     for prefix, rule in session.bdb.ndr_scopes():
@@ -160,8 +162,12 @@ def ndr_pricing_fp(session, rule_name):
     ws = max(1, math.ceil(r["width_x"]))
     gs = max(0, math.ceil(r["spacing_x"]) - 1)
     lay = ",".join(str(l) for l in (r["layers"] or []))
+    # The credit field appends ONLY when set, so every v21 stamp (which
+    # predates the field) still compares equal for a non-credit rule — a
+    # resumed v21 checkpoint must not VOID on a fingerprint-format change.
+    cr = "|c1" if r.get("credit") else ""
     return (f"{rule_name}|w{ws}|g{gs}|s{r['shield_mode']}"
-            f"|p{r['shield_per_n']}|n{r['shield_net']}|L{lay}")
+            f"|p{r['shield_per_n']}|n{r['shield_net']}|L{lay}{cr}")
 
 
 def stamp_bundle_ndr(session, row, wrapper):
@@ -256,6 +262,7 @@ def _spec_of(session, rule_name):
     spec.shield_mode  = r["shield_mode"]
     spec.shield_per_n = r["shield_per_n"]
     spec.shield_net   = r["shield_net"]
+    spec.credit_shields = bool(r.get("credit", 0))
     return spec
 
 
@@ -279,13 +286,15 @@ def _parse_x(tok, what, name):
 
 def cmd_def_ndr(session, cmd, args, cmd_line):
     # def_ndr <name> [width x<N>] [spacing x<N>]
-    #                [shield bus|bit|per:<N> [net <label>]] [layers <csv>]
+    #                [shield bus|bit|per:<N> [net <label>]] [credit]
+    #                [layers <csv>]
     # Declare-once (duplicate = hard error), unknown token = hard error,
     # and a rule that constrains nothing is refused — the def_layer /
     # def_track_pattern LOUD-declaration convention.
     if not args:
         print("Error: usage: def_ndr <name> [width x<N>] [spacing x<N>] "
-              "[shield bus|bit|per:<N> [net <label>]] [layers <csv>]")
+              "[shield bus|bit|per:<N> [net <label>]] [credit] "
+              "[layers <csv>]")
         return
     name = args[0]
     if name in _rules(session):
@@ -293,7 +302,8 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
               f"def_ndr is a hard error")
         sys.exit(1)
     rule = {"width_x": 1.0, "spacing_x": 1.0, "shield_mode": 0,
-            "shield_per_n": 0, "shield_net": "GND", "layers": None}
+            "shield_per_n": 0, "shield_net": "GND", "layers": None,
+            "credit": 0}
     i = 1
     while i < len(args):
         tok = args[i].lower()
@@ -332,6 +342,10 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
                     sys.exit(1)
                 ids.append(lid)
             rule["layers"] = sorted(set(ids)); i += 2
+        elif tok == "credit":
+            # R5a: an END shield may be satisfied by an adjacent pattern
+            # rail electrically identical to the shield net.  Opt-in.
+            rule["credit"] = 1; i += 1
         else:
             print(f"Error: def_ndr '{name}': unknown or incomplete token "
                   f"'{args[i]}' — a typo would silently weaken the rule")
@@ -341,6 +355,11 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
     if not spec_probe:
         print(f"Error: def_ndr '{name}' constrains nothing (default width, "
               f"spacing, no shield) — declare at least one constraint")
+        sys.exit(1)
+    if rule["credit"] and rule["shield_mode"] == 0:
+        print(f"Error: def_ndr '{name}': 'credit' needs a shield "
+              f"arrangement to credit against — declare shield "
+              f"bus|bit|per:<N> with it")
         sys.exit(1)
     _rules(session)[name] = rule
     if not hasattr(session, "_ndr_rules_typed"):
@@ -353,9 +372,10 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
         rule["shield_mode"]]
     lay = ("any" if rule["layers"] is None
            else ",".join(str(l) for l in rule["layers"]))
+    cr = " credit" if rule["credit"] else ""
     print(f"[NDR] rule '{name}': width x{rule['width_x']:g} -> {ws} slot(s)/"
           f"bit, spacing x{rule['spacing_x']:g} -> {gs} guard slot(s)/gap, "
-          f"shield {sh} (net {rule['shield_net']}), layers {lay}")
+          f"shield {sh} (net {rule['shield_net']}){cr}, layers {lay}")
 
 
 def cmd_set_ndr(session, cmd, args, cmd_line):
@@ -543,9 +563,10 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
         lay = ("any" if r["layers"] is None
                else ",".join(str(l) for l in r["layers"]))
         src = "  (restored from BDB)" if name in r_rest else ""
+        cr = " credit" if r.get("credit") else ""
         print(f"[NDR] rule '{name}': width x{r['width_x']:g} "
               f"({ws} slot(s)/bit), spacing x{r['spacing_x']:g} "
-              f"({gs} guard(s)/gap), shield {sh} net {r['shield_net']}, "
+              f"({gs} guard(s)/gap), shield {sh} net {r['shield_net']}{cr}, "
               f"layers {lay}{src}")
     for prefix, rule in sorted(scopes.items()):
         src = "  (restored from BDB)" if prefix in s_rest else ""
@@ -637,6 +658,52 @@ def build_ndr_audit_index(session):
     return {"by_bundle": by_bundle, "by_layer": layer_sorted}
 
 
+def _ndr_end_credit(spec, grid_stack, layer, rows, s_lo, s_hi, low_end):
+    """True when the run's low/high END is legitimately RAIL-CREDITED
+    (R5a): the outermost placed row is a signal bit whose immediately
+    adjacent pattern slot outside the run — no empty SIGNAL slot between —
+    is a rail matching the rule's shield identity (buda.ndr_rail_credits,
+    THE predicate the DNUTS seat search used) whose metal covers the run's
+    span.  The audit checks the PROPERTY, not the provenance: every end
+    must either carry an emitted shield or be flanked by a matching rail,
+    and an outermost-bit end with no matching rail fails back to the
+    uncredited expectation — the missing-shield count check fires."""
+    if not spec.credit_shields or spec.shield_mode == 0:
+        return False
+    if grid_stack is None or not grid_stack.has_layer(layer):
+        return False
+    outer = (min if low_end else max)(rows, key=lambda r: r.track_position)
+    if outer.is_shield:
+        return False
+    g = grid_stack.get_layer_grid(layer)
+    pat = g.global_pattern()
+    period = pat.unit_pitch() if pat.slots else 0.0
+    if period <= 0:
+        return False
+    eps = 1e-6
+    edge = outer.track_position + (-0.5 if low_end else 0.5) * outer.width
+    win = (edge - period, edge - eps) if low_end else (edge + eps,
+                                                       edge + period)
+    rails = grid_stack.preroutes(layer, win[0], win[1], s_lo, s_hi)
+    if not rails:
+        return False
+    pos = (max if low_end else min)(r.track_position for r in rails)
+    mid = 0.5 * (s_lo + s_hi)
+    lo, hi = (pos + eps, edge - eps) if low_end else (edge + eps, pos - eps)
+    if lo < hi and g.signal_tracks_in(mid, lo, hi):
+        return False                     # an empty signal slot intervenes
+    pieces = [r for r in rails if abs(r.track_position - pos) < eps]
+    if not buda.ndr_rail_credits(spec, pieces[0].label, pieces[0].slot_type):
+        return False
+    cov = s_lo                           # keepout-broken rail = no credit
+    for a, b in sorted((min(p.span_lo, p.span_hi),
+                        max(p.span_lo, p.span_hi)) for p in pieces):
+        if a > cov + eps:
+            return False
+        cov = max(cov, b)
+    return cov >= s_hi - eps
+
+
 def audit_ndr_dnuts(session, wrapper, index=None):
     """R9 violations for ONE governed wrapper against the placed detailed
     result.  Checks per governed segment (rows grouped by seg_idx):
@@ -686,19 +753,36 @@ def audit_ndr_dnuts(session, wrapper, index=None):
         if sel >= 0:
             nb_intended = max(nb_intended,
                               session._seg_member_bits(wrapper, sel, seg_idx))
-        layout = buda.ndr_run_layout(spec, nb_intended)
+        seg_lo = min(min(r.span_lo, r.span_hi) for r in rows)
+        seg_hi = max(max(r.span_lo, r.span_hi) for r in rows)
+        seg_layer = rows[0].layer
+        # R5a: a credit-enabled rule's END may be rail-credited — expected
+        # emission drops that end's 'S'.  _ndr_end_credit verifies the
+        # rail's identity + coverage, so a bit-at-the-end run with NO
+        # matching rail keeps the uncredited expectation and fails LOUD.
+        c_lo = _ndr_end_credit(spec, grid_stack, seg_layer, rows,
+                               seg_lo, seg_hi, True)
+        c_hi = _ndr_end_credit(spec, grid_stack, seg_layer, rows,
+                               seg_lo, seg_hi, False)
+        layout = buda.ndr_run_layout_credited(spec, nb_intended, c_lo, c_hi)
         exp_shields = layout.count("S")
+        credited = (" (%d end(s) rail-credited)" % (c_lo + c_hi)
+                    if (c_lo or c_hi) else "")
         if len(shields) != exp_shields:
             out.append(_NdrViolation(
                 "NDR_SHIELD", seg_idx, -1,
                 f"NDR_SHIELD: seg {seg_idx} rule '{spec.rule_name}' expects "
-                f"{exp_shields} shield wire(s) (net {spec.shield_net}) but "
-                f"{len(shields)} are placed — the bus is not shielded as "
-                f"declared"))
-        elif spec.shield_mode == 1 and exp_shields == 2:
+                f"{exp_shields} shield wire(s) (net {spec.shield_net})"
+                f"{credited} but {len(shields)} are placed — the bus is "
+                f"not shielded as declared"))
+        elif spec.shield_mode == 1:
+            # Flank-the-bus: each UNCREDITED end's outermost row must be a
+            # shield (a credited end's outermost row is a bit, guarded by
+            # the adjacent rail _ndr_end_credit verified).
             lo = min(rows, key=lambda r: r.track_position)
             hi = max(rows, key=lambda r: r.track_position)
-            if not (lo.is_shield and hi.is_shield):
+            if (not c_lo and not lo.is_shield) or \
+               (not c_hi and not hi.is_shield):
                 out.append(_NdrViolation(
                     "NDR_SHIELD", seg_idx, -1,
                     f"NDR_SHIELD: seg {seg_idx} rule '{spec.rule_name}' "
@@ -724,9 +808,7 @@ def audit_ndr_dnuts(session, wrapper, index=None):
         # Spacing: the run is exclusive — no foreign wire inside it.
         run_lo = min(r.track_position - r.width / 2.0 for r in rows)
         run_hi = max(r.track_position + r.width / 2.0 for r in rows)
-        s_lo = min(min(r.span_lo, r.span_hi) for r in rows)
-        s_hi = max(max(r.span_lo, r.span_hi) for r in rows)
-        layer = rows[0].layer
+        s_lo, s_hi, layer = seg_lo, seg_hi, seg_layer
         have_grid = grid_stack is not None and grid_stack.has_layer(layer)
         # An UNSHIELDED rule's layout reserves guard_slots SIGNAL slots
         # beyond the outermost wires too (the run's end guards) — the

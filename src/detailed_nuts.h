@@ -112,6 +112,18 @@ inline int bus_seg_demand(const BusSegment& bs) {
     return ndr_group_demand(bs.ndr, bus_seg_nbits(bs));
 }
 
+// MINIMUM possible demand under R5a crediting: a credit-enabled shielded
+// spec may satisfy both END shields with adjacent matching rails, saving
+// up to two SIGNAL slots.  Used only for the optimistic early admission
+// gate (a pool that can't host even the best case is honestly refused);
+// the seat search enforces the real per-seat credited demand.  Identity
+// for non-credit specs, so their gates are byte-identical.
+inline int bus_seg_min_demand(const BusSegment& bs) {
+    return bs.ndr.credit_shields
+        ? ndr_group_demand_credited(bs.ndr, bus_seg_nbits(bs), true, true)
+        : bus_seg_demand(bs);
+}
+
 // One bit-wire; output of stage 9 (kind NET in the placed-segment hierarchy
 // — see placed_segment.h; layer/span/track_position/width live on the base
 // with the same names).  Rows are emitted only for bits that actually got a

@@ -640,6 +640,7 @@ void bind_routing(py::module_& m) {
         .def_readwrite("shield_mode",  &NdrSpec::shield_mode)
         .def_readwrite("shield_per_n", &NdrSpec::shield_per_n)
         .def_readwrite("shield_net",   &NdrSpec::shield_net)
+        .def_readwrite("credit_shields", &NdrSpec::credit_shields)
         .def_readwrite("rule_name",    &NdrSpec::rule_name)
         .def("active",                 &NdrSpec::active);
     m.def("ndr_group_demand", &ndr_group_demand,
@@ -652,6 +653,16 @@ void bind_routing(py::module_& m) {
           "Shield net-identity predicate (R5a/R9): label electrically "
           "identical to the requested shield net (case-insensitive; "
           "GND/VSS/GROUND one family, VDD/VCC/POWER another)");
+    m.def("ndr_group_demand_credited", &ndr_group_demand_credited,
+          "R5a-credited group demand: base demand minus credited END "
+          "shields (c_lo/c_hi); identity for uncredited/unshielded specs");
+    m.def("ndr_run_layout_credited", &ndr_run_layout_credited,
+          "R5a-credited run layout: the base layout with credited end 'S' "
+          "dropped, lockstep with ndr_group_demand_credited");
+    m.def("ndr_rail_credits", &ndr_rail_credits,
+          "True when a pattern rail (label, slot type) satisfies the "
+          "rule's shield identity for R5a crediting — the ONE predicate "
+          "the DNUTS seat search and the R9 audit share");
 
     py::class_<BundleInput>(m, "BundleInput")
         .def(py::init<>())

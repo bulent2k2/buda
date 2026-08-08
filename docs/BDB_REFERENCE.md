@@ -168,7 +168,10 @@ and `bundle.ndr_rule` (the governing rule stamped per persisted bundle).
 rules + scopes (session-typed entries win, a previous BDB's restored entries
 drop), and `load_pipeline` VOIDs (LOUD, re-plan required) any restored plan
 whose governing rule changed — by name OR content — since the checkpoint
-(see docs/internal/ndr_architecture.md §4/§7).
+(see docs/internal/ndr_architecture.md §4/§7).  v22 added
+**`ndr_rule.credit`** (the R5a end-shield rail-crediting opt-in — pricing
+basis, so it joins the rule row and, when set, the `|c1` fingerprint
+suffix; pre-v22 rules migrate to 0, correct since they never credited).
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.
 

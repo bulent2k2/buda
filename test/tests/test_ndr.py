@@ -743,3 +743,188 @@ def test_r9_clock_preroute_inside_run_is_loud():
     out = _audited(s)
     assert "CLOCK pre-route" in out
     assert "VDD" not in out and "GND pre-route" not in out
+
+
+# ── R5a end-shield crediting (phase 2, opt-in `credit`) ────────────────────
+
+def test_credited_pair_is_lockstep():
+    # The credited variants must stay lockstep for every credit combination
+    # (the R4 no-drift property extended to R5a), and reduce exactly to the
+    # base pair for unshielded or uncredited shapes.
+    shapes = [_spec(mode=1), _spec(width=2, guard=1, mode=1),
+              _spec(width=2, mode=2), _spec(guard=1, mode=3, per_n=2)]
+    for s in shapes:
+        s.credit_shields = True
+        for nbits in (1, 2, 4, 8):
+            base = buda.ndr_group_demand(s, nbits)
+            for clo in (False, True):
+                for chi in (False, True):
+                    du = buda.ndr_group_demand_credited(s, nbits, clo, chi)
+                    lay = buda.ndr_run_layout_credited(s, nbits, clo, chi)
+                    assert len(lay) == du
+                    assert lay.count("B") == nbits
+                    assert du == base - clo - chi
+    g = _spec(guard=2)                    # unshielded: nothing to credit
+    assert (buda.ndr_group_demand_credited(g, 4, True, True)
+            == buda.ndr_group_demand(g, 4))
+    assert (buda.ndr_run_layout_credited(g, 4, True, True)
+            == buda.ndr_run_layout(g, 4))
+
+
+def test_rail_credits_predicate():
+    s = _spec(mode=1)                     # shield net defaults to GND
+    s.credit_shields = True
+    assert buda.ndr_rail_credits(s, "GND", "GROUND")
+    assert buda.ndr_rail_credits(s, "VSS", "GROUND")   # same supply family
+    assert buda.ndr_rail_credits(s, "", "GROUND")      # falls to slot type
+    assert not buda.ndr_rail_credits(s, "VDD", "POWER")  # POWER never GND
+    off = _spec(mode=1)                   # no credit opt-in -> never
+    assert not buda.ndr_rail_credits(off, "GND", "GROUND")
+    noshield = _spec(guard=1)             # nothing to credit against
+    noshield.credit_shields = True
+    assert not buda.ndr_rail_credits(noshield, "GND", "GROUND")
+
+
+def test_def_ndr_credit_token():
+    s = _bare_session()
+    out = _run(s, "def_ndr c shield bus net VSS credit")
+    assert "credit" in out
+    assert " credit," in _run(s, "dump_ndr")
+    with pytest.raises(SystemExit):       # credit needs a shield arrangement
+        _run(s, "def_ndr c2 width x2 credit")
+
+
+def _rail_pattern(*rail_defs, nsig=4):
+    """Pattern of one or two rails around nsig SIGNAL slots: [rail0, sigs]
+    or [rail0, sigs, rail1].  Rail width 2, signal width 1, spacing 1."""
+    slots = [buda.TrackSlot(type=rail_defs[0][0], label=rail_defs[0][1],
+                            width=2.0, space_after=1.0)]
+    slots += [buda.TrackSlot(type="SIGNAL", label="sig",
+                             width=1.0, space_after=1.0)] * nsig
+    for t, l in rail_defs[1:]:
+        slots.append(buda.TrackSlot(type=t, label=l,
+                                    width=2.0, space_after=1.0))
+    return buda.TrackPattern(origin=0.0, slots=slots)
+
+
+def _engine_run(pattern, spec, bit_width=4, interval_hi=28.0):
+    stack = buda.RoutingGridStack()
+    stack.define_layer(4, pattern, True)
+    seg = buda.BusSegment()
+    seg.bundle_id, seg.seg_idx, seg.layer = 1, 0, 4
+    seg.span_lo, seg.span_hi = 0.0, 100.0
+    seg.interval_lo, seg.interval_hi = 0.0, interval_hi
+    seg.bit_width = bit_width
+    seg.ndr = spec
+    return buda.DetailedNUTSEngine(stack).run([seg])
+
+
+def test_engine_credits_both_rail_flanked_ends():
+    # GND rail + 4 sigs per period: the first feasible seat starts rail-
+    # adjacent and ends rail-adjacent (the next period's rail), so BOTH end
+    # shields credit — 4 bits, ZERO emitted shields, demand 6 -> 4.
+    spec = _spec(mode=1)
+    spec.credit_shields = True
+    spec.rule_name = "c"
+    res = _engine_run(_rail_pattern(("GROUND", "GND")), spec,
+                      interval_hi=22.0)
+    bits = [r for r in res.net_segments if not r.is_shield]
+    shields = [r for r in res.net_segments if r.is_shield]
+    assert res.num_unplaced == 0
+    assert len(bits) == 4 and len(shields) == 0
+    assert sorted(round(b.track_position, 1) for b in bits) == [
+        3.5, 5.5, 7.5, 9.5]
+
+
+def test_engine_wrong_family_rail_never_credits():
+    # Same geometry but POWER rails against a GND shield spec: no credit,
+    # the full uncredited layout places (shields emitted, run straddles
+    # the rail as phase 1 allows).
+    spec = _spec(mode=1)
+    spec.credit_shields = True
+    spec.rule_name = "c"
+    res = _engine_run(_rail_pattern(("POWER", "VDD")), spec,
+                      interval_hi=22.0)
+    shields = [r for r in res.net_segments if r.is_shield]
+    assert res.num_unplaced == 0
+    assert sorted(round(x.track_position, 1) for x in shields) == [3.5, 16.5]
+
+
+def test_engine_credits_one_end_only():
+    # GND below the signal group, VDD above it: only the low end credits —
+    # one emitted shield, at the high end of the (rail-straddling) run.
+    spec = _spec(mode=1)
+    spec.credit_shields = True
+    spec.rule_name = "c"
+    res = _engine_run(_rail_pattern(("GROUND", "GND"), ("POWER", "VDD")),
+                      spec, interval_hi=28.0)
+    bits = [r for r in res.net_segments if not r.is_shield]
+    shields = [r for r in res.net_segments if r.is_shield]
+    assert res.num_unplaced == 0
+    assert len(bits) == 4 and len(shields) == 1
+    assert round(shields[0].track_position, 1) == 17.5
+    assert sorted(round(b.track_position, 1) for b in bits) == [
+        3.5, 5.5, 7.5, 9.5]
+
+
+def test_r5a_e2e_credit_flow_and_audit_agree():
+    # Whole-pipeline credit flow on the standard pattern (VDD and GND
+    # rails): wherever the seats land, the R9 audit derives the SAME
+    # credit decision from the placed geometry (the shared predicate), so
+    # the report is clean — the credit/audit-agreement property R5a pins.
+    s, out = _flow(["def_ndr clkc width x2 spacing x2 shield bus net GND "
+                    "credit",
+                    "set_ndr clk_ clkc"])
+    assert s.detailed_result.num_unplaced == 0
+    chk = _audited(s)
+    assert "NDR_" not in chk and "no violations" in chk
+
+
+def test_v22_fingerprint_credit_suffix():
+    # The credit flag is pricing basis (demand changes), so it joins the
+    # fingerprint — but ONLY when set, so v21 stamps of non-credit rules
+    # still compare equal (a resumed v21 checkpoint must not VOID on a
+    # fingerprint-format change).
+    s = _bare_session()
+    _run(s, "def_ndr a width x2")
+    _run(s, "def_ndr b shield bus net GND credit")
+    assert ndr_cmds.ndr_pricing_fp(s, "a") == "a|w2|g0|s0|p0|nGND|L"
+    assert ndr_cmds.ndr_pricing_fp(s, "b").endswith("|c1")
+
+
+def test_v22_credit_persists_and_restores(tmp_path):
+    s1 = _bare_session()
+    _run(s1, f"open_bdb {tmp_path}/c.bdb")
+    _run(s1, "def_ndr clkc shield bus net GND credit")
+    _run(s1, "set_ndr clk_ clkc")
+    del s1
+    s2 = _bare_session()
+    out = _run(s2, f"open_bdb {tmp_path}/c.bdb")
+    assert "restored 1 rule(s)" in out
+    assert s2._ndr_rules["clkc"]["credit"] == 1
+    assert " credit," in _run(s2, "dump_ndr")
+
+
+def test_v22_pre_v22_db_migrates(tmp_path):
+    # Construct a GENUINE v21 database (drop the credit column, stamp
+    # user_version=21) and reopen: the migration adds the column with the
+    # 0 default (pre-v22 rules never credited) and the table stays usable.
+    import sqlite3
+    path = str(tmp_path / "v21.bdb")
+    db = buda.BDB(path)
+    r = buda.NdrRuleRow()
+    r.name, r.width_x = "old", 2.0
+    db.set_ndr_rule(r)
+    del db
+    con = sqlite3.connect(path)
+    con.executescript("ALTER TABLE ndr_rule DROP COLUMN credit;"
+                      "PRAGMA user_version = 21;")
+    con.close()
+    db = buda.BDB(path)
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    rows = {x.name: x for x in db.ndr_rules()}
+    assert rows["old"].credit == 0
+    r2 = buda.NdrRuleRow()
+    r2.name, r2.credit = "new", 1
+    db.set_ndr_rule(r2)
+    assert {x.name: x.credit for x in db.ndr_rules()} == {"old": 0, "new": 1}
