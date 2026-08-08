@@ -24,8 +24,9 @@ cross-mixin helper calls resolve through the class as before.
 """
 import buda
 
-from .util import (UNIT_TRACKS_MAX, UNIT_TRACKS_MIN,
-                   unit_consistency_signals, unit_plausibility_faults)
+from .util import (UNIT_PITCH_UM_MAX, UNIT_PITCH_UM_MIN, UNIT_TRACKS_MAX,
+                   UNIT_TRACKS_MIN, unit_consistency_signals,
+                   unit_plausibility_faults)
 
 
 def _fmt_pull_opt(cs):
@@ -116,7 +117,12 @@ class ReportsMixin:
         ones that declare their patterns after planning (demo/comprehensive_
         demo.buda does).  A no-op with no grid: there is no second scale to
         disagree with."""
-        if self._unit_check == "off" or self._unit_check_done:
+        import os
+        mode = os.environ.get("BUDA_UNIT_CHECK", "").lower() or self._unit_check
+        if mode not in ("on", "warn", "off"):
+            mode = self._unit_check
+        measuring = bool(os.environ.get("BUDA_UNIT_SIGNAL"))
+        if self._unit_check_done or (mode == "off" and not measuring):
             return
         if self.routing_grid is None or self.fp is None:
             return
@@ -124,7 +130,25 @@ class ReportsMixin:
         if not signals:
             return
         self._unit_check_done = True
-        faults = unit_plausibility_faults(signals)
+        if measuring:
+            # The raw measurement, for re-calibrating the bounds against a
+            # corpus.  The bounds are only as good as the range they were set
+            # outside of, so the way to widen that range must stay in-tree —
+            # and it has to work with the check itself OFF, since a
+            # calibration sweep must not be stopped by the bounds it is
+            # measuring.
+            for lid, up, n in signals:
+                print(f"[UnitSignal] extent={extent:g} layer {lid} "
+                      f"unit_pitch={up:g} tracks_across={n:.6g}")
+        if mode == "off":
+            return
+        lu = 1.0
+        if self.bdb is not None:
+            try:
+                lu = float(self.bdb.import_scale())
+            except Exception:
+                lu = 1.0
+        faults = unit_plausibility_faults(signals, lu)
         if not faults:
             return
         lo, hi = UNIT_TRACKS_MIN, UNIT_TRACKS_MAX
@@ -133,14 +157,25 @@ class ReportsMixin:
                  f"different units.",
                  f"[UnitCheck]   design extent = {extent:g} layout units; "
                  f"plausible range is {lo:g}..{hi:g} tracks across."]
+        if any(f[3].startswith("pitch") for f in faults):
+            lines.append(
+                f"[UnitCheck]   import scale = {lu:g} layout units per micron, "
+                f"so a track pitch must land in "
+                f"{UNIT_PITCH_UM_MIN * lu:g}..{UNIT_PITCH_UM_MAX * lu:g} "
+                f"layout units to be a real metal pitch.")
+        _WHY = {"low": "too few tracks across",
+                "high": "too many tracks across",
+                "pitch_lo": "far too fine to be a real metal pitch",
+                "pitch_hi": "far too coarse to be a real metal pitch"}
         for lid, up, n, side in faults:
-            how = "too few" if side == "low" else "too many"
+            detail = (f"{up / lu:g} µm" if side.startswith("pitch")
+                      else f"{n:.3g} tracks across")
             lines.append(f"[UnitCheck]   layer {lid}: track pitch {up:g} → "
-                         f"{n:.3g} tracks across ({how})")
+                         f"{detail} ({_WHY[side]})")
         lines.append("[UnitCheck]   Fix the scale, or `set_unit_check warn`"
                      " / `off` if this design really is like this.")
         text = "\n".join(lines)
-        if self._unit_check == "warn":
+        if mode == "warn":
             print(text.replace("[UnitCheck]", "[UnitCheck] WARNING:", 1))
             return
         # The whole diagnostic goes in the EXCEPTION, not just in the log: a

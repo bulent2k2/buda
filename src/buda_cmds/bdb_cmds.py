@@ -153,6 +153,33 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     ndr_cmds.restore_ndr_from_bdb(session)
 
 
+def cmd_set_import_scale(session, cmd, args, cmd_line):
+    # Usage: set_import_scale micron|dbu|<layout units per micron>
+    # The ONE place a design decides what a layout unit is (Phase 1a,
+    # docs/internal/engine_units.md).  Declare it BEFORE import_def_lef.
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    if not args:
+        print(f"import_scale is {session.bdb.import_scale():g} "
+              f"layout units per micron")
+        return
+    val = args[0].lower()
+    if val in ("micron", "microns", "um"):
+        session.bdb.set_import_scale(1.0)
+        return
+    if val == "dbu":
+        # Resolved from the DEF's own `UNITS DISTANCE MICRONS` at import, so
+        # the script does not have to know the technology's DBU count — and
+        # cannot get it wrong.
+        session.bdb.set_import_scale_from_def_units()
+        return
+    try:
+        session.bdb.set_import_scale(float(args[0]))
+    except (ValueError, RuntimeError) as e:
+        print(f"Error: set_import_scale expects micron|dbu|<positive number>: "
+              f"{e}")
+
+
 def cmd_import_def_lef(session, cmd, args, cmd_line):
     # import_def_lef <def_path> <lef_path>
     if len(args) < 2:
@@ -1135,6 +1162,7 @@ COMMANDS = {
     "add_cell_pin": cmd_add_cell_pin,
     "def_gds_layer": cmd_def_gds_layer,
     "open_bdb": cmd_open_bdb,
+    "set_import_scale": cmd_set_import_scale,
     "import_def_lef": cmd_import_def_lef,
     "import_verilog": cmd_import_verilog,
     "import_gds": cmd_import_gds,

@@ -107,6 +107,32 @@ def test_export_reimport_is_identical(tmp_path):
     assert _snapshot(db2) == before
 
 
+def test_export_reimport_is_identical_at_a_non_default_scale(tmp_path):
+    # GDS carries its own DBU record, so the µm<->layout-unit conversion is a
+    # boundary just like DEF's.  A design whose coordinates are in DBU (import
+    # scale 2000) would otherwise export geometry 2000x too large — in a file
+    # that parses perfectly and looks like a valid layout.  The round-trip is
+    # what pins both directions: export divides by the scale, import
+    # multiplies by it, and the design must come back unchanged.
+    db = buda.BDB(str(tmp_path / "a.bdb"))
+    db.set_import_scale(2000.0)
+    db.import_gds(str(_hier_lib(tmp_path / "in.gds")), [63])
+    before = _snapshot(db)
+    db.export_gds(str(tmp_path / "out.gds"))
+    db2 = buda.BDB(str(tmp_path / "b.bdb"))
+    db2.set_import_scale(2000.0)
+    db2.import_gds(str(tmp_path / "out.gds"), [63])
+    assert _snapshot(db2) == before
+
+    # …and the scale really is doing something: at the default the SAME file
+    # imports 2000x smaller.
+    db3 = buda.BDB(str(tmp_path / "c.bdb"))
+    db3.import_gds(str(_hier_lib(tmp_path / "in2.gds")), [63])
+    c_um = sorted(db3.all_components(), key=lambda c: c.name)[0]
+    c_lu = sorted(db.all_components(), key=lambda c: c.name)[0]
+    assert abs(c_um.x2 * 2000.0 - c_lu.x2) < 1e-6
+
+
 def test_export_is_deterministic(tmp_path):
     db = buda.BDB(str(tmp_path / "a.bdb"))
     db.import_gds(str(_hier_lib(tmp_path / "in.gds")), [63])

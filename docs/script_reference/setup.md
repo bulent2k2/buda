@@ -630,9 +630,17 @@ and reports it as routable.
 The guard measures **tracks across the design** (`design extent / track
 pitch`) — a ratio of two layout-unit lengths, so it is identical under any
 *consistent* unit and off by the scale ratio under an inconsistent one — and
-stops the run outside `[4, 1e7]`. Both bounds sit far outside the measured
-corpus (24.4 … 797.2) and outside physical possibility (~1.2e6 for the widest
-reticle at the finest production pitch), so only a scale error reaches them.
+stops the run outside `[0.5, 1e7]`. Both bounds sit far outside the measured
+range (3.66 … 797.2) and outside physical possibility (~1.2e6 for the widest
+reticle at the finest production pitch).
+
+A ratio alone has a limit: a mis-scaled small design and a legitimate huge one
+read the same. So a design that **declared** an import scale
+([`set_import_scale`](../BDB_REFERENCE.md#set_import_scale)) has asserted that
+its units are physical, and gets a second, much sharper check — the track
+pitch in real microns (`unit_pitch / lu_per_um`) must be a pitch that could
+exist, `0.005 … 500 µm`. At the default scale that check is skipped: nobody
+claimed those numbers were physical.
 
 | Value | Behaviour |
 |---|---|

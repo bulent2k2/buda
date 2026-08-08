@@ -28,15 +28,37 @@ them just compares numbers.
 
 | Boundary | Direction | Conversion |
 |---|---|---|
-| `import_def_lef` — DEF `COMPONENTS`, `DIEAREA` | in | DEF integers are DBU; divided by `UNITS DISTANCE MICRONS` (`src/bdb.cpp`), giving µm |
-| `import_def_lef` — LEF `SIZE` / `RECT` | in | LEF is already µm; taken as-is |
-| `import_gds` / `export_gds` | in / out | GDS DBU ↔ µm via the file's `UNITS` record; export writes 1 nm DBU (`kDbuUm`, `src/gds_io.cpp`) |
+| `import_def_lef` — DEF `COMPONENTS`, `DIEAREA` | in | DEF integers are DBU; `dbu × scale / UNITS` (`src/bdb.cpp`) |
+| `import_def_lef` — LEF `SIZE` / `RECT` | in | LEF is already µm; `µm × scale` |
+| `import_gds` / `export_gds` | in / out | GDS DBU ↔ µm via the file's `UNITS` record, then × / ÷ scale; export writes 1 nm DBU (`kDbuUm`, `src/gds_io.cpp`) |
 | BDB tables | store | `REAL` columns, in layout units |
 | BDB → `Floorplan` | in | `int(round(...))` — the quantization point (`src/buda_session/hier.py`), ~59 sites across the Python layer |
 | `.buda` script | in | **every declared distance is already in layout units — no conversion at all** |
 
-So a run has exactly **one** scale decision, and it is made at import.  After
-that the layout unit is fixed and everything else must agree with it.
+So a run has exactly **one** scale decision, and it is made at import:
+
+```
+set_import_scale micron    # default — 1 layout unit = 1 µm (bit-identical)
+set_import_scale dbu       # 1 layout unit = 1 DEF database unit — EXACT
+set_import_scale 2000      # or an explicit factor
+```
+
+After that the layout unit is fixed and everything else must agree with it.
+
+**Why `dbu` is worth having.** At the default scale the engine's integer grid
+quantizes to 1 µm — ~2000 DBU on an advanced node, roughly 20–25 track
+pitches thrown away per coordinate.  That is what made real-PDK data
+unusable, and it was never an algorithm limitation: the algorithms do not know
+what a micron is.  In DBU mode the stored value *is* the integer the DEF wrote,
+and the ~59 `int(round(...))` conversions become exact.  A 10 mm die at
+2000 DBU/µm is 2×10⁷ layout units, comfortably inside int32.
+
+**Why the mode resolves to a number.**  `dbu` is resolved against the DEF
+being imported (its own `UNITS DISTANCE MICRONS`), so the script never has to
+know the technology's DBU count and cannot mis-state it.  What gets persisted
+is the resulting *number*, not the mode — persisting the mode would re-resolve
+it against whatever DEF is imported next, silently restating the stored
+coordinates in a different unit.
 
 ## 3. The sharp edge, and the guard
 
@@ -76,17 +98,43 @@ tracks_across = design_extent / layer_track_pitch
 
 a ratio of two layout-unit lengths — invariant under any *consistent* unit,
 and off by the scale ratio under an inconsistent one.  It fires outside
-`[4, 1e7]`:
+`[0.5, 1e7]`:
 
 | bound | why there |
 |---|---|
-| **min 4** | Under four tracks across the whole design there is nothing to route — no bus plus neighbours fits.  The corpus minimum is **24.4** (`flow/hbundles/05_stress_grid`, M7), 6× above. |
-| **max 1e7** | The widest reticle die (~33 mm) at the finest production metal pitch (~28 nm) is ~1.2e6 tracks across — the physical ceiling.  The bound is ~8× past it, and ~1.3e4× past the corpus maximum of **797.2** (`flow/chip/chip_topdown`, M2–M5). |
+| **min 0.5** | Half a track pitch: the design is smaller than one wire of a layer it claims to route on.  The smallest design in the tree is **3.66** (`flow/four_blocks`, M7 — a 150-unit toy on a 41-unit pitch), 7× above. |
+| **max 1e7** | The widest reticle die (~33 mm) at the finest production metal pitch (~28 nm) is ~1.2e6 tracks across — the physical ceiling.  The bound is ~8× past it, and ~1.3e4× past the tree's maximum of **797.2** (`flow/chip/chip_topdown`, M2–M5). |
+
+The first calibration set the minimum at 4, from the QoR corpus alone
+(minimum 24.4).  That broke six legitimate unit-test fixtures, which are
+*much* smaller than any corpus vehicle — a reminder that a bound is only as
+good as the population it was measured over, and that "the corpus" is not the
+same population as "everything the repo runs".
 
 Both bounds are far outside both the measured and the physical range on
 purpose: a guard that stops a legitimate run is worse than one that misses a
-subtle case.  A ~2000× DBU/µm mismatch moves the signal by 2000×, which
-clears them by orders of magnitude.
+subtle case.
+
+**What the ratio signal cannot do.**  A ~2000× mismatch multiplies it by
+2000× — but a mis-scaled *small* design and a legitimate *huge* one produce
+the same number, and the check has no way to tell them apart.  On the Phase-1
+regression fixture the mismatch reads 720 000 tracks across: nonsense, and
+comfortably inside the bounds.  No pure ratio can do better; without an
+absolute anchor there is nothing to compare against.
+
+**The anchor, when there is one.**  A design that *declared* an import scale
+has asserted that its layout units are physical, so `unit_pitch / lu_per_um`
+is a track pitch in real microns — and real metal pitches are bounded, from
+~20 nm at the finest production node to ~10–20 µm for top metal and
+redistribution.  A declared-scale design therefore gets a second, far sharper
+check: the pitch must land in **0.005 … 500 µm** (~10× outside the real range
+at both ends).  The fixture above fails it at 0.0005 µm — half a nanometre.
+
+At the default scale of 1.0 that check does not apply, and deliberately so:
+"microns" there is nominal.  Every corpus design would fail a physical pitch
+test, and rightly — nobody claimed those numbers were physical.  *Declaring*
+a scale is what turns the claim on.  Same principle as "no track pattern, no
+verdict": the guard judges only what the design actually asserted.
 
 The check runs **once per session**, at the first stage that has both a
 floorplan and a routing grid — `run_planner` for most flows, `run_nuts` for
@@ -102,10 +150,13 @@ set_unit_check warn    # report and continue
 set_unit_check off     # disable
 ```
 
-Calibrated 2026-08 over 12 flows spanning `demo/quickstart` (extent 1000) to
-`flow/chip/chip_topdown` (extent 14350); measurement path
-`BUDA_UNIT_SIGNAL=1`, predicate and bounds in `src/buda_session/util.py`,
-tests in `test/tests/test_unit_check.py`.
+Calibrated 2026-08 over the tree's flows, spanning `flow/four_blocks`
+(extent 150) to `flow/chip/chip_topdown` (extent 14350).  Measurement and
+predicate are the
+same code the verdict uses — `unit_consistency_signals` /
+`unit_plausibility_faults` in `src/buda_session/util.py` — so the number a
+user is shown is the number that was judged; tests in
+`test/tests/test_unit_check.py`.
 
 ## 4. Why this is the cheap fix
 
@@ -115,6 +166,9 @@ It is worth costing separately if this class of bug recurs.  Until then, the
 combination of *one* scale decision (§2), grid-derived geometry (§3a), and a
 ratio-based guard (§3b) buys most of the safety for a fraction of the churn.
 
-The remaining Phase 1 work — an explicit import scale factor so a real-PDK
-DEF can be read at 1 layout unit = 1 DBU with no quantization at all — is in
-[the plan](lefdef_interface_plan.md) §2.
+What Phase 1 did **not** do: the `1.5`-layout-units-per-bit width fallback
+still exists for designs with no track pattern, and a scaled import with a
+hand-written track pattern still needs the pattern scaled by hand.  §3a is
+what keeps the first from mattering on any design that *has* a pattern; §3b
+is what stops the second from passing silently.  Both are honest limits, not
+oversights — see [the plan](lefdef_interface_plan.md) §2.

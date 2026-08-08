@@ -68,14 +68,19 @@ def _run(tmp_path, text, name="t.buda"):
 
 # ── the predicate, without a session ───────────────────────────────────────
 
-def test_bounds_bracket_every_design_the_corpus_contains():
-    """Measured 2026-08 across 12 flows (`BUDA_UNIT_SIGNAL`): the corpus spans
-    24.4 (hbundles/05_stress_grid M7) to 797.2 (chip/chip_topdown M2).  The
-    bounds must sit outside that with room to spare, or the guard becomes a
-    tax on legitimate runs."""
-    assert UNIT_TRACKS_MIN < 24.0
+def test_bounds_bracket_every_design_the_tree_contains():
+    """Measured 2026-08 with `BUDA_UNIT_SIGNAL`: the tree's flows span 3.66
+    (flow/four_blocks M7, a 150-unit toy on a 41-unit pitch) to 797.2
+    (chip/chip_topdown M2).  The bounds must sit outside that with room to
+    spare, or the guard becomes a tax on legitimate runs.
+
+    The 3.66 end is the load-bearing one: the first calibration used the QoR
+    corpus alone (minimum 24.4), set the bound at 4, and broke six unit-test
+    fixtures — the corpus is not the same population as everything the repo
+    runs."""
+    assert UNIT_TRACKS_MIN < 3.6
     assert UNIT_TRACKS_MAX > 8.0e5      # past the widest reticle / finest pitch
-    assert not unit_plausibility_faults([(4, 18.0, 24.39), (5, 18.0, 797.22)])
+    assert not unit_plausibility_faults([(7, 41.0, 3.66), (5, 18.0, 797.22)])
 
 
 def test_predicate_names_the_side_it_fell_off():
@@ -83,6 +88,31 @@ def test_predicate_names_the_side_it_fell_off():
         [(4, 1e-3, 1e9), (5, 1e6, 0.01), (6, 18.0, 100.0)])
     assert [(lid, side) for lid, _up, _n, side in faults] == \
         [(4, "high"), (5, "low")]
+
+
+def test_the_physical_pitch_check_needs_a_declared_scale():
+    """The ratio cannot separate a mis-scaled small design from a legitimate
+    huge one — both read the same.  A DECLARED import scale supplies the
+    missing anchor: `unit_pitch / lu_per_um` is then a pitch in real microns.
+
+    But only a declaration licenses it.  At the default scale of 1.0 the
+    corpus's 18-unit pitches would be "18 µm", which is a fine number for a
+    synthetic design and an absurd one for real metal — judging it would fail
+    every flow in the tree over a claim nobody made."""
+    corpus_like = [(4, 18.0, 100.0)]
+    assert not unit_plausibility_faults(corpus_like)              # scale 1.0
+    assert not unit_plausibility_faults(corpus_like, 1.0)
+
+    # Declared 2000 lu/µm: an 18-unit pitch is 0.009 µm — fine (9 nm is below
+    # production but inside the deliberately generous bound), while the
+    # half-converted case (a micron-scale pattern against DBU coordinates) is
+    # 0.0005 µm and fails.
+    assert not unit_plausibility_faults([(4, 18.0, 4e4)], 2000.0)
+    faults = unit_plausibility_faults([(4, 1.0, 7.2e5)], 2000.0)
+    assert [f[3] for f in faults] == ["pitch_lo"]
+    # …and the mirror: a DBU-scale pattern against micron coordinates.
+    assert [f[3] for f in unit_plausibility_faults([(4, 2e6, 30.0)], 2000.0)] \
+        == ["pitch_hi"]
 
 
 # ── end to end ─────────────────────────────────────────────────────────────

@@ -289,20 +289,46 @@ def _mixin_validate_stage_entry(self, where):
 # because a guard that stops a legitimate run is worse than one that misses a
 # subtle case.  Two references fix them:
 #
-#   measured   the corpus (12 flows, 2026-08, `BUDA_UNIT_SIGNAL=1`) spans
-#              24.4 (flow/hbundles/05_stress_grid M7) to 797.2
-#              (flow/chip/chip_topdown M2-M5) tracks across.
+#   measured   the tree's flows (2026-08, `BUDA_UNIT_SIGNAL=1`) span 3.66
+#              (flow/four_blocks M7 — a 150-unit toy on a 41-unit pitch) to
+#              797.2 (flow/chip/chip_topdown M2-M5) tracks across.  The
+#              small end matters: the first calibration sampled only the QoR
+#              corpus, whose minimum is 24.4, and a bound set from that broke
+#              six legitimate unit-test fixtures.
 #   physical   the widest reticle die (~33 mm) at the finest production metal
 #              pitch (~28 nm) is ~1.2e6 tracks across — the physical ceiling.
-#              At the other end, a design under ~4 tracks across cannot host a
-#              single bus plus its neighbours: there is nothing to route.
+#              At the other end, a design under HALF a track pitch across is
+#              smaller than one wire of a layer it claims to route on.
 #
 # So MAX is ~8x past the physical ceiling and ~1e4x past anything measured;
-# MIN is 6x below the smallest measured design.  Only a scale ERROR lands out
-# there.  `set_unit_check off|warn` is the escape for the case we did not
-# foresee — the fault text names it.
-UNIT_TRACKS_MIN = 4.0
+# MIN is ~7x below the smallest measured design.  `set_unit_check off|warn`
+# is the escape for the case we did not foresee — the fault text names it.
+UNIT_TRACKS_MIN = 0.5
 UNIT_TRACKS_MAX = 1.0e7
+
+# The ratio signal has a HARD limit, and it is worth being explicit about it:
+# a mis-scaled small design and a legitimate huge one produce the same number.
+# A 2000x mismatch on a 720000-unit design reads 720000 tracks across — inside
+# the physical ceiling, so the ratio check passes it.  No ratio can do better:
+# without an absolute anchor there is nothing to compare against.
+#
+# There IS an anchor, but only sometimes.  A design that DECLARED an import
+# scale (`set_import_scale`) has asserted that its layout units are physical:
+# `unit_pitch / lu_per_um` is then a track pitch in real microns, and real
+# metal pitches are bounded — roughly 20 nm at the finest production node up
+# to ~10-20 µm for top-metal/redistribution.  So a declared-scale design gets
+# a second, much sharper check.
+#
+# At the DEFAULT scale (1.0) it does not apply: "microns" there is nominal —
+# every corpus design would fail a physical pitch test, and rightly, because
+# nobody claimed those numbers were physical.  Declaring a scale is what turns
+# the claim on.  Same principle as "no track pattern, no verdict": we judge
+# only what the design actually asserted.
+#
+# Bounds ~10x outside the real range at both ends, for the same reason as
+# above: a guard that stops a legitimate run is worse than one that misses.
+UNIT_PITCH_UM_MIN = 0.005      # 5 nm — an order of magnitude below any node
+UNIT_PITCH_UM_MAX = 500.0      # 0.5 mm — far past any redistribution layer
 
 
 def unit_consistency_signals(fp, routing_grid, max_layer_id=32):
@@ -358,14 +384,27 @@ def min_bit_pitch(session, no_pattern=None):
         else no_pattern
 
 
-def unit_plausibility_faults(signals):
+def unit_plausibility_faults(signals, lu_per_um=1.0):
     """The subset of `unit_consistency_signals` rows outside the bounds, each
-    with the side it fell off: [(layer_id, unit_pitch, tracks, 'low'|'high')].
+    with why it failed:
+    `[(layer_id, unit_pitch, tracks, 'low'|'high'|'pitch_lo'|'pitch_hi')]`.
+
+    `lu_per_um` is the design's declared import scale; at the default 1.0 the
+    physical pitch check is skipped (nothing claimed those units were real).
 
     Separated from the measurement so the predicate is testable without a
     session, and from the reporting so one verdict drives both."""
     faults = []
+    declared = lu_per_um and lu_per_um > 0.0 and lu_per_um != 1.0
     for lid, up, n in signals:
+        if declared:
+            pitch_um = up / lu_per_um
+            if pitch_um < UNIT_PITCH_UM_MIN:
+                faults.append((lid, up, n, "pitch_lo"))
+                continue
+            if pitch_um > UNIT_PITCH_UM_MAX:
+                faults.append((lid, up, n, "pitch_hi"))
+                continue
         if n < UNIT_TRACKS_MIN:
             faults.append((lid, up, n, "low"))
         elif n > UNIT_TRACKS_MAX:
