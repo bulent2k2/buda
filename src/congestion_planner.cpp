@@ -1959,10 +1959,34 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     auto h_layers_rev = h_layers; std::reverse(h_layers_rev.begin(), h_layers_rev.end());
     auto v_layers_rev = v_layers; std::reverse(v_layers_rev.begin(), v_layers_rev.end());
 
-    // Candidate indices to evaluate (see collect_cand_indices_), optionally
-    // restricted by the caller's mask (the ladder's footprint pruning — null
-    // everywhere else, byte-identical).
-    std::vector<int> cand_indices = collect_cand_indices_(bw);
+    // Candidate indices to evaluate.  A GROUP pin (pinned_group) restricts the
+    // search to a super-candidate's members; a SINGLE pin to one index; else the
+    // full sweep.  With no group pin this reproduces the historical
+    // [ci_lo, ci_hi) range exactly, so planning is byte-identical.  Kept INLINE
+    // (not via collect_cand_indices_) so the hot null-mask path — every
+    // optimize_topologies scoring call — is byte-for-byte identical to main;
+    // the ladder's footprint pass uses collect_cand_indices_, which mirrors it.
+    std::vector<int> cand_indices;
+    for (int ci : bw.input.pinned_group)
+        if (ci >= 0 && ci < (int)bw.input.candidates.size())
+            cand_indices.push_back(ci);
+    if (cand_indices.empty()) {
+        // Guard the single-pin path exactly as the pinned_group path above:
+        // an out-of-range selected_topology_index (its default is -1, or a stale
+        // pin after the pool shrank) must not index candidates[] out of bounds.
+        // An incoherent pin is treated as "not usefully pinned" → full sweep,
+        // turning a SIGSEGV into well-defined behavior (issue #454). The
+        // supported CLI never hits this (select_topology sets the flag AND a
+        // valid index together); the pybind fields are independently writable.
+        const int n = (int)bw.input.candidates.size();
+        const int sel = bw.plan.selected_topology_index;
+        const bool valid_pin = bw.input.topology_pinned && sel >= 0 && sel < n;
+        int ci_lo = valid_pin ? sel     : 0;
+        int ci_hi = valid_pin ? sel + 1 : n;
+        for (int ci = ci_lo; ci < ci_hi; ++ci) cand_indices.push_back(ci);
+    }
+    // Mask filter (the ladder's footprint pruning); null everywhere else, so
+    // this is a single never-taken branch on the hot path.
     if (cand_mask) {
         std::vector<int> kept;
         kept.reserve(cand_indices.size());
