@@ -24,6 +24,9 @@ cross-mixin helper calls resolve through the class as before.
 """
 import buda
 
+from .util import (UNIT_TRACKS_MAX, UNIT_TRACKS_MIN,
+                   unit_consistency_signals, unit_plausibility_faults)
+
 
 def _fmt_pull_opt(cs):
     """The anchor-interval pull optimum for the pull display (#523/#539): the
@@ -94,6 +97,58 @@ class _IntrinsicCost:
 
 
 class ReportsMixin:
+
+    # ── unit-plausibility guard (Phase 1d) ─────────────────────────────────
+    def _check_unit_plausibility(self, stage):
+        """Stop a run whose block coordinates and track patterns are on
+        different scales.
+
+        The engine is unit-agnostic, so such a mix does not crash — it
+        produces a plan in which every bus reserves a wrong fraction of the
+        space it needs, and reports it as feasible.  `tracks across the
+        design` (extent / track pitch) is a ratio of two layout-unit lengths:
+        invariant under any CONSISTENT unit, and off by the scale ratio under
+        an inconsistent one.  See `unit_plausibility_faults` for the bounds
+        and how they were fixed.
+
+        Runs once per session, at the first stage that has both a floorplan
+        and a routing grid — `run_planner` for most flows, `run_nuts` for the
+        ones that declare their patterns after planning (demo/comprehensive_
+        demo.buda does).  A no-op with no grid: there is no second scale to
+        disagree with."""
+        if self._unit_check == "off" or self._unit_check_done:
+            return
+        if self.routing_grid is None or self.fp is None:
+            return
+        signals, extent = unit_consistency_signals(self.fp, self.routing_grid)
+        if not signals:
+            return
+        self._unit_check_done = True
+        faults = unit_plausibility_faults(signals)
+        if not faults:
+            return
+        lo, hi = UNIT_TRACKS_MIN, UNIT_TRACKS_MAX
+        lines = [f"[UnitCheck] {stage}: implausible design scale — the block "
+                 f"coordinates and the track patterns look like they are in "
+                 f"different units.",
+                 f"[UnitCheck]   design extent = {extent:g} layout units; "
+                 f"plausible range is {lo:g}..{hi:g} tracks across."]
+        for lid, up, n, side in faults:
+            how = "too few" if side == "low" else "too many"
+            lines.append(f"[UnitCheck]   layer {lid}: track pitch {up:g} → "
+                         f"{n:.3g} tracks across ({how})")
+        lines.append("[UnitCheck]   Fix the scale, or `set_unit_check warn`"
+                     " / `off` if this design really is like this.")
+        text = "\n".join(lines)
+        if self._unit_check == "warn":
+            print(text.replace("[UnitCheck]", "[UnitCheck] WARNING:", 1))
+            return
+        # The whole diagnostic goes in the EXCEPTION, not just in the log: a
+        # command that raises has its captured output written to the flow log
+        # and NOT echoed to the terminal, so a stop whose reason lives only in
+        # a file is a stop the user cannot act on.
+        print(text)                      # for the flow-log record
+        raise ValueError("\n" + text)
 
     # ── debug cost inspection (topology explorer `debug` view) ─────────────
     def _candidate_costs(self, w):

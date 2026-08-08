@@ -228,6 +228,9 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._script_stack = []      # stack of absolute paths of sourced scripts
         self.script_path = None      # set when a .buda script is sourced
         self.routing_grid = None     # RoutingGridStack (stage 8)
+        # Unit-plausibility guard (Phase 1d): 'on' (hard error) | 'warn' | 'off'
+        self._unit_check = "on"
+        self._unit_check_done = False   # report once per session, not per stage
         self.detailed_result = None  # DetailedNUTSResult (stage 9)
         self._dogleg_originals = {}  # bid -> pre-split selected_topology_index (restored on re-plan)
         self._dogleg_slot = {}       # bid -> appended candidate index holding the split topology

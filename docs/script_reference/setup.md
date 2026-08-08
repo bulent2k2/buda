@@ -1,6 +1,6 @@
 # BUDA Script Reference — Setup commands
 
-Technology, floorplan, netlist, and routing-policy declarations that precede the pipeline stages: `def_layer`, `add_block`, `add_keepout`, `add_net`, `add_bus`, `corner_margin`, `detour_channel`, `set_min_stub_length[_dir|_layer]`, `set_feedthru`, `set_track_pitch`.
+Technology, floorplan, netlist, and routing-policy declarations that precede the pipeline stages: `def_layer`, `add_block`, `add_keepout`, `add_net`, `add_bus`, `corner_margin`, `detour_channel`, `set_min_stub_length[_dir|_layer]`, `set_feedthru`, `set_track_pitch`, `set_unit_check`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -567,7 +567,7 @@ set_feedthru * * on         # global default on
 ### `set_track_pitch`
 
 ```
-set_track_pitch <pitch>
+set_track_pitch <pitch>|auto
 ```
 
 Declare the inter-bus gap that `run_planner` should reserve in its band
@@ -580,6 +580,7 @@ required inter-bus gap beside the bus.
 | Argument | Type | Description |
 |---|---|---|
 | `pitch` | float | Minimum perpendicular gap between the upper edge of one bus and the lower edge of the next, in layout units. Default `1.0`. |
+| `auto` | keyword | **Derive** the gap from the routing grid instead: one signal-track pitch on the densest pattern layer (`min` over layers of `unit_pitch / n_signal_slots`). Requires at least one `def_track_pattern`; errors otherwise rather than falling back to the literal it replaces. |
 
 **Behaviour:**
 - After this command, subsequent `run_planner` calls reserve an extra `pitch`
@@ -595,6 +596,60 @@ required inter-bus gap beside the bus.
 set_track_pitch 2.0    # 2-unit gap between buses
 run_planner 5          # plans with 2-unit pitch baked in
 run_nuts               # reuses 2.0 automatically — no need to pass it again
+```
+
+**Why `auto` exists, and why it is not the default.** The default `1.0` is the
+one physical quantity the grid does not already supply — bus width is
+grid-derived (`LayerStack::eff_bus_width` returns `bits × bit_pitch` whenever
+the layer has a pattern), but this gap is a literal, so it silently means
+“one micron” on a micron design and “one DBU” on a DBU one. `auto` closes that.
+It is opt-in because a derived gap is a *larger* reservation on every design
+that has patterns — a QoR change, not a unit fix — and this repo measures
+before it defaults. See [the coordinate contract](../internal/engine_units.md).
+
+---
+
+### `set_unit_check`
+
+```
+set_unit_check [on|warn|off]
+```
+
+Control the **unit-plausibility guard**. With no argument, print the current
+setting.
+
+Every distance in BUDA — block coordinates, track widths, pitches, margins —
+is in *layout units*, and the engine never asks what a layout unit is (see
+[the coordinate contract](../internal/engine_units.md)). That is what lets a
+design be imported at any scale, but it also means nothing stops a design
+from **mixing** scales: blocks imported in DBU against a track pattern
+declared in microns, say. That does not crash and does not look wrong — it
+produces a plan in which every bus reserves a fraction of the space it needs
+and reports it as routable.
+
+The guard measures **tracks across the design** (`design extent / track
+pitch`) — a ratio of two layout-unit lengths, so it is identical under any
+*consistent* unit and off by the scale ratio under an inconsistent one — and
+stops the run outside `[4, 1e7]`. Both bounds sit far outside the measured
+corpus (24.4 … 797.2) and outside physical possibility (~1.2e6 for the widest
+reticle at the finest production pitch), so only a scale error reaches them.
+
+| Value | Behaviour |
+|---|---|
+| `on` | **Default.** Report the offending layers and stop the run. |
+| `warn` | Report and continue. |
+| `off` | Do not check. |
+
+**Behaviour:**
+- Checked **once per session**, at the first stage that has both a floorplan
+  and a routing grid — `run_planner` for most flows, `run_nuts` for flows that
+  declare their track patterns after planning.
+- A design with **no track pattern** is never judged: there is no second scale
+  to disagree with.
+
+**Example:**
+```buda
+set_unit_check warn    # this design really is 12 tracks across; just tell me
 ```
 
 ---

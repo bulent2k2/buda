@@ -268,3 +268,106 @@ def _mixin_validate_stage_entry(self, where):
     if bad:
         raise RuntimeError("wrapper invariant violation(s):\n" +
                            "\n".join(bad))
+
+
+# ── Unit consistency (Phase 1, docs/internal/lefdef_interface_plan.md) ──────
+# The engine is UNIT-AGNOSTIC: `Point`/`Rect` are plain ints and nothing in
+# topology/nuts/congestion_planner/routing_grid claims they are microns.  That
+# is what makes a DBU-exact import cheap — but it also means NOTHING stops a
+# design from mixing scales: block coordinates imported at one scale and a
+# track pattern hand-declared at another.  The result is not a crash; it is a
+# silently optimistic plan (buses reserving a fraction of the space they need)
+# that looks feasible and means nothing.
+#
+# The crisp signal is TRACKS ACROSS THE DESIGN: the design's extent divided by
+# a layer's track pitch.  It is a pure RATIO of two engine-unit lengths, so it
+# is invariant under any consistent choice of unit — which is exactly why it
+# detects an INCONSISTENT one.  A scale mismatch moves it by the scale ratio
+# (~2000x for DBU-vs-micron), orders of magnitude outside anything buildable.
+#
+# The bounds below are deliberately far outside BOTH ends of the real range,
+# because a guard that stops a legitimate run is worse than one that misses a
+# subtle case.  Two references fix them:
+#
+#   measured   the corpus (12 flows, 2026-08, `BUDA_UNIT_SIGNAL=1`) spans
+#              24.4 (flow/hbundles/05_stress_grid M7) to 797.2
+#              (flow/chip/chip_topdown M2-M5) tracks across.
+#   physical   the widest reticle die (~33 mm) at the finest production metal
+#              pitch (~28 nm) is ~1.2e6 tracks across — the physical ceiling.
+#              At the other end, a design under ~4 tracks across cannot host a
+#              single bus plus its neighbours: there is nothing to route.
+#
+# So MAX is ~8x past the physical ceiling and ~1e4x past anything measured;
+# MIN is 6x below the smallest measured design.  Only a scale ERROR lands out
+# there.  `set_unit_check off|warn` is the escape for the case we did not
+# foresee — the fault text names it.
+UNIT_TRACKS_MIN = 4.0
+UNIT_TRACKS_MAX = 1.0e7
+
+
+def unit_consistency_signals(fp, routing_grid, max_layer_id=32):
+    """Return ([(layer_id, unit_pitch, tracks_across_extent)], extent).
+
+    Pure read-only measurement, shared by the reporting and the guard so the
+    number a user is shown is the number that was judged."""
+    blocks = list(fp.get_all_blocks())   # (name, Rect) pairs
+    if not blocks:
+        return [], 0.0
+    xs1 = []; xs2 = []; ys1 = []; ys2 = []
+    for _name, b in blocks:
+        xs1.append(b.x1); xs2.append(b.x2); ys1.append(b.y1); ys2.append(b.y2)
+    extent = float(max(max(xs2) - min(xs1), max(ys2) - min(ys1)))
+    out = []
+    for lid in range(1, max_layer_id + 1):
+        try:
+            if not routing_grid.has_layer(lid):
+                continue
+            up = routing_grid.get_layer_grid(lid).global_pattern().unit_pitch()
+        except Exception:
+            continue
+        if up and up > 0.0:
+            out.append((lid, float(up), extent / float(up)))
+    return out, extent
+
+
+def min_bit_pitch(session, no_pattern=None):
+    """Smallest per-bit pitch over all pattern layers (the densest layer a
+    stub could land on) — eff_bus_width(1, 0.0, lid) is bit_pitch on a
+    pattern layer and 0.0 otherwise.
+
+    With no pattern layer at all there is no grid to derive from; the caller
+    says what that means.  `no_pattern=None` (the default) falls back to the
+    NUTS track pitch, which is what the bit-cap callers want — an approximate
+    length scale beats refusing to cap.  `set_track_pitch auto` passes 0.0
+    instead, because there the fallback would be the very literal it exists
+    to replace, returned as if it had been derived.
+
+    The grid-derived length scale: `set_max_bundle_bits auto` uses it to ask
+    how many bits fit a block face, and `set_track_pitch auto` to size the
+    inter-bus gap.  Shared here so both mean the same thing."""
+    import buda
+    pitches = []
+    for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL):
+        for lid in session.layers.get_layer_ids_by_dir(d):
+            p = session.layers.eff_bus_width(1, 0.0, lid)
+            if p > 0:
+                pitches.append(p)
+    if pitches:
+        return min(pitches)
+    return float(session._nuts_pitch or 1.0) if no_pattern is None \
+        else no_pattern
+
+
+def unit_plausibility_faults(signals):
+    """The subset of `unit_consistency_signals` rows outside the bounds, each
+    with the side it fell off: [(layer_id, unit_pitch, tracks, 'low'|'high')].
+
+    Separated from the measurement so the predicate is testable without a
+    session, and from the reporting so one verdict drives both."""
+    faults = []
+    for lid, up, n in signals:
+        if n < UNIT_TRACKS_MIN:
+            faults.append((lid, up, n, "low"))
+        elif n > UNIT_TRACKS_MAX:
+            faults.append((lid, up, n, "high"))
+    return faults

@@ -24,6 +24,8 @@ import buda
 import sys
 import re
 
+from buda_session.util import min_bit_pitch
+
 from ._options import reject_unknown_options, require_int
 
 _ADD_BLOCK_USAGE = (
@@ -489,16 +491,55 @@ def cmd_def_layer(session, cmd, args, cmd_line):
 
 
 def cmd_set_track_pitch(session, cmd, args, cmd_line):
-    # Usage: set_track_pitch <pitch>
+    # Usage: set_track_pitch <pitch>|auto
     # Declare the inter-bus pitch BEFORE run_planner so its band
     # reservations (Gap 1) match the run_nuts that packs the tracks.
     # run_nuts with no argument reuses this value.
+    #
+    # `auto` (Phase 1b, docs/internal/engine_units.md) DERIVES the gap from
+    # the routing grid — one signal-track pitch on the densest pattern layer
+    # — instead of the literal default 1.0.  The literal is the one physical
+    # default the grid does not already supply (bus width is grid-derived via
+    # LayerStack::eff_bus_width), so it is the one that silently means "one
+    # micron" on a micron design and "one DBU" on a DBU one.  Opt-in, not a
+    # new default: a derived gap is a different (larger) reservation on every
+    # design that has patterns, which is a QoR change, not a unit fix — it has
+    # to be measured before it can be defaulted, the way every other planner
+    # knob in this repo was.
     if not args:
-        print("Error: set_track_pitch requires a pitch value"); return
+        print("Error: set_track_pitch requires a pitch value (or `auto`)")
+        return
+    if args[0].lower() == "auto":
+        pitch = min_bit_pitch(session, no_pattern=0.0)
+        if pitch <= 0.0:
+            print("Error: set_track_pitch auto needs a track pattern — "
+                  "declare def_track_pattern first, or give an explicit pitch")
+            return
+        session._nuts_pitch = pitch
+        print(f"[Setup] set_track_pitch auto → {pitch:g} layout units "
+              f"(one signal-track pitch on the densest pattern layer)")
+        return
     session._nuts_pitch = float(args[0])
 
 
+def cmd_set_unit_check(session, cmd, args, cmd_line):
+    # Usage: set_unit_check [on|warn|off]
+    # The unit-plausibility guard (Phase 1d): `on` (default) STOPS a run whose
+    # block coordinates and track patterns are on different scales, `warn`
+    # reports and continues, `off` disables the check.  See
+    # docs/internal/engine_units.md.
+    if not args:
+        print(f"unit_check is {session._unit_check}")
+        return
+    val = args[0].lower()
+    if val not in ("on", "warn", "off"):
+        print(f"Error: set_unit_check expects on|warn|off, got {args[0]!r}")
+        return
+    session._unit_check = val
+
+
 COMMANDS = {
+    "set_unit_check": cmd_set_unit_check,
     "add_block": cmd_add_block,
     "corner_margin": cmd_corner_margin,
     "set_min_stub_length": cmd_set_min_stub_length,

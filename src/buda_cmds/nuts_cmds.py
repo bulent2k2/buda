@@ -49,6 +49,10 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
               "generate_topologies, and run_planner first.")
         return
     session._validate_stage_entry("run_nuts")
+    # Phase 1d: the second hook for the unit-plausibility guard — some flows
+    # declare their track patterns AFTER run_planner, so plan entry is not a
+    # complete gate.  Reports once per session either way.
+    session._check_unit_plausibility("run_nuts")
     if not any(0 <= w.plan.selected_topology_index < len(w.input.candidates)
                for w in session.bundles):
         print("Warning: run_nuts found no selected topology to place — run "

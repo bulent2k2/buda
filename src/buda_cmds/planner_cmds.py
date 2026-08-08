@@ -66,6 +66,11 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # post-processing within the current cycle, not a new one, and does
         # not clear (Codex P2 on #571).
         session._healers_ran_cycle = False
+        # Phase 1d: stop a run whose blocks and track patterns are on
+        # different scales, before it produces a plausible-looking plan.
+        # A no-op for a flow that declares its patterns later — `run_nuts`
+        # is the second hook, and the check reports once either way.
+        session._check_unit_plausibility("run_planner")
     if args and args[0] == "post_nuts":
         # Stage 4c: post-NUTS stub layer reassignment.
         # Syntax: post_nuts [V [short [long]]] [H [short [long]]]
