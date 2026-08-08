@@ -415,7 +415,7 @@ solid and the two cheapest ideas were dead.  What remained, in order of
 appeal: (a) make the per-visit `band_cost` cheaper or exploit that most
 bands are EMPTY; (b) revive the pruning soundly; (c) accept the cost.
 
-### B1 pruning is a DEAD END — both levers inert once correct (PR #634, closed)
+### B1 disjoint-feasibility pruning inert once correct (PR #634, closed)
 
 Approach (b) was attempted and **closed unmerged**: pruning the victim
 ladder is admissible but INERT on the flows B1 targets.  The reasoning
@@ -453,13 +453,37 @@ not "blockers-locked" hopeless.  Shelved on `claude/b1-ladder-floor-gate`;
 the correct decoupled/window prune is on `claude/b1-ladder-decoupled-prune`
 (both closed/unmerged, kept for reference).
 
-**Conclusion: the victim-ladder cost is irreducible via candidate
-pruning on this corpus.**  The candidates genuinely have
-`kBalance`-dependent feasibility.  The only remaining lever is approach
-(a) — make the per-candidate SCORING cheaper (a sparse/empty-band-aware
-`band_cost`), speeding the candidates the ladder must still fully score.
-That is a larger effort on the planner's decision surface and needs the
-decision-line + corpus gate this arc established.
+**Conclusion (scoped to what was measured): the
+DISJOINT-FEASIBILITY-UNCHANGED prune is inert on this corpus.**  That
+prune reasons "usage on this candidate's bands is unchanged by a
+disjoint rip, so its feasibility is unchanged" — valid only for
+choice-independent candidates, and once the coupled/window-sensitive
+ones are excluded nothing on the chip flows remains to prune.  This does
+NOT prove all candidate pruning is hopeless (thanks to Codex on #635 for
+the scoping catch).  Two untested levers remain:
+
+- **(b′) the per-candidate overflow-infeasibility certificate** (lines
+  above): prune a candidate when some segment has NO non-overflowing
+  layer under the EMPTY overlay at the post-rip usage.  This is a
+  POSITIVE infeasibility test, monotone in usage and quantified over ALL
+  layers, so it is sound for EVERY candidate — coupled and
+  window-sensitive included — unlike the disjoint prune.  It prunes a
+  DIFFERENT set (the overflow-certified candidates, a subset of the
+  base-infeasible ones that the window-sensitivity exclusion discarded
+  wholesale), so the measured `pruned=0` says nothing about it.  Its
+  win is unmeasured: the certificate costs ~half a scoring per candidate
+  (the overflow existence check, no cost terms / no overlay commit) and
+  wins only if enough candidates are overflow-certified per trial; the
+  `disjoint ∩ base-certified` subset is prunable for free (usage
+  unchanged, certified ⇒ still certified), the rest needs a cheap
+  per-victim re-check.  This is the natural next attempt.
+- **(a) cheaper per-candidate SCORING** — a sparse/empty-band-aware
+  `band_cost` — which speeds the candidates any prune must still score.
+
+Both touch the planner's decision surface and need the decision-line +
+corpus gate this arc established.  What IS established: the "usage
+unchanged" prune is a dead end, and a green corpus never certifies a
+`kBalance`-dependent prune sound.
 
 `[ReplanProf]` (env `BUDA_REPLAN_PROF=1`) stays in as the instrument
 that produced all of the above — per call it reports the recharge /
