@@ -158,7 +158,11 @@ def _wirelengths(s):
     dr = getattr(s, "detailed_result", None)
     awl = (round(sum(_seg_wl(x) for x in nr.segments if getattr(x, "placed", True)))
            if nr is not None else None)
-    dwl = (round(sum(_seg_wl(x) for x in dr.net_segments if getattr(x, "placed", True)))
+    # NDR shield wires are real metal but not SIGNAL wirelength (R11) —
+    # excluded so a rule-governed flow's detailed WL stays comparable.
+    dwl = (round(sum(_seg_wl(x) for x in dr.net_segments
+                     if getattr(x, "placed", True)
+                     and not getattr(x, "is_shield", False)))
            if dr is not None else None)
     return awl, dwl
 

@@ -20,6 +20,7 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include "ndr.h"
 #include "nuts.h"          // BundleWrapper / NUTSResult (make_bus_segments)
 #include "placed_segment.h"
 #include "routing_grid.h"
@@ -81,6 +82,11 @@ struct BusSegment {
     // and this must police exactly what that check requires.
     std::vector<std::pair<double,double>> passthru_spans;
 
+    // Non-default rule for this bundle's bits (phase 1: rule-uniform per
+    // bundle; inactive = byte-identical).  Drives the k-slot/guard/shield
+    // placement branch in place_by_layer — see ndr.h.
+    NdrSpec     ndr;
+
     // Abstract NUTS track_position used as anchor for Option B ordering; NaN = unset (fallback)
     double      abstract_pos      = std::numeric_limits<double>::quiet_NaN();
 
@@ -98,6 +104,14 @@ inline int bus_seg_nbits(const BusSegment& bs) {
     return bs.bit_list.empty() ? bs.bit_width : (int)bs.bit_list.size();
 }
 
+// Track DEMAND of a BusSegment: member bits through the NDR group
+// conversion (ndr.h) — the same arithmetic the planner charged, so
+// admission and charging cannot disagree (R4).  Identity for un-governed
+// segments, so every default-path comparison is byte-identical.
+inline int bus_seg_demand(const BusSegment& bs) {
+    return ndr_group_demand(bs.ndr, bus_seg_nbits(bs));
+}
+
 // One bit-wire; output of stage 9 (kind NET in the placed-segment hierarchy
 // — see placed_segment.h; layer/span/track_position/width live on the base
 // with the same names).  Rows are emitted only for bits that actually got a
@@ -108,6 +122,13 @@ struct NetSegment : PlacedSegmentBase {
     int    bundle_id      = 0;
     int    seg_idx        = 0;
     int    bit_index      = 0;
+    // NDR shield wire (phase 1): a first-class placed wire carrying the
+    // rule's shield net, NOT a signal bit — bit_index is a NEGATIVE
+    // per-segment shield ordinal (-1, -2, …) so it can never pair with a
+    // signal bit in the via/span-follow machinery, and every net-identity
+    // consumer (persistence, viz labels, WL reporting) must gate on this
+    // flag before indexing net_names.
+    bool   is_shield      = false;
 };
 
 // One per-bit layer transition between two connected segments' bit-wires.

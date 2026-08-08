@@ -382,6 +382,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("busterm_faces",   &BusSegment::busterm_faces)
         .def_readwrite("passthru_spans",  &BusSegment::passthru_spans)
         .def_readwrite("abstract_pos",    &BusSegment::abstract_pos)
+        .def_readwrite("ndr",             &BusSegment::ndr)
         .def_readwrite("track_lo_bound",  &BusSegment::track_lo_bound)
         .def_readwrite("track_hi_bound",  &BusSegment::track_hi_bound);
 
@@ -395,7 +396,8 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("width",          &NetSegment::width)
         .def_readwrite("layer",          &NetSegment::layer)
         .def_readwrite("span_lo",        &NetSegment::span_lo)
-        .def_readwrite("span_hi",        &NetSegment::span_hi);
+        .def_readwrite("span_hi",        &NetSegment::span_hi)
+        .def_readwrite("is_shield",      &NetSegment::is_shield);
 
     py::class_<NetVia>(m, "NetVia")
         .def(py::init<>())

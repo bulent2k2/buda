@@ -24,6 +24,7 @@
 #include <tuple>
 #include <utility>
 #include "bundler.h"
+#include "ndr.h"
 #include "topology.h"
 #include "conn_topology.h"
 #include "layering.h"
@@ -80,6 +81,10 @@ struct BundleInput {
     HBundle original_bundle;
     std::vector<Topology> candidates;
     double width = 1.0;
+    // Non-default rule resolved for this bundle (phase 1: rule-uniform after
+    // the bundler's rule-class split; inactive = byte-identical).  Charged
+    // through ndr_group_demand at every eff_bus_width site — see ndr.h.
+    NdrSpec ndr;
     // Manual layer overrides per segment.  Values are layer IDs, or -1
     // for no override (let the planner decide).
     std::vector<int> pinned_seg_layers;

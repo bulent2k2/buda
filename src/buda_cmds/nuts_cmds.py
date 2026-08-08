@@ -158,6 +158,13 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
         print("Error: run_detailed_nuts requires a routing grid (def_track_pattern)")
         return
 
+    # NDR R3 realizability at first resolution: with the routing grid now
+    # declared, every governed rule must find its contiguous SIGNAL run on
+    # each layer it may be assigned — hard error with the arithmetic,
+    # BEFORE placement could strand the bits.  No scopes = no-op.
+    from buda_cmds import ndr_cmds
+    ndr_cmds.validate_ndr_realizability(session)
+
     try:
         session._run_detailed_nuts(bit_order=session._detailed_bit_order)
     except RuntimeError as e:

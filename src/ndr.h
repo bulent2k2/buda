@@ -1,0 +1,121 @@
+/*
+ * Copyright 2026 Ben Bulent Basaran
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#pragma once
+#include <algorithm>
+#include <string>
+
+namespace buda {
+
+// ── Non-default rule (NDR), phase 1 ──────────────────────────────────────
+// Path A of docs/internal/ndr_architecture.md: SLOT-QUANTIZED consumption.
+// A rule is resolved per net (longest-prefix scope) session-side; after the
+// bundler's rule-class split every governed bundle is RULE-UNIFORM (the R8
+// fallback position, chosen for phase 1), so one spec rides the whole
+// bundle: BundleInput::ndr (planner charging + abstract width) and
+// BusSegment::ndr (detailed placement) carry copies of the same resolved
+// spec.  An inactive spec (the default) is byte-identical everywhere — every
+// consumer short-circuits on !active(), which is the R12 guarantee.
+struct NdrSpec {
+    // Whole SIGNAL slots consumed per bit — the path-A quantization of the
+    // declared width (a 1.5x wire pays 2 slots: conservative, never
+    // illegal).  1 = default width.
+    int width_slots = 1;
+    // Empty slots kept on each UNSHIELDED gap around a bit (interior gaps
+    // between adjacent bits and the run's two ends) — the quantized
+    // clearance (spacing x2 = 1 guard slot at default-pitch patterns).
+    // 0 = default spacing.  A shielded gap carries the shield INSTEAD of
+    // guards: the grounded wire both occupies the adjacent slot and
+    // satisfies the clearance intent (the documented phase-1 model).
+    int guard_slots = 0;
+    // Shield arrangement: 0 = none, 1 = flank-the-bus (one shield at each
+    // end of the run), 2 = flank-every-bit (a shield in every gap incl.
+    // both ends), 3 = per-N (a shield after every shield_per_n bits, plus
+    // both ends).
+    int shield_mode  = 0;
+    int shield_per_n = 0;
+    // Net identity of emitted shield wires (R5a/R9: credit and audit key on
+    // this; phase 1 always EMITS — crediting is phase 2).
+    std::string shield_net = "GND";
+    // Declared rule name (reporting/provenance).
+    std::string rule_name;
+
+    bool active() const {
+        return width_slots > 1 || guard_slots > 0 || shield_mode != 0;
+    }
+};
+
+// True when the interior gap after ascending-local-bit j (0-based; gaps
+// j = 0 .. nbits-2) carries a SHIELD rather than guard slots.
+inline bool ndr_gap_is_shield(const NdrSpec& s, int j) {
+    if (s.shield_mode == 2) return true;
+    if (s.shield_mode == 3 && s.shield_per_n > 0)
+        return ((j + 1) % s.shield_per_n) == 0;
+    return false;
+}
+
+// ── The single-sourced GROUP demand conversion (requirement R4) ──────────
+// Total SIGNAL slots a rule-uniform group of nbits bits consumes: bit
+// footprints + per-gap shields/guards + the run ends.  EVERY consumer —
+// planner band charging (width and signal_tracks modes), abstract-NUTS
+// footprint, and DNUTS admission/placement — must go through this one
+// function (or the layout below, which is definitionally lockstep with it):
+// two stages rounding differently is the #536 silent-strand class.
+// Shared resources are counted at the GROUP level (an 8-bit flanked group
+// pays 2 end shields; two 4-bit groups pay 4), which is why the conversion
+// takes the group size, never a per-bit cost.  Mixed-rule members would
+// need per-member specs here; phase 1's rule-class split guarantees
+// uniformity, so (spec, nbits) IS the member list.
+inline int ndr_group_demand(const NdrSpec& s, int nbits) {
+    if (nbits <= 0 || !s.active()) return nbits;
+    int du = nbits * s.width_slots;
+    for (int j = 0; j + 1 < nbits; ++j)              // interior gaps
+        du += ndr_gap_is_shield(s, j) ? 1 : s.guard_slots;
+    du += (s.shield_mode != 0) ? 2                    // end shields…
+                               : 2 * s.guard_slots;   // …or end guards
+    return du;
+}
+
+// Slot-role layout of the ascending run, size == ndr_group_demand():
+//   'B' first slot of a bit, 'b' continuation slot of a wide bit,
+//   'S' shield wire, 'G' guard (kept empty, reserved).
+// This is the placement-side rendering of the SAME arithmetic — DNUTS walks
+// it to emit bits/shields and reserve guards, so demand and layout cannot
+// drift (test-pinned: layout.size() == ndr_group_demand for all shapes).
+inline std::string ndr_run_layout(const NdrSpec& s, int nbits) {
+    std::string out;
+    if (nbits <= 0 || !s.active()) {
+        out.assign((size_t)std::max(nbits, 0), 'B');
+        return out;
+    }
+    auto ends = [&](std::string& o) {
+        if (s.shield_mode != 0) o += 'S';
+        else o.append((size_t)s.guard_slots, 'G');
+    };
+    ends(out);
+    for (int b = 0; b < nbits; ++b) {
+        out += 'B';
+        out.append((size_t)(s.width_slots - 1), 'b');
+        if (b + 1 < nbits) {
+            if (ndr_gap_is_shield(s, b)) out += 'S';
+            else out.append((size_t)s.guard_slots, 'G');
+        }
+    }
+    ends(out);
+    return out;
+}
+
+} // namespace buda

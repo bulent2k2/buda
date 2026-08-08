@@ -1,0 +1,41 @@
+# NDR phase-1 demo vehicle (docs/NDR_REQUIREMENTS.md §4 vehicle 1):
+# one shielded double-width clock bus among default buses — all three
+# constraint kinds (width, spacing, shielding) end to end on a small flat
+# design.  The STRICT bundler initially merges clk+data (same endpoints);
+# the NDR rule-class split separates them LOUDLY, the planner charges the
+# clk bundle its 13-slot group demand (4 bits x 2 slots + 3 guard gaps +
+# 2 end shields), and DNUTS places the run: 2-slot bits, reserved guards,
+# GND shield wires flanking the group.  check_design must end clean and
+# report_wirelength shows shield metal on its own line.
+
+add_block blkA 0 0 200 400
+add_block blkB 800 0 1000 400
+
+add_bus clk[4]  blkA.p blkB.q
+add_bus data[8] blkA.d blkB.e
+
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+
+def_ndr clk2x width x2 spacing x2 shield bus net GND
+set_ndr clk_ clk2x
+
+run_bundler STRICT --dump
+dump_ndr
+
+generate_topologies
+set_track_pitch 3
+run_planner 1
+
+def_track_pattern 3 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 4 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 5 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 6 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+
+run_nuts
+run_detailed_nuts
+dump_ndr
+check_design
+report_wirelength

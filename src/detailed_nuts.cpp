@@ -178,15 +178,22 @@ bool DetailedNUTSEngine::signals_contiguous(
 // handful of same-bundle segments per layer, not all-pairs.
 static void compute_pair_misalign(const std::vector<BusSegment>& bus_segs,
                                   DetailedNUTSResult& result) {
-    // (bundle_id, seg_idx) -> bit_index -> placed track.
+    // (bundle_id, seg_idx) -> bit_index -> placed track.  Shield wires are
+    // excluded: their negative per-segment ordinals are NOT bit identities,
+    // so two segments' "-1" shields must never read as a common bit.
     std::map<std::pair<int,int>, std::map<int,double>> bits;
     for (const NetSegment& ns : result.net_segments)
-        bits[{ns.bundle_id, ns.seg_idx}][ns.bit_index] = ns.track_position;
+        if (!ns.is_shield)
+            bits[{ns.bundle_id, ns.seg_idx}][ns.bit_index] = ns.track_position;
 
     std::map<std::pair<int,int>, std::vector<int>> groups;  // (layer,bundle)
     for (int i = 0; i < (int)bus_segs.size(); ++i) {
         const BusSegment& bs = bus_segs[i];
-        if (bs.timing_critical || std::isnan(bs.abstract_pos)) continue;
+        // NDR segments are outside the pair-align machinery entirely (their
+        // k-slot runs never share or adopt tracks), so they carry no
+        // targetable jog.
+        if (bs.timing_critical || bs.ndr.active() ||
+            std::isnan(bs.abstract_pos)) continue;
         groups[{bs.layer, bs.bundle_id}].push_back(i);
     }
     double total = 0.0;
@@ -453,7 +460,7 @@ void DetailedNUTSEngine::place_by_layer(
             // (all tracks clear — ranking would be a no-op), keeping that
             // path byte-identical.
             std::set<long long> span_clear_keys;
-            if ((int)signal_tracks.size() < bus_seg_nbits(bs)) {
+            if ((int)signal_tracks.size() < bus_seg_demand(bs)) {
                 for (const auto& t : signal_tracks)
                     span_clear_keys.insert(track_key(t.first));
                 signal_tracks = grid.signal_tracks_in(x, bs.interval_lo,
@@ -477,10 +484,10 @@ void DetailedNUTSEngine::place_by_layer(
             }
             int n_sig = (int)signal_tracks.size();
 
-            if (n_sig < bus_seg_nbits(bs)) {
+            if (n_sig < bus_seg_demand(bs)) {
                 std::cout << "[DetailedNUTS] Warning: Layer " << layer
                           << " has insufficient signal tracks (" << n_sig
-                          << ") for bus width " << bus_seg_nbits(bs)
+                          << ") for bus width " << bus_seg_demand(bs)
                           << " in interval [" << bs.interval_lo << ", " << bs.interval_hi << "]"
                           << std::endl;
                 result.num_unplaced += bus_seg_nbits(bs);
@@ -533,6 +540,141 @@ void DetailedNUTSEngine::place_by_layer(
                 if (span_ov && itvl_ov)
                     for (double p : asgn.track_positions)
                         reserved.insert(track_key(p));
+            }
+
+            // ── NDR placement branch (phase 1, path A) ──────────────── //
+            // A rule-governed segment claims one run of ndr_group_demand
+            // consecutive pool slots — bits at width_slots each, guard
+            // slots kept empty but RESERVED, shield wires emitted as
+            // first-class NetSegments with negative bit ordinals — chosen
+            // nearest the abstract anchor.  The run walks ndr_run_layout,
+            // which is definitionally lockstep with the demand the planner
+            // charged (ndr.h).  Physical contiguity is required only
+            // WITHIN a bit's k slots (one piece of metal); a guard or
+            // shield gap may straddle a pattern rail, which only adds
+            // clearance.  NO same-bundle track sharing (the bit-for-bit
+            // join cannot hold between k-slot footprints), so every
+            // same-bundle hazard's tracks are simply reserved.  Inactive
+            // spec: branch not taken (byte-identity).
+            if (bs.ndr.active()) {
+                const int nb = bus_seg_nbits(bs);
+                const int du = ndr_group_demand(bs.ndr, nb);
+                const std::string layout = ndr_run_layout(bs.ndr, nb);
+                std::set<long long> resv = reserved;
+                for (const LayerAssignment* H : hazards)
+                    for (double p : H->track_positions)
+                        resv.insert(track_key(p));
+                const TrackPattern& pat =
+                    grid.effective_pattern_at(x, bs.interval_lo);
+                auto all_tracks =
+                    pat.tracks_in_range(bs.interval_lo, bs.interval_hi);
+                int    best_start = -1;
+                double best_dist  = std::numeric_limits<double>::max();
+                const bool anchored = !std::isnan(bs.abstract_pos);
+                for (int j = 0; j + du <= n_sig; ++j) {
+                    bool ok = true;
+                    for (int k = j; k < j + du && ok; ++k)
+                        if (reserved_has(resv, track_key(signal_tracks[k].first)))
+                            ok = false;
+                    // Physical contiguity is required only WITHIN each
+                    // bit's k slots (a wide wire is one piece of metal); a
+                    // guard or shield gap may straddle a pattern rail —
+                    // the rail only ADDS clearance/shielding, and demand
+                    // counts SIGNAL slots consumed either way.
+                    for (int off = 0; ok && off < du; ++off) {
+                        if (layout[off] != 'b') continue;
+                        if (!signals_contiguous(
+                                signal_tracks[j + off - 1].first,
+                                signal_tracks[j + off].first, all_tracks))
+                            ok = false;
+                    }
+                    if (!ok) continue;
+                    const double mid = 0.5 * (signal_tracks[j].first +
+                                              signal_tracks[j + du - 1].first);
+                    const double dist =
+                        anchored ? std::abs(mid - bs.abstract_pos) : 0.0;
+                    if (dist < best_dist) { best_dist = dist; best_start = j; }
+                    if (!anchored) break;   // first feasible run
+                }
+                if (best_start < 0) {
+                    std::cout << "[DetailedNUTS] Warning: Layer " << layer
+                              << " has no contiguous unreserved run of " << du
+                              << " signal tracks for NDR rule '"
+                              << bs.ndr.rule_name << "' (" << nb
+                              << " bits) in interval [" << bs.interval_lo
+                              << ", " << bs.interval_hi << "] (bundle "
+                              << bs.bundle_id << ")" << std::endl;
+                    result.num_unplaced += nb;
+                    if (over_budget()) return;
+                    continue;
+                }
+                auto ndr_bit_on_rank = [&](int i) {
+                    const int b = (bs.bit_order == "HI_LO") ? (nb - 1 - i) : i;
+                    return bs.bit_list.empty() ? b : bs.bit_list[b];
+                };
+                constexpr int kNdrGuardBit =
+                    std::numeric_limits<int>::min() / 2;
+                std::vector<double> assigned;
+                std::vector<int>    assigned_bits;
+                assigned.reserve(du);
+                assigned_bits.reserve(du);
+                int bit_rank = 0, shield_no = 0;
+                for (int off = 0; off < du; ) {
+                    const char role = layout[off];
+                    if (role == 'B') {
+                        const int k = bs.ndr.width_slots;
+                        const auto& lo_t = signal_tracks[best_start + off];
+                        const auto& hi_t = signal_tracks[best_start + off + k - 1];
+                        NetSegment ns;
+                        ns.bundle_id      = bs.bundle_id;
+                        ns.seg_idx        = bs.seg_idx;
+                        ns.bit_index      = ndr_bit_on_rank(bit_rank);
+                        // A k-slot wire's centre sits mid-footprint (between
+                        // slot centres for even k — the documented off-centre
+                        // wrinkle); width covers the slot extent.
+                        ns.track_position = 0.5 * (lo_t.first + hi_t.first);
+                        ns.width          = (hi_t.first - lo_t.first)
+                                            + 0.5 * (lo_t.second.width
+                                                     + hi_t.second.width);
+                        ns.layer          = bs.layer;
+                        ns.span_lo        = bs.span_lo;
+                        ns.span_hi        = bs.span_hi;
+                        result.net_segments.push_back(ns);
+                        for (int k2 = 0; k2 < k; ++k2) {
+                            assigned.push_back(
+                                signal_tracks[best_start + off + k2].first);
+                            assigned_bits.push_back(ns.bit_index);
+                        }
+                        ++bit_rank;
+                        off += k;
+                    } else if (role == 'S') {
+                        const auto& t = signal_tracks[best_start + off];
+                        NetSegment ns;
+                        ns.bundle_id      = bs.bundle_id;
+                        ns.seg_idx        = bs.seg_idx;
+                        ns.bit_index      = -(++shield_no);
+                        ns.is_shield      = true;
+                        ns.track_position = t.first;
+                        ns.width          = t.second.width;
+                        ns.layer          = bs.layer;
+                        ns.span_lo        = bs.span_lo;
+                        ns.span_hi        = bs.span_hi;
+                        result.net_segments.push_back(ns);
+                        assigned.push_back(t.first);
+                        assigned_bits.push_back(ns.bit_index);
+                        off += 1;
+                    } else {   // 'G' — guard: kept empty, reserved
+                        assigned.push_back(
+                            signal_tracks[best_start + off].first);
+                        assigned_bits.push_back(kNdrGuardBit);
+                        off += 1;
+                    }
+                }
+                layer_assigns.push_back({bs.bundle_id, bs.span_lo, bs.span_hi,
+                                         bs.interval_lo, bs.interval_hi,
+                                         std::move(assigned),
+                                         std::move(assigned_bits)});
+                continue;
             }
 
             // Cache timing-critical data once per segment.
@@ -929,6 +1071,10 @@ void DetailedNUTSEngine::adjust_bit_spans(
         int n_passthru_restored = 0;
 
         for (auto& ns : result.net_segments) {
+            // NDR shields keep their abstract span: their negative ordinals
+            // must not pair with a connected segment's shields (different
+            // wires), and a shield has no junction partner to follow.
+            if (ns.is_shield) continue;
             const auto* bs_ptr = bs_map[{ns.bundle_id, ns.seg_idx}];
             if (!bs_ptr) continue;
 
@@ -1043,6 +1189,11 @@ void DetailedNUTSEngine::emit_bit_vias(
 
         std::set<std::tuple<int,int,int,int>> emitted; // (bid, lo_seg, hi_seg, bit)
         for (const auto& ns : result.net_segments) {
+            // NDR shields carry no vias in phase 1 (their negative ordinals
+            // are per-segment, not net identities — two segments' "-1"
+            // shields are different wires; shield connectivity is the
+            // crediting phase's problem, documented in ndr_architecture.md).
+            if (ns.is_shield) continue;
             auto bsit = bs_map.find({ns.bundle_id, ns.seg_idx});
             if (bsit == bs_map.end() || !bsit->second) continue;
             for (const auto& conn : bsit->second->connections) {
@@ -1104,8 +1255,12 @@ std::vector<BusSegment> make_bus_segments(
     // Tapered fan-in: the selected topology's per-segment bit membership
     // (empty for every non-fan-in bundle).
     std::map<int, const std::map<int, std::vector<int>>*> bid_to_bits;
+    // NDR: each governed bundle's resolved rule (inactive specs skipped —
+    // the BusSegment default already means "no rule").
+    std::map<int, const NdrSpec*> bid_to_ndr;
     for (const auto& w : bundles) {
         const int bid = w.input.original_bundle.id;
+        if (w.input.ndr.active()) bid_to_ndr[bid] = &w.input.ndr;
         bid_to_nbits[bid] =
             (int)w.input.original_bundle.get_net_names().size();
         const int sel = w.plan.selected_topology_index;
@@ -1146,6 +1301,13 @@ std::vector<BusSegment> make_bus_segments(
                 bs.bit_list = it->second;
         }
         bs.abstract_pos = ts.track_position;
+        // NDR: carry the bundle's resolved rule so stage 9 places the
+        // k-slot/guard/shield run the upstream stages priced (default
+        // spec = inactive = byte-identical).
+        {
+            auto nit = bid_to_ndr.find(ts.bundle_id);
+            if (nit != bid_to_ndr.end()) bs.ndr = *nit->second;
+        }
         // Cross-layer corner split bounds (carried into detailed NUTS so the
         // trunk's bits snap to its committed side on real signal tracks).
         bs.track_lo_bound = ts.track_lo_bound;

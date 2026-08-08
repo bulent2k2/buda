@@ -6,8 +6,9 @@ and persistence decisions, and the per-requirement implementation mapping.
 Requirements (R1–R13) live in [../NDR_REQUIREMENTS.md](../NDR_REQUIREMENTS.md);
 the user-surface options in [../NDR_UI.md](../NDR_UI.md).  Tracked as
 [opens.md](opens.md) "Substantial features" item 15 and on the
-[work menu](work_menu_2026-08-06.md).  Status: **path leaning recorded, not
-frozen; nothing built** (2026-08-06).
+[work menu](work_menu_2026-08-06.md).  Status: **phase-1 prototype BUILT on
+path A** (2026-08-06) — see §7 for the as-built record and its documented
+prototype limitations.
 
 ## 1. As-built baseline — the assumptions NDR breaks
 
@@ -197,3 +198,75 @@ recorded in [../NDR_UI.md](../NDR_UI.md).
 3. **Later, demand-gated**: bundle-selector attachment override, cell
    -scoped attachment, `edit_shield_side`, abstract-viz footprint display,
    any §3-non-goal promotion that architect feedback requests.
+
+## 7. Phase-1 prototype — AS BUILT (2026-08-06)
+
+The phase-1 slice landed on path A exactly as §5/§6 mapped it, with the
+following as-built specifics and honest deviations:
+
+- **`src/ndr.h`**: `NdrSpec` (width_slots / guard_slots / shield_mode /
+  shield_per_n / shield_net / rule_name; `active()` = the R12 gate) + the
+  single-sourced `ndr_group_demand(spec, nbits)` and its placement-side
+  rendering `ndr_run_layout` (test-pinned lockstep: `len(layout) == demand`
+  for every shape).  **Uniform-rule signature, not per-member**: phase 1
+  adopts R8's rule-uniform-splitting fallback (the bundler splits a
+  mixed-rule bundle by rule class LOUDLY, `|NDR:<rule>` reason suffix), so
+  (spec, nbits) IS the member list; the per-member `group_track_demand
+  (members, layer)` signature remains the target if mixed-rule bundles are
+  ever kept whole.
+- **Charging (R4/R7)**: `ndr_units()` in `congestion_planner.cpp` routes
+  every bundle-scoped `eff_bus_width` site through the group demand —
+  `score_candidate_`'s seg_n/seg_w lambdas (the live scoring path; NOTE
+  `plan_bundle` carries an identical pre-existing DEAD copy), band charging,
+  share usage, demand reservations, commit_plan, and the track-mode ntrk
+  handoff — plus the abstract-NUTS `ts.width` extraction in `nuts.cpp`.
+- **DNUTS (R6)**: an `bs.ndr.active()` branch in `place_by_layer` claims a
+  run of demand consecutive pool slots nearest the anchor, walking the
+  layout: bits at `width_slots` (physical contiguity required only WITHIN a
+  bit's slots — a guard/shield gap may straddle a pattern rail, which only
+  adds clearance; the first whole-run-contiguous draft measurably
+  over-refused), guards reserved-but-empty (sentinel bit id), shields
+  emitted as `NetSegment{is_shield=true, bit_index=-1,-2,…}`.  Admission
+  compares the pool against `bus_seg_demand()` (the same conversion), and
+  same-bundle sharing is disabled for NDR groups (hazard tracks reserved).
+- **CLI**: `def_ndr <name> [width xN] [spacing xN] [shield bus|bit|per:N
+  [net <label>]] [layers <csv>]` (declare-once LOUD; multiplier form only
+  in phase 1 — quantization is pattern-independent), `set_ndr <prefix>|*
+  <rule|off>` (longest prefix wins), `dump_ndr` (rules, scopes, per-bundle
+  demand + layout).  R3 realizability fires at `run_detailed_nuts` (first
+  resolution with the grid known): a rule needing more contiguous SIGNAL
+  slots per bit than any run on a governed layer's pattern hard-errors
+  with the arithmetic.  `run_hier_bundler` refuses when scopes exist.
+- **Guarded consumers**: shields excluded from span-follow, via emission,
+  and the pair-misalign predictor (negative ordinals are NOT net ids);
+  BDB `net_segment` persistence writes the shield net's name (and the
+  negative-index wraparound into `net_names[-1]` is fixed); detailed-WL
+  reporting and `qor_corpus` count shield metal separately (R11).
+- **Vehicle + tests**: `flow/ndr_demo.buda` (the §4-vehicle-1 shape: the
+  STRICT bundler merges clk+data on identical endpoints and the rule-class
+  split separates them — a nice accidental demonstration), `test_ndr.py`
+  (20 tests: lockstep, group-not-per-bit demand, validation LOUDness,
+  longest-prefix resolution, end-to-end shields/widths/spacing, planner
+  demand honesty, R3 refusal, R12 inertness of unattached rules, shield-WL
+  separation, clean check_design).
+
+**Prototype limitations (deliberate, each with its phase):**
+- **No BDB rule persistence yet** (R10): rules/scopes live in the session;
+  flat-flow scripts re-declare (their persistence model), and the v21
+  `ndr_rule`/`ndr_scope` tables + `load_pipeline` VOID semantics are the
+  next increment.  Shield `net_segment` rows DO persist (guarded).
+- **Flat flow only** (R2d): hier template propagation refused LOUDLY.
+- **No R5a crediting** (the documented phase-2 deferral): shields always
+  emitted; R3/R7 price the uncredited worst case.
+- **No shield vias/connectivity** (R6 partial): shields are floating rails
+  in phase 1 — connectivity to the shield net is the crediting phase's
+  problem.  No dedicated R9 audit types yet (check_design runs clean
+  because shields place like wires; NDR_WIDTH/NDR_SPACING/NDR_SHIELD
+  typed checks come with the audit phase).
+- **Explorer badge/tint/ghosts not built**: detailed viz draws shields as
+  wires (width-proportional lw already); the explorer surface is UI-phase
+  work.
+- The doomed-seat census/forensics still count member bits, not demand
+  units, for NDR segments — harmless while admission strands LOUDLY, but
+  the census should adopt `bus_seg_demand` when NDR designs get big
+  enough to census.

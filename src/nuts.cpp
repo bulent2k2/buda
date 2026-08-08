@@ -1635,7 +1635,12 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
             {
                 const int nbits =
                     (int)bw.input.original_bundle.get_net_names().size();
-                const int    n = seg_bit_count(topo, si, nbits);
+                int n = seg_bit_count(topo, si, nbits);
+                // NDR: the abstract footprint reserves the GROUP demand in
+                // slots (ndr.h — the same conversion the planner charged),
+                // so stage-4 packing and stage-9 k-slot reality agree.
+                if (n > 0 && bw.input.ndr.active())
+                    n = ndr_group_demand(bw.input.ndr, n);
                 const double w = (nbits > 0 && n != nbits)
                                      ? bw.input.width * ((double)n / (double)nbits)
                                      : bw.input.width;

@@ -539,15 +539,23 @@ class PersistMixin:
         h_layers = set(self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL))
 
         def bit_net(bundle_id, bit):
+            # 0 <= guard: an NDR shield's NEGATIVE ordinal must never wrap
+            # around into a real net name (Python names[-1] would silently
+            # persist the last bit's identity onto a shield wire).
             names = bid_to_names.get(bundle_id, [])
-            return names[bit] if bit < len(names) else ""
+            return names[bit] if 0 <= bit < len(names) else ""
+
+        bid_to_shield = {w.input.original_bundle.id: w.input.ndr.shield_net
+                         for w in self.bundles if w.input.ndr.active()}
 
         for ns in self.detailed_result.net_segments:
             r = buda.NetSegRow()
             r.id = str(ns.bundle_id)
             r.seg_idx = ns.seg_idx
             r.bit_index = ns.bit_index
-            r.net_name = bit_net(ns.bundle_id, ns.bit_index)
+            r.net_name = (bid_to_shield.get(ns.bundle_id, "GND")
+                          if ns.is_shield
+                          else bit_net(ns.bundle_id, ns.bit_index))
             r.layer = ns.layer
             r.is_horiz = ns.layer in h_layers
             half = ns.width / 2.0
