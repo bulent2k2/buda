@@ -119,7 +119,20 @@ a change claims neutrality.
 
 ## Status
 
-- **Phase A: landed** (this PR): `test/tests/test_docs_guards.py`
+- **Phase A: landed** (PR #612): `test/tests/test_docs_guards.py`
   (links + command coverage), `tools/runtime_ab.py`, per-class runtime
   rollups in `tools/qor_corpus.py --compare`.
-- Phases B-D: not started.
+- **Phase B: landed**: `BudaSession._decision(text, tag, **kv)` — prints
+  the human line verbatim (output byte-identical, verified against a
+  main-build decision-line diff on the caps vehicle) and appends a
+  normalized `(tag, kv)` record when tracing is on.  Converted ripup's
+  core decision sites (improver/heartbeat/stall-sweep/divergence/done,
+  both sequential and parallel paths); the fast par-vs-seq identity
+  tests now compare TRACES (records incl. structured trial counts), and
+  the slow mix2 end-to-end test stays a byte-level log diff — the
+  formatting canary.  `BUDA_DECISION_TRACE=<path>` makes the CLI dump
+  the run's records as JSON lines, so two runs diff decision-wise
+  without parsing log text.  Remaining B item: extend `decision()`
+  coverage to the healer passes the slow canary alone covers today
+  (global/class/release/negotiate lines) as they come up.
+- Phases C-D: not started.

@@ -200,6 +200,21 @@ class RipupMixin:
         # did not move.  Cleared at run exit (both self._rr_t = None sites).
         self._rr_disc_memo = {}
 
+    def _decision(self, text, tag, **kv):
+        """Emit a DECISION line (risk_reduction_plan.md R2, Phase B).
+
+        Prints `text` exactly as the call site always did — output is
+        byte-identical by construction — and, when tracing is enabled
+        (`self._decision_trace` is a list; tests enable it, or the CLI does
+        via BUDA_DECISION_TRACE=<path>), appends the normalized record
+        `(tag, kv)`.  Identity tests compare traces instead of parsing log
+        lines, so wording changes no longer re-baseline correctness claims;
+        one byte-level log diff per area stays as a formatting canary."""
+        print(text, flush=True)
+        tr = getattr(self, '_decision_trace', None)
+        if tr is not None:
+            tr.append((tag, kv))
+
     def _rr_t_add(self, key, dt):
         t = getattr(self, '_rr_t', None)
         if t is not None:
@@ -1071,21 +1086,28 @@ class RipupMixin:
                         trial_base=trials)
                     trials += t2
                     if cand_best is not None:
-                        print(f"[ripup_reroute] iter {it}: contender "
-                              f"{ci}/{n_cont} bundle {bid} improves "
-                              f"{self._rr_m_str(cur)}->"
-                              f"{self._rr_m_str(cand_best[0])} "
-                              f"({self._rr_move_str(old_tidx, cand_best[3])})",
-                              flush=True)
+                        self._decision(
+                            f"[ripup_reroute] iter {it}: contender "
+                            f"{ci}/{n_cont} bundle {bid} improves "
+                            f"{self._rr_m_str(cur)}->"
+                            f"{self._rr_m_str(cand_best[0])} "
+                            f"({self._rr_move_str(old_tidx, cand_best[3])})",
+                            "rr_improve", it=it, ci=ci, bid=bid,
+                            m_from=cur, m_to=cand_best[0],
+                            move=self._rr_move_str(old_tidx, cand_best[3]))
                         return cand_best, trials
                     if all(ok for _p, _s, ok in outs):
-                        print(f"[ripup_reroute] WARNING: parallel-sweep "
-                              f"divergence on bundle {bid} (screened scan) "
-                              f"— replay verdict kept", flush=True)
+                        self._decision(
+                            f"[ripup_reroute] WARNING: parallel-sweep "
+                            f"divergence on bundle {bid} (screened scan) "
+                            f"— replay verdict kept",
+                            "rr_divergence", it=it, bid=bid)
                 else:
                     trials += len(moves)   # the sequential trials these replace
-                print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
-                      f"bundle {bid} — no improvement", flush=True)
+                self._decision(
+                    f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
+                    f"bundle {bid} — no improvement",
+                    "rr_heartbeat", it=it, ci=ci, bid=bid)
         return None, trials
 
     def _rr_parallel_deferred_sweep(self, deferred, cur, stage, metric,
@@ -1115,9 +1137,10 @@ class RipupMixin:
             return None, 0
         base_disc, net_counts, dn_kwargs = \
             self._rr_sweep_stage_setup(flat, stage, metric)
-        print(f"[ripup_reroute] iter {it}: screened scan stalled — "
-              f"sweeping {len(flat)} deferred move(s) in parallel",
-              flush=True)
+        self._decision(
+            f"[ripup_reroute] iter {it}: screened scan stalled — "
+            f"sweeping {len(flat)} deferred move(s) in parallel",
+            "rr_stall_sweep", it=it, n_moves=len(flat))
         outcomes = self._rr_sweep_eval(flat, stage, base_disc, net_counts,
                                        dn_kwargs)
         trials = 0
@@ -1147,18 +1170,26 @@ class RipupMixin:
                                                 first_improving=True)
             trials += t2
             if cand_best is not None:
-                print(f"[ripup_reroute] iter {it}: contender "
-                      f"{ci}/{n_cont} bundle {bid} improves "
-                      f"{self._rr_m_str(cur)}->"
-                      f"{self._rr_m_str(cand_best[0])} "
-                      f"({self._rr_move_str(old_tidx, cand_best[3])}"
-                      f", deferred)", flush=True)
+                self._decision(
+                    f"[ripup_reroute] iter {it}: contender "
+                    f"{ci}/{n_cont} bundle {bid} improves "
+                    f"{self._rr_m_str(cur)}->"
+                    f"{self._rr_m_str(cand_best[0])} "
+                    f"({self._rr_move_str(old_tidx, cand_best[3])}"
+                    f", deferred)",
+                    "rr_improve", it=it, ci=ci, bid=bid, m_from=cur,
+                    m_to=cand_best[0],
+                    move=self._rr_move_str(old_tidx, cand_best[3]),
+                    deferred=True)
                 return cand_best, trials
             if ok:
-                print(f"[ripup_reroute] WARNING: parallel-sweep divergence "
-                      f"on bundle {bid} topo {old_tidx + 1}->{tidx + 1} "
-                      f"(sweep {self._rr_m_str(m)} vs replay non-improving) "
-                      f"— replay verdict kept", flush=True)
+                self._decision(
+                    f"[ripup_reroute] WARNING: parallel-sweep divergence "
+                    f"on bundle {bid} topo {old_tidx + 1}->{tidx + 1} "
+                    f"(sweep {self._rr_m_str(m)} vs replay non-improving) "
+                    f"— replay verdict kept",
+                    "rr_divergence", it=it, bid=bid,
+                    move=f"{old_tidx + 1}->{tidx + 1}")
         return None, trials
 
     # ── measured selection refine (selection-basis lever 3) ─────────────────
@@ -3092,16 +3123,20 @@ class RipupMixin:
                             .extend(wr)
                     if cand_best is not None:
                         best = cand_best
-                        print(f"[ripup_reroute] iter {it}: contender "
-                              f"{ci}/{n_cont} bundle {bid} improves "
-                              f"{self._rr_m_str(cur)}->"
-                              f"{self._rr_m_str(cand_best[0])} "
-                              f"({self._rr_move_str(old_tidx, cand_best[3])})",
-                              flush=True)
+                        self._decision(
+                            f"[ripup_reroute] iter {it}: contender "
+                            f"{ci}/{n_cont} bundle {bid} improves "
+                            f"{self._rr_m_str(cur)}->"
+                            f"{self._rr_m_str(cand_best[0])} "
+                            f"({self._rr_move_str(old_tidx, cand_best[3])})",
+                            "rr_improve", it=it, ci=ci, bid=bid,
+                            m_from=cur, m_to=cand_best[0],
+                            move=self._rr_move_str(old_tidx, cand_best[3]))
                         break
-                    print(f"[ripup_reroute] iter {it}: contender "
-                          f"{ci}/{n_cont} bundle {bid} — no improvement",
-                          flush=True)
+                    self._decision(
+                        f"[ripup_reroute] iter {it}: contender "
+                        f"{ci}/{n_cont} bundle {bid} — no improvement",
+                        "rr_heartbeat", it=it, ci=ci, bid=bid)
             if best is None and deferred:
                 # Completeness fallback: the screened scan stalled, so sweep
                 # the deferred (screened-out) moves at full fidelity before
@@ -3347,9 +3382,12 @@ class RipupMixin:
                   f"improving — re-run ripup_reroute or raise max_iter "
                   f"(e.g. `ripup_reroute {max_iter * 5}`) to continue.", flush=True)
         self._rr_warm_study_report()
-        print(f"[ripup_reroute] done: metric {self._rr_m_str(m0)}->"
-              f"{self._rr_m_str(metric())} "
-              f"after {committed} move(s), {n_trials} trial(s).", flush=True)
+        self._decision(
+            f"[ripup_reroute] done: metric {self._rr_m_str(m0)}->"
+            f"{self._rr_m_str(metric())} "
+            f"after {committed} move(s), {n_trials} trial(s).",
+            "rr_done", m_from=m0, m_to=metric(), moves=committed,
+            trials=n_trials)
         # A severed bus places all its bits (never a DNUTS open), so a "metric
         # ->0" line reads as fully clean — call it out loud if any bundle ended
         # DISCONNECTED (issue #399 follow-up 3; folded into the metric above so

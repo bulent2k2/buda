@@ -239,6 +239,12 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._die_h = 0.0
         self.bdb = None              # BDB (opened by open_bdb command)
         self._persisted_plan_fp = None   # selective-persist fingerprint memo
+        # Decision trace (risk_reduction_plan.md R2): None = off.  Tests set
+        # a list directly; BUDA_DECISION_TRACE=<path> makes the CLI collect
+        # and dump the run's decision records as JSON lines at exit, so two
+        # runs can be diffed decision-wise without parsing log text.
+        self._decision_trace = ([] if os.environ.get("BUDA_DECISION_TRACE")
+                                else None)
         self._bdb_writeback_src = None  # *.sql to write back to on save_bdb/exit (opt-in)
         self._bdb_writeback_bin = None  # temp binary materialized from that .sql
         self._bdb_added_ids = set()  # component ids loaded into fp via add_blocks_from_bdb
@@ -693,6 +699,20 @@ def main():
             session._print_end_report()
             if session._flow_log is not None:
                 session._flow_log.close()
+            # Decision-trace dump (risk_reduction_plan.md R2): one JSON line
+            # per decision record, so two runs diff decision-wise without
+            # parsing log text (wording changes never re-baseline this).
+            tp = os.environ.get("BUDA_DECISION_TRACE")
+            if tp and session._decision_trace is not None:
+                try:
+                    import json
+                    with open(tp, 'w') as f:
+                        for tag, kv in session._decision_trace:
+                            f.write(json.dumps({"tag": tag, **kv},
+                                               default=str) + "\n")
+                except OSError as e:
+                    print(f"Warning: could not write decision trace "
+                          f"{tp}: {e}")
     else:
         # No script: show usage and insist on one rather than quietly exiting.
         parser.print_help(sys.stderr)

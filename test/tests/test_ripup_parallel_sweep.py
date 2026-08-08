@@ -74,6 +74,11 @@ def _build_session(narrow=True):
 
 
 def _run_ripup(s, arg=""):
+    # Decision tracing on (risk_reduction_plan.md R2): identity tests
+    # compare s._decision_trace records, not parsed log lines — wording
+    # changes never re-baseline them.  The slow end-to-end test keeps the
+    # byte-level log diff as the formatting canary.
+    s._decision_trace = []
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         s.do_command(f"ripup_reroute {arg}".strip())
@@ -138,14 +143,15 @@ def test_parallel_scan_matches_sequential_defaults(monkeypatch):
     out_seq = _run_ripup(s_seq, "no_parallel_sweep")
     assert _selections(s_par) == _selections(s_seq)
     assert _done_line(out_par) == _done_line(out_seq)
-    # The decision lines (contender heartbeats + improver) are identical —
-    # the scan sweep prints exactly the sequential lines.
-    def decisions(out):
-        return [ln for ln in out.splitlines()
-                if ln.startswith("[ripup_reroute]")
-                and "timing:" not in ln and "solve passes:" not in ln]
-    assert decisions(out_par) == decisions(out_seq)
-    assert "parallel-sweep divergence" not in out_par
+    # The decision RECORDS (contender heartbeats + improver + done, with
+    # their structured fields incl. trial counts) are identical — the scan
+    # sweep makes exactly the sequential decisions.  The stall-sweep
+    # announce is the one legitimately parallel-only record.
+    def trace(s):
+        return [(tag, kv) for tag, kv in s._decision_trace
+                if tag != "rr_stall_sweep"]
+    assert trace(s_par) == trace(s_seq)
+    assert not any(t == "rr_divergence" for t, _ in s_par._decision_trace)
     assert s_par.nuts_result.num_overlaps == 0
 
 
@@ -171,11 +177,10 @@ def test_zero_move_contenders_keep_their_heartbeats(monkeypatch):
     out_par = _run_ripup(s_par)
     s_seq = _build_session()
     out_seq = _run_ripup(s_seq, "no_parallel_sweep")
-    def heartbeats(out):
-        return [ln for ln in out.splitlines()
-                if "— no improvement" in ln]
-    assert heartbeats(out_par) == heartbeats(out_seq)
-    assert len(heartbeats(out_par)) >= 1, out_par
+    def heartbeats(s):
+        return [kv for tag, kv in s._decision_trace if tag == "rr_heartbeat"]
+    assert heartbeats(s_par) == heartbeats(s_seq)
+    assert len(heartbeats(s_par)) >= 1, out_par
     assert _done_line(out_par) == _done_line(out_seq)
 
 
