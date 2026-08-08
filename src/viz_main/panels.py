@@ -434,6 +434,8 @@ class VizPanelsMixin:
             return {}
         placed = {}
         for ns in self._detailed_result.net_segments:
+            if ns.is_shield:      # NDR shields are not signal bits
+                continue
             placed[ns.bundle_id] = placed.get(ns.bundle_id, 0) + 1
         opens = {}
         for w in self.bundles:
@@ -606,7 +608,8 @@ class VizPanelsMixin:
                 if n_expected is None:
                     stats_part = '[no topo]'; stats_color = '#888888'
                 else:
-                    n_placed   = sum(1 for ns in self._detailed_result.net_segments if ns.bundle_id == bid)
+                    n_placed   = sum(1 for ns in self._detailed_result.net_segments
+                                     if ns.bundle_id == bid and not ns.is_shield)
                     n_unp = n_expected - n_placed
                     stats_part = f"[{n_unp}/{n_expected}]"
                     stats_color = '#CC0000' if n_unp > 0 else '#008800'

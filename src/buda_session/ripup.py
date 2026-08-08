@@ -267,6 +267,11 @@ class RipupMixin:
             return []
         per_seg = {}   # bid -> {seg_idx: placed bit count}
         for ns in self.detailed_result.net_segments:
+            if ns.is_shield:
+                # NDR shield wires are not signal bits: counting them here
+                # would mask a real open whenever the missing-bit count is
+                # covered by emitted shields (Codex on #616).
+                continue
             per_seg.setdefault(ns.bundle_id, {})
             per_seg[ns.bundle_id][ns.seg_idx] = \
                 per_seg[ns.bundle_id].get(ns.seg_idx, 0) + 1
@@ -2270,6 +2275,11 @@ class RipupMixin:
             return cache[1]
         per_seg = {}
         for ns in self.detailed_result.net_segments:
+            if ns.is_shield:
+                # NDR shield wires are not signal bits: counting them here
+                # would mask a real open whenever the missing-bit count is
+                # covered by emitted shields (Codex on #616).
+                continue
             per_seg.setdefault(ns.bundle_id, {})
             per_seg[ns.bundle_id][ns.seg_idx] = \
                 per_seg[ns.bundle_id].get(ns.seg_idx, 0) + 1

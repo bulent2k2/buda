@@ -281,19 +281,38 @@ def validate_ndr_realizability(session):
     the rule, and the arithmetic."""
     if not getattr(session, "_ndr_scopes", None):
         return
+    from buda_cmds.bdb_cmds import _all_layer_ids
     grid = session.routing_grid
     checked = set()
     for w in session.bundles:
         spec = w.input.ndr
         if not spec.active() or spec.width_slots <= 1:
             continue
-        lids = (list(w.input.allowed_layers) or
-                [l for l in range(0, 64) if session.layers.has_layer(l)])
+        # Every layer this bundle MAY be assigned: the explicit restriction,
+        # else ALL declared layers (the layer stack's real id set — a
+        # hard-coded id range silently omitted user-defined ids outside it,
+        # Codex on #616).
+        restricted = list(w.input.allowed_layers)
+        lids = restricted or _all_layer_ids(session)
         for lid in lids:
             key = (spec.rule_name, lid)
-            if key in checked or not grid.has_layer(lid):
+            if key in checked:
                 continue
             checked.add(key)
+            if not grid.has_layer(lid):
+                # No track pattern declared for this layer.  A rule
+                # EXPLICITLY restricted to it can never be realized — R3
+                # hard error.  An unrestricted rule falls through to the
+                # engine's existing LOUD per-run strand ("Layer N has no
+                # track pattern defined"), which hits every bundle equally
+                # and is a flow-configuration issue, not a rule issue.
+                if restricted:
+                    print(f"Error: NDR rule '{spec.rule_name}' is restricted "
+                          f"to layer {lid}, which has no track pattern "
+                          f"(def_track_pattern) — the rule cannot be "
+                          f"realized there (R3).")
+                    sys.exit(1)
+                continue
             pat = grid.get_layer_grid(lid).global_pattern()
             period = pat.unit_pitch()
             if period <= 0 or not pat.slots:

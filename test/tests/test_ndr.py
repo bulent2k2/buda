@@ -287,3 +287,68 @@ def test_check_design_clean_on_the_demo_shape():
                   "set_ndr clk_ clk2x"])
     out = _run(s, "check_design")
     assert "no violations" in out
+
+
+# ── Codex on #616: shields must not count as placed signal bits ────────────
+
+def test_shields_do_not_mask_signal_opens_in_rr_accounting():
+    # A culled/missing signal bit must keep the bundle in the stage-b open
+    # list even though emitted shields pad the row count past the expected
+    # bit count (the masking direction: 3 bits + 2 shields = 5 rows >= 4
+    # expected reads "complete" if shields count).
+    s, _ = _flow(["def_ndr clk2x width x2 spacing x2 shield bus",
+                  "set_ndr clk_ clk2x"])
+    clk_bid = next(w.input.original_bundle.id for w in s.bundles
+                   if w.input.ndr.active())
+    assert s._rr_open_bundles() == []          # clean baseline
+    dr = s.detailed_result
+    kept = [ns for ns in dr.net_segments
+            if not (ns.bundle_id == clk_bid and not ns.is_shield
+                    and ns.bit_index == 0)]
+    assert len(kept) == len(dr.net_segments) - 1
+    dr.net_segments = kept                     # drop ONE signal bit
+    assert clk_bid in s._rr_open_bundles()
+
+
+# ── Codex on #616: R3 validation must enumerate REAL declared layer ids ────
+
+def test_r3_validation_reaches_high_layer_ids():
+    # def_layer imposes no id bound; a hard-coded 0..63 range silently
+    # skipped e.g. layer 70, letting an unhostable rule strand at DNUTS
+    # instead of the promised up-front hard error.
+    narrow = "0 VDD 2 1 _ 1 1 _ 1 1 GND 2 1"
+    s = _bare_session()
+    for c in ["add_block blkA 0 0 200 400",
+              "add_block blkB 800 0 1000 400",
+              "add_bus clk[4] blkA.p blkB.q",
+              "def_layer 70 M70 H TOP 20",
+              "def_layer 71 M71 V TOP 20",
+              "def_ndr wide width x4",
+              "set_ndr clk_ wide",
+              "run_bundler STRICT",
+              "generate_topologies",
+              "run_planner 1",
+              f"def_track_pattern 70 {narrow}",
+              f"def_track_pattern 71 {narrow}",
+              "run_nuts 3"]:
+        _run(s, c)
+    with pytest.raises(SystemExit):
+        _run(s, "run_detailed_nuts")
+
+
+def test_r3_restricted_rule_on_patternless_layer_is_loud():
+    # A rule EXPLICITLY restricted to a layer with no track pattern can
+    # never be realized — hard error at first resolution, not a strand.
+    s = _bare_session()
+    for c in _FLOW_SETUP + ["def_ndr wide width x2 layers 5",
+                            "set_ndr clk_ wide",
+                            "run_bundler STRICT",
+                            "generate_topologies",
+                            "run_planner 1",
+                            f"def_track_pattern 3 {_PATTERN}",
+                            f"def_track_pattern 4 {_PATTERN}",
+                            f"def_track_pattern 6 {_PATTERN}",
+                            "run_nuts 3"]:
+        _run(s, c)      # note: NO pattern for layer 5
+    with pytest.raises(SystemExit):
+        _run(s, "run_detailed_nuts")
