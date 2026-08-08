@@ -24,7 +24,7 @@ record:
 
 | | **Advisory planner** (recommended) | **Flow-participating router** |
 |---|---|---|
-| Writer emits | DEF `BLOCKAGES` + bus corridors + optional guide wires | DEF `NETS + ROUTED` with real vias |
+| Writer emits | corridor manifest → native route guides, + DEF `BLOCKAGES` for keep-clear/density | DEF `NETS + ROUTED` with real vias |
 | Needs a via library | no | **yes** |
 | Needs DRC legality (width/spacing/area/enclosure) | no | **yes** |
 | Needs DBU-exact geometry | desirable | **mandatory** |
@@ -45,18 +45,38 @@ standard construct for *"route this net here"* — only actual pre-routed
 geometry, which is the router path.  So the advisory artifact is a
 **pair**:
 
-1. **Standard DEF `BLOCKAGES`** — the corridors BUDA reserved, emitted
-   as routing obstruction so the downstream router keeps other signals
-   out of them.  Portable across tools, no vias, no DRC.
-2. **A corridor manifest** — machine-readable (JSON/CSV): per bundle,
-   its nets, layer, and the rectangles reserved.  From this, a few lines
-   of tool-specific Tcl produce native route guides
+1. **A corridor manifest — the primary artifact.**  Machine-readable
+   (JSON/CSV): per bundle, its nets, layer, and the rectangles reserved.
+   A few lines of tool-specific Tcl turn it into native route guides
    (`create_route_guide` and equivalents).  BUDA ships the manifest plus
-   one worked Tcl example; sites adapt it.
+   one worked example; sites adapt it.  This is where the *positive*
+   intent — "these nets belong in this corridor" — lives.
+2. **DEF `BLOCKAGES` — the negative half only, used carefully.**
+
+**A correction worth stating loudly, because the first draft got it
+backwards** (review on PR #641): a DEF routing blockage makes geometry
+unavailable to **all** routed nets, including the very buses the
+corridor is reserved for.  Emitting a reserved corridor as a plain
+blockage would tell the downstream router to route *around* the bus
+plan — the exact opposite of the intent, and it would look plausible
+while quietly destroying the plan.  `REGIONS`/`GROUPS` do not rescue it:
+they constrain placement, not routing.
+
+So blockages are used only where the semantics genuinely are negative:
+
+- areas the plan requires to stay **clear** (e.g. lower-layer keep-outs
+  under a reserved corridor), and
+- **`+ PARTIAL <maxDensity>`** density limits, the standard construct
+  for steering congestion away from a region without forbidding it — the
+  closest portable expression of "leave room here for the bus plan".
+
+Corridors themselves are conveyed by the manifest, never as blockages.
 
 That split is honest about the format's limits and keeps the portable
-part portable.  It also raises the value of the Tcl work in Phase 5 from
-"nice to have" to "the delivery vehicle for half the artifact".
+part portable.  It also raises the Tcl work in Phase 5 from "nice to
+have" to **the delivery vehicle for the primary artifact** — which
+argues for pulling a minimal guide-emitter forward rather than leaving
+all of Tcl to Phase 5.
 
 **Deferred by this decision** (recorded, not deleted): the via library
 (2c), DEF `VIAS` (3f), routed-net emission (4b), and all DRC/enclosure
@@ -95,7 +115,7 @@ flow exits non-zero under the flag and 0 without it.
 
 ---
 
-## 2. Phase 1 — the coordinate model (≈ 1 week; the highest-value structural fix)
+## 2. Phase 1 — the coordinate + unit model (≈ 2 weeks; the highest-value structural fix)
 
 **The finding that makes this cheap.**  The routing engine is
 **unit-agnostic**: `grep` for micron semantics across `topology.cpp`,
@@ -130,9 +150,52 @@ is what makes real-PDK data unusable, not the algorithms.
   ~10³ ulps wide, so the ±1 tolerance reasoning still holds — but this
   must be re-derived, not assumed, and pinned with a test.
 
-**Gate:** whole corpus byte-identical at the default factor; a new
-DBU-mode fixture round-trips DEF → BUDA → DEF with zero coordinate
-drift.
+**Scaling coordinates alone is NOT sufficient** (review on PR #641,
+verified).  Engine units are used for *every* physical quantity, not
+just coordinates, and several are hardcoded constants or script-declared
+values that would stay in the old scale:
+
+- bus width is `len(bits) * 1.5` — "1.5 layout-units per bit", a literal
+  (`src/buda_cmds/bundling_cmds.py:703`);
+- the NUTS inter-bus track pitch defaults to `1.0`
+  (`src/buda_session/nutsflow.py:725`);
+- the planner's default capacity model is `CapacityMode::WIDTH`
+  (`src/congestion_planner.h:671`), which consumes those widths;
+- plus every script-declared distance: `corner_margin`,
+  `set_min_stub_length*`, `detour_channel`, `def_layer` span_min/max.
+
+At 2000 DBU/µm a bus would reserve ~1/2000 of the space it needs, and
+the run would look wildly feasible while meaning nothing.
+
+**What makes this tractable** is that the width model already prefers
+grid-derived geometry: `LayerStack::eff_bus_width` returns
+`bits * layer.bit_pitch` whenever the layer has a track pattern, and
+falls back to `base_width * dilution` only when it does not
+(`src/layering.cpp:67`).  So in exactly the flow Phase 1 targets — one
+with imported tech tracks — **bus width becomes grid-derived and
+scale-correct automatically**, and the `1.5` literal is only the
+no-pattern fallback.  It does *not* cover track pitch or the
+script-declared distances above.
+
+So Phase 1 is: (a) the import scale factor; (b) make the remaining
+physical defaults grid-derived rather than literal — track pitch should
+come from the layer pattern, as width already does; (c) treat every
+script-declared distance as being in engine units and document that
+contract in one place; and (d) add a cheap **unit-plausibility guard**
+at plan entry — if total reserved bus width is a negligible fraction of
+the die extent (or a track pitch is sub-unit against the grid), fail
+loud.  That guard is what turns this whole class of error from "silently
+optimistic plan" into a stop.
+
+*Revised size: ~2 weeks, not 1.*  The alternative Codex raised — a typed
+unit boundary (`struct Dbu`/`struct EngineUnit`) — is the rigorous fix
+and worth costing separately if this recurs; it is large because every
+geometry signature changes.
+
+**Gate:** whole corpus byte-identical at the default factor; a DBU-mode
+fixture round-trips DEF → BUDA → DEF with zero coordinate drift **and**
+reserves bus widths within a few percent of the µm-mode run
+(the check that would have caught the scaling hole).
 
 ---
 
@@ -189,11 +252,38 @@ discarded today.
 | Step | Content | Why it matters |
 |---|---|---|
 | 3a | Tokenizer + `COMPONENTS n`/`NETS n` **count reconciliation**, loud "imported X of Y" summary, hard error on a cell missing from LEF | Kills the silent **0.5 × 0.5 µm** fallback (`:1408`) that turns a wrong-LEF run into a plausible, entirely wrong floorplan |
-| 3b | `TRACKS` → exact `TrackPattern` (origin/step/count), `GCELLGRID` | The real track grid, with the real offset — strictly better than deriving from LEF `PITCH` |
+| 3b | `TRACKS` → `TrackPattern` + **new finite bounds**, `GCELLGRID` | The real grid with the real offset. **Model change required** (see below) — `TrackPattern` is origin + repeating slots and tiles outward without limit (`src/routing_grid.h:39`), while a DEF `TRACKS … DO n STEP s` is a *finite* set |
 | 3c | `BLOCKAGES` + macro `OBS` + component `HALO` → `add_keepout` per layer | **The single most surprising omission for a routing tool.** The keepout machinery already exists (`src/routing_grid.h:197`, `src/topology.h:465`) — this is wiring, not new capability |
-| 3d | `PINS` (top-level ports, currently skipped at `:1459`), `SPECIALNETS` (power straps → keepouts, and later pre-route geometry) | Ports are real endpoints; straps are real obstacles |
+| 3d | `PINS` (top-level ports, skipped at `:1459`) + **an endpoint model for them**, `SPECIALNETS` (power straps → keepouts) | **Parsing alone is insufficient** (see below): the bundler drops any pin whose `comp_id` is not a component at the bundling depth (`src/bundler.cpp:168`), so imported ports would be silently ignored |
 | 3e | `NONDEFAULTRULES` → the **landed NDR** feature (`def_ndr`/`set_ndr`) | Rare alignment: the internal feature already exists and matches the DEF concept |
 | ~~3f~~ | ~~`VIAS` (custom via definitions)~~ | **Deferred** (router path only) — see §0 |
+
+**3b — the `TrackPattern` model must grow (review, PR #641).**  Mapping
+`origin/step/count` onto today's type cannot be exact: `tracks_in_range`
+tiles the pattern from the origin outward to cover whatever interval it
+is asked about (`src/routing_grid.h:39-56`), so a query outside the
+DEF-declared range would **invent** tracks that the technology does not
+have — silently, and in the direction of optimism.  Phase 3b therefore
+adds a finite extent (first/last, or origin + count) to `TrackPattern`,
+with queries clamped to it.  Existing hand-declared patterns keep
+unbounded semantics by default, so the corpus is unaffected.
+
+**3d — die ports need a routable identity (review, PR #641).**  Reading
+`PINS` does not make them endpoints.  `PinRow` is keyed by component,
+and endpoint derivation skips any pin whose `comp_id` is absent from
+`comp_by_id` or sits at another depth (`src/bundler.cpp:168`); a null
+BDB `comp_id` would additionally read back as integer 0
+(`src/bdb.cpp:1584`).  So a net reaching the die edge would be
+**silently incomplete** — exactly the failure class `check_design`'s
+`BUSTERM_OPEN` exists to prevent, arriving before the audit can see it.
+Two candidate designs, to be chosen in 3d rather than assumed:
+*(i)* synthesize a zero-area boundary **component** per port (cheapest —
+every downstream stage already understands components, at the cost of a
+fictional instance in the hierarchy), or *(ii)* add a first-class port
+endpoint kind threaded through busterm derivation and topology
+generation (cleaner, wider blast radius).  Recommendation: (i) behind an
+explicit `is_port` flag on the component row, so the fiction is visible
+in the database and to the audits.
 
 **Scale.**  The reader has only ever run on a 3 878-line floorplan DEF.
 A real post-place DEF is 10⁶–10⁸ lines; per-line `std::regex` will not
@@ -209,17 +299,23 @@ There is **no DEF writer today** — the only export is `export_gds`.
 This is the gap that makes the tool's output "a picture, not a
 constraint": GDS rectangles carry no net identity a P&R tool can adopt.
 
-**4a — DEF `BLOCKAGES`.**  Emit the corridors the planner reserved as
-routing obstruction (`BLOCKAGES + LAYER <layer> RECT …`), derived from
-the placed `bus_segment` extents plus their reserved margin.  Needs no
-via model and no DRC.  Deterministic ordering (sorted, like `gds_io`)
-and a DEF → BUDA → DEF round-trip test.
+**4a — corridor manifest + guide emitter (the primary artifact).**  Per
+bundle: net names, layer, and the reserved rectangles from the placed
+`bus_segment` extents plus margin, in JSON/CSV (reusing Phase 0's report
+plumbing), together with one worked `create_route_guide`-style Tcl
+script.  This carries the positive intent that DEF cannot express, so it
+leads rather than follows.
 
-**4b — corridor manifest + Tcl example.**  The half DEF cannot express:
-per bundle, its net names, layer, and reserved rectangles, in JSON/CSV,
-plus one worked `create_route_guide`-style Tcl script showing a site how
-to turn the manifest into native guides.  Reuses Phase 0's report
-plumbing.
+**4b — DEF `BLOCKAGES`, negative semantics only.**  Keep-clear regions
+and `+ PARTIAL <maxDensity>` density limits — **not** the corridors
+themselves (see §0).  Deterministic ordering (sorted, like `gds_io`) and
+a DEF → BUDA → DEF round-trip test.
+
+**Acceptance for both:** a worked end-to-end example on the checked-in
+`demo/ariane` DEF — import, plan, emit, and re-read the emitted DEF —
+showing that the guides name the right nets and that no blockage
+overlaps a corridor it is meant to protect.  Without that example the
+artifact's semantics are untested prose.
 
 *Router-path emission (`NETS … + ROUTED` with real vias) is deferred —
 see §0.  The data for it already exists in `net_segment`/`net_via`, so
@@ -262,11 +358,11 @@ the deferral costs nothing but the writer and the physical models.*
 | Phase | Deliverable | Size |
 |---|---|---|
 | 0 | Exit codes + JSON report | ~3 days |
-| 1 | Explicit import scale (DBU-exact option) | ~1 week |
+| 1 | Import scale + unit consistency (defaults, guard) | ~2 weeks |
 | 2 | LEF reader (tokenizer, macros, tech layers, vias) | 3–4 weeks |
 | 3 | DEF reader (tokenizer, TRACKS, blockages, pins, NDR) | 3–4 weeks |
-| 4a | DEF writer — `BLOCKAGES` | 2 weeks |
-| 4b | Corridor manifest + worked Tcl example | 1 week |
+| 4a | Corridor manifest + guide emitter + worked Tcl | 2 weeks |
+| 4b | DEF `BLOCKAGES` (keep-clear / `PARTIAL` density) | 1 week |
 | 5 | Tcl front end, packaging, logging | 3–4 weeks |
 | — | ~~router path: vias, routed nets, DRC~~ | **deferred, §0** |
 
