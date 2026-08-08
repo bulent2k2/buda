@@ -2892,7 +2892,9 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
     if (!plan.found) { plan = plan_bundle(*target, PlanMode::BEST_EFFORT); ++n_fallback; }
     const double ms_fallback = ms_since(t0);
     if (kProf) {
-        std::cout << "[ReplanProf] b" << target_bundle_id
+        // std::cerr: negotiate silences the iteration body's stdout (Python
+        // redirect + ostream_redirect), so cout lines would be swallowed.
+        std::cerr << "[ReplanProf] b" << target_bundle_id
                   << " total=" << ms_since(t_call)
                   << "ms recharge=" << ms_recharge
                   << " strict=" << ms_strict << "(found=" << strict_found
