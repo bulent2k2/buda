@@ -69,6 +69,99 @@ def _canonical_slot_type(cmd_name, raw):
     sys.exit(1)
 
 
+def _expand_slot_groups(cmd_name, toks, usage):
+    """Expand `( <slots> )x<N>` repetition groups into a flat token list.
+
+    A dense pattern is mostly one slot repeated: spelling out twelve identical
+    `_ 1 1` triples buries the intent (and any typo in the middle of them).
+    `(_ 1 1)x12` says it once.  The group may hold SEVERAL slots — `(VDD 2 1
+    _ 1 1)x4` — since that is the same parse and strictly more expressive.
+
+    Spacing is free: `)x12`, `)x 12` and `) x 12` are the same, because the
+    structural parens are split out before scanning.  Groups do NOT nest —
+    the grammar stays flat so the error messages can stay specific.
+
+    Byte-identical for a paren-free list (the normalize/split round-trips it).
+    """
+    # Split the structural parens off whatever they are glued to, so `(_`,
+    # `1)x12` and `( _ 1 1 ) x 12` all reduce to the same token stream.
+    toks = " ".join(toks).replace("(", " ( ").replace(")", " ) ").split()
+    if "(" not in toks and ")" not in toks:
+        return toks
+
+    def die(msg):
+        print(f"Error: {cmd_name} {msg}\n  Usage: {usage}")
+        sys.exit(1)
+
+    out, i, n = [], 0, len(toks)
+    while i < n:
+        t = toks[i]
+        if t == ")":
+            die("unmatched ')' in the slot list — a repetition group is "
+                "written `( <slots> )x<count>`")
+        if t != "(":
+            out.append(t)
+            i += 1
+            continue
+        # ── a group: collect up to the matching ')' ──────────────────────
+        i += 1
+        group = []
+        while i < n and toks[i] != ")":
+            if toks[i] == "(":
+                die("nested '(' in the slot list — repetition groups do not "
+                    "nest; repeat the expanded slots instead")
+            group.append(toks[i])
+            i += 1
+        if i >= n:
+            die("unterminated '(' in the slot list — expected `)x<count>`")
+        i += 1                                   # consume ')'
+        if not group:
+            die("empty repetition group '()' in the slot list")
+        # ── the count: `x12`, `x 12`, or `X12` ──────────────────────────
+        if i >= n or not toks[i][:1] in ("x", "X"):
+            die("repetition group is missing its count — write "
+                "`( <slots> )x<count>`, e.g. `(_ 1 1)x12`")
+        digits = toks[i][1:]
+        i += 1
+        if not digits:                           # the count is the next token
+            if i >= n:
+                die("repetition group is missing its count — write "
+                    "`( <slots> )x<count>`, e.g. `(_ 1 1)x12`")
+            digits = toks[i]
+            i += 1
+        if not digits.isdigit() or int(digits) < 1:
+            die(f"repetition count '{digits}' is not a positive integer — "
+                f"write `( <slots> )x<count>`, e.g. `(_ 1 1)x12`")
+        if len(group) % 3 != 0:
+            die(f"repetition group has {len(group)} token(s), not a whole "
+                f"number of `<type> <width> <space_after>` triples")
+        out.extend(group * int(digits))
+    return out
+
+
+def _parse_slots(cmd_name, toks, usage):
+    """Parse a `<type> <width> <space_after>` slot list (repetition groups
+    expanded first) into TrackSlots.  Shared by def_track_pattern and
+    add_grid_override — the two had byte-identical copies of this loop."""
+    toks = _expand_slot_groups(cmd_name, toks, usage)
+    slots = []
+    i = 0
+    while i + 2 < len(toks):
+        slot_type   = toks[i]
+        width       = require_number(cmd_name,
+                                     f"<width> of slot '{slot_type}'",
+                                     toks[i + 1], usage=usage)
+        space_after = require_number(cmd_name,
+                                     f"<space_after> of slot '{slot_type}'",
+                                     toks[i + 2], usage=usage)
+        slots.append(buda.TrackSlot(
+            type=_canonical_slot_type(cmd_name, slot_type),
+            label=slot_type.lower(),
+            width=width, space_after=space_after))
+        i += 3
+    return slots
+
+
 def cmd_def_track_pattern(session, cmd, args, cmd_line):
     # Usage: def_track_pattern <layer_id> <origin> [<type> <width> <space_after>] ...
     # Example: def_track_pattern 4 0.0  POWER 2.0 1.0  SIGNAL 1.0 1.0  GROUND 2.0 1.0
@@ -80,23 +173,8 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
                                 usage=_DEF_TRACK_PATTERN_USAGE)
     origin   = require_number("def_track_pattern", "<origin>", args[1],
                               usage=_DEF_TRACK_PATTERN_USAGE)
-    slots = []
-    i = 2
-    while i + 2 < len(args):
-        slot_type   = args[i]
-        width       = require_number("def_track_pattern",
-                                     f"<width> of slot '{slot_type}'",
-                                     args[i + 1],
-                                     usage=_DEF_TRACK_PATTERN_USAGE)
-        space_after = require_number("def_track_pattern",
-                                     f"<space_after> of slot '{slot_type}'",
-                                     args[i + 2],
-                                     usage=_DEF_TRACK_PATTERN_USAGE)
-        slots.append(buda.TrackSlot(
-            type=_canonical_slot_type("def_track_pattern", slot_type),
-            label=slot_type.lower(),
-            width=width, space_after=space_after))
-        i += 3
+    slots = _parse_slots("def_track_pattern", args[2:],
+                         _DEF_TRACK_PATTERN_USAGE)
     if not slots:
         print("Error: def_track_pattern requires at least one slot triple")
         return
@@ -213,23 +291,8 @@ def cmd_add_grid_override(session, cmd, args, cmd_line):
     x2, y2 = _coord("<x2>", args[3]), _coord("<y2>", args[4])
     origin = require_number("add_grid_override", "<origin>", args[5],
                             usage=_ADD_GRID_OVERRIDE_USAGE)
-    slots = []
-    i = 6
-    while i + 2 < len(args):
-        slot_type   = args[i]
-        width       = require_number("add_grid_override",
-                                     f"<width> of slot '{slot_type}'",
-                                     args[i + 1],
-                                     usage=_ADD_GRID_OVERRIDE_USAGE)
-        space_after = require_number("add_grid_override",
-                                     f"<space_after> of slot '{slot_type}'",
-                                     args[i + 2],
-                                     usage=_ADD_GRID_OVERRIDE_USAGE)
-        slots.append(buda.TrackSlot(
-            type=_canonical_slot_type("add_grid_override", slot_type),
-            label=slot_type.lower(),
-            width=width, space_after=space_after))
-        i += 3
+    slots = _parse_slots("add_grid_override", args[6:],
+                         _ADD_GRID_OVERRIDE_USAGE)
     if not slots:
         print("Error: add_grid_override requires at least one slot triple")
         return
