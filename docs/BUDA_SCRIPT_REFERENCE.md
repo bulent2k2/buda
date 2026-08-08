@@ -309,16 +309,16 @@ Worked vehicles: `flow/rnr/mix2_fast_bottomup.buda` (with layer caps:
 
 ```buda
 # DEF + Verilog merge
-open_bdb  flow/lefdef/gcd/gcd.bdb
-import_def_lef  flow/lefdef/gcd/gcd.def  flow/lefdef/gcd/gcd.lef
-import_verilog  flow/lefdef/gcd/gcd.v
+open_bdb  <path1>/gcd.bdb  # create new empty db (or open existing one)
+import_def_lef  <path2>/gcd.def  <path2>/gcd.lef
+import_verilog  <path3>/gcd.v
 
 # Fixup after import
 move_comp   u_regfile  10.0  10.0
 resize_cell DFFRX1     5.6   4.0
 
 # Build from scratch
-open_bdb  flow/manual/tiny.bdb
+open_bdb  ./tiny.bdb
 add_comp  u_a  blk  -      0   0  100 100 nonleaf
 add_comp  u_b  blk  -    200   0  300 100 nonleaf
 add_comp  u_a/x0  cell  u_a   10  10   50  50 leaf
