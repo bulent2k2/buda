@@ -39,7 +39,7 @@ path on a 4-core runner).
 | Want the Linux/GCC toolchain semantics with zero package compromises | **MinGW UCRT64** — the only path that is both GCC *and* full-wheel-ecosystem |
 | Need to reproduce a GCC-specific bug (codegen, `-ffp-contract`, warnings) on Windows | **MinGW** (or Cygwin if the POSIX layer matters too) |
 | Want to run the repo's own `bin/` wrappers or need working `fcntl` locking | **Cygwin** — accept the caveat list in §6 |
-| Care about redistributing the built artifacts | **MinGW** (self-contained) or MSVC (UCRT is in-box on Win10+); Cygwin drags its runtime along |
+| Care about redistributing the built artifacts | **MinGW** (self-contained — the only lane with no runtime prerequisite). MSVC artifacts use the default `/MD` runtime, so targets need the matching **Visual C++ Redistributable** (`msvcp140`/`vcruntime140` — only the UCRT is in-box on Win10+, and CPython's installer ships `vcruntime140` but not the C++ standard library). Cygwin drags its runtime along |
 | Need the GUI tools (floorplanner/viz) | MSVC or MinGW — Cygwin's matplotlib is broken upstream |
 | Want a toolchain that won't shift under you | MSVC; MSYS2 and Cygwin are rolling releases |
 
