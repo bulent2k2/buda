@@ -648,6 +648,10 @@ void bind_routing(py::module_& m) {
     m.def("ndr_run_layout", &ndr_run_layout,
           "Slot-role layout of the ascending run (B/b/S/G), lockstep with "
           "ndr_group_demand");
+    m.def("ndr_shield_net_matches", &ndr_shield_net_matches,
+          "Shield net-identity predicate (R5a/R9): label electrically "
+          "identical to the requested shield net (case-insensitive; "
+          "GND/VSS/GROUND one family, VDD/VCC/POWER another)");
 
     py::class_<BundleInput>(m, "BundleInput")
         .def(py::init<>())

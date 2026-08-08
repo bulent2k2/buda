@@ -35,6 +35,7 @@ Phase-1 shape (the recorded leaning, slot-quantized consumption):
 - flat flow only: run_hier_bundler refuses when scopes are declared (hier
   template propagation is the next increment).
 """
+import bisect
 import math
 import sys
 
@@ -568,3 +569,219 @@ COMMANDS = {
     "set_ndr":  cmd_set_ndr,
     "dump_ndr": cmd_dump_ndr,
 }
+
+
+# ── R9 typed audit (NDR_WIDTH / NDR_SPACING / NDR_SHIELD) ──────────────────
+# Defense-in-depth at the dnuts stage: phase-1 placement emits correct
+# k-slot/guard/shield geometry BY CONSTRUCTION, so these checks exist to
+# catch what construction cannot promise forever — a healer move, a hand
+# edit, or the keepout cull removing a shield — and to give NDR designs a
+# violation vocabulary beside BIT_SHORT/KEEPOUT_CROSS.  Report-only, typed,
+# consumed by _check_design's normal summary machinery via the duck-typed
+# violation shape (_FidelityViolation precedent).  No governed bundles =
+# zero output (byte-identity).
+#
+# The shield NET-IDENTITY predicate (buda.ndr_shield_net_matches) ships
+# here as the audit's contract piece; its in-audit consumer — verifying a
+# CREDITED pattern rail really is the rule's shield net — arrives with R5a
+# crediting (phase 2), which must use the same predicate by requirement.
+
+class _NdrKind:
+    def __init__(self, name):
+        self.name = name
+
+
+class _NdrViolation:
+    """Duck-typed to the C++ ConnViolation interface the reporting paths
+    consume (kind.name / seg indices / block_name / bit_index / message)."""
+    seg_idx2 = -1
+    block_name = ""
+
+    def __init__(self, kind, seg_idx, bit_index, message):
+        self.kind = _NdrKind(kind)
+        self.seg_idx = seg_idx
+        self.bit_index = bit_index
+        self.message = message
+
+
+# Rail slot types that are CLEARANCE-NEUTRAL inside a governed run: static
+# supply/shield metal satisfies the clearance intent (the documented phase-1
+# straddle model — a run's guard/shield gaps may cross these rails, which
+# only ADD isolation).  Everything else (CLOCK, CUSTOM) is a potential
+# AGGRESSOR whose presence inside the run the audit must flag: a switching
+# rail is exactly the coupling the rule's clearance exists to exclude, and
+# an unknown-identity CUSTOM rail cannot be verified quiet.
+_NDR_NEUTRAL_RAILS = ("POWER", "GROUND", "SHIELD")
+
+
+def build_ndr_audit_index(session):
+    """Detailed rows materialized and indexed ONCE for a whole check_design
+    pass (Codex #622): `dr.net_segments` is a pybind vector that converts to
+    a fresh Python list on EVERY property access, and a per-segment scan
+    over it made the audit quadratic in placed-row count.  One
+    materialization, grouped by bundle (own-row lookup) and by layer sorted
+    on track position with a parallel key array (foreign-wire lookup via
+    bisect on the run window).  None when no detailed result exists."""
+    dr = session.detailed_result
+    if dr is None:
+        return None
+    rows = list(dr.net_segments)          # the ONE pybind conversion
+    by_bundle, by_layer = {}, {}
+    for r in rows:
+        by_bundle.setdefault(r.bundle_id, []).append(r)
+        by_layer.setdefault(r.layer, []).append(r)
+    layer_sorted = {}
+    for lid, lst in by_layer.items():
+        lst.sort(key=lambda r: r.track_position)
+        layer_sorted[lid] = (lst, [r.track_position for r in lst])
+    return {"by_bundle": by_bundle, "by_layer": layer_sorted}
+
+
+def audit_ndr_dnuts(session, wrapper, index=None):
+    """R9 violations for ONE governed wrapper against the placed detailed
+    result.  Checks per governed segment (rows grouped by seg_idx):
+
+    - NDR_SHIELD: the placed shield count must match the rule's layout for
+      the segment's INTENDED membership (`_seg_member_bits` — the same
+      accounting DNUTS admission uses), not the surviving placed bits: a
+      keepout-culled SIGNAL bit is already reported UNPLACED and must not
+      re-shape the expected shield arrangement into a spurious mismatch,
+      while a culled/skipped SHIELD is LOUD, not silent.  For flank-the-bus
+      the two shields must be the OUTERMOST rows of the run.
+    - NDR_WIDTH: each signal bit's placed extent must cover width_slots
+      SIGNAL slot centres on its layer (an under-width wire — e.g. a
+      default-width placement of a governed bit — covers fewer).
+    - NDR_SPACING: the group's claimed run is EXCLUSIVE — a foreign wire
+      (another bundle) whose track centre falls inside it with an
+      overlapping span sits on a guard or between bits, violating the
+      rule's clearance.  For an unshielded rule the audited run extends
+      over the END GUARD slots beyond the outermost placed wires (the
+      layout reserves them, so metal there is just as foreign), and
+      AGGRESSOR pre-routes (CLOCK/CUSTOM pattern rails) inside the run are
+      flagged too — static supply/shield rails stay exempt per the
+      documented straddle-neutral phase-1 model (`_NDR_NEUTRAL_RAILS`).
+
+    `index` is a `build_ndr_audit_index` result shared across wrappers by
+    `_check_design`; built on the fly when omitted.
+    """
+    spec = wrapper.input.ndr
+    dr = session.detailed_result
+    if not spec.active() or dr is None:
+        return []
+    if index is None:
+        index = build_ndr_audit_index(session)
+    bid = wrapper.input.original_bundle.id
+    by_seg = {}
+    for ns in index["by_bundle"].get(bid, ()):
+        by_seg.setdefault(ns.seg_idx, []).append(ns)
+    out = []
+    grid_stack = session.routing_grid
+    sel = wrapper.plan.selected_topology_index
+    for seg_idx, rows in sorted(by_seg.items()):
+        bits    = [r for r in rows if not r.is_shield]
+        shields = [r for r in rows if r.is_shield]
+        if not bits:
+            continue                      # fully stranded: UNPLACED covers it
+        nb_intended = len(bits)
+        if sel >= 0:
+            nb_intended = max(nb_intended,
+                              session._seg_member_bits(wrapper, sel, seg_idx))
+        layout = buda.ndr_run_layout(spec, nb_intended)
+        exp_shields = layout.count("S")
+        if len(shields) != exp_shields:
+            out.append(_NdrViolation(
+                "NDR_SHIELD", seg_idx, -1,
+                f"NDR_SHIELD: seg {seg_idx} rule '{spec.rule_name}' expects "
+                f"{exp_shields} shield wire(s) (net {spec.shield_net}) but "
+                f"{len(shields)} are placed — the bus is not shielded as "
+                f"declared"))
+        elif spec.shield_mode == 1 and exp_shields == 2:
+            lo = min(rows, key=lambda r: r.track_position)
+            hi = max(rows, key=lambda r: r.track_position)
+            if not (lo.is_shield and hi.is_shield):
+                out.append(_NdrViolation(
+                    "NDR_SHIELD", seg_idx, -1,
+                    f"NDR_SHIELD: seg {seg_idx} rule '{spec.rule_name}' "
+                    f"(flank-the-bus) shields are not the outermost wires "
+                    f"of the run — a signal bit sits outside the shield"))
+        # Width: placed extent must cover width_slots SIGNAL slot centres.
+        if spec.width_slots > 1 and grid_stack is not None:
+            for r in bits:
+                if not grid_stack.has_layer(r.layer):
+                    continue
+                g = grid_stack.get_layer_grid(r.layer)
+                mid = 0.5 * (r.span_lo + r.span_hi)
+                eps = 1e-6
+                covered = len(g.signal_tracks_in(
+                    mid, r.track_position - r.width / 2.0 - eps,
+                    r.track_position + r.width / 2.0 + eps))
+                if covered < spec.width_slots:
+                    out.append(_NdrViolation(
+                        "NDR_WIDTH", seg_idx, r.bit_index,
+                        f"NDR_WIDTH: seg {seg_idx} bit {r.bit_index} covers "
+                        f"{covered} SIGNAL slot(s), rule '{spec.rule_name}' "
+                        f"requires {spec.width_slots} — under-width wire"))
+        # Spacing: the run is exclusive — no foreign wire inside it.
+        run_lo = min(r.track_position - r.width / 2.0 for r in rows)
+        run_hi = max(r.track_position + r.width / 2.0 for r in rows)
+        s_lo = min(min(r.span_lo, r.span_hi) for r in rows)
+        s_hi = max(max(r.span_lo, r.span_hi) for r in rows)
+        layer = rows[0].layer
+        have_grid = grid_stack is not None and grid_stack.has_layer(layer)
+        # An UNSHIELDED rule's layout reserves guard_slots SIGNAL slots
+        # beyond the outermost wires too (the run's end guards) — the
+        # placed rows alone stop at the outer bit edges, so extend the
+        # audited extent over the nearest guard_slots signal slot centres
+        # on each side (a shielded rule's ends ARE placed rows already).
+        if spec.shield_mode == 0 and spec.guard_slots > 0 and have_grid:
+            g = grid_stack.get_layer_grid(layer)
+            pat = g.global_pattern()
+            period = pat.unit_pitch() if pat.slots else 0.0
+            if period > 0:
+                mid = 0.5 * (s_lo + s_hi)
+                reach = (spec.guard_slots + 1) * period
+                eps = 1e-9
+                below = g.signal_tracks_in(mid, run_lo - reach, run_lo - eps)
+                if below:
+                    pos, slot = below[max(0, len(below) - spec.guard_slots)]
+                    run_lo = min(run_lo, pos - slot.width / 2.0)
+                above = g.signal_tracks_in(mid, run_hi + eps, run_hi + reach)
+                if above:
+                    pos, slot = above[min(len(above), spec.guard_slots) - 1]
+                    run_hi = max(run_hi, pos + slot.width / 2.0)
+        # Foreign detailed wires, via the shared by-layer index (bisect on
+        # the sorted track positions keeps this local to the run window).
+        lst, keys = index["by_layer"].get(layer, ((), ()))
+        i0 = bisect.bisect_right(keys, run_lo)
+        i1 = bisect.bisect_left(keys, run_hi)
+        for o in lst[i0:i1]:
+            if o.bundle_id == bid:
+                continue
+            o_lo, o_hi = min(o.span_lo, o.span_hi), max(o.span_lo, o.span_hi)
+            if o_lo < s_hi and o_hi > s_lo:
+                out.append(_NdrViolation(
+                    "NDR_SPACING", seg_idx, o.bit_index,
+                    f"NDR_SPACING: bundle {o.bundle_id} bit {o.bit_index} "
+                    f"sits at track {o.track_position:g} INSIDE bundle "
+                    f"{bid} seg {seg_idx}'s reserved run "
+                    f"[{run_lo:g}..{run_hi:g}] (rule '{spec.rule_name}') — "
+                    f"the rule's clearance is violated"))
+        # Aggressor pre-routes: a CLOCK (or unknown-identity CUSTOM) rail
+        # whose track runs inside the reserved window is fixed metal the
+        # detailed rows can never show — the pre-routes-vs-spacing case of
+        # R6.  Static supply/shield rails are exempt (straddle-neutral).
+        if have_grid:
+            for pr in grid_stack.preroutes(layer, run_lo, run_hi, s_lo, s_hi):
+                if pr.slot_type in _NDR_NEUTRAL_RAILS:
+                    continue
+                if not (run_lo < pr.track_position < run_hi):
+                    continue
+                out.append(_NdrViolation(
+                    "NDR_SPACING", seg_idx, -1,
+                    f"NDR_SPACING: {pr.slot_type} pre-route "
+                    f"'{pr.label}' at track {pr.track_position:g} runs "
+                    f"INSIDE bundle {bid} seg {seg_idx}'s reserved run "
+                    f"[{run_lo:g}..{run_hi:g}] (rule '{spec.rule_name}') — "
+                    f"a switching rail is an aggressor the rule's "
+                    f"clearance must exclude"))
+    return out
