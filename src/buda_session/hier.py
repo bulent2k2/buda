@@ -1475,6 +1475,12 @@ class HierMixin:
             if n_cleared:
                 print(f"[LayerCap] cleared stale masks on {n_cleared} "
                       f"bundle(s) (no cell layer policies declared)")
+            # This resolver OWNS allowed_layers on hier wrappers, so a
+            # governed rule's layer restriction is re-applied after every
+            # resolution (incl. this clearing path) — see R2d in
+            # docs/internal/ndr_architecture.md.
+            from buda_cmds import ndr_cmds
+            ndr_cmds.reapply_ndr_layer_restrictions(self, wrappers)
             return
         all_lids = sorted(
             list(self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL)) +
@@ -1554,6 +1560,12 @@ class HierMixin:
                 msg += (f"; {n_shared} carrying fractional shares "
                         f"({len(shares)} share(s))")
             print(msg)
+        # NDR layer restrictions re-applied AFTER the band resolution (this
+        # resolver owns allowed_layers on hier wrappers): the effective mask
+        # is the band ∩ the governing rule's layers — an empty intersection
+        # hard-errors there (R2d).
+        from buda_cmds import ndr_cmds
+        ndr_cmds.reapply_ndr_layer_restrictions(self, wrappers)
 
     def _restore_layer_policies(self):
         """Rebuild _cell_layer_policy from the open BDB (v20): per-cell bands
@@ -2165,6 +2177,9 @@ class HierMixin:
                 nw = buda.BundleWrapper()
                 nw.input.original_bundle = clone
                 nw.input.width = w.input.width
+                # A governed template's rotation-class clone keeps the rule
+                # (R2d — same nets, same class, different orientation).
+                nw.input.ndr = w.input.ndr
                 result.append(nw)
                 made += 1
                 print(f"[BottomUp] cell '{cell}': 90°-rotated instance "
@@ -3923,6 +3938,13 @@ class HierMixin:
                                           for x in b.exit_busterm_ids]
                 new_w.input.original_bundle = clone
                 new_w.input.width = w.input.width
+                # R2d: the template's resolved NDR spec rides to every
+                # instance (donor nets resolve to the same rule — the
+                # bundler's class-congruence check guarantees it); the
+                # rule's LAYER restriction is re-derived by
+                # _apply_layer_policies' NDR re-application on the
+                # expanded set, like every other mask.
+                new_w.input.ndr = w.input.ndr
                 # Map each template candidate to instance coords — through
                 # the instance's detected orientation over the cell box, then
                 # the translation — AND qualify its cell-local block names

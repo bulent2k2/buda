@@ -14,19 +14,27 @@
 
 """NDR × hierarchical flows (the real hbundles vehicles, 06-10).
 
-NDR phase 1 is FLAT-FLOW ONLY, and the v21 rule persistence must coexist
-with fully-populated hierarchical BDBs.  These tests clone the canonical
-hier vehicles (flow/hbundles/06..10) and pin both boundaries on them:
+R2d landed: run_hier_bundler PROPAGATES declared rules — the rule-class
+split runs on TEMPLATE bundles before per-instance expansion (replicas in
+lockstep), specs ride expansion to every occurrence, and a class governed
+inconsistently across occurrences hard-errors.  These tests clone the
+canonical hier vehicles (flow/hbundles/06..10) and pin the contract:
 
-1. the phase-1 refusal is LOUD on every real hier vehicle — declaring NDR
-   scopes before run_hier_bundler hard-errors instead of silently routing
-   governed nets at default width/spacing/no-shield (the bare-session unit
-   test's contract, proven against real cell hierarchies);
-2. v21 rules/scopes persist into and restore from a HIER design BDB — the
-   new tables ride beside the full bundle/topology/routing row population
-   (write-through after the flow, restore in a fresh session), and a hier
-   flow leaves the tables empty (no silent rule creation);
-3. the flows themselves still run to completion under the v21 schema.
+1. a governed hier flow runs END-TO-END on every real vehicle — the rule
+   resolves, the bundler reports governance, and the pipeline completes
+   (the old phase-1 refusal tests, flipped to must-route);
+2. a cell-level template class governed by a class-wide scope emits
+   shields at EVERY instance (the propagation the refusal used to block);
+3. a scope that governs a class inconsistently (naming one occurrence's
+   prefix) refuses LOUDLY — a template is solved once and copied, so
+   per-occurrence rules cannot ride it;
+4. per-occurrence CONGRUENT scopes split template and replicas in
+   lockstep (the |NDR: suffix parts, parent linkage rewired);
+5. v21/v22 rules/scopes persist into and restore from a HIER design BDB —
+   the tables ride beside the full bundle/topology/routing population,
+   and an ungoverned hier flow leaves them empty (no silent rule
+   creation);
+6. the flows themselves still run to completion under the current schema.
 
 Mid tier, like the other full-flow integration tests (test_flow_scripts).
 """
@@ -89,19 +97,133 @@ def _run(s, cmd):
     return buf.getvalue()
 
 
-@pytest.mark.parametrize("flow", _HIER_FLOWS)
-def test_hier_bundler_refuses_ndr_scopes_on_real_vehicle(flow):
-    # Inject a rule + scope right before run_hier_bundler: the phase-1
-    # flat-only contract must refuse LOUDLY on the real hier vehicle, not
-    # silently ignore the declared constraints.
+# A real net prefix per vehicle (cell-level template classes where the
+# vehicle has one, top-level buses otherwise) — the governed-run tests
+# resolve against actual nets, not a dead prefix.
+_GOV_PREFIX = {
+    "06_multipin_stress.buda": "d1_mp3_",       # cell-level class, 6 occ.
+    "07_wide_fan_stress.buda": "mp7_",
+    "08_cross_level.buda": "b_lohi_",           # cell-level class, 4 occ.
+    "09_local_global_compete.buda": "loc",
+    "10_chip_units_blocks_leaf.buda": "b_fw_",
+}
+
+
+def _governed_run(flow, ndr_lines):
+    """Replay the vehicle with the NDR declarations injected just before
+    run_hier_bundler; returns (session, full output)."""
     s = _session()
-    lines = _flow_lines(flow)
+    out = []
+    for line in _flow_lines(flow):
+        if line.startswith("run_hier_bundler"):
+            for c in ndr_lines:
+                out.append(_run(s, c))
+        out.append(_run(s, line))
+    return s, "".join(out)
+
+
+@pytest.mark.parametrize("flow", _HIER_FLOWS)
+def test_hier_governed_flow_completes(flow):
+    # R2d flip of the phase-1 refusal test: a shield-only rule on a real
+    # net prefix must be ACCEPTED by run_hier_bundler, reported as
+    # governance, and the vehicle must still run to a detailed result.
+    s, out = _governed_run(flow, [
+        "def_ndr shieldr shield bus net GND",
+        f"set_ndr {_GOV_PREFIX[flow]} shieldr"])
+    assert "governed by declared rules" in out
+    assert s.detailed_result is not None
+    assert any(w.input.ndr.active() for w in s.bundles)
+
+
+def test_hier_cell_template_class_shields_every_instance():
+    # The heart of R2d: a class-wide scope on vehicle 06's 6-occurrence
+    # cell-level template governs template + 5 replicas (6 wrappers), and
+    # the expanded result carries EMITTED SHIELD rows — the constraint
+    # physically propagated to the instances, where the refusal used to
+    # stand.  (Baseline 06 emits zero shields.)
+    s, out = _governed_run("06_multipin_stress.buda", [
+        "def_ndr shieldr shield bus net GND",
+        "set_ndr d1_mp3_ shieldr"])
+    assert "[NDR] 6 bundle(s) governed by declared rules" in out
+    shields = [ns for ns in s.detailed_result.net_segments if ns.is_shield]
+    assert len(shields) > 0
+    gov = [w for w in s.bundles if w.input.ndr.active()]
+    assert len(gov) == 6                  # one expanded wrapper per instance
+    gov_ids = {w.input.original_bundle.id for w in gov}
+    assert {ns.bundle_id for ns in shields} <= gov_ids
+    # Every governed INSTANCE carries shields (propagation, not just the
+    # reference).
+    assert len({ns.bundle_id for ns in shields}) == 6
+
+
+def test_hier_layer_restriction_survives_scope_clearing():
+    # Codex #626: specs resolve at bundling and stay on the wrappers, so
+    # clearing the last scope AFTER run_hier_bundler must not strip the
+    # still-governed bundles' layer restrictions — the resolver's NDR
+    # re-application gates on each wrapper's active spec, not the scope
+    # table.  Rule restricted to M5/M6; scope cleared post-bundling; the
+    # expanded governed wrappers must still carry exactly {5, 6}.
+    s = _session()
+    for line in _flow_lines("06_multipin_stress.buda"):
+        if line.startswith("run_hier_bundler"):
+            _run(s, "def_ndr shieldr shield bus net GND layers M5,M6")
+            _run(s, "set_ndr d1_mp3_ shieldr")
+        _run(s, line)
+        if line.startswith("run_hier_bundler"):
+            _run(s, "set_ndr d1_mp3_ off")     # last scope cleared
+        if line.startswith("run_planner"):
+            break
+    gov = [w for w in s.bundles if w.input.ndr.active()]
+    assert len(gov) == 6                       # expansion kept the specs
+    for w in gov:
+        assert list(w.input.allowed_layers) == [5, 6]
+
+
+def test_hier_noncongruent_scope_refuses():
+    # Vehicle 05's `is_lr` bus is a REAL cell-level template class (one
+    # sub_cell template, 23 replicas).  A scope naming only ONE
+    # occurrence's prefix governs that replica but not the template — the
+    # class would be solved once under one rule and copied to occurrences
+    # resolving another.  Hard error naming the diverging partitions.
     with pytest.raises(SystemExit):
-        for line in lines:
-            if line.startswith("run_hier_bundler"):
-                _run(s, "def_ndr clk2x width x2 shield bus")
-                _run(s, "set_ndr net_ clk2x")
-            _run(s, line)
+        _governed_run("05_stress_grid.buda", [
+            "def_ndr shieldr shield bus net GND",
+            "set_ndr is_lr_u1s2_ shieldr"])
+
+
+def test_hier_class_scope_governs_template_and_replicas():
+    # The congruent form on the same REAL template class: one class-wide
+    # prefix governs the template and every replica identically — no
+    # split, 24 governed occurrences, flow completes with shields.
+    s, out = _governed_run("05_stress_grid.buda", [
+        "def_ndr shieldr shield bus net GND",
+        "set_ndr is_lr_ shieldr"])
+    assert "governed by declared rules" in out
+    assert "split hbundle" not in out          # uniform class: no split
+    assert s.detailed_result is not None
+    gov = [w for w in s.bundles if w.input.ndr.active()]
+    assert len(gov) == 24                      # one expanded wrapper per occ.
+    shields = [ns for ns in s.detailed_result.net_segments if ns.is_shield]
+    assert len({ns.bundle_id for ns in shields}) == 24
+
+
+def test_hier_congruent_per_bit_scopes_split_in_lockstep():
+    # Per-occurrence scopes on the SAME bit of every occurrence partition
+    # the whole class identically — the template splits into rule-uniform
+    # parts, its replicas split in LOCKSTEP (parent linkage rewired
+    # part-for-part), and the flow completes with every occurrence's
+    # governed 1-bit part carrying the rule.
+    ndr = ["def_ndr shieldr shield bus net GND"]
+    ndr += [f"set_ndr is_lr_u{u}s{k}_0 shieldr"
+            for u in range(1, 7) for k in range(1, 5)]
+    s, out = _governed_run("05_stress_grid.buda", ndr)
+    assert "[NDR] split hbundle" in out
+    assert s.detailed_result is not None
+    gov = [w for w in s.bundles if w.input.ndr.active()]
+    # 24 occurrences × the 1-bit governed part.
+    assert len(gov) == 24
+    assert all(len(w.input.original_bundle.get_net_names()) == 1
+               for w in gov)
 
 
 @pytest.mark.parametrize("flow", _HIER_FLOWS)

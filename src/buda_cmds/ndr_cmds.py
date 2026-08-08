@@ -403,7 +403,7 @@ def cmd_set_ndr(session, cmd, args, cmd_line):
     session._ndr_scopes_typed.add(prefix)
     _write_scope_through(session, prefix, rule)       # v21: persists
     print(f"[NDR] scope '{prefix}' -> rule '{rule}' ({len(scopes)} scope(s) "
-          f"active; applies at the next run_bundler)")
+          f"active; applies at the next run_bundler / run_hier_bundler)")
 
 
 def _layer_id(session, tok):
@@ -450,6 +450,168 @@ def split_mixed_ndr_bundles(session, raw_bundles):
             nb.num_terminals = b.num_terminals
             out.append(nb)
     return out
+
+
+def split_mixed_ndr_hbundles(session, raw_bundles):
+    """Hier rule-class split (R2d): the `split_mixed_ndr_bundles` twin for
+    run_hier_bundler, applied to TEMPLATE bundles BEFORE per-instance
+    expansion so the split propagates identically to every occurrence —
+    the `_split_hier_bundles` (set_max_bundle_bits) pattern: every HBundle
+    hier field is preserved per part (`_clone_hbundle_with_id`), per-net
+    fan-in arrays split in the same net partition (with the fan-in
+    reason/busterm re-scope), and a cell-local template's REPLICAS split
+    in LOCKSTEP with their template, parent_id rewired part-for-part.
+
+    Occurrences of one cell-local class carry INSTANCE-SPECIFIC net names
+    (`d1_mp3_u1_*` on the template, `d1_mp3_u2_*` on a replica), so the
+    class is CONGRUENT only when every occurrence's nets partition into
+    the SAME (rule, bit-index) classes — the template's routing is solved
+    once and copied, so per-occurrence rule differences cannot ride one
+    template.  A scope that governs the class inconsistently (e.g. naming
+    only one instance's prefix) is a HARD ERROR naming the bundle and the
+    diverging partitions — refusing beats silently splitting the class
+    apart or routing one occurrence ungoverned.
+
+    No scopes declared = input returned untouched (byte-identity)."""
+    if not getattr(session, "_ndr_scopes", None):
+        return raw_bundles
+    from buda_cmds.bundling_cmds import _fanin_core
+
+    counter = [max((b.id for b in raw_bundles), default=0)]
+
+    def _new_id():
+        counter[0] += 1
+        return counter[0]
+
+    def _classes(b):
+        """The bundle's (rule, [net indices]) partition, stably ordered
+        (default class first, then by rule name — the flat split's
+        order)."""
+        cls = {}
+        for i, n in enumerate(b.get_net_names()):
+            cls.setdefault(ndr_rule_for_net(session, n), []).append(i)
+        return sorted(cls.items(), key=lambda kv: (kv[0] is not None,
+                                                   kv[0] or ""))
+
+    def _split_one(b, classes):
+        nets = list(b.get_net_names())
+        if len(classes) <= 1:
+            return [b]
+        drvs = list(b.net_drivers)
+        rcvs = [list(r) for r in b.net_receivers]
+        fanin = bool(drvs) and len(drvs) == len(nets)
+        sizes = "+".join(str(len(idxs)) for _, idxs in classes)
+        names = ", ".join(str(r or "default") for r, _ in classes)
+        print(f"[NDR] split hbundle {b.id} ({len(nets)} bits) into "
+              f"{len(classes)} rule-uniform part(s) ({sizes}): rules "
+              f"[{names}] — a mixed-rule bundle cannot ride one spec")
+        parts = []
+        for k, (rule, idxs) in enumerate(classes, start=1):
+            nb = session._clone_hbundle_with_id(
+                b, b.id if k == 1 else _new_id())
+            nb.net_names = [nets[i] for i in idxs]
+            suffix = f"|NDR:{rule or 'default'}"
+            if fanin:
+                pd = [drvs[i] for i in idxs]
+                pr = [rcvs[i] for i in idxs]
+                nb.net_drivers = pd
+                nb.net_receivers = pr
+                core, uniq_drv, root, extra_rcv = _fanin_core(pd, pr)
+                nb.reason = (core if core else b.reason) + suffix
+                # Cell-local fan-in reads endpoints from the busterm ids —
+                # re-scope them to the part's own leaves (the bit-cap
+                # split's rule).
+                if core and b.cell_context and b.entry_busterm_ids:
+                    nb.entry_busterm_ids = ["bt:" + d for d in uniq_drv]
+                    nb.exit_busterm_ids = (["bt:" + root]
+                                           + ["bt:" + r for r in extra_rcv])
+            else:
+                nb.reason = b.reason + suffix
+            parts.append(nb)
+        return parts
+
+    cell_ids = {b.id for b in raw_bundles if b.cell_context}
+
+    def _is_replica(b):
+        return bool(b.cell_context and b.parent_id in cell_ids
+                    and b.instances)
+
+    replicas_of = {}
+    for b in raw_bundles:
+        if _is_replica(b):
+            replicas_of.setdefault(b.parent_id, []).append(b)
+
+    out = []
+    for b in raw_bundles:
+        if _is_replica(b):
+            continue                       # handled with its template
+        reps = replicas_of.get(b.id, ())
+        tcls = _classes(b)
+        for rb in reps:
+            rcls = _classes(rb)
+            if ([(r, idxs) for r, idxs in rcls]
+                    != [(r, idxs) for r, idxs in tcls]):
+                tp = ", ".join(f"{r or 'default'}:{len(i)}"
+                               for r, i in tcls)
+                rp = ", ".join(f"{r or 'default'}:{len(i)}"
+                               for r, i in rcls)
+                print(f"Error: NDR scopes govern cell-level bundle class "
+                      f"{b.id} INCONSISTENTLY across its occurrences: the "
+                      f"template partitions as [{tp}] but occurrence "
+                      f"bundle {rb.id} ({rb.instances[0] if rb.instances else '?'}) "
+                      f"as [{rp}] — a cell-local template is solved once "
+                      f"and copied, so every occurrence must resolve to "
+                      f"the same rules on the same bits.  Scope the whole "
+                      f"class (a prefix covering every instance's nets) "
+                      f"or clear the per-instance scope (set_ndr <prefix> "
+                      f"off).")
+                sys.exit(1)
+        tparts = _split_one(b, tcls)
+        out.extend(tparts)
+        for rb in reps:
+            rparts = _split_one(rb, _classes(rb))
+            for tp, rp in zip(tparts, rparts):
+                rp.parent_id = tp.id       # part k replica → part k template
+            out.extend(rparts)
+    return out
+
+
+def reapply_ndr_layer_restrictions(session, wrappers=None):
+    """Intersect each governed wrapper's rule LAYER restriction into
+    `allowed_layers`.  The hier layer-policy resolver (`
+    _apply_layer_policies`) OWNS allowed_layers on hier wrappers — it
+    clears or rewrites the mask at every wrapper-set transition (templates,
+    expanded instances, restored sessions) — so the NDR restriction is
+    RE-APPLIED after each resolution rather than assumed to survive it.
+    An empty intersection (the rule's layers all outside the cell's band)
+    is a hard error naming both constraints.  The gate is each WRAPPER's
+    active spec, not the scope table: specs resolve at bundling and stay
+    on the wrappers, so clearing the last scope AFTER run_hier_bundler
+    must not strip the still-governed bundles' restrictions (Codex #626 —
+    an empty mask means unrestricted routing).  No governed wrappers =
+    a cheap no-op scan; the flat flow never passes through the resolver
+    and keeps apply_ndr_specs' one-shot intersection."""
+    if wrappers is None:
+        wrappers = session.bundles
+    for w in wrappers:
+        spec = w.input.ndr
+        if not spec.active():
+            continue
+        r = _rules(session).get(spec.rule_name)
+        layers = r["layers"] if r else None
+        if not layers:
+            continue
+        cur = list(w.input.allowed_layers)
+        eff = sorted(set(layers) & set(cur)) if cur else sorted(layers)
+        if cur and not eff:
+            b = w.input.original_bundle
+            print(f"Error: NDR rule '{spec.rule_name}' restricts bundle "
+                  f"{b.id} to layers {sorted(layers)}, but the cell layer "
+                  f"policy allows only {sorted(cur)} — the two constraints "
+                  f"have no layer in common.  Widen the band "
+                  f"(set_cell_layer_cap) or the rule's layers.")
+            sys.exit(1)
+        w.input.allowed_layers = eff
 
 
 def apply_ndr_specs(session):

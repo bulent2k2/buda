@@ -174,7 +174,7 @@ recorded in [../NDR_UI.md](../NDR_UI.md).
 | Req | Where it lands |
 |---|---|
 | R1/R3 | `def_ndr` handler (new `buda_cmds` module) + a C++ `NdrRule` in `buda_core`; R3 arithmetic against each declared layer's pattern at declaration/first-resolution |
-| R2 | prefix resolution beside `set_bundling`'s (longest-prefix, `*` default); hier occurrence-group resolution reuses the scoped-bit-cap union machinery |
+| R2 | **LANDED incl. R2d (§7.4)** — prefix resolution beside `set_bundling`'s (longest-prefix, `*` default); hier: rule-class split on TEMPLATE bundles before expansion, replicas in lockstep, class-congruence hard error |
 | R4 | ONE new function (working name `group_track_demand(members, layer)`, where `members` carries each bit's RESOLVED rule — a mixed-rule bundle (R8) means the group has no single rule, so a one-rule signature would either collapse members to the wrong rule or let planner and placement demand disagree; the shield arrangement is derived per rule-class within the group, and the layer/pattern context prices the quantization) in `buda_core`, consumed by `eff_bus_width`, planner `signal_tracks` capacity, kPeak floor, dead-span escalation, doomed-seat census, `_seg_admission_pool`, DNUTS admission |
 | R5 | generalize `for_each_signal_track_in_span` to run-of-k enumeration behind a rule-aware wrapper; `count_` sibling stays no-allocation, vector/count lockstep preserved |
 | R5a | **LANDED (§7.3)** — opt-in `credit`: end-shield rail crediting inside the credited demand/layout pair, seat-decided at DNUTS, audited by the SAME predicate (`ndr_shield_net_matches` / `ndr_rail_credits`) |
@@ -285,7 +285,7 @@ R10 shipped on the §4 design, the v20 policy-table pattern verbatim:
   exactly like the v20 cap audit.
 
 **Prototype limitations (deliberate, each with its phase):**
-- **Flat flow only** (R2d): hier template propagation refused LOUDLY.
+- ~~Flat flow only~~ — R2d hier template propagation LANDED (§7.4).
 - ~~No R5a crediting~~ — LANDED, opt-in (§7.3).
 - **No shield vias/connectivity** (R6 partial): an EMITTED shield is still
   a floating rail (see §7.3 for the decided disposition — a CREDITED end
@@ -406,3 +406,48 @@ including every phase-1 governed flow):
   credits; one-end credit), the e2e credit flow whose R9 audit agrees
   wherever the seats land, fingerprint suffix back-compat, v22
   round-trip + genuine-v21 migration.
+
+### 7.4 R2d hier template propagation — LANDED (2026-08-08)
+
+`run_hier_bundler` now PROPAGATES declared rules instead of refusing —
+the last flow-scope limitation lifted, on the `set_max_bundle_bits` hier
+pattern throughout:
+
+- **Rule-class split before expansion** (`split_mixed_ndr_hbundles`): a
+  mixed-rule TEMPLATE bundle splits into rule-uniform parts (every
+  HBundle hier field preserved via `_clone_hbundle_with_id`, per-net
+  fan-in arrays split in the same partition with the fan-in
+  reason/busterm re-scope, `|NDR:<rule>` suffix), and a cell-local
+  template's REPLICAS split in LOCKSTEP with `parent_id` rewired
+  part-for-part — so the split propagates identically to every occurrence
+  through the template↔replica donor keying.  Runs AFTER the bit-cap
+  split (the flat order).
+- **Class congruence is a hard error**: occurrences of one cell-local
+  class carry instance-specific net names, so the class is well-governed
+  only when every occurrence's nets partition into the SAME (rule,
+  bit-index) classes — a template is solved once and copied, so
+  per-occurrence rule differences cannot ride it.  A scope naming only
+  one occurrence's prefix (`set_ndr is_lr_u1s2_ r` on vehicle 05's
+  24-occurrence class) refuses LOUDLY naming both partitions; the
+  congruent forms — one class-wide prefix, or per-occurrence scopes on
+  the same bits — govern and split cleanly (test-pinned on the real
+  vehicle).
+- **Specs ride expansion**: `apply_ndr_specs` stamps templates AND
+  replicas at bundler time (before the persist fingerprints);
+  `_expand_hier_bundles` copies `input.ndr` onto every per-instance
+  wrapper (donor nets resolve to the same rule by the congruence
+  guarantee), and a governed template's 90° rotation-class clone keeps
+  the rule too.
+- **Layer restrictions vs the cell-band resolver**:
+  `_apply_layer_policies` OWNS `allowed_layers` on hier wrappers
+  (clears/rewrites at every wrapper-set transition), so the rule's layer
+  restriction is RE-APPLIED after each resolution
+  (`reapply_ndr_layer_restrictions`, called on both resolver paths): the
+  effective mask is the band ∩ the rule's layers, and an empty
+  intersection hard-errors naming both constraints.
+- **Everything downstream is flow-agnostic already**: planner charging,
+  abstract width, DNUTS placement/crediting, the R9 audit, and the
+  v21/v22 persistence all read `input.ndr` off whatever wrappers exist —
+  measured on vehicle 06 (6 governed occurrences, shields at every
+  instance) and 05 (24-occurrence template class).  No scopes = the
+  split/stamp/re-apply hooks all no-op (corpus byte-identity).
