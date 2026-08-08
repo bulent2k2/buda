@@ -26,6 +26,7 @@
 #include <unordered_map>
 #include <atomic>
 #include <thread>
+#include <chrono>
 
 namespace buda {
 
@@ -2813,6 +2814,20 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
     std::vector<BundleAssignment> out;
     if (x_grid_.empty() || cuts_.empty() || span_ref_eff_ <= 0.0) return out;
 
+    // Env-gated per-call profile (BUDA_REPLAN_PROF=1): where does a call's
+    // time go — the recharge-all, the STRICT plan, the victim ladder (and how
+    // many victims / plan_bundle sweeps it grinds), or the fallbacks?
+    static const bool kProf = [] {
+        const char* e = std::getenv("BUDA_REPLAN_PROF");
+        return e && *e && *e != '0';
+    }();
+    using clock_ = std::chrono::steady_clock;
+    auto ms_since = [](clock_::time_point t0) {
+        return std::chrono::duration<double, std::milli>(clock_::now() - t0)
+            .count();
+    };
+    const auto t_call = clock_::now();
+
     BundleWrapper* target = nullptr;
     for (auto& bw : bundles)
         if (bw.input.original_bundle.id == target_bundle_id) { target = &bw; break; }
@@ -2821,14 +2836,22 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
     const int tsel = target->plan.selected_topology_index;
     if (tsel < 0 || tsel >= (int)target->input.candidates.size()) return out;
 
+    auto t0 = clock_::now();
     recharge_committed_(bundles, target);
+    const double ms_recharge = ms_since(t0);
 
     std::set<std::pair<int,int>> contended;
+    t0 = clock_::now();
     PlanResult plan = plan_bundle(*target, PlanMode::STRICT, &contended);
+    const double ms_strict = ms_since(t0);
+    const bool strict_found = plan.found;
     bool committed = false;
     BundleAssignment victim_asn;
     bool moved_victim = false;
+    double ms_ladder = 0.0;
+    int n_ranked = 0, n_victims = 0, n_ladder_plans = 0;
     if (!plan.found && !contended.empty()) {
+        t0 = clock_::now();
         std::vector<std::pair<double, BundleWrapper*>> ranked;
         for (auto& bw : bundles) {
             if (&bw == target || !has_committed_plan_(bw)) continue;
@@ -2838,13 +2861,17 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
         }
         std::sort(ranked.begin(), ranked.end(),
                   [](const auto& a, const auto& b) { return a.first > b.first; });
+        n_ranked = (int)ranked.size();
         for (auto& [ovl, pw] : ranked) {
+            ++n_victims;
             const PlanResult fixed = fixed_plan_of_(*pw);
             commit_plan(*pw, fixed, -1.0);              // rip up the blocker
             PlanResult mine = plan_bundle(*target, PlanMode::STRICT);
+            ++n_ladder_plans;
             if (mine.found) {
                 commit_plan(*target, mine);
                 PlanResult theirs = plan_bundle(*pw, PlanMode::STRICT);
+                ++n_ladder_plans;
                 if (theirs.found) {                     // both overflow-free
                     commit_plan(*pw, theirs);
                     victim_asn   = make_assignment(*pw, theirs);
@@ -2857,9 +2884,24 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
             }
             commit_plan(*pw, fixed);                    // restore and try next
         }
+        ms_ladder = ms_since(t0);
     }
-    if (!plan.found) plan = plan_bundle(*target, PlanMode::ALLOW_OVERFLOW);
-    if (!plan.found) plan = plan_bundle(*target, PlanMode::BEST_EFFORT);
+    t0 = clock_::now();
+    int n_fallback = 0;
+    if (!plan.found) { plan = plan_bundle(*target, PlanMode::ALLOW_OVERFLOW); ++n_fallback; }
+    if (!plan.found) { plan = plan_bundle(*target, PlanMode::BEST_EFFORT); ++n_fallback; }
+    const double ms_fallback = ms_since(t0);
+    if (kProf) {
+        std::cout << "[ReplanProf] b" << target_bundle_id
+                  << " total=" << ms_since(t_call)
+                  << "ms recharge=" << ms_recharge
+                  << " strict=" << ms_strict << "(found=" << strict_found
+                  << " contended=" << contended.size() << ")"
+                  << " ladder=" << ms_ladder << "(ranked=" << n_ranked
+                  << " tried=" << n_victims << " plans=" << n_ladder_plans
+                  << " committed=" << committed << ")"
+                  << " fallback=" << ms_fallback << "(n=" << n_fallback << ")\n";
+    }
     if (!plan.found) return out;
     if (!committed) commit_plan(*target, plan);
     out.push_back(make_assignment(*target, plan));
