@@ -102,6 +102,8 @@ EXEMPT = {
     "input.allowed_layers": "layer policy — set at plan setup",
     "input.layer_cap": "layer policy", "input.layer_floor": "layer policy",
     "input.layer_shares": "layer policy",
+    "input.ndr": "NDR rule policy — resolved at bundling (apply_ndr_specs), "
+                 "trials re-pin topologies/layers but never rewrite the rule",
     "input.share_group": "layer policy", "input.share_budgets": "policy",
     "input.pinned_group": "super-candidate pin — trials never clear it "
                           "(negotiate/ripup preserve it by contract)",
