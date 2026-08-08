@@ -185,14 +185,21 @@ class RefineMixin:
                     self.planner.recharge_committed(self.bundles)
                     committed += 1
                     sweeping = True
-                    print(f"[refine_selection] COMMIT bundle {bid} "
-                          f"{self._rr_move_str(old, move)}, metric "
-                          f"{m_str(cur)}->"
-                          f"{m_str(metric())}", flush=True)
+                    self._decision(
+                        f"[refine_selection] COMMIT bundle {bid} "
+                        f"{self._rr_move_str(old, move)}, metric "
+                        f"{m_str(cur)}->"
+                        f"{m_str(metric())}",
+                        "refine_commit", bid=bid,
+                        move=self._rr_move_str(old, move), m_from=cur,
+                        m_to=metric())
                     cur = metric()
-            print(f"[refine_selection] done: metric {m_str(m0)}->"
-                  f"{m_str(metric())} after {committed} move(s), "
-                  f"{n_trials} trial(s).", flush=True)
+            self._decision(
+                f"[refine_selection] done: metric {m_str(m0)}->"
+                f"{m_str(metric())} after {committed} move(s), "
+                f"{n_trials} trial(s).",
+                "refine_done", m_from=m0, m_to=metric(),
+                moves=committed, trials=n_trials)
             print(f"[refine_selection] timing: {self._rr_t_str()}",
                   flush=True)
             self._checkpoint_routing()

@@ -1,6 +1,8 @@
 # BUDA Codebase Analysis
 
-Date: 2026-08-08 (rewrite of the 2026-05-26 original — the codebase has
+Date: 2026-08-08, refreshed same-day after the risk-reduction plan
+(Phases A–D + follow-ups) completed (rewrite of the 2026-05-26
+original — the codebase has
 moved far past that snapshot: the BDB-centric v3 architecture, the
 hierarchy-aware pipeline, the measured-feedback healers, GDS interchange,
 the interactive Floorplanner, and the chip-scale QoR/runtime tooling all
@@ -326,34 +328,54 @@ workflow.
 
 ### Risks And Weak Spots
 
-1. **The pybind surface is still highly mutable.** Many bound structs
-   expose `def_readwrite` fields, and Python-side healer code pins/
-   restores wrapper state directly. The opaque `BundleWrapperVec`
-   tightened aliasing semantics but invariants largely live in
-   discipline + tests, not types.
-2. **Print-identity as a regression oracle is double-edged.** Several
-   validations diff logs byte-for-byte, which catches real divergence
-   but also couples output formatting to correctness claims; changing a
-   print means re-baselining.
-3. **`ripup.py` is the new concentration point** (~3 000 lines of
-   healer orchestration: trials, screens, sweeps, class/release passes,
-   negotiate). It is well-commented and test-covered, but it is the
-   file where most subtle state-restore bugs have lived.
-4. **Runtime is chip-scale-sensitive.** Profiles differ qualitatively
-   between the rnr vehicles and the chip corpus (e.g. persistence
-   dominated the chip flow; trial marshalling dominated rnr) — a change
-   tuned on one class can be neutral or negative on the other, so both
-   must be measured.
-5. **Docs are extensive but layered.** CLAUDE.md is the accurate
-   deep index, the script reference the user surface, and
-   `docs/internal/` the design record — but some older top-level docs
-   (as this file was) lag reality; staleness is found by readers, not
-   tooling.
+The five risks this section named in the 2026-08-08 first edition were
+addressed by the executed
+[risk-reduction plan](internal/risk_reduction_plan.md) (Phases A–D +
+follow-ups, all landed):
+
+1. **Mutable pybind surface** → cross-field invariants now validate at
+   every stage entry suite-wide (`BUDA_VALIDATE`, `validate_wrappers`);
+   `w.pin()`/`w.unpin()` intent methods keep the coupled pin fields
+   atomic, with an allowed-writers test pinning the discipline; the
+   snapshot-coverage contract makes an unclassified new bound field a
+   loud test failure.  Residual: raw writes remain legal at sanctioned
+   pin-establishing sites — the guard is checked discipline, not types.
+2. **Print-identity oracle** → healer correctness claims ride the
+   structured decision trace (`_decision(tag, **kv)`; identity tests
+   compare records); `BUDA_DECISION_TRACE` and `qor_corpus --decisions`
+   diff runs decision-wise.  One byte-level log canary per area is
+   retained deliberately.
+3. **`ripup.py` concentration** → carved into seven cohesive modules
+   (driver + rr_state / rr_trials / rr_sweeps / negotiate / refine /
+   util, 3 430 → ~2 100 lines in the driver), every move gated
+   byte-identical.  The seams now carry the contracts (snapshot
+   coverage at rr_state, fast-trial semantics at rr_trials).
+4. **Scale-sensitive runtime** → `tools/runtime_ab.py` makes the
+   two-class (rnr + chip) measurement one command; `qor_corpus
+   --compare` rolls runtime up per flow class.  The nightly-corpus
+   instrument remains open (below).
+5. **Doc staleness** → CI guards: repo-relative links must resolve and
+   every registry command must be documented (`test_docs_guards.py`).
+
+What remains true rather than solved:
+
+- The validator/trace/guard net is **checked discipline** — it catches
+  the historical bug classes loudly, but the binding still permits raw
+  mutation where sanctioned, and a genuinely novel misuse pattern needs
+  a new invariant added.
+- The C++ engine-entry validator twin was deliberately **not** built
+  (no violation class has needed sub-stage granularity); revisit only
+  on evidence.
+- The healers' correctness story now rests on three layers (trace
+  identity, stage-entry invariants, corpus endpoints) — powerful, but
+  worth keeping in mind that the corpus remains the only gate that sees
+  QoR.
 
 ## Current Improvement Directions
 
 Tracked in `docs/internal/wishlist-*.md`, `docs/internal/opens*.md`, and
-the per-arc notes; the active headline items:
+the per-arc notes; the active headline items (the risk-reduction plan
+itself is complete — see above):
 
 1. **Chip-flow runtime** (`docs/internal/chip_flow_parallelism.md`):
    scoped escalation re-solves (P8, ~7–8% of the chip vehicle),
@@ -396,9 +418,15 @@ regression discipline unusual for a codebase this age: every default is
 a recorded measurement, every parallel path proves decision-identity,
 and every routing change faces a corpus gate. The structural risks of
 the 2026-05 snapshot (monolithic session, ad-hoc endpoints, sidecar
-state) were paid down; today's risks are subtler — a mutable binding
-surface held together by tests, healer orchestration concentrated in
-one large module, and runtime profiles that differ by design scale.
-The near-term high-value work is finishing the chip-scale runtime
-items, then NDR — the first feature that will stress the per-net
-granularity of a deliberately bus-centric core.
+state) were paid down, and the subtler risks this rewrite originally
+named — the mutable binding surface, print-identity oracles, the healer
+concentration point, scale-blind runtime work, reader-found doc
+staleness — were addressed by the executed risk-reduction plan: the
+codebase now validates its own invariants at every stage entry, proves
+healer identity on structured decision records, carries its healer
+logic in cohesive seams, measures runtime per design class by default,
+and fails CI on stale docs. What guards it is checked discipline
+rather than types — kept honest by the guards themselves. The
+near-term high-value work is finishing the chip-scale runtime items,
+then NDR — the first feature that will stress the per-net granularity
+of a deliberately bus-centric core.

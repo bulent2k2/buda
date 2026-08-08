@@ -150,3 +150,64 @@ def test_snapshot_coverage_contract():
         "whether healer trials can mutate each (then _rr_snapshot must "
         "capture it) and add it to the right set: "
         + ", ".join(sorted(unclassified)))
+
+
+# ── R1 intent methods + allowed-writers discipline ───────────────────────────
+
+def test_intent_methods_keep_coupled_fields_atomic():
+    s = _session()
+    w = s.bundles[0]
+    w.input.pinned_seg_layers = [4] * len(
+        w.input.candidates[w.plan.selected_topology_index].segments)
+    w.input.topology_pinned = True
+    w.unpin()
+    assert not w.input.topology_pinned
+    assert list(w.input.pinned_seg_layers) == []
+    w.pin(0)
+    assert w.input.topology_pinned
+    assert w.plan.selected_topology_index == 0
+    assert list(w.input.pinned_seg_layers) == []   # stale force dropped
+    assert validate_wrappers(s.bundles) == []
+
+
+def test_no_new_raw_writes_of_the_coupled_pin_fields():
+    """Allowed-writers discipline (risk plan R1 step 3): session/command
+    code must mutate the coupled pin fields through w.pin()/w.unpin() (or
+    the sanctioned sites below, which SET forced layers as a unit).  A new
+    raw write elsewhere fails here — route it through the intent methods
+    or sanction it explicitly with the reason thought through."""
+    import pathlib
+    import re
+    root = pathlib.Path(__file__).resolve().parents[2] / "src"
+    sanctioned = {
+        # setters that establish a pin/force as a unit (not the hazard):
+        "buda_cmds/edit_cmds.py",       # edit_commit builds forced layers
+        "buda_cmds/planner_cmds.py",    # select_topology sets the pin
+        "buda_session/hier.py",         # expansion/sidecar pin plumbing
+        "buda_session/persist.py",      # load_pipeline restore
+        "buda_session/edit.py",         # sidecar/apply-selection plumbing
+        "buda_session/ripup.py",        # trial pin/restore machinery
+        "buda_session/rr_state.py",     # snapshot restore writes fields back
+        "buda_session/rr_trials.py",    # trial pin/restore
+        "buda_session/rr_sweeps.py",    # sweep replay plumbing
+        "buda_session/nutsflow.py",     # heal pin plumbing
+        # GUI: establishes pins/forced layers as a unit (edit-commit
+        # parity) and clears the group-pin variant explicitly.
+        "viz_explorer/sidecar.py",
+        "viz_explorer/edit.py",
+        "viz_explorer/nav.py",
+    }
+    pat = re.compile(r"\.(?:input\.topology_pinned|input\.pinned_seg_layers)"
+                     r"\s*=")
+    offenders = []
+    for f in root.rglob("*.py"):
+        rel = str(f.relative_to(root))
+        if rel in sanctioned:
+            continue
+        for i, ln in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            if pat.search(ln):
+                offenders.append(f"{rel}:{i}: {ln.strip()}")
+    assert not offenders, (
+        "Raw write(s) to the coupled pin fields outside the sanctioned "
+        "sites — use w.pin()/w.unpin() or sanction with a reason:\n  "
+        + "\n  ".join(offenders))

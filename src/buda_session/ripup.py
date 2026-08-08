@@ -804,9 +804,11 @@ class RipupMixin:
         sites = self._rr_global_sites(stage)
         if not sites:
             return None, 0
-        print(f"[ripup_reroute] GLOBAL pass: contenders stalled at "
-              f"{self._rr_m_str(cur)} — ranking band occupants of "
-              f"{len(sites)} contention site(s)", flush=True)
+        self._decision(
+            f"[ripup_reroute] GLOBAL pass: contenders stalled at "
+            f"{self._rr_m_str(cur)} — ranking band occupants of "
+            f"{len(sites)} contention site(s)",
+            "rr_global_pass", m=cur, n_sites=len(sites))
         h_layers = set(self.layers.get_layer_ids_by_dir(
             buda.LayerDir.HORIZONTAL))
         trials = 0
@@ -862,11 +864,14 @@ class RipupMixin:
                     self._rr_restore(snap, only=self._rr_dirty)
                     trials += 1
                     if m < cur:
-                        print(f"[ripup_reroute] GLOBAL: occupant bundle "
-                              f"{bid} improves {self._rr_m_str(cur)}->"
-                              f"{self._rr_m_str(m)} "
-                              f"(topo {old_tidx + 1}->{tidx + 1})",
-                              flush=True)
+                        self._decision(
+                            f"[ripup_reroute] GLOBAL: occupant bundle "
+                            f"{bid} improves {self._rr_m_str(cur)}->"
+                            f"{self._rr_m_str(m)} "
+                            f"(topo {old_tidx + 1}->{tidx + 1})",
+                            "rr_improve", bid=bid, m_from=cur, m_to=m,
+                            move=f"topo {old_tidx + 1}->{tidx + 1}",
+                            source="global")
                         return (m, bid, old_tidx, ('idx', tidx), fwd), trials
         return None, trials
 
@@ -1219,10 +1224,11 @@ class RipupMixin:
             classes.append((tw, self._rr_wrapper(bid)))
         if not classes:
             return False, 0
-        print(f"[ripup_reroute] CLASS pass: locked template instance(s) "
-              f"hold the residual contention at {self._rr_m_str(cur)} — "
-              f"trying template moves for {len(classes)} class(es)",
-              flush=True)
+        self._decision(
+            f"[ripup_reroute] CLASS pass: locked template instance(s) "
+            f"hold the residual contention at {self._rr_m_str(cur)} — "
+            f"trying template moves for {len(classes)} class(es)",
+            "rr_class_pass", m=cur, n_classes=len(classes))
         trials = 0
         for tw, iw in classes:
             tid = tw.input.original_bundle.id
@@ -1272,11 +1278,16 @@ class RipupMixin:
             self._persist_bottom_up_cell_decision(by_cell[cell])
             self._persist_bottom_up_dogleg_adoptions()
             self.planner.recharge_committed(self.bundles)
-            print(f"[ripup_reroute] CLASS COMMIT: template {tid} "
-                  f"(cell '{cell}') topo {old_tidx + 1}->"
-                  f"{tw.plan.selected_topology_index + 1} across "
-                  f"{n_inst} instance(s), metric {self._rr_m_str(cur)}->"
-                  f"{self._rr_m_str(metric())}", flush=True)
+            self._decision(
+                f"[ripup_reroute] CLASS COMMIT: template {tid} "
+                f"(cell '{cell}') topo {old_tidx + 1}->"
+                f"{tw.plan.selected_topology_index + 1} across "
+                f"{n_inst} instance(s), metric {self._rr_m_str(cur)}->"
+                f"{self._rr_m_str(metric())}",
+                "rr_class_commit", tid=tid, cell=cell,
+                move=f"topo {old_tidx + 1}->"
+                     f"{tw.plan.selected_topology_index + 1}",
+                n_inst=n_inst, m_from=cur, m_to=metric())
             return True, trials
         return False, trials
 
@@ -1315,10 +1326,12 @@ class RipupMixin:
         if not locked_open:
             return False, 0
         by_cell, cell_of, tmpl_of = self._rr_class_maps()
-        print(f"[ripup_reroute] RELEASE pass: {len(locked_open)} locked "
-              f"instance(s) still hold measured DNUTS opens at "
-              f"{self._rr_m_str(cur)} — trying measured-infeasibility "
-              f"uniformity breaks (policy: independent)", flush=True)
+        self._decision(
+            f"[ripup_reroute] RELEASE pass: {len(locked_open)} locked "
+            f"instance(s) still hold measured DNUTS opens at "
+            f"{self._rr_m_str(cur)} — trying measured-infeasibility "
+            f"uniformity breaks (policy: independent)",
+            "rr_release_pass", m=cur, n_locked=len(locked_open))
         trials = 0
         for w in locked_open:
             # Aggregate budget (the _RR_GLOBAL/_RR_CLASS_MAX_TRIALS
@@ -1399,11 +1412,14 @@ class RipupMixin:
             self.planner.recharge_committed(self.bundles)
             how = ("free re-solve" if move is None
                    else f"topo {old_tidx + 1}->{move + 1}")
-            print(f"[ripup_reroute] RELEASE COMMIT: bundle {bid} "
-                  f"({inst}, cell '{cell}') released from the uniform "
-                  f"copy — solved individually ({how}), metric "
-                  f"{self._rr_m_str(cur)}->{self._rr_m_str(metric())}; "
-                  f"the aligned siblings keep the copy", flush=True)
+            self._decision(
+                f"[ripup_reroute] RELEASE COMMIT: bundle {bid} "
+                f"({inst}, cell '{cell}') released from the uniform "
+                f"copy — solved individually ({how}), metric "
+                f"{self._rr_m_str(cur)}->{self._rr_m_str(metric())}; "
+                f"the aligned siblings keep the copy",
+                "rr_release_commit", bid=bid, inst=inst, cell=cell,
+                how=how, m_from=cur, m_to=metric())
             return True, trials
         return False, trials
 
@@ -1639,15 +1655,20 @@ class RipupMixin:
         else:
             entry_clean = (self._rr_m_primary(m0) == 0)
         if entry_clean:
-            print(f"[ripup_reroute] stage {stage}: metric already 0 — nothing to do.")
+            self._decision(
+                f"[ripup_reroute] stage {stage}: metric already 0 — "
+                f"nothing to do.", "rr_noop", stage=stage)
             if stage == 'a':
                 self._stage_a_scope_advisory("ripup_reroute")
             return
         what = "DNUTS opens" if stage == 'b' else "NUTS overlaps"
-        print(f"[ripup_reroute] stage {stage} ({what}): "
-              f"start metric={self._rr_m_str(m0)}, "
-              f"max_iter={max_iter}, {len(self._rr_contenders(stage))} contenders",
-              flush=True)
+        _n_cont0 = len(self._rr_contenders(stage))
+        self._decision(
+            f"[ripup_reroute] stage {stage} ({what}): "
+            f"start metric={self._rr_m_str(m0)}, "
+            f"max_iter={max_iter}, {_n_cont0} contenders",
+            "rr_start", stage=stage, m=m0, max_iter=max_iter,
+            n_cont=_n_cont0)
 
         self._rr_t_init()
         self._rr_width_memo = {}         # static width gate, per-run memo
@@ -1694,7 +1715,9 @@ class RipupMixin:
                 break
             contenders = self._rr_contenders(stage)
             if not contenders:
-                print(f"[ripup_reroute] iter {it}: no contenders — stop.")
+                self._decision(
+                    f"[ripup_reroute] iter {it}: no contenders — stop.",
+                    "rr_stop", it=it, why="no_contenders")
                 stopped_early = True
                 break
             snap = self._rr_snapshot()
@@ -1866,9 +1889,10 @@ class RipupMixin:
                 # no-warm run — a warm false-reject costs this sweep, never
                 # the endpoint (the Phase-0 study's contract).
                 n_wp = sum(len(mv) for _c, _o, mv in warm_pend.values())
-                print(f"[ripup_reroute] iter {it}: warm scan stalled — "
-                      f"cold-sweeping {n_wp} warm-rejected move(s)",
-                      flush=True)
+                self._decision(
+                    f"[ripup_reroute] iter {it}: warm scan stalled — "
+                    f"cold-sweeping {n_wp} warm-rejected move(s)",
+                    "rr_stall_sweep", it=it, n_moves=n_wp, warm=True)
                 for bid, (ci, old_tidx, moves) in warm_pend.items():
                     w = self._rr_wrapper(bid)
                     if w is None:
@@ -1880,12 +1904,17 @@ class RipupMixin:
                     n_trials += t
                     if cand_best is not None:
                         best = cand_best
-                        print(f"[ripup_reroute] iter {it}: contender "
-                              f"{ci}/{n_cont} bundle {bid} improves "
-                              f"{self._rr_m_str(cur)}->"
-                              f"{self._rr_m_str(cand_best[0])} "
-                              f"({self._rr_move_str(old_tidx, cand_best[3])}"
-                              f", warm-rescued)", flush=True)
+                        self._decision(
+                            f"[ripup_reroute] iter {it}: contender "
+                            f"{ci}/{n_cont} bundle {bid} improves "
+                            f"{self._rr_m_str(cur)}->"
+                            f"{self._rr_m_str(cand_best[0])} "
+                            f"({self._rr_move_str(old_tidx, cand_best[3])}"
+                            f", warm-rescued)",
+                            "rr_improve", it=it, ci=ci, bid=bid,
+                            m_from=cur, m_to=cand_best[0],
+                            move=self._rr_move_str(old_tidx, cand_best[3]),
+                            warm_rescued=True)
                         break
             if best is None and use_global:
                 # Normal contenders stalled above zero: bounded global pass
@@ -1925,8 +1954,10 @@ class RipupMixin:
                     prim_hist.append(self._rr_m_primary(metric()))
                     continue
             if best is None:
-                print(f"[ripup_reroute] iter {it}: no improving re-route "
-                      f"(metric={self._rr_m_str(cur)}) — stop.")
+                self._decision(
+                    f"[ripup_reroute] iter {it}: no improving re-route "
+                    f"(metric={self._rr_m_str(cur)}) — stop.",
+                    "rr_stop", it=it, m=cur, why="no_improving_reroute")
                 stopped_early = True
                 break
             m_new, bid, old_t, move, fwd = best
@@ -1954,9 +1985,13 @@ class RipupMixin:
             # retrospective item 2).
             self.planner.recharge_committed(self.bundles)
             committed += 1
-            print(f"[ripup_reroute] iter {it}: COMMIT bundle {bid} "
-                  f"{self._rr_move_str(old_t, move)}, metric {self._rr_m_str(cur)}->"
-                  f"{self._rr_m_str(metric())}", flush=True)
+            self._decision(
+                f"[ripup_reroute] iter {it}: COMMIT bundle {bid} "
+                f"{self._rr_move_str(old_t, move)}, metric {self._rr_m_str(cur)}->"
+                f"{self._rr_m_str(metric())}",
+                "rr_commit", it=it, bid=bid,
+                move=self._rr_move_str(old_t, move), m_from=cur,
+                m_to=metric())
 
             # Convergence guard: a committing iteration made progress, but if
             # the primary metric is still high AND has barely moved over the
@@ -1979,6 +2014,11 @@ class RipupMixin:
                 if win_start > 0:
                     cleared = (win_start - prim_now) / win_start
                     if cleared < _RR_CONVERGE_FRAC:
+                        tr = getattr(self, '_decision_trace', None)
+                        if tr is not None:
+                            tr.append(("rr_stop",
+                                       dict(it=it, why="converge_guard",
+                                            primary=prim_now)))
                         print(f"[ripup_reroute] not converging — primary metric "
                               f"plateaued at {prim_now} "
                               f"({cleared * 100:.1f}% cleared over last "
@@ -2034,10 +2074,13 @@ class RipupMixin:
                 self._run_detailed_nuts(bit_order=self._detailed_bit_order)
                 m_heal = metric()
                 if m_heal < cur_end:
-                    print(f"[ripup_reroute] HEAL-REFOLD ({tier_name}): "
-                          f"escalated {n_refold} starved LOW segment(s), "
-                          f"metric {self._rr_m_str(cur_end)}->"
-                          f"{self._rr_m_str(m_heal)}", flush=True)
+                    self._decision(
+                        f"[ripup_reroute] HEAL-REFOLD ({tier_name}): "
+                        f"escalated {n_refold} starved LOW segment(s), "
+                        f"metric {self._rr_m_str(cur_end)}->"
+                        f"{self._rr_m_str(m_heal)}",
+                        "rr_refold", tier=tier_name, n=n_refold,
+                        m_from=cur_end, m_to=m_heal)
                     self.planner.recharge_committed(self.bundles)
                     if self.bdb is not None:
                         self._checkpoint_routing()

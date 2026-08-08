@@ -174,6 +174,12 @@ def run_flow(flow):
     import buda_cli
     s = buda_cli.BudaSession()
     s.no_viz = True
+    # --decisions: collect the run's decision-trace records (risk plan R2)
+    # and dump them per flow, so two corpus runs can be diffed
+    # decision-wise without parsing log text.
+    _dec_dir = os.environ.get("BUDA_QOR_DECISIONS_DIR")
+    if _dec_dir:
+        s._decision_trace = []
     tmp_logs = private_log_dir(s)               # parallel worker: isolate logs
     d = os.path.dirname(flow)
     t0 = time.time()
@@ -201,6 +207,16 @@ def run_flow(flow):
         if tmp_logs:
             shutil.rmtree(tmp_logs, ignore_errors=True)
     dt = time.time() - t0
+    if _dec_dir and getattr(s, "_decision_trace", None) is not None:
+        try:
+            os.makedirs(_dec_dir, exist_ok=True)
+            key = flow.replace("/", "__").replace("\\", "__")
+            with open(os.path.join(_dec_dir, key + ".jsonl"), "w") as f:
+                for tag, kv in s._decision_trace:
+                    f.write(json.dumps({"tag": tag, **kv}, default=str,
+                                       sort_keys=True) + "\n")
+        except OSError:
+            pass                                 # informational only
     ov = getattr(getattr(s, "nuts_result", None), "num_overlaps", None)
     un = getattr(getattr(s, "detailed_result", None), "num_unplaced", None)
     vb = _check_design_bundles(s)
@@ -550,6 +566,31 @@ def _present_metrics(rows):
     return [k for k in _METRICS if any(k in r for r in rows if "err" not in r)]
 
 
+def _decisions_report(base_path, mine_path):
+    """Informational decision-stream diff (risk plan R2 `--decisions`):
+    when both runs stored per-flow decision traces (the `--decisions`
+    sidecar dirs), report which flows' decision RECORDS differ — a
+    wording-independent identity check, so a prints-only change shows 0
+    differing flows here even if log text moved."""
+    db, dm = base_path + ".decisions", mine_path + ".decisions"
+    if not (os.path.isdir(db) and os.path.isdir(dm)):
+        return
+    common = sorted(set(os.listdir(db)) & set(os.listdir(dm)))
+    if not common:
+        return
+    diff = []
+    for k in common:
+        a = open(os.path.join(db, k)).read()
+        b = open(os.path.join(dm, k)).read()
+        if a != b:
+            na, nb = len(a.splitlines()), len(b.splitlines())
+            diff.append((k[:-6].replace("__", "/"), na, nb))
+    print(f"\ndecision streams ({len(common)} flow(s) traced): "
+          f"{len(diff)} differ")
+    for f, na, nb in diff[:10]:
+        print(f"  {f}: {na} -> {nb} record(s)")
+
+
 def cmd_compare(base_path, mine_path):
     base_rows = json.load(open(base_path))
     mine_rows = json.load(open(mine_path))
@@ -596,6 +637,7 @@ def cmd_compare(base_path, mine_path):
           f"(of {len(flows)} flows).  Metric = {'/'.join(keys) or '(none)'}.")
     paired = [(f, base[f], mine[f]) for f in flows if f in base and f in mine]
     _wirelength_report(paired)
+    _decisions_report(base_path, mine_path)
     _runtime_report(paired)
     return n_worse
 
@@ -892,6 +934,10 @@ def main():
                     help="with --candidates: also RUN each new-coverage "
                          "candidate for its sizes, QoR and runtime, so its "
                          "cost is on the table beside its coverage")
+    ap.add_argument("--decisions", action="store_true",
+                    help="with --out: also store each flow's decision-trace "
+                    "records in <out>.decisions/ so --compare can diff runs "
+                    "decision-wise (wording-independent)")
     ap.add_argument("-j", "--jobs", type=int, default=default_jobs(),
                     metavar="N",
                     help="worker processes for the sweep (default: CPU count "
@@ -910,6 +956,9 @@ def main():
     if args.compare:
         sys.exit(1 if cmd_compare(*args.compare) else 0)
 
+    if args.decisions and args.out:
+        os.environ["BUDA_QOR_DECISIONS_DIR"] = os.path.abspath(
+            args.out + ".decisions")
     cmd_run(args.flows or CORPUS, args.out, jobs=args.jobs)
 
 
