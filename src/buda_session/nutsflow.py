@@ -924,6 +924,12 @@ class NutsFlowMixin:
                 return 0
             placed_bits = {}
             for ns in self.detailed_result.net_segments:
+                # Shield rows are not member bits (issue #616): counting
+                # them inflated the survival predictor, so a governed
+                # segment with bits genuinely stranded could read
+                # `placed >= need` and skip the escalation it needs.
+                if ns.is_shield:
+                    continue
                 k = (ns.bundle_id, ns.seg_idx)
                 placed_bits[k] = placed_bits.get(k, 0) + 1
 
@@ -2023,6 +2029,14 @@ class NutsFlowMixin:
                 exp_bits[b.bundle_id] = (exp_bits.get(b.bundle_id, 0)
                                          + b.bit_width)
             for ns in r1.net_segments:
+                # NDR shield rows are METAL, not member bits: counting them
+                # here against exp_bits' bit_width made a governed
+                # bottom-up cell SUBTRACT from num_unplaced (4 bits + 2
+                # shields read as 6 placed of 4 expected -> -2 per
+                # sibling), masking real opens.  Same rule as
+                # _rr_open_bundles and the viz panels (issue #616).
+                if ns.is_shield:
+                    continue
                 placed_bits[ns.bundle_id] = placed_bits.get(ns.bundle_id,
                                                             0) + 1
             # B2 (chip_flow_parallelism.md): group the reference bits/vias

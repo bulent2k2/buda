@@ -138,7 +138,15 @@ shield-per-pair), resistance-critical feedlines (width).
   solved once and copied to every instance, shield wires included.  The
   instance-alignment machinery is unchanged — NDR moves demand, not the
   track grid — and template-vs-instance verification compares rule-aware
-  track supplies, so uniformity claims stay honest.
+  track supplies, so uniformity claims stay honest.  *Status:* landed and
+  exercised by `flow/ndr_bottom_up.buda` — the copy transform carries
+  shield rows by construction, `align_bottom_up` and
+  `check_template_tracks` are untouched (they compare raw per-instance
+  track pools, which is the stronger claim: identical pools ⇒ identical
+  NDR seating).  Building the vehicle exposed and fixed two
+  shield-counting faults in the bottom-up accounting (a negative unplaced
+  count, an inflated cull-risk predictor) — see
+  internal/ndr_architecture.md §7.5.
 
 ### Verification, reporting, persistence
 
