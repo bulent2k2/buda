@@ -1,16 +1,18 @@
 # BUDA Windows Requirements
 
-Software requirements for building and testing BUDA natively on Windows with
-MSVC.
+Software requirements for building and testing BUDA natively on Windows —
+with MSVC (the reference toolchain), MinGW-w64 (validated alternative), or
+Cygwin (experimental).
 
 **This page is validated, not aspirational.** Every claim marked *measured* was
 executed on a real Windows machine (GitHub `windows-2022` runner: Windows
 Server 2022, Visual Studio 2022 Enterprise, MSVC 19.44, CMake 4.x, Python
 3.13.14 x64) by `.github/workflows/windows-validate.yml`, which builds through
-**both** documented paths (Ninja and the Visual Studio generator), imports the
-extensions, runs the fast test tier, and executes a `.buda` flow end to end.
+**four** documented paths (Ninja and the Visual Studio generator on MSVC,
+MSYS2 UCRT64 MinGW, and Cygwin64), imports the extensions, runs the fast test
+tier, and executes a `.buda` flow end to end.
 Re-validate any time: *Actions → Windows validation → Run workflow*. Last
-green: run 9, 2026-08-06.
+green (MSVC ×2 + MinGW): run 16, 2026-08-07.
 
 For the cross-platform dependency reference see
 [build_test_dependencies.md](build_test_dependencies.md); this page is the
@@ -20,15 +22,28 @@ Windows-specific companion. The build steps live in
 ## Target Environment
 
 - Windows 10 or 11 (validated on Server 2022), 64-bit.
-- Visual Studio 2022 (Build Tools or full IDE): `Desktop development with C++`
-  workload, MSVC v143, a Windows 10/11 SDK.
+- **One of three toolchains:**
+  - *MSVC (reference):* Visual Studio 2022 (Build Tools or full IDE):
+    `Desktop development with C++` workload, MSVC v143, a Windows 10/11 SDK.
+  - *MinGW-w64 (validated, measured green run 16):* MSYS2 with the **UCRT64**
+    packages `mingw-w64-ucrt-x86_64-{gcc,cmake,ninja}` — UCRT64 because
+    modern CPython links the Universal CRT and CRTs must match across the
+    extension boundary. MSYS2 is rolling-release (GCC 14 → 16.1.0 between two
+    validation runs; both clean). Note **Git for Windows' Git Bash is NOT
+    this** — it ships bash/coreutils only, no compiler (measured; a `gcc`
+    that appears in Git Bash comes from some other install on PATH).
+  - *Cygwin GCC (experimental):* `gcc-g++,make,cmake,ninja` from Cygwin
+    setup; builds via the repo's own `bin/bb` (measured), full validation in
+    progress. See WINDOWS_BUILD.md §6 for its measured limitations (Python
+    3.9, broken distro matplotlib, no web deps).
 - CMake ≥ 3.15 (the project's `cmake_minimum_required`).
-- 64-bit Python. **3.13 is the validated version**; CI elsewhere runs 3.11.
-  The interpreter, compiler, and extension must all be x64.
+- 64-bit Python. **3.13 is the validated version** for the MSVC and MinGW
+  paths (the *native* CPython in both cases); CI elsewhere runs 3.11; Cygwin
+  ships 3.9.16 (its newest, measured). The interpreter, compiler, and
+  extension must all be x64.
 - Git for Windows.
 
-WSL, MSYS2, and MinGW are not the target described here (WSL simply follows the
-Linux docs).
+WSL is not the target described here (it simply follows the Linux docs).
 
 ## Required Python Packages
 
@@ -100,6 +115,20 @@ All discovered by the validation runs; each is now handled in-tree.
   `buda_core.dll` and the `.pyd` files are emitted into the **same directory**
   (both generators do this, *measured*), and CPython searches an extension's
   own directory for its DLL dependencies.
+- **MinGW artifacts are self-contained.** Same-directory search does NOT
+  extend to the MSYS2 GCC runtime DLLs (they live in `/ucrt64/bin`, and
+  CPython ≥ 3.8 does not consult PATH), so `CMakeLists.txt` static-links the
+  GCC runtime into **all three** targets on MinGW, with `--exclude-libs=ALL`
+  to keep the runtime's symbols out of the DLL export table (each half
+  *measured* as an import failure or link failure without it — runs 13–16).
+  The workflow's objdump step verifies: only `python313.dll`, `KERNEL32`,
+  UCRT api-sets, and `libbuda_core.dll` are imported.
+- **Cygwin needs an explicit PE export.** Cygwin gcc defines neither `_WIN32`
+  nor any implicit dllexport, so pybind11's `PYBIND11_EXPORT` degrades to an
+  ELF visibility attribute PE ignores; `CMakeLists.txt` pre-defines it as
+  `__attribute__((dllexport))` for the module targets — which both exports
+  `PyInit_<mod>` and disables ld's auto-export (whose lambda-symbol
+  pathology otherwise kills the link, *measured*, runs 12–16).
 - **`setvbuf` guard.** The `buda` module's stdout line-buffering
   (issue #31) is `#ifndef _WIN32`: `_IOLBF` is unsupported by the MSVC CRT and
   a size of 0 is an invalid parameter that fast-fails the process

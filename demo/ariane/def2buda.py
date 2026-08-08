@@ -27,6 +27,10 @@ Example
     python3 def2buda.py ariane133_manual_floorplan.def --depth 2 --scale 0.143
 """
 
+# Cygwin's newest python is 3.9, where PEP 604 unions in EVALUATED
+# annotations raise at import (TypeError) -- lazy annotations keep this
+# converter runnable there; the project floor stays 3.13.
+from __future__ import annotations
 import re
 import sys
 import argparse

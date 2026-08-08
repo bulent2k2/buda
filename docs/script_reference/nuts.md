@@ -390,6 +390,26 @@ stage-b ripup 25.9 → 16.8 s), `mix2_fast_on_aligned_sql` 33.5 → 29.7 s;
 flows that never stall are unchanged.  `BUDA_SWEEP_THREADS` caps the pool
 (0 = hardware concurrency).
 
+**Parallel primary screened scan (rnr runtime P1b, default on with the
+same gate).** The primary contender scan — each contender's top-screened
+kept moves, the trials the first-improving loop runs one at a time — is
+evaluated on the same pool in **lazy visit-order chunks**: a chunk's
+contenders are move-listed and screened only when the chunk is reached,
+so an early improver costs what the sequential loop costs, while a
+grinding stalled scan gets the full pool win.  A contender with a
+sweep-improving (or unevaluable) move replays its ENTIRE kept list
+through the sequential best-of-list trial, so the committed move, the
+printed heartbeat/improver lines, and the trial counts are all identical
+to the sequential scan by construction.  Additional gate over P1: idx
+moves only (no `use_edge_candidates`) and a **>1-thread pool** — on a
+1-thread pool the chunked evaluation is strictly worse than committing
+at the first improving trial (measured 2.5× on `rnr/mix`), so
+single-thread pools (e.g. qor sweep workers) keep the sequential scan;
+the deferred stall sweep stays engaged at any width.  Measured
+(`BUDA_THREADS=4`): `mix2_fast_bottomup_caps` stage-b ripup
+25.6 → 19.2 s (−25 % on top of P1; fully sequential 47.9 s), decision
+lines byte-identical, corpus 0/0/41 with WL ±0.00%.
+
 **Warm trials (round 4, default OFF; `warm_trials` opts in).** A cold trial
 re-solves the whole design's abstract NUTS from scratch; the warm-start
 re-solve (`NUTSEngine::rerun_bundle_warm`) instead seeds the baseline
@@ -546,7 +566,8 @@ finisher for whatever negotiation leaves.
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `max_iter` | int | `5` | Maximum number of negotiation rounds. Each round injects the current failures and re-plans; it is kept only if it strictly improves the metric, otherwise it is rolled back and the loop stops. |
+| `max_iter` | int | `5` | Maximum number of negotiation rounds. Each round injects the current failures and re-plans; it is kept only if it strictly improves the metric, otherwise it is rolled back and (by default) the loop stops. |
+| `press` | flag | off | **Opt-in pressure-escalation retry** (2026-08-07). By default a rejected round ends the run — the first-failure stop. With `press`, a rejected round restores and **retries under the grown PathFinder history pressure** (the history counters persist, so the same rectangles re-inject at grown amounts — the escalation the default stop computes and then throws away), until `max_iter` runs out or a failed retry reproduces the **same** metric as the previous failure (the deterministic replans are insensitive to the grown amounts — certified waste, stop: `identical outcome under escalated pressure`). Opt-in because it measured **0 better / 1 worse** on the corpus as a default: the caps/mix stage-b stalls are price-insensitive (the retry repeats byte-identically), and on `mix2_fast_on_aligned_sql` the pressed retries DO crack the stall on negotiate's own metric (stage b `150 (ovl 12)` → `130 (ovl 6)`, abstract WL −6.5%) but the improved hand-off shifts `ripup_reroute`'s greedy basin and the flow **endpoint** lands worse (2/16/1 → 4/28/2) — the healer-composition hazard. Worth trying by hand on a stuck endpoint (compose with a second healer round, like `refine_selection`); `no_press` states the default explicitly. |
 | `class_moves` | flag | off | **Opt-in bottom-up template price translation** (negotiate v2). Normally a `hier.locked` bottom-up template instance is never a negotiation target (its routing is a uniform copy of the cell template's local solve). With `class_moves`, a locked affected bundle's TEMPLATE class is negotiated instead: the iteration's injected band demand is clipped to each instance's bbox, mapped through the inverse orientation transform into the cell frame, and summed across instances into the cell-local planner; the target templates then re-plan **unpinned** under that aggregated price field and the result propagates to every instance of the class (accept/rollback covers the template state; user-pinned templates are never touched; BDB persistence is deferred to the accept). Opt-in because it measured endpoint-neutral at best on the corpus: the stage-a overlap metric is blind to the DNUTS quality its bigger multi-class shuffles trade away (mix2_fast_bottomup final opens 8→16 at default ripup budgets, equal at `ripup_reroute 30`), and the stage-b priced iteration is rejected by its own accept guard — `ripup_reroute`'s class moves already cover the endpoint. Measurement table in `docs/internal/bottomup_healer_templates.md`. `no_class_moves` states the default explicitly. |
 
 **Two stages, auto-detected from pipeline state** (same as `ripup_reroute`):
@@ -568,11 +589,28 @@ finisher for whatever negotiation leaves.
    prices — and may even displace a committed bundle blocking the contended bands
    (the planner's own rip-up ladder);
 3. accepts the round only on **strict metric improvement** (snapshot/restore
-   otherwise), so it is a safe hill-climb.
+   otherwise), so it is a safe hill-climb. A rejected round ends the run by
+   default; with the opt-in `press` flag the loop instead retries with the
+   grown history pressure until `max_iter` is exhausted or a failed retry
+   lands on the **same metric as the previous failure** (see the `press` row
+   above for the measured trade-off).
 
 It is a **no-op** when the metric is already 0 (`metric already 0 — nothing to
 do`). Injected demand is always cleared at the end, so it never leaks into later
 commands.
+
+**Stage-a scope advisory:** the stage-a metric is NUTS overlaps **only**, so a
+clean stage-a exit can sit right above a dirty `check_design` — keepout-seated
+segments (exhausted-window commits) and supply-doomed seats are invisible to
+the overlap metric and only surface as DNUTS opens at stage b. Both stage-a
+healers (`negotiate_congestion` and `ripup_reroute`) print an advisory at exit
+whenever such seats exist:
+
+```
+[negotiate] advisory: stage-a metric is overlaps-only — 29 keepout-seated
+segment(s), 2 supply-doomed seat(s) remain and will surface as DNUTS opens at
+stage b (details: check_design).
+```
 
 Output logs the start metric and each round:
 
@@ -582,6 +620,11 @@ Output logs the start metric and each round:
 [negotiate] iter 2: no improvement (metric 5->5) — restored, stop.
 [negotiate] done: metric 10->5 after 1 accepted iteration(s).
 ```
+
+With `press`, the iter-2 line becomes `— restored, pressure escalates.` and the
+loop keeps retrying until the budget runs out or a failed retry repeats the
+previous failure's metric (`— restored; identical outcome under escalated
+pressure, stop.`).
 
 **Requires:** `run_planner` and at least `run_nuts` to have run first.
 

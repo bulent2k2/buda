@@ -1,16 +1,86 @@
 # Building BUDA On Windows
 
-Configure, build, and test BUDA natively on Windows with MSVC. Requirements
-and Windows-specific background: [WINDOWS_REQ.md](WINDOWS_REQ.md).
+Configure, build, and test BUDA natively on Windows. Four validated paths:
+
+| # | Path | Toolchain | Python | Status (measured) |
+|---|---|---|---|---|
+| 1 | **MSVC + Ninja** (§3) | VS 2022, MSVC 19.44 | native 3.13 | **green** — build, import, fast tier, flow |
+| 2 | **MSVC + VS generator** (§4) | VS 2022, MSVC 19.44 | native 3.13 | **green** — build, import, fast tier, flow |
+| 3 | **MinGW-w64** (§5) | MSYS2 UCRT64 GCC | native 3.13 | **green** — build, import, fast tier (1819 passed), flow |
+| 4 | **Cygwin64** (§6) | Cygwin GCC 14 | Cygwin 3.9 | **working, with caveats** — with `BUDA_ARCH=x86-64-v2` (required, §6): build, imports, flow, and 1741 tier tests green (run 22); remaining tier damage is the distro matplotlib skew |
+
+Requirements and Windows-specific background: [WINDOWS_REQ.md](WINDOWS_REQ.md).
 
 **Every command below is executed on a real Windows machine** by
 `.github/workflows/windows-validate.yml` (windows-2022 runner, VS 2022, MSVC
-19.44, Python 3.13 x64), through both build paths, the import, the fast test
+19.44, Python 3.13 x64), through all four paths: build, import, fast test
 tier, and a `.buda` flow. Re-validate any time: *Actions → Windows validation
-→ Run workflow*. Last green: run 9, 2026-08-06 — build ≈ 2m30s, fast tier
-≈ 60s per path on a 4-core runner.
+→ Run workflow*. **All four lanes green: run 22, 2026-08-07** (MSVC build ≈
+2m30s, MinGW build ≈ 2m, Cygwin `bin/bb` ≈ 9m; fast tier ≈ 46–75s per
+path on a 4-core runner).
 
-## 1. Open A Developer Shell
+## Choosing A Path
+
+### Pros and cons
+
+| Path | Pros | Cons |
+|---|---|---|
+| **1. MSVC + Ninja** | The reference path: simplest layout (everything in `build\`), fastest edit-build cycle (~2m full build, incremental via Ninja), `pytest` needs no PYTHONPATH, native CPython so **all** wheels work (incl. web deps), stable toolchain (VS releases, not rolling) | Needs a VS developer shell (`vcvars64`); MSVC-only quirks (`WINDOWS_EXPORT_ALL_SYMBOLS`, `/UNDEBUG` warning spam); `BUDA_SANITIZE` hard-errors by design |
+| **2. MSVC + VS generator** | Same toolchain as #1 but **no developer shell needed** (CMake finds MSVC itself); produces a `.sln` — full Visual Studio IDE debugging/profiling | Multi-config `build\Release` layout means PYTHONPATH for *everything*, tests included — this layout produced all three measured subprocess-PYTHONPATH traps (§8); slowest configure (~61s vs ~7s) |
+| **3. MinGW-w64 (MSYS2 UCRT64)** | GCC branch of the build (`-O3 -march=native`, `-ffp-contract=off`) with **native CPython** — all wheels work; artifacts are **self-contained** (objdump-verified: no MSYS2 DLL deps), so they run from any shell; bash-driven workflow closest to Linux muscle memory with native-speed binaries | Two-part setup (MSYS2 + native Python) with the pacman update ritual; **rolling release** — gcc jumped 14→16 between two validation runs; CRT discipline required (UCRT64 flavor only); GDB-style debugging, no VS IDE |
+| **4. Cygwin64** | The Linux instructions *verbatim*: `bin/bb` just works, real `fcntl` (the **only** lane where the floorplanner's inter-process lock actually locks), real POSIX paths/tools; 1741 fast-tier tests pass | **`BUDA_ARCH=x86-64-v2` is required** (`-march=native` codegen segfaults — measured, §6); Python is 3.9 (EOL, below the 3.13 floor); **no pip wheels exist** — distro matplotlib is broken (numpy-2 skew), web deps unbuildable (28 tests permanently skipped); slowest builds (6.5–9m); CRLF guards needed; `build` must be on `PATH` for dlopen |
+
+### Decision criteria
+
+| If you… | Choose |
+|---|---|
+| Just want BUDA working on Windows with least ceremony | **MSVC + Ninja** — it is the reference for a reason |
+| Live in Visual Studio (IDE debugging, profiling, `.sln` workflows) | **MSVC + VS generator** |
+| Want the Linux/GCC toolchain semantics with zero package compromises | **MinGW UCRT64** — the only path that is both GCC *and* full-wheel-ecosystem |
+| Need to reproduce a GCC-specific bug (codegen, `-ffp-contract`, warnings) on Windows | **MinGW** (or Cygwin if the POSIX layer matters too) |
+| Want to run the repo's own `bin/` wrappers or need working `fcntl` locking | **Cygwin** — accept the caveat list in §6 |
+| Care about redistributing the built artifacts | **MinGW** (self-contained — the only lane with no runtime prerequisite). MSVC artifacts use the default `/MD` runtime, so targets need the matching **Visual C++ Redistributable** (`msvcp140`/`vcruntime140` — only the UCRT is in-box on Win10+, and CPython's installer ships `vcruntime140` but not the C++ standard library). Cygwin drags its runtime along |
+| Need the GUI tools (floorplanner/viz) | MSVC or MinGW — Cygwin's matplotlib is broken upstream |
+| Want a toolchain that won't shift under you | MSVC; MSYS2 and Cygwin are rolling releases |
+
+### Performance — measured vs. not
+
+Wall clocks from the validation runs (4-core shared runners, small samples —
+treat ±30% as noise):
+
+| Metric | MSVC Ninja | MSVC VS gen | MinGW | Cygwin |
+|---|---|---|---|---|
+| Full build | ~2m0s | ~2m40s | ~2m0s | **6m30s–9m** |
+| Fast tier (pytest self-timed) | 45–75s | 45–75s | 45.8s best | 61s *for ~200 fewer tests* |
+| Cold environment setup (CI) | ~40s | ~40s | ~1m45s | ~5–8m |
+
+The honest reading:
+
+- **MSVC and MinGW are within runner noise of each other** on everything
+  measured — best-of-run tier times (45.4s vs 45.8s) are effectively
+  identical, so no engine-performance separation between `/O2 /fp:precise`
+  and `-O3 -march=native` was resolvable at this workload scale. A real
+  verdict would need per-lane `tools/qor_corpus.py` timings on a quiet
+  machine, which has not been run on Windows.
+- **Cygwin carries two structural handicaps**: builds are 3–4× slower
+  (Cygwin's process-emulation tax on the compiler driver), and it is the
+  only lane pinned *below* native ISA (`x86-64-v2`, out of correctness
+  necessity) — a theoretical engine-throughput deficit versus MinGW's
+  `-march=native` whose magnitude is unmeasured. Its per-test tier cost is
+  also visibly higher.
+- The tiny `four_blocks.buda` flow ran in 0.01s on every lane — flows of
+  that size discriminate nothing.
+
+In one line: **Ninja-MSVC to use it, VS generator to debug it, MinGW to have
+GCC without giving anything up, Cygwin to pretend you never left Linux — and
+pay for the pretense in build time, package availability, and one mandatory
+ISA pin.**
+
+---
+
+## Path 1 & 2 — MSVC (the reference paths)
+
+### 1. Open A Developer Shell
 
 Any shell that can find MSVC and the Windows SDK:
 
@@ -24,7 +94,7 @@ CMake locates MSVC itself (measured). Ninja does need one.
 
 Verify: `cl`, `cmake --version`, `python --version`.
 
-## 2. Python Environment
+### 2. Python Environment
 
 From the repository root:
 
@@ -46,7 +116,7 @@ $env:PYTHONUTF8 = '1'    # effectively REQUIRED — see WINDOWS_REQ.md (measured
 python -c "import tkinter; import matplotlib; matplotlib.use('TkAgg')"
 ```
 
-## 3. Build With Ninja  *(recommended: single-config, simplest paths)*
+### 3. Build With Ninja  *(recommended: single-config, simplest paths)*
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -85,7 +155,7 @@ python src\buda_cli.py --no-viz flow\four_blocks.buda
 `four_blocks.buda` ends in a `visualize` command, so without the flag this
 opens a GUI.
 
-## 4. Build With The Visual Studio Generator
+### 4. Build With The Visual Studio Generator
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
@@ -102,16 +172,208 @@ python -m pytest -q
 python src\buda_cli.py --no-viz flow\four_blocks.buda
 ```
 
-## 5. What To Expect From The Test Tier
+---
 
-Measured on run 8/9 of the validation: the fast tier passes (~1780 tests, 35
-xfailed) with a handful of **named POSIX-only skips** — file-mode round-trip
-(`test_bdb_edit_bus`), the stdout line-buffering probe (`test_log_ordering`),
-and `SIGKILL` crash-recovery (`test_qor_sweep`); each marker states its
-measured reason. If you see *many* failures instead, check `PYTHONUTF8` first
-(section 2).
+## 5. Path 3 — MinGW-w64 (MSYS2 UCRT64 GCC, native CPython)
 
-## 6. Troubleshooting
+GCC producing **native Windows binaries**, driven from bash — the GCC branch
+of the build (`-march`, `-ffp-contract=off`) with the native CPython, so
+**every pip wheel works** (numpy, matplotlib, the web deps — no package
+availability problem). Measured fully green (run 16): build ≈ 2m, import
+clean, fast tier **1819 passed / 5 skipped / 35 xfailed in 46s**, flow runs.
+
+**First, the misconception, measured:** "the mingw64 that comes with Git for
+Windows" is the *shell*, not the toolchain. Git for Windows ships bash and
+coreutils — **no gcc, no make, no pacman**. (On the GitHub runner, Git Bash
+*does* resolve `gcc` — at `/c/mingw64/bin`, a separate toolchain the runner
+image pre-installs, with ninja from Chocolatey and cmake from its own
+installer; nothing under Git's tree. A dev box without those extras gets
+ABSENT for all of them.) The toolchain comes from **MSYS2**.
+
+### 5.1 Install MSYS2 and the UCRT64 toolchain
+
+```powershell
+winget install MSYS2.MSYS2          # or the installer from https://www.msys2.org
+```
+
+Then in an **MSYS2 UCRT64** shell (Start menu: "MSYS2 UCRT64"), update the
+base system and install the toolchain — pacman's classic two-step ritual: the
+first `-Syu` may close the window; if it does, reopen and run it again:
+
+```bash
+pacman -Syu                # core update (may ask to close the terminal; rerun after)
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc \
+                   mingw-w64-ucrt-x86_64-cmake \
+                   mingw-w64-ucrt-x86_64-ninja
+```
+
+**UCRT64, deliberately** (not MINGW64): modern CPython links the Universal
+CRT, and mixing CRTs across the extension boundary is the class of silent bug
+the MSVC lane needed nine validation runs to characterize. Note MSYS2 is a
+rolling release — the validation measured GCC 14 one day and 16.1.0 the next;
+both build clean.
+
+### 5.2 Native CPython + packages
+
+Use the **native Windows CPython** (python.org, `winget install
+Python.Python.3.13`, or an existing install) — *not* an MSYS2 python. All
+wheels install normally:
+
+```powershell
+python -m pip install --upgrade pip
+python -m pip install pybind11 pytest pytest-bdd matplotlib numpy pytest-xdist
+python -m pip install -r src/web/requirements.txt
+```
+
+Set `PYTHONUTF8=1` exactly as for MSVC (same measured requirement).
+
+### 5.3 Configure, build, test
+
+From a UCRT64 shell with the native CPython **first on PATH** (so CMake's
+`python3` lookup and `PYBIND11_FINDPYTHON` resolve to the native
+interpreter):
+
+```bash
+export PATH="$(cygpath -u 'C:\Path\To\Python313'):$PATH"   # native python first
+cd /c/path/to/buda
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+If your python.org install provides no `python3.exe`, pass
+`-Dpybind11_DIR="$(python -m pybind11 --cmakedir)"` (same fallback as the
+MSVC path; the hosted-runner python provides the shim, measured).
+
+Artifacts land under `build/` as `libbuda_core.dll` + two `.pyd`s. They are
+**self-contained by design**: `CMakeLists.txt` static-links the GCC runtime
+into all three targets (`-static-libgcc -static-libstdc++`, winpthread
+whole-archived, `--exclude-libs=ALL`), because native CPython does not search
+PATH for an extension's DLL dependencies — the MSYS2 runtime DLLs would be
+invisible at import time. Measured by the workflow's objdump step: every
+artifact imports only `python313.dll`, `KERNEL32`, the UCRT api-sets, and
+`libbuda_core.dll` — zero MSYS2 DLLs.
+
+Tests and flows then run from any shell, exactly as the Ninja MSVC path
+(§3): `python -m pytest -q` needs no PYTHONPATH, flows need
+`build;src;tools`.
+
+---
+
+## 6. Path 4 — Cygwin64  *(experimental)*
+
+Windows with a POSIX personality: a real `fcntl`, a real `python3`, and —
+the point of this path — **the repo's own `bin/bb` wrapper just works**, CRLF
+guards aside. Unlike MinGW, binaries are Cygwin-native (`cygbuda_core.dll`,
+`buda.cpython-39-x86_64-cygwin.dll`) and link Cygwin's Python.
+
+**Measured** (validation runs 13–19): `bin/bb` drives a complete GCC 14
+build (≈ 6–8m), the full extension stack **imports clean** —
+`cygbuda_core.dll`, `import buda_db`, `import buda` all green on Cygwin's
+Python 3.9 — and a **`.buda` flow runs end to end** (run 19:
+`four_blocks.buda` through bundler → topologies → planner → NUTS →
+DetailedNUTS, `check_design` clean at every stage, 0 bits unplaced).
+Known, measured limitations:
+
+- **Python is 3.9.16** — the newest Cygwin ships, past upstream EOL and
+  below the project's 3.13 floor. The tree parses under 3.9 (measured: full
+  `ast` sweep), and the one measured *runtime* incompatibility — PEP 604
+  `X | Y` unions in evaluated annotations, which raise `TypeError` at import
+  on 3.9 (run 18) — is fixed with `from __future__ import annotations` in
+  every module a repo-wide AST scan finds (four: `buda_session/nutsflow.py`,
+  `web/server.py`, `tools/build_hier_demo.py`, `demo/ariane/def2buda.py`).
+  Nothing guards new 3.10+ constructs from landing; re-run the validation
+  workflow to re-measure.
+- **No pip wheels exist for Cygwin** — native deps come from `setup.exe`
+  packages or not at all. numpy 2.0.1 works; **the distro matplotlib (3.5.1)
+  is broken out of the box** against that numpy (`_ARRAY_API not found`) —
+  an upstream packaging skew, unfixable from here.
+- **Web deps are unavailable**: pydantic-core needs a Rust build via maturin,
+  whose bootstrap fails under Cygwin (measured — even with a Rust toolchain
+  present). The 28 web tests will always skip.
+- **Pin the ISA: `BUDA_ARCH=x86-64-v2 ./bin/bb` is REQUIRED, not a
+  preference.** With the default `-march=native`, Cygwin gcc 14 generated
+  code that segfaulted *intermittently* in the C++ solve paths on modern
+  CPUs (measured, runs 19–21: one clean flow, then SIGSEGV in `run_nuts`
+  and a few tests into the tier on identical source; thread-count ruled out
+  — `--threads 1` crashed too). With `BUDA_ARCH=x86-64-v2` (the same pin
+  the Linux CI uses) the engine is stable: run 22 measured the flow clean
+  end to end at default threads and **1741 tier tests passing** (5 failed /
+  24 errors — the matplotlib-skew modules plus a few POSIX-assumption
+  cases), where the unpinned build crashed 3 tests in.
+
+### 6.1 Install
+
+Download `setup-x86_64.exe` from https://cygwin.com and install with these
+packages (GUI picker or command line):
+
+```powershell
+.\setup-x86_64.exe -q -s https://mirrors.kernel.org/sourceware/cygwin/ `
+  -R C:\cygwin64 -l C:\cygpkgs `
+  -P gcc-g++,make,cmake,ninja,git,python3,python39-devel,python39-pip,python39-numpy,python39-tkinter
+```
+
+### 6.2 Checkout and environment
+
+Two CRLF guards, both required (measured):
+
+```bash
+git config --global core.autocrlf false   # BEFORE cloning: bash reads CRLF scripts poorly
+set -o igncr                              # this shell: ignore stray \r in sourced files
+export PYTHONUTF8=1
+```
+
+(`SHELLOPTS` itself is **readonly inside bash** — `export SHELLOPTS=igncr`
+fails with `readonly variable`. `set -o igncr` enables it for the current
+shell; to make child bash processes inherit it, set `SHELLOPTS=igncr` in the
+*Windows* environment before bash starts, which is what the validation
+workflow does via its job `env:`.)
+
+Then the pure-python test deps via pip (those wheels are pure-python, so
+they install fine):
+
+```bash
+python3 -m pip install --user pybind11 pytest pytest-bdd pytest-xdist
+```
+
+### 6.3 Build and run — the Linux instructions, plus one PATH line
+
+```bash
+cd /cygdrive/c/path/to/buda
+BUDA_ARCH=x86-64-v2 ./bin/bb               # the repo's own wrapper (ISA pinned per the stability caveat)
+export PATH=$PWD/build:$PATH               # REQUIRED: see below
+PYTHONPATH=$PWD/build:$PWD/src:$PWD/tools python3 src/buda_cli.py --no-viz flow/four_blocks.buda
+python3 -m pytest -q                       # expect matplotlib-dependent failures (distro skew above)
+```
+
+The `PATH` line is the one real deviation from Linux: Cygwin's `dlopen`
+follows Windows LoadLibrary search rules (application dir, system dirs,
+PATH) and — unlike native CPython ≥ 3.8, which searches an extension's own
+directory for its dependencies — does **not** look next to the importing
+module. Without `build` on PATH the import dies with the misleading
+`ImportError: No such file or directory` (measured, run 17): the *module* is
+found; the dependent `cygbuda_core.dll` is what's missing.
+
+`CMakeLists.txt` carries one Cygwin-specific fix: `PYBIND11_EXPORT` is
+pre-defined as a PE `dllexport` for the module targets — Cygwin gcc defines
+neither `_WIN32` nor an implicit dllexport, so without it ld auto-exports
+every symbol (tripping a binutils pathology on pybind11's lambda-heavy
+templates: `cannot export ...: symbol wrong type (4 vs 3)`) while the one
+symbol Python actually needs, `PyInit_<mod>`, goes unexported.
+
+---
+
+## 7. What To Expect From The Test Tier
+
+Measured on runs 9–16 of the validation, identical across the MSVC and MinGW
+paths: the fast tier passes (~1819 tests, 35 xfailed) with a handful of
+**named POSIX-only skips** — file-mode round-trip (`test_bdb_edit_bus`), the
+stdout line-buffering probe (`test_log_ordering`), `SIGKILL`
+crash-recovery (`test_qor_sweep`), and the `bin/buda` wrapper-arg tests
+(`test_buda_wrapper_args` — native Windows' `bash` is the WSL stub, measured
+run 18; they run under Cygwin); each marker states its measured reason.
+If you see *many* failures instead, check `PYTHONUTF8` first (section 2).
+
+## 8. Troubleshooting
 
 Every entry below was actually hit during validation, in this order.
 
@@ -145,18 +407,63 @@ page. Set `PYTHONUTF8=1` (measured: this alone was 87 → 4 test failures).
 
 The compiled extension is not on the path *of the process that needs it*:
 
-- Ninja layout: `build` (pytest gets it free via `pytest.ini`; anything else
-  needs `PYTHONPATH`).
+- Ninja layout (MSVC or MinGW): `build` (pytest gets it free via
+  `pytest.ini`; anything else needs `PYTHONPATH`).
 - VS layout: `build\Release` **and** `build`, always via `PYTHONPATH`.
 - If your own code spawns Python subprocesses, **prepend** to the inherited
   `PYTHONPATH` with `os.pathsep` rather than replacing it — replacing it with
-  a hardcoded `build` orphaned a subprocess under the VS layout (measured;
-  see `test_audit3.py` for the pattern).
+  a hardcoded `build` orphaned a subprocess under the VS layout, and a
+  `':'`-joined literal fused into one bogus entry on Windows (both measured;
+  see `test_audit3.py` and `test_buda_threads_flag.py` for the pattern).
+
+### MinGW: `ImportError: DLL load failed ... The specified module could not be found`
+
+The artifact (or one it links) depends on MSYS2 runtime DLLs
+(`libstdc++-6`, `libgcc_s_seh-1`, `libwinpthread-1`) that native CPython
+cannot find — it does not search PATH for extension dependencies. Current
+`CMakeLists.txt` static-links the runtime into **all three** targets
+(measured: fixing `buda_core` alone just moved the failure into
+`buda_db.pyd`). Verify with `objdump -p <artifact> | grep 'DLL Name'`: only
+`python313.dll`, `KERNEL32`, UCRT api-sets, and `libbuda_core.dll` should
+appear.
+
+### MinGW: `multiple definition of '_Unwind_Resume'` linking a module
+
+The static runtime was linked into `buda_core.dll` but its symbols leaked
+into the DLL's export table (MinGW auto-export), so a module linking the
+import library *plus* its own static `libgcc_eh` sees the symbol twice.
+`--exclude-libs=ALL` on the DLL is the fix (in-tree; measured).
+
+### Cygwin: `ld: cannot export _ZZN8pybind11...: symbol wrong type (4 vs 3)`
+
+Binutils' auto-export tripping over pybind11 lambda symbols. Auto-export
+must be OFF for the module targets, which requires giving ld at least one
+explicit export — in-tree this is `PYBIND11_EXPORT=__attribute__((dllexport))`
+on the module targets (Cygwin gcc defines neither `_WIN32` nor any implicit
+dllexport, so pybind11's default degrades to an ELF visibility attribute
+that PE ignores).
+
+### Cygwin: `ImportError: dynamic module does not define module export function (PyInit_...)`
+
+The module built but exports nothing (the flip side of the previous entry —
+e.g. `--exclude-all-symbols` without an explicit export). Same fix.
+
+### Cygwin: `ImportError: No such file or directory` on `import buda`
+
+Misleading: the module file exists and is found — a **dependent DLL**
+(`cygbuda_core.dll`) is what's missing. Cygwin's `dlopen` searches
+application dir, system dirs, and PATH — never the importing module's own
+directory. Fix: `export PATH=$PWD/build:$PATH` (§6.2/6.3). Measured, run
+17 — where the import-smoke diagnostic *passed* while plain
+`python3`/`pytest` failed, because the diagnostic ctypes-loads the core DLL
+by absolute path first and later imports piggyback on the already-loaded
+copy.
 
 ### Warning spam: `D9025: overriding '/DNDEBUG' with '/UNDEBUG'`
 
 Expected and benign — `BUDA_ASSERTS` (default ON) keeps `assert()` active
-over the Release configuration. One warning per translation unit.
+over the Release configuration. One warning per translation unit (MSVC
+only; the GCC paths use `-UNDEBUG` without complaint).
 
 ### CMake cannot find pybind11 / `python3`
 
@@ -183,4 +490,5 @@ yields configure, link, or import failures.
 
 ### `bb` / `buda` "not recognized"
 
-They are Bash scripts in `bin/`. Use the explicit commands in this guide.
+They are Bash scripts in `bin/`. On the MSVC and MinGW paths use the
+explicit commands in this guide; under Cygwin (§6) they run as-is.

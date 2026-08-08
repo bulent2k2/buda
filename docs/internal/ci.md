@@ -1,7 +1,16 @@
 # Continuous integration
 
 `.github/workflows/ci.yml` builds the C++ core and runs the whole pytest suite
-on every push to `main` and every pull request.
+on every push to `main` and every pull request, plus **on demand** via
+`workflow_dispatch` (the "Run workflow" button, or
+`gh workflow run ci.yml --ref <branch>`).
+
+The manual trigger exists so a branch can be re-tested without an empty commit.
+It was added after an Actions outage left `main` with no CI signal at all: with
+only `push`/`pull_request` declared, the sole lever was re-running an OLD run —
+which tests the SHA that run was created for, not the branch tip, and resets
+that run's previous attempt. Note that `workflow_dispatch` only becomes
+available once the workflow file carrying it is on the **default branch**.
 
 ## Cost
 

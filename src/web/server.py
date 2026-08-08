@@ -26,6 +26,11 @@ contains routing logic.
 Run (dev):
     PYTHONPATH=build:src uvicorn web.server:app --reload --port 8000
 """
+# Cygwin's newest python is 3.9, where PEP 604 unions in EVALUATED
+# annotations raise at import (TypeError: unsupported operand type(s)
+# for |) -- measured, windows-validate run 18.  Lazy annotations keep
+# this module importable there; the project floor stays 3.13.
+from __future__ import annotations
 import asyncio
 import os
 import time

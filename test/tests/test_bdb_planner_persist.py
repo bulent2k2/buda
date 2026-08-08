@@ -201,3 +201,80 @@ def test_v5_db_migrates_to_v6_adds_assigned_layer(tmp_path):
     cols = {r[1] for r in con.execute("PRAGMA table_info(topology_segment)")}
     con.close()
     assert "assigned_layer" in cols
+
+
+# ── selective re-persist (chip_flow_parallelism.md C1) ───────────────────────
+# The RE-persist sites (run_nuts escalation, _checkpoint_routing, the FK
+# fallbacks) pass selective=True: only expanded bundles whose fingerprint
+# (selected uid, seg_layers, lock, USER extras) changed are rewritten.  The
+# contract is BYTE-IDENTITY with a full rewrite — verified through the
+# serialized SQL dump (line-sorted: a selective rewrite reinserts a changed
+# bundle's rows at new rowids, so physical order may differ; content not).
+
+def _dump_sorted(session, tmp_path, tag):
+    out = str(tmp_path / f"{tag}.sql")
+    bdb_serialize.dump(session._bdb_open_path, out)
+    return sorted(open(out).read().splitlines())
+
+
+def test_selective_repersist_noop_skips_and_matches(bdb_input, tmp_path,
+                                                    monkeypatch):
+    s = _hier_planned(bdb_input("hier_mixed"))
+    base = _dump_sorted(s, tmp_path, "base")
+    calls = []
+    orig = type(s)._add_expanded_bundle
+    monkeypatch.setattr(type(s), "_add_expanded_bundle",
+                        lambda self, *a, **k: (calls.append(1),
+                                               orig(self, *a, **k))[1])
+    with contextlib.redirect_stdout(io.StringIO()):
+        s._persist_planner_output(selective=True)
+    assert calls == []                       # nothing changed: zero rewrites
+    assert _dump_sorted(s, tmp_path, "sel") == base
+
+
+def test_selective_repersist_change_matches_full(bdb_input, tmp_path):
+    s = _hier_planned(bdb_input("hier_mixed"))
+    # Mutate ONE expanded instance's assigned layers.
+    exp_ids = {ew.input.original_bundle.id
+               for ws in s._hier_expansion_map.values() for ew in ws}
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.id in exp_ids and w.plan.seg_layers)
+    sl = list(w.plan.seg_layers)
+    sl[0] = next(l for l in s.layers.get_layer_ids_by_dir(
+        buda.LayerDir.HORIZONTAL) + s.layers.get_layer_ids_by_dir(
+        buda.LayerDir.VERTICAL) if l != sl[0])
+    w.plan.seg_layers = sl
+    with contextlib.redirect_stdout(io.StringIO()):
+        s._persist_planner_output(selective=True)
+    sel_dump = _dump_sorted(s, tmp_path, "sel")
+    # Force the historical full rewrite of the SAME state and compare.
+    s._persisted_plan_fp = None
+    with contextlib.redirect_stdout(io.StringIO()):
+        s._persist_planner_output()
+    assert _dump_sorted(s, tmp_path, "full") == sel_dump
+
+
+def test_selective_falls_back_on_new_expansion(bdb_input, monkeypatch):
+    # A memo whose bundle-id set mismatches (fresh expansion) must take the
+    # full clear+rewrite path, never a partial skip.
+    s = _hier_planned(bdb_input("hier_mixed"))
+    s._persisted_plan_fp = {-999: ("x", (), False, ())}   # wrong id set
+    cleared = []
+    orig = type(s.bdb).clear_expanded_bundles
+    monkeypatch.setattr(type(s.bdb), "clear_expanded_bundles",
+                        lambda db: (cleared.append(1), orig(db))[1])
+    with contextlib.redirect_stdout(io.StringIO()):
+        s._persist_planner_output(selective=True)
+    assert cleared                            # full path engaged
+
+
+def test_batch_rollback_invalidates_selective_memo(bdb_input):
+    # Codex #610 P1: the memo is published inside the batched body, and
+    # nested batches defer the real commit past the inner return — so ANY
+    # rollback must invalidate it, forcing the next persist to run full.
+    s = _hier_planned(bdb_input("hier_mixed"))
+    assert s._persisted_plan_fp
+    with pytest.raises(RuntimeError):
+        with s._bdb_batch():
+            raise RuntimeError("boom")
+    assert s._persisted_plan_fp is None

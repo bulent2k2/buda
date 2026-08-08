@@ -23,8 +23,12 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <atomic>
+#include <mutex>
 #include <cstdio>
 #include <iostream>
+#include <sstream>
+#include <thread>
 #include "topology.h"
 #include "topology_analysis.h"
 #include "topo_edit.h"
@@ -536,6 +540,85 @@ void bind_routing(py::module_& m) {
             self.filter_uncovered(cands);
             return cands;
         });
+
+    // ── Parallel candidate generation (chip_flow_parallelism.md P5) ───────
+    // Fan a batch of per-bundle generation tasks across a thread pool with
+    // the GIL released.  Each task is one PRE-CONFIGURED TopologyGenerator
+    // (1:1 task:generator — generate_candidates is not const) plus its
+    // (src, dsts); generators may share read-only Floorplans (audited: no
+    // mutable state, no const_cast; get_hanan_grid builds fresh vectors).
+    // Decision-identical to the sequential loop by construction (per-bundle
+    // generation is pure), and PRINT-identical too: each task's "[TopoGen]"
+    // notes are captured in a private buffer via set_note_stream and
+    // returned per task, so the caller replays them in bundle order exactly
+    // where the sequential loop would have printed them.
+    // Returns [(candidates, notes_str), ...] in input order.
+    m.def("generate_candidates_batch",
+          [](py::sequence gens, const std::vector<std::string>& srcs,
+             const std::vector<std::vector<std::string>>& dsts,
+             int n_threads) {
+        std::vector<TopologyGenerator*> tg;
+        for (auto h : gens)
+            tg.push_back(h.cast<TopologyGenerator*>());
+        const size_t n = tg.size();
+        if (srcs.size() != n || dsts.size() != n)
+            throw std::runtime_error("generate_candidates_batch: length mismatch");
+        std::vector<std::vector<Topology>> pools(n);
+        std::vector<std::string> notes(n);
+        std::exception_ptr first_err = nullptr;
+        {
+            py::gil_scoped_release release;
+            unsigned hw = std::thread::hardware_concurrency();
+            unsigned nt = n_threads > 0 ? (unsigned)n_threads : (hw ? hw : 1);
+            nt = std::min<unsigned>(nt, (unsigned)std::max<size_t>(n, 1));
+            std::atomic<size_t> next{0};
+            // Exception containment (Codex #610 P1): an exception escaping a
+            // spawned thread is std::terminate, and one unwinding the caller
+            // thread past joinable threads terminates too — so each worker
+            // catches, records the FIRST error, and the abort flag drains the
+            // remaining tasks; the pool always joins, note streams are always
+            // restored, and the error rethrows AFTER the join with the GIL
+            // held (pybind translates it to a Python exception, exactly like
+            // the sequential path's failure).
+            std::atomic<bool> abort_flag{false};
+            std::mutex err_mu;
+            auto worker = [&]() {
+                for (size_t i; (i = next.fetch_add(1)) < n; ) {
+                    if (abort_flag.load(std::memory_order_relaxed))
+                        break;
+                    std::ostringstream buf;
+                    tg[i]->set_note_stream(&buf);
+                    try {
+                        pools[i] = tg[i]->generate_candidates(srcs[i], dsts[i]);
+                    } catch (...) {
+                        std::lock_guard<std::mutex> lk(err_mu);
+                        if (!first_err)
+                            first_err = std::current_exception();
+                        abort_flag.store(true, std::memory_order_relaxed);
+                    }
+                    tg[i]->set_note_stream(&std::cerr);
+                    notes[i] = buf.str();
+                }
+            };
+            if (nt <= 1) {
+                worker();
+            } else {
+                std::vector<std::thread> threads;
+                for (unsigned t = 1; t < nt; ++t)
+                    threads.emplace_back(worker);
+                worker();
+                for (auto& th : threads) th.join();
+            }
+        }
+        if (first_err)
+            std::rethrow_exception(first_err);
+        py::list out;
+        for (size_t i = 0; i < n; ++i)
+            out.append(py::make_tuple(py::cast(std::move(pools[i])),
+                                      py::cast(notes[i])));
+        return out;
+    }, py::arg("generators"), py::arg("srcs"), py::arg("dsts"),
+       py::arg("n_threads") = 0);
 
     // ── Bundle planner types (defined in congestion_planner.h) ───────────
     // BundleAssignment and BundleWrapper live here because they are tightly

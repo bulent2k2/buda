@@ -1,481 +1,404 @@
 # BUDA Codebase Analysis
 
-Date: 2026-05-26
+Date: 2026-08-08 (rewrite of the 2026-05-26 original — the codebase has
+moved far past that snapshot: the BDB-centric v3 architecture, the
+hierarchy-aware pipeline, the measured-feedback healers, GDS interchange,
+the interactive Floorplanner, and the chip-scale QoR/runtime tooling all
+landed after it.)
 
 ## Executive Summary
 
-BUDA is a prototype EDA/interconnect planning system. It takes a floorplan and
-netlist, groups related nets into buses, generates candidate bus topologies,
-chooses topology/layer assignments with a congestion-aware global planner, then
-assigns abstract and detailed tracks.
+BUDA is an EDA interconnect planning system for chip design. It bundles
+nets into buses, generates candidate routing topologies, selects
+topology/layer assignments with a congestion-aware global planner, and
+resolves physical track positions down to individual bit-wires respecting
+power-grid and pre-route blockages.
 
-Most core algorithms are implemented in C++20 and exposed to
-Python through a `pybind11` module named `buda`. Python provides the
-script runner, session orchestration, visualization, sidecar persistence, and
-diagnostic logging.
+The core engine is C++20 exposed to Python via pybind11; Python provides
+the `.buda` script CLI, session orchestration, matplotlib visualization,
+and persistence into a SQLite-backed physical design database (**BDB**).
+
+Two entry flows share the pipeline:
+
+1. **Flat flow** — declare blocks and nets in a `.buda` script, bundle,
+   generate, plan, place (the original demo flow).
+2. **Hierarchy-aware flow** — open/build a BDB (`import_def_lef`,
+   `import_verilog`, `import_gds`, or the interactive Floorplanner),
+   derive busterms, and run the `hier` pipeline variants: templates are
+   solved once per cell type and instantiated at every occurrence, with
+   opt-in **bottom-up** solve-once-copy planning, per-cell layer caps and
+   fractional layer shares, and cross-level bundling.
+
+Beyond the one-pass pipeline there is a measured-feedback **healer loop**
+(`negotiate_congestion`, `ripup_reroute`, `refine_selection`) that reads
+the *actual* placement failures (NUTS overlaps, DetailedNUTS opens) and
+re-plans against them, and a `check_design` audit that types every
+violation. Quality is guarded by a 41-flow QoR corpus
+(`tools/qor_corpus.py`): `--compare` fails when ANY flow regresses on
+overlaps/unplaced/viol_bundles (improvements pass; wirelength and
+runtime are reported informationally). Running it base-vs-branch is the
+standard bar for any routing-affecting change — and a change that
+*claims* to be behavior-neutral is held to the stricter observed
+outcome: 0 better / 0 worse / all unchanged with wirelength exactly ±0.
 
 ## Repository Layout
 
-Primary directories:
-
-- `src/`: C++ engines, Buda Physical Design Database (BDB), Python CLI, and visualizer.
-- `flow/`: `.buda` example/design scripts and sidecar `.json` selections.
-- `docs/`: User-facing and design documentation.
-- `test/tests`: pytest and pytest-bdd coverage for the C++ module via Python.
-- `tools`: Helper tooling, including DEF/LEF clustering and visualization utilities.
-- `debug`, `log`, `history`, `fig`: Exploratory scripts, notes, logs, and figures.
+- `src/` — C++ engines + pybind bindings; `buda_cli.py`; the CLI command
+  registry (`buda_cmds/`), session mixins (`buda_session/`), and the
+  visualizer façade + mixins (`buda_viz.py`, `viz_explorer/`, `viz_main/`).
+- `bin/` — launcher/build wrappers: `bb` (build), `buda` (routing CLI),
+  `fp`/`bfp` (Floorplanner), `viz`, `u2b`, `activate`.
+- `flow/` — R&D / regression `.buda` vehicles (`rnr/`, `chip/`,
+  `hbundles/`, `big_data_test/`, shared track fixtures in `tracks/`).
+- `demo/` — user-facing demo vehicles (quickstart, ariane/mempool/nvdla/
+  ispd19 showcases).
+- `docs/` — user guides, per-stage script reference
+  (`docs/script_reference/`), and `docs/internal/` design/measurement
+  notes (the "why is it built this way" record).
+- `test/tests/` — pytest + pytest-bdd suites (~240 test files, 52
+  `.feature` specs); checked-in BDB fixtures as diffable `*.bdb.sql`.
+- `tools/` — Floorplanner GUI, DEF/LEF visualizers, QoR corpus/table,
+  BDB converters (`bdb2buda`, `buda2bdb`, `bdb_edit_bus`), forensics.
+- `qor/` — the checked-in QoR snapshot (`qor_table.md`) and runtime
+  sidecars.
 
 ## Build And Runtime Model
 
-`CMakeLists.txt` builds a single Python extension module:
+CMake builds **three** artifacts (not one):
 
-```text
-buda
-```
+| Target | Kind | Contents |
+|---|---|---|
+| `buda_core` | shared library | BDB + SQLite + busterm + bundler + refiner — the single compiled copy of the DB-layer types |
+| `buda_db` | Python module | registers BDB / row types / BustermGen in pybind11's global registry |
+| `buda` | Python module | full routing pipeline; imports `buda_db` and re-exposes its names |
 
-The extension includes:
+Both extension modules link the same `buda_core`, giving pybind one
+`std::type_info` per class — `buda.BDB` objects pass into `buda` C++
+functions taking `BDB&` without type-info mismatches. New DB-layer types
+register in `buda_db` (via `bind_db.cpp`), not `buda`.
 
-- `bindings.cpp`
-- `bdb.cpp`
-- `sqlite3.c`
-- `bundler.cpp`
-- `bundle_refiner.cpp`
-- `topology.cpp`
-- `conn_topology.cpp`
-- `layering.cpp`
-- `congestion_planner.cpp`
-- `nuts.cpp`
-- `routing_grid.cpp`
-- `detailed_nuts.cpp`
-- `busterm.cpp`
-- `verify.cpp`
+`bin/bb` performs incremental builds (`-c` clean, `test`/`mid`/`slow`
+tiers); compiled `-O3 -march=native -Wall -Wextra` (CI pins `-march` via
+`BUDA_ARCH`; MSVC `/O2` — a manual `Windows validation` workflow builds
+and tests natively on Windows). GitHub Actions gates every PR with build
++ full suite (~5 min).
 
-The Python entry point is `src/buda_cli.py`. It imports
-`buda`, interprets `.buda` files line by line, and stores mutable flow
-state in `BudaSession`.
-
-Typical flow:
-
-```text
-def_layer / def_track_pattern
-add_block / add_keepout
-add_net / add_bus
-run_bundler
-generate_topologies
-run_planner
-run_nuts
-run_detailed_nuts
-visualize
-```
+**Threading.** `buda --threads N` (`-j`) is one knob for every parallel
+stage; the default is half the machine's logical CPUs
+(affinity- and cgroup-quota-aware). It sets the `BUDA_THREADS` governor
+honored by the auto paths of: the planner's parallel candidate scoring
+(`BUDA_PLAN_THREADS`), NUTS per-layer solves (`BUDA_NUTS_THREADS`), the
+healers' parallel trial sweeps (`BUDA_SWEEP_THREADS`), and parallel hier
+candidate generation (`BUDA_TOPO_THREADS`). Every parallel path is
+**decision-identical** (usually print-identical too) to its sequential
+twin by construction — the corpus byte-identity gate depends on it.
 
 ## Core Data Flow
 
-1. Technology and floorplan setup
+```
+BDB (SQLite): components · cells · pins · nets · busterms · bundles
+      │ derive_busterms / add_blocks_from_bdb        (hier flow)
+      ▼
+[1] Bundler        nets → Bundles / HBundles (STRICT | CONVERGENT |
+                   BIDIRECTIONAL | COMBINED; per-prefix permissions;
+                   balanced bit-bound splits; fan-in trees)
+[2] TopologyGen    candidate L/Z/U/trunk/MST/BITRUNK shapes on the Hanan
+                   grid; coverage/antenna/pinch gates; TopoEdit sessions
+[3] Planner        congestion-aware topology selection + layer assignment
+                   (STRICT ladder → rip-up → ALLOW_OVERFLOW → BEST_EFFORT;
+                   parallel candidate scoring; per-cell layer policies)
+[4] Abstract NUTS  1.5-D rectangle packing → per-segment track positions
+[8] Routing Grid   per-layer track patterns (power/signal layout)
+[9] Detailed NUTS  per-bit wires on concrete signal tracks + per-bit vias
+[V] verify         check_topo / check_nuts / check_dnuts (typed violations)
+ ⟲  Healers        negotiate_congestion · ripup_reroute · refine_selection
+                   (measured-feedback re-plan loops between 3↔4/9)
+```
 
-   The script defines metal layers, optional track patterns, blocks, multi-rect
-   blocks, corner margins, keepouts, and nets.
-
-2. Bundling
-
-   `Netlist` stores nets. `Bundler` groups nets into `Bundle` objects. A bundle
-   contains net names, an ID, a reason string, and terminal count metadata.
-
-3. Topology generation
-
-   `TopologyGenerator` creates candidate Manhattan route shapes for each bundle.
-   Two-pin bundles generate L/Z/U/UU-style candidates. Multi-pin bundles can
-   generate trunk, multi-trunk, and MST-style candidates. Topologies carry raw
-   `Segment` geometry plus endpoint annotations via `seg_busterms`.
-
-4. Connectivity enrichment
-
-   `ConnTopology` turns raw topology segments into connected segments. It
-   infers busterm-to-segment and segment-to-segment links, computes slide
-   ranges, and computes net-pull hints for later placement.
-
-5. Global planning
-
-   `GlobalRouter` builds congestion cuts from the floorplan Hanan grid and
-   evaluates candidate topology/layer assignments. It writes the selected
-   topology index, per-segment layer assignments, and representative H/V layers
-   back into `BundleWrapper`.
-
-6. Abstract NUTS placement
-
-   `NUTSEngine` extracts selected topology segments into `TrackSegment`
-   rectangles. Each segment has a fixed span and a hard perpendicular interval.
-   NUTS places each layer independently using sweep-line/first-fit and
-   preferred-fit behavior, then reports violations and physical overlap pairs.
-
-7. Detailed NUTS placement
-
-   `RoutingGridStack` defines real signal/power/ground/clock track patterns.
-   `DetailedNUTSEngine` expands each abstract bus segment into bit-level
-   `NetSegment` placements on concrete signal tracks.
-
-8. Visualization and sidecars
-
-   `buda_viz.py` renders floorplans, topologies, NUTS results, detailed tracks,
-   congestion information, keepouts, and interactive topology selection.
-   Topology choices persist to sidecar `.json` files next to `.buda` scripts.
+Stages persist into the BDB as they run (bundles, candidate topologies,
+planner decisions, bus routing, bit routing), so `load_pipeline` can
+resume a fresh session from a checkpoint taken after
+`generate_topologies`, `run_planner`, or `run_nuts` (+`ripup_reroute`) —
+as deep as was persisted, including the hier flow's expanded
+per-instance view — with the setup (layers/patterns/blocks) re-declared
+first; see `docs/BDB_REFERENCE.md` for the supported resume points.
 
 ## Major Modules
 
-### `bundler.h/.cpp`
+### Bundler (`bundler.h/cpp`, `busterm.h/cpp`)
 
-Defines:
+Flat `Bundler` groups nets by driver/receiver signatures; four
+strategies form a lattice (STRICT ⊂ {CONVERGENT, BIDIRECTIONAL} ⊂
+COMBINED, the last a union-find over both relations). The
+`HierarchicalBundler` bundles each net once at its most specific
+endpoints using BDB busterms; cell-level bundles become reusable
+templates. Multi-driver CONVERGENT groups route as per-bit tapered
+**fan-in trees**. `set_max_bundle_bits` splits oversized bundles into
+balanced parts (static, per-prefix-scoped, or `auto` from busterm-edge
+capacity), applied to templates before expansion.
 
-- `Net`
-- `Netlist`
-- `Bundle`
-- `Bundler`
-- `Strategy`
+### Topology generation (`topology.h/cpp`, `topology_analysis.h/cpp`, `topo_edit.h/cpp`)
 
-The bundler is intentionally simple. It groups nets by signatures derived from
-driver/receiver structure. `STRICT` and `CONVERGENT` strategies are exposed,
-and the header includes a `depth_` field for hierarchy-aware behavior.
+`TopologyGenerator` emits L/Z/U/UU, trunk+branch, MST, trunk+MST hybrid,
+and opt-in two-level BITRUNK shapes; Hanan-line trunk loci are
+default-on. Since the topo/conn unification the six connectivity
+derivation passes live in `topology_analysis.cpp` and cache on the
+`Topology` (content-fingerprint-validated — the fingerprint doubles as
+the persisted `topo_uid` candidate identity). Every generation path ends
+in gates: coverage (no silent `BUSTERM_OPEN`), disconnected-island,
+undeclared-feedthru-relay, BITRUNK anchoring, and opt-in
+dominance-pruning / locus-dedup / dangling-drop cleanups. MST relay
+completion wires relay hubs physically (extension, jog, merge, or the
+opt-in collector spine) so wirelength is honest and no block is silently
+used as a feedthrough. `topo_edit.cpp` provides transactional expert
+edits (the `edit_*` CLI commands and the explorer's edit mode) with
+op-log provenance persisted to the BDB. Per-bundle generation fans out
+on a C++ thread pool (`generate_candidates_batch`, GIL released),
+print- and decision-identical to the sequential loop.
 
-### `topology.h/.cpp`
+### Congestion planner (`congestion_planner.h/cpp`)
 
-Defines geometry and topology generation:
+Greedy widest-first commit over Hanan-grid cuts with band capacities;
+overflow is a **hard constraint** enforced by a per-bundle escalation
+ladder (STRICT → targeted rip-up-and-replan → ALLOW_OVERFLOW →
+BEST_EFFORT, each escalation LOUD). Cost terms are tunable
+(`set_planner_param`: kCong/kSpan/kWL/kSegs(Rel)/kPeak/kBalance/
+kHeight/…; `band_span_charge` spreads a too-wide bus across the bands it
+covers; `charge_pull_target` keeps the books honest against NUTS's pull
+placement). Signal-track capacity mode charges discrete track counts.
+Per-cell **layer caps/shares** (`set_cell_layer_cap/share`,
+`set_layer_caps_by_depth`, `reserve_top_layers`) band-limit a cell's own
+interconnect, enforced inside the ladder. Candidate scoring runs on
+worker threads with an ordered reduction that replays the serial
+compare — decision-identical at any thread count. Hier mode expands
+cell-level templates to per-instance wrappers, plans top-down with
+demand reservations, and runs a default refinement pass; bottom-up
+marked cells solve once per rotation class and copy to instances.
 
-- `Point`, `Rect`, `Segment`
-- `Busterm`
-- `Topology`
-- `Floorplan`
-- `TopologyGenerator`
+### Abstract NUTS (`nuts.h/cpp`, `nuts_dogleg`, `nuts_geom`, `placed_segment.h`)
 
-Important capabilities:
+Sweep-line 1.5-D packing per layer with preferred-fit placement
+(alignment siblings, junction anchoring, pull targets clamped at
+wirelength breakpoints), EDF repacking on failure, corner-overlap
+resolution with delta-based accept guards, scoped span settling, a
+repeat-state convergence guard, and dogleg adoption. Per-layer solves of
+one orientation group run on worker threads behind a size gate
+(result-identical by audit). The placed-segment type hierarchy
+(`PlacedSegmentBase` → `TrackSegment`/`NetSegment`/`PreRoutedSegment`)
+unifies stage-4/stage-9 output with materialized pre-routes.
 
-- Busterm mode connects to block faces rather than centers.
-- Corner margins can be global or per block.
-- Multi-rect blocks support terminal-equivalence and rectilinear/notched
-  modeling.
-- `TegMode::THRU` assumes internal connectivity across rects.
-- `TegMode::OVER` emits bridge annotations when explicit over-the-block
-  connectivity is needed.
-- Keepout zones are stored in the floorplan.
-- Minimum stub length can be global, per direction, or per layer.
+### Routing grid + Detailed NUTS (`routing_grid.h/cpp`, `detailed_nuts.h/cpp`)
 
-The topology layer is a central dependency: the planner, NUTS, visualization,
-and many tests all consume its segment geometry and annotations.
+`RoutingGridStack` models repeating track patterns (POWER/GROUND/CLOCK/
+SHIELD/SIGNAL slots, region overrides, keepouts). `DetailedNUTSEngine`
+places each bus segment's bits on concrete signal tracks (span-clear
+tracks first), span-adjusts bits to their junction partners, culls
+keepout-crossers, and emits per-bit vias. Two measured-accept final
+heals run by default: the cull heal (escalate cull-doomed LOW segments)
+and the TOP re-seat heal (move supply-doomed TOP seats to a layer that
+can host them) — both componentwise-accepted and corpus-guarded.
 
-### `conn_topology.h/.cpp`
+### Healers (`buda_session/ripup.py` + `trial_sweep.cpp`)
 
-This is the bridge between static geometry and routable connectivity. It
-augments a `Topology` with `ConnSeg` records containing:
+- `negotiate_congestion` injects measured overlap/open locations as
+  demand on the exact planner bands and re-plans both parties unpinned
+  (PathFinder-style history; opt-in `press` retries).
+- `ripup_reroute` is a first-improving hill-climb over contenders'
+  candidate alternates with a fixed-context screen, fast trials, an
+  incremental replan per trial, global-occupant and bottom-up
+  template-class passes, dead-span escalation folds, and a convergence
+  guard. Its dominant trial volume — the deferred stall-certificate
+  sweep AND the primary screened scan — evaluates on a C++ thread pool
+  (`parallel_sweep`, per-move private state, replay-confirmed accepts),
+  byte-identical to the sequential path including printed lines and
+  trial counts.
+- `refine_selection` polishes realized wirelength end-of-flow under a
+  componentwise accept.
 
-- orientation and layer
-- along-span and perpendicular position
-- perpendicular slide bounds
-- busterm and segment connections
-- net-pull direction
+### BDB (`bdb.h/cpp`, `gds_io.cpp`, persistence mixins)
 
-This module is important because NUTS depends on slide intervals and pull hints,
-while tests use it heavily to assert connector shape and topology correctness.
+SQLite-backed store for hierarchy, netlist, busterms, bundles, candidate
+topologies (with logical seg-busterm/seg-conn annotations — reloads
+never re-derive connectivity from geometry), planner decisions, bus and
+bit routing, layer policies, and session meta. Self-contained DEF/LEF
+and Verilog parsers (DEF placement + Verilog hierarchy merge), plus
+tested GDSII import/export round-trip (label-based net recovery, layer
+mapping, deterministic bytes). Checked-in test data is diffable
+`*.bdb.sql` text. Persistence is batched into single transactions;
+expanded-instance re-persists are selective (fingerprint dirty-tracking)
+with busterm-row dedup. The remaining interchange roadmap item is the
+OpenAccess bridge (spec'd, gated on the proprietary OA libraries).
 
-### `layering.h/.cpp`
+### CLI (`buda_cli.py`, `buda_cmds/`, `buda_session/`)
 
-Defines the metal stack:
+The 2026-05 monolith concern was addressed by splitting three ways:
+`buda_cli.py` keeps the session core (dispatch, flow-log capture,
+per-command summaries, `--threads` resolution); `buda_cmds/` is the
+command registry (one module per stage, duplicate registration a hard
+import error, unknown commands fail fast); `buda_session/` holds the
+session helpers as six disjoint mixins (persist, hier, nutsflow, edit,
+reports, ripup). Adding a command = C++ class + binding + one `cmd_*`
+handler registered in its stage module.
 
-- layer ID and name
-- horizontal/vertical direction
-- `TOP` versus `LOW` preference
-- dilution factor / overhead
-- span preference window
-- per-layer `kSpan` override
+### Visualizer (`buda_viz.py`, `viz_explorer/`, `viz_main/`, `viz_common`, `viz_window`)
 
-Layering feeds both global routing costs and later physical track assignment.
+Mirrors the CLI split: a façade module plus mixin packages for the
+topology explorer (edit mode, analysis overlays, sidecar sync, debug
+cost view) and the main visualizer (artist-registry highlighting,
+abstract/detailed/pre-route layers). The explorer is part of the
+planning workflow: commits from its edit mode persist USER candidates
+with op-log provenance.
 
-### `congestion_planner.h/.cpp`
+### Floorplanner (`floorplanner.h/cpp`, `placement_optimizer.h/cpp`, `tools/bdb_floorplanner.py`)
 
-The congestion planner chooses topology and layer assignments. Its public knobs are:
+A separate interactive placement tool over the BDB: drag/resize/align
+editing, SA/GA placement optimization with per-block constraints,
+validation, live HPWL/flylines, and Run Flow hand-off into the hier
+routing pipeline. Launched via `bin/fp` / `bin/bfp`.
 
-- `kCong`
-- `kSpan`
-- `base_cost_non_top`
+### Tooling (`tools/`)
 
-It builds congestion cuts and scores candidate segments by overflow, effective
-width, layer preferences, and span mismatch. It returns `BundleAssignment`
-objects, which the Python session copies back onto the corresponding
-`BundleWrapper`.
-
-### `nuts.h/.cpp`
-
-NUTS is the abstract track assignment engine. It treats each bus segment as a
-rectangle:
-
-- fixed routing-direction span
-- movable perpendicular center
-- hard placement interval
-- physical width
-
-It solves each layer independently, reports interval violations, and computes
-exact overlap rectangles. It also supports `rerun_layer`, which re-solves a
-single layer while preserving the larger result context.
-
-### `routing_grid.h/.cpp`
-
-This module models real repeating track patterns:
-
-- `TrackSlot`: signal, power, ground, clock, shield, custom
-- `TrackPattern`: repeating pitch unit with signal density and dilution
-- `PatternOverride`: region-specific local pattern
-- `RoutingGrid`: per-layer pattern plus keepouts
-- `RoutingGridStack`: registry by layer ID
-
-This is the bridge from abstract bus widths to concrete track availability.
-
-### `detailed_nuts.h/.cpp`
-
-Detailed NUTS turns bus-level placement into bit-level placement. A
-`BusSegment` has bit width, bit order, layer, span, interval, adjacent segment
-metadata, and abstract anchor position. The output is a list of `NetSegment`
-placements and a count of unplaced bits.
-
-### `bindings.cpp`
-
-`bindings.cpp` is the API contract between C++ and Python. It exposes nearly
-all important structs and engines, including direct mutable fields for many
-objects. This makes tests and the CLI straightforward, but it also means Python
-can construct states that would be hard to validate from C++ alone.
-
-### `buda_cli.py`
-
-`BudaSession` owns the long-lived state:
-
-- `Floorplan`
-- `Netlist`
-- `LayerStack`
-- `Bundler`
-- `GlobalRouter`
-- bundles/wrappers
-- NUTS and detailed-NUTS results
-- layer-name maps
-- sidecar path state
-- routing grid definitions
-
-The CLI command parser is simple and imperative. It recognizes setup commands,
-planning commands, NUTS commands, visualization commands, and `source` for
-nested scripts.
-
-Important behavior:
-
-- Sidecar `.json` selections can pin topology choices and per-segment layers.
-- `run_planner post_nuts` reassigns short/long stubs after NUTS and reruns NUTS.
-- `run_nuts_on_layer` supports targeted layer re-solving.
-- NUTS diagnostics are written to `<script>_nuts.log`.
-- `--no-viz` disables visualization for batch/test use.
-
-### `buda_viz.py`
-
-Visualization is Matplotlib based. It includes a topology explorer with bundle
-and topology navigation, sidecar selection persistence, rerun hooks, keepout
-display, layer coloring, and NUTS/detailed-NUTS overlays.
-
-This is not only a viewer: it is part of the interactive planning workflow
-because it persists user-selected topology and layer decisions.
-
-### `tools/def_cluster.py`
-
-This helper converts placed DEF/LEF data into BUDA-friendly abstractions. It can
-cluster nets by pin centroid, bipartite driver/receiver clusters, grid cells, or
-high-fanout extraction. It emits `add_block`/bus-style BUDA content. This is the
-main bridge from real design data into the prototype flow.
+`qor_corpus.py` (the 41-flow QoR sweep + `--compare` regression gate,
+parallel `-j`), `qor_table.py` (the checked-in snapshot + nightly diff
+sidecar), `bdb2buda`/`buda2bdb`/`bdb_edit_bus` (BDB ↔ flat-script
+converters and netlist surgery), `build_hier_demo.py` (assembles
+hierarchical demo BDBs up to true 3-level chip vehicles),
+`unit2buda`/`render.py` (test → visual repro), `doomed_seat_forensics`,
+DEF/LEF cluster visualizers, and macOS `.app` bundle generation.
 
 ## Script Language Surface
 
-The `.buda` language is intentionally command-oriented. Important commands:
-
-- `def_layer`
-- `def_track_pattern`
-- `add_grid_override`
-- `add_block`
-- `corner_margin`
-- `set_min_stub_length`
-- `set_min_stub_length_dir`
-- `set_min_stub_length_layer`
-- `add_keepout`
-- `add_net`
-- `add_bus`
-- `run_bundler`
-- `generate_topologies`
-- `generate_topologies_for_bundle`
-- `set_planner_param`
-- `run_planner`
-- `run_planner post_nuts`
-- `run_nuts`
-- `run_nuts_on_layer`
-- `run_detailed_nuts`
-- `visualize_topologies`
-- `visualize`
-- `source`
-
-The command language is documented in `docs/BUDA_SCRIPT_REFERENCE.md`.
+The `.buda` command set has grown to 92 commands across setup,
+BDB/hierarchy construction, bundling, generation (+ per-bundle,
+additive, and edit-session variants), planning (params, pins,
+super-candidate group pins), NUTS/DNUTS, healers, layer policies,
+verification, reporting, and GDS interchange. It is documented in
+`docs/BUDA_SCRIPT_REFERENCE.md` (index + per-stage pages under
+`docs/script_reference/`), with the authoritative one-table summary in
+the repository `CLAUDE.md`. Unknown commands are a hard error, as are
+silently-dangerous redefinitions (duplicate net/block/layer/pattern
+names).
 
 ## Testing Surface
 
-Tests live in `test/tests` and use `pytest` plus `pytest-bdd`. Shared step
-fixtures in `conftest.py` construct `interconnect` objects directly.
-
-Notable coverage areas:
-
-- bundling
-- topology generation
-- unified topology behavior
-- connector shape
-- corner margins
-- minimum stub length
-- keepout zones
-- routing grid
-- detailed NUTS
-- NUTS track assignment
-- span-aware layer assignment
-- global congestion
-- feedthrough
-- multi-rect blocks
-- multi-level trunk
-- multicast topology
-- hierarchy/depth planning
-- busterm over-the-block behavior
-- flow script execution
-
-The test suite is integration-heavy in a useful way: many tests exercise the
-actual Python-facing C++ module rather than isolated C++ internals.
+Three cumulative pytest tiers (markers in `pytest.ini`): **fast**
+(~1 870 tests, <30 s — the default), **mid** (+~600 flow-script/BDB
+round-trip integration, ~6 min), **slow** (+SA/GA storms and healer
+end-to-end agreement runs). `bin/bb test|mid|slow` builds then runs a
+tier; pytest-xdist parallelizes when installed. 52 Gherkin `.feature`
+specs (pytest-bdd) map arcs to executable scenarios with a tag-vocabulary
+guard. Beyond unit/integration tests, the **QoR corpus** is the routing
+regression instrument: every topology/planner/NUTS change runs
+base-vs-branch and must show no endpoint regression and (for
+transparency-classed changes) byte-identical decisions. CI runs build +
+full suite on every PR; Windows correctness is validated by a manual
+workflow.
 
 ## Engineering Findings
 
 ### Strengths
 
-1. Clear staged architecture
-
-   The main flow is coherent: netlist -> bundles -> topologies -> global
-   planning -> abstract tracks -> detailed tracks -> visualization.
-
-2. Productive C++/Python split
-
-   Geometry and placement logic live in C++ while Python provides a fast-moving
-   scripting and visualization shell.
-
-3. Strong domain modeling for a prototype
-
-   Concepts such as busterms, corner margins, multi-rect blocks, TEG modes,
-   keepouts, layer dilution, span preferences, sidecar selections, and
-   detailed track patterns are all represented explicitly.
-
-4. Interactive workflow is built into the design
-
-   Sidecar persistence means the visualizer is not just diagnostic. It is a
-   manual override and exploration tool that feeds future runs.
-
-5. Good test direction
-
-   There are tests for many behaviors that are easy to regress: topology shape,
-   margins, NUTS placement, detailed tracks, and multi-rect edge cases.
+1. **Measured-change discipline.** The corpus gate, byte-identity
+   validation for parallel paths, and `docs/internal/` measurement notes
+   (including rejected experiments with their numbers) make regressions
+   rare and reasoning reconstructible. Defaults get flipped only after
+   corpus-wide A/B (and several measured-worse features deliberately
+   stay opt-in).
+2. **Fail-loud philosophy.** Hard errors on typos and redefinitions,
+   LOUD warnings at every planner escalation, typed `check_design`
+   violations, and report-only audits that never silently filter.
+3. **Coherent staged architecture, now with a feedback loop.** The
+   pipeline is still the clear spine; the healers close the loop against
+   measured reality instead of model estimates, which is where most of
+   the QoR wins of the last quarter came from.
+4. **Resumable persistence.** The BDB checkpoints every stage deeply
+   enough that sessions resume mid-pipeline, including hier templates,
+   USER candidates with provenance, and bottom-up copies.
+5. **Parallelism with determinism.** Every thread pool (planner scoring,
+   NUTS layers, healer sweeps, candidate generation) is
+   decision-identical by construction — performance work has not eroded
+   reproducibility.
+6. **The 2026-05 structural complaints were addressed**: `BudaSession`
+   was split into a registry + mixins, the visualizer likewise; bundle
+   endpoints are first-class (`net_drivers`/`net_receivers`, fan-in
+   contracts checked by `NET_DRIVER_OPEN`); sidecar JSON gave way to BDB
+   persistence; directories were flattened (`bin/`, `qor/`, `assets/`).
 
 ### Risks And Weak Spots
 
-1. `buda_cli.py` is doing too much
+1. **The pybind surface is still highly mutable.** Many bound structs
+   expose `def_readwrite` fields, and Python-side healer code pins/
+   restores wrapper state directly. The opaque `BundleWrapperVec`
+   tightened aliasing semantics but invariants largely live in
+   discipline + tests, not types.
+2. **Print-identity as a regression oracle is double-edged.** Several
+   validations diff logs byte-for-byte, which catches real divergence
+   but also couples output formatting to correctness claims; changing a
+   print means re-baselining.
+3. **`ripup.py` is the new concentration point** (~3 000 lines of
+   healer orchestration: trials, screens, sweeps, class/release passes,
+   negotiate). It is well-commented and test-covered, but it is the
+   file where most subtle state-restore bugs have lived.
+4. **Runtime is chip-scale-sensitive.** Profiles differ qualitatively
+   between the rnr vehicles and the chip corpus (e.g. persistence
+   dominated the chip flow; trial marshalling dominated rnr) — a change
+   tuned on one class can be neutral or negative on the other, so both
+   must be measured.
+5. **Docs are extensive but layered.** CLAUDE.md is the accurate
+   deep index, the script reference the user surface, and
+   `docs/internal/` the design record — but some older top-level docs
+   (as this file was) lag reality; staleness is found by readers, not
+   tooling.
 
-   `BudaSession` mixes parsing, flow orchestration, sidecar IO, logging,
-   diagnostics, post-NUTS heuristics, detailed-NUTS conversion, and visualizer
-   integration. This is workable for a prototype but will become difficult to
-   maintain as commands grow.
+## Current Improvement Directions
 
-2. The Python API exposes highly mutable C++ objects
+Tracked in `docs/internal/wishlist-*.md`, `docs/internal/opens*.md`, and
+the per-arc notes; the active headline items:
 
-   Many pybind classes use direct `def_readwrite` fields. This helps tests and
-   interactive use but weakens invariants. Invalid combinations can be produced
-   outside the C++ constructors or engine methods.
-
-3. Some command parsing is ad hoc
-
-   The `.buda` parser is a split-on-whitespace interpreter with per-command
-   parsing logic. That keeps the language simple, but robust error reporting,
-   quoting, validation, and forward compatibility are limited.
-
-4. Bundle endpoint metadata is split across layers
-
-   The Python session stores `_net_endpoints` separately because the C++ Bundle
-   currently carries net names but not canonical source/destination block
-   metadata. This is a recurring source of lookup and convention dependency.
-
-5. Codebase has been cleaned up
-
-   The repository has been restructured to merge active development files into a clean root-level layout, eliminating duplicate or legacy directories.
-
-6. Visualization is tightly coupled to runtime state
-
-   `buda_viz.py` directly knows about floorplans, wrappers, sidecars, rerun
-   callbacks, NUTS details, and layer behavior. This is pragmatic but makes GUI
-   changes risky because they can affect the planning loop.
-
-7. Docs are broad but scattered
-
-   The codebase has good notes, but users must read several files to understand
-   the current architecture: `README.md`, `docs/USER_GUIDE.md`,
-   `docs/BUDA_SCRIPT_REFERENCE.md`, `src/DESIGN_NOTES.md`, and
-   feature-specific docs.
-
-## Suggested Next Improvements
-
-1. Split `BudaSession` into smaller units
-
-   Candidate boundaries:
-
-   - script parser / command dispatcher
-   - design state model
-   - planning pipeline service
-   - sidecar persistence
-   - diagnostics/logging
-   - visualization adapter
-
-2. Add a first-class C++/Python `BundleEndpoint` model
-
-   Store driver block and receiver blocks with the bundle instead of relying on
-   Python-side `_net_endpoints` and net-name conventions.
-
-3. Add validation before each pipeline stage
-
-   Each command such as `generate_topologies`, `run_planner`, `run_nuts`, and
-   `run_detailed_nuts` should have a clear preflight check with actionable
-   errors.
-
-4. Formalize the `.buda` command grammar
-
-   A small parser layer would make the command surface easier to extend and
-   easier to test. It does not need to be a heavy language implementation.
-
-5. Clarify active directories
-
-   The project directories have been flattened. Active source files reside under `src/` and design runs under `flow/`.
-
-6. Keep expanding flow-level regression tests
-
-   The most valuable tests are probably script-level flows that exercise
-   realistic designs and assert planner/NUTS invariants: no crashes, bounded
-   overlaps, no interval violations, expected sidecar behavior, and detailed
-   track placement counts.
+1. **Chip-flow runtime** (`docs/internal/chip_flow_parallelism.md`):
+   scoped escalation re-solves (P8, ~7–8% of the chip vehicle),
+   congestion-map parallel-for (P6a), DNUTS per-layer threads at scale
+   (P7), async persistence (P9) — after the landed persistence
+   dirty-tracking + parallel generation took the vehicle −31%.
+2. **NDR support** (per-net/bus width/spacing/shield constraints):
+   requirements, UI options, and architecture are written; nothing
+   built.
+3. **OpenAccess bridge**: spec'd behind an optional CMake flag; LEF/DEF
+   + Verilog + GDS remain the supported interchange.
+4. **CI depth**: nightly QoR corpus with golden ownership
+   (`docs/internal/opens_ci.md`).
+5. **Planner selection-basis levers** and remaining wishlist items
+   (dead-span gate default, kWLSpread default) await the measurements
+   their notes call for.
 
 ## Practical Onboarding Path
 
-For a new developer, the shortest path through the codebase is:
-
-1. Read `docs/USER_GUIDE.md` for the pipeline.
-2. Read `docs/BUDA_SCRIPT_REFERENCE.md` for command syntax.
-3. Run or inspect `demo/quickstart.buda`.
-4. Read `src/buda_cli.py` to understand orchestration.
-5. Read the C++ headers in this order:
-   `bdb.h`, `bundler.h`, `topology.h`, `conn_topology.h`, `layering.h`,
-   `congestion_planner.h`, `nuts.h`, `routing_grid.h`, `detailed_nuts.h`.
-6. Use tests in `test/tests` as executable examples of expected behavior.
+1. Read `README.md`, then `docs/USER_GUIDE.md` for the standard flow.
+2. Skim the repository `CLAUDE.md` — it is the accurate architecture
+   index (build model, stage-by-stage detail, command tables).
+3. Run `demo/quickstart.buda` and `bin/bfp tc1`; open a flow in the
+   topology explorer (`visualize_topologies`).
+4. Read `src/buda_cli.py` + one `buda_cmds/` stage module to see the
+   command → engine path.
+5. C++ headers in pipeline order: `bdb.h`, `bundler.h`, `topology.h`,
+   `topology_analysis.h`, `congestion_planner.h`, `nuts.h`,
+   `routing_grid.h`, `detailed_nuts.h`, `verify.h`.
+6. For any behavior question, find its `docs/internal/` note — the
+   measurement history usually explains the current default.
+7. Before changing routing behavior: `tools/qor_corpus.py --out base`
+   on main, again on your branch, `--compare` — the standard gate.
 
 ## Bottom Line
 
-The codebase is a serious prototype with a coherent staged architecture and a
-substantial amount of routing-domain behavior already modeled. Its strongest
-asset is the clear algorithmic pipeline backed by Python-accessible C++ engines.
-The main maintenance risk is orchestration complexity in Python and loose
-mutable boundaries between stages. The next large quality step is to preserve
-the current experimentation speed while introducing clearer stage interfaces,
-preflight validation, and a more explicit design state model.
+BUDA has grown from a staged prototype into a measured, resumable,
+hierarchy-aware planning system with a real feedback loop and a
+regression discipline unusual for a codebase this age: every default is
+a recorded measurement, every parallel path proves decision-identity,
+and every routing change faces a corpus gate. The structural risks of
+the 2026-05 snapshot (monolithic session, ad-hoc endpoints, sidecar
+state) were paid down; today's risks are subtler — a mutable binding
+surface held together by tests, healer orchestration concentrated in
+one large module, and runtime profiles that differ by design scale.
+The near-term high-value work is finishing the chip-scale runtime
+items, then NDR — the first feature that will stress the per-net
+granularity of a deliberately bus-centric core.

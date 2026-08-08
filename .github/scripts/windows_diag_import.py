@@ -18,15 +18,21 @@ stage("stage 0: python %s" % sys.version.split()[0])
 stage("stage 0: cwd=%s" % os.getcwd())
 stage("stage 0: PYTHONPATH=%s" % os.environ.get("PYTHONPATH"))
 
+# Native Windows python has ctypes.WinDLL and MSVC names the DLL
+# buda_core.dll; Cygwin python is a POSIX build (no WinDLL -- use CDLL) and
+# Cygwin GCC prefixes shared libs as cygbuda_core.dll.  Probe whichever
+# personality/name combination exists.
+_loader = getattr(ctypes, "WinDLL", ctypes.CDLL)
 for d in ("build", os.path.join("build", "Release"), "build-noassert"):
-    dll = os.path.join(os.getcwd(), d, "buda_core.dll")
-    if os.path.exists(dll):
-        stage("stage 1: ctypes-loading %s ..." % dll)
-        try:
-            ctypes.WinDLL(dll)
-            stage("stage 1: ctypes loads OK: %s" % dll)
-        except OSError as e:
-            stage("stage 1: ctypes load FAILED: %s -> %s" % (dll, e))
+    for name in ("buda_core.dll", "cygbuda_core.dll", "libbuda_core.dll"):
+        dll = os.path.join(os.getcwd(), d, name)
+        if os.path.exists(dll):
+            stage("stage 1: ctypes-loading %s ..." % dll)
+            try:
+                _loader(dll)
+                stage("stage 1: ctypes loads OK: %s" % dll)
+            except OSError as e:
+                stage("stage 1: ctypes load FAILED: %s -> %s" % (dll, e))
 
 try:
     stage("stage 2: import buda_db ...")

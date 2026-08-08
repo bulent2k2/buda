@@ -48,6 +48,7 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
         print("Warning: run_nuts has no bundles — run run_bundler, "
               "generate_topologies, and run_planner first.")
         return
+    session._validate_stage_entry("run_nuts")
     if not any(0 <= w.plan.selected_topology_index < len(w.input.candidates)
                for w in session.bundles):
         print("Warning: run_nuts found no selected topology to place — run "
@@ -118,7 +119,7 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
             # could recreate the dead assignment.  Mirror the stage-b heal's
             # _checkpoint_routing (Codex #351 P2).  Trial-guarded inside.
             if session.bdb is not None:
-                session._persist_planner_output()
+                session._persist_planner_output(selective=True)
     # A fresh abstract solve invalidates any prior detailed result:
     # ripup_reroute / negotiate_congestion key their stage off
     # detailed_result, and hill-climbing against a detailed route of
@@ -194,6 +195,7 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
 
 
 def cmd_ripup_reroute(session, cmd, args, cmd_line):
+    session._validate_stage_entry("ripup_reroute")
     # Usage: ripup_reroute [max_iter] [use_edge_candidates] [no_global]
     #                      [no_class_moves]
     #                      [fast_trials|no_fast_trials] [screen|no_screen]
@@ -310,6 +312,7 @@ def cmd_refine_selection(session, cmd, args, cmd_line):
 
 
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):
+    session._validate_stage_entry("negotiate_congestion")
     # Usage: negotiate_congestion [max_iter] [class_moves|no_class_moves]
     # Measured-congestion feedback (run after run_nuts): inject the
     # actual NUTS overlaps as band demand and let the planner re-price
@@ -324,14 +327,28 @@ def cmd_negotiate_congestion(session, cmd, args, cmd_line):
     # away (final opens 8->16 at default ripup budgets; equal at 30),
     # and the stage-b iteration is price-rejected — ripup's class moves
     # already cover the endpoint.
-    flags = ("class_moves", "no_class_moves")
+    # `press` (OPT-IN, default off): a rejected iteration does not end the
+    # run — restore and RETRY under the grown PathFinder history pressure
+    # (which the first-failure stop computes and then throws away), until
+    # max_iter or a failed retry reproduces the SAME metric as the previous
+    # failure (deterministic replans insensitive to the grown amounts =
+    # certified waste).  Opt-in because it measured 0 better / 1 worse on
+    # the corpus (2026-08-07): the caps/mix stalls are price-INSENSITIVE
+    # (the retry repeats byte-identically), and on mix2_fast_on_aligned_sql
+    # the pressed retries DO beat the stall on negotiate's own metric
+    # (stage b 150 (ovl 12) -> 130 (ovl 6), abstract WL -6.5%) but the
+    # better hand-off shifts ripup's greedy basin and the flow ENDPOINT
+    # lands worse (2/16/1 -> 4/28/2) — the healer-composition hazard.
+    flags = ("class_moves", "no_class_moves", "press", "no_press")
     use_class_moves = "class_moves" in args
+    use_press = "press" in args
     leftover = [a for a in args if a not in flags]
     unknown = [a for a in leftover if not looks_numeric(a)]
     reject_unknown_options("negotiate_congestion", unknown, flags)
     max_iter = int(leftover[0]) if leftover else 5
     session._negotiate_congestion(max_iter=max_iter,
-                                  use_class_moves=use_class_moves)
+                                  use_class_moves=use_class_moves,
+                                  use_press=use_press)
 
 
 def cmd_run_nuts_on_layer(session, cmd, args, cmd_line):

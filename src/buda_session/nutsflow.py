@@ -23,6 +23,11 @@ Methods extracted verbatim from buda_cli.BudaSession (the CLI mixin
 split); bodies unchanged — `self` is the composed BudaSession, so
 cross-mixin helper calls resolve through the class as before.
 """
+# Cygwin's newest python is 3.9, where PEP 604 unions in EVALUATED
+# annotations raise at import (TypeError: unsupported operand type(s)
+# for |) -- measured, windows-validate run 18.  Lazy annotations keep
+# this module importable there; the project floor stays 3.13.
+from __future__ import annotations
 import math
 import os
 import sys
@@ -787,6 +792,35 @@ class NutsFlowMixin:
         x = (seg.span_lo + seg.span_hi) / 2.0
         return g.count_signal_tracks_in(x, b_lo, b_hi)
 
+    def _doomed_seats(self):
+        """The supply-doomed seat census, computed quietly: returns a list of
+        `(seg, need, pool, is_top)` for every placed segment whose assigned
+        layer's real signal-track supply in the seat falls short of its
+        member bits (see `_report_doomed_seats` for the full story).  Split
+        out so the stage-a healer advisory can COUNT the seats without
+        printing the per-seat report."""
+        if self.nuts_result is None or self.routing_grid is None:
+            return []
+        wmap = {w.input.original_bundle.id: w for w in self.bundles
+                if not w.hier.locked}
+        doomed = []          # (seg, need, pool, is_top)
+        for seg in self.nuts_result.segments:
+            if not seg.placed or not self.routing_grid.has_layer(seg.layer):
+                continue
+            w = wmap.get(seg.bundle_id)
+            if w is None or not w.plan.seg_layers:
+                continue
+            sel = w.plan.selected_topology_index
+            if sel < 0 or sel >= len(w.input.candidates):
+                continue
+            g = self.routing_grid.get_layer_grid(seg.layer)
+            need = self._seg_member_bits(w, sel, seg.seg_idx)
+            pool = self._seg_admission_pool(seg, g, need)
+            if pool < need:
+                doomed.append((seg, need, pool,
+                               self.layers.is_top(seg.layer)))
+        return doomed
+
     def _report_doomed_seats(self) -> int:
         """Report-only census of SUPPLY-DOOMED SEATS (#536 option 1): placed
         segments — any layer, TOP included — whose assigned layer's real
@@ -811,26 +845,7 @@ class NutsFlowMixin:
         here yet place every bit), and their pool story is
         `check_template_tracks`'s.  Returns the doomed-segment count; silent
         when zero."""
-        if self.nuts_result is None or self.routing_grid is None:
-            return 0
-        wmap = {w.input.original_bundle.id: w for w in self.bundles
-                if not w.hier.locked}
-        doomed = []          # (seg, need, pool, is_top, locked)
-        for seg in self.nuts_result.segments:
-            if not seg.placed or not self.routing_grid.has_layer(seg.layer):
-                continue
-            w = wmap.get(seg.bundle_id)
-            if w is None or not w.plan.seg_layers:
-                continue
-            sel = w.plan.selected_topology_index
-            if sel < 0 or sel >= len(w.input.candidates):
-                continue
-            g = self.routing_grid.get_layer_grid(seg.layer)
-            need = self._seg_member_bits(w, sel, seg.seg_idx)
-            pool = self._seg_admission_pool(seg, g, need)
-            if pool < need:
-                doomed.append((seg, need, pool,
-                               self.layers.is_top(seg.layer)))
+        doomed = self._doomed_seats()
         if not doomed:
             return 0
         # Configured layer names (Codex P2 on #548): a layer's id and name
@@ -1743,7 +1758,7 @@ class NutsFlowMixin:
         """
         if self.bdb is None:
             return
-        self._persist_planner_output()
+        self._persist_planner_output(selective=True)
         self._persist_nuts()
         if self.detailed_result is not None:
             self._persist_detailed_nuts()

@@ -444,6 +444,21 @@ def _runtime_report(paired):
     pct = (100 * d / tb) if tb else 0.0
     print("\nruntime (informational — single-run, noisy; not a guard):")
     print(f"  total {tb:.1f}s -> {tm:.1f}s  ({d:+.1f}s, {pct:+.1f}%)")
+    # Per-class rollups (risk_reduction_plan.md R4): runtime profiles differ
+    # qualitatively by design class (chip vs rnr vs big), so aggregate by the
+    # flow's directory family — class-level drift is visible even when no
+    # single flow crosses the per-flow noise floor below.
+    by_class = {}
+    for f, b, m in timed:
+        cls = f.replace("flow/", "").split("/")[0] if "/" in f else "(root)"
+        cb, cm = by_class.get(cls, (0.0, 0.0))
+        by_class[cls] = (cb + b["sec"], cm + m["sec"])
+    for cls in sorted(by_class, key=lambda c: -by_class[c][0]):
+        cb, cm = by_class[cls]
+        cd = cm - cb
+        cpct = (100 * cd / cb) if cb else 0.0
+        print(f"    {cls:<20} {cb:>7.1f}s -> {cm:>7.1f}s  "
+              f"({cd:+.1f}s, {cpct:+.1f}%)")
     movers = sorted(timed, key=lambda x: abs(x[2]["sec"] - x[1]["sec"]),
                     reverse=True)
     for f, b, m in movers:
@@ -766,10 +781,29 @@ def discover_candidates(roots=CANDIDATE_ROOTS, corpus=None):
             for fn in sorted(fns):
                 if not fn.endswith(".buda"):
                     continue
-                rel = os.path.relpath(os.path.join(dp, fn), _ROOT)
+                path = os.path.join(dp, fn)
+                try:
+                    rel = os.path.relpath(path, _ROOT)
+                except ValueError:
+                    # Windows: an out-of-tree root on another DRIVE (pytest tmp
+                    # on C: vs the checkout on D:) has no repo-relative form.
+                    # Keep the absolute path: it can never collide with the
+                    # repo-relative corpus member names, so the exclusion
+                    # semantics are unchanged -- and on Linux an out-of-tree
+                    # root already yields a non-member '../..' form anyway.
+                    # (Measured: doc-validation run 12; third occurrence of
+                    # the cross-drive relpath pathology in this tree.)
+                    rel = path
+                # Normalize to forward slashes: corpus member names use '/',
+                # and on Windows BOTH relpath and the absolute fallback return
+                # backslashes -- without this, corpus members would never match
+                # (and be listed as their own candidates).  Round-1's fix
+                # stopped the ValueError but missed this half (measured:
+                # doc-validation run 13, both MSVC lanes).
+                rel = rel.replace(os.sep, "/")
                 if rel in member:
                     continue
-                if "run_detailed_nuts" in flow_tokens(os.path.join(dp, fn)):
+                if "run_detailed_nuts" in flow_tokens(path):
                     found.append(rel)
     return sorted(found)
 

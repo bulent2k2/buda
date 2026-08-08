@@ -98,6 +98,11 @@ Open it afterward with the Floorplanner (`bin/fp out.bdb`) or drive the hier flo
 (the build prints the exact run_hier_bundler / run_planner hier commands).
 """
 
+# Cygwin's newest python is 3.9, where PEP 604 unions in EVALUATED
+# annotations raise at import (TypeError: unsupported operand type(s)
+# for |) -- measured, windows-validate run 18.  Lazy annotations keep
+# this module importable there; the project floor stays 3.13.
+from __future__ import annotations
 import os
 import sys
 
