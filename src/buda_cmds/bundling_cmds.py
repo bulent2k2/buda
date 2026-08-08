@@ -832,17 +832,6 @@ def cmd_set_max_bundle_bits(session, cmd, args, cmd_line):
 
 def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     # run_hier_bundler [depth <N>] [STRICT|CONVERGENT|BIDIRECTIONAL|COMBINED]
-    if getattr(session, "_ndr_scopes", None):
-        # NDR phase 1 covers the FLAT flow only: hier template propagation
-        # (R2d — a template's rule applying to every instance, incl. the
-        # rule-class split BEFORE per-instance expansion) is the next
-        # increment.  Refusing beats silently routing governed nets at
-        # default width/spacing/no-shield.
-        print("Error: NDR rules are declared (set_ndr) but phase 1 supports "
-              "the flat flow only — run_hier_bundler would silently ignore "
-              "them.  Clear the scopes (set_ndr <prefix> off) or use the "
-              "flat flow.")
-        sys.exit(1)
     if session.bdb is None:
         print("Error: run_hier_bundler requires an open BDB (use open_bdb first)"); return
     max_depth = 1
@@ -886,6 +875,13 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     # so the split propagates identically to every instance (each part is its
     # own template, replicated at run_planner hier).
     raw_bundles = _split_hier_bundles(session, raw_bundles)
+    # NDR rule-class split (R2d — the flat split's hier twin, same order:
+    # bit cap first, rules second): TEMPLATE bundles become rule-uniform
+    # BEFORE per-instance expansion, replicas split in lockstep, and a
+    # class governed inconsistently across occurrences hard-errors.
+    # No-op with no set_ndr scopes.
+    from buda_cmds import ndr_cmds
+    raw_bundles = ndr_cmds.split_mixed_ndr_hbundles(session, raw_bundles)
     # P2: C++-backed container (see the flat site above).
     session.bundles = buda.BundleWrapperVec()
     for b in raw_bundles:
@@ -893,6 +889,10 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
         w.input.original_bundle = b
         w.input.width = len(b.get_net_names()) * 1.5
         session.bundles.append(w)
+    # Stamp resolved NDR specs onto the fresh wrappers (templates AND
+    # replicas — the congruence check above guarantees one rule per
+    # class), before _persist_bundles stamps the governing fingerprints.
+    ndr_cmds.apply_ndr_specs(session)
     session._hier_bundles_orig = list(session.bundles)  # snapshot for dump_hbundles
     # Fresh bundles reuse small integer ids: stale id-keyed clone provenance
     # from a previous split would stamp a bogus cloned_from on an unrelated

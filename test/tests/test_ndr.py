@@ -142,12 +142,17 @@ def test_prefix_resolution_longest_wins():
     assert ndr_cmds.ndr_rule_for_net(s, "clk_0") == "a"        # falls back
 
 
-def test_hier_bundler_refuses_with_scopes():
+def test_hier_bundler_accepts_scopes():
+    # R2d: run_hier_bundler no longer refuses declared scopes — the hier
+    # rule-class split + spec propagation handle them (test_ndr_hier.py
+    # pins the real-vehicle behavior).  A bare session still fails on the
+    # missing BDB, NOT on the scopes.
     s = _bare_session()
     _run(s, "def_ndr r width x2")
     _run(s, "set_ndr clk_ r")
-    with pytest.raises(SystemExit):
-        _run(s, "run_hier_bundler")
+    out = _run(s, "run_hier_bundler")
+    assert "requires an open BDB" in out
+    assert "flat flow" not in out
 
 
 # ── End-to-end flow ────────────────────────────────────────────────────────

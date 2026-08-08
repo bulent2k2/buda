@@ -46,7 +46,12 @@ shield-per-pair), resistance-critical feedlines (width).
   prefix wins), (b) whole buses, (c) whole bundles, and — in hierarchical
   designs — (d) resolve identically for a cell template and every instance
   of it, so a rule declared once applies uniformly to all occurrences.
-  Most-specific attachment wins.
+  Most-specific attachment wins.  *Status:* (a)/(b) and (d) landed —
+  the hier bundler splits template classes into rule-uniform parts before
+  per-instance expansion and hard-errors on a scope that governs a class
+  inconsistently across its occurrences (a template is solved once and
+  copied, so every occurrence must resolve to the same rules on the same
+  bits).
 - **R3 — Realizability is validated LOUDLY, up front.**  Declaring a rule
   that cannot be realized on a layer's track pattern (a width no track
   arrangement can host, a spacing no window can satisfy, a shield spec
