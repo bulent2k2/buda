@@ -156,6 +156,29 @@ def test_hier_cell_template_class_shields_every_instance():
     assert len({ns.bundle_id for ns in shields}) == 6
 
 
+def test_hier_layer_restriction_survives_scope_clearing():
+    # Codex #626: specs resolve at bundling and stay on the wrappers, so
+    # clearing the last scope AFTER run_hier_bundler must not strip the
+    # still-governed bundles' layer restrictions — the resolver's NDR
+    # re-application gates on each wrapper's active spec, not the scope
+    # table.  Rule restricted to M5/M6; scope cleared post-bundling; the
+    # expanded governed wrappers must still carry exactly {5, 6}.
+    s = _session()
+    for line in _flow_lines("06_multipin_stress.buda"):
+        if line.startswith("run_hier_bundler"):
+            _run(s, "def_ndr shieldr shield bus net GND layers M5,M6")
+            _run(s, "set_ndr d1_mp3_ shieldr")
+        _run(s, line)
+        if line.startswith("run_hier_bundler"):
+            _run(s, "set_ndr d1_mp3_ off")     # last scope cleared
+        if line.startswith("run_planner"):
+            break
+    gov = [w for w in s.bundles if w.input.ndr.active()]
+    assert len(gov) == 6                       # expansion kept the specs
+    for w in gov:
+        assert list(w.input.allowed_layers) == [5, 6]
+
+
 def test_hier_noncongruent_scope_refuses():
     # Vehicle 05's `is_lr` bus is a REAL cell-level template class (one
     # sub_cell template, 23 replicas).  A scope naming only ONE

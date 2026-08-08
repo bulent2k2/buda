@@ -584,11 +584,13 @@ def reapply_ndr_layer_restrictions(session, wrappers=None):
     expanded instances, restored sessions) — so the NDR restriction is
     RE-APPLIED after each resolution rather than assumed to survive it.
     An empty intersection (the rule's layers all outside the cell's band)
-    is a hard error naming both constraints.  No scopes = no-op; the flat
-    flow never passes through the resolver and keeps apply_ndr_specs'
-    one-shot intersection."""
-    if not getattr(session, "_ndr_scopes", None):
-        return
+    is a hard error naming both constraints.  The gate is each WRAPPER's
+    active spec, not the scope table: specs resolve at bundling and stay
+    on the wrappers, so clearing the last scope AFTER run_hier_bundler
+    must not strip the still-governed bundles' restrictions (Codex #626 —
+    an empty mask means unrestricted routing).  No governed wrappers =
+    a cheap no-op scan; the flat flow never passes through the resolver
+    and keeps apply_ndr_specs' one-shot intersection."""
     if wrappers is None:
         wrappers = session.bundles
     for w in wrappers:
