@@ -1,0 +1,64 @@
+# NDR multi-rule shield vehicle (flat flow) — the extensive-options twin
+# of ndr_demo.buda: THREE rules spanning the multiplier range (x1.5 / x2 /
+# x2.5 width and spacing) and ALL THREE shield arrangements (bus / bit /
+# per:N), plus rail CREDITING, governing three bundles beside ungoverned
+# traffic.
+#
+#   sig15  width x1.5 spacing x1.5 shield bus  net GND credit
+#          -> 2 slots/bit, 1 guard/gap, flanking shields, ends may credit
+#             an adjacent GND rail.  4 bits = 13 slots (11 fully credited).
+#   dat2x  width x2               shield bit  net VSS
+#          -> 2 slots/bit, a shield in EVERY gap.  4 bits = 13 slots.
+#   bus25  width x2.5 spacing x2.5 shield per:2 net GND
+#          -> 3 slots/bit, 2 guards/gap, a shield after every 2nd bit.
+#             4 bits = 19 slots.
+#
+# The STRICT bundler merges s15+data (same endpoints); the rule-class
+# split separates them LOUDLY.  check_design must end clean (no NDR_*)
+# and report_wirelength shows the shield metal on its own line.
+
+add_block blkA 0   0    200 300
+add_block blkB 800 0    1000 300
+add_block blkC 0   400  200 700
+add_block blkD 800 400  1000 700
+add_block blkE 0   800  200 1100
+add_block blkF 800 800  1000 1100
+
+# s15 and data share endpoints -> one STRICT bundle until the NDR split.
+add_bus s15[4]  blkA.p blkB.q
+add_bus data[8] blkA.d blkB.e
+add_bus d2x[4]  blkC.p blkD.q
+add_bus w25[4]  blkE.p blkF.q
+
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+
+def_ndr sig15 width x1.5 spacing x1.5 shield bus net GND credit
+def_ndr dat2x width x2 shield bit net VSS
+def_ndr bus25 width x2.5 spacing x2.5 shield per:2 net GND
+set_ndr s15_ sig15
+set_ndr d2x_ dat2x
+set_ndr w25_ bus25
+
+run_bundler STRICT --dump
+dump_ndr
+
+generate_topologies
+set_track_pitch 3
+run_planner 1
+
+# 12 SIGNAL slots per period between the rails: room for the 19-slot
+# bus25 run (bit contiguity needs only 3 consecutive slots; guard and
+# shield gaps may straddle the rails).
+def_track_pattern 3 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 4 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 5 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 6 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+
+run_nuts
+run_detailed_nuts
+dump_ndr
+check_design
+report_wirelength

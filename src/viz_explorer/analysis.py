@@ -65,6 +65,148 @@ class ExplorerAnalysisMixin:
         ct.build(topo, self.fp)
         return ct
 
+    # ── NDR surface (docs/NDR_UI.md Decision 3: badge / tint / ghosts) ──
+    # All READ-ONLY derivations from the wrapper's resolved spec + the
+    # routing grid — nothing here persists or edits.  An ungoverned bundle
+    # (inactive spec) short-circuits every method, so the explorer is
+    # byte-identical for designs with no NDR rules.
+
+    def _ndr_spec(self):
+        """The wrapper's ACTIVE resolved NDR spec, else None."""
+        spec = getattr(self.wrapper.input, 'ndr', None)
+        return spec if (spec is not None and spec.active()) else None
+
+    def _ndr_nbits(self, seg_idx=None):
+        """Member-bit count for the NDR demand: the bundle's net count, or
+        the TAPERED subset when the shown topology declares one for
+        `seg_idx` (`Topology::seg_bits` — the same accounting
+        `_seg_member_bits` / `bus_seg_nbits` use, so the overlay and the
+        flag price a fan-in branch the way the engine does).  Falls back
+        to the bundle count on any lookup failure."""
+        nbits = len(self.wrapper.input.original_bundle.get_net_names())
+        if seg_idx is None:
+            return nbits
+        try:
+            sb = self._shown_topo().seg_bits
+            if seg_idx in sb and 0 < len(sb[seg_idx]) < nbits:
+                return len(sb[seg_idx])
+        except Exception:
+            pass
+        return nbits
+
+    def _ndr_seg_demand(self, spec, seg_idx=None):
+        """The segment's GROUP demand in SIGNAL slots.  A crediting rule is
+        priced at its OPTIMISTIC minimum (both end shields rail-credited —
+        `bus_seg_min_demand`'s viz twin): the seat search may legitimately
+        realize the credited run, so the flag must not call a window
+        infeasible that DNUTS can seat (Codex #627)."""
+        nb = self._ndr_nbits(seg_idx)
+        if spec.credit_shields:
+            return ic.ndr_group_demand_credited(spec, nb, True, True)
+        return ic.ndr_group_demand(spec, nb)
+
+    def _ndr_badge(self):
+        """Bundle-header badge for a governed bundle: the rule name and its
+        GROUP demand (`NDR:clk2x 13s/4b`, `+credit` when the rule may
+        rail-credit its end shields).  Deliberately the WHOLE-BUNDLE,
+        UNCREDITED demand — what the planner charges (R7 prices the worst
+        case; crediting and fan-in taper are per-seat/per-segment reliefs
+        the ghosts and the flag show).  Empty for ungoverned bundles."""
+        spec = self._ndr_spec()
+        if spec is None:
+            return ""
+        nb = self._ndr_nbits()
+        du = ic.ndr_group_demand(spec, nb)
+        cr = "+credit" if spec.credit_shields else ""
+        return f" · NDR:{spec.rule_name or '?'} {du}s/{nb}b{cr}"
+
+    def _ndr_slot_pitch(self, lid):
+        """Per-SIGNAL-slot pitch of `lid`'s global track pattern
+        (unit_pitch / signal slots per period), or None when no grid or
+        pattern is available — the ghost overlay's scale."""
+        g = getattr(self, 'routing_grid', None)
+        if g is None or not g.has_layer(lid):
+            return None
+        pat = g.get_layer_grid(lid).global_pattern()
+        if not pat.slots:
+            return None
+        nsig = sum(1 for s in pat.slots if s.type == "SIGNAL")
+        per = pat.unit_pitch()
+        if nsig <= 0 or per <= 0:
+            return None
+        return per / nsig
+
+    def _ndr_infeasible_note(self, cs_list, resolved_lid):
+        """Realizability tint (debug cost view): a one-line warning when
+        some segment has NO same-direction candidate layer whose
+        signal-track supply within the segment's slide window can host the
+        rule's GROUP demand — the candidate cannot seat the governed run
+        anywhere the planner may put it.  None when feasible, ungoverned,
+        or not derivable (no grid / unbounded window: conservative, never
+        a false flag)."""
+        spec = self._ndr_spec()
+        g = getattr(self, 'routing_grid', None)
+        if spec is None or g is None or self.layer_stack is None:
+            return None
+        allowed = set(self.wrapper.input.allowed_layers or [])
+        for i, cs in enumerate(cs_list):
+            # Per-segment demand: the TAPERED bit subset when the topology
+            # declares one, and a crediting rule's optimistic minimum —
+            # the flag fires only on a shortfall no seat could survive.
+            du = self._ndr_seg_demand(spec, i)
+            dir_ = (ic.LayerDir.HORIZONTAL if cs.horiz
+                    else ic.LayerDir.VERTICAL)
+            lids = list(self.layer_stack.get_layer_ids_by_dir(dir_))
+            if allowed:
+                lids = [l for l in lids if l in allowed]
+            lids = [l for l in lids if g.has_layer(l)]
+            if not lids:
+                continue                    # nothing derivable for this seg
+            lo, hi = self._seg_slide(cs, i)
+            if abs(lo) >= _UNCONSTRAINED or abs(hi) >= _UNCONSTRAINED:
+                continue                    # unbounded window: assume room
+            mid = 0.5 * (cs.along_lo + cs.along_hi)
+            best = max(g.get_layer_grid(l).count_signal_tracks_in(
+                mid, lo, hi) for l in lids)
+            if best < du:
+                return (f"⚠ NDR '{spec.rule_name}': seg {i} demand {du} "
+                        f"slots > best window supply {best} on its layers")
+        return None
+
+    def _draw_ndr_ghosts(self, ax, cs_list, draw_perp, draw_lo, draw_hi,
+                         resolved_lid):
+        """Rule-derived shield GHOST overlay (read-only): dashed lines
+        flanking each drawn segment at the governed run's OUTERMOST slot
+        offsets — where the rule's end shields (or end guards) will sit,
+        derived from the DECLARATION (group demand × the layer's slot
+        pitch), never from stored geometry, so the overlay is always
+        consistent with the rule and nothing new persists."""
+        spec = self._ndr_spec()
+        if spec is None:
+            return
+        col = _PREROUTE_COLOR.get('SHIELD', '#e0d4f7')
+        for i, cs in enumerate(cs_list):
+            if i in self._hidden_seg:
+                continue
+            # Per-segment demand: a tapered fan-in branch carries only its
+            # own bits, so its envelope is narrower than the bundle's
+            # (Codex #627); a crediting rule draws its realizable minimum.
+            du = self._ndr_seg_demand(spec, i)
+            if du <= 1:
+                continue
+            pitch = self._ndr_slot_pitch(resolved_lid(i))
+            if pitch is None:
+                continue
+            half = 0.5 * (du - 1) * pitch
+            dp, lo, hi = draw_perp[i], draw_lo[i], draw_hi[i]
+            for off in (-half, half):
+                if cs.horiz:
+                    xs, ys = [lo, hi], [dp + off, dp + off]
+                else:
+                    xs, ys = [dp + off, dp + off], [lo, hi]
+                ax.plot(xs, ys, linestyle='--', color=col, linewidth=1.2,
+                        alpha=0.85, zorder=8)
+
 
     # The dogleg pass pins per-segment net_pull and slide windows on the plan
     # (ConnTopology would recompute them wrongly on the split topology).  Those

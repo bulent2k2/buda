@@ -73,11 +73,15 @@ commands**:
   `band=[..] shares={..}`.
 - **`dump_ndr`** — rules, effective layer sets, attachment scopes, and
   which bundles each rule currently governs.
-- **Explorer GUI**: an NDR badge in the bundle header; a per-candidate
-  realizability tint in the debug cost view (a candidate whose layers
-  cannot host the rule's demand renders flagged); and a **shield ghost
-  overlay drawn from the rule**, not from stored geometry — so the overlay
-  is always consistent with the declaration and nothing new persists.
+- **Explorer GUI** (BUILT): an NDR badge in the bundle header
+  (`NDR:clk2x 13s/4b`, `+credit` for crediting rules); a per-candidate
+  realizability flag in the debug cost view (a candidate whose slide
+  windows cannot host the rule's demand on any of its layers renders
+  red-titled with the arithmetic); and a **shield ghost overlay drawn
+  from the rule**, not from stored geometry — dashed envelope edges at
+  the governed run's outer-slot offsets (group demand × the layer's slot
+  pitch) — so the overlay is always consistent with the declaration and
+  nothing new persists.
 - **Detailed viz**: width-proportional bit wires; shield wires under the
   existing SHIELD type toggle (R11).
 - **Deliberately deferred**: `edit_shield_side <seg#> <both|lo|hi|none>`

@@ -927,3 +927,38 @@ def test_bighalf_rr_reaches_clean_endpoint(tmp_path):
     assert st_b[0] == "0 (ovl 0)", f"stage b not clean: {st_b}\n{out[-3000:]}"
     assert int(st_a[1]) + int(st_b[1]) < 600, \
         f"trial-count blowup: {done}"
+
+
+def test_ndr_shield_flat_multi_rule():
+    """flow/ndr_shield_flat.buda: three rules spanning the multiplier range
+    (x1.5 / x2 / x2.5 width and spacing) and all three shield arrangements
+    (bus / bit / per:N) + rail crediting, governing three bundles beside
+    ungoverned traffic — clean endpoint, shields reported separately."""
+    out, rc = run_script("ndr_shield_flat.buda")
+    assert_clean(out, rc, "ndr_shield_flat.buda")
+    # The three declared rules quantized as designed.
+    assert "width x1.5 -> 2 slot(s)/bit" in out, out
+    assert "spacing x2.5 -> 2 guard slot(s)/gap" in out, out
+    assert "shield per:2" in out, out
+    # STRICT merged s15+data on shared endpoints; the rule-class split
+    # separated them LOUDLY.
+    assert "rule-uniform part(s)" in out, out
+    assert "[NDR] 3 bundle(s) governed by declared rules" in out, out
+    # Clean endpoint: every bit placed, no NDR (or other) violations, and
+    # the shield metal reported on its own line (R11).
+    assert "0 bits unplaced" in out, out
+    assert "no violations" in out and "NDR_" not in out, out
+    assert "NDR shield metal:" in out, out
+
+
+def test_ndr_shield_hier_multi_rule():
+    """flow/ndr_shield_hier.buda: the R2d twin — the same three rule shapes
+    governing a REAL sub_cell-level template class (one template + three
+    lockstep replicas) and top-level buses beside ungoverned traffic."""
+    out, rc = run_script("ndr_shield_hier.buda")
+    assert_clean(out, rc, "ndr_shield_hier.buda")
+    # 4 template-class occurrences + 2 governed top-level buses.
+    assert "[NDR] 6 bundle(s) governed by declared rules" in out, out
+    assert "0 bits unplaced" in out, out
+    assert "no violations" in out and "NDR_" not in out, out
+    assert "NDR shield metal:" in out, out
