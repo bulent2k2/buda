@@ -270,7 +270,7 @@ DEF/LEF cluster visualizers, and macOS `.app` bundle generation.
 
 ## Script Language Surface
 
-The `.buda` command set has grown to 92 commands across setup,
+The `.buda` command set has grown to 95 commands across setup,
 BDB/hierarchy construction, bundling, generation (+ per-bundle,
 additive, and edit-session variants), planning (params, pins,
 super-candidate group pins), NUTS/DNUTS, healers, layer policies,
@@ -371,6 +371,113 @@ What remains true rather than solved:
   worth keeping in mind that the corpus remains the only gate that sees
   QoR.
 
+## Fresh Analysis, Lens B — Fit Into An Existing EDA Methodology
+
+*Code-grounded (parsers, exporters, CLI read directly), 2026-08-08.*
+The question here is not "is the algorithm good" but "could a CAD group
+drop this into a production flow next quarter". The honest summary:
+**BUDA today is a self-contained planning environment with its own world
+model, not a flow-participating point tool.**
+
+**What already integrates.** Placement/connectivity ingestion is real —
+`import_def_lef` reads genuine vendor DEF (the checked-in
+`demo/ariane/ariane.def` is an Innovus 21.11 floorplan) including
+`UNITS`, `DIEAREA`, `COMPONENTS` with orientation, escaped names, and
+`NETS` tuples, and `import_verilog` overlays hierarchy while preserving
+DEF placement (`src/bdb.cpp:1297`, `:1663`). GDSII round-trips with
+deterministic bytes and label-based net recovery (`src/gds_io.cpp`).
+The BDB is versioned (`SCHEMA_VERSION = 22`) with forward migrations
+that **refuse to open a newer database** rather than corrupt it
+(`src/bdb.cpp:516`). Cross-machine reproducibility is a design property,
+not an accident: no RNG in the engine, decision-identical parallelism
+under test, and a canonical route fingerprint hashing net *names* rather
+than autoincrement ids (`src/buda_session/persist.py:417`).
+
+**The blocking gaps, ranked by how much they block:**
+
+1. **There is no DEF writer** (BLOCKER). The only export path is
+   `export_gds`; no `write_def`, no `+ ROUTED` emitter exists anywhere.
+   BUDA's routes therefore cannot be handed back to Innovus/ICC2/Fusion
+   — GDS rectangles carry no net identity a P&R tool can re-adopt, so
+   the output is a picture, not a constraint. The data to emit is
+   already in `net_segment`/`net_via`; the writer is ~medium effort, but
+   it is only *useful* after gaps 2–3.
+2. **No technology data is ingested** (BLOCKER). LEF parsing recognizes
+   `MACRO`/`SIZE`/`PIN`/`DIRECTION`/`USE`/`RECT` and ignores everything
+   else — `LAYER` rules, `VIA`/`VIARULE`, `OBS`, `SITE`,
+   `MANUFACTURINGGRID`, `ORIGIN` (`src/bdb.cpp:1174`, `:1195`). Pin
+   geometry is collapsed to a centroid, discarding layer and multi-port
+   shape; `USE POWER|GROUND|CLOCK` pins are dropped outright. In DEF,
+   `TRACKS`, `GCELLGRID`, `ROW`, `PINS`, `SPECIALNETS`, `VIAS`,
+   `BLOCKAGES`, `NONDEFAULTRULES` are all unparsed — the ariane DEF
+   *contains* 20 real `TRACKS` statements and `SPECIALNETS`, every one
+   discarded. Instead the layer stack is **hand-typed** per flow
+   (`def_layer` + `def_track_pattern`; see `flow/chip/chip_tracks.buda`,
+   whose comments warn the values must be binary-exact). Reading tech
+   LEF is medium effort; *honestly modelling* it is large, because
+   `TrackSlot` is `{type,label,width,space_after}` and has no slot for
+   min-area, EOL spacing, parallel-run-length tables, or cut rules.
+3. **Vias are symbolic points and nothing is DRC-anything** (BLOCKER for
+   signoff). `net_via` is `(from,to,x,y)` with no cut count, enclosure,
+   or via name; GDS export renders each as a default **1.0 µm square**
+   (`src/gds_io.cpp:977`). There is no min-width/spacing/area,
+   manufacturing grid, antenna (the `ANTENNA` violation type is a
+   *topological* predicate, not the process rule), timing, SDC, Liberty,
+   SPEF, or power intent anywhere. Layer assignment is span- and
+   congestion-driven, never slack-driven.
+4. **Blockages are invisible** (HIGH, and the most surprising omission
+   for a routing tool): DEF `BLOCKAGES`, LEF `OBS`, macro `HALO`,
+   `PINS`, and `SPECIALNETS` power straps are all unread, so the planner
+   cannot see obstacles a real design is full of. Keepouts must be
+   re-declared by hand.
+5. **The CLI cannot signal design failure** (HIGH — blocks CI/regression
+   adoption). Verified empirically: a script with reported violations
+   exits **0**, while a malformed script exits 1 with a raw Python
+   traceback. BUDA fails loudly on *syntax* and silently on *quality* —
+   backwards for a flow harness, which can catch its own typos but
+   cannot see 252 unplaced bits. There is also no machine-readable
+   per-run report (reports are prose; the only JSON is the opt-in
+   decision trace), and no Tcl interface — the industry-standard harness
+   language — though the command registry is already a dict and would
+   map onto one mechanically.
+6. **Importer robustness** (MEDIUM). The DEF reader is line-at-a-time
+   `std::regex` with no statement-level tokenizer, no
+   `COMPONENTS n`/`NETS n` reconciliation, and silent fallbacks: a cell
+   missing from the LEF becomes a **0.5 × 0.5 µm** block
+   (`src/bdb.cpp:1408`) and an unmatched instance is skipped
+   (`:1461`) — a wrong-LEF run yields a plausible, entirely wrong
+   floorplan with no diagnostic. It has never been exercised on a
+   full-chip post-place DEF (10⁶–10⁸ lines).
+7. **Operational fit** (LOW–MEDIUM, but immediate). Flow logs are
+   silently overwritten unless `--log`/`--tag` is passed; error and
+   warning counts are computed by **substring-matching the words
+   "error"/"warning"** in captured output (`src/buda_cli.py:337`), so a
+   net named `error_flag` inflates the count. Block coordinates are
+   integer µm by construction (`add_block` hard-errors on a fractional
+   value), with float→int rounding happening upstream in the DEF→script
+   generator. No packaged wheel; `BUDA_NO_APP=1` should be the batch
+   default on macOS.
+
+**The strategic read.** Gaps 1, 2, 4, 5, 6 are *engineering*, not
+research — a focused team could land them in a quarter or two, and doing
+so moves BUDA from "internal prototype" to "tool a CAD group can pilot
+on a real block". Gaps 3 and 5's signoff half are the real cost, and
+they mark a fork in the road worth choosing **explicitly**:
+
+- **Advisory planner** (recommended): export DEF *guides, blockages and
+  bus corridors* rather than final routes. Needs 1, 2, 4, 5, 6 only;
+  sidesteps via/DRC modelling entirely; and matches what the tool is
+  genuinely good at — early feasibility, bus corridor planning, layer
+  budgeting before detailed routing exists. This is a legitimate,
+  valuable product category.
+- **Flow-participating router**: needs real vias, a DRC-legality
+  checker, and DBU-integer geometry — multi-quarter, and it puts BUDA
+  into direct competition with mature detailed routers.
+
+The advisory framing also resolves the QoR-at-scale tension below: a
+corridor plan with residual unplaced *bits* is still a useful corridor
+plan, whereas a final route with 252 unplaced bits is not a route.
+
 ## Current Improvement Directions
 
 Tracked in `docs/internal/wishlist-*.md`, `docs/internal/opens*.md`, and
@@ -381,10 +488,19 @@ itself is complete — see above):
    scoped escalation re-solves (P8, ~7–8% of the chip vehicle),
    congestion-map parallel-for (P6a), DNUTS per-layer threads at scale
    (P7), async persistence (P9) — after the landed persistence
-   dirty-tracking + parallel generation took the vehicle −31%.
+   dirty-tracking + parallel generation took the vehicle −31% and the
+   B2 copy fan-out fix took the bottom-up twin −16.5%. The B1 victim
+   ladder was investigated to a documented dead end: the
+   *usage-unchanged* prune is inert once made admissible, leaving
+   cheaper per-candidate scoring as the remaining lever.
 2. **NDR support** (per-net/bus width/spacing/shield constraints):
-   requirements, UI options, and architecture are written; nothing
-   built.
+   **substantially landed** since the previous edition — `def_ndr` /
+   `set_ndr` / `dump_ndr`, a single-sourced group-demand conversion
+   shared by planner charging, abstract-NUTS footprint and DNUTS
+   admission, the R9 typed audit, R5a rail crediting, v21 BDB rule
+   persistence, and R2d hier propagation (`src/ndr.h`,
+   `src/buda_cmds/ndr_cmds.py`, four test modules). The documented
+   residual is shield-vias for emitted shields.
 3. **OpenAccess bridge**: spec'd behind an optional CMake flag; LEF/DEF
    + Verilog + GDS remain the supported interchange.
 4. **CI depth**: nightly QoR corpus with golden ownership
