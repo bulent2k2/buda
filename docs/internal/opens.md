@@ -18,6 +18,11 @@ items this page doesn't see).
 > goldens, executing the web ports) is tracked separately in
 > [`opens_ci.md`](opens_ci.md).
 
+> **Non-default rules (NDR):** the feature landed 2026-08-08 (item 15 below,
+> R1–R13 complete). What it deliberately does NOT do yet — shield bonding
+> vias, absolute µm values, per-net mixed-rule bundles, plus smaller
+> residuals — is tracked separately in [`opens_ndr.md`](opens_ndr.md).
+
 > **Feature-suite coverage:** the Gherkin narrative spec layer
 > (`test/tests/features/`) is mapped to these arcs & opens in
 > [`feature_coverage_plan.md`](feature_coverage_plan.md). The open items below
@@ -34,26 +39,25 @@ items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
 
-15. **NDR support — non-default width / spacing / shield constraints on
-   nets, buses, and bundles** (added 2026-08-06) — requirements written,
-   design NOT chosen.  Three audience-split docs:
-   [`../NDR_REQUIREMENTS.md`](../NDR_REQUIREMENTS.md) (chip architects —
-   the R1–R13 contract), [`../NDR_UI.md`](../NDR_UI.md) (design
-   methodology — command/GUI surface options + the phase-1 strawman), and
-   [`ndr_architecture.md`](ndr_architecture.md) (implementers — as-built
-   baseline, path comparison + leaning, shield-materialization and
-   persistence decisions, per-requirement mapping, phasing).  The
-   whole pipeline currently assumes one bit = one default SIGNAL slot;
-   NDR generalizes that to per-rule track-demand units, which must be
-   priced by ONE shared conversion everywhere tracks are counted (planner
-   band capacity, kPeak floor, dead-span escalation, doomed-seat census,
-   DNUTS admission — the #536 single-sourced-arithmetic lesson applied
-   prospectively).  Mostly a stage 8 (routing grid supply queries) +
-   stage 9 (DNUTS placement of wide/spaced/shielded bits) feature, with
-   upstream honesty requirements and a hard no-NDR byte-identity gate.
-   Path leaning recorded (start from slot-quantized consumption, crediting
-   as phase 2) — next step: confirm the leaning + the UI strawman with
-   architect/methodology feedback, then prototype phase 1.
+15. ~~**NDR support — non-default width / spacing / shield constraints on
+   nets, buses, and bundles**~~ (added 2026-08-06) — **LANDED 2026-08-08.**
+   All of R1–R13 is implemented and exercised: declaration/attachment
+   (flat + hier template propagation), LOUD realizability, the
+   single-sourced group-demand conversion, rail crediting, DNUTS
+   placement of wide/guarded/shielded bits, planner pricing, the
+   rule-uniform split, the typed `check_design` audit, v21/v22 BDB
+   persistence with VOID-on-change, shield-separated wirelength, the
+   explorer surface, and bottom-up composition — under a hard no-NDR
+   byte-identity gate held at every landing (corpus 41/41, WL +0.00%).
+   Five vehicles cover it (`flow/ndr_demo`, `ndr_shield_flat`,
+   `ndr_shield_hier`, `ndr_bottom_up`, plus the explorer tests).
+   Docs: [`../NDR_REQUIREMENTS.md`](../NDR_REQUIREMENTS.md) (architects),
+   [`../NDR_UI.md`](../NDR_UI.md) (methodology),
+   [`ndr_architecture.md`](ndr_architecture.md) (implementers, as-built),
+   [`../script_reference/ndr.md`](../script_reference/ndr.md) (commands).
+   **Remaining gaps — each deliberate, none blocking — are tracked in
+   [`opens_ndr.md`](opens_ndr.md)**: shield bonding vias, absolute µm
+   values, per-net mixed-rule bundles, plus smaller residuals.
 
 13. **Nominal-WL comparability across shape families (b44 follow-ons)** —
    [`wishlist-topo.md`](wishlist-topo.md) → *"Nominal-WL comparability
