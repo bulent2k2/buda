@@ -434,6 +434,31 @@ private:
     // injected measured-congestion demand.
     void recharge_committed_(const std::vector<BundleWrapper>& bundles,
                              const BundleWrapper* exclude);
+    // Floor state for the ladder-hopeless gate: like recharge_committed_ but
+    // ALSO drops every rippable (non-locked) bundle, leaving only locked
+    // copies + injected demand — the minimum usage any sequence of victim
+    // rip-ups could reach.  Used only inside ladder_hopeless_at_floor_, which
+    // recharges back to the target-excluded state before returning.
+    void recharge_locked_only_(const std::vector<BundleWrapper>& bundles,
+                               const BundleWrapper* exclude);
+    // The candidate-index sweep plan_bundle runs (pinned_group > single pin >
+    // full), factored out so the ladder gate and plan_bundle agree on which
+    // candidates a sweep visits.
+    std::vector<int> collect_cand_indices_(const BundleWrapper& bw) const;
+    // True when replan_bundle_ripup's victim ladder provably cannot commit —
+    // the B1 whole-ladder gate.  At the FLOOR state (all rippable removed) a
+    // candidate is viable only if every segment has an overflow-free
+    // (layer, perp) under the EMPTY overlay; this is a MONOTONE necessary
+    // condition for greedy feasibility (overlay only adds usage, floor is the
+    // usage lower bound, and — with kPeak==0 — best_band_perp returns a clear
+    // perp iff one exists), so if NO candidate is floor-viable, no single
+    // victim rip can make the target feasible and the ladder is hopeless.
+    // Rigorous only when kPeak_==0 (best_band_perp's existence-completeness);
+    // returns false otherwise so the caller runs the ladder unchanged.
+    // Recharges to floor internally and restores the target-excluded state on
+    // return.  Read-only w.r.t. wrapper/plan state.
+    bool ladder_hopeless_at_floor_(std::vector<BundleWrapper>& bundles,
+                                   BundleWrapper& target);
 
     void rebuild_cuts_();
     // Overflow congestion cost: kCong * max(0, (usage+eff-cap)/cap).  Zero below capacity.

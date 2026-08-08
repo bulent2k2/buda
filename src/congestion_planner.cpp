@@ -2823,6 +2823,113 @@ CongestionPlanner::candidate_costs(
     return out;
 }
 
+void CongestionPlanner::recharge_locked_only_(
+        const std::vector<BundleWrapper>& bundles, const BundleWrapper* exclude) {
+    // The floor state: only LOCKED committed bundles + injected demand.  Every
+    // rippable bundle is dropped, so this is the least usage any combination of
+    // victim rip-ups could produce (a single-victim rip removes strictly less).
+    for (auto& cut : cuts_) cut.reset_usage();
+    charge_log_.clear();
+    share_used_.clear();
+    for (const auto& bw : bundles) {
+        if (&bw == exclude || !has_committed_plan_(bw)) continue;
+        if (!bw.hier.locked) continue;      // rippable → removed at the floor
+        commit_plan(bw, fixed_plan_of_(bw));
+    }
+    apply_injected_(+1.0);
+}
+
+// The candidate-index sweep plan_bundle runs (see the header).  With no group
+// pin this reproduces the historical [ci_lo, ci_hi) range exactly.
+std::vector<int> CongestionPlanner::collect_cand_indices_(
+        const BundleWrapper& bw) const {
+    std::vector<int> idx;
+    for (int ci : bw.input.pinned_group)
+        if (ci >= 0 && ci < (int)bw.input.candidates.size())
+            idx.push_back(ci);
+    if (idx.empty()) {
+        const int n = (int)bw.input.candidates.size();
+        const int sel = bw.plan.selected_topology_index;
+        const bool valid_pin = bw.input.topology_pinned && sel >= 0 && sel < n;
+        int ci_lo = valid_pin ? sel     : 0;
+        int ci_hi = valid_pin ? sel + 1 : n;
+        for (int ci = ci_lo; ci < ci_hi; ++ci) idx.push_back(ci);
+    }
+    return idx;
+}
+
+bool CongestionPlanner::ladder_hopeless_at_floor_(
+        std::vector<BundleWrapper>& bundles, BundleWrapper& target) {
+    // Rigorous only when best_band_perp returns a clear perp iff one exists,
+    // which needs the routability term off (kPeak==0); otherwise decline to
+    // gate so the ladder runs unchanged.  (kPeak is opt-in, default 0.)
+    if (kPeak_ > 0.0) return false;
+    constexpr double kOvEps = 1e-6;
+    const int nbits = (int)target.input.original_bundle.get_net_names().size();
+
+    recharge_locked_only_(bundles, &target);           // → floor state
+
+    bool hopeless = true;
+    for (int ci : collect_cand_indices_(target)) {
+        const Topology& topo = target.input.candidates[ci];
+        ConnTopology ct;
+        ct.build(topo, floorplan_);
+        const auto& conn_segs = ct.segs();
+
+        bool all_viable = true;
+        for (int si = 0; si < (int)topo.segments.size(); ++si) {
+            const Segment& seg = topo.segments[si];
+            const bool is_h = (seg.start.y == seg.end.y);
+            int slide_lo = INT_MIN, slide_hi = INT_MIN;
+            if (si < (int)conn_segs.size()) {          // score_candidate_'s clamp
+                const ConnSeg& cs = conn_segs[si];
+                const auto& pgrid = is_h ? y_grid_ : x_grid_;
+                if (!pgrid.empty()) {
+                    slide_lo = std::max(cs.perp_lo, pgrid.front());
+                    slide_hi = std::min(cs.perp_hi, pgrid.back());
+                    if (slide_lo > slide_hi) { slide_lo = INT_MIN; slide_hi = INT_MIN; }
+                }
+            }
+            const int    n = ndr_units(target.input, seg_bit_count(topo, si, nbits));
+            const double w = (nbits > 0 && n != nbits)
+                                 ? target.input.width * ((double)n / (double)nbits)
+                                 : target.input.width;
+            // Layers to try: a forced pin restricts to one, else the segment's
+            // allowed same-direction layers (empty allow-set = unrestricted).
+            auto h_layers = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
+            auto v_layers = layers_.get_layer_ids_by_dir(LayerDir::VERTICAL);
+            if (h_layers.empty()) h_layers.push_back(4);     // plan_bundle fallback
+            if (v_layers.empty()) v_layers.push_back(5);
+            const std::vector<int>& dir_layers = is_h ? h_layers : v_layers;
+
+            bool seg_viable = false;
+            auto try_layer = [&](int lid) {
+                const double eff = layers_.eff_bus_width(n, w, lid);
+                const int pp = best_band_perp(seg, lid, eff, slide_lo, slide_hi,
+                                              (double)n);
+                // Empty overlay (t_cand_overlay_ is null here), floor usage:
+                // score_segment ≤ eps ⇔ a clear perp exists on this layer.
+                return score_segment(seg, lid, eff, pp, slide_lo, slide_hi)
+                       <= kOvEps;
+            };
+            if (si < (int)target.input.pinned_seg_layers.size() &&
+                target.input.pinned_seg_layers[si] != -1) {
+                seg_viable = try_layer(target.input.pinned_seg_layers[si]);
+            } else {
+                for (int lid : dir_layers) {
+                    if (!target.input.allows_layer(lid)) continue;
+                    if (try_layer(lid)) { seg_viable = true; break; }
+                }
+            }
+            if (!seg_viable) { all_viable = false; break; }
+        }
+        if (all_viable) { hopeless = false; break; }
+    }
+
+    recharge_committed_(bundles, &target);             // restore target-excluded
+    return hopeless;
+}
+
 std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
         std::vector<BundleWrapper>& bundles, int target_bundle_id) {
     // replan_bundle WITH the ladder's victim rip-up stage (wishlist-healer item
@@ -2866,9 +2973,20 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
     bool committed = false;
     BundleAssignment victim_asn;
     bool moved_victim = false;
-    double ms_ladder = 0.0;
+    double ms_ladder = 0.0, ms_gate = 0.0;
     int n_ranked = 0, n_victims = 0, n_ladder_plans = 0;
+    bool gate_skipped = false;
+    // B1 whole-ladder gate: if no candidate can be made feasible even by
+    // removing EVERY rippable bundle (the floor), no single victim rip can
+    // either — skip the ladder straight to the fallback, which is what the
+    // fully-ground ladder would have reached (each failed trial restores its
+    // rip exactly, so the fallback sees the identical target-excluded state).
     if (!plan.found && !contended.empty()) {
+        t0 = clock_::now();
+        gate_skipped = ladder_hopeless_at_floor_(bundles, *target);
+        ms_gate = ms_since(t0);
+    }
+    if (!plan.found && !contended.empty() && !gate_skipped) {
         t0 = clock_::now();
         std::vector<std::pair<double, BundleWrapper*>> ranked;
         for (auto& bw : bundles) {
@@ -2918,6 +3036,7 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
                   << "ms recharge=" << ms_recharge
                   << " strict=" << ms_strict << "(found=" << strict_found
                   << " contended=" << contended.size() << ")"
+                  << " gate=" << ms_gate << "(skip=" << gate_skipped << ")"
                   << " ladder=" << ms_ladder << "(ranked=" << n_ranked
                   << " tried=" << n_victims << " plans=" << n_ladder_plans
                   << " committed=" << committed << ")"
