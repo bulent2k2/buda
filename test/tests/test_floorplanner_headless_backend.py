@@ -39,6 +39,7 @@ trivially.  They fail (pre-fix) exactly where the bug was reachable — a
 developer machine or any runner with python3-tk installed.
 """
 import atexit
+import glob
 import os
 import shutil
 import subprocess
@@ -58,6 +59,52 @@ _ROOT = Path(__file__).resolve().parents[2]
 # has to own its config source instead of inheriting one (Codex #603).
 _MPLCONFIG = tempfile.mkdtemp(prefix="buda-mplconfig-")
 atexit.register(shutil.rmtree, _MPLCONFIG, True)
+
+
+def _warm_cache_dir():
+    """A directory that already holds matplotlib's built `fontlist-v*.json`.
+
+    Prefer the suite's MPLCONFIGDIR when it is ALREADY warm; otherwise fall
+    back to matplotlib's DEFAULT cache dir.  The fallback must resolve that
+    default with MPLCONFIGDIR *removed* from the environment: matplotlib points
+    its cache AT MPLCONFIGDIR when set, so on a clean checkout (or after `rm
+    -rf log/`) `get_cachedir()` would just echo the same empty suite dir and we
+    would find nothing — every worker would still rebuild, even though the
+    user's normal cache is warm (Codex #638 P2).  A machine with no cache
+    anywhere yields None and the probe pays a one-time rebuild (pre-existing)."""
+    mcd = os.environ.get("MPLCONFIGDIR")
+    if mcd and glob.glob(os.path.join(mcd, "fontlist-v*.json")):
+        return mcd
+    try:
+        env = {k: v for k, v in os.environ.items() if k != "MPLCONFIGDIR"}
+        default = subprocess.run(
+            [sys.executable, "-c",
+             "import matplotlib; print(matplotlib.get_cachedir())"],
+            capture_output=True, text=True, env=env, timeout=60).stdout.strip()
+    except Exception:
+        return None
+    return default if default and glob.glob(
+        os.path.join(default, "fontlist-v*.json")) else None
+
+
+def _seed_font_cache(dst):
+    """Copy the already-built `fontlist-v*.json` from a warm cache into the
+    fresh `dst`.  A pristine MPLCONFIGDIR is empty of a `matplotlibrc` backend
+    line (the whole point above) — but it is ALSO empty of the font cache, so
+    every probe subprocess would otherwise rebuild it from scratch (~26s on
+    macOS, scanning all system fonts).  That rebuild happens at COLLECTION time
+    (the `skipif` below calls `_tkinter_available()`), so under `bb -p` every
+    xdist worker paid a full font-cache build before the first test ran — the
+    long delay before `[0%]`.  Seeding the cache (NOT a matplotlibrc) keeps the
+    "nothing selected" premise intact while making each probe <1s."""
+    src = _warm_cache_dir()
+    if not src:
+        return
+    for fc in glob.glob(os.path.join(src, "fontlist-v*.json")):
+        shutil.copy(fc, dst)
+
+
+_seed_font_cache(_MPLCONFIG)
 
 
 def _run(code, env_extra=None):

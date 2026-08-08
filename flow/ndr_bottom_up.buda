@@ -47,10 +47,10 @@ def_layer 4 M4 V 20
 def_layer 5 M5 H TOP 20
 def_layer 6 M6 V TOP 20
 
-def_track_pattern 3 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
-def_track_pattern 4 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
-def_track_pattern 5 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
-def_track_pattern 6 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 5 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 6 0 VDD 2 1 (_ 1 1)x12 GND 2 1
 
 # Solve the cell's own interconnect once and copy it to every instance.
 set_bottom_up sub_cell
@@ -93,3 +93,4 @@ run_detailed_nuts
 dump_ndr
 check_design
 report_wirelength
+#visualize

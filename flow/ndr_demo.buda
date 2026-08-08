@@ -29,13 +29,14 @@ generate_topologies
 set_track_pitch 3
 run_planner 1
 
-def_track_pattern 3 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
-def_track_pattern 4 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
-def_track_pattern 5 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
-def_track_pattern 6 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x8 GND 2 1
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x8 GND 2 1
+def_track_pattern 5 0 VDD 2 1 (_ 1 1)x8 GND 2 1
+def_track_pattern 6 0 VDD 2 1 (_ 1 1)x8 GND 2 1
 
 run_nuts
 run_detailed_nuts
 dump_ndr
 check_design
 report_wirelength
+#visualize
