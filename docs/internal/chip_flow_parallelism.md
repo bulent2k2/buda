@@ -347,6 +347,48 @@ topdown twin.
 flow, but it needs the C++ investigation above), then the shared
 P8/P6a items.
 
+### B2 — landed (PR #625)
+
+Group `r1.net_segments`/`net_vias` by bundle_id in ONE pass, then fan
+out per spec from the group — O(N + copies) with no per-probe pybind
+crossing.  Measured (`runtime_ab -n 3`, `chip_stack_bottomup`):
+**134.6 → 112.5 s (−16.5 %)**; negotiate's internal `dnuts` bucket
+15.76 → 0.59 s.  Byte-identical copies by construction.
+
+### B1 — landed: footprint-pruned victim ladder
+
+The instrumented split (`BUDA_REPLAN_PROF=1`, this branch) settled the
+hypotheses: recharge-all is CHEAP (0.61 s over all 105 calls — the
+demand-reservation hypothesis (b) is dead), the initial STRICT plan is
+7.2 s, and **the victim ladder is 43.4 s (82 %)** — concentrated in 15
+calls that ran 297 victim trials × a full ~140 ms STRICT re-plan of the
+target (310 plans) for just 6 commits.  Per-plan cost is candidate
+scoring (the `layer_load` setup is 0.3 s total): ladder targets sweep
+56–84 candidates/plan, and `plan_bundle`'s internal 4-thread scoring
+scales only 1.79× on this shape, so the fix is per-trial WORK, not more
+threads.
+
+The landed cut is decision-identical by construction: every candidate
+is STRICT-infeasible against the base state, and one victim's rip only
+LOWERS usage on the exact bands its commit charged (`charge_log_`), so
+a candidate whose conservative usage-read footprint — raw along-span ×
+(slide window ∪ nominal perp) inflated by half the charged width — is
+disjoint from those bands keeps its base infeasibility.  Each post-rip
+sweep is restricted to the intersecting candidates (a superset of the
+feasible set, so the ordered reduction elects the identical winner); a
+victim intersecting NO candidate skips its sweep outright while keeping
+the rip/restore commit pair (the sequential bit-level state trajectory —
+`plan_bundle` is read-only via overlays).  Disabled under the unbounded
+greedy spread modes (`band_span_charge >= 3`) and for share-carrying
+wrappers.
+
+Measured on `chip_stack_bottomup` (same binary, BUDA_THREADS=4): 10 509
+of ~22 k ladder candidate scorings pruned (~48 %), ladder 43.4 → 24.6 s,
+negotiate 57.2 → 38.2 s, flow 101.0 → 77.5 s single-run; decision lines
+AND the full flow log (modulo timing) byte-identical, trial/plan counts
+unchanged (297/310).  `[ReplanProf]` now also reports `futile`/`pruned`
+per call (prints to stderr — negotiate silences the iteration's stdout).
+
 ## 4. Recommended order
 
 1. **C1 dirty-tracking + dedup** — the ~20 s that is pure waste; no
