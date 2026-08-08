@@ -153,5 +153,12 @@ a change claims neutrality.
   cross-referenced to `test_snapshot_coverage_contract`.  Gated: caps
   vehicle decision lines byte-identical (152 lines), fast tier + slow
   par-vs-seq agreement green.
-- Phase D-2 (negotiate/refine extraction) and D-3 (trials/sweeps): not
-  started.
+- **Phase D-2: landed** (this PR): `negotiate.py` (`NegotiateMixin` —
+  negotiate_congestion + the v2 template price translation +
+  `_heal_dead_spans`, the stage-b fold both healers share) and
+  `refine.py` (`RefineMixin` — refine_selection), both VERBATIM moves
+  registered in the MIXINS guard; refine reads the screen budget via
+  `ripup_mod._RR_SCREEN_TOP_N` so test monkeypatching keeps one source
+  of truth.  Gated: caps decision lines byte-identical (152), fast tier
+  + slow agreement green.  ripup.py 3300 → 2670 lines.
+- Phase D-3 (trials/sweeps extraction): not started.
