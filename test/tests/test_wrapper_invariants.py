@@ -105,6 +105,12 @@ EXEMPT = {
     "input.share_group": "layer policy", "input.share_budgets": "policy",
     "input.pinned_group": "super-candidate pin — trials never clear it "
                           "(negotiate/ripup preserve it by contract)",
+    # BundleWrapper's own top-level members: sub-struct handles whose FIELDS
+    # are classified individually above/below; wholesale replacement of a
+    # handle is construction-only (the expansion/bundling assembly sites).
+    "wrapper.input": "sub-struct handle — fields classified individually",
+    "wrapper.plan": "sub-struct handle — fields classified individually",
+    "wrapper.hier": "sub-struct handle — fields classified individually",
     "hier.locked": "bottom-up lock — set at plan, trials skip locked",
     # hier-expansion bookkeeping, written once by run_planner hier
     "hier.level": "expansion level ordering — plan-time only",
@@ -134,8 +140,8 @@ def _writable(obj, prefix):
 def test_snapshot_coverage_contract():
     s = _session()
     w = s.bundles[0]
-    fields = _writable(w.input, "input") | _writable(w.plan, "plan") \
-        | _writable(w.hier, "hier")
+    fields = _writable(w, "wrapper") | _writable(w.input, "input") \
+        | _writable(w.plan, "plan") | _writable(w.hier, "hier")
     unclassified = fields - SNAPSHOTTED - set(EXEMPT)
     assert not unclassified, (
         "New wrapper field(s) not classified snapshotted-or-exempt — decide "
