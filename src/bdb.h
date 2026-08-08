@@ -160,6 +160,9 @@ struct NdrRuleRow {
     int         shield_per_n = 0;
     std::string shield_net   = "GND";
     std::string layers;
+    // v22: R5a crediting opted in (an END shield may be satisfied by an
+    // adjacent pattern rail electrically identical to shield_net).
+    int         credit = 0;
 };
 
 struct GrpRow {
@@ -370,7 +373,9 @@ public:
     //       default scope) + bundle.ndr_rule (the governing rule stamped on
     //       each persisted bundle, so load_pipeline can detect a
     //       since-changed resolution and VOID the restored plan).
-    static constexpr int SCHEMA_VERSION = 21;
+    // v22 = ndr_rule.credit (R5a end-shield crediting opt-in — part of the
+    //       rule's pricing basis, so it rides the same table).
+    static constexpr int SCHEMA_VERSION = 22;
 
     explicit BDB(const std::string& db_path);
     ~BDB();

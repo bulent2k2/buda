@@ -323,6 +323,7 @@ void bind_nuts(py::module_& m) {
         .def("global_pattern",  &RoutingGrid::global_pattern,
              py::return_value_policy::copy)
         .def("has_overrides",   &RoutingGrid::has_overrides)
+        .def("is_horizontal",   &RoutingGrid::is_horizontal)
         .def("count_signal_tracks_in", &RoutingGrid::count_signal_tracks_in,
              py::arg("x"), py::arg("lo"), py::arg("hi"))
         .def("count_signal_tracks_in_span",

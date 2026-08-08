@@ -484,10 +484,13 @@ void DetailedNUTSEngine::place_by_layer(
             }
             int n_sig = (int)signal_tracks.size();
 
-            if (n_sig < bus_seg_demand(bs)) {
+            // Credit-enabled specs gate on the OPTIMISTIC minimum (both end
+            // shields rail-credited); the seat search below enforces the
+            // real per-seat credited demand.  Identity for everything else.
+            if (n_sig < bus_seg_min_demand(bs)) {
                 std::cout << "[DetailedNUTS] Warning: Layer " << layer
                           << " has insufficient signal tracks (" << n_sig
-                          << ") for bus width " << bus_seg_demand(bs)
+                          << ") for bus width " << bus_seg_min_demand(bs)
                           << " in interval [" << bs.interval_lo << ", " << bs.interval_hi << "]"
                           << std::endl;
                 result.num_unplaced += bus_seg_nbits(bs);
@@ -557,23 +560,89 @@ void DetailedNUTSEngine::place_by_layer(
             // same-bundle hazard's tracks are simply reserved.  Inactive
             // spec: branch not taken (byte-identity).
             if (bs.ndr.active()) {
-                const int nb = bus_seg_nbits(bs);
-                const int du = ndr_group_demand(bs.ndr, nb);
-                const std::string layout = ndr_run_layout(bs.ndr, nb);
+                const int nb  = bus_seg_nbits(bs);
+                const int du0 = ndr_group_demand(bs.ndr, nb);
                 std::set<long long> resv = reserved;
                 for (const LayerAssignment* H : hazards)
                     for (double p : H->track_positions)
                         resv.insert(track_key(p));
-                const TrackPattern& pat =
-                    grid.effective_pattern_at(x, bs.interval_lo);
+                // Override lookup in REAL coordinates (the C11-02 rule): x
+                // is the ALONG coordinate, interval_lo the PERP one — map
+                // per orientation or a vertical layer's region test runs
+                // transposed and serves the wrong pattern to the adjacency
+                // and contiguity checks below.
+                const TrackPattern& pat = grid.is_horizontal()
+                    ? grid.effective_pattern_at(x, bs.interval_lo)
+                    : grid.effective_pattern_at(bs.interval_lo, x);
                 auto all_tracks =
                     pat.tracks_in_range(bs.interval_lo, bs.interval_hi);
+                // ── R5a end-shield crediting (opt-in `credit`) ──────── //
+                // A run END whose immediately adjacent pattern slot is a
+                // rail electrically identical to the rule's shield net
+                // (ndr_rail_credits — THE shared predicate) may credit
+                // that end's shield to the rail: not emitted, one SIGNAL
+                // slot less demand.  The rail must actually RUN THROUGH
+                // this segment's span (keepout-broken rail = absent metal
+                // = no credit).  Non-credit specs take none of this.
+                auto at_index_of = [&](double pos) -> int {
+                    int lo = 0, hi = (int)all_tracks.size() - 1;
+                    while (lo <= hi) {
+                        const int m = (lo + hi) / 2;
+                        const double p = all_tracks[m].first;
+                        if (std::abs(p - pos) < 1e-6) return m;
+                        if (p < pos) lo = m + 1; else hi = m - 1;
+                    }
+                    return -1;
+                };
+                auto rail_covers_span = [&](double centre, double half_w) {
+                    auto pieces = grid.preroutes_in(
+                        centre - half_w - 1e-6, centre + half_w + 1e-6,
+                        bs_lo, bs_hi, false);
+                    std::vector<std::pair<double, double>> iv;
+                    for (const auto& pr : pieces)
+                        if (std::abs(pr.track_position - centre) < 1e-6)
+                            iv.emplace_back(pr.span_lo, pr.span_hi);
+                    std::sort(iv.begin(), iv.end());
+                    double cov = bs_lo;
+                    for (const auto& [a, b] : iv) {
+                        if (a > cov + 1e-6) return false;
+                        cov = std::max(cov, b);
+                        if (cov >= bs_hi - 1e-6) return true;
+                    }
+                    return cov >= bs_hi - 1e-6;
+                };
+                auto credit_at = [&](int sig_idx, int dir) -> bool {
+                    if (!bs.ndr.credit_shields || bs.ndr.shield_mode == 0)
+                        return false;
+                    if (sig_idx < 0 || sig_idx >= n_sig) return false;
+                    const int ai = at_index_of(signal_tracks[sig_idx].first);
+                    if (ai < 0) return false;
+                    const int aj = ai + dir;
+                    if (aj < 0 || aj >= (int)all_tracks.size()) return false;
+                    const TrackSlot& sl = all_tracks[aj].second;
+                    if (sl.type == "SIGNAL") return false;
+                    if (!ndr_rail_credits(bs.ndr, sl.label, sl.type))
+                        return false;
+                    return rail_covers_span(all_tracks[aj].first,
+                                            0.5 * sl.width);
+                };
                 int    best_start = -1;
                 double best_dist  = std::numeric_limits<double>::max();
+                bool   best_clo = false, best_chi = false;
                 const bool anchored = !std::isnan(bs.abstract_pos);
-                for (int j = 0; j + du <= n_sig; ++j) {
+                for (int j = 0; j < n_sig; ++j) {
+                    const bool clo = credit_at(j, -1);
+                    int du_c = du0 - (clo ? 1 : 0);
+                    // If the high end credited, the run's last slot would
+                    // be j + du_c - 2 — check the rail just above it.
+                    const bool chi =
+                        (du_c >= 2) && credit_at(j + du_c - 2, +1);
+                    if (chi) du_c -= 1;
+                    if (j + du_c > n_sig) continue;
+                    const std::string lay =
+                        ndr_run_layout_credited(bs.ndr, nb, clo, chi);
                     bool ok = true;
-                    for (int k = j; k < j + du && ok; ++k)
+                    for (int k = j; k < j + du_c && ok; ++k)
                         if (reserved_has(resv, track_key(signal_tracks[k].first)))
                             ok = false;
                     // Physical contiguity is required only WITHIN each
@@ -581,8 +650,8 @@ void DetailedNUTSEngine::place_by_layer(
                     // guard or shield gap may straddle a pattern rail —
                     // the rail only ADDS clearance/shielding, and demand
                     // counts SIGNAL slots consumed either way.
-                    for (int off = 0; ok && off < du; ++off) {
-                        if (layout[off] != 'b') continue;
+                    for (int off = 0; ok && off < du_c; ++off) {
+                        if (lay[off] != 'b') continue;
                         if (!signals_contiguous(
                                 signal_tracks[j + off - 1].first,
                                 signal_tracks[j + off].first, all_tracks))
@@ -590,15 +659,21 @@ void DetailedNUTSEngine::place_by_layer(
                     }
                     if (!ok) continue;
                     const double mid = 0.5 * (signal_tracks[j].first +
-                                              signal_tracks[j + du - 1].first);
+                                              signal_tracks[j + du_c - 1].first);
                     const double dist =
                         anchored ? std::abs(mid - bs.abstract_pos) : 0.0;
-                    if (dist < best_dist) { best_dist = dist; best_start = j; }
+                    if (dist < best_dist) {
+                        best_dist = dist; best_start = j;
+                        best_clo = clo;  best_chi = chi;
+                    }
                     if (!anchored) break;   // first feasible run
                 }
+                const std::string layout = ndr_run_layout_credited(
+                    bs.ndr, nb, best_clo, best_chi);
+                const int du = (int)layout.size();
                 if (best_start < 0) {
                     std::cout << "[DetailedNUTS] Warning: Layer " << layer
-                              << " has no contiguous unreserved run of " << du
+                              << " has no contiguous unreserved run of " << du0
                               << " signal tracks for NDR rule '"
                               << bs.ndr.rule_name << "' (" << nb
                               << " bits) in interval [" << bs.interval_lo

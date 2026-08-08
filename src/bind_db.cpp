@@ -120,7 +120,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("shield_mode",  &NdrRuleRow::shield_mode)
         .def_readwrite("shield_per_n", &NdrRuleRow::shield_per_n)
         .def_readwrite("shield_net",   &NdrRuleRow::shield_net)
-        .def_readwrite("layers",       &NdrRuleRow::layers);
+        .def_readwrite("layers",       &NdrRuleRow::layers)
+        .def_readwrite("credit",       &NdrRuleRow::credit);
 
     py::class_<TopoRow>(m, "TopoRow")
         .def(py::init<>())

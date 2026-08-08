@@ -35,7 +35,7 @@ change, no pin remapping, no re-baselining.
 
 | Option | Shape | Assessment |
 |---|---|---|
-| **1a. One declaration command** (recommended) | `def_ndr <name> [width <w\|xN>] [spacing <s\|xN>] [shield bus\|bit\|per:<N> [net <GND\|name>]] [layers <list>]` | Mirrors `def_layer`/`def_track_pattern`: declare-once, duplicate name = hard error, unknown token = hard error.  R3 realizability fires here — the command prints the rule's effective layer set or hard-errors with the arithmetic. |
+| **1a. One declaration command** (recommended) | `def_ndr <name> [width <w\|xN>] [spacing <s\|xN>] [shield bus\|bit\|per:<N> [net <GND\|name>]] [credit] [layers <list>]` | Mirrors `def_layer`/`def_track_pattern`: declare-once, duplicate name = hard error, unknown token = hard error.  R3 realizability fires here — the command prints the rule's effective layer set or hard-errors with the arithmetic.  `credit` (built, opt-in) lets an END shield be satisfied by an adjacent identity-matching power rail instead of an emitted wire (R5a); it requires a shield arrangement. |
 | 1b. Property-style increments | `ndr <name> width 2x`, then `ndr <name> spacing 2x`, … | Composable, but violates the declare-once-LOUD convention; a half-declared rule is a silent hazard. |
 | 1c. Pattern-embedded | NDR classes declared inside `def_track_pattern` | Only meaningful under the pattern-declared solution path, which the architecture assessment relegates to an optimization ingredient. |
 

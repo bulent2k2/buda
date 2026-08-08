@@ -177,7 +177,7 @@ recorded in [../NDR_UI.md](../NDR_UI.md).
 | R2 | prefix resolution beside `set_bundling`'s (longest-prefix, `*` default); hier occurrence-group resolution reuses the scoped-bit-cap union machinery |
 | R4 | ONE new function (working name `group_track_demand(members, layer)`, where `members` carries each bit's RESOLVED rule — a mixed-rule bundle (R8) means the group has no single rule, so a one-rule signature would either collapse members to the wrong rule or let planner and placement demand disagree; the shield arrangement is derived per rule-class within the group, and the layer/pattern context prices the quantization) in `buda_core`, consumed by `eff_bus_width`, planner `signal_tracks` capacity, kPeak floor, dead-span escalation, doomed-seat census, `_seg_admission_pool`, DNUTS admission |
 | R5 | generalize `for_each_signal_track_in_span` to run-of-k enumeration behind a rule-aware wrapper; `count_` sibling stays no-allocation, vector/count lockstep preserved |
-| R5a | phase 2: label→net-identity predicate shared between credit and the R9 audit (the predicate — `ndr_shield_net_matches`, §7.2 — SHIPPED with the audit; the credit term is the remaining phase-2 piece) |
+| R5a | **LANDED (§7.3)** — opt-in `credit`: end-shield rail crediting inside the credited demand/layout pair, seat-decided at DNUTS, audited by the SAME predicate (`ndr_shield_net_matches` / `ndr_rail_credits`) |
 | R6 | `place_by_layer`: k-slot claims, guard slots, shield emission (`NetSegment` + shield flag + shield-net id); footprint-aware occupancy for the sharing exemption; keepout cull covers shields |
 | R7 | demand units through `BundleWrapper` width plumbing; layer restriction enters the planner's layer enumeration like `allowed_layers` |
 | R8 | bundler split pass re-derives group demand per part; split report gains the demand delta |
@@ -286,11 +286,10 @@ R10 shipped on the §4 design, the v20 policy-table pattern verbatim:
 
 **Prototype limitations (deliberate, each with its phase):**
 - **Flat flow only** (R2d): hier template propagation refused LOUDLY.
-- **No R5a crediting** (the documented phase-2 deferral): shields always
-  emitted; R3/R7 price the uncredited worst case.
-- **No shield vias/connectivity** (R6 partial): shields are floating rails
-  in phase 1 — connectivity to the shield net is the crediting phase's
-  problem.  (The R9 typed audit has since landed — §7.2.)
+- ~~No R5a crediting~~ — LANDED, opt-in (§7.3).
+- **No shield vias/connectivity** (R6 partial): an EMITTED shield is still
+  a floating rail (see §7.3 for the decided disposition — a CREDITED end
+  needs no bonding at all, the rail is already grid-connected).
 - **Explorer badge/tint/ghosts not built**: detailed viz draws shields as
   wires (width-proportional lw already); the explorer surface is UI-phase
   work.
@@ -353,3 +352,57 @@ keeps credit and audit from ever disagreeing (the review-pinned
 requirement).  Phase-1 emitted shields carry the rule's own `shield_net`,
 so the label check is definitionally clean today; the predicate starts
 mattering the moment crediting substitutes a rail.
+
+### 7.3 R5a end-shield rail crediting — LANDED (2026-08-08)
+
+The phase-2 crediting increment, **opt-in per rule** (`def_ndr … shield …
+credit` → `NdrSpec.credit_shields`; no token anywhere = byte-identical,
+including every phase-1 governed flow):
+
+- **The credited pair** (`ndr.h`): `ndr_group_demand_credited(spec, nbits,
+  c_lo, c_hi)` and `ndr_run_layout_credited(…)` — the base pair with a
+  credited END's `'S'` neither charged nor emitted, lockstep for every
+  credit combination (test-pinned) and reducing exactly to the base pair
+  for unshielded/uncredited shapes.  Interior shields are NEVER credited —
+  phase-2 scope is the parked-against-a-rail case.  `ndr_rail_credits(
+  spec, label, type)` is the ONE credit predicate (label first, slot type
+  fallback, `ndr_shield_net_matches` underneath), shared verbatim by the
+  seat search and the audit.
+- **Seat-decided at DNUTS**: the seat search evaluates each candidate
+  start with its own credit pair — the low end credits when the pattern
+  slot immediately below the run's first signal slot is a matching rail
+  (no empty SIGNAL slot between), the high end symmetrically at the
+  credited run's last slot — and the rail must actually RUN THROUGH the
+  segment's span (`preroutes_in` coverage merge: a keepout-broken rail is
+  absent metal, no credit).  A credited seat consumes 1–2 fewer SIGNAL
+  slots; the early admission gate uses the optimistic
+  `bus_seg_min_demand` (both ends credited) so a pool only the credited
+  form fits is not refused before the search runs.
+- **Planner stays on the uncredited worst case** (R7): band charging,
+  abstract width, and R3 realizability all price `ndr_group_demand` —
+  conservative by design, since whether a seat credits is unknowable at
+  planning time.  The credit is pure DNUTS-side relief.
+- **The audit is the crediting consumer** (the R5a/R9 agreement): per
+  governed segment the R9 shield check derives each end's credit from the
+  PLACED GEOMETRY — outermost row a signal bit + adjacent matching rail
+  (same predicate, same no-signal-slot-between and span-coverage rules,
+  `_ndr_end_credit`) — and expects the credited layout, so a bit-at-the-
+  end run with NO matching rail keeps the uncredited expectation and
+  fails LOUD, while a legitimately credited end audits clean.  The audit
+  checks the property, not the provenance.
+- **v22**: `ndr_rule.credit` column (one idempotent ALTER; pre-v22 rules
+  default 0 — correct, they never credited), write-through/restore, and
+  the pricing fingerprint gains `|c1` ONLY when set, so v21 stamps of
+  non-credit rules still compare equal (a resumed v21 checkpoint must not
+  VOID on a fingerprint-format change).
+- **Shield connectivity disposition (R6)**: a CREDITED end needs no
+  bonding — the rail is the power grid's own metal.  An EMITTED shield
+  remains a floating rail; physical bonding vias to the supply grid are
+  deferred until export flows (GDS/DEF) need them, as they are power vias
+  with different table semantics than the per-bit `net_via` rows.
+- **Tests**: credited-pair lockstep across credit combos, the credit
+  predicate families, deterministic direct-engine seats (both-ends
+  credit → zero emitted shields; POWER rail against a GND spec never
+  credits; one-end credit), the e2e credit flow whose R9 audit agrees
+  wherever the seats land, fingerprint suffix back-compat, v22
+  round-trip + genuine-v21 migration.

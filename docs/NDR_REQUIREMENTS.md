@@ -93,7 +93,10 @@ shield-per-pair), resistance-critical feedlines (width).
   and audit cannot disagree.  *Phasing:* crediting may land after an
   initial always-emit phase — deferring it is conservative (redundant
   shields cost extra capacity but are never illegal) — but R5a is
-  mandatory for the feature to be complete.
+  mandatory for the feature to be complete.  *Status:* landed as the
+  opt-in `credit` token on `def_ndr` — end shields credit against an
+  immediately adjacent identity-matching rail whose metal spans the run;
+  a rule without the token always emits.
 - **R6 — Placement semantics.**  An NDR wire is placed at its true width;
   its footprint blocks every track it covers.  Spacing is enforced against
   everything — other signals, power-grid rails, pre-routes, and fixed

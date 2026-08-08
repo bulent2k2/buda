@@ -51,6 +51,11 @@ struct NdrSpec {
     // Net identity of emitted shield wires (R5a/R9: credit and audit key on
     // this; phase 1 always EMITS — crediting is phase 2).
     std::string shield_net = "GND";
+    // R5a crediting (phase 2, OPT-IN — the `credit` token): an END shield
+    // may be satisfied by an adjacent pattern rail that is electrically
+    // identical to shield_net (ndr_shield_net_matches) instead of an
+    // emitted wire.  Off = phase-1 behavior byte-for-byte.
+    bool credit_shields = false;
     // Declared rule name (reporting/provenance).
     std::string rule_name;
 
@@ -115,6 +120,37 @@ inline bool ndr_shield_net_matches(const std::string& requested,
     return fa != 0 && fa == fb;
 }
 
+// True when a pattern rail with the given label/type satisfies the rule's
+// shield-net identity for CREDITING purposes (R5a): the rule opted in, has
+// a shield arrangement to credit against, and the rail's label (or its
+// slot type, when the label is empty or non-identifying) resolves to the
+// rule's requested net under THE predicate above.  Used by the DNUTS seat
+// search and the R9 audit — one rule, so credit and audit cannot disagree.
+inline bool ndr_rail_credits(const NdrSpec& s, const std::string& label,
+                             const std::string& type) {
+    if (!s.credit_shields || s.shield_mode == 0) return false;
+    if (!label.empty() && ndr_shield_net_matches(s.shield_net, label))
+        return true;
+    return ndr_shield_net_matches(s.shield_net, type);
+}
+
+// ── R5a-credited variants of the demand/layout pair ──────────────────────
+// c_lo / c_hi: the run's low/high END shield is CREDITED to an adjacent
+// matching rail — the 'S' at that end is neither emitted nor charged a
+// SIGNAL slot.  Only meaningful for a shielded spec (ends are 'S'); both
+// false, or an uncredited spec, reduces to the base pair exactly.  Same
+// lockstep guarantee: layout size == demand for every credit combination.
+inline int ndr_group_demand_credited(const NdrSpec& s, int nbits,
+                                     bool c_lo, bool c_hi) {
+    int du = ndr_group_demand(s, nbits);
+    // The opt-in is enforced HERE, not just at the call sites: a spec that
+    // never opted into crediting is identical under any flag combination,
+    // so no API caller can bypass the rule's declaration.
+    if (nbits <= 0 || !s.active() || s.shield_mode == 0 ||
+        !s.credit_shields) return du;
+    return du - (c_lo ? 1 : 0) - (c_hi ? 1 : 0);
+}
+
 // Slot-role layout of the ascending run, size == ndr_group_demand():
 //   'B' first slot of a bit, 'b' continuation slot of a wide bit,
 //   'S' shield wire, 'G' guard (kept empty, reserved).
@@ -141,6 +177,20 @@ inline std::string ndr_run_layout(const NdrSpec& s, int nbits) {
         }
     }
     ends(out);
+    return out;
+}
+
+// Credited layout: the base layout with the low/high end 'S' dropped when
+// that end is credited (definitionally lockstep with
+// ndr_group_demand_credited; interior shields are NEVER credited — phase-2
+// scope is end shields, the parked-against-a-rail case).
+inline std::string ndr_run_layout_credited(const NdrSpec& s, int nbits,
+                                           bool c_lo, bool c_hi) {
+    std::string out = ndr_run_layout(s, nbits);
+    if (nbits <= 0 || !s.active() || s.shield_mode == 0 ||
+        !s.credit_shields) return out;
+    if (c_hi && !out.empty() && out.back() == 'S')  out.pop_back();
+    if (c_lo && !out.empty() && out.front() == 'S') out.erase(out.begin());
     return out;
 }
 
