@@ -1,4 +1,4 @@
-For [Gemini.md](GEMINI.md) update
+For [Gemini.md](../../GEMINI.md) update
 ===
 
 # Summary of Work
