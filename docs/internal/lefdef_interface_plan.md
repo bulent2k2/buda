@@ -1,6 +1,10 @@
 # LEF/DEF interface — plan for closing Lens B
 
-Status: **proposed**, 2026-08-08.  Companion to the Lens B assessment in
+Status: **accepted (advisory path), 2026-08-08.**  The fork in §0 is
+decided: BUDA targets the **advisory planner** role.  Sections marked
+*router path* are explicitly out of scope and retained only so a future
+revisit starts from a written baseline.  Companion to the Lens B
+assessment in
 [`../Analysis.md`](../Analysis.md), which found that BUDA is "a
 self-contained planning environment with its own world model, not a
 flow-participating point tool".  This is the plan to change that,
@@ -12,9 +16,11 @@ it.
 
 ---
 
-## 0. Decide the target first, because it changes the cost by ~4×
+## 0. The target: advisory planner (decided)
 
-Lens B named a fork, and the plan branches on it:
+Lens B named a fork that changes the cost by ~4×.  **It is decided in
+favour of the advisory planner.**  The comparison is kept for the
+record:
 
 | | **Advisory planner** (recommended) | **Flow-participating router** |
 |---|---|---|
@@ -25,7 +31,7 @@ Lens B named a fork, and the plan branches on it:
 | Rough size | 1–2 quarters | multi-quarter, and competes with mature routers |
 | What the customer does with it | honours corridors during detailed routing | consumes the routes directly |
 
-The advisory path is recommended because it matches what the tool is
+The advisory path was chosen because it matches what the tool is
 demonstrably good at (early bus/corridor feasibility, layer budgeting,
 congestion-aware planning before detailed routes exist) and because
 BUDA's own corpus shows it does not yet converge clean at chip scale
@@ -33,8 +39,30 @@ BUDA's own corpus shows it does not yet converge clean at chip scale
 *corridor* plan with residual bits is still useful; a *final route* with
 252 unplaced bits is not.
 
-**Phases 1–4 below are common to both paths.**  Only Phase 5 differs.
-Nothing in the early phases forecloses the router path later.
+**What "advisory" commits us to, precisely.**  This deserves care,
+because standard DEF can express *"do not route here"* but has no
+standard construct for *"route this net here"* — only actual pre-routed
+geometry, which is the router path.  So the advisory artifact is a
+**pair**:
+
+1. **Standard DEF `BLOCKAGES`** — the corridors BUDA reserved, emitted
+   as routing obstruction so the downstream router keeps other signals
+   out of them.  Portable across tools, no vias, no DRC.
+2. **A corridor manifest** — machine-readable (JSON/CSV): per bundle,
+   its nets, layer, and the rectangles reserved.  From this, a few lines
+   of tool-specific Tcl produce native route guides
+   (`create_route_guide` and equivalents).  BUDA ships the manifest plus
+   one worked Tcl example; sites adapt it.
+
+That split is honest about the format's limits and keeps the portable
+part portable.  It also raises the value of the Tcl work in Phase 5 from
+"nice to have" to "the delivery vehicle for half the artifact".
+
+**Deferred by this decision** (recorded, not deleted): the via library
+(2c), DEF `VIAS` (3f), routed-net emission (4b), and all DRC/enclosure
+modelling.  The trigger to revisit is a customer who wants BUDA's routes
+*consumed* rather than *honoured* — at which point the reader work below
+is already done and only the writer and the physical models remain.
 
 ---
 
@@ -128,7 +156,7 @@ multi-line `COMPONENTS` fragility noted in Analysis Lens B item 6.
 |---|---|---|
 | 2a | Tokenizer + macro completeness: `SIZE`, `ORIGIN`, `FOREIGN`, `SYMMETRY`, `SITE`, multi-port `PIN` with per-port `LAYER`+`RECT`, `OBS` | Fixes wrong pin coordinates for macros with non-zero `ORIGIN`; keeps power/ground pins instead of dropping them |
 | 2b | Tech `LAYER`: `TYPE`, `DIRECTION`, `PITCH`, `WIDTH`, `SPACING`, `OFFSET`, `AREA` | → `Layer.dir` + a **synthesized `TrackPattern`**, replacing hand-typed `def_layer`/`def_track_pattern` |
-| 2c | `VIA` / `VIARULE` → a via library (data only, no DRC yet) | Required by the router path's writer; harmless to carry on the advisory path |
+| ~~2c~~ | ~~`VIA`/`VIARULE` → via library~~ | **Deferred** (router path only) — see §0 |
 | 2d | `MANUFACTURINGGRID`, `UNITS` | Feeds Phase 1's scale factor |
 
 **The model gap, stated honestly.**  `Layer` holds direction, span
@@ -165,7 +193,7 @@ discarded today.
 | 3c | `BLOCKAGES` + macro `OBS` + component `HALO` → `add_keepout` per layer | **The single most surprising omission for a routing tool.** The keepout machinery already exists (`src/routing_grid.h:197`, `src/topology.h:465`) — this is wiring, not new capability |
 | 3d | `PINS` (top-level ports, currently skipped at `:1459`), `SPECIALNETS` (power straps → keepouts, and later pre-route geometry) | Ports are real endpoints; straps are real obstacles |
 | 3e | `NONDEFAULTRULES` → the **landed NDR** feature (`def_ndr`/`set_ndr`) | Rare alignment: the internal feature already exists and matches the DEF concept |
-| 3f | `VIAS` (custom via definitions) | Feeds the writer on the router path |
+| ~~3f~~ | ~~`VIAS` (custom via definitions)~~ | **Deferred** (router path only) — see §0 |
 
 **Scale.**  The reader has only ever run on a 3 878-line floorplan DEF.
 A real post-place DEF is 10⁶–10⁸ lines; per-line `std::regex` will not
@@ -175,23 +203,27 @@ well under a minute, memory measured and documented).
 
 ---
 
-## 5. Phase 4 — DEF writer (≈ 2–3 weeks advisory / +4–6 router)
+## 5. Phase 4 — the advisory writer (≈ 2–3 weeks)
 
 There is **no DEF writer today** — the only export is `export_gds`.
 This is the gap that makes the tool's output "a picture, not a
 constraint": GDS rectangles carry no net identity a P&R tool can adopt.
 
-- **4a — advisory artifact (recommended first).**  Emit `BLOCKAGES +
-  LAYER` for the bus corridors the planner reserved, plus `REGIONS`/
-  `GROUPS` where useful.  Needs **no via model and no DRC** — the
-  consumer is a router that must route *around/within* what BUDA
-  planned.  This is the smallest artifact with real methodology value.
-- **4b — routed nets (router path).**  `NETS … + ROUTED <layer> ( x y )
-  ( x y )` from `net_segment` (which already carries
-  `net_id, layer, x1..y2, width`) with vias named from the Phase 2c
-  library, plus `SPECIALNETS` passthrough.  Deterministic ordering and a
-  DEF→BUDA→DEF round-trip test, mirroring the discipline `gds_io`
-  already demonstrates.
+**4a — DEF `BLOCKAGES`.**  Emit the corridors the planner reserved as
+routing obstruction (`BLOCKAGES + LAYER <layer> RECT …`), derived from
+the placed `bus_segment` extents plus their reserved margin.  Needs no
+via model and no DRC.  Deterministic ordering (sorted, like `gds_io`)
+and a DEF → BUDA → DEF round-trip test.
+
+**4b — corridor manifest + Tcl example.**  The half DEF cannot express:
+per bundle, its net names, layer, and reserved rectangles, in JSON/CSV,
+plus one worked `create_route_guide`-style Tcl script showing a site how
+to turn the manifest into native guides.  Reuses Phase 0's report
+plumbing.
+
+*Router-path emission (`NETS … + ROUTED` with real vias) is deferred —
+see §0.  The data for it already exists in `net_segment`/`net_via`, so
+the deferral costs nothing but the writer and the physical models.*
 
 ---
 
@@ -233,26 +265,29 @@ constraint": GDS rectangles carry no net identity a P&R tool can adopt.
 | 1 | Explicit import scale (DBU-exact option) | ~1 week |
 | 2 | LEF reader (tokenizer, macros, tech layers, vias) | 3–4 weeks |
 | 3 | DEF reader (tokenizer, TRACKS, blockages, pins, NDR) | 3–4 weeks |
-| 4a | DEF writer — advisory (blockages/corridors) | 2–3 weeks |
-| 4b | DEF writer — routed nets + vias (router path) | +4–6 weeks |
-| 5 | Tcl, packaging, logging | 3–4 weeks |
+| 4a | DEF writer — `BLOCKAGES` | 2 weeks |
+| 4b | Corridor manifest + worked Tcl example | 1 week |
+| 5 | Tcl front end, packaging, logging | 3–4 weeks |
+| — | ~~router path: vias, routed nets, DRC~~ | **deferred, §0** |
 
-**≈ one quarter to a credible advisory pilot** (0 → 4a), with 5 running
-in parallel as capacity allows.  The router path adds a quarter or more
-*plus* the DRC/via modelling that Analysis Lens B item 3 sizes as large
-and open-ended.
+**≈ one quarter to a credible advisory pilot** (0 → 4b).  Phase 5's Tcl
+work is no longer optional polish: it is how half the advisory artifact
+reaches the customer's tool, so it should start as soon as Phase 4b's
+manifest schema is fixed.
 
-## 9. Open decisions (owner input needed)
+## 9. Decisions
 
-1. **Advisory vs flow-participating** — determines whether 4b and the
-   via/DRC model are in scope at all.  Recommendation: advisory first,
-   explicitly, and revisit after a pilot.
-2. **DBU-exact import: opt-in or default?**  Opt-in keeps every flow
-   byte-identical forever; default-on is the honest choice for new
-   designs but needs a corpus migration.  Recommendation: opt-in in
-   Phase 1, revisit once real designs are running.
-3. **Does tech data persist in the BDB (v23) or stay session state?**
-   Recommendation: persist — otherwise a resumed checkpoint silently
-   plans against a different stack, the same class of bug the
-   already-noted un-persisted `def_gds_layer` mapping has.
-4. **Strict-exit default timing** — one release opt-in, then flip?
+1. **Advisory vs flow-participating** — **DECIDED: advisory** (§0).
+   Via library, DEF `VIAS`, routed-net emission and DRC modelling are
+   deferred with a written revisit trigger.
+2. **DBU-exact import: opt-in or default?**  Proceeding **opt-in** in
+   Phase 1 unless directed otherwise — it keeps every existing flow
+   byte-identical, and the corpus gate stays meaningful throughout.
+   Revisit once real designs are running.
+3. **Tech data in the BDB or session state?**  Proceeding with
+   **persisted (schema v23)** — otherwise a resumed checkpoint silently
+   plans against a different stack, the same bug class as the currently
+   un-persisted `def_gds_layer` mapping.
+4. **Strict-exit default timing** — one release opt-in, then flip the
+   default.  Open to a faster flip if no external scripts depend on the
+   current exit-0 behaviour.
