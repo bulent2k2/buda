@@ -410,14 +410,60 @@ windows already span most of the grid, so there is nothing to skip.
 The cost is the per-visit band walk, not the visit count.  A note in
 `best_band_perp` records this so it is not re-tried.
 
-**Where that leaves B1.**  The attribution is solid and the two
-cheapest ideas are dead.  What is left, in order of appeal: (a) make
-the per-visit `band_cost` cheaper or exploit that most bands are EMPTY
-(the sparse-usage structure `cong_cost_segment` re-derives per band);
-(b) an overlay-independent infeasibility certificate as above, which
-would revive the pruning soundly; (c) accept the cost.  Note (a) and
-(b) both touch the planner's decision surface, so either needs the
-decision-line + corpus gate this branch already exercises.
+**Where that left B1 (before PR2).**  The attribution is solid and the
+two cheapest ideas were dead.  What remained, in order of appeal: (a)
+make the per-visit `band_cost` cheaper or exploit that most bands are
+EMPTY; (b) an overlay-independent way to revive the pruning soundly;
+(c) accept the cost.
+
+### B1 PR2 — landed: admissible decoupled-candidate ladder pruning
+
+The revival of approach (b), via the observation that Codex's
+counterexample has a NECESSARY precondition: a disjoint candidate can
+only flip feasible via the `kBalance`→layer-choice→own-overlay cascade
+if it HAS overlay coupling — two segments sharing a `(cut, band)`.  For
+an **overlay-DECOUPLED** candidate (no two segments ever share a
+cut+band — every L/Z/U/simple-trunk shape, since an H-seg crosses only
+V-cuts and a V-seg only H-cuts), each segment's feasibility is a pure
+function of usage on its own footprint bands, and the overflow gate is
+`kBalance`-free, so "disjoint from the rip ⟹ feasibility unchanged" is
+rigorously true.  Only multi-trunk / fan-in-taper candidates couple.
+
+So the mask becomes **{coupled candidates} ∪ {candidates whose
+footprint intersects the freed bands}** — a provable SUPERSET of the
+feasible set (`cand_is_decoupled_` classifies; coupled ones are always
+scored).  plan_bundle's ordered reduction over any superset elects the
+identical winner, so the routing is byte-identical, and a victim
+intersecting no decoupled candidate (mask empty) skips its whole sweep.
+
+Measured on `chip_stack_bottomup` (BUDA_THREADS=4): **4448** of the
+ladder's candidate-scorings pruned (the unsound #629 version pruned
+10 509 — the other ~6 k were coupled-disjoint, now correctly scored;
+745 coupled candidates seen cumulatively), ladder ~43 → ~32 s.
+Gates: qor_corpus **0 better / 0 worse / 41 unchanged**, abstract AND
+detailed WL **+0.00 %**; full flow log byte-identical on
+`chip_stack_bottomup`; decision lines byte-identical on
+`mix2_fast_bottomup`; fast+mid tiers green (2493).  `runtime_ab -n 5`:
+**negotiate 51.1 → 44.0 s (−7.0 s)**, the ladder win where the change
+acts.  `run_planner` and the topdown twin are PROVABLY unaffected — a
+controlled B/M interleave gives identical `run_planner` medians (~31.1 s
+both), so runtime_ab's apparent +2.6 s there is its base-first/
+branch-second ordering bias, not code.  plan_bundle's null-mask path is
+kept byte-for-byte main (the candidate-index build stays INLINE; routing
+it through `collect_cand_indices_` measured as a spurious run_planner
+regression and was reverted — the same hot-path sensitivity the
+ReplanProf counters hit).
+
+**The floor-relievability gate (a separate earlier idea — skip a whole
+ladder when even removing ALL rippable load leaves no candidate viable)
+was built and measured INERT** (1 skip / 105 calls on
+`chip_stack_bottomup`, 0–1 on the other bottom-up flows): these ladders
+are "needs-multiple-rips" hopeless, not "blockers-locked" hopeless, so
+the floor is almost never dead.  Correct but not worth landing; shelved
+on `claude/b1-ladder-floor-gate` for any genuinely locked-heavy design.
+
+Still open: approach (a) — a cheaper/sparser `band_cost` would speed the
+coupled candidates the decoupled prune must still fully score.
 
 `[ReplanProf]` (env `BUDA_REPLAN_PROF=1`) stays in as the instrument
 that produced all of the above — per call it reports the recharge /
