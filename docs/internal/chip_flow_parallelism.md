@@ -384,10 +384,17 @@ wrappers.
 
 Measured on `chip_stack_bottomup` (same binary, BUDA_THREADS=4): 10 509
 of ~22 k ladder candidate scorings pruned (~48 %), ladder 43.4 → 24.6 s,
-negotiate 57.2 → 38.2 s, flow 101.0 → 77.5 s single-run; decision lines
-AND the full flow log (modulo timing) byte-identical, trial/plan counts
-unchanged (297/310).  `[ReplanProf]` now also reports `futile`/`pruned`
-per call (prints to stderr — negotiate silences the iteration's stdout).
+negotiate 57.2 → 38.2 s single-run; decision lines AND the full flow log
+(modulo timing) byte-identical, trial/plan counts unchanged (297/310).
+Gates: qor_corpus 0 better/0 worse/41 unchanged with abstract AND
+detailed WL **+0.00 %** (byte-identical decisions corpus-wide), fast+mid
+tiers green.  `runtime_ab -n 3`: **90.47 → 75.41 s (−16.6 %)**,
+negotiate 53.3 → 37.1 s; the topdown twin is +0.1 % at n=5 (neutral —
+an earlier +2.6 s there was traced to the prof counters having been
+inserted MID-CLASS, shifting the hot tuning members' cache lines; they
+now sit at the end of the class).  `[ReplanProf]` also reports
+`futile`/`pruned` per call (prints to stderr — negotiate silences the
+iteration's stdout).
 
 ## 4. Recommended order
 
