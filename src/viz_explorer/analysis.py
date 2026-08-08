@@ -76,13 +76,42 @@ class ExplorerAnalysisMixin:
         spec = getattr(self.wrapper.input, 'ndr', None)
         return spec if (spec is not None and spec.active()) else None
 
-    def _ndr_nbits(self):
-        return len(self.wrapper.input.original_bundle.get_net_names())
+    def _ndr_nbits(self, seg_idx=None):
+        """Member-bit count for the NDR demand: the bundle's net count, or
+        the TAPERED subset when the shown topology declares one for
+        `seg_idx` (`Topology::seg_bits` — the same accounting
+        `_seg_member_bits` / `bus_seg_nbits` use, so the overlay and the
+        flag price a fan-in branch the way the engine does).  Falls back
+        to the bundle count on any lookup failure."""
+        nbits = len(self.wrapper.input.original_bundle.get_net_names())
+        if seg_idx is None:
+            return nbits
+        try:
+            sb = self._shown_topo().seg_bits
+            if seg_idx in sb and 0 < len(sb[seg_idx]) < nbits:
+                return len(sb[seg_idx])
+        except Exception:
+            pass
+        return nbits
+
+    def _ndr_seg_demand(self, spec, seg_idx=None):
+        """The segment's GROUP demand in SIGNAL slots.  A crediting rule is
+        priced at its OPTIMISTIC minimum (both end shields rail-credited —
+        `bus_seg_min_demand`'s viz twin): the seat search may legitimately
+        realize the credited run, so the flag must not call a window
+        infeasible that DNUTS can seat (Codex #627)."""
+        nb = self._ndr_nbits(seg_idx)
+        if spec.credit_shields:
+            return ic.ndr_group_demand_credited(spec, nb, True, True)
+        return ic.ndr_group_demand(spec, nb)
 
     def _ndr_badge(self):
         """Bundle-header badge for a governed bundle: the rule name and its
         GROUP demand (`NDR:clk2x 13s/4b`, `+credit` when the rule may
-        rail-credit its end shields).  Empty for ungoverned bundles."""
+        rail-credit its end shields).  Deliberately the WHOLE-BUNDLE,
+        UNCREDITED demand — what the planner charges (R7 prices the worst
+        case; crediting and fan-in taper are per-seat/per-segment reliefs
+        the ghosts and the flag show).  Empty for ungoverned bundles."""
         spec = self._ndr_spec()
         if spec is None:
             return ""
@@ -119,9 +148,12 @@ class ExplorerAnalysisMixin:
         g = getattr(self, 'routing_grid', None)
         if spec is None or g is None or self.layer_stack is None:
             return None
-        du = ic.ndr_group_demand(spec, self._ndr_nbits())
         allowed = set(self.wrapper.input.allowed_layers or [])
         for i, cs in enumerate(cs_list):
+            # Per-segment demand: the TAPERED bit subset when the topology
+            # declares one, and a crediting rule's optimistic minimum —
+            # the flag fires only on a shortfall no seat could survive.
+            du = self._ndr_seg_demand(spec, i)
             dir_ = (ic.LayerDir.HORIZONTAL if cs.horiz
                     else ic.LayerDir.VERTICAL)
             lids = list(self.layer_stack.get_layer_ids_by_dir(dir_))
@@ -152,12 +184,15 @@ class ExplorerAnalysisMixin:
         spec = self._ndr_spec()
         if spec is None:
             return
-        du = ic.ndr_group_demand(spec, self._ndr_nbits())
-        if du <= 1:
-            return
         col = _PREROUTE_COLOR.get('SHIELD', '#e0d4f7')
         for i, cs in enumerate(cs_list):
             if i in self._hidden_seg:
+                continue
+            # Per-segment demand: a tapered fan-in branch carries only its
+            # own bits, so its envelope is narrower than the bundle's
+            # (Codex #627); a crediting rule draws its realizable minimum.
+            du = self._ndr_seg_demand(spec, i)
+            if du <= 1:
                 continue
             pitch = self._ndr_slot_pitch(resolved_lid(i))
             if pitch is None:
