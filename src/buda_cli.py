@@ -323,6 +323,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self.report_json_path = None   # --report-json PATH
         self._audits = []              # one dict per check_design call
         self._audit_failed = False     # any audit dirty or unable to run
+        self._all_cmd_stats = []       # EVERY captured command (report only)
 
     # ── Per-command logging / runtime stats ─────────────────────────────────
     def run_command(self, cmd_line):
@@ -391,6 +392,15 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
             self._flow_log.flush()
             # … and a one-line abstract summary to the terminal.
             self._cmd_stats.append((stripped, elapsed, nlines, nwarn, nerr))
+        if self.report_json_path:
+            # The machine-readable report must list what RAN, not what was
+            # worth printing: `_cmd_stats` deliberately drops silent, instant
+            # setup commands (add_block, def_layer, …) so the terminal stays
+            # readable, which would make the report's command list — and its
+            # total — quietly incomplete.  Recorded only when the flag is on,
+            # so a normal run pays nothing.
+            self._all_cmd_stats.append((stripped, elapsed, nlines, nwarn,
+                                        nerr, bool(significant)))
             headline = self._extract_headline(nonblank)
             self._emit_cmd_summary(real_out, stripped, elapsed, nlines,
                                    nwarn, nerr, headline)
@@ -481,9 +491,14 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         just stops a flow harness from having to regex prose that is
         deliberately lossy and truncated to 68 columns."""
         import json
+        # Prefer the COMPLETE record (every captured command, including the
+        # silent setup ones the terminal summary drops); fall back to the
+        # surfaced list only if the flag was set after the run started.
+        src = self._all_cmd_stats or [(c, e, n, w, x, True)
+                                      for c, e, n, w, x in self._cmd_stats]
         cmds = [{"command": c, "seconds": round(e, 4), "output_lines": n,
-                 "warnings": w, "errors": x}
-                for c, e, n, w, x in self._cmd_stats]
+                 "warnings": w, "errors": x, "surfaced": s}
+                for c, e, n, w, x, s in src]
         metrics = {}
         nr = getattr(self, "nuts_result", None)
         if nr is not None:
@@ -498,8 +513,13 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
             "exit_status": exit_status,
             "strict_check": bool(self.strict_check),
             "audit_failed": bool(self._audit_failed),
-            "total_seconds": round(sum(e for _, e, _, _, _ in self._cmd_stats),
-                                   4),
+            "total_seconds": round(sum(c["seconds"] for c in cmds), 4),
+            # `source`/`visualize` run as passthroughs (no capture), so they
+            # are absent by construction; `source`'s children are each listed,
+            # which is why counting it too would double the time.
+            "commands_note": ("captured commands only; source/visualize are "
+                              "passthroughs and their children are listed "
+                              "individually"),
             "commands": cmds,
             "audits": self._audits,
             "metrics": metrics,
@@ -834,14 +854,24 @@ def main():
         # could not run one — fails, which is what lets a harness gate on
         # quality.  Code 3 is distinct from 1 (script/setup error) and 2
         # (usage) so a harness can tell "the tool worked, the design is dirty"
-        # from "the tool broke".  An explicit non-zero `exit <code>` in the
-        # script always wins: that is the author stating intent.
+        # from "the tool broke".
+        #
+        # An explicit NON-ZERO `exit <code>` wins — that is the author stating
+        # a failure of their own.  A zero one deliberately does NOT: 18 of the
+        # repo's flows end with a bare `exit` (SystemExit code 0) as their
+        # normal terminator, so letting that suppress the verdict would make
+        # --strict-check a no-op on essentially every real flow.
         status = script_exit
-        if session.strict_check and session._audit_failed and status == 0:
+        strict_failed = bool(session.strict_check and session._audit_failed
+                             and status == 0)
+        if strict_failed:
             status = 3
         if session.report_json_path:
             session.write_report_json(session.report_json_path, status)
-        if status == 3:
+        # Attribute the message to strict-check ONLY when strict-check is what
+        # produced it: a script's own `exit 3` must not be reported as a failed
+        # design audit that never ran.
+        if strict_failed:
             n = sum(a.get("violations", 0) for a in session._audits)
             print(f"\nError: --strict-check — design audit failed "
                   f"({n} violation(s) across {len(session._audits)} "

@@ -73,11 +73,46 @@ def test_unrunnable_audit_fails_only_under_strict_check(tmp_path):
     assert "strict-check" in r.stdout
 
 
-def test_explicit_script_exit_code_wins(tmp_path):
-    """An explicit `exit <code>` is the author stating intent; strict-check
-    must not overwrite it with its own 3."""
+def test_explicit_nonzero_exit_code_wins(tmp_path):
+    """An explicit NON-ZERO `exit <code>` is the author stating a failure of
+    their own; strict-check must not overwrite it with its own 3."""
     r = _run(tmp_path, _CANNOT_RUN + "exit 7\n", "--strict-check")
     assert r.returncode == 7, r.stdout[-2000:]
+
+
+def test_explicit_zero_exit_does_not_suppress_the_verdict(tmp_path):
+    """A bare `exit` (code 0) is how most flows in this repo normally
+    terminate — 18 of them — so treating it as "the author forced success"
+    would make --strict-check a no-op on essentially every real flow."""
+    for ending in ("exit\n", "exit 0\n"):
+        r = _run(tmp_path, _CANNOT_RUN + ending, "--strict-check")
+        assert r.returncode == 3, (ending, r.stdout[-2000:])
+
+
+def test_scripts_own_exit_3_is_not_blamed_on_strict_check(tmp_path):
+    """`exit 3` from a script that never ran an audit must not print
+    "design audit failed" — a false diagnostic is worse than none."""
+    r = _run(tmp_path, _CLEAN.replace("check_design\n", "") + "exit 3\n")
+    assert r.returncode == 3
+    assert "strict-check" not in r.stdout, r.stdout[-2000:]
+    assert "design audit failed" not in r.stdout
+
+
+def test_report_lists_silent_setup_commands(tmp_path):
+    """The report must list what RAN, not what was worth printing: the
+    terminal summary drops silent instant commands (add_block, def_layer),
+    which would make the report's list and its total quietly incomplete."""
+    out = tmp_path / "run.json"
+    _run(tmp_path, _CLEAN, "--report-json", str(out))
+    d = json.loads(out.read_text())
+    names = [c["command"].split()[0] for c in d["commands"]]
+    for silent in ("def_layer", "add_block", "add_net"):
+        assert silent in names, f"{silent} missing from the report: {names}"
+    # …and they are marked as not surfaced, so a consumer can still tell
+    # which ones the terminal showed.
+    assert any(not c["surfaced"] for c in d["commands"])
+    assert d["total_seconds"] >= sum(
+        c["seconds"] for c in d["commands"] if c["surfaced"])
 
 
 def test_report_written_for_a_flow_ending_in_exit(tmp_path):
