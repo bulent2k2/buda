@@ -52,13 +52,14 @@ run_planner 1
 # 12 SIGNAL slots per period between the rails: room for the 19-slot
 # bus25 run (bit contiguity needs only 3 consecutive slots; guard and
 # shield gaps may straddle the rails).
-def_track_pattern 3 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
-def_track_pattern 4 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
-def_track_pattern 5 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
-def_track_pattern 6 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 5 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 6 0 VDD 2 1 (_ 1 1)x12 GND 2 1
 
 run_nuts
 run_detailed_nuts
 dump_ndr
 check_design
 report_wirelength
+#visualize
