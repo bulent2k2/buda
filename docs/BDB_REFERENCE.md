@@ -1296,6 +1296,34 @@ derive_busterms 1
 
 ---
 
+### `refine_busterms`
+
+```
+refine_busterms
+```
+
+Re-derive the busterm table using the **same `max_depth` as the last
+`derive_busterms` call**, clearing and rewriting it in place. Takes no
+arguments — the depth is remembered from the earlier call, so this is a
+refresh, not a re-parameterisation; to change the depth, call
+`derive_busterms <max_depth>` again.
+
+Run it after mutating placement (`move_comp`, `flip_comp`, `rotate_comp`,
+`resize_cell`, `align_bottom_up`, …) so the routing interface matches the
+components' new positions. Prints the number of busterms written.
+
+`derive_busterms` must have run first — otherwise the command reports
+`Error: run derive_busterms first` and does nothing.
+
+**Example:**
+```buda
+derive_busterms 2
+move_comp chip/i_dnuts1  1200 800
+refine_busterms            # busterms re-derived at depth 2
+```
+
+---
+
 ## 3. Python API
 
 ```python

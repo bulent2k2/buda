@@ -140,6 +140,8 @@ edit_topology <bundle_id> [<cand#>|new]
 edit_add_trunk <H|V> <perp_pos> [<along_lo> <along_hi>] [layer <id>]
 edit_add_stub <block> <seg#> [layer <id>]
 edit_set_span <seg#> <along_lo> <along_hi>
+edit_set_layer <seg#> <layer_id>
+edit_set_slide <seg#> <lo> <hi> | edit_set_slide <seg#> clear
 edit_connect <seg_i> <seg_j>
 edit_disconnect <seg_i> <seg_j> <retract_to>
 edit_remove_segment <seg#>
@@ -163,13 +165,36 @@ Phase E3b).  `edit_topology` opens a working **copy** of the given candidate
 * `edit_add_stub` — drops a perpendicular stub from the block's nearest face
   to segment `<seg#>` (0-based, as printed by `edit_status`), seeding the
   busterm tap exactly like the generators (margin bbox, multi-rect, TEG).
-* `edit_set_span` — override a segment's along-span.  (A *slide* override is
-  per-plan state, not topology content: use the `plan.seg_slide_lo/hi`
-  NUTS hatch.)
+* `edit_set_span` — override a segment's along-span.
+* `edit_set_layer` — set the working copy's segment layer hint directly (the
+  scriptable equivalent of the explorer's `+`/`-` layer cycle).  The planner
+  honors it through the commit's pinned overrides (GUI) or the candidate's
+  `layer_hint` (CLI).  Note `unpin_topology` clears such forced layers along
+  with the pin — otherwise a re-chosen topology would inherit them.
+* `edit_set_slide` — stage a per-segment perpendicular slide window (the
+  scriptable `W` / `w` of the explorer), intersected with the segment's
+  STRUCTURAL slide range, since a window outside it would make the NUTS
+  placement infeasible.  `clear` drops a staged window.  Staged windows land
+  on `plan.seg_slide_lo/hi` at `edit_commit`, revalidated there because a
+  later geometry edit can narrow the range; indices follow
+  `edit_remove_segment` re-keying, exactly like the GUI staging.  (A slide
+  override is per-plan state, not topology content — this is the NUTS hatch,
+  not a change to the candidate's geometry.)
 * `edit_connect` / `edit_disconnect` — junction editing on a perpendicular
   pair: connect moves the nearest free endpoint to the crossing (extending
   the partner if it falls short; a busterm-tapped endpoint is refused),
   disconnect retracts the landing endpoint to `<retract_to>`.
+* `edit_remove_segment` — delete a segment from the working copy.  The
+  remaining segments are **re-keyed** (indices close up), so re-read
+  `edit_status` before the next index-taking op; staged slide windows follow
+  the re-keying.
+* `edit_status` — print the working copy's current segments (with their
+  0-based indices, layers and spans) plus the running verdict, without
+  mutating anything.  This is where the `<seg#>` every other op takes comes
+  from.
+* `edit_abort` — discard the working copy and end the session, leaving the
+  bundle's candidate pool untouched.  The counterpart of `edit_commit`; an
+  open session must end with one or the other.
 * `edit_commit` — appends the result to the bundle's pool as a `USER`
   candidate, deduplicated by `topo_uid` (an identical topology is reported,
   not duplicated); `pin` also selects it.  A not-clean topology commits with

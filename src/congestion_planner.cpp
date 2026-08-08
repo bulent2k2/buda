@@ -26,8 +26,19 @@
 #include <unordered_map>
 #include <atomic>
 #include <thread>
+#include <chrono>
 
 namespace buda {
+
+// BUDA_REPLAN_PROF=1: enable the replan_bundle_ripup / plan_bundle timing
+// instrumentation (B1).  Checked once; zero cost elsewhere when unset.
+static bool replan_prof_on() {
+    static const bool on = [] {
+        const char* e = std::getenv("BUDA_REPLAN_PROF");
+        return e && *e && *e != '0';
+    }();
+    return on;
+}
 
 // NDR (phase 1): a governed bundle's per-segment charge is its member bits'
 // GROUP demand in slots — the single-sourced conversion of requirement R4
@@ -1226,6 +1237,14 @@ int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
     double best_cost = band_cost(centre);
     int    best_dist = 0;
 
+    // NOTE (B1, measured & rejected): restricting this walk to the bands
+    // inside [slide_lo, slide_hi] by binary search is byte-identical (bands
+    // outside give win_hi - win_lo <= 0 < eff_width and are skipped by the
+    // test below anyway) — but it measured FLAT on chip_stack_bottomup
+    // (negotiate 57.2 -> 57.6 s, ladder 43.4 -> 44.2 s), because this
+    // design's slide windows already span most of the Hanan grid, so there
+    // is almost nothing to skip.  The per-visit band_cost walk is the real
+    // cost, not the visit count.
     for (int b = 0; b + 1 < (int)grid.size(); ++b) {
         int win_lo = std::max(grid[b],     slide_lo);
         int win_hi = std::min(grid[b + 1], slide_hi);
@@ -1894,28 +1913,14 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
 
     const bool enforce_window   = (mode != PlanMode::BEST_EFFORT);
     const bool enforce_overflow = (mode == PlanMode::STRICT);
-    constexpr double kOvEps = 1e-6;   // float noise only — any real overflow is hard
 
     // Bit count for the honest per-layer width model (eff_bus_width);
     // 0 (hand-built wrappers without nets) falls back to width x dilution.
+    // plan_bundle only forwards nbits to score_candidate_ (via CandCtx below);
+    // the overflow epsilon and the per-segment tapered-width helpers
+    // (seg_n/seg_w) now live in score_candidate_, where the scoring loop moved
+    // (dc4b51b) — their copies here were dead after that extraction.
     const int nbits = (int)bw.input.original_bundle.get_net_names().size();
-    // Tapered fan-in width model: a segment carrying a bit SUBSET (seg_bits)
-    // is charged for its member bits only — count for pattern layers, a
-    // proportional base width for the dilution fallback.  Non-fan-in
-    // bundles (empty seg_bits) are byte-identical to the bundle-level model.
-    auto seg_n = [&](const Topology& t, int si) {
-        // NDR: a governed bundle's segments are counted in GROUP DEMAND
-        // UNITS (ndr.h) rather than raw member bits, so every consumer
-        // below prices the rule.  Identity when the spec is inactive
-        // (R12 byte-identity).
-        return ndr_units(bw.input, seg_bit_count(t, si, nbits));
-    };
-    auto seg_w = [&](const Topology& t, int si) {
-        const int n = seg_n(t, si);
-        return (nbits > 0 && n != nbits)
-                   ? bw.input.width * ((double)n / (double)nbits)
-                   : bw.input.width;
-    };
 
     auto h_layers = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
     auto v_layers = layers_.get_layer_ids_by_dir(LayerDir::VERTICAL);
@@ -1962,11 +1967,20 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     // load reflects only already-committed bundles (within-candidate charges are
     // restored per candidate), so it grows monotonically across the greedy
     // schedule and steers later bundles onto the layers earlier ones left empty.
+    const bool prof = replan_prof_on();
+    const auto t_ll0 = prof ? std::chrono::steady_clock::now()
+                            : std::chrono::steady_clock::time_point{};
     std::map<int,double> layer_load;
     for (const auto& c : cuts_) {
         double u = 0.0;
         for (int b = 0; b < c.num_bands(); ++b) u += c.usage(b);
         layer_load[c.layer_id] += u;
+    }
+    if (prof) {
+        prof_layerload_us_ += (long long)std::chrono::duration_cast<
+            std::chrono::microseconds>(std::chrono::steady_clock::now() - t_ll0)
+            .count();
+        ++prof_plan_calls_;
     }
     double max_h_load = 1.0, max_v_load = 1.0;
     for (const auto& [lid, u] : layer_load) {
@@ -1994,6 +2008,8 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     // with per-candidate results identical to the sequential loop; the
     // ordered reduction below then replays the sequential compare, so the
     // winner — and every tie-break — is identical to the serial sweep.
+    const auto t_sc0 = prof ? std::chrono::steady_clock::now()
+                            : std::chrono::steady_clock::time_point{};
     std::vector<CandScore> scores(cand_indices.size());
     const int n_threads = resolved_plan_threads_((int)cand_indices.size());
     if (n_threads > 1) {
@@ -2012,6 +2028,12 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         CandOverlay& ov = thread_overlay_();       // persistent per thread
         for (size_t k = 0; k < cand_indices.size(); ++k)
             scores[k] = score_candidate_(bw, cand_indices[k], mode, ctx, ov);
+    }
+    if (prof) {
+        prof_scoring_us_ += (long long)std::chrono::duration_cast<
+            std::chrono::microseconds>(std::chrono::steady_clock::now() - t_sc0)
+            .count();
+        prof_cands_ += (long long)cand_indices.size();
     }
 
     // Ordered reduction — the sequential loop's tail, verbatim semantics.
@@ -2813,6 +2835,17 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
     std::vector<BundleAssignment> out;
     if (x_grid_.empty() || cuts_.empty() || span_ref_eff_ <= 0.0) return out;
 
+    // Env-gated per-call profile (BUDA_REPLAN_PROF=1): where does a call's
+    // time go — the recharge-all, the STRICT plan, the victim ladder (and how
+    // many victims / plan_bundle sweeps it grinds), or the fallbacks?
+    const bool kProf = replan_prof_on();
+    using clock_ = std::chrono::steady_clock;
+    auto ms_since = [](clock_::time_point t0) {
+        return std::chrono::duration<double, std::milli>(clock_::now() - t0)
+            .count();
+    };
+    const auto t_call = clock_::now();
+
     BundleWrapper* target = nullptr;
     for (auto& bw : bundles)
         if (bw.input.original_bundle.id == target_bundle_id) { target = &bw; break; }
@@ -2821,14 +2854,22 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
     const int tsel = target->plan.selected_topology_index;
     if (tsel < 0 || tsel >= (int)target->input.candidates.size()) return out;
 
+    auto t0 = clock_::now();
     recharge_committed_(bundles, target);
+    const double ms_recharge = ms_since(t0);
 
     std::set<std::pair<int,int>> contended;
+    t0 = clock_::now();
     PlanResult plan = plan_bundle(*target, PlanMode::STRICT, &contended);
+    const double ms_strict = ms_since(t0);
+    const bool strict_found = plan.found;
     bool committed = false;
     BundleAssignment victim_asn;
     bool moved_victim = false;
+    double ms_ladder = 0.0;
+    int n_ranked = 0, n_victims = 0, n_ladder_plans = 0;
     if (!plan.found && !contended.empty()) {
+        t0 = clock_::now();
         std::vector<std::pair<double, BundleWrapper*>> ranked;
         for (auto& bw : bundles) {
             if (&bw == target || !has_committed_plan_(bw)) continue;
@@ -2838,13 +2879,18 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
         }
         std::sort(ranked.begin(), ranked.end(),
                   [](const auto& a, const auto& b) { return a.first > b.first; });
+        n_ranked = (int)ranked.size();
+
         for (auto& [ovl, pw] : ranked) {
+            ++n_victims;
             const PlanResult fixed = fixed_plan_of_(*pw);
             commit_plan(*pw, fixed, -1.0);              // rip up the blocker
             PlanResult mine = plan_bundle(*target, PlanMode::STRICT);
+            ++n_ladder_plans;
             if (mine.found) {
                 commit_plan(*target, mine);
                 PlanResult theirs = plan_bundle(*pw, PlanMode::STRICT);
+                ++n_ladder_plans;
                 if (theirs.found) {                     // both overflow-free
                     commit_plan(*pw, theirs);
                     victim_asn   = make_assignment(*pw, theirs);
@@ -2857,9 +2903,30 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
             }
             commit_plan(*pw, fixed);                    // restore and try next
         }
+        ms_ladder = ms_since(t0);
     }
-    if (!plan.found) plan = plan_bundle(*target, PlanMode::ALLOW_OVERFLOW);
-    if (!plan.found) plan = plan_bundle(*target, PlanMode::BEST_EFFORT);
+    t0 = clock_::now();
+    int n_fallback = 0;
+    if (!plan.found) { plan = plan_bundle(*target, PlanMode::ALLOW_OVERFLOW); ++n_fallback; }
+    if (!plan.found) { plan = plan_bundle(*target, PlanMode::BEST_EFFORT); ++n_fallback; }
+    const double ms_fallback = ms_since(t0);
+    if (kProf) {
+        // std::cerr: negotiate silences the iteration body's stdout (Python
+        // redirect + ostream_redirect), so cout lines would be swallowed.
+        std::cerr << "[ReplanProf] b" << target_bundle_id
+                  << " total=" << ms_since(t_call)
+                  << "ms recharge=" << ms_recharge
+                  << " strict=" << ms_strict << "(found=" << strict_found
+                  << " contended=" << contended.size() << ")"
+                  << " ladder=" << ms_ladder << "(ranked=" << n_ranked
+                  << " tried=" << n_victims << " plans=" << n_ladder_plans
+                  << " committed=" << committed << ")"
+                  << " fallback=" << ms_fallback << "(n=" << n_fallback << ")"
+                  << " pb_cum[calls=" << prof_plan_calls_
+                  << " cands=" << prof_cands_
+                  << " layerload=" << prof_layerload_us_ / 1000.0
+                  << "ms scoring=" << prof_scoring_us_ / 1000.0 << "ms]\n";
+    }
     if (!plan.found) return out;
     if (!committed) commit_plan(*target, plan);
     out.push_back(make_assignment(*target, plan));

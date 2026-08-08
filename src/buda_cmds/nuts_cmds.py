@@ -197,8 +197,11 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
 def cmd_ripup_reroute(session, cmd, args, cmd_line):
     session._validate_stage_entry("ripup_reroute")
     # Usage: ripup_reroute [max_iter] [use_edge_candidates] [no_global]
-    #                      [no_class_moves]
+    #                      [no_class_moves] [no_release_moves]
     #                      [fast_trials|no_fast_trials] [screen|no_screen]
+    #                      [warm_trials|no_warm_trials]
+    #                      [converge_guard|no_converge_guard]
+    #                      [no_parallel_sweep]
     # Stage auto-detected: after run_detailed_nuts ⇒ drive down DNUTS opens;
     # else after run_nuts ⇒ drive down NUTS overlaps.
     # `use_edge_candidates` (off by default) toggles the per-edge MST L/Z
@@ -314,6 +317,7 @@ def cmd_refine_selection(session, cmd, args, cmd_line):
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):
     session._validate_stage_entry("negotiate_congestion")
     # Usage: negotiate_congestion [max_iter] [class_moves|no_class_moves]
+    #                             [press|no_press]
     # Measured-congestion feedback (run after run_nuts): inject the
     # actual NUTS overlaps as band demand and let the planner re-price
     # both sides of each overlap off the contended bands.

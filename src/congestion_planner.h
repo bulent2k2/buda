@@ -959,6 +959,16 @@ private:
     std::map<std::pair<int, int>, std::vector<std::tuple<int, int, double>>> charge_log_;
     // One-shot guard for the above-TOP config-smell warning.
     bool   warned_above_top_ = false;
+    // BUDA_REPLAN_PROF instrumentation accumulators (B1): time inside
+    // plan_bundle's serial layer_load setup vs the candidate-scoring block,
+    // reported cumulatively on each [ReplanProf] line.  Untouched when the
+    // env is unset.  Deliberately LAST in the class: inserting them mid-class
+    // shifted the hot tuning members' offsets/cache lines and measurably
+    // slowed the scoring loops (chip_stack_topdown run_planner +2.6 s).
+    long long prof_layerload_us_ = 0;
+    long long prof_scoring_us_   = 0;
+    long long prof_plan_calls_   = 0;
+    long long prof_cands_        = 0;
 };
 
 } // namespace buda
