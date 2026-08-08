@@ -1237,7 +1237,28 @@ int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
     double best_cost = band_cost(centre);
     int    best_dist = 0;
 
-    for (int b = 0; b + 1 < (int)grid.size(); ++b) {
+    // Scan only the bands that can survive the window test below, found by
+    // binary search instead of walking the whole Hanan grid (thousands of
+    // lines on a chip design, for EVERY (segment, layer) the enumeration
+    // tries — and each visit runs a full band_cost band walk).
+    //
+    // Identical by construction whenever eff_width > 0: a band entirely at or
+    // below slide_lo has win_lo = slide_lo >= grid[b+1] = win_hi, and one at
+    // or above slide_hi has win_hi = slide_hi <= grid[b] = win_lo, so both
+    // give win_hi - win_lo <= 0 < eff_width and the loop `continue`s over
+    // them.  Skipping them up front therefore visits the same bands in the
+    // same order.  A degenerate eff_width <= 0 (a zero-demand bus) makes that
+    // test non-strict, so it keeps the full scan.
+    int b_begin = 0, b_end = (int)grid.size() - 1;   // half-open band range
+    if (eff_width > 0.0) {
+        const int k = (int)(std::upper_bound(grid.begin(), grid.end(), slide_lo)
+                            - grid.begin());
+        const int m = (int)(std::lower_bound(grid.begin(), grid.end(), slide_hi)
+                            - grid.begin());
+        b_begin = std::max(b_begin, k - 1);          // first grid[b+1] > slide_lo
+        b_end   = std::min(b_end,   m);              // last  grid[b]   < slide_hi
+    }
+    for (int b = b_begin; b < b_end; ++b) {
         int win_lo = std::max(grid[b],     slide_lo);
         int win_hi = std::min(grid[b + 1], slide_hi);
         // "Band can't host the bus" — skip it.  Kept even under
@@ -1917,8 +1938,7 @@ std::vector<int> CongestionPlanner::collect_cand_indices_(
 CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         const BundleWrapper& bw, PlanMode mode,
         std::set<std::pair<int,int>>* contended,
-        std::vector<CandidateCost>* costs_out,
-        const std::vector<char>* cand_mask) {
+        std::vector<CandidateCost>* costs_out) {
     PlanResult res;
     if (bw.input.candidates.empty()) return res;
 
@@ -1965,17 +1985,8 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     auto h_layers_rev = h_layers; std::reverse(h_layers_rev.begin(), h_layers_rev.end());
     auto v_layers_rev = v_layers; std::reverse(v_layers_rev.begin(), v_layers_rev.end());
 
-    // Candidate indices to evaluate (see collect_cand_indices_), optionally
-    // restricted by the caller's mask (the ladder's footprint pruning — null
-    // everywhere else, byte-identical).
-    std::vector<int> cand_indices = collect_cand_indices_(bw);
-    if (cand_mask) {
-        std::vector<int> kept;
-        kept.reserve(cand_indices.size());
-        for (int ci : cand_indices)
-            if (ci < (int)cand_mask->size() && (*cand_mask)[ci]) kept.push_back(ci);
-        cand_indices = std::move(kept);
-    }
+    // Candidate indices to evaluate (see collect_cand_indices_).
+    const std::vector<int> cand_indices = collect_cand_indices_(bw);
 
     res.best_topo     = cand_indices.empty() ? 0 : cand_indices.front();
     double best_score = std::numeric_limits<double>::max();
@@ -2846,123 +2857,6 @@ CongestionPlanner::candidate_costs(
     return out;
 }
 
-// Conservative usage-read footprint of one candidate (B1 ladder pruning).
-// Superset argument: score_candidate_ reads band USAGE only through
-// best_band_perp / score_segment / cong_cost_segment / peak_util_segment,
-// all of which walk for_each_band_w(seg, lid, pp, eff+pitch) with pp inside
-// the segment's clamped slide window (or the nominal perp when no window),
-// spreading at most (eff+pitch)/2 either side under the bounded modes
-// (band_span_charge <= 2; the greedy modes spill unboundedly, so the ladder
-// disables pruning there).  Cuts visited lie on the routed extent, which
-// routed_extent only ever SHRINKS from the raw span.  Everything else the
-// enumeration consults (caps, patterns, keepouts, block obstruction, dead
-// bands, span costs) is static during a ladder trial.
-std::vector<CongestionPlanner::BandRect>
-CongestionPlanner::cand_band_footprint_(const BundleWrapper& bw, int ci) const {
-    std::vector<BandRect> out;
-    const int nbits = (int)bw.input.original_bundle.get_net_names().size();
-    const Topology& topo = bw.input.candidates[ci];
-    ConnTopology ct;
-    ct.build(topo, floorplan_);
-    const auto& conn_segs = ct.segs();
-
-    auto h_layers = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
-    auto v_layers = layers_.get_layer_ids_by_dir(LayerDir::VERTICAL);
-    if (h_layers.empty()) h_layers.push_back(4);   // plan_bundle's fallback
-    if (v_layers.empty()) v_layers.push_back(5);
-
-    for (int si = 0; si < (int)topo.segments.size(); ++si) {
-        const Segment& seg = topo.segments[si];
-        const bool is_h = (seg.start.y == seg.end.y);
-        const long lo2 = 2L * (is_h ? std::min(seg.start.x, seg.end.x)
-                                    : std::min(seg.start.y, seg.end.y));
-        const long hi2 = 2L * (is_h ? std::max(seg.start.x, seg.end.x)
-                                    : std::max(seg.start.y, seg.end.y));
-        const int nominal = is_h ? seg.start.y : seg.start.x;
-        int slide_lo = INT_MIN, slide_hi = INT_MIN;
-        if (si < (int)conn_segs.size()) {           // scorer's exact clamp
-            const ConnSeg& cs = conn_segs[si];
-            const auto& pgrid = is_h ? y_grid_ : x_grid_;
-            if (!pgrid.empty()) {
-                slide_lo = std::max(cs.perp_lo, pgrid.front());
-                slide_hi = std::min(cs.perp_hi, pgrid.back());
-                if (slide_lo > slide_hi) { slide_lo = INT_MIN; slide_hi = INT_MIN; }
-            }
-        }
-        double p_base_lo = (double)nominal, p_base_hi = (double)nominal;
-        if (slide_lo != INT_MIN) {
-            p_base_lo = std::min(p_base_lo, (double)slide_lo);
-            p_base_hi = std::max(p_base_hi, (double)slide_hi);
-        }
-        const int n = ndr_units(bw.input, seg_bit_count(topo, si, nbits));
-        const double w = (nbits > 0 && n != nbits)
-                             ? bw.input.width * ((double)n / (double)nbits)
-                             : bw.input.width;
-        auto add_rect = [&](int lid) {
-            const double half =
-                0.5 * (layers_.eff_bus_width(n, w, lid) + track_pitch_);
-            out.push_back({lid, /*vcut=*/is_h, lo2, hi2,
-                           p_base_lo - half - 1.0, p_base_hi + half + 1.0});
-        };
-        if (si < (int)bw.input.pinned_seg_layers.size() &&
-            bw.input.pinned_seg_layers[si] != -1) {
-            add_rect(bw.input.pinned_seg_layers[si]);
-        } else {
-            for (int lid : (is_h ? h_layers : v_layers))
-                if (bw.input.allows_layer(lid)) add_rect(lid);
-        }
-    }
-    return out;
-}
-
-void CongestionPlanner::collect_charged_bands_(
-        const BundleWrapper& bw, const PlanResult& plan,
-        std::vector<std::pair<int,int>>& out) const {
-    // The bands a rip-up of this committed plan touches: the recorded
-    // charge_log_ distribution when present (commit_plan(-1) replays exactly
-    // it), else the same for_each_band_w geometry commit_plan re-derives
-    // (identical by construction — same seg/layer/perp/width inputs).
-    const int nbits = (int)bw.input.original_bundle.get_net_names().size();
-    const Topology& t = bw.input.candidates[plan.best_topo];
-    for (int si = 0; si < (int)t.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
-        const auto key = std::make_pair(bw.input.original_bundle.id, si);
-        auto it = charge_log_.find(key);
-        if (it != charge_log_.end()) {
-            for (const auto& [ci, b, amt] : it->second) out.emplace_back(ci, b);
-            continue;
-        }
-        const int pp  = (si < (int)plan.seg_perp.size()) ? plan.seg_perp[si] : INT_MIN;
-        const int lid = plan.seg_layers[si];
-        const int    n = ndr_units(bw.input, seg_bit_count(t, si, nbits));
-        const double w = (nbits > 0 && n != nbits)
-                             ? bw.input.width * ((double)n / (double)nbits)
-                             : bw.input.width;
-        const double demand = layers_.eff_bus_width(n, w, lid) + track_pitch_;
-        for_each_band_w(t.segments[si], lid, pp, demand,
-                        [&](int ci, int b, double) { out.emplace_back(ci, b); });
-    }
-}
-
-bool CongestionPlanner::footprint_hits_(
-        const std::vector<BandRect>& foot,
-        const std::vector<std::pair<int,int>>& bands) const {
-    for (const auto& [ci, b] : bands) {
-        if (ci < 0 || ci >= (int)cuts_.size()) return true;   // conservative
-        const GlobalCut& c = cuts_[ci];
-        const bool is_vcut = (c.dir == LayerDir::VERTICAL);
-        const auto& grid = is_vcut ? y_grid_ : x_grid_;
-        const bool band_known = (b >= 0 && b + 1 < (int)grid.size());
-        for (const auto& r : foot) {
-            if (c.layer_id != r.layer_id || is_vcut != r.vcut) continue;
-            if (c.cut_coord_2x < r.lo2 || c.cut_coord_2x > r.hi2) continue;
-            if (!band_known) return true;                     // conservative
-            if ((double)grid[b] <= r.p_hi && (double)grid[b + 1] >= r.p_lo)
-                return true;
-        }
-    }
-    return false;
-}
-
 std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
         std::vector<BundleWrapper>& bundles, int target_bundle_id) {
     // replan_bundle WITH the ladder's victim rip-up stage (wishlist-healer item
@@ -3008,8 +2902,6 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
     bool moved_victim = false;
     double ms_ladder = 0.0;
     int n_ranked = 0, n_victims = 0, n_ladder_plans = 0;
-    int n_futile = 0;
-    long long n_pruned = 0;
     if (!plan.found && !contended.empty()) {
         t0 = clock_::now();
         std::vector<std::pair<double, BundleWrapper*>> ranked;
@@ -3023,61 +2915,11 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
                   [](const auto& a, const auto& b) { return a.first > b.first; });
         n_ranked = (int)ranked.size();
 
-        // Footprint pruning (B1): every candidate is STRICT-infeasible against
-        // the base state (the initial plan above), and a single victim's rip
-        // only LOWERS usage on the exact bands its commit charged — so a
-        // candidate whose conservative usage-read footprint is disjoint from
-        // those bands keeps its base infeasibility, and the post-rip sweep may
-        // be restricted to the intersecting candidates: the feasible set is a
-        // subset of them, and plan_bundle's ordered reduction over any superset
-        // of the feasible set elects the identical winner (infeasible
-        // candidates never enter it; the kBalance/global terms only order
-        // FEASIBLE candidates, which are all re-scored fresh).  A victim
-        // intersecting NO candidate is a provably !found trial: the rip/restore
-        // commit pair still runs (the exact bit-level state trajectory of the
-        // sequential code — plan_bundle itself is read-only via overlays), only
-        // the futile sweep is elided.  Disabled under the unbounded greedy
-        // spread modes and for share-carrying wrappers (a rip also moves the
-        // collective share books, which the footprint does not model).
-        const bool prune_ok =
-            band_span_charge_ < 3 && target->input.share_group.empty();
-        std::vector<int> tgt_cands;
-        std::vector<std::vector<BandRect>> foots;
-        if (prune_ok && !ranked.empty()) {
-            tgt_cands = collect_cand_indices_(*target);
-            foots.reserve(tgt_cands.size());
-            for (int ci : tgt_cands)
-                foots.push_back(cand_band_footprint_(*target, ci));
-        }
-
         for (auto& [ovl, pw] : ranked) {
             ++n_victims;
             const PlanResult fixed = fixed_plan_of_(*pw);
-            std::vector<char> mask;
-            bool any_candidate = true;
-            if (prune_ok && pw->input.share_group.empty()) {
-                std::vector<std::pair<int,int>> freed;
-                collect_charged_bands_(*pw, fixed, freed);
-                mask.assign(target->input.candidates.size(), 0);
-                any_candidate = false;
-                for (size_t k = 0; k < tgt_cands.size(); ++k)
-                    if (footprint_hits_(foots[k], freed)) {
-                        mask[tgt_cands[k]] = 1;
-                        any_candidate = true;
-                    } else {
-                        ++n_pruned;
-                    }
-            }
             commit_plan(*pw, fixed, -1.0);              // rip up the blocker
-            if (!any_candidate) {                       // provably !found sweep
-                ++n_futile;
-                commit_plan(*pw, fixed);                // restore and try next
-                continue;
-            }
-            PlanResult mine =
-                mask.empty() ? plan_bundle(*target, PlanMode::STRICT)
-                             : plan_bundle(*target, PlanMode::STRICT,
-                                           nullptr, nullptr, &mask);
+            PlanResult mine = plan_bundle(*target, PlanMode::STRICT);
             ++n_ladder_plans;
             if (mine.found) {
                 commit_plan(*target, mine);
@@ -3112,7 +2954,6 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
                   << " contended=" << contended.size() << ")"
                   << " ladder=" << ms_ladder << "(ranked=" << n_ranked
                   << " tried=" << n_victims << " plans=" << n_ladder_plans
-                  << " futile=" << n_futile << " pruned=" << n_pruned
                   << " committed=" << committed << ")"
                   << " fallback=" << ms_fallback << "(n=" << n_fallback << ")"
                   << " pb_cum[calls=" << prof_plan_calls_
