@@ -45,12 +45,14 @@ run_nuts
 negotiate_congestion
 ripup_reroute
 check_design nuts
+# nuts is clean here because it doesn't see the off-grid/mismatched tracks..
 check_template_tracks on_mismatch independent
 run_detailed_nuts
 # Healing stage b: negotiate each DNUTS-open segment's window, then hill-climb.
-negotiate_congestion
+negotiate_congestion # don't help: 10 class_moves
+check_design
+# visualize
 ripup_reroute
 check_design
 report_wirelength
 visualize
-exit
