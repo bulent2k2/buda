@@ -1913,28 +1913,14 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
 
     const bool enforce_window   = (mode != PlanMode::BEST_EFFORT);
     const bool enforce_overflow = (mode == PlanMode::STRICT);
-    constexpr double kOvEps = 1e-6;   // float noise only — any real overflow is hard
 
     // Bit count for the honest per-layer width model (eff_bus_width);
     // 0 (hand-built wrappers without nets) falls back to width x dilution.
+    // plan_bundle only forwards nbits to score_candidate_ (via CandCtx below);
+    // the overflow epsilon and the per-segment tapered-width helpers
+    // (seg_n/seg_w) now live in score_candidate_, where the scoring loop moved
+    // (dc4b51b) — their copies here were dead after that extraction.
     const int nbits = (int)bw.input.original_bundle.get_net_names().size();
-    // Tapered fan-in width model: a segment carrying a bit SUBSET (seg_bits)
-    // is charged for its member bits only — count for pattern layers, a
-    // proportional base width for the dilution fallback.  Non-fan-in
-    // bundles (empty seg_bits) are byte-identical to the bundle-level model.
-    auto seg_n = [&](const Topology& t, int si) {
-        // NDR: a governed bundle's segments are counted in GROUP DEMAND
-        // UNITS (ndr.h) rather than raw member bits, so every consumer
-        // below prices the rule.  Identity when the spec is inactive
-        // (R12 byte-identity).
-        return ndr_units(bw.input, seg_bit_count(t, si, nbits));
-    };
-    auto seg_w = [&](const Topology& t, int si) {
-        const int n = seg_n(t, si);
-        return (nbits > 0 && n != nbits)
-                   ? bw.input.width * ((double)n / (double)nbits)
-                   : bw.input.width;
-    };
 
     auto h_layers = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
     auto v_layers = layers_.get_layer_ids_by_dir(LayerDir::VERTICAL);
