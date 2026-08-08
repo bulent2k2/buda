@@ -181,7 +181,8 @@ class VizViewMixin:
             fp_resolver=self._fp_resolver,            # hier per-bundle frames
             groups_fn=self._groups_fn,                # super-candidate families
             user_ops_sink=self._user_ops_sink,        # BDB op-log provenance
-            cost_fn=getattr(self, '_cost_fn', None))  # debug cost view (visualize … debug)
+            cost_fn=getattr(self, '_cost_fn', None),  # debug cost view (visualize … debug)
+            routing_grid=self.routing_grid)           # NDR ghosts + debug tint
         self._topo_explorer.fig.show()
         viz_window.install_tk_geometry_resync(self._topo_explorer.fig)
         viz_window.extract_from_fullscreen_tab(self._topo_explorer.fig)

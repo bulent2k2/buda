@@ -1,0 +1,78 @@
+# NDR multi-rule shield vehicle (HIER flow) — the R2d twin of
+# ndr_shield_flat.buda: rules at x1.5 / x2 / x2.5 governing a CELL-LEVEL
+# TEMPLATE CLASS and top-level buses beside ungoverned traffic.
+#
+#   loc15  width x1.5 spacing x1.5 shield bus  net GND credit
+#          -> governs the sub_cell-local `loc_*` bus at EVERY occurrence
+#             (one template, replicas in lockstep — the R2d contract).
+#   top2x  width x2               shield bit  net VSS
+#   top25  width x2.5 spacing x2.5 shield per:2 net GND
+#
+# check_design must end clean (no NDR_*), shields appear at every
+# governed instance, and report_wirelength shows the shield metal line.
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+open_bdb :memory:
+
+add_cell sub_cell  200 150
+add_cell leaf_cell  60  50
+
+add_inst_to_cell sub_cell l leaf_cell  20 50
+add_inst_to_cell sub_cell r leaf_cell 120 50
+
+# 2x2 grid of sub_cell instances.
+add_inst u1 sub_cell -  50  50
+add_inst u2 sub_cell - 500  50
+add_inst u3 sub_cell -  50 500
+add_inst u4 sub_cell - 500 500
+
+derive_busterms 1
+
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+
+bdb_net_mode on
+
+# Cell-local bus per instance: the hier bundler detects the shared
+# pattern and creates ONE sub_cell-level template + 3 replicas.
+add_bus loc_u1[4] u1/l.out u1/r.in
+add_bus loc_u2[4] u2/l.out u2/r.in
+add_bus loc_u3[4] u3/l.out u3/r.in
+add_bus loc_u4[4] u4/l.out u4/r.in
+
+# Top-level buses: two governed, one ungoverned.
+add_bus t2x[4]  u1/r.out u2/l.in
+add_bus t25[2]  u3/r.out u4/l.in
+add_bus tdef[6] u1/r.out u3/l.in
+
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+
+def_track_pattern 3 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 4 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 5 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 6 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 _ 1 1 GND 2 1
+
+def_ndr loc15 width x1.5 spacing x1.5 shield bus net GND credit
+def_ndr top2x width x2 shield bit net VSS
+def_ndr top25 width x2.5 spacing x2.5 shield per:2 net GND
+set_ndr loc_ loc15
+set_ndr t2x_ top2x
+set_ndr t25_ top25
+
+run_hier_bundler depth 1
+dump_ndr
+
+generate_hier_topologies
+set_track_pitch 3
+run_planner hier signal_tracks
+
+run_nuts
+run_detailed_nuts
+dump_ndr
+check_design
+report_wirelength

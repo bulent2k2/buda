@@ -167,7 +167,8 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
                          fp_resolver=session._make_topo_fp_resolver(),
                          groups_fn=session._loci_groups,
                          user_ops_sink=session._record_user_ops,
-                         cost_fn=(session._candidate_costs if debug else None)).show()
+                         cost_fn=(session._candidate_costs if debug else None),
+                         routing_grid=session.routing_grid).show()
 
 
 def cmd_dump_topologies(session, cmd, args, cmd_line):
