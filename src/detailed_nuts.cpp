@@ -566,8 +566,14 @@ void DetailedNUTSEngine::place_by_layer(
                 for (const LayerAssignment* H : hazards)
                     for (double p : H->track_positions)
                         resv.insert(track_key(p));
-                const TrackPattern& pat =
-                    grid.effective_pattern_at(x, bs.interval_lo);
+                // Override lookup in REAL coordinates (the C11-02 rule): x
+                // is the ALONG coordinate, interval_lo the PERP one — map
+                // per orientation or a vertical layer's region test runs
+                // transposed and serves the wrong pattern to the adjacency
+                // and contiguity checks below.
+                const TrackPattern& pat = grid.is_horizontal()
+                    ? grid.effective_pattern_at(x, bs.interval_lo)
+                    : grid.effective_pattern_at(bs.interval_lo, x);
                 auto all_tracks =
                     pat.tracks_in_range(bs.interval_lo, bs.interval_hi);
                 // ── R5a end-shield crediting (opt-in `credit`) ──────── //

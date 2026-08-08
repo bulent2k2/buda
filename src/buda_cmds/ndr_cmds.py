@@ -658,7 +658,24 @@ def build_ndr_audit_index(session):
     return {"by_bundle": by_bundle, "by_layer": layer_sorted}
 
 
-def _ndr_end_credit(spec, grid_stack, layer, rows, s_lo, s_hi, low_end):
+def _ndr_effective_period(g, mid, perp):
+    """Unit pitch of the pattern actually governing a placed row: the
+    EFFECTIVE pattern at the row's real coordinates (an override's pitch
+    may exceed the global one — Codex #624: a global-period search window
+    can miss an override rail the engine legitimately credited), mapped
+    per layer orientation (the C11-02 rule).  Falls back to the global
+    pattern's pitch."""
+    pat = (g.effective_pattern_at(mid, perp) if g.is_horizontal()
+           else g.effective_pattern_at(perp, mid))
+    period = pat.unit_pitch() if pat.slots else 0.0
+    if period <= 0:
+        gp = g.global_pattern()
+        period = gp.unit_pitch() if gp.slots else 0.0
+    return period
+
+
+def _ndr_end_credit(spec, grid_stack, layer, rows, s_lo, s_hi, low_end,
+                    allow_gap=False):
     """True when the run's low/high END is legitimately RAIL-CREDITED
     (R5a): the outermost placed row is a signal bit whose immediately
     adjacent pattern slot outside the run — no empty SIGNAL slot between —
@@ -667,7 +684,15 @@ def _ndr_end_credit(spec, grid_stack, layer, rows, s_lo, s_hi, low_end):
     span.  The audit checks the PROPERTY, not the provenance: every end
     must either carry an emitted shield or be flanked by a matching rail,
     and an outermost-bit end with no matching rail fails back to the
-    uncredited expectation — the missing-shield count check fires."""
+    uncredited expectation — the missing-shield count check fires.
+
+    `allow_gap` (set when the segment placed FEWER bits than intended —
+    the keepout cull removed some): skip the no-empty-slot-between test,
+    since the culled outer bit's now-empty slot would otherwise read as an
+    intervening gap and turn a correctly credited end into a spurious
+    NDR_SHIELD on top of the honest UNPLACED.  Under a culled run the
+    inference is deliberately permissive — identity and span coverage
+    still apply, and the cull itself is already LOUD."""
     if not spec.credit_shields or spec.shield_mode == 0:
         return False
     if grid_stack is None or not grid_stack.has_layer(layer):
@@ -676,8 +701,8 @@ def _ndr_end_credit(spec, grid_stack, layer, rows, s_lo, s_hi, low_end):
     if outer.is_shield:
         return False
     g = grid_stack.get_layer_grid(layer)
-    pat = g.global_pattern()
-    period = pat.unit_pitch() if pat.slots else 0.0
+    mid = 0.5 * (s_lo + s_hi)
+    period = _ndr_effective_period(g, mid, outer.track_position)
     if period <= 0:
         return False
     eps = 1e-6
@@ -688,9 +713,8 @@ def _ndr_end_credit(spec, grid_stack, layer, rows, s_lo, s_hi, low_end):
     if not rails:
         return False
     pos = (max if low_end else min)(r.track_position for r in rails)
-    mid = 0.5 * (s_lo + s_hi)
     lo, hi = (pos + eps, edge - eps) if low_end else (edge + eps, pos - eps)
-    if lo < hi and g.signal_tracks_in(mid, lo, hi):
+    if not allow_gap and lo < hi and g.signal_tracks_in(mid, lo, hi):
         return False                     # an empty signal slot intervenes
     pieces = [r for r in rails if abs(r.track_position - pos) < eps]
     if not buda.ndr_rail_credits(spec, pieces[0].label, pieces[0].slot_type):
@@ -760,10 +784,14 @@ def audit_ndr_dnuts(session, wrapper, index=None):
         # emission drops that end's 'S'.  _ndr_end_credit verifies the
         # rail's identity + coverage, so a bit-at-the-end run with NO
         # matching rail keeps the uncredited expectation and fails LOUD.
+        # A culled run (fewer placed bits than intended) relaxes the
+        # no-gap adjacency test — the culled bit's empty slot must not
+        # turn a correctly credited end into a spurious NDR_SHIELD.
+        gap_ok = len(bits) < nb_intended
         c_lo = _ndr_end_credit(spec, grid_stack, seg_layer, rows,
-                               seg_lo, seg_hi, True)
+                               seg_lo, seg_hi, True, allow_gap=gap_ok)
         c_hi = _ndr_end_credit(spec, grid_stack, seg_layer, rows,
-                               seg_lo, seg_hi, False)
+                               seg_lo, seg_hi, False, allow_gap=gap_ok)
         layout = buda.ndr_run_layout_credited(spec, nb_intended, c_lo, c_hi)
         exp_shields = layout.count("S")
         credited = (" (%d end(s) rail-credited)" % (c_lo + c_hi)
@@ -817,10 +845,10 @@ def audit_ndr_dnuts(session, wrapper, index=None):
         # on each side (a shielded rule's ends ARE placed rows already).
         if spec.shield_mode == 0 and spec.guard_slots > 0 and have_grid:
             g = grid_stack.get_layer_grid(layer)
-            pat = g.global_pattern()
-            period = pat.unit_pitch() if pat.slots else 0.0
+            mid = 0.5 * (s_lo + s_hi)
+            period = _ndr_effective_period(
+                g, mid, 0.5 * (run_lo + run_hi))
             if period > 0:
-                mid = 0.5 * (s_lo + s_hi)
                 reach = (spec.guard_slots + 1) * period
                 eps = 1e-9
                 below = g.signal_tracks_in(mid, run_lo - reach, run_lo - eps)

@@ -928,3 +928,46 @@ def test_v22_pre_v22_db_migrates(tmp_path):
     r2.name, r2.credit = "new", 1
     db.set_ndr_rule(r2)
     assert {x.name: x.credit for x in db.ndr_rules()} == {"old": 0, "new": 1}
+
+
+def test_credited_helpers_enforce_the_opt_in():
+    # Codex #624: the credited pair must be the identity for a spec that
+    # never opted into crediting, under ANY flag combination — API callers
+    # cannot bypass the rule's declaration.
+    s = _spec(mode=1)                     # shielded but credit NOT opted in
+    for nbits in (1, 4):
+        assert (buda.ndr_group_demand_credited(s, nbits, True, True)
+                == buda.ndr_group_demand(s, nbits))
+        assert (buda.ndr_run_layout_credited(s, nbits, True, True)
+                == buda.ndr_run_layout(s, nbits))
+
+
+def test_end_credit_allows_gap_only_for_culled_runs():
+    # Codex #624: a culled outer bit leaves an empty SIGNAL slot between
+    # the surviving outer bit and the credited rail.  The strict adjacency
+    # test reads that as an intervening gap (spurious NDR_SHIELD); the
+    # audit passes allow_gap for under-populated segments so the credit
+    # survives the cull.  Identity and span coverage still apply.
+    spec = _spec(mode=1)
+    spec.credit_shields = True
+    stack = buda.RoutingGridStack()
+    stack.define_layer(4, _rail_pattern(("GROUND", "GND")), True)
+    # Simulate a credited run whose lowest bit (track 3.5) was culled:
+    # surviving bits at 5.5 / 7.5 / 9.5, no emitted shields.
+    rows = []
+    for i, t in enumerate((5.5, 7.5, 9.5)):
+        ns = buda.NetSegment()
+        ns.bundle_id, ns.seg_idx, ns.bit_index = 1, 0, i + 1
+        ns.track_position, ns.width, ns.layer = t, 1.0, 4
+        ns.span_lo, ns.span_hi = 0.0, 100.0
+        rows.append(ns)
+    strict = ndr_cmds._ndr_end_credit(spec, stack, 4, rows, 0.0, 100.0,
+                                      True)
+    relaxed = ndr_cmds._ndr_end_credit(spec, stack, 4, rows, 0.0, 100.0,
+                                       True, allow_gap=True)
+    assert not strict and relaxed
+    # A non-matching rail still refuses even with the gap allowed.
+    vdd = buda.RoutingGridStack()
+    vdd.define_layer(4, _rail_pattern(("POWER", "VDD")), True)
+    assert not ndr_cmds._ndr_end_credit(spec, vdd, 4, rows, 0.0, 100.0,
+                                        True, allow_gap=True)

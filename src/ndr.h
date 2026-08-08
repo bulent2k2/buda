@@ -143,7 +143,11 @@ inline bool ndr_rail_credits(const NdrSpec& s, const std::string& label,
 inline int ndr_group_demand_credited(const NdrSpec& s, int nbits,
                                      bool c_lo, bool c_hi) {
     int du = ndr_group_demand(s, nbits);
-    if (nbits <= 0 || !s.active() || s.shield_mode == 0) return du;
+    // The opt-in is enforced HERE, not just at the call sites: a spec that
+    // never opted into crediting is identical under any flag combination,
+    // so no API caller can bypass the rule's declaration.
+    if (nbits <= 0 || !s.active() || s.shield_mode == 0 ||
+        !s.credit_shields) return du;
     return du - (c_lo ? 1 : 0) - (c_hi ? 1 : 0);
 }
 
@@ -183,7 +187,8 @@ inline std::string ndr_run_layout(const NdrSpec& s, int nbits) {
 inline std::string ndr_run_layout_credited(const NdrSpec& s, int nbits,
                                            bool c_lo, bool c_hi) {
     std::string out = ndr_run_layout(s, nbits);
-    if (nbits <= 0 || !s.active() || s.shield_mode == 0) return out;
+    if (nbits <= 0 || !s.active() || s.shield_mode == 0 ||
+        !s.credit_shields) return out;
     if (c_hi && !out.empty() && out.back() == 'S')  out.pop_back();
     if (c_lo && !out.empty() && out.front() == 'S') out.erase(out.begin());
     return out;
