@@ -586,12 +586,22 @@ class ReportsMixin:
         return out
 
     def _check_design(self, stage: str, all_candidates: bool = False):
+        """Audit the design at `stage`.
+
+        Returns the verdict as a dict — `{stage, ok, violations, by_kind}` —
+        so the caller can record it (Phase 0: a flow harness must be able to
+        gate on design quality, which needs the outcome as a value rather
+        than as printed prose).  `ok=False` means the audit could not run at
+        all; the printing behaviour is unchanged."""
         if stage in ("nuts", "dnuts") and self.nuts_result is None:
             print("  Error: run_nuts required first.")
-            return
+            return {"stage": stage, "ok": False, "violations": 0,
+                    "reason": "run_nuts required first", "by_kind": {}}
         if stage == "dnuts" and self.detailed_result is None:
             print("  Error: run_detailed_nuts required first.")
-            return
+            return {"stage": stage, "ok": False, "violations": 0,
+                    "reason": "run_detailed_nuts required first",
+                    "by_kind": {}}
 
         # For the topo stage, auto-switch to all-candidates mode when no
         # topology has been selected yet (before run_planner).
@@ -760,6 +770,16 @@ class ReportsMixin:
         # nuts/dnuts stages only.
         if stage in ("nuts", "dnuts"):
             self._report_doomed_seats()
+
+        # Phase 0: hand the verdict back as data.  `total` and `collected` are
+        # what the printing above already used, so this adds no new
+        # computation and cannot disagree with what was reported.
+        by_kind = {}
+        for _prefix, v in collected:
+            k = v.kind.name
+            by_kind[k] = by_kind.get(k, 0) + 1
+        return {"stage": stage, "ok": True, "violations": total,
+                "by_kind": by_kind, "all_candidates": bool(all_candidates)}
 
     # Reason text per ViolationKind, used when collapsing per-bit violations.
     _CONN_KIND_REASON = {

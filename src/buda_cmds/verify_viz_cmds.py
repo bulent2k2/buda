@@ -70,7 +70,11 @@ def cmd_check_design(session, cmd, args, cmd_line):
         stage = "nuts"
     else:
         stage = "topo"
-    session._check_design(stage, all_candidates=all_cands)
+    # Record the verdict so --strict-check can fail the run and --report-json
+    # can emit it (Phase 0).  Without those flags this is pure bookkeeping and
+    # the printed output is unchanged.
+    session.record_audit(session._check_design(stage,
+                                               all_candidates=all_cands))
 
 
 def cmd_visualize_topologies(session, cmd, args, cmd_line):
