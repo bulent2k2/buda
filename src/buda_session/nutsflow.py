@@ -2025,17 +2025,30 @@ class NutsFlowMixin:
             for ns in r1.net_segments:
                 placed_bits[ns.bundle_id] = placed_bits.get(ns.bundle_id,
                                                             0) + 1
+            # B2 (chip_flow_parallelism.md): group the reference bits/vias
+            # by bundle ONCE.  The per-spec rescan re-materialized the
+            # whole bound result vector for EVERY copy spec and probed
+            # every element — O(specs × reference bits) binding crossings,
+            # measured 4.2 s/call of pure Python on chip_stack_bottomup
+            # (the engine solve is ~0.2 s) — and it re-ran inside every
+            # bottom-up stage-b healer re-solve.  The fan-out order per
+            # spec is the segment order within its bundle's group, exactly
+            # the order the rescan produced, so the output is identical by
+            # construction (flow-log byte-identity gated).
+            ns_by_bid, vias_by_bid = {}, {}
+            for ns in r1.net_segments:
+                ns_by_bid.setdefault(ns.bundle_id, []).append(ns)
+            for v in r1.net_vias:
+                vias_by_bid.setdefault(v.bundle_id, []).append(v)
             copies, copy_vias, extra_unplaced = [], [], 0
             for ref_bid, sib_bid, oi, cw, ch, rx, ry, sx, sy in copy_specs:
-                for ns in r1.net_segments:
-                    if ns.bundle_id == ref_bid:
-                        copies.append(buda.transform_net_segment(
-                            ns, oi, cw, ch, rx, ry, sx, sy, sib_bid,
-                            horiz_of.get((ref_bid, ns.seg_idx), True)))
-                for v in r1.net_vias:
-                    if v.bundle_id == ref_bid:
-                        copy_vias.append(buda.transform_net_via(
-                            v, oi, cw, ch, rx, ry, sx, sy, sib_bid))
+                for ns in ns_by_bid.get(ref_bid, ()):
+                    copies.append(buda.transform_net_segment(
+                        ns, oi, cw, ch, rx, ry, sx, sy, sib_bid,
+                        horiz_of.get((ref_bid, ns.seg_idx), True)))
+                for v in vias_by_bid.get(ref_bid, ()):
+                    copy_vias.append(buda.transform_net_via(
+                        v, oi, cw, ch, rx, ry, sx, sy, sib_bid))
                 extra_unplaced += (exp_bits.get(ref_bid, 0)
                                    - placed_bits.get(ref_bid, 0))
             eng2 = buda.DetailedNUTSEngine(self.routing_grid)
