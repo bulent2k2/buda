@@ -355,7 +355,7 @@ crossing.  Measured (`runtime_ab -n 3`, `chip_stack_bottomup`):
 **134.6 → 112.5 s (−16.5 %)**; negotiate's internal `dnuts` bucket
 15.76 → 0.59 s.  Byte-identical copies by construction.
 
-### B1 — landed: footprint-pruned victim ladder
+### B1 — attributed, NOT fixed (two approaches killed)
 
 The instrumented split (`BUDA_REPLAN_PROF=1`, this branch) settled the
 hypotheses: recharge-all is CHEAP (0.61 s over all 105 calls — the
@@ -368,33 +368,67 @@ scoring (the `layer_load` setup is 0.3 s total): ladder targets sweep
 scales only 1.79× on this shape, so the fix is per-trial WORK, not more
 threads.
 
-The landed cut is decision-identical by construction: every candidate
-is STRICT-infeasible against the base state, and one victim's rip only
-LOWERS usage on the exact bands its commit charged (`charge_log_`), so
-a candidate whose conservative usage-read footprint — raw along-span ×
-(slide window ∪ nominal perp) inflated by half the charged width — is
-disjoint from those bands keeps its base infeasibility.  Each post-rip
-sweep is restricted to the intersecting candidates (a superset of the
-feasible set, so the ordered reduction elects the identical winner); a
-victim intersecting NO candidate skips its sweep outright while keeping
-the rip/restore commit pair (the sequential bit-level state trajectory —
-`plan_bundle` is read-only via overlays).  Disabled under the unbounded
-greedy spread modes (`band_span_charge >= 3`) and for share-carrying
-wrappers.
+**Approach 1 — footprint-pruning the ladder: UNSOUND, do not retry as
+stated.**  The tempting argument: every candidate is STRICT-infeasible
+against the base state, and one victim's rip only LOWERS usage on the
+bands its commit charged (`charge_log_`), so a candidate whose
+usage-read footprint is disjoint from those bands should keep its base
+infeasibility — letting each post-rip sweep skip to the intersecting
+candidates.  Implemented, it measured beautifully (~48 % of ladder
+scorings pruned, ladder 43.4 → 24.6 s, `runtime_ab` 90.5 → 75.4 s,
+−16.6 %) and passed every gate: full flow log byte-identical on the
+target flow, qor_corpus 0/0/41 with abstract AND detailed WL +0.00 %.
 
-Measured on `chip_stack_bottomup` (same binary, BUDA_THREADS=4): 10 509
-of ~22 k ladder candidate scorings pruned (~48 %), ladder 43.4 → 24.6 s,
-negotiate 57.2 → 38.2 s single-run; decision lines AND the full flow log
-(modulo timing) byte-identical, trial/plan counts unchanged (297/310).
-Gates: qor_corpus 0 better/0 worse/41 unchanged with abstract AND
-detailed WL **+0.00 %** (byte-identical decisions corpus-wide), fast+mid
-tiers green.  `runtime_ab -n 3`: **90.47 → 75.41 s (−16.6 %)**,
-negotiate 53.3 → 37.1 s; the topdown twin is +0.1 % at n=5 (neutral —
-an earlier +2.6 s there was traced to the prof counters having been
-inserted MID-CLASS, shifting the hot tuning members' cache lines; they
-now sit at the end of the class).  `[ReplanProf]` also reports
-`futile`/`pruned` per call (prints to stderr — negotiate silences the
-iteration's stdout).
+It is still wrong, and the gates could not see it (thanks to Codex on
+PR #629 for the catch).  `plan_bundle` scores a layer with a
+`kBalance` term read from GLOBAL aggregates — `layer_load` summed over
+ALL cuts and the per-direction max — recomputed after every rip.  A
+rip therefore perturbs `bal` for layers the victim charged, and for
+EVERY same-direction layer whenever the direction max moves.  The
+feasibility GATE is bal-independent (`ov > kOvEps` is tested before
+`bal` is computed), but the layer CHOICE is not: a disjoint candidate
+can pick a different layer, which changes the charges it puts in its
+own within-candidate overlay, which changes a LATER segment's usage
+reads, which can flip that segment's admissibility — so "disjoint ⇒
+still infeasible" fails whenever `kBalance_ != 0` (default 0.01).
+Corpus silence means the cascade did not fire on 41 flows, not that it
+cannot.  A sound version needs the mask to cover the layer-load
+coupling (which degenerates to "keep everything") or an
+overlay-independent infeasibility certificate — e.g. a segment with no
+admissible layer under the EMPTY overlay, which is monotone-safe since
+the overlay only ADDS usage.
+
+**Approach 2 — scoping `best_band_perp`'s scan: byte-identical but
+FLAT.**  That walk visits every band of the Hanan grid (~10³ lines
+here) for every (segment, layer) the enumeration tries, each visit
+running a full `band_cost` band walk — it looks like the whole 2 ms.
+Restricting it to `[slide_lo, slide_hi]` by binary search is identical
+by construction (bands outside give `win_hi - win_lo <= 0 < eff_width`
+and the loop's own test already skips them), but measured **flat**
+(negotiate 57.2 → 57.6 s, ladder 43.4 → 44.2 s): this design's slide
+windows already span most of the grid, so there is nothing to skip.
+The cost is the per-visit band walk, not the visit count.  A note in
+`best_band_perp` records this so it is not re-tried.
+
+**Where that leaves B1.**  The attribution is solid and the two
+cheapest ideas are dead.  What is left, in order of appeal: (a) make
+the per-visit `band_cost` cheaper or exploit that most bands are EMPTY
+(the sparse-usage structure `cong_cost_segment` re-derives per band);
+(b) an overlay-independent infeasibility certificate as above, which
+would revive the pruning soundly; (c) accept the cost.  Note (a) and
+(b) both touch the planner's decision surface, so either needs the
+decision-line + corpus gate this branch already exercises.
+
+`[ReplanProf]` (env `BUDA_REPLAN_PROF=1`) stays in as the instrument
+that produced all of the above — per call it reports the recharge /
+STRICT / ladder / fallback split with victim and plan counts, plus
+cumulative `plan_bundle` calls, candidates scored, and the layer_load
+vs scoring split.  It prints to **stderr**: negotiate silences the
+iteration body's stdout, so `cout` lines are swallowed.  One trap it
+surfaced: the counters were first declared MID-class, which shifted
+the hot tuning members' cache lines and cost `chip_stack_topdown`'s
+`run_planner` +2.6 s (median of 5) with no behavior change — they now
+sit at the end of `CongestionPlanner`.
 
 ## 4. Recommended order
 

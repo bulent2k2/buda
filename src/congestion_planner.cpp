@@ -1237,28 +1237,15 @@ int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
     double best_cost = band_cost(centre);
     int    best_dist = 0;
 
-    // Scan only the bands that can survive the window test below, found by
-    // binary search instead of walking the whole Hanan grid (thousands of
-    // lines on a chip design, for EVERY (segment, layer) the enumeration
-    // tries — and each visit runs a full band_cost band walk).
-    //
-    // Identical by construction whenever eff_width > 0: a band entirely at or
-    // below slide_lo has win_lo = slide_lo >= grid[b+1] = win_hi, and one at
-    // or above slide_hi has win_hi = slide_hi <= grid[b] = win_lo, so both
-    // give win_hi - win_lo <= 0 < eff_width and the loop `continue`s over
-    // them.  Skipping them up front therefore visits the same bands in the
-    // same order.  A degenerate eff_width <= 0 (a zero-demand bus) makes that
-    // test non-strict, so it keeps the full scan.
-    int b_begin = 0, b_end = (int)grid.size() - 1;   // half-open band range
-    if (eff_width > 0.0) {
-        const int k = (int)(std::upper_bound(grid.begin(), grid.end(), slide_lo)
-                            - grid.begin());
-        const int m = (int)(std::lower_bound(grid.begin(), grid.end(), slide_hi)
-                            - grid.begin());
-        b_begin = std::max(b_begin, k - 1);          // first grid[b+1] > slide_lo
-        b_end   = std::min(b_end,   m);              // last  grid[b]   < slide_hi
-    }
-    for (int b = b_begin; b < b_end; ++b) {
+    // NOTE (B1, measured & rejected): restricting this walk to the bands
+    // inside [slide_lo, slide_hi] by binary search is byte-identical (bands
+    // outside give win_hi - win_lo <= 0 < eff_width and are skipped by the
+    // test below anyway) — but it measured FLAT on chip_stack_bottomup
+    // (negotiate 57.2 -> 57.6 s, ladder 43.4 -> 44.2 s), because this
+    // design's slide windows already span most of the Hanan grid, so there
+    // is almost nothing to skip.  The per-visit band_cost walk is the real
+    // cost, not the visit count.
+    for (int b = 0; b + 1 < (int)grid.size(); ++b) {
         int win_lo = std::max(grid[b],     slide_lo);
         int win_hi = std::min(grid[b + 1], slide_hi);
         // "Band can't host the bus" — skip it.  Kept even under
@@ -1907,34 +1894,6 @@ int CongestionPlanner::resolved_plan_threads_(int ncand) const {
     return std::max(1, std::min({n, ncand, 8}));
 }
 
-// The candidate-index range a plan_bundle sweep visits.  A GROUP pin
-// (pinned_group) restricts the search to a super-candidate's members; a
-// SINGLE pin to one index; else the full sweep.  With no group pin this
-// reproduces the historical [ci_lo, ci_hi) range exactly.
-std::vector<int> CongestionPlanner::collect_cand_indices_(
-        const BundleWrapper& bw) const {
-    std::vector<int> cand_indices;
-    for (int ci : bw.input.pinned_group)
-        if (ci >= 0 && ci < (int)bw.input.candidates.size())
-            cand_indices.push_back(ci);
-    if (cand_indices.empty()) {
-        // Guard the single-pin path exactly as the pinned_group path above:
-        // an out-of-range selected_topology_index (its default is -1, or a stale
-        // pin after the pool shrank) must not index candidates[] out of bounds.
-        // An incoherent pin is treated as "not usefully pinned" → full sweep,
-        // turning a SIGSEGV into well-defined behavior (issue #454). The
-        // supported CLI never hits this (select_topology sets the flag AND a
-        // valid index together); the pybind fields are independently writable.
-        const int n = (int)bw.input.candidates.size();
-        const int sel = bw.plan.selected_topology_index;
-        const bool valid_pin = bw.input.topology_pinned && sel >= 0 && sel < n;
-        int ci_lo = valid_pin ? sel     : 0;
-        int ci_hi = valid_pin ? sel + 1 : n;
-        for (int ci = ci_lo; ci < ci_hi; ++ci) cand_indices.push_back(ci);
-    }
-    return cand_indices;
-}
-
 CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         const BundleWrapper& bw, PlanMode mode,
         std::set<std::pair<int,int>>* contended,
@@ -1985,8 +1944,29 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     auto h_layers_rev = h_layers; std::reverse(h_layers_rev.begin(), h_layers_rev.end());
     auto v_layers_rev = v_layers; std::reverse(v_layers_rev.begin(), v_layers_rev.end());
 
-    // Candidate indices to evaluate (see collect_cand_indices_).
-    const std::vector<int> cand_indices = collect_cand_indices_(bw);
+    // Candidate indices to evaluate.  A GROUP pin (pinned_group) restricts the
+    // search to a super-candidate's members; a SINGLE pin to one index; else the
+    // full sweep.  With no group pin this reproduces the historical
+    // [ci_lo, ci_hi) range exactly, so planning is byte-identical.
+    std::vector<int> cand_indices;
+    for (int ci : bw.input.pinned_group)
+        if (ci >= 0 && ci < (int)bw.input.candidates.size())
+            cand_indices.push_back(ci);
+    if (cand_indices.empty()) {
+        // Guard the single-pin path exactly as the pinned_group path above:
+        // an out-of-range selected_topology_index (its default is -1, or a stale
+        // pin after the pool shrank) must not index candidates[] out of bounds.
+        // An incoherent pin is treated as "not usefully pinned" → full sweep,
+        // turning a SIGSEGV into well-defined behavior (issue #454). The
+        // supported CLI never hits this (select_topology sets the flag AND a
+        // valid index together); the pybind fields are independently writable.
+        const int n = (int)bw.input.candidates.size();
+        const int sel = bw.plan.selected_topology_index;
+        const bool valid_pin = bw.input.topology_pinned && sel >= 0 && sel < n;
+        int ci_lo = valid_pin ? sel     : 0;
+        int ci_hi = valid_pin ? sel + 1 : n;
+        for (int ci = ci_lo; ci < ci_hi; ++ci) cand_indices.push_back(ci);
+    }
 
     res.best_topo     = cand_indices.empty() ? 0 : cand_indices.front();
     double best_score = std::numeric_limits<double>::max();

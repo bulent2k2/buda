@@ -436,9 +436,6 @@ private:
                              const BundleWrapper* exclude);
 
     void rebuild_cuts_();
-    // The candidate-index sweep plan_bundle runs (pinned_group > single pin >
-    // full), factored out of plan_bundle for readability.
-    std::vector<int> collect_cand_indices_(const BundleWrapper& bw) const;
     // Overflow congestion cost: kCong * max(0, (usage+eff-cap)/cap).  Zero below capacity.
     // perp_pos_override: if != INT_MIN, replaces seg.start.x/y for the perpendicular band
     // lookup.  Pass the ConnTopology interval centre so grid-boundary stubs land in the
