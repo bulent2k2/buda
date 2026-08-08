@@ -60,7 +60,10 @@ this form with no change to routing.
 Malformed groups are **flow-stopping errors**, never a silent mis-expansion: a
 missing or non-positive count, an unterminated `(`, an unmatched `)`, an empty
 `()`, a group whose token count is not a whole number of triples, and nesting
-each report what is wrong.
+each report what is wrong. A count above **4096** is refused too, before the
+expansion allocates — a track pattern is one repeating unit that tiles across
+the layer, so a count that large is a typo (`x100000000`), and the longhand
+could never express it.
 
 The same syntax works in [`add_grid_override`](#add_grid_override) — both
 commands share one slot-list parser, so it cannot drift between them.

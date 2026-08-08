@@ -69,6 +69,14 @@ def _canonical_slot_type(cmd_name, raw):
     sys.exit(1)
 
 
+# Upper bound on a single `( … )x<count>` repetition, checked before the
+# expansion allocates.  Sized as a typo guard: a track pattern is one repeating
+# unit that tiles across the layer, so real periods run to tens of slots — this
+# is orders of magnitude above any legitimate pattern while still catching a
+# stray-zeros count that would otherwise exhaust memory.
+_MAX_SLOT_REPEAT = 4096
+
+
 def _expand_slot_groups(cmd_name, toks, usage):
     """Expand `( <slots> )x<N>` repetition groups into a flat token list.
 
@@ -132,6 +140,17 @@ def _expand_slot_groups(cmd_name, toks, usage):
         if not digits.isdigit() or int(digits) < 1:
             die(f"repetition count '{digits}' is not a positive integer — "
                 f"write `( <slots> )x<count>`, e.g. `(_ 1 1)x12`")
+        # Bound the count BEFORE expanding.  `group * count` materializes the
+        # whole token list, so a fat-fingered `x100000000` would be an OOM or a
+        # hang instead of a diagnostic — a failure mode the longhand could not
+        # have (you cannot type 100M tokens).  The cap is a TYPO GUARD, not a
+        # policy: a track period is one repeating unit, so even a hundred slots
+        # is unusual and this sits orders of magnitude above any real pattern.
+        if int(digits) > _MAX_SLOT_REPEAT:
+            die(f"repetition count {digits} exceeds the maximum "
+                f"{_MAX_SLOT_REPEAT} — a track pattern is ONE repeating unit, "
+                f"so this is almost certainly a typo; the pattern tiles across "
+                f"the layer on its own")
         if len(group) % 3 != 0:
             die(f"repetition group has {len(group)} token(s), not a whole "
                 f"number of `<type> <width> <space_after>` triples")

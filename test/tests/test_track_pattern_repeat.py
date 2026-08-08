@@ -165,3 +165,23 @@ def test_nested_groups_are_a_hard_error():
     _s, code, out = _run("def_track_pattern 4 0 ((_ 1 1)x2)x3")
     assert code == 1
     assert "nested '('" in _err(out)
+
+
+def test_absurd_count_is_a_hard_error_not_an_oom():
+    # The compact form is the only way to ASK for a billion slots (you cannot
+    # type them), so the count is bounded before the expansion allocates.
+    _s, code, out = _run("def_track_pattern 4 0 (_ 1 1)x100000000")
+    assert code == 1
+    assert "exceeds the maximum" in _err(out)
+
+
+def test_count_at_the_cap_is_accepted():
+    # The bound is a typo guard, not a policy — the largest allowed count is
+    # still a legal (if unreasonable) pattern.
+    from buda_cmds.grid_cmds import _MAX_SLOT_REPEAT
+    slots = _slots(f"def_track_pattern 4 0 (_ 1 1)x{_MAX_SLOT_REPEAT}")
+    assert len(slots) == _MAX_SLOT_REPEAT
+    _s, code, out = _run(
+        f"def_track_pattern 4 0 (_ 1 1)x{_MAX_SLOT_REPEAT + 1}")
+    assert code == 1
+    assert "exceeds the maximum" in _err(out)
