@@ -16,6 +16,7 @@
 
 #pragma once
 #include <algorithm>
+#include <cctype>
 #include <string>
 
 namespace buda {
@@ -87,6 +88,31 @@ inline int ndr_group_demand(const NdrSpec& s, int nbits) {
     du += (s.shield_mode != 0) ? 2                    // end shields…
                                : 2 * s.guard_slots;   // …or end guards
     return du;
+}
+
+// ── Shield NET-IDENTITY predicate (R5a/R9) ───────────────────────────────
+// True when a rail/label is ELECTRICALLY IDENTICAL to a rule's requested
+// shield net: case-insensitive label equality, or membership in the same
+// supply family (GND/VSS/GROUND are one ground net for shielding purposes;
+// VDD/VCC/POWER are one power net).  A POWER rail can never satisfy a
+// GROUND spec.  This is THE predicate — shared by the R9 mis-connected-
+// shield audit and (phase 2) the R5a pattern-rail crediting, so credit and
+// audit cannot disagree (the review-pinned requirement).
+inline bool ndr_shield_net_matches(const std::string& requested,
+                                   const std::string& label) {
+    auto up = [](std::string s) {
+        for (char& c : s) c = (char)std::toupper((unsigned char)c);
+        return s;
+    };
+    const std::string a = up(requested), b = up(label);
+    if (a == b) return true;
+    auto family = [](const std::string& s) {
+        if (s == "GND" || s == "VSS" || s == "GROUND") return 1;
+        if (s == "VDD" || s == "VCC" || s == "POWER")  return 2;
+        return 0;
+    };
+    const int fa = family(a), fb = family(b);
+    return fa != 0 && fa == fb;
 }
 
 // Slot-role layout of the ascending run, size == ndr_group_demand():

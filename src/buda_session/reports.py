@@ -639,6 +639,7 @@ class ReportsMixin:
         collected = []   # (prefix, violation) — aggregated below unless --verbose-conn
         tug_bundles = 0  # realization-risk advisory (NOT violations); nuts/dnuts only
         tug_pairs = 0
+        ndr_index = None  # shared detailed-row index, built on first governed bundle
         for w in self.bundles:
             if not w.input.candidates:
                 continue
@@ -682,6 +683,16 @@ class ReportsMixin:
 
                 violations = list(res.violations)
                 violations += self._net_driver_fidelity(w, topo)
+                # R9 typed NDR audit (dnuts stage, governed bundles only —
+                # no rules = no calls = byte-identical output): under-width
+                # wires, foreign metal inside a reserved run, missing or
+                # misplaced shields.  Duck-typed violations, same summary
+                # machinery.
+                if stage == "dnuts" and w.input.ndr.active():
+                    from buda_cmds import ndr_cmds
+                    if ndr_index is None:
+                        ndr_index = ndr_cmds.build_ndr_audit_index(self)
+                    violations += ndr_cmds.audit_ndr_dnuts(self, w, ndr_index)
                 for v in violations:
                     if all_candidates and stage == "topo":
                         prefix = f"Bundle {bid} topo {topo_idx + 1} ({topo.type})"
@@ -761,6 +772,9 @@ class ReportsMixin:
         "KEEPOUT_CROSS": "wire placed on a keepout",
         "NET_DRIVER_OPEN": "net endpoint block not attached to the topology",
         "BIT_SHORT":    "different bits (nets) share a track with overlapping spans",
+        "NDR_WIDTH":    "governed bit narrower than its rule's width",
+        "NDR_SPACING":  "foreign wire inside a rule's reserved run (clearance violated)",
+        "NDR_SHIELD":   "shield wires missing or misplaced vs the rule's arrangement",
     }
 
     _CONN_GROUP_CAP = 100   # max summary lines before eliding the rest
