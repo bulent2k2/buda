@@ -1,12 +1,24 @@
 # BUDA Codebase Analysis
 
-Date: 2026-08-08, refreshed same-day after the risk-reduction plan
-(Phases A–D + follow-ups) completed (rewrite of the 2026-05-26
-original — the codebase has
-moved far past that snapshot: the BDB-centric v3 architecture, the
-hierarchy-aware pipeline, the measured-feedback healers, GDS interchange,
-the interactive Floorplanner, and the chip-scale QoR/runtime tooling all
-landed after it.)
+Date: 2026-08-08. Third edition. The first (2026-05-26) described a
+younger codebase; the second rewrote it after the BDB-centric v3
+architecture, hierarchy-aware pipeline, measured-feedback healers, GDS
+interchange, Floorplanner and chip-scale tooling landed, and recorded
+the risk-reduction plan (Phases A–D) as executed.
+
+**This edition adds a fresh, code-first risk analysis.** Rather than
+re-checking the previous list, the sources themselves were audited —
+~31.6k hand-written C++ lines and ~48k Python — under two lenses the
+earlier editions did not separate:
+
+- **Lens A — risks intrinsic to the code** (what will break, and where
+  the existing discipline has gaps), and
+- **Lens B — fit into an existing EDA methodology** (what blocks a CAD
+  group from piloting this in a production flow next quarter).
+
+Findings carry file:line evidence and are marked **verified** where
+reproduced directly. Both lenses are new sections below; the historical
+risk register is retained, condensed, for continuity.
 
 ## Executive Summary
 
@@ -284,9 +296,11 @@ names).
 ## Testing Surface
 
 Three cumulative pytest tiers (markers in `pytest.ini`): **fast**
-(~1 870 tests, <30 s — the default), **mid** (+~600 flow-script/BDB
-round-trip integration, ~6 min), **slow** (+SA/GA storms and healer
-end-to-end agreement runs). `bin/bb test|mid|slow` builds then runs a
+(1 948 tests, <30 s — the default), **mid** (+641 deselected-by-default
+flow-script/BDB round-trip integration tests, ~6 min; 2 589 collected in
+total), **slow** (+SA/GA storms and healer end-to-end agreement runs).
+Note that the default invocation deselects 24.8% of the suite — see
+Lens A item A12. `bin/bb test|mid|slow` builds then runs a
 tier; pytest-xdist parallelizes when installed. 52 Gherkin `.feature`
 specs (pytest-bdd) map arcs to executable scenarios with a tag-vocabulary
 guard. Beyond unit/integration tests, the **QoR corpus** is the routing
@@ -326,9 +340,10 @@ workflow.
    contracts checked by `NET_DRIVER_OPEN`); sidecar JSON gave way to BDB
    persistence; directories were flattened (`bin/`, `qor/`, `assets/`).
 
-### Risks And Weak Spots
+### Risks And Weak Spots — the previous register, resolved (historical)
 
-The five risks this section named in the 2026-08-08 first edition were
+*Retained for continuity; the current risk assessment is the two fresh
+lenses that follow.* The five risks the second edition named were all
 addressed by the executed
 [risk-reduction plan](internal/risk_reduction_plan.md) (Phases A–D +
 follow-ups, all landed):
@@ -370,6 +385,359 @@ What remains true rather than solved:
   identity, stage-entry invariants, corpus endpoints) — powerful, but
   worth keeping in mind that the corpus remains the only gate that sees
   QoR.
+
+## Fresh Analysis, Lens A — Risks Intrinsic To The Code
+
+*A fresh audit of the sources themselves (2026-08-08), independent of
+what the docs claim. ~31.6k hand-written C++ lines (excluding vendored
+`sqlite3`) + ~48k Python. Findings carry file:line evidence; the ones
+marked **verified** were reproduced directly during this review.*
+
+First, three things the code gets genuinely right, because they change
+how the risks below should be read. There are **zero**
+`TODO`/`FIXME`/`HACK`/`XXX` markers in the non-vendored sources; the
+core compiles **warning-free** under `-Wall -Wextra` (**verified** by
+forced rebuild of all seven major translation units); and the hazards
+below are overwhelmingly *gaps in an applied discipline* rather than
+naive mistakes — float determinism, strict-weak-ordering, thread-pool
+exception containment and pybind lifetime are all explicitly reasoned
+about in comments elsewhere in the same files. That makes these
+findings higher-value, not lower: the invariant is already believed to
+hold, so the gap is where a future change will quietly break it.
+
+### A1. The byte-identity guarantee rests on unstable sorts (verified)
+
+The project's central quality instrument is decision byte-identity
+across parallel paths and refactors. But the greedy planner's schedule —
+which decides who claims a band first — sorts on
+`(locked, priority, width)` with **no total-order tiebreak**
+(`src/congestion_planner.cpp:2312`), so bundles equal on all three are
+ordered arbitrarily by `std::sort`. The twin loop 80 lines later
+*does* add the index tiebreak (`:2398`), so the inconsistency is
+visible within one file. Four more sites share the defect: rip-up victim
+ranking (`:2880`), the contention report before `resize(top_k)`
+(`:3060`), NUTS group ordering (`src/nuts.cpp:1269`), and
+`find_overlaps` (`src/nuts_geom.h:195`).
+
+This does not fire today — libstdc++'s introsort is deterministic for a
+given binary, which is exactly why the corpus stays byte-identical. It
+is a **latent portability hazard**: a different standard library
+reorders the ties. The repo validates on MSVC/Windows via a manual
+workflow, which is precisely where it would surface — and it would
+present as unexplained QoR drift, not as a crash.
+
+The Python layer has the matching half. `_resort_pool_preserving_selection`
+(`src/buda_session/edit.py:220`) re-implements the C++ candidate sort key
+from `topology.cpp:1250` — the order that, per that function's own
+comment, "feeds the display, script/sidecar indices, the planner's
+tie-break, and ripup's index-window alternates". Two divergences: C++
+recomputes `estimated_wirelength` before sorting while Python sorts on
+whatever the field currently holds (stale after `flip_mst_edge`, a
+TopoEdit commit, or dogleg adoption); and C++ uses unstable `std::sort`
+where Python's `list.sort` is stable, so candidates equal on
+`(wirelength, nsegs, type)` get different indices. Reached via
+`generate_more_topologies`, this can permute the pool relative to the
+generation path and change which topology the planner selects.
+*Fix: add the index tiebreak at all five C++ sites; have Python call the
+C++ sort rather than mirror it. Small, mechanical, and it retires a
+nondeterminism source that golden tests never exercise.*
+
+### A2. The shorts audit can miss real shorts (verified)
+
+`detailed_nuts.cpp:58-71` documents at length why exact bucket equality
+on `llround(pos*1e6)` is **insufficient** — ulp-close representations of
+one physical track can land in adjacent buckets — and therefore uses
+`track_key_near()` with a ±1 tolerance. The `BIT_SHORT` audit in
+`src/verify.cpp:1147` buckets by exactly the scheme detailed NUTS
+rejected: a `std::map` keyed on the quantized position, compared by
+exact equality. Two bits of different nets on one physical track whose
+representations straddle a bucket boundary are therefore never compared,
+and the short is reported as clean.
+
+This matters more than a normal audit gap because `BIT_SHORT` is the
+*only* DRC-flavoured check in the tool, and its whole job is
+defence-in-depth against the placer.
+*Fix: share one quantizer between engine and verifier. Small.*
+
+### A3. Infeasibility is priced through a user-zeroable knob (verified)
+
+Hard obstruction is encoded as the magic price `9999.0` — but
+inconsistently. `score_segment` (the STRICT gate) returns it **unscaled**
+(`src/congestion_planner.cpp:748`), while `cong_cost_segment` returns
+`kCong_ * 9999.0` for the same conditions (`:1023`, `:1037`). `kCong` is
+user-settable to 0. At `kCong 0` the STRICT gate still blocks, but band
+*choice* (`best_band_perp`) and the ALLOW_OVERFLOW/BEST_EFFORT rankings
+stop seeing blockages at all — a study run that "turns congestion
+weighting off" silently starts treating keepout-carved bands as free.
+*Fix: make infeasibility a sentinel/predicate, not a price. Small.*
+
+### A4. Concurrency hazards in two of four thread pools
+
+- **A race on the topology analysis cache.** `analyze()` writes
+  `topo.analysis_cache_` — a non-atomic `shared_ptr` on a `const&` — at
+  `src/topology_analysis.cpp:144`, and `score_candidate_` reaches it
+  from worker threads (`src/congestion_planner.cpp:1425`, `:2016`). The
+  candidate index list is built from `pinned_group` **without
+  de-duplication** (`:1938`), and `pinned_group` is freely writable from
+  Python (`src/bind_routing.cpp:694`). A repeated index hands one
+  `Topology` to two threads → torn refcount → nondeterministic
+  double-free deep inside planning.
+- **Two pools spawn threads without exception-safe construction**
+  (`src/congestion_planner.cpp:2024`, `src/bind_routing.cpp:608`), while
+  the other two explicitly guard exactly this case
+  (`src/trial_sweep.cpp:262`, `src/nuts.cpp:2705`). Under
+  `EAGAIN`/RLIMIT the vector unwinds holding joinable threads →
+  `std::terminate`, killing the Python process with no traceback.
+- **`parallel_sweep` swaps the process-global `std::cout` buffer** and
+  serializes on a global mutex for its whole body
+  (`src/trial_sweep.cpp:39`, `:44`, `:231`): all output from any other
+  thread disappears for the duration, and two concurrent sweeps fully
+  serialize.
+
+*Fix: de-duplicate the index list (or make the cache atomic); mirror the
+existing pool guards; scope the output redirect. Small each.*
+
+### A5. Unchecked indexing at four charge/commit sites
+
+`candidates[plan.best_topo]` is indexed without a bounds check in
+`plan_band_overlap` (`:815`), `commit_plan` (`:2082`),
+`make_assignment` (`:2145`) and `log_choice` (`:2163`), while
+`PlanResult::best_topo` defaults to `0` and `plan_bundle` returns that
+default for an empty candidate list (`:1911`). NUTS guards the
+analogous index and cites an audit for doing so (`src/nuts.cpp:78`).
+A hand-built or partially-populated wrapper from Python therefore
+charges the cut books from garbage or segfaults.
+
+### A6. One formula duplicated five ways, and NUTS re-implements NDR
+
+The per-segment effective width — `width * (n / nbits)` — appears at
+`src/congestion_planner.cpp:822`, `:845`, `:1386`, `:2104` and
+`src/nuts.cpp:1645`. Worse, `nuts.cpp:1638` **re-implements**
+`ndr_units` inline rather than calling the shared helper, and the
+planner adds `+ track_pitch_` where NUTS does not. Any NDR or tapering
+change must land in five places or the planner's books and the wires
+NUTS actually places diverge silently — exactly the failure mode NDR's
+own design took care to avoid by single-sourcing `ndr_group_demand`.
+
+The same pattern spans the language boundary, which is worse because no
+compiler can see it. The **DNUTS admission arithmetic** — authoritative
+in `src/detailed_nuts.cpp:490` — is mirrored *three times* in Python:
+`_seg_admission_pool` (`src/buda_session/nutsflow.py:769`, whose
+docstring calls itself "the exact `place_by_layer` arithmetic"), an
+inline copy in the dead-span escalation (`:988`, which the same
+docstring admits keeps "its own inline copy"), and a third partial copy
+in the cull heal (`:1277`). Member-bit counting is likewise implemented
+twice (`nutsflow.py:753` and `:1139`), and the bus-width convention
+`len(...) * 1.5` appears at `bundling_cmds.py:703`, `:890` and
+`persist.py:658` — so a resumed session can rehydrate a different width
+than a fresh run. A C++ admission change (shield accounting, corner
+bounds) silently desynchronizes every Python predicate built on it.
+*Fix: one `seg_demand()` helper in C++, exported to Python so the
+mirrors become calls. Small, and the highest-leverage item in this
+list.*
+
+### A7. Parsers invert hard and soft failure
+
+`src/bdb.cpp` swallows malformed LEF geometry with `catch (...) {}`
+(`:1188`, `:1250`) and then substitutes a **0.5 × 0.5 µm** default cell
+(`:1408`) — a silent wrong answer. Meanwhile `std::stoi`/`std::stod` on
+`meta` rows in the DB-open path are **unguarded** (`:444`), so a garbage
+value throws out of the constructor into pybind as an opaque
+`ValueError` — a hard error where a soft one was wanted, and a soft one
+where hard was needed. Related: `_units` is used as a divisor with no
+zero check (`:1387`), and `cur_ref` can dangle across a struct
+reallocation on truncated GDS input (`src/gds_io.cpp:322` vs `:285`).
+
+### A8. Complexity concentration
+
+The largest functions are where future bugs will live:
+`DetailedNUTSEngine::place_by_layer` (~830 lines,
+`src/detailed_nuts.cpp:297`, nesting to column 54, `const`-qualified yet
+driving all detailed placement, with an opt-in prototype path mixed into
+the production loop), `complete_relay_junctions` (~661,
+`src/topology.cpp:1784`), `NUTSEngine::preferred_fit` (~626,
+`src/nuts.cpp:1727`), `score_candidate_` (~500) and
+`optimize_topologies` (~455). `place_by_layer` alone is larger than
+`layering.cpp` + `conn_topology.cpp` + `busterm.cpp` combined and is the
+single highest-value refactor target. Supporting smells:
+`parallel_sweep` takes 16 positional arguments including two adjacent
+bare `bool`s (`src/trial_sweep.h:105`), and `INT_MIN` is overloaded to
+mean both "no perp override" and "no slide window".
+
+### A9. Algorithmic scaling of the escalation ladder
+
+Rip-up escalation is O(B²·C) `plan_bundle` calls
+(`src/congestion_planner.cpp:2386`): every STRICT failure ranks all
+committed bundles, then runs two full candidate sweeps per victim, each
+re-deriving an O(cuts×bands) `layer_load` (`:1985`). The B1
+investigation measured this directly — 297 victim trials for 6 commits
+on one chip vehicle — and established that *pruning* the sweep is a dead
+end, leaving per-candidate scoring cost as the lever. This is the
+principal reason chip-scale runtime is dominated by the healers.
+
+### A10. Quality does not hold at chip scale (verified)
+
+The starkest finding, and one no per-file review surfaces — from the
+project's own published snapshot (`qor/qor_table.md`, 41 flows):
+
+| class | flows | with residuals | residual range |
+|---|--:|--:|---|
+| **chip-scale** (`chip/*`) | 7 | **7 (100%)** | 78–260 unplaced bits, 9–34 violated bundles, 4–69 overlaps |
+| small/mid | 34 | 2 | ≤16 unplaced, 2 overlaps |
+
+Every chip-scale vehicle carries unplaced bits and `check_design`
+violations; almost every small one is clean. Publishing this rather than
+hiding it is admirable, and the corpus gate correctly enforces
+*non-regression* — but non-regression is a research bar, not a signoff
+bar. Combined with Lens B item 5 (violations exit 0), the practical
+consequence is that **the tool's own definition of success is "no worse
+than last time", and nothing in the flow forces the number to zero.**
+This is the algorithmic frontier of the project, and it should be named
+as such rather than folded into runtime work.
+
+### A11. The healer state protocol is the most fragile subsystem
+
+Three nested snapshot layers (`_rr_snapshot`/`_rr_restore` in
+`rr_state.py:51`, `_rr_class_snapshot` in `ripup.py:956`, and
+forward-snapshot commit at `:1526`) plus a `_rr_dirty` scoping set the
+code itself notes "may be stale mid-flight" (`ripup.py:1496`). Three
+concrete hazards:
+
+- **An invariant asserted in one module is violated by another.**
+  `edit.py:53` states the contract verbatim — the adopted dogleg slot
+  "is always the LAST index — ripup's `_rr_restore` depends on it" — and
+  `rr_state.py:136` asserts it. But
+  `_resort_pool_preserving_selection` (`edit.py:231`) writes an
+  arbitrary mid-pool index, reachable via `generate_more_topologies`,
+  and `edit.py:98` then does `del cands[slot]` under the comment
+  "appended last; drop it". A mid-pool delete shifts every higher index
+  while `selected_topology_index` / `pinned_group` are not shifted — so
+  the outcome is either a mid-healer `AssertionError` or silent
+  selection corruption.
+- **Cleanup is tail-positioned, not `finally`.** `_rr_fast_trials`,
+  `_rr_t` and `_rr_disc_memo` are cleared at the end of
+  `_ripup_reroute`'s body (`ripup.py:2117`), and negotiate clears
+  injected demand at its tail (`negotiate.py:493`) directly beneath a
+  comment warning never to leak it. An exception on the accept path
+  escapes with demand still injected or approximate-trial mode still
+  on — so a later `run_nuts` in the same session runs against a
+  mispriced planner, silently.
+- **Exception hygiene is applied at 3 of 6 trial sites.**
+  `_rr_guarded_move` (`ripup.py:1492`) exists precisely for this, yet
+  the class-move pass (`:1246`), the release pass (`:1385`) and
+  refine's commit (`refine.py:183`) call trials bare. An engine-raised
+  stop in a bottom-up flow can leave a rejected trial's wrappers
+  committed while the reported metric describes a different state.
+
+*Fix: `finally` blocks and routing the three unguarded sites through
+`_rr_guarded_move` are small and mostly mechanical; the dogleg-slot
+invariant needs either a shift-aware update or an explicit
+re-adoption after any pool re-sort.*
+
+### A12. The safety nets are off in the default invocation
+
+The wrapper-invariant validator — which checks exactly the fields these
+risks corrupt (`selected_topology_index` range, `seg_layers` length,
+`pinned_seg_layers` shape, `pinned_group` range) and is documented to
+"fail LOUD… catching the bad write where it was made" — runs only when
+`BUDA_VALIDATE=1` (`src/buda_session/util.py:260`). Meanwhile
+`pytest.ini` defaults to `-m "not slow and not mid"`, which deselects
+**641 of 2 589 tests (24.8%)** — and the `mid` tier is precisely the
+full-pipeline, BDB round-trip and resume coverage that would exercise
+A11's state handling. So the default developer and CI invocation runs
+neither the invariant checker nor the integration tests aimed at these
+bugs. *Fix: enable `BUDA_VALIDATE` in CI (it is already suite-wide via
+conftest when set) and run the mid tier on PRs. Small; the machinery
+exists and is merely not switched on.*
+
+### A13. Session state surface, and two binding semantics that differ by provenance
+
+`BudaSession` carries **124 mutable attributes — 43 of which are created
+outside `__init__`** — across 243 methods on 11 mixins, with **159**
+`getattr(self, ..., default)` read sites, so a never-written attribute is
+indistinguishable from a defaulted one (two such attributes are settable
+only from a test). The snapshot-coverage contract test covers *wrapper*
+fields, not session fields, so each new healer knob is one `getattr`
+default away from being un-snapshotted.
+
+Two related pybind hazards were confirmed by live probe against the
+built module: `BundleWrapperVec.append` **copies** while `vec[i]` and
+`list(vec)` yield **references**. Consequently (a) `self.bundles` is a
+C++ vector on the fresh path but a plain Python list on the
+`load_pipeline` resume path (`persist.py:943`) and after a second
+`run_planner hier` (`planner_cmds.py:129`) — and the sequence fallback's
+documented contract is that "C++-side vector mutations [are] discarded",
+so resume silently takes the copying path (~15 ms extra per healer
+trial, per `bind_opaque.h:18`); and (b) `_hier_bundles_orig`, commented
+as a "pre-expansion snapshot" (`buda_cli.py:287`), is built with
+`list(self.bundles)` and is therefore an **aliasing view** — the
+"restore" before re-expansion restores nothing, because the objects are
+the same ones the first run mutated.
+
+*One genuine positive, worth recording:* an AST/regex sweep for the
+classic pybind bug — binding a by-value property copy, mutating it, and
+never assigning back — found **zero** instances across `src/` and
+`tools/`. That discipline is under control.
+
+### A14. Silent degradation is the default failure mode
+
+There are **197** `except Exception` handlers in `src/` + `tools/`,
+**124** of them followed by a bare `pass`/`continue` (and, to the
+codebase's credit, zero bare `except:`). Several sit on load-bearing
+logic: the width-infeasibility gate stands down on any error
+(`ripup.py:640`, `# a gate must never break the healer`); every opt-in
+pool cleanup (`set_prune_dominated`, `set_dedup_loci`,
+`set_drop_dangling`) becomes a partial no-op if `ConnTopology.build`
+throws (`edit.py:398` and six siblings); and member-bit demand collapses
+to a 1-bit bus on exception (`nutsflow.py:766`, `:1145`). The practical
+consequence is that a feature the user declared can be **silently
+inert**, indistinguishable from "there was nothing to do".
+
+Related: result quality depends on a hand-maintained declaration the
+code cannot verify. `healersAhead` gates the automatic post-NUTS
+dead-span escalation (`nuts_cmds.py:104`) and two DNUTS heals
+(`nutsflow.py:1340`, `:1476`), with a measured cost for getting it wrong
+(the comment at `nuts_cmds.py:92` records "mix 16→0 opens, bigHalf
+190→94"). A flow that runs `ripup_reroute` but forgets the declaration
+silently gets the worse result. Issue #444 deliberately replaced script
+scanning with the explicit flag, so this is a considered trade — but it
+means a correct flow is a matter of author discipline, and nothing warns
+on the mismatch. *A cheap mitigation: warn at `exit` when a healer ran
+without the declaration.*
+
+### Cross-cutting observation
+
+Most of the findings above share one shape: **a discipline is applied
+correctly in one place and not in its twin.** The index tiebreak exists
+at one sort and not the other (A1); the tolerant quantizer at the engine
+and not the verifier (A2); the unscaled sentinel at the STRICT gate and
+not at the cost (A3); the exception-safe pool guard in two of four pools
+(A4); the bounds check in NUTS and not in the planner (A5); the shared
+NDR helper in the planner and not in NUTS, and the admission arithmetic
+once in C++ and three more times in Python (A6); `_rr_guarded_move` at
+three of six trial sites (A11).
+
+That is not a review-quality problem — these are twins written by people
+who knew the rule, which is why one side is right. It is a *structural*
+one, and it argues that the highest-leverage investment is *not* more
+review but **making the twins share code**: one comparator helper, one
+track quantizer, one demand function exported to Python, one
+infeasibility predicate, one guarded-trial wrapper. Each is a small,
+low-risk change, and each retires an entire class of future drift rather
+than one instance of it.
+
+A second pattern is worth naming: **the known-issue backlog is not
+greppable.** There are zero `TODO`/`FIXME`/`HACK` markers anywhere in
+the hand-written C++ or Python. The hazards *are* recorded — often
+excellently, as post-mortems in prose (`ripup.py:1496` on the stale
+dirty set, `edit.py:58` on stale slots, `rr_state.py:78` and
+`bind_routing.cpp:671` as dangling-reference and use-after-free
+write-ups) — but no tool can enumerate them, so there is no way to
+inventory outstanding hazards short of reading 80k lines. Adopting a
+single greppable marker convention for *deferred* items (distinct from
+explanatory comments) would make the risk register visible to triage
+without diluting the narrative style that makes this codebase
+unusually readable.
 
 ## Fresh Analysis, Lens B — Fit Into An Existing EDA Methodology
 
@@ -533,16 +901,48 @@ hierarchy-aware planning system with a real feedback loop and a
 regression discipline unusual for a codebase this age: every default is
 a recorded measurement, every parallel path proves decision-identity,
 and every routing change faces a corpus gate. The structural risks of
-the 2026-05 snapshot (monolithic session, ad-hoc endpoints, sidecar
-state) were paid down, and the subtler risks this rewrite originally
-named — the mutable binding surface, print-identity oracles, the healer
-concentration point, scale-blind runtime work, reader-found doc
-staleness — were addressed by the executed risk-reduction plan: the
-codebase now validates its own invariants at every stage entry, proves
-healer identity on structured decision records, carries its healer
-logic in cohesive seams, measures runtime per design class by default,
-and fails CI on stale docs. What guards it is checked discipline
-rather than types — kept honest by the guards themselves. The
-near-term high-value work is finishing the chip-scale runtime items,
-then NDR — the first feature that will stress the per-net granularity
-of a deliberately bus-centric core.
+the 2026-05 snapshot were paid down; the subtler ones the second edition
+named were closed by the executed risk-reduction plan. NDR — expected
+there to be the next stress test of a bus-centric core — has since
+landed through the same measured discipline, single-sourcing its demand
+conversion so planner, NUTS and DNUTS cannot disagree about a governed
+group.
+
+The fresh audit changes the emphasis rather than the verdict. The
+engineering is strong where it has been *looked at*: zero warnings under
+`-Wall -Wextra`, zero deferred-work markers, a clean read-mutate-write
+discipline at the pybind boundary, and post-mortems in prose wherever a
+bug once bit. The risks that remain are of one kind — **a rule applied
+correctly on one side of a twin and not the other**: the sort tiebreak,
+the track quantizer, the infeasibility sentinel, the demand formula
+(once in C++, three more times in Python), the guarded trial wrapper.
+None is exotic; each is a small change; together they retire most of
+Lens A. That is a good position to be in, and it argues for a
+consolidation pass — one comparator, one quantizer, one demand
+function — over any new feature.
+
+Two things deserve to be stated plainly, because neither is visible from
+the corpus gate that governs day-to-day work. First, **quality does not
+yet hold at scale**: all seven chip-class vehicles carry residual
+unplaced bits and violations, while nearly every small one is clean, and
+the gate enforces only non-regression — a research bar, not a signoff
+bar. Second, **nothing in the flow forces that number down**: a design
+with violations exits 0, so no harness can fail on it. Those two facts
+compound, and together they are a larger risk to the project's purpose
+than any remaining runtime item.
+
+So the near-term high-value work is no longer "finish the runtime
+items". It is, in order: **wire failure to the exit code and emit a
+machine-readable report** (days, and it makes every later claim
+checkable); **collapse the twins** (small, and it retires a class of
+latent drift); **turn on the safety nets that already exist** —
+`BUDA_VALIDATE` and the mid tier in CI; and then commit to the strategic
+fork Lens B names. The advisory-planner path — exporting DEF guides,
+blockages and bus corridors, fed by real tech-LEF and `TRACKS` data —
+is reachable in a quarter or two, plays to what this tool is genuinely
+good at, and would put BUDA in front of real designs. Chasing
+flow-participating detailed routes instead means owning vias, DRC and
+DBU-exact geometry, and competing with mature routers. Both are
+defensible; drifting between them is not, and the code is currently
+built as though the second were the goal while the interchange surface
+only supports the first.
