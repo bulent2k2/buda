@@ -3163,8 +3163,10 @@ class RipupMixin:
                     deferred = []            # fully consumed by the sweep
                 n_def = sum(len(mv) for _c, _b, _o, mv in deferred)
                 if deferred:
-                    print(f"[ripup_reroute] iter {it}: screened scan stalled "
-                          f"— sweeping {n_def} deferred move(s)", flush=True)
+                    self._decision(
+                        f"[ripup_reroute] iter {it}: screened scan stalled "
+                        f"— sweeping {n_def} deferred move(s)",
+                        "rr_stall_sweep", it=it, n_moves=n_def)
                 for ci, bid, old_tidx, moves in deferred:
                     w = self._rr_wrapper(bid)
                     if w is None:
@@ -3183,12 +3185,17 @@ class RipupMixin:
                             .extend(wr)
                     if cand_best is not None:
                         best = cand_best
-                        print(f"[ripup_reroute] iter {it}: contender "
-                              f"{ci}/{n_cont} bundle {bid} improves "
-                              f"{self._rr_m_str(cur)}->"
-                              f"{self._rr_m_str(cand_best[0])} "
-                              f"({self._rr_move_str(old_tidx, cand_best[3])}"
-                              f", deferred)", flush=True)
+                        self._decision(
+                            f"[ripup_reroute] iter {it}: contender "
+                            f"{ci}/{n_cont} bundle {bid} improves "
+                            f"{self._rr_m_str(cur)}->"
+                            f"{self._rr_m_str(cand_best[0])} "
+                            f"({self._rr_move_str(old_tidx, cand_best[3])}"
+                            f", deferred)",
+                            "rr_improve", it=it, ci=ci, bid=bid, m_from=cur,
+                            m_to=cand_best[0],
+                            move=self._rr_move_str(old_tidx, cand_best[3]),
+                            deferred=True)
                         break
             if best is None and warm_pend:
                 # Warm-stall certificate sweep: every warm-rejected move is
