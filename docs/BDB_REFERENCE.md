@@ -879,6 +879,47 @@ component's bbox).
 
 ---
 
+### `check_template_tracks`
+
+```
+check_template_tracks [on_mismatch stop|independent]
+```
+
+The bottom-up **uniformity gate**: verify that every instance of a
+`set_bottom_up` cell actually sees the same signal tracks for the routing it
+is about to be handed a copy of.  A template is solved once and copied
+verbatim, so that claim has to be checked rather than assumed — an instance
+sitting on a different track phase, or with a region override or keepout
+cutting its windows differently, cannot host the copy.
+
+Run it **after `run_nuts`, before `run_detailed_nuts`**.  `run_detailed_nuts`
+runs it implicitly if you never call it, but calling it explicitly lets you
+choose the mismatch policy and see the report in flow order.
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `on_mismatch stop` | keyword | default | Refuse DNUTS with the mismatch report — the design is not ready to copy |
+| `on_mismatch independent` | keyword | — | Copy the ALIGNED instances and solve the misaligned ones individually.  This also declares the willingness `ripup_reroute`'s release pass is gated on (see its `no_release_moves` flag) |
+
+**What it compares.** Per rotation class, the span-aware signal-track pool each
+instance sees for each fixed segment window, normalized by instance origin (a
+mirrored instance's pool is reflected back into the reference frame first).
+Instances agree iff their offset/reflection phase fits the layer track pitch
+and nothing cuts their windows differently.  Comparing raw *pools* is stronger
+than comparing demand: identical pools mean identical seating for any rule,
+including [non-default rules](NDR_REQUIREMENTS.md).
+
+The verdict is cached and consumed by `run_detailed_nuts`; the policy persists
+in BDB meta.  It also runs **before** any routing (placement-stage mode:
+whole-instance windows per grid layer, advisory) — that early report is what
+tells you to run [`align_bottom_up`](#align_bottom_up).
+
+```
+[TemplateTracks] cell 'sub_cell': ALIGNED — 4 instance(s) see identical signal tracks (ref u1, 3 window(s) compared)
+```
+
+---
+
 ### `set_cell_layer_cap`
 
 ```

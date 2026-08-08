@@ -16,6 +16,28 @@ For the `buda` command line itself — invocation, wrappers, and flags such as
 
 ---
 
+## Reference pages
+
+The per-command documentation lives in one page per pipeline stage under
+[`script_reference/`](script_reference/):
+
+| Page | Stage | Commands |
+|---|---|---|
+| [Setup](script_reference/setup.md) | setup | `def_layer` · `add_block` · `add_keepout` · `add_net` · `add_bus` · `corner_margin` · `detour_channel` · `set_min_stub_length[_dir\|_layer]` · `set_feedthru` · `set_track_pitch` |
+| [Bundler](script_reference/bundling.md) | 1 | `run_bundler` · `run_hier_bundler` · `dump_hbundles` |
+| [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` · `set_prune_dominated` · `set_dedup_loci` · `set_drop_dangling` |
+| [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` · `unpin_topology` |
+| [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `set_pair_align_heal` · `ripup_reroute` · `negotiate_congestion` · `refine_selection` |
+| [Routing grid](script_reference/routing_grid.md) | 8 | `def_track_pattern` · `add_grid_override` · `report_overhead` |
+| [Non-default rules (NDR)](script_reference/ndr.md) | setup | `def_ndr` · `set_ndr` · `dump_ndr` — per-net width / spacing / shielding, with the demand model and the worked vehicles |
+| [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_design` · `dump_topologies` · `visualize` · `visualize_topologies` |
+
+Script control (`source`, `exit`, comments), the output-files table, the typical
+script skeleton, and the BDB command quick reference stay on this page, below —
+after the pipeline overview that follows.
+
+---
+
 ## Pipeline overview
 
 Commands run in the following order. Later stages depend on earlier ones.
@@ -29,6 +51,8 @@ Commands run in the following order. Later stages depend on earlier ones.
 | Setup | `set_feedthru` | Mark a block×layer set as routable-through (opt-in feedthru) |
 | Setup | `set_track_pitch` | Declare inter-bus pitch so `run_planner` band reservations match the NUTS solve |
 | Setup | `add_net`, `add_bus` | Declare nets / buses in the netlist |
+| Setup | `def_ndr`, `set_ndr` | Declare a non-default rule (width / spacing / shielding) and attach it to nets by name prefix — before the bundler runs |
+| Setup | `dump_ndr` | Print declared rules, their attachment scopes, and each governed bundle's slot demand + layout |
 | Setup | `detour_channel` | Set outer-band width for U-shape / UU-shape detour trunks per compass direction |
 | 1 | `run_bundler`, `run_hier_bundler` | Group nets into flat or hierarchy-aware buses |
 | 1b | `dump_hbundles` | Print a summary of all HBundles (after `run_hier_bundler`) |
@@ -63,27 +87,14 @@ Commands run in the following order. Later stages depend on earlier ones.
 | BDB | `move_comp`, `resize_cell`, `add_comp`, `flip_comp`, `rotate_comp`, `add_cell`, `add_inst`, `add_inst_to_cell`, `add_cell_pin` | Mutate placement and cell/pin definition data in the database |
 | BDB | `bdb_net_mode` | Toggle whether netlist is written to BDB database |
 | BDB | `add_blocks_from_bdb` | Import floorplan block boundaries at a given hierarchy depth |
-| BDB | `derive_busterms` | Extract busterms from hierarchy |
+| BDB | `derive_busterms`, `refine_busterms` | Extract busterms from hierarchy |
+| Hier | `set_bottom_up`, `align_bottom_up` | Mark a cell to be planned/routed ONCE and copied to every instance, and nudge its instances onto a common track phase first |
+| Hier | `check_template_tracks` | Bottom-up uniformity gate: verify every instance sees the same tracks before the copies are made (after `run_nuts`, before `run_detailed_nuts`) |
+| Hier | `set_cell_layer_cap`, `set_cell_layer_share` | Per-cell layer band, and a fractional per-layer share inside or above it |
+| Hier | `set_layer_caps_by_depth`, `reserve_top_layers` | Bulk layer bands: by hierarchy depth, or by reserving the stack's top N layers for the top level |
+| Hier | `load_pipeline` | Resume a routing pipeline (bundles, topologies, plan, routing) from the open BDB |
 
 ---
-
-## Reference pages
-
-The per-command documentation lives in one page per pipeline stage under
-[`script_reference/`](script_reference/):
-
-| Page | Stage | Commands |
-|---|---|---|
-| [Setup](script_reference/setup.md) | setup | `def_layer` · `add_block` · `add_keepout` · `add_net` · `add_bus` · `corner_margin` · `detour_channel` · `set_min_stub_length[_dir\|_layer]` · `set_feedthru` · `set_track_pitch` |
-| [Bundler](script_reference/bundling.md) | 1 | `run_bundler` · `run_hier_bundler` · `dump_hbundles` |
-| [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` · `set_prune_dominated` · `set_dedup_loci` · `set_drop_dangling` |
-| [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` · `unpin_topology` |
-| [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `set_pair_align_heal` · `ripup_reroute` · `negotiate_congestion` · `refine_selection` |
-| [Routing grid](script_reference/routing_grid.md) | 8 | `def_track_pattern` · `add_grid_override` · `report_overhead` |
-| [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_design` · `dump_topologies` · `visualize` · `visualize_topologies` |
-
-Script control (`source`, `exit`, comments), the output-files table, the typical
-script skeleton, and the BDB command quick reference stay on this page, below.
 
 ## Script control
 
@@ -256,20 +267,58 @@ Full reference: **[docs/BDB_REFERENCE.md](BDB_REFERENCE.md)**
 | `add_comp <name> <cell> <parent\|-> <x1> <y1> <x2> <y2> [leaf\|nonleaf]` | Insert a new component. Use `−` as parent for a root instance. |
 | `derive_busterms [max_depth]` | Extract physical port locations from the hierarchy and write to BDB. |
 
+### Hierarchical routing quick reference
+
+These drive the *hierarchy-aware* flow (`run_hier_bundler` →
+`generate_hier_topologies` → `run_planner hier`). Each has a full section in
+**[docs/BDB_REFERENCE.md](BDB_REFERENCE.md)**.
+
+| Command | Description |
+|---|---|
+| [`set_bottom_up <cell>\|* [on\|off]`](BDB_REFERENCE.md#set_bottom_up) | Plan and route a cell's own interconnect **once**, then copy it to every instance (copies become keepouts for higher levels). `*` marks every eligible cell. Opt-in: the default hier flow marks nothing. |
+| [`align_bottom_up [max_shift <um>] [force]`](BDB_REFERENCE.md#align_bottom_up) | Nudge a marked cell's instances onto a **common track phase**, with minimal total movement, so the copies land on real signal tracks. Run after `def_track_pattern` + `set_bottom_up`, **before** `derive_busterms` / `add_blocks_from_bdb`. |
+| [`check_template_tracks [on_mismatch stop\|independent]`](BDB_REFERENCE.md#check_template_tracks) | The uniformity gate: verify every instance sees the same signal tracks before copying. Run after `run_nuts`, before `run_detailed_nuts`. |
+| [`set_cell_layer_cap <cell>\|* <cap> [-min <floor>]`](BDB_REFERENCE.md#set_cell_layer_cap) | Restrict a cell's own interconnect to the layer band `[floor..cap]`. |
+| [`set_cell_layer_share <cell> <layer> <pct>`](BDB_REFERENCE.md#set_cell_layer_share) | Lease a cell at most `pct`% of a layer's signal tracks — thins a layer inside its band, or grants a bounded slice above the cap. |
+| [`set_layer_caps_by_depth <cap1> [<cap2> …] [-min <floor>]`](BDB_REFERENCE.md#set_layer_caps_by_depth) | Bulk bands by how deep a cell's own content goes, deepest first. |
+| [`reserve_top_layers <N> [-min <floor>]`](BDB_REFERENCE.md#reserve_top_layers) | The stack-relative twin: reserve the top `N` layers for the top level and cap everything below. Prefer it when the intent is "the top level gets the top N" — an absolute band is only correct for the stack it was written against. |
+| [`load_pipeline [expanded]`](BDB_REFERENCE.md#load_pipeline) | Resume from a BDB checkpoint: bundles, candidate topologies, the plan, and as much routing as was persisted. |
+
+**Bottom-up command order** (the part that is easy to get wrong):
+
+```buda
+def_track_pattern …          # patterns first — alignment needs the pitches
+set_bottom_up my_cell
+align_bottom_up              # then phase-align the instances
+derive_busterms 1            # only now derive busterms / load blocks
+add_blocks_from_bdb 0
+…
+run_planner hier signal_tracks
+run_nuts
+check_template_tracks        # gate before copying; default policy STOPS on mismatch
+                             # (add `on_mismatch independent` only if you accept
+                             #  solving misaligned instances individually)
+run_detailed_nuts
+```
+
+Worked vehicles: `flow/rnr/mix2_fast_bottomup.buda` (with layer caps:
+`…_caps.buda`, with fractional shares: `…_shared.buda`) and
+`flow/chip/chip_bottomup.buda` at chip scale.
+
 **Common patterns:**
 
 ```buda
 # DEF + Verilog merge
-open_bdb  flow/lefdef/gcd/gcd.bdb
-import_def_lef  flow/lefdef/gcd/gcd.def  flow/lefdef/gcd/gcd.lef
-import_verilog  flow/lefdef/gcd/gcd.v
+open_bdb  <path1>/gcd.bdb  # create new empty db (or open existing one)
+import_def_lef  <path2>/gcd.def  <path2>/gcd.lef
+import_verilog  <path3>/gcd.v
 
 # Fixup after import
 move_comp   u_regfile  10.0  10.0
 resize_cell DFFRX1     5.6   4.0
 
 # Build from scratch
-open_bdb  flow/manual/tiny.bdb
+open_bdb  ./tiny.bdb
 add_comp  u_a  blk  -      0   0  100 100 nonleaf
 add_comp  u_b  blk  -    200   0  300 100 nonleaf
 add_comp  u_a/x0  cell  u_a   10  10   50  50 leaf
