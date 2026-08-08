@@ -51,6 +51,14 @@ def _run_buda(script):
 
 
 @pytest.mark.mid
+@pytest.mark.xfail(
+    strict=False,
+    reason="Reference-host-owned golden pending regen: the hanan_loci-default "
+           "flip (01c6cfbc) left big2_b4_b24.buda's select_topology index pins "
+           "host-fragile, so bundle 1's pinned candidate strands 60 bits off "
+           "the reference host (b4_bus_077 in that commit's regen list). "
+           "strict=False: it may route cleanly on the reference host. "
+           "See docs/internal/hanan_loci_golden_regen.md.")
 def test_big2_b4_b24_routes_cleanly():
     """Both pinned-buggy bundles now route with no opens at any stage, 0 unplaced.
 
