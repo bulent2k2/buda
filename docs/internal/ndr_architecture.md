@@ -177,11 +177,11 @@ recorded in [../NDR_UI.md](../NDR_UI.md).
 | R2 | prefix resolution beside `set_bundling`'s (longest-prefix, `*` default); hier occurrence-group resolution reuses the scoped-bit-cap union machinery |
 | R4 | ONE new function (working name `group_track_demand(members, layer)`, where `members` carries each bit's RESOLVED rule — a mixed-rule bundle (R8) means the group has no single rule, so a one-rule signature would either collapse members to the wrong rule or let planner and placement demand disagree; the shield arrangement is derived per rule-class within the group, and the layer/pattern context prices the quantization) in `buda_core`, consumed by `eff_bus_width`, planner `signal_tracks` capacity, kPeak floor, dead-span escalation, doomed-seat census, `_seg_admission_pool`, DNUTS admission |
 | R5 | generalize `for_each_signal_track_in_span` to run-of-k enumeration behind a rule-aware wrapper; `count_` sibling stays no-allocation, vector/count lockstep preserved |
-| R5a | phase 2: label→net-identity predicate shared between credit and the R9 audit |
+| R5a | phase 2: label→net-identity predicate shared between credit and the R9 audit (the predicate — `ndr_shield_net_matches`, §7.2 — SHIPPED with the audit; the credit term is the remaining phase-2 piece) |
 | R6 | `place_by_layer`: k-slot claims, guard slots, shield emission (`NetSegment` + shield flag + shield-net id); footprint-aware occupancy for the sharing exemption; keepout cull covers shields |
 | R7 | demand units through `BundleWrapper` width plumbing; layer restriction enters the planner's layer enumeration like `allowed_layers` |
 | R8 | bundler split pass re-derives group demand per part; split report gains the demand delta |
-| R9 | `check_design` nuts/dnuts stages: NDR_WIDTH / NDR_SPACING / NDR_SHIELD typed violations (BIT_SHORT machinery generalized to clearance) |
+| R9 | **LANDED (§7.2)** — `check_design` dnuts stage: NDR_WIDTH / NDR_SPACING / NDR_SHIELD typed violations |
 | R10 | v21 tables per §4; `load_pipeline` VOID path |
 | R11 | detailed viz width-proportional wires + SHIELD toggle; `report_wirelength` shield-metal line |
 | R12 | corpus byte-identity run per landing phase (the standing opt-in guard) |
@@ -268,15 +268,21 @@ R10 shipped on the §4 design, the v20 policy-table pattern verbatim:
   winning and a previous BDB's restored entries dropped (the Codex #546
   BDB-switch rule); declare-then-open converges the BDB to the session's
   typed entries.
-- **VOID-on-change**: `load_pipeline` re-resolves rules onto restored
-  wrappers and VOIDs (LOUD, re-plan required) a restored plan whose
-  governing rule changed since the checkpoint — by NAME (scope
-  added/removed/re-pointed) or by CONTENT (a session-typed rule shadowing
-  the persisted same-name definition; detected against a
-  once-per-BDB snapshot of the stored contents, taken BEFORE the converge
-  write-through can overwrite the pricing basis).  Voided bundles' restored
-  routing is excluded from the rehydrated NUTS result, exactly like the
-  v20 cap audit.
+- **VOID-on-change**: `bundle.ndr_rule` stamps each persisted bundle's
+  governing rule as its **pricing fingerprint** — the rule name plus the
+  QUANTIZED spec and layer restriction (`name|wN|gN|sN|pN|nNET|Lcsv`) —
+  so `load_pipeline` re-resolves rules onto restored wrappers (EVERY
+  member net, not just the first: a scope matching only a non-leading net
+  makes the bundle MIXED, which VOIDs with a re-bundle notice — the split
+  itself is stale) and VOIDs (LOUD, re-plan required) any bundle whose
+  fresh resolution fingerprints differently from the stamp.  The
+  fingerprint carries the pricing basis inside the bundle row, so a
+  same-name redeclare in a LATER session voids correctly even though the
+  stored rule definition was overwritten (the cross-session hazard a
+  content-snapshot design could not survive), and a content change that
+  quantizes identically (x1.8 → x2.0) correctly keeps the plan.  Voided
+  bundles' restored routing is excluded from the rehydrated NUTS result,
+  exactly like the v20 cap audit.
 
 **Prototype limitations (deliberate, each with its phase):**
 - **Flat flow only** (R2d): hier template propagation refused LOUDLY.
@@ -284,9 +290,7 @@ R10 shipped on the §4 design, the v20 policy-table pattern verbatim:
   emitted; R3/R7 price the uncredited worst case.
 - **No shield vias/connectivity** (R6 partial): shields are floating rails
   in phase 1 — connectivity to the shield net is the crediting phase's
-  problem.  No dedicated R9 audit types yet (check_design runs clean
-  because shields place like wires; NDR_WIDTH/NDR_SPACING/NDR_SHIELD
-  typed checks come with the audit phase).
+  problem.  (The R9 typed audit has since landed — §7.2.)
 - **Explorer badge/tint/ghosts not built**: detailed viz draws shields as
   wires (width-proportional lw already); the explorer surface is UI-phase
   work.
@@ -294,3 +298,39 @@ R10 shipped on the §4 design, the v20 policy-table pattern verbatim:
   units, for NDR segments — harmless while admission strands LOUDLY, but
   the census should adopt `bus_seg_demand` when NDR designs get big
   enough to census.
+
+### 7.2 R9 typed audit — LANDED (2026-08-08)
+
+The dedicated audit shipped as three typed violations in `check_design`'s
+detailed stage, built on the Python-side duck-typed-violation precedent
+(`NET_DRIVER_OPEN`): `audit_ndr_dnuts(session, wrapper)` in
+`buda_cmds/ndr_cmds.py` runs per governed bundle (gated on
+`input.ndr.active()`, so an ungoverned design's report is byte-identical)
+and its `_NdrViolation` objects flow through the existing summary/reason
+machinery beside the C++ `ConnViolation`s:
+
+- **NDR_SHIELD** — per governed segment, the placed shield-row count must
+  equal the rule's `ndr_run_layout` `'S'` count, and in flank-the-bus mode
+  the shields must actually be the run's outermost rows (a shield inside
+  the bits, or a bit outside the shields, is misplacement even at the
+  right count).
+- **NDR_WIDTH** — each governed bit's placed extent must cover its
+  `width_slots` SIGNAL slot centres (`signal_tracks_in` at the span
+  midpoint over `track ± width/2`), so a bit that lost its continuation
+  slots is LOUD even though it placed.
+- **NDR_SPACING** — the rule's run is EXCLUSIVE: any foreign bundle's wire
+  whose track centre lands strictly inside the run's extent with
+  overlapping span violates the reserved clearance (guard slots are
+  reserved-empty, so any occupant is foreign by construction).
+
+Beside the audit, the **R5a/R9 shared net-identity predicate** shipped in
+`src/ndr.h` as `ndr_shield_net_matches(requested, label)` (bound to
+Python): case-insensitive label equality, or same-supply-family membership
+(GND/VSS/GROUND one family, VDD/VCC/POWER the other; a POWER rail can
+never satisfy a GROUND spec).  The audit is its contract-definition site;
+its credited-rail consumer — pricing a pattern rail as the rule's shield —
+arrives with phase-2 R5a crediting, and sharing the ONE predicate is what
+keeps credit and audit from ever disagreeing (the review-pinned
+requirement).  Phase-1 emitted shields carry the rule's own `shield_net`,
+so the label check is definitionally clean today; the predicate starts
+mattering the moment crediting substitutes a rail.

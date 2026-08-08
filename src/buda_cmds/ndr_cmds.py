@@ -568,3 +568,126 @@ COMMANDS = {
     "set_ndr":  cmd_set_ndr,
     "dump_ndr": cmd_dump_ndr,
 }
+
+
+# ── R9 typed audit (NDR_WIDTH / NDR_SPACING / NDR_SHIELD) ──────────────────
+# Defense-in-depth at the dnuts stage: phase-1 placement emits correct
+# k-slot/guard/shield geometry BY CONSTRUCTION, so these checks exist to
+# catch what construction cannot promise forever — a healer move, a hand
+# edit, or the keepout cull removing a shield — and to give NDR designs a
+# violation vocabulary beside BIT_SHORT/KEEPOUT_CROSS.  Report-only, typed,
+# consumed by _check_design's normal summary machinery via the duck-typed
+# violation shape (_FidelityViolation precedent).  No governed bundles =
+# zero output (byte-identity).
+#
+# The shield NET-IDENTITY predicate (buda.ndr_shield_net_matches) ships
+# here as the audit's contract piece; its in-audit consumer — verifying a
+# CREDITED pattern rail really is the rule's shield net — arrives with R5a
+# crediting (phase 2), which must use the same predicate by requirement.
+
+class _NdrKind:
+    def __init__(self, name):
+        self.name = name
+
+
+class _NdrViolation:
+    """Duck-typed to the C++ ConnViolation interface the reporting paths
+    consume (kind.name / seg indices / block_name / bit_index / message)."""
+    seg_idx2 = -1
+    block_name = ""
+
+    def __init__(self, kind, seg_idx, bit_index, message):
+        self.kind = _NdrKind(kind)
+        self.seg_idx = seg_idx
+        self.bit_index = bit_index
+        self.message = message
+
+
+def audit_ndr_dnuts(session, wrapper):
+    """R9 violations for ONE governed wrapper against the placed detailed
+    result.  Checks per governed segment (rows grouped by seg_idx):
+
+    - NDR_SHIELD: the placed shield count must match the rule's layout
+      (a shield lost to the keepout cull, or a path that skipped emission,
+      leaves the bus unshielded — LOUD, not silent); for flank-the-bus the
+      two shields must be the OUTERMOST rows of the run.
+    - NDR_WIDTH: each signal bit's placed extent must cover width_slots
+      SIGNAL slot centres on its layer (an under-width wire — e.g. a
+      default-width placement of a governed bit — covers fewer).
+    - NDR_SPACING: the group's claimed run [lowest row edge .. highest row
+      edge] is EXCLUSIVE — a foreign wire (another bundle) whose track
+      centre falls inside it with an overlapping span sits on a guard or
+      between bits, violating the rule's clearance.
+    """
+    spec = wrapper.input.ndr
+    dr = session.detailed_result
+    if not spec.active() or dr is None:
+        return []
+    bid = wrapper.input.original_bundle.id
+    by_seg = {}
+    for ns in dr.net_segments:
+        if ns.bundle_id == bid:
+            by_seg.setdefault(ns.seg_idx, []).append(ns)
+    out = []
+    grid_stack = session.routing_grid
+    for seg_idx, rows in sorted(by_seg.items()):
+        bits    = [r for r in rows if not r.is_shield]
+        shields = [r for r in rows if r.is_shield]
+        if not bits:
+            continue                      # fully stranded: UNPLACED covers it
+        layout = buda.ndr_run_layout(spec, len(bits))
+        exp_shields = layout.count("S")
+        if len(shields) != exp_shields:
+            out.append(_NdrViolation(
+                "NDR_SHIELD", seg_idx, -1,
+                f"NDR_SHIELD: seg {seg_idx} rule '{spec.rule_name}' expects "
+                f"{exp_shields} shield wire(s) (net {spec.shield_net}) but "
+                f"{len(shields)} are placed — the bus is not shielded as "
+                f"declared"))
+        elif spec.shield_mode == 1 and exp_shields == 2:
+            lo = min(rows, key=lambda r: r.track_position)
+            hi = max(rows, key=lambda r: r.track_position)
+            if not (lo.is_shield and hi.is_shield):
+                out.append(_NdrViolation(
+                    "NDR_SHIELD", seg_idx, -1,
+                    f"NDR_SHIELD: seg {seg_idx} rule '{spec.rule_name}' "
+                    f"(flank-the-bus) shields are not the outermost wires "
+                    f"of the run — a signal bit sits outside the shield"))
+        # Width: placed extent must cover width_slots SIGNAL slot centres.
+        if spec.width_slots > 1 and grid_stack is not None:
+            for r in bits:
+                if not grid_stack.has_layer(r.layer):
+                    continue
+                g = grid_stack.get_layer_grid(r.layer)
+                mid = 0.5 * (r.span_lo + r.span_hi)
+                eps = 1e-6
+                covered = len(g.signal_tracks_in(
+                    mid, r.track_position - r.width / 2.0 - eps,
+                    r.track_position + r.width / 2.0 + eps))
+                if covered < spec.width_slots:
+                    out.append(_NdrViolation(
+                        "NDR_WIDTH", seg_idx, r.bit_index,
+                        f"NDR_WIDTH: seg {seg_idx} bit {r.bit_index} covers "
+                        f"{covered} SIGNAL slot(s), rule '{spec.rule_name}' "
+                        f"requires {spec.width_slots} — under-width wire"))
+        # Spacing: the run is exclusive — no foreign wire inside it.
+        run_lo = min(r.track_position - r.width / 2.0 for r in rows)
+        run_hi = max(r.track_position + r.width / 2.0 for r in rows)
+        s_lo = min(min(r.span_lo, r.span_hi) for r in rows)
+        s_hi = max(max(r.span_lo, r.span_hi) for r in rows)
+        layer = rows[0].layer
+        for o in dr.net_segments:
+            if o.bundle_id == bid or o.layer != layer:
+                continue
+            if not (run_lo < o.track_position < run_hi):
+                continue
+            o_lo, o_hi = min(o.span_lo, o.span_hi), max(o.span_lo, o.span_hi)
+            if o_lo < s_hi and o_hi > s_lo:
+                out.append(_NdrViolation(
+                    "NDR_SPACING", seg_idx, o.bit_index,
+                    f"NDR_SPACING: bundle {o.bundle_id} bit {o.bit_index} "
+                    f"sits at track {o.track_position:g} INSIDE bundle "
+                    f"{bid} seg {seg_idx}'s reserved run "
+                    f"[{run_lo:g}..{run_hi:g}] (rule '{spec.rule_name}') — "
+                    f"the rule's clearance is violated"))
+    return out

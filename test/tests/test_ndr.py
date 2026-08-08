@@ -565,3 +565,104 @@ def test_v21_quantization_invariant_change_keeps_plan(tmp_path):
     assert "VOIDED" not in out
     w = next(w for w in s2.bundles if w.input.ndr.active())
     assert w.plan.selected_topology_index >= 0
+
+
+# ── R9 typed audit (NDR_WIDTH / NDR_SPACING / NDR_SHIELD) ──────────────────
+
+def test_shield_net_predicate():
+    m = buda.ndr_shield_net_matches
+    assert m("GND", "GND") and m("GND", "vss") and m("VSS", "Ground")
+    assert m("VDD", "VCC") and m("vdd", "POWER")
+    assert not m("GND", "VDD") and not m("VSS", "power")
+    assert m("AVSS_Q", "avss_q")            # custom labels: exact only
+    assert not m("AVSS_Q", "GND")
+
+
+def _ns_copy(ns, **overrides):
+    c = buda.NetSegment()
+    for f in ("bundle_id", "seg_idx", "bit_index", "track_position",
+              "width", "layer", "span_lo", "span_hi", "is_shield"):
+        setattr(c, f, overrides.get(f, getattr(ns, f)))
+    return c
+
+
+def _audited(s):
+    return _run(s, "check_design dnuts")
+
+
+def test_r9_clean_shielded_flow_has_no_ndr_violations():
+    s, _ = _flow(["def_ndr clk2x width x2 spacing x2 shield bus net GND",
+                  "set_ndr clk_ clk2x"])
+    out = _audited(s)
+    assert "no violations" in out
+    assert "NDR_" not in out
+
+
+def test_r9_missing_shield_is_loud():
+    # The keepout cull (or any future path) removing a shield leaves the
+    # bus unshielded — NDR_SHIELD, not silence.
+    s, _ = _flow(["def_ndr clk2x width x2 spacing x2 shield bus net GND",
+                  "set_ndr clk_ clk2x"])
+    dr = s.detailed_result
+    clk_bid = next(w.input.original_bundle.id for w in s.bundles
+                   if w.input.ndr.active())
+    kept, dropped_one = [], False
+    for ns in dr.net_segments:
+        if not dropped_one and ns.bundle_id == clk_bid and ns.is_shield:
+            dropped_one = True
+            continue
+        kept.append(ns)
+    dr.net_segments = kept
+    out = _audited(s)
+    assert "NDR_SHIELD" in out and "expects 2 shield wire(s)" in out
+
+
+def test_r9_under_width_bit_is_loud():
+    # A governed bit placed at DEFAULT width (1 slot) violates the rule.
+    s, _ = _flow(["def_ndr clk2x width x2 spacing x2 shield bus net GND",
+                  "set_ndr clk_ clk2x"])
+    dr = s.detailed_result
+    clk_bid = next(w.input.original_bundle.id for w in s.bundles
+                   if w.input.ndr.active())
+    rows = []
+    shrunk = False
+    for ns in dr.net_segments:
+        if not shrunk and ns.bundle_id == clk_bid and not ns.is_shield:
+            rows.append(_ns_copy(ns, width=1.0))
+            shrunk = True
+        else:
+            rows.append(ns)
+    dr.net_segments = rows
+    out = _audited(s)
+    # The summary collapses per-bit messages into the registered kind
+    # reason; --verbose-conn would show the NDR_WIDTH literal.
+    assert "governed bit narrower than its rule's width" in out
+
+
+def test_r9_foreign_wire_in_run_is_loud():
+    # A foreign bundle's bit dropped onto a guard slot inside the reserved
+    # run violates the rule's clearance.
+    s, _ = _flow(["def_ndr clk2x width x2 spacing x2 shield bus net GND",
+                  "set_ndr clk_ clk2x"])
+    dr = s.detailed_result
+    clk_bid = next(w.input.original_bundle.id for w in s.bundles
+                   if w.input.ndr.active())
+    clk_rows = [ns for ns in dr.net_segments if ns.bundle_id == clk_bid]
+    tracks = sorted(ns.track_position for ns in clk_rows)
+    gap_track = 0.5 * (tracks[1] + tracks[2])       # inside the run
+    donor = next(ns for ns in dr.net_segments
+                 if ns.bundle_id != clk_bid and not ns.is_shield)
+    intruder = _ns_copy(donor, track_position=gap_track,
+                        layer=clk_rows[0].layer,
+                        span_lo=clk_rows[0].span_lo,
+                        span_hi=clk_rows[0].span_hi)
+    dr.net_segments = list(dr.net_segments) + [intruder]
+    out = _audited(s)
+    assert "foreign wire inside a rule's reserved run" in out
+
+
+def test_r9_ungoverned_flow_output_unchanged():
+    # No rules: the audit adds nothing — not even a header line.
+    s, _ = _flow([])
+    out = _audited(s)
+    assert "NDR_" not in out and "no violations" in out
