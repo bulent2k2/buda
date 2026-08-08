@@ -77,12 +77,18 @@ def_ndr bus25 width x2.5 spacing x2.5 shield per:2 net GND layers M5,M6
 
 ### Realizability is checked LOUDLY
 
-A rule needing more physically contiguous SIGNAL slots per bit than any run in
-a governed layer's track pattern can offer is a **hard error** at
-`run_detailed_nuts` (the first point where the grid is known), naming the
-layer, the rule, and the arithmetic. A rule explicitly restricted to a layer
-with no `def_track_pattern` errors up front. BUDA never silently degrades an
-NDR to the default rule.
+A **width** rule (`width_slots > 1`) needing more physically contiguous SIGNAL
+slots per bit than any run in a governed layer's track pattern can offer is a
+**hard error** at `run_detailed_nuts` (the first point where the grid is
+known), naming the layer, the rule, and the arithmetic. A rule explicitly
+restricted to a layer with no `def_track_pattern` errors up front. BUDA never
+silently degrades an NDR to the default rule.
+
+Shield-only and spacing-only rules are **not** width-checked this way — there
+is no per-bit contiguity to prove. If their run does not fit the available
+tracks at placement time, DNUTS reports it as a warning naming the rule and
+the demand, and strands the bus's bits (all-or-nothing admission), which
+`check_design` then counts as unplaced.
 
 ---
 
@@ -146,10 +152,10 @@ Layout letters: `B` first slot of a bit, `b` a continuation slot of a wide bit,
 
 | Stage | Behaviour |
 |---|---|
-| `run_planner` | Charges the group demand in its band capacity model, so an NDR bus that cannot fit shows up as planner overflow **at planning time**. A rule's `layers` restriction constrains layer choice. The planner always prices the **uncredited** worst case — whether a seat can credit a rail is not knowable until placement |
+| `run_planner` | Charges the group demand in its band capacity model, so a region that cannot afford the bus in **aggregate** overflows at planning time. This is capacity pricing, **not** a proof that a seat exists — actual occupancy can still leave no wide-enough unreserved run, which strands at DNUTS. A rule's `layers` restriction constrains layer choice. The planner always prices the **uncredited** worst case — whether a seat can credit a rail is not knowable until placement |
 | `run_nuts` | Reserves the NDR footprint, so bus-level packing and bit-level reality agree |
 | `run_detailed_nuts` | Places each bit on its `width_slots` contiguous slots, keeps guard slots empty, and emits shield wires as first-class routed objects. With `credit`, an end shield adjacent to a matching rail that spans the run is credited instead of emitted |
-| `check_design` | Adds `NDR_WIDTH` (a governed bit narrower than its rule), `NDR_SPACING` (foreign metal inside the reserved run — including CLOCK/CUSTOM pre-route rails), and `NDR_SHIELD` (shield count or arrangement wrong) |
+| `check_design` | Adds `NDR_WIDTH` (a governed bit narrower than its rule), `NDR_SPACING` (foreign metal inside the reserved run — including CLOCK/CUSTOM pre-route rails), and `NDR_SHIELD` (placed shield count wrong; for `shield bus` also that the shields are the run's outermost wires — under `bit`/`per:N` only the count is checked today) |
 | `report_wirelength` | Reports shield metal on its own line — it is real metal the design pays for, but not signal wirelength, so quality metrics stay comparable across designs with and without NDRs |
 | `visualize_topologies` | A governed bundle's header carries an NDR badge (rule + demand); the shield ghost overlay shows where the run's shields will sit; `debug` flags a candidate whose windows cannot host the demand |
 | BDB | Rules and scopes persist (`ndr_rule` / `ndr_scope`) and restore on `open_bdb`; `load_pipeline` VOIDs a restored plan LOUDLY when its governing rule changed since the checkpoint |

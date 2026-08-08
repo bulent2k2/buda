@@ -163,13 +163,19 @@ the bus is flanked by GND shield wires. What matters for a novice:
 *   **Declare before bundling.** Rules attach at `run_bundler` /
     `run_hier_bundler`; a bundle mixing rules is split into rule-uniform parts,
     reported loudly.
-*   **The planner knows the cost.** Extra width, guards and shields are charged
-    as track demand while layers are chosen, so an NDR bus that cannot fit shows
-    up as planner overflow *at planning time* — not as a failed route at the end.
-*   **Nothing degrades silently.** A rule that no track pattern can realize is a
-    hard error naming the arithmetic; `check_design` adds `NDR_WIDTH`,
-    `NDR_SPACING` and `NDR_SHIELD` checks; `report_wirelength` counts shield
-    metal on its own line.
+*   **The planner prices the cost.** Extra width, guards and shields are charged
+    as track demand while layers are chosen, so a region that cannot afford an
+    NDR bus in *aggregate* shows up as planner overflow at planning time rather
+    than only as a failed route at the end. This is aggregate capacity pricing,
+    not a proof that a seat exists: a bus can still strand at
+    `run_detailed_nuts` if the actual occupancy leaves no unreserved run wide
+    enough, which it reports as a warning plus unplaced bits.
+*   **Nothing degrades silently.** A **width** rule needing more contiguous
+    signal slots than a governed layer's pattern can ever offer is a hard error
+    at `run_detailed_nuts`, naming the arithmetic (shield-only and spacing-only
+    rules are not width-checked this way — they surface as the stranding above).
+    `check_design` adds `NDR_WIDTH`, `NDR_SPACING` and `NDR_SHIELD` checks, and
+    `report_wirelength` counts shield metal on its own line.
 *   **Inspect it** with `dump_ndr`, which prints each governed bundle's slot
     demand and layout (`SBbGBbGBbGBbS` — shield, bit, guard, …).
 
