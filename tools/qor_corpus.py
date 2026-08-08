@@ -440,6 +440,21 @@ def _runtime_report(paired):
     pct = (100 * d / tb) if tb else 0.0
     print("\nruntime (informational — single-run, noisy; not a guard):")
     print(f"  total {tb:.1f}s -> {tm:.1f}s  ({d:+.1f}s, {pct:+.1f}%)")
+    # Per-class rollups (risk_reduction_plan.md R4): runtime profiles differ
+    # qualitatively by design class (chip vs rnr vs big), so aggregate by the
+    # flow's directory family — class-level drift is visible even when no
+    # single flow crosses the per-flow noise floor below.
+    by_class = {}
+    for f, b, m in timed:
+        cls = f.replace("flow/", "").split("/")[0] if "/" in f else "(root)"
+        cb, cm = by_class.get(cls, (0.0, 0.0))
+        by_class[cls] = (cb + b["sec"], cm + m["sec"])
+    for cls in sorted(by_class, key=lambda c: -by_class[c][0]):
+        cb, cm = by_class[cls]
+        cd = cm - cb
+        cpct = (100 * cd / cb) if cb else 0.0
+        print(f"    {cls:<20} {cb:>7.1f}s -> {cm:>7.1f}s  "
+              f"({cd:+.1f}s, {cpct:+.1f}%)")
     movers = sorted(timed, key=lambda x: abs(x[2]["sec"] - x[1]["sec"]),
                     reverse=True)
     for f, b, m in movers:

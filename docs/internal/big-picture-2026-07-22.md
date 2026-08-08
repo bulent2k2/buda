@@ -9,7 +9,7 @@ trace of two hierarchical flows.*
 **Interactive version:** a published interaction map with the live-trace charts —
 <https://claude.ai/code/artifact/087b0257-4001-4a97-b460-1d08efcb3794>.
 
-Companion reading: [congestion_planner.md](congestion_planner.md),
+Companion reading: [congestion_planner.md](../congestion_planner.md),
 [single_source_topo_truth.md](single_source_topo_truth.md),
 [seg_junction_coplacement.md](seg_junction_coplacement.md),
 [planner_signal_track_capacity.md](planner_signal_track_capacity.md),
