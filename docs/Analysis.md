@@ -33,9 +33,13 @@ Beyond the one-pass pipeline there is a measured-feedback **healer loop**
 (`negotiate_congestion`, `ripup_reroute`, `refine_selection`) that reads
 the *actual* placement failures (NUTS overlaps, DetailedNUTS opens) and
 re-plans against them, and a `check_design` audit that types every
-violation. Quality and runtime are guarded by a 41-flow QoR corpus
-(`tools/qor_corpus.py`) whose gate — "0 better / 0 worse / N unchanged,
-wirelength ±0" — is the standard bar for any routing-affecting change.
+violation. Quality is guarded by a 41-flow QoR corpus
+(`tools/qor_corpus.py`): `--compare` fails when ANY flow regresses on
+overlaps/unplaced/viol_bundles (improvements pass; wirelength and
+runtime are reported informationally). Running it base-vs-branch is the
+standard bar for any routing-affecting change — and a change that
+*claims* to be behavior-neutral is held to the stricter observed
+outcome: 0 better / 0 worse / all unchanged with wirelength exactly ±0.
 
 ## Repository Layout
 
@@ -113,8 +117,11 @@ BDB (SQLite): components · cells · pins · nets · busterms · bundles
 
 Stages persist into the BDB as they run (bundles, candidate topologies,
 planner decisions, bus routing, bit routing), so `load_pipeline` can
-resume a session from any checkpoint — including the hier flow's
-expanded per-instance view.
+resume a fresh session from a checkpoint taken after
+`generate_topologies`, `run_planner`, or `run_nuts` (+`ripup_reroute`) —
+as deep as was persisted, including the hier flow's expanded
+per-instance view — with the setup (layers/patterns/blocks) re-declared
+first; see `docs/BDB_REFERENCE.md` for the supported resume points.
 
 ## Major Modules
 
