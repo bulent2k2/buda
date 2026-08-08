@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=19;
+PRAGMA user_version=22;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -19,12 +19,12 @@ CREATE TABLE bundle (
         is_expanded    INTEGER DEFAULT 0,   -- planner-expanded instance row (v18)
         bu_locked      INTEGER DEFAULT 0,   -- bottom-up template copy (v18)
         cloned_from    TEXT DEFAULT ''      -- rotation-class clone origin (v19)
-    );
-INSERT INTO "bundle" VALUES('1',1,'STRICT','DRV:alu_i/pa_i|REC:alu_i/pb_i,',2,'alu_cell','["alu_i"]',NULL,0,-1,-1,'','[]','',0,0,'');
-INSERT INTO "bundle" VALUES('3',1,'STRICT','DRV:mem_i/qa_i|REC:mem_i/qb_i,',2,'mem_cell','["mem_i"]',NULL,0,-1,-1,'','[]','',0,0,'');
-INSERT INTO "bundle" VALUES('2',0,'STRICT','DRV:alu_i/pb_i|REC:mem_i/qa_i,',2,'','[]',NULL,0,-1,-1,'','[]','',0,0,'');
-INSERT INTO "bundle" VALUES('4',1,'STRICT','DRV:alu_i/pa_i|REC:alu_i/pb_i,',2,'alu_cell','["alu_i"]','1',1,-1,-1,'','[]','',1,0,'');
-INSERT INTO "bundle" VALUES('5',1,'STRICT','DRV:mem_i/qa_i|REC:mem_i/qb_i,',2,'mem_cell','["mem_i"]','3',1,-1,-1,'','[]','',1,0,'');
+    , ndr_rule TEXT DEFAULT '');
+INSERT INTO "bundle" VALUES('1',1,'STRICT','DRV:alu_i/pa_i|REC:alu_i/pb_i,',2,'alu_cell','["alu_i"]',NULL,0,-1,-1,'','[]','',0,0,'','');
+INSERT INTO "bundle" VALUES('3',1,'STRICT','DRV:mem_i/qa_i|REC:mem_i/qb_i,',2,'mem_cell','["mem_i"]',NULL,0,-1,-1,'','[]','',0,0,'','');
+INSERT INTO "bundle" VALUES('2',0,'STRICT','DRV:alu_i/pb_i|REC:mem_i/qa_i,',2,'','[]',NULL,0,-1,-1,'','[]','',0,0,'','');
+INSERT INTO "bundle" VALUES('4',1,'STRICT','DRV:alu_i/pa_i|REC:alu_i/pb_i,',2,'alu_cell','["alu_i"]','1',1,-1,-1,'','[]','',1,0,'','');
+INSERT INTO "bundle" VALUES('5',1,'STRICT','DRV:mem_i/qa_i|REC:mem_i/qb_i,',2,'mem_cell','["mem_i"]','3',1,-1,-1,'','[]','',1,0,'','');
 CREATE TABLE bundle_busterm (
         bundle_id  TEXT REFERENCES bundle(id),
         busterm_id TEXT,
@@ -145,14 +145,16 @@ INSERT INTO "busterm" VALUES('tb:alu_i/pb_i:55fabb5a',NULL,'alu_i/pb_i',-1,160.0
 INSERT INTO "busterm" VALUES('tb:mem_i/qa_i:5308c2f8',NULL,'mem_i/qa_i',-1,725.0,65.0,825.0,135.0,'BLOCK',NULL,NULL,'THRU',720.0,60.0,830.0,140.0);
 INSERT INTO "busterm" VALUES('tb:mem_i/qb_i:7b3fd8a7',NULL,'mem_i/qb_i',-1,860.0,65.0,960.0,135.0,'BLOCK',NULL,NULL,'THRU',855.0,60.0,965.0,140.0);
 CREATE TABLE cell (
-            name      TEXT PRIMARY KEY,
-            width     REAL NOT NULL,
-            height    REAL NOT NULL,
-            bottom_up INTEGER NOT NULL DEFAULT 0
+            name        TEXT PRIMARY KEY,
+            width       REAL NOT NULL,
+            height      REAL NOT NULL,
+            bottom_up   INTEGER NOT NULL DEFAULT 0,
+            layer_cap   INTEGER NOT NULL DEFAULT -1,
+            layer_floor INTEGER NOT NULL DEFAULT -1
         );
-INSERT INTO "cell" VALUES('alu_cell',420.0,200.0,0);
-INSERT INTO "cell" VALUES('mem_cell',420.0,200.0,0);
-INSERT INTO "cell" VALUES('pipe_cell',110.0,80.0,0);
+INSERT INTO "cell" VALUES('alu_cell',420.0,200.0,0,-1,-1);
+INSERT INTO "cell" VALUES('mem_cell',420.0,200.0,0,-1,-1);
+INSERT INTO "cell" VALUES('pipe_cell',110.0,80.0,0,-1,-1);
 CREATE TABLE cell_children (
             parent_cell TEXT NOT NULL REFERENCES cell(name),
             inst_name   TEXT NOT NULL,
@@ -165,6 +167,12 @@ INSERT INTO "cell_children" VALUES('alu_cell','pa_i','pipe_cell',20.0,60.0);
 INSERT INTO "cell_children" VALUES('alu_cell','pb_i','pipe_cell',155.0,60.0);
 INSERT INTO "cell_children" VALUES('mem_cell','qa_i','pipe_cell',20.0,60.0);
 INSERT INTO "cell_children" VALUES('mem_cell','qb_i','pipe_cell',155.0,60.0);
+CREATE TABLE cell_layer_share (
+            cell     TEXT NOT NULL REFERENCES cell(name),
+            layer_id INTEGER NOT NULL,
+            share    REAL NOT NULL,
+            PRIMARY KEY (cell, layer_id)
+        );
 CREATE TABLE cell_pin (
             cell      TEXT NOT NULL REFERENCES cell(name),
             pin_name  TEXT NOT NULL,
@@ -216,11 +224,28 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','19');
+INSERT INTO "meta" VALUES('schema_version','22');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
+INSERT INTO "meta" VALUES('pinned_group:1','');
+INSERT INTO "meta" VALUES('pinned_group:2','');
+INSERT INTO "meta" VALUES('pinned_group:3','');
 INSERT INTO "meta" VALUES('user_ops:1:c28a5875dd43fd81','{"base": "new", "ops": ["edit_add_trunk H 30 75 210", "edit_add_stub pa_i 0", "edit_add_stub pb_i 0", "edit_set_span 0 102 182"]}');
 INSERT INTO "meta" VALUES('user_ops:3:ca0d1e834516a611','{"base": "new", "ops": ["edit_add_trunk H 30 75 210", "edit_add_stub qa_i 0", "edit_add_stub qb_i 0", "edit_set_span 0 102 182"]}');
 INSERT INTO "meta" VALUES('user_ops:2:2be06ffa4a617a23','{"base": "new", "ops": ["edit_add_trunk H 30 200 760", "edit_add_stub alu_i/pb_i 0", "edit_add_stub mem_i/qa_i 0", "edit_set_span 0 232 740"]}');
+CREATE TABLE ndr_rule (
+            name         TEXT PRIMARY KEY,
+            width_x      REAL NOT NULL DEFAULT 1,
+            spacing_x    REAL NOT NULL DEFAULT 1,
+            shield_mode  INTEGER NOT NULL DEFAULT 0,
+            shield_per_n INTEGER NOT NULL DEFAULT 0,
+            shield_net   TEXT NOT NULL DEFAULT 'GND',
+            layers       TEXT NOT NULL DEFAULT '',
+            credit       INTEGER NOT NULL DEFAULT 0
+        );
+CREATE TABLE ndr_scope (
+            prefix TEXT PRIMARY KEY,
+            rule   TEXT NOT NULL REFERENCES ndr_rule(name)
+        );
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
             name TEXT UNIQUE NOT NULL

@@ -150,8 +150,10 @@ set_unit_check warn    # report and continue
 set_unit_check off     # disable
 ```
 
-Calibrated 2026-08 over the tree's flows, spanning `flow/four_blocks`
-(extent 150) to `flow/chip/chip_topdown` (extent 14350).  Measurement and
+Calibrated 2026-08 over **124 flows / 580 layer-rows** — every `.buda` in
+`flow/`, `demo/` and `test/` that reaches a planner with a grid — spanning
+`flow/four_blocks` (extent 150) to `flow/chip/chip_topdown` (extent 14350).
+Nothing in that population is within 7× of either bound.  Measurement and
 predicate are the
 same code the verdict uses — `unit_consistency_signals` /
 `unit_plausibility_faults` in `src/buda_session/util.py` — so the number a
