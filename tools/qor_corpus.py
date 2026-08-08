@@ -957,8 +957,13 @@ def main():
         sys.exit(1 if cmd_compare(*args.compare) else 0)
 
     if args.decisions and args.out:
-        os.environ["BUDA_QOR_DECISIONS_DIR"] = os.path.abspath(
-            args.out + ".decisions")
+        _dd = os.path.abspath(args.out + ".decisions")
+        # A reused --out must not inherit a previous run's traces: workers
+        # overwrite only the flows THEY run, so a subset/errored rerun
+        # would leave stale files that _decisions_report attributes to the
+        # current experiment (Codex #621).
+        shutil.rmtree(_dd, ignore_errors=True)
+        os.environ["BUDA_QOR_DECISIONS_DIR"] = _dd
     cmd_run(args.flows or CORPUS, args.out, jobs=args.jobs)
 
 
