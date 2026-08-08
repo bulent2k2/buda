@@ -158,11 +158,17 @@ set_ndr clk_ clk2x
 ```
 
 Every `clk_*` net now routes 2 slots wide, keeps a guard slot of clearance, and
-the bus is flanked by GND shield wires. What matters for a novice:
+the bus is flanked by shield wires carrying the `GND` label. What matters for a
+novice:
 
 *   **Declare before bundling.** Rules attach at `run_bundler` /
     `run_hier_bundler`; a bundle mixing rules is split into rule-uniform parts,
     reported loudly.
+*   **An emitted shield is labeled, not bonded.** It is a real routed wire with
+    the shield net's identity and it reserves the track, but nothing straps it
+    to the power grid yet — so do not rely on it for electrical shielding as-is.
+    Add the bonding straps downstream, or use the `credit` token so an
+    **existing** power rail (already grid metal) serves as the shield instead.
 *   **The planner prices the cost.** Extra width, guards and shields are charged
     as track demand while layers are chosen, so a region that cannot afford an
     NDR bus in *aggregate* shows up as planner overflow at planning time rather
@@ -361,6 +367,69 @@ For larger designs, the usual top-down workflow is:
    want to study.
 4. Run `run_hier_bundler`, `generate_hier_topologies`, and `run_planner hier`.
 5. Inspect congestion and topology choices, refine the floorplan, and rerun.
+
+### Bottom-Up: Route a Repeated Cell Once
+
+The flow above is **top-down**: every instance of a repeated cell is planned and
+routed separately, so a design with 40 copies of one cell solves the same local
+problem 40 times — and can solve it 40 slightly different ways.
+
+**Bottom-up** planning inverts that for cells you nominate. The cell's own
+interconnect is planned and routed **once** on a reference instance, and that
+result is copied verbatim to every other instance. The copies then act as
+keepouts for higher levels, which route around them. Two things follow: the
+instances are guaranteed identical (a real requirement for repeated blocks), and
+the work is done once instead of N times.
+
+It is **opt-in** — the default hier flow marks nothing, so your results do not
+change unless you ask for this:
+
+```buda
+def_track_pattern 5 …          # patterns FIRST: alignment needs the pitches
+set_bottom_up proc_cell        # nominate the cell ('*' marks every eligible one)
+align_bottom_up                # nudge its instances onto a common track phase
+derive_busterms 1              # only now derive busterms / load blocks
+add_blocks_from_bdb 0
+…
+run_planner hier signal_tracks
+run_nuts
+check_template_tracks                            # the uniformity gate (stops on mismatch)
+run_detailed_nuts
+```
+
+Three commands, in this order, and the order matters:
+
+*   **`set_bottom_up <cell>`** nominates the cell. Its instances must be
+    congruent — any of the 8 orientations works, and the 90°-rotated family is
+    split into its own class solved separately. An instance that matches under no
+    orientation is refused loudly rather than copied wrongly.
+*   **`align_bottom_up`** nudges the instances onto a shared track phase, with
+    minimal total movement (usually the majority does not move at all). Copied
+    routing lands on real signal tracks only if the instances agree on where the
+    tracks are. Run it **after** `def_track_pattern` and `set_bottom_up`, but
+    **before** `derive_busterms` / `add_blocks_from_bdb` — it moves cells, and
+    those commands snapshot placement.
+*   **`check_template_tracks`** is the gate that proves it worked: it compares
+    the signal tracks each instance actually sees. The default `on_mismatch
+    stop` refuses to copy and hands you the mismatch report — keep it, because
+    it is what makes the identical-instances promise above hold: if alignment
+    did not work, you want to know and fix the placement, not route on. Only if
+    you *accept* divergent instances (some designs do, when one stray instance
+    is not worth re-placing for) switch to `on_mismatch independent`, which
+    copies the aligned instances and solves the misaligned ones individually —
+    the copies stay uniform, the outliers do not. `run_detailed_nuts` runs the
+    check implicitly if you skip it, but then you do not get to choose.
+
+**If a cell should keep its routing off the top-level layers**, cap it:
+`set_cell_layer_cap proc_cell M3` restricts the cell's own interconnect to the
+band up to M3, leaving the upper layers for the levels above. `reserve_top_layers
+2` expresses the common intent — "the top level gets the top two layers" —
+without hard-coding layer names against a particular stack.
+
+Full command reference (arguments, edge cases, persistence):
+[BDB Reference](BDB_REFERENCE.md#set_bottom_up). Worked vehicles:
+`flow/rnr/mix2_fast_bottomup.buda`, its capped and shared variants, and
+`flow/chip/chip_bottomup.buda` at chip scale.
 
 ## 7. Getting Help
 *   Check `docs/BUDA_SCRIPT_REFERENCE.md` for a full list of commands.

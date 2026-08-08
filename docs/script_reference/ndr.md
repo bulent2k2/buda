@@ -12,7 +12,7 @@ Audience notes: the architect-facing contract is [NDR Requirements](../NDR_REQUI
 
 By default every bit-wire is one signal track wide with default spacing. An
 **NDR** is a named rule that widens a net's wire, reserves extra clearance
-around it, and/or flanks it with grounded shield wires — the treatment a clock
+around it, and/or flanks it with shield wires — the treatment a clock
 or a sensitive analog bus needs. Rules are declared once, attached to nets by
 name prefix, and then govern the whole pipeline: the planner **prices** the
 extra demand where it chooses layers, abstract NUTS reserves the footprint,
@@ -36,8 +36,16 @@ conversion — so no two stages can disagree about whether a bus fits:
 | `shield bit` | a shield in EVERY gap, ends included |
 | `shield per:N` | a shield after every N bits, plus both ends |
 
-A shielded gap carries the shield **instead of** guards — the grounded wire
-both occupies the slot and satisfies the clearance intent.
+A shielded gap carries the shield **instead of** guards — the shield wire both
+occupies the slot and satisfies the clearance intent.
+
+> **Emitted shields are labeled, not bonded.** A shield wire BUDA emits is a
+> first-class routed object carrying the rule's shield-net identity, and it
+> reserves the track — but nothing connects it to the power grid yet, so it
+> does not provide electrical shielding on its own. Bonding vias are a known
+> gap ([`internal/opens_ndr.md`](../internal/opens_ndr.md) §1); plan to add the
+> straps downstream, or use `credit` so an **existing** rail — which *is* grid
+> metal — serves as the shield instead.
 
 Group-level means shared resources are counted once: an 8-bit flanked bus pays
 **2** end shields, while two 4-bit flanked buses pay **4**. `dump_ndr` prints
