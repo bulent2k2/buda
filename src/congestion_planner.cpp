@@ -30,6 +30,16 @@
 
 namespace buda {
 
+// BUDA_REPLAN_PROF=1: enable the replan_bundle_ripup / plan_bundle timing
+// instrumentation (B1).  Checked once; zero cost elsewhere when unset.
+static bool replan_prof_on() {
+    static const bool on = [] {
+        const char* e = std::getenv("BUDA_REPLAN_PROF");
+        return e && *e && *e != '0';
+    }();
+    return on;
+}
+
 // NDR (phase 1): a governed bundle's per-segment charge is its member bits'
 // GROUP demand in slots — the single-sourced conversion of requirement R4
 // (ndr.h) shared with abstract-NUTS width and DNUTS admission, so no two
@@ -1980,17 +1990,21 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     // load reflects only already-committed bundles (within-candidate charges are
     // restored per candidate), so it grows monotonically across the greedy
     // schedule and steers later bundles onto the layers earlier ones left empty.
-    const auto t_ll0 = std::chrono::steady_clock::now();
+    const bool prof = replan_prof_on();
+    const auto t_ll0 = prof ? std::chrono::steady_clock::now()
+                            : std::chrono::steady_clock::time_point{};
     std::map<int,double> layer_load;
     for (const auto& c : cuts_) {
         double u = 0.0;
         for (int b = 0; b < c.num_bands(); ++b) u += c.usage(b);
         layer_load[c.layer_id] += u;
     }
-    prof_layerload_us_ += (long long)std::chrono::duration_cast<
-        std::chrono::microseconds>(std::chrono::steady_clock::now() - t_ll0)
-        .count();
-    ++prof_plan_calls_;
+    if (prof) {
+        prof_layerload_us_ += (long long)std::chrono::duration_cast<
+            std::chrono::microseconds>(std::chrono::steady_clock::now() - t_ll0)
+            .count();
+        ++prof_plan_calls_;
+    }
     double max_h_load = 1.0, max_v_load = 1.0;
     for (const auto& [lid, u] : layer_load) {
         const Layer* L = layers_.get_layer(lid);
@@ -2017,7 +2031,8 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     // with per-candidate results identical to the sequential loop; the
     // ordered reduction below then replays the sequential compare, so the
     // winner — and every tie-break — is identical to the serial sweep.
-    const auto t_sc0 = std::chrono::steady_clock::now();
+    const auto t_sc0 = prof ? std::chrono::steady_clock::now()
+                            : std::chrono::steady_clock::time_point{};
     std::vector<CandScore> scores(cand_indices.size());
     const int n_threads = resolved_plan_threads_((int)cand_indices.size());
     if (n_threads > 1) {
@@ -2037,10 +2052,12 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         for (size_t k = 0; k < cand_indices.size(); ++k)
             scores[k] = score_candidate_(bw, cand_indices[k], mode, ctx, ov);
     }
-    prof_scoring_us_ += (long long)std::chrono::duration_cast<
-        std::chrono::microseconds>(std::chrono::steady_clock::now() - t_sc0)
-        .count();
-    prof_cands_ += (long long)cand_indices.size();
+    if (prof) {
+        prof_scoring_us_ += (long long)std::chrono::duration_cast<
+            std::chrono::microseconds>(std::chrono::steady_clock::now() - t_sc0)
+            .count();
+        prof_cands_ += (long long)cand_indices.size();
+    }
 
     // Ordered reduction — the sequential loop's tail, verbatim semantics.
     for (size_t k = 0; k < cand_indices.size(); ++k) {
@@ -2961,10 +2978,7 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
     // Env-gated per-call profile (BUDA_REPLAN_PROF=1): where does a call's
     // time go — the recharge-all, the STRICT plan, the victim ladder (and how
     // many victims / plan_bundle sweeps it grinds), or the fallbacks?
-    static const bool kProf = [] {
-        const char* e = std::getenv("BUDA_REPLAN_PROF");
-        return e && *e && *e != '0';
-    }();
+    const bool kProf = replan_prof_on();
     using clock_ = std::chrono::steady_clock;
     auto ms_since = [](clock_::time_point t0) {
         return std::chrono::duration<double, std::milli>(clock_::now() - t0)
