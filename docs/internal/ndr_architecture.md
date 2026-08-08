@@ -290,9 +290,15 @@ R10 shipped on the §4 design, the v20 policy-table pattern verbatim:
 - **No shield vias/connectivity** (R6 partial): an EMITTED shield is still
   a floating rail (see §7.3 for the decided disposition — a CREDITED end
   needs no bonding at all, the rail is already grid-connected).
-- **Explorer badge/tint/ghosts not built**: detailed viz draws shields as
-  wires (width-proportional lw already); the explorer surface is UI-phase
-  work.
+- ~~Explorer badge/tint/ghosts not built~~ — LANDED: header badge
+  (rule + group demand, `+credit`), debug-view realizability flag (a
+  candidate whose slide windows cannot host the demand on any of its
+  layers renders red with the arithmetic; unbounded windows and missing
+  grids are conservative no-flags), and the rule-derived shield ghost
+  overlay (dashed envelope edges at the run's outer-slot offsets —
+  declaration-derived, read-only, nothing persists).  All gated on an
+  active spec: ungoverned designs render byte-identically (test-pinned,
+  `test_topo_explorer_ndr_surface.py`).
 - The doomed-seat census/forensics still count member bits, not demand
   units, for NDR segments — harmless while admission strands LOUDLY, but
   the census should adopt `bus_seg_demand` when NDR designs get big

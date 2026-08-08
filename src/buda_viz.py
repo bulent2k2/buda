@@ -79,8 +79,13 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
                  rerun_fn=None, refresh_fn=None, layer_stack=None,
                  ui_state: ViewState = None, start_bidx=0, layer_visible=None,
                  on_focus_bundle=None, bundle_order_fn=None, fp_resolver=None,
-                 user_ops_sink=None, groups_fn=None, cost_fn=None):
+                 user_ops_sink=None, groups_fn=None, cost_fn=None,
+                 routing_grid=None):
         self.fp          = fp
+        # Optional RoutingGridStack: powers the NDR surface (rule-derived
+        # shield ghosts + the debug realizability tint).  None (orphan
+        # explorer / no grid declared) -> those overlays are silently off.
+        self.routing_grid = routing_grid
         # Per-bundle frame resolution (hier): fp_resolver is the session's
         # _make_topo_fp_resolver — wrapper -> the Floorplan its candidates were
         # generated in (cell-local for a cell-level template, endpoint frame

@@ -649,6 +649,11 @@ class ExplorerDrawMixin:
                                         mutation_scale=11),
                         zorder=12, alpha=seg_alpha)
 
+        # NDR shield-ghost overlay: rule-derived envelope edges flanking
+        # each drawn segment (read-only; no grid or ungoverned = no-op).
+        self._draw_ndr_ghosts(ax, cs_list, _draw_perp, _draw_lo, _draw_hi,
+                              _resolved_lid)
+
         # Update title with layer info (Compacted: M4x5 M5x3)
         counts = {}
         for lid in actual_lids:
@@ -682,17 +687,27 @@ class ExplorerDrawMixin:
         gpin = getattr(self.wrapper.input, 'pinned_group', [])
         grp_badge = (f"  ◆ GROUP-PINNED ({len(gpin)})"
                      + (" • member" if self.idx in gpin else "")) if gpin else ""
+        # NDR badge (governed bundles): rule + group demand in the header.
+        ndr_badge = self._ndr_badge()
         title_main = (
             f"{bus_label}B{bid} ({nterms} terms/{len(topo.segments)} segs) · topo {self.idx + 1}/{n}"
-            f"{fam_str} · {topo.type} · WL={wl} · [{layer_summary}]{sel_badge}{grp_badge}"
+            f"{fam_str} · {topo.type} · WL={wl} · [{layer_summary}]"
+            f"{ndr_badge}{sel_badge}{grp_badge}"
         )
         # Debug view ('debug' flag): a second title line with the planner cost of
         # THIS candidate + its cost-rank (candidates are stepped in increasing
         # cost, so the rank is the traversal position) and the cost components.
         cost_line = self._debug_cost_title()
+        # Realizability tint (debug view only, like the cost line): flag a
+        # candidate whose slide windows cannot host the rule's demand on any
+        # of its layers — the seat search is guaranteed to strand it there.
+        ndr_note = (self._ndr_infeasible_note(cs_list, _resolved_lid)
+                    if cost_line else None)
+        if ndr_note:
+            cost_line = (cost_line + "  " + ndr_note) if cost_line else ndr_note
         if cost_line:
             title_main += "\n" + cost_line
-        
+
         title_color = 'black'
         if is_planner_active and is_current_selection:
             title_color = '#666600'  # mixture
@@ -700,6 +715,8 @@ class ExplorerDrawMixin:
             title_color = '#886600'  # gold
         elif is_planner_active:
             title_color = '#005588'  # blue
+        if ndr_note:
+            title_color = '#aa2222'  # NDR-infeasible candidate: red flag
 
         # Shrink the title font so a long title (many segments, a group-pinned
         # super-candidate, or the debug cost line) fits the figure width instead
