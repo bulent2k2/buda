@@ -418,52 +418,48 @@ EMPTY; (b) an overlay-independent way to revive the pruning soundly;
 
 ### B1 PR2 — landed: admissible decoupled-candidate ladder pruning
 
-The revival of approach (b), via the observation that Codex's
-counterexample has a NECESSARY precondition: a disjoint candidate can
-only flip feasible via the `kBalance`→layer-choice→own-overlay cascade
-if it HAS overlay coupling — two segments sharing a `(cut, band)`.  For
-an **overlay-DECOUPLED** candidate (no two segments ever share a
-cut+band — every L/Z/U/simple-trunk shape, since an H-seg crosses only
-V-cuts and a V-seg only H-cuts), each segment's feasibility is a pure
-function of usage on its own footprint bands, and the overflow gate is
-`kBalance`-free, so "disjoint from the rip ⟹ feasibility unchanged" is
-rigorously true.  Only multi-trunk / fan-in-taper candidates couple.
+The revival of approach (b) restricts pruning to candidates whose
+feasibility is layer-CHOICE-independent — since a rip changes global
+`kBalance` and can flip the greedy's chosen layer even on unchanged
+usage.  Two mechanisms let a choice-flip change feasibility, so both are
+excluded from pruning: **(1) overlay coupling** (two segments share a
+`(cut, band)`, so a flipped layer's own-overlay charge changes a later
+segment's admissibility — the #629 hole) and **(2) window sensitivity**
+(a bounded ConnTopology window fit by some allowed layers and not others,
+so a flip to a narrower/wider layer changes the post-selection window-fit
+verdict — Codex's #634 P1).  `cand_is_decoupled_` tests (1),
+`cand_band_footprint_` reports (2); a candidate is prunable only when
+neither holds, and the mask is **{non-prunable} ∪ {footprint intersects
+freed}** — a provable superset of the feasible set, so plan_bundle's
+ordered reduction elects the identical winner (routing byte-identical).
 
-So the mask becomes **{coupled candidates} ∪ {candidates whose
-footprint intersects the freed bands}** — a provable SUPERSET of the
-feasible set (`cand_is_decoupled_` classifies; coupled ones are always
-scored).  plan_bundle's ordered reduction over any superset elects the
-identical winner, so the routing is byte-identical, and a victim
-intersecting no decoupled candidate (mask empty) skips its whole sweep.
+**Outcome: admissible, but INERT on the flows B1 targets.**  With BOTH
+guards the prune count is **0 on `chip_stack_bottomup` and
+`chip_bottomup`** (only `mix2_fast_bottomup`, a ~5 s flow, keeps 305):
+its bounded bottom-up template windows combined with mixed-pitch layers
+(18 vs 24) make essentially every candidate window-sensitive, so nothing
+is soundly prunable.  The −7 s I first measured (4448 prunes) was
+**unsound** — it pruned window-sensitive candidates that could flip
+feasibility; the corpus stayed byte-identical only because the flips did
+not happen to change the final winner on those 41 flows, NOT because they
+could not (the exact #629 trap, a second time).  So both B1 pruning
+levers — the floor gate and the decoupled/window prune — are inert once
+made correct.
 
-Measured on `chip_stack_bottomup` (BUDA_THREADS=4): **4448** of the
-ladder's candidate-scorings pruned (the unsound #629 version pruned
-10 509 — the other ~6 k were coupled-disjoint, now correctly scored;
-745 coupled candidates seen cumulatively), ladder ~43 → ~32 s.
-Gates: qor_corpus **0 better / 0 worse / 41 unchanged**, abstract AND
-detailed WL **+0.00 %**; full flow log byte-identical on
-`chip_stack_bottomup`; decision lines byte-identical on
-`mix2_fast_bottomup`; fast+mid tiers green (2493).  `runtime_ab -n 5`:
-**negotiate 51.1 → 44.0 s (−7.0 s)**, the ladder win where the change
-acts.  `run_planner` and the topdown twin are PROVABLY unaffected — a
-controlled B/M interleave gives identical `run_planner` medians (~31.1 s
-both), so runtime_ab's apparent +2.6 s there is its base-first/
-branch-second ordering bias, not code.  plan_bundle's null-mask path is
-kept byte-for-byte main (the candidate-index build stays INLINE; routing
-it through `collect_cand_indices_` measured as a spurious run_planner
-regression and was reverted — the same hot-path sensitivity the
-ReplanProf counters hit).
+**The floor-relievability gate** (skip a whole ladder when even removing
+ALL rippable load leaves no candidate viable) was likewise measured INERT
+(1 skip / 105 calls on `chip_stack_bottomup`): these ladders are
+"needs-multiple-rips" hopeless, not "blockers-locked" hopeless.  Shelved
+on `claude/b1-ladder-floor-gate`.
 
-**The floor-relievability gate (a separate earlier idea — skip a whole
-ladder when even removing ALL rippable load leaves no candidate viable)
-was built and measured INERT** (1 skip / 105 calls on
-`chip_stack_bottomup`, 0–1 on the other bottom-up flows): these ladders
-are "needs-multiple-rips" hopeless, not "blockers-locked" hopeless, so
-the floor is almost never dead.  Correct but not worth landing; shelved
-on `claude/b1-ladder-floor-gate` for any genuinely locked-heavy design.
-
-Still open: approach (a) — a cheaper/sparser `band_cost` would speed the
-coupled candidates the decoupled prune must still fully score.
+**Conclusion for B1: the ladder cost is irreducible via candidate
+pruning on this corpus.** The candidates genuinely have
+`kBalance`-dependent feasibility (window-fit dominant on chip_stack), so
+no "disjoint rip ⟹ unchanged" argument can skip them.  The only
+remaining lever is approach (a) — make the per-candidate SCORING cheaper
+(a sparser `band_cost` exploiting that most bands are empty), which
+speeds the candidates the ladder must still fully score.  That is a
+separate, larger piece of work on the planner's decision surface.
 
 `[ReplanProf]` (env `BUDA_REPLAN_PROF=1`) stays in as the instrument
 that produced all of the above — per call it reports the recharge /
