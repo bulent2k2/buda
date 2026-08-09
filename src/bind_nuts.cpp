@@ -493,10 +493,12 @@ void bind_nuts(py::module_& m) {
     // Evaluate k ('idx', tidx) ripup moves against the committed baseline on
     // worker threads (GIL released — inputs are converted up front and the
     // workers never touch Python state).  Returns [(primary, secondary,
-    // ok), ...] per move in input order; the caller picks the first
-    // in-order strict improver and REPLAYS it through the normal sequential
-    // trial before committing (metrics here carry the stall certificate and
-    // the pick order, never the committed state).
+    // viols, wl, ok), ...] per move in input order (viols/wl feed
+    // refine_selection's full-trial sweep; the ripup sweeps ignore them);
+    // the caller picks the first in-order strict improver and REPLAYS it
+    // through the normal sequential trial before committing (metrics here
+    // carry the stall certificate and the pick order, never the committed
+    // state).
     m.def("parallel_sweep",
           [](const std::vector<BundleWrapper>& bundles,
              const std::vector<std::pair<int, int>>& moves,
@@ -515,7 +517,7 @@ void bind_nuts(py::module_& m) {
              const std::vector<std::tuple<int, int, std::string, int, int,
                                           int, int, int, int>>& copy_specs,
              const std::map<std::pair<int, int>, bool>& horiz_of,
-             int n_threads) {
+             int n_threads, bool full_trials) {
               std::vector<SweepMove> mv;
               mv.reserve(moves.size());
               for (const auto& [bid, tidx] : moves)
@@ -534,17 +536,18 @@ void bind_nuts(py::module_& m) {
                   dn.copy_specs.push_back(std::move(cs));
               }
               dn.horiz_of = horiz_of;
-              std::vector<std::tuple<int, int, bool>> out;
+              std::vector<std::tuple<int, int, int, double, bool>> out;
               {
                   py::gil_scoped_release release;
                   auto res = parallel_sweep(
                       bundles, mv, planner, fp, layers, track_pitch,
                       fixed_segs, extra_x, extra_y, stage_b,
-                      skip_tighten_stage_a, dogleg_slot_bids, base_disc,
-                      net_counts, dn, n_threads);
+                      skip_tighten_stage_a, full_trials, dogleg_slot_bids,
+                      base_disc, net_counts, dn, n_threads);
                   out.reserve(res.size());
                   for (const auto& r : res)
-                      out.emplace_back(r.primary, r.secondary, r.ok);
+                      out.emplace_back(r.primary, r.secondary, r.viols,
+                                       r.wl, r.ok);
               }
               return out;
           },
@@ -560,7 +563,7 @@ void bind_nuts(py::module_& m) {
           py::arg("copy_specs") = std::vector<std::tuple<
               int, int, std::string, int, int, int, int, int, int>>{},
           py::arg("horiz_of") = std::map<std::pair<int, int>, bool>{},
-          py::arg("n_threads") = 0);
+          py::arg("n_threads") = 0, py::arg("full_trials") = false);
 
     // ── Verify ────────────────────────────────────────────────────────────
     py::enum_<ViolationKind>(m, "ViolationKind")

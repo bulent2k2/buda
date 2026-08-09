@@ -17,6 +17,7 @@
 #include "trial_sweep.h"
 
 #include <atomic>
+#include <cmath>
 #include <iostream>
 #include <mutex>
 #include <thread>
@@ -136,6 +137,16 @@ int run_dnuts(const std::vector<BusSegment>& bus, const SweepDnutsCtx& dn) {
     return r1.num_unplaced + extra_unplaced + r2.num_unplaced;
 }
 
+// Realized abstract WL — the refine metric's wl_now(), 1:1: the raw double
+// sum of placed span lengths in segment order (the caller rounds, so the
+// Python int(round(...)) sees the identical double).
+double placed_wl(const NUTSResult& nr) {
+    double wl = 0.0;
+    for (const auto& ts : nr.segments)
+        if (ts.placed) wl += std::abs(ts.span_hi - ts.span_lo);
+    return wl;
+}
+
 SweepOutcome eval_move(const std::vector<BundleWrapper>& baseline,
                        const SweepMove& m,
                        const CongestionPlanner& planner_proto,
@@ -144,7 +155,7 @@ SweepOutcome eval_move(const std::vector<BundleWrapper>& baseline,
                        const std::vector<TrackSegment>& fixed_segs,
                        const std::vector<int>& extra_x,
                        const std::vector<int>& extra_y,
-                       bool stage_b, bool skip_tighten_a,
+                       bool stage_b, bool skip_tighten_a, bool full_trials,
                        const std::set<int>& dogleg_slot_bids,
                        const std::map<int, int>& base_disc,
                        const std::map<int, int>& net_counts,
@@ -177,10 +188,13 @@ SweepOutcome eval_move(const std::vector<BundleWrapper>& baseline,
     NUTSEngine nuts(fp, layers);
     nuts.set_track_pitch(pitch);
     nuts.set_layer_threads(1);   // the move fan-out owns the cores (P3 nests off)
-    nuts.set_skip_tighten(!stage_b && skip_tighten_a);
+    // Full trials (refine): tighten runs in both stages — a WL-fair solve.
+    nuts.set_skip_tighten(full_trials ? false : (!stage_b && skip_tighten_a));
     if (!fixed_segs.empty()) nuts.add_fixed_segments(fixed_segs);
     nuts.set_extra_grid_points(extra_x, extra_y);
     NUTSResult nr = nuts.run(b);
+    out.viols = nr.num_violations;
+    out.wl    = placed_wl(nr);
     if (!stage_b) {
         out.primary = nr.num_overlaps;
         out.ok = true;
@@ -221,6 +235,7 @@ std::vector<SweepOutcome> parallel_sweep(
     const std::vector<int>&           extra_y,
     bool                              stage_b,
     bool                              skip_tighten_stage_a,
+    bool                              full_trials,
     const std::set<int>&              dogleg_slot_bids,
     const std::map<int, int>&         base_disc,
     const std::map<int, int>&         net_counts,
@@ -240,7 +255,7 @@ std::vector<SweepOutcome> parallel_sweep(
             try {
                 out[i] = eval_move(bundles, moves[i], planner, fp, layers,
                                    track_pitch, fixed_segs, extra_x, extra_y,
-                                   stage_b, skip_tighten_stage_a,
+                                   stage_b, skip_tighten_stage_a, full_trials,
                                    dogleg_slot_bids, base_disc, net_counts,
                                    dn);
             } catch (...) {

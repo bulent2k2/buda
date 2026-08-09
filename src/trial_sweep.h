@@ -44,6 +44,15 @@
 // trial before committing, so a wrong commit is structurally impossible —
 // the sweep's metrics only carry the stall certificate and the pick order.
 //
+// FULL-TRIAL mode (`full_trials`, the refine_selection port): tighten_pulls
+// runs in BOTH stages (a WL-fair trial — refine's accept reads realized WL,
+// which a tighten-skipped solve would bias against the move), and the
+// outcome additionally carries the NUTS interval-violation count and the
+// realized abstract WL (sum of placed span lengths, raw double), matching
+// the sequential full trial's 4-component refine metric.  The caller
+// disables the DNUTS abort bar (abort_unplaced = -1) so the opens count is
+// exact for the componentwise parity test.
+//
 // Threads never touch Python state (the binding releases the GIL): shared
 // inputs are const (Floorplan/LayerStack/RoutingGridStack reads;
 // Topology::analysis_cache_ is per-copy with an atomically refcounted const
@@ -70,16 +79,22 @@ struct SweepMove {
     int tidx      = -1;
 };
 
-// One per move: (primary, secondary, ok).
+// One per move: (primary, secondary, viols, wl, ok).
 //   stage a: primary = NUTS overlaps, secondary = 0.
 //   stage b: primary = DNUTS unplaced + base_disc + moved-bundle disc,
 //            secondary = NUTS overlaps.
+//   viols = NUTS interval violations, wl = sum of placed segment span
+//   lengths (the raw double — the caller applies its own rounding so the
+//   Python-side int(round(...)) reproduces exactly).  Both are consumed by
+//   refine_selection's componentwise accept; the ripup sweeps ignore them.
 //   ok = false -> this move could not be evaluated here (incremental replan
 //   unavailable / bad index); the caller must trial it sequentially.
 struct SweepOutcome {
-    int  primary   = 0;
-    int  secondary = 0;
-    bool ok        = false;
+    int    primary   = 0;
+    int    secondary = 0;
+    int    viols     = 0;
+    double wl        = 0.0;
+    bool   ok        = false;
 };
 
 // Stage-b context; enabled=false = stage a (NUTS metric only).
@@ -114,6 +129,7 @@ std::vector<SweepOutcome> parallel_sweep(
     const std::vector<int>&           extra_y,
     bool                              stage_b,
     bool                              skip_tighten_stage_a,
+    bool                              full_trials,
     const std::set<int>&              dogleg_slot_bids,
     const std::map<int, int>&         base_disc,    // bid -> others' disc
     const std::map<int, int>&         net_counts,   // bid -> its bit count

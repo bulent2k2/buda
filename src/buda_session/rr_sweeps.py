@@ -127,14 +127,16 @@ class RRSweepsMixin:
         except ValueError:
             return 0
 
-    def _rr_sweep_stage_setup(self, flat, stage, metric):
+    def _rr_sweep_stage_setup(self, flat, stage, metric, full=False):
         """(base_disc, net_counts, dn_kwargs) for a parallel_sweep call over
         `flat` [(ci, bid, old_tidx, tidx)] — the stage-b DISCONNECTED
         decomposition (base = total minus the moved bundle's CURRENT
         contribution; other bundles' contributions cannot change with the
         move, and trial dogleg-adoption drift is excluded by the dogleg
         pass's non-severing guarantee, #405) plus the bottom-up DNUTS
-        copy-plan port.  Stage a returns empties."""
+        copy-plan port.  Stage a returns empties.  `full` (the refine
+        sweep) disables the DNUTS abort bar: the componentwise parity test
+        needs the exact opens count, not a clamped one."""
         import buda
         base_disc, net_counts, dn_kwargs = {}, {}, {}
         if stage == 'b':
@@ -160,13 +162,18 @@ class RRSweepsMixin:
             self._install_leaf_keepouts()
             dn_kwargs.update(grid=self.routing_grid,
                              bit_order=self._detailed_bit_order,
-                             abort_unplaced=self._rr_m_primary(metric()))
+                             abort_unplaced=(-1 if full else
+                                             self._rr_m_primary(metric())))
         return base_disc, net_counts, dn_kwargs
 
-    def _rr_sweep_eval(self, flat, stage, base_disc, net_counts, dn_kwargs):
+    def _rr_sweep_eval(self, flat, stage, base_disc, net_counts, dn_kwargs,
+                       full=False):
         """One parallel_sweep evaluation of `flat` — private wrapper/planner
         copies per move on C++ worker threads, GIL released; returns the
-        per-move (prim, sec, ok) outcomes in flat order."""
+        per-move (prim, sec, viols, wl, ok) outcomes in flat order.  `full`
+        runs the WL-fair full-trial semantics (tighten on in both stages —
+        the refine_selection sweep); default is the fast-trial shape the
+        ripup sweeps replicate."""
         import buda
         t0 = time.perf_counter()
         outcomes = buda.parallel_sweep(
@@ -180,6 +187,7 @@ class RRSweepsMixin:
             bool(getattr(self, '_rr_fast_trials', False)),
             set(self._dogleg_slot), base_disc, net_counts,
             n_threads=self._rr_sweep_threads(),
+            full_trials=full,
             **dn_kwargs)
         self._rr_t_add('psweep', time.perf_counter() - t0)
         return outcomes
@@ -257,7 +265,7 @@ class RRSweepsMixin:
                 if w is None:
                     continue
                 sweep_improving = False
-                for (_kind, _t), (prim, sec, ok) in zip(moves, outs):
+                for (_kind, _t), (prim, sec, _v, _wl, ok) in zip(moves, outs):
                     if not ok:
                         sweep_improving = True      # unevaluable: replay decides
                         break
@@ -281,7 +289,7 @@ class RRSweepsMixin:
                             m_from=cur, m_to=cand_best[0],
                             move=self._rr_move_str(old_tidx, cand_best[3]))
                         return cand_best, trials
-                    if all(ok for _p, _s, ok in outs):
+                    if all(ok for *_x, ok in outs):
                         self._decision(
                             f"[ripup_reroute] WARNING: parallel-sweep "
                             f"divergence on bundle {bid} (screened scan) "
@@ -329,8 +337,8 @@ class RRSweepsMixin:
         outcomes = self._rr_sweep_eval(flat, stage, base_disc, net_counts,
                                        dn_kwargs)
         trials = 0
-        for (ci, bid, old_tidx, tidx), (prim, sec, ok) in zip(flat,
-                                                              outcomes):
+        for (ci, bid, old_tidx, tidx), (prim, sec, _v, _wl, ok) in \
+                zip(flat, outcomes):
             if ok:
                 m = (prim, sec) if stage == 'b' else prim
                 if os.environ.get("BUDA_RR_TRACE"):
