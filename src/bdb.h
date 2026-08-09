@@ -40,6 +40,17 @@ struct DefBlockage;
 // the database (tracks, blockages, halos).  Deliberately not the whole
 // DefDesign — components and nets went into the tables, and a real DEF's
 // copy of them is the part that would not fit in memory twice.
+struct VerilogImportStats {
+    std::string top_module;
+    int elaborated = 0;             // component rows written
+    // Instances of a module the netlist does not define, dropped as library
+    // cells.  Reported rather than silent: the filter is a heuristic, and a
+    // dropped instance is a hole in the hierarchy that every later stage
+    // treats as absence rather than as an omission.
+    int skipped_library_cells = 0;
+    std::vector<std::string> skipped_cells;   // distinct cell names, capped
+};
+
 struct DefImportStats {
     int declared_components = -1, imported_components = 0;
     int declared_nets = -1, imported_nets = 0;
@@ -436,7 +447,7 @@ public:
     // ── Ingestion ──────────────────────────────────────────────────────────
     DefImportStats import_def_lef(const std::string& def_path,
                                   const std::string& lef_path);
-    void import_verilog(const std::string& v_path);
+    VerilogImportStats import_verilog(const std::string& v_path);
     // Wipe the design tables (pin/net_props/net/component/cell) for a fresh
     // load — what import_def_lef does internally; public for import_gds.
     void clear_design();

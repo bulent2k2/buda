@@ -8,11 +8,17 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 [`message_ids.md`](message_ids.md) and [`../TCL_FRONT_END.md`](../TCL_FRONT_END.md);
 this page is the backlog behind them.
 
-Snapshot index — last verified against `main`: **2026-08-09**, at the commit
-that merged `flow/def` (PR #650). Each item states what is missing, why it
-was left rather than forgotten, and where to start. Every claim below was
-reproduced on `main` before being written down; the reproduction is given so
-a reader can re-derive it rather than trust it.
+Snapshot index — last verified against `main`: **2026-08-09**, after item 1
+landed. Each item states what is missing, why it was left rather than
+forgotten, and where to start. Every claim below was reproduced on `main`
+before being written down; the reproduction is given so a reader can
+re-derive it rather than trust it.
+
+Item 1 is kept in place, struck through, rather than moved to the resolved
+table at the bottom — its entry now records that this page's **first
+description of it was wrong about the merge case**, and that the fix it
+originally proposed would have been the wrong fix. Both are worth more than
+a tidy list.
 
 The working vehicle for all of this is **[`flow/def/`](../../flow/def/)** —
 a LEF + DEF + Verilog design read off disk and routed end to end. Most of
@@ -20,35 +26,47 @@ these items were found by building it, which is the argument for having it.
 
 ---
 
-## 1. The netlist reader drops blackbox instances with ordinary names
+## 1. ~~The netlist reader drops blackbox instances with ordinary names~~ — RESOLVED 2026-08-09
 
-**The one to fix first.** An instance of a module the netlist does not define
-is skipped unless its instance name is **backslash-escaped**:
+An instance of a module the netlist does not define was kept only if its
+instance name was **backslash-escaped**, so a hard macro instantiated the
+normal way — `fakeram45_256x16 u_mem (...)` — read as a standard cell and was
+dropped. The macro exception behind that test (a cell name containing a
+lowercase letter) sat *inside* the escaped-name branch and was therefore
+unreachable for the netlists that need it.
 
-```verilog
-module top ();
-  fakeram45_256x16 u_mem  (.A(x), .Z(y));    // dropped
-  fakeram45_256x16 \u_mem (.A(x), .Z(y));    // kept
-endmodule
-```
+**Correcting what this page first said about the merge case.** "A hard macro
+vanishes" is right for a Verilog-only import (`components: []`), and *wrong*
+for a DEF+Verilog merge, where the DEF's row survives — it is simply never
+given a parent. That is not milder, it is worse and quieter: the macro sits
+orphaned at depth 0, so its **container has no children at all**, cannot be
+sized by `derive_container_bboxes`, gets no busterm, and the routing
+interface loses a whole level. One dropped instance, a missing level, no
+diagnostic.
 
-Reproduced on `main`: the first form yields `components: []`.
+**The fix asks the placement instead of guessing.** The DEF is the authority
+on what exists physically, so an instance whose name the placement already
+contains is kept, however it is spelled — no cell-class heuristic involved.
+The legacy escaped-name rule stands unchanged behind it for Verilog-only
+imports, where there is no placement to ask. Basenames are matched, which is
+a deliberate superset: the netlist knows an instance by its local name and
+only elaboration knows the path, and the cost of a false keep is one real
+netlist instance kept while the cost of a false drop is a hole.
 
-The intent is sound and worth keeping — it is what stops a million standard
-cells becoming a million component rows — and there is a second filter
-behind it that admits a *macro* (a cell name containing a lowercase letter)
-while rejecting a std cell (`DFFR_X1`). But that macro exception sits inside
-the `esc_inst` branch, so it is **unreachable for a netlist that does not
-escape its instance names**, and most do not. A hard macro therefore
-vanishes from the hierarchy with no diagnostic — which for a routing tool is
-the whole design.
+Deliberately **not** done: lifting the lowercase-letter test out of the
+escape branch, which is what this page originally suggested. It would have
+been wrong — std cells are all-lowercase in some libraries (`sky130_fd_sc_hd__inv_1`),
+so that rule keeps every gate in exactly the netlists the filter exists to
+protect against.
 
-*Where to start:* `finish_inst` in `bdb.cpp`. The escape is being used as a
-proxy for "this is worth keeping"; the cell-name test already there is the
-real signal. Reversing the nesting (apply the macro test regardless of
-escaping) is a small change, but it needs a census-style diagnostic — "N
-instances skipped as standard cells, M kept as macros" — because silently
-changing which instances exist is exactly the failure this item is about.
+**And the count is now always stated** (`BUDA-1608`), with the cell *kinds*,
+because the filter remains a heuristic on the Verilog-only path and an
+instance that silently never existed is indistinguishable from a design that
+never had one. `import_verilog` returns a `VerilogImportStats`.
+
+Pinned by `test_bdb_import_edges.py`: the macro joins the hierarchy, the
+container it would have orphaned is sized, Verilog-only filtering is
+unchanged, and the census names distinct kinds.
 
 ## 2. A vector port map collapses to one net
 

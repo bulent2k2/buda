@@ -546,6 +546,38 @@ is preserved via UPSERT.
 - One `net` row per elaborated wire; internal wires are scoped
   (`ai/w1`); wires connected through port bindings keep the caller's net name.
 - One `pin` row per port connection per instance.
+- The die's own ports: the boundary components `import_def_lef` synthesized
+  from DEF `PINS` keep their pin rows, saved before the clear and restored
+  after elaboration. A top-level port is not an instance, so elaboration
+  alone would leave them disconnected.
+
+**What is NOT elaborated: library cells.**
+
+An instance of a module the netlist does not define is a library cell.
+Keeping them all would turn a million gates into a million component rows, so
+they are filtered — and the rule is, in order:
+
+1. **The placement already has an instance by that name** → keep. The DEF is
+   the authority on what exists physically, so this is not a guess about cell
+   classes. It is what carries a hard macro (`fakeram45_256x16 u_mem (…)`)
+   through a DEF+Verilog merge however its instance name is spelled.
+2. Otherwise, for a **Verilog-only** import where there is no placement to
+   ask: an escaped instance name *and* a lowercase letter in the cell name
+   (`fakeram45_*` yes, `DFFR_X1` no — Genus escapes both).
+3. Otherwise skipped.
+
+Skips are **counted and their cell kinds named** (`BUDA-1608`), because rule 2
+is still a heuristic and an instance that silently never existed is
+indistinguishable from a design that never had one.
+
+Returns a `VerilogImportStats` (`top_module`, `elaborated`,
+`skipped_library_cells`, `skipped_cells`).
+
+> Why the filter matters beyond tidiness: a dropped instance in a merge does
+> **not** remove the DEF's row — it leaves it orphaned at depth 0. Its
+> container then has no children, cannot be sized by
+> `derive_container_bboxes`, gets no busterm, and the routing interface loses
+> a whole level. See [`internal/opens_interchange.md`](internal/opens_interchange.md) item 1.
 
 ---
 

@@ -1179,17 +1179,15 @@ double BDB::die_h() const {
 // Both parsers use a line-by-line state machine — std::regex multiline flag
 // only affects ^ / $ anchors, NOT '.', so whole-file regex cannot span lines.
 
-// Strip DEF escaping (\[ and \]) so names match Verilog-elaborated paths
-static std::string normalize_def_name(const std::string& s) {
-    std::string out;
-    out.reserve(s.size());
-    for (size_t i = 0; i < s.size(); ++i) {
-        if (s[i] == '\\' && i+1 < s.size() && (s[i+1]=='[' || s[i+1]==']'))
-            continue;
-        out += s[i];
-    }
-    return out;
-}
+// (The old `normalize_def_name` lived here.  It stripped a backslash only
+// before `[` or `]`, and lost its last caller when the regex DEF scanner was
+// replaced in Phase 3.  `def_io.cpp`'s `unescape` supersedes it and is
+// STRICTLY better for the job the comment claimed: DEF escapes the LEADING
+// character of a hierarchical name too, so `\\mem\\[0\\]/u1` normalized to
+// `\\mem[0]/u1` under the old rule and would NOT have matched the Verilog
+// path `mem[0]/u1`, which is what it existed to match.  Pinned by
+// test_def_reader.py::test_escaped_names_are_unescaped_once and by
+// test_bdb_import_edges.py::test_an_escaped_def_name_matches_its_verilog_path.)
 
 // Map a DEF/LEF orientation token to BDB's component.orient token and whether
 // the placed bbox dims swap vs the LEF SIZE. BDB's orient convention is
@@ -1903,7 +1901,38 @@ std::vector<std::string> BDB::common_nets(const std::string& gid1,
 // coordinates survive.  Clears net/pin tables first (safe to call after
 // import_def_lef).
 
-void BDB::import_verilog(const std::string& v_path) {
+VerilogImportStats BDB::import_verilog(const std::string& v_path) {
+    VerilogImportStats vstats;
+
+    // Instance names the PHYSICAL design already has.
+    //
+    // An instance of a module the netlist does not define is a library cell,
+    // and dropping those is what stops a million gates becoming a million
+    // component rows.  But the test for "library cell" was: the instance name
+    // is not backslash-escaped.  A hard macro instantiated with an ordinary
+    // name — `fakeram45_256x16 u_mem (...)`, which is most of them — read as
+    // a standard cell and was dropped, so the macro never joined the
+    // hierarchy.  In a DEF+Verilog merge that is worse than it sounds: the
+    // DEF's row survives but is never given a parent, so its CONTAINER ends
+    // up with no children, cannot be sized by `derive_container_bboxes`, and
+    // the routing interface loses a whole level.
+    //
+    // The DEF is the authority on what exists physically, so ask it.  A name
+    // the placement already contains is not a guess about cell classes; it is
+    // the design saying the instance is there.  Basenames because the netlist
+    // knows an instance by its local name and only elaboration knows the
+    // path — a superset test, deliberately: the cost of a false keep is one
+    // real netlist instance kept, and the cost of a false drop is a hole.
+    std::unordered_set<std::string> placed_basenames;
+    {
+        Stmt q(_db, "SELECT name FROM component");
+        while (sqlite3_step(q) == SQLITE_ROW) {
+            std::string n = col_txt(q, 0);
+            const size_t slash = n.rfind('/');
+            placed_basenames.insert(slash == std::string::npos
+                                    ? n : n.substr(slash + 1));
+        }
+    }
 
     // ── Phase 1: collect defined module names (one fast pass) ────────────────
     // Also keep definition order: the top module is typically defined last.
@@ -2060,6 +2089,10 @@ void BDB::import_verilog(const std::string& v_path) {
             }
         };
 
+        // Distinct cell names already named in the skip census, so the report
+        // lists eight KINDS of cell rather than the first eight instances.
+        std::unordered_set<std::string> skipped_seen;
+
         // Process a complete accumulated instance text
         auto finish_inst = [&](const std::string& text) {
             size_t i = 0, sz = text.size();
@@ -2093,15 +2126,37 @@ void BDB::import_verilog(const std::string& v_path) {
             }
             if (cell.empty() || inst_nm.empty()) return;
             bool is_defined = defined_mods.count(cell);
-            // Skip standard cells: cell not a defined module AND inst name unescaped
-            if (!is_defined && !esc_inst) return;
-            // Skip uppercase standard cells even with escaped instance names
-            // (e.g. "DFFR_X1 \arb_sel_q_reg[0]" in Genus output).
-            // Real macros (fakeram45_*, etc.) contain lowercase letters.
-            if (!is_defined && esc_inst) {
-                bool has_lower = false;
-                for (char c : cell) if (std::islower((unsigned char)c)) { has_lower=true; break; }
-                if (!has_lower) return;
+            if (!is_defined) {
+                // An instance of a module the netlist does not define: a
+                // library cell.  Keep it only on a reason, in this order.
+                //
+                // 1. The PHYSICAL DESIGN already has an instance by this
+                //    name.  Not a guess — the placement says it is there, so
+                //    dropping it would orphan a row that exists.  This is
+                //    what makes a hard macro survive a DEF+Verilog merge
+                //    however its instance name is spelled.
+                // 2. Otherwise the legacy heuristic, unchanged, for a
+                //    Verilog-ONLY import where there is no placement to ask:
+                //    a backslash-escaped instance name AND a cell name
+                //    containing a lowercase letter (`fakeram45_*` yes,
+                //    `DFFR_X1` no — Genus writes escaped names for both).
+                //
+                // Anything else is skipped and COUNTED.  The count is the
+                // point: the rule above is still a heuristic on the
+                // Verilog-only path, and a silently missing instance is
+                // indistinguishable from a design that never had one.
+                bool keep = placed_basenames.count(inst_nm) > 0;
+                if (!keep && esc_inst) {
+                    for (char c : cell)
+                        if (std::islower((unsigned char)c)) { keep = true; break; }
+                }
+                if (!keep) {
+                    ++vstats.skipped_library_cells;
+                    if (skipped_seen.insert(cell).second &&
+                        vstats.skipped_cells.size() < 8)
+                        vstats.skipped_cells.push_back(cell);
+                    return;
+                }
             }
             while (i < sz && text[i] != '(') ++i;
             VInst vi{ cell, inst_nm, {} };
@@ -2183,7 +2238,8 @@ void BDB::import_verilog(const std::string& v_path) {
         for (auto it = defined_order.rbegin(); it != defined_order.rend(); ++it)
             if (!instantiated.count(*it)) { top_mod = *it; break; }
     }
-    if (top_mod.empty()) return;
+    if (top_mod.empty()) return vstats;
+    vstats.top_module = top_mod;
 
     // ── Phase 4: elaborate hierarchy → BDB ───────────────────────────────────
     // Preserve component placement from any prior import_def_lef call.
@@ -2350,6 +2406,7 @@ void BDB::import_verilog(const std::string& v_path) {
 
             int cid = upsert_comp(inst_path, vi.cell, par_id, depth, is_leaf,
                                   is_leaf_if_placed);
+            ++vstats.elaborated;
 
             // Build child context and create pin records
             Ctx child_ctx;
@@ -2396,6 +2453,7 @@ void BDB::import_verilog(const std::string& v_path) {
         sqlite3_step(s_pin); sqlite3_reset(s_pin);
     }
     _exec("COMMIT");
+    return vstats;
 }
 
 // ── Mutations ─────────────────────────────────────────────────────────────────

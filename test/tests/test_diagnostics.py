@@ -216,3 +216,18 @@ def test_a_log_that_cannot_be_rotated_does_not_stop_the_run(tmp_path):
     (target.parent / "f_flow.log.1").mkdir()   # os.replace onto a dir fails
     buda_cli._rotate_log(str(target))          # must not raise
     assert target.read_text() == "x"
+
+
+def test_the_catalogue_table_in_the_docs_matches_the_registry():
+    """`docs/internal/message_ids.md` carries a table of every id, and a
+    table nobody checks is a table that goes stale — BUDA-1607 shipped
+    without it and nothing noticed.  The doc is what a methodology reads
+    before the message fires, so it has to agree with what can fire."""
+    doc = (_ROOT / "docs" / "internal" / "message_ids.md").read_text()
+    rows = dict(re.findall(r"^\| (BUDA-\d{4}) \| (\w+) \|", doc, re.M))
+    registry = {mid: sev for mid, sev, _t in buda_diag.catalogue()}
+    assert rows == registry, (
+        f"missing from the doc: {sorted(set(registry) - set(rows))}; "
+        f"stale in the doc: {sorted(set(rows) - set(registry))}; "
+        f"severity mismatch: "
+        f"{ {k: (rows[k], registry[k]) for k in set(rows) & set(registry) if rows[k] != registry[k]} }")

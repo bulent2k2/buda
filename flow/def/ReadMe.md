@@ -113,7 +113,11 @@ onto 10 hands the outlines back as routing.
 The two notes above, and everything else this vehicle exposed that is still
 open, are owned by
 [`docs/internal/opens_interchange.md`](../../docs/internal/opens_interchange.md)
-— including the ones you will hit first on a *real* design rather than this
-one: a blackbox macro instance is dropped unless its name is
-backslash-escaped (item 1), and a vector port map collapses to a single net
-(item 2, which is why this design's netlist uses four scalar wires per bus).
+— including the one you will hit first on a *real* design rather than this
+one: a vector port map collapses to a single net (item 2, which is why this
+design's netlist uses four scalar wires per bus).
+
+Item 1 there — a hard macro instance dropped from the hierarchy because its
+name was not backslash-escaped — is **fixed**; an instance the DEF placed is
+now kept whatever its spelling, and whatever the netlist reader does skip is
+counted and its cell kinds named (`BUDA-1608`).

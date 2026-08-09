@@ -93,7 +93,9 @@ every conversion a small regression.
 
 ## 5. What is identified so far
 
-`dump_messages` prints the live list.  As of Phase 5:
+`dump_messages` prints the live list — this table is a snapshot of it, and
+`test_diagnostics.py` fails if the two disagree (BUDA-1607 was added without
+updating this table, which is exactly the drift the guard now prevents):
 
 | Id | Severity | Meaning |
 |---|---|---|
@@ -103,6 +105,8 @@ every conversion a small regression.
 | BUDA-1604 | WARNING | DEF `TRACKS` names an undeclared layer |
 | BUDA-1605 | INFO | technology data skipped: the script already declared it |
 | BUDA-1606 | WARNING | missing LEF footprint, sized anyway by waiver |
+| BUDA-1607 | WARNING | a container has no placed descendant, so it has no extent |
+| BUDA-1608 | INFO | netlist instances of undefined modules skipped as library cells |
 | BUDA-1701 | WARNING | nothing to emit: no placed bus segments |
 | BUDA-1901 | FATAL | coordinates and track patterns are on different scales |
 | BUDA-1902 | ERROR | a design audit reported violations and `--strict-check` is on |
