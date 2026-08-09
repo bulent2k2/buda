@@ -256,9 +256,19 @@ topology, so `bus_segment` rows join back to a bundle. `clear_expanded_bundles()
 drops those instance rows (idempotent re-plan). Templates keep their full candidate
 set; each instance records its own selection + layers.
 
-**coordinates** are in microns (µm). `import_def_lef` converts from DEF
-internal units using the `UNITS DISTANCE MICRONS` value from the DEF header.
-Unresolved pin positions are stored as `−1`.
+**coordinates** are in *layout units*, and one layout unit is whatever the
+design's **import scale** says it is — microns by default. `import_def_lef`
+converts DEF internal units using the `UNITS DISTANCE MICRONS` value from the
+DEF header, then applies the scale; LEF numbers (already µm) get the scale
+alone. The factor is recorded as meta `lu_per_um` and restored on open, so a
+reopened design knows what its own numbers mean. Unresolved pin positions are
+stored as `−1`.
+
+At the default scale of `1.0` a coordinate is a micron and the engine's
+integer grid quantizes to 1 µm — ~2000 DBU on an advanced node, roughly 20-25
+track pitches. Setting `set_import_scale dbu` makes one layout unit one DEF
+database unit, so the import is exact and nothing is quantized away. See
+[the coordinate contract](internal/engine_units.md).
 
 `parent_id` in `component` is `NULL` for top-level (depth-0) instances.
 Python returns `−1` for a `NULL` parent.
@@ -460,6 +470,36 @@ from the re-solved routing, not stale rows. The visualizer's interactive
 rerun buttons (↺ / Re-run & Refresh) are deliberately **pure previews** — a
 checkpoint changes only on explicit commands, never while exploring.
 Tests: `test/tests/test_bdb_resume.py`, `test/tests/test_bdb_resume_gaps.py`.
+
+---
+
+### `set_import_scale`
+
+```
+set_import_scale micron|dbu|<layout units per micron>
+```
+
+Declare what a layout unit means for this design, **before** `import_def_lef`.
+With no argument, print the current scale.
+
+| Value | Meaning |
+|---|---|
+| `micron` | **Default.** 1 layout unit = 1 µm. Historic behaviour, bit-identical. |
+| `dbu` | 1 layout unit = 1 DEF database unit — an **exact** import with no quantization. Resolved from the DEF's own `UNITS DISTANCE MICRONS` at import time, so the script never has to know (or mis-state) the technology's DBU count. |
+| *number* | An explicit factor, for a scale neither of the above expresses. |
+
+The scale is applied at import and **only** at import: everything downstream
+works in the chosen unit because there is nothing left to convert. It is
+persisted as meta `lu_per_um` — as a *number*, even when selected as `dbu`, so
+a later import into the same BDB cannot silently restate the stored
+coordinates in a different unit.
+
+Note what the scale does **not** touch: distances declared in the `.buda`
+script (`corner_margin`, `set_min_stub_length*`, `detour_channel`,
+`def_track_pattern` widths, …) are already in layout units and are taken as
+written. Scale the import and you must scale those too — the
+[unit-plausibility guard](script_reference/setup.md#set_unit_check) stops the
+run when they disagree.
 
 ---
 

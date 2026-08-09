@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=18;
+PRAGMA user_version=22;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -18,7 +18,7 @@ CREATE TABLE bundle (
         gen_knobs      TEXT DEFAULT '',     -- additive-generation knob memo (v15)
         is_expanded    INTEGER DEFAULT 0,   -- planner-expanded instance row (v18)
         bu_locked      INTEGER DEFAULT 0    -- bottom-up template copy (v18)
-    );
+    , cloned_from TEXT DEFAULT '', ndr_rule TEXT DEFAULT '');
 CREATE TABLE bundle_busterm (
         bundle_id  TEXT REFERENCES bundle(id),
         busterm_id TEXT,
@@ -198,33 +198,33 @@ CREATE TABLE cell (
             name   TEXT PRIMARY KEY,
             width  REAL NOT NULL,
             height REAL NOT NULL
-        , bottom_up INTEGER NOT NULL DEFAULT 0);
-INSERT INTO "cell" VALUES('dnuts1',600.0,400.0,1);
-INSERT INTO "cell" VALUES('dnuts1__u0',200.0,100.0,0);
-INSERT INTO "cell" VALUES('dnuts1__u11',200.0,50.0,0);
-INSERT INTO "cell" VALUES('dnuts1__u12',400.0,50.0,0);
-INSERT INTO "cell" VALUES('dnuts1__v0',200.0,100.0,0);
-INSERT INTO "cell" VALUES('dnuts2',150.0,150.0,1);
-INSERT INTO "cell" VALUES('dnuts2__u1',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dnuts2__u2',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dnuts2__u3',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dnuts2__u4',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg1',250.0,350.0,1);
-INSERT INTO "cell" VALUES('dogleg1__bot1',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg1__bot2',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg1__bot3',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg1__top1',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg1__top2',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg1__top3',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg2',400.0,350.0,1);
-INSERT INTO "cell" VALUES('dogleg2__bot1',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg2__bot2',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg2__bot3',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg2__top1',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg2__top2',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg2__top3',50.0,50.0,0);
-INSERT INTO "cell" VALUES('dogleg2__top4',100.0,50.0,0);
-INSERT INTO "cell" VALUES('top',2330.0,2360.0,0);
+        , bottom_up INTEGER NOT NULL DEFAULT 0, layer_cap INTEGER NOT NULL DEFAULT -1, layer_floor INTEGER NOT NULL DEFAULT -1);
+INSERT INTO "cell" VALUES('dnuts1',600.0,400.0,1,-1,-1);
+INSERT INTO "cell" VALUES('dnuts1__u0',200.0,100.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dnuts1__u11',200.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dnuts1__u12',400.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dnuts1__v0',200.0,100.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dnuts2',150.0,150.0,1,-1,-1);
+INSERT INTO "cell" VALUES('dnuts2__u1',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dnuts2__u2',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dnuts2__u3',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dnuts2__u4',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg1',250.0,350.0,1,-1,-1);
+INSERT INTO "cell" VALUES('dogleg1__bot1',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg1__bot2',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg1__bot3',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg1__top1',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg1__top2',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg1__top3',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg2',400.0,350.0,1,-1,-1);
+INSERT INTO "cell" VALUES('dogleg2__bot1',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg2__bot2',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg2__bot3',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg2__top1',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg2__top2',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg2__top3',50.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('dogleg2__top4',100.0,50.0,0,-1,-1);
+INSERT INTO "cell" VALUES('top',2330.0,2360.0,0,-1,-1);
 CREATE TABLE cell_children (
             parent_cell TEXT NOT NULL REFERENCES cell(name),
             inst_name   TEXT NOT NULL,
@@ -274,6 +274,12 @@ INSERT INTO "cell_children" VALUES('top','i_dogleg2_0','dogleg2',1180.0,970.0);
 INSERT INTO "cell_children" VALUES('top','i_dogleg2_1','dogleg2',550.0,50.0);
 INSERT INTO "cell_children" VALUES('top','i_dogleg2_2','dogleg2',1860.0,1330.0);
 INSERT INTO "cell_children" VALUES('top','i_dogleg2_3','dogleg2',790.0,510.0);
+CREATE TABLE cell_layer_share (
+            cell     TEXT NOT NULL REFERENCES cell(name),
+            layer_id INTEGER NOT NULL,
+            share    REAL NOT NULL,
+            PRIMARY KEY (cell, layer_id)
+        );
 CREATE TABLE cell_pin (
             cell      TEXT NOT NULL REFERENCES cell(name),
             pin_name  TEXT NOT NULL,
@@ -1105,8 +1111,22 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','18');
+INSERT INTO "meta" VALUES('schema_version','22');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
+CREATE TABLE ndr_rule (
+            name         TEXT PRIMARY KEY,
+            width_x      REAL NOT NULL DEFAULT 1,
+            spacing_x    REAL NOT NULL DEFAULT 1,
+            shield_mode  INTEGER NOT NULL DEFAULT 0,
+            shield_per_n INTEGER NOT NULL DEFAULT 0,
+            shield_net   TEXT NOT NULL DEFAULT 'GND',
+            layers       TEXT NOT NULL DEFAULT '',
+            credit       INTEGER NOT NULL DEFAULT 0
+        );
+CREATE TABLE ndr_scope (
+            prefix TEXT PRIMARY KEY,
+            rule   TEXT NOT NULL REFERENCES ndr_rule(name)
+        );
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
             name TEXT UNIQUE NOT NULL

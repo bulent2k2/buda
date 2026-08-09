@@ -405,6 +405,12 @@ void bind_db(py::module_& m) {
         .def("delete_group",    &BDB::delete_group, py::arg("gid"))
         .def("all_groups",      &BDB::all_groups)
         .def("units",           &BDB::units)
+        .def("set_import_scale", &BDB::set_import_scale, py::arg("lu_per_um"),
+             "Layout units per micron for subsequent imports (1.0 = microns).")
+        .def("set_import_scale_from_def_units",
+             &BDB::set_import_scale_from_def_units,
+             "1 layout unit = 1 DEF database unit (exact, no quantization).")
+        .def("import_scale",    &BDB::import_scale)
         .def("schema_version",  &BDB::schema_version)
         .def("meta_get",        &BDB::meta_get,
              py::arg("key"), py::arg("def") = std::string())

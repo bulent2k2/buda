@@ -699,6 +699,27 @@ public:
 
     // ── Metadata ───────────────────────────────────────────────────────────
     int    units() const;
+
+    // ── Import scale (layout units per micron) ─────────────────────────────
+    // The ONE place a design decides what a layout unit is.  BUDA's engine is
+    // unit-agnostic (see docs/internal/engine_units.md), so this factor does
+    // not change any algorithm — it changes what the stored numbers COUNT.
+    //
+    //   1.0 (default)  1 layout unit = 1 µm.  Historic behaviour, bit-identical.
+    //   <UNITS>        1 layout unit = 1 DEF database unit — the import is then
+    //                  EXACT, with no quantization at all.  Selected by
+    //                  set_import_scale_from_def_units(), which reads the DEF's
+    //                  own `UNITS DISTANCE MICRONS` so the caller does not have
+    //                  to know it in advance.
+    //
+    // Applied at import ONLY.  Everything downstream — the ~59 int(round())
+    // BDB→Floorplan conversions in the Python layer included — then works in
+    // the chosen unit by construction, because there is nothing left to
+    // convert.  Persisted as meta 'lu_per_um' and restored on open, so a
+    // reopened design keeps the scale its coordinates were written in.
+    void   set_import_scale(double lu_per_um);
+    void   set_import_scale_from_def_units();   // 1 layout unit = 1 DEF DBU
+    double import_scale() const;                // layout units per micron
     double die_w() const;   // explicit die_w, or union-bbox of all comps if unset
     double die_h() const;   // explicit die_h, or union-bbox of all comps if unset
     void   set_die(double w, double h);
@@ -710,6 +731,8 @@ private:
     sqlite3* _db = nullptr;
     int    _units = 1000;
     double _die_w = 0.0, _die_h = 0.0;
+    double _lu_per_um = 1.0;          // layout units per micron (import scale)
+    bool   _lu_from_def_units = false; // resolve _lu_per_um from the DEF's UNITS
 
     // Cached prepared statements for hot read paths.
     // Lazily prepared on first use; reset (not finalized) between calls.

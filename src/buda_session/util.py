@@ -268,3 +268,145 @@ def _mixin_validate_stage_entry(self, where):
     if bad:
         raise RuntimeError("wrapper invariant violation(s):\n" +
                            "\n".join(bad))
+
+
+# ── Unit consistency (Phase 1, docs/internal/lefdef_interface_plan.md) ──────
+# The engine is UNIT-AGNOSTIC: `Point`/`Rect` are plain ints and nothing in
+# topology/nuts/congestion_planner/routing_grid claims they are microns.  That
+# is what makes a DBU-exact import cheap — but it also means NOTHING stops a
+# design from mixing scales: block coordinates imported at one scale and a
+# track pattern hand-declared at another.  The result is not a crash; it is a
+# silently optimistic plan (buses reserving a fraction of the space they need)
+# that looks feasible and means nothing.
+#
+# The crisp signal is TRACKS ACROSS THE DESIGN: the design's extent divided by
+# a layer's track pitch.  It is a pure RATIO of two engine-unit lengths, so it
+# is invariant under any consistent choice of unit — which is exactly why it
+# detects an INCONSISTENT one.  A scale mismatch moves it by the scale ratio
+# (~2000x for DBU-vs-micron), orders of magnitude outside anything buildable.
+#
+# The bounds below are deliberately far outside BOTH ends of the real range,
+# because a guard that stops a legitimate run is worse than one that misses a
+# subtle case.  Two references fix them:
+#
+#   measured   the tree's flows (2026-08, `BUDA_UNIT_SIGNAL=1`) span 3.66
+#              (flow/four_blocks M7 — a 150-unit toy on a 41-unit pitch) to
+#              797.2 (flow/chip/chip_topdown M2-M5) tracks across.  The
+#              small end matters: the first calibration sampled only the QoR
+#              corpus, whose minimum is 24.4, and a bound set from that broke
+#              six legitimate unit-test fixtures.
+#   physical   the widest reticle die (~33 mm) at the finest production metal
+#              pitch (~28 nm) is ~1.2e6 tracks across — the physical ceiling.
+#              At the other end, a design under HALF a track pitch across is
+#              smaller than one wire of a layer it claims to route on.
+#
+# So MAX is ~8x past the physical ceiling and ~1e4x past anything measured;
+# MIN is ~7x below the smallest measured design.  `set_unit_check off|warn`
+# is the escape for the case we did not foresee — the fault text names it.
+UNIT_TRACKS_MIN = 0.5
+UNIT_TRACKS_MAX = 1.0e7
+
+# The ratio signal has a HARD limit, and it is worth being explicit about it:
+# a mis-scaled small design and a legitimate huge one produce the same number.
+# A 2000x mismatch on a 720000-unit design reads 720000 tracks across — inside
+# the physical ceiling, so the ratio check passes it.  No ratio can do better:
+# without an absolute anchor there is nothing to compare against.
+#
+# There IS an anchor, but only sometimes.  A design that DECLARED an import
+# scale (`set_import_scale`) has asserted that its layout units are physical:
+# `unit_pitch / lu_per_um` is then a track pitch in real microns, and real
+# metal pitches are bounded — roughly 20 nm at the finest production node up
+# to ~10-20 µm for top-metal/redistribution.  So a declared-scale design gets
+# a second, much sharper check.
+#
+# At the DEFAULT scale (1.0) it does not apply: "microns" there is nominal —
+# every corpus design would fail a physical pitch test, and rightly, because
+# nobody claimed those numbers were physical.  Declaring a scale is what turns
+# the claim on.  Same principle as "no track pattern, no verdict": we judge
+# only what the design actually asserted.
+#
+# Bounds ~10x outside the real range at both ends, for the same reason as
+# above: a guard that stops a legitimate run is worse than one that misses.
+UNIT_PITCH_UM_MIN = 0.005      # 5 nm — an order of magnitude below any node
+UNIT_PITCH_UM_MAX = 500.0      # 0.5 mm — far past any redistribution layer
+
+
+def unit_consistency_signals(fp, routing_grid, max_layer_id=32):
+    """Return ([(layer_id, unit_pitch, tracks_across_extent)], extent).
+
+    Pure read-only measurement, shared by the reporting and the guard so the
+    number a user is shown is the number that was judged."""
+    blocks = list(fp.get_all_blocks())   # (name, Rect) pairs
+    if not blocks:
+        return [], 0.0
+    xs1 = []; xs2 = []; ys1 = []; ys2 = []
+    for _name, b in blocks:
+        xs1.append(b.x1); xs2.append(b.x2); ys1.append(b.y1); ys2.append(b.y2)
+    extent = float(max(max(xs2) - min(xs1), max(ys2) - min(ys1)))
+    out = []
+    for lid in range(1, max_layer_id + 1):
+        try:
+            if not routing_grid.has_layer(lid):
+                continue
+            up = routing_grid.get_layer_grid(lid).global_pattern().unit_pitch()
+        except Exception:
+            continue
+        if up and up > 0.0:
+            out.append((lid, float(up), extent / float(up)))
+    return out, extent
+
+
+def min_bit_pitch(session, no_pattern=None):
+    """Smallest per-bit pitch over all pattern layers (the densest layer a
+    stub could land on) — eff_bus_width(1, 0.0, lid) is bit_pitch on a
+    pattern layer and 0.0 otherwise.
+
+    With no pattern layer at all there is no grid to derive from; the caller
+    says what that means.  `no_pattern=None` (the default) falls back to the
+    NUTS track pitch, which is what the bit-cap callers want — an approximate
+    length scale beats refusing to cap.  `set_track_pitch auto` passes 0.0
+    instead, because there the fallback would be the very literal it exists
+    to replace, returned as if it had been derived.
+
+    The grid-derived length scale: `set_max_bundle_bits auto` uses it to ask
+    how many bits fit a block face, and `set_track_pitch auto` to size the
+    inter-bus gap.  Shared here so both mean the same thing."""
+    import buda
+    pitches = []
+    for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL):
+        for lid in session.layers.get_layer_ids_by_dir(d):
+            p = session.layers.eff_bus_width(1, 0.0, lid)
+            if p > 0:
+                pitches.append(p)
+    if pitches:
+        return min(pitches)
+    return float(session._nuts_pitch or 1.0) if no_pattern is None \
+        else no_pattern
+
+
+def unit_plausibility_faults(signals, lu_per_um=1.0):
+    """The subset of `unit_consistency_signals` rows outside the bounds, each
+    with why it failed:
+    `[(layer_id, unit_pitch, tracks, 'low'|'high'|'pitch_lo'|'pitch_hi')]`.
+
+    `lu_per_um` is the design's declared import scale; at the default 1.0 the
+    physical pitch check is skipped (nothing claimed those units were real).
+
+    Separated from the measurement so the predicate is testable without a
+    session, and from the reporting so one verdict drives both."""
+    faults = []
+    declared = lu_per_um and lu_per_um > 0.0 and lu_per_um != 1.0
+    for lid, up, n in signals:
+        if declared:
+            pitch_um = up / lu_per_um
+            if pitch_um < UNIT_PITCH_UM_MIN:
+                faults.append((lid, up, n, "pitch_lo"))
+                continue
+            if pitch_um > UNIT_PITCH_UM_MAX:
+                faults.append((lid, up, n, "pitch_hi"))
+                continue
+        if n < UNIT_TRACKS_MIN:
+            faults.append((lid, up, n, "low"))
+        elif n > UNIT_TRACKS_MAX:
+            faults.append((lid, up, n, "high"))
+    return faults

@@ -444,6 +444,14 @@ void BDB::_create_schema() {
         if (k == "units") _units = std::stoi(v);
         else if (k == "die_w") _die_w = std::stod(v);
         else if (k == "die_h") _die_h = std::stod(v);
+        else if (k == "lu_per_um") {
+            // The scale the stored coordinates were WRITTEN in.  Restoring it
+            // is what makes a reopened design self-describing: without it a
+            // DBU-scale BDB would be read back as microns and every derived
+            // physical quantity would be off by the same factor.
+            try { double d = std::stod(v); if (d > 0.0) _lu_per_um = d; }
+            catch (...) {}
+        }
     }
 }
 
@@ -1098,6 +1106,25 @@ int BDB::add_net_pins_inout(const std::string& net_name,
 
 int BDB::units() const { return _units; }
 
+void BDB::set_import_scale(double lu_per_um) {
+    if (!(lu_per_um > 0.0))
+        throw std::runtime_error("set_import_scale: layout units per micron "
+                                 "must be positive, got " +
+                                 std::to_string(lu_per_um));
+    _lu_per_um = lu_per_um;
+    _lu_from_def_units = false;
+    _set_meta("lu_per_um", std::to_string(_lu_per_um));
+}
+
+void BDB::set_import_scale_from_def_units() {
+    // Deferred, not resolved now: the DEF's UNITS is only known once the file
+    // is being read, and asking the caller to supply it would reintroduce the
+    // out-of-band knowledge this mode exists to remove.
+    _lu_from_def_units = true;
+}
+
+double BDB::import_scale() const { return _lu_per_um; }
+
 void BDB::set_die(double w, double h) {
     _die_w = w; _die_h = h;
     auto upsert = [&](const char* key, double val) {
@@ -1323,16 +1350,11 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
     Stmt s_find_net (_db, "SELECT id FROM net WHERE name=?");
     Stmt s_find_cell(_db, "SELECT cell,x1,y1 FROM component WHERE id=?");
 
-    // Populate cell table from LEF sizes
-    {
-        Stmt sc(_db, "INSERT OR REPLACE INTO cell(name,width,height) VALUES(?,?,?)");
-        for (auto& [cname, sz] : lef_sizes) {
-            sqlite3_bind_text  (sc, 1, cname.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_double(sc, 2, sz.w);
-            sqlite3_bind_double(sc, 3, sz.h);
-            sqlite3_step(sc); sqlite3_reset(sc);
-        }
-    }
+    // The cell table is populated AFTER the DEF parse (see below), not here:
+    // in `dbu` mode the scale is the DEF's own UNITS, which is not known until
+    // the file has been read.  `component.cell` is a plain TEXT column with no
+    // foreign key, and the parse loop reads `lef_sizes` directly rather than
+    // the table, so nothing in between needs the rows to exist yet.
 
     _exec("BEGIN");
 
@@ -1357,6 +1379,22 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
         sqlite3_reset(s_find_net);
         net_id_cache[name] = id;
         return id;
+    };
+
+    // ── the ONE scale decision (docs/internal/engine_units.md) ───────────
+    // Two conversions, both here, both applied the instant a number leaves
+    // the file: DEF integers are DBU, LEF numbers are µm.  Downstream there
+    // is nothing left to convert — which is precisely why the ~59
+    // BDB→Floorplan int(round()) sites in the Python layer stay correct
+    // without knowing this factor exists.
+    //   dbu_to_lu is a LAMBDA, not a value, because `UNITS DISTANCE MICRONS`
+    // may not have been read yet when the first coordinate arrives (DIEAREA
+    // in a hand-written DEF).  In DBU mode it is exactly 1.0 either way.
+    auto dbu_to_lu = [&](double dbu) {
+        return _lu_from_def_units ? dbu : dbu * _lu_per_um / double(_units);
+    };
+    auto um_to_lu  = [&](double um) {
+        return um * (_lu_from_def_units ? double(_units) : _lu_per_um);
     };
 
     std::string line, cur_net;
@@ -1384,8 +1422,8 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
                 if (!tok.empty() && (std::isdigit(tok[0]) || tok[0]=='-'))
                     nums.push_back(std::stoi(tok));
             if (nums.size() >= 4) {
-                _die_w = nums[2] / double(_units);
-                _die_h = nums[3] / double(_units);
+                _die_w = dbu_to_lu(nums[2]);
+                _die_h = dbu_to_lu(nums[3]);
             }
             continue;
         }
@@ -1403,11 +1441,13 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
             std::smatch m;
             if (!std::regex_search(line, m, comp_re)) continue;
             std::string inst=normalize_def_name(m[1]), cell=m[2];
-            double x1 = std::stoi(m[3]) / double(_units);
-            double y1 = std::stoi(m[4]) / double(_units);
+            double x1 = dbu_to_lu(std::stoi(m[3]));
+            double y1 = dbu_to_lu(std::stoi(m[4]));
             double w=0.5, h=0.5;
             auto cs = lef_sizes.find(cell);
-            if (cs != lef_sizes.end()) { w=cs->second.w; h=cs->second.h; }
+            if (cs != lef_sizes.end())
+                { w=um_to_lu(cs->second.w); h=um_to_lu(cs->second.h); }
+            else { w=um_to_lu(w); h=um_to_lu(h); }   // the 0.5 default is µm too
             // Orientation: record the BDB token and swap the placed bbox dims
             // for 90/270 rotations (lower-left kept at the DEF placement point,
             // the same convention as rotate_comp). Strip a trailing ';' in case
@@ -1472,8 +1512,8 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
                         auto pi = ci->second.find(pin);
                         if (pi != ci->second.end()) {
                             dir = pi->second.dir;
-                            px  = x1 + pi->second.ox;
-                            py  = y1 + pi->second.oy;
+                            px  = x1 + um_to_lu(pi->second.ox);
+                            py  = y1 + um_to_lu(pi->second.oy);
                         }
                     }
                 }
@@ -1497,7 +1537,31 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
         sqlite3_bind_text(sm,2,v.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_step(sm); sqlite3_reset(sm);
     };
+    // Cell footprints, in the same layout units as the component bboxes built
+    // from them.  Leaving these in raw microns gave a 10 µm macro a
+    // 20000-unit component and a cell width of 10 at 2000 DBU/µm — `add_inst`
+    // would then create undersized instances and `export_gds` would draw the
+    // outline 2000x smaller than the placement it sits in (Codex P1 on #645).
+    {
+        Stmt sc(_db, "INSERT OR REPLACE INTO cell(name,width,height) VALUES(?,?,?)");
+        for (auto& [cname, sz] : lef_sizes) {
+            sqlite3_bind_text  (sc, 1, cname.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_double(sc, 2, um_to_lu(sz.w));
+            sqlite3_bind_double(sc, 3, um_to_lu(sz.h));
+            sqlite3_step(sc); sqlite3_reset(sc);
+        }
+    }
+
+    // DBU mode resolves only now — the DEF's own UNITS is what it means —
+    // and is recorded as a NUMBER, so a reopened design carries the scale its
+    // coordinates were written in rather than a mode that would re-resolve
+    // against whatever DEF is imported next.
+    if (_lu_from_def_units) {
+        _lu_per_um = double(_units);
+        _lu_from_def_units = false;
+    }
     save_meta("units", std::to_string(_units));
+    save_meta("lu_per_um", std::to_string(_lu_per_um));
     save_meta("die_w", std::to_string(_die_w));
     save_meta("die_h", std::to_string(_die_h));
 

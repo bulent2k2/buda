@@ -228,6 +228,11 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._script_stack = []      # stack of absolute paths of sourced scripts
         self.script_path = None      # set when a .buda script is sourced
         self.routing_grid = None     # RoutingGridStack (stage 8)
+        # Unit-plausibility guard (Phase 1d): 'on' (hard error) | 'warn' | 'off'
+        self._unit_check = "on"
+        # The (layer, unit_pitch) tuple last judged — report once per stage
+        # per GRID, so a pattern declared after the first check re-arms it.
+        self._unit_check_done = None
         self.detailed_result = None  # DetailedNUTSResult (stage 9)
         self._dogleg_originals = {}  # bid -> pre-split selected_topology_index (restored on re-plan)
         self._dogleg_slot = {}       # bid -> appended candidate index holding the split topology
@@ -390,8 +395,15 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
                 f"[runtime] {stripped}: {elapsed:.3f}s "
                 f"({nlines} lines, {nwarn} warn, {nerr} err)\n")
             self._flow_log.flush()
-            # … and a one-line abstract summary to the terminal.
+            # … and a one-line abstract summary to the terminal.  This is the
+            # RUN's visible output — every per-command headline a user sees
+            # comes from here, so it must NOT be conditioned on any flag.
+            # (#643 accidentally nested it inside the --report-json branch,
+            # silencing normal runs entirely; see test_run_command_summary.py.)
             self._cmd_stats.append((stripped, elapsed, nlines, nwarn, nerr))
+            headline = self._extract_headline(nonblank)
+            self._emit_cmd_summary(real_out, stripped, elapsed, nlines,
+                                   nwarn, nerr, headline)
         if self.report_json_path:
             # The machine-readable report must list what RAN, not what was
             # worth printing: `_cmd_stats` deliberately drops silent, instant
@@ -401,9 +413,6 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
             # so a normal run pays nothing.
             self._all_cmd_stats.append((stripped, elapsed, nlines, nwarn,
                                         nerr, bool(significant)))
-            headline = self._extract_headline(nonblank)
-            self._emit_cmd_summary(real_out, stripped, elapsed, nlines,
-                                   nwarn, nerr, headline)
 
         if raised is not None:
             raise raised

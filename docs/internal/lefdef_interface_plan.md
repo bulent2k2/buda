@@ -117,6 +117,43 @@ flow exits non-zero under the flag and 0 without it.
 
 ## 2. Phase 1 — the coordinate + unit model (≈ 2 weeks; the highest-value structural fix)
 
+> **LANDED** (2026-08).  All four sub-items (a)-(d) are built; the contract
+> is written up as-built in [engine_units.md](engine_units.md), which is now
+> the reference — this section is the reasoning that produced it.
+>
+> - **(a)** `set_import_scale micron|dbu|<n>` (BDB `set_import_scale` /
+>   `set_import_scale_from_def_units`), applied at import only, persisted as
+>   meta `lu_per_um` as a NUMBER and restored on open.  GDS import/export
+>   convert through it too, so a scaled BDB cannot emit geometry
+>   `lu_per_um`× too large in a valid-looking file.
+> - **(b)** `set_track_pitch auto` derives the inter-bus gap from the grid.
+>   **Opt-in, not a new default**: a derived gap is a larger reservation on
+>   every patterned design — a QoR change, not a unit fix.
+> - **(c)** [engine_units.md](engine_units.md).
+> - **(d)** `set_unit_check on|warn|off`.  TWO signals, because one was not
+>   enough: the *ratio* (tracks across, bounds `[0.5, 1e7]`, calibrated over
+>   124 flows / 580 layer-rows spanning 3.66 … 797.2 against a ~1.2e6
+>   physical ceiling) plus, for a design that DECLARED an import scale, the
+>   *absolute* pitch check (`unit_pitch / lu_per_um` ∈ 0.005 … 500 µm).
+>   Fires on **0 of 41** corpus flows and 0 of the 124 swept.
+>
+> The scaling hole the review raised is real and is documented rather than
+> closed: script-declared distances stay in layout units and are NOT scaled
+> by the import factor.  (d) is what makes that a stop instead of a silent
+> optimistic plan — and building the regression for it is what exposed that
+> the ratio signal alone could not: a 2000× mismatch on a 720 000-unit
+> design reads 720 000 tracks across, nonsense that sits comfortably inside
+> any physically-justifiable ratio bound.  The absolute check exists because
+> of that measurement, not in anticipation of it.
+>
+> Two calibration lessons worth keeping:
+> - a bound is only as good as the *population* it was measured over.  The
+>   first minimum (4) came from the QoR corpus alone and broke six unit-test
+>   fixtures, which are far smaller than any corpus vehicle.
+> - a ratio is invariant under a consistent unit — which is what makes it
+>   detect an inconsistent one, and also what caps how much it can detect.
+
+
 **The finding that makes this cheap.**  The routing engine is
 **unit-agnostic**: `grep` for micron semantics across `topology.cpp`,
 `nuts.cpp`, `congestion_planner.cpp`, `routing_grid.cpp` returns
