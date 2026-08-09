@@ -66,11 +66,21 @@ So blockages are used only where the semantics genuinely are negative:
 
 - areas the plan requires to stay **clear** (e.g. lower-layer keep-outs
   under a reserved corridor), and
-- **`+ PARTIAL <maxDensity>`** density limits, the standard construct
-  for steering congestion away from a region without forbidding it — the
-  closest portable expression of "leave room here for the bus plan".
+- **`+ PARTIAL <maxDensity>`** density limits over the corridors.
 
-Corridors themselves are conveyed by the manifest, never as blockages.
+**A second correction, from the review of the built 4b** (Codex P1 on PR
+#648): `PARTIAL maxDensity` is a **PLACEMENT**-blockage option in the DEF
+5.8 grammar, not a LAYER routing-blockage one.  So the construct above is
+not "steering congestion away from a region" — it caps how densely *cells*
+may be placed under a planned bus.  That helps pin access and leaves the
+area less contended, but DEF has **no** routing-density concept at all, so
+it is not the reservation.  (Our own reader is permissive enough to accept
+`LAYER … + PARTIAL`, which is why a round-trip test alone did not catch the
+first, invalid, emission.)
+
+The consequence is worth stating plainly rather than softening: the routing
+intent lives in the manifest and **nowhere else**.  Corridors themselves are
+conveyed by the manifest, never as blockages.
 
 That split is honest about the format's limits and keeps the portable
 part portable.  It also raises the Tcl work in Phase 5 from "nice to
@@ -465,6 +475,47 @@ well under a minute, memory measured and documented).
 
 ## 5. Phase 4 — the advisory writer (≈ 2–3 weeks)
 
+> **LANDED** (2026-08).  `src/buda_session/advisory.py` + `emit_guides` /
+> `export_def_blockages`.
+>
+> **4a leads, and the ordering is the design.**  The manifest carries the
+> POSITIVE intent — "route these nets here" — as JSON/CSV plus a worked
+> `create_route_guide` Tcl script.  That is the thing BUDA actually computed
+> and the thing DEF has no way to say; a GDS rectangle carries no net
+> identity a router can adopt, which is what made the output a picture
+> rather than a constraint.
+>
+> **4b carries only what DEF can honestly say.**  The obvious move — one
+> `BLOCKAGES` rect per corridor — is exactly backwards: a blockage tells the
+> router to STAY OUT, so it would forbid the routing the plan is asking for.
+> What goes in is the design's real keepouts as hard blockages (that IS what
+> a blockage means) and, opt-in, `+ PARTIAL <maxDensity>` PLACEMENT blockages
+> over the corridors — a cap on cell density under a planned bus, which is
+> the nearest thing DEF has and is **not** the reservation (§0's second
+> correction: `PARTIAL` is a placement option, and DEF has no routing-density
+> concept at all).
+>
+> Each corridor names **its own** nets, not the bundle's: a tapered fan-in
+> branch (`Topology::seg_bits`) carries a subset, and guiding the whole
+> bundle down it would be a wrong instruction rather than a loose one.
+>
+> Both halves of the plan's acceptance criterion are tested, and the second
+> is the load-bearing one: `test_corridors_are_not_emitted_as_blockages`
+> asserts that **no hard blockage overlaps any corridor**, so the §0
+> correction is a test rather than untested prose.  Manifest and DEF are both
+> byte-deterministic (the `gds_io` discipline), and the DEF round-trips
+> through the Phase 3 reader.
+>
+> **Not done, deliberately:** router-path emission (`NETS … + ROUTED` with
+> real vias) stays deferred per §0 — the data exists in
+> `net_segment`/`net_via`, so the deferral costs only the writer.
+>
+> **Acceptance vehicle:** the plan named `demo/ariane`, but Phase 3 showed
+> that pair is mismatched (its DEF's cells are absent from its LEF), so the
+> worked example runs on a synthetic design instead.  Fixing the demo data is
+> the owner's call.
+
+
 There is **no DEF writer today** — the only export is `export_gds`.
 This is the gap that makes the tool's output "a picture, not a
 constraint": GDS rectangles carry no net identity a P&R tool can adopt.
@@ -477,8 +528,8 @@ script.  This carries the positive intent that DEF cannot express, so it
 leads rather than follows.
 
 **4b — DEF `BLOCKAGES`, negative semantics only.**  Keep-clear regions
-and `+ PARTIAL <maxDensity>` density limits — **not** the corridors
-themselves (see §0).  Deterministic ordering (sorted, like `gds_io`) and
+and `+ PARTIAL <maxDensity>` PLACEMENT-density limits — **not** the
+corridors themselves (see §0).  Deterministic ordering (sorted, like `gds_io`) and
 a DEF → BUDA → DEF round-trip test.
 
 **Acceptance for both:** a worked end-to-end example on the checked-in
