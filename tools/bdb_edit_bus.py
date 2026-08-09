@@ -17,9 +17,13 @@
 
 A **bus** is a set of `net` rows sharing a base name plus a numeric bit suffix —
 e.g. `bus_011_b00, bus_011_b01, ... bus_011_b63`, or `s2p_0, s2p_1, s2p_2`.  The
-bit membership is carried in the net NAME (not `net_props.bus_name`, which real
-BDBs leave unset), so this tool identifies a bus by name pattern and resizes the
-set:
+bit membership is carried in the net NAME, so this tool identifies a bus by name
+pattern and resizes the set.  (`net_props.bus_name` is now filled in by the
+importers, but only for the bracket form `<base>[<k>]` a DEF or Verilog netlist
+writes — the underscore spellings above are what the flat flow produces and it
+leaves those unclassified, so the name pattern is still what this reads.)
+
+  Modes:
 
   * PRUNE  — keep the lowest-index bits, drop the rest (64-bit -> 4-bit);
   * GROW   — clone a template bit's pin structure to add higher-index bits

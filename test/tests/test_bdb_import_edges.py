@@ -20,6 +20,7 @@ already tested and is wrong just outside them.  Twice over for the
 library-cell filter, whose rule went cell-name → placement → LEF CLASS,
 each step correct on the case that prompted it and wrong on the next one.
 """
+import sqlite3
 import textwrap
 
 import buda
@@ -31,6 +32,28 @@ def _v(tmp_path, text, name="t.v"):
     db = buda.BDB(str(tmp_path / "x.bdb"))
     db.import_verilog(str(p))
     return db
+
+
+def _wiring(db):
+    """{(instance, pin): net} — the connectivity the reader actually built."""
+    nets = {n.id: n.name for n in db.all_nets()}
+    comps = {c.id: c.name for c in db.all_components()}
+    return {(comps.get(p.comp_id), p.pin_name): nets.get(p.net_id)
+            for p in db.all_pins()}
+
+
+def _bus_props(path):
+    """{net name: (bus_name, bit_index)} straight from the table.
+
+    Read over SQL because `net_props` has no Python binding — the columns
+    have been in the schema for this and nothing filled them in."""
+    con = sqlite3.connect(str(path))
+    try:
+        return {n: (b, i) for n, b, i in con.execute(
+            "SELECT net.name, net_props.bus_name, net_props.bit_index "
+            "FROM net_props JOIN net ON net.id = net_props.net_id")}
+    finally:
+        con.close()
 
 
 # ── ANSI port headers ──────────────────────────────────────────────────────
@@ -360,3 +383,145 @@ endmodule
     # …so the DEF path and the elaborated path share their prefix, which is
     # what makes the merge line up at all.
     assert d.components[0].name.startswith("mem[0]/")
+
+
+# ── vector port maps (opens_interchange item 2) ────────────────────────────
+
+_SUB = """\
+    module sub (a0, a1, z);
+      input a0;
+      input a1;
+      output z;
+    endmodule
+"""
+
+
+def test_a_bit_select_names_the_bit_not_the_bus(tmp_path):
+    """`.a0(w[0])` used to have its selector cut off (`e.resize(e.find('['))`),
+    so it named net `w`.
+
+    Filed as a width collapse — a 4-bit bus arriving 1 bit wide — and that is
+    the smaller half.  The larger half is that it SHORTS the bus: `w[0]` and
+    `w[1]` are different nets, both landed on `w`, and the reader therefore
+    reported two pins joined that the netlist keeps apart.  No diagnostic,
+    and every later stage treats the result as the design."""
+    db = _v(tmp_path, _SUB + """\
+        module top ();
+          wire [1:0] w;
+          sub u0 (.a0(w[0]), .a1(w[1]), .z(q));
+          sub u1 (.a0(w[1]), .a1(w[0]), .z(r));
+        endmodule
+        """)
+    assert sorted(n.name for n in db.all_nets()) == ["q", "r", "w[0]", "w[1]"]
+    w = _wiring(db)
+    assert w[("u0", "a0")] == "w[0]" and w[("u0", "a1")] == "w[1]"
+    # …and crucially the two are NOT the same net, in either instance.
+    assert w[("u1", "a0")] == "w[1]" and w[("u1", "a1")] == "w[0]"
+
+
+def test_the_bus_bits_are_classified_in_net_props(tmp_path):
+    """`net_props.bus_name` / `bit_index` have been in the schema for exactly
+    this and nothing wrote them (`bdb_edit_bus.py` says so in its docstring).
+    One reading of `<base>[<k>]`, shared by both importers, so a DEF net and
+    the Verilog net it merges with cannot be classified differently."""
+    db = _v(tmp_path, _SUB + """\
+        module top ();
+          wire [1:0] w;
+          sub u0 (.a0(w[0]), .a1(w[1]), .z(scalar));
+        endmodule
+        """)
+    del db
+    props = _bus_props(tmp_path / "x.bdb")
+    assert props["w[0]"] == ("w", 0)
+    assert props["w[1]"] == ("w", 1)
+    # A net that is not a bus bit is left unclassified rather than given a
+    # bus of one — "no bus" and "a 1-bit bus" are different claims.
+    assert props["scalar"] == (None, None)
+
+
+def test_a_bit_select_resolves_through_a_port(tmp_path):
+    """The reason the selector is re-applied AFTER the ctx lookup rather than
+    kept in the lookup key.
+
+    The parent connects the whole bus to a port (`.p(w)`), and the child
+    selects bits of that port (`p[0]`).  Resolving base-then-select maps
+    `p[0]` onto `w[0]` — the same net the parent's own `.a0(w[0])` names.
+    Keying the lookup on the literal `p[0]` would miss the ctx entry (`p`)
+    and invent a fresh local net, i.e. an open across the boundary."""
+    db = _v(tmp_path, _SUB + """\
+        module mid (p);
+          input p;
+          sub k0 (.a0(p[0]), .a1(p[1]), .z(t));
+        endmodule
+
+        module top ();
+          wire [1:0] w;
+          mid m0 (.p(w));
+          sub u0 (.a0(w[0]), .a1(w[1]), .z(q));
+        endmodule
+        """)
+    w = _wiring(db)
+    assert w[("m0/k0", "a0")] == "w[0]", "the child's bit did not reach the bus"
+    assert w[("m0/k0", "a1")] == "w[1]"
+    # Same net object as the top-level instance's — that is the whole point.
+    assert w[("u0", "a0")] == w[("m0/k0", "a0")]
+
+
+def test_an_escaped_identifier_keeps_its_brackets_as_a_name(tmp_path):
+    """The trap in reading `[` as a select: a Verilog ESCAPED identifier runs
+    from `\\` to whitespace and takes its brackets with it, so `\\w[0]` is an
+    identifier NAMED `w[0]` — not bit 0 of a bus `w`.
+
+    For that spelling the two readings happen to converge (both give the net
+    name `w[0]`), and converging is what makes the merge work at all, since a
+    DEF writes a bus bit as `\\w\\[0\\]`.  They part company on a name the
+    select parser cannot read: `\\w[1][0]`, which synthesis writes for an
+    element of a 2-D array.  Parsed as a select its index is `1][0`, which is
+    not a literal — so the connection is dropped as unresolvable and the pin
+    silently loses its net.  As a name it is simply a name."""
+    db = _v(tmp_path, _SUB + """\
+        module top ();
+          wire \\w[0] , \\w[1][0] ;
+          sub u0 (.a0(\\w[0] ), .a1(\\w[1][0] ), .z(q));
+        endmodule
+        """)
+    w = _wiring(db)
+    assert w[("u0", "a0")] == "w[0]"
+    assert w[("u0", "a1")] == "w[1][0]", "the 2-D element lost its net"
+
+
+def test_a_part_select_connects_every_bit_it_names(tmp_path):
+    """A part-select on a port BUDA models as ONE pin.  Expanding it to a pin
+    per named bit is what keeps the design connected: the alternative that
+    reads naturally — keep the base name `w` — would leave this pin on a net
+    no bit-select ever touches, so a design mixing the two shapes would come
+    apart at exactly the bus the fix is about.
+
+    The other alternative, a net literally called `w[3:0]`, would invent a
+    name the netlist never declared."""
+    db = _v(tmp_path, """\
+        module sink (s);
+          input s;
+        endmodule
+        """ + _SUB + """\
+        module top ();
+          wire [3:0] w;
+          sub  u0 (.a0(w[0]), .a1(w[1]), .z(q));
+          sink u1 (.s(w[3:0]));
+        endmodule
+        """)
+    nets = {n.id: n.name for n in db.all_nets()}
+    assert {"w[0]", "w[1]", "w[2]", "w[3]"} <= set(nets.values())
+    assert "w[3:0]" not in set(nets.values()), \
+        "invented a net the netlist never declared"
+
+    # One pin ROW per named bit — the pin key is (net, comp, pin), so a port
+    # touching four nets is representable without renaming the pin.  Counted
+    # off the pin table rather than through a (instance, pin) dict, which
+    # would collapse the very rows this is about.
+    comps = {c.id: c.name for c in db.all_components()}
+    on_s = sorted(nets[p.net_id] for p in db.all_pins()
+                  if comps.get(p.comp_id) == "u1" and p.pin_name == "s")
+    assert on_s == ["w[0]", "w[1]", "w[2]", "w[3]"], on_s
+    # …so the part-select and the bit-selects meet on the same nets.
+    assert _wiring(db)[("u0", "a0")] in on_s

@@ -53,6 +53,22 @@ struct VerilogImportStats {
     // true total, so a caller can tell a complete list from a truncated one
     // — the list alone cannot say, since its entries are already unique.
     std::vector<std::string> skipped_cells;
+
+    // Vector connections, by the shape the port map used.  Counted because
+    // the three shapes are modelled to three different depths and a caller
+    // cannot tell from the netlist which it got.
+    int bit_selects = 0;          // .a(w[0]) — exact: one net per bit
+    int part_selects = 0;         // .a(w[3:0]) — a pin per named bit
+    // Part-selects whose low bound is not 0 on a module elaboration DESCENDS
+    // into: the child numbers its port bits from 0, so port bit k is net bit
+    // k+lo and the base-name composition used for the child context is off
+    // by `lo`.  Exact for the usual w[N:0]; reported, never guessed.
+    int offset_part_selects = 0;
+    // Port connections that name no net this reader can resolve —
+    // concatenations `{a,b}` and parameterized selects `w[i]`.  Each is an
+    // OPEN in the imported design; inferring one would put a wire where the
+    // netlist does not say there is one.
+    int unresolved_conns = 0;
 };
 
 struct DefImportStats {
@@ -828,6 +844,10 @@ private:
     // Insert the net_props row a net needs to appear in compute_hpwl/fanout and
     // nets_by_hpwl (idempotent) — the DEF/Verilog/label importers all do this.
     void _ensure_net_props(int net_id);
+    // Same, plus the bus/bit classification the net's NAME implies.  One
+    // reading of `<bus>[<k>]` for every path that creates a net, so a DEF
+    // net and the Verilog net it merges with cannot disagree.
+    void _ensure_net_props(int net_id, const std::string& net_name);
     // Upsert a meta(key,value) row.
     void _set_meta(const std::string& key, const std::string& value);
     // Insert a pin for net_id at the component named inst_path, auto-register

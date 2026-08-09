@@ -581,7 +581,42 @@ indistinguishable from a design that never had one.
 
 Returns a `VerilogImportStats` (`top_module`, `elaborated`,
 `skipped_library_cells`, `skipped_kinds`, `skipped_cells` — the last capped at
-eight, so `skipped_kinds` is what says whether the list is complete).
+eight, so `skipped_kinds` is what says whether the list is complete — plus the
+vector-connection counts below).
+
+**Vector connections.**
+
+A port map's **bit-select keeps its selector**: `.a0(w[0])` is net `w[0]`, so
+a 4-bit bus arrives as four nets. It used to resolve to the base name `w`,
+which collapsed the bus to one net *and shorted its bits together* — two pins
+the netlist keeps apart came back joined. The DEF side has always named bits
+individually, so per-bit nets are also what makes the merge line up.
+
+The identifier is resolved through the hierarchy context and the selector
+re-applied to the **result**, which is what carries a bit-select across a
+boundary: with `.p(w)` in the parent, the child's own `p[0]` lands on `w[0]`.
+
+| Shape | Handling | Counted as |
+|---|---|---|
+| `.a(w[0])` | exact — one net per bit | `bit_selects` |
+| `.a(w[3:0])` | one pin row per named bit (`pin`'s key is `(net, comp, pin)`) | `part_selects` |
+| `{a,b}`, `w[i]` | unresolved — the connection is an open (`BUDA-1609`) | `unresolved_conns` |
+
+A part-select whose low bit is not 0, on a module elaboration descends into,
+is reported (`BUDA-1610`): the child numbers its port bits from 0, so port bit
+*k* is net bit *k+lo*.
+
+An **escaped** identifier keeps its brackets as part of the NAME — `\w[0]` is
+a net called `w[0]`, not bit 0 of `w`, and `\w[1][0]` (a 2-D array element) is
+a name whose "index" no select parser can read.
+
+`net_props.bus_name` / `bit_index` are filled in from the **stored** net name
+by `derive_bus_bit`, shared with `import_def_lef` so a DEF net and the Verilog
+net it merges with cannot be classified differently.
+
+> Still open: a vector **PORT** (`input [3:0] a`) is one pin per port name, so
+> connecting a whole vector to one is modelled as a single pin on N nets. See
+> [`internal/opens_interchange.md`](internal/opens_interchange.md) item 2.
 
 > Why the filter matters beyond tidiness: a dropped instance in a merge does
 > **not** remove the DEF's row — it leaves it orphaned at depth 0. Its

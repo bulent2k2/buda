@@ -400,6 +400,28 @@ def cmd_import_verilog(session, cmd, args, cmd_line):
                        f"{st.skipped_library_cells} instance(s) of "
                        f"{st.skipped_kinds} undefined module(s) skipped as "
                        f"library cells: {shown}")
+    # Vector connections, stated because the shapes are modelled to different
+    # depths.  A bit-select is exact; the other two are not, and a netlist
+    # reader that says nothing leaves the caller unable to tell which it got.
+    if st.bit_selects or st.part_selects:
+        print(f"[Verilog] vector connections: {st.bit_selects} bit-select(s), "
+              f"{st.part_selects} part-select(s)")
+    if st.offset_part_selects:
+        buda_diag.emit("BUDA-1610",
+                       f"{st.offset_part_selects} part-select(s) with a "
+                       f"non-zero low bit connect a module the reader "
+                       f"descends into: inside it, port bit k is net bit "
+                       f"k+lo, and the child's own bit-selects are resolved "
+                       f"against the bus base — so they name bit k, not k+lo")
+    if st.unresolved_conns:
+        # An OPEN, not a nuisance: the connection existed in the netlist and
+        # does not exist in the database.  Warned rather than inferred —
+        # guessing which net a concatenation means would place a wire the
+        # netlist never asked for.
+        buda_diag.emit("BUDA-1609",
+                       f"{st.unresolved_conns} port connection(s) name no "
+                       f"resolvable net (concatenation, or a select whose "
+                       f"index is not a literal) and were left unconnected")
 
 
 def cmd_import_gds(session, cmd, args, cmd_line):

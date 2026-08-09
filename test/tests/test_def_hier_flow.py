@@ -226,8 +226,27 @@ def test_the_whole_flow_routes_the_design_clean(tmp_path):
     assert m["n_bundles"] == 15
     named = {n for b in m["bundles"] for n in b["nets"]}
     # The manifest's whole value is net identity: the nets it names must be
-    # the design's, at every level of the hierarchy.
-    assert {"din0", "dout0", "c0", "u_q0/m0", "u_q0/bl/w0"} <= named, sorted(named)
+    # the design's, at every level of the hierarchy.  The internal buses are
+    # written as VECTORS in chip.v, so their bits are `c[0]`, not `c0` —
+    # which is also how the DEF names them, both files coming from the one
+    # generator.
+    assert {"din0", "dout0", "c[0]", "u_q0/m[0]", "u_q0/bl/w[0]"} <= named, \
+        sorted(named)
+
+    # And the width, which is the point of reading a bit-select at all: each
+    # internal bus must arrive 4 bits wide.  Before interchange item 2 was
+    # fixed every bit of `c` resolved to one net called `c`, so this same
+    # netlist routed 18 bit-wires instead of 60 — with `check_design` still
+    # reporting "Success: no violations found", because nothing downstream
+    # can tell a bus that was never read from a bus that never existed.
+    for bus in ("c", "u_q0/m", "u_q0/bl/w"):
+        bits = {n for n in named if n.startswith(bus + "[")}
+        assert bits == {f"{bus}[{i}]" for i in range(4)}, sorted(bits)
+    # One routed bit per net, all 36 of them (the DEF declares NETS 36).
+    # Collapsed, the same netlist has 15: the four die-port scalars survive
+    # and every 4-bit internal bus becomes one.
+    assert len({(n.bundle_id, n.bit_index) for n in
+                s.detailed_result.net_segments}) == 36
 
 
 @pytest.mark.mid

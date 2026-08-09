@@ -80,6 +80,11 @@ MESSAGES = {
                            "descendant, so it could not be given an extent."),
     "BUDA-1608": (INFO,    "Netlist instances of undefined modules were "
                            "skipped as library cells."),
+    "BUDA-1609": (WARNING, "A port connection names no net this reader can "
+                           "resolve, so the connection is an open."),
+    "BUDA-1610": (WARNING, "A part-select's low bit is not 0 on a module the "
+                           "reader descends into, so its child port bits are "
+                           "offset from the net bits."),
     "BUDA-1602": (WARNING, "Imported design counts differ from the counts the "
                            "file declares."),
     "BUDA-1603": (WARNING, "A construct in the file has no representation in "

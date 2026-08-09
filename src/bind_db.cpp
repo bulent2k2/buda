@@ -480,7 +480,13 @@ void bind_db(py::module_& m) {
         .def_readonly("skipped_library_cells",
                       &VerilogImportStats::skipped_library_cells)
         .def_readonly("skipped_kinds", &VerilogImportStats::skipped_kinds)
-        .def_readonly("skipped_cells", &VerilogImportStats::skipped_cells);
+        .def_readonly("skipped_cells", &VerilogImportStats::skipped_cells)
+        .def_readonly("bit_selects", &VerilogImportStats::bit_selects)
+        .def_readonly("part_selects", &VerilogImportStats::part_selects)
+        .def_readonly("offset_part_selects",
+                      &VerilogImportStats::offset_part_selects)
+        .def_readonly("unresolved_conns",
+                      &VerilogImportStats::unresolved_conns);
 
     m.def("read_def",  &read_def,  py::arg("path"));
     m.def("parse_def", &parse_def, py::arg("text"), py::arg("where") = "<text>");

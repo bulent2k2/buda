@@ -112,12 +112,23 @@ onto 10 hands the outlines back as routing.
 
 The two notes above, and everything else this vehicle exposed that is still
 open, are owned by
-[`docs/internal/opens_interchange.md`](../../docs/internal/opens_interchange.md)
-— including the one you will hit first on a *real* design rather than this
-one: a vector port map collapses to a single net (item 2, which is why this
-design's netlist uses four scalar wires per bus).
+[`docs/internal/opens_interchange.md`](../../docs/internal/opens_interchange.md).
 
-Item 1 there — a hard macro instance dropped from the hierarchy because its
-name was not backslash-escaped — is **fixed**; an instance the DEF placed is
-now kept whatever its spelling, and whatever the netlist reader does skip is
-counted and its cell kinds named (`BUDA-1608`).
+Two of its items were found by building this design and are now **fixed**,
+which is the argument for having the vehicle:
+
+* **Item 1** — a hard macro instance dropped from the hierarchy because its
+  name was not backslash-escaped. The LEF's `MACRO … CLASS` now decides, so
+  the instance name is not consulted; whatever the reader does skip is
+  counted and its cell kinds named (`BUDA-1608`).
+* **Item 2** — a vector port map collapsing to one net. This design's buses
+  were written as four scalar wires each *because* of it; they are real
+  vectors now (`wire [3:0] w;` + `.Z0(w[0])`), and the routed result is
+  identical to the scalar spelling — 15 bundles, same wirelength — which is
+  what "the reader now reads what the netlist says" should look like. Read
+  by the old reader, this same netlist routes **18 bit-wires instead of 60**
+  and every `check_design` still reports success.
+
+What remains of item 2 is the other half: a vector PORT (`input [3:0] a`),
+which BUDA still models as one pin. That is why the ports here are scalar
+`A0..A3` while the wires are vectors.
