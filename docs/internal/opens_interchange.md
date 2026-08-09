@@ -135,10 +135,10 @@ write), so it lived here rather than in §9. **Now fixed**: the three writers
 call `ensure_parent_dir` (`buda_session/util.py`) to `mkdir -p` their parent
 before writing, so the ReadMe command works on a fresh checkout with no manual
 `mkdir` — all six artifacts land (guides json/csv/tcl, advisory DEF, GDS, and
-the `save_bdb` BDB, which rides the dir the earlier export created). This was
-the writer half only; the root split above is the part still open. Note
-`save_bdb` to a *new* directory no earlier export creates is not covered — a
-narrow residual left with the root decision it belongs to.
+the `save_bdb` BDB). This was the writer half only; the root split above is
+the part still open. `save_bdb <path>` (save-as) creates its snapshot's parent
+too, via the same `ensure_parent_dir`, so it no longer depends on an earlier
+export having made the directory.
 
 *Where to start:* not a one-line change — picking either root breaks
 existing scripts in the other direction, and `source ../tracks/tracks.buda`

@@ -26,6 +26,7 @@ import sys
 
 import buda_diag
 from ._options import reject_unknown_options
+from buda_session.util import ensure_parent_dir
 
 
 def cmd_bdb_net_mode(session, cmd, args, cmd_line):
@@ -463,7 +464,6 @@ def cmd_export_gds(session, cmd, args, cmd_line):
                   session.layers.get_gds_datatype(lid))
                  for lid in sorted(set(session._layer_name_map.values()))
                  if session.layers.get_gds_layer(lid) >= 0]
-    from buda_session.util import ensure_parent_dir
     ensure_parent_dir(args[0])              # create flow/def/out/ etc. if absent
     st = session.bdb.export_gds(args[0], layer_map, outline, label_layer,
                              write_labels, via_size)
@@ -1351,6 +1351,7 @@ def cmd_save_bdb(session, cmd, args, cmd_line):
                       "itself — a binary BDB already persists in place; "
                       "pick a different path for the snapshot")
                 return
+        ensure_parent_dir(dest)             # create the snapshot's dir if absent
         try:
             if dest.endswith(".sql"):
                 import shutil
