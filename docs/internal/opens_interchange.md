@@ -114,6 +114,28 @@ sharp edge — `flow/def/chip.buda` documents it in a comment because it had
 to. A file that *is* written, somewhere other than where the script says, is
 worse than one that is not written at all.
 
+**What this means for running the vehicle.** Because the CWD-rooted commands
+in `chip.buda` are written `flow/def/…` and the script-rooted `save_bdb
+out/…` lands in `flow/def/out/`, the two families agree on `flow/def/out/`
+**only from the repo root** — so `chip.buda` runs from there and nowhere
+else (`bin/buda flow/def/chip`, the ReadMe form). `cd flow/def && buda
+chip.buda` breaks the imports: `flow/def/chip.def` does not exist relative to
+that CWD. Rewriting the imports to bare (`chip.def`) is the *other*
+self-consistent config, run from inside `flow/def/` — the fork is real, and
+which config a copy is in is invisible on the page.
+
+**Companion trap — the output directory is not created.** `emit_guides` /
+`export_def_blockages` / `export_gds` open their destination without a
+`mkdir -p`, and `flow/def/out/` is git-ignored (so absent on a fresh
+checkout). Run the ReadMe command as-is and the first export dies with
+`FileNotFoundError: 'flow/def/out/chip_guides.json'` — *after* the pipeline
+has routed cleanly, so it reads as a routing success that then fails to write.
+Reproduced on `main`, 2026-08-09: `mkdir -p flow/def/out` first and all six
+artifacts land (guides json/csv/tcl, advisory DEF, GDS, and the `save_bdb`
+BDB). Same family as the root split — a path that resolves somewhere the run
+cannot write — so it belongs here rather than in §9; the fix is a `mkdir -p`
+at each writer (or a documented precondition), not a root decision.
+
 *Where to start:* not a one-line change — picking either root breaks
 existing scripts in the other direction, and `source ../tracks/tracks.buda`
 (script-relative) is used throughout `flow/hbundles/`. The likely shape is
