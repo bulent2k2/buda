@@ -270,6 +270,23 @@ reserves bus widths within a few percent of the µm-mode run
 > are now read and reachable, so that is a decision at the projection
 > boundary rather than a silent drop inside a parser.
 >
+> **2b LANDED** too: `import_lef_tech <file.lef> [top <N>]`.  ROUTING layers
+> with a DIRECTION become layers; PITCH+WIDTH synthesizes an ALL-SIGNAL track
+> pattern — the honest reading of LEF alone, since the file says nothing
+> about which tracks a power grid takes (that is the DEF's SPECIALNETS).
+> Layer ids come from the trailing integer in the name, so an imported stack
+> and a script saying `def_layer 4` mean the same layer.  TOP is a BUDA
+> notion LEF does not carry: topmost per direction by default.
+>
+> The precedence rule the plan asked to be explicit about is implemented in
+> BOTH directions and tested that way — declared first, the import skips it
+> (by name OR by id, two genuinely different collisions); declared later, it
+> REPLACES what the import installed.  The second direction needed
+> `LayerStack::remove_layer`: `add_layer` appends, so a duplicate id would
+> have left both rows in the vector with lookups silently taking the first,
+> i.e. the imported one.  An override that flips H/V also re-registers the
+> imported pattern, which the routing grid stores direction-side.
+>
 > Known gap left open: `tools/def_cluster.py` and `tools/def_viz_o2.py` carry
 > their own independent Python LEF scanners.  Consolidating them onto this
 > reader is worth doing and is not part of Phase 2.

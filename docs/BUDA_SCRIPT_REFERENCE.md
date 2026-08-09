@@ -23,7 +23,7 @@ The per-command documentation lives in one page per pipeline stage under
 
 | Page | Stage | Commands |
 |---|---|---|
-| [Setup](script_reference/setup.md) | setup | `def_layer` · `add_block` · `add_keepout` · `add_net` · `add_bus` · `corner_margin` · `detour_channel` · `set_min_stub_length[_dir\|_layer]` · `set_feedthru` · `set_track_pitch` · `set_unit_check` |
+| [Setup](script_reference/setup.md) | setup | `def_layer` · `add_block` · `add_keepout` · `add_net` · `add_bus` · `corner_margin` · `detour_channel` · `set_min_stub_length[_dir\|_layer]` · `set_feedthru` · `set_track_pitch` · `set_unit_check` · `import_lef_tech` |
 | [Bundler](script_reference/bundling.md) | 1 | `run_bundler` · `run_hier_bundler` · `dump_hbundles` |
 | [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` · `set_prune_dominated` · `set_dedup_loci` · `set_drop_dangling` |
 | [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` · `unpin_topology` |
@@ -50,6 +50,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | Setup | `set_min_stub_length`, `_dir`, `_layer` | Set minimum stub length globally, per direction, or per layer |
 | Setup | `set_feedthru` | Mark a block×layer set as routable-through (opt-in feedthru) |
 | Setup | `set_track_pitch` | Declare inter-bus pitch so `run_planner` band reservations match the NUTS solve |
+| Setup | `import_lef_tech` | Build the layer stack + track patterns from a LEF technology file; an explicit `def_layer`/`def_track_pattern` always outranks it |
 | Setup | `set_unit_check` | Unit-plausibility guard: stop (default), warn, or ignore when the blocks and the track patterns look like different scales |
 | Setup | `add_net`, `add_bus` | Declare nets / buses in the netlist |
 | Setup | `def_ndr`, `set_ndr` | Declare a non-default rule (width / spacing / shielding) and attach it to nets by name prefix — before the bundler runs |

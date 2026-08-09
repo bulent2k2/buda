@@ -23,6 +23,30 @@ void LayerStack::add_layer(int id, const std::string& name, LayerDir dir, LayerT
         else top_vert_id_ = id;
     }
 }
+// Drop a layer so a later declaration can REPLACE it.  Needed only by the
+// LEF tech import's precedence rule (Phase 2b): an explicit `def_layer`
+// outranks imported technology data in EITHER declaration order, and
+// add_layer appends — a duplicate id would leave both rows in the vector,
+// with lookups silently taking the first (i.e. the imported one).
+//
+// The TOP bookkeeping is re-derived rather than patched: it is a pair of
+// cached ids, and clearing one without rescanning would leave the stack with
+// no top layer in that direction even though another TOP layer exists.
+bool LayerStack::remove_layer(int id) {
+    const size_t before = layers_.size();
+    layers_.erase(std::remove_if(layers_.begin(), layers_.end(),
+                                 [id](const Layer& l) { return l.id == id; }),
+                  layers_.end());
+    if (layers_.size() == before) return false;
+    top_horiz_id_ = top_vert_id_ = -1;
+    for (const auto& l : layers_) {
+        if (l.type != LayerType::TOP) continue;
+        if (l.dir == LayerDir::HORIZONTAL) top_horiz_id_ = l.id;
+        else top_vert_id_ = l.id;
+    }
+    return true;
+}
+
 void LayerStack::set_layer_dilution(int id, double factor) {
     for (auto& l : layers_) if (l.id == id) { l.dilution_factor = factor; return; }
 }

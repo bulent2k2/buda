@@ -48,6 +48,9 @@ struct Layer {
 class LayerStack {
 public:
     void add_layer(int id, const std::string& name, LayerDir dir, LayerType type);
+    // Remove a layer by id (false if absent).  See layering.cpp for why the
+    // LEF tech import needs it and why TOP is re-derived, not patched.
+    bool remove_layer(int id);
     // Set dilution factor (total_pitch / signal_pitch) for an already-added layer.
     void set_layer_dilution(int id, double factor);
     // Convenience: set dilution from overhead percentage (e.g. 20%).

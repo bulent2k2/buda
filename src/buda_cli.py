@@ -216,6 +216,13 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._planner_params  = {}   # param_name -> value (buffered before planner exists)
         self._net_endpoints   = {}   # net_name -> (driver_instance, [receiver_instances])
         self._layer_name_map = {}    # layer_name -> layer_id
+        # Where each layer / track pattern came from: 'script' (an explicit
+        # def_layer / def_track_pattern) or 'lef' (import_lef_tech).  The
+        # precedence rule needs this in BOTH directions — the import must
+        # skip what the script declared, and a script declaration must be
+        # able to replace what the import provided (Phase 2b).
+        self._layer_source = {}      # layer_id -> 'script' | 'lef'
+        self._pattern_source = {}    # layer_id -> 'script' | 'lef'
         self._gds_label_layers = []  # def_gds_layer labels <csv> (import default)
         self._nuts_pitch = 1.0
         self._planner_pitch = None   # pitch the last run_planner reserved bands for
