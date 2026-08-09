@@ -132,7 +132,7 @@ class RefineMixin:
         sweeping = False
         i = 0
         while i < n and committed < max_moves:
-            group = []            # (pos, w, bid, old, tops)
+            pre = []              # (pos, w, bid, old) — chunk membership
             nmv = 0
             while i < n and nmv < chunk_moves:
                 pos, w = i, bundles[i]
@@ -141,11 +141,29 @@ class RefineMixin:
                 if old is None:
                     continue
                 bid = w.input.original_bundle.id
-                tops = self._refine_screen_alts(w, old)
-                group.append((pos, w, bid, old, tops))
-                nmv += len(tops)
-            if not group:
+                # Post-prune kept count is knowable without screening, so
+                # chunk membership is fixed BEFORE the batched screen.
+                pre.append((pos, w, bid, old))
+                nmv += min(len(w.input.candidates) - 1,
+                           _ripup_mod._RR_SCREEN_TOP_N)
+            if not pre:
                 continue
+            # Batched parallel screen for the whole chunk (the sequential
+            # per-bundle screens were the sweep's dominant cost at chip
+            # scale); ordering per bundle identical to _refine_screen_alts.
+            reqs = [(w, [t for t in range(len(w.input.candidates))
+                         if t != old])
+                    for _p, w, _b, old in pre]
+            scores_list = self._rr_screen_scores_many(reqs)
+            group = []            # (pos, w, bid, old, tops)
+            for (pos, w, bid, old), (_w2, alts), scores in \
+                    zip(pre, reqs, scores_list):
+                if scores is not None:
+                    alts = sorted(alts,
+                                  key=lambda t: (scores[t][0],
+                                                 scores[t][1], t))
+                group.append((pos, w, bid, old,
+                              alts[:_ripup_mod._RR_SCREEN_TOP_N]))
             flat = [(0, bid, old, t)
                     for _p, _w, bid, old, tops in group for t in tops]
             if flat:

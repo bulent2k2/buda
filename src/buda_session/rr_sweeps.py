@@ -98,15 +98,52 @@ class RRSweepsMixin:
             return None
         return {t: (o, v) for t, o, v in rows}
 
-    def _rr_screen_prune(self, w, idx_moves):
+    def _rr_screen_scores_many(self, reqs):
+        """Batched fixed-context screens: one `parallel_screen` call for a
+        list of (w, tidxs) requests — per-job private engine + planner
+        clone on C++ worker threads, the exact `_rr_screen_scores` shape,
+        so results are decision-identical to the sequential per-bundle
+        calls (screening is deterministic per (baseline, bundle) and
+        read-only).  Returns a list of {tidx: (overlaps, viols)} or None
+        per request, in request order.  Timing charged to the 'screen'
+        bucket per screened candidate, comparable with the sequential
+        path."""
+        if self.planner is None or self.nuts_result is None:
+            return [None] * len(reqs)
+        if not reqs:
+            return []
+        t0 = time.perf_counter()
+        jobs = [(w.input.original_bundle.id, list(tidxs),
+                 w.input.original_bundle.id in self._dogleg_slot)
+                for w, tidxs in reqs]
+        with contextlib.redirect_stdout(io.StringIO()), \
+                buda.ostream_redirect():
+            rows_per = buda.parallel_screen(
+                self.bundles, jobs, self.planner, self.fp, self.layers,
+                self._nuts_pitch, self.nuts_result,
+                list(self.planner.get_x_grid()),
+                list(self.planner.get_y_grid()),
+                n_threads=self._rr_sweep_threads())
+        n = sum(max(len(t), 1) for _w, t in reqs) or 1
+        dt = time.perf_counter() - t0
+        for _ in range(n):
+            self._rr_t_add('screen', dt / n)
+        return [None if rows is None else {t: (o, v) for t, o, v in rows}
+                for rows in rows_per]
+
+    def _rr_screen_prune(self, w, idx_moves, scores=...):
         """Split a contender's idx-move list into (kept, deferred) by
         screened score: the _ripup_mod._RR_SCREEN_TOP_N best-screened moves are
         full-trialed now, the rest DEFERRED to the iteration's stall sweep
         (never dropped — completeness is the loop's, not the screen's).
         Ties keep the incoming farness/cheap-first position, so the screen
         may reorder only on evidence; with screening unavailable the full
-        unscreened list is returned (nothing deferred)."""
-        scores = self._rr_screen_scores(w, [mv[1] for mv in idx_moves])
+        unscreened list is returned (nothing deferred).  `scores` (batched
+        callers) short-circuits the per-bundle screen call — pass the
+        {tidx: score} map (or None for the unscreened fallback) from
+        `_rr_screen_scores_many`; identical split by construction."""
+        if scores is ...:
+            scores = self._rr_screen_scores(w, [mv[1] for mv in idx_moves])
         if scores is None:
             return idx_moves, []
         order = sorted(range(len(idx_moves)),
@@ -224,8 +261,14 @@ class RRSweepsMixin:
         trials = 0
         i, n_items = 0, len(contenders)
         while i < n_items:
-            # Build (and screen) just enough contenders to fill this chunk.
-            group = []               # (ci, bid, old_tidx, kept moves)
+            # Build just enough contenders to fill this chunk.  The
+            # post-prune kept count (min(len, TOP_N) under screening) is
+            # knowable without the screen, so chunk membership is fixed
+            # first and the chunk's screens then run BATCHED on the C++
+            # pool (`_rr_screen_scores_many`) — the sequential per-bundle
+            # screens were a dominant chunk-build cost at chip scale; the
+            # split per contender is identical by construction.
+            pre = []                 # (ci, bid, old_tidx, w, moves)
             nmv = 0
             while i < n_items and nmv < chunk_moves:
                 ci, bid = i + 1, contenders[i]
@@ -237,16 +280,26 @@ class RRSweepsMixin:
                 moves = [('idx', t)
                          for t in self._rr_candidate_order(w, old_tidx,
                                                            stage)]
+                pre.append((ci, bid, old_tidx, w, moves))
+                nmv += (min(len(moves), _ripup_mod._RR_SCREEN_TOP_N)
+                        if screen else len(moves))
+            if not pre:
+                continue
+            to_screen = [(w, [mv[1] for mv in moves])
+                         for _ci, _b, _o, w, moves in pre
+                         if screen and
+                         len(moves) > _ripup_mod._RR_SCREEN_TOP_N]
+            scores_iter = iter(self._rr_screen_scores_many(to_screen))
+            group = []               # (ci, bid, old_tidx, kept moves)
+            for ci, bid, old_tidx, w, moves in pre:
                 if screen and len(moves) > _ripup_mod._RR_SCREEN_TOP_N:
-                    moves, rest = self._rr_screen_prune(w, moves)
+                    moves, rest = self._rr_screen_prune(
+                        w, moves, scores=next(scores_iter))
                     if rest:
                         deferred.append((ci, bid, old_tidx, rest))
                 # A zero-move contender stays in the group so its sequential
                 # heartbeat still prints in visit order (Codex #604).
                 group.append((ci, bid, old_tidx, moves))
-                nmv += len(moves)
-            if not group:
-                continue
             flat = [(ci, bid, old, t)
                     for ci, bid, old, moves in group
                     for _k, t in moves]

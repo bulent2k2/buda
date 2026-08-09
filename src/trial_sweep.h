@@ -60,7 +60,9 @@
 
 #pragma once
 
+#include <array>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <tuple>
@@ -116,6 +118,35 @@ struct SweepDnutsCtx {
     // (the copy loop's orientation source, as in _run_detailed_nuts).
     std::map<std::pair<int, int>, bool> horiz_of;
 };
+
+// One fixed-context screen request: score `tidxs` for `bundle_id` against
+// the shared baseline (the exact _rr_screen_scores shape — fresh engine,
+// skip tighten/doglegs, add_fixed_segments_except, private planner clone).
+struct ScreenJob {
+    int bundle_id = -1;
+    std::vector<int> tidxs;
+    bool clear_dogleg = false;
+};
+
+// Batched PARALLEL fixed-context screening (the refine/ripup chunk builds'
+// dominant sequential cost at chip scale): one worker per job, private
+// planner clone + engine per job, shared inputs const.  Returns per job the
+// screen rows [(tidx, overlaps, violations)], or nullopt when the
+// incremental replan is unavailable (the caller falls back to the
+// unscreened order, exactly as the sequential per-bundle call does).
+// Deterministic per (baseline, job) — screening order does not matter, so
+// batching is decision-identical to the sequential per-bundle calls.
+std::vector<std::optional<std::vector<std::array<int, 3>>>> parallel_screen(
+    const std::vector<BundleWrapper>& bundles,      // committed baseline
+    const std::vector<ScreenJob>&     jobs,
+    const CongestionPlanner&          planner,      // cloned per job
+    const Floorplan&                  fp,
+    const LayerStack&                 layers,
+    double                            track_pitch,
+    const NUTSResult&                 baseline,     // frozen occupancy
+    const std::vector<int>&           extra_x,
+    const std::vector<int>&           extra_y,
+    int                               n_threads);
 
 std::vector<SweepOutcome> parallel_sweep(
     const std::vector<BundleWrapper>& bundles,      // committed baseline

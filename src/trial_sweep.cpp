@@ -223,6 +223,68 @@ SweepOutcome eval_move(const std::vector<BundleWrapper>& baseline,
 
 } // namespace
 
+std::vector<std::optional<std::vector<std::array<int, 3>>>> parallel_screen(
+    const std::vector<BundleWrapper>& bundles,
+    const std::vector<ScreenJob>&     jobs,
+    const CongestionPlanner&          planner,
+    const Floorplan&                  fp,
+    const LayerStack&                 layers,
+    double                            track_pitch,
+    const NUTSResult&                 baseline,
+    const std::vector<int>&           extra_x,
+    const std::vector<int>&           extra_y,
+    int                               n_threads) {
+    std::vector<std::optional<std::vector<std::array<int, 3>>>>
+        out(jobs.size());
+    if (jobs.empty()) return out;
+    std::lock_guard<std::mutex> sweep_lock(g_sweep_mutex);
+    CoutSilencer silence;
+    unsigned hw = std::thread::hardware_concurrency();
+    int nt = n_threads > 0 ? n_threads : (hw ? (int)hw : 2);
+    nt = std::min<int>(nt, (int)jobs.size());
+    std::atomic<size_t> next{0};
+    auto worker = [&]() {
+        for (size_t i = next.fetch_add(1); i < jobs.size();
+             i = next.fetch_add(1)) {
+            try {
+                const ScreenJob& j = jobs[i];
+                // The exact _rr_screen_scores engine shape, one per job:
+                // fresh engine, screen flags, frozen occupancy minus the
+                // target, planner grids as extras — plus a PRIVATE planner
+                // clone (replan_candidates leaves the planner unchanged,
+                // but a clone makes cross-job isolation structural).
+                NUTSEngine eng(fp, layers);
+                eng.set_track_pitch(track_pitch);
+                eng.set_skip_tighten(true);
+                eng.set_skip_doglegs(true);
+                eng.set_layer_threads(1);   // job fan-out owns the cores
+                eng.set_extra_grid_points(extra_x, extra_y);
+                eng.add_fixed_segments_except(baseline, j.bundle_id);
+                CongestionPlanner pl = planner;
+                pl.set_plan_threads(1);
+                out[i] = eng.screen_candidates(bundles, j.bundle_id,
+                                               j.tidxs, pl, j.clear_dogleg);
+            } catch (...) {
+                out[i] = std::nullopt;    // sequential/unscreened fallback
+            }
+        }
+    };
+    if (nt <= 1) {
+        worker();
+    } else {
+        std::vector<std::thread> pool;
+        pool.reserve(nt);
+        // Same exception-safe construction as parallel_sweep (Codex #502).
+        try {
+            for (int t = 0; t < nt; ++t) pool.emplace_back(worker);
+        } catch (const std::system_error&) {
+        }
+        if (pool.empty()) worker();
+        for (auto& th : pool) th.join();
+    }
+    return out;
+}
+
 std::vector<SweepOutcome> parallel_sweep(
     const std::vector<BundleWrapper>& bundles,
     const std::vector<SweepMove>&     moves,

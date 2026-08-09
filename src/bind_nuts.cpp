@@ -565,6 +565,48 @@ void bind_nuts(py::module_& m) {
           py::arg("horiz_of") = std::map<std::pair<int, int>, bool>{},
           py::arg("n_threads") = 0, py::arg("full_trials") = false);
 
+    // Batched PARALLEL fixed-context screening (the refine/ripup chunk
+    // builds' sequential-screen cost at chip scale): one worker per
+    // (bundle, tidxs) job, private planner clone + engine per job — the
+    // exact _rr_screen_scores shape, so batching is decision-identical to
+    // the sequential per-bundle calls.  Returns per job the screen rows
+    // [(tidx, overlaps, violations)] or None (unscreened fallback).
+    m.def("parallel_screen",
+          [](const std::vector<BundleWrapper>& bundles,
+             const std::vector<std::tuple<int, std::vector<int>,
+                                          bool>>& jobs,
+             const CongestionPlanner& planner, const Floorplan& fp,
+             const LayerStack& layers, double track_pitch,
+             const NUTSResult& baseline,
+             const std::vector<int>& extra_x,
+             const std::vector<int>& extra_y, int n_threads) {
+              std::vector<ScreenJob> js;
+              js.reserve(jobs.size());
+              for (const auto& [bid, tidxs, clear] : jobs)
+                  js.push_back(ScreenJob{bid, tidxs, clear});
+              std::vector<std::optional<
+                  std::vector<std::array<int, 3>>>> res;
+              {
+                  py::gil_scoped_release release;
+                  res = parallel_screen(bundles, js, planner, fp, layers,
+                                        track_pitch, baseline, extra_x,
+                                        extra_y, n_threads);
+              }
+              py::list out;
+              for (const auto& r : res) {
+                  if (!r) { out.append(py::none()); continue; }
+                  py::list rows;
+                  for (const auto& a : *r)
+                      rows.append(py::make_tuple(a[0], a[1], a[2]));
+                  out.append(rows);
+              }
+              return out;
+          },
+          py::arg("bundles"), py::arg("jobs"), py::arg("planner"),
+          py::arg("floorplan"), py::arg("layers"), py::arg("track_pitch"),
+          py::arg("baseline"), py::arg("extra_x"), py::arg("extra_y"),
+          py::arg("n_threads") = 0);
+
     // ── Verify ────────────────────────────────────────────────────────────
     py::enum_<ViolationKind>(m, "ViolationKind")
         .value("SEG_OPEN",     ViolationKind::SEG_OPEN)
