@@ -66,11 +66,21 @@ So blockages are used only where the semantics genuinely are negative:
 
 - areas the plan requires to stay **clear** (e.g. lower-layer keep-outs
   under a reserved corridor), and
-- **`+ PARTIAL <maxDensity>`** density limits, the standard construct
-  for steering congestion away from a region without forbidding it — the
-  closest portable expression of "leave room here for the bus plan".
+- **`+ PARTIAL <maxDensity>`** density limits over the corridors.
 
-Corridors themselves are conveyed by the manifest, never as blockages.
+**A second correction, from the review of the built 4b** (Codex P1 on PR
+#648): `PARTIAL maxDensity` is a **PLACEMENT**-blockage option in the DEF
+5.8 grammar, not a LAYER routing-blockage one.  So the construct above is
+not "steering congestion away from a region" — it caps how densely *cells*
+may be placed under a planned bus.  That helps pin access and leaves the
+area less contended, but DEF has **no** routing-density concept at all, so
+it is not the reservation.  (Our own reader is permissive enough to accept
+`LAYER … + PARTIAL`, which is why a round-trip test alone did not catch the
+first, invalid, emission.)
+
+The consequence is worth stating plainly rather than softening: the routing
+intent lives in the manifest and **nowhere else**.  Corridors themselves are
+conveyed by the manifest, never as blockages.
 
 That split is honest about the format's limits and keeps the portable
 part portable.  It also raises the Tcl work in Phase 5 from "nice to
@@ -479,8 +489,15 @@ well under a minute, memory measured and documented).
 > `BLOCKAGES` rect per corridor — is exactly backwards: a blockage tells the
 > router to STAY OUT, so it would forbid the routing the plan is asking for.
 > What goes in is the design's real keepouts as hard blockages (that IS what
-> a blockage means) and, opt-in, `+ PARTIAL <maxDensity>` over the corridors
-> — "leave room here", the only part of the intent DEF can carry.
+> a blockage means) and, opt-in, `+ PARTIAL <maxDensity>` PLACEMENT blockages
+> over the corridors — a cap on cell density under a planned bus, which is
+> the nearest thing DEF has and is **not** the reservation (§0's second
+> correction: `PARTIAL` is a placement option, and DEF has no routing-density
+> concept at all).
+>
+> Each corridor names **its own** nets, not the bundle's: a tapered fan-in
+> branch (`Topology::seg_bits`) carries a subset, and guiding the whole
+> bundle down it would be a wrong instruction rather than a loose one.
 >
 > Both halves of the plan's acceptance criterion are tested, and the second
 > is the load-bearing one: `test_corridors_are_not_emitted_as_blockages`
@@ -511,8 +528,8 @@ script.  This carries the positive intent that DEF cannot express, so it
 leads rather than follows.
 
 **4b — DEF `BLOCKAGES`, negative semantics only.**  Keep-clear regions
-and `+ PARTIAL <maxDensity>` density limits — **not** the corridors
-themselves (see §0).  Deterministic ordering (sorted, like `gds_io`) and
+and `+ PARTIAL <maxDensity>` PLACEMENT-density limits — **not** the
+corridors themselves (see §0).  Deterministic ordering (sorted, like `gds_io`) and
 a DEF → BUDA → DEF round-trip test.
 
 **Acceptance for both:** a worked end-to-end example on the checked-in

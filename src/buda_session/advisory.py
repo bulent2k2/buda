@@ -34,15 +34,42 @@ nets".  What it can honestly carry is:
 
   * hard blockages for regions that must stay clear (BUDA's own keepouts),
     which is what a blockage means; and
-  * `+ PARTIAL <maxDensity>` over the corridors — "do not fill this region
-    past X%, a bus is planned through it".  That is a real constraint, in
-    the direction the plan intends, and expressible.
+  * `+ PARTIAL <maxDensity>` PLACEMENT blockages over the corridors — a
+    limit on how densely cells may be placed under a planned bus.
 
-So the manifest carries the intent and the DEF carries the room to honour it.
+That second one is narrower than it first looks, and the narrowing is the
+honest part: `PARTIAL` is a PLACEMENT-blockage option in DEF 5.8, not a
+layer routing-blockage one, so DEF has **no** way to say "leave routing room
+here".  What it can say is "do not pack cells under this", which helps pin
+access but is not the reservation.  The routing intent lives in the manifest
+and nowhere else — which is the whole reason 4a leads.
 """
 import csv
 import json
 import os
+
+
+def _seg_net_names(w, all_names):
+    """Per-segment net names for one wrapper.
+
+    A tapered fan-in topology (`Topology::seg_bits`) puts only a SUBSET of the
+    bundle's bits on each branch — NUTS even sizes the segment from that
+    subset.  Naming the whole bundle on every corridor would therefore direct
+    nets into branches they never traverse, which defeats the one guarantee
+    the manifest exists to make (Codex P1 on #648).  Untapered segments keep
+    the full list, which is what an untapered topology means."""
+    try:
+        sel = w.plan.selected_topology_index
+        topo = w.input.candidates[sel]
+        bits = dict(topo.seg_bits)
+    except Exception:
+        return {}
+    out = {}
+    for seg_idx, idxs in bits.items():
+        names = [all_names[i] for i in idxs if 0 <= i < len(all_names)]
+        if names:
+            out[seg_idx] = sorted(names)
+    return out
 
 
 def _corridors(session, margin):
@@ -79,7 +106,7 @@ def _corridors(session, margin):
 
 
 def _bundle_nets(session):
-    """bundle id -> net names.
+    """bundle id -> (all net names, {seg_idx: names} for tapered segments).
 
     `input.original_bundle` is the accessor the rest of the session uses
     (`_bundle_label`, `_bids_by_net_prefix`); `input.bundle` exists but does
@@ -90,9 +117,10 @@ def _bundle_nets(session):
     for w in getattr(session, "bundles", []) or []:
         try:
             b = w.input.original_bundle
-            out[b.id] = list(b.get_net_names())
+            names = list(b.get_net_names())
         except Exception:
             continue
+        out[b.id] = (names, _seg_net_names(w, names))
     return out
 
 
@@ -110,13 +138,20 @@ def build_manifest(session, margin=0.0):
     nets = _bundle_nets(session)
     bundles = []
     for bid in sorted(corr):
+        all_names, per_seg = nets.get(bid, ([], {}))
         rows = sorted(corr[bid], key=lambda r: (r["seg"], r["layer"]))
         for r in rows:
             r["layer_name"] = layer_names.get(r["layer"], f"L{r['layer']}")
+            # The nets THIS corridor carries — the whole bundle on an
+            # untapered segment, the branch's own bits on a tapered one.
+            seg_names = per_seg.get(r["seg"])
+            r["nets"] = seg_names if seg_names is not None else sorted(all_names)
+            r["n_nets"] = len(r["nets"])
+            r["tapered"] = seg_names is not None
         bundles.append({
             "bundle": bid,
-            "nets": sorted(nets.get(bid, [])),
-            "n_nets": len(nets.get(bid, [])),
+            "nets": sorted(all_names),
+            "n_nets": len(all_names),
             "corridors": rows,
         })
     return {
@@ -146,11 +181,10 @@ def write_manifest_csv(manifest, path):
         w.writerow(["bundle", "seg", "layer", "layer_name",
                     "x1", "y1", "x2", "y2", "n_nets", "nets"])
         for b in manifest["bundles"]:
-            joined = " ".join(b["nets"])
             for c in b["corridors"]:
                 w.writerow([b["bundle"], c["seg"], c["layer"], c["layer_name"],
                             c["x1"], c["y1"], c["x2"], c["y2"],
-                            b["n_nets"], joined])
+                            c["n_nets"], " ".join(c["nets"])])
 
 
 def write_guide_tcl(manifest, path):
@@ -175,8 +209,11 @@ def write_guide_tcl(manifest, path):
     ]
     for b in manifest["bundles"]:
         lines.append(f"# bundle {b['bundle']} — {b['n_nets']} net(s)")
-        nets = " ".join(b["nets"])
         for c in b["corridors"]:
+            # The corridor's OWN nets: a tapered branch carries a subset, and
+            # guiding the whole bundle down it would be a wrong instruction,
+            # not merely a loose one.
+            nets = " ".join(c["nets"])
             lines.append(
                 f"create_route_guide -net_list {{{nets}}} "
                 f"-layer {c['layer_name']} "
@@ -251,7 +288,20 @@ def write_def_blockages(session, manifest, path, design="buda_advisory",
     for lname, x1, y1, x2, y2 in hard:
         out.append(f"  - LAYER {lname} RECT ( {x1} {y1} ) ( {x2} {y2} ) ;")
     for lname, x1, y1, x2, y2 in soft:
-        out.append(f"  - LAYER {lname} + PARTIAL {max_density:g} "
+        # `PARTIAL maxDensity` is a PLACEMENT-blockage option in the DEF 5.8
+        # grammar, NOT a layer routing-blockage one.  Writing it on a `LAYER`
+        # blockage produces a file a standards-compliant tool may reject or
+        # ignore — and our own permissive reader accepts it, which is exactly
+        # why the round-trip test did not expose it (Codex P1 on #648).
+        #
+        # So the honest emission is a PLACEMENT blockage, and the honest
+        # CLAIM is narrower than "reserve this corridor": it limits placement
+        # density under the planned bus.  DEF has no routing-density concept
+        # at all, so the routing intent lives in the manifest and nowhere
+        # else.  The layer is carried as a comment because a PLACEMENT
+        # blockage has no layer field.
+        out.append(f"  # corridor on {lname}")
+        out.append(f"  - PLACEMENT + PARTIAL {max_density:g} "
                    f"RECT ( {x1} {y1} ) ( {x2} {y2} ) ;")
     out += ["END BLOCKAGES", "END DESIGN", ""]
     with open(path, "w") as f:

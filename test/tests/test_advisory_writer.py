@@ -194,6 +194,13 @@ def test_density_is_how_the_positive_intent_is_expressed(tmp_path):
     dens = [b for b in blocks if b.has_density]
     assert dens, "density limits requested but not emitted"
     assert all(b.max_density == 0.6 for b in dens)
+    # `PARTIAL maxDensity` is a PLACEMENT-blockage option in DEF 5.8, not a
+    # layer routing-blockage one.  Writing it on a LAYER blockage produces a
+    # file a compliant tool may reject — and our own reader is permissive
+    # enough to accept it, which is exactly why a round-trip test alone does
+    # not catch it.
+    assert all(b.is_placement and not b.layer for b in dens), \
+        [(b.layer, b.is_placement) for b in dens]
     # …and they sit ON the corridors, which is the point.
     m = json.loads(g.read_text())
     n_corr = sum(len(b["corridors"]) for b in m["bundles"])
@@ -216,6 +223,48 @@ def test_the_def_is_deterministic(tmp_path):
     _routed(tmp_path, [f"export_def_blockages {a} density 0.5"])
     _routed(tmp_path, [f"export_def_blockages {b} density 0.5"])
     assert a.read_text() == b.read_text()
+
+
+def test_a_tapered_branch_names_only_the_nets_it_carries(tmp_path):
+    """A fan-in topology puts only a SUBSET of the bundle's bits on each
+    branch (`Topology::seg_bits`) — NUTS even sizes the segment from that
+    subset.  Naming the whole bundle on every corridor would direct nets into
+    branches they never traverse, which is a wrong instruction rather than a
+    loose one, and it defeats the single guarantee the manifest exists to
+    make."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    j = tmp_path / "g.json"
+    flow = """def_layer 4 M4 H TOP 30
+def_layer 5 M5 V TOP 30
+def_track_pattern 4 0 VDD 2 1 _ 1 1 _ 1 1 GND 2 1
+def_track_pattern 5 0 VDD 2 1 _ 1 1 _ 1 1 GND 2 1
+add_block s0 0 0 100 100
+add_block s1 0 400 100 500
+add_block d 900 200 1000 300
+add_net f0 s0.o d.i
+add_net f1 s1.o d.i
+run_bundler CONVERGENT
+generate_topologies
+run_planner 3
+run_nuts
+"""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        for line in flow.strip().splitlines():
+            s.do_command(line.strip())
+        s.do_command(f"emit_guides {j}")
+    m = json.loads(j.read_text())
+    corr = [c for b in m["bundles"] for c in b["corridors"]]
+    assert corr, "no corridors to check"
+    # Whatever the shape, no corridor may name a net the bundle does not have,
+    # and a tapered one must name FEWER than the whole bundle.
+    for b in m["bundles"]:
+        for c in b["corridors"]:
+            assert set(c["nets"]) <= set(b["nets"])
+            if c["tapered"]:
+                assert len(c["nets"]) <= b["n_nets"]
+    assert all("nets" in c and "tapered" in c for c in corr)
 
 
 def test_a_bad_density_is_refused(tmp_path):

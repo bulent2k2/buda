@@ -357,8 +357,12 @@ def cmd_export_def_blockages(session, cmd, args, cmd_line):
     # Phase 4b: DEF with NEGATIVE semantics only.  Emitting the corridors as
     # blockages would tell the router to avoid the plan; what goes in is the
     # design's real keepouts (which is what a blockage means) plus, with
-    # `density`, `+ PARTIAL` limits over the corridors — "leave room here",
-    # the only part of the positive intent DEF can carry.
+    # `density`, `+ PARTIAL` PLACEMENT blockages over the corridors.
+    #
+    # That last one is narrower than it reads: `PARTIAL maxDensity` is a
+    # PLACEMENT-blockage option in DEF 5.8, so it caps CELL density under a
+    # planned bus.  DEF has no routing-density concept, so the routing intent
+    # lives in the manifest and nowhere else.
     if not args:
         print("Error: export_def_blockages requires an output path"); return
     path = args[0]
@@ -390,7 +394,9 @@ def cmd_export_def_blockages(session, cmd, args, cmd_line):
     if density is None and m["bundles"]:
         print("[Advisory] note: corridors were NOT emitted — a blockage tells "
               "the router to stay out, which is the opposite of the plan.  "
-              "Pass `density <frac>` for `+ PARTIAL` limits over them.")
+              "Pass `density <frac>` for `+ PARTIAL` PLACEMENT limits over "
+              "them (a cell-density cap, not a routing reservation — that "
+              "lives only in the emit_guides manifest).")
 
 
 COMMANDS["emit_guides"] = cmd_emit_guides
