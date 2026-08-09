@@ -1197,6 +1197,22 @@ static std::string normalize_def_name(const std::string& s) {
 // but DEF's flip tokens mirror about the Y axis (FN = MY), so they permute
 // under BDB's mirror-about-X form: DEF FN<->BDB FS, DEF FS<->BDB FN,
 // DEF FE<->BDB FW, DEF FW<->BDB FE. swap_wh is set for the 90/270 rotations.
+// A die PORT's direction, as seen from INSIDE the design.
+//
+// A boundary component is a stand-in for the world outside the die, and a
+// port declared INPUT is one the outside world DRIVES — so as a terminal on
+// that fictional component it is an output, and an OUTPUT port is something
+// the outside world receives.  Storing the declared direction unflipped left
+// every input-port net with two receivers and no driver, so the bundler
+// dropped it: "N net(s) not placed in any bundle".  A net reaching the die
+// edge being silently unrouted is the exact failure the boundary components
+// exist to prevent.
+static std::string port_dir_inward(const std::string& d) {
+    if (d == "INPUT")  return "OUTPUT";
+    if (d == "OUTPUT") return "INPUT";
+    return d.empty() ? "UNKNOWN" : d;      // INOUT / UNKNOWN pass through
+}
+
 static std::pair<std::string,bool> def_orient_to_bdb(const std::string& o) {
     if (o == "N")  return {"N",  false};
     if (o == "S")  return {"S",  false};
@@ -1541,7 +1557,7 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
             if (cn.is_port()) {
                 auto dp = pin_by_name.find(cn.pin);
                 if (dp != pin_by_name.end()) {
-                    dir = dp->second->dir.empty() ? "UNKNOWN" : dp->second->dir;
+                    dir = port_dir_inward(dp->second->dir);
                     ppx = dbu_to_lu(dp->second->x);
                     ppy = dbu_to_lu(dp->second->y);
                 }
@@ -2172,7 +2188,23 @@ void BDB::import_verilog(const std::string& v_path) {
         VALUES(?,?,?,?,-1,-1,-1,-1,?)
         ON CONFLICT(name) DO UPDATE SET
           cell=excluded.cell, parent_id=excluded.parent_id,
-          depth=excluded.depth, is_leaf=excluded.is_leaf
+          depth=excluded.depth,
+          -- A component the DEF PLACED is a physical instance with a LEF
+          -- footprint, and the netlist may say where it sits in the tree
+          -- without redefining what it IS.  Letting it through demoted every
+          -- such leaf to a container whenever the netlist happened to
+          -- declare its cell as an empty module — which is exactly how a
+          -- netlist states a hard macro's port directions while leaving the
+          -- geometry to the LEF.  The routing model then treats the
+          -- footprint as transparent to low layers (it is not: it is a solid
+          -- cell) and busterm derivation walks into a cell with no children.
+          --
+          -- Scoped to placed rows on purpose.  A Verilog-ONLY import is
+          -- unaffected, keeping the landed rule that a module defined in the
+          -- netlist is a hierarchy level even when its body is empty
+          -- (features/bdb_import.feature).
+          is_leaf=CASE WHEN component.x1 >= 0 THEN component.is_leaf
+                       ELSE excluded.is_leaf END
     )");
     Stmt s_net (_db, "INSERT OR IGNORE INTO net(name) VALUES(?)");
     Stmt s_pin (_db,
@@ -2283,6 +2315,60 @@ void BDB::import_verilog(const std::string& v_path) {
     };
 
     elaborate(top_mod, "", -1, 0, {});
+
+    // ── the die's own ports ──────────────────────────────────────────────
+    //
+    // Elaboration walks INSTANCES, and a top-level port is not one, so the
+    // boundary components `import_def_lef` synthesized from DEF `PINS`
+    // (Phase 3d) end up with no pin rows at all — this function cleared the
+    // pin table on entry to rebuild it from the netlist.  The components
+    // survive and look fine; only their connectivity is gone, so a net
+    // reaching the die edge is silently endpoint-less and the bundler
+    // reports it as "not placed in any bundle".  That is exactly the
+    // failure Phase 3d exists to prevent, reappearing in the DEF+Verilog
+    // merge which is the flow it was built for.
+    //
+    // The top module's ports ARE the die's ports, and their nets are named
+    // after them at root scope, so the link is recoverable here rather than
+    // needing the DEF's PINS section to be carried along.
+    auto top_it = mod_lib.find(top_mod);
+    if (top_it != mod_lib.end() && !top_it->second.port_dirs.empty()) {
+        Stmt s_port(_db,
+            "SELECT id,name,x1,y1,x2,y2 FROM component"
+            " WHERE is_port=1 AND (name=? OR name LIKE ?)");
+        // Deterministic order: the map is unordered, and the pin table's
+        // insertion order is observable in a *.bdb.sql dump.
+        std::vector<std::pair<std::string,std::string>> ports(
+            top_it->second.port_dirs.begin(), top_it->second.port_dirs.end());
+        std::sort(ports.begin(), ports.end());
+        for (const auto& [port, dir] : ports) {
+            const std::string exact = "PIN/" + port;
+            const std::string uniq  = exact + "#%";   // de-collision suffix
+            sqlite3_bind_text(s_port, 1, exact.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(s_port, 2, uniq.c_str(),  -1, SQLITE_TRANSIENT);
+            while (sqlite3_step(s_port) == SQLITE_ROW) {
+                const int cid = sqlite3_column_int(s_port, 0);
+                const double px = 0.5 * (sqlite3_column_double(s_port, 2) +
+                                         sqlite3_column_double(s_port, 4));
+                const double py = 0.5 * (sqlite3_column_double(s_port, 3) +
+                                         sqlite3_column_double(s_port, 5));
+                const int nid = get_net(port);
+                if (nid <= 0) continue;
+                sqlite3_bind_int   (s_pin, 1, nid);
+                sqlite3_bind_int   (s_pin, 2, cid);
+                sqlite3_bind_text  (s_pin, 3, port.c_str(), -1, SQLITE_TRANSIENT);
+                // Same convention as the DEF path: a port's direction is
+                // declared from OUTSIDE, and this pin sits on the component
+                // standing in for outside.
+                const std::string idir = port_dir_inward(dir);
+                sqlite3_bind_text  (s_pin, 4, idir.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_double(s_pin, 5, px);
+                sqlite3_bind_double(s_pin, 6, py);
+                sqlite3_step(s_pin); sqlite3_reset(s_pin);
+            }
+            sqlite3_reset(s_port);
+        }
+    }
     _exec("COMMIT");
 }
 
@@ -2325,6 +2411,64 @@ void BDB::set_comp_bbox(const std::string& name,
     sqlite3_bind_text  (u, 5, name.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_step(u);
     compute_hpwl();
+}
+
+int BDB::derive_container_bboxes(double margin,
+                                 std::vector<std::string>* unresolved) {
+    // Deepest-FIRST, so a container of containers is resolved from children
+    // that were themselves just resolved.  Doing it the other way round
+    // would give an outer container the union of whatever happened to be
+    // placed already — a box that is right only by accident.
+    auto comps = all_components();
+    std::unordered_map<int, std::vector<int>> kids;   // parent id -> child ids
+    std::unordered_map<int, size_t> index;
+    for (size_t i = 0; i < comps.size(); ++i) {
+        index[comps[i].id] = i;
+        if (comps[i].parent_id >= 0) kids[comps[i].parent_id].push_back(comps[i].id);
+    }
+    std::vector<size_t> order(comps.size());
+    for (size_t i = 0; i < comps.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        if (comps[a].depth != comps[b].depth) return comps[a].depth > comps[b].depth;
+        return comps[a].name < comps[b].name;      // deterministic
+    });
+
+    int placed = 0;
+    for (size_t oi : order) {
+        ComponentRow& c = comps[oi];
+        if (c.x1 >= 0) continue;                   // already has a position
+        auto kit = kids.find(c.id);
+        if (kit == kids.end() || kit->second.empty()) {
+            // Not a container at all — an unplaced LEAF is a real fact about
+            // the design (a netlist instance the DEF never placed), and
+            // inventing a box for it would be a lie, not a convenience.
+            continue;
+        }
+        bool any = false;
+        double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+        for (int kid : kit->second) {
+            const ComponentRow& k = comps[index[kid]];
+            if (k.x1 < 0) continue;                // still unplaced: skip
+            if (!any) { x1 = k.x1; y1 = k.y1; x2 = k.x2; y2 = k.y2; any = true; }
+            else {
+                x1 = std::min(x1, k.x1); y1 = std::min(y1, k.y1);
+                x2 = std::max(x2, k.x2); y2 = std::max(y2, k.y2);
+            }
+        }
+        if (!any) {
+            if (unresolved) unresolved->push_back(c.name);
+            continue;
+        }
+        x1 -= margin; y1 -= margin; x2 += margin; y2 += margin;
+        set_comp_bbox(c.name, x1, y1, x2, y2);
+        c.x1 = x1; c.y1 = y1; c.x2 = x2; c.y2 = y2;   // visible to its parent
+        // A container is not a leaf, whatever the netlist reader guessed:
+        // it has children, and the routing model treats a leaf footprint as
+        // a LOW-layer keepout while a container is transparent to them.
+        set_comp_is_leaf(c.name, false);
+        ++placed;
+    }
+    return placed;
 }
 
 void BDB::resize_cell(const std::string& cell, double w, double h) {

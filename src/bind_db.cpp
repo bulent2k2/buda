@@ -615,6 +615,15 @@ void bind_db(py::module_& m) {
         .def("set_comp_bbox",   &BDB::set_comp_bbox,
              py::arg("name"), py::arg("x1"), py::arg("y1"),
              py::arg("x2"), py::arg("y2"))
+        // Returns (n_placed, [names left unplaced]) — the caller reports
+        // both, because a container nothing could place is a hole in the
+        // routing interface and must not pass silently.
+        .def("derive_container_bboxes",
+             [](BDB& db, double margin) {
+                 std::vector<std::string> unresolved;
+                 int n = db.derive_container_bboxes(margin, &unresolved);
+                 return py::make_tuple(n, unresolved);
+             }, py::arg("margin") = 0.0)
         .def("resize_cell",     &BDB::resize_cell,
              py::arg("cell"), py::arg("w"), py::arg("h"))
         .def("set_comp_cell",   &BDB::set_comp_cell,

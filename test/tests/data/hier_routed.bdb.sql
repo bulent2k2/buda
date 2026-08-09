@@ -80,14 +80,14 @@ CREATE TABLE busterm (
             orig_x1 REAL DEFAULT 0, orig_y1 REAL DEFAULT 0,
             orig_x2 REAL DEFAULT 0, orig_y2 REAL DEFAULT 0
         );
-INSERT INTO "busterm" VALUES('bt:src_a',1,'src_a',0,400.0,400.0,2000.0,2000.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
-INSERT INTO "busterm" VALUES('bt:src_a/gen_i',2,'src_a/gen_i',1,880.0,880.0,1520.0,1520.0,'PORT','bt:src_a',NULL,'THRU',0.0,0.0,0.0,0.0);
 INSERT INTO "busterm" VALUES('bt:proc_a',3,'proc_a',0,2800.0,2000.0,6160.0,4400.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:snk_a',7,'snk_a',0,6960.0,400.0,8560.0,2000.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:src_a',1,'src_a',0,400.0,400.0,2000.0,2000.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
 INSERT INTO "busterm" VALUES('bt:proc_a/pa_i',4,'proc_a/pa_i',1,2960.0,2320.0,3840.0,2960.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
 INSERT INTO "busterm" VALUES('bt:proc_a/pb_i',5,'proc_a/pb_i',1,4040.0,3440.0,4920.0,4080.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
 INSERT INTO "busterm" VALUES('bt:proc_a/pc_i',6,'proc_a/pc_i',1,5120.0,2320.0,6000.0,2960.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
-INSERT INTO "busterm" VALUES('bt:snk_a',7,'snk_a',0,6960.0,400.0,8560.0,2000.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
 INSERT INTO "busterm" VALUES('bt:snk_a/rcv_i',8,'snk_a/rcv_i',1,7440.0,880.0,8080.0,1520.0,'PORT','bt:snk_a',NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:src_a/gen_i',2,'src_a/gen_i',1,880.0,880.0,1520.0,1520.0,'PORT','bt:src_a',NULL,'THRU',0.0,0.0,0.0,0.0);
 CREATE TABLE cell (
             name        TEXT PRIMARY KEY,
             width       REAL NOT NULL,
