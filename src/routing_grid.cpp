@@ -52,6 +52,16 @@ TrackPattern::tracks_in_range(double lo, double hi) const {
     double up = unit_pitch();
     if (up <= 0.0 || slots.empty() || lo > hi) return {};
 
+    // A bounded pattern enumerates its tracks rather than describing a rule,
+    // so a query outside the declared extent must return nothing rather than
+    // tiles that do not exist (Phase 3b).  Clamping the QUERY is enough: the
+    // generator below only emits centres inside [lo, hi].
+    if (bounded) {
+        lo = std::max(lo, bound_lo);
+        hi = std::min(hi, bound_hi);
+        if (lo > hi) return {};
+    }
+
     // Calculate the first unit index n such that origin + n*up could contain centres >= lo.
     // std::floor handles negative offsets correctly.
     int n_start = static_cast<int>(std::floor((lo - origin) / up)) - 1;

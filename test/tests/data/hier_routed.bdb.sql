@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=22;
+PRAGMA user_version=23;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -157,17 +157,18 @@ CREATE TABLE component (
             depth        INTEGER DEFAULT 0,
             x1 REAL, y1 REAL, x2 REAL, y2 REAL,
             is_leaf      INTEGER DEFAULT 1,
+            is_port      INTEGER NOT NULL DEFAULT 0,
             is_replicated INTEGER DEFAULT 0,
             orient       TEXT DEFAULT 'N'
         );
-INSERT INTO "component" VALUES(1,'src_a','src_cell',NULL,0,400.0,400.0,2000.0,2000.0,0,0,'N');
-INSERT INTO "component" VALUES(2,'src_a/gen_i','gen_cell',1,1,880.0,880.0,1520.0,1520.0,1,0,'N');
-INSERT INTO "component" VALUES(3,'proc_a','proc_cell',NULL,0,2800.0,2000.0,6160.0,4400.0,0,0,'N');
-INSERT INTO "component" VALUES(4,'proc_a/pa_i','pipe_cell',3,1,2960.0,2320.0,3840.0,2960.0,1,0,'N');
-INSERT INTO "component" VALUES(5,'proc_a/pb_i','pipe_cell',3,1,4040.0,3440.0,4920.0,4080.0,1,0,'N');
-INSERT INTO "component" VALUES(6,'proc_a/pc_i','pipe_cell',3,1,5120.0,2320.0,6000.0,2960.0,1,0,'N');
-INSERT INTO "component" VALUES(7,'snk_a','snk_cell',NULL,0,6960.0,400.0,8560.0,2000.0,0,0,'N');
-INSERT INTO "component" VALUES(8,'snk_a/rcv_i','rcv_cell',7,1,7440.0,880.0,8080.0,1520.0,1,0,'N');
+INSERT INTO "component" VALUES(1,'src_a','src_cell',NULL,0,400.0,400.0,2000.0,2000.0,0,0,0,'N');
+INSERT INTO "component" VALUES(2,'src_a/gen_i','gen_cell',1,1,880.0,880.0,1520.0,1520.0,1,0,0,'N');
+INSERT INTO "component" VALUES(3,'proc_a','proc_cell',NULL,0,2800.0,2000.0,6160.0,4400.0,0,0,0,'N');
+INSERT INTO "component" VALUES(4,'proc_a/pa_i','pipe_cell',3,1,2960.0,2320.0,3840.0,2960.0,1,0,0,'N');
+INSERT INTO "component" VALUES(5,'proc_a/pb_i','pipe_cell',3,1,4040.0,3440.0,4920.0,4080.0,1,0,0,'N');
+INSERT INTO "component" VALUES(6,'proc_a/pc_i','pipe_cell',3,1,5120.0,2320.0,6000.0,2960.0,1,0,0,'N');
+INSERT INTO "component" VALUES(7,'snk_a','snk_cell',NULL,0,6960.0,400.0,8560.0,2000.0,0,0,0,'N');
+INSERT INTO "component" VALUES(8,'snk_a/rcv_i','rcv_cell',7,1,7440.0,880.0,8080.0,1520.0,1,0,0,'N');
 CREATE TABLE grp (
             id        TEXT PRIMARY KEY,
             name      TEXT NOT NULL,
@@ -184,7 +185,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','22');
+INSERT INTO "meta" VALUES('schema_version','23');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE ndr_rule (
             name         TEXT PRIMARY KEY,

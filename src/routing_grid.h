@@ -15,6 +15,7 @@
  */
 
 #pragma once
+#include <algorithm>
 #include <functional>
 #include <map>
 #include <stdexcept>
@@ -42,6 +43,26 @@ struct TrackPattern {
     double                  origin = 0.0;
     std::vector<TrackSlot>  slots;
 
+    // Optional FINITE extent (Phase 3b).  A hand-declared pattern tiles
+    // outward without limit, which is right for a pattern that describes a
+    // rule.  A DEF `TRACKS <start> DO <n> STEP <s>` is not a rule but an
+    // enumeration: it says there are exactly n tracks and where they stop.
+    // Tiling past that INVENTS tracks the technology does not have —
+    // silently, and in the direction of optimism, since a router asked for
+    // capacity beyond the declared range would be told it exists.
+    //
+    // `bounded` is false by default, so every existing pattern keeps its
+    // unbounded semantics and the corpus is untouched.
+    bool   bounded  = false;
+    double bound_lo = 0.0;      // inclusive, in the perpendicular coordinate
+    double bound_hi = 0.0;
+
+    void set_bounds(double lo, double hi) {
+        bounded = true;
+        bound_lo = std::min(lo, hi);
+        bound_hi = std::max(lo, hi);
+    }
+
     // Sum of (width + space_after) across all slots — the tiling period.
     double unit_pitch() const;
 
@@ -52,7 +73,8 @@ struct TrackPattern {
     double dilution_factor() const;
 
     // All (centre_position, slot) pairs whose centre lies in [lo, hi].
-    // Tiles the pattern from origin outward to cover the interval.
+    // Tiles the pattern from origin outward to cover the interval,
+    // CLAMPED to [bound_lo, bound_hi] when the pattern is bounded.
     std::vector<std::pair<double, TrackSlot>> tracks_in_range(double lo, double hi) const;
 };
 
