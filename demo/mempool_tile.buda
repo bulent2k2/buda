@@ -20,13 +20,13 @@ def_layer 6 M6 V TOP 20 span_min 50 span_max 280
 # NanGate45 track patterns (from NangateOpenCellLibrary.tech.lef + make_tracks.tcl)
 # Pattern: 4 SIGNAL + POWER (2× width, same min-space) + 4 SIGNAL + GROUND per period
 # M3: H, width=0.07 µm, pitch=0.14 µm, origin=0.07 µm
-def_track_pattern 3 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 POWER 0.14 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 GROUND 0.14 0.07
+def_track_pattern 3 0.07 (SIGNAL 0.07 0.07)x4  POWER 0.14 0.07  (SIGNAL 0.07 0.07)x4  GROUND 0.14 0.07
 # M4: V, width=0.14 µm, pitch=0.28 µm, origin=0.095 µm
-def_track_pattern 4 0.095 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+def_track_pattern 4 0.095 (SIGNAL 0.14 0.14)x4  POWER 0.28 0.14  (SIGNAL 0.14 0.14)x4  GROUND 0.28 0.14
 # M5: H, width=0.14 µm, pitch=0.28 µm, origin=0.07 µm
-def_track_pattern 5 0.07 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+def_track_pattern 5 0.07 (SIGNAL 0.14 0.14)x4  POWER 0.28 0.14  (SIGNAL 0.14 0.14)x4  GROUND 0.28 0.14
 # M6: V, width=0.14 µm, pitch=0.28 µm, origin=0.095 µm
-def_track_pattern 6 0.095 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+def_track_pattern 6 0.095 (SIGNAL 0.14 0.14)x4  POWER 0.28 0.14  (SIGNAL 0.14 0.14)x4  GROUND 0.28 0.14
 
 corner_margin dx 5 dy 5
 
