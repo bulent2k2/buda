@@ -1549,17 +1549,21 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
     // What the technology file said that this model cannot hold.  Recorded so
     // "we ignored it" and "it was not in the file" stop looking the same.
     {
+        // Written UNCONDITIONALLY.  import_def_lef replaces the design
+        // tables, so leaving a previous technology file's census in place
+        // would have the database reporting constructs from a LEF that is no
+        // longer loaded — stale data reading as current, which is the exact
+        // failure this key exists to prevent (Codex P2 on #646).
         const std::string census = _lef_unmodelled_census(lef);
-        if (!census.empty()) {
-            save_meta("lef_unmodelled", census);
+        save_meta("lef_unmodelled", census);
+        save_meta("lef_units_dbu",
+                  lef.units_dbu > 0 ? std::to_string(lef.units_dbu) : "");
+        save_meta("lef_manufacturing_grid",
+                  lef.manufacturing_grid > 0
+                      ? std::to_string(lef.manufacturing_grid) : "");
+        if (!census.empty())
             std::cout << "[LEF] " << lef.unmodelled.size()
                       << " unmodelled construct(s): " << census << "\n";
-        }
-        if (lef.units_dbu > 0)
-            save_meta("lef_units_dbu", std::to_string(lef.units_dbu));
-        if (lef.manufacturing_grid > 0)
-            save_meta("lef_manufacturing_grid",
-                      std::to_string(lef.manufacturing_grid));
     }
     save_meta("units", std::to_string(_units));
     save_meta("lu_per_um", std::to_string(_lu_per_um));

@@ -357,3 +357,104 @@ def test_lef_units_are_recorded_even_though_def_units_govern(tmp_path):
     assert db.meta_get("lef_units_dbu").startswith("2000")
     assert db.meta_get("lef_manufacturing_grid").startswith("0.005")
     assert db.units() == 1000        # the DEF's, unchanged
+
+
+# ── review findings (Codex on #646) ────────────────────────────────────────
+
+def test_a_nameless_block_is_not_given_its_first_body_token_as_a_name():
+    """`PROPERTYDEFINITIONS` and `SPACING` take no name.  Reading the first
+    BODY token as one meant `END PROPERTYDEFINITIONS` never matched, the
+    terminator stayed in the stream, and everything after it parsed as
+    garbage."""
+    lib = _lib("""
+        PROPERTYDEFINITIONS
+          LIBRARY intprop INTEGER ;
+          MACRO stringprop STRING ;
+        END PROPERTYDEFINITIONS
+        SPACING
+          SAMENET M1 M1 0.1 ;
+        END SPACING
+        MACRO m
+          SIZE 5 BY 6 ;
+        END m
+        """)
+    assert [m.name for m in lib.macros] == ["m"]
+    assert (lib.macros[0].w, lib.macros[0].h) == (5.0, 6.0)
+
+
+def test_a_vendor_extension_block_ends_at_endext():
+    lib = _lib("""
+        BEGINEXT "vendor stuff"
+          CREATOR "someone" ;
+        ENDEXT
+        MACRO m
+          SIZE 5 BY 6 ;
+        END m
+        """)
+    assert [m.name for m in lib.macros] == ["m"]
+
+
+def test_a_mismatched_end_is_an_error_not_a_silent_skip():
+    """`MACRO m … END n` used to return macro `m` and then swallow the NEXT
+    macro's opener and SIZE as an unknown top-level statement — a library
+    that comes back plausible and short by one macro."""
+    with pytest.raises(RuntimeError) as e:
+        _lib("""
+            MACRO m
+              SIZE 1 BY 1 ;
+            END n
+            MACRO n
+              SIZE 2 BY 2 ;
+            END n
+            """)
+    assert "mismatched END" in str(e.value), str(e.value)
+
+
+def test_an_iterated_rect_keeps_its_base_shape_and_records_the_repetition():
+    """`RECT 0 0 1 1 ITERATE DO 2 BY 3 STEP 5 6 ;` is valid LEF whose last
+    four tokens are `… STEP 5 6`, not coordinates — a last-four heuristic
+    rejected the whole file as malformed."""
+    lib = _lib("""
+        MACRO m
+          SIZE 20 BY 20 ;
+          PIN a
+            PORT
+              LAYER M1 ;
+              RECT 0 0 1 1 ITERATE DO 2 BY 3 STEP 5 6 ;
+            END
+          END a
+        END m
+        """)
+    p = lib.macros[0].find_pin("a")
+    assert p.has_geometry()
+    r = p.ports[0].rects[0]
+    assert (r.x1, r.y1, r.x2, r.y2) == (0.0, 0.0, 1.0, 1.0)
+    assert any("ITERATE" in u.construct for u in lib.unmodelled)
+
+
+def test_a_masked_rect_still_reads_its_coordinates():
+    lib = _lib("""
+        MACRO m
+          SIZE 20 BY 20 ;
+          PIN a
+            PORT
+              LAYER M1 ;
+              RECT MASK 2 3 4 5 6 ;
+            END
+          END a
+        END m
+        """)
+    r = lib.macros[0].find_pin("a").ports[0].rects[0]
+    assert (r.x1, r.y1, r.x2, r.y2) == (3.0, 4.0, 5.0, 6.0)
+
+
+def test_reimporting_a_clean_lef_clears_the_previous_census(tmp_path):
+    """import_def_lef replaces the design tables, so a census left over from
+    a previous technology file would have the database reporting constructs
+    from a LEF that is no longer loaded."""
+    dirty = _SIMPLE.replace("USE SIGNAL ;", "USE SIGNAL ;\n    ANTENNAGATEAREA 0.5 ;")
+    db = _import(tmp_path / "a", dirty)
+    assert "PIN.ANTENNA" in db.meta_get("lef_unmodelled")
+    del db
+    db2 = _import(tmp_path / "a", _SIMPLE)          # same BDB path, clean LEF
+    assert db2.meta_get("lef_unmodelled") == "", db2.meta_get("lef_unmodelled")

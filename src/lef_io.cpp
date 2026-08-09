@@ -50,8 +50,17 @@ void take_end(LefDefLexer& lx, const std::string& block,
     const std::string kw = lx.expect("END of " + block);
     if (upper(kw) != "END")
         lx.fail("expected END of " + block + " '" + name + "', got '" + kw + "'");
-    if (name.empty()) return;
-    if (upper(lx.peek()) == upper(name)) { std::string t; lx.next(t); }
+    if (name.empty()) return;               // PORT / OBS end with a bare END
+    // A named block's END must NAME it.  Accepting a mismatch — which this
+    // did — leaves the wrong token in the stream: `MACRO m … END n` then
+    // swallows the next macro's opener and SIZE as an unknown top-level
+    // statement, and the library comes back plausible and short by one
+    // macro.  A spliced or truncated file is exactly what this catches, so
+    // it has to be an error (Codex P1 on #646).
+    const std::string got = lx.expect("name after END of " + block);
+    if (upper(got) != upper(name))
+        lx.fail("END of " + block + " names '" + got + "', expected '" +
+                name + "' — mismatched END (truncated or spliced file?)");
 }
 
 void note(LefLibrary& lib, const std::string& construct,
@@ -113,18 +122,35 @@ std::vector<LefPort> read_geometry(LefDefLexer& lx, LefLibrary& lib,
             if (!cur.rects.empty()) ports.push_back(cur);
             cur = LefPort{};
             cur.layer = st[1];
-        } else if (kw == "RECT" && st.size() >= 5) {
-            // Optional MASK/ITERATE prefixes push the numbers along; take the
-            // LAST four tokens, which are the coordinates in every form.
-            const size_t n = st.size();
-            try {
-                LefRect r{std::stod(st[n - 4]), std::stod(st[n - 3]),
-                          std::stod(st[n - 2]), std::stod(st[n - 1])};
-                if (r.x1 > r.x2) std::swap(r.x1, r.x2);
-                if (r.y1 > r.y2) std::swap(r.y1, r.y2);
-                cur.rects.push_back(r);
-            } catch (const std::exception&) {
+        } else if (kw == "RECT") {
+            // `RECT [MASK <n>] x1 y1 x2 y2 [ITERATE DO … BY … STEP … …]`.
+            // Taking the LAST four tokens — which this did — works for MASK
+            // and breaks on ITERATE, where they are `… STEP <x> <y>`: a valid
+            // iterated rectangle was rejected as malformed (Codex P2 on
+            // #646).  Read forwards instead: skip a MASK pair, take four
+            // numbers, and treat anything left as the iterator.
+            size_t i = 1;
+            if (i < st.size() && upper(st[i]) == "MASK") i += 2;
+            std::vector<double> v;
+            for (; i < st.size() && v.size() < 4; ++i) {
+                try {
+                    size_t used = 0;
+                    const double d = std::stod(st[i], &used);
+                    if (used != st[i].size()) break;
+                    v.push_back(d);
+                } catch (const std::exception&) { break; }
+            }
+            if (v.size() < 4)
                 lx.fail("malformed RECT: " + LefDefLexer::join(st));
+            LefRect r{v[0], v[1], v[2], v[3]};
+            if (r.x1 > r.x2) std::swap(r.x1, r.x2);
+            if (r.y1 > r.y2) std::swap(r.y1, r.y2);
+            cur.rects.push_back(r);
+            if (i < st.size()) {
+                // The base rectangle is real geometry and is kept; the
+                // REPETITION is not modelled, so it is recorded rather than
+                // silently reduced to one instance.
+                note(lib, construct + ".RECT.ITERATE", st, line);
             }
         } else if (kw == "POLYGON" || kw == "PATH" || kw == "VIA") {
             // Real geometry the Rect-based model cannot hold.  Recorded, and
@@ -361,22 +387,41 @@ LefLibrary parse_lef(const std::string& text, const std::string& where) {
             take_end(lx, "UNITS", "UNITS");
             continue;
         }
-        if (u == "VIA" || u == "VIARULE" || u == "SITE" ||
-            u == "NONDEFAULTRULE" || u == "PROPERTYDEFINITIONS" ||
-            u == "SPACING" || u == "ARRAY" || u == "BEGINEXT") {
-            // Blocks Phase 2 does not model (VIA/VIARULE are explicitly
-            // deferred to the router path, §0 of the plan).  Skipped as a
-            // unit and recorded, never guessed at.
+        // Blocks Phase 2 does not model (VIA/VIARULE are explicitly deferred
+        // to the router path, §0 of the plan).  Skipped as a unit and
+        // recorded, never guessed at.
+        //
+        // NAMED vs NAMELESS is not cosmetic.  `PROPERTYDEFINITIONS` and
+        // `SPACING` take no name and end with `END PROPERTYDEFINITIONS` /
+        // `END SPACING`; treating them as named consumed their first BODY
+        // token as the name, so the terminator never matched and the rest of
+        // the file was parsed as garbage (Codex P1 on #646).  For those the
+        // END names the KEYWORD, which is exactly what take_end wants.
+        if (u == "PROPERTYDEFINITIONS" || u == "SPACING") {
             lx.next(t);
-            std::string name;
-            if (!lx.peek().empty() && upper(lx.peek()) != "END" &&
-                lx.peek() != ";") {
-                lx.next(name);
+            skip_block(lx, lib, u, u);
+            continue;
+        }
+        if (u == "BEGINEXT") {
+            // Vendor extension: terminated by ENDEXT, not by END.
+            const int line = lx.line();
+            lx.next(t);
+            while (lx.next(t) && upper(t) != "ENDEXT") { }
+            lib.unmodelled.push_back({"BEGINEXT", "", line});
+            continue;
+        }
+        if (u == "VIA" || u == "VIARULE" || u == "SITE" ||
+            u == "NONDEFAULTRULE" || u == "ARRAY") {
+            lx.next(t);
+            const std::string name = lx.expect(u + " name");
+            // `VIA … ;` also exists as a bare statement; only the block form
+            // reaches skip_block.
+            if (lx.peek() == ";") {
+                lx.next(t);
+                note(lib, u, {u, name}, lx.line());
+            } else {
+                skip_block(lx, lib, u, name);
             }
-            // `SPACING … ;` also exists as a bare statement at top level;
-            // only the block form reaches skip_block.
-            if (lx.peek() == ";") { lx.next(t); note(lib, u, {u, name}, lx.line()); }
-            else skip_block(lx, lib, u, name);
             continue;
         }
         if (u == "END") {
