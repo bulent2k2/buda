@@ -1411,12 +1411,25 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         auto [orient, swap_wh] = def_orient_to_bdb(c.orient);
         if (swap_wh) std::swap(w, h);
         const double x1 = dbu_to_lu(c.x), y1 = dbu_to_lu(c.y);
+        // An `UNPLACED` component has no coordinates, and the reader's
+        // defaults are (0,0) — so writing a normal bbox would put EVERY
+        // unplaced instance on top of every other one at the die origin, and
+        // the pipeline would route that pile as though it were a floorplan
+        // (Codex P1 on #649).  A note at the end does not undo geometry the
+        // next stage has already believed.
+        //
+        // The repo already has a convention for "this component has no
+        // placement": `import_verilog` writes -1,-1,-1,-1 for a component it
+        // knows only from the netlist.  Reusing it keeps ONE meaning of
+        // unplaced across both importers rather than adding a second, and it
+        // is what `add_blocks_from_bdb` and the floorplan already meet.
+        const bool has_pos = c.placed;
         sqlite3_bind_text  (s_comp,1,c.name.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_bind_text  (s_comp,2,c.cell.c_str(),-1,SQLITE_TRANSIENT);
-        sqlite3_bind_double(s_comp,3,x1);
-        sqlite3_bind_double(s_comp,4,y1);
-        sqlite3_bind_double(s_comp,5,x1+w);
-        sqlite3_bind_double(s_comp,6,y1+h);
+        sqlite3_bind_double(s_comp,3,has_pos ? x1     : -1);
+        sqlite3_bind_double(s_comp,4,has_pos ? y1     : -1);
+        sqlite3_bind_double(s_comp,5,has_pos ? x1 + w : -1);
+        sqlite3_bind_double(s_comp,6,has_pos ? y1 + h : -1);
         sqlite3_bind_text  (s_comp,7,orient.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_bind_int   (s_comp,8,0);
         sqlite3_step(s_comp); sqlite3_reset(s_comp);
@@ -1424,8 +1437,10 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         if (c.placed) ++stats.placed_components;
 
         // HALO — a keep-clear margin the placer honoured and the router must
-        // too (Phase 3c).  Emitted as a keepout ring in layout units.
-        if (c.has_halo) {
+        // too (Phase 3c).  Emitted as a keepout ring in layout units.  Only
+        // for a PLACED instance: an unplaced one has no location, so its halo
+        // would blockade the die origin.
+        if (c.has_halo && has_pos) {
             stats.keepouts.push_back({"", x1 - dbu_to_lu(c.halo_l),
                                       y1 - dbu_to_lu(c.halo_b),
                                       x1 + w + dbu_to_lu(c.halo_r),
@@ -1489,6 +1504,19 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     stats.declared_pins = def.declared_pins;
 
     // ── NETS ─────────────────────────────────────────────────────────────
+    // Index instances and ports by name ONCE.  Resolving each connection by
+    // scanning `def.components` made the import O(components x connections),
+    // and a placed design has O(N) of each — so the reader that exists to
+    // survive a 10^6-line DEF would have spent its time walking a vector
+    // (Codex P1 on #649).  The DB ids are already looked up this way; these
+    // are the two places that were not.
+    std::unordered_map<std::string, const DefComponent*> comp_by_name;
+    comp_by_name.reserve(def.components.size() * 2);
+    for (const auto& c : def.components) comp_by_name.emplace(c.name, &c);
+    std::unordered_map<std::string, const DefPin*> pin_by_name;
+    pin_by_name.reserve(def.pins.size() * 2);
+    for (const auto& p : def.pins) pin_by_name.emplace(p.name, &p);
+
     for (const auto& n : def.nets) {
         sqlite3_bind_text(s_net,1,n.name.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_step(s_net); sqlite3_reset(s_net);
@@ -1511,27 +1539,34 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
             std::string dir = "UNKNOWN";
             double ppx = -1, ppy = -1;
             if (cn.is_port()) {
-                for (const auto& dp : def.pins)
-                    if (dp.name == cn.pin) {
-                        dir = dp.dir.empty() ? "UNKNOWN" : dp.dir;
-                        ppx = dbu_to_lu(dp.x); ppy = dbu_to_lu(dp.y);
-                        break;
-                    }
+                auto dp = pin_by_name.find(cn.pin);
+                if (dp != pin_by_name.end()) {
+                    dir = dp->second->dir.empty() ? "UNKNOWN" : dp->second->dir;
+                    ppx = dbu_to_lu(dp->second->x);
+                    ppy = dbu_to_lu(dp->second->y);
+                }
             } else {
                 // Resolve the pin offset from the instance's cell in LEF.
-                for (const auto& c : def.components)
-                    if (c.name == inst) {
-                        auto ci = lef_pins.find(c.cell);
-                        if (ci != lef_pins.end()) {
-                            auto pi = ci->second.find(cn.pin);
-                            if (pi != ci->second.end()) {
-                                dir = pi->second.dir;
+                auto ic = comp_by_name.find(inst);
+                if (ic != comp_by_name.end()) {
+                    const DefComponent& c = *ic->second;
+                    auto ci = lef_pins.find(c.cell);
+                    if (ci != lef_pins.end()) {
+                        auto pi = ci->second.find(cn.pin);
+                        if (pi != ci->second.end()) {
+                            // DIRECTION comes from the cell, so it is known
+                            // whether or not the instance is placed; the
+                            // absolute POSITION is not.  Leaving it at -1 says
+                            // "unknown", which is what the column already
+                            // means, rather than claiming a pin at the origin.
+                            dir = pi->second.dir;
+                            if (c.placed) {
                                 ppx = dbu_to_lu(c.x) + um_to_lu(pi->second.ox);
                                 ppy = dbu_to_lu(c.y) + um_to_lu(pi->second.oy);
                             }
                         }
-                        break;
                     }
+                }
             }
             sqlite3_bind_int   (s_pin,1,nid);
             sqlite3_bind_int   (s_pin,2,cid);
@@ -1550,14 +1585,35 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
                                 tr.count, tr.layers});
 
     // ── BLOCKAGES + macro OBS (Phase 3c) ─────────────────────────────────
+    //
+    // Only a HARD LAYER blockage is a routing keepout.  The other two kinds
+    // in the DEF grammar say something else entirely, and importing them as
+    // keepouts asserts a constraint the file never made (Codex P1 on #649):
+    //
+    //   * a PLACEMENT blockage constrains where CELLS may go.  It carries no
+    //     layer, and the session maps a layerless keepout onto EVERY routing
+    //     layer, so importing one forbade signal routing through an area the
+    //     DEF left completely routable.  The round trip made it acute: Phase
+    //     4b emits `PLACEMENT + PARTIAL` blockages over its own corridors, so
+    //     BUDA -> DEF -> BUDA turned each planned corridor into a hard
+    //     keepout against itself — the exact inversion Phase 4 exists to
+    //     avoid.  BUDA has no placement-legalisation stage, so there is
+    //     nothing to apply it to; it is recorded as unmodelled.
+    //   * `+ PARTIAL <density>` is a DENSITY CAP, not a prohibition.  A hard
+    //     keepout over-blocks it in the same direction, so it is recorded
+    //     rather than approximated.
+    int skipped_placement = 0, skipped_partial = 0;
     for (const auto& b : def.blockages) {
+        if (b.is_placement) { skipped_placement += (int)b.rects.size(); continue; }
+        if (b.has_density)  { skipped_partial   += (int)b.rects.size(); continue; }
         for (const auto& r : b.rects)
             stats.keepouts.push_back({b.layer, dbu_to_lu(r.x1), dbu_to_lu(r.y1),
                                       dbu_to_lu(r.x2), dbu_to_lu(r.y2),
-                                      b.is_placement ? "PLACEMENT blockage"
-                                                     : "BLOCKAGES"});
+                                      "BLOCKAGES"});
     }
+    // (both counts are folded into the unmodelled census below)
     for (const auto& c : def.components) {
+        if (!c.placed) continue;    // no location: its OBS is nowhere
         const LefMacro* m = lef.find_macro(c.cell);
         if (!m) continue;
         // An OBS rect is in the MACRO's frame.  Translating it without
@@ -1646,6 +1702,12 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     {
         std::map<std::string,int> counts;
         for (const auto& u : def.unmodelled) ++counts[u.construct];
+        // Blockages we READ but deliberately did not apply belong in the same
+        // census: "loud on the unmodelled" is the phase's own gate, and a
+        // blockage silently dropped is exactly as misleading as one silently
+        // misapplied.
+        if (skipped_placement) counts["BLOCKAGES.PLACEMENT"] += skipped_placement;
+        if (skipped_partial)   counts["BLOCKAGES.PARTIAL"]   += skipped_partial;
         std::vector<std::pair<std::string,int>> rows(counts.begin(), counts.end());
         std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
             if (a.second != b.second) return a.second > b.second;

@@ -149,6 +149,8 @@ struct DefDesign {
 
 // Parse `path`.  Throws std::runtime_error with file:line on malformed input.
 DefDesign read_def(const std::string& path);
-DefDesign parse_def(const std::string& text, const std::string& where);
+// `text` is taken BY VALUE and moved into the lexer: a DEF can be gigabytes,
+// and a const-ref signature forced a second full-file copy at every call.
+DefDesign parse_def(std::string text, const std::string& where);
 
 }  // namespace buda

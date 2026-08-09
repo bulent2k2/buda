@@ -304,9 +304,9 @@ void read_specialnet(const std::vector<std::string>& t, DefDesign& d,
 
 }  // namespace
 
-DefDesign parse_def(const std::string& text, const std::string& where) {
+DefDesign parse_def(std::string text, const std::string& where) {
     DefDesign d;
-    LefDefLexer lx(text, where);
+    LefDefLexer lx(std::move(text), where);
     std::vector<std::string> st;
     std::string section;                 // the open `… END <section>` block
     int line = 0;
@@ -464,11 +464,37 @@ DefDesign parse_def(const std::string& text, const std::string& where) {
 }
 
 DefDesign read_def(const std::string& path) {
-    std::ifstream f(path);
+    std::ifstream f(path, std::ios::binary);
     if (!f) throw std::runtime_error("read_def: cannot open " + path);
-    std::ostringstream ss;
-    ss << f.rdbuf();
-    return parse_def(ss.str(), path);
+    // ONE buffer.  The `ostringstream` this replaces held the file, `.str()`
+    // copied it, and the lexer copied it again — three simultaneous copies of
+    // a DEF that can be gigabytes (Codex P1 on #649).  Sizing the string up
+    // front and moving it into the parser leaves exactly one.
+    //
+    // This does NOT make the reader streaming, and the honest reason is that
+    // the text is not the dominant term: measured on a 19.7 MB / 1.02M-line
+    // DEF the whole parse peaks at ~115 MB, of which the parsed model — 340k
+    // components at ~220 B each — is most of it.  True streaming means
+    // inserting rows as they parse, which `import_def_lef` currently cannot
+    // do (it walks `def.components` a second time for macro OBS, and net
+    // resolution needs the name index).  Recorded as the follow-up it is,
+    // with the ceiling stated rather than implied: budget roughly 6x the
+    // file size.
+    std::string text;
+    f.seekg(0, std::ios::end);
+    const std::streamoff n = f.tellg();
+    f.seekg(0, std::ios::beg);
+    if (n > 0) {
+        text.resize(static_cast<size_t>(n));
+        f.read(&text[0], n);
+        text.resize(static_cast<size_t>(f.gcount()));
+    } else {
+        // Not a regular file (a pipe, /dev/stdin): fall back to draining it.
+        std::ostringstream ss;
+        ss << f.rdbuf();
+        text = ss.str();
+    }
+    return parse_def(std::move(text), path);
 }
 
 }  // namespace buda

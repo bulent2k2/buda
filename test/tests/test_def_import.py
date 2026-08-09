@@ -306,3 +306,103 @@ def test_macro_obstructions_follow_the_instance_orientation(tmp_path):
     # Unrotated it would be (1,2)-(3,3); rotated it is a 1 x 2 box.
     rotated = [b for b in obs if (b[2] - b[0]) == 1 and (b[3] - b[1]) == 2]
     assert rotated, f"no rotated OBS keepout among {obs}"
+
+
+# ── what a blockage MEANS (Codex P1 on #649) ───────────────────────────────
+
+_DEF_SOFT = _DEF.replace(
+    """BLOCKAGES 1 ;
+  - LAYER metal2 RECT ( 20000 20000 ) ( 30000 30000 ) ;
+END BLOCKAGES""",
+    """BLOCKAGES 3 ;
+  - LAYER metal2 RECT ( 20000 20000 ) ( 30000 30000 ) ;
+  - PLACEMENT RECT ( 40000 40000 ) ( 45000 45000 ) ;
+  - LAYER metal3 + PARTIAL 0.6 RECT ( 60000 60000 ) ( 65000 65000 ) ;
+END BLOCKAGES""")
+
+
+def _boxes(session):
+    return [(z.bbox.x1, z.bbox.y1, z.bbox.x2, z.bbox.y2)
+            for z in session.fp.get_keepout_zones()]
+
+
+def test_a_placement_blockage_is_not_a_routing_keepout(tmp_path):
+    """A DEF PLACEMENT blockage says where CELLS may not go.  It carries no
+    layer, and a layerless keepout is installed on EVERY routing layer, so
+    importing one forbade signal routing through an area the file left
+    completely routable.
+
+    The round trip is what makes it acute rather than academic: Phase 4b
+    emits `PLACEMENT + PARTIAL` blockages over its own corridors, so
+    BUDA -> DEF -> BUDA turned each planned corridor into a hard keepout
+    against itself — the exact inversion Phase 4 exists to prevent."""
+    s, out = _run(tmp_path, deff=_DEF_SOFT)
+    boxes = _boxes(s)
+    assert (20, 20, 30, 30) in boxes, boxes         # the hard one still lands
+    assert (40, 40, 45, 45) not in boxes, boxes     # the placement one does not
+
+
+def test_a_partial_density_blockage_is_not_a_prohibition(tmp_path):
+    """`+ PARTIAL <density>` caps how full a region may get.  A hard keepout
+    over-blocks it in the same direction, so it is recorded rather than
+    approximated."""
+    s, _out = _run(tmp_path, deff=_DEF_SOFT)
+    assert (60, 60, 65, 65) not in _boxes(s), _boxes(s)
+
+
+def test_what_is_read_but_not_applied_is_still_reported(tmp_path):
+    """The phase's own gate: loud on the unmodelled.  A blockage silently
+    DROPPED is exactly as misleading as one silently misapplied."""
+    _s, out = _run(tmp_path, deff=_DEF_SOFT)
+    assert "BLOCKAGES.PLACEMENT:1" in out, out
+    assert "BLOCKAGES.PARTIAL:1" in out, out
+
+
+# ── UNPLACED components (Codex P1 on #649) ─────────────────────────────────
+
+_DEF_UNPLACED = _DEF.replace(
+    "  - i1 m + PLACED ( 50000 60000 ) N + HALO 100 100 100 100 ;",
+    "  - i1 m + UNPLACED + HALO 100 100 100 100 ;")
+
+
+def test_an_unplaced_component_does_not_land_on_the_origin(tmp_path):
+    """`UNPLACED` means the component has no coordinates, and the reader's
+    defaults are (0,0) — so a normal bbox puts EVERY unplaced instance on
+    top of every other one at the die origin, and the pipeline routes that
+    pile as though it were a floorplan.  A note printed afterwards does not
+    undo geometry the next stage has already believed.
+
+    -1,-1,-1,-1 is the repo's existing "no placement" convention, written by
+    `import_verilog` for a component it knows only from the netlist; reusing
+    it keeps ONE meaning of unplaced across both importers."""
+    s, out = _run(tmp_path, deff=_DEF_UNPLACED)
+    comps = {c.name: c for c in s.bdb.all_components()}
+    assert comps["i0"].x1 == pytest.approx(1.0)        # placed: real position
+    u = comps["i1"]
+    assert (u.x1, u.y1, u.x2, u.y2) == (-1, -1, -1, -1), \
+        (u.x1, u.y1, u.x2, u.y2)
+    assert "1 component(s) are UNPLACED" in out, out
+
+
+def test_an_unplaced_component_brings_no_geometry_with_it(tmp_path):
+    """Its halo and its macro obstructions have nowhere to be either — and a
+    keepout at the origin is worse than none, because it blocks real area."""
+    s, _out = _run(tmp_path, deff=_DEF_UNPLACED)
+    for b in _boxes(s):
+        assert not (b[0] <= 0 and b[1] <= 0), \
+            f"keepout {b} sits at the origin — from an unplaced instance?"
+
+
+def test_an_unplaced_instances_pin_has_no_position_but_keeps_its_direction(
+        tmp_path):
+    """Direction comes from the cell, so it is known whether or not the
+    instance is placed; the absolute position is not.  -1 is what the column
+    already means by unknown."""
+    deff = _DEF_UNPLACED.replace("  - n0 ( i0 a ) ( PIN out ) ;",
+                                 "  - n0 ( i1 a ) ( PIN out ) ;")
+    s, _out = _run(tmp_path, deff=deff)
+    cid = {c.name: c.id for c in s.bdb.all_components()}["i1"]
+    pins = [p for p in s.bdb.pins_by_comp(cid) if p.pin_name == "a"]
+    assert pins, "the connection was dropped entirely"
+    assert pins[0].dir == "INPUT", pins[0].dir
+    assert (pins[0].px, pins[0].py) == (-1, -1), (pins[0].px, pins[0].py)

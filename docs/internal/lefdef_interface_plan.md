@@ -363,6 +363,48 @@ letting a real design drop the hand-typed stack entirely.
 > `test_a_million_line_def_parses_in_seconds`.  Target was "well under a
 > minute".
 >
+> **Second review round** (Codex P1s on #649, all four verified against the
+> source before touching anything; three were real defects, the fourth a
+> real trade-off):
+>
+> - **A `PLACEMENT` blockage is not a routing keepout.**  It says where
+>   *cells* may go, carries no layer, and a layerless keepout is installed on
+>   EVERY routing layer — so importing one forbade signal routing through an
+>   area the file left completely routable.  The round trip made it acute:
+>   Phase 4b emits `PLACEMENT + PARTIAL` blockages over its own corridors, so
+>   BUDA → DEF → BUDA turned each planned corridor into a hard keepout
+>   against itself, the exact inversion Phase 4 exists to prevent.  Now
+>   recorded as unmodelled — BUDA has no placement-legalisation stage to
+>   apply it to.  `+ PARTIAL <density>` likewise: a density cap is not a
+>   prohibition, and a hard keepout over-blocks it in the same direction.
+> - **`UNPLACED` components no longer land on the origin.**  The reader's
+>   default coordinates are (0,0), so a normal bbox stacked every unplaced
+>   instance on top of every other one at the die corner and the pipeline
+>   routed that pile as a floorplan; the note printed afterwards does not
+>   undo geometry the next stage already believed.  They now get
+>   `-1,-1,-1,-1` — the repo's EXISTING unplaced convention, written by
+>   `import_verilog` — so there is one meaning of unplaced, not two.  Their
+>   halos and macro OBS are skipped with them, and their pins keep the
+>   cell's DIRECTION while leaving position unknown.
+> - **Net-connection resolution was O(N²).**  Each connection re-scanned
+>   `def.components` for its instance (and `def.pins` for its port), so the
+>   reader built to survive a 10⁶-line DEF spent its time walking a vector.
+>   Indexed by name once.  Measured, since the shape is the point: 20 000
+>   components **1.86 s → 0.33 s** (5.6×), 40 000 **7.97 s → 0.58 s**
+>   (13.8×) — the base grows 4.3× per doubling, the fix 1.7×.
+> - **Whole-file buffering: partly fixed, and the rest stated rather than
+>   waved away.**  `read_def` held the file three times over
+>   (`ostringstream`, `.str()`, then the lexer's copy); it now reads into one
+>   buffer and moves it, measured 42.5 → 38.2 MB on a 3.2 MB DEF.  It is
+>   still NOT a streaming reader, and the honest reason is that the text is
+>   not the dominant term: on a 19.7 MB / 1.02 M-line DEF the parse peaks at
+>   ~115 MB, most of it the parsed model (340 k components at ~220 B each).
+>   True streaming means inserting rows as they parse, which
+>   `import_def_lef` cannot do today — it walks `def.components` a second
+>   time for macro OBS, and net resolution needs the name index above.  The
+>   working ceiling is therefore **~6× the file size**, recorded here so a
+>   user can budget for it, with streaming as the named follow-up.
+>
 > **A finding, not a fix:** the checked-in `demo/ariane` pair is MISMATCHED —
 > its DEF instantiates 133 × `fakeram45_256x16` while its LEF defines only
 > `sram_asap7_16x256_1rw`, so under the old importer every macro on that
