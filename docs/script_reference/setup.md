@@ -1,6 +1,6 @@
 # BUDA Script Reference — Setup commands
 
-Technology, floorplan, netlist, and routing-policy declarations that precede the pipeline stages: `def_layer`, `add_block`, `add_keepout`, `add_net`, `add_bus`, `corner_margin`, `detour_channel`, `set_min_stub_length[_dir|_layer]`, `set_feedthru`, `set_track_pitch`, `set_unit_check`.
+Technology, floorplan, netlist, and routing-policy declarations that precede the pipeline stages: `def_layer`, `add_block`, `add_keepout`, `add_net`, `add_bus`, `corner_margin`, `detour_channel`, `set_min_stub_length[_dir|_layer]`, `set_feedthru`, `set_track_pitch`, `set_unit_check`, `import_lef_tech`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -606,6 +606,61 @@ the layer has a pattern), but this gap is a literal, so it silently means
 It is opt-in because a derived gap is a *larger* reservation on every design
 that has patterns — a QoR change, not a unit fix — and this repo measures
 before it defaults. See [the coordinate contract](../internal/engine_units.md).
+
+---
+
+### `import_lef_tech`
+
+```
+import_lef_tech <file.lef> [top <N>]
+```
+
+Build the layer stack from a LEF technology file instead of typing it out:
+every `ROUTING` layer with a `DIRECTION` becomes a layer, and every one that
+also has a `PITCH` and `WIDTH` gets a synthesized track pattern.
+
+| Argument | Description |
+|---|---|
+| `file.lef` | Technology LEF. A file that cannot be read stops the run. |
+| `top N` | How many layers to mark `TOP`, highest-numbered first and at most one per direction. Default `2` — the natural H+V pair. |
+
+**Layer ids** come from the trailing integer in the LEF layer name (`M3`→3,
+`metal5`→5), because that is how hand-written stacks in this repo already
+number their layers — so an imported stack and a script that says
+`def_layer 4` mean the same layer. A name with no number gets the next free
+id; an id already in use is reported and that layer is skipped, never
+silently renumbered.
+
+**The synthesized pattern is all-signal**: one `SIGNAL` slot of `WIDTH`, with
+`PITCH - WIDTH` of space, anchored at `OFFSET`. That is the honest reading of
+LEF *alone* — the file says how far apart tracks are and how wide a wire is,
+and says nothing about which of them a power grid will take, which lives in
+the DEF's `SPECIALNETS`. A design with a real PDN declares its rails with
+`def_track_pattern`.
+
+**`TOP` is a BUDA notion, not a LEF one** — nothing in the file says which
+layers the planner should prefer for trunks. The topmost layer in each
+direction is the default; `top N` and an explicit `def_layer` override it.
+
+**Precedence.** An explicit `def_layer` / `def_track_pattern` **always**
+outranks imported technology data, in **either** declaration order:
+
+- declared **before** the import, it is skipped (reported by name or by id);
+- declared **after**, it replaces what the import installed (also reported).
+
+That is what lets a flow adopt a tech file and still override one layer, and
+what keeps every existing hand-typed flow byte-identical. Two *script*
+declarations of one id remain the error they always were.
+
+**Skipped, and said so:** a layer with no `DIRECTION` (BUDA has no undirected
+layer), a `PITCH` that leaves no room for `WIDTH`, an id collision. Nothing
+is dropped in silence.
+
+**Example:**
+```buda
+import_lef_tech tech/sky130.lef      # the whole stack
+def_layer 5 met3 V TOP 30            # …but met3 is ours
+```
 
 ---
 

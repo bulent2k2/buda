@@ -242,10 +242,19 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
     # ordering (init sets the global, keeping the earlier overrides).
     elif (session.routing_grid.has_layer(layer_id) and
           len(session.routing_grid.get_layer_grid(layer_id).global_pattern().slots) > 0):
-        print(f"Error: layer {layer_id} already has a track pattern — "
-              f"duplicate def_track_pattern (use add_grid_override for a "
-              f"region-scoped pattern)")
-        sys.exit(1)
+        # Precedence (Phase 2b): an explicit pattern ALWAYS outranks one
+        # synthesized by `import_lef_tech`, in either declaration order —
+        # so an imported pattern is REPLACED here rather than rejected as a
+        # duplicate.  define_layer already overwrites last-wins, which is
+        # exactly what the override needs.
+        if session._pattern_source.get(layer_id) == "lef":
+            print(f"[LEF] def_track_pattern overrides the imported pattern "
+                  f"on layer {layer_id}")
+        else:
+            print(f"Error: layer {layer_id} already has a track pattern — "
+                  f"duplicate def_track_pattern (use add_grid_override for a "
+                  f"region-scoped pattern)")
+            sys.exit(1)
 
     # Resolve layer direction.
     is_h = True
@@ -253,6 +262,7 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
         is_h = (session.layers.get_layer_dir(layer_id) == buda.LayerDir.HORIZONTAL)
 
     session.routing_grid.define_layer(layer_id, pat, is_h)
+    session._pattern_source[layer_id] = "script"
     session.layers.set_layer_dilution(layer_id, pat.dilution_factor())
     # Measured per-bit channel cost: one signal track every
     # unit_pitch/n_signals units.  Supersedes the density model

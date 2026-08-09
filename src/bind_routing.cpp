@@ -488,6 +488,7 @@ void bind_routing(py::module_& m) {
         // bit_pitch = unit_pitch / n_kept on its shared layers).
         .def("clone", [](const LayerStack& s) { return s; })
         .def("add_layer",               &LayerStack::add_layer)
+        .def("remove_layer",            &LayerStack::remove_layer)
         .def("set_layer_dilution",      &LayerStack::set_layer_dilution)
         .def("set_layer_overhead",      &LayerStack::set_layer_overhead)
         .def("set_bit_pitch",           &LayerStack::set_bit_pitch)

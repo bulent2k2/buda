@@ -15,6 +15,8 @@
  */
 
 #include "bdb.h"
+#include "lef_io.h"
+#include <iostream>
 #include <stdexcept>
 #include <fstream>
 #include <iterator>
@@ -1198,88 +1200,64 @@ static std::vector<std::string> split_ws(const std::string& s) {
     return {std::istream_iterator<std::string>(ss), {}};
 }
 
-BDB::LefCells BDB::_parse_lef_sizes(const std::string& lef_path) {
-    LefCells sizes;
-    std::ifstream f(lef_path);
-    if (!f) return sizes;
+// ── LEF adapter ──────────────────────────────────────────────────────────────
+// The parsing itself moved to src/lef_io.cpp (Phase 2a).  What remains here is
+// the PROJECTION onto what the BDB stores — footprints and one point per pin —
+// kept separate from the reading, so widening the model later is an edit here
+// and not a change to a parser.
+//
+// One read, both maps: the two helpers this replaces each opened and scanned
+// the file independently.
 
-    std::string line, cur_cell;
-    while (std::getline(f, line)) {
-        auto tok = split_ws(line);
-        if (tok.empty()) continue;
-        if (tok[0] == "MACRO" && tok.size() >= 2)
-            { cur_cell = tok[1]; continue; }
-        if (tok[0] == "END" && tok.size() >= 2 && tok[1] == cur_cell)
-            { cur_cell.clear(); continue; }
-        if (!cur_cell.empty() && tok[0] == "SIZE" && tok.size() >= 4) {
-            try { sizes[cur_cell] = {std::stod(tok[1]), std::stod(tok[3])}; }
-            catch (...) {}
-        }
-    }
+BDB::LefCells BDB::_lef_cells(const LefLibrary& lib) {
+    LefCells sizes;
+    for (const auto& m : lib.macros) sizes[m.name] = {m.w, m.h};
     return sizes;
 }
 
-BDB::LefPins BDB::_parse_lef_pins(const std::string& lef_path) {
+BDB::LefPins BDB::_lef_pins(const LefLibrary& lib) {
     LefPins result;
-    std::ifstream f(lef_path);
-    if (!f) return result;
-
-    std::string line, cur_cell, cur_pin, cur_dir, cur_use;
-    std::vector<double> xs, ys;
-    bool in_pin = false;
-
-    auto flush_pin = [&]() {
-        if (cur_cell.empty() || cur_pin.empty()) return;
-        if (cur_use == "POWER" || cur_use == "GROUND" || cur_use == "CLOCK") {
-            xs.clear(); ys.clear(); cur_pin.clear(); cur_dir.clear(); cur_use.clear();
-            in_pin = false; return;
-        }
-        if (!xs.empty()) {
-            double ox=0, oy=0;
-            for (auto x:xs) ox+=x;
-            for (auto y:ys) oy+=y;
-            ox/=xs.size(); oy/=ys.size();
-            std::string dir = cur_dir.empty() ? "UNKNOWN" : cur_dir;
-            result[cur_cell][cur_pin] = {ox, oy, dir};
-        }
-        xs.clear(); ys.clear(); cur_pin.clear(); cur_dir.clear(); cur_use.clear();
-        in_pin = false;
-    };
-
-    while (std::getline(f, line)) {
-        auto tok = split_ws(line);
-        if (tok.empty()) continue;
-
-        if (tok[0] == "MACRO" && tok.size() >= 2)
-            { cur_cell = tok[1]; in_pin = false; continue; }
-        if (tok[0] == "END" && tok.size() >= 2 && tok[1] == cur_cell)
-            { flush_pin(); cur_cell.clear(); continue; }
-
-        if (cur_cell.empty()) continue;
-
-        if (tok[0] == "PIN" && tok.size() >= 2) {
-            flush_pin();
-            cur_pin = tok[1]; in_pin = true; continue;
-        }
-        if (tok[0] == "END" && tok.size() >= 2 && tok[1] == cur_pin)
-            { flush_pin(); continue; }
-
-        if (!in_pin) continue;
-
-        if (tok[0] == "DIRECTION" && tok.size() >= 2)
-            cur_dir = tok[1];
-        else if (tok[0] == "USE" && tok.size() >= 2)
-            cur_use = tok[1];
-        else if (tok[0] == "RECT" && tok.size() >= 5) {
-            try {
-                double x1=std::stod(tok[1]), y1=std::stod(tok[2]);
-                double x2=std::stod(tok[3]), y2=std::stod(tok[4]);
-                xs.push_back((x1+x2)/2); ys.push_back((y1+y2)/2);
-            } catch (...) {}
+    for (const auto& m : lib.macros) {
+        for (const auto& p : m.pins) {
+            // Power/ground/clock pins are pre-routes, not signal terminals:
+            // creating BDB pins for them would put every macro's rails into
+            // the netlist.  They are READ (and reachable through the
+            // LefLibrary) but not projected here — "not stored" is now a
+            // decision at this boundary rather than a silent drop inside a
+            // scanner.
+            if (p.use == "POWER" || p.use == "GROUND" || p.use == "CLOCK")
+                continue;
+            double cx = 0, cy = 0;
+            if (!p.centroid(cx, cy)) continue;    // no shapes: nothing to place
+            // ORIGIN is the offset from the placement point to the geometry
+            // origin, so pin coordinates are relative to it.  The scanner this
+            // replaces ignored it, putting every pin of a non-zero-ORIGIN
+            // macro somewhere it is not — with no symptom until routing lands
+            // on nothing.
+            result[m.name][p.name] = {cx - m.ox, cy - m.oy,
+                                      p.dir.empty() ? "UNKNOWN" : p.dir};
         }
     }
-    flush_pin();
     return result;
+}
+
+// A census of what the file said and the model cannot hold, most common
+// first.  Stored as meta so it survives the import and can be diffed between
+// technology drops; printed so it is seen at least once.
+std::string BDB::_lef_unmodelled_census(const LefLibrary& lib) {
+    std::map<std::string, int> counts;
+    for (const auto& u : lib.unmodelled) ++counts[u.construct];
+    std::vector<std::pair<std::string,int>> rows(counts.begin(), counts.end());
+    std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second > b.second;   // count desc
+        return a.first < b.first;                               // then name
+    });
+    std::string s;
+    for (const auto& [k, n] : rows) {
+        if (!s.empty()) s += ", ";
+        s += k + ":" + std::to_string(n);
+    }
+    return s;
 }
 
 // ── DEF importer ─────────────────────────────────────────────────────────────
@@ -1322,8 +1300,16 @@ void BDB::add_label_pin(const std::string& net_name, int comp_id,
 }
 
 void BDB::import_def_lef(const std::string& def_path, const std::string& lef_path) {
-    auto lef_sizes = _parse_lef_sizes(lef_path);
-    auto lef_pins  = _parse_lef_pins(lef_path);
+    LefLibrary lef;
+    {
+        std::ifstream probe(lef_path);
+        if (probe) { probe.close(); lef = read_lef(lef_path); }
+        // An absent LEF stays non-fatal (footprints fall back to the 0.5
+        // default), as before — but a PRESENT one that cannot be read is now
+        // an error rather than a partial library that reads as complete.
+    }
+    auto lef_sizes = _lef_cells(lef);
+    auto lef_pins  = _lef_pins(lef);
 
     // Full design wipe incl. derived pipeline rows — re-importing into a BDB
     // that holds a routed checkpoint would otherwise trip the FK constraints
@@ -1559,6 +1545,25 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
     if (_lu_from_def_units) {
         _lu_per_um = double(_units);
         _lu_from_def_units = false;
+    }
+    // What the technology file said that this model cannot hold.  Recorded so
+    // "we ignored it" and "it was not in the file" stop looking the same.
+    {
+        // Written UNCONDITIONALLY.  import_def_lef replaces the design
+        // tables, so leaving a previous technology file's census in place
+        // would have the database reporting constructs from a LEF that is no
+        // longer loaded — stale data reading as current, which is the exact
+        // failure this key exists to prevent (Codex P2 on #646).
+        const std::string census = _lef_unmodelled_census(lef);
+        save_meta("lef_unmodelled", census);
+        save_meta("lef_units_dbu",
+                  lef.units_dbu > 0 ? std::to_string(lef.units_dbu) : "");
+        save_meta("lef_manufacturing_grid",
+                  lef.manufacturing_grid > 0
+                      ? std::to_string(lef.manufacturing_grid) : "");
+        if (!census.empty())
+            std::cout << "[LEF] " << lef.unmodelled.size()
+                      << " unmodelled construct(s): " << census << "\n";
     }
     save_meta("units", std::to_string(_units));
     save_meta("lu_per_um", std::to_string(_lu_per_um));
