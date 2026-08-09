@@ -47,8 +47,12 @@ struct VerilogImportStats {
     // cells.  Reported rather than silent: the filter is a heuristic, and a
     // dropped instance is a hole in the hierarchy that every later stage
     // treats as absence rather than as an omission.
-    int skipped_library_cells = 0;
-    std::vector<std::string> skipped_cells;   // distinct cell names, capped
+    int skipped_library_cells = 0;   // instances
+    int skipped_kinds = 0;           // DISTINCT cell types among them
+    // The first few distinct cell types, capped.  `skipped_kinds` is the
+    // true total, so a caller can tell a complete list from a truncated one
+    // — the list alone cannot say, since its entries are already unique.
+    std::vector<std::string> skipped_cells;
 };
 
 struct DefImportStats {
@@ -420,7 +424,7 @@ public:
     //       since-changed resolution and VOID the restored plan).
     // v22 = ndr_rule.credit (R5a end-shield crediting opt-in — part of the
     //       rule's pricing basis, so it rides the same table).
-    static constexpr int SCHEMA_VERSION = 23;
+    static constexpr int SCHEMA_VERSION = 24;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -840,7 +844,7 @@ private:
                                 double abs_x, double abs_y,
                                 int child_depth);
     // parsers
-    struct LefCell { double w, h; };
+    struct LefCell { double w, h; std::string cls; };
     struct LefPin  { double ox, oy; std::string dir; };  // offset from cell origin
     using LefCells = std::unordered_map<std::string, LefCell>;
     using LefPins  = std::unordered_map<std::string,

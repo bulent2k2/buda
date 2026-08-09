@@ -557,21 +557,31 @@ An instance of a module the netlist does not define is a library cell.
 Keeping them all would turn a million gates into a million component rows, so
 they are filtered — and the rule is, in order:
 
-1. **The placement already has an instance by that name** → keep. The DEF is
-   the authority on what exists physically, so this is not a guess about cell
-   classes. It is what carries a hard macro (`fakeram45_256x16 u_mem (…)`)
-   through a DEF+Verilog merge however its instance name is spelled.
-2. Otherwise, for a **Verilog-only** import where there is no placement to
-   ask: an escaped instance name *and* a lowercase letter in the cell name
-   (`fakeram45_*` yes, `DFFR_X1` no — Genus escapes both).
+1. **The LEF calls the cell a hard macro** — a `MACRO … CLASS` other than
+   `CORE` (an absent CLASS reads as CORE, LEF's own default) → keep. The
+   technology states this outright, so it is not a guess, and it is
+   independent of how the instance is named — which is what carries
+   `fakeram45_256x16 u_mem (…)` through a DEF+Verilog merge. The class is
+   persisted on the `cell` row (`cell.cls`, schema v24) by `import_def_lef`.
+2. Otherwise, for an import with **no LEF** to ask: an escaped instance name
+   *and* a lowercase letter in the cell name (`fakeram45_*` yes, `DFFR_X1`
+   no — Genus escapes both).
 3. Otherwise skipped.
 
 Skips are **counted and their cell kinds named** (`BUDA-1608`), because rule 2
 is still a heuristic and an instance that silently never existed is
 indistinguishable from a design that never had one.
 
+> The placement is **not** the discriminator, though it looks like one on a
+> macro-only DEF: a DEF for a gate-level design lists every standard cell in
+> `COMPONENTS`, so "the placement already has an instance by that name" is
+> true of every buffer and flop and the filter admits the whole netlist —
+> exactly the explosion it exists to prevent. Pinned by
+> `test_a_gate_level_merge_keeps_the_macro_and_drops_the_standard_cells`.
+
 Returns a `VerilogImportStats` (`top_module`, `elaborated`,
-`skipped_library_cells`, `skipped_cells`).
+`skipped_library_cells`, `skipped_kinds`, `skipped_cells` — the last capped at
+eight, so `skipped_kinds` is what says whether the list is complete).
 
 > Why the filter matters beyond tidiness: a dropped instance in a merge does
 > **not** remove the DEF's row — it leaves it orphaned at depth 0. Its

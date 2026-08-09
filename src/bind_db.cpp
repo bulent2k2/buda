@@ -479,6 +479,7 @@ void bind_db(py::module_& m) {
         .def_readonly("elaborated", &VerilogImportStats::elaborated)
         .def_readonly("skipped_library_cells",
                       &VerilogImportStats::skipped_library_cells)
+        .def_readonly("skipped_kinds", &VerilogImportStats::skipped_kinds)
         .def_readonly("skipped_cells", &VerilogImportStats::skipped_cells);
 
     m.def("read_def",  &read_def,  py::arg("path"));

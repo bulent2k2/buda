@@ -14,9 +14,11 @@
 
 """Netlist-reader edges the feature suite does not reach.
 
-Both cases here were found by review of the DEF+Verilog merge (#650) and
-both are about a classification that LOOKS right on the designs already
-tested and is wrong just outside them.
+Every case here was found by review of the DEF+Verilog merge (#650, #654),
+and they share a shape: a classification that LOOKS right on the designs
+already tested and is wrong just outside them.  Twice over for the
+library-cell filter, whose rule went cell-name → placement → LEF CLASS,
+each step correct on the case that prompted it and wrong on the next one.
 """
 import textwrap
 
@@ -170,15 +172,15 @@ def _merged(tmp_path):
     return db, st
 
 
-def test_a_macro_the_def_placed_joins_the_hierarchy(tmp_path):
+def test_a_macro_the_lef_calls_a_block_joins_the_hierarchy(tmp_path):
     """An instance of a module the netlist does not define is a library cell,
     and dropping those is what stops a million gates becoming a million rows.
     But the test used to be "the instance name is not backslash-escaped", and
     a hard macro is normally instantiated with an ordinary name — so
     `fakeram45_256x16 u_mem (...)` read as a standard cell.
 
-    The DEF is the authority on what exists physically, so it is asked: a
-    name the placement already contains is kept, whatever its spelling."""
+    The LEF states the answer outright — `CLASS BLOCK` vs `CLASS CORE` — so
+    it is asked, and the instance name is not consulted at all."""
     db, st = _merged(tmp_path)
     by_name = {c.name: c for c in db.all_components()}
     mem, core = by_name["core/u_mem"], by_name["core"]
@@ -202,8 +204,93 @@ def test_an_orphaned_macro_takes_its_container_down_with_it(tmp_path):
     assert (core.x1, core.y1) == (10.0, 20.0)
 
 
-def test_a_verilog_only_import_still_filters_standard_cells(tmp_path):
-    """No placement to ask, so the legacy heuristic stands unchanged — an
+_GATE_LEF = _MACRO_LEF.replace("END LIBRARY", "") + """\
+MACRO BUFX2
+  CLASS CORE ;
+  SIZE 1 BY 2 ;
+END BUFX2
+MACRO DFFR_X1
+  CLASS CORE ;
+  SIZE 3 BY 2 ;
+END DFFR_X1
+END LIBRARY
+"""
+
+_GATE_DEF = """\
+VERSION 5.8 ;
+DESIGN t ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 500000 500000 ) ;
+COMPONENTS 5 ;
+  - core/u_mem fakeram45_256x16 + PLACED ( 10000 20000 ) N ;
+  - core/b0 BUFX2 + PLACED ( 1000 1000 ) N ;
+  - core/b1 BUFX2 + PLACED ( 3000 1000 ) N ;
+  - core/b2 BUFX2 + PLACED ( 5000 1000 ) N ;
+  - core/f0 DFFR_X1 + PLACED ( 7000 1000 ) N ;
+END COMPONENTS
+END DESIGN
+"""
+
+_GATE_V = """\
+module core (a);
+  input a;
+  fakeram45_256x16 u_mem (.A(a));
+  BUFX2 b0 (.A(a), .Z(w0));
+  BUFX2 b1 (.A(w0), .Z(w1));
+  BUFX2 b2 (.A(w1), .Z(w2));
+  DFFR_X1 f0 (.D(w2), .Q(q));
+endmodule
+
+module top ();
+  core core ();
+endmodule
+"""
+
+
+def test_a_gate_level_merge_keeps_the_macro_and_drops_the_standard_cells(
+        tmp_path):
+    """The other half of the same question, and the one that makes the answer
+    "ask the LEF" rather than "ask the placement" (Codex P1 on #654).
+
+    A DEF for a gate-level design places EVERY standard cell — that is what a
+    DEF is — so "the placement already has an instance by this name" is true
+    of every buffer and flop in the design.  Under that rule the filter
+    admitted all of them: measured 8 of 8 std cells elaborated into component,
+    pin and net rows, which is precisely the explosion the filter exists to
+    prevent.  CLASS separates them, and the same DEF that defeats the
+    placement rule is the fixture here."""
+    for n, t in (("a.lef", _GATE_LEF), ("a.def", _GATE_DEF), ("a.v", _GATE_V)):
+        (tmp_path / n).write_text(t)
+    db = buda.BDB(str(tmp_path / "x.bdb"))
+    db.import_def_lef(str(tmp_path / "a.def"), str(tmp_path / "a.lef"))
+    st = db.import_verilog(str(tmp_path / "a.v"))
+
+    # The macro joined the hierarchy…
+    hier = sorted(c.name for c in db.all_components() if c.depth > 0)
+    assert hier == ["core/u_mem"], hier
+    # …and every CLASS CORE instance was filtered, counted and named.
+    assert st.skipped_library_cells == 4                     # 3 BUFX2 + 1 DFF
+    assert sorted(st.skipped_cells) == ["BUFX2", "DFFR_X1"]
+    assert st.skipped_kinds == 2
+
+
+def test_the_truncated_kind_list_says_it_is_truncated(tmp_path):
+    """The list caps at eight distinct kinds, and its own entries are unique
+    by construction — so `len(list) >= len(set(list))` is true whether or not
+    anything was dropped, and the ellipsis it gated never appeared (Codex P2
+    on #654).  A library of nine kinds must not present eight as the whole
+    story."""
+    body = "\n".join(f"  CELL{i} u{i} (.A(a));" for i in range(10))
+    (tmp_path / "t.v").write_text(f"module top ();\n{body}\nendmodule\n")
+    db = buda.BDB(str(tmp_path / "x.bdb"))
+    st = db.import_verilog(str(tmp_path / "t.v"))
+    assert st.skipped_library_cells == 10
+    assert st.skipped_kinds == 10           # the TRUE distinct count
+    assert len(st.skipped_cells) == 8       # …of which the list shows eight
+
+
+def test_an_import_with_no_lef_still_filters_standard_cells(tmp_path):
+    """No LEF to ask, so the legacy heuristic stands unchanged — an
     unescaped instance of an undefined module is a library cell.  This is the
     behaviour that keeps a gate-level netlist from becoming a million
     component rows, and the fix above must not weaken it."""

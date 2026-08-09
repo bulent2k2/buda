@@ -44,29 +44,41 @@ sized by `derive_container_bboxes`, gets no busterm, and the routing
 interface loses a whole level. One dropped instance, a missing level, no
 diagnostic.
 
-**The fix asks the placement instead of guessing.** The DEF is the authority
-on what exists physically, so an instance whose name the placement already
-contains is kept, however it is spelled — no cell-class heuristic involved.
-The legacy escaped-name rule stands unchanged behind it for Verilog-only
-imports, where there is no placement to ask. Basenames are matched, which is
-a deliberate superset: the netlist knows an instance by its local name and
-only elaboration knows the path, and the cost of a false keep is one real
-netlist instance kept while the cost of a false drop is a hole.
+**The fix asks the technology, which states the answer outright.** A LEF
+`MACRO … CLASS` other than `CORE` *is* the hard-macro declaration (an absent
+CLASS reads as CORE, LEF's own default), so the class is persisted on the
+`cell` row at import (`cell.cls`, schema v24) and consulted at elaboration.
+No cell-class heuristic, and no dependence on how the instance is spelled.
+The legacy escaped-name rule stands unchanged behind it for an import with no
+LEF to ask.
 
-Deliberately **not** done: lifting the lowercase-letter test out of the
-escape branch, which is what this page originally suggested. It would have
-been wrong — std cells are all-lowercase in some libraries (`sky130_fd_sc_hd__inv_1`),
-so that rule keeps every gate in exactly the netlists the filter exists to
-protect against.
+Deliberately **not** done, two attempts recorded because each looked right:
+
+- Lifting the lowercase-letter test out of the escape branch, which is what
+  this page originally suggested. Std cells are all-lowercase in some
+  libraries (`sky130_fd_sc_hd__inv_1`), so that rule keeps every gate in
+  exactly the netlists the filter exists to protect against.
+- **Asking the placement** — "keep an instance whose name the DEF already
+  contains" — which this page recommended next and which shipped briefly.
+  It is right on a macro-only DEF and wrong on every real one: a DEF for a
+  gate-level design lists *every standard cell* in `COMPONENTS`, so the test
+  is true of every buffer and flop and the filter admits the whole netlist.
+  Measured on a 5-component merge: 4 of 4 std cells elaborated into
+  component, pin and net rows (Codex P1 on #654). The lesson is the one this
+  page keeps re-learning — a signal that correlates with the right answer on
+  the design in front of you is not the right answer.
 
 **And the count is now always stated** (`BUDA-1608`), with the cell *kinds*,
-because the filter remains a heuristic on the Verilog-only path and an
-instance that silently never existed is indistinguishable from a design that
-never had one. `import_verilog` returns a `VerilogImportStats`.
+because the filter remains a heuristic on the no-LEF path and an instance
+that silently never existed is indistinguishable from a design that never had
+one. `import_verilog` returns a `VerilogImportStats`; the named-kinds list
+caps at eight and `skipped_kinds` carries the true total, so a truncated list
+says so rather than presenting eight kinds as the whole story.
 
 Pinned by `test_bdb_import_edges.py`: the macro joins the hierarchy, the
-container it would have orphaned is sized, Verilog-only filtering is
-unchanged, and the census names distinct kinds.
+container it would have orphaned is sized, a gate-level merge keeps only the
+macro, no-LEF filtering is unchanged, and the census names distinct kinds and
+admits when it is truncated.
 
 ## 2. A vector port map collapses to one net
 

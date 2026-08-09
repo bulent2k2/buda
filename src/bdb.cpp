@@ -392,6 +392,11 @@ void BDB::_create_schema() {
             name        TEXT PRIMARY KEY,
             width       REAL NOT NULL,
             height      REAL NOT NULL,
+            -- LEF MACRO CLASS, verbatim ('BLOCK', 'CORE', 'PAD', …).  The
+            -- authority on whether a cell is a hard macro or a standard
+            -- cell, which no other column can answer.  '' = not stated;
+            -- LEF's own default for an absent CLASS is CORE.
+            cls         TEXT NOT NULL DEFAULT '',
             bottom_up   INTEGER NOT NULL DEFAULT 0,
             layer_cap   INTEGER NOT NULL DEFAULT -1,
             layer_floor INTEGER NOT NULL DEFAULT -1
@@ -794,6 +799,16 @@ void BDB::_migrate() {
         // Pre-v23 designs have no ports, so the 0 default is correct.
         sqlite3_exec(_db,
             "ALTER TABLE component ADD COLUMN is_port INTEGER NOT NULL DEFAULT 0",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 24) {
+        // v23 -> v24: LEF MACRO CLASS on the cell row.  It is the only
+        // authoritative answer to "is this a hard macro or a standard
+        // cell", and `import_verilog` needs it to decide which instances of
+        // undefined modules belong in the routing hierarchy.  Pre-v24
+        // designs never recorded it, so '' (not stated) is correct.
+        sqlite3_exec(_db,
+            "ALTER TABLE cell ADD COLUMN cls TEXT NOT NULL DEFAULT ''",
             nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
@@ -1239,7 +1254,7 @@ static std::vector<std::string> split_ws(const std::string& s) {
 
 BDB::LefCells BDB::_lef_cells(const LefLibrary& lib) {
     LefCells sizes;
-    for (const auto& m : lib.macros) sizes[m.name] = {m.w, m.h};
+    for (const auto& m : lib.macros) sizes[m.name] = {m.w, m.h, m.cls};
     return sizes;
 }
 
@@ -1686,11 +1701,16 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
 
     // Cell footprints, in the same layout units as the component bboxes.
     {
-        Stmt sc(_db, "INSERT OR REPLACE INTO cell(name,width,height) VALUES(?,?,?)");
+        // CLASS rides along: it is the only authoritative answer to "hard
+        // macro or standard cell", and `import_verilog` needs it to decide
+        // which instances of undefined modules belong in the hierarchy.
+        Stmt sc(_db,
+            "INSERT OR REPLACE INTO cell(name,width,height,cls) VALUES(?,?,?,?)");
         for (auto& [cname, sz] : lef_sizes) {
             sqlite3_bind_text  (sc, 1, cname.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_double(sc, 2, um_to_lu(sz.w));
             sqlite3_bind_double(sc, 3, um_to_lu(sz.h));
+            sqlite3_bind_text  (sc, 4, sz.cls.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_step(sc); sqlite3_reset(sc);
         }
     }
@@ -1904,34 +1924,33 @@ std::vector<std::string> BDB::common_nets(const std::string& gid1,
 VerilogImportStats BDB::import_verilog(const std::string& v_path) {
     VerilogImportStats vstats;
 
-    // Instance names the PHYSICAL design already has.
+    // Cell types the technology says are HARD MACROS.
     //
     // An instance of a module the netlist does not define is a library cell,
     // and dropping those is what stops a million gates becoming a million
-    // component rows.  But the test for "library cell" was: the instance name
-    // is not backslash-escaped.  A hard macro instantiated with an ordinary
-    // name — `fakeram45_256x16 u_mem (...)`, which is most of them — read as
-    // a standard cell and was dropped, so the macro never joined the
-    // hierarchy.  In a DEF+Verilog merge that is worse than it sounds: the
-    // DEF's row survives but is never given a parent, so its CONTAINER ends
-    // up with no children, cannot be sized by `derive_container_bboxes`, and
-    // the routing interface loses a whole level.
+    // component rows.  But the test was "the instance name is not
+    // backslash-escaped", and a hard macro is normally instantiated with an
+    // ordinary name — `fakeram45_256x16 u_mem (...)` — so it read as a
+    // standard cell and never joined the hierarchy.  In a DEF+Verilog merge
+    // that is quieter and worse than it sounds: the DEF's row survives but
+    // is never given a parent, so its CONTAINER ends up with no children,
+    // cannot be sized by `derive_container_bboxes`, and the routing
+    // interface loses a whole level.
     //
-    // The DEF is the authority on what exists physically, so ask it.  A name
-    // the placement already contains is not a guess about cell classes; it is
-    // the design saying the instance is there.  Basenames because the netlist
-    // knows an instance by its local name and only elaboration knows the
-    // path — a superset test, deliberately: the cost of a false keep is one
-    // real netlist instance kept, and the cost of a false drop is a hole.
-    std::unordered_set<std::string> placed_basenames;
+    // The authority on "hard macro or standard cell" is the LEF, and it
+    // states the answer outright: `MACRO … CLASS BLOCK` vs `CLASS CORE`.
+    // Nothing else here can answer it — NOT the cell name (std cells are
+    // all-lowercase in some libraries, e.g. `sky130_fd_sc_hd__inv_1`), and
+    // NOT the placement, because a DEF for a gate-level design places every
+    // standard cell too (measured: 8 std cells elaborated into pins, nets
+    // and busterms, which is exactly the explosion the filter exists to
+    // prevent — Codex P1 on #654).
+    //
+    // An absent CLASS is treated as CORE, which is LEF's own default for it.
+    std::unordered_set<std::string> macro_cells;
     {
-        Stmt q(_db, "SELECT name FROM component");
-        while (sqlite3_step(q) == SQLITE_ROW) {
-            std::string n = col_txt(q, 0);
-            const size_t slash = n.rfind('/');
-            placed_basenames.insert(slash == std::string::npos
-                                    ? n : n.substr(slash + 1));
-        }
+        Stmt q(_db, "SELECT name, cls FROM cell WHERE cls <> '' AND cls <> 'CORE'");
+        while (sqlite3_step(q) == SQLITE_ROW) macro_cells.insert(col_txt(q, 0));
     }
 
     // ── Phase 1: collect defined module names (one fast pass) ────────────────
@@ -2130,31 +2149,32 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 // An instance of a module the netlist does not define: a
                 // library cell.  Keep it only on a reason, in this order.
                 //
-                // 1. The PHYSICAL DESIGN already has an instance by this
-                //    name.  Not a guess — the placement says it is there, so
-                //    dropping it would orphan a row that exists.  This is
-                //    what makes a hard macro survive a DEF+Verilog merge
-                //    however its instance name is spelled.
-                // 2. Otherwise the legacy heuristic, unchanged, for a
-                //    Verilog-ONLY import where there is no placement to ask:
-                //    a backslash-escaped instance name AND a cell name
-                //    containing a lowercase letter (`fakeram45_*` yes,
-                //    `DFFR_X1` no — Genus writes escaped names for both).
+                // 1. The TECHNOLOGY says the cell is a hard macro (a LEF
+                //    CLASS other than CORE).  Not a guess, and independent
+                //    of how the instance name is spelled — which is what
+                //    carries a macro through a DEF+Verilog merge.
+                // 2. Otherwise the legacy heuristic, unchanged, for an
+                //    import with no LEF to ask: a backslash-escaped instance
+                //    name AND a cell name containing a lowercase letter
+                //    (`fakeram45_*` yes, `DFFR_X1` no — Genus writes escaped
+                //    names for both).
                 //
                 // Anything else is skipped and COUNTED.  The count is the
-                // point: the rule above is still a heuristic on the
-                // Verilog-only path, and a silently missing instance is
-                // indistinguishable from a design that never had one.
-                bool keep = placed_basenames.count(inst_nm) > 0;
+                // point: rule 2 is still a heuristic, and a silently missing
+                // instance is indistinguishable from a design that never had
+                // one.
+                bool keep = macro_cells.count(cell) > 0;
                 if (!keep && esc_inst) {
                     for (char c : cell)
                         if (std::islower((unsigned char)c)) { keep = true; break; }
                 }
                 if (!keep) {
                     ++vstats.skipped_library_cells;
-                    if (skipped_seen.insert(cell).second &&
-                        vstats.skipped_cells.size() < 8)
-                        vstats.skipped_cells.push_back(cell);
+                    if (skipped_seen.insert(cell).second) {
+                        ++vstats.skipped_kinds;
+                        if (vstats.skipped_cells.size() < 8)
+                            vstats.skipped_cells.push_back(cell);
+                    }
                     return;
                 }
             }

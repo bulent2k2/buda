@@ -387,12 +387,18 @@ def cmd_import_verilog(session, cmd, args, cmd_line):
         # indistinguishable from a design that never had one — so the count
         # is always stated, and the cell KINDS with it, which is what tells
         # you whether a macro went missing.
+        # `skipped_kinds` is the TRUE distinct count; the list is capped at
+        # eight.  Comparing the list against itself could never detect the
+        # truncation — its entries are unique by construction — so a long
+        # library would have presented eight kinds as the whole story
+        # (Codex P2 on #654).
         shown = ", ".join(st.skipped_cells)
-        more = "" if len(st.skipped_cells) >= len(set(st.skipped_cells)) \
-            else " …"
+        if st.skipped_kinds > len(st.skipped_cells):
+            shown += f", … (+{st.skipped_kinds - len(st.skipped_cells)} more kinds)"
         buda_diag.emit("BUDA-1608",
-                       f"{st.skipped_library_cells} instance(s) of undefined "
-                       f"module(s) skipped as library cells: {shown}{more}")
+                       f"{st.skipped_library_cells} instance(s) of "
+                       f"{st.skipped_kinds} undefined module(s) skipped as "
+                       f"library cells: {shown}")
 
 
 def cmd_import_gds(session, cmd, args, cmd_line):
