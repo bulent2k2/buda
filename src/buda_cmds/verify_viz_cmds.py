@@ -315,3 +315,83 @@ COMMANDS = {
     "dump_topologies": cmd_dump_topologies,
     "visualize": cmd_visualize,
 }
+
+
+def cmd_emit_guides(session, cmd, args, cmd_line):
+    # Usage: emit_guides <file.json|.csv> [margin <n>] [tcl <file.tcl>]
+    #                                     [csv <file.csv>]
+    #
+    # Phase 4a: the corridor manifest — the PRIMARY artifact, and the one
+    # that carries positive intent ("route these nets here").  DEF cannot say
+    # that, which is why this leads and the DEF (4b) follows.
+    if not args:
+        print("Error: emit_guides requires an output path "
+              "(<file.json> or <file.csv>)")
+        return
+    path = args[0]
+    margin, tcl, csv_path = 0.0, None, None
+    i = 1
+    while i < len(args):
+        kw = args[i].lower()
+        if kw == "margin" and i + 1 < len(args):
+            try:
+                margin = float(args[i + 1])
+            except ValueError:
+                print(f"Error: emit_guides margin must be a number, "
+                      f"got '{args[i + 1]}'"); return
+            i += 2
+        elif kw == "tcl" and i + 1 < len(args):
+            tcl = args[i + 1]; i += 2
+        elif kw == "csv" and i + 1 < len(args):
+            csv_path = args[i + 1]; i += 2
+        else:
+            reject_unknown_options("emit_guides", [kw],
+                                   ("margin", "tcl", "csv"))
+            return
+    session._emit_guides(path, margin=margin, tcl=tcl, csv_path=csv_path)
+
+
+def cmd_export_def_blockages(session, cmd, args, cmd_line):
+    # Usage: export_def_blockages <file.def> [density <frac>] [margin <n>]
+    #
+    # Phase 4b: DEF with NEGATIVE semantics only.  Emitting the corridors as
+    # blockages would tell the router to avoid the plan; what goes in is the
+    # design's real keepouts (which is what a blockage means) plus, with
+    # `density`, `+ PARTIAL` limits over the corridors — "leave room here",
+    # the only part of the positive intent DEF can carry.
+    if not args:
+        print("Error: export_def_blockages requires an output path"); return
+    path = args[0]
+    density, margin = None, 0.0
+    i = 1
+    while i < len(args):
+        kw = args[i].lower()
+        if kw == "density" and i + 1 < len(args):
+            try:
+                density = float(args[i + 1])
+            except ValueError:
+                print(f"Error: export_def_blockages density must be a "
+                      f"number, got '{args[i + 1]}'"); return
+            if not 0.0 < density <= 1.0:
+                print("Error: export_def_blockages density must be in (0, 1]")
+                return
+            i += 2
+        elif kw == "margin" and i + 1 < len(args):
+            margin = float(args[i + 1]); i += 2
+        else:
+            reject_unknown_options("export_def_blockages", [kw],
+                                   ("density", "margin"))
+            return
+    from buda_session.advisory import build_manifest, write_def_blockages
+    m = build_manifest(session, margin)
+    n_hard, n_soft = write_def_blockages(session, m, path, max_density=density)
+    print(f"[Advisory] DEF blockages -> {path} "
+          f"({n_hard} keep-clear, {n_soft} density-limited)")
+    if density is None and m["bundles"]:
+        print("[Advisory] note: corridors were NOT emitted — a blockage tells "
+              "the router to stay out, which is the opposite of the plan.  "
+              "Pass `density <frac>` for `+ PARTIAL` limits over them.")
+
+
+COMMANDS["emit_guides"] = cmd_emit_guides
+COMMANDS["export_def_blockages"] = cmd_export_def_blockages

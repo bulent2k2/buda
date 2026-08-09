@@ -465,6 +465,40 @@ well under a minute, memory measured and documented).
 
 ## 5. Phase 4 — the advisory writer (≈ 2–3 weeks)
 
+> **LANDED** (2026-08).  `src/buda_session/advisory.py` + `emit_guides` /
+> `export_def_blockages`.
+>
+> **4a leads, and the ordering is the design.**  The manifest carries the
+> POSITIVE intent — "route these nets here" — as JSON/CSV plus a worked
+> `create_route_guide` Tcl script.  That is the thing BUDA actually computed
+> and the thing DEF has no way to say; a GDS rectangle carries no net
+> identity a router can adopt, which is what made the output a picture
+> rather than a constraint.
+>
+> **4b carries only what DEF can honestly say.**  The obvious move — one
+> `BLOCKAGES` rect per corridor — is exactly backwards: a blockage tells the
+> router to STAY OUT, so it would forbid the routing the plan is asking for.
+> What goes in is the design's real keepouts as hard blockages (that IS what
+> a blockage means) and, opt-in, `+ PARTIAL <maxDensity>` over the corridors
+> — "leave room here", the only part of the intent DEF can carry.
+>
+> Both halves of the plan's acceptance criterion are tested, and the second
+> is the load-bearing one: `test_corridors_are_not_emitted_as_blockages`
+> asserts that **no hard blockage overlaps any corridor**, so the §0
+> correction is a test rather than untested prose.  Manifest and DEF are both
+> byte-deterministic (the `gds_io` discipline), and the DEF round-trips
+> through the Phase 3 reader.
+>
+> **Not done, deliberately:** router-path emission (`NETS … + ROUTED` with
+> real vias) stays deferred per §0 — the data exists in
+> `net_segment`/`net_via`, so the deferral costs only the writer.
+>
+> **Acceptance vehicle:** the plan named `demo/ariane`, but Phase 3 showed
+> that pair is mismatched (its DEF's cells are absent from its LEF), so the
+> worked example runs on a synthetic design instead.  Fixing the demo data is
+> the owner's call.
+
+
 There is **no DEF writer today** — the only export is `export_gds`.
 This is the gap that makes the tool's output "a picture, not a
 constraint": GDS rectangles carry no net identity a P&R tool can adopt.

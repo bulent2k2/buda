@@ -37,7 +37,7 @@ from buda_cmds import COMMANDS
 from buda_session import (PersistMixin, HierMixin, NutsFlowMixin,
                           EditMixin, ReportsMixin, RipupMixin,
                           RRStateMixin, NegotiateMixin, RefineMixin,
-                          RRTrialsMixin, RRSweepsMixin)
+                          RRTrialsMixin, RRSweepsMixin, AdvisoryMixin)
 from buda_session.util import (_batched, _RR_DEFAULT_MAX_ITER,  # noqa: F401
                                _RR_MAX_CANDIDATES_PER_BUNDLE)   # compat re-exports
 
@@ -145,7 +145,7 @@ def _strip_inline_comment(line):
 class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
                   ReportsMixin, RipupMixin, RRStateMixin,
                   NegotiateMixin, RefineMixin, RRTrialsMixin,
-                  RRSweepsMixin):
+                  RRSweepsMixin, AdvisoryMixin):
     def _get_log_path(self, suffix):
         """Get the log path for a given suffix, ensuring the log directory exists.
 
