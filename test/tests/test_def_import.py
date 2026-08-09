@@ -120,6 +120,38 @@ def test_a_cell_with_no_lef_footprint_stops_the_run(tmp_path):
         _run(tmp_path, deff=_DEF.replace("- i0 m +", "- i0 nosuchcell +"))
 
 
+def test_a_missing_lef_file_is_an_error_like_a_missing_def(tmp_path):
+    """An ABSENT LEF used to be tolerated silently while the DEF has always
+    thrown — an asymmetry inherited from the old line scanners, not chosen.
+    It failed in two shapes: with a populated DEF, every cell drew the
+    missing-footprint error whose advice ("check that the LEF matches this
+    DEF") misdiagnoses a file that is not there at all; and under
+    `allow_missing_footprints`, a TYPO'D LEF PATH silently produced the
+    all-specks floorplan that waiver exists to make explicit-only — the
+    waiver-user accepted an incomplete library, not an unread one."""
+    import buda
+    db = buda.BDB(str(tmp_path / "a.bdb"))
+    (tmp_path / "d.def").write_text(_DEF)
+    with pytest.raises(RuntimeError, match="cannot open.*no_such"):
+        db.import_def_lef(str(tmp_path / "d.def"),
+                          str(tmp_path / "no_such.lef"))
+
+    # …and the waiver does NOT reach past it: the file must exist for the
+    # question "tolerate its gaps?" to arise at all.
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    err = None
+    with contextlib.redirect_stdout(io.StringIO()):
+        try:
+            s.do_command(f"open_bdb {tmp_path / 'b.bdb'}")
+            s.do_command(f"import_def_lef {tmp_path / 'd.def'} "
+                         f"{tmp_path / 'no_such.lef'} "
+                         f"allow_missing_footprints")
+        except RuntimeError as e:
+            err = e
+    assert err is not None and "no_such" in str(err)
+
+
 def test_the_stop_can_be_overridden_but_only_out_loud(tmp_path):
     _s, out = _run(tmp_path, extra="allow_missing_footprints",
                    deff=_DEF.replace("- i0 m +", "- i0 nosuchcell +"))
