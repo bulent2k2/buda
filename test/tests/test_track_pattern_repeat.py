@@ -22,6 +22,8 @@ what most of these tests assert.
 """
 import contextlib
 import io
+import re
+from pathlib import Path
 
 import buda_cli
 
@@ -185,3 +187,77 @@ def test_count_at_the_cap_is_accepted():
         f"def_track_pattern 4 0 (_ 1 1)x{_MAX_SLOT_REPEAT + 1}")
     assert code == 1
     assert "exceeds the maximum" in _err(out)
+
+
+# ── every reader of a pattern LINE must share the one parser ────────────────
+#
+# The compact syntax is understood by `slot_groups.expand_slot_groups` and
+# nothing else.  Any code that reads a `.buda` track-pattern line as TEXT and
+# walks it three tokens at a time reads `0.25)x7` as a width — which is not a
+# hypothetical: it broke 158 tests when the corpus was rewritten, and then
+# broke CI a second time when a fourth reader (`test_gds_export::_scaled_tracks`)
+# landed on main during that same review.  Nothing structural stops a fifth,
+# so this guard is the thing that catches it at authoring time instead.
+
+_SIGNATURE = re.compile(
+    r"""(?:startswith|match|search|fullmatch|re\.compile)\s*\(\s*"""
+    r"""r?["'][^"']*\b(?:def_track_pattern|add_grid_override)\b""")
+
+# Defines the expansion, so it cannot import it.
+_EXEMPT = {"slot_groups.py"}
+
+_REPO = Path(__file__).resolve().parents[2]
+_SCAN_ROOTS = ("src", "tools", "test", "debug")
+
+
+def _sources():
+    for root in _SCAN_ROOTS:
+        for path in sorted((_REPO / root).rglob("*.py")):
+            if "__pycache__" not in str(path):
+                yield path
+
+
+def test_the_signature_detects_the_historical_offenders():
+    """A grep-based guard is worthless if it silently stops matching, so pin it
+    against the exact code that shipped the bug — both idioms, verbatim."""
+    # tools/double_track_density.py, before the fix
+    assert _SIGNATURE.search(
+        r'PAT = re.compile(r"^(\s*def_track_pattern\s+(\S+)\s+(\S+)\s+)(.*?)(\s*)$")')
+    # test_gds_export.py / test_mirror_symmetric_tracks.py, before the fix
+    assert _SIGNATURE.search('        if line.startswith("def_track_pattern"):')
+    assert _SIGNATURE.search("    if not line.startswith('add_grid_override'):")
+    # …and does NOT fire on an assertion about output text, which is not parsing
+    assert not _SIGNATURE.search(
+        '    assert "def_layer" in sc and "def_track_pattern" in sc')
+
+
+def test_every_pattern_line_reader_uses_the_shared_expansion():
+    """File-level, and deliberately so: it asks whether a file that matches a
+    pattern line knows about the expansion AT ALL.  That is exactly the shape
+    of all four historical offenders — each was written with no awareness the
+    syntax existed.  It would NOT catch a file that expands in one place and
+    walks triples naively in another; proving that statically is a different
+    problem, and the cheap check covers the failure mode that actually
+    happened, twice."""
+    offenders = [
+        p.relative_to(_REPO) for p in _sources()
+        if p.name not in _EXEMPT
+        and _SIGNATURE.search(t := p.read_text())
+        and "expand_slot_groups" not in t
+    ]
+    assert not offenders, (
+        "these files match a `.buda` track-pattern line and parse it "
+        "themselves, but never call expand_slot_groups — they will read "
+        "`0.25)x7` as a width:\n  "
+        + "\n  ".join(str(p) for p in offenders)
+        + "\n\nFix: `from slot_groups import expand_slot_groups` and expand "
+          "the slot tokens before walking them in threes.")
+
+
+def test_the_guard_would_catch_a_new_offender(tmp_path):
+    """The scan is only meaningful if a fresh naive reader trips it."""
+    bad = tmp_path / "new_reader.py"
+    bad.write_text('if line.startswith("def_track_pattern"):\n'
+                   '    tok = line.split()[3:]\n')
+    txt = bad.read_text()
+    assert _SIGNATURE.search(txt) and "expand_slot_groups" not in txt
