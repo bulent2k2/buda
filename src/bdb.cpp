@@ -2032,7 +2032,15 @@ void BDB::import_verilog(const std::string& v_path) {
 
         auto parse_port_dirs = [&](const std::string& text) {
             if (cur_mod.empty()) return;
-            static const std::regex decl_re(R"(\b(input|output|inout)\b([^;)]*))");
+            // Each clause runs to the next DIRECTION keyword, not to the next
+            // `;`/`)`.  An ANSI header — `module top (input a, output b);` —
+            // is one statement, so stopping only at the terminator let the
+            // first `input` swallow `a, output b` and every port in the
+            // module was recorded INPUT (Codex P2 on #650).  Pre-existing,
+            // and it reaches `cell_pin` directions for any ANSI-header
+            // netlist, so an OUTPUT pin was indexed as an INPUT.
+            static const std::regex decl_re(
+                R"(\b(input|output|inout)\b((?:(?!\b(?:input|output|inout)\b)[^;)])*))");
             auto begin = std::sregex_iterator(text.begin(), text.end(), decl_re);
             auto end = std::sregex_iterator();
             for (auto it = begin; it != end; ++it) {
@@ -2180,6 +2188,43 @@ void BDB::import_verilog(const std::string& v_path) {
     // ── Phase 4: elaborate hierarchy → BDB ───────────────────────────────────
     // Preserve component placement from any prior import_def_lef call.
     // Clear only net/pin tables.
+    // The die's own ports, saved before the wipe and restored after
+    // elaboration.
+    //
+    // Elaboration walks INSTANCES, and a top-level port is not one, so the
+    // boundary components `import_def_lef` synthesizes from DEF `PINS`
+    // (Phase 3d) would come out of the rebuild with no pin rows at all —
+    // components that look fine while a net reaching the die edge is
+    // silently endpoint-less and the bundler drops it as "not placed in any
+    // bundle".  That is exactly the silent open those components exist to
+    // prevent, reappearing in the DEF+Verilog merge they were built for.
+    //
+    // Saved rather than RECONSTRUCTED: the DEF stated each port's position
+    // and direction, and reproducing them from the component bbox gets both
+    // wrong.  The bbox is the union of the PLACED point and every shape, so
+    // its midpoint is not the pin for an asymmetric or multi-shape port and
+    // can land in empty space; and the direction would come from
+    // `port_dirs`, which is the netlist's word for something the DEF already
+    // said (Codex P2 x2 on #650).  Nets are keyed by NAME because their ids
+    // do not survive the rebuild.
+    struct SavedPortPin {
+        int comp_id; std::string net, pin, dir; double px, py;
+    };
+    std::vector<SavedPortPin> saved_port_pins;
+    {
+        Stmt q(_db,
+            "SELECT p.comp_id, n.name, p.pin_name, p.dir, p.px, p.py"
+            "  FROM pin p JOIN net n ON n.id = p.net_id"
+            "             JOIN component c ON c.id = p.comp_id"
+            " WHERE c.is_port = 1"
+            " ORDER BY p.comp_id, p.pin_name");   // deterministic restore
+        while (sqlite3_step(q) == SQLITE_ROW)
+            saved_port_pins.push_back({
+                sqlite3_column_int(q, 0), col_txt(q, 1), col_txt(q, 2),
+                col_txt(q, 3), sqlite3_column_double(q, 4),
+                sqlite3_column_double(q, 5)});
+    }
+
     _exec("DELETE FROM pin; DELETE FROM net_props; DELETE FROM net;");
 
     // UPSERT: keep existing x1/y1/x2/y2 (from DEF), update hierarchy fields
@@ -2189,22 +2234,11 @@ void BDB::import_verilog(const std::string& v_path) {
         ON CONFLICT(name) DO UPDATE SET
           cell=excluded.cell, parent_id=excluded.parent_id,
           depth=excluded.depth,
-          -- A component the DEF PLACED is a physical instance with a LEF
-          -- footprint, and the netlist may say where it sits in the tree
-          -- without redefining what it IS.  Letting it through demoted every
-          -- such leaf to a container whenever the netlist happened to
-          -- declare its cell as an empty module — which is exactly how a
-          -- netlist states a hard macro's port directions while leaving the
-          -- geometry to the LEF.  The routing model then treats the
-          -- footprint as transparent to low layers (it is not: it is a solid
-          -- cell) and busterm derivation walks into a cell with no children.
-          --
-          -- Scoped to placed rows on purpose.  A Verilog-ONLY import is
-          -- unaffected, keeping the landed rule that a module defined in the
-          -- netlist is a hierarchy level even when its body is empty
-          -- (features/bdb_import.feature).
-          is_leaf=CASE WHEN component.x1 >= 0 THEN component.is_leaf
-                       ELSE excluded.is_leaf END
+          -- `?6` is the leaf verdict for a row the DEF already PLACED; the
+          -- `excluded` value is the verdict for a netlist-only row.  See
+          -- the table above `leaf_placed` at the call site for why the two
+          -- differ, and why "was it placed" alone is NOT the discriminator.
+          is_leaf=CASE WHEN component.x1 >= 0 THEN ?6 ELSE excluded.is_leaf END
     )");
     Stmt s_net (_db, "INSERT OR IGNORE INTO net(name) VALUES(?)");
     Stmt s_pin (_db,
@@ -2236,13 +2270,15 @@ void BDB::import_verilog(const std::string& v_path) {
     std::unordered_map<std::string,int> comp_ids, net_ids;
 
     auto upsert_comp = [&](const std::string& path, const std::string& cell,
-                           int par_id, int depth, bool is_leaf) -> int {
+                           int par_id, int depth, bool is_leaf,
+                           bool is_leaf_if_placed) -> int {
         sqlite3_bind_text(s_comp,1,path.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_bind_text(s_comp,2,cell.c_str(),-1,SQLITE_TRANSIENT);
         if (par_id >= 0) sqlite3_bind_int(s_comp,3,par_id);
         else             sqlite3_bind_null(s_comp,3);
         sqlite3_bind_int(s_comp,4,depth);
         sqlite3_bind_int(s_comp,5,is_leaf ? 1 : 0);
+        sqlite3_bind_int(s_comp,6,is_leaf_if_placed ? 1 : 0);
         sqlite3_step(s_comp); sqlite3_reset(s_comp);
         // Always SELECT — last_insert_rowid is unreliable after UPSERT DO UPDATE:
         // it returns the last INSERT rowid from any prior transaction, not the
@@ -2281,11 +2317,39 @@ void BDB::import_verilog(const std::string& v_path) {
         if (mit == mod_lib.end()) return;
 
         for (auto& vi : mit->second.insts) {
-            bool is_leaf = !defined_mods.count(vi.cell);
+            // Two verdicts, because a netlist-only row and a DEF-PLACED row
+            // are asking different questions of the same module:
+            //
+            //   module          netlist-only     DEF-placed
+            //   ------------------------------------------------
+            //   undefined       leaf             leaf
+            //   has instances   container        container
+            //   defined, EMPTY  container [1]    leaf      [2]
+            //
+            // [1] the landed rule (features/bdb_import.feature): declaring a
+            //     module makes it a hierarchy level even with an empty body.
+            // [2] an empty body is also how a netlist gives a hard macro its
+            //     port directions while leaving geometry to the LEF.  A row
+            //     the DEF placed from a LEF FOOTPRINT is that macro, and
+            //     calling it a container stops its footprint blocking low
+            //     layers and sends busterm derivation into a cell with no
+            //     children.
+            //
+            // Note what is NOT the discriminator: placement alone.  A DEF
+            // may place hierarchy envelopes as well as their descendants
+            // (features/bdb_combined.feature does exactly that for ai/bi/ci),
+            // and those have instances — so they stay containers on both
+            // sides of the table (Codex P1 on #650).
+            auto sub = mod_lib.find(vi.cell);
+            const bool defined = (sub != mod_lib.end());
+            const bool empty_body = defined && sub->second.insts.empty();
+            bool is_leaf = !defined;
+            bool is_leaf_if_placed = !defined || empty_body;
             // Instance path uses unescaped name (matches DEF convention)
             std::string inst_path = path.empty() ? vi.name : path + "/" + vi.name;
 
-            int cid = upsert_comp(inst_path, vi.cell, par_id, depth, is_leaf);
+            int cid = upsert_comp(inst_path, vi.cell, par_id, depth, is_leaf,
+                                  is_leaf_if_placed);
 
             // Build child context and create pin records
             Ctx child_ctx;
@@ -2316,58 +2380,20 @@ void BDB::import_verilog(const std::string& v_path) {
 
     elaborate(top_mod, "", -1, 0, {});
 
-    // ── the die's own ports ──────────────────────────────────────────────
-    //
-    // Elaboration walks INSTANCES, and a top-level port is not one, so the
-    // boundary components `import_def_lef` synthesized from DEF `PINS`
-    // (Phase 3d) end up with no pin rows at all — this function cleared the
-    // pin table on entry to rebuild it from the netlist.  The components
-    // survive and look fine; only their connectivity is gone, so a net
-    // reaching the die edge is silently endpoint-less and the bundler
-    // reports it as "not placed in any bundle".  That is exactly the
-    // failure Phase 3d exists to prevent, reappearing in the DEF+Verilog
-    // merge which is the flow it was built for.
-    //
-    // The top module's ports ARE the die's ports, and their nets are named
-    // after them at root scope, so the link is recoverable here rather than
-    // needing the DEF's PINS section to be carried along.
-    auto top_it = mod_lib.find(top_mod);
-    if (top_it != mod_lib.end() && !top_it->second.port_dirs.empty()) {
-        Stmt s_port(_db,
-            "SELECT id,name,x1,y1,x2,y2 FROM component"
-            " WHERE is_port=1 AND (name=? OR name LIKE ?)");
-        // Deterministic order: the map is unordered, and the pin table's
-        // insertion order is observable in a *.bdb.sql dump.
-        std::vector<std::pair<std::string,std::string>> ports(
-            top_it->second.port_dirs.begin(), top_it->second.port_dirs.end());
-        std::sort(ports.begin(), ports.end());
-        for (const auto& [port, dir] : ports) {
-            const std::string exact = "PIN/" + port;
-            const std::string uniq  = exact + "#%";   // de-collision suffix
-            sqlite3_bind_text(s_port, 1, exact.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text(s_port, 2, uniq.c_str(),  -1, SQLITE_TRANSIENT);
-            while (sqlite3_step(s_port) == SQLITE_ROW) {
-                const int cid = sqlite3_column_int(s_port, 0);
-                const double px = 0.5 * (sqlite3_column_double(s_port, 2) +
-                                         sqlite3_column_double(s_port, 4));
-                const double py = 0.5 * (sqlite3_column_double(s_port, 3) +
-                                         sqlite3_column_double(s_port, 5));
-                const int nid = get_net(port);
-                if (nid <= 0) continue;
-                sqlite3_bind_int   (s_pin, 1, nid);
-                sqlite3_bind_int   (s_pin, 2, cid);
-                sqlite3_bind_text  (s_pin, 3, port.c_str(), -1, SQLITE_TRANSIENT);
-                // Same convention as the DEF path: a port's direction is
-                // declared from OUTSIDE, and this pin sits on the component
-                // standing in for outside.
-                const std::string idir = port_dir_inward(dir);
-                sqlite3_bind_text  (s_pin, 4, idir.c_str(), -1, SQLITE_TRANSIENT);
-                sqlite3_bind_double(s_pin, 5, px);
-                sqlite3_bind_double(s_pin, 6, py);
-                sqlite3_step(s_pin); sqlite3_reset(s_pin);
-            }
-            sqlite3_reset(s_port);
-        }
+    // ── the die's own ports, restored ────────────────────────────────────
+    // Exactly the rows the DEF wrote — position and direction included.
+    // See the save site above the pin-table wipe for why they are carried
+    // rather than reconstructed.
+    for (const auto& sp : saved_port_pins) {
+        const int nid = get_net(sp.net);
+        if (nid <= 0) continue;
+        sqlite3_bind_int   (s_pin, 1, nid);
+        sqlite3_bind_int   (s_pin, 2, sp.comp_id);
+        sqlite3_bind_text  (s_pin, 3, sp.pin.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text  (s_pin, 4, sp.dir.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_double(s_pin, 5, sp.px);
+        sqlite3_bind_double(s_pin, 6, sp.py);
+        sqlite3_step(s_pin); sqlite3_reset(s_pin);
     }
     _exec("COMMIT");
 }

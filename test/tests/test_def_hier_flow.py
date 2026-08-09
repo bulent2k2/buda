@@ -97,6 +97,31 @@ def test_a_die_port_keeps_its_connectivity_through_the_merge():
     assert pins[0].pin_name == "din0"
 
 
+def test_a_die_ports_pin_survives_the_merge_unchanged():
+    """Saved and restored, not reconstructed.
+
+    Rebuilding the pin from the boundary component's bbox midpoint looked
+    equivalent on this design because its port shapes are symmetric about
+    the `PLACED` point.  In general the bbox is the union of that point and
+    every shape, so for an asymmetric or multi-shape port the midpoint is
+    not the pin and can land in empty space — and the direction would come
+    from the netlist for something the DEF already stated (Codex P2 on
+    #650)."""
+    s, _ = _session(_IMPORT[:-1])          # DEF+LEF only
+    ids = {c.name: c.id for c in s.bdb.all_components()}
+    before = {n: [(p.pin_name, p.dir, p.px, p.py)
+                  for p in s.bdb.pins_by_comp(ids[n])]
+              for n in ("PIN/din0", "PIN/dout3")}
+    assert all(before.values()), before
+
+    s.do_command(_IMPORT[-1])              # …then the netlist
+    ids = {c.name: c.id for c in s.bdb.all_components()}
+    after = {n: [(p.pin_name, p.dir, p.px, p.py)
+                 for p in s.bdb.pins_by_comp(ids[n])]
+             for n in before}
+    assert after == before, (before, after)
+
+
 def test_a_ports_direction_is_read_from_the_environments_side():
     """A boundary component stands in for the world OUTSIDE the die, and a
     port declared INPUT is one the outside world DRIVES.  Stored unflipped,
