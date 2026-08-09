@@ -7,8 +7,15 @@ hierarchy-aware routing pipeline on them, and write the advisory artifacts
 back out.
 
 ```bash
-bin/buda flow/def/chip            # from anywhere — paths are script-relative
+bin/buda flow/def/chip            # from the repo root, or…
+buda ~/work/buda/flow/def/chip    # …any script path from anywhere (bin/ on PATH)
 ```
+
+Either way the flow reads `flow/def/` and writes `flow/def/out/`: every
+relative path **inside the script** resolves against the script's own
+directory, so where you start the run stops mattering once the script is
+found. (Locating the script itself is the shell's job — that argument is
+still relative to your CWD, like any command-line path.)
 
 Every other hier vehicle (`flow/hbundles/*.buda`) *declares* its design in
 the script — `add_cell`, `add_inst_to_cell`, `add_bus`. This one declares
@@ -85,11 +92,9 @@ children, and it is a separate command rather than a step inside
 `import_verilog` because it *invents* geometry the input never stated.
 
 **Relative paths all resolve against the script's directory.** Imports,
-exports, `open_bdb`, `save_bdb` and `source` share one rule, so the flow
-reads from `flow/def/` and writes to `flow/def/out/` no matter where it is
-run from. (It used to be two rules — imports/exports against the CWD — and
-this script ran only from the repo root; see
-`docs/internal/opens_interchange.md` item 4, resolved.)
+exports, `open_bdb`, `save_bdb` and `source` share one rule. (It used to be
+two — imports/exports against the CWD — and this script ran only from the
+repo root; see `docs/internal/opens_interchange.md` item 4, resolved.)
 
 ## Exports
 
