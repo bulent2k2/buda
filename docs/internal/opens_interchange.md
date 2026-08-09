@@ -159,6 +159,14 @@ together, at which point the script-rooted `save_bdb out/…` lines up on the
 same `flow/def/out/`. The fork is real, and which config a copy is in is
 invisible on the page.
 
+On macOS the windowed `bin/buda flow/def/chip` used to fail here for a second
+reason: the launcher relaunches through a per-cell `.app`, and `open` starts
+it from `/`, so the CWD-rooted imports resolved against `/` even when the
+shell was at the repo root (the `--no-viz` path skipped the relaunch, so only
+the windowed form broke). Fixed — `bin/buda` now bakes the launch CWD into
+the generated launcher (`cd "$PWD"`), so the `.app` run matches a direct run.
+Any future flow with CWD-relative paths inherits that; do not drop the `cd`.
+
 **Companion (FIXED) — the output directory was not created.** `emit_guides` /
 `export_def_blockages` / `export_gds` used to open their destination without a
 `mkdir -p`, and `flow/def/out/` is git-ignored (so absent on a fresh
