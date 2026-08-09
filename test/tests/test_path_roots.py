@@ -12,17 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Which root a script-declared relative path resolves against.
+"""ONE root for every script-declared relative path: the script's directory.
 
-This file PINS the split documented in docs/internal/opens_interchange.md
-item 4 — the state before the unification, so the flip is a visible contract
-change in this file's history rather than an undocumented drift:
+The previous revision of this file pinned the split this replaces
+(docs/internal/opens_interchange.md item 4): `open_bdb`/`save_bdb`/`source`
+resolved against the script's directory while the import/export commands
+resolved against the CWD — so two same-looking paths on adjacent lines meant
+different files, and `flow/def/chip.buda` ran from exactly one directory.
 
-  * `open_bdb` / `save_bdb` / `source` resolve against the SCRIPT's directory;
-  * the import/export commands resolve against the CWD.
-
-Two same-looking relative paths on adjacent lines mean different files, and
-`flow/def/chip.buda` runs from exactly one directory because of it.
+Now every path-taking command goes through `resolve_script_path`: relative
+paths resolve against the enclosing script's directory (the innermost
+`source`d file), and a session with no script — interactive, the Tcl front
+end, the Python API — keeps the CWD, since there is no script to be relative
+to.  A `.buda` script is a location-independent artifact, like any other
+language's include.
 """
 import contextlib
 import io
@@ -68,41 +71,11 @@ def _setup(tmp_path):
     return sdir, cwd
 
 
-# ── the script-rooted family ────────────────────────────────────────────────
+# ── reads resolve against the script's directory ───────────────────────────
 
-def test_open_bdb_resolves_against_the_script_directory(tmp_path, monkeypatch):
-    sdir, cwd = _setup(tmp_path)
-    script = sdir / "t.buda"
-    script.write_text("open_bdb sub.bdb\n")
-    _run(script, cwd, monkeypatch)
-    assert (sdir / "sub.bdb").exists()
-    assert not (cwd / "sub.bdb").exists()
-
-
-def test_save_bdb_snapshot_resolves_against_the_script_directory(
+def test_import_lef_tech_resolves_against_the_script_directory(
         tmp_path, monkeypatch):
-    sdir, cwd = _setup(tmp_path)
-    script = sdir / "t.buda"
-    script.write_text("open_bdb :memory:\nsave_bdb snap/s.bdb\n")
-    _run(script, cwd, monkeypatch)
-    assert (sdir / "snap" / "s.bdb").exists()
-    assert not (cwd / "snap").exists()
-
-
-def test_source_resolves_against_the_including_script(tmp_path, monkeypatch):
-    sdir, cwd = _setup(tmp_path)
-    (sdir / "inner.buda").write_text("def_layer 4 M4 H 50\n")
-    (cwd / "inner.buda").write_text("def_layer 5 M5 V 50\n")
-    script = sdir / "t.buda"
-    script.write_text("source inner.buda\n")
-    s, _, _ = _run(script, cwd, monkeypatch)
-    assert s.layers.has_layer(4)         # the script-side file was included
-    assert not s.layers.has_layer(5)
-
-
-# ── the CWD-rooted family (the OTHER root, same-looking paths) ─────────────
-
-def test_import_lef_tech_resolves_against_the_cwd(tmp_path, monkeypatch):
+    """Two candidate files, one per root — the script-side one must win."""
     sdir, cwd = _setup(tmp_path)
     (sdir / "tech.lef").write_text(_LEF.format(name="M1",
                                                direction="HORIZONTAL"))
@@ -111,43 +84,139 @@ def test_import_lef_tech_resolves_against_the_cwd(tmp_path, monkeypatch):
     script = sdir / "t.buda"
     script.write_text("import_lef_tech tech.lef\n")
     s, _, _ = _run(script, cwd, monkeypatch)
-    assert "M9" in s._layer_name_map     # the CWD-side file was read
-    assert "M1" not in s._layer_name_map
+    assert "M1" in s._layer_name_map
+    assert "M9" not in s._layer_name_map
 
 
-def test_import_verilog_resolves_against_the_cwd(tmp_path, monkeypatch):
+def test_import_verilog_agrees_with_open_bdb_one_line_up(
+        tmp_path, monkeypatch):
+    """THE sharp edge item 4 documented: open_bdb and import_verilog are
+    adjacent lines and used to resolve against different roots.  Now one
+    file placed next to the script satisfies both."""
     sdir, cwd = _setup(tmp_path)
-    (cwd / "top.v").write_text(_V)       # exists ONLY under the CWD
+    (sdir / "top.v").write_text(_V)      # next to the script ONLY
+    script = sdir / "t.buda"
+    script.write_text("open_bdb sub.bdb\nimport_verilog top.v\n")
+    _run(script, cwd, monkeypatch)       # no error: both found it
+    assert (sdir / "sub.bdb").exists()
+
+
+def test_a_cwd_only_file_fails_loud_and_names_both_roots(
+        tmp_path, monkeypatch):
+    """The migration aid (BUDA-1609): a script written against the old CWD
+    rule gets a diagnosis naming both roots, not a bare file-not-found for a
+    file its author can see exists.  The note never changes the resolution —
+    the read still fails."""
+    sdir, cwd = _setup(tmp_path)
+    (cwd / "top.v").write_text(_V)       # under the CWD ONLY (the old root)
     script = sdir / "t.buda"
     script.write_text("open_bdb :memory:\nimport_verilog top.v\n")
-    _run(script, cwd, monkeypatch)       # no error: the CWD copy was found
-
-    # …and the same script fails when the file sits only next to the script,
-    # which is the sharp edge: open_bdb one line up DOES look there.
-    (cwd / "top.v").unlink()
-    (sdir / "top.v").write_text(_V)
-    _run(script, cwd, monkeypatch, expect_error=True)
+    _s, out, err = _run(script, cwd, monkeypatch, expect_error=True)
+    assert "BUDA-1609" in out
+    assert str(sdir) in out and str(cwd) in out
+    assert err is not None               # deterministic rule, then the failure
 
 
-def test_emit_guides_writes_under_the_cwd(tmp_path, monkeypatch):
+def test_import_def_lef_resolves_both_paths_against_the_script(
+        tmp_path, monkeypatch):
+    """BOTH arguments go through the resolver, proven separately: a CWD-only
+    LEF draws the note naming it (a missing LEF file is tolerated by the
+    importer, so no error), and a CWD-only DEF draws the note AND the
+    failure."""
+    sdir, cwd = _setup(tmp_path)
+    (sdir / "d.def").write_text("DESIGN top ;\nEND DESIGN\n")
+    (cwd / "t.lef").write_text(_LEF.format(name="M1",
+                                           direction="HORIZONTAL"))
+    script = sdir / "t.buda"
+    script.write_text("open_bdb :memory:\nimport_def_lef d.def t.lef\n")
+    _s, out, _err = _run(script, cwd, monkeypatch)
+    assert "BUDA-1609" in out and "'t.lef'" in out
+
+    (cwd / "d.def").write_text("DESIGN top ;\nEND DESIGN\n")
+    (sdir / "d.def").unlink()
+    _s, out, err = _run(script, cwd, monkeypatch, expect_error=True)
+    assert "BUDA-1609" in out and "'d.def'" in out
+    assert err is not None
+
+
+# ── writes land next to the script ─────────────────────────────────────────
+
+def test_emit_guides_writes_next_to_the_script(tmp_path, monkeypatch):
     sdir, cwd = _setup(tmp_path)
     script = sdir / "t.buda"
-    script.write_text("emit_guides out/g.json\n")
+    script.write_text("emit_guides out/g.json csv out/g.csv tcl out/g.tcl\n")
     _run(script, cwd, monkeypatch)
-    assert (cwd / "out" / "g.json").exists()
-    assert not (sdir / "out").exists()
+    for name in ("g.json", "g.csv", "g.tcl"):
+        assert (sdir / "out" / name).exists()
+    assert not (cwd / "out").exists()
 
 
-def test_export_def_blockages_writes_under_the_cwd(tmp_path, monkeypatch):
+def test_export_def_blockages_writes_next_to_the_script(tmp_path, monkeypatch):
     sdir, cwd = _setup(tmp_path)
     script = sdir / "t.buda"
     script.write_text("export_def_blockages out/a.def\n")
     _run(script, cwd, monkeypatch)
-    assert (cwd / "out" / "a.def").exists()
-    assert not (sdir / "out").exists()
+    assert (sdir / "out" / "a.def").exists()
+    assert not (cwd / "out").exists()
 
 
-# ── shared by both eras: absolute paths and script-less sessions ───────────
+def test_all_output_families_agree_on_one_directory(tmp_path, monkeypatch):
+    """What item 4 could not have: script-rooted save_bdb and the exports
+    landing in the SAME out/ regardless of where the run started."""
+    sdir, cwd = _setup(tmp_path)
+    script = sdir / "t.buda"
+    script.write_text("open_bdb :memory:\n"
+                      "emit_guides out/g.json\n"
+                      "save_bdb out/s.bdb\n")
+    _run(script, cwd, monkeypatch)
+    assert (sdir / "out" / "g.json").exists()
+    assert (sdir / "out" / "s.bdb").exists()
+    assert not (cwd / "out").exists()
+
+
+# ── the rest of the rule: unchanged families, nesting, fallbacks ───────────
+
+def test_open_bdb_still_resolves_against_the_script_directory(
+        tmp_path, monkeypatch):
+    sdir, cwd = _setup(tmp_path)
+    script = sdir / "t.buda"
+    script.write_text("open_bdb sub.bdb\n")
+    _run(script, cwd, monkeypatch)
+    assert (sdir / "sub.bdb").exists()
+    assert not (cwd / "sub.bdb").exists()
+
+
+def test_source_still_resolves_against_the_including_script(
+        tmp_path, monkeypatch):
+    sdir, cwd = _setup(tmp_path)
+    (sdir / "inner.buda").write_text("def_layer 4 M4 H 50\n")
+    (cwd / "inner.buda").write_text("def_layer 5 M5 V 50\n")
+    script = sdir / "t.buda"
+    script.write_text("source inner.buda\n")
+    s, _, _ = _run(script, cwd, monkeypatch)
+    assert s.layers.has_layer(4)
+    assert not s.layers.has_layer(5)
+
+
+def test_nested_source_resolves_against_the_innermost_script(
+        tmp_path, monkeypatch):
+    """The base is the INNERMOST script — the rule `source` has always used,
+    now carried by every command: a sourced library resolves its own paths
+    relative to itself, wherever it is included from."""
+    sdir, cwd = _setup(tmp_path)
+    sub = sdir / "lib"
+    sub.mkdir()
+    (sub / "tech.lef").write_text(_LEF.format(name="M1",
+                                              direction="HORIZONTAL"))
+    (sdir / "tech.lef").write_text(_LEF.format(name="M9",
+                                               direction="VERTICAL"))
+    (sub / "inner.buda").write_text("import_lef_tech tech.lef\n")
+    script = sdir / "t.buda"
+    script.write_text("source lib/inner.buda\n")
+    s, _, _ = _run(script, cwd, monkeypatch)
+    assert "M1" in s._layer_name_map     # lib/'s own tech.lef, not the outer one
+    assert "M9" not in s._layer_name_map
+
 
 def test_absolute_paths_are_never_rewritten(tmp_path, monkeypatch):
     sdir, cwd = _setup(tmp_path)
@@ -160,13 +229,18 @@ def test_absolute_paths_are_never_rewritten(tmp_path, monkeypatch):
 
 def test_no_script_means_cwd_for_everyone(tmp_path, monkeypatch):
     """Interactive / Tcl-front-end / Python-API commands have no enclosing
-    script, so every family falls back to the CWD."""
-    _sdir, cwd = _setup(tmp_path)
+    script, so every family falls back to the CWD — there is no script to be
+    relative to."""
+    sdir, cwd = _setup(tmp_path)
+    (cwd / "tech.lef").write_text(_LEF.format(name="M9",
+                                              direction="VERTICAL"))
     monkeypatch.chdir(cwd)
     s = buda_cli.BudaSession()
     s.no_viz = True
     with contextlib.redirect_stdout(io.StringIO()):
         s.do_command("open_bdb direct.bdb")
+        s.do_command("import_lef_tech tech.lef")
         s.do_command("emit_guides out/g.json")
     assert (cwd / "direct.bdb").exists()
+    assert "M9" in s._layer_name_map
     assert (cwd / "out" / "g.json").exists()

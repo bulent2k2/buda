@@ -22,6 +22,8 @@ full registry that buda_cli.do_command dispatches through.
 """
 import os
 
+from buda_session.util import resolve_script_path
+
 from ._options import reject_unknown_options
 # NOTE: `buda_viz` is imported LAZILY inside the two visualize handlers below,
 # not at module load.  Importing it pulls in matplotlib/numpy, and this module
@@ -348,7 +350,9 @@ def cmd_emit_guides(session, cmd, args, cmd_line):
             reject_unknown_options("emit_guides", [kw],
                                    ("margin", "tcl", "csv"))
             return
-    session._emit_guides(path, margin=margin, tcl=tcl, csv_path=csv_path)
+    session._emit_guides(resolve_script_path(session, path), margin=margin,
+                         tcl=resolve_script_path(session, tcl),
+                         csv_path=resolve_script_path(session, csv_path))
 
 
 def cmd_export_def_blockages(session, cmd, args, cmd_line):
@@ -387,6 +391,7 @@ def cmd_export_def_blockages(session, cmd, args, cmd_line):
                                    ("density", "margin"))
             return
     from buda_session.advisory import build_manifest, write_def_blockages
+    path = resolve_script_path(session, path)
     m = build_manifest(session, margin)
     n_hard, n_soft = write_def_blockages(session, m, path, max_density=density)
     print(f"[Advisory] DEF blockages -> {path} "

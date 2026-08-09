@@ -26,7 +26,7 @@ import sys
 
 import buda_diag
 from ._options import reject_unknown_options
-from buda_session.util import ensure_parent_dir
+from buda_session.util import ensure_parent_dir, resolve_script_path
 
 
 def cmd_bdb_net_mode(session, cmd, args, cmd_line):
@@ -67,7 +67,7 @@ def cmd_def_gds_layer(session, cmd, args, cmd_line):
     entries = []
     if args[0] == "file":
         try:
-            with open(args[1]) as f:
+            with open(resolve_script_path(session, args[1], is_read=True)) as f:
                 for ln, line in enumerate(f, 1):
                     line = line.split("#", 1)[0].strip()
                     if not line:
@@ -118,11 +118,8 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # silently arming write-back on a fixture from a read-looking line.
     writeback = len(args) >= 2 and args[1] == "writeback"
     bdb_path = args[0]
-    if (session._script_stack
-            and not os.path.isabs(bdb_path)
-            and bdb_path != ':memory:'):
-        parent_dir = os.path.dirname(session._script_stack[-1])
-        bdb_path = os.path.normpath(os.path.join(parent_dir, bdb_path))
+    if bdb_path != ':memory:':
+        bdb_path = resolve_script_path(session, bdb_path)
     # A serialized text BDB (e.g. mix.bdb.sql) is materialized into a
     # throwaway temp binary so the pipeline never dirties the checked-in
     # text fixture. With `writeback`, changes are dumped back to the .sql on
@@ -196,7 +193,9 @@ def cmd_import_def_lef(session, cmd, args, cmd_line):
     reject_unknown_options("import_def_lef", args[2:],
                            ("no_tracks", "no_blockages",
                             "allow_missing_footprints"))
-    st = session.bdb.import_def_lef(args[0], args[1])
+    def_path = resolve_script_path(session, args[0], is_read=True)
+    lef_path = resolve_script_path(session, args[1], is_read=True)
+    st = session.bdb.import_def_lef(def_path, lef_path)
 
     def _line(what, got, declared):
         if declared is None or declared < 0:
@@ -378,7 +377,8 @@ def cmd_import_verilog(session, cmd, args, cmd_line):
         print("Error: import_verilog requires a file path"); return
     if session.bdb is None:
         print("Error: open_bdb first"); return
-    st = session.bdb.import_verilog(args[0])
+    st = session.bdb.import_verilog(
+        resolve_script_path(session, args[0], is_read=True))
     print(f"[Verilog] top '{st.top_module}': {st.elaborated} instance(s) "
           f"elaborated")
     if st.skipped_library_cells:
@@ -431,8 +431,9 @@ def cmd_import_gds(session, cmd, args, cmd_line):
     label_layers = list(session._gds_label_layers)
     if len(args) >= 3 and args[1] == "labels":
         label_layers = [int(x) for x in args[2].split(",") if x]
-    st = session.bdb.import_gds(args[0], label_layers,
-                             session.layers.gds_mapped_pairs())
+    st = session.bdb.import_gds(
+        resolve_script_path(session, args[0], is_read=True), label_layers,
+        session.layers.gds_mapped_pairs())
     for wmsg in st.warnings:
         print(f"[import_gds] Warning: {wmsg}")
     tops = ", ".join(st.tops) if st.tops else "(none)"
@@ -485,12 +486,13 @@ def cmd_export_gds(session, cmd, args, cmd_line):
                   session.layers.get_gds_datatype(lid))
                  for lid in sorted(set(session._layer_name_map.values()))
                  if session.layers.get_gds_layer(lid) >= 0]
-    ensure_parent_dir(args[0])              # create flow/def/out/ etc. if absent
-    st = session.bdb.export_gds(args[0], layer_map, outline, label_layer,
+    gds_path = resolve_script_path(session, args[0])
+    ensure_parent_dir(gds_path)             # create flow/def/out/ etc. if absent
+    st = session.bdb.export_gds(gds_path, layer_map, outline, label_layer,
                              write_labels, via_size)
     for wmsg in st.warnings:
         print(f"[export_gds] Warning: {wmsg}")
-    print(f"[export_gds] wrote {args[0]}: {st.n_structures} "
+    print(f"[export_gds] wrote {gds_path}: {st.n_structures} "
           f"structure(s), {st.n_placements} placement(s), "
           f"{st.n_wire_shapes} wire shape(s) "
           f"({st.stage or 'no routing'}), {st.n_via_shapes} via(s), "
@@ -1351,10 +1353,7 @@ def cmd_save_bdb(session, cmd, args, cmd_line):
     if args:
         if session.bdb is None:
             print("Error: open_bdb first"); return
-        dest = args[0]
-        if (session._script_stack and not os.path.isabs(dest)):
-            parent_dir = os.path.dirname(session._script_stack[-1])
-            dest = os.path.normpath(os.path.join(parent_dir, dest))
+        dest = resolve_script_path(session, args[0])
         live = getattr(session, "_bdb_open_path", None)
         if live and live != ':memory:':
             # Symlink-proof: realpath resolves links in the destination AND
