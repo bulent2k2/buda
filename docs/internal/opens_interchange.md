@@ -114,6 +114,37 @@ sharp edge — `flow/def/chip.buda` documents it in a comment because it had
 to. A file that *is* written, somewhere other than where the script says, is
 worse than one that is not written at all.
 
+**What this means for running the vehicle.** Because the CWD-rooted commands
+in `chip.buda` are written `flow/def/…` and the script-rooted `save_bdb
+out/…` lands in `flow/def/out/`, the two families agree on `flow/def/out/`
+**only from the repo root** — so `chip.buda` runs from there and nowhere
+else (`bin/buda flow/def/chip`, the ReadMe form). `cd flow/def && buda
+chip.buda` breaks the imports: `flow/def/chip.def` does not exist relative to
+that CWD. The *other* self-consistent config is to make **every CWD-rooted
+path** `flow/def/`-relative and run from inside `flow/def/` — not the imports
+alone: bare imports (`chip.def`) with the exports left at `flow/def/out/…`
+would resolve those to `flow/def/flow/def/out/…` and still fail. So it is
+`import_def_lef chip.def …` *and* `emit_guides out/… ` / `export_* out/…`
+together, at which point the script-rooted `save_bdb out/…` lines up on the
+same `flow/def/out/`. The fork is real, and which config a copy is in is
+invisible on the page.
+
+**Companion (FIXED) — the output directory was not created.** `emit_guides` /
+`export_def_blockages` / `export_gds` used to open their destination without a
+`mkdir -p`, and `flow/def/out/` is git-ignored (so absent on a fresh
+checkout). The ReadMe command died on the first export with
+`FileNotFoundError: 'flow/def/out/chip_guides.json'` — *after* the pipeline
+had routed cleanly, so it read as a routing success that then failed to write.
+Same family as the root split (a path that resolves somewhere the run cannot
+write), so it lived here rather than in §9. **Now fixed**: the three writers
+call `ensure_parent_dir` (`buda_session/util.py`) to `mkdir -p` their parent
+before writing, so the ReadMe command works on a fresh checkout with no manual
+`mkdir` — all six artifacts land (guides json/csv/tcl, advisory DEF, GDS, and
+the `save_bdb` BDB). This was the writer half only; the root split above is
+the part still open. `save_bdb <path>` (save-as) creates its snapshot's parent
+too, via the same `ensure_parent_dir`, so it no longer depends on an earlier
+export having made the directory.
+
 *Where to start:* not a one-line change — picking either root breaks
 existing scripts in the other direction, and `source ../tracks/tracks.buda`
 (script-relative) is used throughout `flow/hbundles/`. The likely shape is

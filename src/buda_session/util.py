@@ -19,6 +19,22 @@ import them without a buda_cli import cycle; buda_cli re-exports them
 for compatibility.
 """
 import functools
+import os
+
+
+def ensure_parent_dir(path):
+    """`mkdir -p` the parent directory of an output `path` before writing it.
+
+    The advisory writers (emit_guides / export_def_blockages / export_gds) open
+    their destination directly, but a flow's output directory (e.g.
+    flow/def/out/) may not exist on a fresh checkout — it is commonly
+    git-ignored.  Without this the writer fails with FileNotFoundError *after*
+    the pipeline has already routed cleanly, which reads as a routing success
+    that then can't write.  See docs/internal/opens_interchange.md item 4.
+    No-op for a bare filename (no directory part) or an existing directory."""
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
 
 # ripup_reroute tuning (greedy hill-climb over topology selections).
 _RR_MAX_CANDIDATES_PER_BUNDLE = 8   # alternate candidates tried per contender / iter

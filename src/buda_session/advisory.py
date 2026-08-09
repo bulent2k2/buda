@@ -49,6 +49,7 @@ import json
 import os
 
 import buda_diag
+from .util import ensure_parent_dir
 
 
 def _seg_net_names(w, all_names):
@@ -306,6 +307,7 @@ def write_def_blockages(session, manifest, path, design="buda_advisory",
         out.append(f"  - PLACEMENT + PARTIAL {max_density:g} "
                    f"RECT ( {x1} {y1} ) ( {x2} {y2} ) ;")
     out += ["END BLOCKAGES", "END DESIGN", ""]
+    ensure_parent_dir(path)                 # create flow/def/out/ etc. if absent
     with open(path, "w") as f:
         f.write("\n".join(out))
     return len(hard), len(soft)
@@ -322,6 +324,9 @@ class AdvisoryMixin:
                            "run_nuts first (an unplaced plan reserves "
                            "nothing, and emitting it would advertise "
                            "corridors that do not exist)")
+        for p in (path, csv_path, tcl):     # create flow/def/out/ etc. if absent
+            if p:
+                ensure_parent_dir(p)
         root, ext = os.path.splitext(path)
         if ext.lower() == ".csv":
             write_manifest_csv(m, path)
