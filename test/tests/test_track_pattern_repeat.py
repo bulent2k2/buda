@@ -20,6 +20,7 @@ A dense pattern is mostly one slot repeated, and spelling out twelve identical
 must produce a slot list byte-identical to the longhand it replaces, which is
 what most of these tests assert.
 """
+import ast
 import contextlib
 import io
 import re
@@ -203,18 +204,46 @@ _SIGNATURE = re.compile(
     r"""(?:startswith|match|search|fullmatch|re\.compile)\s*\(\s*"""
     r"""r?["'][^"']*\b(?:def_track_pattern|add_grid_override)\b""")
 
-# Defines the expansion, so it cannot import it.
-_EXEMPT = {"slot_groups.py"}
+# slot_groups.py DEFINES the expansion, so it cannot call it.  This file quotes
+# the offending idioms verbatim as fixtures (that is the point of the signature
+# test), so the scan would otherwise flag its own evidence.
+_EXEMPT = {"slot_groups.py", Path(__file__).name}
 
 _REPO = Path(__file__).resolve().parents[2]
-_SCAN_ROOTS = ("src", "tools", "test", "debug")
+# Scan the WHOLE repository, not a list of roots.  A root list has to be
+# remembered, and the readers are exactly the code nobody remembered: `demo/`
+# and `flow/` hold ~28 generator scripts that emit `.buda` and could grow a
+# reader tomorrow.  Excluded instead are the two directories that are not
+# maintained source — build products and bytecode caches.
+_EXCLUDED_DIRS = {"build", ".git", "__pycache__"}
 
 
 def _sources():
-    for root in _SCAN_ROOTS:
-        for path in sorted((_REPO / root).rglob("*.py")):
-            if "__pycache__" not in str(path):
-                yield path
+    for path in sorted(_REPO.rglob("*.py")):
+        if not _EXCLUDED_DIRS.intersection(path.relative_to(_REPO).parts):
+            yield path
+
+
+def _calls_the_expansion(text):
+    """True if the source CALLS expand_slot_groups (not merely mentions it).
+
+    A substring test would accept `# TODO: call expand_slot_groups`, a
+    docstring, or an import that is never used — all of which leave a naive
+    three-token walk misreading grouped patterns.  The evidence has to be a
+    call node.  An unparseable file falls back to the substring, since a
+    syntax error there is someone else's failure to report."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:                      # pragma: no cover - none today
+        return "expand_slot_groups" in text
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            fn = node.func
+            name = (fn.id if isinstance(fn, ast.Name) else
+                    fn.attr if isinstance(fn, ast.Attribute) else None)
+            if name == "expand_slot_groups":
+                return True
+    return False
 
 
 def test_the_signature_detects_the_historical_offenders():
@@ -233,17 +262,17 @@ def test_the_signature_detects_the_historical_offenders():
 
 def test_every_pattern_line_reader_uses_the_shared_expansion():
     """File-level, and deliberately so: it asks whether a file that matches a
-    pattern line knows about the expansion AT ALL.  That is exactly the shape
-    of all four historical offenders — each was written with no awareness the
-    syntax existed.  It would NOT catch a file that expands in one place and
-    walks triples naively in another; proving that statically is a different
+    pattern line calls the expansion AT ALL.  That is exactly the shape of all
+    four historical offenders — each was written with no awareness the syntax
+    existed.  It would NOT catch a file that expands in one place and walks
+    triples naively in another; proving that statically is a different
     problem, and the cheap check covers the failure mode that actually
     happened, twice."""
     offenders = [
         p.relative_to(_REPO) for p in _sources()
         if p.name not in _EXEMPT
         and _SIGNATURE.search(t := p.read_text())
-        and "expand_slot_groups" not in t
+        and not _calls_the_expansion(t)
     ]
     assert not offenders, (
         "these files match a `.buda` track-pattern line and parse it "
@@ -254,10 +283,35 @@ def test_every_pattern_line_reader_uses_the_shared_expansion():
           "the slot tokens before walking them in threes.")
 
 
-def test_the_guard_would_catch_a_new_offender(tmp_path):
+def test_the_guard_would_catch_a_new_offender():
     """The scan is only meaningful if a fresh naive reader trips it."""
-    bad = tmp_path / "new_reader.py"
-    bad.write_text('if line.startswith("def_track_pattern"):\n'
-                   '    tok = line.split()[3:]\n')
-    txt = bad.read_text()
-    assert _SIGNATURE.search(txt) and "expand_slot_groups" not in txt
+    bad = ('if line.startswith("def_track_pattern"):\n'
+           '    tok = line.split()[3:]\n')
+    assert _SIGNATURE.search(bad) and not _calls_the_expansion(bad)
+
+
+def test_mentioning_the_expansion_is_not_enough():
+    """A comment, a docstring or an unused import all leave the naive walk in
+    place, so compliance is a CALL node — not the substring."""
+    for alibi in ('# TODO: call expand_slot_groups here\n',
+                  '"""Should use expand_slot_groups."""\n',
+                  'from slot_groups import expand_slot_groups\n'):
+        src = alibi + 'if line.startswith("def_track_pattern"):\n    pass\n'
+        assert "expand_slot_groups" in src          # the substring is there…
+        assert not _calls_the_expansion(src)        # …but it is never called
+    # the real thing, both spellings, does count
+    assert _calls_the_expansion('x = expand_slot_groups("c", toks)\n')
+    assert _calls_the_expansion('x = sg.expand_slot_groups("c", toks)\n')
+
+
+def test_the_scan_covers_the_whole_repository():
+    """A root LIST has to be remembered, and the readers are exactly the code
+    nobody remembered.  Pin that the scan reaches the generator scripts under
+    demo/ and flow/ — outside the four roots this originally walked — and that
+    build products stay out of it."""
+    scanned = {p.relative_to(_REPO) for p in _sources()}
+    assert Path("demo/gen_ariane136.py") in scanned
+    assert Path("flow/def/gen_chip.py") in scanned
+    assert Path("src/slot_groups.py") in scanned
+    assert not any(p.parts[0] == "build" for p in scanned)
+    assert not any("__pycache__" in p.parts for p in scanned)
