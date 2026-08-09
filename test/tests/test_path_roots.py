@@ -59,7 +59,8 @@ def _run(script, cwd, monkeypatch, *, expect_error=False):
             s.do_command(f"source {script}")
         except Exception as e:           # noqa: BLE001 - the point is which root
             err = e
-    assert (err is not None) == expect_error, (err, out.getvalue())
+    if expect_error is not None:
+        assert (err is not None) == expect_error, (err, out.getvalue())
     return s, out.getvalue(), err
 
 
@@ -120,16 +121,17 @@ def test_a_cwd_only_file_fails_loud_and_names_both_roots(
 def test_import_def_lef_resolves_both_paths_against_the_script(
         tmp_path, monkeypatch):
     """BOTH arguments go through the resolver, proven separately: a CWD-only
-    LEF draws the note naming it (a missing LEF file is tolerated by the
-    importer, so no error), and a CWD-only DEF draws the note AND the
-    failure."""
+    LEF draws the note naming it, and a CWD-only DEF draws the note AND the
+    failure.  The LEF half asserts only the note (expect_error=None): whether
+    a missing LEF file is an error is the importer's contract, pinned in
+    test_def_import.py, not a path-resolution question."""
     sdir, cwd = _setup(tmp_path)
     (sdir / "d.def").write_text("DESIGN top ;\nEND DESIGN\n")
     (cwd / "t.lef").write_text(_LEF.format(name="M1",
                                            direction="HORIZONTAL"))
     script = sdir / "t.buda"
     script.write_text("open_bdb :memory:\nimport_def_lef d.def t.lef\n")
-    _s, out, _err = _run(script, cwd, monkeypatch)
+    _s, out, _err = _run(script, cwd, monkeypatch, expect_error=None)
     assert "BUDA-1609" in out and "'t.lef'" in out
 
     (cwd / "d.def").write_text("DESIGN top ;\nEND DESIGN\n")
