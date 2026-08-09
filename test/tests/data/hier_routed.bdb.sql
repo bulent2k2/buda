@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=23;
+PRAGMA user_version=24;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -92,16 +92,21 @@ CREATE TABLE cell (
             name        TEXT PRIMARY KEY,
             width       REAL NOT NULL,
             height      REAL NOT NULL,
+            -- LEF MACRO CLASS, verbatim ('BLOCK', 'CORE', 'PAD', …).  The
+            -- authority on whether a cell is a hard macro or a standard
+            -- cell, which no other column can answer.  '' = not stated;
+            -- LEF's own default for an absent CLASS is CORE.
+            cls         TEXT NOT NULL DEFAULT '',
             bottom_up   INTEGER NOT NULL DEFAULT 0,
             layer_cap   INTEGER NOT NULL DEFAULT -1,
             layer_floor INTEGER NOT NULL DEFAULT -1
         );
-INSERT INTO "cell" VALUES('proc_cell',3360.0,2400.0,0,-1,-1);
-INSERT INTO "cell" VALUES('pipe_cell',880.0,640.0,0,-1,-1);
-INSERT INTO "cell" VALUES('src_cell',1600.0,1600.0,0,-1,-1);
-INSERT INTO "cell" VALUES('snk_cell',1600.0,1600.0,0,-1,-1);
-INSERT INTO "cell" VALUES('gen_cell',640.0,640.0,0,-1,-1);
-INSERT INTO "cell" VALUES('rcv_cell',640.0,640.0,0,-1,-1);
+INSERT INTO "cell" VALUES('proc_cell',3360.0,2400.0,'',0,-1,-1);
+INSERT INTO "cell" VALUES('pipe_cell',880.0,640.0,'',0,-1,-1);
+INSERT INTO "cell" VALUES('src_cell',1600.0,1600.0,'',0,-1,-1);
+INSERT INTO "cell" VALUES('snk_cell',1600.0,1600.0,'',0,-1,-1);
+INSERT INTO "cell" VALUES('gen_cell',640.0,640.0,'',0,-1,-1);
+INSERT INTO "cell" VALUES('rcv_cell',640.0,640.0,'',0,-1,-1);
 CREATE TABLE cell_children (
             parent_cell TEXT NOT NULL REFERENCES cell(name),
             inst_name   TEXT NOT NULL,
@@ -185,7 +190,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','23');
+INSERT INTO "meta" VALUES('schema_version','24');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE ndr_rule (
             name         TEXT PRIMARY KEY,

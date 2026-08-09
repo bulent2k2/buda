@@ -378,7 +378,28 @@ def cmd_import_verilog(session, cmd, args, cmd_line):
         print("Error: import_verilog requires a file path"); return
     if session.bdb is None:
         print("Error: open_bdb first"); return
-    session.bdb.import_verilog(args[0])
+    st = session.bdb.import_verilog(args[0])
+    print(f"[Verilog] top '{st.top_module}': {st.elaborated} instance(s) "
+          f"elaborated")
+    if st.skipped_library_cells:
+        # INFO, not a warning: skipping library cells is the intended
+        # behaviour and the usual case.  But it is a HEURISTIC on the
+        # Verilog-only path, and an instance that silently never existed is
+        # indistinguishable from a design that never had one — so the count
+        # is always stated, and the cell KINDS with it, which is what tells
+        # you whether a macro went missing.
+        # `skipped_kinds` is the TRUE distinct count; the list is capped at
+        # eight.  Comparing the list against itself could never detect the
+        # truncation — its entries are unique by construction — so a long
+        # library would have presented eight kinds as the whole story
+        # (Codex P2 on #654).
+        shown = ", ".join(st.skipped_cells)
+        if st.skipped_kinds > len(st.skipped_cells):
+            shown += f", … (+{st.skipped_kinds - len(st.skipped_cells)} more kinds)"
+        buda_diag.emit("BUDA-1608",
+                       f"{st.skipped_library_cells} instance(s) of "
+                       f"{st.skipped_kinds} undefined module(s) skipped as "
+                       f"library cells: {shown}")
 
 
 def cmd_import_gds(session, cmd, args, cmd_line):

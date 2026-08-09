@@ -40,6 +40,21 @@ struct DefBlockage;
 // the database (tracks, blockages, halos).  Deliberately not the whole
 // DefDesign — components and nets went into the tables, and a real DEF's
 // copy of them is the part that would not fit in memory twice.
+struct VerilogImportStats {
+    std::string top_module;
+    int elaborated = 0;             // component rows written
+    // Instances of a module the netlist does not define, dropped as library
+    // cells.  Reported rather than silent: the filter is a heuristic, and a
+    // dropped instance is a hole in the hierarchy that every later stage
+    // treats as absence rather than as an omission.
+    int skipped_library_cells = 0;   // instances
+    int skipped_kinds = 0;           // DISTINCT cell types among them
+    // The first few distinct cell types, capped.  `skipped_kinds` is the
+    // true total, so a caller can tell a complete list from a truncated one
+    // — the list alone cannot say, since its entries are already unique.
+    std::vector<std::string> skipped_cells;
+};
+
 struct DefImportStats {
     int declared_components = -1, imported_components = 0;
     int declared_nets = -1, imported_nets = 0;
@@ -409,7 +424,7 @@ public:
     //       since-changed resolution and VOID the restored plan).
     // v22 = ndr_rule.credit (R5a end-shield crediting opt-in — part of the
     //       rule's pricing basis, so it rides the same table).
-    static constexpr int SCHEMA_VERSION = 23;
+    static constexpr int SCHEMA_VERSION = 24;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -436,7 +451,7 @@ public:
     // ── Ingestion ──────────────────────────────────────────────────────────
     DefImportStats import_def_lef(const std::string& def_path,
                                   const std::string& lef_path);
-    void import_verilog(const std::string& v_path);
+    VerilogImportStats import_verilog(const std::string& v_path);
     // Wipe the design tables (pin/net_props/net/component/cell) for a fresh
     // load — what import_def_lef does internally; public for import_gds.
     void clear_design();
@@ -829,7 +844,7 @@ private:
                                 double abs_x, double abs_y,
                                 int child_depth);
     // parsers
-    struct LefCell { double w, h; };
+    struct LefCell { double w, h; std::string cls; };
     struct LefPin  { double ox, oy; std::string dir; };  // offset from cell origin
     using LefCells = std::unordered_map<std::string, LefCell>;
     using LefPins  = std::unordered_map<std::string,

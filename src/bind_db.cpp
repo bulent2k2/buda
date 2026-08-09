@@ -474,6 +474,14 @@ void bind_db(py::module_& m) {
         .def_readonly("tracks", &DefImportStats::tracks)
         .def_readonly("keepouts", &DefImportStats::keepouts);
 
+    py::class_<VerilogImportStats>(m, "VerilogImportStats")
+        .def_readonly("top_module", &VerilogImportStats::top_module)
+        .def_readonly("elaborated", &VerilogImportStats::elaborated)
+        .def_readonly("skipped_library_cells",
+                      &VerilogImportStats::skipped_library_cells)
+        .def_readonly("skipped_kinds", &VerilogImportStats::skipped_kinds)
+        .def_readonly("skipped_cells", &VerilogImportStats::skipped_cells);
+
     m.def("read_def",  &read_def,  py::arg("path"));
     m.def("parse_def", &parse_def, py::arg("text"), py::arg("where") = "<text>");
 
@@ -485,6 +493,7 @@ void bind_db(py::module_& m) {
         .def("import_def_lef",  &BDB::import_def_lef,
              py::arg("def_path"), py::arg("lef_path"))
         .def("import_verilog",  &BDB::import_verilog, py::arg("v_path"))
+        // (VerilogImportStats is bound below, beside DefImportStats.)
         .def("import_gds", [](BDB& db, const std::string& path,
                               const std::vector<int>& label_layers,
                               const std::vector<std::pair<int,int>>& routing_layers) {
