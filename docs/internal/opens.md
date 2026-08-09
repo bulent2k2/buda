@@ -24,6 +24,16 @@ items this page doesn't see).
 > absolute µm values, per-net mixed-rule bundles, plus smaller residuals —
 > is tracked separately in [`opens_ndr.md`](opens_ndr.md).
 
+> **File I/O and interfaces:** the LEF/DEF/Verilog/GDS readers and writers,
+> the advisory artifacts and the Tcl front end landed across phases 0–5
+> ([`lefdef_interface_plan.md`](lefdef_interface_plan.md)), with
+> [`flow/def/`](../../flow/def/) as the end-to-end vehicle. What they do NOT
+> do yet — a netlist reader that drops blackbox instances with ordinary
+> names, vector port maps collapsing to one net, the GDS round trip losing
+> merge-created cells, two different roots for relative paths, DEF
+> streaming, the packaged wheel — is tracked separately in
+> [`opens_interchange.md`](opens_interchange.md).
+
 > **Feature-suite coverage:** the Gherkin narrative spec layer
 > (`test/tests/features/`) is mapped to these arcs & opens in
 > [`feature_coverage_plan.md`](feature_coverage_plan.md). The open items below

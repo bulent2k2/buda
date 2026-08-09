@@ -14,6 +14,13 @@ Every claim below was checked against the source; file:line references
 are given so a reviewer can re-derive the conclusion rather than trust
 it.
 
+> **All five phases have LANDED** (0–5, 2026-08; PRs #643, #645–#650).  The
+> end-to-end vehicle is [`flow/def/`](../../flow/def/) — a LEF + DEF +
+> Verilog design read off disk and routed clean.  What the interface does
+> **not** do yet is tracked in
+> [`opens_interchange.md`](opens_interchange.md); each phase's as-built
+> notes stay inline below, in the section that planned it.
+
 ---
 
 ## 0. The target: advisory planner (decided)
@@ -407,13 +414,16 @@ letting a real design drop the hand-typed stack entirely.
 >   (`ostringstream`, `.str()`, then the lexer's copy); it now reads into one
 >   buffer and moves it, measured 42.5 → 38.2 MB on a 3.2 MB DEF.  It is
 >   still NOT a streaming reader, and the honest reason is that the text is
->   not the dominant term: on a 19.7 MB / 1.02 M-line DEF the parse peaks at
->   ~115 MB, most of it the parsed model (340 k components at ~220 B each).
->   True streaming means inserting rows as they parse, which
+>   not the dominant term: most of the cost is the parsed model (~220 B per
+>   component).  True streaming means inserting rows as they parse, which
 >   `import_def_lef` cannot do today — it walks `def.components` a second
->   time for macro OBS, and net resolution needs the name index above.  The
->   working ceiling is therefore **~6× the file size**, recorded here so a
->   user can budget for it, with streaming as the named follow-up.
+>   time for macro OBS, and net resolution needs the name index above.
+>   Re-measured through `read_def` after this change: **96 MB for a 19.7 MB /
+>   1.02 M-line DEF, 4.9× the file size** — budget ~5×.  (The ~6× first
+>   written here was measured through `parse_def` on an in-memory string
+>   BEFORE the by-value change removed a copy, so it double-counted one.
+>   Live figure and the streaming follow-up:
+>   [opens_interchange.md](opens_interchange.md) item 5.)
 >
 > **A finding, not a fix:** the checked-in `demo/ariane` pair is MISMATCHED —
 > its DEF instantiates 133 × `fakeram45_256x16` while its LEF defines only
