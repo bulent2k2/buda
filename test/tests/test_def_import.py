@@ -123,7 +123,11 @@ def test_a_cell_with_no_lef_footprint_stops_the_run(tmp_path):
 def test_the_stop_can_be_overridden_but_only_out_loud(tmp_path):
     _s, out = _run(tmp_path, extra="allow_missing_footprints",
                    deff=_DEF.replace("- i0 m +", "- i0 nosuchcell +"))
-    assert "Warning" in out and "geometry of those instances is fiction" in out
+    # The waiver does not make the fault disappear, it downgrades it — and
+    # the downgraded form has its OWN id (BUDA-1606), so a methodology can
+    # allow the waiver and still find every design that used it.
+    assert "BUDA-1606: WARNING:" in out, out
+    assert "geometry of those instances is fiction" in out
 
 
 # ── what reaches the database ──────────────────────────────────────────────

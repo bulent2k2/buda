@@ -24,6 +24,7 @@ import buda
 import os
 import sys
 
+import buda_diag
 from ._options import reject_unknown_options
 
 
@@ -199,8 +200,16 @@ def cmd_import_def_lef(session, cmd, args, cmd_line):
     def _line(what, got, declared):
         if declared is None or declared < 0:
             return f"[DEF] {what}: {got}"
-        mark = "" if got == declared else "   <-- MISMATCH"
-        return f"[DEF] {what}: imported {got} of {declared}{mark}"
+        if got == declared:
+            return f"[DEF] {what}: imported {got} of {declared}"
+        # A count mismatch is the reader's own self-check failing, and it
+        # used to print with no diagnostic marker at all — so the run's
+        # warning count was zero while the floorplan was half-read.  The id
+        # is what a methodology gates on (BUDA-1602), and it is also what
+        # makes the line count as the warning it always was.
+        return buda_diag.format(
+            "BUDA-1602",
+            f"[DEF] {what}: imported {got} of {declared}   <-- MISMATCH")
 
     print(_line("components", st.imported_components, st.declared_components))
     if st.declared_nets >= 0 or st.imported_nets:
@@ -222,13 +231,15 @@ def cmd_import_def_lef(session, cmd, args, cmd_line):
         more = f" (+{len(st.missing_cells) - 8} more)" if len(st.missing_cells) > 8 else ""
         n_bad = len(st.missing_cells)
         if "allow_missing_footprints" in args:
-            print(f"Warning: {n_bad} cell(s) in the DEF have no LEF footprint "
-                  f"and were sized 0.5 x 0.5 um: {shown}{more}")
+            buda_diag.emit("BUDA-1606",
+                           f"{n_bad} cell(s) in the DEF have no LEF footprint "
+                           f"and were sized 0.5 x 0.5 um: {shown}{more}")
             print("         Continuing because `allow_missing_footprints` was "
                   "given — the geometry of those instances is fiction.")
         else:
-            print(f"Error: {n_bad} cell(s) in the DEF have no LEF footprint: "
-                  f"{shown}{more}")
+            buda_diag.emit("BUDA-1601",
+                           f"{n_bad} cell(s) in the DEF have no LEF "
+                           f"footprint: {shown}{more}")
             print("       Every one of them would be sized 0.5 x 0.5 um, which "
                   "is not a macro — a wrong-LEF run reads as a plausible and "
                   "entirely wrong floorplan.  Check that the LEF matches this "
@@ -236,7 +247,8 @@ def cmd_import_def_lef(session, cmd, args, cmd_line):
             sys.exit(1)
 
     if st.unmodelled:
-        print(f"[DEF] unmodelled construct(s): {st.unmodelled}")
+        buda_diag.emit("BUDA-1603",
+                       f"[DEF] unmodelled construct(s): {st.unmodelled}")
 
     # ── physical data the SESSION owns, not the database ─────────────────
     if "no_tracks" not in args:
@@ -264,11 +276,20 @@ def _apply_def_tracks(session, st):
         for lname in tr.layers:
             lid = session._layer_name_map.get(lname)
             if lid is None:
-                skipped.append(f"{lname} (no such layer — declare it or "
-                               f"import_lef_tech first)")
+                # A grid the design HAS but BUDA cannot install: a warning,
+                # because routing will be planned against a stack that is
+                # missing one of the file's layers.
+                skipped.append(("BUDA-1604",
+                                f"{lname} (no such layer — declare it or "
+                                f"import_lef_tech first)"))
                 continue
             if session._pattern_source.get(lid) == "script":
-                skipped.append(f"{lname} (script-declared pattern wins)")
+                # Precedence working as documented: INFO, not a warning.
+                # These two used to print through the same channel, so the
+                # one that means "you are missing a layer" was indexed with
+                # the one that means "your own declaration won".
+                skipped.append(("BUDA-1605",
+                                f"{lname} (script-declared pattern wins)"))
                 continue
             # A DEF supplies TRACKS in BOTH directions for most layers — the
             # off-direction ones exist for pin access and vias, not for
@@ -279,7 +300,7 @@ def _apply_def_tracks(session, st):
             # technology declares vertical (Codex P1 on #647).  The layer's
             # own direction decides which statement is its routing grid.
             if not session.layers.has_layer(lid):
-                skipped.append(f"{lname} (no layer row)")
+                skipped.append(("BUDA-1604", f"{lname} (no layer row)"))
                 continue
             layer_is_h = (session.layers.get_layer_dir(lid) ==
                           buda.LayerDir.HORIZONTAL)
@@ -310,8 +331,8 @@ def _apply_def_tracks(session, st):
             installed.append(f"{lname}[{tr.count}@{tr.step:g}]")
     if installed:
         print(f"[DEF] tracks installed (bounded): {', '.join(installed)}")
-    for s in skipped:
-        print(f"[DEF] tracks skipped for {s}")
+    for msg_id, s in skipped:
+        buda_diag.emit(msg_id, f"[DEF] tracks skipped for {s}")
 
 
 def _apply_def_keepouts(session, st):

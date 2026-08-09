@@ -48,6 +48,8 @@ import csv
 import json
 import os
 
+import buda_diag
+
 
 def _seg_net_names(w, all_names):
     """Per-segment net names for one wrapper.
@@ -315,9 +317,11 @@ class AdvisoryMixin:
     def _emit_guides(self, path, margin=0.0, tcl=None, csv_path=None):
         m = build_manifest(self, margin)
         if not m["bundles"]:
-            print("Warning: emit_guides has no placed bus segments — run "
-                  "run_nuts first (an unplaced plan reserves nothing, and "
-                  "emitting it would advertise corridors that do not exist)")
+            buda_diag.emit("BUDA-1701",
+                           "emit_guides has no placed bus segments — run "
+                           "run_nuts first (an unplaced plan reserves "
+                           "nothing, and emitting it would advertise "
+                           "corridors that do not exist)")
         root, ext = os.path.splitext(path)
         if ext.lower() == ".csv":
             write_manifest_csv(m, path)

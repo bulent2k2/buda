@@ -546,13 +546,66 @@ the deferral costs nothing but the writer and the physical models.*
 
 ## 6. Phase 5 — the rest of Lens B (sizing only)
 
+> **BUILT: the Tcl front end and the logging conventions.**  Written up in
+> [TCL_FRONT_END.md](../TCL_FRONT_END.md) and
+> [message_ids.md](message_ids.md); the packaging bullet is **not** built and
+> is re-scoped below.
+>
+> **Tcl.**  The sizing note above ("mostly mechanical; the registry is
+> already a dict") was right about the commands and wrong about the shape.
+> The mechanical build — `tkinter.Tcl()` inside Python — is wrong twice: it
+> puts BUDA's Python in charge and asks the site's flow to run *under* it,
+> which is the opposite of integrating into a flow that already exists; and
+> it makes a Tcl front end depend on **tkinter**, a GUI toolkit, so a
+> headless compute farm may not have it.  So the processes are inverted: the
+> site's own `tclsh` is the parent, sources `tools/buda.tcl`, and BUDA runs
+> behind a pipe (`tools/buda_server.py`).  Commands are discovered FROM the
+> running engine, so the two sides cannot drift.  Errors follow Tcl's
+> convention rather than BUDA's — a command that fails by *printing*
+> `Error: …` still raises, because a flow that continues past a failed step
+> ships a wrong result.
+>
+> Two things only a real interpreter exposed, both fixed: a fail-fast
+> command needed its own status (`FATAL`) so a crash could not read as a
+> clean finish, and the echo channel needed an explicit UTF-8 encoding —
+> under a shell with no locale, `tclsh` defaults stdout to iso8859-1 and
+> every `→` in the planner's output becomes `?`.  The second is also a
+> lesson about the test: pytest's children inherit `LC_CTYPE=C.UTF-8` (PEP
+> 538), so the first version of the regression passed with the fix removed
+> and now strips the locale on purpose.
+>
+> **Logging.**  Message ids (`BUDA-<NNNN>: <SEVERITY>: <text>`), a registry
+> that refuses an unregistered id, `dump_messages`, and non-overwriting flow
+> logs (the previous run rotates to `<name>.1`).  Severity is read off the
+> LINE, not the registry, which is what makes `set_unit_check warn` a
+> *downgrade of BUDA-1901* rather than a different message — a methodology's
+> gate on the id keeps working either way.  The counters now read the
+> declared severity and fall back to the old prose regexes for unidentified
+> output, so existing flow logs count identically; what changes is that a
+> FATAL no longer counts as zero errors and a DEF count mismatch no longer
+> counts as none.
+>
+> **Not built: the packaged wheel.**  It needs a build of the C++ extension
+> per platform and per Python, which is its own CI problem with its own
+> gates, and shipping an untested wheel is worse than shipping none.  The
+> other half of that bullet — `BUDA_NO_APP=1` as the batch default on macOS
+> — turned out to be **already satisfied**: `bin/buda`'s Darwin relaunch
+> requires all three of stdin/stdout/stderr to be TTYs and skips `--no-viz`
+> runs, so a redirected or batch invocation already falls through to the
+> direct launch.  Adding a second mechanism for it would be redundant.
+
 - **Tcl front end** over the existing command registry (~weeks; the
-  registry is already a dict, so this is mostly mechanical).
+  registry is already a dict, so this is mostly mechanical).  **BUILT** —
+  and the shape, not the command list, was the work.
 - **Packaged wheel**; `BUDA_NO_APP=1` as the batch default on macOS.
+  **Wheel: not built.**  `BUDA_NO_APP`: already satisfied by the existing
+  tty/`--no-viz` guards in `bin/buda`.
 - **Logging conventions**: severity levels, message IDs, non-overwriting
   logs (today a re-run silently overwrites unless `--log`/`--tag`).
+  **BUILT.**
 - **Router path only**: real via geometry, DRC-legality checking against
-  the subset of rules BUDA emits, DBU-exact everywhere.
+  the subset of rules BUDA emits, DBU-exact everywhere.  *Deferred by the
+  §0 decision.*
 
 ---
 

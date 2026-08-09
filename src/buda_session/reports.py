@@ -24,6 +24,7 @@ cross-mixin helper calls resolve through the class as before.
 """
 import buda
 
+import buda_diag
 from .util import (UNIT_PITCH_UM_MAX, UNIT_PITCH_UM_MIN, UNIT_TRACKS_MAX,
                    UNIT_TRACKS_MIN, unit_consistency_signals,
                    unit_plausibility_faults)
@@ -163,9 +164,17 @@ class ReportsMixin:
         if not faults:
             return
         lo, hi = UNIT_TRACKS_MIN, UNIT_TRACKS_MAX
-        lines = [f"[UnitCheck] {stage}: implausible design scale — the block "
-                 f"coordinates and the track patterns look like they are in "
-                 f"different units.",
+        # The FIRST line carries the id (BUDA-1901): the continuation lines
+        # are the evidence for it, and giving each one an id would make a
+        # single fault look like five.  `set_unit_check warn` is a severity
+        # DOWNGRADE of that same fault — "I have seen it and I accept it on
+        # this design" — so the id is unchanged and only the severity moves,
+        # which is what keeps a methodology's gate on BUDA-1901 meaningful.
+        head = (f"[UnitCheck] {stage}: implausible design scale — the block "
+                f"coordinates and the track patterns look like they are in "
+                f"different units.")
+        lines = [buda_diag.format("BUDA-1901", head,
+                                  buda_diag.WARNING if mode == "warn" else None),
                  f"[UnitCheck]   design extent = {extent:g} layout units; "
                  f"plausible range is {lo:g}..{hi:g} tracks across."]
         if any(f[3].startswith("pitch") for f in faults):
@@ -187,7 +196,7 @@ class ReportsMixin:
                      " / `off` if this design really is like this.")
         text = "\n".join(lines)
         if mode == "warn":
-            print(text.replace("[UnitCheck]", "[UnitCheck] WARNING:", 1))
+            print(text)
             return
         # The whole diagnostic goes in the EXCEPTION, not just in the log: a
         # command that raises has its captured output written to the flow log
