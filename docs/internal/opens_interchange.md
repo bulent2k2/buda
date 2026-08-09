@@ -124,17 +124,21 @@ that CWD. Rewriting the imports to bare (`chip.def`) is the *other*
 self-consistent config, run from inside `flow/def/` — the fork is real, and
 which config a copy is in is invisible on the page.
 
-**Companion trap — the output directory is not created.** `emit_guides` /
-`export_def_blockages` / `export_gds` open their destination without a
+**Companion (FIXED) — the output directory was not created.** `emit_guides` /
+`export_def_blockages` / `export_gds` used to open their destination without a
 `mkdir -p`, and `flow/def/out/` is git-ignored (so absent on a fresh
-checkout). Run the ReadMe command as-is and the first export dies with
+checkout). The ReadMe command died on the first export with
 `FileNotFoundError: 'flow/def/out/chip_guides.json'` — *after* the pipeline
-has routed cleanly, so it reads as a routing success that then fails to write.
-Reproduced on `main`, 2026-08-09: `mkdir -p flow/def/out` first and all six
-artifacts land (guides json/csv/tcl, advisory DEF, GDS, and the `save_bdb`
-BDB). Same family as the root split — a path that resolves somewhere the run
-cannot write — so it belongs here rather than in §9; the fix is a `mkdir -p`
-at each writer (or a documented precondition), not a root decision.
+had routed cleanly, so it read as a routing success that then failed to write.
+Same family as the root split (a path that resolves somewhere the run cannot
+write), so it lived here rather than in §9. **Now fixed**: the three writers
+call `ensure_parent_dir` (`buda_session/util.py`) to `mkdir -p` their parent
+before writing, so the ReadMe command works on a fresh checkout with no manual
+`mkdir` — all six artifacts land (guides json/csv/tcl, advisory DEF, GDS, and
+the `save_bdb` BDB, which rides the dir the earlier export created). This was
+the writer half only; the root split above is the part still open. Note
+`save_bdb` to a *new* directory no earlier export creates is not covered — a
+narrow residual left with the root decision it belongs to.
 
 *Where to start:* not a one-line change — picking either root breaks
 existing scripts in the other direction, and `source ../tracks/tracks.buda`
