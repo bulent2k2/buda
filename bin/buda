@@ -98,16 +98,23 @@ if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] \
     # flow/def/out/..., ...) — see docs/internal/opens_interchange.md item 4.
     # Bake the launch cwd into the (per-invocation) launcher so the app run
     # matches a direct terminal run.  $PWD is still the user's cwd here: the
-    # PROJECT_ROOT cd above ran in a subshell.  printf %q serialises it as a
-    # shell-safe token so a dir name with a quote / backtick / $() lands as a
-    # literal path and cannot break the cd or inject a command substitution
-    # (used UNQUOTED — %q output already escapes; quoting it would double up).
+    # PROJECT_ROOT cd above ran in a subshell.
+    #
+    # Both the launch cwd AND the repo root are baked into this unquoted
+    # heredoc, so both are serialised with printf %q first — a checkout or
+    # working dir whose name has a quote / backtick / $() / space then lands as
+    # a literal path and cannot break the line or inject a command
+    # substitution at launcher runtime.  %q output is used UNQUOTED (cd) or as
+    # a bare assignment RHS (root=…) — it already escapes, so quoting doubles
+    # up; `root` is then referenced quoted (\$root deferred to launcher time).
     LAUNCH_CWD=$( printf %q "$PWD" )
+    LAUNCH_ROOT=$( printf %q "$PROJECT_ROOT" )
     cat > "$CELL_APP/Contents/MacOS/$CELL" <<LAUNCH
 #!/bin/bash
 cd $LAUNCH_CWD || { echo "buda: launch directory is gone" >&2; exit 1; }
-export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:\$PYTHONPATH"
-exec /usr/bin/env python3 "$PROJECT_ROOT/src/buda_cli.py" "\$@"
+root=$LAUNCH_ROOT
+export PYTHONPATH="\$root/build:\$root/tools:\$PYTHONPATH"
+exec /usr/bin/env python3 "\$root/src/buda_cli.py" "\$@"
 LAUNCH
     chmod +x "$CELL_APP/Contents/MacOS/$CELL"
     ICON_KEY=""
