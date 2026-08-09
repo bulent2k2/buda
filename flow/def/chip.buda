@@ -47,20 +47,20 @@ set_min_stub_length 1000
 # ── the technology ────────────────────────────────────────
 # Six routing layers with their directions, pitches and widths.  M5/M6
 # become TOP (topmost per direction) with no help from the script.
-import_lef_tech flow/def/chip.lef
+import_lef_tech chip.lef
 
 # ── the placed design ─────────────────────────────────────
 # Counts are reconciled against the DEF's own declarations, TRACKS become
 # BOUNDED patterns, and BLOCKAGES / macro OBS / power straps become
 # keepouts on both the planner's floorplan and the detailed grid.
-import_def_lef flow/def/chip.def flow/def/chip.lef
+import_def_lef chip.def chip.lef
 
 # ── the hierarchy ─────────────────────────────────────────
 # A DEF is FLAT: COMPONENTS lists leaf instances and nothing else, so
 # `u_q0/bl/lo` is just a name until something gives it meaning.  The
 # netlist is what does — it is elaborated over the placement, keeping
 # every DEF coordinate and adding the parent/depth the DEF cannot carry.
-import_verilog flow/def/chip.v
+import_verilog chip.v
 
 # …and neither file states where a hierarchical INSTANCE is, because
 # neither has a row for one.  This gives each container the extent of its
@@ -109,8 +109,8 @@ report_wirelength
 # its layer and the rectangle the plan reserved.  The Tcl is a worked
 # create_route_guide example; the DEF carries only what DEF can honestly
 # say (real keepouts, plus placement-density caps over the corridors).
-emit_guides flow/def/out/chip_guides.json margin 200 csv flow/def/out/chip_guides.csv tcl flow/def/out/chip_guides.tcl
-export_def_blockages flow/def/out/chip_advisory.def density 0.7 margin 200
+emit_guides out/chip_guides.json margin 200 csv out/chip_guides.csv tcl out/chip_guides.tcl
+export_def_blockages out/chip_advisory.def density 0.7 margin 200
 
 # Geometry, for a viewer or a round trip.  The metals start at 11 because
 # `export_gds` writes cell OUTLINES on GDS layer 10 by default, and a
@@ -123,20 +123,18 @@ def_gds_layer 3 13
 def_gds_layer 4 14
 def_gds_layer 5 15
 def_gds_layer 6 16
-export_gds flow/def/out/chip.gds outline 10 labels 63
+export_gds out/chip.gds outline 10 labels 63
 # Known limits of THIS round trip, so nobody has to rediscover them: the
 # synthetic `__PORT__` boundary cells and the container cells created by
 # the netlist merge carry no size, so their structures come back empty and
 # the 8 port labels land on nothing.  The routing geometry round-trips; the
 # scaffolding the merge invented does not.
 
-# NOTE the path: `save_bdb` resolves a relative destination against the
-# SCRIPT's directory, while the import and export commands above resolve
-# against the CWD.  So does `open_bdb` at the top of this file — which means
-# `open_bdb` and `import_def_lef`, two adjacent lines, use different roots.
-# Same-looking paths, different meanings — worth knowing before you go
-# looking for a file that did get written, somewhere else.
-# (docs/internal/opens_interchange.md item 4.)
+# Every relative path in this script — imports, exports, and this save —
+# resolves against the SCRIPT's directory, so the whole flow reads from
+# flow/def/ and writes to flow/def/out/ no matter where it is run from.
+# (One rule for all commands; it used to be two, and this script ran only
+# from the repo root — docs/internal/opens_interchange.md item 4.)
 save_bdb out/chip.bdb.sql
 
 visualize

@@ -110,7 +110,15 @@ Execute the contents of another `.buda` script file inline, as if its
 commands had been typed at the current point. Comments and blank lines in
 the included file are skipped.
 
-The script path is resolved relative to the current working directory.
+The script path is resolved against the **including script's directory**
+(for the outermost `source` — the one the CLI itself issues — that falls
+back to the CWD, since there is no enclosing script yet). This is the one
+path rule every command shares: `open_bdb`, `save_bdb`, the `import_*` and
+`export_*` commands, and `emit_guides` all resolve a relative path against
+the enclosing script's directory too, so a `.buda` script is a
+location-independent artifact — it reads and writes the same files no matter
+where it is run from. Sessions with no script (interactive, the Tcl front
+end, the Python API) resolve against the CWD.
 Only the outermost script's path is used for sidecar (`.json`) and log
 (`.log`) file naming.
 

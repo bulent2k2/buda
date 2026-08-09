@@ -80,6 +80,9 @@ MESSAGES = {
                            "descendant, so it could not be given an extent."),
     "BUDA-1608": (INFO,    "Netlist instances of undefined modules were "
                            "skipped as library cells."),
+    "BUDA-1609": (WARNING, "A script-relative path was not found, but the "
+                           "same path exists relative to the CWD — the "
+                           "pre-unification root for import/export commands."),
     "BUDA-1602": (WARNING, "Imported design counts differ from the counts the "
                            "file declares."),
     "BUDA-1603": (WARNING, "A construct in the file has no representation in "
