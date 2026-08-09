@@ -678,6 +678,7 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
         session.routing_grid.define_layer(lid, pat,
                                           l.dir == "HORIZONTAL")
         session._pattern_source[lid] = "lef"
+        session._lef_track_width[lid] = l.width
         session.layers.set_layer_dilution(lid, pat.dilution_factor())
         session.layers.set_bit_pitch(lid, pat.unit_pitch())
 

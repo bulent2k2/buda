@@ -16,6 +16,8 @@
 
 #include "bdb.h"
 #include "lef_io.h"
+#include "def_io.h"
+#include <set>
 #include <iostream>
 #include <stdexcept>
 #include <fstream>
@@ -332,6 +334,7 @@ void BDB::_create_schema() {
             depth        INTEGER DEFAULT 0,
             x1 REAL, y1 REAL, x2 REAL, y2 REAL,
             is_leaf      INTEGER DEFAULT 1,
+            is_port      INTEGER NOT NULL DEFAULT 0,
             is_replicated INTEGER DEFAULT 0,
             orient       TEXT DEFAULT 'N'
         );
@@ -780,6 +783,17 @@ void BDB::_migrate() {
         // never credited, so the 0 default is correct.
         sqlite3_exec(_db,
             "ALTER TABLE ndr_rule ADD COLUMN credit INTEGER NOT NULL DEFAULT 0",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 23) {
+        // v22 -> v23: die ports as boundary components (Phase 3d).  Reading
+        // DEF PINS does not make them endpoints — endpoint derivation is
+        // keyed by component — so each placed port becomes a zero-area
+        // component, and this flag is what keeps that fiction VISIBLE to the
+        // database and to the audits rather than passing as a real instance.
+        // Pre-v23 designs have no ports, so the 0 default is correct.
+        sqlite3_exec(_db,
+            "ALTER TABLE component ADD COLUMN is_port INTEGER NOT NULL DEFAULT 0",
             nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
@@ -1299,53 +1313,44 @@ void BDB::add_label_pin(const std::string& net_name, int comp_id,
     sqlite3_step(s);
 }
 
-void BDB::import_def_lef(const std::string& def_path, const std::string& lef_path) {
+DefImportStats BDB::import_def_lef(const std::string& def_path,
+                                   const std::string& lef_path) {
+    DefImportStats stats;
+
     LefLibrary lef;
     {
         std::ifstream probe(lef_path);
         if (probe) { probe.close(); lef = read_lef(lef_path); }
-        // An absent LEF stays non-fatal (footprints fall back to the 0.5
-        // default), as before — but a PRESENT one that cannot be read is now
-        // an error rather than a partial library that reads as complete.
+        // An absent LEF stays non-fatal, as before — but a PRESENT one that
+        // cannot be read is an error, not a partial library.
     }
     auto lef_sizes = _lef_cells(lef);
     auto lef_pins  = _lef_pins(lef);
 
-    // Full design wipe incl. derived pipeline rows — re-importing into a BDB
-    // that holds a routed checkpoint would otherwise trip the FK constraints
-    // (same fix as import_gds; see clear_design).
+    // ONE parse of the DEF (Phase 3a).  The reader this replaces was a
+    // three-state line-at-a-time std::regex machine: a legal multi-line
+    // COMPONENTS entry was skipped rather than read, and per-line regex does
+    // not survive the 10^6..10^8 lines of a real post-place DEF.
+    const DefDesign def = read_def(def_path);
+    if (def.units > 0) _units = def.units;
+
+    // Full design wipe incl. derived pipeline rows.
     clear_design();
 
-    std::ifstream f(def_path);
-    if (!f) throw std::runtime_error("BDB: cannot open DEF: " + def_path);
-
-    enum class State { IDLE, IN_COMPONENTS, IN_NETS };
-    State state = State::IDLE;
-
     Stmt s_comp(_db,
-        "INSERT OR IGNORE INTO component(name,cell,depth,x1,y1,x2,y2,is_leaf,orient)"
-        " VALUES(?,?,0,?,?,?,?,1,?)");
+        "INSERT OR IGNORE INTO component(name,cell,depth,x1,y1,x2,y2,is_leaf,orient,is_port)"
+        " VALUES(?,?,0,?,?,?,?,1,?,?)");
     Stmt s_net (_db, "INSERT OR IGNORE INTO net(name) VALUES(?)");
     Stmt s_pin (_db,
         "INSERT OR IGNORE INTO pin(net_id,comp_id,pin_name,dir,px,py)"
         " VALUES(?,?,?,?,?,?)");
     Stmt s_np  (_db, "INSERT OR IGNORE INTO net_props(net_id) VALUES(?)");
-
-    // Persistent lookup stmts — reused across all calls to the lambdas below
     Stmt s_find_comp(_db, "SELECT id FROM component WHERE name=?");
     Stmt s_find_net (_db, "SELECT id FROM net WHERE name=?");
-    Stmt s_find_cell(_db, "SELECT cell,x1,y1 FROM component WHERE id=?");
-
-    // The cell table is populated AFTER the DEF parse (see below), not here:
-    // in `dbu` mode the scale is the DEF's own UNITS, which is not known until
-    // the file has been read.  `component.cell` is a plain TEXT column with no
-    // foreign key, and the parse loop reads `lef_sizes` directly rather than
-    // the table, so nothing in between needs the rows to exist yet.
 
     _exec("BEGIN");
 
     std::unordered_map<std::string,int> comp_id_cache, net_id_cache;
-
     auto get_comp_id = [&](const std::string& name) -> int {
         auto it = comp_id_cache.find(name);
         if (it != comp_id_cache.end()) return it->second;
@@ -1368,14 +1373,8 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
     };
 
     // ── the ONE scale decision (docs/internal/engine_units.md) ───────────
-    // Two conversions, both here, both applied the instant a number leaves
-    // the file: DEF integers are DBU, LEF numbers are µm.  Downstream there
-    // is nothing left to convert — which is precisely why the ~59
-    // BDB→Floorplan int(round()) sites in the Python layer stay correct
-    // without knowing this factor exists.
-    //   dbu_to_lu is a LAMBDA, not a value, because `UNITS DISTANCE MICRONS`
-    // may not have been read yet when the first coordinate arrives (DIEAREA
-    // in a hand-written DEF).  In DBU mode it is exactly 1.0 either way.
+    // DEF integers are DBU, LEF numbers are µm; both convert here and nowhere
+    // downstream.  In DBU mode dbu_to_lu is exactly 1.0.
     auto dbu_to_lu = [&](double dbu) {
         return _lu_from_def_units ? dbu : dbu * _lu_per_um / double(_units);
     };
@@ -1383,151 +1382,186 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
         return um * (_lu_from_def_units ? double(_units) : _lu_per_um);
     };
 
-    std::string line, cur_net;
-    const std::regex comp_re(
-        R"(-\s+(\S+)\s+(\S+)\s+\+\s+(?:PLACED|FIXED)\s+\(\s*(\d+)\s+(\d+)\s*\)\s+(\S+))");
-    const std::regex conn_re(R"(\(\s*(\S+)\s+(\S+)\s*\))");
-    const std::regex net_hdr_re(R"(^\s*-\s+(\S+))");
-    const std::regex re_sec_comp(R"(^COMPONENTS\s+\d+\s*;)");
-    const std::regex re_sec_nets(R"(^NETS\s+\d+\s*;)");
+    if (def.has_die) {
+        _die_w = dbu_to_lu(def.die.x2);
+        _die_h = dbu_to_lu(def.die.y2);
+    }
 
-    while (std::getline(f, line)) {
-        // ── section transitions ──────────────────────────────────────────
-        if (line.find("UNITS DISTANCE MICRONS") != std::string::npos) {
-            std::istringstream ss(line);
-            std::string tok;
-            while (ss >> tok) if (std::isdigit(tok[0])) { _units=std::stoi(tok); break; }
-            continue;
+    // ── COMPONENTS ───────────────────────────────────────────────────────
+    std::set<std::string> missing;
+    for (const auto& c : def.components) {
+        double w = 0, h = 0;
+        auto cs = lef_sizes.find(c.cell);
+        if (cs != lef_sizes.end()) {
+            w = um_to_lu(cs->second.w);
+            h = um_to_lu(cs->second.h);
+        } else {
+            // The silent 0.5 x 0.5 µm fallback this replaces turned a
+            // wrong-LEF run into a plausible, entirely wrong floorplan — every
+            // macro a half-micron speck, every route between them meaningless,
+            // and no diagnostic anywhere.  The size is still filled in so the
+            // rest of the import can proceed and report ALL the missing cells
+            // at once, but the caller is told.
+            w = um_to_lu(0.5);
+            h = um_to_lu(0.5);
+            missing.insert(c.cell);
         }
-        if (line.find("DIEAREA") != std::string::npos) {
-            // DIEAREA ( 0 0 ) ( x y ) ;
-            std::vector<int> nums;
-            std::istringstream ss(line);
-            std::string tok;
-            while (ss >> tok)
-                if (!tok.empty() && (std::isdigit(tok[0]) || tok[0]=='-'))
-                    nums.push_back(std::stoi(tok));
-            if (nums.size() >= 4) {
-                _die_w = dbu_to_lu(nums[2]);
-                _die_h = dbu_to_lu(nums[3]);
-            }
-            continue;
-        }
-        if (std::regex_search(line, re_sec_comp))
-            { state=State::IN_COMPONENTS; continue; }
-        if (line.find("END COMPONENTS") != std::string::npos)
-            { state=State::IDLE; continue; }
-        if (std::regex_search(line, re_sec_nets))
-            { state=State::IN_NETS; continue; }
-        if (line.find("END NETS") != std::string::npos)
-            { state=State::IDLE; continue; }
+        auto [orient, swap_wh] = def_orient_to_bdb(c.orient);
+        if (swap_wh) std::swap(w, h);
+        const double x1 = dbu_to_lu(c.x), y1 = dbu_to_lu(c.y);
+        sqlite3_bind_text  (s_comp,1,c.name.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_text  (s_comp,2,c.cell.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_double(s_comp,3,x1);
+        sqlite3_bind_double(s_comp,4,y1);
+        sqlite3_bind_double(s_comp,5,x1+w);
+        sqlite3_bind_double(s_comp,6,y1+h);
+        sqlite3_bind_text  (s_comp,7,orient.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_int   (s_comp,8,0);
+        sqlite3_step(s_comp); sqlite3_reset(s_comp);
+        ++stats.imported_components;
+        if (c.placed) ++stats.placed_components;
 
-        // ── component line ───────────────────────────────────────────────
-        if (state == State::IN_COMPONENTS) {
-            std::smatch m;
-            if (!std::regex_search(line, m, comp_re)) continue;
-            std::string inst=normalize_def_name(m[1]), cell=m[2];
-            double x1 = dbu_to_lu(std::stoi(m[3]));
-            double y1 = dbu_to_lu(std::stoi(m[4]));
-            double w=0.5, h=0.5;
-            auto cs = lef_sizes.find(cell);
-            if (cs != lef_sizes.end())
-                { w=um_to_lu(cs->second.w); h=um_to_lu(cs->second.h); }
-            else { w=um_to_lu(w); h=um_to_lu(h); }   // the 0.5 default is µm too
-            // Orientation: record the BDB token and swap the placed bbox dims
-            // for 90/270 rotations (lower-left kept at the DEF placement point,
-            // the same convention as rotate_comp). Strip a trailing ';' in case
-            // the token abuts it (no space before the statement terminator).
-            std::string otok = m[5];
-            if (!otok.empty() && otok.back() == ';') otok.pop_back();
-            auto [orient, swap_wh] = def_orient_to_bdb(otok);
-            if (swap_wh) std::swap(w, h);
-            sqlite3_bind_text  (s_comp,1,inst.c_str(),-1,SQLITE_TRANSIENT);
-            sqlite3_bind_text  (s_comp,2,cell.c_str(),-1,SQLITE_TRANSIENT);
-            sqlite3_bind_double(s_comp,3,x1);
-            sqlite3_bind_double(s_comp,4,y1);
-            sqlite3_bind_double(s_comp,5,x1+w);
-            sqlite3_bind_double(s_comp,6,y1+h);
-            sqlite3_bind_text  (s_comp,7,orient.c_str(),-1,SQLITE_TRANSIENT);
-            sqlite3_step(s_comp); sqlite3_reset(s_comp);
+        // HALO — a keep-clear margin the placer honoured and the router must
+        // too (Phase 3c).  Emitted as a keepout ring in layout units.
+        if (c.has_halo) {
+            stats.keepouts.push_back({"", x1 - dbu_to_lu(c.halo_l),
+                                      y1 - dbu_to_lu(c.halo_b),
+                                      x1 + w + dbu_to_lu(c.halo_r),
+                                      y1 + h + dbu_to_lu(c.halo_t),
+                                      "HALO of " + c.name});
         }
+    }
+    stats.declared_components = def.declared_components;
+    for (const auto& m : missing) stats.missing_cells.push_back(m);
 
-        // ── nets section ─────────────────────────────────────────────────
-        if (state == State::IN_NETS) {
-            // New net header: "- net_name" or "  - net_name" (leading whitespace allowed)
-            auto first = line.find_first_not_of(" \t");
-            if (first != std::string::npos && line[first] == '-') {
-                std::smatch m;
-                if (std::regex_search(line, m, net_hdr_re)) {
-                    cur_net = m[1];
-                    if (cur_net == "*") { cur_net=""; continue; }
-                    sqlite3_bind_text(s_net,1,cur_net.c_str(),-1,SQLITE_TRANSIENT);
-                    sqlite3_step(s_net); sqlite3_reset(s_net);
-                    int nid = get_net_id(cur_net);
-                    if (nid > 0) {
-                        sqlite3_bind_int(s_np,1,nid);
-                        sqlite3_step(s_np); sqlite3_reset(s_np);
+    // ── PINS → boundary components (Phase 3d) ────────────────────────────
+    // Reading PINS is not enough to make them endpoints: PinRow is keyed by
+    // component, and endpoint derivation skips any pin whose comp_id is not a
+    // component at the bundling depth — so a net reaching the die edge would
+    // be SILENTLY incomplete, which is precisely the failure check_design's
+    // BUSTERM_OPEN exists to catch, arriving before the audit can see it.
+    //
+    // Of the plan's two options this is (i): a zero-area boundary COMPONENT
+    // per port, behind an explicit `is_port` flag so the fiction is visible
+    // in the database and to the audits.  Every downstream stage already
+    // understands components; the cost is one fictional instance per port,
+    // and the flag is what keeps it from passing as a real one.
+    for (const auto& p : def.pins) {
+        if (!p.placed) continue;                 // no location: not an endpoint
+        const double px = dbu_to_lu(p.x), py = dbu_to_lu(p.y);
+        double x1 = px, y1 = py, x2 = px, y2 = py;
+        for (const auto& r : p.rects) {          // shapes are relative to PLACED
+            x1 = std::min(x1, px + dbu_to_lu(r.x1));
+            y1 = std::min(y1, py + dbu_to_lu(r.y1));
+            x2 = std::max(x2, px + dbu_to_lu(r.x2));
+            y2 = std::max(y2, py + dbu_to_lu(r.y2));
+        }
+        sqlite3_bind_text  (s_comp,1,p.name.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_text  (s_comp,2,"__PORT__",-1,SQLITE_STATIC);
+        sqlite3_bind_double(s_comp,3,x1);
+        sqlite3_bind_double(s_comp,4,y1);
+        sqlite3_bind_double(s_comp,5,x2);
+        sqlite3_bind_double(s_comp,6,y2);
+        sqlite3_bind_text  (s_comp,7,"N",-1,SQLITE_STATIC);
+        sqlite3_bind_int   (s_comp,8,1);
+        sqlite3_step(s_comp); sqlite3_reset(s_comp);
+        ++stats.port_components;
+        ++stats.imported_pins;
+    }
+    stats.declared_pins = def.declared_pins;
+
+    // ── NETS ─────────────────────────────────────────────────────────────
+    for (const auto& n : def.nets) {
+        sqlite3_bind_text(s_net,1,n.name.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_step(s_net); sqlite3_reset(s_net);
+        const int nid = get_net_id(n.name);
+        if (nid < 0) continue;
+        sqlite3_bind_int(s_np,1,nid);
+        sqlite3_step(s_np); sqlite3_reset(s_np);
+        ++stats.imported_nets;
+        for (const auto& cn : n.conns) {
+            // A `( PIN <portName> )` connection names a die port, which is a
+            // boundary component above; anything else names an instance.
+            const std::string inst = cn.is_port() ? cn.pin : cn.inst;
+            const int cid = get_comp_id(inst);
+            if (cid < 0) continue;
+            std::string dir = "UNKNOWN";
+            double ppx = -1, ppy = -1;
+            if (cn.is_port()) {
+                for (const auto& dp : def.pins)
+                    if (dp.name == cn.pin) {
+                        dir = dp.dir.empty() ? "UNKNOWN" : dp.dir;
+                        ppx = dbu_to_lu(dp.x); ppy = dbu_to_lu(dp.y);
+                        break;
                     }
-                }
-            }
-            // Connection tokens: ( inst pin )
-            if (cur_net.empty()) continue;
-            int net_id = get_net_id(cur_net);
-            if (net_id < 0) continue;
-            auto cb = std::sregex_iterator(line.begin(), line.end(), conn_re);
-            for (auto it=cb; it!=std::sregex_iterator(); ++it) {
-                // Normalize DEF escapes exactly like the COMPONENTS section
-                // did when the row was stored: the raw token 'mem\[0\]'
-                // would miss get_comp_id('mem[0]') and the connection was
-                // SILENTLY dropped (audit C6-01).
-                std::string inst=normalize_def_name((*it)[1]);
-                std::string pin =normalize_def_name((*it)[2]);
-                if (inst=="PIN") continue;
-                int cid = get_comp_id(inst);
-                if (cid < 0) continue;
-
-                std::string dir="UNKNOWN";
-                double px=-1, py=-1;
-                sqlite3_bind_int(s_find_cell, 1, cid);
-                if (sqlite3_step(s_find_cell) == SQLITE_ROW) {
-                    std::string cell = (const char*)sqlite3_column_text(s_find_cell, 0);
-                    double x1 = sqlite3_column_double(s_find_cell, 1);
-                    double y1 = sqlite3_column_double(s_find_cell, 2);
-                    auto ci = lef_pins.find(cell);
-                    if (ci != lef_pins.end()) {
-                        auto pi = ci->second.find(pin);
-                        if (pi != ci->second.end()) {
-                            dir = pi->second.dir;
-                            px  = x1 + um_to_lu(pi->second.ox);
-                            py  = y1 + um_to_lu(pi->second.oy);
+            } else {
+                // Resolve the pin offset from the instance's cell in LEF.
+                for (const auto& c : def.components)
+                    if (c.name == inst) {
+                        auto ci = lef_pins.find(c.cell);
+                        if (ci != lef_pins.end()) {
+                            auto pi = ci->second.find(cn.pin);
+                            if (pi != ci->second.end()) {
+                                dir = pi->second.dir;
+                                ppx = dbu_to_lu(c.x) + um_to_lu(pi->second.ox);
+                                ppy = dbu_to_lu(c.y) + um_to_lu(pi->second.oy);
+                            }
                         }
+                        break;
                     }
-                }
-                sqlite3_reset(s_find_cell);
-
-                sqlite3_bind_int   (s_pin,1,net_id);
-                sqlite3_bind_int   (s_pin,2,cid);
-                sqlite3_bind_text  (s_pin,3,pin.c_str(),-1,SQLITE_TRANSIENT);
-                sqlite3_bind_text  (s_pin,4,dir.c_str(),-1,SQLITE_TRANSIENT);
-                sqlite3_bind_double(s_pin,5,px);
-                sqlite3_bind_double(s_pin,6,py);
-                sqlite3_step(s_pin); sqlite3_reset(s_pin);
             }
+            sqlite3_bind_int   (s_pin,1,nid);
+            sqlite3_bind_int   (s_pin,2,cid);
+            sqlite3_bind_text  (s_pin,3,cn.pin.c_str(),-1,SQLITE_TRANSIENT);
+            sqlite3_bind_text  (s_pin,4,dir.c_str(),-1,SQLITE_TRANSIENT);
+            sqlite3_bind_double(s_pin,5,ppx);
+            sqlite3_bind_double(s_pin,6,ppy);
+            sqlite3_step(s_pin); sqlite3_reset(s_pin);
+        }
+    }
+    stats.declared_nets = def.declared_nets;
+
+    // ── TRACKS (Phase 3b) ────────────────────────────────────────────────
+    for (const auto& tr : def.tracks)
+        stats.tracks.push_back({tr.dir, dbu_to_lu(tr.start), dbu_to_lu(tr.step),
+                                tr.count, tr.layers});
+
+    // ── BLOCKAGES + macro OBS (Phase 3c) ─────────────────────────────────
+    for (const auto& b : def.blockages) {
+        for (const auto& r : b.rects)
+            stats.keepouts.push_back({b.layer, dbu_to_lu(r.x1), dbu_to_lu(r.y1),
+                                      dbu_to_lu(r.x2), dbu_to_lu(r.y2),
+                                      b.is_placement ? "PLACEMENT blockage"
+                                                     : "BLOCKAGES"});
+    }
+    for (const auto& c : def.components) {
+        const LefMacro* m = lef.find_macro(c.cell);
+        if (!m) continue;
+        for (const auto& o : m->obs)
+            for (const auto& r : o.rects)
+                stats.keepouts.push_back(
+                    {o.layer,
+                     dbu_to_lu(c.x) + um_to_lu(r.x1 - m->ox),
+                     dbu_to_lu(c.y) + um_to_lu(r.y1 - m->oy),
+                     dbu_to_lu(c.x) + um_to_lu(r.x2 - m->ox),
+                     dbu_to_lu(c.y) + um_to_lu(r.y2 - m->oy),
+                     "OBS of " + c.name});
+    }
+    // Power straps are real metal a signal cannot use.
+    for (const auto& w : def.special_wires) {
+        if (w.pts.size() < 2 || w.width <= 0) continue;
+        const double hw = dbu_to_lu(w.width) / 2.0;
+        for (size_t i = 1; i < w.pts.size(); ++i) {
+            const double ax = dbu_to_lu(w.pts[i-1].first),  ay = dbu_to_lu(w.pts[i-1].second);
+            const double bx = dbu_to_lu(w.pts[i].first),    by = dbu_to_lu(w.pts[i].second);
+            stats.keepouts.push_back({w.layer,
+                                      std::min(ax,bx)-hw, std::min(ay,by)-hw,
+                                      std::max(ax,bx)+hw, std::max(ay,by)+hw,
+                                      "SPECIALNET " + w.net});
         }
     }
 
-    // Persist die metadata so direct .bdb opens work without re-parsing
-    Stmt sm(_db, "INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)");
-    auto save_meta = [&](const char* k, const std::string& v) {
-        sqlite3_bind_text(sm,1,k,-1,SQLITE_STATIC);
-        sqlite3_bind_text(sm,2,v.c_str(),-1,SQLITE_TRANSIENT);
-        sqlite3_step(sm); sqlite3_reset(sm);
-    };
-    // Cell footprints, in the same layout units as the component bboxes built
-    // from them.  Leaving these in raw microns gave a 10 µm macro a
-    // 20000-unit component and a cell width of 10 at 2000 DBU/µm — `add_inst`
-    // would then create undersized instances and `export_gds` would draw the
-    // outline 2000x smaller than the placement it sits in (Codex P1 on #645).
+    // Cell footprints, in the same layout units as the component bboxes.
     {
         Stmt sc(_db, "INSERT OR REPLACE INTO cell(name,width,height) VALUES(?,?,?)");
         for (auto& [cname, sz] : lef_sizes) {
@@ -1538,32 +1572,39 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
         }
     }
 
-    // DBU mode resolves only now — the DEF's own UNITS is what it means —
-    // and is recorded as a NUMBER, so a reopened design carries the scale its
-    // coordinates were written in rather than a mode that would re-resolve
-    // against whatever DEF is imported next.
     if (_lu_from_def_units) {
         _lu_per_um = double(_units);
         _lu_from_def_units = false;
     }
-    // What the technology file said that this model cannot hold.  Recorded so
-    // "we ignored it" and "it was not in the file" stop looking the same.
+
+    Stmt sm(_db, "INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)");
+    auto save_meta = [&](const char* k, const std::string& v) {
+        sqlite3_bind_text(sm,1,k,-1,SQLITE_STATIC);
+        sqlite3_bind_text(sm,2,v.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_step(sm); sqlite3_reset(sm);
+    };
+    const std::string lef_census = _lef_unmodelled_census(lef);
+    save_meta("lef_unmodelled", lef_census);
+    save_meta("lef_units_dbu",
+              lef.units_dbu > 0 ? std::to_string(lef.units_dbu) : "");
+    save_meta("lef_manufacturing_grid",
+              lef.manufacturing_grid > 0
+                  ? std::to_string(lef.manufacturing_grid) : "");
     {
-        // Written UNCONDITIONALLY.  import_def_lef replaces the design
-        // tables, so leaving a previous technology file's census in place
-        // would have the database reporting constructs from a LEF that is no
-        // longer loaded — stale data reading as current, which is the exact
-        // failure this key exists to prevent (Codex P2 on #646).
-        const std::string census = _lef_unmodelled_census(lef);
-        save_meta("lef_unmodelled", census);
-        save_meta("lef_units_dbu",
-                  lef.units_dbu > 0 ? std::to_string(lef.units_dbu) : "");
-        save_meta("lef_manufacturing_grid",
-                  lef.manufacturing_grid > 0
-                      ? std::to_string(lef.manufacturing_grid) : "");
-        if (!census.empty())
-            std::cout << "[LEF] " << lef.unmodelled.size()
-                      << " unmodelled construct(s): " << census << "\n";
+        std::map<std::string,int> counts;
+        for (const auto& u : def.unmodelled) ++counts[u.construct];
+        std::vector<std::pair<std::string,int>> rows(counts.begin(), counts.end());
+        std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
+            if (a.second != b.second) return a.second > b.second;
+            return a.first < b.first;
+        });
+        std::string s;
+        for (const auto& [k, n] : rows) {
+            if (!s.empty()) s += ", ";
+            s += k + ":" + std::to_string(n);
+        }
+        stats.unmodelled = s;
+        save_meta("def_unmodelled", s);
     }
     save_meta("units", std::to_string(_units));
     save_meta("lu_per_um", std::to_string(_lu_per_um));
@@ -1571,6 +1612,7 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
     save_meta("die_h", std::to_string(_die_h));
 
     _exec("COMMIT");
+    return stats;
 }
 
 // ── Computed properties ───────────────────────────────────────────────────────
@@ -1604,7 +1646,7 @@ std::vector<ComponentRow> BDB::all_components() const {
     if (!_q_all_components)
         sqlite3_prepare_v2(_db,
             "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated,"
-            "COALESCE(orient,'N')"
+            "COALESCE(orient,'N'),COALESCE(is_port,0)"
             " FROM component ORDER BY id",
             -1, &_q_all_components, nullptr);
     sqlite3_reset(_q_all_components);
@@ -1624,6 +1666,7 @@ std::vector<ComponentRow> BDB::all_components() const {
         r.is_leaf      = sqlite3_column_int(q,9);
         r.is_replicated= sqlite3_column_int(q,10);
         r.orient       = col_txt(q,11);
+        r.is_port      = sqlite3_column_int(q,12);
         rows.push_back(r);
     }
     return rows;
@@ -2765,7 +2808,7 @@ std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
     if (!_q_components_at_depth)
         sqlite3_prepare_v2(_db,
             "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated,"
-            "COALESCE(orient,'N')"
+            "COALESCE(orient,'N'),COALESCE(is_port,0)"
             " FROM component WHERE depth=? ORDER BY id",
             -1, &_q_components_at_depth, nullptr);
     sqlite3_reset(_q_components_at_depth);
@@ -2786,6 +2829,7 @@ std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
         r.is_leaf      = sqlite3_column_int(q, 9);
         r.is_replicated= sqlite3_column_int(q, 10);
         r.orient       = col_txt(q, 11);
+        r.is_port      = sqlite3_column_int(q, 12);
         rows.push_back(r);
     }
     return rows;

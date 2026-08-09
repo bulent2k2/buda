@@ -305,6 +305,11 @@ void bind_nuts(py::module_& m) {
         }), py::arg("origin"), py::arg("slots"))
         .def_readwrite("origin",      &TrackPattern::origin)
         .def_readwrite("slots",       &TrackPattern::slots)
+        .def_readonly("bounded",      &TrackPattern::bounded)
+        .def_readonly("bound_lo",     &TrackPattern::bound_lo)
+        .def_readonly("bound_hi",     &TrackPattern::bound_hi)
+        .def("set_bounds",            &TrackPattern::set_bounds,
+             py::arg("lo"), py::arg("hi"))
         .def("unit_pitch",            &TrackPattern::unit_pitch)
         .def("signal_density",        &TrackPattern::signal_density)
         .def("dilution_factor",       &TrackPattern::dilution_factor)

@@ -222,7 +222,11 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # skip what the script declared, and a script declaration must be
         # able to replace what the import provided (Phase 2b).
         self._layer_source = {}      # layer_id -> 'script' | 'lef'
-        self._pattern_source = {}    # layer_id -> 'script' | 'lef'
+        self._pattern_source = {}    # layer_id -> 'script' | 'lef' | 'def'
+        # Wire WIDTH per layer, from LEF.  DEF TRACKS give a pitch and a
+        # position but no width — only the technology knows that — so a
+        # tech import feeds this and `import_def_lef` consumes it.
+        self._lef_track_width = {}   # layer_id -> width
         self._gds_label_layers = []  # def_gds_layer labels <csv> (import default)
         self._nuts_pitch = 1.0
         self._planner_pitch = None   # pitch the last run_planner reserved bands for

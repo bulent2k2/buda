@@ -181,12 +181,150 @@ def cmd_set_import_scale(session, cmd, args, cmd_line):
 
 
 def cmd_import_def_lef(session, cmd, args, cmd_line):
-    # import_def_lef <def_path> <lef_path>
+    # import_def_lef <def_path> <lef_path> [no_tracks] [no_blockages]
+    #
+    # Phase 3: the importer now returns what it read, and this reports it.
+    # A DEF states its own counts, so a reader that ignores them cannot tell
+    # a fully-read file from a half-read one — and a half-read floorplan is
+    # still a floorplan.
     if len(args) < 2:
         print("Error: import_def_lef requires <def_path> <lef_path>"); return
     if session.bdb is None:
         print("Error: open_bdb first"); return
-    session.bdb.import_def_lef(args[0], args[1])
+    reject_unknown_options("import_def_lef", args[2:],
+                           ("no_tracks", "no_blockages",
+                            "allow_missing_footprints"))
+    st = session.bdb.import_def_lef(args[0], args[1])
+
+    def _line(what, got, declared):
+        if declared is None or declared < 0:
+            return f"[DEF] {what}: {got}"
+        mark = "" if got == declared else "   <-- MISMATCH"
+        return f"[DEF] {what}: imported {got} of {declared}{mark}"
+
+    print(_line("components", st.imported_components, st.declared_components))
+    if st.declared_nets >= 0 or st.imported_nets:
+        print(_line("nets", st.imported_nets, st.declared_nets))
+    if st.declared_pins >= 0 or st.imported_pins:
+        print(_line("ports", st.imported_pins, st.declared_pins))
+    if st.placed_components != st.imported_components:
+        print(f"[DEF] {st.imported_components - st.placed_components} "
+              f"component(s) are UNPLACED — their coordinates are the DEF's "
+              f"default, not a placement")
+
+    # A cell in the DEF with no LEF footprint used to become a 0.5 x 0.5 um
+    # speck in silence, which turns a wrong-LEF run into a plausible and
+    # entirely wrong floorplan.  It is still imported (so every missing cell
+    # is reported at once rather than one per run), but it is now an ERROR:
+    # continuing would plan interconnect between fictional macros.
+    if st.missing_cells:
+        shown = ", ".join(st.missing_cells[:8])
+        more = f" (+{len(st.missing_cells) - 8} more)" if len(st.missing_cells) > 8 else ""
+        n_bad = len(st.missing_cells)
+        if "allow_missing_footprints" in args:
+            print(f"Warning: {n_bad} cell(s) in the DEF have no LEF footprint "
+                  f"and were sized 0.5 x 0.5 um: {shown}{more}")
+            print("         Continuing because `allow_missing_footprints` was "
+                  "given — the geometry of those instances is fiction.")
+        else:
+            print(f"Error: {n_bad} cell(s) in the DEF have no LEF footprint: "
+                  f"{shown}{more}")
+            print("       Every one of them would be sized 0.5 x 0.5 um, which "
+                  "is not a macro — a wrong-LEF run reads as a plausible and "
+                  "entirely wrong floorplan.  Check that the LEF matches this "
+                  "DEF, or pass `allow_missing_footprints` to proceed anyway.")
+            sys.exit(1)
+
+    if st.unmodelled:
+        print(f"[DEF] unmodelled construct(s): {st.unmodelled}")
+
+    # ── physical data the SESSION owns, not the database ─────────────────
+    if "no_tracks" not in args:
+        _apply_def_tracks(session, st)
+    if "no_blockages" not in args:
+        _apply_def_keepouts(session, st)
+
+
+def _apply_def_tracks(session, st):
+    """DEF TRACKS -> bounded track patterns (Phase 3b).
+
+    A `TRACKS <start> DO <n> STEP <s>` is an ENUMERATION, not a rule: it says
+    there are exactly n tracks and where they stop.  The pattern is therefore
+    installed BOUNDED, so a query past the declared range returns nothing
+    rather than tiles that do not exist.
+
+    Precedence matches `import_lef_tech`: a script-declared pattern wins."""
+    if not st.tracks:
+        return
+    installed, skipped = [], []
+    for tr in st.tracks:
+        for lname in tr.layers:
+            lid = session._layer_name_map.get(lname)
+            if lid is None:
+                skipped.append(f"{lname} (no such layer — declare it or "
+                               f"import_lef_tech first)")
+                continue
+            if session._pattern_source.get(lid) == "script":
+                skipped.append(f"{lname} (script-declared pattern wins)")
+                continue
+            # DEF gives the track PITCH directly; width is the layer's, which
+            # only the LEF knows.  Without one, a track is a position with no
+            # width — model it as a full-pitch signal slot, which is what the
+            # all-signal reading of a bare TRACKS statement means.
+            width = session._lef_track_width.get(lid, tr.step)
+            width = min(width, tr.step)
+            slot = buda.TrackSlot(type="SIGNAL", label="",
+                                  width=width, space_after=tr.step - width)
+            pat = buda.TrackPattern(origin=tr.start, slots=[slot])
+            pat.set_bounds(tr.start, tr.start + tr.step * max(tr.count - 1, 0))
+            if session.routing_grid is None:
+                session.routing_grid = buda.RoutingGridStack()
+            is_h = (tr.dir == "Y")     # `TRACKS Y` steps in y: horizontal tracks
+            session.routing_grid.define_layer(lid, pat, is_h)
+            session._pattern_source[lid] = "def"
+            session.layers.set_layer_dilution(lid, pat.dilution_factor())
+            session.layers.set_bit_pitch(lid, pat.unit_pitch())
+            installed.append(f"{lname}[{tr.count}@{tr.step:g}]")
+    if installed:
+        print(f"[DEF] tracks installed (bounded): {', '.join(installed)}")
+    for s in skipped:
+        print(f"[DEF] tracks skipped for {s}")
+
+
+def _apply_def_keepouts(session, st):
+    """BLOCKAGES / macro OBS / component HALO / power straps -> keepouts.
+
+    The keepout machinery already existed; this is wiring, and its absence
+    was the single most surprising omission for a routing tool — a router
+    that cannot see a blockage plans through it."""
+    if not st.keepouts:
+        return
+    by_why, unmapped = {}, set()
+    for k in st.keepouts:
+        lids = ([session._layer_name_map[k.layer]]
+                if k.layer and k.layer in session._layer_name_map
+                else ([] if k.layer else list(session._layer_name_map.values())))
+        if k.layer and not lids:
+            unmapped.add(k.layer)
+            continue
+        x1, y1 = int(round(k.x1)), int(round(k.y1))
+        x2, y2 = int(round(k.x2)), int(round(k.y2))
+        if x2 <= x1 or y2 <= y1:
+            continue                     # degenerate after quantization
+        # Both consumers, exactly as cmd_add_keepout does: the Floorplan
+        # feeds the planner, the RoutingGrid feeds DetailedNUTS.  Installing
+        # only one leaves a blockage that half the pipeline cannot see.
+        session.fp.add_keepout_zone(x1, y1, x2, y2, lids)
+        if session.routing_grid:
+            for lid in lids:
+                if session.routing_grid.has_layer(lid):
+                    session.routing_grid.add_keepout(lid, x1, y1, x2, y2)
+        by_why[k.why.split()[0]] = by_why.get(k.why.split()[0], 0) + 1
+    if by_why:
+        detail = ", ".join(f"{k}:{v}" for k, v in sorted(by_why.items()))
+        print(f"[DEF] keepouts added: {detail}")
+    for l in sorted(unmapped):
+        print(f"[DEF] keepouts on layer {l} skipped — no such layer")
 
 
 def cmd_import_verilog(session, cmd, args, cmd_line):

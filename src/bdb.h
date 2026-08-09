@@ -32,6 +32,31 @@ namespace buda {
 // Forward declaration only: the LEF reader is an implementation detail of the
 // importer, and bdb.h is included nearly everywhere (lef_io.h is not).
 struct LefLibrary;
+struct DefTracks;
+struct DefBlockage;
+
+// What `import_def_lef` hands back: the counts a caller must be able to
+// reconcile, plus the PHYSICAL data that belongs to the session rather than
+// the database (tracks, blockages, halos).  Deliberately not the whole
+// DefDesign — components and nets went into the tables, and a real DEF's
+// copy of them is the part that would not fit in memory twice.
+struct DefImportStats {
+    int declared_components = -1, imported_components = 0;
+    int declared_nets = -1, imported_nets = 0;
+    int declared_pins = -1, imported_pins = 0;
+    int placed_components = 0;
+    int port_components = 0;          // synthesized boundary comps (Phase 3d)
+    std::vector<std::string> missing_cells;   // in DEF, absent from LEF
+    std::vector<std::string> warnings;
+    std::string unmodelled;           // census, as in the LEF reader
+    // Physical data for the session to apply; coordinates already converted
+    // to LAYOUT UNITS by the importer (docs/internal/engine_units.md).
+    struct Track { std::string dir; double start, step; int count;
+                   std::vector<std::string> layers; };
+    struct Keepout { std::string layer; double x1, y1, x2, y2; std::string why; };
+    std::vector<Track>   tracks;
+    std::vector<Keepout> keepouts;
+};
 
 // ── Row types returned to Python / other modules ──────────────────────────
 
@@ -49,6 +74,11 @@ struct ComponentRow {
     // axis-aligned extent (so downstream stays bbox-only); orient is the extra
     // fact a faithful GDS SREF re-emit needs. Default 'N' (identity). (v12)
     std::string orient = "N";
+    // A synthesized boundary component standing in for a DEF top-level PORT
+    // (v23, Phase 3d).  Downstream stages treat it as a component because
+    // that is what makes a die-edge net routable at all; this flag is what
+    // stops the fiction from passing as a real instance.
+    bool        is_port = false;
 };
 
 struct NetRow {
@@ -379,7 +409,7 @@ public:
     //       since-changed resolution and VOID the restored plan).
     // v22 = ndr_rule.credit (R5a end-shield crediting opt-in — part of the
     //       rule's pricing basis, so it rides the same table).
-    static constexpr int SCHEMA_VERSION = 22;
+    static constexpr int SCHEMA_VERSION = 23;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -404,7 +434,8 @@ public:
     void meta_set(const std::string& key, const std::string& value);
 
     // ── Ingestion ──────────────────────────────────────────────────────────
-    void import_def_lef(const std::string& def_path, const std::string& lef_path);
+    DefImportStats import_def_lef(const std::string& def_path,
+                                  const std::string& lef_path);
     void import_verilog(const std::string& v_path);
     // Wipe the design tables (pin/net_props/net/component/cell) for a fresh
     // load — what import_def_lef does internally; public for import_gds.
