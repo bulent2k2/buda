@@ -120,9 +120,14 @@ out/…` lands in `flow/def/out/`, the two families agree on `flow/def/out/`
 **only from the repo root** — so `chip.buda` runs from there and nowhere
 else (`bin/buda flow/def/chip`, the ReadMe form). `cd flow/def && buda
 chip.buda` breaks the imports: `flow/def/chip.def` does not exist relative to
-that CWD. Rewriting the imports to bare (`chip.def`) is the *other*
-self-consistent config, run from inside `flow/def/` — the fork is real, and
-which config a copy is in is invisible on the page.
+that CWD. The *other* self-consistent config is to make **every CWD-rooted
+path** `flow/def/`-relative and run from inside `flow/def/` — not the imports
+alone: bare imports (`chip.def`) with the exports left at `flow/def/out/…`
+would resolve those to `flow/def/flow/def/out/…` and still fail. So it is
+`import_def_lef chip.def …` *and* `emit_guides out/… ` / `export_* out/…`
+together, at which point the script-rooted `save_bdb out/…` lines up on the
+same `flow/def/out/`. The fork is real, and which config a copy is in is
+invisible on the page.
 
 **Companion (FIXED) — the output directory was not created.** `emit_guides` /
 `export_def_blockages` / `export_gds` used to open their destination without a
