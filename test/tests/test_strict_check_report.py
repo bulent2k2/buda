@@ -111,8 +111,13 @@ def test_report_lists_silent_setup_commands(tmp_path):
     # …and they are marked as not surfaced, so a consumer can still tell
     # which ones the terminal showed.
     assert any(not c["surfaced"] for c in d["commands"])
+    # Epsilon, not exact: total_seconds is round(sum(rounded values), 4), and
+    # a 4-decimal value is not exactly representable in binary — so summing
+    # the surfaced subset here can exceed the stored total by float dust
+    # (measured flaking at 0.0029 >= 0.0029000000000000002, ~1/6 runs).  The
+    # invariant is about coverage, not femtosecond accounting.
     assert d["total_seconds"] >= sum(
-        c["seconds"] for c in d["commands"] if c["surfaced"])
+        c["seconds"] for c in d["commands"] if c["surfaced"]) - 1e-9
 
 
 def test_report_written_for_a_flow_ending_in_exit(tmp_path):
