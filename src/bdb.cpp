@@ -1389,6 +1389,8 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
 
     // ── COMPONENTS ───────────────────────────────────────────────────────
     std::set<std::string> missing;
+    std::set<std::string> comp_names;
+    for (const auto& c : def.components) comp_names.insert(c.name);
     for (const auto& c : def.components) {
         double w = 0, h = 0;
         auto cs = lef_sizes.find(c.cell);
@@ -1446,8 +1448,24 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     // in the database and to the audits.  Every downstream stage already
     // understands components; the cost is one fictional instance per port,
     // and the flag is what keeps it from passing as a real one.
+    // DEF ports and component instances are SEPARATE namespaces, so a legal
+    // design may name both the same.  Inserting the port under its bare name
+    // would then be dropped by INSERT OR IGNORE, and the `( PIN name )`
+    // lookup below would resolve to the real instance — attaching the
+    // boundary connection to the wrong component and never setting is_port
+    // (Codex P2 on #647).  An internal name that cannot collide keeps them
+    // apart; `port_comp` maps the external name back to it.
+    std::map<std::string, std::string> port_comp;
     for (const auto& p : def.pins) {
         if (!p.placed) continue;                 // no location: not an endpoint
+        std::string cname = "PIN/" + p.name;
+        if (comp_names.count(cname)) {
+            // Even the prefixed form can collide with a real instance path.
+            int k = 2;
+            while (comp_names.count(cname + "#" + std::to_string(k))) ++k;
+            cname += "#" + std::to_string(k);
+        }
+        port_comp[p.name] = cname;
         const double px = dbu_to_lu(p.x), py = dbu_to_lu(p.y);
         double x1 = px, y1 = py, x2 = px, y2 = py;
         for (const auto& r : p.rects) {          // shapes are relative to PLACED
@@ -1456,7 +1474,7 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
             x2 = std::max(x2, px + dbu_to_lu(r.x2));
             y2 = std::max(y2, py + dbu_to_lu(r.y2));
         }
-        sqlite3_bind_text  (s_comp,1,p.name.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_text  (s_comp,1,cname.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_bind_text  (s_comp,2,"__PORT__",-1,SQLITE_STATIC);
         sqlite3_bind_double(s_comp,3,x1);
         sqlite3_bind_double(s_comp,4,y1);
@@ -1482,7 +1500,12 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         for (const auto& cn : n.conns) {
             // A `( PIN <portName> )` connection names a die port, which is a
             // boundary component above; anything else names an instance.
-            const std::string inst = cn.is_port() ? cn.pin : cn.inst;
+            std::string inst = cn.inst;
+            if (cn.is_port()) {
+                auto pit = port_comp.find(cn.pin);
+                if (pit == port_comp.end()) continue;   // unplaced port
+                inst = pit->second;
+            }
             const int cid = get_comp_id(inst);
             if (cid < 0) continue;
             std::string dir = "UNKNOWN";
@@ -1537,15 +1560,45 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     for (const auto& c : def.components) {
         const LefMacro* m = lef.find_macro(c.cell);
         if (!m) continue;
+        // An OBS rect is in the MACRO's frame.  Translating it without
+        // applying the instance's orientation puts the keepout somewhere the
+        // obstruction is not — blocking empty space while the real
+        // obstruction stays routable, which is a physically invalid route
+        // the audit cannot see (Codex P1 on #647).
+        //
+        // The macro's placed extent is [0, w] x [0, h] after rotation, with
+        // the lower-left at the DEF placement point (the convention the
+        // component bbox above already uses), so the transform maps the
+        // macro's own box onto that.
+        const double mw = um_to_lu(m->w), mh = um_to_lu(m->h);
+        const auto [otok, swap_wh] = def_orient_to_bdb(c.orient);
+        const std::string o8 = c.orient.empty() ? "N" : c.orient;
+        auto xform = [&](double x, double y, double& ox, double& oy) {
+            // x, y are macro-frame layout units with ORIGIN already removed.
+            if      (o8 == "N")  { ox = x;        oy = y;        }
+            else if (o8 == "S")  { ox = mw - x;   oy = mh - y;   }
+            else if (o8 == "FN") { ox = mw - x;   oy = y;        }   // mirror Y
+            else if (o8 == "FS") { ox = x;        oy = mh - y;   }   // mirror X
+            else if (o8 == "W")  { ox = mh - y;   oy = x;        }   // CCW 90
+            else if (o8 == "E")  { ox = y;        oy = mw - x;   }   // CW 90
+            else if (o8 == "FW") { ox = y;        oy = x;        }
+            else if (o8 == "FE") { ox = mh - y;   oy = mw - x;   }
+            else                 { ox = x;        oy = y;        }
+        };
+        (void)swap_wh;
         for (const auto& o : m->obs)
-            for (const auto& r : o.rects)
+            for (const auto& r : o.rects) {
+                double ax, ay, bx, by;
+                xform(um_to_lu(r.x1 - m->ox), um_to_lu(r.y1 - m->oy), ax, ay);
+                xform(um_to_lu(r.x2 - m->ox), um_to_lu(r.y2 - m->oy), bx, by);
                 stats.keepouts.push_back(
                     {o.layer,
-                     dbu_to_lu(c.x) + um_to_lu(r.x1 - m->ox),
-                     dbu_to_lu(c.y) + um_to_lu(r.y1 - m->oy),
-                     dbu_to_lu(c.x) + um_to_lu(r.x2 - m->ox),
-                     dbu_to_lu(c.y) + um_to_lu(r.y2 - m->oy),
+                     dbu_to_lu(c.x) + std::min(ax, bx),
+                     dbu_to_lu(c.y) + std::min(ay, by),
+                     dbu_to_lu(c.x) + std::max(ax, bx),
+                     dbu_to_lu(c.y) + std::max(ay, by),
                      "OBS of " + c.name});
+            }
     }
     // Power straps are real metal a signal cannot use.
     for (const auto& w : def.special_wires) {

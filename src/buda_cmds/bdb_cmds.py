@@ -258,6 +258,9 @@ def _apply_def_tracks(session, st):
         return
     installed, skipped = [], []
     for tr in st.tracks:
+        # `TRACKS X` steps in x, so its tracks carry VERTICAL wires; `TRACKS Y`
+        # carries horizontal ones.
+        tr_is_h = (tr.dir == "Y")
         for lname in tr.layers:
             lid = session._layer_name_map.get(lname)
             if lid is None:
@@ -267,20 +270,40 @@ def _apply_def_tracks(session, st):
             if session._pattern_source.get(lid) == "script":
                 skipped.append(f"{lname} (script-declared pattern wins)")
                 continue
+            # A DEF supplies TRACKS in BOTH directions for most layers — the
+            # off-direction ones exist for pin access and vias, not for
+            # routing.  `define_layer` replaces the pattern AND the
+            # orientation, so taking every statement meant the last one won:
+            # on the checked-in ariane DEF every mapped layer would end up on
+            # its Y grid and marked horizontal, including layers the
+            # technology declares vertical (Codex P1 on #647).  The layer's
+            # own direction decides which statement is its routing grid.
+            if not session.layers.has_layer(lid):
+                skipped.append(f"{lname} (no layer row)")
+                continue
+            layer_is_h = (session.layers.get_layer_dir(lid) ==
+                          buda.LayerDir.HORIZONTAL)
+            if tr_is_h != layer_is_h:
+                continue                 # the off-direction grid: not routing
             # DEF gives the track PITCH directly; width is the layer's, which
             # only the LEF knows.  Without one, a track is a position with no
             # width — model it as a full-pitch signal slot, which is what the
             # all-signal reading of a bare TRACKS statement means.
             width = session._lef_track_width.get(lid, tr.step)
             width = min(width, tr.step)
+            # DEF's `start` is the CENTRE of the first track; TrackPattern's
+            # origin is the START of the first slot, and the generator returns
+            # `origin + width/2` as the centre.  Anchoring at `start` would
+            # shift every imported track by half its width (Codex P1 on #647).
             slot = buda.TrackSlot(type="SIGNAL", label="",
                                   width=width, space_after=tr.step - width)
-            pat = buda.TrackPattern(origin=tr.start, slots=[slot])
+            pat = buda.TrackPattern(origin=tr.start - width / 2.0, slots=[slot])
+            # Bounds are in CENTRE space, which is what tracks_in_range
+            # clamps: first centre .. last centre, both inclusive.
             pat.set_bounds(tr.start, tr.start + tr.step * max(tr.count - 1, 0))
             if session.routing_grid is None:
                 session.routing_grid = buda.RoutingGridStack()
-            is_h = (tr.dir == "Y")     # `TRACKS Y` steps in y: horizontal tracks
-            session.routing_grid.define_layer(lid, pat, is_h)
+            session.routing_grid.define_layer(lid, pat, layer_is_h)
             session._pattern_source[lid] = "def"
             session.layers.set_layer_dilution(lid, pat.dilution_factor())
             session.layers.set_bit_pitch(lid, pat.unit_pitch())
