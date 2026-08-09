@@ -40,6 +40,10 @@ import re
 import sys
 from fractions import Fraction as F
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                os.pardir, "src"))
+from slot_groups import expand_slot_groups  # noqa: E402
+
 RAILS = ("POWER", "GROUND", "CLOCK", "SHIELD", "VDD", "VSS", "GND", "CLK")
 PAT = re.compile(r"^(\s*def_track_pattern\s+(\S+)\s+(\S+)\s+)(.*?)(\s*)$")
 
@@ -50,10 +54,33 @@ def fmt(x):
 
 
 def parse_slots(rest):
-    tok = rest.split()
+    # Expand `( <slots> )x<N>` through the CLI's OWN parser -- this tool reads
+    # the same fixtures the CLI does, and a private triple-splitter here would
+    # read `0.25)x7` as a width the moment a fixture uses the compact form.
+    tok = expand_slot_groups("def_track_pattern", rest.split())
     if len(tok) % 3:
         raise ValueError(f"slot list is not a multiple of 3: {rest!r}")
     return [(tok[i], F(tok[i + 1]), F(tok[i + 2])) for i in range(0, len(tok), 3)]
+
+
+def regroup(slot_strs, min_run=3):
+    """Re-collapse runs of identical slots into `( <slot> )x<N>`.
+
+    Doubling turns one signal slot into two, so a fixture written compactly as
+    `(SIGNAL 0.5 0.25)x7` would come back as fourteen longhand triples — the
+    tool would silently undo the compact form on every file it touched.  The
+    threshold matches the repo-wide rewrite: 3+ identical consecutive slots.
+    """
+    slot_strs = list(slot_strs)
+    out, i, n = [], 0, len(slot_strs)
+    while i < n:
+        k = 1
+        while i + k < n and slot_strs[i + k] == slot_strs[i]:
+            k += 1
+        out.append(f"({slot_strs[i]})x{k}" if k >= min_run
+                   else "  ".join(slot_strs[i:i + k]))
+        i += k
+    return out
 
 
 def period(slots):
@@ -101,7 +128,7 @@ def transform_line(line):
     for _, w, s in new:
         assert exact(w) and exact(s), f"L{lid}: {w}/{s} not binary-exact"
 
-    body = "  ".join(f"{t} {fmt(w)} {fmt(s)}" for t, w, s in new)
+    body = "  ".join(regroup(f"{t} {fmt(w)} {fmt(s)}" for t, w, s in new))
     note = (f"L{lid}: {n_signals(old)} -> {n_signals(new)} signals, "
             f"period {fmt(period(old))} held, metal {fmt(signal_metal(old))} held")
     return head + body + "\n", note

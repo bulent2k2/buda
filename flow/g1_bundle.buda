@@ -6,8 +6,8 @@ def_layer 6  M6  V  LOW   0
 def_layer 7  M7  H  TOP   0
 def_layer 8  M8  V  TOP   0
 
-def_track_pattern 7  0.0  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  POWER 0.8 0.0  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  GROUND 0.8 0.0
-def_track_pattern 8  0.0  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  POWER 0.8 0.0  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  GROUND 0.8 0.0
+def_track_pattern 7  0.0  (SIGNAL 0.4 0.4)x4  POWER 0.8 0.0  (SIGNAL 0.4 0.4)x4  GROUND 0.8 0.0
+def_track_pattern 8  0.0  (SIGNAL 0.4 0.4)x4  POWER 0.8 0.0  (SIGNAL 0.4 0.4)x4  GROUND 0.8 0.0
 
 corner_margin dx 0.5 dy 0.5
 

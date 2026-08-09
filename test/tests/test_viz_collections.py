@@ -404,8 +404,8 @@ def test_heatmap_off_by_default():
 _P705_FLOW = """
 def_layer 4 M4 H TOP 50
 def_layer 5 M5 V TOP 50
-def_track_pattern 4 0 SIGNAL 1 1 SIGNAL 1 1 SIGNAL 1 1
-def_track_pattern 5 0 SIGNAL 1 1 SIGNAL 1 1 SIGNAL 1 1
+def_track_pattern 4 0 (SIGNAL 1 1)x3
+def_track_pattern 5 0 (SIGNAL 1 1)x3
 add_block A 0 0 100 100
 add_block B 300 0 400 100
 add_block C 0 300 100 400

@@ -66,8 +66,8 @@ run_nuts
 # Stage 8: simple power-signal track grid on both routing layers.
 # Pattern: POWER(3) sig(2) sig(2) sig(2) GROUND(3) sig(2) sig(2) sig(2)
 # unit_pitch = 26;  6 signal tracks per unit.
-def_track_pattern 4 0  POWER 3 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  GROUND 3 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
-def_track_pattern 5 0  POWER 3 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  GROUND 3 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 4 0  POWER 3 1  (SIGNAL 2 1)x3  GROUND 3 1  (SIGNAL 2 1)x3
+def_track_pattern 5 0  POWER 3 1  (SIGNAL 2 1)x3  GROUND 3 1  (SIGNAL 2 1)x3
 
 run_detailed_nuts
 

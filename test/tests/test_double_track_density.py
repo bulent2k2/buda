@@ -121,6 +121,34 @@ def test_the_irregular_fixture_survives():
 
 
 # --------------------------------------------------------------------------- #
+# `( <slots> )x<N>` — the tool reads AND writes the compact form
+# --------------------------------------------------------------------------- #
+def test_compact_slot_groups_are_read_not_mistaken_for_widths(tmp_path):
+    """The fixtures are written compactly, and this tool has its own parser.
+    Before it shared the CLI's expansion it read `0.25)x7` as a width and died
+    on every grouped file."""
+    p = tmp_path / "t.buda"
+    p.write_text("def_track_pattern 2 0  POWER 2 1  (SIGNAL 1 0.5)x4\n")
+    lid, _origin, slots = _patterns(p)[0]
+    assert lid == "2"
+    assert [t for t, _w, _s in slots] == ["POWER"] + ["SIGNAL"] * 4
+    assert dtd.period(slots) == F(9)
+
+
+def test_doubling_keeps_the_compact_form(tmp_path):
+    """Doubling turns each signal slot into two, so without re-collapsing, the
+    tool would silently expand `(SIGNAL 1 0.5)x4` to eight longhand triples —
+    un-doing the compact form on every file it touched."""
+    p = tmp_path / "t.buda"
+    p.write_text("def_track_pattern 2 0  POWER 2 1  (SIGNAL 1 0.5)x4\n")
+    subprocess.run([sys.executable, str(TOOL), str(p)], check=True,
+                   capture_output=True)
+    assert "(SIGNAL 0.5 0.25)x8" in p.read_text()
+    # and it is still the same period, read back through the same parser
+    assert dtd.period(_patterns(p)[0][2]) == F(9)
+
+
+# --------------------------------------------------------------------------- #
 # the symlink hazard — this bit once, for real
 # --------------------------------------------------------------------------- #
 def test_symlinked_fixture_is_not_doubled_twice(tmp_path):
