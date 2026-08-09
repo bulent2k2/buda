@@ -401,3 +401,19 @@ def cmd_export_def_blockages(session, cmd, args, cmd_line):
 
 COMMANDS["emit_guides"] = cmd_emit_guides
 COMMANDS["export_def_blockages"] = cmd_export_def_blockages
+
+
+def cmd_dump_messages(session, cmd, args, cmd_line):
+    # Usage: dump_messages
+    #
+    # Phase 5: the message catalogue.  A methodology needs to know what it
+    # may waive or gate on BEFORE the message fires, which is what an id
+    # buys over prose that changes with the next wording improvement.
+    import buda_diag
+    rows = buda_diag.catalogue()
+    print(f"[Messages] {len(rows)} identified diagnostic(s)")
+    for mid, sev, text in rows:
+        print(f"  {mid}  {sev:<7}  {text}")
+
+
+COMMANDS["dump_messages"] = cmd_dump_messages

@@ -33,6 +33,7 @@ if _tools not in sys.path:
 import buda
 
 faulthandler.enable()
+import buda_diag
 from buda_cmds import COMMANDS
 from buda_session import (PersistMixin, HierMixin, NutsFlowMixin,
                           EditMixin, ReportsMixin, RipupMixin,
@@ -57,6 +58,46 @@ from buda_session.util import (_batched, _RR_DEFAULT_MAX_ITER,  # noqa: F401
 # is likewise not a diagnostic and correctly does not count.
 _DIAG_ERR_RE  = re.compile(r'\bERRORS?\b|(?i:\berrors?\s*:)')
 _DIAG_WARN_RE = re.compile(r'\bWARNINGS?\b|(?i:\bwarnings?\s*:)')
+
+
+def _count_diags(lines):
+    """(warnings, errors) over a command's captured output.
+
+    An IDENTIFIED line (`BUDA-1602: WARNING: …`) is counted at its DECLARED
+    severity; everything else falls back to the marker regexes above.  That
+    ordering is the point of Phase 5's message ids: guessing severity from
+    the words in the text is a heuristic that is wrong in both directions —
+    it counts a line whose detail merely mentions "warning", and it counts a
+    FATAL as nothing, because "fatal" is not one of the words it looks for.
+
+    Unidentified output is matched exactly as before, so every existing flow
+    log counts the same (test-pinned)."""
+    nwarn = nerr = 0
+    for ln in lines:
+        sev = buda_diag.severity_of_line(ln)
+        if sev is None:
+            if _DIAG_WARN_RE.search(ln):
+                nwarn += 1
+            if _DIAG_ERR_RE.search(ln):
+                nerr += 1
+        elif sev == buda_diag.WARNING:
+            nwarn += 1
+        elif sev in (buda_diag.ERROR, buda_diag.FATAL):
+            nerr += 1
+    return nwarn, nerr
+
+
+def _is_error_line(ln):
+    """Does this line LEAD with a failure diagnostic?
+
+    Both accepted forms: the prose `Error: …` and an identified
+    `BUDA-NNNN: ERROR|FATAL: …`.  Used for headline selection, so converting
+    a call site to an id cannot demote its message out of the terminal
+    summary — a silent cost that would have made every conversion a small
+    regression."""
+    if _ERROR_RE.match(ln):
+        return True
+    return buda_diag.severity_of_line(ln) in (buda_diag.ERROR, buda_diag.FATAL)
 
 # Every command BudaSession.do_command() understands. Used to detect typos in
 # scripts (e.g. 'add_layer' for 'def_layer') and suggest the closest match.
@@ -127,6 +168,18 @@ _ERROR_RE = re.compile(r'\s*Error\b', re.I)
 # child commands are each summarized instead, and the visualize commands open
 # interactive windows whose output belongs on the terminal.
 _PASSTHROUGH_CMDS = frozenset({"source", "visualize", "visualize_topologies"})
+
+
+def _rotate_log(path):
+    """Move an existing log to `<path>.1` so a re-run does not destroy it.
+
+    Best-effort by design: a log that cannot be rotated must not stop the
+    run — losing the previous log is bad, losing the run is worse."""
+    try:
+        if os.path.exists(path):
+            os.replace(path, path + ".1")
+    except OSError:
+        pass
 
 
 def _strip_inline_comment(line):
@@ -390,8 +443,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # bracketed uppercase (`[Planner] WARNING:`) and capitalised-with-colon
         # (`  Error: run_nuts required first.`) — which is byte-identical on
         # every current corpus log (verified) while ignoring incidental prose.
-        nwarn    = sum(1 for ln in lines if _DIAG_WARN_RE.search(ln))
-        nerr     = sum(1 for ln in lines if _DIAG_ERR_RE.search(ln))
+        nwarn, nerr = _count_diags(lines)
 
         # Silent, instant setup commands (add_block, def_layer, set_*, …) are
         # not worth a terminal line or a log section — only surface commands
@@ -439,7 +491,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         one is the primary complaint (later ones are continuations).
         """
         for ln in nonblank:
-            if _ERROR_RE.match(ln):
+            if _is_error_line(ln):
                 return ln.strip()
         for ln in reversed(nonblank):
             if any(m.search(ln) for m in _SUMMARY_MARKERS):
@@ -456,7 +508,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # already says and eats ~8 columns of the truncation budget — columns
         # the actionable part of the message needs.  Only the redundant err
         # count is dropped; a warn count still carries new information.
-        if nerr and not _ERROR_RE.match(headline):
+        if nerr and not _is_error_line(headline):
             flags += f"[{nerr} err] "
         if nwarn: flags += f"[{nwarn} warn] "
         detail = (flags + headline).strip()
@@ -826,6 +878,14 @@ def main():
         # are no longer duplicated.
         flow_log_path = session._get_log_path('flow.log')
         session._flow_log_path = flow_log_path
+        # Non-overwriting logs (Phase 5).  A re-run used to destroy the
+        # previous log in place, so the evidence for "it worked an hour ago"
+        # was gone the moment you tried to reproduce it.  The CANONICAL path
+        # is kept — 36 tests and every doc reference point at it — and the
+        # previous run is rotated to `<name>.1` instead.  One generation is
+        # enough to compare a run against the one before it, which is the
+        # case that actually comes up; `--log` still archives every run.
+        _rotate_log(flow_log_path)
         try:
             session._flow_log = open(flow_log_path, 'w', buffering=1)
         except OSError as e:
@@ -893,9 +953,11 @@ def main():
         # design audit that never ran.
         if strict_failed:
             n = sum(a.get("violations", 0) for a in session._audits)
-            print(f"\nError: --strict-check — design audit failed "
-                  f"({n} violation(s) across {len(session._audits)} "
-                  f"check_design call(s)); exiting {status}.")
+            print()
+            buda_diag.emit("BUDA-1902",
+                           f"--strict-check — design audit failed "
+                           f"({n} violation(s) across {len(session._audits)} "
+                           f"check_design call(s)); exiting {status}.")
         if status:
             sys.exit(status)
     else:

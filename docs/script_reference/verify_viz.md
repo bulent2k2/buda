@@ -412,3 +412,36 @@ export_def_blockages out/advisory.def density 0.6
 ```
 
 ---
+
+## Diagnostics
+
+### `dump_messages`
+
+```
+dump_messages
+```
+
+Print the **message catalogue**: every identified diagnostic BUDA can emit,
+with its id and severity.
+
+```
+[Messages] 9 identified diagnostic(s)
+  BUDA-1601  ERROR    A cell in the DEF has no footprint in the LEF.
+  BUDA-1602  WARNING  Imported design counts differ from the counts the file declares.
+  ...
+```
+
+A methodology needs to know what it may waive or gate on *before* the
+message fires, which is what an id buys over prose that changes with the
+next wording improvement. Identified diagnostics print as
+
+```
+BUDA-<NNNN>: <SEVERITY>: <text>
+```
+
+and the id, once issued, never changes meaning. The severity on the line is
+authoritative — `set_unit_check warn` downgrades BUDA-1901 rather than
+renaming it, so a gate on the id keeps working either way. Full contract:
+[message ids](../internal/message_ids.md).
+
+---
