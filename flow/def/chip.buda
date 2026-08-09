@@ -132,8 +132,11 @@ export_gds flow/def/out/chip.gds outline 10 labels 63
 
 # NOTE the path: `save_bdb` resolves a relative destination against the
 # SCRIPT's directory, while the import and export commands above resolve
-# against the CWD.  Same-looking paths, different roots — worth knowing
-# before you go looking for a file that did get written, somewhere else.
+# against the CWD.  So does `open_bdb` at the top of this file — which means
+# `open_bdb` and `import_def_lef`, two adjacent lines, use different roots.
+# Same-looking paths, different meanings — worth knowing before you go
+# looking for a file that did get written, somewhere else.
+# (docs/internal/opens_interchange.md item 4.)
 save_bdb out/chip.bdb.sql
 
 visualize
