@@ -14,6 +14,13 @@ Every claim below was checked against the source; file:line references
 are given so a reviewer can re-derive the conclusion rather than trust
 it.
 
+> **All five phases have LANDED** (0–5, 2026-08; PRs #643, #645–#650).  The
+> end-to-end vehicle is [`flow/def/`](../../flow/def/) — a LEF + DEF +
+> Verilog design read off disk and routed clean.  What the interface does
+> **not** do yet is tracked in
+> [`opens_interchange.md`](opens_interchange.md); each phase's as-built
+> notes stay inline below, in the section that planned it.
+
 ---
 
 ## 0. The target: advisory planner (decided)

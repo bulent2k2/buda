@@ -107,3 +107,13 @@ invented does not. Note also that the metal map starts at GDS layer **11**:
 `export_gds` writes cell outlines on layer 10 by default, and a re-import
 reads every shape on a mapped routing pair as a wire, so mapping a metal
 onto 10 hands the outlines back as routing.
+
+## Known limits
+
+The two notes above, and everything else this vehicle exposed that is still
+open, are owned by
+[`docs/internal/opens_interchange.md`](../../docs/internal/opens_interchange.md)
+— including the ones you will hit first on a *real* design rather than this
+one: a blackbox macro instance is dropped unless its name is
+backslash-escaped (item 1), and a vector port map collapses to a single net
+(item 2, which is why this design's netlist uses four scalar wires per bus).
