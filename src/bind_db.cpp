@@ -22,6 +22,7 @@
 #include "bdb.h"
 #include "busterm.h"
 #include "gds_io.h"
+#include "lef_io.h"
 
 namespace py = pybind11;
 using namespace buda;
@@ -295,6 +296,79 @@ void bind_db(py::module_& m) {
         .def_readonly("n_labels",      &GdsExportStats::n_labels)
         .def_readonly("stage",         &GdsExportStats::stage)
         .def_readonly("warnings",      &GdsExportStats::warnings);
+
+    // ── LEF reader (Phase 2) ──────────────────────────────────────────────
+    // Bound as data, not just as an import side effect: the reader is
+    // BDB-agnostic by design, and a technology file is exactly the kind of
+    // input worth inspecting before deciding what it means.
+    py::class_<LefRect>(m, "LefRect")
+        .def_readonly("x1", &LefRect::x1).def_readonly("y1", &LefRect::y1)
+        .def_readonly("x2", &LefRect::x2).def_readonly("y2", &LefRect::y2);
+
+    py::class_<LefPort>(m, "LefPort")
+        .def_readonly("layer", &LefPort::layer)
+        .def_readonly("rects", &LefPort::rects);
+
+    py::class_<LefPinDef>(m, "LefPinDef")
+        .def_readonly("name",  &LefPinDef::name)
+        .def_readonly("dir",   &LefPinDef::dir)
+        .def_readonly("use",   &LefPinDef::use)
+        .def_readonly("shape", &LefPinDef::shape)
+        .def_readonly("ports", &LefPinDef::ports)
+        .def("has_geometry",   &LefPinDef::has_geometry)
+        .def("centroid", [](const LefPinDef& p) {
+            double x = 0, y = 0;
+            if (!p.centroid(x, y)) return py::object(py::none());
+            return py::object(py::make_tuple(x, y));
+        });
+
+    py::class_<LefMacro>(m, "LefMacro")
+        .def_readonly("name",     &LefMacro::name)
+        .def_readonly("cls",      &LefMacro::cls)
+        .def_readonly("w",        &LefMacro::w)
+        .def_readonly("h",        &LefMacro::h)
+        .def_readonly("ox",       &LefMacro::ox)
+        .def_readonly("oy",       &LefMacro::oy)
+        .def_readonly("symmetry", &LefMacro::symmetry)
+        .def_readonly("site",     &LefMacro::site)
+        .def_readonly("foreign",  &LefMacro::foreign)
+        .def_readonly("pins",     &LefMacro::pins)
+        .def_readonly("obs",      &LefMacro::obs)
+        .def("find_pin", &LefMacro::find_pin,
+             py::return_value_policy::reference_internal);
+
+    py::class_<LefTechLayer>(m, "LefTechLayer")
+        .def_readonly("name",    &LefTechLayer::name)
+        .def_readonly("type",    &LefTechLayer::type)
+        .def_readonly("dir",     &LefTechLayer::dir)
+        .def_readonly("pitch",   &LefTechLayer::pitch)
+        .def_readonly("width",   &LefTechLayer::width)
+        .def_readonly("spacing", &LefTechLayer::spacing)
+        .def_readonly("offset",  &LefTechLayer::offset)
+        .def_readonly("area",    &LefTechLayer::area)
+        .def_readonly("has_pitch",   &LefTechLayer::has_pitch)
+        .def_readonly("has_width",   &LefTechLayer::has_width)
+        .def_readonly("has_spacing", &LefTechLayer::has_spacing)
+        .def_readonly("has_offset",  &LefTechLayer::has_offset)
+        .def_readonly("has_area",    &LefTechLayer::has_area);
+
+    py::class_<LefUnmodelled>(m, "LefUnmodelled")
+        .def_readonly("construct", &LefUnmodelled::construct)
+        .def_readonly("detail",    &LefUnmodelled::detail)
+        .def_readonly("line",      &LefUnmodelled::line);
+
+    py::class_<LefLibrary>(m, "LefLibrary")
+        .def_readonly("units_dbu",  &LefLibrary::units_dbu)
+        .def_readonly("manufacturing_grid", &LefLibrary::manufacturing_grid)
+        .def_readonly("macros",     &LefLibrary::macros)
+        .def_readonly("layers",     &LefLibrary::layers)
+        .def_readonly("unmodelled", &LefLibrary::unmodelled)
+        .def_readonly("warnings",   &LefLibrary::warnings)
+        .def("find_macro", &LefLibrary::find_macro,
+             py::return_value_policy::reference_internal);
+
+    m.def("read_lef",  &read_lef,  py::arg("path"));
+    m.def("parse_lef", &parse_lef, py::arg("text"), py::arg("where") = "<text>");
 
     py::class_<BDB>(m, "BDB")
         .def(py::init<const std::string&>())

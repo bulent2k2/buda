@@ -29,6 +29,10 @@
 
 namespace buda {
 
+// Forward declaration only: the LEF reader is an implementation detail of the
+// importer, and bdb.h is included nearly everywhere (lef_io.h is not).
+struct LefLibrary;
+
 // ── Row types returned to Python / other modules ──────────────────────────
 
 struct ComponentRow {
@@ -781,8 +785,11 @@ private:
     using LefCells = std::unordered_map<std::string, LefCell>;
     using LefPins  = std::unordered_map<std::string,
                          std::unordered_map<std::string, LefPin>>;
-    static LefCells _parse_lef_sizes(const std::string& lef_path);
-    static LefPins  _parse_lef_pins (const std::string& lef_path);
+    // Projections of a parsed LEF onto what the BDB stores (Phase 2a; the
+    // parsing itself lives in lef_io.cpp).
+    static LefCells _lef_cells(const LefLibrary& lib);
+    static LefPins  _lef_pins (const LefLibrary& lib);
+    static std::string _lef_unmodelled_census(const LefLibrary& lib);
 };
 
 }  // namespace buda

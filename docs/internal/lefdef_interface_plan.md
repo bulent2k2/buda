@@ -238,6 +238,43 @@ reserves bus widths within a few percent of the µm-mode run
 
 ## 3. Phase 2 — LEF reader (≈ 3–4 weeks)
 
+> **2a / 2d LANDED** (2026-08).  `src/lefdef_lex.h` (the shared token layer)
+> and `src/lef_io.{h,cpp}` (a recursive-descent LEF reader) replace the two
+> line-oriented scanners in `bdb.cpp`, which now holds only the PROJECTION
+> onto what the BDB stores.  2b (tech `LAYER` → synthesized `TrackPattern`)
+> is deliberately separate: it changes what the planner sees, which the macro
+> reader does not.
+>
+> What changed beyond "reads more":
+> - **`ORIGIN` is honoured.**  Pin coordinates are relative to the geometry
+>   origin, so ignoring it put every pin of such a macro somewhere it is not —
+>   with no symptom until routing landed on nothing.
+> - **Layout stopped being syntax.**  The scanners read line by line, so a
+>   statement wrapped across lines — legal, and what tool-written files
+>   eventually contain — was invisible.  The tokenizer honours `;`.
+> - **A malformed technology file now stops the run**, with `file:line`,
+>   instead of importing as a partial library that reads as complete.
+> - **Unmodelled constructs are recorded**, not dropped: `LefLibrary::
+>   unmodelled` with the line, plus a census in BDB meta (`lef_unmodelled`)
+>   and a printed summary.  "We ignored it" and "it was not in the file" no
+>   longer look the same.
+>
+> Fidelity evidence: on the two real LEF files in the tree
+> (`demo/ariane/ariane.lef`, 45 pins; `tools/data/four_blocks.lef`) the new
+> reader's projection is **identical** to a re-implementation of the old
+> scanner — same pins, same coordinates, same directions.  Full tier 2590
+> passed, 0 failed.
+>
+> Deliberately NOT changed: power/ground/clock pins are still not projected
+> into BDB pin rows (they are pre-routes, not signal terminals) — but they
+> are now read and reachable, so that is a decision at the projection
+> boundary rather than a silent drop inside a parser.
+>
+> Known gap left open: `tools/def_cluster.py` and `tools/def_viz_o2.py` carry
+> their own independent Python LEF scanners.  Consolidating them onto this
+> reader is worth doing and is not part of Phase 2.
+
+
 Today's LEF support is two ad-hoc scanners recognizing `MACRO`, `SIZE`,
 `PIN`, `DIRECTION`, `USE`, `RECT` (`src/bdb.cpp:1174`, `:1195`).
 Everything else is ignored, pin geometry is collapsed to a centroid

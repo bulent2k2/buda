@@ -145,6 +145,7 @@ add_library(buda_core SHARED
     src/bundler.cpp
     src/bundle_refiner.cpp
     src/gds_io.cpp
+    src/lef_io.cpp
 )
 target_include_directories(buda_core PUBLIC src)
 set_target_properties(buda_core PROPERTIES
