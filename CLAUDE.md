@@ -167,7 +167,8 @@ Set `export PYTHONPATH=build` once per shell session if invoking Python directly
 | `move_comp` / `flip_comp` / `rotate_comp` / `resize_cell` / `set_comp_*` | Mutate placement (move, mirror, rotate 90/180/270, resize) |
 | `add_blocks_from_bdb [depth N]` | Load BDB components at a hierarchy depth into the flat Floorplan |
 | `bdb_net_mode <on\|off>` | Mirror `add_net`/`add_bus` into the BDB net/pin tables |
-| `derive_busterms [max_depth N]` / `refine_busterms` | Populate the busterm table from the component hierarchy (Phase A of hier flow) |
+| `derive_busterms [max_depth N]` / `refine_busterms` | Populate the busterm table from the component hierarchy (Phase A of hier flow). An UNPLACED component is skipped (no extent to route to) — see `derive_container_bboxes` |
+| `derive_container_bboxes [margin <n>]` | Give every UNPLACED container the bbox of its placed descendants (+`margin` per side), deepest-first; never moves a component that already has a position, and reports (BUDA-1607) a container with nothing placed under it. The step a **DEF + Verilog merge** needs and neither file can supply: a DEF is FLAT (`COMPONENTS` lists leaf instances only), so a hierarchical instance has no row anywhere and `import_verilog` — which knows the tree but no geometry — leaves it unplaced; `derive_busterms` then skips it and the routing interface comes out with a HOLE (ports + leaves get busterms, the levels between them do not, and the leaf busterms have no parent), with every command reporting success. Explicit rather than folded into `import_verilog` because it INVENTS geometry the input never stated. Vehicle: `flow/def/chip.buda` |
 
 **Routing pipeline** (`.buda` script):
 

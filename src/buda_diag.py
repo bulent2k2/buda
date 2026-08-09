@@ -76,6 +76,8 @@ MESSAGES = {
     "BUDA-1601": (ERROR, "A cell in the DEF has no footprint in the LEF."),
     "BUDA-1606": (WARNING, "A cell in the DEF has no footprint in the LEF "
                            "and was sized anyway, by explicit waiver."),
+    "BUDA-1607": (WARNING, "A hierarchical container has no placed "
+                           "descendant, so it could not be given an extent."),
     "BUDA-1602": (WARNING, "Imported design counts differ from the counts the "
                            "file declares."),
     "BUDA-1603": (WARNING, "A construct in the file has no representation in "

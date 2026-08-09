@@ -539,6 +539,24 @@ public:
     void set_comp_is_leaf(const std::string& name, bool is_leaf);
     void set_comp_bbox(const std::string& name,
                        double x1, double y1, double x2, double y2);
+    // Give every UNPLACED container the bounding box of its placed
+    // descendants, grown by `margin` on each side.  Returns how many were
+    // placed; `unresolved` (if given) collects the containers left unplaced
+    // because nothing under them has a position.
+    //
+    // This is what a DEF + Verilog merge needs and cannot get from either
+    // file.  A DEF is FLAT — `COMPONENTS` lists leaf instances only — so a
+    // hierarchical instance has no row anywhere and `import_verilog`, which
+    // knows the tree but no geometry, writes it unplaced.  BustermGen then
+    // skips it (`comp.x1 < 0`), and every busterm collapses to depth 0: the
+    // hierarchy exists in the database while the ROUTING interface is flat.
+    //
+    // Deliberately an explicit call rather than a step inside
+    // `import_verilog`: it INVENTS geometry the files never stated, which is
+    // exactly the kind of thing that should appear in the script.  It never
+    // touches a component that already has a position.
+    int derive_container_bboxes(double margin = 0.0,
+                                std::vector<std::string>* unresolved = nullptr);
     // Update the cell definition and every instance's x2/y2 to x1+w, y1+h.
     void resize_cell(const std::string& cell, double w, double h);
     void set_comp_cell(const std::string& comp_name, const std::string& new_cell);

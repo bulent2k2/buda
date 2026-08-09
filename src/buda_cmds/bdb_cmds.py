@@ -605,6 +605,46 @@ def cmd_derive_busterms(session, cmd, args, cmd_line):
     print(f"derive_busterms: {len(bts)} busterms written (depth 0..{max_depth}).")
 
 
+def cmd_derive_container_bboxes(session, cmd, args, cmd_line):
+    # Usage: derive_container_bboxes [margin <n>]
+    #
+    # Give every UNPLACED container the bounding box of its placed
+    # descendants.  This is the step a DEF + Verilog merge needs and neither
+    # file can supply: a DEF is FLAT — COMPONENTS lists leaf instances only —
+    # so a hierarchical instance has no row anywhere, and `import_verilog`,
+    # which knows the tree but no geometry, leaves it unplaced.  BustermGen
+    # skips unplaced components, so without this every busterm collapses to
+    # depth 0 and the hierarchy is present in the database while the ROUTING
+    # interface is flat.
+    #
+    # Explicit rather than folded into `import_verilog` because it INVENTS
+    # geometry the input never stated.  It never moves a component that
+    # already has a position.
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    margin = 0.0
+    i = 0
+    while i < len(args):
+        if args[i].lower() == "margin" and i + 1 < len(args):
+            try:
+                margin = float(args[i + 1])
+            except ValueError:
+                print(f"Error: derive_container_bboxes margin must be a "
+                      f"number, got '{args[i + 1]}'"); return
+            i += 2
+        else:
+            reject_unknown_options("derive_container_bboxes", [args[i]],
+                                   ("margin",))
+            return
+    n, unresolved = session.bdb.derive_container_bboxes(margin)
+    print(f"derive_container_bboxes: placed {n} container(s) "
+          f"from their children (margin {margin:g}).")
+    for name in unresolved:
+        # Nothing placed underneath it, so it has no extent to route to.
+        buda_diag.emit("BUDA-1607", f"container '{name}' has no placed "
+                                    f"descendant — left unplaced")
+
+
 def cmd_refine_busterms(session, cmd, args, cmd_line):
     # refine_busterms — re-derive busterms using the same max_depth as
     # the last derive_busterms call (clears and rewrites the busterm table).
@@ -1360,6 +1400,7 @@ COMMANDS = {
     "rotate_comp": cmd_rotate_comp,
     "add_comp": cmd_add_comp,
     "derive_busterms": cmd_derive_busterms,
+    "derive_container_bboxes": cmd_derive_container_bboxes,
     "refine_busterms": cmd_refine_busterms,
     "load_pipeline": cmd_load_pipeline,
     "save_bdb": cmd_save_bdb,

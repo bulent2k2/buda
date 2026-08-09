@@ -1375,6 +1375,49 @@ Extract physical port locations (busterms) from the placed component hierarchy a
 derive_busterms 1
 ```
 
+An **unplaced** component is skipped — it has no extent to route to. That is
+why a DEF+Verilog design needs `derive_container_bboxes` first; see below.
+
+---
+
+### `derive_container_bboxes`
+
+```
+derive_container_bboxes [margin <n>]
+```
+
+Give every **unplaced container** the bounding box of its placed
+descendants, grown by `margin` on each side. Prints how many it placed, and
+reports (BUDA-1607) any container with nothing placed underneath it.
+
+This is the step a **DEF + Verilog merge** needs and neither file can
+supply. A DEF is flat — `COMPONENTS` lists leaf instances only — so a
+hierarchical instance has no row anywhere, and `import_verilog`, which knows
+the tree but no geometry, leaves it unplaced. `derive_busterms` skips
+unplaced components, so without this the routing interface comes out with a
+**hole** in it: the ports and the leaves get busterms, the levels between
+them do not, and the leaf busterms have no parent to belong to. Every
+command succeeds while that happens, which is what makes it worth a
+command of its own.
+
+Deliberately **explicit** rather than folded into `import_verilog`: it
+invents geometry the input never stated, so it belongs in the script. It
+never moves a component that already has a position, and it resolves
+deepest-first so a container of containers is built from children that were
+themselves just resolved.
+
+| Argument | Description |
+|---|---|
+| `margin` | Optional. Layout units added on each side of the derived box (default `0`). |
+
+**Example** — the full merge (see `flow/def/chip.buda`):
+```buda
+import_def_lef chip.def chip.lef     # placement, flat
+import_verilog chip.v                # hierarchy, no geometry
+derive_container_bboxes margin 1500  # give the containers an extent
+derive_busterms 2
+```
+
 ---
 
 ### `refine_busterms`
