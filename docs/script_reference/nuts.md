@@ -690,7 +690,7 @@ rationale and the measured negotiate-then-ripup results.
 ### `refine_selection`
 
 ```
-refine_selection [max_moves] [chase_overlaps]
+refine_selection [max_moves] [chase_overlaps] [no_parallel_sweep]
 ```
 
 Measured selection **WL polish** — selection-basis lever 3 (wishlist-planner
@@ -724,6 +724,7 @@ endpoint cannot get worse:
 |---|---|---|---|
 | `max_moves` | int | `30` | Commit budget. Sweeps repeat until a full sweep commits nothing or the budget is spent. |
 | `chase_overlaps` | flag | off | Plain lexicographic accept instead of the componentwise WL-polish guard (see above). |
+| `no_parallel_sweep` | flag | off | Keep the sequential trial loop. By default the sweep's full trials run on the C++ parallel pool (the ripup P1 machinery in **full-trial** form — tighten on in both stages, DNUTS abort off, outcomes carrying opens/overlaps/violations/realized-WL): bundles whose sweep outcomes the accept guard would not take book their trials at pool width, and a bundle with a would-accept move **replays** its whole kept list through the sequential trial — the replay is the accept basis and the committed state, so committed moves, printed lines and trial counts match the sequential sweep exactly (a sweep-vs-replay disagreement is LOUD and the replay verdict wins). 1-thread pools (`BUDA_SWEEP_THREADS=1`) keep the sequential loop. |
 
 Stage-aware like the healers (stage a after `run_nuts`, stage b after
 `run_detailed_nuts` — the stage-b metric carries the DNUTS opens ahead of the
