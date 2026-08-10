@@ -81,6 +81,11 @@ def _write_rule_through(session, name):
     row.layers       = ",".join(str(l) for l in (r["layers"] or []))
     row.credit       = int(r.get("credit", 0))
     row.bond         = int(r.get("bond", 0))
+    # v26: an absolute declaration leaves the MULTIPLIER at 1.0, so without
+    # these the rule reloads as DEFAULT width — usually inactive, silently
+    # dropping the constraint the design was routed under (Codex P1 #682).
+    row.width_abs    = float(r.get("width_abs", 0.0))
+    row.spacing_abs  = float(r.get("spacing_abs", 0.0))
     session.bdb.set_ndr_rule(row)
 
 
@@ -122,7 +127,36 @@ def restore_ndr_from_bdb(session):
                        if row.layers else None),
             "credit": row.credit,
             "bond": row.bond,
+            "width_abs": row.width_abs,
+            "spacing_abs": row.spacing_abs,
         }
+        if row.width_abs > 0.0 or row.spacing_abs > 0.0:
+            # The quantization is a function of the CURRENT grid, so it is
+            # re-derived rather than stored: the same rule against a
+            # different stack is a different slot count, and a stale one
+            # would be charged against geometry it never measured.
+            pitches, bare = _abs_layer_pitches(session, rules[row.name])
+            if pitches and not bare:
+                ws, gs = 1, 0
+                for pitch in pitches.values():
+                    probe = buda.NdrSpec()
+                    probe.width_abs = rules[row.name]["width_abs"]
+                    probe.spacing_abs = rules[row.name]["spacing_abs"]
+                    probe = buda.ndr_resolve_for_pitch(probe, pitch)
+                    ws = max(ws, probe.width_slots)
+                    gs = max(gs, probe.guard_slots)
+                rules[row.name]["width_slots_max"] = ws
+                rules[row.name]["guard_slots_max"] = gs
+            else:
+                # No grid yet (rules restore at open_bdb, before the script
+                # re-declares patterns).  LOUD rather than silently charging
+                # a default-width rule: the caller must declare the patterns
+                # and re-declare, exactly as a fresh declaration requires.
+                print(f"WARNING: [NDR] restored absolute rule '{row.name}' "
+                      f"cannot be quantized yet — its governed layers have "
+                      f"no track pattern in this session.  Declare them "
+                      f"(def_track_pattern) before routing, or the rule "
+                      f"charges default width.")
         restored_rules.add(row.name)
     for prefix, rule in session.bdb.ndr_scopes():
         if prefix in scopes:             # session-typed wins
@@ -164,8 +198,18 @@ def ndr_pricing_fp(session, rule_name):
     r = _rules(session).get(rule_name)
     if r is None:
         return None
-    ws = max(1, math.ceil(r["width_x"]))
-    gs = max(0, math.ceil(r["spacing_x"]) - 1)
+    if r.get("width_abs", 0) > 0 or r.get("spacing_abs", 0) > 0:
+        # An absolute rule's PRICING basis is its conservative quantization,
+        # not ceil(width_x) — that is 1.0 for every absolute rule and would
+        # fingerprint them all as DEFAULT, so a changed absolute value could
+        # never VOID a restored plan.  The declared values join the stamp
+        # too: two absolutes can quantize alike on today's grid and differ
+        # on tomorrow's.
+        ws = r.get("width_slots_max", 1)
+        gs = r.get("guard_slots_max", 0)
+    else:
+        ws = max(1, math.ceil(r["width_x"]))
+        gs = max(0, math.ceil(r["spacing_x"]) - 1)
     lay = ",".join(str(l) for l in (r["layers"] or []))
     # The credit field appends ONLY when set, so every v21 stamp (which
     # predates the field) still compares equal for a non-credit rule — a
@@ -174,8 +218,13 @@ def ndr_pricing_fp(session, rule_name):
     # moves neither the demand nor the placement, so toggling it must not
     # VOID a restored plan (this is the PRICING basis, not the rule text).
     cr = "|c1" if r.get("credit") else ""
+    # Absolute values append ONLY when declared, so every pre-R1 stamp of a
+    # multiplier rule still compares equal.
+    ab = ""
+    if r.get("width_abs", 0) > 0 or r.get("spacing_abs", 0) > 0:
+        ab = f"|a{r.get('width_abs', 0):g},{r.get('spacing_abs', 0):g}"
     return (f"{rule_name}|w{ws}|g{gs}|s{r['shield_mode']}"
-            f"|p{r['shield_per_n']}|n{r['shield_net']}|L{lay}{cr}")
+            f"|p{r['shield_per_n']}|n{r['shield_net']}|L{lay}{cr}{ab}")
 
 
 def stamp_bundle_ndr(session, row, wrapper):

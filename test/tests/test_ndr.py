@@ -1573,3 +1573,91 @@ def test_absolute_resolution_rounds_up_with_an_exact_boundary():
     assert buda.ndr_resolve_for_pitch(m, 2.5).width_slots == 2
     spec.width_abs = 3.0
     assert buda.ndr_resolve_for_pitch(spec, 0.0).width_slots == 1
+
+
+def test_v26_absolute_persists_and_restores(tmp_path):
+    """Codex P1 on #682: an absolute declaration leaves the MULTIPLIER at
+    1.0, so without persisting the absolute fields a reopened design
+    restores the rule as DEFAULT width — usually inactive, silently
+    dropping the constraint the design was routed under."""
+    s1 = _bare_session()
+    _run(s1, f"open_bdb {tmp_path}/a.bdb")
+    for line in ("def_layer 3 M3 H 20",
+                 "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1"):
+        _run(s1, line)
+    _run(s1, "def_ndr abs3 width 3 spacing 5 layers M3")
+    _run(s1, "set_ndr sig_ abs3")
+    del s1
+
+    s2 = _bare_session()
+    for line in ("def_layer 3 M3 H 20",
+                 "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1"):
+        _run(s2, line)
+    out = _run(s2, f"open_bdb {tmp_path}/a.bdb")
+    assert "restored 1 rule(s)" in out
+    r = s2._ndr_rules["abs3"]
+    assert (r["width_abs"], r["spacing_abs"]) == (3.0, 5.0)
+    # The QUANTIZATION is re-derived against this session's grid, not read
+    # back — the same rule against a different stack is a different slot
+    # count, and a stored one would be charged against geometry it never
+    # measured.
+    assert r["width_slots_max"] == 2 and r["guard_slots_max"] == 1
+    spec = ndr_cmds._spec_of(s2, "abs3")
+    assert spec.active() and spec.width_slots == 2
+
+
+def test_v26_restored_absolute_without_a_grid_is_loud():
+    # Rules restore at open_bdb, which can precede the script's pattern
+    # declarations.  An unquantizable absolute rule must SAY so rather than
+    # quietly charging default width.
+    import tempfile, os
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "b.bdb")
+    s1 = _bare_session()
+    _run(s1, f"open_bdb {path}")
+    for line in ("def_layer 3 M3 H 20",
+                 "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1"):
+        _run(s1, line)
+    _run(s1, "def_ndr abs3 width 3 layers M3")
+    del s1
+    s2 = _bare_session()                      # no layers, no patterns
+    out = _run(s2, f"open_bdb {path}")
+    assert "cannot be quantized yet" in out, out
+
+
+def test_v26_absolute_joins_the_pricing_fingerprint():
+    # ceil(width_x) is 1.0 for EVERY absolute rule, so pricing on it would
+    # stamp them all as default and a changed absolute could never VOID a
+    # restored plan.
+    s = _abs_session()
+    _run(s, "def_ndr a3 width 3 layers M3")
+    _run(s, "def_ndr a9 width 9 layers M3")
+    _run(s, "def_ndr m2 width x2 layers M3")
+    fp3 = ndr_cmds.ndr_pricing_fp(s, "a3")
+    fp9 = ndr_cmds.ndr_pricing_fp(s, "a9")
+    fpm = ndr_cmds.ndr_pricing_fp(s, "m2")
+    assert fp3 != fp9, "different absolute widths must price differently"
+    assert "|w2" in fp3 and "|a3" in fp3
+    # A multiplier rule's stamp is unchanged in shape (no |a suffix), so
+    # pre-R1 checkpoints of multiplier rules still compare equal.
+    assert "|a" not in fpm
+
+
+def test_v26_pre_v26_db_migrates(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "v25.bdb")
+    db = buda.BDB(path)
+    r = buda.NdrRuleRow()
+    r.name, r.width_x, r.bond = "old", 2.0, 3
+    db.set_ndr_rule(r)
+    del db
+    con = sqlite3.connect(path)
+    con.executescript("ALTER TABLE ndr_rule DROP COLUMN width_abs;"
+                      "ALTER TABLE ndr_rule DROP COLUMN spacing_abs;"
+                      "PRAGMA user_version = 25;")
+    con.close()
+    db = buda.BDB(path)
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    rows = {x.name: x for x in db.ndr_rules()}
+    assert rows["old"].bond == 3
+    assert rows["old"].width_abs == 0.0 and rows["old"].spacing_abs == 0.0

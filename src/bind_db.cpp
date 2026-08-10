@@ -125,7 +125,9 @@ void bind_db(py::module_& m) {
         .def_readwrite("shield_net",   &NdrRuleRow::shield_net)
         .def_readwrite("layers",       &NdrRuleRow::layers)
         .def_readwrite("credit",       &NdrRuleRow::credit)
-        .def_readwrite("bond",         &NdrRuleRow::bond);
+        .def_readwrite("bond",         &NdrRuleRow::bond)
+        .def_readwrite("width_abs",    &NdrRuleRow::width_abs)
+        .def_readwrite("spacing_abs",  &NdrRuleRow::spacing_abs);
 
     py::class_<TopoRow>(m, "TopoRow")
         .def(py::init<>())

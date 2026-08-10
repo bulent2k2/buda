@@ -417,7 +417,9 @@ void BDB::_create_schema() {
             shield_net   TEXT NOT NULL DEFAULT 'GND',
             layers       TEXT NOT NULL DEFAULT '',
             credit       INTEGER NOT NULL DEFAULT 0,
-            bond         INTEGER NOT NULL DEFAULT 0
+            bond         INTEGER NOT NULL DEFAULT 0,
+            width_abs    REAL NOT NULL DEFAULT 0,
+            spacing_abs  REAL NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS ndr_scope (
             prefix TEXT PRIMARY KEY,
@@ -818,6 +820,16 @@ void BDB::_migrate() {
         // rules never bonded, so the 0 default is correct.
         sqlite3_exec(_db,
             "ALTER TABLE ndr_rule ADD COLUMN bond INTEGER NOT NULL DEFAULT 0",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 26) {
+        // v25 -> v26: R1 absolute width/spacing on the rule row.  Pre-v26
+        // rules were multiplier-only, so the 0 defaults are correct.
+        sqlite3_exec(_db,
+            "ALTER TABLE ndr_rule ADD COLUMN width_abs REAL NOT NULL DEFAULT 0",
+            nullptr, nullptr, nullptr);
+        sqlite3_exec(_db,
+            "ALTER TABLE ndr_rule ADD COLUMN spacing_abs REAL NOT NULL DEFAULT 0",
             nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
@@ -3868,12 +3880,14 @@ void BDB::add_bundle(const BundleRow& br) {
 void BDB::set_ndr_rule(const NdrRuleRow& r) {
     Stmt s(_db,
         "INSERT INTO ndr_rule(name,width_x,spacing_x,shield_mode,shield_per_n,"
-        "shield_net,layers,credit,bond) VALUES(?,?,?,?,?,?,?,?,?)"
+        "shield_net,layers,credit,bond,width_abs,spacing_abs)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(name) DO UPDATE SET width_x=excluded.width_x,"
         " spacing_x=excluded.spacing_x, shield_mode=excluded.shield_mode,"
         " shield_per_n=excluded.shield_per_n, shield_net=excluded.shield_net,"
         " layers=excluded.layers, credit=excluded.credit,"
-        " bond=excluded.bond");
+        " bond=excluded.bond, width_abs=excluded.width_abs,"
+        " spacing_abs=excluded.spacing_abs");
     sqlite3_bind_text  (s, 1, r.name.c_str(),       -1, SQLITE_TRANSIENT);
     sqlite3_bind_double(s, 2, r.width_x);
     sqlite3_bind_double(s, 3, r.spacing_x);
@@ -3883,12 +3897,15 @@ void BDB::set_ndr_rule(const NdrRuleRow& r) {
     sqlite3_bind_text  (s, 7, r.layers.c_str(),     -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 8, r.credit);
     sqlite3_bind_int   (s, 9, r.bond);
+    sqlite3_bind_double(s, 10, r.width_abs);
+    sqlite3_bind_double(s, 11, r.spacing_abs);
     step_checked(_db, s, "set_ndr_rule");
 }
 
 std::vector<NdrRuleRow> BDB::ndr_rules() const {
     Stmt q(_db, "SELECT name,width_x,spacing_x,shield_mode,shield_per_n,"
-                "shield_net,layers,credit,bond FROM ndr_rule ORDER BY name");
+                "shield_net,layers,credit,bond,width_abs,spacing_abs"
+                " FROM ndr_rule ORDER BY name");
     auto txt = [](sqlite3_stmt* st, int c) -> std::string {
         const unsigned char* p = sqlite3_column_text(st, c);
         return p ? reinterpret_cast<const char*>(p) : std::string();
@@ -3905,6 +3922,8 @@ std::vector<NdrRuleRow> BDB::ndr_rules() const {
         r.layers       = txt(q, 6);
         r.credit       = sqlite3_column_int(q, 7);
         r.bond         = sqlite3_column_int(q, 8);
+        r.width_abs    = sqlite3_column_double(q, 9);
+        r.spacing_abs  = sqlite3_column_double(q, 10);
         rows.push_back(std::move(r));
     }
     return rows;

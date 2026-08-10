@@ -242,6 +242,13 @@ struct NdrRuleRow {
     // the power grid wherever it crosses an identity-matching rail on an
     // adjacent perpendicular layer).  Output-only — it moves no demand.
     int         bond = 0;
+    // v26: R1 ABSOLUTE width/spacing in layout units (0 = not declared,
+    // the multiplier fields above apply).  Persisted because an absolute
+    // declaration leaves the MULTIPLIER at 1.0 — without these a reopened
+    // design silently restores the rule as default width, often making it
+    // inactive and losing the constraint the design was routed under.
+    double      width_abs   = 0.0;
+    double      spacing_abs = 0.0;
 };
 
 struct GrpRow {
@@ -456,7 +463,10 @@ public:
     //       rule's pricing basis, so it rides the same table).
     // v25 = ndr_rule.bond (R6 shield-bonding opt-in — output-only, so it is
     //       deliberately NOT part of the bundle.ndr_rule pricing stamp).
-    static constexpr int SCHEMA_VERSION = 25;
+    // v26 = ndr_rule.width_abs / spacing_abs (R1 absolute values; a rule
+    //       declared absolutely is INDISTINGUISHABLE from a default one
+    //       without them, since the multiplier stays 1.0).
+    static constexpr int SCHEMA_VERSION = 26;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
