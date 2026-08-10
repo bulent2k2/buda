@@ -294,6 +294,104 @@ SegAttachment seg_attachment(const ConnSeg& cs, const Topology& topo,
     return a;
 }
 
+// ── detect_bit_antennas ──────────────────────────────────────────────────────
+//
+// detect_antennas asks "is this segment attached?" and reads the BUS-level
+// ConnSeg graph to answer it.  Once a tree is per-bit TAPERED (fan-in /
+// fan-OUT), that graph stops being the whole story: a trunk attached at all 33
+// of its stubs is perfectly healthy as a bus segment, while an individual BIT
+// on it may connect to only two of those stubs and carry the rest of the trunk
+// as dead metal at both ends.  That is an antenna in every sense that matters —
+// electrically inert wire hanging off the route — and nothing was looking for
+// it (issue: flow/rv/soc_conv_div.buda bundle 1, where 73.5% of the vertical
+// metal dangled with `check_design` reporting Success).
+//
+// So this pass asks the OTHER question, per placed bit-wire: does the metal
+// extend past everything this bit actually reaches?  A bit's legitimate reach
+// is the union of
+//   * its VIAS — the real per-bit junctions, and
+//   * its segment's BUSTERM face landings — a tap is a legitimate end even
+//     though no via marks it, and
+//   * any connected block the segment PASSES THROUGH — coverage the route
+//     depends on, and exactly what adjust_bit_spans re-extends to.
+// Anything beyond the outermost of those is attached to nothing.
+static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
+                                const DetailedNUTSResult& dnuts,
+                                const Topology& topo, const Floorplan& fp,
+                                const LayerStack& layers, int bundle_id,
+                                ConnResult& result)
+{
+    const int n = (int)segs.size();
+    if (n < 2) return;               // no junctions to be dangling FROM
+
+    // Per-bit via positions, projected onto each incident segment's axis.
+    std::map<std::pair<int,int>, std::vector<double>> reach;   // (seg,bit) -> coords
+    for (const auto& v : dnuts.net_vias) {
+        if (v.bundle_id != bundle_id) continue;
+        for (int si : {v.from_seg, v.to_seg}) {
+            if (si < 0 || si >= n) continue;
+            reach[{si, v.bit_index}].push_back(segs[si].horiz ? v.x : v.y);
+        }
+    }
+
+    // Legitimate reaches shared by every bit of a segment: busterm faces and
+    // pass-through coverage.  Computed once per segment.
+    std::vector<std::vector<double>> seg_reach(n);
+    for (int si = 0; si < n; ++si) {
+        const ConnSeg& cs = segs[si];
+        for (const auto& c : cs.conns)
+            if (c.kind == SegConn::BUSTERM)
+                seg_reach[si].push_back((double)c.face_coord);
+        for (const auto& bname : topo.connected_block_names) {
+            auto rects = fp.get_block_rects(bname);
+            if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+            for (const Rect& r : rects)
+                if (seg_spans_rect(cs, (double)cs.perp_pos, r)) {
+                    seg_reach[si].push_back(cs.horiz ? (double)r.x1 : (double)r.y1);
+                    seg_reach[si].push_back(cs.horiz ? (double)r.x2 : (double)r.y2);
+                    break;
+                }
+        }
+    }
+
+    // A via's own enclosure legitimately overhangs its junction; only call metal
+    // dangling once it exceeds the widest wire on the layer, so the finding is
+    // about routing structure and never about via geometry.
+    for (const auto& ns : dnuts.net_segments) {
+        if (ns.bundle_id != bundle_id || ns.is_shield || !ns.placed) continue;
+        const int si = ns.seg_idx;
+        if (si < 0 || si >= n) continue;
+
+        std::vector<double> pts = seg_reach[si];
+        auto it = reach.find({si, ns.bit_index});
+        if (it != reach.end())
+            pts.insert(pts.end(), it->second.begin(), it->second.end());
+        if (pts.empty()) continue;          // nothing to measure against
+
+        const double lo = *std::min_element(pts.begin(), pts.end());
+        const double hi = *std::max_element(pts.begin(), pts.end());
+        const double s_lo = std::min(ns.span_lo, ns.span_hi);
+        const double s_hi = std::max(ns.span_lo, ns.span_hi);
+        const double tol  = std::max(ns.width, 1.0);
+        const double lead = lo - s_lo, trail = s_hi - hi;
+        if (lead <= tol && trail <= tol) continue;
+
+        ConnViolation v;
+        v.kind      = ViolationKind::ANTENNA;
+        v.bundle_id = bundle_id;
+        v.seg_idx   = si;
+        std::ostringstream msg;
+        msg << "Seg " << si << " bit " << ns.bit_index << " on layer M"
+            << ns.layer << " spans [" << s_lo << "," << s_hi
+            << "] but this bit only reaches [" << lo << "," << hi << "] — "
+            << (lead > tol ? lead : 0.0) << " + " << (trail > tol ? trail : 0.0)
+            << " of dangling metal past its own attachments (dnuts, per-bit)";
+        v.message = msg.str();
+        result.violations.push_back(std::move(v));
+    }
+    (void)layers;
+}
+
 static void detect_antennas(const std::vector<ConnSeg>& segs,
                             const Topology& topo, const Floorplan& fp,
                             int bundle_id, const char* stage,
@@ -1129,6 +1227,9 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
     detect_disconnected(ct.segs(), bundle_id, "dnuts", result);
     // Dangling wires (structural; see detect_antennas — issue #482).
     detect_antennas(ct.segs(), topo, fp, bundle_id, "dnuts", result);
+
+    // Per-BIT dangling metal, which the structural pass above cannot see.
+    detect_bit_antennas(ct.segs(), dnuts, topo, fp, layers, bundle_id, result);
 
     // BIT_SHORT: two DIFFERENT bits of this bundle are two different NETS,
     // so their wires sharing a layer + track with overlapping (or touching —
