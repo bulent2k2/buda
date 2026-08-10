@@ -1328,3 +1328,49 @@ def test_census_report_names_the_unit():
         s._report_doomed_seats()
     out = buf.getvalue()
     assert "demand slot(s)" in out and "under its NDR rule" in out
+
+
+def test_census_selects_the_pool_on_full_demand_not_the_credited_minimum():
+    """Codex P2 on #677: the engine picks the span-clear-vs-midpoint
+    fallback against FULL demand (detailed_nuts.cpp:470) and admits
+    against the credited MINIMUM (:497).  Passing the optimistic value to
+    both would keep a span-clear pool the engine would have abandoned for
+    a richer midpoint one, and could then call a credited run doomed that
+    DNUTS in fact places."""
+    s, _ = _flow(["def_ndr crd width x2 shield bus net GND credit",
+                  "set_ndr clk_ crd"])
+    gov = next(w for w in s.bundles if w.input.ndr.active())
+    sel = gov.plan.selected_topology_index
+    lo = s._seg_admission_need(gov, sel, 0)
+    hi = s._seg_admission_need(gov, sel, 0, credited=False)
+    assert lo < hi, "a credit rule's minimum must sit below full demand"
+
+    # The census must hand the POOL the full value and compare with the
+    # minimum — recorded rather than re-derived, so the test exercises the
+    # real call rather than restating the arithmetic.
+    bid = gov.input.original_bundle.id
+    seen = []
+    real = s._seg_admission_pool
+
+    def spy(seg, g, need):
+        seen.append((seg.bundle_id, need))     # keyed by BUNDLE: an
+        return real(seg, g, need)              # ungoverned 8-bit bus can
+    s._seg_admission_pool = spy                # collide with lo numerically
+    try:
+        s._doomed_seats()
+    finally:
+        s._seg_admission_pool = real
+    gov_needs = [n for b, n in seen if b == bid]
+    assert gov_needs and all(n == hi for n in gov_needs), \
+        f"pool selection must use full demand {hi}, saw {set(gov_needs)}"
+
+
+def test_census_uncredited_rule_uses_one_value_for_both():
+    # Without `credit` the two coincide, so the split is inert — the
+    # guarantee that this fix cannot perturb a non-crediting governed flow.
+    s, _ = _flow(["def_ndr plain width x2 shield bus net GND",
+                  "set_ndr clk_ plain"])
+    gov = next(w for w in s.bundles if w.input.ndr.active())
+    sel = gov.plan.selected_topology_index
+    assert (s._seg_admission_need(gov, sel, 0)
+            == s._seg_admission_need(gov, sel, 0, credited=False))

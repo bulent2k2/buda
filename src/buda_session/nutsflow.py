@@ -766,10 +766,20 @@ class NutsFlowMixin:
         except Exception:
             return 1
 
-    def _seg_admission_need(self, w, sel, seg_idx):
+    def _seg_admission_need(self, w, sel, seg_idx, credited=True):
         """SIGNAL slots the segment must find to be admitted — the Python
         mirror of `bus_seg_min_demand` (detailed_nuts.h), which is what the
         engine actually compares its pool against.
+
+        `credited=False` returns the UNCREDITED group demand
+        (`bus_seg_demand`) instead.  The engine uses the two at DIFFERENT
+        points and so must this: the span-clear-vs-midpoint FALLBACK is
+        chosen against full demand (detailed_nuts.cpp:470), while the
+        final all-or-nothing doom test compares against the credited
+        minimum (:497).  Passing the optimistic value to both would keep a
+        span-clear pool the engine would have abandoned for a richer
+        midpoint one, and could then report a credited run doomed that
+        DNUTS in fact places (Codex on #677).
 
         For an ungoverned segment this IS `_seg_member_bits` (the NDR
         conversion is the identity on an inactive spec), so every
@@ -785,7 +795,7 @@ class NutsFlowMixin:
         spec = w.input.ndr
         if not spec.active():
             return nbits
-        if spec.credit_shields:
+        if credited and spec.credit_shields:
             return buda.ndr_group_demand_credited(spec, nbits, True, True)
         return buda.ndr_group_demand(spec, nbits)
 
@@ -844,7 +854,13 @@ class NutsFlowMixin:
             # ungoverned segment.
             need = self._seg_admission_need(w, sel, seg.seg_idx)
             bits = self._seg_member_bits(w, sel, seg.seg_idx)
-            pool = self._seg_admission_pool(seg, g, need)
+            # The POOL is selected against FULL demand and the doom test
+            # made against the credited MINIMUM — the engine's own split
+            # (detailed_nuts.cpp:470 vs :497).  Equal whenever the rule
+            # does not credit, and on every ungoverned segment.
+            pool = self._seg_admission_pool(
+                seg, g, self._seg_admission_need(w, sel, seg.seg_idx,
+                                                 credited=False))
             if pool < need:
                 doomed.append((seg, need, pool,
                                self.layers.is_top(seg.layer), bits))

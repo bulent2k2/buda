@@ -204,9 +204,12 @@ def audit(s, flow):
         # is and mis-ranks the sibling-layer search below.  Identity for
         # every ungoverned segment.
         need = s._seg_admission_need(w, sel, seg.seg_idx)
+        # Pool selection uses FULL demand, the doom test the credited
+        # minimum — the engine's own split (Codex on #677).
+        need_pool = s._seg_admission_need(w, sel, seg.seg_idx, credited=False)
         bits = s._seg_member_bits(w, sel, seg.seg_idx)   # what strands
         pool = s._seg_admission_pool(
-            seg, s.routing_grid.get_layer_grid(seg.layer), need)
+            seg, s.routing_grid.get_layer_grid(seg.layer), need_pool)
         if pool >= need:
             continue                       # seat is adequately supplied
         if not s.layers.is_top(seg.layer):
@@ -238,7 +241,7 @@ def audit(s, flow):
             pool_ids = [l for l in pool_ids if l not in leased]
 
         sibs = [(lid, s._seg_admission_pool(
-            seg, s.routing_grid.get_layer_grid(lid), need)) for lid in pool_ids]
+            seg, s.routing_grid.get_layer_grid(lid), need_pool)) for lid in pool_ids]
         adequate = [(lid, sp) for lid, sp in sibs if sp >= need]
 
         holders, verdict = None, "LAYER_STARVED"
