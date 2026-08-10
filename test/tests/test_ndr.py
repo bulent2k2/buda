@@ -1505,3 +1505,71 @@ def test_bond_stride_anchors_extremes_under_an_override():
             assert got[sh][-1] == xs[-1], \
                 f"stride {stride} lost the true high extreme under override"
             assert got[sh] == sorted(got[sh])
+
+
+# ── R1 absolute values: the review's contained findings (Codex on #682) ────
+
+def _abs_session(patterns=("3",)):
+    s = _bare_session()
+    for line in ("add_block a 0 0 100 100", "def_layer 3 M3 H 20",
+                 "def_layer 4 M4 V 20"):
+        _run(s, line)
+    for lid in patterns:
+        _run(s, f"def_track_pattern {lid} 0 VDD 2 1 (_ 1 1)x12 GND 2 1")
+    return s
+
+
+def test_absolute_needs_every_governed_layer_patterned():
+    # The stored quantization is a MAXIMUM, and a max over a SUBSET is not
+    # conservative: a pattern declared later on an omitted layer can need
+    # more slots, and routing there would under-charge the declared width.
+    s = _abs_session(patterns=("3",))          # L4 declared but unpatterned
+    with pytest.raises(SystemExit):
+        _run(s, "def_ndr r width 3")
+    # Restricting the rule to the patterned layer is one of the ways out
+    # the error names, and it must work.
+    s2 = _abs_session(patterns=("3",))
+    out = _run(s2, "def_ndr ok width 3 layers M3")
+    assert "ABSOLUTE" in out and "L3:" in out
+    # Patterning both layers is the other.
+    s3 = _abs_session(patterns=("3", "4"))
+    assert "ABSOLUTE" in _run(s3, "def_ndr both width 3")
+
+
+def test_absolute_accepts_the_um_suffix():
+    # An NDR distance spells a distance the way every other script-declared
+    # distance does — the shared require_distance parser, not a local
+    # float().  At the default scale 1 um is 1 layout unit.
+    s = _abs_session()
+    _run(s, "def_ndr um5 width 5um spacing 6um layers M3")
+    r = s._ndr_rules["um5"]
+    assert (r["width_abs"], r["spacing_abs"]) == (5.0, 6.0)
+    # And a bare value still means layout units.
+    _run(s, "def_ndr bare5 width 5 layers M3")
+    assert s._ndr_rules["bare5"]["width_abs"] == 5.0
+
+
+def test_absolute_rejects_nonsense_values():
+    s = _abs_session()
+    for bad in ("def_ndr z width 0 layers M3",
+                "def_ndr z width -2 layers M3",
+                "def_ndr z width wat layers M3"):
+        with pytest.raises(SystemExit):
+            _run(_abs_session(), bad)
+
+
+def test_absolute_resolution_rounds_up_with_an_exact_boundary():
+    # The rounding decision, at the level it is actually made.  Pitch 2.5:
+    # 3 -> 2 slots (rounds up), 5 -> exactly 2 (must NOT pay 3).
+    spec = buda.NdrSpec()
+    spec.width_abs = 3.0
+    assert buda.ndr_resolve_for_pitch(spec, 2.5).width_slots == 2
+    spec.width_abs = 5.0
+    assert buda.ndr_resolve_for_pitch(spec, 2.5).width_slots == 2
+    spec.width_abs = 5.1
+    assert buda.ndr_resolve_for_pitch(spec, 2.5).width_slots == 3
+    # Identity for a multiplier-only spec and for a pitch <= 0.
+    m = _spec(width=2)
+    assert buda.ndr_resolve_for_pitch(m, 2.5).width_slots == 2
+    spec.width_abs = 3.0
+    assert buda.ndr_resolve_for_pitch(spec, 0.0).width_slots == 1
