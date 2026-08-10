@@ -490,18 +490,19 @@ def test_an_escaped_identifier_keeps_its_brackets_as_a_name(tmp_path):
     assert w[("u0", "a1")] == "w[1][0]", "the 2-D element lost its net"
 
 
-def test_a_part_select_connects_every_bit_it_names(tmp_path):
-    """A part-select on a port BUDA models as ONE pin.  Expanding it to a pin
-    per named bit is what keeps the design connected: the alternative that
-    reads naturally — keep the base name `w` — would leave this pin on a net
-    no bit-select ever touches, so a design mixing the two shapes would come
-    apart at exactly the bus the fix is about.
+def test_a_part_select_connects_every_bit_its_port_can_take(tmp_path):
+    """A part-select on a port BUDA models as ONE pin.  Giving it a pin row
+    per connected bit is what keeps the design connected: the alternative
+    that reads naturally — keep the base name `w` — would leave this pin on a
+    net no bit-select ever touches, so a design mixing the two shapes would
+    come apart at exactly the bus the fix is about.  The other alternative, a
+    net literally called `w[3:0]`, would invent a name never declared.
 
-    The other alternative, a net literally called `w[3:0]`, would invent a
-    name the netlist never declared."""
+    Here the formal is a 4-bit port, so all four bits really are connected.
+    How many bits the port can take is the subject of the next test."""
     db = _v(tmp_path, """\
         module sink (s);
-          input s;
+          input [3:0] s;
         endmodule
         """ + _SUB + """\
         module top ();
@@ -525,3 +526,128 @@ def test_a_part_select_connects_every_bit_it_names(tmp_path):
     assert on_s == ["w[0]", "w[1]", "w[2]", "w[3]"], on_s
     # …so the part-select and the bit-selects meet on the same nets.
     assert _wiring(db)[("u0", "a0")] in on_s
+
+
+def test_a_part_select_takes_only_as_many_bits_as_the_port_has(tmp_path):
+    """Verilog WIDTH-ADAPTS a port connection, so how much of a part-select
+    lands is the FORMAL's declared width, not the select's.
+
+    `.s(w[3:0])` on a scalar `input s` connects bit 0 and nothing else.
+    Expanding to the select's width regardless put four nets on that one pin
+    and reported three connections the netlist does not have — the same class
+    of invention as the short this whole change removes, just in the other
+    direction (Codex P1 on #661).  Bits are taken LSB-first because that is
+    the end Verilog aligns."""
+    seq = iter(range(100))
+
+    def pins_on(formal, actual):
+        d = tmp_path / f"case{next(seq)}"     # one scratch dir per case
+        d.mkdir()
+        db = _v(d, f"""\
+            module sink (s);
+              input {formal} s;
+            endmodule
+
+            module top ();
+              wire [3:0] w;
+              sink u ({actual});
+            endmodule
+            """)
+        nets = {n.id: n.name for n in db.all_nets()}
+        comps = {c.id: c.name for c in db.all_components()}
+        return sorted(nets[p.net_id] for p in db.all_pins()
+                      if comps.get(p.comp_id) == "u")
+
+    assert pins_on("", ".s(w[3:0])") == ["w[0]"]
+    assert pins_on("[3:0]", ".s(w[3:0])") == ["w[0]", "w[1]", "w[2]", "w[3]"]
+    # A formal NARROWER than the select truncates, keeping the low bits.
+    assert pins_on("[1:0]", ".s(w[3:0])") == ["w[0]", "w[1]"]
+    # …and a select that starts above 0 keeps its own low end.
+    assert pins_on("[1:0]", ".s(w[3:2])") == ["w[2]", "w[3]"]
+
+
+def test_a_part_select_onto_an_unsized_port_connects_only_what_is_certain(
+        tmp_path):
+    """An undefined module declares no ports here, so its formal width is
+    unknown and neither answer can be assumed.
+
+    Bit 0 is connected because it is connected for EVERY width >= 1 — the one
+    thing that needs no guess — and the rest is reported (`BUDA-1611`) rather
+    than invented."""
+    db = _v(tmp_path, """\
+        module top ();
+          wire [3:0] a;
+          fakeram45_256x16 \\u_mem (.addr(a[3:0]));
+        endmodule
+        """)
+    nets = {n.id: n.name for n in db.all_nets()}
+    comps = {c.id: c.name for c in db.all_components()}
+    on_addr = sorted(nets[p.net_id] for p in db.all_pins()
+                     if comps.get(p.comp_id) == "u_mem")
+    assert on_addr == ["a[0]"], on_addr
+
+
+def test_a_literal_index_with_spaces_is_still_a_literal(tmp_path):
+    """`w[ 0 ]` and `w[3 : 0]` are legal and their indices ARE literal, so an
+    untrimmed digit test classified them as unresolvable expressions and left
+    the pins open — a reader limitation reported as a design property (Codex
+    P2 on #661)."""
+    db = _v(tmp_path, """\
+        module sink2 (a, b);
+          input a;
+          input [3:0] b;
+        endmodule
+
+        module top ();
+          wire [3:0] w;
+          sink2 u (.a(w[ 0 ]), .b(w[3 : 0]));
+        endmodule
+        """)
+    nets = {n.id: n.name for n in db.all_nets()}
+    comps = {c.id: c.name for c in db.all_components()}
+    by_pin = {}
+    for p in db.all_pins():
+        if comps.get(p.comp_id) == "u":
+            by_pin.setdefault(p.pin_name, []).append(nets[p.net_id])
+    assert sorted(by_pin.get("a", [])) == ["w[0]"]
+    assert sorted(by_pin.get("b", [])) == ["w[0]", "w[1]", "w[2]", "w[3]"]
+
+
+def test_an_unresolved_connection_is_counted_once_per_elaborated_instance(
+        tmp_path):
+    """The count is a claim about the IMPORTED DESIGN, so it has to be
+    gathered where the design is built.
+
+    Port maps are parsed once per module DEFINITION, so counting there gave a
+    module instantiated three times ONE open, and a module never instantiated
+    an open it does not have.  Both errors at once, and they do not cancel:
+    the design below loses three connections and the reader said two (Codex
+    P2 on #661)."""
+    db = _v(tmp_path, """\
+        module leaf (a);
+          input a;
+        endmodule
+
+        module used (x, y);
+          input x, y;
+          leaf k (.a({x, y}));
+        endmodule
+
+        module never_used (z);
+          input z;
+          leaf k2 (.a({z, z}));
+        endmodule
+
+        module top ();
+          used u0 (.x(n0), .y(n1));
+          used u1 (.x(n2), .y(n3));
+          used u2 (.x(n4), .y(n5));
+        endmodule
+        """)
+    del db
+    p = tmp_path / "t.v"
+    db2 = buda.BDB(str(tmp_path / "y.bdb"))
+    st = db2.import_verilog(str(p))
+    # three elaborated `used` instances, each losing its one concatenation;
+    # `never_used` is never elaborated and contributes nothing.
+    assert st.unresolved_conns == 3

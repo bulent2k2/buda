@@ -2037,15 +2037,19 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
     // ESCAPED identifier runs from `\` to whitespace and takes any brackets
     // with it: `\w[0]` is an identifier *named* `w[0]`, not bit 0 of `w`.
     // The two are told apart here and nowhere else — see `escaped`.
+    // Non-nets are recorded on the ref rather than dropped at parse time, so
+    // the ones that are OPENS can be counted per elaborated INSTANCE.  The
+    // port map is parsed once per module DEFINITION, so counting here would
+    // report one open for a module instantiated a hundred times and one for
+    // a module never instantiated at all (Codex P2 on #661).
+    enum class RefSkip { NONE, CONCAT, CONSTANT, UNCONNECTED, EXPR };
     struct NetRef {
         std::string base;                       // identifier, escapes stripped
         enum Kind { WHOLE, BIT, RANGE } kind = WHOLE;
         int  hi = 0, lo = 0;                    // BIT: hi == lo
         bool escaped = false;                   // brackets are part of the name
+        RefSkip skip = RefSkip::NONE;           // NONE = this names a net
     };
-    // Non-nets are reported through `skip`, so a construct that silently
-    // dropped a connection can be counted rather than guessed at.
-    enum class RefSkip { NONE, CONCAT, CONSTANT, UNCONNECTED, EXPR };
     auto parse_net_ref = [](const std::string& expr, RefSkip& skip) -> NetRef {
         skip = RefSkip::NONE;
         NetRef r;
@@ -2075,17 +2079,27 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
         while (!r.base.empty() && std::isspace((unsigned char)r.base.back()))
             r.base.pop_back();
         const auto colon = inner.find(':');
+        // `w[ 0 ]` and `w[3 : 0]` are legal and their indices ARE literal, so
+        // an untrimmed digit test classified them as unresolvable expressions
+        // and opened the pin (Codex P2 on #661).
+        auto trim = [](std::string s) {
+            while (!s.empty() && std::isspace((unsigned char)s.front())) s.erase(s.begin());
+            while (!s.empty() && std::isspace((unsigned char)s.back()))  s.pop_back();
+            return s;
+        };
         auto all_digits = [](const std::string& s) {
             if (s.empty()) return false;
             for (char c : s) if (!std::isdigit((unsigned char)c)) return false;
             return true;
         };
         if (colon == std::string::npos) {
-            if (!all_digits(inner)) { skip = RefSkip::EXPR; return r; }  // w[i]
+            const std::string one = trim(inner);
+            if (!all_digits(one)) { skip = RefSkip::EXPR; return r; }    // w[i]
             r.kind = NetRef::BIT;
-            r.hi = r.lo = std::stoi(inner);
+            r.hi = r.lo = std::stoi(one);
         } else {
-            const std::string a = inner.substr(0, colon), b = inner.substr(colon + 1);
+            const std::string a = trim(inner.substr(0, colon)),
+                              b = trim(inner.substr(colon + 1));
             if (!all_digits(a) || !all_digits(b)) { skip = RefSkip::EXPR; return r; }
             r.kind = NetRef::RANGE;
             r.hi = std::stoi(a); r.lo = std::stoi(b);
@@ -2129,14 +2143,17 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
             }
             RefSkip skip;
             NetRef ref = parse_net_ref(text.substr(i, k - i - 1), skip);
-            if (!port.empty() && skip == RefSkip::NONE && !ref.base.empty())
+            ref.skip = skip;
+            if (port.empty()) { i = k; continue; }
+            // A CONCAT or EXPR is carried through rather than dropped: it is
+            // an OPEN in the imported design, and an open belongs to each
+            // ELABORATED instance, not to the module text.  A deliberate
+            // non-connection (constant, UNCONNECTED) is not an open and is
+            // dropped here as before.
+            if (skip == RefSkip::NONE && !ref.base.empty())
                 result.emplace_back(port, ref);
             else if (skip == RefSkip::CONCAT || skip == RefSkip::EXPR)
-                // A connection we could not resolve to a net is an OPEN in
-                // the imported design.  Counted, never inferred: guessing
-                // which net a concatenation or a parameterized select means
-                // would put wires where the netlist does not say they are.
-                ++vstats.unresolved_conns;
+                result.emplace_back(port, ref);
             i = k;
         }
         return result;
@@ -2151,6 +2168,11 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
     struct VMod {
         std::vector<VInst> insts;
         std::unordered_map<std::string, std::string> port_dirs;
+        // Declared width per port: `input [3:0] a` is 4, a bare `input a` is
+        // 1.  Needed to know how much of a part-select a port can actually
+        // take — Verilog width-adapts, so `.s(w[3:0])` on a SCALAR `s`
+        // connects bit 0 alone (Codex P1 on #661).
+        std::unordered_map<std::string, int> port_width;
     };
     std::unordered_map<std::string, VMod> mod_lib;
 
@@ -2204,14 +2226,32 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 std::transform(dir.begin(), dir.end(), dir.begin(),
                                [](unsigned char c){ return std::toupper(c); });
                 std::string rest = (*it)[2].str();
+                // The clause's range comes once, before the names, and
+                // applies to all of them: `input [3:0] a, b;` declares two
+                // 4-bit ports.  Read it BEFORE the strip below throws every
+                // bracket away.  Only a literal `[<n>:<m>]` counts — an
+                // escaped identifier can carry brackets with no colon.
+                int decl_w = 1;
+                {
+                    static const std::regex range_re(
+                        R"(^\s*\[\s*(\d+)\s*:\s*(\d+)\s*\])");
+                    std::smatch rm;
+                    if (std::regex_search(rest, rm, range_re)) {
+                        const int a = std::stoi(rm[1].str()),
+                                  b = std::stoi(rm[2].str());
+                        decl_w = std::abs(a - b) + 1;
+                    }
+                }
                 rest = std::regex_replace(rest, std::regex(R"(\[[^\]]+\])"), " ");
                 rest = std::regex_replace(rest, std::regex(R"(\b(wire|reg|logic|signed|unsigned)\b)"), " ");
                 std::stringstream ss(rest);
                 std::string item;
                 while (std::getline(ss, item, ',')) {
                     std::string name = clean_port_name(item);
-                    if (!name.empty())
+                    if (!name.empty()) {
                         mod_lib[cur_mod].port_dirs[name] = dir;
+                        mod_lib[cur_mod].port_width[name] = decl_w;
+                    }
                 }
             }
         };
@@ -2589,27 +2629,57 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                     add_pin(child_ctx[port]);
                     ++vstats.bit_selects;
                 } else if (ref.kind == NetRef::RANGE) {
-                    // A part-select on a port BUDA models as one pin.  Every
-                    // bit it names gets a pin row (same pin_name — the pin
-                    // key is (net,comp,pin) so that is representable), which
-                    // keeps the connection to each bit rather than inventing
-                    // a net called `w[3:0]` that the netlist never declared.
+                    // A part-select on a port BUDA models as one pin.  Each
+                    // bit the PORT can actually take gets a pin row (same
+                    // pin_name — the pin key is (net,comp,pin), so that is
+                    // representable), which keeps the connection to those
+                    // bits rather than inventing a net called `w[3:0]` that
+                    // the netlist never declared.
                     //
-                    // The child context gets the resolved BASE, so a child's
-                    // `a[k]` composes to `w[k]`.  That is exact for the usual
-                    // `w[N:0]` and OFF BY `lo` otherwise — a port bit is
-                    // numbered from 0 whatever the slice starts at — so a
-                    // non-zero low bound on a module we descend into is
-                    // reported rather than quietly mapped.
-                    child_ctx[port] = qbase;
-                    const int step = ref.hi >= ref.lo ? -1 : 1;
-                    for (int b = ref.hi; ; b += step) {
-                        add_pin(bit_of(b));
-                        if (b == ref.lo) break;
+                    // How many bits the port can take is the formal's
+                    // DECLARED width, not the select's: Verilog width-adapts,
+                    // so `.s(w[3:0])` on a scalar `s` connects bit 0 and
+                    // nothing else.  Expanding to the select's width regard-
+                    // less put four nets on that one pin and reported three
+                    // connections the netlist does not have (Codex P1 on
+                    // #661).  Bits are taken LSB-first because that is the
+                    // end Verilog aligns.
+                    //
+                    // An UNKNOWN formal width (an undefined module — a macro
+                    // kept by the library-cell filter, which declares no
+                    // ports here) is not guessed either way.  Bit 0 is
+                    // connected because it is connected for EVERY width >= 1,
+                    // and the rest is reported rather than invented.
+                    const int nsel = std::abs(ref.hi - ref.lo) + 1;
+                    int take = nsel;
+                    bool width_known = false;
+                    if (defined) {
+                        auto pw = sub->second.port_width.find(port);
+                        if (pw != sub->second.port_width.end()) {
+                            width_known = true;
+                            take = std::min(nsel, pw->second);
+                        }
                     }
+                    if (!width_known) { take = 1; ++vstats.unsized_part_selects; }
+
+                    const int base_bit = std::min(ref.hi, ref.lo);
+                    for (int k = 0; k < take; ++k) add_pin(bit_of(base_bit + k));
+
+                    // The child context: a single connected bit makes the
+                    // port that bit (as in the BIT case).  Otherwise the
+                    // resolved BASE, so a child's `a[k]` composes to `w[k]` —
+                    // exact for the usual `w[N:0]` and OFF BY `lo` otherwise,
+                    // which is reported rather than quietly mapped.
+                    child_ctx[port] = (take == 1) ? bit_of(base_bit) : qbase;
                     ++vstats.part_selects;
-                    if (ref.lo != 0 && defined && !sub->second.insts.empty())
+                    if (take > 1 && ref.lo != 0 && defined &&
+                        !sub->second.insts.empty())
                         ++vstats.offset_part_selects;
+                } else if (ref.skip != RefSkip::NONE) {
+                    // A concatenation or a non-literal select: an OPEN, and
+                    // one per ELABORATED instance — a module instantiated a
+                    // hundred times loses the connection a hundred times.
+                    ++vstats.unresolved_conns;
                 } else {
                     child_ctx[port] = qbase;
                     add_pin(qbase);

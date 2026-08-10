@@ -413,6 +413,13 @@ def cmd_import_verilog(session, cmd, args, cmd_line):
                        f"descends into: inside it, port bit k is net bit "
                        f"k+lo, and the child's own bit-selects are resolved "
                        f"against the bus base — so they name bit k, not k+lo")
+    if st.unsized_part_selects:
+        buda_diag.emit("BUDA-1611",
+                       f"{st.unsized_part_selects} part-select(s) connect a "
+                       f"port of an undefined module, which declares no "
+                       f"width here: bit 0 is connected (true for every "
+                       f"width) and the remaining bits are left unconnected "
+                       f"rather than assumed")
     if st.unresolved_conns:
         # An OPEN, not a nuisance: the connection existed in the netlist and
         # does not exist in the database.  Warned rather than inferred —

@@ -485,6 +485,8 @@ void bind_db(py::module_& m) {
         .def_readonly("part_selects", &VerilogImportStats::part_selects)
         .def_readonly("offset_part_selects",
                       &VerilogImportStats::offset_part_selects)
+        .def_readonly("unsized_part_selects",
+                      &VerilogImportStats::unsized_part_selects)
         .def_readonly("unresolved_conns",
                       &VerilogImportStats::unresolved_conns);
 

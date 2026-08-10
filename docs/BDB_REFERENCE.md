@@ -599,12 +599,25 @@ boundary: with `.p(w)` in the parent, the child's own `p[0]` lands on `w[0]`.
 | Shape | Handling | Counted as |
 |---|---|---|
 | `.a(w[0])` | exact — one net per bit | `bit_selects` |
-| `.a(w[3:0])` | one pin row per named bit (`pin`'s key is `(net, comp, pin)`) | `part_selects` |
+| `.a(w[3:0])` | one pin row per bit the **formal port** can take (`pin`'s key is `(net, comp, pin)`) | `part_selects` |
 | `{a,b}`, `w[i]` | unresolved — the connection is an open (`BUDA-1609`) | `unresolved_conns` |
+
+**Part-select width.** Verilog width-adapts a port connection, so how much of
+a part-select lands is the formal's **declared** width: `.s(w[3:0])` on a
+scalar `input s` connects bit 0 alone, and on `input [1:0] s` connects bits 0
+and 1. Bits are taken LSB-first, the end Verilog aligns. A formal whose width
+is unknown — an undefined module declares no ports — connects **bit 0 only**
+(true for every width ≥ 1) and reports the rest (`BUDA-1611`, counted as
+`unsized_part_selects`) rather than assuming a width.
 
 A part-select whose low bit is not 0, on a module elaboration descends into,
 is reported (`BUDA-1610`): the child numbers its port bits from 0, so port bit
 *k* is net bit *k+lo*.
+
+Indices may carry whitespace — `w[ 0 ]`, `w[3 : 0]` are literal and resolve
+exactly. `unresolved_conns` is counted **per elaborated instance**, like the
+other two, so a module instantiated a hundred times reports a hundred opens
+and one never instantiated reports none.
 
 An **escaped** identifier keeps its brackets as part of the NAME — `\w[0]` is
 a net called `w[0]`, not bit 0 of `w`, and `\w[1][0]` (a 2-D array element) is

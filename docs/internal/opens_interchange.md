@@ -124,8 +124,31 @@ can tell which it got:
 | Shape | Handling |
 |---|---|
 | `.a(w[0])` bit-select | exact — one net per bit |
-| `.a(w[3:0])` part-select | a pin row per named bit (the pin key is `(net, comp, pin)`, so one port on four nets is representable). Not the base name, which would strand this pin off the bit-selects; not a net called `w[3:0]`, which the netlist never declared. A non-zero low bound on a module the reader descends into is reported (`BUDA-1610`) — port bit *k* is net bit *k+lo* and the child's own selects are resolved against the base |
+| `.a(w[3:0])` part-select | a pin row per bit **the formal port can take** (the pin key is `(net, comp, pin)`, so one port on four nets is representable). Not the base name, which would strand this pin off the bit-selects; not a net called `w[3:0]`, which the netlist never declared. A non-zero low bound on a module the reader descends into is reported (`BUDA-1610`) — port bit *k* is net bit *k+lo* and the child's own selects are resolved against the base |
 | `{a,b}`, `w[i]` | still unresolved, now **warned** (`BUDA-1609`) — each is an open, and guessing which net a concatenation means would place a wire the netlist never asked for |
+
+**How much of a part-select lands is the FORMAL's width, not the select's.**
+Verilog width-adapts a port connection, so `.s(w[3:0])` on a scalar `input s`
+connects bit 0 and nothing else. Expanding to the select's width regardless
+put four nets on that one pin and reported three connections the netlist does
+not have — the same invention as the short this item is about, in the other
+direction (Codex P1 on #661). Port ranges are now kept (`input [3:0] a` is
+width 4) and bits are taken LSB-first, the end Verilog aligns.
+
+An **unknown** formal width — an undefined module declares no ports here —
+is not guessed either way: bit 0 is connected, because it is connected for
+every width ≥ 1, and the rest is reported (`BUDA-1611`).
+
+Two smaller faults from the same review, both reproduced first:
+
+* `w[ 0 ]` and `w[3 : 0]` are legal and their indices *are* literal, but the
+  digit test ran untrimmed, so they were classified as unresolvable and their
+  pins opened — a reader limitation reported as a design property.
+* `unresolved_conns` was counted while each module DEFINITION was parsed, not
+  as instances elaborate. A module instantiated three times reported one open,
+  and a module never instantiated reported one it does not have. Measured
+  together: a design losing **3** connections reported **2**. The counter now
+  runs at elaboration, like `bit_selects` and `part_selects`.
 
 The trap, which cost a test: `[` is not always a select. A Verilog **escaped**
 identifier runs from `\` to whitespace and takes its brackets with it, so

@@ -85,6 +85,9 @@ MESSAGES = {
     "BUDA-1610": (WARNING, "A part-select's low bit is not 0 on a module the "
                            "reader descends into, so its child port bits are "
                            "offset from the net bits."),
+    "BUDA-1611": (WARNING, "A part-select connects a port whose declared "
+                           "width is unknown, so only its low bit was "
+                           "connected."),
     "BUDA-1602": (WARNING, "Imported design counts differ from the counts the "
                            "file declares."),
     "BUDA-1603": (WARNING, "A construct in the file has no representation in "
