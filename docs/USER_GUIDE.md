@@ -167,11 +167,15 @@ novice:
 *   **Declare before bundling.** Rules attach at `run_bundler` /
     `run_hier_bundler`; a bundle mixing rules is split into rule-uniform parts,
     reported loudly.
-*   **An emitted shield is labeled, not bonded.** It is a real routed wire with
-    the shield net's identity and it reserves the track, but nothing straps it
-    to the power grid yet — so do not rely on it for electrical shielding as-is.
-    Add the bonding straps downstream, or use the `credit` token so an
-    **existing** power rail (already grid metal) serves as the shield instead.
+*   **An emitted shield is labeled metal until you bond it.** It is a real
+    routed wire with the shield net's identity and it reserves the track, but by
+    default nothing straps it to the power grid — so do not rely on it for
+    electrical shielding as-is. Two tokens fix that: `credit`, so an **existing**
+    power rail (already grid metal) serves as the shield, or `bond`, so BUDA
+    straps each emitted shield to the grid wherever a matching rail crosses it.
+    With `bond` on, `check_design` raises `NDR_BOND` for any shield it could not
+    strap — that means no matching rail crosses it, a grid problem rather than a
+    routing one.
 *   **The planner prices the cost.** Extra width, guards and shields are charged
     as track demand while layers are chosen, so a region that cannot afford an
     NDR bus in *aggregate* shows up as planner overflow at planning time rather
@@ -183,14 +187,16 @@ novice:
     signal slots than a governed layer's pattern can ever offer is a hard error
     at `run_detailed_nuts`, naming the arithmetic (shield-only and spacing-only
     rules are not width-checked this way — they surface as the stranding above).
-    `check_design` adds `NDR_WIDTH`, `NDR_SPACING` and `NDR_SHIELD` checks, and
+    `check_design` adds `NDR_WIDTH`, `NDR_SPACING`, `NDR_SHIELD` (and, with
+    `bond`, `NDR_BOND`) checks, and
     `report_wirelength` counts shield metal on its own line.
 *   **Inspect it** with `dump_ndr`, which prints each governed bundle's slot
     demand and layout (`SBbGBbGBbGBbS` — shield, bit, guard, …).
 
 Start from a worked vehicle: `flow/ndr_demo.buda` (smallest),
 `flow/ndr_shield_flat.buda` (every shield mode), `flow/ndr_shield_hier.buda`
-(hierarchical), `flow/ndr_bottom_up.buda` (bottom-up templates). Full command
+(hierarchical), `flow/ndr_bottom_up.buda` (bottom-up templates), `flow/ndr_bond.buda`
+(shield bonding). Full command
 reference: [script_reference/ndr.md](script_reference/ndr.md).
 
 ### Comparing Topology Candidates by Cost

@@ -419,6 +419,15 @@ def cmd_dump_messages(session, cmd, args, cmd_line):
     print(f"[Messages] {len(rows)} identified diagnostic(s)")
     for mid, sev, text in rows:
         print(f"  {mid}  {sev:<7}  {text}")
+    # Retired ids are printed too, and this is the point of recording them:
+    # a flow gating on one would otherwise just stop firing, which reads
+    # exactly like a design that stopped having the problem.
+    gone = buda_diag.retired()
+    if gone:
+        print(f"[Messages] {len(gone)} retired id(s) — never reused, never "
+              f"emitted again; a gate on one of these is dead")
+        for mid, why in gone:
+            print(f"  {mid}  RETIRED  {why}")
 
 
 COMMANDS["dump_messages"] = cmd_dump_messages

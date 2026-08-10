@@ -905,6 +905,7 @@ class ReportsMixin:
         "NDR_WIDTH":    "governed bit narrower than its rule's width",
         "NDR_SPACING":  "foreign wire inside a rule's reserved run (clearance violated)",
         "NDR_SHIELD":   "shield wires missing or misplaced vs the rule's arrangement",
+        "NDR_BOND":     "emitted shield not strapped to the power grid (floating metal)",
     }
 
     _CONN_GROUP_CAP = 100   # max summary lines before eliding the rest

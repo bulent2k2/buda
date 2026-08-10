@@ -84,7 +84,7 @@ container it would have orphaned is sized, a gate-level merge keeps only the
 macro, no-LEF filtering is unchanged, and the census names distinct kinds and
 admits when it is truncated.
 
-## 2. ~~A vector port map collapses to one net~~ — RESOLVED 2026-08-09 (bit-selects; vector PORTS remain)
+## 2. ~~A vector port map collapses to one net~~ — RESOLVED 2026-08-10 (both halves)
 
 ```verilog
 wire [1:0] w;
@@ -125,7 +125,8 @@ can tell which it got:
 | Shape | Handling |
 |---|---|
 | `.a(w[0])` bit-select | exact — one net per bit |
-| `.a(w[3:0])` part-select | a pin row per bit **the formal port can take** (the pin key is `(net, comp, pin)`, so one port on four nets is representable). Not the base name, which would strand this pin off the bit-selects; not a net called `w[3:0]`, which the netlist never declared. A non-zero low bound on a module the reader descends into is reported (`BUDA-1611`) — port bit *k* is net bit *k+lo* and the child's own selects are resolved against the base |
+| `.a(w[3:0])` part-select | a pin per bit **the formal port can take**. Not the base name, which would strand this pin off the bit-selects; not a net called `w[3:0]`, which the netlist never declared |
+| `.a(w)` whole vector | a pin per bit of the port, on the matching bit of the actual (see the second half below) |
 | `{a,b}`, `w[i]` | still unresolved, now **warned** (`BUDA-1610`) — each is an open, and guessing which net a concatenation means would place a wire the netlist never asked for |
 
 **How much of a part-select lands is the FORMAL's width, not the select's.**
@@ -159,12 +160,62 @@ bus bit as `\w\[0\]`. They part on a name the select parser cannot read, like
 the 2-D element `\w[1][0]`, whose "index" is `1][0`: read as a select it is
 unresolvable and the pin silently loses its net.
 
-*What remains:* a vector **PORT** (`input [3:0] a`). Ports are still one pin
-per port NAME — `clean_port_name` strips `[…]` — so a port map connecting a
-whole vector to a vector port is modelled as one pin on N nets rather than N
-pins. Doing it properly means per-bit `cell_pin` rows and a context keyed by
-port bit, which is a larger change than this one and wants its own vehicle.
-`flow/def/chip.v` is written to the boundary: vector wires, scalar ports.
+### The second half: a vector PORT is N pins
+
+A port is as many **pins** as it is bits wide. Modelled as one pin named `a`,
+a whole-vector connection `.a(w)` put that single pin on a single net `w`, so
+an 8-net design arrived as 2 nets and 2 pins — the same collapse, entered
+from the port side.
+
+**And the first half caused a worse shape before this landed.** Reproduced:
+
+```verilog
+wire [3:0] w;
+drv u_d (.z(w));                                       // whole vector
+rcv u_r (.a0(w[0]), .a1(w[1]), .a2(w[2]), .a3(w[3]));  // bit-selects
+```
+
+Before either half both spellings collapsed to a net `w` — wrongly joined,
+but joined. Once bit-selects resolved per bit and ports did not, they *split*:
+five nets where the design has four, the driver alone on a net no receiver
+touches, every bit of the bus undriven. One kind of wrong became another. Only
+wiring both sides per bit makes the two spellings name the same nets, which is
+the argument for finishing the item rather than leaving half of it.
+
+Three things this needed:
+
+* **`cell_pin` rows per bit** — `a[0]`..`a[3]` — named as the instance pins
+  are, so direction inference still matches them one to one.
+* **Wire widths.** A whole-signal reference carries no width: `.a(w)` says
+  nothing about how wide `w` is. Declarations (`wire [3:0] w;`) are now read,
+  and a connection is `min(formal, actual)` bits, LSB-aligned. An undeclared
+  signal is an implicit wire, which Verilog defines as 1 bit, so the default
+  needs no guess — and a scalar on a 4-bit port connects bit 0 rather than
+  inventing `s[1]`.
+* **Declared indices.** A port's pins carry the indices it declares, so
+  `input [7:4] a` is `a[4]`..`a[7]`; numbering from 0 put them where no
+  LEF/DEF pin of that macro is, which is the very matching this item exists
+  to fix. The same for a local `wire [7:4] w`.
+* **Unconnected upper bits stay unconnected.** Width adaptation leaves a wider
+  formal's high bits with nothing to connect to, and deriving them from the
+  actual's base invented `s[3]` for a SCALAR `s` — a bit of a signal that has
+  no bits. "Not mapped" and "mapped to nothing" are recorded as the different
+  facts they are.
+* **A per-bit context.** Port bits are mapped exactly, offset slices included,
+  which base-plus-selector composition cannot express. Without it a module
+  handed `w[7:4]` and passing the whole port down reconnected its child to
+  `w[3:0]` — not an open, a **wrong net**, the one failure a reader must never
+  produce quietly. This is what **retired BUDA-1611**: with an exact mapping
+  there is no offset left to warn about, and a warning that fires on correct
+  behaviour is worse than none.
+
+*What remains:* nothing in this item. `flow/def/` is now vector end to end —
+LEF pins `A[0]`..`A[3]` (the LEF already declared `BUSBITCHARS "[]"`), DEF
+nets and die `PINS` named `din[0]`, and a netlist written the way netlists are
+written. It routes **identically** to both earlier spellings — 15 bundles,
+273,800 abstract and 870,800 detailed WL, 60 bit-wires, `check_design` clean —
+which is what "the reader reads what the netlist says" should look like: the
+design never changed, only how it was written.
 
 Pinned by `test_bdb_import_edges.py` (bit-select, hierarchy resolution,
 `net_props` classification, escaped identifier, part-select expansion) and by

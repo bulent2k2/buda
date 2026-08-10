@@ -79,70 +79,70 @@ MACRO LEAF
   ORIGIN 0 0 ;
   SIZE 40 BY 24 ;
   SYMMETRY X Y ;
-  PIN A0
+  PIN A[0]
     DIRECTION INPUT ;
     USE SIGNAL ;
     PORT
       LAYER M1 ;
       RECT 0.5 3.5 1.5 4.5 ;
     END
-  END A0
-  PIN A1
+  END A[0]
+  PIN A[1]
     DIRECTION INPUT ;
     USE SIGNAL ;
     PORT
       LAYER M1 ;
       RECT 0.5 8.5 1.5 9.5 ;
     END
-  END A1
-  PIN A2
+  END A[1]
+  PIN A[2]
     DIRECTION INPUT ;
     USE SIGNAL ;
     PORT
       LAYER M1 ;
       RECT 0.5 13.5 1.5 14.5 ;
     END
-  END A2
-  PIN A3
+  END A[2]
+  PIN A[3]
     DIRECTION INPUT ;
     USE SIGNAL ;
     PORT
       LAYER M1 ;
       RECT 0.5 18.5 1.5 19.5 ;
     END
-  END A3
-  PIN Z0
+  END A[3]
+  PIN Z[0]
     DIRECTION OUTPUT ;
     USE SIGNAL ;
     PORT
       LAYER M1 ;
       RECT 38.5 3.5 39.5 4.5 ;
     END
-  END Z0
-  PIN Z1
+  END Z[0]
+  PIN Z[1]
     DIRECTION OUTPUT ;
     USE SIGNAL ;
     PORT
       LAYER M1 ;
       RECT 38.5 8.5 39.5 9.5 ;
     END
-  END Z1
-  PIN Z2
+  END Z[1]
+  PIN Z[2]
     DIRECTION OUTPUT ;
     USE SIGNAL ;
     PORT
       LAYER M1 ;
       RECT 38.5 13.5 39.5 14.5 ;
     END
-  END Z2
-  PIN Z3
+  END Z[2]
+  PIN Z[3]
     DIRECTION OUTPUT ;
     USE SIGNAL ;
     PORT
       LAYER M1 ;
       RECT 38.5 18.5 39.5 19.5 ;
     END
-  END Z3
+  END Z[3]
   PIN VDD
     DIRECTION INOUT ;
     USE POWER ;

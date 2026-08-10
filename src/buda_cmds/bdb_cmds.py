@@ -408,16 +408,10 @@ def cmd_import_verilog(session, cmd, args, cmd_line):
     # Vector connections, stated because the shapes are modelled to different
     # depths.  A bit-select is exact; the other two are not, and a netlist
     # reader that says nothing leaves the caller unable to tell which it got.
-    if st.bit_selects or st.part_selects:
+    if st.bit_selects or st.part_selects or st.vector_ports:
         print(f"[Verilog] vector connections: {st.bit_selects} bit-select(s), "
-              f"{st.part_selects} part-select(s)")
-    if st.offset_part_selects:
-        buda_diag.emit("BUDA-1611",
-                       f"{st.offset_part_selects} part-select(s) with a "
-                       f"non-zero low bit connect a module the reader "
-                       f"descends into: inside it, port bit k is net bit "
-                       f"k+lo, and the child's own bit-selects are resolved "
-                       f"against the bus base — so they name bit k, not k+lo")
+              f"{st.part_selects} part-select(s), "
+              f"{st.vector_ports} whole-vector port(s)")
     if st.unsized_part_selects:
         buda_diag.emit("BUDA-1612",
                        f"{st.unsized_part_selects} part-select(s) connect a "

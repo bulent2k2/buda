@@ -109,12 +109,22 @@ updating this table, which is exactly the drift the guard now prevents):
 | BUDA-1608 | INFO | netlist instances of undefined modules skipped as library cells |
 | BUDA-1609 | WARNING | a script-relative path was not found but exists relative to the CWD (the pre-unification root) |
 | BUDA-1610 | WARNING | a port connection names no resolvable net, so it is an open |
-| BUDA-1611 | WARNING | a part-select's low bit is not 0 on a descended module, so its port bits are offset |
 | BUDA-1612 | WARNING | a part-select's port has no declared width, so only its low bit was connected |
 | BUDA-1613 | WARNING | a DEF NONDEFAULTRULE could not be translated to a BUDA rule and was skipped |
 | BUDA-1701 | WARNING | nothing to emit: no placed bus segments |
 | BUDA-1901 | FATAL | coordinates and track patterns are on different scales |
 | BUDA-1902 | ERROR | a design audit reported violations and `--strict-check` is on |
+
+**Retired ids.**  An id may never be reused and never changes meaning, so one
+whose fault has been fixed is recorded as *spent* rather than deleted — a
+later message taking the number would silently redefine what an old flow log
+or a methodology's waiver refers to.  `dump_messages` prints these too,
+because a gate on a retired id otherwise just stops firing, which reads
+exactly like a design that stopped having the problem.
+
+| Id | Retired because |
+|---|---|
+| BUDA-1611 | a part-select's low bit is not 0 on a descended module. Port bits are now mapped through a per-bit context, so an offset slice resolves EXACTLY and there is nothing left to warn about |
 
 The list is short on purpose.  Converting a diagnostic is a promise to keep
 its id stable forever, so the ones converted first are the ones a

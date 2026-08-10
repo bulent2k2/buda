@@ -976,3 +976,185 @@ def test_end_credit_allows_gap_only_for_culled_runs():
     vdd.define_layer(4, _rail_pattern(("POWER", "VDD")), True)
     assert not ndr_cmds._ndr_end_credit(spec, vdd, 4, rows, 0.0, 100.0,
                                         True, allow_gap=True)
+
+
+# ── R6 shield BONDING (the `bond` token) ───────────────────────────────────
+# A phase-1 shield is a wire on a reserved track carrying the rule's net
+# NAME with nothing tying it to that net.  Bonding straps each EMITTED
+# shield to the power grid wherever an identity-matching rail crosses it on
+# an adjacent PERPENDICULAR layer.  Output-only: it moves no demand.
+
+def _bond_stack(rail_type="GROUND", rail_label="GND"):
+    """Layer 3 horizontal (dense signal, where the shielded bus lands) with
+    layer 4 vertical carrying one rail per period — the bonding target."""
+    st = buda.RoutingGridStack()
+    st.define_layer(3, buda.TrackPattern(
+        origin=0.0, slots=[buda.TrackSlot(type="SIGNAL", label="sig",
+                                          width=1.0, space_after=1.0)]), True)
+    st.define_layer(4, buda.TrackPattern(
+        origin=0.0,
+        slots=[buda.TrackSlot(type=rail_type, label=rail_label,
+                              width=2.0, space_after=1.0)]
+              + [buda.TrackSlot(type="SIGNAL", label="sig",
+                                width=1.0, space_after=1.0)] * 3), False)
+    return st
+
+
+def _bond_run(stack, spec, span_hi=40.0, bit_width=4):
+    seg = buda.BusSegment()
+    seg.bundle_id, seg.seg_idx, seg.layer = 1, 0, 3
+    seg.span_lo, seg.span_hi = 0.0, span_hi
+    seg.interval_lo, seg.interval_hi = 0.0, span_hi
+    seg.bit_width = bit_width
+    seg.ndr = spec
+    return buda.DetailedNUTSEngine(stack).run([seg])
+
+
+def _bond_spec(net="GND", mode=1):
+    s = _spec(mode=mode)
+    s.rule_name, s.shield_net, s.bond_shields = "r", net, True
+    return s
+
+
+def test_bond_straps_every_matching_crossing():
+    r = _bond_run(_bond_stack(), _bond_spec())
+    shields = [n for n in r.net_segments if n.is_shield]
+    assert len(shields) == 2                      # flank-the-bus
+    straps = [v for v in r.net_vias if v.to_seg < 0]
+    assert r.n_shield_bond_vias == len(straps) > 0
+    # Every strap lands on the adjacent V layer, keyed to its own shield.
+    per_shield = {}
+    for v in straps:
+        assert v.from_layer == 3 and v.to_layer == 4
+        per_shield.setdefault(v.bit_index, []).append(v)
+    assert set(per_shield) == {s.bit_index for s in shields}
+    for sh in shields:                            # strapped at its own track
+        assert all(v.y == sh.track_position for v in per_shield[sh.bit_index])
+    # Strap ordinals are unique per shield, so the net_via primary key
+    # (bundle, from_seg, to_seg, bit_index) cannot collide.
+    keys = {(v.bundle_id, v.from_seg, v.to_seg, v.bit_index) for v in straps}
+    assert len(keys) == len(straps)
+
+
+def test_bond_is_opt_in():
+    spec = _bond_spec()
+    spec.bond_shields = False
+    r = _bond_run(_bond_stack(), spec)
+    assert r.n_shield_bond_vias == 0
+    assert not [v for v in r.net_vias if v.to_seg < 0]
+
+
+def test_bond_respects_supply_family_and_refuses_the_other():
+    # VSS shields bond to GND rails (one ground net); a POWER rail never
+    # bonds a ground shield — THE shared identity predicate.
+    vss = _bond_run(_bond_stack(), _bond_spec(net="VSS"))
+    assert vss.n_shield_bond_vias > 0
+    vdd_rails = _bond_run(_bond_stack("POWER", "VDD"), _bond_spec(net="GND"))
+    assert vdd_rails.n_shield_bond_vias == 0
+
+
+def test_bond_needs_a_perpendicular_adjacent_layer():
+    # Adjacency alone is not enough: two PARALLEL layers never cross, so
+    # there is nothing to via.  No crash, no straps.
+    st = _bond_stack()
+    st2 = buda.RoutingGridStack()
+    st2.define_layer(3, st.get_layer_grid(3).global_pattern(), True)
+    st2.define_layer(4, st.get_layer_grid(4).global_pattern(), True)  # H too
+    assert _bond_run(st2, _bond_spec()).n_shield_bond_vias == 0
+    # And a layer with no neighbour in the stack at all.
+    st3 = buda.RoutingGridStack()
+    st3.define_layer(3, st.get_layer_grid(3).global_pattern(), True)
+    assert _bond_run(st3, _bond_spec()).n_shield_bond_vias == 0
+
+
+def test_bond_moves_no_demand():
+    # Bonding is OUTPUT-only: same placement, same shields, same bit
+    # tracks — only the extra straps differ.
+    plain, bonded = _bond_spec(), _bond_spec()
+    plain.bond_shields = False
+    a, b = _bond_run(_bond_stack(), plain), _bond_run(_bond_stack(), bonded)
+    assert ([(n.bit_index, n.track_position, n.width) for n in a.net_segments]
+            == [(n.bit_index, n.track_position, n.width)
+                for n in b.net_segments])
+    assert a.num_unplaced == b.num_unplaced
+
+
+def test_def_ndr_bond_token():
+    s = _bare_session()
+    out = _run(s, "def_ndr b shield bus net GND bond")
+    assert " bond," in out
+    assert " bond," in _run(s, "dump_ndr")
+    with pytest.raises(SystemExit):       # bond needs a shield arrangement
+        _run(s, "def_ndr b2 width x2 bond")
+
+
+def test_bond_is_not_in_the_pricing_fingerprint():
+    # Bonding emits extra vias and moves neither demand nor placement, so
+    # toggling it must NOT void a restored plan.
+    s = _bare_session()
+    _run(s, "def_ndr p shield bus net GND")
+    _run(s, "def_ndr q shield bus net GND bond")
+    a, b = ndr_cmds.ndr_pricing_fp(s, "p"), ndr_cmds.ndr_pricing_fp(s, "q")
+    assert a.split("|", 1)[1] == b.split("|", 1)[1]
+
+
+def test_v25_bond_persists_and_restores(tmp_path):
+    s1 = _bare_session()
+    _run(s1, f"open_bdb {tmp_path}/b.bdb")
+    _run(s1, "def_ndr shb shield bit net VSS bond")
+    _run(s1, "set_ndr sh_ shb")
+    del s1
+    s2 = _bare_session()
+    assert "restored 1 rule(s)" in _run(s2, f"open_bdb {tmp_path}/b.bdb")
+    assert s2._ndr_rules["shb"]["bond"] == 1
+    assert " bond," in _run(s2, "dump_ndr")
+
+
+def test_v25_pre_v25_db_migrates(tmp_path):
+    # A GENUINE v24 database (no bond column, user_version=24) reopens with
+    # the column added at its 0 default — pre-v25 rules never bonded.
+    import sqlite3
+    path = str(tmp_path / "v24.bdb")
+    db = buda.BDB(path)
+    r = buda.NdrRuleRow()
+    r.name, r.width_x, r.credit = "old", 2.0, 1
+    db.set_ndr_rule(r)
+    del db
+    con = sqlite3.connect(path)
+    con.executescript("ALTER TABLE ndr_rule DROP COLUMN bond;"
+                      "PRAGMA user_version = 24;")
+    con.close()
+    db = buda.BDB(path)
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    rows = {x.name: x for x in db.ndr_rules()}
+    assert rows["old"].credit == 1 and rows["old"].bond == 0
+    r2 = buda.NdrRuleRow()
+    r2.name, r2.bond = "new", 1
+    db.set_ndr_rule(r2)
+    assert {x.name: x.bond for x in db.ndr_rules()} == {"old": 0, "new": 1}
+
+
+def test_r9_unbondable_shield_is_loud():
+    # An emitted shield with zero straps is floating metal — the failure
+    # the opt-in exists to rule out.  Here the adjacent layer's rails are
+    # POWER, so no ground shield can bond to them.
+    s = _bare_session()
+    src = ["add_block A 0 0 100 100", "add_block B 400 0 500 100",
+           "add_bus n_[4] A.p B.q", "def_layer 3 M3 H TOP 20",
+           "def_layer 4 M4 V 20",
+           "def_ndr r shield bus net GND bond", "set_ndr n_ r",
+           "run_bundler STRICT", "generate_topologies", "run_planner 1",
+           "def_track_pattern 3 0 _ 1 1",
+           "def_track_pattern 4 0 VDD 2 1 _ 1 1 _ 1 1 _ 1 1",
+           "run_nuts", "run_detailed_nuts"]
+    for line in src:
+        _run(s, line)
+    assert s.detailed_result.n_shield_bond_vias == 0
+    out = _audited(s)
+    assert "NDR_BOND" in out and "floating metal" in out
+    # …and the audit is quiet once the rails DO match the shield's net.
+    ok = _bare_session()
+    for line in src:
+        _run(ok, line.replace("VDD 2 1", "GND 2 1"))
+    assert ok.detailed_result.n_shield_bond_vias > 0
+    assert "NDR_BOND" not in _audited(ok)

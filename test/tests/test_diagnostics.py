@@ -231,3 +231,31 @@ def test_the_catalogue_table_in_the_docs_matches_the_registry():
         f"stale in the doc: {sorted(set(rows) - set(registry))}; "
         f"severity mismatch: "
         f"{ {k: (rows[k], registry[k]) for k in set(rows) & set(registry) if rows[k] != registry[k]} }")
+
+
+# ── retired ids ────────────────────────────────────────────────────────────
+
+def test_a_retired_id_is_never_reused_and_never_emitted():
+    """An id may not be reused and may not change meaning, so an id whose
+    fault has been FIXED cannot simply be deleted from the registry — a later
+    message taking the number would silently redefine what an old flow log or
+    a methodology's waiver refers to.  Retiring records it as spent."""
+    assert buda_diag.RETIRED, "the register exists to be used"
+    live = {m for m, _s, _t in buda_diag.catalogue()}
+    for mid, why in buda_diag.retired():
+        assert mid not in live, f"{mid} is both live and retired"
+        assert why.strip(), f"{mid} retired with no reason"
+        # …and emitting one is refused at the call site, like an unknown id.
+        with pytest.raises(KeyError) as e:
+            buda_diag.format(mid, "should not be possible")
+        assert "RETIRED" in str(e.value)
+
+
+def test_dump_messages_names_the_retired_ids(capsys):
+    """A gate on a retired id would otherwise just stop firing, which reads
+    exactly like a design that stopped having the problem."""
+    from buda_cmds import COMMANDS
+    COMMANDS["dump_messages"](None, "dump_messages", [], "dump_messages")
+    out = capsys.readouterr().out
+    for mid, _why in buda_diag.retired():
+        assert mid in out and "RETIRED" in out
