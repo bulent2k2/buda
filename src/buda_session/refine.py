@@ -128,13 +128,25 @@ class RefineMixin:
         bundles = list(self.bundles)
         n = len(bundles)
         n_thr = self._rr_sweep_threads() or (os.cpu_count() or 1)
-        chunk_moves = max(8, 2 * n_thr)
+        # ADAPTIVE chunking (topdown refine measurement, 2026-08-10): a
+        # commit discards the chunk's remaining evaluations and re-screens
+        # from the restart point, so on a commit-heavy sweep (the topdown
+        # heal flow: 30 commits at ~3 trials/move) a big fixed chunk wastes
+        # most of its parallel work — refine #1 measured SLOWER than
+        # sequential.  Start small (waste per commit ~ half a small chunk),
+        # DOUBLE after each commit-free chunk (the stall/certification
+        # sweeps — the dominant volume on polish runs — get full pool
+        # width and beyond), reset on commit.  Chunk size only groups
+        # evaluations, so decisions are unchanged.
+        chunk_min = max(4, n_thr)
+        chunk_max = max(32, 8 * n_thr)
+        cur_chunk = chunk_min
         sweeping = False
         i = 0
         while i < n and committed < max_moves:
             pre = []              # (pos, w, bid, old) — chunk membership
             nmv = 0
-            while i < n and nmv < chunk_moves:
+            while i < n and nmv < cur_chunk:
                 pos, w = i, bundles[i]
                 i += 1
                 old = self._refine_eligible(w)
@@ -213,6 +225,9 @@ class RefineMixin:
                         "refine_divergence", bid=bid)
             if restart is not None:
                 i = restart
+                cur_chunk = chunk_min          # commit phase: keep waste small
+            else:
+                cur_chunk = min(chunk_max, cur_chunk * 2)   # stall: widen
         return cur, committed, n_trials, sweeping
 
     def _refine_selection(self, max_moves=30, chase_overlaps=False,
