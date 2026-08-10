@@ -1,0 +1,84 @@
+# ============================================================
+# flow/rv/soc.buda
+#
+# The second LEF/DEF/Verilog vehicle.  flow/def/ is the smallest
+# design that exercises the interchange path; this is the other end
+# — a dual-core RV32-shaped SoC with the port shapes a real netlist
+# has, so the flow is read on something that looks like work.
+#
+#   soc                                          top module
+#     u_cl                cluster      depth 0
+#       u_c0, u_c1        core         depth 1   one template, twice
+#         u_ifu/u_idu/u_exu/u_lsu      depth 2
+#           u_alu                      depth 3
+#             u_add/u_log/u_ysel       depth 4   LEAF
+#         u_rf  RF32                   depth 2   LEAF (CLASS BLOCK)
+#       u_ixb, u_dxb        xbar       depth 1
+#     u_imem, u_dmem  SRAM32           depth 0   LEAF (CLASS BLOCK)
+#
+# 44 leaves, 15 containers, 1230 nets, leaves at four different
+# depths.  What it carries that flow/def does not:
+#
+#   * a 32-bit datapath, so a bundle is 32 nets rather than 4;
+#   * `pc[11:2]` onto a 10-bit memory address — a word-addressed
+#     memory is wired with a NON-zero-based part-select, and port
+#     bit k is net bit k+2;
+#   * bit- and part-selects off one control bundle (ctrl[0],
+#     ctrl[3:1], ctrl[6:4]);
+#   * ports WIDER than what is handed to them (a 10-bit address
+#     through a 32-bit mux), so the upper port bits connect to
+#     nothing and must stay that way.
+#
+# Regenerate the three input files with: python3 flow/rv/gen_soc.py
+# ============================================================
+
+open_bdb :memory:
+
+set_import_scale dbu
+set_unit_check on
+
+corner_margin dx 3000 dy 3000
+set_min_stub_length 1000
+
+import_lef_tech soc.lef
+import_def_lef soc.def soc.lef
+import_verilog soc.v
+derive_container_bboxes margin 4000
+
+# ── routing interface ─────────────────────────────────────
+# Leaves sit at depths 0..4, so the busterm derivation and the
+# floorplan projection both go deeper than the four-level vehicle.
+derive_busterms 4
+
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+add_blocks_from_bdb 3 skip
+add_blocks_from_bdb 4 skip
+
+run_hier_bundler depth 4
+dump_hbundles
+
+generate_hier_topologies
+
+set_planner_param healersAhead 1
+run_planner hier 5
+
+run_nuts
+check_design nuts
+
+run_detailed_nuts
+check_design dnuts
+
+negotiate_congestion 10
+ripup_reroute 20
+refine_selection
+
+check_design dnuts
+report_wirelength
+
+emit_guides out/soc_guides.json margin 300 csv out/soc_guides.csv
+export_def_blockages out/soc_advisory.def density 0.7 margin 300
+save_bdb out/soc.bdb.sql
+
+visualize
