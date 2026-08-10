@@ -77,6 +77,7 @@ def _write_rule_through(session, name):
     row.shield_net   = r["shield_net"]
     row.layers       = ",".join(str(l) for l in (r["layers"] or []))
     row.credit       = int(r.get("credit", 0))
+    row.bond         = int(r.get("bond", 0))
     session.bdb.set_ndr_rule(row)
 
 
@@ -117,6 +118,7 @@ def restore_ndr_from_bdb(session):
             "layers": ([int(t) for t in row.layers.split(",")]
                        if row.layers else None),
             "credit": row.credit,
+            "bond": row.bond,
         }
         restored_rules.add(row.name)
     for prefix, rule in session.bdb.ndr_scopes():
@@ -165,6 +167,9 @@ def ndr_pricing_fp(session, rule_name):
     # The credit field appends ONLY when set, so every v21 stamp (which
     # predates the field) still compares equal for a non-credit rule — a
     # resumed v21 checkpoint must not VOID on a fingerprint-format change.
+    # `bond` is deliberately ABSENT: bonding emits extra output vias and
+    # moves neither the demand nor the placement, so toggling it must not
+    # VOID a restored plan (this is the PRICING basis, not the rule text).
     cr = "|c1" if r.get("credit") else ""
     return (f"{rule_name}|w{ws}|g{gs}|s{r['shield_mode']}"
             f"|p{r['shield_per_n']}|n{r['shield_net']}|L{lay}{cr}")
@@ -263,6 +268,7 @@ def _spec_of(session, rule_name):
     spec.shield_per_n = r["shield_per_n"]
     spec.shield_net   = r["shield_net"]
     spec.credit_shields = bool(r.get("credit", 0))
+    spec.bond_shields   = bool(r.get("bond", 0))
     return spec
 
 
@@ -286,14 +292,14 @@ def _parse_x(tok, what, name):
 
 def cmd_def_ndr(session, cmd, args, cmd_line):
     # def_ndr <name> [width x<N>] [spacing x<N>]
-    #                [shield bus|bit|per:<N> [net <label>]] [credit]
+    #                [shield bus|bit|per:<N> [net <label>]] [credit] [bond]
     #                [layers <csv>]
     # Declare-once (duplicate = hard error), unknown token = hard error,
     # and a rule that constrains nothing is refused — the def_layer /
     # def_track_pattern LOUD-declaration convention.
     if not args:
         print("Error: usage: def_ndr <name> [width x<N>] [spacing x<N>] "
-              "[shield bus|bit|per:<N> [net <label>]] [credit] "
+              "[shield bus|bit|per:<N> [net <label>]] [credit] [bond] "
               "[layers <csv>]")
         return
     name = args[0]
@@ -303,7 +309,7 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
         sys.exit(1)
     rule = {"width_x": 1.0, "spacing_x": 1.0, "shield_mode": 0,
             "shield_per_n": 0, "shield_net": "GND", "layers": None,
-            "credit": 0}
+            "credit": 0, "bond": 0}
     i = 1
     while i < len(args):
         tok = args[i].lower()
@@ -346,6 +352,11 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
             # R5a: an END shield may be satisfied by an adjacent pattern
             # rail electrically identical to the shield net.  Opt-in.
             rule["credit"] = 1; i += 1
+        elif tok == "bond":
+            # R6: strap each EMITTED shield to the power grid wherever it
+            # crosses an identity-matching rail on an adjacent perpendicular
+            # layer.  Opt-in (docs/internal/opens_ndr.md §1).
+            rule["bond"] = 1; i += 1
         else:
             print(f"Error: def_ndr '{name}': unknown or incomplete token "
                   f"'{args[i]}' — a typo would silently weaken the rule")
@@ -361,6 +372,10 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
               f"arrangement to credit against — declare shield "
               f"bus|bit|per:<N> with it")
         sys.exit(1)
+    if rule["bond"] and rule["shield_mode"] == 0:
+        print(f"Error: def_ndr '{name}': 'bond' needs a shield arrangement "
+              f"to bond — declare shield bus|bit|per:<N> with it")
+        sys.exit(1)
     _rules(session)[name] = rule
     if not hasattr(session, "_ndr_rules_typed"):
         session._ndr_rules_typed = set()
@@ -373,9 +388,10 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
     lay = ("any" if rule["layers"] is None
            else ",".join(str(l) for l in rule["layers"]))
     cr = " credit" if rule["credit"] else ""
+    bo = " bond" if rule["bond"] else ""
     print(f"[NDR] rule '{name}': width x{rule['width_x']:g} -> {ws} slot(s)/"
           f"bit, spacing x{rule['spacing_x']:g} -> {gs} guard slot(s)/gap, "
-          f"shield {sh} (net {rule['shield_net']}){cr}, layers {lay}")
+          f"shield {sh} (net {rule['shield_net']}){cr}{bo}, layers {lay}")
 
 
 def cmd_set_ndr(session, cmd, args, cmd_line):
@@ -726,10 +742,11 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
                else ",".join(str(l) for l in r["layers"]))
         src = "  (restored from BDB)" if name in r_rest else ""
         cr = " credit" if r.get("credit") else ""
+        bo = " bond" if r.get("bond") else ""
         print(f"[NDR] rule '{name}': width x{r['width_x']:g} "
               f"({ws} slot(s)/bit), spacing x{r['spacing_x']:g} "
-              f"({gs} guard(s)/gap), shield {sh} net {r['shield_net']}{cr}, "
-              f"layers {lay}{src}")
+              f"({gs} guard(s)/gap), shield {sh} net {r['shield_net']}"
+              f"{cr}{bo}, layers {lay}{src}")
     for prefix, rule in sorted(scopes.items()):
         src = "  (restored from BDB)" if prefix in s_rest else ""
         print(f"[NDR] scope '{prefix}' -> '{rule}'{src}")
@@ -804,7 +821,10 @@ def build_ndr_audit_index(session):
     over it made the audit quadratic in placed-row count.  One
     materialization, grouped by bundle (own-row lookup) and by layer sorted
     on track position with a parallel key array (foreign-wire lookup via
-    bisect on the run window).  None when no detailed result exists."""
+    bisect on the run window).  Also counts the R6 shield BOND straps per
+    (bundle, seg, shield ordinal) — one more single pass over the via
+    vector, skipped entirely when no strap was emitted.  None when no
+    detailed result exists."""
     dr = session.detailed_result
     if dr is None:
         return None
@@ -817,7 +837,14 @@ def build_ndr_audit_index(session):
     for lid, lst in by_layer.items():
         lst.sort(key=lambda r: r.track_position)
         layer_sorted[lid] = (lst, [r.track_position for r in lst])
-    return {"by_bundle": by_bundle, "by_layer": layer_sorted}
+    straps = {}
+    if getattr(dr, "n_shield_bond_vias", 0) > 0:
+        for v in dr.net_vias:             # negative to_seg = a bond strap
+            if v.to_seg < 0:
+                key = (v.bundle_id, v.from_seg, v.bit_index)
+                straps[key] = straps.get(key, 0) + 1
+    return {"by_bundle": by_bundle, "by_layer": layer_sorted,
+            "straps": straps}
 
 
 def _ndr_effective_period(g, mid, perp):
@@ -978,6 +1005,27 @@ def audit_ndr_dnuts(session, wrapper, index=None):
                     f"NDR_SHIELD: seg {seg_idx} rule '{spec.rule_name}' "
                     f"(flank-the-bus) shields are not the outermost wires "
                     f"of the run — a signal bit sits outside the shield"))
+        # R6 bonding: every EMITTED shield of a `bond` rule must carry at
+        # least one strap to the power grid.  A shield with none is metal
+        # at the right track and the right net NAME with nothing tying it
+        # to that net — the floating-shield failure the opt-in exists to
+        # rule out (docs/internal/opens_ndr.md §1).  Not a placement fault:
+        # it means no identity-matching rail crosses the shield on an
+        # adjacent perpendicular layer, so the fix is the grid, not the
+        # route.  (A CREDITED end emits no shield and needs no strap — it
+        # never reaches this loop.)
+        if spec.bond_shields:
+            for sh in shields:
+                if index["straps"].get((bid, seg_idx, sh.bit_index), 0):
+                    continue
+                out.append(_NdrViolation(
+                    "NDR_BOND", seg_idx, sh.bit_index,
+                    f"NDR_BOND: seg {seg_idx} shield {-sh.bit_index} at "
+                    f"track {sh.track_position:g} (net {spec.shield_net}, "
+                    f"rule '{spec.rule_name}') has NO bond via — no "
+                    f"identity-matching rail crosses it on an adjacent "
+                    f"perpendicular layer, so the shield is floating "
+                    f"metal, not grid-tied"))
         # Width: placed extent must cover width_slots SIGNAL slot centres.
         if spec.width_slots > 1 and grid_stack is not None:
             for r in bits:

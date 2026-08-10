@@ -124,7 +124,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("shield_per_n", &NdrRuleRow::shield_per_n)
         .def_readwrite("shield_net",   &NdrRuleRow::shield_net)
         .def_readwrite("layers",       &NdrRuleRow::layers)
-        .def_readwrite("credit",       &NdrRuleRow::credit);
+        .def_readwrite("credit",       &NdrRuleRow::credit)
+        .def_readwrite("bond",         &NdrRuleRow::bond);
 
     py::class_<TopoRow>(m, "TopoRow")
         .def(py::init<>())
@@ -483,10 +484,9 @@ void bind_db(py::module_& m) {
         .def_readonly("skipped_cells", &VerilogImportStats::skipped_cells)
         .def_readonly("bit_selects", &VerilogImportStats::bit_selects)
         .def_readonly("part_selects", &VerilogImportStats::part_selects)
-        .def_readonly("offset_part_selects",
-                      &VerilogImportStats::offset_part_selects)
         .def_readonly("unsized_part_selects",
                       &VerilogImportStats::unsized_part_selects)
+        .def_readonly("vector_ports", &VerilogImportStats::vector_ports)
         .def_readonly("unresolved_conns",
                       &VerilogImportStats::unresolved_conns);
 

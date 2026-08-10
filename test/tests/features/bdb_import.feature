@@ -70,31 +70,46 @@ Feature: BDB Verilog import
 
   # ── net elaboration ────────────────────────────────────────────────────────
 
-  Scenario: top-level wire ab_bus is elaborated as a net
-    Then net "ab_bus" exists
+  # `ab_bus` is declared `wire [3:0]` and drives `input [3:0] data_in` on two
+  # instances, so it is FOUR nets and each of those ports is four pins.  These
+  # scenarios used to say one net named `ab_bus` with four pins on a pin named
+  # `data_in`: that was the reader collapsing a bus, written down as a spec
+  # (opens_interchange item 2).  What they were built to check — that a net is
+  # scoped by hierarchy and propagated through port bindings — is unchanged and
+  # is still exactly what they check.
+
+  Scenario: a top-level bus is elaborated as one net per bit
+    Then net "ab_bus[0]" exists
+    And  net "ab_bus[3]" exists
 
   Scenario: internal wire w1 is scoped under ai
-    Then net "ai/w1" exists
+    Then net "ai/w1[0]" exists
 
-  Scenario: only 2 nets are created for this design
-    Then the database contains 2 nets
+  Scenario: one net per connected bit is created for this design
+    Then the database contains 5 nets
 
   # ── pin recording ─────────────────────────────────────────────────────────
 
-  Scenario: ab_bus has exactly 4 pins — boundary connections propagated through port bindings
-    Then net "ab_bus" has 4 pins
+  Scenario: bit 0 carries 4 pins — boundary connections propagated through port bindings
+    Then net "ab_bus[0]" has 4 pins
 
-  Scenario: ab_bus connects ai and bi at their data_in ports
-    Then net "ab_bus" connects component "ai" at pin "data_in"
-    And  net "ab_bus" connects component "bi" at pin "data_in"
+  Scenario: a bit connected only through the two data_in ports carries 2 pins
+    Then net "ab_bus[1]" has 2 pins
 
+  Scenario: ab_bus connects ai and bi at their data_in ports, bit for bit
+    Then net "ab_bus[0]" connects component "ai" at pin "data_in[0]"
+    And  net "ab_bus[0]" connects component "bi" at pin "data_in[0]"
+    And  net "ab_bus[3]" connects component "ai" at pin "data_in[3]"
+
+  # `a2`/`a1` declare no ports, so those formals are one bit wide and take the
+  # LOW bit of what they are handed — which is why both land on bit 0.
   Scenario: ab_bus is propagated into sub-module a via the data_in port binding
-    Then net "ab_bus" connects component "ai/a2i" at pin "x"
+    Then net "ab_bus[0]" connects component "ai/a2i" at pin "x"
 
   Scenario: ab_bus is propagated into sub-module b via the data_in port binding
-    Then net "ab_bus" connects component "bi/a1i1" at pin "q"
+    Then net "ab_bus[0]" connects component "bi/a1i1" at pin "q"
 
   Scenario: internal wire ai/w1 connects the two a1 instances inside ai
-    Then net "ai/w1" has 2 pins
-    And  net "ai/w1" connects component "ai/a1i1" at pin "q"
-    And  net "ai/w1" connects component "ai/a1i2" at pin "d"
+    Then net "ai/w1[0]" has 2 pins
+    And  net "ai/w1[0]" connects component "ai/a1i1" at pin "q"
+    And  net "ai/w1[0]" connects component "ai/a1i2" at pin "d"

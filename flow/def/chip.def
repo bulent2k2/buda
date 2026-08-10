@@ -49,28 +49,28 @@ COMPONENTS 8 ;
 END COMPONENTS
 
 PINS 8 ;
-  - din0 + NET din0 + DIRECTION INPUT + USE SIGNAL
+  - din[0] + NET din[0] + DIRECTION INPUT + USE SIGNAL
       + LAYER M2 ( -250 -250 ) ( 250 250 )
       + PLACED ( 500 14000 ) N ;
-  - din1 + NET din1 + DIRECTION INPUT + USE SIGNAL
+  - din[1] + NET din[1] + DIRECTION INPUT + USE SIGNAL
       + LAYER M2 ( -250 -250 ) ( 250 250 )
       + PLACED ( 500 19000 ) N ;
-  - din2 + NET din2 + DIRECTION INPUT + USE SIGNAL
+  - din[2] + NET din[2] + DIRECTION INPUT + USE SIGNAL
       + LAYER M2 ( -250 -250 ) ( 250 250 )
       + PLACED ( 500 24000 ) N ;
-  - din3 + NET din3 + DIRECTION INPUT + USE SIGNAL
+  - din[3] + NET din[3] + DIRECTION INPUT + USE SIGNAL
       + LAYER M2 ( -250 -250 ) ( 250 250 )
       + PLACED ( 500 29000 ) N ;
-  - dout0 + NET dout0 + DIRECTION OUTPUT + USE SIGNAL
+  - dout[0] + NET dout[0] + DIRECTION OUTPUT + USE SIGNAL
       + LAYER M2 ( -250 -250 ) ( 250 250 )
       + PLACED ( 259500 59000 ) N ;
-  - dout1 + NET dout1 + DIRECTION OUTPUT + USE SIGNAL
+  - dout[1] + NET dout[1] + DIRECTION OUTPUT + USE SIGNAL
       + LAYER M2 ( -250 -250 ) ( 250 250 )
       + PLACED ( 259500 64000 ) N ;
-  - dout2 + NET dout2 + DIRECTION OUTPUT + USE SIGNAL
+  - dout[2] + NET dout[2] + DIRECTION OUTPUT + USE SIGNAL
       + LAYER M2 ( -250 -250 ) ( 250 250 )
       + PLACED ( 259500 69000 ) N ;
-  - dout3 + NET dout3 + DIRECTION OUTPUT + USE SIGNAL
+  - dout[3] + NET dout[3] + DIRECTION OUTPUT + USE SIGNAL
       + LAYER M2 ( -250 -250 ) ( 250 250 )
       + PLACED ( 259500 74000 ) N ;
 END PINS
@@ -87,42 +87,42 @@ SPECIALNETS 2 ;
 END SPECIALNETS
 
 NETS 36 ;
-  - din0 ( PIN din0 ) ( u_q0/bl/lo A0 ) + USE SIGNAL ;
-  - dout0 ( u_q1/br/hi Z0 ) ( PIN dout0 ) + USE SIGNAL ;
-  - c[0] ( u_q0/br/hi Z0 ) ( u_q1/bl/lo A0 ) + USE SIGNAL ;
-  - din1 ( PIN din1 ) ( u_q0/bl/lo A1 ) + USE SIGNAL ;
-  - dout1 ( u_q1/br/hi Z1 ) ( PIN dout1 ) + USE SIGNAL ;
-  - c[1] ( u_q0/br/hi Z1 ) ( u_q1/bl/lo A1 ) + USE SIGNAL ;
-  - din2 ( PIN din2 ) ( u_q0/bl/lo A2 ) + USE SIGNAL ;
-  - dout2 ( u_q1/br/hi Z2 ) ( PIN dout2 ) + USE SIGNAL ;
-  - c[2] ( u_q0/br/hi Z2 ) ( u_q1/bl/lo A2 ) + USE SIGNAL ;
-  - din3 ( PIN din3 ) ( u_q0/bl/lo A3 ) + USE SIGNAL ;
-  - dout3 ( u_q1/br/hi Z3 ) ( PIN dout3 ) + USE SIGNAL ;
-  - c[3] ( u_q0/br/hi Z3 ) ( u_q1/bl/lo A3 ) + USE SIGNAL ;
-  - u_q0/m[0] ( u_q0/bl/hi Z0 ) ( u_q0/br/lo A0 ) + USE SIGNAL ;
-  - u_q0/m[1] ( u_q0/bl/hi Z1 ) ( u_q0/br/lo A1 ) + USE SIGNAL ;
-  - u_q0/m[2] ( u_q0/bl/hi Z2 ) ( u_q0/br/lo A2 ) + USE SIGNAL ;
-  - u_q0/m[3] ( u_q0/bl/hi Z3 ) ( u_q0/br/lo A3 ) + USE SIGNAL ;
-  - u_q0/bl/w[0] ( u_q0/bl/lo Z0 ) ( u_q0/bl/hi A0 ) + USE SIGNAL ;
-  - u_q0/bl/w[1] ( u_q0/bl/lo Z1 ) ( u_q0/bl/hi A1 ) + USE SIGNAL ;
-  - u_q0/bl/w[2] ( u_q0/bl/lo Z2 ) ( u_q0/bl/hi A2 ) + USE SIGNAL ;
-  - u_q0/bl/w[3] ( u_q0/bl/lo Z3 ) ( u_q0/bl/hi A3 ) + USE SIGNAL ;
-  - u_q0/br/w[0] ( u_q0/br/lo Z0 ) ( u_q0/br/hi A0 ) + USE SIGNAL ;
-  - u_q0/br/w[1] ( u_q0/br/lo Z1 ) ( u_q0/br/hi A1 ) + USE SIGNAL ;
-  - u_q0/br/w[2] ( u_q0/br/lo Z2 ) ( u_q0/br/hi A2 ) + USE SIGNAL ;
-  - u_q0/br/w[3] ( u_q0/br/lo Z3 ) ( u_q0/br/hi A3 ) + USE SIGNAL ;
-  - u_q1/m[0] ( u_q1/bl/hi Z0 ) ( u_q1/br/lo A0 ) + USE SIGNAL ;
-  - u_q1/m[1] ( u_q1/bl/hi Z1 ) ( u_q1/br/lo A1 ) + USE SIGNAL ;
-  - u_q1/m[2] ( u_q1/bl/hi Z2 ) ( u_q1/br/lo A2 ) + USE SIGNAL ;
-  - u_q1/m[3] ( u_q1/bl/hi Z3 ) ( u_q1/br/lo A3 ) + USE SIGNAL ;
-  - u_q1/bl/w[0] ( u_q1/bl/lo Z0 ) ( u_q1/bl/hi A0 ) + USE SIGNAL ;
-  - u_q1/bl/w[1] ( u_q1/bl/lo Z1 ) ( u_q1/bl/hi A1 ) + USE SIGNAL ;
-  - u_q1/bl/w[2] ( u_q1/bl/lo Z2 ) ( u_q1/bl/hi A2 ) + USE SIGNAL ;
-  - u_q1/bl/w[3] ( u_q1/bl/lo Z3 ) ( u_q1/bl/hi A3 ) + USE SIGNAL ;
-  - u_q1/br/w[0] ( u_q1/br/lo Z0 ) ( u_q1/br/hi A0 ) + USE SIGNAL ;
-  - u_q1/br/w[1] ( u_q1/br/lo Z1 ) ( u_q1/br/hi A1 ) + USE SIGNAL ;
-  - u_q1/br/w[2] ( u_q1/br/lo Z2 ) ( u_q1/br/hi A2 ) + USE SIGNAL ;
-  - u_q1/br/w[3] ( u_q1/br/lo Z3 ) ( u_q1/br/hi A3 ) + USE SIGNAL ;
+  - din[0] ( PIN din[0] ) ( u_q0/bl/lo A[0] ) + USE SIGNAL ;
+  - dout[0] ( u_q1/br/hi Z[0] ) ( PIN dout[0] ) + USE SIGNAL ;
+  - c[0] ( u_q0/br/hi Z[0] ) ( u_q1/bl/lo A[0] ) + USE SIGNAL ;
+  - din[1] ( PIN din[1] ) ( u_q0/bl/lo A[1] ) + USE SIGNAL ;
+  - dout[1] ( u_q1/br/hi Z[1] ) ( PIN dout[1] ) + USE SIGNAL ;
+  - c[1] ( u_q0/br/hi Z[1] ) ( u_q1/bl/lo A[1] ) + USE SIGNAL ;
+  - din[2] ( PIN din[2] ) ( u_q0/bl/lo A[2] ) + USE SIGNAL ;
+  - dout[2] ( u_q1/br/hi Z[2] ) ( PIN dout[2] ) + USE SIGNAL ;
+  - c[2] ( u_q0/br/hi Z[2] ) ( u_q1/bl/lo A[2] ) + USE SIGNAL ;
+  - din[3] ( PIN din[3] ) ( u_q0/bl/lo A[3] ) + USE SIGNAL ;
+  - dout[3] ( u_q1/br/hi Z[3] ) ( PIN dout[3] ) + USE SIGNAL ;
+  - c[3] ( u_q0/br/hi Z[3] ) ( u_q1/bl/lo A[3] ) + USE SIGNAL ;
+  - u_q0/m[0] ( u_q0/bl/hi Z[0] ) ( u_q0/br/lo A[0] ) + USE SIGNAL ;
+  - u_q0/m[1] ( u_q0/bl/hi Z[1] ) ( u_q0/br/lo A[1] ) + USE SIGNAL ;
+  - u_q0/m[2] ( u_q0/bl/hi Z[2] ) ( u_q0/br/lo A[2] ) + USE SIGNAL ;
+  - u_q0/m[3] ( u_q0/bl/hi Z[3] ) ( u_q0/br/lo A[3] ) + USE SIGNAL ;
+  - u_q0/bl/w[0] ( u_q0/bl/lo Z[0] ) ( u_q0/bl/hi A[0] ) + USE SIGNAL ;
+  - u_q0/bl/w[1] ( u_q0/bl/lo Z[1] ) ( u_q0/bl/hi A[1] ) + USE SIGNAL ;
+  - u_q0/bl/w[2] ( u_q0/bl/lo Z[2] ) ( u_q0/bl/hi A[2] ) + USE SIGNAL ;
+  - u_q0/bl/w[3] ( u_q0/bl/lo Z[3] ) ( u_q0/bl/hi A[3] ) + USE SIGNAL ;
+  - u_q0/br/w[0] ( u_q0/br/lo Z[0] ) ( u_q0/br/hi A[0] ) + USE SIGNAL ;
+  - u_q0/br/w[1] ( u_q0/br/lo Z[1] ) ( u_q0/br/hi A[1] ) + USE SIGNAL ;
+  - u_q0/br/w[2] ( u_q0/br/lo Z[2] ) ( u_q0/br/hi A[2] ) + USE SIGNAL ;
+  - u_q0/br/w[3] ( u_q0/br/lo Z[3] ) ( u_q0/br/hi A[3] ) + USE SIGNAL ;
+  - u_q1/m[0] ( u_q1/bl/hi Z[0] ) ( u_q1/br/lo A[0] ) + USE SIGNAL ;
+  - u_q1/m[1] ( u_q1/bl/hi Z[1] ) ( u_q1/br/lo A[1] ) + USE SIGNAL ;
+  - u_q1/m[2] ( u_q1/bl/hi Z[2] ) ( u_q1/br/lo A[2] ) + USE SIGNAL ;
+  - u_q1/m[3] ( u_q1/bl/hi Z[3] ) ( u_q1/br/lo A[3] ) + USE SIGNAL ;
+  - u_q1/bl/w[0] ( u_q1/bl/lo Z[0] ) ( u_q1/bl/hi A[0] ) + USE SIGNAL ;
+  - u_q1/bl/w[1] ( u_q1/bl/lo Z[1] ) ( u_q1/bl/hi A[1] ) + USE SIGNAL ;
+  - u_q1/bl/w[2] ( u_q1/bl/lo Z[2] ) ( u_q1/bl/hi A[2] ) + USE SIGNAL ;
+  - u_q1/bl/w[3] ( u_q1/bl/lo Z[3] ) ( u_q1/bl/hi A[3] ) + USE SIGNAL ;
+  - u_q1/br/w[0] ( u_q1/br/lo Z[0] ) ( u_q1/br/hi A[0] ) + USE SIGNAL ;
+  - u_q1/br/w[1] ( u_q1/br/lo Z[1] ) ( u_q1/br/hi A[1] ) + USE SIGNAL ;
+  - u_q1/br/w[2] ( u_q1/br/lo Z[2] ) ( u_q1/br/hi A[2] ) + USE SIGNAL ;
+  - u_q1/br/w[3] ( u_q1/br/lo Z[3] ) ( u_q1/br/hi A[3] ) + USE SIGNAL ;
 END NETS
 
 END DESIGN

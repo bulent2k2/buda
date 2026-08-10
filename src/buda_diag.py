@@ -88,9 +88,6 @@ MESSAGES = {
     # reader's three renumber rather than the path warning moving.
     "BUDA-1610": (WARNING, "A port connection names no net this reader can "
                            "resolve, so the connection is an open."),
-    "BUDA-1611": (WARNING, "A part-select's low bit is not 0 on a module the "
-                           "reader descends into, so its child port bits are "
-                           "offset from the net bits."),
     "BUDA-1612": (WARNING, "A part-select connects a port whose declared "
                            "width is unknown, so only its low bit was "
                            "connected."),
@@ -112,11 +109,33 @@ MESSAGES = {
                           "--strict-check is on."),
 }
 
+# Ids that were ISSUED and whose fault no longer exists.
+#
+# An id may never be reused and may never change meaning, so an id whose
+# condition has been fixed cannot simply be deleted — a later message taking
+# the number would silently redefine what an old flow log or a methodology's
+# waiver refers to.  Retiring records the number as spent, keeps
+# `dump_messages` able to say so (a gate on a retired id is dead, and its
+# owner should learn that from the tool rather than from silence), and
+# `format()` refuses to emit one.
+RETIRED = {
+    "BUDA-1611": "A part-select's low bit is not 0 on a module the reader "
+                 "descends into.  Retired: port bits are now mapped through "
+                 "a per-bit context, so an offset slice resolves EXACTLY and "
+                 "there is nothing left to warn about.",
+}
+
 
 def catalogue():
     """The message catalogue, id-ordered — what a methodology reads to know
     what it may waive or gate on."""
     return [(mid, sev, text) for mid, (sev, text) in sorted(MESSAGES.items())]
+
+
+def retired():
+    """The spent ids, id-ordered.  Printed by `dump_messages` so a gate on a
+    retired id can be found and removed rather than quietly never firing."""
+    return sorted(RETIRED.items())
 
 
 def format(msg_id, detail="", severity=None):
@@ -129,6 +148,9 @@ def format(msg_id, detail="", severity=None):
     is what lets a methodology keep gating on the id.  Reporting stays honest
     because `severity_of_line` reads the LINE, not the registry.
     """
+    if msg_id in RETIRED:
+        raise KeyError(f"message id {msg_id!r} is RETIRED and must not be "
+                       f"emitted again: {RETIRED[msg_id]}")
     if msg_id not in MESSAGES:
         raise KeyError(f"unknown message id {msg_id!r} — add it to "
                        f"buda_diag.MESSAGES so it can be waived and gated on")

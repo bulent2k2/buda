@@ -91,10 +91,10 @@ def test_a_die_port_keeps_its_connectivity_through_the_merge():
     bundler reported 8 nets 'not placed in any bundle'.  That is exactly the
     silent open those components exist to prevent."""
     s, _ = _session(_IMPORT)
-    cid = {c.name: c.id for c in s.bdb.all_components()}["PIN/din0"]
+    cid = {c.name: c.id for c in s.bdb.all_components()}["PIN/din[0]"]
     pins = s.bdb.pins_by_comp(cid)
     assert pins, "the die port lost its net in the merge"
-    assert pins[0].pin_name == "din0"
+    assert pins[0].pin_name == "din[0]"
 
 
 def test_a_die_ports_pin_survives_the_merge_unchanged():
@@ -111,7 +111,7 @@ def test_a_die_ports_pin_survives_the_merge_unchanged():
     ids = {c.name: c.id for c in s.bdb.all_components()}
     before = {n: [(p.pin_name, p.dir, p.px, p.py)
                   for p in s.bdb.pins_by_comp(ids[n])]
-              for n in ("PIN/din0", "PIN/dout3")}
+              for n in ("PIN/din[0]", "PIN/dout[3]")}
     assert all(before.values()), before
 
     s.do_command(_IMPORT[-1])              # …then the netlist
@@ -129,8 +129,8 @@ def test_a_ports_direction_is_read_from_the_environments_side():
     dropped it."""
     s, _ = _session(_IMPORT)
     ids = {c.name: c.id for c in s.bdb.all_components()}
-    din = s.bdb.pins_by_comp(ids["PIN/din0"])[0]
-    dout = s.bdb.pins_by_comp(ids["PIN/dout0"])[0]
+    din = s.bdb.pins_by_comp(ids["PIN/din[0]"])[0]
+    dout = s.bdb.pins_by_comp(ids["PIN/dout[0]"])[0]
     assert din.dir == "OUTPUT", din.dir     # declared INPUT, drives inward
     assert dout.dir == "INPUT", dout.dir    # declared OUTPUT, receives
 
@@ -226,11 +226,11 @@ def test_the_whole_flow_routes_the_design_clean(tmp_path):
     assert m["n_bundles"] == 15
     named = {n for b in m["bundles"] for n in b["nets"]}
     # The manifest's whole value is net identity: the nets it names must be
-    # the design's, at every level of the hierarchy.  The internal buses are
-    # written as VECTORS in chip.v, so their bits are `c[0]`, not `c0` —
-    # which is also how the DEF names them, both files coming from the one
-    # generator.
-    assert {"din0", "dout0", "c[0]", "u_q0/m[0]", "u_q0/bl/w[0]"} <= named, \
+    # the design's, at every level of the hierarchy.  EVERY bus in chip.v is
+    # written as a vector — die ports included, once vector PORTS worked —
+    # so their bits are `c[0]` and `din[0]`, which is also how the DEF names
+    # them, both files coming from the one generator.
+    assert {"din[0]", "dout[0]", "c[0]", "u_q0/m[0]", "u_q0/bl/w[0]"} <= named, \
         sorted(named)
 
     # And the width, which is the point of reading a bit-select at all: each

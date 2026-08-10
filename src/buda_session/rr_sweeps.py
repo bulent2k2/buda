@@ -98,15 +98,52 @@ class RRSweepsMixin:
             return None
         return {t: (o, v) for t, o, v in rows}
 
-    def _rr_screen_prune(self, w, idx_moves):
+    def _rr_screen_scores_many(self, reqs):
+        """Batched fixed-context screens: one `parallel_screen` call for a
+        list of (w, tidxs) requests — per-job private engine + planner
+        clone on C++ worker threads, the exact `_rr_screen_scores` shape,
+        so results are decision-identical to the sequential per-bundle
+        calls (screening is deterministic per (baseline, bundle) and
+        read-only).  Returns a list of {tidx: (overlaps, viols)} or None
+        per request, in request order.  Timing charged to the 'screen'
+        bucket per screened candidate, comparable with the sequential
+        path."""
+        if self.planner is None or self.nuts_result is None:
+            return [None] * len(reqs)
+        if not reqs:
+            return []
+        t0 = time.perf_counter()
+        jobs = [(w.input.original_bundle.id, list(tidxs),
+                 w.input.original_bundle.id in self._dogleg_slot)
+                for w, tidxs in reqs]
+        with contextlib.redirect_stdout(io.StringIO()), \
+                buda.ostream_redirect():
+            rows_per = buda.parallel_screen(
+                self.bundles, jobs, self.planner, self.fp, self.layers,
+                self._nuts_pitch, self.nuts_result,
+                list(self.planner.get_x_grid()),
+                list(self.planner.get_y_grid()),
+                n_threads=self._rr_sweep_threads())
+        n = sum(max(len(t), 1) for _w, t in reqs) or 1
+        dt = time.perf_counter() - t0
+        for _ in range(n):
+            self._rr_t_add('screen', dt / n)
+        return [None if rows is None else {t: (o, v) for t, o, v in rows}
+                for rows in rows_per]
+
+    def _rr_screen_prune(self, w, idx_moves, scores=...):
         """Split a contender's idx-move list into (kept, deferred) by
         screened score: the _ripup_mod._RR_SCREEN_TOP_N best-screened moves are
         full-trialed now, the rest DEFERRED to the iteration's stall sweep
         (never dropped — completeness is the loop's, not the screen's).
         Ties keep the incoming farness/cheap-first position, so the screen
         may reorder only on evidence; with screening unavailable the full
-        unscreened list is returned (nothing deferred)."""
-        scores = self._rr_screen_scores(w, [mv[1] for mv in idx_moves])
+        unscreened list is returned (nothing deferred).  `scores` (batched
+        callers) short-circuits the per-bundle screen call — pass the
+        {tidx: score} map (or None for the unscreened fallback) from
+        `_rr_screen_scores_many`; identical split by construction."""
+        if scores is ...:
+            scores = self._rr_screen_scores(w, [mv[1] for mv in idx_moves])
         if scores is None:
             return idx_moves, []
         order = sorted(range(len(idx_moves)),
@@ -127,14 +164,16 @@ class RRSweepsMixin:
         except ValueError:
             return 0
 
-    def _rr_sweep_stage_setup(self, flat, stage, metric):
+    def _rr_sweep_stage_setup(self, flat, stage, metric, full=False):
         """(base_disc, net_counts, dn_kwargs) for a parallel_sweep call over
         `flat` [(ci, bid, old_tidx, tidx)] — the stage-b DISCONNECTED
         decomposition (base = total minus the moved bundle's CURRENT
         contribution; other bundles' contributions cannot change with the
         move, and trial dogleg-adoption drift is excluded by the dogleg
         pass's non-severing guarantee, #405) plus the bottom-up DNUTS
-        copy-plan port.  Stage a returns empties."""
+        copy-plan port.  Stage a returns empties.  `full` (the refine
+        sweep) disables the DNUTS abort bar: the componentwise parity test
+        needs the exact opens count, not a clamped one."""
         import buda
         base_disc, net_counts, dn_kwargs = {}, {}, {}
         if stage == 'b':
@@ -158,15 +197,37 @@ class RRSweepsMixin:
                     horiz_of={(ts.bundle_id, ts.seg_idx): ts.horiz
                               for ts in self._bottom_up_fixed_segments()})
             self._install_leaf_keepouts()
+            if plan is not None:
+                # Share-thinned reference view (Codex P2 on #664): the
+                # sequential merge path solves the reference instances on a
+                # grid CLONE carrying the `set_cell_layer_share` thinned
+                # overrides — the sweep's run_dnuts must see the same view
+                # or its opens metric diverges from the sequential trial's
+                # (and a silently-skipped move never replays).  Cloned
+                # AFTER the leaf keepouts so the view matches
+                # _run_detailed_nuts exactly; no shares = no clone,
+                # byte-identical.
+                share_ovr = self._bu_share_dnuts_overrides(
+                    dn_kwargs['ref_ids'])
+                if share_ovr:
+                    ref_grid = self.routing_grid.clone()
+                    for lid, x1, y1, x2, y2, pat in share_ovr:
+                        ref_grid.add_override(lid, x1, y1, x2, y2, pat)
+                    dn_kwargs.update(ref_grid=ref_grid)
             dn_kwargs.update(grid=self.routing_grid,
                              bit_order=self._detailed_bit_order,
-                             abort_unplaced=self._rr_m_primary(metric()))
+                             abort_unplaced=(-1 if full else
+                                             self._rr_m_primary(metric())))
         return base_disc, net_counts, dn_kwargs
 
-    def _rr_sweep_eval(self, flat, stage, base_disc, net_counts, dn_kwargs):
+    def _rr_sweep_eval(self, flat, stage, base_disc, net_counts, dn_kwargs,
+                       full=False):
         """One parallel_sweep evaluation of `flat` — private wrapper/planner
         copies per move on C++ worker threads, GIL released; returns the
-        per-move (prim, sec, ok) outcomes in flat order."""
+        per-move (prim, sec, viols, wl, ok) outcomes in flat order.  `full`
+        runs the WL-fair full-trial semantics (tighten on in both stages —
+        the refine_selection sweep); default is the fast-trial shape the
+        ripup sweeps replicate."""
         import buda
         t0 = time.perf_counter()
         outcomes = buda.parallel_sweep(
@@ -180,6 +241,7 @@ class RRSweepsMixin:
             bool(getattr(self, '_rr_fast_trials', False)),
             set(self._dogleg_slot), base_disc, net_counts,
             n_threads=self._rr_sweep_threads(),
+            full_trials=full,
             **dn_kwargs)
         self._rr_t_add('psweep', time.perf_counter() - t0)
         return outcomes
@@ -216,8 +278,14 @@ class RRSweepsMixin:
         trials = 0
         i, n_items = 0, len(contenders)
         while i < n_items:
-            # Build (and screen) just enough contenders to fill this chunk.
-            group = []               # (ci, bid, old_tidx, kept moves)
+            # Build just enough contenders to fill this chunk.  The
+            # post-prune kept count (min(len, TOP_N) under screening) is
+            # knowable without the screen, so chunk membership is fixed
+            # first and the chunk's screens then run BATCHED on the C++
+            # pool (`_rr_screen_scores_many`) — the sequential per-bundle
+            # screens were a dominant chunk-build cost at chip scale; the
+            # split per contender is identical by construction.
+            pre = []                 # (ci, bid, old_tidx, w, moves)
             nmv = 0
             while i < n_items and nmv < chunk_moves:
                 ci, bid = i + 1, contenders[i]
@@ -229,16 +297,26 @@ class RRSweepsMixin:
                 moves = [('idx', t)
                          for t in self._rr_candidate_order(w, old_tidx,
                                                            stage)]
+                pre.append((ci, bid, old_tidx, w, moves))
+                nmv += (min(len(moves), _ripup_mod._RR_SCREEN_TOP_N)
+                        if screen else len(moves))
+            if not pre:
+                continue
+            to_screen = [(w, [mv[1] for mv in moves])
+                         for _ci, _b, _o, w, moves in pre
+                         if screen and
+                         len(moves) > _ripup_mod._RR_SCREEN_TOP_N]
+            scores_iter = iter(self._rr_screen_scores_many(to_screen))
+            group = []               # (ci, bid, old_tidx, kept moves)
+            for ci, bid, old_tidx, w, moves in pre:
                 if screen and len(moves) > _ripup_mod._RR_SCREEN_TOP_N:
-                    moves, rest = self._rr_screen_prune(w, moves)
+                    moves, rest = self._rr_screen_prune(
+                        w, moves, scores=next(scores_iter))
                     if rest:
                         deferred.append((ci, bid, old_tidx, rest))
                 # A zero-move contender stays in the group so its sequential
                 # heartbeat still prints in visit order (Codex #604).
                 group.append((ci, bid, old_tidx, moves))
-                nmv += len(moves)
-            if not group:
-                continue
             flat = [(ci, bid, old, t)
                     for ci, bid, old, moves in group
                     for _k, t in moves]
@@ -257,7 +335,7 @@ class RRSweepsMixin:
                 if w is None:
                     continue
                 sweep_improving = False
-                for (_kind, _t), (prim, sec, ok) in zip(moves, outs):
+                for (_kind, _t), (prim, sec, _v, _wl, ok) in zip(moves, outs):
                     if not ok:
                         sweep_improving = True      # unevaluable: replay decides
                         break
@@ -281,7 +359,7 @@ class RRSweepsMixin:
                             m_from=cur, m_to=cand_best[0],
                             move=self._rr_move_str(old_tidx, cand_best[3]))
                         return cand_best, trials
-                    if all(ok for _p, _s, ok in outs):
+                    if all(ok for *_x, ok in outs):
                         self._decision(
                             f"[ripup_reroute] WARNING: parallel-sweep "
                             f"divergence on bundle {bid} (screened scan) "
@@ -329,8 +407,8 @@ class RRSweepsMixin:
         outcomes = self._rr_sweep_eval(flat, stage, base_disc, net_counts,
                                        dn_kwargs)
         trials = 0
-        for (ci, bid, old_tidx, tidx), (prim, sec, ok) in zip(flat,
-                                                              outcomes):
+        for (ci, bid, old_tidx, tidx), (prim, sec, _v, _wl, ok) in \
+                zip(flat, outcomes):
             if ok:
                 m = (prim, sec) if stage == 'b' else prim
                 if os.environ.get("BUDA_RR_TRACE"):

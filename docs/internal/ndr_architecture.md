@@ -496,3 +496,71 @@ pattern throughout:
   measured on vehicle 06 (6 governed occurrences, shields at every
   instance) and 05 (24-occurrence template class).  No scopes = the
   split/stamp/re-apply hooks all no-op (corpus byte-identity).
+
+### 7.6 R6 shield bonding — LANDED (2026-08-10)
+
+Closes [`opens_ndr.md`](opens_ndr.md) §1's headline gap. An emitted shield
+was labeled metal: a first-class routed wire with the rule's shield-net
+identity, reserving its track, connected to nothing. `bond` (opt-in, per
+rule, requires a shield arrangement) straps each emitted shield to the
+power grid after placement.
+
+**Where it runs.** `emit_shield_bond_vias`, a free function called from
+`run()` inside the `if (emit_vias)` block — bonding is pure output, exactly
+like the per-bit via emission, so a ripup fast trial that skips vias skips
+the straps too and no metric moves.
+
+It is **idempotent and free-standing** on purpose: it reads only placed
+shield geometry against a real grid, dropping any straps already present
+before recomputing. That is what lets the bottom-up path re-derive each
+COPIED instance's straps from ITS OWN coordinates rather than transforming
+the reference's. The distinction matters (Codex on #663): a strap's validity
+depends on the **adjacent perpendicular** layer's rails, while
+`check_template_tracks` establishes copy eligibility from track pools on the
+**routed** layer alone — so a sibling under a different grid override or
+keepout there could inherit a strap sitting over the wrong supply, and the
+`NDR_BOND` audit would read the row as proof of bonding. The merge therefore
+skips negative-`to_seg` vias in the copy loop and calls the pass once over
+the merged result, so reference, copies and independently-solved instances
+are all bonded by what actually crosses them.
+
+**What counts as a bondable crossing.** For a shield on `layer`, the
+candidates are `layer ± 1` — present in the stack AND **perpendicular**.
+The orientation is *tested*, never assumed: `def_layer` takes an explicit
+direction, so BUDA does not force the stack to alternate, and two parallel
+layers have no crossing to via. The rails are found with one
+`RoutingGridStack::preroutes` query per adjacent layer, with the shield's
+span as the adjacent layer's PERP range and the shield's track position as a
+point on its ALONG axis — by construction exactly the rails that cross this
+shield. Identity is `ndr_shield_net_matches` (label, falling back to slot
+type), THE shared predicate: a POWER rail can never bond a ground shield,
+and a VSS-net rule bonds to GND rails by supply family. A **credited** end
+emits no shield, so it never reaches this pass.
+
+**The via-table decision.** A strap is a `net_via` row, not a new power-via
+table, keyed by a NEGATIVE `to_seg` — the strap ordinal `-(k+1)`. A real
+segment index is `>= 0`, so the `(bundle_id, from_seg, to_seg, bit_index)`
+primary key stays unique across a shield's straps, and the sign itself
+encodes "the far end is a grid rail, not a routed segment". Consumers that
+read vias geometrically — GDS export, the detailed viz — use
+`from_layer`/`to_layer`/`x`/`y` only, so they were unaffected; the BDB
+persist path names a strap with the rule's shield net (`bit_net` would return
+"" for a negative bit index). Schema v25 adds `ndr_rule.bond`, and it is
+deliberately absent from the `bundle.ndr_rule` PRICING fingerprint: bonding
+moves no demand, so toggling it must not VOID a restored plan.
+
+**Audit.** `check_design` raises `NDR_BOND` for an emitted shield with zero
+straps — floating metal. That is a grid problem (no matching rail crosses
+it on an adjacent perpendicular layer), not a routing one, and the message
+says so. The strap counts ride `build_ndr_audit_index` as one more pass over
+the via vector, skipped when nothing was emitted.
+
+**Residual limits** (recorded in `opens_ndr.md` §1): every crossing is
+strapped, with no stride or via budget (280 straps on the small
+`ndr_bond.buda` vehicle — conservative, but a real flow may want a declared
+stride); and only `layer ± 1` bonds, since a rail two layers away needs a via
+stack, whose intermediate track is a placement decision rather than an output
+one.
+
+Vehicle: [`flow/ndr_bond.buda`](../../flow/ndr_bond.buda) — one rule matching
+the rails by label, one through the supply family, both clean.

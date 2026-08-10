@@ -172,6 +172,15 @@ whose governing rule changed — by name OR content — since the checkpoint
 **`ndr_rule.credit`** (the R5a end-shield rail-crediting opt-in — pricing
 basis, so it joins the rule row and, when set, the `|c1` fingerprint
 suffix; pre-v22 rules migrate to 0, correct since they never credited).
+v25 added **`ndr_rule.bond`** (the R6 shield-bonding opt-in).  Unlike
+`credit`, bonding is OUTPUT-only — it emits extra `net_via` straps and
+moves neither demand nor placement — so it is deliberately NOT part of
+the `bundle.ndr_rule` pricing fingerprint: toggling it must not VOID a
+restored plan.  A strap reuses `net_via` with a NEGATIVE `to_seg` (the
+strap ordinal; a real segment index is `>= 0`, so the
+`(bundle_id, from_seg, to_seg, bit_index)` primary key stays unique) —
+its far end is a power-grid rail, not a routed segment.  Pre-v25 rules
+migrate to 0, correct since they never bonded.
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.
 
@@ -599,7 +608,8 @@ boundary: with `.p(w)` in the parent, the child's own `p[0]` lands on `w[0]`.
 | Shape | Handling | Counted as |
 |---|---|---|
 | `.a(w[0])` | exact — one net per bit | `bit_selects` |
-| `.a(w[3:0])` | one pin row per bit the **formal port** can take (`pin`'s key is `(net, comp, pin)`) | `part_selects` |
+| `.a(w[3:0])` | one pin per bit the **formal port** can take | `part_selects` |
+| `.a(w)` | a pin per bit of the port, on the matching bit of the actual | `vector_ports` |
 | `{a,b}`, `w[i]` | unresolved — the connection is an open (`BUDA-1610`) | `unresolved_conns` |
 
 **Part-select width.** Verilog width-adapts a port connection, so how much of
@@ -627,9 +637,24 @@ a name whose "index" no select parser can read.
 by `derive_bus_bit`, shared with `import_def_lef` so a DEF net and the Verilog
 net it merges with cannot be classified differently.
 
-> Still open: a vector **PORT** (`input [3:0] a`) is one pin per port name, so
-> connecting a whole vector to one is modelled as a single pin on N nets. See
-> [`internal/opens_interchange.md`](internal/opens_interchange.md) item 2.
+**A vector port is N pins.**  `input [3:0] a` becomes `a[0]`..`a[3]`, in
+`cell_pin` and on every instance, so a whole-vector connection wires bit to
+bit instead of putting one pin on N nets.  Pins carry the port's **declared**
+indices, so `input [7:4] a` is `a[4]`..`a[7]` — numbering them from 0 would
+put them where no LEF/DEF pin of that macro is.
+
+The width of a whole-signal *actual* comes from its declaration — `.a(w)` says
+nothing about how wide `w` is — so `wire [3:0] w;` is read too, declared range
+included.  An undeclared signal is an implicit wire, 1 bit.
+
+Verilog aligns the two ends at their **low** bits and adapts the width, so a
+connection is `min(formal, actual)` bits.  The formal's remaining upper bits
+are **unconnected**, and are recorded as such: a child referencing one finds
+"no connection" rather than a name derived from the actual's base, which would
+invent `s[3]` for a scalar `s`.
+
+Port bits are carried through the hierarchy by a per-bit context, so an offset
+slice (`.p(w[7:4])`) maps exactly rather than approximately.
 
 > Why the filter matters beyond tidiness: a dropped instance in a merge does
 > **not** remove the DEF's row — it leaves it orphaned at depth 0. Its
