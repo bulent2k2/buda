@@ -487,8 +487,14 @@ def cmd_def_layer(session, cmd, args, cmd_line):
     i = 0
     while i < len(rest):
         kw = rest[i].lower()
-        if kw == "span_min":    span_min = int(rest[i+1]);    i += 2
-        elif kw == "span_max":  span_max = int(rest[i+1]);    i += 2
+        if kw == "span_min":
+            span_min = require_distance("def_layer", "span_min", rest[i+1],
+                                        session, integer=True)
+            i += 2
+        elif kw == "span_max":
+            span_max = require_distance("def_layer", "span_max", rest[i+1],
+                                        session, integer=True)
+            i += 2
         elif kw == "kspan":     kspan_override = float(rest[i+1]); i += 2
         else:
             # An unknown trailing keyword used to be silently skipped.
@@ -508,6 +514,12 @@ def cmd_def_layer(session, cmd, args, cmd_line):
         smin = span_min if span_min is not None else 0
         smax = span_max if span_max is not None else 1_000_000_000
         session.layers.set_layer_span(int(lid), smin, smax)
+        # Session mirror (the _min_stub pattern): LayerStack has no span
+        # getter, and the resolved values are worth being able to see —
+        # um-suffixed spans convert at parse time.
+        if not hasattr(session, "_layer_spans"):
+            session._layer_spans = {}
+        session._layer_spans[int(lid)] = (smin, smax)
     if kspan_override is not None:
         session.layers.set_layer_kspan(int(lid), kspan_override)
     ovh_val = float(ovh)

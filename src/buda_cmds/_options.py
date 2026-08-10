@@ -196,6 +196,18 @@ def require_distance(cmd, what, tok, session, *, integer=False, usage="",
             sys.exit(1)
         scale = 1.0
         if getattr(session, "bdb", None) is not None:
+            # `set_import_scale dbu` DEFERS the factor until import_def_lef
+            # reads the DEF's UNITS — in that window import_scale() still
+            # returns the stale value, so converting here would silently
+            # mean the wrong thing (Codex P1 on #666).  Refuse, naming the
+            # two ways out.
+            if session.bdb.import_scale_pending():
+                print(f"Error: {cmd}: '{tok}' — the import scale is `dbu`, "
+                      f"which resolves from the DEF's UNITS at import_def_lef; "
+                      f"a `um` distance cannot convert before then.  Move "
+                      f"this line after the import, or declare a numeric "
+                      f"scale (set_import_scale <lu_per_um>).")
+                sys.exit(1)
             scale = float(session.bdb.import_scale()) or 1.0
         session._um_suffix_used = True
         lu = val * scale

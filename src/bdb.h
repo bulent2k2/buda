@@ -808,6 +808,11 @@ public:
     void   set_import_scale(double lu_per_um);
     void   set_import_scale_from_def_units();   // 1 layout unit = 1 DEF DBU
     double import_scale() const;                // layout units per micron
+    // True between `set_import_scale dbu` and the import that resolves it —
+    // the window in which lu_per_um is NOT yet known, so a parse-time
+    // µm→lu conversion (the CLI's `um` suffix) would silently use the stale
+    // factor (Codex P1 on #666).
+    bool   import_scale_pending() const;
     double die_w() const;   // explicit die_w, or union-bbox of all comps if unset
     double die_h() const;   // explicit die_h, or union-bbox of all comps if unset
     void   set_die(double w, double h);

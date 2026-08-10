@@ -30,6 +30,8 @@ import buda_cli
 
 _BASE = ("def_layer 3 M3 V TOP 0", "def_layer 4 M4 H TOP 0")
 # 2000 layout units per micron — the DBU-flavoured scale the vehicle uses.
+# (A literal `set_import_scale dbu` defers resolution to import_def_lef and
+# REFUSES um suffixes until then — pinned below.)
 _SCALED = ("open_bdb :memory:", "set_import_scale 2000") + _BASE
 
 
@@ -143,3 +145,25 @@ def test_bare_numbers_are_untouched():
     assert s._min_stub["global"] == 7
     (slot,) = s.routing_grid.get_layer_grid(3).global_pattern().slots
     assert slot.width == 0.4                          # NOT rescaled
+
+
+def test_um_is_refused_while_the_dbu_scale_is_pending():
+    """`set_import_scale dbu` DEFERS the factor until import_def_lef reads
+    the DEF's UNITS.  In that window a `um` suffix would convert through the
+    stale value and silently mean the wrong thing (Codex P1 on #666) — so it
+    is refused, naming the two ways out."""
+    _s, code, out = _run("open_bdb :memory:", "set_import_scale dbu", *_BASE,
+                         "set_min_stub_length 2um")
+    assert code == 1
+    msg = _err(out)
+    assert "dbu" in msg and "import_def_lef" in msg
+
+
+def test_def_layer_spans_take_the_suffix():
+    """span_min/span_max are distances too (Codex P2 on #666) — the setup-wide
+    suffix promise has to hold for them."""
+    s, code, out = _run("open_bdb :memory:", "set_import_scale 2000",
+                        "def_layer 3 M3 V TOP 0 span_min 0.5um span_max 2um")
+    assert code is None, _err(out)
+    # LayerStack has no span getter; the session mirrors what it applied.
+    assert s._layer_spans[3] == (1000, 4000)
