@@ -487,12 +487,27 @@ def test_a_malformed_def_rolls_back_to_the_previous_design(tmp_path):
     bad = _DEF.replace("  - i1 m + PLACED ( 50000 60000 ) N "
                        "+ HALO 100 100 100 100 ;",
                        "  - i1 m + PLACED ( 50000")   # truncated mid-entry
+    # ...and give the doomed file a DIFFERENT scale: the rollback must
+    # restore the OBJECT too — latch_units takes the rejected file's
+    # divisor as soon as an entry streams, and left stale it would scale
+    # a later UNITS-less import by the failed file's units (Codex P2).
+    bad = bad.replace("UNITS DISTANCE MICRONS 1000 ;",
+                      "UNITS DISTANCE MICRONS 2000 ;")
     (tmp_path / "bad.def").write_text(bad)
     with pytest.raises(RuntimeError):
         s.bdb.import_def_lef(str(tmp_path / "bad.def"),
                              str(tmp_path / "m.lef"))
     after = sorted(c.name for c in s.bdb.all_components())
     assert after == before, (after, before)
+    # A re-import that states no UNITS scales under the SURVIVING design's
+    # divisor (1000), not the rejected file's (2000): i0 at DBU 1000 is
+    # 1.0 um, not 0.5.
+    unitless = "\n".join(l for l in _DEF.splitlines()
+                         if not l.startswith("UNITS")) + "\n"
+    (tmp_path / "u.def").write_text(unitless)
+    s.bdb.import_def_lef(str(tmp_path / "u.def"), str(tmp_path / "m.lef"))
+    i0 = {c.name: c for c in s.bdb.all_components()}["i0"]
+    assert i0.x1 == pytest.approx(1.0), i0.x1
 
 
 def test_units_after_a_streamed_entry_is_a_hard_error(tmp_path):

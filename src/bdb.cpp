@@ -1687,9 +1687,17 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     sink.component = on_component;
     sink.net       = on_net;
     DefDesign def;
+    // The rollback must restore the OBJECT, not just the database:
+    // latch_units takes the rejected file's scale as soon as an entry
+    // streams, and _units is the only member state a mid-parse failure can
+    // have dirtied (die size and lu_per_um are set post-parse).  Left
+    // stale, a later import that omits UNITS would scale the surviving
+    // design's coordinates by the failed file's divisor (Codex P2 on #671).
+    const int units_before = _units;
     try {
         def = read_def(def_path, sink);
     } catch (...) {
+        _units = units_before;
         _exec("ROLLBACK");
         throw;
     }
