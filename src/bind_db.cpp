@@ -624,6 +624,7 @@ void bind_db(py::module_& m) {
         .def("set_import_scale_from_def_units",
              &BDB::set_import_scale_from_def_units,
              "1 layout unit = 1 DEF database unit (exact, no quantization).")
+        .def("import_scale_pending", &BDB::import_scale_pending)
         .def("import_scale",    &BDB::import_scale)
         .def("schema_version",  &BDB::schema_version)
         .def("meta_get",        &BDB::meta_get,

@@ -1170,6 +1170,7 @@ void BDB::set_import_scale_from_def_units() {
 }
 
 double BDB::import_scale() const { return _lu_per_um; }
+bool   BDB::import_scale_pending() const { return _lu_from_def_units; }
 
 void BDB::set_die(double w, double h) {
     _die_w = w; _die_h = h;
