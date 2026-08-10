@@ -2173,8 +2173,15 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
         // Declared width per port: `input [3:0] a` is 4, a bare `input a` is
         // 1.  Needed to know how much of a part-select a port can actually
         // take — Verilog width-adapts, so `.s(w[3:0])` on a SCALAR `s`
-        // connects bit 0 alone (Codex P1 on #661).
+        // connects bit 0 alone (Codex P1 on #661) — and, now, how many PINS
+        // the port itself has.
         std::unordered_map<std::string, int> port_width;
+        // Declared width per local signal (`wire [3:0] w;`).  A whole-vector
+        // reference names no width of its own — `.a(w)` says nothing about
+        // how wide `w` is — so without this the reader cannot tell a 4-bit
+        // bus from a scalar and would have to invent one or the other.
+        // Ports are signals too, so `port_width` is consulted as well.
+        std::unordered_map<std::string, int> net_width;
     };
     std::unordered_map<std::string, VMod> mod_lib;
 
@@ -2208,6 +2215,41 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 return std::string();
             if (!name.empty() && name[0] == '\\') name.erase(name.begin());
             return name;
+        };
+
+        // `wire [3:0] w, x;` → both 4 bits wide.  A whole-vector port
+        // connection (`.a(w)`) carries no width of its own, so this is the
+        // only place the reader can learn that `w` is a bus rather than a
+        // scalar — and getting it from the declaration is what stops it
+        // either inventing bits a scalar does not have or collapsing a bus
+        // that does.  An UNDECLARED signal is an implicit wire, which
+        // Verilog defines as 1 bit, so the default needs no guess.
+        auto parse_net_widths = [&](const std::string& text) {
+            if (cur_mod.empty()) return;
+            static const std::regex decl_re(
+                R"(\b(?:wire|reg|logic)\b\s*(?:signed\s*)?(\[\s*\d+\s*:\s*\d+\s*\])?([^;]*))");
+            std::smatch m;
+            if (!std::regex_search(text, m, decl_re)) return;
+            int w = 1;
+            if (m[1].matched) {
+                static const std::regex range_re(R"(\[\s*(\d+)\s*:\s*(\d+)\s*\])");
+                std::smatch rm;
+                const std::string r = m[1].str();
+                if (std::regex_search(r, rm, range_re))
+                    w = std::abs(std::stoi(rm[1].str()) - std::stoi(rm[2].str())) + 1;
+            }
+            // Names only: an initialiser or an array bound after the name
+            // (`wire [3:0] mem [0:7];`) is not a width of the signal itself.
+            std::stringstream ss(m[2].str());
+            std::string item;
+            while (std::getline(ss, item, ',')) {
+                const std::string name = clean_port_name(item);
+                // Do not overwrite a PORT's declared width: `output [3:0] z;`
+                // followed by `wire [3:0] z;` is one signal, and a bare
+                // `wire z;` re-declaration must not narrow it.
+                if (!name.empty() && !mod_lib[cur_mod].net_width.count(name))
+                    mod_lib[cur_mod].net_width[name] = w;
+            }
         };
 
         auto parse_port_dirs = [&](const std::string& text) {
@@ -2253,6 +2295,10 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                     if (!name.empty()) {
                         mod_lib[cur_mod].port_dirs[name] = dir;
                         mod_lib[cur_mod].port_width[name] = decl_w;
+                        // A port is a signal inside its own module too, so a
+                        // whole-vector reference to it resolves by width the
+                        // same way a local wire does.
+                        mod_lib[cur_mod].net_width[name] = decl_w;
                     }
                 }
             }
@@ -2381,6 +2427,10 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 parse_port_dirs(line);
                 continue;
             }
+            if (tok[0] == "wire" || tok[0] == "reg" || tok[0] == "logic") {
+                parse_net_widths(line);
+                continue;
+            }
             if (kws.count(tok[0])) continue;
             accum = line;
             auto trimmed = rtrim(line);
@@ -2503,10 +2553,21 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
         sqlite3_bind_text(s_cell, 1, cell_name.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_step(s_cell); sqlite3_reset(s_cell);
         for (const auto& [pin_name, dir] : mod.port_dirs) {
-            sqlite3_bind_text(s_cell_pin, 1, cell_name.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text(s_cell_pin, 2, pin_name.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text(s_cell_pin, 3, dir.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_step(s_cell_pin); sqlite3_reset(s_cell_pin);
+            // A vector port is as many pins as it is bits wide, named the way
+            // the pins on the INSTANCES are named, so direction inference
+            // (`infer_pin_dirs_from_cell_pins`) still matches them one to
+            // one.  A scalar port keeps its bare name, which is what makes
+            // an ordinary netlist byte-identical to before.
+            auto wit = mod.port_width.find(pin_name);
+            const int w = (wit == mod.port_width.end()) ? 1 : wit->second;
+            for (int k = 0; k < w; ++k) {
+                const std::string pn = (w > 1)
+                    ? pin_name + "[" + std::to_string(k) + "]" : pin_name;
+                sqlite3_bind_text(s_cell_pin, 1, cell_name.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(s_cell_pin, 2, pn.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(s_cell_pin, 3, dir.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step(s_cell_pin); sqlite3_reset(s_cell_pin);
+            }
         }
     }
 
@@ -2595,26 +2656,47 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                                   is_leaf_if_placed);
             ++vstats.elaborated;
 
-            // Build child context and create pin records
+            // Build child context and create pin records.
+            //
+            // A port is as many PINS as it is bits wide.  Modelling a vector
+            // port as one pin named `a` meant a whole-vector connection
+            // `.a(w)` put that one pin on the net `w` — so an 8-net design
+            // arrived as 2 nets and 2 pins, and, once bit-selects resolved
+            // per bit (the first half of this item), a netlist that drives a
+            // bus whole and reads it by bit came apart: `.z(w)` landed on a
+            // net `w` that no `.a0(w[0])` ever touches, leaving every bit
+            // undriven.  Wiring bit-to-bit is what makes the two spellings
+            // name the same nets.
+            const VMod& encl = mit->second;
             Ctx child_ctx;
             for (auto& [port, ref] : vi.portmap) {
-                // Resolve the IDENTIFIER through the current ctx (port
-                // connections from the parent), then re-apply the selector.
-                // Resolving base-then-select is what makes a bit-select work
-                // across a hierarchy boundary: with `.a(w)` in the parent,
-                // ctx maps `a` to `…/w`, so the child's own `a[0]` lands on
-                // `…/w[0]` — the same net the parent's `.x(w[0])` names.
-                auto it = ctx.find(ref.base);
-                const std::string qbase = (it != ctx.end())
-                    ? it->second
+                if (ref.skip != RefSkip::NONE) {
+                    // A concatenation or a non-literal select: an OPEN, and
+                    // one per ELABORATED instance — a module instantiated a
+                    // hundred times loses the connection a hundred times.
+                    ++vstats.unresolved_conns;
+                    continue;
+                }
+
+                // Resolve the reference through the current ctx.  The FULL
+                // reference is tried first so a per-bit context entry wins:
+                // with `.a(w[7:4])` above, `a[0]` is `w[4]`, which no amount
+                // of base-plus-selector composition can produce.  Failing
+                // that, the base resolves and the selector is re-applied to
+                // the result — the rule that carries a bit-select across a
+                // boundary.
+                auto itf = ctx.find(ref.base);
+                const std::string qbase = (itf != ctx.end())
+                    ? itf->second
                     : (path.empty() ? ref.base : path + "/" + ref.base);
 
-                auto add_pin = [&](const std::string& qnet) {
+                auto add_pin = [&](const std::string& pin_nm,
+                                   const std::string& qnet) {
                     const int nid = get_net(qnet);
                     if (nid <= 0 || cid <= 0) return;
                     sqlite3_bind_int   (s_pin,1,nid);
                     sqlite3_bind_int   (s_pin,2,cid);
-                    sqlite3_bind_text  (s_pin,3,port.c_str(),-1,SQLITE_TRANSIENT);
+                    sqlite3_bind_text  (s_pin,3,pin_nm.c_str(),-1,SQLITE_TRANSIENT);
                     sqlite3_bind_text  (s_pin,4,"UNKNOWN",-1,SQLITE_STATIC);
                     sqlite3_bind_double(s_pin,5,-1.0);
                     sqlite3_bind_double(s_pin,6,-1.0);
@@ -2624,68 +2706,78 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                     return qbase + "[" + std::to_string(b) + "]";
                 };
 
-                if (ref.kind == NetRef::BIT) {
-                    // The port names one bit, so the port IS that bit: a child
-                    // referring to the port plainly must land on it.
-                    child_ctx[port] = bit_of(ref.lo);
-                    add_pin(child_ctx[port]);
-                    ++vstats.bit_selects;
-                } else if (ref.kind == NetRef::RANGE) {
-                    // A part-select on a port BUDA models as one pin.  Each
-                    // bit the PORT can actually take gets a pin row (same
-                    // pin_name — the pin key is (net,comp,pin), so that is
-                    // representable), which keeps the connection to those
-                    // bits rather than inventing a net called `w[3:0]` that
-                    // the netlist never declared.
-                    //
-                    // How many bits the port can take is the formal's
-                    // DECLARED width, not the select's: Verilog width-adapts,
-                    // so `.s(w[3:0])` on a scalar `s` connects bit 0 and
-                    // nothing else.  Expanding to the select's width regard-
-                    // less put four nets on that one pin and reported three
-                    // connections the netlist does not have (Codex P1 on
-                    // #661).  Bits are taken LSB-first because that is the
-                    // end Verilog aligns.
-                    //
-                    // An UNKNOWN formal width (an undefined module — a macro
-                    // kept by the library-cell filter, which declares no
-                    // ports here) is not guessed either way.  Bit 0 is
-                    // connected because it is connected for EVERY width >= 1,
-                    // and the rest is reported rather than invented.
-                    const int nsel = std::abs(ref.hi - ref.lo) + 1;
-                    int take = nsel;
-                    bool width_known = false;
-                    if (defined) {
-                        auto pw = sub->second.port_width.find(port);
-                        if (pw != sub->second.port_width.end()) {
-                            width_known = true;
-                            take = std::min(nsel, pw->second);
-                        }
+                // How wide is the PORT?  Its declared width, which is also
+                // how many pins it has.  An undefined module declares no
+                // ports here, so the width is unknown and stays 1 — bit 0 is
+                // connected for every width >= 1, which needs no assumption.
+                int wf = 1;
+                bool wf_known = false;
+                if (defined) {
+                    auto pw = sub->second.port_width.find(port);
+                    if (pw != sub->second.port_width.end()) {
+                        wf_known = true; wf = pw->second;
                     }
-                    if (!width_known) { take = 1; ++vstats.unsized_part_selects; }
-
-                    const int base_bit = std::min(ref.hi, ref.lo);
-                    for (int k = 0; k < take; ++k) add_pin(bit_of(base_bit + k));
-
-                    // The child context: a single connected bit makes the
-                    // port that bit (as in the BIT case).  Otherwise the
-                    // resolved BASE, so a child's `a[k]` composes to `w[k]` —
-                    // exact for the usual `w[N:0]` and OFF BY `lo` otherwise,
-                    // which is reported rather than quietly mapped.
-                    child_ctx[port] = (take == 1) ? bit_of(base_bit) : qbase;
-                    ++vstats.part_selects;
-                    if (take > 1 && ref.lo != 0 && defined &&
-                        !sub->second.insts.empty())
-                        ++vstats.offset_part_selects;
-                } else if (ref.skip != RefSkip::NONE) {
-                    // A concatenation or a non-literal select: an OPEN, and
-                    // one per ELABORATED instance — a module instantiated a
-                    // hundred times loses the connection a hundred times.
-                    ++vstats.unresolved_conns;
-                } else {
-                    child_ctx[port] = qbase;
-                    add_pin(qbase);
                 }
+
+                // How wide is the ACTUAL?  A selector states it outright; a
+                // whole-signal reference does not, so its DECLARATION is
+                // asked.  An undeclared signal is an implicit wire, 1 bit.
+                int wa = 1;
+                int base_bit = 0;           // actual bit feeding port bit 0
+                bool actual_is_vector = false;
+                if (ref.kind == NetRef::BIT) {
+                    wa = 1; base_bit = ref.lo; actual_is_vector = true;
+                } else if (ref.kind == NetRef::RANGE) {
+                    wa = std::abs(ref.hi - ref.lo) + 1;
+                    base_bit = std::min(ref.hi, ref.lo);
+                    actual_is_vector = true;
+                } else {
+                    auto nw = encl.net_width.find(ref.base);
+                    if (nw != encl.net_width.end()) wa = nw->second;
+                    actual_is_vector = (wa > 1);
+                }
+
+                // Which NET the actual's bit b is.  A per-bit context entry
+                // wins whenever there is one: the enclosing module's own port
+                // bits were mapped exactly when IT was elaborated, offset
+                // slices included, and that mapping is not reproducible by
+                // appending a selector to a base name.  Without this a module
+                // handed `w[7:4]` and passing the whole port down reconnected
+                // its child to `w[3:0]` — not an open, a WRONG net, which is
+                // the one failure a reader must never produce quietly.
+                auto net_of_bit = [&](int b) -> std::string {
+                    if (!actual_is_vector) return qbase;
+                    auto pb = ctx.find(ref.base + "[" + std::to_string(b) + "]");
+                    if (pb != ctx.end()) return pb->second;
+                    return bit_of(b);
+                };
+
+                // Verilog aligns the two at their low ends and adapts the
+                // width, so the connection is min(formal, actual) bits.
+                const int n = std::min(wf, wa);
+                for (int k = 0; k < n; ++k) {
+                    const std::string pin_nm = (wf > 1)
+                        ? port + "[" + std::to_string(k) + "]" : port;
+                    add_pin(pin_nm, net_of_bit(base_bit + k));
+                }
+
+                // The child context.  Per-bit entries make a port bit resolve
+                // EXACTLY; the bare name is kept too so a child passing the
+                // whole vector down resolves through the same per-bit map.
+                if (wf > 1) {
+                    for (int k = 0; k < n; ++k)
+                        child_ctx[port + "[" + std::to_string(k) + "]"] =
+                            net_of_bit(base_bit + k);
+                    child_ctx[port] = qbase;
+                } else {
+                    child_ctx[port] = net_of_bit(base_bit);
+                }
+
+                if (ref.kind == NetRef::BIT) ++vstats.bit_selects;
+                else if (ref.kind == NetRef::RANGE) {
+                    ++vstats.part_selects;
+                    if (!wf_known) ++vstats.unsized_part_selects;
+                } else if (wf > 1 && wa > 1) ++vstats.vector_ports;
             }
 
             if (!is_leaf)

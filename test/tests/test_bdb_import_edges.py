@@ -444,13 +444,18 @@ def test_a_bit_select_resolves_through_a_port(tmp_path):
     kept in the lookup key.
 
     The parent connects the whole bus to a port (`.p(w)`), and the child
-    selects bits of that port (`p[0]`).  Resolving base-then-select maps
-    `p[0]` onto `w[0]` — the same net the parent's own `.a0(w[0])` names.
-    Keying the lookup on the literal `p[0]` would miss the ctx entry (`p`)
-    and invent a fresh local net, i.e. an open across the boundary."""
+    selects bits of that port (`p[0]`).  The child's bit must land on
+    `w[0]` — the same net the parent's own `.a0(w[0])` names — whether that
+    comes from the per-bit context or from composing the resolved base with
+    the selector.  Getting neither would invent a fresh local net, i.e. an
+    open across the boundary.
+
+    `p` is declared `[1:0]`, which it has to be: this test first wrote
+    `input p;` and bit-selected it anyway — invalid Verilog that parsed only
+    because the reader had no widths to check it against."""
     db = _v(tmp_path, _SUB + """\
         module mid (p);
-          input p;
+          input [1:0] p;
           sub k0 (.a0(p[0]), .a1(p[1]), .z(t));
         endmodule
 
@@ -521,11 +526,14 @@ def test_a_part_select_connects_every_bit_its_port_can_take(tmp_path):
     # off the pin table rather than through a (instance, pin) dict, which
     # would collapse the very rows this is about.
     comps = {c.id: c.name for c in db.all_components()}
-    on_s = sorted(nets[p.net_id] for p in db.all_pins()
-                  if comps.get(p.comp_id) == "u1" and p.pin_name == "s")
-    assert on_s == ["w[0]", "w[1]", "w[2]", "w[3]"], on_s
+    # The 4-bit port is four PINS, `s[0]`..`s[3]` — one per bit, which is
+    # what the second half of this item made true.  Each lands on its own
+    # net, so the pin/net pairing is the design's, not a pile on one pin.
+    on_s = sorted((p.pin_name, nets[p.net_id]) for p in db.all_pins()
+                  if comps.get(p.comp_id) == "u1")
+    assert on_s == [(f"s[{i}]", f"w[{i}]") for i in range(4)], on_s
     # …so the part-select and the bit-selects meet on the same nets.
-    assert _wiring(db)[("u0", "a0")] in on_s
+    assert _wiring(db)[("u0", "a0")] in [n for _pin, n in on_s]
 
 
 def test_a_part_select_takes_only_as_many_bits_as_the_port_has(tmp_path):
@@ -610,7 +618,10 @@ def test_a_literal_index_with_spaces_is_still_a_literal(tmp_path):
         if comps.get(p.comp_id) == "u":
             by_pin.setdefault(p.pin_name, []).append(nets[p.net_id])
     assert sorted(by_pin.get("a", [])) == ["w[0]"]
-    assert sorted(by_pin.get("b", [])) == ["w[0]", "w[1]", "w[2]", "w[3]"]
+    # `b` is `[3:0]`, so it is four pins now — `w[3 : 0]` still resolves as
+    # the literal range it is, which is what this test is about.
+    for i in range(4):
+        assert by_pin.get(f"b[{i}]") == [f"w[{i}]"], by_pin
 
 
 def test_an_unresolved_connection_is_counted_once_per_elaborated_instance(
@@ -651,3 +662,129 @@ def test_an_unresolved_connection_is_counted_once_per_elaborated_instance(
     # three elaborated `used` instances, each losing its one concatenation;
     # `never_used` is never elaborated and contributes nothing.
     assert st.unresolved_conns == 3
+
+
+# ── vector PORTS (opens_interchange item 2, second half) ───────────────────
+
+def test_a_vector_port_is_one_pin_per_bit(tmp_path):
+    """A port is as many PINS as it is bits wide.
+
+    Modelled as one pin named `a`, a whole-vector connection `.a(w)` put that
+    single pin on a single net `w`: an 8-net design arrived as 2 nets and 2
+    pins, the bus collapsed exactly as a bit-select used to collapse it."""
+    db = _v(tmp_path, """\
+        module leaf (a, z);
+          input  [3:0] a;
+          output [3:0] z;
+        endmodule
+
+        module top ();
+          wire [3:0] w, q;
+          leaf u0 (.a(w), .z(q));
+        endmodule
+        """)
+    assert sorted(n.name for n in db.all_nets()) == \
+        [f"q[{i}]" for i in range(4)] + [f"w[{i}]" for i in range(4)]
+    assert sorted(f"{cp.cell}.{cp.pin_name}" for cp in db.all_cell_pins()) == \
+        [f"leaf.a[{i}]" for i in range(4)] + [f"leaf.z[{i}]" for i in range(4)]
+    w = _wiring(db)
+    assert all(w[("u0", f"a[{i}]")] == f"w[{i}]" for i in range(4)), w
+    assert all(w[("u0", f"z[{i}]")] == f"q[{i}]" for i in range(4)), w
+
+
+def test_a_bus_driven_whole_and_read_by_bit_stays_connected(tmp_path):
+    """The shape that makes this half necessary rather than tidy — and the
+    one the FIRST half caused.
+
+    Before either half, `.z(w)` and `.a0(w[0])` both collapsed to a net `w`:
+    wrongly joined, but joined.  Once bit-selects resolved per bit and ports
+    did not, they split — the driver sat alone on a net `w` that no receiver
+    touched, leaving every bit of the bus undriven.  One kind of wrong became
+    another, and only wiring both sides per bit makes the two spellings name
+    the same nets."""
+    db = _v(tmp_path, """\
+        module drv (z);
+          output [3:0] z;
+        endmodule
+
+        module rcv (a0, a1, a2, a3);
+          input a0, a1, a2, a3;
+        endmodule
+
+        module top ();
+          wire [3:0] w;
+          drv u_d (.z(w));
+          rcv u_r (.a0(w[0]), .a1(w[1]), .a2(w[2]), .a3(w[3]));
+        endmodule
+        """)
+    assert sorted(n.name for n in db.all_nets()) == [f"w[{i}]" for i in range(4)]
+    w = _wiring(db)
+    for i in range(4):
+        assert w[("u_d", f"z[{i}]")] == f"w[{i}]" == w[("u_r", f"a{i}")]
+
+
+def test_a_connection_is_min_of_the_two_widths(tmp_path):
+    """Verilog aligns the two ends at their low bits and adapts the width, so
+    the reader connects `min(formal, actual)` bits and invents nothing.
+
+    The width of a whole-signal ACTUAL comes from its declaration — `.a(w)`
+    says nothing about how wide `w` is — which is why wire declarations are
+    read at all.  An undeclared signal is an implicit wire, 1 bit."""
+    def pins(body, decl):
+        d = tmp_path / str(abs(hash(body + decl)))
+        d.mkdir()
+        db = _v(d, f"""\
+            module leaf (a);
+              input {decl} a;
+            endmodule
+
+            module top ();
+              wire [3:0] w;
+              wire s;
+              leaf u0 ({body});
+            endmodule
+            """)
+        return sorted((pin, net) for (inst, pin), net in _wiring(db).items()
+                      if inst == "u0")
+
+    # a scalar wire onto a 4-bit port connects bit 0 — the other three port
+    # bits have nothing to connect TO, and inventing `s[1]` would be a net
+    # the netlist never declared.
+    assert pins(".a(s)", "[3:0]") == [("a[0]", "s")]
+    # a 4-bit wire onto a scalar port connects w[0] and drops the rest.
+    assert pins(".a(w)", "") == [("a", "w[0]")]
+    # matched widths connect throughout.
+    assert pins(".a(w)", "[3:0]") == [(f"a[{i}]", f"w[{i}]") for i in range(4)]
+
+
+def test_an_offset_slice_maps_exactly_through_the_hierarchy(tmp_path):
+    """`.p(w[7:4])` on `input [3:0] p` makes port bit k the net bit k+4.
+
+    Composing a resolved BASE with a selector cannot express that — it would
+    give `w[k]` — so port bits are mapped through a PER-BIT context.  Without
+    it a module handed `w[7:4]` and passing the whole port down reconnected
+    its child to `w[3:0]`: not an open, a WRONG net, which is the one failure
+    a reader must never produce quietly.  This is what retired BUDA-1611."""
+    db = _v(tmp_path, """\
+        module leaf (b, c);
+          input [3:0] b;
+          input c;
+        endmodule
+
+        module mid (p);
+          input [3:0] p;
+          leaf k (.b(p), .c(p[0]));
+        endmodule
+
+        module top ();
+          wire [7:0] w;
+          mid m0 (.p(w[7:4]));
+        endmodule
+        """)
+    w = _wiring(db)
+    for i in range(4):
+        assert w[("m0", f"p[{i}]")] == f"w[{i + 4}]", w
+        # the whole port passed one level down…
+        assert w[("m0/k", f"b[{i}]")] == f"w[{i + 4}]", w
+    # …and a single bit of it.
+    assert w[("m0/k", "c")] == "w[4]"
