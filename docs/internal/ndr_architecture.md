@@ -357,10 +357,17 @@ machinery beside the C++ `ConnViolation`s:
   equal the rule's `ndr_run_layout` `'S'` count for the segment's
   **intended membership** (`_seg_member_bits`, the same accounting DNUTS
   admission uses — a keepout-culled signal bit is already UNPLACED and
-  must not re-shape the expected layout into a spurious mismatch), and in
-  flank-the-bus mode the shields must actually be the run's outermost rows
-  (a shield inside the bits, or a bit outside the shields, is misplacement
-  even at the right count).
+  must not re-shape the expected layout into a spurious mismatch).  On a
+  FULL run the ARRANGEMENT is checked too, in EVERY mode: the layout's
+  `'B'`/`'S'` entries are exactly the rows it predicts (a `'b'`
+  continuation slot belongs to its bit's wire, a `'G'` guard materializes
+  nothing), so walking them against the ascending placed rows catches a
+  right-COUNT shield in the wrong gap — invisible to the count under
+  `bit`/`per:N`, where swapping a shield with a neighbouring bit keeps
+  every total intact.  It subsumes the old flank-the-bus outermost-rows
+  test exactly (that layout is `S…S`).  A CULLED run skips it: the missing
+  bits are already LOUD as UNPLACED, and matching survivors against the
+  intended layout would flag a correct run.
 - **NDR_WIDTH** — each governed bit's placed extent must cover its
   `width_slots` SIGNAL slot centres (`signal_tracks_in` at the span
   midpoint over `track ± width/2`), so a bit that lost its continuation
