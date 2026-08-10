@@ -9,19 +9,20 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 this page is the backlog behind them.
 
 Snapshot index — last verified against `main`: **2026-08-10**, after items 1,
-2 and 4 landed. Each item states what is missing, why it was left rather than
+2, 3 and 4 landed. Each item states what is missing, why it was left rather than
 forgotten, and where to start. Every claim below was reproduced on `main`
 before being written down; the reproduction is given so a reader can
 re-derive it rather than trust it.
 
-Items 1, 2 and 4 are kept in place, struck through, rather than moved to the
-resolved table at the bottom. Each entry records where this page's **own
+Items 1, 2, 3 and 4 are kept in place, struck through, rather than moved to
+the resolved table at the bottom. Each entry records where this page's **own
 first description was wrong** — item 1 about the merge case, and about the
 fix it originally proposed, which would have been the wrong fix; item 2
-about the severity, having called a silent SHORT a width collapse. That is
-worth more than a tidy list, and the pattern is worth naming: the first
-description of a fault is written from the symptom you noticed, and the
-symptom is rarely the whole fault.
+about the severity, having called a silent SHORT a width collapse; item 3
+reserved a size-rule choice that measurement showed to be no choice at all.
+That is worth more than a tidy list, and the pattern is worth naming: the
+first description of a fault is written from the symptom you noticed, and
+the symptom is rarely the whole fault.
 
 The working vehicle for all of this is **[`flow/def/`](../../flow/def/)** —
 a LEF + DEF + Verilog design read off disk and routed end to end. Most of
@@ -221,7 +222,45 @@ Pinned by `test_bdb_import_edges.py` (bit-select, hierarchy resolution,
 `test_def_hier_flow.py`, which asserts each internal bus arrives 4 bits wide
 and the design routes 36 nets.
 
-## 3. The GDS round trip loses what the merge invented
+## 3. ~~The GDS round trip loses what the merge invented~~ — RESOLVED 2026-08-10
+
+**The honest question, answered by measurement.** This item asked what size a
+derived container cell gets — max over instances, or per-instance geometry in
+the export — and reserved the choice.  Measured on the vehicle before
+choosing: every derived cell's instances are **size-uniform** (`__PORT__` ×8
+at 500×500, `blk` ×4 at 93000×27000, `quad` ×2 at 96000×75000 — containers
+come from congruent templates, ports from one PIN template), so the common
+instance size IS the cell size and the two options coincide.  The rule
+implemented is *the common size, written only where none exists*: a cell
+whose instances disagree, or has an unplaced instance, stays 0×0 and the
+export's dim-mismatch warning keeps that gap visible — inventing a max would
+claim a footprint no instance has.
+
+Three fixes, each where the size is derived:
+
+* **containers** — `derive_container_bboxes` writes the derived size back to
+  `cell.width/height` (guarded `WHERE width=0 AND height=0`, so a LEF SIZE or
+  hand resize is never overwritten; 90°-oriented instances compared in the
+  cell frame);
+* **`__PORT__`** — `import_def_lef` Phase 3d creates the cell row, sized to
+  the union of the port shapes;
+* **the top module** — `import_verilog` records `meta.verilog_top`, and
+  `export_gds` adopts that (uninstantiated, sizeless) cell as the top
+  structure's NAME instead of emitting an empty orphan beside a synthetic
+  `top` — direct evidence where the existing die-size adoption is
+  circumstantial.
+
+On the vehicle the re-import went from 8× `reference to undefined structure
+'__PORT__'`, `structure 'chip' has no geometry anywhere`, two tops, 8 labels
+skipped and **0 nets recovered** — to zero warnings, one top named `chip`,
+all 8 ports back and **all 8 nets recovered**.  The export-side "4
+placements have a bbox that differs" warning is gone with it.  Pinned by
+`test_merge_scaffolding_survives_the_round_trip` (a miniature merge, all
+three losses asserted individually) and
+`test_disagreeing_instance_sizes_leave_the_cell_unsized` (the rule's
+refusal half).
+
+<details><summary>The original item, for the record</summary>
 
 `export_gds` writes cell outlines from `cell.width/height`, and two kinds of
 cell created during a DEF+Verilog merge have neither:
@@ -245,6 +284,8 @@ natural place to fill in a size once the rule is chosen.
 
 Related and cosmetic: `export_gds` warns that 4 placements have a bbox
 differing from the oriented cell footprint — the same 0×0 container cells.
+
+</details>
 
 ## 4. ~~Relative paths resolve against two different roots~~ — RESOLVED 2026-08-10
 
@@ -427,8 +468,10 @@ or batch run already falls through to the direct launch.
   straight to the descriptor would land inside a frame and desynchronise the
   channel. Nothing in BUDA does this today.
 * **`import_gds` label recovery needs components to land on.** Labels
-  outside every component are skipped with a warning — correct, and a
-  consequence of item 3 rather than a separate defect.
+  outside every component are skipped with a warning — correct.  (The case
+  that made this bite — port labels landing on nothing because `__PORT__`
+  never round-tripped — was item 3, now resolved; a label genuinely outside
+  every component still skips, as it should.)
 
 ---
 

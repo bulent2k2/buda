@@ -44,6 +44,15 @@
 // trial before committing, so a wrong commit is structurally impossible —
 // the sweep's metrics only carry the stall certificate and the pick order.
 //
+// FULL-TRIAL mode (`full_trials`, the refine_selection port): tighten_pulls
+// runs in BOTH stages (a WL-fair trial — refine's accept reads realized WL,
+// which a tighten-skipped solve would bias against the move), and the
+// outcome additionally carries the NUTS interval-violation count and the
+// realized abstract WL (sum of placed span lengths, raw double), matching
+// the sequential full trial's 4-component refine metric.  The caller
+// disables the DNUTS abort bar (abort_unplaced = -1) so the opens count is
+// exact for the componentwise parity test.
+//
 // Threads never touch Python state (the binding releases the GIL): shared
 // inputs are const (Floorplan/LayerStack/RoutingGridStack reads;
 // Topology::analysis_cache_ is per-copy with an atomically refcounted const
@@ -51,7 +60,9 @@
 
 #pragma once
 
+#include <array>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <tuple>
@@ -70,22 +81,35 @@ struct SweepMove {
     int tidx      = -1;
 };
 
-// One per move: (primary, secondary, ok).
+// One per move: (primary, secondary, viols, wl, ok).
 //   stage a: primary = NUTS overlaps, secondary = 0.
 //   stage b: primary = DNUTS unplaced + base_disc + moved-bundle disc,
 //            secondary = NUTS overlaps.
+//   viols = NUTS interval violations, wl = sum of placed segment span
+//   lengths (the raw double — the caller applies its own rounding so the
+//   Python-side int(round(...)) reproduces exactly).  Both are consumed by
+//   refine_selection's componentwise accept; the ripup sweeps ignore them.
 //   ok = false -> this move could not be evaluated here (incremental replan
 //   unavailable / bad index); the caller must trial it sequentially.
 struct SweepOutcome {
-    int  primary   = 0;
-    int  secondary = 0;
-    bool ok        = false;
+    int    primary   = 0;
+    int    secondary = 0;
+    int    viols     = 0;
+    double wl        = 0.0;
+    bool   ok        = false;
 };
 
 // Stage-b context; enabled=false = stage a (NUTS metric only).
 struct SweepDnutsCtx {
     bool enabled = false;
     const RoutingGridStack* grid = nullptr;
+    // Reference-solve grid for the bottom-up merge path (Codex P2 on #664):
+    // with `set_cell_layer_share` declared, the session's sequential
+    // _run_detailed_nuts solves the REFERENCE instances on a grid CLONE
+    // carrying the thinned-pattern overrides — the sweep must solve them on
+    // the same view or its opens metric diverges from the sequential
+    // trial's.  nullptr = no shares, use `grid` (byte-identical).
+    const RoutingGridStack* ref_grid = nullptr;
     std::string bit_order = "LO_HI";
     int abort_unplaced = -1;              // plain path only (fast-trial bar)
     // Bottom-up DNUTS copy plan (all empty = plain single-engine path);
@@ -102,6 +126,35 @@ struct SweepDnutsCtx {
     std::map<std::pair<int, int>, bool> horiz_of;
 };
 
+// One fixed-context screen request: score `tidxs` for `bundle_id` against
+// the shared baseline (the exact _rr_screen_scores shape — fresh engine,
+// skip tighten/doglegs, add_fixed_segments_except, private planner clone).
+struct ScreenJob {
+    int bundle_id = -1;
+    std::vector<int> tidxs;
+    bool clear_dogleg = false;
+};
+
+// Batched PARALLEL fixed-context screening (the refine/ripup chunk builds'
+// dominant sequential cost at chip scale): one worker per job, private
+// planner clone + engine per job, shared inputs const.  Returns per job the
+// screen rows [(tidx, overlaps, violations)], or nullopt when the
+// incremental replan is unavailable (the caller falls back to the
+// unscreened order, exactly as the sequential per-bundle call does).
+// Deterministic per (baseline, job) — screening order does not matter, so
+// batching is decision-identical to the sequential per-bundle calls.
+std::vector<std::optional<std::vector<std::array<int, 3>>>> parallel_screen(
+    const std::vector<BundleWrapper>& bundles,      // committed baseline
+    const std::vector<ScreenJob>&     jobs,
+    const CongestionPlanner&          planner,      // cloned per job
+    const Floorplan&                  fp,
+    const LayerStack&                 layers,
+    double                            track_pitch,
+    const NUTSResult&                 baseline,     // frozen occupancy
+    const std::vector<int>&           extra_x,
+    const std::vector<int>&           extra_y,
+    int                               n_threads);
+
 std::vector<SweepOutcome> parallel_sweep(
     const std::vector<BundleWrapper>& bundles,      // committed baseline
     const std::vector<SweepMove>&     moves,
@@ -114,6 +167,7 @@ std::vector<SweepOutcome> parallel_sweep(
     const std::vector<int>&           extra_y,
     bool                              stage_b,
     bool                              skip_tighten_stage_a,
+    bool                              full_trials,
     const std::set<int>&              dogleg_slot_bids,
     const std::map<int, int>&         base_disc,    // bid -> others' disc
     const std::map<int, int>&         net_counts,   // bid -> its bit count

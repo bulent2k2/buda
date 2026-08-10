@@ -1438,7 +1438,7 @@ def test_adversarial_screen_cannot_cost_the_endpoint(monkeypatch):
     s = _build_session(narrow=True)
     monkeypatch.setattr(
         buda_cli.BudaSession, "_rr_screen_prune",
-        lambda self, w, idx_moves: ([], list(idx_moves)))
+        lambda self, w, idx_moves, scores=...: ([], list(idx_moves)))
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         s.do_command("ripup_reroute")

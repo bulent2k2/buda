@@ -21,6 +21,7 @@ screens, snapshots) and reporting helpers with RipupMixin/RRStateMixin
 via self; member sets disjoint (guarded by buda_session.MIXINS).
 """
 
+import os
 import time
 
 import buda
@@ -30,7 +31,207 @@ import buda_session.ripup as _ripup_mod
 
 class RefineMixin:
     # ── measured selection refine (selection-basis lever 3) ─────────────────
-    def _refine_selection(self, max_moves=30, chase_overlaps=False):
+    def _refine_eligible(self, w):
+        """The sweep's eligibility test: returns the current selection index
+        for a refinable bundle, None for a skip (user pin inviolable /
+        bottom-up fixed copy / single-candidate pool / no selection)."""
+        if w.input.topology_pinned:
+            return None
+        if w.hier.locked:
+            return None
+        n = len(w.input.candidates)
+        old = w.plan.selected_topology_index
+        if n < 2 or old < 0:
+            return None
+        return old
+
+    def _refine_screen_alts(self, w, old):
+        """Screen-ordered top alternates for one bundle (ordering only, the
+        P1 fixed-context screen): all alternate indices sorted by screened
+        (overlaps, violations), ties on index, truncated to the trial
+        budget.  Falls back to the unscreened index order when the screen
+        is unavailable."""
+        n = len(w.input.candidates)
+        alts = [t for t in range(n) if t != old]
+        scores = self._rr_screen_scores(w, alts)
+        if scores is not None:
+            alts.sort(key=lambda t: (scores[t][0], scores[t][1], t))
+        return alts[:_ripup_mod._RR_SCREEN_TOP_N]
+
+    def _refine_try_bundle(self, w, bid, old, tops, stage, metric, accept,
+                           m_str, cur):
+        """The sequential per-bundle trial + commit body (verbatim from the
+        pre-parallel sweep loop): full-trial the screened alternates in
+        order, adopt the FIRST one the accept guard takes, commit via the
+        forward snapshot (or the full re-apply fallback) + recharge.
+        Returns (cur, committed?, trials_run) — `cur` re-read after a
+        commit."""
+        snap = self._rr_snapshot()
+        accepted = None
+        trials = 0
+        for tidx in tops:
+            move = ('idx', tidx)
+            m = self._rr_guarded_move(w, move, old, stage, metric, snap)
+            # WL polish (default): adopt only when opens and overlaps are
+            # PARITY-or-better componentwise with strictly shorter realized
+            # WL — the healers' work is never traded for length.
+            # chase_overlaps: plain lexicographic (an aggressive pre-healer
+            # — measured mixed on the vehicles, see the wishlist entry).
+            take = m is not None and accept(m, cur)
+            # Full trials (fast off) => the trial state is a full-pipeline
+            # state: capture it as the commit's forward snapshot before
+            # restoring.
+            fwd = self._rr_snapshot() if take else None
+            self._rr_undo_move(w, move, old)
+            self._rr_restore(snap, only=self._rr_dirty)
+            trials += 1
+            if take:
+                accepted = (m, move, fwd)
+                break
+        if accepted is None:
+            return cur, False, trials
+        m_new, move, fwd = accepted
+        if fwd is not None and self._rr_fwd_ok(snap, fwd):
+            self._rr_restore(fwd)
+        else:
+            self._rr_apply_move(w, move, old, stage, metric, full=True)
+        self.planner.recharge_committed(self.bundles)
+        self._decision(
+            f"[refine_selection] COMMIT bundle {bid} "
+            f"{self._rr_move_str(old, move)}, metric "
+            f"{m_str(cur)}->"
+            f"{m_str(metric())}",
+            "refine_commit", bid=bid,
+            move=self._rr_move_str(old, move), m_from=cur,
+            m_to=metric())
+        return metric(), True, trials
+
+    def _refine_parallel_sweep(self, stage, metric, accept, m_str, cur,
+                               committed, max_moves, n_trials):
+        """One PARALLEL refine sweep over the session bundles (the ripup
+        P1/P1b machinery in full-trial form): screen lazily in visit-order
+        chunks, evaluate every kept move on the C++ sweep pool with the
+        WL-fair full-trial semantics (tighten on, DNUTS abort off) and the
+        4-component outcome (opens/overlaps/violations/realized-WL), then
+        walk the outcomes in visit order.  A bundle none of whose moves the
+        accept guard would take books its trials and moves on — the
+        dominant case on a polish sweep, now at pool width instead of two
+        sequential full pipelines per bundle.  A bundle with a would-accept
+        (or unevaluable) move REPLAYS its whole kept list through the
+        sequential `_refine_try_bundle` — the replay is the accept basis
+        and the committed state, so committed moves, printed lines and
+        trial counts match the sequential sweep exactly; a sweep-vs-replay
+        disagreement is LOUD and the replay verdict wins.  After a commit
+        the baseline changed: the chunk's remaining evaluations are stale,
+        so the sweep resumes rebuilding from the next bundle.
+        Returns (cur, committed, n_trials, swept_any_commit)."""
+        bundles = list(self.bundles)
+        n = len(bundles)
+        n_thr = self._rr_sweep_threads() or (os.cpu_count() or 1)
+        # ADAPTIVE chunking (topdown refine measurement, 2026-08-10): a
+        # commit discards the chunk's remaining evaluations and re-screens
+        # from the restart point, so on a commit-heavy sweep (the topdown
+        # heal flow: 30 commits at ~3 trials/move) a big fixed chunk wastes
+        # most of its parallel work — refine #1 measured SLOWER than
+        # sequential.  Start small (waste per commit ~ half a small chunk),
+        # DOUBLE after each commit-free chunk (the stall/certification
+        # sweeps — the dominant volume on polish runs — get full pool
+        # width and beyond), reset on commit.  Chunk size only groups
+        # evaluations, so decisions are unchanged.
+        chunk_min = max(4, n_thr)
+        chunk_max = max(32, 8 * n_thr)
+        cur_chunk = chunk_min
+        sweeping = False
+        i = 0
+        while i < n and committed < max_moves:
+            pre = []              # (pos, w, bid, old) — chunk membership
+            nmv = 0
+            while i < n and nmv < cur_chunk:
+                pos, w = i, bundles[i]
+                i += 1
+                old = self._refine_eligible(w)
+                if old is None:
+                    continue
+                bid = w.input.original_bundle.id
+                # Post-prune kept count is knowable without screening, so
+                # chunk membership is fixed BEFORE the batched screen.
+                pre.append((pos, w, bid, old))
+                nmv += min(len(w.input.candidates) - 1,
+                           _ripup_mod._RR_SCREEN_TOP_N)
+            if not pre:
+                continue
+            # Batched parallel screen for the whole chunk (the sequential
+            # per-bundle screens were the sweep's dominant cost at chip
+            # scale); ordering per bundle identical to _refine_screen_alts.
+            reqs = [(w, [t for t in range(len(w.input.candidates))
+                         if t != old])
+                    for _p, w, _b, old in pre]
+            scores_list = self._rr_screen_scores_many(reqs)
+            group = []            # (pos, w, bid, old, tops)
+            for (pos, w, bid, old), (_w2, alts), scores in \
+                    zip(pre, reqs, scores_list):
+                if scores is not None:
+                    alts = sorted(alts,
+                                  key=lambda t: (scores[t][0],
+                                                 scores[t][1], t))
+                group.append((pos, w, bid, old,
+                              alts[:_ripup_mod._RR_SCREEN_TOP_N]))
+            flat = [(0, bid, old, t)
+                    for _p, _w, bid, old, tops in group for t in tops]
+            if flat:
+                base_disc, net_counts, dn_kwargs = \
+                    self._rr_sweep_stage_setup(flat, stage, metric,
+                                               full=True)
+                outcomes = self._rr_sweep_eval(flat, stage, base_disc,
+                                               net_counts, dn_kwargs,
+                                               full=True)
+            else:
+                outcomes = []
+            oi = 0
+            restart = None
+            for pos, w, bid, old, tops in group:
+                outs = outcomes[oi:oi + len(tops)]
+                oi += len(tops)
+                flagged = False
+                all_ok = True
+                for (prim, sec, viols, wl, ok) in outs:
+                    if not ok:
+                        flagged, all_ok = True, False
+                        break
+                    if stage == 'b':
+                        m = (prim, sec, viols, int(round(wl)))
+                    else:
+                        m = (prim, viols, int(round(wl)))
+                    if accept(m, cur):
+                        flagged = True
+                        break
+                if not flagged:
+                    n_trials += len(tops)   # the sequential trials replaced
+                    continue
+                cur, did, t = self._refine_try_bundle(
+                    w, bid, old, tops, stage, metric, accept, m_str, cur)
+                n_trials += t
+                if did:
+                    committed += 1
+                    sweeping = True
+                    if committed >= max_moves:
+                        return cur, committed, n_trials, sweeping
+                    restart = pos + 1   # baseline changed: chunk is stale
+                    break
+                if all_ok:
+                    self._decision(
+                        f"[refine_selection] WARNING: parallel-sweep "
+                        f"divergence on bundle {bid} — replay verdict kept",
+                        "refine_divergence", bid=bid)
+            if restart is not None:
+                i = restart
+                cur_chunk = chunk_min          # commit phase: keep waste small
+            else:
+                cur_chunk = min(chunk_max, cur_chunk * 2)   # stall: widen
+        return cur, committed, n_trials, sweeping
+
+    def _refine_selection(self, max_moves=30, chase_overlaps=False,
+                          use_parallel_sweep=None):
         """Re-rank SELECTIONS on measured routability, not the generation-time
         WL estimate (wishlist-planner "Selection basis", the deferred lever;
         levers 1 kPeak and 2 ripup pool re-rank shipped earlier).  The two
@@ -129,71 +330,45 @@ class RefineMixin:
         cur = m0
         committed = 0
         n_trials = 0
+        # Parallel refine sweep (chip-scale runtime, 2026-08-08): the polish
+        # sweep full-trials the screened top-2 of EVERY eligible bundle —
+        # ~2 full pipeline solves per bundle per sweep, the dominant cost at
+        # chip scale (chip_stack: 500s+ per call) — and most bundles accept
+        # nothing, which makes the sweep the same embarrassingly-parallel
+        # certificate shape as ripup's stall sweep.  Gate mirrors the P1b
+        # scan: default on, `no_parallel_sweep` opts out, 1-thread pools
+        # keep the sequential loop (chunked eval wastes work when commits
+        # are frequent and the pool adds nothing).
+        use_par = (_ripup_mod._RR_PARALLEL_SWEEP_DEFAULT
+                   if use_parallel_sweep is None else use_parallel_sweep)
+        if use_par:
+            n_pool = self._rr_sweep_threads() or (os.cpu_count() or 1)
+            use_par = n_pool > 1
         try:
             sweeping = True
             while sweeping and committed < max_moves:
                 sweeping = False
+                if use_par:
+                    cur, committed, n_trials, sweeping = \
+                        self._refine_parallel_sweep(
+                            stage, metric, accept, m_str, cur, committed,
+                            max_moves, n_trials)
+                    continue
                 for w in list(self.bundles):
                     if committed >= max_moves:
                         break
-                    if w.input.topology_pinned:
-                        continue                     # user pin inviolable
-                    if w.hier.locked:
-                        continue                     # bottom-up fixed copy
-                    n = len(w.input.candidates)
-                    old = w.plan.selected_topology_index
-                    if n < 2 or old < 0:
+                    old = self._refine_eligible(w)
+                    if old is None:
                         continue
                     bid = w.input.original_bundle.id
-                    snap = self._rr_snapshot()
-                    alts = [t for t in range(n) if t != old]
-                    scores = self._rr_screen_scores(w, alts)
-                    if scores is not None:
-                        alts.sort(key=lambda t: (scores[t][0], scores[t][1],
-                                                 t))
-                    accepted = None
-                    for tidx in alts[:_ripup_mod._RR_SCREEN_TOP_N]:
-                        move = ('idx', tidx)
-                        m = self._rr_guarded_move(w, move, old, stage,
-                                                  metric, snap)
-                        # WL polish (default): adopt only when opens and
-                        # overlaps are PARITY-or-better componentwise with
-                        # strictly shorter realized WL — the healers' work
-                        # is never traded for length.  chase_overlaps:
-                        # plain lexicographic (an aggressive pre-healer —
-                        # measured mixed on the vehicles, see the wishlist
-                        # entry).
-                        take = m is not None and accept(m, cur)
-                        # Full trials (fast off) => the trial state is a
-                        # full-pipeline state: capture it as the commit's
-                        # forward snapshot before restoring.
-                        fwd = self._rr_snapshot() if take else None
-                        self._rr_undo_move(w, move, old)
-                        self._rr_restore(snap, only=self._rr_dirty)
-                        n_trials += 1
-                        if take:
-                            accepted = (m, move, fwd)
-                            break
-                    if accepted is None:
-                        continue
-                    m_new, move, fwd = accepted
-                    if fwd is not None and self._rr_fwd_ok(snap, fwd):
-                        self._rr_restore(fwd)
-                    else:
-                        self._rr_apply_move(w, move, old, stage, metric,
-                                            full=True)
-                    self.planner.recharge_committed(self.bundles)
-                    committed += 1
-                    sweeping = True
-                    self._decision(
-                        f"[refine_selection] COMMIT bundle {bid} "
-                        f"{self._rr_move_str(old, move)}, metric "
-                        f"{m_str(cur)}->"
-                        f"{m_str(metric())}",
-                        "refine_commit", bid=bid,
-                        move=self._rr_move_str(old, move), m_from=cur,
-                        m_to=metric())
-                    cur = metric()
+                    tops = self._refine_screen_alts(w, old)
+                    cur, did, t = self._refine_try_bundle(
+                        w, bid, old, tops, stage, metric, accept, m_str,
+                        cur)
+                    n_trials += t
+                    if did:
+                        committed += 1
+                        sweeping = True
             self._decision(
                 f"[refine_selection] done: metric {m_str(m0)}->"
                 f"{m_str(metric())} after {committed} move(s), "
