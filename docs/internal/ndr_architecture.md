@@ -562,12 +562,21 @@ it on an adjacent perpendicular layer), not a routing one, and the message
 says so. The strap counts ride `build_ndr_audit_index` as one more pass over
 the via vector, skipped when nothing was emitted.
 
-**Residual limits** (recorded in `opens_ndr.md` §1): every crossing is
-strapped, with no stride or via budget (280 straps on the small
-`ndr_bond.buda` vehicle — conservative, but a real flow may want a declared
-stride); and only `layer ± 1` bonds, since a rail two layers away needs a via
-stack, whose intermediate track is a placement decision rather than an output
-one.
+**Strap density.** `bond stride <N>` keeps every Nth bonding site instead of
+all of them. Two details make it honest rather than merely fewer vias: the
+sites are filtered by NET IDENTITY *before* the stride is applied, so striding
+over a POWER rail a ground shield could never use cannot thin the straps by an
+amount that depends on the pattern's rail mix; and both EXTREMES are kept
+whatever N divides out to, because an unbonded tail past the last strap is the
+floating metal the feature exists to prevent. Stride 1 (the bare `bond` token)
+is byte-identical to the pre-stride emitter. It rides the existing v25
+`ndr_rule.bond` column as 0 = off / N = stride, so it needed no schema bump and
+a stored 1 still means what it always meant. Measured on `ndr_bond.buda`:
+280 straps → 160 with one of the two rules at `stride 3`, still clean.
+
+**Residual limit** (recorded in `opens_ndr.md` §1): only `layer ± 1` bonds,
+since a rail two layers away needs a via stack, whose intermediate track is a
+placement decision rather than an output one.
 
 Vehicle: [`flow/ndr_bond.buda`](../../flow/ndr_bond.buda) — one rule matching
 the rails by label, one through the supply family, both clean.

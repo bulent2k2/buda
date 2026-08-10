@@ -1442,7 +1442,7 @@ void emit_shield_bond_vias(const RoutingGridStack& stack_,
     // so a session with no `bond` rule does no work at all.
     std::map<int, const NdrSpec*> bid_to_ndr;
     for (const auto& bs : bus_segs)
-        if (bs.ndr.active() && bs.ndr.bond_shields)
+        if (bs.ndr.active() && bs.ndr.bond_stride > 0)
             bid_to_ndr[bs.bundle_id] = &bs.ndr;
     if (bid_to_ndr.empty()) return;
 
@@ -1486,13 +1486,30 @@ void emit_shield_bond_vias(const RoutingGridStack& stack_,
             auto rails = stack_.preroutes(adj, lo, hi,
                                           ns.track_position,
                                           ns.track_position, false);
-            for (const auto& pr : rails) {
-                // Net identity — THE shared predicate (ndr.h), the same one
-                // R5a crediting and the R9 audit use.  A POWER rail can
-                // never bond a GROUND shield.
-                if (!ndr_shield_net_matches(spec.shield_net, pr.label) &&
-                    !ndr_shield_net_matches(spec.shield_net, pr.slot_type))
-                    continue;
+            // Identity first, so the STRIDE counts real bonding sites
+            // rather than every rail that happens to cross: striding over
+            // a POWER rail a ground shield could never use would thin the
+            // straps by an amount that depends on the pattern's rail mix.
+            // THE shared predicate (ndr.h) — the one R5a crediting and the
+            // R9 audit use.
+            std::vector<const PreRoutedSegment*> sites;
+            for (const auto& pr : rails)
+                if (ndr_shield_net_matches(spec.shield_net, pr.label) ||
+                    ndr_shield_net_matches(spec.shield_net, pr.slot_type))
+                    sites.push_back(&pr);
+            // Stride 1 keeps every site (byte-identical to pre-stride
+            // behavior).  A wider stride keeps every Nth AND both
+            // EXTREMES: an unbonded tail hanging off the last strap is the
+            // floating metal the whole feature exists to prevent, so the
+            // ends are anchored whatever N divides out to.
+            std::vector<size_t> keep;
+            const int stride = std::max(1, spec.bond_stride);
+            for (size_t k = 0; k < sites.size(); k += (size_t)stride)
+                keep.push_back(k);
+            if (!sites.empty() && keep.back() != sites.size() - 1)
+                keep.push_back(sites.size() - 1);
+            for (size_t k : keep) {
+                const PreRoutedSegment& pr = *sites[k];
                 NetVia v;
                 v.bundle_id  = ns.bundle_id;
                 v.from_seg   = ns.seg_idx;

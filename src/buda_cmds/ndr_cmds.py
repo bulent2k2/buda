@@ -269,7 +269,7 @@ def _spec_of(session, rule_name):
     spec.shield_per_n = r["shield_per_n"]
     spec.shield_net   = r["shield_net"]
     spec.credit_shields = bool(r.get("credit", 0))
-    spec.bond_shields   = bool(r.get("bond", 0))
+    spec.bond_stride    = int(r.get("bond", 0))
     return spec
 
 
@@ -354,10 +354,23 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
             # rail electrically identical to the shield net.  Opt-in.
             rule["credit"] = 1; i += 1
         elif tok == "bond":
-            # R6: strap each EMITTED shield to the power grid wherever it
+            # R6: strap each EMITTED shield to the power grid where it
             # crosses an identity-matching rail on an adjacent perpendicular
-            # layer.  Opt-in (docs/internal/opens_ndr.md §1).
+            # layer.  Opt-in (docs/internal/opens_ndr.md §1).  The stored
+            # value IS the stride — 1 (the bare token) = every crossing,
+            # N = every Nth, both extremes always anchored.
             rule["bond"] = 1; i += 1
+            if i + 1 < len(args) and args[i].lower() == "stride":
+                try:
+                    n = int(args[i + 1])
+                except ValueError:
+                    n = 0
+                if n < 1:
+                    print(f"Error: def_ndr '{name}': bond stride needs "
+                          f"N >= 1 (got '{args[i + 1]}'); 1 = strap every "
+                          f"crossing")
+                    sys.exit(1)
+                rule["bond"] = n; i += 2
         else:
             print(f"Error: def_ndr '{name}': unknown or incomplete token "
                   f"'{args[i]}' — a typo would silently weaken the rule")
@@ -389,7 +402,8 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
     lay = ("any" if rule["layers"] is None
            else ",".join(str(l) for l in rule["layers"]))
     cr = " credit" if rule["credit"] else ""
-    bo = " bond" if rule["bond"] else ""
+    bo = ("" if not rule["bond"] else
+          " bond" if rule["bond"] == 1 else f" bond stride {rule['bond']}")
     print(f"[NDR] rule '{name}': width x{rule['width_x']:g} -> {ws} slot(s)/"
           f"bit, spacing x{rule['spacing_x']:g} -> {gs} guard slot(s)/gap, "
           f"shield {sh} (net {rule['shield_net']}){cr}{bo}, layers {lay}")
@@ -909,7 +923,8 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
                else ",".join(str(l) for l in r["layers"]))
         src = "  (restored from BDB)" if name in r_rest else ""
         cr = " credit" if r.get("credit") else ""
-        bo = " bond" if r.get("bond") else ""
+        bo = ("" if not r.get("bond") else
+              " bond" if r["bond"] == 1 else f" bond stride {r['bond']}")
         print(f"[NDR] rule '{name}': width x{r['width_x']:g} "
               f"({ws} slot(s)/bit), spacing x{r['spacing_x']:g} "
               f"({gs} guard(s)/gap), shield {sh} net {r['shield_net']}"
@@ -1206,7 +1221,7 @@ def audit_ndr_dnuts(session, wrapper, index=None):
         # adjacent perpendicular layer, so the fix is the grid, not the
         # route.  (A CREDITED end emits no shield and needs no strap — it
         # never reaches this loop.)
-        if spec.bond_shields:
+        if spec.bond_stride > 0:
             for sh in shields:
                 if index["straps"].get((bid, seg_idx, sh.bit_index), 0):
                     continue

@@ -9,15 +9,19 @@
 #   gndbus  width x1.5 shield bus net GND bond
 #           -> flanking shields, each strapped where the GND rails of the
 #              neighbouring layers cross it (label equality).
-#   vssbit  width x2   shield bit net VSS bond
+#   vssbit  width x2   shield bit net VSS bond stride 3
 #           -> a shield in EVERY gap, each strapped to the same GND rails
 #              through the SUPPLY-FAMILY predicate (VSS and GND are one
-#              ground net for shielding — ndr_shield_net_matches).
+#              ground net for shielding — ndr_shield_net_matches), and
+#              STRIDED: one strap every 3rd crossing instead of all of
+#              them.  Both extremes are anchored regardless, so no tail
+#              hangs unbonded off the last strap.
 #
 # Both layer pairs alternate H/V, so every shield has crossing rails: the
 # NDR_BOND audit (an emitted shield with zero straps) must stay silent and
 # check_design must end clean.  The strap count is reported by
-# run_detailed_nuts.
+# run_detailed_nuts — the two rules together show the cost of the choice,
+# since gndbus straps every crossing and vssbit every third.
 
 add_block blkA 0   0    200 300
 add_block blkB 800 0    1000 300
@@ -33,7 +37,7 @@ def_layer 5 M5 H TOP 20
 def_layer 6 M6 V TOP 20
 
 def_ndr gndbus width x1.5 shield bus net GND bond
-def_ndr vssbit width x2   shield bit net VSS bond
+def_ndr vssbit width x2   shield bit net VSS bond stride 3
 set_ndr gnd_ gndbus
 set_ndr vss_ vssbit
 
