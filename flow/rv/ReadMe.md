@@ -152,6 +152,17 @@ against the scale-free tracks-across ratio.
 The documented consequence applies: **script-declared distances are in
 layout units too**, so `corner_margin dx 3000` is 3 µm, not 3000 µm.
 
+The `um` suffix (`corner_margin dx 3um`) exists to write that intent down —
+and this flow deliberately does **not** use it, which is worth knowing
+because the reason is a real boundary between the two features. `dbu`
+resolves its factor from the DEF's own `UNITS DISTANCE MICRONS`, so it is
+not known until `import_def_lef` runs; `corner_margin` here is declared
+*before* the import, and a `um` distance in that window would have to guess.
+It does not guess — it refuses, naming the two ways out (move the line after
+the import, or declare a numeric scale). Either would work; bare layout
+units keep the setup block in one place, above the import that gives them
+their size.
+
 ## Exports
 
 | Artifact | |

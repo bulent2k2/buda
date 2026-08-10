@@ -8,6 +8,20 @@ Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pip
 
 ## Setup commands
 
+**Distances and the `um` suffix.** Every distance a setup command takes is in
+**layout units** — the engine is unit-agnostic, and `set_import_scale` never
+rescales script-declared numbers. To state a distance in microns regardless
+of the scale, suffix it: `corner_margin dx 2um`, `set_min_stub_length 0.5um`.
+The value converts through the declared `lu_per_um` at parse time, so declare
+`set_import_scale` first (a later declaration warns that earlier `um`
+distances resolved under the previous scale). Under `set_import_scale dbu`
+the factor is unknown until `import_def_lef` reads the DEF's `UNITS`, so a
+`um` distance in that window is **refused** (move it after the import, or
+declare a numeric scale). On integer-grid coordinates (`add_block`,
+`add_keepout`) a `um` value must land on the grid — `0.5um` at scale 1 is
+refused, not truncated. `def_layer span_min`/`span_max` are distances too
+and take the suffix.
+
 ### `def_layer`
 
 ```
