@@ -600,3 +600,53 @@ ripup are unchanged.  Regression cover: the two `parallel_scan_*`
 tests in `test_ripup_parallel_sweep.py` (decision/print transparency
 with the DEFAULT screen on a forced 2-thread pool, and the psweep
 timing-line proof that the scan actually engages).
+
+## §P2r — refine_selection parallel full-trial sweep + batched screens (2026-08-09)
+
+Chip-scale profiling (`flow/chip/chip_stack_*_heal` — the stacked chip vehicle
+with the full healer + refine composition appended) moved the bottleneck: the
+two `refine_selection` calls were **58 %** of the bottomup flow's 1386 s
+(433 s + 251 s) and ripup another 33 %, and *inside* refine the fixed-context
+**screen** out-costed the trials — 208 s + 115 s screening 10 696 + 5 129
+candidates at ~20 ms each, all sequential on the main thread (refine screens
+EVERY eligible bundle's whole alternate list every sweep), vs 173 s + 106 s
+in sequential full-trial solves.  Two levers, both decision-identical by the
+P1 replay pattern:
+
+- **Full-trial sweep mode** (`parallel_sweep(..., full_trials=True)`):
+  tighten runs in BOTH stages (a WL-fair solve — refine's accept reads
+  realized WL, which a tighten-skipped trial would bias against the move),
+  the DNUTS abort bar is disabled (componentwise parity needs the exact
+  opens count), and the outcome grows `viols` (NUTS interval violations) and
+  `wl` (raw double sum of placed span lengths — Python applies the
+  `int(round(...))`, so the 4-component refine metric is reproduced
+  exactly).  `_refine_parallel_sweep` walks chunk outcomes in visit order:
+  a bundle none of whose moves the accept guard would take books its trials
+  and moves on; a would-accept (or unevaluable) bundle REPLAYS its kept
+  list through the sequential `_refine_try_bundle` (extracted verbatim) —
+  the replay is the accept basis and the committed state.  After a commit
+  the baseline changed, so the chunk's remaining evaluations are discarded
+  and the sweep rebuilds from the next bundle (bounded waste, chunk-sized).
+  Gate mirrors P1b: default on, `no_parallel_sweep` opts out, 1-thread
+  pools keep the sequential loop.
+
+- **Batched parallel screening** (`parallel_screen`): one worker per
+  (bundle, tidxs) job, each an exact `_rr_screen_scores` replica (fresh
+  engine, skip tighten/doglegs, `add_fixed_segments_except`, planner grids
+  as extras) on a PRIVATE planner clone — screening is deterministic per
+  (baseline, bundle) and read-only, so batching is decision-identical.
+  Used by BOTH refine's chunk build and ripup's P1b scan chunk build (the
+  chunk membership is fixed before the screen — the post-prune kept count
+  `min(len, TOP_N)` needs no scores — and the per-contender kept/deferred
+  split rides `_rr_screen_prune(scores=...)`, the sequential split
+  verbatim).
+
+**Validated:** `mix2_topdown_refine` (both refine accept modes + P1b ripup)
+byte-identical vs a main-worktree build; `chip_stack_bottomup_heal`
+endpoint byte-identical to the pre-change baseline (only the stripped
+timing columns differ).  **Measured** (same 4-core box, `--threads 4`):
+refine #1 **433 → 185 s (2.3×)**, refine #2 **251 → 77 s (3.3×)**, whole
+bottomup heal flow **1386 → 868 s (−37 %)**; wider pools scale further.
+Ripup's stage-b residual (493 → 405 s) is now dominated by its
+already-parallel stall-sweep evaluation volume — further cuts there are
+trial-volume levers (N3), not parallelism.
