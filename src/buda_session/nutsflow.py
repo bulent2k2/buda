@@ -766,6 +766,29 @@ class NutsFlowMixin:
         except Exception:
             return 1
 
+    def _seg_admission_need(self, w, sel, seg_idx):
+        """SIGNAL slots the segment must find to be admitted — the Python
+        mirror of `bus_seg_min_demand` (detailed_nuts.h), which is what the
+        engine actually compares its pool against.
+
+        For an ungoverned segment this IS `_seg_member_bits` (the NDR
+        conversion is the identity on an inactive spec), so every
+        non-NDR flow is unchanged by construction.  A GOVERNED segment
+        needs its group DEMAND — wide bits pay `width_slots` each, gaps pay
+        guards or shields, the run pays its ends — which is strictly more
+        than the bit count, so measuring a governed seat in bits
+        UNDER-reports how doomed it is.  Crediting is applied at its
+        OPTIMISTIC bound (both ends rail-credited), exactly as
+        `bus_seg_min_demand` does: the census must not call a seat doomed
+        that the credited seat search could still fill."""
+        nbits = self._seg_member_bits(w, sel, seg_idx)
+        spec = w.input.ndr
+        if not spec.active():
+            return nbits
+        if spec.credit_shields:
+            return buda.ndr_group_demand_credited(spec, nbits, True, True)
+        return buda.ndr_group_demand(spec, nbits)
+
     def _seg_admission_pool(self, seg, g, need):
         """The DNUTS admission pool for a placed segment on grid `g` — the
         exact `place_by_layer` arithmetic over the segment's SEAT (span ×
@@ -803,7 +826,7 @@ class NutsFlowMixin:
             return []
         wmap = {w.input.original_bundle.id: w for w in self.bundles
                 if not w.hier.locked}
-        doomed = []          # (seg, need, pool, is_top)
+        doomed = []          # (seg, need, pool, is_top, bits)
         for seg in self.nuts_result.segments:
             if not seg.placed or not self.routing_grid.has_layer(seg.layer):
                 continue
@@ -814,11 +837,17 @@ class NutsFlowMixin:
             if sel < 0 or sel >= len(w.input.candidates):
                 continue
             g = self.routing_grid.get_layer_grid(seg.layer)
-            need = self._seg_member_bits(w, sel, seg.seg_idx)
+            # NEED is what the engine admits on (bus_seg_min_demand), which
+            # for a governed segment is its group DEMAND, not its bit count;
+            # BITS is what actually strands, which is the bit count either
+            # way (admission is all-or-nothing).  The two are equal on every
+            # ungoverned segment.
+            need = self._seg_admission_need(w, sel, seg.seg_idx)
+            bits = self._seg_member_bits(w, sel, seg.seg_idx)
             pool = self._seg_admission_pool(seg, g, need)
             if pool < need:
                 doomed.append((seg, need, pool,
-                               self.layers.is_top(seg.layer)))
+                               self.layers.is_top(seg.layer), bits))
         return doomed
 
     def _report_doomed_seats(self) -> int:
@@ -853,15 +882,21 @@ class NutsFlowMixin:
         # the def_layer mapping with the L{id} fallback rather than
         # synthesizing M{id}.
         lnames = self._make_layer_names()
-        for seg, need, pool, is_top in doomed:
+        for seg, need, pool, is_top, bits in doomed:
             tag = "TOP" if is_top else "LOW"
             lname = lnames.get(seg.layer, f"L{seg.layer}")
+            # Name the unit honestly: a governed segment's requirement is
+            # DEMAND slots (bits + guards + shields), and printing that
+            # number as "member bits" would read as a bit count that does
+            # not match the bus.
+            unit = ("demand slot(s) — %d member bit(s) under its NDR rule"
+                    % bits) if need != bits else "member bit(s)"
             print(f"  Advisory: supply-doomed seat: bundle {seg.bundle_id} "
                   f"seg {seg.seg_idx} on {lname} ({tag}) — "
                   f"{pool} signal track(s) in the placed window < {need} "
-                  f"member bit(s); every bit strands at DNUTS.")
-        n_top = sum(1 for *_, t in doomed if t)
-        bits = sum(need for _, need, _, _ in doomed)   # all-or-nothing strand
+                  f"{unit}; every bit strands at DNUTS.")
+        n_top = sum(1 for d in doomed if d[3])
+        bits = sum(d[4] for d in doomed)   # all-or-nothing strand, in BITS
         print(f"  Advisory: {len(doomed)} supply-doomed seat(s) "
               f"({n_top} TOP, {len(doomed) - n_top} LOW; {bits} "
               f"guaranteed-stranded bit(s)) — static width-infeasibility, "

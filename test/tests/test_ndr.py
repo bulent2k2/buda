@@ -1252,3 +1252,79 @@ def test_r9_arrangement_is_skipped_on_a_culled_run():
         kept.append(ns)
     dr.net_segments = kept
     assert "NDR_SHIELD" not in _audited(s)
+
+
+# ── The doomed-seat census in DEMAND units (opens_ndr.md smaller residual) ──
+# The engine admits on bus_seg_min_demand; the census compared against the
+# BIT count.  A governed seat with enough tracks for its bits but not for
+# its bits-plus-guards-plus-shields therefore reported clean and then
+# stranded every bit at DNUTS — the census under-reporting exactly the
+# class it exists to name.
+
+def _census(s):
+    return s._doomed_seats()
+
+
+def test_census_need_is_the_engines_admission_threshold():
+    # _seg_admission_need must mirror bus_seg_min_demand: identity for an
+    # ungoverned segment, group demand for a governed one, optimistic
+    # credit when the rule opted in.
+    s, _ = _flow(["def_ndr clk2x width x2 spacing x2 shield bus net GND",
+                  "set_ndr clk_ clk2x"])
+    gov = next(w for w in s.bundles if w.input.ndr.active())
+    plain = next(w for w in s.bundles if not w.input.ndr.active())
+    for w in (gov, plain):
+        sel = w.plan.selected_topology_index
+        for seg_idx in range(len(w.input.candidates[sel].segments)):
+            bits = s._seg_member_bits(w, sel, seg_idx)
+            need = s._seg_admission_need(w, sel, seg_idx)
+            spec = w.input.ndr
+            if not spec.active():
+                assert need == bits            # untouched by construction
+            else:
+                assert need == buda.ndr_group_demand(spec, bits) > bits
+
+
+def test_census_counts_governed_seats_in_demand_not_bits():
+    # A rule whose demand exceeds its bit count, seated on a layer whose
+    # window supplies enough for the bits but not the demand: doomed in
+    # truth, invisible when measured in bits.
+    s, _ = _flow(["def_ndr wide width x3 spacing x3 shield bit net GND",
+                  "set_ndr clk_ wide"])
+    gov = next(w for w in s.bundles if w.input.ndr.active())
+    bid = gov.input.original_bundle.id
+    sel = gov.plan.selected_topology_index
+    for seg_idx in range(len(gov.input.candidates[sel].segments)):
+        bits = s._seg_member_bits(gov, sel, seg_idx)
+        need = s._seg_admission_need(gov, sel, seg_idx)
+        assert need > bits, "the vehicle must have demand above its bits"
+    # Every seat the census reports for this bundle is judged against the
+    # DEMAND, and its stranded-bit accounting stays in bits.
+    for seg, need, pool, _is_top, nbits in _census(s):
+        if seg.bundle_id != bid:
+            continue
+        assert need > nbits
+        assert pool < need
+
+
+def test_census_is_unchanged_for_ungoverned_designs():
+    # R12 at the census boundary: with no rule declared the need is the bit
+    # count, so the tuple a non-NDR flow produces is what it always was.
+    s, _ = _flow([])
+    for seg, need, pool, _is_top, bits in _census(s):
+        assert need == bits
+
+
+def test_census_report_names_the_unit():
+    # A governed seat's requirement is demand slots; printing that number
+    # as "member bits" would read as a bit count that does not match the
+    # bus the user declared.
+    s, _ = _flow(["def_ndr wide width x3 spacing x3 shield bit net GND",
+                  "set_ndr clk_ wide"])
+    if not _census(s):
+        pytest.skip("no doomed seat on this vehicle to report")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s._report_doomed_seats()
+    out = buf.getvalue()
+    assert "demand slot(s)" in out and "under its NDR rule" in out
