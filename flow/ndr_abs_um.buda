@@ -1,0 +1,76 @@
+# NDR ABSOLUTE-VALUE vehicle (requirement R1, the half phase 1 left out).
+#
+# `def_ndr` takes the multiplier form only today (`width x2`), and an
+# absolute value is a hard error naming that form.  The multiplier is
+# PATTERN-INDEPENDENT — `x2` means "two signal slots" on every layer — which
+# is why it shipped first.  An absolute value is the opposite: it means one
+# PHYSICAL width, and how many slots that costs depends on the layer.
+#
+# This vehicle exists to pin that difference.  Its stack deliberately mixes
+# pitches: M3/M5 have a 2-unit slot pitch (width 1 + space 1), M4/M6 have a
+# 4-unit pitch (width 2 + space 2).  So ONE declaration resolves to
+# DIFFERENT slot counts per layer — the thing no multiplier can express, and
+# the reason R1 asks for the form at all.
+#
+#   fine3   width 3   -> M3/M5: ceil(3/2) = 2 slots.  M4/M6: ceil(3/4) = 1.
+#   exact4  width 4   -> M3/M5: exactly 2 slots, no rounding.  M4/M6: 1.
+#   space5  spacing 5 -> clearance quantized per layer the same way.
+#
+# THE ROUNDING DECISION this vehicle fixes: an absolute value that falls
+# BETWEEN slot counts rounds UP.  That is the phase-1 convention already
+# applied to multipliers (`width x1.5` pays 2 slots — "conservative, never
+# illegal"), and the alternative — refusing a value that does not land
+# exactly on a slot boundary — would make a rule un-portable across exactly
+# the mixed-pitch stack this vehicle is built from.  `exact4` is here to
+# show the no-rounding case is not special-cased away.
+#
+# Expected at the end: dump_ndr reports the PER-LAYER quantization (a rule
+# no longer has one slot count), check_design is clean, and a value that
+# cannot be realized on a governed layer is LOUD at run_detailed_nuts the
+# way R3 already is for multipliers.
+#
+# STATUS: does not run yet — `def_ndr abs` currently hard-errors with
+# "width must be the multiplier form xN in phase 1".  This file is the
+# specification the implementation has to satisfy.
+
+add_block blkA 0   0    200 300
+add_block blkB 800 0    1000 300
+add_block blkC 0   400  200 700
+add_block blkD 800 400  1000 700
+
+add_bus fine_[4] blkA.p blkB.q
+add_bus wide_[4] blkC.p blkD.q
+add_bus dflt_[6] blkA.d blkB.e
+
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+
+# Absolute width/spacing in LAYOUT UNITS (what the script already speaks —
+# `corner_margin`, `set_min_stub_length` and the pattern geometry below are
+# all in the same unit, and `set_import_scale` is what relates them to µm).
+def_ndr fine3  width 3
+def_ndr space5 width 4 spacing 5 shield bus net GND
+set_ndr fine_ fine3
+set_ndr wide_ space5
+
+run_bundler STRICT --dump
+dump_ndr
+
+generate_topologies
+set_track_pitch 3
+run_planner 1
+
+# MIXED PITCHES — the point of the vehicle.  M3/M5: slot pitch 2.
+# M4/M6: slot pitch 4.  One absolute rule, two slot counts.
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 5 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 4 2 (_ 2 2)x12 GND 4 2
+def_track_pattern 6 0 VDD 4 2 (_ 2 2)x12 GND 4 2
+
+run_nuts
+run_detailed_nuts
+dump_ndr
+check_design
+report_wirelength

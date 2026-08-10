@@ -1,0 +1,90 @@
+# NDR MIXED-RULE BUNDLE vehicle (requirement R8, the richer half).
+#
+# Phase 1 ships R8's FALLBACK: a bundle must be rule-uniform, so the
+# bundler splits a mixed one into rule-uniform parts, loudly.  That is
+# correct and never silently drops a constraint — the cost is that a bus
+# whose bits genuinely deserve different treatment routes as SEVERAL
+# bundles, losing the shared trunk and the shared shields.
+#
+# This vehicle is the case that pays that cost.  `mix_` is ONE 8-bit bus
+# between one block pair whose bits carry THREE rules by prefix:
+#
+#   mix_hi_[0..1]  hi2x   width x2 shield bus net GND   (2 slots/bit)
+#   mix_md_[0..3]  md15   width x1.5 spacing x1.5       (2 slots + 1 guard)
+#   mix_lo_[0..1]  (none) default                       (1 slot/bit)
+#
+# TODAY: three bundles, three trunks, and hi2x's flanking shields wrap only
+# its own two bits.  The split report names the parts.
+#
+# UNDER R8's richer position: ONE bundle, one trunk, and the group demand
+# is the sum of the MEMBERS' footprints with each gap priced by the pair it
+# separates — shared shields and interior spacing counted ONCE at the group
+# level, exactly as `ndr_group_demand` already does for a uniform group.
+# That is the generalization: the conversion takes a MEMBER LIST rather
+# than (spec, nbits), and every consumer follows.
+#
+# What the vehicle must show either way:
+#   * the demand is the SUM over members, not nbits x one spec — an 8-bit
+#     mixed group is not 8 x anything;
+#   * a shield between two members of DIFFERENT rules is counted once, not
+#     once per rule (the group-level property R4 already guarantees within
+#     a uniform group);
+#   * splitting CHANGES the shield count — a flanked group cut in two pays
+#     four end shields where the whole paid two — and the split report
+#     surfaces that delta rather than leaving it implicit (R8's explicit
+#     requirement);
+#   * check_design stays clean under both positions, and the R9 arrangement
+#     walk still reads the run role-by-role — with a per-member layout, not
+#     a single-spec one.
+#
+# `same_` is the control: an 8-bit bus over the same block pair under ONE
+# rule, so the mixed group's demand can be read against a uniform one of
+# equal width rather than against a hand-computed number.
+#
+# STATUS: runs TODAY, exercising the fallback (three parts, split reported).
+# It is committed in that state deliberately — it is the before/after
+# measurement for the richer position, and the WL cost of splitting is
+# exactly what the change has to justify.
+
+add_block blkA 0   0    200 400
+add_block blkB 800 0    1000 400
+add_block blkC 0   500  200 900
+add_block blkD 800 500  1000 900
+
+# One bus, three rule classes by prefix.
+add_bus mix_hi_[2] blkA.p blkB.q
+add_bus mix_md_[4] blkA.p blkB.q
+add_bus mix_lo_[2] blkA.p blkB.q
+
+# Control: same width, one rule, its own block pair.
+add_bus same_[8] blkC.p blkD.q
+
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+
+def_ndr hi2x width x2 shield bus net GND
+def_ndr md15 width x1.5 spacing x1.5
+set_ndr mix_hi_ hi2x
+set_ndr mix_md_ md15
+# mix_lo_ deliberately unscoped — a DEFAULT member inside the mixed group.
+set_ndr same_ hi2x
+
+run_bundler STRICT --dump
+dump_ndr
+
+generate_topologies
+set_track_pitch 3
+run_planner 1
+
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 5 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 6 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+
+run_nuts
+run_detailed_nuts
+dump_ndr
+check_design
+report_wirelength
