@@ -920,6 +920,20 @@ GdsExportStats export_gds(BDB& db, const std::string& path,
         if (!placed_cells.count(c.name) && die_w > 0 &&
             std::fabs(c.width - die_w) < 1e-6 &&
             std::fabs(c.height - die_h) < 1e-6) { top_cell = &c; break; }
+    // Second adoption path (opens item 3): a DEF+Verilog merge's TOP MODULE
+    // has a cell row (import_verilog creates one per defined module) but no
+    // component row — the top is instantiated by nobody — and no size, so
+    // the die-size evidence above can never claim it.  Without this it was
+    // exported as an empty orphan structure ("no geometry anywhere") BESIDE
+    // a synthetic 'top', and re-imported as two tops.  The netlist stated
+    // which module is top; `meta.verilog_top` carries that statement here,
+    // which is direct evidence where the die-size match is circumstantial.
+    if (!top_cell) {
+        const std::string vtop = db.meta_get("verilog_top", "");
+        if (!vtop.empty() && !placed_cells.count(vtop))
+            for (const auto& c : cells)
+                if (c.name == vtop) { top_cell = &c; break; }
+    }
 
     // ── Stream ──────────────────────────────────────────────────────────────
     GdsWriter w;
