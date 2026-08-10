@@ -99,6 +99,21 @@ number has to be able to tell them apart.
 Deliberately few names.  This is a bridge, not a second API, and each one is
 a promise to keep.
 
+## The vehicle
+
+[`flow/tcl/array.tcl`](../flow/tcl/array.tcl) is the front end's own flow
+vehicle — run it with `tclsh flow/tcl/array.tcl ?ROWS COLS?`.  A `.buda`
+script can only *state* a design; this flow **computes** one, which is the
+case the front end exists for: a parameterized ROWS × COLS array of tile
+instances (each a cell containing a 2 × 2 leaf array) whose buses a pair of
+nested loops emits — intra-tile cell templates replicated per instance,
+cross-tile neighbor chains with leaf-deep endpoints, a corner-to-corner
+diagonal, and a fan-in that CONVERGENT bundling merges into one per-bit
+tapered tree.  The end of the flow branches on `buda::query`: healers run
+only if the measured result is dirty, and the exit code is the design's
+cleanliness.  Pinned end-to-end by `test/tests/test_tcl_array_flow.py`
+(mid tier).
+
 ## Options
 
 ```tcl
