@@ -2080,6 +2080,14 @@ class NutsFlowMixin:
                                    + r2.num_unplaced)
             merged.num_keepout_bits = (r1.num_keepout_bits
                                        + r2.num_keepout_bits)
+            # R6 straps ride the copy for free (transform_net_via moves a
+            # via wholesale, negative strap ordinal included), so a copied
+            # instance is bonded at ITS OWN coordinates — but the merged
+            # COUNT has to be re-derived, or the report and the audit's
+            # gate would see only the reference's straps.
+            merged.n_shield_bond_vias = (
+                r1.n_shield_bond_vias + r2.n_shield_bond_vias
+                + sum(1 for v in copy_vias if v.to_seg < 0))
             # Carry the per-pass profile through the merge (Codex #289):
             # without it a bottom-up stage-b trial charges the dnuts WALL
             # but contributes no dnuts.* pass buckets — a misleading gap in
@@ -2109,4 +2117,11 @@ class NutsFlowMixin:
         n_unplaced = self.detailed_result.num_unplaced
         print(f"[DetailedNUTS] {n_net} net segments placed, "
               f"{n_unplaced} bits unplaced.")
+        # R6 shield bonding is opt-in, so this line only appears for a flow
+        # that declared `bond` — the count is what check_design's NDR_BOND
+        # audit measures against (0 straps on an emitted shield = floating).
+        n_bond = getattr(self.detailed_result, "n_shield_bond_vias", 0)
+        if n_bond:
+            print(f"[DetailedNUTS] {n_bond} NDR shield bond via(s) strapped "
+                  f"emitted shields to the power grid.")
         return self.detailed_result

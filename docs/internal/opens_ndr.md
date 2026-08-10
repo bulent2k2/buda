@@ -20,24 +20,42 @@ design that needs it, and the current behaviour in each case is conservative
 
 ---
 
-## 1. Shield bonding vias (R6 partial)
+## 1. Shield bonding vias (R6 — LANDED, with two residual limits)
 
-An **emitted** shield wire is a floating rail today: it is a first-class
-routed object with the rule's shield-net identity, visible to verification,
-reporting and the saved design, but nothing bonds it to the power grid.
+**Implemented** (the opt-in `bond` token). After placement, every EMITTED
+shield is strapped to the power grid with a via wherever an identity-matching
+rail crosses it on an **adjacent perpendicular** layer — the same
+`ndr_shield_net_matches` predicate crediting and the R9 audit use, so a POWER
+rail can never bond a ground shield. `check_design` raises **`NDR_BOND`** for
+an emitted shield with zero straps: that is a grid problem (no matching rail
+crosses it), not a routing one. Vehicle: [`flow/ndr_bond.buda`](../../flow/ndr_bond.buda).
 
-*Why deferred.* Bonding needs power vias, whose table semantics differ from
-the per-bit `net_via` rows stage 9 emits — a via to a grid rail is not a
-bit-to-bit layer transition. The natural time to build it is when an export
-flow (GDS/DEF) has to hand real geometry to a downstream tool, because that
-is the consumer that makes the semantics concrete.
+*The via-table decision.* A strap reuses the per-bit `net_via` row rather
+than introducing a power-via table, keyed by a **negative** `to_seg` (the
+strap ordinal — a real segment index is `>= 0`, so the
+`(bundle_id, from_seg, to_seg, bit_index)` primary key stays unique). The far
+end is a grid rail, not a routed segment, which is exactly what the negative
+ordinal encodes. Consumers that read vias geometrically — GDS export, the viz
+— use `from_layer`/`to_layer`/`x`/`y` only and were unaffected. Because
+straps are ordinary vias, the bottom-up copy path carries a template's straps
+to every instance for free.
 
 *Note the asymmetry:* a **credited** end (R5a, the `credit` token) needs no
-bonding at all — the rail is the power grid's own metal. So a design that
-credits both ends of every run has no gap here.
+bonding at all — the rail is the power grid's own metal, so it never reaches
+the strap pass.
 
-*Where to start:* `detailed_nuts.cpp`'s shield emission in the NDR branch of
-`place_by_layer`, and whatever via table the export path settles on.
+**Residual limits:**
+
+- **Every crossing is strapped.** There is no stride or via-count budget, so
+  a long shield over a dense grid gets many straps (280 on the small
+  `ndr_bond.buda` vehicle). That is the conservative direction — more grid
+  ties, never fewer — but a real flow may want a declared stride.
+- **Adjacent layers only.** A shield bonds to `layer ± 1` when that layer is
+  perpendicular and has a grid. A rail two layers away needs a via stack,
+  which needs the intermediate layer's own track reserved — a placement
+  decision, not an output one, and out of scope here.
+
+*Where to start on either:* `emit_shield_bond_vias` in `detailed_nuts.cpp`.
 
 ## 2. Absolute (µm) width and spacing values (R1 partial)
 

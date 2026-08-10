@@ -172,6 +172,15 @@ whose governing rule changed — by name OR content — since the checkpoint
 **`ndr_rule.credit`** (the R5a end-shield rail-crediting opt-in — pricing
 basis, so it joins the rule row and, when set, the `|c1` fingerprint
 suffix; pre-v22 rules migrate to 0, correct since they never credited).
+v23 added **`ndr_rule.bond`** (the R6 shield-bonding opt-in).  Unlike
+`credit`, bonding is OUTPUT-only — it emits extra `net_via` straps and
+moves neither demand nor placement — so it is deliberately NOT part of
+the `bundle.ndr_rule` pricing fingerprint: toggling it must not VOID a
+restored plan.  A strap reuses `net_via` with a NEGATIVE `to_seg` (the
+strap ordinal; a real segment index is `>= 0`, so the
+`(bundle_id, from_seg, to_seg, bit_index)` primary key stays unique) —
+its far end is a power-grid rail, not a routed segment.  Pre-v23 rules
+migrate to 0, correct since they never bonded.
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.
 

@@ -252,8 +252,15 @@ DetailedNUTSResult DetailedNUTSEngine::run(
     charge("pair_misalign");
     // Fast-trial mode: vias are pure output (the metric is placed by
     // place + cull), so an RR trial may skip them — see the header.
-    if (emit_vias)
+    if (emit_vias) {
         emit_bit_vias(bus_segs, result);
+        // R6 shield bonding rides with the via pass: it is pure output too,
+        // so a fast trial that skips vias skips the straps as well (they
+        // move no metric).  Computed HERE, inside the engine, so the
+        // bottom-up copy path — which transforms r1.net_vias to every
+        // sibling — carries a template's straps to its instances for free.
+        emit_shield_bond_vias(bus_segs, result);
+    }
     charge("vias");
     return result;
 }
@@ -1425,6 +1432,83 @@ std::vector<BusSegment> make_bus_segments(
         out.push_back(std::move(bs));
     }
     return out;
+}
+
+void DetailedNUTSEngine::emit_shield_bond_vias(
+        const std::vector<BusSegment>& bus_segs,
+        DetailedNUTSResult& result) const {
+    // Which bundles asked for bonding, and with which shield net.  Built
+    // from the bus segments' specs (the same place the shields came from),
+    // so a session with no `bond` rule does no work at all.
+    std::map<int, const NdrSpec*> bid_to_ndr;
+    for (const auto& bs : bus_segs)
+        if (bs.ndr.active() && bs.ndr.bond_shields)
+            bid_to_ndr[bs.bundle_id] = &bs.ndr;
+    if (bid_to_ndr.empty()) return;
+
+    // Adjacent-layer candidates for a shield on `layer`: id +/- 1, present
+    // in the stack, and PERPENDICULAR to it.  BUDA does not force the stack
+    // to alternate H/V (def_layer takes an explicit direction), so the
+    // orientation is tested, never assumed — two parallel layers have no
+    // crossing to via.
+    auto bond_layers = [&](int layer) {
+        std::vector<int> out;
+        if (!stack_.has_layer(layer)) return out;
+        const bool horiz = stack_.get_layer_grid(layer).is_horizontal();
+        for (int adj : {layer - 1, layer + 1}) {
+            if (!stack_.has_layer(adj)) continue;
+            if (stack_.get_layer_grid(adj).is_horizontal() == horiz) continue;
+            out.push_back(adj);
+        }
+        return out;
+    };
+
+    std::vector<NetVia> straps;
+    for (const auto& ns : result.net_segments) {
+        if (!ns.is_shield) continue;
+        auto it = bid_to_ndr.find(ns.bundle_id);
+        if (it == bid_to_ndr.end()) continue;
+        const NdrSpec& spec = *it->second;
+        const double lo = std::min(ns.span_lo, ns.span_hi);
+        const double hi = std::max(ns.span_lo, ns.span_hi);
+        int strap_no = 0;
+        for (int adj : bond_layers(ns.layer)) {
+            // The shield's SPAN is the adjacent layer's PERP range, and its
+            // track position is a point on the adjacent layer's ALONG axis:
+            // exactly the rails that cross this shield.
+            auto rails = stack_.preroutes(adj, lo, hi,
+                                          ns.track_position,
+                                          ns.track_position, false);
+            for (const auto& pr : rails) {
+                // Net identity — THE shared predicate (ndr.h), the same one
+                // R5a crediting and the R9 audit use.  A POWER rail can
+                // never bond a GROUND shield.
+                if (!ndr_shield_net_matches(spec.shield_net, pr.label) &&
+                    !ndr_shield_net_matches(spec.shield_net, pr.slot_type))
+                    continue;
+                NetVia v;
+                v.bundle_id  = ns.bundle_id;
+                v.from_seg   = ns.seg_idx;
+                v.to_seg     = -(++strap_no);   // strap ordinal (see NetVia)
+                v.bit_index  = ns.bit_index;    // the shield's own ordinal
+                v.from_layer = ns.layer;
+                v.to_layer   = adj;
+                // The crossing: the rail's track position on its own axis,
+                // the shield's on this one.
+                if (stack_.get_layer_grid(ns.layer).is_horizontal()) {
+                    v.x = pr.track_position;    // rail is vertical
+                    v.y = ns.track_position;
+                } else {
+                    v.x = ns.track_position;
+                    v.y = pr.track_position;    // rail is horizontal
+                }
+                straps.push_back(v);
+            }
+        }
+    }
+    result.n_shield_bond_vias = (int)straps.size();
+    result.net_vias.insert(result.net_vias.end(),
+                           straps.begin(), straps.end());
 }
 
 } // namespace buda

@@ -56,6 +56,13 @@ struct NdrSpec {
     // identical to shield_net (ndr_shield_net_matches) instead of an
     // emitted wire.  Off = phase-1 behavior byte-for-byte.
     bool credit_shields = false;
+    // R6 shield BONDING (opt-in — the `bond` token): strap each EMITTED
+    // shield wire to the power grid with a via wherever it crosses an
+    // identity-matching rail on a perpendicular ADJACENT layer.  Without
+    // it a shield is labeled metal that reserves its track but is not
+    // connected to anything — see docs/internal/opens_ndr.md §1.  A
+    // CREDITED end needs no bonding: the rail IS grid metal.
+    bool bond_shields = false;
     // Declared rule name (reporting/provenance).
     std::string rule_name;
 

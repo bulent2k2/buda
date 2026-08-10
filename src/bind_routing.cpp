@@ -641,6 +641,7 @@ void bind_routing(py::module_& m) {
         .def_readwrite("shield_per_n", &NdrSpec::shield_per_n)
         .def_readwrite("shield_net",   &NdrSpec::shield_net)
         .def_readwrite("credit_shields", &NdrSpec::credit_shields)
+        .def_readwrite("bond_shields",   &NdrSpec::bond_shields)
         .def_readwrite("rule_name",    &NdrSpec::rule_name)
         .def("active",                 &NdrSpec::active);
     m.def("ndr_group_demand", &ndr_group_demand,

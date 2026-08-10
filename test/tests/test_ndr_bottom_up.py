@@ -142,3 +142,35 @@ def test_ungoverned_bottom_up_flow_is_unaffected():
     assert s.detailed_result.num_unplaced == 0
     assert not any(ns.is_shield for ns in s.detailed_result.net_segments)
     assert "no violations" in out
+
+
+def test_bond_straps_ride_the_copy():
+    """R6 x R13: `bond` straps are vias, so the copy path carries them to
+    every sibling for free (transform_net_via moves a via wholesale) — at
+    the sibling's OWN coordinates, and the merged count reports all of
+    them, not just the reference's."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        for raw in _FLOW.read_text().splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("def_ndr locsh"):
+                line += " bond"
+            s.do_command(line)
+    out = buf.getvalue()
+    dr = s.detailed_result
+    straps = [v for v in dr.net_vias if v.to_seg < 0]
+    assert dr.n_shield_bond_vias == len(straps) > 0
+    assert "NDR shield bond via(s)" in out
+    locked_ids = {w.input.original_bundle.id for w in _locked_governed(s)}
+    strapped = {v.bundle_id for v in straps}
+    assert locked_ids <= strapped, "a copied instance lost its straps"
+    # Copies are transforms: the four occurrences cannot share coordinates.
+    by_bid = {}
+    for v in straps:
+        by_bid.setdefault(v.bundle_id, set()).add((v.x, v.y))
+    assert len({frozenset(v) for v in by_bid.values()}) > 1
+    assert "NDR_BOND" not in out

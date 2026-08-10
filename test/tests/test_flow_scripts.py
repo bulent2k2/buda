@@ -964,6 +964,22 @@ def test_ndr_shield_hier_multi_rule():
     assert "NDR shield metal:" in out, out
 
 
+def test_ndr_bond_shield_bonding():
+    """flow/ndr_bond.buda (requirement R6, the `bond` token): two shielded
+    rules opt into bonding — one matching the grid rails by LABEL, one
+    through the supply-family predicate (VSS shields on GND rails).  Every
+    emitted shield must come out strapped to the grid, so the NDR_BOND
+    floating-shield audit stays silent."""
+    out, rc = run_script("ndr_bond.buda")
+    assert_clean(out, rc, "ndr_bond.buda")
+    assert "shield bus (net GND) bond" in out, out
+    assert "shield bit (net VSS) bond" in out, out
+    # Straps emitted and reported; no shield left floating.
+    assert "NDR shield bond via(s) strapped" in out, out
+    assert "0 bits unplaced" in out, out
+    assert "no violations" in out and "NDR_" not in out, out
+
+
 def test_ndr_bottom_up_composition():
     """flow/ndr_bottom_up.buda (requirement R13): a governed cell template
     marked set_bottom_up is solved once and COPIED to every instance,

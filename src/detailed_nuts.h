@@ -150,7 +150,15 @@ struct NetSegment : PlacedSegmentBase {
 struct NetVia {
     int    bundle_id  = 0;
     int    from_seg   = 0;    // min of the connected seg pair
-    int    to_seg     = 0;    // max of the connected seg pair
+    // Max of the connected seg pair — EXCEPT on an NDR shield BOND strap
+    // (emit_shield_bond_vias), where the far end is a power-grid RAIL, not
+    // a routed segment, and one shield needs one row per crossing.  There
+    // to_seg is the NEGATIVE strap ordinal -(k+1): it cannot collide with a
+    // real segment index (>= 0) and it keeps the
+    // (bundle_id, from_seg, to_seg, bit_index) primary key unique across a
+    // shield's straps.  Consumers that read vias geometrically (GDS export,
+    // the viz) are unaffected — they use from_layer/to_layer/x/y only.
+    int    to_seg     = 0;
     int    bit_index  = 0;    // LOGICAL bit (bit_order already applied)
     int    from_layer = 0;    // layer of from_seg's bit-wire
     int    to_layer   = 0;    // layer of to_seg's bit-wire
@@ -167,6 +175,10 @@ struct DetailedNUTSResult {
     // (keepout-model audit).  Each is also counted in num_unplaced, so the
     // healing machinery (negotiate/ripup stage b) sees them as opens.
     int num_keepout_bits = 0;
+    // How many of net_vias are NDR shield BOND straps (R6, opt-in `bond`).
+    // Reported by run_detailed_nuts and asserted by the audit; 0 whenever no
+    // rule opted in, which is every pre-bonding flow.
+    int n_shield_bond_vias = 0;
     // Total per-bit trunk-jog wirelength between PAIR-ALIGN PARTNER segments
     // — same bundle, same bit count, overlapping intervals, one layer,
     // anchored and not timing-critical: exactly the lever-A pair predicate of
@@ -238,6 +250,15 @@ private:
                         int abort_unplaced = -1) const;
     void adjust_bit_spans(const std::vector<BusSegment>& bus_segs,
                           DetailedNUTSResult& result) const;
+    // R6 shield bonding (opt-in per rule, `bond`): strap every EMITTED
+    // shield to the power grid — a via wherever it crosses an
+    // identity-matching rail (ndr_shield_net_matches) on a PERPENDICULAR
+    // ADJACENT layer that has a grid.  Emitted into result.net_vias with
+    // the strap convention documented on NetVia::to_seg, so GDS export,
+    // the viz, and the bottom-up copy path (transform_net_via) all carry
+    // straps with no new plumbing.  No `bond` rule anywhere = no calls.
+    void emit_shield_bond_vias(const std::vector<BusSegment>& bus_segs,
+                               DetailedNUTSResult& result) const;
     // Post-placement keepout cull (keepout-model audit): remove every bit
     // whose FINAL adjusted span crosses a keepout on its layer, counting it
     // unplaced.  Runs on final spans, so it has zero false positives — the

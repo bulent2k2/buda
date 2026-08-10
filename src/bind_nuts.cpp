@@ -416,6 +416,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("net_segments", &DetailedNUTSResult::net_segments)
         .def_readwrite("net_vias",     &DetailedNUTSResult::net_vias)
         .def_readwrite("num_unplaced", &DetailedNUTSResult::num_unplaced)
+        .def_readwrite("n_shield_bond_vias", &DetailedNUTSResult::n_shield_bond_vias)
         .def_readwrite("num_keepout_bits", &DetailedNUTSResult::num_keepout_bits)
         .def_readwrite("pair_misalign_wl", &DetailedNUTSResult::pair_misalign_wl)
         .def_readwrite("aborted",          &DetailedNUTSResult::aborted)
