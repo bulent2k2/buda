@@ -28,7 +28,8 @@ import buda
 from slot_groups import MAX_SLOT_REPEAT as _MAX_SLOT_REPEAT  # noqa: F401
 from slot_groups import expand_slot_groups
 
-from ._options import require_int, require_layer_id, require_number
+from ._options import (require_distance, require_int,
+                       require_layer_id, require_number)
 
 _DEF_TRACK_PATTERN_USAGE = (
     "def_track_pattern <layer_id> <origin> [<type> <width> <space_after>] ...")
@@ -103,21 +104,23 @@ def _require_slot_geometry(cmd_name, slot_type, width, space_after, usage):
             "the next slot (0 is fine: abutting slots)")
 
 
-def _parse_slots(cmd_name, toks, usage):
+def _parse_slots(session, cmd_name, toks, usage):
     """Parse a `<type> <width> <space_after>` slot list (repetition groups
     expanded first) into TrackSlots.  Shared by def_track_pattern and
-    add_grid_override — the two had byte-identical copies of this loop."""
+    add_grid_override — the two had byte-identical copies of this loop.
+    Widths and spacings are DISTANCES, so the `um` suffix is accepted
+    (`SIGNAL 0.07um 0.12um` declares real metal at any import scale)."""
     toks = expand_slot_groups(cmd_name, toks, usage)
     slots = []
     i = 0
     while i + 2 < len(toks):
         slot_type   = toks[i]
-        width       = require_number(cmd_name,
-                                     f"<width> of slot '{slot_type}'",
-                                     toks[i + 1], usage=usage)
-        space_after = require_number(cmd_name,
-                                     f"<space_after> of slot '{slot_type}'",
-                                     toks[i + 2], usage=usage)
+        width       = require_distance(cmd_name,
+                                       f"<width> of slot '{slot_type}'",
+                                       toks[i + 1], session, usage=usage)
+        space_after = require_distance(cmd_name,
+                                       f"<space_after> of slot '{slot_type}'",
+                                       toks[i + 2], session, usage=usage)
         _require_slot_geometry(cmd_name, slot_type, width, space_after, usage)
         slots.append(buda.TrackSlot(
             type=_canonical_slot_type(cmd_name, slot_type),
@@ -136,9 +139,9 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
         return
     layer_id = require_layer_id("def_track_pattern", args[0], session,
                                 usage=_DEF_TRACK_PATTERN_USAGE)
-    origin   = require_number("def_track_pattern", "<origin>", args[1],
-                              usage=_DEF_TRACK_PATTERN_USAGE)
-    slots = _parse_slots("def_track_pattern", args[2:],
+    origin   = require_distance("def_track_pattern", "<origin>", args[1],
+                                session, usage=_DEF_TRACK_PATTERN_USAGE)
+    slots = _parse_slots(session, "def_track_pattern", args[2:],
                          _DEF_TRACK_PATTERN_USAGE)
     if not slots:
         print("Error: def_track_pattern requires at least one slot triple")
@@ -263,14 +266,15 @@ def cmd_add_grid_override(session, cmd, args, cmd_line):
         # The override REGION is integer geometry (PatternOverride::region is a
         # Rect), so a fractional coordinate was silently truncated — same defect
         # as add_keepout's, and it moves the seam between two track patterns.
-        return require_int("add_grid_override", what, tok,
-                           usage=_ADD_GRID_OVERRIDE_USAGE,
-                           why="The region bounds a pattern seam, not a track.")
+        return require_distance(
+            "add_grid_override", what, tok, session, integer=True,
+            usage=_ADD_GRID_OVERRIDE_USAGE,
+            why="The region bounds a pattern seam, not a track.")
     x1, y1 = _coord("<x1>", args[1]), _coord("<y1>", args[2])
     x2, y2 = _coord("<x2>", args[3]), _coord("<y2>", args[4])
-    origin = require_number("add_grid_override", "<origin>", args[5],
-                            usage=_ADD_GRID_OVERRIDE_USAGE)
-    slots = _parse_slots("add_grid_override", args[6:],
+    origin = require_distance("add_grid_override", "<origin>", args[5],
+                              session, usage=_ADD_GRID_OVERRIDE_USAGE)
+    slots = _parse_slots(session, "add_grid_override", args[6:],
                          _ADD_GRID_OVERRIDE_USAGE)
     if not slots:
         print("Error: add_grid_override requires at least one slot triple")

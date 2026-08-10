@@ -26,7 +26,8 @@ import re
 
 from buda_session.util import min_bit_pitch, resolve_script_path
 
-from ._options import reject_unknown_options, require_int
+from ._options import (reject_unknown_options, require_distance,
+                       require_int)
 
 _ADD_BLOCK_USAGE = (
     "add_block <name> <x1> <y1> <x2> <y2> [container] [corner_margin ...]  |  "
@@ -54,8 +55,8 @@ def cmd_add_block(session, cmd, args, cmd_line):
         sys.exit(1)
 
     def _block_coord(what, tok):
-        return require_int("add_block", what, tok, usage=_ADD_BLOCK_USAGE,
-                           why=_BLOCK_COORD_WHY)
+        return require_distance("add_block", what, tok, session, integer=True,
+                                usage=_ADD_BLOCK_USAGE, why=_BLOCK_COORD_WHY)
 
     if len(args) > 1 and args[1].lower() == "rect":
         rects = []
@@ -109,7 +110,11 @@ def cmd_add_block(session, cmd, args, cmd_line):
                 if i + 1 >= len(rest):
                     print(f"Error: add_block corner_margin {kw} requires a value")
                     sys.exit(1)
-                kws[kw] = float(rest[i + 1]); i += 2
+                # dx/dy are distances (um suffix ok); pct_* are percentages.
+                kws[kw] = (require_distance("add_block corner_margin", kw,
+                                            rest[i + 1], session)
+                           if kw in ("dx", "dy") else float(rest[i + 1]))
+                i += 2
             else:
                 # A bad corner_margin sub-keyword used to be silently skipped.
                 reject_unknown_options("add_block corner_margin", [kw],
@@ -142,10 +147,15 @@ def cmd_corner_margin(session, cmd, args, cmd_line):
             # and would loop forever on a trailing `dx`/`dy`).
             if i + 1 >= len(args):
                 print(f"Error: corner_margin {kw} requires a value"); sys.exit(1)
-            kws[kw] = float(args[i + 1]); i += 2
+            kws[kw] = require_distance("corner_margin", kw, args[i + 1],
+                                       session)
+            i += 2
         elif kw[0].isdigit() or (kw[0] == '-' and len(kw) > 1 and kw[1].isdigit()): # Positional
-            if "dx" not in kws: kws["dx"] = float(kw)
-            elif "dy" not in kws: kws["dy"] = float(kw)
+            v = require_distance("corner_margin",
+                                 "dx" if "dx" not in kws else "dy",
+                                 args[i], session)
+            if "dx" not in kws: kws["dx"] = v
+            elif "dy" not in kws: kws["dy"] = v
             i += 1
         elif kw in ("pct_h", "pct_v"):
             print(f"Error: corner_margin pct_h/pct_v not supported globally "
@@ -169,14 +179,17 @@ def cmd_set_min_stub_length(session, cmd, args, cmd_line):
     # re-apply it, so their generation and local solves see the same stub
     # semantics as the flat pipeline (_apply_fp_session_settings).
     if args:
-        session.fp.set_min_stub_length(int(args[0]))
-        session._min_stub["global"] = int(args[0])
+        val = require_distance("set_min_stub_length", "<length>", args[0],
+                               session, integer=True)
+        session.fp.set_min_stub_length(val)
+        session._min_stub["global"] = val
 
 
 def cmd_set_min_stub_length_dir(session, cmd, args, cmd_line):
     if len(args) >= 2:
         dstr = args[0].upper()
-        val = int(args[1])
+        val = require_distance("set_min_stub_length_dir", "<length>", args[1],
+                               session, integer=True)
         if dstr in ("H", "HORIZONTAL"):
             session.fp.set_min_stub_length_dir(buda.LayerDir.HORIZONTAL, val)
             session._min_stub["dir"][buda.LayerDir.HORIZONTAL] = val
@@ -190,7 +203,8 @@ def cmd_set_min_stub_length_dir(session, cmd, args, cmd_line):
 def cmd_set_min_stub_length_layer(session, cmd, args, cmd_line):
     if len(args) >= 2:
         lname = args[0]
-        val = int(args[1])
+        val = require_distance("set_min_stub_length_layer", "<length>",
+                               args[1], session, integer=True)
         lid = session._layer_name_map.get(lname)
         if lid is not None:
             session.fp.set_min_stub_length_layer(lid, val)
@@ -277,11 +291,8 @@ def cmd_detour_channel(session, cmd, args, cmd_line):
                   f"{', '.join(repr(c) for c in bad)} in '{dirs}'. Valid: "
                   f"N S E W (single side), Y (N+S), X (E+W), A (all four).")
             sys.exit(1)
-        try:
-            size = int(args[i + 1])
-        except ValueError:
-            print(f"Error: detour_channel size must be an integer, got '{args[i+1]}'")
-            sys.exit(1)
+        size = require_distance("detour_channel", "<size>", args[i + 1],
+                                session, integer=True)
         session.fp.set_detour_channel(dirs, size)
         i += 2
     # An odd final token (e.g. `detour_channel N 50 Q`) is a direction with no
@@ -299,8 +310,9 @@ def cmd_add_keepout(session, cmd, args, cmd_line):
         return
 
     def _ko_coord(what, tok):
-        return require_int("add_keepout", what, tok, usage=_ADD_KEEPOUT_USAGE,
-                           why=_KEEPOUT_COORD_WHY)
+        return require_distance("add_keepout", what, tok, session,
+                                integer=True, usage=_ADD_KEEPOUT_USAGE,
+                                why=_KEEPOUT_COORD_WHY)
     x1, y1 = _ko_coord("<x1>", args[0]), _ko_coord("<y1>", args[1])
     x2, y2 = _ko_coord("<x2>", args[2]), _ko_coord("<y2>", args[3])
     try:
@@ -475,8 +487,14 @@ def cmd_def_layer(session, cmd, args, cmd_line):
     i = 0
     while i < len(rest):
         kw = rest[i].lower()
-        if kw == "span_min":    span_min = int(rest[i+1]);    i += 2
-        elif kw == "span_max":  span_max = int(rest[i+1]);    i += 2
+        if kw == "span_min":
+            span_min = require_distance("def_layer", "span_min", rest[i+1],
+                                        session, integer=True)
+            i += 2
+        elif kw == "span_max":
+            span_max = require_distance("def_layer", "span_max", rest[i+1],
+                                        session, integer=True)
+            i += 2
         elif kw == "kspan":     kspan_override = float(rest[i+1]); i += 2
         else:
             # An unknown trailing keyword used to be silently skipped.
@@ -496,6 +514,12 @@ def cmd_def_layer(session, cmd, args, cmd_line):
         smin = span_min if span_min is not None else 0
         smax = span_max if span_max is not None else 1_000_000_000
         session.layers.set_layer_span(int(lid), smin, smax)
+        # Session mirror (the _min_stub pattern): LayerStack has no span
+        # getter, and the resolved values are worth being able to see —
+        # um-suffixed spans convert at parse time.
+        if not hasattr(session, "_layer_spans"):
+            session._layer_spans = {}
+        session._layer_spans[int(lid)] = (smin, smax)
     if kspan_override is not None:
         session.layers.set_layer_kspan(int(lid), kspan_override)
     ovh_val = float(ovh)
@@ -546,7 +570,7 @@ def cmd_set_track_pitch(session, cmd, args, cmd_line):
         print(f"[Setup] set_track_pitch auto → {pitch:g} layout units "
               f"(one signal-track pitch on the densest pattern layer)")
         return
-    session._nuts_pitch = float(args[0])
+    session._nuts_pitch = require_distance("set_track_pitch", "<pitch>", args[0], session)
 
 
 def _lef_layer_id(name, taken):
