@@ -60,8 +60,9 @@ def_layer 4 M4 V 20
 def_layer 5 M5 H TOP 20
 def_layer 6 M6 V TOP 20
 
-# MIXED PITCHES — the point of the vehicle.  M3/M5: slot pitch 2.
-# M4/M6: slot pitch 4.  One absolute rule, two slot counts.
+# MIXED PITCHES — the point of the vehicle.  Per-signal-slot channel cost
+# (unit_pitch / n_signal_slots): M3/M5 = 30/12 = 2.5, M4/M6 = 60/12 = 5.0.
+# One absolute rule, two slot counts.
 def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
 def_track_pattern 5 0 VDD 2 1 (_ 1 1)x12 GND 2 1
 def_track_pattern 4 0 VDD 4 2 (_ 2 2)x12 GND 4 2
