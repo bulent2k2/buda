@@ -17,7 +17,7 @@
 # was one DIRECTION rather than the whole case.
 #
 #   STRICT     127 bundles   abstract WL 31,234,654   detailed 409,819,470
-#   DIVERGENT   78 bundles   abstract WL 19,104,008   detailed 430,511,600
+#   DIVERGENT   78 bundles   abstract WL 19,104,008   detailed 427,958,400
 #
 # Both endpoints are clean with 0 unplaced bits.  The abstract win
 # is large because a fan-out tree shares a trunk where 32 bundles
