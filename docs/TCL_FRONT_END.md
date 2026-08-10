@@ -136,6 +136,42 @@ iso8859-1 and every one of those becomes `?`, so a correct tool reads as a
 corrupt one.  We chose to emit UTF-8, so we take responsibility for the
 channel we echo it on.
 
+## Streaming, async, and cancellation
+
+The synchronous face above is all a flow script needs.  A **GUI** driving
+BUDA needs three more things — output as it happens, an event loop that
+stays live, and a stop button — and they are one section because they
+compose:
+
+```tcl
+buda::stream 1                    ;# output arrives as it is produced
+buda::onprogress {my_log_pane}    ;# invoked with each chunk, sync or async
+
+buda::async {ripup_reroute 30} -done {apply {{status output} {
+    ...                           ;# status is OK/ERR/BYE/FATAL — an
+}}}                               ;#   argument, not a raise: no caller
+                                  ;#   is on the stack to catch one
+buda::running                     ;# 1 while a command is in flight
+buda::cancel                      ;# SIGINT to the engine; the command
+                                  ;#   fails as an ordinary ERR, the
+                                  ;#   session stays alive
+set status [buda::wait]           ;# block (vwait) until it finishes
+```
+
+`buda::async` sends the command and returns immediately; frames are
+assembled by a `fileevent` reader, so a Tk GUI's event loop keeps
+dispatching while the engine works.  A sync `buda::<name>` call while a
+command is in flight is refused loudly.  `buda::output` holds the same
+whole text in every mode.
+
+**Cancellation is cooperative, and the boundary is honest**: Python raises
+`KeyboardInterrupt` at the next bytecode boundary, so a Python-level loop —
+`source`, the healers' iterations — cancels promptly, while one long C++
+call (a single `run_planner` on a huge design) returns before the interrupt
+lands.  The cancelled command keeps whatever state it had committed,
+exactly like any other failing command.  POSIX only (`exec kill`); on other
+hosts `buda::cancel` errors rather than pretending.
+
 ## The protocol
 
 Documented in full in `tools/buda_server.py`.  In short: one request line
@@ -143,7 +179,20 @@ per command, and a reply of `<STATUS> <n_chars>\n` followed by that many
 characters of output, where `STATUS` is `OK`, `ERR`, `BYE` or `FATAL`.
 Character counts, not bytes: both sides speak UTF-8 and count code points.
 
-Anything that writes directly to file descriptor 1 inside the engine — as
-opposed to Python's `sys.stdout` or C++'s `std::cout`, both of which are
-captured — would land in the middle of a frame.  Nothing in BUDA does; it is
-noted here because it is the one way to break the channel.
+With streaming opted in (`__stream on`), a reply is zero or more
+`OUT <n_chars>\n<payload>` progress frames followed by exactly one final
+status frame carrying the not-yet-streamed tail — concatenating them yields
+exactly the buffered-mode output.  A client that never opts in never sees
+an `OUT` frame, so the one-frame form above remains the whole contract for
+existing flows.  Cancellation is deliberately NOT a protocol feature:
+POSIX already has one (SIGINT), and the server defers it while a frame is
+on the wire so a cancel cannot tear a frame in half.
+
+A write directly to file descriptor 1 inside the engine — as opposed to
+Python's `sys.stdout` or C++'s `std::cout`, both of which are captured —
+**cannot corrupt the channel**: at startup the server duplicates fd 1 to a
+private descriptor the protocol alone writes, and repoints fd 1 at stderr.
+A library that writes the raw descriptor lands beside the diagnostics —
+visible, in order, outside every frame — instead of inside the
+conversation.  ("Nothing in BUDA does" was true, but it was a promise about
+other people's code; now it does not need to be one.)

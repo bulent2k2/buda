@@ -529,14 +529,34 @@ or batch run already falls through to the direct launch.
   die was a 0.5 µm speck and nothing said so; the reader now refuses it
   unless told `allow_missing_footprints`. Which of the two files is
   authoritative is the owner's call.
-* **The Tcl front end is synchronous.** One request, one reply, no
-  cancellation and no progress events — so a long `ripup_reroute` is a
-  blocking call. Fine for a flow script; a GUI driving it would want more.
-  Protocol in `tools/buda_server.py`.
-* **The Tcl protocol assumes nothing writes to fd 1 directly.** Python's
-  `sys.stdout` and C++'s `std::cout` are both captured; a library writing
-  straight to the descriptor would land inside a frame and desynchronise the
-  channel. Nothing in BUDA does this today.
+* ~~**The Tcl front end is synchronous.**~~ **RESOLVED 2026-08-10** — the
+  GUI face landed as three composable pieces: opt-in **streaming**
+  (`__stream on` → `OUT` progress frames, with the final frame carrying
+  only the unstreamed tail so `buda::output` is identical in every mode; a
+  client that never opts in never sees an `OUT` frame, so the one-frame
+  protocol remains the whole contract for existing flows), **async
+  driving** (`buda::async -done …` on a `fileevent` reader, so a Tk event
+  loop stays live; plus `buda::wait` / `buda::running` / `buda::onprogress`),
+  and **cancellation** — deliberately NOT a protocol feature, because POSIX
+  already has one: `buda::cancel` sends SIGINT, Python raises
+  `KeyboardInterrupt` at the next bytecode boundary, and the command fails
+  as an ordinary `ERR` with the session alive holding what it had
+  committed.  The boundary is stated rather than implied: Python-level
+  loops (`source`, healer iterations) cancel promptly; one long C++ call
+  returns before the interrupt lands.  SIGINT is deferred while a frame is
+  on the wire so a cancel cannot tear a frame in half.  Pinned by
+  `test_tcl_async.py`, incl. a real 150k-line `source` cancelled mid-run
+  with partial state surviving.
+* ~~**The Tcl protocol assumes nothing writes to fd 1 directly.**~~
+  **RESOLVED 2026-08-10** — the assumption is gone rather than defended: at
+  startup the server duplicates fd 1 to a private descriptor the protocol
+  alone writes and repoints fd 1 at **stderr**, so a library writing the
+  raw descriptor lands beside the diagnostics — visible, in order, outside
+  every frame — instead of inside the conversation. "Nothing in BUDA does
+  this today" was true, but it was a promise about other people's code;
+  making the write harmless BY CONSTRUCTION replaces the promise. Pinned by
+  a test whose rogue command `os.write(1, ...)`s mid-command: the frame
+  stays well-formed, the junk arrives on stderr.
 * **`import_gds` label recovery needs components to land on.** Labels
   outside every component are skipped with a warning — correct.  (The case
   that made this bite — port labels landing on nothing because `__PORT__`
