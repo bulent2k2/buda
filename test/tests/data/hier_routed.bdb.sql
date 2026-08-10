@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=24;
+PRAGMA user_version=25;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -190,7 +190,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','24');
+INSERT INTO "meta" VALUES('schema_version','25');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE ndr_rule (
             name         TEXT PRIMARY KEY,
@@ -200,7 +200,8 @@ CREATE TABLE ndr_rule (
             shield_per_n INTEGER NOT NULL DEFAULT 0,
             shield_net   TEXT NOT NULL DEFAULT 'GND',
             layers       TEXT NOT NULL DEFAULT '',
-            credit       INTEGER NOT NULL DEFAULT 0
+            credit       INTEGER NOT NULL DEFAULT 0,
+            bond         INTEGER NOT NULL DEFAULT 0
         );
 CREATE TABLE ndr_scope (
             prefix TEXT PRIMARY KEY,

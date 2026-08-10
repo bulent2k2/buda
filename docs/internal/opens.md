@@ -19,10 +19,11 @@ items this page doesn't see).
 > [`opens_ci.md`](opens_ci.md).
 
 > **Non-default rules (NDR):** the feature is usable end to end as of
-> 2026-08-08 (item 15 below), with R1, R6 and R8 met only in part by
-> deliberate decision. What it does NOT do yet — shield bonding vias,
-> absolute µm values, per-net mixed-rule bundles, plus smaller residuals —
-> is tracked separately in [`opens_ndr.md`](opens_ndr.md).
+> 2026-08-08 (item 15 below), with R1 and R8 met only in part by deliberate
+> decision (R6's headline gap, shield bonding, landed 2026-08-10 — opt-in
+> `bond`). What it does NOT do yet — absolute µm values, per-net mixed-rule
+> bundles, two residual bonding limits, plus smaller items — is tracked
+> separately in [`opens_ndr.md`](opens_ndr.md).
 
 > **File I/O and interfaces:** the LEF/DEF/Verilog/GDS readers and writers,
 > the advisory artifacts and the Tcl front end landed across phases 0–5
@@ -73,8 +74,9 @@ items this page doesn't see).
    [`ndr_architecture.md`](ndr_architecture.md) (implementers, as-built),
    [`../script_reference/ndr.md`](../script_reference/ndr.md) (commands).
    **Remaining gaps — each deliberate, none blocking — are tracked in
-   [`opens_ndr.md`](opens_ndr.md)**: shield bonding vias, absolute µm
-   values, per-net mixed-rule bundles, plus smaller residuals.
+   [`opens_ndr.md`](opens_ndr.md)**: absolute µm values, per-net mixed-rule
+   bundles, the two residual shield-bonding limits (every crossing strapped;
+   adjacent layers only), plus smaller residuals.
 
 13. **Nominal-WL comparability across shape families (b44 follow-ons)** —
    [`wishlist-topo.md`](wishlist-topo.md) → *"Nominal-WL comparability

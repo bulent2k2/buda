@@ -129,24 +129,24 @@ def write_lef(path):
           "  SYMMETRY X Y ;"]
     for i in range(NBITS):
         y = 4 + i * 5
-        L += [f"  PIN A{i}",
+        L += [f"  PIN A[{i}]",
               "    DIRECTION INPUT ;",
               "    USE SIGNAL ;",
               "    PORT",
               "      LAYER M1 ;",
               f"      RECT 0.5 {y - 0.5} 1.5 {y + 0.5} ;",
               "    END",
-              f"  END A{i}"]
+              f"  END A[{i}]"]
     for i in range(NBITS):
         y = 4 + i * 5
-        L += [f"  PIN Z{i}",
+        L += [f"  PIN Z[{i}]",
               "    DIRECTION OUTPUT ;",
               "    USE SIGNAL ;",
               "    PORT",
               "      LAYER M1 ;",
               f"      RECT {LEAF_W - 1.5} {y - 0.5} {LEAF_W - 0.5} {y + 0.5} ;",
               "    END",
-              f"  END Z{i}"]
+              f"  END Z[{i}]"]
     # Power pins: USE POWER/GROUND, so the reader must NOT treat them as
     # signal terminals.
     for nm, use in (("VDD", "POWER"), ("VSS", "GROUND")):
@@ -212,50 +212,38 @@ def write_verilog(path):
         "// heuristic that keeps a million gates out of the hierarchy), so a",
         "// blackbox macro would never reach the component table at all.",
         "",
-        f"module LEAF ({_ports('A')}, {_ports('Z')});",
-        f"  input  {_ports('A')};",
-        f"  output {_ports('Z')};",
+        "module LEAF (A, Z);",
+        f"  input  [{NBITS - 1}:0] A;",
+        f"  output [{NBITS - 1}:0] Z;",
         "endmodule",
         "",
     ]
     # blk: lo takes the block's inputs and drives the D2 bus; hi takes the
     # D2 bus and drives the block's outputs.
-    V += [f"module blk ({_ports('I')}, {_ports('O')});",
-          f"  input  {_ports('I')};",
-          f"  output {_ports('O')};",
+    V += ["module blk (I, O);",
+          f"  input  [{NBITS - 1}:0] I;",
+          f"  output [{NBITS - 1}:0] O;",
           f"  wire   [{NBITS - 1}:0] w;",
-          "  LEAF lo (" + ", ".join(
-              [f".A{i}(I{i})" for i in range(NBITS)] +
-              [f".Z{i}({_bus('w', i)})" for i in range(NBITS)]) + ");",
-          "  LEAF hi (" + ", ".join(
-              [f".A{i}({_bus('w', i)})" for i in range(NBITS)] +
-              [f".Z{i}(O{i})" for i in range(NBITS)]) + ");",
+          "  LEAF lo (.A(I), .Z(w));",
+          "  LEAF hi (.A(w), .Z(O));",
           "endmodule",
           ""]
     # quad: bl drives the D1 bus, br consumes it.
-    V += [f"module quad ({_ports('I')}, {_ports('O')});",
-          f"  input  {_ports('I')};",
-          f"  output {_ports('O')};",
+    V += ["module quad (I, O);",
+          f"  input  [{NBITS - 1}:0] I;",
+          f"  output [{NBITS - 1}:0] O;",
           f"  wire   [{NBITS - 1}:0] m;",
-          "  blk bl (" + ", ".join(
-              [f".I{i}(I{i})" for i in range(NBITS)] +
-              [f".O{i}({_bus('m', i)})" for i in range(NBITS)]) + ");",
-          "  blk br (" + ", ".join(
-              [f".I{i}({_bus('m', i)})" for i in range(NBITS)] +
-              [f".O{i}(O{i})" for i in range(NBITS)]) + ");",
+          "  blk bl (.I(I), .O(m));",
+          "  blk br (.I(m), .O(O));",
           "endmodule",
           ""]
     # chip: u_q0 drives the D0 bus, u_q1 consumes it; die ports at each end.
-    V += [f"module chip ({_ports('din')}, {_ports('dout')});",
-          f"  input  {_ports('din')};",
-          f"  output {_ports('dout')};",
+    V += ["module chip (din, dout);",
+          f"  input  [{NBITS - 1}:0] din;",
+          f"  output [{NBITS - 1}:0] dout;",
           f"  wire   [{NBITS - 1}:0] c;",
-          "  quad u_q0 (" + ", ".join(
-              [f".I{i}(din{i})" for i in range(NBITS)] +
-              [f".O{i}({_bus('c', i)})" for i in range(NBITS)]) + ");",
-          "  quad u_q1 (" + ", ".join(
-              [f".I{i}({_bus('c', i)})" for i in range(NBITS)] +
-              [f".O{i}(dout{i})" for i in range(NBITS)]) + ");",
+          "  quad u_q0 (.I(din), .O(c));",
+          "  quad u_q1 (.I(c), .O(dout));",
           "endmodule",
           ""]
     with open(path, "w") as f:
@@ -271,24 +259,24 @@ def _nets():
     out = []
     for i in range(NBITS):
         # die input port -> u_q0/bl/lo
-        out.append((f"din{i}", [("PIN", f"din{i}"),
-                                ("u_q0/bl/lo", f"A{i}")]))
+        out.append((f"din[{i}]", [("PIN", f"din[{i}]"),
+                                  ("u_q0/bl/lo", f"A[{i}]")]))
         # u_q1/br/hi -> die output port
-        out.append((f"dout{i}", [("u_q1/br/hi", f"Z{i}"),
-                                 ("PIN", f"dout{i}")]))
+        out.append((f"dout[{i}]", [("u_q1/br/hi", f"Z[{i}]"),
+                                   ("PIN", f"dout[{i}]")]))
         # D0: chip-level, u_q0/br/hi -> u_q1/bl/lo
-        out.append((f"c[{i}]", [("u_q0/br/hi", f"Z{i}"),
-                              ("u_q1/bl/lo", f"A{i}")]))
+        out.append((f"c[{i}]", [("u_q0/br/hi", f"Z[{i}]"),
+                              ("u_q1/bl/lo", f"A[{i}]")]))
     for q in ("u_q0", "u_q1"):
         for i in range(NBITS):
             # D1: quad-level, bl/hi -> br/lo
-            out.append((f"{q}/m[{i}]", [(f"{q}/bl/hi", f"Z{i}"),
-                                      (f"{q}/br/lo", f"A{i}")]))
+            out.append((f"{q}/m[{i}]", [(f"{q}/bl/hi", f"Z[{i}]"),
+                                      (f"{q}/br/lo", f"A[{i}]")]))
         for b in ("bl", "br"):
             for i in range(NBITS):
                 # D2: blk-level, lo -> hi
-                out.append((f"{q}/{b}/w[{i}]", [(f"{q}/{b}/lo", f"Z{i}"),
-                                              (f"{q}/{b}/hi", f"A{i}")]))
+                out.append((f"{q}/{b}/w[{i}]", [(f"{q}/{b}/lo", f"Z[{i}]"),
+                                              (f"{q}/{b}/hi", f"A[{i}]")]))
     return out
 
 
@@ -334,8 +322,8 @@ def write_def(path):
     # u_q1/bl/hi, and a LOW-layer wire over a leaf footprint is a real
     # keepout crossing, not a cosmetic one.
     pin_y = [4 + i * 5 for i in range(NBITS)]          # LEAF pin rows
-    ports = [(f"din{i}", "INPUT", 0.5, Q0[1] + pin_y[i]) for i in range(NBITS)]
-    ports += [(f"dout{i}", "OUTPUT", DIE_W - 0.5, Q1[1] + QUAD_DY + pin_y[i])
+    ports = [(f"din[{i}]", "INPUT", 0.5, Q0[1] + pin_y[i]) for i in range(NBITS)]
+    ports += [(f"dout[{i}]", "OUTPUT", DIE_W - 0.5, Q1[1] + QUAD_DY + pin_y[i])
               for i in range(NBITS)]
     D.append(f"PINS {len(ports)} ;")
     for nm, direction, x, y in ports:

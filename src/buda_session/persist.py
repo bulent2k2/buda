@@ -580,7 +580,15 @@ class PersistMixin:
             r.id = str(nv.bundle_id)
             r.from_seg, r.to_seg = nv.from_seg, nv.to_seg
             r.bit_index = nv.bit_index
-            r.net_name = bit_net(nv.bundle_id, nv.bit_index)
+            # An NDR shield BOND strap (R6) is keyed by a NEGATIVE to_seg
+            # (the strap ordinal — see NetVia in detailed_nuts.h): its far
+            # end is a power-grid rail, not a routed segment, and both ends
+            # carry the rule's shield net.  bit_net() would return "" for
+            # its negative bit_index, so name it the same way the shield
+            # NetSegment above is named.
+            r.net_name = (bid_to_shield.get(nv.bundle_id, "GND")
+                          if nv.to_seg < 0
+                          else bit_net(nv.bundle_id, nv.bit_index))
             r.from_layer, r.to_layer = nv.from_layer, nv.to_layer
             r.x, r.y = nv.x, nv.y
             self.bdb.add_net_via(r)
