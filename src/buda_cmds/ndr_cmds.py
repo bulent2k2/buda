@@ -263,8 +263,16 @@ def _spec_of(session, rule_name):
     r = _rules(session)[rule_name]
     spec = buda.NdrSpec()
     spec.rule_name    = rule_name
-    spec.width_slots  = max(1, math.ceil(r["width_x"]))
-    spec.guard_slots  = max(0, math.ceil(r["spacing_x"]) - 1)
+    spec.width_abs    = r.get("width_abs", 0.0)
+    spec.spacing_abs  = r.get("spacing_abs", 0.0)
+    if spec.width_abs > 0.0 or spec.spacing_abs > 0.0:
+        # Absolute: the CONSERVATIVE resolution computed at declaration
+        # (max over the governed layers); consumers narrow it per layer.
+        spec.width_slots = r.get("width_slots_max", 1)
+        spec.guard_slots = r.get("guard_slots_max", 0)
+    else:
+        spec.width_slots  = max(1, math.ceil(r["width_x"]))
+        spec.guard_slots  = max(0, math.ceil(r["spacing_x"]) - 1)
     spec.shield_mode  = r["shield_mode"]
     spec.shield_per_n = r["shield_per_n"]
     spec.shield_net   = r["shield_net"]
@@ -273,22 +281,57 @@ def _spec_of(session, rule_name):
     return spec
 
 
-def _parse_x(tok, what, name):
-    """Parse the multiplier form `xN` (phase 1 accepts only this form)."""
-    if not tok.lower().startswith("x"):
-        print(f"Error: def_ndr '{name}': {what} must be the multiplier "
-              f"form xN in phase 1 (got '{tok}'; absolute um values need "
-              f"per-layer slot geometry and are a later phase)")
-        sys.exit(1)
+def _parse_value(tok, what, name):
+    """Parse a width/spacing value in either R1 form.
+
+    `xN` is the MULTIPLIER: pattern-independent, N signal slots on every
+    layer.  A bare number is the ABSOLUTE form in LAYOUT UNITS — one
+    physical width whose slot cost depends on the layer's pitch, which is
+    the whole reason R1 asks for it.  Returns (multiplier, absolute) with
+    exactly one of them set.
+
+    Both are rejected below 0: a zero-or-negative width is not a weaker
+    rule, it is a meaningless one."""
+    if tok.lower().startswith("x"):
+        try:
+            v = float(tok[1:])
+        except ValueError:
+            v = -1.0
+        if v < 1.0:
+            print(f"Error: def_ndr '{name}': {what} multiplier must be >= 1 "
+                  f"(got '{tok}')")
+            sys.exit(1)
+        return (v, 0.0)
     try:
-        v = float(tok[1:])
+        a = float(tok)
     except ValueError:
-        v = -1.0
-    if v < 1.0:
-        print(f"Error: def_ndr '{name}': {what} multiplier must be >= 1 "
+        print(f"Error: def_ndr '{name}': {what} must be a multiplier "
+              f"(xN) or an absolute value in layout units (got '{tok}')")
+        sys.exit(1)
+    if a <= 0.0:
+        print(f"Error: def_ndr '{name}': absolute {what} must be > 0 "
               f"(got '{tok}')")
         sys.exit(1)
-    return v
+    return (1.0, a)
+
+
+def _abs_layer_pitches(session, rule):
+    """Per-signal-slot pitch of every layer an absolute rule may use —
+    its `layers` restriction, or every declared layer when unrestricted.
+    Only PATTERNED layers appear (bit_pitch 0 = no slot geometry)."""
+    layers = session.layers
+    if layers is None:
+        return {}
+    ids = rule["layers"]
+    if ids is None:
+        ids = list(layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL)) + \
+              list(layers.get_layer_ids_by_dir(buda.LayerDir.VERTICAL))
+    out = {}
+    for lid in ids:
+        p = layers.bit_pitch(lid)
+        if p > 0:
+            out[lid] = p
+    return out
 
 
 def cmd_def_ndr(session, cmd, args, cmd_line):
@@ -310,14 +353,17 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
         sys.exit(1)
     rule = {"width_x": 1.0, "spacing_x": 1.0, "shield_mode": 0,
             "shield_per_n": 0, "shield_net": "GND", "layers": None,
-            "credit": 0, "bond": 0}
+            "credit": 0, "bond": 0, "width_abs": 0.0,
+            "spacing_abs": 0.0}
     i = 1
     while i < len(args):
         tok = args[i].lower()
         if tok == "width" and i + 1 < len(args):
-            rule["width_x"] = _parse_x(args[i + 1], "width", name); i += 2
+            rule["width_x"], rule["width_abs"] = _parse_value(
+                args[i + 1], "width", name); i += 2
         elif tok == "spacing" and i + 1 < len(args):
-            rule["spacing_x"] = _parse_x(args[i + 1], "spacing", name); i += 2
+            rule["spacing_x"], rule["spacing_abs"] = _parse_value(
+                args[i + 1], "spacing", name); i += 2
         elif tok == "shield" and i + 1 < len(args):
             mode = args[i + 1].lower()
             if mode in _SHIELD_MODES:
@@ -376,6 +422,7 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
                   f"'{args[i]}' — a typo would silently weaken the rule")
             sys.exit(1)
     spec_probe = (rule["width_x"] > 1.0 or rule["spacing_x"] > 1.0
+                  or rule["width_abs"] > 0.0 or rule["spacing_abs"] > 0.0
                   or rule["shield_mode"] != 0)
     if not spec_probe:
         print(f"Error: def_ndr '{name}' constrains nothing (default width, "
@@ -390,13 +437,46 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
         print(f"Error: def_ndr '{name}': 'bond' needs a shield arrangement "
               f"to bond — declare shield bus|bit|per:<N> with it")
         sys.exit(1)
+    # R1 ORDERING: an absolute value has no meaning without slot geometry
+    # — it is a physical width, and how many slots that costs is a property
+    # of the layer's pattern.  So the governed layers' track patterns must
+    # already be declared.  Refusing here is the LOUD form: resolving later
+    # against whatever grid happened to exist would silently charge a
+    # DIFFERENT width than the one declared, and the multiplier form is
+    # right there for anyone who wants order-independence.
+    if rule["width_abs"] > 0.0 or rule["spacing_abs"] > 0.0:
+        pitches = _abs_layer_pitches(session, rule)
+        if not pitches:
+            scope = ("layers " + ",".join(str(l) for l in rule["layers"])
+                     if rule["layers"] else "any layer")
+            print(f"Error: def_ndr '{name}': an absolute width/spacing needs "
+                  f"the slot geometry it quantizes against — declare "
+                  f"def_track_pattern for {scope} BEFORE this rule, or use "
+                  f"the multiplier form (xN), which is pattern-independent")
+            sys.exit(1)
+        # The stored quantization is the CONSERVATIVE one: the largest slot
+        # count over the governed layers.  Per-layer resolution can then
+        # only reduce it, so any consumer that forgets to resolve
+        # over-charges rather than under-charges.
+        ws, gs = 1, 0
+        for pitch in pitches.values():
+            probe = buda.NdrSpec()
+            probe.width_abs, probe.spacing_abs = (rule["width_abs"],
+                                                  rule["spacing_abs"])
+            probe = buda.ndr_resolve_for_pitch(probe, pitch)
+            ws, gs = max(ws, probe.width_slots), max(gs, probe.guard_slots)
+        rule["width_slots_max"], rule["guard_slots_max"] = ws, gs
     _rules(session)[name] = rule
     if not hasattr(session, "_ndr_rules_typed"):
         session._ndr_rules_typed = set()
     session._ndr_rules_typed.add(name)
     _write_rule_through(session, name)       # v21: persists when a BDB is open
-    ws = max(1, math.ceil(rule["width_x"]))
-    gs = max(0, math.ceil(rule["spacing_x"]) - 1)
+    if rule["width_abs"] > 0.0 or rule["spacing_abs"] > 0.0:
+        ws = rule.get("width_slots_max", 1)
+        gs = rule.get("guard_slots_max", 0)
+    else:
+        ws = max(1, math.ceil(rule["width_x"]))
+        gs = max(0, math.ceil(rule["spacing_x"]) - 1)
     sh = {0: "none", 1: "bus", 2: "bit", 3: f"per:{rule['shield_per_n']}"}[
         rule["shield_mode"]]
     lay = ("any" if rule["layers"] is None
@@ -404,9 +484,27 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
     cr = " credit" if rule["credit"] else ""
     bo = ("" if not rule["bond"] else
           " bond" if rule["bond"] == 1 else f" bond stride {rule['bond']}")
-    print(f"[NDR] rule '{name}': width x{rule['width_x']:g} -> {ws} slot(s)/"
-          f"bit, spacing x{rule['spacing_x']:g} -> {gs} guard slot(s)/gap, "
-          f"shield {sh} (net {rule['shield_net']}){cr}{bo}, layers {lay}")
+    if rule["width_abs"] > 0.0 or rule["spacing_abs"] > 0.0:
+        # An absolute rule has NO single slot count — report the declared
+        # value, the conservative resolution everything is charged at, and
+        # the per-layer spread, so the layer dependence is visible rather
+        # than implied.
+        wd = (f"width {rule['width_abs']:g}" if rule["width_abs"] > 0
+              else f"width x{rule['width_x']:g}")
+        sd = (f"spacing {rule['spacing_abs']:g}" if rule["spacing_abs"] > 0
+              else f"spacing x{rule['spacing_x']:g}")
+        per = ", ".join(
+            f"L{lid}:{buda.ndr_resolve_for_pitch(_spec_of(session, name), p).width_slots}"
+            f"/{buda.ndr_resolve_for_pitch(_spec_of(session, name), p).guard_slots}"
+            for lid, p in sorted(_abs_layer_pitches(session, rule).items()))
+        print(f"[NDR] rule '{name}': {wd}, {sd} (ABSOLUTE, layout units) -> "
+              f"{ws} slot(s)/bit + {gs} guard(s)/gap charged (the max over "
+              f"governed layers; per layer slots/guards {per}), "
+              f"shield {sh} (net {rule['shield_net']}){cr}{bo}, layers {lay}")
+    else:
+        print(f"[NDR] rule '{name}': width x{rule['width_x']:g} -> {ws} slot(s)/"
+              f"bit, spacing x{rule['spacing_x']:g} -> {gs} guard slot(s)/gap, "
+              f"shield {sh} (net {rule['shield_net']}){cr}{bo}, layers {lay}")
 
 
 def cmd_set_ndr(session, cmd, args, cmd_line):
@@ -915,8 +1013,11 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
     r_rest = getattr(session, "_ndr_rules_restored", None) or set()
     s_rest = getattr(session, "_ndr_scopes_restored", None) or set()
     for name, r in sorted(rules.items()):
-        ws = max(1, math.ceil(r["width_x"]))
-        gs = max(0, math.ceil(r["spacing_x"]) - 1)
+        if r.get("width_abs", 0) > 0 or r.get("spacing_abs", 0) > 0:
+            ws, gs = r.get("width_slots_max", 1), r.get("guard_slots_max", 0)
+        else:
+            ws = max(1, math.ceil(r["width_x"]))
+            gs = max(0, math.ceil(r["spacing_x"]) - 1)
         sh = {0: "none", 1: "bus", 2: "bit",
               3: f"per:{r['shield_per_n']}"}[r["shield_mode"]]
         lay = ("any" if r["layers"] is None
@@ -925,10 +1026,21 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
         cr = " credit" if r.get("credit") else ""
         bo = ("" if not r.get("bond") else
               " bond" if r["bond"] == 1 else f" bond stride {r['bond']}")
-        print(f"[NDR] rule '{name}': width x{r['width_x']:g} "
-              f"({ws} slot(s)/bit), spacing x{r['spacing_x']:g} "
-              f"({gs} guard(s)/gap), shield {sh} net {r['shield_net']}"
-              f"{cr}{bo}, layers {lay}{src}")
+        if r.get("width_abs", 0) > 0 or r.get("spacing_abs", 0) > 0:
+            wd = (f"width {r['width_abs']:g}" if r.get("width_abs", 0) > 0
+                  else f"width x{r['width_x']:g}")
+            sd = (f"spacing {r['spacing_abs']:g}"
+                  if r.get("spacing_abs", 0) > 0
+                  else f"spacing x{r['spacing_x']:g}")
+            print(f"[NDR] rule '{name}': {wd}, {sd} (ABSOLUTE) "
+                  f"-> {ws} slot(s)/bit, {gs} guard(s)/gap charged (max "
+                  f"over governed layers), shield {sh} net "
+                  f"{r['shield_net']}{cr}{bo}, layers {lay}{src}")
+        else:
+            print(f"[NDR] rule '{name}': width x{r['width_x']:g} "
+                  f"({ws} slot(s)/bit), spacing x{r['spacing_x']:g} "
+                  f"({gs} guard(s)/gap), shield {sh} net {r['shield_net']}"
+                  f"{cr}{bo}, layers {lay}{src}")
     for prefix, rule in sorted(scopes.items()):
         src = "  (restored from BDB)" if prefix in s_rest else ""
         print(f"[NDR] scope '{prefix}' -> '{rule}'{src}")
