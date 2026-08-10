@@ -16,8 +16,17 @@ run_bundler convergent
 run_bundler divergent
 run_bundler bidirectional
 run_bundler combined
-run_bundler [strategy] --dump
+run_bundler convergent divergent      # the JOIN of two relations
+run_bundler [strategy...] --dump
 ```
+
+**Several strategy tokens name a SET of relations**, and the bundler takes
+their *join*: nets merge when connected by a chain of **any** of them. A
+strategy names one relation, which is enough until a design carries more than
+one shape — `flow/rv` takes a 32-bit bus IN from 32 pads (fan-in) and sends
+another OUT to 32 pads (fan-out), and no single strategy bundles both.
+`strict` names no relation and so cannot be joined; a repeated token is
+refused. One token behaves exactly as it always did.
 
 Group all nets in the netlist into `Bundle` objects (default `strict`). Must be
 called after all `add_net` / `add_bus` commands and before

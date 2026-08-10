@@ -69,6 +69,8 @@ void bind_bundler(py::module_& m) {
         // BDB must outlive the bundler (audit C7-02).
         .def(py::init<BDB&>(), py::keep_alive<1, 2>())
         .def("set_strategy", &HierarchicalBundler::set_strategy)
+        .def("set_relations", &HierarchicalBundler::set_relations,
+             py::arg("conv"), py::arg("divg"), py::arg("bidir"))
         .def("set_bundling_overrides", &HierarchicalBundler::set_bundling_overrides)
         .def("run", &HierarchicalBundler::run, py::arg("max_depth") = 1);
 }

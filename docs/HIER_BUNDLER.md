@@ -365,3 +365,22 @@ bus — and it is a genuine QoR trade rather than a free win: measured on
 `flow/rv`, 127 → 78 bundles with abstract WL −38.8% and detailed WL +5.0%,
 both endpoints clean.  Hold a prefix out with `set_bundling <prefix>
 no_divergent`.  Pinned by `test/tests/test_bundler_divergent.py`.
+
+**Naming several strategies joins their relations.**  `run_hier_bundler
+depth 4 CONVERGENT DIVERGENT` bundles fan-ins AND fan-outs: the union-find
+join already worked over a set of relations, so only the way to ask was
+missing.  Measured on `flow/rv`, which carries both shapes — CONVERGENT
+bundles its inbound 32-bit port bus and splits the outbound one, DIVERGENT
+does the mirror, and the join gets both:
+
+| strategy | bundles | abstract WL | detailed WL |
+|---|---|---|---|
+| STRICT | 127 | 31,234,654 | 409,819,470 |
+| CONVERGENT | 89 | 29,771,517 | 464,297,620 |
+| DIVERGENT | 78 | 19,104,008 | 430,511,600 |
+| CONVERGENT DIVERGENT | 40 | 16,766,857 | 472,522,550 |
+
+All four end clean with 0 unplaced bits.  The trend is the summary: more
+bundling shares more trunk (abstract WL) and makes each tree reach further
+(detailed WL).  `STRICT` names no relation and cannot be joined; a repeated
+token is refused.  Pinned by `test/tests/test_bundler_relation_join.py`.
