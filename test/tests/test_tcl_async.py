@@ -148,3 +148,103 @@ def test_cancel_interrupts_a_long_command_and_the_session_survives(tmp_path):
     assert "done=ERR" in out, out
     assert "interrupted=1" in out, out
     assert "alive-with-partial-state=1" in out, out
+
+
+def test_the_done_callback_may_use_the_finished_session(tmp_path):
+    """Completion is recorded BEFORE the -done callback runs, so the
+    callback can query the session or launch the next command — and a
+    RAISING callback cannot leave buda::running true forever (its error
+    surfaces through bgerror, the event-loop convention)."""
+    out = _tcl(tmp_path, """
+        proc bgerror {msg} { puts "bg=$msg" }
+        buda::async dump_messages -done {apply {{status output} {
+            puts "inner-query=[buda::query blocks]"
+        }}}
+        buda::wait
+        buda::async dump_messages -done {apply {{status output} { error boom }}}
+        buda::wait
+        update      ;# a handler's error reaches bgerror at IDLE time
+        puts "running-after-raise=[buda::running]"
+        buda::stop
+    """)
+    assert "inner-query=0" in out, out
+    assert "bg=boom" in out, out
+    assert "running-after-raise=0" in out, out
+
+
+def test_a_raising_progress_callback_cannot_wedge_the_frame_parser(tmp_path):
+    """The parser advances and the request finishes BEFORE a chunk is
+    delivered, so a progress callback that raises on every OUT frame
+    cannot re-deliver a frame or leave the request in flight."""
+    out = _tcl(tmp_path, """
+        proc bgerror {msg} { incr ::bg }
+        set ::bg 0
+        buda::stream 1
+        buda::onprogress {apply {{chunk} { error chunkboom }}}
+        buda::async dump_messages
+        set st [buda::wait]
+        buda::onprogress ""
+        update      ;# a handler's error reaches bgerror at IDLE time
+        puts "wait=$st running=[buda::running] bg=[expr {$::bg > 0}]"
+        puts "output-whole=[expr {[string length [buda::output]] > 0}]"
+        buda::stop
+    """)
+    assert "wait=OK running=0 bg=1" in out, out
+    assert "output-whole=1" in out, out
+
+
+def test_a_dying_engine_finishes_the_async_request_as_dead(tmp_path):
+    """EOF finishes through _async_finish with the channel still in hand,
+    so the fileevent is removed and the pipe closed — a dead engine is one
+    DEAD callback, not a storm of readable events on an empty handle.
+
+    The engine must die MID-command (a fast command wins the race and
+    finishes OK before the kill lands), so the async runs a many-line
+    source whose reply cannot have been sent yet."""
+    with (tmp_path / "slow.buda").open("w") as f:
+        for i in range(60000):
+            x = (i % 1000) * 20
+            y = (i // 1000) * 20
+            f.write(f"add_block b{i} {x} {y} {x + 10} {y + 10}\n")
+    out = _tcl(tmp_path, """
+        proc bgerror {msg} { incr ::bg }
+        set ::bg 0
+        set pid [lindex [pid $buda::fh] 0]
+        buda::async {source slow.buda} -done {apply {{status output} {
+            puts "done=$status"
+        }}}
+        after 300 { exec kill -9 $pid }
+        set st [buda::wait]
+        after 100 {set ::poked 1}; vwait ::poked   ;# let any storm fire
+        update
+        puts "wait=$st bg-storm=$::bg"
+    """)
+    assert "done=DEAD" in out, out
+    assert "wait=DEAD" in out, out
+    assert "bg-storm=0" in out, out
+
+
+@pytest.mark.skipif(os.name != "posix", reason="needs POSIX signals")
+def test_a_cancel_that_races_completion_does_not_kill_the_server():
+    """SIGINT deferred past the final frame (or arriving while the server
+    is idle) has nothing left to cancel: the server drops it and answers
+    the next request, rather than dying right after the client read an
+    apparently successful reply."""
+    import signal
+    import time
+    p = subprocess.Popen([sys.executable,
+                          str(_ROOT / "tools" / "buda_server.py")],
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, encoding="utf-8")
+    def ask(req):
+        p.stdin.write(req + "\n")
+        p.stdin.flush()
+        header = p.stdout.readline().split()
+        payload = p.stdout.read(int(header[1])) if int(header[1]) else ""
+        return header[0], payload
+    assert ask("__query blocks") == ("OK", "0")
+    p.send_signal(signal.SIGINT)         # the too-late cancel, mid-idle
+    time.sleep(0.2)
+    assert ask("__query blocks") == ("OK", "0"), "the late SIGINT killed it"
+    assert ask("__exit")[0] == "BYE"
+    p.wait(timeout=30)

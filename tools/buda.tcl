@@ -241,17 +241,31 @@ proc buda::_async_finish {status} {
         catch {fileevent $fh readable {}}
         catch {fconfigure $fh -blocking 1}
     }
-    if {$status in {BYE FATAL}} {
+    # DEAD closes too: the engine is gone, and an EOF-ready channel left
+    # open keeps rescheduling the reader against a dead pipe.
+    if {$status in {BYE FATAL DEAD}} {
         catch {close $fh}
         set fh ""
     }
     set async_status $status
-    if {$async_cb ne ""} {
-        uplevel #0 [linsert $async_cb end $status $output]
-    }
-    # Set LAST: buda::wait's vwait returns here, and the callback above must
-    # have run by then.
+    # Completion is recorded BEFORE the callback: the callback may issue
+    # sync commands against the finished session or launch the next async,
+    # both of which the in-flight guard would otherwise refuse — and a
+    # raising callback must not leave buda::running true forever.  The
+    # buda::wait guarantee survives the reorder for free: vwait cannot
+    # resume until this event handler RETURNS, which is after the callback.
     set async_done $status
+    if {$async_cb ne ""} {
+        # Caught, not propagated, for the same reason as in _on_readable:
+        # this runs inside the fileevent handler, and if the callback
+        # launched the NEXT async (legal — completion is recorded above),
+        # a raise here would make Tcl delete the channel's CURRENT
+        # readable handler, i.e. the new request's.  The error still
+        # reaches bgerror, from idle time.
+        if {[catch {uplevel #0 [linsert $async_cb end $status $output]} m o]} {
+            after idle [list ::buda::_rethrow $m $o]
+        }
+    }
 }
 
 proc buda::_on_readable {} {
@@ -263,14 +277,13 @@ proc buda::_on_readable {} {
     variable async_status
     # Assemble frames from whatever arrived; a header or payload may be
     # split across reads, so this is a small resumable state machine.
+    # The EOF branches finish through _async_finish with fh still set —
+    # clearing it first would leave the fileevent registered and the
+    # channel open, so the dead pipe keeps rescheduling this reader.
     while {1} {
         if {$async_mode eq "header"} {
             if {[gets $fh line] < 0} {
-                if {[eof $fh]} {
-                    set fh ""
-                    buda::_async_finish DEAD
-                    return
-                }
+                if {[eof $fh]} { buda::_async_finish DEAD }
                 return                          ;# partial line -- wait
             }
             set async_status [lindex $line 0]
@@ -283,22 +296,37 @@ proc buda::_on_readable {} {
             append async_buf $got
             set async_need [expr {$async_need - [string length $got]}]
             if {$async_need > 0} {
-                if {[eof $fh]} {
-                    set fh ""
-                    buda::_async_finish DEAD
-                }
+                if {[eof $fh]} { buda::_async_finish DEAD }
                 return                          ;# more payload to come
             }
         }
-        # One whole frame.
-        append output $async_buf
-        buda::_deliver $async_buf
+        # One whole frame.  The parser advances BEFORE the chunk is
+        # delivered, and a raising progress callback is caught and
+        # re-raised from an IDLE callback rather than propagated: Tcl
+        # DELETES a fileevent handler whose script errors, which would
+        # silently unsubscribe this reader and hang the request forever —
+        # the error still reaches bgerror (the event-loop convention), the
+        # frame is never delivered twice, and a final frame still
+        # finishes.
+        set st $async_status
+        set chunk $async_buf
         set async_mode header
-        if {$async_status ne "OUT"} {
-            buda::_async_finish $async_status
+        set async_buf ""
+        append output $chunk
+        if {[catch {buda::_deliver $chunk} dmsg dopts]} {
+            after idle [list ::buda::_rethrow $dmsg $dopts]
+        }
+        if {$st ne "OUT"} {
+            buda::_async_finish $st
             return
         }
     }
+}
+
+# Re-raise a deferred callback error at idle time, where an error reaches
+# bgerror without costing an event subscription.
+proc buda::_rethrow {msg opts} {
+    return -options $opts $msg
 }
 
 # ── the wire ───────────────────────────────────────────────────────────────

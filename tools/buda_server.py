@@ -335,10 +335,24 @@ class Server:
 
     def serve(self, inp=None):
         inp = inp or sys.stdin
-        for line in inp:
-            if not self.handle(line):
-                return 0
-        return 0
+        while True:
+            try:
+                line = inp.readline()
+                if not line:
+                    return 0
+                if not self.handle(line):
+                    return 0
+            except KeyboardInterrupt:
+                # A cancel that raced its command's COMPLETION: the SIGINT
+                # was deferred while the final frame went out (or arrived
+                # while the server sat idle between requests), so there is
+                # nothing left to cancel — the command finished and its
+                # reply was sent.  handle() only converts an interrupt to
+                # ERR while a command is RUNNING; here the late interrupt
+                # would escape and kill the server right after the client
+                # read an apparently successful reply (Codex P2 on #680).
+                # Dropping it is the correct semantics of "too late".
+                continue
 
 
 def main(argv=None):
