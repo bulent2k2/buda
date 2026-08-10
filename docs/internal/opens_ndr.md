@@ -103,17 +103,6 @@ arithmetic, worth doing only for a design that demonstrably needs it.
 
 ## Smaller residuals
 
-### Shield POSITION is only validated for `shield bus`
-
-`check_design`'s `NDR_SHIELD` compares the placed shield **count** against the
-rule's layout for every mode, and additionally checks that the two shields are
-the run's outermost wires for `shield bus`. Under `shield bit` and
-`shield per:N` a same-count shield sitting in the wrong gap is not caught.
-(Raised in review of PR #636; the docs state the narrower guarantee rather
-than implying a full arrangement audit.) Adding positional validation for
-those modes is a contained change to `audit_ndr_dnuts` — walk the credited
-layout and compare role-by-role against the sorted placed rows.
-
 ### The cull-risk predictor fix has no dedicated test
 
 `_escalate_dead_low_segments(cull_risk=True)` now excludes shield rows from

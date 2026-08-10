@@ -503,8 +503,16 @@ void bind_db(py::module_& m) {
         .def_readonly("unresolved_conns",
                       &VerilogImportStats::unresolved_conns);
 
-    m.def("read_def",  &read_def,  py::arg("path"));
-    m.def("parse_def", &parse_def, py::arg("text"), py::arg("where") = "<text>");
+    // The sink overloads are C++-internal (import_def_lef's streaming path);
+    // Python keeps the buffered forms.
+    m.def("read_def",
+          static_cast<DefDesign (*)(const std::string&)>(&read_def),
+          py::arg("path"));
+    m.def("parse_def",
+          [](std::string text, const std::string& where) {
+              return parse_def(std::move(text), where);
+          },
+          py::arg("text"), py::arg("where") = "<text>");
 
     m.def("read_lef",  &read_lef,  py::arg("path"));
     m.def("parse_lef", &parse_lef, py::arg("text"), py::arg("where") = "<text>");

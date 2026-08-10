@@ -304,12 +304,18 @@ void read_specialnet(const std::vector<std::string>& t, DefDesign& d,
 
 }  // namespace
 
-DefDesign parse_def(std::string text, const std::string& where) {
+DefDesign parse_def(std::string text, const std::string& where,
+                    const DefStreamSink* sink) {
     DefDesign d;
     LefDefLexer lx(std::move(text), where);
     std::vector<std::string> st;
     std::string section;                 // the open `… END <section>` block
     int line = 0;
+    // True once any entry has been handed to the sink: past this point a
+    // UNITS statement is a hard error (see DefStreamSink in def_io.h) —
+    // delivered coordinates were converted under the divisor in force at
+    // delivery, and re-stating it cannot be applied retroactively.
+    bool streamed_any = false;
 
     auto entries_of = [&](const std::string& sec, int& count,
                           const std::function<void(const std::vector<std::string>&,
@@ -364,12 +370,22 @@ DefDesign parse_def(std::string text, const std::string& where) {
             if (kw0 == "COMPONENTS") {
                 d.declared_components = n;
                 entries_of("COMPONENTS", seen, [&](const auto& e, int l) {
-                    d.components.push_back(read_component(e, lx, d, l));
+                    if (sink && sink->component) {
+                        sink->component(d, read_component(e, lx, d, l));
+                        streamed_any = true;
+                    } else {
+                        d.components.push_back(read_component(e, lx, d, l));
+                    }
                 });
             } else if (kw0 == "NETS") {
                 d.declared_nets = n;
                 entries_of("NETS", seen, [&](const auto& e, int l) {
-                    d.nets.push_back(read_net(e, lx, d, l));
+                    if (sink && sink->net) {
+                        sink->net(d, read_net(e, lx, d, l));
+                        streamed_any = true;
+                    } else {
+                        d.nets.push_back(read_net(e, lx, d, l));
+                    }
                 });
             } else if (kw0 == "PINS") {
                 d.declared_pins = n;
@@ -443,6 +459,11 @@ DefDesign parse_def(std::string text, const std::string& where) {
             d.design = st[1];
         } else if (kw == "UNITS" && st.size() >= 4 &&
                    upper(st[1]) == "DISTANCE" && upper(st[2]) == "MICRONS") {
+            if (streamed_any)
+                lx.fail("UNITS DISTANCE MICRONS after a streamed COMPONENTS/"
+                        "NETS entry — entries already delivered to the "
+                        "streaming consumer were converted under the previous "
+                        "scale, and DEF 5.8 puts UNITS in the header");
             if (is_number(st[3], v)) d.units = static_cast<int>(v);
         } else if (kw == "DIEAREA") {
             std::vector<double> nums;
@@ -498,6 +519,11 @@ DefDesign parse_def(std::string text, const std::string& where) {
 }
 
 DefDesign read_def(const std::string& path) {
+    DefStreamSink no_sink;
+    return read_def(path, no_sink);
+}
+
+DefDesign read_def(const std::string& path, const DefStreamSink& sink) {
     std::ifstream f(path, std::ios::binary);
     if (!f) throw std::runtime_error("read_def: cannot open " + path);
     // ONE buffer.  The `ostringstream` this replaces held the file, `.str()`
@@ -505,15 +531,11 @@ DefDesign read_def(const std::string& path) {
     // a DEF that can be gigabytes (Codex P1 on #649).  Sizing the string up
     // front and moving it into the parser leaves exactly one.
     //
-    // This does NOT make the reader streaming, and the honest reason is that
-    // the text is not the dominant term: measured on a 19.7 MB / 1.02M-line
-    // DEF the whole parse peaks at ~115 MB, of which the parsed model — 340k
-    // components at ~220 B each — is most of it.  True streaming means
-    // inserting rows as they parse, which `import_def_lef` currently cannot
-    // do (it walks `def.components` a second time for macro OBS, and net
-    // resolution needs the name index).  Recorded as the follow-up it is,
-    // with the ceiling stated rather than implied: budget roughly 6x the
-    // file size.
+    // With a sink attached, that one text buffer IS the dominant term: the
+    // parsed model's big vectors (components, nets — ~220 B per component on
+    // a real post-place DEF) are handed to the sink entry by entry instead
+    // of being retained (opens_interchange.md item 5).  Sink-less, the full
+    // DefDesign is built exactly as before.
     std::string text;
     f.seekg(0, std::ios::end);
     const std::streamoff n = f.tellg();
@@ -528,7 +550,8 @@ DefDesign read_def(const std::string& path) {
         ss << f.rdbuf();
         text = ss.str();
     }
-    return parse_def(std::move(text), path);
+    const bool streaming = sink.component || sink.net;
+    return parse_def(std::move(text), path, streaming ? &sink : nullptr);
 }
 
 }  // namespace buda

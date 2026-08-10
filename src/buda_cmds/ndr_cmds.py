@@ -1093,8 +1093,11 @@ def audit_ndr_dnuts(session, wrapper, index=None):
       accounting DNUTS admission uses), not the surviving placed bits: a
       keepout-culled SIGNAL bit is already reported UNPLACED and must not
       re-shape the expected shield arrangement into a spurious mismatch,
-      while a culled/skipped SHIELD is LOUD, not silent.  For flank-the-bus
-      the two shields must be the OUTERMOST rows of the run.
+      while a culled/skipped SHIELD is LOUD, not silent.  On a FULL run
+      (no cull) the ARRANGEMENT is checked too, for every mode: the placed
+      rows in ascending track order must play the roles the credited layout
+      declares, so a right-COUNT shield sitting in the wrong gap is caught
+      — the case `bit` and `per:N` were blind to before (opens_ndr.md).
     - NDR_WIDTH: each signal bit's placed extent must cover width_slots
       SIGNAL slot centres on its layer (an under-width wire — e.g. a
       default-width placement of a governed bit — covers fewer).
@@ -1159,19 +1162,41 @@ def audit_ndr_dnuts(session, wrapper, index=None):
                 f"{exp_shields} shield wire(s) (net {spec.shield_net})"
                 f"{credited} but {len(shields)} are placed — the bus is "
                 f"not shielded as declared"))
-        elif spec.shield_mode == 1:
-            # Flank-the-bus: each UNCREDITED end's outermost row must be a
-            # shield (a credited end's outermost row is a bit, guarded by
-            # the adjacent rail _ndr_end_credit verified).
-            lo = min(rows, key=lambda r: r.track_position)
-            hi = max(rows, key=lambda r: r.track_position)
-            if (not c_lo and not lo.is_shield) or \
-               (not c_hi and not hi.is_shield):
-                out.append(_NdrViolation(
-                    "NDR_SHIELD", seg_idx, -1,
-                    f"NDR_SHIELD: seg {seg_idx} rule '{spec.rule_name}' "
-                    f"(flank-the-bus) shields are not the outermost wires "
-                    f"of the run — a signal bit sits outside the shield"))
+        elif len(bits) == nb_intended:
+            # ARRANGEMENT: the placed rows, read in ascending track order,
+            # must play the roles the layout declares.  The layout is the
+            # run slot by slot ('B' a bit's first slot, 'b' a continuation
+            # slot of the same wire, 'S' a shield, 'G' a reserved-empty
+            # guard), so the rows it predicts are its 'B' and 'S' entries in
+            # order — one row each, 'b'/'G' materializing none.  Comparing
+            # that against the sorted rows' is_shield flags catches a
+            # right-COUNT shield sitting in the wrong gap, which the count
+            # test above cannot see: under `bit` and `per:N` a shield
+            # swapped with an adjacent bit keeps every total intact
+            # (opens_ndr.md, raised in review of #636).  For `shield bus`
+            # this subsumes the old outermost-wires check exactly — its
+            # layout is S…S, so role 0 and role -1 are the shields.
+            #
+            # Guarded on a FULL run: a keepout cull removes bits, and the
+            # surviving rows then legitimately fail a positional match
+            # against the intended layout.  The cull is already LOUD as
+            # UNPLACED, and the count test above stays on intended
+            # membership either way.
+            expect = [ch for ch in layout if ch in "BS"]
+            placed = sorted(rows, key=lambda r: r.track_position)
+            if len(expect) == len(placed):
+                bad = next((i for i, (ch, r) in enumerate(zip(expect, placed))
+                            if (ch == "S") != r.is_shield), -1)
+                if bad >= 0:
+                    got = "".join("S" if r.is_shield else "B" for r in placed)
+                    out.append(_NdrViolation(
+                        "NDR_SHIELD", seg_idx, -1,
+                        f"NDR_SHIELD: seg {seg_idx} rule '{spec.rule_name}' "
+                        f"expects the run to read {''.join(expect)} in "
+                        f"ascending track order but it reads {got} (first "
+                        f"mismatch at position {bad}){credited} — the "
+                        f"shields are placed, but not in the gaps the rule "
+                        f"declares"))
         # R6 bonding: every EMITTED shield of a `bond` rule must carry at
         # least one strap to the power grid.  A shield with none is metal
         # at the right track and the right net NAME with nothing tying it

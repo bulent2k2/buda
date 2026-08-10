@@ -1158,3 +1158,97 @@ def test_r9_unbondable_shield_is_loud():
         _run(ok, line.replace("VDD 2 1", "GND 2 1"))
     assert ok.detailed_result.n_shield_bond_vias > 0
     assert "NDR_BOND" not in _audited(ok)
+
+
+# ── NDR_SHIELD arrangement, all modes (opens_ndr.md smaller residual) ──────
+# The count check alone is blind to a right-COUNT shield in the wrong gap,
+# which is the whole failure mode under `bit` / `per:N`.  The audit now
+# walks the credited layout role-by-role against the ascending placed rows.
+
+def _swap_two_rows(session, bid, i, j):
+    """Exchange the track positions of the i-th and j-th rows (ascending)
+    of a bundle's placed run — a same-count, wrong-arrangement mutation."""
+    dr = session.detailed_result
+    rows = sorted((ns for ns in dr.net_segments if ns.bundle_id == bid),
+                  key=lambda r: r.track_position)
+    a, b = rows[i], rows[j]
+    moved = {id(a): b.track_position, id(b): a.track_position}
+    out = []
+    for ns in dr.net_segments:
+        out.append(_ns_copy(ns, track_position=moved[id(ns)])
+                   if id(ns) in moved else ns)
+    dr.net_segments = out
+
+
+def _governed_bid(s):
+    return next(w.input.original_bundle.id for w in s.bundles
+                if w.input.ndr.active())
+
+
+def test_r9_shield_in_the_wrong_gap_is_loud_under_shield_bit():
+    # `shield bit` lays out S B S B S B S B S.  Swapping the first shield
+    # with the first bit keeps 5 shields and 4 bits — the count check sees
+    # nothing — but the run now opens on a signal wire.
+    s, _ = _flow(["def_ndr clkb width x2 shield bit net GND",
+                  "set_ndr clk_ clkb"])
+    bid = _governed_bid(s)
+    assert "NDR_SHIELD" not in _audited(s)      # clean before the mutation
+    _swap_two_rows(s, bid, 0, 1)
+    out = _audited(s)
+    assert "NDR_SHIELD" in out
+    assert "not in the gaps the rule declares" in out
+
+
+def test_r9_shield_in_the_wrong_gap_is_loud_under_shield_per_n():
+    # `per:2` puts a shield after every 2nd bit, plus both ends: S B B S B B S.
+    # Swapping the interior shield with its neighbouring bit is invisible to
+    # every total the old audit computed.
+    s, _ = _flow(["def_ndr clkp width x2 shield per:2 net GND",
+                  "set_ndr clk_ clkp"])
+    bid = _governed_bid(s)
+    assert "NDR_SHIELD" not in _audited(s)
+    _swap_two_rows(s, bid, 2, 3)
+    assert "NDR_SHIELD" in _audited(s)
+
+
+def test_r9_arrangement_check_subsumes_flank_the_bus():
+    # The old check was outermost-rows-only for `shield bus`; the layout walk
+    # must still catch exactly that (S B B S -> B S B S opens on a bit).
+    s, _ = _flow(["def_ndr clk2x width x2 spacing x2 shield bus net GND",
+                  "set_ndr clk_ clk2x"])
+    bid = _governed_bid(s)
+    assert "NDR_SHIELD" not in _audited(s)
+    _swap_two_rows(s, bid, 0, 1)
+    assert "NDR_SHIELD" in _audited(s)
+
+
+def test_r9_arrangement_names_the_expected_and_actual_runs():
+    # The message must be diagnosable: both role strings and where they
+    # first differ, not just "wrong".
+    s, _ = _flow(["def_ndr clkb width x2 shield bit net GND",
+                  "set_ndr clk_ clkb"])
+    _swap_two_rows(s, _governed_bid(s), 0, 1)
+    s.verbose_conn = True                 # print the literal, not the digest
+    out = _run(s, "check_design dnuts")
+    assert "expects the run to read SBSBSBSBS" in out, out
+    assert "but it reads BSSBSBSBS" in out, out
+    assert "first mismatch at position 0" in out, out
+
+
+def test_r9_arrangement_is_skipped_on_a_culled_run():
+    # A keepout cull removes bits, so the surviving rows legitimately fail a
+    # positional match against the INTENDED layout.  The cull is already
+    # LOUD as UNPLACED; the arrangement walk must not pile a spurious
+    # NDR_SHIELD on top of it (the guard that keeps #622's fix intact).
+    s, _ = _flow(["def_ndr clkb width x2 shield bit net GND",
+                  "set_ndr clk_ clkb"])
+    dr = s.detailed_result
+    bid = _governed_bid(s)
+    kept, dropped = [], False
+    for ns in dr.net_segments:
+        if not dropped and ns.bundle_id == bid and not ns.is_shield:
+            dropped = True
+            continue
+        kept.append(ns)
+    dr.net_segments = kept
+    assert "NDR_SHIELD" not in _audited(s)
