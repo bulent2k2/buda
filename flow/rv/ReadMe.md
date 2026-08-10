@@ -208,11 +208,30 @@ bin/buda flow/rv/soc_divergent    # soc.buda with one token changed
 | abstract WL | 31,234,654 | 19,104,008 (−38.8%) |
 | detailed WL | 409,819,470 | 430,511,600 (+5.0%) |
 
-Both clean, 0 unplaced. Two scripts rather than one changed script because
-both numbers are real: the abstract win is a fan-out tree sharing a trunk
-where 32 bundles each reserved their own, the detailed cost is what that
-tree pays to reach scattered leaves. Which one a design wants is the
-design's call. See
+Both clean, 0 unplaced.
+
+**And this design is also why you can name more than one relation.** `boot`
+and `dbg` are the same bus shape in opposite directions, so CONVERGENT
+bundles one and splits the other and DIVERGENT does the mirror — neither
+gets both, and `COMBINED` is conv+bidir so it does not either. Naming the
+set does:
+
+```bash
+bin/buda flow/rv/soc_conv_div     # run_hier_bundler depth 4 CONVERGENT DIVERGENT
+```
+
+| script | strategy | bundles | abstract WL | detailed WL |
+|---|---|---|---|---|
+| `soc.buda` | STRICT | 127 | 31,234,654 | 409,819,470 |
+| — | CONVERGENT | 89 | 29,771,517 | 464,297,620 |
+| `soc_divergent.buda` | DIVERGENT | 78 | 19,104,008 | 430,511,600 |
+| `soc_conv_div.buda` | CONVERGENT DIVERGENT | 40 | 16,766,857 | 472,522,550 |
+
+Every one ends clean with 0 unplaced bits. Separate scripts rather than one
+changed script because every one of those numbers is real: the more you
+bundle, the more trunk is shared (abstract WL, down 46% at the join) and
+the further each tree reaches to its leaves (detailed WL, up 15%). Which
+point on that curve a design wants is the design's call. See
 [`opens_interchange.md`](../../docs/internal/opens_interchange.md) item 11.
 
 ## Known limits

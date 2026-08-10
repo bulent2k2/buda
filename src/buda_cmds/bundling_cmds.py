@@ -115,7 +115,7 @@ def _bundle_bit_cap(session, nets):
     return (None if best == 0 else best), True
 
 
-def _generalized_bundles(session, strategy):
+def _generalized_bundles(session, strategy, relations=None):
     """Union-find partition of the netlist under the strategy's relations ∩
     per-net permissions.  Reproduces the pure C++ partitions exactly when
     unrestricted (the equivalence tests pin this), and computes the JOIN
@@ -140,7 +140,10 @@ def _generalized_bundles(session, strategy):
         if ra != rb:
             parent[rb] = ra
 
-    strat_rels = _STRATEGY_RELATIONS[strategy]
+    # `relations` is the JOIN when several strategy tokens were named; a
+    # single token falls back to that strategy's own set (unchanged).
+    strat_rels = (frozenset(relations) if relations is not None
+                  else _STRATEGY_RELATIONS[strategy])
     by_sig = {}
     for n in names:
         drv, rcvs = eps[n]
@@ -671,11 +674,21 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
                            [a for a in args if a.startswith("--")], ("--dump",))
     dump = "--dump" in args
     pos = [a for a in args if not a.startswith("--")]
-    strat_arg = pos[0].upper() if pos else "STRICT"
-    if strat_arg not in ("STRICT", "CONVERGENT", "DIVERGENT",
-                         "BIDIRECTIONAL", "COMBINED"):
-        print(f"Error: run_bundler strategy must be STRICT, CONVERGENT, "
-              f"DIVERGENT, BIDIRECTIONAL or COMBINED, got '{pos[0]}'"); return
+    toks = [a.upper() for a in pos] or ["STRICT"]
+    known = ("STRICT", "CONVERGENT", "DIVERGENT", "BIDIRECTIONAL", "COMBINED")
+    for tk in toks:
+        if tk not in known:
+            print(f"Error: run_bundler strategy must be STRICT, CONVERGENT, "
+                  f"DIVERGENT, BIDIRECTIONAL or COMBINED, got '{tk}'"); return
+    # SEVERAL tokens = the JOIN of their relations, for a design carrying
+    # more than one shape (see run_hier_bundler).  One token is unchanged.
+    if len(toks) != len(set(toks)):
+        print(f"Error: run_bundler: repeated strategy in {', '.join(toks)}")
+        return
+    if "STRICT" in toks and len(toks) > 1:
+        print("Error: run_bundler: STRICT names no relation, so it cannot be "
+              "joined with another — drop it"); return
+    strat_arg = toks[0]
     if strat_arg == "CONVERGENT":
         # CONVERGENT groups nets by shared receiver only, so a bundle can
         # span several DIFFERENT driver blocks at different locations (a
@@ -722,12 +735,19 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
         session.bundler.set_strategy(buda.Strategy.STRICT)
 
     overrides = getattr(session, "_bundling_overrides", None) or {}
-    if strat_arg == "COMBINED" or overrides:
+    joined = set()
+    for tk in toks:
+        joined |= _STRATEGY_RELATIONS[tk]
+    if len(toks) > 1:
+        print(f"[Bundler] {' + '.join(sorted(toks))}: the JOIN of "
+              f"{', '.join(sorted(joined))} — nets merge through a CHAIN of "
+              f"any of them.")
+    if len(joined) > 1 or overrides:
         # Generalized Python path: COMBINED needs the union-find join, and
         # per-prefix overrides need per-net permissions the C++ signature
         # grouping has no channel for.  Equivalence to the pure C++ modes
         # when unrestricted is pinned by test_bundler_combined.py.
-        raw_bundles = _generalized_bundles(session, strat_arg)
+        raw_bundles = _generalized_bundles(session, strat_arg, joined)
     else:
         raw_bundles = session.bundler.run(session.netlist)
     raw_bundles = _split_oversized_bundles(session, raw_bundles)
@@ -751,7 +771,8 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
     print(f"Bundler created {len(session.bundles)} hbundles.")
     if dump:
         _dump_flat_bundles(session.bundles)
-    session._bundler_strategy = strat_arg
+    session._bundler_strategy = ("+".join(sorted(toks)) if len(toks) > 1
+                                 else strat_arg)
     n = session._persist_bundles(strat_arg)
     if n:
         print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
@@ -893,8 +914,18 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     reject_unknown_options("run_hier_bundler", strat_toks,
                            ("STRICT", "CONVERGENT", "DIVERGENT",
                             "BIDIRECTIONAL", "COMBINED"))
-    if len(strat_toks) > 1:
-        print(f"Error: run_hier_bundler: at most one strategy, got "
+    # SEVERAL strategy tokens = the JOIN of their relations.  A design can
+    # carry more than one shape at once — flow/rv takes a 32-bit bus IN from
+    # 32 pads and sends another OUT to 32 pads — and no single strategy
+    # bundles both.  `run_hier_bundler CONVERGENT DIVERGENT` asks for the
+    # set; one token behaves exactly as before.
+    if "STRICT" in strat_toks and len(strat_toks) > 1:
+        print(f"Error: run_hier_bundler: STRICT names no relation, so it "
+              f"cannot be joined with {', '.join(t for t in strat_toks if t != 'STRICT')}"
+              f" — drop it (STRICT is what you get with no relation at all)")
+        return
+    if len(strat_toks) != len(set(strat_toks)):
+        print(f"Error: run_hier_bundler: repeated strategy in "
               f"{', '.join(strat_toks)}"); return
     strat = strat_toks[0] if strat_toks else "STRICT"
     hb = buda.HierarchicalBundler(session.bdb)
@@ -907,6 +938,16 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     # applies to SAME-LEVEL and CROSS-LEVEL groups alike (a cross-level
     # fan-in roots at the shared sink with each deep driver as a leaf).
     hb.set_strategy(getattr(buda.Strategy, strat))
+    rels = set()
+    for tok in strat_toks:
+        rels |= _STRATEGY_RELATIONS[tok]
+    if len(strat_toks) > 1:
+        hb.set_relations("conv" in rels, "div" in rels, "bidir" in rels)
+        print(f"[HierBundler] {' + '.join(sorted(strat_toks))}: the JOIN of "
+              f"{', '.join(sorted(rels))} — nets merge through a CHAIN of any "
+              f"of them (union-find).  A group reached by several relations "
+              f"has several drivers AND several receiver sets; it routes as "
+              f"one per-bit tapered tree, rooted deterministically.")
     overrides = getattr(session, "_bundling_overrides", None) or {}
     if overrides:
         hb.set_bundling_overrides(sorted(overrides.items()))
@@ -969,8 +1010,12 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
         print(f"  Warning: {len(dropped)} net(s) not placed in any bundle "
               f"(possibly UNKNOWN direction or missing receiver): "
               f"{', '.join(shown)}{ellipsis_str}")
-    session._bundler_strategy = strat
-    n = session._persist_bundles(strat)
+    # Persist the whole SET, in a canonical order — the first token alone
+    # describes a join incompletely, and its identity would depend on the
+    # order someone typed the tokens (Codex P2 on #676).
+    strat_label = "+".join(sorted(strat_toks)) if len(strat_toks) > 1 else strat
+    session._bundler_strategy = strat_label
+    n = session._persist_bundles(strat_label)
     if n:
         print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
 

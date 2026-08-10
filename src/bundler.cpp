@@ -123,17 +123,20 @@ std::string HierarchicalBundler::_bidir_sig(std::vector<std::string> all_names) 
 std::string HierarchicalBundler::_sig(
         const std::string& drv_name,
         const std::vector<std::string>& sorted_rcv_names) const {
-    if (_strategy == Strategy::BIDIRECTIONAL) {
+    // Only reached on the single-relation (non-general) path, so the tests
+    // below are mutually exclusive; asked through _rel() so an explicit
+    // one-relation SET picks the same key its named strategy would.
+    if (_rel("bidir")) {
         std::vector<std::string> all = sorted_rcv_names;
         all.push_back(drv_name);
         return _bidir_sig(std::move(all));
     }
-    if (_strategy == Strategy::CONVERGENT) {
+    if (_rel("conv")) {
         std::string sig = "REC:";
         for (const auto& n : sorted_rcv_names) { sig += n; sig += ','; }
         return sig;
     }
-    if (_strategy == Strategy::DIVERGENT) {
+    if (_rel("div")) {
         // The mirror of CONVERGENT: group by the shared DRIVER, receivers
         // ignored.  The "DRV:" prefix is never emitted as a bundle REASON
         // (the fan-out emission below writes FANOUT:…), exactly as the
@@ -608,8 +611,9 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
             // switches to the union-find join so a strict-equivalent bus stays
             // bundled (a per-net key would fragment it when a prefix disables
             // one relation for only some of its bits).
-            const bool general = (_strategy == Strategy::COMBINED)
-                                 || !_overrides.empty();
+            // >1 relation asked for (COMBINED, or an explicit set) needs the
+            // union-find join; so does any override, which is per-net.
+            const bool general = _n_relations() > 1 || !_overrides.empty();
             std::vector<std::vector<int>> xl_groups;
             if (!general) {
                 // Single-relation, override-free strategies: the historical sig
@@ -624,13 +628,13 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                     { auto nit = net_name.find(net_id);
                       if (nit != net_name.end()) nm = &nit->second; }
                     std::string xsig;
-                    if (_strategy == Strategy::CONVERGENT &&
+                    if (_rel("conv") &&
                         (!nm || _net_allows(*nm, "conv"))) {
                         xsig = rcv_set_sig(sorted_rcv);
-                    } else if (_strategy == Strategy::DIVERGENT &&
+                    } else if (_rel("div") &&
                                (!nm || _net_allows(*nm, "div"))) {
                         xsig = drv_sig(info.drv_spec_path);
-                    } else if (_strategy == Strategy::BIDIRECTIONAL &&
+                    } else if (_rel("bidir") &&
                                (!nm || _net_allows(*nm, "bidir"))) {
                         std::vector<std::string> all = sorted_rcv;
                         all.push_back(info.drv_spec_path);
@@ -649,11 +653,9 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 // permissions; conv/bidir keys merge only when the strategy
                 // enables that relation AND the net permits it.  Mirrors the
                 // same-level general path exactly.
-                const bool strat_conv  = (_strategy == Strategy::CONVERGENT ||
-                                          _strategy == Strategy::COMBINED);
-                const bool strat_bidir = (_strategy == Strategy::BIDIRECTIONAL ||
-                                          _strategy == Strategy::COMBINED);
-                const bool strat_div   = (_strategy == Strategy::DIVERGENT);
+                const bool strat_conv  = _rel("conv");
+                const bool strat_bidir = _rel("bidir");
+                const bool strat_div   = _rel("div");
                 std::map<int, int> parent;
                 for (int n : xl_nets) parent[n] = n;
                 std::function<int(int)> find = [&](int x) {
@@ -725,7 +727,7 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 // below.  Gated on the strategy that can produce the group, so
                 // every other strategy is byte-identical.
                 bool xl_fanout = false;
-                if (_strategy == Strategy::DIVERGENT && drv_set.size() == 1) {
+                if (_rel("div") && drv_set.size() == 1) {
                     std::set<std::vector<std::string>> rcv_sets;
                     for (int nid : net_ids) {
                         auto rs = net_leaf.at(nid).rcv_spec_paths;
@@ -810,7 +812,15 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                     const std::string* nm = nullptr;
                     { auto nit = net_name.find(net_ids[0]);
                       if (nit != net_name.end()) nm = &nit->second; }
-                    if (_strategy == Strategy::BIDIRECTIONAL &&
+                    // Asked of the relation SET, not the enum.  The enum
+                    // holds the FIRST token, so reading it here made the
+                    // emitted reason depend on the ORDER the tokens were
+                    // typed: `BIDIRECTIONAL CONVERGENT` wrote a BIDIR reason
+                    // where `CONVERGENT BIDIRECTIONAL` wrote a strict one for
+                    // the same bundle — 59 of them on flow/rv — and the
+                    // reason is what generation parses and what is persisted
+                    // (Codex P2 on #676).  A set has no order.
+                    if (_rel("bidir") &&
                         (!nm || _net_allows(*nm, "bidir"))) {
                         std::vector<std::string> all = sorted_rcv;
                         all.push_back(info0.drv_spec_path);
@@ -919,7 +929,7 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
         // partition is equal but bundles are ordered by smallest net name
         // instead of signature, so bundle IDs can differ.
         std::vector<std::pair<std::string, std::vector<int>>> groups;
-        const bool general = (_strategy == Strategy::COMBINED) ||
+        const bool general = _n_relations() > 1 ||
                              !_overrides.empty();
         if (!general) {
             std::map<std::string, std::vector<int>> sig_to_nets;
@@ -934,12 +944,11 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
                 return x;
             };
-            const bool strat_conv  = (_strategy == Strategy::CONVERGENT ||
-                                      _strategy == Strategy::COMBINED);
-            const bool strat_bidir = (_strategy == Strategy::BIDIRECTIONAL ||
-                                      _strategy == Strategy::COMBINED);
-            // DIVERGENT is deliberately NOT part of COMBINED (bundler.h).
-            const bool strat_div   = (_strategy == Strategy::DIVERGENT);
+            const bool strat_conv  = _rel("conv");
+            const bool strat_bidir = _rel("bidir");
+            // DIVERGENT is deliberately NOT part of COMBINED (bundler.h) —
+            // but an explicit relation SET may still ask for it alongside.
+            const bool strat_div   = _rel("div");
             std::map<std::string, int> by_sig;
             for (const auto& [net_id, dr] : ep_names) {
                 const std::string& nname = net_name.count(net_id)
@@ -1029,7 +1038,7 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
             // shared driver — so every other strategy stays byte-identical
             // (a one-driver differing-receiver group cannot arise elsewhere,
             // but the gate makes that a fact rather than an argument).
-            const bool fanout = !fanin && _strategy == Strategy::DIVERGENT &&
+            const bool fanout = !fanin && _rel("div") &&
                                 drivers.size() == 1 && !same_set;
 
             std::string sig;
