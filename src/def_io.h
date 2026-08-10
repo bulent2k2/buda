@@ -33,6 +33,7 @@
 
 #pragma once
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -166,10 +167,33 @@ struct DefDesign {
     std::vector<std::string> warnings;
 };
 
+// Streaming sink (opens_interchange.md item 5): when a callback is set, the
+// matching entries are handed over AS THEY PARSE and are NOT retained in the
+// returned DefDesign — components and nets are the two vectors that dominate
+// the parsed model's memory (~220 B per component on a real post-place DEF),
+// and they are exactly the two `import_def_lef` can consume one at a time.
+// Everything else (pins, tracks, blockages, NDRs, the census) is small and
+// stays buffered, so a sink-less call is byte-identical to before.
+//
+// Each callback also receives the DefDesign parsed SO FAR, because a
+// streaming consumer converts coordinates at delivery time and the divisor
+// is the header's `UNITS DISTANCE MICRONS` — which is why a UNITS statement
+// arriving AFTER a streamed entry is a hard parse error rather than a
+// warning: the entries already delivered were converted under the wrong
+// scale, and nothing downstream can repair that silently.  (The buffered
+// path keeps tolerating any order; DEF 5.8's own section order puts the
+// header first, so real files never hit this.)
+struct DefStreamSink {
+    std::function<void(const DefDesign&, DefComponent&&)> component;
+    std::function<void(const DefDesign&, DefNet&&)> net;
+};
+
 // Parse `path`.  Throws std::runtime_error with file:line on malformed input.
 DefDesign read_def(const std::string& path);
+DefDesign read_def(const std::string& path, const DefStreamSink& sink);
 // `text` is taken BY VALUE and moved into the lexer: a DEF can be gigabytes,
 // and a const-ref signature forced a second full-file copy at every call.
-DefDesign parse_def(std::string text, const std::string& where);
+DefDesign parse_def(std::string text, const std::string& where,
+                    const DefStreamSink* sink = nullptr);
 
 }  // namespace buda

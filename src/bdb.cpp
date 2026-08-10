@@ -1400,20 +1400,18 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     auto lef_sizes = _lef_cells(lef);
     auto lef_pins  = _lef_pins(lef);
 
-    // ONE parse of the DEF (Phase 3a).  The reader this replaces was a
-    // three-state line-at-a-time std::regex machine: a legal multi-line
-    // COMPONENTS entry was skipped rather than read, and per-line regex does
-    // not survive the 10^6..10^8 lines of a real post-place DEF.
-    const DefDesign def = read_def(def_path);
-    if (def.units > 0) _units = def.units;
-    stats.ndrs = def.ndrs;
-    stats.def_units = double(_units);
-    for (const auto& n : def.nets)
-        if (!n.nondefaultrule.empty())
-            stats.net_ndrs.push_back({n.name, n.nondefaultrule});
-
-    // Full design wipe incl. derived pipeline rows.
-    clear_design();
+    // ONE STREAMING parse of the DEF (Phase 3a; opens item 5 resolved).  The
+    // reader hands each COMPONENTS/NETS entry to the sink below as it parses
+    // — the two vectors that made the buffered model cost ~220 B per
+    // component are never built — and everything the sink needs mid-file is
+    // already in the database: a component row holds the cell and the
+    // layout-unit placement, and `component.name` is UNIQUE, so net
+    // resolution queries the index the table has anyway instead of an
+    // in-memory copy of the component list (the item's second and last
+    // blocker).  The design wipe therefore moves INSIDE the transaction,
+    // BEFORE the parse — and a malformed DEF ROLLS BACK, which preserves the
+    // old contract exactly: a parse error used to throw before clear_design
+    // ran, leaving the previous design intact, and it still must.
 
     Stmt s_comp(_db,
         "INSERT OR IGNORE INTO component(name,cell,depth,x1,y1,x2,y2,is_leaf,orient,is_port)"
@@ -1442,34 +1440,51 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     };
     Stmt s_find_comp(_db, "SELECT id FROM component WHERE name=?");
     Stmt s_find_net (_db, "SELECT id FROM net WHERE name=?");
+    // Net resolution's one indexed hit: everything a connection needs from
+    // its instance — the DB id, the cell (for the LEF pin offset), and the
+    // layout-unit placement.  This is the query that replaces the in-memory
+    // `comp_by_name` map over the full component list.
+    Stmt s_comp_info(_db,
+        "SELECT id, cell, x1, y1, x2 FROM component WHERE name=?");
 
     _exec("BEGIN");
+    // Full design wipe incl. derived pipeline rows — INSIDE the transaction,
+    // so a parse error below rolls it back (contract preserved: a malformed
+    // DEF leaves the previous design intact).
+    clear_design();
 
-    std::unordered_map<std::string,int> comp_id_cache, net_id_cache;
+    // Cacheless on purpose: the name→id caches this replaces re-grew a
+    // per-name map — the exact memory the streaming import exists to shed —
+    // and `component.name`/`net.name` are UNIQUE, so each miss is one b-tree
+    // probe on an index the table maintains anyway.
     auto get_comp_id = [&](const std::string& name) -> int {
-        auto it = comp_id_cache.find(name);
-        if (it != comp_id_cache.end()) return it->second;
         int id = -1;
         sqlite3_bind_text(s_find_comp, 1, name.c_str(), -1, SQLITE_TRANSIENT);
         if (sqlite3_step(s_find_comp) == SQLITE_ROW) id = sqlite3_column_int(s_find_comp, 0);
         sqlite3_reset(s_find_comp);
-        comp_id_cache[name] = id;
         return id;
     };
     auto get_net_id = [&](const std::string& name) -> int {
-        auto it = net_id_cache.find(name);
-        if (it != net_id_cache.end()) return it->second;
         int id = -1;
         sqlite3_bind_text(s_find_net, 1, name.c_str(), -1, SQLITE_TRANSIENT);
         if (sqlite3_step(s_find_net) == SQLITE_ROW) id = sqlite3_column_int(s_find_net, 0);
         sqlite3_reset(s_find_net);
-        net_id_cache[name] = id;
         return id;
     };
 
     // ── the ONE scale decision (docs/internal/engine_units.md) ───────────
     // DEF integers are DBU, LEF numbers are µm; both convert here and nowhere
-    // downstream.  In DBU mode dbu_to_lu is exactly 1.0.
+    // downstream.  In DBU mode dbu_to_lu is exactly 1.0.  Streaming converts
+    // at DELIVERY time, so the divisor is latched from the header on the
+    // first streamed entry — UNITS precedes the sections in DEF 5.8, and the
+    // reader hard-errors on a file that re-states it after an entry has
+    // streamed rather than let two scales into one import.
+    bool units_latched = false;
+    auto latch_units = [&](const DefDesign& d) {
+        if (units_latched) return;
+        if (d.units > 0) _units = d.units;
+        units_latched = true;
+    };
     auto dbu_to_lu = [&](double dbu) {
         return _lu_from_def_units ? dbu : dbu * _lu_per_um / double(_units);
     };
@@ -1477,16 +1492,12 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         return um * (_lu_from_def_units ? double(_units) : _lu_per_um);
     };
 
-    if (def.has_die) {
-        _die_w = dbu_to_lu(def.die.x2);
-        _die_h = dbu_to_lu(def.die.y2);
-    }
-
-    // ── COMPONENTS ───────────────────────────────────────────────────────
+    // ── COMPONENTS (streamed) ────────────────────────────────────────────
+    // One entry at a time from the reader: insert the row, then its HALO and
+    // macro OBS keepouts in the same visit — the component is never retained.
     std::set<std::string> missing;
-    std::set<std::string> comp_names;
-    for (const auto& c : def.components) comp_names.insert(c.name);
-    for (const auto& c : def.components) {
+    auto on_component = [&](const DefDesign& d, DefComponent&& c) {
+        latch_units(d);
         double w = 0, h = 0;
         auto cs = lef_sizes.find(c.cell);
         if (cs != lef_sizes.end()) {
@@ -1590,9 +1601,119 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
                          "OBS of " + c.name});
                 }
         }
+    };
+
+    // ── NETS (streamed) ──────────────────────────────────────────────────
+    // A connection resolves against the DATABASE: `s_comp_info` returns the
+    // instance's id, cell and layout-unit placement in one probe of the
+    // UNIQUE-name index, which is everything the old in-memory
+    // `comp_by_name` map supplied.  A connection that does not resolve yet
+    // is BUFFERED, not dropped: die-port conns always land here (their
+    // boundary components are synthesized from the PINS section after the
+    // parse), and so does every conn of a file whose NETS precede its
+    // COMPONENTS — the spec orders sections but the import's correctness
+    // must not hang on it.  The buffer holds only the unresolved conns, so
+    // it is empty on a well-ordered portless design.
+    struct PendingConn { int nid; std::string inst; std::string pin; bool port; };
+    std::vector<PendingConn> pending;
+    auto try_resolve_conn = [&](int nid, const std::string& inst,
+                                const std::string& pin) -> bool {
+        sqlite3_bind_text(s_comp_info, 1, inst.c_str(), -1, SQLITE_TRANSIENT);
+        const bool found = sqlite3_step(s_comp_info) == SQLITE_ROW;
+        int cid = -1; std::string cell; double x1 = -1, y1 = -1, x2 = -1;
+        if (found) {
+            cid  = sqlite3_column_int(s_comp_info, 0);
+            const unsigned char* ct = sqlite3_column_text(s_comp_info, 1);
+            cell = ct ? reinterpret_cast<const char*>(ct) : "";
+            x1   = sqlite3_column_double(s_comp_info, 2);
+            y1   = sqlite3_column_double(s_comp_info, 3);
+            x2   = sqlite3_column_double(s_comp_info, 4);
+        }
+        sqlite3_reset(s_comp_info);
+        if (!found) return false;
+        std::string dir = "UNKNOWN";
+        double ppx = -1, ppy = -1;
+        auto ci = lef_pins.find(cell);
+        if (ci != lef_pins.end()) {
+            auto pi = ci->second.find(pin);
+            if (pi != ci->second.end()) {
+                // DIRECTION comes from the cell, so it is known whether or
+                // not the instance is placed; the absolute POSITION is not.
+                // Unplaced is the stored -1,-1,-1,-1 convention — x1 and x2
+                // both exactly -1 cannot be a real placement (x2 = x1 + w
+                // with w > 0), while testing x1 alone would misread a
+                // legally negative placement.
+                dir = pi->second.dir;
+                const bool placed = !(x1 == -1 && x2 == -1);
+                if (placed) {
+                    ppx = x1 + um_to_lu(pi->second.ox);
+                    ppy = y1 + um_to_lu(pi->second.oy);
+                }
+            }
+        }
+        sqlite3_bind_int   (s_pin,1,nid);
+        sqlite3_bind_int   (s_pin,2,cid);
+        sqlite3_bind_text  (s_pin,3,pin.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_text  (s_pin,4,dir.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_double(s_pin,5,ppx);
+        sqlite3_bind_double(s_pin,6,ppy);
+        sqlite3_step(s_pin); sqlite3_reset(s_pin);
+        return true;
+    };
+    auto on_net = [&](const DefDesign& d, DefNet&& n) {
+        latch_units(d);
+        if (!n.nondefaultrule.empty())
+            stats.net_ndrs.push_back({n.name, n.nondefaultrule});
+        sqlite3_bind_text(s_net,1,n.name.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_step(s_net); sqlite3_reset(s_net);
+        const int nid = get_net_id(n.name);
+        if (nid < 0) return;
+        bind_net_props(nid, n.name);
+        ++stats.imported_nets;
+        for (auto& cn : n.conns) {
+            // A `( PIN <portName> )` connection names a die port — its
+            // boundary component does not exist until the PINS section is
+            // processed below, so it is always deferred.
+            if (cn.is_port()) {
+                pending.push_back({nid, std::move(cn.inst), std::move(cn.pin), true});
+            } else if (!try_resolve_conn(nid, cn.inst, cn.pin)) {
+                pending.push_back({nid, std::move(cn.inst), std::move(cn.pin), false});
+            }
+        }
+    };
+
+    // ── the parse — one pass, entries streamed to the two sinks above ────
+    DefStreamSink sink;
+    sink.component = on_component;
+    sink.net       = on_net;
+    DefDesign def;
+    // The rollback must restore the OBJECT, not just the database:
+    // latch_units takes the rejected file's scale as soon as an entry
+    // streams, and _units is the only member state a mid-parse failure can
+    // have dirtied (die size and lu_per_um are set post-parse).  Left
+    // stale, a later import that omits UNITS would scale the surviving
+    // design's coordinates by the failed file's divisor (Codex P2 on #671).
+    const int units_before = _units;
+    try {
+        def = read_def(def_path, sink);
+    } catch (...) {
+        _units = units_before;
+        _exec("ROLLBACK");
+        throw;
     }
+    // A DEF with no streamed entries (header-only, or empty sections) never
+    // latched: take the scale from the parsed header now.
+    latch_units(def);
+    stats.ndrs = def.ndrs;
+    stats.def_units = double(_units);
     stats.declared_components = def.declared_components;
+    stats.declared_nets = def.declared_nets;
     for (const auto& m : missing) stats.missing_cells.push_back(m);
+
+    if (def.has_die) {
+        _die_w = dbu_to_lu(def.die.x2);
+        _die_h = dbu_to_lu(def.die.y2);
+    }
 
     // ── PINS → boundary components (Phase 3d) ────────────────────────────
     // Reading PINS is not enough to make them endpoints: PinRow is keyed by
@@ -1648,10 +1769,13 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     for (const auto& p : def.pins) {
         if (!p.placed) continue;                 // no location: not an endpoint
         std::string cname = "PIN/" + p.name;
-        if (comp_names.count(cname)) {
+        // Collision probe against the DATABASE — every component is already
+        // inserted (the streamed pass is complete), so the UNIQUE-name index
+        // answers what the old in-memory name set did.
+        if (get_comp_id(cname) >= 0) {
             // Even the prefixed form can collide with a real instance path.
             int k = 2;
-            while (comp_names.count(cname + "#" + std::to_string(k))) ++k;
+            while (get_comp_id(cname + "#" + std::to_string(k)) >= 0) ++k;
             cname += "#" + std::to_string(k);
         }
         port_comp[p.name] = cname;
@@ -1678,80 +1802,42 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     }
     stats.declared_pins = def.declared_pins;
 
-    // ── NETS ─────────────────────────────────────────────────────────────
-    // Index instances and ports by name ONCE.  Resolving each connection by
-    // scanning `def.components` made the import O(components x connections),
-    // and a placed design has O(N) of each — so the reader that exists to
-    // survive a 10^6-line DEF would have spent its time walking a vector
-    // (Codex P1 on #649).  The DB ids are already looked up this way; these
-    // are the two places that were not.
-    std::unordered_map<std::string, const DefComponent*> comp_by_name;
-    comp_by_name.reserve(def.components.size() * 2);
-    for (const auto& c : def.components) comp_by_name.emplace(c.name, &c);
+    // ── deferred connections ─────────────────────────────────────────────
+    // The streamed NETS pass buffered what it could not resolve mid-file:
+    // every die-port conn (their boundary components exist only now), and —
+    // on an out-of-section-order file — instance conns whose component had
+    // not been inserted yet.  A conn that still does not resolve here is
+    // skipped, exactly as the buffered import skipped it.
     std::unordered_map<std::string, const DefPin*> pin_by_name;
     pin_by_name.reserve(def.pins.size() * 2);
     for (const auto& p : def.pins) pin_by_name.emplace(p.name, &p);
-
-    for (const auto& n : def.nets) {
-        sqlite3_bind_text(s_net,1,n.name.c_str(),-1,SQLITE_TRANSIENT);
-        sqlite3_step(s_net); sqlite3_reset(s_net);
-        const int nid = get_net_id(n.name);
-        if (nid < 0) continue;
-        bind_net_props(nid, n.name);
-        ++stats.imported_nets;
-        for (const auto& cn : n.conns) {
-            // A `( PIN <portName> )` connection names a die port, which is a
-            // boundary component above; anything else names an instance.
-            std::string inst = cn.inst;
-            if (cn.is_port()) {
-                auto pit = port_comp.find(cn.pin);
-                if (pit == port_comp.end()) continue;   // unplaced port
-                inst = pit->second;
-            }
-            const int cid = get_comp_id(inst);
+    for (const auto& pc : pending) {
+        if (pc.port) {
+            auto pit = port_comp.find(pc.pin);
+            if (pit == port_comp.end()) continue;       // unplaced port
+            const int cid = get_comp_id(pit->second);
             if (cid < 0) continue;
             std::string dir = "UNKNOWN";
             double ppx = -1, ppy = -1;
-            if (cn.is_port()) {
-                auto dp = pin_by_name.find(cn.pin);
-                if (dp != pin_by_name.end()) {
-                    dir = port_dir_inward(dp->second->dir);
-                    ppx = dbu_to_lu(dp->second->x);
-                    ppy = dbu_to_lu(dp->second->y);
-                }
-            } else {
-                // Resolve the pin offset from the instance's cell in LEF.
-                auto ic = comp_by_name.find(inst);
-                if (ic != comp_by_name.end()) {
-                    const DefComponent& c = *ic->second;
-                    auto ci = lef_pins.find(c.cell);
-                    if (ci != lef_pins.end()) {
-                        auto pi = ci->second.find(cn.pin);
-                        if (pi != ci->second.end()) {
-                            // DIRECTION comes from the cell, so it is known
-                            // whether or not the instance is placed; the
-                            // absolute POSITION is not.  Leaving it at -1 says
-                            // "unknown", which is what the column already
-                            // means, rather than claiming a pin at the origin.
-                            dir = pi->second.dir;
-                            if (c.placed) {
-                                ppx = dbu_to_lu(c.x) + um_to_lu(pi->second.ox);
-                                ppy = dbu_to_lu(c.y) + um_to_lu(pi->second.oy);
-                            }
-                        }
-                    }
-                }
+            auto dp = pin_by_name.find(pc.pin);
+            if (dp != pin_by_name.end()) {
+                dir = port_dir_inward(dp->second->dir);
+                ppx = dbu_to_lu(dp->second->x);
+                ppy = dbu_to_lu(dp->second->y);
             }
-            sqlite3_bind_int   (s_pin,1,nid);
+            sqlite3_bind_int   (s_pin,1,pc.nid);
             sqlite3_bind_int   (s_pin,2,cid);
-            sqlite3_bind_text  (s_pin,3,cn.pin.c_str(),-1,SQLITE_TRANSIENT);
+            sqlite3_bind_text  (s_pin,3,pc.pin.c_str(),-1,SQLITE_TRANSIENT);
             sqlite3_bind_text  (s_pin,4,dir.c_str(),-1,SQLITE_TRANSIENT);
             sqlite3_bind_double(s_pin,5,ppx);
             sqlite3_bind_double(s_pin,6,ppy);
             sqlite3_step(s_pin); sqlite3_reset(s_pin);
+        } else {
+            try_resolve_conn(pc.nid, pc.inst, pc.pin);
         }
     }
-    stats.declared_nets = def.declared_nets;
+    pending.clear();
+    pending.shrink_to_fit();
 
     // ── TRACKS (Phase 3b) ────────────────────────────────────────────────
     for (const auto& tr : def.tracks)

@@ -9,14 +9,15 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 this page is the backlog behind them.
 
 Snapshot index — last verified against `main`: **2026-08-10**, after items 1,
-2, 3, 4, 6, 7 and 10 landed, and item 5's first blocker (the second
-`def.components` walk) cleared — item 5 stays open on the remaining one. Each
-item states what is missing, why it was left rather than forgotten, and where
-to start. Every claim below was reproduced on `main`
+2, 3, 4, 5, 6, 7 and 10 landed — item 5's second blocker (the net-resolution
+name index) fell to the observation that the database already maintains
+the index, making the import streaming. Each item states what is missing,
+why it was left rather than forgotten, and where to start. Every claim
+below was reproduced on `main`
 before being written down; the reproduction is given so a reader can
 re-derive it rather than trust it.
 
-Items 1, 2, 3, 4, 6, 7 and 10 are kept in place, struck through, rather than
+Items 1, 2, 3, 4, 5, 6, 7 and 10 are kept in place, struck through, rather than
 moved to the resolved table at the bottom. Each entry records where this page's **own
 first description was wrong** — item 1 about the merge case, and about the
 fix it originally proposed, which would have been the wrong fix; item 2
@@ -397,38 +398,62 @@ script-relative everywhere with a deprecation pass, or an explicit
 
 </details>
 
-## 5. The DEF reader buffers the whole design
+## 5. ~~The DEF reader buffers the whole design~~ — RESOLVED 2026-08-10 (streaming import, both blockers cleared)
 
-`read_def` now holds the file **once** (it held it three times before PR
-#650), but the reader is still not streaming, and the text is not the
-dominant term. Measured on `main`, 2026-08-09 — a 19.7 MB / 1.02 M-line DEF
-with 340 k components costs **96 MB peak, 4.9× the file size**, most of it
-the parsed model at ~220 B per component. Budget **~5×**.
+`read_def` held the file **once** (three times before PR #650), but the
+parsed model dominated: measured 2026-08-09 — a 19.7 MB / 1.02 M-line DEF
+with 340 k components cost **96 MB peak, 4.9× the file size**, most of it
+components at ~220 B each. Budget **~5×**.
 
-True streaming means inserting DB rows as entries parse, which
-`import_def_lef` cannot do today for ~~two~~ **one** concrete reason:
+True streaming meant inserting DB rows as entries parse, which
+`import_def_lef` could not do for two concrete reasons, cleared in order:
 
 1. ~~it walks `def.components` a **second** time to place macro `OBS`
-   keepouts~~ **CLEARED, 2026-08-10**: the OBS collection (orientation
-   transform included) now runs inside the first COMPONENTS insertion walk,
-   right after the HALO — one walk, so a future reader can hand each
-   component to a sink exactly once. Results are identical (same keepouts,
-   different order in `stats.keepouts`; the census counts by kind so nothing
-   downstream reads the order), and — measured on a 25.2 MB / 1.0 M-line
-   synthetic with 200 k OBS-bearing components — peak import RSS drops
-   238 → 221 MB (−7%), stable across repeats. Note that vehicle is
-   deliberately OBS-heavy (400 k keepouts), so its 8.8× ratio is not
-   comparable to the 4.9× above: the ratio tracks how much of the file the
-   import *retains*, not a constant of the reader.
-2. net resolution needs the name index built from the full component list.
+   keepouts~~ **CLEARED, 2026-08-10** (#668): the OBS collection
+   (orientation transform included) runs inside the one COMPONENTS visit,
+   right after the HALO — a reader that hands each component to a sink
+   cannot be walked twice. Identical results (same keepouts, different
+   order in `stats.keepouts`; the census counts by kind), −7% peak RSS on
+   its own.
+2. ~~net resolution needs the name index built from the full component
+   list~~ **CLEARED, 2026-08-10**: the index it actually needs is one the
+   database maintains anyway — `component.name` is UNIQUE, and one probe of
+   that index returns the id, cell and layout-unit placement, which is
+   everything the in-memory `comp_by_name` map supplied. The map was a
+   *duplicate* of the table it had just written.
 
-*Where to start:* the remaining blocker is the net-side name index — a
-streaming shape would insert component rows as they parse and resolve net
-pins in a second *file* pass (or against the DB index), rather than against
-the in-memory `def.components`. Note the reader this replaced streamed
-cheaply only because it *kept almost nothing* (it discarded TRACKS, PINS,
-BLOCKAGES and GCELLGRID, and could not read a wrapped entry at all), so the
-memory is being spent on data that is now actually retained.
+**The built shape.** `read_def` takes an optional `DefStreamSink`:
+COMPONENTS and NETS entries — the two vectors that dominated the model —
+are handed over as they parse and never retained; everything else (PINS,
+TRACKS, BLOCKAGES, NDRs, the census) is small and stays buffered, so the
+sink-less call (and the Python `read_def` binding) is unchanged.
+`import_def_lef` inserts each component (row + HALO + OBS keepouts) at
+delivery and resolves each net's connections against the DB; a connection
+that cannot resolve mid-file is **deferred, not dropped** — die-port conns
+always are (their boundary components are synthesized from PINS after the
+parse), and so is every conn of a file whose NETS precede its COMPONENTS,
+so correctness does not hang on the spec's section order. The design wipe
+moved inside the import's transaction, so a malformed DEF **rolls back**
+— the old "parse error leaves the previous design intact" contract holds
+by a different mechanism. One new hard edge, stated rather than implied: a
+`UNITS` statement after a streamed entry is a parse error (delivered
+coordinates were converted under the divisor in force; two scales in one
+import cannot be repaired retroactively), where the buffered reader
+tolerated any order. DEF 5.8 puts UNITS in the header, so no real file
+changes behavior.
+
+**Measured** on a 25.2 MB / 1.0 M-line synthetic, 200 k OBS-bearing
+components + 200 k nets (the deliberately OBS-heavy vehicle from blocker
+1's A/B): peak import RSS **221 → 86 MB, 8.8× → 3.4× the file** — under
+the budget — with import runtime a wash (4.4–4.8 s both sides: the
+b-tree probes cost what the map lookups did). The remaining ~86 MB is the
+one text buffer (25 MB), the keepout list the session applies, and
+SQLite's transaction pages — data that is genuinely retained, which is
+where this item's own note said the memory should be going.
+
+Pinned by three streaming-contract tests in `test_def_import.py`:
+section order does not change what resolves, a malformed DEF rolls back
+to the previous design, late UNITS is a hard error.
 
 ## 6. ~~Script-declared distances are not scaled by the import scale~~ — RESOLVED 2026-08-10 (the ergonomic half; the engine behavior stays, deliberately)
 
