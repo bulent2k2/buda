@@ -408,6 +408,29 @@ def _fanin_core(part_drvs, part_rcvs):
     return reason, uniq_drv, root, extra_rcv
 
 
+def _fanout_core(part_drvs, part_rcvs):
+    """The `_fanin_core` mirror for a DIVERGENT part: root = the shared
+    DRIVER, leaves = the receivers this part's bits actually touch.
+
+    Without it a split fan-out bundle would be re-rooted as a FAN-IN — the
+    two share the net_drivers/net_receivers channel, so the fan-in path
+    accepts a fan-out bundle and silently rewrites its reason, pointing
+    generation at the wrong end of the tree.  Returns (None, None, []) when
+    the part has no resolvable driver or no leaves."""
+    root = next((d for d in part_drvs if d), None)
+    if root is None:
+        return None, None, []
+    leaves = []
+    for rl in part_rcvs:
+        for r in rl:
+            if r and r != root and r not in leaves:
+                leaves.append(r)
+    if not leaves:
+        return None, None, []
+    return ("FANOUT:" + root + "|TO:" + "".join(x + "," for x in leaves),
+            root, leaves)
+
+
 def _split_hier_bundles(session, raw_bundles):
     """Hier twin of _split_oversized_bundles (set_max_bundle_bits): split an
     over-limit TEMPLATE bundle into balanced parts BEFORE per-instance
@@ -484,11 +507,14 @@ def _split_hier_bundles(session, raw_bundles):
         total = len(nets)
         drvs = list(b.net_drivers)
         rcvs = [list(r) for r in b.net_receivers]
-        fanin = bool(drvs) and len(drvs) == total
+        # A FAN-OUT bundle rides the same net_drivers/net_receivers channel,
+        # so the reason is what tells the two apart.
+        fanout = b.reason.startswith('FANOUT:') and len(drvs) == total
+        fanin = bool(drvs) and len(drvs) == total and not fanout
         net_idx = {n: i for i, n in enumerate(nets)}
 
         def _inc(net, shared):
-            if fanin:
+            if fanin or fanout:
                 i = net_idx.get(net)
                 if i is None:
                     return ()
@@ -541,7 +567,17 @@ def _split_hier_bundles(session, raw_bundles):
             nb = session._clone_hbundle_with_id(b, b.id if k == 1 else _new_id())
             nb.net_names = part
             suffix = f"|SPLIT:{k}/{len(parts)}"
-            if fanin:
+            if fanout:
+                pd = [drvs[net_idx[n]] for n in part]
+                pr = [rcvs[net_idx[n]] for n in part]
+                nb.net_drivers = pd
+                nb.net_receivers = pr
+                core, root, leaves = _fanout_core(pd, pr)
+                nb.reason = (core if core else b.reason) + suffix
+                if core and b.cell_context and b.entry_busterm_ids:
+                    nb.entry_busterm_ids = ["bt:" + root]
+                    nb.exit_busterm_ids = ["bt:" + r for r in leaves]
+            elif fanin:
                 pd = [drvs[net_idx[n]] for n in part]
                 pr = [rcvs[net_idx[n]] for n in part]
                 nb.net_drivers = pd

@@ -184,3 +184,38 @@ run_detailed_nuts
     # is not tapering and this test is measuring nothing.
     all_segs = set().union(*per_bit.values())
     assert any(v != all_segs for v in per_bit.values()), (per_bit, all_segs)
+
+
+def test_a_capped_fan_out_stays_a_fan_out():
+    """`set_max_bundle_bits` splits a bundle after grouping, and the split
+    re-scopes a fan-in part's reason to the leaves its bits still touch.
+    A fan-OUT bundle rides the SAME net_drivers/net_receivers channel, so
+    that path accepted it and rewrote `FANOUT:` as `FANIN:` — re-rooting
+    the tree at a receiver and pointing generation at the wrong end.  The
+    reason is what tells the two apart.
+
+    This is the hier flow because the bit cap's hier arm is where the
+    re-scoping lives; a die-port bus is exactly the width someone caps.
+    """
+    import buda
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    b = buda.HBundle()
+    b.id = 1
+    b.net_names = ["n0", "n1", "n2", "n3"]
+    b.reason = "FANOUT:drv|TO:rcv0,rcv1,rcv2,rcv3,"
+    b.net_drivers = ["drv"] * 4
+    b.net_receivers = [["rcv0"], ["rcv1"], ["rcv2"], ["rcv3"]]
+
+    from buda_cmds import bundling_cmds
+    s._max_bundle_bits = 2
+    parts = bundling_cmds._split_hier_bundles(s, [b])
+    assert len(parts) == 2, [p.reason for p in parts]
+    for p in parts:
+        assert p.reason.startswith("FANOUT:drv|TO:"), p.reason
+        # …and re-scoped: a part must not advertise leaves its bits do not
+        # reach, or the generator stubs out to a block with zero bits.
+        leaves = p.reason.split("|TO:")[1].split("|SPLIT:")[0]
+        got = {x for x in leaves.split(",") if x}
+        want = {r for rl in p.net_receivers for r in rl}
+        assert got == want, (p.reason, want)
