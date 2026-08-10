@@ -49,12 +49,26 @@ pytestmark = pytest.mark.mid
 
 
 def _session(flow):
+    """Run a flow and keep BOTH the session and everything it printed.
+
+    The printed output matters: a flow's own mid-flow `check_design` calls are
+    where a transient finding shows up, and by the time the flow ends the
+    healers have usually re-planned it away.  Querying only the final state
+    would make a working detector look silent.
+    """
     s = buda_cli.BudaSession()
     s.no_viz = True
-    with contextlib.redirect_stdout(io.StringIO()), \
-            contextlib.redirect_stderr(io.StringIO()):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
         s.do_command(f"source {flow}")
+    s._test_stdout = buf.getvalue()
     return s
+
+
+def _findings_in_run(session):
+    """Per-bit antenna lines the flow itself reported, at any stage."""
+    return [ln.strip() for ln in session._test_stdout.splitlines()
+            if "dangling metal past its own attachments" in ln]
 
 
 def _findings(session):
@@ -79,7 +93,7 @@ def test_reports_the_keepout_culled_stub_pair(rv_strict):
     a junction that no longer exists — dangling by construction, and invisible
     to every bus-level check because seg 1 is still attached at its other end.
     """
-    hits = _findings(rv_strict)
+    hits = _findings_in_run(rv_strict)
     assert len(hits) == 2, hits
     assert all("Seg 1 bit 0" in h for h in hits), hits
     assert all("19600" in h.replace(",", "") for h in hits), hits
@@ -88,12 +102,11 @@ def test_reports_the_keepout_culled_stub_pair(rv_strict):
 def test_the_flow_still_ends_clean(rv_strict):
     """The findings above are a MID-flow state: the healers re-pin away from
     the keepout-colliding candidate and the antenna goes with it.  A detector
-    that left the endpoint dirty would be reporting its own noise."""
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
-        rv_strict.do_command("check_design dnuts")
-    # the vehicle's own endpoint is clean apart from the two known findings
+    whose findings SURVIVED to the endpoint on a vehicle everyone calls clean
+    would be reporting its own noise, so this is the other half of the claim.
+    """
     assert rv_strict.detailed_result.num_unplaced == 0
+    assert _findings(rv_strict) == [], "findings should not survive the healers"
 
 
 # -------------------------------------------------- it must NOT over-fire
