@@ -1536,6 +1536,54 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
                                       y1 + h + dbu_to_lu(c.halo_t),
                                       "HALO of " + c.name});
         }
+
+        // Macro OBS keepouts, in the SAME pass (opens item 5): this used to
+        // be a second full walk over def.components in the BLOCKAGES section
+        // — the first of the item's two named blockers to a streaming
+        // import, since a reader that hands each component to a sink cannot
+        // be walked twice.  Skipped like the HALO for an unplaced instance
+        // (its OBS is nowhere), and for a cell absent from the LEF.
+        //
+        // An OBS rect is in the MACRO's frame.  Translating it without
+        // applying the instance's orientation puts the keepout somewhere the
+        // obstruction is not — blocking empty space while the real
+        // obstruction stays routable, which is a physically invalid route
+        // the audit cannot see (Codex P1 on #647).  The macro's placed
+        // extent is [0, w] x [0, h] after rotation, with the lower-left at
+        // the DEF placement point (the convention the component bbox above
+        // already uses), so the transform maps the macro's own box onto it.
+        const LefMacro* mac = has_pos ? lef.find_macro(c.cell) : nullptr;
+        if (mac && !mac->obs.empty()) {
+            const double mw = um_to_lu(mac->w), mh = um_to_lu(mac->h);
+            const std::string o8 = c.orient.empty() ? "N" : c.orient;
+            auto xform = [&](double x, double y, double& ox, double& oy) {
+                // x, y are macro-frame layout units, ORIGIN already removed.
+                if      (o8 == "N")  { ox = x;        oy = y;        }
+                else if (o8 == "S")  { ox = mw - x;   oy = mh - y;   }
+                else if (o8 == "FN") { ox = mw - x;   oy = y;        } // mirror Y
+                else if (o8 == "FS") { ox = x;        oy = mh - y;   } // mirror X
+                else if (o8 == "W")  { ox = mh - y;   oy = x;        } // CCW 90
+                else if (o8 == "E")  { ox = y;        oy = mw - x;   } // CW 90
+                else if (o8 == "FW") { ox = y;        oy = x;        }
+                else if (o8 == "FE") { ox = mh - y;   oy = mw - x;   }
+                else                 { ox = x;        oy = y;        }
+            };
+            for (const auto& o : mac->obs)
+                for (const auto& r : o.rects) {
+                    double ax, ay, bx, by;
+                    xform(um_to_lu(r.x1 - mac->ox), um_to_lu(r.y1 - mac->oy),
+                          ax, ay);
+                    xform(um_to_lu(r.x2 - mac->ox), um_to_lu(r.y2 - mac->oy),
+                          bx, by);
+                    stats.keepouts.push_back(
+                        {o.layer,
+                         dbu_to_lu(c.x) + std::min(ax, bx),
+                         dbu_to_lu(c.y) + std::min(ay, by),
+                         dbu_to_lu(c.x) + std::max(ax, bx),
+                         dbu_to_lu(c.y) + std::max(ay, by),
+                         "OBS of " + c.name});
+                }
+        }
     }
     stats.declared_components = def.declared_components;
     for (const auto& m : missing) stats.missing_cells.push_back(m);
@@ -1731,51 +1779,9 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
                                       dbu_to_lu(r.x2), dbu_to_lu(r.y2),
                                       "BLOCKAGES"});
     }
-    // (both counts are folded into the unmodelled census below)
-    for (const auto& c : def.components) {
-        if (!c.placed) continue;    // no location: its OBS is nowhere
-        const LefMacro* m = lef.find_macro(c.cell);
-        if (!m) continue;
-        // An OBS rect is in the MACRO's frame.  Translating it without
-        // applying the instance's orientation puts the keepout somewhere the
-        // obstruction is not — blocking empty space while the real
-        // obstruction stays routable, which is a physically invalid route
-        // the audit cannot see (Codex P1 on #647).
-        //
-        // The macro's placed extent is [0, w] x [0, h] after rotation, with
-        // the lower-left at the DEF placement point (the convention the
-        // component bbox above already uses), so the transform maps the
-        // macro's own box onto that.
-        const double mw = um_to_lu(m->w), mh = um_to_lu(m->h);
-        const auto [otok, swap_wh] = def_orient_to_bdb(c.orient);
-        const std::string o8 = c.orient.empty() ? "N" : c.orient;
-        auto xform = [&](double x, double y, double& ox, double& oy) {
-            // x, y are macro-frame layout units with ORIGIN already removed.
-            if      (o8 == "N")  { ox = x;        oy = y;        }
-            else if (o8 == "S")  { ox = mw - x;   oy = mh - y;   }
-            else if (o8 == "FN") { ox = mw - x;   oy = y;        }   // mirror Y
-            else if (o8 == "FS") { ox = x;        oy = mh - y;   }   // mirror X
-            else if (o8 == "W")  { ox = mh - y;   oy = x;        }   // CCW 90
-            else if (o8 == "E")  { ox = y;        oy = mw - x;   }   // CW 90
-            else if (o8 == "FW") { ox = y;        oy = x;        }
-            else if (o8 == "FE") { ox = mh - y;   oy = mw - x;   }
-            else                 { ox = x;        oy = y;        }
-        };
-        (void)swap_wh;
-        for (const auto& o : m->obs)
-            for (const auto& r : o.rects) {
-                double ax, ay, bx, by;
-                xform(um_to_lu(r.x1 - m->ox), um_to_lu(r.y1 - m->oy), ax, ay);
-                xform(um_to_lu(r.x2 - m->ox), um_to_lu(r.y2 - m->oy), bx, by);
-                stats.keepouts.push_back(
-                    {o.layer,
-                     dbu_to_lu(c.x) + std::min(ax, bx),
-                     dbu_to_lu(c.y) + std::min(ay, by),
-                     dbu_to_lu(c.x) + std::max(ax, bx),
-                     dbu_to_lu(c.y) + std::max(ay, by),
-                     "OBS of " + c.name});
-            }
-    }
+    // (both counts are folded into the unmodelled census below.  Macro OBS
+    // keepouts are collected in the COMPONENTS pass above — item 5's first
+    // streaming blocker was this section's SECOND walk over def.components.)
     // Power straps are real metal a signal cannot use.
     for (const auto& w : def.special_wires) {
         if (w.pts.size() < 2 || w.width <= 0) continue;

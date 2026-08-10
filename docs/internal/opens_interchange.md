@@ -9,8 +9,10 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 this page is the backlog behind them.
 
 Snapshot index — last verified against `main`: **2026-08-10**, after items 1,
-2, 3, 4 and 10 landed. Each item states what is missing, why it was left rather
-than forgotten, and where to start. Every claim below was reproduced on `main`
+2, 3, 4 and 10 landed, and item 5's first blocker (the second `def.components`
+walk) cleared — item 5 stays open on the remaining one. Each item states what
+is missing, why it was left rather than forgotten, and where to start. Every
+claim below was reproduced on `main`
 before being written down; the reproduction is given so a reader can
 re-derive it rather than trust it.
 
@@ -404,16 +406,29 @@ with 340 k components costs **96 MB peak, 4.9× the file size**, most of it
 the parsed model at ~220 B per component. Budget **~5×**.
 
 True streaming means inserting DB rows as entries parse, which
-`import_def_lef` cannot do today for two concrete reasons, both fixable:
+`import_def_lef` cannot do today for ~~two~~ **one** concrete reason:
 
-1. it walks `def.components` a **second** time to place macro `OBS` keepouts;
+1. ~~it walks `def.components` a **second** time to place macro `OBS`
+   keepouts~~ **CLEARED, 2026-08-10**: the OBS collection (orientation
+   transform included) now runs inside the first COMPONENTS insertion walk,
+   right after the HALO — one walk, so a future reader can hand each
+   component to a sink exactly once. Results are identical (same keepouts,
+   different order in `stats.keepouts`; the census counts by kind so nothing
+   downstream reads the order), and — measured on a 25.2 MB / 1.0 M-line
+   synthetic with 200 k OBS-bearing components — peak import RSS drops
+   238 → 221 MB (−7%), stable across repeats. Note that vehicle is
+   deliberately OBS-heavy (400 k keepouts), so its 8.8× ratio is not
+   comparable to the 4.9× above: the ratio tracks how much of the file the
+   import *retains*, not a constant of the reader.
 2. net resolution needs the name index built from the full component list.
 
-*Where to start:* item 1 is the easier half — collect OBS keepouts during the
-first pass. Note the reader this replaced streamed cheaply only because it
-*kept almost nothing* (it discarded TRACKS, PINS, BLOCKAGES and GCELLGRID,
-and could not read a wrapped entry at all), so the memory is being spent on
-data that is now actually retained.
+*Where to start:* the remaining blocker is the net-side name index — a
+streaming shape would insert component rows as they parse and resolve net
+pins in a second *file* pass (or against the DB index), rather than against
+the in-memory `def.components`. Note the reader this replaced streamed
+cheaply only because it *kept almost nothing* (it discarded TRACKS, PINS,
+BLOCKAGES and GCELLGRID, and could not read a wrapped entry at all), so the
+memory is being spent on data that is now actually retained.
 
 ## 6. Script-declared distances are not scaled by the import scale
 
