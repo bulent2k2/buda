@@ -21,6 +21,12 @@ Every other hier vehicle (`flow/hbundles/*.buda`) *declares* its design in
 the script — `add_cell`, `add_inst_to_cell`, `add_bus`. This one declares
 nothing. What the script contains is the flow.
 
+It is deliberately the **smallest** design that does so. Its sibling
+[`flow/rv/`](../rv/) is the other end of the scale — a dual-core RV32-shaped
+SoC, 1230 nets, five levels, a 32-bit datapath — and exists because a small
+vehicle finds the faults that are about *structure* while a large one finds
+the faults that only appear once a quantity stops being one.
+
 ## The files
 
 | File | What it carries |

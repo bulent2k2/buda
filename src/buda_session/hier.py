@@ -775,6 +775,35 @@ class HierMixin:
 
     # ── Hierarchical topology helpers ─────────────────────────────────────────
 
+    @staticmethod
+    def _endpoint_depth(src, level, comps_by_name):
+        """The hierarchy depth of a bundle endpoint block.
+
+        ASKED OF THE COMPONENT, not counted off its name.  A path's
+        separators usually give the depth, but not always: the boundary
+        components `import_def_lef` synthesizes for DEF PINS are named
+        `PIN/<port>` and sit at depth 0, so counting slashes put them one
+        level down.  That built the routing frame at a depth holding
+        NEITHER endpoint, which cost a bundle its candidates at generation
+        and, at verify time, made both its busterms read as "outside block
+        face" — a missing block has no bounds to be inside of.
+
+        The depth is a stored fact; the name is a guess about it.  The
+        count is the fallback only for a block with no component row (a
+        flat-flow block).
+
+        Existing flows are unaffected BY MEASUREMENT, not by argument: with
+        the two readings computed side by side over the hier corpus
+        (01/04/08/10_hbundles, rnr/mix, rnr/mix2, mix2_fast_bottomup,
+        chip3_topdown) they agree on all 442 calls, so a design whose
+        component names were all built by joining a path cannot notice the
+        change.
+        """
+        if not src:
+            return level
+        c = comps_by_name.get(src)
+        return c.depth if c is not None else src.count('/')
+
     def _build_bdb_floorplan(self, depth):
         """Build a Floorplan with placed components at exactly this depth from BDB."""
         fp = self._apply_fp_session_settings(buda.Floorplan())
@@ -1157,9 +1186,20 @@ class HierMixin:
             # endpoints' depth.  b.level is the routing-context depth (the
             # endpoints' common ancestor), which can be shallower than the
             # endpoint paths themselves; the blocks to route between live at
-            # the endpoint depth (path segments − 1).
+            # the endpoint depth.
+            #
+            # That depth is ASKED OF THE COMPONENT, not counted off its name.
+            # A path's separators usually give it, but not always: the
+            # boundary components `import_def_lef` synthesizes for DEF PINS
+            # are named `PIN/<port>` and sit at depth 0, so counting slashes
+            # put them one level down, built the floorplan at a depth
+            # containing NEITHER endpoint, and the bundle came out with zero
+            # candidates — unroutable, reported only as a warning among the
+            # per-bundle lines.  The depth is a stored fact; the name is a
+            # guess about it.  Fall back to the count only for a block with
+            # no component row at all (a flat-flow block).
             src, dsts = self._parse_bundle_reason(b.reason)
-            ep_depth = src.count('/') if src else b.level
+            ep_depth = self._endpoint_depth(src, b.level, comps_by_name)
             cache_key = ('depth', ep_depth)
             if cache_key not in fp_cache:
                 fp_cache[cache_key] = self._build_bdb_floorplan(ep_depth)
@@ -1357,7 +1397,7 @@ class HierMixin:
 
         # Case (b): same-level cross-block — BDB floorplan at the endpoint depth.
         src, _ = self._parse_bundle_reason(b.reason)
-        ep_depth = src.count('/') if src else b.level
+        ep_depth = self._endpoint_depth(src, b.level, comps_by_name)
         cache_key = ('depth', ep_depth)
         if cache_key not in fp_cache:
             fp_cache[cache_key] = self._build_bdb_floorplan(ep_depth)

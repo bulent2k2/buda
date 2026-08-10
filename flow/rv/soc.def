@@ -1,0 +1,1553 @@
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN soc ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 1012000 867200 ) ;
+
+TRACKS X 190 DO 5326 STEP 190 LAYER M1 ;
+TRACKS Y 190 DO 4564 STEP 190 LAYER M1 ;
+TRACKS X 200 DO 5060 STEP 200 LAYER M2 ;
+TRACKS Y 200 DO 4336 STEP 200 LAYER M2 ;
+TRACKS X 200 DO 5060 STEP 200 LAYER M3 ;
+TRACKS Y 200 DO 4336 STEP 200 LAYER M3 ;
+TRACKS X 400 DO 2530 STEP 400 LAYER M4 ;
+TRACKS Y 400 DO 2168 STEP 400 LAYER M4 ;
+TRACKS X 400 DO 2530 STEP 400 LAYER M5 ;
+TRACKS Y 400 DO 2168 STEP 400 LAYER M5 ;
+TRACKS X 800 DO 1265 STEP 800 LAYER M6 ;
+TRACKS Y 800 DO 1084 STEP 800 LAYER M6 ;
+TRACKS X 800 DO 1265 STEP 800 LAYER M7 ;
+TRACKS Y 800 DO 1084 STEP 800 LAYER M7 ;
+
+COMPONENTS 44 ;
+  - u_cl/u_c0/u_exu/u_alu/u_add ADD32
+      + PLACED ( 30000 317200 ) N ;
+  - u_cl/u_c0/u_exu/u_alu/u_log LOG32
+      + PLACED ( 96000 317200 ) N ;
+  - u_cl/u_c0/u_exu/u_alu/u_ysel MUX32
+      + PLACED ( 156000 317200 ) N ;
+  - u_cl/u_c0/u_exu/u_bru BRU32
+      + PLACED ( 30000 172000 ) N ;
+  - u_cl/u_c0/u_exu/u_bsel MUX32
+      + PLACED ( 90000 172000 ) N ;
+  - u_cl/u_c0/u_idu/u_dec DEC32
+      + PLACED ( 30000 460799 ) N ;
+  - u_cl/u_c0/u_idu/u_imm IMM32
+      + PLACED ( 96000 460799 ) N ;
+  - u_cl/u_c0/u_ifu/u_iab ALN32
+      + PLACED ( 30000 550000 ) N ;
+  - u_cl/u_c0/u_ifu/u_inc ADD32
+      + PLACED ( 86000 550000 ) N ;
+  - u_cl/u_c0/u_ifu/u_nsel MUX32
+      + PLACED ( 152000 550000 ) N ;
+  - u_cl/u_c0/u_ifu/u_pc REG32
+      + PLACED ( 204000 550000 ) N ;
+  - u_cl/u_c0/u_ifu/u_pcb REG32
+      + PLACED ( 260000 550000 ) N ;
+  - u_cl/u_c0/u_lsu/u_agu ADD32
+      + PLACED ( 30000 692000 ) N ;
+  - u_cl/u_c0/u_lsu/u_algn ALN32
+      + PLACED ( 96000 692000 ) N ;
+  - u_cl/u_c0/u_lsu/u_dab ALN32
+      + PLACED ( 152000 692000 ) N ;
+  - u_cl/u_c0/u_lsu/u_st REG32
+      + PLACED ( 208000 692000 ) N ;
+  - u_cl/u_c0/u_lsu/u_swe BRU32
+      + PLACED ( 264000 692000 ) N ;
+  - u_cl/u_c0/u_rf RF32
+      + PLACED ( 30000 30000 ) N ;
+  - u_cl/u_c0/u_wbsel MUX32
+      + PLACED ( 152000 30000 ) N ;
+  - u_cl/u_c1/u_exu/u_alu/u_add ADD32
+      + PLACED ( 388000 317200 ) N ;
+  - u_cl/u_c1/u_exu/u_alu/u_log LOG32
+      + PLACED ( 454000 317200 ) N ;
+  - u_cl/u_c1/u_exu/u_alu/u_ysel MUX32
+      + PLACED ( 514000 317200 ) N ;
+  - u_cl/u_c1/u_exu/u_bru BRU32
+      + PLACED ( 388000 172000 ) N ;
+  - u_cl/u_c1/u_exu/u_bsel MUX32
+      + PLACED ( 448000 172000 ) N ;
+  - u_cl/u_c1/u_idu/u_dec DEC32
+      + PLACED ( 388000 460799 ) N ;
+  - u_cl/u_c1/u_idu/u_imm IMM32
+      + PLACED ( 454000 460799 ) N ;
+  - u_cl/u_c1/u_ifu/u_iab ALN32
+      + PLACED ( 388000 550000 ) N ;
+  - u_cl/u_c1/u_ifu/u_inc ADD32
+      + PLACED ( 444000 550000 ) N ;
+  - u_cl/u_c1/u_ifu/u_nsel MUX32
+      + PLACED ( 510000 550000 ) N ;
+  - u_cl/u_c1/u_ifu/u_pc REG32
+      + PLACED ( 562000 550000 ) N ;
+  - u_cl/u_c1/u_ifu/u_pcb REG32
+      + PLACED ( 618000 550000 ) N ;
+  - u_cl/u_c1/u_lsu/u_agu ADD32
+      + PLACED ( 388000 692000 ) N ;
+  - u_cl/u_c1/u_lsu/u_algn ALN32
+      + PLACED ( 454000 692000 ) N ;
+  - u_cl/u_c1/u_lsu/u_dab ALN32
+      + PLACED ( 510000 692000 ) N ;
+  - u_cl/u_c1/u_lsu/u_st REG32
+      + PLACED ( 566000 692000 ) N ;
+  - u_cl/u_c1/u_lsu/u_swe BRU32
+      + PLACED ( 622000 692000 ) N ;
+  - u_cl/u_c1/u_rf RF32
+      + PLACED ( 388000 30000 ) N ;
+  - u_cl/u_c1/u_wbsel MUX32
+      + PLACED ( 510000 30000 ) N ;
+  - u_cl/u_dxb/u_amux MUX32
+      + PLACED ( 746000 30000 ) N ;
+  - u_cl/u_dxb/u_dmux MUX32
+      + PLACED ( 746000 172000 ) N ;
+  - u_cl/u_ixb/u_amux MUX32
+      + PLACED ( 746000 314000 ) N ;
+  - u_cl/u_ixb/u_dmux MUX32
+      + PLACED ( 746000 456000 ) N ;
+  - u_dmem SRAM32
+      + PLACED ( 862000 138400 ) N ;
+  - u_imem SRAM32
+      + PLACED ( 862000 30000 ) N ;
+END COMPONENTS
+
+PINS 64 ;
+  - boot[0] + NET boot[0] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 31225 ) N ;
+  - boot[1] + NET boot[1] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 33675 ) N ;
+  - boot[2] + NET boot[2] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 36125 ) N ;
+  - boot[3] + NET boot[3] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 38575 ) N ;
+  - boot[4] + NET boot[4] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 41025 ) N ;
+  - boot[5] + NET boot[5] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 43475 ) N ;
+  - boot[6] + NET boot[6] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 45925 ) N ;
+  - boot[7] + NET boot[7] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 48375 ) N ;
+  - boot[8] + NET boot[8] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 50825 ) N ;
+  - boot[9] + NET boot[9] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 53275 ) N ;
+  - boot[10] + NET boot[10] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 55725 ) N ;
+  - boot[11] + NET boot[11] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 58175 ) N ;
+  - boot[12] + NET boot[12] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 60625 ) N ;
+  - boot[13] + NET boot[13] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 63075 ) N ;
+  - boot[14] + NET boot[14] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 65525 ) N ;
+  - boot[15] + NET boot[15] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 67975 ) N ;
+  - boot[16] + NET boot[16] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 70425 ) N ;
+  - boot[17] + NET boot[17] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 72875 ) N ;
+  - boot[18] + NET boot[18] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 75325 ) N ;
+  - boot[19] + NET boot[19] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 77775 ) N ;
+  - boot[20] + NET boot[20] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 80225 ) N ;
+  - boot[21] + NET boot[21] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 82675 ) N ;
+  - boot[22] + NET boot[22] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 85125 ) N ;
+  - boot[23] + NET boot[23] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 87575 ) N ;
+  - boot[24] + NET boot[24] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 90025 ) N ;
+  - boot[25] + NET boot[25] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 92475 ) N ;
+  - boot[26] + NET boot[26] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 94925 ) N ;
+  - boot[27] + NET boot[27] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 97375 ) N ;
+  - boot[28] + NET boot[28] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 99825 ) N ;
+  - boot[29] + NET boot[29] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 102275 ) N ;
+  - boot[30] + NET boot[30] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 104725 ) N ;
+  - boot[31] + NET boot[31] + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 107175 ) N ;
+  - dbg[0] + NET dbg[0] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 457750 ) N ;
+  - dbg[1] + NET dbg[1] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 461250 ) N ;
+  - dbg[2] + NET dbg[2] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 464750 ) N ;
+  - dbg[3] + NET dbg[3] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 468250 ) N ;
+  - dbg[4] + NET dbg[4] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 471750 ) N ;
+  - dbg[5] + NET dbg[5] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 475250 ) N ;
+  - dbg[6] + NET dbg[6] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 478750 ) N ;
+  - dbg[7] + NET dbg[7] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 482250 ) N ;
+  - dbg[8] + NET dbg[8] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 485750 ) N ;
+  - dbg[9] + NET dbg[9] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 489250 ) N ;
+  - dbg[10] + NET dbg[10] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 492750 ) N ;
+  - dbg[11] + NET dbg[11] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 496250 ) N ;
+  - dbg[12] + NET dbg[12] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 499750 ) N ;
+  - dbg[13] + NET dbg[13] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 503250 ) N ;
+  - dbg[14] + NET dbg[14] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 506750 ) N ;
+  - dbg[15] + NET dbg[15] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 510250 ) N ;
+  - dbg[16] + NET dbg[16] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 513750 ) N ;
+  - dbg[17] + NET dbg[17] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 517250 ) N ;
+  - dbg[18] + NET dbg[18] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 520750 ) N ;
+  - dbg[19] + NET dbg[19] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 524250 ) N ;
+  - dbg[20] + NET dbg[20] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 527750 ) N ;
+  - dbg[21] + NET dbg[21] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 531250 ) N ;
+  - dbg[22] + NET dbg[22] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 534750 ) N ;
+  - dbg[23] + NET dbg[23] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 538250 ) N ;
+  - dbg[24] + NET dbg[24] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 541750 ) N ;
+  - dbg[25] + NET dbg[25] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 545250 ) N ;
+  - dbg[26] + NET dbg[26] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 548750 ) N ;
+  - dbg[27] + NET dbg[27] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 552250 ) N ;
+  - dbg[28] + NET dbg[28] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 555750 ) N ;
+  - dbg[29] + NET dbg[29] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 559250 ) N ;
+  - dbg[30] + NET dbg[30] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 562750 ) N ;
+  - dbg[31] + NET dbg[31] + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 1011500 566250 ) N ;
+END PINS
+
+BLOCKAGES 2 ;
+  - LAYER M5 RECT ( 772000 303520 ) ( 812000 476960 ) ;
+  - PLACEMENT RECT ( 772000 0 ) ( 812000 86720 ) ;
+END BLOCKAGES
+
+SPECIALNETS 2 ;
+  - VDD ( * VDD ) + ROUTED M6 2000 ( 182160 5000 ) ( * 862200 )
+      NEW M6 2000 ( 829840 5000 ) ( * 862200 ) + USE POWER ;
+  - VSS ( * VSS ) + ROUTED M6 2000 ( 506000 5000 ) ( * 862200 ) + USE GROUND ;
+END SPECIALNETS
+
+NETS 1230 ;
+  - boot[0] ( PIN boot[0] ) ( u_imem wdata[0] ) + USE SIGNAL ;
+  - boot[10] ( PIN boot[10] ) ( u_imem wdata[10] ) + USE SIGNAL ;
+  - boot[11] ( PIN boot[11] ) ( u_imem wdata[11] ) + USE SIGNAL ;
+  - boot[12] ( PIN boot[12] ) ( u_imem wdata[12] ) + USE SIGNAL ;
+  - boot[13] ( PIN boot[13] ) ( u_imem wdata[13] ) + USE SIGNAL ;
+  - boot[14] ( PIN boot[14] ) ( u_imem wdata[14] ) + USE SIGNAL ;
+  - boot[15] ( PIN boot[15] ) ( u_imem wdata[15] ) + USE SIGNAL ;
+  - boot[16] ( PIN boot[16] ) ( u_imem wdata[16] ) + USE SIGNAL ;
+  - boot[17] ( PIN boot[17] ) ( u_imem wdata[17] ) + USE SIGNAL ;
+  - boot[18] ( PIN boot[18] ) ( u_imem wdata[18] ) + USE SIGNAL ;
+  - boot[19] ( PIN boot[19] ) ( u_imem wdata[19] ) + USE SIGNAL ;
+  - boot[1] ( PIN boot[1] ) ( u_imem wdata[1] ) + USE SIGNAL ;
+  - boot[20] ( PIN boot[20] ) ( u_imem wdata[20] ) + USE SIGNAL ;
+  - boot[21] ( PIN boot[21] ) ( u_imem wdata[21] ) + USE SIGNAL ;
+  - boot[22] ( PIN boot[22] ) ( u_imem wdata[22] ) + USE SIGNAL ;
+  - boot[23] ( PIN boot[23] ) ( u_imem wdata[23] ) + USE SIGNAL ;
+  - boot[24] ( PIN boot[24] ) ( u_imem wdata[24] ) + USE SIGNAL ;
+  - boot[25] ( PIN boot[25] ) ( u_imem wdata[25] ) + USE SIGNAL ;
+  - boot[26] ( PIN boot[26] ) ( u_imem wdata[26] ) + USE SIGNAL ;
+  - boot[27] ( PIN boot[27] ) ( u_imem wdata[27] ) + USE SIGNAL ;
+  - boot[28] ( PIN boot[28] ) ( u_imem wdata[28] ) + USE SIGNAL ;
+  - boot[29] ( PIN boot[29] ) ( u_imem wdata[29] ) + USE SIGNAL ;
+  - boot[2] ( PIN boot[2] ) ( u_imem wdata[2] ) + USE SIGNAL ;
+  - boot[30] ( PIN boot[30] ) ( u_imem wdata[30] ) + USE SIGNAL ;
+  - boot[31] ( PIN boot[31] ) ( u_imem wdata[31] ) + USE SIGNAL ;
+  - boot[3] ( PIN boot[3] ) ( u_imem wdata[3] ) + USE SIGNAL ;
+  - boot[4] ( PIN boot[4] ) ( u_imem wdata[4] ) + USE SIGNAL ;
+  - boot[5] ( PIN boot[5] ) ( u_imem wdata[5] ) + USE SIGNAL ;
+  - boot[6] ( PIN boot[6] ) ( u_imem wdata[6] ) + USE SIGNAL ;
+  - boot[7] ( PIN boot[7] ) ( u_imem wdata[7] ) + USE SIGNAL ;
+  - boot[8] ( PIN boot[8] ) ( u_imem wdata[8] ) + USE SIGNAL ;
+  - boot[9] ( PIN boot[9] ) ( u_imem wdata[9] ) + USE SIGNAL ;
+  - dbg[0] ( PIN dbg[0] ) ( u_cl/u_ixb/u_dmux y[0] ) + USE SIGNAL ;
+  - dbg[10] ( PIN dbg[10] ) ( u_cl/u_ixb/u_dmux y[10] ) + USE SIGNAL ;
+  - dbg[11] ( PIN dbg[11] ) ( u_cl/u_ixb/u_dmux y[11] ) + USE SIGNAL ;
+  - dbg[12] ( PIN dbg[12] ) ( u_cl/u_ixb/u_dmux y[12] ) + USE SIGNAL ;
+  - dbg[13] ( PIN dbg[13] ) ( u_cl/u_ixb/u_dmux y[13] ) + USE SIGNAL ;
+  - dbg[14] ( PIN dbg[14] ) ( u_cl/u_ixb/u_dmux y[14] ) + USE SIGNAL ;
+  - dbg[15] ( PIN dbg[15] ) ( u_cl/u_ixb/u_dmux y[15] ) + USE SIGNAL ;
+  - dbg[16] ( PIN dbg[16] ) ( u_cl/u_ixb/u_dmux y[16] ) + USE SIGNAL ;
+  - dbg[17] ( PIN dbg[17] ) ( u_cl/u_ixb/u_dmux y[17] ) + USE SIGNAL ;
+  - dbg[18] ( PIN dbg[18] ) ( u_cl/u_ixb/u_dmux y[18] ) + USE SIGNAL ;
+  - dbg[19] ( PIN dbg[19] ) ( u_cl/u_ixb/u_dmux y[19] ) + USE SIGNAL ;
+  - dbg[1] ( PIN dbg[1] ) ( u_cl/u_ixb/u_dmux y[1] ) + USE SIGNAL ;
+  - dbg[20] ( PIN dbg[20] ) ( u_cl/u_ixb/u_dmux y[20] ) + USE SIGNAL ;
+  - dbg[21] ( PIN dbg[21] ) ( u_cl/u_ixb/u_dmux y[21] ) + USE SIGNAL ;
+  - dbg[22] ( PIN dbg[22] ) ( u_cl/u_ixb/u_dmux y[22] ) + USE SIGNAL ;
+  - dbg[23] ( PIN dbg[23] ) ( u_cl/u_ixb/u_dmux y[23] ) + USE SIGNAL ;
+  - dbg[24] ( PIN dbg[24] ) ( u_cl/u_ixb/u_dmux y[24] ) + USE SIGNAL ;
+  - dbg[25] ( PIN dbg[25] ) ( u_cl/u_ixb/u_dmux y[25] ) + USE SIGNAL ;
+  - dbg[26] ( PIN dbg[26] ) ( u_cl/u_ixb/u_dmux y[26] ) + USE SIGNAL ;
+  - dbg[27] ( PIN dbg[27] ) ( u_cl/u_ixb/u_dmux y[27] ) + USE SIGNAL ;
+  - dbg[28] ( PIN dbg[28] ) ( u_cl/u_ixb/u_dmux y[28] ) + USE SIGNAL ;
+  - dbg[29] ( PIN dbg[29] ) ( u_cl/u_ixb/u_dmux y[29] ) + USE SIGNAL ;
+  - dbg[2] ( PIN dbg[2] ) ( u_cl/u_ixb/u_dmux y[2] ) + USE SIGNAL ;
+  - dbg[30] ( PIN dbg[30] ) ( u_cl/u_ixb/u_dmux y[30] ) + USE SIGNAL ;
+  - dbg[31] ( PIN dbg[31] ) ( u_cl/u_ixb/u_dmux y[31] ) + USE SIGNAL ;
+  - dbg[3] ( PIN dbg[3] ) ( u_cl/u_ixb/u_dmux y[3] ) + USE SIGNAL ;
+  - dbg[4] ( PIN dbg[4] ) ( u_cl/u_ixb/u_dmux y[4] ) + USE SIGNAL ;
+  - dbg[5] ( PIN dbg[5] ) ( u_cl/u_ixb/u_dmux y[5] ) + USE SIGNAL ;
+  - dbg[6] ( PIN dbg[6] ) ( u_cl/u_ixb/u_dmux y[6] ) + USE SIGNAL ;
+  - dbg[7] ( PIN dbg[7] ) ( u_cl/u_ixb/u_dmux y[7] ) + USE SIGNAL ;
+  - dbg[8] ( PIN dbg[8] ) ( u_cl/u_ixb/u_dmux y[8] ) + USE SIGNAL ;
+  - dbg[9] ( PIN dbg[9] ) ( u_cl/u_ixb/u_dmux y[9] ) + USE SIGNAL ;
+  - iaddr[0] ( u_cl/u_ixb/u_amux y[0] ) ( u_imem addr[0] ) + USE SIGNAL ;
+  - iaddr[1] ( u_cl/u_ixb/u_amux y[1] ) ( u_imem addr[1] ) + USE SIGNAL ;
+  - iaddr[2] ( u_cl/u_ixb/u_amux y[2] ) ( u_imem addr[2] ) + USE SIGNAL ;
+  - iaddr[3] ( u_cl/u_ixb/u_amux y[3] ) ( u_imem addr[3] ) + USE SIGNAL ;
+  - iaddr[4] ( u_cl/u_ixb/u_amux y[4] ) ( u_imem addr[4] ) + USE SIGNAL ;
+  - iaddr[5] ( u_cl/u_ixb/u_amux y[5] ) ( u_imem addr[5] ) + USE SIGNAL ;
+  - iaddr[6] ( u_cl/u_ixb/u_amux y[6] ) ( u_imem addr[6] ) + USE SIGNAL ;
+  - iaddr[7] ( u_cl/u_ixb/u_amux y[7] ) ( u_imem addr[7] ) + USE SIGNAL ;
+  - iaddr[8] ( u_cl/u_ixb/u_amux y[8] ) ( u_imem addr[8] ) + USE SIGNAL ;
+  - iaddr[9] ( u_cl/u_ixb/u_amux y[9] ) ( u_imem addr[9] ) + USE SIGNAL ;
+  - instr[0] ( u_cl/u_c0/u_idu/u_dec instr[0] ) ( u_cl/u_c0/u_idu/u_imm instr[0] ) ( u_cl/u_c1/u_idu/u_dec instr[0] ) ( u_cl/u_c1/u_idu/u_imm instr[0] ) ( u_imem rdata[0] ) + USE SIGNAL ;
+  - instr[10] ( u_cl/u_c0/u_idu/u_dec instr[10] ) ( u_cl/u_c0/u_idu/u_imm instr[10] ) ( u_cl/u_c1/u_idu/u_dec instr[10] ) ( u_cl/u_c1/u_idu/u_imm instr[10] ) ( u_imem rdata[10] ) + USE SIGNAL ;
+  - instr[11] ( u_cl/u_c0/u_idu/u_dec instr[11] ) ( u_cl/u_c0/u_idu/u_imm instr[11] ) ( u_cl/u_c1/u_idu/u_dec instr[11] ) ( u_cl/u_c1/u_idu/u_imm instr[11] ) ( u_imem rdata[11] ) + USE SIGNAL ;
+  - instr[12] ( u_cl/u_c0/u_idu/u_dec instr[12] ) ( u_cl/u_c0/u_idu/u_imm instr[12] ) ( u_cl/u_c1/u_idu/u_dec instr[12] ) ( u_cl/u_c1/u_idu/u_imm instr[12] ) ( u_imem rdata[12] ) + USE SIGNAL ;
+  - instr[13] ( u_cl/u_c0/u_idu/u_dec instr[13] ) ( u_cl/u_c0/u_idu/u_imm instr[13] ) ( u_cl/u_c1/u_idu/u_dec instr[13] ) ( u_cl/u_c1/u_idu/u_imm instr[13] ) ( u_imem rdata[13] ) + USE SIGNAL ;
+  - instr[14] ( u_cl/u_c0/u_idu/u_dec instr[14] ) ( u_cl/u_c0/u_idu/u_imm instr[14] ) ( u_cl/u_c1/u_idu/u_dec instr[14] ) ( u_cl/u_c1/u_idu/u_imm instr[14] ) ( u_imem rdata[14] ) + USE SIGNAL ;
+  - instr[15] ( u_cl/u_c0/u_idu/u_dec instr[15] ) ( u_cl/u_c0/u_idu/u_imm instr[15] ) ( u_cl/u_c1/u_idu/u_dec instr[15] ) ( u_cl/u_c1/u_idu/u_imm instr[15] ) ( u_imem rdata[15] ) + USE SIGNAL ;
+  - instr[16] ( u_cl/u_c0/u_idu/u_dec instr[16] ) ( u_cl/u_c0/u_idu/u_imm instr[16] ) ( u_cl/u_c1/u_idu/u_dec instr[16] ) ( u_cl/u_c1/u_idu/u_imm instr[16] ) ( u_imem rdata[16] ) + USE SIGNAL ;
+  - instr[17] ( u_cl/u_c0/u_idu/u_dec instr[17] ) ( u_cl/u_c0/u_idu/u_imm instr[17] ) ( u_cl/u_c1/u_idu/u_dec instr[17] ) ( u_cl/u_c1/u_idu/u_imm instr[17] ) ( u_imem rdata[17] ) + USE SIGNAL ;
+  - instr[18] ( u_cl/u_c0/u_idu/u_dec instr[18] ) ( u_cl/u_c0/u_idu/u_imm instr[18] ) ( u_cl/u_c1/u_idu/u_dec instr[18] ) ( u_cl/u_c1/u_idu/u_imm instr[18] ) ( u_imem rdata[18] ) + USE SIGNAL ;
+  - instr[19] ( u_cl/u_c0/u_idu/u_dec instr[19] ) ( u_cl/u_c0/u_idu/u_imm instr[19] ) ( u_cl/u_c1/u_idu/u_dec instr[19] ) ( u_cl/u_c1/u_idu/u_imm instr[19] ) ( u_imem rdata[19] ) + USE SIGNAL ;
+  - instr[1] ( u_cl/u_c0/u_idu/u_dec instr[1] ) ( u_cl/u_c0/u_idu/u_imm instr[1] ) ( u_cl/u_c1/u_idu/u_dec instr[1] ) ( u_cl/u_c1/u_idu/u_imm instr[1] ) ( u_imem rdata[1] ) + USE SIGNAL ;
+  - instr[20] ( u_cl/u_c0/u_idu/u_dec instr[20] ) ( u_cl/u_c0/u_idu/u_imm instr[20] ) ( u_cl/u_c1/u_idu/u_dec instr[20] ) ( u_cl/u_c1/u_idu/u_imm instr[20] ) ( u_imem rdata[20] ) + USE SIGNAL ;
+  - instr[21] ( u_cl/u_c0/u_idu/u_dec instr[21] ) ( u_cl/u_c0/u_idu/u_imm instr[21] ) ( u_cl/u_c1/u_idu/u_dec instr[21] ) ( u_cl/u_c1/u_idu/u_imm instr[21] ) ( u_imem rdata[21] ) + USE SIGNAL ;
+  - instr[22] ( u_cl/u_c0/u_idu/u_dec instr[22] ) ( u_cl/u_c0/u_idu/u_imm instr[22] ) ( u_cl/u_c1/u_idu/u_dec instr[22] ) ( u_cl/u_c1/u_idu/u_imm instr[22] ) ( u_imem rdata[22] ) + USE SIGNAL ;
+  - instr[23] ( u_cl/u_c0/u_idu/u_dec instr[23] ) ( u_cl/u_c0/u_idu/u_imm instr[23] ) ( u_cl/u_c1/u_idu/u_dec instr[23] ) ( u_cl/u_c1/u_idu/u_imm instr[23] ) ( u_imem rdata[23] ) + USE SIGNAL ;
+  - instr[24] ( u_cl/u_c0/u_idu/u_dec instr[24] ) ( u_cl/u_c0/u_idu/u_imm instr[24] ) ( u_cl/u_c1/u_idu/u_dec instr[24] ) ( u_cl/u_c1/u_idu/u_imm instr[24] ) ( u_imem rdata[24] ) + USE SIGNAL ;
+  - instr[25] ( u_cl/u_c0/u_idu/u_dec instr[25] ) ( u_cl/u_c0/u_idu/u_imm instr[25] ) ( u_cl/u_c1/u_idu/u_dec instr[25] ) ( u_cl/u_c1/u_idu/u_imm instr[25] ) ( u_imem rdata[25] ) + USE SIGNAL ;
+  - instr[26] ( u_cl/u_c0/u_idu/u_dec instr[26] ) ( u_cl/u_c0/u_idu/u_imm instr[26] ) ( u_cl/u_c1/u_idu/u_dec instr[26] ) ( u_cl/u_c1/u_idu/u_imm instr[26] ) ( u_imem rdata[26] ) + USE SIGNAL ;
+  - instr[27] ( u_cl/u_c0/u_idu/u_dec instr[27] ) ( u_cl/u_c0/u_idu/u_imm instr[27] ) ( u_cl/u_c1/u_idu/u_dec instr[27] ) ( u_cl/u_c1/u_idu/u_imm instr[27] ) ( u_imem rdata[27] ) + USE SIGNAL ;
+  - instr[28] ( u_cl/u_c0/u_idu/u_dec instr[28] ) ( u_cl/u_c0/u_idu/u_imm instr[28] ) ( u_cl/u_c1/u_idu/u_dec instr[28] ) ( u_cl/u_c1/u_idu/u_imm instr[28] ) ( u_imem rdata[28] ) + USE SIGNAL ;
+  - instr[29] ( u_cl/u_c0/u_idu/u_dec instr[29] ) ( u_cl/u_c0/u_idu/u_imm instr[29] ) ( u_cl/u_c1/u_idu/u_dec instr[29] ) ( u_cl/u_c1/u_idu/u_imm instr[29] ) ( u_imem rdata[29] ) + USE SIGNAL ;
+  - instr[2] ( u_cl/u_c0/u_idu/u_dec instr[2] ) ( u_cl/u_c0/u_idu/u_imm instr[2] ) ( u_cl/u_c1/u_idu/u_dec instr[2] ) ( u_cl/u_c1/u_idu/u_imm instr[2] ) ( u_imem rdata[2] ) + USE SIGNAL ;
+  - instr[30] ( u_cl/u_c0/u_idu/u_dec instr[30] ) ( u_cl/u_c0/u_idu/u_imm instr[30] ) ( u_cl/u_c1/u_idu/u_dec instr[30] ) ( u_cl/u_c1/u_idu/u_imm instr[30] ) ( u_imem rdata[30] ) + USE SIGNAL ;
+  - instr[31] ( u_cl/u_c0/u_idu/u_dec instr[31] ) ( u_cl/u_c0/u_idu/u_imm instr[31] ) ( u_cl/u_c1/u_idu/u_dec instr[31] ) ( u_cl/u_c1/u_idu/u_imm instr[31] ) ( u_imem rdata[31] ) + USE SIGNAL ;
+  - instr[3] ( u_cl/u_c0/u_idu/u_dec instr[3] ) ( u_cl/u_c0/u_idu/u_imm instr[3] ) ( u_cl/u_c1/u_idu/u_dec instr[3] ) ( u_cl/u_c1/u_idu/u_imm instr[3] ) ( u_imem rdata[3] ) + USE SIGNAL ;
+  - instr[4] ( u_cl/u_c0/u_idu/u_dec instr[4] ) ( u_cl/u_c0/u_idu/u_imm instr[4] ) ( u_cl/u_c1/u_idu/u_dec instr[4] ) ( u_cl/u_c1/u_idu/u_imm instr[4] ) ( u_imem rdata[4] ) + USE SIGNAL ;
+  - instr[5] ( u_cl/u_c0/u_idu/u_dec instr[5] ) ( u_cl/u_c0/u_idu/u_imm instr[5] ) ( u_cl/u_c1/u_idu/u_dec instr[5] ) ( u_cl/u_c1/u_idu/u_imm instr[5] ) ( u_imem rdata[5] ) + USE SIGNAL ;
+  - instr[6] ( u_cl/u_c0/u_idu/u_dec instr[6] ) ( u_cl/u_c0/u_idu/u_imm instr[6] ) ( u_cl/u_c1/u_idu/u_dec instr[6] ) ( u_cl/u_c1/u_idu/u_imm instr[6] ) ( u_imem rdata[6] ) + USE SIGNAL ;
+  - instr[7] ( u_cl/u_c0/u_idu/u_dec instr[7] ) ( u_cl/u_c0/u_idu/u_imm instr[7] ) ( u_cl/u_c1/u_idu/u_dec instr[7] ) ( u_cl/u_c1/u_idu/u_imm instr[7] ) ( u_imem rdata[7] ) + USE SIGNAL ;
+  - instr[8] ( u_cl/u_c0/u_idu/u_dec instr[8] ) ( u_cl/u_c0/u_idu/u_imm instr[8] ) ( u_cl/u_c1/u_idu/u_dec instr[8] ) ( u_cl/u_c1/u_idu/u_imm instr[8] ) ( u_imem rdata[8] ) + USE SIGNAL ;
+  - instr[9] ( u_cl/u_c0/u_idu/u_dec instr[9] ) ( u_cl/u_c0/u_idu/u_imm instr[9] ) ( u_cl/u_c1/u_idu/u_dec instr[9] ) ( u_cl/u_c1/u_idu/u_imm instr[9] ) ( u_imem rdata[9] ) + USE SIGNAL ;
+  - maddr[0] ( u_cl/u_dxb/u_amux y[0] ) ( u_dmem addr[0] ) + USE SIGNAL ;
+  - maddr[1] ( u_cl/u_dxb/u_amux y[1] ) ( u_dmem addr[1] ) + USE SIGNAL ;
+  - maddr[2] ( u_cl/u_dxb/u_amux y[2] ) ( u_dmem addr[2] ) + USE SIGNAL ;
+  - maddr[3] ( u_cl/u_dxb/u_amux y[3] ) ( u_dmem addr[3] ) + USE SIGNAL ;
+  - maddr[4] ( u_cl/u_dxb/u_amux y[4] ) ( u_dmem addr[4] ) + USE SIGNAL ;
+  - maddr[5] ( u_cl/u_dxb/u_amux y[5] ) ( u_dmem addr[5] ) + USE SIGNAL ;
+  - maddr[6] ( u_cl/u_dxb/u_amux y[6] ) ( u_dmem addr[6] ) + USE SIGNAL ;
+  - maddr[7] ( u_cl/u_dxb/u_amux y[7] ) ( u_dmem addr[7] ) + USE SIGNAL ;
+  - maddr[8] ( u_cl/u_dxb/u_amux y[8] ) ( u_dmem addr[8] ) + USE SIGNAL ;
+  - maddr[9] ( u_cl/u_dxb/u_amux y[9] ) ( u_dmem addr[9] ) + USE SIGNAL ;
+  - mdata[0] ( u_cl/u_dxb/u_dmux y[0] ) ( u_dmem wdata[0] ) + USE SIGNAL ;
+  - mdata[10] ( u_cl/u_dxb/u_dmux y[10] ) ( u_dmem wdata[10] ) + USE SIGNAL ;
+  - mdata[11] ( u_cl/u_dxb/u_dmux y[11] ) ( u_dmem wdata[11] ) + USE SIGNAL ;
+  - mdata[12] ( u_cl/u_dxb/u_dmux y[12] ) ( u_dmem wdata[12] ) + USE SIGNAL ;
+  - mdata[13] ( u_cl/u_dxb/u_dmux y[13] ) ( u_dmem wdata[13] ) + USE SIGNAL ;
+  - mdata[14] ( u_cl/u_dxb/u_dmux y[14] ) ( u_dmem wdata[14] ) + USE SIGNAL ;
+  - mdata[15] ( u_cl/u_dxb/u_dmux y[15] ) ( u_dmem wdata[15] ) + USE SIGNAL ;
+  - mdata[16] ( u_cl/u_dxb/u_dmux y[16] ) ( u_dmem wdata[16] ) + USE SIGNAL ;
+  - mdata[17] ( u_cl/u_dxb/u_dmux y[17] ) ( u_dmem wdata[17] ) + USE SIGNAL ;
+  - mdata[18] ( u_cl/u_dxb/u_dmux y[18] ) ( u_dmem wdata[18] ) + USE SIGNAL ;
+  - mdata[19] ( u_cl/u_dxb/u_dmux y[19] ) ( u_dmem wdata[19] ) + USE SIGNAL ;
+  - mdata[1] ( u_cl/u_dxb/u_dmux y[1] ) ( u_dmem wdata[1] ) + USE SIGNAL ;
+  - mdata[20] ( u_cl/u_dxb/u_dmux y[20] ) ( u_dmem wdata[20] ) + USE SIGNAL ;
+  - mdata[21] ( u_cl/u_dxb/u_dmux y[21] ) ( u_dmem wdata[21] ) + USE SIGNAL ;
+  - mdata[22] ( u_cl/u_dxb/u_dmux y[22] ) ( u_dmem wdata[22] ) + USE SIGNAL ;
+  - mdata[23] ( u_cl/u_dxb/u_dmux y[23] ) ( u_dmem wdata[23] ) + USE SIGNAL ;
+  - mdata[24] ( u_cl/u_dxb/u_dmux y[24] ) ( u_dmem wdata[24] ) + USE SIGNAL ;
+  - mdata[25] ( u_cl/u_dxb/u_dmux y[25] ) ( u_dmem wdata[25] ) + USE SIGNAL ;
+  - mdata[26] ( u_cl/u_dxb/u_dmux y[26] ) ( u_dmem wdata[26] ) + USE SIGNAL ;
+  - mdata[27] ( u_cl/u_dxb/u_dmux y[27] ) ( u_dmem wdata[27] ) + USE SIGNAL ;
+  - mdata[28] ( u_cl/u_dxb/u_dmux y[28] ) ( u_dmem wdata[28] ) + USE SIGNAL ;
+  - mdata[29] ( u_cl/u_dxb/u_dmux y[29] ) ( u_dmem wdata[29] ) + USE SIGNAL ;
+  - mdata[2] ( u_cl/u_dxb/u_dmux y[2] ) ( u_dmem wdata[2] ) + USE SIGNAL ;
+  - mdata[30] ( u_cl/u_dxb/u_dmux y[30] ) ( u_dmem wdata[30] ) + USE SIGNAL ;
+  - mdata[31] ( u_cl/u_dxb/u_dmux y[31] ) ( u_dmem wdata[31] ) + USE SIGNAL ;
+  - mdata[3] ( u_cl/u_dxb/u_dmux y[3] ) ( u_dmem wdata[3] ) + USE SIGNAL ;
+  - mdata[4] ( u_cl/u_dxb/u_dmux y[4] ) ( u_dmem wdata[4] ) + USE SIGNAL ;
+  - mdata[5] ( u_cl/u_dxb/u_dmux y[5] ) ( u_dmem wdata[5] ) + USE SIGNAL ;
+  - mdata[6] ( u_cl/u_dxb/u_dmux y[6] ) ( u_dmem wdata[6] ) + USE SIGNAL ;
+  - mdata[7] ( u_cl/u_dxb/u_dmux y[7] ) ( u_dmem wdata[7] ) + USE SIGNAL ;
+  - mdata[8] ( u_cl/u_dxb/u_dmux y[8] ) ( u_dmem wdata[8] ) + USE SIGNAL ;
+  - mdata[9] ( u_cl/u_dxb/u_dmux y[9] ) ( u_dmem wdata[9] ) + USE SIGNAL ;
+  - mrd[0] ( u_cl/u_c0/u_lsu/u_algn din[0] ) ( u_cl/u_c1/u_lsu/u_algn din[0] ) ( u_dmem rdata[0] ) + USE SIGNAL ;
+  - mrd[10] ( u_cl/u_c0/u_lsu/u_algn din[10] ) ( u_cl/u_c1/u_lsu/u_algn din[10] ) ( u_dmem rdata[10] ) + USE SIGNAL ;
+  - mrd[11] ( u_cl/u_c0/u_lsu/u_algn din[11] ) ( u_cl/u_c1/u_lsu/u_algn din[11] ) ( u_dmem rdata[11] ) + USE SIGNAL ;
+  - mrd[12] ( u_cl/u_c0/u_lsu/u_algn din[12] ) ( u_cl/u_c1/u_lsu/u_algn din[12] ) ( u_dmem rdata[12] ) + USE SIGNAL ;
+  - mrd[13] ( u_cl/u_c0/u_lsu/u_algn din[13] ) ( u_cl/u_c1/u_lsu/u_algn din[13] ) ( u_dmem rdata[13] ) + USE SIGNAL ;
+  - mrd[14] ( u_cl/u_c0/u_lsu/u_algn din[14] ) ( u_cl/u_c1/u_lsu/u_algn din[14] ) ( u_dmem rdata[14] ) + USE SIGNAL ;
+  - mrd[15] ( u_cl/u_c0/u_lsu/u_algn din[15] ) ( u_cl/u_c1/u_lsu/u_algn din[15] ) ( u_dmem rdata[15] ) + USE SIGNAL ;
+  - mrd[16] ( u_cl/u_c0/u_lsu/u_algn din[16] ) ( u_cl/u_c1/u_lsu/u_algn din[16] ) ( u_dmem rdata[16] ) + USE SIGNAL ;
+  - mrd[17] ( u_cl/u_c0/u_lsu/u_algn din[17] ) ( u_cl/u_c1/u_lsu/u_algn din[17] ) ( u_dmem rdata[17] ) + USE SIGNAL ;
+  - mrd[18] ( u_cl/u_c0/u_lsu/u_algn din[18] ) ( u_cl/u_c1/u_lsu/u_algn din[18] ) ( u_dmem rdata[18] ) + USE SIGNAL ;
+  - mrd[19] ( u_cl/u_c0/u_lsu/u_algn din[19] ) ( u_cl/u_c1/u_lsu/u_algn din[19] ) ( u_dmem rdata[19] ) + USE SIGNAL ;
+  - mrd[1] ( u_cl/u_c0/u_lsu/u_algn din[1] ) ( u_cl/u_c1/u_lsu/u_algn din[1] ) ( u_dmem rdata[1] ) + USE SIGNAL ;
+  - mrd[20] ( u_cl/u_c0/u_lsu/u_algn din[20] ) ( u_cl/u_c1/u_lsu/u_algn din[20] ) ( u_dmem rdata[20] ) + USE SIGNAL ;
+  - mrd[21] ( u_cl/u_c0/u_lsu/u_algn din[21] ) ( u_cl/u_c1/u_lsu/u_algn din[21] ) ( u_dmem rdata[21] ) + USE SIGNAL ;
+  - mrd[22] ( u_cl/u_c0/u_lsu/u_algn din[22] ) ( u_cl/u_c1/u_lsu/u_algn din[22] ) ( u_dmem rdata[22] ) + USE SIGNAL ;
+  - mrd[23] ( u_cl/u_c0/u_lsu/u_algn din[23] ) ( u_cl/u_c1/u_lsu/u_algn din[23] ) ( u_dmem rdata[23] ) + USE SIGNAL ;
+  - mrd[24] ( u_cl/u_c0/u_lsu/u_algn din[24] ) ( u_cl/u_c1/u_lsu/u_algn din[24] ) ( u_dmem rdata[24] ) + USE SIGNAL ;
+  - mrd[25] ( u_cl/u_c0/u_lsu/u_algn din[25] ) ( u_cl/u_c1/u_lsu/u_algn din[25] ) ( u_dmem rdata[25] ) + USE SIGNAL ;
+  - mrd[26] ( u_cl/u_c0/u_lsu/u_algn din[26] ) ( u_cl/u_c1/u_lsu/u_algn din[26] ) ( u_dmem rdata[26] ) + USE SIGNAL ;
+  - mrd[27] ( u_cl/u_c0/u_lsu/u_algn din[27] ) ( u_cl/u_c1/u_lsu/u_algn din[27] ) ( u_dmem rdata[27] ) + USE SIGNAL ;
+  - mrd[28] ( u_cl/u_c0/u_lsu/u_algn din[28] ) ( u_cl/u_c1/u_lsu/u_algn din[28] ) ( u_dmem rdata[28] ) + USE SIGNAL ;
+  - mrd[29] ( u_cl/u_c0/u_lsu/u_algn din[29] ) ( u_cl/u_c1/u_lsu/u_algn din[29] ) ( u_dmem rdata[29] ) + USE SIGNAL ;
+  - mrd[2] ( u_cl/u_c0/u_lsu/u_algn din[2] ) ( u_cl/u_c1/u_lsu/u_algn din[2] ) ( u_dmem rdata[2] ) + USE SIGNAL ;
+  - mrd[30] ( u_cl/u_c0/u_lsu/u_algn din[30] ) ( u_cl/u_c1/u_lsu/u_algn din[30] ) ( u_dmem rdata[30] ) + USE SIGNAL ;
+  - mrd[31] ( u_cl/u_c0/u_lsu/u_algn din[31] ) ( u_cl/u_c1/u_lsu/u_algn din[31] ) ( u_dmem rdata[31] ) + USE SIGNAL ;
+  - mrd[3] ( u_cl/u_c0/u_lsu/u_algn din[3] ) ( u_cl/u_c1/u_lsu/u_algn din[3] ) ( u_dmem rdata[3] ) + USE SIGNAL ;
+  - mrd[4] ( u_cl/u_c0/u_lsu/u_algn din[4] ) ( u_cl/u_c1/u_lsu/u_algn din[4] ) ( u_dmem rdata[4] ) + USE SIGNAL ;
+  - mrd[5] ( u_cl/u_c0/u_lsu/u_algn din[5] ) ( u_cl/u_c1/u_lsu/u_algn din[5] ) ( u_dmem rdata[5] ) + USE SIGNAL ;
+  - mrd[6] ( u_cl/u_c0/u_lsu/u_algn din[6] ) ( u_cl/u_c1/u_lsu/u_algn din[6] ) ( u_dmem rdata[6] ) + USE SIGNAL ;
+  - mrd[7] ( u_cl/u_c0/u_lsu/u_algn din[7] ) ( u_cl/u_c1/u_lsu/u_algn din[7] ) ( u_dmem rdata[7] ) + USE SIGNAL ;
+  - mrd[8] ( u_cl/u_c0/u_lsu/u_algn din[8] ) ( u_cl/u_c1/u_lsu/u_algn din[8] ) ( u_dmem rdata[8] ) + USE SIGNAL ;
+  - mrd[9] ( u_cl/u_c0/u_lsu/u_algn din[9] ) ( u_cl/u_c1/u_lsu/u_algn din[9] ) ( u_dmem rdata[9] ) + USE SIGNAL ;
+  - mwe ( u_cl/u_c0/u_lsu/u_swe taken ) ( u_dmem en ) ( u_dmem we ) ( u_imem en ) ( u_imem we ) + USE SIGNAL ;
+  - u_cl/da0[0] ( u_cl/u_c0/u_lsu/u_dab dout[0] ) ( u_cl/u_dxb/u_amux a[0] ) + USE SIGNAL ;
+  - u_cl/da0[1] ( u_cl/u_c0/u_lsu/u_dab dout[1] ) ( u_cl/u_dxb/u_amux a[1] ) + USE SIGNAL ;
+  - u_cl/da0[2] ( u_cl/u_c0/u_lsu/u_dab dout[2] ) ( u_cl/u_dxb/u_amux a[2] ) + USE SIGNAL ;
+  - u_cl/da0[3] ( u_cl/u_c0/u_lsu/u_dab dout[3] ) ( u_cl/u_dxb/u_amux a[3] ) + USE SIGNAL ;
+  - u_cl/da0[4] ( u_cl/u_c0/u_lsu/u_dab dout[4] ) ( u_cl/u_dxb/u_amux a[4] ) + USE SIGNAL ;
+  - u_cl/da0[5] ( u_cl/u_c0/u_lsu/u_dab dout[5] ) ( u_cl/u_dxb/u_amux a[5] ) + USE SIGNAL ;
+  - u_cl/da0[6] ( u_cl/u_c0/u_lsu/u_dab dout[6] ) ( u_cl/u_dxb/u_amux a[6] ) + USE SIGNAL ;
+  - u_cl/da0[7] ( u_cl/u_c0/u_lsu/u_dab dout[7] ) ( u_cl/u_dxb/u_amux a[7] ) + USE SIGNAL ;
+  - u_cl/da0[8] ( u_cl/u_c0/u_lsu/u_dab dout[8] ) ( u_cl/u_dxb/u_amux a[8] ) + USE SIGNAL ;
+  - u_cl/da0[9] ( u_cl/u_c0/u_lsu/u_dab dout[9] ) ( u_cl/u_dxb/u_amux a[9] ) + USE SIGNAL ;
+  - u_cl/da1[0] ( u_cl/u_c1/u_lsu/u_dab dout[0] ) ( u_cl/u_dxb/u_amux b[0] ) + USE SIGNAL ;
+  - u_cl/da1[1] ( u_cl/u_c1/u_lsu/u_dab dout[1] ) ( u_cl/u_dxb/u_amux b[1] ) + USE SIGNAL ;
+  - u_cl/da1[2] ( u_cl/u_c1/u_lsu/u_dab dout[2] ) ( u_cl/u_dxb/u_amux b[2] ) + USE SIGNAL ;
+  - u_cl/da1[3] ( u_cl/u_c1/u_lsu/u_dab dout[3] ) ( u_cl/u_dxb/u_amux b[3] ) + USE SIGNAL ;
+  - u_cl/da1[4] ( u_cl/u_c1/u_lsu/u_dab dout[4] ) ( u_cl/u_dxb/u_amux b[4] ) + USE SIGNAL ;
+  - u_cl/da1[5] ( u_cl/u_c1/u_lsu/u_dab dout[5] ) ( u_cl/u_dxb/u_amux b[5] ) + USE SIGNAL ;
+  - u_cl/da1[6] ( u_cl/u_c1/u_lsu/u_dab dout[6] ) ( u_cl/u_dxb/u_amux b[6] ) + USE SIGNAL ;
+  - u_cl/da1[7] ( u_cl/u_c1/u_lsu/u_dab dout[7] ) ( u_cl/u_dxb/u_amux b[7] ) + USE SIGNAL ;
+  - u_cl/da1[8] ( u_cl/u_c1/u_lsu/u_dab dout[8] ) ( u_cl/u_dxb/u_amux b[8] ) + USE SIGNAL ;
+  - u_cl/da1[9] ( u_cl/u_c1/u_lsu/u_dab dout[9] ) ( u_cl/u_dxb/u_amux b[9] ) + USE SIGNAL ;
+  - u_cl/ia0[0] ( u_cl/u_c0/u_ifu/u_iab dout[0] ) ( u_cl/u_ixb/u_amux a[0] ) + USE SIGNAL ;
+  - u_cl/ia0[1] ( u_cl/u_c0/u_ifu/u_iab dout[1] ) ( u_cl/u_ixb/u_amux a[1] ) + USE SIGNAL ;
+  - u_cl/ia0[2] ( u_cl/u_c0/u_ifu/u_iab dout[2] ) ( u_cl/u_ixb/u_amux a[2] ) + USE SIGNAL ;
+  - u_cl/ia0[3] ( u_cl/u_c0/u_ifu/u_iab dout[3] ) ( u_cl/u_ixb/u_amux a[3] ) + USE SIGNAL ;
+  - u_cl/ia0[4] ( u_cl/u_c0/u_ifu/u_iab dout[4] ) ( u_cl/u_ixb/u_amux a[4] ) + USE SIGNAL ;
+  - u_cl/ia0[5] ( u_cl/u_c0/u_ifu/u_iab dout[5] ) ( u_cl/u_ixb/u_amux a[5] ) + USE SIGNAL ;
+  - u_cl/ia0[6] ( u_cl/u_c0/u_ifu/u_iab dout[6] ) ( u_cl/u_ixb/u_amux a[6] ) + USE SIGNAL ;
+  - u_cl/ia0[7] ( u_cl/u_c0/u_ifu/u_iab dout[7] ) ( u_cl/u_ixb/u_amux a[7] ) + USE SIGNAL ;
+  - u_cl/ia0[8] ( u_cl/u_c0/u_ifu/u_iab dout[8] ) ( u_cl/u_ixb/u_amux a[8] ) + USE SIGNAL ;
+  - u_cl/ia0[9] ( u_cl/u_c0/u_ifu/u_iab dout[9] ) ( u_cl/u_ixb/u_amux a[9] ) + USE SIGNAL ;
+  - u_cl/ia1[0] ( u_cl/u_c1/u_ifu/u_iab dout[0] ) ( u_cl/u_ixb/u_amux b[0] ) + USE SIGNAL ;
+  - u_cl/ia1[1] ( u_cl/u_c1/u_ifu/u_iab dout[1] ) ( u_cl/u_ixb/u_amux b[1] ) + USE SIGNAL ;
+  - u_cl/ia1[2] ( u_cl/u_c1/u_ifu/u_iab dout[2] ) ( u_cl/u_ixb/u_amux b[2] ) + USE SIGNAL ;
+  - u_cl/ia1[3] ( u_cl/u_c1/u_ifu/u_iab dout[3] ) ( u_cl/u_ixb/u_amux b[3] ) + USE SIGNAL ;
+  - u_cl/ia1[4] ( u_cl/u_c1/u_ifu/u_iab dout[4] ) ( u_cl/u_ixb/u_amux b[4] ) + USE SIGNAL ;
+  - u_cl/ia1[5] ( u_cl/u_c1/u_ifu/u_iab dout[5] ) ( u_cl/u_ixb/u_amux b[5] ) + USE SIGNAL ;
+  - u_cl/ia1[6] ( u_cl/u_c1/u_ifu/u_iab dout[6] ) ( u_cl/u_ixb/u_amux b[6] ) + USE SIGNAL ;
+  - u_cl/ia1[7] ( u_cl/u_c1/u_ifu/u_iab dout[7] ) ( u_cl/u_ixb/u_amux b[7] ) + USE SIGNAL ;
+  - u_cl/ia1[8] ( u_cl/u_c1/u_ifu/u_iab dout[8] ) ( u_cl/u_ixb/u_amux b[8] ) + USE SIGNAL ;
+  - u_cl/ia1[9] ( u_cl/u_c1/u_ifu/u_iab dout[9] ) ( u_cl/u_ixb/u_amux b[9] ) + USE SIGNAL ;
+  - u_cl/pc0[0] ( u_cl/u_c0/u_ifu/u_pcb q[0] ) ( u_cl/u_ixb/u_dmux a[0] ) + USE SIGNAL ;
+  - u_cl/pc0[10] ( u_cl/u_c0/u_ifu/u_pcb q[10] ) ( u_cl/u_ixb/u_dmux a[10] ) + USE SIGNAL ;
+  - u_cl/pc0[11] ( u_cl/u_c0/u_ifu/u_pcb q[11] ) ( u_cl/u_ixb/u_dmux a[11] ) + USE SIGNAL ;
+  - u_cl/pc0[12] ( u_cl/u_c0/u_ifu/u_pcb q[12] ) ( u_cl/u_ixb/u_dmux a[12] ) + USE SIGNAL ;
+  - u_cl/pc0[13] ( u_cl/u_c0/u_ifu/u_pcb q[13] ) ( u_cl/u_ixb/u_dmux a[13] ) + USE SIGNAL ;
+  - u_cl/pc0[14] ( u_cl/u_c0/u_ifu/u_pcb q[14] ) ( u_cl/u_ixb/u_dmux a[14] ) + USE SIGNAL ;
+  - u_cl/pc0[15] ( u_cl/u_c0/u_ifu/u_pcb q[15] ) ( u_cl/u_ixb/u_dmux a[15] ) + USE SIGNAL ;
+  - u_cl/pc0[16] ( u_cl/u_c0/u_ifu/u_pcb q[16] ) ( u_cl/u_ixb/u_dmux a[16] ) + USE SIGNAL ;
+  - u_cl/pc0[17] ( u_cl/u_c0/u_ifu/u_pcb q[17] ) ( u_cl/u_ixb/u_dmux a[17] ) + USE SIGNAL ;
+  - u_cl/pc0[18] ( u_cl/u_c0/u_ifu/u_pcb q[18] ) ( u_cl/u_ixb/u_dmux a[18] ) + USE SIGNAL ;
+  - u_cl/pc0[19] ( u_cl/u_c0/u_ifu/u_pcb q[19] ) ( u_cl/u_ixb/u_dmux a[19] ) + USE SIGNAL ;
+  - u_cl/pc0[1] ( u_cl/u_c0/u_ifu/u_pcb q[1] ) ( u_cl/u_ixb/u_dmux a[1] ) + USE SIGNAL ;
+  - u_cl/pc0[20] ( u_cl/u_c0/u_ifu/u_pcb q[20] ) ( u_cl/u_ixb/u_dmux a[20] ) + USE SIGNAL ;
+  - u_cl/pc0[21] ( u_cl/u_c0/u_ifu/u_pcb q[21] ) ( u_cl/u_ixb/u_dmux a[21] ) + USE SIGNAL ;
+  - u_cl/pc0[22] ( u_cl/u_c0/u_ifu/u_pcb q[22] ) ( u_cl/u_ixb/u_dmux a[22] ) + USE SIGNAL ;
+  - u_cl/pc0[23] ( u_cl/u_c0/u_ifu/u_pcb q[23] ) ( u_cl/u_ixb/u_dmux a[23] ) + USE SIGNAL ;
+  - u_cl/pc0[24] ( u_cl/u_c0/u_ifu/u_pcb q[24] ) ( u_cl/u_ixb/u_dmux a[24] ) + USE SIGNAL ;
+  - u_cl/pc0[25] ( u_cl/u_c0/u_ifu/u_pcb q[25] ) ( u_cl/u_ixb/u_dmux a[25] ) + USE SIGNAL ;
+  - u_cl/pc0[26] ( u_cl/u_c0/u_ifu/u_pcb q[26] ) ( u_cl/u_ixb/u_dmux a[26] ) + USE SIGNAL ;
+  - u_cl/pc0[27] ( u_cl/u_c0/u_ifu/u_pcb q[27] ) ( u_cl/u_ixb/u_dmux a[27] ) + USE SIGNAL ;
+  - u_cl/pc0[28] ( u_cl/u_c0/u_ifu/u_pcb q[28] ) ( u_cl/u_ixb/u_dmux a[28] ) + USE SIGNAL ;
+  - u_cl/pc0[29] ( u_cl/u_c0/u_ifu/u_pcb q[29] ) ( u_cl/u_ixb/u_dmux a[29] ) + USE SIGNAL ;
+  - u_cl/pc0[2] ( u_cl/u_c0/u_ifu/u_pcb q[2] ) ( u_cl/u_ixb/u_dmux a[2] ) + USE SIGNAL ;
+  - u_cl/pc0[30] ( u_cl/u_c0/u_ifu/u_pcb q[30] ) ( u_cl/u_ixb/u_dmux a[30] ) + USE SIGNAL ;
+  - u_cl/pc0[31] ( u_cl/u_c0/u_ifu/u_pcb q[31] ) ( u_cl/u_ixb/u_dmux a[31] ) + USE SIGNAL ;
+  - u_cl/pc0[3] ( u_cl/u_c0/u_ifu/u_pcb q[3] ) ( u_cl/u_ixb/u_dmux a[3] ) + USE SIGNAL ;
+  - u_cl/pc0[4] ( u_cl/u_c0/u_ifu/u_pcb q[4] ) ( u_cl/u_ixb/u_dmux a[4] ) + USE SIGNAL ;
+  - u_cl/pc0[5] ( u_cl/u_c0/u_ifu/u_pcb q[5] ) ( u_cl/u_ixb/u_dmux a[5] ) + USE SIGNAL ;
+  - u_cl/pc0[6] ( u_cl/u_c0/u_ifu/u_pcb q[6] ) ( u_cl/u_ixb/u_dmux a[6] ) + USE SIGNAL ;
+  - u_cl/pc0[7] ( u_cl/u_c0/u_ifu/u_pcb q[7] ) ( u_cl/u_ixb/u_dmux a[7] ) + USE SIGNAL ;
+  - u_cl/pc0[8] ( u_cl/u_c0/u_ifu/u_pcb q[8] ) ( u_cl/u_ixb/u_dmux a[8] ) + USE SIGNAL ;
+  - u_cl/pc0[9] ( u_cl/u_c0/u_ifu/u_pcb q[9] ) ( u_cl/u_ixb/u_dmux a[9] ) + USE SIGNAL ;
+  - u_cl/pc1[0] ( u_cl/u_c1/u_ifu/u_pcb q[0] ) ( u_cl/u_ixb/u_dmux b[0] ) + USE SIGNAL ;
+  - u_cl/pc1[10] ( u_cl/u_c1/u_ifu/u_pcb q[10] ) ( u_cl/u_ixb/u_dmux b[10] ) + USE SIGNAL ;
+  - u_cl/pc1[11] ( u_cl/u_c1/u_ifu/u_pcb q[11] ) ( u_cl/u_ixb/u_dmux b[11] ) + USE SIGNAL ;
+  - u_cl/pc1[12] ( u_cl/u_c1/u_ifu/u_pcb q[12] ) ( u_cl/u_ixb/u_dmux b[12] ) + USE SIGNAL ;
+  - u_cl/pc1[13] ( u_cl/u_c1/u_ifu/u_pcb q[13] ) ( u_cl/u_ixb/u_dmux b[13] ) + USE SIGNAL ;
+  - u_cl/pc1[14] ( u_cl/u_c1/u_ifu/u_pcb q[14] ) ( u_cl/u_ixb/u_dmux b[14] ) + USE SIGNAL ;
+  - u_cl/pc1[15] ( u_cl/u_c1/u_ifu/u_pcb q[15] ) ( u_cl/u_ixb/u_dmux b[15] ) + USE SIGNAL ;
+  - u_cl/pc1[16] ( u_cl/u_c1/u_ifu/u_pcb q[16] ) ( u_cl/u_ixb/u_dmux b[16] ) + USE SIGNAL ;
+  - u_cl/pc1[17] ( u_cl/u_c1/u_ifu/u_pcb q[17] ) ( u_cl/u_ixb/u_dmux b[17] ) + USE SIGNAL ;
+  - u_cl/pc1[18] ( u_cl/u_c1/u_ifu/u_pcb q[18] ) ( u_cl/u_ixb/u_dmux b[18] ) + USE SIGNAL ;
+  - u_cl/pc1[19] ( u_cl/u_c1/u_ifu/u_pcb q[19] ) ( u_cl/u_ixb/u_dmux b[19] ) + USE SIGNAL ;
+  - u_cl/pc1[1] ( u_cl/u_c1/u_ifu/u_pcb q[1] ) ( u_cl/u_ixb/u_dmux b[1] ) + USE SIGNAL ;
+  - u_cl/pc1[20] ( u_cl/u_c1/u_ifu/u_pcb q[20] ) ( u_cl/u_ixb/u_dmux b[20] ) + USE SIGNAL ;
+  - u_cl/pc1[21] ( u_cl/u_c1/u_ifu/u_pcb q[21] ) ( u_cl/u_ixb/u_dmux b[21] ) + USE SIGNAL ;
+  - u_cl/pc1[22] ( u_cl/u_c1/u_ifu/u_pcb q[22] ) ( u_cl/u_ixb/u_dmux b[22] ) + USE SIGNAL ;
+  - u_cl/pc1[23] ( u_cl/u_c1/u_ifu/u_pcb q[23] ) ( u_cl/u_ixb/u_dmux b[23] ) + USE SIGNAL ;
+  - u_cl/pc1[24] ( u_cl/u_c1/u_ifu/u_pcb q[24] ) ( u_cl/u_ixb/u_dmux b[24] ) + USE SIGNAL ;
+  - u_cl/pc1[25] ( u_cl/u_c1/u_ifu/u_pcb q[25] ) ( u_cl/u_ixb/u_dmux b[25] ) + USE SIGNAL ;
+  - u_cl/pc1[26] ( u_cl/u_c1/u_ifu/u_pcb q[26] ) ( u_cl/u_ixb/u_dmux b[26] ) + USE SIGNAL ;
+  - u_cl/pc1[27] ( u_cl/u_c1/u_ifu/u_pcb q[27] ) ( u_cl/u_ixb/u_dmux b[27] ) + USE SIGNAL ;
+  - u_cl/pc1[28] ( u_cl/u_c1/u_ifu/u_pcb q[28] ) ( u_cl/u_ixb/u_dmux b[28] ) + USE SIGNAL ;
+  - u_cl/pc1[29] ( u_cl/u_c1/u_ifu/u_pcb q[29] ) ( u_cl/u_ixb/u_dmux b[29] ) + USE SIGNAL ;
+  - u_cl/pc1[2] ( u_cl/u_c1/u_ifu/u_pcb q[2] ) ( u_cl/u_ixb/u_dmux b[2] ) + USE SIGNAL ;
+  - u_cl/pc1[30] ( u_cl/u_c1/u_ifu/u_pcb q[30] ) ( u_cl/u_ixb/u_dmux b[30] ) + USE SIGNAL ;
+  - u_cl/pc1[31] ( u_cl/u_c1/u_ifu/u_pcb q[31] ) ( u_cl/u_ixb/u_dmux b[31] ) + USE SIGNAL ;
+  - u_cl/pc1[3] ( u_cl/u_c1/u_ifu/u_pcb q[3] ) ( u_cl/u_ixb/u_dmux b[3] ) + USE SIGNAL ;
+  - u_cl/pc1[4] ( u_cl/u_c1/u_ifu/u_pcb q[4] ) ( u_cl/u_ixb/u_dmux b[4] ) + USE SIGNAL ;
+  - u_cl/pc1[5] ( u_cl/u_c1/u_ifu/u_pcb q[5] ) ( u_cl/u_ixb/u_dmux b[5] ) + USE SIGNAL ;
+  - u_cl/pc1[6] ( u_cl/u_c1/u_ifu/u_pcb q[6] ) ( u_cl/u_ixb/u_dmux b[6] ) + USE SIGNAL ;
+  - u_cl/pc1[7] ( u_cl/u_c1/u_ifu/u_pcb q[7] ) ( u_cl/u_ixb/u_dmux b[7] ) + USE SIGNAL ;
+  - u_cl/pc1[8] ( u_cl/u_c1/u_ifu/u_pcb q[8] ) ( u_cl/u_ixb/u_dmux b[8] ) + USE SIGNAL ;
+  - u_cl/pc1[9] ( u_cl/u_c1/u_ifu/u_pcb q[9] ) ( u_cl/u_ixb/u_dmux b[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/ctrl[0] ( u_cl/u_c0/u_exu/u_bsel s ) ( u_cl/u_c0/u_idu/u_dec ctrl[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/ctrl[1] ( u_cl/u_c0/u_exu/u_alu/u_log op[0] ) ( u_cl/u_c0/u_idu/u_dec ctrl[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/ctrl[2] ( u_cl/u_c0/u_exu/u_alu/u_log op[1] ) ( u_cl/u_c0/u_idu/u_dec ctrl[2] ) ( u_cl/u_c0/u_wbsel s ) + USE SIGNAL ;
+  - u_cl/u_c0/ctrl[3] ( u_cl/u_c0/u_exu/u_alu/u_ysel s ) ( u_cl/u_c0/u_idu/u_dec ctrl[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/ctrl[4] ( u_cl/u_c0/u_exu/u_bru op[0] ) ( u_cl/u_c0/u_idu/u_dec ctrl[4] ) ( u_cl/u_c0/u_lsu/u_algn sz[0] ) ( u_cl/u_c0/u_lsu/u_dab sz[0] ) ( u_cl/u_c0/u_lsu/u_swe op[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/ctrl[5] ( u_cl/u_c0/u_exu/u_bru op[1] ) ( u_cl/u_c0/u_idu/u_dec ctrl[5] ) ( u_cl/u_c0/u_lsu/u_algn sz[1] ) ( u_cl/u_c0/u_lsu/u_dab sz[1] ) ( u_cl/u_c0/u_lsu/u_swe op[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/ctrl[6] ( u_cl/u_c0/u_exu/u_bru op[2] ) ( u_cl/u_c0/u_idu/u_dec ctrl[6] ) ( u_cl/u_c0/u_lsu/u_swe op[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/ctrl[7] ( u_cl/u_c0/u_idu/u_dec ctrl[7] ) ( u_cl/u_c0/u_lsu/u_st en ) ( u_cl/u_c0/u_rf we ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[0] ( u_cl/u_c0/u_exu/u_bsel b[0] ) ( u_cl/u_c0/u_idu/u_imm imm[0] ) ( u_cl/u_c0/u_lsu/u_agu b[0] ) ( u_cl/u_c0/u_lsu/u_swe b[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[10] ( u_cl/u_c0/u_exu/u_bsel b[10] ) ( u_cl/u_c0/u_idu/u_imm imm[10] ) ( u_cl/u_c0/u_lsu/u_agu b[10] ) ( u_cl/u_c0/u_lsu/u_swe b[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[11] ( u_cl/u_c0/u_exu/u_bsel b[11] ) ( u_cl/u_c0/u_idu/u_imm imm[11] ) ( u_cl/u_c0/u_lsu/u_agu b[11] ) ( u_cl/u_c0/u_lsu/u_swe b[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[12] ( u_cl/u_c0/u_exu/u_bsel b[12] ) ( u_cl/u_c0/u_idu/u_imm imm[12] ) ( u_cl/u_c0/u_lsu/u_agu b[12] ) ( u_cl/u_c0/u_lsu/u_swe b[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[13] ( u_cl/u_c0/u_exu/u_bsel b[13] ) ( u_cl/u_c0/u_idu/u_imm imm[13] ) ( u_cl/u_c0/u_lsu/u_agu b[13] ) ( u_cl/u_c0/u_lsu/u_swe b[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[14] ( u_cl/u_c0/u_exu/u_bsel b[14] ) ( u_cl/u_c0/u_idu/u_imm imm[14] ) ( u_cl/u_c0/u_lsu/u_agu b[14] ) ( u_cl/u_c0/u_lsu/u_swe b[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[15] ( u_cl/u_c0/u_exu/u_bsel b[15] ) ( u_cl/u_c0/u_idu/u_imm imm[15] ) ( u_cl/u_c0/u_lsu/u_agu b[15] ) ( u_cl/u_c0/u_lsu/u_swe b[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[16] ( u_cl/u_c0/u_exu/u_bsel b[16] ) ( u_cl/u_c0/u_idu/u_imm imm[16] ) ( u_cl/u_c0/u_lsu/u_agu b[16] ) ( u_cl/u_c0/u_lsu/u_swe b[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[17] ( u_cl/u_c0/u_exu/u_bsel b[17] ) ( u_cl/u_c0/u_idu/u_imm imm[17] ) ( u_cl/u_c0/u_lsu/u_agu b[17] ) ( u_cl/u_c0/u_lsu/u_swe b[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[18] ( u_cl/u_c0/u_exu/u_bsel b[18] ) ( u_cl/u_c0/u_idu/u_imm imm[18] ) ( u_cl/u_c0/u_lsu/u_agu b[18] ) ( u_cl/u_c0/u_lsu/u_swe b[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[19] ( u_cl/u_c0/u_exu/u_bsel b[19] ) ( u_cl/u_c0/u_idu/u_imm imm[19] ) ( u_cl/u_c0/u_lsu/u_agu b[19] ) ( u_cl/u_c0/u_lsu/u_swe b[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[1] ( u_cl/u_c0/u_exu/u_bsel b[1] ) ( u_cl/u_c0/u_idu/u_imm imm[1] ) ( u_cl/u_c0/u_lsu/u_agu b[1] ) ( u_cl/u_c0/u_lsu/u_swe b[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[20] ( u_cl/u_c0/u_exu/u_bsel b[20] ) ( u_cl/u_c0/u_idu/u_imm imm[20] ) ( u_cl/u_c0/u_lsu/u_agu b[20] ) ( u_cl/u_c0/u_lsu/u_swe b[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[21] ( u_cl/u_c0/u_exu/u_bsel b[21] ) ( u_cl/u_c0/u_idu/u_imm imm[21] ) ( u_cl/u_c0/u_lsu/u_agu b[21] ) ( u_cl/u_c0/u_lsu/u_swe b[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[22] ( u_cl/u_c0/u_exu/u_bsel b[22] ) ( u_cl/u_c0/u_idu/u_imm imm[22] ) ( u_cl/u_c0/u_lsu/u_agu b[22] ) ( u_cl/u_c0/u_lsu/u_swe b[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[23] ( u_cl/u_c0/u_exu/u_bsel b[23] ) ( u_cl/u_c0/u_idu/u_imm imm[23] ) ( u_cl/u_c0/u_lsu/u_agu b[23] ) ( u_cl/u_c0/u_lsu/u_swe b[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[24] ( u_cl/u_c0/u_exu/u_bsel b[24] ) ( u_cl/u_c0/u_idu/u_imm imm[24] ) ( u_cl/u_c0/u_lsu/u_agu b[24] ) ( u_cl/u_c0/u_lsu/u_swe b[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[25] ( u_cl/u_c0/u_exu/u_bsel b[25] ) ( u_cl/u_c0/u_idu/u_imm imm[25] ) ( u_cl/u_c0/u_lsu/u_agu b[25] ) ( u_cl/u_c0/u_lsu/u_swe b[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[26] ( u_cl/u_c0/u_exu/u_bsel b[26] ) ( u_cl/u_c0/u_idu/u_imm imm[26] ) ( u_cl/u_c0/u_lsu/u_agu b[26] ) ( u_cl/u_c0/u_lsu/u_swe b[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[27] ( u_cl/u_c0/u_exu/u_bsel b[27] ) ( u_cl/u_c0/u_idu/u_imm imm[27] ) ( u_cl/u_c0/u_lsu/u_agu b[27] ) ( u_cl/u_c0/u_lsu/u_swe b[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[28] ( u_cl/u_c0/u_exu/u_bsel b[28] ) ( u_cl/u_c0/u_idu/u_imm imm[28] ) ( u_cl/u_c0/u_lsu/u_agu b[28] ) ( u_cl/u_c0/u_lsu/u_swe b[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[29] ( u_cl/u_c0/u_exu/u_bsel b[29] ) ( u_cl/u_c0/u_idu/u_imm imm[29] ) ( u_cl/u_c0/u_lsu/u_agu b[29] ) ( u_cl/u_c0/u_lsu/u_swe b[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[2] ( u_cl/u_c0/u_exu/u_bsel b[2] ) ( u_cl/u_c0/u_idu/u_imm imm[2] ) ( u_cl/u_c0/u_lsu/u_agu b[2] ) ( u_cl/u_c0/u_lsu/u_swe b[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[30] ( u_cl/u_c0/u_exu/u_bsel b[30] ) ( u_cl/u_c0/u_idu/u_imm imm[30] ) ( u_cl/u_c0/u_lsu/u_agu b[30] ) ( u_cl/u_c0/u_lsu/u_swe b[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[31] ( u_cl/u_c0/u_exu/u_bsel b[31] ) ( u_cl/u_c0/u_idu/u_imm imm[31] ) ( u_cl/u_c0/u_lsu/u_agu b[31] ) ( u_cl/u_c0/u_lsu/u_swe b[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[3] ( u_cl/u_c0/u_exu/u_bsel b[3] ) ( u_cl/u_c0/u_idu/u_imm imm[3] ) ( u_cl/u_c0/u_lsu/u_agu b[3] ) ( u_cl/u_c0/u_lsu/u_swe b[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[4] ( u_cl/u_c0/u_exu/u_bsel b[4] ) ( u_cl/u_c0/u_idu/u_imm imm[4] ) ( u_cl/u_c0/u_lsu/u_agu b[4] ) ( u_cl/u_c0/u_lsu/u_swe b[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[5] ( u_cl/u_c0/u_exu/u_bsel b[5] ) ( u_cl/u_c0/u_idu/u_imm imm[5] ) ( u_cl/u_c0/u_lsu/u_agu b[5] ) ( u_cl/u_c0/u_lsu/u_swe b[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[6] ( u_cl/u_c0/u_exu/u_bsel b[6] ) ( u_cl/u_c0/u_idu/u_imm imm[6] ) ( u_cl/u_c0/u_lsu/u_agu b[6] ) ( u_cl/u_c0/u_lsu/u_swe b[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[7] ( u_cl/u_c0/u_exu/u_bsel b[7] ) ( u_cl/u_c0/u_idu/u_imm imm[7] ) ( u_cl/u_c0/u_lsu/u_agu b[7] ) ( u_cl/u_c0/u_lsu/u_swe b[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[8] ( u_cl/u_c0/u_exu/u_bsel b[8] ) ( u_cl/u_c0/u_idu/u_imm imm[8] ) ( u_cl/u_c0/u_lsu/u_agu b[8] ) ( u_cl/u_c0/u_lsu/u_swe b[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/imm[9] ( u_cl/u_c0/u_exu/u_bsel b[9] ) ( u_cl/u_c0/u_idu/u_imm imm[9] ) ( u_cl/u_c0/u_lsu/u_agu b[9] ) ( u_cl/u_c0/u_lsu/u_swe b[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[0] ( u_cl/u_c0/u_lsu/u_algn dout[0] ) ( u_cl/u_c0/u_wbsel b[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[10] ( u_cl/u_c0/u_lsu/u_algn dout[10] ) ( u_cl/u_c0/u_wbsel b[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[11] ( u_cl/u_c0/u_lsu/u_algn dout[11] ) ( u_cl/u_c0/u_wbsel b[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[12] ( u_cl/u_c0/u_lsu/u_algn dout[12] ) ( u_cl/u_c0/u_wbsel b[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[13] ( u_cl/u_c0/u_lsu/u_algn dout[13] ) ( u_cl/u_c0/u_wbsel b[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[14] ( u_cl/u_c0/u_lsu/u_algn dout[14] ) ( u_cl/u_c0/u_wbsel b[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[15] ( u_cl/u_c0/u_lsu/u_algn dout[15] ) ( u_cl/u_c0/u_wbsel b[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[16] ( u_cl/u_c0/u_lsu/u_algn dout[16] ) ( u_cl/u_c0/u_wbsel b[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[17] ( u_cl/u_c0/u_lsu/u_algn dout[17] ) ( u_cl/u_c0/u_wbsel b[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[18] ( u_cl/u_c0/u_lsu/u_algn dout[18] ) ( u_cl/u_c0/u_wbsel b[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[19] ( u_cl/u_c0/u_lsu/u_algn dout[19] ) ( u_cl/u_c0/u_wbsel b[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[1] ( u_cl/u_c0/u_lsu/u_algn dout[1] ) ( u_cl/u_c0/u_wbsel b[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[20] ( u_cl/u_c0/u_lsu/u_algn dout[20] ) ( u_cl/u_c0/u_wbsel b[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[21] ( u_cl/u_c0/u_lsu/u_algn dout[21] ) ( u_cl/u_c0/u_wbsel b[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[22] ( u_cl/u_c0/u_lsu/u_algn dout[22] ) ( u_cl/u_c0/u_wbsel b[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[23] ( u_cl/u_c0/u_lsu/u_algn dout[23] ) ( u_cl/u_c0/u_wbsel b[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[24] ( u_cl/u_c0/u_lsu/u_algn dout[24] ) ( u_cl/u_c0/u_wbsel b[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[25] ( u_cl/u_c0/u_lsu/u_algn dout[25] ) ( u_cl/u_c0/u_wbsel b[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[26] ( u_cl/u_c0/u_lsu/u_algn dout[26] ) ( u_cl/u_c0/u_wbsel b[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[27] ( u_cl/u_c0/u_lsu/u_algn dout[27] ) ( u_cl/u_c0/u_wbsel b[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[28] ( u_cl/u_c0/u_lsu/u_algn dout[28] ) ( u_cl/u_c0/u_wbsel b[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[29] ( u_cl/u_c0/u_lsu/u_algn dout[29] ) ( u_cl/u_c0/u_wbsel b[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[2] ( u_cl/u_c0/u_lsu/u_algn dout[2] ) ( u_cl/u_c0/u_wbsel b[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[30] ( u_cl/u_c0/u_lsu/u_algn dout[30] ) ( u_cl/u_c0/u_wbsel b[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[31] ( u_cl/u_c0/u_lsu/u_algn dout[31] ) ( u_cl/u_c0/u_wbsel b[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[3] ( u_cl/u_c0/u_lsu/u_algn dout[3] ) ( u_cl/u_c0/u_wbsel b[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[4] ( u_cl/u_c0/u_lsu/u_algn dout[4] ) ( u_cl/u_c0/u_wbsel b[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[5] ( u_cl/u_c0/u_lsu/u_algn dout[5] ) ( u_cl/u_c0/u_wbsel b[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[6] ( u_cl/u_c0/u_lsu/u_algn dout[6] ) ( u_cl/u_c0/u_wbsel b[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[7] ( u_cl/u_c0/u_lsu/u_algn dout[7] ) ( u_cl/u_c0/u_wbsel b[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[8] ( u_cl/u_c0/u_lsu/u_algn dout[8] ) ( u_cl/u_c0/u_wbsel b[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/ldata[9] ( u_cl/u_c0/u_lsu/u_algn dout[9] ) ( u_cl/u_c0/u_wbsel b[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/rd[0] ( u_cl/u_c0/u_idu/u_dec rd[0] ) ( u_cl/u_c0/u_rf wa[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/rd[1] ( u_cl/u_c0/u_idu/u_dec rd[1] ) ( u_cl/u_c0/u_rf wa[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/rd[2] ( u_cl/u_c0/u_idu/u_dec rd[2] ) ( u_cl/u_c0/u_rf wa[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/rd[3] ( u_cl/u_c0/u_idu/u_dec rd[3] ) ( u_cl/u_c0/u_rf wa[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/rd[4] ( u_cl/u_c0/u_idu/u_dec rd[4] ) ( u_cl/u_c0/u_rf wa[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[0] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[0] ) ( u_cl/u_c0/u_ifu/u_nsel b[0] ) ( u_cl/u_c0/u_wbsel a[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[10] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[10] ) ( u_cl/u_c0/u_ifu/u_nsel b[10] ) ( u_cl/u_c0/u_wbsel a[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[11] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[11] ) ( u_cl/u_c0/u_ifu/u_nsel b[11] ) ( u_cl/u_c0/u_wbsel a[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[12] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[12] ) ( u_cl/u_c0/u_ifu/u_nsel b[12] ) ( u_cl/u_c0/u_wbsel a[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[13] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[13] ) ( u_cl/u_c0/u_ifu/u_nsel b[13] ) ( u_cl/u_c0/u_wbsel a[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[14] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[14] ) ( u_cl/u_c0/u_ifu/u_nsel b[14] ) ( u_cl/u_c0/u_wbsel a[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[15] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[15] ) ( u_cl/u_c0/u_ifu/u_nsel b[15] ) ( u_cl/u_c0/u_wbsel a[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[16] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[16] ) ( u_cl/u_c0/u_ifu/u_nsel b[16] ) ( u_cl/u_c0/u_wbsel a[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[17] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[17] ) ( u_cl/u_c0/u_ifu/u_nsel b[17] ) ( u_cl/u_c0/u_wbsel a[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[18] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[18] ) ( u_cl/u_c0/u_ifu/u_nsel b[18] ) ( u_cl/u_c0/u_wbsel a[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[19] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[19] ) ( u_cl/u_c0/u_ifu/u_nsel b[19] ) ( u_cl/u_c0/u_wbsel a[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[1] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[1] ) ( u_cl/u_c0/u_ifu/u_nsel b[1] ) ( u_cl/u_c0/u_wbsel a[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[20] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[20] ) ( u_cl/u_c0/u_ifu/u_nsel b[20] ) ( u_cl/u_c0/u_wbsel a[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[21] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[21] ) ( u_cl/u_c0/u_ifu/u_nsel b[21] ) ( u_cl/u_c0/u_wbsel a[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[22] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[22] ) ( u_cl/u_c0/u_ifu/u_nsel b[22] ) ( u_cl/u_c0/u_wbsel a[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[23] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[23] ) ( u_cl/u_c0/u_ifu/u_nsel b[23] ) ( u_cl/u_c0/u_wbsel a[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[24] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[24] ) ( u_cl/u_c0/u_ifu/u_nsel b[24] ) ( u_cl/u_c0/u_wbsel a[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[25] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[25] ) ( u_cl/u_c0/u_ifu/u_nsel b[25] ) ( u_cl/u_c0/u_wbsel a[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[26] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[26] ) ( u_cl/u_c0/u_ifu/u_nsel b[26] ) ( u_cl/u_c0/u_wbsel a[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[27] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[27] ) ( u_cl/u_c0/u_ifu/u_nsel b[27] ) ( u_cl/u_c0/u_wbsel a[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[28] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[28] ) ( u_cl/u_c0/u_ifu/u_nsel b[28] ) ( u_cl/u_c0/u_wbsel a[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[29] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[29] ) ( u_cl/u_c0/u_ifu/u_nsel b[29] ) ( u_cl/u_c0/u_wbsel a[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[2] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[2] ) ( u_cl/u_c0/u_ifu/u_nsel b[2] ) ( u_cl/u_c0/u_wbsel a[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[30] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[30] ) ( u_cl/u_c0/u_ifu/u_nsel b[30] ) ( u_cl/u_c0/u_wbsel a[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[31] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[31] ) ( u_cl/u_c0/u_ifu/u_nsel b[31] ) ( u_cl/u_c0/u_wbsel a[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[3] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[3] ) ( u_cl/u_c0/u_ifu/u_nsel b[3] ) ( u_cl/u_c0/u_wbsel a[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[4] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[4] ) ( u_cl/u_c0/u_ifu/u_nsel b[4] ) ( u_cl/u_c0/u_wbsel a[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[5] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[5] ) ( u_cl/u_c0/u_ifu/u_nsel b[5] ) ( u_cl/u_c0/u_wbsel a[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[6] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[6] ) ( u_cl/u_c0/u_ifu/u_nsel b[6] ) ( u_cl/u_c0/u_wbsel a[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[7] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[7] ) ( u_cl/u_c0/u_ifu/u_nsel b[7] ) ( u_cl/u_c0/u_wbsel a[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[8] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[8] ) ( u_cl/u_c0/u_ifu/u_nsel b[8] ) ( u_cl/u_c0/u_wbsel a[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/res[9] ( u_cl/u_c0/u_exu/u_alu/u_ysel y[9] ) ( u_cl/u_c0/u_ifu/u_nsel b[9] ) ( u_cl/u_c0/u_wbsel a[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1[0] ( u_cl/u_c0/u_idu/u_dec rs1[0] ) ( u_cl/u_c0/u_rf ra1[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1[1] ( u_cl/u_c0/u_idu/u_dec rs1[1] ) ( u_cl/u_c0/u_rf ra1[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1[2] ( u_cl/u_c0/u_idu/u_dec rs1[2] ) ( u_cl/u_c0/u_rf ra1[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1[3] ( u_cl/u_c0/u_idu/u_dec rs1[3] ) ( u_cl/u_c0/u_rf ra1[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1[4] ( u_cl/u_c0/u_idu/u_dec rs1[4] ) ( u_cl/u_c0/u_rf ra1[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[0] ( u_cl/u_c0/u_exu/u_alu/u_add a[0] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[0] ) ( u_cl/u_c0/u_exu/u_bru a[0] ) ( u_cl/u_c0/u_lsu/u_agu a[0] ) ( u_cl/u_c0/u_rf rd1[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[10] ( u_cl/u_c0/u_exu/u_alu/u_add a[10] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[10] ) ( u_cl/u_c0/u_exu/u_bru a[10] ) ( u_cl/u_c0/u_lsu/u_agu a[10] ) ( u_cl/u_c0/u_rf rd1[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[11] ( u_cl/u_c0/u_exu/u_alu/u_add a[11] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[11] ) ( u_cl/u_c0/u_exu/u_bru a[11] ) ( u_cl/u_c0/u_lsu/u_agu a[11] ) ( u_cl/u_c0/u_rf rd1[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[12] ( u_cl/u_c0/u_exu/u_alu/u_add a[12] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[12] ) ( u_cl/u_c0/u_exu/u_bru a[12] ) ( u_cl/u_c0/u_lsu/u_agu a[12] ) ( u_cl/u_c0/u_rf rd1[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[13] ( u_cl/u_c0/u_exu/u_alu/u_add a[13] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[13] ) ( u_cl/u_c0/u_exu/u_bru a[13] ) ( u_cl/u_c0/u_lsu/u_agu a[13] ) ( u_cl/u_c0/u_rf rd1[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[14] ( u_cl/u_c0/u_exu/u_alu/u_add a[14] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[14] ) ( u_cl/u_c0/u_exu/u_bru a[14] ) ( u_cl/u_c0/u_lsu/u_agu a[14] ) ( u_cl/u_c0/u_rf rd1[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[15] ( u_cl/u_c0/u_exu/u_alu/u_add a[15] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[15] ) ( u_cl/u_c0/u_exu/u_bru a[15] ) ( u_cl/u_c0/u_lsu/u_agu a[15] ) ( u_cl/u_c0/u_rf rd1[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[16] ( u_cl/u_c0/u_exu/u_alu/u_add a[16] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[16] ) ( u_cl/u_c0/u_exu/u_bru a[16] ) ( u_cl/u_c0/u_lsu/u_agu a[16] ) ( u_cl/u_c0/u_rf rd1[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[17] ( u_cl/u_c0/u_exu/u_alu/u_add a[17] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[17] ) ( u_cl/u_c0/u_exu/u_bru a[17] ) ( u_cl/u_c0/u_lsu/u_agu a[17] ) ( u_cl/u_c0/u_rf rd1[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[18] ( u_cl/u_c0/u_exu/u_alu/u_add a[18] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[18] ) ( u_cl/u_c0/u_exu/u_bru a[18] ) ( u_cl/u_c0/u_lsu/u_agu a[18] ) ( u_cl/u_c0/u_rf rd1[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[19] ( u_cl/u_c0/u_exu/u_alu/u_add a[19] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[19] ) ( u_cl/u_c0/u_exu/u_bru a[19] ) ( u_cl/u_c0/u_lsu/u_agu a[19] ) ( u_cl/u_c0/u_rf rd1[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[1] ( u_cl/u_c0/u_exu/u_alu/u_add a[1] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[1] ) ( u_cl/u_c0/u_exu/u_bru a[1] ) ( u_cl/u_c0/u_lsu/u_agu a[1] ) ( u_cl/u_c0/u_rf rd1[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[20] ( u_cl/u_c0/u_exu/u_alu/u_add a[20] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[20] ) ( u_cl/u_c0/u_exu/u_bru a[20] ) ( u_cl/u_c0/u_lsu/u_agu a[20] ) ( u_cl/u_c0/u_rf rd1[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[21] ( u_cl/u_c0/u_exu/u_alu/u_add a[21] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[21] ) ( u_cl/u_c0/u_exu/u_bru a[21] ) ( u_cl/u_c0/u_lsu/u_agu a[21] ) ( u_cl/u_c0/u_rf rd1[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[22] ( u_cl/u_c0/u_exu/u_alu/u_add a[22] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[22] ) ( u_cl/u_c0/u_exu/u_bru a[22] ) ( u_cl/u_c0/u_lsu/u_agu a[22] ) ( u_cl/u_c0/u_rf rd1[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[23] ( u_cl/u_c0/u_exu/u_alu/u_add a[23] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[23] ) ( u_cl/u_c0/u_exu/u_bru a[23] ) ( u_cl/u_c0/u_lsu/u_agu a[23] ) ( u_cl/u_c0/u_rf rd1[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[24] ( u_cl/u_c0/u_exu/u_alu/u_add a[24] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[24] ) ( u_cl/u_c0/u_exu/u_bru a[24] ) ( u_cl/u_c0/u_lsu/u_agu a[24] ) ( u_cl/u_c0/u_rf rd1[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[25] ( u_cl/u_c0/u_exu/u_alu/u_add a[25] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[25] ) ( u_cl/u_c0/u_exu/u_bru a[25] ) ( u_cl/u_c0/u_lsu/u_agu a[25] ) ( u_cl/u_c0/u_rf rd1[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[26] ( u_cl/u_c0/u_exu/u_alu/u_add a[26] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[26] ) ( u_cl/u_c0/u_exu/u_bru a[26] ) ( u_cl/u_c0/u_lsu/u_agu a[26] ) ( u_cl/u_c0/u_rf rd1[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[27] ( u_cl/u_c0/u_exu/u_alu/u_add a[27] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[27] ) ( u_cl/u_c0/u_exu/u_bru a[27] ) ( u_cl/u_c0/u_lsu/u_agu a[27] ) ( u_cl/u_c0/u_rf rd1[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[28] ( u_cl/u_c0/u_exu/u_alu/u_add a[28] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[28] ) ( u_cl/u_c0/u_exu/u_bru a[28] ) ( u_cl/u_c0/u_lsu/u_agu a[28] ) ( u_cl/u_c0/u_rf rd1[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[29] ( u_cl/u_c0/u_exu/u_alu/u_add a[29] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[29] ) ( u_cl/u_c0/u_exu/u_bru a[29] ) ( u_cl/u_c0/u_lsu/u_agu a[29] ) ( u_cl/u_c0/u_rf rd1[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[2] ( u_cl/u_c0/u_exu/u_alu/u_add a[2] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[2] ) ( u_cl/u_c0/u_exu/u_bru a[2] ) ( u_cl/u_c0/u_lsu/u_agu a[2] ) ( u_cl/u_c0/u_rf rd1[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[30] ( u_cl/u_c0/u_exu/u_alu/u_add a[30] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[30] ) ( u_cl/u_c0/u_exu/u_bru a[30] ) ( u_cl/u_c0/u_lsu/u_agu a[30] ) ( u_cl/u_c0/u_rf rd1[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[31] ( u_cl/u_c0/u_exu/u_alu/u_add a[31] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[31] ) ( u_cl/u_c0/u_exu/u_bru a[31] ) ( u_cl/u_c0/u_lsu/u_agu a[31] ) ( u_cl/u_c0/u_rf rd1[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[3] ( u_cl/u_c0/u_exu/u_alu/u_add a[3] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[3] ) ( u_cl/u_c0/u_exu/u_bru a[3] ) ( u_cl/u_c0/u_lsu/u_agu a[3] ) ( u_cl/u_c0/u_rf rd1[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[4] ( u_cl/u_c0/u_exu/u_alu/u_add a[4] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[4] ) ( u_cl/u_c0/u_exu/u_bru a[4] ) ( u_cl/u_c0/u_lsu/u_agu a[4] ) ( u_cl/u_c0/u_rf rd1[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[5] ( u_cl/u_c0/u_exu/u_alu/u_add a[5] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[5] ) ( u_cl/u_c0/u_exu/u_bru a[5] ) ( u_cl/u_c0/u_lsu/u_agu a[5] ) ( u_cl/u_c0/u_rf rd1[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[6] ( u_cl/u_c0/u_exu/u_alu/u_add a[6] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[6] ) ( u_cl/u_c0/u_exu/u_bru a[6] ) ( u_cl/u_c0/u_lsu/u_agu a[6] ) ( u_cl/u_c0/u_rf rd1[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[7] ( u_cl/u_c0/u_exu/u_alu/u_add a[7] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[7] ) ( u_cl/u_c0/u_exu/u_bru a[7] ) ( u_cl/u_c0/u_lsu/u_agu a[7] ) ( u_cl/u_c0/u_rf rd1[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[8] ( u_cl/u_c0/u_exu/u_alu/u_add a[8] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[8] ) ( u_cl/u_c0/u_exu/u_bru a[8] ) ( u_cl/u_c0/u_lsu/u_agu a[8] ) ( u_cl/u_c0/u_rf rd1[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs1v[9] ( u_cl/u_c0/u_exu/u_alu/u_add a[9] ) ( u_cl/u_c0/u_exu/u_alu/u_log a[9] ) ( u_cl/u_c0/u_exu/u_bru a[9] ) ( u_cl/u_c0/u_lsu/u_agu a[9] ) ( u_cl/u_c0/u_rf rd1[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2[0] ( u_cl/u_c0/u_idu/u_dec rs2[0] ) ( u_cl/u_c0/u_rf ra2[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2[1] ( u_cl/u_c0/u_idu/u_dec rs2[1] ) ( u_cl/u_c0/u_rf ra2[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2[2] ( u_cl/u_c0/u_idu/u_dec rs2[2] ) ( u_cl/u_c0/u_rf ra2[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2[3] ( u_cl/u_c0/u_idu/u_dec rs2[3] ) ( u_cl/u_c0/u_rf ra2[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2[4] ( u_cl/u_c0/u_idu/u_dec rs2[4] ) ( u_cl/u_c0/u_rf ra2[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[0] ( u_cl/u_c0/u_exu/u_bru b[0] ) ( u_cl/u_c0/u_exu/u_bsel a[0] ) ( u_cl/u_c0/u_lsu/u_st d[0] ) ( u_cl/u_c0/u_rf rd2[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[10] ( u_cl/u_c0/u_exu/u_bru b[10] ) ( u_cl/u_c0/u_exu/u_bsel a[10] ) ( u_cl/u_c0/u_lsu/u_st d[10] ) ( u_cl/u_c0/u_rf rd2[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[11] ( u_cl/u_c0/u_exu/u_bru b[11] ) ( u_cl/u_c0/u_exu/u_bsel a[11] ) ( u_cl/u_c0/u_lsu/u_st d[11] ) ( u_cl/u_c0/u_rf rd2[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[12] ( u_cl/u_c0/u_exu/u_bru b[12] ) ( u_cl/u_c0/u_exu/u_bsel a[12] ) ( u_cl/u_c0/u_lsu/u_st d[12] ) ( u_cl/u_c0/u_rf rd2[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[13] ( u_cl/u_c0/u_exu/u_bru b[13] ) ( u_cl/u_c0/u_exu/u_bsel a[13] ) ( u_cl/u_c0/u_lsu/u_st d[13] ) ( u_cl/u_c0/u_rf rd2[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[14] ( u_cl/u_c0/u_exu/u_bru b[14] ) ( u_cl/u_c0/u_exu/u_bsel a[14] ) ( u_cl/u_c0/u_lsu/u_st d[14] ) ( u_cl/u_c0/u_rf rd2[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[15] ( u_cl/u_c0/u_exu/u_bru b[15] ) ( u_cl/u_c0/u_exu/u_bsel a[15] ) ( u_cl/u_c0/u_lsu/u_st d[15] ) ( u_cl/u_c0/u_rf rd2[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[16] ( u_cl/u_c0/u_exu/u_bru b[16] ) ( u_cl/u_c0/u_exu/u_bsel a[16] ) ( u_cl/u_c0/u_lsu/u_st d[16] ) ( u_cl/u_c0/u_rf rd2[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[17] ( u_cl/u_c0/u_exu/u_bru b[17] ) ( u_cl/u_c0/u_exu/u_bsel a[17] ) ( u_cl/u_c0/u_lsu/u_st d[17] ) ( u_cl/u_c0/u_rf rd2[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[18] ( u_cl/u_c0/u_exu/u_bru b[18] ) ( u_cl/u_c0/u_exu/u_bsel a[18] ) ( u_cl/u_c0/u_lsu/u_st d[18] ) ( u_cl/u_c0/u_rf rd2[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[19] ( u_cl/u_c0/u_exu/u_bru b[19] ) ( u_cl/u_c0/u_exu/u_bsel a[19] ) ( u_cl/u_c0/u_lsu/u_st d[19] ) ( u_cl/u_c0/u_rf rd2[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[1] ( u_cl/u_c0/u_exu/u_bru b[1] ) ( u_cl/u_c0/u_exu/u_bsel a[1] ) ( u_cl/u_c0/u_lsu/u_st d[1] ) ( u_cl/u_c0/u_rf rd2[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[20] ( u_cl/u_c0/u_exu/u_bru b[20] ) ( u_cl/u_c0/u_exu/u_bsel a[20] ) ( u_cl/u_c0/u_lsu/u_st d[20] ) ( u_cl/u_c0/u_rf rd2[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[21] ( u_cl/u_c0/u_exu/u_bru b[21] ) ( u_cl/u_c0/u_exu/u_bsel a[21] ) ( u_cl/u_c0/u_lsu/u_st d[21] ) ( u_cl/u_c0/u_rf rd2[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[22] ( u_cl/u_c0/u_exu/u_bru b[22] ) ( u_cl/u_c0/u_exu/u_bsel a[22] ) ( u_cl/u_c0/u_lsu/u_st d[22] ) ( u_cl/u_c0/u_rf rd2[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[23] ( u_cl/u_c0/u_exu/u_bru b[23] ) ( u_cl/u_c0/u_exu/u_bsel a[23] ) ( u_cl/u_c0/u_lsu/u_st d[23] ) ( u_cl/u_c0/u_rf rd2[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[24] ( u_cl/u_c0/u_exu/u_bru b[24] ) ( u_cl/u_c0/u_exu/u_bsel a[24] ) ( u_cl/u_c0/u_lsu/u_st d[24] ) ( u_cl/u_c0/u_rf rd2[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[25] ( u_cl/u_c0/u_exu/u_bru b[25] ) ( u_cl/u_c0/u_exu/u_bsel a[25] ) ( u_cl/u_c0/u_lsu/u_st d[25] ) ( u_cl/u_c0/u_rf rd2[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[26] ( u_cl/u_c0/u_exu/u_bru b[26] ) ( u_cl/u_c0/u_exu/u_bsel a[26] ) ( u_cl/u_c0/u_lsu/u_st d[26] ) ( u_cl/u_c0/u_rf rd2[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[27] ( u_cl/u_c0/u_exu/u_bru b[27] ) ( u_cl/u_c0/u_exu/u_bsel a[27] ) ( u_cl/u_c0/u_lsu/u_st d[27] ) ( u_cl/u_c0/u_rf rd2[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[28] ( u_cl/u_c0/u_exu/u_bru b[28] ) ( u_cl/u_c0/u_exu/u_bsel a[28] ) ( u_cl/u_c0/u_lsu/u_st d[28] ) ( u_cl/u_c0/u_rf rd2[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[29] ( u_cl/u_c0/u_exu/u_bru b[29] ) ( u_cl/u_c0/u_exu/u_bsel a[29] ) ( u_cl/u_c0/u_lsu/u_st d[29] ) ( u_cl/u_c0/u_rf rd2[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[2] ( u_cl/u_c0/u_exu/u_bru b[2] ) ( u_cl/u_c0/u_exu/u_bsel a[2] ) ( u_cl/u_c0/u_lsu/u_st d[2] ) ( u_cl/u_c0/u_rf rd2[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[30] ( u_cl/u_c0/u_exu/u_bru b[30] ) ( u_cl/u_c0/u_exu/u_bsel a[30] ) ( u_cl/u_c0/u_lsu/u_st d[30] ) ( u_cl/u_c0/u_rf rd2[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[31] ( u_cl/u_c0/u_exu/u_bru b[31] ) ( u_cl/u_c0/u_exu/u_bsel a[31] ) ( u_cl/u_c0/u_lsu/u_st d[31] ) ( u_cl/u_c0/u_rf rd2[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[3] ( u_cl/u_c0/u_exu/u_bru b[3] ) ( u_cl/u_c0/u_exu/u_bsel a[3] ) ( u_cl/u_c0/u_lsu/u_st d[3] ) ( u_cl/u_c0/u_rf rd2[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[4] ( u_cl/u_c0/u_exu/u_bru b[4] ) ( u_cl/u_c0/u_exu/u_bsel a[4] ) ( u_cl/u_c0/u_lsu/u_st d[4] ) ( u_cl/u_c0/u_rf rd2[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[5] ( u_cl/u_c0/u_exu/u_bru b[5] ) ( u_cl/u_c0/u_exu/u_bsel a[5] ) ( u_cl/u_c0/u_lsu/u_st d[5] ) ( u_cl/u_c0/u_rf rd2[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[6] ( u_cl/u_c0/u_exu/u_bru b[6] ) ( u_cl/u_c0/u_exu/u_bsel a[6] ) ( u_cl/u_c0/u_lsu/u_st d[6] ) ( u_cl/u_c0/u_rf rd2[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[7] ( u_cl/u_c0/u_exu/u_bru b[7] ) ( u_cl/u_c0/u_exu/u_bsel a[7] ) ( u_cl/u_c0/u_lsu/u_st d[7] ) ( u_cl/u_c0/u_rf rd2[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[8] ( u_cl/u_c0/u_exu/u_bru b[8] ) ( u_cl/u_c0/u_exu/u_bsel a[8] ) ( u_cl/u_c0/u_lsu/u_st d[8] ) ( u_cl/u_c0/u_rf rd2[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/rs2v[9] ( u_cl/u_c0/u_exu/u_bru b[9] ) ( u_cl/u_c0/u_exu/u_bsel a[9] ) ( u_cl/u_c0/u_lsu/u_st d[9] ) ( u_cl/u_c0/u_rf rd2[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/take ( u_cl/u_c0/u_exu/u_bru taken ) ( u_cl/u_c0/u_ifu/u_iab sz[0] ) ( u_cl/u_c0/u_ifu/u_nsel s ) ( u_cl/u_c0/u_ifu/u_pc en ) ( u_cl/u_c0/u_ifu/u_pcb en ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[0] ( u_cl/u_c0/u_exu/u_alu/u_add b[0] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[0] ) ( u_cl/u_c0/u_exu/u_bsel y[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[10] ( u_cl/u_c0/u_exu/u_alu/u_add b[10] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[10] ) ( u_cl/u_c0/u_exu/u_bsel y[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[11] ( u_cl/u_c0/u_exu/u_alu/u_add b[11] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[11] ) ( u_cl/u_c0/u_exu/u_bsel y[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[12] ( u_cl/u_c0/u_exu/u_alu/u_add b[12] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[12] ) ( u_cl/u_c0/u_exu/u_bsel y[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[13] ( u_cl/u_c0/u_exu/u_alu/u_add b[13] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[13] ) ( u_cl/u_c0/u_exu/u_bsel y[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[14] ( u_cl/u_c0/u_exu/u_alu/u_add b[14] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[14] ) ( u_cl/u_c0/u_exu/u_bsel y[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[15] ( u_cl/u_c0/u_exu/u_alu/u_add b[15] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[15] ) ( u_cl/u_c0/u_exu/u_bsel y[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[16] ( u_cl/u_c0/u_exu/u_alu/u_add b[16] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[16] ) ( u_cl/u_c0/u_exu/u_bsel y[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[17] ( u_cl/u_c0/u_exu/u_alu/u_add b[17] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[17] ) ( u_cl/u_c0/u_exu/u_bsel y[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[18] ( u_cl/u_c0/u_exu/u_alu/u_add b[18] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[18] ) ( u_cl/u_c0/u_exu/u_bsel y[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[19] ( u_cl/u_c0/u_exu/u_alu/u_add b[19] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[19] ) ( u_cl/u_c0/u_exu/u_bsel y[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[1] ( u_cl/u_c0/u_exu/u_alu/u_add b[1] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[1] ) ( u_cl/u_c0/u_exu/u_bsel y[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[20] ( u_cl/u_c0/u_exu/u_alu/u_add b[20] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[20] ) ( u_cl/u_c0/u_exu/u_bsel y[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[21] ( u_cl/u_c0/u_exu/u_alu/u_add b[21] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[21] ) ( u_cl/u_c0/u_exu/u_bsel y[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[22] ( u_cl/u_c0/u_exu/u_alu/u_add b[22] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[22] ) ( u_cl/u_c0/u_exu/u_bsel y[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[23] ( u_cl/u_c0/u_exu/u_alu/u_add b[23] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[23] ) ( u_cl/u_c0/u_exu/u_bsel y[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[24] ( u_cl/u_c0/u_exu/u_alu/u_add b[24] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[24] ) ( u_cl/u_c0/u_exu/u_bsel y[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[25] ( u_cl/u_c0/u_exu/u_alu/u_add b[25] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[25] ) ( u_cl/u_c0/u_exu/u_bsel y[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[26] ( u_cl/u_c0/u_exu/u_alu/u_add b[26] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[26] ) ( u_cl/u_c0/u_exu/u_bsel y[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[27] ( u_cl/u_c0/u_exu/u_alu/u_add b[27] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[27] ) ( u_cl/u_c0/u_exu/u_bsel y[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[28] ( u_cl/u_c0/u_exu/u_alu/u_add b[28] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[28] ) ( u_cl/u_c0/u_exu/u_bsel y[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[29] ( u_cl/u_c0/u_exu/u_alu/u_add b[29] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[29] ) ( u_cl/u_c0/u_exu/u_bsel y[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[2] ( u_cl/u_c0/u_exu/u_alu/u_add b[2] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[2] ) ( u_cl/u_c0/u_exu/u_bsel y[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[30] ( u_cl/u_c0/u_exu/u_alu/u_add b[30] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[30] ) ( u_cl/u_c0/u_exu/u_bsel y[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[31] ( u_cl/u_c0/u_exu/u_alu/u_add b[31] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[31] ) ( u_cl/u_c0/u_exu/u_bsel y[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[3] ( u_cl/u_c0/u_exu/u_alu/u_add b[3] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[3] ) ( u_cl/u_c0/u_exu/u_bsel y[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[4] ( u_cl/u_c0/u_exu/u_alu/u_add b[4] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[4] ) ( u_cl/u_c0/u_exu/u_bsel y[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[5] ( u_cl/u_c0/u_exu/u_alu/u_add b[5] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[5] ) ( u_cl/u_c0/u_exu/u_bsel y[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[6] ( u_cl/u_c0/u_exu/u_alu/u_add b[6] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[6] ) ( u_cl/u_c0/u_exu/u_bsel y[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[7] ( u_cl/u_c0/u_exu/u_alu/u_add b[7] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[7] ) ( u_cl/u_c0/u_exu/u_bsel y[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[8] ( u_cl/u_c0/u_exu/u_alu/u_add b[8] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[8] ) ( u_cl/u_c0/u_exu/u_bsel y[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/opb[9] ( u_cl/u_c0/u_exu/u_alu/u_add b[9] ) ( u_cl/u_c0/u_exu/u_alu/u_log b[9] ) ( u_cl/u_c0/u_exu/u_bsel y[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[0] ( u_cl/u_c0/u_exu/u_alu/u_log y[0] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[10] ( u_cl/u_c0/u_exu/u_alu/u_log y[10] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[11] ( u_cl/u_c0/u_exu/u_alu/u_log y[11] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[12] ( u_cl/u_c0/u_exu/u_alu/u_log y[12] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[13] ( u_cl/u_c0/u_exu/u_alu/u_log y[13] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[14] ( u_cl/u_c0/u_exu/u_alu/u_log y[14] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[15] ( u_cl/u_c0/u_exu/u_alu/u_log y[15] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[16] ( u_cl/u_c0/u_exu/u_alu/u_log y[16] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[17] ( u_cl/u_c0/u_exu/u_alu/u_log y[17] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[18] ( u_cl/u_c0/u_exu/u_alu/u_log y[18] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[19] ( u_cl/u_c0/u_exu/u_alu/u_log y[19] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[1] ( u_cl/u_c0/u_exu/u_alu/u_log y[1] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[20] ( u_cl/u_c0/u_exu/u_alu/u_log y[20] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[21] ( u_cl/u_c0/u_exu/u_alu/u_log y[21] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[22] ( u_cl/u_c0/u_exu/u_alu/u_log y[22] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[23] ( u_cl/u_c0/u_exu/u_alu/u_log y[23] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[24] ( u_cl/u_c0/u_exu/u_alu/u_log y[24] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[25] ( u_cl/u_c0/u_exu/u_alu/u_log y[25] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[26] ( u_cl/u_c0/u_exu/u_alu/u_log y[26] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[27] ( u_cl/u_c0/u_exu/u_alu/u_log y[27] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[28] ( u_cl/u_c0/u_exu/u_alu/u_log y[28] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[29] ( u_cl/u_c0/u_exu/u_alu/u_log y[29] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[2] ( u_cl/u_c0/u_exu/u_alu/u_log y[2] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[30] ( u_cl/u_c0/u_exu/u_alu/u_log y[30] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[31] ( u_cl/u_c0/u_exu/u_alu/u_log y[31] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[3] ( u_cl/u_c0/u_exu/u_alu/u_log y[3] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[4] ( u_cl/u_c0/u_exu/u_alu/u_log y[4] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[5] ( u_cl/u_c0/u_exu/u_alu/u_log y[5] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[6] ( u_cl/u_c0/u_exu/u_alu/u_log y[6] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[7] ( u_cl/u_c0/u_exu/u_alu/u_log y[7] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[8] ( u_cl/u_c0/u_exu/u_alu/u_log y[8] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/lgc[9] ( u_cl/u_c0/u_exu/u_alu/u_log y[9] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel b[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[0] ( u_cl/u_c0/u_exu/u_alu/u_add y[0] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[10] ( u_cl/u_c0/u_exu/u_alu/u_add y[10] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[11] ( u_cl/u_c0/u_exu/u_alu/u_add y[11] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[12] ( u_cl/u_c0/u_exu/u_alu/u_add y[12] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[13] ( u_cl/u_c0/u_exu/u_alu/u_add y[13] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[14] ( u_cl/u_c0/u_exu/u_alu/u_add y[14] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[15] ( u_cl/u_c0/u_exu/u_alu/u_add y[15] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[16] ( u_cl/u_c0/u_exu/u_alu/u_add y[16] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[17] ( u_cl/u_c0/u_exu/u_alu/u_add y[17] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[18] ( u_cl/u_c0/u_exu/u_alu/u_add y[18] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[19] ( u_cl/u_c0/u_exu/u_alu/u_add y[19] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[1] ( u_cl/u_c0/u_exu/u_alu/u_add y[1] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[20] ( u_cl/u_c0/u_exu/u_alu/u_add y[20] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[21] ( u_cl/u_c0/u_exu/u_alu/u_add y[21] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[22] ( u_cl/u_c0/u_exu/u_alu/u_add y[22] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[23] ( u_cl/u_c0/u_exu/u_alu/u_add y[23] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[24] ( u_cl/u_c0/u_exu/u_alu/u_add y[24] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[25] ( u_cl/u_c0/u_exu/u_alu/u_add y[25] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[26] ( u_cl/u_c0/u_exu/u_alu/u_add y[26] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[27] ( u_cl/u_c0/u_exu/u_alu/u_add y[27] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[28] ( u_cl/u_c0/u_exu/u_alu/u_add y[28] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[29] ( u_cl/u_c0/u_exu/u_alu/u_add y[29] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[2] ( u_cl/u_c0/u_exu/u_alu/u_add y[2] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[30] ( u_cl/u_c0/u_exu/u_alu/u_add y[30] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[31] ( u_cl/u_c0/u_exu/u_alu/u_add y[31] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[3] ( u_cl/u_c0/u_exu/u_alu/u_add y[3] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[4] ( u_cl/u_c0/u_exu/u_alu/u_add y[4] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[5] ( u_cl/u_c0/u_exu/u_alu/u_add y[5] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[6] ( u_cl/u_c0/u_exu/u_alu/u_add y[6] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[7] ( u_cl/u_c0/u_exu/u_alu/u_add y[7] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[8] ( u_cl/u_c0/u_exu/u_alu/u_add y[8] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_exu/u_alu/sum[9] ( u_cl/u_c0/u_exu/u_alu/u_add y[9] ) ( u_cl/u_c0/u_exu/u_alu/u_ysel a[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[0] ( u_cl/u_c0/u_ifu/u_nsel y[0] ) ( u_cl/u_c0/u_ifu/u_pc d[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[10] ( u_cl/u_c0/u_ifu/u_nsel y[10] ) ( u_cl/u_c0/u_ifu/u_pc d[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[11] ( u_cl/u_c0/u_ifu/u_nsel y[11] ) ( u_cl/u_c0/u_ifu/u_pc d[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[12] ( u_cl/u_c0/u_ifu/u_nsel y[12] ) ( u_cl/u_c0/u_ifu/u_pc d[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[13] ( u_cl/u_c0/u_ifu/u_nsel y[13] ) ( u_cl/u_c0/u_ifu/u_pc d[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[14] ( u_cl/u_c0/u_ifu/u_nsel y[14] ) ( u_cl/u_c0/u_ifu/u_pc d[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[15] ( u_cl/u_c0/u_ifu/u_nsel y[15] ) ( u_cl/u_c0/u_ifu/u_pc d[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[16] ( u_cl/u_c0/u_ifu/u_nsel y[16] ) ( u_cl/u_c0/u_ifu/u_pc d[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[17] ( u_cl/u_c0/u_ifu/u_nsel y[17] ) ( u_cl/u_c0/u_ifu/u_pc d[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[18] ( u_cl/u_c0/u_ifu/u_nsel y[18] ) ( u_cl/u_c0/u_ifu/u_pc d[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[19] ( u_cl/u_c0/u_ifu/u_nsel y[19] ) ( u_cl/u_c0/u_ifu/u_pc d[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[1] ( u_cl/u_c0/u_ifu/u_nsel y[1] ) ( u_cl/u_c0/u_ifu/u_pc d[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[20] ( u_cl/u_c0/u_ifu/u_nsel y[20] ) ( u_cl/u_c0/u_ifu/u_pc d[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[21] ( u_cl/u_c0/u_ifu/u_nsel y[21] ) ( u_cl/u_c0/u_ifu/u_pc d[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[22] ( u_cl/u_c0/u_ifu/u_nsel y[22] ) ( u_cl/u_c0/u_ifu/u_pc d[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[23] ( u_cl/u_c0/u_ifu/u_nsel y[23] ) ( u_cl/u_c0/u_ifu/u_pc d[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[24] ( u_cl/u_c0/u_ifu/u_nsel y[24] ) ( u_cl/u_c0/u_ifu/u_pc d[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[25] ( u_cl/u_c0/u_ifu/u_nsel y[25] ) ( u_cl/u_c0/u_ifu/u_pc d[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[26] ( u_cl/u_c0/u_ifu/u_nsel y[26] ) ( u_cl/u_c0/u_ifu/u_pc d[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[27] ( u_cl/u_c0/u_ifu/u_nsel y[27] ) ( u_cl/u_c0/u_ifu/u_pc d[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[28] ( u_cl/u_c0/u_ifu/u_nsel y[28] ) ( u_cl/u_c0/u_ifu/u_pc d[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[29] ( u_cl/u_c0/u_ifu/u_nsel y[29] ) ( u_cl/u_c0/u_ifu/u_pc d[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[2] ( u_cl/u_c0/u_ifu/u_nsel y[2] ) ( u_cl/u_c0/u_ifu/u_pc d[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[30] ( u_cl/u_c0/u_ifu/u_nsel y[30] ) ( u_cl/u_c0/u_ifu/u_pc d[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[31] ( u_cl/u_c0/u_ifu/u_nsel y[31] ) ( u_cl/u_c0/u_ifu/u_pc d[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[3] ( u_cl/u_c0/u_ifu/u_nsel y[3] ) ( u_cl/u_c0/u_ifu/u_pc d[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[4] ( u_cl/u_c0/u_ifu/u_nsel y[4] ) ( u_cl/u_c0/u_ifu/u_pc d[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[5] ( u_cl/u_c0/u_ifu/u_nsel y[5] ) ( u_cl/u_c0/u_ifu/u_pc d[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[6] ( u_cl/u_c0/u_ifu/u_nsel y[6] ) ( u_cl/u_c0/u_ifu/u_pc d[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[7] ( u_cl/u_c0/u_ifu/u_nsel y[7] ) ( u_cl/u_c0/u_ifu/u_pc d[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[8] ( u_cl/u_c0/u_ifu/u_nsel y[8] ) ( u_cl/u_c0/u_ifu/u_pc d[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/npc[9] ( u_cl/u_c0/u_ifu/u_nsel y[9] ) ( u_cl/u_c0/u_ifu/u_pc d[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[0] ( u_cl/u_c0/u_ifu/u_inc a[0] ) ( u_cl/u_c0/u_ifu/u_inc b[0] ) ( u_cl/u_c0/u_ifu/u_pc q[0] ) ( u_cl/u_c0/u_ifu/u_pcb d[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[10] ( u_cl/u_c0/u_ifu/u_iab din[8] ) ( u_cl/u_c0/u_ifu/u_inc a[10] ) ( u_cl/u_c0/u_ifu/u_inc b[10] ) ( u_cl/u_c0/u_ifu/u_pc q[10] ) ( u_cl/u_c0/u_ifu/u_pcb d[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[11] ( u_cl/u_c0/u_ifu/u_iab din[9] ) ( u_cl/u_c0/u_ifu/u_inc a[11] ) ( u_cl/u_c0/u_ifu/u_inc b[11] ) ( u_cl/u_c0/u_ifu/u_pc q[11] ) ( u_cl/u_c0/u_ifu/u_pcb d[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[12] ( u_cl/u_c0/u_ifu/u_inc a[12] ) ( u_cl/u_c0/u_ifu/u_inc b[12] ) ( u_cl/u_c0/u_ifu/u_pc q[12] ) ( u_cl/u_c0/u_ifu/u_pcb d[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[13] ( u_cl/u_c0/u_ifu/u_inc a[13] ) ( u_cl/u_c0/u_ifu/u_inc b[13] ) ( u_cl/u_c0/u_ifu/u_pc q[13] ) ( u_cl/u_c0/u_ifu/u_pcb d[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[14] ( u_cl/u_c0/u_ifu/u_inc a[14] ) ( u_cl/u_c0/u_ifu/u_inc b[14] ) ( u_cl/u_c0/u_ifu/u_pc q[14] ) ( u_cl/u_c0/u_ifu/u_pcb d[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[15] ( u_cl/u_c0/u_ifu/u_inc a[15] ) ( u_cl/u_c0/u_ifu/u_inc b[15] ) ( u_cl/u_c0/u_ifu/u_pc q[15] ) ( u_cl/u_c0/u_ifu/u_pcb d[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[16] ( u_cl/u_c0/u_ifu/u_inc a[16] ) ( u_cl/u_c0/u_ifu/u_inc b[16] ) ( u_cl/u_c0/u_ifu/u_pc q[16] ) ( u_cl/u_c0/u_ifu/u_pcb d[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[17] ( u_cl/u_c0/u_ifu/u_inc a[17] ) ( u_cl/u_c0/u_ifu/u_inc b[17] ) ( u_cl/u_c0/u_ifu/u_pc q[17] ) ( u_cl/u_c0/u_ifu/u_pcb d[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[18] ( u_cl/u_c0/u_ifu/u_inc a[18] ) ( u_cl/u_c0/u_ifu/u_inc b[18] ) ( u_cl/u_c0/u_ifu/u_pc q[18] ) ( u_cl/u_c0/u_ifu/u_pcb d[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[19] ( u_cl/u_c0/u_ifu/u_inc a[19] ) ( u_cl/u_c0/u_ifu/u_inc b[19] ) ( u_cl/u_c0/u_ifu/u_pc q[19] ) ( u_cl/u_c0/u_ifu/u_pcb d[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[1] ( u_cl/u_c0/u_ifu/u_inc a[1] ) ( u_cl/u_c0/u_ifu/u_inc b[1] ) ( u_cl/u_c0/u_ifu/u_pc q[1] ) ( u_cl/u_c0/u_ifu/u_pcb d[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[20] ( u_cl/u_c0/u_ifu/u_inc a[20] ) ( u_cl/u_c0/u_ifu/u_inc b[20] ) ( u_cl/u_c0/u_ifu/u_pc q[20] ) ( u_cl/u_c0/u_ifu/u_pcb d[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[21] ( u_cl/u_c0/u_ifu/u_inc a[21] ) ( u_cl/u_c0/u_ifu/u_inc b[21] ) ( u_cl/u_c0/u_ifu/u_pc q[21] ) ( u_cl/u_c0/u_ifu/u_pcb d[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[22] ( u_cl/u_c0/u_ifu/u_inc a[22] ) ( u_cl/u_c0/u_ifu/u_inc b[22] ) ( u_cl/u_c0/u_ifu/u_pc q[22] ) ( u_cl/u_c0/u_ifu/u_pcb d[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[23] ( u_cl/u_c0/u_ifu/u_inc a[23] ) ( u_cl/u_c0/u_ifu/u_inc b[23] ) ( u_cl/u_c0/u_ifu/u_pc q[23] ) ( u_cl/u_c0/u_ifu/u_pcb d[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[24] ( u_cl/u_c0/u_ifu/u_inc a[24] ) ( u_cl/u_c0/u_ifu/u_inc b[24] ) ( u_cl/u_c0/u_ifu/u_pc q[24] ) ( u_cl/u_c0/u_ifu/u_pcb d[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[25] ( u_cl/u_c0/u_ifu/u_inc a[25] ) ( u_cl/u_c0/u_ifu/u_inc b[25] ) ( u_cl/u_c0/u_ifu/u_pc q[25] ) ( u_cl/u_c0/u_ifu/u_pcb d[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[26] ( u_cl/u_c0/u_ifu/u_inc a[26] ) ( u_cl/u_c0/u_ifu/u_inc b[26] ) ( u_cl/u_c0/u_ifu/u_pc q[26] ) ( u_cl/u_c0/u_ifu/u_pcb d[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[27] ( u_cl/u_c0/u_ifu/u_inc a[27] ) ( u_cl/u_c0/u_ifu/u_inc b[27] ) ( u_cl/u_c0/u_ifu/u_pc q[27] ) ( u_cl/u_c0/u_ifu/u_pcb d[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[28] ( u_cl/u_c0/u_ifu/u_inc a[28] ) ( u_cl/u_c0/u_ifu/u_inc b[28] ) ( u_cl/u_c0/u_ifu/u_pc q[28] ) ( u_cl/u_c0/u_ifu/u_pcb d[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[29] ( u_cl/u_c0/u_ifu/u_inc a[29] ) ( u_cl/u_c0/u_ifu/u_inc b[29] ) ( u_cl/u_c0/u_ifu/u_pc q[29] ) ( u_cl/u_c0/u_ifu/u_pcb d[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[2] ( u_cl/u_c0/u_ifu/u_iab din[0] ) ( u_cl/u_c0/u_ifu/u_inc a[2] ) ( u_cl/u_c0/u_ifu/u_inc b[2] ) ( u_cl/u_c0/u_ifu/u_pc q[2] ) ( u_cl/u_c0/u_ifu/u_pcb d[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[30] ( u_cl/u_c0/u_ifu/u_inc a[30] ) ( u_cl/u_c0/u_ifu/u_inc b[30] ) ( u_cl/u_c0/u_ifu/u_pc q[30] ) ( u_cl/u_c0/u_ifu/u_pcb d[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[31] ( u_cl/u_c0/u_ifu/u_inc a[31] ) ( u_cl/u_c0/u_ifu/u_inc b[31] ) ( u_cl/u_c0/u_ifu/u_pc q[31] ) ( u_cl/u_c0/u_ifu/u_pcb d[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[3] ( u_cl/u_c0/u_ifu/u_iab din[1] ) ( u_cl/u_c0/u_ifu/u_inc a[3] ) ( u_cl/u_c0/u_ifu/u_inc b[3] ) ( u_cl/u_c0/u_ifu/u_pc q[3] ) ( u_cl/u_c0/u_ifu/u_pcb d[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[4] ( u_cl/u_c0/u_ifu/u_iab din[2] ) ( u_cl/u_c0/u_ifu/u_inc a[4] ) ( u_cl/u_c0/u_ifu/u_inc b[4] ) ( u_cl/u_c0/u_ifu/u_pc q[4] ) ( u_cl/u_c0/u_ifu/u_pcb d[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[5] ( u_cl/u_c0/u_ifu/u_iab din[3] ) ( u_cl/u_c0/u_ifu/u_inc a[5] ) ( u_cl/u_c0/u_ifu/u_inc b[5] ) ( u_cl/u_c0/u_ifu/u_pc q[5] ) ( u_cl/u_c0/u_ifu/u_pcb d[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[6] ( u_cl/u_c0/u_ifu/u_iab din[4] ) ( u_cl/u_c0/u_ifu/u_inc a[6] ) ( u_cl/u_c0/u_ifu/u_inc b[6] ) ( u_cl/u_c0/u_ifu/u_pc q[6] ) ( u_cl/u_c0/u_ifu/u_pcb d[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[7] ( u_cl/u_c0/u_ifu/u_iab din[5] ) ( u_cl/u_c0/u_ifu/u_inc a[7] ) ( u_cl/u_c0/u_ifu/u_inc b[7] ) ( u_cl/u_c0/u_ifu/u_pc q[7] ) ( u_cl/u_c0/u_ifu/u_pcb d[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[8] ( u_cl/u_c0/u_ifu/u_iab din[6] ) ( u_cl/u_c0/u_ifu/u_inc a[8] ) ( u_cl/u_c0/u_ifu/u_inc b[8] ) ( u_cl/u_c0/u_ifu/u_pc q[8] ) ( u_cl/u_c0/u_ifu/u_pcb d[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/pc[9] ( u_cl/u_c0/u_ifu/u_iab din[7] ) ( u_cl/u_c0/u_ifu/u_inc a[9] ) ( u_cl/u_c0/u_ifu/u_inc b[9] ) ( u_cl/u_c0/u_ifu/u_pc q[9] ) ( u_cl/u_c0/u_ifu/u_pcb d[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[0] ( u_cl/u_c0/u_ifu/u_inc y[0] ) ( u_cl/u_c0/u_ifu/u_nsel a[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[10] ( u_cl/u_c0/u_ifu/u_inc y[10] ) ( u_cl/u_c0/u_ifu/u_nsel a[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[11] ( u_cl/u_c0/u_ifu/u_inc y[11] ) ( u_cl/u_c0/u_ifu/u_nsel a[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[12] ( u_cl/u_c0/u_ifu/u_inc y[12] ) ( u_cl/u_c0/u_ifu/u_nsel a[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[13] ( u_cl/u_c0/u_ifu/u_inc y[13] ) ( u_cl/u_c0/u_ifu/u_nsel a[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[14] ( u_cl/u_c0/u_ifu/u_inc y[14] ) ( u_cl/u_c0/u_ifu/u_nsel a[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[15] ( u_cl/u_c0/u_ifu/u_inc y[15] ) ( u_cl/u_c0/u_ifu/u_nsel a[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[16] ( u_cl/u_c0/u_ifu/u_inc y[16] ) ( u_cl/u_c0/u_ifu/u_nsel a[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[17] ( u_cl/u_c0/u_ifu/u_inc y[17] ) ( u_cl/u_c0/u_ifu/u_nsel a[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[18] ( u_cl/u_c0/u_ifu/u_inc y[18] ) ( u_cl/u_c0/u_ifu/u_nsel a[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[19] ( u_cl/u_c0/u_ifu/u_inc y[19] ) ( u_cl/u_c0/u_ifu/u_nsel a[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[1] ( u_cl/u_c0/u_ifu/u_inc y[1] ) ( u_cl/u_c0/u_ifu/u_nsel a[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[20] ( u_cl/u_c0/u_ifu/u_inc y[20] ) ( u_cl/u_c0/u_ifu/u_nsel a[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[21] ( u_cl/u_c0/u_ifu/u_inc y[21] ) ( u_cl/u_c0/u_ifu/u_nsel a[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[22] ( u_cl/u_c0/u_ifu/u_inc y[22] ) ( u_cl/u_c0/u_ifu/u_nsel a[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[23] ( u_cl/u_c0/u_ifu/u_inc y[23] ) ( u_cl/u_c0/u_ifu/u_nsel a[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[24] ( u_cl/u_c0/u_ifu/u_inc y[24] ) ( u_cl/u_c0/u_ifu/u_nsel a[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[25] ( u_cl/u_c0/u_ifu/u_inc y[25] ) ( u_cl/u_c0/u_ifu/u_nsel a[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[26] ( u_cl/u_c0/u_ifu/u_inc y[26] ) ( u_cl/u_c0/u_ifu/u_nsel a[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[27] ( u_cl/u_c0/u_ifu/u_inc y[27] ) ( u_cl/u_c0/u_ifu/u_nsel a[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[28] ( u_cl/u_c0/u_ifu/u_inc y[28] ) ( u_cl/u_c0/u_ifu/u_nsel a[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[29] ( u_cl/u_c0/u_ifu/u_inc y[29] ) ( u_cl/u_c0/u_ifu/u_nsel a[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[2] ( u_cl/u_c0/u_ifu/u_inc y[2] ) ( u_cl/u_c0/u_ifu/u_nsel a[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[30] ( u_cl/u_c0/u_ifu/u_inc y[30] ) ( u_cl/u_c0/u_ifu/u_nsel a[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[31] ( u_cl/u_c0/u_ifu/u_inc y[31] ) ( u_cl/u_c0/u_ifu/u_nsel a[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[3] ( u_cl/u_c0/u_ifu/u_inc y[3] ) ( u_cl/u_c0/u_ifu/u_nsel a[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[4] ( u_cl/u_c0/u_ifu/u_inc y[4] ) ( u_cl/u_c0/u_ifu/u_nsel a[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[5] ( u_cl/u_c0/u_ifu/u_inc y[5] ) ( u_cl/u_c0/u_ifu/u_nsel a[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[6] ( u_cl/u_c0/u_ifu/u_inc y[6] ) ( u_cl/u_c0/u_ifu/u_nsel a[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[7] ( u_cl/u_c0/u_ifu/u_inc y[7] ) ( u_cl/u_c0/u_ifu/u_nsel a[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[8] ( u_cl/u_c0/u_ifu/u_inc y[8] ) ( u_cl/u_c0/u_ifu/u_nsel a[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_ifu/seq[9] ( u_cl/u_c0/u_ifu/u_inc y[9] ) ( u_cl/u_c0/u_ifu/u_nsel a[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[0] ( u_cl/u_c0/u_lsu/u_agu y[0] ) ( u_cl/u_c0/u_lsu/u_swe a[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[10] ( u_cl/u_c0/u_lsu/u_agu y[10] ) ( u_cl/u_c0/u_lsu/u_dab din[8] ) ( u_cl/u_c0/u_lsu/u_swe a[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[11] ( u_cl/u_c0/u_lsu/u_agu y[11] ) ( u_cl/u_c0/u_lsu/u_dab din[9] ) ( u_cl/u_c0/u_lsu/u_swe a[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[12] ( u_cl/u_c0/u_lsu/u_agu y[12] ) ( u_cl/u_c0/u_lsu/u_swe a[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[13] ( u_cl/u_c0/u_lsu/u_agu y[13] ) ( u_cl/u_c0/u_lsu/u_swe a[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[14] ( u_cl/u_c0/u_lsu/u_agu y[14] ) ( u_cl/u_c0/u_lsu/u_swe a[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[15] ( u_cl/u_c0/u_lsu/u_agu y[15] ) ( u_cl/u_c0/u_lsu/u_swe a[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[16] ( u_cl/u_c0/u_lsu/u_agu y[16] ) ( u_cl/u_c0/u_lsu/u_swe a[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[17] ( u_cl/u_c0/u_lsu/u_agu y[17] ) ( u_cl/u_c0/u_lsu/u_swe a[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[18] ( u_cl/u_c0/u_lsu/u_agu y[18] ) ( u_cl/u_c0/u_lsu/u_swe a[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[19] ( u_cl/u_c0/u_lsu/u_agu y[19] ) ( u_cl/u_c0/u_lsu/u_swe a[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[1] ( u_cl/u_c0/u_lsu/u_agu y[1] ) ( u_cl/u_c0/u_lsu/u_swe a[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[20] ( u_cl/u_c0/u_lsu/u_agu y[20] ) ( u_cl/u_c0/u_lsu/u_swe a[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[21] ( u_cl/u_c0/u_lsu/u_agu y[21] ) ( u_cl/u_c0/u_lsu/u_swe a[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[22] ( u_cl/u_c0/u_lsu/u_agu y[22] ) ( u_cl/u_c0/u_lsu/u_swe a[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[23] ( u_cl/u_c0/u_lsu/u_agu y[23] ) ( u_cl/u_c0/u_lsu/u_swe a[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[24] ( u_cl/u_c0/u_lsu/u_agu y[24] ) ( u_cl/u_c0/u_lsu/u_swe a[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[25] ( u_cl/u_c0/u_lsu/u_agu y[25] ) ( u_cl/u_c0/u_lsu/u_swe a[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[26] ( u_cl/u_c0/u_lsu/u_agu y[26] ) ( u_cl/u_c0/u_lsu/u_swe a[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[27] ( u_cl/u_c0/u_lsu/u_agu y[27] ) ( u_cl/u_c0/u_lsu/u_swe a[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[28] ( u_cl/u_c0/u_lsu/u_agu y[28] ) ( u_cl/u_c0/u_lsu/u_swe a[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[29] ( u_cl/u_c0/u_lsu/u_agu y[29] ) ( u_cl/u_c0/u_lsu/u_swe a[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[2] ( u_cl/u_c0/u_lsu/u_agu y[2] ) ( u_cl/u_c0/u_lsu/u_dab din[0] ) ( u_cl/u_c0/u_lsu/u_swe a[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[30] ( u_cl/u_c0/u_lsu/u_agu y[30] ) ( u_cl/u_c0/u_lsu/u_swe a[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[31] ( u_cl/u_c0/u_lsu/u_agu y[31] ) ( u_cl/u_c0/u_lsu/u_swe a[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[3] ( u_cl/u_c0/u_lsu/u_agu y[3] ) ( u_cl/u_c0/u_lsu/u_dab din[1] ) ( u_cl/u_c0/u_lsu/u_swe a[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[4] ( u_cl/u_c0/u_lsu/u_agu y[4] ) ( u_cl/u_c0/u_lsu/u_dab din[2] ) ( u_cl/u_c0/u_lsu/u_swe a[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[5] ( u_cl/u_c0/u_lsu/u_agu y[5] ) ( u_cl/u_c0/u_lsu/u_dab din[3] ) ( u_cl/u_c0/u_lsu/u_swe a[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[6] ( u_cl/u_c0/u_lsu/u_agu y[6] ) ( u_cl/u_c0/u_lsu/u_dab din[4] ) ( u_cl/u_c0/u_lsu/u_swe a[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[7] ( u_cl/u_c0/u_lsu/u_agu y[7] ) ( u_cl/u_c0/u_lsu/u_dab din[5] ) ( u_cl/u_c0/u_lsu/u_swe a[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[8] ( u_cl/u_c0/u_lsu/u_agu y[8] ) ( u_cl/u_c0/u_lsu/u_dab din[6] ) ( u_cl/u_c0/u_lsu/u_swe a[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/u_lsu/ea[9] ( u_cl/u_c0/u_lsu/u_agu y[9] ) ( u_cl/u_c0/u_lsu/u_dab din[7] ) ( u_cl/u_c0/u_lsu/u_swe a[9] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[0] ( u_cl/u_c0/u_rf wd[0] ) ( u_cl/u_c0/u_wbsel y[0] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[10] ( u_cl/u_c0/u_rf wd[10] ) ( u_cl/u_c0/u_wbsel y[10] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[11] ( u_cl/u_c0/u_rf wd[11] ) ( u_cl/u_c0/u_wbsel y[11] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[12] ( u_cl/u_c0/u_rf wd[12] ) ( u_cl/u_c0/u_wbsel y[12] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[13] ( u_cl/u_c0/u_rf wd[13] ) ( u_cl/u_c0/u_wbsel y[13] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[14] ( u_cl/u_c0/u_rf wd[14] ) ( u_cl/u_c0/u_wbsel y[14] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[15] ( u_cl/u_c0/u_rf wd[15] ) ( u_cl/u_c0/u_wbsel y[15] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[16] ( u_cl/u_c0/u_rf wd[16] ) ( u_cl/u_c0/u_wbsel y[16] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[17] ( u_cl/u_c0/u_rf wd[17] ) ( u_cl/u_c0/u_wbsel y[17] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[18] ( u_cl/u_c0/u_rf wd[18] ) ( u_cl/u_c0/u_wbsel y[18] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[19] ( u_cl/u_c0/u_rf wd[19] ) ( u_cl/u_c0/u_wbsel y[19] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[1] ( u_cl/u_c0/u_rf wd[1] ) ( u_cl/u_c0/u_wbsel y[1] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[20] ( u_cl/u_c0/u_rf wd[20] ) ( u_cl/u_c0/u_wbsel y[20] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[21] ( u_cl/u_c0/u_rf wd[21] ) ( u_cl/u_c0/u_wbsel y[21] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[22] ( u_cl/u_c0/u_rf wd[22] ) ( u_cl/u_c0/u_wbsel y[22] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[23] ( u_cl/u_c0/u_rf wd[23] ) ( u_cl/u_c0/u_wbsel y[23] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[24] ( u_cl/u_c0/u_rf wd[24] ) ( u_cl/u_c0/u_wbsel y[24] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[25] ( u_cl/u_c0/u_rf wd[25] ) ( u_cl/u_c0/u_wbsel y[25] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[26] ( u_cl/u_c0/u_rf wd[26] ) ( u_cl/u_c0/u_wbsel y[26] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[27] ( u_cl/u_c0/u_rf wd[27] ) ( u_cl/u_c0/u_wbsel y[27] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[28] ( u_cl/u_c0/u_rf wd[28] ) ( u_cl/u_c0/u_wbsel y[28] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[29] ( u_cl/u_c0/u_rf wd[29] ) ( u_cl/u_c0/u_wbsel y[29] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[2] ( u_cl/u_c0/u_rf wd[2] ) ( u_cl/u_c0/u_wbsel y[2] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[30] ( u_cl/u_c0/u_rf wd[30] ) ( u_cl/u_c0/u_wbsel y[30] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[31] ( u_cl/u_c0/u_rf wd[31] ) ( u_cl/u_c0/u_wbsel y[31] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[3] ( u_cl/u_c0/u_rf wd[3] ) ( u_cl/u_c0/u_wbsel y[3] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[4] ( u_cl/u_c0/u_rf wd[4] ) ( u_cl/u_c0/u_wbsel y[4] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[5] ( u_cl/u_c0/u_rf wd[5] ) ( u_cl/u_c0/u_wbsel y[5] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[6] ( u_cl/u_c0/u_rf wd[6] ) ( u_cl/u_c0/u_wbsel y[6] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[7] ( u_cl/u_c0/u_rf wd[7] ) ( u_cl/u_c0/u_wbsel y[7] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[8] ( u_cl/u_c0/u_rf wd[8] ) ( u_cl/u_c0/u_wbsel y[8] ) + USE SIGNAL ;
+  - u_cl/u_c0/wb[9] ( u_cl/u_c0/u_rf wd[9] ) ( u_cl/u_c0/u_wbsel y[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/ctrl[0] ( u_cl/u_c1/u_exu/u_bsel s ) ( u_cl/u_c1/u_idu/u_dec ctrl[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/ctrl[1] ( u_cl/u_c1/u_exu/u_alu/u_log op[0] ) ( u_cl/u_c1/u_idu/u_dec ctrl[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/ctrl[2] ( u_cl/u_c1/u_exu/u_alu/u_log op[1] ) ( u_cl/u_c1/u_idu/u_dec ctrl[2] ) ( u_cl/u_c1/u_wbsel s ) + USE SIGNAL ;
+  - u_cl/u_c1/ctrl[3] ( u_cl/u_c1/u_exu/u_alu/u_ysel s ) ( u_cl/u_c1/u_idu/u_dec ctrl[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/ctrl[4] ( u_cl/u_c1/u_exu/u_bru op[0] ) ( u_cl/u_c1/u_idu/u_dec ctrl[4] ) ( u_cl/u_c1/u_lsu/u_algn sz[0] ) ( u_cl/u_c1/u_lsu/u_dab sz[0] ) ( u_cl/u_c1/u_lsu/u_swe op[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/ctrl[5] ( u_cl/u_c1/u_exu/u_bru op[1] ) ( u_cl/u_c1/u_idu/u_dec ctrl[5] ) ( u_cl/u_c1/u_lsu/u_algn sz[1] ) ( u_cl/u_c1/u_lsu/u_dab sz[1] ) ( u_cl/u_c1/u_lsu/u_swe op[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/ctrl[6] ( u_cl/u_c1/u_exu/u_bru op[2] ) ( u_cl/u_c1/u_idu/u_dec ctrl[6] ) ( u_cl/u_c1/u_lsu/u_swe op[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/ctrl[7] ( u_cl/u_c1/u_idu/u_dec ctrl[7] ) ( u_cl/u_c1/u_lsu/u_st en ) ( u_cl/u_c1/u_rf we ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[0] ( u_cl/u_c1/u_exu/u_bsel b[0] ) ( u_cl/u_c1/u_idu/u_imm imm[0] ) ( u_cl/u_c1/u_lsu/u_agu b[0] ) ( u_cl/u_c1/u_lsu/u_swe b[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[10] ( u_cl/u_c1/u_exu/u_bsel b[10] ) ( u_cl/u_c1/u_idu/u_imm imm[10] ) ( u_cl/u_c1/u_lsu/u_agu b[10] ) ( u_cl/u_c1/u_lsu/u_swe b[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[11] ( u_cl/u_c1/u_exu/u_bsel b[11] ) ( u_cl/u_c1/u_idu/u_imm imm[11] ) ( u_cl/u_c1/u_lsu/u_agu b[11] ) ( u_cl/u_c1/u_lsu/u_swe b[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[12] ( u_cl/u_c1/u_exu/u_bsel b[12] ) ( u_cl/u_c1/u_idu/u_imm imm[12] ) ( u_cl/u_c1/u_lsu/u_agu b[12] ) ( u_cl/u_c1/u_lsu/u_swe b[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[13] ( u_cl/u_c1/u_exu/u_bsel b[13] ) ( u_cl/u_c1/u_idu/u_imm imm[13] ) ( u_cl/u_c1/u_lsu/u_agu b[13] ) ( u_cl/u_c1/u_lsu/u_swe b[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[14] ( u_cl/u_c1/u_exu/u_bsel b[14] ) ( u_cl/u_c1/u_idu/u_imm imm[14] ) ( u_cl/u_c1/u_lsu/u_agu b[14] ) ( u_cl/u_c1/u_lsu/u_swe b[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[15] ( u_cl/u_c1/u_exu/u_bsel b[15] ) ( u_cl/u_c1/u_idu/u_imm imm[15] ) ( u_cl/u_c1/u_lsu/u_agu b[15] ) ( u_cl/u_c1/u_lsu/u_swe b[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[16] ( u_cl/u_c1/u_exu/u_bsel b[16] ) ( u_cl/u_c1/u_idu/u_imm imm[16] ) ( u_cl/u_c1/u_lsu/u_agu b[16] ) ( u_cl/u_c1/u_lsu/u_swe b[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[17] ( u_cl/u_c1/u_exu/u_bsel b[17] ) ( u_cl/u_c1/u_idu/u_imm imm[17] ) ( u_cl/u_c1/u_lsu/u_agu b[17] ) ( u_cl/u_c1/u_lsu/u_swe b[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[18] ( u_cl/u_c1/u_exu/u_bsel b[18] ) ( u_cl/u_c1/u_idu/u_imm imm[18] ) ( u_cl/u_c1/u_lsu/u_agu b[18] ) ( u_cl/u_c1/u_lsu/u_swe b[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[19] ( u_cl/u_c1/u_exu/u_bsel b[19] ) ( u_cl/u_c1/u_idu/u_imm imm[19] ) ( u_cl/u_c1/u_lsu/u_agu b[19] ) ( u_cl/u_c1/u_lsu/u_swe b[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[1] ( u_cl/u_c1/u_exu/u_bsel b[1] ) ( u_cl/u_c1/u_idu/u_imm imm[1] ) ( u_cl/u_c1/u_lsu/u_agu b[1] ) ( u_cl/u_c1/u_lsu/u_swe b[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[20] ( u_cl/u_c1/u_exu/u_bsel b[20] ) ( u_cl/u_c1/u_idu/u_imm imm[20] ) ( u_cl/u_c1/u_lsu/u_agu b[20] ) ( u_cl/u_c1/u_lsu/u_swe b[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[21] ( u_cl/u_c1/u_exu/u_bsel b[21] ) ( u_cl/u_c1/u_idu/u_imm imm[21] ) ( u_cl/u_c1/u_lsu/u_agu b[21] ) ( u_cl/u_c1/u_lsu/u_swe b[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[22] ( u_cl/u_c1/u_exu/u_bsel b[22] ) ( u_cl/u_c1/u_idu/u_imm imm[22] ) ( u_cl/u_c1/u_lsu/u_agu b[22] ) ( u_cl/u_c1/u_lsu/u_swe b[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[23] ( u_cl/u_c1/u_exu/u_bsel b[23] ) ( u_cl/u_c1/u_idu/u_imm imm[23] ) ( u_cl/u_c1/u_lsu/u_agu b[23] ) ( u_cl/u_c1/u_lsu/u_swe b[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[24] ( u_cl/u_c1/u_exu/u_bsel b[24] ) ( u_cl/u_c1/u_idu/u_imm imm[24] ) ( u_cl/u_c1/u_lsu/u_agu b[24] ) ( u_cl/u_c1/u_lsu/u_swe b[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[25] ( u_cl/u_c1/u_exu/u_bsel b[25] ) ( u_cl/u_c1/u_idu/u_imm imm[25] ) ( u_cl/u_c1/u_lsu/u_agu b[25] ) ( u_cl/u_c1/u_lsu/u_swe b[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[26] ( u_cl/u_c1/u_exu/u_bsel b[26] ) ( u_cl/u_c1/u_idu/u_imm imm[26] ) ( u_cl/u_c1/u_lsu/u_agu b[26] ) ( u_cl/u_c1/u_lsu/u_swe b[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[27] ( u_cl/u_c1/u_exu/u_bsel b[27] ) ( u_cl/u_c1/u_idu/u_imm imm[27] ) ( u_cl/u_c1/u_lsu/u_agu b[27] ) ( u_cl/u_c1/u_lsu/u_swe b[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[28] ( u_cl/u_c1/u_exu/u_bsel b[28] ) ( u_cl/u_c1/u_idu/u_imm imm[28] ) ( u_cl/u_c1/u_lsu/u_agu b[28] ) ( u_cl/u_c1/u_lsu/u_swe b[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[29] ( u_cl/u_c1/u_exu/u_bsel b[29] ) ( u_cl/u_c1/u_idu/u_imm imm[29] ) ( u_cl/u_c1/u_lsu/u_agu b[29] ) ( u_cl/u_c1/u_lsu/u_swe b[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[2] ( u_cl/u_c1/u_exu/u_bsel b[2] ) ( u_cl/u_c1/u_idu/u_imm imm[2] ) ( u_cl/u_c1/u_lsu/u_agu b[2] ) ( u_cl/u_c1/u_lsu/u_swe b[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[30] ( u_cl/u_c1/u_exu/u_bsel b[30] ) ( u_cl/u_c1/u_idu/u_imm imm[30] ) ( u_cl/u_c1/u_lsu/u_agu b[30] ) ( u_cl/u_c1/u_lsu/u_swe b[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[31] ( u_cl/u_c1/u_exu/u_bsel b[31] ) ( u_cl/u_c1/u_idu/u_imm imm[31] ) ( u_cl/u_c1/u_lsu/u_agu b[31] ) ( u_cl/u_c1/u_lsu/u_swe b[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[3] ( u_cl/u_c1/u_exu/u_bsel b[3] ) ( u_cl/u_c1/u_idu/u_imm imm[3] ) ( u_cl/u_c1/u_lsu/u_agu b[3] ) ( u_cl/u_c1/u_lsu/u_swe b[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[4] ( u_cl/u_c1/u_exu/u_bsel b[4] ) ( u_cl/u_c1/u_idu/u_imm imm[4] ) ( u_cl/u_c1/u_lsu/u_agu b[4] ) ( u_cl/u_c1/u_lsu/u_swe b[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[5] ( u_cl/u_c1/u_exu/u_bsel b[5] ) ( u_cl/u_c1/u_idu/u_imm imm[5] ) ( u_cl/u_c1/u_lsu/u_agu b[5] ) ( u_cl/u_c1/u_lsu/u_swe b[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[6] ( u_cl/u_c1/u_exu/u_bsel b[6] ) ( u_cl/u_c1/u_idu/u_imm imm[6] ) ( u_cl/u_c1/u_lsu/u_agu b[6] ) ( u_cl/u_c1/u_lsu/u_swe b[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[7] ( u_cl/u_c1/u_exu/u_bsel b[7] ) ( u_cl/u_c1/u_idu/u_imm imm[7] ) ( u_cl/u_c1/u_lsu/u_agu b[7] ) ( u_cl/u_c1/u_lsu/u_swe b[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[8] ( u_cl/u_c1/u_exu/u_bsel b[8] ) ( u_cl/u_c1/u_idu/u_imm imm[8] ) ( u_cl/u_c1/u_lsu/u_agu b[8] ) ( u_cl/u_c1/u_lsu/u_swe b[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/imm[9] ( u_cl/u_c1/u_exu/u_bsel b[9] ) ( u_cl/u_c1/u_idu/u_imm imm[9] ) ( u_cl/u_c1/u_lsu/u_agu b[9] ) ( u_cl/u_c1/u_lsu/u_swe b[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[0] ( u_cl/u_c1/u_lsu/u_algn dout[0] ) ( u_cl/u_c1/u_wbsel b[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[10] ( u_cl/u_c1/u_lsu/u_algn dout[10] ) ( u_cl/u_c1/u_wbsel b[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[11] ( u_cl/u_c1/u_lsu/u_algn dout[11] ) ( u_cl/u_c1/u_wbsel b[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[12] ( u_cl/u_c1/u_lsu/u_algn dout[12] ) ( u_cl/u_c1/u_wbsel b[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[13] ( u_cl/u_c1/u_lsu/u_algn dout[13] ) ( u_cl/u_c1/u_wbsel b[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[14] ( u_cl/u_c1/u_lsu/u_algn dout[14] ) ( u_cl/u_c1/u_wbsel b[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[15] ( u_cl/u_c1/u_lsu/u_algn dout[15] ) ( u_cl/u_c1/u_wbsel b[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[16] ( u_cl/u_c1/u_lsu/u_algn dout[16] ) ( u_cl/u_c1/u_wbsel b[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[17] ( u_cl/u_c1/u_lsu/u_algn dout[17] ) ( u_cl/u_c1/u_wbsel b[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[18] ( u_cl/u_c1/u_lsu/u_algn dout[18] ) ( u_cl/u_c1/u_wbsel b[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[19] ( u_cl/u_c1/u_lsu/u_algn dout[19] ) ( u_cl/u_c1/u_wbsel b[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[1] ( u_cl/u_c1/u_lsu/u_algn dout[1] ) ( u_cl/u_c1/u_wbsel b[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[20] ( u_cl/u_c1/u_lsu/u_algn dout[20] ) ( u_cl/u_c1/u_wbsel b[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[21] ( u_cl/u_c1/u_lsu/u_algn dout[21] ) ( u_cl/u_c1/u_wbsel b[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[22] ( u_cl/u_c1/u_lsu/u_algn dout[22] ) ( u_cl/u_c1/u_wbsel b[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[23] ( u_cl/u_c1/u_lsu/u_algn dout[23] ) ( u_cl/u_c1/u_wbsel b[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[24] ( u_cl/u_c1/u_lsu/u_algn dout[24] ) ( u_cl/u_c1/u_wbsel b[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[25] ( u_cl/u_c1/u_lsu/u_algn dout[25] ) ( u_cl/u_c1/u_wbsel b[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[26] ( u_cl/u_c1/u_lsu/u_algn dout[26] ) ( u_cl/u_c1/u_wbsel b[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[27] ( u_cl/u_c1/u_lsu/u_algn dout[27] ) ( u_cl/u_c1/u_wbsel b[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[28] ( u_cl/u_c1/u_lsu/u_algn dout[28] ) ( u_cl/u_c1/u_wbsel b[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[29] ( u_cl/u_c1/u_lsu/u_algn dout[29] ) ( u_cl/u_c1/u_wbsel b[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[2] ( u_cl/u_c1/u_lsu/u_algn dout[2] ) ( u_cl/u_c1/u_wbsel b[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[30] ( u_cl/u_c1/u_lsu/u_algn dout[30] ) ( u_cl/u_c1/u_wbsel b[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[31] ( u_cl/u_c1/u_lsu/u_algn dout[31] ) ( u_cl/u_c1/u_wbsel b[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[3] ( u_cl/u_c1/u_lsu/u_algn dout[3] ) ( u_cl/u_c1/u_wbsel b[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[4] ( u_cl/u_c1/u_lsu/u_algn dout[4] ) ( u_cl/u_c1/u_wbsel b[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[5] ( u_cl/u_c1/u_lsu/u_algn dout[5] ) ( u_cl/u_c1/u_wbsel b[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[6] ( u_cl/u_c1/u_lsu/u_algn dout[6] ) ( u_cl/u_c1/u_wbsel b[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[7] ( u_cl/u_c1/u_lsu/u_algn dout[7] ) ( u_cl/u_c1/u_wbsel b[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[8] ( u_cl/u_c1/u_lsu/u_algn dout[8] ) ( u_cl/u_c1/u_wbsel b[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/ldata[9] ( u_cl/u_c1/u_lsu/u_algn dout[9] ) ( u_cl/u_c1/u_wbsel b[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/rd[0] ( u_cl/u_c1/u_idu/u_dec rd[0] ) ( u_cl/u_c1/u_rf wa[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/rd[1] ( u_cl/u_c1/u_idu/u_dec rd[1] ) ( u_cl/u_c1/u_rf wa[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/rd[2] ( u_cl/u_c1/u_idu/u_dec rd[2] ) ( u_cl/u_c1/u_rf wa[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/rd[3] ( u_cl/u_c1/u_idu/u_dec rd[3] ) ( u_cl/u_c1/u_rf wa[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/rd[4] ( u_cl/u_c1/u_idu/u_dec rd[4] ) ( u_cl/u_c1/u_rf wa[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[0] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[0] ) ( u_cl/u_c1/u_ifu/u_nsel b[0] ) ( u_cl/u_c1/u_wbsel a[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[10] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[10] ) ( u_cl/u_c1/u_ifu/u_nsel b[10] ) ( u_cl/u_c1/u_wbsel a[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[11] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[11] ) ( u_cl/u_c1/u_ifu/u_nsel b[11] ) ( u_cl/u_c1/u_wbsel a[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[12] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[12] ) ( u_cl/u_c1/u_ifu/u_nsel b[12] ) ( u_cl/u_c1/u_wbsel a[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[13] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[13] ) ( u_cl/u_c1/u_ifu/u_nsel b[13] ) ( u_cl/u_c1/u_wbsel a[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[14] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[14] ) ( u_cl/u_c1/u_ifu/u_nsel b[14] ) ( u_cl/u_c1/u_wbsel a[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[15] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[15] ) ( u_cl/u_c1/u_ifu/u_nsel b[15] ) ( u_cl/u_c1/u_wbsel a[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[16] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[16] ) ( u_cl/u_c1/u_ifu/u_nsel b[16] ) ( u_cl/u_c1/u_wbsel a[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[17] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[17] ) ( u_cl/u_c1/u_ifu/u_nsel b[17] ) ( u_cl/u_c1/u_wbsel a[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[18] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[18] ) ( u_cl/u_c1/u_ifu/u_nsel b[18] ) ( u_cl/u_c1/u_wbsel a[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[19] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[19] ) ( u_cl/u_c1/u_ifu/u_nsel b[19] ) ( u_cl/u_c1/u_wbsel a[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[1] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[1] ) ( u_cl/u_c1/u_ifu/u_nsel b[1] ) ( u_cl/u_c1/u_wbsel a[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[20] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[20] ) ( u_cl/u_c1/u_ifu/u_nsel b[20] ) ( u_cl/u_c1/u_wbsel a[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[21] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[21] ) ( u_cl/u_c1/u_ifu/u_nsel b[21] ) ( u_cl/u_c1/u_wbsel a[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[22] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[22] ) ( u_cl/u_c1/u_ifu/u_nsel b[22] ) ( u_cl/u_c1/u_wbsel a[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[23] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[23] ) ( u_cl/u_c1/u_ifu/u_nsel b[23] ) ( u_cl/u_c1/u_wbsel a[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[24] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[24] ) ( u_cl/u_c1/u_ifu/u_nsel b[24] ) ( u_cl/u_c1/u_wbsel a[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[25] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[25] ) ( u_cl/u_c1/u_ifu/u_nsel b[25] ) ( u_cl/u_c1/u_wbsel a[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[26] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[26] ) ( u_cl/u_c1/u_ifu/u_nsel b[26] ) ( u_cl/u_c1/u_wbsel a[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[27] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[27] ) ( u_cl/u_c1/u_ifu/u_nsel b[27] ) ( u_cl/u_c1/u_wbsel a[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[28] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[28] ) ( u_cl/u_c1/u_ifu/u_nsel b[28] ) ( u_cl/u_c1/u_wbsel a[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[29] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[29] ) ( u_cl/u_c1/u_ifu/u_nsel b[29] ) ( u_cl/u_c1/u_wbsel a[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[2] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[2] ) ( u_cl/u_c1/u_ifu/u_nsel b[2] ) ( u_cl/u_c1/u_wbsel a[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[30] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[30] ) ( u_cl/u_c1/u_ifu/u_nsel b[30] ) ( u_cl/u_c1/u_wbsel a[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[31] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[31] ) ( u_cl/u_c1/u_ifu/u_nsel b[31] ) ( u_cl/u_c1/u_wbsel a[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[3] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[3] ) ( u_cl/u_c1/u_ifu/u_nsel b[3] ) ( u_cl/u_c1/u_wbsel a[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[4] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[4] ) ( u_cl/u_c1/u_ifu/u_nsel b[4] ) ( u_cl/u_c1/u_wbsel a[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[5] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[5] ) ( u_cl/u_c1/u_ifu/u_nsel b[5] ) ( u_cl/u_c1/u_wbsel a[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[6] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[6] ) ( u_cl/u_c1/u_ifu/u_nsel b[6] ) ( u_cl/u_c1/u_wbsel a[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[7] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[7] ) ( u_cl/u_c1/u_ifu/u_nsel b[7] ) ( u_cl/u_c1/u_wbsel a[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[8] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[8] ) ( u_cl/u_c1/u_ifu/u_nsel b[8] ) ( u_cl/u_c1/u_wbsel a[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/res[9] ( u_cl/u_c1/u_exu/u_alu/u_ysel y[9] ) ( u_cl/u_c1/u_ifu/u_nsel b[9] ) ( u_cl/u_c1/u_wbsel a[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1[0] ( u_cl/u_c1/u_idu/u_dec rs1[0] ) ( u_cl/u_c1/u_rf ra1[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1[1] ( u_cl/u_c1/u_idu/u_dec rs1[1] ) ( u_cl/u_c1/u_rf ra1[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1[2] ( u_cl/u_c1/u_idu/u_dec rs1[2] ) ( u_cl/u_c1/u_rf ra1[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1[3] ( u_cl/u_c1/u_idu/u_dec rs1[3] ) ( u_cl/u_c1/u_rf ra1[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1[4] ( u_cl/u_c1/u_idu/u_dec rs1[4] ) ( u_cl/u_c1/u_rf ra1[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[0] ( u_cl/u_c1/u_exu/u_alu/u_add a[0] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[0] ) ( u_cl/u_c1/u_exu/u_bru a[0] ) ( u_cl/u_c1/u_lsu/u_agu a[0] ) ( u_cl/u_c1/u_rf rd1[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[10] ( u_cl/u_c1/u_exu/u_alu/u_add a[10] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[10] ) ( u_cl/u_c1/u_exu/u_bru a[10] ) ( u_cl/u_c1/u_lsu/u_agu a[10] ) ( u_cl/u_c1/u_rf rd1[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[11] ( u_cl/u_c1/u_exu/u_alu/u_add a[11] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[11] ) ( u_cl/u_c1/u_exu/u_bru a[11] ) ( u_cl/u_c1/u_lsu/u_agu a[11] ) ( u_cl/u_c1/u_rf rd1[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[12] ( u_cl/u_c1/u_exu/u_alu/u_add a[12] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[12] ) ( u_cl/u_c1/u_exu/u_bru a[12] ) ( u_cl/u_c1/u_lsu/u_agu a[12] ) ( u_cl/u_c1/u_rf rd1[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[13] ( u_cl/u_c1/u_exu/u_alu/u_add a[13] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[13] ) ( u_cl/u_c1/u_exu/u_bru a[13] ) ( u_cl/u_c1/u_lsu/u_agu a[13] ) ( u_cl/u_c1/u_rf rd1[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[14] ( u_cl/u_c1/u_exu/u_alu/u_add a[14] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[14] ) ( u_cl/u_c1/u_exu/u_bru a[14] ) ( u_cl/u_c1/u_lsu/u_agu a[14] ) ( u_cl/u_c1/u_rf rd1[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[15] ( u_cl/u_c1/u_exu/u_alu/u_add a[15] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[15] ) ( u_cl/u_c1/u_exu/u_bru a[15] ) ( u_cl/u_c1/u_lsu/u_agu a[15] ) ( u_cl/u_c1/u_rf rd1[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[16] ( u_cl/u_c1/u_exu/u_alu/u_add a[16] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[16] ) ( u_cl/u_c1/u_exu/u_bru a[16] ) ( u_cl/u_c1/u_lsu/u_agu a[16] ) ( u_cl/u_c1/u_rf rd1[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[17] ( u_cl/u_c1/u_exu/u_alu/u_add a[17] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[17] ) ( u_cl/u_c1/u_exu/u_bru a[17] ) ( u_cl/u_c1/u_lsu/u_agu a[17] ) ( u_cl/u_c1/u_rf rd1[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[18] ( u_cl/u_c1/u_exu/u_alu/u_add a[18] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[18] ) ( u_cl/u_c1/u_exu/u_bru a[18] ) ( u_cl/u_c1/u_lsu/u_agu a[18] ) ( u_cl/u_c1/u_rf rd1[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[19] ( u_cl/u_c1/u_exu/u_alu/u_add a[19] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[19] ) ( u_cl/u_c1/u_exu/u_bru a[19] ) ( u_cl/u_c1/u_lsu/u_agu a[19] ) ( u_cl/u_c1/u_rf rd1[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[1] ( u_cl/u_c1/u_exu/u_alu/u_add a[1] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[1] ) ( u_cl/u_c1/u_exu/u_bru a[1] ) ( u_cl/u_c1/u_lsu/u_agu a[1] ) ( u_cl/u_c1/u_rf rd1[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[20] ( u_cl/u_c1/u_exu/u_alu/u_add a[20] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[20] ) ( u_cl/u_c1/u_exu/u_bru a[20] ) ( u_cl/u_c1/u_lsu/u_agu a[20] ) ( u_cl/u_c1/u_rf rd1[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[21] ( u_cl/u_c1/u_exu/u_alu/u_add a[21] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[21] ) ( u_cl/u_c1/u_exu/u_bru a[21] ) ( u_cl/u_c1/u_lsu/u_agu a[21] ) ( u_cl/u_c1/u_rf rd1[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[22] ( u_cl/u_c1/u_exu/u_alu/u_add a[22] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[22] ) ( u_cl/u_c1/u_exu/u_bru a[22] ) ( u_cl/u_c1/u_lsu/u_agu a[22] ) ( u_cl/u_c1/u_rf rd1[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[23] ( u_cl/u_c1/u_exu/u_alu/u_add a[23] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[23] ) ( u_cl/u_c1/u_exu/u_bru a[23] ) ( u_cl/u_c1/u_lsu/u_agu a[23] ) ( u_cl/u_c1/u_rf rd1[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[24] ( u_cl/u_c1/u_exu/u_alu/u_add a[24] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[24] ) ( u_cl/u_c1/u_exu/u_bru a[24] ) ( u_cl/u_c1/u_lsu/u_agu a[24] ) ( u_cl/u_c1/u_rf rd1[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[25] ( u_cl/u_c1/u_exu/u_alu/u_add a[25] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[25] ) ( u_cl/u_c1/u_exu/u_bru a[25] ) ( u_cl/u_c1/u_lsu/u_agu a[25] ) ( u_cl/u_c1/u_rf rd1[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[26] ( u_cl/u_c1/u_exu/u_alu/u_add a[26] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[26] ) ( u_cl/u_c1/u_exu/u_bru a[26] ) ( u_cl/u_c1/u_lsu/u_agu a[26] ) ( u_cl/u_c1/u_rf rd1[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[27] ( u_cl/u_c1/u_exu/u_alu/u_add a[27] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[27] ) ( u_cl/u_c1/u_exu/u_bru a[27] ) ( u_cl/u_c1/u_lsu/u_agu a[27] ) ( u_cl/u_c1/u_rf rd1[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[28] ( u_cl/u_c1/u_exu/u_alu/u_add a[28] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[28] ) ( u_cl/u_c1/u_exu/u_bru a[28] ) ( u_cl/u_c1/u_lsu/u_agu a[28] ) ( u_cl/u_c1/u_rf rd1[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[29] ( u_cl/u_c1/u_exu/u_alu/u_add a[29] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[29] ) ( u_cl/u_c1/u_exu/u_bru a[29] ) ( u_cl/u_c1/u_lsu/u_agu a[29] ) ( u_cl/u_c1/u_rf rd1[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[2] ( u_cl/u_c1/u_exu/u_alu/u_add a[2] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[2] ) ( u_cl/u_c1/u_exu/u_bru a[2] ) ( u_cl/u_c1/u_lsu/u_agu a[2] ) ( u_cl/u_c1/u_rf rd1[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[30] ( u_cl/u_c1/u_exu/u_alu/u_add a[30] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[30] ) ( u_cl/u_c1/u_exu/u_bru a[30] ) ( u_cl/u_c1/u_lsu/u_agu a[30] ) ( u_cl/u_c1/u_rf rd1[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[31] ( u_cl/u_c1/u_exu/u_alu/u_add a[31] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[31] ) ( u_cl/u_c1/u_exu/u_bru a[31] ) ( u_cl/u_c1/u_lsu/u_agu a[31] ) ( u_cl/u_c1/u_rf rd1[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[3] ( u_cl/u_c1/u_exu/u_alu/u_add a[3] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[3] ) ( u_cl/u_c1/u_exu/u_bru a[3] ) ( u_cl/u_c1/u_lsu/u_agu a[3] ) ( u_cl/u_c1/u_rf rd1[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[4] ( u_cl/u_c1/u_exu/u_alu/u_add a[4] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[4] ) ( u_cl/u_c1/u_exu/u_bru a[4] ) ( u_cl/u_c1/u_lsu/u_agu a[4] ) ( u_cl/u_c1/u_rf rd1[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[5] ( u_cl/u_c1/u_exu/u_alu/u_add a[5] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[5] ) ( u_cl/u_c1/u_exu/u_bru a[5] ) ( u_cl/u_c1/u_lsu/u_agu a[5] ) ( u_cl/u_c1/u_rf rd1[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[6] ( u_cl/u_c1/u_exu/u_alu/u_add a[6] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[6] ) ( u_cl/u_c1/u_exu/u_bru a[6] ) ( u_cl/u_c1/u_lsu/u_agu a[6] ) ( u_cl/u_c1/u_rf rd1[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[7] ( u_cl/u_c1/u_exu/u_alu/u_add a[7] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[7] ) ( u_cl/u_c1/u_exu/u_bru a[7] ) ( u_cl/u_c1/u_lsu/u_agu a[7] ) ( u_cl/u_c1/u_rf rd1[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[8] ( u_cl/u_c1/u_exu/u_alu/u_add a[8] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[8] ) ( u_cl/u_c1/u_exu/u_bru a[8] ) ( u_cl/u_c1/u_lsu/u_agu a[8] ) ( u_cl/u_c1/u_rf rd1[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs1v[9] ( u_cl/u_c1/u_exu/u_alu/u_add a[9] ) ( u_cl/u_c1/u_exu/u_alu/u_log a[9] ) ( u_cl/u_c1/u_exu/u_bru a[9] ) ( u_cl/u_c1/u_lsu/u_agu a[9] ) ( u_cl/u_c1/u_rf rd1[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2[0] ( u_cl/u_c1/u_idu/u_dec rs2[0] ) ( u_cl/u_c1/u_rf ra2[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2[1] ( u_cl/u_c1/u_idu/u_dec rs2[1] ) ( u_cl/u_c1/u_rf ra2[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2[2] ( u_cl/u_c1/u_idu/u_dec rs2[2] ) ( u_cl/u_c1/u_rf ra2[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2[3] ( u_cl/u_c1/u_idu/u_dec rs2[3] ) ( u_cl/u_c1/u_rf ra2[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2[4] ( u_cl/u_c1/u_idu/u_dec rs2[4] ) ( u_cl/u_c1/u_rf ra2[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[0] ( u_cl/u_c1/u_exu/u_bru b[0] ) ( u_cl/u_c1/u_exu/u_bsel a[0] ) ( u_cl/u_c1/u_lsu/u_st d[0] ) ( u_cl/u_c1/u_rf rd2[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[10] ( u_cl/u_c1/u_exu/u_bru b[10] ) ( u_cl/u_c1/u_exu/u_bsel a[10] ) ( u_cl/u_c1/u_lsu/u_st d[10] ) ( u_cl/u_c1/u_rf rd2[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[11] ( u_cl/u_c1/u_exu/u_bru b[11] ) ( u_cl/u_c1/u_exu/u_bsel a[11] ) ( u_cl/u_c1/u_lsu/u_st d[11] ) ( u_cl/u_c1/u_rf rd2[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[12] ( u_cl/u_c1/u_exu/u_bru b[12] ) ( u_cl/u_c1/u_exu/u_bsel a[12] ) ( u_cl/u_c1/u_lsu/u_st d[12] ) ( u_cl/u_c1/u_rf rd2[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[13] ( u_cl/u_c1/u_exu/u_bru b[13] ) ( u_cl/u_c1/u_exu/u_bsel a[13] ) ( u_cl/u_c1/u_lsu/u_st d[13] ) ( u_cl/u_c1/u_rf rd2[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[14] ( u_cl/u_c1/u_exu/u_bru b[14] ) ( u_cl/u_c1/u_exu/u_bsel a[14] ) ( u_cl/u_c1/u_lsu/u_st d[14] ) ( u_cl/u_c1/u_rf rd2[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[15] ( u_cl/u_c1/u_exu/u_bru b[15] ) ( u_cl/u_c1/u_exu/u_bsel a[15] ) ( u_cl/u_c1/u_lsu/u_st d[15] ) ( u_cl/u_c1/u_rf rd2[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[16] ( u_cl/u_c1/u_exu/u_bru b[16] ) ( u_cl/u_c1/u_exu/u_bsel a[16] ) ( u_cl/u_c1/u_lsu/u_st d[16] ) ( u_cl/u_c1/u_rf rd2[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[17] ( u_cl/u_c1/u_exu/u_bru b[17] ) ( u_cl/u_c1/u_exu/u_bsel a[17] ) ( u_cl/u_c1/u_lsu/u_st d[17] ) ( u_cl/u_c1/u_rf rd2[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[18] ( u_cl/u_c1/u_exu/u_bru b[18] ) ( u_cl/u_c1/u_exu/u_bsel a[18] ) ( u_cl/u_c1/u_lsu/u_st d[18] ) ( u_cl/u_c1/u_rf rd2[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[19] ( u_cl/u_c1/u_exu/u_bru b[19] ) ( u_cl/u_c1/u_exu/u_bsel a[19] ) ( u_cl/u_c1/u_lsu/u_st d[19] ) ( u_cl/u_c1/u_rf rd2[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[1] ( u_cl/u_c1/u_exu/u_bru b[1] ) ( u_cl/u_c1/u_exu/u_bsel a[1] ) ( u_cl/u_c1/u_lsu/u_st d[1] ) ( u_cl/u_c1/u_rf rd2[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[20] ( u_cl/u_c1/u_exu/u_bru b[20] ) ( u_cl/u_c1/u_exu/u_bsel a[20] ) ( u_cl/u_c1/u_lsu/u_st d[20] ) ( u_cl/u_c1/u_rf rd2[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[21] ( u_cl/u_c1/u_exu/u_bru b[21] ) ( u_cl/u_c1/u_exu/u_bsel a[21] ) ( u_cl/u_c1/u_lsu/u_st d[21] ) ( u_cl/u_c1/u_rf rd2[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[22] ( u_cl/u_c1/u_exu/u_bru b[22] ) ( u_cl/u_c1/u_exu/u_bsel a[22] ) ( u_cl/u_c1/u_lsu/u_st d[22] ) ( u_cl/u_c1/u_rf rd2[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[23] ( u_cl/u_c1/u_exu/u_bru b[23] ) ( u_cl/u_c1/u_exu/u_bsel a[23] ) ( u_cl/u_c1/u_lsu/u_st d[23] ) ( u_cl/u_c1/u_rf rd2[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[24] ( u_cl/u_c1/u_exu/u_bru b[24] ) ( u_cl/u_c1/u_exu/u_bsel a[24] ) ( u_cl/u_c1/u_lsu/u_st d[24] ) ( u_cl/u_c1/u_rf rd2[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[25] ( u_cl/u_c1/u_exu/u_bru b[25] ) ( u_cl/u_c1/u_exu/u_bsel a[25] ) ( u_cl/u_c1/u_lsu/u_st d[25] ) ( u_cl/u_c1/u_rf rd2[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[26] ( u_cl/u_c1/u_exu/u_bru b[26] ) ( u_cl/u_c1/u_exu/u_bsel a[26] ) ( u_cl/u_c1/u_lsu/u_st d[26] ) ( u_cl/u_c1/u_rf rd2[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[27] ( u_cl/u_c1/u_exu/u_bru b[27] ) ( u_cl/u_c1/u_exu/u_bsel a[27] ) ( u_cl/u_c1/u_lsu/u_st d[27] ) ( u_cl/u_c1/u_rf rd2[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[28] ( u_cl/u_c1/u_exu/u_bru b[28] ) ( u_cl/u_c1/u_exu/u_bsel a[28] ) ( u_cl/u_c1/u_lsu/u_st d[28] ) ( u_cl/u_c1/u_rf rd2[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[29] ( u_cl/u_c1/u_exu/u_bru b[29] ) ( u_cl/u_c1/u_exu/u_bsel a[29] ) ( u_cl/u_c1/u_lsu/u_st d[29] ) ( u_cl/u_c1/u_rf rd2[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[2] ( u_cl/u_c1/u_exu/u_bru b[2] ) ( u_cl/u_c1/u_exu/u_bsel a[2] ) ( u_cl/u_c1/u_lsu/u_st d[2] ) ( u_cl/u_c1/u_rf rd2[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[30] ( u_cl/u_c1/u_exu/u_bru b[30] ) ( u_cl/u_c1/u_exu/u_bsel a[30] ) ( u_cl/u_c1/u_lsu/u_st d[30] ) ( u_cl/u_c1/u_rf rd2[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[31] ( u_cl/u_c1/u_exu/u_bru b[31] ) ( u_cl/u_c1/u_exu/u_bsel a[31] ) ( u_cl/u_c1/u_lsu/u_st d[31] ) ( u_cl/u_c1/u_rf rd2[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[3] ( u_cl/u_c1/u_exu/u_bru b[3] ) ( u_cl/u_c1/u_exu/u_bsel a[3] ) ( u_cl/u_c1/u_lsu/u_st d[3] ) ( u_cl/u_c1/u_rf rd2[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[4] ( u_cl/u_c1/u_exu/u_bru b[4] ) ( u_cl/u_c1/u_exu/u_bsel a[4] ) ( u_cl/u_c1/u_lsu/u_st d[4] ) ( u_cl/u_c1/u_rf rd2[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[5] ( u_cl/u_c1/u_exu/u_bru b[5] ) ( u_cl/u_c1/u_exu/u_bsel a[5] ) ( u_cl/u_c1/u_lsu/u_st d[5] ) ( u_cl/u_c1/u_rf rd2[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[6] ( u_cl/u_c1/u_exu/u_bru b[6] ) ( u_cl/u_c1/u_exu/u_bsel a[6] ) ( u_cl/u_c1/u_lsu/u_st d[6] ) ( u_cl/u_c1/u_rf rd2[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[7] ( u_cl/u_c1/u_exu/u_bru b[7] ) ( u_cl/u_c1/u_exu/u_bsel a[7] ) ( u_cl/u_c1/u_lsu/u_st d[7] ) ( u_cl/u_c1/u_rf rd2[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[8] ( u_cl/u_c1/u_exu/u_bru b[8] ) ( u_cl/u_c1/u_exu/u_bsel a[8] ) ( u_cl/u_c1/u_lsu/u_st d[8] ) ( u_cl/u_c1/u_rf rd2[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/rs2v[9] ( u_cl/u_c1/u_exu/u_bru b[9] ) ( u_cl/u_c1/u_exu/u_bsel a[9] ) ( u_cl/u_c1/u_lsu/u_st d[9] ) ( u_cl/u_c1/u_rf rd2[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/take ( u_cl/u_c1/u_exu/u_bru taken ) ( u_cl/u_c1/u_ifu/u_iab sz[0] ) ( u_cl/u_c1/u_ifu/u_nsel s ) ( u_cl/u_c1/u_ifu/u_pc en ) ( u_cl/u_c1/u_ifu/u_pcb en ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[0] ( u_cl/u_c1/u_exu/u_alu/u_add b[0] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[0] ) ( u_cl/u_c1/u_exu/u_bsel y[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[10] ( u_cl/u_c1/u_exu/u_alu/u_add b[10] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[10] ) ( u_cl/u_c1/u_exu/u_bsel y[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[11] ( u_cl/u_c1/u_exu/u_alu/u_add b[11] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[11] ) ( u_cl/u_c1/u_exu/u_bsel y[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[12] ( u_cl/u_c1/u_exu/u_alu/u_add b[12] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[12] ) ( u_cl/u_c1/u_exu/u_bsel y[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[13] ( u_cl/u_c1/u_exu/u_alu/u_add b[13] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[13] ) ( u_cl/u_c1/u_exu/u_bsel y[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[14] ( u_cl/u_c1/u_exu/u_alu/u_add b[14] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[14] ) ( u_cl/u_c1/u_exu/u_bsel y[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[15] ( u_cl/u_c1/u_exu/u_alu/u_add b[15] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[15] ) ( u_cl/u_c1/u_exu/u_bsel y[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[16] ( u_cl/u_c1/u_exu/u_alu/u_add b[16] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[16] ) ( u_cl/u_c1/u_exu/u_bsel y[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[17] ( u_cl/u_c1/u_exu/u_alu/u_add b[17] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[17] ) ( u_cl/u_c1/u_exu/u_bsel y[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[18] ( u_cl/u_c1/u_exu/u_alu/u_add b[18] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[18] ) ( u_cl/u_c1/u_exu/u_bsel y[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[19] ( u_cl/u_c1/u_exu/u_alu/u_add b[19] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[19] ) ( u_cl/u_c1/u_exu/u_bsel y[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[1] ( u_cl/u_c1/u_exu/u_alu/u_add b[1] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[1] ) ( u_cl/u_c1/u_exu/u_bsel y[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[20] ( u_cl/u_c1/u_exu/u_alu/u_add b[20] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[20] ) ( u_cl/u_c1/u_exu/u_bsel y[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[21] ( u_cl/u_c1/u_exu/u_alu/u_add b[21] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[21] ) ( u_cl/u_c1/u_exu/u_bsel y[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[22] ( u_cl/u_c1/u_exu/u_alu/u_add b[22] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[22] ) ( u_cl/u_c1/u_exu/u_bsel y[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[23] ( u_cl/u_c1/u_exu/u_alu/u_add b[23] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[23] ) ( u_cl/u_c1/u_exu/u_bsel y[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[24] ( u_cl/u_c1/u_exu/u_alu/u_add b[24] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[24] ) ( u_cl/u_c1/u_exu/u_bsel y[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[25] ( u_cl/u_c1/u_exu/u_alu/u_add b[25] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[25] ) ( u_cl/u_c1/u_exu/u_bsel y[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[26] ( u_cl/u_c1/u_exu/u_alu/u_add b[26] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[26] ) ( u_cl/u_c1/u_exu/u_bsel y[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[27] ( u_cl/u_c1/u_exu/u_alu/u_add b[27] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[27] ) ( u_cl/u_c1/u_exu/u_bsel y[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[28] ( u_cl/u_c1/u_exu/u_alu/u_add b[28] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[28] ) ( u_cl/u_c1/u_exu/u_bsel y[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[29] ( u_cl/u_c1/u_exu/u_alu/u_add b[29] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[29] ) ( u_cl/u_c1/u_exu/u_bsel y[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[2] ( u_cl/u_c1/u_exu/u_alu/u_add b[2] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[2] ) ( u_cl/u_c1/u_exu/u_bsel y[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[30] ( u_cl/u_c1/u_exu/u_alu/u_add b[30] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[30] ) ( u_cl/u_c1/u_exu/u_bsel y[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[31] ( u_cl/u_c1/u_exu/u_alu/u_add b[31] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[31] ) ( u_cl/u_c1/u_exu/u_bsel y[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[3] ( u_cl/u_c1/u_exu/u_alu/u_add b[3] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[3] ) ( u_cl/u_c1/u_exu/u_bsel y[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[4] ( u_cl/u_c1/u_exu/u_alu/u_add b[4] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[4] ) ( u_cl/u_c1/u_exu/u_bsel y[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[5] ( u_cl/u_c1/u_exu/u_alu/u_add b[5] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[5] ) ( u_cl/u_c1/u_exu/u_bsel y[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[6] ( u_cl/u_c1/u_exu/u_alu/u_add b[6] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[6] ) ( u_cl/u_c1/u_exu/u_bsel y[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[7] ( u_cl/u_c1/u_exu/u_alu/u_add b[7] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[7] ) ( u_cl/u_c1/u_exu/u_bsel y[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[8] ( u_cl/u_c1/u_exu/u_alu/u_add b[8] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[8] ) ( u_cl/u_c1/u_exu/u_bsel y[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/opb[9] ( u_cl/u_c1/u_exu/u_alu/u_add b[9] ) ( u_cl/u_c1/u_exu/u_alu/u_log b[9] ) ( u_cl/u_c1/u_exu/u_bsel y[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[0] ( u_cl/u_c1/u_exu/u_alu/u_log y[0] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[10] ( u_cl/u_c1/u_exu/u_alu/u_log y[10] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[11] ( u_cl/u_c1/u_exu/u_alu/u_log y[11] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[12] ( u_cl/u_c1/u_exu/u_alu/u_log y[12] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[13] ( u_cl/u_c1/u_exu/u_alu/u_log y[13] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[14] ( u_cl/u_c1/u_exu/u_alu/u_log y[14] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[15] ( u_cl/u_c1/u_exu/u_alu/u_log y[15] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[16] ( u_cl/u_c1/u_exu/u_alu/u_log y[16] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[17] ( u_cl/u_c1/u_exu/u_alu/u_log y[17] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[18] ( u_cl/u_c1/u_exu/u_alu/u_log y[18] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[19] ( u_cl/u_c1/u_exu/u_alu/u_log y[19] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[1] ( u_cl/u_c1/u_exu/u_alu/u_log y[1] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[20] ( u_cl/u_c1/u_exu/u_alu/u_log y[20] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[21] ( u_cl/u_c1/u_exu/u_alu/u_log y[21] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[22] ( u_cl/u_c1/u_exu/u_alu/u_log y[22] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[23] ( u_cl/u_c1/u_exu/u_alu/u_log y[23] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[24] ( u_cl/u_c1/u_exu/u_alu/u_log y[24] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[25] ( u_cl/u_c1/u_exu/u_alu/u_log y[25] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[26] ( u_cl/u_c1/u_exu/u_alu/u_log y[26] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[27] ( u_cl/u_c1/u_exu/u_alu/u_log y[27] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[28] ( u_cl/u_c1/u_exu/u_alu/u_log y[28] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[29] ( u_cl/u_c1/u_exu/u_alu/u_log y[29] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[2] ( u_cl/u_c1/u_exu/u_alu/u_log y[2] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[30] ( u_cl/u_c1/u_exu/u_alu/u_log y[30] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[31] ( u_cl/u_c1/u_exu/u_alu/u_log y[31] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[3] ( u_cl/u_c1/u_exu/u_alu/u_log y[3] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[4] ( u_cl/u_c1/u_exu/u_alu/u_log y[4] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[5] ( u_cl/u_c1/u_exu/u_alu/u_log y[5] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[6] ( u_cl/u_c1/u_exu/u_alu/u_log y[6] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[7] ( u_cl/u_c1/u_exu/u_alu/u_log y[7] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[8] ( u_cl/u_c1/u_exu/u_alu/u_log y[8] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/lgc[9] ( u_cl/u_c1/u_exu/u_alu/u_log y[9] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel b[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[0] ( u_cl/u_c1/u_exu/u_alu/u_add y[0] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[10] ( u_cl/u_c1/u_exu/u_alu/u_add y[10] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[11] ( u_cl/u_c1/u_exu/u_alu/u_add y[11] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[12] ( u_cl/u_c1/u_exu/u_alu/u_add y[12] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[13] ( u_cl/u_c1/u_exu/u_alu/u_add y[13] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[14] ( u_cl/u_c1/u_exu/u_alu/u_add y[14] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[15] ( u_cl/u_c1/u_exu/u_alu/u_add y[15] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[16] ( u_cl/u_c1/u_exu/u_alu/u_add y[16] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[17] ( u_cl/u_c1/u_exu/u_alu/u_add y[17] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[18] ( u_cl/u_c1/u_exu/u_alu/u_add y[18] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[19] ( u_cl/u_c1/u_exu/u_alu/u_add y[19] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[1] ( u_cl/u_c1/u_exu/u_alu/u_add y[1] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[20] ( u_cl/u_c1/u_exu/u_alu/u_add y[20] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[21] ( u_cl/u_c1/u_exu/u_alu/u_add y[21] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[22] ( u_cl/u_c1/u_exu/u_alu/u_add y[22] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[23] ( u_cl/u_c1/u_exu/u_alu/u_add y[23] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[24] ( u_cl/u_c1/u_exu/u_alu/u_add y[24] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[25] ( u_cl/u_c1/u_exu/u_alu/u_add y[25] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[26] ( u_cl/u_c1/u_exu/u_alu/u_add y[26] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[27] ( u_cl/u_c1/u_exu/u_alu/u_add y[27] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[28] ( u_cl/u_c1/u_exu/u_alu/u_add y[28] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[29] ( u_cl/u_c1/u_exu/u_alu/u_add y[29] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[2] ( u_cl/u_c1/u_exu/u_alu/u_add y[2] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[30] ( u_cl/u_c1/u_exu/u_alu/u_add y[30] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[31] ( u_cl/u_c1/u_exu/u_alu/u_add y[31] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[3] ( u_cl/u_c1/u_exu/u_alu/u_add y[3] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[4] ( u_cl/u_c1/u_exu/u_alu/u_add y[4] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[5] ( u_cl/u_c1/u_exu/u_alu/u_add y[5] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[6] ( u_cl/u_c1/u_exu/u_alu/u_add y[6] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[7] ( u_cl/u_c1/u_exu/u_alu/u_add y[7] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[8] ( u_cl/u_c1/u_exu/u_alu/u_add y[8] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_exu/u_alu/sum[9] ( u_cl/u_c1/u_exu/u_alu/u_add y[9] ) ( u_cl/u_c1/u_exu/u_alu/u_ysel a[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[0] ( u_cl/u_c1/u_ifu/u_nsel y[0] ) ( u_cl/u_c1/u_ifu/u_pc d[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[10] ( u_cl/u_c1/u_ifu/u_nsel y[10] ) ( u_cl/u_c1/u_ifu/u_pc d[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[11] ( u_cl/u_c1/u_ifu/u_nsel y[11] ) ( u_cl/u_c1/u_ifu/u_pc d[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[12] ( u_cl/u_c1/u_ifu/u_nsel y[12] ) ( u_cl/u_c1/u_ifu/u_pc d[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[13] ( u_cl/u_c1/u_ifu/u_nsel y[13] ) ( u_cl/u_c1/u_ifu/u_pc d[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[14] ( u_cl/u_c1/u_ifu/u_nsel y[14] ) ( u_cl/u_c1/u_ifu/u_pc d[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[15] ( u_cl/u_c1/u_ifu/u_nsel y[15] ) ( u_cl/u_c1/u_ifu/u_pc d[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[16] ( u_cl/u_c1/u_ifu/u_nsel y[16] ) ( u_cl/u_c1/u_ifu/u_pc d[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[17] ( u_cl/u_c1/u_ifu/u_nsel y[17] ) ( u_cl/u_c1/u_ifu/u_pc d[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[18] ( u_cl/u_c1/u_ifu/u_nsel y[18] ) ( u_cl/u_c1/u_ifu/u_pc d[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[19] ( u_cl/u_c1/u_ifu/u_nsel y[19] ) ( u_cl/u_c1/u_ifu/u_pc d[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[1] ( u_cl/u_c1/u_ifu/u_nsel y[1] ) ( u_cl/u_c1/u_ifu/u_pc d[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[20] ( u_cl/u_c1/u_ifu/u_nsel y[20] ) ( u_cl/u_c1/u_ifu/u_pc d[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[21] ( u_cl/u_c1/u_ifu/u_nsel y[21] ) ( u_cl/u_c1/u_ifu/u_pc d[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[22] ( u_cl/u_c1/u_ifu/u_nsel y[22] ) ( u_cl/u_c1/u_ifu/u_pc d[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[23] ( u_cl/u_c1/u_ifu/u_nsel y[23] ) ( u_cl/u_c1/u_ifu/u_pc d[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[24] ( u_cl/u_c1/u_ifu/u_nsel y[24] ) ( u_cl/u_c1/u_ifu/u_pc d[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[25] ( u_cl/u_c1/u_ifu/u_nsel y[25] ) ( u_cl/u_c1/u_ifu/u_pc d[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[26] ( u_cl/u_c1/u_ifu/u_nsel y[26] ) ( u_cl/u_c1/u_ifu/u_pc d[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[27] ( u_cl/u_c1/u_ifu/u_nsel y[27] ) ( u_cl/u_c1/u_ifu/u_pc d[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[28] ( u_cl/u_c1/u_ifu/u_nsel y[28] ) ( u_cl/u_c1/u_ifu/u_pc d[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[29] ( u_cl/u_c1/u_ifu/u_nsel y[29] ) ( u_cl/u_c1/u_ifu/u_pc d[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[2] ( u_cl/u_c1/u_ifu/u_nsel y[2] ) ( u_cl/u_c1/u_ifu/u_pc d[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[30] ( u_cl/u_c1/u_ifu/u_nsel y[30] ) ( u_cl/u_c1/u_ifu/u_pc d[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[31] ( u_cl/u_c1/u_ifu/u_nsel y[31] ) ( u_cl/u_c1/u_ifu/u_pc d[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[3] ( u_cl/u_c1/u_ifu/u_nsel y[3] ) ( u_cl/u_c1/u_ifu/u_pc d[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[4] ( u_cl/u_c1/u_ifu/u_nsel y[4] ) ( u_cl/u_c1/u_ifu/u_pc d[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[5] ( u_cl/u_c1/u_ifu/u_nsel y[5] ) ( u_cl/u_c1/u_ifu/u_pc d[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[6] ( u_cl/u_c1/u_ifu/u_nsel y[6] ) ( u_cl/u_c1/u_ifu/u_pc d[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[7] ( u_cl/u_c1/u_ifu/u_nsel y[7] ) ( u_cl/u_c1/u_ifu/u_pc d[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[8] ( u_cl/u_c1/u_ifu/u_nsel y[8] ) ( u_cl/u_c1/u_ifu/u_pc d[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/npc[9] ( u_cl/u_c1/u_ifu/u_nsel y[9] ) ( u_cl/u_c1/u_ifu/u_pc d[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[0] ( u_cl/u_c1/u_ifu/u_inc a[0] ) ( u_cl/u_c1/u_ifu/u_inc b[0] ) ( u_cl/u_c1/u_ifu/u_pc q[0] ) ( u_cl/u_c1/u_ifu/u_pcb d[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[10] ( u_cl/u_c1/u_ifu/u_iab din[8] ) ( u_cl/u_c1/u_ifu/u_inc a[10] ) ( u_cl/u_c1/u_ifu/u_inc b[10] ) ( u_cl/u_c1/u_ifu/u_pc q[10] ) ( u_cl/u_c1/u_ifu/u_pcb d[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[11] ( u_cl/u_c1/u_ifu/u_iab din[9] ) ( u_cl/u_c1/u_ifu/u_inc a[11] ) ( u_cl/u_c1/u_ifu/u_inc b[11] ) ( u_cl/u_c1/u_ifu/u_pc q[11] ) ( u_cl/u_c1/u_ifu/u_pcb d[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[12] ( u_cl/u_c1/u_ifu/u_inc a[12] ) ( u_cl/u_c1/u_ifu/u_inc b[12] ) ( u_cl/u_c1/u_ifu/u_pc q[12] ) ( u_cl/u_c1/u_ifu/u_pcb d[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[13] ( u_cl/u_c1/u_ifu/u_inc a[13] ) ( u_cl/u_c1/u_ifu/u_inc b[13] ) ( u_cl/u_c1/u_ifu/u_pc q[13] ) ( u_cl/u_c1/u_ifu/u_pcb d[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[14] ( u_cl/u_c1/u_ifu/u_inc a[14] ) ( u_cl/u_c1/u_ifu/u_inc b[14] ) ( u_cl/u_c1/u_ifu/u_pc q[14] ) ( u_cl/u_c1/u_ifu/u_pcb d[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[15] ( u_cl/u_c1/u_ifu/u_inc a[15] ) ( u_cl/u_c1/u_ifu/u_inc b[15] ) ( u_cl/u_c1/u_ifu/u_pc q[15] ) ( u_cl/u_c1/u_ifu/u_pcb d[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[16] ( u_cl/u_c1/u_ifu/u_inc a[16] ) ( u_cl/u_c1/u_ifu/u_inc b[16] ) ( u_cl/u_c1/u_ifu/u_pc q[16] ) ( u_cl/u_c1/u_ifu/u_pcb d[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[17] ( u_cl/u_c1/u_ifu/u_inc a[17] ) ( u_cl/u_c1/u_ifu/u_inc b[17] ) ( u_cl/u_c1/u_ifu/u_pc q[17] ) ( u_cl/u_c1/u_ifu/u_pcb d[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[18] ( u_cl/u_c1/u_ifu/u_inc a[18] ) ( u_cl/u_c1/u_ifu/u_inc b[18] ) ( u_cl/u_c1/u_ifu/u_pc q[18] ) ( u_cl/u_c1/u_ifu/u_pcb d[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[19] ( u_cl/u_c1/u_ifu/u_inc a[19] ) ( u_cl/u_c1/u_ifu/u_inc b[19] ) ( u_cl/u_c1/u_ifu/u_pc q[19] ) ( u_cl/u_c1/u_ifu/u_pcb d[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[1] ( u_cl/u_c1/u_ifu/u_inc a[1] ) ( u_cl/u_c1/u_ifu/u_inc b[1] ) ( u_cl/u_c1/u_ifu/u_pc q[1] ) ( u_cl/u_c1/u_ifu/u_pcb d[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[20] ( u_cl/u_c1/u_ifu/u_inc a[20] ) ( u_cl/u_c1/u_ifu/u_inc b[20] ) ( u_cl/u_c1/u_ifu/u_pc q[20] ) ( u_cl/u_c1/u_ifu/u_pcb d[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[21] ( u_cl/u_c1/u_ifu/u_inc a[21] ) ( u_cl/u_c1/u_ifu/u_inc b[21] ) ( u_cl/u_c1/u_ifu/u_pc q[21] ) ( u_cl/u_c1/u_ifu/u_pcb d[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[22] ( u_cl/u_c1/u_ifu/u_inc a[22] ) ( u_cl/u_c1/u_ifu/u_inc b[22] ) ( u_cl/u_c1/u_ifu/u_pc q[22] ) ( u_cl/u_c1/u_ifu/u_pcb d[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[23] ( u_cl/u_c1/u_ifu/u_inc a[23] ) ( u_cl/u_c1/u_ifu/u_inc b[23] ) ( u_cl/u_c1/u_ifu/u_pc q[23] ) ( u_cl/u_c1/u_ifu/u_pcb d[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[24] ( u_cl/u_c1/u_ifu/u_inc a[24] ) ( u_cl/u_c1/u_ifu/u_inc b[24] ) ( u_cl/u_c1/u_ifu/u_pc q[24] ) ( u_cl/u_c1/u_ifu/u_pcb d[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[25] ( u_cl/u_c1/u_ifu/u_inc a[25] ) ( u_cl/u_c1/u_ifu/u_inc b[25] ) ( u_cl/u_c1/u_ifu/u_pc q[25] ) ( u_cl/u_c1/u_ifu/u_pcb d[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[26] ( u_cl/u_c1/u_ifu/u_inc a[26] ) ( u_cl/u_c1/u_ifu/u_inc b[26] ) ( u_cl/u_c1/u_ifu/u_pc q[26] ) ( u_cl/u_c1/u_ifu/u_pcb d[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[27] ( u_cl/u_c1/u_ifu/u_inc a[27] ) ( u_cl/u_c1/u_ifu/u_inc b[27] ) ( u_cl/u_c1/u_ifu/u_pc q[27] ) ( u_cl/u_c1/u_ifu/u_pcb d[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[28] ( u_cl/u_c1/u_ifu/u_inc a[28] ) ( u_cl/u_c1/u_ifu/u_inc b[28] ) ( u_cl/u_c1/u_ifu/u_pc q[28] ) ( u_cl/u_c1/u_ifu/u_pcb d[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[29] ( u_cl/u_c1/u_ifu/u_inc a[29] ) ( u_cl/u_c1/u_ifu/u_inc b[29] ) ( u_cl/u_c1/u_ifu/u_pc q[29] ) ( u_cl/u_c1/u_ifu/u_pcb d[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[2] ( u_cl/u_c1/u_ifu/u_iab din[0] ) ( u_cl/u_c1/u_ifu/u_inc a[2] ) ( u_cl/u_c1/u_ifu/u_inc b[2] ) ( u_cl/u_c1/u_ifu/u_pc q[2] ) ( u_cl/u_c1/u_ifu/u_pcb d[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[30] ( u_cl/u_c1/u_ifu/u_inc a[30] ) ( u_cl/u_c1/u_ifu/u_inc b[30] ) ( u_cl/u_c1/u_ifu/u_pc q[30] ) ( u_cl/u_c1/u_ifu/u_pcb d[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[31] ( u_cl/u_c1/u_ifu/u_inc a[31] ) ( u_cl/u_c1/u_ifu/u_inc b[31] ) ( u_cl/u_c1/u_ifu/u_pc q[31] ) ( u_cl/u_c1/u_ifu/u_pcb d[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[3] ( u_cl/u_c1/u_ifu/u_iab din[1] ) ( u_cl/u_c1/u_ifu/u_inc a[3] ) ( u_cl/u_c1/u_ifu/u_inc b[3] ) ( u_cl/u_c1/u_ifu/u_pc q[3] ) ( u_cl/u_c1/u_ifu/u_pcb d[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[4] ( u_cl/u_c1/u_ifu/u_iab din[2] ) ( u_cl/u_c1/u_ifu/u_inc a[4] ) ( u_cl/u_c1/u_ifu/u_inc b[4] ) ( u_cl/u_c1/u_ifu/u_pc q[4] ) ( u_cl/u_c1/u_ifu/u_pcb d[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[5] ( u_cl/u_c1/u_ifu/u_iab din[3] ) ( u_cl/u_c1/u_ifu/u_inc a[5] ) ( u_cl/u_c1/u_ifu/u_inc b[5] ) ( u_cl/u_c1/u_ifu/u_pc q[5] ) ( u_cl/u_c1/u_ifu/u_pcb d[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[6] ( u_cl/u_c1/u_ifu/u_iab din[4] ) ( u_cl/u_c1/u_ifu/u_inc a[6] ) ( u_cl/u_c1/u_ifu/u_inc b[6] ) ( u_cl/u_c1/u_ifu/u_pc q[6] ) ( u_cl/u_c1/u_ifu/u_pcb d[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[7] ( u_cl/u_c1/u_ifu/u_iab din[5] ) ( u_cl/u_c1/u_ifu/u_inc a[7] ) ( u_cl/u_c1/u_ifu/u_inc b[7] ) ( u_cl/u_c1/u_ifu/u_pc q[7] ) ( u_cl/u_c1/u_ifu/u_pcb d[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[8] ( u_cl/u_c1/u_ifu/u_iab din[6] ) ( u_cl/u_c1/u_ifu/u_inc a[8] ) ( u_cl/u_c1/u_ifu/u_inc b[8] ) ( u_cl/u_c1/u_ifu/u_pc q[8] ) ( u_cl/u_c1/u_ifu/u_pcb d[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/pc[9] ( u_cl/u_c1/u_ifu/u_iab din[7] ) ( u_cl/u_c1/u_ifu/u_inc a[9] ) ( u_cl/u_c1/u_ifu/u_inc b[9] ) ( u_cl/u_c1/u_ifu/u_pc q[9] ) ( u_cl/u_c1/u_ifu/u_pcb d[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[0] ( u_cl/u_c1/u_ifu/u_inc y[0] ) ( u_cl/u_c1/u_ifu/u_nsel a[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[10] ( u_cl/u_c1/u_ifu/u_inc y[10] ) ( u_cl/u_c1/u_ifu/u_nsel a[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[11] ( u_cl/u_c1/u_ifu/u_inc y[11] ) ( u_cl/u_c1/u_ifu/u_nsel a[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[12] ( u_cl/u_c1/u_ifu/u_inc y[12] ) ( u_cl/u_c1/u_ifu/u_nsel a[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[13] ( u_cl/u_c1/u_ifu/u_inc y[13] ) ( u_cl/u_c1/u_ifu/u_nsel a[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[14] ( u_cl/u_c1/u_ifu/u_inc y[14] ) ( u_cl/u_c1/u_ifu/u_nsel a[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[15] ( u_cl/u_c1/u_ifu/u_inc y[15] ) ( u_cl/u_c1/u_ifu/u_nsel a[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[16] ( u_cl/u_c1/u_ifu/u_inc y[16] ) ( u_cl/u_c1/u_ifu/u_nsel a[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[17] ( u_cl/u_c1/u_ifu/u_inc y[17] ) ( u_cl/u_c1/u_ifu/u_nsel a[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[18] ( u_cl/u_c1/u_ifu/u_inc y[18] ) ( u_cl/u_c1/u_ifu/u_nsel a[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[19] ( u_cl/u_c1/u_ifu/u_inc y[19] ) ( u_cl/u_c1/u_ifu/u_nsel a[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[1] ( u_cl/u_c1/u_ifu/u_inc y[1] ) ( u_cl/u_c1/u_ifu/u_nsel a[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[20] ( u_cl/u_c1/u_ifu/u_inc y[20] ) ( u_cl/u_c1/u_ifu/u_nsel a[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[21] ( u_cl/u_c1/u_ifu/u_inc y[21] ) ( u_cl/u_c1/u_ifu/u_nsel a[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[22] ( u_cl/u_c1/u_ifu/u_inc y[22] ) ( u_cl/u_c1/u_ifu/u_nsel a[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[23] ( u_cl/u_c1/u_ifu/u_inc y[23] ) ( u_cl/u_c1/u_ifu/u_nsel a[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[24] ( u_cl/u_c1/u_ifu/u_inc y[24] ) ( u_cl/u_c1/u_ifu/u_nsel a[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[25] ( u_cl/u_c1/u_ifu/u_inc y[25] ) ( u_cl/u_c1/u_ifu/u_nsel a[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[26] ( u_cl/u_c1/u_ifu/u_inc y[26] ) ( u_cl/u_c1/u_ifu/u_nsel a[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[27] ( u_cl/u_c1/u_ifu/u_inc y[27] ) ( u_cl/u_c1/u_ifu/u_nsel a[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[28] ( u_cl/u_c1/u_ifu/u_inc y[28] ) ( u_cl/u_c1/u_ifu/u_nsel a[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[29] ( u_cl/u_c1/u_ifu/u_inc y[29] ) ( u_cl/u_c1/u_ifu/u_nsel a[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[2] ( u_cl/u_c1/u_ifu/u_inc y[2] ) ( u_cl/u_c1/u_ifu/u_nsel a[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[30] ( u_cl/u_c1/u_ifu/u_inc y[30] ) ( u_cl/u_c1/u_ifu/u_nsel a[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[31] ( u_cl/u_c1/u_ifu/u_inc y[31] ) ( u_cl/u_c1/u_ifu/u_nsel a[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[3] ( u_cl/u_c1/u_ifu/u_inc y[3] ) ( u_cl/u_c1/u_ifu/u_nsel a[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[4] ( u_cl/u_c1/u_ifu/u_inc y[4] ) ( u_cl/u_c1/u_ifu/u_nsel a[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[5] ( u_cl/u_c1/u_ifu/u_inc y[5] ) ( u_cl/u_c1/u_ifu/u_nsel a[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[6] ( u_cl/u_c1/u_ifu/u_inc y[6] ) ( u_cl/u_c1/u_ifu/u_nsel a[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[7] ( u_cl/u_c1/u_ifu/u_inc y[7] ) ( u_cl/u_c1/u_ifu/u_nsel a[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[8] ( u_cl/u_c1/u_ifu/u_inc y[8] ) ( u_cl/u_c1/u_ifu/u_nsel a[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_ifu/seq[9] ( u_cl/u_c1/u_ifu/u_inc y[9] ) ( u_cl/u_c1/u_ifu/u_nsel a[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[0] ( u_cl/u_c1/u_lsu/u_agu y[0] ) ( u_cl/u_c1/u_lsu/u_swe a[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[10] ( u_cl/u_c1/u_lsu/u_agu y[10] ) ( u_cl/u_c1/u_lsu/u_dab din[8] ) ( u_cl/u_c1/u_lsu/u_swe a[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[11] ( u_cl/u_c1/u_lsu/u_agu y[11] ) ( u_cl/u_c1/u_lsu/u_dab din[9] ) ( u_cl/u_c1/u_lsu/u_swe a[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[12] ( u_cl/u_c1/u_lsu/u_agu y[12] ) ( u_cl/u_c1/u_lsu/u_swe a[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[13] ( u_cl/u_c1/u_lsu/u_agu y[13] ) ( u_cl/u_c1/u_lsu/u_swe a[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[14] ( u_cl/u_c1/u_lsu/u_agu y[14] ) ( u_cl/u_c1/u_lsu/u_swe a[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[15] ( u_cl/u_c1/u_lsu/u_agu y[15] ) ( u_cl/u_c1/u_lsu/u_swe a[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[16] ( u_cl/u_c1/u_lsu/u_agu y[16] ) ( u_cl/u_c1/u_lsu/u_swe a[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[17] ( u_cl/u_c1/u_lsu/u_agu y[17] ) ( u_cl/u_c1/u_lsu/u_swe a[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[18] ( u_cl/u_c1/u_lsu/u_agu y[18] ) ( u_cl/u_c1/u_lsu/u_swe a[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[19] ( u_cl/u_c1/u_lsu/u_agu y[19] ) ( u_cl/u_c1/u_lsu/u_swe a[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[1] ( u_cl/u_c1/u_lsu/u_agu y[1] ) ( u_cl/u_c1/u_lsu/u_swe a[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[20] ( u_cl/u_c1/u_lsu/u_agu y[20] ) ( u_cl/u_c1/u_lsu/u_swe a[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[21] ( u_cl/u_c1/u_lsu/u_agu y[21] ) ( u_cl/u_c1/u_lsu/u_swe a[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[22] ( u_cl/u_c1/u_lsu/u_agu y[22] ) ( u_cl/u_c1/u_lsu/u_swe a[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[23] ( u_cl/u_c1/u_lsu/u_agu y[23] ) ( u_cl/u_c1/u_lsu/u_swe a[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[24] ( u_cl/u_c1/u_lsu/u_agu y[24] ) ( u_cl/u_c1/u_lsu/u_swe a[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[25] ( u_cl/u_c1/u_lsu/u_agu y[25] ) ( u_cl/u_c1/u_lsu/u_swe a[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[26] ( u_cl/u_c1/u_lsu/u_agu y[26] ) ( u_cl/u_c1/u_lsu/u_swe a[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[27] ( u_cl/u_c1/u_lsu/u_agu y[27] ) ( u_cl/u_c1/u_lsu/u_swe a[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[28] ( u_cl/u_c1/u_lsu/u_agu y[28] ) ( u_cl/u_c1/u_lsu/u_swe a[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[29] ( u_cl/u_c1/u_lsu/u_agu y[29] ) ( u_cl/u_c1/u_lsu/u_swe a[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[2] ( u_cl/u_c1/u_lsu/u_agu y[2] ) ( u_cl/u_c1/u_lsu/u_dab din[0] ) ( u_cl/u_c1/u_lsu/u_swe a[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[30] ( u_cl/u_c1/u_lsu/u_agu y[30] ) ( u_cl/u_c1/u_lsu/u_swe a[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[31] ( u_cl/u_c1/u_lsu/u_agu y[31] ) ( u_cl/u_c1/u_lsu/u_swe a[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[3] ( u_cl/u_c1/u_lsu/u_agu y[3] ) ( u_cl/u_c1/u_lsu/u_dab din[1] ) ( u_cl/u_c1/u_lsu/u_swe a[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[4] ( u_cl/u_c1/u_lsu/u_agu y[4] ) ( u_cl/u_c1/u_lsu/u_dab din[2] ) ( u_cl/u_c1/u_lsu/u_swe a[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[5] ( u_cl/u_c1/u_lsu/u_agu y[5] ) ( u_cl/u_c1/u_lsu/u_dab din[3] ) ( u_cl/u_c1/u_lsu/u_swe a[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[6] ( u_cl/u_c1/u_lsu/u_agu y[6] ) ( u_cl/u_c1/u_lsu/u_dab din[4] ) ( u_cl/u_c1/u_lsu/u_swe a[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[7] ( u_cl/u_c1/u_lsu/u_agu y[7] ) ( u_cl/u_c1/u_lsu/u_dab din[5] ) ( u_cl/u_c1/u_lsu/u_swe a[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[8] ( u_cl/u_c1/u_lsu/u_agu y[8] ) ( u_cl/u_c1/u_lsu/u_dab din[6] ) ( u_cl/u_c1/u_lsu/u_swe a[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/u_lsu/ea[9] ( u_cl/u_c1/u_lsu/u_agu y[9] ) ( u_cl/u_c1/u_lsu/u_dab din[7] ) ( u_cl/u_c1/u_lsu/u_swe a[9] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[0] ( u_cl/u_c1/u_rf wd[0] ) ( u_cl/u_c1/u_wbsel y[0] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[10] ( u_cl/u_c1/u_rf wd[10] ) ( u_cl/u_c1/u_wbsel y[10] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[11] ( u_cl/u_c1/u_rf wd[11] ) ( u_cl/u_c1/u_wbsel y[11] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[12] ( u_cl/u_c1/u_rf wd[12] ) ( u_cl/u_c1/u_wbsel y[12] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[13] ( u_cl/u_c1/u_rf wd[13] ) ( u_cl/u_c1/u_wbsel y[13] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[14] ( u_cl/u_c1/u_rf wd[14] ) ( u_cl/u_c1/u_wbsel y[14] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[15] ( u_cl/u_c1/u_rf wd[15] ) ( u_cl/u_c1/u_wbsel y[15] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[16] ( u_cl/u_c1/u_rf wd[16] ) ( u_cl/u_c1/u_wbsel y[16] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[17] ( u_cl/u_c1/u_rf wd[17] ) ( u_cl/u_c1/u_wbsel y[17] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[18] ( u_cl/u_c1/u_rf wd[18] ) ( u_cl/u_c1/u_wbsel y[18] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[19] ( u_cl/u_c1/u_rf wd[19] ) ( u_cl/u_c1/u_wbsel y[19] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[1] ( u_cl/u_c1/u_rf wd[1] ) ( u_cl/u_c1/u_wbsel y[1] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[20] ( u_cl/u_c1/u_rf wd[20] ) ( u_cl/u_c1/u_wbsel y[20] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[21] ( u_cl/u_c1/u_rf wd[21] ) ( u_cl/u_c1/u_wbsel y[21] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[22] ( u_cl/u_c1/u_rf wd[22] ) ( u_cl/u_c1/u_wbsel y[22] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[23] ( u_cl/u_c1/u_rf wd[23] ) ( u_cl/u_c1/u_wbsel y[23] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[24] ( u_cl/u_c1/u_rf wd[24] ) ( u_cl/u_c1/u_wbsel y[24] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[25] ( u_cl/u_c1/u_rf wd[25] ) ( u_cl/u_c1/u_wbsel y[25] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[26] ( u_cl/u_c1/u_rf wd[26] ) ( u_cl/u_c1/u_wbsel y[26] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[27] ( u_cl/u_c1/u_rf wd[27] ) ( u_cl/u_c1/u_wbsel y[27] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[28] ( u_cl/u_c1/u_rf wd[28] ) ( u_cl/u_c1/u_wbsel y[28] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[29] ( u_cl/u_c1/u_rf wd[29] ) ( u_cl/u_c1/u_wbsel y[29] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[2] ( u_cl/u_c1/u_rf wd[2] ) ( u_cl/u_c1/u_wbsel y[2] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[30] ( u_cl/u_c1/u_rf wd[30] ) ( u_cl/u_c1/u_wbsel y[30] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[31] ( u_cl/u_c1/u_rf wd[31] ) ( u_cl/u_c1/u_wbsel y[31] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[3] ( u_cl/u_c1/u_rf wd[3] ) ( u_cl/u_c1/u_wbsel y[3] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[4] ( u_cl/u_c1/u_rf wd[4] ) ( u_cl/u_c1/u_wbsel y[4] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[5] ( u_cl/u_c1/u_rf wd[5] ) ( u_cl/u_c1/u_wbsel y[5] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[6] ( u_cl/u_c1/u_rf wd[6] ) ( u_cl/u_c1/u_wbsel y[6] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[7] ( u_cl/u_c1/u_rf wd[7] ) ( u_cl/u_c1/u_wbsel y[7] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[8] ( u_cl/u_c1/u_rf wd[8] ) ( u_cl/u_c1/u_wbsel y[8] ) + USE SIGNAL ;
+  - u_cl/u_c1/wb[9] ( u_cl/u_c1/u_rf wd[9] ) ( u_cl/u_c1/u_wbsel y[9] ) + USE SIGNAL ;
+  - u_cl/wd0[0] ( u_cl/u_c0/u_lsu/u_st q[0] ) ( u_cl/u_dxb/u_dmux a[0] ) + USE SIGNAL ;
+  - u_cl/wd0[10] ( u_cl/u_c0/u_lsu/u_st q[10] ) ( u_cl/u_dxb/u_dmux a[10] ) + USE SIGNAL ;
+  - u_cl/wd0[11] ( u_cl/u_c0/u_lsu/u_st q[11] ) ( u_cl/u_dxb/u_dmux a[11] ) + USE SIGNAL ;
+  - u_cl/wd0[12] ( u_cl/u_c0/u_lsu/u_st q[12] ) ( u_cl/u_dxb/u_dmux a[12] ) + USE SIGNAL ;
+  - u_cl/wd0[13] ( u_cl/u_c0/u_lsu/u_st q[13] ) ( u_cl/u_dxb/u_dmux a[13] ) + USE SIGNAL ;
+  - u_cl/wd0[14] ( u_cl/u_c0/u_lsu/u_st q[14] ) ( u_cl/u_dxb/u_dmux a[14] ) + USE SIGNAL ;
+  - u_cl/wd0[15] ( u_cl/u_c0/u_lsu/u_st q[15] ) ( u_cl/u_dxb/u_dmux a[15] ) + USE SIGNAL ;
+  - u_cl/wd0[16] ( u_cl/u_c0/u_lsu/u_st q[16] ) ( u_cl/u_dxb/u_dmux a[16] ) + USE SIGNAL ;
+  - u_cl/wd0[17] ( u_cl/u_c0/u_lsu/u_st q[17] ) ( u_cl/u_dxb/u_dmux a[17] ) + USE SIGNAL ;
+  - u_cl/wd0[18] ( u_cl/u_c0/u_lsu/u_st q[18] ) ( u_cl/u_dxb/u_dmux a[18] ) + USE SIGNAL ;
+  - u_cl/wd0[19] ( u_cl/u_c0/u_lsu/u_st q[19] ) ( u_cl/u_dxb/u_dmux a[19] ) + USE SIGNAL ;
+  - u_cl/wd0[1] ( u_cl/u_c0/u_lsu/u_st q[1] ) ( u_cl/u_dxb/u_dmux a[1] ) + USE SIGNAL ;
+  - u_cl/wd0[20] ( u_cl/u_c0/u_lsu/u_st q[20] ) ( u_cl/u_dxb/u_dmux a[20] ) + USE SIGNAL ;
+  - u_cl/wd0[21] ( u_cl/u_c0/u_lsu/u_st q[21] ) ( u_cl/u_dxb/u_dmux a[21] ) + USE SIGNAL ;
+  - u_cl/wd0[22] ( u_cl/u_c0/u_lsu/u_st q[22] ) ( u_cl/u_dxb/u_dmux a[22] ) + USE SIGNAL ;
+  - u_cl/wd0[23] ( u_cl/u_c0/u_lsu/u_st q[23] ) ( u_cl/u_dxb/u_dmux a[23] ) + USE SIGNAL ;
+  - u_cl/wd0[24] ( u_cl/u_c0/u_lsu/u_st q[24] ) ( u_cl/u_dxb/u_dmux a[24] ) + USE SIGNAL ;
+  - u_cl/wd0[25] ( u_cl/u_c0/u_lsu/u_st q[25] ) ( u_cl/u_dxb/u_dmux a[25] ) + USE SIGNAL ;
+  - u_cl/wd0[26] ( u_cl/u_c0/u_lsu/u_st q[26] ) ( u_cl/u_dxb/u_dmux a[26] ) + USE SIGNAL ;
+  - u_cl/wd0[27] ( u_cl/u_c0/u_lsu/u_st q[27] ) ( u_cl/u_dxb/u_dmux a[27] ) + USE SIGNAL ;
+  - u_cl/wd0[28] ( u_cl/u_c0/u_lsu/u_st q[28] ) ( u_cl/u_dxb/u_dmux a[28] ) + USE SIGNAL ;
+  - u_cl/wd0[29] ( u_cl/u_c0/u_lsu/u_st q[29] ) ( u_cl/u_dxb/u_dmux a[29] ) + USE SIGNAL ;
+  - u_cl/wd0[2] ( u_cl/u_c0/u_lsu/u_st q[2] ) ( u_cl/u_dxb/u_dmux a[2] ) + USE SIGNAL ;
+  - u_cl/wd0[30] ( u_cl/u_c0/u_lsu/u_st q[30] ) ( u_cl/u_dxb/u_dmux a[30] ) + USE SIGNAL ;
+  - u_cl/wd0[31] ( u_cl/u_c0/u_lsu/u_st q[31] ) ( u_cl/u_dxb/u_dmux a[31] ) + USE SIGNAL ;
+  - u_cl/wd0[3] ( u_cl/u_c0/u_lsu/u_st q[3] ) ( u_cl/u_dxb/u_dmux a[3] ) + USE SIGNAL ;
+  - u_cl/wd0[4] ( u_cl/u_c0/u_lsu/u_st q[4] ) ( u_cl/u_dxb/u_dmux a[4] ) + USE SIGNAL ;
+  - u_cl/wd0[5] ( u_cl/u_c0/u_lsu/u_st q[5] ) ( u_cl/u_dxb/u_dmux a[5] ) + USE SIGNAL ;
+  - u_cl/wd0[6] ( u_cl/u_c0/u_lsu/u_st q[6] ) ( u_cl/u_dxb/u_dmux a[6] ) + USE SIGNAL ;
+  - u_cl/wd0[7] ( u_cl/u_c0/u_lsu/u_st q[7] ) ( u_cl/u_dxb/u_dmux a[7] ) + USE SIGNAL ;
+  - u_cl/wd0[8] ( u_cl/u_c0/u_lsu/u_st q[8] ) ( u_cl/u_dxb/u_dmux a[8] ) + USE SIGNAL ;
+  - u_cl/wd0[9] ( u_cl/u_c0/u_lsu/u_st q[9] ) ( u_cl/u_dxb/u_dmux a[9] ) + USE SIGNAL ;
+  - u_cl/wd1[0] ( u_cl/u_c1/u_lsu/u_st q[0] ) ( u_cl/u_dxb/u_dmux b[0] ) + USE SIGNAL ;
+  - u_cl/wd1[10] ( u_cl/u_c1/u_lsu/u_st q[10] ) ( u_cl/u_dxb/u_dmux b[10] ) + USE SIGNAL ;
+  - u_cl/wd1[11] ( u_cl/u_c1/u_lsu/u_st q[11] ) ( u_cl/u_dxb/u_dmux b[11] ) + USE SIGNAL ;
+  - u_cl/wd1[12] ( u_cl/u_c1/u_lsu/u_st q[12] ) ( u_cl/u_dxb/u_dmux b[12] ) + USE SIGNAL ;
+  - u_cl/wd1[13] ( u_cl/u_c1/u_lsu/u_st q[13] ) ( u_cl/u_dxb/u_dmux b[13] ) + USE SIGNAL ;
+  - u_cl/wd1[14] ( u_cl/u_c1/u_lsu/u_st q[14] ) ( u_cl/u_dxb/u_dmux b[14] ) + USE SIGNAL ;
+  - u_cl/wd1[15] ( u_cl/u_c1/u_lsu/u_st q[15] ) ( u_cl/u_dxb/u_dmux b[15] ) + USE SIGNAL ;
+  - u_cl/wd1[16] ( u_cl/u_c1/u_lsu/u_st q[16] ) ( u_cl/u_dxb/u_dmux b[16] ) + USE SIGNAL ;
+  - u_cl/wd1[17] ( u_cl/u_c1/u_lsu/u_st q[17] ) ( u_cl/u_dxb/u_dmux b[17] ) + USE SIGNAL ;
+  - u_cl/wd1[18] ( u_cl/u_c1/u_lsu/u_st q[18] ) ( u_cl/u_dxb/u_dmux b[18] ) + USE SIGNAL ;
+  - u_cl/wd1[19] ( u_cl/u_c1/u_lsu/u_st q[19] ) ( u_cl/u_dxb/u_dmux b[19] ) + USE SIGNAL ;
+  - u_cl/wd1[1] ( u_cl/u_c1/u_lsu/u_st q[1] ) ( u_cl/u_dxb/u_dmux b[1] ) + USE SIGNAL ;
+  - u_cl/wd1[20] ( u_cl/u_c1/u_lsu/u_st q[20] ) ( u_cl/u_dxb/u_dmux b[20] ) + USE SIGNAL ;
+  - u_cl/wd1[21] ( u_cl/u_c1/u_lsu/u_st q[21] ) ( u_cl/u_dxb/u_dmux b[21] ) + USE SIGNAL ;
+  - u_cl/wd1[22] ( u_cl/u_c1/u_lsu/u_st q[22] ) ( u_cl/u_dxb/u_dmux b[22] ) + USE SIGNAL ;
+  - u_cl/wd1[23] ( u_cl/u_c1/u_lsu/u_st q[23] ) ( u_cl/u_dxb/u_dmux b[23] ) + USE SIGNAL ;
+  - u_cl/wd1[24] ( u_cl/u_c1/u_lsu/u_st q[24] ) ( u_cl/u_dxb/u_dmux b[24] ) + USE SIGNAL ;
+  - u_cl/wd1[25] ( u_cl/u_c1/u_lsu/u_st q[25] ) ( u_cl/u_dxb/u_dmux b[25] ) + USE SIGNAL ;
+  - u_cl/wd1[26] ( u_cl/u_c1/u_lsu/u_st q[26] ) ( u_cl/u_dxb/u_dmux b[26] ) + USE SIGNAL ;
+  - u_cl/wd1[27] ( u_cl/u_c1/u_lsu/u_st q[27] ) ( u_cl/u_dxb/u_dmux b[27] ) + USE SIGNAL ;
+  - u_cl/wd1[28] ( u_cl/u_c1/u_lsu/u_st q[28] ) ( u_cl/u_dxb/u_dmux b[28] ) + USE SIGNAL ;
+  - u_cl/wd1[29] ( u_cl/u_c1/u_lsu/u_st q[29] ) ( u_cl/u_dxb/u_dmux b[29] ) + USE SIGNAL ;
+  - u_cl/wd1[2] ( u_cl/u_c1/u_lsu/u_st q[2] ) ( u_cl/u_dxb/u_dmux b[2] ) + USE SIGNAL ;
+  - u_cl/wd1[30] ( u_cl/u_c1/u_lsu/u_st q[30] ) ( u_cl/u_dxb/u_dmux b[30] ) + USE SIGNAL ;
+  - u_cl/wd1[31] ( u_cl/u_c1/u_lsu/u_st q[31] ) ( u_cl/u_dxb/u_dmux b[31] ) + USE SIGNAL ;
+  - u_cl/wd1[3] ( u_cl/u_c1/u_lsu/u_st q[3] ) ( u_cl/u_dxb/u_dmux b[3] ) + USE SIGNAL ;
+  - u_cl/wd1[4] ( u_cl/u_c1/u_lsu/u_st q[4] ) ( u_cl/u_dxb/u_dmux b[4] ) + USE SIGNAL ;
+  - u_cl/wd1[5] ( u_cl/u_c1/u_lsu/u_st q[5] ) ( u_cl/u_dxb/u_dmux b[5] ) + USE SIGNAL ;
+  - u_cl/wd1[6] ( u_cl/u_c1/u_lsu/u_st q[6] ) ( u_cl/u_dxb/u_dmux b[6] ) + USE SIGNAL ;
+  - u_cl/wd1[7] ( u_cl/u_c1/u_lsu/u_st q[7] ) ( u_cl/u_dxb/u_dmux b[7] ) + USE SIGNAL ;
+  - u_cl/wd1[8] ( u_cl/u_c1/u_lsu/u_st q[8] ) ( u_cl/u_dxb/u_dmux b[8] ) + USE SIGNAL ;
+  - u_cl/wd1[9] ( u_cl/u_c1/u_lsu/u_st q[9] ) ( u_cl/u_dxb/u_dmux b[9] ) + USE SIGNAL ;
+  - u_cl/we1 ( u_cl/u_c1/u_lsu/u_swe taken ) ( u_cl/u_dxb/u_amux s ) ( u_cl/u_dxb/u_dmux s ) ( u_cl/u_ixb/u_amux s ) ( u_cl/u_ixb/u_dmux s ) + USE SIGNAL ;
+END NETS
+
+END DESIGN

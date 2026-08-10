@@ -9,15 +9,16 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 this page is the backlog behind them.
 
 Snapshot index — last verified against `main`: **2026-08-10**, after items 1,
-2, 3, 4, 5, 6 and 7 landed — item 5's second blocker (the net-resolution
+2, 3, 4, 5, 6, 7 and 10 landed — item 5's second blocker (the net-resolution
 name index) fell to the observation that the database already maintains
-the index, making the import streaming. Each item states what is missing, why it was left rather than
-forgotten, and where to start. Every claim below was reproduced on `main`
+the index, making the import streaming. Each item states what is missing,
+why it was left rather than forgotten, and where to start. Every claim
+below was reproduced on `main`
 before being written down; the reproduction is given so a reader can
 re-derive it rather than trust it.
 
-Items 1, 2, 3 and 4 are kept in place, struck through, rather than moved to
-the resolved table at the bottom. Each entry records where this page's **own
+Items 1, 2, 3, 4, 5, 6, 7 and 10 are kept in place, struck through, rather than
+moved to the resolved table at the bottom. Each entry records where this page's **own
 first description was wrong** — item 1 about the merge case, and about the
 fix it originally proposed, which would have been the wrong fix; item 2
 about the severity, having called a silent SHORT a width collapse; item 3
@@ -26,9 +27,15 @@ That is worth more than a tidy list, and the pattern is worth naming: the
 first description of a fault is written from the symptom you noticed, and
 the symptom is rarely the whole fault.
 
-The working vehicle for all of this is **[`flow/def/`](../../flow/def/)** —
-a LEF + DEF + Verilog design read off disk and routed end to end. Most of
-these items were found by building it, which is the argument for having it.
+There are two working vehicles, and they are deliberately at opposite ends
+of the scale. **[`flow/def/`](../../flow/def/)** is the smallest design that
+exercises the path — 36 nets, 4-bit buses, one bus per level; most of the
+items below were found by building it. **[`flow/rv/`](../../flow/rv/)** is
+a dual-core RV32-shaped SoC — 1230 nets, five levels, a 32-bit datapath,
+part-selects that are not zero-based — and found items 10 and 11. That is
+the argument for having both: a small vehicle finds the faults that are
+about *structure*, and a large one finds the faults that only appear once a
+quantity stops being one.
 
 ---
 
@@ -535,6 +542,77 @@ or batch run already falls through to the direct launch.
   that made this bite — port labels landing on nothing because `__PORT__`
   never round-tripped — was item 3, now resolved; a label genuinely outside
   every component still skips, as it should.)
+
+## 10. ~~A die-port endpoint's depth was counted off its name~~ — RESOLVED 2026-08-10
+
+`import_def_lef` names the boundary component it synthesizes for a DEF
+`PIN` **`PIN/<port>`**, at **depth 0**. That is a name containing a slash
+which is not a hierarchy separator, and two places in the hier pipeline —
+the cross-block generation case in `_hier_topo_task`, and the frame
+resolver the verifier reads — recovered an endpoint's depth by counting
+slashes in it.
+
+So a bundle *driven by* a die port had its routing frame built at **depth
+1**, a level holding neither endpoint. It came out of
+`generate_hier_topologies` with **zero candidates**, and at verify time
+*both* its busterms read as "outside block face" — which is what a missing
+block looks like, since a block that is not in the frame has no bounds to
+be inside of. Neither message names the cause.
+
+Reproduced on `flow/rv/soc.buda` (restore `return src.count('/')` to see
+it): the **32 `boot` bundles**, one per input pad, generate an empty pool.
+32 nets get no wire, and the end-of-flow `check_design` still reports
+**"Success: no violations found"** — a bundle with no candidates has no
+segments, so there is nothing left to find a violation in. The only place
+it shows in an artifact is the corridor manifest, which simply does not
+mention those nets.
+
+`flow/def/` never showed it because its die ports connect within one level,
+where the wrong depth and the right one coincide.
+
+*Fixed* by asking the component instead of parsing its name —
+`BudaSession._endpoint_depth` in `src/buda_session/hier.py`, used at both
+sites, falling back to the slash count only for a name with no component
+(a synthetic endpoint). The lesson is the one this page keeps recording:
+a naming convention invented by one layer becomes a parsing rule in
+another, and the two are only equal until someone adds a name that breaks
+the coincidence.
+
+## 11. A die-port bus routes as one bundle per bit
+
+`soc.v` drives a 32-bit `dbg` bus from one mux to 32 die pads. The DEF has
+one `PINS` entry per bit — correct, that is what a DEF has — so
+`import_def_lef` synthesizes 32 boundary components, and the bundler sees
+32 nets with 32 *different* receiver blocks. Under STRICT they are 32
+bundles; under CONVERGENT (shared receiver) and BIDIRECTIONAL (sorted
+endpoint set) they are still 32, because the endpoint sets genuinely
+differ.
+
+Measured on `flow/rv/`: **64 of the 70 depth-0 bundles are a single port
+bit** — 32 for `dbg`, 32 for `boot`. Correct by every rule BUDA has, and
+wrong about the design: those 32 wires run side by side from one driver to
+32 adjacent pads, which is the definition of the thing bundling exists to
+find.
+
+It routes cleanly, which is why this is an open item and not a defect: the
+cost is planning quality and 64 planner turns where there should be two,
+not a broken route.
+
+Two candidate fixes, neither obviously right:
+
+* **A fan-OUT relation in the bundler** — the mirror of CONVERGENT (shared
+  *driver*, differing receivers). It is a real gap in the strategy lattice
+  and would apply to any high-fanout driver, not only ports. It is also the
+  more dangerous of the two: shared-driver is a far weaker signal than
+  shared-receiver, and a clock buffer's 200 sinks are not a bus.
+* **A port-bus grouping at import** — `net_props.bus_name`/`bit_index` are
+  already filled in for `dbg[7]`, so the 32 pads of one port bus are
+  identifiable without any new relation, and the grouping is justified by
+  the *port declaration* rather than inferred from fanout. Narrower, and it
+  does nothing for the general case.
+
+*Where to start:* `HierarchicalBundler`'s signature construction, and
+`docs/internal/wishlist-bundler.md` for the strategy-lattice argument.
 
 ---
 
