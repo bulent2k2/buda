@@ -213,3 +213,26 @@ def test_output_is_available_even_with_the_echo_off(tmp_path):
     assert "CAPTURED=1" in out, out
     # …and it did NOT reach the terminal, which is what `-echo 0` means.
     assert "BUDA-1601  ERROR" not in out, out
+
+
+def test_the_violations_query_is_the_audit_leg(tmp_path):
+    """`overlaps` and `unplaced` say the metal was placed; `violations` says
+    the last check_design found it electrically right.  -1 until an audit
+    has run — a flow gate must not read "never audited" as clean."""
+    out = _tcl(tmp_path, """
+        puts "pre=[buda::query violations]"
+        buda::def_layer 5 M5 V TOP 30
+        buda::def_layer 6 M6 H TOP 30
+        buda::add_block a 0 0 100 100
+        buda::add_block b 300 0 400 100
+        buda::add_net n1 a.o b.i
+        buda::run_bundler STRICT
+        buda::generate_topologies
+        buda::run_planner 3
+        buda::run_nuts
+        buda::check_design
+        puts "post=[buda::query violations]"
+        buda::stop
+    """)
+    assert "pre=-1" in out, out
+    assert "post=0" in out, out
