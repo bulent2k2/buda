@@ -355,17 +355,46 @@ class Server:
                 continue
 
 
+def claim_protocol_channel():
+    """Make a direct fd-1 write harmless BY CONSTRUCTION.
+
+    The protocol's one documented fragility: Python's `sys.stdout` and C++'s
+    `std::cout` are both captured during a command, but a library writing
+    straight to file descriptor 1 would land in the middle of a frame and
+    desynchronise the channel.  Nothing in BUDA does — the note said so —
+    but "nothing does today" is a promise about other people's code.
+
+    So the channel stops BEING fd 1: the descriptor is duplicated to a
+    private fd the protocol alone writes, and fd 1 is repointed at stderr.
+    A rogue write to fd 1 now lands beside the diagnostics — visible, in
+    order, and outside every frame — instead of inside the conversation.
+    Returns the protocol stream; falls back to plain stdout if the dup
+    fails (an exotic host is better served than none).
+    """
+    try:
+        proto_fd = os.dup(1)
+        os.dup2(2, 1)
+        proto = os.fdopen(proto_fd, "w", encoding="utf-8", newline="\n")
+    except OSError:
+        return sys.stdout
+    # sys.stdout still wraps fd 1, which is now stderr: command output is
+    # captured anyway, and anything the interpreter itself prints between
+    # commands lands visibly rather than in a frame.
+    return proto
+
+
 def main(argv=None):
     argv = list(argv if argv is not None else sys.argv[1:])
     if argv and argv[0] in ("-h", "--help"):
         print(__doc__)
         return 0
-    for stream in (sys.stdin, sys.stdout):
+    out = claim_protocol_channel()
+    for stream in (sys.stdin, out):
         try:
             stream.reconfigure(encoding="utf-8", newline="\n")
         except (AttributeError, ValueError):
             pass
-    return Server().serve()
+    return Server(out=out).serve()
 
 
 if __name__ == "__main__":

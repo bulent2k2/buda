@@ -547,10 +547,16 @@ or batch run already falls through to the direct launch.
   on the wire so a cancel cannot tear a frame in half.  Pinned by
   `test_tcl_async.py`, incl. a real 150k-line `source` cancelled mid-run
   with partial state surviving.
-* **The Tcl protocol assumes nothing writes to fd 1 directly.** Python's
-  `sys.stdout` and C++'s `std::cout` are both captured; a library writing
-  straight to the descriptor would land inside a frame and desynchronise the
-  channel. Nothing in BUDA does this today.
+* ~~**The Tcl protocol assumes nothing writes to fd 1 directly.**~~
+  **RESOLVED 2026-08-10** — the assumption is gone rather than defended: at
+  startup the server duplicates fd 1 to a private descriptor the protocol
+  alone writes and repoints fd 1 at **stderr**, so a library writing the
+  raw descriptor lands beside the diagnostics — visible, in order, outside
+  every frame — instead of inside the conversation. "Nothing in BUDA does
+  this today" was true, but it was a promise about other people's code;
+  making the write harmless BY CONSTRUCTION replaces the promise. Pinned by
+  a test whose rogue command `os.write(1, ...)`s mid-command: the frame
+  stays well-formed, the junk arrives on stderr.
 * **`import_gds` label recovery needs components to land on.** Labels
   outside every component are skipped with a warning — correct.  (The case
   that made this bite — port labels landing on nothing because `__PORT__`

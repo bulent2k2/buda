@@ -188,7 +188,11 @@ existing flows.  Cancellation is deliberately NOT a protocol feature:
 POSIX already has one (SIGINT), and the server defers it while a frame is
 on the wire so a cancel cannot tear a frame in half.
 
-Anything that writes directly to file descriptor 1 inside the engine — as
-opposed to Python's `sys.stdout` or C++'s `std::cout`, both of which are
-captured — would land in the middle of a frame.  Nothing in BUDA does; it is
-noted here because it is the one way to break the channel.
+A write directly to file descriptor 1 inside the engine — as opposed to
+Python's `sys.stdout` or C++'s `std::cout`, both of which are captured —
+**cannot corrupt the channel**: at startup the server duplicates fd 1 to a
+private descriptor the protocol alone writes, and repoints fd 1 at stderr.
+A library that writes the raw descriptor lands beside the diagnostics —
+visible, in order, outside every frame — instead of inside the
+conversation.  ("Nothing in BUDA does" was true, but it was a promise about
+other people's code; now it does not need to be one.)
