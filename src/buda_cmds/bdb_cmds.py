@@ -162,6 +162,15 @@ def cmd_set_import_scale(session, cmd, args, cmd_line):
         print(f"import_scale is {session.bdb.import_scale():g} "
               f"layout units per micron")
         return
+    # A `um`-suffixed distance converts through the scale AT PARSE TIME, so a
+    # suffix used before this declaration was resolved under the OLD scale —
+    # the exact silent re-meaning the suffix exists to prevent.  Loud, not
+    # fatal: the earlier value may still be what the author meant.
+    if getattr(session, "_um_suffix_used", False):
+        print("Warning: set_import_scale after a `um`-suffixed distance was "
+              "already parsed — those distances resolved under the PREVIOUS "
+              "scale.  Declare set_import_scale before the first `um` "
+              "distance.")
     val = args[0].lower()
     if val in ("micron", "microns", "um"):
         session.bdb.set_import_scale(1.0)

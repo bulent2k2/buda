@@ -160,6 +160,60 @@ def require_int(cmd, what, tok, *, usage="", why=""):
     return int(val)
 
 
+def require_distance(cmd, what, tok, session, *, integer=False, usage="",
+                     why=""):
+    """Parse a script-declared DISTANCE, accepting an optional `um` suffix.
+
+    Resolves opens_interchange.md item 6's ergonomic half.  A bare number is
+    a distance in LAYOUT UNITS, exactly as before — the engine is
+    unit-agnostic and `set_import_scale` deliberately does not rescale script
+    distances (that is what keeps the ~59 downstream int(round()) sites
+    correct by construction; see engine_units.md).  The trap that leaves is
+    that changing the import scale silently changes what every hand-typed
+    number MEANS.  A `um` suffix writes the intent down instead:
+
+        corner_margin dx 2um        # 2 microns, at ANY import scale
+
+    converts through the declared scale (`lu_per_um`, i.e. BDB
+    import_scale; 1.0 with no BDB open — the nominal-micron default) at
+    PARSE time.  Declare `set_import_scale` before the first suffixed
+    distance; using one earlier is reported when the scale later changes
+    (the session records `_um_suffix_used`).
+
+    `integer=True` demands the CONVERTED value land on the integer layout
+    grid (0.5um at scale 2000 is 1000 — fine; at scale 1.0 it is 0.5 and
+    refused, naming the scale), within 1e-6 for float-dust from the
+    multiply.  No suffix + integer delegates to `require_int` untouched.
+    """
+    s = str(tok)
+    if s.lower().endswith("um") and s.lower() != "um":
+        num = s[:-2]
+        try:
+            val = float(num)
+        except (TypeError, ValueError):
+            print(f"Error: {cmd}: expected a number before 'um' for {what}, "
+                  f"got '{tok}'." + _usage_line(usage))
+            sys.exit(1)
+        scale = 1.0
+        if getattr(session, "bdb", None) is not None:
+            scale = float(session.bdb.import_scale()) or 1.0
+        session._um_suffix_used = True
+        lu = val * scale
+        if not integer:
+            return lu
+        snap = round(lu)
+        if not math.isfinite(lu) or abs(lu - snap) > 1e-6:
+            print(f"Error: {cmd}: {what} = {num}um is {lu:g} layout units at "
+                  f"import scale {scale:g}, not a whole number — coordinates "
+                  f"are an integer grid.{' ' + why if why else ''}"
+                  + _usage_line(usage))
+            sys.exit(1)
+        return int(snap)
+    if integer:
+        return require_int(cmd, what, tok, usage=usage, why=why)
+    return require_number(cmd, what, tok, usage=usage)
+
+
 def require_number(cmd, what, tok, *, integer=False, usage=""):
     """Parse a numeric positional, or stop the flow naming the ARGUMENT.
 

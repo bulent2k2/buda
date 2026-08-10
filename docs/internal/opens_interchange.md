@@ -9,7 +9,7 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 this page is the backlog behind them.
 
 Snapshot index — last verified against `main`: **2026-08-10**, after items 1,
-2, 3 and 4 landed. Each item states what is missing, why it was left rather than
+2, 3, 4 and 6 landed. Each item states what is missing, why it was left rather than
 forgotten, and where to start. Every claim below was reproduced on `main`
 before being written down; the reproduction is given so a reader can
 re-derive it rather than trust it.
@@ -358,23 +358,32 @@ first pass. Note the reader this replaced streamed cheaply only because it
 and could not read a wrapped entry at all), so the memory is being spent on
 data that is now actually retained.
 
-## 6. Script-declared distances are not scaled by the import scale
+## 6. ~~Script-declared distances are not scaled by the import scale~~ — RESOLVED 2026-08-10 (the ergonomic half; the engine behavior stays, deliberately)
 
-`set_import_scale dbu` changes what a layout unit means for **imported**
-geometry only. Everything a script states itself — `corner_margin`,
-`set_min_stub_length*`, `def_track_pattern` widths, `add_keepout` rects — is
-already in layout units and is left alone.
+The engine half is UNCHANGED and stays deliberate: `set_import_scale`
+rescales **imported** geometry only, which is what keeps the ~59 downstream
+`int(round())` sites correct by construction ([`engine_units.md`](engine_units.md)),
+and `set_unit_check` remains the guard that turns a mixed-scale design into
+a stop.  What this item actually asked for was its own *where to start*: an
+ergonomic spelling that writes the intent down.
 
-This is deliberate (applying the factor at import is what keeps the ~59
-downstream `int(round())` sites correct by construction — see
-[`engine_units.md`](engine_units.md)) and it is a real trap: change the
-import scale and every hand-typed distance in the script silently means
-something else. `set_unit_check` exists to turn that into a stop rather than
-an optimistic plan, and fires on 0 of 41 corpus flows.
+That spelling is the **`um` suffix**, accepted wherever a script states a
+distance — `corner_margin dx 2um`, `set_min_stub_length 0.5um`,
+`def_track_pattern 3 0 SIGNAL 0.07um 0.12um` (repetition groups compose),
+`add_block`/`add_keepout`/`add_grid_override` coordinates, `detour_channel`,
+`set_track_pitch` — converted through the declared `lu_per_um` at parse
+time (`require_distance`, `buda_cmds/_options.py`).  A bare number stays a
+layout-unit distance, byte-identical to before.  The contract is loud at
+its edges: an integer-grid coordinate whose conversion misses the grid is
+refused naming the scale (0.5um at scale 1 is 0.5 lu — an error, not a
+truncation), `xum` is an error, and `set_import_scale` declared AFTER a
+suffixed distance warns that the earlier values resolved under the previous
+scale.  `dbu(...)` was considered and dropped: under `set_import_scale dbu`
+a layout unit *is* a DBU, so a bare number already says it, and under any
+other scale the DEF's DBU count is not knowable at parse time.
 
-*Where to start:* probably nothing in the engine. The candidate is
-ergonomic — a `um(...)`/`dbu(...)` spelling for script distances, so the
-intent is written down rather than implied by the current scale.
+Pinned by `test_um_distances.py` (scale conversion, group composition,
+integer-grid refusal, the late-scale warning, and bare numbers untouched).
 
 ## 7. DEF `NONDEFAULTRULES` are read but not attached
 
