@@ -98,3 +98,17 @@ def test_the_ordinary_conversation_is_unchanged():
     assert [s for s, _ in frames] == ["OK", "OK", "BYE"]
     assert "add_block" in frames[0][1]          # the registry came through
     assert frames[1][1] == "0"
+
+
+def test_the_claim_precedes_the_engine_imports():
+    """Run AS the server, the claim happens at module load, BEFORE `import
+    buda`: the compiled extension and its native dependencies initialize at
+    import, and module-init output written straight to fd 1 would already
+    be queued in the pipe by the time main() ran — parsed by the client as
+    the response header to its first request.  The property IS an ordering
+    of module-level statements, so it is pinned as one."""
+    src = (_ROOT / "tools" / "buda_server.py").read_text()
+    claim = src.index("_PROTO_OUT = claim_protocol_channel()")
+    engine = src.index("\nimport buda ")
+    assert claim < engine, "the protocol channel is claimed after the " \
+                           "engine imports — startup output can desync"
