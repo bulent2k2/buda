@@ -630,11 +630,22 @@ net it merges with cannot be classified differently.
 
 **A vector port is N pins.**  `input [3:0] a` becomes `a[0]`..`a[3]`, in
 `cell_pin` and on every instance, so a whole-vector connection wires bit to
-bit instead of putting one pin on N nets.  The width of a whole-signal
-*actual* comes from its declaration — `.a(w)` says nothing about how wide `w`
-is — so `wire [3:0] w;` is read too; an undeclared signal is an implicit wire,
-1 bit.  Port bits are carried through the hierarchy by a per-bit context, so
-an offset slice (`.p(w[7:4])`) maps exactly rather than approximately.
+bit instead of putting one pin on N nets.  Pins carry the port's **declared**
+indices, so `input [7:4] a` is `a[4]`..`a[7]` — numbering them from 0 would
+put them where no LEF/DEF pin of that macro is.
+
+The width of a whole-signal *actual* comes from its declaration — `.a(w)` says
+nothing about how wide `w` is — so `wire [3:0] w;` is read too, declared range
+included.  An undeclared signal is an implicit wire, 1 bit.
+
+Verilog aligns the two ends at their **low** bits and adapts the width, so a
+connection is `min(formal, actual)` bits.  The formal's remaining upper bits
+are **unconnected**, and are recorded as such: a child referencing one finds
+"no connection" rather than a name derived from the actual's base, which would
+invent `s[3]` for a scalar `s`.
+
+Port bits are carried through the hierarchy by a per-bit context, so an offset
+slice (`.p(w[7:4])`) maps exactly rather than approximately.
 
 > Why the filter matters beyond tidiness: a dropped instance in a merge does
 > **not** remove the DEF's row — it leaves it orphaned at depth 0. Its

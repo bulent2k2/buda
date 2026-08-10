@@ -2167,6 +2167,13 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
         std::string cell, name;   // cell type, instance name (both unescaped)
         std::vector<std::pair<std::string,NetRef>> portmap;
     };
+    // A declared bit range.  The WIDTH alone is not enough: `input [7:4] a`
+    // is four bits NAMED a[4]..a[7], and numbering its pins from 0 would put
+    // them where no LEF/DEF pin of that macro is (Codex P1 on #665).  `lo` is
+    // the low declared index, so port bit k (counted from the LSB, which is
+    // the end Verilog aligns) is declared bit `lo + k`.
+    struct Range { int lo = 0; int w = 1; };
+
     struct VMod {
         std::vector<VInst> insts;
         std::unordered_map<std::string, std::string> port_dirs;
@@ -2175,13 +2182,13 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
         // take — Verilog width-adapts, so `.s(w[3:0])` on a SCALAR `s`
         // connects bit 0 alone (Codex P1 on #661) — and, now, how many PINS
         // the port itself has.
-        std::unordered_map<std::string, int> port_width;
+        std::unordered_map<std::string, Range> port_width;
         // Declared width per local signal (`wire [3:0] w;`).  A whole-vector
         // reference names no width of its own — `.a(w)` says nothing about
         // how wide `w` is — so without this the reader cannot tell a 4-bit
         // bus from a scalar and would have to invent one or the other.
         // Ports are signals too, so `port_width` is consulted as well.
-        std::unordered_map<std::string, int> net_width;
+        std::unordered_map<std::string, Range> net_width;
     };
     std::unordered_map<std::string, VMod> mod_lib;
 
@@ -2230,13 +2237,17 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 R"(\b(?:wire|reg|logic)\b\s*(?:signed\s*)?(\[\s*\d+\s*:\s*\d+\s*\])?([^;]*))");
             std::smatch m;
             if (!std::regex_search(text, m, decl_re)) return;
-            int w = 1;
+            Range rng;
             if (m[1].matched) {
                 static const std::regex range_re(R"(\[\s*(\d+)\s*:\s*(\d+)\s*\])");
                 std::smatch rm;
                 const std::string r = m[1].str();
-                if (std::regex_search(r, rm, range_re))
-                    w = std::abs(std::stoi(rm[1].str()) - std::stoi(rm[2].str())) + 1;
+                if (std::regex_search(r, rm, range_re)) {
+                    const int a = std::stoi(rm[1].str()),
+                              b = std::stoi(rm[2].str());
+                    rng.lo = std::min(a, b);
+                    rng.w  = std::abs(a - b) + 1;
+                }
             }
             // Names only: an initialiser or an array bound after the name
             // (`wire [3:0] mem [0:7];`) is not a width of the signal itself.
@@ -2248,7 +2259,7 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 // followed by `wire [3:0] z;` is one signal, and a bare
                 // `wire z;` re-declaration must not narrow it.
                 if (!name.empty() && !mod_lib[cur_mod].net_width.count(name))
-                    mod_lib[cur_mod].net_width[name] = w;
+                    mod_lib[cur_mod].net_width[name] = rng;
             }
         };
 
@@ -2275,7 +2286,7 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 // 4-bit ports.  Read it BEFORE the strip below throws every
                 // bracket away.  Only a literal `[<n>:<m>]` counts — an
                 // escaped identifier can carry brackets with no colon.
-                int decl_w = 1;
+                Range decl;
                 {
                     static const std::regex range_re(
                         R"(^\s*\[\s*(\d+)\s*:\s*(\d+)\s*\])");
@@ -2283,7 +2294,8 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                     if (std::regex_search(rest, rm, range_re)) {
                         const int a = std::stoi(rm[1].str()),
                                   b = std::stoi(rm[2].str());
-                        decl_w = std::abs(a - b) + 1;
+                        decl.lo = std::min(a, b);
+                        decl.w  = std::abs(a - b) + 1;
                     }
                 }
                 rest = std::regex_replace(rest, std::regex(R"(\[[^\]]+\])"), " ");
@@ -2294,11 +2306,11 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                     std::string name = clean_port_name(item);
                     if (!name.empty()) {
                         mod_lib[cur_mod].port_dirs[name] = dir;
-                        mod_lib[cur_mod].port_width[name] = decl_w;
+                        mod_lib[cur_mod].port_width[name] = decl;
                         // A port is a signal inside its own module too, so a
                         // whole-vector reference to it resolves by width the
                         // same way a local wire does.
-                        mod_lib[cur_mod].net_width[name] = decl_w;
+                        mod_lib[cur_mod].net_width[name] = decl;
                     }
                 }
             }
@@ -2559,10 +2571,10 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
             // one.  A scalar port keeps its bare name, which is what makes
             // an ordinary netlist byte-identical to before.
             auto wit = mod.port_width.find(pin_name);
-            const int w = (wit == mod.port_width.end()) ? 1 : wit->second;
-            for (int k = 0; k < w; ++k) {
-                const std::string pn = (w > 1)
-                    ? pin_name + "[" + std::to_string(k) + "]" : pin_name;
+            const Range r = (wit == mod.port_width.end()) ? Range{} : wit->second;
+            for (int k = 0; k < r.w; ++k) {
+                const std::string pn = (r.w > 1)
+                    ? pin_name + "[" + std::to_string(r.lo + k) + "]" : pin_name;
                 sqlite3_bind_text(s_cell_pin, 1, cell_name.c_str(), -1, SQLITE_TRANSIENT);
                 sqlite3_bind_text(s_cell_pin, 2, pn.c_str(), -1, SQLITE_TRANSIENT);
                 sqlite3_bind_text(s_cell_pin, 3, dir.c_str(), -1, SQLITE_TRANSIENT);
@@ -2689,6 +2701,9 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 const std::string qbase = (itf != ctx.end())
                     ? itf->second
                     : (path.empty() ? ref.base : path + "/" + ref.base);
+                // The whole reference resolved to an unconnected formal bit:
+                // there is no net, and inventing one is the fault above.
+                if (qbase.empty()) continue;
 
                 auto add_pin = [&](const std::string& pin_nm,
                                    const std::string& qnet) {
@@ -2710,14 +2725,15 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 // how many pins it has.  An undefined module declares no
                 // ports here, so the width is unknown and stays 1 — bit 0 is
                 // connected for every width >= 1, which needs no assumption.
-                int wf = 1;
+                Range fr;                      // formal: declared range
                 bool wf_known = false;
                 if (defined) {
                     auto pw = sub->second.port_width.find(port);
                     if (pw != sub->second.port_width.end()) {
-                        wf_known = true; wf = pw->second;
+                        wf_known = true; fr = pw->second;
                     }
                 }
+                const int wf = fr.w;
 
                 // How wide is the ACTUAL?  A selector states it outright; a
                 // whole-signal reference does not, so its DECLARATION is
@@ -2733,7 +2749,9 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                     actual_is_vector = true;
                 } else {
                     auto nw = encl.net_width.find(ref.base);
-                    if (nw != encl.net_width.end()) wa = nw->second;
+                    if (nw != encl.net_width.end()) {
+                        wa = nw->second.w; base_bit = nw->second.lo;
+                    }
                     actual_is_vector = (wa > 1);
                 }
 
@@ -2745,29 +2763,42 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 // handed `w[7:4]` and passing the whole port down reconnected
                 // its child to `w[3:0]` — not an open, a WRONG net, which is
                 // the one failure a reader must never produce quietly.
+                // "" = this bit is deliberately NOT connected, which is a
+                // different thing from "not mapped, so derive it from the
+                // base".  Width adaptation leaves a wider formal's upper bits
+                // unconnected, and composing them from the actual's base
+                // invented `s[3]` for a SCALAR `s` — a bit of a signal that
+                // has no bits (Codex P1 on #665).
                 auto net_of_bit = [&](int b) -> std::string {
-                    if (!actual_is_vector) return qbase;
                     auto pb = ctx.find(ref.base + "[" + std::to_string(b) + "]");
-                    if (pb != ctx.end()) return pb->second;
+                    if (pb != ctx.end()) return pb->second;   // may be ""
+                    if (!actual_is_vector) return qbase;
                     return bit_of(b);
                 };
 
                 // Verilog aligns the two at their low ends and adapts the
-                // width, so the connection is min(formal, actual) bits.
+                // width, so the connection is min(formal, actual) bits.  Port
+                // bit k is DECLARED bit `fr.lo + k`, which is what names the
+                // pin: `input [7:4] a` is a[4]..a[7], and numbering from 0
+                // would put the pins where no LEF/DEF pin of that macro is.
                 const int n = std::min(wf, wa);
                 for (int k = 0; k < n; ++k) {
                     const std::string pin_nm = (wf > 1)
-                        ? port + "[" + std::to_string(k) + "]" : port;
-                    add_pin(pin_nm, net_of_bit(base_bit + k));
+                        ? port + "[" + std::to_string(fr.lo + k) + "]" : port;
+                    const std::string qnet = net_of_bit(base_bit + k);
+                    if (!qnet.empty()) add_pin(pin_nm, qnet);
                 }
 
                 // The child context.  Per-bit entries make a port bit resolve
                 // EXACTLY; the bare name is kept too so a child passing the
                 // whole vector down resolves through the same per-bit map.
+                // The formal's UNCONNECTED upper bits are recorded as such,
+                // so a child referencing one finds "no connection" rather
+                // than falling through to a derived name.
                 if (wf > 1) {
-                    for (int k = 0; k < n; ++k)
-                        child_ctx[port + "[" + std::to_string(k) + "]"] =
-                            net_of_bit(base_bit + k);
+                    for (int k = 0; k < wf; ++k)
+                        child_ctx[port + "[" + std::to_string(fr.lo + k) + "]"] =
+                            (k < n) ? net_of_bit(base_bit + k) : std::string();
                     child_ctx[port] = qbase;
                 } else {
                     child_ctx[port] = net_of_bit(base_bit);

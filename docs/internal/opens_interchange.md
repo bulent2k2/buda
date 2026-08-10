@@ -191,6 +191,15 @@ Three things this needed:
   signal is an implicit wire, which Verilog defines as 1 bit, so the default
   needs no guess — and a scalar on a 4-bit port connects bit 0 rather than
   inventing `s[1]`.
+* **Declared indices.** A port's pins carry the indices it declares, so
+  `input [7:4] a` is `a[4]`..`a[7]`; numbering from 0 put them where no
+  LEF/DEF pin of that macro is, which is the very matching this item exists
+  to fix. The same for a local `wire [7:4] w`.
+* **Unconnected upper bits stay unconnected.** Width adaptation leaves a wider
+  formal's high bits with nothing to connect to, and deriving them from the
+  actual's base invented `s[3]` for a SCALAR `s` — a bit of a signal that has
+  no bits. "Not mapped" and "mapped to nothing" are recorded as the different
+  facts they are.
 * **A per-bit context.** Port bits are mapped exactly, offset slices included,
   which base-plus-selector composition cannot express. Without it a module
   handed `w[7:4]` and passing the whole port down reconnected its child to

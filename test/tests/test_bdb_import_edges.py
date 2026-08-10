@@ -788,3 +788,75 @@ def test_an_offset_slice_maps_exactly_through_the_hierarchy(tmp_path):
         assert w[("m0/k", f"b[{i}]")] == f"w[{i + 4}]", w
     # …and a single bit of it.
     assert w[("m0/k", "c")] == "w[4]"
+
+
+def test_a_width_padded_port_bit_stays_unconnected(tmp_path):
+    """A wider formal than actual leaves the formal's upper bits unconnected,
+    and a child referencing one must find NO connection.
+
+    Deriving it from the actual's base instead produced `s[3]` for a SCALAR
+    `s` — a bit of a signal that has no bits, a net the design cannot contain
+    (Codex P1 on #665).  "Not mapped" and "mapped to nothing" are different
+    facts, so the context records the second one explicitly."""
+    db = _v(tmp_path, """\
+        module leaf (c);
+          input c;
+        endmodule
+
+        module mid (p);
+          input [3:0] p;
+          leaf k (.c(p[3]));
+        endmodule
+
+        module top ();
+          wire s;
+          mid m0 (.p(s));
+        endmodule
+        """)
+    assert sorted(n.name for n in db.all_nets()) == ["s"], \
+        "a bit of a scalar was invented"
+    w = _wiring(db)
+    assert w[("m0", "p[0]")] == "s"
+    assert ("m0/k", "c") not in w, "the padded bit must not connect to anything"
+
+
+def test_a_ports_declared_indices_are_the_pin_names(tmp_path):
+    """`input [7:4] a` is four bits NAMED a[4]..a[7].
+
+    Numbering the pins from 0 put them where no LEF/DEF pin of that macro is,
+    so the merge this whole item exists to fix would silently not match
+    (Codex P1 on #665).  The declared LOW index is kept, not just the width.
+    Verilog still aligns the two ends at their low bits, so a[4] takes w[0]."""
+    db = _v(tmp_path, """\
+        module leaf (a);
+          input [7:4] a;
+        endmodule
+
+        module top ();
+          wire [3:0] w;
+          leaf u0 (.a(w));
+        endmodule
+        """)
+    assert sorted(f"{c.cell}.{c.pin_name}" for c in db.all_cell_pins()) == \
+        [f"leaf.a[{i}]" for i in range(4, 8)]
+    w = _wiring(db)
+    for k in range(4):
+        assert w[("u0", f"a[{4 + k}]")] == f"w[{k}]", w
+
+
+def test_a_declared_range_is_kept_for_local_wires_too(tmp_path):
+    """The same fact on the other side: `wire [7:4] w` is w[4]..w[7], so a
+    whole-signal connection names those bits and not w[0]..w[3]."""
+    db = _v(tmp_path, """\
+        module leaf (a);
+          input [3:0] a;
+        endmodule
+
+        module top ();
+          wire [7:4] w;
+          leaf u0 (.a(w));
+        endmodule
+        """)
+    w = _wiring(db)
+    for k in range(4):
+        assert w[("u0", f"a[{k}]")] == f"w[{4 + k}]", w
