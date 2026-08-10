@@ -219,3 +219,53 @@ def test_a_capped_fan_out_stays_a_fan_out():
         got = {x for x in leaves.split(",") if x}
         want = {r for rl in p.net_receivers for r in rl}
         assert got == want, (p.reason, want)
+
+
+def test_a_resumed_session_recovers_the_direction_from_the_reason():
+    """`HBundle.net_drivers` is NOT persisted.  A session resumed from a
+    checkpoint rebuilds a tree bundle's endpoints by parsing the reason
+    alone, so the reason has to carry the DIRECTION — otherwise a fan-out
+    comes back rooted at a receiver and generation builds the tree from
+    the wrong end.
+
+    That is why `FANOUT:root|TO:leaves` is its own form rather than reusing
+    `FANIN:`: the two are the same (root, leaves) shape, and the prefix is
+    the only thing that says which way the arrows point.
+    """
+    import buda
+    b = buda.HBundle()
+    b.id = 1
+    b.net_names = ["n0", "n1"]
+    b.reason = "FANOUT:drv|TO:rcv0,rcv1,"
+    b.net_drivers = []            # what a resumed session sees
+    b.net_receivers = []
+
+    from buda_session.hier import HierMixin
+    tree, root, leaves = HierMixin._xlevel_fanin_endpoints(b)
+    assert tree and root == "drv" and leaves == ["rcv0", "rcv1"]
+
+    # …and the fan-in form still comes back rooted at its sink, unchanged.
+    b.reason = "FANIN:sink|TO:x,"          # wrong separator for FANIN
+    assert HierMixin._xlevel_fanin_endpoints(b) == (False, None, [])
+    b.reason = "FANIN:sink|FROM:d0,d1,"
+    tree, root, leaves = HierMixin._xlevel_fanin_endpoints(b)
+    assert tree and root == "sink" and leaves == ["d0", "d1"]
+
+
+def test_a_fan_out_bundle_carrying_one_driver_is_not_read_as_single_driver():
+    """A DIVERGENT bundle DOES carry net_drivers — one driver repeated per
+    bit — so the fan-in path's `len(drivers) <= 1` early-out rejected it
+    before the reason was ever consulted, and the bundle fell back to the
+    historical single-receiver derivation.  The reason is checked first for
+    exactly this reason."""
+    import buda
+    b = buda.HBundle()
+    b.id = 1
+    b.net_names = ["n0", "n1"]
+    b.reason = "FANOUT:drv|TO:rcv0,rcv1,"
+    b.net_drivers = ["drv", "drv"]
+    b.net_receivers = [["rcv0"], ["rcv1"]]
+
+    from buda_session.hier import HierMixin
+    tree, root, leaves = HierMixin._xlevel_fanin_endpoints(b)
+    assert tree and root == "drv" and leaves == ["rcv0", "rcv1"]
