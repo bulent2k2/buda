@@ -1346,6 +1346,11 @@ void BDB::clear_design() {
           "DELETE FROM cell_pin; DELETE FROM cell_children; "
           "DELETE FROM cell_layer_share; "         // FKs cell (v20)
           "DELETE FROM component; DELETE FROM cell;");
+    // The top-module memo describes the design being wiped, and the GDS
+    // export ADOPTS the cell it names as the top structure — stale, it
+    // could claim an unrelated cell of the next design that happens to
+    // share the old top's name (Codex P2 on #662).
+    _exec("DELETE FROM meta WHERE key='verilog_top';");
 }
 
 void BDB::add_label_pin(const std::string& net_name, int comp_id,
@@ -1547,6 +1552,37 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     // (Codex P2 on #647).  An internal name that cannot collide keeps them
     // apart; `port_comp` maps the external name back to it.
     std::map<std::string, std::string> port_comp;
+    // The __PORT__ cell rows (opens item 3): the boundary components
+    // reference them, and without a cell row the GDS export emits SREFs to
+    // a structure that is never defined — and with the port components gone
+    // on re-import, every net-name label lands "outside every component"
+    // and the whole netlist recovery silently dies with them.  A GDS
+    // structure has ONE footprint, so ports are grouped into cells BY SIZE
+    // — one shared cell when every port agrees (the measured common case:
+    // one PIN template), a numbered sibling per further size (Codex P2:
+    // taking independent maxes over a 1x10 and a 10x1 port invents a 10x10
+    // footprint that matches neither, and re-import would expand every
+    // port to it).  Class order follows DEF order, so the names are
+    // deterministic.
+    std::vector<std::pair<double,double>> port_sizes;   // size classes
+    auto port_cell_for = [&](double w, double h) -> std::string {
+        for (size_t i = 0; i < port_sizes.size(); ++i)
+            if (std::fabs(port_sizes[i].first - w) < 1e-9 &&
+                std::fabs(port_sizes[i].second - h) < 1e-9)
+                return i == 0 ? "__PORT__"
+                              : "__PORT__" + std::to_string(i + 1);
+        port_sizes.push_back({w, h});
+        std::string cell = port_sizes.size() == 1
+            ? "__PORT__" : "__PORT__" + std::to_string(port_sizes.size());
+        Stmt uc(_db, "INSERT INTO cell(name,width,height) VALUES(?1,?2,?3)"
+                     " ON CONFLICT(name) DO UPDATE SET"
+                     " width=excluded.width, height=excluded.height");
+        sqlite3_bind_text  (uc, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_double(uc, 2, w);
+        sqlite3_bind_double(uc, 3, h);
+        sqlite3_step(uc);
+        return cell;
+    };
     for (const auto& p : def.pins) {
         if (!p.placed) continue;                 // no location: not an endpoint
         std::string cname = "PIN/" + p.name;
@@ -1565,8 +1601,9 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
             x2 = std::max(x2, px + dbu_to_lu(r.x2));
             y2 = std::max(y2, py + dbu_to_lu(r.y2));
         }
+        const std::string pcell = port_cell_for(x2 - x1, y2 - y1);
         sqlite3_bind_text  (s_comp,1,cname.c_str(),-1,SQLITE_TRANSIENT);
-        sqlite3_bind_text  (s_comp,2,"__PORT__",-1,SQLITE_STATIC);
+        sqlite3_bind_text  (s_comp,2,pcell.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_bind_double(s_comp,3,x1);
         sqlite3_bind_double(s_comp,4,y1);
         sqlite3_bind_double(s_comp,5,x2);
@@ -2410,6 +2447,10 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
     }
     if (top_mod.empty()) return vstats;
     vstats.top_module = top_mod;
+    // Recorded so the GDS export can adopt this cell as the TOP structure's
+    // name instead of emitting it as an empty orphan beside a synthetic
+    // 'top' (opens item 3) — the netlist declared it top; believe it.
+    meta_set("verilog_top", top_mod);
 
     // ── Phase 4: elaborate hierarchy → BDB ───────────────────────────────────
     // Preserve component placement from any prior import_def_lef call.
@@ -2809,6 +2850,45 @@ int BDB::derive_container_bboxes(double margin,
         // a LOW-layer keepout while a container is transparent to them.
         set_comp_is_leaf(c.name, false);
         ++placed;
+    }
+
+    // Write the derived size back to the CELL definition (opens item 3).
+    // A merge-created container cell carries width=height=0 — neither input
+    // file states a size for it — so the GDS export emitted its structure
+    // with no outline and warned that every placement's bbox differs from
+    // the (0x0) cell footprint.  The rule here was MEASURED before it was
+    // chosen: instances of a derived cell are size-uniform (containers come
+    // from congruent templates), so the common instance size IS the cell
+    // size.  A cell whose instances disagree, or has an unplaced instance,
+    // is left 0x0 — the export's dim-mismatch warning keeps that gap
+    // visible, and inventing a max would claim a footprint no instance has.
+    // The SQL guard (width=0 AND height=0) means a real size — LEF SIZE, a
+    // hand resize_cell — is never overwritten.
+    {
+        std::unordered_map<std::string, std::pair<double,double>> common;
+        std::unordered_set<std::string> bad;
+        auto swapped = [](const std::string& o) {
+            return o == "E" || o == "W" || o == "FE" || o == "FW";
+        };
+        for (const auto& c : comps) {
+            if (c.x1 < 0) { bad.insert(c.cell); continue; }   // unplaced
+            double w = c.x2 - c.x1, h = c.y2 - c.y1;
+            if (swapped(c.orient)) std::swap(w, h);           // cell frame
+            auto it = common.find(c.cell);
+            if (it == common.end()) common[c.cell] = {w, h};
+            else if (std::fabs(it->second.first - w) > 1e-6 ||
+                     std::fabs(it->second.second - h) > 1e-6)
+                bad.insert(c.cell);
+        }
+        Stmt u(_db, "UPDATE cell SET width=?2, height=?3"
+                    " WHERE name=?1 AND width=0 AND height=0");
+        for (const auto& [cell, wh] : common) {
+            if (bad.count(cell)) continue;
+            sqlite3_bind_text  (u, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_double(u, 2, wh.first);
+            sqlite3_bind_double(u, 3, wh.second);
+            sqlite3_step(u); sqlite3_reset(u);
+        }
     }
     return placed;
 }

@@ -464,3 +464,192 @@ def test_rotate_comp_with_children_does_not_compose_orient(tmp_path):
     # orient stays 'N', so export won't double-transform it.
     assert (child.x1, child.y1) != (child_before.x1, child_before.y1)
     assert child.orient == "N"
+
+
+# ── what the DEF+Verilog merge invents survives the round trip (item 3) ─────
+
+_MERGE_LEF = """MACRO m
+  CLASS BLOCK ;
+  SIZE 10 BY 4 ;
+  PIN a
+    DIRECTION INPUT ;
+    PORT
+      LAYER metal1 ;
+      RECT 4 1 6 3 ;
+    END
+  END a
+END m
+END LIBRARY
+"""
+
+_MERGE_DEF = """VERSION 5.8 ;
+DESIGN t ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 100000 100000 ) ;
+COMPONENTS 2 ;
+  - u0/i m + PLACED ( 1000 2000 ) N ;
+  - u1/i m + PLACED ( 50000 60000 ) N ;
+END COMPONENTS
+PINS 1 ;
+  - out + NET n0 + DIRECTION OUTPUT + LAYER metal1 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 99000 50000 ) N ;
+END PINS
+NETS 1 ;
+  - n0 ( u0/i a ) ( PIN out ) ;
+END NETS
+END DESIGN
+"""
+
+_MERGE_V = """module mid ();
+  m i ();
+endmodule
+module chip (output n0);
+  mid u0 ();
+  mid u1 ();
+endmodule
+"""
+
+
+def test_merge_scaffolding_survives_the_round_trip(tmp_path):
+    """Two kinds of cell created during a DEF+Verilog merge had no size — the
+    synthetic __PORT__ cell (no cell row at all) and the containers
+    import_verilog creates (0x0) — so the export emitted SREFs to an
+    undefined structure, an empty orphan for the top module beside a
+    synthetic 'top', and every net-name label re-imported "outside every
+    component": the geometry round-tripped, the netlist silently died.
+
+    The sizes now exist where they are derived: __PORT__ from the port
+    shapes at DEF import, containers from their (measured size-uniform)
+    instances at derive_container_bboxes, and the top module's cell is
+    ADOPTED as the top structure's name via meta.verilog_top rather than
+    orphaned."""
+    (tmp_path / "m.lef").write_text(_MERGE_LEF)
+    (tmp_path / "d.def").write_text(_MERGE_DEF)
+    (tmp_path / "c.v").write_text(_MERGE_V)
+    db = buda.BDB(str(tmp_path / "a.bdb"))
+    db.import_def_lef(str(tmp_path / "d.def"), str(tmp_path / "m.lef"))
+    db.import_verilog(str(tmp_path / "c.v"))
+    db.derive_container_bboxes(1.0)
+
+    # The derived sizes are in the CELL table, not only on the instances.
+    cells = {c.name: (c.width, c.height) for c in db.all_cells()}
+    assert cells["__PORT__"] == (0.5, 0.5)          # the DEF port shape
+    assert cells["mid"] == (12.0, 6.0)              # child + 1.0 margin/side
+    assert cells["m"] == (10.0, 4.0)                # LEF SIZE, untouched
+
+    st = db.export_gds(str(tmp_path / "out.gds"))
+    assert not st.warnings, st.warnings             # no dim-mismatch either
+
+    db2 = buda.BDB(str(tmp_path / "b.bdb"))
+    st2 = db2.import_gds(str(tmp_path / "out.gds"), [63])
+    # The three historical losses, each pinned:
+    assert not any("__PORT__" in w for w in st2.warnings), st2.warnings
+    assert not any("no geometry" in w for w in st2.warnings), st2.warnings
+    assert not any("outside every component" in w for w in st2.warnings), \
+        st2.warnings
+    assert st2.tops == ["chip"]                     # one top, the right name
+    assert len([c for c in db2.all_components() if c.cell == "__PORT__"]) == 1
+    assert sorted(n.name for n in db2.all_nets()) == ["n0"]   # netlist LIVES
+
+
+def test_disagreeing_instance_sizes_leave_the_cell_unsized(tmp_path):
+    """The write-back rule is the COMMON size, not a max: a cell whose
+    instances genuinely differ is left 0x0, and the export's dim-mismatch
+    warning keeps the gap visible instead of claiming a footprint no
+    instance has."""
+    db = buda.BDB(str(tmp_path / "a.bdb"))
+    db.add_cell("box", 0, 0)
+    db.add_comp("p", "box", "", -1, -1, -1, -1, False)   # unplaced container
+    db.add_comp("q", "box", "", -1, -1, -1, -1, False)
+    db.add_comp("p/k1", "leaf", "p", 0, 0, 10, 10, True)
+    db.add_comp("q/k1", "leaf", "q", 50, 50, 80, 70, True)  # different child
+    db.derive_container_bboxes(0.0)
+    box = {c.name: c for c in db.all_cells()}["box"]
+    assert (box.width, box.height) == (0.0, 0.0)
+    # …while the uniform case in the same design DOES write back:
+    db.add_cell("pair", 0, 0)
+    db.add_comp("r", "pair", "", -1, -1, -1, -1, False)
+    db.add_comp("s", "pair", "", -1, -1, -1, -1, False)
+    db.add_comp("r/k", "leaf", "r", 0, 0, 5, 5, True)
+    db.add_comp("s/k", "leaf", "s", 90, 90, 95, 95, True)
+    db.derive_container_bboxes(0.0)
+    pair = {c.name: c for c in db.all_cells()}["pair"]
+    assert (pair.width, pair.height) == (5.0, 5.0)
+
+
+def test_ports_of_different_sizes_get_their_own_cells(tmp_path):
+    """One GDS structure has ONE footprint, so independent maxes over a 1x10
+    and a 10x1 port would invent a 10x10 cell matching neither, and re-import
+    would expand every port to it (Codex P2 on #662).  Differing sizes get
+    numbered sibling cells instead; each port round-trips at its own size."""
+    deff = _MERGE_DEF.replace(
+        """PINS 1 ;
+  - out + NET n0 + DIRECTION OUTPUT + LAYER metal1 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 99000 50000 ) N ;
+END PINS""",
+        """PINS 2 ;
+  - out + NET n0 + DIRECTION OUTPUT + LAYER metal1 ( -50 -500 ) ( 50 500 )
+      + PLACED ( 99000 50000 ) N ;
+  - out2 + NET n0 + DIRECTION OUTPUT + LAYER metal1 ( -500 -50 ) ( 500 50 )
+      + PLACED ( 50000 99000 ) N ;
+END PINS""")
+    (tmp_path / "m.lef").write_text(_MERGE_LEF)
+    (tmp_path / "d.def").write_text(deff)
+    db = buda.BDB(str(tmp_path / "a.bdb"))
+    db.import_def_lef(str(tmp_path / "d.def"), str(tmp_path / "m.lef"))
+    cells = {c.name: (c.width, c.height) for c in db.all_cells()}
+    assert cells["__PORT__"] == pytest.approx((0.1, 1.0))    # first class
+    assert cells["__PORT__2"] == pytest.approx((1.0, 0.1))   # second class
+    st = db.export_gds(str(tmp_path / "out.gds"))
+    assert not st.warnings, st.warnings             # no dim mismatch either way
+    db2 = buda.BDB(str(tmp_path / "b.bdb"))
+    db2.import_gds(str(tmp_path / "out.gds"))
+    sizes = sorted((round(c.x2 - c.x1, 6), round(c.y2 - c.y1, 6))
+                   for c in db2.all_components()
+                   if c.cell.startswith("__PORT__"))
+    assert sizes == [pytest.approx((0.1, 1.0)),
+                     pytest.approx((1.0, 0.1))]     # each its OWN size
+
+
+def test_declared_top_outranks_a_die_sized_decoy(tmp_path):
+    """The die-size adoption is circumstantial: an unused library cell whose
+    dimensions happen to equal the die would be claimed as the top while the
+    DECLARED Verilog top orphans — the two-top failure all over again (Codex
+    P2 on #662).  meta.verilog_top is direct evidence and goes first."""
+    (tmp_path / "m.lef").write_text(_MERGE_LEF)
+    (tmp_path / "d.def").write_text(_MERGE_DEF)
+    (tmp_path / "c.v").write_text(_MERGE_V)
+    db = buda.BDB(str(tmp_path / "a.bdb"))
+    db.import_def_lef(str(tmp_path / "d.def"), str(tmp_path / "m.lef"))
+    db.import_verilog(str(tmp_path / "c.v"))
+    db.derive_container_bboxes(1.0)
+    db.add_cell("decoy", 100.0, 100.0)              # uninstantiated, == die
+    db.export_gds(str(tmp_path / "out.gds"))
+    db2 = buda.BDB(str(tmp_path / "b.bdb"))
+    st2 = db2.import_gds(str(tmp_path / "out.gds"), [63])
+    # `decoy` keeps its OWN structure (an unused library cell must never be
+    # consumed as the top), so it is also unreferenced — two tops is correct.
+    # The regression this pins would look different: `chip` as the EMPTY one
+    # ("no geometry anywhere") with the roots under `decoy`, plus a synthetic
+    # 'top'.
+    assert "chip" in st2.tops and "top" not in st2.tops, st2.tops
+    assert not any("no geometry" in w for w in st2.warnings), st2.warnings
+    cells2 = {c.name: (c.width, c.height) for c in db2.all_cells()}
+    assert cells2["decoy"] == (100.0, 100.0)        # survived, own structure
+    # …and the design's components live under chip, not the decoy.
+    assert any(c.cell == "quad" or c.cell == "mid" for c in db2.all_components())
+
+
+def test_a_fresh_design_load_clears_the_top_memo(tmp_path):
+    """meta.verilog_top survives in the meta table, but clear_design() wipes
+    the design it described — stale, it could claim an unrelated cell of the
+    NEXT design that shares the old top's name (Codex P2 on #662)."""
+    (tmp_path / "m.lef").write_text(_MERGE_LEF)
+    (tmp_path / "d.def").write_text(_MERGE_DEF)
+    (tmp_path / "c.v").write_text(_MERGE_V)
+    db = buda.BDB(str(tmp_path / "a.bdb"))
+    db.import_def_lef(str(tmp_path / "d.def"), str(tmp_path / "m.lef"))
+    db.import_verilog(str(tmp_path / "c.v"))
+    assert db.meta_get("verilog_top") == "chip"
+    db.import_def_lef(str(tmp_path / "d.def"), str(tmp_path / "m.lef"))
+    assert db.meta_get("verilog_top") == ""         # fresh load, fresh slate

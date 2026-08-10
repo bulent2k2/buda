@@ -915,11 +915,32 @@ GdsExportStats export_gds(BDB& db, const std::string& path,
     const double die_h = std::atof(db.meta_get("die_h", "0").c_str());
     std::set<std::string> placed_cells;
     for (const auto& c : comps) placed_cells.insert(c.cell);
+    // Top adoption, DIRECT evidence first (opens item 3): a DEF+Verilog
+    // merge's TOP MODULE has a cell row (import_verilog creates one per
+    // defined module) but no component row — the top is instantiated by
+    // nobody — and no size.  Without adoption it was exported as an empty
+    // orphan structure ("no geometry anywhere") BESIDE a synthetic 'top',
+    // and re-imported as two tops.  The netlist STATED which module is
+    // top; `meta.verilog_top` carries that statement, and it outranks the
+    // die-size match below — which is circumstantial, and which an unused
+    // die-sized library cell could satisfy by coincidence, orphaning the
+    // real top all over again (Codex P2 on #662).  clear_design() drops
+    // the memo, so it can never describe a previous design.
     const CellRow* top_cell = nullptr;
-    for (const auto& c : cells)
-        if (!placed_cells.count(c.name) && die_w > 0 &&
-            std::fabs(c.width - die_w) < 1e-6 &&
-            std::fabs(c.height - die_h) < 1e-6) { top_cell = &c; break; }
+    {
+        const std::string vtop = db.meta_get("verilog_top", "");
+        if (!vtop.empty() && !placed_cells.count(vtop))
+            for (const auto& c : cells)
+                if (c.name == vtop) { top_cell = &c; break; }
+    }
+    // Circumstantial fallback (G1 semantics, GDS-imported BDBs): an
+    // uninstantiated cell whose size IS the die is the materialized top of
+    // a previous import.
+    if (!top_cell)
+        for (const auto& c : cells)
+            if (!placed_cells.count(c.name) && die_w > 0 &&
+                std::fabs(c.width - die_w) < 1e-6 &&
+                std::fabs(c.height - die_h) < 1e-6) { top_cell = &c; break; }
 
     // ── Stream ──────────────────────────────────────────────────────────────
     GdsWriter w;
