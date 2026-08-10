@@ -31,10 +31,12 @@ The `dnuts` stage additionally audits every bundle governed by a
 than its rule's width), **`NDR_SPACING`** (foreign metal — another bundle's
 wire, or a CLOCK/CUSTOM pre-route rail — inside the rule's reserved run), and
 **`NDR_SHIELD`** (the placed shield count does not match the rule, accounting
-for any rail-credited ends; for `shield bus` the two shields must additionally
-be the run's outermost wires — under `shield bit` / `shield per:N` only the
-COUNT is checked, so a same-count shield sitting in the wrong gap is **not**
-caught today). A design with no rules declared produces no NDR output at all.
+for any rail-credited ends; and, on a run with no culled bits, the placed rows
+in ascending track order do not play the roles the rule's layout declares — so
+a same-count shield sitting in the wrong gap is caught in every shield mode.
+A culled run skips the arrangement check: its missing bits are already LOUD as
+`UNPLACED`, and matching them against the intended layout would flag a correct
+run). A design with no rules declared produces no NDR output at all.
 
 The `nuts` and `dnuts` stages additionally audit **keepout crossings**
 (`KEEPOUT_CROSS`): at `nuts`, a placed bus segment whose physical extent
