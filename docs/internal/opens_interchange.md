@@ -9,14 +9,15 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 this page is the backlog behind them.
 
 Snapshot index — last verified against `main`: **2026-08-10**, after items 1,
-2, 3, 4, 6, 7 and 10 landed, and item 5's first blocker (the second
-`def.components` walk) cleared — item 5 stays open on the remaining one. Each
-item states what is missing, why it was left rather than forgotten, and where
-to start. Every claim below was reproduced on `main`
+2, 3, 4, 5, 6, 7, 10 and 11 landed — item 5's second blocker (the
+net-resolution name index) fell to the observation that the database already
+maintains the index, making the import streaming. Each item states what is
+missing, why it was left rather than forgotten, and where to start. Every
+claim below was reproduced on `main`
 before being written down; the reproduction is given so a reader can
 re-derive it rather than trust it.
 
-Items 1, 2, 3, 4, 6, 7 and 10 are kept in place, struck through, rather than
+Items 1, 2, 3, 4, 5, 6, 7, 10 and 11 are kept in place, struck through, rather than
 moved to the resolved table at the bottom. Each entry records where this page's **own
 first description was wrong** — item 1 about the merge case, and about the
 fix it originally proposed, which would have been the wrong fix; item 2
@@ -397,38 +398,62 @@ script-relative everywhere with a deprecation pass, or an explicit
 
 </details>
 
-## 5. The DEF reader buffers the whole design
+## 5. ~~The DEF reader buffers the whole design~~ — RESOLVED 2026-08-10 (streaming import, both blockers cleared)
 
-`read_def` now holds the file **once** (it held it three times before PR
-#650), but the reader is still not streaming, and the text is not the
-dominant term. Measured on `main`, 2026-08-09 — a 19.7 MB / 1.02 M-line DEF
-with 340 k components costs **96 MB peak, 4.9× the file size**, most of it
-the parsed model at ~220 B per component. Budget **~5×**.
+`read_def` held the file **once** (three times before PR #650), but the
+parsed model dominated: measured 2026-08-09 — a 19.7 MB / 1.02 M-line DEF
+with 340 k components cost **96 MB peak, 4.9× the file size**, most of it
+components at ~220 B each. Budget **~5×**.
 
-True streaming means inserting DB rows as entries parse, which
-`import_def_lef` cannot do today for ~~two~~ **one** concrete reason:
+True streaming meant inserting DB rows as entries parse, which
+`import_def_lef` could not do for two concrete reasons, cleared in order:
 
 1. ~~it walks `def.components` a **second** time to place macro `OBS`
-   keepouts~~ **CLEARED, 2026-08-10**: the OBS collection (orientation
-   transform included) now runs inside the first COMPONENTS insertion walk,
-   right after the HALO — one walk, so a future reader can hand each
-   component to a sink exactly once. Results are identical (same keepouts,
-   different order in `stats.keepouts`; the census counts by kind so nothing
-   downstream reads the order), and — measured on a 25.2 MB / 1.0 M-line
-   synthetic with 200 k OBS-bearing components — peak import RSS drops
-   238 → 221 MB (−7%), stable across repeats. Note that vehicle is
-   deliberately OBS-heavy (400 k keepouts), so its 8.8× ratio is not
-   comparable to the 4.9× above: the ratio tracks how much of the file the
-   import *retains*, not a constant of the reader.
-2. net resolution needs the name index built from the full component list.
+   keepouts~~ **CLEARED, 2026-08-10** (#668): the OBS collection
+   (orientation transform included) runs inside the one COMPONENTS visit,
+   right after the HALO — a reader that hands each component to a sink
+   cannot be walked twice. Identical results (same keepouts, different
+   order in `stats.keepouts`; the census counts by kind), −7% peak RSS on
+   its own.
+2. ~~net resolution needs the name index built from the full component
+   list~~ **CLEARED, 2026-08-10**: the index it actually needs is one the
+   database maintains anyway — `component.name` is UNIQUE, and one probe of
+   that index returns the id, cell and layout-unit placement, which is
+   everything the in-memory `comp_by_name` map supplied. The map was a
+   *duplicate* of the table it had just written.
 
-*Where to start:* the remaining blocker is the net-side name index — a
-streaming shape would insert component rows as they parse and resolve net
-pins in a second *file* pass (or against the DB index), rather than against
-the in-memory `def.components`. Note the reader this replaced streamed
-cheaply only because it *kept almost nothing* (it discarded TRACKS, PINS,
-BLOCKAGES and GCELLGRID, and could not read a wrapped entry at all), so the
-memory is being spent on data that is now actually retained.
+**The built shape.** `read_def` takes an optional `DefStreamSink`:
+COMPONENTS and NETS entries — the two vectors that dominated the model —
+are handed over as they parse and never retained; everything else (PINS,
+TRACKS, BLOCKAGES, NDRs, the census) is small and stays buffered, so the
+sink-less call (and the Python `read_def` binding) is unchanged.
+`import_def_lef` inserts each component (row + HALO + OBS keepouts) at
+delivery and resolves each net's connections against the DB; a connection
+that cannot resolve mid-file is **deferred, not dropped** — die-port conns
+always are (their boundary components are synthesized from PINS after the
+parse), and so is every conn of a file whose NETS precede its COMPONENTS,
+so correctness does not hang on the spec's section order. The design wipe
+moved inside the import's transaction, so a malformed DEF **rolls back**
+— the old "parse error leaves the previous design intact" contract holds
+by a different mechanism. One new hard edge, stated rather than implied: a
+`UNITS` statement after a streamed entry is a parse error (delivered
+coordinates were converted under the divisor in force; two scales in one
+import cannot be repaired retroactively), where the buffered reader
+tolerated any order. DEF 5.8 puts UNITS in the header, so no real file
+changes behavior.
+
+**Measured** on a 25.2 MB / 1.0 M-line synthetic, 200 k OBS-bearing
+components + 200 k nets (the deliberately OBS-heavy vehicle from blocker
+1's A/B): peak import RSS **221 → 86 MB, 8.8× → 3.4× the file** — under
+the budget — with import runtime a wash (4.4–4.8 s both sides: the
+b-tree probes cost what the map lookups did). The remaining ~86 MB is the
+one text buffer (25 MB), the keepout list the session applies, and
+SQLite's transaction pages — data that is genuinely retained, which is
+where this item's own note said the memory should be going.
+
+Pinned by three streaming-contract tests in `test_def_import.py`:
+section order does not change what resolves, a malformed DEF rolls back
+to the previous design, late UNITS is a hard error.
 
 ## 6. ~~Script-declared distances are not scaled by the import scale~~ — RESOLVED 2026-08-10 (the ergonomic half; the engine behavior stays, deliberately)
 
@@ -553,41 +578,77 @@ a naming convention invented by one layer becomes a parsing rule in
 another, and the two are only equal until someone adds a name that breaks
 the coincidence.
 
-## 11. A die-port bus routes as one bundle per bit
+## 11. ~~A die-port bus routes as one bundle per bit~~ — RESOLVED 2026-08-10
 
-`soc.v` drives a 32-bit `dbg` bus from one mux to 32 die pads. The DEF has
-one `PINS` entry per bit — correct, that is what a DEF has — so
-`import_def_lef` synthesizes 32 boundary components, and the bundler sees
-32 nets with 32 *different* receiver blocks. Under STRICT they are 32
-bundles; under CONVERGENT (shared receiver) and BIDIRECTIONAL (sorted
-endpoint set) they are still 32, because the endpoint sets genuinely
-differ.
+`soc.v` drives a 32-bit `dbg` bus from one mux to 32 die pads, and takes a
+32-bit `boot` bus from 32 pads into one memory. The DEF has one `PINS`
+entry per bit — correct, that is what a DEF has — so `import_def_lef`
+synthesizes 32 boundary components per bus and the bundler sees 32 nets
+with 32 *different* endpoint blocks. Under STRICT: 64 of `flow/rv`'s 70
+depth-0 bundles are a single port bit.
 
-Measured on `flow/rv/`: **64 of the 70 depth-0 bundles are a single port
-bit** — 32 for `dbg`, 32 for `boot`. Correct by every rule BUDA has, and
-wrong about the design: those 32 wires run side by side from one driver to
-32 adjacent pads, which is the definition of the thing bundling exists to
-find.
+**Correcting what this page first said**, which was wrong in the way that
+matters: it claimed the endpoint sets differ so CONVERGENT and
+BIDIRECTIONAL leave them at 32 too. Measured, CONVERGENT **already merges
+`boot`** — 32 pads into one memory is a fan-in, exactly its case — taking
+depth-0 from 70 bundles to 38. Only `dbg` stayed split. The gap was one
+DIRECTION, not the whole case, and the page had described the symptom
+(a port bus does not bundle) as though it were the fault.
 
-It routes cleanly, which is why this is an open item and not a defect: the
-cost is planning quality and 64 planner turns where there should be two,
-not a broken route.
+**The fault is that the lattice is asymmetric.** N nets arriving at one
+sink from N places bundle; the same N nets leaving one driver for N places
+do not, under any strategy. That is the same physical object drawn
+backwards.
 
-Two candidate fixes, neither obviously right:
+**The fix is the missing mirror: `DIVERGENT`.** Group by the shared
+DRIVER, receivers ignored — CONVERGENT reflected. It is realized as a
+per-bit tapered tree rooted at the driver (reason `FANOUT:root|TO:leaves`,
+the `FANIN:root|FROM:leaves` twin), and it needed no new taper machinery:
+`derive_fanin_seg_bits` already BFSes driver→receiver, which is the
+direction a fan-out runs in, so the same function tapers both with its
+arguments unchanged.
 
-* **A fan-OUT relation in the bundler** — the mirror of CONVERGENT (shared
-  *driver*, differing receivers). It is a real gap in the strategy lattice
-  and would apply to any high-fanout driver, not only ports. It is also the
-  more dangerous of the two: shared-driver is a far weaker signal than
-  shared-receiver, and a clock buffer's 200 sinks are not a bus.
-* **A port-bus grouping at import** — `net_props.bus_name`/`bit_index` are
-  already filled in for `dbg[7]`, so the 32 pads of one port bus are
-  identifiable without any new relation, and the grouping is justified by
-  the *port declaration* rather than inferred from fanout. Narrower, and it
-  does nothing for the general case.
+Measured on `flow/rv` (`run_hier_bundler depth 4 DIVERGENT`):
 
-*Where to start:* `HierarchicalBundler`'s signature construction, and
-`docs/internal/wishlist-bundler.md` for the strategy-lattice argument.
+| | STRICT | DIVERGENT |
+|---|---|---|
+| bundles | 127 | **78** |
+| `dbg` | 32 × 1 net | **1 × 32 nets** |
+| abstract WL | 31,234,654 | **19,104,008 (−38.8%)** |
+| detailed WL | 409,819,470 | 430,511,600 (+5.0%) |
+| endpoint | clean | clean, 0 unplaced |
+
+It bundles far more than the port bus — depth-2 goes 30 → 16 — because
+fan-outs are everywhere in a datapath. The abstract win is large because a
+fan-out tree shares a trunk where N bundles each reserved their own; the
+detailed cost is what the tree pays to reach scattered leaves. Both are
+real, which is why this is **opt-in and not a new default**.
+
+Two deliberate restraints:
+
+* **`COMBINED` does not include it.** COMBINED is the join of the
+  relations safe to apply unasked, and shared-driver is a far weaker
+  signal than shared-receiver — a clock buffer's 200 sinks are not a bus.
+  Folding it in would silently re-bundle every existing COMBINED flow.
+  Ask for `DIVERGENT` by name; hold a prefix out with `set_bundling
+  <prefix> no_divergent`.
+* **The port-bus-grouping alternative was not taken.** Grouping the 32
+  pads at import (their `net_props.bus_name` already says they are one
+  bus) is narrower and fixes only die ports, and it would have to invent a
+  geometry for the merged endpoint — a DEF may place `dbg[0]` and
+  `dbg[31]` on opposite edges, and one bbox around them is a block that is
+  not there.
+
+One implementation note worth keeping, because it cost the vehicle its
+route once already: the grouping key `DRV:<driver>,` must never be emitted
+as a bundle REASON. Generation recovers endpoints by parsing the reason,
+and a bare driver name carries no receivers — every net with a unique
+driver forms its own one-net group under DIVERGENT, so `flow/rv`'s 32
+`boot` bundles came out of generation with zero candidates. That is the
+exact mirror of the guard the driverless `REC:` key already had, and it is
+now written as one.
+
+Pinned by `test_bundler_divergent.py`.
 
 ---
 

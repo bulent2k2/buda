@@ -11,7 +11,7 @@ command/GUI surface), [`ndr_architecture.md`](ndr_architecture.md)
 Snapshot index — last verified against `main`: **2026-08-10**, after R6
 (shield bonding) landed. Every requirement has a working implementation and a
 vehicle, and the feature is usable end to end — but **R1 and R8 are met only
-in part**, and **R6 carries two residual limits** now that its headline gap
+in part**, and **R6 carries one residual limit** now that its headline gap
 (shields bonded to the grid) is closed. What follows is that residue.
 
 **None of these is blocking.** Each is a bounded piece of work waiting for a
@@ -20,7 +20,7 @@ design that needs it, and the current behaviour in each case is conservative
 
 ---
 
-## 1. Shield bonding vias (R6 — LANDED, with two residual limits)
+## 1. Shield bonding vias (R6 — LANDED, with one residual limit)
 
 **Implemented** (the opt-in `bond` token). After placement, every EMITTED
 shield is strapped to the power grid with a via wherever an identity-matching
@@ -49,18 +49,23 @@ there must get the honest answer (possibly `NDR_BOND`).
 bonding at all — the rail is the power grid's own metal, so it never reaches
 the strap pass.
 
-**Residual limits:**
+*Strap density is declared.* `bond stride <N>` straps every Nth crossing
+instead of all of them — every crossing was the original behaviour and is
+still the `bond` default (stride 1), but it is hundreds of vias on a long
+shield over a dense grid. Both **extremes are always anchored** whatever N
+divides out to: an unbonded tail hanging off the last strap is exactly the
+floating metal bonding exists to prevent. The stride rides the existing
+`ndr_rule.bond` column (0 = off, N = stride), so it needed no schema bump
+and a stored 1 still means what it always meant.
 
-- **Every crossing is strapped.** There is no stride or via-count budget, so
-  a long shield over a dense grid gets many straps (280 on the small
-  `ndr_bond.buda` vehicle). That is the conservative direction — more grid
-  ties, never fewer — but a real flow may want a declared stride.
+**Residual limit:**
+
 - **Adjacent layers only.** A shield bonds to `layer ± 1` when that layer is
   perpendicular and has a grid. A rail two layers away needs a via stack,
   which needs the intermediate layer's own track reserved — a placement
   decision, not an output one, and out of scope here.
 
-*Where to start on either:* `emit_shield_bond_vias` in `detailed_nuts.cpp`.
+*Where to start:* `emit_shield_bond_vias` in `detailed_nuts.cpp`.
 
 ## 2. Absolute (µm) width and spacing values (R1 partial)
 

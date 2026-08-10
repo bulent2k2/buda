@@ -65,6 +65,22 @@ struct HBundle {
 };
 // STRICT       — same driver + same receivers (a true parallel bus).
 // CONVERGENT    — same receivers only, driver ignored (fan-in).
+// DIVERGENT     — same DRIVER only, receivers ignored (fan-OUT): the mirror of
+//                 CONVERGENT, and the point the lattice was missing.  N nets
+//                 leaving one driver for N different places are the same
+//                 physical object as N nets arriving at one sink from N
+//                 places, drawn backwards — a 32-bit port bus reaching 32 die
+//                 pads bundled under CONVERGENT going IN and not coming OUT
+//                 (opens_interchange.md item 11).  Realized as a per-bit
+//                 tapered tree rooted at the shared driver (reason
+//                 'FANOUT:root|TO:leaves'), so bit k's wire lands only on the
+//                 block bit k actually reaches.
+//
+//                 It is a WEAKER signal than CONVERGENT and is opt-in for
+//                 that reason: a high-fanout driver is not always a bus (a
+//                 clock buffer's 200 sinks are not), so ask for it per design
+//                 and exclude what it should not touch with `set_bundling
+//                 <prefix> no_divergent`.
 // BIDIRECTIONAL — direction-agnostic: signature is the sorted set of ALL
 //                 endpoint instances (driver + receivers), so nets that connect
 //                 the same group of instances in any driver/receiver roles are
@@ -75,7 +91,13 @@ struct HBundle {
 //                 connected by a CHAIN of either relation (union-find), the
 //                 only genuinely new point on the strategy lattice
 //                 STRICT ⊂ {CONVERGENT, BIDIRECTIONAL} ⊂ COMBINED.
-enum class Strategy { STRICT, CONVERGENT, BIDIRECTIONAL, COMBINED };
+//
+//                 COMBINED deliberately does NOT include DIVERGENT.  The join
+//                 is of the relations that are safe to apply unasked; fan-out
+//                 is not one of them (see DIVERGENT above), and folding it in
+//                 would silently re-bundle every existing COMBINED flow.
+//                 Ask for DIVERGENT by name.
+enum class Strategy { STRICT, CONVERGENT, BIDIRECTIONAL, COMBINED, DIVERGENT };
 class Netlist {
 public:
     void add_net(const std::string& name, const std::string& driver, const std::vector<std::string>& receivers);
@@ -109,7 +131,41 @@ public:
     // cross-level group under CONVERGENT/COMBINED forms one fan-in bundle
     // (per-net endpoints in net_drivers/net_receivers + a FANIN reason), the
     // cross-level twin of the same-level fan-in.
-    void set_strategy(Strategy s) { _strategy = s; }
+    void set_strategy(Strategy s) { _strategy = s; _rel_mask = 0; }
+    // Explicit RELATION SET, for asking for more than one at a time.
+    //
+    // A strategy names one relation (or, for COMBINED, a fixed pair).  That
+    // is enough until a design carries several SHAPES at once — `flow/rv`
+    // takes a 32-bit bus IN from 32 pads (fan-in) and sends another OUT to
+    // 32 pads (fan-out), and no single strategy bundles both: CONVERGENT
+    // gets the inbound one, DIVERGENT the outbound one.  The union-find
+    // join already works over a SET of relations, so the fix is to let the
+    // caller state the set instead of picking a preset.
+    //
+    // Setting a mask overrides the strategy's own relation set; the pure
+    // single-relation paths (and their signature order) are untouched when
+    // exactly one relation is asked for, so every existing flow is
+    // byte-identical.
+    void set_relations(bool conv, bool divg, bool bidir) {
+        _rel_mask = 8 | (conv ? 1 : 0) | (divg ? 2 : 0) | (bidir ? 4 : 0);
+    }
+    bool _rel(const char* r) const {
+        if (!_rel_mask) {                       // no mask: read the strategy
+            const std::string s(r);
+            if (s == "conv")  return _strategy == Strategy::CONVERGENT ||
+                                     _strategy == Strategy::COMBINED;
+            if (s == "div")   return _strategy == Strategy::DIVERGENT;
+            return _strategy == Strategy::BIDIRECTIONAL ||
+                   _strategy == Strategy::COMBINED;
+        }
+        const std::string s(r);
+        if (s == "conv") return (_rel_mask & 1) != 0;
+        if (s == "div")  return (_rel_mask & 2) != 0;
+        return (_rel_mask & 4) != 0;
+    }
+    int _n_relations() const {
+        return (int)_rel("conv") + (int)_rel("div") + (int)_rel("bidir");
+    }
     // Per-net-name-prefix permission overrides (set_bundling): mode is one
     // of strict|no_convergent|no_bidirectional|combined; longest matching
     // prefix wins, "*" is the global default.  A merge via a relation needs
@@ -123,6 +179,8 @@ public:
 private:
     BDB& _db;
     Strategy _strategy = Strategy::STRICT;
+    // 0 = follow _strategy; else bit 3 set + bits 0/1/2 = conv/div/bidir.
+    int _rel_mask = 0;
     std::vector<std::pair<std::string, std::string>> _overrides;
     // Relations ("conv"/"bidir") the named net may merge through, resolved
     // from _overrides (longest prefix) ∩ the strategy's relations.

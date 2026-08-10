@@ -65,6 +65,10 @@ std::string Bundler::generate_signature(const Net& net) const {
     }
     if (current_strategy_ == Strategy::STRICT) {
         signature << "DRV:" << net.get_driver_instance() << "|REC:" << rec_sig;
+    } else if (current_strategy_ == Strategy::DIVERGENT) {
+        // Fan-OUT: the shared DRIVER is the key, receivers ignored — the
+        // mirror of CONVERGENT's receiver-only key one line below.
+        signature << "DRV:" << net.get_driver_instance();
     } else {
         signature << "REC:" << rec_sig;
     }
@@ -119,15 +123,27 @@ std::string HierarchicalBundler::_bidir_sig(std::vector<std::string> all_names) 
 std::string HierarchicalBundler::_sig(
         const std::string& drv_name,
         const std::vector<std::string>& sorted_rcv_names) const {
-    if (_strategy == Strategy::BIDIRECTIONAL) {
+    // Only reached on the single-relation (non-general) path, so the tests
+    // below are mutually exclusive; asked through _rel() so an explicit
+    // one-relation SET picks the same key its named strategy would.
+    if (_rel("bidir")) {
         std::vector<std::string> all = sorted_rcv_names;
         all.push_back(drv_name);
         return _bidir_sig(std::move(all));
     }
-    if (_strategy == Strategy::CONVERGENT) {
+    if (_rel("conv")) {
         std::string sig = "REC:";
         for (const auto& n : sorted_rcv_names) { sig += n; sig += ','; }
         return sig;
+    }
+    if (_rel("div")) {
+        // The mirror of CONVERGENT: group by the shared DRIVER, receivers
+        // ignored.  The "DRV:" prefix is never emitted as a bundle REASON
+        // (the fan-out emission below writes FANOUT:…), exactly as the
+        // driverless "REC:" key is never emitted for fan-in — generation
+        // recovers endpoints by parsing the reason and a bare driver name
+        // does not carry the receivers.
+        return "DRV:" + drv_name + ",";
     }
     return _strict_sig(drv_name, sorted_rcv_names);
 }
@@ -147,9 +163,11 @@ bool HierarchicalBundler::_net_allows(const std::string& net_name,
         }
     }
     if (!best) return true;                       // permissive default
+    const std::string r(rel);
     if (*best == "strict")           return false;
-    if (*best == "no_convergent")    return std::string(rel) == "bidir";
-    if (*best == "no_bidirectional") return std::string(rel) == "conv";
+    if (*best == "no_convergent")    return r != "conv";
+    if (*best == "no_bidirectional") return r != "bidir";
+    if (*best == "no_divergent")     return r != "div";
     return true;                                  // "combined"
 }
 
@@ -584,13 +602,18 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 for (const auto& r : sorted_rcv) { s += r; s += ','; }
                 return s;
             };
+            // The DIVERGENT mirror: the shared DRIVER is the key.
+            auto drv_sig = [](const std::string& drv) {
+                return "XLDIV:" + drv + ",";
+            };
 
             // As on the same-level path, ANY active set_bundling override
             // switches to the union-find join so a strict-equivalent bus stays
             // bundled (a per-net key would fragment it when a prefix disables
             // one relation for only some of its bits).
-            const bool general = (_strategy == Strategy::COMBINED)
-                                 || !_overrides.empty();
+            // >1 relation asked for (COMBINED, or an explicit set) needs the
+            // union-find join; so does any override, which is per-net.
+            const bool general = _n_relations() > 1 || !_overrides.empty();
             std::vector<std::vector<int>> xl_groups;
             if (!general) {
                 // Single-relation, override-free strategies: the historical sig
@@ -605,10 +628,13 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                     { auto nit = net_name.find(net_id);
                       if (nit != net_name.end()) nm = &nit->second; }
                     std::string xsig;
-                    if (_strategy == Strategy::CONVERGENT &&
+                    if (_rel("conv") &&
                         (!nm || _net_allows(*nm, "conv"))) {
                         xsig = rcv_set_sig(sorted_rcv);
-                    } else if (_strategy == Strategy::BIDIRECTIONAL &&
+                    } else if (_rel("div") &&
+                               (!nm || _net_allows(*nm, "div"))) {
+                        xsig = drv_sig(info.drv_spec_path);
+                    } else if (_rel("bidir") &&
                                (!nm || _net_allows(*nm, "bidir"))) {
                         std::vector<std::string> all = sorted_rcv;
                         all.push_back(info.drv_spec_path);
@@ -627,10 +653,9 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 // permissions; conv/bidir keys merge only when the strategy
                 // enables that relation AND the net permits it.  Mirrors the
                 // same-level general path exactly.
-                const bool strat_conv  = (_strategy == Strategy::CONVERGENT ||
-                                          _strategy == Strategy::COMBINED);
-                const bool strat_bidir = (_strategy == Strategy::BIDIRECTIONAL ||
-                                          _strategy == Strategy::COMBINED);
+                const bool strat_conv  = _rel("conv");
+                const bool strat_bidir = _rel("bidir");
+                const bool strat_div   = _rel("div");
                 std::map<int, int> parent;
                 for (int n : xl_nets) parent[n] = n;
                 std::function<int(int)> find = [&](int x) {
@@ -648,6 +673,8 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                     sigs.push_back("S" + _strict_sig(info.drv_spec_path, sorted_rcv));
                     if (strat_conv && _net_allows(nname, "conv"))
                         sigs.push_back("C" + rcv_set_sig(sorted_rcv));
+                    if (strat_div && _net_allows(nname, "div"))
+                        sigs.push_back("D" + drv_sig(info.drv_spec_path));
                     if (strat_bidir && _net_allows(nname, "bidir")) {
                         std::vector<std::string> all = sorted_rcv;
                         all.push_back(info.drv_spec_path);
@@ -695,7 +722,52 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 for (int nid : net_ids)
                     drv_set.insert(net_leaf.at(nid).drv_spec_path);
 
-                if (drv_set.size() > 1) {
+                // Cross-level FAN-OUT (DIVERGENT only): ONE driver, and the
+                // nets do NOT share a receiver set — the mirror of the fan-in
+                // below.  Gated on the strategy that can produce the group, so
+                // every other strategy is byte-identical.
+                bool xl_fanout = false;
+                if (_rel("div") && drv_set.size() == 1) {
+                    std::set<std::vector<std::string>> rcv_sets;
+                    for (int nid : net_ids) {
+                        auto rs = net_leaf.at(nid).rcv_spec_paths;
+                        std::sort(rs.begin(), rs.end());
+                        rcv_sets.insert(std::move(rs));
+                    }
+                    xl_fanout = rcv_sets.size() > 1;
+                }
+
+                if (xl_fanout) {
+                    // Root at the shared driver, every receiver a leaf, and
+                    // per-net endpoints recorded so the SAME per-bit taper the
+                    // fan-in uses (derive_fanin_seg_bits — direction-agnostic:
+                    // it BFSes from the driver's segments to each receiver)
+                    // gives bit k only the wire bit k travels.
+                    std::set<std::string> rcv_union;
+                    for (int nid : net_ids)
+                        for (const auto& r : net_leaf.at(nid).rcv_spec_paths)
+                            rcv_union.insert(r);
+                    std::vector<std::string> rcv_sorted(rcv_union.begin(),
+                                                        rcv_union.end());
+                    const std::string root = *drv_set.begin();
+                    std::map<std::string, int> nid_by_name;
+                    for (int nid : net_ids) {
+                        auto it = net_name.find(nid);
+                        if (it != net_name.end()) nid_by_name[it->second] = nid;
+                    }
+                    for (const auto& nm : b.net_names) {
+                        const auto& li = net_leaf.at(nid_by_name[nm]);
+                        b.net_drivers.push_back(li.drv_spec_path);
+                        b.net_receivers.push_back(li.rcv_spec_paths);
+                    }
+                    std::string sig = "FANOUT:" + root + "|TO:";
+                    for (const auto& r : rcv_sorted)
+                        if (r != root) { sig += r; sig += ','; }
+                    b.reason         = sig;
+                    b.drv_spec_path  = root;
+                    b.rcv_spec_paths = rcv_sorted;
+                    b.num_terminals  = 1 + (int)rcv_sorted.size();
+                } else if (drv_set.size() > 1) {
                     // Cross-level FAN-IN: multiple distinct drivers share the
                     // receiver set.  Root at the shared sink, record per-net
                     // endpoints for the taper, and emit a FANIN reason so
@@ -740,7 +812,15 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                     const std::string* nm = nullptr;
                     { auto nit = net_name.find(net_ids[0]);
                       if (nit != net_name.end()) nm = &nit->second; }
-                    if (_strategy == Strategy::BIDIRECTIONAL &&
+                    // Asked of the relation SET, not the enum.  The enum
+                    // holds the FIRST token, so reading it here made the
+                    // emitted reason depend on the ORDER the tokens were
+                    // typed: `BIDIRECTIONAL CONVERGENT` wrote a BIDIR reason
+                    // where `CONVERGENT BIDIRECTIONAL` wrote a strict one for
+                    // the same bundle — 59 of them on flow/rv — and the
+                    // reason is what generation parses and what is persisted
+                    // (Codex P2 on #676).  A set has no order.
+                    if (_rel("bidir") &&
                         (!nm || _net_allows(*nm, "bidir"))) {
                         std::vector<std::string> all = sorted_rcv;
                         all.push_back(info0.drv_spec_path);
@@ -849,7 +929,7 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
         // partition is equal but bundles are ordered by smallest net name
         // instead of signature, so bundle IDs can differ.
         std::vector<std::pair<std::string, std::vector<int>>> groups;
-        const bool general = (_strategy == Strategy::COMBINED) ||
+        const bool general = _n_relations() > 1 ||
                              !_overrides.empty();
         if (!general) {
             std::map<std::string, std::vector<int>> sig_to_nets;
@@ -864,10 +944,11 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
                 return x;
             };
-            const bool strat_conv  = (_strategy == Strategy::CONVERGENT ||
-                                      _strategy == Strategy::COMBINED);
-            const bool strat_bidir = (_strategy == Strategy::BIDIRECTIONAL ||
-                                      _strategy == Strategy::COMBINED);
+            const bool strat_conv  = _rel("conv");
+            const bool strat_bidir = _rel("bidir");
+            // DIVERGENT is deliberately NOT part of COMBINED (bundler.h) —
+            // but an explicit relation SET may still ask for it alongside.
+            const bool strat_div   = _rel("div");
             std::map<std::string, int> by_sig;
             for (const auto& [net_id, dr] : ep_names) {
                 const std::string& nname = net_name.count(net_id)
@@ -878,6 +959,8 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 for (const auto& r : dr.second) { rec += r; rec += ','; }
                 if (strat_conv && _net_allows(nname, "conv"))
                     sigs.push_back("C REC:" + rec);
+                if (strat_div && _net_allows(nname, "div"))
+                    sigs.push_back("D DRV:" + dr.first + ",");
                 if (strat_bidir && _net_allows(nname, "bidir")) {
                     std::vector<std::string> all = dr.second;
                     all.push_back(dr.first);
@@ -950,9 +1033,26 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 }
             }
             const bool fanin = drivers.size() > 1 && !same_set;
+            // Fan-OUT is its mirror: ONE driver, endpoint block sets that
+            // differ.  Gated on DIVERGENT — the only strategy that groups by
+            // shared driver — so every other strategy stays byte-identical
+            // (a one-driver differing-receiver group cannot arise elsewhere,
+            // but the gate makes that a fact rather than an argument).
+            const bool fanout = !fanin && _rel("div") &&
+                                drivers.size() == 1 && !same_set;
 
             std::string sig;
-            if (fanin) {
+            if (fanout) {
+                // Root at the shared driver, every receiver a leaf.  Same
+                // shape as the fan-in below with the arrow reversed, and the
+                // same per-bit taper serves it: derive_fanin_seg_bits walks
+                // driver→receiver, which is the direction a fan-out already
+                // runs in.
+                const std::string root = drivers[0];
+                sig = "FANOUT:" + root + "|TO:";
+                for (const auto& r : receivers)
+                    if (r != root) { sig += r; sig += ','; }
+            } else if (fanin) {
                 // Fan-in reason: root at the shared sink (the first net's
                 // first receiver — CONVERGENT guarantees a shared receiver
                 // set; a COMBINED chain root is a deterministic pick), the
@@ -970,7 +1070,9 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                         std::find(drivers.begin(), drivers.end(), r) == drivers.end()) {
                         sig += r; sig += ',';
                     }
-            } else if (!sig_hint.empty() && sig_hint.rfind("REC:", 0) != 0) {
+            } else if (!sig_hint.empty() && sig_hint.rfind("REC:", 0) != 0 &&
+                       !(sig_hint.rfind("DRV:", 0) == 0 &&
+                         sig_hint.find("|REC:") == std::string::npos)) {
                 sig = sig_hint;
             } else {
                 // Finest signature the whole group shares.  A driverless
@@ -979,6 +1081,11 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 // cross-block generation recovers the endpoints by parsing
                 // the reason, and it cannot recover a driver from a bare
                 // receiver list — the bundle would get 0 candidates.
+                // The DIVERGENT key "DRV:x," (no |REC:) is excluded for the
+                // MIRROR reason and it is not hypothetical: every net whose
+                // driver is unique forms its own one-net group under
+                // DIVERGENT, and emitting that key as the reason cost
+                // flow/rv's 32 `boot` bundles all their candidates.
                 std::set<std::string> strict_sigs;
                 for (const auto& [nm, nid] : name_id) {
                     const auto& dr = ep_names.at(nid);
@@ -1022,7 +1129,7 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
             // Fan-in metadata: per-net endpoints ALIGNED with the sorted
             // net_names, so the per-bit taper can walk each net's own
             // driver→sink path at generation time.
-            if (fanin) {
+            if (fanin || fanout) {
                 for (const auto& nm : b.net_names) {
                     for (const auto& [n2, nid2] : name_id) {
                         if (n2 != nm) continue;
@@ -1040,7 +1147,8 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
             // path.  A PURE-mode multi-driver same-set group — a plain
             // BIDIRECTIONAL request/response pair — keeps the historical
             // ep0 path verbatim, exactly as before COMBINED existed.
-            const bool multi_emit = fanin || (general && drivers.size() > 1);
+            const bool multi_emit = fanin || fanout ||
+                                    (general && drivers.size() > 1);
             if (!multi_emit) {
                 // Single-driver group (or pure-mode same-set bidir group):
                 // the HISTORICAL ep0-based path, verbatim — entry/exit id

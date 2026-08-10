@@ -45,3 +45,38 @@ runtime, and INSIDE refine the sequential fixed-context screen (10 696 +
 (8-core) scale further.  Ripup's stage-b residual is its already-parallel
 stall-sweep volume — further cuts there are trial-volume levers, not
 parallelism.
+
+# heal-to-clean experiment matrix (2026-08-10)
+
+Baseline `*_heal` endpoints were budget-exhausted, not stalled: every ripup
+iteration up to the default max_iter=10 committed an improving move, and
+refine hit its 30-move budget in every call.  All runs 4-core, `--threads 4`.
+
+**topdown** (baseline 583s, 12 opens / 5 ovl — bundle 893):
+
+| scheme | endpoint | time | final detailed-relevant WL |
+|---|---|---:|---:|
+| x1: `ripup 30` + `refine 60` ×2 | **CLEAN** | 3572s | 2,320,490 |
+| x2: interleaved `negotiate; ripup 12; refine` ×3 | **CLEAN** | 1975s | 2,284,720 |
+
+x2 adopted: ripup's cheap screened-scan commits dry up after ~10-12
+iterations (x1: psweep 2638s of the 2838s ripup); interleaved
+negotiate/refine reshape contention and refill the cheap pipeline.
+
+**bottomup** (baseline 705s, 30 opens / 23 ovl — bundles 86/246/521):
+
+| scheme | endpoint | time |
+|---|---|---:|
+| x1: `ripup 30` + `refine 60` ×2 | 12 opens (ovl 11) — bundle 86 | 1795s |
+| x2: x1 + third round `negotiate 10 press; ripup 20; refine 60` | 12 opens (ovl 10) | 2108s |
+| x3: x1 + `set_max_bundle_bits 8 for top_bus69` | 8 opens (ovl 25) — bundle 246 | 1140s |
+| x4: x3 + `set_max_bundle_bits 4 for top_bus16` | **CLEAN** | 2022s |
+
+x4 adopted.  Bundles 86 (`top_bus69_w16`) and 246 (`top_bus16_w8`) are the
+same shape: 5-endpoint cross-instance fan-outs whose seg strand is a dynamic
+junction conflict (seg cannot reach its partner within the slide window,
+closed by partner stretch) — refused by all 78 candidate re-pins AND by a
+pressed unpinned negotiate replan.  The scoped bundle-bit cap (the
+documented width-doomed-seat recipe) splits each into independently seated
+parts; healers finish the rest.  Press (x2) measured ineffective here —
+the stall is not price-sensitive.

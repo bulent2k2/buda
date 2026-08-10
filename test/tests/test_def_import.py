@@ -442,3 +442,84 @@ def test_an_unplaced_instances_pin_has_no_position_but_keeps_its_direction(
     assert pins, "the connection was dropped entirely"
     assert pins[0].dir == "INPUT", pins[0].dir
     assert (pins[0].px, pins[0].py) == (-1, -1), (pins[0].px, pins[0].py)
+
+
+# ── the streaming import's contracts (opens item 5) ────────────────────────
+# The import consumes COMPONENTS/NETS entries as they parse and resolves
+# connections against the database's own name index; what could not resolve
+# mid-file is deferred, and the whole import lives in one transaction.
+
+def test_section_order_does_not_change_what_resolves(tmp_path):
+    """NETS before COMPONENTS: the spec orders sections, correctness must
+    not hang on it.  Every connection lands in the deferred buffer and
+    resolves after the parse — identical rows to the well-ordered file."""
+    # Move the NETS section ahead of COMPONENTS wholesale.
+    head, comps, tail = _DEF.partition("COMPONENTS 2 ;")
+    comps_block, netskw, nets_block = (comps + tail).partition("NETS 1 ;")
+    nets_sec = netskw + nets_block.split("END NETS")[0] + "END NETS\n"
+    reordered = head + nets_sec + comps_block + \
+        nets_block.split("END NETS")[1]
+    assert reordered.index("NETS 1 ;") < reordered.index("COMPONENTS 2 ;")
+    s_good, _ = _run(tmp_path, deff=_DEF)
+    good_cid = {c.name: c.id for c in s_good.bdb.all_components()}["i0"]
+    good = [(p.pin_name, p.dir, p.px, p.py)
+            for p in s_good.bdb.pins_by_comp(good_cid)]
+    (tmp_path / "r").mkdir()
+    s_re, _ = _run(tmp_path / "r", deff=reordered)
+    re_cid = {c.name: c.id for c in s_re.bdb.all_components()}["i0"]
+    got = [(p.pin_name, p.dir, p.px, p.py)
+           for p in s_re.bdb.pins_by_comp(re_cid)]
+    assert got == good and good, (got, good)
+    # ...and the die-port connection resolved too.
+    ports = [c for c in s_re.bdb.all_components() if c.is_port]
+    assert len(ports) == 1
+    assert s_re.bdb.pins_by_comp(ports[0].id), "port connection dropped"
+
+
+def test_a_malformed_def_rolls_back_to_the_previous_design(tmp_path):
+    """The design wipe now happens inside the import's transaction, before
+    the streaming parse — so a parse error must ROLL BACK and leave the
+    previously imported design intact, exactly as it was when the wipe only
+    ran after a successful parse."""
+    s, _ = _run(tmp_path)
+    before = sorted(c.name for c in s.bdb.all_components())
+    assert before, "the good import produced nothing"
+    bad = _DEF.replace("  - i1 m + PLACED ( 50000 60000 ) N "
+                       "+ HALO 100 100 100 100 ;",
+                       "  - i1 m + PLACED ( 50000")   # truncated mid-entry
+    # ...and give the doomed file a DIFFERENT scale: the rollback must
+    # restore the OBJECT too — latch_units takes the rejected file's
+    # divisor as soon as an entry streams, and left stale it would scale
+    # a later UNITS-less import by the failed file's units (Codex P2).
+    bad = bad.replace("UNITS DISTANCE MICRONS 1000 ;",
+                      "UNITS DISTANCE MICRONS 2000 ;")
+    (tmp_path / "bad.def").write_text(bad)
+    with pytest.raises(RuntimeError):
+        s.bdb.import_def_lef(str(tmp_path / "bad.def"),
+                             str(tmp_path / "m.lef"))
+    after = sorted(c.name for c in s.bdb.all_components())
+    assert after == before, (after, before)
+    # A re-import that states no UNITS scales under the SURVIVING design's
+    # divisor (1000), not the rejected file's (2000): i0 at DBU 1000 is
+    # 1.0 um, not 0.5.
+    unitless = "\n".join(l for l in _DEF.splitlines()
+                         if not l.startswith("UNITS")) + "\n"
+    (tmp_path / "u.def").write_text(unitless)
+    s.bdb.import_def_lef(str(tmp_path / "u.def"), str(tmp_path / "m.lef"))
+    i0 = {c.name: c for c in s.bdb.all_components()}["i0"]
+    assert i0.x1 == pytest.approx(1.0), i0.x1
+
+
+def test_units_after_a_streamed_entry_is_a_hard_error(tmp_path):
+    """Streaming converts coordinates at delivery time, so a UNITS statement
+    after a COMPONENTS entry has already streamed cannot be applied
+    retroactively — refused loud, never two scales in one import."""
+    head, mid = _DEF.split("UNITS DISTANCE MICRONS 1000 ;\n")
+    late_units = head + mid.replace(
+        "END COMPONENTS\n",
+        "END COMPONENTS\nUNITS DISTANCE MICRONS 1000 ;\n")
+    (tmp_path / "m.lef").write_text(_LEF)
+    (tmp_path / "late.def").write_text(late_units)
+    b = buda.BDB(str(tmp_path / "b.bdb"))
+    with pytest.raises(RuntimeError, match="UNITS"):
+        b.import_def_lef(str(tmp_path / "late.def"), str(tmp_path / "m.lef"))
