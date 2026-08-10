@@ -1,0 +1,75 @@
+# ============================================================
+# flow/rv/soc_divergent.buda
+#
+# soc.buda with ONE token changed: `run_hier_bundler depth 4`
+# becomes `run_hier_bundler depth 4 DIVERGENT`.
+#
+# DIVERGENT is CONVERGENT's mirror — group by the shared DRIVER
+# rather than the shared receiver — and it is the relation the
+# strategy lattice was missing (opens_interchange.md item 11).
+#
+# This design is where the gap was measurable.  Its 32-bit `dbg`
+# port bus leaves one crossbar mux for 32 die pads, so under every
+# strategy that shipped before this one it routed as 32 one-net
+# bundles: correct by the rules, wrong about the design.  Its
+# `boot` bus goes the other way — 32 pads into one memory — and
+# CONVERGENT already bundled that, which is what showed the gap
+# was one DIRECTION rather than the whole case.
+#
+#   STRICT     127 bundles   abstract WL 31,234,654   detailed 409,819,470
+#   DIVERGENT   78 bundles   abstract WL 19,104,008   detailed 430,511,600
+#
+# Both endpoints are clean with 0 unplaced bits.  The abstract win
+# is large because a fan-out tree shares a trunk where 32 bundles
+# each reserved their own; the detailed cost is what the tree pays
+# to reach scattered leaves.  BOTH are real, which is why this is
+# a separate script rather than a change to soc.buda: the trade is
+# the design's to make, not the tool's.
+#
+# Regenerate the three input files with: python3 flow/rv/gen_soc.py
+# ============================================================
+
+open_bdb :memory:
+
+set_import_scale dbu
+set_unit_check on
+
+corner_margin dx 3000 dy 3000
+set_min_stub_length 1000
+
+import_lef_tech soc.lef
+import_def_lef soc.def soc.lef
+import_verilog soc.v
+derive_container_bboxes margin 4000
+
+derive_busterms 4
+
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+add_blocks_from_bdb 3 skip
+add_blocks_from_bdb 4 skip
+
+# The one line that differs from soc.buda.
+run_hier_bundler depth 4 DIVERGENT
+dump_hbundles
+
+generate_hier_topologies
+
+set_planner_param healersAhead 1
+run_planner hier 5
+
+run_nuts
+check_design nuts
+
+run_detailed_nuts
+check_design dnuts
+
+negotiate_congestion 10
+ripup_reroute 20
+refine_selection
+
+check_design dnuts
+report_wirelength
+
+visualize

@@ -45,15 +45,19 @@ from ._options import reject_unknown_options
 
 _OVERRIDE_MODES = {
     "strict":           frozenset(),
-    "no_convergent":    frozenset({"bidir"}),
-    "no_bidirectional": frozenset({"conv"}),
-    "combined":         frozenset({"conv", "bidir"}),
+    "no_convergent":    frozenset({"bidir", "div"}),
+    "no_bidirectional": frozenset({"conv", "div"}),
+    "no_divergent":     frozenset({"conv", "bidir"}),
+    "combined":         frozenset({"conv", "bidir", "div"}),
 }
 
 _STRATEGY_RELATIONS = {
     "STRICT":        frozenset(),
     "CONVERGENT":    frozenset({"conv"}),
+    "DIVERGENT":     frozenset({"div"}),
     "BIDIRECTIONAL": frozenset({"bidir"}),
+    # DIVERGENT is deliberately absent: COMBINED is the join of the relations
+    # safe to apply unasked, and fan-out is not one (src/bundler.h).
     "COMBINED":      frozenset({"conv", "bidir"}),
 }
 
@@ -145,6 +149,8 @@ def _generalized_bundles(session, strategy):
         sigs = [("strict", f"DRV:{drv}|REC:{rec_sig}")]
         if "conv" in allowed:
             sigs.append(("conv", f"REC:{rec_sig}"))
+        if "div" in allowed:
+            sigs.append(("div", f"DRV:{drv}"))
         if "bidir" in allowed:
             all_sig = ",".join(sorted({drv, *rcvs}))
             sigs.append(("bidir", f"BIDIR:{all_sig}"))
@@ -630,9 +636,10 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
     dump = "--dump" in args
     pos = [a for a in args if not a.startswith("--")]
     strat_arg = pos[0].upper() if pos else "STRICT"
-    if strat_arg not in ("STRICT", "CONVERGENT", "BIDIRECTIONAL", "COMBINED"):
+    if strat_arg not in ("STRICT", "CONVERGENT", "DIVERGENT",
+                         "BIDIRECTIONAL", "COMBINED"):
         print(f"Error: run_bundler strategy must be STRICT, CONVERGENT, "
-              f"BIDIRECTIONAL or COMBINED, got '{pos[0]}'"); return
+              f"DIVERGENT, BIDIRECTIONAL or COMBINED, got '{pos[0]}'"); return
     if strat_arg == "CONVERGENT":
         # CONVERGENT groups nets by shared receiver only, so a bundle can
         # span several DIFFERENT driver blocks at different locations (a
@@ -645,6 +652,17 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
         print("[Bundler] CONVERGENT: nets grouped by shared receiver; a "
               "multi-driver bundle routes as a fan-in tree rooted at the "
               "shared sink (see docs/internal/convergent_bundling.md).")
+    elif strat_arg == "DIVERGENT":
+        # The mirror of CONVERGENT: nets grouped by shared DRIVER, so a
+        # bundle can span several DIFFERENT receiver blocks (a one-to-many
+        # fan-out).  Generation models it as a fan-out tree rooted at the
+        # shared driver with every receiver block as a leaf, per-bit
+        # tapered so bit k's wire lands only where bit k goes.
+        session.bundler.set_strategy(buda.Strategy.DIVERGENT)
+        print("[Bundler] DIVERGENT: nets grouped by shared driver; a "
+              "multi-receiver bundle routes as a per-bit tapered fan-out "
+              "tree rooted at the shared driver.  A high-fanout driver is "
+              "not always a bus — restrict per prefix with set_bundling.")
     elif strat_arg == "BIDIRECTIONAL":
         # BIDIRECTIONAL bundles nets that connect the SAME set of blocks
         # in any direction (A->B with B->A, a->b,c with b->c,a / c->b,a).
@@ -704,14 +722,15 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
 
 
 def cmd_set_bundling(session, cmd, args, cmd_line):
-    # set_bundling <prefix>|* <strict|no_convergent|no_bidirectional|combined>
+    # set_bundling <prefix>|*
+    #     <strict|no_convergent|no_bidirectional|no_divergent|combined>
     # Per-net-prefix bundling permission (longest prefix wins; '*' = global
     # default).  A merge via a relation happens only when BOTH nets permit
     # it, so `set_bundling clk_ strict` keeps clock nets out of every
     # convergent/bidirectional merge under any strategy.
     if len(args) != 2 or args[1].lower() not in _OVERRIDE_MODES:
-        print("Error: usage: set_bundling <prefix>|* "
-              "<strict|no_convergent|no_bidirectional|combined>")
+        print("Error: usage: set_bundling <prefix>|* <strict|no_convergent|"
+              "no_bidirectional|no_divergent|combined>")
         return
     prefix, mode = args[0], args[1].lower()
     if not hasattr(session, "_bundling_overrides"):
@@ -836,7 +855,8 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     strat_toks = [a.upper() for i, a in enumerate(args)
                   if a.lower() != "depth" and i != depth_val_idx]
     reject_unknown_options("run_hier_bundler", strat_toks,
-                           ("STRICT", "CONVERGENT", "BIDIRECTIONAL", "COMBINED"))
+                           ("STRICT", "CONVERGENT", "DIVERGENT",
+                            "BIDIRECTIONAL", "COMBINED"))
     if len(strat_toks) > 1:
         print(f"Error: run_hier_bundler: at most one strategy, got "
               f"{', '.join(strat_toks)}"); return
@@ -854,6 +874,12 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     overrides = getattr(session, "_bundling_overrides", None) or {}
     if overrides:
         hb.set_bundling_overrides(sorted(overrides.items()))
+    if strat == "DIVERGENT":
+        print("[HierBundler] DIVERGENT: nets grouped by shared DRIVER "
+              "(fan-OUT, the CONVERGENT mirror); a multi-receiver group "
+              "routes as a per-bit tapered tree rooted at the driver.  A "
+              "high-fanout driver is not always a bus — restrict per prefix "
+              "with set_bundling.")
     if strat == "COMBINED":
         print("[HierBundler] COMBINED: join of CONVERGENT and BIDIRECTIONAL "
               "per bundling depth (same-level AND cross-level; restrict per "

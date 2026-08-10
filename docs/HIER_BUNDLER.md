@@ -330,9 +330,9 @@ the filled-in counts.
 | `test/tests/test_hier_bundler.py` | Step defs + standalone tests |
 
 
-## Strategies (STRICT | CONVERGENT | BIDIRECTIONAL | COMBINED)
+## Strategies (STRICT | CONVERGENT | DIVERGENT | BIDIRECTIONAL | COMBINED)
 
-`run_hier_bundler` accepts the same four strategies as the flat
+`run_hier_bundler` accepts the same five strategies as the flat
 `run_bundler`, applied **per bundling depth** to same-level nets (each net
 bundles once at its most specific level, so fan-ins split across subtrees
 or specificity depths remain separate routing problems — the depth-aware
@@ -348,3 +348,20 @@ STRICT/BIDIRECTIONAL grouping, and `set_max_bundle_bits` is flat-only —
 both documented follow-ons.  See
 [convergent_bundling.md](internal/convergent_bundling.md) and
 `test/tests/test_hier_bundler_combined.py`.
+
+**DIVERGENT** is CONVERGENT's mirror and the point the lattice was missing
+(`opens_interchange.md` item 11): group by the shared **driver**, receivers
+ignored, so a bus *leaving* one block for N places bundles the way one
+*arriving* at one block from N places already did.  A group whose nets do
+not share an endpoint block set becomes a *fan-out bundle* — reason
+`FANOUT:root|TO:leaves`, the `FANIN:` twin, rooted at the driver with every
+receiver a leaf and per-bit tapered by the same `derive_fanin_seg_bits`
+(it walks driver→receiver, which is the direction a fan-out already runs
+in, so the taper needed no new code).
+
+It is **opt-in and deliberately outside COMBINED**.  Shared-driver is a far
+weaker signal than shared-receiver — a clock buffer's 200 sinks are not a
+bus — and it is a genuine QoR trade rather than a free win: measured on
+`flow/rv`, 127 → 78 bundles with abstract WL −38.8% and detailed WL +5.0%,
+both endpoints clean.  Hold a prefix out with `set_bundling <prefix>
+no_divergent`.  Pinned by `test/tests/test_bundler_divergent.py`.

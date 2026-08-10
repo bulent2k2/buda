@@ -13,6 +13,7 @@ Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pip
 ```
 run_bundler strict
 run_bundler convergent
+run_bundler divergent
 run_bundler bidirectional
 run_bundler combined
 run_bundler [strategy] --dump
@@ -37,6 +38,7 @@ driver/receiver signature), and the first few net names.
 |---|---|
 | `strict` | Driver instance **and** sorted receiver instances must match exactly (a true parallel bus). |
 | `convergent` | Only sorted receiver instances must match; different drivers allowed (fan-in). |
+| `divergent` | The mirror: only the **driver** instance must match; different receivers allowed (fan-**out**). Opt-in and deliberately **not** part of `combined` — shared-driver is a far weaker signal than shared-receiver, so ask for it by name. |
 | `bidirectional` | Direction-agnostic: the signature is the sorted set of **all** endpoint instances (driver + receivers), so nets connecting the same group of blocks in any roles bundle together — `A→B` with its return `B→A`, or the cyclic `a→b,c` / `b→c,a` / `c→b,a`. |
 | `combined` | The **join** of `convergent` and `bidirectional`: nets merge when connected by a *chain* of either relation (union-find). The only genuinely new point on the strategy lattice `strict ⊂ {convergent, bidirectional} ⊂ combined` — maximal bundling; restrict per net prefix with `set_bundling`. |
 
@@ -51,6 +53,15 @@ driver/receiver signature), and the first few net names.
 > the bits whose driver→sink path uses it, verified by `check_design`'s
 > `NET_DRIVER_OPEN` and `BIT_SHORT` audits. See
 > [`docs/internal/convergent_bundling.md`](../internal/convergent_bundling.md).
+>
+> ℹ️ A `divergent` bundle is the same object with the arrow reversed: a
+> **fan-out tree** rooted at the shared driver with every receiver as a leaf,
+> per-bit tapered by the same derivation (it walks driver→receiver, which is
+> the direction a fan-out already runs in). Reason `FANOUT:root|TO:leaves`,
+> the `FANIN:` twin. It is a real QoR trade rather than a free win — measured
+> on `flow/rv`, 127 → 78 bundles at abstract WL −38.8% and detailed WL +5.0%,
+> both endpoints clean — so measure before adopting it, and hold a prefix out
+> with `set_bundling <prefix> no_divergent`.
 
 Bundle width is computed automatically as `1.5 × (number of nets)` layout
 units. The bundler prints the number of bundles created.
@@ -69,14 +80,14 @@ run_bundler strict
 ### `set_bundling`
 
 ```
-set_bundling <prefix>|* <strict|no_convergent|no_bidirectional|combined>
+set_bundling <prefix>|* <strict|no_convergent|no_bidirectional|no_divergent|combined>
 ```
 
 Per-net-prefix bundling permission, applied at the next `run_bundler` OR
 `run_hier_bundler` (any strategy). The **longest matching prefix** wins; `*` sets the global
 default. A merge via a relation happens only when the strategy enables it
 **and both nets permit it** — so `set_bundling clk_ strict` keeps clock nets
-out of every convergent/bidirectional merge while the rest of the design
+out of every convergent/divergent/bidirectional merge while the rest of the design
 bundles maximally under `combined`. `set_bundling <prefix> combined` restores
 full permission for a sub-prefix under a stricter global default.
 
