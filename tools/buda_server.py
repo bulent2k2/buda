@@ -60,10 +60,31 @@ a script, and in a script this ends the run.
 Character counts, not byte counts: both sides speak UTF-8 and count code
 points, so the diagnostics' `µm` and `→` survive the trip.
 
-Three requests are the server's own rather than script commands:
+**Streaming** (opt-in, `__stream on`): a long command's output is then sent
+as it is produced — zero or more `OUT <n_chars>\n<payload>` frames, followed
+by exactly ONE final status frame as before.  The final frame carries only
+the not-yet-streamed tail, so a client that concatenates OUT payloads with
+the final payload holds exactly the sync-mode output (the Tcl package does,
+and `buda::output` is identical in both modes).  A client that never opts in
+never sees an OUT frame, so the one-frame protocol above remains the whole
+contract for existing flows.
+
+**Cancellation** is not a protocol feature, deliberately: POSIX already has
+one.  The client sends SIGINT to the server process (Tcl knows the pipe's
+pid); Python raises `KeyboardInterrupt` at the next bytecode boundary, the
+command's `BaseException` handler turns it into an ordinary `ERR` reply, and
+the session stays alive with whatever state the command had committed — the
+same contract as any other failing command.  The boundary is honest:
+Python-level loops (`source`, the healers' iterations) cancel promptly,
+while one long C++ call (a single `run_planner` on a huge design) returns
+before the interrupt lands.  SIGINT is blocked while a frame is being
+written, so a cancel cannot tear a frame in half.
+
+Four requests are the server's own rather than script commands:
 
     __commands           the command registry, space-separated
     __query <name>       one scalar about the session (see `_QUERIES`)
+    __stream on|off      stream command output as OUT frames (default off)
     __exit               shut down
 
 `__commands` is what makes the two sides stay in sync automatically: the Tcl
@@ -74,6 +95,7 @@ maintain — the drift a hand-written binding always eventually has.
 import contextlib
 import io
 import os
+import signal
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -148,17 +170,87 @@ _QUERIES = {
 }
 
 
+@contextlib.contextmanager
+def _sigint_deferred():
+    """Hold SIGINT while a frame is on the wire.
+
+    A cancel (SIGINT from the client) may arrive at any bytecode boundary —
+    including between writing a frame's header and its payload, which would
+    desynchronise the channel the ERR reply has to travel on.  Deferring
+    delivery for the microseconds a frame write takes closes that window;
+    the interrupt still lands, one frame later.  No-op where the platform
+    has no pthread_sigmask (Windows), where the cancel path does not exist
+    either.
+    """
+    if not hasattr(signal, "pthread_sigmask"):
+        yield
+        return
+    old = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, old)
+
+
+class _StreamCapture(io.TextIOBase):
+    """A capture that FORWARDS as it fills (the `__stream on` mode).
+
+    Complete lines are emitted immediately as `OUT` frames; a partial line
+    is held until its newline arrives (or the command ends), so a frame
+    never splits a diagnostic mid-word.  The full transcript is kept too —
+    the error-line scan and the final frame's tail need it.
+    """
+    def __init__(self, emit):
+        self._emit = emit          # callable(text) -> writes one OUT frame
+        self._all = []             # the full transcript, for getvalue()
+        self._pending = ""         # the unterminated tail line
+
+    def writable(self):
+        return True
+
+    def write(self, s):
+        s = str(s)
+        if not s:
+            return 0
+        self._all.append(s)
+        chunk = self._pending + s
+        nl = chunk.rfind("\n")
+        if nl < 0:
+            self._pending = chunk
+        else:
+            self._emit(chunk[:nl + 1])
+            self._pending = chunk[nl + 1:]
+        return len(s)
+
+    def getvalue(self):
+        return "".join(self._all)
+
+    def tail(self):
+        """What was never streamed — the final frame's payload."""
+        t = self._pending
+        self._pending = ""
+        return t
+
+
 class Server:
     def __init__(self, session=None, out=None):
         self.session = session or buda_cli.BudaSession()
         self.session.no_viz = True
         self.out = out or sys.stdout
+        self.stream = False
 
     # ── framing ────────────────────────────────────────────────────────────
     def _reply(self, status, text=""):
-        self.out.write(f"{status} {len(text)}\n")
-        self.out.write(text)
-        self.out.flush()
+        with _sigint_deferred():
+            self.out.write(f"{status} {len(text)}\n")
+            self.out.write(text)
+            self.out.flush()
+
+    def _out_frame(self, text):
+        # A progress frame.  Emitted from INSIDE a running command (the
+        # stream capture calls this as lines complete), so the SIGINT hold
+        # matters most here: this is where a cancel is likeliest to land.
+        self._reply("OUT", text)
 
     # ── one request ────────────────────────────────────────────────────────
     def handle(self, line):
@@ -178,6 +270,15 @@ class Server:
         if req == "__commands":
             self._reply("OK", " ".join(sorted(COMMANDS)))
             return True
+        if req.startswith("__stream"):
+            parts = req.split(None, 1)
+            mode = parts[1].strip().lower() if len(parts) > 1 else ""
+            if mode not in ("on", "off"):
+                self._reply("ERR", "usage: __stream on|off")
+            else:
+                self.stream = mode == "on"
+                self._reply("OK")
+            return True
         if req.startswith("__query"):
             parts = req.split(None, 1)
             name = parts[1].strip() if len(parts) > 1 else ""
@@ -189,7 +290,7 @@ class Server:
                 self._reply("OK", str(fn(self.session)))
             return True
 
-        cap = io.StringIO()
+        cap = _StreamCapture(self._out_frame) if self.stream else io.StringIO()
         status, ended = "OK", False
         try:
             # Both redirects: the C++ engine writes to std::cout, and without
@@ -220,11 +321,16 @@ class Server:
         # A command that printed a diagnostic FAILED, even when it returned
         # normally: the handlers report most errors by printing `Error: …`
         # rather than raising.  Tcl's contract is that a failed command
-        # raises, so a site's `catch` has to see those too.
+        # raises, so a site's `catch` has to see those too.  The scan reads
+        # the FULL transcript in both modes — streaming changes how output
+        # travels, never what a command means.
         if status == "OK" and any(buda_cli._is_error_line(ln)
                                   for ln in text.splitlines()):
             status = "ERR"
-        self._reply(status, text)
+        # Streamed: everything up to the last newline already went out as
+        # OUT frames; the final frame carries only the tail, and the client
+        # concatenates.  Buffered: the final frame is the whole output.
+        self._reply(status, cap.tail() if self.stream else text)
         return not ended
 
     def serve(self, inp=None):
