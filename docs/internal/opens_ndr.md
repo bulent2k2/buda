@@ -8,11 +8,11 @@ command/GUI surface), [`ndr_architecture.md`](ndr_architecture.md)
 (implementers, as-built) — and the user-facing command reference is
 [`../script_reference/ndr.md`](../script_reference/ndr.md).
 
-Snapshot index — last verified against `main`: **2026-08-08**, after R13
-(bottom-up composition) landed. Every requirement has a working implementation
-and a vehicle, and the feature is usable end to end — but **R1, R6 and R8 are
-met only in part**, by the decisions recorded below. What follows is that
-residue.
+Snapshot index — last verified against `main`: **2026-08-10**, after R6
+(shield bonding) landed. Every requirement has a working implementation and a
+vehicle, and the feature is usable end to end — but **R1 and R8 are met only
+in part**, and **R6 carries two residual limits** now that its headline gap
+(shields bonded to the grid) is closed. What follows is that residue.
 
 **None of these is blocking.** Each is a bounded piece of work waiting for a
 design that needs it, and the current behaviour in each case is conservative
