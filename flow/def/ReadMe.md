@@ -128,14 +128,15 @@ which is the argument for having the vehicle:
   name was not backslash-escaped. The LEF's `MACRO … CLASS` now decides, so
   the instance name is not consulted; whatever the reader does skip is
   counted and its cell kinds named (`BUDA-1608`).
-* **Item 2** — a vector port map collapsing to one net. This design's buses
-  were written as four scalar wires each *because* of it; they are real
-  vectors now (`wire [3:0] w;` + `.Z0(w[0])`), and the routed result is
-  identical to the scalar spelling — 15 bundles, same wirelength — which is
-  what "the reader now reads what the netlist says" should look like. Read
-  by the old reader, this same netlist routes **18 bit-wires instead of 60**
-  and every `check_design` still reports success.
+* **Item 2, both halves** — a vector port map collapsing to one net, and a
+  vector PORT being one pin. This design was written in scalars throughout
+  *because* of them. It is a vector design now, end to end: LEF pins
+  `A[0]`..`A[3]` (the LEF already declared `BUSBITCHARS "[]"`), DEF nets and
+  die `PINS` named `din[0]`, and a netlist that says
+  `input [3:0] A;` / `LEAF lo (.A(I), .Z(w));` like a netlist does.
 
-What remains of item 2 is the other half: a vector PORT (`input [3:0] a`),
-which BUDA still models as one pin. That is why the ports here are scalar
-`A0..A3` while the wires are vectors.
+  It routes **identically** to both earlier spellings — 15 bundles, 273,800
+  abstract and 870,800 detailed WL, 60 bit-wires, `check_design` clean. That
+  is the point: the design never changed, only how it is written. Read by the
+  pre-fix reader the same netlist routes **18 bit-wires instead of 60**, with
+  every `check_design` still reporting success.

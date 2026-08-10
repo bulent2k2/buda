@@ -59,15 +59,13 @@ struct VerilogImportStats {
     // cannot tell from the netlist which it got.
     int bit_selects = 0;          // .a(w[0]) — exact: one net per bit
     int part_selects = 0;         // .a(w[3:0]) — a pin per named bit
-    // Part-selects whose low bound is not 0 on a module elaboration DESCENDS
-    // into: the child numbers its port bits from 0, so port bit k is net bit
-    // k+lo and the base-name composition used for the child context is off
-    // by `lo`.  Exact for the usual w[N:0]; reported, never guessed.
-    int offset_part_selects = 0;
     // Part-selects onto a port whose declared width is UNKNOWN (an undefined
     // module declares no ports here).  Bit 0 is connected — it is connected
     // for every width >= 1 — and the rest is reported, not guessed.
     int unsized_part_selects = 0;
+    // Whole-vector connections wired bit to bit: a port N bits wide is N
+    // pins, so `.a(w)` on `input [3:0] a` is four pins on `w[0]`..`w[3]`.
+    int vector_ports = 0;
     // Port connections that name no net this reader can resolve —
     // concatenations `{a,b}` and parameterized selects `w[i]`.  Each is an
     // OPEN in the imported design; inferring one would put a wire where the

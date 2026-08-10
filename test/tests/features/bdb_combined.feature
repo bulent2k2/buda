@@ -64,9 +64,9 @@ Feature: BDB combined DEF+Verilog import
   # ── nets and pins ──────────────────────────────────────────────────────────
 
   Scenario: Verilog-derived nets are present alongside placement data
-    Then net "ab_bus" exists
-    And net "ab_bus" has 4 pins
-    And net "ai/w1" exists
-    And net "ai/w1" has 2 pins
-    And net "ab_bus" connects component "ai" at pin "data_in"
-    And net "ab_bus" connects component "bi" at pin "data_in"
+    Then net "ab_bus[0]" exists
+    And net "ab_bus[0]" has 4 pins
+    And net "ai/w1[0]" exists
+    And net "ai/w1[0]" has 2 pins
+    And net "ab_bus[0]" connects component "ai" at pin "data_in[0]"
+    And net "ab_bus[0]" connects component "bi" at pin "data_in[0]"

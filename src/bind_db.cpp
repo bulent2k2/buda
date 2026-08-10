@@ -484,10 +484,9 @@ void bind_db(py::module_& m) {
         .def_readonly("skipped_cells", &VerilogImportStats::skipped_cells)
         .def_readonly("bit_selects", &VerilogImportStats::bit_selects)
         .def_readonly("part_selects", &VerilogImportStats::part_selects)
-        .def_readonly("offset_part_selects",
-                      &VerilogImportStats::offset_part_selects)
         .def_readonly("unsized_part_selects",
                       &VerilogImportStats::unsized_part_selects)
+        .def_readonly("vector_ports", &VerilogImportStats::vector_ports)
         .def_readonly("unresolved_conns",
                       &VerilogImportStats::unresolved_conns);
 

@@ -17,31 +17,31 @@
 // heuristic that keeps a million gates out of the hierarchy), so a
 // blackbox macro would never reach the component table at all.
 
-module LEAF (A0, A1, A2, A3, Z0, Z1, Z2, Z3);
-  input  A0, A1, A2, A3;
-  output Z0, Z1, Z2, Z3;
+module LEAF (A, Z);
+  input  [3:0] A;
+  output [3:0] Z;
 endmodule
 
-module blk (I0, I1, I2, I3, O0, O1, O2, O3);
-  input  I0, I1, I2, I3;
-  output O0, O1, O2, O3;
+module blk (I, O);
+  input  [3:0] I;
+  output [3:0] O;
   wire   [3:0] w;
-  LEAF lo (.A0(I0), .A1(I1), .A2(I2), .A3(I3), .Z0(w[0]), .Z1(w[1]), .Z2(w[2]), .Z3(w[3]));
-  LEAF hi (.A0(w[0]), .A1(w[1]), .A2(w[2]), .A3(w[3]), .Z0(O0), .Z1(O1), .Z2(O2), .Z3(O3));
+  LEAF lo (.A(I), .Z(w));
+  LEAF hi (.A(w), .Z(O));
 endmodule
 
-module quad (I0, I1, I2, I3, O0, O1, O2, O3);
-  input  I0, I1, I2, I3;
-  output O0, O1, O2, O3;
+module quad (I, O);
+  input  [3:0] I;
+  output [3:0] O;
   wire   [3:0] m;
-  blk bl (.I0(I0), .I1(I1), .I2(I2), .I3(I3), .O0(m[0]), .O1(m[1]), .O2(m[2]), .O3(m[3]));
-  blk br (.I0(m[0]), .I1(m[1]), .I2(m[2]), .I3(m[3]), .O0(O0), .O1(O1), .O2(O2), .O3(O3));
+  blk bl (.I(I), .O(m));
+  blk br (.I(m), .O(O));
 endmodule
 
-module chip (din0, din1, din2, din3, dout0, dout1, dout2, dout3);
-  input  din0, din1, din2, din3;
-  output dout0, dout1, dout2, dout3;
+module chip (din, dout);
+  input  [3:0] din;
+  output [3:0] dout;
   wire   [3:0] c;
-  quad u_q0 (.I0(din0), .I1(din1), .I2(din2), .I3(din3), .O0(c[0]), .O1(c[1]), .O2(c[2]), .O3(c[3]));
-  quad u_q1 (.I0(c[0]), .I1(c[1]), .I2(c[2]), .I3(c[3]), .O0(dout0), .O1(dout1), .O2(dout2), .O3(dout3));
+  quad u_q0 (.I(din), .O(c));
+  quad u_q1 (.I(c), .O(dout));
 endmodule
