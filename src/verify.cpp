@@ -324,6 +324,18 @@ static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
     const int n = (int)segs.size();
     if (n < 2) return;               // no junctions to be dangling FROM
 
+    // The per-bit question is only ANSWERABLE from per-bit junctions, and the
+    // only per-bit junction record is the via.  A result carrying no vias for
+    // this bundle is not a bundle without junctions — it is a bundle whose
+    // junctions were never materialized (a hand-built checker fixture, or any
+    // stage before via emission).  Reading absent vias as absent junctions
+    // would call every wire past its block tap dangling, which is a statement
+    // about the INPUT, not about the routing.  Say nothing instead.
+    bool has_vias = false;
+    for (const auto& v : dnuts.net_vias)
+        if (v.bundle_id == bundle_id) { has_vias = true; break; }
+    if (!has_vias) return;
+
     // Per-bit via positions, projected onto each incident segment's axis.
     std::map<std::pair<int,int>, std::vector<double>> reach;   // (seg,bit) -> coords
     for (const auto& v : dnuts.net_vias) {
@@ -339,16 +351,40 @@ static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
     std::vector<std::vector<double>> seg_reach(n);
     for (int si = 0; si < n; ++si) {
         const ConnSeg& cs = segs[si];
+        // A BUSTERM tap's reach must be expressed on THIS segment's along-axis.
+        // SegConn::face_coord cannot serve directly: it is "x for an x-face, y
+        // for a y-face", so which axis it names depends on which face the
+        // segment landed against, and consuming it unconditionally pushes a
+        // PERPENDICULAR coordinate into the along-axis bounds — corrupting them
+        // and manufacturing overhang (it produced a reach of 0 on a wire
+        // spanning [100,400], a coordinate not even on the wire).  Take the
+        // tapped block's own along-extent instead, clipped to the segment: that
+        // is axis-correct by construction and needs no face semantics.
+        auto add_block_reach = [&](const std::string& bname) {
+            auto rects = fp.get_block_rects(bname);
+            if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+            const double s_lo = std::min(cs.along_lo, cs.along_hi);
+            const double s_hi = std::max(cs.along_lo, cs.along_hi);
+            for (const Rect& r : rects) {
+                const double b_lo = cs.horiz ? (double)r.x1 : (double)r.y1;
+                const double b_hi = cs.horiz ? (double)r.x2 : (double)r.y2;
+                const double lo = std::max(s_lo, b_lo), hi = std::min(s_hi, b_hi);
+                if (lo <= hi) { seg_reach[si].push_back(lo);
+                                seg_reach[si].push_back(hi); }
+            }
+        };
         for (const auto& c : cs.conns)
             if (c.kind == SegConn::BUSTERM)
-                seg_reach[si].push_back((double)c.face_coord);
+                add_block_reach(c.block_name);
+        // Pass-through coverage goes through the SAME clipped helper: a block
+        // edge beyond the wire is not a point on the wire, and letting it into
+        // the bounds is the identical mistake as the face_coord one above.
         for (const auto& bname : topo.connected_block_names) {
             auto rects = fp.get_block_rects(bname);
             if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
             for (const Rect& r : rects)
                 if (seg_spans_rect(cs, (double)cs.perp_pos, r)) {
-                    seg_reach[si].push_back(cs.horiz ? (double)r.x1 : (double)r.y1);
-                    seg_reach[si].push_back(cs.horiz ? (double)r.x2 : (double)r.y2);
+                    add_block_reach(bname);
                     break;
                 }
         }
