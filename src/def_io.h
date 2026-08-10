@@ -65,6 +65,24 @@ struct DefNet {
     std::vector<DefNetConn> conns;
 };
 
+// One `+ LAYER <name> WIDTH <w> [SPACING <s>]` clause of a NONDEFAULTRULE.
+// Values stay in DBU — translation to BUDA's multiplier model needs the LEF
+// defaults and happens in the session (opens_interchange.md item 7).
+struct DefNdrLayer {
+    std::string layer;
+    double width_dbu   = -1;      // -1 = the clause did not state it
+    double spacing_dbu = -1;
+};
+
+// A DEF 5.8 NONDEFAULTRULES entry, read in full rather than name-only.
+struct DefNdr {
+    std::string name;
+    bool hardspacing = false;
+    std::vector<DefNdrLayer> layers;
+    std::vector<std::string> unmodelled;  // + clauses BUDA has no model for
+                                          // (VIA, VIARULE, MINCUTS, PROPERTY)
+};
+
 // A top-level port.  These are what a net reaching the die edge connects to,
 // and the reader this replaces skipped them outright.
 struct DefPin {
@@ -136,6 +154,7 @@ struct DefDesign {
     std::vector<DefBlockage> blockages;
     std::vector<DefSpecialWire> special_wires;
     std::vector<std::string> nondefaultrules;
+    std::vector<DefNdr> ndrs;         // full entries (item 7)
 
     // What the section headers CLAIMED.  DEF states its own counts, so a
     // reader that ignores them cannot tell a fully-read file from a

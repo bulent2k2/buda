@@ -26,6 +26,7 @@
 #include <optional>
 #include <unordered_map>
 #include "sqlite3.h"
+#include "def_io.h"
 
 namespace buda {
 
@@ -91,6 +92,13 @@ struct DefImportStats {
     struct Keepout { std::string layer; double x1, y1, x2, y2; std::string why; };
     std::vector<Track>   tracks;
     std::vector<Keepout> keepouts;
+    // NONDEFAULTRULES, read in full for the session to translate into
+    // BUDA's def_ndr/set_ndr model (opens_interchange.md item 7): the rule
+    // contents (DBU values — pair with def_units), and which net asked for
+    // which rule.
+    std::vector<DefNdr> ndrs;
+    std::vector<std::pair<std::string, std::string>> net_ndrs;
+    double def_units = 0;             // DEF DBU per micron
 };
 
 // ── Row types returned to Python / other modules ──────────────────────────

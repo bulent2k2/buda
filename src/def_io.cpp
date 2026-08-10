@@ -387,9 +387,43 @@ DefDesign parse_def(std::string text, const std::string& where) {
                     read_specialnet(e, d, l);
                 });
             } else if (kw0 == "NONDEFAULTRULES") {
+                // Read in FULL (item 7): the session translates each rule
+                // into BUDA's def_ndr multiplier model against the LEF's
+                // default widths, so this keeps the per-layer values rather
+                // than the name alone.  Clauses with no BUDA model (VIA,
+                // MINCUTS, ...) go to `unmodelled`, and only those reach
+                // the census — a translated rule is APPLIED, not recorded.
                 entries_of("NONDEFAULTRULES", seen, [&](const auto& e, int l) {
-                    if (e.size() >= 2) d.nondefaultrules.push_back(e[1]);
-                    note(d, "NONDEFAULTRULES", e, l);
+                    if (e.size() < 2) { note(d, "NONDEFAULTRULES", e, l); return; }
+                    DefNdr r;
+                    r.name = e[1];
+                    d.nondefaultrules.push_back(r.name);
+                    for (size_t i = 2; i + 1 < e.size(); ++i) {
+                        if (e[i] != "+") continue;
+                        const std::string kw = upper(e[i + 1]);
+                        if (kw == "HARDSPACING") {
+                            r.hardspacing = true; ++i;
+                        } else if (kw == "LAYER" && i + 2 < e.size()) {
+                            DefNdrLayer L; L.layer = e[i + 2];
+                            size_t j = i + 3;
+                            for (; j + 1 < e.size() && e[j] != "+"; j += 2) {
+                                const std::string sub = upper(e[j]);
+                                if (sub == "WIDTH")
+                                    L.width_dbu = std::atof(e[j + 1].c_str());
+                                else if (sub == "SPACING")
+                                    L.spacing_dbu = std::atof(e[j + 1].c_str());
+                                else
+                                    r.unmodelled.push_back("LAYER." + sub);
+                            }
+                            r.layers.push_back(L);
+                            i = j - 1;
+                        } else {
+                            r.unmodelled.push_back(kw); ++i;
+                        }
+                    }
+                    for (const auto& u : r.unmodelled)
+                        note(d, "NONDEFAULTRULES." + u, {r.name}, l);
+                    d.ndrs.push_back(std::move(r));
                 });
             } else {
                 // Sections Phase 3 does not model (VIAS is deferred to the

@@ -246,6 +246,11 @@ def cmd_import_def_lef(session, cmd, args, cmd_line):
                   "DEF, or pass `allow_missing_footprints` to proceed anyway.")
             sys.exit(1)
 
+    # DEF NONDEFAULTRULES -> def_ndr/set_ndr (item 7); after the
+    # missing-footprint gate so a refused import translates nothing.
+    from .ndr_cmds import translate_def_ndrs
+    translate_def_ndrs(session, st, lef_path)
+
     if st.unmodelled:
         buda_diag.emit("BUDA-1603",
                        f"[DEF] unmodelled construct(s): {st.unmodelled}")

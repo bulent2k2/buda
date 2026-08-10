@@ -1397,6 +1397,11 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     // not survive the 10^6..10^8 lines of a real post-place DEF.
     const DefDesign def = read_def(def_path);
     if (def.units > 0) _units = def.units;
+    stats.ndrs = def.ndrs;
+    stats.def_units = double(_units);
+    for (const auto& n : def.nets)
+        if (!n.nondefaultrule.empty())
+            stats.net_ndrs.push_back({n.name, n.nondefaultrule});
 
     // Full design wipe incl. derived pipeline rows.
     clear_design();

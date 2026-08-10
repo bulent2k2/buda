@@ -459,6 +459,16 @@ void bind_db(py::module_& m) {
         .def_readonly("x2", &DefImportStats::Keepout::x2)
         .def_readonly("y2", &DefImportStats::Keepout::y2)
         .def_readonly("why", &DefImportStats::Keepout::why);
+
+    py::class_<DefNdrLayer>(m, "DefNdrLayer")
+        .def_readonly("layer", &DefNdrLayer::layer)
+        .def_readonly("width_dbu", &DefNdrLayer::width_dbu)
+        .def_readonly("spacing_dbu", &DefNdrLayer::spacing_dbu);
+    py::class_<DefNdr>(m, "DefNdr")
+        .def_readonly("name", &DefNdr::name)
+        .def_readonly("hardspacing", &DefNdr::hardspacing)
+        .def_readonly("layers", &DefNdr::layers)
+        .def_readonly("unmodelled", &DefNdr::unmodelled);
     py::class_<DefImportStats>(m, "DefImportStats")
         .def_readonly("declared_components", &DefImportStats::declared_components)
         .def_readonly("imported_components", &DefImportStats::imported_components)
@@ -472,7 +482,10 @@ void bind_db(py::module_& m) {
         .def_readonly("warnings", &DefImportStats::warnings)
         .def_readonly("unmodelled", &DefImportStats::unmodelled)
         .def_readonly("tracks", &DefImportStats::tracks)
-        .def_readonly("keepouts", &DefImportStats::keepouts);
+        .def_readonly("keepouts", &DefImportStats::keepouts)
+        .def_readonly("ndrs", &DefImportStats::ndrs)
+        .def_readonly("net_ndrs", &DefImportStats::net_ndrs)
+        .def_readonly("def_units", &DefImportStats::def_units);
 
     py::class_<VerilogImportStats>(m, "VerilogImportStats")
         .def_readonly("top_module", &VerilogImportStats::top_module)

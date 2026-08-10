@@ -9,7 +9,7 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 this page is the backlog behind them.
 
 Snapshot index — last verified against `main`: **2026-08-10**, after items 1,
-2, 3 and 4 landed. Each item states what is missing, why it was left rather than
+2, 3, 4 and 7 landed. Each item states what is missing, why it was left rather than
 forgotten, and where to start. Every claim below was reproduced on `main`
 before being written down; the reproduction is given so a reader can
 re-derive it rather than trust it.
@@ -376,15 +376,30 @@ an optimistic plan, and fires on 0 of 41 corpus flows.
 ergonomic — a `um(...)`/`dbu(...)` spelling for script distances, so the
 intent is written down rather than implied by the current scale.
 
-## 7. DEF `NONDEFAULTRULES` are read but not attached
+## 7. ~~DEF `NONDEFAULTRULES` are read but not attached~~ — RESOLVED 2026-08-10
 
-Phase 3e reads them and records them in the unmodelled census; nothing wires
-them to the landed `def_ndr` / `set_ndr` feature. Left because the mapping
-is per-rule **content** (widths, spacings, layer sets) rather than a name, so
-it is a translation job and not a lookup.
+The translation job the item predicted, done as one: the reader now parses
+each rule's **content** (`+ LAYER <l> WIDTH <w> [SPACING <s>]`, per-clause,
+DBU — `DefNdr` in `def_io.h`, carried out on `DefImportStats` with
+`net_ndrs` and `def_units`), and `translate_def_ndrs`
+(`buda_cmds/ndr_cmds.py`) converts to BUDA's multiplier model against the
+LEF defaults: `multiplier = (dbu / units) / lef_default`.  A rule whose
+layers AGREE on the multiplier (1%) becomes `def_ndr <name> width x<m>
+[spacing x<m>] layers <csv>`; each net's `+ NONDEFAULTRULE` becomes a
+`set_ndr <net> <rule>` scope.
 
-*Where to start:* [`opens_ndr.md`](opens_ndr.md) owns the rule model; this
-item is the import side of it.
+**What refuses, loudly (BUDA-1613)** — the translation is faithful or
+absent, never approximate: per-layer multipliers that disagree (one `x<N>`
+cannot state them; a max would claim a rule the DEF never wrote), a layer
+with no LEF default WIDTH (or SPACING when the rule states one), an
+undeclared layer, a rule with no LAYER clause.  A clause with no BUDA model
+(`VIA`, `MINCUTS`, …) is noted and the rule translated without it; a net
+asking for an untranslated rule is told by name.  And because `set_ndr`
+scopes are PREFIXES, a net name that prefixes another net's name reports
+the over-match instead of silently governing it.
+
+Pinned by `test_def_ndr_import.py` (the x2 translation, per-net scopes,
+each refusal, the prefix shadow, and a rule-free DEF declaring nothing).
 
 ## 8. Packaged wheel
 

@@ -111,6 +111,7 @@ updating this table, which is exactly the drift the guard now prevents):
 | BUDA-1610 | WARNING | a port connection names no resolvable net, so it is an open |
 | BUDA-1611 | WARNING | a part-select's low bit is not 0 on a descended module, so its port bits are offset |
 | BUDA-1612 | WARNING | a part-select's port has no declared width, so only its low bit was connected |
+| BUDA-1613 | WARNING | a DEF NONDEFAULTRULE could not be translated to a BUDA rule and was skipped |
 | BUDA-1701 | WARNING | nothing to emit: no placed bus segments |
 | BUDA-1901 | FATAL | coordinates and track patterns are on different scales |
 | BUDA-1902 | ERROR | a design audit reported violations and `--strict-check` is on |
