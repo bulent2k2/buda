@@ -33,13 +33,71 @@ if _tools not in sys.path:
 import buda
 
 faulthandler.enable()
+import buda_diag
 from buda_cmds import COMMANDS
 from buda_session import (PersistMixin, HierMixin, NutsFlowMixin,
                           EditMixin, ReportsMixin, RipupMixin,
                           RRStateMixin, NegotiateMixin, RefineMixin,
-                          RRTrialsMixin, RRSweepsMixin)
+                          RRTrialsMixin, RRSweepsMixin, AdvisoryMixin)
 from buda_session.util import (_batched, _RR_DEFAULT_MAX_ITER,  # noqa: F401
                                _RR_MAX_CANDIDATES_PER_BUNDLE)   # compat re-exports
+
+# Diagnostic-marker matchers for the per-command error/warning counts.  The
+# engines emit bracketed uppercase (`[Planner] WARNING: …`, `[NUTS] WARNING`)
+# and the CLI emits capitalised-with-colon (`Error: unknown argument …`);
+# incidental prose containing the word — a net named `error_flag`, a comment
+# about warnings — must NOT count.  Word-bounded so `errors`/`warnings` match
+# but `error_flag` does not.
+# Two accepted marker forms, chosen from what the code actually emits:
+#   * bare uppercase  — `[Planner] WARNING`, `[BDB] ERROR` (tag style), and
+#   * any case + colon — `Error:`, `Warning:`, and the C++ `BDB SQL error:`
+#     (lowercase-with-colon is a REAL diagnostic here, so a capitalised-only
+#     matcher would lose it — a regression against the old substring count).
+# `error_flag` matches neither: `_` is a word character, so `\berror\b` does
+# not fire, and there is no colon.  A summary line like "2 warnings raised"
+# is likewise not a diagnostic and correctly does not count.
+_DIAG_ERR_RE  = re.compile(r'\bERRORS?\b|(?i:\berrors?\s*:)')
+_DIAG_WARN_RE = re.compile(r'\bWARNINGS?\b|(?i:\bwarnings?\s*:)')
+
+
+def _count_diags(lines):
+    """(warnings, errors) over a command's captured output.
+
+    An IDENTIFIED line (`BUDA-1602: WARNING: …`) is counted at its DECLARED
+    severity; everything else falls back to the marker regexes above.  That
+    ordering is the point of Phase 5's message ids: guessing severity from
+    the words in the text is a heuristic that is wrong in both directions —
+    it counts a line whose detail merely mentions "warning", and it counts a
+    FATAL as nothing, because "fatal" is not one of the words it looks for.
+
+    Unidentified output is matched exactly as before, so every existing flow
+    log counts the same (test-pinned)."""
+    nwarn = nerr = 0
+    for ln in lines:
+        sev = buda_diag.severity_of_line(ln)
+        if sev is None:
+            if _DIAG_WARN_RE.search(ln):
+                nwarn += 1
+            if _DIAG_ERR_RE.search(ln):
+                nerr += 1
+        elif sev == buda_diag.WARNING:
+            nwarn += 1
+        elif sev in (buda_diag.ERROR, buda_diag.FATAL):
+            nerr += 1
+    return nwarn, nerr
+
+
+def _is_error_line(ln):
+    """Does this line LEAD with a failure diagnostic?
+
+    Both accepted forms: the prose `Error: …` and an identified
+    `BUDA-NNNN: ERROR|FATAL: …`.  Used for headline selection, so converting
+    a call site to an id cannot demote its message out of the terminal
+    summary — a silent cost that would have made every conversion a small
+    regression."""
+    if _ERROR_RE.match(ln):
+        return True
+    return buda_diag.severity_of_line(ln) in (buda_diag.ERROR, buda_diag.FATAL)
 
 # Every command BudaSession.do_command() understands. Used to detect typos in
 # scripts (e.g. 'add_layer' for 'def_layer') and suggest the closest match.
@@ -112,6 +170,18 @@ _ERROR_RE = re.compile(r'\s*Error\b', re.I)
 _PASSTHROUGH_CMDS = frozenset({"source", "visualize", "visualize_topologies"})
 
 
+def _rotate_log(path):
+    """Move an existing log to `<path>.1` so a re-run does not destroy it.
+
+    Best-effort by design: a log that cannot be rotated must not stop the
+    run — losing the previous log is bad, losing the run is worse."""
+    try:
+        if os.path.exists(path):
+            os.replace(path, path + ".1")
+    except OSError:
+        pass
+
+
 def _strip_inline_comment(line):
     """Strip a `#` comment from a script line: everything from the first `#`
     that begins a token (start of line, or preceded by whitespace) to the end
@@ -128,7 +198,7 @@ def _strip_inline_comment(line):
 class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
                   ReportsMixin, RipupMixin, RRStateMixin,
                   NegotiateMixin, RefineMixin, RRTrialsMixin,
-                  RRSweepsMixin):
+                  RRSweepsMixin, AdvisoryMixin):
     def _get_log_path(self, suffix):
         """Get the log path for a given suffix, ensuring the log directory exists.
 
@@ -199,6 +269,17 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._planner_params  = {}   # param_name -> value (buffered before planner exists)
         self._net_endpoints   = {}   # net_name -> (driver_instance, [receiver_instances])
         self._layer_name_map = {}    # layer_name -> layer_id
+        # Where each layer / track pattern came from: 'script' (an explicit
+        # def_layer / def_track_pattern) or 'lef' (import_lef_tech).  The
+        # precedence rule needs this in BOTH directions — the import must
+        # skip what the script declared, and a script declaration must be
+        # able to replace what the import provided (Phase 2b).
+        self._layer_source = {}      # layer_id -> 'script' | 'lef'
+        self._pattern_source = {}    # layer_id -> 'script' | 'lef' | 'def'
+        # Wire WIDTH per layer, from LEF.  DEF TRACKS give a pitch and a
+        # position but no width — only the technology knows that — so a
+        # tech import feeds this and `import_def_lef` consumes it.
+        self._lef_track_width = {}   # layer_id -> width
         self._gds_label_layers = []  # def_gds_layer labels <csv> (import default)
         self._nuts_pitch = 1.0
         self._planner_pitch = None   # pitch the last run_planner reserved bands for
@@ -211,6 +292,11 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._script_stack = []      # stack of absolute paths of sourced scripts
         self.script_path = None      # set when a .buda script is sourced
         self.routing_grid = None     # RoutingGridStack (stage 8)
+        # Unit-plausibility guard (Phase 1d): 'on' (hard error) | 'warn' | 'off'
+        self._unit_check = "on"
+        # The (layer, unit_pitch) tuple last judged — report once per stage
+        # per GRID, so a pattern declared after the first check re-arms it.
+        self._unit_check_done = None
         self.detailed_result = None  # DetailedNUTSResult (stage 9)
         self._dogleg_originals = {}  # bid -> pre-split selected_topology_index (restored on re-plan)
         self._dogleg_slot = {}       # bid -> appended candidate index holding the split topology
@@ -295,6 +381,18 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._end_report_done = False  # runtime summary emitted (idempotent guard)
         self._at_last_command = True   # True while running the flow's final command
         self._at_tail_stack = []       # per-source-frame: was this source at its parent's tail?
+        # ── Phase 0: design-outcome exit status + machine-readable report ───
+        # (docs/internal/lefdef_interface_plan.md §1.)  A flow harness cannot
+        # gate on a design that reports violations but exits 0, so every
+        # check_design records its verdict here; --strict-check turns a dirty
+        # verdict into a non-zero exit, and --report-json writes the run's
+        # outcome as data instead of prose.  Both default OFF, so a run
+        # without them is byte-identical to before.
+        self.strict_check = False      # --strict-check: dirty audit ⇒ exit 3
+        self.report_json_path = None   # --report-json PATH
+        self._audits = []              # one dict per check_design call
+        self._audit_failed = False     # any audit dirty or unable to run
+        self._all_cmd_stats = []       # EVERY captured command (report only)
 
     # ── Per-command logging / runtime stats ─────────────────────────────────
     def run_command(self, cmd_line):
@@ -338,8 +436,14 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         lines    = text.splitlines()
         nonblank = [ln for ln in lines if ln.strip()]
         nlines   = len(nonblank)
-        nwarn    = sum(1 for ln in lines if 'warning' in ln.lower())
-        nerr     = sum(1 for ln in lines if 'error' in ln.lower())
+        # Count DIAGNOSTIC markers, not the substrings: a bare `'error' in
+        # line.lower()` counted any line merely containing the word, so a net
+        # or block named `error_flag` inflated the run's error count (Analysis
+        # Lens B item 7).  Match the forms the codebase actually emits —
+        # bracketed uppercase (`[Planner] WARNING:`) and capitalised-with-colon
+        # (`  Error: run_nuts required first.`) — which is byte-identical on
+        # every current corpus log (verified) while ignoring incidental prose.
+        nwarn, nerr = _count_diags(lines)
 
         # Silent, instant setup commands (add_block, def_layer, set_*, …) are
         # not worth a terminal line or a log section — only surface commands
@@ -354,11 +458,24 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
                 f"[runtime] {stripped}: {elapsed:.3f}s "
                 f"({nlines} lines, {nwarn} warn, {nerr} err)\n")
             self._flow_log.flush()
-            # … and a one-line abstract summary to the terminal.
+            # … and a one-line abstract summary to the terminal.  This is the
+            # RUN's visible output — every per-command headline a user sees
+            # comes from here, so it must NOT be conditioned on any flag.
+            # (#643 accidentally nested it inside the --report-json branch,
+            # silencing normal runs entirely; see test_run_command_summary.py.)
             self._cmd_stats.append((stripped, elapsed, nlines, nwarn, nerr))
             headline = self._extract_headline(nonblank)
             self._emit_cmd_summary(real_out, stripped, elapsed, nlines,
                                    nwarn, nerr, headline)
+        if self.report_json_path:
+            # The machine-readable report must list what RAN, not what was
+            # worth printing: `_cmd_stats` deliberately drops silent, instant
+            # setup commands (add_block, def_layer, …) so the terminal stays
+            # readable, which would make the report's command list — and its
+            # total — quietly incomplete.  Recorded only when the flag is on,
+            # so a normal run pays nothing.
+            self._all_cmd_stats.append((stripped, elapsed, nlines, nwarn,
+                                        nerr, bool(significant)))
 
         if raised is not None:
             raise raised
@@ -374,7 +491,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         one is the primary complaint (later ones are continuations).
         """
         for ln in nonblank:
-            if _ERROR_RE.match(ln):
+            if _is_error_line(ln):
                 return ln.strip()
         for ln in reversed(nonblank):
             if any(m.search(ln) for m in _SUMMARY_MARKERS):
@@ -391,7 +508,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # already says and eats ~8 columns of the truncation budget — columns
         # the actionable part of the message needs.  Only the redundant err
         # count is dropped; a warn count still carries new information.
-        if nerr and not _ERROR_RE.match(headline):
+        if nerr and not _is_error_line(headline):
             flags += f"[{nerr} err] "
         if nwarn: flags += f"[{nwarn} warn] "
         detail = (flags + headline).strip()
@@ -424,6 +541,67 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         out.write(text); out.flush()
         if self._flow_log is not None:
             self._flow_log.write(text); self._flow_log.flush()
+
+    def record_audit(self, result):
+        """Record one check_design verdict (Phase 0).
+
+        `result` is the dict `_check_design` returns: stage, violations,
+        by_kind, plus `ok=False` when the audit could not run at all (a
+        missing prerequisite).  Either condition marks the run dirty, because
+        both mean "this flow did not demonstrate a clean design" — which is
+        the question a harness is asking."""
+        if not result:
+            return
+        self._audits.append(result)
+        if result.get("violations", 0) > 0 or not result.get("ok", True):
+            self._audit_failed = True
+
+    def write_report_json(self, path, exit_status):
+        """Write the run's outcome as data (Phase 0).
+
+        Everything here is already computed for the terminal summary; this
+        just stops a flow harness from having to regex prose that is
+        deliberately lossy and truncated to 68 columns."""
+        import json
+        # Prefer the COMPLETE record (every captured command, including the
+        # silent setup ones the terminal summary drops); fall back to the
+        # surfaced list only if the flag was set after the run started.
+        src = self._all_cmd_stats or [(c, e, n, w, x, True)
+                                      for c, e, n, w, x in self._cmd_stats]
+        cmds = [{"command": c, "seconds": round(e, 4), "output_lines": n,
+                 "warnings": w, "errors": x, "surfaced": s}
+                for c, e, n, w, x, s in src]
+        metrics = {}
+        nr = getattr(self, "nuts_result", None)
+        if nr is not None:
+            metrics["nuts_overlaps"] = getattr(nr, "num_overlaps", None)
+            metrics["nuts_interval_violations"] = getattr(nr, "num_violations",
+                                                          None)
+        dr = getattr(self, "detailed_result", None)
+        if dr is not None:
+            metrics["dnuts_unplaced_bits"] = getattr(dr, "num_unplaced", None)
+        report = {
+            "script": self.script_path,
+            "exit_status": exit_status,
+            "strict_check": bool(self.strict_check),
+            "audit_failed": bool(self._audit_failed),
+            "total_seconds": round(sum(c["seconds"] for c in cmds), 4),
+            # `source`/`visualize` run as passthroughs (no capture), so they
+            # are absent by construction; `source`'s children are each listed,
+            # which is why counting it too would double the time.
+            "commands_note": ("captured commands only; source/visualize are "
+                              "passthroughs and their children are listed "
+                              "individually"),
+            "commands": cmds,
+            "audits": self._audits,
+            "metrics": metrics,
+        }
+        try:
+            with open(path, "w") as f:
+                json.dump(report, f, indent=2, default=str)
+                f.write("\n")
+        except OSError as e:
+            print(f"Warning: could not write run report {path}: {e}")
 
     def _print_end_report(self):
         """Emit the runtime summary + flow-log pointer exactly once.
@@ -606,6 +784,19 @@ def main():
     parser.add_argument('--verbose-conn', action='store_true',
                         help='print every connectivity violation individually; '
                              'default collapses per-bit violations into a summary')
+    parser.add_argument('--strict-check', action='store_true',
+                        help='exit 3 when any check_design reported violations '
+                             '(or could not run). Without it a dirty design '
+                             'still exits 0, so a flow harness cannot gate on '
+                             'design quality — see docs/internal/'
+                             'lefdef_interface_plan.md')
+    parser.add_argument('--report-json', metavar='PATH',
+                        help='write a machine-readable run report to PATH: '
+                             'per-command runtime/diagnostics, every '
+                             'check_design verdict with violation counts by '
+                             'kind, and end-of-run metrics (overlaps, '
+                             'unplaced bits). For flow harnesses that should '
+                             'not parse terminal prose')
     parser.add_argument('--ipc-verbose', action='store_true',
                         help='surface buda_viz/def_viz IPC socket status chatter '
                              '(listening/connected/timer lines); off by default')
@@ -631,6 +822,8 @@ def main():
     session = BudaSession()
     session.no_viz = args.no_viz
     session.verbose_conn = args.verbose_conn
+    session.strict_check = args.strict_check
+    session.report_json_path = args.report_json
     session.ipc_verbose = args.ipc_verbose
     if args.tag:
         # Sanitize to a filename-safe token (the tag becomes part of a path):
@@ -685,11 +878,25 @@ def main():
         # are no longer duplicated.
         flow_log_path = session._get_log_path('flow.log')
         session._flow_log_path = flow_log_path
+        # Non-overwriting logs (Phase 5).  A re-run used to destroy the
+        # previous log in place, so the evidence for "it worked an hour ago"
+        # was gone the moment you tried to reproduce it.  The CANONICAL path
+        # is kept — 36 tests and every doc reference point at it — and the
+        # previous run is rotated to `<name>.1` instead.  One generation is
+        # enough to compare a run against the one before it, which is the
+        # case that actually comes up; `--log` still archives every run.
+        _rotate_log(flow_log_path)
         try:
             session._flow_log = open(flow_log_path, 'w', buffering=1)
         except OSError as e:
             print(f"Warning: could not open flow log {flow_log_path}: {e}")
 
+        # A script's `exit` command raises SystemExit, which would otherwise
+        # sail straight past the end-of-run bookkeeping below — and most real
+        # flows DO end with `exit`, so the strict-check status and the JSON
+        # report would silently never be produced on exactly the flows that
+        # matter.  Catch it, keep the script's own code, and let the tail run.
+        script_exit = 0
         try:
             # The top-level source IS the whole run, so it starts "at the tail".
             session._at_last_command = True
@@ -697,6 +904,8 @@ def main():
             # Persist a fixture opened with `open_bdb <file>.sql writeback` if the
             # run completed without an explicit exit (which flushes on its own).
             session._flush_bdb_writeback()
+        except SystemExit as e:
+            script_exit = e.code if isinstance(e.code, int) else 0
         finally:
             # Idempotent: a blocking `visualize` already emitted this before the
             # GUI opened (so it survives a macOS .app quit-on-window-close).
@@ -717,6 +926,40 @@ def main():
                 except OSError as e:
                     print(f"Warning: could not write decision trace "
                           f"{tp}: {e}")
+
+        # Phase 0: derive the run's exit status from the DESIGN outcome, not
+        # just from whether the script parsed.  Without --strict-check the
+        # status is the script's own (0 unless it asked otherwise), exactly as
+        # before; with it, a flow whose check_design reported violations — or
+        # could not run one — fails, which is what lets a harness gate on
+        # quality.  Code 3 is distinct from 1 (script/setup error) and 2
+        # (usage) so a harness can tell "the tool worked, the design is dirty"
+        # from "the tool broke".
+        #
+        # An explicit NON-ZERO `exit <code>` wins — that is the author stating
+        # a failure of their own.  A zero one deliberately does NOT: 18 of the
+        # repo's flows end with a bare `exit` (SystemExit code 0) as their
+        # normal terminator, so letting that suppress the verdict would make
+        # --strict-check a no-op on essentially every real flow.
+        status = script_exit
+        strict_failed = bool(session.strict_check and session._audit_failed
+                             and status == 0)
+        if strict_failed:
+            status = 3
+        if session.report_json_path:
+            session.write_report_json(session.report_json_path, status)
+        # Attribute the message to strict-check ONLY when strict-check is what
+        # produced it: a script's own `exit 3` must not be reported as a failed
+        # design audit that never ran.
+        if strict_failed:
+            n = sum(a.get("violations", 0) for a in session._audits)
+            print()
+            buda_diag.emit("BUDA-1902",
+                           f"--strict-check — design audit failed "
+                           f"({n} violation(s) across {len(session._audits)} "
+                           f"check_design call(s)); exiting {status}.")
+        if status:
+            sys.exit(status)
     else:
         # No script: show usage and insist on one rather than quietly exiting.
         parser.print_help(sys.stderr)

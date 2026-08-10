@@ -3,8 +3,8 @@
 
 def_layer 4 M4 H TOP 44.44
 def_layer 5 M5 V TOP 50.00
-def_track_pattern 4 -200  VDD 2 1  _ 2 1 _ 2 1 _ 2 1 _ 2 1 _ 2 1  VSS 2 1  _ 2 1 _ 2 1 _ 2 1 _ 2 1 _ 2 1
-def_track_pattern 5 -200  VDD 3 1  _ 2 1 _ 2 1 _ 2 1 _ 2 1        VSS 3 1  _ 2 1 _ 2 1 _ 2 1 _ 2 1
+def_track_pattern 4 -200  VDD 2 1  (_ 2 1)x5   VSS 2 1  (_ 2 1)x5
+def_track_pattern 5 -200  VDD 3 1  (_ 2 1)x4   VSS 3 1  (_ 2 1)x4
 report_overhead
 
 corner_margin dx 1 dy 2

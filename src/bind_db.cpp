@@ -22,6 +22,8 @@
 #include "bdb.h"
 #include "busterm.h"
 #include "gds_io.h"
+#include "lef_io.h"
+#include "def_io.h"
 
 namespace py = pybind11;
 using namespace buda;
@@ -69,7 +71,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("y2",            &ComponentRow::y2)
         .def_readwrite("is_leaf",       &ComponentRow::is_leaf)
         .def_readwrite("is_replicated", &ComponentRow::is_replicated)
-        .def_readwrite("orient",        &ComponentRow::orient);
+        .def_readwrite("orient",        &ComponentRow::orient)
+        .def_readwrite("is_port",       &ComponentRow::is_port);
 
     py::class_<NetRow>(m, "NetRow")
         .def_readwrite("id",   &NetRow::id)
@@ -297,11 +300,209 @@ void bind_db(py::module_& m) {
         .def_readonly("stage",         &GdsExportStats::stage)
         .def_readonly("warnings",      &GdsExportStats::warnings);
 
+    // ── LEF reader (Phase 2) ──────────────────────────────────────────────
+    // Bound as data, not just as an import side effect: the reader is
+    // BDB-agnostic by design, and a technology file is exactly the kind of
+    // input worth inspecting before deciding what it means.
+    py::class_<LefRect>(m, "LefRect")
+        .def_readonly("x1", &LefRect::x1).def_readonly("y1", &LefRect::y1)
+        .def_readonly("x2", &LefRect::x2).def_readonly("y2", &LefRect::y2);
+
+    py::class_<LefPort>(m, "LefPort")
+        .def_readonly("layer", &LefPort::layer)
+        .def_readonly("rects", &LefPort::rects);
+
+    py::class_<LefPinDef>(m, "LefPinDef")
+        .def_readonly("name",  &LefPinDef::name)
+        .def_readonly("dir",   &LefPinDef::dir)
+        .def_readonly("use",   &LefPinDef::use)
+        .def_readonly("shape", &LefPinDef::shape)
+        .def_readonly("ports", &LefPinDef::ports)
+        .def("has_geometry",   &LefPinDef::has_geometry)
+        .def("centroid", [](const LefPinDef& p) {
+            double x = 0, y = 0;
+            if (!p.centroid(x, y)) return py::object(py::none());
+            return py::object(py::make_tuple(x, y));
+        });
+
+    py::class_<LefMacro>(m, "LefMacro")
+        .def_readonly("name",     &LefMacro::name)
+        .def_readonly("cls",      &LefMacro::cls)
+        .def_readonly("w",        &LefMacro::w)
+        .def_readonly("h",        &LefMacro::h)
+        .def_readonly("ox",       &LefMacro::ox)
+        .def_readonly("oy",       &LefMacro::oy)
+        .def_readonly("symmetry", &LefMacro::symmetry)
+        .def_readonly("site",     &LefMacro::site)
+        .def_readonly("foreign",  &LefMacro::foreign)
+        .def_readonly("pins",     &LefMacro::pins)
+        .def_readonly("obs",      &LefMacro::obs)
+        .def("find_pin", &LefMacro::find_pin,
+             py::return_value_policy::reference_internal);
+
+    py::class_<LefTechLayer>(m, "LefTechLayer")
+        .def_readonly("name",    &LefTechLayer::name)
+        .def_readonly("type",    &LefTechLayer::type)
+        .def_readonly("dir",     &LefTechLayer::dir)
+        .def_readonly("pitch",   &LefTechLayer::pitch)
+        .def_readonly("width",   &LefTechLayer::width)
+        .def_readonly("spacing", &LefTechLayer::spacing)
+        .def_readonly("offset",  &LefTechLayer::offset)
+        .def_readonly("area",    &LefTechLayer::area)
+        .def_readonly("has_pitch",   &LefTechLayer::has_pitch)
+        .def_readonly("has_width",   &LefTechLayer::has_width)
+        .def_readonly("has_spacing", &LefTechLayer::has_spacing)
+        .def_readonly("has_offset",  &LefTechLayer::has_offset)
+        .def_readonly("has_area",    &LefTechLayer::has_area);
+
+    py::class_<LefUnmodelled>(m, "LefUnmodelled")
+        .def_readonly("construct", &LefUnmodelled::construct)
+        .def_readonly("detail",    &LefUnmodelled::detail)
+        .def_readonly("line",      &LefUnmodelled::line);
+
+    py::class_<LefLibrary>(m, "LefLibrary")
+        .def_readonly("units_dbu",  &LefLibrary::units_dbu)
+        .def_readonly("manufacturing_grid", &LefLibrary::manufacturing_grid)
+        .def_readonly("macros",     &LefLibrary::macros)
+        .def_readonly("layers",     &LefLibrary::layers)
+        .def_readonly("unmodelled", &LefLibrary::unmodelled)
+        .def_readonly("warnings",   &LefLibrary::warnings)
+        .def("find_macro", &LefLibrary::find_macro,
+             py::return_value_policy::reference_internal);
+
+    py::class_<DefRect>(m, "DefRect")
+        .def_readonly("x1", &DefRect::x1).def_readonly("y1", &DefRect::y1)
+        .def_readonly("x2", &DefRect::x2).def_readonly("y2", &DefRect::y2);
+    py::class_<DefComponent>(m, "DefComponent")
+        .def_readonly("name", &DefComponent::name)
+        .def_readonly("cell", &DefComponent::cell)
+        .def_readonly("orient", &DefComponent::orient)
+        .def_readonly("x", &DefComponent::x).def_readonly("y", &DefComponent::y)
+        .def_readonly("placed", &DefComponent::placed)
+        .def_readonly("has_halo", &DefComponent::has_halo)
+        .def_readonly("halo_l", &DefComponent::halo_l)
+        .def_readonly("halo_b", &DefComponent::halo_b)
+        .def_readonly("halo_r", &DefComponent::halo_r)
+        .def_readonly("halo_t", &DefComponent::halo_t);
+    py::class_<DefNetConn>(m, "DefNetConn")
+        .def_readonly("inst", &DefNetConn::inst)
+        .def_readonly("pin", &DefNetConn::pin)
+        .def("is_port", &DefNetConn::is_port);
+    py::class_<DefNet>(m, "DefNet")
+        .def_readonly("name", &DefNet::name)
+        .def_readonly("use", &DefNet::use)
+        .def_readonly("nondefaultrule", &DefNet::nondefaultrule)
+        .def_readonly("conns", &DefNet::conns);
+    py::class_<DefPin>(m, "DefPin")
+        .def_readonly("name", &DefPin::name).def_readonly("net", &DefPin::net)
+        .def_readonly("dir", &DefPin::dir).def_readonly("use", &DefPin::use)
+        .def_readonly("layer", &DefPin::layer)
+        .def_readonly("placed", &DefPin::placed)
+        .def_readonly("x", &DefPin::x).def_readonly("y", &DefPin::y)
+        .def_readonly("rects", &DefPin::rects);
+    py::class_<DefTracks>(m, "DefTracks")
+        .def_readonly("dir", &DefTracks::dir)
+        .def_readonly("start", &DefTracks::start)
+        .def_readonly("count", &DefTracks::count)
+        .def_readonly("step", &DefTracks::step)
+        .def_readonly("layers", &DefTracks::layers)
+        .def("last", &DefTracks::last);
+    py::class_<DefGCellGrid>(m, "DefGCellGrid")
+        .def_readonly("dir", &DefGCellGrid::dir)
+        .def_readonly("start", &DefGCellGrid::start)
+        .def_readonly("count", &DefGCellGrid::count)
+        .def_readonly("step", &DefGCellGrid::step);
+    py::class_<DefBlockage>(m, "DefBlockage")
+        .def_readonly("layer", &DefBlockage::layer)
+        .def_readonly("is_placement", &DefBlockage::is_placement)
+        .def_readonly("has_density", &DefBlockage::has_density)
+        .def_readonly("max_density", &DefBlockage::max_density)
+        .def_readonly("rects", &DefBlockage::rects);
+    py::class_<DefSpecialWire>(m, "DefSpecialWire")
+        .def_readonly("net", &DefSpecialWire::net)
+        .def_readonly("layer", &DefSpecialWire::layer)
+        .def_readonly("width", &DefSpecialWire::width)
+        .def_readonly("pts", &DefSpecialWire::pts);
+    py::class_<DefUnmodelled>(m, "DefUnmodelled")
+        .def_readonly("construct", &DefUnmodelled::construct)
+        .def_readonly("detail", &DefUnmodelled::detail)
+        .def_readonly("line", &DefUnmodelled::line);
+    py::class_<DefDesign>(m, "DefDesign")
+        .def_readonly("design", &DefDesign::design)
+        .def_readonly("units", &DefDesign::units)
+        .def_readonly("has_die", &DefDesign::has_die)
+        .def_readonly("die", &DefDesign::die)
+        .def_readonly("components", &DefDesign::components)
+        .def_readonly("nets", &DefDesign::nets)
+        .def_readonly("pins", &DefDesign::pins)
+        .def_readonly("tracks", &DefDesign::tracks)
+        .def_readonly("gcellgrid", &DefDesign::gcellgrid)
+        .def_readonly("blockages", &DefDesign::blockages)
+        .def_readonly("special_wires", &DefDesign::special_wires)
+        .def_readonly("nondefaultrules", &DefDesign::nondefaultrules)
+        .def_readonly("declared_components", &DefDesign::declared_components)
+        .def_readonly("declared_nets", &DefDesign::declared_nets)
+        .def_readonly("declared_pins", &DefDesign::declared_pins)
+        .def_readonly("declared_blockages", &DefDesign::declared_blockages)
+        .def_readonly("declared_specialnets", &DefDesign::declared_specialnets)
+        .def_readonly("unmodelled", &DefDesign::unmodelled)
+        .def_readonly("warnings", &DefDesign::warnings);
+    py::class_<DefImportStats::Track>(m, "DefImportTrack")
+        .def_readonly("dir", &DefImportStats::Track::dir)
+        .def_readonly("start", &DefImportStats::Track::start)
+        .def_readonly("step", &DefImportStats::Track::step)
+        .def_readonly("count", &DefImportStats::Track::count)
+        .def_readonly("layers", &DefImportStats::Track::layers);
+    py::class_<DefImportStats::Keepout>(m, "DefImportKeepout")
+        .def_readonly("layer", &DefImportStats::Keepout::layer)
+        .def_readonly("x1", &DefImportStats::Keepout::x1)
+        .def_readonly("y1", &DefImportStats::Keepout::y1)
+        .def_readonly("x2", &DefImportStats::Keepout::x2)
+        .def_readonly("y2", &DefImportStats::Keepout::y2)
+        .def_readonly("why", &DefImportStats::Keepout::why);
+    py::class_<DefImportStats>(m, "DefImportStats")
+        .def_readonly("declared_components", &DefImportStats::declared_components)
+        .def_readonly("imported_components", &DefImportStats::imported_components)
+        .def_readonly("declared_nets", &DefImportStats::declared_nets)
+        .def_readonly("imported_nets", &DefImportStats::imported_nets)
+        .def_readonly("declared_pins", &DefImportStats::declared_pins)
+        .def_readonly("imported_pins", &DefImportStats::imported_pins)
+        .def_readonly("placed_components", &DefImportStats::placed_components)
+        .def_readonly("port_components", &DefImportStats::port_components)
+        .def_readonly("missing_cells", &DefImportStats::missing_cells)
+        .def_readonly("warnings", &DefImportStats::warnings)
+        .def_readonly("unmodelled", &DefImportStats::unmodelled)
+        .def_readonly("tracks", &DefImportStats::tracks)
+        .def_readonly("keepouts", &DefImportStats::keepouts);
+
+    py::class_<VerilogImportStats>(m, "VerilogImportStats")
+        .def_readonly("top_module", &VerilogImportStats::top_module)
+        .def_readonly("elaborated", &VerilogImportStats::elaborated)
+        .def_readonly("skipped_library_cells",
+                      &VerilogImportStats::skipped_library_cells)
+        .def_readonly("skipped_kinds", &VerilogImportStats::skipped_kinds)
+        .def_readonly("skipped_cells", &VerilogImportStats::skipped_cells)
+        .def_readonly("bit_selects", &VerilogImportStats::bit_selects)
+        .def_readonly("part_selects", &VerilogImportStats::part_selects)
+        .def_readonly("offset_part_selects",
+                      &VerilogImportStats::offset_part_selects)
+        .def_readonly("unsized_part_selects",
+                      &VerilogImportStats::unsized_part_selects)
+        .def_readonly("unresolved_conns",
+                      &VerilogImportStats::unresolved_conns);
+
+    m.def("read_def",  &read_def,  py::arg("path"));
+    m.def("parse_def", &parse_def, py::arg("text"), py::arg("where") = "<text>");
+
+    m.def("read_lef",  &read_lef,  py::arg("path"));
+    m.def("parse_lef", &parse_lef, py::arg("text"), py::arg("where") = "<text>");
+
     py::class_<BDB>(m, "BDB")
         .def(py::init<const std::string&>())
         .def("import_def_lef",  &BDB::import_def_lef,
              py::arg("def_path"), py::arg("lef_path"))
         .def("import_verilog",  &BDB::import_verilog, py::arg("v_path"))
+        // (VerilogImportStats is bound below, beside DefImportStats.)
         .def("import_gds", [](BDB& db, const std::string& path,
                               const std::vector<int>& label_layers,
                               const std::vector<std::pair<int,int>>& routing_layers) {
@@ -406,6 +607,12 @@ void bind_db(py::module_& m) {
         .def("delete_group",    &BDB::delete_group, py::arg("gid"))
         .def("all_groups",      &BDB::all_groups)
         .def("units",           &BDB::units)
+        .def("set_import_scale", &BDB::set_import_scale, py::arg("lu_per_um"),
+             "Layout units per micron for subsequent imports (1.0 = microns).")
+        .def("set_import_scale_from_def_units",
+             &BDB::set_import_scale_from_def_units,
+             "1 layout unit = 1 DEF database unit (exact, no quantization).")
+        .def("import_scale",    &BDB::import_scale)
         .def("schema_version",  &BDB::schema_version)
         .def("meta_get",        &BDB::meta_get,
              py::arg("key"), py::arg("def") = std::string())
@@ -426,6 +633,15 @@ void bind_db(py::module_& m) {
         .def("set_comp_bbox",   &BDB::set_comp_bbox,
              py::arg("name"), py::arg("x1"), py::arg("y1"),
              py::arg("x2"), py::arg("y2"))
+        // Returns (n_placed, [names left unplaced]) — the caller reports
+        // both, because a container nothing could place is a hole in the
+        // routing interface and must not pass silently.
+        .def("derive_container_bboxes",
+             [](BDB& db, double margin) {
+                 std::vector<std::string> unresolved;
+                 int n = db.derive_container_bboxes(margin, &unresolved);
+                 return py::make_tuple(n, unresolved);
+             }, py::arg("margin") = 0.0)
         .def("resize_cell",     &BDB::resize_cell,
              py::arg("cell"), py::arg("w"), py::arg("h"))
         .def("set_comp_cell",   &BDB::set_comp_cell,

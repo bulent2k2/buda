@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=23;
+PRAGMA user_version=25;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -80,28 +80,33 @@ CREATE TABLE busterm (
             orig_x1 REAL DEFAULT 0, orig_y1 REAL DEFAULT 0,
             orig_x2 REAL DEFAULT 0, orig_y2 REAL DEFAULT 0
         );
-INSERT INTO "busterm" VALUES('bt:src_a',1,'src_a',0,50.0,50.0,250.0,250.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
-INSERT INTO "busterm" VALUES('bt:src_a/gen_i',2,'src_a/gen_i',1,110.0,110.0,190.0,190.0,'PORT','bt:src_a',NULL,'THRU',0.0,0.0,0.0,0.0);
 INSERT INTO "busterm" VALUES('bt:proc_a',3,'proc_a',0,350.0,50.0,770.0,250.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:snk_a',7,'snk_a',0,870.0,50.0,1070.0,250.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:src_a',1,'src_a',0,50.0,50.0,250.0,250.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
 INSERT INTO "busterm" VALUES('bt:proc_a/pa_i',4,'proc_a/pa_i',1,370.0,110.0,480.0,190.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
 INSERT INTO "busterm" VALUES('bt:proc_a/pb_i',5,'proc_a/pb_i',1,505.0,110.0,615.0,190.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
 INSERT INTO "busterm" VALUES('bt:proc_a/pc_i',6,'proc_a/pc_i',1,640.0,110.0,750.0,190.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
-INSERT INTO "busterm" VALUES('bt:snk_a',7,'snk_a',0,870.0,50.0,1070.0,250.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
 INSERT INTO "busterm" VALUES('bt:snk_a/rcv_i',8,'snk_a/rcv_i',1,930.0,110.0,1010.0,190.0,'PORT','bt:snk_a',NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:src_a/gen_i',2,'src_a/gen_i',1,110.0,110.0,190.0,190.0,'PORT','bt:src_a',NULL,'THRU',0.0,0.0,0.0,0.0);
 CREATE TABLE cell (
             name        TEXT PRIMARY KEY,
             width       REAL NOT NULL,
             height      REAL NOT NULL,
+            -- LEF MACRO CLASS, verbatim ('BLOCK', 'CORE', 'PAD', …).  The
+            -- authority on whether a cell is a hard macro or a standard
+            -- cell, which no other column can answer.  '' = not stated;
+            -- LEF's own default for an absent CLASS is CORE.
+            cls         TEXT NOT NULL DEFAULT '',
             bottom_up   INTEGER NOT NULL DEFAULT 0,
             layer_cap   INTEGER NOT NULL DEFAULT -1,
             layer_floor INTEGER NOT NULL DEFAULT -1
         );
-INSERT INTO "cell" VALUES('proc_cell',420.0,200.0,0,-1,-1);
-INSERT INTO "cell" VALUES('pipe_cell',110.0,80.0,0,-1,-1);
-INSERT INTO "cell" VALUES('src_cell',200.0,200.0,0,-1,-1);
-INSERT INTO "cell" VALUES('snk_cell',200.0,200.0,0,-1,-1);
-INSERT INTO "cell" VALUES('gen_cell',80.0,80.0,0,-1,-1);
-INSERT INTO "cell" VALUES('rcv_cell',80.0,80.0,0,-1,-1);
+INSERT INTO "cell" VALUES('proc_cell',420.0,200.0,'',0,-1,-1);
+INSERT INTO "cell" VALUES('pipe_cell',110.0,80.0,'',0,-1,-1);
+INSERT INTO "cell" VALUES('src_cell',200.0,200.0,'',0,-1,-1);
+INSERT INTO "cell" VALUES('snk_cell',200.0,200.0,'',0,-1,-1);
+INSERT INTO "cell" VALUES('gen_cell',80.0,80.0,'',0,-1,-1);
+INSERT INTO "cell" VALUES('rcv_cell',80.0,80.0,'',0,-1,-1);
 CREATE TABLE cell_children (
             parent_cell TEXT NOT NULL REFERENCES cell(name),
             inst_name   TEXT NOT NULL,
@@ -157,17 +162,18 @@ CREATE TABLE component (
             depth        INTEGER DEFAULT 0,
             x1 REAL, y1 REAL, x2 REAL, y2 REAL,
             is_leaf      INTEGER DEFAULT 1,
+            is_port      INTEGER NOT NULL DEFAULT 0,
             is_replicated INTEGER DEFAULT 0,
             orient       TEXT DEFAULT 'N'
         );
-INSERT INTO "component" VALUES(1,'src_a','src_cell',NULL,0,50.0,50.0,250.0,250.0,0,0,'N');
-INSERT INTO "component" VALUES(2,'src_a/gen_i','gen_cell',1,1,110.0,110.0,190.0,190.0,1,0,'N');
-INSERT INTO "component" VALUES(3,'proc_a','proc_cell',NULL,0,350.0,50.0,770.0,250.0,0,0,'N');
-INSERT INTO "component" VALUES(4,'proc_a/pa_i','pipe_cell',3,1,370.0,110.0,480.0,190.0,1,0,'N');
-INSERT INTO "component" VALUES(5,'proc_a/pb_i','pipe_cell',3,1,505.0,110.0,615.0,190.0,1,0,'N');
-INSERT INTO "component" VALUES(6,'proc_a/pc_i','pipe_cell',3,1,640.0,110.0,750.0,190.0,1,0,'N');
-INSERT INTO "component" VALUES(7,'snk_a','snk_cell',NULL,0,870.0,50.0,1070.0,250.0,0,0,'N');
-INSERT INTO "component" VALUES(8,'snk_a/rcv_i','rcv_cell',7,1,930.0,110.0,1010.0,190.0,1,0,'N');
+INSERT INTO "component" VALUES(1,'src_a','src_cell',NULL,0,50.0,50.0,250.0,250.0,0,0,0,'N');
+INSERT INTO "component" VALUES(2,'src_a/gen_i','gen_cell',1,1,110.0,110.0,190.0,190.0,1,0,0,'N');
+INSERT INTO "component" VALUES(3,'proc_a','proc_cell',NULL,0,350.0,50.0,770.0,250.0,0,0,0,'N');
+INSERT INTO "component" VALUES(4,'proc_a/pa_i','pipe_cell',3,1,370.0,110.0,480.0,190.0,1,0,0,'N');
+INSERT INTO "component" VALUES(5,'proc_a/pb_i','pipe_cell',3,1,505.0,110.0,615.0,190.0,1,0,0,'N');
+INSERT INTO "component" VALUES(6,'proc_a/pc_i','pipe_cell',3,1,640.0,110.0,750.0,190.0,1,0,0,'N');
+INSERT INTO "component" VALUES(7,'snk_a','snk_cell',NULL,0,870.0,50.0,1070.0,250.0,0,0,0,'N');
+INSERT INTO "component" VALUES(8,'snk_a/rcv_i','rcv_cell',7,1,930.0,110.0,1010.0,190.0,1,0,0,'N');
 CREATE TABLE grp (
             id        TEXT PRIMARY KEY,
             name      TEXT NOT NULL,
@@ -184,7 +190,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','23');
+INSERT INTO "meta" VALUES('schema_version','25');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE ndr_rule (
             name         TEXT PRIMARY KEY,

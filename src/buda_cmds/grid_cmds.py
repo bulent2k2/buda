@@ -20,11 +20,15 @@ Each handler takes (session, cmd, args, cmd_line) and is registered
 in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
+import math
 import sys
 
 import buda
 
-from ._options import require_layer_id, require_number
+from slot_groups import MAX_SLOT_REPEAT as _MAX_SLOT_REPEAT  # noqa: F401
+from slot_groups import expand_slot_groups
+
+from ._options import require_int, require_layer_id, require_number
 
 _DEF_TRACK_PATTERN_USAGE = (
     "def_track_pattern <layer_id> <origin> [<type> <width> <space_after>] ...")
@@ -69,100 +73,41 @@ def _canonical_slot_type(cmd_name, raw):
     sys.exit(1)
 
 
-# Upper bound on a single `( … )x<count>` repetition, checked before the
-# expansion allocates.  Sized as a typo guard: a track pattern is one repeating
-# unit that tiles across the layer, so real periods run to tens of slots — this
-# is orders of magnitude above any legitimate pattern while still catching a
-# stray-zeros count that would otherwise exhaust memory.
-_MAX_SLOT_REPEAT = 4096
+def _require_slot_geometry(cmd_name, slot_type, width, space_after, usage):
+    """Reject a slot whose geometry cannot describe a track.
 
+    Track widths and spacings are genuinely FRACTIONAL — `TrackSlot::width` and
+    `space_after` are `double`, and sub-unit patterns (`SIGNAL 0.4 0.4`) are a
+    supported, shipped case — so this validates the SIGN, not the fraction.
 
-def _expand_slot_groups(cmd_name, toks, usage):
-    """Expand `( <slots> )x<N>` repetition groups into a flat token list.
-
-    A dense pattern is mostly one slot repeated: spelling out twelve identical
-    `_ 1 1` triples buries the intent (and any typo in the middle of them).
-    `(_ 1 1)x12` says it once.  The group may hold SEVERAL slots — `(VDD 2 1
-    _ 1 1)x4` — since that is the same parse and strictly more expressive.
-
-    Spacing is free: `)x12`, `)x 12` and `) x 12` are the same, because the
-    structural parens are split out before scanning.  Groups do NOT nest —
-    the grammar stays flat so the error messages can stay specific.
-
-    Byte-identical for a paren-free list (the normalize/split round-trips it).
+    Nothing checked either before, and the value was taken at face value: a
+    `SIGNAL 0 0` slot yielded `unit_pitch=0.000` and a layer with no tracks at
+    all, which does not fail at the declaration.  It surfaces six stages later
+    as `[DetailedNUTS] Warning: Layer 4 has insufficient signal tracks (0)`
+    with every bit on the layer stranded — and the run still exits 0.  The
+    declaration is where a non-positive width is diagnosable: no downstream
+    circumstance makes such a layer routable.
     """
-    # Split the structural parens off whatever they are glued to, so `(_`,
-    # `1)x12` and `( _ 1 1 ) x 12` all reduce to the same token stream.
-    toks = " ".join(toks).replace("(", " ( ").replace(")", " ) ").split()
-    if "(" not in toks and ")" not in toks:
-        return toks
-
-    def die(msg):
-        print(f"Error: {cmd_name} {msg}\n  Usage: {usage}")
+    def die(what, val, why):
+        print(f"Error: {cmd_name}: {what} of slot '{slot_type}' must be "
+              f"{why}, got {val:g}." + (f"\n  Usage: {usage}" if usage else ""))
         sys.exit(1)
 
-    out, i, n = [], 0, len(toks)
-    while i < n:
-        t = toks[i]
-        if t == ")":
-            die("unmatched ')' in the slot list — a repetition group is "
-                "written `( <slots> )x<count>`")
-        if t != "(":
-            out.append(t)
-            i += 1
-            continue
-        # ── a group: collect up to the matching ')' ──────────────────────
-        i += 1
-        group = []
-        while i < n and toks[i] != ")":
-            if toks[i] == "(":
-                die("nested '(' in the slot list — repetition groups do not "
-                    "nest; repeat the expanded slots instead")
-            group.append(toks[i])
-            i += 1
-        if i >= n:
-            die("unterminated '(' in the slot list — expected `)x<count>`")
-        i += 1                                   # consume ')'
-        if not group:
-            die("empty repetition group '()' in the slot list")
-        # ── the count: `x12`, `x 12`, or `X12` ──────────────────────────
-        if i >= n or not toks[i][:1] in ("x", "X"):
-            die("repetition group is missing its count — write "
-                "`( <slots> )x<count>`, e.g. `(_ 1 1)x12`")
-        digits = toks[i][1:]
-        i += 1
-        if not digits:                           # the count is the next token
-            if i >= n:
-                die("repetition group is missing its count — write "
-                    "`( <slots> )x<count>`, e.g. `(_ 1 1)x12`")
-            digits = toks[i]
-            i += 1
-        if not digits.isdigit() or int(digits) < 1:
-            die(f"repetition count '{digits}' is not a positive integer — "
-                f"write `( <slots> )x<count>`, e.g. `(_ 1 1)x12`")
-        # Bound the count BEFORE expanding.  `group * count` materializes the
-        # whole token list, so a fat-fingered `x100000000` would be an OOM or a
-        # hang instead of a diagnostic — a failure mode the longhand could not
-        # have (you cannot type 100M tokens).  The cap is a TYPO GUARD, not a
-        # policy: a track period is one repeating unit, so even a hundred slots
-        # is unusual and this sits orders of magnitude above any real pattern.
-        if int(digits) > _MAX_SLOT_REPEAT:
-            die(f"repetition count {digits} exceeds the maximum "
-                f"{_MAX_SLOT_REPEAT} — a track pattern is ONE repeating unit, "
-                f"so this is almost certainly a typo; the pattern tiles across "
-                f"the layer on its own")
-        if len(group) % 3 != 0:
-            die(f"repetition group has {len(group)} token(s), not a whole "
-                f"number of `<type> <width> <space_after>` triples")
-        out.extend(group * int(digits))
-    return out
+    if not math.isfinite(width) or width <= 0:
+        die("<width>", width, "a positive, finite number — a zero-, negative- "
+                              "or infinite-width slot is not a track, and a "
+                              "pattern of them gives the layer no tracks at all")
+    if not math.isfinite(space_after) or space_after < 0:
+        die("<space_after>", space_after,
+            "zero or a positive, finite number — negative space would overlap "
+            "the next slot (0 is fine: abutting slots)")
 
 
 def _parse_slots(cmd_name, toks, usage):
     """Parse a `<type> <width> <space_after>` slot list (repetition groups
     expanded first) into TrackSlots.  Shared by def_track_pattern and
     add_grid_override — the two had byte-identical copies of this loop."""
-    toks = _expand_slot_groups(cmd_name, toks, usage)
+    toks = expand_slot_groups(cmd_name, toks, usage)
     slots = []
     i = 0
     while i + 2 < len(toks):
@@ -173,6 +118,7 @@ def _parse_slots(cmd_name, toks, usage):
         space_after = require_number(cmd_name,
                                      f"<space_after> of slot '{slot_type}'",
                                      toks[i + 2], usage=usage)
+        _require_slot_geometry(cmd_name, slot_type, width, space_after, usage)
         slots.append(buda.TrackSlot(
             type=_canonical_slot_type(cmd_name, slot_type),
             label=slot_type.lower(),
@@ -210,10 +156,19 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
     # ordering (init sets the global, keeping the earlier overrides).
     elif (session.routing_grid.has_layer(layer_id) and
           len(session.routing_grid.get_layer_grid(layer_id).global_pattern().slots) > 0):
-        print(f"Error: layer {layer_id} already has a track pattern — "
-              f"duplicate def_track_pattern (use add_grid_override for a "
-              f"region-scoped pattern)")
-        sys.exit(1)
+        # Precedence (Phase 2b): an explicit pattern ALWAYS outranks one
+        # synthesized by `import_lef_tech`, in either declaration order —
+        # so an imported pattern is REPLACED here rather than rejected as a
+        # duplicate.  define_layer already overwrites last-wins, which is
+        # exactly what the override needs.
+        if session._pattern_source.get(layer_id) == "lef":
+            print(f"[LEF] def_track_pattern overrides the imported pattern "
+                  f"on layer {layer_id}")
+        else:
+            print(f"Error: layer {layer_id} already has a track pattern — "
+                  f"duplicate def_track_pattern (use add_grid_override for a "
+                  f"region-scoped pattern)")
+            sys.exit(1)
 
     # Resolve layer direction.
     is_h = True
@@ -221,6 +176,7 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
         is_h = (session.layers.get_layer_dir(layer_id) == buda.LayerDir.HORIZONTAL)
 
     session.routing_grid.define_layer(layer_id, pat, is_h)
+    session._pattern_source[layer_id] = "script"
     session.layers.set_layer_dilution(layer_id, pat.dilution_factor())
     # Measured per-bit channel cost: one signal track every
     # unit_pitch/n_signals units.  Supersedes the density model
@@ -304,8 +260,12 @@ def cmd_add_grid_override(session, cmd, args, cmd_line):
                                 usage=_ADD_GRID_OVERRIDE_USAGE)
 
     def _coord(what, tok):
-        return require_number("add_grid_override", what, tok, integer=True,
-                              usage=_ADD_GRID_OVERRIDE_USAGE)
+        # The override REGION is integer geometry (PatternOverride::region is a
+        # Rect), so a fractional coordinate was silently truncated — same defect
+        # as add_keepout's, and it moves the seam between two track patterns.
+        return require_int("add_grid_override", what, tok,
+                           usage=_ADD_GRID_OVERRIDE_USAGE,
+                           why="The region bounds a pattern seam, not a track.")
     x1, y1 = _coord("<x1>", args[1]), _coord("<y1>", args[2])
     x2, y2 = _coord("<x2>", args[3]), _coord("<y2>", args[4])
     origin = require_number("add_grid_override", "<origin>", args[5],

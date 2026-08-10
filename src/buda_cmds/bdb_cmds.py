@@ -24,7 +24,9 @@ import buda
 import os
 import sys
 
+import buda_diag
 from ._options import reject_unknown_options
+from buda_session.util import ensure_parent_dir, resolve_script_path
 
 
 def cmd_bdb_net_mode(session, cmd, args, cmd_line):
@@ -65,7 +67,7 @@ def cmd_def_gds_layer(session, cmd, args, cmd_line):
     entries = []
     if args[0] == "file":
         try:
-            with open(args[1]) as f:
+            with open(resolve_script_path(session, args[1], is_read=True)) as f:
                 for ln, line in enumerate(f, 1):
                     line = line.split("#", 1)[0].strip()
                     if not line:
@@ -116,11 +118,8 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # silently arming write-back on a fixture from a read-looking line.
     writeback = len(args) >= 2 and args[1] == "writeback"
     bdb_path = args[0]
-    if (session._script_stack
-            and not os.path.isabs(bdb_path)
-            and bdb_path != ':memory:'):
-        parent_dir = os.path.dirname(session._script_stack[-1])
-        bdb_path = os.path.normpath(os.path.join(parent_dir, bdb_path))
+    if bdb_path != ':memory:':
+        bdb_path = resolve_script_path(session, bdb_path)
     # A serialized text BDB (e.g. mix.bdb.sql) is materialized into a
     # throwaway temp binary so the pipeline never dirties the checked-in
     # text fixture. With `writeback`, changes are dumped back to the .sql on
@@ -153,13 +152,223 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     ndr_cmds.restore_ndr_from_bdb(session)
 
 
+def cmd_set_import_scale(session, cmd, args, cmd_line):
+    # Usage: set_import_scale micron|dbu|<layout units per micron>
+    # The ONE place a design decides what a layout unit is (Phase 1a,
+    # docs/internal/engine_units.md).  Declare it BEFORE import_def_lef.
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    if not args:
+        print(f"import_scale is {session.bdb.import_scale():g} "
+              f"layout units per micron")
+        return
+    val = args[0].lower()
+    if val in ("micron", "microns", "um"):
+        session.bdb.set_import_scale(1.0)
+        return
+    if val == "dbu":
+        # Resolved from the DEF's own `UNITS DISTANCE MICRONS` at import, so
+        # the script does not have to know the technology's DBU count — and
+        # cannot get it wrong.
+        session.bdb.set_import_scale_from_def_units()
+        return
+    try:
+        session.bdb.set_import_scale(float(args[0]))
+    except (ValueError, RuntimeError) as e:
+        print(f"Error: set_import_scale expects micron|dbu|<positive number>: "
+              f"{e}")
+
+
 def cmd_import_def_lef(session, cmd, args, cmd_line):
-    # import_def_lef <def_path> <lef_path>
+    # import_def_lef <def_path> <lef_path> [no_tracks] [no_blockages]
+    #
+    # Phase 3: the importer now returns what it read, and this reports it.
+    # A DEF states its own counts, so a reader that ignores them cannot tell
+    # a fully-read file from a half-read one — and a half-read floorplan is
+    # still a floorplan.
     if len(args) < 2:
         print("Error: import_def_lef requires <def_path> <lef_path>"); return
     if session.bdb is None:
         print("Error: open_bdb first"); return
-    session.bdb.import_def_lef(args[0], args[1])
+    reject_unknown_options("import_def_lef", args[2:],
+                           ("no_tracks", "no_blockages",
+                            "allow_missing_footprints"))
+    def_path = resolve_script_path(session, args[0], is_read=True)
+    lef_path = resolve_script_path(session, args[1], is_read=True)
+    st = session.bdb.import_def_lef(def_path, lef_path)
+
+    def _line(what, got, declared):
+        if declared is None or declared < 0:
+            return f"[DEF] {what}: {got}"
+        if got == declared:
+            return f"[DEF] {what}: imported {got} of {declared}"
+        # A count mismatch is the reader's own self-check failing, and it
+        # used to print with no diagnostic marker at all — so the run's
+        # warning count was zero while the floorplan was half-read.  The id
+        # is what a methodology gates on (BUDA-1602), and it is also what
+        # makes the line count as the warning it always was.
+        return buda_diag.format(
+            "BUDA-1602",
+            f"[DEF] {what}: imported {got} of {declared}   <-- MISMATCH")
+
+    print(_line("components", st.imported_components, st.declared_components))
+    if st.declared_nets >= 0 or st.imported_nets:
+        print(_line("nets", st.imported_nets, st.declared_nets))
+    if st.declared_pins >= 0 or st.imported_pins:
+        print(_line("ports", st.imported_pins, st.declared_pins))
+    if st.placed_components != st.imported_components:
+        print(f"[DEF] {st.imported_components - st.placed_components} "
+              f"component(s) are UNPLACED — their coordinates are the DEF's "
+              f"default, not a placement")
+
+    # A cell in the DEF with no LEF footprint used to become a 0.5 x 0.5 um
+    # speck in silence, which turns a wrong-LEF run into a plausible and
+    # entirely wrong floorplan.  It is still imported (so every missing cell
+    # is reported at once rather than one per run), but it is now an ERROR:
+    # continuing would plan interconnect between fictional macros.
+    if st.missing_cells:
+        shown = ", ".join(st.missing_cells[:8])
+        more = f" (+{len(st.missing_cells) - 8} more)" if len(st.missing_cells) > 8 else ""
+        n_bad = len(st.missing_cells)
+        if "allow_missing_footprints" in args:
+            buda_diag.emit("BUDA-1606",
+                           f"{n_bad} cell(s) in the DEF have no LEF footprint "
+                           f"and were sized 0.5 x 0.5 um: {shown}{more}")
+            print("         Continuing because `allow_missing_footprints` was "
+                  "given — the geometry of those instances is fiction.")
+        else:
+            buda_diag.emit("BUDA-1601",
+                           f"{n_bad} cell(s) in the DEF have no LEF "
+                           f"footprint: {shown}{more}")
+            print("       Every one of them would be sized 0.5 x 0.5 um, which "
+                  "is not a macro — a wrong-LEF run reads as a plausible and "
+                  "entirely wrong floorplan.  Check that the LEF matches this "
+                  "DEF, or pass `allow_missing_footprints` to proceed anyway.")
+            sys.exit(1)
+
+    if st.unmodelled:
+        buda_diag.emit("BUDA-1603",
+                       f"[DEF] unmodelled construct(s): {st.unmodelled}")
+
+    # ── physical data the SESSION owns, not the database ─────────────────
+    if "no_tracks" not in args:
+        _apply_def_tracks(session, st)
+    if "no_blockages" not in args:
+        _apply_def_keepouts(session, st)
+
+
+def _apply_def_tracks(session, st):
+    """DEF TRACKS -> bounded track patterns (Phase 3b).
+
+    A `TRACKS <start> DO <n> STEP <s>` is an ENUMERATION, not a rule: it says
+    there are exactly n tracks and where they stop.  The pattern is therefore
+    installed BOUNDED, so a query past the declared range returns nothing
+    rather than tiles that do not exist.
+
+    Precedence matches `import_lef_tech`: a script-declared pattern wins."""
+    if not st.tracks:
+        return
+    installed, skipped = [], []
+    for tr in st.tracks:
+        # `TRACKS X` steps in x, so its tracks carry VERTICAL wires; `TRACKS Y`
+        # carries horizontal ones.
+        tr_is_h = (tr.dir == "Y")
+        for lname in tr.layers:
+            lid = session._layer_name_map.get(lname)
+            if lid is None:
+                # A grid the design HAS but BUDA cannot install: a warning,
+                # because routing will be planned against a stack that is
+                # missing one of the file's layers.
+                skipped.append(("BUDA-1604",
+                                f"{lname} (no such layer — declare it or "
+                                f"import_lef_tech first)"))
+                continue
+            if session._pattern_source.get(lid) == "script":
+                # Precedence working as documented: INFO, not a warning.
+                # These two used to print through the same channel, so the
+                # one that means "you are missing a layer" was indexed with
+                # the one that means "your own declaration won".
+                skipped.append(("BUDA-1605",
+                                f"{lname} (script-declared pattern wins)"))
+                continue
+            # A DEF supplies TRACKS in BOTH directions for most layers — the
+            # off-direction ones exist for pin access and vias, not for
+            # routing.  `define_layer` replaces the pattern AND the
+            # orientation, so taking every statement meant the last one won:
+            # on the checked-in ariane DEF every mapped layer would end up on
+            # its Y grid and marked horizontal, including layers the
+            # technology declares vertical (Codex P1 on #647).  The layer's
+            # own direction decides which statement is its routing grid.
+            if not session.layers.has_layer(lid):
+                skipped.append(("BUDA-1604", f"{lname} (no layer row)"))
+                continue
+            layer_is_h = (session.layers.get_layer_dir(lid) ==
+                          buda.LayerDir.HORIZONTAL)
+            if tr_is_h != layer_is_h:
+                continue                 # the off-direction grid: not routing
+            # DEF gives the track PITCH directly; width is the layer's, which
+            # only the LEF knows.  Without one, a track is a position with no
+            # width — model it as a full-pitch signal slot, which is what the
+            # all-signal reading of a bare TRACKS statement means.
+            width = session._lef_track_width.get(lid, tr.step)
+            width = min(width, tr.step)
+            # DEF's `start` is the CENTRE of the first track; TrackPattern's
+            # origin is the START of the first slot, and the generator returns
+            # `origin + width/2` as the centre.  Anchoring at `start` would
+            # shift every imported track by half its width (Codex P1 on #647).
+            slot = buda.TrackSlot(type="SIGNAL", label="",
+                                  width=width, space_after=tr.step - width)
+            pat = buda.TrackPattern(origin=tr.start - width / 2.0, slots=[slot])
+            # Bounds are in CENTRE space, which is what tracks_in_range
+            # clamps: first centre .. last centre, both inclusive.
+            pat.set_bounds(tr.start, tr.start + tr.step * max(tr.count - 1, 0))
+            if session.routing_grid is None:
+                session.routing_grid = buda.RoutingGridStack()
+            session.routing_grid.define_layer(lid, pat, layer_is_h)
+            session._pattern_source[lid] = "def"
+            session.layers.set_layer_dilution(lid, pat.dilution_factor())
+            session.layers.set_bit_pitch(lid, pat.unit_pitch())
+            installed.append(f"{lname}[{tr.count}@{tr.step:g}]")
+    if installed:
+        print(f"[DEF] tracks installed (bounded): {', '.join(installed)}")
+    for msg_id, s in skipped:
+        buda_diag.emit(msg_id, f"[DEF] tracks skipped for {s}")
+
+
+def _apply_def_keepouts(session, st):
+    """BLOCKAGES / macro OBS / component HALO / power straps -> keepouts.
+
+    The keepout machinery already existed; this is wiring, and its absence
+    was the single most surprising omission for a routing tool — a router
+    that cannot see a blockage plans through it."""
+    if not st.keepouts:
+        return
+    by_why, unmapped = {}, set()
+    for k in st.keepouts:
+        lids = ([session._layer_name_map[k.layer]]
+                if k.layer and k.layer in session._layer_name_map
+                else ([] if k.layer else list(session._layer_name_map.values())))
+        if k.layer and not lids:
+            unmapped.add(k.layer)
+            continue
+        x1, y1 = int(round(k.x1)), int(round(k.y1))
+        x2, y2 = int(round(k.x2)), int(round(k.y2))
+        if x2 <= x1 or y2 <= y1:
+            continue                     # degenerate after quantization
+        # Both consumers, exactly as cmd_add_keepout does: the Floorplan
+        # feeds the planner, the RoutingGrid feeds DetailedNUTS.  Installing
+        # only one leaves a blockage that half the pipeline cannot see.
+        session.fp.add_keepout_zone(x1, y1, x2, y2, lids)
+        if session.routing_grid:
+            for lid in lids:
+                if session.routing_grid.has_layer(lid):
+                    session.routing_grid.add_keepout(lid, x1, y1, x2, y2)
+        by_why[k.why.split()[0]] = by_why.get(k.why.split()[0], 0) + 1
+    if by_why:
+        detail = ", ".join(f"{k}:{v}" for k, v in sorted(by_why.items()))
+        print(f"[DEF] keepouts added: {detail}")
+    for l in sorted(unmapped):
+        print(f"[DEF] keepouts on layer {l} skipped — no such layer")
 
 
 def cmd_import_verilog(session, cmd, args, cmd_line):
@@ -168,7 +377,58 @@ def cmd_import_verilog(session, cmd, args, cmd_line):
         print("Error: import_verilog requires a file path"); return
     if session.bdb is None:
         print("Error: open_bdb first"); return
-    session.bdb.import_verilog(args[0])
+    st = session.bdb.import_verilog(
+        resolve_script_path(session, args[0], is_read=True))
+    print(f"[Verilog] top '{st.top_module}': {st.elaborated} instance(s) "
+          f"elaborated")
+    if st.skipped_library_cells:
+        # INFO, not a warning: skipping library cells is the intended
+        # behaviour and the usual case.  But it is a HEURISTIC on the
+        # Verilog-only path, and an instance that silently never existed is
+        # indistinguishable from a design that never had one — so the count
+        # is always stated, and the cell KINDS with it, which is what tells
+        # you whether a macro went missing.
+        # `skipped_kinds` is the TRUE distinct count; the list is capped at
+        # eight.  Comparing the list against itself could never detect the
+        # truncation — its entries are unique by construction — so a long
+        # library would have presented eight kinds as the whole story
+        # (Codex P2 on #654).
+        shown = ", ".join(st.skipped_cells)
+        if st.skipped_kinds > len(st.skipped_cells):
+            shown += f", … (+{st.skipped_kinds - len(st.skipped_cells)} more kinds)"
+        buda_diag.emit("BUDA-1608",
+                       f"{st.skipped_library_cells} instance(s) of "
+                       f"{st.skipped_kinds} undefined module(s) skipped as "
+                       f"library cells: {shown}")
+    # Vector connections, stated because the shapes are modelled to different
+    # depths.  A bit-select is exact; the other two are not, and a netlist
+    # reader that says nothing leaves the caller unable to tell which it got.
+    if st.bit_selects or st.part_selects:
+        print(f"[Verilog] vector connections: {st.bit_selects} bit-select(s), "
+              f"{st.part_selects} part-select(s)")
+    if st.offset_part_selects:
+        buda_diag.emit("BUDA-1611",
+                       f"{st.offset_part_selects} part-select(s) with a "
+                       f"non-zero low bit connect a module the reader "
+                       f"descends into: inside it, port bit k is net bit "
+                       f"k+lo, and the child's own bit-selects are resolved "
+                       f"against the bus base — so they name bit k, not k+lo")
+    if st.unsized_part_selects:
+        buda_diag.emit("BUDA-1612",
+                       f"{st.unsized_part_selects} part-select(s) connect a "
+                       f"port of an undefined module, which declares no "
+                       f"width here: bit 0 is connected (true for every "
+                       f"width) and the remaining bits are left unconnected "
+                       f"rather than assumed")
+    if st.unresolved_conns:
+        # An OPEN, not a nuisance: the connection existed in the netlist and
+        # does not exist in the database.  Warned rather than inferred —
+        # guessing which net a concatenation means would place a wire the
+        # netlist never asked for.
+        buda_diag.emit("BUDA-1610",
+                       f"{st.unresolved_conns} port connection(s) name no "
+                       f"resolvable net (concatenation, or a select whose "
+                       f"index is not a literal) and were left unconnected")
 
 
 def cmd_import_gds(session, cmd, args, cmd_line):
@@ -200,8 +460,9 @@ def cmd_import_gds(session, cmd, args, cmd_line):
     label_layers = list(session._gds_label_layers)
     if len(args) >= 3 and args[1] == "labels":
         label_layers = [int(x) for x in args[2].split(",") if x]
-    st = session.bdb.import_gds(args[0], label_layers,
-                             session.layers.gds_mapped_pairs())
+    st = session.bdb.import_gds(
+        resolve_script_path(session, args[0], is_read=True), label_layers,
+        session.layers.gds_mapped_pairs())
     for wmsg in st.warnings:
         print(f"[import_gds] Warning: {wmsg}")
     tops = ", ".join(st.tops) if st.tops else "(none)"
@@ -254,11 +515,13 @@ def cmd_export_gds(session, cmd, args, cmd_line):
                   session.layers.get_gds_datatype(lid))
                  for lid in sorted(set(session._layer_name_map.values()))
                  if session.layers.get_gds_layer(lid) >= 0]
-    st = session.bdb.export_gds(args[0], layer_map, outline, label_layer,
+    gds_path = resolve_script_path(session, args[0])
+    ensure_parent_dir(gds_path)             # create flow/def/out/ etc. if absent
+    st = session.bdb.export_gds(gds_path, layer_map, outline, label_layer,
                              write_labels, via_size)
     for wmsg in st.warnings:
         print(f"[export_gds] Warning: {wmsg}")
-    print(f"[export_gds] wrote {args[0]}: {st.n_structures} "
+    print(f"[export_gds] wrote {gds_path}: {st.n_structures} "
           f"structure(s), {st.n_placements} placement(s), "
           f"{st.n_wire_shapes} wire shape(s) "
           f"({st.stage or 'no routing'}), {st.n_via_shapes} via(s), "
@@ -394,6 +657,46 @@ def cmd_derive_busterms(session, cmd, args, cmd_line):
     session._busterm_gen.derive(max_depth)
     bts = session.bdb.all_busterms()
     print(f"derive_busterms: {len(bts)} busterms written (depth 0..{max_depth}).")
+
+
+def cmd_derive_container_bboxes(session, cmd, args, cmd_line):
+    # Usage: derive_container_bboxes [margin <n>]
+    #
+    # Give every UNPLACED container the bounding box of its placed
+    # descendants.  This is the step a DEF + Verilog merge needs and neither
+    # file can supply: a DEF is FLAT — COMPONENTS lists leaf instances only —
+    # so a hierarchical instance has no row anywhere, and `import_verilog`,
+    # which knows the tree but no geometry, leaves it unplaced.  BustermGen
+    # skips unplaced components, so without this every busterm collapses to
+    # depth 0 and the hierarchy is present in the database while the ROUTING
+    # interface is flat.
+    #
+    # Explicit rather than folded into `import_verilog` because it INVENTS
+    # geometry the input never stated.  It never moves a component that
+    # already has a position.
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    margin = 0.0
+    i = 0
+    while i < len(args):
+        if args[i].lower() == "margin" and i + 1 < len(args):
+            try:
+                margin = float(args[i + 1])
+            except ValueError:
+                print(f"Error: derive_container_bboxes margin must be a "
+                      f"number, got '{args[i + 1]}'"); return
+            i += 2
+        else:
+            reject_unknown_options("derive_container_bboxes", [args[i]],
+                                   ("margin",))
+            return
+    n, unresolved = session.bdb.derive_container_bboxes(margin)
+    print(f"derive_container_bboxes: placed {n} container(s) "
+          f"from their children (margin {margin:g}).")
+    for name in unresolved:
+        # Nothing placed underneath it, so it has no extent to route to.
+        buda_diag.emit("BUDA-1607", f"container '{name}' has no placed "
+                                    f"descendant — left unplaced")
 
 
 def cmd_refine_busterms(session, cmd, args, cmd_line):
@@ -1079,10 +1382,7 @@ def cmd_save_bdb(session, cmd, args, cmd_line):
     if args:
         if session.bdb is None:
             print("Error: open_bdb first"); return
-        dest = args[0]
-        if (session._script_stack and not os.path.isabs(dest)):
-            parent_dir = os.path.dirname(session._script_stack[-1])
-            dest = os.path.normpath(os.path.join(parent_dir, dest))
+        dest = resolve_script_path(session, args[0])
         live = getattr(session, "_bdb_open_path", None)
         if live and live != ':memory:':
             # Symlink-proof: realpath resolves links in the destination AND
@@ -1100,6 +1400,7 @@ def cmd_save_bdb(session, cmd, args, cmd_line):
                       "itself — a binary BDB already persists in place; "
                       "pick a different path for the snapshot")
                 return
+        ensure_parent_dir(dest)             # create the snapshot's dir if absent
         try:
             if dest.endswith(".sql"):
                 import shutil
@@ -1135,6 +1436,7 @@ COMMANDS = {
     "add_cell_pin": cmd_add_cell_pin,
     "def_gds_layer": cmd_def_gds_layer,
     "open_bdb": cmd_open_bdb,
+    "set_import_scale": cmd_set_import_scale,
     "import_def_lef": cmd_import_def_lef,
     "import_verilog": cmd_import_verilog,
     "import_gds": cmd_import_gds,
@@ -1150,6 +1452,7 @@ COMMANDS = {
     "rotate_comp": cmd_rotate_comp,
     "add_comp": cmd_add_comp,
     "derive_busterms": cmd_derive_busterms,
+    "derive_container_bboxes": cmd_derive_container_bboxes,
     "refine_busterms": cmd_refine_busterms,
     "load_pipeline": cmd_load_pipeline,
     "save_bdb": cmd_save_bdb,

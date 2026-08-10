@@ -312,6 +312,11 @@ void bind_nuts(py::module_& m) {
         }), py::arg("origin"), py::arg("slots"))
         .def_readwrite("origin",      &TrackPattern::origin)
         .def_readwrite("slots",       &TrackPattern::slots)
+        .def_readonly("bounded",      &TrackPattern::bounded)
+        .def_readonly("bound_lo",     &TrackPattern::bound_lo)
+        .def_readonly("bound_hi",     &TrackPattern::bound_hi)
+        .def("set_bounds",            &TrackPattern::set_bounds,
+             py::arg("lo"), py::arg("hi"))
         .def("unit_pitch",            &TrackPattern::unit_pitch)
         .def("signal_density",        &TrackPattern::signal_density)
         .def("dilution_factor",       &TrackPattern::dilution_factor)
@@ -496,10 +501,12 @@ void bind_nuts(py::module_& m) {
     // Evaluate k ('idx', tidx) ripup moves against the committed baseline on
     // worker threads (GIL released — inputs are converted up front and the
     // workers never touch Python state).  Returns [(primary, secondary,
-    // ok), ...] per move in input order; the caller picks the first
-    // in-order strict improver and REPLAYS it through the normal sequential
-    // trial before committing (metrics here carry the stall certificate and
-    // the pick order, never the committed state).
+    // viols, wl, ok), ...] per move in input order (viols/wl feed
+    // refine_selection's full-trial sweep; the ripup sweeps ignore them);
+    // the caller picks the first in-order strict improver and REPLAYS it
+    // through the normal sequential trial before committing (metrics here
+    // carry the stall certificate and the pick order, never the committed
+    // state).
     m.def("parallel_sweep",
           [](const std::vector<BundleWrapper>& bundles,
              const std::vector<std::pair<int, int>>& moves,
@@ -518,7 +525,8 @@ void bind_nuts(py::module_& m) {
              const std::vector<std::tuple<int, int, std::string, int, int,
                                           int, int, int, int>>& copy_specs,
              const std::map<std::pair<int, int>, bool>& horiz_of,
-             int n_threads) {
+             int n_threads, bool full_trials,
+             const RoutingGridStack* ref_grid) {
               std::vector<SweepMove> mv;
               mv.reserve(moves.size());
               for (const auto& [bid, tidx] : moves)
@@ -526,6 +534,7 @@ void bind_nuts(py::module_& m) {
               SweepDnutsCtx dn;
               dn.enabled = stage_b;
               dn.grid = grid;
+              dn.ref_grid = ref_grid;
               dn.bit_order = bit_order;
               dn.abort_unplaced = abort_unplaced;
               dn.ref_ids = ref_ids;
@@ -537,17 +546,18 @@ void bind_nuts(py::module_& m) {
                   dn.copy_specs.push_back(std::move(cs));
               }
               dn.horiz_of = horiz_of;
-              std::vector<std::tuple<int, int, bool>> out;
+              std::vector<std::tuple<int, int, int, double, bool>> out;
               {
                   py::gil_scoped_release release;
                   auto res = parallel_sweep(
                       bundles, mv, planner, fp, layers, track_pitch,
                       fixed_segs, extra_x, extra_y, stage_b,
-                      skip_tighten_stage_a, dogleg_slot_bids, base_disc,
-                      net_counts, dn, n_threads);
+                      skip_tighten_stage_a, full_trials, dogleg_slot_bids,
+                      base_disc, net_counts, dn, n_threads);
                   out.reserve(res.size());
                   for (const auto& r : res)
-                      out.emplace_back(r.primary, r.secondary, r.ok);
+                      out.emplace_back(r.primary, r.secondary, r.viols,
+                                       r.wl, r.ok);
               }
               return out;
           },
@@ -563,6 +573,49 @@ void bind_nuts(py::module_& m) {
           py::arg("copy_specs") = std::vector<std::tuple<
               int, int, std::string, int, int, int, int, int, int>>{},
           py::arg("horiz_of") = std::map<std::pair<int, int>, bool>{},
+          py::arg("n_threads") = 0, py::arg("full_trials") = false,
+          py::arg("ref_grid") = nullptr);
+
+    // Batched PARALLEL fixed-context screening (the refine/ripup chunk
+    // builds' sequential-screen cost at chip scale): one worker per
+    // (bundle, tidxs) job, private planner clone + engine per job — the
+    // exact _rr_screen_scores shape, so batching is decision-identical to
+    // the sequential per-bundle calls.  Returns per job the screen rows
+    // [(tidx, overlaps, violations)] or None (unscreened fallback).
+    m.def("parallel_screen",
+          [](const std::vector<BundleWrapper>& bundles,
+             const std::vector<std::tuple<int, std::vector<int>,
+                                          bool>>& jobs,
+             const CongestionPlanner& planner, const Floorplan& fp,
+             const LayerStack& layers, double track_pitch,
+             const NUTSResult& baseline,
+             const std::vector<int>& extra_x,
+             const std::vector<int>& extra_y, int n_threads) {
+              std::vector<ScreenJob> js;
+              js.reserve(jobs.size());
+              for (const auto& [bid, tidxs, clear] : jobs)
+                  js.push_back(ScreenJob{bid, tidxs, clear});
+              std::vector<std::optional<
+                  std::vector<std::array<int, 3>>>> res;
+              {
+                  py::gil_scoped_release release;
+                  res = parallel_screen(bundles, js, planner, fp, layers,
+                                        track_pitch, baseline, extra_x,
+                                        extra_y, n_threads);
+              }
+              py::list out;
+              for (const auto& r : res) {
+                  if (!r) { out.append(py::none()); continue; }
+                  py::list rows;
+                  for (const auto& a : *r)
+                      rows.append(py::make_tuple(a[0], a[1], a[2]));
+                  out.append(rows);
+              }
+              return out;
+          },
+          py::arg("bundles"), py::arg("jobs"), py::arg("planner"),
+          py::arg("floorplan"), py::arg("layers"), py::arg("track_pitch"),
+          py::arg("baseline"), py::arg("extra_x"), py::arg("extra_y"),
           py::arg("n_threads") = 0);
 
     // ── Verify ────────────────────────────────────────────────────────────

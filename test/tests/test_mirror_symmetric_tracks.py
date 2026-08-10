@@ -13,6 +13,8 @@ import pytest
 
 import buda
 
+from slot_groups import expand_slot_groups
+
 CHIP = Path(__file__).resolve().parents[2] / "flow" / "chip"
 PLAIN = CHIP / "chip_tracks.buda"
 MIRROR = CHIP / "chip_tracks_mirror.buda"
@@ -34,7 +36,11 @@ def read_patterns(path):
         if not line.startswith("def_track_pattern"):
             continue
         tok = line.split()
-        lid, origin, rest = int(tok[1]), F(tok[2]), tok[3:]
+        # Expand `( <slots> )x<N>` with the CLI's own parser: these fixtures are
+        # written in the compact form, and a private triple-splitter here would
+        # read `0.25)x7` as a width.
+        lid, origin = int(tok[1]), F(tok[2])
+        rest = expand_slot_groups("def_track_pattern", tok[3:])
         slots = [(rest[i], F(rest[i + 1]), F(rest[i + 2]))
                  for i in range(0, len(rest), 3)]
         out[lid] = (origin, slots)

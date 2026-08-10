@@ -24,10 +24,18 @@ Define the repeating track pattern for a layer. The pattern tiles from `origin` 
 | `layer_id` | int | Layer ID as registered with `def_layer` — the **number**, not the layer name. Passing the name (`M4` instead of `4`) is a flow-stopping error that names the id to use. |
 | `origin` | float | Anchor position of the first unit in layout units (use `0.0` to align with chip origin) |
 | `type` | string | Track type: `POWER`, `GROUND`, `CLOCK`, `SHIELD`, `SIGNAL`, or `CUSTOM` (case-insensitive; the aliases `_`→`SIGNAL`, `GND`→`GROUND`, `CLK`→`CLOCK`, `VDD`→`POWER`, `VSS`→`GROUND` are accepted — `_` is a terse shorthand for the common `SIGNAL` slot, so a dense pattern reads `_ 1 1 _ 1 1`). **Only `SIGNAL` is routable** — bits land only on `SIGNAL` slots; the others are pre-route rails. An unrecognized type is a hard error (it silently became a non-signal rail before, so a mistyped `SIGNAL` lost its tracks). The canonical type is stored; the raw token is kept as the slot's viz label. |
-| `w` | float | Track width in layout units |
-| `sp` | float | Space after this track (gap to the next slot), in layout units |
+| `w` | float | Track width in layout units — **must be positive**. Fractional is fine and normal (`SIGNAL 0.4 0.4`); slot geometry is `double` throughout, unlike block coordinates. |
+| `sp` | float | Space after this track (gap to the next slot), in layout units. **Zero is allowed** (abutting slots, e.g. `POWER 0.8 0`); negative is not — it would overlap the next slot. |
 
 Each `<type> <w> <sp>` triple defines one slot in the repeating unit. Slots are listed in order from low to high perpendicular position. The unit pitch is the sum of all `(w + sp)` values.
+
+A non-positive width is a **flow-stopping error** at the declaration. Such a
+pattern used to be accepted and gave the layer a `unit_pitch` of zero — no
+tracks at all — which did not surface until six stages later as
+`[DetailedNUTS] Warning: Layer 4 has insufficient signal tracks (0)` with every
+bit on the layer stranded, and the run still exited `0`. No downstream
+circumstance makes a zero-width slot routable, so it is refused where it is
+written.
 
 #### Repetition groups — `( <slots> )x<count>`
 
@@ -101,9 +109,9 @@ Override the track pattern for a rectangular region on a layer. Useful when a fl
 | Argument | Type | Description |
 |---|---|---|
 | `layer_id` | int | Layer to override — the **number** from `def_layer`, not the layer name (`4`, not `M4`; the name is a flow-stopping error that names the id to use) |
-| `x1 y1 x2 y2` | int | Bounding box of the override region (Hanan-grid-aligned) |
+| `x1 y1 x2 y2` | int | Bounding box of the override region (Hanan-grid-aligned). **Integers** — the region bounds a seam between two track patterns, so a fractional value is a flow-stopping error rather than a silent truncation that would move the seam. |
 | `origin` | float | Anchor for the local pattern within this region |
-| `type w sp …` | — | Same slot format as `def_track_pattern` |
+| `type w sp …` | — | Same slot format as `def_track_pattern`, validated the same way (positive width, non-negative space) |
 
 First-match wins: if a point falls in multiple override regions, the first one defined takes precedence.
 

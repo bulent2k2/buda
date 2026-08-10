@@ -344,3 +344,104 @@ visualize_topologies t0_b3 debug    # step candidates in increasing planner cost
 ```
 
 ---
+
+## Advisory export commands
+
+The routed plan as something a downstream P&R tool can **adopt**, rather than
+look at. `export_gds` writes geometry, and a GDS rectangle carries no net
+identity, so it is a picture; these two carry the identity.
+
+### `emit_guides`
+
+```
+emit_guides <file.json> [margin <n>] [csv <file.csv>] [tcl <file.tcl>]
+```
+
+Write the **corridor manifest** — the positive intent, "route these nets
+here". Per bundle: the net names, and one rectangle per placed bus segment
+(its span × its placed track extent, grown by `margin` on every side), with
+the assigned layer id and name.
+
+Each corridor names **its own** nets. A tapered fan-in branch carries only a
+subset of the bundle's bits (`Topology::seg_bits` — NUTS sizes the segment
+from that subset), and naming the whole bundle on such a branch would direct
+nets into wires they never traverse: a wrong instruction, not a loose one.
+Corridors carry `nets` / `n_nets` / `tapered` for this reason.
+
+`csv` writes the same rows as a flat table (one row per corridor); `tcl`
+writes a worked `create_route_guide -net_list {…} -layer <L> -rect {…}`
+script — the adapt-me example, since every tool spells guides differently.
+All three outputs are byte-deterministic, so a diff means a real change.
+
+Run it **after** `run_nuts` (or `run_detailed_nuts`): an unplaced plan
+reserves nothing, and emitting it would advertise corridors that do not
+exist. Emitting early prints `no placed bus segments` and writes an empty
+manifest rather than a plausible-looking one.
+
+### `export_def_blockages`
+
+```
+export_def_blockages <file.def> [density <frac>] [margin <n>]
+```
+
+Write a DEF carrying only what DEF can **honestly** say. The obvious move —
+one `BLOCKAGES` rect per corridor — is exactly backwards: a blockage tells
+the router to STAY OUT, so it would forbid the routing the plan is asking
+for. What goes in instead:
+
+- the design's real keep-clear regions (BUDA's own keepouts) as hard
+  `LAYER … RECT` blockages, which is what a blockage means; and
+- with `density <frac>`, `PLACEMENT + PARTIAL <frac> RECT` blockages over the
+  corridors.
+
+That second one is narrower than it first reads, and the narrowing is the
+point: `PARTIAL maxDensity` is a **placement**-blockage option in DEF 5.8,
+not a layer routing-blockage one, so it caps how densely *cells* may be
+placed under a planned bus. That helps pin access, but DEF has no
+routing-density concept at all — the routing reservation lives in the
+`emit_guides` manifest and nowhere else.
+
+The emitted file round-trips through BUDA's own DEF reader and is
+byte-deterministic.
+
+**Example:**
+```
+run_nuts
+emit_guides out/guides.json margin 2 csv out/guides.csv tcl out/guides.tcl
+export_def_blockages out/advisory.def density 0.6
+```
+
+---
+
+## Diagnostics
+
+### `dump_messages`
+
+```
+dump_messages
+```
+
+Print the **message catalogue**: every identified diagnostic BUDA can emit,
+with its id and severity.
+
+```
+[Messages] 9 identified diagnostic(s)
+  BUDA-1601  ERROR    A cell in the DEF has no footprint in the LEF.
+  BUDA-1602  WARNING  Imported design counts differ from the counts the file declares.
+  ...
+```
+
+A methodology needs to know what it may waive or gate on *before* the
+message fires, which is what an id buys over prose that changes with the
+next wording improvement. Identified diagnostics print as
+
+```
+BUDA-<NNNN>: <SEVERITY>: <text>
+```
+
+and the id, once issued, never changes meaning. The severity on the line is
+authoritative — `set_unit_check warn` downgrades BUDA-1901 rather than
+renaming it, so a gate on the id keeps working either way. Full contract:
+[message ids](../internal/message_ids.md).
+
+---

@@ -26,6 +26,8 @@ import sys
 
 import buda
 
+from buda_session.util import min_bit_pitch as _min_bit_pitch
+
 from ._options import reject_unknown_options
 
 
@@ -188,20 +190,6 @@ def _bus_group_key(net_name):
     _bundle_net_summary) fold to '<bus>'; other names are their own group."""
     m = re.match(r'^(.*?)_([A-Za-z]*)(\d+)$', net_name)
     return m.group(1) if m else net_name
-
-
-def _min_bit_pitch(session):
-    """Smallest per-bit pitch over all pattern layers (the densest layer a
-    stub could land on) — eff_bus_width(1, 0.0, lid) is bit_pitch on a
-    pattern layer and 0.0 otherwise.  Falls back to the NUTS track pitch
-    when no layer has a pattern."""
-    pitches = []
-    for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL):
-        for lid in session.layers.get_layer_ids_by_dir(d):
-            p = session.layers.eff_bus_width(1, 0.0, lid)
-            if p > 0:
-                pitches.append(p)
-    return min(pitches) if pitches else float(session._nuts_pitch or 1.0)
 
 
 def _partition_nets(nets, target, caps, inc_fn):

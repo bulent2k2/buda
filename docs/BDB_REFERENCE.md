@@ -172,14 +172,14 @@ whose governing rule changed — by name OR content — since the checkpoint
 **`ndr_rule.credit`** (the R5a end-shield rail-crediting opt-in — pricing
 basis, so it joins the rule row and, when set, the `|c1` fingerprint
 suffix; pre-v22 rules migrate to 0, correct since they never credited).
-v23 added **`ndr_rule.bond`** (the R6 shield-bonding opt-in).  Unlike
+v25 added **`ndr_rule.bond`** (the R6 shield-bonding opt-in).  Unlike
 `credit`, bonding is OUTPUT-only — it emits extra `net_via` straps and
 moves neither demand nor placement — so it is deliberately NOT part of
 the `bundle.ndr_rule` pricing fingerprint: toggling it must not VOID a
 restored plan.  A strap reuses `net_via` with a NEGATIVE `to_seg` (the
 strap ordinal; a real segment index is `>= 0`, so the
 `(bundle_id, from_seg, to_seg, bit_index)` primary key stays unique) —
-its far end is a power-grid rail, not a routed segment.  Pre-v23 rules
+its far end is a power-grid rail, not a routed segment.  Pre-v25 rules
 migrate to 0, correct since they never bonded.
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.
@@ -265,9 +265,19 @@ topology, so `bus_segment` rows join back to a bundle. `clear_expanded_bundles()
 drops those instance rows (idempotent re-plan). Templates keep their full candidate
 set; each instance records its own selection + layers.
 
-**coordinates** are in microns (µm). `import_def_lef` converts from DEF
-internal units using the `UNITS DISTANCE MICRONS` value from the DEF header.
-Unresolved pin positions are stored as `−1`.
+**coordinates** are in *layout units*, and one layout unit is whatever the
+design's **import scale** says it is — microns by default. `import_def_lef`
+converts DEF internal units using the `UNITS DISTANCE MICRONS` value from the
+DEF header, then applies the scale; LEF numbers (already µm) get the scale
+alone. The factor is recorded as meta `lu_per_um` and restored on open, so a
+reopened design knows what its own numbers mean. Unresolved pin positions are
+stored as `−1`.
+
+At the default scale of `1.0` a coordinate is a micron and the engine's
+integer grid quantizes to 1 µm — ~2000 DBU on an advanced node, roughly 20-25
+track pitches. Setting `set_import_scale dbu` makes one layout unit one DEF
+database unit, so the import is exact and nothing is quantized away. See
+[the coordinate contract](internal/engine_units.md).
 
 `parent_id` in `component` is `NULL` for top-level (depth-0) instances.
 Python returns `−1` for a `NULL` parent.
@@ -472,6 +482,36 @@ Tests: `test/tests/test_bdb_resume.py`, `test/tests/test_bdb_resume_gaps.py`.
 
 ---
 
+### `set_import_scale`
+
+```
+set_import_scale micron|dbu|<layout units per micron>
+```
+
+Declare what a layout unit means for this design, **before** `import_def_lef`.
+With no argument, print the current scale.
+
+| Value | Meaning |
+|---|---|
+| `micron` | **Default.** 1 layout unit = 1 µm. Historic behaviour, bit-identical. |
+| `dbu` | 1 layout unit = 1 DEF database unit — an **exact** import with no quantization. Resolved from the DEF's own `UNITS DISTANCE MICRONS` at import time, so the script never has to know (or mis-state) the technology's DBU count. |
+| *number* | An explicit factor, for a scale neither of the above expresses. |
+
+The scale is applied at import and **only** at import: everything downstream
+works in the chosen unit because there is nothing left to convert. It is
+persisted as meta `lu_per_um` — as a *number*, even when selected as `dbu`, so
+a later import into the same BDB cannot silently restate the stored
+coordinates in a different unit.
+
+Note what the scale does **not** touch: distances declared in the `.buda`
+script (`corner_margin`, `set_min_stub_length*`, `detour_channel`,
+`def_track_pattern` widths, …) are already in layout units and are taken as
+written. Scale the import and you must scale those too — the
+[unit-plausibility guard](script_reference/setup.md#set_unit_check) stops the
+run when they disagree.
+
+---
+
 ### `import_def_lef`
 
 ```
@@ -515,6 +555,96 @@ is preserved via UPSERT.
 - One `net` row per elaborated wire; internal wires are scoped
   (`ai/w1`); wires connected through port bindings keep the caller's net name.
 - One `pin` row per port connection per instance.
+- The die's own ports: the boundary components `import_def_lef` synthesized
+  from DEF `PINS` keep their pin rows, saved before the clear and restored
+  after elaboration. A top-level port is not an instance, so elaboration
+  alone would leave them disconnected.
+
+**What is NOT elaborated: library cells.**
+
+An instance of a module the netlist does not define is a library cell.
+Keeping them all would turn a million gates into a million component rows, so
+they are filtered — and the rule is, in order:
+
+1. **The LEF calls the cell a hard macro** — a `MACRO … CLASS` other than
+   `CORE` (an absent CLASS reads as CORE, LEF's own default) → keep. The
+   technology states this outright, so it is not a guess, and it is
+   independent of how the instance is named — which is what carries
+   `fakeram45_256x16 u_mem (…)` through a DEF+Verilog merge. The class is
+   persisted on the `cell` row (`cell.cls`, schema v24) by `import_def_lef`.
+2. Otherwise, for an import with **no LEF** to ask: an escaped instance name
+   *and* a lowercase letter in the cell name (`fakeram45_*` yes, `DFFR_X1`
+   no — Genus escapes both).
+3. Otherwise skipped.
+
+Skips are **counted and their cell kinds named** (`BUDA-1608`), because rule 2
+is still a heuristic and an instance that silently never existed is
+indistinguishable from a design that never had one.
+
+> The placement is **not** the discriminator, though it looks like one on a
+> macro-only DEF: a DEF for a gate-level design lists every standard cell in
+> `COMPONENTS`, so "the placement already has an instance by that name" is
+> true of every buffer and flop and the filter admits the whole netlist —
+> exactly the explosion it exists to prevent. Pinned by
+> `test_a_gate_level_merge_keeps_the_macro_and_drops_the_standard_cells`.
+
+Returns a `VerilogImportStats` (`top_module`, `elaborated`,
+`skipped_library_cells`, `skipped_kinds`, `skipped_cells` — the last capped at
+eight, so `skipped_kinds` is what says whether the list is complete — plus the
+vector-connection counts below).
+
+**Vector connections.**
+
+A port map's **bit-select keeps its selector**: `.a0(w[0])` is net `w[0]`, so
+a 4-bit bus arrives as four nets. It used to resolve to the base name `w`,
+which collapsed the bus to one net *and shorted its bits together* — two pins
+the netlist keeps apart came back joined. The DEF side has always named bits
+individually, so per-bit nets are also what makes the merge line up.
+
+The identifier is resolved through the hierarchy context and the selector
+re-applied to the **result**, which is what carries a bit-select across a
+boundary: with `.p(w)` in the parent, the child's own `p[0]` lands on `w[0]`.
+
+| Shape | Handling | Counted as |
+|---|---|---|
+| `.a(w[0])` | exact — one net per bit | `bit_selects` |
+| `.a(w[3:0])` | one pin row per bit the **formal port** can take (`pin`'s key is `(net, comp, pin)`) | `part_selects` |
+| `{a,b}`, `w[i]` | unresolved — the connection is an open (`BUDA-1610`) | `unresolved_conns` |
+
+**Part-select width.** Verilog width-adapts a port connection, so how much of
+a part-select lands is the formal's **declared** width: `.s(w[3:0])` on a
+scalar `input s` connects bit 0 alone, and on `input [1:0] s` connects bits 0
+and 1. Bits are taken LSB-first, the end Verilog aligns. A formal whose width
+is unknown — an undefined module declares no ports — connects **bit 0 only**
+(true for every width ≥ 1) and reports the rest (`BUDA-1612`, counted as
+`unsized_part_selects`) rather than assuming a width.
+
+A part-select whose low bit is not 0, on a module elaboration descends into,
+is reported (`BUDA-1611`): the child numbers its port bits from 0, so port bit
+*k* is net bit *k+lo*.
+
+Indices may carry whitespace — `w[ 0 ]`, `w[3 : 0]` are literal and resolve
+exactly. `unresolved_conns` is counted **per elaborated instance**, like the
+other two, so a module instantiated a hundred times reports a hundred opens
+and one never instantiated reports none.
+
+An **escaped** identifier keeps its brackets as part of the NAME — `\w[0]` is
+a net called `w[0]`, not bit 0 of `w`, and `\w[1][0]` (a 2-D array element) is
+a name whose "index" no select parser can read.
+
+`net_props.bus_name` / `bit_index` are filled in from the **stored** net name
+by `derive_bus_bit`, shared with `import_def_lef` so a DEF net and the Verilog
+net it merges with cannot be classified differently.
+
+> Still open: a vector **PORT** (`input [3:0] a`) is one pin per port name, so
+> connecting a whole vector to one is modelled as a single pin on N nets. See
+> [`internal/opens_interchange.md`](internal/opens_interchange.md) item 2.
+
+> Why the filter matters beyond tidiness: a dropped instance in a merge does
+> **not** remove the DEF's row — it leaves it orphaned at depth 0. Its
+> container then has no children, cannot be sized by
+> `derive_container_bboxes`, gets no busterm, and the routing interface loses
+> a whole level. See [`internal/opens_interchange.md`](internal/opens_interchange.md) item 1.
 
 ---
 
@@ -1342,6 +1472,49 @@ Extract physical port locations (busterms) from the placed component hierarchy a
 **Example:**
 ```buda
 derive_busterms 1
+```
+
+An **unplaced** component is skipped — it has no extent to route to. That is
+why a DEF+Verilog design needs `derive_container_bboxes` first; see below.
+
+---
+
+### `derive_container_bboxes`
+
+```
+derive_container_bboxes [margin <n>]
+```
+
+Give every **unplaced container** the bounding box of its placed
+descendants, grown by `margin` on each side. Prints how many it placed, and
+reports (BUDA-1607) any container with nothing placed underneath it.
+
+This is the step a **DEF + Verilog merge** needs and neither file can
+supply. A DEF is flat — `COMPONENTS` lists leaf instances only — so a
+hierarchical instance has no row anywhere, and `import_verilog`, which knows
+the tree but no geometry, leaves it unplaced. `derive_busterms` skips
+unplaced components, so without this the routing interface comes out with a
+**hole** in it: the ports and the leaves get busterms, the levels between
+them do not, and the leaf busterms have no parent to belong to. Every
+command succeeds while that happens, which is what makes it worth a
+command of its own.
+
+Deliberately **explicit** rather than folded into `import_verilog`: it
+invents geometry the input never stated, so it belongs in the script. It
+never moves a component that already has a position, and it resolves
+deepest-first so a container of containers is built from children that were
+themselves just resolved.
+
+| Argument | Description |
+|---|---|
+| `margin` | Optional. Layout units added on each side of the derived box (default `0`). |
+
+**Example** — the full merge (see `flow/def/chip.buda`):
+```buda
+import_def_lef chip.def chip.lef     # placement, flat
+import_verilog chip.v                # hierarchy, no geometry
+derive_container_bboxes margin 1500  # give the containers an extent
+derive_busterms 2
 ```
 
 ---

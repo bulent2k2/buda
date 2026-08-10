@@ -80,7 +80,7 @@ If the engine finds a conflict (e.g., you changed the floorplan and the pinned t
 
 ## 4. Example Script: `quickstart.buda`
 
-Save this as a `.buda` file and run it from the repository root using `python3 src/buda_cli.py your_file.buda`.
+Save this as a `.buda` file and run it from the repository root using `buda your_file.buda`.
 
 ```python
 # ── Step 1: Define Technology ──
@@ -90,8 +90,8 @@ def_layer 5 M5 V TOP 1.0
 
 # Track patterns are REQUIRED for Detailed NUTS.
 # Format: <layer_id> <origin> [<type> <width> <spacing>] ...
-def_track_pattern 4 0.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  POWER 2.0 1.0  GROUND 2.0 1.0  CLK 1.5 1.0
-def_track_pattern 5 0.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  POWER 2.0 1.0  GROUND 2.0 1.0  CLK 1.5 1.0
+def_track_pattern 4 0.0  (SIGNAL 1.0 1.0)x4  POWER 2.0 1.0  GROUND 2.0 1.0  CLK 1.5 1.0
+def_track_pattern 5 0.0  (SIGNAL 1.0 1.0)x5  POWER 2.0 1.0  GROUND 2.0 1.0  CLK 1.5 1.0
 
 # ── Step 2: Define Floorplan ──
 add_block CPU  100 100 300 300
@@ -107,6 +107,9 @@ add_net cntr CPU.tx MEM.lx
 
 # 8-bit bus: MEM -> GPU
 add_bus mem_to_gpu[8] MEM.tx GPU.rx
+
+# 3-pin bus:
+add_bus bus[16]  MEM.io CPU.io,GPU.io
 
 # ── Step 4: Execute Planning ──
 run_bundler strict
@@ -290,7 +293,7 @@ routes inside cell templates.
 Save this as `hb_quickstart.buda` and run it from the repository root:
 
 ```sh
-python3 src/buda_cli.py hb_quickstart.buda
+buda hb_quickstart.buda
 ```
 
 ```python
@@ -300,8 +303,8 @@ def_layer 4 M4 H TOP 1.0
 def_layer 5 M5 V TOP 1.0
 
 # Track patterns are required by run_detailed_nuts.
-def_track_pattern 4 0.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  POWER 2.0 1.0  GROUND 2.0 1.0
-def_track_pattern 5 0.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  POWER 2.0 1.0  GROUND 2.0 1.0
+def_track_pattern 4 0.0  (SIGNAL 1.0 1.0)x3  POWER 2.0 1.0  (SIGNAL 1.0 1.0)x3  GROUND 2.0 1.0
+def_track_pattern 5 0.0  (SIGNAL 1.0 1.0)x3  POWER 2.0 1.0  (SIGNAL 1.0 1.0)x3  GROUND 2.0 1.0
 
 corner_margin dx 5 dy 5
 set_min_stub_length 2

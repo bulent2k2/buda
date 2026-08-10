@@ -1,0 +1,140 @@
+# ============================================================
+# flow/def/chip.buda
+#
+# The LEF/DEF entry point, end to end: read a real technology and a
+# placed hierarchical design off disk, run the hierarchy-aware routing
+# pipeline on it, and write the advisory artifacts back out.
+#
+# Every other hier vehicle (flow/hbundles/*.buda) DECLARES its design in
+# the script — `add_cell`, `add_inst_to_cell`, `add_bus`.  This one
+# declares nothing: the stack comes from chip.lef, the placement and
+# connectivity from chip.def, the hierarchy from chip.v.  What the script
+# contains is the flow, which is the point.
+#
+#   chip                                       (top module)
+#     u_q0, u_q1        quad     depth 0
+#       bl, br          blk      depth 1
+#         lo, hi        LEAF     depth 2   <- the only DEF COMPONENTS
+#
+# One 4-bit bus per level, so each stage of the hier pipeline has
+# something of its own to do:
+#
+#   D2  lo -> hi          inside every blk    4 instances of one template
+#   D1  bl/hi -> br/lo    inside every quad   2 instances of one template
+#   D0  u_q0/br/hi -> u_q1/bl/lo              across the top level
+#   + die PORTS at both ends (din* in, dout* out)
+#
+# Regenerate the three input files with:  python3 flow/def/gen_chip.py
+# ============================================================
+
+open_bdb :memory:
+
+# ── units ─────────────────────────────────────────────────
+# `dbu` makes one layout unit one DEF database unit, so the import is
+# EXACT — no rounding of a 0.2 µm pitch into an integer grid.  It also
+# arms the sharper half of the unit guard: having declared a scale, the
+# design is checked against real metal pitches (0.005..500 µm) and not
+# only against the scale-free tracks-across ratio.
+#
+# The consequence is the documented one: every distance BELOW is in
+# layout units too, i.e. DBU.  2000 is 2 µm.
+set_import_scale dbu
+set_unit_check on
+
+corner_margin dx 2000 dy 2000
+set_min_stub_length 1000
+
+# ── the technology ────────────────────────────────────────
+# Six routing layers with their directions, pitches and widths.  M5/M6
+# become TOP (topmost per direction) with no help from the script.
+import_lef_tech chip.lef
+
+# ── the placed design ─────────────────────────────────────
+# Counts are reconciled against the DEF's own declarations, TRACKS become
+# BOUNDED patterns, and BLOCKAGES / macro OBS / power straps become
+# keepouts on both the planner's floorplan and the detailed grid.
+import_def_lef chip.def chip.lef
+
+# ── the hierarchy ─────────────────────────────────────────
+# A DEF is FLAT: COMPONENTS lists leaf instances and nothing else, so
+# `u_q0/bl/lo` is just a name until something gives it meaning.  The
+# netlist is what does — it is elaborated over the placement, keeping
+# every DEF coordinate and adding the parent/depth the DEF cannot carry.
+import_verilog chip.v
+
+# …and neither file states where a hierarchical INSTANCE is, because
+# neither has a row for one.  This gives each container the extent of its
+# placed children, which is what busterm derivation needs; without it
+# every busterm collapses to depth 0 and the hierarchy is in the database
+# but not in the routing interface.
+derive_container_bboxes margin 1500
+
+# ── Phase A: routing interface ────────────────────────────
+derive_busterms 2
+
+# The floorplan the planner sees, one level at a time: containers at
+# depth 0/1 are transparent to low layers, leaf footprints are keepouts.
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+
+# ── Phases C-E: bundle, generate, plan ────────────────────
+# Nets came from the DEF, so there is no add_bus here — the bundler
+# groups what the design already says.
+run_hier_bundler depth 2
+dump_hbundles
+
+generate_hier_topologies
+
+set_planner_param healersAhead 1
+run_planner hier 5
+
+# ── track assignment ──────────────────────────────────────
+run_nuts
+check_design nuts
+
+run_detailed_nuts
+check_design dnuts
+
+# ── close the residual ────────────────────────────────────
+negotiate_congestion 10
+ripup_reroute 20
+refine_selection
+
+check_design dnuts
+report_wirelength
+
+# ── export: what a downstream flow actually consumes ──────
+# The corridor manifest is the primary artifact — per bundle, its nets,
+# its layer and the rectangle the plan reserved.  The Tcl is a worked
+# create_route_guide example; the DEF carries only what DEF can honestly
+# say (real keepouts, plus placement-density caps over the corridors).
+emit_guides out/chip_guides.json margin 200 csv out/chip_guides.csv tcl out/chip_guides.tcl
+export_def_blockages out/chip_advisory.def density 0.7 margin 200
+
+# Geometry, for a viewer or a round trip.  The metals start at 11 because
+# `export_gds` writes cell OUTLINES on GDS layer 10 by default, and a
+# re-import treats every shape on a mapped routing pair as a wire — so
+# mapping a metal onto 10 hands the outlines back as routing and leaves
+# each cell with "no geometry anywhere".
+def_gds_layer 1 11
+def_gds_layer 2 12
+def_gds_layer 3 13
+def_gds_layer 4 14
+def_gds_layer 5 15
+def_gds_layer 6 16
+export_gds out/chip.gds outline 10 labels 63
+# Known limits of THIS round trip, so nobody has to rediscover them: the
+# synthetic `__PORT__` boundary cells and the container cells created by
+# the netlist merge carry no size, so their structures come back empty and
+# the 8 port labels land on nothing.  The routing geometry round-trips; the
+# scaffolding the merge invented does not.
+
+# Every relative path in this script — imports, exports, and this save —
+# resolves against the SCRIPT's directory, so the whole flow reads from
+# flow/def/ and writes to flow/def/out/ no matter where it is run from.
+# (One rule for all commands; it used to be two, and this script ran only
+# from the repo root — docs/internal/opens_interchange.md item 4.)
+save_bdb out/chip.bdb.sql
+
+visualize

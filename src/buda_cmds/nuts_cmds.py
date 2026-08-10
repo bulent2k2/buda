@@ -49,6 +49,10 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
               "generate_topologies, and run_planner first.")
         return
     session._validate_stage_entry("run_nuts")
+    # Phase 1d: the second hook for the unit-plausibility guard — some flows
+    # declare their track patterns AFTER run_planner, so plan entry is not a
+    # complete gate.  Reports once per session either way.
+    session._check_unit_plausibility("run_nuts")
     if not any(0 <= w.plan.selected_topology_index < len(w.input.candidates)
                for w in session.bundles):
         print("Warning: run_nuts found no selected topology to place — run "
@@ -289,6 +293,7 @@ def cmd_ripup_reroute(session, cmd, args, cmd_line):
 
 def cmd_refine_selection(session, cmd, args, cmd_line):
     # Usage: refine_selection [max_moves] [chase_overlaps]
+    #                         [no_parallel_sweep]
     # Measured selection WL polish (selection-basis lever 3,
     # wishlist-planner): sweep every eligible bundle's SELECTION on the
     # MEASURED result — screen all alternates against the frozen placement,
@@ -297,8 +302,10 @@ def cmd_refine_selection(session, cmd, args, cmd_line):
     # (chase_overlaps: plain lexicographic — the aggressive pre-healer
     # form).  Run it at the END of the flow, after the healers.  Skips
     # user pins and hier.locked bottom-up copies.  Opt-in: flows that do
-    # not call it are byte-identical.
-    flags = ("chase_overlaps",)
+    # not call it are byte-identical.  The sweep's full trials run on the
+    # C++ parallel pool by default (decision-identical replay pattern);
+    # `no_parallel_sweep` keeps the sequential loop.
+    flags = ("chase_overlaps", "no_parallel_sweep")
     unknown = [a for a in args if not looks_numeric(a) and a not in flags]
     reject_unknown_options("refine_selection", unknown, flags)
     nums = [a for a in args if looks_numeric(a)]
@@ -310,8 +317,9 @@ def cmd_refine_selection(session, cmd, args, cmd_line):
               f"integer max_moves argument, got: {' '.join(nums)}")
         sys.exit(1)
     max_moves = int(nums[0]) if nums else 30
-    session._refine_selection(max_moves,
-                              chase_overlaps="chase_overlaps" in args)
+    session._refine_selection(
+        max_moves, chase_overlaps="chase_overlaps" in args,
+        use_parallel_sweep=(False if "no_parallel_sweep" in args else None))
 
 
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):

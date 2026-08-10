@@ -545,7 +545,7 @@ encodes "the far end is a grid rail, not a routed segment". Consumers that
 read vias geometrically — GDS export, the detailed viz — use
 `from_layer`/`to_layer`/`x`/`y` only, so they were unaffected; the BDB
 persist path names a strap with the rule's shield net (`bit_net` would return
-"" for a negative bit index). Schema v23 adds `ndr_rule.bond`, and it is
+"" for a negative bit index). Schema v25 adds `ndr_rule.bond`, and it is
 deliberately absent from the `bundle.ndr_rule` PRICING fingerprint: bonding
 moves no demand, so toggling it must not VOID a restored plan.
 

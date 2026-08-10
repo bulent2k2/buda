@@ -15,6 +15,7 @@
  */
 
 #include "busterm.h"
+#include <algorithm>
 #include <cstdio>
 #include <unordered_map>
 
@@ -105,16 +106,44 @@ void BustermGen::derive(int max_depth) {
     for (const auto& c : all_comps)
         by_id[c.id] = c;
 
-    for (const auto& comp : all_comps) {
+    // SHALLOWEST first.  `busterm.parent_id REFERENCES busterm(id)`, so a
+    // parent's row has to exist before its child's insert runs.  Component
+    // order is by id, and a DEF+Verilog merge numbers the LEAVES first (the
+    // DEF creates them; the netlist adds their ancestors afterwards), so
+    // walking that order inserts children before parents and the FK fires.
+    // Sorting by depth makes the invariant hold whatever the ids look like;
+    // the name tiebreak keeps the write order deterministic.
+    std::vector<const ComponentRow*> ordered;
+    ordered.reserve(all_comps.size());
+    for (const auto& c : all_comps) ordered.push_back(&c);
+    std::stable_sort(ordered.begin(), ordered.end(),
+                     [](const ComponentRow* a, const ComponentRow* b) {
+                         if (a->depth != b->depth) return a->depth < b->depth;
+                         return a->name < b->name;
+                     });
+
+    for (const ComponentRow* cp : ordered) {
+        const ComponentRow& comp = *cp;
         if (comp.depth > max_depth) continue;
         if (comp.x1 < 0) continue;  // unplaced; skip
 
         HierBusterm hbt = _from_component(comp, cells_with_pins);
 
         // Resolve parent busterm id via parent component.
+        //
+        // Only when the parent will actually HAVE a busterm.  The loop skips
+        // an unplaced component (and one past max_depth), so naming it as a
+        // parent leaves a row pointing at an id that is never written —
+        // `busterm.parent_id REFERENCES busterm(id)`, so the insert dies with
+        // a bare "FOREIGN KEY constraint failed" from four frames down, with
+        // nothing saying which component or why.  A partially-placed
+        // hierarchy is an ordinary state (a DEF places leaves and says
+        // nothing about their parents), so this has to be a missing link
+        // rather than a crash.
         if (comp.parent_id >= 0) {
             auto it = by_id.find(comp.parent_id);
-            if (it != by_id.end())
+            if (it != by_id.end() && it->second.x1 >= 0 &&
+                it->second.depth <= max_depth)
                 hbt.parent_id = "bt:" + it->second.name;
         }
 

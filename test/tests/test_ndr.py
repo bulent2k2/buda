@@ -1098,7 +1098,7 @@ def test_bond_is_not_in_the_pricing_fingerprint():
     assert a.split("|", 1)[1] == b.split("|", 1)[1]
 
 
-def test_v23_bond_persists_and_restores(tmp_path):
+def test_v25_bond_persists_and_restores(tmp_path):
     s1 = _bare_session()
     _run(s1, f"open_bdb {tmp_path}/b.bdb")
     _run(s1, "def_ndr shb shield bit net VSS bond")
@@ -1110,11 +1110,11 @@ def test_v23_bond_persists_and_restores(tmp_path):
     assert " bond," in _run(s2, "dump_ndr")
 
 
-def test_v23_pre_v23_db_migrates(tmp_path):
-    # A GENUINE v22 database (no bond column, user_version=22) reopens with
-    # the column added at its 0 default — pre-v23 rules never bonded.
+def test_v25_pre_v25_db_migrates(tmp_path):
+    # A GENUINE v24 database (no bond column, user_version=24) reopens with
+    # the column added at its 0 default — pre-v25 rules never bonded.
     import sqlite3
-    path = str(tmp_path / "v22.bdb")
+    path = str(tmp_path / "v24.bdb")
     db = buda.BDB(path)
     r = buda.NdrRuleRow()
     r.name, r.width_x, r.credit = "old", 2.0, 1
@@ -1122,7 +1122,7 @@ def test_v23_pre_v23_db_migrates(tmp_path):
     del db
     con = sqlite3.connect(path)
     con.executescript("ALTER TABLE ndr_rule DROP COLUMN bond;"
-                      "PRAGMA user_version = 22;")
+                      "PRAGMA user_version = 24;")
     con.close()
     db = buda.BDB(path)
     assert db.schema_version() == buda.BDB.SCHEMA_VERSION

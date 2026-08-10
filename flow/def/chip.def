@@ -1,0 +1,128 @@
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN chip ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 260000 90000 ) ;
+
+TRACKS X 190 DO 1368 STEP 190 LAYER M1 ;
+TRACKS Y 190 DO 473 STEP 190 LAYER M1 ;
+TRACKS X 200 DO 1300 STEP 200 LAYER M2 ;
+TRACKS Y 200 DO 450 STEP 200 LAYER M2 ;
+TRACKS X 200 DO 1300 STEP 200 LAYER M3 ;
+TRACKS Y 200 DO 450 STEP 200 LAYER M3 ;
+TRACKS X 400 DO 650 STEP 400 LAYER M4 ;
+TRACKS Y 400 DO 225 STEP 400 LAYER M4 ;
+TRACKS X 400 DO 650 STEP 400 LAYER M5 ;
+TRACKS Y 400 DO 225 STEP 400 LAYER M5 ;
+TRACKS X 800 DO 325 STEP 800 LAYER M6 ;
+TRACKS Y 800 DO 112 STEP 800 LAYER M6 ;
+
+GCELLGRID X 0 DO 27 STEP 10000 ;
+GCELLGRID Y 0 DO 10 STEP 10000 ;
+
+COMPONENTS 8 ;
+  - u_q0/bl/hi
+      LEAF
+      + PLACED ( 60000 10000 ) N ;
+  - u_q0/bl/lo
+      LEAF
+      + PLACED ( 10000 10000 ) N ;
+  - u_q0/br/hi
+      LEAF
+      + PLACED ( 60000 55000 ) N ;
+  - u_q0/br/lo
+      LEAF
+      + PLACED ( 10000 55000 ) N ;
+  - u_q1/bl/hi
+      LEAF
+      + PLACED ( 210000 10000 ) N ;
+  - u_q1/bl/lo
+      LEAF
+      + PLACED ( 160000 10000 ) N ;
+  - u_q1/br/hi
+      LEAF
+      + PLACED ( 210000 55000 ) N ;
+  - u_q1/br/lo
+      LEAF
+      + PLACED ( 160000 55000 ) N ;
+END COMPONENTS
+
+PINS 8 ;
+  - din0 + NET din0 + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 500 14000 ) N ;
+  - din1 + NET din1 + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 500 19000 ) N ;
+  - din2 + NET din2 + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 500 24000 ) N ;
+  - din3 + NET din3 + DIRECTION INPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 500 29000 ) N ;
+  - dout0 + NET dout0 + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 259500 59000 ) N ;
+  - dout1 + NET dout1 + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 259500 64000 ) N ;
+  - dout2 + NET dout2 + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 259500 69000 ) N ;
+  - dout3 + NET dout3 + DIRECTION OUTPUT + USE SIGNAL
+      + LAYER M2 ( -250 -250 ) ( 250 250 )
+      + PLACED ( 259500 74000 ) N ;
+END PINS
+
+BLOCKAGES 2 ;
+  - LAYER M4 RECT ( 110000 30000 ) ( 150000 60000 ) ;
+  - PLACEMENT RECT ( 110000 0 ) ( 150000 10000 ) ;
+END BLOCKAGES
+
+SPECIALNETS 2 ;
+  - VDD ( * VDD ) + ROUTED M6 2000 ( 30000 5000 ) ( * 85000 )
+      NEW M6 2000 ( 230000 5000 ) ( * 85000 ) + USE POWER ;
+  - VSS ( * VSS ) + ROUTED M6 2000 ( 130000 5000 ) ( * 85000 ) + USE GROUND ;
+END SPECIALNETS
+
+NETS 36 ;
+  - din0 ( PIN din0 ) ( u_q0/bl/lo A0 ) + USE SIGNAL ;
+  - dout0 ( u_q1/br/hi Z0 ) ( PIN dout0 ) + USE SIGNAL ;
+  - c[0] ( u_q0/br/hi Z0 ) ( u_q1/bl/lo A0 ) + USE SIGNAL ;
+  - din1 ( PIN din1 ) ( u_q0/bl/lo A1 ) + USE SIGNAL ;
+  - dout1 ( u_q1/br/hi Z1 ) ( PIN dout1 ) + USE SIGNAL ;
+  - c[1] ( u_q0/br/hi Z1 ) ( u_q1/bl/lo A1 ) + USE SIGNAL ;
+  - din2 ( PIN din2 ) ( u_q0/bl/lo A2 ) + USE SIGNAL ;
+  - dout2 ( u_q1/br/hi Z2 ) ( PIN dout2 ) + USE SIGNAL ;
+  - c[2] ( u_q0/br/hi Z2 ) ( u_q1/bl/lo A2 ) + USE SIGNAL ;
+  - din3 ( PIN din3 ) ( u_q0/bl/lo A3 ) + USE SIGNAL ;
+  - dout3 ( u_q1/br/hi Z3 ) ( PIN dout3 ) + USE SIGNAL ;
+  - c[3] ( u_q0/br/hi Z3 ) ( u_q1/bl/lo A3 ) + USE SIGNAL ;
+  - u_q0/m[0] ( u_q0/bl/hi Z0 ) ( u_q0/br/lo A0 ) + USE SIGNAL ;
+  - u_q0/m[1] ( u_q0/bl/hi Z1 ) ( u_q0/br/lo A1 ) + USE SIGNAL ;
+  - u_q0/m[2] ( u_q0/bl/hi Z2 ) ( u_q0/br/lo A2 ) + USE SIGNAL ;
+  - u_q0/m[3] ( u_q0/bl/hi Z3 ) ( u_q0/br/lo A3 ) + USE SIGNAL ;
+  - u_q0/bl/w[0] ( u_q0/bl/lo Z0 ) ( u_q0/bl/hi A0 ) + USE SIGNAL ;
+  - u_q0/bl/w[1] ( u_q0/bl/lo Z1 ) ( u_q0/bl/hi A1 ) + USE SIGNAL ;
+  - u_q0/bl/w[2] ( u_q0/bl/lo Z2 ) ( u_q0/bl/hi A2 ) + USE SIGNAL ;
+  - u_q0/bl/w[3] ( u_q0/bl/lo Z3 ) ( u_q0/bl/hi A3 ) + USE SIGNAL ;
+  - u_q0/br/w[0] ( u_q0/br/lo Z0 ) ( u_q0/br/hi A0 ) + USE SIGNAL ;
+  - u_q0/br/w[1] ( u_q0/br/lo Z1 ) ( u_q0/br/hi A1 ) + USE SIGNAL ;
+  - u_q0/br/w[2] ( u_q0/br/lo Z2 ) ( u_q0/br/hi A2 ) + USE SIGNAL ;
+  - u_q0/br/w[3] ( u_q0/br/lo Z3 ) ( u_q0/br/hi A3 ) + USE SIGNAL ;
+  - u_q1/m[0] ( u_q1/bl/hi Z0 ) ( u_q1/br/lo A0 ) + USE SIGNAL ;
+  - u_q1/m[1] ( u_q1/bl/hi Z1 ) ( u_q1/br/lo A1 ) + USE SIGNAL ;
+  - u_q1/m[2] ( u_q1/bl/hi Z2 ) ( u_q1/br/lo A2 ) + USE SIGNAL ;
+  - u_q1/m[3] ( u_q1/bl/hi Z3 ) ( u_q1/br/lo A3 ) + USE SIGNAL ;
+  - u_q1/bl/w[0] ( u_q1/bl/lo Z0 ) ( u_q1/bl/hi A0 ) + USE SIGNAL ;
+  - u_q1/bl/w[1] ( u_q1/bl/lo Z1 ) ( u_q1/bl/hi A1 ) + USE SIGNAL ;
+  - u_q1/bl/w[2] ( u_q1/bl/lo Z2 ) ( u_q1/bl/hi A2 ) + USE SIGNAL ;
+  - u_q1/bl/w[3] ( u_q1/bl/lo Z3 ) ( u_q1/bl/hi A3 ) + USE SIGNAL ;
+  - u_q1/br/w[0] ( u_q1/br/lo Z0 ) ( u_q1/br/hi A0 ) + USE SIGNAL ;
+  - u_q1/br/w[1] ( u_q1/br/lo Z1 ) ( u_q1/br/hi A1 ) + USE SIGNAL ;
+  - u_q1/br/w[2] ( u_q1/br/lo Z2 ) ( u_q1/br/hi A2 ) + USE SIGNAL ;
+  - u_q1/br/w[3] ( u_q1/br/lo Z3 ) ( u_q1/br/hi A3 ) + USE SIGNAL ;
+END NETS
+
+END DESIGN

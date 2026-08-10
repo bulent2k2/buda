@@ -29,6 +29,70 @@
 
 namespace buda {
 
+// Forward declaration only: the LEF reader is an implementation detail of the
+// importer, and bdb.h is included nearly everywhere (lef_io.h is not).
+struct LefLibrary;
+struct DefTracks;
+struct DefBlockage;
+
+// What `import_def_lef` hands back: the counts a caller must be able to
+// reconcile, plus the PHYSICAL data that belongs to the session rather than
+// the database (tracks, blockages, halos).  Deliberately not the whole
+// DefDesign — components and nets went into the tables, and a real DEF's
+// copy of them is the part that would not fit in memory twice.
+struct VerilogImportStats {
+    std::string top_module;
+    int elaborated = 0;             // component rows written
+    // Instances of a module the netlist does not define, dropped as library
+    // cells.  Reported rather than silent: the filter is a heuristic, and a
+    // dropped instance is a hole in the hierarchy that every later stage
+    // treats as absence rather than as an omission.
+    int skipped_library_cells = 0;   // instances
+    int skipped_kinds = 0;           // DISTINCT cell types among them
+    // The first few distinct cell types, capped.  `skipped_kinds` is the
+    // true total, so a caller can tell a complete list from a truncated one
+    // — the list alone cannot say, since its entries are already unique.
+    std::vector<std::string> skipped_cells;
+
+    // Vector connections, by the shape the port map used.  Counted because
+    // the three shapes are modelled to three different depths and a caller
+    // cannot tell from the netlist which it got.
+    int bit_selects = 0;          // .a(w[0]) — exact: one net per bit
+    int part_selects = 0;         // .a(w[3:0]) — a pin per named bit
+    // Part-selects whose low bound is not 0 on a module elaboration DESCENDS
+    // into: the child numbers its port bits from 0, so port bit k is net bit
+    // k+lo and the base-name composition used for the child context is off
+    // by `lo`.  Exact for the usual w[N:0]; reported, never guessed.
+    int offset_part_selects = 0;
+    // Part-selects onto a port whose declared width is UNKNOWN (an undefined
+    // module declares no ports here).  Bit 0 is connected — it is connected
+    // for every width >= 1 — and the rest is reported, not guessed.
+    int unsized_part_selects = 0;
+    // Port connections that name no net this reader can resolve —
+    // concatenations `{a,b}` and parameterized selects `w[i]`.  Each is an
+    // OPEN in the imported design; inferring one would put a wire where the
+    // netlist does not say there is one.
+    int unresolved_conns = 0;
+};
+
+struct DefImportStats {
+    int declared_components = -1, imported_components = 0;
+    int declared_nets = -1, imported_nets = 0;
+    int declared_pins = -1, imported_pins = 0;
+    int placed_components = 0;
+    int port_components = 0;          // synthesized boundary comps (Phase 3d)
+    std::vector<std::string> missing_cells;   // in DEF, absent from LEF
+    std::vector<std::string> warnings;
+    std::string unmodelled;           // census, as in the LEF reader
+    // Physical data for the session to apply; coordinates already converted
+    // to LAYOUT UNITS by the importer (docs/internal/engine_units.md).
+    struct Track { std::string dir; double start, step; int count;
+                   std::vector<std::string> layers; };
+    struct Keepout { std::string layer; double x1, y1, x2, y2; std::string why; };
+    std::vector<Track>   tracks;
+    std::vector<Keepout> keepouts;
+};
+
 // ── Row types returned to Python / other modules ──────────────────────────
 
 struct ComponentRow {
@@ -45,6 +109,11 @@ struct ComponentRow {
     // axis-aligned extent (so downstream stays bbox-only); orient is the extra
     // fact a faithful GDS SREF re-emit needs. Default 'N' (identity). (v12)
     std::string orient = "N";
+    // A synthesized boundary component standing in for a DEF top-level PORT
+    // (v23, Phase 3d).  Downstream stages treat it as a component because
+    // that is what makes a die-edge net routable at all; this flag is what
+    // stops the fiction from passing as a real instance.
+    bool        is_port = false;
 };
 
 struct NetRow {
@@ -379,9 +448,9 @@ public:
     //       since-changed resolution and VOID the restored plan).
     // v22 = ndr_rule.credit (R5a end-shield crediting opt-in — part of the
     //       rule's pricing basis, so it rides the same table).
-    // v23 = ndr_rule.bond (R6 shield-bonding opt-in — output-only, so it is
+    // v25 = ndr_rule.bond (R6 shield-bonding opt-in — output-only, so it is
     //       deliberately NOT part of the bundle.ndr_rule pricing stamp).
-    static constexpr int SCHEMA_VERSION = 23;
+    static constexpr int SCHEMA_VERSION = 25;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -406,8 +475,9 @@ public:
     void meta_set(const std::string& key, const std::string& value);
 
     // ── Ingestion ──────────────────────────────────────────────────────────
-    void import_def_lef(const std::string& def_path, const std::string& lef_path);
-    void import_verilog(const std::string& v_path);
+    DefImportStats import_def_lef(const std::string& def_path,
+                                  const std::string& lef_path);
+    VerilogImportStats import_verilog(const std::string& v_path);
     // Wipe the design tables (pin/net_props/net/component/cell) for a fresh
     // load — what import_def_lef does internally; public for import_gds.
     void clear_design();
@@ -510,6 +580,24 @@ public:
     void set_comp_is_leaf(const std::string& name, bool is_leaf);
     void set_comp_bbox(const std::string& name,
                        double x1, double y1, double x2, double y2);
+    // Give every UNPLACED container the bounding box of its placed
+    // descendants, grown by `margin` on each side.  Returns how many were
+    // placed; `unresolved` (if given) collects the containers left unplaced
+    // because nothing under them has a position.
+    //
+    // This is what a DEF + Verilog merge needs and cannot get from either
+    // file.  A DEF is FLAT — `COMPONENTS` lists leaf instances only — so a
+    // hierarchical instance has no row anywhere and `import_verilog`, which
+    // knows the tree but no geometry, writes it unplaced.  BustermGen then
+    // skips it (`comp.x1 < 0`), and every busterm collapses to depth 0: the
+    // hierarchy exists in the database while the ROUTING interface is flat.
+    //
+    // Deliberately an explicit call rather than a step inside
+    // `import_verilog`: it INVENTS geometry the files never stated, which is
+    // exactly the kind of thing that should appear in the script.  It never
+    // touches a component that already has a position.
+    int derive_container_bboxes(double margin = 0.0,
+                                std::vector<std::string>* unresolved = nullptr);
     // Update the cell definition and every instance's x2/y2 to x1+w, y1+h.
     void resize_cell(const std::string& cell, double w, double h);
     void set_comp_cell(const std::string& comp_name, const std::string& new_cell);
@@ -705,6 +793,27 @@ public:
 
     // ── Metadata ───────────────────────────────────────────────────────────
     int    units() const;
+
+    // ── Import scale (layout units per micron) ─────────────────────────────
+    // The ONE place a design decides what a layout unit is.  BUDA's engine is
+    // unit-agnostic (see docs/internal/engine_units.md), so this factor does
+    // not change any algorithm — it changes what the stored numbers COUNT.
+    //
+    //   1.0 (default)  1 layout unit = 1 µm.  Historic behaviour, bit-identical.
+    //   <UNITS>        1 layout unit = 1 DEF database unit — the import is then
+    //                  EXACT, with no quantization at all.  Selected by
+    //                  set_import_scale_from_def_units(), which reads the DEF's
+    //                  own `UNITS DISTANCE MICRONS` so the caller does not have
+    //                  to know it in advance.
+    //
+    // Applied at import ONLY.  Everything downstream — the ~59 int(round())
+    // BDB→Floorplan conversions in the Python layer included — then works in
+    // the chosen unit by construction, because there is nothing left to
+    // convert.  Persisted as meta 'lu_per_um' and restored on open, so a
+    // reopened design keeps the scale its coordinates were written in.
+    void   set_import_scale(double lu_per_um);
+    void   set_import_scale_from_def_units();   // 1 layout unit = 1 DEF DBU
+    double import_scale() const;                // layout units per micron
     double die_w() const;   // explicit die_w, or union-bbox of all comps if unset
     double die_h() const;   // explicit die_h, or union-bbox of all comps if unset
     void   set_die(double w, double h);
@@ -716,6 +825,8 @@ private:
     sqlite3* _db = nullptr;
     int    _units = 1000;
     double _die_w = 0.0, _die_h = 0.0;
+    double _lu_per_um = 1.0;          // layout units per micron (import scale)
+    bool   _lu_from_def_units = false; // resolve _lu_per_um from the DEF's UNITS
 
     // Cached prepared statements for hot read paths.
     // Lazily prepared on first use; reset (not finalized) between calls.
@@ -743,6 +854,10 @@ private:
     // Insert the net_props row a net needs to appear in compute_hpwl/fanout and
     // nets_by_hpwl (idempotent) — the DEF/Verilog/label importers all do this.
     void _ensure_net_props(int net_id);
+    // Same, plus the bus/bit classification the net's NAME implies.  One
+    // reading of `<bus>[<k>]` for every path that creates a net, so a DEF
+    // net and the Verilog net it merges with cannot disagree.
+    void _ensure_net_props(int net_id, const std::string& net_name);
     // Upsert a meta(key,value) row.
     void _set_meta(const std::string& key, const std::string& value);
     // Insert a pin for net_id at the component named inst_path, auto-register
@@ -759,13 +874,16 @@ private:
                                 double abs_x, double abs_y,
                                 int child_depth);
     // parsers
-    struct LefCell { double w, h; };
+    struct LefCell { double w, h; std::string cls; };
     struct LefPin  { double ox, oy; std::string dir; };  // offset from cell origin
     using LefCells = std::unordered_map<std::string, LefCell>;
     using LefPins  = std::unordered_map<std::string,
                          std::unordered_map<std::string, LefPin>>;
-    static LefCells _parse_lef_sizes(const std::string& lef_path);
-    static LefPins  _parse_lef_pins (const std::string& lef_path);
+    // Projections of a parsed LEF onto what the BDB stores (Phase 2a; the
+    // parsing itself lives in lef_io.cpp).
+    static LefCells _lef_cells(const LefLibrary& lib);
+    static LefPins  _lef_pins (const LefLibrary& lib);
+    static std::string _lef_unmodelled_census(const LefLibrary& lib);
 };
 
 }  // namespace buda

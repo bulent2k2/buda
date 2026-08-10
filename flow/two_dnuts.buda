@@ -12,7 +12,7 @@ run_bundler strict
 generate_topologies
 run_planner 1
 run_nuts
-def_track_pattern 4 0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
-def_track_pattern 5 0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
+def_track_pattern 4 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 5 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
 run_detailed_nuts
 visualize

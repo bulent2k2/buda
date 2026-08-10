@@ -24,7 +24,20 @@ import buda
 import sys
 import re
 
-from ._options import reject_unknown_options
+from buda_session.util import min_bit_pitch, resolve_script_path
+
+from ._options import reject_unknown_options, require_int
+
+_ADD_BLOCK_USAGE = (
+    "add_block <name> <x1> <y1> <x2> <y2> [container] [corner_margin ...]  |  "
+    "add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode thru|over]")
+_ADD_KEEPOUT_USAGE = "add_keepout <x1> <y1> <x2> <y2> <layer> [<layer> ...]"
+# Blocks and keepouts share the floorplan's integer coordinate space, so they
+# share the clause explaining what a fractional coordinate would have cost.
+_BLOCK_COORD_WHY = ("A block's corners define Hanan grid lines, which every "
+                    "later stage snaps to.")
+_KEEPOUT_COORD_WHY = ("Truncating would SHRINK the zone, leaving routing that "
+                      "looks legal over blocked ground.")
 
 
 def cmd_add_block(session, cmd, args, cmd_line):
@@ -39,12 +52,19 @@ def cmd_add_block(session, cmd, args, cmd_line):
         print(f"Error: block '{name}' is already defined — "
               f"duplicate add_block (block names must be unique)")
         sys.exit(1)
+
+    def _block_coord(what, tok):
+        return require_int("add_block", what, tok, usage=_ADD_BLOCK_USAGE,
+                           why=_BLOCK_COORD_WHY)
+
     if len(args) > 1 and args[1].lower() == "rect":
         rects = []
         i = 1
         while i < len(args) and args[i].lower() == "rect":
-            x1r, y1r, x2r, y2r = int(args[i+1]), int(args[i+2]), int(args[i+3]), int(args[i+4])
-            rects.append((x1r, y1r, x2r, y2r))
+            n = len(rects) + 1
+            rects.append(tuple(
+                _block_coord(f"<{ax}> of rect {n}", args[i + k])
+                for k, ax in enumerate(("x1", "y1", "x2", "y2"), start=1)))
             i += 5
         # Optional teg_mode keyword after rects
         teg_mode = buda.TegMode.THRU
@@ -61,7 +81,8 @@ def cmd_add_block(session, cmd, args, cmd_line):
         x2 = max(r[2] for r in rects); y2 = max(r[3] for r in rects)
         rest = list(args[i:])
     else:
-        x1, y1, x2, y2 = int(args[1]), int(args[2]), int(args[3]), int(args[4])
+        x1, y1, x2, y2 = (_block_coord(f"<{ax}>", args[k]) for k, ax
+                          in enumerate(("x1", "y1", "x2", "y2"), start=1))
         session.fp.add_block(name, x1, y1, x2, y2)
         rest = list(args[5:])
     # Optional 'container' flag: marks a hierarchy envelope (transparent
@@ -276,9 +297,13 @@ def cmd_add_keepout(session, cmd, args, cmd_line):
     if len(args) < 5:
         print("Error: add_keepout requires x1 y1 x2 y2 and at least one layer")
         return
+
+    def _ko_coord(what, tok):
+        return require_int("add_keepout", what, tok, usage=_ADD_KEEPOUT_USAGE,
+                           why=_KEEPOUT_COORD_WHY)
+    x1, y1 = _ko_coord("<x1>", args[0]), _ko_coord("<y1>", args[1])
+    x2, y2 = _ko_coord("<x2>", args[2]), _ko_coord("<y2>", args[3])
     try:
-        x1, y1 = int(float(args[0])), int(float(args[1]))
-        x2, y2 = int(float(args[2])), int(float(args[3]))
         layer_ids = []
         for name in args[4:]:
             if name.isdigit():
@@ -415,7 +440,22 @@ def cmd_def_layer(session, cmd, args, cmd_line):
     # NAME silently clobbers the name->id map (last-wins), so name-based lookups
     # (set_min_stub_length_layer, def_track_pattern dir, …) resolve to the wrong
     # layer.  Reject both (like the duplicate add_net guard).
-    if session.layers.has_layer(int(lid)):
+    # Precedence (Phase 2b): an explicit `def_layer` ALWAYS outranks a layer
+    # that came from `import_lef_tech`, in either declaration order.  Import
+    # skips what the script already declared; here, the script REPLACES what
+    # the import provided.  `add_layer` appends, so the old row has to go —
+    # a duplicate id would leave both in the vector with lookups silently
+    # taking the first, i.e. the imported one.
+    _replacing_import = session._layer_source.get(int(lid)) == "lef"
+    if _replacing_import:
+        old_name = next((n for n, i in session._layer_name_map.items()
+                         if i == int(lid)), None)
+        session.layers.remove_layer(int(lid))
+        if old_name is not None:
+            session._layer_name_map.pop(old_name, None)
+        print(f"[LEF] def_layer {name} overrides the imported layer {int(lid)}"
+              + (f" ('{old_name}')" if old_name and old_name != name else ""))
+    elif session.layers.has_layer(int(lid)):
         print(f"Error: layer id {int(lid)} is already defined — "
               f"duplicate def_layer (layer ids must be unique)")
         sys.exit(1)
@@ -463,19 +503,212 @@ def cmd_def_layer(session, cmd, args, cmd_line):
         session.layers.set_layer_overhead(int(lid), ovh_val)
         session._layer_overheads[int(lid)] = ovh_val
     session._layer_name_map[name] = int(lid)
+    session._layer_source[int(lid)] = "script"
+    # An IMPORTED pattern outlives the layer row it was installed beside, and
+    # the routing grid stores the layer's direction with it.  Overriding an
+    # imported layer with a different H/V would otherwise leave that pattern
+    # registered the old way — tracks running across the wires that use them.
+    # Re-register it against the new direction; the script can still replace
+    # the pattern itself with def_track_pattern.
+    if _replacing_import and session._pattern_source.get(int(lid)) == "lef":
+        grid = session.routing_grid.get_layer_grid(int(lid))
+        session.routing_grid.define_layer(
+            int(lid), grid.global_pattern(),
+            ldir == buda.LayerDir.HORIZONTAL)
 
 
 def cmd_set_track_pitch(session, cmd, args, cmd_line):
-    # Usage: set_track_pitch <pitch>
+    # Usage: set_track_pitch <pitch>|auto
     # Declare the inter-bus pitch BEFORE run_planner so its band
     # reservations (Gap 1) match the run_nuts that packs the tracks.
     # run_nuts with no argument reuses this value.
+    #
+    # `auto` (Phase 1b, docs/internal/engine_units.md) DERIVES the gap from
+    # the routing grid — one signal-track pitch on the densest pattern layer
+    # — instead of the literal default 1.0.  The literal is the one physical
+    # default the grid does not already supply (bus width is grid-derived via
+    # LayerStack::eff_bus_width), so it is the one that silently means "one
+    # micron" on a micron design and "one DBU" on a DBU one.  Opt-in, not a
+    # new default: a derived gap is a different (larger) reservation on every
+    # design that has patterns, which is a QoR change, not a unit fix — it has
+    # to be measured before it can be defaulted, the way every other planner
+    # knob in this repo was.
     if not args:
-        print("Error: set_track_pitch requires a pitch value"); return
+        print("Error: set_track_pitch requires a pitch value (or `auto`)")
+        return
+    if args[0].lower() == "auto":
+        pitch = min_bit_pitch(session, no_pattern=0.0)
+        if pitch <= 0.0:
+            print("Error: set_track_pitch auto needs a track pattern — "
+                  "declare def_track_pattern first, or give an explicit pitch")
+            return
+        session._nuts_pitch = pitch
+        print(f"[Setup] set_track_pitch auto → {pitch:g} layout units "
+              f"(one signal-track pitch on the densest pattern layer)")
+        return
     session._nuts_pitch = float(args[0])
 
 
+def _lef_layer_id(name, taken):
+    """A layer id for a LEF layer NAME.
+
+    LEF names layers; BUDA numbers them.  The trailing integer is used when
+    there is one (`M3`->3, `metal5`->5, `Metal10`->10), because that is how
+    every hand-written stack in this repo already numbers its layers — so an
+    imported stack and a script that refers to `def_layer 4` mean the same
+    thing.  A name with no number gets the next free id.
+
+    Returns None on a COLLISION (two LEF names claiming one id).  Inventing a
+    substitute would silently re-number a stack whose numbers are how the
+    script refers to it."""
+    m = re.search(r"(\d+)\s*$", name)
+    if m:
+        lid = int(m.group(1))
+        return None if lid in taken else lid
+    lid = 1
+    while lid in taken:
+        lid += 1
+    return lid
+
+
+def cmd_import_lef_tech(session, cmd, args, cmd_line):
+    # Usage: import_lef_tech <file.lef> [top <N>]
+    #
+    # Phase 2b: turn a LEF technology stack into `def_layer` + track patterns,
+    # replacing a hand-typed stack.  Only ROUTING layers with a DIRECTION are
+    # usable — BUDA has no undirected layer, and a layer with no PITCH has no
+    # track pattern to synthesize.
+    #
+    # PRECEDENCE: an explicit `def_layer` / `def_track_pattern` ALWAYS wins,
+    # in either declaration order.  Declared first, it is skipped here;
+    # declared later, it replaces what this installed (see cmd_def_layer).
+    # That is what keeps every existing flow byte-identical while letting a
+    # real design drop the hand-typed stack entirely.
+    if not args:
+        print("Error: import_lef_tech requires <file.lef>"); return
+    reject_unknown_options("import_lef_tech",
+                           [a for a in args[1:] if not a.replace(".", "").isdigit()],
+                           ("top",))
+    n_top = 2                      # the natural pair: one H + one V
+    if "top" in args:
+        i = args.index("top")
+        if i + 1 >= len(args):
+            print("Error: import_lef_tech top requires a count"); return
+        try:
+            n_top = int(args[i + 1])
+        except ValueError:
+            print(f"Error: import_lef_tech top must be an integer, "
+                  f"got '{args[i + 1]}'"); return
+        if n_top < 0:
+            print("Error: import_lef_tech top must be >= 0"); return
+
+    lef_path = resolve_script_path(session, args[0], is_read=True)
+    try:
+        lib = buda.read_lef(lef_path)
+    except RuntimeError as e:
+        print(f"Error: import_lef_tech: {e}"); sys.exit(1)
+
+    routing = [l for l in lib.layers if l.type == "ROUTING"]
+    if not routing:
+        print(f"[LEF] {args[0]}: no ROUTING layers — nothing to import "
+              f"({len(lib.layers)} layer(s) read)")
+        return
+
+    taken = set(session._layer_source) | {
+        i for i in session._layer_name_map.values()}
+    plan, skipped = [], []
+    for l in routing:
+        if not l.dir:
+            skipped.append((l.name, "no DIRECTION (BUDA has no undirected layer)"))
+            continue
+        if l.name in session._layer_name_map:
+            skipped.append((l.name, "already declared by the script"))
+            continue
+        lid = _lef_layer_id(l.name, taken)
+        if lid is None:
+            skipped.append((l.name, "layer id already in use — rename or "
+                                    "declare it explicitly"))
+            continue
+        taken.add(lid)
+        plan.append((lid, l))
+
+    # TOP is a BUDA notion (trunk preference), not a LEF one: nothing in the
+    # file says which layers the planner should prefer for spines.  The
+    # highest-numbered layer in each direction is the defensible default, and
+    # `top <N>` / an explicit `def_layer` override it.
+    order = sorted(plan, key=lambda p: p[0], reverse=True)
+    top_ids, seen_dirs = set(), set()
+    for lid, l in order:
+        if len(top_ids) >= n_top:
+            break
+        if l.dir in seen_dirs:
+            continue
+        seen_dirs.add(l.dir)
+        top_ids.add(lid)
+
+    for lid, l in sorted(plan):
+        ldir = (buda.LayerDir.HORIZONTAL if l.dir == "HORIZONTAL"
+                else buda.LayerDir.VERTICAL)
+        ltype = buda.LayerType.TOP if lid in top_ids else buda.LayerType.LOW
+        session.layers.add_layer(lid, l.name, ldir, ltype)
+        session._layer_name_map[l.name] = lid
+        session._layer_source[lid] = "lef"
+
+        # A track pattern needs PITCH and WIDTH.  One SIGNAL slot per pitch is
+        # the honest reading of LEF ALONE: the file says how far apart tracks
+        # are and how wide a wire is, and says nothing about which of them a
+        # power grid will take — that lives in the DEF's SPECIALNETS.  So the
+        # synthesized pattern is all-signal, and a design with a real PDN
+        # declares the rails itself.
+        if not (l.has_pitch and l.has_width):
+            continue
+        if l.pitch <= l.width:
+            print(f"[LEF] layer {l.name}: PITCH {l.pitch:g} <= WIDTH "
+                  f"{l.width:g} — no room for spacing; pattern skipped")
+            continue
+        if l.has_spacing and l.width + l.spacing > l.pitch + 1e-12:
+            print(f"[LEF] layer {l.name}: WIDTH {l.width:g} + SPACING "
+                  f"{l.spacing:g} exceeds PITCH {l.pitch:g} — the file is "
+                  f"inconsistent; using PITCH")
+        slot = buda.TrackSlot(type="SIGNAL", label="",
+                              width=l.width, space_after=l.pitch - l.width)
+        pat = buda.TrackPattern(origin=l.offset if l.has_offset else 0.0,
+                                slots=[slot])
+        if session.routing_grid is None:
+            session.routing_grid = buda.RoutingGridStack()
+        session.routing_grid.define_layer(lid, pat,
+                                          l.dir == "HORIZONTAL")
+        session._pattern_source[lid] = "lef"
+        session._lef_track_width[lid] = l.width
+        session.layers.set_layer_dilution(lid, pat.dilution_factor())
+        session.layers.set_bit_pitch(lid, pat.unit_pitch())
+
+    rows = ", ".join(f"{l.name}={lid}{'(TOP)' if lid in top_ids else ''}"
+                     for lid, l in sorted(plan))
+    print(f"[LEF] imported {len(plan)} routing layer(s): {rows}")
+    for name, why in skipped:
+        print(f"[LEF] skipped layer {name}: {why}")
+
+
+def cmd_set_unit_check(session, cmd, args, cmd_line):
+    # Usage: set_unit_check [on|warn|off]
+    # The unit-plausibility guard (Phase 1d): `on` (default) STOPS a run whose
+    # block coordinates and track patterns are on different scales, `warn`
+    # reports and continues, `off` disables the check.  See
+    # docs/internal/engine_units.md.
+    if not args:
+        print(f"unit_check is {session._unit_check}")
+        return
+    val = args[0].lower()
+    if val not in ("on", "warn", "off"):
+        print(f"Error: set_unit_check expects on|warn|off, got {args[0]!r}")
+        return
+    session._unit_check = val
+
+
 COMMANDS = {
+    "set_unit_check": cmd_set_unit_check,
+    "import_lef_tech": cmd_import_lef_tech,
     "add_block": cmd_add_block,
     "corner_margin": cmd_corner_margin,
     "set_min_stub_length": cmd_set_min_stub_length,

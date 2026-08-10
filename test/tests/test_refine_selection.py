@@ -326,3 +326,66 @@ def test_topdown_recipe_heals_most_of_the_residual():
         f"audit total {total} != unplaced bits {final[0]} — something beyond "
         f"the accepted residual is being reported\n{audit}"
     )
+
+
+# ── the parallel full-trial refine sweep (chip-stack runtime, 2026-08-09) ────
+
+def _run_refine(s, arg=""):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command(f"refine_selection {arg}".strip())
+    return buf.getvalue()
+
+
+def _done_line(out):
+    return next(ln for ln in out.splitlines()
+                if ln.startswith("[refine_selection] done:"))
+
+
+def test_refine_parallel_matches_sequential(monkeypatch):
+    """Decision identity: the parallel full-trial sweep must commit the same
+    moves and report the same done line (metric trajectory, move count AND
+    trial count) as the sequential loop — the sweep only orders/filters,
+    every accept replays through the sequential trial."""
+    monkeypatch.setenv("BUDA_SWEEP_THREADS", "2")   # a real pool on any host
+    s_par = _build_session(pin_worst=True)
+    out_par = _run_refine(s_par)
+    s_seq = _build_session(pin_worst=True)
+    out_seq = _run_refine(s_seq, "no_parallel_sweep")
+    assert _selections(s_par) == _selections(s_seq)
+    assert _done_line(out_par) == _done_line(out_seq)
+    assert "divergence" not in out_par
+    assert _realized_wl(s_par) == _realized_wl(s_seq)
+
+
+def test_refine_parallel_books_psweep_time(monkeypatch):
+    """The parallel sweep actually engages: the timing line carries psweep
+    evaluations (the sequential path books none)."""
+    monkeypatch.setenv("BUDA_SWEEP_THREADS", "2")
+    s = _build_session(pin_worst=True)
+    out = _run_refine(s)
+    timing = next(ln for ln in out.splitlines()
+                  if ln.startswith("[refine_selection] timing:"))
+    assert "psweep" in timing, timing
+    s2 = _build_session(pin_worst=True)
+    out2 = _run_refine(s2, "no_parallel_sweep")
+    timing2 = next(ln for ln in out2.splitlines()
+                   if ln.startswith("[refine_selection] timing:"))
+    assert "psweep" not in timing2, timing2
+
+
+def test_screen_scores_many_matches_single():
+    """The batched parallel screen returns exactly the sequential per-bundle
+    screen's scores (screening is deterministic per (baseline, bundle) and
+    read-only, so batching must be decision-identical)."""
+    s = _build_session(pin_worst=True)
+    reqs = []
+    for w in s.bundles:
+        old = w.plan.selected_topology_index
+        alts = [t for t in range(len(w.input.candidates)) if t != old]
+        if alts:
+            reqs.append((w, alts))
+    assert reqs
+    batched = s._rr_screen_scores_many(reqs)
+    singles = [s._rr_screen_scores(w, alts) for w, alts in reqs]
+    assert batched == singles

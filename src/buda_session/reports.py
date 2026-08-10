@@ -24,6 +24,11 @@ cross-mixin helper calls resolve through the class as before.
 """
 import buda
 
+import buda_diag
+from .util import (UNIT_PITCH_UM_MAX, UNIT_PITCH_UM_MIN, UNIT_TRACKS_MAX,
+                   UNIT_TRACKS_MIN, unit_consistency_signals,
+                   unit_plausibility_faults)
+
 
 def _fmt_pull_opt(cs):
     """The anchor-interval pull optimum for the pull display (#523/#539): the
@@ -94,6 +99,111 @@ class _IntrinsicCost:
 
 
 class ReportsMixin:
+
+    # ── unit-plausibility guard (Phase 1d) ─────────────────────────────────
+    def _check_unit_plausibility(self, stage):
+        """Stop a run whose block coordinates and track patterns are on
+        different scales.
+
+        The engine is unit-agnostic, so such a mix does not crash — it
+        produces a plan in which every bus reserves a wrong fraction of the
+        space it needs, and reports it as feasible.  `tracks across the
+        design` (extent / track pitch) is a ratio of two layout-unit lengths:
+        invariant under any CONSISTENT unit, and off by the scale ratio under
+        an inconsistent one.  See `unit_plausibility_faults` for the bounds
+        and how they were fixed.
+
+        Runs once per session, at the first stage that has both a floorplan
+        and a routing grid — `run_planner` for most flows, `run_nuts` for the
+        ones that declare their patterns after planning (demo/comprehensive_
+        demo.buda does).  A no-op with no grid: there is no second scale to
+        disagree with."""
+        import os
+        mode = os.environ.get("BUDA_UNIT_CHECK", "").lower() or self._unit_check
+        if mode not in ("on", "warn", "off"):
+            mode = self._unit_check
+        measuring = bool(os.environ.get("BUDA_UNIT_SIGNAL"))
+        if mode == "off" and not measuring:
+            return
+        if self.routing_grid is None or self.fp is None:
+            return
+        signals, extent = unit_consistency_signals(self.fp, self.routing_grid)
+        if not signals:
+            return
+        # "Once per session" really means "once per unchanged grid".  A plain
+        # done-flag set at run_planner would permanently retire the run_nuts
+        # hook, so a design that declares M4 before planning and a
+        # wrong-scale M5 after would be judged on M4 alone and pass — and
+        # declaring patterns late is exactly the flow shape the second hook
+        # exists for (Codex P2 on #645).  Keyed on the patterns themselves, so
+        # a new grid command re-arms the check without any command handler
+        # having to remember to reset a flag.
+        sig_key = tuple((lid, up) for lid, up, _n in signals)
+        if self._unit_check_done == sig_key:
+            return
+        self._unit_check_done = sig_key
+        if measuring:
+            # The raw measurement, for re-calibrating the bounds against a
+            # corpus.  The bounds are only as good as the range they were set
+            # outside of, so the way to widen that range must stay in-tree —
+            # and it has to work with the check itself OFF, since a
+            # calibration sweep must not be stopped by the bounds it is
+            # measuring.
+            for lid, up, n in signals:
+                print(f"[UnitSignal] extent={extent:g} layer {lid} "
+                      f"unit_pitch={up:g} tracks_across={n:.6g}")
+        if mode == "off":
+            return
+        lu = 1.0
+        if self.bdb is not None:
+            try:
+                lu = float(self.bdb.import_scale())
+            except Exception:
+                lu = 1.0
+        faults = unit_plausibility_faults(signals, lu)
+        if not faults:
+            return
+        lo, hi = UNIT_TRACKS_MIN, UNIT_TRACKS_MAX
+        # The FIRST line carries the id (BUDA-1901): the continuation lines
+        # are the evidence for it, and giving each one an id would make a
+        # single fault look like five.  `set_unit_check warn` is a severity
+        # DOWNGRADE of that same fault — "I have seen it and I accept it on
+        # this design" — so the id is unchanged and only the severity moves,
+        # which is what keeps a methodology's gate on BUDA-1901 meaningful.
+        head = (f"[UnitCheck] {stage}: implausible design scale — the block "
+                f"coordinates and the track patterns look like they are in "
+                f"different units.")
+        lines = [buda_diag.format("BUDA-1901", head,
+                                  buda_diag.WARNING if mode == "warn" else None),
+                 f"[UnitCheck]   design extent = {extent:g} layout units; "
+                 f"plausible range is {lo:g}..{hi:g} tracks across."]
+        if any(f[3].startswith("pitch") for f in faults):
+            lines.append(
+                f"[UnitCheck]   import scale = {lu:g} layout units per micron, "
+                f"so a track pitch must land in "
+                f"{UNIT_PITCH_UM_MIN * lu:g}..{UNIT_PITCH_UM_MAX * lu:g} "
+                f"layout units to be a real metal pitch.")
+        _WHY = {"low": "too few tracks across",
+                "high": "too many tracks across",
+                "pitch_lo": "far too fine to be a real metal pitch",
+                "pitch_hi": "far too coarse to be a real metal pitch"}
+        for lid, up, n, side in faults:
+            detail = (f"{up / lu:g} µm" if side.startswith("pitch")
+                      else f"{n:.3g} tracks across")
+            lines.append(f"[UnitCheck]   layer {lid}: track pitch {up:g} → "
+                         f"{detail} ({_WHY[side]})")
+        lines.append("[UnitCheck]   Fix the scale, or `set_unit_check warn`"
+                     " / `off` if this design really is like this.")
+        text = "\n".join(lines)
+        if mode == "warn":
+            print(text)
+            return
+        # The whole diagnostic goes in the EXCEPTION, not just in the log: a
+        # command that raises has its captured output written to the flow log
+        # and NOT echoed to the terminal, so a stop whose reason lives only in
+        # a file is a stop the user cannot act on.
+        print(text)                      # for the flow-log record
+        raise ValueError("\n" + text)
 
     # ── debug cost inspection (topology explorer `debug` view) ─────────────
     def _candidate_costs(self, w):
@@ -586,12 +696,22 @@ class ReportsMixin:
         return out
 
     def _check_design(self, stage: str, all_candidates: bool = False):
+        """Audit the design at `stage`.
+
+        Returns the verdict as a dict — `{stage, ok, violations, by_kind}` —
+        so the caller can record it (Phase 0: a flow harness must be able to
+        gate on design quality, which needs the outcome as a value rather
+        than as printed prose).  `ok=False` means the audit could not run at
+        all; the printing behaviour is unchanged."""
         if stage in ("nuts", "dnuts") and self.nuts_result is None:
             print("  Error: run_nuts required first.")
-            return
+            return {"stage": stage, "ok": False, "violations": 0,
+                    "reason": "run_nuts required first", "by_kind": {}}
         if stage == "dnuts" and self.detailed_result is None:
             print("  Error: run_detailed_nuts required first.")
-            return
+            return {"stage": stage, "ok": False, "violations": 0,
+                    "reason": "run_detailed_nuts required first",
+                    "by_kind": {}}
 
         # For the topo stage, auto-switch to all-candidates mode when no
         # topology has been selected yet (before run_planner).
@@ -760,6 +880,16 @@ class ReportsMixin:
         # nuts/dnuts stages only.
         if stage in ("nuts", "dnuts"):
             self._report_doomed_seats()
+
+        # Phase 0: hand the verdict back as data.  `total` and `collected` are
+        # what the printing above already used, so this adds no new
+        # computation and cannot disagree with what was reported.
+        by_kind = {}
+        for _prefix, v in collected:
+            k = v.kind.name
+            by_kind[k] = by_kind.get(k, 0) + 1
+        return {"stage": stage, "ok": True, "violations": total,
+                "by_kind": by_kind, "all_candidates": bool(all_candidates)}
 
     # Reason text per ViolationKind, used when collapsing per-bit violations.
     _CONN_KIND_REASON = {

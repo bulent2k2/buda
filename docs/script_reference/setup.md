@@ -1,6 +1,6 @@
 # BUDA Script Reference — Setup commands
 
-Technology, floorplan, netlist, and routing-policy declarations that precede the pipeline stages: `def_layer`, `add_block`, `add_keepout`, `add_net`, `add_bus`, `corner_margin`, `detour_channel`, `set_min_stub_length[_dir|_layer]`, `set_feedthru`, `set_track_pitch`.
+Technology, floorplan, netlist, and routing-policy declarations that precede the pipeline stages: `def_layer`, `add_block`, `add_keepout`, `add_net`, `add_bus`, `corner_margin`, `detour_channel`, `set_min_stub_length[_dir|_layer]`, `set_feedthru`, `set_track_pitch`, `set_unit_check`, `import_lef_tech`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -74,6 +74,15 @@ margin calculations.
 | `x1 y1` | int | Lower-left corner (layout units) |
 | `x2 y2` | int | Upper-right corner (layout units) |
 | `rect x1 y1 x2 y2` | keyword | Multi-rect form: one candidate connection rectangle. Repeat for each rect. |
+
+Coordinates are **integers** — `Rect` is an integer bounding box and a block's
+corners become Hanan grid lines that every later stage snaps to. A fractional
+coordinate (`68.300`) is a flow-stopping error naming the argument; an integral
+value spelled as a float (`100.0`, `1e2`) is accepted, since it names an exact
+integer. To place a design whose natural units are fractional, **scale it** (µm
+→ nm) rather than rounding at the block — rounding a 1.4-unit-wide cell to
+integers distorts it by tens of percent.
+
 | `teg_mode thru\|over` | keyword | Optional; multi-rect form only. Controls how topology generation handles trunks that fall in the gap between rects. Default: `thru`. See **TEG mode** below. |
 | `corner_margin dx N` | keyword | Optional. Shrink the routing face by `N` units in X (top/bottom faces). If `dy` is omitted, the same value applies to Y as well. |
 | `corner_margin dy N` | keyword | Optional. Shrink the routing face by `N` units in Y (left/right faces). |
@@ -180,6 +189,11 @@ global planner and the detailed router respect these zones.
 | `x1 y1` | int | Lower-left corner of the prohibited region (layout units) |
 | `x2 y2` | int | Upper-right corner of the prohibited region (layout units) |
 | `layerN` | int or str | Layer ID or name (e.g. `4` or `M4`) to block in this zone. |
+
+Coordinates are **integers**, as for `add_block`. A fractional value is a
+flow-stopping error rather than a rounding: truncating would *shrink* the zone
+(`10.9` → `10` on both axes), leaving routing that looks legal over ground you
+meant to block — the wrong direction to be wrong in.
 
 **Effect:**
 - **Topology generation**: `generate_topologies` / `generate_topologies_for_bundle`
@@ -553,7 +567,7 @@ set_feedthru * * on         # global default on
 ### `set_track_pitch`
 
 ```
-set_track_pitch <pitch>
+set_track_pitch <pitch>|auto
 ```
 
 Declare the inter-bus gap that `run_planner` should reserve in its band
@@ -566,6 +580,7 @@ required inter-bus gap beside the bus.
 | Argument | Type | Description |
 |---|---|---|
 | `pitch` | float | Minimum perpendicular gap between the upper edge of one bus and the lower edge of the next, in layout units. Default `1.0`. |
+| `auto` | keyword | **Derive** the gap from the routing grid instead: one signal-track pitch on the densest pattern layer (`min` over layers of `unit_pitch / n_signal_slots`). Requires at least one `def_track_pattern`; errors otherwise rather than falling back to the literal it replaces. |
 
 **Behaviour:**
 - After this command, subsequent `run_planner` calls reserve an extra `pitch`
@@ -581,6 +596,124 @@ required inter-bus gap beside the bus.
 set_track_pitch 2.0    # 2-unit gap between buses
 run_planner 5          # plans with 2-unit pitch baked in
 run_nuts               # reuses 2.0 automatically — no need to pass it again
+```
+
+**Why `auto` exists, and why it is not the default.** The default `1.0` is the
+one physical quantity the grid does not already supply — bus width is
+grid-derived (`LayerStack::eff_bus_width` returns `bits × bit_pitch` whenever
+the layer has a pattern), but this gap is a literal, so it silently means
+“one micron” on a micron design and “one DBU” on a DBU one. `auto` closes that.
+It is opt-in because a derived gap is a *larger* reservation on every design
+that has patterns — a QoR change, not a unit fix — and this repo measures
+before it defaults. See [the coordinate contract](../internal/engine_units.md).
+
+---
+
+### `import_lef_tech`
+
+```
+import_lef_tech <file.lef> [top <N>]
+```
+
+Build the layer stack from a LEF technology file instead of typing it out:
+every `ROUTING` layer with a `DIRECTION` becomes a layer, and every one that
+also has a `PITCH` and `WIDTH` gets a synthesized track pattern.
+
+| Argument | Description |
+|---|---|
+| `file.lef` | Technology LEF. A file that cannot be read stops the run. |
+| `top N` | How many layers to mark `TOP`, highest-numbered first and at most one per direction. Default `2` — the natural H+V pair. |
+
+**Layer ids** come from the trailing integer in the LEF layer name (`M3`→3,
+`metal5`→5), because that is how hand-written stacks in this repo already
+number their layers — so an imported stack and a script that says
+`def_layer 4` mean the same layer. A name with no number gets the next free
+id; an id already in use is reported and that layer is skipped, never
+silently renumbered.
+
+**The synthesized pattern is all-signal**: one `SIGNAL` slot of `WIDTH`, with
+`PITCH - WIDTH` of space, anchored at `OFFSET`. That is the honest reading of
+LEF *alone* — the file says how far apart tracks are and how wide a wire is,
+and says nothing about which of them a power grid will take, which lives in
+the DEF's `SPECIALNETS`. A design with a real PDN declares its rails with
+`def_track_pattern`.
+
+**`TOP` is a BUDA notion, not a LEF one** — nothing in the file says which
+layers the planner should prefer for trunks. The topmost layer in each
+direction is the default; `top N` and an explicit `def_layer` override it.
+
+**Precedence.** An explicit `def_layer` / `def_track_pattern` **always**
+outranks imported technology data, in **either** declaration order:
+
+- declared **before** the import, it is skipped (reported by name or by id);
+- declared **after**, it replaces what the import installed (also reported).
+
+That is what lets a flow adopt a tech file and still override one layer, and
+what keeps every existing hand-typed flow byte-identical. Two *script*
+declarations of one id remain the error they always were.
+
+**Skipped, and said so:** a layer with no `DIRECTION` (BUDA has no undirected
+layer), a `PITCH` that leaves no room for `WIDTH`, an id collision. Nothing
+is dropped in silence.
+
+**Example:**
+```buda
+import_lef_tech tech/sky130.lef      # the whole stack
+def_layer 5 met3 V TOP 30            # …but met3 is ours
+```
+
+---
+
+### `set_unit_check`
+
+```
+set_unit_check [on|warn|off]
+```
+
+Control the **unit-plausibility guard**. With no argument, print the current
+setting.
+
+Every distance in BUDA — block coordinates, track widths, pitches, margins —
+is in *layout units*, and the engine never asks what a layout unit is (see
+[the coordinate contract](../internal/engine_units.md)). That is what lets a
+design be imported at any scale, but it also means nothing stops a design
+from **mixing** scales: blocks imported in DBU against a track pattern
+declared in microns, say. That does not crash and does not look wrong — it
+produces a plan in which every bus reserves a fraction of the space it needs
+and reports it as routable.
+
+The guard measures **tracks across the design** (`design extent / track
+pitch`) — a ratio of two layout-unit lengths, so it is identical under any
+*consistent* unit and off by the scale ratio under an inconsistent one — and
+stops the run outside `[0.5, 1e7]`. Both bounds sit far outside the measured
+range (3.66 … 797.2) and outside physical possibility (~1.2e6 for the widest
+reticle at the finest production pitch).
+
+A ratio alone has a limit: a mis-scaled small design and a legitimate huge one
+read the same. So a design that **declared** an import scale
+([`set_import_scale`](../BDB_REFERENCE.md#set_import_scale)) has asserted that
+its units are physical, and gets a second, much sharper check — the track
+pitch in real microns (`unit_pitch / lu_per_um`) must be a pitch that could
+exist, `0.005 … 500 µm`. At the default scale that check is skipped: nobody
+claimed those numbers were physical.
+
+| Value | Behaviour |
+|---|---|
+| `on` | **Default.** Report the offending layers and stop the run. |
+| `warn` | Report and continue. |
+| `off` | Do not check. |
+
+**Behaviour:**
+- Checked **once per grid**, at the first stage that has both a floorplan and
+  a routing grid — `run_planner` for most flows, `run_nuts` for flows that
+  declare their track patterns after planning. Declaring a new pattern re-arms
+  the check, so a valid early layer cannot excuse a wrong-scale later one.
+- A design with **no track pattern** is never judged: there is no second scale
+  to disagree with.
+
+**Example:**
+```buda
+set_unit_check warn    # this design really is 12 tracks across; just tell me
 ```
 
 ---

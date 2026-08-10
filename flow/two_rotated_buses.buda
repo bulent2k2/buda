@@ -52,8 +52,8 @@ run_nuts
 
 # Denser grid — unit_pitch=18, 8 signal tracks per unit.
 # Narrower tracks fit bit_width=12 inside the tightest Hanan intervals (~30 units).
-def_track_pattern 4 0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
-def_track_pattern 5 0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
+def_track_pattern 4 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 5 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
 
 run_detailed_nuts
 

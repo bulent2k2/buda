@@ -749,9 +749,13 @@ endmodule
 
     result = fpc.run_hbundle_flow(state, str(script_path), depth=0)
 
+    # Per-command detail (bundler / topology summaries) now lands in the flow
+    # log, not stdout; fold it in so these substring checks still see it.
+    _fl = script_path.parent / "log" / f"{script_path.stem}_flow.log"
+    out = result.stdout + (_fl.read_text() if _fl.exists() else "")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "HierBundler:" in result.stdout
-    assert "generate_hier_topologies:" in result.stdout
+    assert "HierBundler:" in out
+    assert "generate_hier_topologies:" in out
 
 
 def test_optimize_placement_sa(tmp_path):

@@ -16,6 +16,28 @@ For the `buda` command line itself — invocation, wrappers, and flags such as
 
 ---
 
+## Reference pages
+
+The per-command documentation lives in one page per pipeline stage under
+[`script_reference/`](script_reference/):
+
+| Page | Stage | Commands |
+|---|---|---|
+| [Setup](script_reference/setup.md) | setup | `def_layer` · `add_block` · `add_keepout` · `add_net` · `add_bus` · `corner_margin` · `detour_channel` · `set_min_stub_length[_dir\|_layer]` · `set_feedthru` · `set_track_pitch` · `set_unit_check` · `import_lef_tech` |
+| [Bundler](script_reference/bundling.md) | 1 | `run_bundler` · `run_hier_bundler` · `dump_hbundles` |
+| [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` · `set_prune_dominated` · `set_dedup_loci` · `set_drop_dangling` |
+| [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` · `unpin_topology` |
+| [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `set_pair_align_heal` · `ripup_reroute` · `negotiate_congestion` · `refine_selection` |
+| [Routing grid](script_reference/routing_grid.md) | 8 | `def_track_pattern` · `add_grid_override` · `report_overhead` |
+| [Non-default rules (NDR)](script_reference/ndr.md) | setup | `def_ndr` · `set_ndr` · `dump_ndr` — per-net width / spacing / shielding, with the demand model and the worked vehicles |
+| [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_design` · `dump_topologies` · `visualize` · `visualize_topologies` · `emit_guides` · `export_def_blockages` · `dump_messages` |
+
+Script control (`source`, `exit`, comments), the output-files table, the typical
+script skeleton, and the BDB command quick reference stay on this page, below —
+after the pipeline overview that follows.
+
+---
+
 ## Pipeline overview
 
 Commands run in the following order. Later stages depend on earlier ones.
@@ -28,6 +50,8 @@ Commands run in the following order. Later stages depend on earlier ones.
 | Setup | `set_min_stub_length`, `_dir`, `_layer` | Set minimum stub length globally, per direction, or per layer |
 | Setup | `set_feedthru` | Mark a block×layer set as routable-through (opt-in feedthru) |
 | Setup | `set_track_pitch` | Declare inter-bus pitch so `run_planner` band reservations match the NUTS solve |
+| Setup | `import_lef_tech` | Build the layer stack + track patterns from a LEF technology file; an explicit `def_layer`/`def_track_pattern` always outranks it |
+| Setup | `set_unit_check` | Unit-plausibility guard: stop (default), warn, or ignore when the blocks and the track patterns look like different scales |
 | Setup | `add_net`, `add_bus` | Declare nets / buses in the netlist |
 | Setup | `def_ndr`, `set_ndr` | Declare a non-default rule (width / spacing / shielding) and attach it to nets by name prefix — before the bundler runs |
 | Setup | `dump_ndr` | Print declared rules, their attachment scopes, and each governed bundle's slot demand + layout |
@@ -74,25 +98,6 @@ Commands run in the following order. Later stages depend on earlier ones.
 
 ---
 
-## Reference pages
-
-The per-command documentation lives in one page per pipeline stage under
-[`script_reference/`](script_reference/):
-
-| Page | Stage | Commands |
-|---|---|---|
-| [Setup](script_reference/setup.md) | setup | `def_layer` · `add_block` · `add_keepout` · `add_net` · `add_bus` · `corner_margin` · `detour_channel` · `set_min_stub_length[_dir\|_layer]` · `set_feedthru` · `set_track_pitch` |
-| [Bundler](script_reference/bundling.md) | 1 | `run_bundler` · `run_hier_bundler` · `dump_hbundles` |
-| [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` · `set_prune_dominated` · `set_dedup_loci` · `set_drop_dangling` |
-| [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` · `unpin_topology` |
-| [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `set_pair_align_heal` · `ripup_reroute` · `negotiate_congestion` · `refine_selection` |
-| [Routing grid](script_reference/routing_grid.md) | 8 | `def_track_pattern` · `add_grid_override` · `report_overhead` |
-| [Non-default rules (NDR)](script_reference/ndr.md) | setup | `def_ndr` · `set_ndr` · `dump_ndr` — per-net width / spacing / shielding, with the demand model and the worked vehicles |
-| [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_design` · `dump_topologies` · `visualize` · `visualize_topologies` |
-
-Script control (`source`, `exit`, comments), the output-files table, the typical
-script skeleton, and the BDB command quick reference stay on this page, below.
-
 ## Script control
 
 ### `source`
@@ -105,7 +110,15 @@ Execute the contents of another `.buda` script file inline, as if its
 commands had been typed at the current point. Comments and blank lines in
 the included file are skipped.
 
-The script path is resolved relative to the current working directory.
+The script path is resolved against the **including script's directory**
+(for the outermost `source` — the one the CLI itself issues — that falls
+back to the CWD, since there is no enclosing script yet). This is the one
+path rule every command shares: `open_bdb`, `save_bdb`, the `import_*` and
+`export_*` commands, and `emit_guides` all resolve a relative path against
+the enclosing script's directory too, so a `.buda` script is a
+location-independent artifact — it reads and writes the same files no matter
+where it is run from. Sessions with no script (interactive, the Tcl front
+end, the Python API) resolve against the CWD.
 Only the outermost script's path is used for sidecar (`.json`) and log
 (`.log`) file naming.
 
@@ -306,16 +319,16 @@ Worked vehicles: `flow/rnr/mix2_fast_bottomup.buda` (with layer caps:
 
 ```buda
 # DEF + Verilog merge
-open_bdb  flow/lefdef/gcd/gcd.bdb
-import_def_lef  flow/lefdef/gcd/gcd.def  flow/lefdef/gcd/gcd.lef
-import_verilog  flow/lefdef/gcd/gcd.v
+open_bdb  <path1>/gcd.bdb  # create new empty db (or open existing one)
+import_def_lef  <path2>/gcd.def  <path2>/gcd.lef
+import_verilog  <path3>/gcd.v
 
 # Fixup after import
 move_comp   u_regfile  10.0  10.0
 resize_cell DFFRX1     5.6   4.0
 
 # Build from scratch
-open_bdb  flow/manual/tiny.bdb
+open_bdb  ./tiny.bdb
 add_comp  u_a  blk  -      0   0  100 100 nonleaf
 add_comp  u_b  blk  -    200   0  300 100 nonleaf
 add_comp  u_a/x0  cell  u_a   10  10   50  50 leaf

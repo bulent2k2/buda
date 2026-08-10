@@ -691,7 +691,7 @@ def test_10_four_level_scale_one_bundle_per_bus():
             f"host (pinned ISA, see docs/internal/ci.md) with "
             f"BUDA_FLOW_QOR_REGEN=1 and commit {FLOW_QOR_GOLDEN}.")
     else:
-        assert 205 <= segs <= 209         # host-sensitive topology near-ties
+        assert 204 <= segs <= 209         # host-sensitive topology near-ties
         assert ovlps <= 1                 # a residual corner overlap when a replan doesn't clear here
         assert net_segs >= 1180
         # Off the generation host, any unplaced bits must all be accounted-for

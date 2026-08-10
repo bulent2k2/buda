@@ -15,6 +15,10 @@
  */
 
 #include "bdb.h"
+#include "lef_io.h"
+#include "def_io.h"
+#include <set>
+#include <iostream>
 #include <stdexcept>
 #include <fstream>
 #include <iterator>
@@ -22,6 +26,7 @@
 #include <regex>
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
@@ -330,6 +335,7 @@ void BDB::_create_schema() {
             depth        INTEGER DEFAULT 0,
             x1 REAL, y1 REAL, x2 REAL, y2 REAL,
             is_leaf      INTEGER DEFAULT 1,
+            is_port      INTEGER NOT NULL DEFAULT 0,
             is_replicated INTEGER DEFAULT 0,
             orient       TEXT DEFAULT 'N'
         );
@@ -387,6 +393,11 @@ void BDB::_create_schema() {
             name        TEXT PRIMARY KEY,
             width       REAL NOT NULL,
             height      REAL NOT NULL,
+            -- LEF MACRO CLASS, verbatim ('BLOCK', 'CORE', 'PAD', …).  The
+            -- authority on whether a cell is a hard macro or a standard
+            -- cell, which no other column can answer.  '' = not stated;
+            -- LEF's own default for an absent CLASS is CORE.
+            cls         TEXT NOT NULL DEFAULT '',
             bottom_up   INTEGER NOT NULL DEFAULT 0,
             layer_cap   INTEGER NOT NULL DEFAULT -1,
             layer_floor INTEGER NOT NULL DEFAULT -1
@@ -445,6 +456,14 @@ void BDB::_create_schema() {
         if (k == "units") _units = std::stoi(v);
         else if (k == "die_w") _die_w = std::stod(v);
         else if (k == "die_h") _die_h = std::stod(v);
+        else if (k == "lu_per_um") {
+            // The scale the stored coordinates were WRITTEN in.  Restoring it
+            // is what makes a reopened design self-describing: without it a
+            // DBU-scale BDB would be read back as microns and every derived
+            // physical quantity would be off by the same factor.
+            try { double d = std::stod(v); if (d > 0.0) _lu_per_um = d; }
+            catch (...) {}
+        }
     }
 }
 
@@ -774,7 +793,28 @@ void BDB::_migrate() {
             nullptr, nullptr, nullptr);
     }
     if (v < 23) {
-        // v22 -> v23: R6 shield-bonding opt-in on the rule row.  Pre-v23
+        // v22 -> v23: die ports as boundary components (Phase 3d).  Reading
+        // DEF PINS does not make them endpoints — endpoint derivation is
+        // keyed by component — so each placed port becomes a zero-area
+        // component, and this flag is what keeps that fiction VISIBLE to the
+        // database and to the audits rather than passing as a real instance.
+        // Pre-v23 designs have no ports, so the 0 default is correct.
+        sqlite3_exec(_db,
+            "ALTER TABLE component ADD COLUMN is_port INTEGER NOT NULL DEFAULT 0",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 24) {
+        // v23 -> v24: LEF MACRO CLASS on the cell row.  It is the only
+        // authoritative answer to "is this a hard macro or a standard
+        // cell", and `import_verilog` needs it to decide which instances of
+        // undefined modules belong in the routing hierarchy.  Pre-v24
+        // designs never recorded it, so '' (not stated) is correct.
+        sqlite3_exec(_db,
+            "ALTER TABLE cell ADD COLUMN cls TEXT NOT NULL DEFAULT ''",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 25) {
+        // v24 -> v25: R6 shield-bonding opt-in on the rule row.  Pre-v25
         // rules never bonded, so the 0 default is correct.
         sqlite3_exec(_db,
             "ALTER TABLE ndr_rule ADD COLUMN bond INTEGER NOT NULL DEFAULT 0",
@@ -909,7 +949,9 @@ int BDB::add_net_pins(const std::string& net_name,
     if (sqlite3_step(q_net) != SQLITE_ROW)
         throw std::runtime_error("add_net_pins: failed to insert net " + net_name);
     int net_id = sqlite3_column_int(q_net, 0);
-    _ensure_net_props(net_id);   // else it disappears from HPWL/fanout (C6-07)
+    // else it disappears from HPWL/fanout (C6-07); the name goes with it so
+    // a `<bus>[<k>]` net is classified here exactly as the importers do.
+    _ensure_net_props(net_id, net_name);
 
     // Parse "inst/path.pin_name" into (path, pin_name, dir).
     struct Ep { std::string path, pin, dir; };
@@ -986,7 +1028,9 @@ int BDB::add_net_pins_undirected(const std::string& net_name,
     if (sqlite3_step(q_net) != SQLITE_ROW)
         throw std::runtime_error("add_net_pins_undirected: failed to insert net " + net_name);
     int net_id = sqlite3_column_int(q_net, 0);
-    _ensure_net_props(net_id);   // else it disappears from HPWL/fanout (C6-07)
+    // else it disappears from HPWL/fanout (C6-07); the name goes with it so
+    // a `<bus>[<k>]` net is classified here exactly as the importers do.
+    _ensure_net_props(net_id, net_name);
 
     auto split = [](const std::string& p) {
         std::vector<std::string> v;
@@ -1051,7 +1095,9 @@ int BDB::add_net_pins_inout(const std::string& net_name,
     if (sqlite3_step(q_net) != SQLITE_ROW)
         throw std::runtime_error("add_net_pins_inout: failed to insert net " + net_name);
     int net_id = sqlite3_column_int(q_net, 0);
-    _ensure_net_props(net_id);   // else it disappears from HPWL/fanout (C6-07)
+    // else it disappears from HPWL/fanout (C6-07); the name goes with it so
+    // a `<bus>[<k>]` net is classified here exactly as the importers do.
+    _ensure_net_props(net_id, net_name);
 
     auto split = [](const std::string& p) {
         std::vector<std::string> v;
@@ -1106,6 +1152,25 @@ int BDB::add_net_pins_inout(const std::string& net_name,
 
 int BDB::units() const { return _units; }
 
+void BDB::set_import_scale(double lu_per_um) {
+    if (!(lu_per_um > 0.0))
+        throw std::runtime_error("set_import_scale: layout units per micron "
+                                 "must be positive, got " +
+                                 std::to_string(lu_per_um));
+    _lu_per_um = lu_per_um;
+    _lu_from_def_units = false;
+    _set_meta("lu_per_um", std::to_string(_lu_per_um));
+}
+
+void BDB::set_import_scale_from_def_units() {
+    // Deferred, not resolved now: the DEF's UNITS is only known once the file
+    // is being read, and asking the caller to supply it would reintroduce the
+    // out-of-band knowledge this mode exists to remove.
+    _lu_from_def_units = true;
+}
+
+double BDB::import_scale() const { return _lu_per_um; }
+
 void BDB::set_die(double w, double h) {
     _die_w = w; _die_h = h;
     auto upsert = [&](const char* key, double val) {
@@ -1144,17 +1209,15 @@ double BDB::die_h() const {
 // Both parsers use a line-by-line state machine — std::regex multiline flag
 // only affects ^ / $ anchors, NOT '.', so whole-file regex cannot span lines.
 
-// Strip DEF escaping (\[ and \]) so names match Verilog-elaborated paths
-static std::string normalize_def_name(const std::string& s) {
-    std::string out;
-    out.reserve(s.size());
-    for (size_t i = 0; i < s.size(); ++i) {
-        if (s[i] == '\\' && i+1 < s.size() && (s[i+1]=='[' || s[i+1]==']'))
-            continue;
-        out += s[i];
-    }
-    return out;
-}
+// (The old `normalize_def_name` lived here.  It stripped a backslash only
+// before `[` or `]`, and lost its last caller when the regex DEF scanner was
+// replaced in Phase 3.  `def_io.cpp`'s `unescape` supersedes it and is
+// STRICTLY better for the job the comment claimed: DEF escapes the LEADING
+// character of a hierarchical name too, so `\\mem\\[0\\]/u1` normalized to
+// `\\mem[0]/u1` under the old rule and would NOT have matched the Verilog
+// path `mem[0]/u1`, which is what it existed to match.  Pinned by
+// test_def_reader.py::test_escaped_names_are_unescaped_once and by
+// test_bdb_import_edges.py::test_an_escaped_def_name_matches_its_verilog_path.)
 
 // Map a DEF/LEF orientation token to BDB's component.orient token and whether
 // the placed bbox dims swap vs the LEF SIZE. BDB's orient convention is
@@ -1162,6 +1225,22 @@ static std::string normalize_def_name(const std::string& s) {
 // but DEF's flip tokens mirror about the Y axis (FN = MY), so they permute
 // under BDB's mirror-about-X form: DEF FN<->BDB FS, DEF FS<->BDB FN,
 // DEF FE<->BDB FW, DEF FW<->BDB FE. swap_wh is set for the 90/270 rotations.
+// A die PORT's direction, as seen from INSIDE the design.
+//
+// A boundary component is a stand-in for the world outside the die, and a
+// port declared INPUT is one the outside world DRIVES — so as a terminal on
+// that fictional component it is an output, and an OUTPUT port is something
+// the outside world receives.  Storing the declared direction unflipped left
+// every input-port net with two receivers and no driver, so the bundler
+// dropped it: "N net(s) not placed in any bundle".  A net reaching the die
+// edge being silently unrouted is the exact failure the boundary components
+// exist to prevent.
+static std::string port_dir_inward(const std::string& d) {
+    if (d == "INPUT")  return "OUTPUT";
+    if (d == "OUTPUT") return "INPUT";
+    return d.empty() ? "UNKNOWN" : d;      // INOUT / UNKNOWN pass through
+}
+
 static std::pair<std::string,bool> def_orient_to_bdb(const std::string& o) {
     if (o == "N")  return {"N",  false};
     if (o == "S")  return {"S",  false};
@@ -1179,88 +1258,85 @@ static std::vector<std::string> split_ws(const std::string& s) {
     return {std::istream_iterator<std::string>(ss), {}};
 }
 
-BDB::LefCells BDB::_parse_lef_sizes(const std::string& lef_path) {
-    LefCells sizes;
-    std::ifstream f(lef_path);
-    if (!f) return sizes;
+// A net named `<base>[<k>]` is bit k of bus <base>.  ONE reading of the
+// convention, shared by both importers, so a DEF net and the Verilog net it
+// merges with cannot be classified differently — `net_props.bus_name` /
+// `bit_index` have been in the schema for this and nothing filled them in.
+//
+// Purely a naming convention, so it is applied to the STORED name and asks
+// nothing about how the name was spelled in its file: a DEF `\w\[0\]` and a
+// Verilog `w[0]` both arrive here as `w[0]`.
+static bool derive_bus_bit(const std::string& net_name,
+                           std::string& bus, int& bit) {
+    if (net_name.size() < 4 || net_name.back() != ']') return false;
+    const auto br = net_name.rfind('[');
+    if (br == std::string::npos || br == 0) return false;
+    const std::string inner = net_name.substr(br + 1, net_name.size() - br - 2);
+    if (inner.empty()) return false;
+    for (char c : inner) if (!std::isdigit((unsigned char)c)) return false;
+    bus = net_name.substr(0, br);
+    bit = std::stoi(inner);
+    return true;
+}
 
-    std::string line, cur_cell;
-    while (std::getline(f, line)) {
-        auto tok = split_ws(line);
-        if (tok.empty()) continue;
-        if (tok[0] == "MACRO" && tok.size() >= 2)
-            { cur_cell = tok[1]; continue; }
-        if (tok[0] == "END" && tok.size() >= 2 && tok[1] == cur_cell)
-            { cur_cell.clear(); continue; }
-        if (!cur_cell.empty() && tok[0] == "SIZE" && tok.size() >= 4) {
-            try { sizes[cur_cell] = {std::stod(tok[1]), std::stod(tok[3])}; }
-            catch (...) {}
-        }
-    }
+// ── LEF adapter ──────────────────────────────────────────────────────────────
+// The parsing itself moved to src/lef_io.cpp (Phase 2a).  What remains here is
+// the PROJECTION onto what the BDB stores — footprints and one point per pin —
+// kept separate from the reading, so widening the model later is an edit here
+// and not a change to a parser.
+//
+// One read, both maps: the two helpers this replaces each opened and scanned
+// the file independently.
+
+BDB::LefCells BDB::_lef_cells(const LefLibrary& lib) {
+    LefCells sizes;
+    for (const auto& m : lib.macros) sizes[m.name] = {m.w, m.h, m.cls};
     return sizes;
 }
 
-BDB::LefPins BDB::_parse_lef_pins(const std::string& lef_path) {
+BDB::LefPins BDB::_lef_pins(const LefLibrary& lib) {
     LefPins result;
-    std::ifstream f(lef_path);
-    if (!f) return result;
-
-    std::string line, cur_cell, cur_pin, cur_dir, cur_use;
-    std::vector<double> xs, ys;
-    bool in_pin = false;
-
-    auto flush_pin = [&]() {
-        if (cur_cell.empty() || cur_pin.empty()) return;
-        if (cur_use == "POWER" || cur_use == "GROUND" || cur_use == "CLOCK") {
-            xs.clear(); ys.clear(); cur_pin.clear(); cur_dir.clear(); cur_use.clear();
-            in_pin = false; return;
-        }
-        if (!xs.empty()) {
-            double ox=0, oy=0;
-            for (auto x:xs) ox+=x;
-            for (auto y:ys) oy+=y;
-            ox/=xs.size(); oy/=ys.size();
-            std::string dir = cur_dir.empty() ? "UNKNOWN" : cur_dir;
-            result[cur_cell][cur_pin] = {ox, oy, dir};
-        }
-        xs.clear(); ys.clear(); cur_pin.clear(); cur_dir.clear(); cur_use.clear();
-        in_pin = false;
-    };
-
-    while (std::getline(f, line)) {
-        auto tok = split_ws(line);
-        if (tok.empty()) continue;
-
-        if (tok[0] == "MACRO" && tok.size() >= 2)
-            { cur_cell = tok[1]; in_pin = false; continue; }
-        if (tok[0] == "END" && tok.size() >= 2 && tok[1] == cur_cell)
-            { flush_pin(); cur_cell.clear(); continue; }
-
-        if (cur_cell.empty()) continue;
-
-        if (tok[0] == "PIN" && tok.size() >= 2) {
-            flush_pin();
-            cur_pin = tok[1]; in_pin = true; continue;
-        }
-        if (tok[0] == "END" && tok.size() >= 2 && tok[1] == cur_pin)
-            { flush_pin(); continue; }
-
-        if (!in_pin) continue;
-
-        if (tok[0] == "DIRECTION" && tok.size() >= 2)
-            cur_dir = tok[1];
-        else if (tok[0] == "USE" && tok.size() >= 2)
-            cur_use = tok[1];
-        else if (tok[0] == "RECT" && tok.size() >= 5) {
-            try {
-                double x1=std::stod(tok[1]), y1=std::stod(tok[2]);
-                double x2=std::stod(tok[3]), y2=std::stod(tok[4]);
-                xs.push_back((x1+x2)/2); ys.push_back((y1+y2)/2);
-            } catch (...) {}
+    for (const auto& m : lib.macros) {
+        for (const auto& p : m.pins) {
+            // Power/ground/clock pins are pre-routes, not signal terminals:
+            // creating BDB pins for them would put every macro's rails into
+            // the netlist.  They are READ (and reachable through the
+            // LefLibrary) but not projected here — "not stored" is now a
+            // decision at this boundary rather than a silent drop inside a
+            // scanner.
+            if (p.use == "POWER" || p.use == "GROUND" || p.use == "CLOCK")
+                continue;
+            double cx = 0, cy = 0;
+            if (!p.centroid(cx, cy)) continue;    // no shapes: nothing to place
+            // ORIGIN is the offset from the placement point to the geometry
+            // origin, so pin coordinates are relative to it.  The scanner this
+            // replaces ignored it, putting every pin of a non-zero-ORIGIN
+            // macro somewhere it is not — with no symptom until routing lands
+            // on nothing.
+            result[m.name][p.name] = {cx - m.ox, cy - m.oy,
+                                      p.dir.empty() ? "UNKNOWN" : p.dir};
         }
     }
-    flush_pin();
     return result;
+}
+
+// A census of what the file said and the model cannot hold, most common
+// first.  Stored as meta so it survives the import and can be diffed between
+// technology drops; printed so it is seen at least once.
+std::string BDB::_lef_unmodelled_census(const LefLibrary& lib) {
+    std::map<std::string, int> counts;
+    for (const auto& u : lib.unmodelled) ++counts[u.construct];
+    std::vector<std::pair<std::string,int>> rows(counts.begin(), counts.end());
+    std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second > b.second;   // count desc
+        return a.first < b.first;                               // then name
+    });
+    std::string s;
+    for (const auto& [k, n] : rows) {
+        if (!s.empty()) s += ", ";
+        s += k + ":" + std::to_string(n);
+    }
+    return s;
 }
 
 // ── DEF importer ─────────────────────────────────────────────────────────────
@@ -1278,6 +1354,11 @@ void BDB::clear_design() {
           "DELETE FROM cell_pin; DELETE FROM cell_children; "
           "DELETE FROM cell_layer_share; "         // FKs cell (v20)
           "DELETE FROM component; DELETE FROM cell;");
+    // The top-module memo describes the design being wiped, and the GDS
+    // export ADOPTS the cell it names as the top structure — stale, it
+    // could claim an unrelated cell of the next design that happens to
+    // share the old top's name (Codex P2 on #662).
+    _exec("DELETE FROM meta WHERE key='verilog_top';");
 }
 
 void BDB::add_label_pin(const std::string& net_name, int comp_id,
@@ -1302,50 +1383,63 @@ void BDB::add_label_pin(const std::string& net_name, int comp_id,
     sqlite3_step(s);
 }
 
-void BDB::import_def_lef(const std::string& def_path, const std::string& lef_path) {
-    auto lef_sizes = _parse_lef_sizes(lef_path);
-    auto lef_pins  = _parse_lef_pins(lef_path);
+DefImportStats BDB::import_def_lef(const std::string& def_path,
+                                   const std::string& lef_path) {
+    DefImportStats stats;
 
-    // Full design wipe incl. derived pipeline rows — re-importing into a BDB
-    // that holds a routed checkpoint would otherwise trip the FK constraints
-    // (same fix as import_gds; see clear_design).
+    // An ABSENT LEF used to be tolerated silently (a probe guarded the read,
+    // "as before" — inherited from the old line scanners, not chosen).  That
+    // failed in two shapes: with a populated DEF, every cell became a
+    // missing-footprint error whose advice ("check that the LEF matches this
+    // DEF") misdiagnoses a file that is not there at all; with
+    // allow_missing_footprints, a typo'd LEF path silently produced the
+    // all-specks floorplan that waiver exists to make explicit-only.  The DEF
+    // has thrown on a missing file all along (read_def) — the LEF now matches.
+    LefLibrary lef = read_lef(lef_path);
+    auto lef_sizes = _lef_cells(lef);
+    auto lef_pins  = _lef_pins(lef);
+
+    // ONE parse of the DEF (Phase 3a).  The reader this replaces was a
+    // three-state line-at-a-time std::regex machine: a legal multi-line
+    // COMPONENTS entry was skipped rather than read, and per-line regex does
+    // not survive the 10^6..10^8 lines of a real post-place DEF.
+    const DefDesign def = read_def(def_path);
+    if (def.units > 0) _units = def.units;
+
+    // Full design wipe incl. derived pipeline rows.
     clear_design();
 
-    std::ifstream f(def_path);
-    if (!f) throw std::runtime_error("BDB: cannot open DEF: " + def_path);
-
-    enum class State { IDLE, IN_COMPONENTS, IN_NETS };
-    State state = State::IDLE;
-
     Stmt s_comp(_db,
-        "INSERT OR IGNORE INTO component(name,cell,depth,x1,y1,x2,y2,is_leaf,orient)"
-        " VALUES(?,?,0,?,?,?,?,1,?)");
+        "INSERT OR IGNORE INTO component(name,cell,depth,x1,y1,x2,y2,is_leaf,orient,is_port)"
+        " VALUES(?,?,0,?,?,?,?,1,?,?)");
     Stmt s_net (_db, "INSERT OR IGNORE INTO net(name) VALUES(?)");
     Stmt s_pin (_db,
         "INSERT OR IGNORE INTO pin(net_id,comp_id,pin_name,dir,px,py)"
         " VALUES(?,?,?,?,?,?)");
-    Stmt s_np  (_db, "INSERT OR IGNORE INTO net_props(net_id) VALUES(?)");
-
-    // Persistent lookup stmts — reused across all calls to the lambdas below
+    // Prepared rather than routed through `_ensure_net_props(id, name)`:
+    // this runs once per net on a real design.  Same classification.
+    Stmt s_np  (_db, "INSERT OR IGNORE INTO net_props(net_id,bus_name,bit_index)"
+                     " VALUES(?,?,?)");
+    // One place per importer that turns a net NAME into its bus/bit columns,
+    // so the two cannot drift apart on the merge (`derive_bus_bit`).
+    auto bind_net_props = [&](int nid, const std::string& nm) {
+        std::string bus; int bit = 0;
+        sqlite3_bind_int(s_np, 1, nid);
+        if (derive_bus_bit(nm, bus, bit)) {
+            sqlite3_bind_text(s_np, 2, bus.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int (s_np, 3, bit);
+        } else {
+            sqlite3_bind_null(s_np, 2);
+            sqlite3_bind_null(s_np, 3);
+        }
+        sqlite3_step(s_np); sqlite3_reset(s_np);
+    };
     Stmt s_find_comp(_db, "SELECT id FROM component WHERE name=?");
     Stmt s_find_net (_db, "SELECT id FROM net WHERE name=?");
-    Stmt s_find_cell(_db, "SELECT cell,x1,y1 FROM component WHERE id=?");
-
-    // Populate cell table from LEF sizes
-    {
-        Stmt sc(_db, "INSERT OR REPLACE INTO cell(name,width,height) VALUES(?,?,?)");
-        for (auto& [cname, sz] : lef_sizes) {
-            sqlite3_bind_text  (sc, 1, cname.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_double(sc, 2, sz.w);
-            sqlite3_bind_double(sc, 3, sz.h);
-            sqlite3_step(sc); sqlite3_reset(sc);
-        }
-    }
 
     _exec("BEGIN");
 
     std::unordered_map<std::string,int> comp_id_cache, net_id_cache;
-
     auto get_comp_id = [&](const std::string& name) -> int {
         auto it = comp_id_cache.find(name);
         if (it != comp_id_cache.end()) return it->second;
@@ -1367,149 +1461,398 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
         return id;
     };
 
-    std::string line, cur_net;
-    const std::regex comp_re(
-        R"(-\s+(\S+)\s+(\S+)\s+\+\s+(?:PLACED|FIXED)\s+\(\s*(\d+)\s+(\d+)\s*\)\s+(\S+))");
-    const std::regex conn_re(R"(\(\s*(\S+)\s+(\S+)\s*\))");
-    const std::regex net_hdr_re(R"(^\s*-\s+(\S+))");
-    const std::regex re_sec_comp(R"(^COMPONENTS\s+\d+\s*;)");
-    const std::regex re_sec_nets(R"(^NETS\s+\d+\s*;)");
+    // ── the ONE scale decision (docs/internal/engine_units.md) ───────────
+    // DEF integers are DBU, LEF numbers are µm; both convert here and nowhere
+    // downstream.  In DBU mode dbu_to_lu is exactly 1.0.
+    auto dbu_to_lu = [&](double dbu) {
+        return _lu_from_def_units ? dbu : dbu * _lu_per_um / double(_units);
+    };
+    auto um_to_lu  = [&](double um) {
+        return um * (_lu_from_def_units ? double(_units) : _lu_per_um);
+    };
 
-    while (std::getline(f, line)) {
-        // ── section transitions ──────────────────────────────────────────
-        if (line.find("UNITS DISTANCE MICRONS") != std::string::npos) {
-            std::istringstream ss(line);
-            std::string tok;
-            while (ss >> tok) if (std::isdigit(tok[0])) { _units=std::stoi(tok); break; }
-            continue;
+    if (def.has_die) {
+        _die_w = dbu_to_lu(def.die.x2);
+        _die_h = dbu_to_lu(def.die.y2);
+    }
+
+    // ── COMPONENTS ───────────────────────────────────────────────────────
+    std::set<std::string> missing;
+    std::set<std::string> comp_names;
+    for (const auto& c : def.components) comp_names.insert(c.name);
+    for (const auto& c : def.components) {
+        double w = 0, h = 0;
+        auto cs = lef_sizes.find(c.cell);
+        if (cs != lef_sizes.end()) {
+            w = um_to_lu(cs->second.w);
+            h = um_to_lu(cs->second.h);
+        } else {
+            // The silent 0.5 x 0.5 µm fallback this replaces turned a
+            // wrong-LEF run into a plausible, entirely wrong floorplan — every
+            // macro a half-micron speck, every route between them meaningless,
+            // and no diagnostic anywhere.  The size is still filled in so the
+            // rest of the import can proceed and report ALL the missing cells
+            // at once, but the caller is told.
+            w = um_to_lu(0.5);
+            h = um_to_lu(0.5);
+            missing.insert(c.cell);
         }
-        if (line.find("DIEAREA") != std::string::npos) {
-            // DIEAREA ( 0 0 ) ( x y ) ;
-            std::vector<int> nums;
-            std::istringstream ss(line);
-            std::string tok;
-            while (ss >> tok)
-                if (!tok.empty() && (std::isdigit(tok[0]) || tok[0]=='-'))
-                    nums.push_back(std::stoi(tok));
-            if (nums.size() >= 4) {
-                _die_w = nums[2] / double(_units);
-                _die_h = nums[3] / double(_units);
+        auto [orient, swap_wh] = def_orient_to_bdb(c.orient);
+        if (swap_wh) std::swap(w, h);
+        const double x1 = dbu_to_lu(c.x), y1 = dbu_to_lu(c.y);
+        // An `UNPLACED` component has no coordinates, and the reader's
+        // defaults are (0,0) — so writing a normal bbox would put EVERY
+        // unplaced instance on top of every other one at the die origin, and
+        // the pipeline would route that pile as though it were a floorplan
+        // (Codex P1 on #649).  A note at the end does not undo geometry the
+        // next stage has already believed.
+        //
+        // The repo already has a convention for "this component has no
+        // placement": `import_verilog` writes -1,-1,-1,-1 for a component it
+        // knows only from the netlist.  Reusing it keeps ONE meaning of
+        // unplaced across both importers rather than adding a second, and it
+        // is what `add_blocks_from_bdb` and the floorplan already meet.
+        const bool has_pos = c.placed;
+        sqlite3_bind_text  (s_comp,1,c.name.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_text  (s_comp,2,c.cell.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_double(s_comp,3,has_pos ? x1     : -1);
+        sqlite3_bind_double(s_comp,4,has_pos ? y1     : -1);
+        sqlite3_bind_double(s_comp,5,has_pos ? x1 + w : -1);
+        sqlite3_bind_double(s_comp,6,has_pos ? y1 + h : -1);
+        sqlite3_bind_text  (s_comp,7,orient.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_int   (s_comp,8,0);
+        sqlite3_step(s_comp); sqlite3_reset(s_comp);
+        ++stats.imported_components;
+        if (c.placed) ++stats.placed_components;
+
+        // HALO — a keep-clear margin the placer honoured and the router must
+        // too (Phase 3c).  Emitted as a keepout ring in layout units.  Only
+        // for a PLACED instance: an unplaced one has no location, so its halo
+        // would blockade the die origin.
+        if (c.has_halo && has_pos) {
+            stats.keepouts.push_back({"", x1 - dbu_to_lu(c.halo_l),
+                                      y1 - dbu_to_lu(c.halo_b),
+                                      x1 + w + dbu_to_lu(c.halo_r),
+                                      y1 + h + dbu_to_lu(c.halo_t),
+                                      "HALO of " + c.name});
+        }
+    }
+    stats.declared_components = def.declared_components;
+    for (const auto& m : missing) stats.missing_cells.push_back(m);
+
+    // ── PINS → boundary components (Phase 3d) ────────────────────────────
+    // Reading PINS is not enough to make them endpoints: PinRow is keyed by
+    // component, and endpoint derivation skips any pin whose comp_id is not a
+    // component at the bundling depth — so a net reaching the die edge would
+    // be SILENTLY incomplete, which is precisely the failure check_design's
+    // BUSTERM_OPEN exists to catch, arriving before the audit can see it.
+    //
+    // Of the plan's two options this is (i): a zero-area boundary COMPONENT
+    // per port, behind an explicit `is_port` flag so the fiction is visible
+    // in the database and to the audits.  Every downstream stage already
+    // understands components; the cost is one fictional instance per port,
+    // and the flag is what keeps it from passing as a real one.
+    // DEF ports and component instances are SEPARATE namespaces, so a legal
+    // design may name both the same.  Inserting the port under its bare name
+    // would then be dropped by INSERT OR IGNORE, and the `( PIN name )`
+    // lookup below would resolve to the real instance — attaching the
+    // boundary connection to the wrong component and never setting is_port
+    // (Codex P2 on #647).  An internal name that cannot collide keeps them
+    // apart; `port_comp` maps the external name back to it.
+    std::map<std::string, std::string> port_comp;
+    // The __PORT__ cell rows (opens item 3): the boundary components
+    // reference them, and without a cell row the GDS export emits SREFs to
+    // a structure that is never defined — and with the port components gone
+    // on re-import, every net-name label lands "outside every component"
+    // and the whole netlist recovery silently dies with them.  A GDS
+    // structure has ONE footprint, so ports are grouped into cells BY SIZE
+    // — one shared cell when every port agrees (the measured common case:
+    // one PIN template), a numbered sibling per further size (Codex P2:
+    // taking independent maxes over a 1x10 and a 10x1 port invents a 10x10
+    // footprint that matches neither, and re-import would expand every
+    // port to it).  Class order follows DEF order, so the names are
+    // deterministic.
+    std::vector<std::pair<double,double>> port_sizes;   // size classes
+    auto port_cell_for = [&](double w, double h) -> std::string {
+        for (size_t i = 0; i < port_sizes.size(); ++i)
+            if (std::fabs(port_sizes[i].first - w) < 1e-9 &&
+                std::fabs(port_sizes[i].second - h) < 1e-9)
+                return i == 0 ? "__PORT__"
+                              : "__PORT__" + std::to_string(i + 1);
+        port_sizes.push_back({w, h});
+        std::string cell = port_sizes.size() == 1
+            ? "__PORT__" : "__PORT__" + std::to_string(port_sizes.size());
+        Stmt uc(_db, "INSERT INTO cell(name,width,height) VALUES(?1,?2,?3)"
+                     " ON CONFLICT(name) DO UPDATE SET"
+                     " width=excluded.width, height=excluded.height");
+        sqlite3_bind_text  (uc, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_double(uc, 2, w);
+        sqlite3_bind_double(uc, 3, h);
+        sqlite3_step(uc);
+        return cell;
+    };
+    for (const auto& p : def.pins) {
+        if (!p.placed) continue;                 // no location: not an endpoint
+        std::string cname = "PIN/" + p.name;
+        if (comp_names.count(cname)) {
+            // Even the prefixed form can collide with a real instance path.
+            int k = 2;
+            while (comp_names.count(cname + "#" + std::to_string(k))) ++k;
+            cname += "#" + std::to_string(k);
+        }
+        port_comp[p.name] = cname;
+        const double px = dbu_to_lu(p.x), py = dbu_to_lu(p.y);
+        double x1 = px, y1 = py, x2 = px, y2 = py;
+        for (const auto& r : p.rects) {          // shapes are relative to PLACED
+            x1 = std::min(x1, px + dbu_to_lu(r.x1));
+            y1 = std::min(y1, py + dbu_to_lu(r.y1));
+            x2 = std::max(x2, px + dbu_to_lu(r.x2));
+            y2 = std::max(y2, py + dbu_to_lu(r.y2));
+        }
+        const std::string pcell = port_cell_for(x2 - x1, y2 - y1);
+        sqlite3_bind_text  (s_comp,1,cname.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_text  (s_comp,2,pcell.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_double(s_comp,3,x1);
+        sqlite3_bind_double(s_comp,4,y1);
+        sqlite3_bind_double(s_comp,5,x2);
+        sqlite3_bind_double(s_comp,6,y2);
+        sqlite3_bind_text  (s_comp,7,"N",-1,SQLITE_STATIC);
+        sqlite3_bind_int   (s_comp,8,1);
+        sqlite3_step(s_comp); sqlite3_reset(s_comp);
+        ++stats.port_components;
+        ++stats.imported_pins;
+    }
+    stats.declared_pins = def.declared_pins;
+
+    // ── NETS ─────────────────────────────────────────────────────────────
+    // Index instances and ports by name ONCE.  Resolving each connection by
+    // scanning `def.components` made the import O(components x connections),
+    // and a placed design has O(N) of each — so the reader that exists to
+    // survive a 10^6-line DEF would have spent its time walking a vector
+    // (Codex P1 on #649).  The DB ids are already looked up this way; these
+    // are the two places that were not.
+    std::unordered_map<std::string, const DefComponent*> comp_by_name;
+    comp_by_name.reserve(def.components.size() * 2);
+    for (const auto& c : def.components) comp_by_name.emplace(c.name, &c);
+    std::unordered_map<std::string, const DefPin*> pin_by_name;
+    pin_by_name.reserve(def.pins.size() * 2);
+    for (const auto& p : def.pins) pin_by_name.emplace(p.name, &p);
+
+    for (const auto& n : def.nets) {
+        sqlite3_bind_text(s_net,1,n.name.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_step(s_net); sqlite3_reset(s_net);
+        const int nid = get_net_id(n.name);
+        if (nid < 0) continue;
+        bind_net_props(nid, n.name);
+        ++stats.imported_nets;
+        for (const auto& cn : n.conns) {
+            // A `( PIN <portName> )` connection names a die port, which is a
+            // boundary component above; anything else names an instance.
+            std::string inst = cn.inst;
+            if (cn.is_port()) {
+                auto pit = port_comp.find(cn.pin);
+                if (pit == port_comp.end()) continue;   // unplaced port
+                inst = pit->second;
             }
-            continue;
-        }
-        if (std::regex_search(line, re_sec_comp))
-            { state=State::IN_COMPONENTS; continue; }
-        if (line.find("END COMPONENTS") != std::string::npos)
-            { state=State::IDLE; continue; }
-        if (std::regex_search(line, re_sec_nets))
-            { state=State::IN_NETS; continue; }
-        if (line.find("END NETS") != std::string::npos)
-            { state=State::IDLE; continue; }
-
-        // ── component line ───────────────────────────────────────────────
-        if (state == State::IN_COMPONENTS) {
-            std::smatch m;
-            if (!std::regex_search(line, m, comp_re)) continue;
-            std::string inst=normalize_def_name(m[1]), cell=m[2];
-            double x1 = std::stoi(m[3]) / double(_units);
-            double y1 = std::stoi(m[4]) / double(_units);
-            double w=0.5, h=0.5;
-            auto cs = lef_sizes.find(cell);
-            if (cs != lef_sizes.end()) { w=cs->second.w; h=cs->second.h; }
-            // Orientation: record the BDB token and swap the placed bbox dims
-            // for 90/270 rotations (lower-left kept at the DEF placement point,
-            // the same convention as rotate_comp). Strip a trailing ';' in case
-            // the token abuts it (no space before the statement terminator).
-            std::string otok = m[5];
-            if (!otok.empty() && otok.back() == ';') otok.pop_back();
-            auto [orient, swap_wh] = def_orient_to_bdb(otok);
-            if (swap_wh) std::swap(w, h);
-            sqlite3_bind_text  (s_comp,1,inst.c_str(),-1,SQLITE_TRANSIENT);
-            sqlite3_bind_text  (s_comp,2,cell.c_str(),-1,SQLITE_TRANSIENT);
-            sqlite3_bind_double(s_comp,3,x1);
-            sqlite3_bind_double(s_comp,4,y1);
-            sqlite3_bind_double(s_comp,5,x1+w);
-            sqlite3_bind_double(s_comp,6,y1+h);
-            sqlite3_bind_text  (s_comp,7,orient.c_str(),-1,SQLITE_TRANSIENT);
-            sqlite3_step(s_comp); sqlite3_reset(s_comp);
-        }
-
-        // ── nets section ─────────────────────────────────────────────────
-        if (state == State::IN_NETS) {
-            // New net header: "- net_name" or "  - net_name" (leading whitespace allowed)
-            auto first = line.find_first_not_of(" \t");
-            if (first != std::string::npos && line[first] == '-') {
-                std::smatch m;
-                if (std::regex_search(line, m, net_hdr_re)) {
-                    cur_net = m[1];
-                    if (cur_net == "*") { cur_net=""; continue; }
-                    sqlite3_bind_text(s_net,1,cur_net.c_str(),-1,SQLITE_TRANSIENT);
-                    sqlite3_step(s_net); sqlite3_reset(s_net);
-                    int nid = get_net_id(cur_net);
-                    if (nid > 0) {
-                        sqlite3_bind_int(s_np,1,nid);
-                        sqlite3_step(s_np); sqlite3_reset(s_np);
-                    }
+            const int cid = get_comp_id(inst);
+            if (cid < 0) continue;
+            std::string dir = "UNKNOWN";
+            double ppx = -1, ppy = -1;
+            if (cn.is_port()) {
+                auto dp = pin_by_name.find(cn.pin);
+                if (dp != pin_by_name.end()) {
+                    dir = port_dir_inward(dp->second->dir);
+                    ppx = dbu_to_lu(dp->second->x);
+                    ppy = dbu_to_lu(dp->second->y);
                 }
-            }
-            // Connection tokens: ( inst pin )
-            if (cur_net.empty()) continue;
-            int net_id = get_net_id(cur_net);
-            if (net_id < 0) continue;
-            auto cb = std::sregex_iterator(line.begin(), line.end(), conn_re);
-            for (auto it=cb; it!=std::sregex_iterator(); ++it) {
-                // Normalize DEF escapes exactly like the COMPONENTS section
-                // did when the row was stored: the raw token 'mem\[0\]'
-                // would miss get_comp_id('mem[0]') and the connection was
-                // SILENTLY dropped (audit C6-01).
-                std::string inst=normalize_def_name((*it)[1]);
-                std::string pin =normalize_def_name((*it)[2]);
-                if (inst=="PIN") continue;
-                int cid = get_comp_id(inst);
-                if (cid < 0) continue;
-
-                std::string dir="UNKNOWN";
-                double px=-1, py=-1;
-                sqlite3_bind_int(s_find_cell, 1, cid);
-                if (sqlite3_step(s_find_cell) == SQLITE_ROW) {
-                    std::string cell = (const char*)sqlite3_column_text(s_find_cell, 0);
-                    double x1 = sqlite3_column_double(s_find_cell, 1);
-                    double y1 = sqlite3_column_double(s_find_cell, 2);
-                    auto ci = lef_pins.find(cell);
+            } else {
+                // Resolve the pin offset from the instance's cell in LEF.
+                auto ic = comp_by_name.find(inst);
+                if (ic != comp_by_name.end()) {
+                    const DefComponent& c = *ic->second;
+                    auto ci = lef_pins.find(c.cell);
                     if (ci != lef_pins.end()) {
-                        auto pi = ci->second.find(pin);
+                        auto pi = ci->second.find(cn.pin);
                         if (pi != ci->second.end()) {
+                            // DIRECTION comes from the cell, so it is known
+                            // whether or not the instance is placed; the
+                            // absolute POSITION is not.  Leaving it at -1 says
+                            // "unknown", which is what the column already
+                            // means, rather than claiming a pin at the origin.
                             dir = pi->second.dir;
-                            px  = x1 + pi->second.ox;
-                            py  = y1 + pi->second.oy;
+                            if (c.placed) {
+                                ppx = dbu_to_lu(c.x) + um_to_lu(pi->second.ox);
+                                ppy = dbu_to_lu(c.y) + um_to_lu(pi->second.oy);
+                            }
                         }
                     }
                 }
-                sqlite3_reset(s_find_cell);
-
-                sqlite3_bind_int   (s_pin,1,net_id);
-                sqlite3_bind_int   (s_pin,2,cid);
-                sqlite3_bind_text  (s_pin,3,pin.c_str(),-1,SQLITE_TRANSIENT);
-                sqlite3_bind_text  (s_pin,4,dir.c_str(),-1,SQLITE_TRANSIENT);
-                sqlite3_bind_double(s_pin,5,px);
-                sqlite3_bind_double(s_pin,6,py);
-                sqlite3_step(s_pin); sqlite3_reset(s_pin);
             }
+            sqlite3_bind_int   (s_pin,1,nid);
+            sqlite3_bind_int   (s_pin,2,cid);
+            sqlite3_bind_text  (s_pin,3,cn.pin.c_str(),-1,SQLITE_TRANSIENT);
+            sqlite3_bind_text  (s_pin,4,dir.c_str(),-1,SQLITE_TRANSIENT);
+            sqlite3_bind_double(s_pin,5,ppx);
+            sqlite3_bind_double(s_pin,6,ppy);
+            sqlite3_step(s_pin); sqlite3_reset(s_pin);
+        }
+    }
+    stats.declared_nets = def.declared_nets;
+
+    // ── TRACKS (Phase 3b) ────────────────────────────────────────────────
+    for (const auto& tr : def.tracks)
+        stats.tracks.push_back({tr.dir, dbu_to_lu(tr.start), dbu_to_lu(tr.step),
+                                tr.count, tr.layers});
+
+    // ── BLOCKAGES + macro OBS (Phase 3c) ─────────────────────────────────
+    //
+    // Only a HARD LAYER blockage is a routing keepout.  The other two kinds
+    // in the DEF grammar say something else entirely, and importing them as
+    // keepouts asserts a constraint the file never made (Codex P1 on #649):
+    //
+    //   * a PLACEMENT blockage constrains where CELLS may go.  It carries no
+    //     layer, and the session maps a layerless keepout onto EVERY routing
+    //     layer, so importing one forbade signal routing through an area the
+    //     DEF left completely routable.  The round trip made it acute: Phase
+    //     4b emits `PLACEMENT + PARTIAL` blockages over its own corridors, so
+    //     BUDA -> DEF -> BUDA turned each planned corridor into a hard
+    //     keepout against itself — the exact inversion Phase 4 exists to
+    //     avoid.  BUDA has no placement-legalisation stage, so there is
+    //     nothing to apply it to; it is recorded as unmodelled.
+    //   * `+ PARTIAL <density>` is a DENSITY CAP, not a prohibition.  A hard
+    //     keepout over-blocks it in the same direction, so it is recorded
+    //     rather than approximated.
+    int skipped_placement = 0, skipped_partial = 0;
+    for (const auto& b : def.blockages) {
+        if (b.is_placement) { skipped_placement += (int)b.rects.size(); continue; }
+        if (b.has_density)  { skipped_partial   += (int)b.rects.size(); continue; }
+        for (const auto& r : b.rects)
+            stats.keepouts.push_back({b.layer, dbu_to_lu(r.x1), dbu_to_lu(r.y1),
+                                      dbu_to_lu(r.x2), dbu_to_lu(r.y2),
+                                      "BLOCKAGES"});
+    }
+    // (both counts are folded into the unmodelled census below)
+    for (const auto& c : def.components) {
+        if (!c.placed) continue;    // no location: its OBS is nowhere
+        const LefMacro* m = lef.find_macro(c.cell);
+        if (!m) continue;
+        // An OBS rect is in the MACRO's frame.  Translating it without
+        // applying the instance's orientation puts the keepout somewhere the
+        // obstruction is not — blocking empty space while the real
+        // obstruction stays routable, which is a physically invalid route
+        // the audit cannot see (Codex P1 on #647).
+        //
+        // The macro's placed extent is [0, w] x [0, h] after rotation, with
+        // the lower-left at the DEF placement point (the convention the
+        // component bbox above already uses), so the transform maps the
+        // macro's own box onto that.
+        const double mw = um_to_lu(m->w), mh = um_to_lu(m->h);
+        const auto [otok, swap_wh] = def_orient_to_bdb(c.orient);
+        const std::string o8 = c.orient.empty() ? "N" : c.orient;
+        auto xform = [&](double x, double y, double& ox, double& oy) {
+            // x, y are macro-frame layout units with ORIGIN already removed.
+            if      (o8 == "N")  { ox = x;        oy = y;        }
+            else if (o8 == "S")  { ox = mw - x;   oy = mh - y;   }
+            else if (o8 == "FN") { ox = mw - x;   oy = y;        }   // mirror Y
+            else if (o8 == "FS") { ox = x;        oy = mh - y;   }   // mirror X
+            else if (o8 == "W")  { ox = mh - y;   oy = x;        }   // CCW 90
+            else if (o8 == "E")  { ox = y;        oy = mw - x;   }   // CW 90
+            else if (o8 == "FW") { ox = y;        oy = x;        }
+            else if (o8 == "FE") { ox = mh - y;   oy = mw - x;   }
+            else                 { ox = x;        oy = y;        }
+        };
+        (void)swap_wh;
+        for (const auto& o : m->obs)
+            for (const auto& r : o.rects) {
+                double ax, ay, bx, by;
+                xform(um_to_lu(r.x1 - m->ox), um_to_lu(r.y1 - m->oy), ax, ay);
+                xform(um_to_lu(r.x2 - m->ox), um_to_lu(r.y2 - m->oy), bx, by);
+                stats.keepouts.push_back(
+                    {o.layer,
+                     dbu_to_lu(c.x) + std::min(ax, bx),
+                     dbu_to_lu(c.y) + std::min(ay, by),
+                     dbu_to_lu(c.x) + std::max(ax, bx),
+                     dbu_to_lu(c.y) + std::max(ay, by),
+                     "OBS of " + c.name});
+            }
+    }
+    // Power straps are real metal a signal cannot use.
+    for (const auto& w : def.special_wires) {
+        if (w.pts.size() < 2 || w.width <= 0) continue;
+        const double hw = dbu_to_lu(w.width) / 2.0;
+        for (size_t i = 1; i < w.pts.size(); ++i) {
+            const double ax = dbu_to_lu(w.pts[i-1].first),  ay = dbu_to_lu(w.pts[i-1].second);
+            const double bx = dbu_to_lu(w.pts[i].first),    by = dbu_to_lu(w.pts[i].second);
+            stats.keepouts.push_back({w.layer,
+                                      std::min(ax,bx)-hw, std::min(ay,by)-hw,
+                                      std::max(ax,bx)+hw, std::max(ay,by)+hw,
+                                      "SPECIALNET " + w.net});
         }
     }
 
-    // Persist die metadata so direct .bdb opens work without re-parsing
+    // Cell footprints, in the same layout units as the component bboxes.
+    {
+        // CLASS rides along: it is the only authoritative answer to "hard
+        // macro or standard cell", and `import_verilog` needs it to decide
+        // which instances of undefined modules belong in the hierarchy.
+        Stmt sc(_db,
+            "INSERT OR REPLACE INTO cell(name,width,height,cls) VALUES(?,?,?,?)");
+        for (auto& [cname, sz] : lef_sizes) {
+            sqlite3_bind_text  (sc, 1, cname.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_double(sc, 2, um_to_lu(sz.w));
+            sqlite3_bind_double(sc, 3, um_to_lu(sz.h));
+            sqlite3_bind_text  (sc, 4, sz.cls.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(sc); sqlite3_reset(sc);
+        }
+    }
+
+    if (_lu_from_def_units) {
+        _lu_per_um = double(_units);
+        _lu_from_def_units = false;
+    }
+
     Stmt sm(_db, "INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)");
     auto save_meta = [&](const char* k, const std::string& v) {
         sqlite3_bind_text(sm,1,k,-1,SQLITE_STATIC);
         sqlite3_bind_text(sm,2,v.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_step(sm); sqlite3_reset(sm);
     };
+    const std::string lef_census = _lef_unmodelled_census(lef);
+    save_meta("lef_unmodelled", lef_census);
+    save_meta("lef_units_dbu",
+              lef.units_dbu > 0 ? std::to_string(lef.units_dbu) : "");
+    save_meta("lef_manufacturing_grid",
+              lef.manufacturing_grid > 0
+                  ? std::to_string(lef.manufacturing_grid) : "");
+    {
+        std::map<std::string,int> counts;
+        for (const auto& u : def.unmodelled) ++counts[u.construct];
+        // Blockages we READ but deliberately did not apply belong in the same
+        // census: "loud on the unmodelled" is the phase's own gate, and a
+        // blockage silently dropped is exactly as misleading as one silently
+        // misapplied.
+        if (skipped_placement) counts["BLOCKAGES.PLACEMENT"] += skipped_placement;
+        if (skipped_partial)   counts["BLOCKAGES.PARTIAL"]   += skipped_partial;
+        std::vector<std::pair<std::string,int>> rows(counts.begin(), counts.end());
+        std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
+            if (a.second != b.second) return a.second > b.second;
+            return a.first < b.first;
+        });
+        std::string s;
+        for (const auto& [k, n] : rows) {
+            if (!s.empty()) s += ", ";
+            s += k + ":" + std::to_string(n);
+        }
+        stats.unmodelled = s;
+        save_meta("def_unmodelled", s);
+    }
     save_meta("units", std::to_string(_units));
+    save_meta("lu_per_um", std::to_string(_lu_per_um));
     save_meta("die_w", std::to_string(_die_w));
     save_meta("die_h", std::to_string(_die_h));
 
     _exec("COMMIT");
+    return stats;
 }
 
 // ── Computed properties ───────────────────────────────────────────────────────
@@ -1543,7 +1886,7 @@ std::vector<ComponentRow> BDB::all_components() const {
     if (!_q_all_components)
         sqlite3_prepare_v2(_db,
             "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated,"
-            "COALESCE(orient,'N')"
+            "COALESCE(orient,'N'),COALESCE(is_port,0)"
             " FROM component ORDER BY id",
             -1, &_q_all_components, nullptr);
     sqlite3_reset(_q_all_components);
@@ -1563,6 +1906,7 @@ std::vector<ComponentRow> BDB::all_components() const {
         r.is_leaf      = sqlite3_column_int(q,9);
         r.is_replicated= sqlite3_column_int(q,10);
         r.orient       = col_txt(q,11);
+        r.is_port      = sqlite3_column_int(q,12);
         rows.push_back(r);
     }
     return rows;
@@ -1668,7 +2012,37 @@ std::vector<std::string> BDB::common_nets(const std::string& gid1,
 // coordinates survive.  Clears net/pin tables first (safe to call after
 // import_def_lef).
 
-void BDB::import_verilog(const std::string& v_path) {
+VerilogImportStats BDB::import_verilog(const std::string& v_path) {
+    VerilogImportStats vstats;
+
+    // Cell types the technology says are HARD MACROS.
+    //
+    // An instance of a module the netlist does not define is a library cell,
+    // and dropping those is what stops a million gates becoming a million
+    // component rows.  But the test was "the instance name is not
+    // backslash-escaped", and a hard macro is normally instantiated with an
+    // ordinary name — `fakeram45_256x16 u_mem (...)` — so it read as a
+    // standard cell and never joined the hierarchy.  In a DEF+Verilog merge
+    // that is quieter and worse than it sounds: the DEF's row survives but
+    // is never given a parent, so its CONTAINER ends up with no children,
+    // cannot be sized by `derive_container_bboxes`, and the routing
+    // interface loses a whole level.
+    //
+    // The authority on "hard macro or standard cell" is the LEF, and it
+    // states the answer outright: `MACRO … CLASS BLOCK` vs `CLASS CORE`.
+    // Nothing else here can answer it — NOT the cell name (std cells are
+    // all-lowercase in some libraries, e.g. `sky130_fd_sc_hd__inv_1`), and
+    // NOT the placement, because a DEF for a gate-level design places every
+    // standard cell too (measured: 8 std cells elaborated into pins, nets
+    // and busterms, which is exactly the explosion the filter exists to
+    // prevent — Codex P1 on #654).
+    //
+    // An absent CLASS is treated as CORE, which is LEF's own default for it.
+    std::unordered_set<std::string> macro_cells;
+    {
+        Stmt q(_db, "SELECT name, cls FROM cell WHERE cls <> '' AND cls <> 'CORE'");
+        while (sqlite3_step(q) == SQLITE_ROW) macro_cells.insert(col_txt(q, 0));
+    }
 
     // ── Phase 1: collect defined module names (one fast pass) ────────────────
     // Also keep definition order: the top module is typically defined last.
@@ -1694,26 +2068,97 @@ void BDB::import_verilog(const std::string& v_path) {
 
     // ── local helpers ─────────────────────────────────────────────────────────
 
-    // Extract simple net name from a port-map value expression.
-    // Skips constants, concatenations, UNCONNECTED stubs; strips bit selects.
-    auto clean_net = [](const std::string& expr) -> std::string {
+    // Parse a port-map value expression into a net REFERENCE: the identifier
+    // plus whatever part of it the expression selects.
+    //
+    // The selector used to be thrown away (`e.resize(e.find('['))`), which
+    // made `.a0(w[0]), .a1(w[1])` two connections to one net named `w`.  That
+    // is not only the width collapse it was filed as — a 4-bit bus arriving
+    // 1 bit wide — it SHORTS the bus: every bit of `w` became the same net,
+    // so two pins the netlist keeps apart came back electrically joined, with
+    // no diagnostic.  Keeping the selector is what makes a bus a bus, and it
+    // makes the Verilog side agree with the DEF side, which has always named
+    // bits individually (`w[0]`, `w[1]`).
+    //
+    // The one trap is that `[` does not always mean a select.  A Verilog
+    // ESCAPED identifier runs from `\` to whitespace and takes any brackets
+    // with it: `\w[0]` is an identifier *named* `w[0]`, not bit 0 of `w`.
+    // The two are told apart here and nowhere else — see `escaped`.
+    // Non-nets are recorded on the ref rather than dropped at parse time, so
+    // the ones that are OPENS can be counted per elaborated INSTANCE.  The
+    // port map is parsed once per module DEFINITION, so counting here would
+    // report one open for a module instantiated a hundred times and one for
+    // a module never instantiated at all (Codex P2 on #661).
+    enum class RefSkip { NONE, CONCAT, CONSTANT, UNCONNECTED, EXPR };
+    struct NetRef {
+        std::string base;                       // identifier, escapes stripped
+        enum Kind { WHOLE, BIT, RANGE } kind = WHOLE;
+        int  hi = 0, lo = 0;                    // BIT: hi == lo
+        bool escaped = false;                   // brackets are part of the name
+        RefSkip skip = RefSkip::NONE;           // NONE = this names a net
+    };
+    auto parse_net_ref = [](const std::string& expr, RefSkip& skip) -> NetRef {
+        skip = RefSkip::NONE;
+        NetRef r;
         std::string e = expr;
         while (!e.empty() && std::isspace((unsigned char)e.front())) e.erase(e.begin());
         while (!e.empty() && std::isspace((unsigned char)e.back()))  e.pop_back();
-        if (e.empty() || std::isdigit((unsigned char)e[0]) || e[0] == '{') return "";
-        if (e[0] == '\\') e.erase(e.begin());   // strip verilog escape prefix
-        auto br = e.find('[');
-        if (br != std::string::npos) e.resize(br);
-        while (!e.empty() && std::isspace((unsigned char)e.back())) e.pop_back();
-        if (e.size() >= 11 && e.substr(0,11) == "UNCONNECTED") return "";
-        return e;
+        if (e.empty()) { skip = RefSkip::EXPR; return r; }
+        if (std::isdigit((unsigned char)e[0])) { skip = RefSkip::CONSTANT;    return r; }
+        if (e[0] == '{')                       { skip = RefSkip::CONCAT;      return r; }
+        if (e.size() >= 11 && e.compare(0, 11, "UNCONNECTED") == 0) {
+            skip = RefSkip::UNCONNECTED; return r;
+        }
+        if (e[0] == '\\') {
+            // Escaped identifier: the whole token is the name.  Any backslash
+            // inside is an escape too (a DEF writes `\w\[0\]`), and stripping
+            // it wherever it appears is what makes the two readers agree —
+            // see the `normalize_def_name` removal in #654.
+            r.escaped = true;
+            e.erase(std::remove(e.begin(), e.end(), '\\'), e.end());
+            r.base = e;
+            return r;
+        }
+        const auto br = e.find('[');
+        if (br == std::string::npos || e.back() != ']') { r.base = e; return r; }
+        const std::string inner = e.substr(br + 1, e.size() - br - 2);
+        r.base = e.substr(0, br);
+        while (!r.base.empty() && std::isspace((unsigned char)r.base.back()))
+            r.base.pop_back();
+        const auto colon = inner.find(':');
+        // `w[ 0 ]` and `w[3 : 0]` are legal and their indices ARE literal, so
+        // an untrimmed digit test classified them as unresolvable expressions
+        // and opened the pin (Codex P2 on #661).
+        auto trim = [](std::string s) {
+            while (!s.empty() && std::isspace((unsigned char)s.front())) s.erase(s.begin());
+            while (!s.empty() && std::isspace((unsigned char)s.back()))  s.pop_back();
+            return s;
+        };
+        auto all_digits = [](const std::string& s) {
+            if (s.empty()) return false;
+            for (char c : s) if (!std::isdigit((unsigned char)c)) return false;
+            return true;
+        };
+        if (colon == std::string::npos) {
+            const std::string one = trim(inner);
+            if (!all_digits(one)) { skip = RefSkip::EXPR; return r; }    // w[i]
+            r.kind = NetRef::BIT;
+            r.hi = r.lo = std::stoi(one);
+        } else {
+            const std::string a = trim(inner.substr(0, colon)),
+                              b = trim(inner.substr(colon + 1));
+            if (!all_digits(a) || !all_digits(b)) { skip = RefSkip::EXPR; return r; }
+            r.kind = NetRef::RANGE;
+            r.hi = std::stoi(a); r.lo = std::stoi(b);
+        }
+        return r;
     };
 
-    // Parse ".port (net), ..." text → vector of (port, net) pairs
+    // Parse ".port (net), ..." text → vector of (port, net reference) pairs
     auto parse_portmap = [&](const std::string& text)
-        -> std::vector<std::pair<std::string,std::string>>
+        -> std::vector<std::pair<std::string,NetRef>>
     {
-        std::vector<std::pair<std::string,std::string>> result;
+        std::vector<std::pair<std::string,NetRef>> result;
         size_t i = 0, sz = text.size();
         while (i < sz) {
             if (text[i] != '.') { ++i; continue; }
@@ -1743,9 +2188,19 @@ void BDB::import_verilog(const std::string& v_path) {
                 else if (text[k] == ')') --depth;
                 ++k;
             }
-            std::string net = clean_net(text.substr(i, k - i - 1));
-            if (!port.empty() && !net.empty())
-                result.emplace_back(port, net);
+            RefSkip skip;
+            NetRef ref = parse_net_ref(text.substr(i, k - i - 1), skip);
+            ref.skip = skip;
+            if (port.empty()) { i = k; continue; }
+            // A CONCAT or EXPR is carried through rather than dropped: it is
+            // an OPEN in the imported design, and an open belongs to each
+            // ELABORATED instance, not to the module text.  A deliberate
+            // non-connection (constant, UNCONNECTED) is not an open and is
+            // dropped here as before.
+            if (skip == RefSkip::NONE && !ref.base.empty())
+                result.emplace_back(port, ref);
+            else if (skip == RefSkip::CONCAT || skip == RefSkip::EXPR)
+                result.emplace_back(port, ref);
             i = k;
         }
         return result;
@@ -1755,11 +2210,16 @@ void BDB::import_verilog(const std::string& v_path) {
 
     struct VInst {
         std::string cell, name;   // cell type, instance name (both unescaped)
-        std::vector<std::pair<std::string,std::string>> portmap;
+        std::vector<std::pair<std::string,NetRef>> portmap;
     };
     struct VMod {
         std::vector<VInst> insts;
         std::unordered_map<std::string, std::string> port_dirs;
+        // Declared width per port: `input [3:0] a` is 4, a bare `input a` is
+        // 1.  Needed to know how much of a part-select a port can actually
+        // take — Verilog width-adapts, so `.s(w[3:0])` on a SCALAR `s`
+        // connects bit 0 alone (Codex P1 on #661).
+        std::unordered_map<std::string, int> port_width;
     };
     std::unordered_map<std::string, VMod> mod_lib;
 
@@ -1797,7 +2257,15 @@ void BDB::import_verilog(const std::string& v_path) {
 
         auto parse_port_dirs = [&](const std::string& text) {
             if (cur_mod.empty()) return;
-            static const std::regex decl_re(R"(\b(input|output|inout)\b([^;)]*))");
+            // Each clause runs to the next DIRECTION keyword, not to the next
+            // `;`/`)`.  An ANSI header — `module top (input a, output b);` —
+            // is one statement, so stopping only at the terminator let the
+            // first `input` swallow `a, output b` and every port in the
+            // module was recorded INPUT (Codex P2 on #650).  Pre-existing,
+            // and it reaches `cell_pin` directions for any ANSI-header
+            // netlist, so an OUTPUT pin was indexed as an INPUT.
+            static const std::regex decl_re(
+                R"(\b(input|output|inout)\b((?:(?!\b(?:input|output|inout)\b)[^;)])*))");
             auto begin = std::sregex_iterator(text.begin(), text.end(), decl_re);
             auto end = std::sregex_iterator();
             for (auto it = begin; it != end; ++it) {
@@ -1805,17 +2273,39 @@ void BDB::import_verilog(const std::string& v_path) {
                 std::transform(dir.begin(), dir.end(), dir.begin(),
                                [](unsigned char c){ return std::toupper(c); });
                 std::string rest = (*it)[2].str();
+                // The clause's range comes once, before the names, and
+                // applies to all of them: `input [3:0] a, b;` declares two
+                // 4-bit ports.  Read it BEFORE the strip below throws every
+                // bracket away.  Only a literal `[<n>:<m>]` counts — an
+                // escaped identifier can carry brackets with no colon.
+                int decl_w = 1;
+                {
+                    static const std::regex range_re(
+                        R"(^\s*\[\s*(\d+)\s*:\s*(\d+)\s*\])");
+                    std::smatch rm;
+                    if (std::regex_search(rest, rm, range_re)) {
+                        const int a = std::stoi(rm[1].str()),
+                                  b = std::stoi(rm[2].str());
+                        decl_w = std::abs(a - b) + 1;
+                    }
+                }
                 rest = std::regex_replace(rest, std::regex(R"(\[[^\]]+\])"), " ");
                 rest = std::regex_replace(rest, std::regex(R"(\b(wire|reg|logic|signed|unsigned)\b)"), " ");
                 std::stringstream ss(rest);
                 std::string item;
                 while (std::getline(ss, item, ',')) {
                     std::string name = clean_port_name(item);
-                    if (!name.empty())
+                    if (!name.empty()) {
                         mod_lib[cur_mod].port_dirs[name] = dir;
+                        mod_lib[cur_mod].port_width[name] = decl_w;
+                    }
                 }
             }
         };
+
+        // Distinct cell names already named in the skip census, so the report
+        // lists eight KINDS of cell rather than the first eight instances.
+        std::unordered_set<std::string> skipped_seen;
 
         // Process a complete accumulated instance text
         auto finish_inst = [&](const std::string& text) {
@@ -1850,15 +2340,38 @@ void BDB::import_verilog(const std::string& v_path) {
             }
             if (cell.empty() || inst_nm.empty()) return;
             bool is_defined = defined_mods.count(cell);
-            // Skip standard cells: cell not a defined module AND inst name unescaped
-            if (!is_defined && !esc_inst) return;
-            // Skip uppercase standard cells even with escaped instance names
-            // (e.g. "DFFR_X1 \arb_sel_q_reg[0]" in Genus output).
-            // Real macros (fakeram45_*, etc.) contain lowercase letters.
-            if (!is_defined && esc_inst) {
-                bool has_lower = false;
-                for (char c : cell) if (std::islower((unsigned char)c)) { has_lower=true; break; }
-                if (!has_lower) return;
+            if (!is_defined) {
+                // An instance of a module the netlist does not define: a
+                // library cell.  Keep it only on a reason, in this order.
+                //
+                // 1. The TECHNOLOGY says the cell is a hard macro (a LEF
+                //    CLASS other than CORE).  Not a guess, and independent
+                //    of how the instance name is spelled — which is what
+                //    carries a macro through a DEF+Verilog merge.
+                // 2. Otherwise the legacy heuristic, unchanged, for an
+                //    import with no LEF to ask: a backslash-escaped instance
+                //    name AND a cell name containing a lowercase letter
+                //    (`fakeram45_*` yes, `DFFR_X1` no — Genus writes escaped
+                //    names for both).
+                //
+                // Anything else is skipped and COUNTED.  The count is the
+                // point: rule 2 is still a heuristic, and a silently missing
+                // instance is indistinguishable from a design that never had
+                // one.
+                bool keep = macro_cells.count(cell) > 0;
+                if (!keep && esc_inst) {
+                    for (char c : cell)
+                        if (std::islower((unsigned char)c)) { keep = true; break; }
+                }
+                if (!keep) {
+                    ++vstats.skipped_library_cells;
+                    if (skipped_seen.insert(cell).second) {
+                        ++vstats.skipped_kinds;
+                        if (vstats.skipped_cells.size() < 8)
+                            vstats.skipped_cells.push_back(cell);
+                    }
+                    return;
+                }
             }
             while (i < sz && text[i] != '(') ++i;
             VInst vi{ cell, inst_nm, {} };
@@ -1940,11 +2453,53 @@ void BDB::import_verilog(const std::string& v_path) {
         for (auto it = defined_order.rbegin(); it != defined_order.rend(); ++it)
             if (!instantiated.count(*it)) { top_mod = *it; break; }
     }
-    if (top_mod.empty()) return;
+    if (top_mod.empty()) return vstats;
+    vstats.top_module = top_mod;
+    // Recorded so the GDS export can adopt this cell as the TOP structure's
+    // name instead of emitting it as an empty orphan beside a synthetic
+    // 'top' (opens item 3) — the netlist declared it top; believe it.
+    meta_set("verilog_top", top_mod);
 
     // ── Phase 4: elaborate hierarchy → BDB ───────────────────────────────────
     // Preserve component placement from any prior import_def_lef call.
     // Clear only net/pin tables.
+    // The die's own ports, saved before the wipe and restored after
+    // elaboration.
+    //
+    // Elaboration walks INSTANCES, and a top-level port is not one, so the
+    // boundary components `import_def_lef` synthesizes from DEF `PINS`
+    // (Phase 3d) would come out of the rebuild with no pin rows at all —
+    // components that look fine while a net reaching the die edge is
+    // silently endpoint-less and the bundler drops it as "not placed in any
+    // bundle".  That is exactly the silent open those components exist to
+    // prevent, reappearing in the DEF+Verilog merge they were built for.
+    //
+    // Saved rather than RECONSTRUCTED: the DEF stated each port's position
+    // and direction, and reproducing them from the component bbox gets both
+    // wrong.  The bbox is the union of the PLACED point and every shape, so
+    // its midpoint is not the pin for an asymmetric or multi-shape port and
+    // can land in empty space; and the direction would come from
+    // `port_dirs`, which is the netlist's word for something the DEF already
+    // said (Codex P2 x2 on #650).  Nets are keyed by NAME because their ids
+    // do not survive the rebuild.
+    struct SavedPortPin {
+        int comp_id; std::string net, pin, dir; double px, py;
+    };
+    std::vector<SavedPortPin> saved_port_pins;
+    {
+        Stmt q(_db,
+            "SELECT p.comp_id, n.name, p.pin_name, p.dir, p.px, p.py"
+            "  FROM pin p JOIN net n ON n.id = p.net_id"
+            "             JOIN component c ON c.id = p.comp_id"
+            " WHERE c.is_port = 1"
+            " ORDER BY p.comp_id, p.pin_name");   // deterministic restore
+        while (sqlite3_step(q) == SQLITE_ROW)
+            saved_port_pins.push_back({
+                sqlite3_column_int(q, 0), col_txt(q, 1), col_txt(q, 2),
+                col_txt(q, 3), sqlite3_column_double(q, 4),
+                sqlite3_column_double(q, 5)});
+    }
+
     _exec("DELETE FROM pin; DELETE FROM net_props; DELETE FROM net;");
 
     // UPSERT: keep existing x1/y1/x2/y2 (from DEF), update hierarchy fields
@@ -1953,13 +2508,35 @@ void BDB::import_verilog(const std::string& v_path) {
         VALUES(?,?,?,?,-1,-1,-1,-1,?)
         ON CONFLICT(name) DO UPDATE SET
           cell=excluded.cell, parent_id=excluded.parent_id,
-          depth=excluded.depth, is_leaf=excluded.is_leaf
+          depth=excluded.depth,
+          -- `?6` is the leaf verdict for a row the DEF already PLACED; the
+          -- `excluded` value is the verdict for a netlist-only row.  See
+          -- the table above `leaf_placed` at the call site for why the two
+          -- differ, and why "was it placed" alone is NOT the discriminator.
+          is_leaf=CASE WHEN component.x1 >= 0 THEN ?6 ELSE excluded.is_leaf END
     )");
     Stmt s_net (_db, "INSERT OR IGNORE INTO net(name) VALUES(?)");
     Stmt s_pin (_db,
         "INSERT OR IGNORE INTO pin(net_id,comp_id,pin_name,dir,px,py)"
         " VALUES(?,?,?,?,?,?)");
-    Stmt s_np  (_db, "INSERT OR IGNORE INTO net_props(net_id) VALUES(?)");
+    // Prepared rather than routed through `_ensure_net_props(id, name)`:
+    // this runs once per net on a real design.  Same classification.
+    Stmt s_np  (_db, "INSERT OR IGNORE INTO net_props(net_id,bus_name,bit_index)"
+                     " VALUES(?,?,?)");
+    // One place per importer that turns a net NAME into its bus/bit columns,
+    // so the two cannot drift apart on the merge (`derive_bus_bit`).
+    auto bind_net_props = [&](int nid, const std::string& nm) {
+        std::string bus; int bit = 0;
+        sqlite3_bind_int(s_np, 1, nid);
+        if (derive_bus_bit(nm, bus, bit)) {
+            sqlite3_bind_text(s_np, 2, bus.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int (s_np, 3, bit);
+        } else {
+            sqlite3_bind_null(s_np, 2);
+            sqlite3_bind_null(s_np, 3);
+        }
+        sqlite3_step(s_np); sqlite3_reset(s_np);
+    };
     Stmt s_find_by_name(_db, "SELECT id FROM component WHERE name=?");
     Stmt s_cell(_db,
         "INSERT OR IGNORE INTO cell(name,width,height) VALUES(?,0,0)");
@@ -1985,13 +2562,15 @@ void BDB::import_verilog(const std::string& v_path) {
     std::unordered_map<std::string,int> comp_ids, net_ids;
 
     auto upsert_comp = [&](const std::string& path, const std::string& cell,
-                           int par_id, int depth, bool is_leaf) -> int {
+                           int par_id, int depth, bool is_leaf,
+                           bool is_leaf_if_placed) -> int {
         sqlite3_bind_text(s_comp,1,path.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_bind_text(s_comp,2,cell.c_str(),-1,SQLITE_TRANSIENT);
         if (par_id >= 0) sqlite3_bind_int(s_comp,3,par_id);
         else             sqlite3_bind_null(s_comp,3);
         sqlite3_bind_int(s_comp,4,depth);
         sqlite3_bind_int(s_comp,5,is_leaf ? 1 : 0);
+        sqlite3_bind_int(s_comp,6,is_leaf_if_placed ? 1 : 0);
         sqlite3_step(s_comp); sqlite3_reset(s_comp);
         // Always SELECT — last_insert_rowid is unreliable after UPSERT DO UPDATE:
         // it returns the last INSERT rowid from any prior transaction, not the
@@ -2012,7 +2591,7 @@ void BDB::import_verilog(const std::string& v_path) {
         sqlite3_step(s_net);
         int id = (int)sqlite3_last_insert_rowid(_db);
         sqlite3_reset(s_net);
-        sqlite3_bind_int(s_np,1,id); sqlite3_step(s_np); sqlite3_reset(s_np);
+        bind_net_props(id, name);
         net_ids[name] = id;
         return id;
     };
@@ -2030,32 +2609,132 @@ void BDB::import_verilog(const std::string& v_path) {
         if (mit == mod_lib.end()) return;
 
         for (auto& vi : mit->second.insts) {
-            bool is_leaf = !defined_mods.count(vi.cell);
+            // Two verdicts, because a netlist-only row and a DEF-PLACED row
+            // are asking different questions of the same module:
+            //
+            //   module          netlist-only     DEF-placed
+            //   ------------------------------------------------
+            //   undefined       leaf             leaf
+            //   has instances   container        container
+            //   defined, EMPTY  container [1]    leaf      [2]
+            //
+            // [1] the landed rule (features/bdb_import.feature): declaring a
+            //     module makes it a hierarchy level even with an empty body.
+            // [2] an empty body is also how a netlist gives a hard macro its
+            //     port directions while leaving geometry to the LEF.  A row
+            //     the DEF placed from a LEF FOOTPRINT is that macro, and
+            //     calling it a container stops its footprint blocking low
+            //     layers and sends busterm derivation into a cell with no
+            //     children.
+            //
+            // Note what is NOT the discriminator: placement alone.  A DEF
+            // may place hierarchy envelopes as well as their descendants
+            // (features/bdb_combined.feature does exactly that for ai/bi/ci),
+            // and those have instances — so they stay containers on both
+            // sides of the table (Codex P1 on #650).
+            auto sub = mod_lib.find(vi.cell);
+            const bool defined = (sub != mod_lib.end());
+            const bool empty_body = defined && sub->second.insts.empty();
+            bool is_leaf = !defined;
+            bool is_leaf_if_placed = !defined || empty_body;
             // Instance path uses unescaped name (matches DEF convention)
             std::string inst_path = path.empty() ? vi.name : path + "/" + vi.name;
 
-            int cid = upsert_comp(inst_path, vi.cell, par_id, depth, is_leaf);
+            int cid = upsert_comp(inst_path, vi.cell, par_id, depth, is_leaf,
+                                  is_leaf_if_placed);
+            ++vstats.elaborated;
 
             // Build child context and create pin records
             Ctx child_ctx;
-            for (auto& [port, local_net] : vi.portmap) {
-                // Resolve local_net through current ctx (port connections from parent)
-                auto it = ctx.find(local_net);
-                std::string qnet = (it != ctx.end())
+            for (auto& [port, ref] : vi.portmap) {
+                // Resolve the IDENTIFIER through the current ctx (port
+                // connections from the parent), then re-apply the selector.
+                // Resolving base-then-select is what makes a bit-select work
+                // across a hierarchy boundary: with `.a(w)` in the parent,
+                // ctx maps `a` to `…/w`, so the child's own `a[0]` lands on
+                // `…/w[0]` — the same net the parent's `.x(w[0])` names.
+                auto it = ctx.find(ref.base);
+                const std::string qbase = (it != ctx.end())
                     ? it->second
-                    : (path.empty() ? local_net : path + "/" + local_net);
+                    : (path.empty() ? ref.base : path + "/" + ref.base);
 
-                child_ctx[port] = qnet;
+                auto add_pin = [&](const std::string& qnet) {
+                    const int nid = get_net(qnet);
+                    if (nid <= 0 || cid <= 0) return;
+                    sqlite3_bind_int   (s_pin,1,nid);
+                    sqlite3_bind_int   (s_pin,2,cid);
+                    sqlite3_bind_text  (s_pin,3,port.c_str(),-1,SQLITE_TRANSIENT);
+                    sqlite3_bind_text  (s_pin,4,"UNKNOWN",-1,SQLITE_STATIC);
+                    sqlite3_bind_double(s_pin,5,-1.0);
+                    sqlite3_bind_double(s_pin,6,-1.0);
+                    sqlite3_step(s_pin); sqlite3_reset(s_pin);
+                };
+                auto bit_of = [&](int b) {
+                    return qbase + "[" + std::to_string(b) + "]";
+                };
 
-                int nid = get_net(qnet);
-                if (nid <= 0 || cid <= 0) continue;
-                sqlite3_bind_int   (s_pin,1,nid);
-                sqlite3_bind_int   (s_pin,2,cid);
-                sqlite3_bind_text  (s_pin,3,port.c_str(),-1,SQLITE_TRANSIENT);
-                sqlite3_bind_text  (s_pin,4,"UNKNOWN",-1,SQLITE_STATIC);
-                sqlite3_bind_double(s_pin,5,-1.0);
-                sqlite3_bind_double(s_pin,6,-1.0);
-                sqlite3_step(s_pin); sqlite3_reset(s_pin);
+                if (ref.kind == NetRef::BIT) {
+                    // The port names one bit, so the port IS that bit: a child
+                    // referring to the port plainly must land on it.
+                    child_ctx[port] = bit_of(ref.lo);
+                    add_pin(child_ctx[port]);
+                    ++vstats.bit_selects;
+                } else if (ref.kind == NetRef::RANGE) {
+                    // A part-select on a port BUDA models as one pin.  Each
+                    // bit the PORT can actually take gets a pin row (same
+                    // pin_name — the pin key is (net,comp,pin), so that is
+                    // representable), which keeps the connection to those
+                    // bits rather than inventing a net called `w[3:0]` that
+                    // the netlist never declared.
+                    //
+                    // How many bits the port can take is the formal's
+                    // DECLARED width, not the select's: Verilog width-adapts,
+                    // so `.s(w[3:0])` on a scalar `s` connects bit 0 and
+                    // nothing else.  Expanding to the select's width regard-
+                    // less put four nets on that one pin and reported three
+                    // connections the netlist does not have (Codex P1 on
+                    // #661).  Bits are taken LSB-first because that is the
+                    // end Verilog aligns.
+                    //
+                    // An UNKNOWN formal width (an undefined module — a macro
+                    // kept by the library-cell filter, which declares no
+                    // ports here) is not guessed either way.  Bit 0 is
+                    // connected because it is connected for EVERY width >= 1,
+                    // and the rest is reported rather than invented.
+                    const int nsel = std::abs(ref.hi - ref.lo) + 1;
+                    int take = nsel;
+                    bool width_known = false;
+                    if (defined) {
+                        auto pw = sub->second.port_width.find(port);
+                        if (pw != sub->second.port_width.end()) {
+                            width_known = true;
+                            take = std::min(nsel, pw->second);
+                        }
+                    }
+                    if (!width_known) { take = 1; ++vstats.unsized_part_selects; }
+
+                    const int base_bit = std::min(ref.hi, ref.lo);
+                    for (int k = 0; k < take; ++k) add_pin(bit_of(base_bit + k));
+
+                    // The child context: a single connected bit makes the
+                    // port that bit (as in the BIT case).  Otherwise the
+                    // resolved BASE, so a child's `a[k]` composes to `w[k]` —
+                    // exact for the usual `w[N:0]` and OFF BY `lo` otherwise,
+                    // which is reported rather than quietly mapped.
+                    child_ctx[port] = (take == 1) ? bit_of(base_bit) : qbase;
+                    ++vstats.part_selects;
+                    if (take > 1 && ref.lo != 0 && defined &&
+                        !sub->second.insts.empty())
+                        ++vstats.offset_part_selects;
+                } else if (ref.skip != RefSkip::NONE) {
+                    // A concatenation or a non-literal select: an OPEN, and
+                    // one per ELABORATED instance — a module instantiated a
+                    // hundred times loses the connection a hundred times.
+                    ++vstats.unresolved_conns;
+                } else {
+                    child_ctx[port] = qbase;
+                    add_pin(qbase);
+                }
             }
 
             if (!is_leaf)
@@ -2064,7 +2743,24 @@ void BDB::import_verilog(const std::string& v_path) {
     };
 
     elaborate(top_mod, "", -1, 0, {});
+
+    // ── the die's own ports, restored ────────────────────────────────────
+    // Exactly the rows the DEF wrote — position and direction included.
+    // See the save site above the pin-table wipe for why they are carried
+    // rather than reconstructed.
+    for (const auto& sp : saved_port_pins) {
+        const int nid = get_net(sp.net);
+        if (nid <= 0) continue;
+        sqlite3_bind_int   (s_pin, 1, nid);
+        sqlite3_bind_int   (s_pin, 2, sp.comp_id);
+        sqlite3_bind_text  (s_pin, 3, sp.pin.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text  (s_pin, 4, sp.dir.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_double(s_pin, 5, sp.px);
+        sqlite3_bind_double(s_pin, 6, sp.py);
+        sqlite3_step(s_pin); sqlite3_reset(s_pin);
+    }
     _exec("COMMIT");
+    return vstats;
 }
 
 // ── Mutations ─────────────────────────────────────────────────────────────────
@@ -2106,6 +2802,103 @@ void BDB::set_comp_bbox(const std::string& name,
     sqlite3_bind_text  (u, 5, name.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_step(u);
     compute_hpwl();
+}
+
+int BDB::derive_container_bboxes(double margin,
+                                 std::vector<std::string>* unresolved) {
+    // Deepest-FIRST, so a container of containers is resolved from children
+    // that were themselves just resolved.  Doing it the other way round
+    // would give an outer container the union of whatever happened to be
+    // placed already — a box that is right only by accident.
+    auto comps = all_components();
+    std::unordered_map<int, std::vector<int>> kids;   // parent id -> child ids
+    std::unordered_map<int, size_t> index;
+    for (size_t i = 0; i < comps.size(); ++i) {
+        index[comps[i].id] = i;
+        if (comps[i].parent_id >= 0) kids[comps[i].parent_id].push_back(comps[i].id);
+    }
+    std::vector<size_t> order(comps.size());
+    for (size_t i = 0; i < comps.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        if (comps[a].depth != comps[b].depth) return comps[a].depth > comps[b].depth;
+        return comps[a].name < comps[b].name;      // deterministic
+    });
+
+    int placed = 0;
+    for (size_t oi : order) {
+        ComponentRow& c = comps[oi];
+        if (c.x1 >= 0) continue;                   // already has a position
+        auto kit = kids.find(c.id);
+        if (kit == kids.end() || kit->second.empty()) {
+            // Not a container at all — an unplaced LEAF is a real fact about
+            // the design (a netlist instance the DEF never placed), and
+            // inventing a box for it would be a lie, not a convenience.
+            continue;
+        }
+        bool any = false;
+        double x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+        for (int kid : kit->second) {
+            const ComponentRow& k = comps[index[kid]];
+            if (k.x1 < 0) continue;                // still unplaced: skip
+            if (!any) { x1 = k.x1; y1 = k.y1; x2 = k.x2; y2 = k.y2; any = true; }
+            else {
+                x1 = std::min(x1, k.x1); y1 = std::min(y1, k.y1);
+                x2 = std::max(x2, k.x2); y2 = std::max(y2, k.y2);
+            }
+        }
+        if (!any) {
+            if (unresolved) unresolved->push_back(c.name);
+            continue;
+        }
+        x1 -= margin; y1 -= margin; x2 += margin; y2 += margin;
+        set_comp_bbox(c.name, x1, y1, x2, y2);
+        c.x1 = x1; c.y1 = y1; c.x2 = x2; c.y2 = y2;   // visible to its parent
+        // A container is not a leaf, whatever the netlist reader guessed:
+        // it has children, and the routing model treats a leaf footprint as
+        // a LOW-layer keepout while a container is transparent to them.
+        set_comp_is_leaf(c.name, false);
+        ++placed;
+    }
+
+    // Write the derived size back to the CELL definition (opens item 3).
+    // A merge-created container cell carries width=height=0 — neither input
+    // file states a size for it — so the GDS export emitted its structure
+    // with no outline and warned that every placement's bbox differs from
+    // the (0x0) cell footprint.  The rule here was MEASURED before it was
+    // chosen: instances of a derived cell are size-uniform (containers come
+    // from congruent templates), so the common instance size IS the cell
+    // size.  A cell whose instances disagree, or has an unplaced instance,
+    // is left 0x0 — the export's dim-mismatch warning keeps that gap
+    // visible, and inventing a max would claim a footprint no instance has.
+    // The SQL guard (width=0 AND height=0) means a real size — LEF SIZE, a
+    // hand resize_cell — is never overwritten.
+    {
+        std::unordered_map<std::string, std::pair<double,double>> common;
+        std::unordered_set<std::string> bad;
+        auto swapped = [](const std::string& o) {
+            return o == "E" || o == "W" || o == "FE" || o == "FW";
+        };
+        for (const auto& c : comps) {
+            if (c.x1 < 0) { bad.insert(c.cell); continue; }   // unplaced
+            double w = c.x2 - c.x1, h = c.y2 - c.y1;
+            if (swapped(c.orient)) std::swap(w, h);           // cell frame
+            auto it = common.find(c.cell);
+            if (it == common.end()) common[c.cell] = {w, h};
+            else if (std::fabs(it->second.first - w) > 1e-6 ||
+                     std::fabs(it->second.second - h) > 1e-6)
+                bad.insert(c.cell);
+        }
+        Stmt u(_db, "UPDATE cell SET width=?2, height=?3"
+                    " WHERE name=?1 AND width=0 AND height=0");
+        for (const auto& [cell, wh] : common) {
+            if (bad.count(cell)) continue;
+            sqlite3_bind_text  (u, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_double(u, 2, wh.first);
+            sqlite3_bind_double(u, 3, wh.second);
+            sqlite3_step(u); sqlite3_reset(u);
+        }
+    }
+    return placed;
 }
 
 void BDB::resize_cell(const std::string& cell, double w, double h) {
@@ -2704,7 +3497,7 @@ std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
     if (!_q_components_at_depth)
         sqlite3_prepare_v2(_db,
             "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated,"
-            "COALESCE(orient,'N')"
+            "COALESCE(orient,'N'),COALESCE(is_port,0)"
             " FROM component WHERE depth=? ORDER BY id",
             -1, &_q_components_at_depth, nullptr);
     sqlite3_reset(_q_components_at_depth);
@@ -2725,6 +3518,7 @@ std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
         r.is_leaf      = sqlite3_column_int(q, 9);
         r.is_replicated= sqlite3_column_int(q, 10);
         r.orient       = col_txt(q, 11);
+        r.is_port      = sqlite3_column_int(q, 12);
         rows.push_back(r);
     }
     return rows;
@@ -2947,6 +3741,23 @@ int BDB::_ensure_net(const std::string& name) {
 void BDB::_ensure_net_props(int net_id) {
     Stmt np(_db, "INSERT OR IGNORE INTO net_props(net_id) VALUES(?)");
     sqlite3_bind_int(np, 1, net_id);
+    sqlite3_step(np);
+}
+
+void BDB::_ensure_net_props(int net_id, const std::string& net_name) {
+    std::string bus; int bit = 0;
+    if (!derive_bus_bit(net_name, bus, bit)) { _ensure_net_props(net_id); return; }
+    // DO UPDATE rather than OR IGNORE: the props row may already exist (a
+    // net is reached from several pins), and the classification must land on
+    // it either way — an IGNORE here would record the bus only for whichever
+    // pin happened to create the row first.
+    Stmt np(_db,
+        "INSERT INTO net_props(net_id,bus_name,bit_index) VALUES(?,?,?)"
+        " ON CONFLICT(net_id) DO UPDATE SET"
+        " bus_name=excluded.bus_name, bit_index=excluded.bit_index");
+    sqlite3_bind_int (np, 1, net_id);
+    sqlite3_bind_text(np, 2, bus.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (np, 3, bit);
     sqlite3_step(np);
 }
 

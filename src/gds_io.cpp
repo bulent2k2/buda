@@ -270,6 +270,9 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
                 if (r.len < 16)
                     throw std::runtime_error("import_gds: short UNITS record");
                 um_per_dbu = r.real8(8) * 1e6;   // meters/dbu -> µm/dbu
+                // ... and µm -> LAYOUT UNITS, the scale this design
+                // stores its coordinates in (1.0 = microns).
+                um_per_dbu *= db.import_scale();
                 break;
             case R_BGNSTR:
                 structs.emplace_back();
@@ -742,7 +745,19 @@ private:
     static int32_t to_dbu_static(double um) {
         return (int32_t)std::llround(um / kDbuUm);
     }
-    int32_t to_dbu(double um) const { return to_dbu_static(um); }
+    // BDB coordinates are in LAYOUT UNITS, which are microns only at the
+    // default import scale (docs/internal/engine_units.md).  Divide by the
+    // design's own scale first, or a DBU-scale BDB would export geometry
+    // `lu_per_um` times too large — silently, in a valid-looking GDS.
+    int32_t to_dbu(double lu) const { return to_dbu_static(lu / lu_per_um_); }
+
+public:
+    void set_layout_scale(double lu_per_um) {
+        if (lu_per_um > 0.0) lu_per_um_ = lu_per_um;
+    }
+
+private:
+    double lu_per_um_ = 1.0;
 
     void rec(uint8_t rtype, uint8_t dcode, const std::vector<uint8_t>& payload) {
         size_t len = 4 + payload.size();
@@ -900,14 +915,36 @@ GdsExportStats export_gds(BDB& db, const std::string& path,
     const double die_h = std::atof(db.meta_get("die_h", "0").c_str());
     std::set<std::string> placed_cells;
     for (const auto& c : comps) placed_cells.insert(c.cell);
+    // Top adoption, DIRECT evidence first (opens item 3): a DEF+Verilog
+    // merge's TOP MODULE has a cell row (import_verilog creates one per
+    // defined module) but no component row — the top is instantiated by
+    // nobody — and no size.  Without adoption it was exported as an empty
+    // orphan structure ("no geometry anywhere") BESIDE a synthetic 'top',
+    // and re-imported as two tops.  The netlist STATED which module is
+    // top; `meta.verilog_top` carries that statement, and it outranks the
+    // die-size match below — which is circumstantial, and which an unused
+    // die-sized library cell could satisfy by coincidence, orphaning the
+    // real top all over again (Codex P2 on #662).  clear_design() drops
+    // the memo, so it can never describe a previous design.
     const CellRow* top_cell = nullptr;
-    for (const auto& c : cells)
-        if (!placed_cells.count(c.name) && die_w > 0 &&
-            std::fabs(c.width - die_w) < 1e-6 &&
-            std::fabs(c.height - die_h) < 1e-6) { top_cell = &c; break; }
+    {
+        const std::string vtop = db.meta_get("verilog_top", "");
+        if (!vtop.empty() && !placed_cells.count(vtop))
+            for (const auto& c : cells)
+                if (c.name == vtop) { top_cell = &c; break; }
+    }
+    // Circumstantial fallback (G1 semantics, GDS-imported BDBs): an
+    // uninstantiated cell whose size IS the die is the materialized top of
+    // a previous import.
+    if (!top_cell)
+        for (const auto& c : cells)
+            if (!placed_cells.count(c.name) && die_w > 0 &&
+                std::fabs(c.width - die_w) < 1e-6 &&
+                std::fabs(c.height - die_h) < 1e-6) { top_cell = &c; break; }
 
     // ── Stream ──────────────────────────────────────────────────────────────
     GdsWriter w;
+    w.set_layout_scale(db.import_scale());
     w.header("BUDA");
 
     for (const auto& cell : cells) {
@@ -974,9 +1011,15 @@ GdsExportStats export_gds(BDB& db, const std::string& path,
                         std::max(x1, x2), std::max(y1, y2));
         ++stats.n_wire_shapes;
     };
+    // `via_size` is documented and defaulted in MICRONS (`export_gds …
+    // via_size <um>`) — it describes the GDS boundary, not the design, so it
+    // is the one distance here that is NOT already in layout units.  Convert
+    // it, or the writer's ÷scale would take a 1 µm via to 0.0005 µm at 2000
+    // DBU/µm (Codex P1 on #645).  Identity at the default scale.
+    const double via_size_lu = via_size * db.import_scale();
     auto emit_via = [&](int from_layer, int to_layer, double x, double y) {
         auto [gl, dt] = gds_pair(std::max(from_layer, to_layer));
-        const double h = via_size / 2.0;
+        const double h = via_size_lu / 2.0;
         w.boundary_rect(gl, dt, x - h, y - h, x + h, y + h);
         ++stats.n_via_shapes;
     };

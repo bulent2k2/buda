@@ -59,8 +59,8 @@ edit_status
 edit_commit pin
 
 # --- Concrete tracks so DetailedNUTS can place the 4 bits -------------------
-def_track_pattern 4 -400  POWER 2 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1
-def_track_pattern 5 -500  POWER 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 4 -400  POWER 2 1  (SIGNAL 2 1)x5  GROUND 2 1  (SIGNAL 2 1)x5
+def_track_pattern 5 -500  POWER 3 1  (SIGNAL 2 1)x4  GROUND 3 1  (SIGNAL 2 1)x4
 
 run_planner 5
 run_nuts
