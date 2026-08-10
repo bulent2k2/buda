@@ -112,6 +112,21 @@ def _n_unplaced(s):
     return int(r.num_unplaced) if r is not None else -1
 
 
+def _n_violations(s):
+    # The MOST RECENT check_design's violation count — the audit leg of
+    # cleanliness, which overlaps/unplaced do not cover: a design can place
+    # every bit overlap-free and still be electrically wrong (SEG_OPEN,
+    # BIT_SHORT, LAYER_DIR...), and a flow gating on the other two queries
+    # alone would call that clean (Codex P1 on #679).  -1 when no audit has
+    # run, and -1 too when the last one could not run at all (ok=False):
+    # both mean "nothing was demonstrated", which a gate must not read as 0.
+    audits = getattr(s, "_audits", None) or []
+    last = audits[-1] if audits else None
+    if not last or not last.get("ok", True):
+        return -1
+    return int(last.get("violations", 0))
+
+
 def _messages(_s):
     # `{id severity}` pairs — a Tcl list of two-element lists, so a flow can
     # `foreach {m} [buda::query messages] { ... }` without parsing text.
@@ -128,6 +143,7 @@ _QUERIES = {
     "nets": _n_nets,
     "overlaps": _n_overlaps,
     "unplaced": _n_unplaced,
+    "violations": _n_violations,
     "messages": _messages,
 }
 

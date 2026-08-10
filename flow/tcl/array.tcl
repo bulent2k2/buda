@@ -153,9 +153,16 @@ buda::run_detailed_nuts
 buda::check_design dnuts
 
 # ── branch on the measured result: heal only if dirty ─────────────────────
-if {[buda::query overlaps] > 0 || [buda::query unplaced] > 0} {
+# Three legs, not two: overlaps and unplaced say the metal was PLACED, the
+# audit says it is electrically RIGHT — a design can place every bit
+# overlap-free and still hold a SEG_OPEN or BIT_SHORT the first two never
+# see.  `violations` answers -1 until an audit has run, and -1 is dirty
+# here: a design that was never audited has demonstrated nothing.
+if {[buda::query overlaps] > 0 || [buda::query unplaced] > 0
+        || [buda::query violations] != 0} {
     puts "array.tcl: dirty ([buda::query overlaps] overlaps,\
-          [buda::query unplaced] unplaced) -- healing"
+          [buda::query unplaced] unplaced,\
+          [buda::query violations] audit violations) -- healing"
     buda::negotiate_congestion 10
     buda::ripup_reroute 20
     buda::check_design dnuts
@@ -165,10 +172,12 @@ buda::report_wirelength
 
 set ov [buda::query overlaps]
 set un [buda::query unplaced]
+set vi [buda::query violations]
 buda::stop
 
-if {$ov != 0 || $un != 0} {
-    puts stderr "array.tcl: FAILED -- $ov overlaps, $un unplaced"
+if {$ov != 0 || $un != 0 || $vi != 0} {
+    puts stderr "array.tcl: FAILED -- $ov overlaps, $un unplaced,\
+                 $vi audit violations"
     exit 1
 }
-puts "array.tcl: clean -- 0 overlaps, 0 unplaced"
+puts "array.tcl: clean -- 0 overlaps, 0 unplaced, 0 audit violations"

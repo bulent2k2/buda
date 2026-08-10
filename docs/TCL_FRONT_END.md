@@ -89,6 +89,9 @@ buda::query blocks       ;# floorplan blocks
 buda::query nets         ;# nets in the netlist
 buda::query overlaps     ;# NUTS track overlaps, -1 if NUTS has not run
 buda::query unplaced     ;# unplaced bits, -1 if detailed NUTS has not run
+buda::query violations   ;# the LAST check_design's violation count,
+                         ;#   -1 if no audit has run (or it could not) —
+                         ;#   a gate must not read "never audited" as clean
 buda::query messages     ;# {id severity} pairs — the message catalogue
 ```
 

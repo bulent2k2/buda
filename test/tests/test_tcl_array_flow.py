@@ -50,7 +50,7 @@ def test_the_array_flow_ends_clean_and_forms_the_structures(tmp_path):
     r = _run(tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     out = r.stdout
-    assert "clean -- 0 overlaps, 0 unplaced" in out
+    assert "clean -- 0 overlaps, 0 unplaced, 0 audit violations" in out
     # The structures the generated design exists to exercise:
     # a cell-local TEMPLATE carrying every tile instance...
     assert "cell:tile_cell" in out
@@ -66,4 +66,4 @@ def test_the_array_flow_scales_by_its_parameters(tmp_path):
     r = _run(tmp_path, 3, 2)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "3 x 2 tiles -> 18 bundles" in r.stdout
-    assert "clean -- 0 overlaps, 0 unplaced" in r.stdout
+    assert "clean -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
