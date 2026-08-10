@@ -1346,3 +1346,41 @@ def test_bond_stride_is_not_in_the_pricing_fingerprint():
     _run(s, "def_ndr q shield bus net GND bond stride 8")
     a, b = ndr_cmds.ndr_pricing_fp(s, "p"), ndr_cmds.ndr_pricing_fp(s, "q")
     assert a.split("|", 1)[1] == b.split("|", 1)[1]
+
+
+def test_bond_stride_anchors_extremes_under_an_override():
+    """Codex on #674: `preroutes_in` emits the global pattern's rails first
+    and appends each override region's afterwards, so the query order is
+    NOT spatial when the adjacent layer carries an override.  Striding by
+    that order would thin an arbitrary interleaving and anchor the last
+    APPENDED rail instead of the far extreme — a genuinely unbonded tail
+    NDR_BOND cannot see, because the shield still has straps."""
+    def straps(stride):
+        st = _bond_stack()
+        # A GND rail inside a mid-span region, on the adjacent V layer.
+        ov = buda.TrackPattern(
+            origin=0.0,
+            slots=[buda.TrackSlot(type="GROUND", label="GND",
+                                  width=2.0, space_after=1.0)]
+                  + [buda.TrackSlot(type="SIGNAL", label="sig",
+                                    width=1.0, space_after=1.0)] * 3)
+        st.add_override(4, 10, -50, 30, 50, ov)
+        spec = _bond_spec()
+        spec.bond_stride = stride
+        r = _bond_run(st, spec, span_hi=100.0)
+        out = {}
+        for v in r.net_vias:
+            if v.to_seg < 0:
+                out.setdefault(v.bit_index, []).append(v.x)
+        return {k: sorted(v) for k, v in out.items()}
+
+    every = straps(1)
+    assert every, "the override vehicle must still bond"
+    for stride in (2, 3, 1000):
+        got = straps(stride)
+        for sh, xs in every.items():
+            assert got[sh][0] == xs[0], \
+                f"stride {stride} lost the true low extreme under override"
+            assert got[sh][-1] == xs[-1], \
+                f"stride {stride} lost the true high extreme under override"
+            assert got[sh] == sorted(got[sh])

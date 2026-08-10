@@ -578,5 +578,13 @@ a stored 1 still means what it always meant. Measured on `ndr_bond.buda`:
 since a rail two layers away needs a via stack, whose intermediate track is a
 placement decision rather than an output one.
 
+The bonding sites are **sorted by position** before the stride is applied.
+`preroutes_in` emits the global pattern's rails first and appends each
+override region's afterwards, so its output order is not spatial wherever the
+adjacent layer carries an override; striding by that order would thin an
+arbitrary interleaving, and the "last" site would be the last APPENDED rail
+rather than the far extreme — a genuinely unbonded tail that `NDR_BOND`
+cannot see, because the shield still has straps (Codex on #674).
+
 Vehicle: [`flow/ndr_bond.buda`](../../flow/ndr_bond.buda) — one rule matching
 the rails by label, one through the supply family, both clean.

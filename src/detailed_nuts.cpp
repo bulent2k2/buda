@@ -1497,6 +1497,19 @@ void emit_shield_bond_vias(const RoutingGridStack& stack_,
                 if (ndr_shield_net_matches(spec.shield_net, pr.label) ||
                     ndr_shield_net_matches(spec.shield_net, pr.slot_type))
                     sites.push_back(&pr);
+            // SORT BY POSITION before striding.  preroutes_in emits the
+            // global pattern's rails first and appends each override
+            // region's afterwards, so the query order is not spatial
+            // wherever the adjacent layer carries an override — striding by
+            // index would then thin an arbitrary interleaving, and
+            // sites.back() would be the last APPENDED rail rather than the
+            // far extreme, leaving a genuinely unbonded tail that NDR_BOND
+            // cannot see (the shield still has straps).  Codex on #674.
+            std::sort(sites.begin(), sites.end(),
+                      [](const PreRoutedSegment* a,
+                         const PreRoutedSegment* b) {
+                          return a->track_position < b->track_position;
+                      });
             // Stride 1 keeps every site (byte-identical to pre-stride
             // behavior).  A wider stride keeps every Nth AND both
             // EXTREMES: an unbonded tail hanging off the last strap is the
