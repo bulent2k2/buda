@@ -1374,13 +1374,15 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
                                    const std::string& lef_path) {
     DefImportStats stats;
 
-    LefLibrary lef;
-    {
-        std::ifstream probe(lef_path);
-        if (probe) { probe.close(); lef = read_lef(lef_path); }
-        // An absent LEF stays non-fatal, as before — but a PRESENT one that
-        // cannot be read is an error, not a partial library.
-    }
+    // An ABSENT LEF used to be tolerated silently (a probe guarded the read,
+    // "as before" — inherited from the old line scanners, not chosen).  That
+    // failed in two shapes: with a populated DEF, every cell became a
+    // missing-footprint error whose advice ("check that the LEF matches this
+    // DEF") misdiagnoses a file that is not there at all; with
+    // allow_missing_footprints, a typo'd LEF path silently produced the
+    // all-specks floorplan that waiver exists to make explicit-only.  The DEF
+    // has thrown on a missing file all along (read_def) — the LEF now matches.
+    LefLibrary lef = read_lef(lef_path);
     auto lef_sizes = _lef_cells(lef);
     auto lef_pins  = _lef_pins(lef);
 

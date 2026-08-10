@@ -8,20 +8,20 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 [`message_ids.md`](message_ids.md) and [`../TCL_FRONT_END.md`](../TCL_FRONT_END.md);
 this page is the backlog behind them.
 
-Snapshot index — last verified against `main`: **2026-08-09**, after items 1
-and 2 landed. Each item states what is missing, why it was left rather than
+Snapshot index — last verified against `main`: **2026-08-10**, after items 1,
+2 and 4 landed. Each item states what is missing, why it was left rather than
 forgotten, and where to start. Every claim below was reproduced on `main`
 before being written down; the reproduction is given so a reader can
 re-derive it rather than trust it.
 
-Items 1 and 2 are kept in place, struck through, rather than moved to the
+Items 1, 2 and 4 are kept in place, struck through, rather than moved to the
 resolved table at the bottom. Each entry records where this page's **own
 first description was wrong** — item 1 about the merge case, and about the
 fix it originally proposed, which would have been the wrong fix; item 2
-about the severity, having called a silent SHORT a width collapse. Both are
-worth more than a tidy list. The pattern they share is worth naming: the
-first description of a fault is written from the symptom you noticed, and
-the symptom is rarely the whole fault.
+about the severity, having called a silent SHORT a width collapse. That is
+worth more than a tidy list, and the pattern is worth naming: the first
+description of a fault is written from the symptom you noticed, and the
+symptom is rarely the whole fault.
 
 The working vehicle for all of this is **[`flow/def/`](../../flow/def/)** —
 a LEF + DEF + Verilog design read off disk and routed end to end. Most of
@@ -124,8 +124,8 @@ can tell which it got:
 | Shape | Handling |
 |---|---|
 | `.a(w[0])` bit-select | exact — one net per bit |
-| `.a(w[3:0])` part-select | a pin row per bit **the formal port can take** (the pin key is `(net, comp, pin)`, so one port on four nets is representable). Not the base name, which would strand this pin off the bit-selects; not a net called `w[3:0]`, which the netlist never declared. A non-zero low bound on a module the reader descends into is reported (`BUDA-1610`) — port bit *k* is net bit *k+lo* and the child's own selects are resolved against the base |
-| `{a,b}`, `w[i]` | still unresolved, now **warned** (`BUDA-1609`) — each is an open, and guessing which net a concatenation means would place a wire the netlist never asked for |
+| `.a(w[3:0])` part-select | a pin row per bit **the formal port can take** (the pin key is `(net, comp, pin)`, so one port on four nets is representable). Not the base name, which would strand this pin off the bit-selects; not a net called `w[3:0]`, which the netlist never declared. A non-zero low bound on a module the reader descends into is reported (`BUDA-1611`) — port bit *k* is net bit *k+lo* and the child's own selects are resolved against the base |
+| `{a,b}`, `w[i]` | still unresolved, now **warned** (`BUDA-1610`) — each is an open, and guessing which net a concatenation means would place a wire the netlist never asked for |
 
 **How much of a part-select lands is the FORMAL's width, not the select's.**
 Verilog width-adapts a port connection, so `.s(w[3:0])` on a scalar `input s`
@@ -137,7 +137,7 @@ width 4) and bits are taken LSB-first, the end Verilog aligns.
 
 An **unknown** formal width — an undefined module declares no ports here —
 is not guessed either way: bit 0 is connected, because it is connected for
-every width ≥ 1, and the rest is reported (`BUDA-1611`).
+every width ≥ 1, and the rest is reported (`BUDA-1612`).
 
 Two smaller faults from the same review, both reproduced first:
 
@@ -195,7 +195,43 @@ natural place to fill in a size once the rule is chosen.
 Related and cosmetic: `export_gds` warns that 4 placements have a bbox
 differing from the oriented cell footprint — the same 0×0 container cells.
 
-## 4. Relative paths resolve against two different roots
+## 4. ~~Relative paths resolve against two different roots~~ — RESOLVED 2026-08-10
+
+**One root now: the script's directory.** Every path-taking command —
+`open_bdb`, `save_bdb`, `source`, the `import_*` and `export_*` commands,
+`emit_guides`, `def_gds_layer file` — resolves a relative path through one
+shared rule (`resolve_script_path`, `buda_session/util.py`): against the
+directory of the enclosing script (the innermost `source`d file), falling
+back to the CWD only when no script is running (interactive, the Tcl front
+end, the Python API — there is no script to be relative to). A `.buda`
+script is a location-independent artifact; `flow/def/chip.buda` now runs
+from any directory, and both its self-consistent configurations below are
+the SAME configuration.
+
+**What decided it.** The original *where to start* said "picking either root
+breaks existing scripts in the other direction" — measured, the two
+directions were wildly asymmetric: exactly **one** script in the repo used
+the CWD-rooted commands relatively (`flow/def/chip.buda`, five lines,
+converted in the same commit), against **100+** script-relative `source`
+lines in `flow/`. The fork looked balanced on the page and was 1-vs-100 in
+reality. The `set_path_base cwd|script` alternative was rejected for making
+the page-invisibility *worse*: behavior would depend on a declaration
+possibly several `source` levels away.
+
+**Migration aid for out-of-repo scripts** written against the old CWD rule:
+a READ whose script-relative candidate does not exist, where the CWD-relative
+one does, gets `BUDA-1609` naming both roots and the fix — then fails on the
+resolved path anyway. The rule stays deterministic; only the diagnosis is
+added. Writes cannot be disambiguated by existence and simply land next to
+the script, which is where `save_bdb` always put them.
+
+Pinned by `test_path_roots.py`, whose **previous revision pinned the split
+itself** — the flip is a visible contract change in that file's history. The
+sharp edge got its own test: `open_bdb` and `import_verilog` on adjacent
+lines now satisfied by one file next to the script, and all output families
+(`save_bdb` + exports) landing in the same `out/` from any CWD.
+
+<details><summary>The original item, for the record</summary>
 
 In one script, with no visual difference between them:
 
@@ -229,6 +265,14 @@ together, at which point the script-rooted `save_bdb out/…` lines up on the
 same `flow/def/out/`. The fork is real, and which config a copy is in is
 invisible on the page.
 
+On macOS the windowed `bin/buda flow/def/chip` used to fail here for a second
+reason: the launcher relaunches through a per-cell `.app`, and `open` starts
+it from `/`, so the CWD-rooted imports resolved against `/` even when the
+shell was at the repo root (the `--no-viz` path skipped the relaunch, so only
+the windowed form broke). Fixed — `bin/buda` now bakes the launch CWD into
+the generated launcher (`cd "$PWD"`), so the `.app` run matches a direct run.
+Any future flow with CWD-relative paths inherits that; do not drop the `cd`.
+
 **Companion (FIXED) — the output directory was not created.** `emit_guides` /
 `export_def_blockages` / `export_gds` used to open their destination without a
 `mkdir -p`, and `flow/def/out/` is git-ignored (so absent on a fresh
@@ -250,6 +294,8 @@ existing scripts in the other direction, and `source ../tracks/tracks.buda`
 (script-relative) is used throughout `flow/hbundles/`. The likely shape is
 script-relative everywhere with a deprecation pass, or an explicit
 `set_path_base cwd|script`. Worth a decision before a patch.
+
+</details>
 
 ## 5. The DEF reader buffers the whole design
 

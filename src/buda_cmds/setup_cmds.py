@@ -24,7 +24,7 @@ import buda
 import sys
 import re
 
-from buda_session.util import min_bit_pitch
+from buda_session.util import min_bit_pitch, resolve_script_path
 
 from ._options import reject_unknown_options, require_int
 
@@ -602,8 +602,9 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
         if n_top < 0:
             print("Error: import_lef_tech top must be >= 0"); return
 
+    lef_path = resolve_script_path(session, args[0], is_read=True)
     try:
-        lib = buda.read_lef(args[0])
+        lib = buda.read_lef(lef_path)
     except RuntimeError as e:
         print(f"Error: import_lef_tech: {e}"); sys.exit(1)
 

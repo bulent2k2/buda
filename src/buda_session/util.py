@@ -22,6 +22,44 @@ import functools
 import os
 
 
+def resolve_script_path(session, path, *, is_read=False):
+    """Resolve a script-declared relative path against the enclosing script's
+    directory — the innermost `source`d file — falling back to the CWD when no
+    script is running (interactive use, the Tcl front end, the Python API).
+
+    This is THE path rule, shared by every path-taking command.  It used to be
+    only `open_bdb` / `save_bdb` / `source`'s rule, while the import/export
+    commands resolved against the CWD — so two same-looking relative paths on
+    adjacent lines meant different files, and `flow/def/chip.buda` ran from
+    exactly one directory (docs/internal/opens_interchange.md item 4).  One
+    rule makes a `.buda` script a location-independent artifact, the same
+    semantics as every language's include.
+
+    `is_read=True` adds the migration aid: when the script-relative candidate
+    does not exist but the CWD-relative one DOES, say so (BUDA-1609) before
+    the open fails — a script written against the old CWD rule should get a
+    diagnosis naming both roots, not a bare file-not-found for a file its
+    author can see exists.  The note never changes the resolution: the rule
+    stays deterministic, and the read then fails on the resolved path.
+    """
+    if not path or os.path.isabs(path):
+        return path
+    stack = getattr(session, "_script_stack", None)
+    if not stack:
+        return path
+    base = os.path.dirname(stack[-1])
+    resolved = os.path.normpath(os.path.join(base, path))
+    if is_read and not os.path.exists(resolved) and os.path.exists(path):
+        import buda_diag
+        buda_diag.emit(
+            "BUDA-1609",
+            f"'{path}' does not exist relative to the script ({base}) but "
+            f"does relative to the CWD ({os.getcwd()}); script paths resolve "
+            f"against the script's directory — move the file or restate the "
+            f"path relative to the script")
+    return resolved
+
+
 def ensure_parent_dir(path):
     """`mkdir -p` the parent directory of an output `path` before writing it.
 

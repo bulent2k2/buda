@@ -33,6 +33,7 @@ import sqlite3
 import buda
 import buda_cli
 from gds_build import GdsBuilder
+from slot_groups import expand_slot_groups
 
 
 def test_v11_db_migrates_to_current_orient(tmp_path):
@@ -224,7 +225,11 @@ def _scaled_tracks(tmp_path, scale):
             tok = line.split()
             # `def_track_pattern <layer_id> <origin> [<type> <w> <sp>]...`
             # — the LAYER ID is an identifier, not a distance.
-            head, rest = tok[:3], tok[3:]
+            # The fixtures are written with `( <slots> )x<N>` repetition
+            # groups, so expand through the CLI's own parser first: a private
+            # triple-splitter reads `0.5)x4` as a spacing.
+            head, rest = tok[:3], expand_slot_groups("def_track_pattern",
+                                                     tok[3:])
             head[2] = f"{float(head[2]) * scale:g}"           # origin
             for i in range(0, len(rest), 3):                  # type w sp
                 rest[i + 1] = f"{float(rest[i + 1]) * scale:g}"

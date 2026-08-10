@@ -34,10 +34,10 @@ def_layer 9  M9  H TOP 15 span_min 0    span_max 2907
 def_layer 10 M10 V TOP 15 span_min 0    span_max 2906
 
 # NanGate45 track patterns (NangateOpenCellLibrary.tech.lef)
-def_track_pattern 7  0.07  SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 POWER 0.8 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 GROUND 0.8 0.4
-def_track_pattern 8  0.095 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 POWER 0.8 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 GROUND 0.8 0.4
-def_track_pattern 9  0.07  SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 POWER 1.6 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 GROUND 1.6 0.8
-def_track_pattern 10 0.095 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 POWER 1.6 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 GROUND 1.6 0.8
+def_track_pattern 7  0.07  (SIGNAL 0.4 0.4)x4  POWER 0.8 0.4  (SIGNAL 0.4 0.4)x4  GROUND 0.8 0.4
+def_track_pattern 8  0.095 (SIGNAL 0.4 0.4)x4  POWER 0.8 0.4  (SIGNAL 0.4 0.4)x4  GROUND 0.8 0.4
+def_track_pattern 9  0.07  (SIGNAL 0.8 0.8)x4  POWER 1.6 0.8  (SIGNAL 0.8 0.8)x4  GROUND 1.6 0.8
+def_track_pattern 10 0.095 (SIGNAL 0.8 0.8)x4  POWER 1.6 0.8  (SIGNAL 0.8 0.8)x4  GROUND 1.6 0.8
 
 # dx/dy=5 µm: small blocks (fakeram45_64x62 = 32×40 µm) need a tight margin.
 corner_margin dx 5 dy 5

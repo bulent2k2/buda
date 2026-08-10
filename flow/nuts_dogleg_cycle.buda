@@ -19,8 +19,8 @@
 
 def_layer 4 M4 H TOP 52.94
 def_layer 5 M5 V TOP 50.00
-def_track_pattern 4 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1
-def_track_pattern 5    0  POWER 3 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 4 -400  POWER 4 1  (SIGNAL 2 1)x4  GROUND 4 1  (SIGNAL 2 1)x4
+def_track_pattern 5    0  POWER 3 1  (SIGNAL 2 1)x4  GROUND 3 1  (SIGNAL 2 1)x4
 
 add_block A_top  80 150 100 200
 add_block B_bot  80   0 100  50

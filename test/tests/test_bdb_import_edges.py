@@ -572,7 +572,7 @@ def test_a_part_select_onto_an_unsized_port_connects_only_what_is_certain(
     unknown and neither answer can be assumed.
 
     Bit 0 is connected because it is connected for EVERY width >= 1 — the one
-    thing that needs no guess — and the rest is reported (`BUDA-1611`) rather
+    thing that needs no guess — and the rest is reported (`BUDA-1612`) rather
     than invented."""
     db = _v(tmp_path, """\
         module top ();

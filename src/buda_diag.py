@@ -80,12 +80,18 @@ MESSAGES = {
                            "descendant, so it could not be given an extent."),
     "BUDA-1608": (INFO,    "Netlist instances of undefined modules were "
                            "skipped as library cells."),
-    "BUDA-1609": (WARNING, "A port connection names no net this reader can "
+    "BUDA-1609": (WARNING, "A script-relative path was not found, but the "
+                           "same path exists relative to the CWD — the "
+                           "pre-unification root for import/export commands."),
+    # #658 claimed 1609 for the path-root warning while this branch was open.
+    # An id never changes meaning and that one landed first, so the netlist
+    # reader's three renumber rather than the path warning moving.
+    "BUDA-1610": (WARNING, "A port connection names no net this reader can "
                            "resolve, so the connection is an open."),
-    "BUDA-1610": (WARNING, "A part-select's low bit is not 0 on a module the "
+    "BUDA-1611": (WARNING, "A part-select's low bit is not 0 on a module the "
                            "reader descends into, so its child port bits are "
                            "offset from the net bits."),
-    "BUDA-1611": (WARNING, "A part-select connects a port whose declared "
+    "BUDA-1612": (WARNING, "A part-select connects a port whose declared "
                            "width is unknown, so only its low bit was "
                            "connected."),
     "BUDA-1602": (WARNING, "Imported design counts differ from the counts the "
