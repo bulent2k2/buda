@@ -681,6 +681,7 @@ void bind_db(py::module_& m) {
         .def("ndr_rules",        &BDB::ndr_rules)
         .def("set_ndr_scope",    &BDB::set_ndr_scope,
              py::arg("prefix"), py::arg("rule"))
+        .def("delete_ndr_rule", &BDB::delete_ndr_rule, py::arg("name"))
         .def("delete_ndr_scope", &BDB::delete_ndr_scope, py::arg("prefix"))
         .def("ndr_scopes",       &BDB::ndr_scopes)
         .def("clear_ndr",        &BDB::clear_ndr)

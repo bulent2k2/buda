@@ -146,6 +146,83 @@ def test_an_unmodelled_clause_is_noted_not_fatal(tmp_path):
     assert "VIA" in out and "no BUDA model" in out
 
 
+def test_partial_spacing_coverage_skips_loud(tmp_path):
+    """SPACING on only ONE of a rule's two LAYER clauses: the multiplier
+    model states one spacing for ALL the rule's layers, so emitting it
+    would broaden the rule onto metal3, which the DEF left at its default
+    (Codex P1 on #667).  Refused, not approximated."""
+    deff = _DEF.replace("+ LAYER metal3 WIDTH 280 SPACING 480",
+                        "+ LAYER metal3 WIDTH 280")
+    s, out = _run(deff=deff, tmp_path=tmp_path)
+    assert "fat" not in getattr(s, "_ndr_rules", {})
+    assert "BUDA-1613" in out and "'fat'" in out
+    assert "only 1 of 2 LAYER clauses" in out
+
+
+def test_reimport_replaces_the_previous_imports_rules(tmp_path):
+    """A second import_def_lef in one session replaces the design, so it
+    replaces the previous import's translated rules too — it used to hit
+    def_ndr's duplicate-rule hard error after the design tables were
+    already replaced (Codex P2 on #667)."""
+    s, _ = _run(tmp_path=tmp_path)
+    assert "fat" in s._ndr_rules
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        s.do_command(f"import_def_lef {tmp_path / 'd.def'} "
+                     f"{tmp_path / 'm.lef'}")
+    # No SystemExit above, the rule is declared exactly once, the scope
+    # re-attached, and the BDB holds one persisted copy.
+    assert s._ndr_rules["fat"]["width_x"] == pytest.approx(2.0)
+    assert s._ndr_scopes.get("clk") == "fat"
+    assert [r.name for r in s.bdb.ndr_rules()] == ["fat"]
+
+
+def test_reimport_drops_a_rule_the_new_def_lacks(tmp_path):
+    """The replacement is a REPLACEMENT: a rule translated by import 1 that
+    import 2's DEF does not state must vanish (session and BDB), not
+    linger as if the new design declared it."""
+    s, _ = _run(tmp_path=tmp_path)
+    assert "fat" in s._ndr_rules
+    bare = _DEF.replace("""NONDEFAULTRULES 2 ;
+  - fat
+    + LAYER metal2 WIDTH 280 SPACING 480
+    + LAYER metal3 WIDTH 280 SPACING 480 ;
+  - mixed
+    + LAYER metal2 WIDTH 280
+    + LAYER metal3 WIDTH 560 ;
+END NONDEFAULTRULES
+""", "").replace(" + NONDEFAULTRULE fat", "").replace(
+        " + NONDEFAULTRULE mixed", "")
+    (tmp_path / "bare.def").write_text(bare)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command(f"import_def_lef {tmp_path / 'bare.def'} "
+                     f"{tmp_path / 'm.lef'}")
+    assert "fat" not in s._ndr_rules
+    assert "clk" not in s._ndr_scopes
+    assert s.bdb.ndr_rules() == []
+
+
+def test_a_session_typed_rule_wins_over_the_defs(tmp_path):
+    """The user typed `def_ndr fat …` before importing a DEF whose rule of
+    the same name says something else: session-typed wins (the restore
+    path's convention), the DEF's content is skipped LOUD instead of
+    def_ndr's duplicate hard error killing the import."""
+    (tmp_path / "m.lef").write_text(_LEF)
+    (tmp_path / "d.def").write_text(_DEF)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        s.do_command(f"open_bdb {tmp_path / 'a.bdb'}")
+        s.do_command(f"import_lef_tech {tmp_path / 'm.lef'}")
+        s.do_command("def_ndr fat width x3")
+        s.do_command(f"import_def_lef {tmp_path / 'd.def'} "
+                     f"{tmp_path / 'm.lef'}")
+    assert s._ndr_rules["fat"]["width_x"] == pytest.approx(3.0)  # not 2.0
+    assert "BUDA-1613" in out.getvalue()
+    assert "session declaration wins" in out.getvalue()
+
+
 def test_a_def_without_ndrs_declares_nothing(tmp_path):
     deff = _DEF.replace("""NONDEFAULTRULES 2 ;
   - fat

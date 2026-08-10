@@ -519,11 +519,15 @@ public:
     // set_ndr_rule upserts a declared rule; ndr_rules returns every rule
     // sorted by name.  set_ndr_scope upserts a prefix→rule attachment
     // (throws if the rule is not declared — the FK made LOUD);
-    // delete_ndr_scope removes one (missing = no-op); ndr_scopes returns
+    // delete_ndr_scope removes one (missing = no-op); delete_ndr_rule
+    // removes one rule AND its scopes (a scope naming a deleted rule would
+    // silently resolve nets to nothing on reload — the set_ndr_scope FK's
+    // complement on the delete side; missing = no-op); ndr_scopes returns
     // every (prefix, rule) sorted by prefix.  clear_ndr drops all scopes
     // and rules (the session-level 'forget everything' path).
     void set_ndr_rule(const NdrRuleRow& r);
     std::vector<NdrRuleRow> ndr_rules() const;
+    void delete_ndr_rule(const std::string& name);
     void set_ndr_scope(const std::string& prefix, const std::string& rule);
     void delete_ndr_scope(const std::string& prefix);
     std::vector<std::pair<std::string,std::string>> ndr_scopes() const;

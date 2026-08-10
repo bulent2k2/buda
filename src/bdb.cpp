@@ -3683,6 +3683,15 @@ std::vector<NdrRuleRow> BDB::ndr_rules() const {
     return rows;
 }
 
+void BDB::delete_ndr_rule(const std::string& name) {
+    { Stmt s(_db, "DELETE FROM ndr_scope WHERE rule=?");
+      sqlite3_bind_text(s, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+      step_checked(_db, s, "delete_ndr_rule"); }
+    Stmt s(_db, "DELETE FROM ndr_rule WHERE name=?");
+    sqlite3_bind_text(s, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    step_checked(_db, s, "delete_ndr_rule");
+}
+
 void BDB::set_ndr_scope(const std::string& prefix, const std::string& rule) {
     // FK made LOUD: sqlite only enforces REFERENCES with foreign_keys=ON,
     // and a dangling scope would silently resolve nets to a rule that no

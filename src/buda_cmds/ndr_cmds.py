@@ -414,6 +414,44 @@ def _layer_id(session, tok):
     return _resolve_layer_id(session, tok)
 
 
+def _clear_imported_ndrs(session):
+    """Drop the rules/scopes a PREVIOUS import_def_lef translated.
+
+    `clear_design()` replaces the design tables but knows nothing of session
+    NDR state, so a re-import in the same session used to hit `def_ndr`'s
+    duplicate-rule hard error AFTER the old design was already gone (Codex
+    P2 on #667).  Only what translation itself added is cleared — a
+    user-typed declaration is never touched, except that a typed scope
+    still naming a cleared imported rule cannot outlive the rule (a
+    dangling scope resolves nets to a rule that no longer exists) and is
+    dropped with a warning."""
+    imp_rules = getattr(session, "_ndr_rules_imported", None) or set()
+    imp_scopes = getattr(session, "_ndr_scopes_imported", None) or set()
+    if not imp_rules and not imp_scopes:
+        return
+    rules, scopes = _rules(session), _scopes(session)
+    for pfx in imp_scopes:
+        if pfx in scopes:
+            del scopes[pfx]
+            _write_scope_through(session, pfx, None)
+    for name in imp_rules:
+        if name not in rules:
+            continue
+        del rules[name]
+        for pfx in [p for p, rl in scopes.items() if rl == name]:
+            print(f"Warning: [NDR] scope '{pfx}' names imported rule "
+                  f"'{name}', which this re-import replaces — scope "
+                  f"dropped (re-declare it against a current rule)")
+            del scopes[pfx]
+            if hasattr(session, "_ndr_scopes_typed"):
+                session._ndr_scopes_typed.discard(pfx)
+            _write_scope_through(session, pfx, None)
+        if getattr(session, "bdb", None) is not None:
+            session.bdb.delete_ndr_rule(name)
+    session._ndr_rules_imported = set()
+    session._ndr_scopes_imported = set()
+
+
 def translate_def_ndrs(session, st, lef_path):
     """DEF NONDEFAULTRULES -> def_ndr/set_ndr (opens_interchange.md item 7).
 
@@ -429,6 +467,11 @@ def translate_def_ndrs(session, st, lef_path):
     net's name would silently govern that net too, so the collision is
     reported when it exists.
     """
+    # A re-import replaces the design, so it replaces the previous import's
+    # translated rules too — BEFORE the empty-rules early-out, since the new
+    # DEF having no rules of its own is exactly the case where the old
+    # design's rules must not linger.
+    _clear_imported_ndrs(session)
     if not st.ndrs:
         return
     try:
@@ -462,6 +505,20 @@ def translate_def_ndrs(session, st, lef_path):
                            f"no default SPACING to scale against"); break
                 sms.append(L.spacing_dbu / units / base[1])
         if not why:
+            # A BUDA rule states ONE width and ONE spacing multiplier for
+            # ALL its layers.  A DEF rule that states WIDTH or SPACING on
+            # only SOME of its LAYER clauses leaves the rest at their
+            # defaults — emitting the multiplier anyway would broaden the
+            # rule onto layers the DEF never constrained, silently changing
+            # capacity (Codex P1 on #667).  Not expressible, so refused.
+            for vals, what in ((wms, "WIDTH"), (sms, "SPACING")):
+                if vals and len(vals) != len(layer_toks):
+                    why = (f"{what} is stated on only {len(vals)} of "
+                           f"{len(layer_toks)} LAYER clauses — one "
+                           f"multiplier per rule cannot leave the others "
+                           f"at their default")
+                    break
+        if not why:
             for vals, what in ((wms, "WIDTH"), (sms, "SPACING")):
                 if vals and (max(vals) - min(vals)) > 0.01 * max(vals):
                     why = (f"per-layer {what} multipliers disagree "
@@ -470,6 +527,14 @@ def translate_def_ndrs(session, st, lef_path):
                     break
         if not why and not wms and not sms:
             why = "states neither WIDTH nor SPACING"
+        if not why and r.name in _rules(session):
+            # The user typed a rule of this name in this session (an
+            # imported one of the same name was cleared above).  Session-
+            # typed wins, the restore path's convention — and def_ndr's
+            # duplicate hard error must not kill the import.
+            why = ("the name is already declared in this session — the "
+                   "session declaration wins, the DEF's content is not "
+                   "applied")
         if why:
             buda_diag.emit("BUDA-1613", f"rule '{r.name}': {why}")
             continue
@@ -481,6 +546,15 @@ def translate_def_ndrs(session, st, lef_path):
         args += ["layers", ",".join(layer_toks)]
         cmd_def_ndr(session, "def_ndr", args, "")
         translated.add(r.name)
+        # Imported, not typed: tracked so the NEXT import replaces it, and
+        # kept out of the typed set cmd_def_ndr stamps (typed is the
+        # session-wins marker; a rule the design file supplied is not one
+        # the user wrote).
+        if not hasattr(session, "_ndr_rules_imported"):
+            session._ndr_rules_imported = set()
+        session._ndr_rules_imported.add(r.name)
+        if hasattr(session, "_ndr_rules_typed"):
+            session._ndr_rules_typed.discard(r.name)
         for u in r.unmodelled:
             print(f"[NDR] note: rule '{r.name}' clause '{u}' has no BUDA "
                   f"model — translated without it")
@@ -499,6 +573,11 @@ def translate_def_ndrs(session, st, lef_path):
             print(f"Warning: set_ndr scopes are PREFIXES — attaching "
                   f"'{rule}' to '{net}' also governs {shown}{more}")
         cmd_set_ndr(session, "set_ndr", [net, rule], "")
+        if not hasattr(session, "_ndr_scopes_imported"):
+            session._ndr_scopes_imported = set()
+        session._ndr_scopes_imported.add(net)
+        if hasattr(session, "_ndr_scopes_typed"):
+            session._ndr_scopes_typed.discard(net)
 
 
 def split_mixed_ndr_bundles(session, raw_bundles):
