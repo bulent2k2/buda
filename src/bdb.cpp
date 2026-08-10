@@ -1346,6 +1346,11 @@ void BDB::clear_design() {
           "DELETE FROM cell_pin; DELETE FROM cell_children; "
           "DELETE FROM cell_layer_share; "         // FKs cell (v20)
           "DELETE FROM component; DELETE FROM cell;");
+    // The top-module memo describes the design being wiped, and the GDS
+    // export ADOPTS the cell it names as the top structure — stale, it
+    // could claim an unrelated cell of the next design that happens to
+    // share the old top's name (Codex P2 on #662).
+    _exec("DELETE FROM meta WHERE key='verilog_top';");
 }
 
 void BDB::add_label_pin(const std::string& net_name, int comp_id,
@@ -1547,6 +1552,37 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     // (Codex P2 on #647).  An internal name that cannot collide keeps them
     // apart; `port_comp` maps the external name back to it.
     std::map<std::string, std::string> port_comp;
+    // The __PORT__ cell rows (opens item 3): the boundary components
+    // reference them, and without a cell row the GDS export emits SREFs to
+    // a structure that is never defined — and with the port components gone
+    // on re-import, every net-name label lands "outside every component"
+    // and the whole netlist recovery silently dies with them.  A GDS
+    // structure has ONE footprint, so ports are grouped into cells BY SIZE
+    // — one shared cell when every port agrees (the measured common case:
+    // one PIN template), a numbered sibling per further size (Codex P2:
+    // taking independent maxes over a 1x10 and a 10x1 port invents a 10x10
+    // footprint that matches neither, and re-import would expand every
+    // port to it).  Class order follows DEF order, so the names are
+    // deterministic.
+    std::vector<std::pair<double,double>> port_sizes;   // size classes
+    auto port_cell_for = [&](double w, double h) -> std::string {
+        for (size_t i = 0; i < port_sizes.size(); ++i)
+            if (std::fabs(port_sizes[i].first - w) < 1e-9 &&
+                std::fabs(port_sizes[i].second - h) < 1e-9)
+                return i == 0 ? "__PORT__"
+                              : "__PORT__" + std::to_string(i + 1);
+        port_sizes.push_back({w, h});
+        std::string cell = port_sizes.size() == 1
+            ? "__PORT__" : "__PORT__" + std::to_string(port_sizes.size());
+        Stmt uc(_db, "INSERT INTO cell(name,width,height) VALUES(?1,?2,?3)"
+                     " ON CONFLICT(name) DO UPDATE SET"
+                     " width=excluded.width, height=excluded.height");
+        sqlite3_bind_text  (uc, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_double(uc, 2, w);
+        sqlite3_bind_double(uc, 3, h);
+        sqlite3_step(uc);
+        return cell;
+    };
     for (const auto& p : def.pins) {
         if (!p.placed) continue;                 // no location: not an endpoint
         std::string cname = "PIN/" + p.name;
@@ -1565,8 +1601,9 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
             x2 = std::max(x2, px + dbu_to_lu(r.x2));
             y2 = std::max(y2, py + dbu_to_lu(r.y2));
         }
+        const std::string pcell = port_cell_for(x2 - x1, y2 - y1);
         sqlite3_bind_text  (s_comp,1,cname.c_str(),-1,SQLITE_TRANSIENT);
-        sqlite3_bind_text  (s_comp,2,"__PORT__",-1,SQLITE_STATIC);
+        sqlite3_bind_text  (s_comp,2,pcell.c_str(),-1,SQLITE_TRANSIENT);
         sqlite3_bind_double(s_comp,3,x1);
         sqlite3_bind_double(s_comp,4,y1);
         sqlite3_bind_double(s_comp,5,x2);
@@ -1576,30 +1613,6 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         sqlite3_step(s_comp); sqlite3_reset(s_comp);
         ++stats.port_components;
         ++stats.imported_pins;
-    }
-    // The __PORT__ cell itself (opens item 3): the boundary components
-    // reference it, and without a cell row the GDS export emits SREFs to a
-    // structure that is never defined — and with the 8 port components gone
-    // on re-import, every net-name label lands "outside every component"
-    // and the whole netlist recovery silently dies with them.  Sized to the
-    // union of the port shapes (uniform in practice — one PIN template).
-    if (stats.port_components > 0) {
-        double pw = 0, ph = 0;
-        {
-            Stmt q(_db, "SELECT MAX(x2-x1), MAX(y2-y1) FROM component"
-                        " WHERE cell='__PORT__'");
-            if (sqlite3_step(q) == SQLITE_ROW) {
-                pw = sqlite3_column_double(q, 0);
-                ph = sqlite3_column_double(q, 1);
-            }
-        }
-        Stmt uc(_db, "INSERT INTO cell(name,width,height)"
-                     " VALUES('__PORT__',?1,?2)"
-                     " ON CONFLICT(name) DO UPDATE SET"
-                     " width=excluded.width, height=excluded.height");
-        sqlite3_bind_double(uc, 1, pw);
-        sqlite3_bind_double(uc, 2, ph);
-        sqlite3_step(uc);
     }
     stats.declared_pins = def.declared_pins;
 
