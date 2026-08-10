@@ -172,7 +172,9 @@ novice:
     default nothing straps it to the power grid — so do not rely on it for
     electrical shielding as-is. Two tokens fix that: `credit`, so an **existing**
     power rail (already grid metal) serves as the shield, or `bond`, so BUDA
-    straps each emitted shield to the grid wherever a matching rail crosses it.
+    straps each emitted shield to the grid where a matching rail crosses it —
+    `bond stride <N>` thins that to every Nth crossing when strapping all of
+    them is more vias than the grid wants, always anchoring both ends.
     With `bond` on, `check_design` raises `NDR_BOND` for any shield it could not
     strap — that means no matching rail crosses it, a grid problem rather than a
     routing one.

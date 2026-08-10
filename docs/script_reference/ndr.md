@@ -58,7 +58,7 @@ each governed bundle's total demand and its slot-by-slot layout.
 ## `def_ndr`
 
 ```
-def_ndr <name> [width x<N>] [spacing x<N>] [shield bus|bit|per:<N> [net <label>]] [credit] [bond] [layers <csv>]
+def_ndr <name> [width x<N>] [spacing x<N>] [shield bus|bit|per:<N> [net <label>]] [credit] [bond [stride <N>]] [layers <csv>]
 ```
 
 Declare a rule. **Declare-once**: a duplicate name, an unknown token, or a rule
@@ -72,7 +72,7 @@ weaken a constraint.
 | `spacing x<N>` | multiplier | Minimum spacing to any neighbour, as a multiple of default |
 | `shield …` | mode | `bus` = flank the whole bus, `bit` = flank every bit, `per:<N>` = a shield every N bits. Optional `net <label>` names the shield net (default `GND`) |
 | `credit` | flag | Opt in to **rail crediting** (R5a): an END shield may be satisfied by an immediately adjacent power rail that is electrically identical to the shield net, instead of emitting a redundant wire. Requires a shield arrangement |
-| `bond` | flag | Opt in to **shield bonding** (R6): strap every EMITTED shield to the power grid with a via wherever an identity-matching rail crosses it on an adjacent perpendicular layer. Requires a shield arrangement. Output-only — it changes no demand and no placement, so it can be turned on without re-planning |
+| `bond [stride <N>]` | flag + count | Opt in to **shield bonding** (R6): strap every EMITTED shield to the power grid with a via where an identity-matching rail crosses it on an adjacent perpendicular layer. `stride <N>` straps every Nth crossing instead of all of them (default 1 = every crossing); both **extremes are always anchored**, so no tail hangs unbonded off the last strap. Requires a shield arrangement. Output-only — it changes no demand and no placement, so it can be turned on, off, or re-strided without re-planning |
 | `layers <csv>` | layer names/ids | Restrict the rule (and so its nets) to these layers. The planner honours the restriction when choosing layers |
 
 Shield-net identity is by supply family, case-insensitively: `GND`/`VSS`/`GROUND`
@@ -85,6 +85,7 @@ def_ndr clk2x width x2 spacing x2 shield bus net GND
 def_ndr sig15 width x1.5 spacing x1.5 shield bus net GND credit
 def_ndr bus25 width x2.5 spacing x2.5 shield per:2 net GND layers M5,M6
 def_ndr gndbus width x1.5 shield bus net GND bond
+def_ndr vssbit width x2 shield bit net VSS bond stride 3
 ```
 
 ### Realizability is checked LOUDLY
@@ -184,7 +185,7 @@ Runnable end-to-end examples, smallest first:
 | Flow | What it shows |
 |---|---|
 | [`flow/ndr_demo.buda`](../../flow/ndr_demo.buda) | The minimum: one shielded double-width clock bus among default buses. All three constraint kinds on a small flat design |
-| [`flow/ndr_bond.buda`](../../flow/ndr_bond.buda) | Two bonded shield rules — one matching the grid rails by label, one through the supply family (VSS shields on GND rails) |
+| [`flow/ndr_bond.buda`](../../flow/ndr_bond.buda) | Two bonded shield rules — one matching the grid rails by label and strapping every crossing, one matching through the supply family (VSS shields on GND rails) at `stride 3` |
 | [`flow/ndr_shield_flat.buda`](../../flow/ndr_shield_flat.buda) | Three rules across the multiplier range (x1.5 / x2 / x2.5) and **all three** shield arrangements + crediting, governing three bundles beside ungoverned traffic |
 | [`flow/ndr_shield_hier.buda`](../../flow/ndr_shield_hier.buda) | The same three rule shapes in a **hierarchical** flow, governing a cell-level template class (one template, three lockstep replicas) and top-level buses |
 | [`flow/ndr_bottom_up.buda`](../../flow/ndr_bottom_up.buda) | A governed template marked `set_bottom_up`: its interconnect is solved once and copied — **shields included** — to every instance |

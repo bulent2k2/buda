@@ -57,12 +57,18 @@ struct NdrSpec {
     // emitted wire.  Off = phase-1 behavior byte-for-byte.
     bool credit_shields = false;
     // R6 shield BONDING (opt-in — the `bond` token): strap each EMITTED
-    // shield wire to the power grid with a via wherever it crosses an
+    // shield wire to the power grid with a via where it crosses an
     // identity-matching rail on a perpendicular ADJACENT layer.  Without
     // it a shield is labeled metal that reserves its track but is not
     // connected to anything — see docs/internal/opens_ndr.md §1.  A
     // CREDITED end needs no bonding: the rail IS grid metal.
-    bool bond_shields = false;
+    //
+    // The value is a STRIDE, not a flag: 0 = no bonding, 1 = every
+    // crossing (the `bond` default), N = every Nth crossing along the
+    // shield.  A stride is what a real grid wants — every crossing is
+    // hundreds of vias on a long shield over a dense grid — and one field
+    // rather than a flag-plus-count keeps the two from disagreeing.
+    int bond_stride = 0;
     // Declared rule name (reporting/provenance).
     std::string rule_name;
 

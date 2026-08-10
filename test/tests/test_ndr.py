@@ -1012,7 +1012,7 @@ def _bond_run(stack, spec, span_hi=40.0, bit_width=4):
 
 def _bond_spec(net="GND", mode=1):
     s = _spec(mode=mode)
-    s.rule_name, s.shield_net, s.bond_shields = "r", net, True
+    s.rule_name, s.shield_net, s.bond_stride = "r", net, 1
     return s
 
 
@@ -1038,7 +1038,7 @@ def test_bond_straps_every_matching_crossing():
 
 def test_bond_is_opt_in():
     spec = _bond_spec()
-    spec.bond_shields = False
+    spec.bond_stride = 0
     r = _bond_run(_bond_stack(), spec)
     assert r.n_shield_bond_vias == 0
     assert not [v for v in r.net_vias if v.to_seg < 0]
@@ -1071,7 +1071,7 @@ def test_bond_moves_no_demand():
     # Bonding is OUTPUT-only: same placement, same shields, same bit
     # tracks — only the extra straps differ.
     plain, bonded = _bond_spec(), _bond_spec()
-    plain.bond_shields = False
+    plain.bond_stride = 0
     a, b = _bond_run(_bond_stack(), plain), _bond_run(_bond_stack(), bonded)
     assert ([(n.bit_index, n.track_position, n.width) for n in a.net_segments]
             == [(n.bit_index, n.track_position, n.width)
@@ -1252,3 +1252,135 @@ def test_r9_arrangement_is_skipped_on_a_culled_run():
         kept.append(ns)
     dr.net_segments = kept
     assert "NDR_SHIELD" not in _audited(s)
+
+
+# ── R6 bond STRIDE (opens_ndr.md §1 residual: every crossing was strapped) ──
+
+def _straps_at(stride, span_hi=100.0):
+    spec = _bond_spec()
+    spec.bond_stride = stride
+    r = _bond_run(_bond_stack(), spec, span_hi=span_hi)
+    by_shield = {}
+    for v in r.net_vias:
+        if v.to_seg < 0:
+            by_shield.setdefault(v.bit_index, []).append(v.x)
+    return {k: sorted(v) for k, v in by_shield.items()}
+
+
+def test_bond_stride_thins_the_straps():
+    every = _straps_at(1)
+    third = _straps_at(3)
+    assert every and third
+    for sh, xs in every.items():
+        assert len(third[sh]) < len(xs), "stride 3 must strap fewer"
+        assert set(third[sh]) <= set(xs), "strided straps are a SUBSET"
+
+
+def test_bond_stride_anchors_both_extremes():
+    # An unbonded tail past the last strap is the floating metal bonding
+    # exists to prevent, so the first and last crossing are always kept
+    # whatever the stride divides out to.
+    every = _straps_at(1)
+    for stride in (2, 3, 4, 7):
+        got = _straps_at(stride)
+        for sh, xs in every.items():
+            assert got[sh][0] == xs[0], f"stride {stride} lost the low end"
+            assert got[sh][-1] == xs[-1], f"stride {stride} lost the high end"
+
+
+def test_bond_stride_1_is_every_crossing():
+    # The bare `bond` token is stride 1 — byte-identical to pre-stride
+    # behaviour, so turning the knob on cannot change an existing flow.
+    spec_default = _bond_spec()
+    assert spec_default.bond_stride == 1
+    r_off = _bond_run(_bond_stack(), _spec(mode=1))   # never opted in
+    assert r_off.n_shield_bond_vias == 0
+
+
+def test_bond_stride_larger_than_the_run_keeps_both_ends():
+    # A stride past the crossing count degenerates to "first and last",
+    # never to zero straps.
+    got = _straps_at(1000)
+    every = _straps_at(1)
+    for sh, xs in got.items():
+        assert xs == sorted({every[sh][0], every[sh][-1]})
+
+
+def test_def_ndr_bond_stride_token():
+    s = _bare_session()
+    out = _run(s, "def_ndr b shield bus net GND bond stride 4")
+    assert "bond stride 4" in out
+    assert "bond stride 4" in _run(s, "dump_ndr")
+    assert s._ndr_rules["b"]["bond"] == 4
+    # The bare token stays stride 1 and prints without a stride.
+    s2 = _bare_session()
+    out2 = _run(s2, "def_ndr b shield bus net GND bond")
+    assert " bond," in out2 and "stride" not in out2
+    for bad in ("def_ndr c shield bus bond stride 0",
+                "def_ndr c shield bus bond stride -2",
+                "def_ndr c shield bus bond stride wat"):
+        with pytest.raises(SystemExit):
+            _run(_bare_session(), bad)
+
+
+def test_bond_stride_persists_and_restores(tmp_path):
+    # The stride rides the EXISTING v25 `bond` column (0 = off, N = stride),
+    # so a stride needs no schema bump and a stored 1 still means what it
+    # meant before.
+    s1 = _bare_session()
+    _run(s1, f"open_bdb {tmp_path}/s.bdb")
+    _run(s1, "def_ndr shb shield bit net VSS bond stride 6")
+    _run(s1, "set_ndr sh_ shb")
+    del s1
+    s2 = _bare_session()
+    _run(s2, f"open_bdb {tmp_path}/s.bdb")
+    assert s2._ndr_rules["shb"]["bond"] == 6
+    assert "bond stride 6" in _run(s2, "dump_ndr")
+
+
+def test_bond_stride_is_not_in_the_pricing_fingerprint():
+    # Like `bond` itself: straps are output, so changing the stride must
+    # not VOID a restored plan.
+    s = _bare_session()
+    _run(s, "def_ndr p shield bus net GND bond")
+    _run(s, "def_ndr q shield bus net GND bond stride 8")
+    a, b = ndr_cmds.ndr_pricing_fp(s, "p"), ndr_cmds.ndr_pricing_fp(s, "q")
+    assert a.split("|", 1)[1] == b.split("|", 1)[1]
+
+
+def test_bond_stride_anchors_extremes_under_an_override():
+    """Codex on #674: `preroutes_in` emits the global pattern's rails first
+    and appends each override region's afterwards, so the query order is
+    NOT spatial when the adjacent layer carries an override.  Striding by
+    that order would thin an arbitrary interleaving and anchor the last
+    APPENDED rail instead of the far extreme — a genuinely unbonded tail
+    NDR_BOND cannot see, because the shield still has straps."""
+    def straps(stride):
+        st = _bond_stack()
+        # A GND rail inside a mid-span region, on the adjacent V layer.
+        ov = buda.TrackPattern(
+            origin=0.0,
+            slots=[buda.TrackSlot(type="GROUND", label="GND",
+                                  width=2.0, space_after=1.0)]
+                  + [buda.TrackSlot(type="SIGNAL", label="sig",
+                                    width=1.0, space_after=1.0)] * 3)
+        st.add_override(4, 10, -50, 30, 50, ov)
+        spec = _bond_spec()
+        spec.bond_stride = stride
+        r = _bond_run(st, spec, span_hi=100.0)
+        out = {}
+        for v in r.net_vias:
+            if v.to_seg < 0:
+                out.setdefault(v.bit_index, []).append(v.x)
+        return {k: sorted(v) for k, v in out.items()}
+
+    every = straps(1)
+    assert every, "the override vehicle must still bond"
+    for stride in (2, 3, 1000):
+        got = straps(stride)
+        for sh, xs in every.items():
+            assert got[sh][0] == xs[0], \
+                f"stride {stride} lost the true low extreme under override"
+            assert got[sh][-1] == xs[-1], \
+                f"stride {stride} lost the true high extreme under override"
+            assert got[sh] == sorted(got[sh])
