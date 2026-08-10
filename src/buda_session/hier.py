@@ -1008,6 +1008,10 @@ class HierMixin:
         'BIDIR:a,b,c,'    → ('a', ['b', 'c'])   — direction-agnostic: any
             instance can root the trunk, so use the first and branch to the rest;
             the block-to-block topology reaches every instance either way.
+        'FANOUT:d|TO:a,b,' -> ('d', ['a', 'b']) - a DIVERGENT fan-out
+            bundle: rooted at the shared DRIVER d with every receiver as a
+            leaf.  Same (root, leaves) shape as FANIN with the arrow
+            reversed, which is why both land in one return.
         'FANIN:s|FROM:a,b,' -> ('s', ['a', 'b']) - a multi-driver hier
             fan-in bundle: rooted at the shared sink s with the drivers
             (and any receiver beyond the root) as leaves, exactly the
@@ -1020,6 +1024,10 @@ class HierMixin:
             if reason.startswith('FANIN:'):
                 root_part, from_part = reason[len('FANIN:'):].split('|FROM:')
                 leaves = [n for n in from_part.split(',') if n]
+                return (root_part, leaves) if root_part and leaves else (None, [])
+            if reason.startswith('FANOUT:'):
+                root_part, to_part = reason[len('FANOUT:'):].split('|TO:')
+                leaves = [n for n in to_part.split(',') if n]
                 return (root_part, leaves) if root_part and leaves else (None, [])
             if reason.startswith('BIDIR:'):
                 insts = [n for n in reason[len('BIDIR:'):].split(',') if n]
@@ -1210,7 +1218,9 @@ class HierMixin:
             if src is None:
                 print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
                 return None
-            if b.reason.startswith('FANIN:'):
+            if b.reason.startswith('FANOUT:'):
+                label = f"{src}→[{','.join(dsts)}] fan-out"
+            elif b.reason.startswith('FANIN:'):
                 label = f"[{','.join(dsts)}]→{src} fan-in"
             else:
                 label = (f"{src}→{dsts[0]}" if len(dsts) == 1
@@ -4191,6 +4201,22 @@ class HierMixin:
             if drv not in drivers:
                 drivers.append(drv)
         if len(drivers) == 1:
+            # Fan-OUT (DIVERGENT): one driver, and the nets do NOT all reach
+            # the same receiver blocks.  The historical single-net derivation
+            # would hand the generator the FIRST net's receiver alone and
+            # silently leave the other blocks unrouted — the exact fault the
+            # fan-in path below was written to fix, mirrored.  Root at the
+            # driver, every receiver block a leaf.
+            rcv_sets = {tuple(sorted(set(r))) for _, (_d, r) in eps}
+            if len(rcv_sets) > 1:
+                root = first[0]
+                leaves = []
+                for _, (_drv, rcvs) in eps:
+                    for r in rcvs:
+                        if r != root and r not in leaves:
+                            leaves.append(r)
+                if leaves:
+                    return root, leaves, True
             return first[0], list(first[1]), False
         # Fan-in: root at the shared sink (the first net's first receiver —
         # safe because CONVERGENT's signature guarantees every net in the
@@ -4216,6 +4242,14 @@ class HierMixin:
         so the route stays complete (only the per-bit taper falls back to
         conservative full width).  Returns (False, None, []) for a single-driver
         cross-level bundle (the historical drv_spec_path path)."""
+        # Fan-OUT first: a DIVERGENT bundle DOES carry net_drivers (one
+        # driver, repeated per bit), so the single-driver early-out below
+        # would reject it before the reason is ever consulted.
+        if b.reason.startswith('FANOUT:'):
+            root, leaves = HierMixin._parse_bundle_reason(b.reason)
+            if root and leaves:
+                return True, root, leaves
+            return False, None, []
         if b.net_drivers:
             drivers = list(dict.fromkeys(b.net_drivers))
             if len(drivers) <= 1:

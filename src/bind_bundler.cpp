@@ -29,6 +29,7 @@ void bind_bundler(py::module_& m) {
     py::enum_<Strategy>(m, "Strategy")
         .value("STRICT",        Strategy::STRICT)
         .value("CONVERGENT",    Strategy::CONVERGENT)
+        .value("DIVERGENT",     Strategy::DIVERGENT)
         .value("BIDIRECTIONAL", Strategy::BIDIRECTIONAL)
         .value("COMBINED",      Strategy::COMBINED);
 

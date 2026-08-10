@@ -65,6 +65,22 @@ struct HBundle {
 };
 // STRICT       — same driver + same receivers (a true parallel bus).
 // CONVERGENT    — same receivers only, driver ignored (fan-in).
+// DIVERGENT     — same DRIVER only, receivers ignored (fan-OUT): the mirror of
+//                 CONVERGENT, and the point the lattice was missing.  N nets
+//                 leaving one driver for N different places are the same
+//                 physical object as N nets arriving at one sink from N
+//                 places, drawn backwards — a 32-bit port bus reaching 32 die
+//                 pads bundled under CONVERGENT going IN and not coming OUT
+//                 (opens_interchange.md item 11).  Realized as a per-bit
+//                 tapered tree rooted at the shared driver (reason
+//                 'FANOUT:root|TO:leaves'), so bit k's wire lands only on the
+//                 block bit k actually reaches.
+//
+//                 It is a WEAKER signal than CONVERGENT and is opt-in for
+//                 that reason: a high-fanout driver is not always a bus (a
+//                 clock buffer's 200 sinks are not), so ask for it per design
+//                 and exclude what it should not touch with `set_bundling
+//                 <prefix> no_divergent`.
 // BIDIRECTIONAL — direction-agnostic: signature is the sorted set of ALL
 //                 endpoint instances (driver + receivers), so nets that connect
 //                 the same group of instances in any driver/receiver roles are
@@ -75,7 +91,13 @@ struct HBundle {
 //                 connected by a CHAIN of either relation (union-find), the
 //                 only genuinely new point on the strategy lattice
 //                 STRICT ⊂ {CONVERGENT, BIDIRECTIONAL} ⊂ COMBINED.
-enum class Strategy { STRICT, CONVERGENT, BIDIRECTIONAL, COMBINED };
+//
+//                 COMBINED deliberately does NOT include DIVERGENT.  The join
+//                 is of the relations that are safe to apply unasked; fan-out
+//                 is not one of them (see DIVERGENT above), and folding it in
+//                 would silently re-bundle every existing COMBINED flow.
+//                 Ask for DIVERGENT by name.
+enum class Strategy { STRICT, CONVERGENT, BIDIRECTIONAL, COMBINED, DIVERGENT };
 class Netlist {
 public:
     void add_net(const std::string& name, const std::string& driver, const std::vector<std::string>& receivers);

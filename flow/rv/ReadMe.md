@@ -185,11 +185,34 @@ segments to find a violation in. Fixed by asking the component
 (`_endpoint_depth` in `src/buda_session/hier.py`); `flow/def` never showed it
 because its ports connect within one level.
 
-**A 32-bit die-port bus routes as 32 one-net bundles.** 64 of the 70 D0
-bundles are a single port bit. Each `PIN/dbg[k]` is its own boundary
-component, so under any current bundling relation the 32 wires from one mux
-to 32 adjacent pads have 32 different endpoint sets. It is correct by the
-rule and wrong about the design — those wires are a bus. See
+**A 32-bit die-port bus routed as 32 one-net bundles** — 64 of the 70 D0
+bundles a single port bit. Each `PIN/<port>[k]` is its own boundary
+component, so the 32 wires from one mux to 32 adjacent pads had 32
+different endpoint sets: correct by the rule and wrong about the design.
+
+Measuring it is what showed the fault was narrower and sharper than "a port
+bus does not bundle". CONVERGENT **already** merged `boot` (32 pads into one
+memory is a fan-in, exactly its case); only `dbg` — the same bus going the
+other way — stayed split. The lattice was **asymmetric**: it had a fan-in
+relation and no fan-out one. Fixed by adding the mirror, `DIVERGENT`, and
+this design is its demo:
+
+```bash
+bin/buda flow/rv/soc_divergent    # soc.buda with one token changed
+```
+
+|  | `soc.buda` | `soc_divergent.buda` |
+|---|---|---|
+| bundles | 127 | 78 |
+| `dbg` | 32 × 1 net | 1 × 32 nets |
+| abstract WL | 31,234,654 | 19,104,008 (−38.8%) |
+| detailed WL | 409,819,470 | 430,511,600 (+5.0%) |
+
+Both clean, 0 unplaced. Two scripts rather than one changed script because
+both numbers are real: the abstract win is a fan-out tree sharing a trunk
+where 32 bundles each reserved their own, the detailed cost is what that
+tree pays to reach scattered leaves. Which one a design wants is the
+design's call. See
 [`opens_interchange.md`](../../docs/internal/opens_interchange.md) item 11.
 
 ## Known limits

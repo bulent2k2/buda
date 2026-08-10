@@ -45,15 +45,19 @@ from ._options import reject_unknown_options
 
 _OVERRIDE_MODES = {
     "strict":           frozenset(),
-    "no_convergent":    frozenset({"bidir"}),
-    "no_bidirectional": frozenset({"conv"}),
-    "combined":         frozenset({"conv", "bidir"}),
+    "no_convergent":    frozenset({"bidir", "div"}),
+    "no_bidirectional": frozenset({"conv", "div"}),
+    "no_divergent":     frozenset({"conv", "bidir"}),
+    "combined":         frozenset({"conv", "bidir", "div"}),
 }
 
 _STRATEGY_RELATIONS = {
     "STRICT":        frozenset(),
     "CONVERGENT":    frozenset({"conv"}),
+    "DIVERGENT":     frozenset({"div"}),
     "BIDIRECTIONAL": frozenset({"bidir"}),
+    # DIVERGENT is deliberately absent: COMBINED is the join of the relations
+    # safe to apply unasked, and fan-out is not one (src/bundler.h).
     "COMBINED":      frozenset({"conv", "bidir"}),
 }
 
@@ -145,6 +149,8 @@ def _generalized_bundles(session, strategy):
         sigs = [("strict", f"DRV:{drv}|REC:{rec_sig}")]
         if "conv" in allowed:
             sigs.append(("conv", f"REC:{rec_sig}"))
+        if "div" in allowed:
+            sigs.append(("div", f"DRV:{drv}"))
         if "bidir" in allowed:
             all_sig = ",".join(sorted({drv, *rcvs}))
             sigs.append(("bidir", f"BIDIR:{all_sig}"))
@@ -402,6 +408,29 @@ def _fanin_core(part_drvs, part_rcvs):
     return reason, uniq_drv, root, extra_rcv
 
 
+def _fanout_core(part_drvs, part_rcvs):
+    """The `_fanin_core` mirror for a DIVERGENT part: root = the shared
+    DRIVER, leaves = the receivers this part's bits actually touch.
+
+    Without it a split fan-out bundle would be re-rooted as a FAN-IN — the
+    two share the net_drivers/net_receivers channel, so the fan-in path
+    accepts a fan-out bundle and silently rewrites its reason, pointing
+    generation at the wrong end of the tree.  Returns (None, None, []) when
+    the part has no resolvable driver or no leaves."""
+    root = next((d for d in part_drvs if d), None)
+    if root is None:
+        return None, None, []
+    leaves = []
+    for rl in part_rcvs:
+        for r in rl:
+            if r and r != root and r not in leaves:
+                leaves.append(r)
+    if not leaves:
+        return None, None, []
+    return ("FANOUT:" + root + "|TO:" + "".join(x + "," for x in leaves),
+            root, leaves)
+
+
 def _split_hier_bundles(session, raw_bundles):
     """Hier twin of _split_oversized_bundles (set_max_bundle_bits): split an
     over-limit TEMPLATE bundle into balanced parts BEFORE per-instance
@@ -478,11 +507,14 @@ def _split_hier_bundles(session, raw_bundles):
         total = len(nets)
         drvs = list(b.net_drivers)
         rcvs = [list(r) for r in b.net_receivers]
-        fanin = bool(drvs) and len(drvs) == total
+        # A FAN-OUT bundle rides the same net_drivers/net_receivers channel,
+        # so the reason is what tells the two apart.
+        fanout = b.reason.startswith('FANOUT:') and len(drvs) == total
+        fanin = bool(drvs) and len(drvs) == total and not fanout
         net_idx = {n: i for i, n in enumerate(nets)}
 
         def _inc(net, shared):
-            if fanin:
+            if fanin or fanout:
                 i = net_idx.get(net)
                 if i is None:
                     return ()
@@ -535,7 +567,17 @@ def _split_hier_bundles(session, raw_bundles):
             nb = session._clone_hbundle_with_id(b, b.id if k == 1 else _new_id())
             nb.net_names = part
             suffix = f"|SPLIT:{k}/{len(parts)}"
-            if fanin:
+            if fanout:
+                pd = [drvs[net_idx[n]] for n in part]
+                pr = [rcvs[net_idx[n]] for n in part]
+                nb.net_drivers = pd
+                nb.net_receivers = pr
+                core, root, leaves = _fanout_core(pd, pr)
+                nb.reason = (core if core else b.reason) + suffix
+                if core and b.cell_context and b.entry_busterm_ids:
+                    nb.entry_busterm_ids = ["bt:" + root]
+                    nb.exit_busterm_ids = ["bt:" + r for r in leaves]
+            elif fanin:
                 pd = [drvs[net_idx[n]] for n in part]
                 pr = [rcvs[net_idx[n]] for n in part]
                 nb.net_drivers = pd
@@ -630,9 +672,10 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
     dump = "--dump" in args
     pos = [a for a in args if not a.startswith("--")]
     strat_arg = pos[0].upper() if pos else "STRICT"
-    if strat_arg not in ("STRICT", "CONVERGENT", "BIDIRECTIONAL", "COMBINED"):
+    if strat_arg not in ("STRICT", "CONVERGENT", "DIVERGENT",
+                         "BIDIRECTIONAL", "COMBINED"):
         print(f"Error: run_bundler strategy must be STRICT, CONVERGENT, "
-              f"BIDIRECTIONAL or COMBINED, got '{pos[0]}'"); return
+              f"DIVERGENT, BIDIRECTIONAL or COMBINED, got '{pos[0]}'"); return
     if strat_arg == "CONVERGENT":
         # CONVERGENT groups nets by shared receiver only, so a bundle can
         # span several DIFFERENT driver blocks at different locations (a
@@ -645,6 +688,17 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
         print("[Bundler] CONVERGENT: nets grouped by shared receiver; a "
               "multi-driver bundle routes as a fan-in tree rooted at the "
               "shared sink (see docs/internal/convergent_bundling.md).")
+    elif strat_arg == "DIVERGENT":
+        # The mirror of CONVERGENT: nets grouped by shared DRIVER, so a
+        # bundle can span several DIFFERENT receiver blocks (a one-to-many
+        # fan-out).  Generation models it as a fan-out tree rooted at the
+        # shared driver with every receiver block as a leaf, per-bit
+        # tapered so bit k's wire lands only where bit k goes.
+        session.bundler.set_strategy(buda.Strategy.DIVERGENT)
+        print("[Bundler] DIVERGENT: nets grouped by shared driver; a "
+              "multi-receiver bundle routes as a per-bit tapered fan-out "
+              "tree rooted at the shared driver.  A high-fanout driver is "
+              "not always a bus — restrict per prefix with set_bundling.")
     elif strat_arg == "BIDIRECTIONAL":
         # BIDIRECTIONAL bundles nets that connect the SAME set of blocks
         # in any direction (A->B with B->A, a->b,c with b->c,a / c->b,a).
@@ -704,14 +758,15 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
 
 
 def cmd_set_bundling(session, cmd, args, cmd_line):
-    # set_bundling <prefix>|* <strict|no_convergent|no_bidirectional|combined>
+    # set_bundling <prefix>|*
+    #     <strict|no_convergent|no_bidirectional|no_divergent|combined>
     # Per-net-prefix bundling permission (longest prefix wins; '*' = global
     # default).  A merge via a relation happens only when BOTH nets permit
     # it, so `set_bundling clk_ strict` keeps clock nets out of every
     # convergent/bidirectional merge under any strategy.
     if len(args) != 2 or args[1].lower() not in _OVERRIDE_MODES:
-        print("Error: usage: set_bundling <prefix>|* "
-              "<strict|no_convergent|no_bidirectional|combined>")
+        print("Error: usage: set_bundling <prefix>|* <strict|no_convergent|"
+              "no_bidirectional|no_divergent|combined>")
         return
     prefix, mode = args[0], args[1].lower()
     if not hasattr(session, "_bundling_overrides"):
@@ -836,7 +891,8 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     strat_toks = [a.upper() for i, a in enumerate(args)
                   if a.lower() != "depth" and i != depth_val_idx]
     reject_unknown_options("run_hier_bundler", strat_toks,
-                           ("STRICT", "CONVERGENT", "BIDIRECTIONAL", "COMBINED"))
+                           ("STRICT", "CONVERGENT", "DIVERGENT",
+                            "BIDIRECTIONAL", "COMBINED"))
     if len(strat_toks) > 1:
         print(f"Error: run_hier_bundler: at most one strategy, got "
               f"{', '.join(strat_toks)}"); return
@@ -854,6 +910,12 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     overrides = getattr(session, "_bundling_overrides", None) or {}
     if overrides:
         hb.set_bundling_overrides(sorted(overrides.items()))
+    if strat == "DIVERGENT":
+        print("[HierBundler] DIVERGENT: nets grouped by shared DRIVER "
+              "(fan-OUT, the CONVERGENT mirror); a multi-receiver group "
+              "routes as a per-bit tapered tree rooted at the driver.  A "
+              "high-fanout driver is not always a bus — restrict per prefix "
+              "with set_bundling.")
     if strat == "COMBINED":
         print("[HierBundler] COMBINED: join of CONVERGENT and BIDIRECTIONAL "
               "per bundling depth (same-level AND cross-level; restrict per "
