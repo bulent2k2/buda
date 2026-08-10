@@ -98,6 +98,44 @@ import os
 import signal
 import sys
 
+
+def claim_protocol_channel():
+    """Make a direct fd-1 write harmless BY CONSTRUCTION.
+
+    The protocol's one documented fragility: Python's `sys.stdout` and C++'s
+    `std::cout` are both captured during a command, but a library writing
+    straight to file descriptor 1 would land in the middle of a frame and
+    desynchronise the channel.  Nothing in BUDA does — the note said so —
+    but "nothing does today" is a promise about other people's code.
+
+    So the channel stops BEING fd 1: the descriptor is duplicated to a
+    private fd the protocol alone writes, and fd 1 is repointed at stderr.
+    A rogue write to fd 1 now lands beside the diagnostics — visible, in
+    order, and outside every frame — instead of inside the conversation.
+    Returns the protocol stream; falls back to plain stdout if the dup
+    fails (an exotic host is better served than none).
+    """
+    try:
+        proto_fd = os.dup(1)
+        os.dup2(2, 1)
+        proto = os.fdopen(proto_fd, "w", encoding="utf-8", newline="\n")
+    except OSError:
+        return sys.stdout
+    # sys.stdout still wraps fd 1, which is now stderr: command output is
+    # captured anyway, and anything the interpreter itself prints between
+    # commands lands visibly rather than in a frame.
+    return proto
+
+
+# Claimed BEFORE the engine imports below, and only when running AS the
+# server (an importer — the tests' protocol drivers — claims explicitly
+# when it wants to): the imports initialize the compiled extension and its
+# native dependencies, and module-init output written straight to fd 1
+# would already be queued in the pipe by the time main() ran — parsed by
+# the client as the response header to its first request (Codex P2 on
+# #681).  The window between exec and this line is the OS's, not ours.
+_PROTO_OUT = claim_protocol_channel() if __name__ == "__main__" else None
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 for _p in (os.path.join(_HERE, "..", "build"),
            os.path.join(_HERE, "..", "src"),
@@ -360,12 +398,16 @@ def main(argv=None):
     if argv and argv[0] in ("-h", "--help"):
         print(__doc__)
         return 0
-    for stream in (sys.stdin, sys.stdout):
+    # Claimed at module load when running as the server (see the top of the
+    # file — before the engine imports); an importer that calls main() gets
+    # the claim here, after its own imports, which is the best it can ask.
+    out = _PROTO_OUT if _PROTO_OUT is not None else claim_protocol_channel()
+    for stream in (sys.stdin, out):
         try:
             stream.reconfigure(encoding="utf-8", newline="\n")
         except (AttributeError, ValueError):
             pass
-    return Server().serve()
+    return Server(out=out).serve()
 
 
 if __name__ == "__main__":
