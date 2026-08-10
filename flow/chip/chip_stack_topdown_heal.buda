@@ -18,6 +18,17 @@
 #   RIGHT column  x=[7100..9430]   4 x mix2, pitch 3528  (multiple of 504),
 #                                  centred (458 margins); upper half mirrored
 #   die 9430 x 13860, 100 top-level cross-hierarchy buses, 11750 nets
+# HEALER SCHEME (2026-08-10, session heal-to-clean): three INTERLEAVED short
+# rounds — 'negotiate; ripup_reroute 12; refine_selection' — reach the CLEAN
+# endpoint (0 opens / 0 ovl, check_design Success) at 1975s on the 4-core
+# measurement box, 45% cheaper than one big 'ripup_reroute 30' (3572s, also
+# clean) and with better final WL (2284720 vs 2320490).  Why: ripup's first
+# ~10-12 iterations commit cheaply from the screened scan; past that every
+# improver needs a full deferred stall sweep (x1 measured psweep 2638s of
+# 2838s).  Each negotiate/refine between bursts reshapes the contention and
+# REFILLS the cheap pipeline.  The default budgets (ripup 10 / refine 30)
+# are budget-exhausted mid-improvement on this vehicle — every iteration up
+# to the cap commits — which is what the raised budgets fix.
 source chip_tracks_mirror.buda
 open_bdb chip_stack.bdb.sql
 reserve_top_layers 2
@@ -33,11 +44,14 @@ run_planner hier 5 signal_tracks
 run_nuts
 run_detailed_nuts
 negotiate_congestion
-ripup_reroute
-refine_selection
+ripup_reroute 12
+refine_selection 30
 negotiate_congestion
-ripup_reroute
-refine_selection
+ripup_reroute 12
+refine_selection 30
+negotiate_congestion
+ripup_reroute 12
+refine_selection 60
 report_wl
 check_design
 exit
