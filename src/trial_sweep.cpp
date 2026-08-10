@@ -108,7 +108,9 @@ int run_dnuts(const std::vector<BusSegment>& bus, const SweepDnutsCtx& dn) {
         if (dn.ref_ids.count(b.bundle_id))       ref_segs.push_back(b);
         else if (!dn.skip_ids.count(b.bundle_id)) rest_segs.push_back(b);
     }
-    DetailedNUTSEngine e1(*dn.grid);
+    // Reference solve on the share-thinned view when declared — the
+    // sequential merge path's grid CLONE (see SweepDnutsCtx::ref_grid).
+    DetailedNUTSEngine e1(dn.ref_grid ? *dn.ref_grid : *dn.grid);
     DetailedNUTSResult r1 = e1.run(ref_segs, /*emit_vias=*/false);
     std::map<int, int> exp_bits, placed_bits;
     for (const auto& b : ref_segs) exp_bits[b.bundle_id] += b.bit_width;

@@ -103,6 +103,13 @@ struct SweepOutcome {
 struct SweepDnutsCtx {
     bool enabled = false;
     const RoutingGridStack* grid = nullptr;
+    // Reference-solve grid for the bottom-up merge path (Codex P2 on #664):
+    // with `set_cell_layer_share` declared, the session's sequential
+    // _run_detailed_nuts solves the REFERENCE instances on a grid CLONE
+    // carrying the thinned-pattern overrides — the sweep must solve them on
+    // the same view or its opens metric diverges from the sequential
+    // trial's.  nullptr = no shares, use `grid` (byte-identical).
+    const RoutingGridStack* ref_grid = nullptr;
     std::string bit_order = "LO_HI";
     int abort_unplaced = -1;              // plain path only (fast-trial bar)
     // Bottom-up DNUTS copy plan (all empty = plain single-engine path);

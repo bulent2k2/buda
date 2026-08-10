@@ -197,6 +197,23 @@ class RRSweepsMixin:
                     horiz_of={(ts.bundle_id, ts.seg_idx): ts.horiz
                               for ts in self._bottom_up_fixed_segments()})
             self._install_leaf_keepouts()
+            if plan is not None:
+                # Share-thinned reference view (Codex P2 on #664): the
+                # sequential merge path solves the reference instances on a
+                # grid CLONE carrying the `set_cell_layer_share` thinned
+                # overrides — the sweep's run_dnuts must see the same view
+                # or its opens metric diverges from the sequential trial's
+                # (and a silently-skipped move never replays).  Cloned
+                # AFTER the leaf keepouts so the view matches
+                # _run_detailed_nuts exactly; no shares = no clone,
+                # byte-identical.
+                share_ovr = self._bu_share_dnuts_overrides(
+                    dn_kwargs['ref_ids'])
+                if share_ovr:
+                    ref_grid = self.routing_grid.clone()
+                    for lid, x1, y1, x2, y2, pat in share_ovr:
+                        ref_grid.add_override(lid, x1, y1, x2, y2, pat)
+                    dn_kwargs.update(ref_grid=ref_grid)
             dn_kwargs.update(grid=self.routing_grid,
                              bit_order=self._detailed_bit_order,
                              abort_unplaced=(-1 if full else
