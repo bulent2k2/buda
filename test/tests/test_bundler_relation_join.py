@@ -234,3 +234,57 @@ def test_the_hier_join_is_coarser_than_either_relation_alone():
     for strategy in ("CONVERGENT", "DIVERGENT"):
         for grp in parts(strategy):
             assert any(grp <= j for j in join), (strategy, sorted(grp)[:4])
+
+
+def test_the_order_of_the_tokens_does_not_matter():
+    """A SET has no order, so the two spellings of one set must produce the
+    same bundles AND the same bundle metadata.
+
+    They did not.  The strategy enum still held the FIRST token, and the
+    cross-level emission read the enum rather than the set to decide
+    whether a single-driver group gets a `BIDIR:` reason — so
+    `BIDIRECTIONAL CONVERGENT` wrote BIDIR reasons where `CONVERGENT
+    BIDIRECTIONAL` wrote strict ones, for 59 of `flow/rv`'s bundles.  The
+    reason is not cosmetic: generation parses it to recover endpoints, and
+    it is what gets persisted (Codex P2 on #676).
+
+    Every PAIR is checked rather than the one that happened to be tried
+    first — the conv+div pair, which is what this feature was built for,
+    is exactly the pair that did NOT differ.
+    """
+    import itertools
+    for a, b in itertools.combinations(
+            ("CONVERGENT", "DIVERGENT", "BIDIRECTIONAL"), 2):
+        fwd, rev = _rv_bundles(f"{a} {b}"), _rv_bundles(f"{b} {a}")
+        assert fwd == rev, (a, b, [x for x in fwd if x not in rev][:2])
+
+
+def _rv_bundles(strategy):
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in _RV_IMPORT + [f"run_hier_bundler depth 4 {strategy}"]:
+            s.do_command(c)
+    return sorted((tuple(sorted(w.input.original_bundle.get_net_names())),
+                   w.input.original_bundle.reason) for w in s.bundles)
+
+
+def test_the_persisted_strategy_names_the_whole_set():
+    """`_bundler_strategy` is what a re-persist stamps on the bundle rows.
+    Recording only the first token describes a join incompletely, and its
+    identity would depend on the order someone typed."""
+    for spelling in ("CONVERGENT DIVERGENT", "DIVERGENT CONVERGENT"):
+        s = buda_cli.BudaSession()
+        s.no_viz = True
+        with contextlib.redirect_stdout(io.StringIO()):
+            for c in _RV_IMPORT + [f"run_hier_bundler depth 4 {spelling}"]:
+                s.do_command(c)
+        assert s._bundler_strategy == "CONVERGENT+DIVERGENT", \
+            (spelling, s._bundler_strategy)
+    # A single token is unchanged — it is not a join.
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in _RV_IMPORT + ["run_hier_bundler depth 4 CONVERGENT"]:
+            s.do_command(c)
+    assert s._bundler_strategy == "CONVERGENT"

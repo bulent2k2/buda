@@ -739,7 +739,7 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
     for tk in toks:
         joined |= _STRATEGY_RELATIONS[tk]
     if len(toks) > 1:
-        print(f"[Bundler] {' + '.join(toks)}: the JOIN of "
+        print(f"[Bundler] {' + '.join(sorted(toks))}: the JOIN of "
               f"{', '.join(sorted(joined))} — nets merge through a CHAIN of "
               f"any of them.")
     if len(joined) > 1 or overrides:
@@ -771,7 +771,8 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
     print(f"Bundler created {len(session.bundles)} hbundles.")
     if dump:
         _dump_flat_bundles(session.bundles)
-    session._bundler_strategy = strat_arg
+    session._bundler_strategy = ("+".join(sorted(toks)) if len(toks) > 1
+                                 else strat_arg)
     n = session._persist_bundles(strat_arg)
     if n:
         print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
@@ -1009,8 +1010,12 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
         print(f"  Warning: {len(dropped)} net(s) not placed in any bundle "
               f"(possibly UNKNOWN direction or missing receiver): "
               f"{', '.join(shown)}{ellipsis_str}")
-    session._bundler_strategy = strat
-    n = session._persist_bundles(strat)
+    # Persist the whole SET, in a canonical order — the first token alone
+    # describes a join incompletely, and its identity would depend on the
+    # order someone typed the tokens (Codex P2 on #676).
+    strat_label = "+".join(sorted(strat_toks)) if len(strat_toks) > 1 else strat
+    session._bundler_strategy = strat_label
+    n = session._persist_bundles(strat_label)
     if n:
         print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
 

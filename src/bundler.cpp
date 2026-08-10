@@ -628,13 +628,13 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                     { auto nit = net_name.find(net_id);
                       if (nit != net_name.end()) nm = &nit->second; }
                     std::string xsig;
-                    if (_strategy == Strategy::CONVERGENT &&
+                    if (_rel("conv") &&
                         (!nm || _net_allows(*nm, "conv"))) {
                         xsig = rcv_set_sig(sorted_rcv);
-                    } else if (_strategy == Strategy::DIVERGENT &&
+                    } else if (_rel("div") &&
                                (!nm || _net_allows(*nm, "div"))) {
                         xsig = drv_sig(info.drv_spec_path);
-                    } else if (_strategy == Strategy::BIDIRECTIONAL &&
+                    } else if (_rel("bidir") &&
                                (!nm || _net_allows(*nm, "bidir"))) {
                         std::vector<std::string> all = sorted_rcv;
                         all.push_back(info.drv_spec_path);
@@ -812,7 +812,15 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                     const std::string* nm = nullptr;
                     { auto nit = net_name.find(net_ids[0]);
                       if (nit != net_name.end()) nm = &nit->second; }
-                    if (_strategy == Strategy::BIDIRECTIONAL &&
+                    // Asked of the relation SET, not the enum.  The enum
+                    // holds the FIRST token, so reading it here made the
+                    // emitted reason depend on the ORDER the tokens were
+                    // typed: `BIDIRECTIONAL CONVERGENT` wrote a BIDIR reason
+                    // where `CONVERGENT BIDIRECTIONAL` wrote a strict one for
+                    // the same bundle — 59 of them on flow/rv — and the
+                    // reason is what generation parses and what is persisted
+                    // (Codex P2 on #676).  A set has no order.
+                    if (_rel("bidir") &&
                         (!nm || _net_allows(*nm, "bidir"))) {
                         std::vector<std::string> all = sorted_rcv;
                         all.push_back(info0.drv_spec_path);
