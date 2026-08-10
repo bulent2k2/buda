@@ -232,6 +232,10 @@ struct NdrRuleRow {
     // v22: R5a crediting opted in (an END shield may be satisfied by an
     // adjacent pattern rail electrically identical to shield_net).
     int         credit = 0;
+    // v23: R6 shield BONDING opted in (each emitted shield is strapped to
+    // the power grid wherever it crosses an identity-matching rail on an
+    // adjacent perpendicular layer).  Output-only — it moves no demand.
+    int         bond = 0;
 };
 
 struct GrpRow {
@@ -444,7 +448,9 @@ public:
     //       since-changed resolution and VOID the restored plan).
     // v22 = ndr_rule.credit (R5a end-shield crediting opt-in — part of the
     //       rule's pricing basis, so it rides the same table).
-    static constexpr int SCHEMA_VERSION = 24;
+    // v25 = ndr_rule.bond (R6 shield-bonding opt-in — output-only, so it is
+    //       deliberately NOT part of the bundle.ndr_rule pricing stamp).
+    static constexpr int SCHEMA_VERSION = 25;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
