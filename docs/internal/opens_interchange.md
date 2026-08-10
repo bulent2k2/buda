@@ -8,17 +8,20 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 [`message_ids.md`](message_ids.md) and [`../TCL_FRONT_END.md`](../TCL_FRONT_END.md);
 this page is the backlog behind them.
 
-Snapshot index — last verified against `main`: **2026-08-10**, after items 1
-and 4 landed. Each item states what is missing, why it was left rather than
+Snapshot index — last verified against `main`: **2026-08-10**, after items 1,
+2 and 4 landed. Each item states what is missing, why it was left rather than
 forgotten, and where to start. Every claim below was reproduced on `main`
 before being written down; the reproduction is given so a reader can
 re-derive it rather than trust it.
 
-Items 1 and 4 are kept in place, struck through, rather than moved to the
-resolved table at the bottom — its entry now records that this page's **first
-description of it was wrong about the merge case**, and that the fix it
-originally proposed would have been the wrong fix. Both are worth more than
-a tidy list.
+Items 1, 2 and 4 are kept in place, struck through, rather than moved to the
+resolved table at the bottom. Each entry records where this page's **own
+first description was wrong** — item 1 about the merge case, and about the
+fix it originally proposed, which would have been the wrong fix; item 2
+about the severity, having called a silent SHORT a width collapse. That is
+worth more than a tidy list, and the pattern is worth naming: the first
+description of a fault is written from the symptom you noticed, and the
+symptom is rarely the whole fault.
 
 The working vehicle for all of this is **[`flow/def/`](../../flow/def/)** —
 a LEF + DEF + Verilog design read off disk and routed end to end. Most of
@@ -80,25 +83,92 @@ container it would have orphaned is sized, a gate-level merge keeps only the
 macro, no-LEF filtering is unchanged, and the census names distinct kinds and
 admits when it is truncated.
 
-## 2. A vector port map collapses to one net
+## 2. ~~A vector port map collapses to one net~~ — RESOLVED 2026-08-09 (bit-selects; vector PORTS remain)
 
 ```verilog
 wire [1:0] w;
 sub u0 (.a0(w[0]), .a1(w[1]));
 ```
 
-Reproduced on `main`: `nets: ['w']`. `parse_portmap` resolves a bit-select to
-its **base name**, so a 4-bit bus arrives as a single net and the bundler
-sees a 1-bit bus — a silent width collapse, not an error.
+Reproduced on `main`: `nets: ['w']`. `parse_portmap` resolved a bit-select to
+its **base name**, so a 4-bit bus arrived as a single net.
 
-`flow/def/chip.v` works around it with four scalar wires, and says so in a
-comment. That is fine for a fixture and wrong for a real netlist, where
-vectors are how buses are written.
+**Correcting what this page first called it.** "A silent width collapse" is
+the smaller half. The bits of a bus are *different nets*, and they all landed
+on one — so the reader also **shorted the bus**, reporting pins joined that
+the netlist keeps apart:
 
-*Where to start:* keep the base name as the **bus** name (`net_props.bus_name`
-already exists for this) and make the net per-bit. The DEF side already
-names bits individually, so the merge would then line up instead of one side
-having four nets and the other one.
+```
+  u0 .a0 -> w        u0 .a1 -> w        (two bits, one net)
+```
+
+A width error understates it: a short is a correctness fault, and nothing
+downstream could see either one. Measured on `flow/def/chip.v` once its buses
+were written as vectors, the old reader routes **18 bit-wires where the
+design has 60** — 15 nets against the DEF's declared 36 — and `check_design`
+reports "Success: no violations found" at all three stages. Nothing can tell
+a bus that was never read from a bus that never existed.
+
+**The fix keeps the selector and resolves base-then-select.** `w[0]` is net
+`w[0]`, which is also what the DEF side has always called it, so the merge
+lines up (36 declared, 36 imported, 36 after the merge). The identifier is
+resolved through the hierarchy context and the selector re-applied to the
+*result*, so a parent's `.p(w)` plus a child's `p[0]` reach `w[0]` — the same
+net the parent's own `.a0(w[0])` names. `net_props.bus_name` / `bit_index`
+are filled in from the stored name by one shared helper, so a DEF net and the
+Verilog net it merges with cannot be classified differently.
+
+Three sub-cases, modelled to three depths and each **counted** so a caller
+can tell which it got:
+
+| Shape | Handling |
+|---|---|
+| `.a(w[0])` bit-select | exact — one net per bit |
+| `.a(w[3:0])` part-select | a pin row per bit **the formal port can take** (the pin key is `(net, comp, pin)`, so one port on four nets is representable). Not the base name, which would strand this pin off the bit-selects; not a net called `w[3:0]`, which the netlist never declared. A non-zero low bound on a module the reader descends into is reported (`BUDA-1611`) — port bit *k* is net bit *k+lo* and the child's own selects are resolved against the base |
+| `{a,b}`, `w[i]` | still unresolved, now **warned** (`BUDA-1610`) — each is an open, and guessing which net a concatenation means would place a wire the netlist never asked for |
+
+**How much of a part-select lands is the FORMAL's width, not the select's.**
+Verilog width-adapts a port connection, so `.s(w[3:0])` on a scalar `input s`
+connects bit 0 and nothing else. Expanding to the select's width regardless
+put four nets on that one pin and reported three connections the netlist does
+not have — the same invention as the short this item is about, in the other
+direction (Codex P1 on #661). Port ranges are now kept (`input [3:0] a` is
+width 4) and bits are taken LSB-first, the end Verilog aligns.
+
+An **unknown** formal width — an undefined module declares no ports here —
+is not guessed either way: bit 0 is connected, because it is connected for
+every width ≥ 1, and the rest is reported (`BUDA-1612`).
+
+Two smaller faults from the same review, both reproduced first:
+
+* `w[ 0 ]` and `w[3 : 0]` are legal and their indices *are* literal, but the
+  digit test ran untrimmed, so they were classified as unresolvable and their
+  pins opened — a reader limitation reported as a design property.
+* `unresolved_conns` was counted while each module DEFINITION was parsed, not
+  as instances elaborate. A module instantiated three times reported one open,
+  and a module never instantiated reported one it does not have. Measured
+  together: a design losing **3** connections reported **2**. The counter now
+  runs at elaboration, like `bit_selects` and `part_selects`.
+
+The trap, which cost a test: `[` is not always a select. A Verilog **escaped**
+identifier runs from `\` to whitespace and takes its brackets with it, so
+`\w[0]` is an identifier *named* `w[0]`. For that spelling both readings
+converge — and converging is what makes the merge work, since a DEF writes a
+bus bit as `\w\[0\]`. They part on a name the select parser cannot read, like
+the 2-D element `\w[1][0]`, whose "index" is `1][0`: read as a select it is
+unresolvable and the pin silently loses its net.
+
+*What remains:* a vector **PORT** (`input [3:0] a`). Ports are still one pin
+per port NAME — `clean_port_name` strips `[…]` — so a port map connecting a
+whole vector to a vector port is modelled as one pin on N nets rather than N
+pins. Doing it properly means per-bit `cell_pin` rows and a context keyed by
+port bit, which is a larger change than this one and wants its own vehicle.
+`flow/def/chip.v` is written to the boundary: vector wires, scalar ports.
+
+Pinned by `test_bdb_import_edges.py` (bit-select, hierarchy resolution,
+`net_props` classification, escaped identifier, part-select expansion) and by
+`test_def_hier_flow.py`, which asserts each internal bus arrives 4 bits wide
+and the design routes 36 nets.
 
 ## 3. The GDS round trip loses what the merge invented
 

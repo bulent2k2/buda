@@ -941,7 +941,9 @@ int BDB::add_net_pins(const std::string& net_name,
     if (sqlite3_step(q_net) != SQLITE_ROW)
         throw std::runtime_error("add_net_pins: failed to insert net " + net_name);
     int net_id = sqlite3_column_int(q_net, 0);
-    _ensure_net_props(net_id);   // else it disappears from HPWL/fanout (C6-07)
+    // else it disappears from HPWL/fanout (C6-07); the name goes with it so
+    // a `<bus>[<k>]` net is classified here exactly as the importers do.
+    _ensure_net_props(net_id, net_name);
 
     // Parse "inst/path.pin_name" into (path, pin_name, dir).
     struct Ep { std::string path, pin, dir; };
@@ -1018,7 +1020,9 @@ int BDB::add_net_pins_undirected(const std::string& net_name,
     if (sqlite3_step(q_net) != SQLITE_ROW)
         throw std::runtime_error("add_net_pins_undirected: failed to insert net " + net_name);
     int net_id = sqlite3_column_int(q_net, 0);
-    _ensure_net_props(net_id);   // else it disappears from HPWL/fanout (C6-07)
+    // else it disappears from HPWL/fanout (C6-07); the name goes with it so
+    // a `<bus>[<k>]` net is classified here exactly as the importers do.
+    _ensure_net_props(net_id, net_name);
 
     auto split = [](const std::string& p) {
         std::vector<std::string> v;
@@ -1083,7 +1087,9 @@ int BDB::add_net_pins_inout(const std::string& net_name,
     if (sqlite3_step(q_net) != SQLITE_ROW)
         throw std::runtime_error("add_net_pins_inout: failed to insert net " + net_name);
     int net_id = sqlite3_column_int(q_net, 0);
-    _ensure_net_props(net_id);   // else it disappears from HPWL/fanout (C6-07)
+    // else it disappears from HPWL/fanout (C6-07); the name goes with it so
+    // a `<bus>[<k>]` net is classified here exactly as the importers do.
+    _ensure_net_props(net_id, net_name);
 
     auto split = [](const std::string& p) {
         std::vector<std::string> v;
@@ -1244,6 +1250,27 @@ static std::vector<std::string> split_ws(const std::string& s) {
     return {std::istream_iterator<std::string>(ss), {}};
 }
 
+// A net named `<base>[<k>]` is bit k of bus <base>.  ONE reading of the
+// convention, shared by both importers, so a DEF net and the Verilog net it
+// merges with cannot be classified differently — `net_props.bus_name` /
+// `bit_index` have been in the schema for this and nothing filled them in.
+//
+// Purely a naming convention, so it is applied to the STORED name and asks
+// nothing about how the name was spelled in its file: a DEF `\w\[0\]` and a
+// Verilog `w[0]` both arrive here as `w[0]`.
+static bool derive_bus_bit(const std::string& net_name,
+                           std::string& bus, int& bit) {
+    if (net_name.size() < 4 || net_name.back() != ']') return false;
+    const auto br = net_name.rfind('[');
+    if (br == std::string::npos || br == 0) return false;
+    const std::string inner = net_name.substr(br + 1, net_name.size() - br - 2);
+    if (inner.empty()) return false;
+    for (char c : inner) if (!std::isdigit((unsigned char)c)) return false;
+    bus = net_name.substr(0, br);
+    bit = std::stoi(inner);
+    return true;
+}
+
 // ── LEF adapter ──────────────────────────────────────────────────────────────
 // The parsing itself moved to src/lef_io.cpp (Phase 2a).  What remains here is
 // the PROJECTION onto what the BDB stores — footprints and one point per pin —
@@ -1376,7 +1403,24 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     Stmt s_pin (_db,
         "INSERT OR IGNORE INTO pin(net_id,comp_id,pin_name,dir,px,py)"
         " VALUES(?,?,?,?,?,?)");
-    Stmt s_np  (_db, "INSERT OR IGNORE INTO net_props(net_id) VALUES(?)");
+    // Prepared rather than routed through `_ensure_net_props(id, name)`:
+    // this runs once per net on a real design.  Same classification.
+    Stmt s_np  (_db, "INSERT OR IGNORE INTO net_props(net_id,bus_name,bit_index)"
+                     " VALUES(?,?,?)");
+    // One place per importer that turns a net NAME into its bus/bit columns,
+    // so the two cannot drift apart on the merge (`derive_bus_bit`).
+    auto bind_net_props = [&](int nid, const std::string& nm) {
+        std::string bus; int bit = 0;
+        sqlite3_bind_int(s_np, 1, nid);
+        if (derive_bus_bit(nm, bus, bit)) {
+            sqlite3_bind_text(s_np, 2, bus.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int (s_np, 3, bit);
+        } else {
+            sqlite3_bind_null(s_np, 2);
+            sqlite3_bind_null(s_np, 3);
+        }
+        sqlite3_step(s_np); sqlite3_reset(s_np);
+    };
     Stmt s_find_comp(_db, "SELECT id FROM component WHERE name=?");
     Stmt s_find_net (_db, "SELECT id FROM net WHERE name=?");
 
@@ -1554,8 +1598,7 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         sqlite3_step(s_net); sqlite3_reset(s_net);
         const int nid = get_net_id(n.name);
         if (nid < 0) continue;
-        sqlite3_bind_int(s_np,1,nid);
-        sqlite3_step(s_np); sqlite3_reset(s_np);
+        bind_net_props(nid, n.name);
         ++stats.imported_nets;
         for (const auto& cn : n.conns) {
             // A `( PIN <portName> )` connection names a die port, which is a
@@ -1980,26 +2023,97 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
 
     // ── local helpers ─────────────────────────────────────────────────────────
 
-    // Extract simple net name from a port-map value expression.
-    // Skips constants, concatenations, UNCONNECTED stubs; strips bit selects.
-    auto clean_net = [](const std::string& expr) -> std::string {
+    // Parse a port-map value expression into a net REFERENCE: the identifier
+    // plus whatever part of it the expression selects.
+    //
+    // The selector used to be thrown away (`e.resize(e.find('['))`), which
+    // made `.a0(w[0]), .a1(w[1])` two connections to one net named `w`.  That
+    // is not only the width collapse it was filed as — a 4-bit bus arriving
+    // 1 bit wide — it SHORTS the bus: every bit of `w` became the same net,
+    // so two pins the netlist keeps apart came back electrically joined, with
+    // no diagnostic.  Keeping the selector is what makes a bus a bus, and it
+    // makes the Verilog side agree with the DEF side, which has always named
+    // bits individually (`w[0]`, `w[1]`).
+    //
+    // The one trap is that `[` does not always mean a select.  A Verilog
+    // ESCAPED identifier runs from `\` to whitespace and takes any brackets
+    // with it: `\w[0]` is an identifier *named* `w[0]`, not bit 0 of `w`.
+    // The two are told apart here and nowhere else — see `escaped`.
+    // Non-nets are recorded on the ref rather than dropped at parse time, so
+    // the ones that are OPENS can be counted per elaborated INSTANCE.  The
+    // port map is parsed once per module DEFINITION, so counting here would
+    // report one open for a module instantiated a hundred times and one for
+    // a module never instantiated at all (Codex P2 on #661).
+    enum class RefSkip { NONE, CONCAT, CONSTANT, UNCONNECTED, EXPR };
+    struct NetRef {
+        std::string base;                       // identifier, escapes stripped
+        enum Kind { WHOLE, BIT, RANGE } kind = WHOLE;
+        int  hi = 0, lo = 0;                    // BIT: hi == lo
+        bool escaped = false;                   // brackets are part of the name
+        RefSkip skip = RefSkip::NONE;           // NONE = this names a net
+    };
+    auto parse_net_ref = [](const std::string& expr, RefSkip& skip) -> NetRef {
+        skip = RefSkip::NONE;
+        NetRef r;
         std::string e = expr;
         while (!e.empty() && std::isspace((unsigned char)e.front())) e.erase(e.begin());
         while (!e.empty() && std::isspace((unsigned char)e.back()))  e.pop_back();
-        if (e.empty() || std::isdigit((unsigned char)e[0]) || e[0] == '{') return "";
-        if (e[0] == '\\') e.erase(e.begin());   // strip verilog escape prefix
-        auto br = e.find('[');
-        if (br != std::string::npos) e.resize(br);
-        while (!e.empty() && std::isspace((unsigned char)e.back())) e.pop_back();
-        if (e.size() >= 11 && e.substr(0,11) == "UNCONNECTED") return "";
-        return e;
+        if (e.empty()) { skip = RefSkip::EXPR; return r; }
+        if (std::isdigit((unsigned char)e[0])) { skip = RefSkip::CONSTANT;    return r; }
+        if (e[0] == '{')                       { skip = RefSkip::CONCAT;      return r; }
+        if (e.size() >= 11 && e.compare(0, 11, "UNCONNECTED") == 0) {
+            skip = RefSkip::UNCONNECTED; return r;
+        }
+        if (e[0] == '\\') {
+            // Escaped identifier: the whole token is the name.  Any backslash
+            // inside is an escape too (a DEF writes `\w\[0\]`), and stripping
+            // it wherever it appears is what makes the two readers agree —
+            // see the `normalize_def_name` removal in #654.
+            r.escaped = true;
+            e.erase(std::remove(e.begin(), e.end(), '\\'), e.end());
+            r.base = e;
+            return r;
+        }
+        const auto br = e.find('[');
+        if (br == std::string::npos || e.back() != ']') { r.base = e; return r; }
+        const std::string inner = e.substr(br + 1, e.size() - br - 2);
+        r.base = e.substr(0, br);
+        while (!r.base.empty() && std::isspace((unsigned char)r.base.back()))
+            r.base.pop_back();
+        const auto colon = inner.find(':');
+        // `w[ 0 ]` and `w[3 : 0]` are legal and their indices ARE literal, so
+        // an untrimmed digit test classified them as unresolvable expressions
+        // and opened the pin (Codex P2 on #661).
+        auto trim = [](std::string s) {
+            while (!s.empty() && std::isspace((unsigned char)s.front())) s.erase(s.begin());
+            while (!s.empty() && std::isspace((unsigned char)s.back()))  s.pop_back();
+            return s;
+        };
+        auto all_digits = [](const std::string& s) {
+            if (s.empty()) return false;
+            for (char c : s) if (!std::isdigit((unsigned char)c)) return false;
+            return true;
+        };
+        if (colon == std::string::npos) {
+            const std::string one = trim(inner);
+            if (!all_digits(one)) { skip = RefSkip::EXPR; return r; }    // w[i]
+            r.kind = NetRef::BIT;
+            r.hi = r.lo = std::stoi(one);
+        } else {
+            const std::string a = trim(inner.substr(0, colon)),
+                              b = trim(inner.substr(colon + 1));
+            if (!all_digits(a) || !all_digits(b)) { skip = RefSkip::EXPR; return r; }
+            r.kind = NetRef::RANGE;
+            r.hi = std::stoi(a); r.lo = std::stoi(b);
+        }
+        return r;
     };
 
-    // Parse ".port (net), ..." text → vector of (port, net) pairs
+    // Parse ".port (net), ..." text → vector of (port, net reference) pairs
     auto parse_portmap = [&](const std::string& text)
-        -> std::vector<std::pair<std::string,std::string>>
+        -> std::vector<std::pair<std::string,NetRef>>
     {
-        std::vector<std::pair<std::string,std::string>> result;
+        std::vector<std::pair<std::string,NetRef>> result;
         size_t i = 0, sz = text.size();
         while (i < sz) {
             if (text[i] != '.') { ++i; continue; }
@@ -2029,9 +2143,19 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 else if (text[k] == ')') --depth;
                 ++k;
             }
-            std::string net = clean_net(text.substr(i, k - i - 1));
-            if (!port.empty() && !net.empty())
-                result.emplace_back(port, net);
+            RefSkip skip;
+            NetRef ref = parse_net_ref(text.substr(i, k - i - 1), skip);
+            ref.skip = skip;
+            if (port.empty()) { i = k; continue; }
+            // A CONCAT or EXPR is carried through rather than dropped: it is
+            // an OPEN in the imported design, and an open belongs to each
+            // ELABORATED instance, not to the module text.  A deliberate
+            // non-connection (constant, UNCONNECTED) is not an open and is
+            // dropped here as before.
+            if (skip == RefSkip::NONE && !ref.base.empty())
+                result.emplace_back(port, ref);
+            else if (skip == RefSkip::CONCAT || skip == RefSkip::EXPR)
+                result.emplace_back(port, ref);
             i = k;
         }
         return result;
@@ -2041,11 +2165,16 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
 
     struct VInst {
         std::string cell, name;   // cell type, instance name (both unescaped)
-        std::vector<std::pair<std::string,std::string>> portmap;
+        std::vector<std::pair<std::string,NetRef>> portmap;
     };
     struct VMod {
         std::vector<VInst> insts;
         std::unordered_map<std::string, std::string> port_dirs;
+        // Declared width per port: `input [3:0] a` is 4, a bare `input a` is
+        // 1.  Needed to know how much of a part-select a port can actually
+        // take — Verilog width-adapts, so `.s(w[3:0])` on a SCALAR `s`
+        // connects bit 0 alone (Codex P1 on #661).
+        std::unordered_map<std::string, int> port_width;
     };
     std::unordered_map<std::string, VMod> mod_lib;
 
@@ -2099,14 +2228,32 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
                 std::transform(dir.begin(), dir.end(), dir.begin(),
                                [](unsigned char c){ return std::toupper(c); });
                 std::string rest = (*it)[2].str();
+                // The clause's range comes once, before the names, and
+                // applies to all of them: `input [3:0] a, b;` declares two
+                // 4-bit ports.  Read it BEFORE the strip below throws every
+                // bracket away.  Only a literal `[<n>:<m>]` counts — an
+                // escaped identifier can carry brackets with no colon.
+                int decl_w = 1;
+                {
+                    static const std::regex range_re(
+                        R"(^\s*\[\s*(\d+)\s*:\s*(\d+)\s*\])");
+                    std::smatch rm;
+                    if (std::regex_search(rest, rm, range_re)) {
+                        const int a = std::stoi(rm[1].str()),
+                                  b = std::stoi(rm[2].str());
+                        decl_w = std::abs(a - b) + 1;
+                    }
+                }
                 rest = std::regex_replace(rest, std::regex(R"(\[[^\]]+\])"), " ");
                 rest = std::regex_replace(rest, std::regex(R"(\b(wire|reg|logic|signed|unsigned)\b)"), " ");
                 std::stringstream ss(rest);
                 std::string item;
                 while (std::getline(ss, item, ',')) {
                     std::string name = clean_port_name(item);
-                    if (!name.empty())
+                    if (!name.empty()) {
                         mod_lib[cur_mod].port_dirs[name] = dir;
+                        mod_lib[cur_mod].port_width[name] = decl_w;
+                    }
                 }
             }
         };
@@ -2323,7 +2470,24 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
     Stmt s_pin (_db,
         "INSERT OR IGNORE INTO pin(net_id,comp_id,pin_name,dir,px,py)"
         " VALUES(?,?,?,?,?,?)");
-    Stmt s_np  (_db, "INSERT OR IGNORE INTO net_props(net_id) VALUES(?)");
+    // Prepared rather than routed through `_ensure_net_props(id, name)`:
+    // this runs once per net on a real design.  Same classification.
+    Stmt s_np  (_db, "INSERT OR IGNORE INTO net_props(net_id,bus_name,bit_index)"
+                     " VALUES(?,?,?)");
+    // One place per importer that turns a net NAME into its bus/bit columns,
+    // so the two cannot drift apart on the merge (`derive_bus_bit`).
+    auto bind_net_props = [&](int nid, const std::string& nm) {
+        std::string bus; int bit = 0;
+        sqlite3_bind_int(s_np, 1, nid);
+        if (derive_bus_bit(nm, bus, bit)) {
+            sqlite3_bind_text(s_np, 2, bus.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int (s_np, 3, bit);
+        } else {
+            sqlite3_bind_null(s_np, 2);
+            sqlite3_bind_null(s_np, 3);
+        }
+        sqlite3_step(s_np); sqlite3_reset(s_np);
+    };
     Stmt s_find_by_name(_db, "SELECT id FROM component WHERE name=?");
     Stmt s_cell(_db,
         "INSERT OR IGNORE INTO cell(name,width,height) VALUES(?,0,0)");
@@ -2378,7 +2542,7 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
         sqlite3_step(s_net);
         int id = (int)sqlite3_last_insert_rowid(_db);
         sqlite3_reset(s_net);
-        sqlite3_bind_int(s_np,1,id); sqlite3_step(s_np); sqlite3_reset(s_np);
+        bind_net_props(id, name);
         net_ids[name] = id;
         return id;
     };
@@ -2433,24 +2597,95 @@ VerilogImportStats BDB::import_verilog(const std::string& v_path) {
 
             // Build child context and create pin records
             Ctx child_ctx;
-            for (auto& [port, local_net] : vi.portmap) {
-                // Resolve local_net through current ctx (port connections from parent)
-                auto it = ctx.find(local_net);
-                std::string qnet = (it != ctx.end())
+            for (auto& [port, ref] : vi.portmap) {
+                // Resolve the IDENTIFIER through the current ctx (port
+                // connections from the parent), then re-apply the selector.
+                // Resolving base-then-select is what makes a bit-select work
+                // across a hierarchy boundary: with `.a(w)` in the parent,
+                // ctx maps `a` to `…/w`, so the child's own `a[0]` lands on
+                // `…/w[0]` — the same net the parent's `.x(w[0])` names.
+                auto it = ctx.find(ref.base);
+                const std::string qbase = (it != ctx.end())
                     ? it->second
-                    : (path.empty() ? local_net : path + "/" + local_net);
+                    : (path.empty() ? ref.base : path + "/" + ref.base);
 
-                child_ctx[port] = qnet;
+                auto add_pin = [&](const std::string& qnet) {
+                    const int nid = get_net(qnet);
+                    if (nid <= 0 || cid <= 0) return;
+                    sqlite3_bind_int   (s_pin,1,nid);
+                    sqlite3_bind_int   (s_pin,2,cid);
+                    sqlite3_bind_text  (s_pin,3,port.c_str(),-1,SQLITE_TRANSIENT);
+                    sqlite3_bind_text  (s_pin,4,"UNKNOWN",-1,SQLITE_STATIC);
+                    sqlite3_bind_double(s_pin,5,-1.0);
+                    sqlite3_bind_double(s_pin,6,-1.0);
+                    sqlite3_step(s_pin); sqlite3_reset(s_pin);
+                };
+                auto bit_of = [&](int b) {
+                    return qbase + "[" + std::to_string(b) + "]";
+                };
 
-                int nid = get_net(qnet);
-                if (nid <= 0 || cid <= 0) continue;
-                sqlite3_bind_int   (s_pin,1,nid);
-                sqlite3_bind_int   (s_pin,2,cid);
-                sqlite3_bind_text  (s_pin,3,port.c_str(),-1,SQLITE_TRANSIENT);
-                sqlite3_bind_text  (s_pin,4,"UNKNOWN",-1,SQLITE_STATIC);
-                sqlite3_bind_double(s_pin,5,-1.0);
-                sqlite3_bind_double(s_pin,6,-1.0);
-                sqlite3_step(s_pin); sqlite3_reset(s_pin);
+                if (ref.kind == NetRef::BIT) {
+                    // The port names one bit, so the port IS that bit: a child
+                    // referring to the port plainly must land on it.
+                    child_ctx[port] = bit_of(ref.lo);
+                    add_pin(child_ctx[port]);
+                    ++vstats.bit_selects;
+                } else if (ref.kind == NetRef::RANGE) {
+                    // A part-select on a port BUDA models as one pin.  Each
+                    // bit the PORT can actually take gets a pin row (same
+                    // pin_name — the pin key is (net,comp,pin), so that is
+                    // representable), which keeps the connection to those
+                    // bits rather than inventing a net called `w[3:0]` that
+                    // the netlist never declared.
+                    //
+                    // How many bits the port can take is the formal's
+                    // DECLARED width, not the select's: Verilog width-adapts,
+                    // so `.s(w[3:0])` on a scalar `s` connects bit 0 and
+                    // nothing else.  Expanding to the select's width regard-
+                    // less put four nets on that one pin and reported three
+                    // connections the netlist does not have (Codex P1 on
+                    // #661).  Bits are taken LSB-first because that is the
+                    // end Verilog aligns.
+                    //
+                    // An UNKNOWN formal width (an undefined module — a macro
+                    // kept by the library-cell filter, which declares no
+                    // ports here) is not guessed either way.  Bit 0 is
+                    // connected because it is connected for EVERY width >= 1,
+                    // and the rest is reported rather than invented.
+                    const int nsel = std::abs(ref.hi - ref.lo) + 1;
+                    int take = nsel;
+                    bool width_known = false;
+                    if (defined) {
+                        auto pw = sub->second.port_width.find(port);
+                        if (pw != sub->second.port_width.end()) {
+                            width_known = true;
+                            take = std::min(nsel, pw->second);
+                        }
+                    }
+                    if (!width_known) { take = 1; ++vstats.unsized_part_selects; }
+
+                    const int base_bit = std::min(ref.hi, ref.lo);
+                    for (int k = 0; k < take; ++k) add_pin(bit_of(base_bit + k));
+
+                    // The child context: a single connected bit makes the
+                    // port that bit (as in the BIT case).  Otherwise the
+                    // resolved BASE, so a child's `a[k]` composes to `w[k]` —
+                    // exact for the usual `w[N:0]` and OFF BY `lo` otherwise,
+                    // which is reported rather than quietly mapped.
+                    child_ctx[port] = (take == 1) ? bit_of(base_bit) : qbase;
+                    ++vstats.part_selects;
+                    if (take > 1 && ref.lo != 0 && defined &&
+                        !sub->second.insts.empty())
+                        ++vstats.offset_part_selects;
+                } else if (ref.skip != RefSkip::NONE) {
+                    // A concatenation or a non-literal select: an OPEN, and
+                    // one per ELABORATED instance — a module instantiated a
+                    // hundred times loses the connection a hundred times.
+                    ++vstats.unresolved_conns;
+                } else {
+                    child_ctx[port] = qbase;
+                    add_pin(qbase);
+                }
             }
 
             if (!is_leaf)
@@ -3415,6 +3650,23 @@ int BDB::_ensure_net(const std::string& name) {
 void BDB::_ensure_net_props(int net_id) {
     Stmt np(_db, "INSERT OR IGNORE INTO net_props(net_id) VALUES(?)");
     sqlite3_bind_int(np, 1, net_id);
+    sqlite3_step(np);
+}
+
+void BDB::_ensure_net_props(int net_id, const std::string& net_name) {
+    std::string bus; int bit = 0;
+    if (!derive_bus_bit(net_name, bus, bit)) { _ensure_net_props(net_id); return; }
+    // DO UPDATE rather than OR IGNORE: the props row may already exist (a
+    // net is reached from several pins), and the classification must land on
+    // it either way — an IGNORE here would record the bus only for whichever
+    // pin happened to create the row first.
+    Stmt np(_db,
+        "INSERT INTO net_props(net_id,bus_name,bit_index) VALUES(?,?,?)"
+        " ON CONFLICT(net_id) DO UPDATE SET"
+        " bus_name=excluded.bus_name, bit_index=excluded.bit_index");
+    sqlite3_bind_int (np, 1, net_id);
+    sqlite3_bind_text(np, 2, bus.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (np, 3, bit);
     sqlite3_step(np);
 }
 
