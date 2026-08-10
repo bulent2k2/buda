@@ -206,7 +206,7 @@ bin/buda flow/rv/soc_divergent    # soc.buda with one token changed
 | bundles | 127 | 78 |
 | `dbg` | 32 × 1 net | 1 × 32 nets |
 | abstract WL | 31,234,654 | 19,104,008 (−38.8%) |
-| detailed WL | 409,819,470 | 430,511,600 (+5.0%) |
+| detailed WL | 409,819,470 | 427,958,400 (+4.4%) |
 
 Both clean, 0 unplaced.
 

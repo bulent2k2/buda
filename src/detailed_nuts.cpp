@@ -1171,13 +1171,20 @@ void DetailedNUTSEngine::adjust_bit_spans(
             double ep_hi = -std::numeric_limits<double>::infinity();
             double cover_lo =  std::numeric_limits<double>::infinity();
             double cover_hi = -std::numeric_limits<double>::infinity();
+            // Outermost position this BIT actually connects to, and whether any
+            // connection had no counterpart wire for it (the taper, below).
+            double pres_lo =  std::numeric_limits<double>::infinity();
+            double pres_hi = -std::numeric_limits<double>::infinity();
+            bool   tapered_out = false;
 
             for (const auto& conn : bs_ptr->connections) {
                 auto it = idx_map.find({ns.bundle_id, conn.seg_idx, ns.bit_index});
-                if (it == idx_map.end()) continue;
+                if (it == idx_map.end()) { tapered_out = true; continue; }
 
                 const auto& other_ns = result.net_segments[it->second];
                 const double other_pos = other_ns.track_position;
+                pres_lo = std::min(pres_lo, other_pos);
+                pres_hi = std::max(pres_hi, other_pos);
 
                 if (conn.is_endpoint) {
                     if (conn.lo_end) {
@@ -1200,6 +1207,47 @@ void DetailedNUTSEngine::adjust_bit_spans(
             // check takes min/max locally rather than reordering them.
             if (has_ep_lo) ns.span_lo = ep_lo;
             if (has_ep_hi) ns.span_hi = ep_hi;
+
+            // TAPERED end: a per-bit tapered tree (fan-in / fan-OUT) gives each
+            // stub only ITS OWN bits, so for every other bit the endpoint conn
+            // above resolves to no wire at all — has_ep_* stays false and the
+            // "keep the abstract span" rule leaves this bit spanning the WHOLE
+            // trunk.  Before the taper that could not happen: every stub carried
+            // every bit, so an endpoint conn always had a counterpart to snap to.
+            // The residue is dangling metal past the bit's outermost junction —
+            // an antenna the ANTENNA audit cannot see, because it reads the
+            // BUS-level ConnSeg graph where the trunk is attached at every stub.
+            // Measured on flow/rv/soc_conv_div.buda bundle 1 (a 32-bit FANOUT):
+            // all 32 trunk bits spanned the full 108,400 while needing as little
+            // as 800, i.e. 73.5% of the vertical metal was dangling.
+            //
+            // Retract each un-snapped end to the outermost position this bit
+            // REALLY connects to.  Shrink-only — extension stays the business of
+            // the busterm-face and pass-through passes below, which run after
+            // this and give back exactly what a tap or crossing needs.  Gated on
+            // `tapered_out`, so a segment whose conns all resolve (every
+            // non-tapered flow) is byte-identical by construction.
+            if (tapered_out && pres_lo <= pres_hi) {
+                // has_ep_lo/hi name the NOMINAL ends (span_lo/span_hi keep
+                // endpoint identity and placement may swap them, leaving
+                // span_lo > span_hi); g_lo/g_hi are GEOMETRIC.  On a reversed
+                // span the two orders disagree, so the flags must be mapped
+                // through `rev` — testing them against the geometric bounds
+                // directly would retract the end that was already snapped and
+                // leave the un-snapped one at full abstract span, i.e. exactly
+                // the overhang this is here to remove.
+                const bool rev = ns.span_lo > ns.span_hi;
+                const bool snapped_at_g_lo = rev ? has_ep_hi : has_ep_lo;
+                const bool snapped_at_g_hi = rev ? has_ep_lo : has_ep_hi;
+                double g_lo = std::min(ns.span_lo, ns.span_hi);
+                double g_hi = std::max(ns.span_lo, ns.span_hi);
+                if (!snapped_at_g_lo) g_lo = std::max(g_lo, pres_lo);
+                if (!snapped_at_g_hi) g_hi = std::min(g_hi, pres_hi);
+                if (g_lo <= g_hi) {
+                    ns.span_lo = rev ? g_hi : g_lo;
+                    ns.span_hi = rev ? g_lo : g_hi;
+                }
+            }
 
             // Extend the span to cover mid-span (interior) connections.  Ordered
             // so a reversed span (span_lo > span_hi) keeps both endpoints: a raw

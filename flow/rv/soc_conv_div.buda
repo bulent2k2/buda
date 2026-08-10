@@ -19,9 +19,9 @@
 #
 #   strategy               bundles   abstract WL    detailed WL
 #   STRICT                     127    31,234,654    409,819,470
-#   CONVERGENT                  89    29,771,517    464,297,620
-#   DIVERGENT                   78    19,104,008    430,511,600
-#   CONVERGENT DIVERGENT        40    16,766,857    472,522,550
+#   CONVERGENT                  89    29,771,517    447,753,870
+#   DIVERGENT                   78    19,104,008    427,958,400
+#   CONVERGENT DIVERGENT        40    16,766,857    453,430,400
 #
 # Every one of them ends clean with 0 unplaced bits.  The trend is
 # the honest summary: the more you bundle, the more trunk is
