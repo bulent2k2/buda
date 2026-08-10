@@ -256,10 +256,10 @@ DetailedNUTSResult DetailedNUTSEngine::run(
         emit_bit_vias(bus_segs, result);
         // R6 shield bonding rides with the via pass: it is pure output too,
         // so a fast trial that skips vias skips the straps as well (they
-        // move no metric).  Computed HERE, inside the engine, so the
-        // bottom-up copy path — which transforms r1.net_vias to every
-        // sibling — carries a template's straps to its instances for free.
-        emit_shield_bond_vias(bus_segs, result);
+        // move no metric).  The pass is idempotent and free-standing, so
+        // the bottom-up path re-runs it on the MERGED result to derive each
+        // copied instance's straps from ITS OWN grid (Codex on #663).
+        emit_shield_bond_vias(stack_, bus_segs, result);
     }
     charge("vias");
     return result;
@@ -1434,9 +1434,9 @@ std::vector<BusSegment> make_bus_segments(
     return out;
 }
 
-void DetailedNUTSEngine::emit_shield_bond_vias(
-        const std::vector<BusSegment>& bus_segs,
-        DetailedNUTSResult& result) const {
+void emit_shield_bond_vias(const RoutingGridStack& stack_,
+                           const std::vector<BusSegment>& bus_segs,
+                           DetailedNUTSResult& result) {
     // Which bundles asked for bonding, and with which shield net.  Built
     // from the bus segments' specs (the same place the shields came from),
     // so a session with no `bond` rule does no work at all.
@@ -1445,6 +1445,13 @@ void DetailedNUTSEngine::emit_shield_bond_vias(
         if (bs.ndr.active() && bs.ndr.bond_shields)
             bid_to_ndr[bs.bundle_id] = &bs.ndr;
     if (bid_to_ndr.empty()) return;
+
+    // Idempotence: drop any straps already present so a re-run recomputes
+    // rather than duplicates.  Real vias (to_seg >= 0) are untouched.
+    result.net_vias.erase(
+        std::remove_if(result.net_vias.begin(), result.net_vias.end(),
+                       [](const NetVia& v) { return v.to_seg < 0; }),
+        result.net_vias.end());
 
     // Adjacent-layer candidates for a shield on `layer`: id +/- 1, present
     // in the stack, and PERPENDICULAR to it.  BUDA does not force the stack

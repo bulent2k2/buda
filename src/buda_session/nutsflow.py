@@ -2061,6 +2061,16 @@ class NutsFlowMixin:
                         ns, oi, cw, ch, rx, ry, sx, sy, sib_bid,
                         horiz_of.get((ref_bid, ns.seg_idx), True)))
                 for v in vias_by_bid.get(ref_bid, ()):
+                    # R6 straps (negative to_seg) are NOT transformed: a
+                    # strap's validity depends on the ADJACENT perpendicular
+                    # layer's rails, and check_template_tracks compares track
+                    # pools on the ROUTED layer only — a sibling under a
+                    # different grid override there would inherit a strap
+                    # over the wrong supply, with the NDR_BOND audit reading
+                    # the row as proof of bonding (Codex on #663).  They are
+                    # re-derived per instance after the merge instead.
+                    if v.to_seg < 0:
+                        continue
                     copy_vias.append(buda.transform_net_via(
                         v, oi, cw, ch, rx, ry, sx, sy, sib_bid))
                 extra_unplaced += (exp_bits.get(ref_bid, 0)
@@ -2080,14 +2090,18 @@ class NutsFlowMixin:
                                    + r2.num_unplaced)
             merged.num_keepout_bits = (r1.num_keepout_bits
                                        + r2.num_keepout_bits)
-            # R6 straps ride the copy for free (transform_net_via moves a
-            # via wholesale, negative strap ordinal included), so a copied
-            # instance is bonded at ITS OWN coordinates — but the merged
-            # COUNT has to be re-derived, or the report and the audit's
-            # gate would see only the reference's straps.
-            merged.n_shield_bond_vias = (
-                r1.n_shield_bond_vias + r2.n_shield_bond_vias
-                + sum(1 for v in copy_vias if v.to_seg < 0))
+            # R6 straps are RE-DERIVED over the merged result rather than
+            # copied: the pass is idempotent and reads placed shields
+            # against the REAL grid, so every occurrence — reference, copy,
+            # and independently-solved — is bonded by what actually crosses
+            # it.  A copied instance whose adjacent layers carry a different
+            # pattern override or keepout therefore gets the honest answer
+            # (possibly none, which the NDR_BOND audit then reports) instead
+            # of inheriting the reference's straps.  No `bond` rule anywhere
+            # = no mutation, so this is a no-op for every other flow.
+            if emit_vias:
+                buda.emit_shield_bond_vias(self.routing_grid, bus_segs,
+                                           merged)
             # Carry the per-pass profile through the merge (Codex #289):
             # without it a bottom-up stage-b trial charges the dnuts WALL
             # but contributes no dnuts.* pass buckets — a misleading gap in

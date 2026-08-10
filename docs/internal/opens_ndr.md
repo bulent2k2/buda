@@ -36,9 +36,14 @@ strap ordinal — a real segment index is `>= 0`, so the
 `(bundle_id, from_seg, to_seg, bit_index)` primary key stays unique). The far
 end is a grid rail, not a routed segment, which is exactly what the negative
 ordinal encodes. Consumers that read vias geometrically — GDS export, the viz
-— use `from_layer`/`to_layer`/`x`/`y` only and were unaffected. Because
-straps are ordinary vias, the bottom-up copy path carries a template's straps
-to every instance for free.
+— use `from_layer`/`to_layer`/`x`/`y` only and were unaffected.
+
+The pass is **idempotent and free-standing**, reading placed shields against
+a real grid, so the bottom-up path re-derives each copied instance's straps
+from its own coordinates rather than transforming the reference's: copy
+eligibility is proved on the ROUTED layer's track pools, which says nothing
+about the ADJACENT layer's rails, and a sibling under a different override
+there must get the honest answer (possibly `NDR_BOND`).
 
 *Note the asymmetry:* a **credited** end (R5a, the `credit` token) needs no
 bonding at all — the rail is the power grid's own metal, so it never reaches

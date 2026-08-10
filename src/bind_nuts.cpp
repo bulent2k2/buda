@@ -279,6 +279,13 @@ void bind_nuts(py::module_& m) {
           py::arg("cell_h"), py::arg("src_x"), py::arg("src_y"),
           py::arg("dst_x"), py::arg("dst_y"), py::arg("new_bundle_id"),
           "Orientation-aware offset_net_via (N/S/FN/FS; 90/270 throw)");
+    m.def("emit_shield_bond_vias", &emit_shield_bond_vias,
+          py::arg("stack"), py::arg("bus_segs"), py::arg("result"),
+          "R6: (re)derive the NDR shield BOND straps of a placed result "
+          "against a real grid.  Idempotent — existing straps are dropped "
+          "and recomputed — so the bottom-up merge can re-derive each "
+          "COPIED instance's straps from ITS OWN coordinates instead of "
+          "transforming the reference's.  No `bond` rule = no mutation.");
     m.def("offset_track_segment", &offset_track_segment,
           py::arg("ts"), py::arg("dx"), py::arg("dy"), py::arg("new_bundle_id"),
           "Translate a placed TrackSegment by (dx, dy) and re-key it to "

@@ -203,6 +203,28 @@ struct DetailedNUTSResult {
     bool aborted = false;
 };
 
+// ── R6 shield bonding (opt-in per rule, `bond`) ──────────────────────────
+// Strap every EMITTED shield in `result` to the power grid: a via wherever
+// the shield crosses an identity-matching rail (ndr_shield_net_matches) on
+// a PERPENDICULAR ADJACENT layer that has a grid.  Straps land in
+// result.net_vias under the convention documented on NetVia::to_seg, so
+// GDS export and the viz carry them with no new plumbing.
+//
+// IDEMPOTENT and FREE-STANDING by design.  It reads only PLACED shield
+// geometry against a real grid, so it is re-runnable: existing straps are
+// dropped first and recomputed.  That is what lets the bottom-up path
+// re-derive a COPIED instance's straps against ITS OWN coordinates instead
+// of transforming the reference's — a sibling's adjacent layer can carry a
+// different pattern override or keepout, which check_template_tracks does
+// not compare (it compares track pools on the ROUTED layer only), so a
+// transformed strap could otherwise sit over no rail while the NDR_BOND
+// audit read the row as proof of bonding.
+//
+// No `bond` rule among `bus_segs` = no work and no mutation.
+void emit_shield_bond_vias(const RoutingGridStack& stack,
+                           const std::vector<BusSegment>& bus_segs,
+                           DetailedNUTSResult& result);
+
 class DetailedNUTSEngine {
 public:
     explicit DetailedNUTSEngine(const RoutingGridStack& stack);
@@ -250,15 +272,6 @@ private:
                         int abort_unplaced = -1) const;
     void adjust_bit_spans(const std::vector<BusSegment>& bus_segs,
                           DetailedNUTSResult& result) const;
-    // R6 shield bonding (opt-in per rule, `bond`): strap every EMITTED
-    // shield to the power grid — a via wherever it crosses an
-    // identity-matching rail (ndr_shield_net_matches) on a PERPENDICULAR
-    // ADJACENT layer that has a grid.  Emitted into result.net_vias with
-    // the strap convention documented on NetVia::to_seg, so GDS export,
-    // the viz, and the bottom-up copy path (transform_net_via) all carry
-    // straps with no new plumbing.  No `bond` rule anywhere = no calls.
-    void emit_shield_bond_vias(const std::vector<BusSegment>& bus_segs,
-                               DetailedNUTSResult& result) const;
     // Post-placement keepout cull (keepout-model audit): remove every bit
     // whose FINAL adjusted span crosses a keepout on its layer, counting it
     // unplaced.  Runs on final spans, so it has zero false positives — the

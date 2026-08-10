@@ -505,14 +505,24 @@ identity, reserving its track, connected to nothing. `bond` (opt-in, per
 rule, requires a shield arrangement) straps each emitted shield to the
 power grid after placement.
 
-**Where it runs.** `DetailedNUTSEngine::emit_shield_bond_vias`, called from
+**Where it runs.** `emit_shield_bond_vias`, a free function called from
 `run()` inside the `if (emit_vias)` block — bonding is pure output, exactly
 like the per-bit via emission, so a ripup fast trial that skips vias skips
-the straps too and no metric moves. Being inside the engine also means the
-bottom-up copy path gets it for free: `transform_net_via` moves a via
-wholesale, so a template's straps land on every sibling at the sibling's own
-coordinates (the merged `n_shield_bond_vias` count is re-derived in
-`nutsflow.py`, since the merge builds its own result).
+the straps too and no metric moves.
+
+It is **idempotent and free-standing** on purpose: it reads only placed
+shield geometry against a real grid, dropping any straps already present
+before recomputing. That is what lets the bottom-up path re-derive each
+COPIED instance's straps from ITS OWN coordinates rather than transforming
+the reference's. The distinction matters (Codex on #663): a strap's validity
+depends on the **adjacent perpendicular** layer's rails, while
+`check_template_tracks` establishes copy eligibility from track pools on the
+**routed** layer alone — so a sibling under a different grid override or
+keepout there could inherit a strap sitting over the wrong supply, and the
+`NDR_BOND` audit would read the row as proof of bonding. The merge therefore
+skips negative-`to_seg` vias in the copy loop and calls the pass once over
+the merged result, so reference, copies and independently-solved instances
+are all bonded by what actually crosses them.
 
 **What counts as a bondable crossing.** For a shield on `layer`, the
 candidates are `layer ± 1` — present in the stack AND **perpendicular**.
