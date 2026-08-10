@@ -26,6 +26,7 @@
 #include <optional>
 #include <unordered_map>
 #include "sqlite3.h"
+#include "def_io.h"
 
 namespace buda {
 
@@ -89,6 +90,13 @@ struct DefImportStats {
     struct Keepout { std::string layer; double x1, y1, x2, y2; std::string why; };
     std::vector<Track>   tracks;
     std::vector<Keepout> keepouts;
+    // NONDEFAULTRULES, read in full for the session to translate into
+    // BUDA's def_ndr/set_ndr model (opens_interchange.md item 7): the rule
+    // contents (DBU values — pair with def_units), and which net asked for
+    // which rule.
+    std::vector<DefNdr> ndrs;
+    std::vector<std::pair<std::string, std::string>> net_ndrs;
+    double def_units = 0;             // DEF DBU per micron
 };
 
 // ── Row types returned to Python / other modules ──────────────────────────
@@ -515,11 +523,15 @@ public:
     // set_ndr_rule upserts a declared rule; ndr_rules returns every rule
     // sorted by name.  set_ndr_scope upserts a prefix→rule attachment
     // (throws if the rule is not declared — the FK made LOUD);
-    // delete_ndr_scope removes one (missing = no-op); ndr_scopes returns
+    // delete_ndr_scope removes one (missing = no-op); delete_ndr_rule
+    // removes one rule AND its scopes (a scope naming a deleted rule would
+    // silently resolve nets to nothing on reload — the set_ndr_scope FK's
+    // complement on the delete side; missing = no-op); ndr_scopes returns
     // every (prefix, rule) sorted by prefix.  clear_ndr drops all scopes
     // and rules (the session-level 'forget everything' path).
     void set_ndr_rule(const NdrRuleRow& r);
     std::vector<NdrRuleRow> ndr_rules() const;
+    void delete_ndr_rule(const std::string& name);
     void set_ndr_scope(const std::string& prefix, const std::string& rule);
     void delete_ndr_scope(const std::string& prefix);
     std::vector<std::pair<std::string,std::string>> ndr_scopes() const;

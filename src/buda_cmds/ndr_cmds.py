@@ -40,6 +40,7 @@ import math
 import sys
 
 import buda
+import buda_diag
 
 
 _SHIELD_MODES = {"none": 0, "bus": 1, "bit": 2}
@@ -427,6 +428,172 @@ def _layer_id(session, tok):
     # BDB layer-policy commands use.
     from buda_cmds.bdb_cmds import _resolve_layer_id
     return _resolve_layer_id(session, tok)
+
+
+def _clear_imported_ndrs(session):
+    """Drop the rules/scopes a PREVIOUS import_def_lef translated.
+
+    `clear_design()` replaces the design tables but knows nothing of session
+    NDR state, so a re-import in the same session used to hit `def_ndr`'s
+    duplicate-rule hard error AFTER the old design was already gone (Codex
+    P2 on #667).  Only what translation itself added is cleared — a
+    user-typed declaration is never touched, except that a typed scope
+    still naming a cleared imported rule cannot outlive the rule (a
+    dangling scope resolves nets to a rule that no longer exists) and is
+    dropped with a warning."""
+    imp_rules = getattr(session, "_ndr_rules_imported", None) or set()
+    imp_scopes = getattr(session, "_ndr_scopes_imported", None) or set()
+    if not imp_rules and not imp_scopes:
+        return
+    rules, scopes = _rules(session), _scopes(session)
+    for pfx in imp_scopes:
+        if pfx in scopes:
+            del scopes[pfx]
+            _write_scope_through(session, pfx, None)
+    for name in imp_rules:
+        if name not in rules:
+            continue
+        del rules[name]
+        for pfx in [p for p, rl in scopes.items() if rl == name]:
+            print(f"Warning: [NDR] scope '{pfx}' names imported rule "
+                  f"'{name}', which this re-import replaces — scope "
+                  f"dropped (re-declare it against a current rule)")
+            del scopes[pfx]
+            if hasattr(session, "_ndr_scopes_typed"):
+                session._ndr_scopes_typed.discard(pfx)
+            _write_scope_through(session, pfx, None)
+        if getattr(session, "bdb", None) is not None:
+            session.bdb.delete_ndr_rule(name)
+    session._ndr_rules_imported = set()
+    session._ndr_scopes_imported = set()
+
+
+def translate_def_ndrs(session, st, lef_path):
+    """DEF NONDEFAULTRULES -> def_ndr/set_ndr (opens_interchange.md item 7).
+
+    A translation job, not a lookup: DEF states ABSOLUTE per-layer widths in
+    DBU, BUDA's rule model states MULTIPLIERS of each layer's default — so
+    each rule's clauses are divided by the LEF defaults, and only a rule
+    whose layers AGREE on the multiplier (within 1%) is expressible.  One
+    that is not is skipped LOUD (BUDA-1613) with the per-layer values —
+    approximating with a max would claim a rule the DEF never stated.
+
+    Attachment is per NET NAME through set_ndr, whose scopes are PREFIXES
+    (longest wins).  An attached name that is a strict prefix of another
+    net's name would silently govern that net too, so the collision is
+    reported when it exists.
+    """
+    # A re-import replaces the design, so it replaces the previous import's
+    # translated rules too — BEFORE the empty-rules early-out, since the new
+    # DEF having no rules of its own is exactly the case where the old
+    # design's rules must not linger.
+    _clear_imported_ndrs(session)
+    if not st.ndrs:
+        return
+    try:
+        lef = buda.read_lef(lef_path)
+    except RuntimeError as e:
+        buda_diag.emit("BUDA-1613",
+                       f"cannot re-read the LEF for rule translation: {e}")
+        return
+    defaults = {l.name: (l.width, l.spacing) for l in lef.layers
+                if l.type == "ROUTING"}
+    units = st.def_units or 1.0
+    translated = set()
+    for r in st.ndrs:
+        why = None
+        wms, sms, layer_toks = [], [], []
+        if not r.layers:
+            why = "no LAYER clause"
+        for L in (r.layers if not why else []):
+            base = defaults.get(L.layer)
+            if base is None or base[0] <= 0:
+                why = f"layer {L.layer} has no LEF default WIDTH"; break
+            if _layer_id(session, L.layer) is None:
+                why = (f"layer {L.layer} is not declared "
+                       f"(def_layer/import_lef_tech first)"); break
+            layer_toks.append(L.layer)
+            if L.width_dbu >= 0:
+                wms.append(L.width_dbu / units / base[0])
+            if L.spacing_dbu >= 0:
+                if base[1] <= 0:
+                    why = (f"layer {L.layer} states SPACING but the LEF has "
+                           f"no default SPACING to scale against"); break
+                sms.append(L.spacing_dbu / units / base[1])
+        if not why:
+            # A BUDA rule states ONE width and ONE spacing multiplier for
+            # ALL its layers.  A DEF rule that states WIDTH or SPACING on
+            # only SOME of its LAYER clauses leaves the rest at their
+            # defaults — emitting the multiplier anyway would broaden the
+            # rule onto layers the DEF never constrained, silently changing
+            # capacity (Codex P1 on #667).  Not expressible, so refused.
+            for vals, what in ((wms, "WIDTH"), (sms, "SPACING")):
+                if vals and len(vals) != len(layer_toks):
+                    why = (f"{what} is stated on only {len(vals)} of "
+                           f"{len(layer_toks)} LAYER clauses — one "
+                           f"multiplier per rule cannot leave the others "
+                           f"at their default")
+                    break
+        if not why:
+            for vals, what in ((wms, "WIDTH"), (sms, "SPACING")):
+                if vals and (max(vals) - min(vals)) > 0.01 * max(vals):
+                    why = (f"per-layer {what} multipliers disagree "
+                           f"({', '.join(f'{v:g}' for v in vals)}) — one "
+                           f"multiplier cannot state them")
+                    break
+        if not why and not wms and not sms:
+            why = "states neither WIDTH nor SPACING"
+        if not why and r.name in _rules(session):
+            # The user typed a rule of this name in this session (an
+            # imported one of the same name was cleared above).  Session-
+            # typed wins, the restore path's convention — and def_ndr's
+            # duplicate hard error must not kill the import.
+            why = ("the name is already declared in this session — the "
+                   "session declaration wins, the DEF's content is not "
+                   "applied")
+        if why:
+            buda_diag.emit("BUDA-1613", f"rule '{r.name}': {why}")
+            continue
+        args = [r.name]
+        if wms:
+            args += ["width", f"x{wms[0]:.6g}"]
+        if sms:
+            args += ["spacing", f"x{sms[0]:.6g}"]
+        args += ["layers", ",".join(layer_toks)]
+        cmd_def_ndr(session, "def_ndr", args, "")
+        translated.add(r.name)
+        # Imported, not typed: tracked so the NEXT import replaces it, and
+        # kept out of the typed set cmd_def_ndr stamps (typed is the
+        # session-wins marker; a rule the design file supplied is not one
+        # the user wrote).
+        if not hasattr(session, "_ndr_rules_imported"):
+            session._ndr_rules_imported = set()
+        session._ndr_rules_imported.add(r.name)
+        if hasattr(session, "_ndr_rules_typed"):
+            session._ndr_rules_typed.discard(r.name)
+        for u in r.unmodelled:
+            print(f"[NDR] note: rule '{r.name}' clause '{u}' has no BUDA "
+                  f"model — translated without it")
+    if not st.net_ndrs:
+        return
+    all_nets = sorted(n.name for n in session.bdb.all_nets())
+    for net, rule in st.net_ndrs:
+        if rule not in translated:
+            print(f"[NDR] note: net '{net}' asks for rule '{rule}', which "
+                  f"was not translated — the net stays on default rules")
+            continue
+        shadows = [m for m in all_nets if m != net and m.startswith(net)]
+        if shadows:
+            shown = ", ".join(shadows[:4])
+            more = f" (+{len(shadows)-4} more)" if len(shadows) > 4 else ""
+            print(f"Warning: set_ndr scopes are PREFIXES — attaching "
+                  f"'{rule}' to '{net}' also governs {shown}{more}")
+        cmd_set_ndr(session, "set_ndr", [net, rule], "")
+        if not hasattr(session, "_ndr_scopes_imported"):
+            session._ndr_scopes_imported = set()
+        session._ndr_scopes_imported.add(net)
+        if hasattr(session, "_ndr_scopes_typed"):
+            session._ndr_scopes_typed.discard(net)
 
 
 def split_mixed_ndr_bundles(session, raw_bundles):

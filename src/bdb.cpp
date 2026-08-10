@@ -1406,6 +1406,11 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     // not survive the 10^6..10^8 lines of a real post-place DEF.
     const DefDesign def = read_def(def_path);
     if (def.units > 0) _units = def.units;
+    stats.ndrs = def.ndrs;
+    stats.def_units = double(_units);
+    for (const auto& n : def.nets)
+        if (!n.nondefaultrule.empty())
+            stats.net_ndrs.push_back({n.name, n.nondefaultrule});
 
     // Full design wipe incl. derived pipeline rows.
     clear_design();
@@ -3817,6 +3822,15 @@ std::vector<NdrRuleRow> BDB::ndr_rules() const {
         rows.push_back(std::move(r));
     }
     return rows;
+}
+
+void BDB::delete_ndr_rule(const std::string& name) {
+    { Stmt s(_db, "DELETE FROM ndr_scope WHERE rule=?");
+      sqlite3_bind_text(s, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+      step_checked(_db, s, "delete_ndr_rule"); }
+    Stmt s(_db, "DELETE FROM ndr_rule WHERE name=?");
+    sqlite3_bind_text(s, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    step_checked(_db, s, "delete_ndr_rule");
 }
 
 void BDB::set_ndr_scope(const std::string& prefix, const std::string& rule) {
