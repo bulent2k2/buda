@@ -118,12 +118,26 @@ starved yet still R3-realizable (a coarse pattern hard-errors at declaration
 first). The sibling fix in the same commit *is* test-pinned. See
 [`ndr_architecture.md`](ndr_architecture.md) §7.5.
 
-### The doomed-seat census counts member bits, not demand units
+### The dead-span and re-seat HEALS still measure need in member bits
 
-`check_design`'s supply-doomed-seat census and `tools/doomed_seat_forensics.py`
-count member bits for NDR segments rather than demand units. Harmless while
-admission strands loudly — the census under-reports rather than misleads — but
-it should adopt `bus_seg_demand` when NDR designs get big enough to census.
+The doomed-seat census and `tools/doomed_seat_forensics.py` now measure a
+governed seat against `_seg_admission_need` — the Python mirror of
+`bus_seg_min_demand`, which is what the engine actually admits on. The two
+HEALS that share the same seat arithmetic (`_escalate_dead_low_segments` and
+the TOP re-seat pass in `nutsflow.py`) still compute `need` as
+`_seg_member_bits`, so a governed segment whose seat can host its bits but
+not its bits-plus-guards-plus-shields is not escalated and strands at DNUTS.
+
+*Why it was left out of the census fix.* The census is report-only; the heals
+change layer assignment, so the fix belongs with its own QoR measurement
+rather than folded into a diagnostic change. It is corpus-neutral by
+construction — no corpus flow declares a rule, and the NDR conversion is the
+identity on an inactive spec — but it would move governed vehicles, which is
+exactly what wants measuring on its own.
+
+*Where to start:* swap the two `need = self._seg_member_bits(...)` sites in
+`_escalate_dead_low_segments` / the re-seat heal for `_seg_admission_need`,
+then measure the NDR vehicles.
 
 ---
 

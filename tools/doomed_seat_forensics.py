@@ -198,9 +198,18 @@ def audit(s, flow):
         sel = w.plan.selected_topology_index
         if sel < 0 or sel >= len(w.input.candidates):
             continue
-        need = s._seg_member_bits(w, sel, seg.seg_idx)
+        # The engine admits on bus_seg_min_demand, so a GOVERNED segment's
+        # requirement is its group DEMAND (bits + guards + shields), not its
+        # bit count — measuring it in bits under-reports how doomed the seat
+        # is and mis-ranks the sibling-layer search below.  Identity for
+        # every ungoverned segment.
+        need = s._seg_admission_need(w, sel, seg.seg_idx)
+        # Pool selection uses FULL demand, the doom test the credited
+        # minimum — the engine's own split (Codex on #677).
+        need_pool = s._seg_admission_need(w, sel, seg.seg_idx, credited=False)
+        bits = s._seg_member_bits(w, sel, seg.seg_idx)   # what strands
         pool = s._seg_admission_pool(
-            seg, s.routing_grid.get_layer_grid(seg.layer), need)
+            seg, s.routing_grid.get_layer_grid(seg.layer), need_pool)
         if pool >= need:
             continue                       # seat is adequately supplied
         if not s.layers.is_top(seg.layer):
@@ -212,7 +221,7 @@ def audit(s, flow):
         if seg.seg_idx < len(pins) and pins[seg.seg_idx] >= 0:
             rows.append(dict(flow=flow, bid=seg.bundle_id, seg=seg.seg_idx,
                              layer=lnames.get(seg.layer, seg.layer),
-                             need=need, pool=pool, verdict="USER_PINNED",
+                             need=need, bits=bits, pool=pool, verdict="USER_PINNED",
                              sibs=[], holders=None))
             continue
 
@@ -232,7 +241,7 @@ def audit(s, flow):
             pool_ids = [l for l in pool_ids if l not in leased]
 
         sibs = [(lid, s._seg_admission_pool(
-            seg, s.routing_grid.get_layer_grid(lid), need)) for lid in pool_ids]
+            seg, s.routing_grid.get_layer_grid(lid), need_pool)) for lid in pool_ids]
         adequate = [(lid, sp) for lid, sp in sibs if sp >= need]
 
         holders, verdict = None, "LAYER_STARVED"
@@ -266,7 +275,7 @@ def audit(s, flow):
 
         rows.append(dict(flow=flow, bid=seg.bundle_id, seg=seg.seg_idx,
                          layer=lnames.get(seg.layer, seg.layer),
-                         need=need, pool=pool, verdict=verdict,
+                         need=need, bits=bits, pool=pool, verdict=verdict,
                          sibs=[(lnames.get(l, l), p) for l, p in sibs],
                          holders=holders))
     return rows
@@ -312,8 +321,10 @@ def main():
     negotiable = [d for d in rows if d["verdict"] == "BLOCKED_BY_LOCKED"]
     vehicles = sorted({d["flow"] for d in negotiable})
     print(f"  BLOCKED_BY_LOCKED on {len(vehicles)} vehicle(s): {vehicles}")
+    # BITS, not need: a governed seat's `need` is demand slots (bits +
+    # guards + shields), and what strands is the bit count.
     print(f"  bits at stake (all-or-nothing strand): "
-          f"{sum(d['need'] for d in negotiable)}")
+          f"{sum(d.get('bits', d['need']) for d in negotiable)}")
 
 
 if __name__ == "__main__":
