@@ -19,3 +19,29 @@ bin/buda -j4 flow/chip/chip_stack_topdown.buda
   report_wl                            0.54s  [report_wirelength] total detailed WL = 39315491 over 660 bundle(s)…
   check_design                         1.20s  Total: 325 violation(s) in 29 group(s) across 24 bundle(s). Use --v…
 [buda_viz] heatmap: labelling 40 worst of 228 overflow cells (colour shows the rest).
+
+# after the parallel refine sweep + batched screening (2026-08-10)
+
+Branch `claude/chip-stack-speedup` — `refine_selection` full trials on the
+C++ sweep pool (full-trial mode + adaptive chunking) and batched parallel
+fixed-context screening for both refine and ripup chunk builds.  Measured on
+a 4-core container, `--threads 4`, on the `*_heal` variants (the flows above
+with `ripup_reroute` + `refine_selection` + a second healer round appended);
+endpoints byte-identical to a main-worktree baseline in every run:
+
+| command            | bottomup base | bottomup new | topdown base | topdown new |
+|--------------------|--------------:|-------------:|-------------:|------------:|
+| negotiate #1       |        76.3s  |       76.3s  |       12.9s  |      14.0s  |
+| ripup #1           |        67.9s  |       44.2s  |       91.8s  |      88.5s  |
+| refine #1          |       433.1s  |      170.2s  |      151.5s  |     140.1s  |
+| negotiate #2       |         7.1s  |        8.1s  |        1.9s  |      1.9s   |
+| ripup #2           |       493.0s  |      312.3s  |       99.5s  |      91.4s  |
+| refine #2          |       251.5s  |       58.1s  |      210.0s  |     150.9s  |
+| **total**          |     **1386s** |     **705s** |     **626s** |    **548s** |
+
+The profiling that drove it: refine was 58% of the two flows' combined
+runtime, and INSIDE refine the sequential fixed-context screen (10 696 +
+5 129 candidates at ~20 ms each) out-costed the trial solves.  Wider pools
+(8-core) scale further.  Ripup's stage-b residual is its already-parallel
+stall-sweep volume — further cuts there are trial-volume levers, not
+parallelism.
