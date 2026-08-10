@@ -58,6 +58,19 @@
 #     --layout stacked --channel 1000 --grid 504 \
 #     --column-align center --mirror-upper
 #   python3 tools/bdb_serialize.py dump flow/chip/chip_stack.bdb flow/chip/chip_stack.bdb.sql
+# HEALER SCHEME + SCOPED CAPS (2026-08-10, session heal-to-clean): raised
+# budgets alone plateau at 12 opens (ovl 11): bundle 86 / top_bus69_w16, a
+# 5-endpoint cross-instance fan-out whose seg-4 strand is a DYNAMIC junction
+# conflict (seg0 cannot reach seg3, closed by partner stretch) — refused by
+# all 78 candidate re-pins AND by a pressed unpinned negotiate replan
+# (experiment x2).  The documented width-doomed-seat recipe clears it:
+# 'set_max_bundle_bits 8 for top_bus69' splits the bus into independently
+# seated parts; the residual then moved to top_bus16_w8 (the IDENTICAL
+# shape), capped 4 the same way.  With both scoped caps + budgets
+# 'ripup_reroute 30 / refine_selection 60' x2, the flow reaches the CLEAN
+# endpoint (0 opens, check_design Success, 0 unplaced bits) at 2022s on the
+# 4-core measurement box.  Scoped caps touch ONLY the named buses — the
+# global 'auto' cap stays as-is for everything else.
 source chip_tracks_mirror.buda
 open_bdb chip_stack.bdb.sql
 set_bottom_up big2
@@ -69,6 +82,8 @@ add_blocks_from_bdb 0
 add_blocks_from_bdb 1 skip
 add_blocks_from_bdb 2 skip
 set_max_bundle_bits auto
+set_max_bundle_bits 8 for top_bus69
+set_max_bundle_bits 4 for top_bus16
 run_hier_bundler depth 2
 generate_hier_topologies
 set_planner_param healersAhead 1
@@ -77,11 +92,11 @@ run_nuts
 check_template_tracks on_mismatch independent
 run_detailed_nuts
 negotiate_congestion
-ripup_reroute
-refine_selection
+ripup_reroute 30
+refine_selection 60
 negotiate_congestion
-ripup_reroute
-refine_selection
+ripup_reroute 30
+refine_selection 60
 report_wl
 check_design
 exit
