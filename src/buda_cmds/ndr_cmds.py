@@ -1018,7 +1018,16 @@ def validate_ndr_realizability(session):
     checked = set()
     for w in session.bundles:
         spec = w.input.ndr
-        if not spec.active() or spec.width_slots <= 1:
+        if not spec.active():
+            continue
+        # An ABSOLUTE rule has no single width: it resolves per layer, so
+        # the check must ask each layer for ITS OWN slot count.  Comparing
+        # every layer against the conservative MAXIMUM would hard-error a
+        # coarse layer whose per-layer width genuinely fits — a FALSE
+        # REJECTION of a legal design, not a conservative charge (Codex P1
+        # on #682).  A multiplier rule resolves to the same number on every
+        # layer, so its behaviour is unchanged.
+        if spec.width_slots <= 1 and not (spec.width_abs > 0):
             continue
         # Every layer this bundle MAY be assigned: the explicit restriction,
         # else ALL declared layers (the layer stack's real id set — a
@@ -1045,6 +1054,14 @@ def validate_ndr_realizability(session):
                           f"realized there (R3).")
                     sys.exit(1)
                 continue
+            # Per-layer width: the rule's own resolution against THIS
+            # layer's pitch (identity for a multiplier rule).
+            lspec = spec
+            if spec.width_abs > 0.0 or spec.spacing_abs > 0.0:
+                lp = session.layers.bit_pitch(lid) if session.layers else 0.0
+                lspec = buda.ndr_resolve_for_pitch(spec, lp)
+            if lspec.width_slots <= 1:
+                continue                   # fits in one slot on this layer
             pat = grid.get_layer_grid(lid).global_pattern()
             period = pat.unit_pitch()
             if period <= 0 or not pat.slots:
@@ -1065,9 +1082,9 @@ def validate_ndr_realizability(session):
                     run += 1
                 prev = pos
                 best_run = max(best_run, run)
-            if best_run < spec.width_slots:
+            if best_run < lspec.width_slots:
                 print(f"Error: NDR rule '{spec.rule_name}' needs "
-                      f"{spec.width_slots} physically contiguous SIGNAL "
+                      f"{lspec.width_slots} physically contiguous SIGNAL "
                       f"slots per bit, but layer {lid}'s pattern offers "
                       f"runs of at most {best_run} — the rule is not "
                       f"realizable there (R3).  Restrict the rule with "

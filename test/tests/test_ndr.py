@@ -1661,3 +1661,40 @@ def test_v26_pre_v26_db_migrates(tmp_path):
     rows = {x.name: x for x in db.ndr_rules()}
     assert rows["old"].bond == 3
     assert rows["old"].width_abs == 0.0 and rows["old"].spacing_abs == 0.0
+
+
+def test_r3_absolute_is_checked_per_layer_not_against_the_maximum():
+    """Codex P1 on #682: R3 compared every layer against the conservative
+    MAXIMUM, so a coarse layer whose per-layer width genuinely fits could
+    be hard-errored — a false rejection of a legal design, not a
+    conservative charge.
+
+    The stack here is the vehicle's: a COARSE layer (pitch 5) whose
+    pattern offers only single isolated SIGNAL slots between wide rails,
+    and a FINE layer (pitch 2.5) with a long contiguous run.  `width 4`
+    needs 2 slots on the fine layer and 1 on the coarse one — so the
+    coarse layer is realizable, and checking it against the maximum of 2
+    would refuse it."""
+    s = _bare_session()
+    for line in ("add_block a 0 0 200 200", "add_block b 800 0 1000 200",
+                 "add_bus w_[2] a.p b.q",
+                 "def_layer 3 M3 H TOP 20", "def_layer 4 M4 V 20",
+                 # fine: 12 contiguous signal slots, pitch 2.5
+                 "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1",
+                 # coarse: every signal slot isolated between rails, pitch 5
+                 "def_track_pattern 4 0 (VDD 2 2 _ 2 2 GND 2 2 _ 2 2)x3"):
+        _run(s, line)
+    _run(s, "def_ndr abs4 width 4")
+    _run(s, "set_ndr w_ abs4")
+    for line in ("run_bundler STRICT", "generate_topologies",
+                 "set_track_pitch 3", "run_planner 1"):
+        _run(s, line)
+    gov = next(w for w in s.bundles if w.input.ndr.active())
+    spec = gov.input.ndr
+    # The conservative max comes from the FINE layer…
+    assert spec.width_slots == 2
+    # …while the coarse layer needs only 1, so it must not be refused for
+    # lacking a 2-slot contiguous run it never needed.
+    coarse = buda.ndr_resolve_for_pitch(spec, s.layers.bit_pitch(4))
+    assert coarse.width_slots == 1
+    ndr_cmds.validate_ndr_realizability(s)     # must NOT sys.exit
