@@ -1228,11 +1228,21 @@ void DetailedNUTSEngine::adjust_bit_spans(
             // `tapered_out`, so a segment whose conns all resolve (every
             // non-tapered flow) is byte-identical by construction.
             if (tapered_out && pres_lo <= pres_hi) {
-                const bool rev = ns.span_lo > ns.span_hi;   // nominal end identity
+                // has_ep_lo/hi name the NOMINAL ends (span_lo/span_hi keep
+                // endpoint identity and placement may swap them, leaving
+                // span_lo > span_hi); g_lo/g_hi are GEOMETRIC.  On a reversed
+                // span the two orders disagree, so the flags must be mapped
+                // through `rev` — testing them against the geometric bounds
+                // directly would retract the end that was already snapped and
+                // leave the un-snapped one at full abstract span, i.e. exactly
+                // the overhang this is here to remove.
+                const bool rev = ns.span_lo > ns.span_hi;
+                const bool snapped_at_g_lo = rev ? has_ep_hi : has_ep_lo;
+                const bool snapped_at_g_hi = rev ? has_ep_lo : has_ep_hi;
                 double g_lo = std::min(ns.span_lo, ns.span_hi);
                 double g_hi = std::max(ns.span_lo, ns.span_hi);
-                if (!has_ep_lo) g_lo = std::max(g_lo, pres_lo);
-                if (!has_ep_hi) g_hi = std::min(g_hi, pres_hi);
+                if (!snapped_at_g_lo) g_lo = std::max(g_lo, pres_lo);
+                if (!snapped_at_g_hi) g_hi = std::min(g_hi, pres_hi);
                 if (g_lo <= g_hi) {
                     ns.span_lo = rev ? g_hi : g_lo;
                     ns.span_hi = rev ? g_lo : g_hi;
