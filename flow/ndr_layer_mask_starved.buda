@@ -1,0 +1,96 @@
+# REPRO: a layer restriction that starves a routing direction.
+#
+# `def_ndr <rule> layers <csv>` restricts the layers a governed bundle may be
+# assigned.  A restriction naming only VERTICAL layers is perfectly legal and
+# often what is wanted — a bus that routes purely vertically needs nothing
+# else.  It becomes a fault only when the bundle's candidates need a
+# HORIZONTAL segment and no horizontal layer is allowed: there is then no
+# legal assignment, in any planner mode.
+#
+# ── What used to happen ───────────────────────────────────────────────────
+#
+# Nothing.  The escalation ladder's last rung is BEST_EFFORT, which turns
+# off the slide-window and overflow filters — but NOT the layer mask, which
+# is checked unconditionally.  So every candidate stayed unscorable, the
+# ladder fell through to a bare `continue`, and the bundle left the planner
+# with no assignment and NO MESSAGE.  Downstream:
+#
+#   run_planner          silent for this bundle (every other rung warns)
+#   run_nuts             "found no selected topology to place" — generic,
+#                        names no bundle and no cause
+#   run_detailed_nuts    hard error (or, in a mixed design, just fewer bits)
+#   check_design         "Success: no violations found."
+#
+# A bus with no wire anywhere, and a clean audit.  That is the `flow/rv`
+# item-10 failure shape reached through the planner instead of through
+# generation, and it is what this vehicle pins.
+#
+# ── What happens now ──────────────────────────────────────────────────────
+#
+#   [Planner] WARNING: Bundle N: NOTHING committed — this bundle gets no
+#   layer assignment and no route. Its candidates need a HORIZONTAL segment,
+#   but its allowed layers {M4,M6} contain no HORIZONTAL layer — ...
+#
+#   [Check] ... UNROUTED_BUNDLE: bundle N (...) has K candidate(s) but the
+#   planner selected none — the bus has no layer assignment and no wire
+#
+# The planner names the cause; `check_design` is the safety net that refuses
+# to call the design clean whatever the cause was.  Both are needed: the
+# diagnosis is only reachable in the planner, and the audit must not depend
+# on anyone having read the log.
+#
+# ── Why the restriction is NOT rejected at declaration ────────────────────
+#
+# `set_cell_layer_cap` hard-errors on a band with no H or no V layer, and
+# copying that here was the obvious move.  It would be WRONG: a cell's band
+# governs all of that cell's interconnect, which needs both directions,
+# while an NDR rule governs named nets that may legitimately route in one
+# direction only.  `ok_` below is exactly that case — same V-only
+# restriction, vertically aligned endpoints, routes cleanly — and a
+# declaration-time rule could not tell the two apart without knowing the
+# placement.  So the check belongs where the direction is known, which is
+# the planner.
+
+add_block bad_a 0 0    200 200
+add_block bad_b 800 600 1000 800
+
+# Vertically ALIGNED, so this pair routes as a straight V run and the same
+# V-only restriction is satisfiable.  The control that keeps the fix honest:
+# a blanket declaration-time refusal would reject this legal design too.
+add_block ok_a  0 1200 200 1400
+add_block ok_b  0 1800 200 2000
+
+add_bus bad_[3] bad_a.p bad_b.q
+add_bus ok_[3]  ok_a.p  ok_b.q
+add_bus free_[3] bad_a.d bad_b.e
+
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 5 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 6 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+
+# One rule, two bundles, opposite outcomes — the restriction is identical
+# and only the geometry differs.
+def_ndr vonly width x2 layers M4,M6
+set_ndr bad_ vonly
+set_ndr ok_  vonly
+
+run_bundler STRICT
+generate_topologies
+set_track_pitch 3
+run_planner 1
+
+run_nuts
+check_design
+report_wirelength
+
+# This vehicle's PASS condition is that the fault is REPORTED — the flow
+# test asserts on the planner warning and the UNROUTED_BUNDLE violation, and
+# on bundles 1 and 2 routing normally.  The run still exits 0: `check_design`
+# is report-only by design, and gating a run on its verdict is what
+# `buda --strict-check` is for.

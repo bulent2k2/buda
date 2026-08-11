@@ -74,12 +74,39 @@ weaken a constraint.
 | `shield …` | mode | `bus` = flank the whole bus, `bit` = flank every bit, `per:<N>` = a shield every N bits. Optional `net <label>` names the shield net (default `GND`) |
 | `credit` | flag | Opt in to **rail crediting** (R5a): an END shield may be satisfied by an immediately adjacent power rail that is electrically identical to the shield net, instead of emitting a redundant wire. Requires a shield arrangement |
 | `bond [stride <N>]` | flag + count | Opt in to **shield bonding** (R6): strap every EMITTED shield to the power grid with a via where an identity-matching rail crosses it on an adjacent perpendicular layer. `stride <N>` straps every Nth crossing instead of all of them (default 1 = every crossing); both **extremes are always anchored**, so no tail hangs unbonded off the last strap. Requires a shield arrangement. Output-only — it changes no demand and no placement, so it can be turned on, off, or re-strided without re-planning |
-| `layers <csv>` | layer names/ids | Restrict the rule (and so its nets) to these layers. The planner honours the restriction when choosing layers |
+| `layers <csv>` | layer names/ids | Restrict the rule (and so its nets) to these layers. The planner honours the restriction when choosing layers — see [Restricting layers](#restricting-layers) for what happens when the restriction cannot be satisfied |
 
 Shield-net identity is by supply family, case-insensitively: `GND`/`VSS`/`GROUND`
 are one net for shielding purposes, `VDD`/`VCC`/`POWER` another. A POWER rail
 can never satisfy a GROUND spec. Crediting and the `check_design` audit share
 this one predicate, so they cannot disagree.
+
+### Restricting layers
+
+`layers <csv>` is **not** validated at declaration, deliberately. A rule
+naming only vertical layers is legitimate — a bus that routes purely
+vertically needs nothing else — and whether that is satisfiable depends on
+where the endpoints sit, which the declaration cannot know. (This is the one
+place it differs from `set_cell_layer_cap`, which *does* hard-error on a band
+with no H or no V layer: a cell's band governs all of that cell's
+interconnect, which needs both directions.)
+
+The check therefore lives where the direction is known. If a governed
+bundle's candidates need a segment in a direction the restriction supplies no
+layer for, there is no legal assignment in any planner mode, and the planner
+says so by name:
+
+```
+[Planner] WARNING: Bundle 3: NOTHING committed — this bundle gets no layer
+assignment and no route. Its candidates need a HORIZONTAL segment, but its
+allowed layers {M4,M6} contain no HORIZONTAL layer — ...
+```
+
+`check_design` then reports the bundle as `UNROUTED_BUNDLE`, so a bus with no
+wire can never read as a clean design. Vehicle:
+[`flow/ndr_layer_mask_starved.buda`](../../flow/ndr_layer_mask_starved.buda),
+which routes the same restriction successfully on an aligned pair alongside
+the failing one.
 
 ```
 def_ndr clk2x width x2 spacing x2 shield bus net GND

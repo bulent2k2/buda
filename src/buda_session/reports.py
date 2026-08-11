@@ -71,6 +71,28 @@ class _FidelityViolation:
         self.message = message
 
 
+class _UnroutedViolation:
+    """A bundle the planner left with NO selected topology — same duck-typed
+    shape as _FidelityViolation.
+
+    The audit walked bundles by their SELECTED candidate and skipped any
+    without one, so a bus the planner could not commit contributed nothing
+    and the run printed "Success: no violations found."  A bus with no wire
+    anywhere is the one thing an audit must never call clean; it is the
+    `flow/rv` item-10 failure reached through the planner instead of through
+    generation."""
+    class _Kind:
+        name = "UNROUTED_BUNDLE"
+    kind = _Kind()
+    seg_idx = -1
+    seg_idx2 = -1
+    bit_index = -1
+    block_name = ""
+
+    def __init__(self, message):
+        self.message = message
+
+
 def _fidelity_union(block, nets):
     shown = ", ".join(nets[:4]) + (" …" if len(nets) > 4 else "")
     return _FidelityViolation(block, (
@@ -715,7 +737,17 @@ class ReportsMixin:
 
         # For the topo stage, auto-switch to all-candidates mode when no
         # topology has been selected yet (before run_planner).
-        if stage == "topo" and not all_candidates:
+        #
+        # Gated on the planner never having RUN, not merely on the absence of
+        # selections.  Those differ: a run in which the planner committed
+        # nothing anywhere also leaves every selection unset, and promoting
+        # THAT to all-candidates mode audits the candidate pool — which is
+        # perfectly valid — and reports Success over a design with no routes
+        # at all.  `self.planner` is set only by run_planner (and by ripup,
+        # which follows it), so it is exactly the "has planning happened"
+        # signal.
+        if (stage == "topo" and not all_candidates
+                and getattr(self, "planner", None) is None):
             no_selection = all(
                 not w.input.candidates or w.plan.selected_topology_index < 0
                 for w in self.bundles
@@ -779,6 +811,22 @@ class ReportsMixin:
                 idx = w.plan.selected_topology_index
                 to_check = [(idx, w.input.candidates[idx])]
             else:
+                # The planner RAN and committed nothing for this bundle: it
+                # has candidates and no selection, so there is no route to
+                # audit.  Skipping it silently is what let a starved layer
+                # mask produce a bus with no wire and a clean verdict.
+                # `self.planner is None` means planning has not happened
+                # yet, which is not a fault.
+                if getattr(self, "planner", None) is not None:
+                    nets = w.input.original_bundle.get_net_names()
+                    collected.append((f"Bundle {bid}", _UnroutedViolation(
+                        f"UNROUTED_BUNDLE: bundle {bid} "
+                        f"('{nets[0] if nets else '?'}' x{len(nets)}) has "
+                        f"{len(w.input.candidates)} candidate(s) but the "
+                        f"planner selected none — the bus has no layer "
+                        f"assignment and no wire (see the planner's "
+                        f"NOTHING committed warning for the cause)")))
+                    total += 1
                 continue
 
             for topo_idx, topo in to_check:

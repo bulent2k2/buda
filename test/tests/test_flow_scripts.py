@@ -1046,6 +1046,34 @@ def test_ndr_absolute_divisor_repro():
     assert "rule 'w8sp': demand" not in out, out
 
 
+def test_ndr_layer_mask_starving_a_direction_is_loud():
+    """flow/ndr_layer_mask_starved.buda: a layer restriction that leaves no
+    legal layer for a segment direction used to drop the bundle SILENTLY.
+
+    BEST_EFFORT — the escalation ladder's last rung — turns off the
+    slide-window and overflow filters but not the layer mask, so every
+    candidate stayed unscorable and the ladder fell through to a bare
+    `continue`.  The bundle left the planner with no assignment and no
+    message; `run_nuts` warned generically, and `check_design` reported
+    "Success: no violations found" over a bus with no wire anywhere."""
+    out, rc = run_script("ndr_layer_mask_starved.buda")
+    assert rc == 0, out[-3000:]          # report-only; --strict-check gates
+    # The planner names the CAUSE, which is only knowable there.
+    assert "NOTHING committed" in out, out
+    assert "need a HORIZONTAL segment" in out, out
+    assert "contain no HORIZONTAL layer" in out, out
+    # The audit is the safety net: it must refuse to call this clean
+    # whatever the cause was.
+    assert "UNROUTED_BUNDLE" in out, out
+    assert "Success: no violations found" not in out, out
+    # The CONTROL: the same V-only restriction on a vertically aligned pair
+    # is legal and routes.  This is why the restriction is not rejected at
+    # declaration the way set_cell_layer_cap's band is — a cell's band
+    # governs interconnect needing both directions, an NDR rule governs
+    # named nets that may route in one.
+    assert "Bundle 2 (4.5 units wide) -> topo 1 of 5: I_V" in out, out
+
+
 def test_ndr_absolute_shared_cell_bottom_up():
     """flow/ndr_abs_shared_bottomup.buda (Codex P1 on #682): a shared
     cell's own interconnect is planned, NUTS-solved and DNUTS-placed on a
