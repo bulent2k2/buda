@@ -440,13 +440,29 @@ def cmd_run(flows, out, jobs=1):
 # somewhere else entirely, so the working tree is never read, written, or
 # checked out, and you may edit and commit freely while it runs.
 
-def _sh(cmd, cwd, check=True, env=None):
+def _sh(cmd, cwd, check=True, env=None, stream=False):
+    """Run a command in `cwd`.
+
+    `stream=True` lets it write straight to our stdout instead of capturing:
+    the baseline sweep takes as long as a corpus run, and a captured one shows
+    NOTHING until it finishes, which is indistinguishable from a hang for
+    twenty minutes.  Errors are still caught — only the reporting differs,
+    since a streamed failure has already printed its own diagnosis."""
+    if stream:
+        r = subprocess.run([str(c) for c in cmd], cwd=str(cwd), env=env)
+        if check and r.returncode != 0:
+            sys.exit(f"[--vs] command failed "
+                     f"({' '.join(str(c) for c in cmd)}) — see its output above")
+        return r
     r = subprocess.run([str(c) for c in cmd], cwd=str(cwd), env=env,
                        capture_output=True, text=True)
     if check and r.returncode != 0:
         sys.exit(f"[--vs] command failed ({' '.join(str(c) for c in cmd)}):\n"
                  f"{r.stdout[-1500:]}{r.stderr[-2000:]}")
     return r
+
+
+_WT_PREFIX = "buda-qor-"
 
 
 def baseline_worktree(rev):
@@ -464,9 +480,6 @@ def baseline_worktree(rev):
         _sh(["git", "worktree", "prune"], _ROOT)
         _sh(["git", "worktree", "add", "--detach", str(wt), commit], _ROOT)
     return wt, commit
-
-
-_WT_PREFIX = "buda-qor-"
 
 
 def cached_baselines():
@@ -511,7 +524,7 @@ def _build(tree, label):
     # The worktree's OWN bin/bb: it resolves the repo root as its parent dir,
     # so each side builds itself into its own build/ and neither can pick up
     # the other's artifacts.
-    _sh([tree / "bin" / "bb"], tree)
+    _sh([tree / "bin" / "bb"], tree, stream=True)
 
 
 def cmd_vs(rev, out, jobs, flows=None, build=True):
@@ -551,7 +564,7 @@ def cmd_vs(rev, out, jobs, flows=None, build=True):
            "--out", base, "-j", str(jobs)]
     if flows:
         cmd += ["--flows", *flows]
-    _sh(cmd, wt, env=env)
+    _sh(cmd, wt, env=env, stream=True)
 
     print("[--vs] sweeping the working tree...", flush=True)
     cmd_run(flows or CORPUS, mine, jobs=jobs)
