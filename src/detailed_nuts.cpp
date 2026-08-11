@@ -1227,6 +1227,26 @@ void DetailedNUTSEngine::adjust_bit_spans(
             // this and give back exactly what a tap or crossing needs.  Gated on
             // `tapered_out`, so a segment whose conns all resolve (every
             // non-tapered flow) is byte-identical by construction.
+            // A busterm TAP that does not serve this bit is just as stale an
+            // end as a tapered-out conn, and it is the commoner case: the
+            // `a` bits of a fan-out branch off early, their one conn RESOLVES
+            // (so tapered_out is false), and the trunk's far-receiver tap then
+            // holds them out to a block they never reach.  Fold the bit's OWN
+            // taps into its attachment envelope and let a stale end retract to
+            // it.  With no membership recorded every tap serves every bit, so
+            // the envelope is the abstract span and nothing moves.
+            for (size_t fi = 0; fi < bs_ptr->busterm_faces.size(); ++fi) {
+                bool mine = true;
+                if (fi < bs_ptr->busterm_face_bits.size()) {
+                    const auto& fb = bs_ptr->busterm_face_bits[fi];
+                    mine = fb.empty() ||
+                           std::binary_search(fb.begin(), fb.end(), ns.bit_index);
+                }
+                if (!mine) { tapered_out = true; continue; }
+                const double fc = bs_ptr->busterm_faces[fi];
+                pres_lo = std::min(pres_lo, fc);
+                pres_hi = std::max(pres_hi, fc);
+            }
             if (tapered_out && pres_lo <= pres_hi) {
                 // has_ep_lo/hi name the NOMINAL ends (span_lo/span_hi keep
                 // endpoint identity and placement may swap them, leaving
@@ -1265,7 +1285,25 @@ void DetailedNUTSEngine::adjust_bit_spans(
             // the block-face tap the abstract span reached.  Re-extend each bit's
             // span to its block face (extend-only) so the tap always lands on the
             // block (big2 bus_077 / blk_12).
-            for (double fc : bs_ptr->busterm_faces) cover(fc);
+            // A tap re-extends a bit only when that bit's own path
+            // terminates at the tapped block.  Busterm taps are per
+            // SEGMENT while bits are per BIT, so applying every tap to
+            // every bit hands a trunk's far-receiver tap to the bits that
+            // branched off earlier — they keep metal all the way out to a
+            // block they never reach, and nothing flags it because the
+            // SEGMENT is legitimately attached there
+            // (flow/antenna_taper_passthru.buda: 8 bits x ~370 units).
+            // An empty membership list = serves every bit, so a bundle
+            // without a taper is byte-identical.
+            for (size_t fi = 0; fi < bs_ptr->busterm_faces.size(); ++fi) {
+                if (fi < bs_ptr->busterm_face_bits.size()) {
+                    const auto& fb = bs_ptr->busterm_face_bits[fi];
+                    if (!fb.empty() &&
+                        !std::binary_search(fb.begin(), fb.end(), ns.bit_index))
+                        continue;
+                }
+                cover(bs_ptr->busterm_faces[fi]);
+            }
 
             // PASS-THROUGH coverage: the same snap can strand a block this
             // segment covers by crossing it, and does so more brutally — a block
@@ -1383,6 +1421,8 @@ std::vector<BusSegment> make_bus_segments(
     // placed with (this loop is the former Python handoff, verbatim).
     std::map<int, int>                  bid_to_nbits;
     std::map<int, std::vector<ConnSeg>> bid_to_cs;
+    std::map<int, const std::map<std::pair<int,int>, std::vector<int>>*> bid_to_tapbits;
+    std::map<int, const std::map<int, SegEndpoints>*> bid_to_bterms;
     // Tapered fan-in: the selected topology's per-segment bit membership
     // (empty for every non-fan-in bundle).
     std::map<int, const std::map<int, std::vector<int>>*> bid_to_bits;
@@ -1406,6 +1446,10 @@ std::vector<BusSegment> make_bus_segments(
         bid_to_cs[bid] = ct.segs();
         if (!topo.seg_bits.empty())
             bid_to_bits[bid] = &topo.seg_bits;
+        if (!topo.seg_busterm_bits.empty()) {
+            bid_to_tapbits[bid] = &topo.seg_busterm_bits;
+            bid_to_bterms[bid]  = &topo.seg_busterms;
+        }
     }
 
     std::vector<BusSegment> out;
@@ -1468,6 +1512,28 @@ std::vector<BusSegment> make_bus_segments(
                     bs.connections.push_back(c);
                 } else {  // BUSTERM: keep the block-face tap reachable per-bit
                     bs.busterm_faces.push_back((double)conn.face_coord);
+                    // Which bits this tap actually serves.  Resolve the
+                    // tap ORDINAL by block name against seg_busterms, so
+                    // the lookup does not depend on conn ordering.  Empty
+                    // = serves every bit (untapered, historical).
+                    std::vector<int> fb;
+                    auto tbit = bid_to_tapbits.find(ts.bundle_id);
+                    auto btit = bid_to_bterms.find(ts.bundle_id);
+                    if (tbit != bid_to_tapbits.end() && btit != bid_to_bterms.end()) {
+                        auto se = btit->second->find(ts.seg_idx);
+                        if (se != btit->second->end()) {
+                            const Busterm* eps[2] = {
+                                se->second.first  ? &*se->second.first  : nullptr,
+                                se->second.second ? &*se->second.second : nullptr };
+                            for (int k = 0; k < 2; ++k) {
+                                if (!eps[k] || eps[k]->block_name != conn.block_name) continue;
+                                auto f = tbit->second->find({ts.seg_idx, k});
+                                if (f != tbit->second->end()) fb = f->second;
+                                break;
+                            }
+                        }
+                    }
+                    bs.busterm_face_bits.push_back(std::move(fb));
                 }
             }
         }

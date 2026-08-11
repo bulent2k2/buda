@@ -187,6 +187,21 @@ struct Topology {
     // time (derive_fanin_seg_bits); the dogleg split propagates the split
     // trunk's bits to its new pieces in place.
     std::map<int, std::vector<int>> seg_bits;
+    // Per-segment BUSTERM TAP membership, the companion seg_bits was missing:
+    // (segment index, tap ordinal 0=first / 1=second) → sorted global bit
+    // indices whose OWN driver→receiver path terminates at that tapped block.
+    //
+    // seg_bits says which bits ride a segment; this says which of them the
+    // segment's block TAPS actually belong to.  Without it a tap is applied to
+    // every bit on the segment, so a trunk tapping a far receiver re-extends
+    // bits that never go there — metal reaching nothing, invisible to every
+    // check (flow/antenna_taper_passthru.buda).  EMPTY map = every tap serves
+    // every bit (all non-tapered bundles — the historical behavior).
+    //
+    // DERIVED exactly like seg_bits: never persisted, excluded from topo_uid,
+    // recomputed by derive_fanin_seg_bits, and shifted in step by the dogleg
+    // split.
+    std::map<std::pair<int,int>, std::vector<int>> seg_busterm_bits;
     // Blocks the trunk is routed *through* on purpose (opt-in feedthru): the trunk
     // is split at the block's two crossed faces (no stub to the block) and the
     // block's own lower-level router bridges the gap.  Empty unless a straddling

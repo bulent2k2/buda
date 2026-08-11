@@ -63,6 +63,12 @@ struct BusSegment {
     // re-extend each bit's span to its block face so the tap survives (mirror of
     // TrackSegment::busterm_faces in the abstract stage).
     std::vector<double> busterm_faces;
+    // Per-face bit membership, parallel to busterm_faces: the bits whose
+    // own path terminates at that tapped block.  An EMPTY entry means the
+    // face serves every bit (all non-tapered bundles — the historical
+    // behavior).  From Topology::seg_busterm_bits; without it a tap
+    // re-extends bits that never go to the block it taps.
+    std::vector<std::vector<int>> busterm_face_bits;
 
     // Along-axis intervals where this segment covers a connected block by
     // PASS-THROUGH — it crosses the block's footprint with no tap of its own,
