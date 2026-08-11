@@ -63,6 +63,17 @@ namespace eval ::buda {
     variable async_mode header
     variable async_need 0
     variable async_buf ""
+    # The names the BRIDGE owns.  `_define` mints one proc per registry
+    # command, and a registry name colliding with one of these — `viz`, say,
+    # added one day beside the existing `visualize` — would REPLACE the
+    # bridge's own proc with a wrapper that sends it to the engine as a
+    # script command.  The flow would then fail far from the cause, so the
+    # collision is refused loudly instead (`buda::do <name>` still reaches
+    # the engine command).  Listed rather than snapshotted from
+    # `info procs`, which would also capture the generated procs if this
+    # file were ever sourced twice.  Pinned by the test suite.
+    variable reserved {start stop query output commands stream viz
+                       onprogress async wait running cancel do}
     # Captured HERE, at source time.  Inside a proc `info script` names the
     # script being RUN, not the one the proc was defined in, so resolving the
     # server relative to it would look for it beside the site's flow script.
@@ -70,7 +81,9 @@ namespace eval ::buda {
 }
 
 # Start the engine.  `-python` picks the interpreter, `-echo 0` keeps command
-# output out of the terminal (it stays available as [buda::output]).
+# output out of the terminal (it stays available as [buda::output]), and
+# `-viz 0` declares this a batch flow: `visualize` then reports itself
+# skipped instead of blocking on a window (see `buda::viz`).
 proc ::buda::start {args} {
     variable fh
     variable commands
@@ -80,11 +93,13 @@ proc ::buda::start {args} {
 
     set python "python3"
     set server [file join $dir buda_server.py]
+    set viz ""
     foreach {k v} $args {
         switch -- $k {
             -python { set python $v }
             -server { set server $v }
             -echo   { set echo $v }
+            -viz    { set viz $v }
             default { error "buda::start: unknown option $k" }
         }
     }
@@ -105,6 +120,9 @@ proc ::buda::start {args} {
 
     set commands [buda::_request "__commands"]
     foreach name $commands { buda::_define $name }
+    # Only when asked: the engine's own default is on, and sending nothing
+    # keeps `buda::start` byte-identical on the wire for existing flows.
+    if {$viz ne ""} { buda::viz $viz }
     return $commands
 }
 
@@ -157,6 +175,22 @@ proc ::buda::commands {} {
 proc ::buda::stream {onoff} {
     buda::_request [expr {$onoff ? "__stream on" : "__stream off"}]
     return $onoff
+}
+
+# May `visualize` open a window?  With no argument, what the setting is.
+#
+# On by default, because a command must mean from Tcl what it means in a
+# `.buda` script — and there it opens a viewer.  Note what that implies: the
+# window BLOCKS this interpreter until it is closed, exactly as it blocks a
+# script run.  A GUI that wants to stay live sends it with `buda::async
+# visualize`; a batch flow turns it off (`buda::start -viz 0`) and every
+# `visualize` then reports itself skipped (BUDA-1903) instead of costing a
+# viewer nobody is watching.
+proc ::buda::viz {{onoff ""}} {
+    if {$onoff eq ""} { return [string trim [buda::_request "__viz"]] }
+    set mode [expr {[string is boolean -strict $onoff] ? \
+                    ($onoff ? "on" : "off") : $onoff}]
+    return [string trim [buda::_request "__viz $mode"]]
 }
 
 # `buda::onprogress {cmdprefix}` — invoked (at global level) with each chunk
@@ -404,7 +438,25 @@ proc ::buda::_deliver {chunk} {
     }
 }
 
+# Send a raw command line — the generic form of every `buda::<name>` proc,
+# and the way to reach a registry command whose name the bridge already
+# owns (see `reserved` above).  Also what a GUI wants when the command is
+# in a variable rather than in the source text.
+proc ::buda::do {args} {
+    return [buda::_request [string trim [join $args " "]]]
+}
+
 proc ::buda::_define {name} {
+    variable reserved
+    if {[lsearch -exact $reserved $name] >= 0} {
+        # The bridge's own proc wins, and says so.  Silently overwriting it
+        # would break the bridge from inside — `buda::stop` or `buda::query`
+        # would start sending themselves to the engine as script commands —
+        # and the flow would fail somewhere far from the cause.
+        puts stderr "buda: engine command '$name' collides with the bridge's\
+ own buda::$name — call it as \[buda::do $name ...\]"
+        return
+    }
     # The handlers split on whitespace, so arguments are joined and not
     # re-quoted: a command must mean the same thing from Tcl as from a .buda
     # script, and adding quoting here would silently make it mean something

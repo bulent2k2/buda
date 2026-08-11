@@ -170,6 +170,19 @@ if {[buda::query overlaps] > 0 || [buda::query unplaced] > 0
 
 buda::report_wirelength
 
+# The viewer, on request.  `buda::visualize` opens the same window a `.buda`
+# script opens and BLOCKS until it is closed, which is right for a person at
+# a terminal and wrong for the test that runs this vehicle — hence the
+# switch rather than a bare call or a commented-out line nobody can use:
+#
+#     BUDA_ARRAY_VIZ=1 tclsh flow/tcl/array.tcl 3 2
+#
+# On a host with no display it reports BUDA-1903 and carries on, so asking
+# for it over ssh tells you why you got no window instead of nothing.
+if {[info exists ::env(BUDA_ARRAY_VIZ)] && $::env(BUDA_ARRAY_VIZ) ne "0"} {
+    buda::visualize
+}
+
 set ov [buda::query overlaps]
 set un [buda::query unplaced]
 set vi [buda::query violations]

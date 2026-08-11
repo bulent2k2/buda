@@ -111,6 +111,7 @@ MESSAGES = {
                           "are on implausibly different scales."),
     "BUDA-1902": (ERROR,  "A design audit reported violations and "
                           "--strict-check is on."),
+    "BUDA-1903": (WARNING, "A visualize command opened no window."),
 }
 
 # Ids that were ISSUED and whose fault no longer exists.

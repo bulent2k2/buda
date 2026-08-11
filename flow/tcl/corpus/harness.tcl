@@ -103,7 +103,14 @@ proc corpus::begin {script origin_buda} {
     # thing this harness's stdout is FOR is the QOR line a sweep parses.  The
     # output still travels the pipe (buda::output holds it), so the engine
     # side is exercised identically — this suppresses only the terminal echo.
-    buda::start -echo 0
+    #
+    # -viz 0: 31 of the 41 corpus flows end in `visualize`, and a window
+    # BLOCKS the run until it is closed.  The sweep is a batch measurement,
+    # so it says so — the same declaration `qor_corpus.py` makes with
+    # `no_viz` on the CLI side, which is also what keeps the two drivers
+    # comparable.  Without it a sweep on a machine with a display would
+    # simply stop at the first flow's viewer.
+    buda::start -echo 0 -viz 0
     set t0 [clock milliseconds]
 }
 
