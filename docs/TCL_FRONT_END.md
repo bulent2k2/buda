@@ -120,14 +120,47 @@ cleanliness.  Pinned end-to-end by `test/tests/test_tcl_array_flow.py`
 ## Options
 
 ```tcl
-buda::start ?-python <interpreter>? ?-server <path>? ?-echo 0|1?
+buda::start ?-python <interpreter>? ?-server <path>? ?-echo 0|1? ?-viz 0|1?
 buda::stop
 buda::output      ;# the last command's output, echoed or not
 buda::commands    ;# the command list the engine reported
+buda::viz ?on|off?  ;# may `visualize` open a window; no arg = ask
+buda::do <cmd> ...  ;# send a raw command line (the generic form)
 ```
 
 `-echo 0` keeps command output off the terminal; it is still available from
 `buda::output`.
+
+## The viewer
+
+`buda::visualize` opens the same window `visualize` opens in a `.buda`
+script, and it **blocks** the same way — the run stops until you close it.
+A GUI that must stay live sends it as `buda::async visualize`; a batch flow
+declares itself with `buda::start -viz 0` (what `flow/tcl/corpus/harness.tcl`
+does — 31 of the 41 corpus flows end in `visualize`, and a sweep that opened
+31 windows would never finish).
+
+Whenever a `visualize` command opens **no** window it now says so, with
+`BUDA-1903` and the reason:
+
+```
+BUDA-1903: INFO: visualize: no window opened: visualization is off for this
+           session (--no-viz, or buda::start -viz 0)
+BUDA-1903: WARNING: visualize: no window opened: matplotlib's backend (agg)
+           cannot display a window — no display, or MPLBACKEND names a
+           file-only backend
+```
+
+The severity is the difference between "you asked for this" and "nobody
+asked for this", and the second one had no voice at all before: `plt.show()`
+under a file-only backend is a silent no-op — matplotlib does not even warn
+— so a run over `ssh` drew nothing and reported success.  The note also goes
+to the flow log, which is where the question gets asked afterwards.
+
+The server used to force visualization off unconditionally, which made
+`visualize` the one command that did not mean from Tcl what it means in a
+script.  It is on by default now; `buda::viz off` is how a client declines
+it, at any point in the session.
 
 `buda::start` sets stdout's encoding to UTF-8 (and `buda::stop` restores
 it).  BUDA's diagnostics contain `→`, `µm` and box-drawing rules; on a host
@@ -178,6 +211,11 @@ Documented in full in `tools/buda_server.py`.  In short: one request line
 per command, and a reply of `<STATUS> <n_chars>\n` followed by that many
 characters of output, where `STATUS` is `OK`, `ERR`, `BYE` or `FATAL`.
 Character counts, not bytes: both sides speak UTF-8 and count code points.
+
+Five requests are the server's own rather than script commands:
+`__commands` (the registry, which is how `buda::<name>` procs are minted
+with no second list to keep in step), `__query <name>`, `__stream on|off`,
+`__viz [on|off]`, and `__exit`.
 
 With streaming opted in (`__stream on`), a reply is zero or more
 `OUT <n_chars>\n<payload>` progress frames followed by exactly one final

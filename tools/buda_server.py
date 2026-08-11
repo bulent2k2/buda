@@ -80,12 +80,19 @@ while one long C++ call (a single `run_planner` on a huge design) returns
 before the interrupt lands.  SIGINT is blocked while a frame is being
 written, so a cancel cannot tear a frame in half.
 
-Four requests are the server's own rather than script commands:
+Five requests are the server's own rather than script commands:
 
     __commands           the command registry, space-separated
     __query <name>       one scalar about the session (see `_QUERIES`)
     __stream on|off      stream command output as OUT frames (default off)
+    __viz [on|off]       may `visualize` open a window (default on); no
+                         argument reports the current setting
     __exit               shut down
+
+`__viz` exists because a window BLOCKS — `visualize` in a `.buda` script
+holds the run until the viewer is closed, and it means the same thing here.
+A batch driver (the corpus harness) says `off` the way a batch CLI run says
+`--no-viz`; an interactive one leaves it on and gets a viewer.
 
 `__commands` is what makes the two sides stay in sync automatically: the Tcl
 package asks for the list at startup and defines one proc per name, so a
@@ -273,7 +280,14 @@ class _StreamCapture(io.TextIOBase):
 class Server:
     def __init__(self, session=None, out=None):
         self.session = session or buda_cli.BudaSession()
-        self.session.no_viz = True
+        # Deliberately NOT `no_viz = True`.  It was, and that quietly made
+        # `visualize` the one command that does not mean from Tcl what it
+        # means in a script: it returned OK, opened nothing, and said nothing
+        # — on a workstation with a perfectly good display.  A client that
+        # wants the batch behaviour asks for it (`__viz off`, which is what
+        # `buda::start -viz 0` sends), exactly as a batch CLI run passes
+        # `--no-viz`; and when there is no display to open on, the command
+        # itself now says so (BUDA-1903) instead of succeeding silently.
         self.out = out or sys.stdout
         self.stream = False
 
@@ -307,6 +321,24 @@ class Server:
             return False
         if req == "__commands":
             self._reply("OK", " ".join(sorted(COMMANDS)))
+            return True
+        if req == "__viz" or req.startswith("__viz "):
+            # Exact, not `startswith("__viz")`: the no-argument form REPORTS
+            # the setting, so a mistyped `__vizz` would otherwise answer OK
+            # with a plausible value instead of saying it was not understood.
+            #
+            # A window BLOCKS the session until it is closed (as it does in a
+            # `.buda` run), so a batch driver turns it off rather than
+            # discovering that on a machine that happens to have a display.
+            parts = req.split(None, 1)
+            mode = parts[1].strip().lower() if len(parts) > 1 else ""
+            if mode == "":
+                self._reply("OK", "off" if self.session.no_viz else "on")
+            elif mode in ("on", "off"):
+                self.session.no_viz = mode == "off"
+                self._reply("OK", mode)
+            else:
+                self._reply("ERR", "usage: __viz [on|off]")
             return True
         if req.startswith("__stream"):
             parts = req.split(None, 1)

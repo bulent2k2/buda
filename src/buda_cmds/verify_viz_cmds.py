@@ -22,6 +22,7 @@ full registry that buda_cli.do_command dispatches through.
 """
 import os
 
+import buda_diag
 from buda_session.util import resolve_script_path
 
 from ._options import reject_unknown_options
@@ -30,7 +31,127 @@ from ._options import reject_unknown_options
 # is eagerly imported by the buda_cmds registry (and thus by buda_cli) — a
 # headless embedder (e.g. the web server) must be able to import the command
 # layer without a matplotlib dependency.  The viz handlers return early under
-# `no_viz`, so the heavy import only happens when a window is actually opened.
+# `no_viz` — which is checked BEFORE anything below touches matplotlib — so the
+# heavy import only happens when a window is actually about to be opened.
+
+
+def _backend_cannot_show():
+    """The matplotlib backend is one that provably cannot put a window up.
+
+    **Only valid AFTER `buda_viz` has been imported** — see
+    `_import_viz_or_reason`.  `get_backend()` auto-selects and LOCKS the
+    implicit default, and on macOS that default is the segfault-prone native
+    `macosx`, which `buda_viz` exists to override; asking early would answer
+    the question and silently decide it.
+
+    Asked as "is it KNOWN to be non-interactive", never as "is it known to be
+    interactive": a third-party backend (`module://…`) is in neither builtin
+    list, and answering "not interactive" for it would refuse a window we
+    could have opened.  Unknown means try — `plt.show()` on a backend that
+    cannot show is a no-op, which is the cheaper mistake of the two.
+    """
+    try:
+        import matplotlib
+        name = matplotlib.get_backend().lower()
+    except Exception:
+        return False
+    try:                                    # matplotlib >= 3.9
+        from matplotlib.backends.registry import BackendFilter, backend_registry
+        dead = backend_registry.list_builtin(BackendFilter.NON_INTERACTIVE)
+    except Exception:
+        try:                                # older matplotlib
+            from matplotlib import rcsetup
+            dead = rcsetup.non_interactive_bk
+        except Exception:
+            return False
+    return name in [b.lower() for b in dead]
+
+
+def _no_window_reason(session):
+    """Why a `visualize*` command will open NO window — or None if it MIGHT.
+
+    Only the reason knowable WITHOUT touching matplotlib, which is what keeps
+    two separate promises: the command layer stays importable on a host with
+    no plotting stack (the headless-embedder requirement above), and the
+    backend is left unchosen for `buda_viz` to decide.  The rest of the
+    verdict is `_import_viz_or_reason`'s.
+
+    The suppression was ASKED for — `--no-viz`, `buda::viz off`, the
+    web/embedded servers — so it is an INFO.  Said out loud all the same,
+    because a log read against its script should show where the viewer was
+    skipped; before this it was a bare `return`, and a command that succeeds
+    and does nothing is exactly how `buda::visualize` read from a Tcl flow.
+
+    Returns `(detail, severity)` or None.
+    """
+    if session.no_viz:
+        return ("visualization is off for this session "
+                "(--no-viz, or buda::start -viz 0)", buda_diag.INFO)
+    return None
+
+
+def _import_viz_or_reason():
+    """Import the viz layer.  `(module, None)` or `(None, reason)`.
+
+    An import that fails is a reason like any other rather than a traceback
+    naming `matplotlib` but neither the command that wanted it nor the fact
+    that the rest of the run is unaffected.
+    """
+    try:
+        import buda_viz
+    except Exception as e:
+        return None, (f"the visualization layer could not be loaded on this "
+                      f"host ({e})", buda_diag.WARNING)
+    return buda_viz, None
+
+
+def _note_if_nothing_can_be_shown(session, cmd):
+    """Say that this viewer will not appear, and CARRY ON building it.
+
+    Two things are deliberate here.
+
+    **It does not stop.**  Constructing the figure under a file-only backend
+    is a supported mode, not a waste: the viz suite drives `cmd_visualize`
+    under Agg with `show` stubbed to check what each layer draws, and PNG
+    rendering does the same.  Skipping the build to save the work would take
+    that away — and the work was never the complaint.  What was missing is
+    the sentence, so the sentence is all that is added.
+
+    **It is asked AFTER `buda_viz` is imported.**  That import is where the
+    backend is CHOSEN: on macOS it forces TkAgg over the native default that
+    intermittently segfaults with the IPC timer or several windows — but only
+    if nothing has been selected yet.  A `get_backend()` probe auto-selects
+    and LOCKS that very default, so probing first would leave `buda_viz`
+    finding a backend already chosen, skipping its override, and
+    reintroducing the segfaults (Codex P1 on #688).  Import first, ask
+    second; by then the answer is also the true one.
+    """
+    if not _backend_cannot_show():
+        return
+    import matplotlib
+    _report_no_window(session, cmd,
+                      (f"matplotlib's backend ({matplotlib.get_backend()}) "
+                       f"cannot display a window — no display, or MPLBACKEND "
+                       f"names a file-only backend; the figure is still built",
+                       buda_diag.WARNING))
+
+
+def _report_no_window(session, cmd, reason):
+    """Say that `cmd` opened no window, and why.  Identified, so a headless
+    methodology can waive BUDA-1903 once instead of grepping for prose.
+
+    Mirrored into the flow log by hand because the visualize commands are
+    PASSTHROUGHS (`_PASSTHROUGH_CMDS`): their output deliberately bypasses
+    run_command's capture, since a blocking viewer's output belongs on the
+    terminal.  That is right for a window that opened — and wrong for one
+    that did not, because the post-mortem log is exactly where someone asks
+    afterwards why they never saw it.
+    """
+    detail, severity = reason
+    line = buda_diag.format("BUDA-1903", f"{cmd}: no window opened: {detail}",
+                            severity=severity)
+    print(line)
+    session._log_write(line)
 
 
 def cmd_report_wirelength(session, cmd, args, cmd_line):
@@ -122,9 +243,17 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
               f"Use '-all {' '.join(positional)}' to open several.")
         raise SystemExit(1)
 
-    if session.no_viz:
+    reason = _no_window_reason(session)
+    if reason:
+        _report_no_window(session, "visualize_topologies", reason)
         return
-    from buda_viz import TopologyExplorer, collect_candidate_bundles
+    _viz, reason = _import_viz_or_reason()
+    if reason:
+        _report_no_window(session, "visualize_topologies", reason)
+        return
+    _note_if_nothing_can_be_shown(session, "visualize_topologies")
+    TopologyExplorer = _viz.TopologyExplorer
+    collect_candidate_bundles = _viz.collect_candidate_bundles
 
     # Collect every candidate-bearing bundle once — including each hier
     # per-instance bundle (they route independently); shared with the GUI
@@ -216,9 +345,16 @@ def cmd_visualize(session, cmd, args, cmd_line):
     # must not both enable the view and fail validation).
     reject_unknown_options("visualize", [a.lower() for a in args], ("debug",))
     debug = any(a.lower() == "debug" for a in args)
-    if session.no_viz:
+    reason = _no_window_reason(session)
+    if reason:
+        _report_no_window(session, "visualize", reason)
         return
-    from buda_viz import BudaVisualizer
+    _viz, reason = _import_viz_or_reason()
+    if reason:
+        _report_no_window(session, "visualize", reason)
+        return
+    _note_if_nothing_can_be_shown(session, "visualize")
+    BudaVisualizer = _viz.BudaVisualizer
     rerun_layer_fn = session._rerun_nuts_layer if session.nuts_result is not None else None
     rerun_all_fn   = session._rerun_all        if session.nuts_result is not None else None
     ipc_session = (os.path.splitext(os.path.basename(session.script_path))[0]

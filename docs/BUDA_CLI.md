@@ -49,7 +49,7 @@ relative to the sourcing script's directory.
 | Flag | Default | Effect |
 |---|---|---|
 | `-h`, `--help` | — | Print usage (auto-generated from the flags below) and exit. |
-| `-nv`, `--no-viz` | off | Skip `visualize` / `visualize_topologies` commands so no GUI window opens. Use for batch runs, tests, and CI. The full pipeline still runs and all logs are written. |
+| `-nv`, `--no-viz` | off | Skip `visualize` / `visualize_topologies` commands so no GUI window opens. Use for batch runs, tests, and CI. The full pipeline still runs and all logs are written. Each skipped command reports itself (`BUDA-1903`, at INFO — you asked for it), on the terminal and in the flow log. |
 | `-t`, `--tag TAG` | none | Insert `TAG` into every log file name for this run, immediately before the suffix: `log/<cell>_<TAG>_flow.log`, `…_<TAG>_nuts.log`, etc. (with `-l`, `log/<cell>/<timestamp>/<TAG>_flow.log`). The default log names are overwritten by every re-run of the same script; a tag gives parallel experiments on one script (say two planner-knob settings, or the two `ripup_reroute` calls) their own log files instead. `TAG` is sanitized to a filename-safe token — anything outside `[0-9A-Za-z._-]` (spaces, slashes, …) becomes `_`. |
 | `-l`, `--log` | off | **Archive the run.** All logs go to a fresh `log/<cell>/<timestamp>/` dir (never overwriting a previous run's) together with a copy of the **exact scripts executed** — the top-level `.buda` and every `source`d file, snapshotted the moment each is sourced, with a `MANIFEST` mapping each copy to its origin path (same-basename collisions are uniquified; a re-sourced file is archived once, but every distinct origin path gets its own copy and `MANIFEST` line, even when byte-identical). Made for exploratory tweak-and-re-run loops: each run keeps its logs *and* the script text that produced them. The dir is printed at start (`Run archive → …`). Without the flag, logging is unchanged (`log/<cell>_flow.log`, overwritten per run). |
 | `--strict-check` | off | **Make a dirty design fail the run.** Exit `3` when any `check_design` reported violations, or could not run at all (a missing prerequisite — "did not demonstrate a clean design" is the question a harness asks). Without it a design with violations still exits `0`, so a CI/regression harness cannot gate on quality: the tool fails loudly on a malformed *script* but silently on a broken *design*. An explicit **non-zero** `exit <code>` wins — that is the author stating a failure of their own. A **zero** one does not: a bare `exit` (code 0) is how most flows normally terminate, so letting it suppress the verdict would make this flag a no-op on nearly every real flow. |
@@ -113,6 +113,10 @@ leave the design half-configured (e.g. no layers loaded).
   wrapper and `bin/activate` set this for you.
 - **matplotlib backend** — on macOS the CLI forces `TkAgg` for stability; set
   `MPLBACKEND=Agg` for a headless run (pairs naturally with `--no-viz`).
+  A `visualize` on a backend that cannot show a window — `Agg`, or any run
+  with no display — reports `BUDA-1903` at WARNING and carries on. It used to
+  return in silence: `plt.show()` there is a no-op and matplotlib does not
+  even warn, so a run over `ssh` drew nothing and said nothing.
 
 ---
 
