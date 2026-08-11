@@ -148,6 +148,15 @@ static const char* BUNDLE_DDL = R"(
         bundle_id TEXT REFERENCES bundle(id),
         net_id    INTEGER REFERENCES net(id),
         ord       INTEGER DEFAULT -1,  -- bit order within the bundle (v10)
+        -- Per-BIT endpoints of a fan-in / fan-out bundle (v27), i.e.
+        -- HBundle::net_drivers[ord] and net_receivers[ord].  They are what
+        -- makes the per-bit taper (Topology::seg_bits) derivable, and they
+        -- are stored rather than re-derived because the roles they encode
+        -- come from a subtle pass (deepest OUTPUT, path-maximal receivers,
+        -- INOUT/UNKNOWN fallbacks, extra-driver attachment) that a second
+        -- implementation would drift from.  Empty for every other bundle.
+        drv_path  TEXT DEFAULT '',      -- driver block path for this bit
+        rcv_paths TEXT DEFAULT '',      -- JSON array of receiver block paths
         PRIMARY KEY (bundle_id, net_id)
     );
     CREATE TABLE IF NOT EXISTS bundle_busterm (
@@ -830,6 +839,19 @@ void BDB::_migrate() {
             nullptr, nullptr, nullptr);
         sqlite3_exec(_db,
             "ALTER TABLE ndr_rule ADD COLUMN spacing_abs REAL NOT NULL DEFAULT 0",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 27) {
+        // v26 -> v27: per-bit fan-in/fan-out endpoints on bundle_net.  A
+        // pre-v27 checkpoint has none, and the empty default is exactly the
+        // state it resumed in before this existed (untapered), so an old DB
+        // keeps behaving as it did rather than acquiring a taper nobody
+        // measured.
+        sqlite3_exec(_db,
+            "ALTER TABLE bundle_net ADD COLUMN drv_path TEXT DEFAULT ''",
+            nullptr, nullptr, nullptr);
+        sqlite3_exec(_db,
+            "ALTER TABLE bundle_net ADD COLUMN rcv_paths TEXT DEFAULT ''",
             nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
@@ -4021,6 +4043,41 @@ void BDB::add_bundle_net(const std::string& bundle_id, const std::string& net_na
     sqlite3_bind_text(s, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int (s, 2, net_id);
     sqlite3_step(s);
+}
+
+void BDB::set_bundle_net_endpoints(const std::string& bundle_id,
+                                   const std::string& net_name,
+                                   const std::string& drv_path,
+                                   const std::string& rcv_paths_json) {
+    // Per-bit fan-in / fan-out endpoints (v27).  Keyed by the SAME
+    // (bundle_id, net_id) row the membership uses, so the bit alignment is
+    // `ord` and cannot drift from it.
+    int net_id = _ensure_net(net_name);
+    Stmt s(_db, "UPDATE bundle_net SET drv_path=?, rcv_paths=?"
+                " WHERE bundle_id=? AND net_id=?");
+    sqlite3_bind_text(s, 1, drv_path.c_str(),       -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(s, 2, rcv_paths_json.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(s, 3, bundle_id.c_str(),      -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (s, 4, net_id);
+    sqlite3_step(s);
+}
+
+std::vector<std::pair<std::string, std::string>>
+BDB::bundle_net_endpoints(const std::string& bundle_id) const {
+    // (drv_path, rcv_paths_json) per bit, in the SAME order bundle_nets()
+    // returns names — one ORDER BY, written once, so the two can never
+    // disagree about which bit a row belongs to.
+    Stmt q(_db, "SELECT COALESCE(b.drv_path,''), COALESCE(b.rcv_paths,'')"
+                " FROM bundle_net b JOIN net n ON b.net_id=n.id"
+                " WHERE b.bundle_id=?"
+                " ORDER BY (b.ord IS NULL OR b.ord < 0), b.ord, n.name");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    std::vector<std::pair<std::string, std::string>> out;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        out.emplace_back(
+            reinterpret_cast<const char*>(sqlite3_column_text(q, 0)),
+            reinterpret_cast<const char*>(sqlite3_column_text(q, 1)));
+    return out;
 }
 
 void BDB::add_bundle_busterm(const std::string& bundle_id,
