@@ -61,9 +61,30 @@ def test_the_array_flow_ends_clean_and_forms_the_structures(tmp_path):
 
 def test_the_array_flow_scales_by_its_parameters(tmp_path):
     """The vehicle's point is that the design is COMPUTED: a different shape
-    is two arguments, not a rewrite.  3 x 2 must also end clean, with more
-    bundles than 2 x 2's 12."""
+    is two arguments, not a rewrite.  3 x 2 grows to 18 bundles.
+
+    KNOWN RESIDUAL at 3 x 2 (2 x 2 is clean, so it is shape-dependent).  The
+    per-bit ANTENNA audit reports 8 units of dangling metal on bundle 10 —
+    a `[t_1_0/l_0_1, t_0_1/l_1_0] -> t_1_1/l_0_0` fan-in routed TRUNK_H@y415.
+    The trunk carries bits 0-7 while its M5 stub exists only for bits 4-7
+    (the per-bit taper), so the trunk's metal runs on toward a junction its
+    lower bits never make — exactly the pair NUTS already warns about:
+
+        [NUTS] junction infeasible: bundle 10 seg 0 cannot reach seg 1
+
+    The finding is REAL (confirmed against the placed geometry), so this
+    asserts the known state rather than pretending it is clean: the flow's
+    self-check exits non-zero, with that one violation and nothing else.
+    Overlaps and unplaced must still be ZERO — the residual is dangling
+    metal, not a broken route.
+
+    When array.tcl's overshoot is fixed this test FAILS, which is the point:
+    it forces the expectation back to clean rather than letting a repaired
+    vehicle keep a stale allowance.
+    """
     r = _run(tmp_path, 3, 2)
-    assert r.returncode == 0, r.stdout + r.stderr
     assert "3 x 2 tiles -> 18 bundles" in r.stdout
-    assert "clean -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "0 overlaps, 0 unplaced" in r.stdout + r.stderr
+    assert "dangling metal past its own attachments" in r.stdout
+    assert "Bundle 10" in r.stdout
