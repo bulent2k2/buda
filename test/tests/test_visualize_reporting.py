@@ -70,15 +70,34 @@ def test_a_suppressed_viewer_is_reported_as_asked_for(cmd):
     assert cmd in out
 
 
-@pytest.mark.parametrize("cmd", ["visualize", "visualize_topologies"])
-def test_a_viewer_nobody_can_see_is_a_warning(cmd, monkeypatch):
+def test_a_viewer_nobody_can_see_is_a_warning(monkeypatch):
     """Nobody asked for a headless host, so this one is a WARNING — and it is
     the case that had no voice at all: the CLI over ssh drew nothing and said
     nothing."""
     monkeypatch.setattr(vv, "_backend_cannot_show", lambda: True)
-    out = _say(_session(no_viz=False), cmd)
+    import buda_viz
+    monkeypatch.setattr(buda_viz.BudaVisualizer, "show", lambda self: None)
+    out = _say(_session(no_viz=False), "visualize")
+    said = [l for l in out.splitlines() if "BUDA-1903" in l]
+    assert said, out
+    assert buda_diag.severity_of_line(said[0]) == "WARNING", said
+
+
+def test_saying_no_window_will_appear_does_not_stop_the_figure_being_built(
+        monkeypatch):
+    """Building under a file-only backend is a SUPPORTED mode, not a waste:
+    the viz suite drives `cmd_visualize` under Agg with `show` stubbed to
+    check what each layer draws (54 tests), and PNG rendering does the same.
+    A first cut of this change skipped the build to save the work — the work
+    was never the complaint, the missing sentence was."""
+    monkeypatch.setattr(vv, "_backend_cannot_show", lambda: True)
+    built = []
+    import buda_viz
+    monkeypatch.setattr(buda_viz.BudaVisualizer, "show",
+                        lambda self: built.append(self))
+    out = _say(_session(no_viz=False), "visualize")
+    assert built, "the note suppressed the build: " + out
     assert "BUDA-1903" in out, out
-    assert buda_diag.severity_of_line(out.strip().splitlines()[0]) == "WARNING"
 
 
 def test_the_viewer_is_reached_when_a_display_is_available(monkeypatch):
@@ -148,8 +167,10 @@ def test_the_backend_is_not_probed_before_the_viz_layer_chooses_one():
     try:
         vv._backend_cannot_show = lambda: probed.append(1) or False
         assert vv._no_window_reason(_session(no_viz=False)) is None
-        assert not probed, "_no_window_reason probed the backend"
-        vv._import_viz_or_reason()
+        mod, reason = vv._import_viz_or_reason()
+        assert reason is None and mod is not None
+        assert not probed, "the backend was probed before buda_viz was imported"
+        vv._note_if_nothing_can_be_shown(_session(no_viz=False), "visualize")
         assert probed, "the probe never happened after the import either"
     finally:
         vv._backend_cannot_show = real

@@ -91,17 +91,7 @@ def _no_window_reason(session):
 
 
 def _import_viz_or_reason():
-    """Import the viz layer, then judge the backend.  `(module, None)` or
-    `(None, reason)`.
-
-    The ORDER is the point.  `buda_viz`'s import is where the backend is
-    CHOSEN: on macOS it forces TkAgg over the native default that
-    intermittently segfaults with the IPC timer or several windows — but
-    only if nothing has been selected yet.  A `get_backend()` probe
-    auto-selects and LOCKS that very default, so probing first would leave
-    `buda_viz` finding a backend already chosen, skipping its override, and
-    reintroducing the segfaults (Codex P1 on #688).  Import first, ask
-    second; by then the answer is also the true one.
+    """Import the viz layer.  `(module, None)` or `(None, reason)`.
 
     An import that fails is a reason like any other rather than a traceback
     naming `matplotlib` but neither the command that wanted it nor the fact
@@ -112,12 +102,38 @@ def _import_viz_or_reason():
     except Exception as e:
         return None, (f"the visualization layer could not be loaded on this "
                       f"host ({e})", buda_diag.WARNING)
-    if _backend_cannot_show():
-        import matplotlib
-        return None, (f"matplotlib's backend ({matplotlib.get_backend()}) "
-                      f"cannot display a window — no display, or MPLBACKEND "
-                      f"names a file-only backend", buda_diag.WARNING)
     return buda_viz, None
+
+
+def _note_if_nothing_can_be_shown(session, cmd):
+    """Say that this viewer will not appear, and CARRY ON building it.
+
+    Two things are deliberate here.
+
+    **It does not stop.**  Constructing the figure under a file-only backend
+    is a supported mode, not a waste: the viz suite drives `cmd_visualize`
+    under Agg with `show` stubbed to check what each layer draws, and PNG
+    rendering does the same.  Skipping the build to save the work would take
+    that away — and the work was never the complaint.  What was missing is
+    the sentence, so the sentence is all that is added.
+
+    **It is asked AFTER `buda_viz` is imported.**  That import is where the
+    backend is CHOSEN: on macOS it forces TkAgg over the native default that
+    intermittently segfaults with the IPC timer or several windows — but only
+    if nothing has been selected yet.  A `get_backend()` probe auto-selects
+    and LOCKS that very default, so probing first would leave `buda_viz`
+    finding a backend already chosen, skipping its override, and
+    reintroducing the segfaults (Codex P1 on #688).  Import first, ask
+    second; by then the answer is also the true one.
+    """
+    if not _backend_cannot_show():
+        return
+    import matplotlib
+    _report_no_window(session, cmd,
+                      (f"matplotlib's backend ({matplotlib.get_backend()}) "
+                       f"cannot display a window — no display, or MPLBACKEND "
+                       f"names a file-only backend; the figure is still built",
+                       buda_diag.WARNING))
 
 
 def _report_no_window(session, cmd, reason):
@@ -235,6 +251,7 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
     if reason:
         _report_no_window(session, "visualize_topologies", reason)
         return
+    _note_if_nothing_can_be_shown(session, "visualize_topologies")
     TopologyExplorer = _viz.TopologyExplorer
     collect_candidate_bundles = _viz.collect_candidate_bundles
 
@@ -336,6 +353,7 @@ def cmd_visualize(session, cmd, args, cmd_line):
     if reason:
         _report_no_window(session, "visualize", reason)
         return
+    _note_if_nothing_can_be_shown(session, "visualize")
     BudaVisualizer = _viz.BudaVisualizer
     rerun_layer_fn = session._rerun_nuts_layer if session.nuts_result is not None else None
     rerun_all_fn   = session._rerun_all        if session.nuts_result is not None else None
