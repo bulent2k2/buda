@@ -106,13 +106,29 @@ signal slots — the same quantity `eff_bus_width` charges, so a rule and the
 width model agree by construction.
 
 That makes an absolute value a statement about **how much routing channel the
-width consumes**, which is what the planner books. On a dense pattern the
-emitted metal matches the declared width; on a **sparse** one (wide slots with
-wide gaps) a bit can be granted a whole channel while its metal stays narrower
-than declared. If you are declaring a width for EM or resistance rather than
-for congestion, check the placed widths — see
-[opens_ndr.md §2](../internal/opens_ndr.md) for the measurement and the
-alternative quantization.
+width consumes**, which is what the planner books — not a promise about how
+much metal the bit gets. A k-slot bit's metal is `k·w + (k−1)·sp` over the
+layer's own slots, and the two quantities coincide only for some combinations
+of pattern and declared value. On a period that is mostly power rail the gap
+is large: `width 8` can resolve to a single slot and place a 2-unit wire.
+
+After `run_detailed_nuts`, `dump_ndr` reports the delivered metal beside the
+declared width wherever they differ:
+
+```
+[NDR]   on layer 6: rule 'w8' declares width 8 but the placed bits are 2 wide
+        — the value was quantized by the layer's per-signal-slot CHANNEL cost,
+        which is not its metal (opens_ndr.md §2)
+```
+
+`check_design` stays clean in that case, and correctly so: its `NDR_WIDTH`
+check counts covered SIGNAL slot centres, the same channel-shaped quantity the
+quantization used. **A silent run is not evidence the two agree** — it can
+equally mean the declared value happened to land on a slot boundary. If you
+are declaring a width for EM or resistance rather than for congestion, read
+the `dump_ndr` lines and see
+[opens_ndr.md §2](../internal/opens_ndr.md), whose repro
+(`flow/ndr_abs_divisor.buda`) shows all four cases including the exact one.
 
 **Rounding is UP.** A value between slot counts pays the larger, the
 convention the multiplier form already uses (`x1.5` pays 2 slots —

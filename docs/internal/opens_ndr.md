@@ -130,35 +130,62 @@ rule is the conservative MAXIMUM: the fallback over-charges, never under.
 
 **Residual limits:**
 
-- **The divisor is a CHANNEL cost, so wide-slot layers under-deliver
-  METAL.** `ndr_resolve_for_pitch` divides by `bit_pitch`
-  (`unit_pitch / n_signal_slots`) — how much *channel* the width consumes.
-  A k-slot bit's emitted metal, though, spans the slots themselves:
-  `k·w + (k−1)·sp`. The two agree on a dense pattern and diverge on a
-  sparse one. Measured on `flow/ndr_abs_um.buda`: `fine3` (`width 3`)
-  places **3.0 units of metal on M5** (`_ 1 1`, 2 slots — exactly the
-  declared width) and **2.0 on M6** (`_ 2 2`, 1 slot — a third short),
-  because `ceil(3/5.0) = 1` while the smallest k whose metal reaches 3 is
-  2. Spacing has the same shape (a gap of g guards clears
-  `(g+1)·sp + g·w`, not `g·bit_pitch`).
+- **The divisor is a CHANNEL cost, so a layer's METAL can fall short of
+  the declared width.** `ndr_resolve_for_pitch` divides by `bit_pitch`
+  (`unit_pitch / n_signal_slots`) — how much *channel* the width consumes,
+  rails amortized in. A k-slot bit's emitted metal is a different
+  quantity, `k·w + (k−1)·sp` over the layer's own slots, which includes
+  neither the rails nor the gaps outside the run. Nothing forces the two
+  to agree.
 
-  This is inherited from R1 part 1, not introduced here — the per-layer
-  resolution only made it *visible*, since the conservative maximum used
-  to over-deliver on the coarse layer by accident. It is a genuine
-  semantic choice, not a bug to patch quietly: `bit_pitch` is the right
-  divisor for CHARGING (it is what `eff_bus_width` books, which is the
-  no-double-count property), and the wrong one for REALIZING a physical
-  width. The R9 `NDR_WIDTH` audit counts covered SIGNAL slot *centres*,
-  so it agrees with the charging reading and would not flag the shortfall.
+  **Repro: [`flow/ndr_abs_divisor.buda`](../../flow/ndr_abs_divisor.buda)**,
+  which produces all four cases in one run. DENSE = `VDD 2 1 (_ 1 1)x12
+  GND 2 1` (pitch 2.5, k slots give 2k−1 metal); SPARSE = `VDD 10 2
+  (_ 2 2)x4 GND 10 2` (pitch 10.0, k slots give 4k−2):
 
-  *If the physical reading is wanted*, the fix is local: quantize width by
-  the smallest k with `k·w + (k−1)·sp ≥ width_abs` and spacing by the
-  smallest g with `(g+1)·sp + g·w ≥ spacing_abs`, both derived from the
-  layer's pattern rather than its pitch — which means
-  `ndr_resolve_for_pitch` needs the SLOT GEOMETRY, not one scalar, and
-  the charging conversion must keep using `bit_pitch` so the books stay
-  consistent. Decide before a design leans on absolute widths for EM or
-  resistance; a demand-shaped reading is fine for congestion planning.
+  | rule | layer | k = ceil(W/pitch) | metal | vs declared |
+  |---|---|---|---|---|
+  | `width 3` | M5 dense | 2 | 3 | **exact** |
+  | `width 3` | M6 sparse | 1 | 2 | short by 1 |
+  | `width 8` | M5 dense | 4 | 7 | short by 1 |
+  | `width 8` | M6 sparse | 1 | 2 | **4× under** |
+
+  The first row is the one to internalize: it is exact *by coincidence of
+  the declared value*, and the third row is the same layer failing. So a
+  stack where it happens to work is not evidence the readings agree. The
+  last row is the headline — `ceil(8/10) = 1` means `width_slots 1` and
+  `guard_slots 0`, an INACTIVE spec, so the bus routes as an ordinary one
+  and gets 2 units of metal for a declared 8. Spacing has the same shape
+  (a gap of g guards clears `(g+1)·sp + g·w`, not `g·bit_pitch`).
+
+  `check_design` is **clean** on that vehicle, correctly: the R9
+  `NDR_WIDTH` check counts covered SIGNAL slot *centres*, so it measures
+  the same channel-shaped quantity the quantization used and agrees with
+  it by construction. `dump_ndr` after `run_detailed_nuts` reports the
+  delivered metal beside the declared width wherever they differ — the
+  only place the gap surfaces, and only because this open was written
+  down.
+
+  This is inherited from R1 part 1, not introduced by the per-layer
+  resolution — that only made it *visible*, since the conservative
+  maximum used to over-deliver on a coarse layer by accident. It is a
+  genuine semantic choice, not a bug to patch quietly: `bit_pitch` is the
+  right divisor for CHARGING (it is what `eff_bus_width` books, which is
+  the no-double-count property) and the wrong one for REALIZING a
+  physical width.
+
+  *If the physical reading is wanted*: quantize width by the smallest k
+  with `k·w + (k−1)·sp ≥ width_abs` and spacing by the smallest g with
+  `(g+1)·sp + g·w ≥ spacing_abs`, both read off the layer's pattern. That
+  makes `ndr_resolve_for_pitch` need the SLOT GEOMETRY rather than one
+  scalar, and the CHARGING conversion must keep using `bit_pitch` so the
+  planner's books stay consistent — i.e. the code would carry both
+  numbers at once, which is the real cost and the reason this is a
+  decision rather than a patch. The R9 audit would have to move with it:
+  a metal-shaped rule needs a metal-shaped check, or the two disagree
+  again one level down. Decide before a design leans on absolute widths
+  for EM or resistance; the channel-shaped reading is fine for congestion
+  planning, which is what every current consumer of the number does.
 
 - **A rule that resolves to one slot resolves to NO rule.** On a layer
   whose single signal slot already covers the declared width, the spec

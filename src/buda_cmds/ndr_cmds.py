@@ -1171,6 +1171,53 @@ def validate_ndr_realizability(session):
                 sys.exit(1)
 
 
+def _report_abs_metal(session, w, spec):
+    """After DNUTS, report an ABSOLUTE rule's DELIVERED metal beside the
+    declared width, per layer, whenever they differ.
+
+    An absolute value is quantized by the per-signal-slot CHANNEL cost
+    (`unit_pitch / n_signal_slots`), which answers "how much routing
+    channel does this width consume" — the question the planner books.
+    The metal a k-slot bit actually gets is a different quantity,
+    `k*w + (k-1)*sp` over the layer's own slots.  The two coincide on some
+    patterns and not others, and nothing else in the flow says which case
+    you are in: `check_design`'s NDR_WIDTH counts covered SIGNAL slot
+    CENTRES, so it agrees with the channel reading by construction and
+    stays silent here.
+
+    Report-only, and printed only when the numbers disagree — the gap is a
+    documented semantic limit (docs/internal/opens_ndr.md §2), not a
+    violation, so it is surfaced for anyone declaring a width for EM or
+    resistance rather than for congestion.  Vehicle:
+    flow/ndr_abs_divisor.buda.
+
+    WIDTH only.  Declared SPACING has the same shape (a gap of g guards
+    clears `(g+1)*sp + g*w`, not `g*bit_pitch`), but the delivered
+    clearance is a property of neighbouring tracks rather than of a placed
+    row, so it needs the run's geometry rather than one width — left to
+    whoever settles the open, since a metal-shaped spacing rule and a
+    metal-shaped spacing report have to arrive together."""
+    dr = getattr(session, "detailed_result", None)
+    if dr is None or spec.width_abs <= 0.0:
+        return
+    bid = w.input.original_bundle.id
+    widths = {}
+    for ns in dr.net_segments:
+        if ns.bundle_id != bid or ns.is_shield:
+            continue
+        widths.setdefault(ns.layer, set()).add(ns.width)
+    eps = 1e-9
+    for lid in sorted(widths):
+        got = min(widths[lid])           # the narrowest bit is the honest one
+        if got >= spec.width_abs - eps:
+            continue
+        print(f"[NDR]   on layer {lid}: rule '{spec.rule_name}' declares "
+              f"width {spec.width_abs:g} but the placed bits are "
+              f"{got:g} wide — the value was quantized by the layer's "
+              f"per-signal-slot CHANNEL cost, which is not its metal "
+              f"(opens_ndr.md §2)")
+
+
 def cmd_dump_ndr(session, cmd, args, cmd_line):
     # dump_ndr — rules, quantization, scopes, and per-bundle governance.
     rules = getattr(session, "_ndr_rules", None) or {}
@@ -1241,6 +1288,7 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
                           f"slot(s) — the absolute width resolves to "
                           f"{ndr_spec_for_layer(session, spec, lid, w).width_slots}"
                           f" slot(s)/bit at that layer's pitch")
+                _report_abs_metal(session, w, spec)
 
 
 COMMANDS = {
