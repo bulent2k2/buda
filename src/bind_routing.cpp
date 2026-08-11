@@ -496,10 +496,7 @@ void bind_routing(py::module_& m) {
         // against (ndr_resolve_for_pitch).  0 when the layer is unknown or
         // has no track pattern — which is exactly the "no slot geometry to
         // resolve against" case `def_ndr` refuses on.
-        .def("bit_pitch", [](const LayerStack& s, int id) {
-            const Layer* l = s.get_layer(id);
-            return l ? l->bit_pitch : 0.0;
-        }, py::arg("layer_id"))
+        .def("bit_pitch", &LayerStack::bit_pitch, py::arg("layer_id"))
         .def("eff_bus_width",           &LayerStack::eff_bus_width,
              py::arg("bits"), py::arg("base_width"), py::arg("layer_id"))
         .def("set_layer_span",          &LayerStack::set_layer_span)

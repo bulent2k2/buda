@@ -370,6 +370,26 @@ def _parse_value(tok, what, name, session=None):
     return (1.0, a)
 
 
+def ndr_spec_for_layer(session, spec, layer):
+    """`spec` as it resolves on ONE layer — the R1 per-layer quantization
+    of an absolute rule, identity for a multiplier rule (and for an unknown
+    or unpatterned layer, whose pitch is 0).
+
+    THE conversion for anything reading a spec against a DECIDED layer:
+    the routing stages resolve in C++ (ndr_group_demand_on / the
+    make_bus_segments pre-resolve), and every Python consumer that knows a
+    layer — the R3 realizability check, the R9 audit, `dump_ndr`'s routed
+    view — must resolve identically or it reports on a rule the engine did
+    not place.  A consumer with NO layer in hand keeps the spec's stored
+    quantization, which is the conservative MAXIMUM over the rule's
+    governed layers: over-strict, never permissive."""
+    if spec.width_abs <= 0.0 and spec.spacing_abs <= 0.0:
+        return spec
+    layers = getattr(session, "layers", None)
+    pitch = layers.bit_pitch(layer) if layers is not None else 0.0
+    return buda.ndr_resolve_for_pitch(spec, pitch)
+
+
 def _abs_layer_pitches(session, rule):
     """Per-signal-slot pitches of the layers an absolute rule may use —
     its `layers` restriction, or every declared layer when unrestricted.
@@ -1056,10 +1076,7 @@ def validate_ndr_realizability(session):
                 continue
             # Per-layer width: the rule's own resolution against THIS
             # layer's pitch (identity for a multiplier rule).
-            lspec = spec
-            if spec.width_abs > 0.0 or spec.spacing_abs > 0.0:
-                lp = session.layers.bit_pitch(lid) if session.layers else 0.0
-                lspec = buda.ndr_resolve_for_pitch(spec, lp)
+            lspec = ndr_spec_for_layer(session, spec, lid)
             if lspec.width_slots <= 1:
                 continue                   # fits in one slot on this layer
             pat = grid.get_layer_grid(lid).global_pattern()
@@ -1145,6 +1162,22 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
                   f"('{nets[0] if nets else '?'}' x{nb}) rule "
                   f"'{spec.rule_name}': demand {du} slot(s) "
                   f"(layout {buda.ndr_run_layout(spec, nb)})")
+            # R1: once layers are assigned, an ABSOLUTE rule's REAL charge
+            # is per layer — report the ones that differ from the maximum
+            # above, so a dump can never claim a demand the engine did not
+            # place (silent on multiplier rules and before planning).
+            if spec.width_abs > 0.0 or spec.spacing_abs > 0.0:
+                seen = {}
+                for lid in getattr(w.plan, "seg_layers", ()) or ():
+                    if lid < 0 or lid in seen:
+                        continue
+                    ls = ndr_spec_for_layer(session, spec, lid)
+                    seen[lid] = buda.ndr_group_demand(ls, nb)
+                for lid in sorted(k for k, v in seen.items() if v != du):
+                    print(f"[NDR]   on layer {lid}: demand {seen[lid]} "
+                          f"slot(s) — the absolute width resolves to "
+                          f"{ndr_spec_for_layer(session, spec, lid).width_slots}"
+                          f" slot(s)/bit at that layer's pitch")
 
 
 COMMANDS = {
@@ -1330,9 +1363,9 @@ def audit_ndr_dnuts(session, wrapper, index=None):
     `index` is a `build_ndr_audit_index` result shared across wrappers by
     `_check_design`; built on the fly when omitted.
     """
-    spec = wrapper.input.ndr
+    base_spec = wrapper.input.ndr
     dr = session.detailed_result
-    if not spec.active() or dr is None:
+    if not base_spec.active() or dr is None:
         return []
     if index is None:
         index = build_ndr_audit_index(session)
@@ -1355,6 +1388,15 @@ def audit_ndr_dnuts(session, wrapper, index=None):
         seg_lo = min(min(r.span_lo, r.span_hi) for r in rows)
         seg_hi = max(max(r.span_lo, r.span_hi) for r in rows)
         seg_layer = rows[0].layer
+        # R1: audit against the rule as it resolves on the layer this
+        # segment was PLACED on — the same quantization make_bus_segments
+        # handed the engine.  Auditing the rule's conservative MAXIMUM
+        # instead would report every correctly-placed governed bit on a
+        # coarser layer as NDR_WIDTH: the maximum is a charging basis, not
+        # a geometric requirement (identity for a multiplier rule).
+        spec = ndr_spec_for_layer(session, base_spec, seg_layer)
+        if not spec.active():
+            continue          # the rule is the default width on this layer
         # R5a: a credit-enabled rule's END may be rail-credited — expected
         # emission drops that end's 'S'.  _ndr_end_credit verifies the
         # rail's identity + coverage, so a bit-at-the-end run with NO

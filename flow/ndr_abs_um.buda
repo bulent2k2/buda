@@ -54,6 +54,12 @@ add_block blkD 800 400  1000 700
 add_bus fine_[4] blkA.p blkB.q
 add_bus wide_[4] blkC.p blkD.q
 add_bus dflt_[6] blkA.d blkB.e
+# A governed bus that routes VERTICALLY, so its segment lands on the COARSE
+# pair (M4/M6, pitch 5.0) rather than the fine one.  Without it the vehicle
+# only ever places `fine3` on M3/M5 — where the conservative maximum happens
+# to be the right answer — and the per-layer resolution is invisible in the
+# routed result.  `fine3`'s width 3 is 2 slots/bit here and 1 there.
+add_bus vert_[4] blkA.v blkC.w
 
 def_layer 3 M3 H 20
 def_layer 4 M4 V 20
@@ -75,6 +81,7 @@ def_ndr fine3  width 3
 def_ndr space5 width 4 spacing 5 shield bus net GND
 set_ndr fine_ fine3
 set_ndr wide_ space5
+set_ndr vert_ fine3
 
 run_bundler STRICT --dump
 dump_ndr

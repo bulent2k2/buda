@@ -105,6 +105,15 @@ The divisor is the layer's per-signal-slot **channel cost**
 signal slots — the same quantity `eff_bus_width` charges, so a rule and the
 width model agree by construction.
 
+That makes an absolute value a statement about **how much routing channel the
+width consumes**, which is what the planner books. On a dense pattern the
+emitted metal matches the declared width; on a **sparse** one (wide slots with
+wide gaps) a bit can be granted a whole channel while its metal stays narrower
+than declared. If you are declaring a width for EM or resistance rather than
+for congestion, check the placed widths — see
+[opens_ndr.md §2](../internal/opens_ndr.md) for the measurement and the
+alternative quantization.
+
 **Rounding is UP.** A value between slot counts pays the larger, the
 convention the multiplier form already uses (`x1.5` pays 2 slots —
 conservative, never illegal). A value landing exactly on a slot boundary pays
@@ -124,17 +133,33 @@ taken over a subset is not conservative — a pattern declared later on an
 omitted layer could need more slots, and routing there would under-charge the
 declared width.
 
+**Routing charges the layer it lands on.** The maximum above is the
+declaration-time summary; once a segment has a layer, the planner, abstract
+NUTS and detailed NUTS all price the rule as it resolves *there* — so a bus
+crossing a coarse layer pays what that layer's geometry actually asks, not
+what its tightest governed layer would. A layer whose single slot already
+covers the declared width charges the rule as an ordinary bus (nothing to
+add), which for width and spacing is exactly right; a **shielded** rule stays
+governed at any pitch, since the shields are geometry the layer cannot supply
+on its own.
+
 `dump_ndr` and the declaration line report the declared value, the
-conservative quantization everything is charged at, and the per-layer spread,
-since an absolute rule has no single slot count:
+conservative quantization the rule is summarized at, and the per-layer spread,
+since an absolute rule has no single slot count. After planning, a governed
+bundle also reports every layer whose real charge differs from that maximum:
 
 ```
 [NDR] rule 'fine3': width 3, spacing x1 (ABSOLUTE, layout units) -> 2 slot(s)/bit
       + 0 guard(s)/gap charged (the max over governed layers;
       per layer slots/guards L3:2/0, L4:1/0, L5:2/0, L6:1/0)
+[NDR] bundle 2 ('vert__0' x4) rule 'fine3': demand 8 slot(s) (layout BbBbBbBb)
+[NDR]   on layer 6: demand 4 slot(s) — the absolute width resolves to
+        1 slot(s)/bit at that layer's pitch
 ```
 
-Vehicle: [`flow/ndr_abs_um.buda`](../../flow/ndr_abs_um.buda).
+Vehicle: [`flow/ndr_abs_um.buda`](../../flow/ndr_abs_um.buda) — its `vert_`
+bus routes vertically on purpose, so a governed segment lands on the coarse
+pair and the per-layer difference is visible in the routed result.
 
 ### Realizability is checked LOUDLY
 

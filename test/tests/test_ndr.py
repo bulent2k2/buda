@@ -1698,3 +1698,87 @@ def test_r3_absolute_is_checked_per_layer_not_against_the_maximum():
     coarse = buda.ndr_resolve_for_pitch(spec, s.layers.bit_pitch(4))
     assert coarse.width_slots == 1
     ndr_cmds.validate_ndr_realizability(s)     # must NOT sys.exit
+
+
+# ── R1 part 2: the ROUTING consumers resolve per layer ──────────────────────
+# Part 1 landed the declaration, the persistence and the R3 check; the three
+# routing stages still priced an absolute rule at its conservative MAXIMUM.
+# Safe in direction (over-charge, never under) but it is capacity a design
+# does not owe, and it left the stages disagreeing about a governed group's
+# demand — the single-sourcing invariant R4 exists to protect.
+
+def _abs_mixed_pitch_session(extra=()):
+    """Two blocks on a stack whose H and V pairs have DIFFERENT per-signal-
+    slot pitches (2.5 vs 5.0), with one absolute rule (`width 4`) that
+    therefore costs 2 slots/bit horizontally and 1 vertically."""
+    s = _bare_session()
+    for line in ("add_block a 0 0 200 200", "add_block b 800 600 1000 800",
+                 "add_bus w_[4] a.p b.q",
+                 "def_layer 3 M3 H TOP 20", "def_layer 4 M4 V TOP 20",
+                 "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1",
+                 "def_track_pattern 4 0 VDD 4 2 (_ 2 2)x12 GND 4 2",
+                 "def_ndr abs4 width 4", "set_ndr w_ abs4",
+                 "run_bundler STRICT", "generate_topologies",
+                 "set_track_pitch 3", "run_planner 1", "run_nuts",
+                 *extra):
+        _run(s, line)
+    return s
+
+
+def test_absolute_rule_is_resolved_per_layer_at_stage_9():
+    s = _abs_mixed_pitch_session()
+    gov = next(w for w in s.bundles if w.input.ndr.active())
+    assert gov.input.ndr.width_slots == 2          # the conservative max
+    assert s.layers.bit_pitch(3) == pytest.approx(2.5)
+    assert s.layers.bit_pitch(4) == pytest.approx(5.0)
+    fine = [seg for seg in buda.make_bus_segments(
+                s.bundles, s.nuts_result, s.fp, "LO_HI", s.layers)
+            if seg.bundle_id == gov.input.original_bundle.id]
+    assert fine, "the vehicle must route the governed bundle"
+    # The V segments sit on a layer whose ONE slot already exceeds the
+    # declared width, so the rule resolves to the default there…
+    by_layer = {seg.layer: seg.ndr for seg in fine}
+    assert 4 in by_layer and 3 in by_layer, "needs both directions routed"
+    assert by_layer[3].width_slots == 2
+    assert by_layer[4].width_slots == 1
+    # …and WITHOUT the layer stack every segment keeps the maximum: the
+    # over-charge this change removes (and the documented safe fallback).
+    coarse = {seg.layer: seg.ndr for seg in buda.make_bus_segments(
+                  s.bundles, s.nuts_result, s.fp, "LO_HI")
+              if seg.bundle_id == gov.input.original_bundle.id}
+    assert coarse[3].width_slots == 2 and coarse[4].width_slots == 2
+
+
+def test_absolute_rule_per_layer_charge_matches_the_engine():
+    # The invariant the refactor is for: the seat census (Python) and the
+    # engine (C++) must measure a governed seat in the SAME units.  On the
+    # coarse layer that is the plain bit count; on the fine one it is the
+    # 2-slot group demand.
+    s = _abs_mixed_pitch_session()
+    gov = next(w for w in s.bundles if w.input.ndr.active())
+    sel = gov.plan.selected_topology_index
+    seen = set()
+    for seg in s.nuts_result.segments:
+        if seg.bundle_id != gov.input.original_bundle.id:
+            continue
+        bits = s._seg_member_bits(gov, sel, seg.seg_idx)
+        need = s._seg_admission_need(gov, sel, seg.seg_idx, layer=seg.layer)
+        expect = buda.ndr_group_demand(
+            buda.ndr_resolve_for_pitch(gov.input.ndr,
+                                       s.layers.bit_pitch(seg.layer)), bits)
+        assert need == expect
+        seen.add(seg.layer)
+    # Both pitches must actually be exercised, or the assertion above is
+    # vacuous (it holds trivially when one layer resolves to the maximum).
+    assert {3, 4} <= seen
+
+
+def test_absolute_rule_audit_does_not_flag_a_coarse_layer_bit():
+    # The R9 audit read the UNRESOLVED spec, so a correctly-placed bit on a
+    # layer where the rule needs one slot was reported NDR_WIDTH against
+    # the maximum of two — a false violation on a clean design.
+    s = _abs_mixed_pitch_session(extra=("run_detailed_nuts",))
+    gov = next(w for w in s.bundles if w.input.ndr.active())
+    viols = ndr_cmds.audit_ndr_dnuts(s, gov)
+    assert [v.message for v in viols
+            if v.kind.name == "NDR_WIDTH"] == []

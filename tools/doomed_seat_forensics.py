@@ -203,10 +203,11 @@ def audit(s, flow):
         # bit count — measuring it in bits under-reports how doomed the seat
         # is and mis-ranks the sibling-layer search below.  Identity for
         # every ungoverned segment.
-        need = s._seg_admission_need(w, sel, seg.seg_idx)
+        need = s._seg_admission_need(w, sel, seg.seg_idx, layer=seg.layer)
         # Pool selection uses FULL demand, the doom test the credited
         # minimum — the engine's own split (Codex on #677).
-        need_pool = s._seg_admission_need(w, sel, seg.seg_idx, credited=False)
+        need_pool = s._seg_admission_need(w, sel, seg.seg_idx, credited=False,
+                                          layer=seg.layer)
         bits = s._seg_member_bits(w, sel, seg.seg_idx)   # what strands
         pool = s._seg_admission_pool(
             seg, s.routing_grid.get_layer_grid(seg.layer), need_pool)

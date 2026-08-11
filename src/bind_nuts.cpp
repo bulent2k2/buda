@@ -466,19 +466,24 @@ void bind_nuts(py::module_& m) {
     // corner bounds carried, bit_width = the bundle's net count) with its SEG
     // connections + BUSTERM faces derived from the selected topology's cached
     // analysis — the derivation the abstract solve placed with, existing once.
+    // `layers` is optional: it supplies the per-layer pitch an R1 ABSOLUTE
+    // NDR rule resolves against (ndr.h).  Omitted, a governed segment keeps
+    // the rule's conservative-maximum quantization (over-charge, never under).
     m.def("make_bus_segments", &make_bus_segments,
           py::arg("bundles"), py::arg("nuts_result"), py::arg("floorplan"),
           py::arg("bit_order") = "LO_HI",
+          py::arg("layers")    = nullptr,
           "Build DetailedNUTSEngine.run() input from the placed NUTS result");
     // Sequence fallback (P2): plain wrapper lists keep the copy path.
     m.def("make_bus_segments",
           [](py::sequence seq, const NUTSResult& nr, const Floorplan& fp,
-             const std::string& bit_order) {
+             const std::string& bit_order, const LayerStack* layers) {
               return make_bus_segments(wrappers_from_seq(seq), nr, fp,
-                                       bit_order);
+                                       bit_order, layers);
           },
           py::arg("bundles"), py::arg("nuts_result"), py::arg("floorplan"),
-          py::arg("bit_order") = "LO_HI");
+          py::arg("bit_order") = "LO_HI",
+          py::arg("layers")    = nullptr);
 
     // ── Test support: overlap-delta exactness probes (corner-pass work) ──
     // The repair/repack accept guards replaced their per-move full

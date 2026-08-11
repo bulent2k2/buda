@@ -119,6 +119,13 @@ inline NdrSpec ndr_resolve_for_pitch(const NdrSpec& s, double slot_pitch) {
     return o;
 }
 
+// True when a spec was declared in ABSOLUTE (layout-unit) terms and so
+// resolves differently per layer.  A multiplier rule is pitch-independent,
+// which is what lets every consumer take the allocation-free path below.
+inline bool ndr_has_abs(const NdrSpec& s) {
+    return s.width_abs > 0.0 || s.spacing_abs > 0.0;
+}
+
 // True when the interior gap after ascending-local-bit j (0-based; gaps
 // j = 0 .. nbits-2) carries a SHIELD rather than guard slots.
 inline bool ndr_gap_is_shield(const NdrSpec& s, int j) {
@@ -148,6 +155,26 @@ inline int ndr_group_demand(const NdrSpec& s, int nbits) {
     du += (s.shield_mode != 0) ? 2                    // end shields…
                                : 2 * s.guard_slots;   // …or end guards
     return du;
+}
+
+// ── R1 per-layer form of the group demand ────────────────────────────────
+// The demand of `nbits` governed bits on a layer whose per-signal-slot
+// channel cost is `bit_pitch` (LayerStack::bit_pitch).  THIS is what every
+// routing consumer calls: an ABSOLUTE rule resolves against the layer it is
+// being priced on — one declaration, different slot counts on layers of
+// different pitch, which is the whole point of the form — while a multiplier
+// rule is pitch-independent and takes the same allocation-free path it
+// always did (no NdrSpec copy in the planner's hot scoring loop).
+//
+// A non-positive pitch (an unpatterned layer, or a caller with no layer in
+// hand) falls back to the spec's stored quantization, which for an absolute
+// rule is the CONSERVATIVE MAXIMUM over the layers it may use — so the
+// fallback over-charges rather than under-charges.
+inline int ndr_group_demand_on(const NdrSpec& s, int nbits, double bit_pitch) {
+    if (nbits <= 0 || !s.active()) return nbits;
+    if (ndr_has_abs(s) && bit_pitch > 0.0)
+        return ndr_group_demand(ndr_resolve_for_pitch(s, bit_pitch), nbits);
+    return ndr_group_demand(s, nbits);
 }
 
 // ── Shield NET-IDENTITY predicate (R5a/R9) ───────────────────────────────

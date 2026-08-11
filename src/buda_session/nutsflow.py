@@ -766,7 +766,7 @@ class NutsFlowMixin:
         except Exception:
             return 1
 
-    def _seg_admission_need(self, w, sel, seg_idx, credited=True):
+    def _seg_admission_need(self, w, sel, seg_idx, credited=True, layer=None):
         """SIGNAL slots the segment must find to be admitted — the Python
         mirror of `bus_seg_min_demand` (detailed_nuts.h), which is what the
         engine actually compares its pool against.
@@ -795,6 +795,13 @@ class NutsFlowMixin:
         spec = w.input.ndr
         if not spec.active():
             return nbits
+        # R1: an ABSOLUTE rule quantizes against the layer the segment is
+        # PLACED on, exactly as make_bus_segments resolves it for the engine
+        # — measuring the seat against the conservative maximum instead
+        # would report a governed seat doomed that DNUTS in fact places.
+        if layer is not None and (spec.width_abs > 0.0 or
+                                  spec.spacing_abs > 0.0):
+            spec = buda.ndr_resolve_for_pitch(spec, self.layers.bit_pitch(layer))
         if credited and spec.credit_shields:
             return buda.ndr_group_demand_credited(spec, nbits, True, True)
         return buda.ndr_group_demand(spec, nbits)
@@ -852,7 +859,8 @@ class NutsFlowMixin:
             # BITS is what actually strands, which is the bit count either
             # way (admission is all-or-nothing).  The two are equal on every
             # ungoverned segment.
-            need = self._seg_admission_need(w, sel, seg.seg_idx)
+            need = self._seg_admission_need(w, sel, seg.seg_idx,
+                                            layer=seg.layer)
             bits = self._seg_member_bits(w, sel, seg.seg_idx)
             # The POOL is selected against FULL demand and the doom test
             # made against the credited MINIMUM — the engine's own split
@@ -860,7 +868,8 @@ class NutsFlowMixin:
             # does not credit, and on every ungoverned segment.
             pool = self._seg_admission_pool(
                 seg, g, self._seg_admission_need(w, sel, seg.seg_idx,
-                                                 credited=False))
+                                                 credited=False,
+                                                 layer=seg.layer))
             if pool < need:
                 doomed.append((seg, need, pool,
                                self.layers.is_top(seg.layer), bits))
@@ -2017,8 +2026,11 @@ class NutsFlowMixin:
         # per-segment SEG connections / BUSTERM faces derived from the selected
         # topology's cached analysis — the same derivation the abstract solve
         # placed with, so the two stages can never drift.
+        # `self.layers` supplies the per-layer pitch an R1 ABSOLUTE NDR rule
+        # resolves against, so a governed segment's k-slot run is quantized
+        # on the layer the planner priced it on.
         bus_segs = buda.make_bus_segments(self.bundles, self.nuts_result,
-                                          self.fp, bit_order)
+                                          self.fp, bit_order, self.layers)
         # Bottom-up cells (stage c): solve the reference instance once, copy
         # its bits/vias to the aligned siblings, and solve everything else
         # around the copies (their tracks pre-reserved).  May raise under the

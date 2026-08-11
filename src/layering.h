@@ -81,6 +81,10 @@ public:
     std::vector<std::pair<int,int>> gds_mapped_pairs() const;
 
     const Layer* get_layer(int id) const;
+    // Per-signal-slot channel cost of a layer (0 when unknown/unpatterned) —
+    // the divisor an absolute NDR value quantizes against (ndr.h), kept next
+    // to eff_bus_width so the rule and the width model share one basis.
+    double       bit_pitch(int id) const;
     double       get_layer_dilution(int id) const;
     bool         has_layer(int id) const;
     bool         is_top(int id) const;

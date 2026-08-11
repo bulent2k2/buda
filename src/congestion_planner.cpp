@@ -45,8 +45,17 @@ static bool replan_prof_on() {
 // (ndr.h) shared with abstract-NUTS width and DNUTS admission, so no two
 // stages can disagree about whether a rule-governed group fits.  Identity
 // when the spec is inactive: the whole feature's byte-identity guarantee.
-static inline int ndr_units(const BundleInput& in, int n) {
-    return (n > 0 && in.ndr.active()) ? ndr_group_demand(in.ndr, n) : n;
+//
+// R1: the charge is resolved against the LAYER it is being priced on — an
+// absolute (µm) rule costs fewer slots on a coarse layer than on a fine one,
+// which is the whole point of the form.  The LayerStack lookup is LAZY: a
+// multiplier rule is pitch-independent, so the ungoverned and phase-1
+// governed paths do exactly the work they always did.
+static inline int ndr_units(const BundleInput& in, int n,
+                            const LayerStack& ls, int layer_id) {
+    if (n <= 0 || !in.ndr.active()) return n;
+    return ndr_group_demand_on(in.ndr, n,
+        ndr_has_abs(in.ndr) ? ls.bit_pitch(layer_id) : 0.0);
 }
 
 // Per-candidate scoring overlay (plan_bundle).  While a candidate is being
@@ -817,7 +826,8 @@ double CongestionPlanner::plan_band_overlap(const BundleWrapper& bw,
     for (int si = 0; si < (int)t.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
         int pp  = (si < (int)plan.seg_perp.size()) ? plan.seg_perp[si] : INT_MIN;
         int lid = plan.seg_layers[si];
-        const int    n = ndr_units(bw.input, seg_bit_count(t, si, nbits));
+        const int    n = ndr_units(bw.input, seg_bit_count(t, si, nbits),
+                                   layers_, lid);
         const double w = (nbits > 0 && n != nbits)
                              ? bw.input.width * ((double)n / (double)nbits)
                              : bw.input.width;
@@ -840,7 +850,8 @@ void CongestionPlanner::share_usage_of_(const BundleWrapper& bw, const Topology&
     for (int si = 0; si < (int)t.segments.size() && si < (int)seg_layers.size(); ++si) {
         const int lid = seg_layers[si];
         if (lid < 0 || bw.input.share_of(lid) >= 1.0) continue;
-        const int    n = ndr_units(bw.input, seg_bit_count(t, si, nbits));
+        const int    n = ndr_units(bw.input, seg_bit_count(t, si, nbits),
+                                   layers_, lid);
         const double w = (nbits > 0 && n != nbits)
                              ? bw.input.width * ((double)n / (double)nbits)
                              : bw.input.width;
@@ -989,7 +1000,7 @@ void CongestionPlanner::apply_reservation(const BundleWrapper& bw, double sign) 
         int clo = is_vcut ? bw.hier.res_x1 : bw.hier.res_y1;
         int chi = is_vcut ? bw.hier.res_x2 : bw.hier.res_y2;
         if (c.cut_coord < clo || c.cut_coord > chi) continue;
-        const int    rn = ndr_units(bw.input, nbits);
+        const int    rn = ndr_units(bw.input, nbits, layers_, lid);
         const double rw = (nbits > 0 && rn != nbits)
                               ? bw.input.width * ((double)rn / (double)nbits)
                               : bw.input.width;
@@ -1373,15 +1384,21 @@ CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
     const bool enforce_window   = ctx.enforce_window;
     const bool enforce_overflow = ctx.enforce_overflow;
     const int  nbits = ctx.nbits;
-    auto seg_n = [&](const Topology& t, int si) {
+    auto seg_n = [&](const Topology& t, int si, int lid) {
         // NDR: a governed bundle's segments are counted in GROUP DEMAND
         // UNITS (ndr.h) rather than raw member bits, so every consumer
         // below prices the rule.  Identity when the spec is inactive
         // (R12 byte-identity).
-        return ndr_units(bw.input, seg_bit_count(t, si, nbits));
+        //
+        // `lid` is the layer the caller is pricing THIS evaluation on — the
+        // candidate layer inside the enumeration, `best_lid` once chosen —
+        // because an R1 absolute rule resolves per layer.  Pass -1 where no
+        // layer is decided: the spec's stored quantization is the
+        // conservative maximum, so that fallback over-charges, never under.
+        return ndr_units(bw.input, seg_bit_count(t, si, nbits), layers_, lid);
     };
-    auto seg_w = [&](const Topology& t, int si) {
-        const int n = seg_n(t, si);
+    auto seg_w = [&](const Topology& t, int si, int lid) {
+        const int n = seg_n(t, si, lid);
         return (nbits > 0 && n != nbits)
                    ? bw.input.width * ((double)n / (double)nbits)
                    : bw.input.width;
@@ -1540,7 +1557,7 @@ CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
                     }
                 }
                 int pp = best_band_perp(seg, lid, eff, slide_lo, slide_hi,
-                                        (double)seg_n(topo, si));
+                                        (double)seg_n(topo, si, lid));
                 // (a1) single-rider junction anchor: NUTS clamps an unpulled
                 // single-junction segment's preference into its rider's span
                 // when the base falls outside it — mirror that on the charge.
@@ -1589,7 +1606,8 @@ CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
             if (si < (int)bw.input.pinned_seg_layers.size() && bw.input.pinned_seg_layers[si] != -1) {
                 best_lid = bw.input.pinned_seg_layers[si];
                 best_s   = 0.0; // Pinned choice is considered "perfect" cost for planning.
-                double eff = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), best_lid);
+                double eff = layers_.eff_bus_width(seg_n(topo, si, best_lid),
+                                                  seg_w(topo, si, best_lid), best_lid);
                 best_pp  = band_perp(best_lid, eff);
                 best_ov  = score_segment(seg, best_lid, eff, best_pp, slide_lo, slide_hi);
                 if (charge_pull_target_ >= 2 && enforce_overflow && best_ov <= kOvEps &&
@@ -1610,7 +1628,8 @@ CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
                     // replans and the trial paths inherit — empty mask (the
                     // default) changes nothing.
                     if (!bw.input.allows_layer(lid)) continue;
-                    double eff  = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), lid);
+                    double eff  = layers_.eff_bus_width(seg_n(topo, si, lid),
+                                                       seg_w(topo, si, lid), lid);
                     // Scalar collective budget (Phase 3 Q3), STRICT: a
                     // shared layer whose group lease cannot host this
                     // segment on top of the books + this candidate's own
@@ -1674,7 +1693,7 @@ CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
                     // wishlist-planner / opens item 4.  TOP layers are exempt.
                     if (nontop_dead_span_gate_ && enforce_overflow
                         && !is_top_for(bw.input, lid) && pp != INT_MIN
-                        && seg_n(topo, si) > 0) {
+                        && seg_n(topo, si, lid) > 0) {
                         int sup = span_signal_supply(seg, lid, pp,
                                                      slide_lo, slide_hi,
                                                      /*with_midpoint_fallback=*/false,
@@ -1729,7 +1748,7 @@ CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
                     if (kPeak_ > 0.0)
                         pk = kPeak_ * peak_util_segment(seg, lid, pp,
                                                         slide_lo, slide_hi,
-                                                        (double)seg_n(topo, si));
+                                                        (double)seg_n(topo, si, lid));
                     double s    = cong + span + base + bal + hgt + pk;
                     if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp;
                                       best_cong = cong; best_span = span; best_base = base;
@@ -1748,7 +1767,7 @@ CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
             if (ksegs_eff_ > 0.0 && kSegsGate_ > 0.0) {
                 double fill = peak_util_segment(seg, best_lid, best_pp,
                                                 slide_lo, slide_hi,
-                                                (double)seg_n(topo, si));
+                                                (double)seg_n(topo, si, best_lid));
                 topo_peak_fill = std::max(topo_peak_fill, fill);
             }
 
@@ -1758,7 +1777,8 @@ CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
             if (enforce_window && si < (int)conn_segs.size()) {
                 const ConnSeg& cs = conn_segs[si];
                 if (cs.perp_lo > -kSentinel && cs.perp_hi < kSentinel) {
-                    double eff = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), best_lid);
+                    double eff = layers_.eff_bus_width(seg_n(topo, si, best_lid),
+                                                      seg_w(topo, si, best_lid), best_lid);
                     if (static_cast<double>(cs.perp_hi - cs.perp_lo) < eff)
                         topo_infeasible = true;
                 }
@@ -1768,7 +1788,8 @@ CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
             // Apply chosen layer so later segments in this topology see
             // the updated congestion state.  Charge eff + pitch so the band
             // books mirror NUTS inter-bus spacing (Gap 1).
-            double eff = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), best_lid);
+            double eff = layers_.eff_bus_width(seg_n(topo, si, best_lid),
+                                              seg_w(topo, si, best_lid), best_lid);
             apply_segment(seg, best_lid, eff + track_pitch_, perp_pos);
             if (bw.input.share_of(best_lid) < 1.0)
                 cand_share_use[best_lid] += eff;
@@ -1833,7 +1854,10 @@ CongestionPlanner::CandScore CongestionPlanner::score_candidate_(
             if (nbits > 0 && !topo.seg_bits.empty()) {
                 w_segs = 0.0;
                 for (int si = 0; si < (int)topo.segments.size(); ++si)
-                    w_segs += (double)seg_n(topo, si) / (double)nbits;
+                    w_segs += (double)seg_n(topo, si,
+                                  si < (int)seg_layers.size() ? seg_layers[si]
+                                                              : -1)
+                              / (double)nbits;
             }
             wl_est += ksegs_eff_ * gate * w_segs;
         }
@@ -2099,7 +2123,8 @@ void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& p
         // junction-extended spans participate in overflow GATING only —
         // committing the conservative extension was measured and rejected
         // (mix healed endpoint 0->2 overlaps, big2 WL +13%).
-        const int    n = ndr_units(bw.input, seg_bit_count(t, si, nbits));
+        const int    n = ndr_units(bw.input, seg_bit_count(t, si, nbits),
+                                   layers_, lid);
         const double w = (nbits > 0 && n != nbits)
                              ? bw.input.width * ((double)n / (double)nbits)
                              : bw.input.width;
