@@ -33,7 +33,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 1.7
+  "sec": 2.1
  },
  {
   "flow": "flow/big_data_test/big2/b1_bus_007.buda",
@@ -105,7 +105,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 1.4
+  "sec": 1.9
  },
  {
   "flow": "flow/big_data_test/bigHalf.buda",
@@ -117,7 +117,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 61.8
+  "sec": 67.9
  },
  {
   "flow": "flow/big_data_test/bigHalf_bus038_bitrunk.buda",
@@ -165,7 +165,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 2.8
+  "sec": 3.0
  },
  {
   "flow": "flow/chip/chip3_topdown.buda",
@@ -177,7 +177,7 @@
   "ovl": 6,
   "unpl": 260,
   "viol": 34,
-  "sec": 206.3
+  "sec": 227.0
  },
  {
   "flow": "flow/chip/chip3a_bottomup.buda",
@@ -185,11 +185,11 @@
   "busS": 1729,
   "netS": 35312,
   "busWL": 2493698,
-  "netWL": 48262520,
+  "netWL": 48238624,
   "ovl": 38,
   "unpl": 78,
   "viol": 9,
-  "sec": 193.7
+  "sec": 208.7
  },
  {
   "flow": "flow/chip/chip_bottomup.buda",
@@ -197,11 +197,11 @@
   "busS": 1809,
   "netS": 35931,
   "busWL": 2516788,
-  "netWL": 48243174,
+  "netWL": 48203301,
   "ovl": 54,
   "unpl": 243,
   "viol": 19,
-  "sec": 177.5
+  "sec": 167.7
  },
  {
   "flow": "flow/chip/chip_bottomup_caps.buda",
@@ -209,11 +209,11 @@
   "busS": 1809,
   "netS": 36007,
   "busWL": 2527421,
-  "netWL": 48342575,
+  "netWL": 48327965,
   "ovl": 55,
   "unpl": 155,
-  "viol": 13,
-  "sec": 209.9
+  "viol": 14,
+  "sec": 188.3
  },
  {
   "flow": "flow/chip/chip_stack_bottomup.buda",
@@ -221,11 +221,11 @@
   "busS": 1797,
   "netS": 30856,
   "busWL": 2269788,
-  "netWL": 38124104,
+  "netWL": 38070160,
   "ovl": 69,
   "unpl": 252,
-  "viol": 19,
-  "sec": 304.2
+  "viol": 20,
+  "sec": 321.0
  },
  {
   "flow": "flow/chip/chip_stack_topdown.buda",
@@ -233,11 +233,11 @@
   "busS": 1798,
   "netS": 32003,
   "busWL": 2281274,
-  "netWL": 39384431,
+  "netWL": 39380339,
   "ovl": 21,
   "unpl": 241,
   "viol": 18,
-  "sec": 198.4
+  "sec": 199.3
  },
  {
   "flow": "flow/chip/chip_topdown.buda",
@@ -249,7 +249,7 @@
   "ovl": 4,
   "unpl": 134,
   "viol": 9,
-  "sec": 225.2
+  "sec": 209.4
  },
  {
   "flow": "flow/hbundles/01_pipeline_hier.buda",
@@ -309,7 +309,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 0.3
+  "sec": 0.4
  },
  {
   "flow": "flow/hbundles/06_multipin_stress.buda",
@@ -321,7 +321,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 19.5
+  "sec": 22.1
  },
  {
   "flow": "flow/hbundles/07_wide_fan_stress.buda",
@@ -369,7 +369,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 1.1
+  "sec": 1.2
  },
  {
   "flow": "flow/rnr/mix.buda",
@@ -381,7 +381,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 5.1
+  "sec": 5.0
  },
  {
   "flow": "flow/rnr/mix2.buda",
@@ -393,7 +393,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 34.4
+  "sec": 37.9
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup.buda",
@@ -405,7 +405,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 8.3
+  "sec": 8.0
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup_caps.buda",
@@ -417,7 +417,7 @@
   "ovl": 2,
   "unpl": 0,
   "viol": 0,
-  "sec": 38.6
+  "sec": 39.9
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup_caps_2x.buda",
@@ -429,7 +429,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 17.7
+  "sec": 19.4
  },
  {
   "flow": "flow/rnr/mix2_fast_bottomup_shared.buda",
@@ -441,7 +441,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 55.5
+  "sec": 54.0
  },
  {
   "flow": "flow/rnr/mix2_fast_on_aligned_sql.buda",
@@ -449,11 +449,11 @@
   "busS": 262,
   "netS": 3326,
   "busWL": 76368,
-  "netWL": 911840,
+  "netWL": 901316,
   "ovl": 2,
   "unpl": 16,
   "viol": 1,
-  "sec": 43.0
+  "sec": 43.1
  },
  {
   "flow": "flow/rnr/mix2_fast_on_aligned_sql_2x.buda",
@@ -465,7 +465,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 5.9
+  "sec": 5.1
  },
  {
   "flow": "flow/rnr/mix2_fast_topdown.buda",
@@ -477,7 +477,7 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 7.8
+  "sec": 8.1
  },
  {
   "flow": "flow/rnr/mix2_topdown_refine.buda",
@@ -489,6 +489,6 @@
   "ovl": 0,
   "unpl": 0,
   "viol": 0,
-  "sec": 56.1
+  "sec": 58.7
  }
 ]
