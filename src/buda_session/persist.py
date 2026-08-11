@@ -136,15 +136,27 @@ class PersistMixin:
             if _row.id not in cur_ids:
                 absent_membership[_row.id] = (
                     self.bdb.bundle_nets(_row.id),
-                    self.bdb.bundle_busterms(_row.id))
+                    self.bdb.bundle_busterms(_row.id),
+                    # v27: and its per-bit endpoints.  They live ON the
+                    # bundle_net rows this clear wipes, and the re-add below
+                    # would put back bare membership — so a kept fan-in
+                    # would come back untapered (BUDA-1904) purely because
+                    # some LATER run re-persisted without it.
+                    self.bdb.bundle_net_endpoints(_row.id))
         self.bdb.clear_bundles(keep_user=True)
         kept_ids = ({r.id for r in self.bdb.all_bundles()}
                     if absent_membership else set())
-        for _bid, (_nets, _bts) in absent_membership.items():
+        for _bid, (_nets, _bts, _eps) in absent_membership.items():
             if _bid not in kept_ids:
                 continue
             for _nm in _nets:
                 self.bdb.add_bundle_net(_bid, _nm)
+            # Both lists come back in bundle_nets() order — one ORDER BY,
+            # written once and shared by the two readers — so zipping them is
+            # the same bit alignment the rows were stored under.
+            for _nm, (_dp, _rp) in zip(_nets, _eps):
+                if _dp:
+                    self.bdb.set_bundle_net_endpoints(_bid, _nm, _dp, _rp)
             for _bt, _role in _bts:
                 self.bdb.add_bundle_busterm(_bid, _bt, _role)
         for w in self.bundles:

@@ -298,3 +298,53 @@ def test_a_resumed_fanin_routes_the_same_metal_without_regenerating(tmp_path):
     assert len(b.detailed_result.net_segments) == saved_bits, (
         f"resumed design routes {len(b.detailed_result.net_segments)} "
         f"bit-wires where the checkpoint had {saved_bits}")
+
+
+@pytest.mark.mid
+def test_a_kept_fanin_bundle_keeps_its_endpoints_through_a_re_persist(tmp_path):
+    """A fan-in bundle held alive only by a USER topology keeps its per-bit
+    endpoints when a LATER run re-persists without it (Codex P2 on #694).
+
+    `_persist_bundles` clears and rewrites, and `clear_bundles(keep_user)`
+    keeps such a row while wiping every `bundle_net` row — which is where the
+    endpoints live.  The membership is snapshotted and put back (audit
+    P3-04); without the endpoints riding along, the bundle survives with bare
+    names and resumes untapered, and nothing in THIS run would show it.
+    """
+    bdb = str(tmp_path / "keep.bdb")
+    setup = ["def_layer 4 M4 H TOP 10", "def_layer 5 M5 V TOP 10"]
+
+    s = buda_cli.BudaSession(); s.no_viz = True
+    _quiet(s, *setup, f"open_bdb {bdb}")
+    db = s.bdb
+    db.add_cell("core_cell", 200, 120); db.add_cell("leaf_cell", 60, 60)
+    db.add_inst_to_cell("core_cell", "c0", "leaf_cell", 20, 30)
+    db.add_inst("core_i1", "core_cell", "", 0, 0)
+    db.add_inst("core_i2", "core_cell", "", 0, 300)
+    db.add_inst("snk_i", "leaf_cell", "", 600, 150)
+    buda.BustermGen(db).derive(1)
+    _quiet(s, "bdb_net_mode on")
+    for i in range(4):
+        _quiet(s, f"add_net xa_{i} core_i1/c0.out snk_i.in",
+               f"add_net xb_{i} core_i2/c0.out snk_i.in")
+    _quiet(s, "add_blocks_from_bdb 0", "add_blocks_from_bdb 1 skip",
+           "run_hier_bundler CONVERGENT", "generate_hier_topologies")
+
+    w = next(w for w in s.bundles
+             if w.input.original_bundle.drv_spec_depth >= 0)
+    bid = str(w.input.original_bundle.id)
+    stored = s.bdb.bundle_net_endpoints(bid)
+    assert any(d for d, _r in stored), "nothing was stored to lose"
+
+    # Hold the row alive the way a USER topology does, then re-persist a run
+    # this bundle is not part of — the absent-membership path.
+    tr = buda.TopoRow()
+    tr.id = bid; tr.cand_index = 99; tr.source = "user"; tr.type = "USER"
+    s.bdb.add_topology(tr)
+    s.bundles = [b for b in s.bundles if b is not w]
+    s._persist_bundles("CONVERGENT")
+
+    assert bid in {b.id for b in s.bdb.all_bundles()}, "the row was not kept"
+    assert s.bdb.bundle_net_endpoints(bid) == stored, (
+        "the kept bundle lost its per-bit endpoints, so it would resume "
+        "untapered")
