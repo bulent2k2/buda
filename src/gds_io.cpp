@@ -505,7 +505,7 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
 
     // Placed components (for label containment) + labels elaborated through
     // the same hierarchy transforms as geometry (Phase G2 net recovery).
-    struct Placed { int id; int depth; BBox bb; };
+    struct Placed { int id; int depth; BBox bb; std::string name; };
     std::vector<Placed> placed;
     struct Label { std::string net; double x, y; };
     std::vector<Label> labels;
@@ -537,7 +537,7 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
         // the bbox above is still the absolute axis-aligned extent.
         int cid = db.add_comp(comp_path, s.name, parent_path,
                               bb.x1, bb.y1, bb.x2, bb.y2, s.refs.empty(), orient);
-        placed.push_back({cid, depth, bb});
+        placed.push_back({cid, depth, bb, comp_path});
         emit_labels(s, xf);
         ++stats.n_components;
         std::map<std::string, int> ordinal;     // per-parent synthesized names
@@ -628,16 +628,37 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
     std::set<std::string> net_names;
     for (const Label& lb : labels) {
         const Placed* best = nullptr;
+        // Nearest miss, tracked in the same walk: the SKIP is correct by
+        // design (a label on nothing has nothing to pin to), but its most
+        // common cause is a near miss — a label a fraction of a µm off a
+        // component edge from a scale or rounding slip — and "outside
+        // every component" alone cannot be told apart from a label that is
+        // genuinely stray.  Naming the position and the closest component
+        // with its distance makes the one diagnosable from the other.
+        const Placed* nearest = nullptr;
+        double nearest_d = 0;
         for (const Placed& pc : placed) {
-            if (lb.x < pc.bb.x1 || lb.x > pc.bb.x2 ||
-                lb.y < pc.bb.y1 || lb.y > pc.bb.y2)
+            const double dx = std::max({pc.bb.x1 - lb.x, 0.0, lb.x - pc.bb.x2});
+            const double dy = std::max({pc.bb.y1 - lb.y, 0.0, lb.y - pc.bb.y2});
+            if (dx <= 0 && dy <= 0) {
+                if (!best || pc.depth > best->depth) best = &pc;
                 continue;
-            if (!best || pc.depth > best->depth) best = &pc;
+            }
+            const double d = std::hypot(dx, dy);
+            if (!nearest || d < nearest_d) { nearest = &pc; nearest_d = d; }
         }
         if (!best) {
             ++stats.n_labels_skipped;
-            stats.warnings.push_back("label '" + lb.net +
-                                     "' is outside every component — skipped");
+            std::ostringstream w;
+            w << "label '" << lb.net << "' at (" << lb.x << ", " << lb.y
+              << ") is outside every component — skipped";
+            if (nearest) {
+                w << " (nearest: '" << nearest->name << "', "
+                  << nearest_d << " um away)";
+            } else {
+                w << " (the design has no placed components)";
+            }
+            stats.warnings.push_back(w.str());
             continue;
         }
         db.add_label_pin(lb.net, best->id, lb.net, lb.x, lb.y);
