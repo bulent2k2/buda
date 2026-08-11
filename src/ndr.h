@@ -17,6 +17,7 @@
 #pragma once
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <string>
 
 namespace buda {
@@ -69,6 +70,21 @@ struct NdrSpec {
     // hundreds of vias on a long shield over a dense grid — and one field
     // rather than a flag-plus-count keeps the two from disagreeing.
     int bond_stride = 0;
+    // R1 ABSOLUTE values, in LAYOUT UNITS (0 = not declared, use the
+    // multiplier quantization above).  A multiplier is PATTERN-INDEPENDENT
+    // — `x2` is two signal slots on every layer — while an absolute value
+    // names one PHYSICAL width whose slot cost depends on the layer's
+    // pitch, which is exactly why R1 asks for the form.
+    //
+    // width_slots/guard_slots above stay the AUTHORITATIVE quantization
+    // and, for an absolute rule, hold the CONSERVATIVE resolution: the
+    // largest slot count over the layers the rule may use.  Per-layer
+    // resolution (ndr_resolve_for_pitch) can then only REDUCE them, so a
+    // consumer that forgets to resolve OVER-charges rather than under-
+    // charges — the same direction R5a takes when the planner prices the
+    // uncredited worst case and DNUTS credits at the seat.
+    double width_abs   = 0.0;
+    double spacing_abs = 0.0;
     // Declared rule name (reporting/provenance).
     std::string rule_name;
 
@@ -76,6 +92,39 @@ struct NdrSpec {
         return width_slots > 1 || guard_slots > 0 || shield_mode != 0;
     }
 };
+
+// ── R1 per-layer resolution of an ABSOLUTE rule ──────────────────────────
+// Quantize the declared absolute width/spacing against ONE layer's
+// per-signal-slot pitch (LayerStack::bit_pitch — the same per-bit channel
+// cost eff_bus_width charges, so a rule and the width model agree by
+// construction).  Rounds UP: a value between slot counts pays the larger,
+// the convention the multiplier form already uses (`x1.5` pays 2 slots —
+// conservative, never illegal).  The epsilon keeps a value landing EXACTLY
+// on a boundary from paying an extra slot to floating-point error.
+//
+// IDENTITY for a rule with no absolute values, and for a non-positive
+// pitch (an unpatterned layer has no slot cost to divide by) — so every
+// multiplier rule, and every ungoverned segment, is byte-identical.
+inline NdrSpec ndr_resolve_for_pitch(const NdrSpec& s, double slot_pitch) {
+    if ((s.width_abs <= 0.0 && s.spacing_abs <= 0.0) || slot_pitch <= 0.0)
+        return s;
+    const double eps = 1e-9;
+    NdrSpec o = s;
+    if (s.width_abs > 0.0)
+        o.width_slots = std::max(1,
+            (int)std::ceil(s.width_abs / slot_pitch - eps));
+    if (s.spacing_abs > 0.0)
+        o.guard_slots = std::max(0,
+            (int)std::ceil(s.spacing_abs / slot_pitch - eps) - 1);
+    return o;
+}
+
+// True when a spec was declared in ABSOLUTE (layout-unit) terms and so
+// resolves differently per layer.  A multiplier rule is pitch-independent,
+// which is what lets every consumer take the allocation-free path below.
+inline bool ndr_has_abs(const NdrSpec& s) {
+    return s.width_abs > 0.0 || s.spacing_abs > 0.0;
+}
 
 // True when the interior gap after ascending-local-bit j (0-based; gaps
 // j = 0 .. nbits-2) carries a SHIELD rather than guard slots.
@@ -106,6 +155,26 @@ inline int ndr_group_demand(const NdrSpec& s, int nbits) {
     du += (s.shield_mode != 0) ? 2                    // end shields…
                                : 2 * s.guard_slots;   // …or end guards
     return du;
+}
+
+// ── R1 per-layer form of the group demand ────────────────────────────────
+// The demand of `nbits` governed bits on a layer whose per-signal-slot
+// channel cost is `bit_pitch` (LayerStack::bit_pitch).  THIS is what every
+// routing consumer calls: an ABSOLUTE rule resolves against the layer it is
+// being priced on — one declaration, different slot counts on layers of
+// different pitch, which is the whole point of the form — while a multiplier
+// rule is pitch-independent and takes the same allocation-free path it
+// always did (no NdrSpec copy in the planner's hot scoring loop).
+//
+// A non-positive pitch (an unpatterned layer, or a caller with no layer in
+// hand) falls back to the spec's stored quantization, which for an absolute
+// rule is the CONSERVATIVE MAXIMUM over the layers it may use — so the
+// fallback over-charges rather than under-charges.
+inline int ndr_group_demand_on(const NdrSpec& s, int nbits, double bit_pitch) {
+    if (nbits <= 0 || !s.active()) return nbits;
+    if (ndr_has_abs(s) && bit_pitch > 0.0)
+        return ndr_group_demand(ndr_resolve_for_pitch(s, bit_pitch), nbits);
+    return ndr_group_demand(s, nbits);
 }
 
 // ── Shield NET-IDENTITY predicate (R5a/R9) ───────────────────────────────

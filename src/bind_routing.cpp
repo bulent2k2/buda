@@ -492,6 +492,11 @@ void bind_routing(py::module_& m) {
         .def("set_layer_dilution",      &LayerStack::set_layer_dilution)
         .def("set_layer_overhead",      &LayerStack::set_layer_overhead)
         .def("set_bit_pitch",           &LayerStack::set_bit_pitch)
+        // R1: the per-signal-slot pitch an ABSOLUTE NDR value is quantized
+        // against (ndr_resolve_for_pitch).  0 when the layer is unknown or
+        // has no track pattern — which is exactly the "no slot geometry to
+        // resolve against" case `def_ndr` refuses on.
+        .def("bit_pitch", &LayerStack::bit_pitch, py::arg("layer_id"))
         .def("eff_bus_width",           &LayerStack::eff_bus_width,
              py::arg("bits"), py::arg("base_width"), py::arg("layer_id"))
         .def("set_layer_span",          &LayerStack::set_layer_span)
@@ -636,6 +641,8 @@ void bind_routing(py::module_& m) {
     // session-side per bundle, charged everywhere via ndr_group_demand.
     py::class_<NdrSpec>(m, "NdrSpec")
         .def(py::init<>())
+        .def_readwrite("width_abs",    &NdrSpec::width_abs)
+        .def_readwrite("spacing_abs",  &NdrSpec::spacing_abs)
         .def_readwrite("width_slots",  &NdrSpec::width_slots)
         .def_readwrite("guard_slots",  &NdrSpec::guard_slots)
         .def_readwrite("shield_mode",  &NdrSpec::shield_mode)
@@ -645,6 +652,11 @@ void bind_routing(py::module_& m) {
         .def_readwrite("bond_stride",    &NdrSpec::bond_stride)
         .def_readwrite("rule_name",    &NdrSpec::rule_name)
         .def("active",                 &NdrSpec::active);
+    m.def("ndr_resolve_for_pitch", &ndr_resolve_for_pitch,
+          py::arg("spec"), py::arg("slot_pitch"),
+          "R1: quantize a rule's ABSOLUTE width/spacing against one "
+          "layer's per-signal-slot pitch, rounding UP.  Identity for a "
+          "multiplier-only rule and for a pitch <= 0.");
     m.def("ndr_group_demand", &ndr_group_demand,
           "The single-sourced R4 group demand conversion (slots for a "
           "rule-uniform group of nbits bits)");

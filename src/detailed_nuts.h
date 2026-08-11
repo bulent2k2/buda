@@ -295,11 +295,18 @@ private:
 // corner bounds carried), bit_width from the bundle's net count, and the
 // per-segment connections/faces from the selected topology's cached analysis
 // (ConnTopology::build) — exactly the values the abstract solve placed with.
+// R1: `layers` (optional) supplies the per-signal-slot pitch each segment's
+// ASSIGNED layer charges, so an ABSOLUTE NDR rule is resolved ONCE here and
+// every stage-9 consumer — the admission helpers below, the run layout, the
+// shield emission — reads an already-per-layer spec.  Without it the spec's
+// stored quantization (the conservative maximum over the rule's layers) is
+// carried through unchanged: over-charging, never under.
 std::vector<BusSegment> make_bus_segments(
     const std::vector<BundleWrapper>& bundles,
     const NUTSResult& nuts_result,
     const Floorplan& floorplan,
-    const std::string& bit_order = "LO_HI");
+    const std::string& bit_order = "LO_HI",
+    const LayerStack* layers = nullptr);
 
 // Bottom-up per-instance copy helpers (stage c) — the NetSegment/NetVia
 // analogues of offset_track_segment: translate a solved reference-instance

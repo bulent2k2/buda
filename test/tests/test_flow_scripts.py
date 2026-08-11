@@ -964,6 +964,29 @@ def test_ndr_shield_hier_multi_rule():
     assert "NDR shield metal:" in out, out
 
 
+def test_ndr_mixed_rules_fallback_baseline():
+    """flow/ndr_mixed_rules.buda (requirement R8): an 8-bit bus whose bits
+    carry three rule classes.  Phase 1 ships R8's FALLBACK — the bundler
+    splits it into rule-uniform parts, loudly — and this pins that
+    behaviour as the BEFORE measurement for the richer per-net position.
+
+    The `same_` control (8 bits, one rule) is what makes the cost legible:
+    a uniform flanked group pays 2 end shields, while the split bus pays
+    them per part."""
+    out, rc = run_script("ndr_mixed_rules.buda")
+    assert_clean(out, rc, "ndr_mixed_rules.buda")
+    # The split is LOUD and names its parts and their rules.
+    assert "into 3 rule-uniform part(s) (2+4+2)" in out, out
+    assert "[hi2x, md15, None]" in out, out
+    # The control's 8-bit uniform group pays TWO end shields; the mixed
+    # bus's governed parts pay their own.  Both layouts printed by dump_ndr.
+    assert "('same__0' x8) rule 'hi2x': demand 18" in out, out
+    assert "('mix_hi__0' x2) rule 'hi2x': demand 6" in out, out
+    assert "('mix_md__0' x4) rule 'md15': demand 13" in out, out
+    assert "0 bits unplaced" in out, out
+    assert "no violations" in out and "NDR_" not in out, out
+
+
 def test_ndr_bond_shield_bonding():
     """flow/ndr_bond.buda (requirement R6, the `bond` token): two shielded
     rules opt into bonding — one matching the grid rails by LABEL, one
@@ -977,6 +1000,27 @@ def test_ndr_bond_shield_bonding():
     # Straps emitted and reported; no shield left floating.
     assert "NDR shield bond via(s) strapped" in out, out
     assert "0 bits unplaced" in out, out
+    assert "no violations" in out and "NDR_" not in out, out
+
+
+def test_ndr_absolute_shared_cell_bottom_up():
+    """flow/ndr_abs_shared_bottomup.buda (Codex P1 on #682): a shared
+    cell's own interconnect is planned, NUTS-solved and DNUTS-placed on a
+    THINNED view whose per-signal-slot cost is `unit_pitch / n_kept`, so an
+    R1 absolute rule inside that cell must quantize against it.  Resolving
+    against the global stack instead made DNUTS demand 8 slots on the
+    6-slot leased supply the local planner had priced 4 against — every bit
+    of the reference class stranded, and the copies with it (measured
+    before the fix: 12 placed / 16 unplaced / 16 NDR_WIDTH violations)."""
+    out, rc = run_script("ndr_abs_shared_bottomup.buda")
+    assert_clean(out, rc, "ndr_abs_shared_bottomup.buda")
+    # The vehicle is only meaningful if all three features actually engage.
+    assert "local solve under thinned view" in out, out
+    assert "DNUTS reference solve under" in out, out
+    assert "copied to 3 sibling instance(s)" in out, out
+    # The two stages agree, so nothing strands.
+    assert "0 bits unplaced" in out, out
+    assert "insufficient signal tracks" not in out, out
     assert "no violations" in out and "NDR_" not in out, out
 
 

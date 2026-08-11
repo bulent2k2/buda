@@ -167,6 +167,16 @@ novice:
 *   **Declare before bundling.** Rules attach at `run_bundler` /
     `run_hier_bundler`; a bundle mixing rules is split into rule-uniform parts,
     reported loudly.
+*   **Multiplier or absolute.** `width x2` is a *multiplier* — two signal slots
+    on every layer, so one rule ports across a stack whose layers have
+    different pitches. `width 3` (layout units) or `width 0.2um` is *absolute*
+    — one physical width, whose slot cost is resolved per layer. Reach for the
+    absolute form when the technology gives you a number in microns; reach for
+    the multiplier when you want one rule to mean the same thing everywhere.
+    An absolute value rounds UP to the next whole slot, and needs every layer
+    it can reach to have a `def_track_pattern` already declared — it is a hard
+    error otherwise, naming the multiplier form as the order-independent way
+    out.
 *   **An emitted shield is labeled metal until you bond it.** It is a real
     routed wire with the shield net's identity and it reserves the track, but by
     default nothing straps it to the power grid — so do not rely on it for

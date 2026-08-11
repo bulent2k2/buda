@@ -1,0 +1,109 @@
+# NDR ABSOLUTE x set_cell_layer_share x BOTTOM-UP composition vehicle.
+#
+# The three features are individually covered (ndr_abs_um, the rnr shared
+# vehicles, ndr_bottom_up).  Their INTERSECTION is what this one exists for,
+# because it is the one place two stages can be handed different arithmetic
+# for the same wire:
+#
+#   * `set_cell_layer_share` solves a cell's own interconnect against a
+#     DERIVED THINNED VIEW — the same period with fewer SIGNAL slots, so the
+#     honest per-signal-slot channel cost there is `unit_pitch / n_kept`,
+#     NOT the global `unit_pitch / n_signal`.  The cell-local planner and
+#     abstract NUTS already use it (`_cell_share_views`), and the reference
+#     DNUTS solve literally runs on a grid carrying the thinned pattern.
+#
+#   * An ABSOLUTE NDR width quantizes by dividing by that per-signal-slot
+#     cost.  Resolve it against the GLOBAL stack and DNUTS demands more
+#     slots than the cell-local planner priced — an accepted template that
+#     strands at stage 9, which is the #536 silent-strand class arriving
+#     through a new door (Codex P1 on #682).
+#
+#   * `set_bottom_up` is what makes the disagreement expensive rather than
+#     local: the reference instance's solve is COPIED to every sibling, so
+#     one mis-quantized template is four broken instances.
+#
+# THE ARITHMETIC.  M3/M4 carry 12 signal slots of (width 1 + space 1)
+# between 2-wide rails: unit_pitch 30, so globally bit_pitch = 30/12 = 2.5.
+# `sub_cell` leases 50% of M3, keeping 6 slots -> the cell's own view has
+# bit_pitch = 30/6 = 5.0.  The rule `absw` declares `width 4`:
+#
+#     global view (2.5):  ceil(4 / 2.5) = 2 slots/bit   <- what DNUTS used
+#     cell view   (5.0):  ceil(4 / 5.0) = 1 slot/bit    <- what was priced
+#
+# So the local planner prices 4 bits at 4 slots and DNUTS would demand 8 on
+# a supply already halved by the lease.  The share is deliberately 50% and
+# the width deliberately 4: both sit just past the boundary where the two
+# readings part company.
+#
+# What must hold at the end: the cell-local solve reports the thinned view,
+# DNUTS copies the reference to 3 siblings, and check_design is clean.
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+open_bdb :memory:
+
+add_cell sub_cell  200 150
+add_cell leaf_cell  60  50
+
+add_inst_to_cell sub_cell l leaf_cell  20 50
+add_inst_to_cell sub_cell r leaf_cell 120 50
+
+add_inst u1 sub_cell -  50  50
+add_inst u2 sub_cell - 500  50
+add_inst u3 sub_cell -  50 500
+add_inst u4 sub_cell - 500 500
+
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+
+# Patterns BEFORE the rules: an absolute value has no meaning without the
+# slot geometry it quantizes against, and `def_ndr` enforces the order.
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 5 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 6 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+
+# The lease: sub_cell's own interconnect may use half of M3's signal
+# tracks.  This is what makes the cell's per-signal-slot cost differ from
+# the global one, and so what makes the absolute rule resolve differently
+# inside the cell than outside it.
+set_cell_layer_cap sub_cell M4
+set_cell_layer_share sub_cell M3 50
+
+set_bottom_up sub_cell
+align_bottom_up
+
+derive_busterms 1
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+
+bdb_net_mode on
+
+add_bus loc_u1[4] u1/l.out u1/r.in
+add_bus loc_u2[4] u2/l.out u2/r.in
+add_bus loc_u3[4] u3/l.out u3/r.in
+add_bus loc_u4[4] u4/l.out u4/r.in
+
+add_bus tdef[6] u1/r.out u3/l.in
+
+# ABSOLUTE, not a multiplier: a multiplier is pattern-independent by
+# construction and so cannot express the disagreement this vehicle tests.
+def_ndr absw width 4
+set_ndr loc_ absw
+
+run_hier_bundler depth 1
+dump_ndr
+
+generate_hier_topologies
+set_track_pitch 3
+run_planner hier signal_tracks
+
+run_nuts
+check_template_tracks on_mismatch independent
+run_detailed_nuts
+dump_ndr
+check_design
+report_wirelength

@@ -1505,3 +1505,316 @@ def test_bond_stride_anchors_extremes_under_an_override():
             assert got[sh][-1] == xs[-1], \
                 f"stride {stride} lost the true high extreme under override"
             assert got[sh] == sorted(got[sh])
+
+
+# ── R1 absolute values: the review's contained findings (Codex on #682) ────
+
+def _abs_session(patterns=("3",)):
+    s = _bare_session()
+    for line in ("add_block a 0 0 100 100", "def_layer 3 M3 H 20",
+                 "def_layer 4 M4 V 20"):
+        _run(s, line)
+    for lid in patterns:
+        _run(s, f"def_track_pattern {lid} 0 VDD 2 1 (_ 1 1)x12 GND 2 1")
+    return s
+
+
+def test_absolute_needs_every_governed_layer_patterned():
+    # The stored quantization is a MAXIMUM, and a max over a SUBSET is not
+    # conservative: a pattern declared later on an omitted layer can need
+    # more slots, and routing there would under-charge the declared width.
+    s = _abs_session(patterns=("3",))          # L4 declared but unpatterned
+    with pytest.raises(SystemExit):
+        _run(s, "def_ndr r width 3")
+    # Restricting the rule to the patterned layer is one of the ways out
+    # the error names, and it must work.
+    s2 = _abs_session(patterns=("3",))
+    out = _run(s2, "def_ndr ok width 3 layers M3")
+    assert "ABSOLUTE" in out and "L3:" in out
+    # Patterning both layers is the other.
+    s3 = _abs_session(patterns=("3", "4"))
+    assert "ABSOLUTE" in _run(s3, "def_ndr both width 3")
+
+
+def test_absolute_accepts_the_um_suffix():
+    # An NDR distance spells a distance the way every other script-declared
+    # distance does — the shared require_distance parser, not a local
+    # float().  At the default scale 1 um is 1 layout unit.
+    s = _abs_session()
+    _run(s, "def_ndr um5 width 5um spacing 6um layers M3")
+    r = s._ndr_rules["um5"]
+    assert (r["width_abs"], r["spacing_abs"]) == (5.0, 6.0)
+    # And a bare value still means layout units.
+    _run(s, "def_ndr bare5 width 5 layers M3")
+    assert s._ndr_rules["bare5"]["width_abs"] == 5.0
+
+
+def test_absolute_rejects_nonsense_values():
+    s = _abs_session()
+    for bad in ("def_ndr z width 0 layers M3",
+                "def_ndr z width -2 layers M3",
+                "def_ndr z width wat layers M3"):
+        with pytest.raises(SystemExit):
+            _run(_abs_session(), bad)
+
+
+def test_absolute_resolution_rounds_up_with_an_exact_boundary():
+    # The rounding decision, at the level it is actually made.  Pitch 2.5:
+    # 3 -> 2 slots (rounds up), 5 -> exactly 2 (must NOT pay 3).
+    spec = buda.NdrSpec()
+    spec.width_abs = 3.0
+    assert buda.ndr_resolve_for_pitch(spec, 2.5).width_slots == 2
+    spec.width_abs = 5.0
+    assert buda.ndr_resolve_for_pitch(spec, 2.5).width_slots == 2
+    spec.width_abs = 5.1
+    assert buda.ndr_resolve_for_pitch(spec, 2.5).width_slots == 3
+    # Identity for a multiplier-only spec and for a pitch <= 0.
+    m = _spec(width=2)
+    assert buda.ndr_resolve_for_pitch(m, 2.5).width_slots == 2
+    spec.width_abs = 3.0
+    assert buda.ndr_resolve_for_pitch(spec, 0.0).width_slots == 1
+
+
+def test_v26_absolute_persists_and_restores(tmp_path):
+    """Codex P1 on #682: an absolute declaration leaves the MULTIPLIER at
+    1.0, so without persisting the absolute fields a reopened design
+    restores the rule as DEFAULT width — usually inactive, silently
+    dropping the constraint the design was routed under."""
+    s1 = _bare_session()
+    _run(s1, f"open_bdb {tmp_path}/a.bdb")
+    for line in ("def_layer 3 M3 H 20",
+                 "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1"):
+        _run(s1, line)
+    _run(s1, "def_ndr abs3 width 3 spacing 5 layers M3")
+    _run(s1, "set_ndr sig_ abs3")
+    del s1
+
+    s2 = _bare_session()
+    for line in ("def_layer 3 M3 H 20",
+                 "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1"):
+        _run(s2, line)
+    out = _run(s2, f"open_bdb {tmp_path}/a.bdb")
+    assert "restored 1 rule(s)" in out
+    r = s2._ndr_rules["abs3"]
+    assert (r["width_abs"], r["spacing_abs"]) == (3.0, 5.0)
+    # The QUANTIZATION is re-derived against this session's grid, not read
+    # back — the same rule against a different stack is a different slot
+    # count, and a stored one would be charged against geometry it never
+    # measured.
+    assert r["width_slots_max"] == 2 and r["guard_slots_max"] == 1
+    spec = ndr_cmds._spec_of(s2, "abs3")
+    assert spec.active() and spec.width_slots == 2
+
+
+def _persisted_abs_rule(tmp_path, decl="def_ndr abs3 width 3 layers M3"):
+    """A BDB carrying one absolute rule, ready to reopen."""
+    s1 = _bare_session()
+    _run(s1, f"open_bdb {tmp_path}/b.bdb")
+    for line in ("def_layer 3 M3 H 20",
+                 "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1"):
+        _run(s1, line)
+    _run(s1, decl)
+    del s1
+    return f"{tmp_path}/b.bdb"
+
+
+def test_v26_restored_absolute_without_a_grid_says_so(tmp_path):
+    # Rules restore at open_bdb, which can precede the script's pattern
+    # declarations.  An unquantizable absolute rule must SAY so rather than
+    # quietly charging default width.
+    path = _persisted_abs_rule(tmp_path)
+    s2 = _bare_session()                      # no layers, no patterns
+    out = _run(s2, f"open_bdb {path}")
+    assert "quantization deferred" in out, out
+
+
+def test_v26_restored_absolute_quantizes_when_the_grid_arrives(tmp_path):
+    """Codex P1 on #682: quantizing ONLY at restore left a rule opened
+    before its patterns with no slot count and no way to acquire one —
+    `_spec_of` fell back to 1/0, which for a width/spacing-only rule is an
+    INACTIVE spec, so the design routed with the persisted constraint
+    silently dropped.  Re-declaring is not a workaround: `def_ndr` refuses
+    a duplicate name.  The quantization is now derived at first use."""
+    path = _persisted_abs_rule(tmp_path)
+    s2 = _bare_session()
+    _run(s2, f"open_bdb {path}")              # patterns NOT declared yet
+    assert "width_slots_max" not in s2._ndr_rules["abs3"]
+    for line in ("def_layer 3 M3 H 20",
+                 "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1"):
+        _run(s2, line)
+    # First use derives it against the grid that will actually be routed on.
+    spec = ndr_cmds._spec_of(s2, "abs3")
+    assert spec.width_slots == 2, "the restored constraint must survive"
+    assert spec.active(), "a 2-slot rule that reads inactive is the bug"
+    assert s2._ndr_rules["abs3"]["width_slots_max"] == 2   # memoized
+
+
+def test_v26_restored_absolute_still_unpatterned_at_use_is_fatal(tmp_path):
+    # Deferral is not permission: a rule whose governed layer STILL has no
+    # pattern when it is about to govern routing gets the same refusal
+    # `def_ndr` would have made, at the first moment it can be made.
+    path = _persisted_abs_rule(tmp_path)
+    s2 = _bare_session()
+    _run(s2, f"open_bdb {path}")
+    _run(s2, "def_layer 3 M3 H 20")           # layer, but no track pattern
+    with pytest.raises(SystemExit):
+        ndr_cmds._spec_of(s2, "abs3")
+
+
+def test_v26_absolute_joins_the_pricing_fingerprint():
+    # ceil(width_x) is 1.0 for EVERY absolute rule, so pricing on it would
+    # stamp them all as default and a changed absolute could never VOID a
+    # restored plan.
+    s = _abs_session()
+    _run(s, "def_ndr a3 width 3 layers M3")
+    _run(s, "def_ndr a9 width 9 layers M3")
+    _run(s, "def_ndr m2 width x2 layers M3")
+    fp3 = ndr_cmds.ndr_pricing_fp(s, "a3")
+    fp9 = ndr_cmds.ndr_pricing_fp(s, "a9")
+    fpm = ndr_cmds.ndr_pricing_fp(s, "m2")
+    assert fp3 != fp9, "different absolute widths must price differently"
+    assert "|w2" in fp3 and "|a3" in fp3
+    # A multiplier rule's stamp is unchanged in shape (no |a suffix), so
+    # pre-R1 checkpoints of multiplier rules still compare equal.
+    assert "|a" not in fpm
+
+
+def test_v26_pre_v26_db_migrates(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "v25.bdb")
+    db = buda.BDB(path)
+    r = buda.NdrRuleRow()
+    r.name, r.width_x, r.bond = "old", 2.0, 3
+    db.set_ndr_rule(r)
+    del db
+    con = sqlite3.connect(path)
+    con.executescript("ALTER TABLE ndr_rule DROP COLUMN width_abs;"
+                      "ALTER TABLE ndr_rule DROP COLUMN spacing_abs;"
+                      "PRAGMA user_version = 25;")
+    con.close()
+    db = buda.BDB(path)
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    rows = {x.name: x for x in db.ndr_rules()}
+    assert rows["old"].bond == 3
+    assert rows["old"].width_abs == 0.0 and rows["old"].spacing_abs == 0.0
+
+
+def test_r3_absolute_is_checked_per_layer_not_against_the_maximum():
+    """Codex P1 on #682: R3 compared every layer against the conservative
+    MAXIMUM, so a coarse layer whose per-layer width genuinely fits could
+    be hard-errored — a false rejection of a legal design, not a
+    conservative charge.
+
+    The stack here is the vehicle's: a COARSE layer (pitch 5) whose
+    pattern offers only single isolated SIGNAL slots between wide rails,
+    and a FINE layer (pitch 2.5) with a long contiguous run.  `width 4`
+    needs 2 slots on the fine layer and 1 on the coarse one — so the
+    coarse layer is realizable, and checking it against the maximum of 2
+    would refuse it."""
+    s = _bare_session()
+    for line in ("add_block a 0 0 200 200", "add_block b 800 0 1000 200",
+                 "add_bus w_[2] a.p b.q",
+                 "def_layer 3 M3 H TOP 20", "def_layer 4 M4 V 20",
+                 # fine: 12 contiguous signal slots, pitch 2.5
+                 "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1",
+                 # coarse: every signal slot isolated between rails, pitch 5
+                 "def_track_pattern 4 0 (VDD 2 2 _ 2 2 GND 2 2 _ 2 2)x3"):
+        _run(s, line)
+    _run(s, "def_ndr abs4 width 4")
+    _run(s, "set_ndr w_ abs4")
+    for line in ("run_bundler STRICT", "generate_topologies",
+                 "set_track_pitch 3", "run_planner 1"):
+        _run(s, line)
+    gov = next(w for w in s.bundles if w.input.ndr.active())
+    spec = gov.input.ndr
+    # The conservative max comes from the FINE layer…
+    assert spec.width_slots == 2
+    # …while the coarse layer needs only 1, so it must not be refused for
+    # lacking a 2-slot contiguous run it never needed.
+    coarse = buda.ndr_resolve_for_pitch(spec, s.layers.bit_pitch(4))
+    assert coarse.width_slots == 1
+    ndr_cmds.validate_ndr_realizability(s)     # must NOT sys.exit
+
+
+# ── R1 part 2: the ROUTING consumers resolve per layer ──────────────────────
+# Part 1 landed the declaration, the persistence and the R3 check; the three
+# routing stages still priced an absolute rule at its conservative MAXIMUM.
+# Safe in direction (over-charge, never under) but it is capacity a design
+# does not owe, and it left the stages disagreeing about a governed group's
+# demand — the single-sourcing invariant R4 exists to protect.
+
+def _abs_mixed_pitch_session(extra=()):
+    """Two blocks on a stack whose H and V pairs have DIFFERENT per-signal-
+    slot pitches (2.5 vs 5.0), with one absolute rule (`width 4`) that
+    therefore costs 2 slots/bit horizontally and 1 vertically."""
+    s = _bare_session()
+    for line in ("add_block a 0 0 200 200", "add_block b 800 600 1000 800",
+                 "add_bus w_[4] a.p b.q",
+                 "def_layer 3 M3 H TOP 20", "def_layer 4 M4 V TOP 20",
+                 "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1",
+                 "def_track_pattern 4 0 VDD 4 2 (_ 2 2)x12 GND 4 2",
+                 "def_ndr abs4 width 4", "set_ndr w_ abs4",
+                 "run_bundler STRICT", "generate_topologies",
+                 "set_track_pitch 3", "run_planner 1", "run_nuts",
+                 *extra):
+        _run(s, line)
+    return s
+
+
+def test_absolute_rule_is_resolved_per_layer_at_stage_9():
+    s = _abs_mixed_pitch_session()
+    gov = next(w for w in s.bundles if w.input.ndr.active())
+    assert gov.input.ndr.width_slots == 2          # the conservative max
+    assert s.layers.bit_pitch(3) == pytest.approx(2.5)
+    assert s.layers.bit_pitch(4) == pytest.approx(5.0)
+    fine = [seg for seg in buda.make_bus_segments(
+                s.bundles, s.nuts_result, s.fp, "LO_HI", s.layers)
+            if seg.bundle_id == gov.input.original_bundle.id]
+    assert fine, "the vehicle must route the governed bundle"
+    # The V segments sit on a layer whose ONE slot already exceeds the
+    # declared width, so the rule resolves to the default there…
+    by_layer = {seg.layer: seg.ndr for seg in fine}
+    assert 4 in by_layer and 3 in by_layer, "needs both directions routed"
+    assert by_layer[3].width_slots == 2
+    assert by_layer[4].width_slots == 1
+    # …and WITHOUT the layer stack every segment keeps the maximum: the
+    # over-charge this change removes (and the documented safe fallback).
+    coarse = {seg.layer: seg.ndr for seg in buda.make_bus_segments(
+                  s.bundles, s.nuts_result, s.fp, "LO_HI")
+              if seg.bundle_id == gov.input.original_bundle.id}
+    assert coarse[3].width_slots == 2 and coarse[4].width_slots == 2
+
+
+def test_absolute_rule_per_layer_charge_matches_the_engine():
+    # The invariant the refactor is for: the seat census (Python) and the
+    # engine (C++) must measure a governed seat in the SAME units.  On the
+    # coarse layer that is the plain bit count; on the fine one it is the
+    # 2-slot group demand.
+    s = _abs_mixed_pitch_session()
+    gov = next(w for w in s.bundles if w.input.ndr.active())
+    sel = gov.plan.selected_topology_index
+    seen = set()
+    for seg in s.nuts_result.segments:
+        if seg.bundle_id != gov.input.original_bundle.id:
+            continue
+        bits = s._seg_member_bits(gov, sel, seg.seg_idx)
+        need = s._seg_admission_need(gov, sel, seg.seg_idx, layer=seg.layer)
+        expect = buda.ndr_group_demand(
+            buda.ndr_resolve_for_pitch(gov.input.ndr,
+                                       s.layers.bit_pitch(seg.layer)), bits)
+        assert need == expect
+        seen.add(seg.layer)
+    # Both pitches must actually be exercised, or the assertion above is
+    # vacuous (it holds trivially when one layer resolves to the maximum).
+    assert {3, 4} <= seen
+
+
+def test_absolute_rule_audit_does_not_flag_a_coarse_layer_bit():
+    # The R9 audit read the UNRESOLVED spec, so a correctly-placed bit on a
+    # layer where the rule needs one slot was reported NDR_WIDTH against
+    # the maximum of two — a false violation on a clean design.
+    s = _abs_mixed_pitch_session(extra=("run_detailed_nuts",))
+    gov = next(w for w in s.bundles if w.input.ndr.active())
+    viols = ndr_cmds.audit_ndr_dnuts(s, gov)
+    assert [v.message for v in viols
+            if v.kind.name == "NDR_WIDTH"] == []

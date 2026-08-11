@@ -89,7 +89,7 @@ class RRTrialsMixin:
                 if stage == 'b':
                     segs = buda.make_bus_segments(
                         self.bundles, warm, self.fp,
-                        self._detailed_bit_order)
+                        self._detailed_bit_order, self.layers)
                     deng = buda.DetailedNUTSEngine(self.routing_grid)
                     dres = deng.run(segs, emit_vias=False,
                                     abort_unplaced=self._rr_m_primary(cur))
@@ -127,7 +127,8 @@ class RRTrialsMixin:
             warm = eng.rerun_bundle_warm(snap['nuts'], self.bundles, bid)
             if stage == 'b':
                 segs = buda.make_bus_segments(self.bundles, warm, self.fp,
-                                              self._detailed_bit_order)
+                                              self._detailed_bit_order,
+                                              self.layers)
                 deng = buda.DetailedNUTSEngine(self.routing_grid)
                 dres = deng.run(segs, emit_vias=False)
                 warm_m = (dres.num_unplaced, warm.num_overlaps)

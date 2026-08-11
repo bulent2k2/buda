@@ -203,7 +203,8 @@ SweepOutcome eval_move(const std::vector<BundleWrapper>& baseline,
         return out;
     }
     apply_doglegs(b, nr);
-    std::vector<BusSegment> bus = make_bus_segments(b, nr, fp, dn.bit_order);
+    std::vector<BusSegment> bus =
+        make_bus_segments(b, nr, fp, dn.bit_order, &layers);
     int unplaced = run_dnuts(bus, dn);
     // The moved bundle's DISCONNECTED term on its FINAL selected candidate
     // (a dogleg adoption above may have replaced the trial candidate —

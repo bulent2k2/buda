@@ -1374,7 +1374,8 @@ std::vector<BusSegment> make_bus_segments(
     const std::vector<BundleWrapper>& bundles,
     const NUTSResult& nuts_result,
     const Floorplan& floorplan,
-    const std::string& bit_order)
+    const std::string& bit_order,
+    const LayerStack* layers)
 {
     // Per-bundle bit width (net count) and per-segment connectivity from the
     // SELECTED topology's cached analysis — the same derivation the abstract
@@ -1433,10 +1434,19 @@ std::vector<BusSegment> make_bus_segments(
         bs.abstract_pos = ts.track_position;
         // NDR: carry the bundle's resolved rule so stage 9 places the
         // k-slot/guard/shield run the upstream stages priced (default
-        // spec = inactive = byte-identical).
+        // spec = inactive = byte-identical).  R1: an ABSOLUTE rule is
+        // quantized HERE against the segment's assigned layer — the one
+        // place stage 9 knows both the rule and the layer — so every
+        // downstream consumer reads one already-resolved spec and cannot
+        // disagree with the planner about a governed group's demand.
         {
             auto nit = bid_to_ndr.find(ts.bundle_id);
-            if (nit != bid_to_ndr.end()) bs.ndr = *nit->second;
+            if (nit != bid_to_ndr.end()) {
+                bs.ndr = *nit->second;
+                if (layers && ndr_has_abs(bs.ndr))
+                    bs.ndr = ndr_resolve_for_pitch(bs.ndr,
+                                                   layers->bit_pitch(ts.layer));
+            }
         }
         // Cross-layer corner split bounds (carried into detailed NUTS so the
         // trunk's bits snap to its committed side on real signal tracks).

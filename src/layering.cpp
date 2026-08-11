@@ -98,6 +98,10 @@ const Layer* LayerStack::get_layer(int id) const {
     for (const auto& l : layers_) if (l.id == id) return &l;
     return nullptr;
 }
+double LayerStack::bit_pitch(int id) const {
+    const Layer* l = get_layer(id);
+    return l ? l->bit_pitch : 0.0;
+}
 double LayerStack::get_layer_dilution(int id) const {
     const Layer* l = get_layer(id);
     return l ? l->dilution_factor : 1.0;
