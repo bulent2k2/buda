@@ -1171,25 +1171,53 @@ def validate_ndr_realizability(session):
                 sys.exit(1)
 
 
-def _report_abs_metal(session, w, spec):
+def _min_placed_widths(session):
+    """{(bundle_id, layer): narrowest placed bit width} over the whole
+    detailed result, built in ONE pass.
+
+    `DetailedNUTSResult.net_segments` is a plain pybind vector property, so
+    every access rebuilds the list — rescanning it per governed bundle is
+    O(bundles x rows) with a copy on each, the cost `build_ndr_audit_index`
+    exists to avoid.  Shield rows are excluded: they are the rule's own
+    metal, not a governed bit."""
+    dr = getattr(session, "detailed_result", None)
+    if dr is None:
+        return {}
+    out = {}
+    for ns in dr.net_segments:
+        if ns.is_shield:
+            continue
+        key = (ns.bundle_id, ns.layer)
+        cur = out.get(key)
+        if cur is None or ns.width < cur:
+            out[key] = ns.width
+    return out
+
+
+def _report_abs_metal(w, spec, metal):
     """After DNUTS, report an ABSOLUTE rule's DELIVERED metal beside the
-    declared width, per layer, whenever they differ.
+    declared width, per layer, whenever it falls short.
 
     An absolute value is quantized by the per-signal-slot CHANNEL cost
     (`unit_pitch / n_signal_slots`), which answers "how much routing
     channel does this width consume" — the question the planner books.
     The metal a k-slot bit actually gets is a different quantity,
     `k*w + (k-1)*sp` over the layer's own slots.  The two coincide on some
-    patterns and not others, and nothing else in the flow says which case
-    you are in: `check_design`'s NDR_WIDTH counts covered SIGNAL slot
-    CENTRES, so it agrees with the channel reading by construction and
-    stays silent here.
+    (pattern, declared value) pairs and not others, and nothing else in
+    the flow says which case you are in: `check_design`'s NDR_WIDTH counts
+    covered SIGNAL slot CENTRES, so it agrees with the channel reading by
+    construction and stays silent here.
 
-    Report-only, and printed only when the numbers disagree — the gap is a
+    Called for EVERY governed bundle, including one whose spec is
+    INACTIVE.  That case is not empty, it is the worst one: a width that
+    quantizes to a single slot with no guards or shields on every layer it
+    can reach reads as "no rule", so the bus routes ungoverned and the
+    shortfall is total.  The line therefore names its own bundle — no
+    demand header precedes it there.
+
+    Report-only, and printed only when the numbers disagree: the gap is a
     documented semantic limit (docs/internal/opens_ndr.md §2), not a
-    violation, so it is surfaced for anyone declaring a width for EM or
-    resistance rather than for congestion.  Vehicle:
-    flow/ndr_abs_divisor.buda.
+    violation.  Vehicle: flow/ndr_abs_divisor.buda.
 
     WIDTH only.  Declared SPACING has the same shape (a gap of g guards
     clears `(g+1)*sp + g*w`, not `g*bit_pitch`), but the delivered
@@ -1197,25 +1225,21 @@ def _report_abs_metal(session, w, spec):
     row, so it needs the run's geometry rather than one width — left to
     whoever settles the open, since a metal-shaped spacing rule and a
     metal-shaped spacing report have to arrive together."""
-    dr = getattr(session, "detailed_result", None)
-    if dr is None or spec.width_abs <= 0.0:
+    if spec.width_abs <= 0.0 or not metal:
         return
     bid = w.input.original_bundle.id
-    widths = {}
-    for ns in dr.net_segments:
-        if ns.bundle_id != bid or ns.is_shield:
-            continue
-        widths.setdefault(ns.layer, set()).add(ns.width)
     eps = 1e-9
-    for lid in sorted(widths):
-        got = min(widths[lid])           # the narrowest bit is the honest one
-        if got >= spec.width_abs - eps:
+    ungoverned = ("" if spec.active() else
+                  ", and the spec reads INACTIVE there so the bus routes "
+                  "UNGOVERNED")
+    for (b, lid), got in sorted(metal.items()):
+        if b != bid or got >= spec.width_abs - eps:
             continue
-        print(f"[NDR]   on layer {lid}: rule '{spec.rule_name}' declares "
-              f"width {spec.width_abs:g} but the placed bits are "
-              f"{got:g} wide — the value was quantized by the layer's "
-              f"per-signal-slot CHANNEL cost, which is not its metal "
-              f"(opens_ndr.md §2)")
+        print(f"[NDR]   bundle {bid} on layer {lid}: rule "
+              f"'{spec.rule_name}' declares width {spec.width_abs:g} but "
+              f"the placed bits are {got:g} wide — the value was "
+              f"quantized by the layer's per-signal-slot CHANNEL cost, "
+              f"which is not its metal{ungoverned} (opens_ndr.md §2)")
 
 
 def cmd_dump_ndr(session, cmd, args, cmd_line):
@@ -1261,34 +1285,45 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
         src = "  (restored from BDB)" if prefix in s_rest else ""
         print(f"[NDR] scope '{prefix}' -> '{rule}'{src}")
     if getattr(session, "bundles", None):
+        # One pass over the detailed rows for the whole dump.  Per-bundle
+        # rescans are O(bundles x rows) AND `net_segments` is a plain
+        # pybind vector property, so each access rebuilds the list — the
+        # cost build_ndr_audit_index exists to avoid (Codex P2 on #689).
+        metal = _min_placed_widths(session)
         for w in session.bundles:
             spec = w.input.ndr
-            if not spec.active():
-                continue
             nets = w.input.original_bundle.get_net_names()
             nb = len(nets)
-            du = buda.ndr_group_demand(spec, nb)
-            print(f"[NDR] bundle {w.input.original_bundle.id} "
-                  f"('{nets[0] if nets else '?'}' x{nb}) rule "
-                  f"'{spec.rule_name}': demand {du} slot(s) "
-                  f"(layout {buda.ndr_run_layout(spec, nb)})")
-            # R1: once layers are assigned, an ABSOLUTE rule's REAL charge
-            # is per layer — report the ones that differ from the maximum
-            # above, so a dump can never claim a demand the engine did not
-            # place (silent on multiplier rules and before planning).
-            if spec.width_abs > 0.0 or spec.spacing_abs > 0.0:
-                seen = {}
-                for lid in getattr(w.plan, "seg_layers", ()) or ():
-                    if lid < 0 or lid in seen:
-                        continue
-                    ls = ndr_spec_for_layer(session, spec, lid, w)
-                    seen[lid] = buda.ndr_group_demand(ls, nb)
-                for lid in sorted(k for k, v in seen.items() if v != du):
-                    print(f"[NDR]   on layer {lid}: demand {seen[lid]} "
-                          f"slot(s) — the absolute width resolves to "
-                          f"{ndr_spec_for_layer(session, spec, lid, w).width_slots}"
-                          f" slot(s)/bit at that layer's pitch")
-                _report_abs_metal(session, w, spec)
+            if spec.active():
+                du = buda.ndr_group_demand(spec, nb)
+                print(f"[NDR] bundle {w.input.original_bundle.id} "
+                      f"('{nets[0] if nets else '?'}' x{nb}) rule "
+                      f"'{spec.rule_name}': demand {du} slot(s) "
+                      f"(layout {buda.ndr_run_layout(spec, nb)})")
+                # R1: once layers are assigned, an ABSOLUTE rule's REAL
+                # charge is per layer — report the ones that differ from
+                # the maximum above, so a dump can never claim a demand
+                # the engine did not place (silent on multiplier rules
+                # and before planning).
+                if spec.width_abs > 0.0 or spec.spacing_abs > 0.0:
+                    seen = {}
+                    for lid in getattr(w.plan, "seg_layers", ()) or ():
+                        if lid < 0 or lid in seen:
+                            continue
+                        ls = ndr_spec_for_layer(session, spec, lid, w)
+                        seen[lid] = buda.ndr_group_demand(ls, nb)
+                    for lid in sorted(k for k, v in seen.items() if v != du):
+                        print(f"[NDR]   on layer {lid}: demand {seen[lid]} "
+                              f"slot(s) — the absolute width resolves to "
+                              f"{ndr_spec_for_layer(session, spec, lid, w).width_slots}"
+                              f" slot(s)/bit at that layer's pitch")
+            # OUTSIDE the active() guard, deliberately: an absolute width
+            # that quantizes to one slot with no guards or shields on
+            # every layer it can reach IS an inactive spec — and that is
+            # the WORST case, not an empty one.  Skipping it printed
+            # nothing at all for the bundle with the largest shortfall
+            # (Codex P2 on #689).
+            _report_abs_metal(w, spec, metal)
 
 
 COMMANDS = {

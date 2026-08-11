@@ -1032,6 +1032,18 @@ def test_ndr_absolute_divisor_repro():
     # spec reads INACTIVE, so the bus routes as an ordinary one.
     assert ("rule 'w8' declares width 8 but the placed bits are 2 wide"
             in out), out
+    # Row 5: a rule whose EVERY governed layer resolves to one slot has an
+    # INACTIVE stored spec, so it has no demand line and the bundle is
+    # ungoverned in fact.  That is the worst row, and the diagnostic used
+    # to skip it entirely — it sat behind the `spec.active()` filter, so
+    # the largest shortfall in the vehicle printed nothing at all
+    # (Codex P2 on #689).
+    assert ("rule 'w8sp' declares width 8 but the placed bits are 2 wide"
+            in out), out
+    assert "the spec reads INACTIVE there so the bus routes UNGOVERNED" in out
+    # …and it really is unreported by the demand machinery, which is why
+    # the metal line has to name its own bundle.
+    assert "rule 'w8sp': demand" not in out, out
 
 
 def test_ndr_absolute_shared_cell_bottom_up():

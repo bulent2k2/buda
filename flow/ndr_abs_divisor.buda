@@ -51,6 +51,13 @@
 # Only the three short rows are reported; the EXACT one is silent, which
 # is why a run that prints nothing is not evidence of agreement.
 #
+# A fifth row, from `w8sp` (width 8 restricted to the sparse pair): EVERY
+# layer it can reach resolves to 1 slot, so its stored maximum is 1 slot /
+# 0 guards and, with no shield, the spec reads INACTIVE.  The bundle is
+# governed on paper and ungoverned in fact — declared 8, placed 2, and no
+# demand line at all, since there is no active rule to report a demand
+# for.  It is the worst row and the quietest.
+#
 # The first row is the one that matters most.  It is EXACT — and that is a
 # COINCIDENCE, not a property: change the declared width to 8 on the same
 # layer and it stops being exact.  So "it works on my stack" is not
@@ -89,11 +96,30 @@ add_block src_a 0    0    200  200
 add_block dst_a 800  600  1000 800
 add_block src_b 0    900  200  1100
 add_block dst_b 800  1500 1000 1700
+# Vertically ALIGNED (same x span), so this pair routes as a straight V
+# run.  That matters: `w8sp` is restricted to the V layers, and an L-shaped
+# bus under a V-only restriction has no legal layer for its H leg — it
+# simply never routes, which would make the row prove nothing.
+add_block src_c 0    1800 200  2000
+add_block dst_c 0    2400 200  2600
 
 # Both buses route L-shaped (the blocks differ in x AND y), so each one
 # lands on BOTH families and a single run yields all four rows.
 add_bus w3_[3] src_a.p dst_a.q
 add_bus w8_[3] src_b.p dst_b.q
+
+# ── The fifth row: a rule that reads as NO RULE ───────────────────────────
+# `w8sp` is the SAME width 8, restricted to the SPARSE pair.  Its stored
+# quantization is a maximum over the layers it can reach — and every one of
+# them resolves to 1 slot — so `width_slots` is 1, `guard_slots` is 0, and
+# with no shield declared the spec is INACTIVE.  The bus routes as an
+# ordinary one and gets 2 units of metal for a declared 8.
+#
+# This is the WORST case in the vehicle and the easiest to miss: the rule
+# is declared, attached, and reported at declaration time, yet nothing
+# downstream treats the bundle as governed.  A diagnostic that skips
+# inactive specs would say nothing at all here (Codex P2 on #689).
+add_bus w8sp_[3] src_c.p dst_c.q
 
 def_layer 3 M3 H 20
 def_layer 4 M4 V 20
@@ -114,8 +140,12 @@ def_track_pattern 6 0 VDD 10 2 (_ 2 2)x4 GND 10 2
 # slot geometry it quantizes against, and def_ndr enforces the order.
 def_ndr w3 width 3
 def_ndr w8 width 8
+# Same declared width as w8, but confined to the SPARSE pair — so its
+# conservative maximum is 1 slot and the stored spec reads INACTIVE.
+def_ndr w8sp width 8 layers M4,M6
 set_ndr w3_ w3
 set_ndr w8_ w8
+set_ndr w8sp_ w8sp
 
 run_bundler STRICT
 dump_ndr
