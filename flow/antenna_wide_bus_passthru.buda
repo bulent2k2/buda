@@ -1,0 +1,70 @@
+# ============================================================
+# flow/antenna_wide_bus_passthru.buda
+#
+# A NEGATIVE repro: it shows that a configuration cannot be
+# built, which is why it ends DIRTY (16 unplaced bits) on
+# purpose.  Do not add it to the QoR corpus.
+#
+# The question it answers.  `detect_bit_antennas` (check_dnuts)
+# credits a bit with "reach" over any connected block its
+# segment passes through, because adjust_bit_spans deliberately
+# re-extends spans to preserve that coverage (issue #496).  It
+# tests the crossing at the NOMINAL ConnSeg::perp_pos — one
+# line — while the placed bundle is bits x pitch TALL.  So: can
+# a bus be wider than a block it crosses, leaving outer bits
+# that never touch the block yet are credited by it?
+#
+# NO.  The crossed block's own edges ARE Hanan lines, so they
+# BOUND the trunk's interval, and the bus is charged its full
+# width against that interval.  Here:
+#
+#     hanan y lines   100, 126, 134, 160   <- mid's edges
+#     seg 0 interval  [130.0, 130.0]       <- a POINT
+#     bus width       36.0                 <- 16 bits need 36
+#     result          16 unplaced, 0 placed
+#
+# The design fails as UNPLACED BITS long before any bit could
+# be placed clear of the block.  A bus that crosses a block is
+# confined by that block's own Hanan cell, so "wider than the
+# block it crosses" is not a placeable state.
+#
+# What this does NOT rule out is the OTHER route to the same
+# blind spot: a per-bit TAPER, where the far-side junction
+# belongs to other bits only.  That one is real and already in
+# the tree — flow/tcl/array.tcl bundle 10, whose trunk carries
+# bits 0-7 while its stub exists only for bits 4-7.
+#
+# Run:  bin/buda flow/antenna_wide_bus_passthru.buda --no-viz
+# ============================================================
+
+def_layer 4 M4 H TOP 33.33
+def_layer 5 M5 V TOP 33.33
+
+corner_margin dx 20 dy 4
+
+# Tall endpoints, so a 16-bit bus could land on their faces.
+add_block drv   100 100  200 160
+add_block rcv   700 100  800 160
+
+# The block the trunk crosses: 8 units tall, far narrower than
+# the bus.  Its edges at y=126 and y=134 become the Hanan lines
+# that pin the trunk to a single track.
+add_block mid   400 126  460 134
+
+# `mid` is a RECEIVER, so it is a bundle busterm the trunk
+# passes THROUGH (a `passthru:` block, not a tap) — which is
+# what would put it into the reach model.
+add_bus b[16] drv.tx mid.rx,rcv.rx
+
+run_bundler strict
+generate_topologies
+run_planner 1
+run_nuts
+
+def_track_pattern 4 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 5 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+
+run_detailed_nuts
+dump_topologies --conn
+check_design dnuts
+report_wirelength
