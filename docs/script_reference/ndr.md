@@ -58,7 +58,7 @@ each governed bundle's total demand and its slot-by-slot layout.
 ## `def_ndr`
 
 ```
-def_ndr <name> [width x<N>] [spacing x<N>] [shield bus|bit|per:<N> [net <label>]] [credit] [bond [stride <N>]] [layers <csv>]
+def_ndr <name> [width x<N>|<dist>] [spacing x<N>|<dist>] [shield bus|bit|per:<N> [net <label>]] [credit] [bond [stride <N>]] [layers <csv>]
 ```
 
 Declare a rule. **Declare-once**: a duplicate name, an unknown token, or a rule
@@ -68,8 +68,9 @@ weaken a constraint.
 | Argument | Type | Description |
 |---|---|---|
 | `name` | string | Rule name, used by `set_ndr` and reported everywhere |
-| `width x<N>` | multiplier | Wire width as a multiple of the default. **Multiplier form only** — absolute µm needs per-layer slot geometry and is a later phase |
-| `spacing x<N>` | multiplier | Minimum spacing to any neighbour, as a multiple of default |
+| `width x<N>` | multiplier | Wire width as a multiple of the default. **Pattern-independent**: `x2` is two signal slots on every layer, so one rule ports across a stack whose layers have different pitches |
+| `width <dist>` | distance | Wire width as an ABSOLUTE distance — bare = layout units, `um` = microns converted through the declared import scale. Resolves **per layer**: how many slots one physical width costs depends on the layer, which is why R1 asks for the form. See [Absolute values](#absolute-values) |
+| `spacing x<N>` \| `<dist>` | multiplier or distance | Minimum spacing to any neighbour, in either form, quantized the same way |
 | `shield …` | mode | `bus` = flank the whole bus, `bit` = flank every bit, `per:<N>` = a shield every N bits. Optional `net <label>` names the shield net (default `GND`) |
 | `credit` | flag | Opt in to **rail crediting** (R5a): an END shield may be satisfied by an immediately adjacent power rail that is electrically identical to the shield net, instead of emitting a redundant wire. Requires a shield arrangement |
 | `bond [stride <N>]` | flag + count | Opt in to **shield bonding** (R6): strap every EMITTED shield to the power grid with a via where an identity-matching rail crosses it on an adjacent perpendicular layer. `stride <N>` straps every Nth crossing instead of all of them (default 1 = every crossing); both **extremes are always anchored**, so no tail hangs unbonded off the last strap. Requires a shield arrangement. Output-only — it changes no demand and no placement, so it can be turned on, off, or re-strided without re-planning |
@@ -87,6 +88,53 @@ def_ndr bus25 width x2.5 spacing x2.5 shield per:2 net GND layers M5,M6
 def_ndr gndbus width x1.5 shield bus net GND bond
 def_ndr vssbit width x2 shield bit net VSS bond stride 3
 ```
+
+### Absolute values
+
+An absolute width or spacing names one **physical** width; how many SIGNAL
+slots that costs is a property of the layer. So one declaration resolves to
+different slot counts per layer — the thing a multiplier cannot express.
+
+```
+def_ndr fine3 width 3          # layout units
+def_ndr thin  width 0.2um      # microns, via the declared import scale
+```
+
+The divisor is the layer's per-signal-slot **channel cost**
+(`unit_pitch / n_signal_slots`), which amortizes the power rails across the
+signal slots — the same quantity `eff_bus_width` charges, so a rule and the
+width model agree by construction.
+
+**Rounding is UP.** A value between slot counts pays the larger, the
+convention the multiplier form already uses (`x1.5` pays 2 slots —
+conservative, never illegal). A value landing exactly on a slot boundary pays
+exactly that, not one more.
+
+**Ordering matters, and it is enforced.** An absolute value is meaningless
+without the slot geometry it quantizes against, so **every layer the rule can
+reach must already have a `def_track_pattern`** — the rule's `layers`
+restriction if it has one, otherwise every declared layer. Declaring one
+earlier is a hard error naming the unpatterned layers and the three ways out
+(declare the patterns first, restrict with `layers <csv>`, or use the
+multiplier form, which is order-independent).
+
+Requiring *every* governed layer rather than merely one is deliberate: the
+charged quantization is a **maximum** over the governed layers, and a maximum
+taken over a subset is not conservative — a pattern declared later on an
+omitted layer could need more slots, and routing there would under-charge the
+declared width.
+
+`dump_ndr` and the declaration line report the declared value, the
+conservative quantization everything is charged at, and the per-layer spread,
+since an absolute rule has no single slot count:
+
+```
+[NDR] rule 'fine3': width 3, spacing x1 (ABSOLUTE, layout units) -> 2 slot(s)/bit
+      + 0 guard(s)/gap charged (the max over governed layers;
+      per layer slots/guards L3:2/0, L4:1/0, L5:2/0, L6:1/0)
+```
+
+Vehicle: [`flow/ndr_abs_um.buda`](../../flow/ndr_abs_um.buda).
 
 ### Realizability is checked LOUDLY
 

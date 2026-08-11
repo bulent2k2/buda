@@ -181,6 +181,17 @@ strap ordinal; a real segment index is `>= 0`, so the
 `(bundle_id, from_seg, to_seg, bit_index)` primary key stays unique) —
 its far end is a power-grid rail, not a routed segment.  Pre-v25 rules
 migrate to 0, correct since they never bonded.
+v26 added **`ndr_rule.width_abs` / `spacing_abs`** (R1 absolute width and
+spacing, in layout units; 0 = not declared).  They are persisted because an
+absolute declaration leaves the MULTIPLIER at 1.0 — without them a reopened
+design restores the rule as DEFAULT width, usually inactive, silently losing
+the constraint the design was routed under.  The derived QUANTIZATION (slots
+per bit, guards per gap) is deliberately NOT stored: it is a function of the
+CURRENT grid, so the same rule against a different stack is a different slot
+count and a stored one would be charged against geometry it never measured.
+`open_bdb` re-derives it, and says so loudly when the governed layers carry
+no track pattern in the new session.  Pre-v26 rules migrate to 0, correct
+since they were multiplier-only.
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.
 

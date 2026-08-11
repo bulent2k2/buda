@@ -8,11 +8,12 @@ command/GUI surface), [`ndr_architecture.md`](ndr_architecture.md)
 (implementers, as-built) — and the user-facing command reference is
 [`../script_reference/ndr.md`](../script_reference/ndr.md).
 
-Snapshot index — last verified against `main`: **2026-08-10**, after R6
-(shield bonding) landed. Every requirement has a working implementation and a
-vehicle, and the feature is usable end to end — but **R1 and R8 are met only
-in part**, and **R6 carries one residual limit** now that its headline gap
-(shields bonded to the grid) is closed. What follows is that residue.
+Snapshot index — last verified against `main`: **2026-08-10**, after R1
+(absolute width/spacing) landed. Every requirement has a working
+implementation and a vehicle, and the feature is usable end to end — **R8 is
+the one still met only in part** (the rule-uniform fallback), and R1 and R6
+each carry a residual limit below now that their headline gaps are closed.
+What follows is that residue.
 
 **None of these is blocking.** Each is a bounded piece of work waiting for a
 design that needs it, and the current behaviour in each case is conservative
@@ -67,23 +68,49 @@ and a stored 1 still means what it always meant.
 
 *Where to start:* `emit_shield_bond_vias` in `detailed_nuts.cpp`.
 
-## 2. Absolute (µm) width and spacing values (R1 partial)
+## 2. Absolute (µm) width and spacing values (R1 — LANDED)
 
-`def_ndr` accepts the multiplier form only (`width x2`, `spacing x1.5`). R1
-allows absolute µm as well.
+**Implemented.** `def_ndr` takes either form: `width x2` (multiplier,
+pattern-independent) or `width 3` / `width 0.2um` (absolute, through the
+shared `require_distance` parser). An absolute value resolves **per layer**
+against the layer's per-signal-slot channel cost, so one declaration means
+different slot counts on layers of different pitch — what the multiplier
+form structurally cannot express.
 
-*Why deferred.* The multiplier form is **pattern-independent**: `x2` means
-"two signal slots" on any layer, so one rule is portable across a stack whose
-layers have different pitches. An absolute value has to be resolved against
-each layer's slot geometry, which means per-layer quantization and a decision
-about what to do when the value falls between slot counts. That is a real
-design question, not a parsing one.
+*The design question this settled.* A value falling between slot counts
+**rounds up**, the convention multipliers already use (`x1.5` pays 2 slots —
+conservative, never illegal). Refusing non-boundary values was the
+alternative, and it would have made a rule un-portable across exactly the
+mixed-pitch stacks the form exists for.
 
-*Current behaviour:* an absolute value is a hard error naming the multiplier
-form — no silent misinterpretation.
+*The divisor* is the per-signal-slot channel cost
+(`unit_pitch / n_signal_slots`), not the raw slot pitch: it amortizes the
+power rails across the signal slots and is what `eff_bus_width` already
+charges, so a rule and the width model agree by construction rather than by
+coincidence.
 
-*Where to start:* `_parse_x` in `buda_cmds/ndr_cmds.py`, and the quantization
-in `_spec_of` (which would become per-layer).
+*Ordering is a real precondition, enforced LOUDLY.* Every layer the rule can
+reach must already carry a `def_track_pattern`. Requiring all of them rather
+than one is what keeps the stored maximum conservative — a maximum over a
+subset is not, since a pattern declared later on an omitted layer could need
+more slots.
+
+Persisted at BDB **v26** (`ndr_rule.width_abs` / `spacing_abs`). The
+QUANTIZATION is deliberately not stored — it is a function of the current
+grid, so restore re-derives it and warns when the governed layers have no
+pattern yet.
+
+**Residual limit:**
+
+- **Consumers charge the conservative maximum.** The routing stages
+  (`congestion_planner.cpp`, `nuts.cpp`, `detailed_nuts.cpp`) price an
+  absolute rule at the max over its governed layers rather than resolving
+  per layer, so a coarse layer is over-charged (a 3-unit wire at pitch 5
+  costs `2 x 5 = 10` units instead of ~3). Safe in direction — over-charge,
+  never under — but it is capacity a design does not owe. R3 realizability
+  and the declaration reporting DO resolve per layer.
+
+Vehicle: [`flow/ndr_abs_um.buda`](../../flow/ndr_abs_um.buda).
 
 ## 3. Per-net mixed-rule bundles (R8, the richer half)
 
