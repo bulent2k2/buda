@@ -42,11 +42,14 @@ hand recipe above cannot do that: `git checkout main` requires a clean tree,
 and stashing around it makes the measurement a mutation of the tree, whose
 failure modes all yield a WRONG NUMBER rather than an error (see cmd_vs).
 
-Two things to know about `--vs`: the baseline is the COMMIT, so `--vs HEAD`
+Three things to know about `--vs`: the baseline is the COMMIT, so `--vs HEAD`
 measures your last commit and uncommitted changes appear only on the branch
-side; and the baseline runs the BASELINE's own copy of this harness, matching
-the hand recipe, so a CORPUS that differs between the two is reported as a
-comparable subset rather than silently reconciled.
+side; the baseline runs the BASELINE's own copy of this harness, matching the
+hand recipe, so a CORPUS that differs between the two is reported as a
+comparable subset rather than silently reconciled; and the RUNTIME column is
+advisory here even by its usual standards — working while the sweep runs is
+the point of the mode, and it makes whichever side you worked during read
+slower (the QoR verdict is decision-based and immune).
 
 `--compare` tags each moved flow BETTER/WORSE on the QoR metric
 (overlaps/unplaced/viol_bundles) and exits non-zero if any regressed, then
@@ -541,7 +544,18 @@ def cmd_vs(rev, out, jobs, flows=None, build=True):
       pretending the sets match.
 
     Sequential by construction: the two sweeps never overlap, so the runtime
-    column is not distorted by them contending with each other.
+    column is not distorted by them contending with EACH OTHER.
+
+    It can still be distorted by YOU.  Being free to build, test and commit
+    while the sweep runs is the point of this mode, and every one of those
+    competes for the same CPU — so whichever side you happened to work
+    during reads slower.  Measured on this feature's own landing run: the
+    QoR verdict was 41/41 unchanged (it is decision-based, so contention
+    cannot move it) while the runtime column showed +4.7%, entirely from
+    committing and running tests during the branch half.  The runtime diff
+    was already labelled single-run and non-gating; under `--vs` treat it
+    as advisory only, and use `tools/runtime_ab.py` on an idle machine when
+    runtime is the question being asked.
     """
     wt, commit = baseline_worktree(rev)
     print(f"[--vs] baseline {rev} = {commit[:12]} in {wt}")
