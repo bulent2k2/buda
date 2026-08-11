@@ -126,6 +126,30 @@ def test_the_save_flow_refuses_to_rebuild_over_a_file_it_does_not_own(tmp_path):
     assert precious.read_text() == "important", "it deleted the file anyway"
 
 
+def test_a_caller_named_bdb_is_never_deleted_without_being_asked(tmp_path):
+    """The dangerous case, because the guard used to PASS it: a `.bdb`
+    suffix says nothing about who owns the file (Codex P1 on #693).  A real
+    checkpoint named by a mistyped `BUDA_ARRAY_BDB` would have been deleted,
+    with no undo — so only this flow's own default output goes without
+    asking, and anything the caller named needs `BUDA_ARRAY_FRESH=1`."""
+    theirs = tmp_path / "production_checkpoint.bdb"
+    theirs.write_bytes(b"SQLite format 3\x00 not really, but theirs")
+    before = theirs.read_bytes()
+
+    r = _run(_SAVE, tmp_path, BUDA_ARRAY_BDB=str(theirs))
+    assert r.returncode != 0, "it went ahead and rebuilt over their database"
+    assert theirs.read_bytes() == before, "it deleted a file it does not own"
+    out = r.stdout + r.stderr
+    assert "refusing to overwrite" in out
+    assert "BUDA_ARRAY_FRESH=1" in out, "no way forward in the message"
+
+    # ...and the escape hatch works, because a refusal with no override is
+    # just a different way to be unusable.
+    r = _run(_SAVE, tmp_path, BUDA_ARRAY_BDB=str(theirs), BUDA_ARRAY_FRESH="1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert theirs.read_bytes() != before, "FRESH=1 did not rebuild"
+
+
 def test_the_resume_flow_says_so_when_there_is_no_checkpoint(tmp_path):
     """The first thing anyone does wrong is run session 2 first."""
     r = _run(_RESUME, tmp_path)

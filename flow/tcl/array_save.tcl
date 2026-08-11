@@ -34,7 +34,7 @@
 # runs, and `array_resume.tcl` picks it up in a new process and re-plans.
 # The pair is the iteration loop:
 #
-#     tclsh flow/tcl/array_save.tcl 3 2          # build + route + look
+#     tclsh flow/tcl/array_save.tcl              # build + route + look
 #     BUDA_ARRAY_PIN=diag=14 tclsh flow/tcl/array_resume.tcl   # re-plan
 #     BUDA_ARRAY_PIN=diag=7  tclsh flow/tcl/array_resume.tcl   # ...and again
 #
@@ -56,15 +56,9 @@ source [file join $repo flow tcl array_lib.tcl]
 
 set bdb [array_vehicle::bdb_path $repo]
 
-# Session 1 BUILDS, so it starts from an empty database: `add_inst` into a BDB
-# that already holds the design is a duplicate-instance error, and a half-
-# rebuilt checkpoint is worse than none.  Only ever removes the working `.bdb`
-# it is about to write — anything else is the user's file and is refused.
-if {[file exists $bdb]} {
-    if {[file extension $bdb] ne ".bdb"} {
-        error "array_save.tcl: refusing to overwrite $bdb (not a .bdb) --\
-               this flow REBUILDS the design and needs an empty database"
-    }
+# Session 1 BUILDS, so it starts from an empty database (see
+# `may_rebuild_over` — it raises rather than delete a file the caller named).
+if {[file exists $bdb] && [array_vehicle::may_rebuild_over $bdb "array_save.tcl"]} {
     puts "array_save.tcl: rebuilding -- removing the previous $bdb"
     file delete $bdb
     file delete ${bdb}-wal

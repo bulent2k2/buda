@@ -30,6 +30,12 @@
 # ============================================================
 
 namespace eval array_vehicle {
+    # Did THIS flow choose the checkpoint path (default) or did the caller
+    # (BUDA_ARRAY_BDB)?  Set by `bdb_path`, read by `may_rebuild_over`, which
+    # is the difference between deleting our own output and deleting someone
+    # else's database.
+    variable bdb_is_ours 1
+
     # leaf 70x130; leaves at pitch 90/150 inside a tile with a 15 margin;
     # tiles at pitch (tile+60)/(tile+70) with a 20 margin at the die edge.
     variable LW 70
@@ -49,10 +55,42 @@ namespace eval array_vehicle {
 # NOT keyed on rows x cols: the resuming session does not know the shape — it
 # reads the design out of the database, which is the point.
 proc array_vehicle::bdb_path {repo} {
+    variable bdb_is_ours
     if {[info exists ::env(BUDA_ARRAY_BDB)] && $::env(BUDA_ARRAY_BDB) ne ""} {
+        # Named by the caller, so the file is THEIRS — see `may_rebuild_over`.
+        set bdb_is_ours 0
         return [file normalize $::env(BUDA_ARRAY_BDB)]
     }
+    set bdb_is_ours 1
     return [file join $repo flow tcl out array.bdb]
+}
+
+# May session 1 delete `$bdb` to rebuild into it?  Raises with the way
+# forward if not.
+#
+# Session 1 BUILDS, so it needs an empty database — `add_inst` into a BDB
+# that already holds the design is a duplicate-instance error, and a
+# half-rebuilt checkpoint is worse than none.  But a `.bdb` SUFFIX does not
+# establish ownership: `BUDA_ARRAY_BDB` pointed (or mistyped) at a real
+# checkpoint would have this flow delete it, and there is no undo.  So the
+# only file removed without being asked is the flow's OWN default output;
+# anything the caller named is refused unless they say `BUDA_ARRAY_FRESH=1`.
+proc array_vehicle::may_rebuild_over {bdb who} {
+    variable bdb_is_ours
+    if {![file exists $bdb]} { return 1 }
+    set forced [expr {[info exists ::env(BUDA_ARRAY_FRESH)]
+                      && $::env(BUDA_ARRAY_FRESH) ne "0"}]
+    if {!$bdb_is_ours && !$forced} {
+        error "$who: refusing to overwrite $bdb -- BUDA_ARRAY_BDB named it, so\
+               it is yours, and this flow REBUILDS the design from an empty\
+               database.  Remove it, point BUDA_ARRAY_BDB elsewhere, or set\
+               BUDA_ARRAY_FRESH=1 to let the rebuild discard it."
+    }
+    if {[file extension $bdb] ne ".bdb"} {
+        error "$who: refusing to overwrite $bdb -- not a .bdb, so it is not a\
+               database this flow could have written"
+    }
+    return 1
 }
 
 # The diffable text form beside the working binary: `array.bdb` ->
@@ -202,7 +240,7 @@ proc array_vehicle::verdict {who} {
 # the tests that run these vehicles — hence a switch rather than a bare call
 # or a commented-out line nobody can use:
 #
-#     BUDA_ARRAY_VIZ=1 tclsh flow/tcl/array_save.tcl 3 2
+#     BUDA_ARRAY_VIZ=1 tclsh flow/tcl/array_save.tcl
 #
 # On a host with no display it reports BUDA-1903 and carries on, so asking
 # for it over ssh tells you why you got no window instead of nothing.

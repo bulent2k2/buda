@@ -243,12 +243,18 @@ is how a candidate picked by hand in the explorer gets lost between runs.
 split into the two sessions a person actually works in:
 
 ```bash
-tclsh flow/tcl/array_save.tcl 3 2                        # build, route, look
-BUDA_ARRAY_VIZ=1 tclsh flow/tcl/array_save.tcl 3 2       # ...with the viewer
+tclsh flow/tcl/array_save.tcl                            # build, route, look
+BUDA_ARRAY_VIZ=1 tclsh flow/tcl/array_save.tcl           # ...with the viewer
 
 BUDA_ARRAY_PIN=diag=14 tclsh flow/tcl/array_resume.tcl   # re-plan with a choice
 tclsh flow/tcl/array_resume.tcl                          # again; the pin holds
 ```
+
+The default 2 × 2 is clean, so every line above exits 0. Passing `3 2`
+selects the vehicle's known-dirty shape (`array.tcl`'s documented antenna
+residual) — still a valid checkpoint, and still resumable, but the flow's
+self-check exits **1** on it by design, which will stop a `set -e` script at
+the first line.
 
 Session 2 declares the technology and **nothing else**: no cells, no buses,
 no bundler, no generation. `load_pipeline` brings back the bundles, every

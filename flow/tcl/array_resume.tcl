@@ -36,7 +36,7 @@
 # `array_save.tcl` used, so the two sessions cannot disagree about the design
 # they are both talking about.
 #
-#     tclsh flow/tcl/array_save.tcl 3 2                        # session 1
+#     tclsh flow/tcl/array_save.tcl                            # session 1
 #     BUDA_ARRAY_PIN=diag=14 tclsh flow/tcl/array_resume.tcl   # session 2
 #
 # The re-plan honors the pin, and the checkpoint is written again — so the
