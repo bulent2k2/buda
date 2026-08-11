@@ -1606,23 +1606,59 @@ def test_v26_absolute_persists_and_restores(tmp_path):
     assert spec.active() and spec.width_slots == 2
 
 
-def test_v26_restored_absolute_without_a_grid_is_loud():
-    # Rules restore at open_bdb, which can precede the script's pattern
-    # declarations.  An unquantizable absolute rule must SAY so rather than
-    # quietly charging default width.
-    import tempfile, os
-    d = tempfile.mkdtemp()
-    path = os.path.join(d, "b.bdb")
+def _persisted_abs_rule(tmp_path, decl="def_ndr abs3 width 3 layers M3"):
+    """A BDB carrying one absolute rule, ready to reopen."""
     s1 = _bare_session()
-    _run(s1, f"open_bdb {path}")
+    _run(s1, f"open_bdb {tmp_path}/b.bdb")
     for line in ("def_layer 3 M3 H 20",
                  "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1"):
         _run(s1, line)
-    _run(s1, "def_ndr abs3 width 3 layers M3")
+    _run(s1, decl)
     del s1
+    return f"{tmp_path}/b.bdb"
+
+
+def test_v26_restored_absolute_without_a_grid_says_so(tmp_path):
+    # Rules restore at open_bdb, which can precede the script's pattern
+    # declarations.  An unquantizable absolute rule must SAY so rather than
+    # quietly charging default width.
+    path = _persisted_abs_rule(tmp_path)
     s2 = _bare_session()                      # no layers, no patterns
     out = _run(s2, f"open_bdb {path}")
-    assert "cannot be quantized yet" in out, out
+    assert "quantization deferred" in out, out
+
+
+def test_v26_restored_absolute_quantizes_when_the_grid_arrives(tmp_path):
+    """Codex P1 on #682: quantizing ONLY at restore left a rule opened
+    before its patterns with no slot count and no way to acquire one —
+    `_spec_of` fell back to 1/0, which for a width/spacing-only rule is an
+    INACTIVE spec, so the design routed with the persisted constraint
+    silently dropped.  Re-declaring is not a workaround: `def_ndr` refuses
+    a duplicate name.  The quantization is now derived at first use."""
+    path = _persisted_abs_rule(tmp_path)
+    s2 = _bare_session()
+    _run(s2, f"open_bdb {path}")              # patterns NOT declared yet
+    assert "width_slots_max" not in s2._ndr_rules["abs3"]
+    for line in ("def_layer 3 M3 H 20",
+                 "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1"):
+        _run(s2, line)
+    # First use derives it against the grid that will actually be routed on.
+    spec = ndr_cmds._spec_of(s2, "abs3")
+    assert spec.width_slots == 2, "the restored constraint must survive"
+    assert spec.active(), "a 2-slot rule that reads inactive is the bug"
+    assert s2._ndr_rules["abs3"]["width_slots_max"] == 2   # memoized
+
+
+def test_v26_restored_absolute_still_unpatterned_at_use_is_fatal(tmp_path):
+    # Deferral is not permission: a rule whose governed layer STILL has no
+    # pattern when it is about to govern routing gets the same refusal
+    # `def_ndr` would have made, at the first moment it can be made.
+    path = _persisted_abs_rule(tmp_path)
+    s2 = _bare_session()
+    _run(s2, f"open_bdb {path}")
+    _run(s2, "def_layer 3 M3 H 20")           # layer, but no track pattern
+    with pytest.raises(SystemExit):
+        ndr_cmds._spec_of(s2, "abs3")
 
 
 def test_v26_absolute_joins_the_pricing_fingerprint():

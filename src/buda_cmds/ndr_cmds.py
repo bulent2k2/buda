@@ -135,28 +135,19 @@ def restore_ndr_from_bdb(session):
             # re-derived rather than stored: the same rule against a
             # different stack is a different slot count, and a stale one
             # would be charged against geometry it never measured.
-            pitches, bare = _abs_layer_pitches(session, rules[row.name])
-            if pitches and not bare:
-                ws, gs = 1, 0
-                for pitch in pitches.values():
-                    probe = buda.NdrSpec()
-                    probe.width_abs = rules[row.name]["width_abs"]
-                    probe.spacing_abs = rules[row.name]["spacing_abs"]
-                    probe = buda.ndr_resolve_for_pitch(probe, pitch)
-                    ws = max(ws, probe.width_slots)
-                    gs = max(gs, probe.guard_slots)
-                rules[row.name]["width_slots_max"] = ws
-                rules[row.name]["guard_slots_max"] = gs
-            else:
-                # No grid yet (rules restore at open_bdb, before the script
-                # re-declares patterns).  LOUD rather than silently charging
-                # a default-width rule: the caller must declare the patterns
-                # and re-declare, exactly as a fresh declaration requires.
-                print(f"WARNING: [NDR] restored absolute rule '{row.name}' "
-                      f"cannot be quantized yet — its governed layers have "
-                      f"no track pattern in this session.  Declare them "
-                      f"(def_track_pattern) before routing, or the rule "
-                      f"charges default width.")
+            if not ensure_abs_quantization(session, rules[row.name]):
+                # No grid yet — the common case, since rules restore at
+                # `open_bdb` and the script declares its patterns after.
+                # DEFERRED, not lost: the quantization is derived at the
+                # rule's first use (_spec_of), by which time the patterns
+                # exist.  Note rather than warn; the LOUD failure lives at
+                # first use, where a still-unpatterned layer is a real
+                # error instead of a script-order artifact.
+                print(f"[NDR] restored absolute rule '{row.name}': "
+                      f"quantization deferred — its governed layers have "
+                      f"no track pattern yet, so it is derived when the "
+                      f"rule is first used (declare def_track_pattern "
+                      f"before bundling)")
         restored_rules.add(row.name)
     for prefix, rule in session.bdb.ndr_scopes():
         if prefix in scopes:             # session-typed wins
@@ -205,6 +196,7 @@ def ndr_pricing_fp(session, rule_name):
         # never VOID a restored plan.  The declared values join the stamp
         # too: two absolutes can quantize alike on today's grid and differ
         # on tomorrow's.
+        ensure_abs_quantization(session, r)   # restored-before-patterns
         ws = r.get("width_slots_max", 1)
         gs = r.get("guard_slots_max", 0)
     else:
@@ -317,8 +309,25 @@ def _spec_of(session, rule_name):
     spec.width_abs    = r.get("width_abs", 0.0)
     spec.spacing_abs  = r.get("spacing_abs", 0.0)
     if spec.width_abs > 0.0 or spec.spacing_abs > 0.0:
-        # Absolute: the CONSERVATIVE resolution computed at declaration
-        # (max over the governed layers); consumers narrow it per layer.
+        # Absolute: the CONSERVATIVE resolution (max over the governed
+        # layers); consumers narrow it per layer.  Derived at declaration
+        # when the patterns were already there, HERE when the rule was
+        # restored from a BDB before the script declared them.
+        if not ensure_abs_quantization(session, r):
+            # This is the same refusal `def_ndr` makes, at the first moment
+            # it can be made for a restored rule: the alternative is
+            # charging default width for a rule the design persisted, which
+            # is a silently unconstrained route.
+            _, bare = _abs_layer_pitches(session, r)
+            missing = (", ".join(f"L{l}" for l in bare) if bare
+                       else "no layer in this session")
+            print(f"Error: NDR rule '{rule_name}' declares an absolute "
+                  f"width/spacing but {missing} has no def_track_pattern, "
+                  f"so the rule cannot be quantized against the grid it "
+                  f"would route on.  Declare the patterns before bundling "
+                  f"(a restored rule cannot be re-declared — def_ndr "
+                  f"refuses a duplicate name).")
+            sys.exit(1)
         spec.width_slots = r.get("width_slots_max", 1)
         spec.guard_slots = r.get("guard_slots_max", 0)
     else:
@@ -370,7 +379,68 @@ def _parse_value(tok, what, name, session=None):
     return (1.0, a)
 
 
-def ndr_spec_for_layer(session, spec, layer):
+def ensure_abs_quantization(session, rule):
+    """Derive an absolute rule's CONSERVATIVE quantization (`width_slots_max`
+    / `guard_slots_max` — the largest slot count over the layers it may use)
+    if it does not have one yet.  Returns True when the rule now carries a
+    quantization, False when the grid still cannot supply one.
+
+    Idempotent and LAZY on purpose.  A declaration has its patterns by
+    construction (`def_ndr` refuses otherwise), but a rule RESTORED from a
+    BDB usually does not: `open_bdb` runs before the script re-declares
+    `def_track_pattern`.  Quantizing only at restore left such a rule with
+    no slot count and no way to acquire one — `_spec_of` then fell back to
+    1/0, which for a width/spacing-only rule is an INACTIVE spec, so the
+    design routed with the persisted constraint silently dropped.  (The
+    obvious workaround does not exist: re-declaring the name is a hard
+    error.)  Deriving it at first use instead means the value is always
+    taken from the grid that will actually be routed on.
+
+    Per-layer resolution can only REDUCE this maximum, so a consumer that
+    forgets to resolve over-charges rather than under-charges."""
+    if rule.get("width_abs", 0.0) <= 0.0 and rule.get("spacing_abs", 0.0) <= 0.0:
+        return True                       # multiplier rule: nothing to derive
+    if "width_slots_max" in rule:
+        return True
+    pitches, bare = _abs_layer_pitches(session, rule)
+    if not pitches or bare:
+        # A max over a SUBSET is not conservative — a pattern declared later
+        # on an omitted layer can need more slots — so an incomplete grid
+        # yields no quantization at all rather than an optimistic one.
+        return False
+    ws, gs = 1, 0
+    for pitch in pitches.values():
+        probe = buda.NdrSpec()
+        probe.width_abs, probe.spacing_abs = (rule["width_abs"],
+                                              rule["spacing_abs"])
+        probe = buda.ndr_resolve_for_pitch(probe, pitch)
+        ws, gs = max(ws, probe.width_slots), max(gs, probe.guard_slots)
+    rule["width_slots_max"], rule["guard_slots_max"] = ws, gs
+    return True
+
+
+def ndr_layer_pitch(session, layer, wrapper=None):
+    """The per-signal-slot pitch an absolute rule quantizes against on
+    `layer`: the SHARED CELL's derived view when `wrapper` belongs to a
+    `set_cell_layer_share` cell (that cell's own interconnect is planned,
+    NUTS-solved and DNUTS-placed on a thinned pattern whose real cost is
+    `unit_pitch / n_kept`), otherwise the global stack's.
+
+    One resolver so a reporting path cannot read a different pitch than the
+    stage it reports on — the R4 single-sourcing rule applied to the pitch
+    itself.  Passing no wrapper always yields the global pitch, which is
+    what every flow without fractional shares uses anyway."""
+    if wrapper is not None:
+        share_pitch = getattr(session, "_shared_cell_ndr_pitch", None)
+        if share_pitch is not None:
+            p = share_pitch(wrapper, layer)
+            if p is not None:
+                return p
+    layers = getattr(session, "layers", None)
+    return layers.bit_pitch(layer) if layers is not None else 0.0
+
+
+def ndr_spec_for_layer(session, spec, layer, wrapper=None):
     """`spec` as it resolves on ONE layer — the R1 per-layer quantization
     of an absolute rule, identity for a multiplier rule (and for an unknown
     or unpatterned layer, whose pitch is 0).
@@ -380,14 +450,14 @@ def ndr_spec_for_layer(session, spec, layer):
     make_bus_segments pre-resolve), and every Python consumer that knows a
     layer — the R3 realizability check, the R9 audit, `dump_ndr`'s routed
     view — must resolve identically or it reports on a rule the engine did
-    not place.  A consumer with NO layer in hand keeps the spec's stored
-    quantization, which is the conservative MAXIMUM over the rule's
-    governed layers: over-strict, never permissive."""
+    not place.  Pass `wrapper` wherever one is in hand so a shared cell's
+    derived pitch is used (see ndr_layer_pitch).  A consumer with NO layer
+    keeps the spec's stored quantization, which is the conservative MAXIMUM
+    over the rule's governed layers: over-strict, never permissive."""
     if spec.width_abs <= 0.0 and spec.spacing_abs <= 0.0:
         return spec
-    layers = getattr(session, "layers", None)
-    pitch = layers.bit_pitch(layer) if layers is not None else 0.0
-    return buda.ndr_resolve_for_pitch(spec, pitch)
+    return buda.ndr_resolve_for_pitch(
+        spec, ndr_layer_pitch(session, layer, wrapper))
 
 
 def _abs_layer_pitches(session, rule):
@@ -546,18 +616,7 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
                   f"with `layers <csv>`, or use the multiplier form (xN), "
                   f"which is pattern-independent")
             sys.exit(1)
-        # The stored quantization is the CONSERVATIVE one: the largest slot
-        # count over the governed layers.  Per-layer resolution can then
-        # only reduce it, so any consumer that forgets to resolve
-        # over-charges rather than under-charges.
-        ws, gs = 1, 0
-        for pitch in pitches.values():
-            probe = buda.NdrSpec()
-            probe.width_abs, probe.spacing_abs = (rule["width_abs"],
-                                                  rule["spacing_abs"])
-            probe = buda.ndr_resolve_for_pitch(probe, pitch)
-            ws, gs = max(ws, probe.width_slots), max(gs, probe.guard_slots)
-        rule["width_slots_max"], rule["guard_slots_max"] = ws, gs
+        ensure_abs_quantization(session, rule)
     _rules(session)[name] = rule
     if not hasattr(session, "_ndr_rules_typed"):
         session._ndr_rules_typed = set()
@@ -1056,7 +1115,10 @@ def validate_ndr_realizability(session):
         restricted = list(w.input.allowed_layers)
         lids = restricted or _all_layer_ids(session)
         for lid in lids:
-            key = (spec.rule_name, lid)
+            # The pitch joins the key: with fractional layer SHARES two
+            # bundles can resolve the same (rule, layer) differently, so
+            # deduping on the pair alone would check one and skip the other.
+            key = (spec.rule_name, lid, ndr_layer_pitch(session, lid, w))
             if key in checked:
                 continue
             checked.add(key)
@@ -1076,7 +1138,7 @@ def validate_ndr_realizability(session):
                 continue
             # Per-layer width: the rule's own resolution against THIS
             # layer's pitch (identity for a multiplier rule).
-            lspec = ndr_spec_for_layer(session, spec, lid)
+            lspec = ndr_spec_for_layer(session, spec, lid, w)
             if lspec.width_slots <= 1:
                 continue                   # fits in one slot on this layer
             pat = grid.get_layer_grid(lid).global_pattern()
@@ -1120,6 +1182,7 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
     s_rest = getattr(session, "_ndr_scopes_restored", None) or set()
     for name, r in sorted(rules.items()):
         if r.get("width_abs", 0) > 0 or r.get("spacing_abs", 0) > 0:
+            ensure_abs_quantization(session, r)   # restored-before-patterns
             ws, gs = r.get("width_slots_max", 1), r.get("guard_slots_max", 0)
         else:
             ws = max(1, math.ceil(r["width_x"]))
@@ -1171,12 +1234,12 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
                 for lid in getattr(w.plan, "seg_layers", ()) or ():
                     if lid < 0 or lid in seen:
                         continue
-                    ls = ndr_spec_for_layer(session, spec, lid)
+                    ls = ndr_spec_for_layer(session, spec, lid, w)
                     seen[lid] = buda.ndr_group_demand(ls, nb)
                 for lid in sorted(k for k, v in seen.items() if v != du):
                     print(f"[NDR]   on layer {lid}: demand {seen[lid]} "
                           f"slot(s) — the absolute width resolves to "
-                          f"{ndr_spec_for_layer(session, spec, lid).width_slots}"
+                          f"{ndr_spec_for_layer(session, spec, lid, w).width_slots}"
                           f" slot(s)/bit at that layer's pitch")
 
 
@@ -1394,7 +1457,7 @@ def audit_ndr_dnuts(session, wrapper, index=None):
         # instead would report every correctly-placed governed bit on a
         # coarser layer as NDR_WIDTH: the maximum is a charging basis, not
         # a geometric requirement (identity for a multiplier rule).
-        spec = ndr_spec_for_layer(session, base_spec, seg_layer)
+        spec = ndr_spec_for_layer(session, base_spec, seg_layer, wrapper)
         if not spec.active():
             continue          # the rule is the default width on this layer
         # R5a: a credit-enabled rule's END may be rail-credited — expected

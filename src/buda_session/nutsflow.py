@@ -766,6 +766,53 @@ class NutsFlowMixin:
         except Exception:
             return 1
 
+    def _shared_cell_ndr_pitch(self, w, layer):
+        """The per-signal-slot pitch an ABSOLUTE NDR rule on `w` must
+        quantize against on `layer`, or None when the global stack's is
+        right (every flow without fractional layer shares — the
+        byte-identity short-circuit).
+
+        A `set_cell_layer_share` cell's own interconnect is solved against
+        the DERIVED THINNED VIEW: the local planner and abstract NUTS take
+        `bit_pitch = unit_pitch / n_kept` (hier.py `_cell_share_views`), and
+        the reference DNUTS solve runs on a grid clone carrying the thinned
+        pattern — SAME period, fewer SIGNAL slots — so `unit_pitch/n_kept`
+        is not merely the books' figure there, it is the grid's own
+        per-signal-slot cost.  Resolving against the global stack instead
+        would have DNUTS demand more slots than the local planner priced
+        and strand an otherwise accepted template (Codex P1 on #682)."""
+        if not getattr(self, "_cell_layer_shares", None):
+            return None                    # no shares declared anywhere
+        cell = getattr(w.input.original_bundle, "cell_context", "")
+        if not cell:
+            return None                    # top-level: the global stack
+        view, _thinned = self._cell_share_views(cell)
+        if view is self.layers:
+            return None                    # no shares on THIS cell
+        p = view.bit_pitch(layer)
+        return p if p > 0.0 else None
+
+    def _resolve_shared_cell_ndr(self, bus_segs):
+        """Re-quantize governed segments of a shared cell against its
+        derived view (see `_shared_cell_ndr_pitch`).  A no-op — and so
+        byte-identical — unless a flow combines `set_cell_layer_share` with
+        an ABSOLUTE NDR rule; a multiplier rule is pitch-independent and a
+        cell with no shares resolves to the global stack anyway."""
+        by_bid = {w.input.original_bundle.id: w for w in self.bundles
+                  if w.input.ndr.active()
+                  and (w.input.ndr.width_abs > 0.0
+                       or w.input.ndr.spacing_abs > 0.0)}
+        if not by_bid:
+            return
+        for bs in bus_segs:
+            w = by_bid.get(bs.bundle_id)
+            if w is None:
+                continue
+            pitch = self._shared_cell_ndr_pitch(w, bs.layer)
+            if pitch is None:
+                continue
+            bs.ndr = buda.ndr_resolve_for_pitch(w.input.ndr, pitch)
+
     def _seg_admission_need(self, w, sel, seg_idx, credited=True, layer=None):
         """SIGNAL slots the segment must find to be admitted — the Python
         mirror of `bus_seg_min_demand` (detailed_nuts.h), which is what the
@@ -801,7 +848,14 @@ class NutsFlowMixin:
         # would report a governed seat doomed that DNUTS in fact places.
         if layer is not None and (spec.width_abs > 0.0 or
                                   spec.spacing_abs > 0.0):
-            spec = buda.ndr_resolve_for_pitch(spec, self.layers.bit_pitch(layer))
+            # A shared cell's own interconnect is solved on its DERIVED
+            # view, so the census must measure the seat in the same units
+            # the engine admits it in (_shared_cell_ndr_pitch); None =
+            # every flow without fractional shares.
+            pitch = self._shared_cell_ndr_pitch(w, layer)
+            if pitch is None:
+                pitch = self.layers.bit_pitch(layer)
+            spec = buda.ndr_resolve_for_pitch(spec, pitch)
         if credited and spec.credit_shields:
             return buda.ndr_group_demand_credited(spec, nbits, True, True)
         return buda.ndr_group_demand(spec, nbits)
@@ -2031,6 +2085,7 @@ class NutsFlowMixin:
         # on the layer the planner priced it on.
         bus_segs = buda.make_bus_segments(self.bundles, self.nuts_result,
                                           self.fp, bit_order, self.layers)
+        self._resolve_shared_cell_ndr(bus_segs)
         # Bottom-up cells (stage c): solve the reference instance once, copy
         # its bits/vias to the aligned siblings, and solve everything else
         # around the copies (their tracks pre-reserved).  May raise under the

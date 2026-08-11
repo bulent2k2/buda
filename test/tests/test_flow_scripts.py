@@ -1003,6 +1003,27 @@ def test_ndr_bond_shield_bonding():
     assert "no violations" in out and "NDR_" not in out, out
 
 
+def test_ndr_absolute_shared_cell_bottom_up():
+    """flow/ndr_abs_shared_bottomup.buda (Codex P1 on #682): a shared
+    cell's own interconnect is planned, NUTS-solved and DNUTS-placed on a
+    THINNED view whose per-signal-slot cost is `unit_pitch / n_kept`, so an
+    R1 absolute rule inside that cell must quantize against it.  Resolving
+    against the global stack instead made DNUTS demand 8 slots on the
+    6-slot leased supply the local planner had priced 4 against — every bit
+    of the reference class stranded, and the copies with it (measured
+    before the fix: 12 placed / 16 unplaced / 16 NDR_WIDTH violations)."""
+    out, rc = run_script("ndr_abs_shared_bottomup.buda")
+    assert_clean(out, rc, "ndr_abs_shared_bottomup.buda")
+    # The vehicle is only meaningful if all three features actually engage.
+    assert "local solve under thinned view" in out, out
+    assert "DNUTS reference solve under" in out, out
+    assert "copied to 3 sibling instance(s)" in out, out
+    # The two stages agree, so nothing strands.
+    assert "0 bits unplaced" in out, out
+    assert "insufficient signal tracks" not in out, out
+    assert "no violations" in out and "NDR_" not in out, out
+
+
 def test_ndr_bottom_up_composition():
     """flow/ndr_bottom_up.buda (requirement R13): a governed cell template
     marked set_bottom_up is solved once and COPIED to every instance,
