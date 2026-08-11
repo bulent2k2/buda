@@ -533,6 +533,10 @@ private:
     PlanResult plan_bundle(const BundleWrapper& bw, PlanMode mode,
                            std::set<std::pair<int,int>>* contended = nullptr,
                            std::vector<CandidateCost>* costs_out = nullptr);
+    // Diagnosis for a bundle that reached the end of the escalation ladder
+    // with nothing committed: names the routing direction its layer mask
+    // starved, or "" when the mask is not the cause.  See the definition.
+    std::string mask_starvation_note_(const BundleWrapper& bw) const;
     // sign=+1 applies the plan's demand to the cut state; sign=-1 rips it up.
     void commit_plan(const BundleWrapper& bw, const PlanResult& plan, double sign = 1.0);
     BundleAssignment make_assignment(const BundleWrapper& bw, const PlanResult& plan) const;

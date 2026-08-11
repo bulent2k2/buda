@@ -26,6 +26,17 @@ unbuildable.
 > crossings, unplaced bits). `check_connectivity` remains registered as a
 > legacy alias with identical behavior, so existing scripts keep working.
 
+Every stage after planning flags an **unrouted bundle** (`UNROUTED_BUNDLE`):
+a bundle that has candidate topologies but which the planner selected none
+of, so it carries no layer assignment and no wire. The audit walks bundles by
+their selected candidate, so such a bundle previously contributed nothing and
+the run reported `Success: no violations found` over a bus with no metal
+anywhere. The planner names the *cause* at the moment it happens (see its
+`NOTHING committed` warning — most often a layer restriction with no legal
+layer for a segment's direction); this is the safety net that refuses to call
+the design clean whatever the cause was. Before `run_planner` no bundle has a
+selection and none is flagged.
+
 The `dnuts` stage additionally audits every bundle governed by a
 [non-default rule](ndr.md): **`NDR_WIDTH`** (a governed bit placed narrower
 than its rule's width), **`NDR_SPACING`** (foreign metal — another bundle's

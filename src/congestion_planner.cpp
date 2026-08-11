@@ -58,6 +58,71 @@ static inline int ndr_units(const BundleInput& in, int n,
         ndr_has_abs(in.ndr) ? ls.bit_pitch(layer_id) : 0.0);
 }
 
+// Why a bundle reached the end of the escalation ladder with nothing
+// committed.  Returns "" when the cause is not a starved layer mask, so the
+// caller's message degrades to the bare fact.
+//
+// This is a DEDUCTION, not a guess.  BEST_EFFORT (the last rung) turns off
+// both the slide-window and the overflow filters, so the only unconditional
+// filter left in the layer enumeration is `allows_layer` — the mask set by
+// an NDR rule's `layers <csv>`, `set_cell_layer_cap` or
+// `set_cell_layer_share`.  A non-empty candidate list that still scores
+// nothing therefore means some segment direction has no allowed layer.
+//
+// Reported per DIRECTION rather than as "the mask is empty", because the
+// legitimate case is direction-shaped: a rule restricted to the V layers is
+// perfectly valid for a bus that routes purely vertically, and only becomes
+// a fault when a candidate needs an H segment.
+std::string CongestionPlanner::mask_starvation_note_(
+        const BundleWrapper& bw) const {
+    if (bw.input.candidates.empty())
+        return ". It has NO candidate topologies — the generator produced "
+               "none (a degenerate placement; see its own unrouted-bus "
+               "warning)";
+    bool needs_h = false, needs_v = false;
+    for (const auto& t : bw.input.candidates)
+        for (const auto& s : t.segments)
+            ((s.start.y == s.end.y) ? needs_h : needs_v) = true;
+    // The EFFECTIVE choice set: the bundle's mask when it has one, else the
+    // whole declared stack.  Both can starve a direction, and they are
+    // different faults with different fixes, so the message names which.
+    const bool masked = !bw.input.allowed_layers.empty();
+    std::vector<int> pool;
+    if (masked)
+        pool.assign(bw.input.allowed_layers.begin(),
+                    bw.input.allowed_layers.end());
+    else {
+        pool = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
+        for (int lid : layers_.get_layer_ids_by_dir(LayerDir::VERTICAL))
+            pool.push_back(lid);
+    }
+    bool has_h = false, has_v = false;
+    for (int lid : pool) {
+        if (!layers_.has_layer(lid)) continue;
+        if (layers_.get_layer_dir(lid) == LayerDir::HORIZONTAL) has_h = true;
+        else                                                    has_v = true;
+    }
+    const char* missing = (needs_h && !has_h) ? "HORIZONTAL"
+                        : (needs_v && !has_v) ? "VERTICAL"
+                        : nullptr;
+    if (!missing) return "";
+    std::string names;
+    for (int lid : pool) {
+        if (!names.empty()) names += ",";
+        const Layer* l = layers_.get_layer(lid);
+        names += l ? l->name : ("L" + std::to_string(lid));
+    }
+    if (masked)
+        return std::string(". Its candidates need a ") + missing +
+               " segment, but its allowed layers {" + names + "} contain no " +
+               missing + " layer — the restriction (an NDR rule's `layers`, "
+               "a set_cell_layer_cap band, or a set_cell_layer_share) cannot "
+               "be satisfied in that direction";
+    return std::string(". Its candidates need a ") + missing +
+           " segment, but the declared layer stack {" + names + "} has no " +
+           missing + " layer at all — declare one with def_layer";
+}
+
 // Per-candidate scoring overlay (plan_bundle).  While a candidate is being
 // scored, its own within-candidate charges live here instead of in cuts_ —
 // the committed cut state stays READ-ONLY for the whole scoring pass, which
@@ -2525,7 +2590,20 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
             }
         }
 
-        if (!plan.found) continue;   // no candidates scored (empty range)
+        // (5) NOTHING committed.  Every other rung above reports itself; this
+        //     one used to `continue` in silence, so a bundle could end the
+        //     planner with no assignment, no segments, and no message — a bus
+        //     with no wire anywhere that every later stage then had nothing to
+        //     say about (`run_nuts` warns generically without naming it, and
+        //     `check_design` had no bundle to audit, so it printed Success).
+        if (!plan.found) {
+            std::cout << "[Planner] WARNING: Bundle "
+                      << bw.input.original_bundle.id
+                      << ": NOTHING committed — this bundle gets no layer "
+                      << "assignment and no route"
+                      << mask_starvation_note_(bw) << "\n";
+            continue;
+        }
 
         // Commit the winning topology's per-segment choices to the cut state
         // (the rip-up path already did).
