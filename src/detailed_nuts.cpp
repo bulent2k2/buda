@@ -1421,8 +1421,9 @@ std::vector<BusSegment> make_bus_segments(
     // placed with (this loop is the former Python handoff, verbatim).
     std::map<int, int>                  bid_to_nbits;
     std::map<int, std::vector<ConnSeg>> bid_to_cs;
-    std::map<int, const std::map<std::pair<int,int>, std::vector<int>>*> bid_to_tapbits;
-    std::map<int, const std::map<int, SegEndpoints>*> bid_to_bterms;
+    // Selected topology per bundle, for the shared busterm-tap membership
+    // predicate (seg_busterm_serves_bit) the audit reads too.
+    std::map<int, const Topology*> bid_to_topo;
     // Tapered fan-in: the selected topology's per-segment bit membership
     // (empty for every non-fan-in bundle).
     std::map<int, const std::map<int, std::vector<int>>*> bid_to_bits;
@@ -1446,10 +1447,7 @@ std::vector<BusSegment> make_bus_segments(
         bid_to_cs[bid] = ct.segs();
         if (!topo.seg_bits.empty())
             bid_to_bits[bid] = &topo.seg_bits;
-        if (!topo.seg_busterm_bits.empty()) {
-            bid_to_tapbits[bid] = &topo.seg_busterm_bits;
-            bid_to_bterms[bid]  = &topo.seg_busterms;
-        }
+        bid_to_topo[bid] = &topo;
     }
 
     std::vector<BusSegment> out;
@@ -1512,26 +1510,23 @@ std::vector<BusSegment> make_bus_segments(
                     bs.connections.push_back(c);
                 } else {  // BUSTERM: keep the block-face tap reachable per-bit
                     bs.busterm_faces.push_back((double)conn.face_coord);
-                    // Which bits this tap actually serves.  Resolve the
-                    // tap ORDINAL by block name against seg_busterms, so
-                    // the lookup does not depend on conn ordering.  Empty
-                    // = serves every bit (untapered, historical).
+                    // Which bits this tap actually serves — materialized here
+                    // as a bit MASK because adjust_bit_spans runs per bit and
+                    // must not re-resolve the ordinal 20 times per tap.  The
+                    // verdict comes from the shared predicate, so the placer
+                    // and check_dnuts cannot disagree about a tap.  Empty
+                    // mask = serves every bit (untapered, historical).
                     std::vector<int> fb;
-                    auto tbit = bid_to_tapbits.find(ts.bundle_id);
-                    auto btit = bid_to_bterms.find(ts.bundle_id);
-                    if (tbit != bid_to_tapbits.end() && btit != bid_to_bterms.end()) {
-                        auto se = btit->second->find(ts.seg_idx);
-                        if (se != btit->second->end()) {
-                            const Busterm* eps[2] = {
-                                se->second.first  ? &*se->second.first  : nullptr,
-                                se->second.second ? &*se->second.second : nullptr };
-                            for (int k = 0; k < 2; ++k) {
-                                if (!eps[k] || eps[k]->block_name != conn.block_name) continue;
-                                auto f = tbit->second->find({ts.seg_idx, k});
-                                if (f != tbit->second->end()) fb = f->second;
-                                break;
-                            }
-                        }
+                    auto tp = bid_to_topo.find(ts.bundle_id);
+                    if (tp != bid_to_topo.end() &&
+                        !tp->second->seg_busterm_bits.empty()) {
+                        const int nb = bid_to_nbits.count(ts.bundle_id)
+                                     ? bid_to_nbits[ts.bundle_id] : 0;
+                        for (int b = 0; b < nb; ++b)
+                            if (seg_busterm_serves_bit(*tp->second, ts.seg_idx,
+                                                       conn.block_name, b))
+                                fb.push_back(b);
+                        if ((int)fb.size() == nb) fb.clear();   // serves all
                     }
                     bs.busterm_face_bits.push_back(std::move(fb));
                 }

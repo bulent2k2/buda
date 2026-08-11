@@ -1592,6 +1592,24 @@ std::vector<int> derive_fanin_seg_bits(
     return fallback_bits;
 }
 
+bool seg_busterm_serves_bit(const Topology& topo, int si,
+                            const std::string& block, int bit)
+{
+    if (topo.seg_busterm_bits.empty()) return true;   // untapered
+    auto bt = topo.seg_busterms.find(si);
+    if (bt == topo.seg_busterms.end()) return true;
+    const Busterm* eps[2] = {
+        bt->second.first  ? &*bt->second.first  : nullptr,
+        bt->second.second ? &*bt->second.second : nullptr };
+    for (int k = 0; k < 2; ++k) {
+        if (!eps[k] || eps[k]->block_name != block) continue;
+        auto f = topo.seg_busterm_bits.find({si, k});
+        if (f == topo.seg_busterm_bits.end() || f->second.empty()) return true;
+        return std::binary_search(f->second.begin(), f->second.end(), bit);
+    }
+    return true;   // no tap ordinal for this block: nothing recorded, so serve all
+}
+
 // Per-segment conn COUNT under the connections ConnTopology infers (BUSTERM
 // taps + SEG junctions) -- the attachment count the placed stages see, and the
 // ANTENNA predicate's input (a segment attached at < 2 points dangles).

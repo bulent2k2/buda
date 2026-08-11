@@ -360,6 +360,22 @@ inline int seg_bit_count(const Topology& t, int si, int nbits) {
     return nbits;
 }
 
+// Does the BUSTERM tap on segment `si` to block `block` serve bit `bit`?
+//
+// The ONE predicate both consumers of seg_busterm_bits read: DetailedNUTS
+// (which re-extends a bit's span to a tap it serves, and retracts a stale end
+// past one it does not) and check_dnuts (which requires a bit's span to reach
+// the taps it serves).  Sharing it is the point — a tap the placer declines to
+// reach for a bit must be a tap the audit declines to demand, or the two stages
+// disagree and every tapered fan-out reads as a BUSTERM_OPEN.
+//
+// Resolves the tap ORDINAL by block name against seg_busterms, so it does not
+// depend on any caller's conn ordering.  With nothing recorded — no membership
+// for this (segment, ordinal), or no seg_busterms entry at all — every tap
+// serves every bit, which is the untapered historical behavior.
+bool seg_busterm_serves_bit(const Topology& topo, int si,
+                            const std::string& block, int bit);
+
 // Derive per-segment bit membership for a FAN-IN bundle (tapered bus).
 // Inputs: one driver block + receiver block list PER BIT (index = the
 // bundle's net order, i.e. the global bit index).  For each bit, walk the
