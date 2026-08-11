@@ -271,6 +271,13 @@ void bind_routing(py::module_& m) {
         .def_readwrite("bridge_segments",       &Topology::bridge_segments)
         .def_readwrite("connected_block_names", &Topology::connected_block_names)
         .def_readwrite("seg_bits",              &Topology::seg_bits)
+        // seg_bits' companion: which bits each BUSTERM tap serves, keyed
+        // (segment index, tap ordinal).  Read-only — it is DERIVED, and the
+        // one writer is derive_fanin_seg_bits.  Exposed because a taper
+        // question is nearly always "which bits does this tap belong to?",
+        // and answering it from Python otherwise means inferring it from the
+        // spans the placer already produced.
+        .def_readonly("seg_busterm_bits",       &Topology::seg_busterm_bits)
         .def_readwrite("feedthru_blocks",       &Topology::feedthru_blocks)
         .def_readwrite("wl_lo",                 &Topology::wl_lo)
         .def_readwrite("wl_hi",                 &Topology::wl_hi);

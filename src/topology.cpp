@@ -1582,6 +1582,30 @@ std::vector<int> derive_fanin_seg_bits(
         }
     }
 
+    // Seed an entry for every tap on a segment the walk gave bits to, so that
+    // "a tap with no bits" is RECORDED rather than inferred from a missing key.
+    // Absence was doing double duty: "this topology is untapered" and "the walk
+    // never reached this tap", and the second reading handed the tap back to
+    // every bit riding the segment — the fallback hole.  A tap on a segment
+    // whose riding groups do not name its block as an endpoint serves NO bit,
+    // and that is now what the map says.
+    //
+    // Deliberately restricted to segments the walk DID populate.  A segment in
+    // no group's path carries no bits by the walk but every bit by the
+    // seg_bit_count fallback; its taps stay on the old serve-all reading rather
+    // than being declared empty on the strength of a walk that plainly did not
+    // account for it.  That is the conservative half of the same distinction:
+    // record what the walk established, do not infer from what it skipped.
+    for (int si = 0; si < n_seg; ++si) {
+        if (bits_of_seg[si].empty()) continue;
+        auto bt = topo.seg_busterms.find(si);
+        if (bt == topo.seg_busterms.end()) continue;
+        if (bt->second.first)  tap_bits.emplace(std::make_pair(si, 0),
+                                                std::vector<int>{});
+        if (bt->second.second) tap_bits.emplace(std::make_pair(si, 1),
+                                                std::vector<int>{});
+    }
+
     for (int si = 0; si < n_seg; ++si) {
         auto& v = bits_of_seg[si];
         std::sort(v.begin(), v.end());
@@ -1591,7 +1615,10 @@ std::vector<int> derive_fanin_seg_bits(
     for (auto& [key, v] : tap_bits) {
         std::sort(v.begin(), v.end());
         v.erase(std::unique(v.begin(), v.end()), v.end());
-        if (!v.empty()) topo.seg_busterm_bits[key] = std::move(v);
+        // Stored even when EMPTY — that is the whole point of the seeding
+        // above.  An empty list means "this tap serves no bit"; only a MISSING
+        // key still means "serves every bit".
+        topo.seg_busterm_bits[key] = std::move(v);
     }
     std::sort(fallback_bits.begin(), fallback_bits.end());
     fallback_bits.erase(std::unique(fallback_bits.begin(), fallback_bits.end()),
@@ -1611,7 +1638,11 @@ bool seg_busterm_serves_bit(const Topology& topo, int si,
     for (int k = 0; k < 2; ++k) {
         if (!eps[k] || eps[k]->block_name != block) continue;
         auto f = topo.seg_busterm_bits.find({si, k});
-        if (f == topo.seg_busterm_bits.end() || f->second.empty()) return true;
+        // MISSING key = serves every bit (a tap the derivation did not account
+        // for — see the seeding in derive_fanin_seg_bits).  An entry that is
+        // present and EMPTY is a recorded verdict, not a gap: this tap serves
+        // no bit, and binary_search says so.
+        if (f == topo.seg_busterm_bits.end()) return true;
         return std::binary_search(f->second.begin(), f->second.end(), bit);
     }
     return true;   // no tap ordinal for this block: nothing recorded, so serve all
