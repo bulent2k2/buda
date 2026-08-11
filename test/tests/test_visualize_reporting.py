@@ -113,21 +113,46 @@ def test_the_note_reaches_the_flow_log_too(tmp_path):
     assert "BUDA-1903" in log.read_text()
 
 
-def test_a_host_without_matplotlib_is_told_which_command_wanted_it(monkeypatch):
-    """A farm image built without the plotting stack: the ImportError from
-    `from buda_viz import …` names `matplotlib` and neither the command that
-    wanted it nor the fact that the rest of the run is unaffected."""
+def test_a_host_without_the_plotting_stack_is_told_which_command_wanted_it(
+        monkeypatch):
+    """A farm image built without matplotlib: the raw ImportError names the
+    module and neither the command that wanted it nor the fact that the rest
+    of the run is unaffected."""
     import builtins
     real = builtins.__import__
 
-    def no_mpl(name, *a, **k):
-        if name == "matplotlib" or name.startswith("matplotlib."):
+    def no_viz(name, *a, **k):
+        if name == "buda_viz":
             raise ImportError("No module named 'matplotlib'")
         return real(name, *a, **k)
 
-    monkeypatch.setattr(builtins, "__import__", no_mpl)
+    monkeypatch.setattr(builtins, "__import__", no_viz)
     out = _say(_session(no_viz=False), "visualize")
-    assert "BUDA-1903" in out and "matplotlib is not available" in out, out
+    assert "BUDA-1903" in out and "could not be loaded" in out, out
+
+
+def test_the_backend_is_not_probed_before_the_viz_layer_chooses_one():
+    """The macOS trap (Codex P1 on #688).  `get_backend()` auto-SELECTS and
+    LOCKS matplotlib's implicit default; on macOS that is the native backend
+    which intermittently segfaults with the IPC timer or several windows, and
+    which `buda_viz` overrides to TkAgg on import — but only when nothing has
+    been chosen yet.  A probe ahead of that import therefore does not read
+    the answer, it DECIDES it, and silently disables the override.
+
+    So the pre-import check must never touch the backend, and the probe must
+    live on the far side of the import.  Both halves are pinned here because
+    each alone would pass while the bug was present.
+    """
+    probed = []
+    real = vv._backend_cannot_show
+    try:
+        vv._backend_cannot_show = lambda: probed.append(1) or False
+        assert vv._no_window_reason(_session(no_viz=False)) is None
+        assert not probed, "_no_window_reason probed the backend"
+        vv._import_viz_or_reason()
+        assert probed, "the probe never happened after the import either"
+    finally:
+        vv._backend_cannot_show = real
 
 
 def test_an_unrecognised_backend_is_tried_rather_than_refused(monkeypatch):

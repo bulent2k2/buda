@@ -38,6 +38,12 @@ from ._options import reject_unknown_options
 def _backend_cannot_show():
     """The matplotlib backend is one that provably cannot put a window up.
 
+    **Only valid AFTER `buda_viz` has been imported** — see
+    `_import_viz_or_reason`.  `get_backend()` auto-selects and LOCKS the
+    implicit default, and on macOS that default is the segfault-prone native
+    `macosx`, which `buda_viz` exists to override; asking early would answer
+    the question and silently decide it.
+
     Asked as "is it KNOWN to be non-interactive", never as "is it known to be
     interactive": a third-party backend (`module://…`) is in neither builtin
     list, and answering "not interactive" for it would refuse a window we
@@ -62,45 +68,56 @@ def _backend_cannot_show():
 
 
 def _no_window_reason(session):
-    """Why a `visualize*` command will open NO window — or None if it will.
+    """Why a `visualize*` command will open NO window — or None if it MIGHT.
 
-    Two different things stop a window appearing and, before this existed,
-    both were the SAME silence: the command returned, printed nothing, and
-    the flow carried on as though a viewer were up.  That is how
-    `buda::visualize` reads from a Tcl flow — a command that succeeds and
-    does nothing.
+    Only the reason knowable WITHOUT touching matplotlib, which is what keeps
+    two separate promises: the command layer stays importable on a host with
+    no plotting stack (the headless-embedder requirement above), and the
+    backend is left unchosen for `buda_viz` to decide.  The rest of the
+    verdict is `_import_viz_or_reason`'s.
 
-      * **Asked for.**  `--no-viz`, `buda::viz off`, the web/embedded
-        servers.  The user requested the suppression, so this is an INFO —
-        but still said out loud, because a log read against its script
-        should show where the viewer was skipped.
-      * **Impossible.**  matplotlib's backend cannot show anything (a
-        headless farm machine, `MPLBACKEND=Agg`).  Nobody asked for that, so
-        it is a WARNING — and it is the one that had no voice at all:
-        `plt.show()` under Agg is a silent no-op, matplotlib 3.11 does not
-        even warn, so `bin/buda flow.buda` over ssh drew nothing and said
-        nothing either.
+    The suppression was ASKED for — `--no-viz`, `buda::viz off`, the
+    web/embedded servers — so it is an INFO.  Said out loud all the same,
+    because a log read against its script should show where the viewer was
+    skipped; before this it was a bare `return`, and a command that succeeds
+    and does nothing is exactly how `buda::visualize` read from a Tcl flow.
 
     Returns `(detail, severity)` or None.
     """
     if session.no_viz:
         return ("visualization is off for this session "
                 "(--no-viz, or buda::start -viz 0)", buda_diag.INFO)
+    return None
+
+
+def _import_viz_or_reason():
+    """Import the viz layer, then judge the backend.  `(module, None)` or
+    `(None, reason)`.
+
+    The ORDER is the point.  `buda_viz`'s import is where the backend is
+    CHOSEN: on macOS it forces TkAgg over the native default that
+    intermittently segfaults with the IPC timer or several windows — but
+    only if nothing has been selected yet.  A `get_backend()` probe
+    auto-selects and LOCKS that very default, so probing first would leave
+    `buda_viz` finding a backend already chosen, skipping its override, and
+    reintroducing the segfaults (Codex P1 on #688).  Import first, ask
+    second; by then the answer is also the true one.
+
+    An import that fails is a reason like any other rather than a traceback
+    naming `matplotlib` but neither the command that wanted it nor the fact
+    that the rest of the run is unaffected.
+    """
     try:
-        import matplotlib                                        # noqa: F401
+        import buda_viz
     except Exception as e:
-        # A farm image built without the plotting stack.  Reported rather
-        # than left to `from buda_viz import …` a few lines down, whose
-        # ImportError traceback says `matplotlib` and not which command
-        # wanted it or that the rest of the run is unaffected.
-        return (f"matplotlib is not available on this host ({e})",
-                buda_diag.WARNING)
+        return None, (f"the visualization layer could not be loaded on this "
+                      f"host ({e})", buda_diag.WARNING)
     if _backend_cannot_show():
         import matplotlib
-        return (f"matplotlib's backend ({matplotlib.get_backend()}) cannot "
-                f"display a window — no display, or MPLBACKEND names a "
-                f"file-only backend", buda_diag.WARNING)
-    return None
+        return None, (f"matplotlib's backend ({matplotlib.get_backend()}) "
+                      f"cannot display a window — no display, or MPLBACKEND "
+                      f"names a file-only backend", buda_diag.WARNING)
+    return buda_viz, None
 
 
 def _report_no_window(session, cmd, reason):
@@ -214,7 +231,12 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
     if reason:
         _report_no_window(session, "visualize_topologies", reason)
         return
-    from buda_viz import TopologyExplorer, collect_candidate_bundles
+    _viz, reason = _import_viz_or_reason()
+    if reason:
+        _report_no_window(session, "visualize_topologies", reason)
+        return
+    TopologyExplorer = _viz.TopologyExplorer
+    collect_candidate_bundles = _viz.collect_candidate_bundles
 
     # Collect every candidate-bearing bundle once — including each hier
     # per-instance bundle (they route independently); shared with the GUI
@@ -310,7 +332,11 @@ def cmd_visualize(session, cmd, args, cmd_line):
     if reason:
         _report_no_window(session, "visualize", reason)
         return
-    from buda_viz import BudaVisualizer
+    _viz, reason = _import_viz_or_reason()
+    if reason:
+        _report_no_window(session, "visualize", reason)
+        return
+    BudaVisualizer = _viz.BudaVisualizer
     rerun_layer_fn = session._rerun_nuts_layer if session.nuts_result is not None else None
     rerun_all_fn   = session._rerun_all        if session.nuts_result is not None else None
     ipc_session = (os.path.splitext(os.path.basename(session.script_path))[0]
