@@ -1,0 +1,101 @@
+# ============================================================
+# flow/antenna_taper_passthru.buda
+#
+# Counter-configuration (b) for the per-bit ANTENNA audit's
+# pass-through reach: THE TAPER.
+#
+# The intuition this exists to test is: "if a bit passes through
+# a connected block, it must have another connection pulling it
+# to the far side."  That holds per BUS.  It does NOT hold per
+# BIT once the tree is per-bit tapered, because a far-side stub
+# can belong to OTHER bits only.
+#
+# Here DIVERGENT bundles three buses that share one driver into
+# a single fan-out tree, so the trunk carries all 20 bits while
+# each branch carries its own:
+#
+#     a[8] -> r_near   branch taps the trunk EARLY
+#     c[4] -> mid      the trunk passes THROUGH this block
+#     b[8] -> r_far    branch at the far end
+#
+# An `a` bit's last electrical junction is its own branch, well
+# before `mid`.  Its metal does not stop there: `mid` is a
+# connected block the segment must cover, so adjust_bit_spans
+# re-extends the bit to preserve that crossing (issue #496).
+# The result is metal past the bit's last junction, justified
+# only by a coverage CONTRACT — nothing joins the wire there.
+#
+# WHAT IT ACTUALLY FOUND is sharper than the pass-through
+# question it was built for.  Measured:
+#
+#   topo TRUNK_H@y100   seg_bits {0: 20 bits, 1: 8 bits}
+#   bit 0  a_0  span=[200,700]  vias=[322,322]
+#   ...
+#   bit 7  a_7  span=[200,700]  vias=[338,338]
+#   check_design dnuts: Success -- no violations
+#
+# The eight `a` bits go to r_near and their ONLY junction is
+# that branch at x~330.  Their trunk metal runs to x=700 --
+# r_far, a block they do not connect to.  ~370 units each,
+# ~2960 in total, reaching nothing of theirs.
+#
+# The mechanism is not the crossing.  BUSTERM TAPS ARE PER
+# SEGMENT WHILE BITS ARE PER BIT: the trunk taps drv at 200 and
+# r_far at 700, and that tap vouches for every bit on the
+# segment, including the eight that never go there.  #678's
+# retraction does not fire either, because it snaps an end only
+# when that end's conn resolves to a wire for THAT bit -- a
+# busterm face is not a seg conn, so "ends with no endpoint conn
+# keep the abstract span" applies.
+#
+# So this is the same class of defect as #678 (a tapered bit
+# keeping metal it does not use) reached through the OTHER kind
+# of segment end, and both the placer fix and the audit miss it.
+# It is left UNFIXED here on purpose: the repro is the argument
+# that it needs fixing, and the fix belongs with a measurement.
+#
+# Its sibling flow/antenna_wide_bus_passthru.buda shows the
+# OTHER route to this blind spot — a bus wider than the block it
+# crosses — is unreachable: the block's edges are Hanan lines
+# that pin the trunk's interval.  Every block on the trunk row
+# here is deliberately given the SAME tall extent so that the
+# interval stays wide enough to place the bus, isolating the
+# taper as the only variable.
+#
+# Run:  bin/buda flow/antenna_taper_passthru.buda --no-viz
+# ============================================================
+
+def_layer 4 M4 H TOP 33.33
+def_layer 5 M5 V TOP 33.33
+
+corner_margin dx 20 dy 8
+
+# Every block ON the trunk row shares y 100..200, so their edges
+# contribute the SAME two Hanan lines and the trunk's interval
+# stays 100 units wide — room for all 20 bits.
+add_block drv    100 100  200 200
+add_block mid    450 100  520 200
+add_block r_far  700 100  800 200
+
+# The early branch sits BELOW the row, so the trunk taps it with
+# a stub rather than crossing it.
+add_block r_near 300  20  360  60
+
+# One driver, three destinations: DIVERGENT groups by the shared
+# DRIVER, so these become ONE per-bit tapered fan-out tree.
+add_bus a[8] drv.tx r_near.rx
+add_bus c[4] drv.tx mid.rx
+add_bus b[8] drv.tx r_far.rx
+
+run_bundler DIVERGENT
+generate_topologies
+run_planner 1
+run_nuts
+
+def_track_pattern 4 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 5 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+
+run_detailed_nuts
+dump_topologies --conn
+check_design dnuts
+report_wirelength
