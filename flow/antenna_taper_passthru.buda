@@ -48,11 +48,36 @@
 # busterm face is not a seg conn, so "ends with no endpoint conn
 # keep the abstract span" applies.
 #
-# So this is the same class of defect as #678 (a tapered bit
-# keeping metal it does not use) reached through the OTHER kind
-# of segment end, and both the placer fix and the audit miss it.
-# It is left UNFIXED here on purpose: the repro is the argument
-# that it needs fixing, and the fix belongs with a measurement.
+# FIXED.  A tap now re-extends a bit only when that bit's own
+# path terminates at the tapped block (Topology::seg_busterm_bits
+# -> BusSegment::busterm_face_bits), and a tap that does not
+# serve the bit counts as a stale END, so the retraction fires
+# for it exactly as it does for a tapered-out conn.  On this
+# vehicle the trunk's bit metal drops 10000 -> 7840 (-21.6%):
+#
+#   a_* (branch at ~330)   [200,700] -> [200,520]
+#   c_* (to mid)           [200,700] -> [200,520]
+#   b_* (to r_far)         [200,700]    unchanged, correctly
+#
+# The membership is read by THREE stages through ONE predicate
+# (`seg_busterm_serves_bit`), because a tap the placer declines
+# to reach must be a tap the audits decline to demand or to
+# credit:
+#
+#   DetailedNUTS       retract past a tap that is not the bit's
+#   check_dnuts        do not require the bit to reach it
+#                      (read per SEGMENT it reported every
+#                      retracted bit as a BUSTERM_OPEN)
+#   ANTENNA (per bit)  do not credit its reach to the bit
+#                      (read per SEGMENT it would excuse the
+#                      very metal the retraction removes)
+#
+# The residual on a_* is NOT the tap: it is `mid`'s PASS-THROUGH
+# coverage, the contract metal adjust_bit_spans re-extends to on
+# purpose (issue #496).  Whether a crossing should vouch for a
+# bit at all is the open question its sibling flow discusses;
+# this vehicle keeps that stretch visible so the two are not
+# confused.
 #
 # Its sibling flow/antenna_wide_bus_passthru.buda shows the
 # OTHER route to this blind spot — a bus wider than the block it

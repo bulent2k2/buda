@@ -63,28 +63,26 @@ def test_the_array_flow_scales_by_its_parameters(tmp_path):
     """The vehicle's point is that the design is COMPUTED: a different shape
     is two arguments, not a rewrite.  3 x 2 grows to 18 bundles.
 
-    KNOWN RESIDUAL at 3 x 2 (2 x 2 is clean, so it is shape-dependent).  The
-    per-bit ANTENNA audit reports 8 units of dangling metal on bundle 10 —
-    a `[t_1_0/l_0_1, t_0_1/l_1_0] -> t_1_1/l_0_0` fan-in routed TRUNK_H@y415.
-    The trunk carries bits 0-7 while its M5 stub exists only for bits 4-7
-    (the per-bit taper), so the trunk's metal runs on toward a junction its
-    lower bits never make — exactly the pair NUTS already warns about:
+    3 x 2 used to carry a shape-dependent RESIDUAL (2 x 2 was clean): the
+    per-bit ANTENNA audit reported 8 units of dangling metal on bundle 10 —
+    a `[t_1_0/l_0_1, t_0_1/l_1_0] -> t_1_1/l_0_0` fan-in routed TRUNK_H@y415
+    whose trunk carries bits 0-7 while its M5 stub exists only for bits 4-7
+    (the per-bit taper), so the trunk's metal ran on toward a junction its
+    lower bits never make — the pair NUTS already warned about:
 
         [NUTS] junction infeasible: bundle 10 seg 0 cannot reach seg 1
 
-    The finding is REAL (confirmed against the placed geometry), so this
-    asserts the known state rather than pretending it is clean: the flow's
-    self-check exits non-zero, with that one violation and nothing else.
-    Overlaps and unplaced must still be ZERO — the residual is dangling
-    metal, not a broken route.
-
-    When array.tcl's overshoot is fixed this test FAILS, which is the point:
-    it forces the expectation back to clean rather than letting a repaired
-    vehicle keep a stale allowance.
+    The cause was a BUSTERM TAP held out to every bit on its segment rather
+    than to the bits whose own path terminates there, so bits 0-3 were
+    stretched to a block they have no net at.  With the tap read per bit
+    (Topology::seg_busterm_bits) the trunk retracts: bundle 10's detailed WL
+    drops 1336 -> 944 and the design's 24977 -> 21615, and the ANTENNA audit
+    — untouched by that change — stops reporting, which is what makes this a
+    repaired vehicle rather than a silenced check.  The expectation is back
+    to CLEAN, as the previous form of this test demanded it be.
     """
     r = _run(tmp_path, 3, 2)
     assert "3 x 2 tiles -> 18 bundles" in r.stdout
-    assert r.returncode == 1, r.stdout + r.stderr
-    assert "0 overlaps, 0 unplaced" in r.stdout + r.stderr
-    assert "dangling metal past its own attachments" in r.stdout
-    assert "Bundle 10" in r.stdout
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "clean -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+    assert "dangling metal past its own attachments" not in r.stdout

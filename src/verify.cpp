@@ -346,9 +346,20 @@ static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
         }
     }
 
-    // Legitimate reaches shared by every bit of a segment: busterm faces and
-    // pass-through coverage.  Computed once per segment.
+    // Legitimate reaches from the topology rather than from a via: busterm
+    // faces and pass-through coverage.  Computed once per segment.
+    //
+    // A BUSTERM tap is kept SEPARATE from the pass-through coverage because it
+    // is not shared by every bit: on a tapered tree a trunk taps blocks only
+    // some of its bits terminate at, and crediting such a tap to the others
+    // would excuse exactly the dangling metal this audit exists to find — the
+    // same per-SEGMENT/per-BIT conflation DetailedNUTS and check_dnuts read
+    // `seg_busterm_serves_bit` to avoid.  So taps carry their block name and
+    // are filtered per bit below; pass-through coverage stays shared (a
+    // crossing is geometry, and whether it should vouch for a bit at all is the
+    // separate open question flow/antenna_taper_passthru.buda documents).
     std::vector<std::vector<double>> seg_reach(n);
+    std::vector<std::vector<std::pair<std::string, double>>> tap_reach(n);
     for (int si = 0; si < n; ++si) {
         const ConnSeg& cs = segs[si];
         // A BUSTERM tap's reach must be expressed on THIS segment's along-axis.
@@ -360,7 +371,8 @@ static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
         // spanning [100,400], a coordinate not even on the wire).  Take the
         // tapped block's own along-extent instead, clipped to the segment: that
         // is axis-correct by construction and needs no face semantics.
-        auto add_block_reach = [&](const std::string& bname) {
+        auto block_reach = [&](const std::string& bname,
+                               std::vector<double>& sink) {
             auto rects = fp.get_block_rects(bname);
             if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
             const double s_lo = std::min(cs.along_lo, cs.along_hi);
@@ -369,13 +381,18 @@ static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
                 const double b_lo = cs.horiz ? (double)r.x1 : (double)r.y1;
                 const double b_hi = cs.horiz ? (double)r.x2 : (double)r.y2;
                 const double lo = std::max(s_lo, b_lo), hi = std::min(s_hi, b_hi);
-                if (lo <= hi) { seg_reach[si].push_back(lo);
-                                seg_reach[si].push_back(hi); }
+                if (lo <= hi) { sink.push_back(lo); sink.push_back(hi); }
             }
         };
+        auto add_block_reach = [&](const std::string& bname) {
+            block_reach(bname, seg_reach[si]);
+        };
         for (const auto& c : cs.conns)
-            if (c.kind == SegConn::BUSTERM)
-                add_block_reach(c.block_name);
+            if (c.kind == SegConn::BUSTERM) {
+                std::vector<double> pts;
+                block_reach(c.block_name, pts);
+                for (double p : pts) tap_reach[si].emplace_back(c.block_name, p);
+            }
         // Pass-through coverage goes through the SAME clipped helper: a block
         // edge beyond the wire is not a point on the wire, and letting it into
         // the bounds is the identical mistake as the face_coord one above.
@@ -399,6 +416,9 @@ static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
         if (si < 0 || si >= n) continue;
 
         std::vector<double> pts = seg_reach[si];
+        for (const auto& [bname, p] : tap_reach[si])
+            if (seg_busterm_serves_bit(topo, si, bname, ns.bit_index))
+                pts.push_back(p);
         auto it = reach.find({si, ns.bit_index});
         if (it != reach.end())
             pts.insert(pts.end(), it->second.begin(), it->second.end());
@@ -1035,6 +1055,14 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
             for (int bit = 0; bit < num_bits; ++bit) {
                 auto it = ns_map.find({i, bit});
                 if (it == ns_map.end()) continue;
+                // A tap is per SEGMENT while bits are per BIT.  On a tapered
+                // tree (fan-in / fan-OUT) a trunk taps blocks that only SOME
+                // of its bits terminate at, so demanding every bit reach every
+                // tap of its segment is demanding metal to a block the bit has
+                // no net at — the mirror of the DNUTS fault this predicate was
+                // introduced for, and the reason both stages read it.
+                if (!seg_busterm_serves_bit(topo, i, conn.block_name, bit))
+                    continue;
                 if (!perp_in_block_face(it->second->track_position, cs.horiz,
                                         conn.block_name, fp,
                                         it->second->span_lo,

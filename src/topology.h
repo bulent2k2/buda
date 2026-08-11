@@ -187,6 +187,36 @@ struct Topology {
     // time (derive_fanin_seg_bits); the dogleg split propagates the split
     // trunk's bits to its new pieces in place.
     std::map<int, std::vector<int>> seg_bits;
+    // Per-segment BUSTERM TAP membership, the companion seg_bits was missing:
+    // (segment index, tap ordinal 0=first / 1=second) → sorted global bit
+    // indices whose OWN driver→receiver path terminates at that tapped block.
+    //
+    // seg_bits says which bits ride a segment; this says which of them the
+    // segment's block TAPS actually belong to.  Without it a tap is applied to
+    // every bit on the segment, so a trunk tapping a far receiver re-extends
+    // bits that never go there — metal reaching nothing, invisible to every
+    // check (flow/antenna_taper_passthru.buda).  EMPTY map = every tap serves
+    // every bit (all non-tapered bundles — the historical behavior).
+    //
+    // "Nothing recorded means serves every bit" is deliberately fail-SAFE — it
+    // can only keep a tap, never drop one — but it makes every gap in the
+    // derivation walk a silently unfixed tap, and there is a reachable one:
+    // derive_fanin_seg_bits marks only the ONE path it walks per receiver, so
+    // when two segments tap the same block (a trunk and a stub — the shape
+    // complete_relay_junctions produces routinely) the path that loses the race
+    // records nothing for its own tap, and the fallback hands that tap back to
+    // every bit riding it.  Pre-existing, and the first place to look when a
+    // tapered tree still shows overhang at a tapped block — the conclusion to
+    // avoid is that the membership did not apply.
+    //
+    // DERIVED exactly like seg_bits: never persisted, excluded from topo_uid,
+    // recomputed by derive_fanin_seg_bits.  The dogleg split leaves it alone —
+    // as it leaves seg_busterms alone, and for the same reason: the split
+    // APPENDS its pieces and never lands on a tapped endpoint, so existing keys
+    // stay valid and the new pieces correctly have neither a tap nor a
+    // membership.  (seg_bits IS propagated there; these two do not move
+    // together through the dogleg, and reading across from it will mislead.)
+    std::map<std::pair<int,int>, std::vector<int>> seg_busterm_bits;
     // Blocks the trunk is routed *through* on purpose (opt-in feedthru): the trunk
     // is split at the block's two crossed faces (no stub to the block) and the
     // block's own lower-level router bridges the gap.  Empty unless a straddling
@@ -271,6 +301,20 @@ inline void prepend_segment(Topology& t, const Segment& spine) {
         for (auto& kv : t.seg_bits) shifted_bits[kv.first + 1] = std::move(kv.second);
         t.seg_bits = std::move(shifted_bits);
     }
+    // Tap membership, keyed (seg_idx, tap ordinal) — the same argument as
+    // seg_conns above, and it bites harder: seg_busterm_serves_bit resolves the
+    // ordinal against the SHIFTED seg_busterms and then reads this map, so an
+    // unshifted entry would answer for segment si-1.  Both consumers read the
+    // one predicate, so they would agree on the wrong answer and nothing would
+    // report it — the placer retracts a bit off a real block face and the audit
+    // concurs.  Unreachable today (the only caller prepends during generation,
+    // before derive_fanin_seg_bits runs), which is exactly when to close it.
+    if (!t.seg_busterm_bits.empty()) {
+        std::map<std::pair<int,int>, std::vector<int>> shifted_taps;
+        for (auto& kv : t.seg_busterm_bits)
+            shifted_taps[{kv.first.first + 1, kv.first.second}] = std::move(kv.second);
+        t.seg_busterm_bits = std::move(shifted_taps);
+    }
 }
 
 // Return a deep copy of `t` with all geometry shifted by (dx, dy): every
@@ -344,6 +388,22 @@ inline int seg_bit_count(const Topology& t, int si, int nbits) {
     if (it != t.seg_bits.end() && !it->second.empty()) return (int)it->second.size();
     return nbits;
 }
+
+// Does the BUSTERM tap on segment `si` to block `block` serve bit `bit`?
+//
+// The ONE predicate both consumers of seg_busterm_bits read: DetailedNUTS
+// (which re-extends a bit's span to a tap it serves, and retracts a stale end
+// past one it does not) and check_dnuts (which requires a bit's span to reach
+// the taps it serves).  Sharing it is the point — a tap the placer declines to
+// reach for a bit must be a tap the audit declines to demand, or the two stages
+// disagree and every tapered fan-out reads as a BUSTERM_OPEN.
+//
+// Resolves the tap ORDINAL by block name against seg_busterms, so it does not
+// depend on any caller's conn ordering.  With nothing recorded — no membership
+// for this (segment, ordinal), or no seg_busterms entry at all — every tap
+// serves every bit, which is the untapered historical behavior.
+bool seg_busterm_serves_bit(const Topology& topo, int si,
+                            const std::string& block, int bit);
 
 // Derive per-segment bit membership for a FAN-IN bundle (tapered bus).
 // Inputs: one driver block + receiver block list PER BIT (index = the

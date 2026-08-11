@@ -1431,6 +1431,17 @@ void erase_segment(Topology& topo, int idx) {
         }
         topo.seg_bits = std::move(nsb);
     }
+    // The tap membership is keyed by segment index too, so it shifts in step —
+    // otherwise a removed segment desyncs it from seg_bits and taps land on the
+    // wrong segment's bits.
+    if (!topo.seg_busterm_bits.empty()) {
+        std::map<std::pair<int,int>, std::vector<int>> nbb;
+        for (auto& [k, v] : topo.seg_busterm_bits) {
+            if (k.first < idx)      nbb[{k.first, k.second}] = std::move(v);
+            else if (k.first > idx) nbb[{k.first - 1, k.second}] = std::move(v);
+        }
+        topo.seg_busterm_bits = std::move(nbb);
+    }
 }
 
 std::vector<int> derive_fanin_seg_bits(
@@ -1441,6 +1452,7 @@ std::vector<int> derive_fanin_seg_bits(
     const int n_seg  = (int)topo.segments.size();
     const int n_bits = (int)driver_per_bit.size();
     topo.seg_bits.clear();
+    topo.seg_busterm_bits.clear();
     std::vector<int> fallback_bits;
     if (n_seg == 0 || n_bits == 0 || (int)receivers_per_bit.size() != n_bits)
         return fallback_bits;
@@ -1498,9 +1510,26 @@ std::vector<int> derive_fanin_seg_bits(
         groups[{driver_per_bit[b], receivers_per_bit[b]}].push_back(b);
 
     std::vector<std::vector<int>> bits_of_seg(n_seg);
+    std::map<std::pair<int,int>, std::vector<int>> tap_bits;
     auto mark_all = [&](const std::vector<int>& bits) {
-        for (int si = 0; si < n_seg; ++si)
+        for (int si = 0; si < n_seg; ++si) {
             for (int b : bits) bits_of_seg[si].push_back(b);
+            // Endpoints unresolved for this group: fall back to the
+            // historical all-bits behavior for its taps too, so an
+            // unwalkable group never LOSES a tap it might need.  Only over
+            // the ordinals seg_busterms actually records — an entry for a
+            // tap that does not exist is unreadable (the predicate resolves
+            // the ordinal through seg_busterms first) and would just make
+            // the map assert things about taps the topology does not have.
+            auto bt = topo.seg_busterms.find(si);
+            if (bt == topo.seg_busterms.end()) continue;
+            const bool has[2] = { (bool)bt->second.first, (bool)bt->second.second };
+            for (int k = 0; k < 2; ++k) {
+                if (!has[k]) continue;
+                auto& v = tap_bits[{si, k}];
+                v.insert(v.end(), bits.begin(), bits.end());
+            }
+        }
         fallback_bits.insert(fallback_bits.end(), bits.begin(), bits.end());
     };
 
@@ -1530,6 +1559,27 @@ std::vector<int> derive_fanin_seg_bits(
         if (!ok) { mark_all(bits); continue; }
         for (int si : member)
             for (int b : bits) bits_of_seg[si].push_back(b);
+
+        // A segment's BUSTERM tap belongs to this group's bits only when the
+        // tapped block is one of THEIR endpoints — their driver or one of
+        // their receivers.  A trunk that taps a far receiver taps it for the
+        // bits going there, not for the bits that branched off earlier; giving
+        // every bit the tap is what let those bits keep metal out to it.
+        for (int si : member) {
+            auto bt = topo.seg_busterms.find(si);
+            if (bt == topo.seg_busterms.end()) continue;
+            const Busterm* eps[2] = { bt->second.first ? &*bt->second.first : nullptr,
+                                      bt->second.second ? &*bt->second.second : nullptr };
+            for (int k = 0; k < 2; ++k) {
+                if (!eps[k]) continue;
+                const std::string& bn = eps[k]->block_name;
+                const bool mine = (bn == ep.first) ||
+                    (std::find(ep.second.begin(), ep.second.end(), bn) != ep.second.end());
+                if (!mine) continue;
+                auto& v = tap_bits[{si, k}];
+                v.insert(v.end(), bits.begin(), bits.end());
+            }
+        }
     }
 
     for (int si = 0; si < n_seg; ++si) {
@@ -1538,10 +1588,33 @@ std::vector<int> derive_fanin_seg_bits(
         v.erase(std::unique(v.begin(), v.end()), v.end());
         if (!v.empty()) topo.seg_bits[si] = std::move(v);
     }
+    for (auto& [key, v] : tap_bits) {
+        std::sort(v.begin(), v.end());
+        v.erase(std::unique(v.begin(), v.end()), v.end());
+        if (!v.empty()) topo.seg_busterm_bits[key] = std::move(v);
+    }
     std::sort(fallback_bits.begin(), fallback_bits.end());
     fallback_bits.erase(std::unique(fallback_bits.begin(), fallback_bits.end()),
                         fallback_bits.end());
     return fallback_bits;
+}
+
+bool seg_busterm_serves_bit(const Topology& topo, int si,
+                            const std::string& block, int bit)
+{
+    if (topo.seg_busterm_bits.empty()) return true;   // untapered
+    auto bt = topo.seg_busterms.find(si);
+    if (bt == topo.seg_busterms.end()) return true;
+    const Busterm* eps[2] = {
+        bt->second.first  ? &*bt->second.first  : nullptr,
+        bt->second.second ? &*bt->second.second : nullptr };
+    for (int k = 0; k < 2; ++k) {
+        if (!eps[k] || eps[k]->block_name != block) continue;
+        auto f = topo.seg_busterm_bits.find({si, k});
+        if (f == topo.seg_busterm_bits.end() || f->second.empty()) return true;
+        return std::binary_search(f->second.begin(), f->second.end(), bit);
+    }
+    return true;   // no tap ordinal for this block: nothing recorded, so serve all
 }
 
 // Per-segment conn COUNT under the connections ConnTopology infers (BUSTERM
