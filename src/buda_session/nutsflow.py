@@ -1098,7 +1098,19 @@ class NutsFlowMixin:
                 # counting the whole interval over-counted a corner-bounded
                 # segment's pool and skipped an escalation DNUTS then
                 # stranded in full.)
-                need = _member_bits(w, sel, seg.seg_idx)
+                # THREE quantities, deliberately distinct — mixing them is
+                # the #536 silent-strand class (Codex/opens_ndr).  `bits` is
+                # member BITS and compares against PLACED ROWS; `need` is the
+                # credited group DEMAND in slots, the engine's all-or-nothing
+                # doom threshold; `need_pool` is the FULL demand the engine
+                # selects its pool with.  All three coincide on an ungoverned
+                # segment, so every non-NDR flow is byte-identical.
+                bits = _member_bits(w, sel, seg.seg_idx)
+                need = self._seg_admission_need(w, sel, seg.seg_idx,
+                                                layer=seg.layer)
+                need_pool = self._seg_admission_need(w, sel, seg.seg_idx,
+                                                     credited=False,
+                                                     layer=seg.layer)
                 b_lo = max(seg.interval_lo, seg.track_lo_bound)
                 b_hi = min(seg.interval_hi, seg.track_hi_bound)
                 span_all = g.count_signal_tracks_in_span(
@@ -1112,15 +1124,18 @@ class NutsFlowMixin:
                     # bounded span-clear pool that cannot host the member
                     # bits — no midpoint retry (see the docstring).
                     if placed_bits.get((seg.bundle_id, seg.seg_idx),
-                                       0) >= need:
-                        continue
+                                       0) >= bits:
+                        continue          # rows vs BITS, not slots
                     span_bnd = (span_all if (b_lo == seg.interval_lo and
                                              b_hi == seg.interval_hi)
                                 else g.count_signal_tracks_in_span(
                                     seg.span_lo, seg.span_hi, b_lo, b_hi))
                     if span_bnd >= need:
                         continue
-                elif span_all >= need:
+                elif span_all >= need_pool:
+                    # Pool SELECTION is made on the full demand and the doom
+                    # test on the credited minimum — the engine's own split
+                    # (detailed_nuts.cpp:470 vs :497).
                     span_bnd = (span_all if (b_lo == seg.interval_lo and
                                              b_hi == seg.interval_hi)
                                 else g.count_signal_tracks_in_span(
@@ -1236,6 +1251,16 @@ class NutsFlowMixin:
             """(bundle, seg) -> culled bit count, from the live results."""
             placed = {}
             for ns in self.detailed_result.net_segments:
+                # NDR shield rows are the RULE's metal, not member bits.
+                # Counting them makes a governed segment look better placed
+                # than it is (4 bits + 2 shields reads as 6 of 4), so `miss`
+                # under-reports and can go NEGATIVE — the same shield-inflated
+                # accounting that produced a negative unplaced count on the
+                # bottom-up copy path (ndr_architecture.md §7.5).  Here it
+                # hides stranded/culled seats from the heal that exists to
+                # move them.
+                if ns.is_shield:
+                    continue
                 k = (ns.bundle_id, ns.seg_idx)
                 placed[k] = placed.get(k, 0) + 1
             wmap = {w.input.original_bundle.id: w for w in self.bundles
@@ -1363,8 +1388,18 @@ class NutsFlowMixin:
                 if seg.seg_idx < len(pins) and pins[seg.seg_idx] >= 0:
                     continue
                 g = self.routing_grid.get_layer_grid(seg.layer)
-                need = self._seg_member_bits(w, sel, seg.seg_idx)
-                if self._seg_admission_pool(seg, g, need) >= need:
+                # Demand, not bits: a governed seat that fits its bits but
+                # not its bits-plus-guards-plus-shields is doomed, and
+                # measuring it in bits hid exactly the seats this heal
+                # exists to move (opens_ndr.md).  Pool selection on the full
+                # demand, doom on the credited minimum — the engine's split,
+                # and the same one `_doomed_seats` uses.
+                need = self._seg_admission_need(w, sel, seg.seg_idx,
+                                                layer=seg.layer)
+                need_pool = self._seg_admission_need(w, sel, seg.seg_idx,
+                                                     credited=False,
+                                                     layer=seg.layer)
+                if self._seg_admission_pool(seg, g, need_pool) >= need:
                     continue
                 want_dir = (buda.LayerDir.HORIZONTAL if seg.horiz
                             else buda.LayerDir.VERTICAL)
@@ -1388,8 +1423,16 @@ class NutsFlowMixin:
                 new_layer = None
                 for l in sorted(pool):
                     g2 = self.routing_grid.get_layer_grid(l)
+                    # The TARGET must host the demand as resolved ON THAT
+                    # LAYER — an R1 absolute rule costs a different number of
+                    # slots per layer, so asking the question with the
+                    # current layer's answer is the wrong question.  Full
+                    # (uncredited) demand keeps this pass what it advertises:
+                    # conservative, guaranteed-host-only.
+                    need_l = self._seg_admission_need(w, sel, seg.seg_idx,
+                                                      credited=False, layer=l)
                     if b_lo <= b_hi and g2.count_signal_tracks_in_span(
-                            seg.span_lo, seg.span_hi, b_lo, b_hi) >= need:
+                            seg.span_lo, seg.span_hi, b_lo, b_hi) >= need_l:
                         new_layer = l
                         break
                 if new_layer is None:
@@ -1459,6 +1502,16 @@ class NutsFlowMixin:
             that are also census-doomed TOP seats."""
             placed = {}
             for ns in self.detailed_result.net_segments:
+                # NDR shield rows are the RULE's metal, not member bits.
+                # Counting them makes a governed segment look better placed
+                # than it is (4 bits + 2 shields reads as 6 of 4), so `miss`
+                # under-reports and can go NEGATIVE — the same shield-inflated
+                # accounting that produced a negative unplaced count on the
+                # bottom-up copy path (ndr_architecture.md §7.5).  Here it
+                # hides stranded/culled seats from the heal that exists to
+                # move them.
+                if ns.is_shield:
+                    continue
                 k = (ns.bundle_id, ns.seg_idx)
                 placed[k] = placed.get(k, 0) + 1
             wmap = {w.input.original_bundle.id: w for w in self.bundles
@@ -1475,12 +1528,22 @@ class NutsFlowMixin:
                 sel = w.plan.selected_topology_index
                 if sel < 0 or sel >= len(w.input.candidates):
                     continue
-                need = self._seg_member_bits(w, sel, ts.seg_idx)
-                miss = need - placed.get((ts.bundle_id, ts.seg_idx), 0)
+                # `miss` RANKS by missing bits (rows against bits); the
+                # admission test is in DEMAND slots.  These were one
+                # variable, so a governed seat was both ranked and judged in
+                # bits — and a seat that fits its bits but not its
+                # bits-plus-guards-plus-shields never reached the heal.
+                bits = self._seg_member_bits(w, sel, ts.seg_idx)
+                miss = bits - placed.get((ts.bundle_id, ts.seg_idx), 0)
                 if miss <= 0:
                     continue
                 g = self.routing_grid.get_layer_grid(ts.layer)
-                if self._seg_admission_pool(ts, g, need) < need:
+                need = self._seg_admission_need(w, sel, ts.seg_idx,
+                                                layer=ts.layer)
+                need_pool = self._seg_admission_need(w, sel, ts.seg_idx,
+                                                     credited=False,
+                                                     layer=ts.layer)
+                if self._seg_admission_pool(ts, g, need_pool) < need:
                     out[(ts.bundle_id, ts.seg_idx)] = miss
             return out
 

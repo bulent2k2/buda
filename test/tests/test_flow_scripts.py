@@ -1003,6 +1003,28 @@ def test_ndr_bond_shield_bonding():
     assert "no violations" in out and "NDR_" not in out, out
 
 
+def test_ndr_heal_measures_a_governed_seat_in_demand():
+    """flow/ndr_heal_demand_seat.buda (opens_ndr.md smaller residual): the
+    doomed-seat HEALS measured a seat in member BITS while the DNUTS engine
+    admits on group DEMAND.
+
+    For an ungoverned bundle those are the same number, so the gap only
+    existed on a governed one — where a seat with room for the bits but not
+    the shields read as healthy, was never escalated, and stranded in full.
+    Measured on this vehicle before the fix: 0 net segments placed, 4 bits
+    unplaced, 4 violations, detailed WL 0."""
+    out, rc = run_script("ndr_heal_demand_seat.buda")
+    assert_clean(out, rc, "ndr_heal_demand_seat.buda")
+    # The seat really is the doomed shape (5 tracks for a 6-slot run) — if
+    # the construction ever stops biting, the rest proves nothing.
+    assert "insufficient signal tracks (5) for bus width 6" in out, out
+    # …and the heal moves it off, which is the whole point.
+    assert "RESEAT-HEAL: re-seated 1 supply-doomed TOP segment(s)" in out, out
+    assert "opens 4->0" in out, out
+    assert "0 bits unplaced" in out, out
+    assert "no violations" in out and "NDR_" not in out, out
+
+
 def test_ndr_absolute_divisor_repro():
     """flow/ndr_abs_divisor.buda: the documented semantic limit of
     opens_ndr.md §2 — an absolute width is quantized by the layer's
