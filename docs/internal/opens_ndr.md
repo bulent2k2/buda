@@ -110,6 +110,32 @@ pattern yet.
   never under — but it is capacity a design does not owe. R3 realizability
   and the declaration reporting DO resolve per layer.
 
+  *Notes for whoever picks this up.* Do it as ONE change across all three
+  stages. Partial is not dangerous — a planner that over-reserves relative
+  to what DNUTS places errs the safe way — but it leaves the stages
+  disagreeing about a governed group's demand, which is the single-sourcing
+  invariant R4 exists to protect, and it buys little.
+
+  Two design points are already settled. **No double-count:** charged width
+  is `slots x bit_pitch(layer)`, so per-layer slots make that product ≈ the
+  declared width on every layer, which is what an absolute value should
+  mean. **Global pitch, not the override-aware effective pattern:** more
+  accurate locally, but the planner would then price against a different
+  basis than DNUTS admits on — the same two-stages-disagree failure.
+
+  Two mechanical obstacles. In `congestion_planner.cpp` the helper
+  (`ndr_units`) is reached through a `seg_n` lambda consumed at ~8 points
+  inside `score_candidate_`, each with a DIFFERENT layer in scope (`lid`,
+  `best_lid`, the reservation path's own), so it needs a layer argument
+  threaded through the hot scoring path. And `DetailedNUTSEngine` holds
+  only a `RoutingGridStack`, not a `LayerStack`, so the spec likely wants
+  pre-resolving at `make_bus_segments` where the pitch is reachable, rather
+  than in-place at the consumer.
+
+  `ndr_resolve_for_pitch` (src/ndr.h) is the one conversion; `LayerStack`
+  exposes `bit_pitch(layer)` to Python already. Expect the corpus to be
+  byte-identical (no corpus flow declares a rule), but measure it.
+
 Vehicle: [`flow/ndr_abs_um.buda`](../../flow/ndr_abs_um.buda).
 
 ## 3. Per-net mixed-rule bundles (R8, the richer half)
