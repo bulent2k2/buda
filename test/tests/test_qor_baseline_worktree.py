@@ -26,6 +26,7 @@ machinery and the argument contract, not a corpus sweep (that is measured by
 hand, and a 40-minute test is not a test).
 """
 import importlib.util
+import os
 import subprocess
 from pathlib import Path
 
@@ -93,6 +94,41 @@ def test_the_baseline_is_a_commit_not_a_branch_checkout():
     src = (_ROOT / "tools" / "qor_corpus.py").read_text()
     assert '"--detach"' in src, "the baseline worktree must be detached"
     assert 'rev + "^{commit}"' in src, "the rev must resolve to a commit"
+
+
+def test_vs_output_paths_are_absolute(tmp_path, monkeypatch):
+    """The two sweeps run in DIFFERENT directories — the baseline subprocess
+    in the worktree, the branch sweep after chdir'ing to the repo root — so a
+    relative `--out` names two different files and `--compare` dies with
+    FileNotFoundError AFTER both sweeps, the most expensive moment to fail."""
+    qc = _load()
+    monkeypatch.chdir(tmp_path)
+    mine, base = qc.vs_paths("results.json")
+    assert os.path.isabs(mine) and os.path.isabs(base), (mine, base)
+    # …and resolved against where the USER is, not where the tool chdirs to.
+    assert Path(mine).parent == tmp_path
+    assert base.startswith(mine), (mine, base)
+    assert mine != base
+
+    # No --out: a private temp dir, absolute by construction and distinct.
+    m2, b2 = qc.vs_paths(None)
+    assert os.path.isabs(m2) and os.path.isabs(b2) and m2 != b2
+    assert Path(m2).parent == Path(b2).parent
+
+
+def test_a_relative_out_lands_where_the_user_is(tmp_path, monkeypatch):
+    """`cmd_run` chdirs to the repo root, so a relative --out used to land
+    there rather than in the caller's directory.  A no-op from the repo root
+    (the documented usage), and the difference between one file and two under
+    --vs."""
+    qc = _load()
+    stray = _ROOT / "here.json"
+    stray.unlink(missing_ok=True)     # a previous failure's artifact is not evidence
+    monkeypatch.chdir(tmp_path)
+    qc.cmd_run([], "here.json", jobs=1)
+    assert (tmp_path / "here.json").exists(), sorted(
+        p.name for p in tmp_path.iterdir())
+    assert not stray.exists(), "the output landed in the repo root, not the cwd"
 
 
 def test_no_build_is_rejected_without_vs():

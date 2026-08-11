@@ -416,6 +416,13 @@ def sweep(run_fn, flows, jobs, progress=None):
 
 
 def cmd_run(flows, out, jobs=1):
+    # Resolve BEFORE the chdir: `--out results.json` means "here", where the
+    # user is, not "wherever this tool happens to chdir to".  A no-op for the
+    # documented usage (run from the repo root, where the two coincide), and
+    # the difference between two files and one under --vs, whose sweeps run in
+    # different directories.
+    if out:
+        out = os.path.abspath(out)
     os.chdir(_ROOT)                             # flow paths are repo-root-relative
     t0 = time.time()
     results = sweep(run_flow, flows, jobs,
@@ -530,6 +537,22 @@ def _build(tree, label):
     _sh([tree / "bin" / "bb"], tree, stream=True)
 
 
+def vs_paths(out):
+    """(branch json, baseline json) for a `--vs` run, both ABSOLUTE.
+
+    Absolute is load-bearing, not tidiness: the two sweeps run in DIFFERENT
+    directories (the baseline subprocess in the worktree, `cmd_run` after
+    chdir'ing to the repo root), so a relative path means two different files
+    and `--compare` then dies with FileNotFoundError — AFTER both sweeps have
+    run, which is the most expensive moment to fail (Codex P2 on #692).
+    Resolved once, up front, against the directory the user invoked from."""
+    if out:
+        mine = os.path.abspath(out)
+        return mine, mine + ".base.json"
+    d = tempfile.mkdtemp(prefix="qor-vs-")
+    return os.path.join(d, "branch.json"), os.path.join(d, "base.json")
+
+
 def cmd_vs(rev, out, jobs, flows=None, build=True):
     """Measure `rev` in a worktree and the CURRENT tree, then compare.
 
@@ -559,9 +582,7 @@ def cmd_vs(rev, out, jobs, flows=None, build=True):
     """
     wt, commit = baseline_worktree(rev)
     print(f"[--vs] baseline {rev} = {commit[:12]} in {wt}")
-    mine = out or os.path.join(tempfile.mkdtemp(prefix="qor-vs-"), "branch.json")
-    base = (out + ".base.json") if out else os.path.join(
-        os.path.dirname(mine), "base.json")
+    mine, base = vs_paths(out)
 
     if build:
         # BOTH sides.  Measuring a stale working-tree build against a freshly
