@@ -196,3 +196,73 @@ A library that writes the raw descriptor lands beside the diagnostics —
 visible, in order, outside every frame — instead of inside the
 conversation.  ("Nothing in BUDA does" was true, but it was a promise about
 other people's code; now it does not need to be one.)
+
+## The corpus: the same 41 flows, driven from Tcl
+
+`flow/tcl/corpus/` is the QoR corpus translated to Tcl — every flow
+`tools/qor_corpus.py` runs through the CLI, run instead through a real
+`tclsh` and the pipe:
+
+```bash
+tclsh flow/tcl/corpus/rnr/mix.tcl            # one flow
+tools/tcl_corpus.py -j 4 --out tcl.json      # the sweep
+tools/qor_corpus.py --compare cli.json tcl.json
+```
+
+The point is the **comparison**, not the coverage: a `.buda` script and its
+translation say the same things to the same engine, so any difference in the
+routed result is a fault in the bridge.  The two sides are kept in step by
+`tools/buda2tcl.py`, which generates the tree (a hand-written translation
+would drift from its original the first time anyone edited the `.buda`), and
+by `test_tcl_corpus.py`, which regenerates in memory and fails if what is
+committed no longer matches.
+
+Each translated flow reports one machine-readable line in
+`qor_corpus.py --out`'s schema, so the existing `--compare` does the diffing:
+
+```
+QOR {"flow": "flow/rnr/mix.buda", "overlaps": 0, "unplaced": 0, ...}
+```
+
+### The result, measured 2026-08-11
+
+41 flows, ~13.5 k commands over the pipe, against a CLI sweep of the same
+corpus **on the same build**:
+
+```
+0 better, 0 worse, 41 unchanged (of 41 flows).  Metric = overlaps/unplaced/viol_bundles.
+  abstract WL (after NUTS)        19,623,671 ->      19,623,671  (+0, +0.00%)
+  detailed WL (after DNUTS)      385,795,633 ->     385,795,633  (+0, +0.00%)
+```
+
+Field by field it is **41/41 exact** on all five metrics.  The wirelengths
+carry the weight of that claim: three small integers can agree by luck, and
+385 million units of routed metal cannot.
+
+Against the checked-in nightly snapshot (`qor/qor_table_rows.json`, then 5
+days old) 35 of 41 matched outright, and all 8 remaining deltas are `main`
+moving underneath, not the bridge — **today's CLI reports exactly what
+today's Tcl reports** in every one of them.  That is why the same-build
+sweep is the comparison that means something: run only against the snapshot,
+a driver fault and a week of drift look identical.
+
+The cost of the round trip, measured serially on the highest-command flow
+(`big.buda`, 2909 commands, three runs): **0.35–0.42 s, ≈0.13 ms per
+command**, engine spawn included.  It scales with the number of COMMANDS,
+not the size of the design — the sweep's chip-scale flows issue a few dozen
+commands each and pay nothing measurable, while a flow that declares
+thousands of nets one line at a time pays a few tenths of a second.
+
+Two things this corpus found on its first run, both invisible at the scale of
+a hand-written example:
+
+* **`buda.tcl` defined itself relative to the calling namespace.**  Sourced
+  from inside one — `namespace eval myapp { source buda.tcl }`, which is what
+  a GUI does — the package landed at `::myapp::buda::*` and failed later,
+  somewhere far from the cause.  The namespace and every proc are now
+  absolute (`::buda::`).
+* **The engine is a child process and inherits the directory it was SPAWNED
+  in.**  A `cd` after `buda::start` moves the interpreter and leaves the
+  engine behind, so every path-taking command (`open_bdb mix.bdb.sql`)
+  resolved against wherever the sweep was launched.  The harness now cds
+  first — and a test pins that order rather than the comment alone.
