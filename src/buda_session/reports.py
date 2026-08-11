@@ -737,7 +737,17 @@ class ReportsMixin:
 
         # For the topo stage, auto-switch to all-candidates mode when no
         # topology has been selected yet (before run_planner).
-        if stage == "topo" and not all_candidates:
+        #
+        # Gated on the planner never having RUN, not merely on the absence of
+        # selections.  Those differ: a run in which the planner committed
+        # nothing anywhere also leaves every selection unset, and promoting
+        # THAT to all-candidates mode audits the candidate pool — which is
+        # perfectly valid — and reports Success over a design with no routes
+        # at all.  `self.planner` is set only by run_planner (and by ripup,
+        # which follows it), so it is exactly the "has planning happened"
+        # signal.
+        if (stage == "topo" and not all_candidates
+                and getattr(self, "planner", None) is None):
             no_selection = all(
                 not w.input.candidates or w.plan.selected_topology_index < 0
                 for w in self.bundles

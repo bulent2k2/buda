@@ -28,6 +28,44 @@ import buda
 from ._options import looks_numeric, reject_unknown_options
 
 
+def _apply_assignments(wrappers, assignments):
+    """Write the planner's decisions onto the wrappers, and CLEAR the plan of
+    every wrapper the planner did not assign.
+
+    `optimize_topologies` returns one assignment per bundle it committed, and
+    omits a bundle only when it has no candidates or when nothing survived
+    the escalation ladder — in both cases this run produced no plan for it.
+    Applying assignments alone therefore left a RE-planned bundle carrying
+    the previous run's selection and seg_layers, which is worse than stale
+    bookkeeping: a tightened layer policy could forbid exactly the layers
+    that stale plan names, so NUTS would place the bundle on them and
+    `check_design` — which walks bundles by their selected candidate — would
+    audit the old route and call the design clean.  Measured on a V-only
+    mask applied between two `run_planner` calls: the wrapper kept
+    `seg_layers = [M3, M4]` with M3 horizontal and forbidden, and the run
+    reported Success (Codex P1 on #691).
+
+    Clearing is safe precisely because absence from `assignments` means "no
+    plan this run" and nothing else — locked bottom-up wrappers are planned
+    like any other, so they are present when committed."""
+    bid_to_wrapper = {w.input.original_bundle.id: w for w in wrappers}
+    for asn in assignments:
+        w = bid_to_wrapper.get(asn.bundle_id)
+        if w is not None:
+            w.plan.selected_topology_index = asn.topo_index
+            w.input.assigned_v_layer = asn.v_layer_id
+            w.input.assigned_h_layer = asn.h_layer_id
+            w.plan.seg_layers = list(asn.seg_layers)
+            w.plan.seg_perp = list(asn.seg_perp)
+    assigned = {asn.bundle_id for asn in assignments}
+    for w in wrappers:
+        if w.input.original_bundle.id in assigned:
+            continue
+        w.plan.selected_topology_index = -1
+        w.plan.seg_layers = []
+        w.plan.seg_perp = []
+
+
 def cmd_set_planner_param(session, cmd, args, cmd_line):
     name_p, value_p = args[0], float(args[1])
     # Always record in the stash: run_planner builds a fresh
@@ -207,17 +245,11 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         session._planner_iterations = iterations
         with buda.ostream_redirect():
             assignments = session.planner.optimize_topologies(expanded, iterations)
-        # Apply assignments.  Each expanded wrapper has a unique HBundle ID so
-        # this lookup is unambiguous even for multiple cell instances.
-        bid_to_wrapper = {w.input.original_bundle.id: w for w in expanded}
-        for asn in assignments:
-            w = bid_to_wrapper.get(asn.bundle_id)
-            if w is not None:
-                w.plan.selected_topology_index = asn.topo_index
-                w.input.assigned_v_layer = asn.v_layer_id
-                w.input.assigned_h_layer = asn.h_layer_id
-                w.plan.seg_layers = list(asn.seg_layers)
-                w.plan.seg_perp = list(asn.seg_perp)
+        # Apply assignments (and clear the plan of anything unassigned —
+        # see _apply_assignments).  Each expanded wrapper has a unique
+        # HBundle ID so the lookup is unambiguous even for multiple cell
+        # instances.
+        _apply_assignments(expanded, assignments)
         session.bundles = expanded
         session._planner_is_hier = True
         # §9.7 share audit (Phase 3): committed usage vs each cell
@@ -256,16 +288,10 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         session._planner_iterations = session._planner_iters(args)
         with buda.ostream_redirect():
             assignments = session.planner.optimize_topologies(session.bundles, session._planner_iterations)
-        # Apply planner layer decisions (vector copy in C++ means we must apply here).
-        bid_to_wrapper = {w.input.original_bundle.id: w for w in session.bundles}
-        for asn in assignments:
-            w = bid_to_wrapper.get(asn.bundle_id)
-            if w is not None:
-                w.plan.selected_topology_index = asn.topo_index
-                w.input.assigned_v_layer = asn.v_layer_id
-                w.input.assigned_h_layer = asn.h_layer_id
-                w.plan.seg_layers = list(asn.seg_layers)
-                w.plan.seg_perp = list(asn.seg_perp)
+        # Apply planner layer decisions (vector copy in C++ means we must
+        # apply here), and clear the plan of anything the planner did not
+        # assign — see _apply_assignments.
+        _apply_assignments(session.bundles, assignments)
     # Persist the planner's decision into the BDB: expanded per-instance
     # bundles (hier), the selected topology, and per-segment assigned
     # layers — for both flows.
