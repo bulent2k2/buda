@@ -89,5 +89,4 @@ buda::ripup_reroute
 buda::refine_selection {30} {chase_overlaps}
 buda::report_wl
 buda::check_design
-corpus::end [info script]   ;# `exit` in the original
-return
+corpus::finish [info script] {0}

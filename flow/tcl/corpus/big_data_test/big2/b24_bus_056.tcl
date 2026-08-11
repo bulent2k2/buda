@@ -45,5 +45,4 @@ buda::check_design {nuts}
 buda::run_detailed_nuts
 buda::check_design
 buda::visualize
-corpus::end [info script]   ;# `exit` in the original
-return
+corpus::finish [info script] {0}

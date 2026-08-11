@@ -65,5 +65,4 @@ buda::negotiate_congestion
 buda::ripup_reroute
 buda::check_design
 buda::visualize
-corpus::end [info script]   ;# `exit` in the original
-return
+corpus::finish [info script] {0}

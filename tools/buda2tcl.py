@@ -109,7 +109,10 @@ def tcl_word(tok):
             return "{" + tok + "}"
     out = []
     for ch in tok:
-        if ch in '\\$[]{}"':
+        # `;` belongs in this set: Tcl ends a command at a bare semicolon, so
+        # an unescaped one would not corrupt the argument — it would START A
+        # SECOND COMMAND out of the rest of the line (Codex P2 on #686).
+        if ch in '\\$[]{}";':
             out.append("\\")
         out.append(ch)
     return "".join(out) or '""'
@@ -138,17 +141,27 @@ def translate_line(line, src_dir, out_root, flow_root):
         # under the flow's own tree.  `::corpus::root` is captured when the
         # harness is sourced, which is before that cd.
         ref = os.path.normpath(os.path.join(src_dir, toks[1]))
+        # `source fixture` (no suffix) is legal: cmd_source falls back to
+        # `fixture.buda` when the exact path is not a file.  Resolving it the
+        # same way here is what lets such a flow be translated at all —
+        # otherwise the queue tries to open a path that does not exist.
+        if not os.path.isfile(ref) and not toks[1].endswith(".buda"):
+            cand = os.path.normpath(os.path.join(src_dir, toks[1] + ".buda"))
+            if os.path.isfile(cand):
+                ref = cand
         rel = os.path.relpath(_out_path(ref, out_root, flow_root), out_root)
         return ([f"source [file join $::corpus::root {tcl_word(rel)}]"],
                 ref, False)
 
     if cmd == "exit":
         code = toks[1] if len(toks) > 1 else "0"
-        if code in ("0", ""):
-            # End of the run: measure HERE, before the engine goes away.
-            return (["corpus::end [info script]   ;# `exit` in the original",
-                     "return"], None, True)
-        return ([f"corpus::abort [info script] {tcl_word(code)}", "return"],
+        # `corpus::finish`, which never returns — NOT a `return`.  In the CLI
+        # `exit` raises SystemExit and unwinds the entire run, sourced files
+        # included; a bare `return` here would only leave the Tcl `source`,
+        # and the parent translation would carry on executing commands the
+        # original never reached (Codex P2 on #686).  finish measures wherever
+        # it is called from, because an exit anywhere IS the end of the run.
+        return ([f"corpus::finish [info script] {tcl_word(code or '0')}"],
                 None, True)
 
     return ([" ".join(["buda::" + cmd] + [tcl_word(t) for t in toks[1:]])],

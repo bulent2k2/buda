@@ -49,7 +49,25 @@ namespace eval corpus {
 # any relative path (including `[info script]`) resolves against the flow's
 # directory instead of the corpus, so anything computed later would be wrong.
 set corpus::root [file dirname [file normalize [info script]]]
-set corpus::repo [file dirname [file dirname [file dirname $corpus::root]]]
+# The repo is found by WALKING UP for tools/buda.tcl rather than counting
+# directories: a fixed `dirname` depth silently produces a wrong path the
+# moment this harness sits anywhere but flow/tcl/corpus/ — which is exactly
+# where a test that generates a throwaway corpus puts it.  BUDA_REPO is the
+# escape hatch for that case.
+set corpus::repo ""
+set _p $corpus::root
+while {1} {
+    if {[file exists [file join $_p tools buda.tcl]]} { set corpus::repo $_p; break }
+    set _up [file dirname $_p]
+    if {$_up eq $_p} break
+    set _p $_up
+}
+if {$corpus::repo eq "" && [info exists ::env(BUDA_REPO)]} {
+    set corpus::repo $::env(BUDA_REPO)
+}
+if {$corpus::repo eq ""} {
+    error "corpus harness: no tools/buda.tcl above [info script] (set BUDA_REPO)"
+}
 
 proc corpus::begin {script origin_buda} {
     variable top
@@ -93,11 +111,14 @@ proc corpus::begin {script origin_buda} {
 # — overlaps, unplaced, and the number of bundles check_design faults — plus
 # the two wirelengths as the fine-grained fingerprint: two runs can agree on
 # three integers by luck, and cannot agree on the wirelength by luck.
-proc corpus::end {script} {
+proc corpus::end {script {forced -1}} {
     variable top
     variable origin
     variable t0
-    if {$top eq "" || $script ne $top} { return }
+    # `forced` >= 0 means an `exit` in the original brought us here, and an
+    # exit ends the run wherever it appears — so the top-file guard applies
+    # only to the fell-off-the-end case.
+    if {$top eq "" || ($forced < 0 && $script ne $top)} { return }
 
     set ov [buda::query overlaps]
     set un [buda::query unplaced]
@@ -105,23 +126,48 @@ proc corpus::end {script} {
     lassign [corpus::_wirelengths] awl dwl
     set sec [format %.1f [expr {([clock milliseconds] - $t0) / 1000.0}]]
 
-    buda::stop
+    corpus::_shutdown 0
     puts [format {QOR {"flow": "%s", "overlaps": %s, "unplaced": %s, "viol_bundles": %s, "abstract_wl": %s, "detailed_wl": %s, "sec": %s}} \
               $origin [corpus::_json $ov] [corpus::_json $un] \
               [corpus::_json $vb] [corpus::_json $awl] [corpus::_json $dwl] $sec]
     flush stdout
 }
 
-# A non-zero `exit <code>` in the original is a fail-fast, not an ending: the
-# run did not reach a measurable state, and saying so is the whole point of
-# BUDA's own FATAL contract.
-proc corpus::abort {script code} {
-    variable top
+# `exit` in the original, from ANYWHERE — including inside a sourced fixture.
+# It never returns, because in the CLI `exit` raises SystemExit and unwinds
+# the whole run: a Tcl `return` would only leave the sourced file and let the
+# parent keep issuing commands the original never reached.
+#
+# A non-zero code is a fail-fast, not an ending: the run did not reach a
+# measurable state, and saying so is the point of BUDA's own FATAL contract.
+proc corpus::finish {script code} {
     variable origin
-    if {$top eq "" || $script ne $top} { return }
-    catch {buda::stop}
+    if {$code == 0} {
+        corpus::end $script $code
+        exit 0
+    }
+    corpus::_shutdown $code
     puts [format {QOR {"flow": "%s", "err": "exit(%s)"}} $origin $code]
     flush stdout
+    exit 1
+}
+
+# End the engine session the way a `.buda` run ends it.
+#
+# `buda::stop` alone is NOT that: it sends the server's `__exit`, which is
+# answered by closing the session without ever running the script-level
+# `exit` handler — and that handler is where `_flush_bdb_writeback` persists
+# an `open_bdb ... writeback` fixture.  Stopping without it would discard the
+# modified BDB while this harness printed a successful row (Codex P2 on
+# #686).  Issuing the real command flushes; the catch is because a non-zero
+# code comes back as FATAL, which the bridge correctly raises.
+proc corpus::_shutdown {code} {
+    if {$code == 0} {
+        catch {buda::exit}
+    } else {
+        catch {buda::exit $code}
+    }
+    catch {buda::stop}
 }
 
 # `check_design` with no argument audits the deepest completed stage and is

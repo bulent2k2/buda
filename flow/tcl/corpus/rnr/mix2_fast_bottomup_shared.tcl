@@ -63,5 +63,4 @@ buda::ripup_reroute
 buda::check_design
 buda::report_wirelength
 buda::visualize
-corpus::end [info script]   ;# `exit` in the original
-return
+corpus::finish [info script] {0}

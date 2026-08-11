@@ -143,3 +143,104 @@ def test_the_engine_resolves_paths_from_the_flows_directory(tmp_path):
     start_at = harness.index("buda::start -echo 0")
     assert cd_at < start_at, ("harness.tcl starts the engine before the cd — "
                               "the child would inherit the wrong directory")
+
+
+# ── the translation's edge cases (Codex review on #686) ────────────────────
+# Each of these is a shape the corpus itself does not contain today.  They are
+# pinned anyway because the translator is a general tool: the corpus is what
+# it was built for, not the limit of what it will be pointed at.
+
+def _mini(tmp_path, files, top, run=True):
+    """Translate a throwaway .buda tree and (optionally) run it through tclsh.
+
+    Returns (out_dir, CompletedProcess|None).
+    """
+    src = tmp_path / "src"
+    src.mkdir(exist_ok=True)
+    for name, text in files.items():
+        (src / name).write_text(text)
+    out = tmp_path / "out"
+    b2t = _load("buda2tcl")
+    written = b2t.translate([str(src / top)], str(out), str(src))
+    for path, text in written.items():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        Path(path).write_text(text)
+    shutil.copy(_ROOT / "flow" / "tcl" / "corpus" / "harness.tcl", out / "harness.tcl")
+    if not run:
+        return out, None
+    env = dict(os.environ, BUDA_REPO=str(_ROOT))
+    p = subprocess.run(["tclsh", str(out / (Path(top).stem + ".tcl"))],
+                       capture_output=True, encoding="utf-8", errors="replace",
+                       cwd=str(tmp_path), timeout=600, env=env)
+    return out, p
+
+
+def test_a_word_that_cannot_be_braced_escapes_the_command_separator():
+    """`;` ends a command in Tcl.  A token that falls to the escaping path —
+    it carries a backslash or unbalanced braces — would otherwise not merely
+    arrive corrupted: the rest of the line would RUN as a second command."""
+    b2t = _load("buda2tcl")
+    w = b2t.tcl_word(r"C:\foo;puts")
+    assert ";" not in w.replace(r"\;", ""), w
+    # ...and the word still means what it said, through a real interpreter.
+    out = subprocess.run(["tclsh"], input=f'puts [list {w}]\n',
+                         capture_output=True, encoding="utf-8", timeout=60)
+    assert out.stdout.strip() == r"{C:\foo;puts}", out.stdout + out.stderr
+
+
+def test_a_suffixless_source_resolves_like_the_cli(tmp_path):
+    """`source fixture` is legal — cmd_source falls back to `fixture.buda`.
+    The translator has to resolve it the same way or the flow cannot be
+    translated at all."""
+    out, _ = _mini(tmp_path, {
+        "top.buda": "source fixture\nadd_block b 0 0 10 10\n",
+        "fixture.buda": "def_layer 4 M4 H TOP 30\n",
+    }, "top.buda", run=False)
+    assert (out / "fixture.tcl").exists(), "the suffixless source was not followed"
+    assert "fixture.tcl" in (out / "top.tcl").read_text()
+
+
+@pytest.mark.skipif(shutil.which("tclsh") is None, reason="no tclsh on this host")
+def test_an_exit_inside_a_sourced_file_ends_the_whole_run(tmp_path):
+    """In the CLI `exit` raises SystemExit and unwinds everything, sourced
+    files included.  A translation that only returned from the Tcl `source`
+    would keep issuing commands the original never reached — and then measure
+    a design that never existed."""
+    # The probe is the RE-DECLARATION of `a`: a duplicate block name is a
+    # hard error, so if the parent kept going past the fixture's exit the run
+    # would fail loudly instead of reporting a clean row.  (The generated text
+    # still CONTAINS that line — a translator cannot know statically that a
+    # sourced file exits — so the property to test is the runtime one, which
+    # is also the property the CLI has.)
+    _out, p = _mini(tmp_path, {
+        "top.buda": ("add_block a 0 0 10 10\n"
+                     "source fixture.buda\n"
+                     "add_block a 0 0 10 10\n"),      # unreachable; fatal if run
+        "fixture.buda": "add_block b 20 0 30 10\nexit\n",
+    }, "top.buda")
+    assert p.returncode == 0, p.stdout + p.stderr
+    rows = [l for l in p.stdout.splitlines() if l.startswith("QOR ")]
+    assert len(rows) == 1, p.stdout
+    assert "err" not in rows[0], rows[0]
+    assert "already" not in (p.stdout + p.stderr), p.stdout + p.stderr
+
+
+@pytest.mark.mid
+@pytest.mark.skipif(shutil.which("tclsh") is None, reason="no tclsh on this host")
+def test_an_armed_writeback_is_flushed_when_the_run_ends(tmp_path):
+    """`open_bdb <f>.bdb.sql writeback` persists at the END of the run, via
+    the script-level `exit` handler.  `buda::stop` alone does not go through
+    it — the server answers `__exit` by closing the session — so the harness
+    would have discarded the modified BDB while reporting a clean row."""
+    fixture = next((_ROOT / "test" / "tests" / "data").glob("*.bdb.sql"))
+    sql = tmp_path / "src" / "w.bdb.sql"
+    sql.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(fixture, sql)
+    before = sql.read_text()
+    _out, p = _mini(tmp_path, {
+        "w.buda": "open_bdb w.bdb.sql writeback\nadd_cell zzz_probe 10 10\n",
+    }, "w.buda")
+    assert p.returncode == 0, p.stdout + p.stderr
+    after = sql.read_text()
+    assert after != before, "the writeback never reached the .sql"
+    assert "zzz_probe" in after, "the modification was not persisted"

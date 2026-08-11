@@ -43,5 +43,4 @@ buda::run_detailed_nuts
 buda::negotiate_congestion
 buda::report_wl
 buda::check_design
-corpus::end [info script]   ;# `exit` in the original
-return
+corpus::finish [info script] {0}
