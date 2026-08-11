@@ -118,7 +118,13 @@ def test_texts_counted_not_footprinted(tmp_path):
     db, st = _import(tmp_path, b.write(tmp_path / "t.gds"))
     assert st.n_texts == 1
     assert st.n_labels_skipped == 1 and st.n_nets == 0
-    assert any("outside every component" in w for w in st.warnings)
+    # The skip is correct by design; the DIAGNOSTIC carries what makes it
+    # actionable — the label's position and the nearest component with its
+    # distance, so a near miss (a scale/rounding slip) reads differently
+    # from a genuinely stray label.
+    w = next(w for w in st.warnings if "outside every component" in w)
+    assert "at (500, 500)" in w, w
+    assert "nearest: 'leaf'" in w, w
     assert {c.name: (c.width, c.height)
             for c in db.all_cells()} == {"leaf": (5.0, 3.0)}
 
@@ -593,3 +599,23 @@ def test_truncated_xy_record_fails_loud(tmp_path):
     db = buda.BDB(str(tmp_path / "trunc.bdb"))
     with pytest.raises(Exception, match="truncated"):
         db.import_gds(str(p), [63])
+
+
+def test_a_skipped_label_is_an_identified_diagnostic(tmp_path):
+    """Through the CLI, the skip carries BUDA-1614: the behavior is correct
+    by design (a label on nothing has nothing to pin to), but each skip is
+    a net silently missing from the recovered design — exactly what a
+    methodology gates on, so it must be an ID, not prose."""
+    b = GdsBuilder()
+    b.structure("leaf").boundary(10, 0, [(0, 0), (5, 0), (5, 3), (0, 3)]) \
+     .text(63, 0, (500, 500), "net_far")
+    gds = b.write(tmp_path / "t.gds")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command(f"open_bdb {tmp_path / 'a.bdb'}")
+        s.do_command(f"import_gds {gds}")
+    out = buf.getvalue()
+    assert "BUDA-1614" in out, out
+    assert "WARNING" in out and "net_far" in out, out

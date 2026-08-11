@@ -472,7 +472,17 @@ def cmd_import_gds(session, cmd, args, cmd_line):
         resolve_script_path(session, args[0], is_read=True), label_layers,
         session.layers.gds_mapped_pairs())
     for wmsg in st.warnings:
-        print(f"[import_gds] Warning: {wmsg}")
+        # The skipped-label warning is IDENTIFIED (BUDA-1614): the skip is
+        # correct by design — a label on nothing has nothing to pin to —
+        # but each one is a net silently missing from the recovered
+        # design, which is exactly what a methodology gates on.  The text
+        # names the position and the nearest component with its distance,
+        # so a near miss (a scale or rounding slip, the fixable cause)
+        # reads differently from a genuinely stray label.
+        if "outside every component" in wmsg:
+            buda_diag.emit("BUDA-1614", wmsg)
+        else:
+            print(f"[import_gds] Warning: {wmsg}")
     tops = ", ".join(st.tops) if st.tops else "(none)"
     lbl = (f"{st.n_nets} net(s) / {st.n_pins} pin(s) recovered from "
            f"{st.n_texts} TEXT label(s)"

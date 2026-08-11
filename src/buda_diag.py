@@ -93,6 +93,8 @@ MESSAGES = {
                            "connected."),
     "BUDA-1613": (WARNING, "A DEF NONDEFAULTRULE could not be translated to "
                            "a BUDA rule and was skipped."),
+    "BUDA-1614": (WARNING, "A GDS TEXT label lands outside every component, "
+                           "so its net was not recovered."),
     "BUDA-1602": (WARNING, "Imported design counts differ from the counts the "
                            "file declares."),
     "BUDA-1603": (WARNING, "A construct in the file has no representation in "

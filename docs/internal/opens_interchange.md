@@ -557,11 +557,23 @@ or batch run already falls through to the direct launch.
   making the write harmless BY CONSTRUCTION replaces the promise. Pinned by
   a test whose rogue command `os.write(1, ...)`s mid-command: the frame
   stays well-formed, the junk arrives on stderr.
-* **`import_gds` label recovery needs components to land on.** Labels
-  outside every component are skipped with a warning — correct.  (The case
-  that made this bite — port labels landing on nothing because `__PORT__`
-  never round-tripped — was item 3, now resolved; a label genuinely outside
-  every component still skips, as it should.)
+* ~~**`import_gds` label recovery needs components to land on.**~~
+  **RESOLVED 2026-08-11** — the skip stays, because it is correct: a label
+  on nothing has nothing to pin to, and inventing a pin would place a
+  connection the layout never stated.  What was missing was the
+  diagnostic's quality on the repo's own terms: the warning was
+  unidentified prose (nothing to gate on, though each skip is a net
+  silently missing from the recovered design), and it named the label but
+  not WHERE it was or HOW it missed — yet the fixable cause is a NEAR
+  miss, a label a fraction of a µm off a component edge from a scale or
+  rounding slip, indistinguishable in the old text from a genuinely stray
+  label.  Now: **BUDA-1614** (catalogued, counted), and the message names
+  the label's position and the nearest component with its distance —
+  `label 'x' at (500, 500) is outside every component — skipped (nearest:
+  'leaf', 495 um away)` — so near-miss and stray read differently and the
+  first is actionable.  (The case that originally made this bite — port
+  labels landing on nothing because `__PORT__` never round-tripped — was
+  item 3, resolved separately.)
 
 ## 10. ~~A die-port endpoint's depth was counted off its name~~ — RESOLVED 2026-08-10
 
