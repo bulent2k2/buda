@@ -48,3 +48,10 @@ docs/.obsidian/
 
 # Windows/venv workflow (docs/WINDOWS_BUILD.md creates it in-repo)
 .venv/
+
+# flow/tcl/array_save.tcl + array_resume.tcl write their checkpoint here.
+# Needs to be explicit: the `.bdb` binary is already ignored, but the
+# diffable `.bdb.sql` snapshot beside it is deliberately UN-ignored above
+# (checked-in BDB fixtures are text), so without this the vehicle dirties
+# `git status` every time someone runs it.
+flow/tcl/out/
