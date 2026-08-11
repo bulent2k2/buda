@@ -175,6 +175,7 @@ def _mini(tmp_path, files, top, run=True):
     return out, p
 
 
+@pytest.mark.skipif(shutil.which("tclsh") is None, reason="no tclsh on this host")
 def test_a_word_that_cannot_be_braced_escapes_the_command_separator():
     """`;` ends a command in Tcl.  A token that falls to the escaping path —
     it carries a backslash or unbalanced braces — would otherwise not merely

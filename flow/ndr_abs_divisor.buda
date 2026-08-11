@@ -1,0 +1,164 @@
+# REPRO: an absolute NDR width is quantized by CHANNEL cost, not by METAL.
+#
+# `docs/internal/opens_ndr.md` §2's residual, reproduced in one run.  This
+# vehicle is not a regression test for a bug — the behaviour below is what
+# the code currently means — it exists so the semantic choice is visible in
+# numbers before anyone decides whether to change it.
+#
+# ── The two readings ──────────────────────────────────────────────────────
+#
+# `def_ndr r width W` says a governed bit should be W units wide.  Path A
+# realizes that as a whole number of SIGNAL slots, and the conversion is
+#
+#     k = ceil(W / bit_pitch)      bit_pitch = unit_pitch / n_signal_slots
+#
+# `bit_pitch` is the per-signal-slot CHANNEL cost: the layer's whole period
+# amortized over its signal slots, rails included.  It answers "how much
+# routing channel does this width consume", which is the question the
+# planner books — and it is exactly what `eff_bus_width` charges, so rule
+# and width model agree by construction (the no-double-count property).
+#
+# The METAL a k-slot bit actually gets is a different quantity entirely:
+#
+#     metal = k*w + (k-1)*sp       w, sp = the layer's own slot geometry
+#
+# Nothing forces those to agree.  `bit_pitch` includes the power rails and
+# the inter-slot gaps; `metal` includes neither the rails nor the gaps
+# outside the run.  On a pattern whose period is mostly rail, `bit_pitch`
+# is large and `metal` is small, and the same declaration buys wildly
+# different wire.
+#
+# ── The four rows this vehicle produces ───────────────────────────────────
+#
+#   DENSE  (M3/M5)  VDD 2 1 (_ 1 1)x12 GND 2 1
+#                   unit_pitch 30, 12 signal slots -> bit_pitch 2.5
+#                   slot w=1 sp=1, so k slots deliver 2k-1 units of metal
+#
+#   SPARSE (M4/M6)  VDD 10 2 (_ 2 2)x4 GND 10 2
+#                   unit_pitch 40, 4 signal slots -> bit_pitch 10.0
+#                   slot w=2 sp=2, so k slots deliver 4k-2 units of metal
+#
+# Both buses are planned onto the TOP pair, so the rows below appear as
+# M5 (dense H) and M6 (sparse V) in the run's output.
+#
+#   rule    layer        k = ceil(W/pitch)   metal delivered   vs declared
+#   ------  -----------  ------------------  ----------------  -----------
+#   w3 (3)  M5  DENSE    ceil(3/2.5)  = 2    2*2-1 = 3         EXACT
+#   w3 (3)  M6  SPARSE   ceil(3/10)   = 1    4*1-2 = 2         short by 1
+#   w8 (8)  M5  DENSE    ceil(8/2.5)  = 4    2*4-1 = 7         short by 1
+#   w8 (8)  M6  SPARSE   ceil(8/10)   = 1    4*1-2 = 2         4x UNDER
+#
+# Only the three short rows are reported; the EXACT one is silent, which
+# is why a run that prints nothing is not evidence of agreement.
+#
+# A fifth row, from `w8sp` (width 8 restricted to the sparse pair): EVERY
+# layer it can reach resolves to 1 slot, so its stored maximum is 1 slot /
+# 0 guards and, with no shield, the spec reads INACTIVE.  The bundle is
+# governed on paper and ungoverned in fact — declared 8, placed 2, and no
+# demand line at all, since there is no active rule to report a demand
+# for.  It is the worst row and the quietest.
+#
+# The first row is the one that matters most.  It is EXACT — and that is a
+# COINCIDENCE, not a property: change the declared width to 8 on the same
+# layer and it stops being exact.  So "it works on my stack" is not
+# evidence the two readings agree; it is evidence you picked a lucky W.
+#
+# The last row is the headline.  `width 8` on the sparse layer resolves to
+# ONE slot, which means `width_slots == 1` and `guard_slots == 0`: with no
+# shield declared the spec reads INACTIVE, so the bundle routes as an
+# ordinary bus and gets 2 units of metal against a declared 8.
+#
+# ── Why nothing else catches it ───────────────────────────────────────────
+#
+# `check_design` is clean here, and correctly so.  Its R9 NDR_WIDTH check
+# counts how many SIGNAL slot CENTRES a placed bit covers, so it measures
+# the same channel-shaped quantity the quantization used and agrees with it
+# by construction.  A metal-shaped check would need the metal-shaped
+# quantization; the two questions have to be answered together or not at
+# all.  `dump_ndr` after `run_detailed_nuts` is the one place the gap is
+# reported, and only because this open was written down.
+#
+# ── If the physical reading is wanted ─────────────────────────────────────
+#
+# Quantize width by the smallest k with `k*w + (k-1)*sp >= W`, and spacing
+# by the smallest g with `(g+1)*sp + g*w >= S`, both read off the layer's
+# pattern.  That makes `ndr_resolve_for_pitch` need the SLOT GEOMETRY
+# rather than one scalar, and the CHARGING conversion must keep using
+# bit_pitch so the planner's books stay consistent — i.e. the two readings
+# become two different numbers the code carries at once, which is the real
+# cost of the change and the reason it is a decision rather than a patch.
+#
+# Decide before a design leans on absolute widths for EM or resistance.  A
+# channel-shaped reading is fine for congestion planning, which is what
+# every current consumer of the number does.
+
+add_block src_a 0    0    200  200
+add_block dst_a 800  600  1000 800
+add_block src_b 0    900  200  1100
+add_block dst_b 800  1500 1000 1700
+# Vertically ALIGNED (same x span), so this pair routes as a straight V
+# run.  That matters: `w8sp` is restricted to the V layers, and an L-shaped
+# bus under a V-only restriction has no legal layer for its H leg — it
+# simply never routes, which would make the row prove nothing.
+add_block src_c 0    1800 200  2000
+add_block dst_c 0    2400 200  2600
+
+# Both buses route L-shaped (the blocks differ in x AND y), so each one
+# lands on BOTH families and a single run yields all four rows.
+add_bus w3_[3] src_a.p dst_a.q
+add_bus w8_[3] src_b.p dst_b.q
+
+# ── The fifth row: a rule that reads as NO RULE ───────────────────────────
+# `w8sp` is the SAME width 8, restricted to the SPARSE pair.  Its stored
+# quantization is a maximum over the layers it can reach — and every one of
+# them resolves to 1 slot — so `width_slots` is 1, `guard_slots` is 0, and
+# with no shield declared the spec is INACTIVE.  The bus routes as an
+# ordinary one and gets 2 units of metal for a declared 8.
+#
+# This is the WORST case in the vehicle and the easiest to miss: the rule
+# is declared, attached, and reported at declaration time, yet nothing
+# downstream treats the bundle as governed.  A diagnostic that skips
+# inactive specs would say nothing at all here (Codex P2 on #689).
+add_bus w8sp_[3] src_c.p dst_c.q
+
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+
+# DENSE horizontal / SPARSE vertical.  The sparse period is mostly rail:
+# 24 of its 40 units are the two 10-wide supplies and their clearance, so
+# each of its 4 signal slots amortizes to 10 units of channel while the
+# slot itself is 2 units of metal.  That 5x gap between channel and metal
+# IS the open.
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 5 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 10 2 (_ 2 2)x4 GND 10 2
+def_track_pattern 6 0 VDD 10 2 (_ 2 2)x4 GND 10 2
+
+# Patterns before the rules: an absolute value has no meaning without the
+# slot geometry it quantizes against, and def_ndr enforces the order.
+def_ndr w3 width 3
+def_ndr w8 width 8
+# Same declared width as w8, but confined to the SPARSE pair — so its
+# conservative maximum is 1 slot and the stored spec reads INACTIVE.
+def_ndr w8sp width 8 layers M4,M6
+set_ndr w3_ w3
+set_ndr w8_ w8
+set_ndr w8sp_ w8sp
+
+run_bundler STRICT
+dump_ndr
+
+generate_topologies
+set_track_pitch 3
+run_planner 1
+
+run_nuts
+run_detailed_nuts
+
+# The report: per governed bundle, the per-layer slot resolution AND the
+# delivered metal wherever it falls short of the declared width.
+dump_ndr
+check_design
+report_wirelength

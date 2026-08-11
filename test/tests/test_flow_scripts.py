@@ -1003,6 +1003,49 @@ def test_ndr_bond_shield_bonding():
     assert "no violations" in out and "NDR_" not in out, out
 
 
+def test_ndr_absolute_divisor_repro():
+    """flow/ndr_abs_divisor.buda: the documented semantic limit of
+    opens_ndr.md §2 — an absolute width is quantized by the layer's
+    per-signal-slot CHANNEL cost (`unit_pitch / n_signal_slots`), which is
+    not the METAL a k-slot bit gets (`k*w + (k-1)*sp`).
+
+    This pins the CURRENT MEANING, not a bug: if someone changes the
+    quantization to the metal-shaped reading, this test fails and points
+    at the decision rather than letting it land silently.  It also pins
+    that `check_design` stays clean — the R9 NDR_WIDTH check counts
+    covered SIGNAL slot CENTRES, so it measures the same channel-shaped
+    quantity and agrees with the quantization by construction."""
+    out, rc = run_script("ndr_abs_divisor.buda")
+    assert_clean(out, rc, "ndr_abs_divisor.buda")
+    # Nothing is VIOLATED — that is the point of the repro.
+    assert "no violations" in out and "NDR_" not in out, out
+    # width 3 on the DENSE pair is exact, so it must NOT be reported: an
+    # agreement here is a coincidence of the declared value, and a run
+    # that prints nothing is not evidence the two readings agree.
+    assert "rule 'w3' declares width 3 but the placed bits are 3" not in out
+    # The three short rows, smallest gap to largest.
+    assert ("rule 'w3' declares width 3 but the placed bits are 2 wide"
+            in out), out
+    assert ("rule 'w8' declares width 8 but the placed bits are 7 wide"
+            in out), out
+    # The headline: 4x under, and with width_slots quantizing to 1 the
+    # spec reads INACTIVE, so the bus routes as an ordinary one.
+    assert ("rule 'w8' declares width 8 but the placed bits are 2 wide"
+            in out), out
+    # Row 5: a rule whose EVERY governed layer resolves to one slot has an
+    # INACTIVE stored spec, so it has no demand line and the bundle is
+    # ungoverned in fact.  That is the worst row, and the diagnostic used
+    # to skip it entirely — it sat behind the `spec.active()` filter, so
+    # the largest shortfall in the vehicle printed nothing at all
+    # (Codex P2 on #689).
+    assert ("rule 'w8sp' declares width 8 but the placed bits are 2 wide"
+            in out), out
+    assert "the spec reads INACTIVE there so the bus routes UNGOVERNED" in out
+    # …and it really is unreported by the demand machinery, which is why
+    # the metal line has to name its own bundle.
+    assert "rule 'w8sp': demand" not in out, out
+
+
 def test_ndr_absolute_shared_cell_bottom_up():
     """flow/ndr_abs_shared_bottomup.buda (Codex P1 on #682): a shared
     cell's own interconnect is planned, NUTS-solved and DNUTS-placed on a
