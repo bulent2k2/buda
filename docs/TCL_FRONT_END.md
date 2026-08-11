@@ -235,6 +235,47 @@ visible, in order, outside every frame — instead of inside the
 conversation.  ("Nothing in BUDA does" was true, but it was a promise about
 other people's code; now it does not need to be one.)
 
+## Design iteration: a decision that survives the process
+
+`array.tcl` opens `:memory:`, so everything it decides dies with it — which
+is how a candidate picked by hand in the explorer gets lost between runs.
+`array_save.tcl` and `array_resume.tcl` are the same design against a FILE,
+split into the two sessions a person actually works in:
+
+```bash
+tclsh flow/tcl/array_save.tcl 3 2                        # build, route, look
+BUDA_ARRAY_VIZ=1 tclsh flow/tcl/array_save.tcl 3 2       # ...with the viewer
+
+BUDA_ARRAY_PIN=diag=14 tclsh flow/tcl/array_resume.tcl   # re-plan with a choice
+tclsh flow/tcl/array_resume.tcl                          # again; the pin holds
+```
+
+Session 2 declares the technology and **nothing else**: no cells, no buses,
+no bundler, no generation. `load_pipeline` brings back the bundles, every
+candidate topology, the planner's selection and layers, the pre-plan pins and
+the abstract routing, and the flow starts at the planner — a design iteration
+re-plans, it does not rebuild. Both sessions get their stack and geometry
+from `array_lib.tcl`, because a checkpoint is worth nothing if the session
+reopening it declares a different design.
+
+**A pin is the durable form of a choice.** `buda::select_topology` writes
+`topology.is_pinned` the moment it is applied, so it survives the save, binds
+the next session's planner, and stays in force until it is changed —
+measured: unpinned this design plans `diag` as `TRUNK_V@x240`, pinned to 14
+it keeps `TRUNK_H+MST@y480` through the resume, the re-plan, and the
+checkpoint after that. A pin made **in the explorer** is a preview by
+design — the viewer's re-run buttons never write a checkpoint — so bring the
+title bar's `topo N/n` back as `BUDA_ARRAY_PIN=<bus>=N`. That N is 1-based
+and is exactly what `select_topology` takes; `dump_topologies` numbers its
+own table from **0**, so add one when reading it there.
+
+Known gap, worth knowing before trusting a resumed number: the per-bit
+**fan-in taper is not restored**, so a resumed CONVERGENT/DIVERGENT bundle
+comes back untapered and routes wider than the design that was saved (this
+vehicle: 88 → 106 bit-wires, all of it in the two fan-in bundles, both
+endpoints clean). Details and the measurement in
+[BDB_REFERENCE.md](BDB_REFERENCE.md#load_pipeline).
+
 ## The corpus: the same 41 flows, driven from Tcl
 
 `flow/tcl/corpus/` is the QoR corpus translated to Tcl — every flow
