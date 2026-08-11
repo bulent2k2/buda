@@ -26,10 +26,30 @@ Usage:
   # capture this build's QoR over the default corpus
   PYTHONPATH=build:src:tools tools/qor_corpus.py --out mine.json
 
-  # baseline-vs-branch recipe (the point of this tool)
+  # baseline-vs-branch, WITHOUT touching the working tree (preferred)
+  tools/qor_corpus.py --vs main
+
+  # the same thing by hand, when you want the two runs separated
   git checkout main   && bin/bb && tools/qor_corpus.py --out base.json
   git checkout branch && bin/bb && tools/qor_corpus.py --out mine.json
   tools/qor_corpus.py --compare base.json mine.json
+
+`--vs REV` materializes REV in a git worktree (cached under the temp dir,
+keyed by commit), builds BOTH sides, sweeps them SEQUENTIALLY and compares.
+It never reads, writes or checks out your working tree, so uncommitted work
+needs no stash and you may keep editing — or commit — while it runs.  The
+hand recipe above cannot do that: `git checkout main` requires a clean tree,
+and stashing around it makes the measurement a mutation of the tree, whose
+failure modes all yield a WRONG NUMBER rather than an error (see cmd_vs).
+
+Three things to know about `--vs`: the baseline is the COMMIT, so `--vs HEAD`
+measures your last commit and uncommitted changes appear only on the branch
+side; the baseline runs the BASELINE's own copy of this harness, matching the
+hand recipe, so a CORPUS that differs between the two is reported as a
+comparable subset rather than silently reconciled; and the RUNTIME column is
+advisory here even by its usual standards — working while the sweep runs is
+the point of the mode, and it makes whichever side you worked during read
+slower (the QoR verdict is decision-based and immune).
 
 `--compare` tags each moved flow BETTER/WORSE on the QoR metric
 (overlaps/unplaced/viol_bundles) and exits non-zero if any regressed, then
@@ -65,9 +85,11 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
@@ -394,6 +416,13 @@ def sweep(run_fn, flows, jobs, progress=None):
 
 
 def cmd_run(flows, out, jobs=1):
+    # Resolve BEFORE the chdir: `--out results.json` means "here", where the
+    # user is, not "wherever this tool happens to chdir to".  A no-op for the
+    # documented usage (run from the repo root, where the two coincide), and
+    # the difference between two files and one under --vs, whose sweeps run in
+    # different directories.
+    if out:
+        out = os.path.abspath(out)
     os.chdir(_ROOT)                             # flow paths are repo-root-relative
     t0 = time.time()
     results = sweep(run_flow, flows, jobs,
@@ -405,6 +434,181 @@ def cmd_run(flows, out, jobs=1):
             json.dump(results, fh, indent=1)
         print(f"wrote {len(results)} results -> {out}")
     return results
+
+
+# ── baseline-in-a-worktree (--vs) ──────────────────────────────────────────
+# The documented two-checkout recipe needs a CLEAN tree to `git checkout
+# main`, which is exactly what you do not have while measuring uncommitted
+# work.  The workaround people reach for — stash, build, measure, pop — makes
+# the measurement a mutation of the working tree, with three failure modes
+# that all produce a WRONG NUMBER rather than an error: anything else touching
+# the tree mid-run corrupts it; committing mid-run leaves nothing to stash, so
+# the "baseline" silently measures the branch and reports a vacuous
+# no-difference; and an interrupted run leaves the tree stashed.
+#
+# A git worktree removes the hazard at the root: the baseline is materialized
+# somewhere else entirely, so the working tree is never read, written, or
+# checked out, and you may edit and commit freely while it runs.
+
+def _sh(cmd, cwd, check=True, env=None, stream=False):
+    """Run a command in `cwd`.
+
+    `stream=True` lets it write straight to our stdout instead of capturing:
+    the baseline sweep takes as long as a corpus run, and a captured one shows
+    NOTHING until it finishes, which is indistinguishable from a hang for
+    twenty minutes.  Errors are still caught — only the reporting differs,
+    since a streamed failure has already printed its own diagnosis."""
+    if stream:
+        r = subprocess.run([str(c) for c in cmd], cwd=str(cwd), env=env)
+        if check and r.returncode != 0:
+            sys.exit(f"[--vs] command failed "
+                     f"({' '.join(str(c) for c in cmd)}) — see its output above")
+        return r
+    r = subprocess.run([str(c) for c in cmd], cwd=str(cwd), env=env,
+                       capture_output=True, text=True)
+    if check and r.returncode != 0:
+        sys.exit(f"[--vs] command failed ({' '.join(str(c) for c in cmd)}):\n"
+                 f"{r.stdout[-1500:]}{r.stderr[-2000:]}")
+    return r
+
+
+_WT_PREFIX = "buda-qor-"
+
+
+def baseline_worktree(rev):
+    """A git worktree holding `rev`, cached under the temp dir and keyed by
+    COMMIT so repeated baselines against an unchanged main reuse its build.
+
+    Detached on purpose: a worktree that checked out the BRANCH would refuse
+    (git allows one checkout per branch) and, worse, would tie the baseline to
+    a moving ref."""
+    commit = _sh(["git", "rev-parse", rev + "^{commit}"], _ROOT).stdout.strip()
+    wt = Path(tempfile.gettempdir()) / f"{_WT_PREFIX}{commit[:12]}"
+    if not (wt / "CMakeLists.txt").exists():
+        # `prune` first: a cache dir deleted by hand (or by a temp sweep)
+        # leaves a registration behind that makes `worktree add` refuse.
+        _sh(["git", "worktree", "prune"], _ROOT)
+        _sh(["git", "worktree", "add", "--detach", str(wt), commit], _ROOT)
+    return wt, commit
+
+
+def cached_baselines():
+    """Every cached baseline worktree, newest first: (path, bytes)."""
+    root = Path(tempfile.gettempdir())
+    out = []
+    for d in root.glob(_WT_PREFIX + "*"):
+        if not d.is_dir():
+            continue
+        size = sum(f.stat().st_size for f in d.rglob("*")
+                   if f.is_file() and not f.is_symlink())
+        out.append((d, size))
+    return sorted(out, key=lambda t: t[0].stat().st_mtime, reverse=True)
+
+
+def cmd_clean_baselines(keep=0):
+    """Remove cached baseline worktrees (each carries a full build — ~140 MB
+    here), keeping the `keep` most recently used.
+
+    They are a CACHE, not state: a removed one is simply rebuilt on the next
+    `--vs` against that commit.  Worth an explicit command because main moves
+    often, so the cache grows one build per baseline commit and nothing else
+    would ever collect it."""
+    entries = cached_baselines()
+    if not entries:
+        print("no cached baseline worktrees")
+        return
+    for i, (d, size) in enumerate(entries):
+        if i < keep:
+            print(f"  keep   {d}  ({size / 1e6:.0f} MB)")
+            continue
+        _sh(["git", "worktree", "remove", "--force", str(d)], _ROOT,
+            check=False)
+        shutil.rmtree(d, ignore_errors=True)      # hand-deleted / not registered
+        print(f"  removed {d}  ({size / 1e6:.0f} MB)")
+    _sh(["git", "worktree", "prune"], _ROOT, check=False)
+
+
+def _build(tree, label):
+    tree = Path(tree)
+    print(f"[--vs] building {label} ({tree})...", flush=True)
+    # The worktree's OWN bin/bb: it resolves the repo root as its parent dir,
+    # so each side builds itself into its own build/ and neither can pick up
+    # the other's artifacts.
+    _sh([tree / "bin" / "bb"], tree, stream=True)
+
+
+def vs_paths(out):
+    """(branch json, baseline json) for a `--vs` run, both ABSOLUTE.
+
+    Absolute is load-bearing, not tidiness: the two sweeps run in DIFFERENT
+    directories (the baseline subprocess in the worktree, `cmd_run` after
+    chdir'ing to the repo root), so a relative path means two different files
+    and `--compare` then dies with FileNotFoundError — AFTER both sweeps have
+    run, which is the most expensive moment to fail (Codex P2 on #692).
+    Resolved once, up front, against the directory the user invoked from."""
+    if out:
+        mine = os.path.abspath(out)
+        return mine, mine + ".base.json"
+    d = tempfile.mkdtemp(prefix="qor-vs-")
+    return os.path.join(d, "branch.json"), os.path.join(d, "base.json")
+
+
+def cmd_vs(rev, out, jobs, flows=None, build=True):
+    """Measure `rev` in a worktree and the CURRENT tree, then compare.
+
+    Two properties worth being explicit about:
+
+    * The baseline is the COMMIT, not your working tree.  `--vs HEAD` measures
+      your last commit; uncommitted changes are, by design, only on the branch
+      side.  The commit is echoed so the comparison is self-describing.
+    * The baseline runs the BASELINE's own harness (its copy of this file),
+      matching the two-checkout recipe this replaces.  If CORPUS differs
+      between the two, `--compare` reports the comparable subset rather than
+      pretending the sets match.
+
+    Sequential by construction: the two sweeps never overlap, so the runtime
+    column is not distorted by them contending with EACH OTHER.
+
+    It can still be distorted by YOU.  Being free to build, test and commit
+    while the sweep runs is the point of this mode, and every one of those
+    competes for the same CPU — so whichever side you happened to work
+    during reads slower.  Measured on this feature's own landing run: the
+    QoR verdict was 41/41 unchanged (it is decision-based, so contention
+    cannot move it) while the runtime column showed +4.7%, entirely from
+    committing and running tests during the branch half.  The runtime diff
+    was already labelled single-run and non-gating; under `--vs` treat it
+    as advisory only, and use `tools/runtime_ab.py` on an idle machine when
+    runtime is the question being asked.
+    """
+    wt, commit = baseline_worktree(rev)
+    print(f"[--vs] baseline {rev} = {commit[:12]} in {wt}")
+    mine, base = vs_paths(out)
+
+    if build:
+        # BOTH sides.  Measuring a stale working-tree build against a freshly
+        # built baseline is the same class of silent-wrong-number this whole
+        # mode exists to prevent, and `bin/bb` is incremental so it costs
+        # nothing when the tree is already current.
+        _build(wt, f"baseline {commit[:12]}")
+        _build(_ROOT, "working tree")
+
+    print(f"[--vs] sweeping baseline {commit[:12]}...", flush=True)
+    env = {**os.environ,
+           "PYTHONPATH": f"{wt}/build:{wt}/src:{wt}/tools"}
+    cmd = [sys.executable, wt / "tools" / "qor_corpus.py",
+           "--out", base, "-j", str(jobs)]
+    if flows:
+        cmd += ["--flows", *flows]
+    _sh(cmd, wt, env=env, stream=True)
+
+    print("[--vs] sweeping the working tree...", flush=True)
+    cmd_run(flows or CORPUS, mine, jobs=jobs)
+
+    print(f"\n[--vs] {commit[:12]} ({rev}) -> working tree\n")
+    regressed = cmd_compare(base, mine)
+    if not out:
+        print(f"\n[--vs] result JSONs: {base} , {mine}")
+    return regressed
 
 
 def _rank(r, keys):
@@ -918,6 +1122,22 @@ def main():
                     help="run these flows instead of the default corpus")
     ap.add_argument("--out", metavar="PATH",
                     help="write the run's results as JSON to PATH")
+    ap.add_argument("--vs", metavar="REV",
+                    help="measure REV in a git WORKTREE and the current tree, "
+                         "then compare — the baseline-vs-branch recipe without "
+                         "touching the working tree, so uncommitted work needs "
+                         "no stash and you may edit or commit while it runs.  "
+                         "The baseline is the COMMIT, not your working tree")
+    ap.add_argument("--clean-baselines", nargs="?", type=int, const=0,
+                    metavar="KEEP",
+                    help="remove cached --vs baseline worktrees (each holds a "
+                         "full build), keeping the KEEP most recent (default "
+                         "0 = all).  They are a cache: the next --vs against "
+                         "that commit rebuilds it")
+    ap.add_argument("--no-build", action="store_true",
+                    help="with --vs: skip building both sides (they must "
+                         "already match their sources; a stale build measures "
+                         "code you are not looking at)")
     ap.add_argument("--compare", nargs=2, metavar=("BASE", "BRANCH"),
                     help="diff two result JSONs (from earlier --out runs) on "
                          "QoR + runtime; exits non-zero if any flow regressed")
@@ -947,14 +1167,25 @@ def main():
     if args.check:
         sys.exit(1 if cmd_check(args.check) else 0)
 
+    if args.clean_baselines is not None:
+        cmd_clean_baselines(keep=args.clean_baselines)
+        return
+
     if args.candidates:
         cmd_candidates(quantify=args.quantify, jobs=args.jobs)
         return
     if args.quantify:
         ap.error("--quantify is only meaningful with --candidates")
+    if args.no_build and not args.vs:
+        ap.error("--no-build is only meaningful with --vs")
 
     if args.compare:
         sys.exit(1 if cmd_compare(*args.compare) else 0)
+
+    if args.vs:
+        sys.exit(1 if cmd_vs(args.vs, args.out, args.jobs,
+                             flows=args.flows,
+                             build=not args.no_build) else 0)
 
     if args.decisions and args.out:
         _dd = os.path.abspath(args.out + ".decisions")

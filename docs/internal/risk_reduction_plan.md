@@ -83,6 +83,18 @@ change tuned on one class to be measured on the other.
    LANDED): runtime deltas aggregated by flow family (rnr / chip / big /
    hbundles / …) so class-level drift is visible even when no single
    flow crosses the noise floor.
+2b. **`qor_corpus --vs REV`** (LANDED): the QoR half of the same idea —
+   the baseline is materialized in a git worktree (cached by commit, the
+   pattern `runtime_ab.py` already used), both sides built, both swept
+   sequentially, compared.  It exists because the two-checkout recipe
+   needs a CLEAN tree, so measuring uncommitted work meant stashing
+   around it — which makes the measurement a MUTATION of the tree, and
+   every way that goes wrong yields a WRONG NUMBER rather than an error.
+   The sharpest: committing mid-run leaves nothing to stash, so the
+   "baseline" silently measures the branch and reports a vacuous
+   no-difference.  A measurement instrument whose failure mode is
+   plausible-looking agreement is worse than none, which is why this is
+   filed under risk reduction rather than convenience.
 3. **Nightly corpus** (merges with the standing
    [opens_ci.md](opens_ci.md) item): pinned `BUDA_ARCH`, history
    retained, alert on class-level runtime drift >10% or any QoR
