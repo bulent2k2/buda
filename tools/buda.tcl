@@ -41,7 +41,13 @@
 
 package require Tcl 8.5
 
-namespace eval buda {
+# `::buda`, absolute: a package must land in the GLOBAL namespace
+# however it is loaded.  Sourced from inside another namespace — a
+# GUI doing `namespace eval myapp { source buda.tcl }`, or the
+# corpus harness — a RELATIVE name would define the whole package as
+# ::myapp::buda::* and the first command would fail somewhere far
+# from the cause.
+namespace eval ::buda {
     variable fh ""
     variable output ""
     variable echo 1
@@ -65,7 +71,7 @@ namespace eval buda {
 
 # Start the engine.  `-python` picks the interpreter, `-echo 0` keeps command
 # output out of the terminal (it stays available as [buda::output]).
-proc buda::start {args} {
+proc ::buda::start {args} {
     variable fh
     variable commands
     variable echo
@@ -102,7 +108,7 @@ proc buda::start {args} {
     return $commands
 }
 
-proc buda::stop {} {
+proc ::buda::stop {} {
     variable fh
     if {$fh ne ""} {
         catch {buda::_request "__exit"}
@@ -112,7 +118,7 @@ proc buda::stop {} {
     buda::_restore_stdout
 }
 
-proc buda::_use_utf8_stdout {} {
+proc ::buda::_use_utf8_stdout {} {
     variable saved_stdout_encoding
     if {$saved_stdout_encoding ne ""} { return }
     if {[catch {fconfigure stdout -encoding} enc]} { return }
@@ -121,7 +127,7 @@ proc buda::_use_utf8_stdout {} {
     catch {fconfigure stdout -encoding utf-8}
 }
 
-proc buda::_restore_stdout {} {
+proc ::buda::_restore_stdout {} {
     variable saved_stdout_encoding
     if {$saved_stdout_encoding eq ""} { return }
     catch {fconfigure stdout -encoding $saved_stdout_encoding}
@@ -131,31 +137,31 @@ proc buda::_restore_stdout {} {
 # One scalar about the session -- `bundles`, `blocks`, `nets`, `overlaps`,
 # `unplaced`, `messages`.  This is why a flow is worth driving from Tcl at
 # all: a command that RETURNS a value can be branched on.
-proc buda::query {name} {
+proc ::buda::query {name} {
     return [string trim [buda::_request "__query $name"]]
 }
 
 # The output of the last command, echoed or not.
-proc buda::output {} {
+proc ::buda::output {} {
     variable output
     return $output
 }
 
-proc buda::commands {} {
+proc ::buda::commands {} {
     variable commands
     return $commands
 }
 
 # Stream command output as it is produced (OUT frames) instead of one blob
 # at the end.  What a GUI wants; `buda::output` is identical either way.
-proc buda::stream {onoff} {
+proc ::buda::stream {onoff} {
     buda::_request [expr {$onoff ? "__stream on" : "__stream off"}]
     return $onoff
 }
 
 # `buda::onprogress {cmdprefix}` — invoked (at global level) with each chunk
 # of command output as it arrives, sync or async.  Empty string clears it.
-proc buda::onprogress {cb} {
+proc ::buda::onprogress {cb} {
     variable progress_cb
     set progress_cb $cb
 }
@@ -176,7 +182,7 @@ proc buda::onprogress {cb} {
 # design: a Python-level loop cancels promptly, one long C++ call returns
 # first.  POSIX only (it needs `exec kill`); on other hosts it errors.
 
-proc buda::async {cmd args} {
+proc ::buda::async {cmd args} {
     variable fh
     variable output
     variable async_done
@@ -207,18 +213,18 @@ proc buda::async {cmd args} {
     return
 }
 
-proc buda::wait {} {
+proc ::buda::wait {} {
     variable async_done
     if {$async_done eq ""} { vwait ::buda::async_done }
     return $async_done
 }
 
-proc buda::running {} {
+proc ::buda::running {} {
     variable async_done
     return [expr {$async_done eq ""}]
 }
 
-proc buda::cancel {} {
+proc ::buda::cancel {} {
     variable fh
     variable async_done
     if {$fh eq "" || $async_done ne ""} { return 0 }
@@ -231,7 +237,7 @@ proc buda::cancel {} {
     return 1
 }
 
-proc buda::_async_finish {status} {
+proc ::buda::_async_finish {status} {
     variable fh
     variable output
     variable async_done
@@ -268,7 +274,7 @@ proc buda::_async_finish {status} {
     }
 }
 
-proc buda::_on_readable {} {
+proc ::buda::_on_readable {} {
     variable fh
     variable output
     variable async_mode
@@ -325,13 +331,13 @@ proc buda::_on_readable {} {
 
 # Re-raise a deferred callback error at idle time, where an error reaches
 # bgerror without costing an event subscription.
-proc buda::_rethrow {msg opts} {
+proc ::buda::_rethrow {msg opts} {
     return -options $opts $msg
 }
 
 # ── the wire ───────────────────────────────────────────────────────────────
 
-proc buda::_request {line} {
+proc ::buda::_request {line} {
     variable fh
     variable output
     variable async_done
@@ -385,7 +391,7 @@ proc buda::_request {line} {
 
 # Echo and/or hand a chunk to the site's progress callback.  One place, so
 # the sync and async paths cannot drift on what "seeing output" means.
-proc buda::_deliver {chunk} {
+proc ::buda::_deliver {chunk} {
     variable echo
     variable progress_cb
     if {$chunk eq ""} { return }
@@ -398,7 +404,7 @@ proc buda::_deliver {chunk} {
     }
 }
 
-proc buda::_define {name} {
+proc ::buda::_define {name} {
     # The handlers split on whitespace, so arguments are joined and not
     # re-quoted: a command must mean the same thing from Tcl as from a .buda
     # script, and adding quoting here would silently make it mean something

@@ -196,3 +196,44 @@ A library that writes the raw descriptor lands beside the diagnostics —
 visible, in order, outside every frame — instead of inside the
 conversation.  ("Nothing in BUDA does" was true, but it was a promise about
 other people's code; now it does not need to be one.)
+
+## The corpus: the same 41 flows, driven from Tcl
+
+`flow/tcl/corpus/` is the QoR corpus translated to Tcl — every flow
+`tools/qor_corpus.py` runs through the CLI, run instead through a real
+`tclsh` and the pipe:
+
+```bash
+tclsh flow/tcl/corpus/rnr/mix.tcl            # one flow
+tools/tcl_corpus.py -j 4 --out tcl.json      # the sweep
+tools/qor_corpus.py --compare cli.json tcl.json
+```
+
+The point is the **comparison**, not the coverage: a `.buda` script and its
+translation say the same things to the same engine, so any difference in the
+routed result is a fault in the bridge.  The two sides are kept in step by
+`tools/buda2tcl.py`, which generates the tree (a hand-written translation
+would drift from its original the first time anyone edited the `.buda`), and
+by `test_tcl_corpus.py`, which regenerates in memory and fails if what is
+committed no longer matches.
+
+Each translated flow reports one machine-readable line in
+`qor_corpus.py --out`'s schema, so the existing `--compare` does the diffing:
+
+```
+QOR {"flow": "flow/rnr/mix.buda", "overlaps": 0, "unplaced": 0, ...}
+```
+
+Two things this corpus found on its first run, both invisible at the scale of
+a hand-written example:
+
+* **`buda.tcl` defined itself relative to the calling namespace.**  Sourced
+  from inside one — `namespace eval myapp { source buda.tcl }`, which is what
+  a GUI does — the package landed at `::myapp::buda::*` and failed later,
+  somewhere far from the cause.  The namespace and every proc are now
+  absolute (`::buda::`).
+* **The engine is a child process and inherits the directory it was SPAWNED
+  in.**  A `cd` after `buda::start` moves the interpreter and leaves the
+  engine behind, so every path-taking command (`open_bdb mix.bdb.sql`)
+  resolved against wherever the sweep was launched.  The harness now cds
+  first — and a test pins that order rather than the comment alone.
