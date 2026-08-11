@@ -481,7 +481,27 @@ ends at the next re-plan). Re-running `run_planner hier` on a resumed
 post-expansion session remains unsupported.
 
 Not restored: `seg_perp` (a NUTS placement *preference* from the planner's
-charged bands), planner band state, overlap details. TEG-over bridge segments
+charged bands), planner band state, overlap details.
+
+**Also not restored: the per-bit fan-in taper** (`Topology::seg_bits`).
+`derive_fanin_seg_bits` runs at *generation* (three call sites in
+`buda_session/hier.py`) and on no load path, so a restored CONVERGENT /
+DIVERGENT fan-in topology comes back with an empty `seg_bits` — and an empty
+map means *every segment carries every bit*, which is the untapered tree. The
+resumed design is still clean; it is simply **wider than the one that was
+saved**, and nothing says so. Measured on `flow/tcl/array_save.tcl` +
+`array_resume.tcl` (2 x 2, a checkpoint and a straight continuation of it):
+every plain bundle round-trips bit-for-bit, while the two fan-in bundles grow
+— b1 16 → 18 bit-wires, b10 32 → 48, total 88 → 106 — with both endpoints
+reporting 0 overlaps / 0 unplaced / 0 violations. Anything downstream of the
+taper moves with it: planner band charging (`congestion_planner.cpp` prices
+`seg_bits` when non-empty), abstract NUTS widths, and DNUTS emission. The
+endpoints ARE recoverable — the `FANIN:`/`FANOUT:` reason is persisted for
+exactly that purpose — so the fix is to re-derive at load rather than to add
+a column; until then, treat a resumed fan-in design as a re-route, not as a
+continuation.
+
+TEG-over bridge segments
 **are** restored (`topology_bridge_segment`, v11), so TEG-over multi-rect
 designs resume losslessly. `ripup_reroute` and `run_nuts_on_layer` both
 **commit** their final routing via the `_checkpoint_routing()` choke point

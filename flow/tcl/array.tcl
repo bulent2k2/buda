@@ -34,6 +34,12 @@
 #     under CONVERGENT bundling these N buses become ONE fan-in bundle
 #     routed as a per-bit tapered tree.
 #
+# The design itself lives in `array_lib.tcl`, shared with `array_save.tcl` /
+# `array_resume.tcl` — the same array, driven three ways.  This one runs it
+# end to end in ONE session against `:memory:`, which is why nothing it
+# decides outlives the process; the save/resume pair is the flow to copy when
+# a decision has to survive.
+#
 # The end of the flow is the other half of the point: `buda::query` returns
 # VALUES, so the flow BRANCHES — healers run only if the measured result is
 # dirty, and the script's exit code is the design's cleanliness, not just
@@ -51,89 +57,18 @@ if {$argc >= 2} {
 # the flow runs from any CWD — the same rule .buda scripts follow.
 set repo [file dirname [file dirname [file dirname [file normalize [info script]]]]]
 source [file join $repo tools buda.tcl]
+source [file join $repo flow tcl array_lib.tcl]
 
 buda::start
 
-# ── geometry, computed ─────────────────────────────────────────────────────
-# leaf 70x130; leaves at pitch 90/150 inside a tile with a 15 margin;
-# tiles at pitch (tile+60)/(tile+70) with a 20 margin at the die edge.
-set LW 70;  set LH 130
-set LPX 90; set LPY 150
-set TM 15
-set TW [expr {2*$TM + $LPX + $LW}]
-set TH [expr {2*$TM + $LPY + $LH}]
-set TPX [expr {$TW + 60}]
-set TPY [expr {$TH + 70}]
+# The design, the stack and the verdict helpers — one source, three drivers.
+array_vehicle::declare_stack
 
-# ── layers + track patterns (the shared corpus stack, stated inline) ──────
-foreach {id nm dir kind oh} {
-    2 M2 H {}  55.56   3 M3 V {}  55.56   4 M4 H {}  55.56
-    5 M5 V TOP 50      6 M6 H TOP 52.94   7 M7 V TOP 56.10
-} {
-    buda::def_layer $id $nm $dir {*}$kind $oh
-}
-buda::def_track_pattern 2 -100 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
-buda::def_track_pattern 3    0 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
-buda::def_track_pattern 4 -200 POWER 2 1 (SIGNAL 1 0.5)x4 GROUND 2 1 (SIGNAL 1 0.5)x4
-buda::def_track_pattern 5    0 POWER 3 1 (SIGNAL 2 1)x4 GROUND 3 1 (SIGNAL 2 1)x4
-buda::def_track_pattern 6 -400 POWER 4 1 (SIGNAL 2 1)x4 GROUND 4 1 (SIGNAL 2 1)x4
-buda::def_track_pattern 7 -600 POWER 6 2 (SIGNAL 3 2)x3 GROUND 2 1 (SIGNAL 3 2)x3
-
-buda::corner_margin dx 5 dy 5
-buda::set_min_stub_length 2
-buda::set_planner_param healersAhead 1   ;# this flow heals below, on demand
-
-# ── hierarchy: one tile cell, ROWS x COLS instances of it ─────────────────
 buda::open_bdb :memory:
-
-buda::add_cell leaf_cell $LW $LH
-buda::add_cell tile_cell $TW $TH
-foreach r {0 1} {
-    foreach c {0 1} {
-        buda::add_inst_to_cell tile_cell l_${r}_${c} leaf_cell \
-            [expr {$TM + $c*$LPX}] [expr {$TM + $r*$LPY}]
-    }
-}
-for {set R 0} {$R < $rows} {incr R} {
-    for {set C 0} {$C < $cols} {incr C} {
-        buda::add_inst t_${R}_${C} tile_cell - \
-            [expr {20 + $C*$TPX}] [expr {20 + $R*$TPY}]
-    }
-}
-
-buda::derive_busterms 2
-buda::add_blocks_from_bdb 0
-buda::add_blocks_from_bdb 1 skip
-buda::add_blocks_from_bdb 2 skip
-
-# ── buses, generated ──────────────────────────────────────────────────────
-buda::bdb_net_mode on
-
-for {set R 0} {$R < $rows} {incr R} {
-    for {set C 0} {$C < $cols} {incr C} {
-        set t t_${R}_${C}
-        # intra-tile, the SAME pattern in every tile (depth-2 templates):
-        # one horizontal (SW -> SE) and one vertical (SW -> NW) 4-bit bus.
-        buda::add_bus "bh_${R}_${C}\[4\]" $t/l_0_0.out $t/l_0_1.in
-        buda::add_bus "bv_${R}_${C}\[4\]" $t/l_0_0.out $t/l_1_0.in
-        # cross-tile neighbor chains, leaf-deep endpoints (depth 0):
-        if {$C < $cols - 1} {
-            buda::add_bus "h_${R}_${C}\[4\]" \
-                $t/l_0_1.out t_${R}_[expr {$C+1}]/l_0_0.in
-        }
-        if {$R < $rows - 1} {
-            buda::add_bus "v_${R}_${C}\[4\]" \
-                $t/l_1_0.out t_[expr {$R+1}]_${C}/l_0_0.in
-        }
-        # fan-in: every tile's NE leaf drives the SW tile's SW leaf.
-        if {$R != 0 || $C != 0} {
-            buda::add_bus "f_${R}_${C}\[2\]" $t/l_1_1.out t_0_0/l_0_0.in
-        }
-    }
-}
-# one corner-to-corner diagonal — the long wire.
-buda::add_bus "diag\[8\]" \
-    t_0_0/l_1_1.out t_[expr {$rows-1}]_[expr {$cols-1}]/l_0_0.in
+array_vehicle::build_hierarchy $rows $cols
+array_vehicle::derive_interface
+array_vehicle::load_blocks
+array_vehicle::build_buses $rows $cols
 
 # ── the hier pipeline ─────────────────────────────────────────────────────
 # CONVERGENT so the f_* buses merge into ONE cross-level fan-in bundle.
@@ -152,45 +87,10 @@ buda::check_design nuts
 buda::run_detailed_nuts
 buda::check_design dnuts
 
-# ── branch on the measured result: heal only if dirty ─────────────────────
-# Three legs, not two: overlaps and unplaced say the metal was PLACED, the
-# audit says it is electrically RIGHT — a design can place every bit
-# overlap-free and still hold a SEG_OPEN or BIT_SHORT the first two never
-# see.  `violations` answers -1 until an audit has run, and -1 is dirty
-# here: a design that was never audited has demonstrated nothing.
-if {[buda::query overlaps] > 0 || [buda::query unplaced] > 0
-        || [buda::query violations] != 0} {
-    puts "array.tcl: dirty ([buda::query overlaps] overlaps,\
-          [buda::query unplaced] unplaced,\
-          [buda::query violations] audit violations) -- healing"
-    buda::negotiate_congestion 10
-    buda::ripup_reroute 20
-    buda::check_design dnuts
-}
+array_vehicle::heal_if_dirty "array.tcl"
 
 buda::report_wirelength
 
-# The viewer, on request.  `buda::visualize` opens the same window a `.buda`
-# script opens and BLOCKS until it is closed, which is right for a person at
-# a terminal and wrong for the test that runs this vehicle — hence the
-# switch rather than a bare call or a commented-out line nobody can use:
-#
-#     BUDA_ARRAY_VIZ=1 tclsh flow/tcl/array.tcl 3 2
-#
-# On a host with no display it reports BUDA-1903 and carries on, so asking
-# for it over ssh tells you why you got no window instead of nothing.
-if {[info exists ::env(BUDA_ARRAY_VIZ)] && $::env(BUDA_ARRAY_VIZ) ne "0"} {
-    buda::visualize
-}
+array_vehicle::show
 
-set ov [buda::query overlaps]
-set un [buda::query unplaced]
-set vi [buda::query violations]
-buda::stop
-
-if {$ov != 0 || $un != 0 || $vi != 0} {
-    puts stderr "array.tcl: FAILED -- $ov overlaps, $un unplaced,\
-                 $vi audit violations"
-    exit 1
-}
-puts "array.tcl: clean -- 0 overlaps, 0 unplaced, 0 audit violations"
+array_vehicle::verdict "array.tcl"
