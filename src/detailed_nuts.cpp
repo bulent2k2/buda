@@ -1510,23 +1510,22 @@ std::vector<BusSegment> make_bus_segments(
                     bs.connections.push_back(c);
                 } else {  // BUSTERM: keep the block-face tap reachable per-bit
                     bs.busterm_faces.push_back((double)conn.face_coord);
-                    // Which bits this tap actually serves — materialized here
-                    // as a bit MASK because adjust_bit_spans runs per bit and
-                    // must not re-resolve the ordinal 20 times per tap.  The
-                    // verdict comes from the shared predicate, so the placer
-                    // and check_dnuts cannot disagree about a tap.  Empty
-                    // mask = serves every bit (untapered, historical).
+                    // Which bits this tap actually serves, as a bit MASK:
+                    // adjust_bit_spans runs per bit and reads it with a flat
+                    // binary_search rather than re-resolving the tap ordinal
+                    // for every one.  The verdict is the shared predicate's,
+                    // so the placer and check_dnuts cannot disagree about a
+                    // tap.  Empty mask = serves every bit (untapered).
                     std::vector<int> fb;
                     auto tp = bid_to_topo.find(ts.bundle_id);
                     if (tp != bid_to_topo.end() &&
                         !tp->second->seg_busterm_bits.empty()) {
-                        const int nb = bid_to_nbits.count(ts.bundle_id)
-                                     ? bid_to_nbits[ts.bundle_id] : 0;
-                        for (int b = 0; b < nb; ++b)
+                        const int nbits = bs.bit_width;
+                        for (int b = 0; b < nbits; ++b)
                             if (seg_busterm_serves_bit(*tp->second, ts.seg_idx,
                                                        conn.block_name, b))
                                 fb.push_back(b);
-                        if ((int)fb.size() == nb) fb.clear();   // serves all
+                        if ((int)fb.size() == nbits) fb.clear();  // serves all
                     }
                     bs.busterm_face_bits.push_back(std::move(fb));
                 }

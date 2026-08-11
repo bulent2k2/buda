@@ -198,9 +198,24 @@ struct Topology {
     // check (flow/antenna_taper_passthru.buda).  EMPTY map = every tap serves
     // every bit (all non-tapered bundles — the historical behavior).
     //
+    // "Nothing recorded means serves every bit" is deliberately fail-SAFE — it
+    // can only keep a tap, never drop one — but it makes every gap in the
+    // derivation walk a silently unfixed tap, and there is a reachable one:
+    // derive_fanin_seg_bits marks only the ONE path it walks per receiver, so
+    // when two segments tap the same block (a trunk and a stub — the shape
+    // complete_relay_junctions produces routinely) the path that loses the race
+    // records nothing for its own tap, and the fallback hands that tap back to
+    // every bit riding it.  Pre-existing, and the first place to look when a
+    // tapered tree still shows overhang at a tapped block — the conclusion to
+    // avoid is that the membership did not apply.
+    //
     // DERIVED exactly like seg_bits: never persisted, excluded from topo_uid,
-    // recomputed by derive_fanin_seg_bits, and shifted in step by the dogleg
-    // split.
+    // recomputed by derive_fanin_seg_bits.  The dogleg split leaves it alone —
+    // as it leaves seg_busterms alone, and for the same reason: the split
+    // APPENDS its pieces and never lands on a tapped endpoint, so existing keys
+    // stay valid and the new pieces correctly have neither a tap nor a
+    // membership.  (seg_bits IS propagated there; these two do not move
+    // together through the dogleg, and reading across from it will mislead.)
     std::map<std::pair<int,int>, std::vector<int>> seg_busterm_bits;
     // Blocks the trunk is routed *through* on purpose (opt-in feedthru): the trunk
     // is split at the block's two crossed faces (no stub to the block) and the
@@ -285,6 +300,20 @@ inline void prepend_segment(Topology& t, const Segment& spine) {
         std::map<int, std::vector<int>> shifted_bits;
         for (auto& kv : t.seg_bits) shifted_bits[kv.first + 1] = std::move(kv.second);
         t.seg_bits = std::move(shifted_bits);
+    }
+    // Tap membership, keyed (seg_idx, tap ordinal) — the same argument as
+    // seg_conns above, and it bites harder: seg_busterm_serves_bit resolves the
+    // ordinal against the SHIFTED seg_busterms and then reads this map, so an
+    // unshifted entry would answer for segment si-1.  Both consumers read the
+    // one predicate, so they would agree on the wrong answer and nothing would
+    // report it — the placer retracts a bit off a real block face and the audit
+    // concurs.  Unreachable today (the only caller prepends during generation,
+    // before derive_fanin_seg_bits runs), which is exactly when to close it.
+    if (!t.seg_busterm_bits.empty()) {
+        std::map<std::pair<int,int>, std::vector<int>> shifted_taps;
+        for (auto& kv : t.seg_busterm_bits)
+            shifted_taps[{kv.first.first + 1, kv.first.second}] = std::move(kv.second);
+        t.seg_busterm_bits = std::move(shifted_taps);
     }
 }
 

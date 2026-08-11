@@ -1516,8 +1516,16 @@ std::vector<int> derive_fanin_seg_bits(
             for (int b : bits) bits_of_seg[si].push_back(b);
             // Endpoints unresolved for this group: fall back to the
             // historical all-bits behavior for its taps too, so an
-            // unwalkable group never LOSES a tap it might need.
+            // unwalkable group never LOSES a tap it might need.  Only over
+            // the ordinals seg_busterms actually records — an entry for a
+            // tap that does not exist is unreadable (the predicate resolves
+            // the ordinal through seg_busterms first) and would just make
+            // the map assert things about taps the topology does not have.
+            auto bt = topo.seg_busterms.find(si);
+            if (bt == topo.seg_busterms.end()) continue;
+            const bool has[2] = { (bool)bt->second.first, (bool)bt->second.second };
             for (int k = 0; k < 2; ++k) {
+                if (!has[k]) continue;
                 auto& v = tap_bits[{si, k}];
                 v.insert(v.end(), bits.begin(), bits.end());
             }
@@ -1580,7 +1588,6 @@ std::vector<int> derive_fanin_seg_bits(
         v.erase(std::unique(v.begin(), v.end()), v.end());
         if (!v.empty()) topo.seg_bits[si] = std::move(v);
     }
-    topo.seg_busterm_bits.clear();
     for (auto& [key, v] : tap_bits) {
         std::sort(v.begin(), v.end());
         v.erase(std::unique(v.begin(), v.end()), v.end());
