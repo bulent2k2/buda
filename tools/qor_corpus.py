@@ -158,6 +158,38 @@ CORPUS = [
     "flow/chip/chip_bottomup.buda",
     "flow/chip/chip3_topdown.buda",
     "flow/chip/chip3a_bottomup.buda",
+    # ── Feature families the corpus had no QoR guard for at all ───────────
+    # `--candidates` reported these as NEW COVERAGE: whole command families
+    # exercised only by pass/fail flow tests, so a change that quietly moved
+    # their overlaps / unplaced / wirelength had nothing to fail.  Chosen for
+    # coverage per second — six of the seven are under half a second against
+    # a ~20-minute sweep.
+    #
+    # NDR (def_ndr / set_ndr / dump_ndr): eleven vehicles existed, none in
+    # the corpus.  Three cover the axes that differ in ARITHMETIC rather
+    # than in syntax — shields, bonding, and the bottom-up copy path where a
+    # governed template is solved once and copied.
+    "flow/ndr_shield_flat.buda",
+    "flow/ndr_bond.buda",
+    "flow/ndr_bottom_up.buda",
+    # Interchange: eleven new tokens in one flow (import_def_lef /
+    # import_verilog / import_lef_tech / export_gds / emit_guides /
+    # export_def_blockages / set_import_scale / set_unit_check /
+    # derive_container_bboxes / save_bdb / def_gds_layer).  `flow/def/chip`
+    # is the SMALLEST vehicle that exercises the path — built for that.
+    "flow/def/chip.buda",
+    # add_keepout and set_track_pitch: a user-declared keepout ZONE had no
+    # corpus flow, which is the constraint KEEPOUT_CROSS, the DNUTS crossing
+    # cull and the cull heal all exist for.
+    "flow/comprehensive_regression.buda",
+    # The expert edit surface (edit_topology / edit_add_trunk / edit_add_stub
+    # / edit_set_span / edit_commit): a USER candidate committed by hand
+    # routes through the same planner and NUTS as a generated one.
+    "flow/c_dd_detour.buda",
+    # Hier CONVERGENT bundling on a real SoC-shaped netlist — the fan-in tree
+    # path, whose per-bit taper the QoR triple is sensitive to.  The only
+    # entry here that costs real time (~23s); the rest are rounding error.
+    "flow/rv/soc_conv_div.buda",
 ]
 
 
