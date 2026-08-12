@@ -139,6 +139,132 @@ def test_no_build_is_rejected_without_vs():
     assert "only meaningful with --vs" in r.stderr, r.stderr
 
 
+def _git(cwd, *a, **kw):
+    r = subprocess.run(["git", *a], cwd=str(cwd), capture_output=True,
+                       text=True, **kw)
+    assert r.returncode == 0, f"git {' '.join(a)}:\n{r.stdout}{r.stderr}"
+    return r.stdout.strip()
+
+
+@pytest.fixture
+def stale_repo(tmp_path):
+    """A work repo whose local `main` is one commit behind `origin/main`, with
+    HEAD on a branch that forked BEFORE that commit.
+
+    Both halves of the trap in one fixture, because they are one situation: a
+    topic-branch workflow never checks `main` out, so the local ref goes stale
+    exactly while the branch falls behind the real baseline."""
+    origin, work, other = (tmp_path / n for n in ("origin.git", "work", "other"))
+    _git(tmp_path, "init", "--bare", "-b", "main", str(origin))
+    _git(tmp_path, "init", "-b", "main", str(work))
+    for k, v in (("user.email", "t@t"), ("user.name", "t")):
+        _git(work, "config", k, v)
+    (work / "f").write_text("1")
+    _git(work, "add", "f")
+    _git(work, "commit", "-m", "c1")
+    _git(work, "remote", "add", "origin", str(origin))
+    _git(work, "push", "-u", "origin", "main")
+    c1 = _git(work, "rev-parse", "HEAD")
+
+    # Somebody else advances main.
+    _git(tmp_path, "clone", str(origin), str(other))
+    for k, v in (("user.email", "t@t"), ("user.name", "t")):
+        _git(other, "config", k, v)
+    (other / "f").write_text("2")
+    _git(other, "commit", "-am", "c2")
+    _git(other, "push", "origin", "main")
+
+    _git(work, "fetch", "origin")          # origin/main moves, local main does not
+    _git(work, "checkout", "-b", "feat", c1)
+    (work / "g").write_text("x")
+    _git(work, "add", "g")
+    _git(work, "commit", "-m", "mine")
+    return work
+
+
+def test_a_stale_local_ref_is_reported(stale_repo, monkeypatch):
+    """`--vs main` resolves the LOCAL ref.  In a topic-branch workflow that ref
+    is whatever it was when you last touched it, and nothing about the run
+    looks wrong — both sweeps succeed and the table prints."""
+    qc = _load()
+    monkeypatch.setattr(qc, "_ROOT", stale_repo)
+    commit = _git(stale_repo, "rev-parse", "main^{commit}")
+    lines = qc.baseline_advisories("main", commit)
+    assert any("behind its upstream" in l and "origin/main" in l for l in lines), lines
+
+
+def test_a_baseline_the_tree_does_not_contain_is_reported(stale_repo,
+                                                          monkeypatch):
+    """The shape that actually misattributes a delta — and a FRESH ref does not
+    prevent it.  Here the baseline is `origin/main`, perfectly up to date, yet
+    it holds a commit the branch forked before, so that commit's effects would
+    be reported as the branch's."""
+    qc = _load()
+    monkeypatch.setattr(qc, "_ROOT", stale_repo)
+    commit = _git(stale_repo, "rev-parse", "origin/main^{commit}")
+    lines = qc.baseline_advisories("origin/main", commit)
+    assert not any("behind its upstream" in l for l in lines), \
+        "origin/main is not stale; only the ancestry advisory applies"
+    assert any("your working tree does not" in l for l in lines), lines
+
+
+def test_an_ancestor_baseline_says_nothing(stale_repo, monkeypatch):
+    """The normal case must stay quiet, or the advisory becomes noise people
+    learn to skip past."""
+    qc = _load()
+    monkeypatch.setattr(qc, "_ROOT", stale_repo)
+    head = _git(stale_repo, "rev-parse", "HEAD")
+    assert qc.baseline_advisories("HEAD", head) == []
+    # A raw SHA has no upstream to be stale against, and is an ancestor here.
+    assert qc.baseline_advisories(head, head) == []
+
+
+def test_measuring_your_own_tip_is_never_called_stale(stale_repo, monkeypatch):
+    """`--vs HEAD` names ONE commit unambiguously, so remote drift cannot make
+    it the wrong baseline — the delta is your uncommitted work either way.
+
+    The case that forced this: a REBASE leaves the remote copy of your branch
+    holding commits your HEAD does not, so a naive upstream check fires on
+    every rebase-then-measure and tells you to `git fetch`, which is the wrong
+    action.  An advisory that cries wolf on a routine workflow is one people
+    learn to skip past."""
+    qc = _load()
+    monkeypatch.setattr(qc, "_ROOT", stale_repo)
+    _git(stale_repo, "push", "-u", "origin", "feat")
+    _git(stale_repo, "commit", "--amend", "-m", "mine, reworded")  # a rebase-alike
+    head = _git(stale_repo, "rev-parse", "HEAD")
+    behind = _git(stale_repo, "rev-list", "--count", "HEAD..origin/feat")
+    assert behind == "1", "the fixture must actually leave the remote ahead"
+    assert qc.baseline_advisories("HEAD", head) == []
+
+
+def test_the_advisory_is_printed_before_the_builds(tmp_path, monkeypatch,
+                                                   capsys):
+    """Ordering is the point: the two sweeps cost tens of minutes, so an
+    advisory printed after them has already let you act on a wrong number."""
+    qc = _load()
+    seen = []
+    monkeypatch.setattr(qc, "baseline_worktree", lambda rev: (tmp_path, "c" * 40))
+    monkeypatch.setattr(qc, "baseline_advisories",
+                        lambda rev, commit: ["the sky is falling"])
+    def fake_build(tree, label):
+        seen.append("build")
+        print(f"[--vs] building {label}...")     # as the real one does
+    monkeypatch.setattr(qc, "_build", fake_build)
+    monkeypatch.setattr(qc, "_sh",
+                        lambda *a, **kw: seen.append("baseline sweep"))
+    monkeypatch.setattr(qc, "cmd_run",
+                        lambda *a, **kw: seen.append("branch sweep"))
+    monkeypatch.setattr(qc, "cmd_compare", lambda base, mine: 0)
+    qc.cmd_vs("main", str(tmp_path / "o.json"), jobs=1, flows=["x.buda"])
+
+    out = capsys.readouterr().out
+    assert "WARNING: the sky is falling" in out, out
+    assert out.index("WARNING") < out.index("building"), \
+        "the advisory came after the build it should have preceded"
+    assert seen[0] == "build", seen
+
+
 def test_clean_baselines_reports_when_there_is_nothing_cached(tmp_path,
                                                               monkeypatch):
     qc = _load()
