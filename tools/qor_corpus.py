@@ -51,6 +51,11 @@ advisory here even by its usual standards — working while the sweep runs is
 the point of the mode, and it makes whichever side you worked during read
 slower (the QoR verdict is decision-based and immune).
 
+`--vs` also ADVISES when the baseline it resolved is probably not the one you
+meant — a stale local ref, or a baseline holding commits your tree does not.
+Both hand you a confident wrong number, which is the exact failure mode this
+mode exists to remove; see `baseline_advisories`.
+
 `--compare` tags each moved flow BETTER/WORSE on the QoR metric
 (overlaps/unplaced/viol_bundles) and exits non-zero if any regressed, then
 prints two informational diffs that are reported but never gate: a
@@ -525,6 +530,79 @@ def baseline_worktree(rev):
     return wt, commit
 
 
+def _rev_count(spec):
+    """`git rev-list --count <spec>`, or None when the spec does not resolve."""
+    r = _sh(["git", "rev-list", "--count", spec], _ROOT, check=False)
+    return int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _rev_parse(rev):
+    """`rev` as a commit sha, or '' when it does not resolve."""
+    return _sh(["git", "rev-parse", rev + "^{commit}"], _ROOT,
+               check=False).stdout.strip()
+
+
+def _upstream_of(rev):
+    """The configured upstream of `rev` (e.g. 'origin/main'), or None.
+
+    None for a raw SHA, a remote-tracking ref, or a branch nobody has set an
+    upstream for — in all of which there is nothing to be stale against."""
+    r = _sh(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name",
+             rev + "@{upstream}"], _ROOT, check=False)
+    up = r.stdout.strip()
+    return up if r.returncode == 0 and up else None
+
+
+def baseline_advisories(rev, commit):
+    """Reasons the baseline just resolved is probably not the one you meant.
+
+    A worktree keeps the measurement from MUTATING your tree, which is the
+    hazard this mode was built for.  It does nothing about the other way a
+    comparison goes wrong: measuring against the wrong commit.  That failure
+    has no symptom — both sweeps succeed, the table prints, and the delta is
+    simply attributed to the wrong change.  Two shapes, both seen for real:
+
+    * **A stale ref.**  `--vs main` resolves your LOCAL `main`, which is
+      whatever it was when you last touched it — commonly many commits behind
+      `origin/main`, since a topic-branch workflow never checks main out.
+
+    * **A baseline your tree does not contain.**  This is the one that
+      actually bites, and a fresh ref does NOT prevent it: if your branch
+      forked before commits that are in the baseline, every difference THEY
+      cause is reported as yours.  Measured instance: a gated change that
+      could not fire on a flow was credited with fixing it, because the
+      baseline had a sharper audit than the branch did.
+
+    Advisory, never fatal — comparing against a divergent commit is sometimes
+    exactly the question.  Returns a list of lines (empty = nothing to say).
+    """
+    out = []
+    up = _upstream_of(rev)
+    # Not when the baseline IS your tip.  `--vs HEAD` names one commit
+    # unambiguously — the delta is your uncommitted work, and no amount of
+    # remote drift changes what it means.  Worth excluding explicitly because
+    # a rebase leaves the remote copy holding commits your HEAD does not, so
+    # the check fires on every rebase-then-measure and advises `git fetch`,
+    # which is the WRONG action.  An advisory people learn to skip past is
+    # worse than none.  (Caught dogfooding this on its own branch.)
+    if up and commit != _rev_parse("HEAD"):
+        behind = _rev_count(f"{rev}..{up}")
+        if behind:
+            out.append(
+                f"baseline ref {rev!r} is {behind} commit(s) behind its "
+                f"upstream {up!r} — `--vs` resolves the LOCAL ref.  "
+                f"`git fetch` and use {up!r} if you meant the remote.")
+    # Ancestry is asked of the COMMIT, so it also covers `--vs <sha>` and
+    # `--vs origin/main`, where there is no stale ref to report.
+    ahead = _rev_count(f"HEAD..{commit}")
+    if ahead:
+        out.append(
+            f"the baseline holds {ahead} commit(s) your working tree does "
+            f"not, so any difference THEY cause is reported as yours.  "
+            f"Merge or rebase onto the baseline to measure your change alone.")
+    return out
+
+
 def cached_baselines():
     """Every cached baseline worktree, newest first: (path, bytes)."""
     root = Path(tempfile.gettempdir())
@@ -615,6 +693,10 @@ def cmd_vs(rev, out, jobs, flows=None, build=True):
     """
     wt, commit = baseline_worktree(rev)
     print(f"[--vs] baseline {rev} = {commit[:12]} in {wt}")
+    # BEFORE the builds: the two sweeps cost tens of minutes, and a baseline
+    # advisory read afterwards has already let you act on a wrong number.
+    for line in baseline_advisories(rev, commit):
+        print(f"[--vs] WARNING: {line}", flush=True)
     mine, base = vs_paths(out)
 
     if build:
