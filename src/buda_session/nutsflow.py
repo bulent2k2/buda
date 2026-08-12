@@ -1149,6 +1149,9 @@ class NutsFlowMixin:
                 # Guaranteed full strand — escalate to the same-direction
                 # TOP layer.
                 new_layer = top_h if seg.horiz else top_v
+                want_dir = (buda.LayerDir.HORIZONTAL if seg.horiz
+                            else buda.LayerDir.VERTICAL)
+                pool = None
                 # Per-cell layer policy (hier_layer_caps.md Phase 1): a
                 # governed segment escalates only WITHIN its cell's band — to
                 # the cheapest same-direction allowed layer that is
@@ -1158,8 +1161,6 @@ class NutsFlowMixin:
                 # unhealable by layer; report LOUD and leave it, never
                 # silently escalate past the cap.
                 if w.input.allowed_layers:
-                    want_dir = (buda.LayerDir.HORIZONTAL if seg.horiz
-                                else buda.LayerDir.VERTICAL)
                     allowed = [l for l in w.input.allowed_layers
                                if self.layers.has_layer(l)
                                and self.layers.get_layer_dir(l) == want_dir]
@@ -1174,6 +1175,39 @@ class NutsFlowMixin:
                               f"declared trade).", flush=True)
                         continue
                     new_layer = min(pool)
+                # NDR: prefer a target that can actually HOST the run.
+                #
+                # This escalation has always taken the CHEAPEST same-direction
+                # TOP unconditionally, which is sound under its own premise —
+                # the LOW seat is guaranteed dead, so any TOP is a better bet.
+                # Measuring the seat in DEMAND widens which segments reach
+                # here, though, and for a governed one the cheapest TOP can be
+                # short too, or an ABSOLUTE rule can cost MORE slots there
+                # than on the layer it left (Codex P2 on #697).  So search
+                # cheapest-first for a target whose bounded pool hosts the
+                # demand resolved ON THAT LAYER, and keep the unconditional
+                # choice as the fallback when none does — a move to a
+                # can't-host TOP is no worse than staying on a dead LOW, and
+                # refusing to move would forfeit the escape.
+                #
+                # GOVERNED segments only.  The ungoverned path is
+                # corpus-measured and tuned (bigHalf no-rr opens 566 -> 135),
+                # so it stays byte-identical here; making the search general
+                # is a QoR question that deserves its own measurement.
+                if w.input.ndr.active():
+                    cands = (pool if pool is not None else
+                             [l for l in self.layers.get_layer_ids_by_dir(want_dir)
+                              if self.layers.is_top(l) and l != seg.layer])
+                    for l in sorted(cands):
+                        if not self.routing_grid.has_layer(l):
+                            continue
+                        need_l = self._seg_admission_need(
+                            w, sel, seg.seg_idx, credited=False, layer=l)
+                        g2 = self.routing_grid.get_layer_grid(l)
+                        if b_lo <= b_hi and g2.count_signal_tracks_in_span(
+                                seg.span_lo, seg.span_hi, b_lo, b_hi) >= need_l:
+                            new_layer = l
+                            break
                 if new_layer is None or new_layer == seg.layer:
                     continue
                 sl = list(w.plan.seg_layers)
