@@ -1,0 +1,76 @@
+# R1 per-layer NDR values + metal-shaped quantization, end to end.
+#
+# The shape a physical rule actually has.  EM current density, sheet
+# resistance and RC all differ per layer, so an EM-driven rule is not one
+# width applied to the whole stack — it is a width PER LAYER, wider on the
+# thin lower metal and narrower on the thick top metal (or the reverse,
+# depending on the technology).  R1 always asked for that ("per-layer or
+# layer-independent values", and its cited precedent LEF/DEF
+# NONDEFAULTRULE is per-layer); phase 1 shipped only the layer-independent
+# half, and it was not among the declared non-goals.
+#
+# ── The two readings ──────────────────────────────────────────────────────
+#
+# `metal` asks for the METAL a run of signal slots delivers:
+#
+#     metal(k) = sum of the k slot widths + the k-1 gaps BETWEEN them
+#
+# rather than the layer's per-signal-slot CHANNEL cost
+# (`unit_pitch / n_signal_slots`), which is what the planner books and what
+# an absolute value means WITHOUT the token.  The two share no term —
+# channel counts the power rails, metal does not — so on a rail-heavy
+# pattern the same declaration buys wildly different wire.  Measured in
+# flow/ndr_abs_divisor.buda, which keeps the channel reading on purpose.
+#
+# `metal` is OPT-IN because the honest answer is STRICTER, not merely
+# different: a layer whose signal slots sit isolated between rails delivers
+# only one slot's metal, so a width the channel reading accepted (by
+# silently delivering half of it) becomes an R3 refusal.
+#
+# ── This design ───────────────────────────────────────────────────────────
+#
+#   M3/M5 FINE    VDD 2 1 (_ 1 1)x12 GND 2 1   12-slot run, metal(k) = 2k-1
+#   M4/M6 COARSE  VDD 10 2 (_ 2 2)x4 GND 10 2   4-slot run, metal(k) = 4k-2
+#
+# `em` declares 3 units everywhere and 8 on the COARSE vertical layer, the
+# way a real rule widens where the metal is thick:
+#
+#   layer   declared   k   metal delivered
+#   ------  ---------  --  ---------------
+#   M5      3 (rule)    2   3   exactly what was asked
+#   M6      8 (layer)   3  10   >= 8, and 2 slots would give only 6
+#
+# Under the CHANNEL reading M6 would have quantized 8 to a single slot —
+# 2 units of metal for a declared 8, with the spec then reading INACTIVE so
+# the bus routed ungoverned.  That is the silent case metal removes.
+
+add_block a 0   0 200  200
+add_block b 900 0 1100 200
+
+add_bus em_[4] a.p b.q
+
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 5 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 10 2 (_ 2 2)x4 GND 10 2
+def_track_pattern 6 0 VDD 10 2 (_ 2 2)x4 GND 10 2
+
+def_ndr em width 3 metal
+def_ndr_layer em M6 width 8
+def_ndr_layer em M4 width 8
+set_ndr em_ em
+
+run_bundler STRICT
+generate_topologies
+set_track_pitch 3
+run_planner 1
+
+run_nuts
+run_detailed_nuts
+dump_ndr
+check_design
+report_wirelength

@@ -54,8 +54,10 @@ static bool replan_prof_on() {
 static inline int ndr_units(const BundleInput& in, int n,
                             const LayerStack& ls, int layer_id) {
     if (n <= 0 || !in.ndr.active()) return n;
-    return ndr_group_demand_on(in.ndr, n,
-        ndr_has_abs(in.ndr) ? ls.bit_pitch(layer_id) : 0.0);
+    if (!ndr_is_layer_dependent(in.ndr)) return ndr_group_demand(in.ndr, n);
+    return ndr_group_demand(
+        ndr_resolve_on_layer(in.ndr, layer_id, ls.ndr_geom(layer_id),
+                             ls.bit_pitch(layer_id)), n);
 }
 
 // Why a bundle reached the end of the escalation ladder with nothing

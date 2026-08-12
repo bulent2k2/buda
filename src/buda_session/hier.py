@@ -1833,6 +1833,10 @@ class HierMixin:
                 continue          # declaration-time validation prevents this
             thinned[lid] = tp
             layers_view.set_bit_pitch(lid, pat.unit_pitch() / n_kept)
+            # The THINNED view has its own geometry: fewer signal slots per
+            # period, so a governed cell resolves its rule against what it
+            # was actually leased, not the parent's full grid.
+            layers_view.set_ndr_geom(lid, pat.ndr_geom())
         return (layers_view, thinned) if thinned else (self.layers, {})
 
     def _layer_policy_advisories(self, stage):

@@ -42,6 +42,52 @@ double TrackPattern::signal_density() const {
     return sig / up;
 }
 
+NdrLayerGeom TrackPattern::ndr_geom() const {
+    NdrLayerGeom g;
+    std::vector<std::pair<double, double>> run;
+    // `pending` is the distance accumulated since the last SIGNAL slot: its
+    // own space_after plus any non-signal slots crossed.  It becomes that
+    // slot's gap once the NEXT signal slot in the same run is seen, so a run
+    // that ends at a rail never records a gap into it.
+    double pending = 0.0;
+    for (const auto& s : slots) {
+        if (s.type == "SIGNAL") {
+            if (!run.empty()) run.back().second = pending;
+            run.push_back({s.width, 0.0});
+            pending = s.space_after;
+        } else {
+            // A rail breaks the run: metal cannot cross it.
+            if (run.size() > 0) { g.runs.push_back(run); run.clear(); }
+            pending = 0.0;
+        }
+    }
+    if (!run.empty()) g.runs.push_back(run);
+    // The pattern TILES, so the LAST run of one period physically abuts the
+    // FIRST run of the next whenever no rail separates them — i.e. the
+    // period both ends and starts on a signal slot.  This is independent of
+    // how many runs the period has: `SIGNAL POWER SIGNAL` has two runs of
+    // one, yet a legal TWO-slot wire straddles the boundary (Codex P2 on
+    // #717 — the earlier `runs.size() == 1` guard reported max 1 and would
+    // have falsely refused it).  Splicing unconditionally is still wrong,
+    // so the condition is on the rail, not on the run count.
+    if (!slots.empty() && slots.front().type == "SIGNAL" &&
+        slots.back().type == "SIGNAL" && g.runs.size() >= 1) {
+        auto  first = g.runs.front();
+        auto& last  = g.runs.back();
+        last.back().second = slots.back().space_after;  // the gap it bridges
+        if (g.runs.size() == 1) {
+            // One run spanning the whole period: it continues into its own
+            // next copy, so one more period's worth is the repeating unit.
+            const size_t n = last.size();
+            for (size_t i = 0; i < n; ++i) last.push_back(last[i]);
+        } else {
+            // Distinct runs: the joined run is last + first.
+            for (const auto& e : first) last.push_back(e);
+        }
+    }
+    return g;
+}
+
 double TrackPattern::dilution_factor() const {
     double sd = signal_density();
     return (sd > 0.0) ? 1.0 / sd : 1.0;

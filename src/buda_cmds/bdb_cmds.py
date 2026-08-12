@@ -342,6 +342,7 @@ def _apply_def_tracks(session, st):
             session._pattern_source[lid] = "def"
             session.layers.set_layer_dilution(lid, pat.dilution_factor())
             session.layers.set_bit_pitch(lid, pat.unit_pitch())
+            session.layers.set_ndr_geom(lid, pat.ndr_geom())
             installed.append(f"{lname}[{tr.count}@{tr.step:g}]")
     if installed:
         print(f"[DEF] tracks installed (bounded): {', '.join(installed)}")

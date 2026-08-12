@@ -177,7 +177,21 @@ rule is the conservative MAXIMUM: the fallback over-charges, never under.
   the no-double-count property) and the wrong one for REALIZING a
   physical width.
 
-  *If the physical reading is wanted*: quantize width by the smallest k
+  **Landed as opt-in** (`def_ndr ... metal`), together with the per-layer
+  values below — see `flow/ndr_per_layer_em.buda`.  It is opt-in rather
+  than the default because the honest reading is **stricter**, not merely
+  different: a layer whose signal slots sit isolated between rails delivers
+  only one slot's metal, so `width 4` there — which the channel reading
+  accepts by silently delivering 2 — becomes an R3 refusal.  That rejects
+  designs which route today, so the default flip owes its own measured
+  study, the same path `kSegsRel` / `spine_relays` / `band_span_charge`
+  took.  Two residuals of the opt-in landing: per-layer values are NOT yet
+  persisted to the BDB (BUDA-1911 says so LOUDLY rather than restoring a
+  rule missing half its declaration), and the R9 audit still measures the
+  channel-shaped quantity, so it agrees with a channel rule by construction
+  and does not yet check metal against a `metal` rule.
+
+  *The original note, kept because it is the reasoning*: quantize width by the smallest k
   with `k·w + (k−1)·sp ≥ width_abs` and spacing by the smallest g with
   `(g+1)·sp + g·w ≥ spacing_abs`, both read off the layer's pattern. That
   makes `ndr_resolve_for_pitch` need the SLOT GEOMETRY rather than one
@@ -204,6 +218,23 @@ bus exists for exactly this: a governed bus routing VERTICALLY, so its
 segment lands on the coarse pair and `fine3`'s width 3 costs 2 slots/bit on
 M5 and 1 on M6. Without it the vehicle only ever placed governed metal where
 the conservative maximum happened to be the right answer.
+
+### R1's per-layer half — LANDED
+
+`def_ndr_layer <rule> <layer> [width ...] [spacing ...]` overrides one
+layer's values; layers with no entry inherit.  R1 always asked for
+"per-layer or layer-independent values" and its cited precedent (LEF/DEF
+`NONDEFAULTRULE`) is per-layer, but phase 1 shipped only the
+layer-independent half — and per-layer was **not** among the declared
+non-goals, so it was dropped rather than deferred.
+
+It matters for exactly the rules the absolute form exists to serve: EM
+limits, sheet resistance and RC all differ per layer, so one width applied
+to the whole stack is over-wide on the top metal or under-wide at the
+bottom.  Per-layer values apply under BOTH readings — the two questions are
+orthogonal.
+
+Residual: not yet persisted (BUDA-1911).
 
 ## 3. Per-net mixed-rule bundles (R8, the richer half)
 

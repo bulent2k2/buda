@@ -499,6 +499,9 @@ void bind_routing(py::module_& m) {
         .def("set_layer_dilution",      &LayerStack::set_layer_dilution)
         .def("set_layer_overhead",      &LayerStack::set_layer_overhead)
         .def("set_bit_pitch",           &LayerStack::set_bit_pitch)
+        .def("set_ndr_geom",            &LayerStack::set_ndr_geom)
+        .def("ndr_geom",                &LayerStack::ndr_geom,
+             py::return_value_policy::reference_internal)
         // R1: the per-signal-slot pitch an ABSOLUTE NDR value is quantized
         // against (ndr_resolve_for_pitch).  0 when the layer is unknown or
         // has no track pattern — which is exactly the "no slot geometry to
@@ -657,8 +660,57 @@ void bind_routing(py::module_& m) {
         .def_readwrite("shield_net",   &NdrSpec::shield_net)
         .def_readwrite("credit_shields", &NdrSpec::credit_shields)
         .def_readwrite("bond_stride",    &NdrSpec::bond_stride)
+        .def_readwrite("metal_quant",  &NdrSpec::metal_quant)
         .def_readwrite("rule_name",    &NdrSpec::rule_name)
+        // READ-ONLY by construction: pybind11 converts std::map BY VALUE, so
+        // `spec.per_layer[id] = rule` would mutate a throwaway copy and
+        // silently do nothing — a rule that reads as declared and governs
+        // nothing.  Mutation goes through set_layer_rule, which cannot.
+        .def_property_readonly("per_layer",
+                               [](const NdrSpec& s) { return s.per_layer; })
+        .def("set_layer_rule",
+             [](NdrSpec& s, int layer_id, const NdrLayerRule& r) {
+                 s.per_layer[layer_id] = r;
+             }, py::arg("layer_id"), py::arg("rule"))
+        .def("clear_layer_rules", [](NdrSpec& s) { s.per_layer.clear(); })
         .def("active",                 &NdrSpec::active);
+
+    // R1 per-layer declared values (`def_ndr_layer`).
+    py::class_<NdrLayerRule>(m, "NdrLayerRule")
+        .def(py::init<>())
+        .def_readwrite("width_abs",   &NdrLayerRule::width_abs)
+        .def_readwrite("spacing_abs", &NdrLayerRule::spacing_abs)
+        .def_readwrite("width_slots", &NdrLayerRule::width_slots)
+        .def_readwrite("guard_slots", &NdrLayerRule::guard_slots);
+
+    // R1 metal-shaped quantization: a layer's signal slots as contiguous
+    // runs.  `runs` is exposed so a test can build one by hand without a
+    // track pattern, and so a report can show what a layer actually offers.
+    py::class_<NdrLayerGeom>(m, "NdrLayerGeom")
+        .def(py::init<>())
+        .def_readwrite("runs",  &NdrLayerGeom::runs)
+        .def("empty",           &NdrLayerGeom::empty);
+
+    m.def("ndr_metal_for_slots", &ndr_metal_for_slots, py::arg("geom"),
+          py::arg("k"),
+          "Metal delivered by the NARROWEST window of k consecutive signal "
+          "slots (-1 = no run is that long: the wire would span a rail).");
+    m.def("ndr_clearance_for_guards", &ndr_clearance_for_guards,
+          py::arg("geom"), py::arg("guards"),
+          "Clearance delivered by `guards` guard slots between two bits, "
+          "narrowest window (-1 = the period cannot host that many).");
+    m.def("ndr_max_slots", &ndr_max_slots, py::arg("geom"),
+          "Longest contiguous signal run — the realizability ceiling.");
+    m.def("ndr_resolve_on_layer",
+          [](const NdrSpec& s, int layer_id, const NdrLayerGeom& g,
+             double bit_pitch) {
+              bool ok = true;
+              NdrSpec o = ndr_resolve_on_layer(s, layer_id, g, bit_pitch, &ok);
+              return py::make_tuple(o, ok);
+          },
+          py::arg("spec"), py::arg("layer_id"), py::arg("geom"),
+          py::arg("bit_pitch") = 0.0,
+          "Resolve a rule on one layer -> (spec, realizable).");
     m.def("ndr_resolve_for_pitch", &ndr_resolve_for_pitch,
           py::arg("spec"), py::arg("slot_pitch"),
           "R1: quantize a rule's ABSOLUTE width/spacing against one "

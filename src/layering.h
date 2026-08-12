@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <utility>
 #include "topology.h"
+#include "ndr.h"      // NdrLayerGeom
 namespace buda {
 enum class LayerDir { HORIZONTAL, VERTICAL };
 enum class LayerType { TOP, LOW };  // LOW kept for backward compatibility; treated as non-TOP
@@ -33,6 +34,12 @@ struct Layer {
     // (= track pattern unit_pitch / number of SIGNAL slots).  0 = unset:
     // fall back to the density model (base width x dilution_factor).
     double bit_pitch = 0.0;
+    // The same pattern's SIGNAL slots as contiguous runs (R1 metal-shaped
+    // NDR quantization).  Pushed beside bit_pitch from whichever site
+    // declared the pattern, so a thinned per-cell view installs its own.
+    // Empty = unset: an absolute rule then keeps its stored conservative
+    // quantization, which over-charges rather than under-charges.
+    NdrLayerGeom ndr_geom;
     // Span preference: span_cost = kSpan * max(0, span_min-span, span-span_max).
     // Defaults give zero span cost for any segment length.
     int    span_min      = 0;
@@ -57,6 +64,9 @@ public:
     void set_layer_overhead(int id, double overhead_percent);
     // Set measured per-bit channel cost (from the layer's track pattern).
     void set_bit_pitch(int id, double pitch);
+    // R1 metal-shaped NDR: the layer's signal-slot geometry, pushed from
+    // the same site that pushed its bit_pitch.
+    void set_ndr_geom(int id, const NdrLayerGeom& g);
     // Effective channel footprint of a bus on this layer.  bits > 0 with a
     // measured bit_pitch gives the exact cost (bits x unit_pitch/n_signals);
     // otherwise the legacy density model (base_width x dilution_factor).
@@ -85,6 +95,8 @@ public:
     // the divisor an absolute NDR value quantizes against (ndr.h), kept next
     // to eff_bus_width so the rule and the width model share one basis.
     double       bit_pitch(int id) const;
+    // Empty when the layer has no pattern (or none was pushed).
+    const NdrLayerGeom& ndr_geom(int id) const;
     double       get_layer_dilution(int id) const;
     bool         has_layer(int id) const;
     bool         is_top(int id) const;

@@ -1644,10 +1644,12 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
                 // multiplier rule is pitch-independent, so this is the same
                 // call it always made).
                 if (n > 0 && bw.input.ndr.active())
-                    n = ndr_group_demand_on(
-                            bw.input.ndr, n,
-                            ndr_has_abs(bw.input.ndr) ? layers_.bit_pitch(lid)
-                                                      : 0.0);
+                    n = ndr_is_layer_dependent(bw.input.ndr)
+                            ? ndr_group_demand(
+                                  ndr_resolve_on_layer(bw.input.ndr, lid,
+                                                       layers_.ndr_geom(lid),
+                                                       layers_.bit_pitch(lid)), n)
+                            : ndr_group_demand(bw.input.ndr, n);
                 const double w = (nbits > 0 && n != nbits)
                                      ? bw.input.width * ((double)n / (double)nbits)
                                      : bw.input.width;

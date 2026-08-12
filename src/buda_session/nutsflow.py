@@ -877,6 +877,30 @@ class NutsFlowMixin:
         p = view.bit_pitch(layer)
         return p if p > 0.0 else None
 
+    def _shared_cell_ndr_geom(self, w, layer):
+        """The signal-slot GEOMETRY a metal-shaped rule on `w` must quantize
+        against on `layer`, or None when the global stack's is right.
+
+        The exact twin of `_shared_cell_ndr_pitch`, for the same reason: a
+        `set_cell_layer_share` cell is solved against the DERIVED THINNED
+        VIEW -- same period, fewer SIGNAL slots -- so its runs are SHORTER
+        than the parent's, and a metal rule resolved against the parent's
+        geometry would ask for slots the leased view does not have (Codex P1
+        on #717).  Falling back silently is the failure, not the fallback:
+        the pitch twin already existed, and only the geometry lookup was
+        missing, so the two would have disagreed on exactly the cells the
+        share feature exists for."""
+        if not getattr(self, "_cell_layer_shares", None):
+            return None                    # no shares declared anywhere
+        cell = getattr(w.input.original_bundle, "cell_context", "")
+        if not cell:
+            return None                    # top-level: the global stack
+        view, _thinned = self._cell_share_views(cell)
+        if view is self.layers:
+            return None                    # no shares on THIS cell
+        g = view.ndr_geom(layer)
+        return g if (g is not None and not g.empty()) else None
+
     def _resolve_shared_cell_ndr(self, bus_segs):
         """Re-quantize governed segments of a shared cell against its
         derived view (see `_shared_cell_ndr_pitch`).  A no-op — and so

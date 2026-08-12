@@ -706,6 +706,7 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
         session._lef_track_width[lid] = l.width
         session.layers.set_layer_dilution(lid, pat.dilution_factor())
         session.layers.set_bit_pitch(lid, pat.unit_pitch())
+        session.layers.set_ndr_geom(lid, pat.ndr_geom())
 
     rows = ", ".join(f"{l.name}={lid}{'(TOP)' if lid in top_ids else ''}"
                      for lid, l in sorted(plan))

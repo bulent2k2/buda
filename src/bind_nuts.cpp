@@ -319,6 +319,7 @@ void bind_nuts(py::module_& m) {
              py::arg("lo"), py::arg("hi"))
         .def("unit_pitch",            &TrackPattern::unit_pitch)
         .def("signal_density",        &TrackPattern::signal_density)
+        .def("ndr_geom",              &TrackPattern::ndr_geom)
         .def("dilution_factor",       &TrackPattern::dilution_factor)
         .def("tracks_in_range",       &TrackPattern::tracks_in_range,
              py::arg("lo"), py::arg("hi"));
