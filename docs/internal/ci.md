@@ -123,7 +123,8 @@ Bump it deliberately, together with a golden rebaseline
 
 ## Nightly QoR corpus
 
-`.github/workflows/nightly-qor.yml` sweeps the 37-flow QoR corpus at 03:17 UTC
+`.github/workflows/nightly-qor.yml` sweeps the QoR corpus (**48 flows** as of
+2026-08-11) at 03:17 UTC
 (and on `workflow_dispatch`) and diffs it against the **previous successful
 nightly**, so a routing-quality regression on `main` surfaces within a day
 instead of waiting for someone to remember `tools/qor_corpus.py`.
@@ -137,6 +138,16 @@ corpus sweep 6m34s (`swept 37 flows in 393.9s (jobs=4)`) = **8m49s**. The
 "~4m20s sweep" figure this page carried before that run was measured in a
 developer container; the hosted runner is ~50% slower for the same work. Adding
 the snapshot-table refresh below takes the job to roughly **16 min**.
+
+The corpus has grown twice since that measurement — to 41, then to 48 when the
+uncovered feature families were added (NDR, interchange, keepouts, the edit
+surface, hier convergent bundling).  Cost measured in a developer container:
+six of the seven new flows are under half a second each and
+`flow/rv/soc_conv_div.buda` is ~23s, so the added sweep time is dominated by
+that one row — on the order of +6% of the 2026-08-02 sweep, before the runner's
+~50% slowdown.  Re-measure on the runner if the nightly's budget ever becomes
+the binding constraint; the numbers above are deliberately left as the last
+figures actually measured THERE rather than scaled by hand.
 
 **The baseline is only promoted on a clean run.** That is the design decision
 worth knowing: promoting a regressed sweep would make the regression the new
