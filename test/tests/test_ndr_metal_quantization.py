@@ -400,3 +400,26 @@ def test_a_layer_independent_rule_keeps_its_pre_v28_fingerprint(tmp_path):
                  + "def_ndr plain width x2 spacing x2\n")
     fp = ndr_cmds.ndr_pricing_fp(s, "plain")
     assert "|P" not in fp and "|m1" not in fp, fp
+
+
+@pytest.mark.parametrize("stored", ["[]", '{"4": null}', '"hello"', "5",
+                                    "not json", "{", '{"4": [1,2]}'])
+def test_a_malformed_stored_per_layer_value_warns_it_never_aborts(stored):
+    """A stored value we cannot read is a reason to SAY SO, never a reason to
+    fail to open the design.
+
+    "Readable JSON" is not enough (Codex P2 on #719): `[]`, `"x"`, `5` and
+    `{"4": null}` all parse, then raise AttributeError on `.items()` /
+    `.get()` — so a database carrying one would abort the session that opened
+    it rather than restore the rule layer-independent."""
+    from buda_cmds import ndr_cmds
+    assert ndr_cmds._per_layer_from_json(stored, "em") == {}
+
+
+def test_a_partially_bad_map_keeps_the_good_entries_and_says_what_it_dropped(capsys):
+    """Silently dropping entries is the same fault one level down."""
+    from buda_cmds import ndr_cmds
+    got = ndr_cmds._per_layer_from_json('{"4":{"w":8},"5":3}', "em")
+    assert set(got) == {4} and got[4]["width_abs"] == 8.0
+    out = capsys.readouterr().out
+    assert "BUDA-1912" in out and "1 unreadable entry" in out, out

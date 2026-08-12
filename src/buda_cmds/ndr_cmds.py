@@ -87,26 +87,51 @@ def _per_layer_to_json(per_layer):
                       sort_keys=True, separators=(",", ":"))
 
 
-def _per_layer_from_json(txt):
+def _per_layer_from_json(txt, rule_name=""):
+    """Decode the stored per-layer values, tolerating anything.
+
+    Every malformed shape routes through BUDA-1912 and restores the rule
+    LAYER-INDEPENDENT.  "Readable JSON" is not enough: `[]`, `"x"`, `5` and
+    `{"4": null}` all parse and then raise AttributeError on `.items()` /
+    `.get()`, so a database carrying one would ABORT the session that opened
+    it rather than warn (Codex P2 on #719).  A stored value we cannot read is
+    a reason to say so, never a reason to fail to open the design.
+
+    A partially-bad map warns too, with a count: dropping entries silently is
+    the same fault one level down."""
     import json
     if not txt:
         return {}
+    who = f" on rule '{rule_name}'" if rule_name else ""
+
+    def _warn(why):
+        print(f"BUDA-1912: WARNING: the stored per-layer NDR values{who} "
+              f"{why} — the rule restores LAYER-INDEPENDENT.  Re-declare "
+              f"with def_ndr_layer.", flush=True)
+
     try:
         raw = json.loads(txt)
     except ValueError:
-        print(f"BUDA-1912: WARNING: an NDR rule's stored per-layer values are "
-              f"not readable JSON and were DROPPED — the rule restores "
-              f"layer-independent.  Re-declare with def_ndr_layer.", flush=True)
+        _warn("are not readable JSON and were DROPPED")
         return {}
-    out = {}
+    if not isinstance(raw, dict):
+        _warn(f"are a {type(raw).__name__}, not an object, and were DROPPED")
+        return {}
+    out, bad = {}, 0
     for lid, e in raw.items():
-        try:
-            out[int(lid)] = {"width_abs":   float(e.get("w", 0.0)),
-                             "spacing_abs": float(e.get("s", 0.0)),
-                             "width_x":     float(e.get("wx", 0.0)),
-                             "spacing_x":   float(e.get("sx", 0.0))}
-        except (TypeError, ValueError):
+        if not isinstance(e, dict):
+            bad += 1
             continue
+        try:
+            out[int(lid)] = {"width_abs":   float(e.get("w", 0.0) or 0.0),
+                             "spacing_abs": float(e.get("s", 0.0) or 0.0),
+                             "width_x":     float(e.get("wx", 0.0) or 0.0),
+                             "spacing_x":   float(e.get("sx", 0.0) or 0.0)}
+        except (TypeError, ValueError):
+            bad += 1
+    if bad:
+        _warn(f"had {bad} unreadable entr{'y' if bad == 1 else 'ies'}, DROPPED "
+              f"({len(out)} kept)")
     return out
 
 
@@ -177,7 +202,7 @@ def restore_ndr_from_bdb(session):
             "bond": row.bond,
             "width_abs": row.width_abs,
             "spacing_abs": row.spacing_abs,
-            "per_layer": _per_layer_from_json(row.per_layer),
+            "per_layer": _per_layer_from_json(row.per_layer, row.name),
             "metal": row.metal,
             "name": row.name,
         }
