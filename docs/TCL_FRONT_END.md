@@ -286,6 +286,49 @@ re-derived on load, so a continuation reproduces it exactly — same
 untapered and now says so (`BUDA-1904`). Details in
 [BDB_REFERENCE.md](BDB_REFERENCE.md#load_pipeline).
 
+## The other direction: a Tcl run as the `.buda` it ran
+
+`tools/buda2tcl.py` reads a `.buda` and rewrites it; the reverse cannot work
+that way. `.buda` is a command list, but Tcl is a general programming
+language, so which commands a flow issues is not a property of its **text**:
+
+```bash
+tclsh flow/tcl/array.tcl 3 2      # 18 bundles
+tclsh flow/tcl/array.tcl 4 5      # 62 bundles, same file
+```
+
+A static translator would have to resolve `$argv`, the loops, `expr`,
+`catch`, and a `source` chosen at run time — i.e. be a Tcl interpreter. So
+`tools/tcl2buda.py` uses the one that already exists: it **runs the flow and
+records what reached the engine**.
+
+```bash
+tools/tcl2buda.py flow/tcl/array.tcl 3 2 -o /tmp/array_3x2.buda --verify
+```
+
+That is cheap because the translation has already happened by then. A
+command arrives at the engine as the flat line it became —
+`buda::add_bus "bh_${R}_${C}\[4\]" $t/l_0_0.out …` is
+`add_bus bh_0_1[4] t_0_1/l_0_0.out …` — so `BUDA_RECORD=<path>` just writes
+it down, at `BudaSession.do_command`, the choke point **every** driver
+passes through. The same mechanism records a `.buda` run (flattening its
+`source` tree) or the web server; nothing in it is Tcl-specific.
+
+What comes out is a **flattening**, which is the honest description: one
+concrete design, straight-line, loops unrolled, branches resolved to
+whichever way they went, the parameterization gone. That is what "the
+`.buda` for `array.tcl 3 2`" can mean. It does not round-trip back to a
+program.
+
+`--verify` replays the recording through the CLI and compares the measured
+result — for the 3 × 2 array, identical on abstract WL, detailed WL,
+bit-wires and overlaps. Two caveats it reports rather than hides: a flow
+that used **relative paths** only replays from the directory it ran in (a
+`.buda` resolves them against its own directory — the recording's `# cwd:`
+header says which, and a failed replay prints the remedy), and a flow run
+with `-echo 0` prints no metric to compare against, so the replay is checked
+only for having run clean.
+
 ## The corpus: the same 41 flows, driven from Tcl
 
 `flow/tcl/corpus/` is the QoR corpus translated to Tcl — every flow

@@ -1,0 +1,133 @@
+# Copyright 2026 Ben Bulent Basaran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""`tools/tcl2buda.py` — a Tcl flow as the `.buda` it actually ran.
+
+The reverse of `buda2tcl.py` cannot be a source-to-source translator: Tcl is
+a general programming language, so which commands a flow issues is not a
+property of its text (`array.tcl 3 2` and `array.tcl 4 5` are different
+designs from one file).  It is a RECORDER instead — `BUDA_RECORD` writes
+every command at `BudaSession.do_command`, the choke point every driver
+already passes through — and what it produces is a FLATTENING: loops
+unrolled, `source` inlined, branches resolved to whichever way they went.
+
+So the tests are about the two claims that makes: the flattening really is
+flat, and the recording really does reproduce the run.
+"""
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parents[2]
+_TOOL = _ROOT / "tools" / "tcl2buda.py"
+
+pytestmark = pytest.mark.skipif(shutil.which("tclsh") is None,
+                                reason="no tclsh on this host")
+
+
+def _run(*args, cwd=None):
+    return subprocess.run([sys.executable, str(_TOOL), *map(str, args)],
+                          capture_output=True, encoding="utf-8",
+                          errors="replace", cwd=str(cwd or _ROOT), timeout=900)
+
+
+def _commands(path):
+    return [ln.strip() for ln in Path(path).read_text().splitlines()
+            if ln.strip() and not ln.startswith("#")]
+
+
+@pytest.mark.mid
+def test_a_computed_flow_records_the_design_it_computed(tmp_path):
+    """The point of the whole exercise: what a Tcl loop COMPUTES comes out as
+    the flat commands it became, and the same file with different arguments
+    records a different design.  No parser could do this."""
+    small = tmp_path / "s.buda"
+    big = tmp_path / "b.buda"
+    assert _run("flow/tcl/array.tcl", 2, 2, "-o", small).returncode == 0
+    assert _run("flow/tcl/array.tcl", 3, 2, "-o", big).returncode == 0
+
+    s, b = _commands(small), _commands(big)
+    assert len(b) > len(s), "3x2 must record more commands than 2x2"
+    # The buses a pair of nested Tcl loops emitted, as flat `add_bus` lines
+    # with every `${R}_${C}` already substituted.
+    assert any(ln.startswith("add_bus bh_0_0[4] t_0_0/") for ln in s), s[:5]
+    assert any(ln.startswith("add_bus bh_2_0[4] t_2_0/") for ln in b), \
+        "the third row of tiles is missing from the 3x2 recording"
+    assert not any("bh_2_0" in ln for ln in s), \
+        "the 2x2 recording contains a tile only 3x2 has"
+    # Flat: no Tcl left, and no `source` (its children are recorded instead,
+    # so keeping it would run them twice on replay).
+    assert not any(ln.startswith(("source ", "set ", "if ", "foreach ",
+                                  "proc ", "buda::")) for ln in b)
+
+
+@pytest.mark.mid
+def test_the_recording_replays_to_the_same_design(tmp_path):
+    """`--verify` runs the recording through the CLI and compares the measured
+    result against the Tcl run's.  Wirelength is the fingerprint: two runs can
+    agree on the small integers by luck and cannot agree on that."""
+    r = _run("flow/tcl/array.tcl", 2, 2, "-o", tmp_path / "a.buda", "--verify")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "identical on" in r.stdout, r.stdout
+    assert "detailed WL" in r.stdout, r.stdout
+
+
+@pytest.mark.mid
+def test_a_replay_that_fails_is_reported_as_a_failure(tmp_path):
+    """The failure mode this tool must not have.
+
+    A corpus flow `cd`s to its design directory and names its fixture
+    relatively (`open_bdb mix.bdb.sql`); a `.buda` resolves relative paths
+    against its OWN directory, so a recording written elsewhere cannot find
+    it.  That flow also runs `-echo 0`, so there is no metric to compare —
+    and an earlier cut returned 0 on exactly that path, reporting success for
+    a replay which had already died.  The check on the replay's own exit is
+    therefore unconditional, and the message names the cause.
+    """
+    r = _run("flow/tcl/corpus/rnr/mix.tcl", "-o", tmp_path / "m.buda",
+             "--verify")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "the replay FAILED" in r.stdout, r.stdout
+    assert "resolves relative paths against its OWN directory" in r.stdout
+    # ...and it says where to put it instead.
+    assert str(_ROOT / "flow" / "rnr") in r.stdout, r.stdout
+
+
+def test_the_recorder_flattens_a_source_tree(tmp_path):
+    """`BUDA_RECORD` is not Tcl-specific — it records at the session, so a
+    `.buda` run records too, and an include tree flattens into one file.
+    `source` itself is dropped: recording both it and its children would run
+    them twice on replay."""
+    (tmp_path / "inc.buda").write_text("def_layer 4 M4 H TOP 30\n"
+                                       "def_layer 5 M5 V TOP 30\n")
+    top = tmp_path / "top.buda"
+    top.write_text("source inc.buda\nadd_block a 0 0 10 10\n")
+    out = tmp_path / "rec.buda"
+    p = subprocess.run(
+        [sys.executable, str(_ROOT / "src" / "buda_cli.py"), "--no-viz",
+         str(top)],
+        capture_output=True, encoding="utf-8", cwd=str(_ROOT), timeout=300,
+        env=dict(os.environ, BUDA_RECORD=str(out), MPLBACKEND="Agg"))
+    assert p.returncode == 0, p.stdout + p.stderr
+    cmds = _commands(out)
+    assert cmds == ["def_layer 4 M4 H TOP 30", "def_layer 5 M5 V TOP 30",
+                    "add_block a 0 0 10 10"], cmds
+    # The header states the directory relative paths resolved against, so a
+    # recording of a flow that used them says where it can be replayed.
+    assert any(ln.startswith("# cwd: ")
+               for ln in Path(out).read_text().splitlines())

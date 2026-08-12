@@ -322,6 +322,11 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
                                      # meta provenance (user_ops:<bid>:<uid>)
         self._edit_base = 'new'      # the source candidate's topo_uid ('new'
                                      # for an empty session) the ops apply on
+        # Command recorder (BUDA_RECORD=<path>): every command the session
+        # executes, written as the flat `.buda` line it already is.  See
+        # `_record` — this is what `tools/tcl2buda.py` is built on.
+        self._record_fh = None
+        self._record_path = os.environ.get("BUDA_RECORD", "").strip()
         self.no_viz = False          # set by --no-viz CLI flag
         self.verbose_conn = False    # set by --verbose-conn: print every per-bit violation
         self.ipc_verbose = False     # set by --ipc-verbose: surface buda_viz/def_viz IPC chatter
@@ -632,14 +637,74 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
             self._flow_log.write(text if text.endswith('\n') else text + '\n')
             self._flow_log.flush()
 
+    # ── command recorder ──────────────────────────────────────────────────
+    # `BUDA_RECORD=<path>` writes every command this session executes to a
+    # `.buda` script.  It is the answer to "translate a Tcl flow into a
+    # script", and it is a RECORDER rather than a translator on purpose:
+    #
+    #   Tcl is a general programming language, so what commands a flow issues
+    #   is not a property of its TEXT — `flow/tcl/array.tcl 4 5` and the same
+    #   file with `3 2` are different designs, and the loops, `expr`s and
+    #   `catch`es between them are not statically resolvable.  Parsing Tcl
+    #   would mean re-implementing Tcl.
+    #
+    #   But by the time a command reaches the engine it IS a flat `.buda`
+    #   line — `buda::add_bus "bh_${R}_${C}\\[4\\]" …` arrives as
+    #   `add_bus bh_0_1[4] …`.  So the translation already happened; it only
+    #   needed writing down, at the one choke point every driver passes
+    #   through (the CLI, the Tcl bridge via `run_command`, the web server).
+    #
+    # What comes out is a FLATTENING, which is the honest description: one
+    # concrete design, straight-line, with the parameterization gone — that
+    # is what "the .buda for `array.tcl 4 5`" means.  `source` is dropped
+    # because its children are recorded individually (keeping both would run
+    # them twice on replay), so an include tree flattens into one file too.
+    def _record(self, cmd, cmd_line):
+        if not self._record_path or cmd == "source":
+            return
+        if self._record_fh is None:
+            try:
+                self._record_fh = open(self._record_path, "w")
+            except OSError as e:
+                print(f"Warning: BUDA_RECORD: cannot write "
+                      f"{self._record_path}: {e}")
+                self._record_path = ""
+                return
+            # The note is supplied by whoever armed the recording, because
+            # the RECORDING process is not the interesting one: under the Tcl
+            # bridge `sys.argv` is the command server's, which says nothing
+            # about the flow that drove it.
+            note = os.environ.get("BUDA_RECORD_NOTE", "").strip()
+            self._record_fh.write(
+                f"# Recorded from a live BUDA session"
+                f"{' — ' + note if note else ''}\n"
+                f"# A flattened TRACE of the commands that ran, in order.\n"
+                # The directory the recorded paths were relative TO.  A
+                # `.buda` resolves a relative path against its OWN directory,
+                # so a recording of a flow that used relative paths only
+                # replays from here — worth stating in the file rather than
+                # leaving to a FileNotFoundError three commands in.
+                f"# cwd: {os.getcwd()}\n"
+                f"# See tools/tcl2buda.py.\n\n")
+        self._record_fh.write(_strip_inline_comment(cmd_line).strip() + "\n")
+        self._record_fh.flush()
+
+    def _record_note(self, text):
+        """A comment in the recording (never a command)."""
+        if self._record_fh is not None:
+            self._record_fh.write(text + "\n")
+            self._record_fh.flush()
+
     def do_command(self, cmd_line):
         parts = _strip_inline_comment(cmd_line).strip().split()
         if not parts: return
         cmd = parts[0].lower()
         args = parts[1:]
+        self._record(cmd, cmd_line)
 
         handler = COMMANDS.get(cmd)
         if handler is None:
+            self._record_note(f"# unknown command, recorded as attempted: {cmd}")
             # Unknown command — fail loudly rather than silently skipping it.
             # A typo like 'add_layer' (the command is 'def_layer') would otherwise
             # leave the design misconfigured (no layers) with no warning.
