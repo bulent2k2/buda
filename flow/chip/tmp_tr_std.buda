@@ -1,0 +1,67 @@
+# chip_stack — the ON-GRID STACKED chip variant, TOP-DOWN.
+#
+# The comparison twin of chip_stack_bottomup.buda: same design, same layer
+# policy, SAME TRACK TECHNOLOGY, but no bottom-up templates — every instance's
+# interconnect is planned individually in the global frame.  Use the pair to
+# separate what the on-grid stacked placement buys from what solve-once-copy
+# buys; that only works if both halves route on the same technology, so this
+# one sources chip_tracks_mirror.buda too.
+#
+# It gains nothing from the mirror-symmetric ORIGINS (no templates, so nothing
+# to keep in phase); what it does gain is the shared stack's extra tracks —
+# 277/3262/161 before the 8 -> 10 track change, 103/2053/125 after.  The
+# origins-only part of the pair is the piece it cannot use, which is the point:
+# symmetry earns its keep exactly where solve-once-copy is in play.
+#
+# Design (see chip_stack_bottomup.buda for the full note on the 504 grid):
+#   LEFT  column  x=[0..6100]      2 x big2, pitch 7560  (multiple of 504)
+#   RIGHT column  x=[7100..9430]   4 x mix2, pitch 3528  (multiple of 504),
+#                                  centred (458 margins); upper half mirrored
+#   die 9430 x 13860, 100 top-level cross-hierarchy buses, 11750 nets
+# HEALER SCHEME (2026-08-10, session heal-to-clean): three INTERLEAVED short
+# rounds — 'negotiate; ripup_reroute 12; refine_selection' — reach the CLEAN
+# endpoint (0 opens / 0 ovl, check_design Success) at 1975s on the 4-core
+# measurement box, 45% cheaper than one big 'ripup_reroute 30' (3572s, also
+# clean) and with better final WL (2284720 vs 2320490).  Why: ripup's first
+# ~10-12 iterations commit cheaply from the screened scan; past that every
+# improver needs a full deferred stall sweep (x1 measured psweep 2638s of
+# 2838s).  Each negotiate/refine between bursts reshapes the contention and
+# REFILLS the cheap pipeline.  The default budgets (ripup 10 / refine 30)
+# are budget-exhausted mid-improvement on this vehicle — every iteration up
+# to the cap commits — which is what the raised budgets fix.
+source chip_tracks_mirror.buda
+open_bdb chip_stack.bdb.sql
+reserve_top_layers 2
+derive_busterms 2
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+set_max_bundle_bits auto
+run_hier_bundler depth 2
+generate_hier_topologies
+set_planner_param healersAhead 1
+run_planner hier 5 signal_tracks
+run_nuts
+run_detailed_nuts
+check_design
+negotiate_congestion
+check_design
+ripup_reroute 12
+check_design
+refine_selection 30
+check_design
+negotiate_congestion
+check_design
+ripup_reroute 12
+check_design
+refine_selection 30
+check_design
+negotiate_congestion
+check_design
+ripup_reroute 12
+check_design
+refine_selection 60
+check_design
+report_wl
+check_design
+exit
