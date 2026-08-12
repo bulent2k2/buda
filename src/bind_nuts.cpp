@@ -393,6 +393,22 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("timing_critical", &BusSegment::timing_critical)
         .def_readwrite("connections",     &BusSegment::connections)
         .def_readwrite("busterm_faces",   &BusSegment::busterm_faces)
+        // The two halves of a tap's membership, bound TOGETHER because reading
+        // either alone is what inverts "serves no bit" into "serves every
+        // bit": the list is authoritative when the flag is false, including
+        // when the list is empty.
+        .def_readwrite("busterm_face_bits", &BusSegment::busterm_face_bits)
+        // As BOOLs, not as the underlying char.  A std::vector<char> reaches
+        // Python as '\x01'/'\x00', and '\x00' is a one-character string —
+        // TRUTHY — so `if not serves_all[i]` silently never fires and every
+        // tap reads as serving all bits.  The C++ side keeps char (vector<bool>
+        // is the packed specialization, awkward to hand out by reference);
+        // the conversion belongs here, at the boundary that would mislead.
+        .def_property_readonly("busterm_face_serves_all",
+            [](const BusSegment& b) {
+                return std::vector<bool>(b.busterm_face_serves_all.begin(),
+                                         b.busterm_face_serves_all.end());
+            })
         .def_readwrite("passthru_spans",  &BusSegment::passthru_spans)
         .def_readwrite("abstract_pos",    &BusSegment::abstract_pos)
         .def_readwrite("ndr",             &BusSegment::ndr)

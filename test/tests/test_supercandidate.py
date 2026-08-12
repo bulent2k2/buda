@@ -200,12 +200,12 @@ def test_dump_grouped_reduces_rows(capsys):
 def test_dump_grouped_emits_pinnable_token():
     """Every --grouped row prints the exact `group:<N>` token it takes.
 
-    The `idx` column is 0-based and the ordinal position among families is NOT
-    the pin id, so users must copy the representative's 1-based candidate id.
-    The dump prints it verbatim as `group:<N>`; feeding THAT TOKEN back —
-    unedited — to `select_topology <bundle> <token>` must pin the SAME family
-    (the row's representative candidate becomes the selection). No `pin=` label
-    or reconstruction: what the dump shows is what the command accepts.
+    The row's `topo` number and its `group:` token are now the SAME number —
+    they used to differ by one, because the column was 0-based while the token
+    was 1-based, on the same line.  The ordinal position among families is
+    still not the pin id.  Feeding the token back unedited to
+    `select_topology <bundle> <token>` must pin the family whose
+    representative is that row.
     """
     s = _session()
     with contextlib.redirect_stdout(io.StringIO()) as buf:
@@ -217,14 +217,17 @@ def test_dump_grouped_emits_pinnable_token():
     for ln in out.splitlines():
         toks = ln.strip().split()
         if toks and toks[0].isdigit() and "group:" in ln:
-            idx = int(toks[0])
+            shown = int(toks[0])                 # the `topo` column, 1-based
             token = next(m for m in ln.split()[-1].split(",")
                          if m.startswith("group:"))
-            assert token == f"group:{idx + 1}"   # 1-based candidate id, verbatim
+            # The point of the change: one number per row, not two.
+            assert token == f"group:{shown}", (
+                f"the row shows topo {shown} but offers {token} — the two "
+                f"numbering systems are back")
             with contextlib.redirect_stdout(io.StringIO()):
                 s.do_command(f"select_topology 1 {token}")  # token unedited
             w = s.bundles[0]
-            assert idx in w.input.pinned_group   # the rep is in the pinned family
+            assert shown - 1 in w.input.pinned_group  # the rep is in the family
             assert w.plan.selected_topology_index == w.input.pinned_group[0]
             break
     else:
@@ -254,3 +257,63 @@ def test_incoherent_single_pin_does_not_crash_planner():
             s.do_command("run_planner")          # must not SIGSEGV
         # Fell back to the full sweep and chose a valid candidate.
         assert 0 <= w.plan.selected_topology_index < n, label
+
+
+# ── one numbering, everywhere a candidate is named ────────────────────────────
+
+def test_the_number_the_dump_shows_is_the_number_select_topology_takes():
+    """The read-it-then-type-it loop, end to end.
+
+    `select_topology`, `edit_topology`, the planner's `topo N of M` and the
+    explorer's `topo N/n` title were all 1-based while `dump_topologies`
+    printed a 0-based `idx` — so the obvious thing to do with the table (read
+    a row, pin it) silently pinned the NEIGHBOURING candidate.  Worse, the
+    same row already carried a 1-based `group:` token, so one line held both
+    systems at once.
+
+    This walks every row of a real dump, pins by the number printed, and
+    checks the selection landed on the candidate whose TYPE that row named.
+    Type, not index: an off-by-one that shifted both the read and the write
+    would still satisfy an index comparison.
+    """
+    import io, contextlib
+    s = _session()
+    with contextlib.redirect_stdout(io.StringIO()) as buf:
+        s.do_command("dump_topologies")
+    rows = []
+    for ln in buf.getvalue().splitlines():
+        toks = ln.strip().split()
+        if len(toks) >= 3 and toks[0].isdigit():
+            rows.append((int(toks[0]), toks[1]))
+    assert len(rows) > 1, "need a multi-candidate bundle to have an off-by-one"
+    assert rows[0][0] == 1, f"the table must start at 1, got {rows[0][0]}"
+
+    cands = list(s.bundles[0].input.candidates)
+    for shown, typ in rows:
+        with contextlib.redirect_stdout(io.StringIO()):
+            s.do_command(f"select_topology 1 {shown}")
+        got = cands[s.bundles[0].plan.selected_topology_index].type
+        assert got == typ, (
+            f"row printed as topo {shown} names {typ}, but pinning {shown} "
+            f"selected {got}")
+
+
+def test_the_dump_header_and_the_planner_agree_on_the_selected_candidate():
+    """`sel=` in the dump header and the planner's `topo N of M` name the same
+    candidate.  `sel=` printed the raw 0-based index, so on any bundle whose
+    winner was not the first candidate the two disagreed by one."""
+    import io, contextlib, re
+    s = _session()
+    with contextlib.redirect_stdout(io.StringIO()) as buf:
+        s.do_command("run_planner 3")
+    planner = dict(re.findall(r"Bundle (\d+) .*?-> topo (\d+) of ", buf.getvalue()))
+    assert planner, "no planner selection line to compare against"
+    with contextlib.redirect_stdout(io.StringIO()) as buf:
+        s.do_command("dump_topologies")
+    dumped = dict(re.findall(r"── bundle (\S+) .*? sel=(\S+?)(?: |$)",
+                             buf.getvalue()))
+    for bid, topo_n in planner.items():
+        assert dumped.get(bid) == topo_n, (
+            f"bundle {bid}: planner says topo {topo_n}, dump says "
+            f"sel={dumped.get(bid)}")
+

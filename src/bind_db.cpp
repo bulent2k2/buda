@@ -554,6 +554,11 @@ void bind_db(py::module_& m) {
         .def("clear_busterms",       &BDB::clear_busterms)
         .def("all_nets",        &BDB::all_nets)
         .def("all_pins",        &BDB::all_pins)
+        .def("set_bundle_net_endpoints", &BDB::set_bundle_net_endpoints,
+             py::arg("bundle_id"), py::arg("net_name"),
+             py::arg("drv_path"), py::arg("rcv_paths_json"))
+        .def("bundle_net_endpoints", &BDB::bundle_net_endpoints,
+             py::arg("bundle_id"))
         .def("all_busterms",    &BDB::all_busterms)
         .def("all_bundles",     &BDB::all_bundles)
         .def("add_bundle",      &BDB::add_bundle, py::arg("br"))

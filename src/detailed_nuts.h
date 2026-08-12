@@ -64,11 +64,24 @@ struct BusSegment {
     // TrackSegment::busterm_faces in the abstract stage).
     std::vector<double> busterm_faces;
     // Per-face bit membership, parallel to busterm_faces: the bits whose
-    // own path terminates at that tapped block.  An EMPTY entry means the
-    // face serves every bit (all non-tapered bundles — the historical
-    // behavior).  From Topology::seg_busterm_bits; without it a tap
-    // re-extends bits that never go to the block it taps.
+    // own path terminates at that tapped block.  From
+    // Topology::seg_busterm_bits; without it a tap re-extends bits that never
+    // go to the block it taps.
+    //
+    // The list is AUTHORITATIVE, including when it is empty — an empty entry
+    // means the tap serves NO bit.  "Serves every bit" is the separate flag
+    // below rather than the empty list, because the two are different
+    // statements and conflating them inverts one into the other: a tap that
+    // serves nobody would be read as serving everybody, so DetailedNUTS would
+    // hold every bit out to it while check_dnuts, reading the membership
+    // directly, skipped it — placement and audit disagreeing about a tap,
+    // which is the one thing the shared predicate exists to prevent.
     std::vector<std::vector<int>> busterm_face_bits;
+    // Per face, parallel to busterm_faces: this tap serves every bit, so
+    // busterm_face_bits carries no list for it.  True for every non-tapered
+    // bundle (the historical behavior) and for any tap whose membership the
+    // derivation did not record.
+    std::vector<char> busterm_face_serves_all;
 
     // Along-axis intervals where this segment covers a connected block by
     // PASS-THROUGH — it crosses the block's footprint with no tap of its own,

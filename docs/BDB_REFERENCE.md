@@ -192,6 +192,16 @@ count and a stored one would be charged against geometry it never measured.
 `open_bdb` re-derives it, and says so loudly when the governed layers carry
 no track pattern in the new session.  Pre-v26 rules migrate to 0, correct
 since they were multiplier-only.
+v27 added **`bundle_net.drv_path` / `rcv_paths`** — the per-bit endpoints of a
+fan-in / fan-out bundle (`HBundle::net_drivers[ord]` /
+`net_receivers[ord]`), on the row that already carries the membership so the
+bit alignment cannot drift from it.  They are what makes the per-bit taper
+(`Topology::seg_bits`) derivable on resume; without them a restored fan-in
+came back UNTAPERED — every segment carrying every bit — and routed wider
+than the design that was checkpointed while reporting itself clean (see
+[`load_pipeline`](#load_pipeline)).  Empty for every other bundle, and empty
+for a pre-v27 checkpoint, which resumes exactly as it did and says so
+(BUDA-1904).
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.
 
@@ -481,7 +491,42 @@ ends at the next re-plan). Re-running `run_planner hier` on a resumed
 post-expansion session remains unsupported.
 
 Not restored: `seg_perp` (a NUTS placement *preference* from the planner's
-charged bands), planner band state, overlap details. TEG-over bridge segments
+charged bands), planner band state, overlap details.
+
+**The per-bit fan-in taper IS restored** (v27). `Topology::seg_bits` is
+derived at *generation* and by no load path, so a restored CONVERGENT /
+DIVERGENT fan-in used to come back with an empty map — and an empty map means
+*every segment carries every bit*, the untapered tree. The resumed design was
+still clean; it was simply **wider than the one that was saved**, and nothing
+said so. Measured on `flow/tcl/array_save.tcl` + `array_resume.tcl` (2 x 2, a
+checkpoint and a straight continuation of it): every plain bundle round-tripped
+bit-for-bit while the two fan-in bundles grew — b1 16 → 18 bit-wires, b10 32 →
+48, total 88 → 106 — with both endpoints reporting 0 overlaps / 0 unplaced / 0
+violations. Everything downstream moves with the taper: planner band charging
+(`congestion_planner.cpp` prices `seg_bits` when non-empty), abstract NUTS
+widths, DNUTS emission.
+
+What closes it is `bundle_net.drv_path` / `rcv_paths` (v27): the per-bit
+endpoints `HBundle::net_drivers[i]` / `net_receivers[i]`, on the same row the
+membership uses so the bit alignment is the same `ord`. They are **stored, not
+re-derived at load**, because the driver/receiver roles they encode come out of
+a subtle pass in the bundler (deepest OUTPUT, path-maximal receivers,
+INOUT/UNKNOWN fallbacks, extra-driver attachment) that a second implementation
+in the loader would drift from. `_restore_wrapper` then re-derives `seg_bits`
+on every restored candidate (`_retaper_fanin`), asking the frame which spelling
+of the endpoint names it recognises — as stored, or by leaf for a cell-local
+template — rather than re-deciding which hier case this is. Same continuation,
+same `route_snapshot` hash: 9644 WL / 88 bit-wires on both sides of the round
+trip, where the untapered resume gave 13895 / 106.
+
+A checkpoint written **before v27** has no endpoints to restore and resumes
+untapered exactly as it did, which is reported (**BUDA-1904**) rather than left
+to be noticed as a mysteriously wider design; re-run the bundler and
+re-checkpoint to store them. If neither spelling of a stored endpoint matches
+the frame, the taper is left underived and reported the same way — guessing a
+mapping could drop a bit's wire.
+
+TEG-over bridge segments
 **are** restored (`topology_bridge_segment`, v11), so TEG-over multi-rect
 designs resume losslessly. `ripup_reroute` and `run_nuts_on_layer` both
 **commit** their final routing via the `_checkpoint_routing()` choke point

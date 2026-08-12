@@ -477,7 +477,7 @@ window, block taps, net-pull)` plus the junction adjacency, deliberately
 the **best-estimated (lowest-WL) member**; the rest are dropped with a note:
 
 ```
-[TopoDedup] bundle B: dropped TYPE (idx I) — same slide-window/connectivity as idx J (nominal-locus variant)
+[TopoDedup] bundle B: dropped TYPE (topo I) — same slide-window/connectivity as topo J (nominal-locus variant)
 [TopoDedup] collapsed N nominal-locus duplicate candidate(s) across M bundle(s).
 ```
 

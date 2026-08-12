@@ -235,6 +235,57 @@ visible, in order, outside every frame — instead of inside the
 conversation.  ("Nothing in BUDA does" was true, but it was a promise about
 other people's code; now it does not need to be one.)
 
+## Design iteration: a decision that survives the process
+
+`array.tcl` opens `:memory:`, so everything it decides dies with it — which
+is how a candidate picked by hand in the explorer gets lost between runs.
+`array_save.tcl` and `array_resume.tcl` are the same design against a FILE,
+split into the two sessions a person actually works in:
+
+```bash
+tclsh flow/tcl/array_save.tcl                            # build, route, look
+BUDA_ARRAY_VIZ=1 tclsh flow/tcl/array_save.tcl           # ...with the viewer
+
+BUDA_ARRAY_PIN=diag=14 tclsh flow/tcl/array_resume.tcl   # re-plan with a choice
+tclsh flow/tcl/array_resume.tcl                          # again; the pin holds
+```
+
+The default 2 × 2 is clean, so every line above exits 0. Passing `3 2`
+selects the vehicle's known-dirty shape (`array.tcl`'s documented antenna
+residual) — still a valid checkpoint, and still resumable, but the flow's
+self-check exits **1** on it by design, which will stop a `set -e` script at
+the first line.
+
+Session 2 declares the technology and **nothing else**: no cells, no buses,
+no bundler, no generation. `load_pipeline` brings back the bundles, every
+candidate topology, the planner's selection and layers, the pre-plan pins and
+the abstract routing, and the flow starts at the planner — a design iteration
+re-plans, it does not rebuild. Both sessions get their stack and geometry
+from `array_lib.tcl`, because a checkpoint is worth nothing if the session
+reopening it declares a different design.
+
+**A pin is the durable form of a choice.** `buda::select_topology` writes
+`topology.is_pinned` the moment it is applied, so it survives the save, binds
+the next session's planner, and stays in force until it is changed —
+measured: unpinned this design plans `diag` as `TRUNK_V@x240`, pinned to 14
+it keeps `TRUNK_H+MST@y480` through the resume, the re-plan, and the
+checkpoint after that. A pin made **in the explorer** is a preview by
+design — the viewer's re-run buttons never write a checkpoint — so bring the
+title bar's `topo N/n` back as `BUDA_ARRAY_PIN=<bus>=N`. Candidate ids are
+**1-based everywhere** they are shown or typed — the title bar,
+`dump_topologies`' `topo` column, `select_topology`, `edit_topology` — so the
+number you read is the number you use.
+
+This pair is also what measured the **fan-in taper gap**, now fixed: a
+resumed CONVERGENT/DIVERGENT bundle used to come back untapered and route
+wider than the design that was saved (this vehicle: 88 → 106 bit-wires, all
+of it in the two fan-in bundles, both endpoints clean, nothing said). Since
+schema v27 the per-bit endpoints ride the checkpoint and the taper is
+re-derived on load, so a continuation reproduces it exactly — same
+`route_snapshot` hash. A checkpoint written before v27 still resumes
+untapered and now says so (`BUDA-1904`). Details in
+[BDB_REFERENCE.md](BDB_REFERENCE.md#load_pipeline).
+
 ## The corpus: the same 41 flows, driven from Tcl
 
 `flow/tcl/corpus/` is the QoR corpus translated to Tcl — every flow

@@ -1127,6 +1127,26 @@ void DetailedNUTSEngine::place_by_layer(
     }
 }
 
+// Does busterm tap `fi` of `bs` serve `bit`?  The BusSegment-side reading of
+// Topology::seg_busterm_bits, and the ONE place that reads the pair
+// (busterm_face_bits, busterm_face_serves_all) — the two consumers below must
+// agree, since one retracts a bit past a tap it does not serve and the other
+// re-extends it to a tap it does.  Split them and a tap gets trimmed by the
+// first and handed back by the second.
+static inline bool tap_serves_bit(const BusSegment& bs, size_t fi, int bit) {
+    if (fi >= bs.busterm_face_bits.size()) return true;   // nothing recorded
+    const auto& fb = bs.busterm_face_bits[fi];
+    // A BusSegment built WITHOUT the flags (a hand-made fixture, or any
+    // builder other than make_bus_segments) gets the legacy reading, where an
+    // empty list means "serves every bit".  Only a segment carrying the flags
+    // can express "serves none", so nothing that predates them can be
+    // misread as it.
+    if (bs.busterm_face_serves_all.size() != bs.busterm_faces.size())
+        return fb.empty() || std::binary_search(fb.begin(), fb.end(), bit);
+    if (bs.busterm_face_serves_all[fi]) return true;
+    return std::binary_search(fb.begin(), fb.end(), bit);
+}
+
 // ---------------------------------------------------------------------- //
 // 4. Span-adjustment post-pass: extend bit-wire endpoints to reach        //
 //    all connected perpendicular segments' exact track_positions.         //
@@ -1236,12 +1256,7 @@ void DetailedNUTSEngine::adjust_bit_spans(
             // it.  With no membership recorded every tap serves every bit, so
             // the envelope is the abstract span and nothing moves.
             for (size_t fi = 0; fi < bs_ptr->busterm_faces.size(); ++fi) {
-                bool mine = true;
-                if (fi < bs_ptr->busterm_face_bits.size()) {
-                    const auto& fb = bs_ptr->busterm_face_bits[fi];
-                    mine = fb.empty() ||
-                           std::binary_search(fb.begin(), fb.end(), ns.bit_index);
-                }
+                bool mine = tap_serves_bit(*bs_ptr, fi, ns.bit_index);
                 if (!mine) { tapered_out = true; continue; }
                 const double fc = bs_ptr->busterm_faces[fi];
                 pres_lo = std::min(pres_lo, fc);
@@ -1295,15 +1310,9 @@ void DetailedNUTSEngine::adjust_bit_spans(
             // (flow/antenna_taper_passthru.buda: 8 bits x ~370 units).
             // An empty membership list = serves every bit, so a bundle
             // without a taper is byte-identical.
-            for (size_t fi = 0; fi < bs_ptr->busterm_faces.size(); ++fi) {
-                if (fi < bs_ptr->busterm_face_bits.size()) {
-                    const auto& fb = bs_ptr->busterm_face_bits[fi];
-                    if (!fb.empty() &&
-                        !std::binary_search(fb.begin(), fb.end(), ns.bit_index))
-                        continue;
-                }
-                cover(bs_ptr->busterm_faces[fi]);
-            }
+            for (size_t fi = 0; fi < bs_ptr->busterm_faces.size(); ++fi)
+                if (tap_serves_bit(*bs_ptr, fi, ns.bit_index))
+                    cover(bs_ptr->busterm_faces[fi]);
 
             // PASS-THROUGH coverage: the same snap can strand a block this
             // segment covers by crossing it, and does so more brutally — a block
@@ -1517,6 +1526,7 @@ std::vector<BusSegment> make_bus_segments(
                     // so the placer and check_dnuts cannot disagree about a
                     // tap.  Empty mask = serves every bit (untapered).
                     std::vector<int> fb;
+                    bool serves_all = true;
                     auto tp = bid_to_topo.find(ts.bundle_id);
                     if (tp != bid_to_topo.end() &&
                         !tp->second->seg_busterm_bits.empty()) {
@@ -1525,9 +1535,14 @@ std::vector<BusSegment> make_bus_segments(
                             if (seg_busterm_serves_bit(*tp->second, ts.seg_idx,
                                                        conn.block_name, b))
                                 fb.push_back(b);
-                        if ((int)fb.size() == nbits) fb.clear();  // serves all
+                        // Every bit served is recorded as the FLAG, not as a
+                        // full list — but a tap serving NONE keeps its empty
+                        // list, which is why the flag exists.
+                        serves_all = ((int)fb.size() == nbits);
+                        if (serves_all) fb.clear();
                     }
                     bs.busterm_face_bits.push_back(std::move(fb));
+                    bs.busterm_face_serves_all.push_back(serves_all ? 1 : 0);
                 }
             }
         }
