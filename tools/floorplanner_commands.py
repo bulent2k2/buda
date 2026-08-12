@@ -55,14 +55,33 @@ from typing import Callable, Iterable
 # on sys.path.  What is left is `python3 tools/bdb_floorplanner.py` run by
 # path with nothing set up.
 #
-# Existence-checked: installed, `_ROOT` is `buda_runtime/`, so `src` and
-# `build` under it do not exist — and inserting a nonexistent directory at
-# sys.path[0] is a claim about a layout this module cannot see.  It is only
-# accidentally harmless today (install() has already put the real ones ahead);
-# a future layout with a real `buda_runtime/src` would make it win.
+# Each candidate is checked, so nothing is claimed that is not there and
+# nothing is claimed in the layout that does not want it.  Installed, `_ROOT`
+# is `buda_runtime/`, so `src` and `build` under it do not exist — inserting a
+# nonexistent directory at sys.path[0] is a claim about a layout this module
+# cannot see, and it was only ACCIDENTALLY harmless (install() had already put
+# the real ones ahead); a future layout with a real `buda_runtime/src` would
+# make it win.
+#
+# `_ROOT` itself is content-checked rather than `isdir`, which would always be
+# true: it is wanted ONLY when installed, where it is the directory holding
+# `buda_cli.py` and the rest of the layer.  In a checkout it is the repo root,
+# which this module has never needed — putting it at sys.path[0] would be a
+# new side effect of a bootstrap fix, which is not a trade worth making
+# silently.
+#
+# `build` keeps a plain `isdir`, and the asymmetry with its neighbours is
+# deliberate rather than an oversight: a compiled module's filename carries an
+# ABI suffix, so there is no fixed name to look for — and unlike `buda_viz`'s
+# `../tools` (where `..` is site-packages once installed), every candidate
+# here lives under our own root and cannot be a stranger's directory.
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _ROOT):
-    if os.path.isdir(_p) and _p not in sys.path:
+for _p, _proof in ((os.path.join(_ROOT, "src"), "buda_cli.py"),
+                   (os.path.join(_ROOT, "build"), None),
+                   (_ROOT, "buda_cli.py")):
+    _ok = os.path.isdir(_p) if _proof is None \
+        else os.path.isfile(os.path.join(_p, _proof))
+    if _ok and _p not in sys.path:
         sys.path.insert(0, _p)
 
 import buda
