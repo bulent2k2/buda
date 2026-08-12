@@ -1,0 +1,95 @@
+# ============================================================
+# flow/mst_shared_leg_prefix.buda
+#
+# Two MST edges leaving ONE block along the same axis.
+#
+# `realize_mst_edge` routes each edge on its own, from the
+# closest point between its two blocks.  Two edges incident on
+# the same block therefore start at the SAME face point, and if
+# both go L-shaped with the same first axis, the shorter one's
+# leg lies entirely inside the longer one's.
+#
+# The longer leg's first stretch is then a duplicate, and its
+# start is a FREE END: the shorter leg owns the block tap, and
+# nothing joins the long leg until the two diverge.
+#
+# Nothing downstream removed it.  The ANTENNA rule counts
+# attachment POSITIONS and the long leg has two elsewhere, so it
+# passes; #514's tap-overhang rule wants the piece to lie over a
+# block the segment itself taps, and this one taps nothing.
+#
+# What it DID do is push the leg's end past the junction where
+# the edges diverge, turning that junction from an endpoint conn
+# into a mid-span one — and DetailedNUTS only snaps a bit to its
+# own via at an ENDPOINT conn, so every bit kept the shared
+# abstract end instead of stopping at its own via.
+#
+# Found on flow/rnr/mix2_topdown_refine bundle 35
+# (TRUNK_V+MST@x690), where the trunk and a branch both left
+# chip/i_dnuts1_4/v0 at x=2130 heading west:
+#
+#   seg3  H (2130,1020)->(2110,1020)   edge 1, owns the tap
+#   seg5  H (2130,1020)->( 980,1020)   edge 2, runs over it
+#
+# and seg5's bits carried 8.75 + 5.75 + 2.75 units past their
+# last via — with `check_design` reporting Success.
+#
+# FIXED by cutting each leg back to where it stops being a
+# duplicate (`trim_shared_leg_prefixes`).  Connectivity is
+# preserved by construction: the cut point is the shorter leg's
+# far end, which is either that edge's own BEND or a block FACE,
+# so something is always waiting at the seam.  On bundle 35:
+#
+#   seg5  (2130,1020) -> (2110,1020)   the duplicated prefix, gone
+#   detailed WL 13753 -> 13736         exactly the dangling metal
+#   check_design       dirty -> Success
+#
+# This vehicle is the SHAPE on its own, so the mechanism has a
+# home that does not depend on a 100-bundle hier design keeping
+# one particular candidate at one particular index.  Four blocks
+# is the minimum for a standalone MST candidate.  It reproduces
+# on BOTH standalone strategies -- measured on main, at the
+# shared corner (2010,1010) after the corner margin:
+#
+#   MST_HV  seg1 len  120 inside seg3 len 1320
+#   MST_VH  seg3 len   70 inside seg1 len  620
+#
+# and neither survives the trim.
+#
+# Run:  bin/buda flow/mst_shared_leg_prefix.buda --no-viz
+# ============================================================
+
+def_layer 4 M4 H TOP 33.33
+def_layer 5 M5 V TOP 33.33
+
+corner_margin dx 10 dy 10
+
+# `hub` is the shared MST node.  Both targets sit BEYOND its
+# south-west CORNER, so closest_points
+# returns that same corner for each: the two edges start at one point.
+# Each is then an L that goes WEST first, and `near`'s short west leg
+# lies inside `far`'s long one.
+add_block hub   2000 1000  2100 1100
+add_block near  1800  300  1900  400
+add_block far    600  900   700  950
+
+# The MST must keep BOTH as direct edges off hub rather than chaining
+# near--far, so the blocks are placed to make that the cheaper tree:
+#   hub--near  100 + 600 =  700      hub--far  1300 + 50 = 1350
+#   near--far 1100 + 500 = 1600   <- dearer than either, so no chain
+add_block up    2000 1800  2100 1900
+
+add_bus d[4] hub.tx near.rx,far.rx,up.rx
+
+run_bundler strict
+generate_topologies
+run_planner 1
+run_nuts
+
+def_track_pattern 4 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 5 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+
+run_detailed_nuts
+dump_topologies --conn
+check_design dnuts
+report_wirelength
