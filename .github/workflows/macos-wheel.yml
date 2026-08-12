@@ -12,58 +12,77 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# ONE macOS wheel — a prototype, deliberately not a matrix.
+# macOS wheels — a prototype, deliberately not a matrix and not a gate.
 #
 # `docs/internal/packaging.md` §7 says auditwheel/delocate "would mostly verify
 # rather than repair, but that is a claim to test, not to assert".  This is the
-# test.  It also gives the project its FIRST macOS build of any kind: every
-# other workflow here runs ubuntu-24.04 or windows-2022, so `@loader_path` —
-# the RPATH the whole three-artifact layout depends on — has never been
-# exercised outside a developer's laptop.
+# test.  It is also the project's FIRST macOS build of any kind: every other
+# workflow here runs ubuntu-24.04 or windows-2022, so `@loader_path` — the RPATH
+# the whole three-artifact layout depends on — has never been exercised outside
+# a developer's laptop, on the platform carrying the most platform-specific code
+# in the tree (the Dock icon ladder, the per-cell `.app`, make_macos_apps).
 #
-# What this is NOT: a release process, a version matrix, or anything published.
-# It builds one wheel for one platform and one Python, inspects it, smoke-tests
-# it, and uploads it as an artifact.  Keep it that way until there is a reason
-# not to; the reason will not be "it was easy to add another row".
+# TWO jobs, because one runner cannot do both halves of the job:
 #
-# The build does NOT use cibuildwheel, on purpose.  cibuildwheel would repair
-# the wheel automatically and hide the very answer we are here to get.  This
-# builds the wheel plainly, then reports what it links (`delocate-listdeps`)
-# and uploads a repaired copy ALONGSIDE the raw one, so "did it need repair?"
-# is answered by comparing two artifacts rather than by assertion.
+#   native  arm64, built plainly, FULLY smoke-tested.  This is the evidence:
+#           it answers @loader_path, delocate, and the layout contract by
+#           RUNNING them.  Deliberately not cibuildwheel — cibuildwheel repairs
+#           the wheel automatically and would hide the very answer we want, so
+#           this builds plainly, reports what the wheel links, and uploads a
+#           repaired copy ALONGSIDE the raw one so "did it need repair?" is
+#           settled by comparing two artifacts rather than by assertion.
+#
+#   intel   x86_64, CROSS-built with cibuildwheel, NOT smoke-tested.  This is
+#           the deliverable for an Intel Mac.  cibuildwheel is the right tool
+#           here for the opposite reason: cross-building a CPython extension
+#           needs the universal2 interpreter and deployment-target machinery it
+#           already solves, and there is no evidence to hide because the
+#           runner cannot execute an x86_64 wheel anyway.  The target Mac is
+#           the only execution test, and the job says so rather than implying
+#           a green tick means it ran.
+#
+# Both run on `macos-latest`, which is Apple Silicon and certain to exist.
+# `macos-13` — the obvious choice for a native Intel build — was RETIRED, and
+# this workflow's first run proved it the slow way: queued 15 minutes with no
+# runner ever assigned (`runner_id: 0`), because an unserved label does not
+# fail, it waits.  A native Intel label may exist again (`macos-15-intel`);
+# trying it is a follow-up, not something to depend on, and the point of
+# cross-building is that this workflow does not care either way.
+#
+# What this is NOT: a release process, a version matrix, anything published, or
+# a CI gate.  See the `push` trigger note below.
 name: macOS wheel (prototype)
 
 on:
   workflow_dispatch:
     inputs:
-      runner:
-        description: "macOS runner: macos-13 is Intel x86_64, macos-15 is Apple Silicon arm64"
-        type: choice
-        default: macos-13
-        options: [macos-13, macos-15]
-        required: false
       python:
-        description: "Python version to build the wheel for (a wheel installs ONLY on its own version)"
+        description: "Python version (a wheel installs ONLY on its own version)"
         type: string
         default: "3.13"
         required: false
-  # Also on push, because a `workflow_dispatch` workflow cannot be dispatched
-  # until it exists on the DEFAULT branch — so on a topic branch this is the
-  # only way to run it.  Path-scoped so it fires when the packaging inputs
-  # change and stays quiet otherwise.
+  # Scoped to THIS FILE, on purpose.  The tempting widening is `src/**` +
+  # `tools/**` — they are what the wheel packages, so a change there is exactly
+  # what could break it.  But that would silently turn a prototype into a macOS
+  # build on nearly every commit, which is a cost worth deciding on rather than
+  # acquiring.  Until that decision, `workflow_dispatch` is the intended
+  # trigger and this exists only because a dispatch-only workflow cannot be
+  # dispatched until it lives on the default branch — so on a topic branch,
+  # push is the only way to run it at all.  A filter listing SOME of the inputs
+  # that matter would be worse than this one: it would imply the list is
+  # complete.
   push:
     paths:
       - '.github/workflows/macos-wheel.yml'
-      - 'pyproject.toml'
-      - 'CMakeLists.txt'
-      - 'buda_runtime/**'
 
 permissions:
   contents: read
 
 jobs:
-  wheel:
-    runs-on: ${{ inputs.runner || 'macos-13' }}
+  # ── the evidence ────────────────────────────────────────────────────────
+  native:
+    name: arm64 (native, smoke-tested)
+    runs-on: macos-latest
     timeout-minutes: 60
 
     steps:
@@ -80,29 +99,29 @@ jobs:
           sw_vers
           python3 -VV
           python3 -c "import sysconfig; print('platform tag:', sysconfig.get_platform())"
-          clang --version
+          clang --version | head -2
           cmake --version | head -1
 
       - name: Build the wheel
         run: |
           python3 -m pip install --upgrade pip build delocate
-          # BUDA_ARCH is pinned to `none` by pyproject.toml for every pip
-          # build; nothing here overrides it.  That matters twice over on this
-          # runner: a distributable wheel must not carry the build machine's
-          # ISA, and `-march=` is x86 syntax that an arm64 clang would reject
-          # outright — so `none` is what makes the macos-15 option viable too.
+          # BUDA_ARCH is pinned to `none` by pyproject.toml for every pip build
+          # and nothing here overrides it.  That matters twice on this runner:
+          # a distributable wheel must not carry the build machine's ISA, and
+          # `-march=` is x86 syntax an arm64 clang would reject outright.
           python3 -m build --wheel --outdir dist/
           ls -l dist/
 
       - name: What does it link? (the delocate question, answered)
         run: |
-          echo '## Wheel' >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          ls -1 dist/ >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-          echo '## Dependencies before repair' >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '## arm64 wheel'
+            echo '```'
+            ls -1 dist/
+            echo '```'
+            echo '### Dependencies before repair'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
           delocate-listdeps --all dist/*.whl 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
@@ -111,21 +130,23 @@ jobs:
           # repaired wheel is equivalent.  Uploaded separately rather than
           # asserted, so the comparison is evidence and not a claim.
           #
-          # Deliberately NOT fatal.  "delocate refuses this wheel" is a real
-          # answer to the question being asked and belongs in the report; a
-          # failed step here would instead throw away the raw wheel, which is
-          # the thing being tested and the thing you are waiting to install.
+          # Deliberately NOT fatal: "delocate refuses this wheel" is a real
+          # answer that belongs in the report, and a failing step here would
+          # throw away the raw wheel, which is the thing being tested.
           mkdir -p repaired
           if delocate-wheel -w repaired/ -v dist/*.whl 2>&1 | tail -20; then
-            echo '## After repair' >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo '### After repair'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
             delocate-listdeps --all repaired/*.whl 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           else
-            echo '## After repair' >> "$GITHUB_STEP_SUMMARY"
-            echo 'delocate-wheel FAILED — see the step log. The raw wheel is' \
-                 'still uploaded and is what the smoke test below exercises.' \
-                 >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo '### After repair'
+              echo 'delocate-wheel FAILED — see the step log.  The raw wheel is'
+              echo 'still uploaded and is what the smoke test below exercises.'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Smoke-test the installed wheel
@@ -135,12 +156,12 @@ jobs:
           "$RUNNER_TEMP/venv/bin/pip" install --quiet dist/*.whl
 
           # Run from OUTSIDE the checkout, deliberately.  `buda_runtime/` sits
-          # at the repo root, so a test run with the repo as cwd would import
-          # the CHECKOUT's copy, `in_checkout()` would be true, and the whole
-          # thing would exercise the source tree while appearing to test the
-          # wheel.  That is the exact shape of mistake this packaging work kept
-          # turning up, so the smoke test is anchored elsewhere and given an
-          # absolute path to the flow.
+          # at the repo root, so a test with the repo as cwd would import the
+          # CHECKOUT's copy, `in_checkout()` would be true, and the whole thing
+          # would exercise the source tree while appearing to test the wheel.
+          # That is the exact shape of mistake this packaging work kept turning
+          # up, so the smoke test is anchored elsewhere and given an absolute
+          # path to the flow.
           cd "$RUNNER_TEMP"
           REPO="$GITHUB_WORKSPACE"
 
@@ -152,7 +173,7 @@ jobs:
           assert buda.BDB is buda_db.BDB, "two std::type_info for BDB — libbuda_core was not shared"
           PY
 
-          echo "-- the two-tier contract"
+          echo "-- the two-tier layout contract"
           "$RUNNER_TEMP/venv/bin/python" - <<'PY'
           try:
               import buda_cli
@@ -185,8 +206,8 @@ jobs:
           buda::add_block a 0 0 100 100
           buda::add_block b 300 0 400 100
           # Backslashes are DOUBLED because this heredoc is unquoted (it has to
-          # be, to expand $SP and $RUNNER_TEMP): bash eats one level, leaving
-          # Tcl the `\[4\]` it needs to keep the brackets literal.
+          # be, to expand \$SP and \$RUNNER_TEMP): bash eats one level, leaving
+          # Tcl the \`\\[4\\]\` it needs to keep the brackets literal.
           buda::add_bus "bus\\[4\\]" a.out b.in
           buda::run_bundler STRICT
           puts "   tcl bridge: [buda::query bundles] bundle(s)"
@@ -194,26 +215,101 @@ jobs:
           TCL
           tclsh t.tcl | tail -2
 
-      - name: How to use it
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          # TWO path patterns, so the archive keeps the `dist/` and `repaired/`
+          # directories (upload-artifact roots the archive at their common
+          # ancestor).  That is wanted here — the two wheels have the SAME
+          # filename and would collide if flattened, and keeping them apart is
+          # what makes the before/after comparison possible.  The install
+          # instructions below name `dist/` for exactly this reason.
+          name: buda-macos-arm64-wheel
+          path: |
+            dist/*.whl
+            repaired/*.whl
+          if-no-files-found: error
+
+  # ── the deliverable for an Intel Mac ────────────────────────────────────
+  intel:
+    name: x86_64 (cross-built, NOT run here)
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python || '3.13' }}
+
+      - name: Cross-build the x86_64 wheel
+        env:
+          # cp313 only, x86_64 only.  A wheel installs ONLY on its own Python
+          # version and architecture, so these two lines are what decide
+          # whether the artifact is usable on the target machine at all.
+          CIBW_BUILD: cp313-macosx_x86_64
+          CIBW_ARCHS_MACOS: x86_64
+          # Old enough to install on anything current, new enough for C++20.
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
+        run: |
+          python3 -m pip install --upgrade pip cibuildwheel
+          python3 -m cibuildwheel --output-dir wheelhouse
+          ls -l wheelhouse/
+
+      - name: Report, and say plainly what was NOT tested
         if: always()
         run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'MD'
-          ## Installing this on your Mac
+          {
+            echo '## x86_64 (Intel) wheel'
+            echo '```'
+            ls -1 wheelhouse/ 2>/dev/null || echo '(none produced)'
+            echo '```'
+            echo 'Cross-built on an Apple Silicon runner, so **it was never'
+            echo 'executed here** — this job going green means it BUILT, not'
+            echo 'that it runs.  The target Mac is the only execution test.'
+            echo 'The arm64 job is where the layout contract, @loader_path and'
+            echo 'the Tcl bridge are actually exercised.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          Download the `buda-macos-wheel` artifact, then:
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          # ONE path pattern, so the wheel lands at the archive ROOT and the
+          # documented `pip install ./buda-*.whl` matches after unzipping.
+          name: buda-macos-x86_64-wheel
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  # ── how to use what came out ────────────────────────────────────────────
+  instructions:
+    name: How to install
+    runs-on: ubuntu-24.04
+    needs: [native, intel]
+    if: always()
+    steps:
+      - name: Write the install recipe
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'MD'
+          ## Installing on your Mac
+
+          **Intel Mac** → download the `buda-macos-x86_64-wheel` artifact.
+          **Apple Silicon** → download `buda-macos-arm64-wheel`; its wheel is
+          under `dist/` (the `repaired/` copy is the delocate comparison, not a
+          second thing to install).
 
           ```bash
-          unzip buda-macos-wheel.zip
+          unzip buda-macos-x86_64-wheel.zip
           # A .whl that arrived through a browser carries com.apple.quarantine,
           # which can stop the extracted dylib from loading.  Strip it first —
           # this is not optional paranoia, it is the usual first failure.
           xattr -dr com.apple.quarantine .
-          pip install ./buda-*.whl
+          pip install ./buda-*.whl          # arm64 artifact: ./dist/buda-*.whl
           ```
 
-          Then, from any directory OUTSIDE a BUDA checkout (inside one, the
+          Then, from any directory **outside** a BUDA checkout — inside one the
           repo's own `buda_runtime/` wins and you would be testing the source
-          tree):
+          tree, not the wheel:
 
           ```bash
           buda --no-viz /path/to/checkout/demo/quickstart.buda
@@ -221,20 +317,11 @@ jobs:
           ```
 
           **This wheel is a baseline build** (`BUDA_ARCH=none`, the same pin CI
-          uses), so its exact overlap/opens counts may differ from your
-          `bin/bb` build's. Use it to check that it RUNS; do not diff its
-          numbers against a local build's.
+          uses), so its exact overlap/opens counts may differ from a `bin/bb`
+          build's.  Use it to check that it RUNS; do not diff its numbers
+          against a local build's.
 
           If `pip install` says "not a supported wheel on this platform", the
-          mismatch is the Python version or the macOS tag — the build's
-          platform tag is printed in the *Host facts* step above.
+          mismatch is the Python version or the macOS tag — the arm64 job's
+          *Host facts* step prints the platform tag it built against.
           MD
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: buda-macos-wheel
-          path: |
-            dist/*.whl
-            repaired/*.whl
-          if-no-files-found: error
