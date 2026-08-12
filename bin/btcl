@@ -1,0 +1,62 @@
+#!/bin/bash
+# btcl — run a Tcl flow that drives BUDA (it sources tools/buda.tcl and calls
+# buda::start), with an optional -v that opens a viewer on the FINISHED design
+# at the end of the flow even when it has no `visualize`.  The Tcl twin of the
+# `buda -v` flag, for eyeballing a Tcl test vehicle without editing it.
+#
+#   btcl flow.tcl [args...]        # run the flow
+#   btcl -v flow.tcl [args...]     # …and pop a viewer when the flow ends
+#   btcl -- -v.tcl                 # a script whose NAME starts with a dash
+#
+# WRAPPER OPTIONS ARE READ ONLY BEFORE THE SCRIPT.  The first non-option word
+# is the script, and everything from it onward — including any `-v` of the
+# flow's OWN — is passed through untouched, in its original position.  `--`
+# ends option parsing explicitly.  This matters because `-v` is a perfectly
+# ordinary flag for a flow to want: reading it anywhere on the line stole the
+# flow's argument, re-spelled `--visualize` as `-v`, collapsed two occurrences
+# into one, moved it to the end, and — worst — turned the viewer on for a
+# `btcl flow.tcl -v` that never asked this wrapper for anything.
+#
+# The request travels as an ENVIRONMENT VARIABLE (BUDA_VIZ_FINAL) rather than
+# an injected argv token, so a flow's arguments are exactly what it was given.
+# buda::start reads only that: it used to scan `$argv` for a bare `-v`, which
+# cannot tell a launcher's request from a flag the flow wants for itself.  With
+# no wrapper, `BUDA_VIZ_FINAL=1 tclsh flow.tcl` says the same thing.
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+# The child buda_server.py self-bootstraps its own imports, but export the
+# layer too so a `package require`/helper in the flow resolves the same way.
+export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -v|--visualize) export BUDA_VIZ_FINAL=1; shift ;;
+    --)             shift; break ;;
+    # The header block IS the help, read to the first non-comment line rather
+    # than to a hand-picked number — which had already gone stale by four
+    # lines and silently truncated the last paragraph.
+    -h|--help)      sed -n '2,${/^[^#]/q; s/^# \{0,1\}//; p;}' "${BASH_SOURCE[0]}"
+                    exit 0 ;;
+    -*)             echo "btcl: unknown option '$1'" >&2; exit 2 ;;
+    *)              break ;;          # the script — parsing stops here
+  esac
+done
+
+# A script whose NAME begins with a dash is not a script to tclsh — it reads it
+# as an OPTION, runs nothing, drains stdin and returns 0.  Measured on 8.6.14:
+#
+#   tclsh -v.tcl a      -> ran nothing, exit 0
+#   tclsh -- -v.tcl a   -> ran nothing, exit 0     (`--` is not a terminator
+#                                                   tclsh honours, so ours
+#                                                   cannot simply be handed on)
+#   tclsh ./-v.tcl a    -> ran the script
+#
+# So `--` ends OUR parsing and the operand is normalised to a path tclsh cannot
+# misread.  Without this the documented `btcl -- -v.tcl` was a silent no-op that
+# still reported success — the worst shape a launcher can have.
+if [ $# -gt 0 ]; then
+  case "$1" in
+    -*) set -- "./$1" "${@:2}" ;;
+  esac
+fi
+
+exec tclsh "$@"

@@ -72,7 +72,7 @@ namespace eval ::buda {
     # the engine command).  Listed rather than snapshotted from
     # `info procs`, which would also capture the generated procs if this
     # file were ever sourced twice.  Pinned by the test suite.
-    variable reserved {start stop query output commands stream viz
+    variable reserved {start stop query output commands stream viz vizfinal
                        onprogress async wait running cancel do}
     # Captured HERE, at source time.  Inside a proc `info script` names the
     # script being RUN, not the one the proc was defined in, so resolving the
@@ -123,13 +123,38 @@ proc ::buda::start {args} {
     # Only when asked: the engine's own default is on, and sending nothing
     # keeps `buda::start` byte-identical on the wire for existing flows.
     if {$viz ne ""} { buda::viz $viz }
+    # -v via the launcher: turn on viz-final — a viewer on the finished design
+    # when the flow ends, even though the flow has no `visualize`.  Read here so
+    # a flow only has to be LAUNCHED with -v, never edited.
+    #
+    # The signal is an ENVIRONMENT VARIABLE (`btcl -v` sets it), deliberately
+    # NOT a token in `$argv`.  Tcl is a general language and `-v` is an ordinary
+    # flag for a flow to want, so scanning argv for one cannot tell a launcher's
+    # request from the flow's own argument: `btcl flow.tcl -v` opened a viewer
+    # nobody had asked this wrapper for, and no amount of fixing the wrapper's
+    # own parsing repairs that — the misreading is here.  Without a wrapper,
+    # `BUDA_VIZ_FINAL=1 tclsh flow.tcl` says the same thing unambiguously, and
+    # an embedder calls `buda::vizfinal on` directly.
+    #
+    # Unset (or off) sends nothing, so this stays byte-identical on the wire.
+    if {[info exists ::env(BUDA_VIZ_FINAL)]
+        && [string tolower $::env(BUDA_VIZ_FINAL)] ni {"" 0 off false no}} {
+        buda::vizfinal on
+    }
     return $commands
 }
 
 proc ::buda::stop {} {
     variable fh
     if {$fh ne ""} {
-        catch {buda::_request "__exit"}
+        # __exit may carry the -v viewer's output (a headless BUDA-1903 note,
+        # or nothing once a window has opened and been closed).  `_request`
+        # does not echo INTERNAL (`__…`) replies — they are return values — so
+        # surface this one here rather than let the viewer run silently.  An
+        # ordinary stop returns "" and prints nothing (byte-identical).
+        if {![catch {buda::_request "__exit"} out] && [string trim $out] ne ""} {
+            puts $out
+        }
         catch {close $fh}
         set fh ""
     }
@@ -191,6 +216,18 @@ proc ::buda::viz {{onoff ""}} {
     set mode [expr {[string is boolean -strict $onoff] ? \
                     ($onoff ? "on" : "off") : $onoff}]
     return [string trim [buda::_request "__viz $mode"]]
+}
+
+# The -v twin: at buda::stop, open a viewer on the FINISHED design even when
+# the flow never called `visualize` (unless it already ended by visualizing) —
+# for eyeballing a Tcl test vehicle without editing it.  Turned on for you by
+# `btcl -v <flow>.tcl` (buda::start reads a bare `-v` from $::argv); a GUI or
+# embedder can also set it directly.  With no argument, reports the setting.
+proc ::buda::vizfinal {{onoff ""}} {
+    if {$onoff eq ""} { return [string trim [buda::_request "__viz_final"]] }
+    set mode [expr {[string is boolean -strict $onoff] ? \
+                    ($onoff ? "on" : "off") : $onoff}]
+    return [string trim [buda::_request "__viz_final $mode"]]
 }
 
 # `buda::onprogress {cmdprefix}` — invoked (at global level) with each chunk

@@ -125,6 +125,7 @@ buda::stop
 buda::output      ;# the last command's output, echoed or not
 buda::commands    ;# the command list the engine reported
 buda::viz ?on|off?  ;# may `visualize` open a window; no arg = ask
+buda::vizfinal ?on|off?  ;# open a viewer at buda::stop even with no visualize
 buda::do <cmd> ...  ;# send a raw command line (the generic form)
 ```
 
@@ -139,6 +140,49 @@ A GUI that must stay live sends it as `buda::async visualize`; a batch flow
 declares itself with `buda::start -viz 0` (what `flow/tcl/corpus/harness.tcl`
 does — 31 of the 41 corpus flows end in `visualize`, and a sweep that opened
 31 windows would never finish).
+
+### `btcl -v` — a viewer at the end without editing the flow
+
+To eyeball a Tcl test vehicle without adding a `visualize` to it, launch it
+with the **`bin/btcl`** wrapper and `-v` (the twin of `buda -v`):
+
+```bash
+btcl -v flow.tcl [args...]        # the flow's own args pass through untouched
+BUDA_VIZ_FINAL=1 tclsh flow.tcl   # the same thing with no wrapper
+```
+
+`btcl -v` sets **`BUDA_VIZ_FINAL`**; `buda::start` reads it and turns on
+**viz-final**, so the viewer opens on the finished design when the flow ends —
+**unless the flow already ended by visualizing** (its last BUDA command was
+`visualize`/`visualize_topologies`), in which case nothing is doubled. A GUI or
+embedder can set the same behaviour directly with `buda::vizfinal on`. The
+window blocks until you close it, exactly as `buda::visualize` blocks; with
+`-viz 0` (or no display) the appended viewer reports `BUDA-1903` instead.
+
+Both ways of ending a flow open it: `buda::stop`, and the engine's own
+`buda::exit` (which ends the session before `buda::stop` can be reached).
+
+`buda::exit 3` still **fails**, and the viewer cannot change that: its note is
+appended after the reply's status is decided, so a `FATAL` stays `FATAL`. What
+it does *not* do is reach the shell — `buda::_request` turns a `FATAL` into a
+Tcl error, and an unhandled Tcl error exits **1**, not 3 (measured). The
+engine's code is in the error text; a flow that wants the process to carry it
+has to say so:
+
+```tcl
+if {[catch {buda::exit 3} err]} { puts stderr $err; exit 3 }
+```
+
+This is the one place the Tcl twin differs from `buda -v`, where a trailing
+`exit 3` really does exit 3 — the CLI owns its own process and the bridge does
+not own `tclsh`'s.
+
+**Wrapper options are read only before the script**, and `--` ends them
+explicitly. Everything from the script onward is the flow's, in its original
+position — including a `-v` of the flow's own, which is why the request travels
+as an environment variable rather than an injected `$argv` token: Tcl is a
+general language, and scanning `$argv` for a bare `-v` cannot tell a launcher's
+request from an argument the flow wants for itself.
 
 Whenever a `visualize` command opens **no** window it now says so, with
 `BUDA-1903` and the reason:
