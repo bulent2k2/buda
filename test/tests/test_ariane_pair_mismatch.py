@@ -124,18 +124,13 @@ def test_the_visualizers_no_lef_mode_still_works():
     assert "1357" in summary, summary
 
 
-def test_nothing_in_the_repo_imports_the_pair():
-    """The item closed because nothing depends on the two files agreeing.
-    That is a property of the tree, so it is checked against the tree — a
-    future caller would make the refusals above a broken demo instead of a
-    correct guard, and should have to notice.
+def _import_lines():
+    """Every `import_def_lef` line in the tree that mentions ariane.
 
-    Scanning only `*.buda` was not enough and is the reason this test was
-    wrong when written: the documented entry point is a PYTHON one
-    (`tools/def_viz_o3.py <def> <lef>`), so the scan covers scripts too.
-    `def_viz_shared.py` itself is exempt — it is the module that now
-    refuses, and it names the files in that refusal's own test."""
-    offenders = []
+    Yields `(relative path, line)`.  Skips generated trees and this test
+    directory; `def_viz_shared.py` is exempt for the same reason — it is the
+    module that refuses, and it names the files in its own refusal.
+    """
     for pattern in ("*.buda", "*.py", "*.tcl"):
         for path in _ROOT.rglob(pattern):
             s = str(path)
@@ -145,12 +140,68 @@ def test_nothing_in_the_repo_imports_the_pair():
                 continue
             for line in path.read_text(errors="ignore").splitlines():
                 line = line.strip()
-                if "ariane" not in line:
+                if "ariane" not in line or line.startswith("#"):
                     continue
-                if line.startswith("import_def_lef") or (
-                        "import_def_lef(" in line and not line.startswith("#")):
-                    offenders.append(f"{path.relative_to(_ROOT)}: {line}")
+                if line.startswith("import_def_lef") or "import_def_lef(" in line:
+                    yield path.relative_to(_ROOT), line
+
+
+def test_nothing_in_the_repo_imports_the_MISMATCHED_pair():
+    """The item closed because nothing depends on the two files agreeing.
+    That is a property of the tree, so it is checked against the tree.
+
+    This predicate has now been wrong twice, in opposite directions, and
+    both are worth keeping written down:
+
+      * it first scanned only `*.buda`, missing the documented entry point,
+        which is a PYTHON one (`tools/def_viz_o3.py <def> <lef>`);
+      * it then flagged ANY import naming ariane — which made a legitimate
+        import of `ariane.def` indistinguishable from the fault.  That fired
+        the moment `flow/ariane133/` imported the same DEF with the LEF that
+        actually describes it.
+
+    The guarded property was never "nobody may import this DEF".  It is
+    "nobody may import this DEF **against `ariane.lef`**", those two files
+    being from different technologies.  So the pair is what is matched."""
+    offenders = [f"{p}: {line}" for p, line in _import_lines()
+                 if "ariane.def" in line and "ariane.lef" in line]
     assert not offenders, offenders
+
+
+def test_the_ariane133_flow_imports_that_def_with_the_lef_that_fits_it():
+    """The positive half, and the reason the scan above had to be narrowed.
+
+    `flow/ariane133/` routes `demo/ariane/ariane.def` — the same DEF — using
+    the NanGate45 `fakeram45_256x16.lef` fetched from the benchmark suite
+    that produced the DEF.  That is the other half of item 9: the file is
+    not missing from the world, only from this repo, and the flow says so by
+    running.  If someone ever repoints it at `ariane.lef`, the test above
+    fails, not this one."""
+    lines = [line for p, line in _import_lines() if "ariane133" in str(p)]
+    assert lines, "flow/ariane133 no longer imports a DEF — was it removed?"
+    for line in lines:
+        assert "fakeram45_256x16.lef" in line, line
+        assert "ariane.lef" not in line, line
+
+
+@pytest.mark.skipif(not (_ROOT / "flow" / "ariane133" / "ariane.v").exists(),
+                    reason="upstream inputs not fetched "
+                           "(python3 flow/ariane133/fetch.py)")
+def test_the_matching_lef_gives_the_macros_their_real_size():
+    """…and when the inputs are present, the claim is measured rather than
+    asserted: 133 macros at 57.57 x 133.0 um, against the 0.5 x 0.5 speck
+    the wrong LEF produced.  That number IS the finding."""
+    import collections
+
+    import buda
+    lef = _ROOT / "flow" / "ariane133" / "fakeram45_256x16.lef"
+    db = buda.BDB(":memory:")
+    st = db.import_def_lef(str(_DEMO / "ariane.def"), str(lef))
+    assert not list(getattr(st, "missing_cells", []) or [])
+    sizes = collections.Counter(
+        (round(c.x2 - c.x1, 2), round(c.y2 - c.y1, 2))
+        for c in db.all_components())
+    assert sizes[(57.57, 133.0)] == 133, sizes.most_common()
 
 
 def test_the_def_alone_still_reads_completely():
