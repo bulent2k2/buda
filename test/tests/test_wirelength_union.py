@@ -38,7 +38,11 @@ import buda_cli
 
 pytestmark = pytest.mark.mid
 
-_WL = buda_cli.BudaSession._wirelength_by_bundle
+# An empty session: no bundles, so no taper membership — the
+# untapered path these unit cases exercise.  Bound to an INSTANCE
+# because the helper needs the session to know which segments carry
+# which bits (see test_tapered_abstract_segments_do_not_merge).
+_WL = buda_cli.BudaSession()._wirelength_by_bundle
 
 
 class _Seg:
@@ -169,3 +173,58 @@ def test_the_corpus_tool_and_the_report_share_one_implementation():
         "qor_corpus must delegate to the canonical helper, not re-sum spans"
     assert not hasattr(qor_corpus, "_seg_wl"), \
         "the duplicate per-segment length helper should be gone"
+
+
+# ------------------------------------------ the taper: same bundle, other nets
+
+class _FakeTaperSession:
+    """A session whose selected candidate declares per-segment bit membership.
+
+    `_seg_taper_bits` reads exactly this shape off the real wrappers; building
+    it by hand keeps the case exact instead of hunting a corpus flow that
+    happens to produce a tapered overlap."""
+    class _Topo:
+        def __init__(self, seg_bits): self.seg_bits = seg_bits
+
+    def __init__(self, seg_bits, bundle_id=1):
+        topo = self._Topo(seg_bits)
+        plan = type("P", (), {"selected_topology_index": 0})()
+        inp = type("I", (), {"candidates": [topo],
+                             "original_bundle": type("B", (), {"id": bundle_id})()})()
+        self.bundles = [type("W", (), {"input": inp, "plan": plan})()]
+
+    _seg_taper_bits = buda_cli.BudaSession._seg_taper_bits
+    _wirelength_by_bundle = buda_cli.BudaSession._wirelength_by_bundle
+
+
+def _abstract(span_lo, span_hi, seg_idx, bundle_id=1):
+    s = _Seg(span_lo, span_hi, bundle_id=bundle_id)   # no bit_index = abstract
+    s.seg_idx = seg_idx
+    return s
+
+
+def test_tapered_abstract_segments_carrying_different_bits_do_not_merge():
+    """A TrackSegment is a whole BUS and has no bit_index, so two same-bundle
+    segments at one track look identical — but under a fan-in/fan-OUT taper
+    they can carry DISJOINT bits, which makes them different nets on different
+    metal.  Merging them would UNDER-state, the opposite of the bug this
+    change fixes and a worse failure: an under-count is invisible."""
+    s = _FakeTaperSession({0: [0, 1, 2, 3], 1: [4, 5, 6, 7]})
+    segs = [_abstract(0, 100, seg_idx=0), _abstract(40, 60, seg_idx=1)]
+    assert s._wirelength_by_bundle(segs)[2] == 100 + 20
+
+
+def test_tapered_abstract_segments_carrying_the_SAME_bits_still_merge():
+    """The other half: identical membership on one track is one wire, and the
+    taper guard must not block the merge it was added to qualify."""
+    s = _FakeTaperSession({0: [0, 1, 2, 3], 1: [0, 1, 2, 3]})
+    segs = [_abstract(0, 100, seg_idx=0), _abstract(40, 60, seg_idx=1)]
+    assert s._wirelength_by_bundle(segs)[2] == 100
+
+
+def test_an_untapered_bundle_has_no_membership_and_merges():
+    """No seg_bits at all = every segment carries every bit, which is every
+    non-fan-in bundle.  The guard must be inert there."""
+    s = _FakeTaperSession({})
+    segs = [_abstract(0, 100, seg_idx=0), _abstract(40, 60, seg_idx=1)]
+    assert s._wirelength_by_bundle(segs)[2] == 100

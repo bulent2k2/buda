@@ -60,8 +60,32 @@ class NutsFlowMixin:
         if healing_now:
             planner.set_planner_param("healersAhead", 1.0)
 
-    @staticmethod
-    def _wirelength_by_bundle(segments):
+    def _seg_taper_bits(self):
+        """{(bundle_id, seg_idx): sorted bit tuple} for every TAPERED selected
+        candidate — `Topology::seg_bits`, which says a segment carries only
+        SOME of the bundle's bits.  Empty for every untapered design.
+
+        Exists for `_wirelength_by_bundle`'s abstract pass: a TrackSegment is a
+        whole BUS at one track and carries no bit_index, so without this two
+        overlapping same-bundle segments look like the same wire — which under
+        a fan-in/fan-OUT taper they need not be, since they can carry DISJOINT
+        bit sets and therefore be different nets on different metal."""
+        out = {}
+        for w in getattr(self, "bundles", None) or []:
+            cands = w.input.candidates
+            si = w.plan.selected_topology_index
+            if not cands or si < 0 or si >= len(cands):
+                continue
+            sb = cands[si].seg_bits
+            if not sb:
+                continue                     # untapered: every seg has all bits
+            bid = w.input.original_bundle.id
+            for seg_idx, bits in sb.items():
+                if bits:
+                    out[(bid, seg_idx)] = tuple(bits)
+        return out
+
+    def _wirelength_by_bundle(self, segments):
         """METAL, per bundle and per layer, over a placed-segment list
         (TrackSegment for abstract NUTS, or NetSegment for detailed).
 
@@ -75,11 +99,15 @@ class NutsFlowMixin:
         870,386 units, 0.106%, in 22 flows and 4,547 places; 7.8% on
         big2/b3_bus_023, and every chip flow affected).
 
-        So: group by what makes two spans the same wire — same bundle, same bit,
-        same layer, same track — and take the UNION of the spans in each group.
-        A TrackSegment has no bit_index (it is the whole bus at one track), so
-        the key degrades to (bundle, layer, track) for the abstract pass, which
-        is the right grouping there.
+        So: group by what makes two spans the same wire — same bundle, same
+        NETS, same layer, same track — and take the UNION of the spans in each
+        group.  "Same nets" is bit_index for a NetSegment (one bit, one net).
+        A TrackSegment is the whole BUS at one track and has no bit_index, so
+        it uses its TAPER MEMBERSHIP instead (`_seg_taper_bits`): under a
+        fan-in/fan-OUT taper two same-bundle segments can carry DISJOINT bit
+        sets, and those are different nets on different metal — merging them
+        would under-state.  An untapered segment carries every bit, keys as
+        None, and merges with its peers as it should.
 
         track_position is a double used as a dict key: exact equality is correct
         because both values come from the same track ENUMERATION and so are
@@ -97,6 +125,7 @@ class NutsFlowMixin:
         # singletons (4,547 sharing sites against millions of segments), and a
         # list object per unique track would dominate the memory on chip-scale
         # designs for nothing.
+        taper = self._seg_taper_bits()
         groups = {}
         for s in segments:
             if getattr(s, 'placed', True) is False:
@@ -105,8 +134,10 @@ class NutsFlowMixin:
             lo, hi = s.span_lo, s.span_hi
             if lo > hi:
                 lo, hi = hi, lo
-            key = (s.bundle_id, getattr(s, 'bit_index', None),
-                   s.layer, s.track_position)
+            nets = getattr(s, 'bit_index', None)
+            if nets is None:                 # abstract: identify by membership
+                nets = taper.get((s.bundle_id, getattr(s, 'seg_idx', None)))
+            key = (s.bundle_id, nets, s.layer, s.track_position)
             cur = groups.get(key)
             if cur is None:
                 groups[key] = (lo, hi)
