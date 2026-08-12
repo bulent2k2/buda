@@ -898,7 +898,12 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
             # fallback could never resolve viz_ipc; matches buda_cli.py).
             _tools = _os.path.normpath(
                 _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'tools'))
-            if _tools not in _sys.path:
+            # Existence-checked: installed, `..` is site-packages, and
+            # `tools` IS a real distribution name there (see
+            # tools/__init__.py) — inserting it at position 0 would put a
+            # stranger's package ahead of everything.  In that layout
+            # buda_runtime.install() has already supplied the real one.
+            if _os.path.isdir(_tools) and _tools not in _sys.path:
                 _sys.path.insert(0, _tools)
             from viz_ipc import VizIPC, POLL_MS
             self._ipc = VizIPC(self._ipc_session, verbose=self._ipc_verbose)

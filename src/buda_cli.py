@@ -19,16 +19,31 @@ import re
 import sys
 import time
 
-# Ensure the compiled extension is loaded from build/ rather than a stale
-# copy that might exist alongside this script.
-_build = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'build'))
-if _build not in sys.path:
-    sys.path.insert(0, _build)
-
-# tools/ holds bdb_serialize (used by open_bdb to load *.bdb.sql text fixtures).
-_tools = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'tools'))
-if _tools not in sys.path:
-    sys.path.append(_tools)
+# Put BUDA's Python layer on sys.path: the compiled extension (from build/,
+# ahead of any stale copy sitting next to this script) and tools/, which holds
+# bdb_serialize (used by open_bdb to load *.bdb.sql text fixtures).
+#
+# WHICH directories those are is `buda_runtime`'s to say, not ours — a
+# checkout spreads the layer over build/src/tools and an installed wheel folds
+# it into one directory, and a second copy of that rule here would be
+# exercised in only one of the two layouts and drift in the other.  All this
+# does is FIND buda_runtime: it is a sibling of our directory in a checkout,
+# and in a wheel this file lives inside it.
+_here = os.path.dirname(os.path.abspath(__file__))
+for _cand in (_here, os.path.dirname(_here)):
+    if os.path.basename(_cand) == 'buda_runtime':
+        _pkg_root = os.path.dirname(_cand)
+        break
+    if os.path.isfile(os.path.join(_cand, 'buda_runtime', '__init__.py')):
+        _pkg_root = _cand
+        break
+else:                                        # pragma: no cover - broken tree
+    raise ImportError('buda_runtime is missing beside ' + _here +
+                      ' — BUDA cannot tell where its Python layer is')
+if _pkg_root not in sys.path:
+    sys.path.insert(0, _pkg_root)
+import buda_runtime
+buda_runtime.install()
 
 import buda
 

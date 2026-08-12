@@ -516,6 +516,25 @@ with its own gates — and the repo's `-march=native` default has to be pinned
 per wheel or the artifact crashes with an illegal instruction on an older
 CPU.
 
+**The PREREQUISITE landed 2026-08-12** (still no wheels, deliberately): a
+checkout is installable with the standard tooling — `pip install .` and
+`pip install -e .`, three console scripts, `import buda` with nothing on
+`PYTHONPATH` — via a `pyproject.toml` on `scikit-build-core`. It exists
+because every distribution decision above has to be built on it, and because
+doing it now is what flushes out the real work while it is cheap: BUDA's
+import contract is a set of DIRECTORIES (`build`, `src`, `tools`, the repo
+root) rather than a package, and none of those three names may be claimed in
+`site-packages` — so a wheel has to fold the layer into one directory and put
+it back on `sys.path` at import time, which `buda_runtime/__init__.py` is.
+`-march` is already pinned there (`BUDA_ARCH=none` for the pip path, the same
+reason CI pins it), so the illegal-instruction hazard above is answered for
+the build path that exists; what is left is the matrix. One measured
+correction on the way: an editable install initially COPIED the Python layer
+into site-packages and reported success while serving a stale snapshot —
+fixed by declaring `buda_runtime` as the wheel's package so it is redirected.
+Design, the residuals, and the by-hand verification table:
+[packaging.md](packaging.md).
+
 The other half of that plan bullet — `BUDA_NO_APP=1` as the batch default on
 macOS — is **already satisfied**: `bin/buda`'s Darwin relaunch requires all
 three of stdin/stdout/stderr to be TTYs and skips `--no-viz`, so a redirected

@@ -1,0 +1,221 @@
+# Copyright 2026 Ben Bulent Basaran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""`pip install .` — the parts of it that can be checked without installing.
+
+Actually building the wheel takes minutes (it compiles the engine), so it is a
+by-hand step recorded in docs/internal/packaging.md.  What is pinned here is
+everything that decides whether that build produces something that WORKS, and
+every one of these is a pair that can silently drift:
+
+  * two declarations of the version (pyproject.toml / CMakeLists.txt);
+  * three console scripts naming functions in `buda_runtime.entry`, which name
+    modules that have to have a `main`;
+  * the layout rule in `buda_runtime`, whose installed branch no test in a
+    checkout would otherwise ever execute;
+  * `buda.tcl` resolving its engine child as a file beside itself, which is
+    what forces the two into one directory in the wheel.
+"""
+import os
+import re
+import shutil
+import sys
+import tomllib
+from pathlib import Path
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parents[2]
+
+sys.path.insert(0, str(_ROOT))
+import buda_runtime            # noqa: E402
+from buda_runtime import entry  # noqa: E402
+
+
+def _pyproject():
+    with open(_ROOT / "pyproject.toml", "rb") as fh:
+        return tomllib.load(fh)
+
+
+_isolated_n = 0
+
+
+def _load_isolated(path):
+    """Import a COPY of buda_runtime from `path` under a throwaway name.
+
+    Loaded through a real spec, not exec'd into a bare dict: the module reads
+    `__file__` to decide the layout, which is the very thing under test, and a
+    dict without one would fail for a reason that has nothing to do with it.
+    Kept out of `sys.modules` so the real `buda_runtime` stays untouched.
+    """
+    global _isolated_n
+    _isolated_n += 1
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        f"_buda_runtime_probe_{_isolated_n}", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# ── the version pair ──────────────────────────────────────────────────────
+
+def test_version_matches_cmake():
+    """One version, declared twice.  Nothing at build time compares them —
+    CMake's is what `project()` stamps on the library, pyproject's is what pip
+    puts on the wheel — so a release could ship 3.1.0 built from a 3.0.0 tree
+    and every check would pass."""
+    cml = (_ROOT / "CMakeLists.txt").read_text()
+    m = re.search(r"project\(buda\s+VERSION\s+(\S+)", cml)
+    assert m, "CMakeLists.txt no longer declares project(buda VERSION ...)"
+    assert _pyproject()["project"]["version"] == m.group(1)
+
+
+# ── the console scripts ───────────────────────────────────────────────────
+
+def test_console_scripts_resolve():
+    """Every `[project.scripts]` target must be an attribute of the module it
+    names.  A bad entry point is not a build error — pip installs the script
+    happily and it dies with an AttributeError the first time a user runs it."""
+    scripts = _pyproject()["project"]["scripts"]
+    assert set(scripts) == {"buda", "buda-fp", "buda-viz"}
+    for name, target in scripts.items():
+        mod, _, func = target.partition(":")
+        assert mod == "buda_runtime.entry", f"{name} points outside entry.py"
+        assert callable(getattr(entry, func)), f"{name} -> {target} is not callable"
+
+
+@pytest.mark.parametrize("module,where", [("buda_cli", "src"),
+                                          ("bdb_floorplanner", "tools"),
+                                          ("def_viz_o3", "tools")])
+def test_entry_target_modules_have_main(module, where):
+    """`entry._main` calls `<module>.main()`.  These three modules are reached
+    only through the installed scripts, so a rename would be invisible until
+    someone ran the installed command.
+
+    Checked on the SOURCE rather than by importing, because two of the three
+    are GUI entry points that import tkinter at module scope — a headless host
+    (CI, this container) has no tkinter, and a test that skipped there would
+    check the two that matter most exactly nowhere.  The import is asserted as
+    well when the host can do it.
+    """
+    src = (_ROOT / where / f"{module}.py").read_text()
+    assert re.search(r"^def main\(", src, re.M), f"{module}.py defines no main()"
+    if module != "buda_cli":
+        pytest.importorskip("tkinter")
+    buda_runtime.install()
+    __import__(module)
+    assert callable(getattr(sys.modules[module], "main"))
+
+
+# ── the layout rule ───────────────────────────────────────────────────────
+
+def test_checkout_layout_is_the_repo():
+    """In a checkout the layer is the four directories PYTHONPATH names."""
+    assert buda_runtime.in_checkout()
+    assert buda_runtime.paths() == [str(_ROOT / "build"), str(_ROOT / "src"),
+                                    str(_ROOT / "tools"), str(_ROOT)]
+
+
+def test_install_is_idempotent_and_does_not_reorder(monkeypatch):
+    """Called twice it must be a no-op the second time — a version that
+    removed-and-reinserted would quietly move a caller's own entries."""
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    buda_runtime.install()
+    before = list(sys.path)
+    buda_runtime.install()
+    assert sys.path == before
+
+
+def test_installed_layout_folds_into_one_directory(tmp_path):
+    """The wheel branch of `paths()`, which a checkout never executes.
+
+    Built the way the wheel is: `buda_runtime/` holding the package plus the
+    `src/` modules flattened in, and `tools/` as a subdirectory.  Both go on
+    sys.path — `_HERE` so `from tools import ...` and the `src` modules
+    resolve, `_HERE/tools` so `import bdb_serialize` does (that is how
+    `open_bdb` reads a `.bdb.sql`).
+    """
+    pkg = tmp_path / "site-packages" / "buda_runtime"
+    (pkg / "tools").mkdir(parents=True)
+    shutil.copy(_ROOT / "buda_runtime" / "__init__.py", pkg / "__init__.py")
+    assert not (tmp_path / "site-packages" / "CMakeLists.txt").exists()
+
+    mod = _load_isolated(pkg / "__init__.py")
+    assert mod.in_checkout() is False
+    assert mod.paths() == [str(pkg), str(pkg / "tools")]
+
+
+def test_a_build_distribution_is_not_mistaken_for_a_checkout(tmp_path):
+    """`in_checkout()` asks for the CMakeLists that BUILDS us, deliberately.
+
+    Probing for a `build/` directory instead would be a guess, and a wrong one:
+    `build` is a real distribution (the PEP 517 frontend) and installs as
+    `site-packages/build/`, so any machine with it would read as a checkout and
+    the wheel would put site-packages/src and site-packages/tools on sys.path.
+    """
+    sp = tmp_path / "site-packages"
+    (sp / "build").mkdir(parents=True)          # the PEP 517 frontend
+    (sp / "buda_runtime" / "tools").mkdir(parents=True)
+    shutil.copy(_ROOT / "buda_runtime" / "__init__.py",
+                sp / "buda_runtime" / "__init__.py")
+
+    mod = _load_isolated(sp / "buda_runtime" / "__init__.py")
+    assert mod.in_checkout() is False
+    assert str(sp / "build") not in mod.paths()
+
+
+# ── what the wheel has to keep together ───────────────────────────────────
+
+def test_tcl_bridge_and_server_are_adjacent():
+    """`buda.tcl` computes its engine child from its OWN directory, so the two
+    must install into the same directory — no console script or import can
+    stand in for a path Tcl resolves.  The wheel keeps `tools/` whole for
+    exactly this reason; pinned here so a future split notices."""
+    tcl = (_ROOT / "tools" / "buda.tcl").read_text()
+    assert "file join $dir buda_server.py" in tcl
+    assert (_ROOT / "tools" / "buda_server.py").exists()
+
+
+def test_wheel_ships_the_layer_wholesale():
+    """The BUDA_WHEEL rules install `src/` and `tools/` by PATTERN, not by
+    list.  A list is a judgement call that fails silently — a module left out
+    of it surfaces as an ImportError in a user's flow, not at build time."""
+    cml = (_ROOT / "CMakeLists.txt").read_text()
+    assert re.search(r'install\(DIRECTORY src/ DESTINATION "\$\{BUDA_PY_DEST\}"\s*\n'
+                     r'\s*FILES_MATCHING PATTERN "\*\.py"', cml)
+    assert re.search(r'install\(DIRECTORY tools/ DESTINATION "\$\{BUDA_PY_DEST\}/tools"\s*\n'
+                     r'\s*FILES_MATCHING PATTERN "\*\.py" PATTERN "\*\.tcl"', cml)
+
+
+def test_editable_redirects_rather_than_copies():
+    """`buda_runtime` must be declared as the wheel's package, not installed by
+    CMake.  Measured: with the whole layer coming from CMake, `pip install -e .`
+    COPIED `src/*.py` into site-packages — editing the checkout changed
+    nothing and the install reported success while serving a stale copy.
+    scikit-build-core redirects a declared package and copies everything else,
+    so this one line is the difference."""
+    assert _pyproject()["tool"]["scikit-build"]["wheel"]["packages"] == ["buda_runtime"]
+    cml = (_ROOT / "CMakeLists.txt").read_text()
+    assert 'if(NOT SKBUILD_STATE STREQUAL "editable")' in cml
+
+
+def test_pip_build_does_not_share_the_developer_build_dir():
+    """`build/` is the developer's, written by `bin/bb` and read via
+    PYTHONPATH.  If pip configured CMake in it, a `pip install` would leave the
+    tree configured with a different BUDA_ARCH — which is precisely what
+    perturbs the placement goldens."""
+    sk = _pyproject()["tool"]["scikit-build"]
+    assert not sk["build-dir"].startswith("build/")
+    assert sk["cmake"]["define"]["BUDA_ARCH"] == "none"

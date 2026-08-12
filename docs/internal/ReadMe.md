@@ -23,4 +23,5 @@ This directory contains deep-dive architectural documents, cross-subsystem inter
 ## Test Infrastructure & Tooling
 - [feature_coverage_plan.md](feature_coverage_plan.md) — Gherkin/pytest-bdd feature specification layer and tag vocabulary (`@landed`, `@future`, `@doc`, `@orphaned`).
 - [macos_app_bundles.md](macos_app_bundles.md) — Native macOS `.app` bundle launchers (`bin/Buda.app` and `bin/Floorplanner.app`).
+- [packaging.md](packaging.md) — `pip install .` / `pip install -e .` (`pyproject.toml` + scikit-build-core): why the wheel folds `build`/`src`/`tools` into one `buda_runtime` directory, the `BUDA_ARCH=none` and editable-install residuals, and what is deliberately not here (no wheel matrix).
 - [test/suite_analysis.md](test/suite_analysis.md) & [test/runtime_analysis.md](test/runtime_analysis.md) — Test suite tiering (`fast`, `mid`, `slow`) and performance benchmarks.
