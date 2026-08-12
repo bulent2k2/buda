@@ -122,3 +122,45 @@ def test_a_taps_bits_are_a_subset_of_the_bits_riding_its_segment(taper):
         if not riding:
             continue
         assert set(bits) <= riding, (si, sorted(bits), sorted(riding))
+
+
+def test_a_serves_nobody_tap_is_not_read_as_serves_everybody():
+    """The encoding hazard the seeding creates, and the reason BusSegment
+    carries a flag instead of overloading the empty list.
+
+    Making "serves no bit" REPRESENTABLE in `Topology::seg_busterm_bits` is
+    only half the job: DetailedNUTS reads the membership through
+    `BusSegment::busterm_face_bits`, where an empty list historically meant
+    "serves every bit".  Handed a serves-nobody tap, that reading inverts the
+    verdict — the placer would hold every bit out to the tap while
+    `check_dnuts`, reading `seg_busterm_serves_bit` directly, skipped it.
+    Placement and audit disagreeing about a tap is precisely what the one
+    shared predicate exists to prevent, so the two states must be distinct all
+    the way down.
+
+    Asserted structurally, because no vehicle produces a serves-nobody tap
+    (see this module's docstring): every tap the builder marks as serving all
+    bits must ALSO be flagged, so an empty list can never be reached by a
+    serves-all tap and therefore always means what it says.
+    """
+    import buda
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.do_command(f"source {_TAPER}")
+    segs = buda.make_bus_segments(
+        s.bundles, s.nuts_result, s.fp, "lo_hi", s.layers)
+    seen_taps = 0
+    for bs in segs:
+        assert len(bs.busterm_face_serves_all) == len(bs.busterm_faces), (
+            "every tap must carry a serves-all flag, else an empty list is "
+            "ambiguous")
+        for fi in range(len(bs.busterm_faces)):
+            seen_taps += 1
+            if not bs.busterm_face_serves_all[fi]:
+                # An authoritative list.  Empty here would mean "serves no
+                # bit" — the state that must NOT be read as "serves all".
+                continue
+            assert not list(bs.busterm_face_bits[fi]), (
+                "a serves-all tap must carry no list; carrying one makes the "
+                "flag and the list two sources of truth")
+    assert seen_taps > 0, "vehicle assumption: the tapered bundle has taps"
