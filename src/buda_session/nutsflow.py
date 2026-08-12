@@ -62,21 +62,75 @@ class NutsFlowMixin:
 
     @staticmethod
     def _wirelength_by_bundle(segments):
-        """Sum routing-direction length |span_hi - span_lo| per bundle and per
-        layer over a placed-segment list (TrackSegment for abstract NUTS, or
-        NetSegment for detailed).  Unplaced abstract segments (a TrackSegment
-        with placed=False) contribute no wire and are counted; NetSegments are
-        always placed bit-wires (their unplaced count comes from
-        DetailedNUTSResult.num_unplaced).  Returns (per_bundle: {bid: WL},
-        per_layer: {layer: WL}, total: WL, n_unplaced_segs: int)."""
+        """METAL, per bundle and per layer, over a placed-segment list
+        (TrackSegment for abstract NUTS, or NetSegment for detailed).
+
+        Not a sum of |span_hi - span_lo|, because that is not what is on the
+        die.  NUTS deliberately lets SAME-BUNDLE segments share a track — they
+        are the same nets, so they may occupy the same metal — and when it does,
+        one physical wire is emitted as two or three overlapping segments.
+        Summing their spans counts the shared stretch once per segment, so the
+        metric OVER-STATES exactly where the router did well, biasing every
+        comparison against track sharing (measured on the 48-flow corpus:
+        870,386 units, 0.106%, in 22 flows and 4,547 places; 7.8% on
+        big2/b3_bus_023, and every chip flow affected).
+
+        So: group by what makes two spans the same wire — same bundle, same bit,
+        same layer, same track — and take the UNION of the spans in each group.
+        A TrackSegment has no bit_index (it is the whole bus at one track), so
+        the key degrades to (bundle, layer, track) for the abstract pass, which
+        is the right grouping there.
+
+        track_position is a double used as a dict key: exact equality is correct
+        because both values come from the same track ENUMERATION and so are
+        bit-identical, not merely close.  If tracks ever become computed rather
+        than enumerated, this needs clustering, not `==`.
+
+        Unplaced abstract segments (a TrackSegment with placed=False) contribute
+        no wire and are counted; NetSegments are always placed bit-wires (their
+        unplaced count comes from DetailedNUTSResult.num_unplaced).  Shields are
+        the CALLER's business to filter (R11), unchanged.  Returns (per_bundle:
+        {bid: WL}, per_layer: {layer: WL}, total: WL, n_unplaced_segs: int)."""
         per_bundle, per_layer, total, n_unplaced = {}, {}, 0.0, 0
+        # A group holds a bare (lo, hi) while it has ONE member and promotes to
+        # a list on the first collision: the overwhelming majority of groups are
+        # singletons (4,547 sharing sites against millions of segments), and a
+        # list object per unique track would dominate the memory on chip-scale
+        # designs for nothing.
+        groups = {}
         for s in segments:
             if getattr(s, 'placed', True) is False:
                 n_unplaced += 1
                 continue
-            length = abs(s.span_hi - s.span_lo)
-            per_bundle[s.bundle_id] = per_bundle.get(s.bundle_id, 0.0) + length
-            per_layer[s.layer] = per_layer.get(s.layer, 0.0) + length
+            lo, hi = s.span_lo, s.span_hi
+            if lo > hi:
+                lo, hi = hi, lo
+            key = (s.bundle_id, getattr(s, 'bit_index', None),
+                   s.layer, s.track_position)
+            cur = groups.get(key)
+            if cur is None:
+                groups[key] = (lo, hi)
+            elif type(cur) is tuple:
+                groups[key] = [cur, (lo, hi)]
+            else:
+                cur.append((lo, hi))
+
+        for (bid, _bit, layer, _trk), spans in groups.items():
+            if type(spans) is tuple:
+                length = spans[1] - spans[0]
+            else:
+                # Sort by lo, then sweep charging only the part of each span not
+                # already covered.  `max(lo, reach)` is what makes a contained
+                # span free and keeps an ABUTTING one (lo == reach) full-price —
+                # touching wires are two wires end to end, not an overlap.
+                spans.sort()
+                length, reach = 0.0, float('-inf')
+                for lo, hi in spans:
+                    if hi > reach:
+                        length += hi - (lo if lo > reach else reach)
+                        reach = hi
+            per_bundle[bid] = per_bundle.get(bid, 0.0) + length
+            per_layer[layer] = per_layer.get(layer, 0.0) + length
             total += length
         return per_bundle, per_layer, total, n_unplaced
 
