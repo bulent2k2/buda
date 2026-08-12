@@ -8,15 +8,16 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 [`message_ids.md`](message_ids.md) and [`../TCL_FRONT_END.md`](../TCL_FRONT_END.md);
 this page is the backlog behind them.
 
-Snapshot index — last verified against `main`: **2026-08-12**.  Everything
-here has landed except **item 8, the packaged wheel** — which is a CI and
-packaging project rather than an interchange defect, and is the only entry
-still owed code.  Item 9 closed WITHOUT any: its last residual turned out to
-be a provenance accident with no dependants, and saying so precisely is the
-resolution.  Each item states what was missing, why it was left rather than
-forgotten, and where to start.  Every claim below was reproduced on `main`
-before being written down; the reproduction is given so a reader can
-re-derive it rather than trust it.
+Snapshot index — last verified against `main`: **2026-08-12**.  Two entries
+are owed code: **item 8, the packaged wheel** — a CI and packaging project
+rather than an interchange defect — and **item 12, the macro `OBS` grid
+blowup**, which is the real thing: an import that is individually correct
+and collectively unaffordable.  Item 9 closed WITHOUT any code: its last
+residual turned out to be a provenance accident with no dependants, and
+saying so precisely is the resolution.  Each item states what was missing,
+why it was left rather than forgotten, and where to start.  Every claim
+below was reproduced on `main` before being written down; the reproduction
+is given so a reader can re-derive it rather than trust it.
 
 Resolved items are kept in place, struck through, rather than moved to the
 resolved table at the bottom. Each entry records where this page's **own
@@ -28,8 +29,8 @@ That is worth more than a tidy list, and the pattern is worth naming: the
 first description of a fault is written from the symptom you noticed, and
 the symptom is rarely the whole fault.
 
-There are two working vehicles, and they are deliberately at opposite ends
-of the scale. **[`flow/def/`](../../flow/def/)** is the smallest design that
+There are three working vehicles. Two are deliberately at opposite ends of
+the scale: **[`flow/def/`](../../flow/def/)** is the smallest design that
 exercises the path — 36 nets, 4-bit buses, one bus per level; most of the
 items below were found by building it. **[`flow/rv/`](../../flow/rv/)** is
 a dual-core RV32-shaped SoC — 1230 nets, five levels, a 32-bit datapath,
@@ -37,6 +38,17 @@ part-selects that are not zero-based — and found items 10 and 11. That is
 the argument for having both: a small vehicle finds the faults that are
 about *structure*, and a large one finds the faults that only appear once a
 quantity stops being one.
+
+The third differs on an axis that is not size. **[`flow/ariane133/`](../../flow/ariane133/)**
+is a real 45nm design in a real technology — 5576 nets, 133 SRAM macros, a
+127-module netlist — and, unlike the other two, **it is not authored here**;
+its inputs are fetched, digest-pinned, from the benchmark suite that also
+produced `demo/ariane/ariane.def` (so it is item 9's other half: the same
+DEF, finally given the LEF that describes it). It found item 12 immediately,
+and that item was invisible to both other vehicles for a reason worth
+stating — they author their own LEF, and a hand-written LEF has a handful of
+`OBS` rects because a human typed them. Scale was never going to surface it;
+only somebody else's file was.
 
 ---
 
@@ -733,6 +745,61 @@ exact mirror of the guard the driverless `REC:` key already had, and it is
 now written as one.
 
 Pinned by `test_bundler_divergent.py`.
+
+---
+
+## 12. Macro `OBS` import scales with LEF detail, not with the design
+
+Phase 3c reads macro `OBS` into keepouts, which is correct — that metal is
+occupied and routing over it is a real violation. What was never bounded is
+what happens when a technology draws its obstruction finely. **One
+`fakeram45_256x16` carries 99 `OBS RECT`s**, so a 133-macro design imports
+**13,034 keepouts** to describe 133 rectangles' worth of physics. Every
+keepout edge is a Hanan line, and the planner's `GlobalCut` structure is
+built per Hanan cut.
+
+The measurement, on `demo/ariane/ariane.def` + the NanGate45
+`fakeram45_256x16.lef` (see [`flow/ariane133/`](../../flow/ariane133/)):
+
+| | Hanan x | Hanan y | cells | `run_planner hier 2` |
+|---|---|---|---|---|
+| as imported | 1996 | 1257 | **2,508,972** | **killed at 50 min** |
+| `no_blockages` | 67 | 37 | 2,479 | **0.79 s** |
+
+A **1012× grid** and, on the flow that has to walk it, the difference
+between a seven-second run and not finishing. Note the grid grows only ~30× per
+axis rather than 99×: the macros are identical and row-aligned, so their
+edges coincide and the axis-projected set dedups itself. That is luck of
+this floorplan, not a bound — a design mixing macro types gets the full
+product.
+
+**Why this was left rather than forgotten.** It is not a reader defect —
+the reader imports what the LEF says, and `no_blockages` already declines
+the whole category. It is that BUDA has no notion between *"model every
+rectangle"* and *"model none of them"*, and the useful answer is in between.
+Nor is it ariane-specific: it is a property of any LEF whose macros carry
+detailed obstruction, which is most real ones. The existing vehicles missed
+it because `flow/def/` and `flow/rv/` both author their own LEF, and a
+hand-written LEF has a handful of `OBS` rects because a human typed them.
+
+**Where to start.** The cheapest correct fix is almost certainly to
+**merge each macro's `OBS` into its covering rectangles at import** — a
+per-macro rectangle union, computed once per *cell* and instanced, not once
+per component. For a memory whose obstruction is "all of metal1–metal4 over
+the whole footprint drawn as 99 stripes", that collapses to a handful of
+rects per layer and costs nothing in fidelity. Two things to check before
+building it: the union must be per LAYER (an `OBS` stripe set differs
+between metal1 and metal4, and merging across layers would block routing
+that is legal), and the result must stay a keepout *set* rather than a
+bbox — a genuinely L-shaped obstruction exists and its bounding box would
+forbid legal track. A cruder alternative, worth measuring against it, is to
+keep the rects but stop feeding keepout edges into the Hanan grid, deriving
+trunk loci from blocks alone and letting the keepout only cull tracks; that
+is a smaller change and may be most of the win.
+
+Until then, a design with detailed macro `OBS` needs `import_def_lef …
+no_blockages`, which is what `flow/ariane133/` passes — and says so, because
+the flag silently trades away the obstruction model.
 
 ---
 
