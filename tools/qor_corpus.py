@@ -198,30 +198,31 @@ CORPUS = [
 ]
 
 
-def _seg_wl(seg):
-    """Routing-direction length of a placed segment (its span extent)."""
-    return abs(seg.span_hi - seg.span_lo)
-
-
 def _wirelengths(s):
-    """(abstract WL after NUTS, detailed WL after DNUTS) for a solved session —
-    each the sum of PLACED-segment span lengths (the metric `report_wirelength`
-    prints, computed straight off the placed structs).  A `placed=False`
-    TrackSegment carries no wire and is EXCLUDED, matching the canonical
-    `_wirelength_by_bundle` (nutsflow.py) — otherwise an incomplete route would
-    report an inflated, non-comparable abstract WL.  `None` when that stage did
-    not run, mirroring the None-means-stage-absent convention the other metrics
-    use, so a build that stops before NUTS/DNUTS is distinguishable from a
-    zero-length route."""
+    """(abstract WL after NUTS, detailed WL after DNUTS) for a solved session.
+
+    Delegates to the session's own `_wirelength_by_bundle` — the SAME function
+    `report_wirelength` prints from — rather than re-summing the placed structs
+    here.  This file used to carry its own copy, and the copy is precisely how
+    the two drifted into being wrong together: both summed |span_hi - span_lo|,
+    which double-counts the metal NUTS shares between same-bundle segments on
+    one track.  One metric, one implementation; a corpus number that disagrees
+    with the flow log is a bug either way, so there should be nothing to
+    disagree with.
+
+    `None` when that stage did not run, mirroring the None-means-stage-absent
+    convention the other metrics use, so a build that stops before NUTS/DNUTS is
+    distinguishable from a zero-length route."""
     nr = getattr(s, "nuts_result", None)
     dr = getattr(s, "detailed_result", None)
-    awl = (round(sum(_seg_wl(x) for x in nr.segments if getattr(x, "placed", True)))
-           if nr is not None else None)
+    # An unplaced TrackSegment carries no wire; the helper counts and skips it,
+    # so an incomplete route cannot report an inflated, non-comparable WL.
+    awl = round(s._wirelength_by_bundle(nr.segments)[2]) if nr is not None else None
     # NDR shield wires are real metal but not SIGNAL wirelength (R11) —
-    # excluded so a rule-governed flow's detailed WL stays comparable.
-    dwl = (round(sum(_seg_wl(x) for x in dr.net_segments
-                     if getattr(x, "placed", True)
-                     and not getattr(x, "is_shield", False)))
+    # excluded so a rule-governed flow's detailed WL stays comparable.  The
+    # helper leaves this filter to its caller, exactly as report_wirelength does.
+    dwl = (round(s._wirelength_by_bundle(
+               [x for x in dr.net_segments if not getattr(x, "is_shield", False)])[2])
            if dr is not None else None)
     return awl, dwl
 
