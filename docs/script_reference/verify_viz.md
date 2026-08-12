@@ -186,7 +186,7 @@ generation.
 | `--conn` | After each shown bundle's table, print a per-segment connectivity detail for the selected candidate (see below). |
 | `--grouped` | Collapse **nominal-locus families** to one representative row each — the set-up for a `group:<N>` super-candidate pin (see below). |
 
-Each candidate row prints: `idx`, `type`, `wl` (estimated / as-generated
+Each candidate row prints: `topo` (the candidate's **1-based** id — the number `select_topology` / `edit_topology` take and the explorer's `topo N/n` shows), `type`, `wl` (estimated / as-generated
 wirelength), `wl[lo..hi]` (the routing **WL envelope** the candidate's slide/span
 DOF permit — `lo` is the tightest routing, i.e. the total span minimized jointly
 over the slide box; `hi` a loose outer bound — a wide envelope means the candidate
