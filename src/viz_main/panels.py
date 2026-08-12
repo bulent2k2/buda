@@ -23,6 +23,8 @@ import re
 import sys
 from datetime import datetime
 
+from bus_names import bus_key
+
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.collections import PatchCollection, LineCollection
@@ -493,19 +495,18 @@ class VizPanelsMixin:
     def _design_counts(self):
         """Return (n_bundles, n_buses, n_nets) for the whole design.
 
-        A *net* is one wire; a *bus* is the `add_bus` grouping it belongs to
-        (`<bus>_<idx>` / `<bus>_b<idx>` — same convention the CLI's bus summary
-        uses), and a bare net with no numeric suffix counts as its own bus.
-        Bundles/buses/nets are fixed once the pipeline has run, so this is
-        computed from the bundle wrappers with no extra plumbing."""
+        A *net* is one wire; a *bus* is the grouping it belongs to — both
+        spellings, declared and imported (`bus_names.bus_key`) — and a net
+        in neither form counts as its own bus.  Bundles/buses/nets are fixed once the
+        pipeline has run, so this is computed from the bundle wrappers with
+        no extra plumbing."""
         n_bundles = len(self.bundles)
         n_nets = 0
         buses = set()
         for w in self.bundles:
             for nm in w.input.original_bundle.get_net_names():
                 n_nets += 1
-                m = re.match(r'^(.*?)_([A-Za-z]*)(\d+)$', nm)
-                buses.add((m.group(1), m.group(2)) if m else ('', nm))
+                buses.add(bus_key(nm))
         return n_bundles, len(buses), n_nets
 
 

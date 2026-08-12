@@ -26,6 +26,7 @@ import sys
 
 import buda
 
+from bus_names import bus_key
 from buda_session.util import min_bit_pitch as _min_bit_pitch
 
 from ._options import reject_unknown_options
@@ -194,11 +195,19 @@ def _generalized_bundles(session, strategy, relations=None):
 # ── bundle bit bound (static + auto busterm-edge) ─────────────────────────────
 
 def _bus_group_key(net_name):
-    """Bus identity for keep-buses-together splitting: '<bus>_<idx>' /
-    '<bus>_b<idx>' (the add_bus/add_net forms — same regex as
-    _bundle_net_summary) fold to '<bus>'; other names are their own group."""
-    m = re.match(r'^(.*?)_([A-Za-z]*)(\d+)$', net_name)
-    return m.group(1) if m else net_name
+    """Bus identity for keep-buses-together splitting.
+
+    BOTH spellings (`bus_names.bus_key`): the declared `<bus>_<idx>` /
+    `<bus>_b<idx>` that `add_bus` emits, and the imported `<bus>[<idx>]`
+    that a LEF/DEF/Verilog design keeps.  Only the first was recognised, so
+    on an imported design every bit was its own group and the splitter had
+    no bus structure left to preserve — it could cut a bus down the middle
+    while promising not to, with no diagnostic.
+
+    The full KEY is used, not just the name: two buses spelled differently
+    are different buses, and folding `p_0` together with `p[0]` would be a
+    new way to be wrong."""
+    return bus_key(net_name)
 
 
 def _partition_nets(nets, target, caps, inc_fn):
