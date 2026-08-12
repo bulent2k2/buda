@@ -95,7 +95,7 @@ Use the build wrapper script `bin/bb`. By default it performs an **incremental**
 ```bash
 bin/bb            # incremental build into build/
 bin/bb --clean    # clean rebuild (-c also works)
-bin/bb test       # build, then run the FAST test tier (~8s; -t also works)
+bin/bb test       # build, then run the FAST test tier (-t also works; ~25s parallel via `bb -p`)
 bin/bb mid        # build, then run FAST + MID tiers (+flow-script integration; -m also works)
 bin/bb slow       # build, then run ALL tiers (+SA/GA optimizer storms; -s also works)
 bin/bb --help     # describe all options (-h)

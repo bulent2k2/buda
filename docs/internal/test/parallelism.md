@@ -96,6 +96,25 @@ before diagnosing parallelism.
 | Force serial | `BB_JOBS=0 bb -m` (or uninstall xdist) |
 | Fast tier | serial by default (`bb -t`); parallel with `bb -t -p` / `bb -p` |
 
+## Keep the fast tier's *tier* honest, not just its parallelism
+
+`bb -p` is floored by two things nothing about xdist can move: the machine's
+**physical** cores (hyperthreads add ~nothing to the CPU-bound C++ engine — on
+a 4-physical/8-logical box `-n 4`, `-n 6`, `-n 8`, and `--dist load` vs
+`loadfile` all measured the same wall time), and a ~8.6s fixed floor (≈5s
+collection + xdist worker boot). So once parallelism is maxed, the only lever
+left is **less work in the tier** — which means the fast tier must stay what it
+is *for*: the routing-engine inner loop.
+
+Tests that drive a **subprocess** (a `tclsh` + `buda_server` bridge flow, the
+`qor_corpus.py` measurement tooling over real `git worktree`s) are integration
+of the *tooling*, not engine units, and each subprocess is slow I/O that does
+not parallelize against the CPU-bound engine tests. They belong in `mid`.
+Moving the qor-tooling and Tcl-bridge files there (2026-08) took `bb -p` from
+~35s to ~25s with zero engine-coverage loss — they still run in `bb -m`/`bb -s`.
+The rule for a new test: if it shells out or measures the toolchain rather than
+the router, mark it `@pytest.mark.mid`.
+
 ## Surgical speedups applied
 
 Two safe, coverage-preserving trims to the heaviest individual tests:

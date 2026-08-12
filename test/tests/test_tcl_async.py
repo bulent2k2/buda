@@ -33,8 +33,11 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[2]
 _TCL = _ROOT / "tools" / "buda.tcl"
 
-pytestmark = pytest.mark.skipif(shutil.which("tclsh") is None,
-                                reason="no tclsh on this host")
+# mid tier: drives a real tclsh + buda_server subprocess per test (bridge
+# integration), too heavy for the fast inner loop — run with `bb -m`/`bb -s`.
+pytestmark = [pytest.mark.mid,
+              pytest.mark.skipif(shutil.which("tclsh") is None,
+                                 reason="no tclsh on this host")]
 
 
 def _tcl(tmp_path, body, expect_rc=0):

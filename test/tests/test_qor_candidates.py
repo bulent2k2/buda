@@ -29,6 +29,11 @@ import contextlib
 
 import pytest
 
+# mid tier: dev-TOOLING tests (qor_corpus.py measurement machinery), driven
+# through subprocesses — not routing-engine units, so out of the fast inner
+# loop; run with `bb -m`/`bb -s`.
+pytestmark = pytest.mark.mid
+
 from tools import qor_corpus as qc
 
 
