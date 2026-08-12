@@ -1,0 +1,127 @@
+# Copyright 2026 Ben Bulent Basaran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# The DEVELOPER build on Apple Silicon — which nothing else exercises.
+#
+# `bin/bb` leaves `BUDA_ARCH` at its default, `native`, and CMakeLists turns
+# that into `-march=native`.  `-march=` is x86 syntax; the AArch64 spelling is
+# `-mcpu=`, and clang only grew `-march=` for AArch64 comparatively recently.
+# So "does the developer build work on an M-series Mac" is an open question,
+# and every path that could have answered it looks away:
+#
+#   * `ci.yml` pins `BUDA_ARCH=x86-64-v2` and runs on ubuntu-24.04;
+#   * `windows-validate.yml` is MSVC, which takes the `/O2` branch entirely;
+#   * `macos-wheel.yml` builds through pip, and pyproject.toml pins
+#     `BUDA_ARCH=none` for every pip build — deliberately, since a
+#     distributable wheel must not carry the build machine's ISA.  That pin is
+#     exactly what makes the wheel job blind to this.
+#
+# The only Apple Silicon this project has is a hosted runner, so the question
+# gets answered here or not at all.  A red job IS the answer, and a legible one.
+#
+# NOT a gate, and not part of the CI ratchet: it runs on dispatch, and the
+# golden-strict / QoR-strict flags stay OFF.  Those goldens are calibrated
+# against `ci.yml`'s PINNED ISA, and `native` on a heterogeneous runner fleet
+# is the one thing they cannot survive — which is why ci.yml pins it and says
+# so.  Turning this into a gate would mean owning a second golden host; that
+# is a decision, not a side effect of adding a job.
+name: macOS developer build (Apple Silicon, BUDA_ARCH=native)
+
+on:
+  workflow_dispatch:
+  # Scoped to this file alone, for the reason macos-wheel.yml gives: a
+  # dispatch-only workflow cannot be dispatched until it lives on the default
+  # branch, so on a topic branch push is the only way to run it at all.
+  push:
+    paths:
+      - '.github/workflows/macos-devbuild.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  devbuild:
+    name: bin/bb on arm64
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      MPLBACKEND: Agg
+      # Deliberately NOT setting BUDA_ARCH.  `bin/bb` passes -DBUDA_ARCH only
+      # when the variable is set, so leaving it unset is what puts CMakeLists'
+      # `native` default under test.  Setting anything here would answer a
+      # different question.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Host facts
+        run: |
+          set -x
+          uname -m
+          sw_vers
+          clang --version | head -2
+          cmake --version | head -1
+
+      - name: Does clang accept -march=native on this host?
+        # Asked in ISOLATION first, before the 30-odd translation units, so the
+        # answer is unambiguous either way.  A failure buried in a build log
+        # reads as "the build broke"; this reads as "the flag is rejected".
+        run: |
+          cat > /tmp/probe.cpp <<'CPP'
+          int main() { return 0; }
+          CPP
+          echo "--- -march=native"
+          if clang++ -march=native -c /tmp/probe.cpp -o /tmp/probe.o 2>/tmp/march.err; then
+            echo "ACCEPTED"; march_ok=1
+          else
+            echo "REJECTED:"; cat /tmp/march.err; march_ok=0
+          fi
+          echo "--- -mcpu=native (the AArch64 spelling, for comparison)"
+          if clang++ -mcpu=native -c /tmp/probe.cpp -o /tmp/probe.o 2>/tmp/mcpu.err; then
+            echo "ACCEPTED"
+          else
+            echo "REJECTED:"; cat /tmp/mcpu.err
+          fi
+          {
+            echo "## \`-march=native\` on $(uname -m)"
+            echo '```'
+            echo "-march=native : $([ "$march_ok" = 1 ] && echo ACCEPTED || echo REJECTED)"
+            cat /tmp/march.err 2>/dev/null
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build with bin/bb (the developer path, verbatim)
+        run: bin/bb
+
+      - name: Report the ISA CMake actually configured
+        run: grep -m1 '^BUDA_ARCH:' build/CMakeCache.txt
+
+      - name: Fast tier
+        # The developer default, deliberately: BUDA_NUTS_GOLDEN_STRICT and
+        # BUDA_FLOW_QOR_STRICT stay UNSET, so host-sensitive goldens xfail
+        # rather than fail.  That is what an Apple Silicon developer gets from
+        # `bin/bb test`, and reproducing their experience is the point — this
+        # job is not a second golden host and must not pretend to be one.
+        run: |
+          set -o pipefail
+          python -m pytest -q -rs 2>&1 | tee pytest.log
+          tail -3 pytest.log >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Route something, so "it built" is not the whole claim
+        run: |
+          PYTHONPATH=build:tools python3 src/buda_cli.py --no-viz demo/quickstart.buda | tail -5
