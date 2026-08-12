@@ -64,7 +64,7 @@ def test_a_net_that_is_not_a_bus_bit_is_its_own_bus(net):
         assert parsed == ("w[1]", BRACKET_TAG, 0)
         return
     assert parsed is None
-    assert bus_key(net) == ("", net)
+    assert bus_key(net)[0] == "net"        # its own namespace, not a bus
     assert bus_name(net) == net
 
 
@@ -152,3 +152,43 @@ def test_the_bit_cap_splitter_keeps_an_imported_bus_together():
     for p in parts:
         buses = {bus_name(n) for n in p.get_net_names()}
         assert len(buses) == 1, (buses, p.get_net_names())
+
+
+def test_a_scalar_never_shares_a_key_with_a_bus_of_the_same_name():
+    """A design may hold BOTH a scalar `p` and a declared bus `p_0`.  They
+    are two different things and must count as two.
+
+    The key is namespaced by KIND for this reason.  A two-part `(tag, bus)`
+    key collides — both are `('', 'p')` — and so does the `(bus, tag)` order
+    it replaced, in the obscure direction: scalar `b` against the declared
+    bus `_b0`, both `('', 'b')`.  Either way `_design_counts()` reports one
+    bus too few (Codex P2 on #704).
+    """
+    pairs = [("p", "p_0"),        # scalar vs declared bus of the same name
+             ("b", "_b0"),        # scalar vs a bus whose name is empty
+             ("p", "p[0]")]       # scalar vs imported bus of the same name
+    for scalar, bit in pairs:
+        assert bus_key(scalar) != bus_key(bit), (scalar, bit, bus_key(scalar))
+
+
+def test_a_scalar_and_a_bus_of_one_name_count_as_two_buses():
+    """The same property where it is actually consumed."""
+    from viz_main.panels import VizPanelsMixin
+
+    class _B:
+        def __init__(self, names):
+            self.net_names = list(names)
+
+        def get_net_names(self):
+            return self.net_names
+
+    class _W:
+        def __init__(self, names):
+            self.input = type("I", (), {"original_bundle": _B(names)})()
+
+    class _Counter(VizPanelsMixin):
+        def __init__(self, bundles):
+            self.bundles = bundles
+
+    _nb, nbus, nnets = _Counter([_W(["p", "p_0", "p_1"])])._design_counts()
+    assert (nbus, nnets) == (2, 3), (nbus, nnets)
