@@ -94,6 +94,33 @@ no-op there and every existing import keeps working.
 `import buda_runtime` deliberately has **no** side effect; `install()` is the
 ask. Pinned by `test_importing_buda_runtime_has_no_side_effect`.
 
+**And `install()` is not free, which is the other half of the same argument.**
+The names are not claimed *globally* — but `install()` claims them for your
+whole **process**, at `sys.path[0]`, which is a *stronger* claim than
+site-packages would have been: site-packages sits near the end of `sys.path`,
+so your own module beats it, whereas index 0 beats even your script's own
+directory. Measured on a real install, run from a directory holding the
+caller's own `render.py`:
+
+```
+their own render : user
+after install()  : …/site-packages/buda_runtime/tools/render.py
+their own directory is now at sys.path index 4
+```
+
+43 modules in `tools/` alone go in front. That is right for the console
+scripts (a dedicated process, where BUDA should win) and a no-op in a checkout
+(the directories are the repo's anyway) — it is only wrong for a **library**
+consumer, so:
+
+```python
+buda_runtime.install(front=False)     # append; your modules keep winning
+```
+
+`conftest.py` made the same choice for `tools`, for the same reason. Appending
+moves the block, never the order inside it, so `build` stays ahead of `src`
+and a stale `.so` beside the sources still cannot win.
+
 `in_checkout()` asks for **the CMakeLists that builds us**, next to a
 checkout's `buda_runtime/` and never installed. Probing for `build/` or `src/`
 instead would be a guess and a wrong one: `build` is a real distribution (the
@@ -130,8 +157,32 @@ buda::start -viz 0 -python …/venv/bin/python
 
 ## 3. What the two entry files had to change
 
-`src/buda_cli.py` and `tools/buda_server.py` were the only two files that
-hardcoded the checkout layout, both reaching for `../build`.
+`src/buda_cli.py` and `tools/buda_server.py` are the two files on the **engine
+import path** that hardcoded the checkout layout, both reaching for
+`../build`. They are not the only files in the repo that do so — about 15
+more join a computed repo root with `build` and 19 with `src` — but the rest
+are developer harnesses (`qor_corpus.py`, `render.py`, `regen_goldens.py`, …)
+that need a checkout to do anything at all, and converting them is not this
+change's business. **Three were on the installed entry-point paths and are
+converted here**, since a user's `buda-fp` really does execute them:
+`tools/bdb_floorplanner.py`, `tools/def_viz_o3.py` and
+`tools/floorplanner_commands.py`. Measured before the fix, on a real install:
+
+```
+>>> import buda_runtime; buda_runtime.install()
+>>> import floorplanner_commands        # what buda-fp pulls in
+added to sys.path:
+   exists=False  …/site-packages/buda_runtime/build
+   exists=False  …/site-packages/buda_runtime/src
+```
+
+Nothing broke — `entry._main` calls `install()` first, so the real paths were
+already ahead, and Python tolerates a missing directory. But claiming
+`sys.path[0]` from a module that cannot see which layout it is in is the exact
+habit `buda_runtime` exists to end, and it was only *accidentally* safe: a
+future layout with a real `buda_runtime/src` would make those inserts win.
+All three are now content- or existence-checked, so they are the checkout
+fallback they were always meant to be and a no-op once installed.
 
 * `buda_cli.py` now **finds `buda_runtime`** — a sibling of its directory in a
   checkout, its own containing directory in a wheel — and asks it. It does not
@@ -141,7 +192,14 @@ hardcoded the checkout layout, both reaching for `../build`.
   in a wheel it is one directory up.
 * `buda_viz.py`'s `viz_ipc` fallback inserted `<…>/../tools` at `sys.path[0]`
   unconditionally. Installed, `..` is site-packages — and `tools` is a real
-  distribution name there. Now existence-checked.
+  distribution name there. The first attempt at a fix guarded it with
+  `isdir`, which **guards nothing**: that is true exactly when the stranger
+  exists, and false only in the case that was never the hazard. It now asks
+  the question it means — *is this `tools` mine?* — by looking for the file it
+  is about to import (`viz_ipc.py`), the same content-addressed form
+  `buda_server.py` uses. The fallback is kept rather than deleted: `pytest.ini`
+  sets `pythonpath = build src` and conftest only *appends* `tools`, so a test
+  importing `buda_viz` without going through `buda_cli` relies on it.
 
 `entry.py` also answers `-h`/`--help` for the two GUI commands **before**
 importing anything, which is exactly why `bin/fp` and `bin/viz` answer it in

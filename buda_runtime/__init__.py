@@ -87,15 +87,37 @@ def paths():
     return [d for d in cand if os.path.isdir(d)]
 
 
-def install():
-    """Put `paths()` on `sys.path`, in order, ahead of everything else.
+def install(front=True):
+    """Put `paths()` on `sys.path`, in order.  Returns what it worked from.
 
-    Idempotent: a directory already present is left where it is rather than
-    moved to the front, so calling this twice cannot reorder a caller's own
-    `sys.path`.  Returns what it worked from.
+    **What this costs you, stated plainly.**  The wheel deliberately does not
+    claim BUDA's ~40 generic module names GLOBALLY — that is the whole reason
+    the layer is folded into one directory instead of unpacked into
+    site-packages.  But `front=True` claims them for your PROCESS, ahead of
+    your own code, and at `sys.path[0]` that is a *stronger* claim than
+    site-packages would have been: site-packages sits near the END of
+    `sys.path`, so your module beats it, whereas index 0 beats even your
+    script's own directory.  Measured on an installed copy, run from a
+    directory holding the caller's own `render.py`: after `install()`,
+    `import render` returns BUDA's `tools/render.py` and the caller's
+    directory has moved to index 4.  43 modules in `tools/` alone go in front.
+
+    That is right for the console scripts (a dedicated process, where BUDA
+    should win) and a no-op in a checkout (the directories are the repo's
+    anyway).  It is only wrong for a LIBRARY consumer — so `front=False`
+    appends instead, and that is the call to prefer when BUDA is a guest in
+    someone else's program.  `conftest.py` made the same choice for `tools`
+    for the same reason.
+
+    `front=False` keeps the order WITHIN the list, so the constraint that
+    matters — `build` ahead of `src`, so a stale `.so` next to the sources
+    cannot win — is unaffected either way.
+
+    Idempotent in both modes: a directory already present is left where it is
+    rather than moved, so calling this twice cannot reorder a caller's path.
     """
     where = paths()
-    for d in reversed(where):
+    for d in (reversed(where) if front else where):
         if d not in sys.path:
-            sys.path.insert(0, d)
+            sys.path.insert(0, d) if front else sys.path.append(d)
     return where

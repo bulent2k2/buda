@@ -325,10 +325,18 @@ else()
 
         # Non-.py payload the layer reads at runtime: the web front end's
         # served files, and the window icons.  The icons install FLAT, which
-        # is the third lookup `viz_window.set_app_icon` already tries ("a
-        # flattened or frozen tree") — its first two are checkout-relative
-        # and resolve above the package here.
+        # is the third lookup `viz_window.set_icon` / `set_dock_icon` already
+        # try ("a flattened or frozen tree").  Their first two rungs LOOK
+        # above the package (`<pkg>/../assets/x.png`, `<pkg>/../x.png`) and
+        # MISS — that is the mechanism, not a failure: measured on an install,
+        # rungs 1 and 2 are absent and rung 3 finds the file.
+        #
+        # `FILES_MATCHING` on assets/ for the same reason as its neighbours:
+        # this destination is the package directory itself, so an unfiltered
+        # copy would land anything added to assets/ beside `buda_cli.py` — a
+        # `.py` there would become an importable top-level module.
         install(DIRECTORY src/web/static/ DESTINATION "${BUDA_PY_DEST}/web/static")
-        install(DIRECTORY assets/ DESTINATION "${BUDA_PY_DEST}")
+        install(DIRECTORY assets/ DESTINATION "${BUDA_PY_DEST}"
+                FILES_MATCHING PATTERN "*.png")
     endif()
 endif()

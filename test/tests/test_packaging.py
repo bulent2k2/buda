@@ -38,9 +38,31 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 
-sys.path.insert(0, str(_ROOT))
+# Under pytest the repo root is already on sys.path (it is rootdir), so this
+# is normally a no-op; guarded so running this file standalone still works
+# WITHOUT pushing a duplicate entry in front of everything.
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 import buda_runtime            # noqa: E402
 from buda_runtime import entry  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _restore_sys_path():
+    """Give every test in this file its own `sys.path`.
+
+    Several of them call `install()` for real, which PERMANENTLY reorders the
+    pytest process's path for every module collected after this one — and it
+    is not a harmless reorder: `conftest.py` deliberately APPENDS `tools`
+    while inserting `build`/`src` at the front, so `tools` is a last resort by
+    design, and `install()` moves it to index 0 mid-session.  This file sorts
+    into the middle of the suite, so half the tests would resolve `tools`
+    differently from the other half — nothing fails today, and a failure that
+    depended on it would be very hard to read.
+    """
+    saved = list(sys.path)
+    yield
+    sys.path[:] = saved
 
 
 def _pyproject():
@@ -201,6 +223,54 @@ def test_install_is_idempotent_and_does_not_reorder(monkeypatch):
     before = list(sys.path)
     buda_runtime.install()
     assert sys.path == before
+
+
+def test_install_front_false_appends(monkeypatch):
+    """`install(front=False)` is the library caller's mode: the layer goes at
+    the BACK, so the caller's own modules keep winning.
+
+    Without it, `install()` claims ~40 generic names at `sys.path[0]` — a
+    stronger claim than site-packages would have been, since site-packages
+    sits near the end and index 0 beats even the caller's script directory.
+    Measured: from a directory holding the caller's own `render.py`, plain
+    `install()` makes `import render` return BUDA's `tools/render.py`.
+    """
+    monkeypatch.setattr(sys, "path",
+                        [p for p in sys.path if p not in buda_runtime.paths()])
+    caller_owns = sys.path[0]
+    buda_runtime.install(front=False)
+    assert sys.path[0] == caller_owns, "appended mode must not take the front"
+    assert sys.path[-len(buda_runtime.paths()):] == buda_runtime.paths()
+
+
+def test_install_front_false_keeps_build_ahead_of_src(monkeypatch):
+    """Appending changes where the block goes, never the order inside it —
+    `build` stays ahead of `src` so a stale `.so` beside the sources cannot
+    win, which is the one ordering constraint that matters."""
+    monkeypatch.setattr(sys, "path",
+                        [p for p in sys.path if p not in buda_runtime.paths()])
+    buda_runtime.install(front=False)
+    where = buda_runtime.paths()
+    assert sys.path.index(where[0]) < sys.path.index(where[1])
+
+
+def test_viz_ipc_fallback_rejects_a_stranger_tools(tmp_path):
+    """`buda_viz`'s `../tools` fallback must ask whether that `tools` is OURS.
+
+    An `isdir` test cannot: installed, `..` is site-packages, where `tools` is
+    a real distribution name — so `isdir` is TRUE exactly when the stranger
+    exists and false only in the case that was never the hazard.  The guard is
+    content-addressed on the file it is about to import.
+    """
+    src = (_ROOT / "src" / "buda_viz.py").read_text()
+    assert "isdir(_tools)" not in src, "the fallback is back to an isdir guard"
+    assert "_tools, 'viz_ipc.py'" in src, "the fallback is not content-addressed"
+
+    stranger = tmp_path / "site-packages" / "tools"      # someone else's
+    stranger.mkdir(parents=True)
+    (stranger / "__init__.py").write_text("")
+    assert os.path.isdir(stranger)                       # an isdir guard passes
+    assert not os.path.isfile(stranger / "viz_ipc.py")   # this one does not
 
 
 def test_installed_layout_folds_into_one_directory(tmp_path):

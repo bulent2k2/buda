@@ -156,6 +156,13 @@ for _p in (os.path.join(_HERE, "..", "src"), os.path.dirname(_HERE)):
     if os.path.isfile(os.path.join(_p, "buda_cli.py")) and _p not in sys.path:
         sys.path.insert(0, _p)
 
+# `buda_cli` FIRST, and the order is load-bearing: its bootstrap is what puts
+# `build` on sys.path for the `import buda` below.  Under `bin/buda` the
+# wrapper's PYTHONPATH hides that, but `python3 tools/buda_server.py` in a bare
+# shell depends on it — and that is the environment nothing tests.  `noqa:
+# E402` says "not at the top of the file"; it does not say "do not reorder",
+# so an import sorter (or a reader tidying two adjacent `import buda*` lines
+# back into alphabetical order) would break it silently.
 import buda_cli                                             # noqa: E402
 import buda                                                 # noqa: E402
 import buda_diag                                            # noqa: E402

@@ -50,9 +50,19 @@ import subprocess
 import sys
 from typing import Callable, Iterable
 
+# The CHECKOUT fallback: this module is imported by the Floorplanner, and by
+# the time `bin/fp` or the installed `buda-fp` reaches it the layer is already
+# on sys.path.  What is left is `python3 tools/bdb_floorplanner.py` run by
+# path with nothing set up.
+#
+# Existence-checked: installed, `_ROOT` is `buda_runtime/`, so `src` and
+# `build` under it do not exist — and inserting a nonexistent directory at
+# sys.path[0] is a claim about a layout this module cannot see.  It is only
+# accidentally harmless today (install() has already put the real ones ahead);
+# a future layout with a real `buda_runtime/src` would make it win.
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build")):
-    if _p not in sys.path:
+for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _ROOT):
+    if os.path.isdir(_p) and _p not in sys.path:
         sys.path.insert(0, _p)
 
 import buda

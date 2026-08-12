@@ -29,13 +29,21 @@ import time
 # exercised in only one of the two layouts and drift in the other.  All this
 # does is FIND buda_runtime: it is a sibling of our directory in a checkout,
 # and in a wheel this file lives inside it.
+#
+# The EXISTENCE test runs first and the name test second, deliberately.  A
+# directory that actually contains `buda_runtime/__init__.py` is an answer; a
+# directory merely CALLED buda_runtime is a guess, and it is wrong for a
+# checkout that happens to be cloned under that name (`git clone -o`, a
+# vendored copy, a worktree) — the name would match `<repo>` and point us at
+# the repo's PARENT.  Installed, `buda_runtime/buda_runtime/` does not exist,
+# so the existence test falls through to the name test exactly as before.
 _here = os.path.dirname(os.path.abspath(__file__))
 for _cand in (_here, os.path.dirname(_here)):
-    if os.path.basename(_cand) == 'buda_runtime':
-        _pkg_root = os.path.dirname(_cand)
-        break
     if os.path.isfile(os.path.join(_cand, 'buda_runtime', '__init__.py')):
         _pkg_root = _cand
+        break
+    if os.path.basename(_cand) == 'buda_runtime':
+        _pkg_root = os.path.dirname(_cand)
         break
 else:                                        # pragma: no cover - broken tree
     raise ImportError('buda_runtime is missing beside ' + _here +
