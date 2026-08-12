@@ -65,6 +65,35 @@ bootstrap through it rather than each carrying a copy of the rule — a rule
 that is only ever exercised in one layout at a time is exactly the kind that
 drifts unnoticed in the other.
 
+### The import contract after installing — two tiers, on purpose
+
+```python
+import buda, buda_db                      # works bare
+
+import buda_runtime; buda_runtime.install()
+import buda_cli, bdb_serialize            # everything else, after that
+from tools import bdb2buda                # one line, and only in a wheel
+```
+
+The second tier is a decision, not an oversight, and it is the one thing an
+installed BUDA does *not* reproduce from the checkout. `buda` and `buda_db`
+are the project's public names, so they land at the wheel root and cost
+nothing. The rest is about forty **generic** top-level names — `ui_state`,
+`viz_common`, `slot_groups`, `render`, `web`, `qor_corpus`, `tools` — and a
+distribution that claimed them in `site-packages` would shadow other people's
+code. `tools` is not hypothetical: one appeared transitively in CI and broke
+every `from tools import …` in the suite at once (`tools/__init__.py` records
+it). Two ways to avoid the bootstrap line were considered and rejected for
+the same reason: installing those names at the root *is* the collision, and a
+`.pth` only makes it lazy and harder to see.
+
+Inside a checkout nothing changes — `bin/activate`, `pytest.ini` and the
+wrappers already put the directories on `sys.path`, so the bootstrap is a
+no-op there and every existing import keeps working.
+
+`import buda_runtime` deliberately has **no** side effect; `install()` is the
+ask. Pinned by `test_importing_buda_runtime_has_no_side_effect`.
+
 `in_checkout()` asks for **the CMakeLists that builds us**, next to a
 checkout's `buda_runtime/` and never installed. Probing for `build/` or `src/`
 instead would be a guess and a wrong one: `build` is a real distribution (the
@@ -113,6 +142,16 @@ hardcoded the checkout layout, both reaching for `../build`.
 * `buda_viz.py`'s `viz_ipc` fallback inserted `<…>/../tools` at `sys.path[0]`
   unconditionally. Installed, `..` is site-packages — and `tools` is a real
   distribution name there. Now existence-checked.
+
+`entry.py` also answers `-h`/`--help` for the two GUI commands **before**
+importing anything, which is exactly why `bin/fp` and `bin/viz` answer it in
+bash before they exec. A GUI entry point imports tkinter and picks a
+matplotlib backend at module scope, so "what does this command do" would
+otherwise need a display to answer — measured on the installed copy,
+`buda-fp --help` reported `cannot open BDB — file not found: --help` and
+`buda-viz --help` died in `import tkinter`. `buda --help` is deliberately
+*not* intercepted: argparse inside `buda_cli` generates it from the real
+option list, and a copy here would go stale.
 
 ## 4. `pip install -e .` — measured, then fixed
 
@@ -184,7 +223,9 @@ The build itself is a by-hand step, last run on this tree:
 | `pip install .` into a clean venv | wheel built, 3.5 MB, `buda-3.0.0-cp311-cp311-linux_x86_64` |
 | `buda --no-viz demo/quickstart.buda`, run from `/tmp` | 9 commands, clean |
 | `open_bdb` on a `.bdb.sql` (reaches `bdb_serialize`) | 8 busterms |
-| every import path (`buda`, `buda_cli`, `bdb_serialize`, `from tools import …`, `buda_cmds`) | 102 commands registered |
+| `import buda`, `import buda_db` — bare, nothing on PYTHONPATH | resolve at the wheel root |
+| `buda_cli`, `bdb_serialize`, `buda_cmds`, `from tools import …` **after `buda_runtime.install()`** | 102 commands registered — and they fail *without* it, which is the contract above, not a defect |
+| `buda-fp --help`, `buda-viz --help` | usage printed without touching tkinter or a display |
 | `buda.BDB is buda_db.BDB` | `True` — one `std::type_info`, as in a `bb` build |
 | Tcl bridge sourced from the installed copy | 1 bundle |
 | `pip install -e .`, then edit a source file | change visible immediately |

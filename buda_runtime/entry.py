@@ -28,6 +28,7 @@ under both names, and importing it under both would give the process two
 distinct module objects with two copies of the session state.
 """
 import sys
+import textwrap
 
 from . import install
 
@@ -38,6 +39,61 @@ def _main(module, func="main"):
     return getattr(sys.modules[module], func)()
 
 
+# ── help ──────────────────────────────────────────────────────────────────
+# `-h`/`--help` is answered HERE, before the module is imported, for the two
+# GUI commands — which is exactly why `bin/fp` and `bin/viz` answer it in bash
+# before they exec anything.  A GUI entry point imports tkinter and picks a
+# matplotlib backend at module scope, so "tell me what this command does" would
+# otherwise need a display to answer: measured on the installed copy,
+# `buda-fp --help` reported `cannot open BDB — file not found: --help` and
+# `buda-viz --help` died in `import tkinter`.
+#
+# `buda` is NOT in this table.  Its help comes from argparse inside `buda_cli`,
+# which knows the real option list; intercepting it here would replace a
+# generated answer with a copy that goes stale.
+#
+# These texts describe the INSTALLED commands and are deliberately not copies
+# of the wrappers' — `bin/fp` can point at `bin/bfp` and a `.buda` flow, which
+# a pip install does not carry, and the command is spelled differently.
+_HELP = {
+    "buda-fp": """
+        Usage: buda-fp [file.bdb]
+
+        Open the interactive BUDA Floorplanner (Tk/matplotlib GUI) to edit
+        block placement in a BDB and, optionally, launch the hier routing flow.
+
+        Arguments:
+          file.bdb    BDB to open; omit for a blank canvas
+
+        Needs a display and a working tkinter.  See the Floorplanner User Guide
+        in the BUDA docs.
+    """,
+    "buda-viz": """
+        Usage: buda-viz [file.def [file.lef]] [--ipc <name>]
+               buda-viz [file.bdb] [--ipc <name>]
+
+        Open the interactive DEF/LEF/BDB net-cluster visualizer (Tk GUI).
+
+        Arguments:
+          file.def [file.lef]   DEF to load (a sibling .lef is auto-found if
+                                omitted)
+          file.bdb              a BDB to load instead of DEF/LEF
+          --ipc <name>          selection-sync IPC channel to pair with the
+                                BUDA viewer (defaults to the input file's stem)
+
+        Needs a display and a working tkinter.
+    """,
+}
+
+
+def _helped(command):
+    """Print `command`'s help and return True, if help is what was asked for."""
+    if not any(a in ("-h", "--help") for a in sys.argv[1:]):
+        return False
+    print(textwrap.dedent(_HELP[command]).strip())
+    return True
+
+
 def buda():
     """`buda <script.buda>` — the routing CLI (`src/buda_cli.py`)."""
     return _main("buda_cli")
@@ -45,11 +101,15 @@ def buda():
 
 def floorplanner():
     """`buda-fp [file.bdb]` — the interactive Floorplanner GUI."""
+    if _helped("buda-fp"):
+        return 0
     return _main("bdb_floorplanner")
 
 
 def viz():
     """`buda-viz [file.def|file.bdb]` — the DEF/LEF/BDB cluster visualizer."""
+    if _helped("buda-viz"):
+        return 0
     return _main("def_viz_o3")
 
 
