@@ -20,11 +20,13 @@ here is asserted from reading the code alone — every measurement is from a run
 | 3 | bus wider than the block it crosses | `flow/antenna_wide_bus_passthru.buda` | UNREACHABLE |
 | 4 | crossing credited at the nominal seg | `flow/rnr/mix2_topdown_refine.buda` | FIXED #695 |
 | 5 | two MST edges duplicate a leg | `flow/mst_shared_leg_prefix.buda` (branch `claude/mst-leg-overshoot`) | **OPEN** |
-| 6 | a culled partner strands a segment | `flow/antenna_culled_partner.buda` | HANDLED |
-| 7 | `rv/soc` 1.25M units mid-flow | `flow/rv/soc.buda` | **OPEN** |
+| 6 | a culled partner strands a segment | `flow/antenna_culled_partner.buda` + `flow/antenna_starved_partner.buda` | **OPEN — cause found** |
+| 7 | `rv/soc` 1.25M units mid-flow | `flow/rv/soc.buda` | **OPEN — same cause as 6** |
 
-Entries 5 and 7 are the live ones. 3 and 6 are negative results kept as guards —
-both end DIRTY on purpose and neither belongs in the QoR corpus.
+Entries 5, 6 and 7 are the live ones, and 6 and 7 are now known to be **one
+defect**: a DetailedNUTS pass-ordering problem, isolated to a 4-bit vehicle in
+entry 6. Entry 3 is a negative result kept as a guard. Entries 3, 6 and 7's
+vehicles all end DIRTY on purpose; none belongs in the QoR corpus.
 
 ---
 
@@ -146,36 +148,61 @@ blocks are declared.
 
 ---
 
-## 6. A culled partner leaves a segment stranded — HANDLED
+## 6. A partner deleted AFTER its neighbour was stretched to meet it
 
-**Mechanism.** A segment's far leg lands on a keepout and DetailedNUTS culls
-every one of its bits. The middle segment's far junction then refers to a wire
-that no longer exists.
+This is the live one, and entry 7 is the same defect at scale.
 
-**Reproduce.** `flow/antenna_culled_partner.buda`. Note the construction: a
-keepout declared *up front* is one the planner routes around, so it can never
-produce this — the vehicle declares it **after `run_planner`**, so the planner
-never saw it and only the per-bit cull acts. That is the deterministic stand-in
-for a DEF-imported blockage, which is how `flow/rv/soc` gets its.
+**Mechanism.** DetailedNUTS runs three passes in this order:
 
-**Measured.** The middle segment does **not** dangle: it retracts to its
-remaining via (`seg1 bit0 span=[183.5,183.5]`), because #678's rule treats an
-endpoint conn that resolves to no wire as a stale end. `check_design` reports the
-real problem — 4 unplaced bits — and no dangling metal.
+```
+place_by_layer  ->  adjust_bit_spans  ->  cull_keepout_crossers
+```
 
-**Status.** HANDLED. The vehicle is a guard, run by
-`test_bit_antenna_audit.py::test_a_culled_partner_retracts_its_neighbour_instead_of_stranding_it`,
-which pins both halves — no dangling metal, and the 4 unplaced bits still
-reported (a checker silenced by dropping the segment would pass on the first
-alone). A regression in the retraction turns that segment back into 520 units of
-dangling metal.
+`adjust_bit_spans` extends each bit to reach its partner's track.
+`cull_keepout_crossers` then deletes bits whose FINAL span still crosses a
+keepout. **A partner removed by that cull is removed after the neighbour was
+already stretched to meet it**, so the neighbour keeps metal aimed at a wire
+that no longer exists. #678's stale-end rule cannot help: it lives inside
+`adjust_bit_spans`, one pass too early.
 
-**And this is the evidence entry 7 needs.** The same construction, in isolation,
-comes out clean — so whatever holds rv/soc's bits out is not the cull.
+**Reproduce.** A matched pair, because the contrast is the argument:
+
+* `flow/antenna_culled_partner.buda` — the defect.
+* `flow/antenna_starved_partner.buda` — the control. Identical design, identical
+  pin, **one number different** in the keepout, and the dangling metal is gone.
+
+Two details make these work. A keepout declared *up front* is one the planner
+routes around, so it can never produce this — both declare it **after
+`run_planner`**, the deterministic stand-in for the DEF-imported blockage
+`flow/rv/soc` has. And the keepout must **miss the segment's span midpoint**:
+`signal_tracks_in` tests keepouts at that single sample point, so covering the
+midpoint fails placement *admission* instead and the bits never reach the cull.
+
+**Measured.**
+
+| | keepout | `num_keepout_bits` | seg 1 |
+|---|---|---|---|
+| culled | y 380..**450** (misses midpoint) | **4** | spans `[183.5,710]`, reaches `[183.5,183.5]` |
+| starved | y 380..**720** (covers midpoint) | **0** | `[183.5,183.5]` — retracted |
+
+4 findings of ~529 units = **2115 units of dangling metal on M4**, out of a 2922
+detailed WL. The starved twin comes to 807 with no findings. `num_unplaced` is 4
+in *both* — which is why a guard must assert `num_keepout_bits`, or it cannot
+tell which path it tested.
+
+**The audit is not the problem.** `check_design dnuts` reports every one of
+those bits. It is the **placer** that leaves the metal.
+
+**Status.** OPEN, cause identified, not fixed here — the fix is an engine change
+(retract after the cull, or cull before adjusting) and the choice between those
+is the owner's. Both vehicles are pinned by
+`test_bit_antenna_audit.py::test_a_partner_lost_to_the_CULL_strands_its_neighbour`
+and `…::test_a_partner_STARVED_before_span_adjustment_retracts_it_instead`, so
+whichever way it is fixed, the pair is what must not regress.
 
 ---
 
-## 7. `flow/rv/soc` mid-flow — the one still worth digging into
+## 7. `flow/rv/soc` — entry 6 at scale
 
 **Reproduce.** `bin/buda flow/rv/soc.buda --no-viz --verbose-conn`, then read
 `flow/rv/log/soc_flow.log`.
@@ -188,20 +215,19 @@ Bundle 142: Seg 1 bit 0 on layer M5 spans [139200,158800]
             but this bit only reaches [139200,139200] — 0 + 19600 of dangling metal
 ```
 
-**Why it is not entry 6.** Entry 6 shows a culled partner leaves the segment
-*retracted*, so something is holding these out instead. Bundle 142's selected
-topology is `U_HVH@x-19600` — a U-shape whose detour arm is 19,600 units out, the
-same number as the overhang. The candidates are the #496 pass-through coverage
-re-extension (a crossing the bit does not make), or a far conn registered as
-mid-span rather than endpoint, as in entry 5. **This is not yet resolved**, and it
-is the most valuable thread left: it is the largest measured quantity of dangling
-metal anywhere in the tree.
+**It is entry 6.** Mid-flow, immediately after the first `run_detailed_nuts`,
+`num_keepout_bits` is **66** — every lost bit here goes through
+`cull_keepout_crossers`, the post-adjustment path, which is exactly the twin
+that dangles. (The earlier reading of this entry — that rv/soc must have some
+*other* cause because the isolated vehicle came out clean — was wrong: that
+vehicle was on the *starved* path and never reached the cull at all.)
 
 **Status.** OPEN, but MID-FLOW ONLY — the healers re-pin and it does not survive
 to the endpoint, which `test/tests/test_bit_antenna_audit.py` pins from both
 sides (it must fire mid-flow, and must be gone at the end). So it costs nothing
 in the shipped route today; it is a latent shape that a design without those
-healers would keep.
+healers would keep. Fix entry 6 and this goes with it — the 4-bit vehicle is the
+one to develop against.
 
 ---
 
@@ -214,6 +240,15 @@ healers would keep.
 | `detect_bit_antennas` (per bit) | per-bit vias + served taps + crossings the bit really makes | whether a *crossing* should vouch for a bit at all — the open question entry 3's vehicle exists to frame |
 | `check_dnuts` block coverage | per-bit coverage of connected blocks | nothing here; it is the check that keeps the retractions honest |
 
-The recurring lesson, and the thing to check first on any new instance: **find
-out whether the datum governing the decision is per segment or per bit.** Every
-entry above except 3 and 6 was that.
+Note that entry 6 is **not** a checker gap — the per-bit audit reports it in
+full. It is the placer emitting metal the audit then correctly complains about,
+which is the healthier of the two failure modes and the reason it is measurable
+at all.
+
+Two things to check first on any new instance:
+
+1. **Is the datum governing the decision per SEGMENT or per BIT?** Entries 1, 2,
+   4 and 5 were all that.
+2. **Which PASS removed the thing that is missing, relative to the pass that
+   read it?** Entry 6 (and so 7) was that: the same bits lost one pass earlier
+   are handled correctly, and one pass later are not.

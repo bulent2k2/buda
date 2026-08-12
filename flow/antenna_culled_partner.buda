@@ -1,40 +1,51 @@
 # ============================================================
 # flow/antenna_culled_partner.buda
 #
-# A segment whose PARTNER is culled out from under it.
+# A segment whose PARTNER is CULLED out from under it — the
+# rv/soc mechanism, isolated.  THIS IS AN OPEN DEFECT.
 #
-# This is the shape flow/rv/soc shows mid-flow: a Z_VHV whose
-# far leg lands on a keepout, so DetailedNUTS culls every one of
-# its bits.  The middle segment's far junction then refers to a
-# wire that no longer exists, and on the face of it the whole
-# middle segment is metal aimed at nothing.
+# DetailedNUTS runs three passes in this order:
 #
-# It is checked in as a GUARD, not as an open defect: on today's
-# tree the shape is HANDLED, and this vehicle is what would
-# notice if that stopped being true.  `adjust_bit_spans` treats
-# an endpoint conn that resolves to no wire for this bit as a
-# stale end and retracts to the bit's real attachment (#678, and
-# #690 for the busterm-tap variant), so the middle segment
-# collapses to its remaining via instead of dangling:
+#     place_by_layer  ->  adjust_bit_spans  ->  cull_keepout_crossers
 #
-#   seg0 bit0  M5 track=183.5  span=[200.0,399.5]
-#   seg1 bit0  M4 track=399.5  span=[183.5,183.5]   <- retracted
-#   seg2       culled (4 bits unplaced)
+# `adjust_bit_spans` extends each bit to reach its partner's
+# track.  `cull_keepout_crossers` then deletes bits whose FINAL
+# span still crosses a keepout.  A partner removed by that cull
+# is removed AFTER the neighbour was extended to meet it — so
+# the neighbour keeps metal aimed at a wire that no longer
+# exists, and nothing retracts it.  #678's stale-end rule cannot
+# help: it runs inside adjust_bit_spans, one pass too early.
 #
-# So `check_design` reports the REAL problem — 4 unplaced bits and
-# the receiver left uncovered — and does NOT report dangling
-# metal, because there is none.  A regression in the retraction
-# turns seg1 back into 520 units of it.
+# Measured here — seg 2's four bits culled, seg 1 left holding
+# its full span out to x=710 where seg 2 used to be:
 #
-# THE CONSTRUCTION IS THE INTERESTING PART.  A keepout declared
-# up front is one the PLANNER sees and routes around, so it can
-# never produce this: the planner simply picks another candidate.
-# What produces it is the planner committing to ground that only
-# turns out blocked later — which is exactly what happens on a
-# DEF-imported design, where rv/soc gets its blockages.  Here
-# that is arranged deterministically by declaring the keepout
-# AFTER `run_planner`, so the planner never saw it and only the
-# per-bit keepout cull at DetailedNUTS does.
+#   Bundle 1: Seg 1 bit 0 on layer M4 spans [183.5,710]
+#             but this bit only reaches [183.5,183.5]
+#             — 526.5 of dangling metal
+#
+#   4 findings, ~529 units each = 2115 units on M4.
+#   detailed WL 2922, of which 2115 is metal reaching nothing.
+#
+# The AUDIT is fine — `check_design dnuts` reports every bit.
+# It is the PLACER that leaves the metal.  The same shape at
+# scale is flow/rv/soc: 2 bundles x 32 bits x 19,600 units.
+#
+# THE CONSTRUCTION IS THE INTERESTING PART, twice over.
+#
+# (1) A keepout declared UP FRONT is one the PLANNER routes
+#     around, so it can never produce this.  Declaring it AFTER
+#     `run_planner` is the deterministic stand-in for a
+#     DEF-imported blockage, which is how rv/soc gets its.
+#
+# (2) The keepout must MISS the segment's span MIDPOINT.
+#     `signal_tracks_in` tests a keepout at that single sample
+#     point, so a keepout covering the midpoint fails placement
+#     ADMISSION instead and the bits never reach the cull —
+#     a different path with the opposite outcome, which is what
+#     flow/antenna_starved_partner.buda holds.  That pair is the
+#     evidence that the ORDERING is the cause and not the
+#     keepout: same geometry, two ways to lose the partner, and
+#     only the post-adjustment one dangles.
 #
 # The vehicle ends DIRTY on purpose (4 unplaced bits): culling a
 # segment breaks the route, and that is the point of the setup.
@@ -71,10 +82,16 @@ def_track_pattern 4 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
 def_track_pattern 5 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
 
 # Declared HERE, after the plan is committed: the planner never
-# sees it, so seg2 keeps its assignment and only DNUTS's per-bit
-# keepout cull acts on it.  Covers seg2's column (x 710) and its
-# whole span, so all four of its bits go.
-add_keepout 600 380 900 720 5
+# sees it, so seg2 keeps its assignment.
+#
+# seg2 is V on M5, spanning y 400..600 at x 710..790.  This
+# keepout covers its tracks (x 600..900) and the LOW END of its
+# span (y 380..450) while missing the midpoint y=500 — so
+# admission succeeds at the midpoint sample, all four bits place,
+# and the cull removes them afterwards on their final spans.
+# Widen it to y 720 and the midpoint is covered: admission fails
+# instead and the shape does not appear (see the starved twin).
+add_keepout 600 380 900 450 5
 
 run_detailed_nuts
 dump_topologies --conn
