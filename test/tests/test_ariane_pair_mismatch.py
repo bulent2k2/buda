@@ -80,20 +80,76 @@ def test_the_refusal_can_be_overridden_deliberately():
     assert "fakeram45_256x16" in out          # still LOUD, just not fatal
 
 
+def test_the_visualizer_refuses_the_pair_too():
+    """The CLI is not the only way in, and the other way was silent.
+
+    `def_viz_shared.DefVizData._load_via_bdb` calls the RAW
+    `BDB.import_def_lef`, which REPORTS `missing_cells` but does not refuse
+    — the BUDA-1601 stop lives in the CLI command wrapper.  So the very
+    command this demo's ReadMe opens with imported all 133 macros at the
+    0.5 x 0.5 um fallback and CACHED the resulting BDB, meaning every later
+    run reused a plausible and entirely wrong floorplan (Codex P1 on #710).
+
+    That is exactly the fault this item claims is fixed, still reachable
+    through the documented path — so the loader refuses it now."""
+    import sys
+    sys.path.insert(0, str(_ROOT / "tools"))
+    from def_viz_shared import DefVizData
+
+    with pytest.raises(SystemExit) as e:
+        DefVizData().load(str(_DEMO / "ariane.def"), str(_DEMO / "ariane.lef"))
+    msg = str(e.value)
+    assert "fakeram45_256x16" in msg, msg
+    assert "0.5" in msg and "entirely wrong" in msg, msg
+
+
+def test_the_visualizers_no_lef_mode_still_works():
+    """The refusal names a way forward, so that way has to work: with no
+    LEF the loader infers sizes from the placement.  A guard that leaves
+    the user with nothing to do would just be an obstacle."""
+    import sys
+    sys.path.insert(0, str(_ROOT / "tools"))
+    from def_viz_shared import DefVizData
+
+    for stale in _DEMO.glob("*.bdb"):
+        stale.unlink()
+    try:
+        summary = DefVizData().load(str(_DEMO / "ariane.def"), "")
+    finally:
+        for stale in _DEMO.glob("*.bdb"):
+            stale.unlink()
+    assert "133 instances" in summary, summary
+    # …and the die it reports is the DEF's real one, not the 226 um the
+    # ReadMe used to claim from a different design's description.
+    assert "1357" in summary, summary
+
+
 def test_nothing_in_the_repo_imports_the_pair():
-    """The item closed because no flow depends on the two files agreeing.
+    """The item closed because nothing depends on the two files agreeing.
     That is a property of the tree, so it is checked against the tree — a
-    future flow that imports them would make the refusal above a broken
-    demo instead of a correct guard, and should have to notice."""
+    future caller would make the refusals above a broken demo instead of a
+    correct guard, and should have to notice.
+
+    Scanning only `*.buda` was not enough and is the reason this test was
+    wrong when written: the documented entry point is a PYTHON one
+    (`tools/def_viz_o3.py <def> <lef>`), so the scan covers scripts too.
+    `def_viz_shared.py` itself is exempt — it is the module that now
+    refuses, and it names the files in that refusal's own test."""
     offenders = []
-    for path in _ROOT.rglob("*.buda"):
-        if "/log/" in str(path) or "/out/" in str(path):
-            continue
-        text = path.read_text(errors="ignore")
-        for line in text.splitlines():
-            line = line.strip()
-            if line.startswith("import_def_lef") and "ariane" in line:
-                offenders.append(f"{path.relative_to(_ROOT)}: {line}")
+    for pattern in ("*.buda", "*.py", "*.tcl"):
+        for path in _ROOT.rglob(pattern):
+            s = str(path)
+            if any(part in s for part in ("/log/", "/out/", "/build/",
+                                          "/.git/", "__pycache__",
+                                          "/test/tests/")):
+                continue
+            for line in path.read_text(errors="ignore").splitlines():
+                line = line.strip()
+                if "ariane" not in line:
+                    continue
+                if line.startswith("import_def_lef") or (
+                        "import_def_lef(" in line and not line.startswith("#")):
+                    offenders.append(f"{path.relative_to(_ROOT)}: {line}")
     assert not offenders, offenders
 
 

@@ -184,7 +184,34 @@ class DefVizData:
                 else:
                     effective_lef = ''
             try:
-                db.import_def_lef(def_path, effective_lef)
+                st = db.import_def_lef(def_path, effective_lef)
+                # A LEF that does not cover the DEF's cells is the ONE import
+                # error worth stopping for here: every uncovered macro falls
+                # back to 0.5 x 0.5 um, so the picture comes out plausible and
+                # entirely wrong — and `_load_via_bdb` CACHES the result, so
+                # the wrong floorplan is what every later run reuses.  The CLI
+                # has refused this since BUDA-1601; this path called the raw
+                # BDB entry point and never read `missing_cells`, so the
+                # documented `def_viz_o3.py <def> <lef>` command imported
+                # demo/ariane's mismatched pair at speck size in silence
+                # (Codex P1 on #710).
+                #
+                # Only when a LEF was actually SUPPLIED: the no-LEF mode above
+                # synthesizes one from the DEF's own placement and is a
+                # deliberate, documented fallback.
+                missing = list(getattr(st, "missing_cells", []) or [])
+                if missing and tmp_lef is None and effective_lef:
+                    shown = ", ".join(missing[:8])
+                    more = f" (+{len(missing) - 8} more)" if len(missing) > 8 else ""
+                    raise SystemExit(
+                        f"[def_viz] ERROR: {len(missing)} cell(s) in the DEF "
+                        f"have no footprint in {_os.path.basename(effective_lef)}: "
+                        f"{shown}{more}\n"
+                        f"          Each would be drawn 0.5 x 0.5 um, which is "
+                        f"not a macro — a wrong-LEF run looks plausible and is "
+                        f"entirely wrong.\n"
+                        f"          Use the LEF that matches this DEF, or drop "
+                        f"the LEF argument to infer sizes from the placement.")
                 db.compute_all()
             finally:
                 if tmp_lef is not None:
