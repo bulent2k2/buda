@@ -1,6 +1,11 @@
-# chip3a_bottomup + the chip_stack heal-to-clean scheme (PR #675),
-# interleaved-round starting point; scoped bundle-bit caps to follow if
-# structural fan-out residuals appear (the chip_stack BU signature).
+# chip3a_bottomup + the chip_stack heal-to-clean scheme (PR #675).
+# MEASURED CLEAN on the first application, NO scoped caps needed
+# (2026-08-12, 4-core box, --threads 4): 78 unplaced / 38 ovl -> 0 opens
+# (ovl 1), check_design 'Success: no violations found', 1767s total.  The
+# round-2 ripup's CLASS passes carried it — six template re-pins across
+# the NESTED bottom-up classes (mix2__dogleg1/dogleg2/dnuts1 AND the
+# intermediate mix2 itself, 3-18 instances each; the fully recursive
+# bottom-up composition) took 30->0 opens and ground overlaps 21->1.
 # chip3 — depth-3 BOTTOM-UP variant: bottom-up marks at TWO hierarchy
 # levels (templates within templates — a first): the depth-1 cells (big2,
 # mix2) AND mix2's nested depth-2 cell types (mix2__dnuts1/2, mix2__dogleg1/2

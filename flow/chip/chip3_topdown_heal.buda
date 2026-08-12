@@ -1,6 +1,10 @@
 # chip3_topdown + the chip_stack heal-to-clean TD scheme (PR #675):
 # three INTERLEAVED short healer rounds — negotiate; ripup_reroute 12;
-# refine_selection — instead of negotiate-only.
+# refine_selection — instead of negotiate-only.  MEASURED CLEAN on the
+# first application (2026-08-12, 4-core box, --threads 4): 260 unplaced /
+# 6 ovl -> 0/0, check_design 'Success: no violations found', 1357s total
+# (round-1 ripup 260->6 in 13 cheap screened moves, round-2 6->0, round 3
+# pure WL polish to 2,453,102).
 # chip3 — the TRUE 3-LEVEL variant of chip_topdown (2026-07-31): same
 # composition (3x big2 + 3x mix2 + 100 top buses, identical SA placement),
 # but mix2 is imported with build_hier_demo's --nest-bdb-cells, PRESERVING
