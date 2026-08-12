@@ -288,13 +288,79 @@ The build itself is a by-hand step, last run on this tree:
 | Tcl bridge sourced from the installed copy | 1 bundle |
 | `pip install -e .`, then edit a source file | change visible immediately |
 
+## 6a. macOS — measured, not assumed
+
+`.github/workflows/macos-wheel.yml` is a **prototype**, not a gate and not a
+matrix: `workflow_dispatch`, one Python, artifact only, nothing published. It
+exists because §7 used to say delocate "would mostly verify rather than repair,
+but that is a claim to test, not to assert" — and because before it, no
+workflow in this repo had ever run on macOS at all, on the platform carrying
+the most platform-specific code in the tree.
+
+Two jobs, because one runner cannot do both halves:
+
+| job | what it is |
+|---|---|
+| `native` | arm64 on `macos-latest`, built plainly, **fully smoke-tested**. The evidence. |
+| `intel` | x86_64 **cross-built** with cibuildwheel, **never executed there**. The deliverable for an Intel Mac; the target machine is the only execution test, and the job's name says so. |
+
+`macos-13` — the obvious choice for a native Intel build — is **retired**, and
+the first run found out the slow way: 15 minutes queued with `runner_id: 0`,
+no runner ever assigned. Worth knowing the failure mode, because an unserved
+label does not error, it *waits*: "still queued" reads like a busy fleet.
+
+**The delocate answer, and it is half of what was expected.**
+
+```
+before repair:  /usr/lib/libSystem.B.dylib  /usr/lib/libc++.1.dylib  libbuda_core.dylib
+after  repair:  /usr/lib/libSystem.B.dylib  /usr/lib/libc++.1.dylib  libbuda_core.dylib
+```
+
+delocate vendored **nothing** — no third-party dylib to bring in, so the
+"verify rather than repair" half is confirmed. But it is **not** a no-op: it
+rewrote both extensions' install names from `@rpath/libbuda_core.dylib` to
+`@loader_path/libbuda_core.dylib` and deleted the now-redundant `@loader_path`
+rpath entry, collapsing one level of indirection. A normalization, not a
+repair. And the wheel that passed the smoke test is the **raw** one, so
+`@rpath` + `LC_RPATH=@loader_path` resolves on macOS as designed.
+
+**What the native job proved** (the project's first macOS execution):
+
+| check | result |
+|---|---|
+| `import buda`, `import buda_db` bare | resolve at the wheel root |
+| `buda.BDB is buda_db.BDB` | `True` — one `std::type_info`, so `@loader_path` really shares `libbuda_core` |
+| `import buda_cli` before `install()` | `ModuleNotFoundError`, as the two-tier contract requires |
+| `in_checkout()` | `False` |
+| after `install()` | 102 commands — identical to Linux |
+| `buda --no-viz demo/quickstart.buda` from outside the checkout | 9 commands, clean |
+| `buda-fp --help`, `buda-viz --help` | usage — the headless-help fix, verified on a host that HAS tkinter (the opposite of where it was written) |
+| Tcl bridge sourced from the installed copy | 1 bundle |
+
+**`MACOSX_DEPLOYMENT_TARGET` must be set explicitly, and the first run proved
+it by getting it wrong.** Unset, a wheel inherits the *runner's* macOS version
+as its floor: the arm64 wheel came out `macosx_26_0_arm64` — installable on
+macOS 26 and nothing older — from a job whose green tick said nothing about it.
+The Intel job was already right because cibuildwheel had been handed `13.0`
+explicitly; the asymmetry was the bug. Both are now pinned at 13.0, and the
+`Host facts` step prints the value so an unset one is visible rather than
+inferred from a filename.
+
+Installed and run on a real Intel Mac (macOS 26, Anaconda Python 3.13.5):
+`buda-3.0.0-cp313-cp313-macosx_13_0_x86_64.whl` installs and routes
+`demo/quickstart.buda` to the same numbers as Linux and as the arm64 job —
+5 bundles, 16 segments, 0 overlaps, 61 net segments, 0 unplaced.
+
+One gotcha worth pre-empting: a `.whl` downloaded through a browser carries
+`com.apple.quarantine`, which can stop the extracted dylib from loading.
+`xattr -dr com.apple.quarantine .` before installing.
+
 ## 7. What this does NOT do
 
-* No wheels are built for other platforms or Python versions, and none are
-  published. `auditwheel`/`delocate` have not been run — the three artifacts
-  are already adjacent with an `$ORIGIN`/`@loader_path` RPATH, so those tools
-  would mostly verify rather than repair, but that is a claim to test, not to
-  assert.
+* No wheel **matrix**: one macOS prototype (§6a), nothing for Windows or
+  Linux, one Python version, and nothing published. `auditwheel` has still not
+  been run — the Linux side of the "verify rather than repair" claim remains
+  untested, even though the macOS side now has an answer.
 * No version-bump process. The version is declared twice (`pyproject.toml`,
   `CMakeLists.txt`) and pinned equal by a test; nothing automates changing it.
 * `src/web`'s served files ship, but the Scala.js front-end bundle is a build
