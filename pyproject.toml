@@ -1,0 +1,107 @@
+# Copyright 2026 Ben Bulent Basaran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# `pip install .` — see docs/internal/packaging.md.
+#
+# This is the PREREQUISITE for wheels, not wheels: it makes a checkout
+# installable with the standard tooling.  There is deliberately no
+# cibuildwheel matrix, no release cadence and nothing published — those
+# decisions come later and this is what they would have to be built on.
+#
+# `bin/bb` + `bin/activate` remain the developer path and are untouched by
+# this file: the CMake install rules it drives are guarded by BUDA_WHEEL,
+# which is OFF for every build that does not come through pip.
+
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.10"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "buda"
+version = "3.0.0"          # == project(buda VERSION ...) in CMakeLists.txt,
+                           # pinned equal by test_packaging.py
+description = "BUDA — Bundled Unified Design Automation: EDA interconnect planning"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Ben Bulent Basaran" }]
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation",
+]
+
+# matplotlib is not optional in practice: the CLI imports buda_viz on the
+# visualize path and the Floorplanner is built on it.  tkinter is a system
+# package (it ships with Python) and cannot be declared here — the suite runs
+# headless under Agg without it, live windows need it.  See
+# docs/build_test_dependencies.md.
+dependencies = ["matplotlib"]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-bdd"]
+
+[project.scripts]
+# The installed twins of bin/buda, bin/fp and bin/viz.  `fp` and `viz` are
+# too generic to claim on a user's PATH, so they are prefixed; `buda` is the
+# project's own name and is not.
+buda = "buda_runtime.entry:buda"
+buda-fp = "buda_runtime.entry:floorplanner"
+buda-viz = "buda_runtime.entry:viz"
+
+[project.urls]
+Homepage = "https://github.com/bulent2k2/buda"
+
+[tool.scikit-build]
+cmake.version = ">=3.15"
+
+# NOT `build/`: that directory is the developer's, written by `bin/bb` and
+# read via PYTHONPATH, and letting pip share it would mean a `pip install`
+# silently re-configures the tree the next `bb` builds in — with a different
+# BUDA_ARCH (below), which is exactly what perturbs the placement goldens.
+build-dir = ".pipbuild/{wheel_tag}"
+
+# `buda_runtime` is declared here rather than installed by CMake, and that one
+# line is what makes `pip install -e .` mean what it says.  scikit-build-core
+# REDIRECTS a declared package to its source directory in editable mode and
+# COPIES everything else; with the whole layer coming from CMake, an editable
+# install was measured to copy `src/*.py` into site-packages, so editing the
+# checkout changed nothing and the install looked fine while serving a stale
+# copy.  Redirected instead, `buda_runtime/__init__.py` is read from the
+# checkout, `in_checkout()` is true there, and `paths()` hands back the live
+# `src/` and `tools/` — the editable case falls out of the layout rule rather
+# than needing one of its own.  The rest of the layer still comes from CMake
+# (see the BUDA_WHEEL block in CMakeLists.txt), which skips it when
+# SKBUILD_STATE says editable.
+wheel.packages = ["buda_runtime"]
+wheel.install-dir = ""
+wheel.exclude = ["**/__pycache__/**"]
+
+sdist.exclude = [".pipbuild", "build", "log", "flow/log", "qor", "debug",
+                 "archive", "**/__pycache__", "**/*.so", "bin/*.app"]
+
+[tool.scikit-build.cmake.define]
+BUDA_WHEEL = "ON"
+
+# A pip build is a DISTRIBUTABLE build, so it must not bake in the build
+# machine's instruction set.  `bin/bb` keeps `native`; this path pins the
+# baseline, for the same reason CI does (CMakeLists.txt explains it at
+# BUDA_ARCH: exact overlap/opens counts drift across microarchitectures, and
+# the goldens are what that perturbs).
+#
+# The consequence is worth stating rather than discovering: a pip-installed
+# BUDA and a `bin/bb` BUDA are two different builds and may report different
+# exact counts on the same design.  Override with
+#     pip install . -C cmake.define.BUDA_ARCH=native
+BUDA_ARCH = "none"

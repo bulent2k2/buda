@@ -55,3 +55,7 @@ docs/.obsidian/
 # (checked-in BDB fixtures are text), so without this the vehicle dirties
 # `git status` every time someone runs it.
 flow/tcl/out/
+
+# pip's CMake build tree (tool.scikit-build build-dir). Deliberately NOT build/,
+# which is the developer tree bin/bb writes — see pyproject.toml.
+.pipbuild/

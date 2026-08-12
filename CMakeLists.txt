@@ -276,4 +276,67 @@ if(CYGWIN)
     endforeach()
 endif()
 
-install(TARGETS buda buda_db buda_core DESTINATION build)
+# ── install ───────────────────────────────────────────────────────────────
+# Two destinations, because there are two consumers.
+#
+# BUDA_WHEEL=OFF (default) is the developer layout `bin/bb` and `bin/activate`
+# describe: the three artifacts land in `build/`, which is what PYTHONPATH
+# points at.  Unchanged.
+#
+# BUDA_WHEEL=ON is what `pip install .` asks for (scikit-build-core sets it
+# from pyproject.toml).  The whole Python layer is folded into ONE directory
+# so a wheel claims exactly one name in site-packages — `src/` and `tools/`
+# are names no distribution may take, and `build/` is a build product.  The
+# extension modules are the exception and stay at the wheel ROOT, so `import
+# buda` works with nothing on PYTHONPATH; `libbuda_core` must be adjacent to
+# them for their `$ORIGIN`/`@loader_path` RPATH to resolve, so it goes there
+# too.  `buda_runtime/__init__.py` documents the resulting layout and is what
+# puts it back together at import time.
+option(BUDA_WHEEL "Install the Python layer as a wheel payload" OFF)
+
+if(NOT BUDA_WHEEL)
+    install(TARGETS buda buda_db buda_core DESTINATION build)
+else()
+    set(BUDA_PY_DEST "buda_runtime")
+    install(TARGETS buda buda_db buda_core DESTINATION ".")
+
+    # `buda_runtime/__init__.py` and `entry.py` are NOT installed here: they
+    # are declared in pyproject.toml as the wheel's one package, so an
+    # editable install REDIRECTS them to the checkout.  Everything below is
+    # copied content, which an editable install must not have — redirected
+    # `buda_runtime` reports `in_checkout()` and hands back the live `src/`
+    # and `tools/`, and a copy sitting beside it would shadow them with a
+    # snapshot taken at install time.
+    if(NOT SKBUILD_STATE STREQUAL "editable")
+        # The Python layer, whole.  Selecting a subset would be a judgement
+        # call that fails SILENTLY — a module left out surfaces as an
+        # ImportError deep in someone's flow — and these are small text
+        # files, so the rule is simply "every .py".  `src/` flattens into the
+        # package directory (its modules are top-level names today and every
+        # import in the repo says so); `tools/` stays a SUBdirectory, because
+        # it is a package in its own right (`from tools import bdb2buda`) as
+        # well as a source of top-level modules (`import bdb_serialize`), and
+        # buda_runtime puts both on sys.path.
+        install(DIRECTORY src/ DESTINATION "${BUDA_PY_DEST}"
+                FILES_MATCHING PATTERN "*.py" PATTERN "__pycache__" EXCLUDE)
+        install(DIRECTORY tools/ DESTINATION "${BUDA_PY_DEST}/tools"
+                FILES_MATCHING PATTERN "*.py" PATTERN "*.tcl"
+                PATTERN "__pycache__" EXCLUDE)
+
+        # Non-.py payload the layer reads at runtime: the web front end's
+        # served files, and the window icons.  The icons install FLAT, which
+        # is the third lookup `viz_window.set_icon` / `set_dock_icon` already
+        # try ("a flattened or frozen tree").  Their first two rungs LOOK
+        # above the package (`<pkg>/../assets/x.png`, `<pkg>/../x.png`) and
+        # MISS — that is the mechanism, not a failure: measured on an install,
+        # rungs 1 and 2 are absent and rung 3 finds the file.
+        #
+        # `FILES_MATCHING` on assets/ for the same reason as its neighbours:
+        # this destination is the package directory itself, so an unfiltered
+        # copy would land anything added to assets/ beside `buda_cli.py` — a
+        # `.py` there would become an importable top-level module.
+        install(DIRECTORY src/web/static/ DESTINATION "${BUDA_PY_DEST}/web/static")
+        install(DIRECTORY assets/ DESTINATION "${BUDA_PY_DEST}"
+                FILES_MATCHING PATTERN "*.png")
+    endif()
+endif()

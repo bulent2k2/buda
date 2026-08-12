@@ -898,7 +898,20 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
             # fallback could never resolve viz_ipc; matches buda_cli.py).
             _tools = _os.path.normpath(
                 _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'tools'))
-            if _tools not in _sys.path:
+            # This is the CHECKOUT fallback — pytest.ini puts `build` and
+            # `src` on the path and conftest only APPENDS `tools`, so a test
+            # importing buda_viz without going through buda_cli relies on it.
+            #
+            # Installed, `..` is site-packages, where `tools` is a real
+            # distribution name (see tools/__init__.py) and putting it at
+            # position 0 would hand a stranger's package the front of the
+            # path.  So the test asks whether this `tools` is OURS, by looking
+            # for the file we are about to import — the same content-addressed
+            # form buda_server.py uses.  An `isdir` here would be no guard at
+            # all: it is TRUE exactly when the stranger exists, and false only
+            # in the one case that was never the hazard.
+            if (_os.path.isfile(_os.path.join(_tools, 'viz_ipc.py'))
+                    and _tools not in _sys.path):
                 _sys.path.insert(0, _tools)
             from viz_ipc import VizIPC, POLL_MS
             self._ipc = VizIPC(self._ipc_session, verbose=self._ipc_verbose)

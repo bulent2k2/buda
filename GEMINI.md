@@ -164,7 +164,7 @@ below, so they are current — the earlier "out-of-date documents" list is retir
 
 *   **[CLAUDE.md](CLAUDE.md)** — the canonical, most-detailed architecture + command reference. GEMINI.md mirrors it at a high level; when the two disagree, CLAUDE.md and the `docs/` tree win.
 *   **[README.md](README.md)** — project overview, current directory tree, quick start.
-*   **[README_build.md](README_build.md)** — build guide (`bin/bb` + standard CMake in `build/`).
+*   **[README_build.md](README_build.md)** — build guide (`bin/bb` + standard CMake in `build/`, plus `pip install .` for using rather than developing — see [docs/internal/packaging.md](docs/internal/packaging.md)).
 *   **[README_viz.md](README_viz.md)** — visualizers: matplotlib CLI (`bin/viz`), TopoExplorer (`bin/u2b`), Floorplanner (`bin/fp`/`bin/bfp`), and the web client.
 *   **[docs/](docs/)** — user guide, CLI/script references, and `docs/internal/` design notes (indexed by [docs/internal/ReadMe.md](docs/internal/ReadMe.md)).
 *   **[tools/ReadMe_tools.md](tools/ReadMe_tools.md)** — clustering / converter / DEF-viz tooling and IPC demos.

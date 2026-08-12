@@ -94,10 +94,20 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-# Add src/ to path so we can import buda_viz
-_SRC = os.path.join(_HERE, "..", "src")
-if _SRC not in sys.path:
-    sys.path.insert(0, _SRC)
+# Add src/ to path so we can import buda_viz — the CHECKOUT fallback, for
+# `python3 tools/bdb_floorplanner.py` run by path with nothing set up.  Every
+# other route has already bootstrapped: `bin/fp` exports PYTHONPATH, and the
+# installed `buda-fp` goes through `buda_runtime.install()`.
+#
+# Existence-checked, because in the installed layout this resolves to
+# `buda_runtime/src`, which does not exist — and claiming a nonexistent
+# directory at sys.path[0] is a guess about the layout, which is the habit
+# buda_runtime exists to end.  `_UP` is the installed answer (it holds the
+# `src` modules there) and the repo root in a checkout; both are real.
+_UP = os.path.normpath(os.path.join(_HERE, ".."))
+for _p in (os.path.join(_UP, "src"), _UP):
+    if os.path.isfile(os.path.join(_p, "buda_viz.py")) and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import floorplanner_commands as fpc
 import buda_viz

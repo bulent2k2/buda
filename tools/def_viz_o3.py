@@ -38,10 +38,16 @@ import matplotlib.patches as mpatches
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 
-# Add src/ to path so we can import buda_viz
-_SRC = os.path.join(_HERE, "..", "src")
-if _SRC not in sys.path:
-    sys.path.insert(0, _SRC)
+# Add src/ to path so we can import buda_viz — the CHECKOUT fallback, for
+# `python3 tools/def_viz_o3.py` run by path.  `bin/viz` exports PYTHONPATH and
+# the installed `buda-viz` goes through `buda_runtime.install()`, so this is
+# only the bare case.  Content-checked: installed, `../src` does not exist and
+# `_UP` is the directory that holds those modules — claiming either by NAME
+# would be a guess about the layout, which buda_runtime exists to end.
+_UP = os.path.normpath(os.path.join(_HERE, ".."))
+for _p in (os.path.join(_UP, "src"), _UP):
+    if os.path.isfile(os.path.join(_p, "buda_viz.py")) and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from def_viz_shared import (DefVizData, bdb_is_fresh,
                              draw_die, draw_bg_instances,

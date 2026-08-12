@@ -144,15 +144,27 @@ def claim_protocol_channel():
 _PROTO_OUT = claim_protocol_channel() if __name__ == "__main__" else None
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-for _p in (os.path.join(_HERE, "..", "build"),
-           os.path.join(_HERE, "..", "src"),
-           _HERE):
+# All this has to do is REACH `buda_cli`; its own bootstrap then puts the rest
+# of the Python layer on sys.path (see `buda_runtime.paths()`).  Deliberately
+# not a second copy of that rule: a checkout spreads the layer over
+# build/src/tools while an installed wheel folds it into one directory, so a
+# copy here would be exercised in one layout and drift in the other.  In a
+# checkout `buda_cli` is in the sibling `src/`; in a wheel it is one directory
+# up, since `tools/` is installed inside `buda_runtime/`.
+for _p in (os.path.join(_HERE, "..", "src"), os.path.dirname(_HERE)):
     _p = os.path.normpath(_p)
-    if _p not in sys.path:
+    if os.path.isfile(os.path.join(_p, "buda_cli.py")) and _p not in sys.path:
         sys.path.insert(0, _p)
 
-import buda                                                 # noqa: E402
+# `buda_cli` FIRST, and the order is load-bearing: its bootstrap is what puts
+# `build` on sys.path for the `import buda` below.  Under `bin/buda` the
+# wrapper's PYTHONPATH hides that, but `python3 tools/buda_server.py` in a bare
+# shell depends on it — and that is the environment nothing tests.  `noqa:
+# E402` says "not at the top of the file"; it does not say "do not reorder",
+# so an import sorter (or a reader tidying two adjacent `import buda*` lines
+# back into alphabetical order) would break it silently.
 import buda_cli                                             # noqa: E402
+import buda                                                 # noqa: E402
 import buda_diag                                            # noqa: E402
 from buda_cmds import COMMANDS                              # noqa: E402
 
