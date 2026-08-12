@@ -187,6 +187,9 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
     n_sig = sum(1 for s in slots if s.type == "SIGNAL")
     if n_sig > 0:
         session.layers.set_bit_pitch(layer_id, pat.unit_pitch() / n_sig)
+        # R1 metal-shaped NDR needs the slot GEOMETRY, not just the pitch:
+        # pushed beside it so the two can never describe different patterns.
+        session.layers.set_ndr_geom(layer_id, pat.ndr_geom())
 
     # Re-apply any existing keepouts to this new layer grid.  Explicit layer
     # sets only: a zone with EMPTY layer_ids (= blocks all layers, Python-API

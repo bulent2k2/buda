@@ -23,6 +23,7 @@
 #include <vector>
 #include "placed_segment.h"  // PreRoutedSegment
 #include "topology.h"  // Rect
+#include "ndr.h"       // NdrLayerGeom
 
 namespace buda {
 
@@ -68,6 +69,14 @@ struct TrackPattern {
 
     // Fraction of unit_pitch occupied by SIGNAL slots.
     double signal_density() const;
+
+    // The pattern's SIGNAL slots as maximal CONTIGUOUS runs, for R1
+    // metal-shaped NDR quantization (ndr.h).  A run breaks at any non-signal
+    // slot, because a k-slot wire is k consecutive signal slots and may not
+    // span a power rail — the distinction a single scalar pitch cannot
+    // express.  Each entry is (slot width, gap to the next signal slot in
+    // the same run).
+    NdrLayerGeom ndr_geom() const;
 
     // 1 / signal_density — multiply abstract bus width by this to get physical reservation.
     double dilution_factor() const;

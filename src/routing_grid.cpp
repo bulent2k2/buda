@@ -42,6 +42,45 @@ double TrackPattern::signal_density() const {
     return sig / up;
 }
 
+NdrLayerGeom TrackPattern::ndr_geom() const {
+    NdrLayerGeom g;
+    std::vector<std::pair<double, double>> run;
+    // `pending` is the distance accumulated since the last SIGNAL slot: its
+    // own space_after plus any non-signal slots crossed.  It becomes that
+    // slot's gap once the NEXT signal slot in the same run is seen, so a run
+    // that ends at a rail never records a gap into it.
+    double pending = 0.0;
+    for (const auto& s : slots) {
+        if (s.type == "SIGNAL") {
+            if (!run.empty()) run.back().second = pending;
+            run.push_back({s.width, 0.0});
+            pending = s.space_after;
+        } else {
+            // A rail breaks the run: metal cannot cross it.
+            if (run.size() > 0) { g.runs.push_back(run); run.clear(); }
+            pending = 0.0;
+        }
+    }
+    if (!run.empty()) g.runs.push_back(run);
+    // The pattern TILES, so the last run of one period abuts the first run
+    // of the next.  They are one physical run only when the period neither
+    // starts nor ends on a rail — i.e. exactly one run was produced and the
+    // first and last slots are both signal.  Splicing is what would let a
+    // wire cross the period boundary, so it must be conditional, not
+    // assumed.
+    if (g.runs.size() == 1 && !slots.empty() &&
+        slots.front().type == "SIGNAL" && slots.back().type == "SIGNAL") {
+        auto& only = g.runs.front();
+        only.back().second = slots.back().space_after;
+        // One period's worth is the repeating unit; a caller asking for more
+        // slots than a period holds is asking to cross into the next copy,
+        // which is legal here precisely because there is no rail between.
+        const size_t n = only.size();
+        for (size_t i = 0; i < n; ++i) only.push_back(only[i]);
+    }
+    return g;
+}
+
 double TrackPattern::dilution_factor() const {
     double sd = signal_density();
     return (sd > 0.0) ? 1.0 / sd : 1.0;

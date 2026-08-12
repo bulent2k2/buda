@@ -98,6 +98,14 @@ const Layer* LayerStack::get_layer(int id) const {
     for (const auto& l : layers_) if (l.id == id) return &l;
     return nullptr;
 }
+void LayerStack::set_ndr_geom(int id, const NdrLayerGeom& g) {
+    for (auto& l : layers_) if (l.id == id) { l.ndr_geom = g; return; }
+}
+const NdrLayerGeom& LayerStack::ndr_geom(int id) const {
+    static const NdrLayerGeom kEmpty;
+    const Layer* l = get_layer(id);
+    return l ? l->ndr_geom : kEmpty;
+}
 double LayerStack::bit_pitch(int id) const {
     const Layer* l = get_layer(id);
     return l ? l->bit_pitch : 0.0;
