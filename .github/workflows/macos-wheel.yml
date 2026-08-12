@@ -84,6 +84,15 @@ jobs:
     name: arm64 (native, smoke-tested)
     runs-on: macos-latest
     timeout-minutes: 60
+    env:
+      # JOB-level, so the "Host facts" step can PRINT it rather than the build
+      # silently having it.  Without a target the wheel inherits the RUNNER's
+      # macOS version as its floor: the first green run produced
+      # `buda-3.0.0-cp313-cp313-macosx_26_0_arm64.whl`, installable on macOS 26
+      # and nothing older — from a job whose success said nothing about it.
+      # The Intel job was already correct because cibuildwheel was handed this
+      # same target explicitly; the ASYMMETRY was the bug.
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
 
     steps:
       - uses: actions/checkout@v4
@@ -99,6 +108,10 @@ jobs:
           sw_vers
           python3 -VV
           python3 -c "import sysconfig; print('platform tag:', sysconfig.get_platform())"
+          # Printed, not merely set: unset, the wheel silently inherits the
+          # runner OS as its floor, and the only place that shows up is the
+          # filename nobody reads.
+          echo "MACOSX_DEPLOYMENT_TARGET=[${MACOSX_DEPLOYMENT_TARGET:-UNSET}]"
           clang --version | head -2
           cmake --version | head -1
 
