@@ -83,9 +83,25 @@ def _metrics(text):
 
 
 def record(script, args, out_path, tclsh="tclsh"):
-    """Run the Tcl flow with the recorder armed.  Returns its CompletedProcess."""
+    """Run the Tcl flow with the recorder armed.  Returns its CompletedProcess.
+
+    The destination is REMOVED first, so its existence afterwards proves THIS
+    run wrote it.  Without that, a flow that dies before `buda::start` records
+    nothing, the previous run's file is still sitting there, and the caller
+    counts its commands and reports an old design as the new result — a
+    routine retry silently answering with stale data (Codex P1 on #701).
+    """
+    out_path = os.path.abspath(out_path)
+    try:
+        os.remove(out_path)
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        # Refuse rather than proceed: we could no longer tell a fresh
+        # recording from the file already there, which is the whole point.
+        raise SystemExit(f"tcl2buda: cannot clear {out_path}: {e}")
     env = dict(os.environ)
-    env["BUDA_RECORD"] = os.path.abspath(out_path)
+    env["BUDA_RECORD"] = out_path
     env["BUDA_RECORD_NOTE"] = " ".join([os.path.relpath(script, _ROOT)] + list(args))
     return subprocess.run([tclsh, script, *args], capture_output=True,
                           encoding="utf-8", errors="replace", env=env)
@@ -150,8 +166,12 @@ def main(argv=None):
         print(f"no such script: {a.script}", file=sys.stderr)
         return 2
 
-    p = record(a.script, a.args, a.out, a.tclsh)
-    if not os.path.exists(a.out):
+    # One absolute path from here on.  `record` resolves against the CALLER's
+    # directory while `replay` runs with cwd=_ROOT, so a relative `-o` used by
+    # both would name two different files (Codex P2 on #701).
+    out = os.path.abspath(a.out)
+    p = record(a.script, a.args, out, a.tclsh)
+    if not os.path.exists(out):
         # No recording at all means the flow never reached the engine — a
         # Tcl error before `buda::start`, most likely.  Its own output is the
         # explanation, so pass it through rather than paraphrasing.
@@ -160,9 +180,9 @@ def main(argv=None):
         sys.stderr.write((p.stderr or p.stdout or "")[-2000:])
         return 1
 
-    n = sum(1 for ln in open(a.out)
+    n = sum(1 for ln in open(out)
             if ln.strip() and not ln.startswith("#"))
-    print(f"tcl2buda: {n} command(s) -> {a.out}  (tcl exit {p.returncode})")
+    print(f"tcl2buda: {n} command(s) -> {out}  (tcl exit {p.returncode})")
     # A non-zero exit is NOT an error here: `array.tcl` exits 1 on a dirty
     # design, and the recording of a dirty run is exactly as valid.
     if p.returncode != 0:
@@ -172,7 +192,7 @@ def main(argv=None):
     if not a.verify:
         return 0
 
-    r, replay_text = replay(a.out)
+    r, replay_text = replay(out)
     # The replay RAN is checked first and unconditionally.  Comparing metrics
     # only when both sides have them is fine; returning 0 because there was
     # nothing to compare is not — that reported success for a replay which had
@@ -183,12 +203,12 @@ def main(argv=None):
                 if "Error" in ln or "error" in ln][-3:]
         for ln in tail:
             print(f"    {ln.strip()[:160]}")
-        cwd = _recorded_cwd(a.out)
-        outdir = os.path.dirname(os.path.abspath(a.out))
+        cwd = _recorded_cwd(out)
+        outdir = os.path.dirname(out)
         if cwd and os.path.abspath(cwd) != outdir:
             print(f"    A `.buda` resolves relative paths against its OWN "
                   f"directory, and this flow ran in\n      {cwd}\n"
-                  f"    Write the recording there (-o {os.path.join(cwd, os.path.basename(a.out))}) "
+                  f"    Write the recording there (-o {os.path.join(cwd, os.path.basename(out))}) "
                   f"so its paths resolve.")
         return 1
     tcl_m = _metrics((p.stdout or "") + (p.stderr or ""))

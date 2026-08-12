@@ -131,3 +131,38 @@ def test_the_recorder_flattens_a_source_tree(tmp_path):
     # recording of a flow that used them says where it can be replayed.
     assert any(ln.startswith("# cwd: ")
                for ln in Path(out).read_text().splitlines())
+
+
+def test_a_flow_that_records_nothing_never_reports_a_stale_file(tmp_path):
+    """The retry trap (Codex P1 on #701).
+
+    A Tcl script that dies before `buda::start` records nothing.  If the
+    destination already holds a PREVIOUS run's recording, an existence check
+    accepts it, counts its commands, and reports an old design as the newly
+    recorded result — with the flow's own non-zero exit excused as "its own
+    verdict".  So the destination is cleared before Tcl launches, and its
+    existence afterwards proves this run wrote it.
+    """
+    dead = tmp_path / "dead.tcl"
+    dead.write_text('error "boom before buda::start"\n')
+    out = tmp_path / "out.buda"
+    out.write_text("# STALE from an earlier run\nadd_block stale 0 0 1 1\n")
+
+    r = _run(dead, "-o", out)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "recorded nothing" in r.stdout + r.stderr
+    assert "stale" not in r.stdout, "it counted the previous run's file"
+    assert not out.exists(), "the stale recording survived and could be read"
+
+
+@pytest.mark.mid
+def test_a_relative_out_path_is_the_same_file_for_record_and_replay(tmp_path):
+    """`record` resolves `-o` against the CALLER's directory while `replay`
+    runs with cwd=<repo>, so a relative path used by both named two different
+    files — the replay then checked some other file, or none (Codex P2)."""
+    r = _run(_ROOT / "flow" / "tcl" / "array.tcl", 2, 2,
+             "-o", "rel.buda", "--verify", cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (tmp_path / "rel.buda").exists(), "recorded somewhere else"
+    assert not (_ROOT / "rel.buda").exists(), "recorded into the repo root"
+    assert "identical on" in r.stdout, r.stdout
