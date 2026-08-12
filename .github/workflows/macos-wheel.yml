@@ -1,0 +1,240 @@
+# Copyright 2026 Ben Bulent Basaran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# ONE macOS wheel — a prototype, deliberately not a matrix.
+#
+# `docs/internal/packaging.md` §7 says auditwheel/delocate "would mostly verify
+# rather than repair, but that is a claim to test, not to assert".  This is the
+# test.  It also gives the project its FIRST macOS build of any kind: every
+# other workflow here runs ubuntu-24.04 or windows-2022, so `@loader_path` —
+# the RPATH the whole three-artifact layout depends on — has never been
+# exercised outside a developer's laptop.
+#
+# What this is NOT: a release process, a version matrix, or anything published.
+# It builds one wheel for one platform and one Python, inspects it, smoke-tests
+# it, and uploads it as an artifact.  Keep it that way until there is a reason
+# not to; the reason will not be "it was easy to add another row".
+#
+# The build does NOT use cibuildwheel, on purpose.  cibuildwheel would repair
+# the wheel automatically and hide the very answer we are here to get.  This
+# builds the wheel plainly, then reports what it links (`delocate-listdeps`)
+# and uploads a repaired copy ALONGSIDE the raw one, so "did it need repair?"
+# is answered by comparing two artifacts rather than by assertion.
+name: macOS wheel (prototype)
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "macOS runner: macos-13 is Intel x86_64, macos-15 is Apple Silicon arm64"
+        type: choice
+        default: macos-13
+        options: [macos-13, macos-15]
+        required: false
+      python:
+        description: "Python version to build the wheel for (a wheel installs ONLY on its own version)"
+        type: string
+        default: "3.13"
+        required: false
+  # Also on push, because a `workflow_dispatch` workflow cannot be dispatched
+  # until it exists on the DEFAULT branch — so on a topic branch this is the
+  # only way to run it.  Path-scoped so it fires when the packaging inputs
+  # change and stays quiet otherwise.
+  push:
+    paths:
+      - '.github/workflows/macos-wheel.yml'
+      - 'pyproject.toml'
+      - 'CMakeLists.txt'
+      - 'buda_runtime/**'
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    runs-on: ${{ inputs.runner || 'macos-13' }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python || '3.13' }}
+
+      - name: Host facts
+        run: |
+          set -x
+          uname -a
+          sw_vers
+          python3 -VV
+          python3 -c "import sysconfig; print('platform tag:', sysconfig.get_platform())"
+          clang --version
+          cmake --version | head -1
+
+      - name: Build the wheel
+        run: |
+          python3 -m pip install --upgrade pip build delocate
+          # BUDA_ARCH is pinned to `none` by pyproject.toml for every pip
+          # build; nothing here overrides it.  That matters twice over on this
+          # runner: a distributable wheel must not carry the build machine's
+          # ISA, and `-march=` is x86 syntax that an arm64 clang would reject
+          # outright — so `none` is what makes the macos-15 option viable too.
+          python3 -m build --wheel --outdir dist/
+          ls -l dist/
+
+      - name: What does it link? (the delocate question, answered)
+        run: |
+          echo '## Wheel' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          ls -1 dist/ >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          echo '## Dependencies before repair' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          delocate-listdeps --all dist/*.whl 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          # The three artifacts install adjacent with an @loader_path RPATH, so
+          # the expectation is that delocate finds nothing to bring in and the
+          # repaired wheel is equivalent.  Uploaded separately rather than
+          # asserted, so the comparison is evidence and not a claim.
+          #
+          # Deliberately NOT fatal.  "delocate refuses this wheel" is a real
+          # answer to the question being asked and belongs in the report; a
+          # failed step here would instead throw away the raw wheel, which is
+          # the thing being tested and the thing you are waiting to install.
+          mkdir -p repaired
+          if delocate-wheel -w repaired/ -v dist/*.whl 2>&1 | tail -20; then
+            echo '## After repair' >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            delocate-listdeps --all repaired/*.whl 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '## After repair' >> "$GITHUB_STEP_SUMMARY"
+            echo 'delocate-wheel FAILED — see the step log. The raw wheel is' \
+                 'still uploaded and is what the smoke test below exercises.' \
+                 >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Smoke-test the installed wheel
+        run: |
+          set -e
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet dist/*.whl
+
+          # Run from OUTSIDE the checkout, deliberately.  `buda_runtime/` sits
+          # at the repo root, so a test run with the repo as cwd would import
+          # the CHECKOUT's copy, `in_checkout()` would be true, and the whole
+          # thing would exercise the source tree while appearing to test the
+          # wheel.  That is the exact shape of mistake this packaging work kept
+          # turning up, so the smoke test is anchored elsewhere and given an
+          # absolute path to the flow.
+          cd "$RUNNER_TEMP"
+          REPO="$GITHUB_WORKSPACE"
+
+          echo "-- import buda, bare (nothing on PYTHONPATH)"
+          "$RUNNER_TEMP/venv/bin/python" - <<'PY'
+          import buda, buda_db
+          print("   buda      :", buda.__file__)
+          print("   same type :", buda.BDB is buda_db.BDB)
+          assert buda.BDB is buda_db.BDB, "two std::type_info for BDB — libbuda_core was not shared"
+          PY
+
+          echo "-- the two-tier contract"
+          "$RUNNER_TEMP/venv/bin/python" - <<'PY'
+          try:
+              import buda_cli
+          except ModuleNotFoundError:
+              print("   buda_cli before install(): ModuleNotFoundError (expected)")
+          else:
+              raise SystemExit("buda_cli imported WITHOUT install() — layout contract broken")
+          import buda_runtime
+          print("   in_checkout():", buda_runtime.in_checkout(), "(must be False)")
+          assert not buda_runtime.in_checkout()
+          buda_runtime.install()
+          import buda_cli, bdb_serialize
+          from tools import bdb2buda
+          from buda_cmds import COMMANDS
+          print("   after install():", len(COMMANDS), "commands")
+          PY
+
+          echo "-- console scripts"
+          MPLBACKEND=Agg "$RUNNER_TEMP/venv/bin/buda" --no-viz "$REPO/demo/quickstart.buda" | tail -4
+          MPLBACKEND=Agg "$RUNNER_TEMP/venv/bin/buda-fp" --help | head -1
+          MPLBACKEND=Agg "$RUNNER_TEMP/venv/bin/buda-viz" --help | head -1
+
+          echo "-- Tcl bridge, sourced from the installed copy"
+          SP="$("$RUNNER_TEMP/venv/bin/python" -c 'import buda_runtime,os;print(os.path.dirname(buda_runtime.__file__))')"
+          cat > t.tcl <<TCL
+          source $SP/tools/buda.tcl
+          buda::start -viz 0 -python "$RUNNER_TEMP/venv/bin/python"
+          buda::def_layer 3 M3 H 20
+          buda::def_layer 4 M4 V 20
+          buda::add_block a 0 0 100 100
+          buda::add_block b 300 0 400 100
+          # Backslashes are DOUBLED because this heredoc is unquoted (it has to
+          # be, to expand $SP and $RUNNER_TEMP): bash eats one level, leaving
+          # Tcl the `\[4\]` it needs to keep the brackets literal.
+          buda::add_bus "bus\\[4\\]" a.out b.in
+          buda::run_bundler STRICT
+          puts "   tcl bridge: [buda::query bundles] bundle(s)"
+          buda::stop
+          TCL
+          tclsh t.tcl | tail -2
+
+      - name: How to use it
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'MD'
+          ## Installing this on your Mac
+
+          Download the `buda-macos-wheel` artifact, then:
+
+          ```bash
+          unzip buda-macos-wheel.zip
+          # A .whl that arrived through a browser carries com.apple.quarantine,
+          # which can stop the extracted dylib from loading.  Strip it first —
+          # this is not optional paranoia, it is the usual first failure.
+          xattr -dr com.apple.quarantine .
+          pip install ./buda-*.whl
+          ```
+
+          Then, from any directory OUTSIDE a BUDA checkout (inside one, the
+          repo's own `buda_runtime/` wins and you would be testing the source
+          tree):
+
+          ```bash
+          buda --no-viz /path/to/checkout/demo/quickstart.buda
+          python3 -c "import buda; print(buda.__file__)"
+          ```
+
+          **This wheel is a baseline build** (`BUDA_ARCH=none`, the same pin CI
+          uses), so its exact overlap/opens counts may differ from your
+          `bin/bb` build's. Use it to check that it RUNS; do not diff its
+          numbers against a local build's.
+
+          If `pip install` says "not a supported wheel on this platform", the
+          mismatch is the Python version or the macOS tag — the build's
+          platform tag is printed in the *Host facts* step above.
+          MD
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: buda-macos-wheel
+          path: |
+            dist/*.whl
+            repaired/*.whl
+          if-no-files-found: error
