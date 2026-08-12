@@ -224,6 +224,48 @@ def test_btcl_v_keeps_a_nonzero_exit_code_from_the_flow(tmp_path):
     assert "SAW_CODE_3: 1" in out, out[-500:]
 
 
+@pytest.mark.mid
+@_tcl_required
+def test_an_unhandled_engine_exit_code_does_not_reach_the_shell(tmp_path):
+    """What the Tcl side actually does with `buda::exit 3`, pinned so the doc
+    cannot drift back to claiming the CLI's guarantee.
+
+    `_request` turns a FATAL into a Tcl error, and an unhandled Tcl error exits
+    1 — the engine's code survives in the error TEXT, not in the process
+    status.  `buda -v` really does exit 3, because the CLI owns its own
+    process; the bridge does not own tclsh's.  Documented in TCL_FRONT_END.md
+    with the two-line pattern for a flow that wants to carry the code."""
+    # Streams kept APART here.  An unhandled FATAL is reported twice by
+    # construction — `_request` echoes the payload through `_deliver`, then
+    # tclsh prints the uncaught error, which carries the same text — so a
+    # combined count says 2 without a second viewer existing.  stdout is the
+    # echo; one there is the viewer having run once.
+    script = tmp_path / "flow.tcl"
+    script.write_text(_TCL_FLOW + "buda::exit 3\n")
+    env = {**os.environ, "MPLBACKEND": "Agg"}
+    r = subprocess.run(["bash", str(_BTCL), "-v", str(script)],
+                       capture_output=True, text=True, env=env, timeout=300)
+    assert r.returncode == 1, (r.returncode, r.stderr[-400:])   # Tcl's, not 3
+    assert "exit code 3" in r.stdout + r.stderr                 # …not lost
+    assert _viewer_attempts(r.stdout) == 1                      # opened once
+
+
+@pytest.mark.mid
+@_tcl_required
+def test_btcl_runs_a_script_whose_name_starts_with_a_dash(tmp_path):
+    """`--` ends btcl's own options, but tclsh does not honour a `--` of its
+    own: measured on 8.6.14, both `tclsh -v.tcl` and `tclsh -- -v.tcl` read the
+    name as an OPTION, run nothing, drain stdin and exit 0 — a silent no-op
+    reporting success.  So the operand is normalised to `./-v.tcl`."""
+    script = tmp_path / "-v.tcl"
+    script.write_text('puts "ARGV=[list {*}$argv]"\n')
+    env = {**os.environ, "MPLBACKEND": "Agg"}
+    r = subprocess.run(["bash", str(_BTCL), "--", script.name, "a", "b"],
+                       capture_output=True, text=True, env=env,
+                       cwd=str(tmp_path), timeout=300)
+    assert "ARGV=a b" in r.stdout, (r.returncode, r.stdout, r.stderr)
+
+
 def test_a_failing_viewer_is_reported_not_swallowed():
     """The appended viewer used to be wrapped in `except BaseException: pass`,
     so a backend or render failure gave the user neither the window they asked

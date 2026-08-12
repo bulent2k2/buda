@@ -161,8 +161,21 @@ window blocks until you close it, exactly as `buda::visualize` blocks; with
 
 Both ways of ending a flow open it: `buda::stop`, and the engine's own
 `buda::exit` (which ends the session before `buda::stop` can be reached).
-A trailing `buda::exit 3` still fails with code 3 — the viewer's note is
-appended after the outcome is decided and cannot change it.
+
+`buda::exit 3` still **fails**, and the viewer cannot change that: its note is
+appended after the reply's status is decided, so a `FATAL` stays `FATAL`. What
+it does *not* do is reach the shell — `buda::_request` turns a `FATAL` into a
+Tcl error, and an unhandled Tcl error exits **1**, not 3 (measured). The
+engine's code is in the error text; a flow that wants the process to carry it
+has to say so:
+
+```tcl
+if {[catch {buda::exit 3} err]} { puts stderr $err; exit 3 }
+```
+
+This is the one place the Tcl twin differs from `buda -v`, where a trailing
+`exit 3` really does exit 3 — the CLI owns its own process and the bridge does
+not own `tclsh`'s.
 
 **Wrapper options are read only before the script**, and `--` ends them
 explicitly. Everything from the script onward is the flow's, in its original

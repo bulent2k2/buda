@@ -36,4 +36,22 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# A script whose NAME begins with a dash is not a script to tclsh — it reads it
+# as an OPTION, runs nothing, drains stdin and returns 0.  Measured on 8.6.14:
+#
+#   tclsh -v.tcl a      -> ran nothing, exit 0
+#   tclsh -- -v.tcl a   -> ran nothing, exit 0     (`--` is not a terminator
+#                                                   tclsh honours, so ours
+#                                                   cannot simply be handed on)
+#   tclsh ./-v.tcl a    -> ran the script
+#
+# So `--` ends OUR parsing and the operand is normalised to a path tclsh cannot
+# misread.  Without this the documented `btcl -- -v.tcl` was a silent no-op that
+# still reported success — the worst shape a launcher can have.
+if [ $# -gt 0 ]; then
+  case "$1" in
+    -*) set -- "./$1" "${@:2}" ;;
+  esac
+fi
+
 exec tclsh "$@"
