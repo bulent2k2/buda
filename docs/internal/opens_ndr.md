@@ -10,7 +10,8 @@ command/GUI surface), [`ndr_architecture.md`](ndr_architecture.md)
 
 Snapshot index — last verified against `main`: **2026-08-11**, after R1
 (absolute width/spacing) landed in full — declaration, persistence AND
-per-layer resolution at every routing consumer. Every requirement has a
+per-layer resolution at every routing consumer — and after the doomed-seat
+HEALS moved from member bits to group demand. Every requirement has a
 working implementation and a vehicle, and the feature is usable end to end —
 **R8 is the one still met only in part** (the rule-uniform fallback), and R1
 and R6 each carry a residual limit below now that their headline gaps are
@@ -235,26 +236,41 @@ starved yet still R3-realizable (a coarse pattern hard-errors at declaration
 first). The sibling fix in the same commit *is* test-pinned. See
 [`ndr_architecture.md`](ndr_architecture.md) §7.5.
 
-### The dead-span and re-seat HEALS still measure need in member bits
+### The heals measure a governed seat in DEMAND (LANDED)
 
-The doomed-seat census and `tools/doomed_seat_forensics.py` now measure a
+The census, `tools/doomed_seat_forensics.py` and now the HEALS all measure a
 governed seat against `_seg_admission_need` — the Python mirror of
-`bus_seg_min_demand`, which is what the engine actually admits on. The two
-HEALS that share the same seat arithmetic (`_escalate_dead_low_segments` and
-the TOP re-seat pass in `nutsflow.py`) still compute `need` as
-`_seg_member_bits`, so a governed segment whose seat can host its bits but
-not its bits-plus-guards-plus-shields is not escalated and strands at DNUTS.
+`bus_seg_min_demand`, which is what the engine admits on. Measuring in member
+BITS meant a seat with room for the bits but not the
+bits-plus-guards-plus-shields read as healthy, was never escalated, and
+stranded in full at DNUTS.
 
-*Why it was left out of the census fix.* The census is report-only; the heals
-change layer assignment, so the fix belongs with its own QoR measurement
-rather than folded into a diagnostic change. It is corpus-neutral by
-construction — no corpus flow declares a rule, and the NDR conversion is the
-identity on an inactive spec — but it would move governed vehicles, which is
-exactly what wants measuring on its own.
+Repro: [`flow/ndr_heal_demand_seat.buda`](../../flow/ndr_heal_demand_seat.buda)
+— `shield bus` on 4 bits (demand 6) seated where the real pool is 5, so
+`5 >= 4` looked fine and `5 < 6` is the truth. Before: **0 net segments
+placed, 4 bits unplaced, 4 violations, detailed WL 0**. After: the re-seat
+heal moves it (`opens 4->0`) and the design is clean.
 
-*Where to start:* swap the two `need = self._seg_member_bits(...)` sites in
-`_escalate_dead_low_segments` / the re-seat heal for `_seg_admission_need`,
-then measure the NDR vehicles.
+*Three sites, not two.* The TOP re-seat pass has both a mover
+(`_reseat_doomed_top_segments`) and a ranking helper
+(`_final_reseat_heal._stranded_doomed_top`); they have to move together or
+the ranking disagrees with the mover about which seats are doomed.
+
+*Two units, kept distinct.* Each site mixes a BITS quantity (placed rows
+against member bits — the cull predictor, the `miss` ranking) with a SLOT
+quantity (pool against demand). They had been one variable. The pool is
+still selected on the FULL demand and the doom test made on the CREDITED
+minimum, which is the engine's own split (`detailed_nuts.cpp:470` vs `:497`).
+
+*And the re-seat target resolves on the TARGET layer.* An R1 absolute rule
+costs a different number of slots per layer, so asking "can layer L host
+this" with the current layer's answer is the wrong question.
+
+*Found on the way:* both ranking helpers counted NDR shield rows as placed
+bits, so a governed segment read as better placed than it is (4 bits + 2
+shields as 6 of 4) and `miss` could go negative — the same shield-inflated
+accounting as the bottom-up copy path (§7.5), here hiding stranded seats
+from the heal meant to move them.
 
 ---
 

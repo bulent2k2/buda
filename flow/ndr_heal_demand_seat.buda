@@ -1,0 +1,71 @@
+# REPRO: a governed seat that fits its BITS but not its DEMAND.
+#
+# The doomed-seat census measures a seat against `_seg_admission_need` — the
+# group DEMAND in slots, which is what the DNUTS engine actually admits on.
+# The HEALS that share the same arithmetic measured it in member BITS.  For
+# an ungoverned bundle those are the same number, so the gap was invisible
+# everywhere except on a governed bundle, where demand = bits + guards +
+# shields.  A seat with room for the bits but not the shields therefore read
+# as healthy, was never escalated, and stranded in full at DNUTS.
+#
+# ── The construction ──────────────────────────────────────────────────────
+#
+# `shb` is `shield bus`: 4 bits flanked by 2 GND shields, so
+#
+#     bits   = 4        what the heals used to measure
+#     demand = 6        what the engine admits on  (SBbBbBbBbS -> 6 slots)
+#
+# M9 carries a dense global pattern — which is what the PLANNER prices
+# against — and a region override over the trunk that leaves ONE signal
+# track per 40 units, so the seat's real pool is 5.  That is the #536
+# supply-doomed shape: 5 >= 4 (the seat looks fine in bits) and 5 < 6 (it
+# cannot host the run).  The override is the mechanism because a KEEPOUT
+# would not do: the planner sees keepouts in its band capacity and simply
+# routes elsewhere, so the doomed seat would never be chosen.
+#
+# M9 is the HIGHEST horizontal layer on purpose.  Equal-cost layers are
+# enumerated highest-first, so the trunk lands on the starved one and M5 is
+# left as the healthy re-seat target the heal needs.
+#
+# ── What must happen ──────────────────────────────────────────────────────
+#
+# The TOP re-seat heal (`_final_reseat_heal`) sees a supply-doomed seat and
+# moves the segment to M5, which can host all 6 slots.  Measured in bits it
+# saw nothing to do and every bit stranded.
+#
+# The flow is deliberately HEALERLESS — no negotiate/ripup/refine — because
+# the re-seat heal skips itself once any healer has run.  This vehicle is
+# about that heal, so nothing else may pre-empt it.
+
+add_block a 0   0 200  200
+add_block b 900 0 1100 200
+
+add_bus sh_[4] a.p b.q
+
+def_layer 3 M3 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+def_layer 9 M9 H TOP 20
+
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 5 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 6 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 9 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+
+# The starved region: one signal track per 40 units over the trunk's span,
+# invisible to the planner's global-pattern capacity model.
+add_grid_override 9 200 0 900 200 0 CUSTOM 36 1 _ 1 1
+
+def_ndr shb shield bus net GND
+set_ndr sh_ shb
+
+run_bundler STRICT
+generate_topologies
+set_track_pitch 3
+run_planner 1
+
+run_nuts
+run_detailed_nuts
+dump_ndr
+check_design
+report_wirelength
