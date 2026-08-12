@@ -8,17 +8,18 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 [`message_ids.md`](message_ids.md) and [`../TCL_FRONT_END.md`](../TCL_FRONT_END.md);
 this page is the backlog behind them.
 
-Snapshot index — last verified against `main`: **2026-08-10**, after items 1,
-2, 3, 4, 5, 6, 7, 10 and 11 landed — item 5's second blocker (the
-net-resolution name index) fell to the observation that the database already
-maintains the index, making the import streaming. Each item states what is
-missing, why it was left rather than forgotten, and where to start. Every
-claim below was reproduced on `main`
+Snapshot index — last verified against `main`: **2026-08-12**.  Everything
+here has landed except **item 8, the packaged wheel** — which is a CI and
+packaging project rather than an interchange defect, and is the only entry
+still owed code.  Item 9 closed WITHOUT any: its last residual turned out to
+be a provenance accident with no dependants, and saying so precisely is the
+resolution.  Each item states what was missing, why it was left rather than
+forgotten, and where to start.  Every claim below was reproduced on `main`
 before being written down; the reproduction is given so a reader can
 re-derive it rather than trust it.
 
-Items 1, 2, 3, 4, 5, 6, 7, 10 and 11 are kept in place, struck through, rather than
-moved to the resolved table at the bottom. Each entry records where this page's **own
+Resolved items are kept in place, struck through, rather than moved to the
+resolved table at the bottom. Each entry records where this page's **own
 first description was wrong** — item 1 about the merge case, and about the
 fix it originally proposed, which would have been the wrong fix; item 2
 about the severity, having called a silent SHORT a width collapse; item 3
@@ -521,14 +522,46 @@ macOS — is **already satisfied**: `bin/buda`'s Darwin relaunch requires all
 three of stdin/stdout/stderr to be TTYs and skips `--no-viz`, so a redirected
 or batch run already falls through to the direct launch.
 
-## 9. Smaller residuals
+## 9. ~~Smaller residuals~~ — RESOLVED 2026-08-12
 
-* **`demo/ariane` is a mismatched pair** (data, not code): its DEF
-  instantiates 133 × `fakeram45_256x16` while its LEF defines only
-  `sram_asap7_16x256_1rw`. Under the old importer every macro on that 2.7 mm
-  die was a 0.5 µm speck and nothing said so; the reader now refuses it
-  unless told `allow_missing_footprints`. Which of the two files is
-  authoritative is the owner's call.
+* ~~**`demo/ariane` is a mismatched pair.**~~ **RESOLVED 2026-08-12 — no
+  code is owed.** This page framed it as a question the owner had to
+  settle: its DEF instantiates 133 × `fakeram45_256x16` while its LEF
+  defines only `sram_asap7_16x256_1rw`, so *which file is authoritative?*
+
+  That was the wrong question, and the repo already answers it. The DEF is
+  the TILOS MacroPlacement **NanGate45** ariane133 benchmark
+  (`demo/ariane/ariane.buda` cites it); the LEF is an **ASAP7** SRAM, and
+  `demo/ariane/ReadMe.md` records how it arrived — *"ariane.lef (got it
+  later)"*. They are two different technologies. Neither file is wrong;
+  the LEF was simply never the LEF for this DEF, so there is nothing to
+  choose between.
+
+  And nothing depends on them agreeing, which is what makes this closable
+  rather than deferred:
+
+  | | |
+  |---|---|
+  | flows | **none import the pair** — `ariane.buda` / `ariane_core.buda` are hand-written floorplans derived from the benchmark, with no `import_def_lef` anywhere in `demo/` |
+  | tests | one reads the DEF (`test_def_reader.py::test_the_checked_in_ariane_def_gives_up_nothing`, 133 components / 495 pins / 20 TRACKS / 6 GCELLGRIDs) through the raw `read_def` and **never opens the LEF**, so the mismatch cannot reach it |
+  | corpus / CI | neither |
+
+  (`demo/tracks_ariane136.buda` and `demo/gen_ariane136.py`, which two other
+  tests do use, are generated 136-macro flows — a different artifact that
+  shares only the name.)
+
+  The reader's behaviour is already correct: it refuses the pair unless
+  told `allow_missing_footprints`, which is what should happen when a
+  design is handed a technology that does not describe it. Under the old
+  importer every macro on that 2.7 mm die became a 0.5 µm speck in silence
+  — that was the fault, and it is fixed.
+
+  The LEF **stays**: it is a real 45-pin macro sample the LEF reader was
+  developed against (`lefdef_interface_plan.md` §2a), and the ReadMe says
+  it was kept deliberately. If the pair is ever wanted as a working import
+  vehicle it needs the matching NanGate45 `fakeram45_256x16` LEF — but
+  `flow/def/` and `flow/rv/` were built to cover that path, so it would be
+  redundant coverage rather than a gap.
 * ~~**The Tcl front end is synchronous.**~~ **RESOLVED 2026-08-10** — the
   GUI face landed as three composable pieces: opt-in **streaming**
   (`__stream on` → `OUT` progress frames, with the final frame carrying
