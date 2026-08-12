@@ -76,6 +76,12 @@ jobs:
           sw_vers
           clang --version | head -2
           cmake --version | head -1
+          # The Tcl version EARNED its place here: macOS ships 8.5.9 as
+          # /usr/bin/tclsh, and the corpus harness used to require 8.6 — so
+          # `bin/bb test` failed on every stock Mac, and the first run of this
+          # job is what caught it.  Printing the version turns a future
+          # recurrence into one legible line instead of a Tcl stack trace.
+          echo "tclsh: $(echo 'puts [info patchlevel]' | tclsh 2>&1)"
 
       - name: Does clang accept -march=native on this host?
         # Asked in ISOLATION first, before the 30-odd translation units, so the
