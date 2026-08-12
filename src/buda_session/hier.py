@@ -34,6 +34,8 @@ import sys
 
 import buda
 
+from bus_names import parse_bus_bit
+
 # ── Orientation helpers (module-level: shared pure functions) ────────────────
 # Output-normalized orientation maps over a w×h box: (swap, reflect-x,
 # reflect-y).  Token convention = mirror-about-X-axis FIRST, then CCW
@@ -1055,19 +1057,24 @@ class HierMixin:
     def _bundle_net_summary(self, net_names, max_len=200):
         """Group a bundle's nets into buses for a compact log line.
 
-        A net named '<bus>_<idx>' or '<bus>_b<idx>' (the two forms add_bus/add_net
-        emit — e.g. 'bus_007_3', 'bus_077_b00') is folded into its bus with a
-        compressed bit range like 'bus_077[0:59]'; nets with no numeric suffix are
-        listed verbatim.  First-seen order is preserved; truncated past max_len."""
+        A net that belongs to a bus is folded into it with a compressed bit
+        range like 'bus_077[0:59]'; a net that does not is listed verbatim.
+        BOTH spellings count (`bus_names.parse_bus_bit`): the declared
+        '<bus>_<idx>' / '<bus>_b<idx>' that add_bus/add_net emit, and the
+        imported '<bus>[<idx>]' a LEF/DEF/Verilog design keeps.  Only the
+        first was recognised, so an imported design never compressed at all
+        — the very case where the line is longest.  First-seen order is
+        preserved; truncated past max_len."""
         groups, order, seen = {}, [], set()
         for nm in net_names:
-            m = re.match(r'^(.*?)_([A-Za-z]*)(\d+)$', nm)
-            if m:
-                key = (m.group(1), m.group(2))      # (bus, bit-tag) e.g. ('bus_077','b')
+            parsed = parse_bus_bit(nm)
+            if parsed:
+                bus, tag, idx = parsed
+                key = (bus, tag)          # e.g. ('bus_077','b') or ('dbg','[]')
                 if key not in groups:
                     groups[key] = []
-                    order.append(('bus', key, m.group(1)))
-                groups[key].append(int(m.group(3)))
+                    order.append(('bus', key, bus))
+                groups[key].append(idx)
             elif ('net', nm) not in seen:
                 seen.add(('net', nm))
                 order.append(('net', nm, nm))
