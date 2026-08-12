@@ -19,6 +19,7 @@ This directory contains deep-dive architectural documents, cross-subsystem inter
 - [topology_tree_gen_design.md](topology_tree_gen_design.md) & [multi_trunk_datapath.md](multi_trunk_datapath.md) — Multi-trunk Hanan tree generation and datapath routing algorithms.
 - [nuts_dnuts_refactor.md](nuts_dnuts_refactor.md) & [detailed_nuts_engine_options.md](detailed_nuts_engine_options.md) — Abstract NUTS rectangle packing and Detailed NUTS bit-level track snapping.
 - [planner_signal_track_capacity.md](planner_signal_track_capacity.md) & [ksegs_default_audit.md](ksegs_default_audit.md) — Congestion planner capacity calculations and `kSegsRel` cost tuning.
+- [antenna_repros.md](antenna_repros.md) — The dangling-metal ("antenna") repro index: every shape seen so far, its vehicle, what was measured, and whether it is fixed, unreachable, or still open. Companion: [seed_trunk_antenna_2026-07.md](seed_trunk_antenna_2026-07.md) (the generation-time seed-trunk case).
 
 ## Test Infrastructure & Tooling
 - [feature_coverage_plan.md](feature_coverage_plan.md) — Gherkin/pytest-bdd feature specification layer and tag vocabulary (`@landed`, `@future`, `@doc`, `@orphaned`).

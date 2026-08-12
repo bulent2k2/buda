@@ -203,6 +203,65 @@ def test_pass_through_and_tap_reach_stay_on_the_wire():
         assert s_lo <= r_lo <= s_hi and s_lo <= r_hi <= s_hi, h
 
 
+def test_a_partner_lost_to_the_CULL_strands_its_neighbour():
+    """rv/soc's mechanism, isolated — and it is an OPEN defect.
+
+    DetailedNUTS runs `place_by_layer` -> `adjust_bit_spans` ->
+    `cull_keepout_crossers`.  The middle pass extends each bit to reach its
+    partner's track; the last one deletes bits whose FINAL span still crosses a
+    keepout.  A partner removed by that cull is removed AFTER the neighbour was
+    stretched to meet it, so the neighbour keeps metal aimed at a wire that no
+    longer exists.  #678's stale-end rule cannot help — it lives inside
+    `adjust_bit_spans`, one pass too early.
+
+    `num_keepout_bits` is what proves the cull actually ran.  `num_unplaced` is
+    4 either way (see the starved twin below), so asserting on it alone would
+    let this guard pass while testing the wrong path entirely.
+
+    The AUDIT is fine here — it reports every bit.  It is the PLACER that
+    leaves the metal, which is why this is filed as open rather than fixed.
+    """
+    s = _session(_ROOT / "flow/antenna_culled_partner.buda", verbose=True)
+    assert s.detailed_result.num_keepout_bits == 4, "the post-adjustment cull must be the path"
+
+    hits = _findings_in_run(s)
+    assert len(hits) == 4, hits
+    assert all("Seg 1 bit" in h for h in hits), hits
+    overhangs = sorted(round(float(h.split("0 + ")[1].split(" of")[0]), 2) for h in hits)
+    assert overhangs == [526.5, 529.5, 529.5, 529.5], overhangs
+
+    # Seg 1's bits keep their full span out to where seg 2 used to be.
+    seg1 = [n for n in s.detailed_result.net_segments if n.seg_idx == 1]
+    assert len(seg1) == 4, seg1
+    assert all(n.span_hi - n.span_lo > 500 for n in seg1), \
+        [(n.bit_index, n.span_lo, n.span_hi) for n in seg1]
+
+
+def test_a_partner_STARVED_before_span_adjustment_retracts_it_instead():
+    """The control: same design, same pin, one number different in the keepout.
+
+    Here the partner is lost at placement ADMISSION — no eligible track, bits
+    never created — which is BEFORE `adjust_bit_spans`.  The neighbour's
+    endpoint conn therefore resolves to no wire while spans are being set,
+    #678's stale-end rule fires, and it retracts to its own via.
+
+    Together with the twin above this is the whole argument: identical geometry,
+    two ways to lose the same partner, opposite outcomes.  So the cause is
+    neither the keepout nor the geometry — it is WHERE IN THE PASS ORDER the
+    partner goes.  Whichever way that gets fixed, both of these must keep
+    saying what they say now.
+    """
+    s = _session(_ROOT / "flow/antenna_starved_partner.buda", verbose=True)
+    assert s.detailed_result.num_keepout_bits == 0, "the cull must NOT be the path here"
+    assert s.detailed_result.num_unplaced == 4, "same 4 bits lost, different pass"
+    assert _findings_in_run(s) == [], "the retraction should leave no antenna"
+
+    seg1 = [n for n in s.detailed_result.net_segments if n.seg_idx == 1]
+    assert len(seg1) == 4, seg1
+    assert all(abs(n.span_hi - n.span_lo) < 1.0 for n in seg1), \
+        [(n.bit_index, n.span_lo, n.span_hi) for n in seg1]
+
+
 def test_a_crossing_is_judged_at_the_bit_not_at_the_nominal_segment():
     """The reach a NOMINAL crossing used to grant, on a bit that crosses nothing.
 
