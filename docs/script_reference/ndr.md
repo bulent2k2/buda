@@ -116,11 +116,63 @@ def_ndr gndbus width x1.5 shield bus net GND bond
 def_ndr vssbit width x2 shield bit net VSS bond stride 3
 ```
 
+## `def_ndr_layer`
+
+```
+def_ndr_layer <rule> <layer> [width x<N>|<dist>] [spacing x<N>|<dist>]
+```
+
+Override one layer's width/spacing on an already-declared rule. Layers with
+no entry inherit the rule's own values, so a rule that needs no per-layer
+treatment is written exactly as before.
+
+This is R1's per-layer half — the requirement always asked for "per-layer or
+layer-independent values", and its cited precedent (LEF/DEF
+`NONDEFAULTRULE`) is per-layer. It matters most for the rules the absolute
+form exists to serve: **EM limits, sheet resistance and RC all differ per
+layer**, so one width applied to the whole stack is over-wide on the top
+metal or under-wide at the bottom.
+
+The shape mirrors `def_track_pattern` + `add_grid_override`: a global
+declaration plus per-scope overrides.
+
+```
+def_ndr       em width 0.1 spacing 0.15 shield bus
+def_ndr_layer em M9 width 0.4 spacing 0.6      # thick top metal
+def_ndr_layer em M8 width 0.3
+set_ndr       clk_ em
+```
+
+A per-layer **multiplier** is already quantized and wins over an inherited
+absolute — the more specific declaration is the one made about that layer.
+
+Declaration is LOUD (each of these is a hard error): an unknown rule or
+layer; a layer outside the rule's own `layers` restriction, which could
+never take effect; a duplicate `(rule, layer)`; a declaration that
+constrains nothing; an absolute value on a layer with no
+`def_track_pattern`; and an absolute value **no window on that layer can
+deliver** (R3), which names the longest contiguous signal run and the most
+metal it offers.
+
 ### Absolute values
 
-An absolute width or spacing names one **physical** width; how many SIGNAL
-slots that costs is a property of the layer. So one declaration resolves to
-different slot counts per layer — the thing a multiplier cannot express.
+An absolute width or spacing names one **physical** width, and it is
+quantized by the **metal** a run of signal slots delivers — the smallest `k`
+whose narrowest `k`-slot window offers at least the declared width:
+
+```
+metal(k) = sum of the k slot widths + the k-1 gaps BETWEEN them
+```
+
+Two consequences worth knowing. A `k`-slot wire is `k` **consecutive** signal
+slots and may not span a power rail, so a layer's longest contiguous run is a
+real ceiling (R3 refuses past it). And when a period's signal gaps vary, the
+**narrowest** window is the guaranteed one — the placer chooses the seat, not
+the rule.
+
+How many slots a given width costs is therefore a property of the layer, so
+one declaration resolves to different slot counts per layer — the thing a
+multiplier cannot express.
 
 ```
 def_ndr fine3 width 3          # layout units

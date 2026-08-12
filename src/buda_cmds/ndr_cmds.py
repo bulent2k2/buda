@@ -338,6 +338,20 @@ def _spec_of(session, rule_name):
     spec.shield_net   = r["shield_net"]
     spec.credit_shields = bool(r.get("credit", 0))
     spec.bond_stride    = int(r.get("bond", 0))
+    # R1 per-layer declared values (`def_ndr_layer`).  Carried on the spec so
+    # every consumer resolves the value the user declared FOR THE LAYER it is
+    # working on, rather than one value stretched across the stack.
+    for lid, pl in sorted(r.get("per_layer", {}).items()):
+        lr = buda.NdrLayerRule()
+        lr.width_abs   = pl.get("width_abs", 0.0)
+        lr.spacing_abs = pl.get("spacing_abs", 0.0)
+        # A multiplier is pattern-independent, so it is quantized here and
+        # there is nothing left for the per-layer resolution to do.
+        lr.width_slots = (max(1, math.ceil(pl["width_x"]))
+                          if pl.get("width_x") else 0)
+        lr.guard_slots = (max(0, math.ceil(pl["spacing_x"]) - 1)
+                          if pl.get("spacing_x") else -1)
+        spec.set_layer_rule(lid, lr)
     return spec
 
 
@@ -656,6 +670,115 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
         print(f"[NDR] rule '{name}': width x{rule['width_x']:g} -> {ws} slot(s)/"
               f"bit, spacing x{rule['spacing_x']:g} -> {gs} guard slot(s)/gap, "
               f"shield {sh} (net {rule['shield_net']}){cr}{bo}, layers {lay}")
+
+
+def cmd_def_ndr_layer(session, cmd, args, cmd_line):
+    """def_ndr_layer <rule> <layer> [width x<N>|<dist>] [spacing x<N>|<dist>]
+
+    R1's per-layer half.  The requirement always asked for "per-layer OR
+    layer-independent values" — its cited precedent, LEF/DEF NONDEFAULTRULE,
+    is per-layer — and phase 1 shipped only the layer-independent half without
+    listing the other among its non-goals.
+
+    It matters most for exactly the rules the absolute form exists to serve:
+    EM limits, sheet resistance and RC all differ per layer, so one width
+    applied to the whole stack is over-wide on top or under-wide at the
+    bottom.  This is the `add_grid_override` shape — a global declaration plus
+    per-scope overrides — which is the idiom the script language already uses.
+    """
+    if len(args) < 3:
+        print("Error: usage: def_ndr_layer <rule> <layer> "
+              "[width x<N>|<dist>] [spacing x<N>|<dist>]")
+        sys.exit(1)
+    name = args[0]
+    rules = _rules(session)
+    if name not in rules:
+        print(f"Error: def_ndr_layer: unknown NDR rule '{name}' — declare it "
+              f"with def_ndr first")
+        sys.exit(1)
+    rule = rules[name]
+    lid = _layer_id(session, args[1])
+    if lid is None:
+        print(f"Error: def_ndr_layer '{name}': unknown layer '{args[1]}' "
+              f"(declare def_layer first)")
+        sys.exit(1)
+    # A value for a layer the rule may never use is a mistake, not a
+    # harmless extra: it reads as governing and can never take effect.
+    if rule.get("layers") and lid not in rule["layers"]:
+        allowed = ", ".join(f"L{l}" for l in rule["layers"])
+        print(f"Error: def_ndr_layer '{name}': layer '{args[1]}' is outside "
+              f"the rule's own `layers` restriction ({allowed}), so the value "
+              f"could never take effect")
+        sys.exit(1)
+    per_layer = rule.setdefault("per_layer", {})
+    if lid in per_layer:
+        print(f"Error: def_ndr_layer '{name}': layer '{args[1]}' already "
+              f"declared — a duplicate is a hard error (def_ndr's "
+              f"declare-once convention)")
+        sys.exit(1)
+
+    entry = {"width_x": 0.0, "width_abs": 0.0,
+             "spacing_x": 0.0, "spacing_abs": 0.0}
+    i = 2
+    while i < len(args):
+        tok = args[i].lower()
+        if tok == "width" and i + 1 < len(args):
+            # `_parse_value` returns (multiplier, absolute) with the
+            # multiplier defaulting to 1.0 for the absolute form.  Per layer
+            # we need a THIRD state -- not declared here at all -- so only
+            # the form actually given is recorded; 0.0 means "inherit".
+            mx, ab = _parse_value(args[i + 1], "width", name, session)
+            if ab > 0.0: entry["width_abs"] = ab
+            else:        entry["width_x"]   = mx
+            i += 2
+        elif tok == "spacing" and i + 1 < len(args):
+            mx, ab = _parse_value(args[i + 1], "spacing", name, session)
+            if ab > 0.0: entry["spacing_abs"] = ab
+            else:        entry["spacing_x"]   = mx
+            i += 2
+        else:
+            print(f"Error: def_ndr_layer '{name}': unknown token "
+                  f"'{args[i]}' (width | spacing)")
+            sys.exit(1)
+    if not any(entry.values()):
+        print(f"Error: def_ndr_layer '{name}': declares nothing for layer "
+              f"'{args[1]}' — give a width and/or a spacing")
+        sys.exit(1)
+
+    # R3, at declaration: an ABSOLUTE value is quantized against this layer's
+    # own geometry, so the layer must HAVE one, and the value must be
+    # realizable on it.  Both are reported here rather than surfacing six
+    # stages later as stranded bits.
+    if entry["width_abs"] > 0.0 or entry["spacing_abs"] > 0.0:
+        geom = (session.layers.ndr_geom(lid)
+                if getattr(session, "layers", None) is not None else None)
+        if geom is None or geom.empty():
+            print(f"Error: def_ndr_layer '{name}': layer '{args[1]}' has no "
+                  f"def_track_pattern, so an absolute value cannot be "
+                  f"quantized against the grid it would route on — declare "
+                  f"the pattern first")
+            sys.exit(1)
+        probe = buda.NdrSpec()
+        probe.width_abs, probe.spacing_abs = entry["width_abs"], entry["spacing_abs"]
+        _, ok = buda.ndr_resolve_on_layer(probe, lid, geom)
+        if not ok:
+            ceiling = buda.ndr_max_slots(geom)
+            best = buda.ndr_metal_for_slots(geom, ceiling)
+            print(f"Error: def_ndr_layer '{name}': layer '{args[1]}' cannot "
+                  f"realize the declared value — its longest contiguous "
+                  f"signal run is {ceiling} slot(s), delivering at most "
+                  f"{best:g} unit(s) of metal (a wire may not span a power "
+                  f"rail).  R3: the tool never silently degrades an NDR.")
+            sys.exit(1)
+
+    per_layer[lid] = entry
+    _write_rule_through(session, name)
+    what = []
+    if entry["width_x"]:    what.append(f"width x{entry['width_x']:g}")
+    if entry["width_abs"]:  what.append(f"width {entry['width_abs']:g}")
+    if entry["spacing_x"]:  what.append(f"spacing x{entry['spacing_x']:g}")
+    if entry["spacing_abs"]: what.append(f"spacing {entry['spacing_abs']:g}")
+    print(f"[NDR] rule '{name}' on layer {args[1]}: {', '.join(what)}")
 
 
 def cmd_set_ndr(session, cmd, args, cmd_line):
@@ -1328,6 +1451,7 @@ def cmd_dump_ndr(session, cmd, args, cmd_line):
 
 COMMANDS = {
     "def_ndr":  cmd_def_ndr,
+    "def_ndr_layer": cmd_def_ndr_layer,
     "set_ndr":  cmd_set_ndr,
     "dump_ndr": cmd_dump_ndr,
 }
