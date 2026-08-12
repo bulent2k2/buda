@@ -18,7 +18,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <map>
 #include <string>
+#include <vector>
 
 namespace buda {
 
@@ -31,6 +33,36 @@ namespace buda {
 // BusSegment::ndr (detailed placement) carry copies of the same resolved
 // spec.  An inactive spec (the default) is byte-identical everywhere — every
 // consumer short-circuits on !active(), which is the R12 guarantee.
+// ── R1 per-layer declared values ─────────────────────────────────────────
+// One layer's override of a rule's width/spacing.  Either form may be given
+// independently, and either may be absent (inherit the rule's own value):
+// an absolute distance in layout units, or a multiplier already quantized to
+// a slot count (a multiplier is pattern-independent, so there is nothing left
+// to resolve later).  The sentinels differ because 0 means different things:
+// no width_abs is 0 distance, but 0 guard slots is a real declaration.
+struct NdrLayerRule {
+    double width_abs   = 0.0;   // 0 = not declared here
+    double spacing_abs = 0.0;   // 0 = not declared here
+    int    width_slots = 0;     // multiplier form, quantized; 0 = not declared
+    int    guard_slots = -1;    // multiplier form, quantized; -1 = not declared
+};
+
+// ── The signal-slot geometry of ONE layer's track pattern ────────────────
+// What metal-shaped quantization needs and a single scalar pitch cannot
+// supply.  A k-slot wire is k CONSECUTIVE signal slots, and it may not span
+// a power rail — so the period is modelled as maximal CONTIGUOUS runs of
+// signal slots, not one flat list.  Each entry of a run is that slot's
+// (width, gap to the next signal slot IN THE SAME run).  The last entry's
+// gap is unused.
+//
+// Cached onto LayerStack beside `bit_pitch` (the same push-model
+// `set_bit_pitch` uses), so ndr.h stays free of any routing_grid.h
+// dependency and the planner's hot loop keeps its scalar.
+struct NdrLayerGeom {
+    std::vector<std::vector<std::pair<double, double>>> runs;
+    bool empty() const { return runs.empty(); }
+};
+
 struct NdrSpec {
     // Whole SIGNAL slots consumed per bit — the path-A quantization of the
     // declared width (a 1.5x wire pays 2 slots: conservative, never
@@ -85,6 +117,18 @@ struct NdrSpec {
     // uncredited worst case and DNUTS credits at the seat.
     double width_abs   = 0.0;
     double spacing_abs = 0.0;
+    // R1 PER-LAYER declared values (`def_ndr_layer`), keyed by layer id.
+    // R1 always asked for "per-layer or layer-independent values" — the
+    // industry precedent it cites, LEF/DEF NONDEFAULTRULE, is per-layer —
+    // and phase 1 shipped only the layer-independent half.  The values a
+    // physical rule is written against genuinely differ per layer: EM
+    // limits, sheet resistance and RC all do, so one absolute width applied
+    // to every layer is over-wide on top or under-wide at the bottom.
+    //
+    // An entry OVERRIDES the rule's own value on that layer alone; layers
+    // with no entry inherit.  Empty = a layer-independent rule, which is
+    // byte-identical to the pre-per-layer behaviour.
+    std::map<int, NdrLayerRule> per_layer;
     // Declared rule name (reporting/provenance).
     std::string rule_name;
 
@@ -116,6 +160,135 @@ inline NdrSpec ndr_resolve_for_pitch(const NdrSpec& s, double slot_pitch) {
     if (s.spacing_abs > 0.0)
         o.guard_slots = std::max(0,
             (int)std::ceil(s.spacing_abs / slot_pitch - eps) - 1);
+    return o;
+}
+
+// ── R1 METAL-shaped quantization ─────────────────────────────────────────
+// `ndr_resolve_for_pitch` above answers "how much routing CHANNEL does this
+// width consume" — the layer's whole period amortized over its signal slots,
+// rails and gaps included.  That is the right question for the planner's
+// books and the wrong one for a width declared for a PHYSICAL reason: EM
+// current density, sheet resistance, RC.  Those care about the metal, and
+// the metal a k-slot bit gets is a different quantity that shares no term
+// with the channel cost:
+//
+//     metal(k) = sum of the k slot widths + the k-1 gaps BETWEEN them
+//
+// so a declaration of 8 could buy 2 units of wire (opens_ndr.md §2, and
+// flow/ndr_abs_divisor.buda measured exactly that).  These functions ask
+// the metal question instead.
+//
+// CHARGING is unaffected and must stay so: a resolved spec still reports a
+// SLOT COUNT, and every consumer still charges slots x bit_pitch.  Only the
+// declared-value -> slot-count conversion moves, so the planner's books keep
+// agreeing with `eff_bus_width` by construction (the no-double-count
+// property).  Metal-shaped simply asks for MORE slots than channel-shaped
+// wherever the two differ.
+
+// Metal delivered by the NARROWEST window of `k` consecutive signal slots
+// anywhere in the period, or -1 when no run is that long (the wire would
+// have to span a power rail, which is not a legal signal wire — R3).
+//
+// The narrowest window is the honest answer whenever the gaps vary: the
+// seat is chosen by the placer, not by the rule, so a rule is only
+// guaranteed met if it is met at the WORST window.  Measured: 20 of 345
+// declared patterns have non-uniform signal gaps, and in each the slot
+// widths agree while the trailing gaps differ — exactly the case a single
+// `k*w + (k-1)*sp` formula gets wrong.
+inline double ndr_metal_for_slots(const NdrLayerGeom& g, int k) {
+    if (k <= 0) return 0.0;
+    double best = -1.0;
+    for (const auto& run : g.runs) {
+        if ((int)run.size() < k) continue;
+        for (int i = 0; i + k <= (int)run.size(); ++i) {
+            double m = 0.0;
+            for (int j = 0; j < k; ++j) {
+                m += run[i + j].first;                 // the slot's metal
+                if (j + 1 < k) m += run[i + j].second; // the gap it bridges
+            }
+            if (best < 0.0 || m < best) best = m;
+        }
+    }
+    return best;
+}
+
+// Clearance delivered by `gu` guard slots between two governed bits: the
+// guards' own widths plus the gu+1 gaps around them.  Same narrowest-window
+// reading, and the same -1 when the period cannot host that many.
+inline double ndr_clearance_for_guards(const NdrLayerGeom& g, int gu) {
+    if (gu < 0) return -1.0;
+    double best = -1.0;
+    for (const auto& run : g.runs) {
+        // gu guards sit BETWEEN two bits, so the window is gu+2 slots wide.
+        const int need = gu + 2;
+        if ((int)run.size() < need) continue;
+        for (int i = 0; i + need <= (int)run.size(); ++i) {
+            double c = 0.0;
+            for (int j = 0; j < gu; ++j) c += run[i + 1 + j].first;
+            for (int j = 0; j <= gu; ++j) c += run[i + j].second;
+            if (best < 0.0 || c < best) best = c;
+        }
+    }
+    return best;
+}
+
+// The largest k any run in the period can host — the realizability ceiling.
+inline int ndr_max_slots(const NdrLayerGeom& g) {
+    int m = 0;
+    for (const auto& run : g.runs) m = std::max(m, (int)run.size());
+    return m;
+}
+
+// Resolve a rule ON ONE LAYER: pick that layer's declared values (its
+// `def_ndr_layer` override, else the rule's own) and quantize any absolute
+// among them METAL-shaped against the layer's geometry.
+//
+// IDENTITY when the layer has no geometry and no per-layer entry — so an
+// unpatterned layer, and every caller with no layer in hand, keeps the
+// spec's stored conservative quantization and over-charges rather than
+// under-charges, exactly as before.
+//
+// `ok` (optional) reports realizability: false when a declared absolute
+// cannot be met by ANY window in the period, which R3 turns into a hard
+// error naming the layer, the rule and the arithmetic.  The slot count is
+// then clamped to the ceiling so a caller that ignores `ok` still produces
+// a bounded, conservative number rather than looping.
+inline NdrSpec ndr_resolve_on_layer(const NdrSpec& s, int layer_id,
+                                    const NdrLayerGeom& geom,
+                                    bool* ok = nullptr) {
+    if (ok) *ok = true;
+    NdrSpec o = s;
+
+    // 1. The values THIS layer declares, falling back to the rule's own.
+    double w_abs = s.width_abs, sp_abs = s.spacing_abs;
+    auto it = s.per_layer.find(layer_id);
+    if (it != s.per_layer.end()) {
+        const NdrLayerRule& pl = it->second;
+        if (pl.width_abs   > 0.0) { w_abs  = pl.width_abs;   }
+        if (pl.spacing_abs > 0.0) { sp_abs = pl.spacing_abs; }
+        // A multiplier override is already quantized: nothing to resolve,
+        // and it WINS over an inherited absolute, since the more specific
+        // declaration is the one the user made about this layer.
+        if (pl.width_slots > 0)  { o.width_slots = pl.width_slots; w_abs  = 0.0; }
+        if (pl.guard_slots >= 0) { o.guard_slots = pl.guard_slots; sp_abs = 0.0; }
+    }
+    if ((w_abs <= 0.0 && sp_abs <= 0.0) || geom.empty()) return o;
+
+    const double eps = 1e-9;
+    const int ceiling = ndr_max_slots(geom);
+    if (w_abs > 0.0) {
+        int k = 1;
+        while (k <= ceiling && ndr_metal_for_slots(geom, k) < w_abs - eps) ++k;
+        if (k > ceiling) { if (ok) *ok = false; k = std::max(1, ceiling); }
+        o.width_slots = std::max(1, k);
+    }
+    if (sp_abs > 0.0) {
+        int gu = 0;
+        while (gu + 2 <= ceiling &&
+               ndr_clearance_for_guards(geom, gu) < sp_abs - eps) ++gu;
+        if (gu + 2 > ceiling) { if (ok) *ok = false; gu = std::max(0, ceiling - 2); }
+        o.guard_slots = std::max(0, gu);
+    }
     return o;
 }
 
