@@ -40,6 +40,7 @@ install.
 
 | Dependency | pip name | Enables | Without it |
 |---|---|---|---|
+| **Tcl** | *(system `tclsh`, **8.5 or newer**)* | the Tcl front end (`tools/buda.tcl`) and the Tcl corpus tests. | Every `tclsh`-dependent test skips on `shutil.which("tclsh")`, so the suite is green without it. **8.5 is the real floor and it is macOS that sets it**: macOS ships 8.5.9 as `/usr/bin/tclsh` and has for over a decade. `flow/tcl/corpus/harness.tcl` once asked for 8.6 without using anything from it, which failed the whole corpus — and `bin/bb test` with it — on every stock Mac; the guard tests for a `tclsh`'s PRESENCE, never its version, so it surfaced as a corpus error rather than "your Tcl is too old". Raise the floor only alongside a feature that needs it. |
 | **pytest-xdist** | `pytest-xdist` | parallel `bb -m` / `bb -s` (`-n auto --dist loadfile`, ~3× on 4 cores). | Tiers run serially; `bb` prints a hint. See [internal/test/parallelism.md](internal/test/parallelism.md). |
 | **pyobjc (Cocoa)** | `pyobjc-framework-Cocoa` | **macOS only** — names the app in the Dock / menu bar / Cmd-Tab after the design and swaps the Dock icon (`Foundation.NSProcessInfo` / `NSBundle`, `AppKit.NSApplication`). | The GUI still runs; it just shows as `python3`. Every call is guarded. See [internal/macos_app_bundles.md](internal/macos_app_bundles.md). |
 | **setproctitle** | `setproctitle` | sets the process title (`ps`/`top`) to the design name. | No process-title rename; guarded no-op. |
