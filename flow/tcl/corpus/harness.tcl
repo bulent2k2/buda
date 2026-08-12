@@ -34,7 +34,20 @@
 # second comparison tool to keep in step.
 # ============================================================================
 
-package require Tcl 8.6
+# 8.5, matching `tools/buda.tcl` — the bridge this harness drives — and NOT
+# 8.6, which it asked for and never used.  The difference is not academic:
+# macOS ships Tcl **8.5.9** as /usr/bin/tclsh and has for over a decade, so
+# `package require Tcl 8.6` failed the whole corpus on any stock Mac, and
+# `bin/bb test` with it — measured on an Apple Silicon runner, the one test
+# failure in an otherwise clean 2353-pass fast tier:
+#
+#   version conflict for package "Tcl": have 8.5.9, need 8.6
+#
+# The harness uses no 8.6 construct (no lmap, try, dict map, oo, coroutine,
+# zlib, file tempfile, chan pipe), and neither does any corpus flow — the
+# requirement was declared, not earned.  Raise it again only alongside the
+# feature that needs it, and expect that to cost macOS its Tcl corpus.
+package require Tcl 8.5
 
 namespace eval corpus {
     variable top ""          ;# the file tclsh was given (the one that reports)
