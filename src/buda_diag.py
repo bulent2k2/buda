@@ -112,6 +112,9 @@ MESSAGES = {
     "BUDA-1902": (ERROR,  "A design audit reported violations and "
                           "--strict-check is on."),
     "BUDA-1903": (WARNING, "A visualize command opened no window."),
+    "BUDA-1904": (WARNING, "A restored fan-in bundle has no per-bit "
+                           "endpoints, so it resumes untapered — wider "
+                           "than the design that was checkpointed."),
 }
 
 # Ids that were ISSUED and whose fault no longer exists.

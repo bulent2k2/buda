@@ -275,11 +275,14 @@ title bar's `topo N/n` back as `BUDA_ARRAY_PIN=<bus>=N`. That N is 1-based
 and is exactly what `select_topology` takes; `dump_topologies` numbers its
 own table from **0**, so add one when reading it there.
 
-Known gap, worth knowing before trusting a resumed number: the per-bit
-**fan-in taper is not restored**, so a resumed CONVERGENT/DIVERGENT bundle
-comes back untapered and routes wider than the design that was saved (this
-vehicle: 88 → 106 bit-wires, all of it in the two fan-in bundles, both
-endpoints clean). Details and the measurement in
+This pair is also what measured the **fan-in taper gap**, now fixed: a
+resumed CONVERGENT/DIVERGENT bundle used to come back untapered and route
+wider than the design that was saved (this vehicle: 88 → 106 bit-wires, all
+of it in the two fan-in bundles, both endpoints clean, nothing said). Since
+schema v27 the per-bit endpoints ride the checkpoint and the taper is
+re-derived on load, so a continuation reproduces it exactly — same
+`route_snapshot` hash. A checkpoint written before v27 still resumes
+untapered and now says so (`BUDA-1904`). Details in
 [BDB_REFERENCE.md](BDB_REFERENCE.md#load_pipeline).
 
 ## The corpus: the same 41 flows, driven from Tcl

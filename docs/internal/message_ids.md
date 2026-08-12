@@ -116,6 +116,7 @@ updating this table, which is exactly the drift the guard now prevents):
 | BUDA-1901 | FATAL | coordinates and track patterns are on different scales |
 | BUDA-1902 | ERROR | a design audit reported violations and `--strict-check` is on |
 | BUDA-1903 | WARNING | a `visualize` command opened no window (INFO when the suppression was asked for: `--no-viz` / `buda::start -viz 0`) |
+| BUDA-1904 | WARNING | a restored fan-in bundle has no per-bit endpoints (pre-v27 checkpoint), so it resumes untapered and wider than what was saved |
 
 **Retired ids.**  An id may never be reused and never changes meaning, so one
 whose fault has been fixed is recorded as *spent* rather than deleted — a

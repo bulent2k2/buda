@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=26;
+PRAGMA user_version=27;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -30,6 +30,15 @@ CREATE TABLE bundle_net (
         bundle_id TEXT REFERENCES bundle(id),
         net_id    INTEGER REFERENCES net(id),
         ord       INTEGER DEFAULT -1,  -- bit order within the bundle (v10)
+        -- Per-BIT endpoints of a fan-in / fan-out bundle (v27), i.e.
+        -- HBundle::net_drivers[ord] and net_receivers[ord].  They are what
+        -- makes the per-bit taper (Topology::seg_bits) derivable, and they
+        -- are stored rather than re-derived because the roles they encode
+        -- come from a subtle pass (deepest OUTPUT, path-maximal receivers,
+        -- INOUT/UNKNOWN fallbacks, extra-driver attachment) that a second
+        -- implementation would drift from.  Empty for every other bundle.
+        drv_path  TEXT DEFAULT '',      -- driver block path for this bit
+        rcv_paths TEXT DEFAULT '',      -- JSON array of receiver block paths
         PRIMARY KEY (bundle_id, net_id)
     );
 CREATE TABLE bus_segment (
@@ -190,7 +199,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','26');
+INSERT INTO "meta" VALUES('schema_version','27');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE ndr_rule (
             name         TEXT PRIMARY KEY,

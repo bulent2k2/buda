@@ -30,6 +30,7 @@ import hashlib
 import os
 
 import buda
+import buda_diag
 
 from .util import _batched
 
@@ -135,15 +136,27 @@ class PersistMixin:
             if _row.id not in cur_ids:
                 absent_membership[_row.id] = (
                     self.bdb.bundle_nets(_row.id),
-                    self.bdb.bundle_busterms(_row.id))
+                    self.bdb.bundle_busterms(_row.id),
+                    # v27: and its per-bit endpoints.  They live ON the
+                    # bundle_net rows this clear wipes, and the re-add below
+                    # would put back bare membership — so a kept fan-in
+                    # would come back untapered (BUDA-1904) purely because
+                    # some LATER run re-persisted without it.
+                    self.bdb.bundle_net_endpoints(_row.id))
         self.bdb.clear_bundles(keep_user=True)
         kept_ids = ({r.id for r in self.bdb.all_bundles()}
                     if absent_membership else set())
-        for _bid, (_nets, _bts) in absent_membership.items():
+        for _bid, (_nets, _bts, _eps) in absent_membership.items():
             if _bid not in kept_ids:
                 continue
             for _nm in _nets:
                 self.bdb.add_bundle_net(_bid, _nm)
+            # Both lists come back in bundle_nets() order — one ORDER BY,
+            # written once and shared by the two readers — so zipping them is
+            # the same bit alignment the rows were stored under.
+            for _nm, (_dp, _rp) in zip(_nets, _eps):
+                if _dp:
+                    self.bdb.set_bundle_net_endpoints(_bid, _nm, _dp, _rp)
             for _bt, _role in _bts:
                 self.bdb.add_bundle_busterm(_bid, _bt, _role)
         for w in self.bundles:
@@ -168,8 +181,28 @@ class PersistMixin:
             from buda_cmds.ndr_cmds import stamp_bundle_ndr
             stamp_bundle_ndr(self, row, w)
             self.bdb.add_bundle(row)
-            for nm in hb.get_net_names():
+            names = hb.get_net_names()
+            for nm in names:
                 self.bdb.add_bundle_net(row.id, nm)
+            # v27: the per-bit endpoints of a fan-in / fan-out bundle.  Only
+            # these bundles carry them (net_drivers is empty for every
+            # other), and without them a resumed session cannot re-derive
+            # `Topology::seg_bits` — so its tree comes back UNTAPERED, every
+            # segment carrying every bit, wider than the design that was
+            # saved and reporting itself perfectly clean.  Stored rather than
+            # re-derived at load because the driver/receiver roles come out
+            # of a subtle pass in the bundler (deepest OUTPUT, path-maximal
+            # receivers, INOUT/UNKNOWN fallbacks, extra-driver attachment)
+            # that a second implementation would drift from.
+            drvs = list(hb.net_drivers)
+            if drvs:
+                rcvs = [list(r) for r in hb.net_receivers]
+                for i, nm in enumerate(names):
+                    if i >= len(drvs):
+                        break
+                    self.bdb.set_bundle_net_endpoints(
+                        row.id, nm, drvs[i],
+                        json.dumps(rcvs[i] if i < len(rcvs) else []))
             for bt in hb.entry_busterm_ids:
                 self.bdb.add_bundle_busterm(row.id, bt, "entry")
             for bt in hb.exit_busterm_ids:
@@ -650,6 +683,14 @@ class PersistMixin:
             (ent if kind == "entry" else ext).append(bt_id)
         hb.entry_busterm_ids = ent
         hb.exit_busterm_ids = ext
+        # v27: the per-bit fan-in / fan-out endpoints, in bit order — the
+        # input the per-bit taper is derived from (see _retaper_fanin below).
+        # Empty for every other bundle, and empty for a pre-v27 checkpoint,
+        # which then resumes exactly as it did before this existed.
+        eps = self.bdb.bundle_net_endpoints(br.id)
+        if eps and any(d for d, _r in eps):
+            hb.net_drivers = [d for d, _r in eps]
+            hb.net_receivers = [json.loads(r) if r else [] for _d, r in eps]
         if fp is None:
             fp = self.fp
             if (fp_env is not None
@@ -785,7 +826,64 @@ class PersistMixin:
                 w.input.pinned_group = [
                     i for i, t in enumerate(w.input.candidates)
                     if buda.topo_uid(t) in uids]
+        self._retaper_fanin(w, fp)
         return w
+
+    def _retaper_fanin(self, w, fp):
+        """Re-derive the per-bit fan-in taper (`Topology::seg_bits`) on every
+        restored candidate.  No-op unless the bundle persisted per-bit
+        endpoints (v27) — i.e. unless it is a fan-in / fan-out.
+
+        Without this a resumed fan-in tree is UNTAPERED: `seg_bits` is
+        derived at generation and by no load path, and an empty map means
+        every segment carries every bit.  The resumed design is still clean
+        and still complete — the route comes back via the `FANIN:` reason —
+        it is simply WIDER than the one that was saved, and nothing says so.
+        Measured on `flow/tcl/array_save.tcl` before this: every plain
+        bundle round-tripped bit-for-bit while the two fan-in bundles grew
+        16 -> 18 and 32 -> 48 bit-wires, both endpoints reporting 0/0/0.
+
+        The frame is ASKED, not inferred.  A cell-local template names its
+        blocks by leaf while everything else uses the stored path, and the
+        two restore paths reach here with different frames (the loader's
+        resolved one, the bottom-up templates' cell-local one) — so rather
+        than re-deriving which case this is, both spellings are offered to
+        the floorplan and the one it recognises wins.  If neither does, the
+        taper is left underived: conservative full width is what this
+        already did, and a WRONG taper would drop a bit's wire.
+        """
+        hb = w.input.original_bundle
+        drvs = list(hb.net_drivers)
+        if not drvs:
+            # A fan-in whose endpoints were never stored: a checkpoint from
+            # before v27.  It resumes exactly as it used to — untapered —
+            # which is the silence this whole change is about, so it is
+            # counted and reported (BUDA-1904) rather than left to be
+            # noticed as a mysteriously wider design.
+            if str(hb.reason).startswith(("FANIN:", "FANOUT:")):
+                self._retaper_stale = getattr(self, "_retaper_stale", 0) + 1
+            return
+        if fp is None or not w.input.candidates:
+            return
+        rcvs = [list(r) for r in hb.net_receivers]
+        leaf = lambda p: p.rsplit('/', 1)[-1]            # noqa: E731
+        for d_names, r_names in (
+                (drvs, rcvs),
+                ([leaf(d) for d in drvs], [[leaf(r) for r in rl]
+                                           for rl in rcvs])):
+            if not all(fp.has_block(d) for d in d_names):
+                continue
+            cands = w.input.candidates      # pybind copy semantics
+            for t in cands:
+                buda.derive_fanin_seg_bits(t, fp, d_names, r_names)
+            w.input.candidates = cands
+            self._retaper_done = getattr(self, "_retaper_done", 0) + 1
+            return
+        # Endpoints were stored but name neither as-is nor by leaf: the frame
+        # is not the one they were written in.  Same outcome as a stale
+        # checkpoint (untapered), and worth the same word — silently guessing
+        # a mapping could drop a bit's wire.
+        self._retaper_stale = getattr(self, "_retaper_stale", 0) + 1
 
     def _restore_bottom_up_templates(self, exp_map, all_rows,
                                      h_layer_ids, v_layer_ids):
@@ -928,6 +1026,9 @@ class PersistMixin:
         # path (cell-local templates / cross-level bundles validate in their
         # own floorplan, not self.fp — see the docstring there).
         fp_env = ({}, {c.name: c for c in self.bdb.all_components()})
+        # Per-bit fan-in taper accounting (v27) — see _retaper_fanin.
+        self._retaper_done = 0
+        self._retaper_stale = 0
         bundles, missing_blocks, skipped = [], set(), 0
         for br in rows:
             w = self._restore_wrapper(br, h_layer_ids, v_layer_ids,
@@ -949,6 +1050,18 @@ class PersistMixin:
                   "— run generate_topologies with a BDB open first")
             return 0
         self.bundles = bundles
+        if self._retaper_done:
+            print(f"[Resume] re-derived the per-bit fan-in taper on "
+                  f"{self._retaper_done} bundle(s)")
+        if self._retaper_stale:
+            buda_diag.emit(
+                "BUDA-1904",
+                f"{self._retaper_stale} fan-in/fan-out bundle(s) restored "
+                f"without per-bit endpoints (checkpoint written before "
+                f"schema v27); they resume UNTAPERED — every segment "
+                f"carrying every bit — so the design is wider than the one "
+                f"that was saved.  Re-run the bundler and re-checkpoint to "
+                f"store them.")
         if expanded:
             # Rebuild the hier bookkeeping the bottom-up machinery needs on
             # resume: the planner ran (this IS the post-expansion view), and

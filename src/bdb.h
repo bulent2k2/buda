@@ -466,7 +466,7 @@ public:
     // v26 = ndr_rule.width_abs / spacing_abs (R1 absolute values; a rule
     //       declared absolutely is INDISTINGUISHABLE from a default one
     //       without them, since the multiplier stays 1.0).
-    static constexpr int SCHEMA_VERSION = 26;
+    static constexpr int SCHEMA_VERSION = 27;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -691,6 +691,16 @@ public:
     // rows in place).  Routing rows are always cleared (invalidated).
     void clear_bundles(bool keep_user = false);                   // wipe bundle + topology tables
     std::vector<std::string> bundle_nets(const std::string& bundle_id) const;
+    // Per-bit fan-in/fan-out endpoints (v27): HBundle::net_drivers[i] /
+    // net_receivers[i], stored on the bundle_net row so the bit alignment is
+    // the same `ord` the membership uses.  Reader returns (drv_path,
+    // rcv_paths_json) in bundle_nets() order.
+    void set_bundle_net_endpoints(const std::string& bundle_id,
+                                  const std::string& net_name,
+                                  const std::string& drv_path,
+                                  const std::string& rcv_paths_json);
+    std::vector<std::pair<std::string, std::string>>
+        bundle_net_endpoints(const std::string& bundle_id) const;
     // (busterm_id, role) pairs for a bundle.
     std::vector<std::pair<std::string, std::string>>
         bundle_busterms(const std::string& bundle_id) const;
