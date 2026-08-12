@@ -105,9 +105,9 @@ buda::report_wirelength
 # Look at it.  A candidate picked in the explorer is a PREVIEW — the viewer's
 # re-run buttons deliberately never write a checkpoint — so the title bar's
 # `topo N/n` is the number to bring back, not something the window can save
-# for you.  (That N is 1-based and is exactly what `select_topology` takes;
-# `dump_topologies` numbers its own table from 0, so add one when reading it
-# there.)
+# for you.  (Candidate ids are 1-based everywhere they are shown or typed —
+# the title bar, `dump_topologies`' `topo` column, `select_topology` — so the
+# number you read is the number you use.)
 array_vehicle::show
 puts "array_save.tcl: to keep a candidate you picked in the explorer, re-plan\
       with it:\n    BUDA_ARRAY_PIN=<bus>=<topo N from the title bar> tclsh\

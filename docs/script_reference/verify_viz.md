@@ -213,9 +213,9 @@ notes to that row:
   spanning `lo..hi`.
 - `group:<N>` — the **exact, pinnable token**: paste it verbatim after the
   bundle hint to pin the whole family, `select_topology <bundle> group:<N>`. `N`
-  is the representative's **1-based** candidate id (the `idx` column is 0-based,
-  and the ordinal position among families is neither — so always copy this mark
-  rather than deriving it).
+  is the representative's candidate id — the same number its `topo` column
+  shows. (The ordinal position among families is NOT the pin id, so copy the
+  mark rather than counting rows.)
 
 `--grouped` is read-only display: it never drops or reorders candidates, so a
 plain dump and the whole pipeline are unchanged. It is the discovery step for a

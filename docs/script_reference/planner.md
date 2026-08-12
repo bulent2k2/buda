@@ -293,13 +293,15 @@ Then pin a family by any of its members:
 select_topology bus_044 group:12   # pin the FAMILY containing candidate id 12
 ```
 
-> **Numbering — add one to the displayed `idx`.** `dump_topologies` prints a
-> **0-based** `idx` column, but `select_topology` candidate ids (single *and*
-> `group:`) are **1-based**. So a representative shown at `idx 11` is pinned with
-> `group:12`; feeding the raw index in (`group:11`) would pin the *previous*
-> candidate — possibly a different family — and the `idx 0` row would error
-> (`valid range is 1..N`). `<N>` may be **any** member's id — each resolves to the
-> same super-candidate — so you don't need the "canonical" one.
+> **Numbering — one system.** Candidate ids are **1-based** everywhere they
+> are shown or typed: `dump_topologies`' `topo` column and its `sel=` header,
+> `select_topology` (single *and* `group:`), `edit_topology`, the planner's
+> `topo N of M`, and the explorer's `topo N/n` title. Read a number, type that
+> number. (Before this, the dump's column was `idx` and 0-based while the
+> `group:` token on the same row was 1-based, so the obvious thing to do with
+> the table pinned the *neighbouring* candidate.) `<N>` may be **any** member's
+> id — each resolves to the same super-candidate — so you don't need the
+> "canonical" one.
 
 The planner is then restricted to that family and optimizes within it. It is
 **byte-identical to an unpinned plan** when the pinned family is already the

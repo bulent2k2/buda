@@ -383,7 +383,7 @@ class ReportsMixin:
             # without importing math.
             return len(_sslo) == nseg and _sslo[i] == _sslo[i]
 
-        print(f"   conn detail — candidate {cand_idx}: {topo.type}"
+        print(f"   conn detail — topo {cand_idx + 1}: {topo.type}"
               + (f"   feedthru={sorted(feedthru)}" if feedthru else ""))
         for si, cs in enumerate(segs):
             orient = "H" if cs.horiz else "V"
@@ -580,8 +580,17 @@ class ReportsMixin:
             cand_s = f"cands={len(cands)}"
             if loci_groups is not None:
                 cand_s += f" → {len(loci_groups)} famil{'y' if len(loci_groups)==1 else 'ies'}"
+            # Every candidate number this command prints is 1-BASED, which
+            # is what `select_topology` / `edit_topology` take and what the
+            # explorer's `topo N/n` title shows.  It used to print the raw
+            # 0-based index here and in the `idx` column while emitting a
+            # 1-based `group:` token on the SAME ROW — one line, two
+            # numbering systems, and the off-by-one silently pinned the
+            # neighbouring candidate.  `-` means nothing is selected: `0`
+            # would read as a valid id under 1-based numbering.
+            sel_s = f"{sel + 1}" if (sel is not None and sel >= 0) else "-"
             print(f"\n── bundle {b.id}  nets={len(b.net_names)} ({net0}…)  "
-                  f"width={w.input.width}  sel={sel}{pin_s}  "
+                  f"width={w.input.width}  sel={sel_s}{pin_s}  "
                   f"{cand_s}  {' '.join(flags)}")
             # Size the type column to the widest type so every later column
             # stays aligned regardless of long names like TRUNK_V_OOB@x6282.
@@ -590,7 +599,10 @@ class ReportsMixin:
             # is the routing envelope its slide/span DOF permit — lo = tightest
             # (joint slide minimum), hi = loose outer bound.  A wide envelope means
             # the candidate has lots of routing freedom for NUTS to exploit.
-            print(f"   {'idx':>3} {'type':<{type_w}} {'wl':>8} {'wl[lo..hi]':>17} "
+            # `topo`, not `idx`: the number changed meaning (1-based now),
+            # and a changed value under an unchanged header is how a reader's
+            # habit of adding one silently starts double-counting.
+            print(f"   {'topo':>4} {'type':<{type_w}} {'wl':>8} {'wl[lo..hi]':>17} "
                   f"{'segs':>4} {'pass':>4} {'mslide':>7}  notes")
             # --grouped: only the lowest-WL representative of each nominal-locus
             # family is printed; its notes carry the variant count + perp span.
@@ -615,21 +627,20 @@ class ReportsMixin:
                     # The directly-pinnable token for this family, emitted
                     # VERBATIM as `select_topology <bundle> group:<N>` accepts
                     # it — copy it straight after the bundle hint, no editing.
-                    # The rep's 1-based candidate id (the `idx` column is
-                    # 0-based, and the ordinal position among families is NOT
-                    # the pin id — see docs/script_reference/planner.md).
+                    # It is the rep's own `topo` number: the ordinal position
+                    # among families is NOT the pin id.
                     marks.append(f"group:{i + 1}")
                 ms_s = ("-" if ms is None
                         else "free" if ms >= self._SLIDE_SENTINEL
                         else str(ms))
                 env = f"[{lo:.0f}..{hi:.0f}]" if lo is not None else "-"
-                print(f"   {i:>3} {typ:<{type_w}} {wl:>8} {env:>17} {nsegs:>4} "
-                      f"{pt:>4} {ms_s:>7}  {','.join(marks)}")
+                print(f"   {i + 1:>4} {typ:<{type_w}} {wl:>8} {env:>17} "
+                      f"{nsegs:>4} {pt:>4} {ms_s:>7}  {','.join(marks)}")
 
             # Tug-of-war detail: which interior segment each opposing rider
             # pair stretches (cand `disp` = the selected/displayed candidate).
             for (t, lo, hi) in tug:
-                print(f"   tug: cand {disp} seg{t} stretched by "
+                print(f"   tug: topo {disp + 1} seg{t} stretched by "
                       f"seg{lo}(-)/seg{hi}(+)  [realization risk]")
 
             # --conn: per-segment connectivity / pass-through / slide / pull for
