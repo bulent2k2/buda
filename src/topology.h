@@ -198,16 +198,21 @@ struct Topology {
     // check (flow/antenna_taper_passthru.buda).  EMPTY map = every tap serves
     // every bit (all non-tapered bundles — the historical behavior).
     //
-    // "Nothing recorded means serves every bit" is deliberately fail-SAFE — it
-    // can only keep a tap, never drop one — but it makes every gap in the
-    // derivation walk a silently unfixed tap, and there is a reachable one:
-    // derive_fanin_seg_bits marks only the ONE path it walks per receiver, so
-    // when two segments tap the same block (a trunk and a stub — the shape
-    // complete_relay_junctions produces routinely) the path that loses the race
-    // records nothing for its own tap, and the fallback hands that tap back to
-    // every bit riding it.  Pre-existing, and the first place to look when a
-    // tapered tree still shows overhang at a tapped block — the conclusion to
-    // avoid is that the membership did not apply.
+    // A MISSING key means "serves every bit" — fail-SAFE, since it can only
+    // keep a tap, never drop one.  It used to be reachable two ways, and only
+    // one of them is a true statement about the topology: "untapered", and
+    // "the walk did not reach this tap".  derive_fanin_seg_bits now SEEDS an
+    // entry for every tap on a segment it gave bits to, so inside a tapered
+    // topology the second reading cannot arise and an EMPTY list is a recorded
+    // verdict — this tap serves no bit — rather than a gap.
+    //
+    // The second reading was never observed to fire.  The shape that would
+    // produce it is a block tapped by two segments where the group routing to
+    // it walks the other one; instrumenting the derivation found ZERO such
+    // taps across the 41-flow corpus and every taper vehicle, and the shape
+    // resisted synthesis (a group whose receiver is unreachable takes the
+    // mark_all fallback, which marks every tap).  The seeding is therefore a
+    // convention made explicit, measured inert — not a repair with a witness.
     //
     // DERIVED exactly like seg_bits: never persisted, excluded from topo_uid,
     // recomputed by derive_fanin_seg_bits.  The dogleg split leaves it alone —
