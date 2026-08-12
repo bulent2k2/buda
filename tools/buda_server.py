@@ -302,6 +302,11 @@ class Server:
         # itself now says so (BUDA-1903) instead of succeeding silently.
         self.out = out or sys.stdout
         self.stream = False
+        # -v twin (set by `__viz_final on`, which `buda::start` sends when the
+        # flow was launched with `btcl -v` / `tclsh …tcl -v`): open a viewer on
+        # the finished design at `__exit` (buda::stop) even if the flow never
+        # called `visualize`, unless it already ended by visualizing.
+        self.viz_final = False
 
     # ── framing ────────────────────────────────────────────────────────────
     def _reply(self, status, text=""):
@@ -329,8 +334,36 @@ class Server:
             self._reply("OK")
             return True
         if req == "__exit":
-            self._reply("BYE")
+            # -v twin: open a viewer on the finished design before shutting
+            # down, unless the flow already ended by visualizing.  The window
+            # BLOCKS until closed (as `visualize` does anywhere), so buda::stop
+            # waits for the BYE until then.  Captured like a real command and
+            # returned with the BYE (a headless run's BUDA-1903 note included).
+            if (self.viz_final and not self.session.no_viz
+                    and not self.session._flow_ends_by_visualizing()):
+                cap = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(cap), \
+                         contextlib.redirect_stderr(cap), \
+                         buda.ostream_redirect():
+                        self.session.run_command("visualize")
+                except BaseException:                     # noqa: BLE001
+                    pass
+                self._reply("BYE", cap.getvalue())
+            else:
+                self._reply("BYE")
             return False
+        if req == "__viz_final" or req.startswith("__viz_final "):
+            parts = req.split(None, 1)
+            mode = parts[1].strip().lower() if len(parts) > 1 else ""
+            if mode == "":
+                self._reply("OK", "on" if self.viz_final else "off")
+            elif mode in ("on", "off"):
+                self.viz_final = mode == "on"
+                self._reply("OK", mode)
+            else:
+                self._reply("ERR", "usage: __viz_final [on|off]")
+            return True
         if req == "__commands":
             self._reply("OK", " ".join(sorted(COMMANDS)))
             return True

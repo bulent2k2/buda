@@ -125,6 +125,7 @@ buda::stop
 buda::output      ;# the last command's output, echoed or not
 buda::commands    ;# the command list the engine reported
 buda::viz ?on|off?  ;# may `visualize` open a window; no arg = ask
+buda::vizfinal ?on|off?  ;# open a viewer at buda::stop even with no visualize
 buda::do <cmd> ...  ;# send a raw command line (the generic form)
 ```
 
@@ -139,6 +140,24 @@ A GUI that must stay live sends it as `buda::async visualize`; a batch flow
 declares itself with `buda::start -viz 0` (what `flow/tcl/corpus/harness.tcl`
 does — 31 of the 41 corpus flows end in `visualize`, and a sweep that opened
 31 windows would never finish).
+
+### `btcl -v` — a viewer at the end without editing the flow
+
+To eyeball a Tcl test vehicle without adding a `visualize` to it, launch it
+with the **`bin/btcl`** wrapper and `-v` (the twin of `buda -v`):
+
+```bash
+btcl -v flow.tcl        # runs `tclsh flow.tcl -v`
+```
+
+`btcl` moves `-v` into the interpreter's `$argv`; `buda::start` reads it there
+and turns on **viz-final**, so `buda::stop` opens a viewer on the finished
+design — **unless the flow already ended by visualizing** (its last BUDA
+command was `visualize`/`visualize_topologies`), in which case nothing is
+doubled. A GUI or embedder can set the same behaviour directly with
+`buda::vizfinal on`. The window blocks `buda::stop` until you close it, exactly
+as `buda::visualize` blocks; with `-viz 0` (or no display) the appended viewer
+reports `BUDA-1903` instead.
 
 Whenever a `visualize` command opens **no** window it now says so, with
 `BUDA-1903` and the reason:
