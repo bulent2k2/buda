@@ -104,19 +104,23 @@ def test_entry_target_modules_have_main(module, where):
     only through the installed scripts, so a rename would be invisible until
     someone ran the installed command.
 
-    Checked on the SOURCE rather than by importing, because two of the three
-    are GUI entry points that import tkinter at module scope — a headless host
-    (CI, this container) has no tkinter, and a test that skipped there would
-    check the two that matter most exactly nowhere.  The import is asserted as
-    well when the host can do it.
+    The two GUI entry points are checked on the SOURCE rather than by
+    importing.  `def_viz_o3` calls `matplotlib.use('TkAgg')` at module scope,
+    so importing it here would switch the backend for the whole pytest
+    PROCESS — the suite runs headless under Agg, and every viz test after this
+    one would be drawing at a display that is not there.  (`bdb_floorplanner`
+    guards its own backend choice and would import safely; it is checked the
+    same way for one rule rather than two.)  Nor would skipping when tkinter
+    is missing help: `actions/setup-python` ships tkinter, so the skip would
+    protect this container and fire the hazard on CI.  A source check has no
+    such reach and still catches the rename this exists for.
     """
     src = (_ROOT / where / f"{module}.py").read_text()
     assert re.search(r"^def main\(", src, re.M), f"{module}.py defines no main()"
-    if module != "buda_cli":
-        pytest.importorskip("tkinter")
-    buda_runtime.install()
-    __import__(module)
-    assert callable(getattr(sys.modules[module], "main"))
+    if module == "buda_cli":                 # no module-scope backend choice
+        buda_runtime.install()
+        __import__(module)
+        assert callable(getattr(sys.modules[module], "main"))
 
 
 # ── the layout rule ───────────────────────────────────────────────────────
