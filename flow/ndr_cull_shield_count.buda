@@ -1,0 +1,90 @@
+# REPRO: a governed segment whose MEMBER BITS are keepout-culled while its
+# SHIELDS survive, so counting shield rows as placed bits hides the stranding
+# from the cull-risk escalation tier (`_escalate_dead_low_segments`, the R13
+# fix in ndr_architecture.md §7.5).
+#
+# ── Why this vehicle is shaped the way it is ─────────────────────────────
+#
+# The tier only looks at NON-TOP seats and escalates them to a TOP layer, so
+# the vehicle must deliver BOTH at once: a governed run seated LOW, and a TOP
+# layer that can still host it.  Three constructions were tried and do not
+# work — worth recording, because each fails for its own reason:
+#
+#   * `def_ndr ... layers M3,M4` seats the run LOW, but a mask holding no TOP
+#     layer also removes the escalation TARGET — the tier falls back to the
+#     highest ALLOWED layer, which is the one the segment already sits on, so
+#     it refuses with "at its cell band's ceiling" and nothing moves.
+#   * a `span_max` penalty on the TOP layer steers the planner off it, but it
+#     re-shapes the chosen TOPOLOGY, and the keepout no longer meets the run.
+#   * `base_cost_non_top 0` does not seat a trunk LOW either: the planner
+#     prefers a TOP layer for a trunk whatever that penalty says.
+#
+# So the layer is FORCED, with an `edit_set_layer` + `edit_commit pin` the
+# planner honours for the candidate directly.  M9 is declared LOW (it is the
+# seat) and M5 TOP (it is the escalation target).  Pinning the layer is not a
+# workaround here but the honest instrument: the vehicle is about what the
+# TIER does with a given seat, not about which seat the planner picks.
+#
+# ── The cull ─────────────────────────────────────────────────────────────
+#
+# `shb` is `shield bus`: 4 bits flanked by 2 GND shields (demand 6 slots).
+# The blocks are deliberately THIN, so the trunk's perpendicular interval is
+# ~24 units — about 12 signal tracks — and the run cannot simply slide away
+# from the keepout the way it does on a tall face.
+#
+# The keepout takes out the two CENTRE tracks over PART of the span:
+#
+#   * centre, so neither side leaves 6 contiguous clear tracks and the
+#     span-clear-first placer is forced to straddle it;
+#   * only two tracks, so the run's OUTERMOST rows — the shields — sit
+#     outside the hole and survive the cull that removes the member bits;
+#   * partial span, clear of the midpoint (550), so every track stays
+#     midpoint-clear and the fallback pool is what the placer lands on.
+#
+# The result: 2 member bits placed, 2 shields placed, 4 member bits owed — so
+# counting shield rows reads 4 of 4 ("nothing stranded, skip") while the truth
+# is 2 of 4.  That is the exact arithmetic the R13 fix corrects.
+#
+# A/B with the `is_shield` exclusion removed: 4 net segments placed, 2 bits
+# unplaced, 2 violations, and no CULL-HEAL line at all.  With it: 6 placed, 0
+# unplaced, clean, `CULL-HEAL … opens 2->0`.
+
+add_block a 0   94 200  118
+add_block b 900 94 1100 118
+
+add_bus sh_[4] a.p b.q
+
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+def_layer 9 M9 H 20
+
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 5 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 6 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 9 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+
+def_ndr shb shield bus net GND
+set_ndr sh_ shb
+
+# Two centre tracks, partial span, clear of the midpoint.
+add_keepout 250 105 450 108 9
+
+run_bundler STRICT
+generate_topologies
+
+# Force the trunk onto M9 (LOW).  Cost knobs could not do this: the planner
+# prefers a TOP layer for a trunk whatever `base_cost_non_top` says, and a
+# `span_max` penalty re-shapes the topology instead.  A pinned forced layer
+# is honoured for the candidate directly, which is exactly the control the
+# vehicle needs.
+edit_topology 1 1
+edit_set_layer 0 9
+edit_commit pin
+set_track_pitch 3
+run_planner 1
+
+run_nuts
+run_detailed_nuts
+check_design
+report_wirelength
