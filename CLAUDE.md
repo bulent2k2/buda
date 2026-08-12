@@ -50,8 +50,10 @@ The **Floorplanner** (`bin/fp`, `bin/bfp`) is a separate interactive GUI tool th
 ## Wrapper scripts (`bin/`)
 
 All the launcher/build wrappers live in **`bin/`** at the repo root: `bb` (build),
-`buda` (routing CLI), `fp` / `bfp` (Floorplanner), `viz` (DEF/BDB visualizer),
-`u2b` (unit-test → `.buda` visualizer), and `activate` (sourceable env setup).
+`buda` (routing CLI), `btcl` (Tcl-flow launcher — `tclsh` + `buda.tcl`, with `-v`
+for a viewer at `buda::stop`), `fp` / `bfp` (Floorplanner), `viz` (DEF/BDB
+visualizer), `u2b` (unit-test → `.buda` visualizer), and `activate` (sourceable
+env setup).
 Each resolves the repo root as its parent dir, so it works from any CWD.
 
 **Add `<repo_root>/bin` to your `PATH`** and you can invoke them bare (`bb`, `buda

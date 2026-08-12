@@ -351,6 +351,10 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._record_fh = None
         self._record_path = os.environ.get("BUDA_RECORD", "").strip()
         self.no_viz = False          # set by --no-viz CLI flag
+        self.viz_final = False       # set by -v/--visualize: open a viewer at the
+                                     # end even if the script has no `visualize`
+        self._recent_verbs = []      # leaf command verbs in run order (for -v's
+                                     # "does the flow already end by visualizing?")
         self.verbose_conn = False    # set by --verbose-conn: print every per-bit violation
         self.ipc_verbose = False     # set by --ipc-verbose: surface buda_viz/def_viz IPC chatter
         self._die_w = 0.0            # stored by set_die when no BDB is open (flat flow)
@@ -724,6 +728,12 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         cmd = parts[0].lower()
         args = parts[1:]
         self._record(cmd, cmd_line)
+        # Track the leaf command sequence for -v's end-of-flow decision.  Skip
+        # `source` (a wrapper — its children run through here too, so the tail
+        # stays the real last commands).  Recorded here, BEFORE dispatch, so a
+        # terminal `exit` (whose handler raises SystemExit) still lands.
+        if cmd != "source":
+            self._recent_verbs.append(cmd)
 
         handler = COMMANDS.get(cmd)
         if handler is None:
@@ -741,6 +751,22 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
             sys.exit(1)
             return
         return handler(self, cmd, args, cmd_line)
+
+    _VIZ_VERBS = ("visualize", "visualize_topologies")
+
+    def _flow_ends_by_visualizing(self):
+        """True when the flow's own commands already open a viewer at the end,
+        so -v should NOT add a second one.  That is: the last leaf command is a
+        `visualize`/`visualize_topologies`, OR it is `exit` immediately preceded
+        by one (`visualize` then `exit`).  A viewer earlier in the flow — with
+        other commands after it — does NOT count: -v still adds a fresh final
+        view of the finished design (the whole point of the flag)."""
+        v = self._recent_verbs
+        if v and v[-1] in self._VIZ_VERBS:
+            return True
+        if len(v) >= 2 and v[-1] == "exit" and v[-2] in self._VIZ_VERBS:
+            return True
+        return False
 
 def _enable_line_buffered_stdio():
     """Issue #31: force line buffering on stdout/stderr so that, when they are
@@ -856,8 +882,15 @@ def main():
     parser.add_argument('script', nargs='?',
                         help='path to a .buda flow script; a missing .buda '
                              'suffix is added automatically')
-    parser.add_argument('-nv', '--no-viz', action='store_true',
+    viz_group = parser.add_mutually_exclusive_group()
+    viz_group.add_argument('-nv', '--no-viz', action='store_true',
                         help='skip visualize commands (useful for batch/CI runs)')
+    viz_group.add_argument('-v', '--visualize', dest='viz_final',
+                        action='store_true',
+                        help='open a viewer on the finished design even if the '
+                             'script has no `visualize` — for running test '
+                             'vehicles without adding one; no-op if the flow '
+                             'already ends by visualizing')
     parser.add_argument('-t', '--tag', metavar='TAG',
                         help='insert TAG into every log file name for this run '
                              '(<stem>_<TAG>_flow.log etc.), so parallel '
@@ -909,6 +942,7 @@ def main():
           f"({'--threads' if args.threads is not None else 'default: max/2'})")
     session = BudaSession()
     session.no_viz = args.no_viz
+    session.viz_final = args.viz_final
     session.verbose_conn = args.verbose_conn
     session.strict_check = args.strict_check
     session.report_json_path = args.report_json
@@ -998,6 +1032,22 @@ def main():
             # Idempotent: a blocking `visualize` already emitted this before the
             # GUI opened (so it survives a macOS .app quit-on-window-close).
             session._print_end_report()
+            # -v (--visualize): open a viewer on the FINISHED design even when
+            # the script never called `visualize`, so a test vehicle can be
+            # eyeballed without editing it.  Runs here — after the end report
+            # (so the summary survives the macOS .app quit-on-close) and while
+            # the flow log is still OPEN (the skip-note path writes to it) — and
+            # after a trailing `exit` was caught above, so the window still
+            # opens and the script's exit code is honored below once it closes.
+            # A flow that already ends by visualizing is left alone; `visualize`
+            # self-skips (BUDA-1903) with no display, so this is safe headless.
+            if (session.viz_final and not session.no_viz
+                    and not session._flow_ends_by_visualizing()):
+                session._at_last_command = True
+                try:
+                    session.run_command("visualize")
+                except BaseException as e:   # never mask the flow's own outcome
+                    print(f"Warning: -v visualize failed: {e}")
             if session._flow_log is not None:
                 session._flow_log.close()
             # Decision-trace dump (risk_reduction_plan.md R2): one JSON line

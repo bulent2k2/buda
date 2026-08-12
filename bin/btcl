@@ -1,0 +1,27 @@
+#!/bin/bash
+# btcl — run a Tcl flow that drives BUDA (it sources tools/buda.tcl and calls
+# buda::start), with an optional -v that opens a viewer on the FINISHED design
+# at buda::stop even when the flow has no `visualize`.  The Tcl twin of the
+# `buda -v` flag, for eyeballing a Tcl test vehicle without editing it.
+#
+#   btcl flow.tcl [args...]        # run the flow
+#   btcl -v flow.tcl [args...]     # …and pop a viewer at buda::stop
+#
+# -v is handed to the flow's interpreter as a bare `$argv` token (moved after
+# the script), where tools/buda.tcl's buda::start reads it and enables the
+# behaviour engine-side.  Everything else passes through to tclsh unchanged.
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+# The child buda_server.py self-bootstraps its own imports, but export the
+# layer too so a `package require`/helper in the flow resolves the same way.
+export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
+
+VFLAG=(); ARGS=()
+for a in "$@"; do
+  case "$a" in
+    -v|--visualize) VFLAG=(-v) ;;
+    *)              ARGS+=("$a") ;;
+  esac
+done
+# -v AFTER the script so it lands in the interpreter's $argv (tclsh treats a
+# flag before the script as the script name).  buda::start finds it anywhere.
+exec tclsh "${ARGS[@]}" "${VFLAG[@]}"
