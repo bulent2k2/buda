@@ -346,65 +346,36 @@ static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
         }
     }
 
-    // Legitimate reaches from the topology rather than from a via: busterm
-    // faces and pass-through coverage.  Computed once per segment.
+    // Legitimate reaches from the topology rather than from a via: BUSTERM taps
+    // and pass-through crossings.  Both are per BIT, for different reasons, so
+    // neither can be summarized per segment:
     //
-    // A BUSTERM tap is kept SEPARATE from the pass-through coverage because it
-    // is not shared by every bit: on a tapered tree a trunk taps blocks only
-    // some of its bits terminate at, and crediting such a tap to the others
-    // would excuse exactly the dangling metal this audit exists to find — the
-    // same per-SEGMENT/per-BIT conflation DetailedNUTS and check_dnuts read
-    // `seg_busterm_serves_bit` to avoid.  So taps carry their block name and
-    // are filtered per bit below; pass-through coverage stays shared (a
-    // crossing is geometry, and whether it should vouch for a bit at all is the
-    // separate open question flow/antenna_taper_passthru.buda documents).
-    std::vector<std::vector<double>> seg_reach(n);
+    //   a TAP is not shared by every bit — on a tapered tree a trunk taps
+    //   blocks only some of its bits terminate at, and crediting such a tap to
+    //   the others excuses exactly the dangling metal this audit exists to find
+    //   (the per-SEGMENT/per-BIT conflation `seg_busterm_serves_bit` fixes);
+    //
+    //   a CROSSING is not shared either — it is decided at the NOMINAL
+    //   ConnSeg (one line, one span), while what is actually built is a bit at
+    //   its own placed track with its own final span.  DetailedNUTS can slide a
+    //   bit off a block the nominal segment crossed, and if some other segment
+    //   supplies that block's coverage the coverage audit stays clean, so the
+    //   phantom crossing silently excuses the overhang.
+    //
+    // What is per SEGMENT is only the tap's block and coordinate; the verdict
+    // is taken per bit below.
     std::vector<std::vector<std::pair<std::string, double>>> tap_reach(n);
     for (int si = 0; si < n; ++si) {
-        const ConnSeg& cs = segs[si];
-        // A BUSTERM tap's reach must be expressed on THIS segment's along-axis.
-        // SegConn::face_coord cannot serve directly: it is "x for an x-face, y
-        // for a y-face", so which axis it names depends on which face the
-        // segment landed against, and consuming it unconditionally pushes a
-        // PERPENDICULAR coordinate into the along-axis bounds — corrupting them
-        // and manufacturing overhang (it produced a reach of 0 on a wire
-        // spanning [100,400], a coordinate not even on the wire).  Take the
-        // tapped block's own along-extent instead, clipped to the segment: that
-        // is axis-correct by construction and needs no face semantics.
-        auto block_reach = [&](const std::string& bname,
-                               std::vector<double>& sink) {
-            auto rects = fp.get_block_rects(bname);
-            if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
-            const double s_lo = std::min(cs.along_lo, cs.along_hi);
-            const double s_hi = std::max(cs.along_lo, cs.along_hi);
-            for (const Rect& r : rects) {
-                const double b_lo = cs.horiz ? (double)r.x1 : (double)r.y1;
-                const double b_hi = cs.horiz ? (double)r.x2 : (double)r.y2;
-                const double lo = std::max(s_lo, b_lo), hi = std::min(s_hi, b_hi);
-                if (lo <= hi) { sink.push_back(lo); sink.push_back(hi); }
-            }
-        };
-        auto add_block_reach = [&](const std::string& bname) {
-            block_reach(bname, seg_reach[si]);
-        };
-        for (const auto& c : cs.conns)
-            if (c.kind == SegConn::BUSTERM) {
-                std::vector<double> pts;
-                block_reach(c.block_name, pts);
-                for (double p : pts) tap_reach[si].emplace_back(c.block_name, p);
-            }
-        // Pass-through coverage goes through the SAME clipped helper: a block
-        // edge beyond the wire is not a point on the wire, and letting it into
-        // the bounds is the identical mistake as the face_coord one above.
-        for (const auto& bname : topo.connected_block_names) {
-            auto rects = fp.get_block_rects(bname);
-            if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
-            for (const Rect& r : rects)
-                if (seg_spans_rect(cs, (double)cs.perp_pos, r)) {
-                    add_block_reach(bname);
-                    break;
-                }
-        }
+        // A tap's reach is the tap: SegConn::face_coord, the along-axis
+        // coordinate of the endpoint that lands on the block
+        // (`ci.horiz ? P.x : P.y` on the segment's OWN endpoint and OWN
+        // orientation — always the along axis, never the perpendicular one).
+        // Crediting the block's whole clipped extent instead, as this did,
+        // hands a wire that overshoots its tap into the block a free pass out
+        // to the far edge — hiding precisely the overhang being measured.
+        for (const auto& c : segs[si].conns)
+            if (c.kind == SegConn::BUSTERM)
+                tap_reach[si].emplace_back(c.block_name, (double)c.face_coord);
     }
 
     // A via's own enclosure legitimately overhangs its junction; only call metal
@@ -414,11 +385,33 @@ static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
         if (ns.bundle_id != bundle_id || ns.is_shield || !ns.placed) continue;
         const int si = ns.seg_idx;
         if (si < 0 || si >= n) continue;
+        const ConnSeg& cs = segs[si];
+        const double s_lo = std::min(ns.span_lo, ns.span_hi);
+        const double s_hi = std::max(ns.span_lo, ns.span_hi);
 
-        std::vector<double> pts = seg_reach[si];
+        std::vector<double> pts;
         for (const auto& [bname, p] : tap_reach[si])
             if (seg_busterm_serves_bit(topo, si, bname, ns.bit_index))
                 pts.push_back(p);
+        // Pass-through crossings, judged on THIS BIT's placed geometry: its
+        // track_position for the perpendicular test and its final span for the
+        // along one.  A block the bit really crosses contributes the crossed
+        // extent, clipped to the bit — a block edge beyond the wire is not a
+        // point on the wire, and admitting one would manufacture reach the
+        // same way crediting a whole tapped block did.
+        for (const auto& bname : topo.connected_block_names) {
+            auto rects = fp.get_block_rects(bname);
+            if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+            for (const Rect& r : rects) {
+                const double p_lo = cs.horiz ? (double)r.y1 : (double)r.x1;
+                const double p_hi = cs.horiz ? (double)r.y2 : (double)r.x2;
+                if (ns.track_position < p_lo || ns.track_position > p_hi) continue;
+                const double b_lo = cs.horiz ? (double)r.x1 : (double)r.y1;
+                const double b_hi = cs.horiz ? (double)r.x2 : (double)r.y2;
+                const double lo = std::max(s_lo, b_lo), hi = std::min(s_hi, b_hi);
+                if (lo <= hi) { pts.push_back(lo); pts.push_back(hi); }
+            }
+        }
         auto it = reach.find({si, ns.bit_index});
         if (it != reach.end())
             pts.insert(pts.end(), it->second.begin(), it->second.end());
@@ -426,8 +419,6 @@ static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
 
         const double lo = *std::min_element(pts.begin(), pts.end());
         const double hi = *std::max_element(pts.begin(), pts.end());
-        const double s_lo = std::min(ns.span_lo, ns.span_hi);
-        const double s_hi = std::max(ns.span_lo, ns.span_hi);
         const double tol  = std::max(ns.width, 1.0);
         const double lead = lo - s_lo, trail = s_hi - hi;
         if (lead <= tol && trail <= tol) continue;
@@ -436,6 +427,16 @@ static void detect_bit_antennas(const std::vector<ConnSeg>& segs,
         v.kind      = ViolationKind::ANTENNA;
         v.bundle_id = bundle_id;
         v.seg_idx   = si;
+        // This finding is PER BIT, so it must carry its bit.  Left at the -1
+        // default, the summary reporter reads several affected bits on one
+        // segment as ONE non-bit violation: it prints the first bit's message
+        // and counts the group as 1, so both the detail and the total are
+        // wrong; a programmatic consumer cannot tell which bit failed at all.
+        // (Setting it also moves this kind onto the reporter's grouped line,
+        // which is why ANTENNA needed a _CONN_KIND_REASON entry — the group
+        // renders the kind's reason, not the per-bit message.  --verbose-conn
+        // still prints the message below, magnitude and all.)
+        v.bit_index = ns.bit_index;
         std::ostringstream msg;
         msg << "Seg " << si << " bit " << ns.bit_index << " on layer M"
             << ns.layer << " spans [" << s_lo << "," << s_hi
