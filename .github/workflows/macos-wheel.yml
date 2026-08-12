@@ -125,6 +125,21 @@ jobs:
           python3 -m build --wheel --outdir dist/
           ls -l dist/
 
+          # ASSERT the tag, do not eyeball it.  The macOS floor lives in the
+          # wheel FILENAME and nowhere else — no step fails when it is wrong,
+          # and the first green run of this workflow shipped a macOS-26-only
+          # wheel with every tick green because of exactly that.  Checking it
+          # here makes the green tick mean something.
+          want="macosx_$(echo "$MACOSX_DEPLOYMENT_TARGET" | tr . _)"
+          got=$(basename dist/*.whl)
+          echo "wheel: $got   (expecting tag to contain '$want')"
+          case "$got" in
+            *"$want"*) echo "OK: deployment target is in the tag" ;;
+            *) echo "::error::wheel tag does not carry $want — MACOSX_DEPLOYMENT_TARGET did not take effect: $got"
+               exit 1 ;;
+          esac
+          echo "WHEEL_NAME=$got" >> "$GITHUB_ENV"
+
       - name: What does it link? (the delocate question, answered)
         run: |
           {
@@ -269,6 +284,19 @@ jobs:
           python3 -m pip install --upgrade pip cibuildwheel
           python3 -m cibuildwheel --output-dir wheelhouse
           ls -l wheelhouse/
+
+          # Same assertion as the native job, and for the same reason: an
+          # unusable wheel and a usable one differ only in this filename, and
+          # nothing else in the run would notice.  Here it also pins the ARCH,
+          # since a cross-build silently producing an arm64 wheel would be
+          # green, uploaded, and useless on the Intel Mac it exists for.
+          want="macosx_$(echo "$MACOSX_DEPLOYMENT_TARGET" | tr . _)_x86_64"
+          got=$(basename wheelhouse/*.whl)
+          echo "wheel: $got   (expecting tag to contain '$want')"
+          case "$got" in
+            *"$want"*) echo "OK: deployment target and arch are in the tag" ;;
+            *) echo "::error::wheel tag is not $want: $got"; exit 1 ;;
+          esac
 
       - name: Report, and say plainly what was NOT tested
         if: always()
