@@ -17,10 +17,11 @@
 # into one, moved it to the end, and — worst — turned the viewer on for a
 # `btcl flow.tcl -v` that never asked this wrapper for anything.
 #
-# The request travels as an ENVIRONMENT VARIABLE rather than an injected argv
-# token, so a flow's arguments are exactly what it was given.  buda::start also
-# still honours a bare `-v` in `$argv`, which is what `tclsh flow.tcl -v` (no
-# wrapper) relies on — there the token is the user's own and unambiguous.
+# The request travels as an ENVIRONMENT VARIABLE (BUDA_VIZ_FINAL) rather than
+# an injected argv token, so a flow's arguments are exactly what it was given.
+# buda::start reads only that: it used to scan `$argv` for a bare `-v`, which
+# cannot tell a launcher's request from a flag the flow wants for itself.  With
+# no wrapper, `BUDA_VIZ_FINAL=1 tclsh flow.tcl` says the same thing.
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # The child buda_server.py self-bootstraps its own imports, but export the
 # layer too so a `package require`/helper in the flow resolves the same way.
@@ -30,7 +31,11 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -v|--visualize) export BUDA_VIZ_FINAL=1; shift ;;
     --)             shift; break ;;
-    -h|--help)      sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # The header block IS the help, read to the first non-comment line rather
+    # than to a hand-picked number — which had already gone stale by four
+    # lines and silently truncated the last paragraph.
+    -h|--help)      sed -n '2,${/^[^#]/q; s/^# \{0,1\}//; p;}' "${BASH_SOURCE[0]}"
+                    exit 0 ;;
     -*)             echo "btcl: unknown option '$1'" >&2; exit 2 ;;
     *)              break ;;          # the script — parsing stops here
   esac
