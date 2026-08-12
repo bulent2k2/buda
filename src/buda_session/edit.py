@@ -604,8 +604,8 @@ class EditMixin:
             elif i != sel:                  # never drop the pinned candidate
                 drop.add(i)
                 print(f"  [TopoDedup] bundle {bid}: dropped {c.type} "
-                      f"(idx {i + 1}) — same slide-window/connectivity as "
-                      f"idx {seen[key] + 1} (nominal-locus variant)")
+                      f"(topo {i + 1}) — same slide-window/connectivity as "
+                      f"topo {seen[key] + 1} (nominal-locus variant)")
         if not drop:
             return 0
         w.input.candidates = [c for k, c in enumerate(cands) if k not in drop]
@@ -708,7 +708,7 @@ class EditMixin:
             if reason:
                 drop.add(i)
                 print(f"  [TopoDangling] bundle {bid}: dropped {c.type} "
-                      f"(idx {i + 1}) — {reason}")
+                      f"(topo {i + 1}) — {reason}")
         if not drop:
             return 0
         keep = [c for k, c in enumerate(cands) if k not in drop]

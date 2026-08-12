@@ -271,9 +271,10 @@ measured: unpinned this design plans `diag` as `TRUNK_V@x240`, pinned to 14
 it keeps `TRUNK_H+MST@y480` through the resume, the re-plan, and the
 checkpoint after that. A pin made **in the explorer** is a preview by
 design — the viewer's re-run buttons never write a checkpoint — so bring the
-title bar's `topo N/n` back as `BUDA_ARRAY_PIN=<bus>=N`. That N is 1-based
-and is exactly what `select_topology` takes; `dump_topologies` numbers its
-own table from **0**, so add one when reading it there.
+title bar's `topo N/n` back as `BUDA_ARRAY_PIN=<bus>=N`. Candidate ids are
+**1-based everywhere** they are shown or typed — the title bar,
+`dump_topologies`' `topo` column, `select_topology`, `edit_topology` — so the
+number you read is the number you use.
 
 This pair is also what measured the **fan-in taper gap**, now fixed: a
 resumed CONVERGENT/DIVERGENT bundle used to come back untapered and route

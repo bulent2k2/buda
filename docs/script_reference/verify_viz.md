@@ -186,7 +186,7 @@ generation.
 | `--conn` | After each shown bundle's table, print a per-segment connectivity detail for the selected candidate (see below). |
 | `--grouped` | Collapse **nominal-locus families** to one representative row each — the set-up for a `group:<N>` super-candidate pin (see below). |
 
-Each candidate row prints: `idx`, `type`, `wl` (estimated / as-generated
+Each candidate row prints: `topo` (the candidate's **1-based** id — the number `select_topology` / `edit_topology` take and the explorer's `topo N/n` shows), `type`, `wl` (estimated / as-generated
 wirelength), `wl[lo..hi]` (the routing **WL envelope** the candidate's slide/span
 DOF permit — `lo` is the tightest routing, i.e. the total span minimized jointly
 over the slide box; `hi` a loose outer bound — a wide envelope means the candidate
@@ -213,9 +213,9 @@ notes to that row:
   spanning `lo..hi`.
 - `group:<N>` — the **exact, pinnable token**: paste it verbatim after the
   bundle hint to pin the whole family, `select_topology <bundle> group:<N>`. `N`
-  is the representative's **1-based** candidate id (the `idx` column is 0-based,
-  and the ordinal position among families is neither — so always copy this mark
-  rather than deriving it).
+  is the representative's candidate id — the same number its `topo` column
+  shows. (The ordinal position among families is NOT the pin id, so copy the
+  mark rather than counting rows.)
 
 `--grouped` is read-only display: it never drops or reorders candidates, so a
 plain dump and the whole pipeline are unchanged. It is the discovery step for a
