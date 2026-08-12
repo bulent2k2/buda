@@ -203,6 +203,38 @@ def test_pass_through_and_tap_reach_stay_on_the_wire():
         assert s_lo <= r_lo <= s_hi and s_lo <= r_hi <= s_hi, h
 
 
+def test_a_culled_partner_retracts_its_neighbour_instead_of_stranding_it():
+    """The shape rv/soc shows mid-flow, isolated — and it is HANDLED.
+
+    `flow/antenna_culled_partner.buda` is a Z_VHV whose far leg lands on a
+    keepout the PLANNER never saw (declared after `run_planner`, the
+    deterministic stand-in for a DEF-imported blockage), so only DetailedNUTS's
+    per-bit cull acts and all 4 of seg 2's bits go.  Seg 1's far junction then
+    refers to a wire that does not exist, which is exactly the setup that
+    dangles 19,600 units per bit on rv/soc.
+
+    Here it does not dangle: #678's rule treats an endpoint conn resolving to
+    no wire as a stale end, so seg 1 retracts to its remaining via.  Both halves
+    are pinned — no dangling metal, AND the real problem (unplaced bits) still
+    reported — because a checker made silent by dropping the segment entirely
+    would pass the first assertion alone.
+
+    That this vehicle stays clean while rv/soc does not is the evidence that
+    rv/soc's antenna has a DIFFERENT cause; see docs/internal/antenna_repros.md
+    entries 6 and 7.
+    """
+    s = _session(_ROOT / "flow/antenna_culled_partner.buda", verbose=True)
+    assert _findings_in_run(s) == [], "the retraction should leave no antenna"
+    assert s.detailed_result.num_unplaced == 4, "the real problem must still be reported"
+
+    # Seg 1 spans [190,710] abstractly — 520 units.  Retracted, each of its
+    # bits collapses onto its own via; a regression restores the full 520.
+    seg1 = [n for n in s.detailed_result.net_segments if n.seg_idx == 1]
+    assert len(seg1) == 4, seg1
+    assert all(abs(n.span_hi - n.span_lo) < 1.0 for n in seg1), \
+        [(n.bit_index, n.span_lo, n.span_hi) for n in seg1]
+
+
 def test_a_crossing_is_judged_at_the_bit_not_at_the_nominal_segment():
     """The reach a NOMINAL crossing used to grant, on a bit that crosses nothing.
 
