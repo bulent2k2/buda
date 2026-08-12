@@ -61,13 +61,31 @@ def test_a_wire_may_not_span_a_rail():
     """A k-slot wire is k CONSECUTIVE signal slots.  A period whose signal
     slots are split by a rail offers only its longest run, and asking for more
     is unrealizable (R3) rather than a number to round."""
+    # RAIL-TERMINATED so the period cannot join its own next copy — that
+    # would be the cross-period splice, which is a different (and legal)
+    # thing, covered below.
     split = _pattern([("SIGNAL", 1, 1)] * 2 + [("POWER", 2, 1)]
-                     + [("SIGNAL", 1, 1)] * 3)
+                     + [("SIGNAL", 1, 1)] * 3 + [("GROUND", 2, 1)])
     g = split.ndr_geom()
     assert [len(r) for r in g.runs] == [2, 3]
     assert buda.ndr_max_slots(g) == 3
     assert buda.ndr_metal_for_slots(g, 3) == pytest.approx(5)
     assert buda.ndr_metal_for_slots(g, 4) < 0, "a 4-slot wire would cross the rail"
+
+
+def test_runs_join_across_the_period_boundary_even_with_an_interior_rail():
+    """The tail run of one period abuts the head run of the next whenever no
+    rail sits between — which depends on the RAIL, not on how many runs the
+    period happens to have (Codex P2 on #717).
+
+    `SIGNAL POWER SIGNAL` is two runs of one, yet a legal TWO-slot wire
+    straddles the boundary; guarding on `runs.size() == 1` reported max 1 and
+    would have falsely refused it."""
+    g = _pattern([("SIGNAL", 1, 1), ("POWER", 2, 1),
+                  ("SIGNAL", 1, 1)]).ndr_geom()
+    assert buda.ndr_max_slots(g) == 2
+    # …and the interior rail still blocks a wire that would cross IT.
+    assert buda.ndr_metal_for_slots(g, 3) < 0
 
 
 def test_runs_splice_across_periods_only_when_no_rail_separates_them():
@@ -217,3 +235,62 @@ def test_multiplier_and_ungoverned_specs_are_untouched():
     plain = buda.NdrSpec()
     got, ok = buda.ndr_resolve_on_layer(plain, 5, dg)
     assert ok and not got.active()
+
+
+def _flow(tmp_path, body):
+    """Run a .buda body through the CLI, returning (stdout+stderr, rc)."""
+    import subprocess, sys, os
+    f = tmp_path / "t.buda"
+    f.write_text(body)
+    env = dict(os.environ, PYTHONPATH="build:src:tools")
+    root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    r = subprocess.run([sys.executable, "src/buda_cli.py", str(f), "--no-viz"],
+                       capture_output=True, text=True, cwd=root, env=env)
+    return r.stdout + r.stderr, r.returncode
+
+
+_STACK = """add_block a 0 0 200 200
+add_block b 900 0 1100 200
+add_bus w_[2] a.p b.q
+def_layer 3 M3 H TOP 20
+def_layer 4 M4 V 20
+"""
+_DENSE = "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1\n"
+# Every signal slot isolated between rails: runs of ONE, 2 units of metal.
+_ISO = "def_track_pattern 4 0 (VDD 2 2 _ 2 2 GND 2 2 _ 2 2)x3\n"
+
+
+def test_an_unrealizable_metal_rule_is_refused_not_quantized_to_the_clamp(tmp_path):
+    """R3 at the declaration.  `ndr_resolve_on_layer` CLAMPS an unrealizable
+    value to the layer's longest run, so caching that count would let the
+    later check see a number that fits by construction and route the rule
+    below its declared width — silently (Codex P1 on #717)."""
+    out, rc = _flow(tmp_path, _STACK + _DENSE
+                    + "def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1\n"
+                    + "def_ndr big width 40 metal\nset_ndr w_ big\n"
+                      "run_bundler STRICT\n")
+    assert rc != 0, out
+    assert "cannot realize the declared value" in out, out
+    assert "NDR rule 'big'" in out, "the refusal must name the rule"
+
+
+def test_a_per_layer_override_is_validated_in_the_parent_rules_reading(tmp_path):
+    """The `def_ndr_layer` probe left `metal_quant` at its default and passed
+    no pitch, so it took the channel branch, returned early and reported OK
+    unconditionally — an advertised R3 check that tested nothing."""
+    out, _rc = _flow(tmp_path, _STACK + _DENSE + _ISO
+                     + "def_ndr em width 2 metal\n"
+                       "def_ndr_layer em M4 width 9\n")
+    assert "def_ndr_layer 'em'" in out and "cannot realize" in out, out
+
+
+def test_the_same_override_is_accepted_when_the_layer_can_deliver(tmp_path):
+    """Non-vacuity: the refusal above must be about the ARITHMETIC, not about
+    per-layer overrides being rejected generally."""
+    out, rc = _flow(tmp_path, _STACK + _DENSE
+                    + "def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1\n"
+                    + "def_ndr em width 2 metal\n"
+                      "def_ndr_layer em M4 width 9\n")
+    assert rc == 0, out
+    assert "cannot realize" not in out, out

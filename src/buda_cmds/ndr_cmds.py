@@ -461,8 +461,28 @@ def ensure_abs_quantization(session, rule):
         # property (a consumer that forgets to resolve over-charges) would
         # invert into under-charging.
         probe.metal_quant = bool(rule.get("metal", 0))
-        r, _ok = buda.ndr_resolve_on_layer(probe, lid, geom,
-                                           pitches[lid])
+        r, ok = buda.ndr_resolve_on_layer(probe, lid, geom, pitches[lid])
+        if not ok:
+            # An unrealizable value is CLAMPED to the layer's longest run, so
+            # caching it would make the later R3 check see a count that fits
+            # by construction and route the rule below its declared width --
+            # silently (Codex P1 on #717).  R3 says the tool never degrades
+            # an NDR, so refuse here, where the arithmetic is still nameable.
+            ceiling = buda.ndr_max_slots(geom)
+            best = buda.ndr_metal_for_slots(geom, ceiling)
+            # Reverse-lookup only on the error path: the rule dict does not
+            # carry its own name, and a refusal that cannot name the rule is
+            # half a message.
+            nm = (rule.get("name")
+                  or next((k for k, v in _rules(session).items()
+                           if v is rule), "?"))
+            print(f"Error: NDR rule '{nm}': layer "
+                  f"L{lid} cannot realize the declared value — its longest "
+                  f"contiguous signal run is {ceiling} slot(s), delivering at "
+                  f"most {best:g} unit(s) of metal (a wire may not span a "
+                  f"power rail).  R3: the tool never silently degrades an "
+                  f"NDR.", flush=True)
+            sys.exit(1)
         ws, gs = max(ws, r.width_slots), max(gs, r.guard_slots)
     rule["width_slots_max"], rule["guard_slots_max"] = ws, gs
     return True
@@ -581,7 +601,7 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
     rule = {"width_x": 1.0, "spacing_x": 1.0, "shield_mode": 0,
             "shield_per_n": 0, "shield_net": "GND", "layers": None,
             "credit": 0, "bond": 0, "width_abs": 0.0,
-            "spacing_abs": 0.0, "metal": 0}
+            "spacing_abs": 0.0, "metal": 0, "name": name}
     i = 1
     while i < len(args):
         tok = args[i].lower()
@@ -824,7 +844,13 @@ def cmd_def_ndr_layer(session, cmd, args, cmd_line):
             sys.exit(1)
         probe = buda.NdrSpec()
         probe.width_abs, probe.spacing_abs = entry["width_abs"], entry["spacing_abs"]
-        _, ok = buda.ndr_resolve_on_layer(probe, lid, geom)
+        # The parent rule's READING, and its pitch.  Left at the default the
+        # probe took the CHANNEL branch with pitch 0, returned early and
+        # reported ok=True unconditionally -- an advertised R3 check that
+        # tested nothing (Codex P1 on #717).
+        probe.metal_quant = bool(rule.get("metal", 0))
+        _, ok = buda.ndr_resolve_on_layer(
+            probe, lid, geom, ndr_layer_pitch(session, lid))
         if not ok:
             ceiling = buda.ndr_max_slots(geom)
             best = buda.ndr_metal_for_slots(geom, ceiling)
