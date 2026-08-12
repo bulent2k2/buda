@@ -503,19 +503,43 @@ def test_optimizer_ga_runtime_budget():
                                          patience=0))
 
 
-def test_optimizer_timed_patience_scales_with_budget():
+def test_optimizer_timed_patience_scales_with_budget(attempts=3):
     # Regression: a timed run with convergence early-stop ON must scale its
     # stagnation horizon to the budget, not abandon the run after a tiny fixed
     # window.  (Previously SA capped the window at 200 → it quit after ~thousands
     # of iters even for a multi-second budget.)  Compare patience-on vs off on
     # the SAME machine/budget so the check is independent of CPU speed.
-    no_stop  = _mk_optimizer().run_sa(max_iter=0, time_budget_s=0.5, patience=0)
-    with_stop = _mk_optimizer().run_sa(max_iter=0, time_budget_s=0.5, patience=10)
-    # The early-stop may converge before the wall-clock cap, but it must not slash
-    # the run to a tiny fraction (the old bug stopped at <1% of the budget).
-    assert with_stop.iterations > 0.1 * no_stop.iterations, (
-        f"timed patience stopped too early: {with_stop.iterations} vs "
-        f"{no_stop.iterations} (no early-stop)")
+    #
+    # Bounded retry, for the same reason as _assert_more_budget_more_work above
+    # but a different mechanism, so it is worth naming.  Under a time budget SA
+    # CALIBRATES: it measures per-iteration cost, derives n_target from the
+    # budget, and sets the stagnation window to n_target/50 — so the early stop
+    # lands at patience × window = n_target/5.  A stall during that calibration
+    # (and only then — sustained load slows both runs equally and the ratio
+    # RISES) makes per_iter look expensive, n_target too small, and the window
+    # too narrow.  The CI failure that prompted this shows it exactly: the stop
+    # fired at 4368 iters ⇒ window ≈ 437 ⇒ n_target ≈ 21.8k, while the
+    # patience-off twin managed 290k in the same 0.5s — a ~13× calibration
+    # underestimate, not an early-stop regression.
+    #
+    # Calibration is a fresh measurement per run_sa call, so a stall is
+    # independent per attempt and retrying drives it to ~0.  The regression this
+    # guards is NOT independent: a fixed 200-cap window stops at ≤ patience×200
+    # ≈ 2000 iters against ~10^6, failing every attempt deterministically.  So
+    # the retry costs the guard nothing — and the 10% threshold is deliberately
+    # left alone, since loosening it is what would.
+    last = None
+    for _ in range(attempts):
+        no_stop  = _mk_optimizer().run_sa(max_iter=0, time_budget_s=0.5, patience=0)
+        with_stop = _mk_optimizer().run_sa(max_iter=0, time_budget_s=0.5, patience=10)
+        # The early-stop may converge before the wall-clock cap, but it must not
+        # slash the run to a tiny fraction (the old bug stopped at <1% of it).
+        if with_stop.iterations > 0.1 * no_stop.iterations:
+            return
+        last = (with_stop.iterations, no_stop.iterations)
+    raise AssertionError(
+        f"timed patience stopped too early in {attempts} attempts "
+        f"(last: {last[0]} vs {last[1]} with no early-stop)")
 
 
 def test_parse_time_budget():
