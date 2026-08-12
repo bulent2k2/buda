@@ -294,3 +294,109 @@ def test_the_same_override_is_accepted_when_the_layer_can_deliver(tmp_path):
                       "def_ndr_layer em M4 width 9\n")
     assert rc == 0, out
     assert "cannot realize" not in out, out
+
+
+# ── v28: per-layer values and the metal flag survive a BDB round trip ──────
+# Persisted for the same reason `width_abs` was (v26): without them a reopened
+# design restores the rule missing part of its declaration and routes
+# DIFFERENTLY from the design that was saved — and the session that could have
+# warned is not the session that suffers.
+
+_RT_SETUP = """open_bdb {db}
+def_layer 3 M3 H TOP 20
+def_layer 4 M4 V 20
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+"""
+
+
+def _session(tmp_path, body):
+    import sys as _s
+    _s.path[:0] = ["build", "src", "tools"]
+    import buda_cli
+    sess = buda_cli.BudaSession()
+    for raw in body.splitlines():
+        line = raw.split("#")[0].strip()
+        if line:
+            sess.do_command(line)
+    return sess
+
+
+def test_per_layer_and_metal_survive_a_bdb_round_trip(tmp_path):
+    from buda_cmds import ndr_cmds
+    db = str(tmp_path / "rt.bdb")
+    _session(tmp_path, _RT_SETUP.format(db=db) + """def_ndr em width 3 metal
+def_ndr_layer em M4 width 5
+def_ndr_layer em M3 spacing x2
+save_bdb
+""")
+    # A FRESH session that only re-declares the technology.
+    s2 = _session(tmp_path, _RT_SETUP.format(db=db))
+    r = ndr_cmds._rules(s2)["em"]
+    assert r["width_abs"] == 3.0
+    assert r["metal"] == 1, "a metal rule must not come back as a channel rule"
+    pl = r["per_layer"]
+    assert set(pl) == {3, 4}, pl
+    assert pl[4]["width_abs"] == 5.0
+    # The TRI-STATE must survive: M4 declared a width and NOT a spacing, M3
+    # the reverse.  Collapsing "not declared here" into a 0 would restore a
+    # rule that governs differently than the one written.
+    assert pl[4]["spacing_abs"] == 0.0 and pl[4]["spacing_x"] == 0.0
+    assert pl[3]["spacing_x"] == 2.0 and pl[3]["width_abs"] == 0.0
+
+
+def test_a_restored_rule_resolves_the_same_as_the_one_that_was_saved(tmp_path):
+    """The property that matters — not that the fields round-trip, but that
+    the ROUTING does.  Half a declaration routes narrower than what was
+    saved, which is the fault this column exists to close."""
+    from buda_cmds import ndr_cmds
+    db = str(tmp_path / "rt2.bdb")
+    body = """def_ndr em width 3 metal
+def_ndr_layer em M4 width 9
+"""
+    s1 = _session(tmp_path, _RT_SETUP.format(db=db) + body + "save_bdb\n")
+    s2 = _session(tmp_path, _RT_SETUP.format(db=db))
+    a = ndr_cmds._spec_of(s1, "em")
+    b = ndr_cmds._spec_of(s2, "em")
+    for lid in (3, 4):
+        geom = s1.layers.ndr_geom(lid)
+        pitch = s1.layers.bit_pitch(lid)
+        ra, _ = buda.ndr_resolve_on_layer(a, lid, geom, pitch)
+        rb, _ = buda.ndr_resolve_on_layer(b, lid, geom, pitch)
+        assert (ra.width_slots, ra.guard_slots) == (rb.width_slots, rb.guard_slots), \
+            f"layer {lid}: saved {ra.width_slots} slots, restored {rb.width_slots}"
+    # …and the M4 override is really doing something, or the check is vacuous.
+    on4, _ = buda.ndr_resolve_on_layer(b, 4, s1.layers.ndr_geom(4),
+                                       s1.layers.bit_pitch(4))
+    on3, _ = buda.ndr_resolve_on_layer(b, 3, s1.layers.ndr_geom(3),
+                                       s1.layers.bit_pitch(3))
+    assert on4.width_slots > on3.width_slots
+
+
+def test_changing_a_per_layer_value_voids_a_restored_plan(tmp_path):
+    """The pricing fingerprint must carry the per-layer values and the metal
+    flag: both move the quantized demand, so a plan priced under the old
+    declaration is not valid under the new one.  Omitting them would let a
+    resumed session keep a plan priced for a different width — silently."""
+    from buda_cmds import ndr_cmds
+    s = _session(tmp_path, _RT_SETUP.format(db=str(tmp_path / "fp.bdb"))
+                 + "def_ndr em width 3 metal\ndef_ndr_layer em M4 width 5\n")
+    before = ndr_cmds.ndr_pricing_fp(s, "em")
+    # Same rule, one per-layer value changed.
+    s2 = _session(tmp_path, _RT_SETUP.format(db=str(tmp_path / "fp2.bdb"))
+                  + "def_ndr em width 3 metal\ndef_ndr_layer em M4 width 9\n")
+    assert ndr_cmds.ndr_pricing_fp(s2, "em") != before
+    # And the READING alone is enough to change it, at identical values.
+    s3 = _session(tmp_path, _RT_SETUP.format(db=str(tmp_path / "fp3.bdb"))
+                  + "def_ndr em width 3\ndef_ndr_layer em M4 width 5\n")
+    assert ndr_cmds.ndr_pricing_fp(s3, "em") != before
+
+
+def test_a_layer_independent_rule_keeps_its_pre_v28_fingerprint(tmp_path):
+    """The other half: appended ONLY when present, so a resumed checkpoint of
+    a rule that uses neither feature must not VOID on a format change."""
+    from buda_cmds import ndr_cmds
+    s = _session(tmp_path, _RT_SETUP.format(db=str(tmp_path / "fp4.bdb"))
+                 + "def_ndr plain width x2 spacing x2\n")
+    fp = ndr_cmds.ndr_pricing_fp(s, "plain")
+    assert "|P" not in fp and "|m1" not in fp, fp

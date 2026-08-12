@@ -117,7 +117,7 @@ updating this table, which is exactly the drift the guard now prevents):
 | BUDA-1902 | ERROR | a design audit reported violations and `--strict-check` is on |
 | BUDA-1903 | WARNING | a `visualize` command opened no window (INFO when the suppression was asked for: `--no-viz` / `buda::start -viz 0`) |
 | BUDA-1904 | WARNING | a restored fan-in bundle has no per-bit endpoints (pre-v27 checkpoint), so it resumes untapered and wider than what was saved |
-| BUDA-1911 | WARNING | an NDR rule has per-layer values (`def_ndr_layer`) which the BDB schema does not carry yet, so a reopened session restores the rule without them |
+| BUDA-1912 | WARNING | an NDR rule's stored per-layer values are not readable and were dropped, so the rule restores layer-independent |
 
 **Retired ids.**  An id may never be reused and never changes meaning, so one
 whose fault has been fixed is recorded as *spent* rather than deleted — a
@@ -129,6 +129,7 @@ exactly like a design that stopped having the problem.
 | Id | Retired because |
 |---|---|
 | BUDA-1611 | a part-select's low bit is not 0 on a descended module. Port bits are now mapped through a per-bit context, so an offset slice resolves EXACTLY and there is nothing left to warn about |
+| BUDA-1911 | an NDR rule's per-layer values were not carried by the BDB schema. v28 persists them (`ndr_rule.per_layer`), so a reopened session restores the whole declaration |
 
 The list is short on purpose.  Converting a diagnostic is a promise to keep
 its id stable forever, so the ones converted first are the ones a

@@ -67,19 +67,50 @@ def _scopes(session):
 # dropped before another BDB's merge in (a BDB switch must not carry the
 # old design's rules along).
 
+# ── v28: per-layer values as a compact JSON object ──────────────────────
+# Keys are layer ids as strings (JSON has no integer keys); the four value
+# slots keep the declaration's TRI-STATE, which is the whole subtlety: 0.0
+# absolute / 0 multiplier-slots / -1 guard-slots each mean "not declared
+# here, inherit", and 0 guards IS a real declaration.  Collapsing them on the
+# way through would restore a rule that governs differently than the one
+# written.
+
+def _per_layer_to_json(per_layer):
+    import json
+    if not per_layer:
+        return ""
+    return json.dumps({str(lid): {"w":  e.get("width_abs", 0.0),
+                                  "s":  e.get("spacing_abs", 0.0),
+                                  "wx": e.get("width_x", 0.0),
+                                  "sx": e.get("spacing_x", 0.0)}
+                       for lid, e in sorted(per_layer.items())},
+                      sort_keys=True, separators=(",", ":"))
+
+
+def _per_layer_from_json(txt):
+    import json
+    if not txt:
+        return {}
+    try:
+        raw = json.loads(txt)
+    except ValueError:
+        print(f"BUDA-1912: WARNING: an NDR rule's stored per-layer values are "
+              f"not readable JSON and were DROPPED — the rule restores "
+              f"layer-independent.  Re-declare with def_ndr_layer.", flush=True)
+        return {}
+    out = {}
+    for lid, e in raw.items():
+        try:
+            out[int(lid)] = {"width_abs":   float(e.get("w", 0.0)),
+                             "spacing_abs": float(e.get("s", 0.0)),
+                             "width_x":     float(e.get("wx", 0.0)),
+                             "spacing_x":   float(e.get("sx", 0.0))}
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _write_rule_through(session, name):
-    # Per-layer values have no column yet (see opens_ndr.md).  Say so rather
-    # than writing a rule that reads as complete and comes back missing half
-    # its declaration -- the silent-restore class v21 exists to prevent.
-    r = _rules(session).get(name) or {}
-    if r.get("per_layer") and getattr(session, "bdb", None) is not None:
-        if not r.get("_pl_warned"):
-            print(f"BUDA-1911: WARNING: NDR rule '{name}' has per-layer "
-                  f"values (def_ndr_layer) which are NOT yet persisted to the "
-                  f"BDB -- a reopened session restores the rule WITHOUT them. "
-                  f"Re-declare them after open_bdb until the schema carries "
-                  f"them (docs/internal/opens_ndr.md).", flush=True)
-            r["_pl_warned"] = True
     if getattr(session, "bdb", None) is None:
         return
     r = _rules(session)[name]
@@ -98,6 +129,11 @@ def _write_rule_through(session, name):
     # dropping the constraint the design was routed under (Codex P1 #682).
     row.width_abs    = float(r.get("width_abs", 0.0))
     row.spacing_abs  = float(r.get("spacing_abs", 0.0))
+    # v28: without this a reopened design restores the rule missing half its
+    # declaration and routes NARROWER than what was saved — and the session
+    # that could warn is not the session that suffers.
+    row.per_layer    = _per_layer_to_json(r.get("per_layer"))
+    row.metal        = int(r.get("metal", 0))
     session.bdb.set_ndr_rule(row)
 
 
@@ -141,6 +177,9 @@ def restore_ndr_from_bdb(session):
             "bond": row.bond,
             "width_abs": row.width_abs,
             "spacing_abs": row.spacing_abs,
+            "per_layer": _per_layer_from_json(row.per_layer),
+            "metal": row.metal,
+            "name": row.name,
         }
         if row.width_abs > 0.0 or row.spacing_abs > 0.0:
             # The quantization is a function of the CURRENT grid, so it is
@@ -227,8 +266,16 @@ def ndr_pricing_fp(session, rule_name):
     ab = ""
     if r.get("width_abs", 0) > 0 or r.get("spacing_abs", 0) > 0:
         ab = f"|a{r.get('width_abs', 0):g},{r.get('spacing_abs', 0):g}"
+    # v28: BOTH move the priced demand, so both join the stamp.  Per-layer
+    # values change the slot count on the layers they name; the metal
+    # reading changes it on every layer.  Appended ONLY when present, the
+    # same convention `credit` and the absolutes use, so every earlier stamp
+    # still compares equal and a resumed pre-v28 checkpoint does not VOID on
+    # a fingerprint-FORMAT change.
+    pl = ("|P" + _per_layer_to_json(r["per_layer"])) if r.get("per_layer") else ""
+    mq = "|m1" if r.get("metal") else ""
     return (f"{rule_name}|w{ws}|g{gs}|s{r['shield_mode']}"
-            f"|p{r['shield_per_n']}|n{r['shield_net']}|L{lay}{cr}{ab}")
+            f"|p{r['shield_per_n']}|n{r['shield_net']}|L{lay}{cr}{ab}{pl}{mq}")
 
 
 def stamp_bundle_ndr(session, row, wrapper):
