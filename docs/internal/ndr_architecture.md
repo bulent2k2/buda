@@ -334,11 +334,17 @@ class reports ALIGNED on the vehicle.
 2. **Cull-risk survival predictor** (`_escalate_dead_low_segments`,
    `cull_risk=True`): the same inflated count fed `placed >= need`, so a
    governed segment with bits genuinely stranded could read as fully
-   placed and skip its escalation.  Fixed by the same rule.  No dedicated
-   test: the predicate sits behind `wmap`, which excludes `hier.locked`
-   bundles, so bottom-up instances never reach it — observing it needs a
-   governed NON-locked LOW segment whose seat is starved yet still R3-
-   realizable (a coarse pattern hard-errors at declaration instead).
+   placed and skip its escalation.  Fixed by the same rule, and now
+   test-pinned by `flow/ndr_cull_shield_count.buda`: a governed run seated
+   LOW whose MEMBER bits are keepout-culled while its SHIELDS survive, so
+   the count reads 4 of 4 against a truth of 2 of 4.  Removing the
+   exclusion drops the vehicle to **4 placed / 2 unplaced / 2 violations**
+   with no CULL-HEAL line.  The binding constraint on reaching it was not
+   the `wmap` filter noted earlier but `_final_cull_heal`'s
+   `num_keepout_bits <= 0` entry guard: every other NDR vehicle is clean,
+   so 0 of 11 entered the heal at all (measured).  See
+   [`opens_ndr.md`](opens_ndr.md) for the three constructions that were
+   tried and rejected before the forced-layer one.
 
 Both fixes are `is_shield`-conditional, so no-NDR designs are untouched
 (corpus-guarded); an ungoverned run of the same vehicle is test-pinned.

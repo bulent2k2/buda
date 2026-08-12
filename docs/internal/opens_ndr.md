@@ -8,10 +8,12 @@ command/GUI surface), [`ndr_architecture.md`](ndr_architecture.md)
 (implementers, as-built) — and the user-facing command reference is
 [`../script_reference/ndr.md`](../script_reference/ndr.md).
 
-Snapshot index — last verified against `main`: **2026-08-11**, after R1
+Snapshot index — last verified against `main`: **2026-08-12**, after R1
 (absolute width/spacing) landed in full — declaration, persistence AND
-per-layer resolution at every routing consumer — and after the doomed-seat
-HEALS moved from member bits to group demand. Every requirement has a
+per-layer resolution at every routing consumer — after the doomed-seat
+HEALS moved from member bits to group demand (including validating that the
+escalation TARGET can host the run it is handed, resolved on that layer),
+and after the cull-risk shield-counting fix acquired the repro it lacked. Every requirement has a
 working implementation and a vehicle, and the feature is usable end to end —
 **R8 is the one still met only in part** (the rule-uniform fallback), and R1
 and R6 each carry a residual limit below now that their headline gaps are
@@ -226,14 +228,40 @@ arithmetic, worth doing only for a design that demonstrably needs it.
 
 ## Smaller residuals
 
-### The cull-risk predictor fix has no dedicated test
+### The cull-risk predictor fix is test-pinned (LANDED)
 
-`_escalate_dead_low_segments(cull_risk=True)` now excludes shield rows from
-its placed-bit count (the R13 fix). It has no test: the predicate sits behind
-`wmap`, which excludes `hier.locked` bundles, so bottom-up instances never
-reach it — observing it needs a governed NON-locked LOW segment whose seat is
-starved yet still R3-realizable (a coarse pattern hard-errors at declaration
-first). The sibling fix in the same commit *is* test-pinned. See
+`_escalate_dead_low_segments(cull_risk=True)` excludes shield rows from its
+placed-bit count (the R13 fix). It now has a repro and a test:
+[`flow/ndr_cull_shield_count.buda`](../../flow/ndr_cull_shield_count.buda).
+
+Reaching it needed more than the earlier note implied. The predicate does sit
+behind `wmap` (no `hier.locked` bundles), but the binding constraint was one
+step further out: `_final_cull_heal` returns at its `num_keepout_bits <= 0`
+entry guard, and **every** other NDR vehicle is clean, so none of them got
+within reach of the predicate at all. Measured, not inferred — instrumenting
+the tier showed 0 of 11 vehicles entering the heal.
+
+The shape needs a governed run seated LOW whose MEMBER bits are keepout-culled
+while its SHIELDS survive, so the inflated count reads 4 of 4 against a truth
+of 2 of 4. Three constructions were tried and rejected first, each for its own
+reason, and they are recorded in the vehicle's header because they are the
+non-obvious part:
+
+- a rule layer MASK (`layers M3,M4`) seats the run LOW but removes the
+  escalation TARGET — with no TOP in the allowed set the tier falls back to
+  the highest allowed layer, which is the seat itself, and refuses;
+- a `span_max` penalty on the TOP layer re-shapes the chosen TOPOLOGY, so the
+  keepout no longer meets the run;
+- `base_cost_non_top 0` does not seat a trunk LOW: a trunk prefers TOP
+  whatever that penalty says.
+
+The layer is therefore FORCED (`edit_set_layer` + `edit_commit pin`), which is
+the honest instrument rather than a workaround: the vehicle is about what the
+tier does with a given seat, not about which seat the planner picks.
+
+A/B on the vehicle — with the shield exclusion removed: **4 net segments
+placed, 2 bits unplaced, 2 violations, and no CULL-HEAL line**. With it: 6
+placed, 0 unplaced, clean, `CULL-HEAL … opens 2->0`. See
 [`ndr_architecture.md`](ndr_architecture.md) §7.5.
 
 ### The heals measure a governed seat in DEMAND (LANDED)
@@ -265,6 +293,17 @@ minimum, which is the engine's own split (`detailed_nuts.cpp:470` vs `:497`).
 *And the re-seat target resolves on the TARGET layer.* An R1 absolute rule
 costs a different number of slots per layer, so asking "can layer L host
 this" with the current layer's answer is the wrong question.
+
+*The LOW→TOP escalation validates its target too.* It had always taken the
+cheapest same-direction TOP unconditionally, which is sound under its own
+premise — a dead LOW seat makes any TOP a better bet. Measuring the seat in
+demand widened which segments reach it, and for a governed one the cheapest
+TOP can be short as well, or an absolute rule can cost MORE slots there than
+on the layer it left. It now searches cheapest-first for a target whose
+bounded pool hosts the demand resolved on that layer, keeping the
+unconditional choice as the fallback (refusing to move would forfeit the
+escape) and gated on `ndr.active()` so the corpus-tuned ungoverned path stays
+byte-identical.
 
 *Found on the way:* both ranking helpers counted NDR shield rows as placed
 bits, so a governed segment read as better placed than it is (4 bits + 2

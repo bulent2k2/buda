@@ -1025,6 +1025,35 @@ def test_ndr_heal_measures_a_governed_seat_in_demand():
     assert "no violations" in out and "NDR_" not in out, out
 
 
+def test_ndr_cull_shield_count_repro():
+    """flow/ndr_cull_shield_count.buda (opens_ndr.md smaller residual): the
+    cull-risk escalation tier counted NDR SHIELD rows as placed member bits,
+    so a governed segment with bits genuinely stranded read `placed >= need`
+    and skipped the escalation it needed.
+
+    The shape is narrow and was not reached by ANY existing vehicle — every
+    other NDR flow is clean, so `_final_cull_heal` returns at its
+    `num_keepout_bits <= 0` entry guard and never gets near the predicate.
+    It needs a governed run seated LOW whose MEMBER bits are keepout-culled
+    while its SHIELDS survive: 4 bits + 2 shields, the two centre tracks
+    culled, so the count reads 4 of 4 while the truth is 2 of 4.
+
+    Measured with the shield exclusion removed: 4 net segments placed, 2 bits
+    unplaced, 2 violations, and no CULL-HEAL line at all."""
+    out, rc = run_script("ndr_cull_shield_count.buda")
+    assert_clean(out, rc, "ndr_cull_shield_count.buda")
+    # The construction must really bite: the keepout has to cull MEMBER bits,
+    # or the predicate is never exercised and the rest proves nothing.
+    assert "2 bit(s) removed" in out, out
+    # …the tier must fire on it (this is the line that needs the fix: with
+    # shields counted, gate 1 reads 4 placed of 4 and skips)…
+    assert "CULL-HEAL: escalated 1 span-starved LOW segment(s)" in out, out
+    assert "opens 2->0" in out, out
+    # …and the design ends complete: 4 bits + 2 shields, nothing stranded.
+    assert "6 net segments placed, 0 bits unplaced" in out, out
+    assert "no violations" in out and "NDR_" not in out, out
+
+
 def test_ndr_absolute_divisor_repro():
     """flow/ndr_abs_divisor.buda: the documented semantic limit of
     opens_ndr.md §2 — an absolute width is quantized by the layer's
