@@ -660,6 +660,7 @@ void bind_routing(py::module_& m) {
         .def_readwrite("shield_net",   &NdrSpec::shield_net)
         .def_readwrite("credit_shields", &NdrSpec::credit_shields)
         .def_readwrite("bond_stride",    &NdrSpec::bond_stride)
+        .def_readwrite("metal_quant",  &NdrSpec::metal_quant)
         .def_readwrite("rule_name",    &NdrSpec::rule_name)
         // READ-ONLY by construction: pybind11 converts std::map BY VALUE, so
         // `spec.per_layer[id] = rule` would mutate a throwaway copy and
@@ -701,12 +702,14 @@ void bind_routing(py::module_& m) {
     m.def("ndr_max_slots", &ndr_max_slots, py::arg("geom"),
           "Longest contiguous signal run — the realizability ceiling.");
     m.def("ndr_resolve_on_layer",
-          [](const NdrSpec& s, int layer_id, const NdrLayerGeom& g) {
+          [](const NdrSpec& s, int layer_id, const NdrLayerGeom& g,
+             double bit_pitch) {
               bool ok = true;
-              NdrSpec o = ndr_resolve_on_layer(s, layer_id, g, &ok);
+              NdrSpec o = ndr_resolve_on_layer(s, layer_id, g, bit_pitch, &ok);
               return py::make_tuple(o, ok);
           },
           py::arg("spec"), py::arg("layer_id"), py::arg("geom"),
+          py::arg("bit_pitch") = 0.0,
           "Resolve a rule on one layer -> (spec, realizable).");
     m.def("ndr_resolve_for_pitch", &ndr_resolve_for_pitch,
           py::arg("spec"), py::arg("slot_pitch"),

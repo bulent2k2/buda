@@ -92,10 +92,52 @@ def test_the_narrowest_window_wins_when_gaps_vary():
     assert buda.ndr_metal_for_slots(g, 2) == pytest.approx(5)
 
 
-def _spec(width_abs=0.0, spacing_abs=0.0):
+def _spec(width_abs=0.0, spacing_abs=0.0, metal=True):
+    """Metal-shaped by default HERE because that is what this file is about.
+
+    The engine default is the CHANNEL reading (`metal_quant=False`): the
+    metal one is opt-in per rule via `def_ndr ... metal`, because it is
+    stricter rather than merely different — a layer whose signal slots are
+    isolated between rails can deliver only one slot's metal, so a width the
+    channel reading accepted (by silently delivering half of it) becomes an
+    R3 refusal.  See `test_the_channel_reading_is_still_the_default`."""
     s = buda.NdrSpec()
     s.width_abs, s.spacing_abs = width_abs, spacing_abs
+    s.metal_quant = metal
     return s
+
+
+def test_the_channel_reading_is_still_the_default():
+    """R12: a design that does not ask for metal must be byte-identical.
+
+    The same declaration reads differently under the two, which is the whole
+    point — `width 8` on the sparse pattern costs 1 slot as channel (period
+    40 over 4 signal slots -> pitch 10) and 3 as metal (4k-2 >= 8)."""
+    sg = _pattern(SPARSE).ndr_geom()
+    pitch = _pattern(SPARSE).unit_pitch() / 4
+    channel = _spec(width_abs=8, metal=False)
+    assert not channel.metal_quant
+    got, ok = buda.ndr_resolve_on_layer(channel, 6, sg, pitch)
+    assert ok and got.width_slots == 1, "the default reading must not move"
+    got, ok = buda.ndr_resolve_on_layer(_spec(width_abs=8), 6, sg, pitch)
+    assert ok and got.width_slots == 3
+
+
+def test_metal_is_stricter_where_a_layer_cannot_deliver():
+    """Why metal is opt-in: it REFUSES designs the channel reading routes.
+
+    A pattern whose signal slots are isolated between rails offers runs of
+    one slot.  `width 4` there is channel-quantized to 1 slot — delivering 2
+    units, half what was declared, silently — while metal reports it as
+    unrealizable, which is R3's job."""
+    iso = _pattern([("POWER", 2, 2), ("SIGNAL", 2, 2),
+                    ("GROUND", 2, 2), ("SIGNAL", 2, 2)] * 3)
+    g, pitch = iso.ndr_geom(), iso.unit_pitch() / 6
+    assert buda.ndr_max_slots(g) == 1 and buda.ndr_metal_for_slots(g, 1) == 2
+    got, ok = buda.ndr_resolve_on_layer(_spec(width_abs=4, metal=False), 4, g, pitch)
+    assert ok and got.width_slots == 1, "channel accepts it, delivering 2 of 4"
+    _got, ok = buda.ndr_resolve_on_layer(_spec(width_abs=4), 4, g, pitch)
+    assert not ok, "metal must refuse what the layer cannot deliver"
 
 
 def test_the_four_divisor_rows_now_deliver_what_they_declared():

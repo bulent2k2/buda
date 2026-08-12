@@ -117,6 +117,20 @@ struct NdrSpec {
     // uncredited worst case and DNUTS credits at the seat.
     double width_abs   = 0.0;
     double spacing_abs = 0.0;
+    // R1 METAL-shaped quantization (opt-in — the `metal` token).  Default
+    // false keeps the CHANNEL reading: an absolute value is quantized by
+    // `unit_pitch / n_signal_slots`, which answers how much routing channel
+    // the width consumes.  True asks instead how much METAL a run of slots
+    // delivers, which is what a width declared for EM, resistance or RC
+    // means.
+    //
+    // Opt-in because the honest answer is STRICTER, not merely different: a
+    // layer whose signal slots are isolated between rails can deliver only
+    // one slot's metal, so a width the channel reading accepted (by silently
+    // delivering half of it) becomes an R3 refusal.  That is correct and it
+    // rejects designs that route today, so it follows the same opt-in +
+    // measured-default-flip path every other semantic change here took.
+    bool metal_quant = false;
     // R1 PER-LAYER declared values (`def_ndr_layer`), keyed by layer id.
     // R1 always asked for "per-layer or layer-independent values" — the
     // industry precedent it cites, LEF/DEF NONDEFAULTRULE, is per-layer —
@@ -255,6 +269,7 @@ inline int ndr_max_slots(const NdrLayerGeom& g) {
 // a bounded, conservative number rather than looping.
 inline NdrSpec ndr_resolve_on_layer(const NdrSpec& s, int layer_id,
                                     const NdrLayerGeom& geom,
+                                    double bit_pitch = 0.0,
                                     bool* ok = nullptr) {
     if (ok) *ok = true;
     NdrSpec o = s;
@@ -272,9 +287,22 @@ inline NdrSpec ndr_resolve_on_layer(const NdrSpec& s, int layer_id,
         if (pl.width_slots > 0)  { o.width_slots = pl.width_slots; w_abs  = 0.0; }
         if (pl.guard_slots >= 0) { o.guard_slots = pl.guard_slots; sp_abs = 0.0; }
     }
-    if ((w_abs <= 0.0 && sp_abs <= 0.0) || geom.empty()) return o;
+    if (w_abs <= 0.0 && sp_abs <= 0.0) return o;
 
     const double eps = 1e-9;
+    // CHANNEL reading (the default): quantize by the per-signal-slot pitch.
+    // Per-layer VALUES still apply — the two questions are orthogonal, so
+    // `def_ndr_layer` works whichever reading the rule declares.
+    if (!s.metal_quant) {
+        if (bit_pitch <= 0.0) return o;
+        if (w_abs > 0.0)
+            o.width_slots = std::max(1, (int)std::ceil(w_abs / bit_pitch - eps));
+        if (sp_abs > 0.0)
+            o.guard_slots = std::max(0,
+                (int)std::ceil(sp_abs / bit_pitch - eps) - 1);
+        return o;
+    }
+    if (geom.empty()) return o;
     const int ceiling = ndr_max_slots(geom);
     if (w_abs > 0.0) {
         int k = 1;
@@ -297,6 +325,15 @@ inline NdrSpec ndr_resolve_on_layer(const NdrSpec& s, int layer_id,
 // which is what lets every consumer take the allocation-free path below.
 inline bool ndr_has_abs(const NdrSpec& s) {
     return s.width_abs > 0.0 || s.spacing_abs > 0.0;
+}
+
+// True when a spec must be resolved against the LAYER it is priced on: it
+// declares an absolute (whose slot cost depends on the geometry) or carries
+// any per-layer override.  False keeps the allocation-free fast path a
+// multiplier rule has always taken.  Both halves matter -- a rule with no
+// absolute at all can still carry a per-layer MULTIPLIER override.
+inline bool ndr_is_layer_dependent(const NdrSpec& s) {
+    return ndr_has_abs(s) || !s.per_layer.empty();
 }
 
 // True when the interior gap after ascending-local-bit j (0-based; gaps

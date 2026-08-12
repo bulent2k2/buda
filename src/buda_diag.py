@@ -115,6 +115,10 @@ MESSAGES = {
     "BUDA-1904": (WARNING, "A restored fan-in bundle has no per-bit "
                            "endpoints, so it resumes untapered — wider "
                            "than the design that was checkpointed."),
+    "BUDA-1911": (WARNING, "An NDR rule has per-layer values "
+                           "(def_ndr_layer) which the BDB schema does not "
+                           "carry yet, so a reopened session restores the "
+                           "rule without them."),
 }
 
 # Ids that were ISSUED and whose fault no longer exists.

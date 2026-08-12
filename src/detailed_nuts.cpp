@@ -1494,9 +1494,10 @@ std::vector<BusSegment> make_bus_segments(
             auto nit = bid_to_ndr.find(ts.bundle_id);
             if (nit != bid_to_ndr.end()) {
                 bs.ndr = *nit->second;
-                if (layers && ndr_has_abs(bs.ndr))
-                    bs.ndr = ndr_resolve_for_pitch(bs.ndr,
-                                                   layers->bit_pitch(ts.layer));
+                if (layers && ndr_is_layer_dependent(bs.ndr))
+                    bs.ndr = ndr_resolve_on_layer(bs.ndr, ts.layer,
+                                                  layers->ndr_geom(ts.layer),
+                                                  layers->bit_pitch(ts.layer));
             }
         }
         // Cross-layer corner split bounds (carried into detailed NUTS so the
