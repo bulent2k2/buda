@@ -1,27 +1,39 @@
 #!/bin/bash
 # btcl — run a Tcl flow that drives BUDA (it sources tools/buda.tcl and calls
 # buda::start), with an optional -v that opens a viewer on the FINISHED design
-# at buda::stop even when the flow has no `visualize`.  The Tcl twin of the
+# at the end of the flow even when it has no `visualize`.  The Tcl twin of the
 # `buda -v` flag, for eyeballing a Tcl test vehicle without editing it.
 #
 #   btcl flow.tcl [args...]        # run the flow
-#   btcl -v flow.tcl [args...]     # …and pop a viewer at buda::stop
+#   btcl -v flow.tcl [args...]     # …and pop a viewer when the flow ends
+#   btcl -- -v.tcl                 # a script whose NAME starts with a dash
 #
-# -v is handed to the flow's interpreter as a bare `$argv` token (moved after
-# the script), where tools/buda.tcl's buda::start reads it and enables the
-# behaviour engine-side.  Everything else passes through to tclsh unchanged.
+# WRAPPER OPTIONS ARE READ ONLY BEFORE THE SCRIPT.  The first non-option word
+# is the script, and everything from it onward — including any `-v` of the
+# flow's OWN — is passed through untouched, in its original position.  `--`
+# ends option parsing explicitly.  This matters because `-v` is a perfectly
+# ordinary flag for a flow to want: reading it anywhere on the line stole the
+# flow's argument, re-spelled `--visualize` as `-v`, collapsed two occurrences
+# into one, moved it to the end, and — worst — turned the viewer on for a
+# `btcl flow.tcl -v` that never asked this wrapper for anything.
+#
+# The request travels as an ENVIRONMENT VARIABLE rather than an injected argv
+# token, so a flow's arguments are exactly what it was given.  buda::start also
+# still honours a bare `-v` in `$argv`, which is what `tclsh flow.tcl -v` (no
+# wrapper) relies on — there the token is the user's own and unambiguous.
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # The child buda_server.py self-bootstraps its own imports, but export the
 # layer too so a `package require`/helper in the flow resolves the same way.
 export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
 
-VFLAG=(); ARGS=()
-for a in "$@"; do
-  case "$a" in
-    -v|--visualize) VFLAG=(-v) ;;
-    *)              ARGS+=("$a") ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -v|--visualize) export BUDA_VIZ_FINAL=1; shift ;;
+    --)             shift; break ;;
+    -h|--help)      sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*)             echo "btcl: unknown option '$1'" >&2; exit 2 ;;
+    *)              break ;;          # the script — parsing stops here
   esac
 done
-# -v AFTER the script so it lands in the interpreter's $argv (tclsh treats a
-# flag before the script as the script name).  buda::start finds it anywhere.
-exec tclsh "${ARGS[@]}" "${VFLAG[@]}"
+
+exec tclsh "$@"

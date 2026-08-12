@@ -321,6 +321,49 @@ class Server:
         # matters most here: this is where a cancel is likeliest to land.
         self._reply("OUT", text)
 
+    # ── shutdown ───────────────────────────────────────────────────────────
+    def _viz_final_output(self):
+        """The -v viewer on the FINISHED design; returns what it printed.
+
+        Empty when viz-final is off, the session is headless by request, or the
+        flow already ended by visualizing — the same rule the CLI's `-v` uses,
+        read from the same `_flow_ends_by_visualizing()`.
+
+        Called from BOTH ways a session can end, and that is the point of it
+        being a method.  `__exit` (buda::stop) is the tidy one; a flow that ends
+        with the engine's own `exit` command — `buda::exit`, which the Tcl
+        bridge defines from the command registry like any other — raises
+        SystemExit inside `handle`, which replies BYE/FATAL and terminates the
+        server there and then.  `buda::stop` afterwards finds the pipe already
+        closed and never sends `__exit`, so a viewer that lives only in that
+        branch is a viewer `btcl -v` loses for every flow using the documented
+        exit command.  Measured before the fix: `buda::stop` printed BUDA-1903,
+        `buda::exit` printed nothing at all.
+
+        The window BLOCKS until closed (as `visualize` does anywhere), so the
+        reply — and with it buda::stop or buda::exit — waits for it.
+        """
+        if not (self.viz_final and not self.session.no_viz
+                and not self.session._flow_ends_by_visualizing()):
+            return ""
+        cap = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(cap), \
+                 contextlib.redirect_stderr(cap), \
+                 buda.ostream_redirect():
+                self.session.run_command("visualize")
+        except BaseException as e:                        # noqa: BLE001
+            # REPORTED, not swallowed.  A viewer that fails to open — a broken
+            # backend, a render that raises — otherwise gives the user neither
+            # the window they asked for nor a reason, and the reply is an empty
+            # clean BYE.  The CLI's `-v` prints the same warning; this is the
+            # one place the two paths could drift and say different things
+            # about the same failure.  The flow's own outcome is untouched:
+            # this only ADDS a line, and never changes the reply's status.
+            cap.write(f"\nWarning: -v visualize failed: "
+                      f"{type(e).__name__}: {e}\n")
+        return cap.getvalue()
+
     # ── one request ────────────────────────────────────────────────────────
     def handle(self, line):
         """Run one request.  Returns False when the session should end.
@@ -334,24 +377,10 @@ class Server:
             self._reply("OK")
             return True
         if req == "__exit":
-            # -v twin: open a viewer on the finished design before shutting
-            # down, unless the flow already ended by visualizing.  The window
-            # BLOCKS until closed (as `visualize` does anywhere), so buda::stop
-            # waits for the BYE until then.  Captured like a real command and
-            # returned with the BYE (a headless run's BUDA-1903 note included).
-            if (self.viz_final and not self.session.no_viz
-                    and not self.session._flow_ends_by_visualizing()):
-                cap = io.StringIO()
-                try:
-                    with contextlib.redirect_stdout(cap), \
-                         contextlib.redirect_stderr(cap), \
-                         buda.ostream_redirect():
-                        self.session.run_command("visualize")
-                except BaseException:                     # noqa: BLE001
-                    pass
-                self._reply("BYE", cap.getvalue())
-            else:
-                self._reply("BYE")
+            # -v twin: a viewer on the finished design before shutting down.
+            # Empty string when there is nothing to add, so an ordinary stop
+            # is the same `BYE` frame with no payload it always was.
+            self._reply("BYE", self._viz_final_output())
             return False
         if req == "__viz_final" or req.startswith("__viz_final "):
             parts = req.split(None, 1)
@@ -442,10 +471,18 @@ class Server:
         if status == "OK" and any(buda_cli._is_error_line(ln)
                                   for ln in text.splitlines()):
             status = "ERR"
+        # -v twin, second shutdown path: the flow's own `exit` ends the session
+        # HERE, and returning False below terminates the server before
+        # buda::stop can send `__exit` — so the viewer has to open on this path
+        # too or `btcl -v` silently does nothing for every flow that ends the
+        # documented way.  Appended AFTER the error scan on purpose: the
+        # viewer's note is about the viewer, and must not be able to turn a
+        # clean run into an ERR (or a FATAL's exit code into anything else).
+        viz = self._viz_final_output() if ended else ""
         # Streamed: everything up to the last newline already went out as
         # OUT frames; the final frame carries only the tail, and the client
         # concatenates.  Buffered: the final frame is the whole output.
-        self._reply(status, cap.tail() if self.stream else text)
+        self._reply(status, (cap.tail() if self.stream else text) + viz)
         return not ended
 
     def serve(self, inp=None):

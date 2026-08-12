@@ -177,3 +177,129 @@ def test_btcl_v_no_double_when_flow_visualizes(tmp_path):
     body = _TCL_FLOW + "buda::visualize\nbuda::stop\n"
     _, out = _run_btcl(tmp_path, body, "-v")
     assert _viewer_attempts(out) == 1          # the flow's own, not doubled
+
+
+# ── the three review findings on #712, each with the shape that reproduced ──
+
+@pytest.mark.mid
+@_tcl_required
+def test_btcl_v_appends_viewer_when_the_flow_ends_with_the_engine_exit(tmp_path):
+    """THE regression.  `buda::exit` — the engine's own exit command, which the
+    bridge defines from the registry like any other — raises SystemExit inside
+    the server's ordinary-command path, which replies BYE and terminates the
+    session there.  `buda::stop` afterwards finds the pipe closed and never
+    sends `__exit`, where the only viz-final implementation lived.
+
+    Measured before the fix: `buda::stop` printed BUDA-1903 and `buda::exit`
+    printed nothing — so `btcl -v` silently did nothing for every flow ending
+    the documented way.  Both shutdown paths now go through one method."""
+    body = _TCL_FLOW + "buda::exit\nbuda::stop\n"
+    _, out = _run_btcl(tmp_path, body, "-v")
+    assert _viewer_attempts(out) == 1
+
+
+@pytest.mark.mid
+@_tcl_required
+def test_btcl_v_no_double_when_the_flow_visualizes_then_exits(tmp_path):
+    """The skip rule has to hold on the exit path too, or the fix above just
+    moves the doubling to the other shutdown."""
+    body = _TCL_FLOW + "buda::visualize\nbuda::exit\n"
+    _, out = _run_btcl(tmp_path, body, "-v")
+    assert _viewer_attempts(out) == 1          # the flow's own, not doubled
+
+
+@pytest.mark.mid
+@_tcl_required
+def test_btcl_v_keeps_a_nonzero_exit_code_from_the_flow(tmp_path):
+    """`buda::exit 3` is the fail-fast path: it must still fail, and loudly,
+    with the viewer opened.  The viewer's note is appended AFTER the status is
+    decided precisely so it cannot turn a FATAL into anything else."""
+    # `puts $err` would re-print the whole caught payload — `_request` already
+    # echoed it — and double the BUDA-1903 count for reasons that have nothing
+    # to do with the viewer.  Report the verdict, not the text.
+    body = _TCL_FLOW + ("catch {buda::exit 3} err\n"
+                        "puts \"SAW_CODE_3: [string match {*exit code 3*} $err]\"\n")
+    _, out = _run_btcl(tmp_path, body, "-v")
+    assert _viewer_attempts(out) == 1
+    assert "SAW_CODE_3: 1" in out, out[-500:]
+
+
+def test_a_failing_viewer_is_reported_not_swallowed():
+    """The appended viewer used to be wrapped in `except BaseException: pass`,
+    so a backend or render failure gave the user neither the window they asked
+    for nor a reason — an empty, clean BYE.  The CLI's `-v` prints a warning;
+    this is the one place the two paths could disagree about a failure."""
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import buda_server
+
+    class _Boom:
+        no_viz = False
+        def _flow_ends_by_visualizing(self): return False
+        def run_command(self, cmd): raise RuntimeError("backend exploded")
+
+    srv = buda_server.Server.__new__(buda_server.Server)
+    srv.session, srv.viz_final = _Boom(), True
+    out = srv._viz_final_output()
+    assert "Warning: -v visualize failed" in out
+    assert "RuntimeError: backend exploded" in out
+
+    srv.viz_final = False                       # off  -> nothing at all
+    assert srv._viz_final_output() == ""
+    srv.viz_final, srv.session.no_viz = True, True   # headless by request
+    assert srv._viz_final_output() == ""
+
+
+@pytest.mark.mid
+@_tcl_required
+@pytest.mark.parametrize("flags, passed", [
+    ([],            ["a", "b"]),
+    (["-v"],        ["a", "b"]),
+    ([],            ["-v"]),            # the FLOW's own -v, in its own position
+    (["-v"],        ["-v", "x"]),       # …alongside the wrapper's
+    ([],            ["--visualize"]),   # not re-spelled, not moved
+    ([],            ["-v", "-v"]),      # not collapsed
+    ([],            ["--", "-v"]),
+])
+def test_btcl_passes_the_flows_arguments_through_untouched(tmp_path, flags, passed):
+    """Wrapper options are read only BEFORE the script.  Reading `-v` anywhere
+    on the line stole the flow's own argument, re-spelled `--visualize` as
+    `-v`, collapsed two occurrences into one and moved it to the end."""
+    script = tmp_path / "argv.tcl"
+    script.write_text('puts "ARGV=[list {*}$argv]"\n')
+    env = {**os.environ, "MPLBACKEND": "Agg"}
+    r = subprocess.run(["bash", str(_BTCL), *flags, str(script), *passed],
+                       capture_output=True, text=True, env=env, timeout=300)
+    assert f"ARGV={' '.join(passed)}" in r.stdout, r.stdout + r.stderr
+
+
+@pytest.mark.mid
+@_tcl_required
+def test_a_flows_own_v_argument_does_not_open_a_viewer(tmp_path):
+    """The half of that defect the wrapper alone cannot fix: `buda::start` used
+    to scan `$argv` for a bare `-v`, which cannot tell a launcher's request
+    from an argument the flow wants for itself — so `btcl flow.tcl -v` opened a
+    viewer nobody had asked this wrapper for.  The signal is an env var now."""
+    _, out = _run_btcl(tmp_path, _TCL_FLOW + "buda::stop\n")   # no wrapper -v…
+    assert _viewer_attempts(out) == 0
+    script = tmp_path / "flow.tcl"
+    env = {**os.environ, "MPLBACKEND": "Agg"}
+    r = subprocess.run(["bash", str(_BTCL), str(script), "-v"],   # …flow's own
+                       capture_output=True, text=True, env=env, timeout=300)
+    assert _viewer_attempts(r.stdout + r.stderr) == 0
+
+
+@pytest.mark.mid
+@_tcl_required
+def test_buda_viz_final_env_var_is_the_signal(tmp_path):
+    """What `tclsh flow.tcl` uses with no wrapper in the picture, and what
+    `btcl -v` sets.  Explicitly off must stay off."""
+    script = tmp_path / "flow.tcl"
+    script.write_text(_TCL_FLOW + "buda::stop\n")
+    def run(val):
+        env = {**os.environ, "MPLBACKEND": "Agg", "BUDA_VIZ_FINAL": val}
+        r = subprocess.run(["tclsh", str(script)], capture_output=True,
+                           text=True, env=env, timeout=300)
+        return _viewer_attempts(r.stdout + r.stderr)
+    assert run("1") == 1
+    assert run("0") == 0
+    assert run("off") == 0

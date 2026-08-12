@@ -123,12 +123,22 @@ proc ::buda::start {args} {
     # Only when asked: the engine's own default is on, and sending nothing
     # keeps `buda::start` byte-identical on the wire for existing flows.
     if {$viz ne ""} { buda::viz $viz }
-    # -v via the launcher: `btcl -v <flow>.tcl` runs `tclsh <flow>.tcl -v`, so a
-    # bare `-v` in the interpreter's argv turns on the viz-final behaviour — a
-    # viewer at buda::stop even when the flow has no `visualize`.  Read here so
-    # a flow only has to be LAUNCHED with -v, never edited.  A flow with no
-    # `-v` sends nothing, so this stays byte-identical on the wire.
-    if {[info exists ::argv] && [lsearch -exact $::argv -v] >= 0} {
+    # -v via the launcher: turn on viz-final — a viewer on the finished design
+    # when the flow ends, even though the flow has no `visualize`.  Read here so
+    # a flow only has to be LAUNCHED with -v, never edited.
+    #
+    # The signal is an ENVIRONMENT VARIABLE (`btcl -v` sets it), deliberately
+    # NOT a token in `$argv`.  Tcl is a general language and `-v` is an ordinary
+    # flag for a flow to want, so scanning argv for one cannot tell a launcher's
+    # request from the flow's own argument: `btcl flow.tcl -v` opened a viewer
+    # nobody had asked this wrapper for, and no amount of fixing the wrapper's
+    # own parsing repairs that — the misreading is here.  Without a wrapper,
+    # `BUDA_VIZ_FINAL=1 tclsh flow.tcl` says the same thing unambiguously, and
+    # an embedder calls `buda::vizfinal on` directly.
+    #
+    # Unset (or off) sends nothing, so this stays byte-identical on the wire.
+    if {[info exists ::env(BUDA_VIZ_FINAL)]
+        && [string tolower $::env(BUDA_VIZ_FINAL)] ni {"" 0 off false no}} {
         buda::vizfinal on
     }
     return $commands
