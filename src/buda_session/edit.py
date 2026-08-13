@@ -1070,6 +1070,17 @@ class EditMixin:
             nm = 0
             for w in wrappers:
                 nm = _set_pin(w)
+            # The pin must ALSO land on the pre-expansion ORIGINAL (the
+            # template / replica wrapper): `run_planner hier` re-plans from
+            # _hier_bundles_orig and the checkpoint persists that view, so a
+            # pin held only by the expanded wrappers would evaporate at the
+            # next replan and never reach the BDB (the post-route prompt pin,
+            # flow/tcl/hdesign.tcl).
+            for ow in (getattr(self, "_hier_bundles_orig", None) or []):
+                if (ow.input.original_bundle.id == bid
+                        and 0 <= tidx < len(ow.input.candidates)):
+                    _set_pin(ow)
+                    break
             n = len(wrappers)
             _pin_msg(bid, self._bundle_label(wrappers[0]), nm,
                      wrappers[0].plan.selected_topology_index + 1,
@@ -1103,6 +1114,13 @@ class EditMixin:
                 for w in wrappers:
                     w.unpin()
                     w.input.pinned_group = []
+                # And the pre-expansion original, for the same reason the pin
+                # lands there (see _select_single_topology_internal).
+                for ow in (getattr(self, "_hier_bundles_orig", None) or []):
+                    if ow.input.original_bundle.id == bid:
+                        ow.unpin()
+                        ow.input.pinned_group = []
+                        break
                 n = len(wrappers)
                 print(f"Unpinned bundle {bid} "
                       f"({n} expanded instance{'s' if n > 1 else ''})")

@@ -357,6 +357,51 @@ session also writes a diffable `<bdb>.sql` snapshot, so iterations can be
 compared instead of just replaced. Pinned by
 `test/tests/test_tcl_design_iterate.py`.
 
+### The hierarchical twin: `hdesign.tcl`
+
+`flow/tcl/hdesign.tcl` is the same loop on a THREE-level design —
+`flow/hbundles/08_cross_level.buda`'s chip/blk/leaf hierarchy, with every
+kind of bundle a hierarchy holds: a cell-LOCAL D2 template (`b_lohi`, four
+blk instances), same-level D0/D1 bundles, and seven CROSS-LEVEL buses
+(blk↔leaf, chip↔leaf). At the prompt, `pin b_lohi 2` resolves through the
+expansion map to the TEMPLATE, so one pin re-routes all four instances —
+and it survives into the next session like any other pin.
+
+What a hierarchy adds is planning **options**:
+
+```bash
+bin/btcl -v flow/tcl/hdesign.tcl -mode topdown|bottomup|hybrid \
+         -reserve N -share cell=layer=pct        # -h prints the full header
+```
+
+`-mode` picks how cell-local interconnect is planned — `bottomup` marks
+every eligible cell (`set_bottom_up *`), `hybrid` only the deepest cell with
+local interconnect (`blk_cell`) — with `align_bottom_up` +
+`check_template_tracks on_mismatch independent` declared for both, because
+08's fixed geometry cannot fully phase-align (the moves auto-revert on the
+parent-overlap guard) and the honest answer is the engine's own policy:
+aligned instances copy the template's solve, the rest solve individually.
+`-reserve 2` keeps M6+M7 for the top level (`reserve_top_layers` — the
+governed `b_lohi` templates measurably drop from M6 to M4), and
+`-share blk_cell=M6=50` leases half of a reserved layer back — the
+wiring-limited escape valve (they come back up onto M6 through the lease).
+
+The options split by what a RESUME may change: `-reserve`/`-share` are
+planning POLICY — persisted, and changing them on a resume is the
+experiment loop (a tightened cap VOIDS the restored plan loudly and the
+session re-plans) — while `-mode` is a BUILD premise (alignment happens
+before busterms are derived), so a resume with a different mode is refused
+with the rebuild recipe. Pinned by `test/tests/test_tcl_hdesign_iterate.py`.
+
+Building it exposed a checkpoint-clobber: a pin typed AFTER the route (the
+prompt's whole point) persisted the EXPANDED per-instance wrapper list over
+the template/replica rows, and the next session could not restore. Fixed in
+the engine, not the vehicle — persists now source the pre-expansion view
+(`_persist_wrappers`), `run_planner hier` snapshots it on a resumed session,
+and the expansion-map pin/unpin branches mirror onto the original — so the
+GUI explorer and any other driver get the same guarantee
+(`test/tests/test_hier_pin_persist.py`).
+
 This pair is also what measured the **fan-in taper gap**, now fixed: a
 resumed CONVERGENT/DIVERGENT bundle used to come back untapered and route
 wider than the design that was saved (this vehicle: 88 → 106 bit-wires, all
