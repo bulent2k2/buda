@@ -1,6 +1,6 @@
 # BUDA Script Reference — Stage 2 — Topology generator
 
-Candidate enumeration and expert editing: `generate_topologies`, `generate_topologies_for_bundle`, `generate_more_topologies`, the TopoEdit session (`edit_topology` … `edit_commit`), `generate_hier_topologies`, `generate_topologies_for_hbundle`, `set_prune_dominated`, `set_dedup_loci`, `set_drop_dangling`.
+Candidate enumeration and expert editing: `generate_topologies`, `generate_topologies_for_bundle`, `generate_more_topologies`, the TopoEdit session (`edit_topology` … `edit_commit`), `generate_hier_topologies`, `generate_topologies_for_hbundle`, `set_prune_dominated`, `set_dedup_loci`, `set_drop_dangling`, `set_trim_mst_legs`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -574,5 +574,101 @@ set_dedup_loci on
 set_drop_dangling on
 generate_topologies            # collapse nominal-locus variants, drop danglers
 ```
+
+---
+
+### `set_trim_mst_legs`
+
+```
+set_trim_mst_legs [on|off]
+```
+
+Opt-in **shared-leg trim** for MST candidates (default **off** — flows are
+byte-identical without it, and a test pins that).  Unlike the three cleanups
+above it does not filter the pool: it **changes geometry**.
+
+**The shape.** `realize_mst_edge` routes each MST edge on its own, from the
+closest point between its two blocks.  Two edges incident on the **same** block
+therefore start at the same face point, and when both go L-shaped with the same
+first axis, the shorter one's leg lies entirely inside the longer one's:
+
+```
+seg3  H (2130,1020) -> (2110,1020)    edge 1, owns the tap to the block
+seg5  H (2130,1020) -> ( 980,1020)    edge 2, runs over it and on past
+```
+
+The longer leg's prefix is a duplicate whose start is a **free end**: the
+shorter leg owns the block tap, and nothing joins the long leg until the two
+diverge.  No audit catches it — `ANTENNA` counts attachment *positions* and the
+long leg has two elsewhere, while the tap-overhang rule wants a piece lying over
+a block the segment itself **taps**, and this one taps nothing.
+
+**Why it matters** is downstream rather than at the wire.  The overshoot pushes
+the leg's end **past the divergence junction**, which turns that junction from
+an *endpoint* conn into a *mid-span* one — and DetailedNUTS only snaps a bit to
+its own via at an **endpoint** conn.  So every bit keeps the shared abstract
+end.  On `flow/rnr/mix2_topdown_refine` bundle 35 that left 8.75 + 5.75 + 2.75
+units of metal past the last via.
+
+**When on**, each leg is cut back to the shorter sibling's far end, on both
+realization paths (standalone `MST_*` and the `TRUNK_*+MST` hybrids).
+Connectivity holds **by construction**: the cut point is that edge's own bend or
+a block face, so something is always waiting at the seam, and the trimmed leg
+still reaches its own far block.  The decision is made on the *original*
+geometry, so three legs off one node chain correctly; a cut that would leave
+less than the min-stub floor is skipped.
+
+**Why it is opt-in.** The mutation is not local to the wire it fixes.
+Candidates are **WL-sorted**, so shortening one **re-sorts the pool**, and a
+re-sort changes which candidates clear generation gates.  Measured on
+`chip/chip3_topdown`, `main` vs an always-on build:
+
+```
+selected TYPE  changed:  9 of 640
+selected INDEX changed: 10
+pool SIZE      changed:  3      b14 72->80   b31 74->78   b42 59->62
+control (main run twice):  0 / 0 / 0
+```
+
+The **pool-size** changes are the telling ones — occupancy cannot add candidates
+to a pool, so the trim changes what is *in* the search space.  Downstream, leaf
+bundles lose tracks they were getting (`chip3_topdown` 260 → 636 unplaced bits,
+all `unplaced (no track in DetailedNUTS)` — DNUTS admission).  The geometry is
+sound; the **search space** moves.  That is the same reason
+`set_prune_dominated`, `set_dedup_loci` and `set_drop_dangling` are opt-in.
+
+**Measured with it on**, `flow/rnr/mix2_topdown_refine`: `check_design` 3
+violations → **Success**, detailed WL 793215 → 793198, 0 unplaced either way.
+
+**Ordering:** declare *before* the generation command.  The trim renumbers
+candidate indices, so `select_topology` pins must come from an opted-in run.
+
+**Scope — what it does NOT cover.** Both are pinned as strict `xfail`s in
+`test/tests/test_mst_shared_leg_prefix.py`, so they fail loudly when closed:
+
+- **Legs that END at the shared node.**  `compute_mst` emits every edge with
+  `u < v` and `realize_mst_edge` routes `u → v`, so a shared node holding the
+  *higher* index has both legs end there, and a start-only match misses them.
+  The lever is which block is the **driver** (the busterm list leads with it),
+  not declaration order — `flow/mst_shared_leg_suffix.buda` demotes the hub to a
+  receiver and reproduces it.  The harm differs in kind: both legs tap the hub's
+  face, so there is no free end and `check_design` reports Success; the cost is
+  duplicate metal plus a perpendicular partner claiming an endpoint conn to
+  *both* legs, which NUTS reports as a junction infeasibility.
+- **The same geometry from TRUNK stub generation**, which this trim (living in
+  the MST realization paths) never sees.
+
+**Corpus A/B:** `BUDA_MST_LEG_TRIM=1` opts a whole sweep in without editing
+flows; an explicit `set_trim_mst_legs` wins over it.
+
+**Example:**
+```buda
+run_bundler strict
+set_trim_mst_legs on
+generate_topologies            # MST legs no longer duplicate a sibling's prefix
+```
+
+Vehicles: `flow/mst_shared_leg_prefix.buda` (trimmed) and
+`flow/mst_shared_leg_suffix.buda` (the open mirror).
 
 ---

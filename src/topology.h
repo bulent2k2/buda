@@ -632,6 +632,8 @@ public:
             allow_spine_relays_ = (std::string(e) == "1");
         if (const char* e = std::getenv("BUDA_MULTI_TRUNK"))
             allow_multi_trunk_ = (std::string(e) == "1");
+        if (const char* e = std::getenv("BUDA_MST_LEG_TRIM"))
+            allow_mst_leg_trim_ = (std::string(e) == "1");
     }
 
     // Busterm mode (default true): route segments terminate at the nearest
@@ -695,6 +697,40 @@ public:
     // docs/internal/wishlist-topo.md "star→spine relay completion".
     void set_spine_relays(bool v) { allow_spine_relays_ = v; }
 
+    // Shared-leg trim for MST edges (default false — byte-identical when off;
+    // opt in per generator via this setter, from a script with
+    // `set_trim_mst_legs on`, or corpus-wide via the study env
+    // BUDA_MST_LEG_TRIM=1).
+    //
+    // realize_mst_edge routes each edge on its own, so two edges incident on
+    // the SAME block start at the same face point; when both go L-shaped with
+    // the same first axis the shorter one's leg lies inside the longer one's,
+    // and the longer leg's prefix is a duplicate with a FREE END.  Its real
+    // cost is downstream — it pushes the leg's end PAST the divergence
+    // junction, making that junction a mid-span conn, and DetailedNUTS only
+    // snaps a bit to its own via at an ENDPOINT conn.  Trimming cuts each leg
+    // back to the shorter sibling's far end (that edge's own bend, or a block
+    // face, so connectivity holds by construction).
+    //
+    // OPT-IN because the mutation is not local to the wire it fixes.
+    // Candidates are WL-SORTED, so shortening one re-sorts the pool, and a
+    // re-sort changes which candidates clear generation gates: measured on
+    // chip3_topdown, 9 of 640 bundles change selected topology TYPE and 3
+    // change pool SIZE (control, main vs main: 0).  Downstream, leaf bundles
+    // elsewhere lose tracks they were getting — chip3_topdown 260 -> 636
+    // unplaced bits.  Not bad geometry (the cut point is sound); a moved
+    // search space.  Same reason set_prune_dominated / set_dedup_loci /
+    // set_drop_dangling are opt-in, and the same caveat applies: trimming
+    // renumbers candidate indices, so select_topology pins must come from an
+    // opted-in run.
+    //
+    // Covers the START-shared half only.  Legs that END at the shared node
+    // (which happens when that node holds the higher MST index, since
+    // compute_mst emits u<v and realize_mst_edge routes u->v) are NOT trimmed,
+    // nor is the same geometry when TRUNK stub generation produces it; both
+    // are pinned as strict xfails in test_mst_shared_leg_prefix.py.
+    void set_mst_leg_trim(bool v) { allow_mst_leg_trim_ = v; }
+
     // Unified entry point: 1 dst → L/Z/U shapes; N dsts → trunk+branch shapes.
     std::vector<Topology> generate_candidates(
         const std::string& src_name,
@@ -756,6 +792,7 @@ private:
     bool allow_multi_trunk_   = false;
     bool allow_hanan_loci_    = true;
     bool allow_spine_relays_  = false;
+    bool allow_mst_leg_trim_  = false;
     int  h_layer_             = 4;
     int  v_layer_             = 5;
     std::vector<int> all_h_layers_ = {4};

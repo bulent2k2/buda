@@ -1,0 +1,96 @@
+# ============================================================
+# flow/mst_shared_leg_suffix.buda
+#
+# The MIRROR of flow/mst_shared_leg_prefix.buda: two MST edges
+# meeting at one block where the shared legs END rather than
+# START.  STILL OPEN — the trim matches on shared STARTS, so it
+# does not fire here.  Note this flow turns the trim ON
+# (`set_trim_mst_legs on`, below): the duplication below survives
+# a build that HAS the trim and has been asked to apply it, so
+# this is the missing half and not merely the opt-in being off.
+#
+# `compute_mst` emits every edge with `u < v` and
+# `realize_mst_edge` routes `u -> v`, so whether a shared node's
+# legs start or end at it is decided purely by that node's index.
+#
+# THE LEVER IS WHICH BLOCK IS THE DRIVER, not which is declared
+# first.  `nodes` for `add_mst_candidates` comes from the bundle's
+# BUSTERM list, and the driver heads it — so re-ordering
+# `add_block` cannot move the hub's index (measured: hub-first and
+# hub-last give byte-identical candidates).  Making the geometric
+# hub a RECEIVER does move it: the hub then holds the higher index
+# of both its edges, and both legs land on it as segment ENDS.
+#
+# This is the prefix fixture's geometry with ONE line changed —
+# `hub` demoted from driver to receiver, `drv` taking the far
+# position the old `far` block held.
+#
+# Measured on this branch (trim in, and it does not fire):
+#
+#   MST_VH  seg2 (1890,1010)->(2010,1010) len  120
+#             inside seg4 (690,1010)->(2010,1010) len 1320
+#   MST_HV  seg4 (2010, 940)->(2010,1010) len   70
+#             inside seg2 (2010, 390)->(2010,1010) len  620
+#
+# both sharing the END point (2010,1010) — the hub's SW corner
+# after the corner margin, the same corner the prefix fixture
+# shares.
+#
+# THE HARM IS DIFFERENT IN KIND from the prefix case, which is
+# why this is filed separately rather than as "the same bug".
+# Here both legs terminate on the hub's face and both get busterm
+# taps, so there is no free end and `check_design` reports
+# Success.  What is wrong instead:
+#
+#   * the short leg is PURE DUPLICATE — its long sibling already
+#     reaches the same junction, so its 120 units x 4 bits are
+#     480 of the vehicle's 11114 detailed WL (~4.3%); and
+#   * the perpendicular partner claims an ENDPOINT conn to BOTH
+#     legs, which cannot both hold once NUTS puts them on
+#     different tracks.  NUTS says so:
+#       [NUTS] junction infeasible: bundle 1 seg 1 cannot reach seg 2
+#     and those feed `ripup_reroute`'s contender list, so the
+#     shape costs healer effort as well as metal.
+#
+# So the mirror is a WIRELENGTH-and-robustness fix, not a
+# dangling-metal one, and it should not be sold as the same
+# defect.  The geometric cut is the mirror image: trim the long
+# leg's END back to the short leg's far end, where the short
+# leg's own perpendicular partner already is.
+#
+# Run:  bin/buda flow/mst_shared_leg_suffix.buda --no-viz
+# ============================================================
+
+def_layer 4 M4 H TOP 33.33
+def_layer 5 M5 V TOP 33.33
+
+corner_margin dx 10 dy 10
+
+# Same four rectangles as the prefix fixture.  `hub` is still the
+# geometric hub — both other targets sit beyond its SW corner —
+# but it is now a RECEIVER, so it takes a higher busterm index
+# than the driver and its legs arrive as segment ENDS.
+add_block drv    600  900   700  950
+add_block near  1800  300  1900  400
+add_block hub   2000 1000  2100 1100
+add_block up    2000 1800  2100 1900
+
+add_bus d[4] drv.tx near.rx,hub.rx,up.rx
+
+run_bundler strict
+
+# The trim is OPT-IN (default off, byte-identical): it re-sorts the
+# WL-ordered candidate pool, so it moves selection well beyond the
+# bundle it fixes.  Declared BEFORE generation, as it must be.
+set_trim_mst_legs on
+generate_topologies
+run_planner 1
+run_nuts
+
+def_track_pattern 4 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 5 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+
+run_detailed_nuts
+dump_topologies --conn
+check_design dnuts
+report_wirelength

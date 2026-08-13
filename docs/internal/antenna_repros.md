@@ -4,11 +4,16 @@ Metal that is part of a routed net but attaches to nothing: a wire whose end
 runs past its own last junction or tap. Electrically inert, and in real silicon
 an antenna-rule problem rather than a wirelength one.
 
-The reason there are so many separate entries is that they are all the same
-*kind* of mistake in different places: **per-SEGMENT data governing a per-BIT
-quantity**. A segment is attached; a bit on it need not be. Every audit that
-reads the bus-level `ConnSeg` graph is blind to the difference, which is why
-several of these ran for a long time with `check_design` reporting Success.
+The largest family here is one *kind* of mistake in different places:
+**per-SEGMENT data governing a per-BIT quantity** (entries 1, 2, 4). A segment
+is attached; a bit on it need not be, and every audit that reads the bus-level
+`ConnSeg` graph is blind to the difference — which is why those ran for a long
+time with `check_design` reporting Success.
+
+It is not the only cause, and assuming it was cost real time here. Entry 5 is
+generation-stage **geometry** (a duplicated leg), and entries 6–7 are a
+DetailedNUTS **pass-ordering** problem. The three questions worth asking on a
+new instance are at the bottom of this page.
 
 Each entry says how to reproduce it, what is measured, and its status. Nothing
 here is asserted from reading the code alone — every measurement is from a run.
@@ -19,14 +24,15 @@ here is asserted from reading the code alone — every measurement is from a run
 | 2 | busterm tap vouches for every bit | `flow/antenna_taper_passthru.buda` | FIXED #690 |
 | 3 | bus wider than the block it crosses | `flow/antenna_wide_bus_passthru.buda` | UNREACHABLE |
 | 4 | crossing credited at the nominal seg | `flow/rnr/mix2_topdown_refine.buda` | FIXED #695 |
-| 5 | two MST edges duplicate a leg | `flow/mst_shared_leg_prefix.buda` (branch `claude/mst-leg-overshoot`) | **OPEN** |
+| 5 | a duplicated leg off one block | `flow/mst_shared_leg_prefix.buda` + `flow/mst_shared_leg_suffix.buda` | **PARTLY FIXED, opt-in** (#708) |
 | 6 | a culled partner strands a segment | `flow/antenna_culled_partner.buda` + `flow/antenna_starved_partner.buda` | **OPEN — cause found** |
 | 7 | `rv/soc` 1.25M units mid-flow | `flow/rv/soc.buda` | **OPEN — same cause as 6** |
 
-Entries 5, 6 and 7 are the live ones, and 6 and 7 are now known to be **one
-defect**: a DetailedNUTS pass-ordering problem, isolated to a 4-bit vehicle in
-entry 6. Entry 3 is a negative result kept as a guard. Entries 3, 6 and 7's
-vehicles all end DIRTY on purpose; none belongs in the QoR corpus.
+Entries 5, 6 and 7 are the live ones. 6 and 7 are **one defect** — a
+DetailedNUTS pass-ordering problem, isolated to a 4-bit vehicle in entry 6. 5 is
+a *class* of three members sharing one geometry, of which one is fixed behind an
+opt-in and two are open. Entry 3 is a negative result kept as a guard. Entries
+3, 6 and 7's vehicles all end DIRTY on purpose; none belongs in the QoR corpus.
 
 ---
 
@@ -105,46 +111,89 @@ up and never cross it. The block also spans x 2130–2330 while the bits end at
 making `trail = span_hi − reach_hi` negative and cancelling the finding.
 
 **Status.** FIXED (#695) — the audit now measures reach per bit. The metal it
-revealed is entry 5.
+revealed is entry 5a.
 
 ---
 
-## 5. Two MST edges leaving one block duplicate a leg
+## 5. A duplicated leg off one block — one geometry, three producers
 
-**Mechanism.** `realize_mst_edge` routes each edge on its own, from the closest
-point between its two blocks, so two edges incident on the *same* block start at
-the same face point. When both go L-shaped with the same first axis, the shorter
-one's leg lies inside the longer one's. The longer leg's prefix is a duplicate
-with a **free end**, and it pushes the leg's end *past* the divergence junction —
-which makes that junction a mid-span conn, and DetailedNUTS only snaps a bit to
-its own via at an ENDPOINT conn.
+**Mechanism.** Two wires leave the *same* block from the same point along the
+same axis, and the shorter one lies entirely inside the longer. The longer leg's
+extra stretch is a duplicate with a **free end**, and it pushes that leg's end
+*past* the divergence junction — which makes the junction a mid-span conn, and
+DetailedNUTS only snaps a bit to its own via at an ENDPOINT conn, so every bit
+keeps the shared abstract end.
 
-**Reproduce.** `flow/mst_shared_leg_prefix.buda`, which lives on branch
-`claude/mst-leg-overshoot` (PR #708) together with the proposed fix — it is
-deliberately NOT duplicated here, so there is one copy to keep in step with
-whatever that PR settles on. The vehicle reproduces the shape on `main` as well:
-`git show origin/claude/mst-leg-overshoot:flow/mst_shared_leg_prefix.buda > /tmp/m.buda`
-then run it. Also `flow/rnr/mix2_topdown_refine.buda` bundle 35 in a real design.
+The geometry has **three** producers, and only the first is fixed:
 
-**Measured.** 8.75 + 5.75 + 2.75 units past the last via on bundle 35. On the
-standalone vehicle, on `main`, at the shared corner (2010,1010): `MST_HV` seg1
-len 120 inside seg3 len 1320; `MST_VH` seg3 len 70 inside seg1 len 620.
+| # | producer | shared point | status |
+|---|---|---|---|
+| 5a | `realize_mst_edge`, shared node holds the LOWER index | legs **start** there | fixed behind `set_trim_mst_legs` |
+| 5b | `realize_mst_edge`, shared node holds the HIGHER index | legs **end** there | OPEN |
+| 5c | TRUNK stub generation | stub + leg leave one trunk point | OPEN |
 
-**Status.** OPEN — a fix exists in **PR #708** but is *not* recommended as it
-stands: it clears the shape (WL 13753 → 13736 on the pinned candidate,
-`check_design` dirty → Success) at the cost of `chip3_topdown` 6/260/34 →
-6/636/78. That regression is measured **collateral**, not bad geometry: the trim
-fires ~5 times there, and the bundles that newly fail select *identical*
-candidates on both sides — plain 2-segment `L_HV` shapes with no MST leg in them
-— failing DNUTS *admission* because global track occupancy moved.
+`compute_mst` emits every edge with `u < v` and `realize_mst_edge` routes
+`u → v`, which is what splits 5a from 5b. The lever is **which block is the
+driver**, not declaration order: `nodes` comes from the busterm list and the
+driver heads it, so re-ordering `add_block` cannot move the hub's index while
+demoting the hub to a receiver can.
 
-A second, independent gap in that fix is recorded on the PR: `compute_mst` emits
-every edge with `u < v` and `realize_mst_edge` routes `u → v`, so when the shared
-node holds the higher index both legs **end** at the shared point rather than
-start there, and a start-only match misses it. It is latent and needs a
-*non-driver* block to be the shared MST node — the fixture cannot expose it,
-because its hub is the bus driver and so heads the busterm list whichever way the
-blocks are declared.
+**Reproduce.**
+
+* 5a — `flow/mst_shared_leg_prefix.buda`, and `flow/rnr/mix2_topdown_refine.buda`
+  bundle 35 in a real design.
+* 5b — `flow/mst_shared_leg_suffix.buda`: the same four rectangles with the hub
+  demoted to a receiver. It turns the trim **on**, so what it shows survives a
+  build that has the fix and was asked to apply it.
+* 5c — no separate vehicle needed: it is present in 5a's own fixture, nine pairs
+  of it.
+
+**Measured.**
+
+* 5a: 8.75 + 5.75 + 2.75 units past the last via on bundle 35. On the standalone
+  vehicle at the shared corner (2010,1010): `MST_HV` seg1 len 120 inside seg3 len
+  1320; `MST_VH` seg3 len 70 inside seg1 len 620.
+* 5b: `MST_VH` seg2 len 120 inside seg4 len 1320, `MST_HV` seg4 len 70 inside
+  seg2 len 620, both at the END (2010,1010). **The harm differs in kind** — both
+  legs tap the hub's face, so there is no free end and `check_design` reports
+  Success. The cost is duplicate metal (480 of 11114 detailed WL) plus a
+  perpendicular partner claiming an ENDPOINT conn to *both* legs, which NUTS
+  reports as a junction infeasibility and which feeds ripup's contenders. Do not
+  sell the mirror as the same defect.
+* 5c: `TRUNK_H@y950` has seg1 `(2010,1000)→(2010,950)` inside seg3
+  `(2010,1800)→(2010,950)`, which runs straight through `hub` (x 2000..2100,
+  y 1000..1100).
+
+**Status.** 5a FIXED behind an **opt-in** (#708): `set_trim_mst_legs [on|off]`,
+default off, byte-identical unused, `BUDA_MST_LEG_TRIM=1` for corpus A/B. Opted
+in on `mix2_topdown_refine`: `check_design` 3 violations → Success, detailed WL
+793215 → 793198. 5b and 5c are strict `xfail`s in
+`test/tests/test_mst_shared_leg_prefix.py`, and they **still xfail with the trim
+on** — so they record "not covered" rather than "not exercised".
+
+**Why opt-in, and the part worth carrying to the next fix of this kind.** The
+first cut applied the trim unconditionally and cost `chip3_topdown` 260 → 636
+unplaced bits. That was originally written down here as pure occupancy
+displacement — "the bundles that newly fail select identical candidates on both
+sides". **That was wrong**, and measuring it properly is what produced the
+opt-in. Comparing every bundle's selected `(index, type)` and pool size, `main`
+vs an always-on build:
+
+```
+selected TYPE  changed:  9 of 640
+selected INDEX changed: 10
+pool SIZE      changed:  3      b14 72→80   b31 74→78   b42 59→62
+control (main run twice):  0 / 0 / 0
+```
+
+The chain is longer than "shorter geometry → occupancy": candidates are
+**WL-sorted**, so trimming one **renumbers indices**, which changes which
+candidates clear generation gates — hence three pools that change *size*, which
+occupancy cannot do — which flips selections, which moves occupancy. The
+geometry is sound in every case constructible; what moves is the **search
+space**. That also makes `chip3_topdown`'s number a poor signal about the trim's
+quality, and it is why narrowing the trim would not have shrunk the blast radius
+in proportion to how often it fires.
 
 ---
 
@@ -236,7 +285,7 @@ one to develop against.
 | check | reads | blind to |
 |---|---|---|
 | `detect_antennas` (`ANTENNA`, structural) | attachment *positions* on the bus-level `ConnSeg` graph | a segment attached at ≥2 points whose individual BITS are not |
-| tap-overhang (#514) | a terminal piece over a block the segment **taps** | a piece past the last junction that taps nothing (entry 5) |
+| tap-overhang (#514) | a terminal piece over a block the segment **taps** | a piece past the last junction that taps nothing (entry 5a) — and 5b, where BOTH legs tap the block and neither piece is terminal |
 | `detect_bit_antennas` (per bit) | per-bit vias + served taps + crossings the bit really makes | whether a *crossing* should vouch for a bit at all — the open question entry 3's vehicle exists to frame |
 | `check_dnuts` block coverage | per-bit coverage of connected blocks | nothing here; it is the check that keeps the retractions honest |
 
@@ -245,10 +294,18 @@ full. It is the placer emitting metal the audit then correctly complains about,
 which is the healthier of the two failure modes and the reason it is measurable
 at all.
 
-Two things to check first on any new instance:
+Three things to check first on any new instance:
 
-1. **Is the datum governing the decision per SEGMENT or per BIT?** Entries 1, 2,
-   4 and 5 were all that.
+1. **Is the datum governing the decision per SEGMENT or per BIT?** Entries 1, 2
+   and 4 were all that. A segment is attached; a bit on it need not be.
 2. **Which PASS removed the thing that is missing, relative to the pass that
    read it?** Entry 6 (and so 7) was that: the same bits lost one pass earlier
    are handled correctly, and one pass later are not.
+3. **Does the fix move the SEARCH SPACE?** Entry 5 was that, and it is the one
+   that does not look like a correctness question at all. Candidate pools are
+   WL-SORTED, so any generation-stage change to geometry renumbers indices, and
+   renumbering changes which candidates clear the generation gates — so the pool
+   itself changes and selections flip design-wide. Before judging such a fix by
+   a corpus number, establish whether the number is measuring the fix or the
+   shift. `set_prune_dominated`, `set_dedup_loci`, `set_drop_dangling` and now
+   `set_trim_mst_legs` are all opt-in for exactly this reason.

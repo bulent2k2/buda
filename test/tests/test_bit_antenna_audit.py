@@ -274,9 +274,14 @@ def test_a_crossing_is_judged_at_the_bit_not_at_the_nominal_segment():
     `trail = span_hi - reach_hi` negative and silently cancelled the finding.
 
     Judged at each bit's own track and span, the 3 bits are short of their span
-    by 8.75 / 5.75 / 2.75 — real metal past their last via, and the flow's
-    `viol_bundles` goes 0 -> 1 because the audit got sharper, not because the
-    routing changed (detailed WL is identical across the change).
+    by 8.75 / 5.75 / 2.75 — real metal past their last via.
+
+    THIS FLOW STILL SHOWS IT, and that is deliberate.  The generation-side
+    cause is a duplicated MST leg prefix, and the trim for it ships OPT-IN
+    (`set_trim_mst_legs`, default off) because it re-sorts the WL-ordered
+    candidate pool and moves selection far beyond this bundle.  A corpus flow
+    that does not opt in therefore keeps the metal, and the audit must keep
+    reporting it — the sibling test below is the one that opts in.
     """
     s = _session(_ROOT / "flow/rnr/mix2_topdown_refine.buda", verbose=True)
     hits = _findings_in_run(s)
@@ -291,3 +296,38 @@ def test_a_crossing_is_judged_at_the_bit_not_at_the_nominal_segment():
         r_hi = max(float(x) for x in
                    h.split("reaches [")[1].split("]")[0].split(","))
         assert r_hi <= s_hi, h
+
+
+def test_opting_IN_to_the_leg_trim_removes_that_metal_at_the_source():
+    """The other side of the opt-in: the trim does close this case.
+
+    Same flow, one line added before `generate_hier_topologies`.  The audit goes
+    silent because the metal is gone, not because the checker stopped looking —
+    so the detailed wirelength must drop by the same amount the findings
+    reported (8.75 + 5.75 + 2.75 = 17.25, rounded in the reported total).
+
+    Asserting BOTH is the point.  A trim that removed the finding without
+    removing the wire, or removed wire elsewhere while leaving this, would pass
+    either assertion alone.
+    """
+    flow = _ROOT / "flow/rnr/mix2_topdown_refine.buda"
+    src = flow.read_text().replace("generate_hier_topologies",
+                                   "set_trim_mst_legs on\ngenerate_hier_topologies", 1)
+    tmp = flow.parent / "_optin_leg_trim_tmp.buda"
+    tmp.write_text(src)
+    try:
+        s = _session(tmp, verbose=True)
+    finally:
+        tmp.unlink()
+
+    assert _findings_in_run(s) == [], "the trim should remove the metal"
+    assert s.detailed_result.num_unplaced == 0
+
+    def _wl(sess):
+        for ln in sess._test_stdout.splitlines():
+            if "total detailed WL" in ln:
+                return float(ln.split("total detailed WL = ")[1].split()[0])
+        raise AssertionError("no detailed WL line")
+
+    base = _session(flow, verbose=True)
+    assert _wl(base) - _wl(s) == pytest.approx(17, abs=1), (_wl(base), _wl(s))

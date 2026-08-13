@@ -399,6 +399,12 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # to nothing).
         self._dedup_loci = False
         self._drop_dangling_mode = "off"
+        # set_trim_mst_legs: cut the duplicated PREFIX off MST legs that leave
+        # one block along the same axis.  Same opt-in reason as the three above
+        # and unlike them a GEOMETRY change, so it re-sorts the WL-ordered pool
+        # and moves selection well beyond the bundle it fixes (chip3_topdown:
+        # 9 of 640 bundles change selected type, 3 change pool size).
+        self._trim_mst_legs = False
         self._max_bundle_bits = None
         self._max_bundle_bits_auto = False
         self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]

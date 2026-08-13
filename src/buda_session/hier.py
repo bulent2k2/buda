@@ -4161,6 +4161,13 @@ class HierMixin:
         # #463 P2).  An explicit token / knob memo passes True and wins.
         if use_spine_relays:
             tg.set_spine_relays(True)
+        # Session-scope opt-in (set_trim_mst_legs), not a per-command token, so
+        # it needs no slot in the generation-knob tuple or its persisted memo.
+        # Stamped only when opting in, for the same reason as spine_relays: a
+        # flow without it keeps the constructor's env-derived default, so the
+        # BUDA_MST_LEG_TRIM corpus A/B hook still works.
+        if getattr(self, "_trim_mst_legs", False):
+            tg.set_mst_leg_trim(True)
         return tg
 
     def _make_layer_names(self):

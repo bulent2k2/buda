@@ -3497,6 +3497,75 @@ bool TopologyGenerator::realize_mst_edge(const Rect& r_u, const Rect& r_v,
     return true;
 }
 
+// Trim the SHARED PREFIX of MST legs that leave one node along the same axis.
+//
+// realize_mst_edge routes each edge on its own, from the closest point between
+// its two blocks.  Two edges incident on the SAME block therefore start at the
+// same face point, and if both go L-shaped with the same first axis, the
+// shorter one's leg lies entirely inside the longer one's — the longer runs
+// over it and on past, so its first stretch duplicates a wire that is already
+// there and its start is a FREE END: no tap of its own (the shorter leg owns
+// the block), and no junction until the two diverge.
+//
+// Nothing downstream removes it.  The ANTENNA rule counts attachment POSITIONS
+// and the long leg has two elsewhere, so it passes; #514's tap-overhang rule
+// wants the piece to lie over a block the segment itself taps, and this one
+// taps nothing.  What it does do is push the leg's end PAST the junction where
+// the edges diverge, which turns that junction from an endpoint conn into a
+// mid-span one — and DetailedNUTS only snaps a bit to its own via at an
+// ENDPOINT conn, so every bit keeps the shared abstract end instead
+// (rnr/mix2_topdown_refine bundle 35: 8.75 + 5.75 + 2.75 units of metal past
+// the last via, invisible to every audit).
+//
+// So cut each leg back to where it stops being a duplicate.  Connectivity is
+// preserved by construction: the cut point is the shorter leg's far end, which
+// is either that edge's own BEND (its perpendicular partner starts there) or a
+// block FACE (a straight edge lands on one) — either way something is waiting
+// at the seam, and the trimmed leg reaches its own far block exactly as before.
+// The shared start's block stays connected through the leg that kept it.
+//
+// Decided on the ORIGINAL geometry, so three legs off one node chain correctly
+// (longest cut to the middle one's end, middle to the shortest's) instead of
+// the second comparison seeing an already-moved start.  A cut that would leave
+// less than the min-stub floor is skipped: a pinched leg is worse than a
+// duplicated one.  Returns the number trimmed.
+static int trim_shared_leg_prefixes(std::vector<Segment>& segs,
+                                    int m_h, int m_v) {
+    const std::vector<Segment> orig = segs;
+    int n_trim = 0;
+    for (size_t i = 0; i < segs.size(); ++i) {
+        const Segment& b = orig[i];
+        const bool bh = (b.start.y == b.end.y);
+        if (bh == (b.start.x == b.end.x)) continue;   // degenerate or diagonal
+        const long b_len = bh ? std::labs((long)b.end.x - b.start.x)
+                              : std::labs((long)b.end.y - b.start.y);
+        const int  b_dir = bh ? (b.end.x > b.start.x ? 1 : -1)
+                              : (b.end.y > b.start.y ? 1 : -1);
+        long  best = -1;
+        Point cut{};
+        for (size_t j = 0; j < orig.size(); ++j) {
+            if (i == j) continue;
+            const Segment& a = orig[j];
+            if (a.start.x != b.start.x || a.start.y != b.start.y) continue;
+            const bool ah = (a.start.y == a.end.y);
+            if (ah != bh || ah == (a.start.x == a.end.x)) continue;
+            const long a_len = bh ? std::labs((long)a.end.x - a.start.x)
+                                  : std::labs((long)a.end.y - a.start.y);
+            const int  a_dir = bh ? (a.end.x > a.start.x ? 1 : -1)
+                                  : (a.end.y > a.start.y ? 1 : -1);
+            if (a_dir != b_dir || a_len <= 0 || a_len >= b_len) continue;
+            if (a_len > best) { best = a_len; cut = a.end; }
+        }
+        if (best < 0) continue;
+        const long rem = bh ? std::labs((long)b.end.x - cut.x)
+                            : std::labs((long)b.end.y - cut.y);
+        if (rem < (bh ? m_h : m_v)) continue;
+        segs[i].start = cut;
+        ++n_trim;
+    }
+    return n_trim;
+}
+
 void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                                            std::vector<Topology>& results) {
     // MST topologies model daisy-chain connections (each block connects to its
@@ -3568,6 +3637,13 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
             for (size_t k = before; k < mst.segments.size(); ++k)
                 mst.segments[k].edge_id = ei;
         }
+        // Edges sharing a node can leave it along the same axis; cut the
+        // duplicated prefix before anything reads the geometry.  Opt-in
+        // (set_trim_mst_legs / BUDA_MST_LEG_TRIM): the cut re-sorts the
+        // WL-ordered pool, so it moves selection well beyond the trimmed
+        // bundle — see TopologyGenerator::set_mst_leg_trim.
+        if (valid && allow_mst_leg_trim_)
+            trim_shared_leg_prefixes(mst.segments, m_h, m_v);
         if (valid) {
             // Annotate the raw stubs first, then complete: completion rewrites the
             // relay busterm taps (single tap + SEG junctions) and annotates the
@@ -3926,6 +4002,11 @@ void TopologyGenerator::add_trunk_mst_candidates(
                     return false;
                 for (size_t k = before; k < out.size(); ++k) out[k].edge_id = e;
             }
+            // Same as the standalone MST path: edges incident on one block leave
+            // it from the same face point, so cut the duplicated prefix here,
+            // before annotate_endpoints/complete_relay_junctions read the shape.
+            // Opt-in on the same knob (set_trim_mst_legs / BUDA_MST_LEG_TRIM).
+            if (allow_mst_leg_trim_) trim_shared_leg_prefixes(out, m_h, m_v);
             return true;
         };
 
