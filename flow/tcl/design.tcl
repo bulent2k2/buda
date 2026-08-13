@@ -168,7 +168,17 @@ while {1} {
     if {[gets stdin line] < 0} { break }              ;# EOF ends the session
     set line [string trim $line]
     if {$line eq ""} { continue }
-    set verb [lindex $line 0]
+    # The list ops below (`lindex`, `llength`, `lrange`) all RAISE on a line
+    # that is not a well-formed Tcl list — an unmatched brace or quote — and
+    # this first one runs before the dispatch catch, so it must have its own:
+    # a stray brace at an interactive prompt must cost a message, not the
+    # whole session (and its snapshot / verdict).  Once it parses, the rest
+    # of the list ops are safe.  (Comments inside a braced script still count
+    # braces, so this comment spells the characters out rather than show them.)
+    if {[catch {lindex $line 0} verb]} {
+        puts "design.tcl: unparseable input ($verb) -- balance braces/quotes"
+        continue
+    }
     # `done` is checked OUTSIDE the catch: `break` raises TCL_BREAK, which a
     # catch around the switch would swallow instead of ending the loop.
     if {$verb in {done exit quit}} { break }
@@ -200,6 +210,22 @@ while {1} {
                 # cost the whole session.  `buda::commands` is that registry,
                 # asked of the running engine at start, so it cannot drift.
                 if {$verb in [buda::commands]} {
+                    # Escape-hatch parity with the pin/unpin verbs: these
+                    # engine commands change the durable pin too, so `done`
+                    # must re-plan for the checkpoint to stay coherent —
+                    # typed raw, they persisted the new selection while the
+                    # saved metal still belonged to the old candidate.
+                    # Marked BEFORE the send: a `select_topologies` list can
+                    # pin some bundles and then raise on another, and a raise
+                    # after the send would skip the mark — the cost of the
+                    # conservative order is one redundant re-plan on a pin
+                    # that failed outright, never an incoherent checkpoint.
+                    if {$verb in {select_topology select_topologies
+                                  unpin_topology}
+                        || ($verb eq "edit_commit"
+                            && "pin" in [lrange $line 1 end])} {
+                        set pins_dirty 1
+                    }
                     puts [buda::do $line]
                 } else {
                     puts "design.tcl: unknown command '$verb' -- try `topos`,\

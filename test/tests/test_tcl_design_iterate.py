@@ -146,13 +146,32 @@ def test_the_prompt_survives_mistakes_and_passes_raw_commands_through(tmp_path):
     engine mid-session."""
     assert _run(tmp_path).returncode == 0
     r = _run(tmp_path, stdin="pin d1\n"                 # wrong arity
+                             "pin d1 {\n"               # not a Tcl list (P2)
                              "no_such_command_xyz\n"    # not in the registry
                              "dump_topologies d1\n"     # raw pass-through
                              "pin d1 4\n"
                              "done\n")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "usage: pin" in r.stdout
+    assert "unparseable input" in r.stdout      # a stray brace is a message,
+                                                # not a lost session
     assert "unknown command 'no_such_command_xyz'" in r.stdout
     assert "bundle 3" in r.stdout               # dump_topologies reached it
     assert "topo 4 of" in r.stdout              # ...and the session went on
     assert "clean -- 0 overlaps" in r.stdout
+
+
+def test_raw_pin_commands_also_dirty_the_checkpoint(tmp_path):
+    """The escape hatch must not dodge the coherence guarantee: a pin typed
+    as the RAW engine command (`select_topology …` instead of `pin …`)
+    persists the new selection at once, so `done` must re-plan exactly as it
+    does for the `pin` verb — else the snapshot holds the new candidate's
+    metadata over the OLD candidate's metal (Codex #722 P1)."""
+    assert _run(tmp_path).returncode == 0
+    r = _run(tmp_path, stdin="select_topology d1 4\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "pins changed since the last route" in r.stdout, \
+        "a raw select_topology did not dirty the checkpoint"
+    assert "topo 4 of" in r.stdout
+    assert "clean -- 0 overlaps" in r.stdout
+    assert _selected(tmp_path / "it.bdb", "3")[:1] == (3,)   # 1-based 4
