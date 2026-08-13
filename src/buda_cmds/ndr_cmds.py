@@ -412,8 +412,20 @@ def _spec_of(session, rule_name):
                   f"(a restored rule cannot be re-declared — def_ndr "
                   f"refuses a duplicate name).")
             sys.exit(1)
-        spec.width_slots = r.get("width_slots_max", 1)
-        spec.guard_slots = r.get("guard_slots_max", 0)
+        # PER FIELD, not per rule.  width and spacing are declared
+        # independently, so a rule may mix the forms -- `width x2 spacing 3`
+        # is legal and means both things.  Taking the absolute quantization
+        # for BOTH fields whenever EITHER is absolute silently dropped the
+        # multiplier one: `width x2 spacing 3` resolved to width_slots 1, so
+        # a governed bit routed at DEFAULT width while the rule said x2, and
+        # the width audit could not see it because it compared against the
+        # same 1 (found via Codex P2 on #721).
+        spec.width_slots = (r.get("width_slots_max", 1)
+                            if r.get("width_abs", 0.0) > 0.0
+                            else max(1, math.ceil(r["width_x"])))
+        spec.guard_slots = (r.get("guard_slots_max", 0)
+                            if r.get("spacing_abs", 0.0) > 0.0
+                            else max(0, math.ceil(r["spacing_x"]) - 1))
     else:
         spec.width_slots  = max(1, math.ceil(r["width_x"]))
         spec.guard_slots  = max(0, math.ceil(r["spacing_x"]) - 1)
@@ -1932,37 +1944,47 @@ def audit_ndr_dnuts(session, wrapper, index=None):
         # what the user asked for, not what the tool computed — so this check
         # can actually fail, which is the whole point of an audit written for
         # EM and resistance rules.
+        # The reading is a property of the WIDTH IN FORCE on the bit's layer,
+        # NOT of the rule's `metal_quant` flag.  A metal rule can carry a
+        # MULTIPLIER width -- `def_ndr em width x2 spacing 3 metal`, or an
+        # absolute rule with a per-layer `width x2` override -- and a
+        # multiplier names no physical width, so there is nothing for the
+        # metal check to compare against.  Gating the slot-centre check on
+        # `not metal_quant` therefore switched BOTH checks off for those and
+        # audited the width not at all (Codex P2 on #721): the same
+        # silently-not-running class this audit exists to end.
         for r in bits:
             declared = (buda.ndr_declared_width_on(spec, r.layer)
                         if spec.metal_quant else 0.0)
-            if declared <= 0.0:
-                continue
-            if r.width + 1e-9 < declared:
-                out.append(_NdrViolation(
-                    "NDR_WIDTH", seg_idx, r.bit_index,
-                    f"NDR_WIDTH: seg {seg_idx} bit {r.bit_index} on layer "
-                    f"{r.layer} is {r.width:g} unit(s) of metal, rule "
-                    f"'{spec.rule_name}' declares {declared:g} — "
-                    f"under-width wire"))
-        # CHANNEL rule (the default): the slot-count reading, unchanged.  A
-        # channel-declared width is a claim about CONSUMPTION, so covered
-        # slot centres is the right quantity for it.
-        if spec.width_slots > 1 and grid_stack is not None and not spec.metal_quant:
-            for r in bits:
-                if not grid_stack.has_layer(r.layer):
-                    continue
-                g = grid_stack.get_layer_grid(r.layer)
-                mid = 0.5 * (r.span_lo + r.span_hi)
-                eps = 1e-6
-                covered = len(g.signal_tracks_in(
-                    mid, r.track_position - r.width / 2.0 - eps,
-                    r.track_position + r.width / 2.0 + eps))
-                if covered < spec.width_slots:
+            if declared > 0.0:
+                # METAL: placed metal against the DECLARED width -- an
+                # independent quantity, so this can actually fail.
+                if r.width + 1e-9 < declared:
                     out.append(_NdrViolation(
                         "NDR_WIDTH", seg_idx, r.bit_index,
-                        f"NDR_WIDTH: seg {seg_idx} bit {r.bit_index} covers "
-                        f"{covered} SIGNAL slot(s), rule '{spec.rule_name}' "
-                        f"requires {spec.width_slots} — under-width wire"))
+                        f"NDR_WIDTH: seg {seg_idx} bit {r.bit_index} on layer "
+                        f"{r.layer} is {r.width:g} unit(s) of metal, rule "
+                        f"'{spec.rule_name}' declares {declared:g} — "
+                        f"under-width wire"))
+                continue
+            # CHANNEL: covered slot centres, the right quantity for a
+            # width declared as CONSUMPTION.
+            if spec.width_slots <= 1 or grid_stack is None:
+                continue
+            if not grid_stack.has_layer(r.layer):
+                continue
+            g = grid_stack.get_layer_grid(r.layer)
+            mid = 0.5 * (r.span_lo + r.span_hi)
+            eps = 1e-6
+            covered = len(g.signal_tracks_in(
+                mid, r.track_position - r.width / 2.0 - eps,
+                r.track_position + r.width / 2.0 + eps))
+            if covered < spec.width_slots:
+                out.append(_NdrViolation(
+                    "NDR_WIDTH", seg_idx, r.bit_index,
+                    f"NDR_WIDTH: seg {seg_idx} bit {r.bit_index} covers "
+                    f"{covered} SIGNAL slot(s), rule '{spec.rule_name}' "
+                    f"requires {spec.width_slots} — under-width wire"))
         # Spacing: the run is exclusive — no foreign wire inside it.
         run_lo = min(r.track_position - r.width / 2.0 for r in rows)
         run_hi = max(r.track_position + r.width / 2.0 for r in rows)
