@@ -81,11 +81,36 @@ def test_every_emitted_status_is_handled(text):
         f"baseline steps gate on statuses nothing emits: {sorted(handled - emitted)}"
 
 
+def _input_block(text, name):
+    """The lines of one workflow_dispatch input, by indentation.
+
+    Line-scanned rather than regexed: the obvious pattern for "a key, then its
+    indented body" is `(?:\\s+.*\\n)*?`, whose two quantifiers overlap and
+    backtrack catastrophically when the match FAILS.  Caught by mutating the
+    default to `true` and watching this file hang instead of fail — a guard
+    that hangs is worse than no guard, since a timeout reads as infrastructure
+    rather than as the property being broken.
+    """
+    lines = text.splitlines()
+    for i, ln in enumerate(lines):
+        if ln.strip() == f"{name}:":
+            indent = len(ln) - len(ln.lstrip())
+            body = []
+            for nxt in lines[i + 1:]:
+                if nxt.strip() and (len(nxt) - len(nxt.lstrip())) <= indent:
+                    break
+                body.append(nxt.strip())
+            return body
+    return None
+
+
 def test_the_accept_path_is_dispatch_only_and_off_by_default(text):
     """`promote_baseline` must be an opt-in input, never a schedule default."""
-    assert "promote_baseline:" in text, "the accept path input is gone"
-    assert re.search(r"promote_baseline:\s*\n(?:\s+.*\n)*?\s+default:\s*false", text), \
-        "promote_baseline no longer defaults to false"
+    block = _input_block(text, "promote_baseline")
+    assert block is not None, "the accept path input is gone"
+    assert "default: false" in block, \
+        f"promote_baseline no longer defaults to false: {block}"
+    assert "type: boolean" in block, "promote_baseline is no longer a boolean"
     # Read through the environment, so the flag cannot be spelled into the
     # script body by expression interpolation.
     assert re.search(r"PROMOTE_BASELINE:\s*\$\{\{\s*inputs\.promote_baseline\s*\}\}", text), \
