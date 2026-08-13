@@ -124,3 +124,64 @@ def test_post_expansion_pin_keeps_the_checkpoint_restorable(tmp_path):
     assert "Error" not in out, out
     out = _out(s2, "run_planner hier 3")
     assert "[pinned]" in out, out
+
+
+def _resume(bdb):
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, f"open_bdb {bdb}", *_SETUP,
+           "add_blocks_from_bdb 0", "add_blocks_from_bdb 1 skip",
+           "load_pipeline")
+    return s
+
+
+def test_post_expansion_pin_of_a_pass_through_bundle_sticks(tmp_path):
+    """Expansion rebuilds EVERY wrapper as a fresh object — pass-through
+    (cross-block / cross-level) bundles too, not just template instances —
+    so a pin found by the direct self.bundles scan must mirror onto the
+    pre-expansion original exactly like the expansion-map branch does
+    (Codex #723: `pin xl_c2l 3` silently absent from checkpoint + replan)."""
+    bdb = str(tmp_path / "hier.bdb")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, f"open_bdb {bdb}", *_SETUP, *_DESIGN, *_PIPE)
+
+    out = _out(s, "select_topology x 2")           # the D0 pass-through bus
+    assert "Pinned" in out, out
+    out = _out(s, "run_planner hier 3")            # replan from the originals
+    assert "[pinned]" in out, out
+    del s
+
+    out = _out(_resume(bdb), "run_planner hier 3")
+    assert "[pinned]" in out, out
+
+
+def test_wildcard_unpin_clears_the_originals_too(tmp_path):
+    """`unpin_topology *` in a post-expansion session must clear the
+    pre-expansion originals as well — they are what the next replan resets
+    from and what the persist serializes, so a template pin cleared only on
+    the routed wrappers came back on the next replan or resume."""
+    bdb = str(tmp_path / "hier.bdb")
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s, f"open_bdb {bdb}", *_SETUP, *_DESIGN, *_PIPE)
+    _quiet(s, "select_topology b_loc 2")
+    out = _out(s, "unpin_topology *")
+    assert "Unpinned all bundles" in out
+    out = _out(s, "run_planner hier 3")
+    assert "[pinned]" not in out, out              # cleared for THIS replan
+    del s
+    out = _out(_resume(bdb), "run_planner hier 3")
+    assert "[pinned]" not in out, out              # ...and for the next session
+
+
+def test_persist_bundles_is_batched_and_the_getter_is_not():
+    """Inserting _persist_wrappers under _persist_bundles' @_batched line
+    silently transferred the transaction wrapper to the read-only getter:
+    stage-1 persists ran one autocommit (fsync) per row, and an exception
+    midway left a partially rewritten checkpoint instead of rolling back
+    (Codex #723).  functools.wraps marks the decorated one."""
+    assert hasattr(buda_cli.BudaSession._persist_bundles, "__wrapped__"), \
+        "_persist_bundles lost its @_batched transaction wrapper"
+    assert not hasattr(buda_cli.BudaSession._persist_wrappers, "__wrapped__"), \
+        "_persist_wrappers must stay an undecorated read-only helper"

@@ -97,7 +97,6 @@ class PersistMixin:
         self._bdb_writeback_src = None
         self._bdb_writeback_bin = None
 
-    @_batched
     def _persist_wrappers(self):
         """The wrapper list a bundle/topology persist must describe: the
         PRE-expansion view.
@@ -119,6 +118,7 @@ class PersistMixin:
             return self._hier_bundles_orig
         return self.bundles
 
+    @_batched
     def _persist_bundles(self, strategy):
         """Persist the session's bundles into the open BDB's bundle tables
         (Stage-1 output; pre-expansion view — see _persist_wrappers).

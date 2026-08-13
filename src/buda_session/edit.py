@@ -988,6 +988,28 @@ class EditMixin:
             return [], f"no bundle whose first net starts with '{pfx}'"
         return bids, None
 
+    def _mirror_pin_to_original(self, bid, w, set_fn, tidx=None):
+        """Apply a pin/unpin mutation to the PRE-expansion ORIGINAL wrapper.
+
+        In a post-expansion hier session EVERY wrapper in self.bundles is a
+        FRESH object — expansion rebuilds pass-through (cross-level /
+        cross-block) wrappers too, not just the per-instance template copies
+        — while `run_planner hier` re-plans from _hier_bundles_orig and the
+        checkpoint persists that view (_persist_wrappers).  A pin applied
+        only to the routed wrapper `w` would therefore evaporate at the next
+        replan and never reach the BDB (Codex #723: `pin xl_c2l 3` — the
+        template path had the mirror, the pass-through path did not).
+        No-op when the original IS `w` (flat sessions, pre-expansion hier)
+        or when `tidx` is given and out of the original's candidate range.
+        """
+        for ow in (getattr(self, "_hier_bundles_orig", None) or []):
+            if ow is not w and ow.input.original_bundle.id == bid:
+                if tidx is None or 0 <= tidx < len(ow.input.candidates):
+                    set_fn(ow)
+                return
+            if ow is w:
+                return
+
     def _select_single_topology_internal(self, bid, tid, group=False):
         """Helper for select_topology/select_topologies: set a pin without
         re-planning layers.  Returns True only when a pin was actually APPLIED
@@ -1053,6 +1075,7 @@ class EditMixin:
                     _bad_id(w, self._bundle_label(w))
                     return False
                 nm = _set_pin(w)
+                self._mirror_pin_to_original(bid, w, _set_pin, tidx)
                 _pin_msg(bid, self._bundle_label(w), nm,
                          w.plan.selected_topology_index + 1)
                 return True
@@ -1071,16 +1094,8 @@ class EditMixin:
             for w in wrappers:
                 nm = _set_pin(w)
             # The pin must ALSO land on the pre-expansion ORIGINAL (the
-            # template / replica wrapper): `run_planner hier` re-plans from
-            # _hier_bundles_orig and the checkpoint persists that view, so a
-            # pin held only by the expanded wrappers would evaporate at the
-            # next replan and never reach the BDB (the post-route prompt pin,
-            # flow/tcl/hdesign.tcl).
-            for ow in (getattr(self, "_hier_bundles_orig", None) or []):
-                if (ow.input.original_bundle.id == bid
-                        and 0 <= tidx < len(ow.input.candidates)):
-                    _set_pin(ow)
-                    break
+            # template / replica wrapper) — see _mirror_pin_to_original.
+            self._mirror_pin_to_original(bid, wrappers[0], _set_pin, tidx)
             n = len(wrappers)
             _pin_msg(bid, self._bundle_label(wrappers[0]), nm,
                      wrappers[0].plan.selected_topology_index + 1,
@@ -1100,11 +1115,16 @@ class EditMixin:
         independent of topology_pinned; leaving them set would keep forcing stale
         layers onto a re-chosen topology. Returns True if the bundle (or its
         hierarchical expansion) was found."""
+        def _clear(w):
+            w.unpin()                          # pin + forced layers, atomically
+            w.input.pinned_group = []          # also clear a group pin
         found = False
         for w in self.bundles:
             if w.input.original_bundle.id == bid:
-                w.unpin()                      # pin + forced layers, atomically
-                w.input.pinned_group = []      # also clear a group pin
+                _clear(w)
+                # And the pre-expansion original, for the same reason the pin
+                # lands there (see _mirror_pin_to_original).
+                self._mirror_pin_to_original(bid, w, _clear)
                 print(f"Unpinned bundle {bid}")
                 found = True
                 break
@@ -1112,15 +1132,8 @@ class EditMixin:
             wrappers = self._hier_expansion_map.get(bid, [])
             if wrappers:
                 for w in wrappers:
-                    w.unpin()
-                    w.input.pinned_group = []
-                # And the pre-expansion original, for the same reason the pin
-                # lands there (see _select_single_topology_internal).
-                for ow in (getattr(self, "_hier_bundles_orig", None) or []):
-                    if ow.input.original_bundle.id == bid:
-                        ow.unpin()
-                        ow.input.pinned_group = []
-                        break
+                    _clear(w)
+                self._mirror_pin_to_original(bid, wrappers[0], _clear)
                 n = len(wrappers)
                 print(f"Unpinned bundle {bid} "
                       f"({n} expanded instance{'s' if n > 1 else ''})")

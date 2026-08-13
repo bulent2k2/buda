@@ -397,8 +397,20 @@ def cmd_unpin_topology(session, cmd, args, cmd_line):
         print("Error: unpin_topology requires a bundle selector (or *)")
         return
     if args[0] == '*':
+        # Post-expansion hier: the routed wrappers AND the pre-expansion
+        # originals — every wrapper is a fresh object after expansion, the
+        # next `run_planner hier` resets from the originals, and the persist
+        # below serializes them; clearing only session.bundles let a
+        # template pin look cleared and then return on the next replan or
+        # resume (Codex #723).  Dedup by identity: pre-expansion sessions
+        # hold the same objects in both lists.
         n = 0
-        for w in session.bundles:
+        seen = set()
+        orig = getattr(session, "_hier_bundles_orig", None) or []
+        for w in list(session.bundles) + list(orig):
+            if id(w) in seen:
+                continue
+            seen.add(id(w))
             if (getattr(w.input, "topology_pinned", False)
                     or w.input.pinned_seg_layers
                     or getattr(w.input, "pinned_group", [])):
