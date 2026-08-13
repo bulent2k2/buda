@@ -1786,9 +1786,16 @@ def audit_ndr_dnuts(session, wrapper, index=None):
       rows in ascending track order must play the roles the credited layout
       declares, so a right-COUNT shield sitting in the wrong gap is caught
       — the case `bit` and `per:N` were blind to before (opens_ndr.md).
-    - NDR_WIDTH: each signal bit's placed extent must cover width_slots
-      SIGNAL slot centres on its layer (an under-width wire — e.g. a
-      default-width placement of a governed bit — covers fewer).
+    - NDR_WIDTH: measured in the reading the rule was WRITTEN in.  A
+      METAL rule (`def_ndr ... metal`) compares each bit's placed METAL
+      against the width DECLARED on its layer — an independent quantity,
+      so the check can actually fail.  A CHANNEL rule compares covered
+      SIGNAL slot centres against `width_slots`; that is the right
+      quantity for a consumption claim, but note both sides come from the
+      same quantization, so it agrees by construction and catches only a
+      placement that ignored the spec outright (a default-width placement
+      of a governed bit).  Auditing a metal rule that way would inherit
+      that blindness on exactly the rules written for EM and resistance.
     - NDR_SPACING: the group's claimed run is EXCLUSIVE — a foreign wire
       (another bundle) whose track centre falls inside it with an
       overlapping span sits on a guard or between bits, violating the
@@ -1915,8 +1922,32 @@ def audit_ndr_dnuts(session, wrapper, index=None):
                     f"identity-matching rail crosses it on an adjacent "
                     f"perpendicular layer, so the shield is floating "
                     f"metal, not grid-tied"))
-        # Width: placed extent must cover width_slots SIGNAL slot centres.
-        if spec.width_slots > 1 and grid_stack is not None:
+        # Width.  TWO readings, and the audit must use the one the rule was
+        # written in — otherwise it measures the placement against a number
+        # derived from the same quantization the placement used, and agrees
+        # by construction.
+        #
+        # METAL rule: compare the placed METAL against the DECLARED width on
+        # that layer.  The declaration is an INDEPENDENT quantity — it is
+        # what the user asked for, not what the tool computed — so this check
+        # can actually fail, which is the whole point of an audit written for
+        # EM and resistance rules.
+        for r in bits:
+            declared = (buda.ndr_declared_width_on(spec, r.layer)
+                        if spec.metal_quant else 0.0)
+            if declared <= 0.0:
+                continue
+            if r.width + 1e-9 < declared:
+                out.append(_NdrViolation(
+                    "NDR_WIDTH", seg_idx, r.bit_index,
+                    f"NDR_WIDTH: seg {seg_idx} bit {r.bit_index} on layer "
+                    f"{r.layer} is {r.width:g} unit(s) of metal, rule "
+                    f"'{spec.rule_name}' declares {declared:g} — "
+                    f"under-width wire"))
+        # CHANNEL rule (the default): the slot-count reading, unchanged.  A
+        # channel-declared width is a claim about CONSUMPTION, so covered
+        # slot centres is the right quantity for it.
+        if spec.width_slots > 1 and grid_stack is not None and not spec.metal_quant:
             for r in bits:
                 if not grid_stack.has_layer(r.layer):
                     continue

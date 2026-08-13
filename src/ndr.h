@@ -253,6 +253,26 @@ inline int ndr_max_slots(const NdrLayerGeom& g) {
     return m;
 }
 
+// The ABSOLUTE width in force on `layer_id` — that layer's `def_ndr_layer`
+// override if it declares one, else the rule's own.  0 when neither declares
+// an absolute (a multiplier rule has no physical width to check against).
+//
+// This is what an audit must compare PLACED METAL against.  Comparing against
+// `width_slots` instead compares the placement to a number derived from the
+// same quantization the placement used, so the two agree by construction and
+// the check cannot fail — see the R9 note in ndr_architecture.md.
+inline double ndr_declared_width_on(const NdrSpec& s, int layer_id) {
+    auto it = s.per_layer.find(layer_id);
+    if (it != s.per_layer.end()) {
+        // A multiplier override REPLACES the width on this layer, so an
+        // inherited absolute no longer describes it and there is nothing
+        // physical to check.
+        if (it->second.width_slots > 0) return 0.0;
+        if (it->second.width_abs > 0.0) return it->second.width_abs;
+    }
+    return s.width_abs;
+}
+
 // Resolve a rule ON ONE LAYER: pick that layer's declared values (its
 // `def_ndr_layer` override, else the rule's own) and quantize any absolute
 // among them METAL-shaped against the layer's geometry.

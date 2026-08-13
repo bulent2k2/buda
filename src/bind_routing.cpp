@@ -699,6 +699,9 @@ void bind_routing(py::module_& m) {
           py::arg("geom"), py::arg("guards"),
           "Clearance delivered by `guards` guard slots between two bits, "
           "narrowest window (-1 = the period cannot host that many).");
+    m.def("ndr_declared_width_on", &ndr_declared_width_on,
+          py::arg("spec"), py::arg("layer_id"),
+          "The absolute width in force on a layer (0 = none).");
     m.def("ndr_max_slots", &ndr_max_slots, py::arg("geom"),
           "Longest contiguous signal run — the realizability ceiling.");
     m.def("ndr_resolve_on_layer",

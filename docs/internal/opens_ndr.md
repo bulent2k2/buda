@@ -185,12 +185,15 @@ rule is the conservative MAXIMUM: the fallback over-charges, never under.
   accepts by silently delivering 2 — becomes an R3 refusal.  That rejects
   designs which route today, so the default flip owes its own measured
   study, the same path `kSegsRel` / `spine_relays` / `band_span_charge`
-  took.  One residual of the opt-in landing: **the R9 audit still measures the
-  channel-shaped quantity**, so it agrees with a channel rule by
-  construction and cannot fail on a `metal` rule — an audit that cannot
-  fail on exactly the rules written for EM and resistance.  That is the
-  next piece.  (Persistence is done: v28 carries both the per-layer values
-  and the reading.)
+  took.  The R9 width audit measures each rule in the reading it was WRITTEN in
+  (landed): a `metal` rule's placed METAL is compared against the width
+  DECLARED on that layer — an independent quantity, so the check can
+  actually fail — while a channel rule keeps the covered-slot-centre
+  reading, which is the right quantity for a consumption claim.  Note the
+  narrower scope than first written down here: only NDR_WIDTH had this
+  problem.  NDR_SPACING checks that the claimed run is EXCLUSIVE, which is
+  an independent property and was never tautological.  (Persistence is
+  done too: v28 carries both the per-layer values and the reading.)
 
   *The original note, kept because it is the reasoning*: quantize width by the smallest k
   with `k·w + (k−1)·sp ≥ width_abs` and spacing by the smallest g with

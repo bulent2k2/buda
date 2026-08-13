@@ -423,3 +423,70 @@ def test_a_partially_bad_map_keeps_the_good_entries_and_says_what_it_dropped(cap
     assert set(got) == {4} and got[4]["width_abs"] == 8.0
     out = capsys.readouterr().out
     assert "BUDA-1912" in out and "1 unreadable entry" in out, out
+
+
+# ── R9: the width audit must be able to FAIL ────────────────────────────────
+
+def test_the_declared_width_accessor_picks_the_layer_in_force():
+    """What the metal audit compares against: the width the USER declared on
+    that layer, not the slot count the tool derived from it."""
+    s = _spec(width_abs=3)
+    pl = buda.NdrLayerRule()
+    pl.width_abs = 8.0
+    s.set_layer_rule(6, pl)
+    assert buda.ndr_declared_width_on(s, 5) == 3.0      # inherited
+    assert buda.ndr_declared_width_on(s, 6) == 8.0      # overridden
+    # A MULTIPLIER override replaces the width on that layer, so an inherited
+    # absolute no longer describes it and there is nothing physical to check.
+    mx = buda.NdrLayerRule()
+    mx.width_slots = 2
+    s.set_layer_rule(4, mx)
+    assert buda.ndr_declared_width_on(s, 4) == 0.0
+    # A pure multiplier rule has no physical width at all.
+    assert buda.ndr_declared_width_on(buda.NdrSpec(), 5) == 0.0
+
+
+def test_the_metal_width_audit_fails_on_an_under_width_bit(tmp_path):
+    """The property the old check could not have: a FAILING case.
+
+    The channel reading compared covered slot centres against `width_slots`
+    — both derived from the same quantization, so they agree by construction
+    and the audit could only catch a placement that ignored the spec
+    outright.  Measuring placed METAL against the DECLARATION compares two
+    independent quantities, so a real shortfall is visible.
+
+    Driven through the audit directly: the pipeline quantizes correctly, so
+    an under-width bit is a pipeline BUG, which is precisely what an audit
+    exists to catch rather than something a flow can be asked to produce."""
+    from buda_cmds import ndr_cmds
+    sess = _session(tmp_path, """add_block a 0 0 200 200
+add_block b 900 0 1100 200
+add_bus em_[2] a.p b.q
+def_layer 3 M3 H TOP 20
+def_layer 4 M4 V 20
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_ndr em width 3 metal
+set_ndr em_ em
+run_bundler STRICT
+generate_topologies
+set_track_pitch 3
+run_planner 1
+run_nuts
+run_detailed_nuts
+""")
+    w = next(x for x in sess.bundles if x.input.ndr.active())
+    assert not ndr_cmds.audit_ndr_dnuts(sess, w), "the honest route must be clean"
+
+    # Now narrow one placed bit below the declared 3 — a placement that does
+    # not deliver what the rule asked for.
+    for ns in sess.detailed_result.net_segments:
+        if not ns.is_shield:
+            ns.width = 1.0
+            break
+    msgs = [v.message for v in ndr_cmds.audit_ndr_dnuts(sess, w)]
+    hits = [m for m in msgs if m.startswith("NDR_WIDTH")]
+    assert hits, msgs
+    # The message must carry BOTH numbers — an audit that says "too narrow"
+    # without saying narrower than what cannot be acted on.
+    assert "1 unit(s) of metal" in hits[0] and "declares 3" in hits[0], hits[0]
