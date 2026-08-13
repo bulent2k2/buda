@@ -95,6 +95,26 @@ before diagnosing parallelism.
 | Pin worker count | `BB_JOBS=8 bb -m` |
 | Force serial | `BB_JOBS=0 bb -m` (or uninstall xdist) |
 | Fast tier | serial by default (`bb -t`); parallel with `bb -t -p` / `bb -p` |
+| Stop `-n auto` oversubscribing a hyperthreaded box | `pip install psutil` (see below) |
+
+### `-n auto` needs `psutil` to mean *physical* cores
+
+The floor below is physical cores, but xdist can only find those **through
+`psutil`**: `-n auto` asks for the physical count and falls back to
+`os.cpu_count()` — the *logical* count — when psutil is not importable (its
+`--help` says as much: *"With 'auto', attempt to detect physical CPU count. If
+physical CPU count cannot be determined, [fall back]"*).
+
+psutil is **not** in the project's dependency list, so on a hyperthreaded box
+the default is a worker per hyperthread. Measured on the 4-physical/8-logical
+reference box: `-n auto` (→ 8) **37s** vs `-n 6` **33s** vs `-n 4` 35s.
+`pip install psutil` makes `auto` pick 4; `BB_JOBS` overrides either way, and
+the per-machine optimum is worth measuring once — it sat at 6 there, between
+the physical and logical counts.
+
+(Not reproducible on a runner without hyperthreading: where physical ==
+logical, `-n auto` is identical with and without psutil — verified at 9.4s
+either way on a 4-core Linux container.)
 
 ## `bb -p` is floored, and the fast tier is also the Windows suite
 
@@ -106,14 +126,17 @@ a 4-physical/8-logical box `-n 4`, `-n 6`, `-n 8`, and `--dist load` vs
 work in the tier**. But two things make "just move the slow files to `mid`"
 wrong more often than right:
 
-1. **The fast tier IS the Windows validation suite.** Every job in
-   `.github/workflows/windows-validate.yml` runs `python -m pytest` with
+1. **The fast tier WAS the whole Windows validation suite.** Every job in
+   `.github/workflows/windows-validate.yml` ran `python -m pytest` with
    pytest.ini's default `-m "not slow and not mid"` — fast tier only, no
-   `bb -m`. So marking a file `mid` deletes it from Windows validation
-   entirely, not just from the inner loop. A test that runs on Windows and
-   exercises platform-fragile behavior — `ProcessPoolExecutor` **spawn**
-   semantics, `git worktree` path handling — earns its place in the fast tier
-   *because* it is the only Windows gate, even when it is slow.
+   `bb -m`. So marking a file `mid` would have deleted it from Windows
+   validation entirely, not just from the inner loop. A test that runs on
+   Windows and exercises platform-fragile behavior — `ProcessPoolExecutor`
+   **spawn** semantics, `git worktree` path handling — earned its place in the
+   fast tier *because* it was the only Windows gate, even when it was slow.
+   (Past tense deliberately: the resolution below widened those jobs to
+   `-m "not slow"`, so this constraint no longer binds. It is recorded because
+   it is what makes the naive "just move the slow files to `mid`" wrong.)
 2. **Serial cheap ≠ parallel cheap.** The qor-tooling tests are ~0.1–5s each
    run alone, yet dominate under xdist: they fan out their OWN subprocesses
    (`git worktree`, a `jobs=4` process pool) on top of 8 already-saturated
