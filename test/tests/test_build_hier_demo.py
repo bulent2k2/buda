@@ -70,9 +70,17 @@ def test_resolve_cells_path_and_extension():
     assert bd._resolve_cells(bd._DEFAULT_CELLS, None) == [
         (os.path.splitext(f)[0], os.path.join(flow, f)) for f in
         ("dnuts1.buda", "dnuts2.buda", "channel_stress.buda")]
-    # --path directory is used for bare names.
-    assert bd._resolve_cells(["foo", "bar"], "/tmp/cells") == [
-        ("foo", "/tmp/cells/foo.buda"), ("bar", "/tmp/cells/bar.buda")]
+    # --path directory is used for bare names.  The expectation is BUILT with
+    # os.path.join rather than written out: `_resolve_cells` abspath()s the
+    # --path argument and joins with the platform separator, so a literal
+    # "/tmp/cells/foo.buda" only ever matched on POSIX — on Windows the call
+    # returns "C:\\tmp\\cells\\foo.buda".  (The other cases here are already
+    # platform-neutral: `/abs/foo` stays as-is because ntpath.isabs accepts a
+    # leading slash, and the dir-qualified ones join the same way both sides.)
+    cells = os.path.abspath(os.path.join(os.sep, "tmp", "cells"))
+    assert bd._resolve_cells(["foo", "bar"], cells) == [
+        ("foo", os.path.join(cells, "foo.buda")),
+        ("bar", os.path.join(cells, "bar.buda"))]
     # A directory-qualified entry stays relative to the repo root (back-compat).
     assert bd._resolve_cells(["flow/two.buda"], None) == [
         ("two", os.path.join(ROOT, "flow/two.buda"))]

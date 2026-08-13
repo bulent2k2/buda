@@ -74,7 +74,11 @@ def test_readonly_session_release_keeps_holders_sidecar(tmp_path):
 
 
 def test_safe_unlink_keeps_lockfile_when_another_holds_it(tmp_path):
-    import fcntl
+    # POSIX advisory locking, by construction — `fcntl` does not exist on
+    # Windows, so this is a skip there rather than a collection-time crash.
+    # (It only started running on Windows when windows-validate.yml widened to
+    # `-m "not slow"`; before that the mid tier never reached that platform.)
+    fcntl = pytest.importorskip("fcntl")
     path = str(tmp_path / "x.fplock")
     fd = os.open(path, os.O_RDONLY | os.O_CREAT, 0o644)
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)     # simulate a live holder
@@ -109,7 +113,13 @@ def test_write_lock_shared_across_path_aliases(tmp_path):
     s1 = fpc.create_bdb(real, 1000, 800)
     assert s1.is_read_only is False
 
-    os.symlink(real, link)
+    # Windows needs Developer Mode or elevation to create a symlink, and the
+    # runner may have neither — skip on the privilege, not on the platform, so
+    # a Windows box that CAN symlink still gets the coverage.
+    try:
+        os.symlink(real, link)
+    except (OSError, NotImplementedError, AttributeError) as e:
+        pytest.skip(f"symlinks not permitted here: {e}")
     s_link = fpc.load_bdb(link)
     assert s_link.is_read_only is True, "symlink alias must share the lock"
 
