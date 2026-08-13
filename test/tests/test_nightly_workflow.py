@@ -36,12 +36,16 @@ from pathlib import Path
 
 import pytest
 
-WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "nightly-qor.yml"
+WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+WORKFLOW = WORKFLOWS / "nightly-qor.yml"
+# Both QoR gates run the same compare and had the same log-swallowing defect.
+COMPARING = ("nightly-qor.yml", "pr-qor.yml")
 
 # The statuses the promote/save steps deliberately do NOT act on.  A regressed
 # sweep must not become the baseline — that is the whole promote-on-clean
-# design (docs/internal/ci.md).
-NOT_PROMOTED = {"regressed"}
+# design (docs/internal/ci.md) — and neither must one whose compare never
+# finished.
+NOT_PROMOTED = {"regressed", "broken"}
 
 
 @pytest.fixture(scope="module")
@@ -50,17 +54,34 @@ def text():
     return WORKFLOW.read_text()
 
 
-def test_compare_output_reaches_the_job_log(text):
+@pytest.mark.parametrize("name", COMPARING)
+def test_compare_output_reaches_the_job_log(name):
     """`tee compare.txt` must not be redirected into the step summary."""
-    offenders = [ln.strip() for ln in text.splitlines()
+    body = (WORKFLOWS / name).read_text()
+    offenders = [ln.strip() for ln in body.splitlines()
                  if re.search(r"tee\s+compare\.txt\s*>>", ln)]
     assert not offenders, (
-        "the compare's output is redirected away from the job log — a red "
-        f"nightly would print only the ::error:: line: {offenders}")
-    assert re.search(r"\|\s*tee compare\.txt\b(?!\s*>)", text), \
-        "the compare no longer tees its output to stdout at all"
-    assert "cat compare.txt >>" in text, \
-        "the compare's output no longer reaches $GITHUB_STEP_SUMMARY"
+        f"{name}: the compare's output is redirected away from the job log — a "
+        f"red run would print only the ::error:: line: {offenders}")
+    assert re.search(r"\|\s*tee compare\.txt\b(?!\s*>)", body), \
+        f"{name}: the compare no longer tees its output to stdout at all"
+    assert "cat compare.txt >>" in body, \
+        f"{name}: the compare's output no longer reaches $GITHUB_STEP_SUMMARY"
+
+
+@pytest.mark.parametrize("name", COMPARING)
+def test_a_regression_is_told_apart_from_a_broken_compare(name):
+    """Both gates must branch on the tool's REPORTED-regression code.
+
+    `--compare` exits 2 when it ran and found regressions, 1 when it did not
+    finish.  Treating every non-zero alike is what let the nightly's accept path
+    promote a sweep that was never compared (Codex P1 on #727); in the PR gate
+    it only mislabels the failure, but the fix is the same one line.
+    """
+    body = (WORKFLOWS / name).read_text()
+    assert re.search(r'\[\s*"\$rc"\s*-eq\s*2\s*\]', body), (
+        f"{name}: nothing tests for exit 2, so a crashed compare and a reported "
+        "regression are handled identically")
 
 
 def test_every_emitted_status_is_handled(text):
@@ -76,7 +97,8 @@ def test_every_emitted_status_is_handled(text):
     assert emitted - handled == NOT_PROMOTED, (
         f"statuses emitted but not handled by a baseline step: "
         f"{sorted(emitted - handled - NOT_PROMOTED)}; "
-        f"expected exactly {sorted(NOT_PROMOTED)} to be left unpromoted")
+        f"expected exactly {sorted(NOT_PROMOTED)} to be left unpromoted "
+        f"(emitted={sorted(emitted)}, handled={sorted(handled)})")
     assert not handled - emitted - {"status"}, \
         f"baseline steps gate on statuses nothing emits: {sorted(handled - emitted)}"
 

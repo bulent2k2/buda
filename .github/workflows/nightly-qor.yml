@@ -141,8 +141,23 @@ jobs:
             2>&1 | tee compare.txt || rc=$?
           cat compare.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          if [ "$rc" -ne 0 ]; then
-            # The ACCEPT path.  `viol_bundles` is the count of bundles
+          # Anything non-zero that is NOT the tool's REPORTED-REGRESSION code (2)
+          # is an operational failure — an uncaught exception mid-compare, a
+          # malformed JSON, a tee that could not write (pipefail surfaces that
+          # too).  Fatal, and deliberately BEFORE the accept path: forcing on one
+          # would overwrite the last good baseline with a sweep that was never
+          # successfully compared (Codex P1 on #727).  No promotion, and the
+          # status says what happened instead of blaming the QoR.
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+            echo "status=broken" >> "$GITHUB_OUTPUT"
+            echo "::error::the QoR compare did not complete (exit $rc) — no baseline change; see the job log"
+            exit 1
+          fi
+          if [ "$rc" -eq 2 ]; then
+            # A REPORTED regression, and only that — the accept path below is
+            # reachable from no other exit code.
+            #
+            # `viol_bundles` is the count of bundles
             # check_design faults, so a NEW AUDIT raises it by reporting a fault
             # that was always there — better DETECTION is indistinguishable from
             # worse ROUTING by that metric alone (the per-bit antenna audit
@@ -154,9 +169,10 @@ jobs:
             # consecutive nightlies red, still diffing against the run before
             # them.
             #
-            # Deliberately still LOUD, still non-promoting by default, and still
-            # downstream of the errored-sweep rejection above — that step is a
-            # hard failure of its own, so this cannot bank a broken sweep.
+            # Deliberately still LOUD, still non-promoting by default, and
+            # doubly fenced against banking a sweep nothing vouched for: the
+            # errored-sweep rejection is a hard failure of its own STEP, and a
+            # compare that did not finish was already fatal above.
             if [ "$PROMOTE_BASELINE" = "true" ]; then
               echo "status=forced" >> "$GITHUB_OUTPUT"
               echo "::warning::QoR regression ACCEPTED by operator request (promote_baseline) — this sweep becomes the baseline"
