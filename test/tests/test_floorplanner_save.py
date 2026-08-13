@@ -112,6 +112,7 @@ def test_save_sql_without_target_raises(tmp_path):
         fpc.save_sql(state)
 
 
+@pytest.mark.needs_flock
 def test_save_sql_read_only_raises(tmp_path):
     holder = _design(tmp_path, "shared.bdb")             # holds the write lock
     ro = fpc.load_bdb(str(tmp_path / "shared.bdb"))      # second session: read-only
@@ -122,6 +123,7 @@ def test_save_sql_read_only_raises(tmp_path):
     fpc.release_bdb_lock(holder)
 
 
+@pytest.mark.needs_flock
 def test_two_sql_windows_lock_the_source_not_the_temp(tmp_path):
     # Two sessions opening the SAME *.bdb.sql must not both stay writable — the
     # write lock keys on the shared source, not each session's throwaway temp
@@ -142,6 +144,7 @@ def test_two_sql_windows_lock_the_source_not_the_temp(tmp_path):
     fpc.release_bdb_lock(s1)
 
 
+@pytest.mark.needs_flock
 def test_save_as_binary_refuses_locked_target(tmp_path):
     # Save As to an existing binary another session is editing must FAIL before
     # the destructive dump->load, not clobber the live DB (Codex #166 P1).

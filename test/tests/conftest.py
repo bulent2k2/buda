@@ -442,3 +442,35 @@ def at_least_one_connects_all(ctx, n):
 # outside the suite (the env gate defaults off).
 import os as _os
 _os.environ.setdefault("BUDA_VALIDATE", "1")
+
+
+# ── `needs_flock`: tests that assert real inter-process lock EXCLUSION ──────
+#
+# `tools/floorplanner_commands.py` falls back to a NO-OP `flock` stub where
+# `fcntl` is absent (Windows), which is a deliberate, documented degradation:
+# the module stays importable and every session stays writable, because
+# concurrent sessions are simply NOT excluded there.  A test that asserts a
+# second session comes back read-only — or that `save_*` raises
+# PermissionError against a locked target — is therefore asserting a property
+# the platform does not have, and fails for a reason that says nothing about
+# the code under test.
+#
+# The mid tier only started reaching Windows when windows-validate.yml widened
+# to `-m "not slow"` (#720), so this had never fired before.  Marked rather
+# than skipif'd per-test so the predicate lives in exactly one place: six tests
+# across two files depend on it, and they must not drift apart on WHY they skip.
+import importlib.util as _importlib_util  # noqa: E402
+
+_HAS_FCNTL = _importlib_util.find_spec("fcntl") is not None
+
+
+def pytest_collection_modifyitems(config, items):
+    if _HAS_FCNTL:
+        return
+    import pytest
+    skip = pytest.mark.skip(
+        reason="no fcntl: floorplanner_commands uses a no-op flock fallback, "
+               "so inter-process lock exclusion cannot hold on this platform")
+    for item in items:
+        if "needs_flock" in item.keywords:
+            item.add_marker(skip)
