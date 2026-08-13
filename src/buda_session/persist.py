@@ -97,9 +97,31 @@ class PersistMixin:
         self._bdb_writeback_src = None
         self._bdb_writeback_bin = None
 
+    def _persist_wrappers(self):
+        """The wrapper list a bundle/topology persist must describe: the
+        PRE-expansion view.
+
+        After `run_planner hier`, `self.bundles` is the EXPANDED per-instance
+        list (synthetic wrapper ids).  A clear-and-rewrite persist walking it —
+        a post-route `select_topology`/`unpin_topology`/`edit_commit`, e.g.
+        hdesign.tcl's prompt — replaced the template/replica bundle rows with
+        per-instance rows carrying per-instance geometry and no expansion
+        marker, and the next session's `load_pipeline` restored those as
+        cell-local templates whose blocks are not in any frame (the
+        checkpoint-clobber found by flow/tcl/hdesign.tcl).  The pre-expansion
+        originals are what a checkpoint means; run_planner's own SELECTIVE
+        expanded-row re-persist is separate machinery and unaffected.  Flat
+        sessions (and hier sessions before expansion) keep `self.bundles`.
+        """
+        if (getattr(self, "_planner_is_hier", False)
+                and getattr(self, "_hier_bundles_orig", None)):
+            return self._hier_bundles_orig
+        return self.bundles
+
     @_batched
     def _persist_bundles(self, strategy):
-        """Persist self.bundles into the open BDB's bundle tables (Stage-1 output).
+        """Persist the session's bundles into the open BDB's bundle tables
+        (Stage-1 output; pre-expansion view — see _persist_wrappers).
 
         Flow-agnostic: net membership is stored by name, so the flat flow (whose
         nets may not have rows in the BDB `net` table) persists too. Clears and
@@ -109,6 +131,7 @@ class PersistMixin:
         if self.bdb is None:
             return 0
         import json
+        wrappers = self._persist_wrappers()
         # This clear-and-rewrite drops expanded-bundle rows too, so the
         # selective-persist fingerprint memo no longer describes the DB.
         self._persisted_plan_fp = None
@@ -116,7 +139,7 @@ class PersistMixin:
         # clear-and-rewrite — it is written OUTSIDE this path (generate_more)
         # and would otherwise be wiped by every re-persist.
         knob_memo = {}
-        for _w in self.bundles:
+        for _w in wrappers:
             _bid = str(_w.input.original_bundle.id)
             _k = self.bdb.bundle_gen_knobs(_bid)
             if _k:
@@ -130,7 +153,7 @@ class PersistMixin:
         # bundle whose "kept" user routing routes nothing.  Snapshot the
         # absent bundles' membership and rewrite it for the rows the clear
         # actually kept.
-        cur_ids = {str(w.input.original_bundle.id) for w in self.bundles}
+        cur_ids = {str(w.input.original_bundle.id) for w in wrappers}
         absent_membership = {}
         for _row in self.bdb.all_bundles():
             if _row.id not in cur_ids:
@@ -159,7 +182,7 @@ class PersistMixin:
                     self.bdb.set_bundle_net_endpoints(_bid, _nm, _dp, _rp)
             for _bt, _role in _bts:
                 self.bdb.add_bundle_busterm(_bid, _bt, _role)
-        for w in self.bundles:
+        for w in wrappers:
             hb = w.input.original_bundle
             row = buda.BundleRow()
             row.id = str(hb.id)
@@ -209,7 +232,7 @@ class PersistMixin:
                 self.bdb.add_bundle_busterm(row.id, bt, "exit")
         for _bid, _k in knob_memo.items():
             self.bdb.set_bundle_gen_knobs(_bid, _k)
-        return len(self.bundles)
+        return len(wrappers)
 
     @contextlib.contextmanager
     def _bdb_batch(self):
@@ -272,7 +295,8 @@ class PersistMixin:
         # out of the fresh 0..n-1 index block (or dropped if the pool itself
         # carries the same uid — the pool write recreates them).
         self.bdb.clear_topologies(keep_user=True)
-        for w in self.bundles:
+        wrappers = self._persist_wrappers()
+        for w in wrappers:
             bid = str(w.input.original_bundle.id)
             kept = self.bdb.topologies(bid)
             if not kept:
@@ -299,7 +323,7 @@ class PersistMixin:
         # them; dedup so each block's (identical, JSON-rects-heavy) busterm row
         # is written once across all candidates, not once per candidate.
         seen_busterms = set()
-        for w in self.bundles:
+        for w in wrappers:
             bid = str(w.input.original_bundle.id)
             selected = w.plan.selected_topology_index
             for ci, topo in enumerate(w.input.candidates):

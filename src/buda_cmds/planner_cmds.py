@@ -171,6 +171,18 @@ def cmd_run_planner(session, cmd, args, cmd_line):
                 getattr(session, "_hier_bundles_orig", None):
             session.bundles = list(session._hier_bundles_orig)
             session._hier_expansion_map = {}
+        # A RESUMED session reaches here with _hier_bundles_orig EMPTY — only
+        # run_hier_bundler (a build) and the bottom-up restore set it — so
+        # snapshot the pre-expansion wrappers now: session.bundles at this
+        # point IS the pre-expansion view (load_pipeline built it that way).
+        # Without this, a resumed session's SECOND hier plan skipped the
+        # reset above and re-expanded the prior run's per-instance wrappers
+        # (the C6-09 coupled staleness), and every persist that must write
+        # the pre-expansion view (_persist_wrappers) fell through to the
+        # expanded list, clobbering the template/replica rows in the
+        # checkpoint (found by flow/tcl/hdesign.tcl's post-route pin).
+        if not getattr(session, "_hier_bundles_orig", None):
+            session._hier_bundles_orig = list(session.bundles)
         # Re-planning invalidates any adopted dogleg (and its pins).
         session._reset_doglegs()
         # Apply user-pinned selections to template wrappers BEFORE expansion
@@ -385,8 +397,20 @@ def cmd_unpin_topology(session, cmd, args, cmd_line):
         print("Error: unpin_topology requires a bundle selector (or *)")
         return
     if args[0] == '*':
+        # Post-expansion hier: the routed wrappers AND the pre-expansion
+        # originals — every wrapper is a fresh object after expansion, the
+        # next `run_planner hier` resets from the originals, and the persist
+        # below serializes them; clearing only session.bundles let a
+        # template pin look cleared and then return on the next replan or
+        # resume (Codex #723).  Dedup by identity: pre-expansion sessions
+        # hold the same objects in both lists.
         n = 0
-        for w in session.bundles:
+        seen = set()
+        orig = getattr(session, "_hier_bundles_orig", None) or []
+        for w in list(session.bundles) + list(orig):
+            if id(w) in seen:
+                continue
+            seen.add(id(w))
             if (getattr(w.input, "topology_pinned", False)
                     or w.input.pinned_seg_layers
                     or getattr(w.input, "pinned_group", [])):
