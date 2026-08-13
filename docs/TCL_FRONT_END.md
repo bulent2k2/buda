@@ -320,6 +320,43 @@ title bar's `topo N/n` back as `BUDA_ARRAY_PIN=<bus>=N`. Candidate ids are
 `dump_topologies`' `topo` column, `select_topology`, `edit_topology` — so the
 number you read is the number you use.
 
+### One file you just keep running: `design.tcl`
+
+The pair above is the iteration loop split into named sessions; for working a
+design by hand there is a form with nothing to remember:
+
+```bash
+bin/btcl -v flow/tcl/design.tcl      # session 1: build, route, iterate
+bin/btcl -v flow/tcl/design.tcl      # session 2..N: resume, iterate more
+```
+
+`flow/tcl/design.tcl` is **one self-contained file** (technology, floorplan,
+buses, pipeline) that decides which session it is by looking for its own
+checkpoint (`BUDA_DESIGN_BDB`, default `flow/tcl/out/design.bdb`): missing
+means BUILD, present means RESUME via `load_pipeline`, and
+`BUDA_DESIGN_FRESH=1` starts over. Being one file is what guarantees two
+sessions can never disagree about the design they are iterating on.
+
+After the route it drops into a **prompt**: `topos d1` lists a bundle's
+candidates, `explore d1` / `show` open the explorer / viewer (close the
+window to come back), `pin d1 4` pins a candidate (1-based, durable at once),
+`replan` re-runs planner → NUTS → detailed with the pins in force, `done`
+saves and exits — auto-replanning first if any pin changed since the last
+route, so the checkpoint's metal always belongs to the pinned candidates.
+Anything else is passed to the engine **if its command registry knows it**
+(`edit_topology …`, `dump_messages`, …); an unknown word is refused locally,
+because the engine's own fail-fast on unknown commands would end the session
+over a typo. Every engine error is caught and printed — a mistake costs a
+message, never the session.
+
+The prompt reads stdin, so the interactive session and the scripted one are
+the same code path — `echo "pin d1 4
+done" | bin/btcl flow/tcl/design.tcl` is a complete iteration, EOF simply
+finishes the session, and the exit code is the design's cleanliness. Each
+session also writes a diffable `<bdb>.sql` snapshot, so iterations can be
+compared instead of just replaced. Pinned by
+`test/tests/test_tcl_design_iterate.py`.
+
 This pair is also what measured the **fan-in taper gap**, now fixed: a
 resumed CONVERGENT/DIVERGENT bundle used to come back untapered and route
 wider than the design that was saved (this vehicle: 88 → 106 bit-wires, all

@@ -73,6 +73,29 @@ def test_unpin_topology_clears_pin_and_forced_layers():
     assert list(w.input.pinned_seg_layers) == []      # forced layers cleared too
 
 
+def test_unpin_topology_takes_select_topology_selectors():
+    """The inverse of select_topology takes select_topology's SELECTOR: a
+    net-name hint, id:N, net:PFX — not just the numeric id.  It accepted only
+    the numeric form, so `unpin_topology d` failed on exactly the name
+    `select_topology d 1` had just accepted (found by flow/tcl/design.tcl's
+    prompt, whose pin/unpin verbs pass the same word through)."""
+    s = _session()
+    w = s.bundles[0]
+
+    _quiet(s, "select_topology d 1")                  # pin by net-name hint
+    assert w.input.topology_pinned is True
+    out = _out(s, "unpin_topology d")                 # ...unpin by the same hint
+    assert w.input.topology_pinned is False
+    assert "Unpinned" in out
+
+    _quiet(s, "select_topology d 1")
+    _quiet(s, "unpin_topology net:d")                 # forced-hint spelling
+    assert w.input.topology_pinned is False
+
+    out = _out(s, "unpin_topology nosuch")            # a bad hint says so
+    assert "no bundle whose first net starts with" in out
+
+
 def test_scripted_user_topology_routes_end_to_end():
     """Build a hand topology purely from .buda commands, pin it, and run the
     full pipeline on it — the E3 loop closed at script level."""

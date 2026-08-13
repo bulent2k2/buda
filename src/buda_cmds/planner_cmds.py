@@ -379,10 +379,10 @@ def cmd_select_topologies(session, cmd, args, cmd_line):
 
 
 def cmd_unpin_topology(session, cmd, args, cmd_line):
-    # Usage: unpin_topology <bundle_id|*>
+    # Usage: unpin_topology <bundle_id|hint|id:N|net:PREFIX|*>
     # Clears select_topology's pin so the next planner run may re-choose.
     if len(args) < 1:
-        print("Error: unpin_topology requires a bundle_id (or *)")
+        print("Error: unpin_topology requires a bundle selector (or *)")
         return
     if args[0] == '*':
         n = 0
@@ -397,12 +397,15 @@ def cmd_unpin_topology(session, cmd, args, cmd_line):
         print(f"Unpinned all bundles ({n} pinned)")
         session._persist_topologies()
         return
-    try:
-        bid = int(args[0])
-    except ValueError:
-        print(f"Error: invalid bundle id '{args[0]}'")
+    # The inverse of select_topology takes select_topology's selector: a bare
+    # integer is a bundle ID, a bare non-numeric a net-name hint, id:/net:
+    # force one — it accepted only the numeric form, so `unpin_topology d1`
+    # failed on exactly the name `select_topology d1 4` had just accepted.
+    bids, err = session._resolve_bundle_selector(args[0])
+    if err:
+        print(f"Error: {err}")
         return
-    if session._unpin_topology_internal(bid):
+    if any([session._unpin_topology_internal(bid) for bid in bids]):
         session._persist_topologies()   # refresh is_pinned in the BDB
 
 

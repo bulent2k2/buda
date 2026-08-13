@@ -810,8 +810,20 @@ class ReportsMixin:
 
             b = w.input.original_bundle
             check_fp = self.fp
+            # Resolve a hier bundle's own generation-space floorplan — but only
+            # for a bundle the HIER bundler marked as such: a FLAT bundle is
+            # also a `buda.HBundle` (the type was renamed), and with a BDB open
+            # the bare isinstance test sent every flat bundle through the
+            # depth-projection case, whose floorplan holds the BDB's components
+            # — not the session blocks flat candidates were generated against —
+            # so every busterm face failed (the design.tcl checkpoint flow).
+            # Same marker guard as load_pipeline's restore validation and
+            # dump_topologies' resolver (Codex #231), so the three cannot
+            # disagree about which space a bundle is checked in.
             if (self.bdb is not None and isinstance(b, buda.HBundle)
-                    and id(w) not in expanded_ids):
+                    and id(w) not in expanded_ids
+                    and ((b.cell_context and b.entry_busterm_ids)
+                         or b.drv_spec_depth >= 0)):
                 resolved = self._floorplan_for_hbundle(b, hier_fp_cache, comps_by_name)
                 if resolved is not None:
                     check_fp = resolved
