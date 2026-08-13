@@ -32,6 +32,12 @@ from pathlib import Path
 
 import pytest
 
+# mid tier: qor_corpus --vs baseline machinery over real git worktrees — a
+# heavy xdist contender, so out of the fast inner loop.  Still validated on
+# Windows (windows-validate.yml runs `-m "not slow"`), which is where the
+# worktree path handling most needs to run.
+pytestmark = pytest.mark.mid
+
 _ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -53,7 +59,6 @@ def _tree_state():
             git("stash", "list"))
 
 
-@pytest.mark.mid
 def test_materializing_a_baseline_leaves_the_working_tree_untouched():
     qc = _load()
     before = _tree_state()

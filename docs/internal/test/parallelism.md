@@ -96,6 +96,45 @@ before diagnosing parallelism.
 | Force serial | `BB_JOBS=0 bb -m` (or uninstall xdist) |
 | Fast tier | serial by default (`bb -t`); parallel with `bb -t -p` / `bb -p` |
 
+## `bb -p` is floored, and the fast tier is also the Windows suite
+
+`bb -p` is bounded by two things nothing about xdist can move: the machine's
+**physical** cores (hyperthreads add ~nothing to the CPU-bound C++ engine — on
+a 4-physical/8-logical box `-n 4`, `-n 6`, `-n 8`, and `--dist load` vs
+`loadfile` all measured the same ~34s), and a ~8.6s fixed floor (≈5s collection
++ xdist worker boot). Parallelism is already maxed, so the only lever is **less
+work in the tier**. But two things make "just move the slow files to `mid`"
+wrong more often than right:
+
+1. **The fast tier IS the Windows validation suite.** Every job in
+   `.github/workflows/windows-validate.yml` runs `python -m pytest` with
+   pytest.ini's default `-m "not slow and not mid"` — fast tier only, no
+   `bb -m`. So marking a file `mid` deletes it from Windows validation
+   entirely, not just from the inner loop. A test that runs on Windows and
+   exercises platform-fragile behavior — `ProcessPoolExecutor` **spawn**
+   semantics, `git worktree` path handling — earns its place in the fast tier
+   *because* it is the only Windows gate, even when it is slow.
+2. **Serial cheap ≠ parallel cheap.** The qor-tooling tests are ~0.1–5s each
+   run alone, yet dominate under xdist: they fan out their OWN subprocesses
+   (`git worktree`, a `jobs=4` process pool) on top of 8 already-saturated
+   workers, so they contend far worse than a CPU-bound engine test. That is a
+   reason to make them xdist-lighter, not to hide them from Windows.
+
+The resolution keeps both true. `windows-validate.yml` now runs **`-m "not
+slow"`** (fast **and** mid), so `mid` no longer means "gone from Windows" — it
+means "out of the developer inner loop." With that in place, the heavy xdist
+contenders — the qor-tooling files (`git worktree`, the `jobs=4` pool) and the
+`tclsh` + `buda_server` bridge — move to `mid` (2026-08): `bb -p` ~35s → ~25s,
+and they still run under `bb -m`/`bb -s` **and** on Windows. (The workflow is
+manual-only and explicitly not a gate, so widening it to the mid tier costs no
+PR latency.)
+
+The rule for a new test: a subprocess/tooling **integration** test — one that
+shells out or measures the toolchain rather than the router — belongs in `mid`;
+the inner loop is the engine's. Point 2 still stands as the residual lever: a
+`mid` test that spawns its own pool should size it small so a future `bb -m -p`
+does not oversubscribe.
+
 ## Surgical speedups applied
 
 Two safe, coverage-preserving trims to the heaviest individual tests:
