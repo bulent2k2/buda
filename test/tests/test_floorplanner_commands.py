@@ -60,6 +60,7 @@ def test_lock_sidecar_removed_on_release(tmp_path):
     assert s._lock_fd is None and s._lock_path is None
 
 
+@pytest.mark.needs_flock
 def test_readonly_session_release_keeps_holders_sidecar(tmp_path):
     # A read-only second session must not delete the lock holder's sidecar.
     bdb_path = str(tmp_path / "ro.bdb")
@@ -73,8 +74,9 @@ def test_readonly_session_release_keeps_holders_sidecar(tmp_path):
     assert not os.path.exists(sidecar), "holder's release removes the sidecar"
 
 
+@pytest.mark.needs_flock
 def test_safe_unlink_keeps_lockfile_when_another_holds_it(tmp_path):
-    import fcntl
+    import fcntl                       # guaranteed by @needs_flock
     path = str(tmp_path / "x.fplock")
     fd = os.open(path, os.O_RDONLY | os.O_CREAT, 0o644)
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)     # simulate a live holder
@@ -86,6 +88,7 @@ def test_safe_unlink_keeps_lockfile_when_another_holds_it(tmp_path):
     assert not os.path.exists(path)
 
 
+@pytest.mark.needs_flock
 def test_write_lock_excludes_second_session(tmp_path):
     bdb_path = str(tmp_path / "locked.bdb")
     s1 = fpc.create_bdb(bdb_path, 1000, 800)
@@ -101,6 +104,7 @@ def test_write_lock_excludes_second_session(tmp_path):
     assert s3.is_read_only is False
 
 
+@pytest.mark.needs_flock
 def test_write_lock_shared_across_path_aliases(tmp_path):
     # Aliases of the same DB (symlink, relative-vs-absolute) must resolve to one
     # lock so two sessions can't both stay writable and clobber each other.
@@ -109,7 +113,13 @@ def test_write_lock_shared_across_path_aliases(tmp_path):
     s1 = fpc.create_bdb(real, 1000, 800)
     assert s1.is_read_only is False
 
-    os.symlink(real, link)
+    # Windows needs Developer Mode or elevation to create a symlink, and the
+    # runner may have neither — skip on the privilege, not on the platform, so
+    # a Windows box that CAN symlink still gets the coverage.
+    try:
+        os.symlink(real, link)
+    except (OSError, NotImplementedError, AttributeError) as e:
+        pytest.skip(f"symlinks not permitted here: {e}")
     s_link = fpc.load_bdb(link)
     assert s_link.is_read_only is True, "symlink alias must share the lock"
 

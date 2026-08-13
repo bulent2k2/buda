@@ -26,6 +26,7 @@ command the headless sweep no-ops would each produce a fake 'new feature'.
 """
 import io
 import contextlib
+import os
 
 import pytest
 
@@ -192,7 +193,10 @@ def test_unreachable_run_detailed_nuts_is_not_a_full_pipeline_flow(tmp_path):
     (tmp_path / "flow").mkdir()
     _write(tmp_path, "flow/dead.buda", "run_nuts\nexit\nrun_detailed_nuts\n")
     _write(tmp_path, "flow/live.buda", "run_nuts\nrun_detailed_nuts\n")
-    names = [f.split("/")[-1]
+    # basename, not split("/"): discover_candidates returns os.path.join()ed
+    # paths, so on Windows a "/" split returns the whole path and every
+    # membership assertion below silently fails.
+    names = [os.path.basename(f)
              for f in qc.discover_candidates(roots=(str(tmp_path / "flow"),),
                                              corpus=[])]
     assert "live.buda" in names and "dead.buda" not in names
@@ -216,7 +220,7 @@ def test_only_full_pipeline_flows_are_candidates(tmp_path):
     _write(tmp_path, "flow/whole.buda", "run_nuts\nrun_detailed_nuts\n")
     _write(tmp_path, "flow/fragment.buda", "def_track_pattern 2 0 SIGNAL 1 1\n")
     found = qc.discover_candidates(roots=(str(tmp_path / "flow"),), corpus=[])
-    names = [f.split("/")[-1] for f in found]
+    names = [os.path.basename(f) for f in found]      # see above: os-joined
     assert "whole.buda" in names and "fragment.buda" not in names
 
 
