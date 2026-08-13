@@ -194,24 +194,27 @@ def test_a_vanished_bit_is_UNPLACED_not_an_NDR_violation():
     owns the missing bit, and this pins that it really does — a gap here
     would be invisible from either side alone."""
     s = _clean_session(SHIELDED)
+    before = s._check_design("dnuts")["by_kind"].get("UNPLACED", 0)
     segs = list(s.detailed_result.net_segments)
-    before = len(segs)
+    n_rows = len(segs)
     for i, r in enumerate(segs):
         if not r.is_shield:
             del segs[i]
             break
-    assert len(segs) == before - 1
+    assert len(segs) == n_rows - 1
     assert _put_segments(s, segs)
     # The NDR audit stays quiet…
     assert not _audit(s)
-    # …and check_design reports it as unplaced.
-    import io
-    import contextlib
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        s.do_command("check_design")
-    text = out.getvalue()
-    assert "unplaced" in text and "violation(s)" in text, text
+    # …and the connectivity audit reports it, by TYPED KIND.
+    #
+    # Counted before and after, not searched for in the report text (Codex P2
+    # on #728).  A substring assertion on the final report passes whenever
+    # ANY unplaced bit exists — including one the fixture already had, or one
+    # this deletion did not cause — so it could not prove the connectivity
+    # half of this guard works.  A vacuous assertion inside the vacuity
+    # sweep, which is exactly the shape the file exists to find.
+    after = s._check_design("dnuts")["by_kind"].get("UNPLACED", 0)
+    assert after == before + 1, (before, after)
 
 
 def test_the_sweep_would_notice_a_check_that_stopped_working():
