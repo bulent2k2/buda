@@ -127,6 +127,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("credit",       &NdrRuleRow::credit)
         .def_readwrite("bond",         &NdrRuleRow::bond)
         .def_readwrite("width_abs",    &NdrRuleRow::width_abs)
+        .def_readwrite("per_layer",    &NdrRuleRow::per_layer)
+        .def_readwrite("metal",        &NdrRuleRow::metal)
         .def_readwrite("spacing_abs",  &NdrRuleRow::spacing_abs);
 
     py::class_<TopoRow>(m, "TopoRow")

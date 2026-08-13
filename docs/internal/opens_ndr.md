@@ -185,11 +185,12 @@ rule is the conservative MAXIMUM: the fallback over-charges, never under.
   accepts by silently delivering 2 — becomes an R3 refusal.  That rejects
   designs which route today, so the default flip owes its own measured
   study, the same path `kSegsRel` / `spine_relays` / `band_span_charge`
-  took.  Two residuals of the opt-in landing: per-layer values are NOT yet
-  persisted to the BDB (BUDA-1911 says so LOUDLY rather than restoring a
-  rule missing half its declaration), and the R9 audit still measures the
-  channel-shaped quantity, so it agrees with a channel rule by construction
-  and does not yet check metal against a `metal` rule.
+  took.  One residual of the opt-in landing: **the R9 audit still measures the
+  channel-shaped quantity**, so it agrees with a channel rule by
+  construction and cannot fail on a `metal` rule — an audit that cannot
+  fail on exactly the rules written for EM and resistance.  That is the
+  next piece.  (Persistence is done: v28 carries both the per-layer values
+  and the reading.)
 
   *The original note, kept because it is the reasoning*: quantize width by the smallest k
   with `k·w + (k−1)·sp ≥ width_abs` and spacing by the smallest g with
@@ -234,7 +235,14 @@ to the whole stack is over-wide on the top metal or under-wide at the
 bottom.  Per-layer values apply under BOTH readings — the two questions are
 orthogonal.
 
-Residual: not yet persisted (BUDA-1911).
+Persisted at BDB **v28** (`ndr_rule.per_layer` as compact JSON, alongside
+`ndr_rule.metal` for the reading).  A JSON column rather than a table: the
+values are opaque to SQL, are read and written only as a whole with their
+rule, and need no cascade on delete — the `layers` restriction beside them
+already set that precedent.  Both join the plan's **pricing fingerprint**,
+appended only when present so a pre-v28 checkpoint does not VOID on a format
+change; both move the quantized demand, so a plan priced under the old
+declaration is correctly voided.  BUDA-1911 is retired.
 
 ## 3. Per-net mixed-rule bundles (R8, the richer half)
 

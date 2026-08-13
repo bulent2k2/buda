@@ -249,6 +249,24 @@ struct NdrRuleRow {
     // inactive and losing the constraint the design was routed under.
     double      width_abs   = 0.0;
     double      spacing_abs = 0.0;
+    // v28: R1 PER-LAYER declared values (`def_ndr_layer`), as a compact JSON
+    // object keyed by layer id: {"6":{"w":8.0,"s":0.0,"wx":0,"gx":-1}, ...}.
+    // Persisted for the same reason width_abs was: without it a reopened
+    // design restores the rule missing half its declaration and routes
+    // NARROWER than the design that was saved, and the session that could
+    // have warned is not the session that suffers.
+    //
+    // A JSON column rather than an ndr_rule_layer TABLE: the values are
+    // opaque to SQL (nothing joins or filters on them), they are read and
+    // written only as a whole with their rule, and a column needs no
+    // cascade on rule delete.  The `layers` restriction next to it already
+    // sets this precedent.
+    std::string per_layer;
+    // v28: R1 METAL-shaped quantization opted in.  Without it a
+    // `metal` rule reloads under the CHANNEL reading -- a DIFFERENT
+    // slot count, silently, which is the same half-restore the
+    // per_layer column above exists to prevent.
+    int         metal = 0;
 };
 
 struct GrpRow {
@@ -466,7 +484,7 @@ public:
     // v26 = ndr_rule.width_abs / spacing_abs (R1 absolute values; a rule
     //       declared absolutely is INDISTINGUISHABLE from a default one
     //       without them, since the multiplier stays 1.0).
-    static constexpr int SCHEMA_VERSION = 27;
+    static constexpr int SCHEMA_VERSION = 28;
 
     explicit BDB(const std::string& db_path);
     ~BDB();

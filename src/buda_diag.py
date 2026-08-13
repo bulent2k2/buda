@@ -115,10 +115,9 @@ MESSAGES = {
     "BUDA-1904": (WARNING, "A restored fan-in bundle has no per-bit "
                            "endpoints, so it resumes untapered — wider "
                            "than the design that was checkpointed."),
-    "BUDA-1911": (WARNING, "An NDR rule has per-layer values "
-                           "(def_ndr_layer) which the BDB schema does not "
-                           "carry yet, so a reopened session restores the "
-                           "rule without them."),
+    "BUDA-1912": (WARNING, "An NDR rule's stored per-layer values are not "
+                           "readable and were dropped, so the rule restores "
+                           "layer-independent."),
 }
 
 # Ids that were ISSUED and whose fault no longer exists.
@@ -131,6 +130,10 @@ MESSAGES = {
 # owner should learn that from the tool rather than from silence), and
 # `format()` refuses to emit one.
 RETIRED = {
+    "BUDA-1911": "An NDR rule's per-layer values were not carried by the BDB "
+                 "schema.  Retired: v28 persists them (ndr_rule.per_layer), "
+                 "so a reopened session restores the whole declaration and "
+                 "there is nothing left to warn about.",
     "BUDA-1611": "A part-select's low bit is not 0 on a module the reader "
                  "descends into.  Retired: port bits are now mapped through "
                  "a per-bit context, so an offset slice resolves EXACTLY and "
