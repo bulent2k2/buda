@@ -96,24 +96,37 @@ before diagnosing parallelism.
 | Force serial | `BB_JOBS=0 bb -m` (or uninstall xdist) |
 | Fast tier | serial by default (`bb -t`); parallel with `bb -t -p` / `bb -p` |
 
-## Keep the fast tier's *tier* honest, not just its parallelism
+## `bb -p` is floored, and the fast tier is also the Windows suite
 
-`bb -p` is floored by two things nothing about xdist can move: the machine's
+`bb -p` is bounded by two things nothing about xdist can move: the machine's
 **physical** cores (hyperthreads add ~nothing to the CPU-bound C++ engine — on
 a 4-physical/8-logical box `-n 4`, `-n 6`, `-n 8`, and `--dist load` vs
-`loadfile` all measured the same wall time), and a ~8.6s fixed floor (≈5s
-collection + xdist worker boot). So once parallelism is maxed, the only lever
-left is **less work in the tier** — which means the fast tier must stay what it
-is *for*: the routing-engine inner loop.
+`loadfile` all measured the same ~34s), and a ~8.6s fixed floor (≈5s collection
++ xdist worker boot). Parallelism is already maxed, so the only lever is **less
+work in the tier**. But two things make "just move the slow files to `mid`"
+wrong more often than right:
 
-Tests that drive a **subprocess** (a `tclsh` + `buda_server` bridge flow, the
-`qor_corpus.py` measurement tooling over real `git worktree`s) are integration
-of the *tooling*, not engine units, and each subprocess is slow I/O that does
-not parallelize against the CPU-bound engine tests. They belong in `mid`.
-Moving the qor-tooling and Tcl-bridge files there (2026-08) took `bb -p` from
-~35s to ~25s with zero engine-coverage loss — they still run in `bb -m`/`bb -s`.
-The rule for a new test: if it shells out or measures the toolchain rather than
-the router, mark it `@pytest.mark.mid`.
+1. **The fast tier IS the Windows validation suite.** Every job in
+   `.github/workflows/windows-validate.yml` runs `python -m pytest` with
+   pytest.ini's default `-m "not slow and not mid"` — fast tier only, no
+   `bb -m`. So marking a file `mid` deletes it from Windows validation
+   entirely, not just from the inner loop. A test that runs on Windows and
+   exercises platform-fragile behavior — `ProcessPoolExecutor` **spawn**
+   semantics, `git worktree` path handling — earns its place in the fast tier
+   *because* it is the only Windows gate, even when it is slow.
+2. **Serial cheap ≠ parallel cheap.** The qor-tooling tests are ~0.1–5s each
+   run alone, yet dominate under xdist: they fan out their OWN subprocesses
+   (`git worktree`, a `jobs=4` process pool) on top of 8 already-saturated
+   workers, so they contend far worse than a CPU-bound engine test. That is a
+   reason to make them xdist-lighter, not to hide them from Windows.
+
+So only tests that are inner-loop-only **and** already skipped on Windows may
+move. The `tclsh` + `buda_server` bridge tests qualify (the Windows workflow
+installs no `tcl`, so their `skipif` already skips them there); moving those
+two files to `mid` (2026-08) trimmed `bb -p` ~35s → ~32s with zero coverage
+loss on any platform. The qor-tooling files stay fast — the bigger win they
+represent is gated on either running `mid` on Windows too (`-m "not slow"`) or
+making them oversubscribe less, both open decisions.
 
 ## Surgical speedups applied
 

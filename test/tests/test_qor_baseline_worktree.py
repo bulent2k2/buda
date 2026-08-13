@@ -32,11 +32,6 @@ from pathlib import Path
 
 import pytest
 
-# mid tier: dev-TOOLING tests (qor_corpus --vs baseline machinery) driven
-# through real git worktrees / subprocesses — out of the fast inner loop; run
-# with `bb -m`/`bb -s`.  (One test was already mid; the whole file belongs.)
-pytestmark = pytest.mark.mid
-
 _ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -58,6 +53,7 @@ def _tree_state():
             git("stash", "list"))
 
 
+@pytest.mark.mid
 def test_materializing_a_baseline_leaves_the_working_tree_untouched():
     qc = _load()
     before = _tree_state()

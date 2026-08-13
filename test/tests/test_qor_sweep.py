@@ -31,10 +31,6 @@ import types
 
 import pytest
 
-# mid tier: dev-TOOLING tests (qor_corpus sweep harness) — out of the fast
-# inner loop; run with `bb -m`/`bb -s`.
-pytestmark = pytest.mark.mid
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "tools"))
 import qor_corpus as qc  # noqa: E402
 
