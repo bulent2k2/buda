@@ -133,29 +133,43 @@ It is deliberately not part of the PR gate: the corpus is a *comparison* tool �
 a single run says nothing without a baseline — and it costs a full sweep on top
 of a build.
 
-**Measured on the hosted runner** (first real run, 2026-08-02): build 1m52s +
-corpus sweep 6m34s (`swept 37 flows in 393.9s (jobs=4)`) = **8m49s**. The
-"~4m20s sweep" figure this page carried before that run was measured in a
-developer container; the hosted runner is ~50% slower for the same work. Adding
-the snapshot-table refresh below takes the job to roughly **16 min**.
+**Measured on the hosted runner** (2026-08-12, at 48 flows): `swept 48 flows in
+461.1s (jobs=4)` — **7m41s** — plus a build, plus the snapshot-table refresh
+below sweeping again for about as long, which puts the whole job at **~18 min**.
 
-The corpus has grown twice since that measurement — to 41, then to 48 when the
-uncovered feature families were added (NDR, interchange, keepouts, the edit
-surface, hier convergent bundling).  Cost measured in a developer container:
-six of the seven new flows are under half a second each and
-`flow/rv/soc_conv_div.buda` is ~23s, so the added sweep time is dominated by
-that one row — on the order of +6% of the 2026-08-02 sweep, before the runner's
-~50% slowdown.  Re-measure on the runner if the nightly's budget ever becomes
-the binding constraint; the numbers above are deliberately left as the last
-figures actually measured THERE rather than scaled by hand.
+The earlier figures on this page are kept for the trend: the first real run
+(2026-08-02) swept 37 flows in 393.9s, and the corpus has grown twice since — to
+41, then to 48 when the uncovered feature families were added (NDR, interchange,
+keepouts, the edit surface, hier convergent bundling). A developer container is
+~50% faster for the same work, so its numbers are not what this job costs;
+every figure quoted here was measured on the runner.
 
-**The baseline is only promoted on a clean run.** That is the design decision
-worth knowing: promoting a regressed sweep would make the regression the new
-normal — reported once, then absent from every later diff. Leaving the baseline
-at the last good result means a regression keeps being reported until it is
-actually fixed. First run (or after a cache eviction) establishes a baseline and
-passes; the tool itself raises an uncaught `FileNotFoundError` on a missing
-baseline, so the workflow handles that case rather than letting it crash.
+**The baseline is only promoted on a clean run** — or on an explicitly forced
+one. That is the design decision worth knowing: promoting a regressed sweep
+would make the regression the new normal — reported once, then absent from every
+later diff. Leaving the baseline at the last good result means a regression keeps
+being reported until it is actually fixed. First run (or after a cache eviction)
+establishes a baseline and passes; the tool itself raises an uncaught
+`FileNotFoundError` on a missing baseline, so the workflow handles that case
+rather than letting it crash.
+
+**Accepting a deliberate metric change** is the `promote_baseline` dispatch
+input: run the workflow manually with it checked and the sweep is promoted even
+though the compare reported a regression. It exists because `viol_bundles`
+counts the bundles `check_design` faults, so a **new audit** raises the metric by
+reporting a fault that was always there — better *detection* is indistinguishable
+from worse *routing* by that number alone. The per-bit antenna audit was exactly
+that shape: +1 on two chip flows with overlaps, unplaced and both wirelengths
+byte-identical. With no way to say "this delta is deliberate", the gate stayed
+red for two consecutive nights, still diffing against the run before them and
+piling later changes onto the same report.
+
+The flag is deliberately narrow: empty on a schedule run (so it is unreachable
+except from a deliberate dispatch), a no-op on a clean sweep, and downstream of
+the errored-sweep rejection, which is a hard failure of its own — so it can never
+bank a broken sweep. It annotates a `::warning::` and writes the acceptance into
+the job summary, so the record shows a human moved the baseline. Use it for a new
+detector or new corpus flows; a routing regression is what the red is *for*.
 
 **An errored sweep is rejected before either.** `cmd_run` records a flow that
 raises as `{"flow": ..., "err": ...}` and still exits 0, and `cmd_compare`
@@ -200,7 +214,7 @@ covers both directions (timing-only churn is *not* a change; a real metric move
 *is*). The `--json` sidecar it compares is sorted by flow, so reordering the
 `CORPUS` list does not read as a whole-file change.
 
-**This costs a second full sweep** (~6.5 min). The two tools' `run_flow`s
+**This costs a second full sweep** (~7.7 min at 48 flows). The two tools' `run_flow`s
 measure the same pipeline and could share one sweep with a key rename
 (`ovl/unpl/viol` vs `overlaps/unplaced/viol_bundles`), but that would re-point
 the regression *gate* at the other tool's row-builder and invalidate the cached
@@ -220,6 +234,12 @@ the sweep errored, since that table would be garbage.
   depends on an exact 4-iteration rip-up trace, documented in the flow itself,
   so occasional legitimate churn is expected. A red nightly is a report to
   triage, not proof of a bug — it blocks nothing.
+- **The diff is in three places, starting with the job log.** It used to be in
+  only two: the compare piped `tee compare.txt` *into* `$GITHUB_STEP_SUMMARY`,
+  which left the log holding nothing but `::error::QoR regression` — the one
+  output needed to diagnose a red run was the one output not in it. It now tees
+  to the log and is copied into the summary, and `compare.txt` uploads as an
+  artifact alongside `qor-current.json` on every run.
 
 ## The JS front end is executed; the Scala one is not
 
