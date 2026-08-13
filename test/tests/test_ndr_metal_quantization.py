@@ -423,3 +423,142 @@ def test_a_partially_bad_map_keeps_the_good_entries_and_says_what_it_dropped(cap
     assert set(got) == {4} and got[4]["width_abs"] == 8.0
     out = capsys.readouterr().out
     assert "BUDA-1912" in out and "1 unreadable entry" in out, out
+
+
+# ── R9: the width audit must be able to FAIL ────────────────────────────────
+
+def test_the_declared_width_accessor_picks_the_layer_in_force():
+    """What the metal audit compares against: the width the USER declared on
+    that layer, not the slot count the tool derived from it."""
+    s = _spec(width_abs=3)
+    pl = buda.NdrLayerRule()
+    pl.width_abs = 8.0
+    s.set_layer_rule(6, pl)
+    assert buda.ndr_declared_width_on(s, 5) == 3.0      # inherited
+    assert buda.ndr_declared_width_on(s, 6) == 8.0      # overridden
+    # A MULTIPLIER override replaces the width on that layer, so an inherited
+    # absolute no longer describes it and there is nothing physical to check.
+    mx = buda.NdrLayerRule()
+    mx.width_slots = 2
+    s.set_layer_rule(4, mx)
+    assert buda.ndr_declared_width_on(s, 4) == 0.0
+    # A pure multiplier rule has no physical width at all.
+    assert buda.ndr_declared_width_on(buda.NdrSpec(), 5) == 0.0
+
+
+def test_the_metal_width_audit_fails_on_an_under_width_bit(tmp_path):
+    """The property the old check could not have: a FAILING case.
+
+    The channel reading compared covered slot centres against `width_slots`
+    — both derived from the same quantization, so they agree by construction
+    and the audit could only catch a placement that ignored the spec
+    outright.  Measuring placed METAL against the DECLARATION compares two
+    independent quantities, so a real shortfall is visible.
+
+    Driven through the audit directly: the pipeline quantizes correctly, so
+    an under-width bit is a pipeline BUG, which is precisely what an audit
+    exists to catch rather than something a flow can be asked to produce."""
+    from buda_cmds import ndr_cmds
+    sess = _session(tmp_path, """add_block a 0 0 200 200
+add_block b 900 0 1100 200
+add_bus em_[2] a.p b.q
+def_layer 3 M3 H TOP 20
+def_layer 4 M4 V 20
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_ndr em width 3 metal
+set_ndr em_ em
+run_bundler STRICT
+generate_topologies
+set_track_pitch 3
+run_planner 1
+run_nuts
+run_detailed_nuts
+""")
+    w = next(x for x in sess.bundles if x.input.ndr.active())
+    assert not ndr_cmds.audit_ndr_dnuts(sess, w), "the honest route must be clean"
+
+    # Now narrow one placed bit below the declared 3 — a placement that does
+    # not deliver what the rule asked for.
+    for ns in sess.detailed_result.net_segments:
+        if not ns.is_shield:
+            ns.width = 1.0
+            break
+    msgs = [v.message for v in ndr_cmds.audit_ndr_dnuts(sess, w)]
+    hits = [m for m in msgs if m.startswith("NDR_WIDTH")]
+    assert hits, msgs
+    # The message must carry BOTH numbers — an audit that says "too narrow"
+    # without saying narrower than what cannot be acted on.
+    assert "1 unit(s) of metal" in hits[0] and "declares 3" in hits[0], hits[0]
+
+
+# ── The reading follows the WIDTH IN FORCE, not the rule's flag ────────────
+
+_AUDIT_STACK = """add_block a 0 0 200 200
+add_block b 900 0 1100 200
+add_bus em_[2] a.p b.q
+def_layer 3 M3 H TOP 20
+def_layer 4 M4 V 20
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+"""
+_AUDIT_RUN = """set_ndr em_ em
+run_bundler STRICT
+generate_topologies
+set_track_pitch 3
+run_planner 1
+run_nuts
+run_detailed_nuts
+"""
+
+
+def _audit_catches_a_narrowed_bit(tmp_path, decl):
+    from buda_cmds import ndr_cmds
+    sess = _session(tmp_path, _AUDIT_STACK + decl + _AUDIT_RUN)
+    w = next(x for x in sess.bundles if x.input.ndr.active())
+    assert not ndr_cmds.audit_ndr_dnuts(sess, w), "the honest route must be clean"
+    for ns in sess.detailed_result.net_segments:
+        if not ns.is_shield:
+            ns.width = 1.0
+            break
+    return [v.message for v in ndr_cmds.audit_ndr_dnuts(sess, w)
+            if v.message.startswith("NDR_WIDTH")]
+
+
+@pytest.mark.parametrize("decl", [
+    "def_ndr em width 3 metal\n",                                  # metal, absolute
+    "def_ndr em width x2 spacing 3 metal\n",                       # metal rule, MULTIPLIER width
+    "def_ndr em width 3 metal\ndef_ndr_layer em M3 width x2\n",    # per-layer multiplier override
+    "def_ndr em width x2\n",                                       # plain channel rule
+])
+def test_the_width_audit_fires_whichever_form_is_in_force(tmp_path, decl):
+    """The reading is a property of the WIDTH IN FORCE on the bit's layer, not
+    of the rule's `metal_quant` flag.
+
+    A metal rule can carry a MULTIPLIER width — `width x2 spacing 3 metal`, or
+    an absolute rule with a per-layer `width x2` override — and a multiplier
+    names no physical width, so the metal check has nothing to compare.
+    Gating the slot-centre check on `not metal_quant` switched BOTH off for
+    those and audited the width not at all (Codex P2 on #721)."""
+    assert _audit_catches_a_narrowed_bit(tmp_path, decl)
+
+
+def test_a_mixed_form_rule_keeps_both_declarations(tmp_path):
+    """width and spacing are declared INDEPENDENTLY, so a rule may mix the
+    forms and `width x2 spacing 3` means both things.
+
+    Resolving BOTH fields from the absolute quantization whenever EITHER was
+    absolute silently dropped the multiplier one: this rule resolved to
+    width_slots 1, so a governed bit routed at DEFAULT width while the rule
+    said x2 — and the width audit could not see it, because it compared
+    against the same 1.  A routing fault, not just an audit gap."""
+    from buda_cmds import ndr_cmds
+    sess = _session(tmp_path, _AUDIT_STACK
+                    + "def_ndr mixed width x2 spacing 3 metal\n"
+                      "def_ndr rev   width 3 spacing x2 metal\n")
+    mixed = ndr_cmds._spec_of(sess, "mixed")
+    assert mixed.width_slots == 2, "the multiplier WIDTH must survive"
+    assert mixed.guard_slots >= 1, "the absolute SPACING must survive"
+    # …and the mirror, so the fix is not one-directional.
+    rev = ndr_cmds._spec_of(sess, "rev")
+    assert rev.width_slots == 2 and rev.guard_slots == 1
