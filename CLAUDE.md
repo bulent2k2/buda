@@ -106,6 +106,19 @@ Tests are split into three cumulative tiers via pytest markers (`mid`, `slow` in
 `pytest.ini`); the default run excludes both. Per-test runtimes and the tier
 rationale (and the parallel-run setup) live in [docs/internal/test/](docs/internal/test/).
 
+The two timings above are **one reference box** (4 physical / 8 logical cores),
+so read them as a scale, not a target — the same tier measures ~32s serial /
+~9s parallel on a 4-core Linux container.
+
+`-p` is floored by **physical** cores, and xdist only knows those if `psutil` is
+importable: `-n auto` asks for the physical count and falls back to
+`os.cpu_count()` — the *logical* count — when psutil is missing. So on a
+hyperthreaded box without psutil, `-n auto` spawns a worker per hyperthread and
+oversubscribes (measured on the reference box: `-n auto` 37s vs `-n 6` 33s).
+`pip install psutil` makes `auto` pick the physical count; `BB_JOBS=6 bin/bb -p`
+overrides it explicitly. Measured curve and the tier rule in
+[parallelism.md](docs/internal/test/parallelism.md).
+
 Manual build:
 
 ```bash
