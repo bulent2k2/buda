@@ -3,8 +3,11 @@
 #
 # The MIRROR of flow/mst_shared_leg_prefix.buda: two MST edges
 # meeting at one block where the shared legs END rather than
-# START.  STILL OPEN on this branch — the trim matches on shared
-# STARTS, so it does not fire here.
+# START.  STILL OPEN — the trim matches on shared STARTS, so it
+# does not fire here.  Note this flow turns the trim ON
+# (`set_trim_mst_legs on`, below): the duplication below survives
+# a build that HAS the trim and has been asked to apply it, so
+# this is the missing half and not merely the opt-in being off.
 #
 # `compute_mst` emits every edge with `u < v` and
 # `realize_mst_edge` routes `u -> v`, so whether a shared node's
@@ -75,6 +78,11 @@ add_block up    2000 1800  2100 1900
 add_bus d[4] drv.tx near.rx,hub.rx,up.rx
 
 run_bundler strict
+
+# The trim is OPT-IN (default off, byte-identical): it re-sorts the
+# WL-ordered candidate pool, so it moves selection well beyond the
+# bundle it fixes.  Declared BEFORE generation, as it must be.
+set_trim_mst_legs on
 generate_topologies
 run_planner 1
 run_nuts

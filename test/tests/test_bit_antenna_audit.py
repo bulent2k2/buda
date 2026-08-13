@@ -262,31 +262,72 @@ def test_a_partner_STARVED_before_span_adjustment_retracts_it_instead():
         [(n.bit_index, n.span_lo, n.span_hi) for n in seg1]
 
 
-def test_the_crossing_case_that_made_the_audit_per_bit_is_now_ROUTED_clean():
-    """The finding that justified judging a crossing at the BIT, now fixed at
-    the source — so this asserts CLEAN, as its previous form demanded.
+def test_a_crossing_is_judged_at_the_bit_not_at_the_nominal_segment():
+    """The reach a NOMINAL crossing used to grant, on a bit that crosses nothing.
 
-    flow/rnr/mix2_topdown_refine bundle 35 seg 5 was the case.  The audit half
-    (#695) was that the nominal ConnSeg sits at perp_pos 1020 and grazes
-    `chip/i_dnuts1_4/v0` (y 920..1020) on its boundary, so the SEGMENT "crosses"
-    it while the placed bits — at y 1044.5 and up — do not; the block also spans
-    x 2130..2330 while the bits end at 2069.75, so the credited reach was a
-    coordinate BEYOND the end of the wire, making `trail` negative and
-    cancelling the finding.  Judged per bit, 3 bits showed 8.75 / 5.75 / 2.75
-    units past their last via.
+    flow/rnr/mix2_topdown_refine bundle 35 seg 5 is the case: the nominal
+    ConnSeg sits at perp_pos 1020 and grazes `chip/i_dnuts1_4/v0` (y 920..1020)
+    on its boundary, so the segment "crosses" it.  The placed bits do not —
+    they sit at y 1044.5 and up, outside the block entirely.  Worse, the block
+    spans x 2130..2330 while the bits end at x 2069.75, so the credited reach
+    was a coordinate BEYOND the end of the wire being judged; that made
+    `trail = span_hi - reach_hi` negative and silently cancelled the finding.
 
-    The GENERATION half is why that metal existed: two MST edges left
-    `i_dnuts1_4/v0` at the same face point heading west, so the longer leg
-    duplicated the shorter one's prefix and ran on past their divergence
-    junction — which made that junction a mid-span conn, and DetailedNUTS only
-    snaps a bit to its own via at an ENDPOINT conn.  Trimming the duplicated
-    prefix removes the overhang at the source: detailed WL 13753 -> 13736 on
-    the pinned candidate, exactly the 17.25 units, and the flow's
-    `viol_bundles` returns to 0.
+    Judged at each bit's own track and span, the 3 bits are short of their span
+    by 8.75 / 5.75 / 2.75 — real metal past their last via.
 
-    The per-bit reach model is still the thing that could SEE it, and
-    flow/mst_shared_leg_prefix.buda + test_mst_shared_leg_prefix.py now pin the
-    generation shape directly, so nothing is lost by this vehicle going quiet.
+    THIS FLOW STILL SHOWS IT, and that is deliberate.  The generation-side
+    cause is a duplicated MST leg prefix, and the trim for it ships OPT-IN
+    (`set_trim_mst_legs`, default off) because it re-sorts the WL-ordered
+    candidate pool and moves selection far beyond this bundle.  A corpus flow
+    that does not opt in therefore keeps the metal, and the audit must keep
+    reporting it — the sibling test below is the one that opts in.
     """
     s = _session(_ROOT / "flow/rnr/mix2_topdown_refine.buda", verbose=True)
-    assert _findings_in_run(s) == []
+    hits = _findings_in_run(s)
+    assert len(hits) == 3, hits
+    assert all("Seg 5 bit" in h for h in hits), hits
+    overhangs = sorted(float(h.split("0 + ")[1].split(" of")[0]) for h in hits)
+    assert overhangs == [2.75, 5.75, 8.75], overhangs
+    # The reach must lie ON the wire — the invariant the nominal crossing broke.
+    for h in hits:
+        s_hi = max(float(x) for x in
+                   h.split("spans [")[1].split("]")[0].split(","))
+        r_hi = max(float(x) for x in
+                   h.split("reaches [")[1].split("]")[0].split(","))
+        assert r_hi <= s_hi, h
+
+
+def test_opting_IN_to_the_leg_trim_removes_that_metal_at_the_source():
+    """The other side of the opt-in: the trim does close this case.
+
+    Same flow, one line added before `generate_hier_topologies`.  The audit goes
+    silent because the metal is gone, not because the checker stopped looking —
+    so the detailed wirelength must drop by the same amount the findings
+    reported (8.75 + 5.75 + 2.75 = 17.25, rounded in the reported total).
+
+    Asserting BOTH is the point.  A trim that removed the finding without
+    removing the wire, or removed wire elsewhere while leaving this, would pass
+    either assertion alone.
+    """
+    flow = _ROOT / "flow/rnr/mix2_topdown_refine.buda"
+    src = flow.read_text().replace("generate_hier_topologies",
+                                   "set_trim_mst_legs on\ngenerate_hier_topologies", 1)
+    tmp = flow.parent / "_optin_leg_trim_tmp.buda"
+    tmp.write_text(src)
+    try:
+        s = _session(tmp, verbose=True)
+    finally:
+        tmp.unlink()
+
+    assert _findings_in_run(s) == [], "the trim should remove the metal"
+    assert s.detailed_result.num_unplaced == 0
+
+    def _wl(sess):
+        for ln in sess._test_stdout.splitlines():
+            if "total detailed WL" in ln:
+                return float(ln.split("total detailed WL = ")[1].split()[0])
+        raise AssertionError("no detailed WL line")
+
+    base = _session(flow, verbose=True)
+    assert _wl(base) - _wl(s) == pytest.approx(17, abs=1), (_wl(base), _wl(s))

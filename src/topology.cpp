@@ -3638,8 +3638,12 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                 mst.segments[k].edge_id = ei;
         }
         // Edges sharing a node can leave it along the same axis; cut the
-        // duplicated prefix before anything reads the geometry.
-        if (valid) trim_shared_leg_prefixes(mst.segments, m_h, m_v);
+        // duplicated prefix before anything reads the geometry.  Opt-in
+        // (set_trim_mst_legs / BUDA_MST_LEG_TRIM): the cut re-sorts the
+        // WL-ordered pool, so it moves selection well beyond the trimmed
+        // bundle — see TopologyGenerator::set_mst_leg_trim.
+        if (valid && allow_mst_leg_trim_)
+            trim_shared_leg_prefixes(mst.segments, m_h, m_v);
         if (valid) {
             // Annotate the raw stubs first, then complete: completion rewrites the
             // relay busterm taps (single tap + SEG junctions) and annotates the
@@ -4001,7 +4005,8 @@ void TopologyGenerator::add_trunk_mst_candidates(
             // Same as the standalone MST path: edges incident on one block leave
             // it from the same face point, so cut the duplicated prefix here,
             // before annotate_endpoints/complete_relay_junctions read the shape.
-            trim_shared_leg_prefixes(out, m_h, m_v);
+            // Opt-in on the same knob (set_trim_mst_legs / BUDA_MST_LEG_TRIM).
+            if (allow_mst_leg_trim_) trim_shared_leg_prefixes(out, m_h, m_v);
             return true;
         };
 

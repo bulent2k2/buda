@@ -34,7 +34,19 @@
 # and seg5's bits carried 8.75 + 5.75 + 2.75 units past their
 # last via — with `check_design` reporting Success.
 #
-# FIXED by cutting each leg back to where it stops being a
+# FIXED — but OPT-IN, default off (`set_trim_mst_legs on`, below;
+# corpus-wide `BUDA_MST_LEG_TRIM=1`).  The cut is sound geometry,
+# yet candidates are WL-SORTED, so shortening one RE-SORTS the
+# pool and changes which candidates clear generation gates:
+# measured on chip3_topdown, 9 of 640 bundles change selected
+# topology TYPE and 3 change pool SIZE (control, main twice: 0),
+# and leaf bundles elsewhere lose tracks — 260 -> 636 unplaced.
+# The search space moves, not the wire.  Same reason
+# set_prune_dominated / set_dedup_loci / set_drop_dangling are
+# opt-in, and the same caveat: it renumbers candidate indices, so
+# select_topology pins must come from an opted-in run.
+#
+# The trim cuts each leg back to where it stops being a
 # duplicate (`trim_shared_leg_prefixes`).  Connectivity is
 # preserved by construction: the cut point is the shorter leg's
 # far end, which is either that edge's own BEND or a block FACE,
@@ -82,6 +94,11 @@ add_block up    2000 1800  2100 1900
 add_bus d[4] hub.tx near.rx,far.rx,up.rx
 
 run_bundler strict
+
+# The trim is OPT-IN (default off, byte-identical): it re-sorts the
+# WL-ordered candidate pool, so it moves selection well beyond the
+# bundle it fixes.  Declared BEFORE generation, as it must be.
+set_trim_mst_legs on
 generate_topologies
 run_planner 1
 run_nuts

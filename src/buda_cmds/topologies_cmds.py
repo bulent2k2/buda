@@ -190,6 +190,46 @@ def cmd_set_dedup_loci(session, cmd, args, cmd_line):
           f"(applies at the next generate_[hier_]topologies).")
 
 
+def cmd_set_trim_mst_legs(session, cmd, args, cmd_line):
+    # Usage: set_trim_mst_legs [on|off]        (default off)
+    # Opt-in shared-leg trim for MST candidates (default OFF — byte-identical
+    # without it).  `realize_mst_edge` routes each edge on its own, so two
+    # edges incident on the SAME block start at the same face point; when both
+    # go L-shaped with the same first axis, the shorter one's leg lies entirely
+    # inside the longer one's and the longer leg's prefix is a duplicate with a
+    # FREE END.  No audit catches it (the ANTENNA rule counts attachment
+    # POSITIONS and the long leg has two elsewhere; #514's tap-overhang rule
+    # wants the piece over a block the segment taps, and this one taps
+    # nothing).  Its cost is downstream: the overshoot pushes the leg's end PAST
+    # the divergence junction, which makes that junction a mid-span conn, and
+    # DetailedNUTS only snaps a bit to its own via at an ENDPOINT conn — so
+    # every bit keeps the shared abstract end.
+    #
+    # When on, each leg is cut back to the shorter sibling's far end (that
+    # edge's own bend, or a block face, so connectivity holds by construction),
+    # on both realization paths.
+    #
+    # OPT-IN because the mutation is not local to the wire it fixes: candidates
+    # are WL-SORTED, so shortening one re-sorts the pool and changes which
+    # candidates clear generation gates.  Measured on chip3_topdown, 9 of 640
+    # bundles change selected topology TYPE and 3 change pool SIZE (control,
+    # main vs main: 0), and leaf bundles elsewhere lose tracks — 260 -> 636
+    # unplaced bits.  The geometry is sound; the SEARCH SPACE moves.  Declare
+    # BEFORE the generation command; the trim renumbers candidate indices, so
+    # select_topology pins must come from an opted-in run.
+    #
+    # Covers the START-shared half only — legs that END at the shared node, and
+    # the same geometry from TRUNK stub generation, are still open (strict
+    # xfails in test_mst_shared_leg_prefix.py).
+    val = args[0].lower() if args else "on"
+    if val not in ("on", "off"):
+        print(f"Error: set_trim_mst_legs expects on|off, got {args[0]!r}")
+        return
+    session._trim_mst_legs = (val == "on")
+    print(f"MST shared-leg trim {'ENABLED' if val == 'on' else 'disabled'} "
+          f"(applies at the next generate_[hier_]topologies; renumbers indices).")
+
+
 _DROP_DANGLING_MODES = {"off", "on", "drop", "clamp", "clamp_drop"}
 
 
@@ -683,6 +723,7 @@ def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
 COMMANDS = {
     "set_prune_dominated": cmd_set_prune_dominated,
     "set_dedup_loci": cmd_set_dedup_loci,
+    "set_trim_mst_legs": cmd_set_trim_mst_legs,
     "set_drop_dangling": cmd_set_drop_dangling,
     "generate_topologies_for_bundle": cmd_generate_topologies_for_bundle,
     "generate_more_topologies": cmd_generate_more_topologies,

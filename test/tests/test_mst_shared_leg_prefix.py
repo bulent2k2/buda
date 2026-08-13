@@ -158,6 +158,39 @@ def test_no_MST_candidate_duplicates_a_sibling_edges_first_leg(solved):
     assert not bad, f"duplicated MST leg prefixes: {bad}"
 
 
+def test_the_trim_is_OPT_IN_and_the_default_leaves_the_geometry_alone():
+    """The other half of "byte-identical when unused".
+
+    The trim ships default-off because it is not a local fix: candidates are
+    WL-SORTED, so shortening one re-sorts the pool and changes which candidates
+    clear generation gates (chip3_topdown: 9 of 640 bundles change selected
+    type, 3 change pool size, against a main-vs-main control of 0).  Same
+    reason set_prune_dominated / set_dedup_loci / set_drop_dangling are opt-in.
+
+    A default that quietly turned on would be caught by the corpus, eventually
+    and expensively.  This catches it here: run the fixture with the
+    `set_trim_mst_legs on` line REMOVED and the duplication must come back, in
+    the exact shape the flow header documents.  If this ever fails, the knob
+    has stopped being opt-in.
+    """
+    src = _FLOW.read_text().replace("set_trim_mst_legs on\n", "")
+    # Comments may name the knob (the header explains it); no COMMAND may.
+    assert not [ln for ln in src.splitlines()
+                if ln.strip() and not ln.lstrip().startswith("#")
+                and "set_trim_mst_legs" in ln], "the opt-in must be gone"
+    tmp = _FLOW.parent / "_mst_default_off_tmp.buda"
+    tmp.write_text(src)
+    try:
+        bad = _pairs(_solve(tmp), kinds=["MST"])
+    finally:
+        tmp.unlink()
+
+    # Exactly the pair the vehicle exists for: MST_HV len 120 inside len 1320,
+    # MST_VH len 70 inside len 620, both at the shared corner (2010,1010).
+    assert {p[0] for p in bad} == {"MST_HV", "MST_VH"}, bad
+    assert all(p[3] == (2010, 1010) for p in bad), bad
+
+
 @pytest.mark.xfail(strict=True, reason="OPEN: the trim matches shared STARTS only")
 def test_MST_legs_that_END_at_the_shared_node_are_also_trimmed(solved_suffix):
     """The mirror half, still open.
