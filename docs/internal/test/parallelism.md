@@ -120,13 +120,20 @@ wrong more often than right:
    workers, so they contend far worse than a CPU-bound engine test. That is a
    reason to make them xdist-lighter, not to hide them from Windows.
 
-So only tests that are inner-loop-only **and** already skipped on Windows may
-move. The `tclsh` + `buda_server` bridge tests qualify (the Windows workflow
-installs no `tcl`, so their `skipif` already skips them there); moving those
-two files to `mid` (2026-08) trimmed `bb -p` ~35s → ~32s with zero coverage
-loss on any platform. The qor-tooling files stay fast — the bigger win they
-represent is gated on either running `mid` on Windows too (`-m "not slow"`) or
-making them oversubscribe less, both open decisions.
+The resolution keeps both true. `windows-validate.yml` now runs **`-m "not
+slow"`** (fast **and** mid), so `mid` no longer means "gone from Windows" — it
+means "out of the developer inner loop." With that in place, the heavy xdist
+contenders — the qor-tooling files (`git worktree`, the `jobs=4` pool) and the
+`tclsh` + `buda_server` bridge — move to `mid` (2026-08): `bb -p` ~35s → ~25s,
+and they still run under `bb -m`/`bb -s` **and** on Windows. (The workflow is
+manual-only and explicitly not a gate, so widening it to the mid tier costs no
+PR latency.)
+
+The rule for a new test: a subprocess/tooling **integration** test — one that
+shells out or measures the toolchain rather than the router — belongs in `mid`;
+the inner loop is the engine's. Point 2 still stands as the residual lever: a
+`mid` test that spawns its own pool should size it small so a future `bb -m -p`
+does not oversubscribe.
 
 ## Surgical speedups applied
 

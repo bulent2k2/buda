@@ -29,6 +29,12 @@ import contextlib
 
 import pytest
 
+# mid tier: qor_corpus.py dev-tooling — cheap serially but a heavy xdist
+# contender (fans its own work out onto already-saturated workers), so out of
+# the fast inner loop.  Still validated on Windows: the windows-validate.yml
+# jobs run `-m "not slow"` (fast + mid), so this keeps its Windows coverage.
+pytestmark = pytest.mark.mid
+
 from tools import qor_corpus as qc
 
 

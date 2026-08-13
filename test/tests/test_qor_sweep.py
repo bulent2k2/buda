@@ -31,6 +31,12 @@ import types
 
 import pytest
 
+# mid tier: qor_corpus sweep harness — spawns a ProcessPoolExecutor, a heavy
+# xdist contender, so out of the fast inner loop.  Still validated on Windows
+# (windows-validate.yml runs `-m "not slow"`), which is where its spawn/
+# recovery contract most needs to run.
+pytestmark = pytest.mark.mid
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "tools"))
 import qor_corpus as qc  # noqa: E402
 
