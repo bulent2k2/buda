@@ -2,7 +2,7 @@
 
 Regenerate with `tools/qor_table.py --out qor/qor_table.md`.  Columns: `bund`/`busS`/`netS` = bundle / bus-segment / net-segment counts; `busWL`/`netWL` = abstract (after NUTS) / detailed (after DNUTS) wirelength, placed-only; `ovl`/`unpl`/`viol` = overlaps / unplaced bits / bundles with `check_design` violations; `sec` = wall-clock of THIS run (contention-inflated when the sweep ran parallel).  `null` = that stage did not run.  `sec1` = last known SERIAL (-j 1) wall-clock, captured 2026-08-02 (main @ 557c9de) — refresh with a full `-j 1 --out` run ('-' = no serial timing yet).
 
-38 clean · 10 with residuals · 48 flows.
+39 clean · 9 with residuals · 48 flows.
 
 ## DIRTY — residual overlaps / unplaced / viol_bundles (or incomplete)
 
@@ -18,7 +18,6 @@ chip/chip_stack_topdown                        660  1798  32003  2279102   39303
 chip/chip_stack_bottomup                       660  1796  30860  2266555   37323998 |   99  240   20  329.6       -
 rnr/mix2_fast_bottomup_caps                    100   267   3328    68371     841195 |    2    0    0   51.0    19.3
 rnr/mix2_fast_on_aligned_sql                   100   262   3326    76333     886438 |    2   16    1   59.8    25.4
-rnr/mix2_topdown_refine                        100   259   3284    65339     793215 |    0    0    1   89.5    53.8
 ```
 
 ## CLEAN — 0 overlaps / 0 unplaced / 0 viol_bundles
@@ -32,6 +31,7 @@ big_data_test/big2/big2                         80   243   8308   344921   11751
 rnr/mix2_fast_bottomup_shared                  100   279   3530    72436     890954    70.2    28.6
 rnr/mix2_fast_topdown                          100   268   3412    66010     800286     9.5     5.7
 rnr/mix2_fast_bottomup                         100   262   3324    71805     885066     8.5     5.4
+rnr/mix2_topdown_refine                        100   259   3284    65339     793198    89.5    53.8
 rnr/mix2                                       100   244   3204    69713     866029    50.6    17.1
 rnr/mix                                        100   248   3132    62004     761157     5.9     3.6
 rnr/mix2_fast_bottomup_caps_2x                 100   244   2888    62737     745400    26.3       -
