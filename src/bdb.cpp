@@ -1593,10 +1593,10 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         ++stats.imported_components;
         if (c.placed) ++stats.placed_components;
 
-        // HALO — a keep-clear margin the placer honoured and the router must
-        // too (Phase 3c).  Emitted as a keepout ring in layout units.  Only
-        // for a PLACED instance: an unplaced one has no location, so its halo
-        // would blockade the die origin.
+        // HALO (Phase 3c).  This block used to read "a keep-clear margin the
+        // placer honoured and the router must too", and emitted a keepout
+        // ring for placed instances only.  Both halves of that were wrong.
+        //
         // A component `+ HALO` is NOT a routing keepout, and importing it as
         // one was the same mistake the PLACEMENT blockage below already
         // records.  DEF has two halos and they mean different things:
