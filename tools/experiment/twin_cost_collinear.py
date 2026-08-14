@@ -29,7 +29,7 @@ Channel (3) is the one that cannot be read off a single scoring pass — so
 instead of estimating it, BOUND it.  Congestion cost is non-negative, so even
 if trimming drove every remaining segment's cong term to zero:
 
-    cost_after >= kWL*(wl_est - len(S)) + max_over_remaining(total - cong)
+    cost_after >= kWL*(wl_est - len(S)) + ksegs*(n-1) + max_over_remaining(total - cong)
 
 That is a floor no amount of double-charge relief can go under.  If the floor
 still exceeds the winner's cost, trimming PROVABLY cannot flip that candidate,
@@ -38,9 +38,15 @@ and the hypothesis is refuted for it with no mutation and no re-planning.
 Only the candidates whose floor dips below the winner need the real
 trim-and-rescore experiment.
 
-kWL is self-calibrated per candidate as wl_term/wl_est rather than read from
-the knob, so kSegs / kWLSpread contributions ride along instead of being
-assumed absent.
+The WL term's components are SEPARATED by a per-bundle least-squares fit
+(`_fit_wl_term`) rather than assumed.  Taking `kWL` as `wl_term/wl_est` folds
+the segment-count penalty into the WL rate, and scaling that by `(wl - L)` then
+removes a penalty proportional to the trimmed LENGTH instead of to the one
+segment actually dropped — which overstates the post-trim cost for a short stub,
+so the "floor" stops being a lower bound and a reachable cost can be reported as
+unreachable (Codex #745; it moved 2 of 150 candidates across the line).  A
+bundle whose books the fit cannot reproduce is reported UNVERIFIABLE rather than
+scored on a formula that does not hold for it.
 """
 import contextlib
 import io
@@ -86,7 +92,47 @@ def seg_len(sg):
     return abs(sg.end.x - sg.start.x) + abs(sg.end.y - sg.start.y)
 
 
-def analyse(flow, rows_out):
+def _fit_wl_term(w, costs):
+    """Recover (kWL, kWL*kWLSpread, kWL*ksegs) for one bundle, or None.
+
+    `wl_term = kWL * (wl_est + kWLSpread*(wl_hi-wl_lo) + ksegs*w_segs)` — linear
+    in three regressors, so a no-intercept least squares over the bundle's own
+    candidates recovers the coefficients without reading (or assuming) the
+    knobs.  That matters because `kSegsRel` carries a COMPILED default that
+    engages whenever a flow declares `healersAhead`, so "kSegs is probably off"
+    is wrong on exactly the flows this measurement cares about.
+
+    Returns None when the fit does not reproduce every candidate's wl_term to
+    within a tight tolerance — a per-bit TAPERED candidate charges a fractional
+    segment weight this model does not carry, and a bundle whose books we
+    cannot reproduce must be reported as unverifiable rather than scored on a
+    formula that does not hold for it.
+    """
+    import numpy as np
+    rows, ys = [], []
+    for i, t in enumerate(w.input.candidates):
+        c = costs.get(i)
+        if c is None:
+            continue
+        env = (t.wl_hi - t.wl_lo) if (t.wl_lo >= 0 and t.wl_hi >= t.wl_lo) else 0.0
+        rows.append([float(t.estimated_wirelength), float(env),
+                     float(len(t.segments))])
+        ys.append(c.wl_term)
+    if len(rows) < 4:                      # need more samples than unknowns
+        return None
+    A = np.array(rows)
+    y = np.array(ys)
+    coef, *_ = np.linalg.lstsq(A, y, rcond=None)
+    resid = np.abs(A @ coef - y)
+    scale = max(1e-9, float(np.abs(y).max()))
+    if float(resid.max()) / scale > 1e-6:
+        return None
+    if coef[0] <= 0 or coef[2] < -1e-9:    # kWL must be positive, ksegs >= 0
+        return None
+    return float(coef[0]), float(coef[1]), float(max(0.0, coef[2]))
+
+
+def analyse(flow, rows_out, unverifiable):
     s = solve(flow)
     topo_fp = s._make_topo_fp_resolver()
     for w in s.bundles:
@@ -115,6 +161,7 @@ def analyse(flow, rows_out):
         if not is_real or sel not in costs:
             continue
         win = costs[sel].total
+        coef = _fit_wl_term(w, costs)
 
         for idx, short_idxs in removable.items():
             c = costs.get(idx)
@@ -124,21 +171,37 @@ def analyse(flow, rows_out):
             wl = t.estimated_wirelength
             if wl <= 0:
                 continue
-            kwl_eff = c.wl_term / wl
+            if coef is None:
+                unverifiable.append((w.input.original_bundle.id, idx))
+                continue
+            a_wl, b_env, c_seg = coef
             trimmed_len = sum(seg_len(t.segments[i]) for i in short_idxs
                               if i < len(t.segments))
 
             keep = [g for g in c.segs if g.seg_idx not in short_idxs]
             if not keep:
                 continue
-            # floor: every remaining segment's congestion driven to zero
+            # floor: every remaining segment's congestion driven to zero, and
+            # the WL term rebuilt from its SEPARATED components.  Dividing
+            # wl_term by wl folds the segment-count penalty into the WL rate,
+            # and scaling that by (wl - L) then removes a penalty proportional
+            # to the trimmed LENGTH instead of the one segment actually
+            # dropped — which overstates the post-trim cost for a short stub
+            # and would let a floor exceed a cost that is really reachable
+            # (Codex #745).  The envelope term is dropped rather than
+            # predicted: b_env * env_after >= 0, so omitting it keeps the
+            # floor a genuine lower bound.
             floor_seg = max(g.total - g.cong for g in keep)
-            floor = kwl_eff * (wl - trimmed_len) + floor_seg
+            n_now = float(len(t.segments))
+            floor = (a_wl * (wl - trimmed_len)
+                     + c_seg * max(0.0, n_now - len(short_idxs))
+                     + floor_seg)
 
             # the exact analytic saving through channels (1) and (2) only
             seg_now = max(g.total for g in c.segs)
             seg_excl = max(g.total for g in keep)
-            delta_12 = kwl_eff * trimmed_len + (seg_now - seg_excl)
+            delta_12 = (a_wl * trimmed_len + c_seg * len(short_idxs)
+                        + (seg_now - seg_excl))
 
             rows_out.append(dict(
                 flow=flow.name, bid=w.input.original_bundle.id, idx=idx,
@@ -152,16 +215,18 @@ def analyse(flow, rows_out):
 
 def main():
     rows = []
+    unverifiable = []
     for f in (sys.argv[1:] or FLOWS):
         p = BUDA / f
         if not p.exists():
             print(f"-- not found: {f}")
             continue
-        analyse(p, rows)
+        analyse(p, rows, unverifiable)
         print(f"scanned {f}  (cum rows {len(rows)})")
 
     print("\n" + "=" * 92)
     print(f"redundant-carrying candidates with a real cost: {len(rows)}")
+    print(f"  UNVERIFIABLE (wl_term books not reproducible): {len(unverifiable)}")
     if not rows:
         return
 

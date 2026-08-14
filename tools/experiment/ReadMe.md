@@ -52,13 +52,17 @@ runner-up, and the vanished double charge. The third can't be read off one
 scoring pass, so it is **bounded** rather than estimated — congestion is
 non-negative, so
 
-    cost_after >= kWL*(wl_est - len(S)) + max_over_remaining(total - cong)
+    cost_after >= kWL*(wl_est - len(S)) + ksegs*(n-1) + max_over_remaining(total - cong)
 
-is a floor no double-charge relief can go under. Where that floor still exceeds
-the winner's cost, trimming provably cannot flip the candidate:
+is a floor no double-charge relief can go under. The WL term's components are
+separated by a per-bundle least-squares fit rather than assumed: taking `kWL` as
+`wl_term/wl_est` folds the segment-count penalty into the WL rate, which
+overstates the post-trim cost for a short stub and stops the floor being a lower
+bound at all (Codex #745 — it moved 2 of 150 across the line). Where the floor
+still exceeds the winner's cost, trimming provably cannot flip the candidate:
 
-    130 of 150 : flip PROVABLY IMPOSSIBLE
-    median gap to the winner 2.24  vs  median saving 0.53
+    128 of 150 : flip PROVABLY IMPOSSIBLE
+    median gap to the winner 2.24  vs  median saving 0.67
 
 The saving closes about a third of the gap it would have to. `seg_cost` being a
 **max** is why: a short stub is almost never the argmax, so the double charge is

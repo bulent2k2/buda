@@ -248,8 +248,8 @@ class carry redundancy. The zero is a placement fact, not a scoring one.
 directly. Since congestion cost is non-negative, `kWL*(wl−L) + max over
 remaining of (total − cong)` is a floor the trimmed twin cannot go under —
 including the double-charge relief, which is therefore bounded rather than
-guessed. Result: **130 of 150 candidates provably cannot flip**, and the median
-saving (0.53) closes about a third of the median gap it would need to (2.24).
+guessed. Result: **128 of 150 candidates provably cannot flip**, and the median
+saving (0.67) closes about a third of the median gap it would need to (2.24).
 `seg_cost` is a **max** over segments, so a short stub is almost never the
 argmax — the double charge is largely muted in the candidate's own score, and
 what it really inflates is the committed usage *other* bundles see.

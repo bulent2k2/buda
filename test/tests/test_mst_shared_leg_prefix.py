@@ -318,3 +318,37 @@ def test_the_flow_ends_clean(solved):
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
         solved.do_command("check_design dnuts")
     assert "no violations found" in buf.getvalue(), buf.getvalue()[-600:]
+
+
+def test_an_explicit_off_beats_the_corpus_AB_env(monkeypatch):
+    """The env hook sets a DEFAULT; an explicit command outranks it BOTH ways.
+
+    Stamping the generator only when the flag was `on` meant
+    `set_trim_trunk_stubs off` under `BUDA_TRUNK_STUB_TRIM=1` never reached the
+    setter, so the generator kept the env's `true` while the command printed
+    "disabled" — the one combination a corpus A/B sweep actually produces, when
+    a sweep opts one flow back out (Codex #745).  The session flag is tri-state
+    for this: None leaves the env default alone, False is stamped.
+
+    Asserted on the GEOMETRY, not on the flag: the flag being False proves
+    nothing if the generator never hears about it.
+    """
+    monkeypatch.setenv("BUDA_TRUNK_STUB_TRIM", "1")
+
+    # env alone -> trimming ON -> the trunk duplication is gone
+    assert not _pairs(_solve(_FLOW), kinds=["TRUNK"]), \
+        "BUDA_TRUNK_STUB_TRIM=1 did not enable the trim"
+
+    # env + an explicit `off` -> the command wins -> the shape comes back
+    src = _FLOW.read_text().replace("generate_topologies",
+                                    "set_trim_trunk_stubs off\ngenerate_topologies", 1)
+    fd, path = tempfile.mkstemp(dir=_FLOW.parent, prefix="_trunk_trim_off_",
+                                suffix=".buda")
+    tmp = Path(path)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(src)
+        assert _pairs(_solve(tmp), kinds=["TRUNK"]), \
+            "an explicit `off` lost to the env hook"
+    finally:
+        tmp.unlink(missing_ok=True)
