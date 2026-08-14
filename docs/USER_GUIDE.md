@@ -22,6 +22,17 @@ To successfully run a BUDA script, you should follow this sequence:
 
 BUDA commands depend on each other. If you skip a setup step, the engine may use incorrect defaults or fail.
 
+### Input files: `require_file`
+*   **What**: `require_file <path> [<path> ...] [hint <text>]` declares the files your flow needs before it needs them. If any is missing — or is a directory of that name rather than a file — the run stops on that line (`BUDA-1905`, exit 1), naming every bad path and printing your `hint`.
+*   **Why?**: An import command fails perfectly well on a file it cannot open — but it can only tell you the path. Where the file *comes from* is something only your flow knows, and that is usually what you need to be told. Declaring inputs at the top also means a run that cannot succeed stops on line one instead of partway through the setup.
+*   **When to use it**: any input not checked in beside the script — a fetched or generated netlist, a site LEF, a previous stage's output. Paths resolve against the script's own directory, exactly like `source` and `import_*`.
+    ```buda
+    require_file ariane.v fakeram45_256x16.lef hint Fetch them first:  python3 flow/ariane133/fetch.py
+    open_bdb ariane133.bdb
+    import_def_lef ../../demo/ariane/ariane.def fakeram45_256x16.lef
+    import_verilog ariane.v
+    ```
+
 ### `generate_topologies`
 *   **Prerequisite**: Use `def_layer` first.
 *   **Why?**: The generator needs to know which layers are Horizontal (H) and which are Vertical (V). If no layers are defined, it will default to Layer 4 (H) and Layer 5 (V).
