@@ -170,7 +170,13 @@ def write_lef(path):
           "",
           "END LIBRARY",
           ""]
-    with open(path, "w") as f:
+    # newline="\n": these files are COMMITTED and byte-compared against a
+    # regeneration (test_*_hier_flow's match-their-generator tests).  Python's
+    # text mode writes os.linesep, so on Windows the regeneration came out
+    # CRLF against an LF checkout and the whole file diffed (measured,
+    # windows-validate run 31, the mingw lane's forced-LF checkout).  A
+    # generator whose output is committed must emit ONE spelling everywhere.
+    with open(path, "w", newline="\n") as f:
         f.write("\n".join(L))
 
 
@@ -246,7 +252,7 @@ def write_verilog(path):
           "  quad u_q1 (.I(c), .O(dout));",
           "endmodule",
           ""]
-    with open(path, "w") as f:
+    with open(path, "w", newline="\n") as f:
         f.write("\n".join(V))
 
 
@@ -355,7 +361,7 @@ def write_def(path):
         D.append(f"  - {nm} {c} + USE SIGNAL ;")
     D += ["END NETS", "", "END DESIGN", ""]
 
-    with open(path, "w") as f:
+    with open(path, "w", newline="\n") as f:
         f.write("\n".join(D))
 
 
