@@ -39,7 +39,11 @@
 # printing `Error: ...` and carry on -- inside a flow, silently continuing
 # past a failed step is how a wrong result gets shipped.
 
-package require Tcl 8.5
+# `8.5-`, dash included: without it this means "8.x only" and refuses
+# Tcl 9 at line 1 of the session — measured on the first Tcl 9.0.4
+# install to point at BUDA (a Windows box, 2026-08), where the pin and
+# ONE relative namespace write below were the entire port.
+package require Tcl 8.5-
 
 # `::buda`, absolute: a package must land in the GLOBAL namespace
 # however it is loaded.  Sourced from inside another namespace — a
@@ -105,7 +109,11 @@ proc ::buda::start {args} {
     }
     if {![file exists $server]} { error "buda::start: no server at $server" }
 
-    set buda::async_done "DONE"
+    # Absolute `::buda::`, not `buda::`: inside this proc the relative
+    # spelling names ::buda::buda::async_done, which Tcl 8 quietly resolved
+    # through its global fallback and Tcl 9 (TIP 278) refuses with "parent
+    # namespace doesn't exist" — the one line in the bridge that broke on 9.
+    set ::buda::async_done "DONE"
     set fh [open "|[list $python $server] 2>@stderr" r+]
     # lf + utf-8, NOT binary: the payload length is counted in CHARACTERS on
     # both sides, so the diagnostics' non-ASCII text survives intact.
