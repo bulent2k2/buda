@@ -36,6 +36,8 @@ judged.
 """
 import io
 import contextlib
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -276,12 +278,21 @@ def _session_without_the_trim(flow):
     src = [ln for ln in flow.read_text().splitlines(keepends=True)
            if ln.strip() != "set_trim_mst_legs on"]
     assert len(src) < len(flow.read_text().splitlines()), "opt-in line not found"
-    tmp = flow.parent / "_no_trim_tmp.buda"
-    tmp.write_text("".join(src))
+
+    # UNIQUE name, and in the flow's OWN directory.  Both halves are load-bearing:
+    # the directory because the flow does `source mix_tracks.buda`, which a
+    # command resolves against the SCRIPT's directory — a tmp_path copy would not
+    # find it; the uniqueness because CI runs `-p xdist -n 4` and BOTH tests in
+    # this module call this helper, so a fixed name lets one worker unlink the
+    # file the other is still running against (Codex #732).
+    fd, path = tempfile.mkstemp(dir=flow.parent, prefix="_no_trim_", suffix=".buda")
+    tmp = Path(path)
     try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write("".join(src))
         return _session(tmp, verbose=True)
     finally:
-        tmp.unlink()
+        tmp.unlink(missing_ok=True)
 
 
 def _detailed_wl(session):

@@ -37,6 +37,8 @@ below are what the trim has to keep true.
 """
 import io
 import contextlib
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -178,12 +180,18 @@ def test_the_trim_is_OPT_IN_and_the_default_leaves_the_geometry_alone():
     assert not [ln for ln in src.splitlines()
                 if ln.strip() and not ln.lstrip().startswith("#")
                 and "set_trim_mst_legs" in ln], "the opt-in must be gone"
-    tmp = _FLOW.parent / "_mst_default_off_tmp.buda"
-    tmp.write_text(src)
+    # Unique name in the fixture's own directory — one caller today, but CI runs
+    # `-p xdist -n 4` and a fixed name is a collision waiting for the second
+    # caller (the sibling module had exactly that; Codex #732).
+    fd, path = tempfile.mkstemp(dir=_FLOW.parent, prefix="_mst_default_off_",
+                                suffix=".buda")
+    tmp = Path(path)
     try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(src)
         bad = _pairs(_solve(tmp), kinds=["MST"])
     finally:
-        tmp.unlink()
+        tmp.unlink(missing_ok=True)
 
     # Exactly the pair the vehicle exists for: MST_HV len 120 inside len 1320,
     # MST_VH len 70 inside len 620, both at the shared corner (2010,1010).
