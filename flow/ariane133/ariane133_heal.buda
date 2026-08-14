@@ -127,6 +127,12 @@ refine_selection 30
 negotiate_congestion
 ripup_reroute 12
 refine_selection 60
+# Re-certify AFTER the last refine (Codex P2 on #738): a refine commit is an
+# overlap-parity topology change, so the endpoint must carry its own ripup
+# certificate — the sweep before the refine certifies a state the refine may
+# have since moved.  Measured: the final refine accepts 0 moves here, so
+# this sweep reproduces the 381-trial certificate at the same 52.
+ripup_reroute 12
 
 check_design
 report_wirelength
