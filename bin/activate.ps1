@@ -30,12 +30,16 @@ if (($env:PATH -split [regex]::Escape($_sep)) -notcontains $_bin) {
 }
 
 # --- prepend build/ + tools/ to PYTHONPATH (idempotent, build-first) --------
+# build/Release first when it exists: the VS multi-config generator puts the
+# extensions there, invisible to a bare `build` entry (Codex P2 #735).
 $_build = Join-Path $_budaRoot 'build'
 $_tools = Join-Path $_budaRoot 'tools'
+$_rel = Join-Path $_budaRoot 'build/Release'
+$_lead = if (Test-Path -LiteralPath $_rel) { "$_rel$_sep$_build" } else { $_build }
 if (-not $env:PYTHONPATH -or
     (($env:PYTHONPATH -split [regex]::Escape($_sep)) -notcontains $_build)) {
-    if ($env:PYTHONPATH) { $env:PYTHONPATH = "$_build$_sep$_tools$_sep$($env:PYTHONPATH)" }
-    else                 { $env:PYTHONPATH = "$_build$_sep$_tools" }
+    if ($env:PYTHONPATH) { $env:PYTHONPATH = "$_lead$_sep$_tools$_sep$($env:PYTHONPATH)" }
+    else                 { $env:PYTHONPATH = "$_lead$_sep$_tools" }
 }
 
 # --- bare-name functions for the wrappers -----------------------------------
@@ -53,4 +57,4 @@ function global:btcl { & (Join-Path $global:BudaBin 'btcl.ps1') @args }
 Write-Host "BUDA env ready: $_bin on PATH (bb, buda, fp, bfp, viz, u2b, btcl); PYTHONPATH set."
 Write-Host "  (run 'bb' once to build if you haven't yet)"
 
-Remove-Variable _budaRoot, _sep, _build, _tools -ErrorAction SilentlyContinue
+Remove-Variable _budaRoot, _sep, _build, _tools, _rel, _lead -ErrorAction SilentlyContinue

@@ -73,9 +73,19 @@ $BuildStart = Get-Date
 
 # Configure.  BUDA_ARCH forwards the target ISA exactly like bin/bb (default
 # "native"; CI pins an explicit baseline).  Prefer Ninja for the single-config
-# build\ layout the docs and pytest.ini assume.
+# build\ layout the docs and pytest.ini assume — but ONLY when creating a
+# FRESH build tree: CMake rejects a -G that differs from an existing tree's
+# recorded generator instead of rebuilding (Codex P1 on #735), so an
+# incremental run must reuse whatever the cache records and derive the
+# multi-config question from it.
 $cmakeArgs = @('-S', '.', '-B', 'build')
-if (Get-Command ninja -ErrorAction SilentlyContinue) {
+$cache = 'build/CMakeCache.txt'
+if (Test-Path -LiteralPath $cache) {
+    $genLine = Select-String -LiteralPath $cache `
+        -Pattern '^CMAKE_GENERATOR:INTERNAL=(.+)$' | Select-Object -First 1
+    $gen = if ($genLine) { $genLine.Matches[0].Groups[1].Value } else { '' }
+    $multiConfig = ($gen -match 'Visual Studio|Xcode|Multi-Config')
+} elseif (Get-Command ninja -ErrorAction SilentlyContinue) {
     $cmakeArgs += @('-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release')
     $multiConfig = $false
 } else {
@@ -112,6 +122,15 @@ if ($RunTests) {
     Write-Output '=== Running Tests ==='
     if (-not $env:MPLBACKEND) { $env:MPLBACKEND = 'Agg' }
     if (-not $env:PYTHONUTF8) { $env:PYTHONUTF8 = '1' }   # measured requirement on Windows
+    # Multi-config layout: the extensions land in build\Release, which
+    # pytest.ini's `pythonpath = build src` does not cover (Codex P2 on
+    # #735; the documented VS-layout PYTHONPATH in WINDOWS_BUILD.md §4).
+    $rel = Join-Path $RepoDir 'build/Release'
+    if (Test-Path -LiteralPath $rel) {
+        $sep = [IO.Path]::PathSeparator
+        if ($env:PYTHONPATH) { $env:PYTHONPATH = "$rel$sep$($env:PYTHONPATH)" }
+        else                 { $env:PYTHONPATH = $rel }
+    }
     $TestStart = Get-Date
     New-Item -ItemType Directory -Force -Path 'log' | Out-Null
     if (-not $env:MPLCONFIGDIR) { $env:MPLCONFIGDIR = Join-Path $RepoDir 'log/matplotlib' }

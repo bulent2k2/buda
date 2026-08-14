@@ -63,7 +63,10 @@ if ($env:BUDA_TEST_ANCHOR) {
 # Add build and tools directories to PYTHONPATH (build first), preserving a
 # caller's PYTHONPATH as the tail — same shape as the bash wrapper's
 # `export PYTHONPATH="$BUILD_DIR:$PROJECT_ROOT/tools:$PYTHONPATH"`.
-$parts = @((Join-Path $ProjectRoot 'build'), (Join-Path $ProjectRoot 'tools'))
+$parts = @()
+$rel = Join-Path $ProjectRoot 'build/Release'
+if (Test-Path -LiteralPath $rel) { $parts += $rel }   # VS multi-config layout (Codex P2 #735)
+$parts += @((Join-Path $ProjectRoot 'build'), (Join-Path $ProjectRoot 'tools'))
 if ($env:PYTHONPATH) { $parts += $env:PYTHONPATH }
 $env:PYTHONPATH = $parts -join $Sep
 

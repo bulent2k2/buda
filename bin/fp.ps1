@@ -23,7 +23,10 @@ See also:
     exit 0
 }
 
-$parts = @((Join-Path $ProjectRoot 'build'), (Join-Path $ProjectRoot 'tools'))
+$parts = @()
+$rel = Join-Path $ProjectRoot 'build/Release'
+if (Test-Path -LiteralPath $rel) { $parts += $rel }   # VS multi-config layout (Codex P2 #735)
+$parts += @((Join-Path $ProjectRoot 'build'), (Join-Path $ProjectRoot 'tools'))
 if ($env:PYTHONPATH) { $parts += $env:PYTHONPATH }
 $env:PYTHONPATH = $parts -join $Sep
 
