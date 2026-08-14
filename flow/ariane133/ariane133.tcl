@@ -19,6 +19,7 @@
 #   bin/btcl flow/ariane133/ariane133.tcl base         # fetch + the plain flow
 #   bin/btcl -v flow/ariane133/ariane133.tcl           # …and a viewer at the end
 #   bin/btcl flow/ariane133/ariane133.tcl heal -nofetch   # offline: verify only
+#   bin/btcl flow/ariane133/ariane133.tcl -strict         # also fail on a dirty audit
 #
 # WHY THIS EXISTS.  This vehicle has a prerequisite no other flow in the repo
 # has: two of its three inputs are somebody else's files, fetched from
@@ -57,14 +58,16 @@ source [file join $repo tools buda.tcl]
 # ── arguments ─────────────────────────────────────────────────────────────
 # `heal` (default) or `base`, plus the offline switch.  A flow may also be
 # named by path, so a variant sitting beside these two needs no edit here.
-set flow  heal
-set fetch 1
+set flow   heal
+set fetch  1
+set strict 0
 foreach a $argv {
     switch -glob -- $a {
         heal    { set flow heal }
         base    { set flow base }
         -nofetch -
         -no-fetch { set fetch 0 }
+        -strict { set strict 1 }
         -*      { puts stderr "ariane133.tcl: unknown option '$a'"; exit 2 }
         default { set flow $a }
     }
@@ -138,18 +141,38 @@ set secs [expr {([clock milliseconds] - $t0) / 1000.0}]
 # for doing exactly what it says it does; reading it as 0 would be the older
 # and worse mistake of reporting a stage that never ran as clean.  It is
 # reported as what it is, and the flow's own failure is the raise above.
-set overlaps [buda::query overlaps]
-set unplaced [buda::query unplaced]
-set bundles  [buda::query bundles]
+set overlaps   [buda::query overlaps]
+set unplaced   [buda::query unplaced]
+set violations [buda::query violations]
+set bundles    [buda::query bundles]
 
 proc metric {n} { return [expr {$n < 0 ? "not run" : $n}] }
 
 puts "\n== verdict ====================================================="
-puts [format "  %-10s %s" bundles  [metric $bundles]]
-puts [format "  %-10s %s" overlaps [metric $overlaps]]
-puts [format "  %-10s %s" unplaced [metric $unplaced]]
+puts [format "  %-10s %s" bundles    [metric $bundles]]
+puts [format "  %-10s %s" overlaps   [metric $overlaps]]
+puts [format "  %-10s %s" unplaced   [metric $unplaced]]
+puts [format "  %-10s %s" violations [metric $violations]]
 puts [format "  %-10s %.1fs" runtime $secs]
 
+# Overlaps and unplaced bits are the ROUTING verdict and gate the exit.
+# `check_design` violations are the AUDIT leg, which the other two do not
+# cover — a design can place every bit overlap-free and still be
+# electrically wrong — so they are always REPORTED, and "clean endpoint" is
+# never claimed over a dirty audit (Codex P1 on #743; `buda::query
+# violations` exists because a flow gating on the other two called that
+# clean, the same fault on #679).
+#
+# They do not gate the exit BY DEFAULT, and that is a deliberate split
+# rather than an omission.  This vehicle's audit violations are structural
+# and known: a floorplan DEF places no standard cells, so 16 pure-logic
+# containers have no placed descendant and every bundle reaching one is
+# counted (274 at the detailed stage, measured).  Gating on them would make
+# this driver permanently red on a design behaving exactly as documented,
+# which trains a reader to ignore the gate.  `bin/buda --strict-check` made
+# the same call for the same reason — report by default, exit non-zero only
+# when asked — and `-strict` here is that switch.  See ReadMe.md, "What is
+# not clean, and why that is the input's shape".
 set status 0
 set ran 0
 foreach {what n} [list overlaps $overlaps unplaced $unplaced] {
@@ -160,10 +183,21 @@ foreach {what n} [list overlaps $overlaps unplaced $unplaced] {
         incr ran
     }
 }
+if {$violations > 0} {
+    puts "  AUDIT: $violations check_design violation(s)\
+           [expr {$strict ? {-- -strict, so this fails the run}
+                          : {-- reported, not gated (see ReadMe.md); -strict gates on it}}]."
+    if {$strict} { set status 1 }
+} elseif {$violations < 0} {
+    puts "  AUDIT: no check_design was run, so nothing was demonstrated."
+    if {$strict} { set status 1 }
+}
 if {$status == 0} {
-    puts [expr {$ran == 2 ? "  clean endpoint."
-                          : "  clean as far as this flow goes\
-                             (a stage it does not run has no count)."}]
+    set routing [expr {$ran == 2 ? "clean endpoint"
+                                 : "clean as far as this flow goes\
+                                    (a stage it does not run has no count)"}]
+    puts [expr {$violations > 0 ? "  routing $routing; the audit is not clean."
+                                : "  $routing."}]
 }
 
 # `buda::stop` last: with `btcl -v` it carries the final viewer, so the

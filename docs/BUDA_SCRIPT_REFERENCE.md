@@ -138,9 +138,13 @@ require_file <path> [<path> ...] [hint <text ...>]
 ```
 
 Declare the input files this script needs. Every path is checked; if any is
-missing the run **stops immediately** with `BUDA-1905` (FATAL, exit 1),
-naming *every* missing file and printing `hint` verbatim. When all are
-present the command is silent and the flow continues.
+missing — or is present but is not a regular file, a directory of the same
+name being the case that bites — the run **stops immediately** with
+`BUDA-1905` (FATAL, exit 1), naming *every* bad path with which of the two
+it is, and printing `hint` verbatim. When all are present the command is
+silent and the flow continues. A malformed declaration (no path at all)
+stops the run too: this command's job is to have checked something, and one
+that named nothing checked nothing.
 
 Paths follow the same rule as `source` and every `import_*` command — they
 resolve against the **script's own directory** — so a required path names the

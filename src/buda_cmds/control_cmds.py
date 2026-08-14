@@ -114,11 +114,20 @@ def cmd_require_file(session, cmd, args, cmd_line):
     # Fails FAST, like `source` and an unknown command, and for the same
     # reason: continuing past a missing input leaves the design
     # misconfigured, and the run that follows describes a design nobody has.
-    if not args:
-        msg = ("Error: require_file requires at least one path "
-               "(require_file <path> [<path> ...] [hint <text>])")
+    # A MALFORMED declaration stops the run too (Codex P2 on #743).  The
+    # tempting reading is that a usage error is the author's problem and the
+    # flow may carry on — but this command's whole job is to have CHECKED
+    # something, and a declaration that named nothing checked nothing.  So
+    # continuing produces the exact shape this command exists to remove: a
+    # run that verified no precondition, reached the end, and exited 0.
+    def _fail(msg):
         print(msg); session._log_write(msg)
-        return
+        session._flush_bdb_writeback()
+        sys.exit(1)
+
+    if not args:
+        _fail("Error: require_file requires at least one path "
+              "(require_file <path> [<path> ...] [hint <text>])")
 
     # `hint` ends the path list, so several files can share one remedy.  The
     # rest of the line is the hint verbatim — the handlers split on
@@ -128,27 +137,43 @@ def cmd_require_file(session, cmd, args, cmd_line):
         cut = args.index("hint")
         paths, hint = args[:cut], " ".join(args[cut + 1:]).strip()
     if not paths:
-        msg = "Error: require_file: no path before 'hint'"
-        print(msg); session._log_write(msg)
-        return
+        _fail("Error: require_file: no path before 'hint' "
+              "(require_file <path> [<path> ...] [hint <text>])")
 
     # Resolved by THE path rule (the script's own directory), so a required
     # path means the same file as the import command that will read it.
-    missing = [(p, resolve_script_path(session, p, is_read=True))
+    #
+    # `isfile`, not `exists` (Codex P2 on #743): a DIRECTORY of the required
+    # name satisfies `exists` and the precondition passes silently, leaving
+    # the reader to fail on it later without the hint — which is the whole
+    # failure this command removes, reintroduced by a laxer test.  `source`
+    # uses isfile for the same reason.  The two cases are reported
+    # separately because they have different remedies: one file is absent,
+    # the other is present and is not a file.
+    checked = [(p, resolve_script_path(session, p, is_read=True))
                for p in paths]
-    missing = [(p, full) for p, full in missing if not os.path.exists(full)]
-    if not missing:
+    absent = [(p, full) for p, full in checked if not os.path.exists(full)]
+    notfile = [(p, full) for p, full in checked
+               if os.path.exists(full) and not os.path.isfile(full)]
+    if not absent and not notfile:
         return          # silent: a satisfied precondition is not news
 
-    # Every missing file at once.  Reporting one per run turns fetching two
+    # Every bad path at once.  Reporting one per run turns fetching two
     # inputs into two failed runs.
     where = (f" ({os.path.basename(session._script_stack[-1])})"
              if session._script_stack else "")
+    n = len(absent) + len(notfile)
+    what = "not found" if not notfile else "not usable"
     lines = [buda_diag.format(
         "BUDA-1905",
-        f"{len(missing)} required input file(s) not found{where}:")]
-    for p, full in missing:
-        lines.append(f"    {p}" + (f"   → {full}" if full != p else ""))
+        f"{n} required input file(s) {what}{where}:")]
+    for p, full in absent:
+        lines.append(f"    {p}" + (f"   → {full}" if full != p else "")
+                     + ("   (not found)" if notfile else ""))
+    for p, full in notfile:
+        kind = "a directory" if os.path.isdir(full) else "not a regular file"
+        lines.append(f"    {p}" + (f"   → {full}" if full != p else "")
+                     + f"   ({kind})")
     if hint:
         lines.append(f"  {hint}")
     for ln in lines:

@@ -122,6 +122,42 @@ def test_no_path_is_an_error_not_a_silent_pass(tmp_path):
     assert "Error: require_file: no path before 'hint'" in r.stdout
 
 
+def test_a_malformed_declaration_stops_the_run(tmp_path):
+    """Codex P2 on #743.  The command's job is to have CHECKED something; a
+    declaration naming nothing checked nothing, so carrying on produces the
+    exact shape the command exists to remove — a run that verified no
+    precondition, reached the end, and exited 0."""
+    for body in ("require_file\n", "require_file hint no path before me\n"):
+        r = _run(tmp_path, body + "def_layer 4 M4 H TOP 10\n")
+        assert r.returncode == 1, f"{body!r} did not stop the run"
+        assert "def_layer" not in r.stdout, \
+            f"{body!r} let the flow continue past a check that never happened"
+
+
+def test_a_directory_does_not_satisfy_a_required_file(tmp_path):
+    """Codex P2 on #743.  `exists` is true for a directory, so a required
+    name that IS one passed silently and left the reader to fail on it later
+    without the hint — the very failure this command removes, reintroduced
+    by a laxer test.  (`source` uses isfile for the same reason.)"""
+    (tmp_path / "netlist.v").mkdir()
+    r = _run(tmp_path, "require_file netlist.v hint the remedy\n"
+                       "def_layer 4 M4 H TOP 10\n")
+    assert r.returncode == 1
+    out = r.stdout + r.stderr
+    assert "BUDA-1905" in out
+    assert "a directory" in out, out          # named, not just "not found"
+    assert "the remedy" in out
+    assert "def_layer" not in r.stdout
+
+
+def test_absent_and_unusable_are_reported_together_and_distinctly(tmp_path):
+    (tmp_path / "adir.lef").mkdir()
+    r = _run(tmp_path, "require_file gone.v adir.lef\n")
+    out = r.stdout + r.stderr
+    assert "2 required input file(s)" in out
+    assert "(not found)" in out and "(a directory)" in out
+
+
 # ── 2. a raising command is a diagnostic, not a traceback ───────────────────
 _RAISES = """\
 open_bdb {bdb}
