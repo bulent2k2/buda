@@ -133,9 +133,61 @@ def test_v_and_no_viz_are_mutually_exclusive(tmp_path):
 _tcl_required = pytest.mark.skipif(shutil.which("tclsh") is None,
                                    reason="no tclsh on this host")
 
+# `bin/btcl` is a Bash script, and on NATIVE Windows `bash` resolves to the
+# System32 WSL stub, which prints "Windows Subsystem for Linux has no installed
+# distributions" and runs nothing — so every assertion below matches against
+# that banner instead of the flow's output.  Measured on windows-validate run
+# 23, where these were the only test_viz_final failures.  Same predicate and
+# same reason as test_buda_wrapper_args.py, which hit this first: Cygwin
+# (sys.platform == "cygwin") has a real bash and keeps running, and it is the
+# one Windows job that passed that run.
+_bash_required = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bin/btcl needs a real bash; Windows' `bash` is the WSL stub "
+           "(measured, windows-validate runs 18 and 23)")
+
+# Everything that goes through the wrapper needs BOTH.  One marker rather than
+# two stacked decorators, so the skip REASON names the prerequisite that is
+# actually missing instead of whichever skipif pytest happened to evaluate.
+def _btcl_missing():
+    if shutil.which("tclsh") is None:
+        return "no tclsh on this host"
+    if sys.platform == "win32":
+        return ("bin/btcl needs a real bash; Windows' `bash` is the WSL stub "
+                "(measured, windows-validate runs 18 and 23)")
+    return ""
+
+
+_BTCL_MISSING = _btcl_missing()
+_btcl_required = pytest.mark.skipif(bool(_BTCL_MISSING),
+                                    reason=_BTCL_MISSING or "btcl is runnable")
+
+# `-python $sys.executable` is not decoration: `buda::start`'s default is
+# `python3`, and native Windows exposes `python`/`py` instead (WINDOWS_REQ.md
+# calls that lookup a portability hazard, and windows-validate measures it in
+# its "python3 lookup reality" step).  Without this the engine never starts,
+# the flow produces no viewer note at all, and the test reads that as "the
+# viewer did not open" — which is how `test_buda_viz_final_env_var_is_the_signal`
+# failed on all three native jobs in run 23.  test_tcl_front_end.py's `_tcl`
+# helper passes it for the same reason.
+# Paths reach Tcl as FORWARD-slashed, which Tcl accepts on every platform
+# including Windows.  A native Windows path interpolated raw would be read as
+# backslash ESCAPES by the Tcl parser — `D:\a\buda\...` becomes BEL + `buda`,
+# and `source` then fails on a filename that never existed.  `.as_posix()` /
+# the replace below cost nothing on POSIX, where the paths are already `/`.
+#
+# BRACED as well as forward-slashed, and the two solve different problems.
+# Forward slashes stop the Tcl parser eating `\a`/`\b`/`\t` as escapes; braces
+# stop it WORD-SPLITTING a path that contains spaces — `C:/Program Files/…`
+# would otherwise hand `buda::start` a `-python` of `C:/Program` plus a stray
+# `Files/…` option and fail before the engine starts.  Tcl's own `{…}` quoting
+# is the right tool: it suppresses substitution and splitting together.
+_TCL_PATH = "{" + _BUDA_TCL.as_posix() + "}"
+_PY_PATH = "{" + sys.executable.replace("\\", "/") + "}"
+
 _TCL_FLOW = f"""\
-source {_BUDA_TCL}
-buda::start
+source {_TCL_PATH}
+buda::start -python {_PY_PATH}
 buda::def_layer 4 M4 H TOP 50
 buda::def_layer 5 M5 V TOP 50
 buda::add_block A 0 0 100 100
@@ -158,21 +210,21 @@ def _run_btcl(tmp_path, tcl_body, *flags):
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_no_v_no_viewer(tmp_path):
     _, out = _run_btcl(tmp_path, _TCL_FLOW + "buda::stop\n")
     assert _viewer_attempts(out) == 0
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_v_appends_viewer_at_stop(tmp_path):
     _, out = _run_btcl(tmp_path, _TCL_FLOW + "buda::stop\n", "-v")
     assert _viewer_attempts(out) == 1          # appended at buda::stop
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_v_no_double_when_flow_visualizes(tmp_path):
     body = _TCL_FLOW + "buda::visualize\nbuda::stop\n"
     _, out = _run_btcl(tmp_path, body, "-v")
@@ -182,7 +234,7 @@ def test_btcl_v_no_double_when_flow_visualizes(tmp_path):
 # ── the three review findings on #712, each with the shape that reproduced ──
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_v_appends_viewer_when_the_flow_ends_with_the_engine_exit(tmp_path):
     """THE regression.  `buda::exit` — the engine's own exit command, which the
     bridge defines from the registry like any other — raises SystemExit inside
@@ -199,7 +251,7 @@ def test_btcl_v_appends_viewer_when_the_flow_ends_with_the_engine_exit(tmp_path)
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_v_no_double_when_the_flow_visualizes_then_exits(tmp_path):
     """The skip rule has to hold on the exit path too, or the fix above just
     moves the doubling to the other shutdown."""
@@ -209,7 +261,7 @@ def test_btcl_v_no_double_when_the_flow_visualizes_then_exits(tmp_path):
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_v_keeps_a_nonzero_exit_code_from_the_flow(tmp_path):
     """`buda::exit 3` is the fail-fast path: it must still fail, and loudly,
     with the viewer opened.  The viewer's note is appended AFTER the status is
@@ -225,7 +277,7 @@ def test_btcl_v_keeps_a_nonzero_exit_code_from_the_flow(tmp_path):
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_an_unhandled_engine_exit_code_does_not_reach_the_shell(tmp_path):
     """What the Tcl side actually does with `buda::exit 3`, pinned so the doc
     cannot drift back to claiming the CLI's guarantee.
@@ -251,7 +303,7 @@ def test_an_unhandled_engine_exit_code_does_not_reach_the_shell(tmp_path):
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_runs_a_script_whose_name_starts_with_a_dash(tmp_path):
     """`--` ends btcl's own options, but tclsh does not honour a `--` of its
     own: measured on 8.6.14, both `tclsh -v.tcl` and `tclsh -- -v.tcl` read the
@@ -292,7 +344,7 @@ def test_a_failing_viewer_is_reported_not_swallowed():
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 @pytest.mark.parametrize("flags, passed", [
     ([],            ["a", "b"]),
     (["-v"],        ["a", "b"]),
@@ -315,7 +367,7 @@ def test_btcl_passes_the_flows_arguments_through_untouched(tmp_path, flags, pass
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_a_flows_own_v_argument_does_not_open_a_viewer(tmp_path):
     """The half of that defect the wrapper alone cannot fix: `buda::start` used
     to scan `$argv` for a bare `-v`, which cannot tell a launcher's request
