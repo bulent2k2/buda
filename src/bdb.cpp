@@ -1639,13 +1639,22 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
                           ax, ay);
                     xform(um_to_lu(r.x2 - mac->ox), um_to_lu(r.y2 - mac->oy),
                           bx, by);
+                    const double kx1 = dbu_to_lu(c.x) + std::min(ax, bx);
+                    const double ky1 = dbu_to_lu(c.y) + std::min(ay, by);
+                    const double kx2 = dbu_to_lu(c.x) + std::max(ax, bx);
+                    const double ky2 = dbu_to_lu(c.y) + std::max(ay, by);
+                    // Whether it is inside the instance is MEASURED, not
+                    // assumed: OBS almost always is (that is what an
+                    // obstruction of a macro means), but LEF does not
+                    // require a rect to sit within SIZE, and a rect that
+                    // pokes out is exactly the one whose edge IS a useful
+                    // Hanan locus.  x1/y1 and w/h are the placed extent the
+                    // component bbox above was built from.
+                    const bool inside = kx1 >= x1 && ky1 >= y1 &&
+                                        kx2 <= x1 + w && ky2 <= y1 + h;
                     stats.keepouts.push_back(
-                        {o.layer,
-                         dbu_to_lu(c.x) + std::min(ax, bx),
-                         dbu_to_lu(c.y) + std::min(ay, by),
-                         dbu_to_lu(c.x) + std::max(ax, bx),
-                         dbu_to_lu(c.y) + std::max(ay, by),
-                         "OBS of " + c.name});
+                        {o.layer, kx1, ky1, kx2, ky2,
+                         "OBS of " + c.name, inside});
                 }
         }
     };

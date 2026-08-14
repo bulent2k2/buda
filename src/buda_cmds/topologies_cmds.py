@@ -230,6 +230,47 @@ def cmd_set_trim_mst_legs(session, cmd, args, cmd_line):
           f"(applies at the next generate_[hier_]topologies; renumbers indices).")
 
 
+def cmd_set_keepout_loci(session, cmd, args, cmd_line):
+    # Usage: set_keepout_loci all|outside          (default all)
+    #
+    # WHICH KEEPOUTS CONTRIBUTE HANAN LOCI (opens_interchange.md item 12).
+    # `all` (default, historical) = every keepout's four edges become grid
+    # lines.  `outside` = only keepouts reaching beyond a block do; one lying
+    # wholly inside a block still BLOCKS identically, it just stops adding
+    # coordinates.
+    #
+    # The problem it answers is quadratic.  The Hanan grid is the PRODUCT of
+    # its two axis sets, so a technology that draws obstruction finely buys
+    # grid without bound: one `fakeram45_256x16` carries 99 OBS rects, 133 of
+    # them import 13,034 keepouts, and demo/ariane's grid goes 2,479 ->
+    # 2,508,972 cells with `run_planner hier` killed at 50 minutes.  Under
+    # `outside` it is 6,327 cells and the flow finishes in ~19 s.
+    #
+    # OPT-IN, and the reason is a correction worth keeping: the first version
+    # of this shipped unconditionally, justified by "a position inside a
+    # block is unreachable anyway".  That is FALSE — a trunk may cross a
+    # block over-the-cell, so an interior locus is a real candidate position.
+    # Measured on flow/rv/soc_conv_div, whose macros carry 10 OBS rects:
+    # bundle 42 moved off a locus contributed by an OBS edge (TRUNK_V@x108000,
+    # 2 segments) onto a 4-segment alternative carrying dangling metal, which
+    # the QoR corpus could not see (its metric is overlaps/unplaced/
+    # viol_bundles) and test_tapered_bit_spans caught.  So this REMOVES
+    # candidate positions, exactly like set_prune_dominated / set_dedup_loci /
+    # set_trim_mst_legs, and like them it is asked for by name.
+    #
+    # Declare it BEFORE import_def_lef / generation.
+    val = args[0].lower() if args else "all"
+    if val not in ("all", "outside"):
+        print(f"Error: set_keepout_loci expects all|outside, got {args[0]!r}")
+        return
+    session.fp.set_keepout_loci_outside_only(val == "outside")
+    if val == "outside":
+        print("Keepout Hanan loci: OUTSIDE-only — a keepout inside a block "
+              "still blocks but adds no grid line (candidate positions change).")
+    else:
+        print("Keepout Hanan loci: ALL (default).")
+
+
 _DROP_DANGLING_MODES = {"off", "on", "drop", "clamp", "clamp_drop"}
 
 
@@ -725,6 +766,7 @@ COMMANDS = {
     "set_dedup_loci": cmd_set_dedup_loci,
     "set_trim_mst_legs": cmd_set_trim_mst_legs,
     "set_drop_dangling": cmd_set_drop_dangling,
+    "set_keepout_loci": cmd_set_keepout_loci,
     "generate_topologies_for_bundle": cmd_generate_topologies_for_bundle,
     "generate_more_topologies": cmd_generate_more_topologies,
     "generate_topologies": cmd_generate_topologies,

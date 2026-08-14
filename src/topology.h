@@ -499,6 +499,13 @@ struct DetourChannelSpec {
 struct KeepoutZone {
     Rect bbox;
     std::set<int> layer_ids;
+    // True when this zone lies wholly inside a block — a macro's OBS,
+    // typically.  Blocking is unaffected either way; this only lets
+    // `set_keepout_loci outside` drop such a zone's Hanan loci, which a
+    // design with finely drawn obstruction needs and which is otherwise a
+    // real trade (an interior locus IS reachable — a trunk may cross a
+    // block over-the-cell).  See opens_interchange.md item 12.
+    bool inside_block = false;
 };
 
 // Floorplan identity for the analysis cache (Phase B): every Floorplan carries
@@ -527,7 +534,13 @@ public:
     uint64_t rev() const { return rev_; }
 
     void add_block(const std::string& name, int x1, int y1, int x2, int y2);
-    void add_keepout_zone(int x1, int y1, int x2, int y2, const std::vector<int>& layer_ids);
+    // `inside_block` defaults false: a keepout contributes its edges as
+    // Hanan loci unless the caller can say it sits inside a block that
+    // already does (see KeepoutZone).  Blocking behaviour is identical
+    // either way.
+    void add_keepout_zone(int x1, int y1, int x2, int y2,
+                          const std::vector<int>& layer_ids,
+                          bool inside_block = false);
     const std::vector<KeepoutZone>& get_keepout_zones() const { return keepouts_; }
     // Mark a block as a hierarchy container (an envelope enclosing finer blocks)
     // rather than a solid leaf cell.  Containers are transparent to LOW layers:
@@ -595,6 +608,16 @@ public:
     void set_detour_channel(const std::string& dirs, int size);
     const DetourChannelSpec& get_detour_channel() const { return detour_channel_; }
 
+    // Which keepouts contribute Hanan loci (opens_interchange.md item 12).
+    // false (default) = all of them, the historical behaviour.  true = only
+    // those reaching outside a block, which bounds the grid on a design
+    // whose technology draws obstruction finely.  OPT-IN because it is a
+    // real trade and not a free win: an interior locus is reachable (a
+    // trunk may cross a block over-the-cell), so dropping it removes
+    // candidate positions.  Blocking is unaffected in either mode.
+    void set_keepout_loci_outside_only(bool on) { keepout_loci_outside_only_ = on; ++rev_; }
+    bool keepout_loci_outside_only() const { return keepout_loci_outside_only_; }
+
     Rect get_block_bounds(const std::string& name) const;
     // True iff a block with this exact name has been registered (get_block_bounds
     // silently returns a degenerate {0,0,0,0} for unknown names, so callers that
@@ -620,6 +643,7 @@ private:
     MinStubLength min_stub_len_;
     FeedthruConfig feedthru_;
     DetourChannelSpec detour_channel_;
+    bool keepout_loci_outside_only_ = false;
     std::vector<KeepoutZone> keepouts_;
 };
 class TopologyGenerator {

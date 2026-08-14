@@ -15,8 +15,8 @@ bin/buda flow/ariane133/ariane133.buda
 | design | ariane133 — a RISC-V core with 133 SRAM macros, 45nm |
 | netlist | gate-level, **127 modules, 5 hierarchy levels** |
 | nets / bundles | 5576 nets → **111 hbundles** (D0 50, D1 5, D2 25, D3 31) |
-| runtime | **7.5 s** end to end |
-| endpoint | 121 segments, **0 track overlaps, 0 interval violations**; 76 connectivity violations in 25 bundles — see *What is not clean* |
+| runtime | **~19 s** end to end, obstruction model included |
+| endpoint | 126 segments, 0 interval violations; **195 track overlaps** and 178 connectivity violations in 47 bundles — see *What is not clean* |
 
 ## Where the files come from
 
@@ -67,18 +67,30 @@ skipped as library cells**; and the ten routing layers' track patterns come
 from the **DEF's own `TRACKS`**. Ten `def_layer` lines and the SRAM's LEF
 reproduce the full-library import exactly.
 
-**`no_blockages` is mandatory here, and it is not tuning.** One fakeram
-macro carries **99 `OBS` rects**, so 133 of them import **13,034 keepouts**
-and the Hanan grid goes from 2,479 cells to **2,508,972** — a 1012× grid,
-on which `run_planner hier` did not finish in **50 minutes**, against
-**0.79 s** with the flag. The cost is real: this run has no macro-obstruction
-model. Written up as **`opens_interchange.md` item 12**; drop the flag when
-it lands.
+**This vehicle found `opens_interchange.md` item 12, which has since
+landed.** One fakeram macro carries **99 `OBS` rects**, so 133 of them
+import **13,034 keepouts**; every keepout edge is a Hanan line and the grid
+is a product, so it went from 2,479 cells to **2,508,972** and
+`run_planner hier` did not finish in **50 minutes**.
+
+`ariane133.buda` now declares **`set_keepout_loci outside`**: a keepout
+lying inside a block still blocks but adds no grid line. Grid **6,327
+cells**, and the flow runs **with** its obstruction model in ~19 s, so
+`no_blockages` is gone.
+
+The knob is opt-in and worth understanding before copying it: an interior
+locus *is* reachable — a trunk may cross a block over-the-cell — so this
+removes candidate positions along with the grid. It is the right trade for a
+design whose LEF draws obstruction in 99 rects per macro, and the wrong one
+for a design with a handful, where it measurably cost `flow/rv` a better
+trunk. See item 12.
 
 ## What is not clean, and why that is the input's shape
 
-`check_design` reports **76 violations across 25 of the 111 bundles**, all of
-one kind: *block referenced in topologies but not in floorplan*.
+Two separate things, worth not conflating.
+
+**The unplaced containers** — `check_design` reports violations of one kind,
+*block referenced in topologies but not in floorplan*.
 
 A DEF is flat — `COMPONENTS` lists leaf instances only — so every level
 between the die and the macros arrives from the Verilog with no geometry.
@@ -91,10 +103,20 @@ children, but **16 pure-logic containers have no placed descendant at all**
 *floorplan* DEF places no standard cells. Bundles that reach those blocks
 have nothing to land on.
 
-This is the honest ceiling of a floorplan DEF, not a routing defect: the
-placed geometry routes cleanly (0 overlaps, 0 interval violations). Removing
-it needs a **fully placed** DEF, which upstream generates rather than ships —
-so it costs an OpenROAD or Innovus run, not a download.
+This is the honest ceiling of a floorplan DEF, not a routing defect.
+Removing it needs a **fully placed** DEF, which upstream generates rather
+than ships — so it costs an OpenROAD or Innovus run, not a download.
+
+**The congestion** — 195 track overlaps — is the newer half, and it appeared
+when item 12 made the obstruction model affordable. `OBS` covers
+metal1–metal4 across all 133 macros, so this interconnect has to live on
+metal5 and above. That is the truth about this floorplan; the earlier
+`no_blockages` run reported 0 overlaps by flying over macro metal, which is
+not a route. Healers close most of it — `negotiate_congestion` +
+`ripup_reroute` measured 125 → 61 overlaps and were still improving when
+they hit the move budget — so this is a QoR question for the vehicle, not a
+defect. The flow deliberately does not run them, to stay a ~19 s vehicle;
+add them when you want to work on the congestion itself.
 
 ## Relation to the other vehicles
 
