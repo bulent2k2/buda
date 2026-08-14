@@ -454,6 +454,9 @@ void bind_routing(py::module_& m) {
              py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),
              py::arg("layer_ids"), py::arg("inside_block") = false)
         .def("get_keepout_zones",       &Floorplan::get_keepout_zones)
+        .def("set_keepout_loci_outside_only",
+             &Floorplan::set_keepout_loci_outside_only, py::arg("on"))
+        .def("keepout_loci_outside_only", &Floorplan::keepout_loci_outside_only)
         .def("get_block_rects", [](const Floorplan& fp, const std::string& name) {
             auto rects = fp.get_block_rects(name);
             std::vector<std::tuple<int,int,int,int>> out;

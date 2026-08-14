@@ -499,13 +499,12 @@ struct DetourChannelSpec {
 struct KeepoutZone {
     Rect bbox;
     std::set<int> layer_ids;
-    // True when this zone lies wholly inside a block whose own edges are
-    // already Hanan lines — a macro's OBS, typically.  Such a zone still
-    // BLOCKS exactly as before; it just contributes no Hanan loci, because
-    // a trunk position inside a footprint the grid already brackets is not
-    // a position anything can reach.  Default false, so every hand-declared
-    // `add_keepout` behaves as it always has.
-    // See opens_interchange.md item 12.
+    // True when this zone lies wholly inside a block — a macro's OBS,
+    // typically.  Blocking is unaffected either way; this only lets
+    // `set_keepout_loci outside` drop such a zone's Hanan loci, which a
+    // design with finely drawn obstruction needs and which is otherwise a
+    // real trade (an interior locus IS reachable — a trunk may cross a
+    // block over-the-cell).  See opens_interchange.md item 12.
     bool inside_block = false;
 };
 
@@ -609,6 +608,16 @@ public:
     void set_detour_channel(const std::string& dirs, int size);
     const DetourChannelSpec& get_detour_channel() const { return detour_channel_; }
 
+    // Which keepouts contribute Hanan loci (opens_interchange.md item 12).
+    // false (default) = all of them, the historical behaviour.  true = only
+    // those reaching outside a block, which bounds the grid on a design
+    // whose technology draws obstruction finely.  OPT-IN because it is a
+    // real trade and not a free win: an interior locus is reachable (a
+    // trunk may cross a block over-the-cell), so dropping it removes
+    // candidate positions.  Blocking is unaffected in either mode.
+    void set_keepout_loci_outside_only(bool on) { keepout_loci_outside_only_ = on; ++rev_; }
+    bool keepout_loci_outside_only() const { return keepout_loci_outside_only_; }
+
     Rect get_block_bounds(const std::string& name) const;
     // True iff a block with this exact name has been registered (get_block_bounds
     // silently returns a degenerate {0,0,0,0} for unknown names, so callers that
@@ -634,6 +643,7 @@ private:
     MinStubLength min_stub_len_;
     FeedthruConfig feedthru_;
     DetourChannelSpec detour_channel_;
+    bool keepout_loci_outside_only_ = false;
     std::vector<KeepoutZone> keepouts_;
 };
 class TopologyGenerator {

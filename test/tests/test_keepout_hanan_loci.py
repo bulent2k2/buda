@@ -12,26 +12,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A keepout inside a block blocks, but contributes no Hanan loci.
+"""`set_keepout_loci outside`: an interior keepout blocks, but adds no loci.
 
 `opens_interchange.md` item 12.  Phase 3c imports macro `OBS` as keepouts,
-which is right — that metal is occupied.  What was unbounded is the GRID:
-every keepout edge was a Hanan line, and the grid is a PRODUCT of its two
-axis sets, so a technology that draws obstruction finely bought quadratic
-grid for no reachable position.
+which is right — that metal is occupied.  What is unbounded is the GRID:
+every keepout edge is a Hanan line, and the grid is a PRODUCT of its two
+axis sets, so a technology that draws obstruction finely buys quadratic grid.
+On `demo/ariane` that is 2,479 -> 2,508,972 cells and a planner that does not
+finish in 50 minutes.
 
-The rule landed here is geometric, not by provenance: a keepout lying wholly
-inside a block adds no locus, because the block's own four edges are already
-in the grid.  A keepout that pokes OUT (a halo, a blockage in open space)
-still contributes, and that is the case worth protecting — it is the one
-whose edge a trunk can actually be placed against.
+The policy is geometric rather than by provenance — "inside a block", not
+"came from OBS" — and it is OPT-IN.  Both halves are corrections to how this
+first shipped, and both are pinned below: it went in unconditionally, argued
+as free on the grounds that a position inside a block is unreachable anyway.
+That is FALSE.  A trunk may cross a block over-the-cell, so an interior
+locus is a real candidate position, and dropping it is a trade rather than a
+tidy-up.  `flow/rv/soc_conv_div` proved it — see
+`test_the_default_is_unchanged`.
+
+A keepout that pokes OUT (a halo, a blockage in open space) always
+contributes, in either mode.
 """
 import buda
 
 
-def _fp_with(keepouts):
-    """The Hanan grid of one block plus (x1,y1,x2,y2,inside_block) keepouts."""
+def _fp_with(keepouts, outside_only=True):
+    """The Hanan grid of one block plus (x1,y1,x2,y2,inside_block) keepouts.
+
+    `outside_only` is the `set_keepout_loci outside` policy.  It defaults to
+    True here because that is what these tests are about; the DEFAULT in the
+    product is the opposite, and `test_the_default_is_unchanged` pins it.
+    """
     fp = buda.Floorplan()
+    fp.set_keepout_loci_outside_only(outside_only)
     fp.add_block("m", 100, 100, 200, 200)
     for x1, y1, x2, y2, inside in keepouts:
         fp.add_keepout_zone(x1, y1, x2, y2, [3], inside)
@@ -79,12 +92,30 @@ def test_interior_keepouts_do_not_multiply_the_grid():
     assert len(xs2) * len(ys2) > 100 * len(xs) * len(ys)
 
 
+def test_the_default_is_unchanged():
+    """The policy is OPT-IN, and this is the test that says so.
+
+    The first version of this change shipped unconditionally, on the
+    reasoning that a position inside a block is unreachable anyway.  That is
+    FALSE — a trunk may cross a block over-the-cell — so dropping those loci
+    removes real candidate positions.  It cost `flow/rv/soc_conv_div`'s
+    bundle 42 a 2-segment trunk sitting exactly on an OBS edge, which the
+    QoR corpus could not see and `test_tapered_bit_spans` caught.
+    """
+    xs, ys = _fp_with([(120, 130, 160, 170, True)], outside_only=False)
+    assert xs == [100, 120, 160, 200]
+    assert ys == [100, 130, 170, 200]
+    # …and a fresh Floorplan is in that mode without being asked.
+    assert buda.Floorplan().keepout_loci_outside_only() is False
+
+
 def test_an_interior_keepout_still_blocks():
     """The whole point: this changes the GRID, never what is routable.  A
     keepout covering the block on layer 3 must still be seen as blocking, or
     the fix would have traded a real obstruction for a fast one."""
     fp = buda.Floorplan()
     fp.add_block("m", 100, 100, 200, 200)
+    fp.set_keepout_loci_outside_only(True)
     fp.add_keepout_zone(100, 100, 200, 200, [3], True)
     zones = fp.get_keepout_zones()
     assert len(zones) == 1

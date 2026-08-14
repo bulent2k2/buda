@@ -46,6 +46,16 @@ set_min_stub_length 1000
 # of it (measured: negotiate+ripup take 125 overlaps -> 61 and were still
 # improving at the move budget).  Convergence here is this vehicle's own QoR
 # question, not an interchange one.
+# The knob that makes the obstruction model affordable here (item 12).  The
+# macros' OBS keepouts are imported and enforced either way; `outside` stops
+# the 13,034 of them that lie INSIDE a macro from each adding four Hanan
+# lines.  Grid 2,508,972 -> 6,327 cells; the planner finishes in ~10 s
+# instead of not at all.  Opt-in because it is a real trade — an interior
+# locus is a reachable position (a trunk may cross a block over-the-cell) —
+# and a design whose LEF draws a handful of OBS rects should not pay for a
+# problem it does not have.
+set_keepout_loci outside
+
 def_layer 1 metal1 H LOW 30
 def_layer 2 metal2 V LOW 30
 def_layer 3 metal3 H LOW 30

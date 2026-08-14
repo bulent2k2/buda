@@ -453,14 +453,17 @@ void Floorplan::get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_c
         }
     }
     for (const auto& koz : keepouts_) {
-        // A keepout that lies inside a block contributes no locus the block
-        // has not already contributed, and the grid is a PRODUCT: on a
-        // 133-macro design whose SRAM draws 99 OBS rects, these edges took
-        // the grid from 2,479 cells to 2,508,972 and the hier planner from
-        // 0.79 s to not finishing in 50 minutes (opens_interchange.md item
-        // 12).  Skipping them costs nothing reachable — the zone still
-        // blocks, and the enclosing block's four edges are already here.
-        if (koz.inside_block) continue;
+        // `set_keepout_loci outside` (opens_interchange.md item 12): drop
+        // the loci of keepouts lying inside a block.  The grid is a PRODUCT
+        // of its two axis sets, so on a 133-macro design whose SRAM draws 99
+        // OBS rects these edges took it from 2,479 cells to 2,508,972 and
+        // the hier planner from 0.79 s to not finishing in 50 minutes.
+        //
+        // Opt-in, because it is a genuine trade rather than free: an
+        // interior position IS reachable — a trunk may cross a block
+        // over-the-cell — so this removes candidate positions along with
+        // the grid.  Blocking is unaffected in either mode.
+        if (keepout_loci_outside_only_ && koz.inside_block) continue;
         x_coords.push_back(koz.bbox.x1); x_coords.push_back(koz.bbox.x2);
         y_coords.push_back(koz.bbox.y1); y_coords.push_back(koz.bbox.y2);
     }
