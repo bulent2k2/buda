@@ -39,13 +39,13 @@ set_min_stub_length 1000
 # edges are already grid lines (opens_interchange.md item 12).  Grid 2.5M ->
 # 6,327 cells, and the planner finishes in ~10 s instead of not at all.
 #
-# Consequence worth expecting: the design is now genuinely congested.  OBS
-# covers metal1-metal4 across all 133 macros, so this interconnect has to
-# live on metal5 and above — which is the truth about this floorplan, and
-# what `no_blockages` was hiding.  The flow ends dirty; healers close most
-# of it (measured: negotiate+ripup take 125 overlaps -> 61 and were still
-# improving at the move budget).  Convergence here is this vehicle's own QoR
-# question, not an interchange one.
+# The OBS obstruction model pushes this interconnect onto metal5 and above
+# — that part is the truth about this floorplan.  What ISN'T true anymore
+# is the congestion this paragraph used to describe: PR #739 established
+# the 195-overlap dirty endpoint was the DEF's per-macro placement HALO
+# imported as 133 all-layer routing keepouts, and with the importer fixed
+# the healerless baseline routes at 0 overlaps.  The residual audit
+# violations are the unplaced-container class, not congestion.
 # The knob that makes the obstruction model affordable here (item 12).  The
 # macros' OBS keepouts are imported and enforced either way; `outside` stops
 # the 13,034 of them that lie INSIDE a macro from each adding four Hanan
@@ -136,8 +136,9 @@ refine_selection 60
 # Re-certify AFTER the last refine (Codex P2 on #738): a refine commit is an
 # overlap-parity topology change, so the endpoint must carry its own ripup
 # certificate — the sweep before the refine certifies a state the refine may
-# have since moved.  Measured: the final refine accepts 0 moves here, so
-# this sweep reproduces the 381-trial certificate at the same 52.
+# have since moved.  Post-#739 this is an instant no-op at 0 overlaps; it
+# stays as the structural guarantee (and engages if congestion ever
+# returns).
 ripup_reroute 12
 
 check_design
