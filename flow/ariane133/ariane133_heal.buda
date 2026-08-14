@@ -1,0 +1,132 @@
+# ─────────────────────────────────────────────────────────────────────────
+# ariane133 — a real 45nm design through the hier pipeline
+#
+#   133 SRAM macros, 5 hierarchy levels, 5576 nets, 111 hbundles.
+#
+# Run `python3 flow/ariane133/fetch.py` first: the netlist and the macro LEF
+# are fetched from upstream, not checked in (see ReadMe.md).
+#
+# The DEF is the one already in this repo, `demo/ariane/ariane.def`.  That is
+# not a convenience — it is the finding.  `opens_interchange.md` item 9
+# closed by establishing that demo/ariane's LEF is an ASAP7 SRAM that was
+# never the LEF for that NanGate45 DEF; the file fetched here IS its LEF, and
+# the netlist fetched beside it instantiates `fakeram45_256x16` exactly 133
+# times against that DEF's 133 components.  So this flow is the other half of
+# that item: the same DEF, finally handed the technology that describes it.
+# ─────────────────────────────────────────────────────────────────────────
+
+open_bdb ariane133.bdb
+
+# The DEF is 2000 DBU/um and we want the placement EXACTLY, not rounded onto
+# a micron grid — a 57.57 um macro is not 58 um, and the die ports are 0.07.
+set_import_scale dbu
+set_unit_check on
+
+corner_margin dx 3000 dy 3000
+set_min_stub_length 1000
+
+# ── the design ────────────────────────────────────────────────────────────
+#
+# Only the SRAM's LEF is needed, and that is worth knowing: the NanGate45
+# standard-cell library carries a proprietary licence header, and this flow
+# does not touch it.  The DEF instantiates nothing but the SRAM (it is a
+# FLOORPLAN DEF), and the netlist's 76,731 standard cells are skipped as
+# library cells.  The ten routing layers come from the DEF's own TRACKS.
+#
+# This USED to need `no_blockages`, and no longer does — item 12 landed.
+# The macros' 13,034 OBS keepouts are imported and enforced; they simply no
+# longer contribute Hanan loci, because each lies inside a macro whose own
+# edges are already grid lines (opens_interchange.md item 12).  Grid 2.5M ->
+# 6,327 cells, and the planner finishes in ~10 s instead of not at all.
+#
+# Consequence worth expecting: the design is now genuinely congested.  OBS
+# covers metal1-metal4 across all 133 macros, so this interconnect has to
+# live on metal5 and above — which is the truth about this floorplan, and
+# what `no_blockages` was hiding.  The flow ends dirty; healers close most
+# of it (measured: negotiate+ripup take 125 overlaps -> 61 and were still
+# improving at the move budget).  Convergence here is this vehicle's own QoR
+# question, not an interchange one.
+# The knob that makes the obstruction model affordable here (item 12).  The
+# macros' OBS keepouts are imported and enforced either way; `outside` stops
+# the 13,034 of them that lie INSIDE a macro from each adding four Hanan
+# lines.  Grid 2,508,972 -> 6,327 cells; the planner finishes in ~10 s
+# instead of not at all.  Opt-in because it is a real trade — an interior
+# locus is a reachable position (a trunk may cross a block over-the-cell) —
+# and a design whose LEF draws a handful of OBS rects should not pay for a
+# problem it does not have.
+set_keepout_loci outside
+
+def_layer 1 metal1 H LOW 30
+def_layer 2 metal2 V LOW 30
+def_layer 3 metal3 H LOW 30
+def_layer 4 metal4 V LOW 30
+def_layer 5 metal5 H LOW 30
+def_layer 6 metal6 V LOW 30
+def_layer 7 metal7 H LOW 30
+def_layer 8 metal8 V LOW 30
+def_layer 9 metal9 H TOP 30
+def_layer 10 metal10 V TOP 30
+
+import_def_lef ../../demo/ariane/ariane.def fakeram45_256x16.lef
+import_verilog ariane.v
+
+# A DEF is flat — it lists leaf instances only — so every level between the
+# die and the macros arrives from the Verilog with no geometry at all.  This
+# is the step that gives them one, and the step whose warnings are the honest
+# limit of this vehicle: 28 containers are placed from their macro children,
+# and 16 pure-logic ones (ex_stage_i and its whole subtree, csr_regfile_i,
+# id_stage_i, issue_stage_i, i_frontend, ...) have no placed descendant
+# because a floorplan DEF places no standard cells — count them with
+# `grep -c BUDA-1607` on the flow log.  Those 16 are why check_design is not
+# clean below.
+derive_container_bboxes margin 4000
+
+# ── routing interface ─────────────────────────────────────────────────────
+derive_busterms 4
+
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+add_blocks_from_bdb 3 skip
+add_blocks_from_bdb 4 skip
+
+# ── the pipeline ──────────────────────────────────────────────────────────
+run_hier_bundler depth 4
+
+
+# ── heal (stage a: the abstract-overlap residual) ─────────────────────────
+# The chip_stack/chip3 interleaved scheme (PR #675/#713) at the NUTS stage
+# this vehicle stops at.  MEASURED (2026-08-14, 4-core box, --threads 4):
+# 195 overlaps -> 52, audit 178 -> 175 violations, WL 106.4M, 151s total
+# (baseline 12s) — and 52 is a CERTIFIED stall, not a budget limit: rounds
+# 2-3 end in full ripup sweep certificates (381 trials, 0 moves), pressed
+# negotiate, MST edge flips and a chase_overlaps refine all find at most 1
+# more overlap (traded for an interval violation), a multi_trunk pool lands
+# WORSE (56 @ +8M WL), and set_max_bundle_bits auto + run_planner hier 5
+# change nothing.  52 overlaps is this floorplan's congestion truth — OBS
+# covers metal1-metal4 across all 133 macros, so the interconnect lives on
+# metal5+ (the flow header's own point).  The pass-through violations on
+# the geometry-less logic containers are the other floor component:
+# healers cannot place what the floorplan DEF never placed.
+#
+# healersAhead MATTERS here, in the winning direction (unlike
+# rnr/mix2_fast_bottomup_caps, where it regresses): the declaration's
+# gated kSegsRel + run_nuts dead-span escalation enter the healer chain at
+# 125 overlaps instead of 195 and converge lower (52 vs 58-and-climbing at
+# much higher WL without it).  Measure, don't assume.
+set_planner_param healersAhead 1
+generate_hier_topologies
+run_planner hier 2
+run_nuts
+negotiate_congestion
+ripup_reroute 12
+refine_selection 30
+negotiate_congestion
+ripup_reroute 12
+refine_selection 30
+negotiate_congestion
+ripup_reroute 12
+refine_selection 60
+
+check_design
+report_wirelength
