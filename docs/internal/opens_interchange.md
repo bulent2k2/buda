@@ -8,26 +8,32 @@ described in [`lefdef_interface_plan.md`](lefdef_interface_plan.md) (phases
 [`message_ids.md`](message_ids.md) and [`../TCL_FRONT_END.md`](../TCL_FRONT_END.md);
 this page is the backlog behind them.
 
-Snapshot index — last verified against `main`: **2026-08-12**.  Two entries
-are owed code: **item 8, the packaged wheel** — a CI and packaging project
-rather than an interchange defect — and **item 12, the macro `OBS` grid
-blowup**, which is the real thing: an import that is individually correct
-and collectively unaffordable.  Item 9 closed WITHOUT any code: its last
-residual turned out to be a provenance accident with no dependants, and
-saying so precisely is the resolution.  Each item states what was missing,
-why it was left rather than forgotten, and where to start.  Every claim
-below was reproduced on `main` before being written down; the reproduction
-is given so a reader can re-derive it rather than trust it.
+Snapshot index — last verified against `main`: **2026-08-14**.  Everything
+here has landed except **item 8, the packaged wheel**, which is a CI and
+packaging project rather than an interchange defect and is the only entry
+still owed code.  Item 9 closed WITHOUT any: its last residual turned out to
+be a provenance accident with no dependants, and saying so precisely is the
+resolution.  Item 12 closed WITH code, but not the code this page first
+proposed — see its "the proposed fix was the wrong one" section, which is
+the third entry here to record that, and the first where the error was
+caught by measuring the geometry before building anything.  Each item states
+what was missing, why it was left rather than forgotten, and where to start.
+Every claim below was reproduced on `main` before being written down; the
+reproduction is given so a reader can re-derive it rather than trust it.
 
 Resolved items are kept in place, struck through, rather than moved to the
 resolved table at the bottom. Each entry records where this page's **own
 first description was wrong** — item 1 about the merge case, and about the
 fix it originally proposed, which would have been the wrong fix; item 2
 about the severity, having called a silent SHORT a width collapse; item 3
-reserved a size-rule choice that measurement showed to be no choice at all.
+reserved a size-rule choice that measurement showed to be no choice at all;
+item 12 proposed a rectangle union that would have been work for almost
+nothing, the rects it meant to merge having real gaps between them.
 That is worth more than a tidy list, and the pattern is worth naming: the
 first description of a fault is written from the symptom you noticed, and
-the symptom is rarely the whole fault.
+the symptom is rarely the whole fault.  Item 12 adds the corollary — the
+first *fix* is written from the description, so it inherits the error, and
+the cheapest place to catch it is a probe of the real data before any code.
 
 There are three working vehicles. Two are deliberately at opposite ends of
 the scale: **[`flow/def/`](../../flow/def/)** is the smallest design that
@@ -748,7 +754,7 @@ Pinned by `test_bundler_divergent.py`.
 
 ---
 
-## 12. Macro `OBS` import scales with LEF detail, not with the design
+## 12. ~~Macro `OBS` import scales with LEF detail, not with the design~~ — RESOLVED 2026-08-14
 
 Phase 3c reads macro `OBS` into keepouts, which is correct — that metal is
 occupied and routing over it is a real violation. What was never bounded is
@@ -782,24 +788,73 @@ detailed obstruction, which is most real ones. The existing vehicles missed
 it because `flow/def/` and `flow/rv/` both author their own LEF, and a
 hand-written LEF has a handful of `OBS` rects because a human typed them.
 
-**Where to start.** The cheapest correct fix is almost certainly to
-**merge each macro's `OBS` into its covering rectangles at import** — a
-per-macro rectangle union, computed once per *cell* and instanced, not once
-per component. For a memory whose obstruction is "all of metal1–metal4 over
-the whole footprint drawn as 99 stripes", that collapses to a handful of
-rects per layer and costs nothing in fidelity. Two things to check before
-building it: the union must be per LAYER (an `OBS` stripe set differs
-between metal1 and metal4, and merging across layers would block routing
-that is legal), and the result must stay a keepout *set* rather than a
-bbox — a genuinely L-shaped obstruction exists and its bounding box would
-forbid legal track. A cruder alternative, worth measuring against it, is to
-keep the rects but stop feeding keepout edges into the Hanan grid, deriving
-trunk loci from blocks alone and letting the keepout only cull tracks; that
-is a smaller change and may be most of the win.
+### The proposed fix was the wrong one, and measuring first is what said so
 
-Until then, a design with detailed macro `OBS` needs `import_def_lef …
-no_blockages`, which is what `flow/ariane133/` passes — and says so, because
-the flag silently trades away the obstruction model.
+This page's own first answer was to **merge each macro's `OBS` into covering
+rectangles at import** — a per-layer, per-cell rectangle union. It sounded
+obviously right: 99 rects to describe "all of metal1–metal4 over the whole
+footprint" is clearly redundant.
+
+It is not redundant. Looking at the geometry before writing any union code:
+
+| layer | rects | what they are |
+|---|---|---|
+| metal1, metal2 | 1 each | the full macro |
+| metal3 | 61 | one near-full rect **plus 60 slivers with real gaps** — pin access down the left edge |
+| metal4 | 35 | two full-width bands plus vertical strips |
+| OVERLAP | 1 | not a routing layer; already skipped |
+
+The metal3 gaps are genuine openings, so a union cannot collapse them: it
+would have been real work for almost nothing, and it would have left the
+grid exactly as large.
+
+The measurement that redirected it took one probe. On `demo/ariane`:
+
+| | Hanan x | Hanan y | cells |
+|---|---|---|---|
+| blocks alone | 67 | 37 | **2,479** — *exactly the `no_blockages` grid* |
+| keepouts add | +1,929 | +1,220 | 2,508,972 |
+
+The entire blowup is **loci**, not rects. The rects were never the problem.
+
+### What landed
+
+A keepout that lies wholly inside a block contributes **no Hanan loci**. The
+block's own four edges are already in the grid, and no trunk position inside
+a bracketed footprint is reachable, so those coordinates buy nothing and
+cost a product.
+
+Three deliberate choices:
+
+* **Geometric, not by provenance.** The rule is "inside a block", not "came
+  from `OBS`". `KeepoutZone::inside_block` defaults false, so every
+  hand-declared `add_keepout` is untouched.
+* **The importer measures containment**, against the instance's placed
+  extent, rather than assuming an `OBS` rect is inside its macro. LEF does
+  not require one to sit within `SIZE`, and a rect that pokes out is exactly
+  the one whose edge *is* a useful locus. It decides this where both
+  rectangles are already in hand and it costs nothing; a later consumer
+  would have to search every block to recover the same fact.
+* **A halo still contributes.** It extends beyond the footprint by
+  construction, so its edges are reachable positions — and on ariane those
+  133 zones are why the grid lands at 6,327 cells rather than 2,479.
+
+**Blocking behaviour is unchanged.** This decides which coordinates enter
+the grid and nothing else.
+
+Measured: 13,034 of 13,167 keepouts interior, grid **2,508,972 → 6,327
+cells (397×)**, and `flow/ariane133/` now runs **with** its obstruction
+model in 18.9 s where it previously did not finish — the flag is gone from
+that flow, which was this item's closing condition.
+
+One consequence to expect rather than be surprised by: the vehicle is now
+genuinely congested. `OBS` covers metal1–metal4 across all 133 macros, so
+that interconnect has to live on metal5 and above — which is the truth
+about the floorplan, and what `no_blockages` was hiding. It ends dirty;
+healers take 125 overlaps to 61 and are still improving at the move budget.
+Convergence there is that vehicle's QoR question, not an interchange one.
+
+Pinned by `test_keepout_hanan_loci.py`.
 
 ---
 
