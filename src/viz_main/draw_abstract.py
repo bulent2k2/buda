@@ -33,6 +33,21 @@ from ui_state import ViewState              # noqa: F401
 from viz_common import *                    # noqa: F401,F403
 import viz_window
 
+#: Above this many keepout zones the per-zone labels are dropped.  They
+#: are the dominant redraw cost (measured 20.5 s of a 27 s redraw on
+#: flow/ariane133's 13,034 zones) and past a few hundred they overlap
+#: into an unreadable band, so they stop being information first and
+#: stay expensive afterwards.  The shapes are always drawn.
+_KOZ_LABEL_MAX = 200
+#: Above this many zones the HATCH is dropped for a translucent fill.
+#: Measured: 5.07 s per redraw hatched vs 0.21 s unhatched at 13,034
+#: zones.  Higher than the label cap because a hatch stays legible
+#: longer than a text label does — the two caps encode where each one
+#: stops being information, not one shared guess.
+_KOZ_HATCH_MAX = 2000
+
+
+
 class VizAbstractDrawMixin:
 
     def _redraw_nuts_tracks(self, rerun_result):
@@ -204,30 +219,66 @@ class VizAbstractDrawMixin:
 
 
     def draw_keepouts(self):
-        """Draw KeepoutZones as hatched rectangles with layer labels."""
+        """Draw KeepoutZones as hatched rectangles, labelled while legible.
+
+        Both halves of this scale with the keepout COUNT, which is set by the
+        technology rather than the design: one `fakeram45_256x16` carries 99
+        `OBS` rects, so `flow/ariane133`'s 133 macros import 13,034 zones.
+        Drawn one artist each, that was 13,034 patches AND 13,034 texts, and
+        matplotlib re-renders every artist on every draw — so the window took
+        ~30 s to appear and ~28 s again on each expose (a focus switch, a
+        resize), which reads as a hang rather than as slowness.
+
+        Measured on that flow, per redraw: 20.5 s in the texts, 8.2 s in the
+        patches, 0.25 s for everything else.  So the labels cost more than
+        the shapes they label — and at 13k they overlap into an unreadable
+        band anyway, which is the tell that they are not doing their job.
+        """
         self._keepout_artists = []
         vis = self.ui_state.keepouts
-        for koz in self.fp.get_keepout_zones():
-            r = koz.bbox
-            w = r.x2 - r.x1
-            h = r.y2 - r.y1
-            # Red hatched rectangle
-            rect = patches.Rectangle(
-                (r.x1, r.y1), w, h,
-                linewidth=1, edgecolor='red', facecolor='none',
-                hatch='///', alpha=0.4, zorder=1)
-            rect.set_visible(vis)
-            self.ax.add_patch(rect)
-            self._keepout_artists.append(rect)
-            
-            # Label with layers
-            layers = sorted(list(koz.layer_ids))
-            layer_str = "KOZ: " + ",".join(_LAYER_LABEL.get(lid, f"M{lid}").split()[0] for lid in layers)
-            txt = self.ax.text((r.x1 + r.x2) / 2, r.y2 + 5,
-                         layer_str, color='red', fontsize=7, 
-                         ha='center', va='bottom', clip_on=True, zorder=2)
-            txt.set_visible(vis)
-            self._keepout_artists.append(txt)
+        zones = list(self.fp.get_keepout_zones())
+
+        # ONE collection instead of N patches: same hatched rectangles, one
+        # artist for the renderer to walk.  Every consumer of this list only
+        # calls set_visible(), which a Collection supports, so the toggle and
+        # the view reset are untouched.
+        rects = [patches.Rectangle((k.bbox.x1, k.bbox.y1),
+                                   k.bbox.x2 - k.bbox.x1,
+                                   k.bbox.y2 - k.bbox.y1) for k in zones]
+        if rects:
+            # The HATCH is the third thing here that costs more than it says.
+            # Measured on the same 13,034 zones, with the collection already
+            # in place: 5.07 s per redraw hatched, 0.21 s with the hatch
+            # dropped — 96% of what was left.  And at that density each zone
+            # is a few pixels, so the diagonals cannot resolve; a translucent
+            # fill distinguishes the zones perfectly well and is what the
+            # hatch was standing in for.
+            dense = len(rects) > _KOZ_HATCH_MAX
+            coll = PatchCollection(
+                rects, match_original=False, linewidths=1, edgecolors='red',
+                facecolors=('red' if dense else 'none'),
+                hatch=(None if dense else '///'),
+                alpha=(0.18 if dense else 0.4), zorder=1)
+            coll.set_visible(vis)
+            self.ax.add_collection(coll)
+            self._keepout_artists.append(coll)
+
+        # A label per zone is worth drawing only while it can be read.  Past
+        # the cap they are illegible AND the dominant redraw cost, so they are
+        # dropped rather than stacked — the count is in the stats line and the
+        # shapes are still all there.
+        if len(zones) <= _KOZ_LABEL_MAX:
+            for koz in zones:
+                r = koz.bbox
+                layers = sorted(list(koz.layer_ids))
+                layer_str = "KOZ: " + ",".join(
+                    _LAYER_LABEL.get(lid, f"M{lid}").split()[0] for lid in layers)
+                txt = self.ax.text((r.x1 + r.x2) / 2, r.y2 + 5,
+                                   layer_str, color='red', fontsize=7,
+                                   ha='center', va='bottom', clip_on=True,
+                                   zorder=2)
+                txt.set_visible(vis)
+                self._keepout_artists.append(txt)
 
         if self._btn_keepouts is not None:
              # Always visible; dimmed (inactive) when there are no keepouts.
