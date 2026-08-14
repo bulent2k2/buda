@@ -213,6 +213,33 @@ class VizAbstractDrawMixin:
             txt.set_visible(self.ui_state.blocks and self.ui_state.block_names)
 
 
+    def _nudge(self, frac=0.005, floor=1.0):
+        """A small DESIGN-PROPORTIONAL distance in layout units.
+
+        For the drawing niceties that are meant to be SEEN rather than
+        measured: the de-overlap fan on coincident bus lines, the gap
+        between a keepout and its label.  Those were absolute constants (2
+        and 5 layout units), which silently stop working the moment a unit
+        is not about a micron — under `set_import_scale dbu` a unit is
+        1/2000 µm, so a 2-unit fan is 1 nm and coincident buses draw exactly
+        on top of each other with nothing to say they are several.
+
+        Deliberately NOT a screen-space (points) offset, which would be the
+        purest reading of "a visual nudge": the offset is baked into the
+        artists' data coordinates AND reused for their markers and busterm
+        positions, so making it screen-space means threading a transform
+        through all of them — a real refactor of a view this cannot
+        interactively test, for the same picture.  A fraction of the design
+        extent is scale-free, which is the property that was missing, and it
+        reproduces the historical look on a micron design of typical size.
+
+        The floor keeps it non-zero on a degenerate (zero-extent) design.
+        """
+        x_min, x_max, y_min, y_max = self._layout_bbox()
+        extent = max(x_max - x_min, y_max - y_min)
+        return max(floor, extent * frac)
+
+
     def draw_blocks(self):
         self._redraw_blocks()
         self.draw_keepouts()
@@ -273,7 +300,7 @@ class VizAbstractDrawMixin:
                 layers = sorted(list(koz.layer_ids))
                 layer_str = "KOZ: " + ",".join(
                     _LAYER_LABEL.get(lid, f"M{lid}").split()[0] for lid in layers)
-                txt = self.ax.text((r.x1 + r.x2) / 2, r.y2 + 5,
+                txt = self.ax.text((r.x1 + r.x2) / 2, r.y2 + self._nudge(),
                                    layer_str, color='red', fontsize=7,
                                    ha='center', va='bottom', clip_on=True,
                                    zorder=2)
@@ -593,7 +620,10 @@ class VizAbstractDrawMixin:
                 continue
             topo     = wrapper.input.candidates[wrapper.plan.selected_topology_index]
             viz_lw   = 3.0 + math.log2(1 + wrapper.input.width) * 2.0
-            offset   = (i % 3 - 1) * 2.0
+            # De-overlap fan so coincident bundles are distinguishable.
+            # Design-proportional (see _nudge): as an absolute 2.0 this
+            # was 1 nm on a DBU-scale design and did nothing at all.
+            offset   = (i % 3 - 1) * self._nudge()
             alpha    = 0.8
 
             ct = ic.ConnTopology(); ct.build(topo, self.fp)

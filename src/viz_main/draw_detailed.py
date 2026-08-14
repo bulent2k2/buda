@@ -33,6 +33,15 @@ from ui_state import ViewState              # noqa: F401
 from viz_common import *                    # noqa: F401,F403
 import viz_window
 
+# Visibility floor for a bit-wire, in POINTS.  A wire narrower than this at
+# the current zoom is drawn at the floor so it stays on screen: at
+# full-design zoom a real track is far below one pixel, and the detailed
+# view's job there is "where did the bits go", not "how wide are they".
+# Lower than the abstract view's 2.5pt floor because a detailed view shows
+# every BIT — a thousand of them at 2.5pt is a smear where 0.6pt is a bus.
+_DETAILED_LW_FLOOR = 0.6
+
+
 class VizDetailedDrawMixin:
 
     # ── Pre-routes (Phase G: first-class PreRoutedSegments) ────────────────
@@ -257,28 +266,60 @@ class VizDetailedDrawMixin:
 
         # Bit-wire NetSegments → one LineCollection per (bundle, layer).
         # span_lo/span_hi are already junction-adjusted by DetailedNUTSEngine.
+        # Grouped by (bundle, layer, WIDTH), not just (bundle, layer): the
+        # width is now a per-collection PHYSICAL property that the zoom sync
+        # sets as a scalar, so a collection has to be width-uniform.  In
+        # practice a layer's signal slots are one width and this adds no
+        # groups; a pattern that mixes them gets one collection per width
+        # rather than one wrong width for all of them.
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
-        seg_groups = {}   # (bundle_id, layer) -> ([segment], [linewidth])
+        seg_groups = {}   # (bundle_id, layer, width) -> [segment]
         for ns in detailed_result.net_segments:
             is_h = self._layer_is_h.get(ns.layer, True)
-            lw   = max(0.6, ns.width * 0.6)
             if is_h:
                 seg = [(ns.span_lo, ns.track_position), (ns.span_hi, ns.track_position)]
             else:
                 seg = [(ns.track_position, ns.span_lo), (ns.track_position, ns.span_hi)]
-            g = seg_groups.setdefault((ns.bundle_id, ns.layer), ([], []))
-            g[0].append(seg); g[1].append(lw)
+            seg_groups.setdefault((ns.bundle_id, ns.layer, ns.width), []).append(seg)
 
-        for (bid, layer), (segs, lws) in seg_groups.items():
-            col = layer_specs.get(layer, {'color': 'green'})['color']
-            lc  = LineCollection(segs, colors=col, linewidths=lws,
+        for (bid, layer, width), segs in seg_groups.items():
+            col  = layer_specs.get(layer, {'color': 'green'})['color']
+            is_h = self._layer_is_h.get(layer, True)
+            # A LINEWIDTH IS IN POINTS AND A TRACK WIDTH IS IN LAYOUT UNITS.
+            # This used to bake `max(0.6, ns.width * 0.6)` — a points value
+            # computed from a layout-unit number, which is only sane when one
+            # layout unit is about one point.  It is at micron scale, so the
+            # picture looked right for years; `set_import_scale dbu` makes a
+            # unit 1/2000 µm, so ariane133's 1.6 µm metal9 wire (3200 DBU)
+            # asked for a 1920-POINT line — 27 inches on a 14-inch figure, a
+            # band across the whole canvas with the span still correct.
+            #
+            # The width now travels as the PHYSICAL number it is and
+            # _sync_nuts_linewidths converts it to points at the current
+            # zoom, as the abstract NUTS lines have always done.  Unit-scale
+            # independent by construction, and a zoomed-in wire is drawn at
+            # its true width against the [Tracks] rails.
+            lc  = LineCollection(segs, colors=col, linewidths=_DETAILED_LW_FLOOR,
                                  capstyle='butt', zorder=15)
             lc.set_alpha(0.9)
             lc.set_visible(False)
             self.ax.add_collection(lc)
-            # lw=None: widths are baked per-segment on the collection, so
-            # _refresh_highlight must not overwrite them with a scalar.
-            self._register_detailed(bid, lc, alpha=0.9, lw=None, layer=layer)
+            self._register_detailed(bid, lc, alpha=0.9, lw=_DETAILED_LW_FLOOR,
+                                    layer=layer, phys_w=width, horiz=is_h,
+                                    lw_floor=_DETAILED_LW_FLOOR)
+
+        # The zoom sync is what makes a physical width drawable, so ensure it
+        # is hooked HERE too.  It used to be installed only by the abstract
+        # NUTS draw, which was fine while it was the only consumer — a
+        # detailed view in a session that never drew abstract lines (or one
+        # built before them) would otherwise keep its widths frozen.
+        # Idempotent: the hook guards itself.
+        self._hook_lw_sync()
+        # Fit the freshly built widths to the CURRENT zoom.  The hook only
+        # fires on a limit change or a draw, and these artists are built
+        # lazily on the first [Detailed] toggle — without this they would
+        # show at the floor width until the user happened to zoom.
+        self._sync_nuts_linewidths()
 
         # Per-bit vias (NetVia) → one scatter (PathCollection) per
         # (bundle, upper layer): thousands of via markers collapse into a

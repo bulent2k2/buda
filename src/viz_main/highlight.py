@@ -81,7 +81,7 @@ class VizHighlightMixin:
         (unless below the visibility floor), never wider than the static
         viz_lw (preserving the zoomed-in look).  Returns True if any width
         changed (caller decides whether a redraw is needed)."""
-        if not self._bundle_artists:
+        if not self._bundle_artists and not self._detailed_bundle_artists:
             return False
         o  = self.ax.transData.transform((0.0, 0.0))
         px = self.ax.transData.transform((1.0, 0.0))[0] - o[0]
@@ -89,14 +89,22 @@ class VizHighlightMixin:
         pts_x = abs(px) * 72.0 / self.fig.dpi   # points per data unit, x
         pts_y = abs(py) * 72.0 / self.fig.dpi   # points per data unit, y
         changed = False
-        for entries in self._bundle_artists.values():
+        # BOTH registries: the detailed bit-wires are physical-width lines
+        # exactly as the abstract NUTS lines are, and syncing only the
+        # abstract ones left the detailed view's widths frozen at whatever
+        # was baked in at build time.
+        for entries in list(self._bundle_artists.values()) + \
+                       list(self._detailed_bundle_artists.values()):
             for e in entries:
                 pw = e.get('phys_w')
                 mp = e.get('marker_phys')
                 if pw:
                     # An H segment's width is vertical; a V segment's horizontal.
                     pts = pts_y if e['horiz'] else pts_x
-                    lw  = max(self._LW_MIN_PTS, min(e['lw_cap'], pw * pts))
+                    cap = e.get('lw_cap')
+                    floor = e.get('lw_floor') or self._LW_MIN_PTS
+                    want = pw * pts
+                    lw  = max(floor, want if cap is None else min(cap, want))
                     if abs(lw - e['lw']) > 0.1:
                         e['lw'] = lw
                         e['artist'].set_linewidth(lw)
@@ -425,7 +433,8 @@ class VizHighlightMixin:
     # Detailed NUTS (Stage 9) drawing
     # ------------------------------------------------------------------
 
-    def _register_detailed(self, bundle_id, artist, *, alpha, lw=None, layer=None):
+    def _register_detailed(self, bundle_id, artist, *, alpha, lw=None, layer=None,
+                           phys_w=None, horiz=None, lw_floor=None):
         artist.set_picker(5)
         self._detailed_bundle_artists.setdefault(bundle_id, []).append({
             'artist':  artist,
@@ -433,4 +442,20 @@ class VizHighlightMixin:
             'lw':      lw,
             'is_band': False,
             'layer':   layer,
+            # Bit-wires carry their PHYSICAL track width the same way the
+            # abstract NUTS lines do, so _sync_nuts_linewidths fits the drawn
+            # point-width to the true footprint at every zoom.  Baking a
+            # static point-width from a layout-unit number instead is only
+            # right when one layout unit happens to be about one point — see
+            # the note in _build_detailed_artists.
+            'phys_w':   phys_w,
+            'horiz':    horiz,
+            # UNCAPPED, unlike the abstract view: its cap keeps a schematic
+            # bold line from ballooning, but a bit-wire IS its width — zoomed
+            # in it has to keep matching the [Tracks] rails it sits on, which
+            # are drawn in data coordinates.
+            'lw_cap':   None,
+            'lw_floor': lw_floor,
+            'marker_phys': None,
+            'ms': None, 'ms_cap': None, 'ms_floor': 4.0,
         })
