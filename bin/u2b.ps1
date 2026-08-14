@@ -32,7 +32,7 @@ if ($args.Count -eq 0) {
 }
 
 $test = $args[0]
-$rest = if ($args.Count -gt 1) { $args[1..($args.Count - 1)] } else { @() }
+$rest = @(if ($args.Count -gt 1) { $args[1..($args.Count - 1)] } else { @() })
 
 # A filesystem-safe stem for the output name (strip any path::func decoration).
 $stem = $test -replace '[/:.\\]', '_'
