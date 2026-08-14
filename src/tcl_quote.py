@@ -30,8 +30,11 @@ BOTH of Tcl's word-parsing stages fire on an ordinary path:
                    rest
 
 They are separate stages and need separate mitigations, which is why
-`tcl_path` does two things and not one: forward-slash first (kills the escape
-reading, and Tcl accepts `/` on Windows), then quote (kills the split).
+`tcl_path` does two things and not one: respell the separators (kills the
+escape reading, and Tcl accepts `/` on Windows), then quote (kills the
+split).  The respelling happens only where the backslash IS a separator --
+see `tcl_path`; on POSIX it is an ordinary filename character and the
+escaping carries it instead.
 
 `tcl_word` quotes a whitespace-free command TOKEN -- it is what the corpus
 translation is built on, so its output is byte-load-bearing and its default
