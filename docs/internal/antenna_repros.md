@@ -24,15 +24,17 @@ here is asserted from reading the code alone — every measurement is from a run
 | 2 | busterm tap vouches for every bit | `flow/antenna_taper_passthru.buda` | FIXED #690 |
 | 3 | bus wider than the block it crosses | `flow/antenna_wide_bus_passthru.buda` | UNREACHABLE |
 | 4 | crossing credited at the nominal seg | `flow/rnr/mix2_topdown_refine.buda` | FIXED #695 |
-| 5 | a duplicated leg off one block | `flow/mst_shared_leg_prefix.buda` + `flow/mst_shared_leg_suffix.buda` | **PARTLY FIXED, opt-in** (#708) |
+| 5 | a duplicated leg off one block | `flow/mst_shared_leg_prefix.buda` + `flow/mst_shared_leg_suffix.buda` | **5a FIXED opt-in** (#708) · 5b OPEN · 5c reclassified |
 | 6 | a culled partner strands a segment | `flow/antenna_culled_partner.buda` + `flow/antenna_starved_partner.buda` | **OPEN — cause found** |
 | 7 | `rv/soc` 1.25M units mid-flow | `flow/rv/soc.buda` | **OPEN — same cause as 6** |
 
 Entries 5, 6 and 7 are the live ones. 6 and 7 are **one defect** — a
 DetailedNUTS pass-ordering problem, isolated to a 4-bit vehicle in entry 6. 5 is
-a *class* of three members sharing one geometry, of which one is fixed behind an
-opt-in and two are open. Entry 3 is a negative result kept as a guard. Entries
-3, 6 and 7's vehicles all end DIRTY on purpose; none belongs in the QoR corpus.
+a *class* of three members sharing one geometry: 5a is fixed behind an opt-in,
+5b is open, and 5c turns out to be neither an antenna nor (mostly) a redundancy —
+measured, not argued, by `tools/scan_collinear_stubs.py`. Entry 3 is a negative
+result kept as a guard. Entries 3, 6 and 7's vehicles all end DIRTY on purpose;
+none belongs in the QoR corpus.
 
 ---
 
@@ -130,7 +132,7 @@ The geometry has **three** producers, and only the first is fixed:
 |---|---|---|---|
 | 5a | `realize_mst_edge`, shared node holds the LOWER index | legs **start** there | fixed behind `set_trim_mst_legs` |
 | 5b | `realize_mst_edge`, shared node holds the HIGHER index | legs **end** there | OPEN |
-| 5c | TRUNK stub generation | stub + leg leave one trunk point | OPEN |
+| 5c | TRUNK stub generation | stub + leg leave one trunk point | **NOT AN ANTENNA — reclassified, see below** |
 
 `compute_mst` emits every edge with `u < v` and `realize_mst_edge` routes
 `u → v`, which is what splits 5a from 5b. The lever is **which block is the
@@ -145,8 +147,9 @@ demoting the hub to a receiver can.
 * 5b — `flow/mst_shared_leg_suffix.buda`: the same four rectangles with the hub
   demoted to a receiver. It turns the trim **on**, so what it shows survives a
   build that has the fix and was asked to apply it.
-* 5c — no separate vehicle needed: it is present in 5a's own fixture, nine pairs
-  of it.
+* 5c — `tools/scan_collinear_stubs.py` (no argument scans a default spread of 11
+  flows). It is also present in 5a's own fixture, nine pairs of it — all of the
+  REDUNDANT kind there, which is what made the shape look worse than it is.
 
 **Measured.**
 
@@ -160,9 +163,8 @@ demoting the hub to a receiver can.
   perpendicular partner claiming an ENDPOINT conn to *both* legs, which NUTS
   reports as a junction infeasibility and which feeds ripup's contenders. Do not
   sell the mirror as the same defect.
-* 5c: `TRUNK_H@y950` has seg1 `(2010,1000)→(2010,950)` inside seg3
-  `(2010,1800)→(2010,950)`, which runs straight through `hub` (x 2000..2100,
-  y 1000..1100).
+* 5c: see the section below — it is **not an antenna** and mostly not even
+  redundant. `tools/scan_collinear_stubs.py` measures it.
 
 **Status.** 5a FIXED behind an **opt-in** (#708): `set_trim_mst_legs [on|off]`,
 default off, byte-identical unused, `BUDA_MST_LEG_TRIM=1` for corpus A/B. Opted
@@ -170,6 +172,51 @@ in on `mix2_topdown_refine`: `check_design` 3 violations → Success, detailed W
 793215 → 793198. 5b and 5c are strict `xfail`s in
 `test/tests/test_mst_shared_leg_prefix.py`, and they **still xfail with the trim
 on** — so they record "not covered" rather than "not exercised".
+
+### 5c is not an antenna, and mostly not redundant either
+
+Filing 5c here was an error of provenance: it was found by generalizing the
+antenna scanner, and it kept the label of the instrument rather than of the
+defect. Both legs are attached at **two** points each — a block tap at the far
+end, the trunk junction at the shared end — so nothing dangles and
+`detect_bit_antennas` is right to stay silent.
+
+The natural next thought is that the shape is at least *wasteful*: N collinear
+stubs to N aligned blocks, where the longest passes over the rest, so all but
+one could go. `tools/scan_collinear_stubs.py` tests exactly that, classifying
+every containment pair by whether the long leg actually serves the short leg's
+block (BUDA's rule is INTERIOR overlap — abutment does not cover, and
+`Topology::pass_through_count` agrees). Over 11 flows, flat and hier, small and
+large:
+
+```
+REDUNDANT:long_leg_crosses_it        174     (22.3%)
+LOAD_BEARING:long_leg_only_grazes    547
+LOAD_BEARING:short_leg_taps_nothing   60
+SELECTED+LOAD_BEARING                  4
+SELECTED+REDUNDANT                     0
+```
+
+So the "longest saves the rest" rule is **real but a minority case** — about one
+pair in four. The other three in four are collinear by *coincidence of
+placement*: two blocks share an x1 (or y1), so both stubs leave the trunk on the
+same line, and the long one runs along the short one's block **edge** without
+covering it. `mix2_topdown_refine` bundle 14 is the canonical instance —
+seg3 at x=640 grazes `u2` (x[640,690], y[1170,1220]) and the topology reports
+`pass_through_count: 0`. Delete that stub and `u2` opens.
+
+**And the last line is the one that decides priority: `SELECTED+REDUNDANT` is
+zero.** In every flow measured, the pairs that reach a *selected* candidate are
+all load-bearing; no removable stub has been observed in a routed design. So
+removing them buys no wire anywhere we can currently measure — the benefit is
+pool hygiene, in exchange for the pool-resorting blast radius that made 5a
+opt-in. That is a bad trade on present evidence.
+
+Two things would change it, and both are measurements rather than opinions: a
+design where a REDUNDANT pair is selected, or a demonstration that the shape
+costs ranking (a candidate losing to a rival only because it carries duplicate
+length it did not need). Until one of those exists, 5c is **recorded, not
+open** — and it belongs to topology generation, not to this page.
 
 **Why opt-in, and the part worth carrying to the next fix of this kind.** The
 first cut applied the trim unconditionally and cost `chip3_topdown` 260 → 636

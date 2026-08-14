@@ -43,16 +43,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from subprocess_env import buda_env
 
 _ROOT = Path(__file__).parents[2]
 
 
 def _run_buda(script):
-    build_dir = _ROOT / "build"
-    tools_dir = _ROOT / "tools"
-    ppath = os.environ.get("PYTHONPATH", "")
-    new_ppath = f"{build_dir}:{tools_dir}" + (f":{ppath}" if ppath else "")
-    env = {**os.environ, "PYTHONPATH": new_ppath}
+    env = buda_env(_ROOT)
     r = subprocess.run(
         [sys.executable, str(_ROOT / "src" / "buda_cli.py"), "--no-viz", str(script)],
         capture_output=True, text=True, env=env,

@@ -429,7 +429,8 @@ void bind_routing(py::module_& m) {
 
     py::class_<KeepoutZone>(m, "KeepoutZone")
         .def_readwrite("bbox",      &KeepoutZone::bbox)
-        .def_readwrite("layer_ids", &KeepoutZone::layer_ids);
+        .def_readwrite("layer_ids", &KeepoutZone::layer_ids)
+        .def_readwrite("inside_block", &KeepoutZone::inside_block);
 
     py::class_<Floorplan>(m, "Floorplan").def(py::init<>())
         .def("add_block",              &Floorplan::add_block)
@@ -449,8 +450,13 @@ void bind_routing(py::module_& m) {
         .def("is_container",            &Floorplan::is_container)
         .def("low_layer_keepouts",      &Floorplan::low_layer_keepouts,
              py::arg("low_layer_ids"))
-        .def("add_keepout_zone",        &Floorplan::add_keepout_zone)
+        .def("add_keepout_zone",        &Floorplan::add_keepout_zone,
+             py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),
+             py::arg("layer_ids"), py::arg("inside_block") = false)
         .def("get_keepout_zones",       &Floorplan::get_keepout_zones)
+        .def("set_keepout_loci_outside_only",
+             &Floorplan::set_keepout_loci_outside_only, py::arg("on"))
+        .def("keepout_loci_outside_only", &Floorplan::keepout_loci_outside_only)
         .def("get_block_rects", [](const Floorplan& fp, const std::string& name) {
             auto rects = fp.get_block_rects(name);
             std::vector<std::tuple<int,int,int,int>> out;
@@ -703,6 +709,9 @@ void bind_routing(py::module_& m) {
     m.def("ndr_declared_width_on", &ndr_declared_width_on,
           py::arg("spec"), py::arg("layer_id"),
           "The absolute width in force on a layer (0 = none).");
+    m.def("ndr_declared_spacing_on", &ndr_declared_spacing_on,
+          py::arg("spec"), py::arg("layer_id"),
+          "The absolute spacing in force on a layer (0 = none).");
     m.def("ndr_max_slots", &ndr_max_slots, py::arg("geom"),
           "Longest contiguous signal run — the realizability ceiling.");
     m.def("ndr_resolve_on_layer",

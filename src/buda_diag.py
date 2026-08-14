@@ -112,12 +112,23 @@ MESSAGES = {
     "BUDA-1902": (ERROR,  "A design audit reported violations and "
                           "--strict-check is on."),
     "BUDA-1903": (WARNING, "A visualize command opened no window."),
+    "BUDA-1905": (FATAL,  "An input file the script declared as REQUIRED is "
+                          "missing, so the run stopped before the command "
+                          "that would have read it."),
+    "BUDA-1906": (FATAL,  "A command raised an engine error and the run "
+                          "stopped."),
     "BUDA-1904": (WARNING, "A restored fan-in bundle has no per-bit "
                            "endpoints, so it resumes untapered — wider "
                            "than the design that was checkpointed."),
     "BUDA-1912": (WARNING, "An NDR rule's stored per-layer values are not "
                            "readable and were dropped, so the rule restores "
                            "layer-independent."),
+    "BUDA-1913": (WARNING, "An NDR rule quantizes to no constraint on EVERY "
+                           "layer it can reach, so the buses it governs "
+                           "route exactly as ungoverned ones."),
+    "BUDA-1914": (INFO,    "An NDR rule quantizes to no constraint on SOME "
+                           "of the layers it can reach, so its metal there "
+                           "is governed in name only."),
 }
 
 # Ids that were ISSUED and whose fault no longer exists.

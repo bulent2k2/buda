@@ -100,6 +100,27 @@ jobs:
           set "PYTHONPATH=%CD%\build;%CD%\src;%CD%\tools"
           python -u -X faulthandler .github\scripts\windows_diag_import.py
 
+      # (Ordered BEFORE the tier: it needs only the build, and main's
+      # currently-red Windows tier was skipping it every run — the #736
+      # smoke never executed until this reorder.)
+      - name: PowerShell wrapper smoke (bb.ps1 / buda.ps1 / activate.ps1)
+        # The .ps1 twins of the bin/ wrappers, executed for real: bb.ps1
+        # re-runs the build INCREMENTALLY in the same build dir (Ninja is on
+        # PATH from the pip install, and the MSVC env is re-established the
+        # same way the build step did it), buda.ps1 runs the flow through its
+        # own PYTHONPATH setup, and activate.ps1 must refuse to be executed
+        # (it only works dot-sourced).  pwsh is preinstalled on the runner.
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          pwsh -NoProfile -ExecutionPolicy Bypass -File bin\bb.ps1
+          if errorlevel 1 exit /b 1
+          pwsh -NoProfile -ExecutionPolicy Bypass -File bin\buda.ps1 --no-viz flow\four_blocks.buda
+          if errorlevel 1 exit /b 1
+          pwsh -NoProfile -ExecutionPolicy Bypass -File bin\activate.ps1 && exit /b 1
+          echo activate.ps1 refused direct execution, as documented
+          exit /b 0
+
       - name: Fast + mid tiers (`-m "not slow"`, documented no-PYTHONPATH form)
         # Deliberately no PYTHONPATH: WINDOWS_BUILD.md section 3 claims the
         # Ninja layout needs none for pytest -- pytest.ini's `pythonpath =

@@ -271,6 +271,48 @@ tracks at placement time, DNUTS reports it as a warning naming the rule and
 the demand, and strands the bus's bits (all-or-nothing admission), which
 `check_design` then counts as unplaced.
 
+### A rule that constrains nothing says so
+
+The opposite failure is quieter. `def_ndr` refuses a rule that constrains
+nothing *as written* — no width, no spacing, no shield — but a rule can reach
+the same place through the **grid**: a declared width already covered by one
+signal slot quantizes to one slot per bit with no guards, which with no
+shield is the default wire. The bundle is governed on paper and routes
+exactly as an ordinary one, so nothing charges the rule and no NDR audit
+covers it.
+
+That verdict is now reported, at bundling (before a planner pass is spent)
+and again before detailed NUTS:
+
+```
+BUDA-1913: WARNING: NDR rule 'dead' resolves to a DEFAULT wire (1 slot/bit,
+0 guard(s)/gap, no shield) on every layer it can reach (L5, L6), so 1 of 1
+governed bundle(s) route exactly as ungoverned ones — … : bundle(s) 1.  L5:
+the declared width 8 costs 1 slot(s) at that layer's per-signal-slot pitch
+10 — …
+BUDA-1914: INFO: NDR rule 'partial' resolves to a DEFAULT wire on L5, L6
+(active on L3, L4), so its spec reads inactive there: …
+```
+
+**BUDA-1913** is the whole rule doing nothing anywhere; **BUDA-1914** is one
+or more layers of an otherwise-biting rule, which under the channel reading
+means the layer already gives the declared width — what it costs there is
+that no NDR audit covers the metal. Both are reports, not refusals: whether
+a rule bites is a property of the grid, and a later `def_ndr_layer` can
+revive a rule that was dead when it was declared. The fixes are the ones the
+message names — widen the value, declare a shield (which keeps a spec active
+at any pitch), or restrict the rule to the layers where it bites.
+
+A layer with no `def_track_pattern` is not judged: nothing can be placed
+there at all. Nor is the verdict reached while a **cell layer policy** is
+still unresolved — `set_cell_layer_cap` narrows which layers a bundle can
+reach and resolves at `run_planner hier`, so a capped design hears the
+verdict there instead, against the layers it can really use.
+
+The cause names **every** declared value, since width and spacing are
+declared independently: a `spacing`-only rule is explained by its spacing
+and the guard slots it bought, not by its (default) width.
+
 ---
 
 ## `set_ndr`
@@ -357,6 +399,7 @@ Runnable end-to-end examples, smallest first:
 | [`flow/ndr_shield_flat.buda`](../../flow/ndr_shield_flat.buda) | Three rules across the multiplier range (x1.5 / x2 / x2.5) and **all three** shield arrangements + crediting, governing three bundles beside ungoverned traffic |
 | [`flow/ndr_shield_hier.buda`](../../flow/ndr_shield_hier.buda) | The same three rule shapes in a **hierarchical** flow, governing a cell-level template class (one template, three lockstep replicas) and top-level buses |
 | [`flow/ndr_bottom_up.buda`](../../flow/ndr_bottom_up.buda) | A governed template marked `set_bottom_up`: its interconnect is solved once and copied — **shields included** — to every instance |
+| [`flow/ndr_noop_rule.buda`](../../flow/ndr_noop_rule.buda) | The three ways a declared rule can quantize to **no rule at all** (BUDA-1913 / BUDA-1914), beside a control rule of the same form that bites |
 
 Run any of them with:
 

@@ -24,6 +24,10 @@ from pathlib import Path
 import pytest
 
 import buda_cli
+from tcl_quote import tcl_path
+
+from wrapper_select import wrapper_command, wrapper_missing_reason
+from subprocess_env import buda_env
 
 _ROOT = Path(__file__).parents[2]
 _CLI = _ROOT / "src" / "buda_cli.py"
@@ -68,8 +72,7 @@ def test_flow_ends_by_visualizing(verbs, expected):
 def _run(tmp_path, body, *flags):
     script = tmp_path / "veh.buda"
     script.write_text(body)
-    env = {**os.environ, "MPLBACKEND": "Agg",
-           "PYTHONPATH": f"{_ROOT/'build'}:{_ROOT/'tools'}"}
+    env = buda_env(_ROOT, MPLBACKEND="Agg")
     r = subprocess.run([sys.executable, str(_CLI), str(script), *flags],
                        capture_output=True, text=True, env=env)
     return r.returncode, r.stdout + r.stderr
@@ -133,9 +136,45 @@ def test_v_and_no_viz_are_mutually_exclusive(tmp_path):
 _tcl_required = pytest.mark.skipif(shutil.which("tclsh") is None,
                                    reason="no tclsh on this host")
 
+# The btcl wrapper exists twice — bin/btcl (bash) and bin/btcl.ps1
+# (PowerShell) — honouring the same contract (BUDA_VIZ_FINAL env signal, `--`
+# terminator, dash-named-script normalisation).  wrapper_select picks the one
+# this platform can run: bash on POSIX/Cygwin; PowerShell on native Windows,
+# where `bash` is the unrunnable WSL stub (measured, windows-validate runs 18
+# and 23 — every assertion matched the stub's banner instead of flow output).
+_BTCL_CMD = wrapper_command(Path(__file__).parents[2], "btcl")
+
+# Everything that goes through the wrapper needs BOTH a launcher and tclsh.
+# One marker rather than two stacked decorators, so the skip REASON names the
+# prerequisite that is actually missing.
+def _btcl_missing():
+    if shutil.which("tclsh") is None:
+        return "no tclsh on this host"
+    if _BTCL_CMD is None:
+        return wrapper_missing_reason("btcl")
+    return ""
+
+
+_BTCL_MISSING = _btcl_missing()
+_btcl_required = pytest.mark.skipif(bool(_BTCL_MISSING),
+                                    reason=_BTCL_MISSING or "btcl is runnable")
+
+# `-python $sys.executable` is not decoration: `buda::start`'s default is
+# `python3`, and native Windows exposes `python`/`py` instead (WINDOWS_REQ.md
+# calls that lookup a portability hazard, and windows-validate measures it in
+# its "python3 lookup reality" step).  Without this the engine never starts,
+# the flow produces no viewer note at all, and the test reads that as "the
+# viewer did not open" — which is how `test_buda_viz_final_env_var_is_the_signal`
+# failed on all three native jobs in run 23.  test_tcl_front_end.py's `_tcl`
+# helper passes it for the same reason.
+# `tcl_path` does the quoting (forward-slash, then quote — two stages, two
+# separate ways a native Windows path is eaten); `src/tcl_quote.py` says why.
+_TCL_PATH = tcl_path(_BUDA_TCL)
+_PY_PATH = tcl_path(sys.executable)
+
 _TCL_FLOW = f"""\
-source {_BUDA_TCL}
-buda::start
+source {_TCL_PATH}
+buda::start -python {_PY_PATH}
 buda::def_layer 4 M4 H TOP 50
 buda::def_layer 5 M5 V TOP 50
 buda::add_block A 0 0 100 100
@@ -152,27 +191,27 @@ def _run_btcl(tmp_path, tcl_body, *flags):
     script = tmp_path / "flow.tcl"
     script.write_text(tcl_body)
     env = {**os.environ, "MPLBACKEND": "Agg"}
-    r = subprocess.run(["bash", str(_BTCL), *flags, str(script)],
+    r = subprocess.run([*_BTCL_CMD, *flags, str(script)],
                        capture_output=True, text=True, env=env, timeout=300)
     return r.returncode, r.stdout + r.stderr
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_no_v_no_viewer(tmp_path):
     _, out = _run_btcl(tmp_path, _TCL_FLOW + "buda::stop\n")
     assert _viewer_attempts(out) == 0
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_v_appends_viewer_at_stop(tmp_path):
     _, out = _run_btcl(tmp_path, _TCL_FLOW + "buda::stop\n", "-v")
     assert _viewer_attempts(out) == 1          # appended at buda::stop
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_v_no_double_when_flow_visualizes(tmp_path):
     body = _TCL_FLOW + "buda::visualize\nbuda::stop\n"
     _, out = _run_btcl(tmp_path, body, "-v")
@@ -182,7 +221,7 @@ def test_btcl_v_no_double_when_flow_visualizes(tmp_path):
 # ── the three review findings on #712, each with the shape that reproduced ──
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_v_appends_viewer_when_the_flow_ends_with_the_engine_exit(tmp_path):
     """THE regression.  `buda::exit` — the engine's own exit command, which the
     bridge defines from the registry like any other — raises SystemExit inside
@@ -199,7 +238,7 @@ def test_btcl_v_appends_viewer_when_the_flow_ends_with_the_engine_exit(tmp_path)
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_v_no_double_when_the_flow_visualizes_then_exits(tmp_path):
     """The skip rule has to hold on the exit path too, or the fix above just
     moves the doubling to the other shutdown."""
@@ -209,7 +248,7 @@ def test_btcl_v_no_double_when_the_flow_visualizes_then_exits(tmp_path):
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_v_keeps_a_nonzero_exit_code_from_the_flow(tmp_path):
     """`buda::exit 3` is the fail-fast path: it must still fail, and loudly,
     with the viewer opened.  The viewer's note is appended AFTER the status is
@@ -225,7 +264,7 @@ def test_btcl_v_keeps_a_nonzero_exit_code_from_the_flow(tmp_path):
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_an_unhandled_engine_exit_code_does_not_reach_the_shell(tmp_path):
     """What the Tcl side actually does with `buda::exit 3`, pinned so the doc
     cannot drift back to claiming the CLI's guarantee.
@@ -243,15 +282,22 @@ def test_an_unhandled_engine_exit_code_does_not_reach_the_shell(tmp_path):
     script = tmp_path / "flow.tcl"
     script.write_text(_TCL_FLOW + "buda::exit 3\n")
     env = {**os.environ, "MPLBACKEND": "Agg"}
-    r = subprocess.run(["bash", str(_BTCL), "-v", str(script)],
+    r = subprocess.run([*_BTCL_CMD, "-v", str(script)],
                        capture_output=True, text=True, env=env, timeout=300)
-    assert r.returncode == 1, (r.returncode, r.stderr[-400:])   # Tcl's, not 3
-    assert "exit code 3" in r.stdout + r.stderr                 # …not lost
-    assert _viewer_attempts(r.stdout) == 1                      # opened once
+    # (r.stdout or "") despite capture_output=True: windows-validate on #736
+    # measured ONE run of this test with a stream attribute None — a state
+    # CompletedProcess should not be able to reach — and the bare
+    # concatenation turned that anomaly into a TypeError that hid the repr.
+    # The or-guards keep the assertions running and the message below prints
+    # the full CompletedProcess as evidence if it ever recurs.
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 1, (r.returncode, (r.stderr or "")[-400:])  # Tcl's, not 3
+    assert "exit code 3" in out, r                              # …not lost
+    assert _viewer_attempts(r.stdout or "") == 1, r             # opened once
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_btcl_runs_a_script_whose_name_starts_with_a_dash(tmp_path):
     """`--` ends btcl's own options, but tclsh does not honour a `--` of its
     own: measured on 8.6.14, both `tclsh -v.tcl` and `tclsh -- -v.tcl` read the
@@ -260,7 +306,7 @@ def test_btcl_runs_a_script_whose_name_starts_with_a_dash(tmp_path):
     script = tmp_path / "-v.tcl"
     script.write_text('puts "ARGV=[list {*}$argv]"\n')
     env = {**os.environ, "MPLBACKEND": "Agg"}
-    r = subprocess.run(["bash", str(_BTCL), "--", script.name, "a", "b"],
+    r = subprocess.run([*_BTCL_CMD, "--", script.name, "a", "b"],
                        capture_output=True, text=True, env=env,
                        cwd=str(tmp_path), timeout=300)
     assert "ARGV=a b" in r.stdout, (r.returncode, r.stdout, r.stderr)
@@ -292,7 +338,7 @@ def test_a_failing_viewer_is_reported_not_swallowed():
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 @pytest.mark.parametrize("flags, passed", [
     ([],            ["a", "b"]),
     (["-v"],        ["a", "b"]),
@@ -309,13 +355,13 @@ def test_btcl_passes_the_flows_arguments_through_untouched(tmp_path, flags, pass
     script = tmp_path / "argv.tcl"
     script.write_text('puts "ARGV=[list {*}$argv]"\n')
     env = {**os.environ, "MPLBACKEND": "Agg"}
-    r = subprocess.run(["bash", str(_BTCL), *flags, str(script), *passed],
+    r = subprocess.run([*_BTCL_CMD, *flags, str(script), *passed],
                        capture_output=True, text=True, env=env, timeout=300)
     assert f"ARGV={' '.join(passed)}" in r.stdout, r.stdout + r.stderr
 
 
 @pytest.mark.mid
-@_tcl_required
+@_btcl_required
 def test_a_flows_own_v_argument_does_not_open_a_viewer(tmp_path):
     """The half of that defect the wrapper alone cannot fix: `buda::start` used
     to scan `$argv` for a bare `-v`, which cannot tell a launcher's request
@@ -325,7 +371,7 @@ def test_a_flows_own_v_argument_does_not_open_a_viewer(tmp_path):
     assert _viewer_attempts(out) == 0
     script = tmp_path / "flow.tcl"
     env = {**os.environ, "MPLBACKEND": "Agg"}
-    r = subprocess.run(["bash", str(_BTCL), str(script), "-v"],   # …flow's own
+    r = subprocess.run([*_BTCL_CMD, str(script), "-v"],   # …flow's own
                        capture_output=True, text=True, env=env, timeout=300)
     assert _viewer_attempts(r.stdout + r.stderr) == 0
 

@@ -36,6 +36,8 @@ judged.
 """
 import io
 import contextlib
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -262,6 +264,44 @@ def test_a_partner_STARVED_before_span_adjustment_retracts_it_instead():
         [(n.bit_index, n.span_lo, n.span_hi) for n in seg1]
 
 
+_REFINE = _ROOT / "flow/rnr/mix2_topdown_refine.buda"
+
+
+def _session_without_the_trim(flow):
+    """Run `flow` with its `set_trim_mst_legs on` line removed.
+
+    The flow OPTS IN, so its shipped result is the trimmed one.  Recovering the
+    pre-trim state by stripping that line keeps both sides measurable from a
+    single checked-in vehicle, and means the "before" numbers below are a real
+    run rather than a remembered one.
+    """
+    src = [ln for ln in flow.read_text().splitlines(keepends=True)
+           if ln.strip() != "set_trim_mst_legs on"]
+    assert len(src) < len(flow.read_text().splitlines()), "opt-in line not found"
+
+    # UNIQUE name, and in the flow's OWN directory.  Both halves are load-bearing:
+    # the directory because the flow does `source mix_tracks.buda`, which a
+    # command resolves against the SCRIPT's directory — a tmp_path copy would not
+    # find it; the uniqueness because CI runs `-p xdist -n 4` and BOTH tests in
+    # this module call this helper, so a fixed name lets one worker unlink the
+    # file the other is still running against (Codex #732).
+    fd, path = tempfile.mkstemp(dir=flow.parent, prefix="_no_trim_", suffix=".buda")
+    tmp = Path(path)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write("".join(src))
+        return _session(tmp, verbose=True)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _detailed_wl(session):
+    for ln in session._test_stdout.splitlines():
+        if "total detailed WL" in ln:
+            return float(ln.split("total detailed WL = ")[1].split()[0])
+    raise AssertionError("no detailed WL line in the run")
+
+
 def test_a_crossing_is_judged_at_the_bit_not_at_the_nominal_segment():
     """The reach a NOMINAL crossing used to grant, on a bit that crosses nothing.
 
@@ -276,15 +316,12 @@ def test_a_crossing_is_judged_at_the_bit_not_at_the_nominal_segment():
     Judged at each bit's own track and span, the 3 bits are short of their span
     by 8.75 / 5.75 / 2.75 — real metal past their last via.
 
-    THIS FLOW STILL SHOWS IT, and that is deliberate.  The generation-side
-    cause is a duplicated MST leg prefix, and the trim for it ships OPT-IN
-    (`set_trim_mst_legs`, default off) because it re-sorts the WL-ordered
-    candidate pool and moves selection far beyond this bundle.  A corpus flow
-    that does not opt in therefore keeps the metal, and the audit must keep
-    reporting it — the sibling test below is the one that opts in.
+    The flow now opts in to the trim that removes this metal at the source, so
+    the finding is recovered by stripping that one line.  This is the audit's
+    own regression test (#695) and it must keep working on the shape that
+    justified it, whatever generation later does about the cause.
     """
-    s = _session(_ROOT / "flow/rnr/mix2_topdown_refine.buda", verbose=True)
-    hits = _findings_in_run(s)
+    hits = _findings_in_run(_session_without_the_trim(_REFINE))
     assert len(hits) == 3, hits
     assert all("Seg 5 bit" in h for h in hits), hits
     overhangs = sorted(float(h.split("0 + ")[1].split(" of")[0]) for h in hits)
@@ -298,36 +335,22 @@ def test_a_crossing_is_judged_at_the_bit_not_at_the_nominal_segment():
         assert r_hi <= s_hi, h
 
 
-def test_opting_IN_to_the_leg_trim_removes_that_metal_at_the_source():
-    """The other side of the opt-in: the trim does close this case.
+def test_the_flow_opts_in_and_that_metal_is_gone_at_the_source():
+    """The shipped flow: opted in, and clean because the wire is gone.
 
-    Same flow, one line added before `generate_hier_topologies`.  The audit goes
-    silent because the metal is gone, not because the checker stopped looking —
-    so the detailed wirelength must drop by the same amount the findings
-    reported (8.75 + 5.75 + 2.75 = 17.25, rounded in the reported total).
+    The audit goes silent because there is nothing left to report, not because
+    the checker stopped looking — so the detailed wirelength must ALSO drop, by
+    the amount the findings above reported (8.75 + 5.75 + 2.75 = 17.25, rounded
+    in the reported total).
 
-    Asserting BOTH is the point.  A trim that removed the finding without
-    removing the wire, or removed wire elsewhere while leaving this, would pass
-    either assertion alone.
+    Asserting both is the point.  A trim that silenced the audit without
+    removing wire, or removed wire elsewhere while leaving this, passes either
+    assertion on its own.
     """
-    flow = _ROOT / "flow/rnr/mix2_topdown_refine.buda"
-    src = flow.read_text().replace("generate_hier_topologies",
-                                   "set_trim_mst_legs on\ngenerate_hier_topologies", 1)
-    tmp = flow.parent / "_optin_leg_trim_tmp.buda"
-    tmp.write_text(src)
-    try:
-        s = _session(tmp, verbose=True)
-    finally:
-        tmp.unlink()
+    trimmed = _session(_REFINE, verbose=True)
+    assert _findings_in_run(trimmed) == [], "the trim should remove the metal"
+    assert trimmed.detailed_result.num_unplaced == 0
 
-    assert _findings_in_run(s) == [], "the trim should remove the metal"
-    assert s.detailed_result.num_unplaced == 0
-
-    def _wl(sess):
-        for ln in sess._test_stdout.splitlines():
-            if "total detailed WL" in ln:
-                return float(ln.split("total detailed WL = ")[1].split()[0])
-        raise AssertionError("no detailed WL line")
-
-    base = _session(flow, verbose=True)
-    assert _wl(base) - _wl(s) == pytest.approx(17, abs=1), (_wl(base), _wl(s))
+    base = _session_without_the_trim(_REFINE)
+    assert _detailed_wl(base) - _detailed_wl(trimmed) == pytest.approx(17, abs=1), \
+        (_detailed_wl(base), _detailed_wl(trimmed))

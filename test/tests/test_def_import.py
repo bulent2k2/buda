@@ -218,7 +218,7 @@ def test_def_tracks_install_a_bounded_pattern(tmp_path):
     assert len(pat.tracks_in_range(100.0, 200.0)) == 0   # far outside: none
 
 
-def test_blockages_and_halos_become_keepouts(tmp_path):
+def test_hard_layer_blockages_become_keepouts(tmp_path):
     """The keepout machinery already existed; its absence here was the single
     most surprising omission for a routing tool — a router that cannot see a
     blockage plans through it."""
@@ -229,9 +229,62 @@ def test_blockages_and_halos_become_keepouts(tmp_path):
     # The BLOCKAGES rect, in layout units.
     boxes = [(z.bbox.x1, z.bbox.y1, z.bbox.x2, z.bbox.y2) for z in zones]
     assert (20, 20, 30, 30) in boxes, boxes
-    # …and the HALO ring around i1, which the placer honoured and the router
-    # must too: 50000 DBU = 50 lu, minus the 0.1 lu halo.
-    assert any(b[0] == 49 or b[0] == 50 for b in boxes), boxes
+
+
+def test_a_component_halo_is_not_a_routing_keepout(tmp_path):
+    """REVERSES what this file used to assert, and the old comment said why
+    it was wrong: "the HALO ring around i1, which the placer honoured and the
+    router must too".  The router must NOT.
+
+    DEF has two halos and they are different constraints:
+
+      * `+ HALO [SOFT] l b r t` keeps other CELLS away.  It is placement
+        information and carries NO layer — so a layerless keepout maps onto
+        every routing layer and forbids routing an area the DEF left
+        completely routable.
+      * `+ ROUTEHALO dist minLayer maxLayer` is the routing one, and names
+        the layers it applies to.
+
+    We honoured the placement construct as routing and ignore the routing
+    construct — backwards, and the same mistake already recorded for
+    PLACEMENT blockages, which are dropped for exactly this reason.
+
+    Measured on `flow/ariane133`: 133 macros each carrying `HALO 10000`
+    (5 um a side) produced 195 track overlaps and 83 supply-doomed seats with
+    ZERO signal tracks in their placed windows — on layers carrying 4,848
+    tracks.  Dropping them takes that flow to 0 overlaps with its OBS
+    obstruction model still fully enforced.
+    """
+    s, out = _run(tmp_path)
+    boxes = [(z.bbox.x1, z.bbox.y1, z.bbox.x2, z.bbox.y2)
+             for z in s.fp.get_keepout_zones()]
+    # i1 sits at 50000 DBU = 50 lu; its halo ring would start just inside.
+    assert not any(b[0] in (49, 50) for b in boxes), \
+        f"a placement halo became a routing keepout: {boxes}"
+
+
+def test_the_halo_is_reported_rather_than_silently_dropped(tmp_path):
+    """Not applying it is not the same as not reading it.  A halo is real
+    placement information BUDA has no stage to apply, so it is censused —
+    beside BLOCKAGES.PLACEMENT, which it is the same kind of thing as."""
+    s, out = _run(tmp_path)
+    assert "COMPONENTS.HALO" in out, out
+
+
+def test_an_unplaced_component_s_halo_is_censused_too(tmp_path):
+    """The census asks "what did the file say that we do not model?", and
+    placement has no bearing on that answer.
+
+    The first cut gated the count on `has_pos` — a leftover from the days
+    when this emitted a keepout, which genuinely needs a position.  A census
+    does not, and the gate left exactly the unreported case the census
+    exists to prevent: an UNPLACED component whose halo is read, deliberately
+    not applied, and never mentioned (Codex P2 on #739).
+    """
+    s, out = _run(tmp_path, deff=_DEF_UNPLACED)
+    assert "COMPONENTS.HALO" in out, out
+    # …and it is still reported as unplaced, which is a separate fact.
+    assert "COMPONENTS.UNPLACED" in out, out
 
 
 def test_the_physical_import_can_be_declined(tmp_path):

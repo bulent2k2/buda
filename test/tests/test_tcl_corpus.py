@@ -37,8 +37,13 @@ from pathlib import Path
 
 import pytest
 
+from tcl_quote import tcl_path
+
 _ROOT = Path(__file__).resolve().parents[2]
 _TOOLS = _ROOT / "tools"
+# Quoting, not formatting -- see `src/tcl_quote.py`.
+_TCL_Q = tcl_path(_TOOLS / "buda.tcl")
+_PY_Q = tcl_path(sys.executable)
 
 
 def _load(name):
@@ -116,8 +121,8 @@ def test_the_package_loads_from_inside_a_namespace(tmp_path):
     script.write_text(f"""
         namespace eval myapp {{
             proc boot {{}} {{
-                uplevel #0 [list source {_ROOT / 'tools' / 'buda.tcl'}]
-                buda::start -python {sys.executable}
+                uplevel #0 [list source {_TCL_Q}]
+                buda::start -python {_PY_Q}
                 buda::add_block a 0 0 10 10
                 puts "blocks=[buda::query blocks]"
                 buda::stop

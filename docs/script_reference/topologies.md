@@ -1,6 +1,6 @@
 # BUDA Script Reference — Stage 2 — Topology generator
 
-Candidate enumeration and expert editing: `generate_topologies`, `generate_topologies_for_bundle`, `generate_more_topologies`, the TopoEdit session (`edit_topology` … `edit_commit`), `generate_hier_topologies`, `generate_topologies_for_hbundle`, `set_prune_dominated`, `set_dedup_loci`, `set_drop_dangling`, `set_trim_mst_legs`.
+Candidate enumeration and expert editing: `generate_topologies`, `generate_topologies_for_bundle`, `generate_more_topologies`, the TopoEdit session (`edit_topology` … `edit_commit`), `generate_hier_topologies`, `generate_topologies_for_hbundle`, `set_prune_dominated`, `set_dedup_loci`, `set_drop_dangling`, `set_trim_mst_legs`, `set_keepout_loci`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -500,6 +500,42 @@ from **35 → 24** candidates.
 1-based candidate indices, so `select_topology` pins must be taken from an
 opted-in run (it runs before sidecar restore and BDB persistence, so
 `dump_topologies`, persisted rows and later pins all see the collapsed pool).
+
+---
+
+### `set_keepout_loci`
+
+```
+set_keepout_loci [all|outside]
+```
+
+**Which keepouts contribute Hanan loci** (default **all** — flows are
+byte-identical without it).  `all` is the historical behaviour: every
+keepout's four edges become grid lines.  `outside` restricts that to
+keepouts reaching beyond a block; one lying wholly inside a block still
+**blocks identically**, it just stops adding coordinates.
+
+The problem it answers is quadratic.  The Hanan grid is the **product** of
+its two axis sets, so a technology that draws obstruction finely buys grid
+without bound.  One `fakeram45_256x16` carries 99 `OBS` rects, so a
+133-macro design imports **13,034 keepouts** and `demo/ariane`'s grid goes
+**2,479 → 2,508,972 cells**, with `run_planner hier` killed at **50
+minutes**.  Under `outside` it is **6,327 cells** and the flow finishes in
+~19 s with its obstruction model enforced ([`flow/ariane133/`](../../flow/ariane133/)
+declares it).
+
+**Opt-in, because it removes candidate positions.**  An interior locus is
+*reachable* — a trunk may cross a block over-the-cell — so this is a trade,
+not a tidy-up.  It first shipped unconditionally on the opposite (false)
+claim, and `flow/rv/soc_conv_div` disproved it: bundle 42's 2-segment
+`TRUNK_V@x108000` sat exactly on an `OBS` edge, and without that locus the
+planner took a 4-segment alternative carrying dangling metal.  Use it when a
+design's LEF draws obstruction in tens of rects per macro; leave it alone
+when it draws a handful.
+
+Declare it **before** `import_def_lef` and generation.  Blocking behaviour
+is identical in both modes — this decides grid coordinates and nothing else.
+See [`opens_interchange.md` item 12](../internal/opens_interchange.md).
 
 ---
 

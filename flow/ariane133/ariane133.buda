@@ -15,6 +15,15 @@
 # that item: the same DEF, finally handed the technology that describes it.
 # ─────────────────────────────────────────────────────────────────────────
 
+# The two files below are fetched from upstream and deliberately NOT checked
+# in (12 MB of somebody else's netlist, under somebody else's licence — see
+# ReadMe.md).  Stated as a PRECONDITION rather than left to the importer:
+# `import_def_lef` fails perfectly well on a LEF it cannot open, but its
+# complaint is about a path, and the half a fresh clone needs is where the
+# file comes from.  Declared up here, the run stops on line one with the
+# remedy instead of after the setup that precedes the read.
+require_file ariane.v fakeram45_256x16.lef hint Fetch them first:  python3 flow/ariane133/fetch.py   (~12 MB, checksum-pinned; see flow/ariane133/ReadMe.md)
+
 open_bdb ariane133.bdb
 
 # The DEF is 2000 DBU/um and we want the placement EXACTLY, not rounded onto
@@ -33,11 +42,29 @@ set_min_stub_length 1000
 # FLOORPLAN DEF), and the netlist's 76,731 standard cells are skipped as
 # library cells.  The ten routing layers come from the DEF's own TRACKS.
 #
-# `no_blockages` is NOT tuning — see opens_interchange.md item 12.  One
-# fakeram macro carries 99 OBS rects, so 133 of them import 13,034 keepouts
-# and the Hanan grid goes 2,479 -> 2,508,972 cells; the planner then does not
-# finish in 50 minutes, against 0.79 s here.  It is a real trade: this run
-# has NO macro-obstruction model.  Remove the flag once item 12 lands.
+# This USED to need `no_blockages`, and no longer does — item 12 landed.
+# The macros' 13,034 OBS keepouts are imported and enforced; they simply no
+# longer contribute Hanan loci, because each lies inside a macro whose own
+# edges are already grid lines (opens_interchange.md item 12).  Grid 2.5M ->
+# 6,327 cells, and the planner finishes in ~10 s instead of not at all.
+#
+# Consequence worth expecting: the design is now genuinely congested.  OBS
+# covers metal1-metal4 across all 133 macros, so this interconnect has to
+# live on metal5 and above — which is the truth about this floorplan, and
+# what `no_blockages` was hiding.  The flow ends dirty; healers close most
+# of it (measured: negotiate+ripup take 125 overlaps -> 61 and were still
+# improving at the move budget).  Convergence here is this vehicle's own QoR
+# question, not an interchange one.
+# The knob that makes the obstruction model affordable here (item 12).  The
+# macros' OBS keepouts are imported and enforced either way; `outside` stops
+# the 13,034 of them that lie INSIDE a macro from each adding four Hanan
+# lines.  Grid 2,508,972 -> 6,327 cells; the planner finishes in ~10 s
+# instead of not at all.  Opt-in because it is a real trade — an interior
+# locus is a reachable position (a trunk may cross a block over-the-cell) —
+# and a design whose LEF draws a handful of OBS rects should not pay for a
+# problem it does not have.
+set_keepout_loci outside
+
 def_layer 1 metal1 H LOW 30
 def_layer 2 metal2 V LOW 30
 def_layer 3 metal3 H LOW 30
@@ -49,7 +76,7 @@ def_layer 8 metal8 V LOW 30
 def_layer 9 metal9 H TOP 30
 def_layer 10 metal10 V TOP 30
 
-import_def_lef ../../demo/ariane/ariane.def fakeram45_256x16.lef no_blockages
+import_def_lef ../../demo/ariane/ariane.def fakeram45_256x16.lef
 import_verilog ariane.v
 
 # A DEF is flat — it lists leaf instances only — so every level between the

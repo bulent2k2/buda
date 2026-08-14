@@ -1526,6 +1526,10 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     // first streamed entry — UNITS precedes the sections in DEF 5.8, and the
     // reader hard-errors on a file that re-states it after an entry has
     // streamed rather than let two scales into one import.
+    // Component `+ HALO`s read but deliberately not applied as routing
+    // keepouts (see the COMPONENTS sink below); folded into the unmodelled
+    // census beside BLOCKAGES.PLACEMENT, which it is the same kind of thing as.
+    int halo_unmodelled = 0;
     bool units_latched = false;
     auto latch_units = [&](const DefDesign& d) {
         if (units_latched) return;
@@ -1589,17 +1593,39 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         ++stats.imported_components;
         if (c.placed) ++stats.placed_components;
 
-        // HALO — a keep-clear margin the placer honoured and the router must
-        // too (Phase 3c).  Emitted as a keepout ring in layout units.  Only
-        // for a PLACED instance: an unplaced one has no location, so its halo
-        // would blockade the die origin.
-        if (c.has_halo && has_pos) {
-            stats.keepouts.push_back({"", x1 - dbu_to_lu(c.halo_l),
-                                      y1 - dbu_to_lu(c.halo_b),
-                                      x1 + w + dbu_to_lu(c.halo_r),
-                                      y1 + h + dbu_to_lu(c.halo_t),
-                                      "HALO of " + c.name});
-        }
+        // HALO (Phase 3c).  This block used to read "a keep-clear margin the
+        // placer honoured and the router must too", and emitted a keepout
+        // ring for placed instances only.  Both halves of that were wrong.
+        //
+        // A component `+ HALO` is NOT a routing keepout, and importing it as
+        // one was the same mistake the PLACEMENT blockage below already
+        // records.  DEF has two halos and they mean different things:
+        //
+        //   * `+ HALO [SOFT] l b r t` keeps other CELLS away — a PLACEMENT
+        //     constraint, carrying no layer.  A layerless keepout maps onto
+        //     EVERY routing layer, so importing it forbade routing an area
+        //     the DEF left completely routable.
+        //   * `+ ROUTEHALO dist minLayer maxLayer` is the routing one, and
+        //     it names its layers.
+        //
+        // We honoured the placement construct as routing and ignored the
+        // routing construct — backwards.  Measured on `flow/ariane133`,
+        // whose 133 macros each carry `HALO 10000` (5 um a side at 2000
+        // DBU/um): those 133 all-layer zones alone produced 195 track
+        // overlaps and 83 supply-doomed seats with ZERO signal tracks in
+        // their placed windows, on layers with 4,848 tracks.  Dropping them
+        // takes the flow to 0 overlaps with the OBS obstruction model still
+        // fully enforced.  BUDA has no placement-legalisation stage, so as
+        // with a PLACEMENT blockage there is nothing to apply it to; it is
+        // recorded as unmodelled.
+        // Counted for EVERY halo, placed or not.  `has_pos` gated this at
+        // first, which was a leftover from emitting the keepout — geometry
+        // needs a position, a census does not.  The question here is "what
+        // did the file say that we do not model?", and an UNPLACED component
+        // with a halo answers it just as much as a placed one; gating on
+        // placement left exactly those silently unreported, which is the
+        // failure this census exists to prevent (Codex P2 on #739).
+        if (c.has_halo) ++halo_unmodelled;
 
         // Macro OBS keepouts, in the SAME pass (opens item 5): this used to
         // be a second full walk over def.components in the BLOCKAGES section
@@ -1639,13 +1665,22 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
                           ax, ay);
                     xform(um_to_lu(r.x2 - mac->ox), um_to_lu(r.y2 - mac->oy),
                           bx, by);
+                    const double kx1 = dbu_to_lu(c.x) + std::min(ax, bx);
+                    const double ky1 = dbu_to_lu(c.y) + std::min(ay, by);
+                    const double kx2 = dbu_to_lu(c.x) + std::max(ax, bx);
+                    const double ky2 = dbu_to_lu(c.y) + std::max(ay, by);
+                    // Whether it is inside the instance is MEASURED, not
+                    // assumed: OBS almost always is (that is what an
+                    // obstruction of a macro means), but LEF does not
+                    // require a rect to sit within SIZE, and a rect that
+                    // pokes out is exactly the one whose edge IS a useful
+                    // Hanan locus.  x1/y1 and w/h are the placed extent the
+                    // component bbox above was built from.
+                    const bool inside = kx1 >= x1 && ky1 >= y1 &&
+                                        kx2 <= x1 + w && ky2 <= y1 + h;
                     stats.keepouts.push_back(
-                        {o.layer,
-                         dbu_to_lu(c.x) + std::min(ax, bx),
-                         dbu_to_lu(c.y) + std::min(ay, by),
-                         dbu_to_lu(c.x) + std::max(ax, bx),
-                         dbu_to_lu(c.y) + std::max(ay, by),
-                         "OBS of " + c.name});
+                        {o.layer, kx1, ky1, kx2, ky2,
+                         "OBS of " + c.name, inside});
                 }
         }
     };
@@ -1978,6 +2013,9 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         // misapplied.
         if (skipped_placement) counts["BLOCKAGES.PLACEMENT"] += skipped_placement;
         if (skipped_partial)   counts["BLOCKAGES.PARTIAL"]   += skipped_partial;
+        // A placement halo is placement information we do not model, exactly
+        // like the two above — not a routing keepout we chose to drop.
+        if (halo_unmodelled)   counts["COMPONENTS.HALO"]     += halo_unmodelled;
         std::vector<std::pair<std::string,int>> rows(counts.begin(), counts.end());
         std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
             if (a.second != b.second) return a.second > b.second;

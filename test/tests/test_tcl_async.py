@@ -30,8 +30,13 @@ from pathlib import Path
 
 import pytest
 
+from tcl_quote import tcl_path
+
 _ROOT = Path(__file__).resolve().parents[2]
 _TCL = _ROOT / "tools" / "buda.tcl"
+# Quoting, not formatting -- see `src/tcl_quote.py`.
+_TCL_Q = tcl_path(_TCL)
+_PY_Q = tcl_path(sys.executable)
 
 # mid tier: drives a real tclsh + buda_server subprocess per test (bridge
 # integration), too heavy for the fast inner loop — run with `bb -m`/`bb -s`.
@@ -42,7 +47,7 @@ pytestmark = [pytest.mark.mid,
 
 def _tcl(tmp_path, body, expect_rc=0):
     script = tmp_path / "t.tcl"
-    script.write_text(f"source {_TCL}\nbuda::start -python {sys.executable}\n"
+    script.write_text(f"source {_TCL_Q}\nbuda::start -python {_PY_Q}\n"
                       f"{body}\n")
     r = subprocess.run(["tclsh", str(script)], capture_output=True,
                        encoding="utf-8", errors="replace",

@@ -1,0 +1,129 @@
+# REPRO: a declared NDR rule that constrains NOTHING, and says so.
+#
+# `docs/internal/opens_ndr.md` §2's second residual — "a rule that resolves to
+# one slot resolves to NO rule" — in the shapes it comes in, one run.
+#
+# ── The condition ─────────────────────────────────────────────────────────
+#
+# Path A realizes a rule as a whole number of SIGNAL slots.  When a declared
+# width resolves to ONE slot with no guards and no shield, the resolved spec
+# is `width_slots 1 / guard_slots 0 / shield none` — which is `NdrSpec` at its
+# DEFAULT, and every consumer short-circuits on `!active()`.  The bus is
+# governed on paper and routes exactly as an ordinary one: the planner charges
+# default width, DNUTS places default wires, and the R9 audit raises nothing
+# because an inactive spec makes no claim to check.
+#
+# `def_ndr` already refuses the same rule spelled out — `def_ndr r` with no
+# width, spacing or shield is a hard error, "constrains nothing".  Arrived at
+# through the GRID it used to be silent from end to end.
+#
+# ── The shapes ────────────────────────────────────────────────────────────
+#
+#   fine   (M3/M4)  VDD 2 1 (_ 1 1)x12 GND 2 1
+#                   period 30 over 12 signal slots -> 2.5 units of channel/slot
+#   coarse (M5/M6)  VDD 10 2 (_ 2 2)x4 GND 10 2
+#                   period 40 over  4 signal slots -> 10 units of channel/slot
+#
+#   rule     reaches      resolves to        verdict
+#   -------  -----------  -----------------  ----------------------------------
+#   dead     M5,M6 only   1 slot on both     BUDA-1913 (WARNING) — no-op
+#   partial  every layer  2 fine / 1 coarse  BUDA-1914 (INFO) — dead on M5,M6
+#   perlayer every layer  x2, but x1 on M4   BUDA-1914 (INFO) — dead on M4
+#   alive    M5,M6 only   2 slots on both    silent — the rule bites
+#   spconly  M5,M6 only   0 guard slots      BUDA-1913 (WARNING) — no-op,
+#                                            explained by its SPACING
+#
+# `alive` is the control and the reason the run is worth reading: it declares
+# the SAME absolute form against the SAME layers as `dead` and says nothing,
+# so a message here is about the rule and not about the vehicle.
+#
+# `perlayer` is the shape nothing else could see.  `dump_ndr`'s delivered-metal
+# line (the one `flow/ndr_abs_divisor.buda` produces) speaks only after DNUTS,
+# only for an ABSOLUTE width, and only when the placed metal falls short of it
+# — and a per-layer MULTIPLIER override has no absolute value to fall short
+# of.  A rule biting everywhere except the one layer where `def_ndr_layer`
+# hands back the default width was silent from end to end.
+#
+# ── What to do about it ───────────────────────────────────────────────────
+#
+# The report is a REPORT, not a refusal.  Whether a rule bites is a property
+# of the grid it is quantized against, so refusing would reject designs that
+# route today — and the verdict is not even final at `def_ndr`, since a later
+# `def_ndr_layer` can revive a rule that was dead when it was declared.  The
+# fixes are the ones the message names: widen the value, declare a shield
+# (which keeps a spec active at any pitch), or restrict the rule to the layers
+# where it bites.
+
+add_block a1 0    0    200  200
+add_block b1 0    600  200  800
+add_block a2 600  0    800  200
+add_block b2 600  600  800  800
+add_block a3 1200 0    1400 200
+add_block b3 1200 600  1400 800
+add_block a4 1800 0    2000 200
+add_block b4 1800 600  2000 800
+add_block a5 2400 0    2600 200
+add_block b5 2400 600  2600 800
+
+# Vertically aligned pairs, so each bus is a straight V run and a rule
+# restricted to the coarse pair has a legal layer in the direction it needs.
+add_bus dead_[4]     a1.p b1.q
+add_bus partial_[4]  a2.p b2.q
+add_bus perlayer_[4] a3.p b3.q
+add_bus alive_[4]    a4.p b4.q
+add_bus spconly_[4]  a5.p b5.q
+
+def_layer 3 M3 H 20
+def_layer 4 M4 V 20
+def_layer 5 M5 H TOP 20
+def_layer 6 M6 V TOP 20
+
+def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 4 0 VDD 2 1 (_ 1 1)x12 GND 2 1
+def_track_pattern 5 0 VDD 10 2 (_ 2 2)x4 GND 10 2
+def_track_pattern 6 0 VDD 10 2 (_ 2 2)x4 GND 10 2
+
+# Patterns before the rules: an absolute value has no meaning without the slot
+# geometry it quantizes against, and def_ndr enforces the order.
+
+# 8 units of channel is less than ONE coarse slot (10), so this resolves to
+# 1 slot / 0 guards on both layers it may use.  Declared, attached, and inert.
+def_ndr dead width 8 layers M5,M6
+# The same 8 against 12 fine slots is 4 slots — but the coarse pair still
+# takes one, so the rule bites on M3/M4 and not on M5/M6.
+def_ndr partial width 8
+# A multiplier rule, which is pattern-independent and can never be a no-op by
+# itself — until one layer's override hands back the default width.
+def_ndr perlayer width x2
+def_ndr_layer perlayer M4 width x1
+# The control: 12 units needs TWO coarse slots, so the same declaration form
+# on the same layers is a real constraint.
+def_ndr alive width 12 layers M5,M6
+# SPACING, not width.  The cause has to be read from both fields: this rule
+# declares no width at all, so an explanation derived from the width alone
+# says "the rule's own multiplier is one slot per bit" -- true, and silent
+# about the declaration that actually failed to bite.
+def_ndr spconly spacing 8 layers M5,M6
+
+set_ndr dead_     dead
+set_ndr partial_  partial
+set_ndr perlayer_ perlayer
+set_ndr alive_    alive
+set_ndr spconly_  spconly
+
+# The verdicts print HERE — at bundling, before a planner pass is spent.
+run_bundler STRICT
+dump_ndr
+
+generate_topologies
+set_track_pitch 3
+run_planner 1
+run_nuts
+run_detailed_nuts
+
+# `dead`'s bundle appears in neither the demand lines nor the R9 audit: there
+# is no active rule to report a demand for and no claim to check.  That is the
+# whole point — without the verdict above, its absence reads as "clean".
+dump_ndr
+check_design
+report_wirelength

@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from subprocess_env import buda_env
 
 # Full-pipeline integration smoke tests: each spawns buda_cli.py on a .buda
 # script (~1s apiece, ~19s total).  They form the "mid" tier — deselected from
@@ -51,12 +52,7 @@ def run_script(name: str) -> tuple[str, int]:
     """Run a .buda script with --no-viz; return (combined output, returncode).
 
     Combined output = terminal (summary) + the flow log (full detail)."""
-    # Ensure build (where buda.so lives) and tools are in PYTHONPATH
-    build_dir = _ROOT / "build"
-    tools_dir = _ROOT / "tools"
-    ppath = os.environ.get("PYTHONPATH", "")
-    new_ppath = f"{build_dir}:{tools_dir}:{ppath}" if ppath else f"{build_dir}:{tools_dir}"
-    env = {**os.environ, "PYTHONPATH": new_ppath}
+    env = buda_env(_ROOT)
     r = subprocess.run(
         [sys.executable, str(CLI), "--no-viz", str(FLOW / name)],
         capture_output=True, text=True, env=env,
@@ -789,11 +785,7 @@ def test_nuts_corner_touch_xlayer():
 # ---------------------------------------------------------------------------
 
 def _run_path(path: Path) -> tuple[str, int]:
-    build_dir = _ROOT / "build"
-    tools_dir = _ROOT / "tools"
-    ppath = os.environ.get("PYTHONPATH", "")
-    new_ppath = f"{build_dir}:{tools_dir}:{ppath}" if ppath else f"{build_dir}:{tools_dir}"
-    env = {**os.environ, "PYTHONPATH": new_ppath}
+    env = buda_env(_ROOT)
     r = subprocess.run([sys.executable, str(CLI), "--no-viz", str(path)],
                        capture_output=True, text=True, env=env)
     return r.stdout + r.stderr + "\n" + _flow_log_text(path), r.returncode
@@ -1095,6 +1087,44 @@ def test_ndr_absolute_divisor_repro():
     # …and it really is unreported by the demand machinery, which is why
     # the metal line has to name its own bundle.
     assert "rule 'w8sp': demand" not in out, out
+
+
+def test_ndr_noop_rule_repro():
+    """flow/ndr_noop_rule.buda (opens_ndr.md §2's second residual): a rule
+    that quantizes to a DEFAULT wire constrains nothing, and must say so.
+
+    Four rules on one stack, and the CONTROL is what makes the run readable:
+    `alive` declares the same absolute form against the same layers as `dead`
+    and stays silent, so a verdict here is about the rule rather than about
+    the vehicle."""
+    out, rc = run_script("ndr_noop_rule.buda")
+    assert_clean(out, rc, "ndr_noop_rule.buda")
+    # Nothing is VIOLATED — an inactive spec makes no claim to check, which
+    # is exactly why the verdict has to be reported instead.
+    assert "no violations" in out and "NDR_" not in out, out
+    # Dead on every layer it can reach -> the WARNING, naming the layers and
+    # the arithmetic that got there.
+    assert "BUDA-1913" in out, out
+    assert "NDR rule 'dead'" in out and "(L5, L6)" in out, out
+    assert "pitch 10" in out, out
+    # Dead on SOME -> the INFO, naming both halves.
+    assert "BUDA-1914: INFO: NDR rule 'partial'" in out, out
+    assert "on L5, L6 (active on L3, L4)" in out, out
+    # The per-layer multiplier override: the shape the delivered-metal line
+    # structurally cannot see, since there is no absolute value to fall short
+    # of.  Its clause must NOT claim a channel division that never happened.
+    assert "BUDA-1914: INFO: NDR rule 'perlayer'" in out, out
+    assert "the `def_ndr_layer` value declared for this layer" in out, out
+    # A SPACING-only no-op, explained by its spacing.  Read from the width
+    # alone it claimed "the rule's own multiplier is one slot per bit" —
+    # true of its width, silent about the declaration that failed to bite.
+    assert "BUDA-1913" in out and "NDR rule 'spconly'" in out, out
+    assert "the declared spacing 8" in out and "0 guard slot(s)" in out, out
+    # The control: same declaration form, same layers as `dead`, and it
+    # bites — so no verdict names it.  ("NDR rule 'alive'" is the phrasing
+    # BOTH verdicts use, and only they do; the declaration line reads
+    # "[NDR] rule 'alive'".)
+    assert "NDR rule 'alive'" not in out, out
 
 
 def test_ndr_layer_mask_starving_a_direction_is_loud():

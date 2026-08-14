@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from subprocess_env import buda_env
 
 _ROOT = Path(__file__).parents[2]
 CLI = _ROOT / "src" / "buda_cli.py"
@@ -48,10 +49,7 @@ check_design nuts
 def _run(tmp_path):
     script = tmp_path / "flow.buda"
     script.write_text(_FLOW)
-    build_dir, tools_dir = _ROOT / "build", _ROOT / "tools"
-    ppath = os.environ.get("PYTHONPATH", "")
-    env = {**os.environ,
-           "PYTHONPATH": f"{build_dir}:{tools_dir}:{ppath}".rstrip(":")}
+    env = buda_env(_ROOT)
     r = subprocess.run([sys.executable, str(CLI), "--no-viz", str(script)],
                        capture_output=True, text=True, env=env)
     assert r.returncode == 0, f"flow failed:\n{r.stdout}{r.stderr}"
@@ -99,10 +97,7 @@ def test_source_failure_recorded_in_log(tmp_path):
     it must still be mirrored into the flow log for batch post-mortems."""
     script = tmp_path / "flow.buda"
     script.write_text("def_layer 4 M4 H TOP 10\nsource nope_missing.buda\n")
-    build_dir, tools_dir = _ROOT / "build", _ROOT / "tools"
-    ppath = os.environ.get("PYTHONPATH", "")
-    env = {**os.environ,
-           "PYTHONPATH": f"{build_dir}:{tools_dir}:{ppath}".rstrip(":")}
+    env = buda_env(_ROOT)
     r = subprocess.run([sys.executable, str(CLI), "--no-viz", str(script)],
                        capture_output=True, text=True, env=env)
     assert r.returncode == 1, r.stdout + r.stderr

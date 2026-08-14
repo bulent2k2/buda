@@ -17,7 +17,12 @@
 #include "layering.h"
 namespace buda {
 void LayerStack::add_layer(int id, const std::string& name, LayerDir dir, LayerType type) {
-    layers_.push_back({id, name, dir, type, 1.0});
+    // Only the members with no sensible default are given positionally; the
+    // rest take their default member initializers.  Deliberately NOT spelling
+    // dilution_factor's 1.0 here: it is the NSDMI's own value, and a trailing
+    // positional double sits directly before bit_pitch — reorder the two and
+    // the literal lands on the wrong member with no diagnostic.
+    layers_.push_back({id, name, dir, type});
     if (type == LayerType::TOP) {
         if (dir == LayerDir::HORIZONTAL) top_horiz_id_ = id;
         else top_vert_id_ = id;

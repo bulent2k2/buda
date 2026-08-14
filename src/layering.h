@@ -39,7 +39,7 @@ struct Layer {
     // declared the pattern, so a thinned per-cell view installs its own.
     // Empty = unset: an absolute rule then keeps its stored conservative
     // quantization, which over-charges rather than under-charges.
-    NdrLayerGeom ndr_geom;
+    NdrLayerGeom ndr_geom{};
     // Span preference: span_cost = kSpan * max(0, span_min-span, span-span_max).
     // Defaults give zero span cost for any segment length.
     int    span_min      = 0;

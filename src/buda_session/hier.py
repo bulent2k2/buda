@@ -1623,6 +1623,11 @@ class HierMixin:
         # hard-errors there (R2d).
         from buda_cmds import ndr_cmds
         ndr_cmds.reapply_ndr_layer_restrictions(self, wrappers)
+        # This resolver is the moment a hier wrapper's reachable layer set
+        # becomes final, and the NDR no-op verdict is a statement ABOUT that
+        # set — so it waits for this flag rather than judging a capped bundle
+        # as able to reach every layer (Codex P2 on #737).
+        self._layer_masks_resolved = True
 
     def _restore_layer_policies(self):
         """Rebuild _cell_layer_policy from the open BDB (v20): per-cell bands

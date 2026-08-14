@@ -400,10 +400,13 @@ void Floorplan::set_detour_channel(const std::string& dirs, int size) {
     }
     ++rev_;
 }
-void Floorplan::add_keepout_zone(int x1, int y1, int x2, int y2, const std::vector<int>& layer_ids) {
+void Floorplan::add_keepout_zone(int x1, int y1, int x2, int y2,
+                                 const std::vector<int>& layer_ids,
+                                 bool inside_block) {
     KeepoutZone koz;
     koz.bbox = Rect{x1, y1, x2, y2};
     for (int lid : layer_ids) koz.layer_ids.insert(lid);
+    koz.inside_block = inside_block;
     keepouts_.push_back(std::move(koz));
     ++rev_;
 }
@@ -450,6 +453,17 @@ void Floorplan::get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_c
         }
     }
     for (const auto& koz : keepouts_) {
+        // `set_keepout_loci outside` (opens_interchange.md item 12): drop
+        // the loci of keepouts lying inside a block.  The grid is a PRODUCT
+        // of its two axis sets, so on a 133-macro design whose SRAM draws 99
+        // OBS rects these edges took it from 2,479 cells to 2,508,972 and
+        // the hier planner from 0.79 s to not finishing in 50 minutes.
+        //
+        // Opt-in, because it is a genuine trade rather than free: an
+        // interior position IS reachable — a trunk may cross a block
+        // over-the-cell — so this removes candidate positions along with
+        // the grid.  Blocking is unaffected in either mode.
+        if (keepout_loci_outside_only_ && koz.inside_block) continue;
         x_coords.push_back(koz.bbox.x1); x_coords.push_back(koz.bbox.x2);
         y_coords.push_back(koz.bbox.y1); y_coords.push_back(koz.bbox.y2);
     }

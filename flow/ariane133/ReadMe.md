@@ -10,13 +10,39 @@ python3 flow/ariane133/fetch.py          # ~12 MB, checksum-pinned
 bin/buda flow/ariane133/ariane133.buda
 ```
 
+Or as **one command**, which fetches (or verifies) and then routes:
+
+```bash
+bin/btcl flow/ariane133/ariane133.tcl         # inputs + the healer flow
+bin/btcl flow/ariane133/ariane133.tcl base    # inputs + the plain flow
+```
+
+The two-step recipe above is the one to know; the Tcl driver exists because
+this vehicle is the only one in the repo whose inputs are not in the repo, so
+running step two alone is a mistake a fresh clone makes exactly once. It is a
+driver and not a second copy of the flow — it hands the engine the **same**
+`.buda` file — and it ends by asking the finished session for its numbers
+(`buda::query`), so the pair is gateable: non-zero exit on a dirty endpoint or
+a stage that never ran. `-nofetch` verifies without downloading.
+
+Both `.buda` flows now **declare their inputs** on the first line:
+
+```
+require_file ariane.v fakeram45_256x16.lef hint Fetch them first: …
+```
+
+so running one without the fetch stops immediately with the remedy
+(`BUDA-1905`) instead of partway through the setup. The importer's own
+complaint is about a path it could not open; where that file comes from is
+this flow's knowledge, and that is the half worth printing.
+
 | | |
 |---|---|
 | design | ariane133 — a RISC-V core with 133 SRAM macros, 45nm |
 | netlist | gate-level, **127 modules, 5 hierarchy levels** |
 | nets / bundles | 5576 nets → **111 hbundles** (D0 50, D1 5, D2 25, D3 31) |
-| runtime | **7.5 s** end to end |
-| endpoint | 121 segments, **0 track overlaps, 0 interval violations**; 76 connectivity violations in 25 bundles — see *What is not clean* |
+| runtime | **~13.5 s** end to end, obstruction model included |
+| endpoint | 121 segments, **0 track overlaps, 0 interval violations**; 77 connectivity violations in 25 bundles — see *What is not clean* |
 
 ## Where the files come from
 
@@ -67,18 +93,30 @@ skipped as library cells**; and the ten routing layers' track patterns come
 from the **DEF's own `TRACKS`**. Ten `def_layer` lines and the SRAM's LEF
 reproduce the full-library import exactly.
 
-**`no_blockages` is mandatory here, and it is not tuning.** One fakeram
-macro carries **99 `OBS` rects**, so 133 of them import **13,034 keepouts**
-and the Hanan grid goes from 2,479 cells to **2,508,972** — a 1012× grid,
-on which `run_planner hier` did not finish in **50 minutes**, against
-**0.79 s** with the flag. The cost is real: this run has no macro-obstruction
-model. Written up as **`opens_interchange.md` item 12**; drop the flag when
-it lands.
+**This vehicle found `opens_interchange.md` item 12, which has since
+landed.** One fakeram macro carries **99 `OBS` rects**, so 133 of them
+import **13,034 keepouts**; every keepout edge is a Hanan line and the grid
+is a product, so it went from 2,479 cells to **2,508,972** and
+`run_planner hier` did not finish in **50 minutes**.
+
+`ariane133.buda` now declares **`set_keepout_loci outside`**: a keepout
+lying inside a block still blocks but adds no grid line. Grid **6,327
+cells**, and the flow runs **with** its obstruction model in ~19 s, so
+`no_blockages` is gone.
+
+The knob is opt-in and worth understanding before copying it: an interior
+locus *is* reachable — a trunk may cross a block over-the-cell — so this
+removes candidate positions along with the grid. It is the right trade for a
+design whose LEF draws obstruction in 99 rects per macro, and the wrong one
+for a design with a handful, where it measurably cost `flow/rv` a better
+trunk. See item 12.
 
 ## What is not clean, and why that is the input's shape
 
-`check_design` reports **76 violations across 25 of the 111 bundles**, all of
-one kind: *block referenced in topologies but not in floorplan*.
+Two separate things, worth not conflating.
+
+**The unplaced containers** — `check_design` reports violations of one kind,
+*block referenced in topologies but not in floorplan*.
 
 A DEF is flat — `COMPONENTS` lists leaf instances only — so every level
 between the die and the macros arrives from the Verilog with no geometry.
@@ -91,10 +129,28 @@ children, but **16 pure-logic containers have no placed descendant at all**
 *floorplan* DEF places no standard cells. Bundles that reach those blocks
 have nothing to land on.
 
-This is the honest ceiling of a floorplan DEF, not a routing defect: the
-placed geometry routes cleanly (0 overlaps, 0 interval violations). Removing
-it needs a **fully placed** DEF, which upstream generates rather than ships —
-so it costs an OpenROAD or Innovus run, not a download.
+This is the honest ceiling of a floorplan DEF, not a routing defect.
+Removing it needs a **fully placed** DEF, which upstream generates rather
+than ships — so it costs an OpenROAD or Innovus run, not a download.
+
+**The congestion is gone, and chasing it found a bug** (`opens_interchange.md`
+item 13). When item 12 made the obstruction model affordable, this flow
+reported **195 track overlaps**, which looked like the honest cost of routing
+a real macro design. It was not. Each of the 133 macros carries a DEF
+`+ HALO 10000`, and we were importing that **placement** halo as a routing
+keepout with no layer — so it blocked every routing layer, across 5 µm around
+every macro. Dropping it (a halo is placement information; `ROUTEHALO` is the
+routing construct) takes this flow to **0 overlaps**, with all 13,034 `OBS`
+keepouts still enforced.
+
+Worth keeping as a caution: the first response was to treat it as QoR.
+Promoting metal5–metal10 to `TOP` and running `negotiate_congestion` +
+`ripup_reroute` got 195 → 23 overlaps in 84 s and read like progress. The
+root-cause fix reaches 0 in 13.5 s with the original layer policy and no
+healers, so none of that tuning survives. The signal that should have been
+read first was in the advisory all along — supply-doomed seats reporting
+**zero** signal tracks in their windows, on layers carrying 4,848 tracks.
+Zero is not a congestion number.
 
 ## Relation to the other vehicles
 
