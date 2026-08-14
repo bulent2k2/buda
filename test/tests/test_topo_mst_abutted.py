@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 import buda
+from subprocess_env import buda_env
 
 _ROOT = Path(__file__).parents[2]
 
@@ -159,11 +160,7 @@ def test_abutment_collinear_butt_joint_connects():
 def test_big2_b1_bus_007_repro_routes_cleanly():
     """The committed repro flow routes with no opens and 0 unplaced bits."""
     repro = _ROOT / "flow" / "big_data_test" / "big2" / "b1_bus_007.buda"
-    build_dir = _ROOT / "build"
-    tools_dir = _ROOT / "tools"
-    ppath = os.environ.get("PYTHONPATH", "")
-    new_ppath = f"{build_dir}:{tools_dir}" + (f":{ppath}" if ppath else "")
-    env = {**os.environ, "PYTHONPATH": new_ppath}
+    env = buda_env(_ROOT)
     r = subprocess.run(
         [sys.executable, str(_ROOT / "src" / "buda_cli.py"), "--no-viz", str(repro)],
         capture_output=True, text=True, env=env,

@@ -41,6 +41,7 @@ from pathlib import Path
 
 import pytest
 import buda
+from subprocess_env import buda_env
 
 _ROOT = Path(__file__).parents[2]
 
@@ -217,11 +218,7 @@ def test_b34_bus_028_repro_routes_cleanly():
     over-extended edge tap; the candidate collapses to its branches and routes.
     """
     repro = _ROOT / "flow" / "big_data_test" / "big2" / "b34_bus_028.buda"
-    build_dir = _ROOT / "build"
-    tools_dir = _ROOT / "tools"
-    ppath = os.environ.get("PYTHONPATH", "")
-    new_ppath = f"{build_dir}:{tools_dir}" + (f":{ppath}" if ppath else "")
-    env = {**os.environ, "PYTHONPATH": new_ppath}
+    env = buda_env(_ROOT)
     r = subprocess.run(
         [sys.executable, str(_ROOT / "src" / "buda_cli.py"), "--no-viz", str(repro)],
         capture_output=True, text=True, env=env,

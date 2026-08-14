@@ -21,6 +21,7 @@ collection errors on main.  The fix is `tools/__init__.py`; these tests pin it
 by constructing the shadowing situation directly, rather than waiting for a
 dependency to reintroduce it.
 """
+import os
 import subprocess
 import sys
 import textwrap
@@ -55,7 +56,11 @@ def _run(code, extra_path):
     return subprocess.run(
         [sys.executable, "-c", textwrap.dedent(code)],
         capture_output=True, text=True,
-        env={"PYTHONPATH": f"{_ROOT}:{extra_path}", "PATH": "/usr/bin:/bin"})
+        # NOT buda_env: these two build a DELIBERATELY minimal path — the
+        # thing under test is sys.path PRECEDENCE, so inheriting the caller's
+        # PYTHONPATH would contaminate it.  Only the separator is shared.
+        env={"PYTHONPATH": os.pathsep.join([str(_ROOT), str(extra_path)]),
+             "PATH": "/usr/bin:/bin"})
 
 
 def test_repo_tools_wins_over_a_shadowing_distribution(tmp_path):
@@ -93,6 +98,7 @@ def test_the_shadowing_really_would_break_a_namespace_package(tmp_path):
     r = subprocess.run(
         [sys.executable, "-c", "from tools import thing"],
         capture_output=True, text=True,
-        env={"PYTHONPATH": f"{fake_repo}:{sp}", "PATH": "/usr/bin:/bin"})
+        env={"PYTHONPATH": os.pathsep.join([str(fake_repo), str(sp)]),
+             "PATH": "/usr/bin:/bin"})
     assert r.returncode != 0, "expected the namespace package to lose"
     assert "cannot import name 'thing' from 'tools'" in r.stderr, r.stderr
