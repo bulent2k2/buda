@@ -119,6 +119,7 @@ jobs:
           if errorlevel 1 exit /b 1
           pwsh -NoProfile -ExecutionPolicy Bypass -File bin\activate.ps1 && exit /b 1
           echo activate.ps1 refused direct execution, as documented
+          exit /b 0
 
       - name: Fast + mid tiers (`-m "not slow"`, documented no-PYTHONPATH form)
         # Deliberately no PYTHONPATH: WINDOWS_BUILD.md section 3 claims the
