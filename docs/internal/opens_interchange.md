@@ -27,13 +27,17 @@ first description was wrong** — item 1 about the merge case, and about the
 fix it originally proposed, which would have been the wrong fix; item 2
 about the severity, having called a silent SHORT a width collapse; item 3
 reserved a size-rule choice that measurement showed to be no choice at all;
-item 12 proposed a rectangle union that would have been work for almost
-nothing, the rects it meant to merge having real gaps between them.
+item 12 was wrong TWICE about its own fix — it proposed a rectangle union
+that would have been work for almost nothing (the rects it meant to merge
+have real gaps between them), and then shipped the replacement unconditional
+on a false claim that the loci it drops are unreachable.
 That is worth more than a tidy list, and the pattern is worth naming: the
 first description of a fault is written from the symptom you noticed, and
-the symptom is rarely the whole fault.  Item 12 adds the corollary — the
+the symptom is rarely the whole fault.  Item 12 adds two corollaries — the
 first *fix* is written from the description, so it inherits the error, and
-the cheapest place to catch it is a probe of the real data before any code.
+the cheapest place to catch that is a probe of the real data before any
+code; and the argument that a change is FREE deserves more suspicion than
+the change itself, because it is the part no gate checks.
 
 There are three working vehicles. Two are deliberately at opposite ends of
 the scale: **[`flow/def/`](../../flow/def/)** is the smallest design that
@@ -817,12 +821,11 @@ The measurement that redirected it took one probe. On `demo/ariane`:
 
 The entire blowup is **loci**, not rects. The rects were never the problem.
 
-### What landed
+### What landed — `set_keepout_loci all|outside`, default `all`
 
-A keepout that lies wholly inside a block contributes **no Hanan loci**. The
-block's own four edges are already in the grid, and no trunk position inside
-a bracketed footprint is reachable, so those coordinates buy nothing and
-cost a product.
+Under `outside`, a keepout lying wholly inside a block contributes **no
+Hanan loci**. It still blocks, identically; it just stops adding
+coordinates.
 
 Three deliberate choices:
 
@@ -835,17 +838,52 @@ Three deliberate choices:
   the one whose edge *is* a useful locus. It decides this where both
   rectangles are already in hand and it costs nothing; a later consumer
   would have to search every block to recover the same fact.
-* **A halo still contributes.** It extends beyond the footprint by
-  construction, so its edges are reachable positions — and on ariane those
-  133 zones are why the grid lands at 6,327 cells rather than 2,479.
+* **A halo always contributes**, in either mode. It extends beyond the
+  footprint by construction — and on ariane those 133 zones are why the grid
+  lands at 6,327 cells rather than 2,479.
 
-**Blocking behaviour is unchanged.** This decides which coordinates enter
-the grid and nothing else.
+**Blocking behaviour is unchanged** in both modes. This decides which
+coordinates enter the grid and nothing else.
 
-Measured: 13,034 of 13,167 keepouts interior, grid **2,508,972 → 6,327
-cells (397×)**, and `flow/ariane133/` now runs **with** its obstruction
-model in 18.9 s where it previously did not finish — the flag is gone from
-that flow, which was this item's closing condition.
+### The second wrong turn: it is not free, and shipped once as though it were
+
+This landed **unconditional** first, on the argument that a position inside
+a bracketed footprint is unreachable anyway, so the loci were pure waste.
+
+**That argument is false.** A trunk may cross a block *over-the-cell* —
+BUDA does it routinely and this repo's own docs call it a pass-through — so
+an interior locus is a perfectly reachable candidate position. Dropping it
+removes candidate positions, which is a trade.
+
+`flow/rv/soc_conv_div` demonstrated it within one suite run. Its macros
+carry ten `OBS` rects, and bundle 42's selected trunk sat exactly on one of
+their edges:
+
+| | `all` (main) | `outside`, unconditional |
+|---|---|---|
+| bundle 42 | `TRUNK_V@x108000`, **2 segments** | `TRUNK_V@x125000`, **4 segments** |
+| dangling metal | 0 | **3,956,000** |
+
+Two things are worth keeping from how that was caught:
+
+* **`test_tapered_bit_spans` caught it; the QoR corpus did not.** The corpus
+  reported *0 better, 0 worse, 48 unchanged* straight through this, because
+  its metric is overlaps/unplaced/viol_bundles and dangling metal is none of
+  those. It is a QoR gate, not a correctness one, and it is not a substitute
+  for the suite.
+* **The knob is where this should have started.** Every other lever here
+  that moves candidate positions — `set_prune_dominated`, `set_dedup_loci`,
+  `set_trim_mst_legs`, `set_drop_dangling` — is opt-in for exactly this
+  reason, and each says so in its own docs.
+
+Default `all` is byte-identical to before: corpus 48/48 unchanged with
+abstract and detailed WL **+0**.
+
+Measured on `flow/ariane133/`, which declares `set_keepout_loci outside`:
+13,034 of 13,167 keepouts interior, grid **2,508,972 → 6,327 cells (397×)**,
+and the flow now runs **with** its obstruction model in ~19 s where it
+previously did not finish — `no_blockages` is gone from it, which was this
+item's closing condition.
 
 One consequence to expect rather than be surprised by: the vehicle is now
 genuinely congested. `OBS` covers metal1–metal4 across all 133 macros, so

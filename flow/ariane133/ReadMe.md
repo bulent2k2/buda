@@ -69,13 +69,21 @@ reproduce the full-library import exactly.
 
 **This vehicle found `opens_interchange.md` item 12, which has since
 landed.** One fakeram macro carries **99 `OBS` rects**, so 133 of them
-import **13,034 keepouts**; every keepout edge used to be a Hanan line, and
-the grid is a product, so it went from 2,479 cells to **2,508,972** and
-`run_planner hier` did not finish in **50 minutes**. A keepout lying inside
-a block now contributes no loci — the block's own edges already bracket it —
-so the grid is **6,327 cells** and the flow runs **with** its obstruction
-model, in ~19 s. `no_blockages` is no longer needed and is gone from
-`ariane133.buda`.
+import **13,034 keepouts**; every keepout edge is a Hanan line and the grid
+is a product, so it went from 2,479 cells to **2,508,972** and
+`run_planner hier` did not finish in **50 minutes**.
+
+`ariane133.buda` now declares **`set_keepout_loci outside`**: a keepout
+lying inside a block still blocks but adds no grid line. Grid **6,327
+cells**, and the flow runs **with** its obstruction model in ~19 s, so
+`no_blockages` is gone.
+
+The knob is opt-in and worth understanding before copying it: an interior
+locus *is* reachable — a trunk may cross a block over-the-cell — so this
+removes candidate positions along with the grid. It is the right trade for a
+design whose LEF draws obstruction in 99 rects per macro, and the wrong one
+for a design with a handful, where it measurably cost `flow/rv` a better
+trunk. See item 12.
 
 ## What is not clean, and why that is the input's shape
 
