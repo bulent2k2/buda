@@ -516,6 +516,22 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
                                         nerr, bool(significant)))
 
         if raised is not None:
+            # A FAILING command gets its full detail on the terminal, not just
+            # the one-line headline every other command gets.  The abstract is
+            # right for a command that worked — the log has the rest, and the
+            # run continues to the place where it matters.  It is wrong for a
+            # command that ENDED the run: the detail IS the outcome, and the
+            # useful half of a fail-fast diagnostic is exactly what does not
+            # fit on the headline (which files, the remedy, the usage line).
+            # Sending a user to a log for the reason their run stopped is
+            # sending them there for the only thing they need.
+            #
+            # A clean `exit` is excluded: code 0 is 18 flows' normal
+            # terminator, not a failure, and its one line already reads fine.
+            failing = not (isinstance(raised, SystemExit)
+                           and raised.code in (0, None))
+            if failing and nonblank:
+                print(text.rstrip('\n'), file=real_out)
             raise raised
 
     @staticmethod
@@ -1034,6 +1050,39 @@ def main():
             session._flush_bdb_writeback()
         except SystemExit as e:
             script_exit = e.code if isinstance(e.code, int) else 0
+        except Exception as e:          # noqa: BLE001 — an ENGINE fault
+            # Deliberately `Exception`, not `BaseException`: SystemExit is
+            # handled above and a KeyboardInterrupt is the user stopping the
+            # run, not the engine failing — neither is this diagnostic.
+            # A command that RAISES (a C++ RuntimeError, a bad argument that
+            # reached a binding) used to sail past this block entirely, so
+            # the run ended: end report first — a runtime summary listing the
+            # commands that DID run, which reads exactly like a clean short
+            # flow — and only then Python's default excepthook, printing a
+            # traceback through code the user did not write.  The failure was
+            # on screen, in the least legible place and after the evidence
+            # that it had not happened.
+            #
+            # Reported here, BEFORE the `finally` runs, so the diagnostic
+            # comes first and the summary is read as the tail of a failed
+            # run.  The traceback is not lost: it goes to the flow log
+            # always, and to the terminal under BUDA_TRACEBACK=1.
+            import traceback
+            tb = traceback.format_exc()
+            if session._flow_log is not None:
+                session._flow_log.write(f"\n{tb}\n")
+                session._flow_log.flush()
+            print(buda_diag.format(
+                "BUDA-1906", f"{type(e).__name__}: {e}"))
+            where = session._script_stack[-1] if session._script_stack else script
+            print(f"  while running {os.path.basename(where)}"
+                  f" — the commands below it did NOT run")
+            if os.environ.get("BUDA_TRACEBACK", "").strip() not in ("", "0"):
+                print(tb, file=sys.stderr)
+            else:
+                print("  (set BUDA_TRACEBACK=1 for the Python traceback; "
+                      "it is in the flow log either way)")
+            script_exit = 1
         finally:
             # Idempotent: a blocking `visualize` already emitted this before the
             # GUI opened (so it survives a macOS .app quit-on-window-close).

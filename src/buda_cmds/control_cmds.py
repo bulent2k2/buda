@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Script control: source, exit.
+"""Script control: source, require_file, exit.
 
 Command handlers extracted verbatim from BudaSession.do_command
 (the CLI registry split; self -> session was the only body change).
@@ -22,6 +22,9 @@ full registry that buda_cli.do_command dispatches through.
 """
 import os
 import sys
+
+import buda_diag
+from buda_session.util import resolve_script_path
 
 
 def cmd_source(session, cmd, args, cmd_line):
@@ -96,6 +99,64 @@ def cmd_source(session, cmd, args, cmd_line):
         session._script_stack.pop()
 
 
+def cmd_require_file(session, cmd, args, cmd_line):
+    # require_file <path> [<path> ...] [hint <text ...>]
+    #
+    # State a flow's INPUT PRECONDITION, with the remedy, at the top of the
+    # script instead of letting the reader that needs the file fail six
+    # commands later.  The reader's own complaint is about the file it could
+    # not open; only the flow knows where the file COMES FROM — a fetch
+    # script, a prior stage's output, a site path — and that is the half a
+    # user needs.  `flow/ariane133` is the case in point: two of its inputs
+    # are fetched from upstream by `fetch.py` and are deliberately not
+    # checked in, so a fresh clone runs three commands and stops.
+    #
+    # Fails FAST, like `source` and an unknown command, and for the same
+    # reason: continuing past a missing input leaves the design
+    # misconfigured, and the run that follows describes a design nobody has.
+    if not args:
+        msg = ("Error: require_file requires at least one path "
+               "(require_file <path> [<path> ...] [hint <text>])")
+        print(msg); session._log_write(msg)
+        return
+
+    # `hint` ends the path list, so several files can share one remedy.  The
+    # rest of the line is the hint verbatim — the handlers split on
+    # whitespace and nothing here re-quotes, so it reads as written.
+    paths, hint = args, ""
+    if "hint" in args:
+        cut = args.index("hint")
+        paths, hint = args[:cut], " ".join(args[cut + 1:]).strip()
+    if not paths:
+        msg = "Error: require_file: no path before 'hint'"
+        print(msg); session._log_write(msg)
+        return
+
+    # Resolved by THE path rule (the script's own directory), so a required
+    # path means the same file as the import command that will read it.
+    missing = [(p, resolve_script_path(session, p, is_read=True))
+               for p in paths]
+    missing = [(p, full) for p, full in missing if not os.path.exists(full)]
+    if not missing:
+        return          # silent: a satisfied precondition is not news
+
+    # Every missing file at once.  Reporting one per run turns fetching two
+    # inputs into two failed runs.
+    where = (f" ({os.path.basename(session._script_stack[-1])})"
+             if session._script_stack else "")
+    lines = [buda_diag.format(
+        "BUDA-1905",
+        f"{len(missing)} required input file(s) not found{where}:")]
+    for p, full in missing:
+        lines.append(f"    {p}" + (f"   → {full}" if full != p else ""))
+    if hint:
+        lines.append(f"  {hint}")
+    for ln in lines:
+        print(ln); session._log_write(ln)
+    session._flush_bdb_writeback()
+    sys.exit(1)
+
+
 def cmd_exit(session, cmd, args, cmd_line):
     # Stop the run mid-script (handy for debugging a flow incrementally).
     # Optional integer exit code (default 0 = clean stop).
@@ -115,5 +176,6 @@ def cmd_exit(session, cmd, args, cmd_line):
 
 COMMANDS = {
     "source": cmd_source,
+    "require_file": cmd_require_file,
     "exit": cmd_exit,
 }

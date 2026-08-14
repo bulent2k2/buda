@@ -10,6 +10,32 @@ python3 flow/ariane133/fetch.py          # ~12 MB, checksum-pinned
 bin/buda flow/ariane133/ariane133.buda
 ```
 
+Or as **one command**, which fetches (or verifies) and then routes:
+
+```bash
+bin/btcl flow/ariane133/ariane133.tcl         # inputs + the healer flow
+bin/btcl flow/ariane133/ariane133.tcl base    # inputs + the plain flow
+```
+
+The two-step recipe above is the one to know; the Tcl driver exists because
+this vehicle is the only one in the repo whose inputs are not in the repo, so
+running step two alone is a mistake a fresh clone makes exactly once. It is a
+driver and not a second copy of the flow — it hands the engine the **same**
+`.buda` file — and it ends by asking the finished session for its numbers
+(`buda::query`), so the pair is gateable: non-zero exit on a dirty endpoint or
+a stage that never ran. `-nofetch` verifies without downloading.
+
+Both `.buda` flows now **declare their inputs** on the first line:
+
+```
+require_file ariane.v fakeram45_256x16.lef hint Fetch them first: …
+```
+
+so running one without the fetch stops immediately with the remedy
+(`BUDA-1905`) instead of partway through the setup. The importer's own
+complaint is about a path it could not open; where that file comes from is
+this flow's knowledge, and that is the half worth printing.
+
 | | |
 |---|---|
 | design | ariane133 — a RISC-V core with 133 SRAM macros, 45nm |
