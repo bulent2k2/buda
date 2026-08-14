@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 import buda
+from subprocess_env import buda_env
 
 _ROOT = Path(__file__).parents[2]
 
@@ -109,11 +110,7 @@ def test_corner_diagonal_trunk_mst_3blocks():
 def test_big2_b3_bus_023_repro_routes_cleanly():
     """The committed repro routes with no opens and 0 unplaced, and now offers MST."""
     repro = _ROOT / "flow" / "big_data_test" / "big2" / "b3_bus_023.buda"
-    build_dir = _ROOT / "build"
-    tools_dir = _ROOT / "tools"
-    ppath = os.environ.get("PYTHONPATH", "")
-    new_ppath = f"{build_dir}:{tools_dir}" + (f":{ppath}" if ppath else "")
-    env = {**os.environ, "PYTHONPATH": new_ppath}
+    env = buda_env(_ROOT)
     r = subprocess.run(
         [sys.executable, str(_ROOT / "src" / "buda_cli.py"), "--no-viz", str(repro)],
         capture_output=True, text=True, env=env,

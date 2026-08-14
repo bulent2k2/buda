@@ -27,6 +27,7 @@ import buda_cli
 from tcl_quote import tcl_path
 
 from wrapper_select import wrapper_command, wrapper_missing_reason
+from subprocess_env import buda_env
 
 _ROOT = Path(__file__).parents[2]
 _CLI = _ROOT / "src" / "buda_cli.py"
@@ -71,8 +72,7 @@ def test_flow_ends_by_visualizing(verbs, expected):
 def _run(tmp_path, body, *flags):
     script = tmp_path / "veh.buda"
     script.write_text(body)
-    env = {**os.environ, "MPLBACKEND": "Agg",
-           "PYTHONPATH": f"{_ROOT/'build'}:{_ROOT/'tools'}"}
+    env = buda_env(_ROOT, MPLBACKEND="Agg")
     r = subprocess.run([sys.executable, str(_CLI), str(script), *flags],
                        capture_output=True, text=True, env=env)
     return r.returncode, r.stdout + r.stderr

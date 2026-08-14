@@ -42,6 +42,7 @@ import sys
 from pathlib import Path
 
 import buda
+from subprocess_env import buda_env
 
 _ROOT   = Path(__file__).parents[2]
 FLOW    = _ROOT / "flow"
@@ -244,11 +245,7 @@ def test_direct_trunk_taps_count_as_endpoints():
 # ---------------------------------------------------------------------------
 
 def _run_flow(name):
-    build_dir = _ROOT / "build"
-    tools_dir = _ROOT / "tools"
-    ppath = os.environ.get("PYTHONPATH", "")
-    env = {**os.environ,
-           "PYTHONPATH": f"{build_dir}:{tools_dir}:{ppath}".rstrip(":")}
+    env = buda_env(_ROOT)
     r = subprocess.run(
         [sys.executable, str(CLI), "--no-viz", str(FLOW / name)],
         capture_output=True, text=True, env=env)

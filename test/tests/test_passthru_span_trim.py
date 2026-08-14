@@ -50,6 +50,7 @@ import buda
 _ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(_ROOT / "src"))
 import buda_cli  # noqa: E402
+from subprocess_env import buda_env
 
 LAYER = 4
 
@@ -169,10 +170,7 @@ def test_no_change_when_the_crossing_survives():
 # ── end to end ───────────────────────────────────────────────────────────────
 
 def _run_buda(script):
-    ppath = os.environ.get("PYTHONPATH", "")
-    env = {**os.environ,
-           "PYTHONPATH": f"{_ROOT / 'build'}:{_ROOT / 'tools'}"
-                         + (f":{ppath}" if ppath else "")}
+    env = buda_env(_ROOT)
     r = subprocess.run(
         [sys.executable, str(_ROOT / "src" / "buda_cli.py"), "--no-viz", str(script)],
         capture_output=True, text=True, env=env, cwd=str(_ROOT / "flow" / "rnr"),

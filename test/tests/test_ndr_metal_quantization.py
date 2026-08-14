@@ -27,6 +27,7 @@ NARROWEST window is the only guaranteed one.
 import pytest
 
 import buda
+from subprocess_env import buda_env
 
 
 def _pattern(spec):
@@ -242,9 +243,9 @@ def _flow(tmp_path, body):
     import subprocess, sys, os
     f = tmp_path / "t.buda"
     f.write_text(body)
-    env = dict(os.environ, PYTHONPATH="build:src:tools")
     root = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))))
+    env = buda_env(root, "build", "src", "tools")
     r = subprocess.run([sys.executable, "src/buda_cli.py", str(f), "--no-viz"],
                        capture_output=True, text=True, cwd=root, env=env)
     return r.stdout + r.stderr, r.returncode

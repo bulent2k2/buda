@@ -34,6 +34,7 @@ if _ROOT not in sys.path:
 import buda
 import buda_db
 import buda_cli
+from subprocess_env import buda_env
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -198,13 +199,7 @@ def test_source_resolves_against_parent_not_cwd(tmp_path):
         [sys.executable, os.path.join(_ROOT, "src", "buda_cli.py"),
          str(scripts / "parent.buda"), "--no-viz"],
         cwd=str(cwd), capture_output=True, text=True,
-        # PREPEND build, do not replace the inherited PYTHONPATH: under the
-        # Visual Studio multi-config layout the extension lives in
-        # build\Release, which only the caller's env knows -- replacing it
-        # orphaned this subprocess on Windows (doc-validation run 8).
-        env={**os.environ, "PYTHONPATH": os.pathsep.join(
-            [os.path.join(_ROOT, "build")]
-            + ([os.environ["PYTHONPATH"]] if os.environ.get("PYTHONPATH") else []))})
+        env=buda_env(_ROOT, "build"))
     # Pre-fix os.path.exists('child') in cwd was true, so '.buda' was not
     # appended and resolution against the parent dir found no file → exit(1).
     assert r.returncode == 0, r.stdout + r.stderr

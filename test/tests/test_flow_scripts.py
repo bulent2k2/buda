@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from subprocess_env import buda_env
 
 # Full-pipeline integration smoke tests: each spawns buda_cli.py on a .buda
 # script (~1s apiece, ~19s total).  They form the "mid" tier — deselected from
@@ -51,12 +52,7 @@ def run_script(name: str) -> tuple[str, int]:
     """Run a .buda script with --no-viz; return (combined output, returncode).
 
     Combined output = terminal (summary) + the flow log (full detail)."""
-    # Ensure build (where buda.so lives) and tools are in PYTHONPATH
-    build_dir = _ROOT / "build"
-    tools_dir = _ROOT / "tools"
-    ppath = os.environ.get("PYTHONPATH", "")
-    new_ppath = f"{build_dir}:{tools_dir}:{ppath}" if ppath else f"{build_dir}:{tools_dir}"
-    env = {**os.environ, "PYTHONPATH": new_ppath}
+    env = buda_env(_ROOT)
     r = subprocess.run(
         [sys.executable, str(CLI), "--no-viz", str(FLOW / name)],
         capture_output=True, text=True, env=env,
@@ -789,11 +785,7 @@ def test_nuts_corner_touch_xlayer():
 # ---------------------------------------------------------------------------
 
 def _run_path(path: Path) -> tuple[str, int]:
-    build_dir = _ROOT / "build"
-    tools_dir = _ROOT / "tools"
-    ppath = os.environ.get("PYTHONPATH", "")
-    new_ppath = f"{build_dir}:{tools_dir}:{ppath}" if ppath else f"{build_dir}:{tools_dir}"
-    env = {**os.environ, "PYTHONPATH": new_ppath}
+    env = buda_env(_ROOT)
     r = subprocess.run([sys.executable, str(CLI), "--no-viz", str(path)],
                        capture_output=True, text=True, env=env)
     return r.stdout + r.stderr + "\n" + _flow_log_text(path), r.returncode
