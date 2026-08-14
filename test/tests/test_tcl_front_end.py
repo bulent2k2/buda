@@ -37,8 +37,15 @@ from pathlib import Path
 
 import pytest
 
+from tcl_quote import tcl_path
+
 _ROOT = Path(__file__).resolve().parents[2]
 _TCL = _ROOT / "tools" / "buda.tcl"
+# Interpolating a path into Tcl source is quoting, not formatting: see
+# `src/tcl_quote.py` for the two separate ways a native Windows path is
+# otherwise eaten before anything looks at a filename.
+_TCL_Q = tcl_path(_TCL)
+_PY_Q = tcl_path(sys.executable)
 
 # mid tier: drives a real tclsh + buda_server subprocess per test (bridge
 # integration), too heavy for the fast inner loop — run with `bb -m`/`bb -s`.
@@ -58,7 +65,7 @@ def _tcl(tmp_path, body, expect_rc=0, no_locale=False):
     the encoding test would pass no matter what the code did.
     """
     script = tmp_path / "t.tcl"
-    script.write_text(f"source {_TCL}\nbuda::start -python {sys.executable}\n"
+    script.write_text(f"source {_TCL_Q}\nbuda::start -python {_PY_Q}\n"
                       f"{body}\n")
     env = dict(os.environ)
     if no_locale:
@@ -212,7 +219,7 @@ def test_output_is_available_even_with_the_echo_off(tmp_path):
         buda::dump_messages
         puts "CAPTURED=[string match {*BUDA-1601*} [buda::output]]"
         puts "QUIET=[string match {*BUDA-1601*} {}]"
-        buda::stop""" % sys.executable)
+        buda::stop""" % _PY_Q)
     assert "CAPTURED=1" in out, out
     # …and it did NOT reach the terminal, which is what `-echo 0` means.
     assert "BUDA-1601  ERROR" not in out, out
