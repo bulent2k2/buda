@@ -11,7 +11,11 @@ this page is the backlog behind them.
 Snapshot index — last verified against `main`: **2026-08-14**.  Everything
 here has landed except **item 8, the packaged wheel**, which is a CI and
 packaging project rather than an interchange defect and is the only entry
-still owed code.  Item 9 closed WITHOUT any: its last residual turned out to
+still owed code.  Item 13 is the newest, and was found by chasing what
+looked like a QoR problem in `flow/ariane133` and turned out to be an
+importer defect — the third-vehicle argument again, and a reminder that a
+diagnostic reporting ZERO of something is a different claim from a
+diagnostic reporting too few.  Item 9 closed WITHOUT any: its last residual turned out to
 be a provenance accident with no dependants, and saying so precisely is the
 resolution.  Item 12 closed WITH code, but not the code this page first
 proposed — see its "the proposed fix was the wrong one" section, which is
@@ -58,7 +62,9 @@ DEF, finally given the LEF that describes it). It found item 12 immediately,
 and that item was invisible to both other vehicles for a reason worth
 stating — they author their own LEF, and a hand-written LEF has a handful of
 `OBS` rects because a human typed them. Scale was never going to surface it;
-only somebody else's file was.
+only somebody else's file was. It then found item 13 the same way, and that
+one had been sitting in the importer since Phase 3c: a hand-written DEF puts
+a halo on a macro when the author remembers to, and neither of ours does.
 
 ---
 
@@ -893,6 +899,69 @@ healers take 125 overlaps to 61 and are still improving at the move budget.
 Convergence there is that vehicle's QoR question, not an interchange one.
 
 Pinned by `test_keepout_hanan_loci.py`.
+
+---
+
+## 13. ~~A component `HALO` was imported as a routing keepout~~ — RESOLVED 2026-08-14
+
+Found by going after `flow/ariane133`'s congestion, and it turned out not to
+be congestion at all.
+
+`ariane.def` puts `+ HALO 10000` — 5 µm a side at 2000 DBU/µm — on every one
+of its 133 macros. Each became a keepout with **no layer**, and the session
+maps a layerless keepout onto *every* routing layer. So 133 zones forbade
+routing across an area the DEF left completely routable.
+
+DEF has two halos, and they are different constraints:
+
+| | means | layers |
+|---|---|---|
+| `+ HALO [SOFT] l b r t` | keep other **cells** away — placement | none |
+| `+ ROUTEHALO dist minLayer maxLayer` | keep **routing** away | named |
+
+We honoured the placement construct as routing and **ignore** the routing
+construct. Backwards — and it is the same mistake recorded a few lines below
+it in the same function for `PLACEMENT` blockages, which are dropped because
+*"importing them forbade routing the DEF left routable"*. That reasoning
+was written, applied to the neighbouring construct, and not applied here.
+
+Measured on `flow/ariane133`, with nothing else changed:
+
+| | before | after |
+|---|---|---|
+| track overlaps | 195 | **0** |
+| `check_design` | 178 violations / 47 bundles | **77 / 25** |
+| supply-doomed seats | 83 (435 stranded bits) | 18 (104) |
+| runtime | 18.9 s | **13.5 s** |
+
+The `OBS` obstruction model is untouched and still fully enforced — 13,034
+keepouts, the thing that actually describes where macro metal is. What went
+away is 133 all-layer zones describing where *cells* may not go. A halo is
+real placement information BUDA has no stage to apply, so it is now
+**censused** (`COMPONENTS.HALO`) beside `BLOCKAGES.PLACEMENT`, not silently
+dropped.
+
+**What this cost before it was found.** The congestion was first attacked as
+QoR: promoting metal5–metal10 to `TOP` and running `negotiate_congestion` +
+`ripup_reroute` took 195 → 23 overlaps in 84 s, and looked like progress.
+The root-cause fix reaches **0 in 13.5 s** with the original layer policy and
+no healers, so all of that tuning was discarded. The tell was in the
+diagnostics the whole time: 83 supply-doomed seats reporting **zero** signal
+tracks in their placed windows, on layers carrying 4,848 tracks. Zero is not
+a congestion number — it is a "something is blocking everything" number, and
+it should have been read as one before any knob was turned.
+
+**Still open, deliberately:** `ROUTEHALO` remains parsed-and-ignored. That is
+not a regression — it was ignored before too, and the halo blocking was an
+accident rather than an implementation of it — but it *is* the construct
+that should produce a routing keepout, on its own declared layer range. No
+vehicle here declares one, so it is left rather than built blind.
+
+Pinned by `test_def_import.py`, which **reverses** an assertion this repo
+used to make. Its old comment was explicit about the belief — *"the HALO
+ring around i1, which the placer honoured and the router must too"* — and it
+is quoted in the new test so the reversal reads as a decision rather than a
+silent edit.
 
 ---
 
