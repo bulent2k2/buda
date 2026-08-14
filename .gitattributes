@@ -1,0 +1,13 @@
+# Generated-and-committed vehicle inputs: their tests regenerate and
+# byte-compare (test_rv_hier_flow / test_def_hier_flow match-their-generator),
+# and the generators emit LF explicitly on every platform.  Pin the checkout
+# to LF too, or autocrlf materializes a CRLF reference that can never match
+# (measured: windows-validate run 31 failed the LF-checkout lanes with CRLF
+# regeneration, run 32 failed the autocrlf lanes with LF regeneration — the
+# two halves of the same indeterminism).
+flow/rv/soc.v    text eol=lf
+flow/rv/soc.def  text eol=lf
+flow/rv/soc.lef  text eol=lf
+flow/def/chip.v   text eol=lf
+flow/def/chip.def text eol=lf
+flow/def/chip.lef text eol=lf
