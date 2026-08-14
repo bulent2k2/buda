@@ -52,7 +52,7 @@
 # `require Tcl 8.5` means "8.x only" and refuses Tcl 9 outright — measured
 # on the first Tcl 9.0.4 install to point at BUDA (a Windows box, 2026-08),
 # where this line was the whole failure.  `8.5-` = 8.5 or ANY later major.
-package require Tcl 8.5--
+package require Tcl 8.5-
 
 namespace eval corpus {
     variable top ""          ;# the file tclsh was given (the one that reports)
