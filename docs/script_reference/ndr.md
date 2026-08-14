@@ -304,7 +304,14 @@ message names — widen the value, declare a shield (which keeps a spec active
 at any pitch), or restrict the rule to the layers where it bites.
 
 A layer with no `def_track_pattern` is not judged: nothing can be placed
-there at all.
+there at all. Nor is the verdict reached while a **cell layer policy** is
+still unresolved — `set_cell_layer_cap` narrows which layers a bundle can
+reach and resolves at `run_planner hier`, so a capped design hears the
+verdict there instead, against the layers it can really use.
+
+The cause names **every** declared value, since width and spacing are
+declared independently: a `spacing`-only rule is explained by its spacing
+and the guard slots it bought, not by its (default) width.
 
 ---
 

@@ -1123,6 +1123,11 @@ def test_ndr_noop_rule_repro():
     # of.  Its clause must NOT claim a channel division that never happened.
     assert "BUDA-1914: INFO: NDR rule 'perlayer'" in out, out
     assert "the `def_ndr_layer` value declared for this layer" in out, out
+    # A SPACING-only no-op, explained by its spacing.  Read from the width
+    # alone it claimed "the rule's own multiplier is one slot per bit" —
+    # true of its width, silent about the declaration that failed to bite.
+    assert "BUDA-1913" in out and "NDR rule 'spconly'" in out, out
+    assert "the declared spacing 8" in out and "0 guard slot(s)" in out, out
     # The control: same declaration form, same layers as `dead`, and it
     # bites — so no verdict names it.  ("NDR rule 'alive'" is the phrasing
     # BOTH verdicts use, and only they do; the declaration line reads

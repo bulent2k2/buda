@@ -1,7 +1,7 @@
 # REPRO: a declared NDR rule that constrains NOTHING, and says so.
 #
 # `docs/internal/opens_ndr.md` §2's second residual — "a rule that resolves to
-# one slot resolves to NO rule" — in the three shapes it comes in, one run.
+# one slot resolves to NO rule" — in the shapes it comes in, one run.
 #
 # ── The condition ─────────────────────────────────────────────────────────
 #
@@ -17,7 +17,7 @@
 # width, spacing or shield is a hard error, "constrains nothing".  Arrived at
 # through the GRID it used to be silent from end to end.
 #
-# ── The three shapes ──────────────────────────────────────────────────────
+# ── The shapes ────────────────────────────────────────────────────────────
 #
 #   fine   (M3/M4)  VDD 2 1 (_ 1 1)x12 GND 2 1
 #                   period 30 over 12 signal slots -> 2.5 units of channel/slot
@@ -30,6 +30,8 @@
 #   partial  every layer  2 fine / 1 coarse  BUDA-1914 (INFO) — dead on M5,M6
 #   perlayer every layer  x2, but x1 on M4   BUDA-1914 (INFO) — dead on M4
 #   alive    M5,M6 only   2 slots on both    silent — the rule bites
+#   spconly  M5,M6 only   0 guard slots      BUDA-1913 (WARNING) — no-op,
+#                                            explained by its SPACING
 #
 # `alive` is the control and the reason the run is worth reading: it declares
 # the SAME absolute form against the SAME layers as `dead` and says nothing,
@@ -60,6 +62,8 @@ add_block a3 1200 0    1400 200
 add_block b3 1200 600  1400 800
 add_block a4 1800 0    2000 200
 add_block b4 1800 600  2000 800
+add_block a5 2400 0    2600 200
+add_block b5 2400 600  2600 800
 
 # Vertically aligned pairs, so each bus is a straight V run and a rule
 # restricted to the coarse pair has a legal layer in the direction it needs.
@@ -67,6 +71,7 @@ add_bus dead_[4]     a1.p b1.q
 add_bus partial_[4]  a2.p b2.q
 add_bus perlayer_[4] a3.p b3.q
 add_bus alive_[4]    a4.p b4.q
+add_bus spconly_[4]  a5.p b5.q
 
 def_layer 3 M3 H 20
 def_layer 4 M4 V 20
@@ -94,11 +99,17 @@ def_ndr_layer perlayer M4 width x1
 # The control: 12 units needs TWO coarse slots, so the same declaration form
 # on the same layers is a real constraint.
 def_ndr alive width 12 layers M5,M6
+# SPACING, not width.  The cause has to be read from both fields: this rule
+# declares no width at all, so an explanation derived from the width alone
+# says "the rule's own multiplier is one slot per bit" -- true, and silent
+# about the declaration that actually failed to bite.
+def_ndr spconly spacing 8 layers M5,M6
 
 set_ndr dead_     dead
 set_ndr partial_  partial
 set_ndr perlayer_ perlayer
 set_ndr alive_    alive
+set_ndr spconly_  spconly
 
 # The verdicts print HERE — at bundling, before a planner pass is spent.
 run_bundler STRICT

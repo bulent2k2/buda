@@ -181,6 +181,33 @@ def test_a_bundle_capped_onto_the_dead_layers_is_INERT_not_partial(capsys):
     assert "1 of 1 governed bundle(s)" in line, line
 
 
+def test_a_SPACING_only_no_op_is_explained_by_its_spacing(capsys):
+    """Width and spacing are declared independently, so the cause has to be
+    read from both.
+
+    `spacing 8` on a pitch-10 layer quantizes to 0 guard slots — that is why
+    the rule is inactive.  Answering from `ndr_declared_width_on` alone said
+    "the rule's own multiplier is one slot per bit", which is TRUE of its
+    width, silent about the declaration that actually failed to bite, and so
+    a misleading cause (Codex P2 on #737)."""
+    _, out = _run(capsys, "def_ndr r spacing 8 layers M5,M6\n")
+    line = next(ln for ln in out.splitlines()
+                if buda_diag.id_of_line(ln) == "BUDA-1913")
+    assert "spacing 8" in line, line
+    assert "0 guard slot(s)" in line, line
+    # And it must NOT reach for the width-shaped explanation it used to give.
+    assert "multiplier" not in line, line
+
+
+def test_a_rule_declaring_BOTH_names_both(capsys):
+    """`width 8 spacing 8` is inactive for two independent reasons, and a
+    clause that names one of them leaves the reader fixing half the rule."""
+    _, out = _run(capsys, "def_ndr r width 8 spacing 8 layers M5,M6\n")
+    line = next(ln for ln in out.splitlines()
+                if buda_diag.id_of_line(ln) == "BUDA-1913")
+    assert "width 8" in line and "spacing 8" in line, line
+
+
 # ── what must stay silent ────────────────────────────────────────────────
 
 def test_a_multiplier_rule_is_never_a_no_op(capsys):
@@ -267,6 +294,78 @@ run_bundler STRICT
     line = next(ln for ln in late.splitlines()
                 if buda_diag.id_of_line(ln) == "BUDA-1914")
     assert "L4" in line
+
+
+# ── the verdict waits for the layer masks ────────────────────────────────
+
+def test_a_declared_cell_policy_defers_the_verdict(capsys):
+    """A hier wrapper's reachable layer set is not final at bundling.
+
+    `_apply_layer_policies` OWNS `allowed_layers` and resolves at
+    `run_planner hier` — AFTER bundling — so judging early reads a capped
+    bundle as able to reach every layer.  Measured on a capped hier vehicle:
+    a cell capped to [..M4] governed by a rule dead on M5/M6 was told about
+    M5/M6, which it can never use (Codex P2 on #737).
+
+    So a session carrying a cell policy stays quiet until the resolver says
+    the masks are final, and then speaks."""
+    from buda_cmds import ndr_cmds
+    s, out = _run(capsys, "def_ndr r width 8 layers M5,M6\n",
+                  # A policy declared before bundling: the flat vehicle has no
+                  # cell to cap, but the GATE is on the declaration existing.
+                  tail="")
+    assert "BUDA-1913" in _ids(out), "the ungated flow must speak"
+
+    s2 = buda_cli.BudaSession()
+    s2._cell_layer_policy = {"some_cell": (0, 4)}
+    for raw in (_STACK + "def_ndr r width 8 layers M5,M6\n"
+                + _BUNDLE).splitlines():
+        line = raw.split("#")[0].strip()
+        if line:
+            s2.do_command(line)
+    assert not _ids(capsys.readouterr().out), "a pending policy must defer"
+
+    # …and once the resolver has run, the same verdict lands.
+    s2._layer_masks_resolved = True
+    ndr_cmds.report_noop_ndr_rules(s2)
+    assert "BUDA-1913" in _ids(capsys.readouterr().out)
+
+
+def test_the_last_call_site_speaks_even_if_masks_never_resolved(capsys):
+    """The deferral must not become a permanent silence.
+
+    A FLAT flow can carry cell policies from an open BDB and never run
+    `_apply_layer_policies` at all, so the gate would wait forever.  By
+    detailed NUTS whatever masks exist are the ones the design routes with,
+    which is why that call site forces the verdict."""
+    from buda_cmds import ndr_cmds
+    s = buda_cli.BudaSession()
+    s._cell_layer_policy = {"some_cell": (0, 4)}
+    for raw in (_STACK + "def_ndr r width 8 layers M5,M6\n"
+                + _BUNDLE).splitlines():
+        line = raw.split("#")[0].strip()
+        if line:
+            s.do_command(line)
+    assert not _ids(capsys.readouterr().out)
+    ndr_cmds.report_noop_ndr_rules(s, force=True)
+    assert "BUDA-1913" in _ids(capsys.readouterr().out)
+
+
+def test_hier_expansion_does_not_re_announce_the_same_verdict(capsys):
+    """The memo ignores WHICH bundles.
+
+    Hier expansion replaces every template wrapper with per-instance ones
+    carrying fresh ids, so a verdict key holding the id list made the
+    identical verdict about the identical rule read as a new one and print
+    again after expansion — measured on a capped hier vehicle, twice for one
+    rule."""
+    from buda_cmds import ndr_cmds
+    s, out = _run(capsys, "def_ndr r width 8 layers M5,M6\n")
+    assert "BUDA-1913" in _ids(out)
+    # Same verdict, different bundle id: what expansion does.
+    s.bundles[0].input.original_bundle.id = 99
+    ndr_cmds.report_noop_ndr_rules(s)
+    assert not _ids(capsys.readouterr().out)
 
 
 # ── the catalogue ────────────────────────────────────────────────────────

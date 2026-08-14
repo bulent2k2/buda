@@ -1390,38 +1390,61 @@ def apply_ndr_specs(session):
 
 
 def _noop_arithmetic(session, spec, lid, w, resolved):
-    """One clause saying WHY the rule came out to a default wire on `lid`.
+    """The clause saying WHY the rule came out to a default wire on `lid`.
+
+    Width and spacing are declared INDEPENDENTLY, so the cause is read from
+    BOTH and every declared one is named.  Asking only about the width
+    described `def_ndr r spacing 8` as "the rule's own multiplier is one slot
+    per bit" — true of its width, silent about the declaration that actually
+    failed to bite, and therefore a misleading cause (Codex P2 on #737).
 
     In the reading the rule was WRITTEN in, so the number a user checks is the
     one the resolution actually used: a channel rule divides by the layer's
-    per-signal-slot pitch, a `metal` rule compares against what one slot
-    delivers, and a MULTIPLIER has nothing to resolve — it says one slot
-    outright, so the clause names where that value came from instead of
-    inventing an arithmetic it never did."""
-    declared = buda.ndr_declared_width_on(spec, lid)
-    if declared <= 0.0:
+    per-signal-slot pitch, a `metal` rule compares against what the slots
+    deliver.  A MULTIPLIER has nothing to resolve — it says one slot outright
+    — so its clause names where that value came from instead of inventing an
+    arithmetic that was never applied to it."""
+    geom = _ndr_geom_for(session, lid, w)
+    have_geom = geom is not None and not geom.empty()
+    pitch = ndr_layer_pitch(session, lid, w)
+    wid = buda.ndr_declared_width_on(spec, lid)
+    spc = buda.ndr_declared_spacing_on(spec, lid)
+    parts = []
+    if wid > 0.0:
+        if spec.metal_quant:
+            one = buda.ndr_metal_for_slots(geom, 1) if have_geom else -1.0
+            parts.append(f"the declared width {wid:g} is met by ONE slot, "
+                         f"which delivers {one:g} unit(s) of metal")
+        else:
+            parts.append(f"the declared width {wid:g} costs "
+                         f"{resolved.width_slots} slot(s) at that layer's "
+                         f"per-signal-slot pitch {pitch:g}")
+    if spc > 0.0:
+        if spec.metal_quant:
+            bare = (buda.ndr_clearance_for_guards(geom, 0) if have_geom
+                    else -1.0)
+            parts.append(f"the declared spacing {spc:g} is met by the bare "
+                         f"gap between adjacent slots, which is {bare:g} "
+                         f"unit(s), so it buys no guard slot")
+        else:
+            parts.append(f"the declared spacing {spc:g} is within one "
+                         f"per-signal-slot pitch ({pitch:g}), so it "
+                         f"quantizes to {resolved.guard_slots} guard slot(s)")
+    if not parts:
         src = ("the `def_ndr_layer` value declared for this layer"
                if lid in spec.per_layer else "the rule's own multiplier")
-        return (f"L{lid}: {src} is one slot per bit with no guard, which is "
-                f"the default wire")
-    if spec.metal_quant:
-        geom = _ndr_geom_for(session, lid, w)
-        one = (buda.ndr_metal_for_slots(geom, 1)
-               if geom is not None and not geom.empty() else -1.0)
-        return (f"L{lid}: the declared width {declared:g} is met by ONE slot, "
-                f"which delivers {one:g} unit(s) of metal there")
-    pitch = ndr_layer_pitch(session, lid, w)
-    # The CHANNEL caveat belongs HERE and only here: it is a statement about
-    # an absolute value quantized by the pitch, so attaching it to every
-    # verdict would tell a multiplier rule's reader about an arithmetic that
-    # was never applied to it.
-    return (f"L{lid}: the declared width {declared:g} costs "
-            f"{resolved.width_slots} slot(s) at that layer's per-signal-slot "
-            f"pitch {pitch:g} — the CHANNEL reading, so the METAL delivered "
-            f"there can fall short of {declared:g} as well (opens_ndr.md §2)")
+        parts.append(f"{src} is one slot per bit with no guard, which is the "
+                     f"default wire")
+    # The CHANNEL caveat belongs on an ABSOLUTE value quantized by the pitch
+    # and nowhere else: attaching it to a multiplier rule's verdict would
+    # describe an arithmetic that rule never went through.
+    tail = ("" if spec.metal_quant or not (wid > 0.0 or spc > 0.0) else
+            " — the CHANNEL reading, so the METAL delivered there can fall "
+            "short of the declared value as well (opens_ndr.md §2)")
+    return f"L{lid}: " + "; ".join(parts) + tail
 
 
-def report_noop_ndr_rules(session):
+def report_noop_ndr_rules(session, force=False):
     """Report a governed rule whose QUANTIZATION leaves it constraining
     nothing — `docs/internal/opens_ndr.md` §2's "a rule that resolves to one
     slot resolves to NO rule".
@@ -1469,8 +1492,25 @@ def report_noop_ndr_rules(session):
     makes that safe in both directions: a repeat says nothing, while a rule
     whose verdict genuinely CHANGED in between — a track pattern declared
     after bundling turns an unjudged layer into a dead one — is reported
-    rather than suppressed by a name that was already seen."""
+    rather than suppressed by a name that was already seen.
+
+    `force` overrides the mask-readiness gate below, for the last call site:
+    by detailed NUTS whatever masks exist ARE the ones the design routed
+    with, so there is nothing left to wait for."""
     if not getattr(session, "_ndr_scopes", None):
+        return
+    # A hier wrapper's reachable layer set is not final until
+    # `_apply_layer_policies` has run — it OWNS allowed_layers and resolves at
+    # `run_planner hier`, AFTER bundling — so a capped bundle looks able to
+    # reach every layer here.  Measured: a cell capped to [..M4] governed by a
+    # rule dead on M5/M6 was told about M5/M6, which it can never use, and a
+    # cell capped ONTO the dead layers got an INFO now and the true WARNING
+    # later (Codex P2 on #737).  Wait for the resolution instead; the planner
+    # calls back the moment it has one, still before it plans.
+    if (not force
+            and (getattr(session, "_cell_layer_policy", None)
+                 or getattr(session, "_cell_layer_shares", None))
+            and not getattr(session, "_layer_masks_resolved", False)):
         return
     from buda_cmds.bdb_cmds import _all_layer_ids
     said = session.__dict__.setdefault("_ndr_noop_said", set())
@@ -1505,7 +1545,13 @@ def report_noop_ndr_rules(session):
         L, D = sorted(e["live"]), sorted(e["dead"])
         if not D:
             continue
-        verdict = (name, tuple(D), tuple(L), tuple(e["inert"]))
+        # WHICH bundles, deliberately not part of the key: hier expansion
+        # replaces every template wrapper with per-instance ones carrying
+        # fresh ids, so an id list would make the identical verdict about the
+        # identical rule read as a new one and print again after expansion.
+        # What can honestly CHANGE is the layer sets and whether any bundle
+        # is inert at all.
+        verdict = (name, tuple(D), tuple(L), bool(e["inert"]))
         if verdict in said:
             continue
         said.add(verdict)
@@ -1546,11 +1592,14 @@ def validate_ndr_realizability(session):
     if not getattr(session, "_ndr_scopes", None):
         return
     from buda_cmds.bdb_cmds import _all_layer_ids
-    # The no-op verdict's second chance, for a flow that declares its track
-    # patterns AFTER bundling: by here the grid is required to exist, so a
-    # rule left unjudged at `apply_ndr_specs` can be judged now.  Idempotent
-    # by rule name, so a flow declaring its patterns first prints once.
-    report_noop_ndr_rules(session)
+    # The no-op verdict's LAST call site, for a flow that declares its track
+    # patterns after bundling and for one whose layer masks never resolved
+    # (a flat flow carrying cell policies never runs `_apply_layer_policies`,
+    # so its verdict would wait forever) — hence `force`.  By here whatever
+    # masks exist ARE the ones the design routes with, and the grid is
+    # required to exist.  Deduped by verdict, so a flow already told stays
+    # quiet.
+    report_noop_ndr_rules(session, force=True)
     grid = session.routing_grid
     checked = set()
     for w in session.bundles:

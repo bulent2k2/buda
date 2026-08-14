@@ -250,6 +250,20 @@ rule is the conservative MAXIMUM: the fallback over-charges, never under.
   the verdict from the rule's UNION of layers would downgrade the first case
   to the second, which is the one a reader can safely ignore.
 
+  *And it WAITS for those masks.* `_apply_layer_policies` owns
+  `allowed_layers` on hier wrappers and resolves at `run_planner hier` —
+  after bundling — so a session carrying a cell policy defers its verdict
+  until the resolver stamps `_layer_masks_resolved`, and the planner calls
+  back the moment it has one (still before it plans). Judging early was
+  measured wrong in both directions: a cell capped to `[..M4]` under a rule
+  dead on M5/M6 was told about M5/M6, which it can never use, and a cell
+  capped ONTO the dead layers got the INFO first and the true WARNING later.
+  The pre-DNUTS call site FORCES the verdict, because a flat flow carrying
+  cell policies never runs the resolver at all and would otherwise wait for
+  ever. Bundle IDs are deliberately not part of the memo key — hier
+  expansion re-ids every wrapper, so an identical verdict about an identical
+  rule would print again after expansion.
+
   *What it covers that nothing else did.* `dump_ndr`'s delivered-metal line
   already said "the spec reads INACTIVE there" — but only after DNUTS, only
   for an ABSOLUTE width, and only when the placed metal falls short of it.

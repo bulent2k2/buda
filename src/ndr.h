@@ -273,6 +273,24 @@ inline double ndr_declared_width_on(const NdrSpec& s, int layer_id) {
     return s.width_abs;
 }
 
+// The ABSOLUTE spacing in force on `layer_id` — the twin of the width
+// accessor above, and it lives beside it for the same reason the two
+// per-layer branches of ndr_resolve_on_layer do: width and spacing are
+// declared INDEPENDENTLY, so a caller that answers "what did this rule
+// declare here" from the width alone describes a spacing-only rule with a
+// width-shaped answer.  (That is exactly how the no-op report first
+// explained `spacing 8` as "the rule's own multiplier" — Codex P2 on #737.)
+inline double ndr_declared_spacing_on(const NdrSpec& s, int layer_id) {
+    auto it = s.per_layer.find(layer_id);
+    if (it != s.per_layer.end()) {
+        // A multiplier override REPLACES the spacing on this layer, so an
+        // inherited absolute no longer describes it.
+        if (it->second.guard_slots >= 0) return 0.0;
+        if (it->second.spacing_abs > 0.0) return it->second.spacing_abs;
+    }
+    return s.spacing_abs;
+}
+
 // Resolve a rule ON ONE LAYER: pick that layer's declared values (its
 // `def_ndr_layer` override, else the rule's own) and quantize any absolute
 // among them METAL-shaped against the layer's geometry.
