@@ -15,8 +15,8 @@ bin/buda flow/ariane133/ariane133.buda
 | design | ariane133 — a RISC-V core with 133 SRAM macros, 45nm |
 | netlist | gate-level, **127 modules, 5 hierarchy levels** |
 | nets / bundles | 5576 nets → **111 hbundles** (D0 50, D1 5, D2 25, D3 31) |
-| runtime | **~19 s** end to end, obstruction model included |
-| endpoint | 126 segments, 0 interval violations; **195 track overlaps** and 178 connectivity violations in 47 bundles — see *What is not clean* |
+| runtime | **~13.5 s** end to end, obstruction model included |
+| endpoint | 121 segments, **0 track overlaps, 0 interval violations**; 77 connectivity violations in 25 bundles — see *What is not clean* |
 
 ## Where the files come from
 
@@ -107,16 +107,24 @@ This is the honest ceiling of a floorplan DEF, not a routing defect.
 Removing it needs a **fully placed** DEF, which upstream generates rather
 than ships — so it costs an OpenROAD or Innovus run, not a download.
 
-**The congestion** — 195 track overlaps — is the newer half, and it appeared
-when item 12 made the obstruction model affordable. `OBS` covers
-metal1–metal4 across all 133 macros, so this interconnect has to live on
-metal5 and above. That is the truth about this floorplan; the earlier
-`no_blockages` run reported 0 overlaps by flying over macro metal, which is
-not a route. Healers close most of it — `negotiate_congestion` +
-`ripup_reroute` measured 125 → 61 overlaps and were still improving when
-they hit the move budget — so this is a QoR question for the vehicle, not a
-defect. The flow deliberately does not run them, to stay a ~19 s vehicle;
-add them when you want to work on the congestion itself.
+**The congestion is gone, and chasing it found a bug** (`opens_interchange.md`
+item 13). When item 12 made the obstruction model affordable, this flow
+reported **195 track overlaps**, which looked like the honest cost of routing
+a real macro design. It was not. Each of the 133 macros carries a DEF
+`+ HALO 10000`, and we were importing that **placement** halo as a routing
+keepout with no layer — so it blocked every routing layer, across 5 µm around
+every macro. Dropping it (a halo is placement information; `ROUTEHALO` is the
+routing construct) takes this flow to **0 overlaps**, with all 13,034 `OBS`
+keepouts still enforced.
+
+Worth keeping as a caution: the first response was to treat it as QoR.
+Promoting metal5–metal10 to `TOP` and running `negotiate_congestion` +
+`ripup_reroute` got 195 → 23 overlaps in 84 s and read like progress. The
+root-cause fix reaches 0 in 13.5 s with the original layer policy and no
+healers, so none of that tuning survives. The signal that should have been
+read first was in the advisory all along — supply-doomed seats reporting
+**zero** signal tracks in their windows, on layers carrying 4,848 tracks.
+Zero is not a congestion number.
 
 ## Relation to the other vehicles
 
