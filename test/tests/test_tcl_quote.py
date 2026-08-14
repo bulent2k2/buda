@@ -27,7 +27,7 @@ import sys
 
 import pytest
 
-from tcl_quote import tcl_path, tcl_word
+from tcl_quote import posix_sep, tcl_path, tcl_word
 
 _needs_tclsh = pytest.mark.skipif(shutil.which("tclsh") is None,
                                   reason="no tclsh on this host")
@@ -99,6 +99,47 @@ def test_the_raw_interpolation_this_replaces_really_does_lose_the_path():
                        capture_output=True, encoding="utf-8", timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "buda.tcl" not in r.stdout, r.stdout      # the separators are gone
+
+
+def test_posix_sep_respells_a_separator_and_keeps_a_filename_character():
+    """The rule in one place, tested from both platforms' side.
+
+    `sep` is injectable precisely so a POSIX host can hold the Windows half:
+    the alternative is asserting about a branch nothing here executes.
+    """
+    # Where the backslash IS the separator, respell it.
+    assert posix_sep(r"flow\rnr\mix.buda", sep="\\") == "flow/rnr/mix.buda"
+    assert posix_sep(r"D:\a\buda\tools", sep="\\") == "D:/a/buda/tools"
+    # Where it is NOT, it is part of the NAME and must survive.
+    assert posix_sep("flow/back\\slash/x", sep="/") == "flow/back\\slash/x"
+    # Already-`/` input is untouched either way.
+    assert posix_sep("flow/rnr/mix.buda", sep="\\") == "flow/rnr/mix.buda"
+
+
+def test_the_generated_origin_is_repo_spelled_not_platform_spelled(monkeypatch):
+    """`origin` is stamped into line 1 of EVERY generated file and into
+    `corpus::begin`, so a native spelling rewrites all 59 and the drift guard
+    calls the whole corpus stale — which is what windows-validate run 24
+    reported on this branch.  Simulated here by handing the translator the
+    spelling a Windows `relpath` would return."""
+    import importlib.util
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location(
+        "b2t_origin", root / "tools" / "buda2tcl.py")
+    b2t = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(b2t)
+
+    # `os` is one module object, so patching it here also patches the `os.sep`
+    # that `posix_sep` reads — which is the point: it must respell under the
+    # simulated separator, not under this host's.
+    monkeypatch.setattr(b2t.os.path, "relpath",
+                        lambda *a, **k: "flow\\rnr\\mix.buda")
+    monkeypatch.setattr(b2t.os, "sep", "\\")
+    _out, text, _refs = b2t.translate_file(
+        str(root / "flow" / "four_blocks.buda"), "/tmp/out", str(root / "flow"))
+    assert "flow/rnr/mix.buda" in text, text[:200]
+    assert "flow\\rnr\\mix.buda" not in text, text[:200]
 
 
 def test_a_whitespace_free_token_quotes_exactly_as_it_always_did():

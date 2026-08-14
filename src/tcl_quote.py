@@ -43,7 +43,23 @@ behaviour must not move.  `tcl_path` is the whitespace-tolerant form.
 
 import os
 
-__all__ = ["tcl_word", "tcl_path"]
+__all__ = ["tcl_word", "tcl_path", "posix_sep"]
+
+
+def posix_sep(path, sep=None):
+    """Spell a path with `/` separators, where that is a RESPELLING.
+
+    Guarded on the separator because the rewrite is only sound where the
+    backslash is one.  On POSIX a backslash is an ordinary filename
+    character, so rewriting it renames the file rather than respelling it
+    (Codex P2 on #734) -- there this is the identity.
+
+    `sep` overrides the platform's, which is what lets the other platform's
+    behaviour be TESTED rather than asserted about.
+    """
+    text = str(path)
+    sep = os.sep if sep is None else sep
+    return text.replace(sep, "/") if sep != "/" else text
 
 
 def tcl_word(tok, escape_ws=False):
@@ -99,17 +115,10 @@ def tcl_path(path):
     same file.  Quoting is the second, independent fix -- a path with a space
     is otherwise several words however its separators are spelled.
 
-    The respelling is guarded on the PLATFORM because it is only sound where
-    the backslash IS a separator.  On POSIX a backslash is an ordinary
-    filename character, so a checkout under `back\\slash` would be rewritten
-    to a different -- and almost certainly nonexistent -- path (Codex P2 on
-    #734).  There it stays literal and rides `tcl_word`'s escaping instead,
-    which already handles it: escaped, the interpreter hands the backslash
-    back rather than reading the next character as an escape.  `os.sep`
-    rather than `sys.platform` because that is the actual question, and it
-    answers Cygwin correctly too (POSIX separators on a Windows kernel).
+    The respelling is `posix_sep`, guarded there because it is only sound
+    where the backslash IS a separator; on POSIX the backslash stays literal
+    and rides `tcl_word`'s escaping instead, which already handles it --
+    escaped, the interpreter hands the backslash back rather than reading the
+    next character as an escape.
     """
-    text = str(path)
-    if os.sep == "\\":
-        text = text.replace("\\", "/")
-    return tcl_word(text, escape_ws=True)
+    return tcl_word(posix_sep(path), escape_ws=True)
