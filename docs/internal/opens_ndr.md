@@ -8,7 +8,9 @@ command/GUI surface), [`ndr_architecture.md`](ndr_architecture.md)
 (implementers, as-built) — and the user-facing command reference is
 [`../script_reference/ndr.md`](../script_reference/ndr.md).
 
-Snapshot index — last verified against `main`: **2026-08-12**, after R1
+Snapshot index — last verified against `main`: **2026-08-14**, after the
+no-op verdict below acquired a voice (BUDA-1913 / BUDA-1914 — the residual it
+reports is unchanged, only the silence around it is gone), and after R1
 (absolute width/spacing) landed in full — declaration, persistence AND
 per-layer resolution at every routing consumer — after the doomed-seat
 HEALS moved from member bits to group demand (including validating that the
@@ -208,14 +210,64 @@ rule is the conservative MAXIMUM: the fallback over-charges, never under.
   for EM or resistance; the channel-shaped reading is fine for congestion
   planning, which is what every current consumer of the number does.
 
-- **A rule that resolves to one slot resolves to NO rule.** On a layer
-  whose single signal slot already covers the declared width, the spec
-  quantizes to `width_slots 1 / guard_slots 0`; with no shield declared
-  that is an INACTIVE spec, so the bundle routes as an ordinary bus there.
-  Consistent with the charging reading above, and it means a future
-  per-net or reporting hook keyed on "is this segment governed" sees an
-  ungoverned one. A shielded rule is unaffected (`shield_mode` keeps it
-  active at any pitch).
+- **A rule that resolves to one slot resolves to NO rule** — still true, and
+  now REPORTED (the condition stands; the silence around it does not). On a
+  layer whose single signal slot already covers the declared width, the spec
+  quantizes to `width_slots 1 / guard_slots 0`; with no shield declared that
+  is an INACTIVE spec, so the bundle routes as an ordinary bus there.
+  Consistent with the charging reading above, and it means a hook keyed on
+  "is this segment governed" sees an ungoverned one. A shielded rule is
+  unaffected (`shield_mode` keeps it active at any pitch).
+
+  Two ids, because the two cases are gated on differently — **BUDA-1913**
+  (WARNING) when the rule is dead on EVERY layer it can reach (it does
+  nothing at all, anywhere), **BUDA-1914** (INFO) when it is dead on some.
+  Emitted at bundling, so a flow hears it before it spends a planner pass,
+  and again before detailed NUTS — the only one of the two a RESUMED session
+  reaches, since `load_pipeline` restores bundles without re-bundling. The
+  memo is keyed on the VERDICT rather than the rule name: a repeat says
+  nothing, while a verdict that genuinely changed in between (a track
+  pattern declared after bundling turns an unjudged layer into a dead one)
+  is reported rather than suppressed by a name already seen.
+
+  *Report, not refusal.* `def_ndr` hard-errors on a rule that constrains
+  nothing BY DECLARATION, and it is tempting to extend that to the
+  quantized verdict — but whether a rule bites is a property of the grid,
+  so refusing would reject designs that route today, and the verdict is not
+  even final at declaration: a later `def_ndr_layer` can revive a rule that
+  was dead when it was declared. The judgement is therefore made where the
+  declaration is complete AND the rule is in use, which also means a rule
+  attached to no net is nobody's problem.
+
+  *A layer with no `def_track_pattern` is not judged and not counted as
+  reachable.* Nothing can be placed there at all, so quantizing a width
+  against it would answer a question the design never asks.
+
+  *Judged per BUNDLE, reported per rule.* Which layers a governed bundle can
+  reach is not a property of the rule alone — `set_cell_layer_cap` and the
+  hier band resolution narrow `allowed_layers` per wrapper — so one rule can
+  be inert for a capped bundle and merely partial for its neighbour. Taking
+  the verdict from the rule's UNION of layers would downgrade the first case
+  to the second, which is the one a reader can safely ignore.
+
+  *What it covers that nothing else did.* `dump_ndr`'s delivered-metal line
+  already said "the spec reads INACTIVE there" — but only after DNUTS, only
+  for an ABSOLUTE width, and only when the placed metal falls short of it.
+  A no-op reached through a per-layer MULTIPLIER override has no absolute
+  value to fall short of and was silent end to end; so was one whose default
+  wire happens to match the declared value.
+
+  Vehicle: [`flow/ndr_noop_rule.buda`](../../flow/ndr_noop_rule.buda) — all
+  three shapes plus a CONTROL rule declaring the same absolute form against
+  the same layers and staying silent, which is what makes the run evidence
+  about the rules rather than about the vehicle.
+
+  **Residual:** a SCOPE that matches no net is a different silence and is
+  still unreported — `set_ndr` takes a prefix, so a typo attaches a perfectly
+  good rule to nothing. It needs its own condition and id, and the obvious
+  form has a false-alarm mode worth thinking about first: `*` is a
+  deliberate default that a design whose every bus matches a longer prefix
+  leaves legitimately unused.
 
 Vehicle: [`flow/ndr_abs_um.buda`](../../flow/ndr_abs_um.buda) — its `vert_`
 bus exists for exactly this: a governed bus routing VERTICALLY, so its

@@ -118,6 +118,12 @@ MESSAGES = {
     "BUDA-1912": (WARNING, "An NDR rule's stored per-layer values are not "
                            "readable and were dropped, so the rule restores "
                            "layer-independent."),
+    "BUDA-1913": (WARNING, "An NDR rule quantizes to no constraint on EVERY "
+                           "layer it can reach, so the buses it governs "
+                           "route exactly as ungoverned ones."),
+    "BUDA-1914": (INFO,    "An NDR rule quantizes to no constraint on SOME "
+                           "of the layers it can reach, so its metal there "
+                           "is governed in name only."),
 }
 
 # Ids that were ISSUED and whose fault no longer exists.

@@ -1097,6 +1097,39 @@ def test_ndr_absolute_divisor_repro():
     assert "rule 'w8sp': demand" not in out, out
 
 
+def test_ndr_noop_rule_repro():
+    """flow/ndr_noop_rule.buda (opens_ndr.md §2's second residual): a rule
+    that quantizes to a DEFAULT wire constrains nothing, and must say so.
+
+    Four rules on one stack, and the CONTROL is what makes the run readable:
+    `alive` declares the same absolute form against the same layers as `dead`
+    and stays silent, so a verdict here is about the rule rather than about
+    the vehicle."""
+    out, rc = run_script("ndr_noop_rule.buda")
+    assert_clean(out, rc, "ndr_noop_rule.buda")
+    # Nothing is VIOLATED — an inactive spec makes no claim to check, which
+    # is exactly why the verdict has to be reported instead.
+    assert "no violations" in out and "NDR_" not in out, out
+    # Dead on every layer it can reach -> the WARNING, naming the layers and
+    # the arithmetic that got there.
+    assert "BUDA-1913" in out, out
+    assert "NDR rule 'dead'" in out and "(L5, L6)" in out, out
+    assert "pitch 10" in out, out
+    # Dead on SOME -> the INFO, naming both halves.
+    assert "BUDA-1914: INFO: NDR rule 'partial'" in out, out
+    assert "on L5, L6 (active on L3, L4)" in out, out
+    # The per-layer multiplier override: the shape the delivered-metal line
+    # structurally cannot see, since there is no absolute value to fall short
+    # of.  Its clause must NOT claim a channel division that never happened.
+    assert "BUDA-1914: INFO: NDR rule 'perlayer'" in out, out
+    assert "the `def_ndr_layer` value declared for this layer" in out, out
+    # The control: same declaration form, same layers as `dead`, and it
+    # bites — so no verdict names it.  ("NDR rule 'alive'" is the phrasing
+    # BOTH verdicts use, and only they do; the declaration line reads
+    # "[NDR] rule 'alive'".)
+    assert "NDR rule 'alive'" not in out, out
+
+
 def test_ndr_layer_mask_starving_a_direction_is_loud():
     """flow/ndr_layer_mask_starved.buda: a layer restriction that leaves no
     legal layer for a segment direction used to drop the bundle SILENTLY.
