@@ -184,10 +184,28 @@ rule is the conservative MAXIMUM: the fallback over-charges, never under.
   than the default because the honest reading is **stricter**, not merely
   different: a layer whose signal slots sit isolated between rails delivers
   only one slot's metal, so `width 4` there — which the channel reading
-  accepts by silently delivering 2 — becomes an R3 refusal.  That rejects
-  designs which route today, so the default flip owes its own measured
-  study, the same path `kSegsRel` / `spine_relays` / `band_span_charge`
-  took.  The R9 width audit measures each rule in the reading it was WRITTEN in
+  accepts by silently delivering 2 — becomes an R3 refusal.
+
+  **The default flip is MEASURED and REFUSED** (2026-08-14) — full study,
+  method and numbers in
+  [`ndr_metal_default_study.md`](ndr_metal_default_study.md), reproducible
+  with `tools/ndr_metal_study.py` and `BUDA_NDR_METAL=1`.  Over 35 distinct
+  declared patterns × 6 declared widths: the readings are **identical at 1×
+  minimum wire** (35/35, so a minimum-width rule can adopt `metal` for
+  free), metal costs **+1 slot per bit in 141 of the 145** pairs where they
+  differ, and 9% become R3 refusals — though channel *accepts* every one of
+  those and delivers 1.15×–5.00× under the declared width, so the flip
+  refuses silently-wrong declarations rather than breaking working ones.
+  What decided it is the flow half: **three of the five vehicles declaring
+  an absolute value go from clean to stranded** (6, 16 and 8 unplaced bits),
+  and healers recover only about half (divisor 6 opens → 3).  The flip does
+  not create that problem, it reveals it — those designs asked for more
+  metal than their grid can host, and under channel got a narrower wire and
+  a success report — but converting a silent QUALITY failure into a visible
+  ROUTING failure is a methodology decision, which is what a per-rule token
+  is for.  Re-run the study if absolute widths ever acquire a consumer with
+  a real EM or resistance requirement behind the numbers; every vehicle
+  today is one we authored to demonstrate the semantics.  The R9 width audit measures each rule in the reading it was WRITTEN in
   (landed): a `metal` rule's placed METAL is compared against the width
   DECLARED on that layer — an independent quantity, so the check can
   actually fail — while a channel rule keeps the covered-slot-centre
