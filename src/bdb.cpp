@@ -1526,6 +1526,10 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
     // first streamed entry — UNITS precedes the sections in DEF 5.8, and the
     // reader hard-errors on a file that re-states it after an entry has
     // streamed rather than let two scales into one import.
+    // Component `+ HALO`s read but deliberately not applied as routing
+    // keepouts (see the COMPONENTS sink below); folded into the unmodelled
+    // census beside BLOCKAGES.PLACEMENT, which it is the same kind of thing as.
+    int halo_unmodelled = 0;
     bool units_latched = false;
     auto latch_units = [&](const DefDesign& d) {
         if (units_latched) return;
@@ -1593,13 +1597,28 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         // too (Phase 3c).  Emitted as a keepout ring in layout units.  Only
         // for a PLACED instance: an unplaced one has no location, so its halo
         // would blockade the die origin.
-        if (c.has_halo && has_pos) {
-            stats.keepouts.push_back({"", x1 - dbu_to_lu(c.halo_l),
-                                      y1 - dbu_to_lu(c.halo_b),
-                                      x1 + w + dbu_to_lu(c.halo_r),
-                                      y1 + h + dbu_to_lu(c.halo_t),
-                                      "HALO of " + c.name});
-        }
+        // A component `+ HALO` is NOT a routing keepout, and importing it as
+        // one was the same mistake the PLACEMENT blockage below already
+        // records.  DEF has two halos and they mean different things:
+        //
+        //   * `+ HALO [SOFT] l b r t` keeps other CELLS away — a PLACEMENT
+        //     constraint, carrying no layer.  A layerless keepout maps onto
+        //     EVERY routing layer, so importing it forbade routing an area
+        //     the DEF left completely routable.
+        //   * `+ ROUTEHALO dist minLayer maxLayer` is the routing one, and
+        //     it names its layers.
+        //
+        // We honoured the placement construct as routing and ignored the
+        // routing construct — backwards.  Measured on `flow/ariane133`,
+        // whose 133 macros each carry `HALO 10000` (5 um a side at 2000
+        // DBU/um): those 133 all-layer zones alone produced 195 track
+        // overlaps and 83 supply-doomed seats with ZERO signal tracks in
+        // their placed windows, on layers with 4,848 tracks.  Dropping them
+        // takes the flow to 0 overlaps with the OBS obstruction model still
+        // fully enforced.  BUDA has no placement-legalisation stage, so as
+        // with a PLACEMENT blockage there is nothing to apply it to; it is
+        // recorded as unmodelled.
+        if (c.has_halo && has_pos) ++halo_unmodelled;
 
         // Macro OBS keepouts, in the SAME pass (opens item 5): this used to
         // be a second full walk over def.components in the BLOCKAGES section
@@ -1987,6 +2006,9 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         // misapplied.
         if (skipped_placement) counts["BLOCKAGES.PLACEMENT"] += skipped_placement;
         if (skipped_partial)   counts["BLOCKAGES.PARTIAL"]   += skipped_partial;
+        // A placement halo is placement information we do not model, exactly
+        // like the two above — not a routing keepout we chose to drop.
+        if (halo_unmodelled)   counts["COMPONENTS.HALO"]     += halo_unmodelled;
         std::vector<std::pair<std::string,int>> rows(counts.begin(), counts.end());
         std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
             if (a.second != b.second) return a.second > b.second;
