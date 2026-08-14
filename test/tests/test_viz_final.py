@@ -175,8 +175,15 @@ _btcl_required = pytest.mark.skipif(bool(_BTCL_MISSING),
 # backslash ESCAPES by the Tcl parser — `D:\a\buda\...` becomes BEL + `buda`,
 # and `source` then fails on a filename that never existed.  `.as_posix()` /
 # the replace below cost nothing on POSIX, where the paths are already `/`.
-_TCL_PATH = _BUDA_TCL.as_posix()
-_PY_PATH = sys.executable.replace("\\", "/")
+#
+# BRACED as well as forward-slashed, and the two solve different problems.
+# Forward slashes stop the Tcl parser eating `\a`/`\b`/`\t` as escapes; braces
+# stop it WORD-SPLITTING a path that contains spaces — `C:/Program Files/…`
+# would otherwise hand `buda::start` a `-python` of `C:/Program` plus a stray
+# `Files/…` option and fail before the engine starts.  Tcl's own `{…}` quoting
+# is the right tool: it suppresses substitution and splitting together.
+_TCL_PATH = "{" + _BUDA_TCL.as_posix() + "}"
+_PY_PATH = "{" + sys.executable.replace("\\", "/") + "}"
 
 _TCL_FLOW = f"""\
 source {_TCL_PATH}
