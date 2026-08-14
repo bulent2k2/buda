@@ -280,6 +280,18 @@ def _safe_unlink_lockfile(lock_path: str) -> None:
     While we hold this re-lock no racing O_CREAT can lock a competing inode at the
     same path, and the inode check guards against the file being swapped between
     open and lock — so the single-writer guarantee is preserved."""
+    if os.name == "nt":
+        # The re-lock ritual is vacuous here — fcntl is the no-op fallback,
+        # so there is no lock to race — and it was itself what left the
+        # sidecar behind: Windows refuses to unlink a file we hold OPEN, so
+        # the probe fd below turned the unlink into a swallowed
+        # PermissionError (measured, windows-validate run 25).  With no lock
+        # semantics on this platform, best-effort unlink IS the contract.
+        try:
+            os.unlink(lock_path)
+        except OSError:
+            pass
+        return
     try:
         fd = os.open(lock_path, os.O_RDONLY)   # no O_CREAT: don't resurrect it
     except FileNotFoundError:
