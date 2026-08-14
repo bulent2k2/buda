@@ -260,10 +260,26 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
     # "View Topologies" path.
     all_wrappers, cell_seen = collect_candidate_bundles(session.bundles)
 
+    # Resolve each hint through the SAME selector `select_topology` and
+    # `dump_topologies` take, so a bare integer is a bundle ID here too: the
+    # explorer is what you open on the bundle an audit just named, and
+    # `visualize_topologies 8` used to hunt for a bus called '8'.  A hint that
+    # resolves to ids matches by id; one that resolves to nothing falls back
+    # to the prefix test, so an unmatched name behaves exactly as before.
+    _want = set()
+    for h in hints:
+        bids, err = session._resolve_bundle_selector(h)
+        if not err:
+            _want.update(bids)
+
     def _matches(w):
+        if not hints:
+            return True
+        if w.input.original_bundle.id in _want:
+            return True
         names = w.input.original_bundle.get_net_names()
         net0  = names[0] if names else ""
-        return (not hints) or any(net0.startswith(h) for h in hints)
+        return any(net0.startswith(h) for h in hints)
 
     if not all_wrappers:
         print("Warning: no bundle with candidates")

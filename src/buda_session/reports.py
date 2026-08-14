@@ -486,11 +486,26 @@ class ReportsMixin:
             return
         wraps = self.bundles
         if hint:
-            wraps = [w for w in wraps
-                     if w.input.original_bundle.get_net_names()
-                     and w.input.original_bundle.get_net_names()[0].startswith(hint)]
+            # The SAME selector `select_topology` takes, so a bare integer is a
+            # bundle ID here too.  It used to be a net-name prefix ONLY, which
+            # made the number this very report prints — and the one
+            # `check_design` prints in "Bundle 8: ..." — the one thing you could
+            # not look up: `dump_topologies 8` answered "No bundles whose first
+            # net name starts with '8'" while `select_topology 8` pinned bundle
+            # 8.  One token, two meanings, in adjacent commands.  `net:8` still
+            # forces the prefix reading for a bus whose name starts with a
+            # digit.
+            bids, err = self._resolve_bundle_selector(hint)
+            if err:
+                print(f"No bundles matched '{hint}': {err}.")
+                return
+            want = set(bids)
+            wraps = [w for w in wraps if w.input.original_bundle.id in want]
             if not wraps:
-                print(f"No bundles whose first net name starts with '{hint}'.")
+                known = sorted(w.input.original_bundle.id for w in self.bundles)
+                rng = (f"{known[0]}..{known[-1]}" if known else "none")
+                print(f"No bundle matched '{hint}' "
+                      f"(bundle ids present: {rng}).")
                 return
 
         # Aggregates across the (possibly filtered) set.
