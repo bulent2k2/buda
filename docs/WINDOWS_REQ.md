@@ -159,9 +159,17 @@ configure cannot find pybind11, pass
 `-Dpybind11_DIR="$(python -m pybind11 --cmakedir)"` (see WINDOWS_BUILD.md
 troubleshooting).
 
-## Bash Wrappers Do Not Apply
+## Wrappers: Bash On POSIX, PowerShell On Native Windows
 
-The launcher/build wrappers live in **`bin/`** (`bin/bb`, `bin/buda`,
-`bin/fp`, `bin/activate`, …) and are Bash scripts. On native Windows use the
+The launcher/build wrappers live in **`bin/`** twice: the Bash originals
+(`bin/bb`, `bin/buda`, `bin/fp`, `bin/activate`, …) for POSIX shells
+(Linux, macOS, Cygwin), and **PowerShell twins** (`bin/bb.ps1`,
+`bin/buda.ps1`, `bin/activate.ps1`, …) for native Windows — where `bash`
+resolves to the System32 WSL stub and the Bash originals are unrunnable
+(*measured*, windows-validate run 18). Dot-source `bin/activate.ps1` to get
+the bare names (`bb`, `buda`, …) as session functions plus PATH/PYTHONPATH,
+or run the `.ps1` files directly. `bb.ps1` needs the MSVC environment for
+its Ninja build, exactly like the documented Ninja path. Deliberate gaps:
+the macOS `.app` relaunch branches and `bb web` (sbt) are not ported. The
 explicit `cmake`/`pytest`/`python` commands in
-[WINDOWS_BUILD.md](WINDOWS_BUILD.md); there are no `.ps1` equivalents yet.
+[WINDOWS_BUILD.md](WINDOWS_BUILD.md) remain the reference path.

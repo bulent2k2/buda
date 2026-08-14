@@ -58,6 +58,12 @@ pass through untouched), `fp` / `bfp` (Floorplanner), `viz` (DEF/BDB
 visualizer), `u2b` (unit-test → `.buda` visualizer), and `activate` (sourceable
 env setup).
 Each resolves the repo root as its parent dir, so it works from any CWD.
+Every wrapper also has a **PowerShell twin** (`bin/*.ps1`) for native Windows,
+where `bash` is the unrunnable WSL stub — dot-source `bin/activate.ps1` for
+bare-name functions; the twins honour the same contracts (`BUDA_TEST_ANCHOR`,
+`BUDA_VIZ_FINAL`) and `test/tests/wrapper_select.py` picks the right launcher
+per platform for the wrapper tests. Not ported: the macOS `.app` branches and
+`bb web`.
 
 **Add `<repo_root>/bin` to your `PATH`** and you can invoke them bare (`bb`, `buda
 flow/x.buda`, `u2b test_foo`); otherwise call them as `bin/bb`, `bin/buda …`, etc.
