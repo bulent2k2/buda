@@ -135,7 +135,6 @@ def nuts_summary(out: str):
 # connectivity at topo/nuts/dnuts levels (PSI: perp slide interval case)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(sys.platform == "win32", reason=_WIN_QOR_SKIP)
 def test_tc3a_flat_no_perp_range_inversion():
     """Regression: ConnTopology::build asserted (perp_lo > perp_hi) on the big
     flat tc3a design.  A min-stub-length push-out (compute_slide_ranges pass 2)
@@ -173,8 +172,16 @@ def test_tc3a_flat_no_perp_range_inversion():
     dm = re.search(
         r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, f"DetailedNUTS summary not found\n{out[-2000:]}"
-    assert int(dm.group(2)) == 0, \
-        f"expected 0 unplaced after collinear-relay merge, got {dm.group(2)}"
+    # Only THIS count is placement-sensitive, so only it is Linux-gated
+    # (Codex P2 on #749).  The whole test was skipped on win32 at first,
+    # which threw out the crash coverage with the QoR bathwater: the
+    # SIGABRT this test pins is exactly the 0xC0000409 class the Windows
+    # lanes exist to catch.  Run 25 measured the split — MSVC reached this
+    # line with rc 0 and the topo stage clean, then reported 8 unplaced
+    # (placement divergence, the _WIN_QOR_SKIP story) where Linux has 0.
+    if sys.platform != "win32":
+        assert int(dm.group(2)) == 0, \
+            f"expected 0 unplaced after collinear-relay merge, got {dm.group(2)}"
 
 
 def test_pinless_buses_stay_separate():
