@@ -1,0 +1,106 @@
+name: Windows wheel
+
+# Build a DISTRIBUTABLE Windows wheel (cp313, x64) and prove it works before
+# anyone downloads it: install into a FRESH venv, import the extension stack,
+# run a real routed flow through the installed `buda` console script, and
+# check the optional surfaces (GUI deps, web deps, the wheel-shipped Tcl
+# front end).  The wheel is uploaded as a workflow artifact.
+#
+# What the build pins (all from pyproject.toml, none from this file):
+#   * BUDA_WHEEL=ON       — the pip-only CMake install rules
+#   * BUDA_ARCH=none      — no -march baked in; a distributable build must
+#                           not assume the build machine's ISA
+#   * cp313 tag           — from the interpreter below; the wheel only
+#                           installs into a matching CPython 3.13
+#
+# Dispatch-only, like windows-validate.yml: this is an on-demand deliverable,
+# not a release cadence (docs/internal/packaging.md is explicit that wheel
+# publishing is a separate, later decision).
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-wheel-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wheel:
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    env:
+      PYTHONUTF8: '1'      # measured requirement (docs/WINDOWS_REQ.md)
+      MPLBACKEND: Agg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Build the wheel
+        # pip's build isolation fetches scikit-build-core + pybind11 per the
+        # pyproject build-system table; scikit-build-core locates MSVC itself
+        # (the VS generator needs no developer shell — measured on the
+        # windows-validate msbuild lane).
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip wheel . --no-deps -w dist
+          Get-ChildItem dist
+
+      - name: Smoke the installed wheel (fresh venv, neutral cwd)
+        # A fresh venv + a cwd OUTSIDE the checkout: the import must come
+        # from site-packages, not be rescued by the repo's own directories.
+        shell: pwsh
+        run: |
+          python -m venv $env:TEMP\wheelsmoke
+          $py = "$env:TEMP\wheelsmoke\Scripts\python.exe"
+          & $py -m pip install --quiet (Get-ChildItem dist\*.whl).FullName
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $code = @'
+          import buda, buda_db, buda_runtime, os
+          print("import OK:", os.path.basename(buda.__file__))
+          tcl = os.path.join(os.path.dirname(buda_runtime.__file__), "tools", "buda.tcl")
+          assert os.path.exists(tcl), "buda.tcl missing from the wheel"
+          print("buda.tcl shipped at:", tcl)
+          '@
+          Set-Location $env:TEMP
+          & $py -c $code
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Run a routed flow through the installed console script
+        shell: pwsh
+        run: |
+          $buda = "$env:TEMP\wheelsmoke\Scripts\buda.exe"
+          $flow = "$env:GITHUB_WORKSPACE\flow\four_blocks.buda"
+          Set-Location $env:TEMP
+          & $buda --no-viz $flow
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Check the optional surfaces (GUI deps, web deps, entry points)
+        # GUI: tkinter ships with the python.org installer; matplotlib is a
+        # wheel dependency — both must import and TkAgg must be selectable.
+        # Web: the FastAPI deps install cleanly on native CPython (unlike
+        # Cygwin, measured).  Entry points: importable without a display.
+        shell: pwsh
+        run: |
+          $py = "$env:TEMP\wheelsmoke\Scripts\python.exe"
+          & $py -c "import tkinter; import matplotlib; matplotlib.use('TkAgg'); print('GUI deps OK:', matplotlib.get_backend())"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $py -m pip install --quiet -r src\web\requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $py -c "import fastapi, uvicorn, httpx; print('web deps OK')"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $py -c "from buda_runtime import entry; print('entry points OK:', [n for n in dir(entry) if not n.startswith('_')])"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Upload the wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: buda-wheel-cp313-win_amd64
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 30
