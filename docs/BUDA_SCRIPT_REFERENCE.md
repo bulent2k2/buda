@@ -25,7 +25,7 @@ The per-command documentation lives in one page per pipeline stage under
 |---|---|---|
 | [Setup](script_reference/setup.md) | setup | `def_layer` · `add_block` · `add_keepout` · `add_net` · `add_bus` · `corner_margin` · `detour_channel` · `set_min_stub_length[_dir\|_layer]` · `set_feedthru` · `set_track_pitch` · `set_unit_check` · `import_lef_tech` |
 | [Bundler](script_reference/bundling.md) | 1 | `run_bundler` · `run_hier_bundler` · `dump_hbundles` |
-| [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` · `set_prune_dominated` · `set_dedup_loci` · `set_drop_dangling` · `set_trim_mst_legs` |
+| [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` · `set_prune_dominated` · `set_dedup_loci` · `set_drop_dangling` · `set_trim_mst_legs` · `set_trim_trunk_stubs` |
 | [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` · `unpin_topology` |
 | [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `set_pair_align_heal` · `ripup_reroute` · `negotiate_congestion` · `refine_selection` |
 | [Routing grid](script_reference/routing_grid.md) | 8 | `def_track_pattern` · `add_grid_override` · `report_overhead` |
@@ -65,6 +65,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 2 setup | `set_dedup_loci` | Opt-in dedup of nominal-locus candidate variants that share a slide window + connectivity (default off) |
 | 2 setup | `set_drop_dangling` | Opt-in handling of candidates with a dangling segment or an unclamped slide window (default off): `clamp` bounds unbounded windows to the design extent, `clamp_drop` also drops truly-dangling candidates, `drop`/`on` drops any such candidate |
 | 2 setup | `set_trim_mst_legs` | Opt-in shared-leg trim for MST candidates (default off): cut the duplicated prefix off two legs leaving one block along the same axis. Opt-in because candidates are WL-sorted, so the cut re-sorts the pool and moves selection far beyond the trimmed bundle; renumbers indices |
+| 2 setup | `set_trim_trunk_stubs` | Opt-in redundant-stub suppression on the H trunk path (default off): a stub lying entirely inside a farther block's stub off the same spine point adds no coverage. NOT a new algorithm — it enables the pass `add_trunk` already runs, which only `add_trunk_v` was ever allowed to (the H/V unification gated it off to keep H byte-identical), so every redundant pair in the corpus is a V stub off an H spine. Opt-in because dropping a stub re-sorts the WL-ordered pool; renumbers indices |
 | 3 | `set_planner_param` | Tune planner cost coefficients (applied at the next `run_planner`) |
 | 3 | `run_planner` | Select topology + assign layers per segment |
 | 3b | `select_topology` | Manually pin a bundle's topology candidate (1-based); bundle given by numeric ID or net-name hint (`bus_033`; `id:`/`net:` to disambiguate) |

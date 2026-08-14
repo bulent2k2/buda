@@ -230,6 +230,39 @@ def cmd_set_trim_mst_legs(session, cmd, args, cmd_line):
           f"(applies at the next generate_[hier_]topologies; renumbers indices).")
 
 
+def cmd_set_trim_trunk_stubs(session, cmd, args, cmd_line):
+    # Usage: set_trim_trunk_stubs [on|off]      (default off)
+    # Let the H trunk path suppress a redundant collinear stub — the pass
+    # add_trunk ALREADY runs, which only add_trunk_v has ever been allowed to.
+    #
+    # A trunk whose spine passes several blocks stacked along the stub axis
+    # taps each with its own stub off the same spine point.  When a farther
+    # block's stub already crosses a nearer block's along-extent, the nearer
+    # stub is a duplicate lying entirely inside it — no extra coverage, no
+    # extra flexibility.  add_trunk suppresses exactly that, farthest-first,
+    # and only a CONFIRMED SURVIVOR may suppress (so a chain A<-B<-C cannot
+    # leave B uncovered); the pass is gated on `suppress_stubs`, and the H/V
+    # unification passed false from add_trunk_h to keep the H output
+    # byte-for-byte identical.  The asymmetry outlived the refactor.
+    #
+    # Measured (tools/experiment/scan_collinear_stubs.py, 13 flows): all 108
+    # REDUNDANT collinear pairs are VERTICAL stubs off a HORIZONTAL spine, in
+    # TRUNK_H / TRUNK_H_OOB.  TRUNK_V carries none — its suppressor removes
+    # them already.
+    #
+    # OPT-IN for the set_trim_mst_legs reason: candidates are WL-SORTED, so
+    # dropping a stub re-sorts the pool and changes which candidates clear the
+    # generation gates.  Declare BEFORE the generation command; it renumbers
+    # candidate indices, so select_topology pins must come from an opted-in run.
+    val = args[0].lower() if args else "on"
+    if val not in ("on", "off"):
+        print(f"Error: set_trim_trunk_stubs expects on|off, got {args[0]!r}")
+        return
+    session._trim_trunk_stubs = (val == "on")
+    print(f"Trunk redundant-stub trim {'ENABLED' if val == 'on' else 'disabled'} "
+          f"(applies at the next generate_[hier_]topologies; renumbers indices).")
+
+
 def cmd_set_keepout_loci(session, cmd, args, cmd_line):
     # Usage: set_keepout_loci all|outside          (default all)
     #
@@ -765,6 +798,7 @@ COMMANDS = {
     "set_prune_dominated": cmd_set_prune_dominated,
     "set_dedup_loci": cmd_set_dedup_loci,
     "set_trim_mst_legs": cmd_set_trim_mst_legs,
+    "set_trim_trunk_stubs": cmd_set_trim_trunk_stubs,
     "set_drop_dangling": cmd_set_drop_dangling,
     "set_keepout_loci": cmd_set_keepout_loci,
     "generate_topologies_for_bundle": cmd_generate_topologies_for_bundle,

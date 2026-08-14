@@ -24,7 +24,7 @@ here is asserted from reading the code alone — every measurement is from a run
 | 2 | busterm tap vouches for every bit | `flow/antenna_taper_passthru.buda` | FIXED #690 |
 | 3 | bus wider than the block it crosses | `flow/antenna_wide_bus_passthru.buda` | UNREACHABLE |
 | 4 | crossing credited at the nominal seg | `flow/rnr/mix2_topdown_refine.buda` | FIXED #695 |
-| 5 | a duplicated leg off one block | `flow/mst_shared_leg_prefix.buda` + `flow/mst_shared_leg_suffix.buda` | **5a FIXED opt-in** (#708) · 5b OPEN · 5c reclassified |
+| 5 | a duplicated leg off one block | `flow/mst_shared_leg_prefix.buda` + `flow/mst_shared_leg_suffix.buda` | **5a FIXED opt-in** (#708) · 5b OPEN · **5c reclassified + fixed opt-in** |
 | 6 | a culled partner strands a segment | `flow/antenna_culled_partner.buda` + `flow/antenna_starved_partner.buda` | **OPEN — cause found** |
 | 7 | `rv/soc` 1.25M units mid-flow | `flow/rv/soc.buda` | **OPEN — same cause as 6** |
 
@@ -32,7 +32,9 @@ Entries 5, 6 and 7 are the live ones. 6 and 7 are **one defect** — a
 DetailedNUTS pass-ordering problem, isolated to a 4-bit vehicle in entry 6. 5 is
 a *class* of three members sharing one geometry: 5a is fixed behind an opt-in,
 5b is open, and 5c turns out to be neither an antenna nor (mostly) a redundancy —
-measured, not argued, by `tools/scan_collinear_stubs.py`. Entry 3 is a negative
+measured, not argued, by `tools/scan_collinear_stubs.py` and the two
+`tools/experiment/` scripts, which refuted the cost explanation and localized
+the real one: a suppression pass `add_trunk_v` runs and `add_trunk_h` does not. Entry 3 is a negative
 result kept as a guard. Entries 3, 6 and 7's vehicles all end DIRTY on purpose;
 none belongs in the QoR corpus.
 
@@ -132,7 +134,7 @@ The geometry has **three** producers, and only the first is fixed:
 |---|---|---|---|
 | 5a | `realize_mst_edge`, shared node holds the LOWER index | legs **start** there | fixed behind `set_trim_mst_legs` |
 | 5b | `realize_mst_edge`, shared node holds the HIGHER index | legs **end** there | OPEN |
-| 5c | TRUNK stub generation | stub + leg leave one trunk point | **NOT AN ANTENNA — reclassified, see below** |
+| 5c | TRUNK stub generation | stub + leg leave one trunk point | **NOT AN ANTENNA — reclassified**; root-caused and fixed behind `set_trim_trunk_stubs` |
 
 `compute_mst` emits every edge with `u < v` and `realize_mst_edge` routes
 `u → v`, which is what splits 5a from 5b. The lever is **which block is the
@@ -171,7 +173,9 @@ default off, byte-identical unused, `BUDA_MST_LEG_TRIM=1` for corpus A/B. Opted
 in on `mix2_topdown_refine`: `check_design` 3 violations → Success, detailed WL
 793215 → 793198. 5b and 5c are strict `xfail`s in
 `test/tests/test_mst_shared_leg_prefix.py`, and they **still xfail with the trim
-on** — so they record "not covered" rather than "not exercised".
+on** — so they record "not covered" rather than "not exercised".  5c's xfail
+stays (it is the DEFAULT behaviour) but is no longer unfixed: its twin passes
+under `set_trim_trunk_stubs on`.
 
 ### 5c is not an antenna, and mostly not redundant either
 
@@ -217,6 +221,60 @@ design where a REDUNDANT pair is selected, or a demonstration that the shape
 costs ranking (a candidate losing to a rival only because it carries duplicate
 length it did not need). Until one of those exists, 5c is **recorded, not
 open** — and it belongs to topology generation, not to this page.
+
+#### Both bars were tested. Neither was met — and 5c got fixed anyway.
+
+The ranking bar above was the interesting one, because there is a plausible
+mechanism: `wirelength()` (topology.cpp) sums segment lengths with **no overlap
+dedup**, so a duplicate stub of length L adds exactly L; and `apply_segment`
+(congestion_planner.cpp) charges **each segment independently** at
+`eff_width + track_pitch`, so two collinear same-bundle segments on one layer
+charge the shared bands twice — for metal NUTS will place once. Both mechanisms
+are real. Neither is the explanation.
+
+`tools/experiment/base_rate_collinear.py` measured the null first, because
+"zero selected" means nothing without a base rate. Over 621 planned bundles:
+
+```
+OBSERVED selected+redundant : 0
+NULL A (uniform in the bundle's pool)     : expected 4.55 +/- 1.83   z = -2.49
+NULL B (uniform within the WINNER's class): expected 0.00 +/- 0.00
+```
+
+Null B is **exactly** zero: in no bundle does any candidate sharing the winner's
+class carry redundancy. The zero is a placement fact, not a scoring one.
+
+`tools/experiment/twin_cost_collinear.py` then tested the ranking claim
+directly. Since congestion cost is non-negative, `kWL*(wl−L) + max over
+remaining of (total − cong)` is a floor the trimmed twin cannot go under —
+including the double-charge relief, which is therefore bounded rather than
+guessed. Result: **128 of 150 candidates provably cannot flip**, and the median
+saving (0.67) closes about a third of the median gap it would need to (2.24).
+`seg_cost` is a **max** over segments, so a short stub is almost never the
+argmax — the double charge is largely muted in the candidate's own score, and
+what it really inflates is the committed usage *other* bundles see.
+
+So the ranking bar failed, and the fix that landed is justified on a different
+footing: not QoR, but a **one-sided gap in the generator**. The by-class table
+is what pointed at it — redundancy occurs in `TRUNK_H` (109 of 3388) and
+`TRUNK_H_OOB` (41 of 595) and **nowhere else**, and every redundant stub is a
+vertical stub off a horizontal spine. `add_trunk` has always carried the
+suppression pass; it is gated on a `suppress_stubs` parameter that only
+`add_trunk_v` passes `true`, because the H/V unification adopted the V structure
+and passed `false` from `add_trunk_h` to keep the H output byte-for-byte
+identical. `TRUNK_V` has no redundant pairs because its suppressor already
+removes them.
+
+**Status: root-caused and fixed behind `set_trim_trunk_stubs [on|off]`**,
+default off, byte-identical unused, `BUDA_TRUNK_STUB_TRIM=1` for corpus A/B —
+opt-in for 5a's reason, since dropping a stub re-sorts the WL-ordered pool. The
+newly-enabled H path uses the **strict-interior** coverage rule matching
+`verify.cpp`; enabling V's historical **inclusive** rule on H over-suppressed at
+the graze boundary and the coverage gate paid for it by dropping candidates
+(`big2` pool 2084 → 1880 inclusive, → 2011 strict; load-bearing pairs preserved
+0 vs 508). Tightening V is a separate, non-byte-identical change and is not made
+here. On present evidence this buys **no QoR** — it removes a defect, not a
+regression.
 
 **Why opt-in, and the part worth carrying to the next fix of this kind.** The
 first cut applied the trim unconditionally and cost `chip3_topdown` 260 → 636

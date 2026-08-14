@@ -2656,6 +2656,24 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
         att[i]      = blocks[i].rects.empty() ? axis.along(pins[i]) : axis.along_center(best_r[i]);
     }
     std::vector<bool> stub_suppressed(n, false);
+    // Does surviving stub j's wire COVER block i?  j runs perpendicular at
+    // along-coordinate att[j], so it covers i only when att[j] falls in i's
+    // along-extent.  The historical V test is INCLUSIVE, which accepts att[j]
+    // exactly ON i's edge — a graze, and BUDA's coverage rule is interior
+    // overlap (verify.cpp's pass_through_count agrees), so an edge-equal att
+    // suppresses a stub whose block nothing actually covers.  The generation
+    // coverage gate then drops the whole candidate, so it never reaches a
+    // route — it just costs the pool.  The newly-enabled H path therefore uses
+    // the STRICT rule; the V path keeps the inclusive one so that enabling the
+    // H knob cannot perturb V (byte-identity when the knob is off).  Tightening
+    // V is a separate, non-byte-identical change.
+    const bool strict_cover = axis.along_horiz;
+    auto stub_covers_block = [&](int j, int i) {
+        const int lo = axis.along_lo(blocks[i].orig_bbox);
+        const int hi = axis.along_hi(blocks[i].orig_bbox);
+        return strict_cover ? (att[j] > lo && att[j] < hi)
+                            : (att[j] >= lo && att[j] <= hi);
+    };
 
     if (use_busterm_) {
         // Enforce stub length for multicast stubs (stub is perpendicular to spine).
@@ -2769,8 +2787,7 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
                     if ((di > 0) != (dj > 0)) continue;          // opposite sides of trunk
                     if (std::abs(dj) <= std::abs(di)) continue;  // j not strictly farther
                     // Surviving stub j's att lies within block i's original along-extent?
-                    if (att[j] >= axis.along_lo(blocks[i].orig_bbox) &&
-                        att[j] <= axis.along_hi(blocks[i].orig_bbox)) {
+                    if (stub_covers_block(j, i)) {
                         stub_suppressed[i] = true; break;
                     }
                 }
@@ -2845,8 +2862,7 @@ void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
                 int dj = conn[j] - locus;
                 if (di == 0 || dj == 0 || (di > 0) != (dj > 0)) continue; // same side
                 if (std::abs(dj) <= std::abs(di)) continue;               // strictly farther
-                covered = (att[j] >= axis.along_lo(blocks[i].orig_bbox) &&
-                           att[j] <= axis.along_hi(blocks[i].orig_bbox));
+                covered = stub_covers_block(j, i);
             }
             if (!covered) { stub_suppressed[i] = false; att[i] = ctr(i); }
         }
@@ -3063,7 +3079,13 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
                                      int y_trunk, bool out_of_bbox,
                                      std::vector<Topology>& results)
 {
-    add_trunk(Axis{true}, /*suppress_stubs=*/false, pins, blocks, y_trunk, out_of_bbox, results);
+    // suppress_stubs was hard-false here while add_trunk_v passes true — the
+    // unification gated the pass off so the H path stayed byte-for-byte
+    // identical, and the asymmetry outlived the refactor.  Opt-in via
+    // set_trim_trunk_stubs / BUDA_TRUNK_STUB_TRIM (see set_trunk_stub_trim):
+    // every REDUNDANT collinear stub pair the corpus carries is on this path.
+    add_trunk(Axis{true}, /*suppress_stubs=*/allow_trunk_stub_trim_, pins, blocks,
+              y_trunk, out_of_bbox, results);
 }
 
 void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,

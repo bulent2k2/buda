@@ -1,6 +1,6 @@
 # BUDA Script Reference — Stage 2 — Topology generator
 
-Candidate enumeration and expert editing: `generate_topologies`, `generate_topologies_for_bundle`, `generate_more_topologies`, the TopoEdit session (`edit_topology` … `edit_commit`), `generate_hier_topologies`, `generate_topologies_for_hbundle`, `set_prune_dominated`, `set_dedup_loci`, `set_drop_dangling`, `set_trim_mst_legs`, `set_keepout_loci`.
+Candidate enumeration and expert editing: `generate_topologies`, `generate_topologies_for_bundle`, `generate_more_topologies`, the TopoEdit session (`edit_topology` … `edit_commit`), `generate_hier_topologies`, `generate_topologies_for_hbundle`, `set_prune_dominated`, `set_dedup_loci`, `set_drop_dangling`, `set_trim_mst_legs`, `set_trim_trunk_stubs`, `set_keepout_loci`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -692,7 +692,9 @@ candidate indices, so `select_topology` pins must come from an opted-in run.
   duplicate metal plus a perpendicular partner claiming an endpoint conn to
   *both* legs, which NUTS reports as a junction infeasibility.
 - **The same geometry from TRUNK stub generation**, which this trim (living in
-  the MST realization paths) never sees.
+  the MST realization paths) never sees.  That half now has its own opt-in —
+  see [`set_trim_trunk_stubs`](#set_trim_trunk_stubs) — and it is where the
+  corpus's redundant stubs actually are.
 
 **Corpus A/B:** `BUDA_MST_LEG_TRIM=1` opts a whole sweep in without editing
 flows; an explicit `set_trim_mst_legs` wins over it.
@@ -706,5 +708,83 @@ generate_topologies            # MST legs no longer duplicate a sibling's prefix
 
 Vehicles: `flow/mst_shared_leg_prefix.buda` (trimmed) and
 `flow/mst_shared_leg_suffix.buda` (the open mirror).
+
+---
+
+### `set_trim_trunk_stubs`
+
+```
+set_trim_trunk_stubs [on|off]
+```
+
+Let the **H trunk path** suppress a redundant collinear stub (default **off** —
+byte-identical without it, test-pinned).  This is **not a new algorithm**: it
+enables the pass `add_trunk` already runs.
+
+**The shape.**  A trunk whose spine passes several blocks stacked along the stub
+axis taps each with its own stub off the same spine point.  When a farther
+block's stub already crosses a nearer block's along-extent, the nearer stub is a
+duplicate lying entirely inside it — no extra coverage, no extra flexibility:
+
+```
+seg0  H (700,950)   -> (2010,950)     the spine
+seg1  V (2010,1000) -> (2010,950)     stub to `hub`s bottom face
+seg3  V (2010,1800) -> (2010,950)     leg to `up`, straight THROUGH `hub`
+```
+
+`seg1`'s 50 units are already covered by `seg3`.
+
+**Why it was one-sided.**  `add_trunk` suppresses exactly this — farthest-first,
+and only a **confirmed survivor** may suppress, so a chain A←B←C cannot leave B
+uncovered.  But the pass is gated on a `suppress_stubs` parameter, and only
+`add_trunk_v` ever passed `true`: the H/V unification adopted the V structure
+and deliberately passed `false` from `add_trunk_h` so the H output stayed
+byte-for-byte identical.  The gap has been latent ever since, and it is
+one-sided **by construction** — which is exactly what measurement shows.  Over
+13 flows (`tools/experiment/`), every one of the corpus's **108** redundant
+collinear pairs is a **vertical stub off a horizontal spine**, in `TRUNK_H` or
+`TRUNK_H_OOB`.  `TRUNK_V` carries none, not because V geometry differs but
+because `add_trunk_v`'s suppressor already removes them:
+
+| class | candidates | carrying a redundant pair |
+|---|---|---|
+| `TRUNK_H` | 3388 | 109 |
+| `TRUNK_H_OOB` | 595 | 41 |
+| `TRUNK_V`, all MST, Z/L/U/I/ABUT | ~11 000 | **0** |
+
+**Coverage rule.**  The newly-enabled H path uses the **strict-interior** test —
+a surviving stub covers a block only when its along-coordinate falls *strictly*
+inside the block's extent, matching `verify.cpp`'s `pass_through_count`.  The V
+path keeps its historical **inclusive** test, which accepts a coordinate exactly
+*on* the edge (a graze, which does not cover).  Enabling the inclusive rule on H
+over-suppressed: the generation coverage gate then dropped the whole candidate,
+so nothing reached a route — it just cost pool.  Measured on the same 13 flows:
+
+| | inclusive | strict |
+|---|---|---|
+| redundant pairs remaining | 4 | 4 |
+| load-bearing pairs preserved | **0** | **508** of 547 |
+| `big2` candidate pool | 2084 → 1880 | 2084 → **2011** |
+
+Leaving V on the inclusive test is what keeps the knob byte-identical when off;
+tightening V is a separate, non-byte-identical change.
+
+**Why it is opt-in.**  Same reason as `set_trim_mst_legs`: candidates are
+**WL-sorted**, so dropping a stub **re-sorts the pool** and changes which
+candidates clear the generation gates.  The geometry is sound; the search space
+moves.
+
+**Ordering:** declare *before* the generation command.  It renumbers candidate
+indices, so `select_topology` pins must come from an opted-in run.
+
+**Corpus A/B:** `BUDA_TRUNK_STUB_TRIM=1` opts a whole sweep in without editing
+flows; an explicit `set_trim_trunk_stubs` wins over it.
+
+**Example:**
+```buda
+run_bundler strict
+set_trim_trunk_stubs on
+generate_topologies            # no stub duplicating one the spine already covers
+```
 
 ---

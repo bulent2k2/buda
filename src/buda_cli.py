@@ -404,7 +404,12 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # and unlike them a GEOMETRY change, so it re-sorts the WL-ordered pool
         # and moves selection well beyond the bundle it fixes (chip3_topdown:
         # 9 of 640 bundles change selected type, 3 change pool size).
-        self._trim_mst_legs = False
+        # None = never declared (the env default stands); True/False = explicit.
+        self._trim_mst_legs = None
+        # set_trim_trunk_stubs: let the H trunk path suppress a redundant
+        # collinear stub, which add_trunk_v has always done and add_trunk_h
+        # never has.  Opt-in for the same search-space reason as the above.
+        self._trim_trunk_stubs = None
         self._max_bundle_bits = None
         self._max_bundle_bits_auto = False
         self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]

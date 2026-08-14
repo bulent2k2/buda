@@ -224,7 +224,54 @@ def test_MST_legs_that_END_at_the_shared_node_are_also_trimmed(solved_suffix):
     assert not bad, f"duplicated MST leg suffixes: {bad}"
 
 
-@pytest.mark.xfail(strict=True, reason="OPEN: the shape is not MST-specific")
+def _solve_with_trunk_trim(flow):
+    """Same fixture, with `set_trim_trunk_stubs on` inserted before generation.
+
+    Unique temp name in the flow's own directory, for the xdist reason the
+    sibling opt-in test documents (Codex #732).
+    """
+    src = flow.read_text().replace("generate_topologies",
+                                   "set_trim_trunk_stubs on\ngenerate_topologies", 1)
+    fd, path = tempfile.mkstemp(dir=flow.parent, prefix="_trunk_trim_on_",
+                                suffix=".buda")
+    tmp = Path(path)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(src)
+        return _solve(tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def test_the_trunk_stub_trim_removes_the_duplicated_spine_stub():
+    """The fix for the shape the xfail below records, behind its own opt-in.
+
+    `add_trunk` has always had this suppression pass — farthest-first, and only
+    a CONFIRMED SURVIVOR may suppress, so a chain A<-B<-C cannot leave B
+    uncovered.  It was gated on the `suppress_stubs` parameter and only
+    `add_trunk_v` ever passed true: the H/V unification adopted the V structure
+    and deliberately passed false from `add_trunk_h` to keep the H output
+    byte-for-byte identical.  So the duplication is one-sided BY CONSTRUCTION,
+    which is exactly what the corpus shows — every REDUNDANT collinear pair is
+    a VERTICAL stub off a HORIZONTAL spine, and TRUNK_V has none because its
+    suppressor already removes them.
+    """
+    bad = _pairs(_solve_with_trunk_trim(_FLOW), kinds=["TRUNK"])
+    assert not bad, f"duplicated TRUNK stubs survived the trim: {bad}"
+
+
+def test_the_trunk_stub_trim_is_OPT_IN(solved):
+    """Default off, for the set_trim_mst_legs reason: dropping a stub re-sorts
+    the WL-ordered pool and moves the search space.  The xfail below is the
+    same claim from the other side; this one states it as a passing assertion so
+    a silent default flip fails loudly rather than turning an xfail into an
+    XPASS somebody has to interpret."""
+    assert _pairs(solved, kinds=["TRUNK"]), \
+        "the trunk-stub duplication vanished with no opt-in — default flipped?"
+
+
+@pytest.mark.xfail(strict=True,
+                   reason="OPEN by default: fixed only under set_trim_trunk_stubs")
 def test_TRUNK_candidates_do_not_duplicate_a_stub_the_spine_already_covers(solved):
     """The scope the trim does not reach at all — found by generalizing the
     scanner off `seg.start`, on the PR's own fixture.
@@ -241,10 +288,10 @@ def test_TRUNK_candidates_do_not_duplicate_a_stub_the_spine_already_covers(solve
     MST case by a completely different code path (trunk stub generation, not
     `realize_mst_edge`).  Nine such pairs on this fixture.
 
-    Recorded rather than fixed: the trim lives in the MST realization paths, and
-    widening it to trunk stubs is a much larger change than this PR makes — it
-    would want its own measurement, since the pool re-sorting that drives this
-    PR's corpus regression applies there too.
+    Still the DEFAULT behaviour, hence still xfail — but no longer unfixed:
+    `set_trim_trunk_stubs on` lets the H trunk path run the suppression pass
+    `add_trunk_v` has always run, and the twin above pins that it clears every
+    one of these pairs.  Opt-in for the same reason the MST trim is.
     """
     bad = _pairs(solved, kinds=["TRUNK"])
     assert not bad, f"duplicated TRUNK stubs: {bad}"
@@ -271,3 +318,37 @@ def test_the_flow_ends_clean(solved):
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
         solved.do_command("check_design dnuts")
     assert "no violations found" in buf.getvalue(), buf.getvalue()[-600:]
+
+
+def test_an_explicit_off_beats_the_corpus_AB_env(monkeypatch):
+    """The env hook sets a DEFAULT; an explicit command outranks it BOTH ways.
+
+    Stamping the generator only when the flag was `on` meant
+    `set_trim_trunk_stubs off` under `BUDA_TRUNK_STUB_TRIM=1` never reached the
+    setter, so the generator kept the env's `true` while the command printed
+    "disabled" — the one combination a corpus A/B sweep actually produces, when
+    a sweep opts one flow back out (Codex #745).  The session flag is tri-state
+    for this: None leaves the env default alone, False is stamped.
+
+    Asserted on the GEOMETRY, not on the flag: the flag being False proves
+    nothing if the generator never hears about it.
+    """
+    monkeypatch.setenv("BUDA_TRUNK_STUB_TRIM", "1")
+
+    # env alone -> trimming ON -> the trunk duplication is gone
+    assert not _pairs(_solve(_FLOW), kinds=["TRUNK"]), \
+        "BUDA_TRUNK_STUB_TRIM=1 did not enable the trim"
+
+    # env + an explicit `off` -> the command wins -> the shape comes back
+    src = _FLOW.read_text().replace("generate_topologies",
+                                    "set_trim_trunk_stubs off\ngenerate_topologies", 1)
+    fd, path = tempfile.mkstemp(dir=_FLOW.parent, prefix="_trunk_trim_off_",
+                                suffix=".buda")
+    tmp = Path(path)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(src)
+        assert _pairs(_solve(tmp), kinds=["TRUNK"]), \
+            "an explicit `off` lost to the env hook"
+    finally:
+        tmp.unlink(missing_ok=True)

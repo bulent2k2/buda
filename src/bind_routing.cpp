@@ -546,6 +546,7 @@ void bind_routing(py::module_& m) {
         .def("set_hanan_loci",     &TopologyGenerator::set_hanan_loci)
         .def("set_spine_relays",   &TopologyGenerator::set_spine_relays)
         .def("set_mst_leg_trim",   &TopologyGenerator::set_mst_leg_trim)
+        .def("set_trunk_stub_trim", &TopologyGenerator::set_trunk_stub_trim)
         .def("set_layer_ids",      &TopologyGenerator::set_layer_ids)
         .def("set_all_h_layers",   &TopologyGenerator::set_all_h_layers)
         .def("set_all_v_layers",   &TopologyGenerator::set_all_v_layers)

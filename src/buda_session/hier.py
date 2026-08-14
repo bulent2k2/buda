@@ -4166,13 +4166,21 @@ class HierMixin:
         # #463 P2).  An explicit token / knob memo passes True and wins.
         if use_spine_relays:
             tg.set_spine_relays(True)
-        # Session-scope opt-in (set_trim_mst_legs), not a per-command token, so
-        # it needs no slot in the generation-knob tuple or its persisted memo.
-        # Stamped only when opting in, for the same reason as spine_relays: a
-        # flow without it keeps the constructor's env-derived default, so the
-        # BUDA_MST_LEG_TRIM corpus A/B hook still works.
-        if getattr(self, "_trim_mst_legs", False):
-            tg.set_mst_leg_trim(True)
+        # Session-scope opt-ins (set_trim_mst_legs / set_trim_trunk_stubs), not
+        # per-command tokens, so they need no slot in the generation-knob tuple
+        # or its persisted memo.
+        #
+        # TRI-STATE, and the None matters: an UNSET flag must leave the
+        # constructor's env-derived default alone, or the BUDA_*_TRIM corpus
+        # A/B hooks stop working.  But an EXPLICIT value must be stamped in
+        # BOTH directions — stamping only `True` meant `set_trim_mst_legs off`
+        # under BUDA_MST_LEG_TRIM=1 never reached the setter, so the generator
+        # kept trimming while the command printed "disabled" (Codex #745).  The
+        # documented contract is that an explicit command wins over the env.
+        if getattr(self, "_trim_mst_legs", None) is not None:
+            tg.set_mst_leg_trim(bool(self._trim_mst_legs))
+        if getattr(self, "_trim_trunk_stubs", None) is not None:
+            tg.set_trunk_stub_trim(bool(self._trim_trunk_stubs))
         return tg
 
     def _make_layer_names(self):
