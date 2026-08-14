@@ -32,7 +32,7 @@ The per-command documentation lives in one page per pipeline stage under
 | [Non-default rules (NDR)](script_reference/ndr.md) | setup | `def_ndr` · `set_ndr` · `dump_ndr` — per-net width / spacing / shielding, with the demand model and the worked vehicles |
 | [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_design` · `dump_topologies` · `visualize` · `visualize_topologies` · `emit_guides` · `export_def_blockages` · `dump_messages` |
 
-Script control (`source`, `exit`, comments), the output-files table, the typical
+Script control (`source`, `require_file`, `exit`, comments), the output-files table, the typical
 script skeleton, and the BDB command quick reference stay on this page, below —
 after the pipeline overview that follows.
 
@@ -86,6 +86,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | — | `visualize` | Open interactive NUTS result viewer |
 | — | `visualize_topologies` | Open topology explorer |
 | — | `source` | Include another `.buda` file |
+| Setup | `require_file` | Declare the input files this flow needs, with the remedy — a missing one stops the run at once instead of partway through |
 | BDB | `open_bdb`, `import_def_lef`, `import_verilog` | Open / populate the physical design database |
 | BDB | `move_comp`, `resize_cell`, `add_comp`, `flip_comp`, `rotate_comp`, `add_cell`, `add_inst`, `add_inst_to_cell`, `add_cell_pin` | Mutate placement and cell/pin definition data in the database |
 | BDB | `bdb_net_mode` | Toggle whether netlist is written to BDB database |
@@ -128,6 +129,50 @@ Only the outermost script's path is used for sidecar (`.json`) and log
 source ../common/base_layers.buda
 source my_floorplan.buda
 run_bundler strict
+```
+
+### `require_file`
+
+```
+require_file <path> [<path> ...] [hint <text ...>]
+```
+
+Declare the input files this script needs. Every path is checked; if any is
+missing the run **stops immediately** with `BUDA-1905` (FATAL, exit 1),
+naming *every* missing file and printing `hint` verbatim. When all are
+present the command is silent and the flow continues.
+
+Paths follow the same rule as `source` and every `import_*` command — they
+resolve against the **script's own directory** — so a required path names the
+same file the import that reads it will open. The message prints both the
+path as you wrote it and the absolute path it resolved to.
+
+Everything after the `hint` keyword is the remedy text, so several files can
+share one hint. It is passed through as written (the parser splits on
+whitespace and re-joins with single spaces; no quoting is needed or applied).
+
+**Why not just let the importer fail?** It does fail, correctly — but its
+complaint is about a path it could not open. Where that file *comes from* — a
+fetch script, an earlier stage's output, a site-specific location — is the
+flow's knowledge, not the engine's, and it is usually the half you need.
+Declaring the inputs also moves the failure to the top of the script, so a
+run that cannot succeed stops on line one rather than after the setup that
+precedes the read.
+
+**Example** — `flow/ariane133`, whose netlist and macro LEF are fetched from
+upstream and deliberately not checked in:
+
+```buda
+require_file ariane.v fakeram45_256x16.lef hint Fetch them first:  python3 flow/ariane133/fetch.py
+open_bdb ariane133.bdb
+...
+```
+
+```
+BUDA-1905: FATAL: 2 required input file(s) not found (ariane133.buda):
+    ariane.v   → /repo/flow/ariane133/ariane.v
+    fakeram45_256x16.lef   → /repo/flow/ariane133/fakeram45_256x16.lef
+  Fetch them first: python3 flow/ariane133/fetch.py
 ```
 
 ### `exit`
