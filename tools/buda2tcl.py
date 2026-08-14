@@ -154,7 +154,15 @@ def translate_file(buda_path, out_root, flow_root):
     # and the drift guard reports the whole corpus stale (measured,
     # windows-validate run 24 on this branch).  The repo-relative spelling is
     # `/` on every platform, so this is byte-identical on POSIX.
-    origin = posix_sep(os.path.relpath(os.path.abspath(buda_path), _ROOT))
+    # A flow OUTSIDE the repo (a tmp vehicle) has no repo-relative spelling at
+    # all on Windows when tmp and checkout sit on different drives —
+    # `ntpath.relpath` raises ValueError there (measured, windows-validate
+    # run 25: three test_tcl_corpus mini-flows died in translate_file) — so
+    # the origin falls back to the absolute path, `/`-spelled.
+    try:
+        origin = posix_sep(os.path.relpath(os.path.abspath(buda_path), _ROOT))
+    except ValueError:
+        origin = posix_sep(os.path.abspath(buda_path))
     lines, refs, ended = [], [], False
     with open(buda_path) as fh:
         for line in fh:
