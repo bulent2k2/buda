@@ -355,12 +355,49 @@ One gotcha worth pre-empting: a `.whl` downloaded through a browser carries
 `com.apple.quarantine`, which can stop the extracted dylib from loading.
 `xattr -dr com.apple.quarantine .` before installing.
 
+## 6b. Windows — the first deliverable wheel
+
+`.github/workflows/windows-wheel.yml` is the Windows twin of §6a's prototype:
+`workflow_dispatch`, one Python (**cp313**, the current stable), `windows-2022`,
+artifact only, nothing published. It exists because a real Windows box wanted a
+real install, and opens_interchange item 8 said the packaged wheel was the one
+interchange item still owed code. One bootstrap quirk worth recording: a
+workflow that exists only on a topic branch is **not dispatchable by name**
+(the workflows index reads the default branch — the dispatch 404s, measured
+twice), so the file carries a push trigger scoped to its own branch and path;
+the first push ran it, the run registered it, and the by-name dispatch works
+from then on. On `main` the branch filter matches nothing.
+
+What run 1 proved, in one 3m38s job (first attempt, no iteration needed —
+which is the windows-validate arc paying out: the build system and the
+subprocess/path/encoding traps were all already fixed):
+
+| check | result |
+|---|---|
+| `pip wheel . --no-deps` on bare MSVC (no developer shell) | `buda-3.0.0-cp313-cp313-win_amd64.whl`, 3.2 MB — scikit-build-core locates VS itself |
+| fresh venv, cwd `$env:TEMP` (outside the checkout) | `import buda, buda_db, buda_runtime` from site-packages |
+| `buda_runtime/tools/buda.tcl` | shipped, found by the smoke assert |
+| `flow/four_blocks.buda` via the installed `buda.exe` | full pipeline, 0 overlaps / 0 unplaced, all three `check_design` stages clean, BUDA-1903 voicing the suppressed viz |
+| GUI deps | `tkinter` + `matplotlib.use('TkAgg')` select cleanly (setup-python ships Tcl/Tk) |
+| web deps | `src/web/requirements.txt` installs; fastapi/uvicorn/httpx import |
+| entry points | `buda`, `floorplanner`, `viz` importable headless |
+
+Install on a real box: `py -3.13 -m pip install <wheel>` (the python.org
+installer with Tcl/Tk checked matches everything the smoke exercised);
+`PYTHONUTF8=1` is the standing recommendation from `WINDOWS_REQ.md`. The Tcl
+front end additionally needs a `tclsh` (e.g. Magicsplat Tcl/Tk) — the bridge
+itself ships in the wheel. The web backend runs from an installed copy as
+`import buda_runtime; buda_runtime.install()` then `uvicorn.run(web.server.app)`
+— `install()` puts `buda_runtime/` itself on `sys.path`, which is what makes
+`server.py`'s top-level `from web import …` resolve in both layouts.
+
 ## 7. What this does NOT do
 
-* No wheel **matrix**: one macOS prototype (§6a), nothing for Windows or
-  Linux, one Python version, and nothing published. `auditwheel` has still not
-  been run — the Linux side of the "verify rather than repair" claim remains
-  untested, even though the macOS side now has an answer.
+* No wheel **matrix**: one macOS prototype (§6a), one Windows deliverable
+  (§6b), nothing for Linux, one Python version each, and nothing published.
+  `auditwheel` has still not been run — the Linux side of the "verify rather
+  than repair" claim remains untested, even though the macOS side now has an
+  answer.
 * No version-bump process. The version is declared twice (`pyproject.toml`,
   `CMakeLists.txt`) and pinned equal by a test; nothing automates changing it.
 * `src/web`'s served files ship, but the Scala.js front-end bundle is a build
