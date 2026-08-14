@@ -33,7 +33,8 @@ import pytest
 _ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(_ROOT / "tools"))
 
-from scan_collinear_stubs import _crosses_interior, _ray, contained_pairs  # noqa: E402
+from scan_collinear_stubs import (_covers_block, _crosses_interior,  # noqa: E402
+                                  _ray, contained_pairs)
 
 pytestmark = pytest.mark.mid
 
@@ -149,3 +150,54 @@ def test_equal_length_legs_are_not_reported_twice():
     report the same overlap twice with the roles swapped."""
     t = _Topo([_Seg(0, 0, 0, 100), _Seg(0, 0, 0, 100)])
     assert contained_pairs(t) == []
+
+
+# ------------------------------------------- multi-rect blocks (the gap case)
+
+class _FP:
+    """Minimal Floorplan stand-in: a name -> rects map plus its union bbox."""
+    def __init__(self, rects):
+        self._rects = rects
+
+    def get_block_rects(self, name):
+        return self._rects.get(name, [])
+
+    def get_block_bounds(self, name):
+        rs = self._rects[name]
+        return _R(min(r[0] for r in rs), min(r[1] for r in rs),
+                  max(r[2] for r in rs), max(r[3] for r in rs))
+
+
+def test_a_leg_through_a_TEG_gap_does_not_cover_the_block():
+    """The reason `get_block_bounds()` is not good enough.
+
+    Two rects with a gap between them: the union bbox spans the gap, so a leg
+    down the middle crosses the BBOX while touching no block material.  Scored
+    off the bbox it would read REDUNDANT and the stub would look removable —
+    the one direction that inflates the headline count.
+    """
+    fp = _FP({"teg": [(0, 0, 100, 400), (300, 0, 400, 400)]})
+    through_the_gap = _Seg(200, -50, 200, 450)
+    assert _crosses_interior(through_the_gap, fp.get_block_bounds("teg")) is True
+    assert _covers_block(through_the_gap, fp, "teg") is False
+
+
+def test_a_leg_through_one_rect_of_a_multi_rect_block_does_cover_it():
+    fp = _FP({"teg": [(0, 0, 100, 400), (300, 0, 400, 400)]})
+    assert _covers_block(_Seg(50, -50, 50, 450), fp, "teg") is True
+    assert _covers_block(_Seg(350, -50, 350, 450), fp, "teg") is True
+
+
+def test_a_block_with_no_rects_falls_back_to_its_bounds():
+    """Single-rect blocks report no rect list in some frames; the fallback must
+    keep them classifiable rather than silently load-bearing."""
+    class _Bare(_FP):
+        def get_block_rects(self, name):
+            return []
+
+        def get_block_bounds(self, name):
+            return _R(0, 0, 100, 100)
+
+    fp = _Bare({})
+    assert _covers_block(_Seg(50, -10, 50, 110), fp, "b") is True
+    assert _covers_block(_Seg(0, -10, 0, 110), fp, "b") is False   # left edge

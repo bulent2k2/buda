@@ -58,6 +58,10 @@ DEFAULT_FLOWS = [
     "flow/four_blocks.buda",
     "flow/channel_stress.buda",          # a NEGATIVE: no pairs at all
     "demo/comprehensive_demo.buda",
+    # MULTI-RECT / TEG blocks, so the rects-not-bbox coverage path is actually
+    # exercised rather than merely written (Codex #741)
+    "flow/lShape1.buda",
+    "flow/teg1.buda",
     # hier
     "flow/rnr/mix.buda",
     "flow/rnr/mix2.buda",
@@ -128,6 +132,8 @@ def _crosses_interior(seg, r):
     Matches BUDA's coverage rule: abutment does not cover.  Strict inequality
     on the perpendicular axis is what separates "runs along the left edge"
     from "runs through the middle".
+
+    `r` is one RECT, never a union bbox — see `_covers_block`.
     """
     horiz = seg.start.y == seg.end.y
     perp = seg.start.y if horiz else seg.start.x
@@ -136,6 +142,30 @@ def _crosses_interior(seg, r):
     p_lo, p_hi = (r.y1, r.y2) if horiz else (r.x1, r.x2)
     a_lo, a_hi = (r.x1, r.x2) if horiz else (r.y1, r.y2)
     return p_lo < perp < p_hi and lo < a_hi and hi > a_lo
+
+
+class _Rect:
+    """The 4-tuple `get_block_rects` returns, given a rect's attribute names."""
+    __slots__ = ("x1", "y1", "x2", "y2")
+
+    def __init__(self, t):
+        self.x1, self.y1, self.x2, self.y2 = t
+
+
+def _covers_block(seg, fp, name):
+    """Does `seg` cross any REAL rectangle of the block?
+
+    A multi-rect / TEG block's `get_block_bounds()` is only the union bbox, so
+    it spans notches and gaps that hold no block material.  A leg through such
+    a gap crosses the BBOX while covering nothing — which would score a
+    load-bearing stub as removable, the one direction that could inflate the
+    redundant count.  So test the rects and fall back to the bounds only when
+    a block has none, exactly as the production coverage paths do.
+    """
+    rects = fp.get_block_rects(name)
+    if not rects:
+        return _crosses_interior(seg, fp.get_block_bounds(name))
+    return any(_crosses_interior(seg, _Rect(t)) for t in rects)
 
 
 def classify(topo, pair, fp):
@@ -150,7 +180,7 @@ def classify(topo, pair, fp):
         return "REDUNDANT:same_block"
     if not fp.has_block(b_short):
         return "LOAD_BEARING:block_not_in_frame"
-    if _crosses_interior(topo.segments[li], fp.get_block_bounds(b_short)):
+    if _covers_block(topo.segments[li], fp, b_short):
         return "REDUNDANT:long_leg_crosses_it"
     return "LOAD_BEARING:long_leg_only_grazes"
 
@@ -173,9 +203,20 @@ def scan(flow):
     tally = Counter()
     examples = {}
     n_cand = n_carrier = 0
+
+    # Each wrapper is classified against the floorplan ITS candidates were
+    # generated in, not the session's.  A pre-expansion cell-local template
+    # and a cross-level bundle live in their own frames, so `s.fp` would
+    # report their taps as blocks-not-in-frame — or, worse, silently test a
+    # same-named block from another frame.  This is the resolver
+    # `dump_topologies` uses, so the scan reads geometry the same way
+    # topology inspection does (Codex #741).
+    topo_fp = s._make_topo_fp_resolver()
+
     for w in s.bundles:
         bid = w.input.original_bundle.id
         sel = w.plan.selected_topology_index if w.plan else -1
+        fp = topo_fp(w)
         for idx, t in enumerate(w.input.candidates):
             n_cand += 1
             pairs = contained_pairs(t)
@@ -183,7 +224,7 @@ def scan(flow):
                 continue
             n_carrier += 1
             for p in pairs:
-                verdict = classify(t, p, s.fp)
+                verdict = classify(t, p, fp)
                 tally[verdict] += 1
                 if idx == sel:
                     # Cross-tabbed, not just counted: a pair in a SELECTED
