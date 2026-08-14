@@ -1618,7 +1618,14 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         // fully enforced.  BUDA has no placement-legalisation stage, so as
         // with a PLACEMENT blockage there is nothing to apply it to; it is
         // recorded as unmodelled.
-        if (c.has_halo && has_pos) ++halo_unmodelled;
+        // Counted for EVERY halo, placed or not.  `has_pos` gated this at
+        // first, which was a leftover from emitting the keepout — geometry
+        // needs a position, a census does not.  The question here is "what
+        // did the file say that we do not model?", and an UNPLACED component
+        // with a halo answers it just as much as a placed one; gating on
+        // placement left exactly those silently unreported, which is the
+        // failure this census exists to prevent (Codex P2 on #739).
+        if (c.has_halo) ++halo_unmodelled;
 
         // Macro OBS keepouts, in the SAME pass (opens item 5): this used to
         // be a second full walk over def.components in the BLOCKAGES section

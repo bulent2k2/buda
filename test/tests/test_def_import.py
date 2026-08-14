@@ -271,6 +271,22 @@ def test_the_halo_is_reported_rather_than_silently_dropped(tmp_path):
     assert "COMPONENTS.HALO" in out, out
 
 
+def test_an_unplaced_component_s_halo_is_censused_too(tmp_path):
+    """The census asks "what did the file say that we do not model?", and
+    placement has no bearing on that answer.
+
+    The first cut gated the count on `has_pos` — a leftover from the days
+    when this emitted a keepout, which genuinely needs a position.  A census
+    does not, and the gate left exactly the unreported case the census
+    exists to prevent: an UNPLACED component whose halo is read, deliberately
+    not applied, and never mentioned (Codex P2 on #739).
+    """
+    s, out = _run(tmp_path, deff=_DEF_UNPLACED)
+    assert "COMPONENTS.HALO" in out, out
+    # …and it is still reported as unplaced, which is a separate fact.
+    assert "COMPONENTS.UNPLACED" in out, out
+
+
 def test_the_physical_import_can_be_declined(tmp_path):
     s, out = _run(tmp_path, extra="no_tracks no_blockages")
     assert "tracks installed" not in out
