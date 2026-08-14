@@ -22,14 +22,23 @@ $parts += @((Join-Path $ProjectRoot 'build'), (Join-Path $ProjectRoot 'tools'))
 if ($env:PYTHONPATH) { $parts += $env:PYTHONPATH }
 $env:PYTHONPATH = $parts -join $Sep
 
+# Every slice below is wrapped in @(): assigning an if-expression's output
+# UNWRAPS a single-element result to a bare string, after which $rest[0] is
+# the first CHARACTER and `tclsh @rest` splats one argument PER CHARACTER —
+# measured on windows-validate (PR #735): `btcl.ps1 -v flow.tcl` handed
+# tclsh the argument "C" (from C:\...) and every flagged invocation failed
+# with `couldn't read file "C"`, while the multi-arg `--` form stayed an
+# array and passed.  The @() must wrap the WHOLE if-expression: wrapping
+# only the inner slice still unwraps, because the enumeration happens when
+# the if's output is assigned (verified with pwsh 7.4 both ways).
 $rest = @() + $args
 while ($rest.Count -gt 0) {
     $a = $rest[0]
     if ($a -in '-v', '--visualize') {
         $env:BUDA_VIZ_FINAL = '1'
-        $rest = if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() }
+        $rest = @(if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() })
     } elseif ($a -eq '--') {
-        $rest = if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() }
+        $rest = @(if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() })
         break
     } elseif ($a -in '-h', '--help') {
         # The header block IS the help, read to the first non-comment line.
@@ -51,7 +60,7 @@ while ($rest.Count -gt 0) {
 # operand to a path tclsh cannot misread.
 if ($rest.Count -gt 0 -and $rest[0] -like '-*') {
     $rest = @(".$([IO.Path]::DirectorySeparatorChar)$($rest[0])") + `
-            $(if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() })
+            $(@(if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() }))
 }
 
 tclsh @rest

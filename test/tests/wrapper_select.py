@@ -42,8 +42,15 @@ def wrapper_command(root, name):
 
     ``root`` is the repo root as a ``pathlib.Path``.  A None return means no
     capable interpreter exists here — callers should skip with a reason.
+
+    ``BUDA_WRAPPER_PS=1`` forces the PowerShell twin on any platform with
+    pwsh — how the .ps1 contracts are exercised on a POSIX dev box or Linux
+    CI without waiting for a Windows runner (the #735 btcl.ps1 char-splat
+    bug shipped precisely because the twins could only be run on Windows).
     """
-    if sys.platform == "win32":
+    import os
+    force_ps = os.environ.get("BUDA_WRAPPER_PS") == "1"
+    if sys.platform == "win32" or force_ps:
         ps = shutil.which("pwsh") or shutil.which("powershell")
         if not ps:
             return None
