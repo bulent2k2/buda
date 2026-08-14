@@ -293,9 +293,16 @@ def test_an_unhandled_engine_exit_code_does_not_reach_the_shell(tmp_path):
     env = {**os.environ, "MPLBACKEND": "Agg"}
     r = subprocess.run([*_BTCL_CMD, "-v", str(script)],
                        capture_output=True, text=True, env=env, timeout=300)
-    assert r.returncode == 1, (r.returncode, r.stderr[-400:])   # Tcl's, not 3
-    assert "exit code 3" in r.stdout + r.stderr                 # …not lost
-    assert _viewer_attempts(r.stdout) == 1                      # opened once
+    # (r.stdout or "") despite capture_output=True: windows-validate on #736
+    # measured ONE run of this test with a stream attribute None — a state
+    # CompletedProcess should not be able to reach — and the bare
+    # concatenation turned that anomaly into a TypeError that hid the repr.
+    # The or-guards keep the assertions running and the message below prints
+    # the full CompletedProcess as evidence if it ever recurs.
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 1, (r.returncode, (r.stderr or "")[-400:])  # Tcl's, not 3
+    assert "exit code 3" in out, r                              # …not lost
+    assert _viewer_attempts(r.stdout or "") == 1, r             # opened once
 
 
 @pytest.mark.mid

@@ -100,23 +100,9 @@ jobs:
           set "PYTHONPATH=%CD%\build;%CD%\src;%CD%\tools"
           python -u -X faulthandler .github\scripts\windows_diag_import.py
 
-      - name: Fast + mid tiers (`-m "not slow"`, documented no-PYTHONPATH form)
-        # Deliberately no PYTHONPATH: WINDOWS_BUILD.md section 3 claims the
-        # Ninja layout needs none for pytest -- pytest.ini's `pythonpath =
-        # build src` covers the extension and src, and `python -m pytest` puts
-        # the CWD (= repo root) on sys.path for the `tools` package.  Injecting
-        # it here would let a break of that documented mechanism pass silently
-        # (review #600).  The flow step below keeps PYTHONPATH because the doc
-        # says plain `python` runs DO need it.
-        shell: cmd
-        run: python -m pytest -m "not slow" -q -r fs
-
-      - name: Run a .buda flow
-        shell: cmd
-        run: |
-          set "PYTHONPATH=%CD%\build;%CD%\src;%CD%\tools"
-          python src\buda_cli.py --no-viz flow\four_blocks.buda
-
+      # (Ordered BEFORE the tier: it needs only the build, and main's
+      # currently-red Windows tier was skipping it every run — the #736
+      # smoke never executed until this reorder.)
       - name: PowerShell wrapper smoke (bb.ps1 / buda.ps1 / activate.ps1)
         # The .ps1 twins of the bin/ wrappers, executed for real: bb.ps1
         # re-runs the build INCREMENTALLY in the same build dir (Ninja is on
@@ -133,6 +119,23 @@ jobs:
           if errorlevel 1 exit /b 1
           pwsh -NoProfile -ExecutionPolicy Bypass -File bin\activate.ps1 && exit /b 1
           echo activate.ps1 refused direct execution, as documented
+
+      - name: Fast + mid tiers (`-m "not slow"`, documented no-PYTHONPATH form)
+        # Deliberately no PYTHONPATH: WINDOWS_BUILD.md section 3 claims the
+        # Ninja layout needs none for pytest -- pytest.ini's `pythonpath =
+        # build src` covers the extension and src, and `python -m pytest` puts
+        # the CWD (= repo root) on sys.path for the `tools` package.  Injecting
+        # it here would let a break of that documented mechanism pass silently
+        # (review #600).  The flow step below keeps PYTHONPATH because the doc
+        # says plain `python` runs DO need it.
+        shell: cmd
+        run: python -m pytest -m "not slow" -q -r fs
+
+      - name: Run a .buda flow
+        shell: cmd
+        run: |
+          set "PYTHONPATH=%CD%\build;%CD%\src;%CD%\tools"
+          python src\buda_cli.py --no-viz flow\four_blocks.buda
 
   msbuild:
     runs-on: windows-2022
