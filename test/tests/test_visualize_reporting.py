@@ -40,9 +40,13 @@ import pytest
 import buda_cli
 import buda_diag
 from buda_cmds import verify_viz_cmds as vv
+from tcl_quote import tcl_path
 
 _ROOT = Path(__file__).resolve().parents[2]
 _TOOLS = _ROOT / "tools"
+# Quoting, not formatting -- see `src/tcl_quote.py`.
+_TCL_Q = tcl_path(_TOOLS / "buda.tcl")
+_PY_Q = tcl_path(sys.executable)
 
 
 def _session(no_viz):
@@ -264,8 +268,8 @@ def test_visualize_from_tcl_says_what_it_did(tmp_path):
     to return an empty string having done nothing at all."""
     script = tmp_path / "v.tcl"
     script.write_text(f"""
-        source {_TOOLS / 'buda.tcl'}
-        buda::start -python {sys.executable}
+        source {_TCL_Q}
+        buda::start -python {_PY_Q}
         buda::add_block a 0 0 100 100
         puts "setting=[buda::viz]"
         buda::viz off
@@ -289,8 +293,8 @@ def test_start_viz_0_reaches_the_engine(tmp_path):
     reads: INFO means the engine was told, WARNING means it worked it out."""
     script = tmp_path / "s.tcl"
     script.write_text(f"""
-        source {_TOOLS / 'buda.tcl'}
-        buda::start -echo 0 -viz 0 -python {sys.executable}
+        source {_TCL_Q}
+        buda::start -echo 0 -viz 0 -python {_PY_Q}
         puts "setting=[buda::viz]"
         buda::add_block a 0 0 100 100
         buda::visualize

@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 import buda_cli
+from tcl_quote import tcl_path
 
 from wrapper_select import wrapper_command, wrapper_missing_reason
 
@@ -166,20 +167,10 @@ _btcl_required = pytest.mark.skipif(bool(_BTCL_MISSING),
 # viewer did not open" — which is how `test_buda_viz_final_env_var_is_the_signal`
 # failed on all three native jobs in run 23.  test_tcl_front_end.py's `_tcl`
 # helper passes it for the same reason.
-# Paths reach Tcl as FORWARD-slashed, which Tcl accepts on every platform
-# including Windows.  A native Windows path interpolated raw would be read as
-# backslash ESCAPES by the Tcl parser — `D:\a\buda\...` becomes BEL + `buda`,
-# and `source` then fails on a filename that never existed.  `.as_posix()` /
-# the replace below cost nothing on POSIX, where the paths are already `/`.
-#
-# BRACED as well as forward-slashed, and the two solve different problems.
-# Forward slashes stop the Tcl parser eating `\a`/`\b`/`\t` as escapes; braces
-# stop it WORD-SPLITTING a path that contains spaces — `C:/Program Files/…`
-# would otherwise hand `buda::start` a `-python` of `C:/Program` plus a stray
-# `Files/…` option and fail before the engine starts.  Tcl's own `{…}` quoting
-# is the right tool: it suppresses substitution and splitting together.
-_TCL_PATH = "{" + _BUDA_TCL.as_posix() + "}"
-_PY_PATH = "{" + sys.executable.replace("\\", "/") + "}"
+# `tcl_path` does the quoting (forward-slash, then quote — two stages, two
+# separate ways a native Windows path is eaten); `src/tcl_quote.py` says why.
+_TCL_PATH = tcl_path(_BUDA_TCL)
+_PY_PATH = tcl_path(sys.executable)
 
 _TCL_FLOW = f"""\
 source {_TCL_PATH}
