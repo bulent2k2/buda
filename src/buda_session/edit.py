@@ -953,6 +953,36 @@ class EditMixin:
                     break
         return bids
 
+    @staticmethod
+    def _split_bundle_selector(sel):
+        """Classify a bundle selector: ('id', n) | ('prefix', pfx) | (None, msg).
+
+        The ONE place the id-vs-prefix rule lives.  `_resolve_bundle_selector`
+        below answers "which bundles?", which is what most callers want; a
+        caller that must know WHICH READING applied — the explorer, which
+        otherwise falls back to prefix-matching a token that already resolved
+        as an id, so `visualize_topologies 8` could open a bundle whose first
+        net merely starts with '8' (Codex P2 on #746) — asks this instead.
+        Two callers inferring the rule separately is the drift this exists to
+        prevent.
+        """
+        if ":" in sel:
+            head, rest = sel.split(":", 1)
+            if head == "id":
+                try:
+                    return "id", int(rest)
+                except ValueError:
+                    return None, f"invalid bundle id '{rest}' after 'id:'"
+            if head in ("net", "name", "hint"):
+                if not rest:
+                    return None, f"empty net-name prefix in selector '{sel}'"
+                return "prefix", rest
+        if not sel:
+            return None, f"empty net-name prefix in selector '{sel}'"
+        if sel.lstrip("-").isdigit():
+            return "id", int(sel)
+        return "prefix", sel
+
     def _resolve_bundle_selector(self, sel):
         """Resolve a select_topology bundle selector to (bundle_ids, error).
 
@@ -966,23 +996,15 @@ class EditMixin:
         number (e.g. 'net:10' matches a bus '10net', while bare '10' is ID 10).
         Returns ([], msg) on an empty/failed match.
         """
-        forced_hint = False
-        pfx = sel
-        if ":" in sel:
-            head, rest = sel.split(":", 1)
-            if head == "id":
-                try:
-                    return [int(rest)], None
-                except ValueError:
-                    return [], f"invalid bundle id '{rest}' after 'id:'"
-            if head in ("net", "name", "hint"):
-                forced_hint, pfx = True, rest
         # An empty prefix would startswith()-match EVERY bundle (a `net:` typo
-        # silently pinning the whole design); reject it instead (Codex P2 #423).
-        if not pfx:
-            return [], f"empty net-name prefix in selector '{sel}'"
-        if not forced_hint and pfx.lstrip("-").isdigit():
-            return [int(pfx)], None
+        # silently pinning the whole design); the splitter rejects it instead
+        # (Codex P2 #423).
+        kind, val = self._split_bundle_selector(sel)
+        if kind is None:
+            return [], val
+        if kind == "id":
+            return [val], None
+        pfx = val
         bids = self._bids_by_net_prefix(pfx)
         if not bids:
             return [], f"no bundle whose first net starts with '{pfx}'"
