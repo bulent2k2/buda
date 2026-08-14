@@ -63,6 +63,19 @@ class VizIPC:
 
     def connect_or_serve(self):
         """Try to connect as client; if that fails, bind as server."""
+        # Selection-sync IPC is Unix-only (AF_UNIX; documented in
+        # WINDOWS_REQ.md).  Degrade to disconnected rather than raise: on
+        # native Windows `socket.AF_UNIX` does not exist, and the bare
+        # attribute error killed the whole `visualize` command mid-flow
+        # (measured, windows-validate run 25: the flow's viewer count came
+        # up short because the SECOND visualize died here).  Every public
+        # entry point already no-ops when not connected.
+        if not hasattr(socket, "AF_UNIX"):
+            if self.verbose and not getattr(self, "_af_unix_warned", False):
+                self._af_unix_warned = True   # poll() retries here at POLL_MS
+                print('[viz_ipc] AF_UNIX unavailable on this platform — '
+                      'selection sync disabled')
+            return
         if self._connected:
             return
         if self._srv is not None:

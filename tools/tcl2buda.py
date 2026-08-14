@@ -102,7 +102,15 @@ def record(script, args, out_path, tclsh="tclsh"):
         raise SystemExit(f"tcl2buda: cannot clear {out_path}: {e}")
     env = dict(os.environ)
     env["BUDA_RECORD"] = out_path
-    env["BUDA_RECORD_NOTE"] = " ".join([os.path.relpath(script, _ROOT)] + list(args))
+    # A script on another drive than the checkout has no repo-relative
+    # spelling on Windows (ntpath.relpath raises ValueError — measured,
+    # windows-validate run 25: both tcl2buda tests died here on C:-temp
+    # scripts against the D: checkout); the note falls back to absolute.
+    try:
+        note_path = os.path.relpath(script, _ROOT)
+    except ValueError:
+        note_path = os.path.abspath(script)
+    env["BUDA_RECORD_NOTE"] = " ".join([note_path] + list(args))
     return subprocess.run([tclsh, script, *args], capture_output=True,
                           encoding="utf-8", errors="replace", env=env)
 
