@@ -490,5 +490,10 @@ yields configure, link, or import failures.
 
 ### `bb` / `buda` "not recognized"
 
-They are Bash scripts in `bin/`. On the MSVC and MinGW paths use the
-explicit commands in this guide; under Cygwin (§6) they run as-is.
+The bare names are Bash scripts in `bin/`; on native Windows use their
+**PowerShell twins** (`bin\bb.ps1`, `bin\buda.ps1`, …) — dot-source
+`bin\activate.ps1` first to get the bare names as session functions
+(PowerShell does not resolve `bb` to `bb.ps1` via PATH the way cmd resolves
+`.bat`). `bb.ps1` needs the MSVC environment (developer shell / vcvars64)
+for its Ninja build. Under Cygwin (§6) the Bash originals run as-is; the
+explicit commands in this guide remain the reference path.

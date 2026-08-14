@@ -12,43 +12,46 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""bin/buda's macOS .app relaunch arg handling (BUDA_TEST_ANCHOR hook).
+"""The buda wrapper's arg handling (BUDA_TEST_ANCHOR hook), on either wrapper.
 
-The Darwin branch anchors relative path args to the invoking cwd (the .app
-launches elsewhere) and detects the script arg for the Dock cell name.  Both
-loops must skip the VALUES of non-path value-taking options: `buda -j 4
-flow/x.buda` once rewrote the 4 to "$PWD/4" ("invalid int value" on macOS)
-and would have named the Dock cell "4".  The BUDA_TEST_ANCHOR hook prints
-the computed SCRIPT_ARG and anchored args on any OS, so this logic is
+The macOS .app relaunch branch anchors relative path args to the invoking cwd
+(the .app launches elsewhere) and detects the script arg for the Dock cell
+name.  Both loops must skip the VALUES of non-path value-taking options:
+`buda -j 4 flow/x.buda` once rewrote the 4 to "$PWD/4" ("invalid int value"
+on macOS) and would have named the Dock cell "4".  The BUDA_TEST_ANCHOR hook
+prints the computed SCRIPT_ARG and anchored args on any OS, so this logic is
 CI-testable where the Darwin gate itself cannot run.
+
+The hook is a CONTRACT implemented by both wrappers — bin/buda (bash) and
+bin/buda.ps1 (PowerShell) — and these tests run against whichever one this
+platform can execute (wrapper_select picks: bash on POSIX/Cygwin, PowerShell
+on native Windows, where `bash` is the unrunnable WSL stub — measured,
+windows-validate run 18).  Expected paths are built with pathlib, so the
+same assertions check bash's `/`-joined output on POSIX and PowerShell's
+`\\`-joined output on Windows.
 """
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-# bin/buda is a Bash script; on native Windows `bash` resolves to the
-# System32 WSL stub, which prints "Windows Subsystem for Linux has no
-# installed distributions" instead of running anything (measured,
-# windows-validate run 18 — all 5 tests fail on that output).  The docs
-# already state the bin/ wrappers do not apply on native Windows; Cygwin
-# (sys.platform == "cygwin") has a real bash and is not skipped.
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="bin/buda needs a real bash; Windows' `bash` is the WSL stub "
-           "(measured, windows-validate run 18)")
+from wrapper_select import wrapper_command, wrapper_missing_reason
 
-_BUDA = str(Path(__file__).parents[2] / "bin" / "buda")
+_ROOT = Path(__file__).parents[2]
+_BUDA_CMD = wrapper_command(_ROOT, "buda")
+
+pytestmark = pytest.mark.skipif(
+    _BUDA_CMD is None, reason=wrapper_missing_reason("buda"))
 
 
 def _anchor(args, cwd):
     out = subprocess.run(
-        ["bash", _BUDA, *args], capture_output=True, text=True, timeout=30,
+        [*_BUDA_CMD, *args], capture_output=True, text=True, timeout=60,
         cwd=str(cwd), env={**os.environ, "BUDA_TEST_ANCHOR": "1"})
     lines = out.stdout.splitlines()
-    assert lines and lines[0].startswith("SCRIPT_ARG="), out.stdout
+    assert lines and lines[0].startswith("SCRIPT_ARG="), (
+        f"stdout={out.stdout!r}\nstderr={out.stderr!r}")
     return lines[0].removeprefix("SCRIPT_ARG="), lines[1:]
 
 
