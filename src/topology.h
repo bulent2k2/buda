@@ -658,6 +658,8 @@ public:
             allow_multi_trunk_ = (std::string(e) == "1");
         if (const char* e = std::getenv("BUDA_MST_LEG_TRIM"))
             allow_mst_leg_trim_ = (std::string(e) == "1");
+        if (const char* e = std::getenv("BUDA_TRUNK_STUB_TRIM"))
+            allow_trunk_stub_trim_ = (std::string(e) == "1");
     }
 
     // Busterm mode (default true): route segments terminate at the nearest
@@ -755,6 +757,37 @@ public:
     // are pinned as strict xfails in test_mst_shared_leg_prefix.py.
     void set_mst_leg_trim(bool v) { allow_mst_leg_trim_ = v; }
 
+    // Redundant-stub suppression on the H trunk path (default false —
+    // byte-identical when off; opt in per generator via this setter, from a
+    // script with `set_trim_trunk_stubs on`, or corpus-wide via the study env
+    // BUDA_TRUNK_STUB_TRIM=1).
+    //
+    // NOT a new algorithm — it enables the one add_trunk already runs.  A trunk
+    // whose spine passes several blocks stacked along the STUB axis taps each
+    // one with its own stub off the same spine point; when a farther block's
+    // stub already crosses a nearer block's along-extent, the nearer stub is a
+    // duplicate lying entirely inside it.  add_trunk suppresses exactly that
+    // (farthest-first, and only a CONFIRMED SURVIVOR may suppress, so a chain
+    // A<-B<-C cannot leave B uncovered), but the pass is gated on the
+    // `suppress_stubs` parameter and only add_trunk_v passes true: the H/V
+    // unification adopted the V structure and deliberately gated the pass off
+    // so the H output stayed byte-for-byte identical.  The gap has been latent
+    // ever since, and it is one-sided by construction.
+    //
+    // Measured (tools/experiment/scan_collinear_stubs.py over 13 flows): every
+    // one of the 108 REDUNDANT collinear stub pairs in the corpus sits in a
+    // TRUNK_H or TRUNK_H_OOB candidate and is a VERTICAL stub off a horizontal
+    // spine.  TRUNK_V carries none — not because V geometry differs, but
+    // because add_trunk_v's suppressor already removes them.
+    //
+    // OPT-IN for the set_trim_mst_legs reason: candidates are WL-SORTED, so
+    // dropping a stub re-sorts the pool and changes which candidates clear the
+    // generation gates.  The geometry is sound (the suppressed stub is covered
+    // by a surviving wire, the same pass-through rule verify.cpp checks); the
+    // SEARCH SPACE moves.  Trimming renumbers candidate indices, so
+    // select_topology pins must come from an opted-in run.
+    void set_trunk_stub_trim(bool v) { allow_trunk_stub_trim_ = v; }
+
     // Unified entry point: 1 dst → L/Z/U shapes; N dsts → trunk+branch shapes.
     std::vector<Topology> generate_candidates(
         const std::string& src_name,
@@ -817,6 +850,7 @@ private:
     bool allow_hanan_loci_    = true;
     bool allow_spine_relays_  = false;
     bool allow_mst_leg_trim_  = false;
+    bool allow_trunk_stub_trim_ = false;
     int  h_layer_             = 4;
     int  v_layer_             = 5;
     std::vector<int> all_h_layers_ = {4};

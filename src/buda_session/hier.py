@@ -4173,6 +4173,10 @@ class HierMixin:
         # BUDA_MST_LEG_TRIM corpus A/B hook still works.
         if getattr(self, "_trim_mst_legs", False):
             tg.set_mst_leg_trim(True)
+        # set_trim_trunk_stubs: same session-scope opt-in shape, and the same
+        # reason for stamping only when enabled (BUDA_TRUNK_STUB_TRIM A/B).
+        if getattr(self, "_trim_trunk_stubs", False):
+            tg.set_trunk_stub_trim(True)
         return tg
 
     def _make_layer_names(self):
