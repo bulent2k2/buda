@@ -56,7 +56,12 @@
 # 0 guards and, with no shield, the spec reads INACTIVE.  The bundle is
 # governed on paper and ungoverned in fact — declared 8, placed 2, and no
 # demand line at all, since there is no active rule to report a demand
-# for.  It is the worst row and the quietest.
+# for.  It is the worst row, and it used to be the quietest: the only
+# evidence was the delivered-metal line at the very end of the run.  It
+# now announces itself at BUNDLING as BUDA-1913, and the two partial rows
+# (`w3` and `w8`, which bite on the dense pair and not on the sparse one)
+# as BUDA-1914 — see flow/ndr_noop_rule.buda, the vehicle for that
+# verdict in all three of its shapes.
 #
 # The first row is the one that matters most.  It is EXACT — and that is a
 # COINCIDENCE, not a property: change the declared width to 8 on the same

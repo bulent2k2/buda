@@ -223,6 +223,13 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # optimize_topologies plans them (a post-assignment application
         # would let a capped non-bottom-up instance plan unrestricted).
         session._apply_layer_policies(expanded)
+        # The masks are final NOW, which is the first moment a hier bundle's
+        # reachable layer set is knowable — and the NDR no-op verdict is a
+        # statement about exactly that set, so it is deferred out of bundling
+        # to here (Codex P2 on #737).  Still before optimize_topologies, so a
+        # rule that constrains nothing is heard before the planner works.
+        from buda_cmds import ndr_cmds as _ndr
+        _ndr.report_noop_ndr_rules(session)
         # priority = -(level * 10000 + n_candidates): higher routes first.
         # Depth-0 before depth-1; fewer candidates (less flexibility) first.
         # BUDA_HIER_DEEP_FIRST=1 (experiment): invert the level key only —

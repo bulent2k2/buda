@@ -709,6 +709,9 @@ void bind_routing(py::module_& m) {
     m.def("ndr_declared_width_on", &ndr_declared_width_on,
           py::arg("spec"), py::arg("layer_id"),
           "The absolute width in force on a layer (0 = none).");
+    m.def("ndr_declared_spacing_on", &ndr_declared_spacing_on,
+          py::arg("spec"), py::arg("layer_id"),
+          "The absolute spacing in force on a layer (0 = none).");
     m.def("ndr_max_slots", &ndr_max_slots, py::arg("geom"),
           "Longest contiguous signal run — the realizability ceiling.");
     m.def("ndr_resolve_on_layer",
