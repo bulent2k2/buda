@@ -87,7 +87,17 @@ struct DefImportStats {
     // to LAYOUT UNITS by the importer (docs/internal/engine_units.md).
     struct Track { std::string dir; double start, step; int count;
                    std::vector<std::string> layers; };
-    struct Keepout { std::string layer; double x1, y1, x2, y2; std::string why; };
+    // `inside_block`: this keepout lies wholly within the placed extent of
+    // the instance it came from — true for macro OBS, false for a HALO
+    // (which extends beyond it by construction) and for a standalone
+    // BLOCKAGE.  Recorded HERE because the importer holds both rectangles
+    // and can decide it exactly and for free; a later consumer would have
+    // to search every block to recover the same fact.  What it is FOR:
+    // Hanan loci (opens_interchange.md item 12) — an obstruction inside a
+    // footprint whose own edges are already grid lines contributes no
+    // reachable trunk position, only grid.
+    struct Keepout { std::string layer; double x1, y1, x2, y2; std::string why;
+                     bool inside_block = false; };
     std::vector<Track>   tracks;
     std::vector<Keepout> keepouts;
     // NONDEFAULTRULES, read in full for the session to translate into

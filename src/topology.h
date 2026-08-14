@@ -499,6 +499,14 @@ struct DetourChannelSpec {
 struct KeepoutZone {
     Rect bbox;
     std::set<int> layer_ids;
+    // True when this zone lies wholly inside a block whose own edges are
+    // already Hanan lines — a macro's OBS, typically.  Such a zone still
+    // BLOCKS exactly as before; it just contributes no Hanan loci, because
+    // a trunk position inside a footprint the grid already brackets is not
+    // a position anything can reach.  Default false, so every hand-declared
+    // `add_keepout` behaves as it always has.
+    // See opens_interchange.md item 12.
+    bool inside_block = false;
 };
 
 // Floorplan identity for the analysis cache (Phase B): every Floorplan carries
@@ -527,7 +535,13 @@ public:
     uint64_t rev() const { return rev_; }
 
     void add_block(const std::string& name, int x1, int y1, int x2, int y2);
-    void add_keepout_zone(int x1, int y1, int x2, int y2, const std::vector<int>& layer_ids);
+    // `inside_block` defaults false: a keepout contributes its edges as
+    // Hanan loci unless the caller can say it sits inside a block that
+    // already does (see KeepoutZone).  Blocking behaviour is identical
+    // either way.
+    void add_keepout_zone(int x1, int y1, int x2, int y2,
+                          const std::vector<int>& layer_ids,
+                          bool inside_block = false);
     const std::vector<KeepoutZone>& get_keepout_zones() const { return keepouts_; }
     // Mark a block as a hierarchy container (an envelope enclosing finer blocks)
     // rather than a solid leaf cell.  Containers are transparent to LOW layers:

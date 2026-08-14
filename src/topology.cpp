@@ -400,10 +400,13 @@ void Floorplan::set_detour_channel(const std::string& dirs, int size) {
     }
     ++rev_;
 }
-void Floorplan::add_keepout_zone(int x1, int y1, int x2, int y2, const std::vector<int>& layer_ids) {
+void Floorplan::add_keepout_zone(int x1, int y1, int x2, int y2,
+                                 const std::vector<int>& layer_ids,
+                                 bool inside_block) {
     KeepoutZone koz;
     koz.bbox = Rect{x1, y1, x2, y2};
     for (int lid : layer_ids) koz.layer_ids.insert(lid);
+    koz.inside_block = inside_block;
     keepouts_.push_back(std::move(koz));
     ++rev_;
 }
@@ -450,6 +453,14 @@ void Floorplan::get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_c
         }
     }
     for (const auto& koz : keepouts_) {
+        // A keepout that lies inside a block contributes no locus the block
+        // has not already contributed, and the grid is a PRODUCT: on a
+        // 133-macro design whose SRAM draws 99 OBS rects, these edges took
+        // the grid from 2,479 cells to 2,508,972 and the hier planner from
+        // 0.79 s to not finishing in 50 minutes (opens_interchange.md item
+        // 12).  Skipping them costs nothing reachable — the zone still
+        // blocks, and the enclosing block's four edges are already here.
+        if (koz.inside_block) continue;
         x_coords.push_back(koz.bbox.x1); x_coords.push_back(koz.bbox.x2);
         y_coords.push_back(koz.bbox.y1); y_coords.push_back(koz.bbox.y2);
     }

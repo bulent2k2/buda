@@ -373,7 +373,12 @@ def _apply_def_keepouts(session, st):
         # Both consumers, exactly as cmd_add_keepout does: the Floorplan
         # feeds the planner, the RoutingGrid feeds DetailedNUTS.  Installing
         # only one leaves a blockage that half the pipeline cannot see.
-        session.fp.add_keepout_zone(x1, y1, x2, y2, lids)
+        # `inside_block` rides along from the importer, which measured it
+        # against the instance's own placed extent.  It changes nothing about
+        # what this zone blocks — only whether its edges become Hanan loci
+        # (opens_interchange.md item 12).
+        session.fp.add_keepout_zone(x1, y1, x2, y2, lids,
+                                    bool(getattr(k, "inside_block", False)))
         if session.routing_grid:
             for lid in lids:
                 if session.routing_grid.has_layer(lid):
