@@ -141,7 +141,16 @@ def translate_line(line, src_dir, out_root, flow_root):
 
 def _out_path(buda_path, out_root, flow_root):
     """flow/rnr/mix.buda -> <out_root>/rnr/mix.tcl (layout mirrored)."""
-    rel = os.path.relpath(os.path.abspath(buda_path), flow_root)
+    # The same Windows cross-drive case as `origin` below (Codex P2 on
+    # #748): `main()` pins flow_root to the repo's flow/, so translating a
+    # C:-temp flow against a D: checkout raised here even with the origin
+    # fallback (the tests never hit it — they pass their own tmp
+    # flow_root).  An out-of-tree flow has no layout to mirror, so its
+    # translation lands at out_root's top level by basename.
+    try:
+        rel = os.path.relpath(os.path.abspath(buda_path), flow_root)
+    except ValueError:
+        rel = os.path.basename(buda_path)
     return os.path.join(out_root, os.path.splitext(rel)[0] + ".tcl")
 
 
