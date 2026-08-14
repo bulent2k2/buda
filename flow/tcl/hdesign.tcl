@@ -69,6 +69,7 @@
 
 set repo [file dirname [file dirname [file dirname [file normalize [info script]]]]]
 source [file join $repo tools buda.tcl]
+source [file join $repo flow tcl prompt.tcl]
 
 # ── options ───────────────────────────────────────────────────────────────
 set mode topdown
@@ -276,74 +277,14 @@ proc route {} {
 }
 route
 
-# ── the prompt (flow/tcl/design.tcl's, replan going through `hier`) ───────
-# A pin's hint resolves through the hierarchy: `pin b_lohi 2` matches the
-# D2 TEMPLATE behind the per-instance expansion, so one pin re-routes all
-# four blk instances; `pin xl_c2l 3` pins a cross-level bundle the same way.
-set pins_dirty 0
-puts "\nhdesign.tcl: pin/edit prompt -- `topos b_lohi` to look, `pin <bus> <N>`\
-      to choose (1-based), `replan` to apply, `done` to save and exit.\
-      Anything else goes to the engine verbatim."
-while {1} {
-    puts -nonewline "hdesign> "
-    flush stdout
-    if {[gets stdin line] < 0} { break }              ;# EOF ends the session
-    set line [string trim $line]
-    if {$line eq ""} { continue }
-    # List ops raise on a line that is not a well-formed Tcl list, and this
-    # first one runs before the dispatch catch — a stray brace must cost a
-    # message, not the session.  (Comments in a braced script count braces,
-    # hence no literal ones here.)
-    if {[catch {lindex $line 0} verb]} {
-        puts "hdesign.tcl: unparseable input ($verb) -- balance braces/quotes"
-        continue
-    }
-    # `done` outside the catch: it would swallow the `break`.
-    if {$verb in {done exit quit}} { break }
-    if {[catch {
-        switch -- $verb {
-            pin {
-                if {[llength $line] != 3} {
-                    puts "usage: pin <bus> <topo-N>  (1-based, from `topos` or\
-                          the explorer title bar)"
-                } else {
-                    buda::select_topology [lindex $line 1] [lindex $line 2]
-                    set pins_dirty 1
-                }
-            }
-            unpin {
-                buda::unpin_topology [lindex $line 1]
-                set pins_dirty 1
-            }
-            topos   { buda::dump_topologies {*}[lrange $line 1 end] }
-            explore { buda::visualize_topologies {*}[lrange $line 1 end] }
-            show    { buda::visualize }
-            replan  { route; set pins_dirty 0 }
-            save    { buda::save_bdb ${bdb}.sql }
-            default {
-                # Raw pass-through for registry commands only: an unknown
-                # command is the CLI's fail-fast and would kill the session.
-                if {$verb in [buda::commands]} {
-                    # Pin-mutating engine commands dirty the checkpoint too,
-                    # marked BEFORE the send (a select_topologies list can
-                    # pin some bundles and then raise on another).
-                    if {$verb in {select_topology select_topologies
-                                  unpin_topology}
-                        || ($verb eq "edit_commit"
-                            && "pin" in [lrange $line 1 end])} {
-                        set pins_dirty 1
-                    }
-                    puts [buda::do $line]
-                } else {
-                    puts "hdesign.tcl: unknown command '$verb' -- try `topos`,\
-                          `pin`, `replan`, `done`, or any engine command"
-                }
-            }
-        }
-    } err]} {
-        puts "hdesign.tcl: $err"
-    }
-}
+# ── the prompt (shared with design.tcl; replan goes through `hier`) ───────
+# The loop lives in flow/tcl/prompt.tcl — it was character-for-character the
+# same in both files, so it is now written once and handed this script's own
+# `route`.  A pin's hint resolves through the hierarchy: `pin b_lohi 2`
+# matches the D2 TEMPLATE behind the per-instance expansion, so one pin
+# re-routes all four blk instances; `pin xl_c2l 3` pins a cross-level bundle
+# the same way.
+set pins_dirty [prompt::run hdesign.tcl "hdesign>" route $bdb b_lohi]
 if {$pins_dirty} {
     puts "hdesign.tcl: pins changed since the last route -- re-planning so the\
           checkpoint stays coherent"

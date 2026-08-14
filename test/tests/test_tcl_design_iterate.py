@@ -175,3 +175,55 @@ def test_raw_pin_commands_also_dirty_the_checkpoint(tmp_path):
     assert "topo 4 of" in r.stdout
     assert "clean -- 0 overlaps" in r.stdout
     assert _selected(tmp_path / "it.bdb", "3")[:1] == (3,)   # 1-based 4
+
+
+def test_help_lists_the_loops_own_verbs_and_the_engines(tmp_path):
+    """`design.tcl` documents its verbs in a header comment, which is no use
+    at the prompt — the loop refused `foo` by naming four verbs and stopping.
+    `help` is derived from the same list the dispatch uses, so it cannot go
+    stale, and `commands` asks the ENGINE what it accepts."""
+    r = _run(tmp_path, stdin="help\ncommands *topolog*\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    for verb in ("topos", "explore", "pin", "unpin", "replan", "commands", "help"):
+        assert verb in r.stdout, f"`help` never mentions `{verb}`"
+    # The engine's registry, filtered — not the loop's own verbs.
+    assert "dump_topologies" in r.stdout and "select_topology" in r.stdout
+    assert "engine command(s)" in r.stdout
+    # And it points at the bridge's procs, which are neither of the above.
+    assert "info commands ::buda::*" in r.stdout
+
+
+def test_a_pass_through_command_prints_its_output_once(tmp_path):
+    """The bridge ECHOES a command's output as it arrives, so the loop's
+    `puts [buda::do ...]` printed every pass-through command a SECOND time —
+    while the named verbs, which do not print the return value, printed it
+    once.  One loop, two behaviours, and the duplicate read as though the
+    engine had run the command twice.
+
+    Measured as a DIFFERENCE against a session that types nothing: the flow
+    audits twice while routing, and stdin is not a tty so the typed line is
+    never echoed back, which leaves no reliable text anchor to split on.
+    """
+    d_base, d_typed = tmp_path / "base", tmp_path / "typed"
+    d_base.mkdir(); d_typed.mkdir()          # _run runs with cwd=the dir
+    base = _run(d_base, stdin="done\n")
+    assert base.returncode == 0, base.stdout + base.stderr
+    n_base = base.stdout.count("Verifying")
+
+    typed = _run(d_typed, stdin="check_design\ndone\n")
+    assert typed.returncode == 0, typed.stdout + typed.stderr
+    n_typed = typed.stdout.count("Verifying")
+
+    assert n_typed == n_base + 1, (
+        f"one typed check_design added {n_typed - n_base} audit blocks, not 1 "
+        f"(base {n_base}, typed {n_typed})")
+
+
+def test_topos_takes_the_bundle_id_check_design_prints(tmp_path):
+    """The audit says "Bundle 8: ..."; `topos 8` must answer for bundle 8.
+    It used to search net names for a bus called '8' and report finding
+    none."""
+    r = _run(tmp_path, stdin="topos 8\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "── bundle 8 " in r.stdout, r.stdout[-2000:]
+    assert "nets=" in r.stdout

@@ -200,6 +200,60 @@ def cmd_check_design(session, cmd, args, cmd_line):
                                                all_candidates=all_cands))
 
 
+def select_explorer_bundles(session, all_wrappers, hints, all_mode):
+    """Which bundles the explorer loads, and which one it opens on.
+
+    Module-level and pure over its arguments so it can be TESTED: the command
+    around it returns early under `no_viz` (BUDA-1903), which put this decision
+    out of reach of every headless test — and this decision is where the bug
+    was.
+
+    Each hint is classified by `_split_bundle_selector`, the SAME rule
+    `select_topology` and `dump_topologies` use, so a bare integer is a bundle
+    ID here too: the explorer is what you open on the bundle an audit just
+    named, and `visualize_topologies 8` used to hunt for a bus called '8'.
+
+    The two readings are kept APART on purpose.  Letting an id-form hint also
+    prefix-match meant `8` matched bundle 8 OR any bundle whose first net
+    starts with '8' — and the scan takes the first in wrapper order — so the
+    promised ID-only meaning held only while no such bus existed (Codex P2 on
+    #746).  A name hint keeps the literal prefix test over THIS command's
+    wrapper set, which is `collect_candidate_bundles` and not
+    `session.bundles`, so name behaviour is untouched by construction.
+
+    Returns (wrappers, start_index).
+    """
+    want, prefix_hints, bad = set(), [], []
+    for h in hints:
+        kind, val = session._split_bundle_selector(h)
+        if kind == "id":
+            want.add(val)
+        elif kind == "prefix":
+            prefix_hints.append(val)
+        else:
+            bad.append(f"{h} ({val})")
+    for b in bad:
+        print(f"Warning: visualize_topologies: ignoring selector {b}")
+
+    def matches(w):
+        if not hints:
+            return True
+        if w.input.original_bundle.id in want:
+            return True
+        if not prefix_hints:
+            return False
+        names = w.input.original_bundle.get_net_names()
+        net0  = names[0] if names else ""
+        return any(net0.startswith(h) for h in prefix_hints)
+
+    if all_mode:
+        # Filter to matching bundles (or all if no hints given).
+        return ([w for w in all_wrappers if matches(w)] or all_wrappers), 0
+    # Load every bundle; open on the first one matching the hint.
+    return all_wrappers, next((i for i, w in enumerate(all_wrappers)
+                               if matches(w)), 0)
+
+
 def cmd_visualize_topologies(session, cmd, args, cmd_line):
     # Usage:
     #   visualize_topologies [hint]         — load ALL bundles; a hint just
@@ -260,23 +314,11 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
     # "View Topologies" path.
     all_wrappers, cell_seen = collect_candidate_bundles(session.bundles)
 
-    def _matches(w):
-        names = w.input.original_bundle.get_net_names()
-        net0  = names[0] if names else ""
-        return (not hints) or any(net0.startswith(h) for h in hints)
-
     if not all_wrappers:
         print("Warning: no bundle with candidates")
     else:
-        if all_mode:
-            # Filter to matching bundles (or all if no hints given).
-            wrappers = [w for w in all_wrappers if _matches(w)] or all_wrappers
-            start = 0
-        else:
-            # Load every bundle; open on the first one matching the hint.
-            wrappers = all_wrappers
-            start = next((i for i, w in enumerate(all_wrappers)
-                          if _matches(w)), 0)
+        wrappers, start = select_explorer_bundles(session, all_wrappers,
+                                                  hints, all_mode)
 
         for i, w in enumerate(wrappers):
             b = w.input.original_bundle

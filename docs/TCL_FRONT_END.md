@@ -349,6 +349,27 @@ because the engine's own fail-fast on unknown commands would end the session
 over a typo. Every engine error is caught and printed — a mistake costs a
 message, never the session.
 
+**`help` lists the verbs; `commands ?glob?` lists the engine's.** The verb
+list is generated from the same table the dispatch switches on, so it cannot
+go stale, and `commands` asks the running engine's registry rather than a
+copy of it (`commands *topolog*` filters). Between them and `info commands
+::buda::*` for the bridge's own procs, the three namespaces a session can
+reach are all enumerable from inside it — the header comment in the script
+was no use at the prompt, and the refusal message named four verbs.
+
+A bundle selector — for `topos`, `explore`, `pin`, `unpin` — is whatever
+`select_topology` takes, so **a bare integer is the bundle ID `check_design`
+prints**: read `Bundle 8: Seg 1: 4 bit(s) — unplaced`, type `topos 8`, and the
+header names the bus (`── bundle 8  nets=4 (n1_0…)`).
+
+The loop itself lives ONCE, in [`flow/tcl/prompt.tcl`](../flow/tcl/prompt.tcl),
+and both drivers call it (`prompt::run <tag> <ps> <route-proc> <bdb>
+<example>`, returning `pins_dirty`). It was duplicated character-for-character
+in `design.tcl` and `hdesign.tcl` — including the comments explaining why
+`done` sits outside the `catch` and why a pin is marked dirty BEFORE the send —
+and the copies had already drifted in their prose. The only real difference
+was which `route` to call, which is now an argument.
+
 The prompt reads stdin, so the interactive session and the scripted one are
 the same code path — `echo "pin d1 4
 done" | bin/btcl flow/tcl/design.tcl` is a complete iteration, EOF simply

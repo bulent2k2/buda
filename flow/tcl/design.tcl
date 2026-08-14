@@ -59,6 +59,7 @@
 
 set repo [file dirname [file dirname [file dirname [file normalize [info script]]]]]
 source [file join $repo tools buda.tcl]
+source [file join $repo flow tcl prompt.tcl]
 
 # ── the checkpoint ────────────────────────────────────────────────────────
 set bdb [expr {[info exists ::env(BUDA_DESIGN_BDB)] && $::env(BUDA_DESIGN_BDB) ne ""
@@ -154,89 +155,12 @@ proc route {} {
 route
 
 # ── the prompt ────────────────────────────────────────────────────────────
-# Every engine error is caught and printed: a typo must not cost the session.
-# `pins_dirty` keeps the checkpoint COHERENT — a pin applied after the route
-# would leave the saved metal belonging to the candidate it replaced, so
-# `done` re-plans first when any pin changed since the last route.
-set pins_dirty 0
-puts "\ndesign.tcl: pin/edit prompt -- `topos d1` to look, `pin d1 <N>` to\
-      choose (1-based), `replan` to apply, `done` to save and exit.\
-      Anything else goes to the engine verbatim."
-while {1} {
-    puts -nonewline "design> "
-    flush stdout
-    if {[gets stdin line] < 0} { break }              ;# EOF ends the session
-    set line [string trim $line]
-    if {$line eq ""} { continue }
-    # The list ops below (`lindex`, `llength`, `lrange`) all RAISE on a line
-    # that is not a well-formed Tcl list — an unmatched brace or quote — and
-    # this first one runs before the dispatch catch, so it must have its own:
-    # a stray brace at an interactive prompt must cost a message, not the
-    # whole session (and its snapshot / verdict).  Once it parses, the rest
-    # of the list ops are safe.  (Comments inside a braced script still count
-    # braces, so this comment spells the characters out rather than show them.)
-    if {[catch {lindex $line 0} verb]} {
-        puts "design.tcl: unparseable input ($verb) -- balance braces/quotes"
-        continue
-    }
-    # `done` is checked OUTSIDE the catch: `break` raises TCL_BREAK, which a
-    # catch around the switch would swallow instead of ending the loop.
-    if {$verb in {done exit quit}} { break }
-    if {[catch {
-        switch -- $verb {
-            pin {
-                if {[llength $line] != 3} {
-                    puts "usage: pin <bus> <topo-N>  (1-based, from `topos` or\
-                          the explorer title bar)"
-                } else {
-                    buda::select_topology [lindex $line 1] [lindex $line 2]
-                    set pins_dirty 1
-                }
-            }
-            unpin {
-                buda::unpin_topology [lindex $line 1]
-                set pins_dirty 1
-            }
-            topos   { buda::dump_topologies {*}[lrange $line 1 end] }
-            explore { buda::visualize_topologies {*}[lrange $line 1 end] }
-            show    { buda::visualize }
-            replan  { route; set pins_dirty 0 }
-            save    { buda::save_bdb ${bdb}.sql }
-            default {
-                # Raw pass-through — but only for a command the ENGINE's own
-                # registry knows: an unknown command is the CLI's fail-fast
-                # (it kills the run, by design, so a script typo cannot be
-                # silently skipped), and at an interactive prompt that would
-                # cost the whole session.  `buda::commands` is that registry,
-                # asked of the running engine at start, so it cannot drift.
-                if {$verb in [buda::commands]} {
-                    # Escape-hatch parity with the pin/unpin verbs: these
-                    # engine commands change the durable pin too, so `done`
-                    # must re-plan for the checkpoint to stay coherent —
-                    # typed raw, they persisted the new selection while the
-                    # saved metal still belonged to the old candidate.
-                    # Marked BEFORE the send: a `select_topologies` list can
-                    # pin some bundles and then raise on another, and a raise
-                    # after the send would skip the mark — the cost of the
-                    # conservative order is one redundant re-plan on a pin
-                    # that failed outright, never an incoherent checkpoint.
-                    if {$verb in {select_topology select_topologies
-                                  unpin_topology}
-                        || ($verb eq "edit_commit"
-                            && "pin" in [lrange $line 1 end])} {
-                        set pins_dirty 1
-                    }
-                    puts [buda::do $line]
-                } else {
-                    puts "design.tcl: unknown command '$verb' -- try `topos`,\
-                          `pin`, `replan`, `done`, or any engine command"
-                }
-            }
-        }
-    } err]} {
-        puts "design.tcl: $err"
-    }
-}
+# Shared with hdesign.tcl (flow/tcl/prompt.tcl): the loop was identical in
+# both, down to the comments explaining why `done` sits outside the catch.
+# Every engine error is caught and printed there — a typo must not cost the
+# session — and `pins_dirty` comes back set when any pin changed since the
+# last route, so the checkpoint below can stay COHERENT.
+set pins_dirty [prompt::run design.tcl "design>" route $bdb d1]
 if {$pins_dirty} {
     puts "design.tcl: pins changed since the last route -- re-planning so the\
           checkpoint stays coherent"

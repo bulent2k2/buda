@@ -170,8 +170,18 @@ preserved in `<script>.json` and loaded by the next `run_planner` invocation.
 ### `dump_topologies`
 
 ```
-dump_topologies [<hint>] [--problems] [--conn] [--grouped]
+dump_topologies [<sel>] [--problems] [--conn] [--grouped]
 ```
+
+`<sel>` is the **same selector `select_topology` takes**: a bare integer is a
+bundle **ID**, a bare non-numeric token is a net-name prefix, and `id:N` /
+`net:PFX` force one reading. That matters because `check_design` reports
+`Bundle 8: ...` — the id it names is the one you type back. It was a net-name
+prefix only until 2026-08, so the number the audit printed was the one thing
+you could not look up: `dump_topologies 8` answered *"No bundles whose first
+net name starts with '8'"* while `select_topology 8` pinned bundle 8 — one
+token, two meanings, in adjacent commands. An unmatched id now names the range
+of ids that do exist.
 
 Text (non-GUI) inspection of the candidate topologies generated for each bundle.
 Run it after `generate_topologies` (or `generate_hier_topologies`). Read-only — it
@@ -270,7 +280,9 @@ unexpected slide/pull.
 
 ```
 dump_topologies                 # every bundle + summary
+dump_topologies 8               # bundle ID 8 — as `check_design` names it
 dump_topologies bus_007         # bundles whose first net starts with bus_007
+dump_topologies net:8           # ...a bus literally named 8something
 dump_topologies --problems      # only flagged bundles + summary
 dump_topologies bus_044 --grouped   # families + the group:<N> pin token for each
 ```
