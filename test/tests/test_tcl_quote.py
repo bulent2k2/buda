@@ -20,6 +20,7 @@ So a POSIX host can hold the whole property, which is the point — the defect
 these pin was invisible until `windows-validate` ran, six days after it
 landed, and cost ~21 failures across three jobs.
 """
+import os
 import shutil
 import subprocess
 import sys
@@ -31,39 +32,62 @@ from tcl_quote import tcl_path, tcl_word
 _needs_tclsh = pytest.mark.skipif(shutil.which("tclsh") is None,
                                   reason="no tclsh on this host")
 
-# Left column: what a path looks like on the platform named.  Right column:
-# what the interpreter must hand back — separators may be respelled, nothing
-# else may move.
 _PATHS = [
     # The escape reading.  `\a` is BEL, `\b` backspace, `\t` TAB, so the raw
     # form arrives as `D:uda<BS>uda<TAB>oolsuda.tcl` — a filename that never
     # existed, which is what windows-validate run 23 reported.
-    (r"D:\a\buda\buda\tools\buda.tcl", "D:/a/buda/buda/tools/buda.tcl"),
+    r"D:\a\buda\buda\tools\buda.tcl",
     # The word split, and the one `tcl_word` alone does NOT cover: the
     # backslashes send it down the escaping path, which leaves the space bare.
-    (r"C:\Program Files\Python313\python.exe",
-     "C:/Program Files/Python313/python.exe"),
+    r"C:\Program Files\Python313\python.exe",
     # Both stages at once, already forward-slashed (what `.as_posix()` gives).
-    ("C:/Program Files/Python313/python.exe",
-     "C:/Program Files/Python313/python.exe"),
+    "C:/Program Files/Python313/python.exe",
     # POSIX, where all of this is a no-op.
-    ("/home/u/buda/tools/buda.tcl", "/home/u/buda/tools/buda.tcl"),
-    # A tmp_path a test could really be handed, carrying every character the
+    "/home/u/buda/tools/buda.tcl",
+    # A path a test could really be handed, carrying every character the
     # parser acts on: substitution, command substitution, separator.
-    ("/tmp/we ird/[x]/py$thon;puts hi", "/tmp/we ird/[x]/py$thon;puts hi"),
+    "/tmp/we ird/[x]/py$thon;puts hi",
+    # A backslash that is NOT a separator, which is every backslash on POSIX
+    # (Codex P2 on #734).  Respelling it there would name a different file.
+    "/tmp/back\\slash/python",
 ]
 
 
+def _same_file_spelling(raw):
+    """The one string that names `raw`'s file on THIS platform.
+
+    Respelled only where the backslash is a separator — which is the whole
+    of what `tcl_path` may change, so this is the invariant stated once.
+    """
+    return raw.replace("\\", "/") if os.sep == "\\" else raw
+
+
 @_needs_tclsh
-@pytest.mark.parametrize("raw,want", _PATHS, ids=lambda v: v[:24])
-def test_a_quoted_path_is_one_word_and_still_that_path(raw, want):
+@pytest.mark.parametrize("raw", _PATHS, ids=lambda v: v[:24])
+def test_a_quoted_path_is_one_word_and_still_that_path(raw):
     script = "set L [list %s]\nputs \"[llength $L]|[lindex $L 0]\"" % tcl_path(raw)
     r = subprocess.run(["tclsh"], input=script, capture_output=True,
                        encoding="utf-8", timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     n, _, got = r.stdout.strip().partition("|")
     assert n == "1", f"split into {n} words: {r.stdout}"
-    assert got == want, r.stdout
+    assert got == _same_file_spelling(raw), r.stdout
+
+
+@_needs_tclsh
+def test_a_real_posix_path_with_a_backslash_in_it_still_opens(tmp_path):
+    """The round trip against a file that EXISTS, not just a string compare:
+    on POSIX `back\\slash` is one directory, and respelling it unconditionally
+    pointed `source` at a path nothing had created."""
+    if os.sep == "\\":
+        pytest.skip("a backslash is a separator here, so no such filename")
+    d = tmp_path / "back\\slash"
+    d.mkdir()
+    (d / "it.tcl").write_text('puts OPENED\n')
+    r = subprocess.run(["tclsh"], input="source %s\n" % tcl_path(d / "it.tcl"),
+                       capture_output=True, encoding="utf-8", timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "OPENED" in r.stdout, r.stdout + r.stderr
 
 
 @_needs_tclsh

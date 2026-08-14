@@ -38,6 +38,8 @@ translation is built on, so its output is byte-load-bearing and its default
 behaviour must not move.  `tcl_path` is the whitespace-tolerant form.
 """
 
+import os
+
 __all__ = ["tcl_word", "tcl_path"]
 
 
@@ -90,8 +92,21 @@ def tcl_path(path):
 
     Forward-slashing is not cosmetic and not Windows-only politeness: it is
     what stops the interpreter from reading `\\a`/`\\b`/`\\t` in a native path
-    as escapes.  Tcl takes `/` on Windows, so the converted path opens the
+    as escapes.  Tcl takes `/` on Windows, so the respelled path opens the
     same file.  Quoting is the second, independent fix -- a path with a space
     is otherwise several words however its separators are spelled.
+
+    The respelling is guarded on the PLATFORM because it is only sound where
+    the backslash IS a separator.  On POSIX a backslash is an ordinary
+    filename character, so a checkout under `back\\slash` would be rewritten
+    to a different -- and almost certainly nonexistent -- path (Codex P2 on
+    #734).  There it stays literal and rides `tcl_word`'s escaping instead,
+    which already handles it: escaped, the interpreter hands the backslash
+    back rather than reading the next character as an escape.  `os.sep`
+    rather than `sys.platform` because that is the actual question, and it
+    answers Cygwin correctly too (POSIX separators on a Windows kernel).
     """
-    return tcl_word(str(path).replace("\\", "/"), escape_ws=True)
+    text = str(path)
+    if os.sep == "\\":
+        text = text.replace("\\", "/")
+    return tcl_word(text, escape_ws=True)
