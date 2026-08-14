@@ -19,6 +19,14 @@ name: Windows wheel
 
 on:
   workflow_dispatch:
+  # Bootstrap trigger: a workflow that exists only on a topic branch is not
+  # dispatchable by name until it has run once (GitHub indexes workflows off
+  # the default branch — measured: the dispatch 404s).  A push trigger scoped
+  # to this branch runs it directly off the pushed ref; on main the filter
+  # matches nothing, so merging this file changes no cadence.
+  push:
+    branches: [claude/windows-wheel]
+    paths: ['.github/workflows/windows-wheel.yml']
 
 concurrency:
   group: windows-wheel-${{ github.ref }}
