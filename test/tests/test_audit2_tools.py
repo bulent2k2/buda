@@ -126,7 +126,12 @@ def test_bdb_serialize_dump_uri_metachar_path(tmp_path):
     # A '?' in the filename is the URI query separator: a raw f-string let
     # SQLite parse the path off at the '?', silently opening a DIFFERENT
     # (empty) db and dumping nothing. quote() escapes it to %3F.
-    src = str(tmp_path / "de?sign.bdb")
+    # Windows forbids '?' in filenames outright (the POSIX spelling cannot
+    # even be created — measured, run 25), so the fragment separator '#' —
+    # legal on NTFS and eaten identically by an unquoted URI — carries the
+    # same property there.
+    meta = "#" if os.name == "nt" else "?"
+    src = str(tmp_path / f"de{meta}sign.bdb")
     b = buda_db.BDB(src)
     b.set_die(1000, 800)
     b.add_comp("cpu", "CPU", "", 0, 0, 500, 400, False)
@@ -368,7 +373,7 @@ def test_buda2bdb_cell_replace_prunes_routing(tmp_path):
 # T2-08 — export_hbundle_script writes a cwd-independent absolute open_bdb path
 # ──────────────────────────────────────────────────────────────────────────
 
-def test_fpc_export_hbundle_script_absolute_bdb_path(tmp_path):
+def test_fpc_export_hbundle_script_absolute_bdb_path(tmp_path, monkeypatch):
     from tools import floorplanner_commands as fpc
     p = str(tmp_path / "fp.bdb")
     b = buda_db.BDB(p)
@@ -377,6 +382,12 @@ def test_fpc_export_hbundle_script_absolute_bdb_path(tmp_path):
     del b
 
     # A state whose bdb_path is RELATIVE (a floorplanner launched from cwd).
+    # chdir into tmp_path first: on the Windows runner tmp (C:) and checkout
+    # (D:) are different drives, where a relative spelling from the repo cwd
+    # does not EXIST (ntpath.relpath raises ValueError — measured, run 25).
+    # The premise is "launched from a cwd with a relative path", so take it
+    # from a cwd that has one.
+    monkeypatch.chdir(tmp_path)
     rel = os.path.relpath(p)
     state = fpc.load_bdb(p)
     state.bdb_path = rel

@@ -97,11 +97,19 @@ def test_a_flow_routes_identically_through_tclsh_and_the_cli():
             f"r'{_TOOLS / 'qor_corpus.py'}');"
             f"m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);"
             f"import os;os.chdir(r'{_ROOT}');"
-            f"print(json.dumps(m.run_flow('{flow}')))")
+            f"print('CLIROW '+json.dumps(m.run_flow('{flow}')))")
     p = subprocess.run([sys.executable, "-c", code], capture_output=True,
                        encoding="utf-8", cwd=str(_ROOT), timeout=900)
     assert p.returncode == 0, p.stderr[-2000:]
-    cli_row = json.loads(p.stdout.strip().splitlines()[-1])
+    # Marker-scanned, not last-line: on Windows the engine's C++ stdout is
+    # FULLY buffered (the setvbuf line-buffering is deliberately absent —
+    # bindings.cpp) and flushes at process exit, AFTER python's print — so
+    # the last stdout line was '  M6 (H)  min_band_cap=10', not the JSON
+    # (measured, windows-validate run 30, the pass's final residual).  The
+    # marker makes the row order-independent, like the Tcl side's 'QOR {…}'.
+    row_lines = [ln for ln in p.stdout.splitlines() if ln.startswith("CLIROW ")]
+    assert row_lines, p.stdout[-2000:]
+    cli_row = json.loads(row_lines[-1].removeprefix("CLIROW "))
     assert "err" not in cli_row, cli_row
 
     keys = ("overlaps", "unplaced", "viol_bundles", "abstract_wl", "detailed_wl")

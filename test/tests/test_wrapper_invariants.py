@@ -201,7 +201,10 @@ def test_no_new_raw_writes_of_the_coupled_pin_fields():
                      r"\s*=")
     offenders = []
     for f in root.rglob("*.py"):
-        rel = str(f.relative_to(root))
+        # as_posix(): the sanctioned set is /-spelled; Windows' native
+        # backslash spelling matched nothing and flagged every sanctioned
+        # site (measured, windows-validate run 25).
+        rel = f.relative_to(root).as_posix()
         if rel in sanctioned:
             continue
         for i, ln in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):

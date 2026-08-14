@@ -25,6 +25,7 @@ fallback for pre-v12 checkpoints.
 See docs/internal/single_source_topo_truth.md (Phase 5).
 """
 
+import sys
 import pytest
 
 # Moved to the mid tier: full-pipeline / BDB round-trip / interchange
@@ -152,7 +153,13 @@ def test_pre_v12_checkpoint_falls_back_geometrically(tmp_path, capfd):
     capfd.readouterr()
     t = _reload(s, bid, ci, cand)
     out = capfd.readouterr().out
-    assert "pre-v12" in out, "fallback must announce itself"
+    if sys.platform != "win32":
+        # The announcement is C++ std::cout (bind_routing.cpp); on Windows
+        # that stream is FULLY buffered by design — the line-buffering setvbuf
+        # is deliberately absent there (bindings.cpp, 0xC0000409 story) — so
+        # capfd reads it as empty (measured, windows-validate run 25).  The
+        # fallback BEHAVIOUR below is asserted on every platform.
+        assert "pre-v12" in out, "fallback must announce itself"
     assert _norm(t.seg_conns) == _norm(cand.seg_conns), \
         "geometric fallback must reproduce the junctions"
 

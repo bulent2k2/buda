@@ -86,10 +86,15 @@ def test_resolve_cells_path_and_extension():
         ("two", os.path.join(ROOT, "flow/two.buda"))]
     assert bd._resolve_cells(["flow/two"], None) == [
         ("two", os.path.join(ROOT, "flow/two.buda"))]
-    # An absolute path is used as-is (extension still inferred), --path ignored.
-    assert bd._resolve_cells(["/abs/foo"], None) == [("foo", "/abs/foo.buda")]
-    assert bd._resolve_cells(["/abs/foo.buda"], "/ignored") == [
-        ("foo", "/abs/foo.buda")]
+    # An absolute path is used as-is (extension still inferred), --path
+    # ignored.  Built with abspath rather than the literal "/abs/...": a bare
+    # leading slash is NOT absolute to ntpath on 3.13+ (isabs("/abs") is
+    # False), so the POSIX literal exercised the dir-qualified branch and
+    # came back on the repo drive (measured, windows-validate run 25).
+    absfoo = os.path.join(os.path.abspath(os.sep), "abs", "foo")
+    assert bd._resolve_cells([absfoo], None) == [("foo", absfoo + ".buda")]
+    assert bd._resolve_cells([absfoo + ".buda"], "/ignored") == [
+        ("foo", absfoo + ".buda")]
 
 
 def test_resolve_cells_bdb_and_named_entries():
@@ -105,7 +110,8 @@ def test_resolve_cells_bdb_and_named_entries():
     # its default cell name from the basename minus the compound extension.
     assert bd._resolve_cells(["flow/rnr/mix2.bdb.sql"], None) == [
         ("mix2", os.path.join(ROOT, "flow/rnr/mix2.bdb.sql"))]
-    assert bd._resolve_cells(["/abs/x.bdb"], None) == [("x", "/abs/x.bdb")]
+    absx = os.path.join(os.path.abspath(os.sep), "abs", "x.bdb")
+    assert bd._resolve_cells([absx], None) == [("x", absx)]
     # Duplicate resolved names are a hard error (SystemExit).
     with pytest.raises(SystemExit):
         bd._resolve_cells(["dnuts1", "dnuts1=flow/rnr/mix2.bdb.sql"], None)
@@ -798,6 +804,9 @@ def test_import_leaves_sigpipe_disposition_alone():
     """
     import signal
     import importlib
+    if not hasattr(signal, "SIGPIPE"):
+        pytest.skip("no SIGPIPE on this platform (Windows) — the disposition "
+                    "under test does not exist (measured, run 25)")
     assert signal.getsignal(signal.SIGPIPE) is not signal.SIG_DFL, (
         "SIGPIPE already SIG_DFL before re-import — another import leaked it")
     before = signal.getsignal(signal.SIGPIPE)

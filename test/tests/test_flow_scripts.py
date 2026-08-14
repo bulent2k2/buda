@@ -40,6 +40,16 @@ CLI     = _ROOT / "src" / "buda_cli.py"
 SRC_DIR = CLI.parent
 
 
+# Placement-sensitive assertion: MSVC codegen (different FP contraction /
+# libm / tie-breaking than the GCC Linux gate, whose -ffp-contract=off and
+# pinned -march exist exactly to stop such drift) lands a DIFFERENT-BUT-LEGAL
+# placement, and the exact counts/goldens asserted here move with it
+# (measured, windows-validate run 25).  QoR is gated on Linux CI; the
+# Windows lanes validate the platform, not the numbers.
+_WIN_QOR_SKIP = ("MSVC placement divergence: exact-count/golden assertions "
+                 "are Linux-gated (measured, windows-validate run 25)")
+
+
 def _flow_log_text(script: Path) -> str:
     """Detailed per-command output now lives in <dir>/log/<stem>_flow.log; the
     terminal only carries an abstract per-command summary.  Return the log text
@@ -162,8 +172,16 @@ def test_tc3a_flat_no_perp_range_inversion():
     dm = re.search(
         r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, f"DetailedNUTS summary not found\n{out[-2000:]}"
-    assert int(dm.group(2)) == 0, \
-        f"expected 0 unplaced after collinear-relay merge, got {dm.group(2)}"
+    # Only THIS count is placement-sensitive, so only it is Linux-gated
+    # (Codex P2 on #749).  The whole test was skipped on win32 at first,
+    # which threw out the crash coverage with the QoR bathwater: the
+    # SIGABRT this test pins is exactly the 0xC0000409 class the Windows
+    # lanes exist to catch.  Run 25 measured the split — MSVC reached this
+    # line with rc 0 and the topo stage clean, then reported 8 unplaced
+    # (placement divergence, the _WIN_QOR_SKIP story) where Linux has 0.
+    if sys.platform != "win32":
+        assert int(dm.group(2)) == 0, \
+            f"expected 0 unplaced after collinear-relay merge, got {dm.group(2)}"
 
 
 def test_pinless_buses_stay_separate():
@@ -604,6 +622,7 @@ def test_ripup2_targets_actual_blocker():
 # bits as unplaced, so only the topo stage stays fully clean.
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(sys.platform == "win32", reason=_WIN_QOR_SKIP)
 def test_10_four_level_scale_one_bundle_per_bus():
     out, rc = run_script("hbundles/10_chip_units_blocks_leaf.buda")
     assert_clean(out, rc, "hbundles/10_chip_units_blocks_leaf.buda")

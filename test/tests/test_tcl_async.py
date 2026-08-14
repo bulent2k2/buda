@@ -201,6 +201,11 @@ def test_a_raising_progress_callback_cannot_wedge_the_frame_parser(tmp_path):
     assert "output-whole=1" in out, out
 
 
+@pytest.mark.skipif(os.name != "posix",
+                    reason="kills the engine with `exec kill -9` — POSIX "
+                           "only (measured, windows-validate run 25: the "
+                           "kill is a no-op there, the engine survives and "
+                           "the request finishes OK)")
 def test_a_dying_engine_finishes_the_async_request_as_dead(tmp_path):
     """EOF finishes through _async_finish with the channel still in hand,
     so the fileevent is removed and the pipe closed — a dead engine is one

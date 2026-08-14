@@ -70,6 +70,8 @@ def bdb_input(tmp_path):
     fixture is never dirtied.
     """
     import bdb_serialize
+    import itertools
+    seq = itertools.count()
 
     def _materialize(name):
         sql_path = os.path.join(DATA_DIR, f'{name}.bdb.sql')
@@ -77,7 +79,14 @@ def bdb_input(tmp_path):
             raise FileNotFoundError(
                 f'no BDB fixture {name!r} at {sql_path} '
                 f'(regenerate via test/tests/data/build_fixtures.py)')
-        out = str(tmp_path / f'{name}.bdb')
+        # A UNIQUE path per call: a test that materializes the same fixture
+        # twice (e.g. the parallel-vs-sequential comparisons) still holds the
+        # first copy open through its session when the second call arrives,
+        # and bdb_serialize.load unlinks any existing file at the target —
+        # which Windows refuses for an open handle (measured, windows-validate
+        # run 25: PermissionError WinError 32 in test_hier_topo_batch).  A
+        # fresh name means no unlink of a live handle, on any platform.
+        out = str(tmp_path / f'{name}_{next(seq)}.bdb')
         return bdb_serialize.load(sql_path, out)
 
     return _materialize
