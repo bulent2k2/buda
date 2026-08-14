@@ -173,7 +173,16 @@ proc ::buda::_use_utf8_stdout {} {
     variable saved_stdout_encoding
     if {$saved_stdout_encoding ne ""} { return }
     if {[catch {fconfigure stdout -encoding} enc]} { return }
-    if {$enc eq "utf-8"} { return }
+    # Leave ANY Unicode-capable encoding alone -- this shim exists only to
+    # lift a BYTE-locale default (cp1252, iso8859-*) to utf-8.  utf-8 was
+    # the original skip; Tcl 9 on a Windows CONSOLE reports utf-16, the
+    # channel feeding the Unicode console API two bytes per code unit, so
+    # forcing utf-8 there made every ASCII byte PAIR render as one CJK
+    # glyph (measured on the first Tcl 9.0.4 home box: the whole flow log
+    # arrived as fluent nonsense with a clean design underneath it).
+    if {$enc eq "utf-8" || $enc eq "unicode"
+        || [string match -nocase "utf-16*" $enc]
+        || [string match -nocase "ucs-2*" $enc]} { return }
     set saved_stdout_encoding $enc
     catch {fconfigure stdout -encoding utf-8}
 }
