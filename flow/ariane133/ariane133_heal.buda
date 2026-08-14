@@ -142,4 +142,15 @@ refine_selection 60
 ripup_reroute 12
 
 check_design
+
+# ── stage 9, unlocked by #739 ─────────────────────────────────────────────
+# The original vehicle stops at abstract NUTS — pre-#739 that was the only
+# honest choice (the phantom halo keepouts left 78+ supply-doomed seats, so
+# detailed placement would have stranded hundreds of bits).  On the fixed
+# importer the DEF's own TRACKS carry the design: MEASURED, all 1149
+# bit-wires place with 0 unplaced.  The per-bit audit total grows (the
+# structural pass-through class is counted per bit) but the bundle count
+# stays the same 20 geometry-less containers.
+run_detailed_nuts
+check_design
 report_wirelength
