@@ -135,11 +135,25 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           rc=0
+          # tee to the LOG, then cat into the summary — not `tee … >> summary`,
+          # which sends tee's stdout to the summary and leaves the log of a red
+          # run holding nothing but the ::error:: line (the same defect fixed in
+          # nightly-qor.yml; pinned by test_nightly_workflow.py for both).
           python3 tools/qor_corpus.py --compare qor-base.json qor-head.json \
-            2>&1 | tee compare.txt >> "$GITHUB_STEP_SUMMARY" || rc=$?
+            2>&1 | tee compare.txt || rc=$?
+          cat compare.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # 2 is the tool's REPORTED-regression code; any other non-zero means
+          # the compare did not finish, which is a different thing to say.  This
+          # gate fails either way — it has no accept path to protect — but a
+          # crash reported as "QoR regression" sends the reader hunting for a
+          # routing change that never happened.
+          if [ "$rc" -eq 2 ]; then
+            echo "::error::QoR regression against the merge-base — see the job log or summary"
+            exit 1
+          fi
           if [ "$rc" -ne 0 ]; then
-            echo "::error::QoR regression against the merge-base — see the job summary"
+            echo "::error::the QoR compare did not complete (exit $rc) — see the job log"
             exit 1
           fi
           echo 'No QoR regression against the merge-base.' >> "$GITHUB_STEP_SUMMARY"

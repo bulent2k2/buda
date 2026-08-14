@@ -385,3 +385,50 @@ def test_check_cli_exits_nonzero_on_err(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as e:
         q.main()
     assert e.value.code == 0                       # runs NO flows, just checks
+
+
+# --- --compare: a REPORTED regression is not any other kind of failure -------
+
+def _compare_exit(tmp_path, monkeypatch, base_rows, mine_rows):
+    import qor_corpus as q
+    b, m = tmp_path / "base.json", tmp_path / "mine.json"
+    b.write_text(base_rows if isinstance(base_rows, str) else json.dumps(base_rows))
+    m.write_text(mine_rows if isinstance(mine_rows, str) else json.dumps(mine_rows))
+    monkeypatch.setattr(sys, "argv", ["qor_corpus.py", "--compare", str(b), str(m)])
+    with pytest.raises(BaseException) as e:      # SystemExit, or the crash
+        q.main()
+    return e.value
+
+
+def test_compare_exits_the_regression_code_on_a_regression(tmp_path, monkeypatch, capsys):
+    """The code a caller may ACT on.
+
+    The nightly's `promote_baseline` accepts a regression and moves the
+    baseline; it must therefore be able to tell one from a compare that never
+    finished, which also exits non-zero.  With both at 1 a crash would have
+    overwritten the last good baseline with a sweep nothing had compared
+    (Codex P1 on #727).
+    """
+    import qor_corpus as q
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 13}
+    worse = dict(row, viol_bundles=14)            # the new-audit shape
+    exc = _compare_exit(tmp_path, monkeypatch, [row], [worse])
+    assert isinstance(exc, SystemExit)
+    assert exc.code == q.EXIT_REGRESSED == 2
+    assert "WORSE" in capsys.readouterr().out
+
+
+def test_compare_exits_zero_when_nothing_regressed(tmp_path, monkeypatch):
+    row = {"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}
+    better = dict(row, viol_bundles=0, overlaps=0)
+    exc = _compare_exit(tmp_path, monkeypatch, [row], [better])
+    assert isinstance(exc, SystemExit) and exc.code == 0
+
+
+def test_a_compare_that_cannot_run_does_not_exit_the_regression_code(tmp_path, monkeypatch):
+    """Malformed input must not masquerade as a measured regression."""
+    import qor_corpus as q
+    exc = _compare_exit(tmp_path, monkeypatch, "{not json", [{"flow": "a.buda"}])
+    assert not isinstance(exc, SystemExit) or exc.code != q.EXIT_REGRESSED, (
+        "a compare that could not parse its input exited the code that means "
+        "'measured, and worse' — the nightly would offer to promote it")

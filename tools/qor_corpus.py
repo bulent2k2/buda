@@ -57,7 +57,9 @@ Both hand you a confident wrong number, which is the exact failure mode this
 mode exists to remove; see `baseline_advisories`.
 
 `--compare` tags each moved flow BETTER/WORSE on the QoR metric
-(overlaps/unplaced/viol_bundles) and exits non-zero if any regressed, then
+(overlaps/unplaced/viol_bundles) and exits `EXIT_REGRESSED` (2) if any
+regressed — distinct from the 1 any other failure exits with, so a caller can
+tell a REPORTED regression from a compare that never finished — then
 prints two informational diffs that are reported but never gate: a
 **wirelength** diff (total abstract WL after NUTS + detailed WL after DNUTS,
 base->branch, plus the largest per-flow movers — a topology/planner change
@@ -101,6 +103,15 @@ _ROOT = os.path.dirname(_HERE)
 for p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _HERE):
     if p not in sys.path:
         sys.path.insert(0, p)
+
+# A REPORTED regression exits with this code; every other failure keeps the
+# conventional 1.  The distinction exists because a caller that can ACT on a
+# regression — the nightly's `promote_baseline`, which accepts one and moves the
+# baseline — must not act on a crash: an uncaught exception mid-compare also
+# exits non-zero, and `1 == 1` would let a sweep that was never successfully
+# compared overwrite the last good baseline (Codex P1 on #727).  Every existing
+# consumer gates on non-zero, so 2 is compatible with all of them.
+EXIT_REGRESSED = 2
 
 # The curated corpus: flow/ vehicles that route the full pipeline through
 # run_detailed_nuts (so both overlaps and unplaced are meaningful).  Paths are
@@ -1295,12 +1306,12 @@ def main():
         ap.error("--no-build is only meaningful with --vs")
 
     if args.compare:
-        sys.exit(1 if cmd_compare(*args.compare) else 0)
+        sys.exit(EXIT_REGRESSED if cmd_compare(*args.compare) else 0)
 
     if args.vs:
-        sys.exit(1 if cmd_vs(args.vs, args.out, args.jobs,
-                             flows=args.flows,
-                             build=not args.no_build) else 0)
+        sys.exit(EXIT_REGRESSED if cmd_vs(args.vs, args.out, args.jobs,
+                                          flows=args.flows,
+                                          build=not args.no_build) else 0)
 
     if args.decisions and args.out:
         _dd = os.path.abspath(args.out + ".decisions")

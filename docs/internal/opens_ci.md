@@ -5,9 +5,10 @@ value/effort. The workflow itself, its cost, and the dependency list are in
 [`ci.md`](ci.md); this page is the backlog behind its "What CI deliberately
 does NOT do" section.
 
-Snapshot index — last verified against `main`: **2026-08-01**, at the commit
-that introduced CI. Each item states what is uncovered, why it was left out
-rather than forgotten, and where to start.
+Snapshot index — first written **2026-08-01**, at the commit that introduced CI;
+the nightly items (1, 3, 5) re-verified against the workflow **2026-08-13**.
+Each item states what is uncovered, why it was left out rather than forgotten,
+and where to start.
 
 ---
 
@@ -22,8 +23,9 @@ Corrected while building it: the corpus is **37** flows, not the "36 flows,
 ~2-4 min serial" this page previously estimated — that figure predated the
 corpus growing. Corrected again after the first real run: the sweep takes
 **6m34s** on the hosted runner (jobs=4), not the ~4m20s measured in a developer
-container. The nightly also refreshes `qor/qor_table.md` (see [`ci.md`](ci.md)),
-which adds a second sweep — item 3 below.
+container. It has grown twice more since (41, then **48**), and at 48 the sweep
+measures **7m41s** on the runner. The nightly also refreshes `qor/qor_table.md`
+(see [`ci.md`](ci.md)), which adds a second sweep — item 3 below.
 
 **Resolved 2026-08-04 — the PR half.** `.github/workflows/pr-qor.yml` sweeps the
 corpus on a `run-qor`-labelled PR and diffs it against the PR's own
@@ -83,7 +85,8 @@ host.
 
 The nightly runs `qor_corpus.py` (the regression gate) **and**
 `qor_table.py` (the snapshot table), each doing its own full corpus sweep —
-~6.5 min apiece, ~16 min for the job.
+**~7.7 min apiece at 48 flows, ~18 min for the job** (measured on the runner
+2026-08-12; it was ~6.5 min apiece at 37).
 
 They measure the same pipeline. Both `run_flow`s source the flow the same way
 and call the same `_check_design_bundles` / `_wirelengths`; they differ only in
@@ -93,11 +96,42 @@ carries. One sweep could feed both with a rename.
 
 **Left as-is on purpose.** Sharing a sweep means the regression *gate* — the
 nightly's primary job — starts consuming the other tool's row-builder, and the
-cached baseline's key schema is invalidated in the process. Six minutes of
+cached baseline's key schema is invalidated in the process. Eight minutes of
 unattended runner time is not worth putting the gate's fidelity in play. If
 this is ever taken on, the safe direction is to make `qor_table.py` derive its
 extra columns from a `qor_corpus` sweep (gate unchanged, table follows), not
 the reverse.
+
+## 5. ~~No way to accept a deliberate metric change~~ — RESOLVED 2026-08-13
+
+Promote-on-clean (item 1) has a corollary nobody wrote down: a metric that moves
+for a **legitimate** reason wedges the gate permanently. `viol_bundles` counts
+the bundles `check_design` faults, so a new audit raises it by reporting a fault
+that was always there — better *detection* is indistinguishable from worse
+*routing* by that number alone.
+
+Not hypothetical, and predicted in the commit that caused it. The per-bit
+antenna audit's own A/B (`2c1d7fd`) measured `+1 viol_bundles` on two chip flows
+with overlaps, unplaced and both wirelengths **byte-identical**, and said in as
+many words that `--compare` would keep calling it WORSE and that accepting it
+means re-baselining. There was no way to re-baseline. The nightly went red on
+2026-08-11 and stayed red, still diffing against 08-10 — so 08-12's report
+carried the detector delta *plus* a corpus that had grown 41 → 48 *plus* real
+routing movement in the chip bottom-up family, all in one pile. A restore counts
+as a cache access, so the baseline would not have aged out either.
+
+The fix is a `promote_baseline` **dispatch input**: the compare still runs and
+still prints, the sweep is promoted anyway, and the run is annotated
+`::warning::` with the acceptance written into the job summary. Deliberately
+narrow — empty on a schedule run, a no-op on a clean sweep, and downstream of the
+errored-sweep rejection (a hard failure of its own), so it cannot bank a broken
+sweep.
+
+What is still owed: **nothing automatic**. A human decides that a delta is
+instrumentation rather than quality, and the discriminator is the columns that
+did *not* move. Teaching the gate to recognise that itself — an audit-version
+field in the row schema, say, so a detector change is a separate axis from a QoR
+change — is a real design and is not attempted here.
 
 ## 4. Execute the web ports — **RESOLVED 2026-08-03/04; only the Scala.js LINK step remains**
 
