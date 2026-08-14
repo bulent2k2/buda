@@ -94,27 +94,33 @@ add_blocks_from_bdb 4 skip
 run_hier_bundler depth 4
 
 
-# ── heal (stage a: the abstract-overlap residual) ─────────────────────────
-# The chip_stack/chip3 interleaved scheme (PR #675/#713) at the NUTS stage
-# this vehicle stops at.  MEASURED (2026-08-14, 4-core box, --threads 4):
-# 195 overlaps -> 52, audit 178 -> 175 violations, WL 106.4M, 151s total
-# (baseline 12s) — and 52 is a CERTIFIED stall, not a budget limit: rounds
-# 2-3 end in full ripup sweep certificates (381 trials, 0 moves), pressed
-# negotiate, MST edge flips and a chase_overlaps refine all find at most 1
-# more overlap (traded for an interval violation), a multi_trunk pool lands
-# WORSE (56 @ +8M WL), and set_max_bundle_bits auto + run_planner hier 5
-# change nothing.  52 overlaps is this floorplan's congestion truth — OBS
-# covers metal1-metal4 across all 133 macros, so the interconnect lives on
-# metal5+ (the flow header's own point).  The pass-through violations on
-# the geometry-less logic containers are the other floor component:
-# healers cannot place what the floorplan DEF never placed.
+# ── heal (stage a) — and a retraction worth keeping (2026-08-14) ─────────
+# HISTORY: this flow's first version measured 195 overlaps healed to 52 and
+# called 52 a CERTIFIED congestion floor (full ripup sweep certificates,
+# pressed negotiate, edge flips, alternate pools all stalled).  The
+# certification was sound; the PROBLEM was corrupt.  PR #739 root-caused
+# the "congestion": the DEF's per-macro `+ HALO` (a PLACEMENT construct)
+# was imported as an all-layer routing keepout on all 133 macros, forbidding
+# routing the DEF left routable.  With the importer fixed, the healerless
+# baseline is 0 overlaps in ~10s — there was no floor, there was a bug.
+# The tell was on screen both times: supply-doomed seats reporting ZERO
+# signal tracks in their placed windows on layers carrying thousands.
+# Zero is not a congestion number; it is a "something is blocking
+# everything" number.  Twice misread, now written down twice.
 #
-# healersAhead MATTERS here, in the winning direction (unlike
-# rnr/mix2_fast_bottomup_caps, where it regresses): the declaration's
-# gated kSegsRel + run_nuts dead-span escalation enter the healer chain at
-# 125 overlaps instead of 195 and converge lower (52 vs 58-and-climbing at
-# much higher WL without it).  Measure, don't assume.
-set_planner_param healersAhead 1
+# CURRENT ROLE (post-#739): the healer chain on a clean-entry real design.
+# negotiate/ripup are instant no-ops at 0 overlaps; refine_selection does
+# the real work — MEASURED: WL 88.2M -> 76.8M (-13%) in 18 moves, and the
+# audit improves from the baseline's 77 violations / 25 bundles to
+# 54 / 20 (better topologies clear pass-through violations the WL estimate
+# had picked badly).  The residual 54 are the structural class: containers
+# a floorplan DEF never places.
+#
+# healersAhead is deliberately NOT declared — the #739 fix FLIPPED its
+# verdict on this vehicle: pre-fix it entered 125 vs 195 overlaps and
+# converged lower; post-fix it enters DIRTIER (4 ovl vs 0) and lands worse
+# on the audit (66 violations / 23 bundles @ WL 73.9M vs 54 / 20 @ 76.8M).
+# Measure, don't assume — and re-measure after a root-cause fix upstream.
 generate_hier_topologies
 run_planner hier 2
 run_nuts
