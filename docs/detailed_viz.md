@@ -80,7 +80,19 @@ Each `NetSegment` from `DetailedNUTSResult` is drawn as a thin line at its
 
 - H layer: horizontal line at Y = `track_position`, spanning X = `[span_lo, span_hi]`
 - V layer: vertical line at X = `track_position`, spanning Y = `[span_lo, span_hi]`
-- Line width ∝ `track_width` (actual signal track width from `TrackSlot`)
+- Line width = `track_width` (the actual signal track width from `TrackSlot`)
+  **as a physical width**, converted to points at the current zoom by
+  `_sync_nuts_linewidths` — the same mechanism the abstract NUTS lines use.
+  So a bit-wire is drawn at its true width against the [Tracks] rails (which
+  are data-coordinate rectangles) and grows as you zoom in, with a 0.6 pt
+  visibility floor for the full-design view, where a real track is a small
+  fraction of a pixel. It is deliberately **not** a point-width computed
+  from the track width: that number is in layout units, so it is only sane
+  while one unit happens to be about one point. At micron scale it is, which
+  is why the earlier `max(0.6, width*0.6)` looked right for years; under
+  `set_import_scale dbu` a 1.6 µm wire is 3200 units and asked for a
+  1920-point line — a band across the whole canvas, with the span still
+  correct.
 - Colour = same layer colour used in the abstract view
 
 Every bit-wire is registered under its `bundle_id`, so click-to-highlight,
