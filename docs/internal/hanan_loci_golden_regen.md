@@ -27,10 +27,20 @@ one developer box):
 
 That last row is the real proof: a re-baseline today is a no-op, so there is
 nothing left to regenerate.  The procedure below is kept as the **turnkey kit
-for the next content-shifting change**, not as pending work.  (The stale
-"one remaining step" wording outlived its cause and had already leaked into a
-`pytest.xfail` on `test_nuts_busterm_face_anchor.py`, which was reporting
-XPASS; that marker is now removed.)
+for the next content-shifting change**, not as pending work.
+
+**What this does NOT say.**  "The goldens are current" is not "every flow is
+host-stable", and the two must not be conflated.
+`test_nuts_busterm_face_anchor.py::test_big2_b4_b24_routes_cleanly` exercises
+`big2_b4_b24.buda`, which is **not in the golden corpus at all** (that is
+`b4_bus_077.buda`, a different flow) and which pins candidates by INDEX
+(`select_topology 1 4` / `2 10`).  Its `pytest.xfail` used to read "golden
+pending regen" unconditionally and had started reporting XPASS; it is now
+**conditional on `BUDA_NUTS_GOLDEN_STRICT`** — enforced on the reference
+environment, lenient off it — the same rule
+`test_nuts_placement_golden.py` applies to its `HOST_SENSITIVE_FLOWS`.  So CI
+reports a real regression there instead of swallowing it, while a native or
+Windows build still gets the documented environmental leniency.
 
 The kit is built around `tools/regen_goldens.py`:
 
