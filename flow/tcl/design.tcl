@@ -59,7 +59,7 @@
 
 set repo [file dirname [file dirname [file dirname [file normalize [info script]]]]]
 source [file join $repo tools buda.tcl]
-source [file join $repo flow tcl prompt.tcl]
+source [file join $repo tools buda_prompt.tcl]
 
 # ── the checkpoint ────────────────────────────────────────────────────────
 set bdb [expr {[info exists ::env(BUDA_DESIGN_BDB)] && $::env(BUDA_DESIGN_BDB) ne ""
@@ -155,7 +155,7 @@ proc route {} {
 route
 
 # ── the prompt ────────────────────────────────────────────────────────────
-# Shared with hdesign.tcl (flow/tcl/prompt.tcl): the loop was identical in
+# Shared with hdesign.tcl (tools/buda_prompt.tcl): the loop was identical in
 # both, down to the comments explaining why `done` sits outside the catch.
 # Every engine error is caught and printed there — a typo must not cost the
 # session — and `pins_dirty` comes back set when any pin changed since the

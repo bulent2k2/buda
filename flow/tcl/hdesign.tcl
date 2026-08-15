@@ -69,7 +69,7 @@
 
 set repo [file dirname [file dirname [file dirname [file normalize [info script]]]]]
 source [file join $repo tools buda.tcl]
-source [file join $repo flow tcl prompt.tcl]
+source [file join $repo tools buda_prompt.tcl]
 
 # ── options ───────────────────────────────────────────────────────────────
 set mode topdown
@@ -278,7 +278,7 @@ proc route {} {
 route
 
 # ── the prompt (shared with design.tcl; replan goes through `hier`) ───────
-# The loop lives in flow/tcl/prompt.tcl — it was character-for-character the
+# The loop lives in tools/buda_prompt.tcl — it was character-for-character the
 # same in both files, so it is now written once and handed this script's own
 # `route`.  A pin's hint resolves through the hierarchy: `pin b_lohi 2`
 # matches the D2 TEMPLATE behind the per-instance expansion, so one pin
