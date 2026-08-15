@@ -12,17 +12,27 @@ order-canonical comparison (`tools/topo_snapshot.py::canonicalize`, PR #327);
 the content regen stays **reference-host-owned** — goldens must only ever be
 rewritten on the host that owns them, never on a drive-by container.
 
-**STATUS (2026-07-19): the flip has LANDED on branch
-`claude/hanan-loci-default-flip`** (default `allow_hanan_loci_ = true`,
-`no_hanan_loci` opt-out, pin remaps applied, spec tests inverted — see
-[hanan_loci_flip_audit.md](hanan_loci_flip_audit.md), APPLIED).  The
-`--write` re-baseline is the branch's ONE remaining step and lands **on that
-same branch** (the owner runs it on the reference host and pushes) — use the
-abbreviated procedure at the end of this doc, not the from-scratch flip
-walk-through in the middle (kept for the record).
+**STATUS (2026-08-13): DONE — the flip and its re-baseline are both on
+`main`, and nothing here is outstanding.**  `src/topology.h` carries the
+default (`allow_hanan_loci_ = true`) and the goldens match it.  Verified
+under CI's pinned ISA (`BUDA_ARCH=x86-64-v2` — `ci.md` names CI the golden
+reference host, so that is the environment the goldens are owned by, not any
+one developer box):
 
-This doc is the turnkey procedure for that regen, built around
-`tools/regen_goldens.py`:
+| check | result |
+|---|---|
+| `regen_goldens.py --verify` | **ALL OK (10 flows)** |
+| `test_nuts_placement_golden.py` with `BUDA_NUTS_GOLDEN_STRICT=1` | **9/9 pass**, incl. all four `HOST_SENSITIVE_FLOWS` |
+| re-running BOTH regens (`--write` + `nuts_snapshot.py`) | **zero diff** — every golden rewritten byte-identically |
+
+That last row is the real proof: a re-baseline today is a no-op, so there is
+nothing left to regenerate.  The procedure below is kept as the **turnkey kit
+for the next content-shifting change**, not as pending work.  (The stale
+"one remaining step" wording outlived its cause and had already leaked into a
+`pytest.xfail` on `test_nuts_busterm_face_anchor.py`, which was reporting
+XPASS; that marker is now removed.)
+
+The kit is built around `tools/regen_goldens.py`:
 
 ```
 PYTHONPATH=build:tools python3 tools/regen_goldens.py --verify   # read-only check

@@ -237,6 +237,17 @@ def golden_path(flow, base=None):
 
 
 def main():
+    # The lone positional is an output DIRECTORY.  Reject anything that looks
+    # like an option instead of silently treating it as one: `--help` used to
+    # create a directory named "--help" and write every golden into it, which
+    # reads as success and leaves a stray dir in the tree.
+    if len(sys.argv) > 1 and sys.argv[1].startswith("-"):
+        print(f"usage: {os.path.basename(sys.argv[0])} [OUT_DIR]\n"
+              f"  Regenerate the NUTS placement goldens (default: "
+              f"{os.path.relpath(golden_dir(), ROOT)}).\n"
+              f"  The only argument is an output directory — "
+              f"{sys.argv[1]!r} is not one.")
+        sys.exit(0 if sys.argv[1] in ("-h", "--help") else 2)
     out_dir = sys.argv[1] if len(sys.argv) > 1 else golden_dir()
     os.makedirs(out_dir, exist_ok=True)
     for flow in CORPUS:

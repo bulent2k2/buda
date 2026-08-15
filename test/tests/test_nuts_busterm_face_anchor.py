@@ -51,14 +51,18 @@ def _run_buda(script):
 
 
 @pytest.mark.mid
-@pytest.mark.xfail(
-    strict=False,
-    reason="Reference-host-owned golden pending regen: the hanan_loci-default "
-           "flip (01c6cfbc) left big2_b4_b24.buda's select_topology index pins "
-           "host-fragile, so bundle 1's pinned candidate strands 60 bits off "
-           "the reference host (b4_bus_077 in that commit's regen list). "
-           "strict=False: it may route cleanly on the reference host. "
-           "See docs/internal/hanan_loci_golden_regen.md.")
+# The xfail here is GONE, not relaxed.  It read "reference-host-owned golden
+# pending regen" — the hanan_loci default flip renumbered big2_b4_b24.buda's
+# select_topology index pins, so bundle 1's pinned candidate stranded 60 bits
+# off the reference host.  That regen has since landed: on 2026-08-13, under
+# CI's pinned ISA (BUDA_ARCH=x86-64-v2), `tools/regen_goldens.py --verify`
+# reports ALL OK (10 flows), all 9 NUTS placement goldens pass with
+# BUDA_NUTS_GOLDEN_STRICT=1 (including every HOST_SENSITIVE_FLOW), and
+# re-running BOTH regens rewrites every golden byte-identically — zero diff.
+# The marker was outliving its cause and reporting XPASS; a stale
+# strict=False xfail is worse than no marker, because it would swallow a
+# genuine regression here exactly as readily as the environmental one it was
+# written for.
 def test_big2_b4_b24_routes_cleanly():
     """Both pinned-buggy bundles now route with no opens at any stage, 0 unplaced.
 
