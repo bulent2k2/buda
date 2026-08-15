@@ -96,10 +96,22 @@ def test_a_relative_inherited_entry_is_anchored(tmp_path, monkeypatch):
     assert parts[-1] == str(tmp_path / "build"), parts
 
 
-def test_an_absolute_inherited_entry_is_passed_through_untouched(monkeypatch):
+def test_an_absolute_inherited_entry_is_passed_through_untouched(tmp_path,
+                                                                 monkeypatch):
     """The Visual Studio `build\\Release` case must not be rewritten: it is
-    already unambiguous, and only the caller knows it."""
-    abs_entry = str(Path(os.sep) / "opt" / "buda" / "build" / "Release")
+    already unambiguous, and only the caller knows it.
+
+    The fixture comes from `tmp_path` because that is DRIVE-QUALIFIED on every
+    platform.  Built as `Path(os.sep) / ...` it is `\\opt\\...` on Windows —
+    rooted but driveless, which Python 3.13 stopped calling absolute
+    (`ntpath.isabs`), so `_anchored` would expand it with the current drive and
+    this assertion would fail on the windows-validate jobs ALONE: they pin
+    3.13, while Linux CI pins 3.11 where the same path IS absolute.  That is
+    the fixture being wrong rather than the helper — a driveless path really is
+    drive-ambiguous, so anchoring it is the intended behaviour (Codex #756).
+    """
+    abs_entry = str(tmp_path / "opt" / "buda" / "build" / "Release")
+    assert os.path.isabs(abs_entry), abs_entry      # the fixture's precondition
     monkeypatch.setenv("PYTHONPATH", abs_entry)
     parts = buda_env(_ROOT)["PYTHONPATH"].split(os.pathsep)
     assert parts[-1] == abs_entry, parts
@@ -109,7 +121,8 @@ def test_every_inherited_entry_is_anchored_in_order(tmp_path, monkeypatch):
     """Several entries, mixed absolute and relative: each is handled on its
     own and the caller's ORDER survives (it is a search path — the order is
     the caller's precedence, not ours to sort)."""
-    abs_entry = str(Path(os.sep) / "opt" / "first")
+    # Drive-qualified, for the reason the test above spells out.
+    abs_entry = str(tmp_path / "first")
     up = os.path.join("..", "up")
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join([abs_entry, "rel", up]))
     monkeypatch.chdir(tmp_path)
