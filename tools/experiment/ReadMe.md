@@ -17,6 +17,7 @@ session, and prints. None mutates a flow, a golden, or a BDB.
 |---|---|
 | `base_rate_collinear.py` | Is `SELECTED+REDUNDANT == 0` surprising, or is it what chance predicts? |
 | `twin_cost_collinear.py` | Could trimming a redundant stub ever have flipped the selection? |
+| `phantom_charge.py` | Does the same-bundle double charge inflate what *other* bundles see? |
 
 ## The collinear-stub pair
 
@@ -79,3 +80,65 @@ Where it did lead: the by-class result pointed at `add_trunk_h`, which passes
 `suppress_stubs=false` while `add_trunk_v` passes `true` — so `TRUNK_V` carries
 no redundant pairs because its suppressor already removes them. That gap is what
 `set_trim_trunk_stubs` closes.
+
+
+## The double charge, and who it actually reaches
+
+`twin_cost_collinear.py` closes with a loose end: the double charge is muted in
+the candidate's *own* score because `seg_cost` is a max, but it still inflates
+the committed usage **other** bundles read. That is a different question, and
+`phantom_charge.py` is the one that answers it.
+
+The stakes are higher than a cost nudge. A committed bundle's charge persists in
+`cuts_`, and later bundles read it through `cong_cost_segment`, `kPeak`, and —
+above all — OVERFLOW, which is a hard STRICT constraint. Phantom demand can make
+a band look full and push somebody else's candidate out of the STRICT tier
+entirely, which is a discrete harm, not a matter of degree.
+
+Two questions, cheapest first, and the first can refute the whole thing:
+
+**P0, the premise.** NUTS *may* let same-bundle segments share a track; that is
+not the same as it doing so. Measured:
+
+    co-placed (one wire charged twice)      3   (75%)
+    placed APART (charge correct)           1   (25%)
+
+The mechanism is real — but that fourth pair matters just as much. NUTS put it
+on two different tracks, so two charges was the *right* answer. A blanket
+"dedup same-bundle charge" fix would be wrong.
+
+**P1, the census.** How often does this reach the geometry other bundles can
+actually read?
+
+    committed bundles                    555
+    committed segments                  1566
+    coincident pairs                       4   (0.2554% of segments)
+    affected band charges                 13
+    ...landing on a band OVER capacity     0
+
+Four instances in 555 committed bundles, none on an overflowing band. So the
+effect on other bundles is bounded to nothing measurable here — and the reason
+is the same fact `base_rate_collinear.py` found from the other side: the shape
+lives in candidates that LOSE. A duplicate inside a losing candidate is charged
+into a scoring overlay and dies with it; it never reaches the committed field.
+
+What is deliberately **not** claimed: the per-instance magnitude. The script
+prints a per-band ratio and labels it an upper bound loose in both directions
+(the whole charge on one band though `for_each_band_w` spreads it by a weight
+≤ 1; the raw cap as denominator though the engine adds a `track_pitch` margin).
+It comes out above 1, which means the bound is uninformative — not that a band
+is several times over. The incidence is the finding; the ratio is not.
+
+Two honest limits, either of which would need the next step:
+
+- These are **final** committed states. The planner is greedy and widest-first,
+  so a band could have been tight mid-run and relaxed by the end; "0 over
+  capacity now" is not quite "never mattered".
+- Settling that means recomputing STRICT feasibility against `usage − phantom`
+  and counting candidates whose verdict flips. The natural lever is blocked:
+  `inject_band_demand` guards `amount <= 0.0` and returns, so the phantom cannot
+  be subtracted through the existing API. Relaxing that guard (floored at zero)
+  is the cheap way in, and is preferable to reimplementing `for_each_band_w`'s
+  spreading in Python, where a subtle mistake yields a confident wrong answer.
+
+Not worth it for four instances. Worth knowing where the door is.

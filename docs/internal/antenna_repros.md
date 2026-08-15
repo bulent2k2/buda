@@ -254,6 +254,20 @@ saving (0.67) closes about a third of the median gap it would need to (2.24).
 argmax — the double charge is largely muted in the candidate's own score, and
 what it really inflates is the committed usage *other* bundles see.
 
+The remaining loose end was the congestion half, since `seg_cost` is a **max**
+over segments: a short duplicate is almost never the argmax, so the double
+charge is muted in the candidate's OWN score but still inflates the committed
+usage **other** bundles read — and there it meets OVERFLOW, a hard STRICT
+constraint, so it could push somebody else's candidate out of the STRICT tier.
+`tools/experiment/phantom_charge.py` measured that too, and it is also not
+happening: across 8 flows the shape reaches committed geometry **4 times in 555
+bundles / 1566 segments (0.26%)**, on **0** bands that are over capacity.  Of
+those 4, NUTS co-placed 3 (genuinely one wire charged twice) and placed 1 on
+separate tracks — where two charges was the CORRECT answer, which is why a
+blanket same-bundle charge dedup would be wrong.  The reason it is so rare is
+the base-rate finding again: a duplicate inside a LOSING candidate is charged
+into a scoring overlay and dies with it, never reaching the committed field.
+
 So the ranking bar failed, and the fix that landed is justified on a different
 footing: not QoR, but a **one-sided gap in the generator**. The by-class table
 is what pointed at it — redundancy occurs in `TRUNK_H` (109 of 3388) and
