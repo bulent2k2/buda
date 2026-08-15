@@ -148,9 +148,21 @@ proc _skipped {verb {skips {}}} {
     return 0
 }
 
+# The engine resolves a relative path against the SCRIPT's directory (CWD
+# only when no script is running), and the recorder writes the line
+# verbatim — so a recorded relative `open_bdb` token must be resolved the
+# way the engine resolved it (against the flow), not the way a naive
+# replay would (against this driver's CWD): the trace would land in the
+# wrong directory and the resume's raw `buda::do` replay — which runs with
+# NO script — would open a DIFFERENT file than the build did.
+proc _resolve_bdb {p} {
+    if {$p eq ":memory:" || [file pathtype $p] eq "absolute"} { return $p }
+    file normalize [file join [file dirname $::flow] $p]
+}
+
 proc analyze {lines} {
-    global is_hier routed ckpt ckpt_live first_bus tail
-    set is_hier 0; set routed 0; set ckpt ""; set ckpt_live 0
+    global is_hier routed ckpt ckpt_live ckpt_why first_bus tail
+    set is_hier 0; set routed 0; set ckpt ""; set ckpt_live 0; set ckpt_why ""
     set first_bus ""; set tail {}
     set planning 0
     foreach ln $lines {
@@ -160,17 +172,33 @@ proc analyze {lines} {
         }
         if {$verb eq "run_nuts"} { set routed 1 }
         if {$verb eq "open_bdb"} {
-            set p [lindex [split $ln] 1]
+            set rest [lrange [split $ln] 1 end]
+            set p [_resolve_bdb [lindex $rest 0]]
             # `ckpt_live` distinguishes "a file-backed BDB was SEEN" from
-            # "the file-backed BDB is the one still OPEN": a flow that opens
-            # `:memory:` after it (an armed BDB followed by the flow's own
-            # open) replaced it, and pins made at the prompt then go to
-            # memory — a checkpoint claim on the dead file would be a lie.
-            if {$p ne ":memory:"} {
-                set ckpt $p
-                set ckpt_live 1
-            } else {
+            # "the file-backed BDB is the one still OPEN and DURABLE":
+            #  * a flow that opens `:memory:` after it (an armed BDB
+            #    followed by the flow's own open) replaced it — pins made
+            #    at the prompt then go to memory;
+            #  * a `.sql` text fixture opened WITHOUT `writeback` is
+            #    materialized to a throwaway binary the pipeline writes to
+            #    and discards — nothing flushes back to the fixture, so a
+            #    "checkpoint" claim on it would promise a resume that
+            #    restores none of this session's work.
+            if {$p eq ":memory:"} {
                 set ckpt_live 0
+                set ckpt_why "the flow reopened :memory: after it"
+            } else {
+                set ckpt $p
+                if {[string match -nocase *.sql $p]
+                        && "writeback" ni $rest} {
+                    set ckpt_live 0
+                    set ckpt_why "a .sql fixture opened without `writeback`\
+                          is a throwaway materialized copy -- nothing\
+                          flushes back"
+                } else {
+                    set ckpt_live 1
+                    set ckpt_why ""
+                }
             }
         }
         if {$first_bus eq "" && $verb eq "add_bus"} {
@@ -323,8 +351,9 @@ if {$stage eq "build"} {
     }
     analyze $lines
     if {!$ckpt_live || $ckpt eq ""} {
-        puts stderr "$tag: the build's live BDB was not a file (the flow\
-              reopened :memory:) -- nothing durable to resume; run build"
+        puts stderr "$tag: the build left no durable checkpoint\
+              ([expr {$ckpt_why ne "" ? $ckpt_why : "no file-backed\
+              open_bdb"}]) -- nothing to resume; run build"
         exit 2
     }
     if {$is_hier && $stage in {nuts dnuts}} {
@@ -421,6 +450,15 @@ if {$stage eq "build"} {
         set verb [_verb $ln]
         if {[_skipped $verb $pipeline_prefixes]} { continue }
         if {[_skipped $verb $never_prefixes]} { continue }
+        if {$verb eq "open_bdb"} {
+            # The recorded token may be relative — the engine resolved it
+            # against the FLOW's directory, but this replay runs with no
+            # script, so a raw resend would resolve against the CWD and
+            # open a different file.  Rewrite to the path the build used.
+            set rest [lrange [split $ln] 1 end]
+            set ln [string trim "open_bdb [_resolve_bdb [lindex $rest 0]]\
+                    [join [lrange $rest 1 end] { }]"]
+        }
         if {!$bdb_built} {
             # Flat: setup is session state by nature — replay it all.
             lappend setup $ln
@@ -486,13 +524,12 @@ if {[llength $tail]} {
     puts "$tag: the flow never ran the planner -- `replan` is unavailable"
 }
 if {$ckpt ne "" && !$ckpt_live} {
-    # A file-backed BDB was seen but the flow reopened `:memory:` after it
-    # (an armed BDB followed by the flow's own open is the usual shape):
-    # the file holds what ran BEFORE that open, and pins made at this
-    # prompt go to the memory BDB — durable only via an explicit
-    # `save <path>` snapshot of the live session.
-    puts "$tag: NOTE -- the flow reopened :memory: after $ckpt; prompt pins\
-          are NOT durable there (`save` snapshots the live session)"
+    # A file-backed BDB was seen but it is not the durable live one — the
+    # flow reopened `:memory:` after it, or it is a read-only .sql fixture
+    # (no `writeback`).  Pins made at this prompt are durable only via an
+    # explicit `save <path>` snapshot of the live session.
+    puts "$tag: NOTE -- $ckpt is not a durable checkpoint ($ckpt_why);\
+          prompt pins die with this session (`save` snapshots it)"
     set snap_base [file rootname $tag].bdb
 } elseif {$ckpt ne ""} {
     puts "$tag: checkpoint $ckpt -- pins persist; rerun the flow (or resume:\

@@ -312,6 +312,55 @@ def test_hier_stage_resume_holds_construction_and_replans(tmp_path):
     assert "run_planner hier" in r.stderr
 
 
+def test_relative_checkpoint_paths_resolve_against_the_flow(tmp_path):
+    # The engine resolves a relative `open_bdb` against the FLOW's directory
+    # (the script-dir rule), and the recorder writes the token verbatim —
+    # so the driver must resolve it the same way: the trace lands BESIDE
+    # the checkpoint the engine actually wrote (not in the invocation CWD),
+    # and the resume's raw replay reopens the same file.
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    flow = sub / "mini.buda"
+    flow.write_text("open_bdb ckpt.bdb\n" + _FLAT_FLOW)
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="pin d1 4\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (sub / "ckpt.bdb").exists()             # the engine's rule
+    assert (sub / "ckpt.bdb.trace").exists()       # the trace beside it
+    assert not (tmp_path / "ckpt.bdb.trace").exists()
+
+    r = _run(["tclsh", _DRIVER, flow, sub / "ckpt.bdb", "plan"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "RESUMED 8 bundles" in r.stdout
+    assert "topo 4 of" in r.stdout and "[pinned]" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_sql_fixture_without_writeback_is_not_a_checkpoint(tmp_path):
+    # `open_bdb x.bdb.sql` without `writeback` materializes a THROWAWAY
+    # binary — nothing flushes back to the fixture — so the driver must not
+    # advertise it as a checkpoint, must not write a resume trace for it,
+    # and a stage resume against it is refused.
+    seed = tmp_path / "seed.buda"
+    seed.write_text("open_bdb seed.bdb\n" + _FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, seed], tmp_path,
+             stdin="save_bdb fix.bdb.sql\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (tmp_path / "fix.bdb.sql").exists()
+
+    flow = tmp_path / "sqlflow.buda"
+    flow.write_text("open_bdb fix.bdb.sql\n" + _FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "not a durable checkpoint" in r.stdout
+    assert "writeback" in r.stdout                 # the reason is named
+    assert not (tmp_path / "fix.bdb.sql.trace").exists()
+
+    r = _run(["tclsh", _DRIVER, flow, tmp_path / "fix.bdb.sql", "plan"],
+             tmp_path)
+    assert r.returncode == 2                       # no trace, refused
+
+
 def test_concurrent_sessions_fail_loudly_and_do_not_corrupt_the_bdb(tmp_path):
     # SQLite allows one writer, and that is the protection: two sessions on
     # the SAME armed BDB must never corrupt it — the unlucky one fails
