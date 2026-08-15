@@ -17,7 +17,7 @@ session, and prints. None mutates a flow, a golden, or a BDB.
 |---|---|
 | `base_rate_collinear.py` | Is `SELECTED+REDUNDANT == 0` surprising, or is it what chance predicts? |
 | `twin_cost_collinear.py` | Could trimming a redundant stub ever have flipped the selection? |
-| `phantom_charge.py` | Does the same-bundle double charge inflate what *other* bundles see? |
+| `phantom_charge.py` | Does the same-bundle double charge inflate what *other* bundles see, and by how much on which band? |
 
 ## The collinear-stub pair
 
@@ -95,7 +95,7 @@ above all — OVERFLOW, which is a hard STRICT constraint. Phantom demand can ma
 a band look full and push somebody else's candidate out of the STRICT tier
 entirely, which is a discrete harm, not a matter of degree.
 
-Two questions, cheapest first, and the first can refute the whole thing:
+Three questions, cheapest first, and the first can refute the whole thing:
 
 **P0, the premise.** NUTS *may* let same-bundle segments share a track; that is
 not the same as it doing so. Measured:
@@ -114,38 +114,79 @@ actually read?
     committed segments                  1566
     coincident pairs                       4   (0.2554% of segments)
 
-Four instances in 555 committed bundles. So the
-effect on other bundles is bounded to nothing measurable here — and the reason
-is the same fact `base_rate_collinear.py` found from the other side: the shape
-lives in candidates that LOSE. A duplicate inside a losing candidate is charged
-into a scoring overlay and dies with it; it never reaches the committed field.
+Four instances in 555 committed bundles — and the reason is the same fact
+`base_rate_collinear.py` found from the other side: the shape lives in
+candidates that LOSE. A duplicate inside a losing candidate is charged into a
+scoring overlay and dies with it; it never reaches the committed field.
 
-What is deliberately **not** claimed: the per-instance magnitude, or how close
-any affected band sits to capacity. A first cut reported both, by mapping each
-duplicate onto the cut and band it charges — and got that wrong four ways
-(Codex #754): the grid of the **wrong axis** (`for_each_cut_` passes
-`is_vcut = is_h`, so an H segment's bands index `y_grid_` and a V segment's
-`x_grid_` — the opposite of the obvious reading), no filter on cut
-**direction**, an inclusive band test where `find_band` is **half-open**, and
-the topology's nominal perp where `commit_plan` charges through `plan.seg_perp`
-and may **spread** one segment across several weighted bands.
+**P2, the magnitude.** Rarity is the whole defence, so it is worth knowing what
+one instance costs when it does land:
 
-Those numbers ("13 affected band charges", "0 landing on a band over capacity")
-are **withdrawn**, and the band census is gone rather than patched — a partial
-reimplementation of `for_each_band_w` is exactly the trap flagged below, and the
-first cut walked into it. The two numbers above never touched a band and are
-unchanged; the conclusion rests on them.
+    flow          cut band   M   phantom       cap     usage  fill%   eaten  bundle
+    big.buda      247   44   5    127.00    310.00    254.00  81.9%   69.4%  8
+    big.buda      250   44   5    127.00    310.00    282.00  91.0%   81.9%  8
+    big2.buda     112    2   5     64.00   1250.00    374.00  29.9%    6.8%  64
 
-Two honest limits, either of which would need the next step:
+Three bands. **None over capacity, and none that the phantom pushes over** — so
+the STRICT harm the question was about does not occur, and there is nothing to
+fix. But it is not negligible where it lands: cut 250 reads 91% full when the
+metal is really at 50%, and the phantom eats 82% of the room a later bundle
+would otherwise have found. So the finding is "three instances, not a class of
+problem" — not "the effect is small". One more co-placed duplicate on a tighter
+band is all it would take.
 
-- These are **final** committed states. The planner is greedy and widest-first,
-  so a band could have been tight mid-run and relaxed by the end; "0 over
-  capacity now" is not quite "never mattered".
-- Settling that means recomputing STRICT feasibility against `usage − phantom`
-  and counting candidates whose verdict flips. The natural lever is blocked:
-  `inject_band_demand` guards `amount <= 0.0` and returns, so the phantom cannot
-  be subtracted through the existing API. Relaxing that guard (floored at zero)
-  is the cheap way in, and is preferable to reimplementing `for_each_band_w`'s
-  spreading in Python, where a subtle mistake yields a confident wrong answer.
+Only CO-PLACED pairs reach P2. Where NUTS put the twins on separate tracks the
+metal really is two wires, so folding that pair in would manufacture a phantom.
 
-Not worth it for four instances. Worth knowing where the door is.
+### Where the per-band numbers come from
+
+`CongestionPlanner::committed_charges()`, which reports `charge_log_` — the
+record `commit_plan` keeps so a rip-up can subtract exactly what it added.
+Nothing is re-derived, and that is the point.
+
+A first cut *did* re-derive, mapping each duplicate onto the cut and band it
+charges, and got it wrong four ways (Codex #754): the grid of the **wrong axis**
+(`for_each_cut_` passes `is_vcut = is_h`, so an H segment's bands index
+`y_grid_` and a V segment's `x_grid_` — the opposite of the obvious reading), no
+filter on cut **direction**, an inclusive band test where `find_band` is
+**half-open**, and the topology's nominal perp where `commit_plan` charges
+through `plan.seg_perp` and may **spread** one segment across several weighted
+bands. Those numbers ("13 affected band charges", "0 landing on a band over
+capacity") were withdrawn.
+
+Under the greedy `band_span_charge` modes no re-derivation could have been right
+at all — they read live occupancy that has moved on by the time anyone asks —
+which is why the fix was to ask the engine rather than to patch the Python.
+`inject_band_demand`'s `amount <= 0.0` guard was the other candidate door; the
+record is better, because it is exact for every mode and mutates nothing.
+
+The accessor is pinned to the engine by an identity: summed per (cut, band) it
+must reproduce `GlobalCut::usage` exactly, in both directions (no charge
+unaccounted, no band unexplained). `test_phantom_charge_scan.py` holds it on a
+**healing** flow as well as a plan-only one, so the rip-up erase and the
+`recharge_committed` rebuild are covered rather than just the append. A 0.01%
+drift fails it.
+
+`band_phantoms` does only set arithmetic on those records. Its one judgement
+call: a group of N coincident segments charging one band pays once, at the
+**largest** amount (`sum − max`), which is the conservative reading and counts a
+triple stack as two phantom charges rather than three.
+
+Merging is licensed by two facts, one per axis. The shared **placed track**
+fixes the position across the span; the shared **cut** fixes it along the span
+(a cut lies at one coordinate, so every segment charging it reaches that
+coordinate). Same layer, same track, same place along the wire — one piece of
+metal.
+
+Keying the class on the placed track rather than the topology's nominal
+perpendicular is the fix for Codex #762: being one wire is a *placed* fact, and
+the two can disagree. Four segments can share a nominal perpendicular while NUTS
+seats them as two pairs on two different tracks — two wires each charged twice,
+a phantom of two charges, which a nominal key reports as three. Not reachable on
+the current corpus (the three co-placed pairs are in different bundles), so the
+table above is unchanged; it is the predicate that was unsound, and the count is
+what the whole finding rests on.
+
+One honest limit stands: these are **final** committed states. The planner is
+greedy and widest-first, so a band could have been tight mid-run and relaxed by
+the end; "0 over capacity now" is not quite "never mattered".

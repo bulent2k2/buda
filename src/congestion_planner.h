@@ -77,6 +77,17 @@ private:
     std::vector<int>    band_sig_ntrk_;  // cached full-band SIGNAL-track count (track mode)
 };
 
+// One band charge from the committed field, as CongestionPlanner::commit_plan
+// applied it: bundle `bundle_id`'s segment `seg_idx` added `amount` to band
+// `band` of `cuts_[cut_index]`.  Reported by committed_charges().
+struct CommittedCharge {
+    int    bundle_id = 0;
+    int    seg_idx   = 0;
+    int    cut_index = 0;
+    int    band      = 0;
+    double amount    = 0.0;
+};
+
 struct BundleInput {
     HBundle original_bundle;
     std::vector<Topology> candidates;
@@ -423,6 +434,28 @@ public:
     const std::vector<GlobalCut>& get_cuts() const { return cuts_; }
     const std::vector<int>& get_x_grid() const { return x_grid_; }
     const std::vector<int>& get_y_grid() const { return y_grid_; }
+    // The committed charge distribution, exactly as it was applied: which
+    // (bundle, segment) put how much demand on which (cut, band).  Read
+    // straight off charge_log_ — the record commit_plan keeps so a rip-up can
+    // subtract precisely what it added — so this is the engine's own
+    // arithmetic, not a re-derivation of it.
+    //
+    // That distinction is the whole point of the accessor.  A caller wanting
+    // per-band demand has to reproduce for_each_band_w: which cuts a segment
+    // crosses (an H segment's bands index y_grid_, a V segment's x_grid_ —
+    // for_each_cut_ passes is_vcut = is_h), the half-open find_band rule, the
+    // cut-direction filter, plan.seg_perp rather than the topology's nominal
+    // perp, and the width-driven SPREAD across several weighted bands.  A
+    // partial reimplementation gets a confident wrong answer (four separate
+    // ways, measured — Codex #754), and for the greedy band_span_charge modes
+    // no reimplementation can be right at all: they read live occupancy that
+    // has moved on by the time anyone asks.
+    //
+    // EMPTY under band_span_charge 0 — that path charges a single band and is
+    // its own inverse, so it keeps no record.  `charge_log_active()` says so,
+    // so a caller can report "not measurable here" instead of "nothing found".
+    std::vector<CommittedCharge> committed_charges() const;
+    bool charge_log_active() const { return band_span_charge_ > 0; }
 
 private:
     // Injected measured-congestion demand: (cut index, band, amount), applied
