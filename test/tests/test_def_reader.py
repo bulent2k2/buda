@@ -235,6 +235,48 @@ END SPECIALNETS
     assert not _sn("SPECIALNETS.unread_wire", d)
 
 
+def test_a_property_VALUE_spelled_like_a_route_keyword_is_not_a_route():
+    # The lexer strips the quotes, so `+ PROPERTY mode "ROUTED"` yields a
+    # token identical to the keyword.  Matching by spelling would make this
+    # net look like it had wiring — and since that decides whether it may say
+    # `no_geometry`, a DEF the reader handled perfectly would be miscensused.
+    d = _parse("""SPECIALNETS 1 ;
+  - VDD ( * VDD ) + PROPERTY mode "ROUTED" + USE POWER ;
+END SPECIALNETS
+""")
+    assert len(d.special_wires) == 0
+    assert _sn("SPECIALNETS.no_geometry", d)     # this net really has none
+    assert not _sn("SPECIALNETS.unread_wire", d)
+
+
+def test_a_property_VALUE_of_NEW_does_not_forge_a_path_on_a_read_route():
+    # The mirror: a route we read in full, followed by a property whose value
+    # is `NEW`.  `NEW` continues a wiring clause, so one after `+ PROPERTY`
+    # is not a path — counting it invents an unread wire on a clean import.
+    d = _parse("""SPECIALNETS 1 ;
+  - VDD ( * VDD ) + ROUTED metal5 400 ( 1000 1000 ) ( 9000 * )
+      + PROPERTY mode "NEW" + USE POWER ;
+END SPECIALNETS
+""")
+    assert len(d.special_wires) == 1
+    assert not [u for u in d.unmodelled if u.construct.startswith("SPECIALNETS")]
+
+
+def test_SHAPE_does_not_end_the_wiring_clause_a_following_NEW_continues():
+    # `+ SHAPE`/`+ STYLE` sit INSIDE the wiring clause, so the `NEW` after one
+    # is still a path.  If a `+` were taken to always end the clause, this
+    # second stripe would not be counted and its loss would go unreported.
+    d = _parse("""SPECIALNETS 1 ;
+  - VDD ( * VDD ) + ROUTED metal5 400 + SHAPE STRIPE ( 1000 1000 ) ( 9000 * )
+      NEW metal5 400 ( 1000 1000 ) ( * 9000 ) + USE POWER ;
+END SPECIALNETS
+""")
+    # The first path is lost to SHAPE, the second is read normally.
+    assert len(d.special_wires) == 1
+    assert len(_sn("SPECIALNETS.unread_wire", d)) == 1
+    assert not _sn("SPECIALNETS.no_geometry", d)
+
+
 def test_a_wire_the_reader_reads_in_full_is_censused_as_nothing():
     # The false-positive guard: the plain form our own DEFs use must stay
     # silent, or every clean import grows a warning about metal it did read.

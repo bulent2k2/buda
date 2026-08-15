@@ -266,11 +266,32 @@ void read_specialnet(const std::vector<std::string>& t, DefDesign& d,
                      int line) {
     const std::string net = t.size() >= 2 ? unescape(t[1]) : "";
     const size_t before = d.special_wires.size();
-    int paths = 0;               // `+ ROUTED`/`NEW`/… path starts seen
+    int paths = 0;               // wiring clauses seen, however they read
+    bool in_wiring = false;      // inside a `+ ROUTED|FIXED|COVER` clause
     // `+ ROUTED <layer> <width> ( x y ) ( x y ) … [NEW <layer> <width> …]`
+    //
+    // Matched by POSITION, not by spelling.  `ROUTED`/`FIXED`/`COVER` open a
+    // clause and so must follow a `+`; `NEW` continues one and so must not.
+    // A loose keyword match reads the VALUE in `+ PROPERTY mode "ROUTED"` as
+    // a route — the lexer strips the quotes, so the token is identical — and
+    // since `paths` decides whether this net may say `no_geometry`, that
+    // would put a wrong census on a DEF the reader handled perfectly.
     for (size_t i = 2; i < t.size(); ++i) {
-        const std::string kw = upper(t[i]);
-        const bool starts = is_special_path_start(kw);
+        bool starts = false;
+        if (t[i] == "+") {
+            const std::string nx = i + 1 < t.size() ? upper(t[i + 1]) : "";
+            if (nx == "ROUTED" || nx == "FIXED" || nx == "COVER") {
+                ++i;                       // `i` now indexes the keyword
+                starts = true;
+                in_wiring = true;
+            } else if (nx != "SHAPE" && nx != "STYLE") {
+                // `+ SHAPE`/`+ STYLE` are PART of the wiring clause; every
+                // other `+` ends it, so a later bare `NEW` is not a path.
+                in_wiring = false;
+            }
+        } else if (in_wiring && upper(t[i]) == "NEW") {
+            starts = true;
+        }
         if (!starts) continue;
         ++paths;
         size_t j = i + 1;

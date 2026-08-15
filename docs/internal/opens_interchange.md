@@ -1040,6 +1040,11 @@ parsing one-net DEFs through `parse_def`:
 | `+ ROUTED M6 2000 RECT ( … ) ( … )` | **0** |
 | `+ ROUTED M6 2000 POLYGON ( … ) …` | **0** |
 
+The clauses it recognises at all are `+ ROUTED`, `+ FIXED`, `+ COVER` and
+their `NEW` continuations — matched by POSITION since the lexer strips
+quotes, so a `+ PROPERTY mode "ROUTED"` value is not mistaken for wiring.
+Any other geometry-bearing clause is outside what the reader looks for.
+
 `+ SHAPE` is not an exotic form — DEF's grammar is
 `ROUTED layer width [+ SHAPE type] [+ STYLE n] points`, so the `+` sits
 between the width and the first `(` and the point walk never starts. That is
