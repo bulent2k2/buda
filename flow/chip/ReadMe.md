@@ -27,10 +27,7 @@ not affordable at this scale — on `chip_topdown` it ran >10 minutes without
 converging against a 135s base flow — and `refine_selection` is an end-of-flow
 WL polish that wants a converged endpoint.
 
-### What that costs, measured: `chip_stack_bottomup`'s 99 overlaps
-
-The near-healerless choice is why this vehicle reads worse than it is, and it
-is worth knowing before anyone treats its numbers as a routing verdict.
+### `chip_stack_bottomup`'s 99 overlaps: a measured QoR cost, not an artifact
 
 `42071c1` ("dnuts: a busterm tap re-extends only the bits it serves") removed
 metal that reached nothing — 8 bits x ~370 units on its repro, with
@@ -40,27 +37,37 @@ metal that reached nothing — 8 bits x ~370 units on its repro, with
     chip/chip_bottomup         54/243/19 -> 56/231/17   better
     chip/chip_stack_bottomup   69/252/20 -> 99/240/20   WORSE on the gate
 
-That +30 kept the nightly QoR gate red for four nights.  The commit itself
-called the mechanism a hypothesis — "a different greedy basin from a changed
-start state" — and asked for a look before anyone called the trade settled.
+That +30 kept the nightly QoR gate red for four nights.  The commit called the
+mechanism a hypothesis — "a different greedy basin from a changed start state"
+— and asked for a look before anyone called the trade settled.
 
-**The look, 2026-08-14** (`-j 1`, this vehicle, one healer round added):
+**The look, 2026-08-15.**  Identical healer configuration
+(`negotiate_congestion` + `ripup_reroute` + `refine_selection 30`) on BOTH
+sides of the commit, era-correct builds, this flow's own text (the commit
+touches no file under `flow/chip/`, so both arms run the same script):
 
-    as shipped (negotiate only)             99/240/20   detWL 37,323,998   154s
-    + ripup_reroute + refine_selection 30   66/ 80/ 6   detWL 38,154,391   489s
-    pre-42071c1 baseline                    69/252/20
+    commit                    unhealed                 HEALED
+    42071c1^  (pre-fix)       69/252/20  detWL 38.07M   44/66/7  detWL 38.48M
+    42071c1   (post-fix)      99/240/20  detWL 37.38M   66/80/6  detWL 38.21M
 
-The hypothesis holds.  With healing, the post-fix design beats the PRE-fix
-baseline on all three gate metrics — overlaps 66 < 69, unplaced 80 < 252,
-violating bundles 6 < 20 — so the +30 is a healer-basin artifact of an
-under-healed vehicle, not metal the fix stranded.  Removing dangling metal
-cannot create an overlap; it changes where the greedy healer starts.
+**The hypothesis does NOT hold.**  Under equal healing the fix costs **+22
+overlaps and +14 unplaced**, buying one fewer violating bundle and -0.69%
+detailed WL.  Healing recovers roughly a quarter of the unhealed +30 gap and no
+more; the rest is a real QoR cost that survives every healer this vehicle can
+afford.
 
-The flow is deliberately NOT changed: healing it costs 3.2x runtime (+5.6 min
-per sweep, and the nightly sweeps twice) on a vehicle whose whole point is
-fast iteration, to buy a number nobody routes for.  Read its overlaps as "this
-vehicle does not heal", and reach for the healed variants above when the
-question is how good the design can get.
+The first version of this section claimed the opposite, by comparing healed
+POST (66/80/6) against unhealed PRE (69/252/20) — two variables at once, so it
+measured healing and attributed it to the fix (Codex P2 on #751).  A healed-vs-
+unhealed comparison across a code change cannot separate "the change is
+harmless" from "this vehicle is under-healed", and the difference between those
+two readings is the whole question.
+
+What the fix buys is CORRECTNESS: metal reaching nothing is an ANTENNA-class
+defect that `check_design` was reporting as Success.  Reverting it to recover
+22 overlaps would trade a real electrical fault for a metric.  But it is a
+trade, it is not free, and on this vehicle it is not favourable — which is what
+the commit asked to have established, now established.
 
 For the **healerless fast-iteration mode** these vehicles used to have, delete
 that line and the `set_planner_param healersAhead 1` above it (which gates the
