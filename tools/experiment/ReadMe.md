@@ -113,21 +113,28 @@ actually read?
     committed bundles                    555
     committed segments                  1566
     coincident pairs                       4   (0.2554% of segments)
-    affected band charges                 13
-    ...landing on a band OVER capacity     0
 
-Four instances in 555 committed bundles, none on an overflowing band. So the
+Four instances in 555 committed bundles. So the
 effect on other bundles is bounded to nothing measurable here — and the reason
 is the same fact `base_rate_collinear.py` found from the other side: the shape
 lives in candidates that LOSE. A duplicate inside a losing candidate is charged
 into a scoring overlay and dies with it; it never reaches the committed field.
 
-What is deliberately **not** claimed: the per-instance magnitude. The script
-prints a per-band ratio and labels it an upper bound loose in both directions
-(the whole charge on one band though `for_each_band_w` spreads it by a weight
-≤ 1; the raw cap as denominator though the engine adds a `track_pitch` margin).
-It comes out above 1, which means the bound is uninformative — not that a band
-is several times over. The incidence is the finding; the ratio is not.
+What is deliberately **not** claimed: the per-instance magnitude, or how close
+any affected band sits to capacity. A first cut reported both, by mapping each
+duplicate onto the cut and band it charges — and got that wrong four ways
+(Codex #754): the grid of the **wrong axis** (`for_each_cut_` passes
+`is_vcut = is_h`, so an H segment's bands index `y_grid_` and a V segment's
+`x_grid_` — the opposite of the obvious reading), no filter on cut
+**direction**, an inclusive band test where `find_band` is **half-open**, and
+the topology's nominal perp where `commit_plan` charges through `plan.seg_perp`
+and may **spread** one segment across several weighted bands.
+
+Those numbers ("13 affected band charges", "0 landing on a band over capacity")
+are **withdrawn**, and the band census is gone rather than patched — a partial
+reimplementation of `for_each_band_w` is exactly the trap flagged below, and the
+first cut walked into it. The two numbers above never touched a band and are
+unchanged; the conclusion rests on them.
 
 Two honest limits, either of which would need the next step:
 

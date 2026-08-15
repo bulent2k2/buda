@@ -35,8 +35,7 @@ import pytest
 _ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(_ROOT / "tools" / "experiment"))
 
-from phantom_charge import (band_of, coincident_pairs,  # noqa: E402
-                            orient, perp_of)
+from phantom_charge import coincident_pairs, orient, perp_of  # noqa: E402
 
 pytestmark = pytest.mark.mid
 
@@ -127,15 +126,6 @@ def test_orient_rejects_degenerate_and_diagonal():
 def test_perp_is_the_axis_the_segment_does_not_run_along():
     assert perp_of(_Seg(0, 7, 100, 7), "H") == 7
     assert perp_of(_Seg(7, 0, 7, 100), "V") == 7
-
-
-def test_band_lookup_matches_the_engine_convention():
-    """Bands are grid[b]..grid[b+1], as `for_each_band_w` reads them."""
-    grid = [0.0, 10.0, 20.0, 30.0]
-    assert band_of(grid, 5.0) == 0
-    assert band_of(grid, 15.0) == 1
-    assert band_of(grid, 25.0) == 2
-    assert band_of(grid, 100.0) is None
 
 
 def test_three_collinear_segments_report_every_duplicated_pair():

@@ -261,7 +261,7 @@ usage **other** bundles read — and there it meets OVERFLOW, a hard STRICT
 constraint, so it could push somebody else's candidate out of the STRICT tier.
 `tools/experiment/phantom_charge.py` measured that too, and it is also not
 happening: across 8 flows the shape reaches committed geometry **4 times in 555
-bundles / 1566 segments (0.26%)**, on **0** bands that are over capacity.  Of
+bundles / 1566 segments (0.26%)**.  Of
 those 4, NUTS co-placed 3 (genuinely one wire charged twice) and placed 1 on
 separate tracks — where two charges was the CORRECT answer, which is why a
 blanket same-bundle charge dedup would be wrong.  The reason it is so rare is

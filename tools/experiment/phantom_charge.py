@@ -38,8 +38,23 @@ Two questions, cheapest first, and the first can refute the whole thing:
      is why a blanket "dedup same-bundle charge" fix would be wrong.
 
   P1 CENSUS.  How often does this occur in COMMITTED geometry — the only
-     geometry that persists in `cuts_` and that other bundles can read — and
-     does any affected band actually sit over capacity?
+     geometry that persists in `cuts_` and that other bundles can read?
+
+Deliberately NOT answered here: HOW MUCH any one instance inflates a specific
+band.  A first cut tried, by mapping each duplicate onto the cut/band it charges
+— and got it wrong in four separate ways (Codex #754): it picked the grid of the
+WRONG AXIS (`for_each_cut_` passes `is_vcut = is_h`, so an H segment's bands
+index `y_grid_` and a V segment's `x_grid_`, the opposite of the obvious
+reading), it never filtered cuts by DIRECTION, it used an inclusive band test
+where `find_band` is half-open, and it read the topology's nominal perp while
+`commit_plan` charges through `plan.seg_perp` and may SPREAD one segment over
+several weighted bands (`band_span_charge`).
+
+That is the trap this file warns about below: a partial reimplementation of
+`for_each_band_w` yields a confident wrong answer.  Quantifying per-band impact
+belongs in the engine, which already owns that arithmetic — see the note at the
+bottom of tools/experiment/ReadMe.md.  What survives here needs none of it:
+both numbers below are counts over geometry, and neither touches a band.
 
 Scoped to SELECTED topologies on purpose.  A duplicate inside a candidate that
 then loses is charged into a scoring overlay and dies with the candidate; it
@@ -140,15 +155,7 @@ def coincident_pairs(topo, seg_layers):
     return out
 
 
-def band_of(grid, coord):
-    """Index of the band containing `coord` (bands are grid[b]..grid[b+1])."""
-    for k in range(len(grid) - 1):
-        if grid[k] <= coord <= grid[k + 1]:
-            return k
-    return None
-
-
-def run(flow, p0, rows, totals):
+def run(flow, p0, totals):
     s = solve(flow)
     nr = getattr(s, "nuts_result", None)
     if nr is None:
@@ -156,58 +163,35 @@ def run(flow, p0, rows, totals):
     placed = {(ts.bundle_id, ts.seg_idx): ts.track_position
               for ts in nr.segments if ts.placed}
 
-    planner = getattr(s, "planner", None)
-    cuts = planner.get_cuts() if planner is not None else []
-    xg = planner.get_x_grid() if planner is not None else []
-    yg = planner.get_y_grid() if planner is not None else []
-
     for w in s.bundles:
         if not w.plan or w.plan.selected_topology_index < 0:
             continue
         t = w.input.candidates[w.plan.selected_topology_index]
         seg_layers = list(w.plan.seg_layers)
         bid = w.input.original_bundle.id
-        nbits = len(w.input.original_bundle.get_net_names())
         totals["bundles"] += 1
         totals["segments"] += len(t.segments)
 
-        for (i, j, lo, hi, o, perp, layer) in coincident_pairs(t, seg_layers):
+        for (i, j, _lo, _hi, _o, _perp, _layer) in coincident_pairs(t, seg_layers):
             totals["pairs"] += 1
             pi, pj = placed.get((bid, i)), placed.get((bid, j))
             if pi is None or pj is None:
                 p0["one or both unplaced"] += 1
-                continue
-            if abs(pi - pj) >= 1e-9:
+            elif abs(pi - pj) >= 1e-9:
                 p0["placed APART (charge correct)"] += 1
-                continue
-            p0["co-placed (phantom)"] += 1
-            if not cuts:
-                continue
-
-            # Per-band size, as a LOOSE UPPER BOUND — see the report note.
-            charge = (s.layers.eff_bus_width(nbits, w.input.width, layer)
-                      + getattr(s, "_nuts_pitch", 1.0))
-            grid = yg if o == "V" else xg
-            for c in cuts:
-                if c.layer_id != layer or not (lo <= c.cut_coord <= hi):
-                    continue
-                b = band_of(grid, perp)
-                if b is None or b >= c.num_bands():
-                    continue
-                cap = c.cap(b)
-                if cap > 0:
-                    rows.append((charge, cap, c.usage(b)))
+            else:
+                p0["co-placed (phantom)"] += 1
 
 
 def main():
     flows = sys.argv[1:] or FLOWS
-    p0, rows, totals = Counter(), [], Counter()
+    p0, totals = Counter(), Counter()
     for f in flows:
         p = BUDA / f
         if not p.exists():
             print(f"-- not found: {f}")
             continue
-        run(p, p0, rows, totals)
+        run(p, p0, totals)
         print(f"scanned {f}")
 
     print("\n" + "=" * 74)
@@ -224,20 +208,9 @@ def main():
     print(f"  committed segments                {segs:>6}")
     print(f"  coincident pairs                  {totals['pairs']:>6}"
           f"   ({100.0 * totals['pairs'] / max(1, segs):.4f}% of segments)")
-    print(f"  affected band charges             {len(rows):>6}")
-    over = sum(1 for ch, cap, use in rows if use > cap)
-    print(f"  ...landing on a band OVER capacity {over:>5}")
-
-    if rows:
-        fr = sorted(ch / cap for ch, cap, _ in rows)
-        print(f"\n  per-band size, LOOSE UPPER BOUND: median {fr[len(fr)//2]:.2f}"
-              f"  max {fr[-1]:.2f}")
-        print("  NOTE: loose in BOTH directions — the whole charge is put on one\n"
-              "  band though `for_each_band_w` spreads it by a weight <= 1, and the\n"
-              "  denominator is the raw cap though the engine adds a track_pitch\n"
-              "  margin.  A value >= 1 therefore means the bound is UNINFORMATIVE,\n"
-              "  not that the band is that far over.  Read the incidence and the\n"
-              "  over-capacity count above; do not quote this ratio as a finding.")
+    print("\n  Per-band impact is NOT reported: see the module docstring.  It\n"
+          "  needs `for_each_band_w`'s own arithmetic, and the four ways a\n"
+          "  hand-rolled version got it wrong are recorded there.")
 
 
 if __name__ == "__main__":
