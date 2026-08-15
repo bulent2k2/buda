@@ -48,13 +48,33 @@ def _run_buda(script):
 
 
 @pytest.mark.mid
+# ENFORCED on the reference environment, lenient off it — the same rule
+# test_nuts_placement_golden.py applies to its HOST_SENSITIVE_FLOWS, keyed on
+# the same BUDA_NUTS_GOLDEN_STRICT that ci.md documents CI setting.
+#
+# The marker used to be unconditional, reading "reference-host-owned golden
+# pending regen".  That regen has landed — on 2026-08-13, under CI's pinned
+# ISA, `regen_goldens.py --verify` reports ALL OK (10 flows), all 9 placement
+# goldens pass under STRICT, and re-running both regens rewrites every golden
+# byte-identically (zero diff) — which is why it had started reporting XPASS.
+#
+# But "the goldens are current" is NOT "this flow is host-stable", and the
+# first cut of this change conflated them (Codex #753).  This flow is NOT in
+# the golden corpus at all (that is b4_bus_077.buda, a different flow), it
+# pins candidates by INDEX (`select_topology 1 4` / `2 10`), and nothing here
+# changed those pins or the routing code.  So the documented host-fragile
+# placement can still bite a native or Windows build, where dropping the
+# guard outright would turn a known environmental failure into a hard one.
+#
+# Conditional rather than unconditional so the marker cannot go stale in the
+# same way twice: under STRICT this is an ordinary test that must pass, so CI
+# reports a real regression here instead of swallowing it.
 @pytest.mark.xfail(
+    not os.environ.get("BUDA_NUTS_GOLDEN_STRICT"),
     strict=False,
-    reason="Reference-host-owned golden pending regen: the hanan_loci-default "
-           "flip (01c6cfbc) left big2_b4_b24.buda's select_topology index pins "
-           "host-fragile, so bundle 1's pinned candidate strands 60 bits off "
-           "the reference host (b4_bus_077 in that commit's regen list). "
-           "strict=False: it may route cleanly on the reference host. "
+    reason="Off the reference environment this pinned flow's select_topology "
+           "index pins are host-fragile (bundle 1's pinned candidate can "
+           "strand 60 bits); set BUDA_NUTS_GOLDEN_STRICT=1 to enforce. "
            "See docs/internal/hanan_loci_golden_regen.md.")
 def test_big2_b4_b24_routes_cleanly():
     """Both pinned-buggy bundles now route with no opens at any stage, 0 unplaced.

@@ -237,7 +237,28 @@ def golden_path(flow, base=None):
 
 
 def main():
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else golden_dir()
+    # The interface is exactly ONE optional positional: an output DIRECTORY.
+    # Validate the WHOLE argv, not just argv[1] (Codex #753): an option after
+    # the directory — `nuts_snapshot.py /tmp/g --bogus` — would otherwise be
+    # silently ignored and the expensive regeneration would run to a happy
+    # exit 0, which is how a mistyped automation call passes for success.
+    # Before any of this, a bare `--help` became a DIRECTORY of that name with
+    # every golden written into it.
+    args = sys.argv[1:]
+    usage = (f"usage: {os.path.basename(sys.argv[0])} [OUT_DIR]\n"
+             f"  Regenerate the NUTS placement goldens (default: "
+             f"{os.path.relpath(golden_dir(), ROOT)}).\n"
+             f"  Takes at most one argument, an output directory.")
+    if any(a in ("-h", "--help") for a in args):
+        print(usage)
+        sys.exit(0)
+    bad = [a for a in args if a.startswith("-")]
+    if bad or len(args) > 1:
+        why = (f"unrecognized option(s): {', '.join(map(repr, bad))}" if bad
+               else f"expected at most 1 argument, got {len(args)}")
+        print(f"{usage}\n  Error: {why}.")
+        sys.exit(2)
+    out_dir = args[0] if args else golden_dir()
     os.makedirs(out_dir, exist_ok=True)
     for flow in CORPUS:
         if not os.path.exists(os.path.join(ROOT, flow)):

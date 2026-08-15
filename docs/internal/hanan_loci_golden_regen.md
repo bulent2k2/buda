@@ -12,17 +12,37 @@ order-canonical comparison (`tools/topo_snapshot.py::canonicalize`, PR #327);
 the content regen stays **reference-host-owned** — goldens must only ever be
 rewritten on the host that owns them, never on a drive-by container.
 
-**STATUS (2026-07-19): the flip has LANDED on branch
-`claude/hanan-loci-default-flip`** (default `allow_hanan_loci_ = true`,
-`no_hanan_loci` opt-out, pin remaps applied, spec tests inverted — see
-[hanan_loci_flip_audit.md](hanan_loci_flip_audit.md), APPLIED).  The
-`--write` re-baseline is the branch's ONE remaining step and lands **on that
-same branch** (the owner runs it on the reference host and pushes) — use the
-abbreviated procedure at the end of this doc, not the from-scratch flip
-walk-through in the middle (kept for the record).
+**STATUS (2026-08-13): DONE — the flip and its re-baseline are both on
+`main`, and nothing here is outstanding.**  `src/topology.h` carries the
+default (`allow_hanan_loci_ = true`) and the goldens match it.  Verified
+under CI's pinned ISA (`BUDA_ARCH=x86-64-v2` — `ci.md` names CI the golden
+reference host, so that is the environment the goldens are owned by, not any
+one developer box):
 
-This doc is the turnkey procedure for that regen, built around
-`tools/regen_goldens.py`:
+| check | result |
+|---|---|
+| `regen_goldens.py --verify` | **ALL OK (10 flows)** |
+| `test_nuts_placement_golden.py` with `BUDA_NUTS_GOLDEN_STRICT=1` | **9/9 pass**, incl. all four `HOST_SENSITIVE_FLOWS` |
+| re-running BOTH regens (`--write` + `nuts_snapshot.py`) | **zero diff** — every golden rewritten byte-identically |
+
+That last row is the real proof: a re-baseline today is a no-op, so there is
+nothing left to regenerate.  The procedure below is kept as the **turnkey kit
+for the next content-shifting change**, not as pending work.
+
+**What this does NOT say.**  "The goldens are current" is not "every flow is
+host-stable", and the two must not be conflated.
+`test_nuts_busterm_face_anchor.py::test_big2_b4_b24_routes_cleanly` exercises
+`big2_b4_b24.buda`, which is **not in the golden corpus at all** (that is
+`b4_bus_077.buda`, a different flow) and which pins candidates by INDEX
+(`select_topology 1 4` / `2 10`).  Its `pytest.xfail` used to read "golden
+pending regen" unconditionally and had started reporting XPASS; it is now
+**conditional on `BUDA_NUTS_GOLDEN_STRICT`** — enforced on the reference
+environment, lenient off it — the same rule
+`test_nuts_placement_golden.py` applies to its `HOST_SENSITIVE_FLOWS`.  So CI
+reports a real regression there instead of swallowing it, while a native or
+Windows build still gets the documented environmental leniency.
+
+The kit is built around `tools/regen_goldens.py`:
 
 ```
 PYTHONPATH=build:tools python3 tools/regen_goldens.py --verify   # read-only check
