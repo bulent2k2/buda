@@ -606,3 +606,102 @@ def test_the_single_boundary_splice_is_preserved():
                   ("SIGNAL", 1, 1)]).ndr_geom()
     assert not g.unbounded
     assert buda.ndr_max_slots(g) == 2
+
+
+# ── "no rail" is not "no end" ────────────────────────────────────────────
+
+def test_a_BOUNDED_all_signal_layer_has_a_real_ceiling():
+    """A DEF `TRACKS … DO n` ENUMERATES its tracks, so the layer has exactly
+    n of them however rail-free the period is.
+
+    Marking every all-signal pattern unbounded ignored that, and a metal rule
+    wider than the design's entire track count read as realizable while
+    detailed placement looked for tracks that were never declared (Codex P2
+    on #757).  Measured on `flow/ariane133`: metal10 807 tracks, metal9 847,
+    metal7/8 1615."""
+    pat = _pattern([("SIGNAL", 140, 140)])
+    pat.set_bounds(0.0, 280.0 * 9)          # ten tracks, first centre to last
+    g = pat.ndr_geom()
+    assert g.unbounded                      # the period still has no rail…
+    assert g.max_run == 10                  # …but the layer has ten tracks
+    assert buda.ndr_max_slots(g) == 10
+    assert buda.ndr_metal_for_slots(g, 10) > 0
+    assert buda.ndr_metal_for_slots(g, 11) == -1.0
+
+
+def test_an_UNBOUNDED_all_signal_layer_keeps_its_unlimited_ceiling():
+    """The twin: a pattern with no declared extent is a RULE, not an
+    enumeration, so nothing caps it."""
+    g = _pattern([("SIGNAL", 140, 140)]).ndr_geom()
+    assert g.unbounded and g.max_run == 0
+    assert buda.ndr_max_slots(g) > 1000
+    assert buda.ndr_metal_for_slots(g, 500) == pytest.approx(280 * 500 - 140)
+
+
+def test_the_periodic_closed_form_matches_an_exhaustive_scan():
+    """The closed form replaced a tile-and-rescan that was O(k^2) per query.
+    It has to agree with the thing it replaced on every window, including a
+    period whose widths AND gaps vary — where the narrowest window, not the
+    first, is the answer."""
+    slots = [("SIGNAL", 100, 50), ("SIGNAL", 200, 10), ("SIGNAL", 50, 300)]
+    g = _pattern(slots).ndr_geom()
+    n = len(slots)
+
+    def brute(k):
+        best = None
+        for p in range(n):
+            m = 0.0
+            for j in range(k):
+                m += slots[(p + j) % n][1]
+                if j + 1 < k:
+                    m += slots[(p + j) % n][2]
+            best = m if best is None or m < best else best
+        return best
+
+    for k in range(1, 40):
+        assert buda.ndr_metal_for_slots(g, k) == pytest.approx(brute(k)), k
+
+
+def test_resolving_a_wide_rule_does_not_blow_up():
+    """A perf guard with a wide margin, because the failure it pins is a
+    HANG rather than a wrong answer.
+
+    Resolution walks k upward calling `ndr_metal_for_slots` at each step.
+    While that rebuilt and rescanned a 2k-entry tile per call the total was
+    cubic — measured, the 1..K sweep went 98 ms at K=500 to 801 ms at K=1000,
+    and K=4000 would have been most of a minute.  The closed form makes each
+    query O(period)."""
+    import time
+    g = _pattern([("SIGNAL", 140, 140)]).ndr_geom()
+    t0 = time.time()
+    for k in range(1, 4001):
+        buda.ndr_metal_for_slots(g, k)
+    assert time.time() - t0 < 5.0, "the cubic resolution is back"
+
+
+def test_the_periodic_CLEARANCE_closed_form_matches_an_exhaustive_scan():
+    """The other closed form, and the one that nearly shipped unverified.
+
+    A sabotage that used the wrong starting phase for the guard widths —
+    `sum_w(p, gu)` where the guards are the INTERIOR slots and start at
+    `p+1` — passed the entire suite.  Nothing exercised
+    `ndr_clearance_for_guards` on a PERIODIC pattern whose answer depends on
+    the phase: the all-signal vehicles have one slot per period (every phase
+    identical) and the railed ones never take this branch.
+
+    Same lesson as test_ndr_audit_vacuity: a formula is not verified by the
+    tests that happen to pass around it."""
+    slots = [("SIGNAL", 100, 50), ("SIGNAL", 200, 10), ("SIGNAL", 50, 300)]
+    g = _pattern(slots).ndr_geom()
+    n = len(slots)
+
+    def brute(gu):
+        best = None
+        for p in range(n):
+            c = sum(slots[(p + 1 + j) % n][1] for j in range(gu))       # guards
+            c += sum(slots[(p + j) % n][2] for j in range(gu + 1))      # gaps
+            best = c if best is None or c < best else best
+        return best
+
+    for gu in range(0, 20):
+        assert buda.ndr_clearance_for_guards(g, gu) == pytest.approx(brute(gu)), gu
