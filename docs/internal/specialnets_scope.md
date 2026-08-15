@@ -11,9 +11,13 @@ tracks the power grid takes, so every imported layer is all-signal and NDR's
 obvious next step was "import the DEF's `SPECIALNETS`". Probing first says
 otherwise, in three steps.
 
+§1 was itself corrected after review caught it overstating the reader's
+coverage — the correction is kept in place rather than smoothed away, since
+it is the same fault this document exists to describe.
+
 ---
 
-## 1. The import already reads SPECIALNETS geometry
+## 1. The import reads SPECIALNETS geometry — but only its simplest form
 
 `read_specialnet` (`def_io.cpp`) parses the wires, and `bdb.cpp` turns each
 segment into a keepout tagged `"SPECIALNET <net>"`:
@@ -23,9 +27,43 @@ segment into a keepout tagged `"SPECIALNET <net>"`:
 for (const auto& w : def.special_wires) { … stats.keepouts.push_back(…); }
 ```
 
-So a strap already **blocks** correctly, on both consumers (the Floorplan for
-the planner, the RoutingGrid for DNUTS). It even censuses a special net that
-carries no geometry (`SPECIALNETS.no_geometry`). There is no missing importer.
+So a strap **that the reader retains** blocks correctly, on both consumers
+(the Floorplan for the planner, the RoutingGrid for DNUTS). There is no
+missing *consumer*.
+
+**The reader itself is another matter, and this is a correction to the first
+draft of this document, which claimed there was no missing importer at all.**
+`read_specialnet` collects points only while the next token is `(`, so it
+handles a contiguous width-plus-polyline and nothing else. Measured by
+parsing one-net DEFs through `parse_def`:
+
+| special-wire form | wires kept | points | census |
+|---|---:|---:|---|
+| `+ ROUTED M6 2000 ( x y ) ( * y )` | 1 | 2 | — |
+| `+ ROUTED M6 2000 + SHAPE STRIPE ( x y ) ( * y )` | **0** | — | `SPECIALNETS.no_geometry` |
+| `… ( x y ) ( * y ) M6_M7 ( x y ) ( x2 * )` (via mid-path) | 1 | **2** | — |
+| `+ ROUTED M6 2000 RECT ( … ) ( … )` | **0** | — | `SPECIALNETS.no_geometry` |
+| `+ ROUTED M6 2000 POLYGON ( … ) …` | **0** | — | `SPECIALNETS.no_geometry` |
+
+Three things to take from that table:
+
+- **`+ SHAPE STRIPE` drops the stripe entirely.** DEF's grammar is
+  `ROUTED layer width [+ SHAPE type] [+ STYLE n] points`, so the `+` sits
+  between the width and the first `(` — the loop never starts. This is not an
+  exotic form; it is what a PDN generator emits for every stripe it draws.
+- **A via truncates the path.** The run before the via is kept and everything
+  after it is silently discarded, so a strap that changes layer is imported as
+  its first leg alone.
+- **The census actively misreports it.** A net whose geometry was present but
+  unparsed is recorded as `SPECIALNETS.no_geometry` — not silence, but a
+  positive claim that the DEF contained no wires. That is the one part of this
+  worth treating as a defect in its own right rather than a missing feature.
+
+**And the reason the first draft got this wrong is the subject of §4.** The
+two DEFs in this repo with any PDN are ours, and both are written in exactly
+the one form the reader handles — so "the reader is complete" was validated
+against vehicles typed by hand in the simplest legal syntax. That is item 12's
+mistake, one level further in than the place this document warns about it.
 
 ## 2. What is actually dropped is the strap's IDENTITY
 
@@ -78,7 +116,7 @@ it — and an absolute rectangle answers that directly.
 
 | DEF | SPECIALNETS | geometry |
 |---|---|---|
-| `demo/ariane/ariane.def` | 2 nets (VDD, VSS) | **none** — `( * VDD ) + USE POWER` and nothing else |
+| `demo/ariane/ariane.def` | 2 nets (VDD, VSS) | **none** — `( * VDD ) + USE POWER` and no `+ ROUTED` at all, so here `SPECIALNETS.no_geometry` is the truth and not §1's misreport |
 | `flow/def/chip.def` | 2 nets | 3 stripes, hand-authored |
 | `flow/rv/soc.def` | 2 nets | 3 stripes, hand-authored |
 | the rest | none | — |
@@ -94,12 +132,21 @@ generates rather than ships: an OpenROAD or Innovus run, not a download.
 
 ## 5. What to build, if this is picked up
 
-Two pieces, in order, and the first is worth doing on its own:
+Three pieces, in order, and the first two are each worth doing on their own:
+
+**(0) Finish the special-wire reader** — `+ SHAPE`/`+ STYLE` before the
+points, a path that continues past a via, and the `RECT`/`POLYGON` forms; and
+stop reporting an unparsed net as `SPECIALNETS.no_geometry`, which is a false
+statement rather than a missing one. Provably needed the moment a real PDN
+arrives, since a generator emits `+ SHAPE STRIPE` on every stripe — so §4's
+"get a power-routed DEF" and this are the same errand. Until then it cannot
+be measured on anything but a synthetic case, which is why it is not urgent
+and is also why it was not noticed.
 
 **(a) Carry the strap's identity into the session** — a net label on the
 imported keepout, or a parallel strap list beside the keepouts. Small,
 self-contained, no semantic risk: nothing reads the field yet, so it is
-additive. Do this first even if (b) waits, because it is the part that is
+additive. Worth doing even if (b) waits, because it is the part that is
 provably missing rather than merely absent.
 
 **(b) Teach the three NDR rail predicates to see strap geometry** alongside
