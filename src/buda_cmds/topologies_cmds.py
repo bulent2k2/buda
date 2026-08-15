@@ -631,6 +631,11 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
     # even before run_planner. A later select_topology overrides it; the
     # sidecar's layer overrides for a matching topology are still merged.
     session._apply_selections()
+    # Then the BDB's durable pins (uid-keyed) — BEFORE the persist below
+    # rewrites the topology table from session state, which is what wiped a
+    # previous session's pin on every flow re-run (a rebuild never calls
+    # load_pipeline, so nothing else restores them).
+    session._apply_bdb_pins()
     nt = session._persist_topologies()
     if nt:
         print(f"[BDB] persisted {nt} candidate topolog"
@@ -741,6 +746,10 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
     # Restore the sidecar baseline onto the fresh candidates (see
     # generate_topologies); keeps live state and GUI consistent pre-plan.
     session._apply_selections()
+    # Then the BDB's durable pins — before the persist wipes them (see
+    # generate_topologies; template bundles restore pre-expansion, so a
+    # restored pin propagates to every instance at run_planner hier).
+    session._apply_bdb_pins()
     nt = session._persist_topologies()
     if nt:
         print(f"[BDB] persisted {nt} candidate topolog"

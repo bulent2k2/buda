@@ -6,10 +6,13 @@
 #
 #   btcl flow.tcl [args...]        # run the flow
 #   btcl -v flow.tcl [args...]     # …and pop a viewer when the flow ends
-#   btcl -i flow.buda              # run a .BUDA flow, then drop into the
+#   btcl -i flow.buda [ckpt.bdb]   # run a .BUDA flow, then drop into the
 #                                  # interactive pin/edit prompt (auto-detects
 #                                  # hier/flat; `replan` replays the flow's own
-#                                  # routing tail — tools/buda_interact.tcl)
+#                                  # routing tail — tools/buda_interact.tcl).
+#                                  # The optional BDB is opened BEFORE the flow
+#                                  # so pins persist across sessions even when
+#                                  # the flow itself never opens one
 #   btcl -- -v.tcl                 # a script whose NAME starts with a dash
 #
 # WRAPPER OPTIONS ARE READ ONLY BEFORE THE SCRIPT.  The first non-option word
@@ -67,12 +70,12 @@ fi
 
 # -i drives a .BUDA flow through the interactive prompt driver.  A Tcl flow
 # is refused rather than half-worked: it runs its own buda::start and can
-# source flow/tcl/prompt.tcl itself (as flow/tcl/design.tcl does).
+# source tools/buda_prompt.tcl itself (as flow/tcl/design.tcl does).
 if [ "$INTERACTIVE" = 1 ]; then
   case "$1" in
     *.buda) exec tclsh "$PROJECT_ROOT/tools/buda_interact.tcl" "$@" ;;
     *)      echo "btcl: -i takes a .buda flow (a Tcl flow can source" \
-                 "flow/tcl/prompt.tcl itself)" >&2; exit 2 ;;
+                 "tools/buda_prompt.tcl itself)" >&2; exit 2 ;;
   esac
 fi
 

@@ -144,6 +144,24 @@ class PersistMixin:
             _k = self.bdb.bundle_gen_knobs(_bid)
             if _k:
                 knob_memo[_bid] = _k
+        # A durable select_topology pin must survive it too: the clear wipes
+        # the topology rows carrying is_pinned at BUNDLING time, two commands
+        # before the generation tail's _apply_bdb_pins could read them — so
+        # snapshot (bundle -> pinned uid) into a session memo first.  ONCE
+        # per BDB connection: only rows a PREVIOUS session wrote need
+        # rescuing (this session's pins live in memory and re-persist from
+        # there), a re-snapshot after this session's own persists would read
+        # back its own state for nothing on every chip-scale re-persist, and
+        # entries are POPPED as _apply_bdb_pins consumes them, so a pin the
+        # user has since dropped cannot be resurrected by a later rebundle.
+        if getattr(self, '_bdb_pin_snap_for', None) != id(self.bdb):
+            self._bdb_pin_snap_for = id(self.bdb)
+            self._bdb_pin_memo = {}
+            for _row in self.bdb.all_bundles():
+                _pinned = [tr.topo_uid for tr in self.bdb.topologies(_row.id)
+                           if tr.is_pinned]
+                if _pinned:
+                    self._bdb_pin_memo[_row.id] = _pinned[0]
         # Membership of FK-kept bundles must survive too (audit P3-04):
         # clear_bundles(keep_user) preserves a bundle row still referenced
         # by a kept USER topology, but wipes ALL bundle_net/bundle_busterm
@@ -270,6 +288,60 @@ class PersistMixin:
                     self._persisted_plan_fp = None   # same contract as above
                     self.bdb.rollback_batch()
                     raise
+
+    def _apply_bdb_pins(self):
+        """Re-attach durable `select_topology` pins from the open BDB onto a
+        REBUILT candidate pool, by stable content uid.
+
+        `select_topology` writes `topology.is_pinned` through to the BDB at
+        once, and `load_pipeline` restores it — but a flow that REBUILDS
+        (re-bundles and regenerates rather than resuming) starts from
+        unpinned session state, and the generation-tail persist rewrites the
+        topology table FROM that state: the durable pin was silently wiped
+        by the very re-run it was meant to outlive (the `btcl -i`
+        back-to-back case).  So the generation tail calls this right before
+        persisting: an unpinned wrapper whose BDB rows carry `is_pinned`
+        re-adopts the pin, resolved by `topo_uid` (indices may renumber
+        across regenerations, and generation is deterministic, so the same
+        candidate carries the same uid).  Precedence matches the sidecar
+        baseline: a pin made in THIS session (a script `select_topology`
+        before regeneration) wins; a pin whose uid matches no regenerated
+        candidate is reported and dropped rather than landing on a
+        neighbour.  Single pins only — a `pinned_group` super-candidate pin
+        rides BDB meta and stays load_pipeline-restored.  No-op without an
+        open BDB, and on any BDB with no pinned rows (every checked-in
+        fixture: none persist topology rows at all)."""
+        if self.bdb is None or not self.bundles:
+            return
+        memo = getattr(self, '_bdb_pin_memo', None) or {}
+        for w in self.bundles:
+            if (getattr(w.input, 'topology_pinned', False)
+                    or getattr(w.input, 'pinned_group', [])):
+                continue                              # session state wins
+            bid = str(w.input.original_bundle.id)
+            # The re-bundle's clear already wiped the rows, so the memo
+            # snapshotted at _persist_bundles is the primary source; live
+            # rows are the fallback for a regeneration with no re-bundle.
+            uid = memo.pop(bid, None)
+            if uid is None:
+                try:
+                    rows = [tr for tr in self.bdb.topologies(bid)
+                            if tr.is_pinned]
+                except RuntimeError:
+                    continue
+                uid = rows[0].topo_uid if rows else None
+            if uid is None:
+                continue
+            for ci, cand in enumerate(w.input.candidates):
+                if buda.topo_uid(cand) == uid:
+                    w.input.topology_pinned = True
+                    w.plan.selected_topology_index = ci
+                    print(f"[BDB] bundle {bid}: durable pin restored -> "
+                          f"topo {ci + 1} ({cand.type})")
+                    break
+            else:
+                print(f"Warning: bundle {bid}: durable pin (uid {uid}) "
+                      f"matches no regenerated candidate — pin dropped")
 
     @_batched
     def _persist_topologies(self):
