@@ -60,6 +60,15 @@ FILES = [
      15329,
      "the SRAM macro: 57.57 x 133.0 um.  THE missing LEF of item 9 — the "
      "one that actually describes demo/ariane/ariane.def"),
+    ("NangateOpenCellLibrary.tech.lef",
+     "Enablements/NanGate45/lef/NangateOpenCellLibrary.tech.lef",
+     "834a79295054cd4209178d1bade67c353863c47bb4b3c22ee38b862b7cec37f2",
+     19485,
+     "the TECHNOLOGY: the ten routing layers' PITCH and WIDTH.  The DEF's "
+     "TRACKS give positions and say nothing about how wide a wire is, so "
+     "without this every layer modelled one FULL-PITCH signal slot — a wire "
+     "occupying its whole track, with no space beside it.  Note the "
+     "PROPRIETARY Nangate header: fetched, never vendored"),
 ]
 
 _HERE = Path(__file__).resolve().parent

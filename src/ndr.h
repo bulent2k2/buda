@@ -60,6 +60,19 @@ struct NdrLayerRule {
 // dependency and the planner's hot loop keeps its scalar.
 struct NdrLayerGeom {
     std::vector<std::vector<std::pair<double, double>>> runs;
+    // The period contains NO rail, so its single run does not end — every
+    // tiled copy adds more signal slots to the same contiguous stretch.
+    //
+    // Rails are what bound a run, so modelling one period plus a single
+    // splice across the boundary is exact whenever they exist.  With none it
+    // under-reports without limit: a one-signal-slot period reported a
+    // longest run of 2, so a metal-shaped rule needing 3 slots was refused
+    // as unrealizable on a layer that can host any width at all.  That is
+    // not a corner case — a technology LEF says nothing about which tracks
+    // the power grid takes (that lives in the DEF's SPECIALNETS), so EVERY
+    // layer imported from one is all-signal, `flow/ariane133`'s ten
+    // included.
+    bool unbounded = false;
     bool empty() const { return runs.empty(); }
 };
 
@@ -209,10 +222,29 @@ inline NdrSpec ndr_resolve_for_pitch(const NdrSpec& s, double slot_pitch) {
 // declared patterns have non-uniform signal gaps, and in each the slot
 // widths agree while the trailing gaps differ — exactly the case a single
 // `k*w + (k-1)*sp` formula gets wrong.
+// The run a k-slot window is measured against.  Identity for a bounded run;
+// for an UNBOUNDED one the stored run is the repeating unit, tiled here until
+// it can host k slots plus one full period of starting phases (so the
+// narrowest-window scan below still sees every distinct alignment).
+inline const std::vector<std::pair<double, double>>&
+ndr_window_run(const NdrLayerGeom& g,
+               const std::vector<std::pair<double, double>>& run,
+               int k, std::vector<std::pair<double, double>>& scratch) {
+    if (!g.unbounded || (int)run.size() >= 2 * k) return run;
+    scratch = run;
+    while ((int)scratch.size() < 2 * k) {
+        const size_t n = run.size();
+        for (size_t i = 0; i < n; ++i) scratch.push_back(run[i]);
+    }
+    return scratch;
+}
+
 inline double ndr_metal_for_slots(const NdrLayerGeom& g, int k) {
     if (k <= 0) return 0.0;
     double best = -1.0;
-    for (const auto& run : g.runs) {
+    std::vector<std::pair<double, double>> scratch;
+    for (const auto& stored : g.runs) {
+        const auto& run = ndr_window_run(g, stored, k, scratch);
         if ((int)run.size() < k) continue;
         for (int i = 0; i + k <= (int)run.size(); ++i) {
             double m = 0.0;
@@ -232,9 +264,11 @@ inline double ndr_metal_for_slots(const NdrLayerGeom& g, int k) {
 inline double ndr_clearance_for_guards(const NdrLayerGeom& g, int gu) {
     if (gu < 0) return -1.0;
     double best = -1.0;
-    for (const auto& run : g.runs) {
+    std::vector<std::pair<double, double>> scratch;
+    for (const auto& stored : g.runs) {
         // gu guards sit BETWEEN two bits, so the window is gu+2 slots wide.
         const int need = gu + 2;
+        const auto& run = ndr_window_run(g, stored, need, scratch);
         if ((int)run.size() < need) continue;
         for (int i = 0; i + need <= (int)run.size(); ++i) {
             double c = 0.0;
@@ -247,10 +281,24 @@ inline double ndr_clearance_for_guards(const NdrLayerGeom& g, int gu) {
 }
 
 // The largest k any run in the period can host — the realizability ceiling.
+//
+// A period with no rail hosts ANY k, so the ceiling is not a property of the
+// pattern at all; `NDR_UNBOUNDED_SLOTS` stands for that.  It is a large finite
+// number rather than a sentinel so every existing `k <= ceiling` loop keeps
+// working unchanged — those loops terminate on the value they are searching
+// for, since metal grows by at least one slot width per step.  Reporting sites
+// ask `ndr_ceiling_is_unbounded` and say so in words instead of printing it.
+constexpr int NDR_UNBOUNDED_SLOTS = 1 << 20;
+
 inline int ndr_max_slots(const NdrLayerGeom& g) {
+    if (g.unbounded && !g.runs.empty()) return NDR_UNBOUNDED_SLOTS;
     int m = 0;
     for (const auto& run : g.runs) m = std::max(m, (int)run.size());
     return m;
+}
+
+inline bool ndr_ceiling_is_unbounded(const NdrLayerGeom& g) {
+    return g.unbounded && !g.runs.empty();
 }
 
 // The ABSOLUTE width in force on `layer_id` — that layer's `def_ndr_layer`

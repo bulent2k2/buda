@@ -563,3 +563,46 @@ def test_a_mixed_form_rule_keeps_both_declarations(tmp_path):
     # …and the mirror, so the fix is not one-directional.
     rev = ndr_cmds._spec_of(sess, "rev")
     assert rev.width_slots == 2 and rev.guard_slots == 1
+
+
+# ── an all-signal period has no ceiling ──────────────────────────────────
+
+def test_a_period_with_no_rail_hosts_a_run_of_any_length():
+    """Rails are what BOUND a contiguous run, so a period with none does not
+    end: every tiled copy adds more signal slots to the same stretch.
+
+    Modelling one period plus a single splice across the boundary is exact
+    while rails exist and under-reports without limit when they do not — a
+    one-slot period reported a longest run of 2, so a metal rule needing 3
+    slots was refused as unrealizable on a layer that can host any width.
+
+    Not a corner case: a technology LEF says nothing about which tracks the
+    power grid takes (that lives in the DEF's SPECIALNETS), so EVERY layer
+    imported from one is all-signal — `flow/ariane133`'s ten included, which
+    is how this was found."""
+    # flow/ariane133's metal1 once the tech LEF supplies its width:
+    # pitch 280 DBU, wire 140, so metal(k) = 140k + 140(k-1) = 280k - 140.
+    g = _pattern([("SIGNAL", 140, 140)]).ndr_geom()
+    assert g.unbounded
+    for k in range(1, 9):
+        assert buda.ndr_metal_for_slots(g, k) == pytest.approx(280 * k - 140)
+    assert buda.ndr_max_slots(g) > 1000          # i.e. not a real ceiling
+
+
+def test_a_railed_period_is_still_BOUNDED():
+    """The twin that keeps the fix honest: where rails exist they really do
+    end the run, and nothing about that changed."""
+    g = _pattern(DENSE).ndr_geom()
+    assert not g.unbounded
+    assert buda.ndr_max_slots(g) == 12
+    assert buda.ndr_metal_for_slots(g, 13) == -1.0
+
+
+def test_the_single_boundary_splice_is_preserved():
+    """`SIGNAL POWER SIGNAL` has two runs of one, and a legal TWO-slot wire
+    straddles the tiled boundary (the #717 case).  It is still bounded at 2 —
+    the unbounded rule keys on the RAIL, not on the run count."""
+    g = _pattern([("SIGNAL", 1, 1), ("POWER", 2, 1),
+                  ("SIGNAL", 1, 1)]).ndr_geom()
+    assert not g.unbounded
+    assert buda.ndr_max_slots(g) == 2

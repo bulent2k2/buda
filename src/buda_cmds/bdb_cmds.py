@@ -324,7 +324,19 @@ def _apply_def_tracks(session, st):
             # only the LEF knows.  Without one, a track is a position with no
             # width — model it as a full-pitch signal slot, which is what the
             # all-signal reading of a bare TRACKS statement means.
-            width = session._lef_track_width.get(lid, tr.step)
+            #
+            # THE UNITS DIFFER.  `_lef_track_width` is MICRONS (a LEF is
+            # written in them) while `tr.step` is in the design's layout
+            # units — DBU here, so 0.07 against 280.  Composing them raw
+            # gives a 0.07-wide wire on a 280 pitch: a signal density of
+            # 0.025% that would strand practically every bit while looking
+            # like a legitimate grid.  The conversion belongs HERE and not at
+            # the LEF read, because `set_import_scale dbu` resolves from the
+            # DEF's own UNITS statement and a tech LEF read before the DEF
+            # cannot know it yet.
+            lu_per_um = session.bdb.import_scale() if session.bdb else 1.0
+            width = session._lef_track_width.get(lid)
+            width = tr.step if width is None else width * lu_per_um
             width = min(width, tr.step)
             # DEF's `start` is the CENTRE of the first track; TrackPattern's
             # origin is the START of the first slot, and the generator returns

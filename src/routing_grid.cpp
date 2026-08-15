@@ -80,6 +80,14 @@ NdrLayerGeom TrackPattern::ndr_geom() const {
             // next copy, so one more period's worth is the repeating unit.
             const size_t n = last.size();
             for (size_t i = 0; i < n; ++i) last.push_back(last[i]);
+            // …and it does not stop THERE either.  With no rail anywhere in
+            // the period the stretch of signal slots is endless, so the run
+            // stored here is a repeating UNIT rather than the whole run, and
+            // consumers extend it on demand.  Splicing exactly one boundary
+            // capped every all-signal layer at two periods' worth: measured,
+            // a one-slot period reported a longest run of 2 and refused a
+            // 3-slot metal rule on a layer that can host any width.
+            g.unbounded = true;
         } else {
             // Distinct runs: the joined run is last + first.
             for (const auto& e : first) last.push_back(e);

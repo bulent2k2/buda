@@ -76,6 +76,23 @@ def_layer 8 metal8 V LOW 30
 def_layer 9 metal9 H TOP 30
 def_layer 10 metal10 V TOP 30
 
+# The TECHNOLOGY, for its track geometry alone.  The ten `def_layer` lines
+# above own each layer's identity — id, name, direction, TOP/LOW, overhead —
+# and `def_layer` has no syntax for PITCH or WIDTH, so those can only come
+# from here.  Without it every routing layer modelled ONE FULL-PITCH signal
+# slot: a wire occupying its entire track with no space beside it, zero rail
+# fraction, and a "minimum wire" of 280 DBU where this technology's metal1 is
+# 140.  Nothing about the ROUTE changed (one signal track per pitch either
+# way, so capacity is identical — measured: 126 segments, 195 overlaps and
+# 178 violations before and after), but every question about the WIDTH of a
+# wire was degenerate, which is why no NDR rule could mean anything here.
+#
+# Composed with the DEF rather than replacing it: TRACKS below supplies the
+# real track POSITIONS (pitch, offset, count) and this supplies the WIDTH.
+# The two are in different units — LEF microns against DEF database units —
+# and the conversion happens where the DEF's own UNITS is known.
+import_lef_tech NangateOpenCellLibrary.tech.lef
+
 import_def_lef ../../demo/ariane/ariane.def fakeram45_256x16.lef
 import_verilog ariane.v
 
