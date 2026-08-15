@@ -237,6 +237,130 @@ def test_armed_bdb_gives_a_flat_flow_durable_pins(tmp_path):
     assert "topo 4 of" in r.stdout and "[pinned]" in r.stdout
 
 
+def test_stage_resume_skips_the_rebuild_and_keeps_pins(tmp_path):
+    # The optional third argument is the design.tcl RESUME recipe
+    # generalized: a build session writes its recorded trace beside the
+    # checkpoint; `btcl -i flow ckpt.bdb plan` then replays only the SETUP
+    # portion, calls load_pipeline (which restores bundles, candidates, the
+    # plan and the PINS — the machinery built for this), and re-enters at
+    # the planner.  No bundler, no generator, and the pin needs no restore
+    # hack: load_pipeline's own path carries it.
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    bdb = tmp_path / "r.bdb"
+
+    r = _run(["tclsh", _DRIVER, flow, bdb], tmp_path, stdin="pin d1 4\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "resume trace" in r.stdout                  # the build wrote it
+    assert (tmp_path / "r.bdb.trace").exists()
+
+    r = _run(["tclsh", _DRIVER, flow, bdb, "plan"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "RESUMING at `plan`" in r.stdout
+    assert "RESUMED 8 bundles" in r.stdout
+    assert "replay> run_bundler" not in r.stdout       # the point of resume
+    assert "replay> generate_topologies" not in r.stdout
+    assert "topo 4 of" in r.stdout and "[pinned]" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    # `nuts` keeps the plan too: the planner is not re-run either.
+    r = _run(["tclsh", _DRIVER, flow, bdb, "nuts"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "replay> RUN_PLANNER" not in r.stdout       # trace spells it so
+    assert "replay> run_detailed_nuts" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    # A stage without a build first is refused with the remedy.
+    r = _run(["tclsh", _DRIVER, flow, tmp_path / "fresh.bdb", "plan"],
+             tmp_path)
+    assert r.returncode == 2
+    assert "run a build session first" in r.stderr
+
+
+def test_hier_stage_resume_holds_construction_and_replans(tmp_path):
+    # The hdesign.tcl resume rule, generalized: a hier flow's setup mixes
+    # session projections (stack, patterns — replayed) with BDB
+    # construction (cells, instances, buses, busterms — IN the checkpoint;
+    # a replayed add_inst is a duplicate-instance error), so the resume
+    # replays the whitelist and HOLDS the construction, then load_pipeline
+    # restores the templates and `run_planner hier` re-expands — the pinned
+    # template fanning back out to every instance.
+    src = (_ROOT / "flow" / "hbundles" / "08_cross_level.buda").read_text()
+    src = src.replace("open_bdb :memory:", "open_bdb h.bdb")
+    src = src.replace("source ../tracks/tracks.buda",
+                      f"source {_ROOT / 'flow' / 'tracks' / 'tracks.buda'}")
+    flow = tmp_path / "h.buda"
+    flow.write_text(src)
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="pin b_lohi 2\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "resume trace" in r.stdout
+
+    r = _run(["tclsh", _DRIVER, flow, tmp_path / "h.bdb", "plan"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "HIER flow" in r.stdout
+    assert "held by the checkpoint" in r.stdout
+    assert "replay> add_inst" not in r.stdout          # construction held
+    assert "replay> derive_busterms" not in r.stdout
+    assert r.stdout.count("topo 2 of 5") >= 4, "the template pin fell out"
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    # A hier resume below the planner would skip the expansion the restored
+    # pre-expansion view feeds — refused, naming the recipe that could.
+    r = _run(["tclsh", _DRIVER, flow, tmp_path / "h.bdb", "nuts"], tmp_path)
+    assert r.returncode == 2
+    assert "run_planner hier" in r.stderr
+
+
+def test_relative_checkpoint_paths_resolve_against_the_flow(tmp_path):
+    # The engine resolves a relative `open_bdb` against the FLOW's directory
+    # (the script-dir rule), and the recorder writes the token verbatim —
+    # so the driver must resolve it the same way: the trace lands BESIDE
+    # the checkpoint the engine actually wrote (not in the invocation CWD),
+    # and the resume's raw replay reopens the same file.
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    flow = sub / "mini.buda"
+    flow.write_text("open_bdb ckpt.bdb\n" + _FLAT_FLOW)
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="pin d1 4\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (sub / "ckpt.bdb").exists()             # the engine's rule
+    assert (sub / "ckpt.bdb.trace").exists()       # the trace beside it
+    assert not (tmp_path / "ckpt.bdb.trace").exists()
+
+    r = _run(["tclsh", _DRIVER, flow, sub / "ckpt.bdb", "plan"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "RESUMED 8 bundles" in r.stdout
+    assert "topo 4 of" in r.stdout and "[pinned]" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_sql_fixture_without_writeback_is_not_a_checkpoint(tmp_path):
+    # `open_bdb x.bdb.sql` without `writeback` materializes a THROWAWAY
+    # binary — nothing flushes back to the fixture — so the driver must not
+    # advertise it as a checkpoint, must not write a resume trace for it,
+    # and a stage resume against it is refused.
+    seed = tmp_path / "seed.buda"
+    seed.write_text("open_bdb seed.bdb\n" + _FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, seed], tmp_path,
+             stdin="save_bdb fix.bdb.sql\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (tmp_path / "fix.bdb.sql").exists()
+
+    flow = tmp_path / "sqlflow.buda"
+    flow.write_text("open_bdb fix.bdb.sql\n" + _FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "not a durable checkpoint" in r.stdout
+    assert "writeback" in r.stdout                 # the reason is named
+    assert not (tmp_path / "fix.bdb.sql.trace").exists()
+
+    r = _run(["tclsh", _DRIVER, flow, tmp_path / "fix.bdb.sql", "plan"],
+             tmp_path)
+    assert r.returncode == 2                       # no trace, refused
+
+
 def test_concurrent_sessions_fail_loudly_and_do_not_corrupt_the_bdb(tmp_path):
     # SQLite allows one writer, and that is the protection: two sessions on
     # the SAME armed BDB must never corrupt it — the unlucky one fails
