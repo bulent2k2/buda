@@ -423,6 +423,51 @@ and the expansion-map pin/unpin branches mirror onto the original — so the
 GUI explorer and any other driver get the same guarantee
 (`test/tests/test_hier_pin_persist.py`).
 
+### Any flow at all: `btcl -i <flow>.buda`
+
+The two vehicles carry their own design and their own route recipe; the
+generalization carries neither:
+
+```bash
+bin/btcl -i flow/hbundles/08_cross_level.buda     # any .buda flow
+bin/btcl -i demo/comprehensive_demo.buda
+```
+
+`tools/buda_interact.tcl` runs the flow **verbatim** (the engine's own
+`source`, so it means exactly what `bin/buda` makes it mean), then drops
+into the same prompt. What it knows about the flow it learns from the
+**recorder** (`BUDA_RECORD` at `do_command` — loops unrolled, `source`
+trees flattened), not from parsing its text:
+
+- **hier vs flat** — a recorded `run_planner hier`;
+- **the `replan` recipe** — the flow's own ROUTING TAIL: everything from
+  the first `run_planner` on, minus what a replay must not repeat
+  (viz/exports/dumps, pins and edits — a prompt unpin must not be fought
+  by a replayed pin — and generation/bundling: an iteration re-plans, it
+  does not rebuild). The flow's healers, checks, and reports replay with
+  it, so `replan` heals the way the flow heals;
+- **whether it routed** — no recorded `run_nuts` means nothing to
+  verdict, so a deliberately partial flow exits 0 with a note instead of
+  reading "never computed" as dirty. A **replay that stops partway** is a
+  failure, not a finished route: the error re-raises through the prompt
+  (which keeps the pins marked dirty), and a sticky flag fails the run
+  even if the session then quits with clean pins — a verdict is never
+  read off half-mutated state;
+- **where its checkpoint lives** — the last file-backed `open_bdb`; with
+  none, the driver says pins die with the session, because `save_bdb`
+  snapshots the OPEN BDB (opening one after the fact would not backfill
+  the rows the pipeline persists as it runs) — a flow that wants durable
+  pins opens a BDB, as `flow/tcl/design.tcl` does.
+
+The prompt itself is **`flow/tcl/prompt.tcl`** — one source, every
+driver: `design.tcl`, `hdesign.tcl`, and `btcl -i` all call
+`prompt::run`, so a pin means the same thing (durable at once,
+coherence auto-replan on `done`, registry-gated raw pass-through, typo
+tolerance) no matter which door you came in through. A Tcl flow given to
+`-i` is refused with a pointer — it runs its own `buda::start` and can
+source the prompt lib itself, exactly as the vehicles do. Pinned by
+`test/tests/test_tcl_interact.py`.
+
 This pair is also what measured the **fan-in taper gap**, now fixed: a
 resumed CONVERGENT/DIVERGENT bundle used to come back untapered and route
 wider than the design that was saved (this vehicle: 88 → 106 bit-wires, all

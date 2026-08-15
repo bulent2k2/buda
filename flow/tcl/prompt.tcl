@@ -40,7 +40,7 @@ namespace eval prompt {
         {unpin    "<sel>"        "drop a pin, letting the planner re-choose"}
         {replan   ""             "re-run the planner and route with the current pins"}
         {show     ""             "open the main viewer on the routed design"}
-        {save     ""             "write the .sql snapshot now, without leaving"}
+        {save     ""             "write the .sql snapshot now (re-plans first if pins changed)"}
         {commands "?glob?"       "list the ENGINE's commands (optionally filtered)"}
         {help     ""             "this list"}
         {done     ""             "re-plan if pins changed, save, and exit (also: exit, quit)"}
@@ -139,7 +139,23 @@ proc prompt::run {tag ps route bdb example} {
                 explore { buda::visualize_topologies {*}[lrange $line 1 end] }
                 show    { buda::visualize }
                 replan  { $route ; set pins_dirty 0 }
-                save    { buda::save_bdb ${bdb}.sql }
+                save    {
+                    # The same coherence rule `done` enforces, at the same
+                    # moment it matters: a snapshot taken between a pin and
+                    # its re-plan would hold the new selection over the OLD
+                    # candidate's metal — exactly the incoherent checkpoint
+                    # the exit path exists to prevent.  Re-plan first; a
+                    # route that RAISES skips both the clear and the save
+                    # (the catch below prints it), so a failed re-plan can
+                    # never publish the stale snapshot either.
+                    if {$pins_dirty} {
+                        puts "$tag: pins changed since the last route --\
+                              re-planning so the snapshot stays coherent"
+                        $route
+                        set pins_dirty 0
+                    }
+                    buda::save_bdb ${bdb}.sql
+                }
                 help    { prompt::_help $tag }
                 commands { prompt::_commands [lindex $line 1] }
                 default {
