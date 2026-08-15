@@ -147,13 +147,15 @@ class PersistMixin:
         # A durable select_topology pin must survive it too: the clear wipes
         # the topology rows carrying is_pinned at BUNDLING time, two commands
         # before the generation tail's _apply_bdb_pins could read them — so
-        # snapshot (bundle -> pinned uid) into a session memo first.  ONCE
-        # per BDB connection: only rows a PREVIOUS session wrote need
-        # rescuing (this session's pins live in memory and re-persist from
-        # there), a re-snapshot after this session's own persists would read
-        # back its own state for nothing on every chip-scale re-persist, and
-        # entries are POPPED as _apply_bdb_pins consumes them, so a pin the
-        # user has since dropped cannot be resurrected by a later rebundle.
+        # the session keeps a (bundle -> pinned uid) memo that MIRRORS the
+        # table's pin state.  Initialized from the rows here, once per BDB
+        # connection (the cross-session case: rows a previous session
+        # wrote); from then on _persist_topologies rebuilds it from the very
+        # wrapper state it serializes, so the mirror holds through every
+        # in-session pin, unpin and REBUNDLE — the bundler replaces
+        # session.bundles with fresh unpinned wrappers before calling here,
+        # which is exactly why the rows (mirrored here) are the source, not
+        # memory (Codex #758).
         if getattr(self, '_bdb_pin_snap_for', None) != id(self.bdb):
             self._bdb_pin_snap_for = id(self.bdb)
             self._bdb_pin_memo = {}
@@ -314,16 +316,33 @@ class PersistMixin:
         if self.bdb is None or not self.bundles:
             return
         memo = getattr(self, '_bdb_pin_memo', None) or {}
+        # Rows are worth querying only while the mirror is UNINITIALIZED for
+        # this connection (e.g. a flat flow that bundled BEFORE open_bdb, so
+        # no persist has snapshotted yet); once initialized, rows == mirror
+        # by invariant and the per-bundle query would be pure waste.
+        mirror_fresh = (getattr(self, '_bdb_pin_snap_for', None)
+                        == id(self.bdb))
         for w in self.bundles:
             if (getattr(w.input, 'topology_pinned', False)
                     or getattr(w.input, 'pinned_group', [])):
                 continue                              # session state wins
+            if not w.input.candidates:
+                # No pool to restore ONTO (rebundled, not yet regenerated) —
+                # neither restored nor dropped: the mirror keeps the entry
+                # (see _persist_topologies) for the generation that builds
+                # this bundle's pool.
+                continue
             bid = str(w.input.original_bundle.id)
-            # The re-bundle's clear already wiped the rows, so the memo
-            # snapshotted at _persist_bundles is the primary source; live
-            # rows are the fallback for a regeneration with no re-bundle.
-            uid = memo.pop(bid, None)
-            if uid is None:
+            # The re-bundle's clear already wiped the rows, so the memo —
+            # the mirror of the table's pin state, maintained by
+            # _persist_topologies — is the primary source; live rows are
+            # the fallback for a regeneration with no re-bundle.  Read, not
+            # popped: the mirror must keep matching the rows, and a
+            # re-restore is already prevented by the pinned-wrapper skip
+            # above (a dropped pin cannot return either — the drop's own
+            # persist rebuilt the mirror without it).
+            uid = memo.get(bid)
+            if uid is None and not mirror_fresh:
                 try:
                     rows = [tr for tr in self.bdb.topologies(bid)
                             if tr.is_pinned]
@@ -438,6 +457,29 @@ class PersistMixin:
                 self._persist_topology_annotations(bid, ci, topo, seen_busterms)
                 n_cands += 1
             self._persist_group_pin(w, bid)
+        # The durable-pin memo mirrors the table, and this method is the
+        # table's only writer — so rebuild the mirror from the wrapper state
+        # just serialized.  This is what makes an in-session pin survive an
+        # in-session rebundle (the pin's persist refreshed the mirror before
+        # the bundler wiped memory and rows alike), and what makes an
+        # in-session unpin durable (the mirror goes empty WITH the rows, so
+        # no later restore can resurrect it).  One asymmetry, on purpose: a
+        # wrapper with an EMPTY candidate pool persisted no rows, so it said
+        # nothing about its pin either way — its old entry is carried
+        # forward, because dropping it would lose a pin merely because a
+        # rebundle's persist ran before that bundle's pool was regenerated.
+        old_memo = getattr(self, '_bdb_pin_memo', None) or {}
+        self._bdb_pin_snap_for = id(self.bdb)
+        self._bdb_pin_memo = {}
+        for w in wrappers:
+            bid = str(w.input.original_bundle.id)
+            if getattr(w.input, 'topology_pinned', False):
+                sel = w.plan.selected_topology_index
+                if 0 <= sel < len(w.input.candidates):
+                    self._bdb_pin_memo[bid] = \
+                        buda.topo_uid(w.input.candidates[sel])
+            elif not w.input.candidates and bid in old_memo:
+                self._bdb_pin_memo[bid] = old_memo[bid]
         return n_cands
 
     def _persist_group_pin(self, w, bid):

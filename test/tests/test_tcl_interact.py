@@ -186,6 +186,38 @@ def test_pins_survive_back_to_back_sessions(tmp_path):
     assert "durable pin restored" not in r.stdout          # honestly unpinned
 
 
+def test_in_session_rebundle_and_per_bundle_generation_keep_pins(tmp_path):
+    # The two Codex #758 P1s in one round trip.  Session B pins a SECOND
+    # bundle at the prompt, then re-bundles raw — fresh unpinned wrappers,
+    # so the memo mirror (refreshed by the pin's own persist) is the only
+    # surviving copy — and regenerates ONE bundle through the per-bundle
+    # additive path, whose persist rewrites the whole table.  At that
+    # persist w's pool is still EMPTY: it must ride the mirror's
+    # carry-forward (not be warn-dropped), so the bulk generation that
+    # follows restores it onto the regenerated pool.  Session C then sees
+    # BOTH pins: d1's from session A, w's from session B.
+    flow = tmp_path / "ckpt.buda"
+    flow.write_text("open_bdb ckpt.bdb\n" + _FLAT_FLOW)
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="pin d1 4\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path,
+             stdin="pin w 2\nrun_bundler STRICT\n"
+                   "generate_more_topologies d1\n"
+                   "generate_topologies\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "durable pin restored -> topo 4" in r.stdout    # d1 held throughout
+    assert "durable pin restored -> topo 2" in r.stdout    # w, via carry-forward
+    assert "matches no regenerated candidate" not in r.stdout
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path)           # just `done`
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "durable pin restored -> topo 4" in r.stdout
+    assert "durable pin restored -> topo 2" in r.stdout
+    assert r.stdout.count("[pinned]") >= 2, "a pin fell out of the planner"
+
+
 def test_armed_bdb_gives_a_flat_flow_durable_pins(tmp_path):
     # A flow that never opens a BDB has no durable home for a pin — the
     # optional second argument arms one BEFORE the flow runs (the design.tcl
