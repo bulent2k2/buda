@@ -697,6 +697,9 @@ void bind_routing(py::module_& m) {
     py::class_<NdrLayerGeom>(m, "NdrLayerGeom")
         .def(py::init<>())
         .def_readwrite("runs",  &NdrLayerGeom::runs)
+        .def_readwrite("unbounded", &NdrLayerGeom::unbounded)
+        .def_readwrite("period_slots", &NdrLayerGeom::period_slots)
+        .def_readwrite("max_run", &NdrLayerGeom::max_run)
         .def("empty",           &NdrLayerGeom::empty);
 
     m.def("ndr_metal_for_slots", &ndr_metal_for_slots, py::arg("geom"),

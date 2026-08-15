@@ -149,11 +149,34 @@ when it is net-positive on measured QoR, and this is net-negative.
    The alternative is not a wider wire, it is a narrower one you were not
    told about.
 
+## The population, and a gap in it that has since narrowed
+
+Every one of the 35 patterns above is **declared** in a `.buda` file, and
+every one was authored by us. The repo's one real technology,
+`flow/ariane133`, declares none — it imports them — so it was structurally
+invisible to this sweep.
+
+At the time of measurement that was moot: its ten layers each modelled a
+single FULL-PITCH signal slot, and with `metal(k) = k·pitch` the two readings
+are the same function, so the question was degenerate there. That was itself
+a defect (`opens_interchange.md` item 13) and has since been fixed — the
+design now composes the DEF's track positions with the tech LEF's widths, and
+its layers carry a ~50% space fraction. On that grid the readings genuinely
+differ: a `width 0.21um metal` rule resolves to 2 slots/bit on metal1–metal6
+and 1 on metal7–metal10.
+
+So a second, non-synthetic population now exists. It is **not** folded into
+the numbers above, which remain a sweep of declared patterns — re-running
+`--patterns` will not pick it up, since the tool reads `.buda` text. Judging
+the flip on real technology means measuring that design directly.
+
 ## What would change this verdict
 
-A design corpus that leans on absolute widths for a physical reason. Every
-vehicle here is one we authored to demonstrate the semantics, and none has an
-EM or resistance requirement behind its numbers — so this study measures how
-the two readings differ, not how much a real methodology would care. If
-absolute widths acquire a real consumer, re-run `tools/ndr_metal_study.py`
-and weigh the stranding against a requirement that actually exists.
+A design that leans on absolute widths for a physical reason. None of the
+vehicles measured here has an EM or resistance requirement behind its
+numbers — so this study measures how the two readings differ, not how much a
+real methodology would care. `flow/ariane133` is now the closest thing to a
+real consumer available; the rule quoted above is illustrative rather than a
+requirement anyone stated. If absolute widths acquire a genuine consumer,
+re-run `tools/ndr_metal_study.py` and weigh the stranding against a
+requirement that actually exists.

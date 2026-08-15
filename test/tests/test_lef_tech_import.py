@@ -142,23 +142,59 @@ def test_an_impossible_pitch_is_reported_rather_than_producing_a_bad_pattern(tmp
 
 # ── precedence: the script always wins, in either order ────────────────────
 
-@pytest.mark.parametrize("name,why", [
-    # The script's own name for the layer: the import recognises the NAME.
-    ("M2", "already declared by the script"),
-    # A different name for the same id: the import recognises the ID.  Both
-    # are the same outcome — the script's layer stands untouched — and the
-    # reason differs because they are genuinely different collisions.
-    ("MYM2", "layer id already in use"),
-])
-def test_a_layer_declared_before_the_import_is_left_alone(tmp_path, name, why):
-    s, out = _run(tmp_path, f"""
-        def_layer 2 {name} V LOW 30
+def test_an_id_collision_still_skips_the_layer_outright(tmp_path):
+    """A DIFFERENT name for an id the script already used is a collision, not
+    a match: the import cannot tell whether the two describe the same layer,
+    so it takes nothing at all."""
+    s, out = _run(tmp_path, """
+        def_layer 2 MYM2 V LOW 30
         import_lef_tech @TECH@
         """)
-    assert "skipped layer M2" in out and why in out, out
-    assert s._layer_name_map[name] == 2
+    assert "skipped layer M2" in out and "layer id already in use" in out, out
+    assert s._layer_name_map["MYM2"] == 2
     assert s.layers.get_layer_type(2) == buda.LayerType.LOW   # the script's
     assert not s.routing_grid.has_layer(2)      # and no imported pattern
+
+
+def test_a_script_layer_keeps_its_IDENTITY_and_takes_the_files_GEOMETRY(tmp_path):
+    """Precedence is per FACT, not per layer.
+
+    `def_layer` declares id, name, direction, TOP/LOW and overhead — and has
+    no syntax for PITCH or WIDTH.  Skipping the layer outright therefore threw
+    away the only facts in the file the script could not have stated, and left
+    the design with a layer that has no track geometry at all.
+
+    Measured on `flow/ariane133`, which declares its ten layers by hand: every
+    routing layer came out as one FULL-PITCH signal slot — a wire occupying
+    its whole track with no space beside it — so no NDR width, spacing or
+    shield rule could mean anything on that design."""
+    s, out = _run(tmp_path, """
+        def_layer 2 M2 V LOW 30
+        import_lef_tech @TECH@
+        """)
+    # Identity: the script's, untouched.
+    assert s._layer_name_map["M2"] == 2
+    assert s.layers.get_layer_type(2) == buda.LayerType.LOW
+    assert s.layers.get_layer_dir(2) == buda.LayerDir.VERTICAL
+    # Geometry: the file's, and said out loud rather than done silently.
+    assert "took track geometry" in out and "M2" in out, out
+    assert s.routing_grid.has_layer(2)
+    assert _pitch(s, 2) == pytest.approx(0.24)
+
+
+def test_a_script_PATTERN_still_outranks_the_files_geometry(tmp_path):
+    """The other half of the same rule: a geometry declaration DOES assert
+    geometry, so it wins — in this order as well as the reverse (which
+    `test_a_pattern_declared_after_the_import_replaces_it` covers).  Without
+    this, letting geometry travel past a declared layer would have quietly
+    taken the pattern too."""
+    s, out = _run(tmp_path, """
+        def_layer 2 M2 V LOW 30
+        def_track_pattern 2 0 VDD 2 1 _ 1 1 GND 2 1
+        import_lef_tech @TECH@
+        """)
+    assert "script-declared pattern wins" in out, out
+    assert _pitch(s, 2) == pytest.approx(8.0)      # the script's, not 0.24
 
 
 def test_a_layer_declared_after_the_import_replaces_it(tmp_path):

@@ -962,6 +962,67 @@ used to make. Its old comment was explicit about the belief — *"the HALO
 ring around i1, which the placer honoured and the router must too"* — and it
 is quoted in the new test so the reversal reads as a decision rather than a
 silent edit.
+## 14. ~~An imported grid has track positions but no wire WIDTH~~ — RESOLVED 2026-08-14
+
+A DEF `TRACKS` statement says where tracks are and nothing about how wide a
+wire on one is. `import_def_lef` therefore modelled each layer as **one
+full-pitch SIGNAL slot** — a wire occupying its entire track, with no space
+beside it — unless a LEF had supplied the width. It had a hook for exactly
+that (`_lef_track_width`), and on `flow/ariane133` the hook never fired.
+
+**Why it never fired: layer precedence was per LAYER, not per FACT.**
+`import_lef_tech` skipped any layer the script had already named
+(`"already declared by the script"`), which discarded that layer's PITCH and
+WIDTH along with it — the only facts in the file the script had no syntax to
+state, since `def_layer` declares id, name, direction, TOP/LOW and overhead
+and nothing about geometry. ariane133 declares its ten layers by hand, so it
+got no widths at all.
+
+Measured before: every one of the ten routing layers had `n_signal = 1`,
+`min_wire == unit_pitch`, **rail fraction 0.000**, and a metal1 "minimum
+wire" of 280 DBU where NanGate45's is 140.
+
+**What landed.** The script keeps a declared layer's IDENTITY; its track
+GEOMETRY still comes from the file, and yields only to a geometry
+declaration (`def_track_pattern`), checked where the pattern is installed.
+The two paths share one installer so they cannot learn different geometry
+from the same file, and a direction disagreement between script and file is
+reported rather than absorbed. `flow/ariane133` fetches the NanGate45 tech
+LEF (proprietary header — fetched, never vendored) and composes it with the
+DEF: **TRACKS supplies the positions, LEF supplies the width.**
+
+*The units differ, and composing them raw is the trap.* `_lef_track_width`
+is MICRONS (a LEF is written in them) and the DEF's step is in the design's
+layout units — 0.07 against 280 here. The conversion belongs at the DEF
+TRACKS path and not at the LEF read, because `set_import_scale dbu` resolves
+from the DEF's own `UNITS` statement and a tech LEF read first cannot know
+it. Uncomposed, a 0.07-wide wire on a 280 pitch is a signal density of
+0.025% that would strand practically every bit while looking like a grid.
+
+Measured after: metal1 280/140 (50% space), metal2 380/140, metal9
+3200/1600 — each matching the LEF exactly, with metal10 taking the DEF's own
+1.68 µm step and the LEF's 0.8 µm width. **The route is unchanged** (one
+signal track per pitch either way, so capacity is identical: measured on current main: 121 segments, 0 overlaps, 77 violations in 25 bundles, identical either way), which is the point — this is
+a correctness fix to the modelled wire, not a QoR change.
+
+Blast radius: of the five flows using `import_lef_tech`, only ariane133 also
+declares layers by hand, so it is the only one whose behaviour moves.
+
+**It also exposed a defect in NDR's run model.** Rails are what bound a
+contiguous signal run, so modelling one period plus a single splice across
+the tiled boundary is exact while rails exist — and a LEF says nothing about
+which tracks the power grid takes (that lives in the DEF's `SPECIALNETS`), so
+every layer imported from one is **all-signal**, where the run does not end
+at all. `ndr_geom` capped those at two periods' worth: a one-slot period
+reported a longest run of 2, so a metal-shaped rule needing 3 slots was
+refused as unrealizable on a layer that can host any width. `NdrLayerGeom`
+now carries `unbounded` and consumers extend the repeating unit on demand.
+Verified on the design: `width 0.35um metal` resolves to **3 slots/bit** on
+metal1/metal2, which was an R3 hard error before.
+
+Pinned by `test_lef_tech_import.py` (precedence per fact) and
+`test_ndr_metal_quantization.py` (unbounded runs, with the railed and
+single-splice cases as the twins that keep the rule honest).
 
 ---
 

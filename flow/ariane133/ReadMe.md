@@ -83,15 +83,36 @@ the flow a different design.
 
 ## Two things this vehicle established
 
-**You do not need the NanGate45 standard-cell library.** Its tech LEF
-carries proprietary boilerplate — *"provided pursuant to a License Agreement
-containing restrictions on its use… valuable trade secrets… does not
-indicate actual or intended publication"* — so vendoring it would be a real
-problem. It turns out to be unnecessary. The DEF is a floorplan DEF and
-instantiates nothing but the SRAM; the netlist's **76,731 standard cells are
-skipped as library cells**; and the ten routing layers' track patterns come
-from the **DEF's own `TRACKS`**. Ten `def_layer` lines and the SRAM's LEF
-reproduce the full-library import exactly.
+**You do not need the NanGate45 standard-cell LIBRARY — but you do need its
+TECHNOLOGY.** The library is unnecessary: the DEF is a floorplan DEF and
+instantiates nothing but the SRAM, and the netlist's **76,731 standard cells
+are skipped as library cells**.
+
+The tech LEF is a different matter, and the claim that used to stand here —
+that ten `def_layer` lines and the SRAM's LEF "reproduce the full-library
+import exactly" — was **true of the placement and false of the grid**. A DEF
+`TRACKS` statement gives positions and says nothing about how wide a wire is,
+so every routing layer modelled ONE FULL-PITCH signal slot: a wire occupying
+its whole track with no space beside it, and a "minimum wire" of 280 DBU
+where this technology's metal1 is 140. Nothing about the route depended on
+it — one signal track per pitch either way, so capacity is identical
+(measured on current main: 121 segments, 0 overlaps, 77 violations in 25 bundles, identical either way) — but
+every question about the WIDTH of a wire was degenerate, which is why no NDR
+rule could mean anything on this design.
+
+So `fetch.py` now also fetches `NangateOpenCellLibrary.tech.lef`, and
+`import_lef_tech` takes its PITCH and WIDTH while the ten `def_layer` lines
+keep owning each layer's identity. It carries the same proprietary
+boilerplate as ever — *"provided pursuant to a License Agreement containing
+restrictions on its use… valuable trade secrets… does not indicate actual or
+intended publication"* — so it is fetched and **never vendored**, which is
+the treatment the netlist and the SRAM LEF already get for milder reasons.
+
+What that buys, measured here: a physically-motivated
+`def_ndr em3 width 0.21um metal` (3× metal1's minimum wire) now resolves to
+**2 slots/bit on metal1–metal6 and 1 on metal7–metal10** — the upper metal's
+own 0.4 µm wire already exceeds the declared width, and BUDA-1914 says so
+rather than leaving it implied.
 
 **This vehicle found `opens_interchange.md` item 12, which has since
 landed.** One fakeram macro carries **99 `OBS` rects**, so 133 of them

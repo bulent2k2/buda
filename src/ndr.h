@@ -60,6 +60,33 @@ struct NdrLayerRule {
 // dependency and the planner's hot loop keeps its scalar.
 struct NdrLayerGeom {
     std::vector<std::vector<std::pair<double, double>>> runs;
+    // The period contains NO rail, so its single run does not end — every
+    // tiled copy adds more signal slots to the same contiguous stretch.
+    //
+    // Rails are what bound a run, so modelling one period plus a single
+    // splice across the boundary is exact whenever they exist.  With none it
+    // under-reports without limit: a one-signal-slot period reported a
+    // longest run of 2, so a metal-shaped rule needing 3 slots was refused
+    // as unrealizable on a layer that can host any width at all.  That is
+    // not a corner case — a technology LEF says nothing about which tracks
+    // the power grid takes (that lives in the DEF's SPECIALNETS), so EVERY
+    // layer imported from one is all-signal, `flow/ariane133`'s ten
+    // included.
+    bool unbounded = false;
+    // Signal slots in ONE period, when `unbounded`.  The stored run holds
+    // TWO (the splice), so the repeating unit cannot be read off its length.
+    int period_slots = 0;
+    // A FINITE ceiling on that repetition, or 0 for none.
+    //
+    // "No rail" is not the same as "no end".  An imported grid is BOUNDED —
+    // a DEF `TRACKS … DO n` ENUMERATES its tracks, so the layer has exactly
+    // n of them and no run can exceed that however rail-free the period is.
+    // Without this an all-signal bounded layer advertised an unlimited
+    // ceiling, and a metal rule wider than the design's entire track count
+    // was accepted as realizable while detailed placement looked for tracks
+    // that were never declared (Codex P2 on #757).  Measured on
+    // `flow/ariane133`: metal10 has 807 tracks, metal7 1615.
+    int max_run = 0;
     bool empty() const { return runs.empty(); }
 };
 
@@ -209,9 +236,75 @@ inline NdrSpec ndr_resolve_for_pitch(const NdrSpec& s, double slot_pitch) {
 // declared patterns have non-uniform signal gaps, and in each the slot
 // widths agree while the trailing gaps differ — exactly the case a single
 // `k*w + (k-1)*sp` formula gets wrong.
+// ── the PERIODIC case, in closed form ────────────────────────────────────
+// An unbounded run repeats, so only the `n` distinct starting PHASES differ:
+// a window of m slots from phase p covers floor(m/n) whole periods plus a
+// remainder.  Summing that directly costs O(n) per query instead of tiling a
+// 2k-entry copy and rescanning it, which made resolution O(K^3) in the slot
+// count and could hang `def_ndr … metal` on a wide absolute width (Codex P2
+// on #757 — measured, the 1..K sweep went 98 ms at K=500 to 801 ms at
+// K=1000, the 8x of a cubic).
+struct NdrPeriodSums {
+    std::vector<double> pw, pg;      // prefix sums over TWO periods
+    double W = 0.0, G = 0.0;         // one period's widths / gaps
+    int n = 0;
+    explicit NdrPeriodSums(const std::vector<std::pair<double,double>>& u)
+        : pw(2 * u.size() + 1, 0.0), pg(2 * u.size() + 1, 0.0),
+          n((int)u.size()) {
+        for (int i = 0; i < 2 * n; ++i) {
+            pw[i + 1] = pw[i] + u[i % n].first;
+            pg[i + 1] = pg[i] + u[i % n].second;
+        }
+        W = pw[n]; G = pg[n];
+    }
+    // `m` widths (gaps) running from phase p, wrapping as many times as it
+    // takes.  p is in [0, n) and the prefix arrays cover 2n, so the
+    // remainder is always contiguous.
+    double sum_w(int p, int m) const {
+        return (m / n) * W + (pw[p + m % n] - pw[p]);
+    }
+    double sum_g(int p, int m) const {
+        return (m / n) * G + (pg[p + m % n] - pg[p]);
+    }
+};
+
+// One period of an unbounded geom's repeating unit, or empty when it has
+// none to offer.
+inline std::vector<std::pair<double, double>> ndr_period_unit(
+        const NdrLayerGeom& g) {
+    if (!g.unbounded || g.runs.empty() || g.period_slots <= 0) return {};
+    const auto& r = g.runs.back();
+    if ((int)r.size() < g.period_slots) return {};
+    return std::vector<std::pair<double, double>>(
+        r.begin(), r.begin() + g.period_slots);
+}
+
+// Metal delivered by the NARROWEST window of `k` consecutive signal slots,
+// or -1 when no run is that long (the wire would have to span a power rail,
+// which is not a legal signal wire — R3).
+//
+// The narrowest window is the honest answer whenever the gaps vary: the seat
+// is chosen by the placer, not by the rule, so a rule is only guaranteed met
+// if it is met at the WORST window.  Measured: 20 of 345 declared patterns
+// have non-uniform signal gaps, and in each the slot widths agree while the
+// trailing gaps differ — exactly the case a single `k*w + (k-1)*sp` formula
+// gets wrong.
 inline double ndr_metal_for_slots(const NdrLayerGeom& g, int k) {
     if (k <= 0) return 0.0;
-    double best = -1.0;
+    // A bounded layer cannot host more slots than it HAS, however rail-free
+    // its period: `TRACKS … DO n` is an enumeration, not a hint.
+    if (g.max_run > 0 && k > g.max_run) return -1.0;
+    const auto unit = ndr_period_unit(g);
+    if (!unit.empty()) {                       // periodic: O(n), closed form
+        const NdrPeriodSums s(unit);
+        double best = -1.0;
+        for (int p = 0; p < s.n; ++p) {
+            const double m = s.sum_w(p, k) + s.sum_g(p, k - 1);
+            if (best < 0.0 || m < best) best = m;
+        }
+        return best;
+    }
+    double best = -1.0;                        // bounded runs: exact scan
     for (const auto& run : g.runs) {
         if ((int)run.size() < k) continue;
         for (int i = 0; i + k <= (int)run.size(); ++i) {
@@ -228,13 +321,26 @@ inline double ndr_metal_for_slots(const NdrLayerGeom& g, int k) {
 
 // Clearance delivered by `gu` guard slots between two governed bits: the
 // guards' own widths plus the gu+1 gaps around them.  Same narrowest-window
-// reading, and the same -1 when the period cannot host that many.
+// reading, the same -1 when the period cannot host that many, and the same
+// closed form for a periodic run.
 inline double ndr_clearance_for_guards(const NdrLayerGeom& g, int gu) {
     if (gu < 0) return -1.0;
+    const int need = gu + 2;      // gu guards sit BETWEEN two bits
+    if (g.max_run > 0 && need > g.max_run) return -1.0;
+    const auto unit = ndr_period_unit(g);
+    if (!unit.empty()) {
+        const NdrPeriodSums s(unit);
+        double best = -1.0;
+        for (int p = 0; p < s.n; ++p) {
+            // The guards are the INTERIOR gu slots; the gaps are the gu+1
+            // that separate all gu+2.
+            const double c = s.sum_w((p + 1) % s.n, gu) + s.sum_g(p, gu + 1);
+            if (best < 0.0 || c < best) best = c;
+        }
+        return best;
+    }
     double best = -1.0;
     for (const auto& run : g.runs) {
-        // gu guards sit BETWEEN two bits, so the window is gu+2 slots wide.
-        const int need = gu + 2;
         if ((int)run.size() < need) continue;
         for (int i = 0; i + need <= (int)run.size(); ++i) {
             double c = 0.0;
@@ -247,10 +353,27 @@ inline double ndr_clearance_for_guards(const NdrLayerGeom& g, int gu) {
 }
 
 // The largest k any run in the period can host — the realizability ceiling.
+//
+// A period with no rail hosts ANY k, so the ceiling is not a property of the
+// pattern at all; `NDR_UNBOUNDED_SLOTS` stands for that.  It is a large finite
+// number rather than a sentinel so every existing `k <= ceiling` loop keeps
+// working unchanged — those loops terminate on the value they are searching
+// for, since metal grows by at least one slot width per step.  Reporting sites
+// ask `ndr_ceiling_is_unbounded` and say so in words instead of printing it.
+constexpr int NDR_UNBOUNDED_SLOTS = 1 << 20;
+
 inline int ndr_max_slots(const NdrLayerGeom& g) {
+    if (g.unbounded && !g.runs.empty())
+        return g.max_run > 0 ? g.max_run : NDR_UNBOUNDED_SLOTS;
     int m = 0;
     for (const auto& run : g.runs) m = std::max(m, (int)run.size());
     return m;
+}
+
+inline bool ndr_ceiling_is_unbounded(const NdrLayerGeom& g) {
+    // A BOUNDED all-signal layer has a real ceiling — its track count — so
+    // it is not "unbounded" for reporting either.
+    return g.unbounded && !g.runs.empty() && g.max_run <= 0;
 }
 
 // The ABSOLUTE width in force on `layer_id` — that layer's `def_ndr_layer`

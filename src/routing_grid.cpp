@@ -80,6 +80,26 @@ NdrLayerGeom TrackPattern::ndr_geom() const {
             // next copy, so one more period's worth is the repeating unit.
             const size_t n = last.size();
             for (size_t i = 0; i < n; ++i) last.push_back(last[i]);
+            // …and it does not stop THERE either.  With no rail anywhere in
+            // the period the stretch of signal slots is endless, so the run
+            // stored here is a repeating UNIT rather than the whole run, and
+            // consumers extend it on demand.  Splicing exactly one boundary
+            // capped every all-signal layer at two periods' worth: measured,
+            // a one-slot period reported a longest run of 2 and refused a
+            // 3-slot metal rule on a layer that can host any width.
+            g.unbounded = true;
+            g.period_slots = (int)n;
+            // …but "no rail" is not "no end".  A BOUNDED pattern — a DEF
+            // `TRACKS … DO n` enumerates its tracks — has exactly as many
+            // slots as were declared, and a run cannot exceed that.  Without
+            // this ceiling a metal rule wider than the design's entire track
+            // count read as realizable (Codex P2 on #757).
+            if (bounded && unit_pitch() > 0.0) {
+                const double span = bound_hi - bound_lo;
+                const int periods = span <= 0.0 ? 1
+                    : (int)std::floor(span / unit_pitch() + 1e-9) + 1;
+                g.max_run = periods * (int)n;
+            }
         } else {
             // Distinct runs: the joined run is last + first.
             for (const auto& e : first) last.push_back(e);

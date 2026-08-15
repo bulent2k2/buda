@@ -640,13 +640,27 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
 
     taken = set(session._layer_source) | {
         i for i in session._layer_name_map.values()}
-    plan, skipped = [], []
+    plan, geom_only, skipped = [], [], []
     for l in routing:
         if not l.dir:
             skipped.append((l.name, "no DIRECTION (BUDA has no undirected layer)"))
             continue
         if l.name in session._layer_name_map:
-            skipped.append((l.name, "already declared by the script"))
+            # The script named this layer — so it owns the layer's IDENTITY
+            # (id, direction, TOP/LOW, overhead) and that precedence stands.
+            # But `def_layer` has no syntax for PITCH or WIDTH, so skipping
+            # the layer OUTRIGHT threw away the only facts in the file the
+            # script could not have stated, and the design silently kept a
+            # grid with no wire width.  Measured on `flow/ariane133`, which
+            # declares its ten layers by hand: every routing layer came out
+            # as ONE full-pitch signal slot with zero space between wires,
+            # so a "wire" occupied its whole track and no NDR width, spacing
+            # or shield rule could mean anything there.
+            #
+            # Geometry is therefore taken separately, and yields only to a
+            # geometry declaration (`def_track_pattern`), which is checked
+            # below where the pattern is installed.
+            geom_only.append((session._layer_name_map[l.name], l))
             continue
         lid = _lef_layer_id(l.name, taken)
         if lid is None:
@@ -670,26 +684,29 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
         seen_dirs.add(l.dir)
         top_ids.add(lid)
 
-    for lid, l in sorted(plan):
-        ldir = (buda.LayerDir.HORIZONTAL if l.dir == "HORIZONTAL"
-                else buda.LayerDir.VERTICAL)
-        ltype = buda.LayerType.TOP if lid in top_ids else buda.LayerType.LOW
-        session.layers.add_layer(lid, l.name, ldir, ltype)
-        session._layer_name_map[l.name] = lid
-        session._layer_source[lid] = "lef"
+    def _install_geometry(lid, l, is_h):
+        """The layer's TRACK GEOMETRY from the file.  Shared by both paths —
+        layers this import defines, and layers the script already declared —
+        so the two can never learn different geometry from the same file.
 
-        # A track pattern needs PITCH and WIDTH.  One SIGNAL slot per pitch is
-        # the honest reading of LEF ALONE: the file says how far apart tracks
-        # are and how wide a wire is, and says nothing about which of them a
-        # power grid will take — that lives in the DEF's SPECIALNETS.  So the
-        # synthesized pattern is all-signal, and a design with a real PDN
-        # declares the rails itself.
+        A track pattern needs PITCH and WIDTH.  One SIGNAL slot per pitch is
+        the honest reading of LEF ALONE: the file says how far apart tracks
+        are and how wide a wire is, and says nothing about which of them a
+        power grid will take — that lives in the DEF's SPECIALNETS.  So the
+        synthesized pattern is all-signal, and a design with a real PDN
+        declares the rails itself."""
+        if session._pattern_source.get(lid) == "script":
+            # A geometry declaration outranks imported geometry, in either
+            # order — the same rule `def_track_pattern` already enforces
+            # against a LATER import.  Previously this was implied by the
+            # whole layer being skipped; now that geometry travels on its
+            # own, the check has to be stated.
+            return "script-declared pattern wins"
         if not (l.has_pitch and l.has_width):
-            continue
+            return "no PITCH/WIDTH"
         if l.pitch <= l.width:
-            print(f"[LEF] layer {l.name}: PITCH {l.pitch:g} <= WIDTH "
-                  f"{l.width:g} — no room for spacing; pattern skipped")
-            continue
+            return (f"PITCH {l.pitch:g} <= WIDTH {l.width:g} — no room for "
+                    f"spacing")
         if l.has_spacing and l.width + l.spacing > l.pitch + 1e-12:
             print(f"[LEF] layer {l.name}: WIDTH {l.width:g} + SPACING "
                   f"{l.spacing:g} exceeds PITCH {l.pitch:g} — the file is "
@@ -700,17 +717,60 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
                                 slots=[slot])
         if session.routing_grid is None:
             session.routing_grid = buda.RoutingGridStack()
-        session.routing_grid.define_layer(lid, pat,
-                                          l.dir == "HORIZONTAL")
+        session.routing_grid.define_layer(lid, pat, is_h)
         session._pattern_source[lid] = "lef"
+        # In MICRONS, the unit a LEF is written in.  Converted at the one
+        # place it is consumed (the DEF TRACKS path), which is where the
+        # design's own units are known — a LEF read before the DEF cannot
+        # convert, since `set_import_scale dbu` resolves from the DEF's own
+        # UNITS statement.
         session._lef_track_width[lid] = l.width
         session.layers.set_layer_dilution(lid, pat.dilution_factor())
         session.layers.set_bit_pitch(lid, pat.unit_pitch())
         session.layers.set_ndr_geom(lid, pat.ndr_geom())
+        return None
+
+    for lid, l in sorted(plan):
+        ldir = (buda.LayerDir.HORIZONTAL if l.dir == "HORIZONTAL"
+                else buda.LayerDir.VERTICAL)
+        ltype = buda.LayerType.TOP if lid in top_ids else buda.LayerType.LOW
+        session.layers.add_layer(lid, l.name, ldir, ltype)
+        session._layer_name_map[l.name] = lid
+        session._layer_source[lid] = "lef"
+        why = _install_geometry(lid, l, l.dir == "HORIZONTAL")
+        if why and why != "no PITCH/WIDTH":
+            print(f"[LEF] layer {l.name}: {why}; pattern skipped")
+
+    n_geom = 0
+    for lid, l in sorted(geom_only):
+        # The SCRIPT's direction, not the file's: it owns the layer's
+        # identity.  A disagreement is worth saying out loud — one of the two
+        # is wrong about the technology, and a pattern installed on the wrong
+        # axis is a whole grid pointing the wrong way.
+        is_h = (session.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL)
+        if (l.dir == "HORIZONTAL") != is_h:
+            print(f"[LEF] layer {l.name}: the script declares it "
+                  f"{'H' if is_h else 'V'} and the file says "
+                  f"{'H' if l.dir == 'HORIZONTAL' else 'V'} — keeping the "
+                  f"script's direction; one of them is wrong about this "
+                  f"technology")
+        why = _install_geometry(lid, l, is_h)
+        if why is None:
+            n_geom += 1
+        else:
+            skipped.append((l.name, f"already declared by the script; "
+                                    f"geometry not taken either ({why})"))
 
     rows = ", ".join(f"{l.name}={lid}{'(TOP)' if lid in top_ids else ''}"
                      for lid, l in sorted(plan))
     print(f"[LEF] imported {len(plan)} routing layer(s): {rows}")
+    if n_geom:
+        # Named separately because it is a different thing from importing a
+        # layer: the script keeps the layer, the file supplies the wire.
+        gr = ", ".join(l.name for _lid, l in sorted(geom_only)
+                       if session._pattern_source.get(_lid) == "lef")
+        print(f"[LEF] took track geometry for {n_geom} script-declared "
+              f"layer(s): {gr}")
     for name, why in skipped:
         print(f"[LEF] skipped layer {name}: {why}")
 

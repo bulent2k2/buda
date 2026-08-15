@@ -491,6 +491,21 @@ def _parse_value(tok, what, name, session=None):
     return (1.0, a)
 
 
+def _ceiling_report(geom):
+    """(longest run, metal it delivers) for an R3 refusal message.
+
+    An UNBOUNDED period — no rail anywhere, so the signal slots never stop —
+    has no ceiling to name, and asking for the metal of `NDR_UNBOUNDED_SLOTS`
+    slots would materialize a million-entry window to answer a question with
+    no answer.  The refusal is unreachable there anyway (metal grows without
+    bound, so every declared width is realizable); this keeps the message
+    honest and cheap if some other path ever arrives."""
+    if getattr(geom, "unbounded", False) and not geom.empty():
+        return ("unbounded", float("inf"))
+    ceiling = buda.ndr_max_slots(geom)
+    return (ceiling, buda.ndr_metal_for_slots(geom, ceiling))
+
+
 def ensure_abs_quantization(session, rule):
     """Derive an absolute rule's CONSERVATIVE quantization (`width_slots_max`
     / `guard_slots_max` — the largest slot count over the layers it may use)
@@ -553,8 +568,7 @@ def ensure_abs_quantization(session, rule):
             # by construction and route the rule below its declared width --
             # silently (Codex P1 on #717).  R3 says the tool never degrades
             # an NDR, so refuse here, where the arithmetic is still nameable.
-            ceiling = buda.ndr_max_slots(geom)
-            best = buda.ndr_metal_for_slots(geom, ceiling)
+            ceiling, best = _ceiling_report(geom)
             # Reverse-lookup only on the error path: the rule dict does not
             # carry its own name, and a refusal that cannot name the rule is
             # half a message.
@@ -970,8 +984,7 @@ def cmd_def_ndr_layer(session, cmd, args, cmd_line):
         _, ok = buda.ndr_resolve_on_layer(
             probe, lid, geom, ndr_layer_pitch(session, lid))
         if not ok:
-            ceiling = buda.ndr_max_slots(geom)
-            best = buda.ndr_metal_for_slots(geom, ceiling)
+            ceiling, best = _ceiling_report(geom)
             print(f"Error: def_ndr_layer '{name}': layer '{args[1]}' cannot "
                   f"realize the declared value — its longest contiguous "
                   f"signal run is {ceiling} slot(s), delivering at most "
