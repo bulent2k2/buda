@@ -45,6 +45,11 @@ graphify-out
 docs/.obsidian/
 # Worktree-local symlink to the main checkout build/ (for pytest/uvicorn).
 /build
+# scikit-build-core's build tree — `pip install .` puts it here, from
+# pyproject.toml's `build-dir = ".pipbuild/{wheel_tag}"`.  63 MB of build
+# output, and untracked: the pip path landed without this line, so every
+# checkout that has ever run `pip install .` reports a dirty tree forever.
+/.pipbuild
 
 # Windows/venv workflow (docs/WINDOWS_BUILD.md creates it in-repo)
 .venv/
