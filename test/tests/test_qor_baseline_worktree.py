@@ -51,12 +51,29 @@ def _load():
 
 def _tree_state():
     """Everything a stash-based baseline would disturb: the porcelain status,
-    HEAD, and the stash depth."""
+    HEAD, and the stash depth.
+
+    UNTRACKED entries are excluded, and that is the whole point of the filter:
+    this is a snapshot of the WHOLE repo, but other xdist workers write
+    temporary files INSIDE it — `test_bit_antenna_audit` does
+    `mkstemp(dir=flow.parent, prefix="_no_trim_")` so a generated flow's
+    relative `source` paths resolve beside its siblings.  `--dist loadfile`
+    keeps one FILE on one worker, not one repo on one worker, so such a file
+    can appear or vanish between the two snapshots and fail a test that has
+    nothing to do with it (measured on CI: `?? flow/rnr/_no_trim_yx7f4yi3.buda`
+    present in `before`, gone by the final assert).
+
+    Nothing is lost by excluding them: what this guard is for is the baseline
+    operation moving OUR tree — a stray checkout, a stash, a modified tracked
+    file — and the worktree itself is asserted to live OUTSIDE the repo, so
+    "untracked junk left in the repo" was never the signal it carried.
+    """
     def git(*a):
         return subprocess.run(["git", *a], cwd=_ROOT, capture_output=True,
                               text=True).stdout
-    return (git("status", "--porcelain"), git("rev-parse", "HEAD"),
-            git("stash", "list"))
+    tracked = "\n".join(l for l in git("status", "--porcelain").splitlines()
+                        if not l.startswith("??"))
+    return (tracked, git("rev-parse", "HEAD"), git("stash", "list"))
 
 
 def test_materializing_a_baseline_leaves_the_working_tree_untouched():
@@ -290,3 +307,35 @@ def test_clean_baselines_keeps_the_requested_number(tmp_path, monkeypatch):
     assert len(qc.cached_baselines()) == 1
     qc.cmd_clean_baselines()
     assert qc.cached_baselines() == []
+
+
+def test_the_tree_snapshot_ignores_another_workers_temp_file():
+    """A parallel worker's untracked file must not read as "the tree moved".
+
+    Reproduces the CI failure directly rather than by running the suite twice:
+    `test_bit_antenna_audit` writes `flow/rnr/_no_trim_*.buda` inside the repo,
+    and this file's snapshot covers the whole repo, so under xdist the two were
+    racing.  Same name, same directory — if the filter regresses, this fails
+    deterministically instead of one run in N.
+    """
+    import os
+    before = _tree_state()
+    stray = _ROOT / "flow" / "rnr" / "_no_trim_snapshot_probe.buda"
+    stray.write_text("# another worker's scratch flow\n")
+    try:
+        assert _tree_state() == before, (
+            "an unrelated untracked file changed the snapshot — the whole-repo "
+            "porcelain is shared mutable state across xdist workers")
+        # ...and the guard still SEES what it exists to catch: a tracked file
+        # modified under it.
+        tracked = _ROOT / "tools" / "qor_corpus.py"
+        orig = tracked.read_text()
+        tracked.write_text(orig + "\n# probe\n")
+        try:
+            assert _tree_state() != before, \
+                "a modified TRACKED file no longer moves the snapshot"
+        finally:
+            tracked.write_text(orig)
+    finally:
+        os.unlink(stray)
+    assert _tree_state() == before

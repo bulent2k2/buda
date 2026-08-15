@@ -127,6 +127,40 @@ narrow — empty on a schedule run, a no-op on a clean sweep, and downstream of 
 errored-sweep rejection (a hard failure of its own), so it cannot bank a broken
 sweep.
 
+**The red that motivated it, 2026-08-14/15 — and what accepting it cost.**
+Bisected to `42071c1` (dnuts: a busterm tap re-extends only the bits it serves),
+a correctness fix that removes metal reaching nothing.  Its own commit message
+published the same corpus A/B and asked for the +30 on `chip_stack_bottomup` to
+be looked at.
+
+The look was done TWICE, and the first one was wrong.  It compared healed
+POST against unhealed PRE and concluded "healer-basin artifact"; the controlled
+version — identical healer config on both sides, era-correct builds — says
+otherwise:
+
+    42071c1^  (pre)    unhealed 69/252/20    HEALED 44/66/7
+    42071c1   (post)   unhealed 99/240/20    HEALED 66/80/6
+
+Under equal healing the fix costs **+22 overlaps and +14 unplaced**, buying one
+fewer violating bundle and -0.69% detailed WL.  The regression is REAL and
+survives healing (`flow/chip/ReadMe.md`).
+
+**And the baseline was promoted on the wrong conclusion.**  `promote_baseline`
+was dispatched while the uncontrolled reading stood, so `chip_stack_bottomup`'s
+99 overlaps are now the banked normal and the gate will never report them
+again.  That is the failure mode promote-on-clean exists to prevent, reached by
+accepting before the evidence was controlled — the accept path worked exactly
+as designed; the judgement feeding it did not.  Recorded here because with the
+gate silenced on this row, a doc is the only thing left that remembers.
+
+Owed: decide `42071c1` deliberately (keep and pay, or gate the behaviour), and
+re-derive a baseline once that decision is made.  The other flow that went
+worse, `rnr/mix2_topdown_refine`, was fixed separately by #732 and measures
+0/0/0 again.
+
+That the answer sat in a commit message for four nights while the gate stayed
+red is the argument for the axis below, not against the bisect.
+
 What is still owed: **nothing automatic**. A human decides that a delta is
 instrumentation rather than quality, and the discriminator is the columns that
 did *not* move. Teaching the gate to recognise that itself — an audit-version
