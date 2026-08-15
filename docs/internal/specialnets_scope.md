@@ -54,10 +54,17 @@ Three things to take from that table:
 - **A via truncates the path.** The run before the via is kept and everything
   after it is silently discarded, so a strap that changes layer is imported as
   its first leg alone.
-- **The census actively misreports it.** A net whose geometry was present but
-  unparsed is recorded as `SPECIALNETS.no_geometry` — not silence, but a
-  positive claim that the DEF contained no wires. That is the one part of this
-  worth treating as a defect in its own right rather than a missing feature.
+- ~~**The census actively misreports it.**~~ **RESOLVED 2026-08-15.** A net
+  whose geometry was present but unparsed was recorded as
+  `SPECIALNETS.no_geometry` — not silence, but a positive claim that the DEF
+  contained no wires — and a truncated path was recorded as nothing at all,
+  since a kept wire looks like a complete read. Each path is now censused by
+  what defeated the reader (`SPECIALNETS.unread_wire`,
+  `SPECIALNETS.partial_wire`), and `no_geometry` is emitted only for a net
+  with no `+ ROUTED` at all. This was the one part treatable as a defect in
+  its own right rather than a missing feature, because making the gap **loud**
+  needs no design to measure on — whereas reading the forms does. The reader
+  itself is [opens_interchange item 15](opens_interchange.md).
 
 **And the reason the first draft got this wrong is the subject of §4.** The
 two DEFs in this repo with any PDN are ours, and both are written in exactly

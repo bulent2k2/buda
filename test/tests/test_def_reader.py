@@ -166,6 +166,87 @@ END SPECIALNETS
     assert list(d.special_wires[1].pts) == [(1000.0, 1000.0), (1000.0, 9000.0)]
 
 
+# ── saying what was NOT read ───────────────────────────────────────────────
+#
+# The reader handles one special-wire form: a contiguous width-plus-polyline.
+# That is a real limitation and a separate piece of work (opens_interchange
+# item 15).  What these pin is the CENSUS: whatever the reader cannot read,
+# it may not report as metal the DEF never drew.
+
+def _sn(construct, d):
+    return [u for u in d.unmodelled if u.construct == construct]
+
+
+def test_a_stripe_written_with_SHAPE_is_reported_as_unread_not_as_absent():
+    # DEF puts `+ SHAPE` between the width and the first point, which is how
+    # a PDN generator writes every stripe — so the point walk never starts.
+    d = _parse("""SPECIALNETS 1 ;
+  - VDD ( * VDD ) + ROUTED metal5 400 + SHAPE STRIPE ( 1000 1000 ) ( 9000 * )
+      + USE POWER ;
+END SPECIALNETS
+""")
+    assert len(d.special_wires) == 0            # the stripe is still lost
+    assert _sn("SPECIALNETS.unread_wire", d)    # but no longer silently
+    # The point of the fix: this net HAD geometry, so the census must not
+    # claim the DEF drew none.
+    assert not _sn("SPECIALNETS.no_geometry", d)
+
+
+def test_a_path_truncated_by_a_via_reports_the_part_it_dropped():
+    # The run before the via is kept; everything past it is discarded — which
+    # was entirely silent, since a kept wire looked like a complete read.
+    d = _parse("""SPECIALNETS 1 ;
+  - VDD ( * VDD ) + ROUTED metal5 400 ( 1000 1000 ) ( 9000 * )
+      M5_M6 ( 9000 1000 ) ( * 9000 ) + USE POWER ;
+END SPECIALNETS
+""")
+    assert len(d.special_wires) == 1
+    assert list(d.special_wires[0].pts) == [(1000.0, 1000.0), (9000.0, 1000.0)]
+    got = _sn("SPECIALNETS.partial_wire", d)
+    assert got and "M5_M6" in got[0].detail     # names what defeated it
+
+
+@pytest.mark.parametrize("form", [
+    "RECT ( 1000 1000 ) ( 2000 9000 )",
+    "POLYGON ( 0 0 ) ( 100 0 ) ( 100 50 )",
+])
+def test_a_special_wire_shape_the_reader_cannot_represent_is_reported(form):
+    d = _parse(f"""SPECIALNETS 1 ;
+  - VDD ( * VDD ) + ROUTED metal5 400 {form} + USE POWER ;
+END SPECIALNETS
+""")
+    assert len(d.special_wires) == 0
+    assert _sn("SPECIALNETS.unread_wire", d)
+    assert not _sn("SPECIALNETS.no_geometry", d)
+
+
+def test_a_net_that_really_has_no_wires_still_says_no_geometry():
+    # The twin that keeps the rule honest: `no_geometry` is a claim about the
+    # FILE, and it is TRUE here — connectivity and no `+ ROUTED` at all, which
+    # is exactly what demo/ariane/ariane.def carries.  Suppressing it whenever
+    # anything else improved would trade one wrong census for another.
+    d = _parse("""SPECIALNETS 2 ;
+  - VDD ( * VDD ) + USE POWER ;
+  - VSS ( * VSS ) + USE GROUND ;
+END SPECIALNETS
+""")
+    assert len(d.special_wires) == 0
+    assert len(_sn("SPECIALNETS.no_geometry", d)) == 2
+    assert not _sn("SPECIALNETS.unread_wire", d)
+
+
+def test_a_wire_the_reader_reads_in_full_is_censused_as_nothing():
+    # The false-positive guard: the plain form our own DEFs use must stay
+    # silent, or every clean import grows a warning about metal it did read.
+    d = _parse("""SPECIALNETS 1 ;
+  - VDD ( * VDD ) + ROUTED metal5 400 ( 1000 1000 ) ( 9000 * )
+      NEW metal5 400 ( 1000 1000 ) ( * 9000 ) + USE POWER ;
+END SPECIALNETS
+""")
+    assert len(d.special_wires) == 2
+    assert not [u for u in d.unmodelled if u.construct.startswith("SPECIALNETS")]
+
+
 # ── failing loud ───────────────────────────────────────────────────────────
 
 def test_a_section_closed_by_the_wrong_name_is_an_error():
