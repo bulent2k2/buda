@@ -170,9 +170,22 @@ drift fails it.
 `band_phantoms` does only set arithmetic on those records. Its one judgement
 call: a group of N coincident segments charging one band pays once, at the
 **largest** amount (`sum − max`), which is the conservative reading and counts a
-triple stack as two phantom charges rather than three. Merging them is licensed
-by the **shared cut** — a cut lies at one position along the span, so every
-segment charging it spans that position.
+triple stack as two phantom charges rather than three.
+
+Merging is licensed by two facts, one per axis. The shared **placed track**
+fixes the position across the span; the shared **cut** fixes it along the span
+(a cut lies at one coordinate, so every segment charging it reaches that
+coordinate). Same layer, same track, same place along the wire — one piece of
+metal.
+
+Keying the class on the placed track rather than the topology's nominal
+perpendicular is the fix for Codex #762: being one wire is a *placed* fact, and
+the two can disagree. Four segments can share a nominal perpendicular while NUTS
+seats them as two pairs on two different tracks — two wires each charged twice,
+a phantom of two charges, which a nominal key reports as three. Not reachable on
+the current corpus (the three co-placed pairs are in different bundles), so the
+table above is unchanged; it is the predicate that was unsound, and the count is
+what the whole finding rests on.
 
 One honest limit stands: these are **final** committed states. The planner is
 greedy and widest-first, so a band could have been tight mid-run and relaxed by

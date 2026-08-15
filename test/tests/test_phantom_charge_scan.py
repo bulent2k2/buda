@@ -237,6 +237,68 @@ def test_separate_classes_of_one_bundle_do_not_merge():
     assert row[2] == 40.0
 
 
+def test_pairs_on_different_placed_tracks_are_separate_classes(monkeypatch):
+    """Codex #762: the class key must be the PLACED track, not the nominal
+    perpendicular.
+
+    Being one wire is a placed fact, and the two properties can disagree — four
+    segments can share a nominal perpendicular while NUTS seats them as two
+    pairs on two different tracks.  That is two wires each charged twice, so
+    the phantom is TWO charges; a nominal key merges all four into one class
+    and reports THREE, inflating the affected-band and overflow conclusions the
+    whole finding rests on.
+
+    Driven through `run` rather than `band_phantoms`, because the defect was in
+    how the classes are BUILT, not in how they are summed.
+    """
+    import phantom_charge as pc
+
+    segs = [_Seg(0, 0, 0, 400), _Seg(0, 0, 0, 300),      # pair A, track 10
+            _Seg(0, 0, 0, 200), _Seg(0, 0, 0, 100)]      # pair B, track 20
+    topo = _Topo(segs)
+    tracks = {0: 10.0, 1: 10.0, 2: 20.0, 3: 20.0}
+
+    class _TS:
+        def __init__(self, si):
+            self.bundle_id, self.seg_idx = 1, si
+            self.track_position, self.placed = tracks[si], True
+
+    class _Plan:
+        selected_topology_index = 0
+        seg_layers = [5, 5, 5, 5]
+
+    class _Bundle:
+        id = 1
+
+    class _Input:
+        candidates = [topo]
+        original_bundle = _Bundle()
+
+    class _W:
+        plan, input = _Plan(), _Input()
+
+    class _NR:
+        segments = [_TS(s) for s in range(4)]
+
+    charges = [_FakeCharge(1, s, 7, 3, 20.0) for s in range(4)]
+
+    class _S:
+        nuts_result = _NR()
+        bundles = [_W()]
+        planner = _FakePlanner(charges, {7: _FakeCut(500.0, 80.0)})
+        planner.charge_log_active = lambda: True
+
+    monkeypatch.setattr(pc, "solve", lambda _flow: _S())
+    p0, totals, bands = {}, __import__("collections").Counter(), []
+    p0 = __import__("collections").Counter()
+    pc.run("dummy.buda", p0, totals, bands)
+
+    assert p0["co-placed (phantom)"] == 2, dict(p0)
+    (row,) = bands
+    # sum-max over each PAIR: 20 + 20.  Merged as one class of four it is 60.
+    assert row[3] == 40.0, row
+
+
 # ------------------------------------------ the identity that makes it trusted
 
 @pytest.mark.parametrize("flow", [

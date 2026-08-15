@@ -167,15 +167,17 @@ def band_phantoms(planner, groups):
     """Per-band duplicated demand, from the engine's own charge record.
 
     `groups` maps bundle_id -> list of segment-index sets, each set holding
-    segments that are mutually coincident (same layer, orientation and
-    perpendicular — `coincident_pairs`' equivalence classes).
+    segments that are mutually coincident AND that NUTS seated on one track:
+    same layer, same orientation, same PLACED track position.
 
-    A band is affected when TWO OR MORE segments of one group charged it.  That
-    they charged the same cut is what makes merging them sound: a cut lies at
-    one position along the span, so every segment charging it spans that
-    position — the group's members really are one wire there, whatever their
-    individual extents.  It is also why the grouping needs no reachability
-    argument; the shared cut supplies it.
+    A band is affected when TWO OR MORE segments of one group charged it.  Two
+    facts together make merging them sound, and each supplies one axis: the
+    shared TRACK fixes the position across the span, and the shared CUT fixes
+    it along the span (a cut lies at one coordinate, so every segment charging
+    it reaches that coordinate).  Same layer, same track, same place along the
+    wire — one piece of metal, whatever the members' individual extents.  It is
+    also why the grouping needs no reachability argument, and why two disjoint
+    duplicates that happen to share a track stay harmless: they share no cut.
 
     The phantom is `sum - max`: one wire pays once, at the LARGEST of the
     recorded amounts.  Conservative by construction, and it handles a triple
@@ -229,8 +231,16 @@ def run(flow, p0, totals, bands):
 
         # Keyed by the coincidence class itself, so a triple stack forms ONE
         # group rather than three overlapping pairs.
+        #
+        # The key is the PLACED track, not the topology's nominal perp.  Being
+        # one wire is a placed fact, and the two can disagree: two duplicate
+        # pairs at the same nominal perp that NUTS seats on DIFFERENT tracks
+        # are two wires, and a nominal key would merge all four into one class
+        # and report three phantom charges where the truth is two (Codex #762).
+        # Keying on the track cannot make that mistake, and it is the honest
+        # statement of the merge rule anyway.
         classes = {}
-        for (i, j, _lo, _hi, o, perp, layer) in coincident_pairs(t, seg_layers):
+        for (i, j, _lo, _hi, o, _perp, layer) in coincident_pairs(t, seg_layers):
             totals["pairs"] += 1
             pi, pj = placed.get((bid, i)), placed.get((bid, j))
             if pi is None or pj is None:
@@ -243,7 +253,7 @@ def run(flow, p0, totals, bands):
             # Only a CO-PLACED pair reaches P2: where NUTS put the twins on
             # different tracks the metal really is two wires and charging twice
             # was right, so folding it in would manufacture a phantom.
-            classes.setdefault((o, perp, layer), set()).update((i, j))
+            classes.setdefault((o, layer, round(pi, 6)), set()).update((i, j))
         # EXTEND rather than assign: `charge_log_` keys on original_bundle.id,
         # so if two wrappers ever shared one, assigning would silently drop a
         # class whose charges are still in the record.

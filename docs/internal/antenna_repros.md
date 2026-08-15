@@ -298,6 +298,15 @@ identity test: summed per (cut, band) it must reproduce `GlobalCut::usage`
 exactly, held on a healing flow so the rip-up erase and `recharge_committed`
 rebuild paths are covered (`test_phantom_charge_scan.py`).
 
+Which segments count as ONE wire is keyed on the **placed track**, not on the
+topology's nominal perpendicular (Codex #762): being one wire is a placed fact,
+and the two disagree exactly when NUTS seats four segments sharing a nominal
+perpendicular as two pairs on two tracks — two wires each charged twice, which a
+nominal key reports as three phantom charges instead of two.  Not reachable on
+this corpus (the three co-placed pairs are in different bundles), so the table
+above is unchanged; the predicate was unsound and the count is what the finding
+rests on.
+
 One limit stands: these are **final** committed states.  The planner is greedy
 and widest-first, so a band could have been tight mid-run and relaxed by the
 end; a clean table is not quite "never mattered".
