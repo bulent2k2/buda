@@ -866,6 +866,14 @@ void bind_routing(py::module_& m) {
         .def("cap",       &GlobalCut::cap,   py::arg("band"))
         .def("usage",     &GlobalCut::usage, py::arg("band"));
 
+    py::class_<CommittedCharge>(m, "CommittedCharge")
+        .def(py::init<>())
+        .def_readwrite("bundle_id", &CommittedCharge::bundle_id)
+        .def_readwrite("seg_idx",   &CommittedCharge::seg_idx)
+        .def_readwrite("cut_index", &CommittedCharge::cut_index)
+        .def_readwrite("band",      &CommittedCharge::band)
+        .def_readwrite("amount",    &CommittedCharge::amount);
+
     py::enum_<CapacityMode>(m, "CapacityMode")
         .value("WIDTH",         CapacityMode::WIDTH)
         .value("SIGNAL_TRACKS", CapacityMode::SIGNAL_TRACKS);
@@ -991,7 +999,9 @@ void bind_routing(py::module_& m) {
              py::arg("placed") = std::vector<std::tuple<int,int,int>>{})
         .def("get_cuts",             &CongestionPlanner::get_cuts)
         .def("get_x_grid",           &CongestionPlanner::get_x_grid)
-        .def("get_y_grid",           &CongestionPlanner::get_y_grid);
+        .def("get_y_grid",           &CongestionPlanner::get_y_grid)
+        .def("committed_charges",    &CongestionPlanner::committed_charges)
+        .def("charge_log_active",    &CongestionPlanner::charge_log_active);
 
     // ── FloorplannerEngine ────────────────────────────────────────────────
     // Note: write_bdb(BDB&) requires BDB to already be registered (bind_db first).

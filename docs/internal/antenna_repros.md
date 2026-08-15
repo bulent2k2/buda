@@ -268,6 +268,40 @@ blanket same-bundle charge dedup would be wrong.  The reason it is so rare is
 the base-rate finding again: a duplicate inside a LOSING candidate is charged
 into a scoring overlay and dies with it, never reaching the committed field.
 
+The per-band magnitude is measured too, and **rarity is the whole defence** —
+where the phantom does land it is not small:
+
+```
+  flow          cut band   M   phantom       cap     usage  fill%   eaten  bundle
+  big.buda      247   44   5    127.00    310.00    254.00  81.9%   69.4%  8
+  big.buda      250   44   5    127.00    310.00    282.00  91.0%   81.9%  8
+  big2.buda     112    2   5     64.00   1250.00    374.00  29.9%    6.8%  64
+```
+
+Three bands, **none over capacity and none pushed over by the phantom**, so the
+STRICT harm does not occur.  But cut 250 reads 91% full when the metal is really
+at 50%: the phantom is 127 of the 282 charged, and it eats 82% of the room a
+later bundle would otherwise have found there.  The conclusion is therefore
+"three instances, not a class of problem", **not** "the effect is negligible" —
+one more co-placed duplicate on a tighter band is all it would take.
+
+The numbers come from `CongestionPlanner::committed_charges()`, which reports
+`charge_log_` — the record `commit_plan` keeps so a rip-up can subtract exactly
+what it added.  Nothing is re-derived.  An earlier cut did re-derive and got
+four things wrong (Codex #754: wrong grid axis, no cut-direction filter, an
+inclusive test where `find_band` is half-open, nominal perp instead of
+`plan.seg_perp` with its width-driven spread); those figures were withdrawn and
+the accessor replaced them.  Under the greedy `band_span_charge` modes no
+re-derivation could have been right at all — they read live occupancy that has
+moved on by the time anyone asks.  The record is pinned to the engine by an
+identity test: summed per (cut, band) it must reproduce `GlobalCut::usage`
+exactly, held on a healing flow so the rip-up erase and `recharge_committed`
+rebuild paths are covered (`test_phantom_charge_scan.py`).
+
+One limit stands: these are **final** committed states.  The planner is greedy
+and widest-first, so a band could have been tight mid-run and relaxed by the
+end; a clean table is not quite "never mattered".
+
 So the ranking bar failed, and the fix that landed is justified on a different
 footing: not QoR, but a **one-sided gap in the generator**. The by-class table
 is what pointed at it — redundancy occurs in `TRUNK_H` (109 of 3388) and

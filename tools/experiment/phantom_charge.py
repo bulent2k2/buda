@@ -40,21 +40,29 @@ Two questions, cheapest first, and the first can refute the whole thing:
   P1 CENSUS.  How often does this occur in COMMITTED geometry — the only
      geometry that persists in `cuts_` and that other bundles can read?
 
-Deliberately NOT answered here: HOW MUCH any one instance inflates a specific
-band.  A first cut tried, by mapping each duplicate onto the cut/band it charges
-— and got it wrong in four separate ways (Codex #754): it picked the grid of the
-WRONG AXIS (`for_each_cut_` passes `is_vcut = is_h`, so an H segment's bands
-index `y_grid_` and a V segment's `x_grid_`, the opposite of the obvious
-reading), it never filtered cuts by DIRECTION, it used an inclusive band test
-where `find_band` is half-open, and it read the topology's nominal perp while
-`commit_plan` charges through `plan.seg_perp` and may SPREAD one segment over
-several weighted bands (`band_span_charge`).
+  P2 MAGNITUDE.  For the instances that survive P0 and P1: how much demand does
+     the phantom put on which band, and does that band have the room?  The harm
+     is discrete — a band that looks full pushes somebody else's candidate out
+     of the STRICT tier — so the reported figures are the ones that decide it:
+     whether the band overflows, whether the phantom is what makes it overflow,
+     and how much of the remaining headroom the phantom eats.
 
-That is the trap this file warns about below: a partial reimplementation of
-`for_each_band_w` yields a confident wrong answer.  Quantifying per-band impact
-belongs in the engine, which already owns that arithmetic — see the note at the
-bottom of tools/experiment/ReadMe.md.  What survives here needs none of it:
-both numbers below are counts over geometry, and neither touches a band.
+P2's arithmetic is the ENGINE's, read through `CongestionPlanner::
+committed_charges()` — the `charge_log_` record `commit_plan` keeps so a rip-up
+can subtract exactly what it added.  Nothing here re-derives a band.
+
+That is deliberate.  A first cut did re-derive, mapping each duplicate onto the
+cut/band it charges, and got it wrong in four separate ways (Codex #754): it
+picked the grid of the WRONG AXIS (`for_each_cut_` passes `is_vcut = is_h`, so
+an H segment's bands index `y_grid_` and a V segment's `x_grid_`, the opposite
+of the obvious reading), it never filtered cuts by DIRECTION, it used an
+inclusive band test where `find_band` is half-open, and it read the topology's
+nominal perp while `commit_plan` charges through `plan.seg_perp` and may SPREAD
+one segment over several weighted bands (`band_span_charge`).  Those numbers
+were withdrawn.  Under the greedy `band_span_charge` modes no reimplementation
+could have been right at all — they read live occupancy that has moved on by
+the time anyone asks — which is why the fix was to ask the engine rather than to
+patch the Python.
 
 Scoped to SELECTED topologies on purpose.  A duplicate inside a candidate that
 then loses is charged into a scoring overlay and dies with the candidate; it
@@ -155,7 +163,53 @@ def coincident_pairs(topo, seg_layers):
     return out
 
 
-def run(flow, p0, totals):
+def band_phantoms(planner, groups):
+    """Per-band duplicated demand, from the engine's own charge record.
+
+    `groups` maps bundle_id -> list of segment-index sets, each set holding
+    segments that are mutually coincident (same layer, orientation and
+    perpendicular — `coincident_pairs`' equivalence classes).
+
+    A band is affected when TWO OR MORE segments of one group charged it.  That
+    they charged the same cut is what makes merging them sound: a cut lies at
+    one position along the span, so every segment charging it spans that
+    position — the group's members really are one wire there, whatever their
+    individual extents.  It is also why the grouping needs no reachability
+    argument; the shared cut supplies it.
+
+    The phantom is `sum - max`: one wire pays once, at the LARGEST of the
+    recorded amounts.  Conservative by construction, and it handles a triple
+    stack correctly where summing pairwise minima would count it three times.
+
+    Returns [(cut_index, band, phantom, cap, usage, layer, bundles)], one row
+    per affected band.
+    """
+    # (bundle, segment) -> [(cut, band, amount)], straight from charge_log_.
+    by_seg = {}
+    for c in planner.committed_charges():
+        by_seg.setdefault((c.bundle_id, c.seg_idx), []).append(
+            (c.cut_index, c.band, c.amount))
+
+    cuts = planner.get_cuts()
+    per_band = {}
+    for bid, sets in groups.items():
+        for members in sets:
+            amounts = {}                      # (cut, band) -> [amount, ...]
+            for si in members:
+                for (ci, b, amt) in by_seg.get((bid, si), ()):
+                    amounts.setdefault((ci, b), []).append(amt)
+            for key, vals in amounts.items():
+                if len(vals) < 2:
+                    continue
+                ph, bids = per_band.get(key, (0.0, set()))
+                per_band[key] = (ph + sum(vals) - max(vals), bids | {bid})
+
+    return [(ci, b, ph, cuts[ci].cap(b), cuts[ci].usage(b),
+             cuts[ci].layer_id, sorted(bids))
+            for (ci, b), (ph, bids) in sorted(per_band.items())]
+
+
+def run(flow, p0, totals, bands):
     s = solve(flow)
     nr = getattr(s, "nuts_result", None)
     if nr is None:
@@ -163,6 +217,7 @@ def run(flow, p0, totals):
     placed = {(ts.bundle_id, ts.seg_idx): ts.track_position
               for ts in nr.segments if ts.placed}
 
+    groups = {}
     for w in s.bundles:
         if not w.plan or w.plan.selected_topology_index < 0:
             continue
@@ -172,26 +227,82 @@ def run(flow, p0, totals):
         totals["bundles"] += 1
         totals["segments"] += len(t.segments)
 
-        for (i, j, _lo, _hi, _o, _perp, _layer) in coincident_pairs(t, seg_layers):
+        # Keyed by the coincidence class itself, so a triple stack forms ONE
+        # group rather than three overlapping pairs.
+        classes = {}
+        for (i, j, _lo, _hi, o, perp, layer) in coincident_pairs(t, seg_layers):
             totals["pairs"] += 1
             pi, pj = placed.get((bid, i)), placed.get((bid, j))
             if pi is None or pj is None:
                 p0["one or both unplaced"] += 1
-            elif abs(pi - pj) >= 1e-9:
+                continue
+            if abs(pi - pj) >= 1e-9:
                 p0["placed APART (charge correct)"] += 1
-            else:
-                p0["co-placed (phantom)"] += 1
+                continue
+            p0["co-placed (phantom)"] += 1
+            # Only a CO-PLACED pair reaches P2: where NUTS put the twins on
+            # different tracks the metal really is two wires and charging twice
+            # was right, so folding it in would manufacture a phantom.
+            classes.setdefault((o, perp, layer), set()).update((i, j))
+        # EXTEND rather than assign: `charge_log_` keys on original_bundle.id,
+        # so if two wrappers ever shared one, assigning would silently drop a
+        # class whose charges are still in the record.
+        if classes:
+            groups.setdefault(bid, []).extend(classes.values())
+
+    planner = getattr(s, "planner", None)
+    if planner is None or not groups:
+        return
+    if not planner.charge_log_active():
+        # band_span_charge 0 charges a single band and is its own inverse, so
+        # it keeps no record.  Say so rather than report an empty result.
+        totals["unrecorded_flows"] += 1
+        return
+    name = Path(flow).name
+    bands.extend((name,) + row for row in band_phantoms(planner, groups))
+
+
+def report_bands(bands, unrecorded):
+    print("\nP2 — how much demand, on which band, with how much room?")
+    if unrecorded:
+        print(f"  {unrecorded} flow(s) ran with band_span_charge 0, which keeps"
+              " no charge record;\n  their instances are NOT in the rows below.")
+    if not bands:
+        print("  no affected bands (nothing co-placed reached the committed"
+              " field)")
+        return
+
+    print(f"  affected bands                    {len(bands):>6}")
+    # Overflow is the hard STRICT constraint, so it gets counted first: a band
+    # the phantom ALONE pushes over is the discrete harm the whole question is
+    # about.
+    over = [r for r in bands if r[5] > r[4]]
+    caused = [r for r in over if r[5] - r[3] <= r[4]]
+    print(f"  ... over capacity                  {len(over):>6}")
+    print(f"  ... over capacity BECAUSE of it    {len(caused):>6}")
+
+    print(f"\n  {'flow':<26} {'cut':>4} {'band':>4} {'M':>3} {'phantom':>9}"
+          f" {'cap':>9} {'usage':>9}  fill%   eaten  bundle")
+    for (flow, ci, b, ph, cap, use, lid, bids) in bands:
+        # Of the room that would have existed without the phantom, how much
+        # does it take?  Undefined when the band is already over.
+        free = cap - use
+        eaten = ("    n/a" if free < 0 else
+                 f"{100.0 * ph / max(ph + free, 1e-12):>6.1f}%")
+        print(f"  {flow:<26} {ci:>4} {b:>4} {lid:>3} {ph:>9.2f} {cap:>9.2f}"
+              f" {use:>9.2f} {100.0 * use / max(cap, 1e-12):>5.1f}% {eaten}"
+              f"  {','.join(str(x) for x in bids)}")
 
 
 def main():
     flows = sys.argv[1:] or FLOWS
-    p0, totals = Counter(), Counter()
+    p0, totals, bands = Counter(), Counter(), []
     for f in flows:
         p = BUDA / f
         if not p.exists():
             print(f"-- not found: {f}")
             continue
-        run(p, p0, totals)
+        run(p, p0, totals, bands)
         print(f"scanned {f}")
 
     print("\n" + "=" * 74)
@@ -208,9 +319,11 @@ def main():
     print(f"  committed segments                {segs:>6}")
     print(f"  coincident pairs                  {totals['pairs']:>6}"
           f"   ({100.0 * totals['pairs'] / max(1, segs):.4f}% of segments)")
-    print("\n  Per-band impact is NOT reported: see the module docstring.  It\n"
-          "  needs `for_each_band_w`'s own arithmetic, and the four ways a\n"
-          "  hand-rolled version got it wrong are recorded there.")
+
+    report_bands(bands, totals["unrecorded_flows"])
+    print("\n  These are FINAL committed states.  The planner is greedy and\n"
+          "  widest-first, so a band could have been tight mid-run and relaxed\n"
+          "  by the end; a clean table here is not 'never mattered'.")
 
 
 if __name__ == "__main__":

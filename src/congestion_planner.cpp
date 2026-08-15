@@ -2229,6 +2229,18 @@ void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& p
     }
 }
 
+std::vector<CommittedCharge> CongestionPlanner::committed_charges() const {
+    // charge_log_ is a std::map keyed by (bundle_id, seg_idx) and each vector
+    // is in for_each_band_w emission order, so the output is deterministic
+    // without sorting.  Rip-ups erase their key, so what remains describes
+    // exactly the charges currently standing in cuts_.
+    std::vector<CommittedCharge> out;
+    for (const auto& [key, rec] : charge_log_)
+        for (const auto& [ci, b, amt] : rec)
+            out.push_back({key.first, key.second, ci, b, amt});
+    return out;
+}
+
 BundleAssignment CongestionPlanner::make_assignment(const BundleWrapper& bw,
                                                     const PlanResult& plan) const {
     // Derive representative V/H layers for logging (last V/H seg wins).
