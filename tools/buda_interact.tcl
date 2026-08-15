@@ -38,10 +38,12 @@
 #   * and where its checkpoint lives (the last file-backed `open_bdb`), so
 #     the prompt can say whether a pin will outlive the session.
 #
-# A flow with no file-backed BDB still iterates IN-session (pin/replan);
-# `save <path>` at the prompt snapshots the state so the next session can
-# `open_bdb` + `load_pipeline` it.  A flow that ends in `exit` has ended
-# the engine session — reported, nothing to iterate.
+# A flow with no file-backed BDB still iterates IN-session (pin/replan),
+# but its pins die with the session: `save_bdb` snapshots the OPEN BDB, so
+# only a flow that opened one has a snapshot to write (opening one after
+# the fact would not backfill the rows the pipeline persists as it runs).
+# A flow that ends in `exit` has ended the engine session — reported,
+# nothing to iterate.
 # ============================================================
 
 set here [file dirname [file normalize [info script]]]
@@ -113,7 +115,12 @@ set first_bus ""
 set tail {}
 set planning 0
 foreach ln $lines {
-    set verb [lindex [split $ln] 0]
+    # The engine lowercases the COMMAND NAME (do_command's parts[0].lower())
+    # but the recorder writes the line verbatim, so a flow spelling
+    # `RUN_PLANNER` ran fine and must be recognized here too.  Only the verb:
+    # arguments are case-sensitive to the engine (`run_planner HIER` would
+    # have been refused), and an `open_bdb` PATH must never be case-folded.
+    set verb [string tolower [lindex [split $ln] 0]]
     if {$verb eq "run_planner" && [lindex [split $ln] 1] eq "hier"} {
         set is_hier 1
     }
@@ -143,23 +150,37 @@ if {$ckpt ne ""} {
           load_pipeline (or a checkpointing flow)"
     set snap_base $ckpt
 } else {
-    puts "$tag: no file-backed BDB -- pins and edits die with this session;\
-          `save` (or a raw `save_bdb <path>`) writes a snapshot"
+    # `save_bdb <path>` snapshots the OPEN BDB (it refuses with `open_bdb
+    # first` otherwise), and opening one now would not backfill the rows the
+    # pipeline persists as it runs — so a flow that never opened a BDB has
+    # no snapshot to offer, and promising one here handed the user a verb
+    # that could only fail.  Say what is true instead.
+    puts "$tag: no file-backed BDB -- pins and edits die with this session\
+          (a snapshot needs a BDB the flow itself opened; see\
+          flow/tcl/design.tcl for a checkpointing flow)"
     set snap_base [file rootname $tag].bdb
 }
 
+# A replay that stops partway is a FAILURE, not a finished route: the session
+# then holds a mix of old and new state, and a verdict read off it would be
+# stale.  So the error is RE-RAISED (the prompt's catch prints it and keeps
+# `pins_dirty` set, since its clear follows the route call), and the sticky
+# flag below keeps the exit code honest even when the user routes on and
+# quits with clean pins — only a replay that runs to the end clears it.
+set replay_failed 0
 proc replay_tail {} {
     if {![llength $::tail]} {
         puts "[set ::tag]: the flow never planned -- no replan recipe to replay"
         return
     }
+    set ::replay_failed 1
     foreach ln $::tail {
         puts "replay> $ln"
         if {[catch {buda::do $ln} err]} {
-            puts "[set ::tag]: replay stopped at `$ln`: $err"
-            break
+            error "replay stopped at `$ln`: $err"
         }
     }
+    set ::replay_failed 0
 }
 
 set pins_dirty [prompt::run $tag "[file rootname $tag]>" replay_tail \
@@ -167,7 +188,15 @@ set pins_dirty [prompt::run $tag "[file rootname $tag]>" replay_tail \
 if {$pins_dirty} {
     puts "$tag: pins changed since the last route -- re-planning so the\
           checkpoint stays coherent"
-    replay_tail
+    if {[catch {replay_tail} err]} {
+        puts stderr "$tag: $err"
+    }
+}
+if {$replay_failed} {
+    catch {buda::stop}
+    puts stderr "$tag: FAILED -- the last replan stopped partway, so the\
+          session's state is not the flow's routed result"
+    exit 1
 }
 
 # The exit code is the design's cleanliness — but only when the flow

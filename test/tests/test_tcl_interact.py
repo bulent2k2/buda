@@ -72,12 +72,16 @@ add_bus n1[4] noc.b mem1.b
 add_net irq io.irq dsp.irq
 run_bundler STRICT
 generate_topologies
-run_planner 5
-run_nuts
+RUN_PLANNER 5
+RUN_NUTS
 check_design nuts
 run_detailed_nuts
 check_design dnuts
 """
+# RUN_PLANNER / RUN_NUTS are deliberately uppercase: the engine lowercases the
+# command NAME but the recorder writes the line verbatim, so the driver's
+# hier/routed/tail detection must case-fold the verb too — spelled that way
+# here, the flat test only passes if it does.
 
 
 def _run(cmd, tmp_path, stdin="done\n"):
@@ -112,6 +116,33 @@ def test_hier_flow_is_autodetected_and_replans_hier(tmp_path):
     assert "starting `run_planner hier 5`" in r.stdout
     assert "expanded instances" in r.stdout        # the template pin fanned out
     assert r.stdout.count("topo 2 of 5") >= 4, "the replay lost the pin"
+
+
+def test_a_failed_replay_fails_the_run(tmp_path):
+    # A command that succeeds once and hard-errors on repetition — a duplicate
+    # `def_layer` id — planted AFTER the planner puts a deterministic failure
+    # inside the routing tail: the original run declares layer 8 once (fine),
+    # every replay re-declares it and stops there.  A replay that stops
+    # partway leaves the session half-mutated, so the driver must exit
+    # non-zero rather than read a verdict off that state.
+    flow = tmp_path / "sour.buda"
+    flow.write_text(_FLAT_FLOW.replace(
+        "RUN_NUTS\n", "RUN_NUTS\ndef_layer 8 M8 H 30\n"))
+
+    # Exit-path replan (pin made pins dirty; `done` triggers the replay).
+    r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="pin d1 4\ndone\n")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "replay stopped at `def_layer 8 M8 H 30`" in r.stdout + r.stderr
+    assert "FAILED" in r.stderr
+
+    # Mid-session `replan` with CLEAN pins: the prompt survives the failure
+    # (the error is printed, the loop continues to `done`), no exit replan
+    # runs — and the sticky flag still fails the run, because the last route
+    # attempt never finished.
+    r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="replan\ndone\n")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "replay stopped at `def_layer 8 M8 H 30`" in r.stdout
+    assert "stopped partway" in r.stderr
 
 
 def test_a_flow_that_never_planned_has_no_replan_and_no_verdict(tmp_path):

@@ -448,10 +448,16 @@ trees flattened), not from parsing its text:
   it, so `replan` heals the way the flow heals;
 - **whether it routed** — no recorded `run_nuts` means nothing to
   verdict, so a deliberately partial flow exits 0 with a note instead of
-  reading "never computed" as dirty;
+  reading "never computed" as dirty. A **replay that stops partway** is a
+  failure, not a finished route: the error re-raises through the prompt
+  (which keeps the pins marked dirty), and a sticky flag fails the run
+  even if the session then quits with clean pins — a verdict is never
+  read off half-mutated state;
 - **where its checkpoint lives** — the last file-backed `open_bdb`; with
-  none, the prompt says pins die with the session and `save <path.bdb>`
-  writes a snapshot the next session can `open_bdb` + `load_pipeline`.
+  none, the driver says pins die with the session, because `save_bdb`
+  snapshots the OPEN BDB (opening one after the fact would not backfill
+  the rows the pipeline persists as it runs) — a flow that wants durable
+  pins opens a BDB, as `flow/tcl/design.tcl` does.
 
 The prompt itself is **`flow/tcl/prompt.tcl`** — one source, every
 driver: `design.tcl`, `hdesign.tcl`, and `btcl -i` all call
