@@ -6,13 +6,18 @@
 #
 #   btcl flow.tcl [args...]        # run the flow
 #   btcl -v flow.tcl [args...]     # …and pop a viewer when the flow ends
-#   btcl -i flow.buda [ckpt.bdb]   # run a .BUDA flow, then drop into the
+#   btcl -i flow.buda [ckpt.bdb [stage]]
+#                                  # run a .BUDA flow, then drop into the
 #                                  # interactive pin/edit prompt (auto-detects
 #                                  # hier/flat; `replan` replays the flow's own
 #                                  # routing tail — tools/buda_interact.tcl).
 #                                  # The optional BDB is opened BEFORE the flow
 #                                  # so pins persist across sessions even when
-#                                  # the flow itself never opens one
+#                                  # the flow itself never opens one; the
+#                                  # optional stage (topo|plan|nuts|dnuts)
+#                                  # RESUMES from the checkpoint instead of
+#                                  # rebuilding: setup replayed from the build
+#                                  # trace, load_pipeline, re-enter there
 #   btcl -- -v.tcl                 # a script whose NAME starts with a dash
 #
 # WRAPPER OPTIONS ARE READ ONLY BEFORE THE SCRIPT.  The first non-option word

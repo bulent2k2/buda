@@ -475,6 +475,37 @@ the previous session's choice.  `unpin` is durable the same way.  Session
 precedence is unchanged: a `select_topology` in the flow's own text wins
 over the restored pin.
 
+**Or skip the rebuild entirely — the optional STAGE argument** is the
+`design.tcl`/`hdesign.tcl` RESUME recipe generalized to any flow:
+
+```bash
+bin/btcl -i mini.buda ckpt.bdb plan    # skip bundling + generation
+bin/btcl -i mini.buda ckpt.bdb topo    # skip bundling only
+bin/btcl -i mini.buda ckpt.bdb nuts    # keep the plan too   (flat only)
+bin/btcl -i mini.buda ckpt.bdb dnuts   # keep abstract NUTS  (flat only)
+```
+
+Every build session with a live file-backed checkpoint writes its recorded
+trace beside it (`<ckpt.bdb>.trace`); a stage session replays only the
+trace's SETUP portion, calls `load_pipeline` — which restores bundles,
+every candidate, the plan and the PINS through the machinery built for
+exactly this, so no rebuild-path restore is even involved — and re-enters
+the flow's own recorded commands at the chosen stage.  What "setup" means
+follows the vehicles: a FLAT flow's blocks and buses are session state and
+replay wholesale (`design.tcl` re-declares them every session), while a
+HIER flow's cells/instances/buses/busterms are IN the checkpoint (a
+replayed `add_inst` is a duplicate-instance error, a re-derive would
+renumber busterm ids the restored bundles reference), so only the
+session-state verbs replay — stack, patterns, `add_blocks_from_bdb`
+projections, layer policies — and the construction commands are held,
+counted, and said.  A hier resume supports `topo` and `plan` (the cuts
+that still run `run_planner hier`, whose expansion the restored
+pre-expansion view feeds); `nuts`/`dnuts` there would need the
+post-expansion `load_pipeline expanded` recipe, which stays a
+resume-aware flow's job (`hdesign.tcl`).  A stage without a prior build
+(no trace), a trace built by a DIFFERENT flow, or a checkpoint the flow
+later replaced with `:memory:` are each refused with the remedy.
+
 **Two concurrent sessions on the same BDB cannot corrupt it**: SQLite
 allows one writer, so the unlucky session fails LOUDLY — at the arming
 open ("cannot open the armed BDB", another session holding it) or
