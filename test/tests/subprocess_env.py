@@ -35,7 +35,8 @@ module is where those two comments now live so the next site inherits the
 lesson instead of rediscovering it.
 
 Directories are resolved against `root`, so a caller cannot accidentally
-depend on the current directory being the repo root either.
+depend on the current directory being the repo root either -- and the
+INHERITED entries are absolutized for the same reason, see `_anchored`.
 """
 import os
 from pathlib import Path
@@ -44,6 +45,34 @@ __all__ = ["buda_env", "DEFAULT_DIRS"]
 
 # `build` holds the compiled extension; `tools` is a package flows import.
 DEFAULT_DIRS = ("build", "tools")
+
+
+def _anchored(entry):
+    """One inherited PYTHONPATH entry, made independent of the child's cwd.
+
+    A RELATIVE entry means "relative to the current directory", and Python
+    re-resolves it at every import rather than once at startup -- so it names
+    one directory in the parent and a different one in a child that runs
+    somewhere else.  Passing it through verbatim hands the child a path whose
+    meaning we did not intend and cannot predict.
+
+    Anchored to the CURRENT DIRECTORY, not to `root`: cwd is what the entry
+    means to the parent at the moment we read it, so this preserves the
+    caller's intent rather than inventing repo-root semantics they never
+    wrote.  The two agree in the ordinary case (a developer at the repo root
+    with `export PYTHONPATH=build`) and differ only when cwd is not root --
+    exactly where guessing `root` would be a fabrication.
+
+    An EMPTY entry is Python's spelling of the current directory, so it
+    anchors the same way instead of being dropped: `os.path.abspath("")` is
+    cwd, which is precisely what the parent means by it.
+
+    Reached via `bin/activate`?  No -- that exports ABSOLUTE paths, so this
+    is inert there.  It bites the documented direct-invocation habit
+    (`export PYTHONPATH=build`), under which `test_subprocess_env.py`'s own
+    cwd-independence test failed on clean main.
+    """
+    return entry if os.path.isabs(entry) else os.path.abspath(entry)
 
 
 def buda_env(root, *dirs, **overrides):
@@ -56,7 +85,8 @@ def buda_env(root, *dirs, **overrides):
     env = dict(os.environ)
     parts = [str(Path(root) / d) for d in (dirs or DEFAULT_DIRS)]
     if env.get("PYTHONPATH"):
-        parts.append(env["PYTHONPATH"])
+        parts.extend(_anchored(p)
+                     for p in env["PYTHONPATH"].split(os.pathsep))
     env["PYTHONPATH"] = os.pathsep.join(parts)
     env.update({k: str(v) for k, v in overrides.items()})
     return env
