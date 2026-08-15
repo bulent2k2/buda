@@ -418,6 +418,11 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
             memo_tokens.append("spine_relays")
         if memo_tokens:
             _record_gen_knob_memo(session, remembered, memo_tokens)
+        # The persist below rewrites the WHOLE topology table from session
+        # state, so a durable pin on ANY bundle must be re-attached first —
+        # a rebuilding flow that reaches this per-bundle path without a bulk
+        # generate would otherwise wipe every previous session's pin.
+        session._apply_bdb_pins()
         if session._persist_topologies():
             print("[BDB] re-persisted candidate topologies to the open BDB.")
 
@@ -558,6 +563,10 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
         ("no_hanan_loci", loci_explicit and not use_hanan_loci),
         ("spine_relays", use_spine_relays)) if on]
     _record_gen_knob_memo(session, targets, tokens)
+    # Whole-table rewrite below: re-attach durable pins first (see
+    # generate_topologies_for_bundle) — accretion leaves the pool's pinned
+    # candidate in place, so the uid always still resolves.
+    session._apply_bdb_pins()
     if session._persist_topologies():
         print("[BDB] re-persisted candidate topologies to the open BDB.")
 
@@ -631,6 +640,11 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
     # even before run_planner. A later select_topology overrides it; the
     # sidecar's layer overrides for a matching topology are still merged.
     session._apply_selections()
+    # Then the BDB's durable pins (uid-keyed) — BEFORE the persist below
+    # rewrites the topology table from session state, which is what wiped a
+    # previous session's pin on every flow re-run (a rebuild never calls
+    # load_pipeline, so nothing else restores them).
+    session._apply_bdb_pins()
     nt = session._persist_topologies()
     if nt:
         print(f"[BDB] persisted {nt} candidate topolog"
@@ -741,6 +755,10 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
     # Restore the sidecar baseline onto the fresh candidates (see
     # generate_topologies); keeps live state and GUI consistent pre-plan.
     session._apply_selections()
+    # Then the BDB's durable pins — before the persist wipes them (see
+    # generate_topologies; template bundles restore pre-expansion, so a
+    # restored pin propagates to every instance at run_planner hier).
+    session._apply_bdb_pins()
     nt = session._persist_topologies()
     if nt:
         print(f"[BDB] persisted {nt} candidate topolog"
@@ -790,6 +808,9 @@ def cmd_generate_topologies_for_hbundle(session, cmd, args, cmd_line):
     if memo_tokens:
         _record_gen_knob_memo(session, [target_w], memo_tokens)
     print(f"generate_topologies_for_hbundle: bundle {bid} — {n} candidates")
+    # Whole-table rewrite below: re-attach durable pins first (see
+    # generate_topologies_for_bundle).
+    session._apply_bdb_pins()
     if session._persist_topologies():
         print("[BDB] re-persisted candidate topologies to the open BDB.")
 

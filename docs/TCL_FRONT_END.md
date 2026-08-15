@@ -362,7 +362,7 @@ A bundle selector — for `topos`, `explore`, `pin`, `unpin` — is whatever
 prints**: read `Bundle 8: Seg 1: 4 bit(s) — unplaced`, type `topos 8`, and the
 header names the bus (`── bundle 8  nets=4 (n1_0…)`).
 
-The loop itself lives ONCE, in [`flow/tcl/prompt.tcl`](../flow/tcl/prompt.tcl),
+The loop itself lives ONCE, in [`tools/buda_prompt.tcl`](../tools/buda_prompt.tcl),
 and both drivers call it (`prompt::run <tag> <ps> <route-proc> <bdb>
 <example>`, returning `pins_dirty`). It was duplicated character-for-character
 in `design.tcl` and `hdesign.tcl` — including the comments explaining why
@@ -456,10 +456,35 @@ trees flattened), not from parsing its text:
 - **where its checkpoint lives** — the last file-backed `open_bdb`; with
   none, the driver says pins die with the session, because `save_bdb`
   snapshots the OPEN BDB (opening one after the fact would not backfill
-  the rows the pipeline persists as it runs) — a flow that wants durable
-  pins opens a BDB, as `flow/tcl/design.tcl` does.
+  the rows the pipeline persists as it runs).  A flow that wants durable
+  pins opens a BDB, as `flow/tcl/design.tcl` does — or you arm one from
+  the command line without editing the flow:
 
-The prompt itself is **`flow/tcl/prompt.tcl`** — one source, every
+  ```bash
+  bin/btcl -i demo/comprehensive_demo.buda ckpt.bdb   # opened BEFORE the flow
+  ```
+
+**Back-to-back sessions work on the pin's durable form**: a `pin` at the
+prompt writes `topology.is_pinned` through to the checkpoint at once, and
+the next `btcl -i` on the same flow+BDB — a RERUN of the flow, not a
+`load_pipeline` resume — re-attaches it onto the freshly regenerated
+candidate pool by stable content uid (`_apply_bdb_pins`, the generation
+tail's mirror of the sidecar baseline restore, running just before the
+re-persist that used to wipe it), so the flow's own `run_planner` honors
+the previous session's choice.  `unpin` is durable the same way.  Session
+precedence is unchanged: a `select_topology` in the flow's own text wins
+over the restored pin.
+
+**Two concurrent sessions on the same BDB cannot corrupt it**: SQLite
+allows one writer, so the unlucky session fails LOUDLY — at the arming
+open ("cannot open the armed BDB", another session holding it) or
+mid-flow ("the flow failed: … database is locked") — while the file stays
+consistent (`pragma integrity_check` ok) and a follow-up session runs
+clean.  Concurrent *iteration* on one checkpoint is a conflict by
+construction (each session rebuilds the same tables); give each session
+its own BDB path when you want them in parallel.
+
+The prompt itself is **`tools/buda_prompt.tcl`** — one source, every
 driver: `design.tcl`, `hdesign.tcl`, and `btcl -i` all call
 `prompt::run`, so a pin means the same thing (durable at once,
 coherence auto-replan on `done`, registry-gated raw pass-through, typo

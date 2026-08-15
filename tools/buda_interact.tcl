@@ -15,13 +15,14 @@
 # ============================================================
 # tools/buda_interact.tcl — interactive iteration on ANY .buda flow.
 #
-#   bin/btcl -i <flow>.buda        (or: tclsh tools/buda_interact.tcl <flow>.buda)
+#   bin/btcl -i <flow>.buda ?<ckpt.bdb>?
+#   (or: tclsh tools/buda_interact.tcl <flow>.buda ?<ckpt.bdb>?)
 #
 # design.tcl and hdesign.tcl carry their own design and their own route
 # recipe; this driver carries NEITHER — it runs an arbitrary flow verbatim
 # (`buda::source`, the engine's own command, so the flow means exactly what
 # `bin/buda` makes it mean) and then drops into the same pin/edit prompt
-# (flow/tcl/prompt.tcl — the shared loop the vehicles use).
+# (tools/buda_prompt.tcl — the shared loop the vehicles use).
 #
 # The flow itself supplies the `replan` recipe, through the RECORDER: with
 # BUDA_RECORD armed, every command the flow executes is written down at
@@ -42,17 +43,22 @@
 # but its pins die with the session: `save_bdb` snapshots the OPEN BDB, so
 # only a flow that opened one has a snapshot to write (opening one after
 # the fact would not backfill the rows the pipeline persists as it runs).
-# A flow that ends in `exit` has ended the engine session — reported,
-# nothing to iterate.
+# The optional SECOND argument closes exactly that gap the honest way
+# round: `btcl -i <flow>.buda ckpt.bdb` opens the BDB BEFORE the flow, so
+# every stage persists as it runs and a prompt pin lands durably — the
+# next session with the same pair restores it onto the rebuilt candidate
+# pool by content uid (_apply_bdb_pins) and the flow's own `run_planner`
+# honors it.  A flow that ends in `exit` has ended the engine session —
+# reported, nothing to iterate.
 # ============================================================
 
 set here [file dirname [file normalize [info script]]]
-set repo [file dirname $here]
 source [file join $here buda.tcl]
-source [file join $repo flow tcl prompt.tcl]
+source [file join $here buda_prompt.tcl]
 
-if {[llength $argv] != 1} {
-    puts stderr "usage: btcl -i <flow>.buda   (a .buda flow takes no arguments)"
+if {[llength $argv] < 1 || [llength $argv] > 2} {
+    puts stderr "usage: btcl -i <flow>.buda ?<ckpt.bdb>?   (the optional BDB\
+                 is opened BEFORE the flow, so pins persist across sessions)"
     exit 2
 }
 set flow [file normalize [lindex $argv 0]]
@@ -61,6 +67,8 @@ if {![file exists $flow]} {
     exit 2
 }
 set tag [file tail $flow]
+set armed ""
+if {[llength $argv] == 2} { set armed [file normalize [lindex $argv 1]] }
 
 # ── arm the recorder, run the flow verbatim ───────────────────────────────
 close [file tempfile recpath buda_record]
@@ -68,6 +76,28 @@ set ::env(BUDA_RECORD) $recpath
 set ::env(BUDA_RECORD_NOTE) "btcl -i $tag"
 
 buda::start
+if {$armed ne ""} {
+    # Arm a file-backed BDB BEFORE the flow runs, so the whole pipeline
+    # persists as it goes — the flow/tcl/design.tcl pattern, without editing
+    # the flow.  This is what gives a flow that never opens a BDB durable
+    # pins: a `pin` at the prompt writes through, and the next
+    # `btcl -i <flow> <same.bdb>` restores it onto the rebuilt pool
+    # (_apply_bdb_pins, uid-keyed).  It cannot be done at SAVE time instead:
+    # the pipeline persists its rows as it runs, so a BDB opened after the
+    # fact holds none of them.  The open is recorded like everything else,
+    # so the checkpoint detection below finds it with no special case.
+    # A failure here is most often ANOTHER session holding the same BDB —
+    # SQLite allows one writer, which is what keeps two concurrent sessions
+    # from corrupting the file: the loser must fail LOUDLY at the door, in
+    # this driver's voice, not as a raw Tcl stack trace.
+    if {[catch {buda::open_bdb $armed} err]} {
+        puts stderr "$tag: cannot open the armed BDB $armed: $err"
+        puts stderr "$tag: (another session holding it?  one writer at a\
+              time -- finish or kill it, or arm a different path)"
+        catch {buda::stop}
+        exit 1
+    }
+}
 if {[catch {buda::source $flow} err]} {
     puts stderr "$tag: the flow failed: $err"
     catch {buda::stop}
@@ -111,6 +141,7 @@ proc _skipped {verb} {
 set is_hier 0
 set routed 0
 set ckpt ""
+set ckpt_live 0
 set first_bus ""
 set tail {}
 set planning 0
@@ -127,7 +158,17 @@ foreach ln $lines {
     if {$verb eq "run_nuts"} { set routed 1 }
     if {$verb eq "open_bdb"} {
         set p [lindex [split $ln] 1]
-        if {$p ne ":memory:"} { set ckpt $p }
+        # `ckpt_live` distinguishes "a file-backed BDB was SEEN" from "the
+        # file-backed BDB is the one still OPEN": a flow that opens
+        # `:memory:` after it (an armed BDB followed by the flow's own
+        # open) replaced it, and pins made at the prompt then go to memory
+        # — a checkpoint claim on the dead file would be a lie.
+        if {$p ne ":memory:"} {
+            set ckpt $p
+            set ckpt_live 1
+        } else {
+            set ckpt_live 0
+        }
     }
     if {$first_bus eq "" && $verb eq "add_bus"} {
         # `add_bus d0[8] ...` -> hint `d0`, for the prompt banner's examples.
@@ -145,9 +186,26 @@ if {[llength $tail]} {
 } else {
     puts "$tag: the flow never ran the planner -- `replan` is unavailable"
 }
-if {$ckpt ne ""} {
-    puts "$tag: checkpoint $ckpt -- pins persist; resume with open_bdb +\
-          load_pipeline (or a checkpointing flow)"
+if {$ckpt ne "" && !$ckpt_live} {
+    # A file-backed BDB was seen but the flow reopened `:memory:` after it
+    # (an armed BDB followed by the flow's own open is the usual shape):
+    # the file holds what ran BEFORE that open, and pins made at this
+    # prompt go to the memory BDB — durable only via an explicit
+    # `save <path>` snapshot of the live session.
+    puts "$tag: NOTE -- the flow reopened :memory: after $ckpt; prompt pins\
+          are NOT durable there (`save` snapshots the live session)"
+    set snap_base [file rootname $tag].bdb
+} elseif {$ckpt ne ""} {
+    puts "$tag: checkpoint $ckpt -- pins persist; rerun the flow (or resume\
+          with open_bdb + load_pipeline) and they hold"
+    if {$armed ne "" && $ckpt ne $armed} {
+        # The flow opened its OWN BDB after the armed one, so the armed file
+        # holds only what ran before that open — the flow's checkpoint is
+        # the real one, and pretending otherwise would promise persistence
+        # in a file the routing never reached.
+        puts "$tag: NOTE -- the flow opened its own BDB after the armed\
+              $armed; the flow's checkpoint above is the live one"
+    }
     set snap_base $ckpt
 } else {
     # `save_bdb <path>` snapshots the OPEN BDB (it refuses with `open_bdb

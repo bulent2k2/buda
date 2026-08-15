@@ -144,6 +144,26 @@ class PersistMixin:
             _k = self.bdb.bundle_gen_knobs(_bid)
             if _k:
                 knob_memo[_bid] = _k
+        # A durable select_topology pin must survive it too: the clear wipes
+        # the topology rows carrying is_pinned at BUNDLING time, two commands
+        # before the generation tail's _apply_bdb_pins could read them — so
+        # the session keeps a (bundle -> pinned uid) memo that MIRRORS the
+        # table's pin state.  Initialized from the rows here, once per BDB
+        # connection (the cross-session case: rows a previous session
+        # wrote); from then on _persist_topologies rebuilds it from the very
+        # wrapper state it serializes, so the mirror holds through every
+        # in-session pin, unpin and REBUNDLE — the bundler replaces
+        # session.bundles with fresh unpinned wrappers before calling here,
+        # which is exactly why the rows (mirrored here) are the source, not
+        # memory (Codex #758).
+        if getattr(self, '_bdb_pin_snap_for', None) != id(self.bdb):
+            self._bdb_pin_snap_for = id(self.bdb)
+            self._bdb_pin_memo = {}
+            for _row in self.bdb.all_bundles():
+                _pinned = [tr.topo_uid for tr in self.bdb.topologies(_row.id)
+                           if tr.is_pinned]
+                if _pinned:
+                    self._bdb_pin_memo[_row.id] = _pinned[0]
         # Membership of FK-kept bundles must survive too (audit P3-04):
         # clear_bundles(keep_user) preserves a bundle row still referenced
         # by a kept USER topology, but wipes ALL bundle_net/bundle_busterm
@@ -271,6 +291,77 @@ class PersistMixin:
                     self.bdb.rollback_batch()
                     raise
 
+    def _apply_bdb_pins(self):
+        """Re-attach durable `select_topology` pins from the open BDB onto a
+        REBUILT candidate pool, by stable content uid.
+
+        `select_topology` writes `topology.is_pinned` through to the BDB at
+        once, and `load_pipeline` restores it — but a flow that REBUILDS
+        (re-bundles and regenerates rather than resuming) starts from
+        unpinned session state, and the generation-tail persist rewrites the
+        topology table FROM that state: the durable pin was silently wiped
+        by the very re-run it was meant to outlive (the `btcl -i`
+        back-to-back case).  So the generation tail calls this right before
+        persisting: an unpinned wrapper whose BDB rows carry `is_pinned`
+        re-adopts the pin, resolved by `topo_uid` (indices may renumber
+        across regenerations, and generation is deterministic, so the same
+        candidate carries the same uid).  Precedence matches the sidecar
+        baseline: a pin made in THIS session (a script `select_topology`
+        before regeneration) wins; a pin whose uid matches no regenerated
+        candidate is reported and dropped rather than landing on a
+        neighbour.  Single pins only — a `pinned_group` super-candidate pin
+        rides BDB meta and stays load_pipeline-restored.  No-op without an
+        open BDB, and on any BDB with no pinned rows (every checked-in
+        fixture: none persist topology rows at all)."""
+        if self.bdb is None or not self.bundles:
+            return
+        memo = getattr(self, '_bdb_pin_memo', None) or {}
+        # Rows are worth querying only while the mirror is UNINITIALIZED for
+        # this connection (e.g. a flat flow that bundled BEFORE open_bdb, so
+        # no persist has snapshotted yet); once initialized, rows == mirror
+        # by invariant and the per-bundle query would be pure waste.
+        mirror_fresh = (getattr(self, '_bdb_pin_snap_for', None)
+                        == id(self.bdb))
+        for w in self.bundles:
+            if (getattr(w.input, 'topology_pinned', False)
+                    or getattr(w.input, 'pinned_group', [])):
+                continue                              # session state wins
+            if not w.input.candidates:
+                # No pool to restore ONTO (rebundled, not yet regenerated) —
+                # neither restored nor dropped: the mirror keeps the entry
+                # (see _persist_topologies) for the generation that builds
+                # this bundle's pool.
+                continue
+            bid = str(w.input.original_bundle.id)
+            # The re-bundle's clear already wiped the rows, so the memo —
+            # the mirror of the table's pin state, maintained by
+            # _persist_topologies — is the primary source; live rows are
+            # the fallback for a regeneration with no re-bundle.  Read, not
+            # popped: the mirror must keep matching the rows, and a
+            # re-restore is already prevented by the pinned-wrapper skip
+            # above (a dropped pin cannot return either — the drop's own
+            # persist rebuilt the mirror without it).
+            uid = memo.get(bid)
+            if uid is None and not mirror_fresh:
+                try:
+                    rows = [tr for tr in self.bdb.topologies(bid)
+                            if tr.is_pinned]
+                except RuntimeError:
+                    continue
+                uid = rows[0].topo_uid if rows else None
+            if uid is None:
+                continue
+            for ci, cand in enumerate(w.input.candidates):
+                if buda.topo_uid(cand) == uid:
+                    w.input.topology_pinned = True
+                    w.plan.selected_topology_index = ci
+                    print(f"[BDB] bundle {bid}: durable pin restored -> "
+                          f"topo {ci + 1} ({cand.type})")
+                    break
+            else:
+                print(f"Warning: bundle {bid}: durable pin (uid {uid}) "
+                      f"matches no regenerated candidate — pin dropped")
+
     @_batched
     def _persist_topologies(self):
         """Persist all candidate topologies in self.bundles to the BDB (Stage 2).
@@ -366,6 +457,29 @@ class PersistMixin:
                 self._persist_topology_annotations(bid, ci, topo, seen_busterms)
                 n_cands += 1
             self._persist_group_pin(w, bid)
+        # The durable-pin memo mirrors the table, and this method is the
+        # table's only writer — so rebuild the mirror from the wrapper state
+        # just serialized.  This is what makes an in-session pin survive an
+        # in-session rebundle (the pin's persist refreshed the mirror before
+        # the bundler wiped memory and rows alike), and what makes an
+        # in-session unpin durable (the mirror goes empty WITH the rows, so
+        # no later restore can resurrect it).  One asymmetry, on purpose: a
+        # wrapper with an EMPTY candidate pool persisted no rows, so it said
+        # nothing about its pin either way — its old entry is carried
+        # forward, because dropping it would lose a pin merely because a
+        # rebundle's persist ran before that bundle's pool was regenerated.
+        old_memo = getattr(self, '_bdb_pin_memo', None) or {}
+        self._bdb_pin_snap_for = id(self.bdb)
+        self._bdb_pin_memo = {}
+        for w in wrappers:
+            bid = str(w.input.original_bundle.id)
+            if getattr(w.input, 'topology_pinned', False):
+                sel = w.plan.selected_topology_index
+                if 0 <= sel < len(w.input.candidates):
+                    self._bdb_pin_memo[bid] = \
+                        buda.topo_uid(w.input.candidates[sel])
+            elif not w.input.candidates and bid in old_memo:
+                self._bdb_pin_memo[bid] = old_memo[bid]
         return n_cands
 
     def _persist_group_pin(self, w, bid):

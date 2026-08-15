@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # ============================================================================
-# flow/tcl/prompt.tcl — the design-iteration prompt, once.
+# tools/buda_prompt.tcl — the design-iteration prompt, once.
 #
 # `design.tcl` (flat) and `hdesign.tcl` (hierarchical) had a character-for-
 # character identical prompt loop, differing only in the tag they print and in

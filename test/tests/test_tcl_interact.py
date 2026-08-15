@@ -20,7 +20,7 @@ arbitrary flow verbatim via the engine's `source`, learns what the flow DID
 from the recorder (BUDA_RECORD at do_command — loops unrolled, source trees
 flattened), and derives from that: hier vs flat, the flow's own routing
 tail as the prompt's `replan`, whether it routed at all, and where its
-checkpoint lives.  Then the shared prompt (flow/tcl/prompt.tcl) takes
+checkpoint lives.  Then the shared prompt (tools/buda_prompt.tcl) takes
 over — the same loop the vehicles use, so a pin means the same thing in
 all three drivers.
 """
@@ -154,6 +154,127 @@ def test_a_flow_that_never_planned_has_no_replan_and_no_verdict(tmp_path):
     assert "never ran the planner" in r.stdout
     assert "no replan recipe" in r.stdout          # the verb says so, politely
     assert "did not route" in r.stdout and "no verdict" in r.stdout
+
+
+def test_pins_survive_back_to_back_sessions(tmp_path):
+    # The durable-pin round trip on a flow that opens its own BDB: a pin made
+    # at the prompt writes topology.is_pinned through at once; the next
+    # session RERUNS the flow (a rebuild, not a load_pipeline resume), and
+    # the generation tail re-attaches the pin onto the regenerated pool by
+    # content uid (_apply_bdb_pins) — before the re-persist that used to
+    # wipe it — so the flow's own run_planner honors it.  Unpin is durable
+    # the same way: cleared in session 3, gone in session 4.
+    flow = tmp_path / "ckpt.buda"
+    flow.write_text("open_bdb ckpt.bdb\n" + _FLAT_FLOW)
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="pin d1 4\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "checkpoint" in r.stdout and "pins persist" in r.stdout
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path)          # just `done`
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "durable pin restored -> topo 4" in r.stdout
+    assert "topo 4 of" in r.stdout and "[pinned]" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="unpin d1\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Unpinned" in r.stdout
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "durable pin restored" not in r.stdout          # honestly unpinned
+
+
+def test_in_session_rebundle_and_per_bundle_generation_keep_pins(tmp_path):
+    # The two Codex #758 P1s in one round trip.  Session B pins a SECOND
+    # bundle at the prompt, then re-bundles raw — fresh unpinned wrappers,
+    # so the memo mirror (refreshed by the pin's own persist) is the only
+    # surviving copy — and regenerates ONE bundle through the per-bundle
+    # additive path, whose persist rewrites the whole table.  At that
+    # persist w's pool is still EMPTY: it must ride the mirror's
+    # carry-forward (not be warn-dropped), so the bulk generation that
+    # follows restores it onto the regenerated pool.  Session C then sees
+    # BOTH pins: d1's from session A, w's from session B.
+    flow = tmp_path / "ckpt.buda"
+    flow.write_text("open_bdb ckpt.bdb\n" + _FLAT_FLOW)
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="pin d1 4\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path,
+             stdin="pin w 2\nrun_bundler STRICT\n"
+                   "generate_more_topologies d1\n"
+                   "generate_topologies\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "durable pin restored -> topo 4" in r.stdout    # d1 held throughout
+    assert "durable pin restored -> topo 2" in r.stdout    # w, via carry-forward
+    assert "matches no regenerated candidate" not in r.stdout
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path)           # just `done`
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "durable pin restored -> topo 4" in r.stdout
+    assert "durable pin restored -> topo 2" in r.stdout
+    assert r.stdout.count("[pinned]") >= 2, "a pin fell out of the planner"
+
+
+def test_armed_bdb_gives_a_flat_flow_durable_pins(tmp_path):
+    # A flow that never opens a BDB has no durable home for a pin — the
+    # optional second argument arms one BEFORE the flow runs (the design.tcl
+    # pattern without editing the flow), so the whole pipeline persists as
+    # it goes and the next session restores the pin onto the rebuilt pool.
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+
+    r = _run(["bash", _BTCL, "-i", flow, tmp_path / "armed.bdb"], tmp_path,
+             stdin="pin d1 4\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "checkpoint" in r.stdout and "no file-backed BDB" not in r.stdout
+
+    r = _run(["bash", _BTCL, "-i", flow, tmp_path / "armed.bdb"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "durable pin restored -> topo 4" in r.stdout
+    assert "topo 4 of" in r.stdout and "[pinned]" in r.stdout
+
+
+def test_concurrent_sessions_fail_loudly_and_do_not_corrupt_the_bdb(tmp_path):
+    # SQLite allows one writer, and that is the protection: two sessions on
+    # the SAME armed BDB must never corrupt it — the unlucky one fails
+    # LOUDLY (at the arming open, or mid-flow as "the flow failed") while
+    # the file stays consistent and a follow-up session runs clean.  Which
+    # session loses (or whether the writes happen to serialize) is timing;
+    # what is asserted is the invariant: no silent failure, no corruption.
+    import sqlite3
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    bdb = tmp_path / "conc.bdb"
+
+    import os
+    procs = [subprocess.Popen(
+                 ["tclsh", str(_DRIVER), str(flow), str(bdb)],
+                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                 stderr=subprocess.STDOUT, encoding="utf-8",
+                 errors="replace", cwd=tmp_path, env={**os.environ})
+             for _ in range(2)]
+    outs = [p.communicate(input=f"pin d1 {n}\ndone\n", timeout=900)[0]
+            for n, p in zip((4, 3), procs)]
+    rcs = [p.returncode for p in procs]
+
+    for rc, out in zip(rcs, outs):
+        if rc == 0:
+            assert "done -- 0 overlaps" in out, out
+        else:
+            assert ("cannot open the armed BDB" in out
+                    or "the flow failed" in out
+                    or "FAILED" in out), f"a silent failure (rc {rc}): {out}"
+
+    c = sqlite3.connect(bdb)
+    assert c.execute("pragma integrity_check").fetchone()[0] == "ok"
+    c.close()
+
+    r = _run(["tclsh", _DRIVER, flow, bdb], tmp_path)     # follow-up session
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
 
 
 def test_btcl_dash_i_wraps_the_driver_and_refuses_tcl(tmp_path):
