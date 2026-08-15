@@ -37,6 +37,7 @@ Phase-1 shape (the recorded leaning, slot-quantized consumption):
 """
 import bisect
 import math
+import os
 import sys
 
 import buda
@@ -665,6 +666,31 @@ def _abs_layer_pitches(session, rule):
     return (patterned, bare)
 
 
+def metal_default():
+    """The reading a NEWLY DECLARED absolute rule takes: CHANNEL (0) unless
+    `BUDA_NDR_METAL=1` asks for metal.
+
+    A study knob, on the path every semantic default here has taken
+    (`BUDA_KSEGS_REL`, `BUDA_SPINE_RELAYS`, `BUDA_BAND_SPAN_CHARGE`): the flip
+    is STRICTER, not merely different — a layer whose signal slots sit
+    isolated between rails delivers one slot's metal however wide the
+    declaration, so a value the channel reading accepts (by silently
+    delivering less) becomes an R3 refusal.  That rejects designs which route
+    today, so the default owes a measurement before it moves, and the knob is
+    what makes the measurement runnable (`tools/ndr_metal_study.py`).
+
+    DECLARATION only.  A rule RESTORED from a BDB keeps the reading it was
+    persisted with (v28 `ndr_rule.metal`) — the stored declaration is the
+    design's, not this process's — and the reading is part of the pricing
+    fingerprint, so a restored plan priced under the other reading VOIDs
+    loudly rather than being re-charged behind the flow's back.
+
+    The `metal` token still wins where it appears; with the env on there is
+    no token that asks for channel, which is deliberate — the knob exists to
+    move the WHOLE population for one measurement, not to author designs."""
+    return 1 if os.environ.get("BUDA_NDR_METAL") == "1" else 0
+
+
 def cmd_def_ndr(session, cmd, args, cmd_line):
     # def_ndr <name> [width x<N>] [spacing x<N>]
     #                [shield bus|bit|per:<N> [net <label>]] [credit] [bond]
@@ -685,7 +711,7 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
     rule = {"width_x": 1.0, "spacing_x": 1.0, "shield_mode": 0,
             "shield_per_n": 0, "shield_net": "GND", "layers": None,
             "credit": 0, "bond": 0, "width_abs": 0.0,
-            "spacing_abs": 0.0, "metal": 0, "name": name}
+            "spacing_abs": 0.0, "metal": metal_default(), "name": name}
     i = 1
     while i < len(args):
         tok = args[i].lower()
@@ -826,10 +852,18 @@ def cmd_def_ndr(session, cmd, args, cmd_line):
               else f"width x{rule['width_x']:g}")
         sd = (f"spacing {rule['spacing_abs']:g}" if rule["spacing_abs"] > 0
               else f"spacing x{rule['spacing_x']:g}")
+        # Through `ndr_spec_for_layer`, the ONE conversion every stage uses —
+        # not `ndr_resolve_for_pitch`, which is the CHANNEL branch alone.  A
+        # `metal` rule resolved through the channel helper reported a slot
+        # count the engine never charges: measured on the em vehicle, the
+        # header said "L4:1/0" for a rule that resolves to 2 slots/bit there.
+        # The declaration report is a Python consumer WITH a layer in hand,
+        # so it is bound by the same single-sourcing rule as the R9 audit.
+        _sp = _spec_of(session, name)
         per = ", ".join(
-            f"L{lid}:{buda.ndr_resolve_for_pitch(_spec_of(session, name), p).width_slots}"
-            f"/{buda.ndr_resolve_for_pitch(_spec_of(session, name), p).guard_slots}"
-            for lid, p in sorted(_abs_layer_pitches(session, rule)[0].items()))
+            f"L{lid}:{ndr_spec_for_layer(session, _sp, lid).width_slots}"
+            f"/{ndr_spec_for_layer(session, _sp, lid).guard_slots}"
+            for lid in sorted(_abs_layer_pitches(session, rule)[0]))
         print(f"[NDR] rule '{name}': {wd}, {sd} (ABSOLUTE, layout units) -> "
               f"{ws} slot(s)/bit + {gs} guard(s)/gap charged (the max over "
               f"governed layers; per layer slots/guards {per}), "
