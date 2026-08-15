@@ -81,6 +81,81 @@ def test_directories_resolve_against_root_not_the_current_directory(tmp_path,
     assert os.path.isdir(parts[0]), parts
 
 
+def test_a_relative_inherited_entry_is_anchored(tmp_path, monkeypatch):
+    """The failure this fixes, stated as the value rather than a property.
+
+    `export PYTHONPATH=build` is the habit CLAUDE.md documents for invoking
+    python directly, and a relative entry is re-resolved by Python at EVERY
+    import — so handed to a child that runs elsewhere it silently names a
+    different directory.  On clean main it also made the cwd-independence
+    test below fail outright whenever pytest was launched that way.
+    """
+    monkeypatch.setenv("PYTHONPATH", "build")
+    monkeypatch.chdir(tmp_path)
+    parts = buda_env(_ROOT)["PYTHONPATH"].split(os.pathsep)
+    assert parts[-1] == str(tmp_path / "build"), parts
+
+
+def test_an_absolute_inherited_entry_is_passed_through_untouched(tmp_path,
+                                                                 monkeypatch):
+    """The Visual Studio `build\\Release` case must not be rewritten: it is
+    already unambiguous, and only the caller knows it.
+
+    The fixture comes from `tmp_path` because that is DRIVE-QUALIFIED on every
+    platform.  Built as `Path(os.sep) / ...` it is `\\opt\\...` on Windows —
+    rooted but driveless, which Python 3.13 stopped calling absolute
+    (`ntpath.isabs`), so `_anchored` would expand it with the current drive and
+    this assertion would fail on the windows-validate jobs ALONE: they pin
+    3.13, while Linux CI pins 3.11 where the same path IS absolute.  That is
+    the fixture being wrong rather than the helper — a driveless path really is
+    drive-ambiguous, so anchoring it is the intended behaviour (Codex #756).
+    """
+    abs_entry = str(tmp_path / "opt" / "buda" / "build" / "Release")
+    assert os.path.isabs(abs_entry), abs_entry      # the fixture's precondition
+    monkeypatch.setenv("PYTHONPATH", abs_entry)
+    parts = buda_env(_ROOT)["PYTHONPATH"].split(os.pathsep)
+    assert parts[-1] == abs_entry, parts
+
+
+def test_every_inherited_entry_is_anchored_in_order(tmp_path, monkeypatch):
+    """Several entries, mixed absolute and relative: each is handled on its
+    own and the caller's ORDER survives (it is a search path — the order is
+    the caller's precedence, not ours to sort)."""
+    # Drive-qualified, for the reason the test above spells out.
+    abs_entry = str(tmp_path / "first")
+    up = os.path.join("..", "up")
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([abs_entry, "rel", up]))
+    monkeypatch.chdir(tmp_path)
+    parts = buda_env(_ROOT)["PYTHONPATH"].split(os.pathsep)
+    assert parts[-3:] == [abs_entry,
+                          str(tmp_path / "rel"),
+                          os.path.abspath(up)], parts
+
+
+def test_an_empty_inherited_entry_becomes_the_directory_it_already_meant(
+        tmp_path, monkeypatch):
+    """A stray separator (`build:`) yields an empty entry, which Python reads
+    as the CURRENT DIRECTORY.  Anchoring keeps that meaning instead of
+    exporting a `""` the child would re-read as ITS own directory."""
+    monkeypatch.setenv("PYTHONPATH", "a" + os.pathsep)
+    monkeypatch.chdir(tmp_path)
+    parts = buda_env(_ROOT)["PYTHONPATH"].split(os.pathsep)
+    assert "" not in parts, parts
+    assert parts[-1] == str(tmp_path), parts
+
+
+def test_anchoring_uses_the_cwd_not_the_root(tmp_path, monkeypatch):
+    """The distinguishing case, and the reason `_anchored` does not take
+    `root`: the two agree only while cwd IS root.  A relative entry means
+    what the PARENT means by it — its own directory — so resolving it against
+    the repo root would fabricate a path the caller never wrote."""
+    monkeypatch.setenv("PYTHONPATH", "somewhere")
+    monkeypatch.chdir(tmp_path)
+    parts = buda_env(_ROOT)["PYTHONPATH"].split(os.pathsep)
+    assert parts[-1] == str(tmp_path / "somewhere"), parts
+    assert parts[-1] != str(_ROOT / "somewhere"), parts
+
+
 def test_overrides_are_applied():
     env = buda_env(_ROOT, MPLBACKEND="Agg")
     assert env["MPLBACKEND"] == "Agg"
