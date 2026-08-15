@@ -1026,6 +1026,62 @@ single-splice cases as the twins that keep the rule honest).
 
 ---
 
+## 15. The special-wire reader reads one form of SPECIALNETS wire
+
+`read_specialnet` collects points only while the next token is `(`, so it
+handles a contiguous width-plus-polyline and **nothing else**. Measured by
+parsing one-net DEFs through `parse_def`:
+
+| special-wire form | wires kept |
+|---|---:|
+| `+ ROUTED M6 2000 ( x y ) ( * y )` | 1 |
+| `+ ROUTED M6 2000 + SHAPE STRIPE ( x y ) ( * y )` | **0** |
+| `… ( x y ) ( * y ) M6_M7 ( x y ) ( x2 * )` (via mid-path) | 1, **truncated** |
+| `+ ROUTED M6 2000 RECT ( … ) ( … )` | **0** |
+| `+ ROUTED M6 2000 POLYGON ( … ) …` | **0** |
+
+The clauses it recognises at all are `+ ROUTED`, `+ FIXED`, `+ COVER` and
+their `NEW` continuations — matched by POSITION since the lexer strips
+quotes, so a `+ PROPERTY mode "ROUTED"` value is not mistaken for wiring.
+Any other geometry-bearing clause is outside what the reader looks for.
+
+`+ SHAPE` is not an exotic form — DEF's grammar is
+`ROUTED layer width [+ SHAPE type] [+ STYLE n] points`, so the `+` sits
+between the width and the first `(` and the point walk never starts. That is
+what a PDN generator emits for **every stripe it draws**, so a real power grid
+could be imported almost entirely as nothing. A via truncates a path to its
+first leg; `RECT` and `POLYGON` special wires are not represented at all.
+
+**The census half is RESOLVED (2026-08-15); the reader is not.** A net whose
+paths were present but unread used to be recorded as
+`SPECIALNETS.no_geometry` — not silence but a positive claim that the DEF drew
+no metal there — and a truncated path was recorded as nothing at all, since a
+kept wire looks like a complete read. Now each path is censused by what
+defeated the reader (`SPECIALNETS.unread_wire`, `SPECIALNETS.partial_wire`),
+and `no_geometry` is emitted only when the net has no `+ ROUTED` at all, which
+is what `demo/ariane/ariane.def` genuinely carries. So the gap is now **loud
+instead of invisible**, which is the part that could be fixed without a design
+to measure on.
+
+Why it survived this long, and it is item 12's lesson again: the only two DEFs
+here with any PDN are **ours** (`flow/def/chip.def`, `flow/rv/soc.def`), and
+both are written in the one form the reader handles — so "the reader is
+complete" had been validated against vehicles typed by hand in the simplest
+legal syntax. It took somebody else's grammar, not somebody else's file, this
+time.
+
+Deliberately **not** fixing the reader here: extending it changes which metal
+is imported as a keepout, and the only designs available to measure that on
+are the two hand-authored ones that already parse. It wants the same
+prerequisite as [the SPECIALNETS scoping](specialnets_scope.md) — a placed and
+power-routed DEF — and is item (0) of that document's work list.
+
+Pinned by `test_def_reader.py`, with the twins that keep the rule honest: a
+net that really has no wires must still say `no_geometry`, and a wire read in
+full must census nothing.
+
+---
+
 ## Resolved (by 2026-08-09)
 
 Recorded because each was found by building `flow/def/` and each had passed

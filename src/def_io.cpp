@@ -258,16 +258,42 @@ DefBlockage read_blockage(const std::vector<std::string>& t, DefDesign& d,
 }
 
 // ── SPECIALNETS ────────────────────────────────────────────────────────────
+bool is_special_path_start(const std::string& kw) {
+    return kw == "ROUTED" || kw == "FIXED" || kw == "COVER" || kw == "NEW";
+}
+
 void read_specialnet(const std::vector<std::string>& t, DefDesign& d,
                      int line) {
     const std::string net = t.size() >= 2 ? unescape(t[1]) : "";
     const size_t before = d.special_wires.size();
+    int paths = 0;               // wiring clauses seen, however they read
+    bool in_wiring = false;      // inside a `+ ROUTED|FIXED|COVER` clause
     // `+ ROUTED <layer> <width> ( x y ) ( x y ) … [NEW <layer> <width> …]`
+    //
+    // Matched by POSITION, not by spelling.  `ROUTED`/`FIXED`/`COVER` open a
+    // clause and so must follow a `+`; `NEW` continues one and so must not.
+    // A loose keyword match reads the VALUE in `+ PROPERTY mode "ROUTED"` as
+    // a route — the lexer strips the quotes, so the token is identical — and
+    // since `paths` decides whether this net may say `no_geometry`, that
+    // would put a wrong census on a DEF the reader handled perfectly.
     for (size_t i = 2; i < t.size(); ++i) {
-        const std::string kw = upper(t[i]);
-        const bool starts = (kw == "ROUTED" || kw == "FIXED" || kw == "COVER" ||
-                             kw == "NEW");
+        bool starts = false;
+        if (t[i] == "+") {
+            const std::string nx = i + 1 < t.size() ? upper(t[i + 1]) : "";
+            if (nx == "ROUTED" || nx == "FIXED" || nx == "COVER") {
+                ++i;                       // `i` now indexes the keyword
+                starts = true;
+                in_wiring = true;
+            } else if (nx != "SHAPE" && nx != "STYLE") {
+                // `+ SHAPE`/`+ STYLE` are PART of the wiring clause; every
+                // other `+` ends it, so a later bare `NEW` is not a path.
+                in_wiring = false;
+            }
+        } else if (in_wiring && upper(t[i]) == "NEW") {
+            starts = true;
+        }
         if (!starts) continue;
+        ++paths;
         size_t j = i + 1;
         DefSpecialWire w;
         w.net = net;
@@ -293,12 +319,34 @@ void read_specialnet(const std::vector<std::string>& t, DefDesign& d,
             if (k >= t.size()) break;
             j = k + 1;
         }
-        if (w.pts.size() >= 2) d.special_wires.push_back(std::move(w));
+        // What STOPPED the point walk decides what we are entitled to say.
+        // A path may legally carry a via, a RECT or a POLYGON, none of which
+        // this reader represents — and `+ SHAPE`/`+ STYLE` sit BEFORE the
+        // first point, so a stripe written the way a PDN generator writes one
+        // yields no points at all.  In both cases the metal is real and we
+        // did not read it, which has to be said HERE: downstream sees only
+        // the wires that survived, so silence there is indistinguishable
+        // from a DEF that drew nothing.
+        const std::string stopped = j < t.size() ? t[j] : std::string();
+        const bool clean = stopped.empty() || stopped == "+" ||
+                           stopped == ";" || is_special_path_start(upper(stopped));
+        if (w.pts.size() >= 2) {
+            d.special_wires.push_back(std::move(w));
+            if (!clean) note(d, "SPECIALNETS.partial_wire", {net, stopped}, line);
+        } else {
+            note(d, "SPECIALNETS.unread_wire", {net, stopped}, line);
+        }
         i = j - 1;
     }
     // Per-NET, not per-file: checking the global list would stop recording a
     // geometry-less special net as soon as any OTHER one had produced a wire.
-    if (d.special_wires.size() == before)
+    //
+    // `paths == 0` is the whole point of the guard.  This census line reads
+    // as "the DEF drew no metal for this net", which is a claim about the
+    // FILE — so a net whose paths were present but unread must not borrow
+    // it, or the census positively asserts the opposite of what happened.
+    // Those nets are reported above, per path, by what defeated the reader.
+    if (paths == 0 && d.special_wires.size() == before)
         note(d, "SPECIALNETS.no_geometry", {net}, line);
 }
 
