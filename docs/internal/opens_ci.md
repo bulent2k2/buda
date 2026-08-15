@@ -127,6 +127,21 @@ narrow — empty on a schedule run, a no-op on a clean sweep, and downstream of 
 errored-sweep rejection (a hard failure of its own), so it cannot bank a broken
 sweep.
 
+**The red that motivated it, resolved 2026-08-14.** Bisected to `42071c1`
+(dnuts: a busterm tap re-extends only the bits it serves) — a correctness fix
+that removes metal reaching nothing, and whose own commit message published
+this same corpus A/B and asked for the +30 on `chip_stack_bottomup` to be
+looked at.  Measured: with one healer round that flow goes 99/240/20 ->
+66/80/6, beating the PRE-fix baseline (69/252/20) on all three gate metrics, so
+the +30 is a healer-basin artifact of a deliberately near-healerless vehicle
+rather than stranded metal (`flow/chip/ReadMe.md`).  The other flow that went
+worse, `rnr/mix2_topdown_refine`, was fixed separately by #732 and measures
+0/0/0 again.  Nothing to revert; what the gate needs is the accept path above,
+used once.
+
+That the answer sat in a commit message for four nights while the gate stayed
+red is the argument for the axis below, not against the bisect.
+
 What is still owed: **nothing automatic**. A human decides that a delta is
 instrumentation rather than quality, and the discriminator is the columns that
 did *not* move. Teaching the gate to recognise that itself — an audit-version

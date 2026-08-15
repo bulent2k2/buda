@@ -27,6 +27,41 @@ not affordable at this scale — on `chip_topdown` it ran >10 minutes without
 converging against a 135s base flow — and `refine_selection` is an end-of-flow
 WL polish that wants a converged endpoint.
 
+### What that costs, measured: `chip_stack_bottomup`'s 99 overlaps
+
+The near-healerless choice is why this vehicle reads worse than it is, and it
+is worth knowing before anyone treats its numbers as a routing verdict.
+
+`42071c1` ("dnuts: a busterm tap re-extends only the bits it serves") removed
+metal that reached nothing — 8 bits x ~370 units on its repro, with
+`check_design` reporting Success — and moved three chip flows:
+
+    chip/chip_bottomup_caps    55/155/14 -> 56/143/14   better
+    chip/chip_bottomup         54/243/19 -> 56/231/17   better
+    chip/chip_stack_bottomup   69/252/20 -> 99/240/20   WORSE on the gate
+
+That +30 kept the nightly QoR gate red for four nights.  The commit itself
+called the mechanism a hypothesis — "a different greedy basin from a changed
+start state" — and asked for a look before anyone called the trade settled.
+
+**The look, 2026-08-14** (`-j 1`, this vehicle, one healer round added):
+
+    as shipped (negotiate only)             99/240/20   detWL 37,323,998   154s
+    + ripup_reroute + refine_selection 30   66/ 80/ 6   detWL 38,154,391   489s
+    pre-42071c1 baseline                    69/252/20
+
+The hypothesis holds.  With healing, the post-fix design beats the PRE-fix
+baseline on all three gate metrics — overlaps 66 < 69, unplaced 80 < 252,
+violating bundles 6 < 20 — so the +30 is a healer-basin artifact of an
+under-healed vehicle, not metal the fix stranded.  Removing dangling metal
+cannot create an overlap; it changes where the greedy healer starts.
+
+The flow is deliberately NOT changed: healing it costs 3.2x runtime (+5.6 min
+per sweep, and the nightly sweeps twice) on a vehicle whose whole point is
+fast iteration, to buy a number nobody routes for.  Read its overlaps as "this
+vehicle does not heal", and reach for the healed variants above when the
+question is how good the design can get.
+
 For the **healerless fast-iteration mode** these vehicles used to have, delete
 that line and the `set_planner_param healersAhead 1` above it (which gates the
 proactive `kSegsRel` default and the `run_nuts` dead-span auto-escalation):
