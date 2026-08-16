@@ -312,11 +312,15 @@ def test_hier_stage_resume_holds_construction_and_replans(tmp_path):
     # bypass, and replan are guarded, because their persist would write the
     # expanded view over the checkpoint's template rows.
     r = _run(["tclsh", _DRIVER, flow, tmp_path / "h.bdb", "dnuts"], tmp_path,
-             stdin="pin b_lohi 3\nselect_topology b_lohi 3\nreplan\ndone\n")
+             stdin="pin b_lohi 3\nselect_topology b_lohi 3\nreplan\n"
+                   "run_planner hier 5\nrun_hier_bundler depth 2\ndone\n")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "INSPECTION session" in r.stdout
     assert "replay> run_detailed_nuts" in r.stdout
-    assert r.stdout.count("disabled in this INSPECTION") == 2  # pin + raw
+    # pin verb + raw select_topology + raw run_planner + raw re-bundle: the
+    # guard sees every raw engine command, so the planner/bundler bypass
+    # (Codex #763) is blocked the same way the pin family is.
+    assert r.stdout.count("disabled in this INSPECTION") == 4
     assert "resume at `plan` to re-plan" in r.stdout           # replan refusal
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
 

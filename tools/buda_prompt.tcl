@@ -91,13 +91,16 @@ proc prompt::_commands {pat} {
 # route     — name of the caller's re-plan proc; `replan` and `done` call it
 # bdb       — checkpoint path; `save` writes ${bdb}.sql
 # example   — a bus name from THIS design, for the intro line
-# guard     — OPTIONAL: a command called with the MUTATING verb about to run
-#             (the pin/unpin verbs' underlying commands, their raw forms, and
-#             edit_*); returning 1 blocks it, and the guard says why.  This
-#             is how a post-expansion INSPECTION session (btcl -i hier
-#             nuts/dnuts) keeps a pin's persist from writing the expanded
-#             view over the checkpoint's template rows.  Empty (the default,
-#             and the vehicles) = every verb allowed, behavior unchanged.
+# guard     — OPTIONAL: a command called with the verb about to run — the
+#             pin/unpin verbs' underlying commands, and EVERY raw engine
+#             command (the guard decides which verbs mutate; this loop does
+#             not pretend to know).  Returning 1 blocks it, and the guard
+#             says why.  This is how a post-expansion INSPECTION session
+#             (btcl -i hier nuts/dnuts) keeps a pin's persist — or a raw
+#             `run_planner hier`, or a re-bundle — from writing the
+#             expanded view over the checkpoint's template rows.  Empty
+#             (the default, and the vehicles) = every verb allowed,
+#             behavior unchanged.
 proc prompt::run {tag ps route bdb example {guard ""}} {
     # `pins_dirty` keeps the checkpoint COHERENT — a pin applied after the
     # route would leave the saved metal belonging to the candidate it
@@ -182,19 +185,18 @@ proc prompt::run {tag ps route bdb example {guard ""}} {
                     # `buda::commands` is that registry, asked of the running
                     # engine at start, so it cannot drift.
                     if {$verb in [buda::commands]} {
-                        # The guard sees the raw forms of the mutating verbs
-                        # too — a blocked `pin` retyped as `select_topology`
-                        # must not become the way around it, and edit_*
-                        # commits persist the same tables.  (Plain if/else,
-                        # not `continue`: inside this catch a `continue`
-                        # would be swallowed as an exceptional return, the
-                        # same trap the `done` handling documents above.)
-                        if {$guard ne ""
-                                && ($verb in {select_topology
-                                              select_topologies
-                                              unpin_topology}
-                                    || [string match edit_* $verb])
-                                && [uplevel #0 $guard $verb]} {
+                        # The guard sees EVERY raw engine command and
+                        # decides — a blocked `pin` retyped as
+                        # `select_topology` must not become the way around
+                        # it, and neither must `run_planner hier` or a
+                        # re-bundle/regenerate, which persist the same
+                        # tables the named verbs are guarded for; which
+                        # verbs mutate is the CALLER's knowledge, not this
+                        # loop's.  (Plain if/else, not `continue`: inside
+                        # this catch a `continue` would be swallowed as an
+                        # exceptional return, the same trap the `done`
+                        # handling documents above.)
+                        if {$guard ne "" && [uplevel #0 $guard $verb]} {
                             # blocked — the guard said why
                         } else {
                         # Escape-hatch parity with the pin/unpin verbs: these

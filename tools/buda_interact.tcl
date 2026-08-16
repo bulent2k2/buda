@@ -251,12 +251,27 @@ proc replay_tail {} {
 
 # The inspection session's prompt hooks (hier nuts/dnuts — a post-expansion
 # restore): the guard blocks the persisting mutators, the route refuses the
-# replan, and both say why with the remedy.
+# replan, and both say why with the remedy.  The guard sees EVERY raw
+# engine command (the prompt does not pretend to know which verbs mutate):
+# blocked are the pin family, edits, and anything that re-plans, re-bundles
+# or re-generates — `run_planner hier` here would re-expand the
+# already-expanded wrappers, and a re-bundle/regenerate's persist writes
+# the pre-expansion view, which on this session IS the expanded list
+# (Codex #763).  Re-solving is fine: run_nuts/run_detailed_nuts persist
+# through the selective expanded machinery, which is what the stage replay
+# itself runs.
 proc _inspect_guard {verb} {
-    puts "[set ::tag]: `$verb` is disabled in this INSPECTION session -- a\
-          persist here would write the post-expansion view over the\
-          checkpoint's template rows; pin/edit from a `plan` resume instead"
-    return 1
+    if {[string match edit_* $verb]
+            || [string match generate_* $verb]
+            || $verb in {select_topology select_topologies unpin_topology
+                         run_planner run_bundler run_hier_bundler}} {
+        puts "[set ::tag]: `$verb` is disabled in this INSPECTION session --\
+              a persist here would write the post-expansion view over the\
+              checkpoint's template rows; pin/edit from a `plan` resume\
+              instead"
+        return 1
+    }
+    return 0
 }
 proc _inspect_replan {} {
     puts "[set ::tag]: `replan` needs `run_planner hier`, which this session\
