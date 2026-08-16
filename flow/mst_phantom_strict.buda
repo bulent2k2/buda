@@ -1,0 +1,183 @@
+# ============================================================
+# flow/mst_phantom_strict.buda
+#
+# The same-bundle DOUBLE CHARGE, made DECISIVE.
+#
+# `CongestionPlanner::apply_segment` charges every segment
+# independently, so two same-bundle segments whose metal
+# COINCIDES charge the same band twice.  NUTS lets same-bundle
+# segments share a track, so the books can say two buses where
+# the metal is one.
+#
+# `tools/experiment/phantom_charge.py` measured that on the
+# corpus and found it real but RARE: 4 coincident pairs in 555
+# committed bundles (0.26% of segments), 3 bands affected, and
+# the column that decides the question --
+#
+#     ... over capacity BECAUSE of it        0
+#
+# -- reading zero everywhere.  So the STRICT harm the mechanism
+# implies does not occur on any design we route.  Rarity is the
+# whole defence: cut 250 of big.buda already reads 91% full where
+# its metal is at 50%, and one more co-placed duplicate on a
+# tighter band is all it would take.
+#
+# THIS VEHICLE IS THAT ONE MORE.  It is an ADVERSARIAL
+# CONSTRUCTION, not a design the corpus produces -- see WHAT IS
+# FORCED below.  What it buys is a bound: the claim "no harm
+# observed" becomes "no harm observed, and here is exactly how
+# far a design has to be pushed before there is."
+#
+# Run:  bin/buda flow/mst_phantom_strict.buda --no-viz
+# Read: PYTHONPATH=build:src:tools python3 \
+#           tools/experiment/phantom_charge.py flow/mst_phantom_strict.buda
+#
+# ── THE MECHANISM ───────────────────────────────────────────
+#
+# The four carrier blocks are `flow/mst_shared_leg_prefix.buda`'s,
+# unchanged.  Both MST targets sit beyond hub's south-west
+# CORNER, so `closest_points` returns that same corner for each
+# edge and both leave it heading west:
+#
+#   seg1  H (2010,1010)->(1890,1010)   edge to `near`, len  120
+#   seg3  H (2010,1010)->( 690,1010)   edge to `far`,  len 1320
+#
+# seg1 lies entirely inside seg3.  NUTS then places BOTH at track
+# 964.5 -- one wire -- and the planner has charged it twice.
+#
+# ── WHAT IS FORCED, AND WHY ─────────────────────────────────
+#
+# THREE things, all because the shape is a structural loser and
+# will not commit itself.  Everything else is ordinary.
+#
+# 1. THE PIN.  Unpinned, this bundle selects candidate 1
+#    (TRUNK_H+MST@y900) and the duplicate rides candidates 18 and
+#    19, which lose.  That is not luck -- it is the corpus-wide
+#    finding (`base_rate_collinear.py`): in no bundle does any
+#    candidate sharing the winner's CLASS carry redundancy, so a
+#    duplicate almost always dies in a scoring overlay and never
+#    reaches the committed field.  `select_topology 1 18` is what
+#    overrules that.
+#
+# 2. THE BUS WIDTHS.  A phantom is one duplicate's charge, and it
+#    is decisive only on a band already loaded to within that
+#    charge of capacity.  The shared band here is 700 units (the
+#    hub-top .. up-bottom gap, which the victim blocks span
+#    EXACTLY so it stays one band).  Filling 700 units takes a
+#    133-bit carrier and an 88-bit victim -- and the carrier must
+#    be the WIDER of the two, because the planner commits widest
+#    first and a phantom can only reach a bundle planned AFTER
+#    the bundle carrying it.
+#
+#    The arithmetic bounds it.  Charge is 2.25*bits + 1 here, so
+#    with the victim's demand D below the carrier's C (the
+#    ordering constraint) and cap 700, harm needs
+#    700 - 2C < D <= 700 - C with D < C, which forces C > 233 --
+#    i.e. a carrier bus of at least ~104 bits.  There is no thin
+#    carrier that does this.
+#
+# 3. BUNDLE 1 IS ALREADY IN BEST_EFFORT -- and this is the part
+#    worth reading.  A carrier that wide no longer fits the
+#    pinned candidate's own slide windows, so the planner emits
+#
+#      WARNING: Bundle 1: no candidate fits its slide windows
+#      (bus width exceeds them); committing best-effort
+#
+#    and commits with overflow=100.118 of its own.  MEASURED, not
+#    chosen: every (carrier, victim) pair that produces the harm
+#    does this, and narrowing the gap band to 300 or 400 units to
+#    allow a thinner carrier does not avoid it either (it just
+#    loses the harm).  So on this geometry the phantom is
+#    decisive only through a bundle the planner has ALREADY given
+#    up on.  That is a real qualifier on the result and it points
+#    the same way as everything else here.
+#
+# Point 2 is the structural content.  The knife-edge is not
+# incidental: the phantom must be a significant fraction of a
+# band's capacity, on a band wide enough to hold BOTH
+# duplicates' charged perpendiculars (here they sit 275 units
+# apart -- seg_perp 1235 and 1510 -- so no band narrower than
+# that can carry the double charge at all).  Those two demands
+# pull in opposite directions, which is the structural reason
+# the corpus has no instance.
+#
+# ── THE RESULT ──────────────────────────────────────────────
+#
+#   phantom_charge.py, band (cut 6, band 6) on M4:
+#     cap 700.00   usage 799.46   phantom 300.24
+#     799.46 - 300.24 = 499.22 <= 700     the metal fits
+#     799.46                    >  700     the books do not
+#
+#     ... over capacity                       1
+#     ... over capacity BECAUSE of it         1     <-- was 0 everywhere
+#
+# and the planner says the rest itself:
+#
+#   WARNING: Bundle 2: no overflow-free candidate (even after
+#   rip-up); committing least-cost candidate with overflow=118.46
+#
+# Bundle 2 has done nothing wrong and its own metal fits.  It is
+# pushed out of the STRICT tier by demand that does not exist.
+#
+# THE CONTROL is `flow/mst_phantom_strict_control.buda` -- the
+# same design with `set_trim_mst_legs on` -- where bundle 2's
+# overflow is 0.  Read it as corroboration, NOT as the proof:
+# the trim removes the duplicate METAL (bundle 1 goes 7 segments
+# to 5), so the two arms are not "same wires, charged once".
+# The attribution rests on the arithmetic above, which needs no
+# second run: usage minus the phantom is under capacity.
+#
+# Bundle 1's own overflow (100.118) and its BEST_EFFORT warning
+# are IDENTICAL in both arms -- a constant of the design, on a
+# different band, not an effect of the duplicate.
+# ============================================================
+
+def_layer 4 M4 H TOP 33.33
+def_layer 5 M5 V TOP 33.33
+
+corner_margin dx 10 dy 10
+
+# ── carrier: flow/mst_shared_leg_prefix.buda's four blocks ──
+# Both targets sit beyond hub's south-west corner, so the two MST
+# edges start at one point and `near`'s short west leg lies
+# inside `far`'s long one.
+add_block hub   2000 1000  2100 1100
+add_block near  1800  300  1900  400
+add_block far    600  900   700  950
+
+# Keeps hub--near and hub--far as DIRECT edges rather than a
+# near--far chain:  hub--near 700, hub--far 1350, near--far 1600.
+add_block up    2000 1800  2100 1900
+
+# ── victim: spans the gap band EXACTLY ──────────────────────
+# y 1100..1800 are already Hanan lines (hub top, up bottom), so
+# these blocks add no new one and the gap stays a SINGLE 700-unit
+# band -- wide enough to hold both charged perpendiculars (1235
+# and 1510).  Split it and the double charge lands on two bands
+# and nothing is decisive.
+add_block vl   1200 1100  1300 1800
+add_block vr   2300 1100  2400 1800
+
+# Widest commits first, so the carrier must be the wider bus for
+# its phantom to reach the victim at all.
+add_bus d[133] hub.tx near.rx,far.rx,up.rx
+add_bus v[88]  vl.tx vr.rx
+
+run_bundler strict
+generate_topologies
+
+# Candidate 18 is MST_HV -- the shape carrying the duplicate.
+# Unpinned it loses to candidate 1.  Verified by the vehicle's
+# test, which asserts the pinned candidate's TYPE rather than
+# trusting the index.
+select_topology 1 18
+
+run_planner 1
+run_nuts
+
+def_track_pattern 4 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 5 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+
+run_detailed_nuts
+check_design dnuts
+report_wirelength

@@ -311,6 +311,64 @@ One limit stands: these are **final** committed states.  The planner is greedy
 and widest-first, so a band could have been tight mid-run and relaxed by the
 end; a clean table is not quite "never mattered".
 
+### 5d. "One more co-placed duplicate" — built, so the defence has a bound
+
+"Rarity is the whole defence" is only worth saying if you know what defeats it.
+`flow/mst_phantom_strict.buda` is the adversarial construction that makes the
+column read **1**, on the same tool:
+
+```
+  flow                        cut band   M   phantom       cap     usage  fill%
+  mst_phantom_strict.buda       6    6   4    300.24    700.00    799.46 114.2%
+
+  ... over capacity                       1
+  ... over capacity BECAUSE of it         1        <-- 0 on every real design
+```
+
+799.46 − 300.24 = 499.22 ≤ 700: **the metal fits and the books do not**, and the
+planner then says the rest itself —
+
+```
+WARNING: Bundle 2: no overflow-free candidate (even after rip-up);
+committing least-cost candidate with overflow=118.46
+```
+
+A bundle whose own metal fits, pushed out of the STRICT tier by demand that does
+not exist.  `flow/mst_phantom_strict_control.buda` is the same design with
+`set_trim_mst_legs on`, where bundle 2's overflow is `0`; read it as
+corroboration, **not** as the proof, since the trim removes the duplicated metal
+(7 segments → 5) rather than just the charge.  The attribution is the arithmetic
+above, which needs no second run.  (A charge-only isolation would require an
+engine that charges coincident same-bundle metal once — precisely the fix this
+measurement argued against, since one of the four corpus pairs is placed APART
+and its two charges are right.)
+
+**What it costs to get there is the actual result.**  Three things must be
+forced, and each is a reason the corpus has no instance:
+
+| forced | why it cannot happen by itself |
+|---|---|
+| `select_topology 1 18` | the duplicate rides candidates that LOSE — the base-rate finding, from the other side |
+| a 133-bit carrier | charge here is `2.25·bits + 1`; with the victim's demand `D < C` (widest commits first, so the carrier must be the wider bus) and cap 700, harm needs `700 − 2C < D ≤ 700 − C`, forcing **C > 233** ≈ 104 bits |
+| bundle 1 already in BEST_EFFORT | a bus that wide no longer fits the pinned candidate's slide windows — **measured, not chosen**: every (carrier, victim) pair that produces the harm does this, and narrowing the gap band to 300 or 400 units to allow a thinner carrier loses the harm instead of avoiding the warning |
+
+The knife-edge is structural.  The phantom must be a large fraction of a band's
+capacity, on a band wide enough to hold **both** duplicates' charged
+perpendiculars — here `seg_perp` 1235 and 1510, so no band under 275 units can
+carry the double charge at all.  Those two demands pull in opposite directions,
+which is why the census finds nothing and why the honest statement is bounded:
+*the harm is reachable, and reaching it takes a pinned structural loser, a
+carrier the planner has already given up on, and a band loaded to within one
+duplicate's width of capacity.*
+
+Pinned by `test_phantom_strict_repro.py`, which asserts the pinned candidate by
+TYPE rather than index (18 in the phantom arm, 14 in the control — the trim
+re-sorts the WL-ordered pool) and asserts the harm as the arithmetic rather than
+as literal numbers, so a re-tune survives but a vehicle that stopped
+demonstrating anything fails loud.  The vehicles are deliberately **not** in
+`phantom_charge.py`'s default sweep: that list is the census, and a construction
+added to it would turn a measurement into an argument.
+
 So the ranking bar failed, and the fix that landed is justified on a different
 footing: not QoR, but a **one-sided gap in the generator**. The by-class table
 is what pointed at it — redundancy occurs in `TRUNK_H` (109 of 3388) and
