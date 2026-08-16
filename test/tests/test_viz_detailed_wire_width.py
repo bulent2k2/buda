@@ -74,6 +74,16 @@ def _viz(scale):
     v.draw_blocks()
     v.draw_detailed_tracks(res, None, layers)
     v._build_detailed_artists()
+    # Frame the design before drawing, exactly as a real window does.  show()
+    # autoscales the axes to the design extent (and 'h'/cmd-z re-fit it) BEFORE
+    # the zoom sync converts each wire's physical width to points.  Skip it and
+    # the axes sit at the default [0,1], so the sync measures points-per-data-
+    # unit against a 1-unit span — which makes the drawn width scale with the
+    # unit, the very dependence these tests exist to catch.  That is a harness
+    # gap, not the product (which always frames first); replicate the framing
+    # via the same home-view path 'h' uses.
+    v._recompute_home_bbox()
+    v._zoom_home()
     v.fig.canvas.draw()          # runs the zoom sync, as an open window does
     return v
 
