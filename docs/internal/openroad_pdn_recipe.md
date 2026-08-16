@@ -353,32 +353,46 @@ With `ariane_pdn.def` in hand, in the order the work is worth doing:
 
    So this is **item 12 re-opened in a new direction.** `set_keepout_loci
    outside` is a block-*interior* mitigation; a real PDN's dominant keepouts
-   are die-spanning stripes, which it structurally cannot reach. The route
-   impact is not a congestion number to report — it is that the design cannot
-   be planned at all until stripe loci get a mitigation of their own (a long
-   thin power stripe blocks metal but should not contribute a Hanan line per
-   edge across the whole die). That mitigation is the real follow-up this
-   measurement surfaces; until it exists, a PDN-keepout QoR number is not
-   obtainable on a design this size.
+   are die-spanning stripes, which it structurally cannot reach. The right
+   fix is that a long thin power stripe should block metal but not contribute
+   a Hanan line per edge across the whole die.
+
+   **RESOLVED 2026-08-16 — `set_keepout_loci stripes`.** A geometric,
+   opt-in, composable modifier: a STRIPE keepout (thin and long, aspect ≥ 8 —
+   a power strap, not a block) contributes only its LONG-axis loci (its ends,
+   few, usually already the die boundary), dropping the proliferating
+   thin-axis pair. Blocking is untouched; a strap's thin-axis edge is
+   near-useless as a trunk nominal anyway (a signal trunk does not align to a
+   power strap's edge). It composes with `outside` (which drops an
+   inside-a-block keepout first). With `set_keepout_loci outside stripes`,
+   the keepout variant that was killed at 16 min **completes in 30.6 s: 0
+   overlaps, 0 interval violations, abstract WL 88,189,343 vs the baseline's
+   88,189,348** (5 units — the 6673 enforced strap keepouts barely perturb the
+   route on this design, whose signal metal lives on M8–M10). So the item-15
+   number the reader fix landed without is now *obtainable and negligible*,
+   once the grid is not exploded. Implementation: `Floorplan` +
+   `topology.cpp` (`push_zone_loci` / `zone_is_stripe`), tested in
+   `test/tests/test_stripe_keepout_loci.py`.
 
    **Reproducing it.** `flow/ariane133/ariane133.buda` hardcodes its input
    DEF (line ~96) and the CLI has no input-DEF override, so the splice alone
-   is not enough — you also need a variant flow that imports it. Both are
-   throwaway, so make them beside the flow (the `.gitignore` covers the DEF;
-   the variant `.buda` is a scratch file to delete after). With
-   `ariane_keepout.def` already built by the splice above:
+   is not enough — you also need a variant flow that imports it and turns on
+   the mitigation. Both are throwaway, so make them beside the flow (the
+   `.gitignore` covers the DEF; the variant `.buda` is a scratch file to
+   delete after). With `ariane_keepout.def` already built by the splice above:
 
    ```bash
-   # a variant flow that imports it (only the DEF path and bdb name change)
+   # a variant flow: import the spliced DEF, add the stripes modifier
    sed -e 's#open_bdb ariane133.bdb#open_bdb ariane133_keepout.bdb#' \
+       -e 's#set_keepout_loci outside#set_keepout_loci outside stripes#' \
        -e 's#import_def_lef ../../demo/ariane/ariane.def fakeram45_256x16.lef#import_def_lef ariane_keepout.def fakeram45_256x16.lef#' \
        flow/ariane133/ariane133.buda > flow/ariane133/ariane133_keepout.buda
 
-   # run it (baseline for comparison is the unmodified ariane133.buda)
-   bin/buda --no-viz flow/ariane133/ariane133_keepout.buda
+   bin/buda --no-viz flow/ariane133/ariane133_keepout.buda   # ~30 s, clean
    ```
 
-   The run will not finish (that is the finding); watch the worker's CPU and
+   Drop the middle `sed` line (keep `set_keepout_loci outside`) to reproduce
+   the un-mitigated blowup — it will not finish; watch the worker's CPU and
    the `import_def_lef` line's `keepouts added:` count, then kill it.
 2. **`specialnets_scope.md` (a)** — carry each strap's *net identity* into
    the session, not just its rectangle. Small and additive; nothing reads

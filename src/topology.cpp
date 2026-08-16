@@ -439,6 +439,34 @@ std::vector<KeepoutZone> Floorplan::low_layer_keepouts(const std::vector<int>& l
     }
     return result;
 }
+// A keepout is a STRIPE — a power-grid strap rather than a block-shaped
+// obstacle — when its long side is at least this many times its short side.
+// A NanGate45 M4 stripe is 0.48 um wide and spans a 1357 um die (aspect
+// ~2800); a followpin is thinner still; a 57.57 x 133 um SRAM is aspect 2.3.
+// Eight cleanly separates straps from every block/OBS shape in the corpus.
+static constexpr long kStripeAspect = 8;
+static bool zone_is_stripe(const Rect& b) {
+    long w = (long)b.x2 - b.x1, h = (long)b.y2 - b.y1;
+    if (w <= 0 || h <= 0) return false;
+    long lo = std::min(w, h), hi = std::max(w, h);
+    return hi >= kStripeAspect * lo;
+}
+// Push a keepout zone's Hanan loci.  With stripe suppression on, a stripe
+// contributes only its LONG-axis edges (its ends — few, often already the die
+// boundary); the proliferating thin-axis pair is dropped.  Blocking is
+// unaffected either way (this only governs which grid lines are sampled).
+static void push_zone_loci(const KeepoutZone& koz, bool stripe_suppress,
+                           std::vector<int>& xs, std::vector<int>& ys) {
+    if (stripe_suppress && zone_is_stripe(koz.bbox)) {
+        long w = (long)koz.bbox.x2 - koz.bbox.x1;
+        long h = (long)koz.bbox.y2 - koz.bbox.y1;
+        if (w < h) { ys.push_back(koz.bbox.y1); ys.push_back(koz.bbox.y2); }  // thin in x
+        else       { xs.push_back(koz.bbox.x1); xs.push_back(koz.bbox.x2); }  // thin in y
+        return;
+    }
+    xs.push_back(koz.bbox.x1); xs.push_back(koz.bbox.x2);
+    ys.push_back(koz.bbox.y1); ys.push_back(koz.bbox.y2);
+}
 void Floorplan::get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_coords) const {
     for (const auto& [name, r] : blocks_) {
         auto it = block_rects_.find(name);
@@ -464,8 +492,9 @@ void Floorplan::get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_c
         // over-the-cell — so this removes candidate positions along with
         // the grid.  Blocking is unaffected in either mode.
         if (keepout_loci_outside_only_ && koz.inside_block) continue;
-        x_coords.push_back(koz.bbox.x1); x_coords.push_back(koz.bbox.x2);
-        y_coords.push_back(koz.bbox.y1); y_coords.push_back(koz.bbox.y2);
+        // A die-crossing PDN strap is NOT inside a block, so `outside` cannot
+        // reach it; `stripes` drops its thin-axis loci (see set_stripe_loci_*).
+        push_zone_loci(koz, stripe_loci_suppress_, x_coords, y_coords);
     }
     std::sort(x_coords.begin(), x_coords.end());
     x_coords.erase(std::unique(x_coords.begin(), x_coords.end()), x_coords.end());
@@ -3268,10 +3297,9 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     // fall above/below keepout bands rather than inside them.
     const auto& keepouts = floorplan_.get_keepout_zones();
     if (!keepouts.empty()) {
-        for (const auto& koz : keepouts) {
-            hanan_x.push_back(koz.bbox.x1); hanan_x.push_back(koz.bbox.x2);
-            hanan_y.push_back(koz.bbox.y1); hanan_y.push_back(koz.bbox.y2);
-        }
+        const bool stripe_suppress = floorplan_.stripe_loci_suppress();
+        for (const auto& koz : keepouts)
+            push_zone_loci(koz, stripe_suppress, hanan_x, hanan_y);
         auto su = [](std::vector<int>& v) {
             std::sort(v.begin(), v.end());
             v.erase(std::unique(v.begin(), v.end()), v.end());
