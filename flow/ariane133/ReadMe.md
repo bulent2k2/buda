@@ -152,7 +152,11 @@ have nothing to land on.
 
 This is the honest ceiling of a floorplan DEF, not a routing defect.
 Removing it needs a **fully placed** DEF, which upstream generates rather
-than ships — so it costs an OpenROAD or Innovus run, not a download.
+than ships — so it costs an OpenROAD or Innovus run, not a download.  The
+same is true of a power grid, and that run IS written down:
+[openroad_pdn_recipe.md](../../docs/internal/openroad_pdn_recipe.md) grids
+this design's floorplan with pdngen using the two LEFs `fetch.py` already
+pins.
 
 **The congestion is gone, and chasing it found a bug** (`opens_interchange.md`
 item 13). When item 12 made the obstruction model affordable, this flow

@@ -59,7 +59,11 @@ mode exists to remove; see `baseline_advisories`.
 `--compare` tags each moved flow BETTER/WORSE on the QoR metric
 (overlaps/unplaced/viol_bundles) and exits `EXIT_REGRESSED` (2) if any
 regressed — distinct from the 1 any other failure exits with, so a caller can
-tell a REPORTED regression from a compare that never finished — then
+tell a REPORTED regression from a compare that never finished.  A flow the
+BASELINE could not run is `NOT COMPARABLE` rather than BETTER: nothing was
+measured there, so the branch cannot beat it.  The mirror stays WORSE, since
+a change that stops a flow running is a regression until shown otherwise —
+each direction failing in the safe sense.  Then it
 prints two informational diffs that are reported but never gate: a
 **wirelength** diff (total abstract WL after NUTS + detailed WL after DNUTS,
 base->branch, plus the largest per-flow movers — a topology/planner change
@@ -944,6 +948,7 @@ def cmd_compare(base_path, mine_path):
     print(hdr)
     print("-" * len(hdr))
     n_better = n_worse = n_same = 0
+    incomparable = []
     for f in flows:
         b, m = base.get(f), mine.get(f)
         if b is None:
@@ -953,6 +958,23 @@ def cmd_compare(base_path, mine_path):
             print(f"{f.replace('flow/', ''):<48} {_fmt(b, keys):>14} {'(gone)':>14}")
             continue
         bf, mf = _fmt(b, keys), _fmt(m, keys)
+        # A flow the BASELINE could not run is not a measurement, so the
+        # branch cannot be better than it.  Ranking it anyway credits the
+        # branch with the difference between a result and a crash — measured:
+        # `--vs origin/main --flows flow/ariane133/…` reported BETTER because
+        # that flow's inputs are FETCHED and gitignored, so they are absent
+        # from the baseline worktree and the flow exits 1 there.  Re-run with
+        # the inputs present: identical on every metric.
+        #
+        # The asymmetry is deliberate.  An error on the BRANCH side stays
+        # WORSE — a change that stops a flow running IS a regression until
+        # shown otherwise — so the two directions fail in the safe direction
+        # each: a false alarm you investigate, never a false credit you bank.
+        if "err" in b:
+            incomparable.append((f, b, m))
+            tag = "NOT COMPARABLE (baseline errored)"
+            print(f"{f.replace('flow/', ''):<48} {bf:>14} {mf:>14}  {tag}")
+            continue
         if bf == mf:
             n_same += 1
             continue                            # unchanged rows are noise; skip
@@ -963,8 +985,19 @@ def cmd_compare(base_path, mine_path):
         elif tag == "WORSE":
             n_worse += 1
         print(f"{f.replace('flow/', ''):<48} {bf:>14} {mf:>14}  {tag}")
-    print(f"\n{n_better} better, {n_worse} worse, {n_same} unchanged "
-          f"(of {len(flows)} flows).  Metric = {'/'.join(keys) or '(none)'}.")
+    summary = (f"\n{n_better} better, {n_worse} worse, {n_same} unchanged "
+               f"(of {len(flows)} flows).  Metric = {'/'.join(keys) or '(none)'}.")
+    if incomparable:
+        summary += f"  {len(incomparable)} NOT COMPARABLE."
+    print(summary)
+    for f, b, _m in incomparable:
+        print(f"\n  NOT COMPARABLE: {f}\n"
+              f"    baseline errored: {b['err']}\n"
+              f"    Nothing was measured on the baseline, so this flow says\n"
+              f"    nothing about the branch either way.  A common cause is\n"
+              f"    an input the flow FETCHES (and .gitignore-s), which a\n"
+              f"    baseline worktree therefore does not have: supply it\n"
+              f"    there and re-run.  `--check` gates a sweep on err rows.")
     paired = [(f, base[f], mine[f]) for f in flows if f in base and f in mine]
     _wirelength_report(paired)
     _decisions_report(base_path, mine_path)

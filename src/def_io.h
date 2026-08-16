@@ -132,6 +132,12 @@ struct DefSpecialWire {
     std::string net;
     std::string layer;
     double width = 0;
+    // `+ SHAPE <type>`: STRIPE / FOLLOWPIN / RING / … .  Empty when the DEF
+    // states none.  Kept because it is the only thing distinguishing a rail
+    // that runs inside a standard-cell row from a stripe crossing the die,
+    // and because a reader that merely TOLERATED the clause could not be
+    // told apart from one that skipped the wire (which is what it did).
+    std::string shape;
     std::vector<std::pair<double, double>> pts;   // polyline, DBU
 };
 

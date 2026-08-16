@@ -425,6 +425,52 @@ def test_compare_exits_zero_when_nothing_regressed(tmp_path, monkeypatch):
     assert isinstance(exc, SystemExit) and exc.code == 0
 
 
+def test_a_flow_the_baseline_could_not_run_is_not_credited_as_better(
+        tmp_path, monkeypatch, capsys):
+    """A crash is not a measurement, so the branch cannot beat it.
+
+    Measured, and it is why this exists: `--vs origin/main --flows
+    flow/ariane133/…` reported BETTER for a change that moves nothing there.
+    That flow's inputs are FETCHED and gitignored, so a baseline WORKTREE
+    does not have them and the flow exits 1 — and `_rank` ranks an err row
+    worst, so any real result outranked it.  The worktree removes the
+    MUTATION hazard of the old stash recipe; it does not stop the baseline
+    being unable to run, and that failure is silent in exactly the direction
+    that flatters the branch.
+    """
+    import qor_corpus as q
+    base = [{"flow": "a.buda", "err": "SystemExit(1)"}]
+    mine = [{"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 25}]
+    exc = _compare_exit(tmp_path, monkeypatch, base, mine)
+    assert isinstance(exc, SystemExit) and exc.code == 0
+    out = capsys.readouterr().out
+    assert "NOT COMPARABLE" in out
+    assert "BETTER" not in out
+    assert "0 better" in out
+    # And it says what to do about it, since the cause is nearly always the
+    # same one and is not obvious from a bare exit code.
+    assert "FETCHES" in out
+
+
+def test_a_flow_the_BRANCH_cannot_run_is_still_a_regression(
+        tmp_path, monkeypatch, capsys):
+    """The deliberate asymmetry.
+
+    Baseline-errored says nothing about the branch; BRANCH-errored says the
+    change stopped a flow running, which is a regression until shown
+    otherwise.  Both directions fail in the safe sense — a false alarm you
+    investigate, never a false credit you bank — so this must NOT be
+    generalized to "either side errored is non-comparable".
+    """
+    import qor_corpus as q
+    base = [{"flow": "a.buda", "overlaps": 0, "unplaced": 0, "viol_bundles": 0}]
+    mine = [{"flow": "a.buda", "err": "SystemExit(1)"}]
+    exc = _compare_exit(tmp_path, monkeypatch, base, mine)
+    assert isinstance(exc, SystemExit) and exc.code == q.EXIT_REGRESSED
+    out = capsys.readouterr().out
+    assert "WORSE" in out and "NOT COMPARABLE" not in out
+
+
 def test_a_compare_that_cannot_run_does_not_exit_the_regression_code(tmp_path, monkeypatch):
     """Malformed input must not masquerade as a measured regression."""
     import qor_corpus as q

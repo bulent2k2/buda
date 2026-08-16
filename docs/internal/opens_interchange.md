@@ -1026,19 +1026,23 @@ single-splice cases as the twins that keep the rule honest).
 
 ---
 
-## 15. The special-wire reader reads one form of SPECIALNETS wire
+## 15. The special-wire reader read one form of SPECIALNETS wire
 
-`read_specialnet` collects points only while the next token is `(`, so it
-handles a contiguous width-plus-polyline and **nothing else**. Measured by
+**Reader RESOLVED 2026-08-16 for every form a generator emits; the keepout
+IMPACT is still unmeasured (§"Still open" below).**
+
+`read_specialnet` collected points only while the next token was `(`, so it
+handled a contiguous width-plus-polyline and **nothing else**. Measured by
 parsing one-net DEFs through `parse_def`:
 
-| special-wire form | wires kept |
-|---|---:|
-| `+ ROUTED M6 2000 ( x y ) ( * y )` | 1 |
-| `+ ROUTED M6 2000 + SHAPE STRIPE ( x y ) ( * y )` | **0** |
-| `… ( x y ) ( * y ) M6_M7 ( x y ) ( x2 * )` (via mid-path) | 1, **truncated** |
-| `+ ROUTED M6 2000 RECT ( … ) ( … )` | **0** |
-| `+ ROUTED M6 2000 POLYGON ( … ) …` | **0** |
+| special-wire form | wires kept, before | now |
+|---|---:|---:|
+| `+ ROUTED M6 2000 ( x y ) ( * y )` | 1 | 1 |
+| `+ ROUTED M6 2000 + SHAPE STRIPE ( x y ) ( * y )` | **0** | 1 |
+| `NEW M6 0 + SHAPE STRIPE ( x y ) via6_7_…` | **0**, as unread wire | via placement |
+| `… ( x y ) ( * y ) M6_M7 ( x y ) ( x2 * )` (via mid-path) | 1, **truncated** | 1, truncated |
+| `+ ROUTED M6 2000 RECT ( … ) ( … )` | **0** | **0** |
+| `+ ROUTED M6 2000 POLYGON ( … ) …` | **0** | **0** |
 
 The clauses it recognises at all are `+ ROUTED`, `+ FIXED`, `+ COVER` and
 their `NEW` continuations — matched by POSITION since the lexer strips
@@ -1052,33 +1056,89 @@ what a PDN generator emits for **every stripe it draws**, so a real power grid
 could be imported almost entirely as nothing. A via truncates a path to its
 first leg; `RECT` and `POLYGON` special wires are not represented at all.
 
-**The census half is RESOLVED (2026-08-15); the reader is not.** A net whose
-paths were present but unread used to be recorded as
+**The census half was resolved 2026-08-15; the READER on 2026-08-16, when a
+vehicle turned up that had been fetchable all along.** Both halves are below,
+in the order they landed, because the second one is a lesson about the first.
+
+### The census (2026-08-15)
+
+A net whose paths were present but unread used to be recorded as
 `SPECIALNETS.no_geometry` — not silence but a positive claim that the DEF drew
 no metal there — and a truncated path was recorded as nothing at all, since a
 kept wire looks like a complete read. Now each path is censused by what
 defeated the reader (`SPECIALNETS.unread_wire`, `SPECIALNETS.partial_wire`),
 and `no_geometry` is emitted only when the net has no `+ ROUTED` at all, which
-is what `demo/ariane/ariane.def` genuinely carries. So the gap is now **loud
-instead of invisible**, which is the part that could be fixed without a design
-to measure on.
+is what `demo/ariane/ariane.def` genuinely carries.
 
-Why it survived this long, and it is item 12's lesson again: the only two DEFs
-here with any PDN are **ours** (`flow/def/chip.def`, `flow/rv/soc.def`), and
-both are written in the one form the reader handles — so "the reader is
-complete" had been validated against vehicles typed by hand in the simplest
-legal syntax. It took somebody else's grammar, not somebody else's file, this
-time.
+That made the gap **loud instead of invisible** — and it is what made the next
+step measurable, since the count below is the census reporting itself.
 
-Deliberately **not** fixing the reader here: extending it changes which metal
-is imported as a keepout, and the only designs available to measure that on
-are the two hand-authored ones that already parse. It wants the same
-prerequisite as [the SPECIALNETS scoping](specialnets_scope.md) — a placed and
-power-routed DEF — and is item (0) of that document's work list.
+### The reader (2026-08-16)
 
-Pinned by `test_def_reader.py`, with the twins that keep the rule honest: a
-net that really has no wires must still say `no_geometry`, and a wire read in
-full must census nothing.
+This page said the fix "wants a placed and power-routed DEF" and that until
+one existed it "cannot be measured on anything but a synthetic case". **That
+was wrong, and wrong in the direction this document keeps warning about.**
+OpenROAD's pdn regression goldens (`src/pdn/test/*.defok`) are what pdngen
+writes and diffs against — real generator output, ~1 MB, fetchable through
+the same `raw.githubusercontent.com` channel `flow/ariane133/fetch.py`
+already uses. Measured across four of them:
+
+| | paths | before | after |
+|---|---:|---:|---:|
+| metal polylines | 685 | **0 read** | 685 read |
+| via placements | 6781 | counted as unread WIRE | censused `via_placement` |
+| via mid-path / `RECT` / `POLYGON` | 0 | — | — |
+
+Every one of the 685 was defeated by the same three tokens. What landed:
+
+1. **`+ SHAPE` / `+ STYLE` are skipped** between the width and the first
+   point, and the shape TYPE is kept (`DefSpecialWire::shape`) — a rail
+   inside a standard-cell row and a stripe crossing the die are different
+   obstacles, and this clause is the only thing that says which. It also
+   distinguishes a reader that RECOGNISES the clause from one that merely
+   tolerates it, which is what the first cut did.
+2. **A one-point path ending in a via name is a via PLACEMENT, not a wire**
+   — `NEW metal6 0 ( x y ) via6_7_…`, 6781 of the goldens' 7466 paths. It
+   draws no run, so there is no polyline to lose; what goes unmodelled is the
+   via's ENCLOSURE metal, whose extent lives in the DEF's `VIAS` section and
+   not here. Censusing these as `unread_wire` would bury the wires that
+   really were lost under a 10:1 majority of things that are not wires.
+
+**Still not represented, deliberately: a via MID-path, `RECT` and `POLYGON`
+special wires.** All three are legal DEF; none appears in any generator
+output available here, so an implementation would be built against no
+evidence at all — which is the mistake this item exists to record, not one to
+make in a fresh direction. They stay censused, and
+`test_the_goldens_carry_no_form_the_reader_still_cannot_read` fails the day a
+golden carries one, so the boundary gets revisited with a vehicle in hand.
+
+**Still open: what the keepouts DO to a route.** These designs are 100–200 µm
+with a few hundred nets — parser vehicles, not something we route. That needs
+a PDN on `flow/ariane133`, i.e. the pdngen run in
+[openroad_pdn_recipe.md](openroad_pdn_recipe.md). The reader fix is
+byte-identical on every flow in the tree (none of our DEFs carries `+ SHAPE`),
+which is both why it was safe to land alone and why it proves nothing about
+routing yet.
+
+### Why it survived this long
+
+Item 12's lesson, twice over. First: the only two DEFs here with any PDN are
+**ours** (`flow/def/chip.def`, `flow/rv/soc.def`), both written in the one
+form the reader handled, so "the reader is complete" had been validated
+against the assumption it was built on. Second, and newer: once that was
+understood, the fix was parked behind "we need a power-routed DEF" for a day
+— when the thing actually needed was not a *design* but a *sample of the
+output grammar*, and upstream publishes 1 MB of it as test data. The
+prerequisite was real for the QoR question and imaginary for the parsing one,
+and nobody had separated the two.
+
+Pinned by `test_def_reader.py` (the forms, one clause at a time) and
+`test_def_specialnets.py` (the same reader against upstream's bytes: a
+checked-in four-clause excerpt that always runs, plus the fetched goldens for
+the counts), with the twins that keep the census honest — a net that really
+has no wires must still say `no_geometry`, a wire read in full must census
+nothing, and a stripe must reach the keepout consumer, which nothing pinned
+before.
 
 ---
 
