@@ -231,7 +231,38 @@ def test_corpus_members_are_not_candidates():
 
 
 def test_discovery_is_sorted_and_stable():
-    assert qc.discover_candidates() == sorted(qc.discover_candidates())
+    """ONE call, compared against its own sort.
+
+    This used to call `discover_candidates()` TWICE and compare the results.
+    That cannot test sortedness -- the function ends in `return sorted(found)`,
+    so the property holds by construction -- and what it actually detected was
+    the TREE CHANGING between the two walks.  Under CI's `-p xdist -n 4` that
+    happens for real: `test_bit_antenna_audit` mkstemps a `_no_trim_*.buda`
+    inside `flow/rnr/` and unlinks it, so a concurrent worker's two walks could
+    straddle it and the assert failed on main intermittently.  Scratch files
+    are excluded from discovery now (see `test_scratch_flows_are_not_candidates`),
+    and the comparison is single-call so it can only ever fail for the reason
+    it names."""
+    found = qc.discover_candidates()
+    assert found == sorted(found)
+
+
+def test_scratch_flows_are_not_candidates(tmp_path):
+    """A '_'-prefixed flow is machine-written scratch, not a corpus candidate.
+
+    `test_bit_antenna_audit` has to write its trim-free variant INSIDE
+    `flow/rnr/` (the flow does `source mix_tracks.buda`, which resolves against
+    the SCRIPT's directory), and it reaches `run_detailed_nuts` because it is a
+    copy of a real flow -- so without this rule discovery lists a file that is
+    deleted moments later."""
+    (tmp_path / "flow").mkdir()
+    _write(tmp_path, "flow/real.buda", "run_nuts\nrun_detailed_nuts\n")
+    _write(tmp_path, "flow/_no_trim_abc123.buda", "run_nuts\nrun_detailed_nuts\n")
+    names = [os.path.basename(f)
+             for f in qc.discover_candidates(roots=(str(tmp_path / "flow"),),
+                                             corpus=[])]
+    assert "real.buda" in names
+    assert "_no_trim_abc123.buda" not in names
 
 
 # ------------------------------------------------------------- the contract
