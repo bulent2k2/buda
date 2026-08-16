@@ -330,9 +330,15 @@ With `ariane_pdn.def` in hand, in the order the work is worth doing:
    ```
 
    Importing that (netlist now identical — 161 busterms / 111 hbundles
-   confirmed) adds exactly the power metal as keepouts:
+   confirmed) adds the power-grid **wire polylines** as keepouts:
    `keepouts added: OBS:13034, SPECIALNET:6673` (vs baseline `OBS:13034`
-   alone; the 113969 via placements are 0-width and correctly NOT keepouts).
+   alone). This is a **wire-only** measurement: the 113969 via placements
+   contribute no keepout, but that is not because via metal is absent — it is
+   because a via placement's **enclosure metal** is not modelled at all
+   (`def_io.cpp:347` — its extent lives in the DEF's `VIAS` section, which the
+   reader does not resolve). So the keepout footprint measured here is a
+   **lower bound**; the true PDN blocks strictly more, which only strengthens
+   the conclusion below (the grid already explodes on the wires alone).
 
    The result is that **`run_planner hier` becomes intractable.** The 6673
    PDN wires are die-crossing M4/M7 stripes and M1 followpins that lie
@@ -353,8 +359,27 @@ With `ariane_pdn.def` in hand, in the order the work is worth doing:
    thin power stripe blocks metal but should not contribute a Hanan line per
    edge across the whole die). That mitigation is the real follow-up this
    measurement surfaces; until it exists, a PDN-keepout QoR number is not
-   obtainable on a design this size. Reproduce with the splice above +
-   `flow/ariane133/ariane133.buda`'s pipeline against the spliced DEF.
+   obtainable on a design this size.
+
+   **Reproducing it.** `flow/ariane133/ariane133.buda` hardcodes its input
+   DEF (line ~96) and the CLI has no input-DEF override, so the splice alone
+   is not enough — you also need a variant flow that imports it. Both are
+   throwaway, so make them beside the flow (the `.gitignore` covers the DEF;
+   the variant `.buda` is a scratch file to delete after). With
+   `ariane_keepout.def` already built by the splice above:
+
+   ```bash
+   # a variant flow that imports it (only the DEF path and bdb name change)
+   sed -e 's#open_bdb ariane133.bdb#open_bdb ariane133_keepout.bdb#' \
+       -e 's#import_def_lef ../../demo/ariane/ariane.def fakeram45_256x16.lef#import_def_lef ariane_keepout.def fakeram45_256x16.lef#' \
+       flow/ariane133/ariane133.buda > flow/ariane133/ariane133_keepout.buda
+
+   # run it (baseline for comparison is the unmodified ariane133.buda)
+   bin/buda --no-viz flow/ariane133/ariane133_keepout.buda
+   ```
+
+   The run will not finish (that is the finding); watch the worker's CPU and
+   the `import_def_lef` line's `keepouts added:` count, then kill it.
 2. **`specialnets_scope.md` (a)** — carry each strap's *net identity* into
    the session, not just its rectangle. Small and additive; nothing reads
    the field yet.
