@@ -61,7 +61,28 @@ clamps and applies identically — and a bare `btcl` now imposes the SAME max/2
 default a bare `buda` does, only the launchers imposing it), and
 `-i <flow>.buda` for interactive iteration on ANY `.buda`
 flow: run it verbatim, then the pin/edit prompt, with hier/flat and the
-`replan` recipe learned from the recorder — see docs/TCL_FRONT_END.md;
+`replan` recipe learned from the recorder — see docs/TCL_FRONT_END.md.
+The flow's OUTPUT means what `bin/buda` makes it mean too: `-i` arms
+`buda::log`, so the console gets ONE line per command plus the runtime
+summary and the detail goes to the `<flow_dir>/log/<stem>_flow.log` the CLI
+writes — the summarizer was always the engine's, gated on a flow log being
+open, and only the CLI ever opened one, so the same flow driven from Tcl
+printed every line of every command and left no log to read the detail in
+(`bigHalf`: 677 console lines against the CLI's 51, now 58).  The arming
+follows what is RUNNING, not the session: the flow and every replay
+(`replan`, a stage resume) are summarized, the PROMPT is not, since a
+command you typed — `topos`, a raw `dump_topologies` — is one whose output
+you asked to read; a re-arm appends, so one session is one log.  It is a
+REQUEST (`__log`) rather than a default because a Tcl flow issues its
+commands one at a time and usually wants each one's output, so arming it in
+`buda::start` would change every existing flow's console.  A `.buda` flow
+handed to a bare `btcl` is now REFUSED with both ways to run one
+(`btcl -i` / `buda`), because `tclsh` reads it as Tcl and complains about
+whatever the flow's first line happens to be — `invalid command name
+"add_block"`, or, for a flow opening with `source`, Tcl's OWN source failing
+on a path resolved against a different root (`couldn't read file
+"../tracks/tracks4top.buda"`), a message naming a file the user never typed,
+after part of the flow has already run;
 wrapper options are read only BEFORE the script and the request
 travels as an env var (`BUDA_VIZ_FINAL`, `BUDA_THREADS_REQUEST`), so the flow's
 own args — a `-v` or `-j` among them —
@@ -73,7 +94,11 @@ Every wrapper also has a **PowerShell twin** (`bin/*.ps1`) for native Windows,
 where `bash` is the unrunnable WSL stub — dot-source `bin/activate.ps1` for
 bare-name functions; the twins honour the same contracts (`BUDA_TEST_ANCHOR`,
 `BUDA_VIZ_FINAL`) and `test/tests/wrapper_select.py` picks the right launcher
-per platform for the wrapper tests. Not ported: the macOS `.app` branches and
+per platform for the wrapper tests (`BUDA_WRAPPER_PS=1` runs them against the
+twins on a POSIX box with `pwsh`, which is how `btcl.ps1 -i` was validated —
+the twin had no `-i` at all until the `.buda` guard landed, which would have
+made its own advice untrue on the one platform it speaks for). Not ported:
+the macOS `.app` branches and
 `bb web`.
 
 **Add `<repo_root>/bin` to your `PATH`** and you can invoke them bare (`bb`, `buda

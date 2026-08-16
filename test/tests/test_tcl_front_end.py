@@ -30,6 +30,7 @@ The properties worth pinning are the ones where a plausible design is wrong:
   * the command list comes from the engine, so it cannot drift.
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -246,3 +247,66 @@ def test_the_violations_query_is_the_audit_leg(tmp_path):
     """)
     assert "pre=-1" in out, out
     assert "post=0" in out, out
+
+
+def test_buda_log_gives_the_terminal_the_cli_gives(tmp_path):
+    """`bin/buda` prints one line per command and files the detail; the same
+    flow driven from Tcl printed every line of every command, because the
+    summarizer is gated on a flow log being open and only the CLI ever opened
+    one.  `buda::log` opens the same one — same path, same rotation, same
+    summaries — so a flow means the same thing through both doors."""
+    flow = tmp_path / "mini.buda"
+    flow.write_text("def_layer 5 M5 V TOP 30\n"
+                    "def_layer 6 M6 H TOP 30\n"
+                    "add_block a 0 0 100 100\n"
+                    "add_block b 300 0 400 100\n"
+                    "add_bus d[4] a.o b.i\n"
+                    "run_bundler STRICT\n"
+                    "generate_topologies\n"
+                    "run_planner 3\n"
+                    "run_nuts\n")
+    out = _tcl(tmp_path, f"""
+        puts "OFF=[buda::log]"
+        puts "ARMED=[buda::log {tcl_path(flow)}]"
+        buda::source {tcl_path(flow)}
+        buda::endreport
+        puts "DISARMED=[buda::log off]"
+        puts "AFTER=[buda::log]"
+        buda::stop""")
+
+    log_path = tmp_path / "log" / "mini_flow.log"
+    assert re.search(r"^OFF=$", out, re.M), out          # "" while off
+    assert f"ARMED={log_path}" in out, out
+    assert f"DISARMED={log_path}" in out, out
+    # …and a bare query reports OFF again: the path outlives the close
+    # (the end report names the file it wrote), the ARMED state does not.
+    assert re.search(r"^AFTER=$", out, re.M), out
+
+    # The console got the abstract…
+    assert "═══════ Runtime summary (mini.buda)" in out, out
+    assert "Full per-command detail →" in out, out
+    assert "[Planner] Bundle" not in out, out
+    # …and the detail is in the file, at the path the CLI derives.
+    detail = log_path.read_text()
+    assert "[Planner] Bundle" in detail
+    assert "━━━ run_nuts ━━━" in detail
+
+
+def test_an_unarmed_session_is_the_flow_it_always_was(tmp_path):
+    """Opt-in, and byte-identical when not used: a Tcl flow issues its
+    commands one at a time and usually wants each one's output, so arming
+    this in `buda::start` would change every existing flow's console."""
+    body = """
+        buda::def_layer 5 M5 V TOP 30
+        buda::def_layer 6 M6 H TOP 30
+        buda::add_block a 0 0 100 100
+        buda::add_block b 300 0 400 100
+        buda::add_net n1 a.o b.i
+        buda::run_bundler STRICT
+        buda::generate_topologies
+        buda::run_planner 3
+        buda::stop"""
+    out = _tcl(tmp_path, body)
+    assert "[Planner] Bundle" in out, out          # every line, as before
+    assert "Runtime summary" not in out, out       # and no end report
+    assert not (tmp_path / "log").exists()         # and no log written

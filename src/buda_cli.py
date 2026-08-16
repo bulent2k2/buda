@@ -415,8 +415,9 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]
         self._hier_bundles_orig = []   # pre-expansion snapshot set by run_hier_bundler
         self._planner_is_hier = False  # True after `run_planner hier` (self.bundles is expanded)
-        self._flow_log = None          # open flow-log file (set by main); enables per-command logging
+        self._flow_log = None          # open flow-log file (see open_flow_log); enables per-command logging
         self._flow_log_path = None     # its path (for the "Full detail →" line)
+        self._flow_log_seen = set()    # paths this session already truncated (a re-arm appends)
         self._log_run_dir = None       # --log: log/<cell>/<timestamp>/ archive dir (logs + script copies)
         self._log_archived = set()     # --log: origin abspaths already archived this run
         self._log_tag = None           # --tag: extra token inserted before the log suffix (e.g. rr_experiment)
@@ -661,6 +662,70 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
                 f.write("\n")
         except OSError as e:
             print(f"Warning: could not write run report {path}: {e}")
+
+    # ── arming the flow log ────────────────────────────────────────────────
+    # The flow log is the switch that turns a run from "every line of every
+    # command on the terminal" into "one summary line per command, full detail
+    # in a file" (see run_command).  It lives here rather than in `main` so the
+    # CLI is not the only driver that can have it: the Tcl bridge arms the same
+    # machinery through the server's `__log` request, and a summarized run means
+    # the same thing — same log path, same rotation, same summaries — whichever
+    # door the flow came through.  It used to be eight lines inline in `main`,
+    # which made "like `buda` does it" un-callable from anywhere else.
+    def open_flow_log(self, script_path=None):
+        """Arm per-command logging; returns the log path (None if it failed).
+
+        `script_path` names the flow, so the log lands beside it in the
+        canonical `<script_dir>/log/<stem>_flow.log` — passed only when the
+        session has no script yet (the CLI sets `script_path` before calling;
+        the Tcl bridge arms the log BEFORE its `source` command, which is what
+        would otherwise set it).
+
+        Idempotent, and a re-arm after `close_flow_log` APPENDS: a driver that
+        summarizes each routing pass separately (the interactive prompt's
+        `replan`) must not have its second pass rotate away the first one's
+        log — one session is one file.
+        """
+        if self._flow_log is not None:
+            return self._flow_log_path
+        if script_path and self.script_path is None:
+            self.script_path = os.path.abspath(script_path)
+        # `_get_log_path` CREATES the log directory, so it can fail too — on a
+        # read-only checkout, the case a site flow hits.  Inside the try with
+        # the open: a run must not die for want of a log, and under the Tcl
+        # bridge this raising would kill the engine mid-request, which the
+        # client can only report as "the engine exited unexpectedly".
+        try:
+            path = self._get_log_path('flow.log')
+            if path not in self._flow_log_seen:
+                _rotate_log(path)
+            self._flow_log = open(path, 'a' if path in self._flow_log_seen
+                                  else 'w', buffering=1)
+        except OSError as e:
+            print(f"Warning: could not open the flow log: {e}")
+            return None
+        self._flow_log_seen.add(path)
+        self._flow_log_path = path
+        return path
+
+    def close_flow_log(self):
+        """Disarm per-command logging; returns the path that was open (or None).
+
+        The inverse of `open_flow_log`, for a driver that summarizes only PART
+        of a session.  An interactive prompt is the case: a command the user
+        TYPED is one whose output they want to read — `dump_topologies` exists
+        to print — so the prompt disarms while it waits and re-arms around the
+        routing it replays.
+        """
+        if self._flow_log is None:
+            return None
+        path = self._flow_log_path
+        try:
+            self._flow_log.close()
+        except OSError:
+            pass
+        self._flow_log = None
+        return path
 
     def _print_end_report(self):
         """Emit the runtime summary + flow-log pointer exactly once.
@@ -1067,8 +1132,7 @@ def main():
         # buda.ostream_redirect).  run_command mirrors each command's detail
         # here and prints only a one-line summary to the terminal, so the two
         # are no longer duplicated.
-        flow_log_path = session._get_log_path('flow.log')
-        session._flow_log_path = flow_log_path
+        #
         # Non-overwriting logs (Phase 5).  A re-run used to destroy the
         # previous log in place, so the evidence for "it worked an hour ago"
         # was gone the moment you tried to reproduce it.  The CANONICAL path
@@ -1076,11 +1140,7 @@ def main():
         # previous run is rotated to `<name>.1` instead.  One generation is
         # enough to compare a run against the one before it, which is the
         # case that actually comes up; `--log` still archives every run.
-        _rotate_log(flow_log_path)
-        try:
-            session._flow_log = open(flow_log_path, 'w', buffering=1)
-        except OSError as e:
-            print(f"Warning: could not open flow log {flow_log_path}: {e}")
+        session.open_flow_log()
 
         # A script's `exit` command raises SystemExit, which would otherwise
         # sail straight past the end-of-run bookkeeping below — and most real

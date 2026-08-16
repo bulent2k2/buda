@@ -28,6 +28,11 @@
 #                                  # trace, load_pipeline, re-enter there
 #   btcl -- -v.tcl                 # a script whose NAME starts with a dash
 #
+# The operand is a TCL script.  A `.buda` flow handed to the bare wrapper is
+# refused with the two ways to run one (`btcl -i` for the prompt, `buda` for a
+# plain run) rather than passed to tclsh, which reads it as Tcl and complains
+# about whatever its first line happens to be.
+#
 # WRAPPER OPTIONS ARE READ ONLY BEFORE THE SCRIPT.  The first non-option word
 # is the script, and everything from it onward — including any `-v` of the
 # flow's OWN — is passed through untouched, in its original position.  `--`
@@ -122,5 +127,23 @@ if [ "$INTERACTIVE" = 1 ]; then
                  "tools/buda_prompt.tcl itself)" >&2; exit 2 ;;
   esac
 fi
+
+# A `.buda` flow handed to the bare wrapper is the mirror of the case above,
+# and it has to be caught HERE because tclsh will not catch it: it reads the
+# file as Tcl, so the flow's first line decides the complaint.  `add_block …`
+# is an "invalid command name"; a flow whose first line is `source …` gets
+# Tcl's OWN source, which resolves the path against a different root and fails
+# with `couldn't read file "../tracks/tracks4top.buda"` (measured on
+# flow/big_data_test/bigHalf.buda) — a message about a file the user never
+# typed, from a command they did not know had run.  Neither names the actual
+# mistake, and both arrive after tclsh has already executed part of the flow.
+case "$1" in
+  *.buda)
+    echo "btcl: '$1' is a BUDA flow -- this wrapper runs TCL scripts" >&2
+    echo "btcl: to run a .buda flow:" >&2
+    echo "btcl:   btcl -i $1     # run it, then the pin/edit prompt" >&2
+    echo "btcl:   buda $1        # run it non-interactively" >&2
+    exit 2 ;;
+esac
 
 exec tclsh "$@"

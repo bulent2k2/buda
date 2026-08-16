@@ -223,6 +223,29 @@ proc analyze {lines} {
     if {$first_bus eq ""} { set first_bus 1 }  ;# bundle 1: a valid selector
 }
 
+# ── shared: summarized output, as `bin/buda` gives it ─────────────────────
+#
+# A `.buda` flow run through `bin/buda` prints ONE line per command and files
+# the detail in `<flow_dir>/log/<stem>_flow.log`.  Run through this driver the
+# same flow printed every line of every command — `flow/big_data_test/bigHalf`
+# measured 677 lines against the CLI's 51 — and left no log to read the detail
+# in afterwards.  Nothing about the engine differed: the summarizer is gated on
+# a flow log being open, and only the CLI ever opened one.  `buda::log` opens
+# the same one, so a flow means the same thing through both doors.
+#
+# Armed around the FLOW and around every replay, dropped while the prompt
+# waits: a command the user TYPED is one whose output they asked to read
+# (`topos` exists to print a table), and summarizing that would answer a
+# question with a line count.  Re-arming appends, so one session is one log.
+proc _log_on  {} { catch {buda::log $::flow} }
+proc _log_off {} { catch {buda::log off} }
+# Every exit from an armed region goes through here, the failing ones
+# included: the end report is what NAMES the log file, and a run that died is
+# the case where being told where the detail went matters most.  (The failing
+# command's own detail is on the terminal regardless — the engine prints a
+# raising command in full rather than summarizing it.)
+proc _log_finish {} { catch {buda::endreport} ; _log_off }
+
 # ── shared: the replay engine ─────────────────────────────────────────────
 # A replay that stops partway is a FAILURE, not a finished route: the session
 # then holds a mix of old and new state, and a verdict read off it would be
@@ -246,7 +269,14 @@ proc replay_tail {} {
         puts "[set ::tag]: the flow never planned -- no replan recipe to replay"
         return
     }
-    _replay $::tail
+    # A replan re-runs the flow's own routing tail, so it is summarized like
+    # the flow was.  The disarm is unconditional — a replay that RAISES must
+    # still hand the prompt back with its output un-summarized, or the failure
+    # would be followed by a prompt that silently swallows what you type next.
+    _log_on
+    set rc [catch {_replay $::tail} err opts]
+    _log_off
+    if {$rc} { return -options $opts $err }
 }
 
 # The inspection session's prompt hooks (hier nuts/dnuts — a post-expansion
@@ -287,6 +317,12 @@ if {$stage eq "build"} {
     set ::env(BUDA_RECORD_NOTE) "btcl -i $tag"
 
     buda::start
+    # Stream, so the summaries appear AS the flow runs.  The whole flow is one
+    # `source` command on the wire, and buffered that is one frame at the end:
+    # a 45-second route would sit behind a blank screen and then print its
+    # whole summary at once, which is not what `bin/buda` looks like either.
+    catch {buda::stream 1}
+    _log_on
     if {$armed ne ""} {
         # Arm a file-backed BDB BEFORE the flow runs, so the whole pipeline
         # persists as it goes — the flow/tcl/design.tcl pattern, without
@@ -310,8 +346,17 @@ if {$stage eq "build"} {
             exit 1
         }
     }
-    if {[catch {buda::source $flow} err]} {
-        puts stderr "$tag: the flow failed: $err"
+    set rc [catch {buda::source $flow} err]
+    _log_finish
+    if {$rc} {
+        # The FIRST line of $err, not all of it: the bridge has already echoed
+        # the whole payload to stdout, and on a fail-fast that payload now
+        # carries the end report too — so repeating it here printed the entire
+        # runtime summary a second time, on stderr, where Tcl has not set the
+        # UTF-8 encoding and its arrow comes out as `?`.  The first line IS the
+        # diagnostic (`Error: sourced file not found: …`); the rest is the
+        # detail the reader just saw.
+        puts stderr "$tag: the flow failed: [lindex [split $err \n] 0]"
         catch {buda::stop}
         exit 1
     }
@@ -567,7 +612,10 @@ if {$stage eq "build"} {
               templates; use a `plan` resume to change the design"
     }
     buda::start
+    catch {buda::stream 1}
+    _log_on
     if {[catch {_replay $setup} err]} {
+        _log_finish
         puts stderr "$tag: resume setup failed: $err"
         catch {buda::stop}
         exit 1
@@ -579,19 +627,23 @@ if {$stage eq "build"} {
     # persisted routing).
     set lp [expr {$inspect ? "load_pipeline expanded" : "load_pipeline"}]
     if {[catch {buda::do $lp} err]} {
+        _log_finish
         puts stderr "$tag: $lp failed: $err"
         catch {buda::stop}
         exit 1
     }
     set nb [buda::query bundles]
     if {$nb == 0} {
+        _log_finish
         puts stderr "$tag: $ckpt restored no bundles -- not this flow's\
               checkpoint?  `btcl -i $tag $armed` rebuilds it"
         catch {buda::stop}
         exit 1
     }
     puts "$tag: RESUMED $nb bundles from $ckpt"
-    if {[catch {_replay $stage_lines} err]} {
+    set rc [catch {_replay $stage_lines} err]
+    _log_finish
+    if {$rc} {
         puts stderr "$tag: $err"
         catch {buda::stop}
         puts stderr "$tag: FAILED -- the `$stage` replay stopped partway"

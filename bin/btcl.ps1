@@ -6,7 +6,14 @@
 #                                      # `buda -j`; travels as BUDA_THREADS_REQUEST).
 #                                      # `-j max` = the whole maximum; no -j =
 #                                      # half the maximum, as `buda` caps.
+#   btcl.ps1 -i flow.buda [ckpt [stage]]
+#                                      # run a .BUDA flow, then the interactive
+#                                      # pin/edit prompt (tools/buda_interact.tcl)
 #   btcl.ps1 -- -v.tcl                 # a script whose NAME starts with a dash
+#
+# The operand is a TCL script; a `.buda` flow is refused with the two ways to
+# run one, rather than handed to tclsh — which reads it as Tcl and complains
+# about whatever its first line happens to be.
 #
 # WRAPPER OPTIONS ARE READ ONLY BEFORE THE SCRIPT — the first non-option word
 # is the script, and everything from it onward (including any -v of the flow's
@@ -48,10 +55,14 @@ function Fail2($msg) { [Console]::Error.WriteLine($msg); exit 2 }
 $reThreads = '^(-?\d+|max)$'
 
 $rest = @() + $args
+$interactive = $false
 while ($rest.Count -gt 0) {
     $a = $rest[0]
     if ($a -in '-v', '--visualize') {
         $env:BUDA_VIZ_FINAL = '1'
+        $rest = @(if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() })
+    } elseif ($a -in '-i', '--interactive') {
+        $interactive = $true
         $rest = @(if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() })
     } elseif ($a -in '-j', '--threads') {
         # The value is NOT a path — it travels to the child engine as an env
@@ -96,6 +107,28 @@ if (-not $env:BUDA_THREADS_REQUEST) { $env:BUDA_THREADS_REQUEST = 'default' }
 if ($rest.Count -gt 0 -and $rest[0] -like '-*') {
     $rest = @(".$([IO.Path]::DirectorySeparatorChar)$($rest[0])") + `
             $(@(if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() }))
+}
+
+# -i drives a .BUDA flow through the interactive prompt driver; a Tcl flow is
+# refused rather than half-worked (it can source tools/buda_prompt.tcl itself).
+# Same contract as bin/btcl, where the rationale is documented in full.
+if ($interactive) {
+    if ($rest.Count -gt 0 -and $rest[0] -like '*.buda') {
+        $driver = Join-Path $ProjectRoot 'tools/buda_interact.tcl'
+        tclsh $driver @rest
+        exit $LASTEXITCODE
+    }
+    Fail2 "btcl: -i takes a .buda flow (a Tcl flow can source tools/buda_prompt.tcl itself)"
+}
+
+# The mirror: a .buda flow handed to the bare wrapper.  tclsh would read it as
+# Tcl and complain about its first line instead of the actual mistake.
+if ($rest.Count -gt 0 -and $rest[0] -like '*.buda') {
+    [Console]::Error.WriteLine("btcl: '$($rest[0])' is a BUDA flow -- this wrapper runs TCL scripts")
+    [Console]::Error.WriteLine("btcl: to run a .buda flow:")
+    [Console]::Error.WriteLine("btcl:   btcl -i $($rest[0])     # run it, then the pin/edit prompt")
+    [Console]::Error.WriteLine("btcl:   buda $($rest[0])        # run it non-interactively")
+    exit 2
 }
 
 tclsh @rest

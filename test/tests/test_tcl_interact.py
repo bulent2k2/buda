@@ -24,6 +24,7 @@ checkpoint lives.  Then the shared prompt (tools/buda_prompt.tcl) takes
 over — the same loop the vehicles use, so a pin means the same thing in
 all three drivers.
 """
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -91,6 +92,20 @@ def _run(cmd, tmp_path, stdin="done\n"):
                           timeout=900, env={**os.environ})
 
 
+def _log(flow):
+    """The flow's per-command detail, where the driver now files it.
+
+    A flow run through this driver is summarized exactly as `bin/buda`
+    summarizes it — one line per command on the terminal, the full detail in
+    `<flow_dir>/log/<stem>_flow.log` — so a claim about what a COMMAND printed
+    (`topo 4 of 8 … [pinned]`, a restored-pin note) is a claim about the log.
+    The terminal carries the abstract, and the assertions that read `r.stdout`
+    below are the ones about the DRIVER's own messages.
+    """
+    p = Path(flow).parent / "log" / (Path(flow).stem + "_flow.log")
+    return p.read_text(errors="replace") if p.exists() else ""
+
+
 def test_flat_flow_pin_replan_verdict(tmp_path):
     flow = tmp_path / "mini.buda"
     flow.write_text(_FLAT_FLOW)
@@ -100,7 +115,7 @@ def test_flat_flow_pin_replan_verdict(tmp_path):
     assert "`replan` replays the flow's own routing tail" in r.stdout
     assert "no file-backed BDB" in r.stdout        # no open_bdb in the flow
     assert "pins changed since the last route" in r.stdout
-    assert "topo 4 of" in r.stdout                 # the replay honored the pin
+    assert "topo 4 of" in _log(flow)               # the replay honored the pin
     # The replay is the FLOW's tail: its checks and detailed stage re-ran.
     assert "replay> run_detailed_nuts" in r.stdout
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
@@ -109,13 +124,26 @@ def test_flat_flow_pin_replan_verdict(tmp_path):
 def test_hier_flow_is_autodetected_and_replans_hier(tmp_path):
     # The unmodified hbundles cross-level case: 3 levels, cell-local template
     # + cross-level bundles, :memory: BDB, ends in `visualize` (headless note).
-    flow = _ROOT / "flow" / "hbundles" / "08_cross_level.buda"
+    #
+    # COPIED into tmp_path (with the `../tracks` fixture its one `source`
+    # needs, so the relative path still resolves) rather than run in place:
+    # the flow log is derived from the flow's own directory, and
+    # test_flow_scripts.py runs this same flow through `bin/buda`, writing the
+    # same file.  Two writers were harmless while nobody read it; now that the
+    # engine detail this test asserts on lives there, running in place would
+    # be a race under `bb -p`.
+    flow = tmp_path / "hbundles" / "08_cross_level.buda"
+    flow.parent.mkdir()
+    shutil.copytree(_ROOT / "flow" / "tracks", tmp_path / "tracks")
+    shutil.copy(_ROOT / "flow" / "hbundles" / "08_cross_level.buda", flow)
     r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="pin b_lohi 2\ndone\n")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "HIER flow" in r.stdout
     assert "starting `run_planner hier 5`" in r.stdout
+    # The fan-out note is the TYPED `pin`'s own output (terminal); the planner
+    # lines proving the replay honored it are the flow's, hence the log.
     assert "expanded instances" in r.stdout        # the template pin fanned out
-    assert r.stdout.count("topo 2 of 5") >= 4, "the replay lost the pin"
+    assert _log(flow).count("topo 2 of 5") >= 4, "the replay lost the pin"
 
 
 def test_a_failed_replay_fails_the_run(tmp_path):
@@ -173,17 +201,20 @@ def test_pins_survive_back_to_back_sessions(tmp_path):
 
     r = _run(["tclsh", _DRIVER, flow], tmp_path)          # just `done`
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "durable pin restored -> topo 4" in r.stdout
-    assert "topo 4 of" in r.stdout and "[pinned]" in r.stdout
+    log = _log(flow)
+    assert "durable pin restored -> topo 4" in log
+    assert "topo 4 of" in log and "[pinned]" in log
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
 
+    # `unpin` is TYPED at the prompt, so its output stays on the terminal:
+    # the driver summarizes the flow it runs, never what the user asks for.
     r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="unpin d1\ndone\n")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "Unpinned" in r.stdout
 
     r = _run(["tclsh", _DRIVER, flow], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "durable pin restored" not in r.stdout          # honestly unpinned
+    assert "durable pin restored" not in _log(flow)        # honestly unpinned
 
 
 def test_in_session_rebundle_and_per_bundle_generation_keep_pins(tmp_path):
@@ -207,15 +238,20 @@ def test_in_session_rebundle_and_per_bundle_generation_keep_pins(tmp_path):
                    "generate_more_topologies d1\n"
                    "generate_topologies\ndone\n")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "durable pin restored -> topo 4" in r.stdout    # d1 held throughout
-    assert "durable pin restored -> topo 2" in r.stdout    # w, via carry-forward
-    assert "matches no regenerated candidate" not in r.stdout
+    # The re-bundle and the per-bundle regeneration are TYPED here, so their
+    # own output is on the terminal; the restore notes belong to the flow's
+    # `generate_topologies`, which the driver summarized into the log.
+    both = r.stdout + _log(flow)
+    assert "durable pin restored -> topo 4" in both        # d1 held throughout
+    assert "durable pin restored -> topo 2" in both        # w, via carry-forward
+    assert "matches no regenerated candidate" not in both
 
     r = _run(["tclsh", _DRIVER, flow], tmp_path)           # just `done`
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "durable pin restored -> topo 4" in r.stdout
-    assert "durable pin restored -> topo 2" in r.stdout
-    assert r.stdout.count("[pinned]") >= 2, "a pin fell out of the planner"
+    log = _log(flow)
+    assert "durable pin restored -> topo 4" in log
+    assert "durable pin restored -> topo 2" in log
+    assert log.count("[pinned]") >= 2, "a pin fell out of the planner"
 
 
 def test_armed_bdb_gives_a_flat_flow_durable_pins(tmp_path):
@@ -233,8 +269,9 @@ def test_armed_bdb_gives_a_flat_flow_durable_pins(tmp_path):
 
     r = _run(["bash", _BTCL, "-i", flow, tmp_path / "armed.bdb"], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "durable pin restored -> topo 4" in r.stdout
-    assert "topo 4 of" in r.stdout and "[pinned]" in r.stdout
+    log = _log(flow)
+    assert "durable pin restored -> topo 4" in log
+    assert "topo 4 of" in log and "[pinned]" in log
 
 
 def test_stage_resume_skips_the_rebuild_and_keeps_pins(tmp_path):
@@ -260,7 +297,8 @@ def test_stage_resume_skips_the_rebuild_and_keeps_pins(tmp_path):
     assert "RESUMED 8 bundles" in r.stdout
     assert "replay> run_bundler" not in r.stdout       # the point of resume
     assert "replay> generate_topologies" not in r.stdout
-    assert "topo 4 of" in r.stdout and "[pinned]" in r.stdout
+    log = _log(flow)
+    assert "topo 4 of" in log and "[pinned]" in log
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
 
     # `nuts` keeps the plan too: the planner is not re-run either.
@@ -302,7 +340,7 @@ def test_hier_stage_resume_holds_construction_and_replans(tmp_path):
     assert "held by the checkpoint" in r.stdout
     assert "replay> add_inst" not in r.stdout          # construction held
     assert "replay> derive_busterms" not in r.stdout
-    assert r.stdout.count("topo 2 of 5") >= 4, "the template pin fell out"
+    assert _log(flow).count("topo 2 of 5") >= 4, "the template pin fell out"
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
 
     # A hier resume BELOW the planner is an INSPECTION session — the quick
@@ -329,7 +367,7 @@ def test_hier_stage_resume_holds_construction_and_replans(tmp_path):
     # pin onto every instance — the checkpoint was not clobbered.
     r = _run(["tclsh", _DRIVER, flow, tmp_path / "h.bdb", "plan"], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert r.stdout.count("topo 2 of 5") >= 4, "the inspection session dirtied the checkpoint"
+    assert _log(flow).count("topo 2 of 5") >= 4, "the inspection session dirtied the checkpoint"
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
 
 
@@ -378,7 +416,8 @@ def test_relative_checkpoint_paths_resolve_against_the_flow(tmp_path):
     r = _run(["tclsh", _DRIVER, flow, sub / "ckpt.bdb", "plan"], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "RESUMED 8 bundles" in r.stdout
-    assert "topo 4 of" in r.stdout and "[pinned]" in r.stdout
+    log = _log(flow)
+    assert "topo 4 of" in log and "[pinned]" in log
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
 
 
@@ -459,3 +498,83 @@ def test_btcl_dash_i_wraps_the_driver_and_refuses_tcl(tmp_path):
     r = _run(["bash", _BTCL, "-i", tclflow], tmp_path)
     assert r.returncode == 2
     assert "prompt.tcl" in r.stderr           # the message names the path
+
+
+def test_a_buda_flow_without_dash_i_says_which_two_ways_run_it(tmp_path):
+    # The mirror of the case above, and the one tclsh cannot report: it reads
+    # the .buda as TCL, so the complaint is about whatever the flow's first
+    # line happens to be — `invalid command name "add_block"`, or, for a flow
+    # opening with `source`, Tcl's OWN source failing on a path resolved
+    # against a different root (measured on flow/big_data_test/bigHalf.buda:
+    # `couldn't read file "../tracks/tracks4top.buda"`).  Neither names the
+    # mistake, and both arrive after part of the flow has already run.
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    r = _run(["bash", _BTCL, flow], tmp_path)
+    assert r.returncode == 2
+    assert "is a BUDA flow" in r.stderr
+    assert "btcl -i" in r.stderr and "buda " in r.stderr   # both remedies
+    assert "invalid command name" not in r.stderr          # tclsh never saw it
+
+    # A .tcl operand is untouched — the wrapper refuses ONE named mistake, it
+    # does not audit what a Tcl script may be called.
+    tclflow = tmp_path / "hi.tcl"
+    tclflow.write_text("puts hi\n")
+    r = _run(["bash", _BTCL, tclflow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "hi" in r.stdout
+
+
+def test_a_flow_run_is_summarized_like_the_cli_and_filed_in_the_log(tmp_path):
+    # The parity this driver exists to have: `bin/buda` prints ONE line per
+    # command and files the detail; run through Tcl the same flow printed
+    # every line of every command (bigHalf: 677 lines against the CLI's 51)
+    # and left no log at all, because the summarizer is gated on a flow log
+    # being open and only the CLI ever opened one.
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    r = _run(["bash", _BTCL, "-i", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    # One line per command, in the CLI's own shape (`  <cmd>  <secs>s  <head>`).
+    assert re.search(r"^  run_detailed_nuts +\d+\.\d\ds  ", r.stdout, re.M), \
+        r.stdout
+    assert "═══════ Runtime summary (mini.buda)" in r.stdout
+    assert "Full per-command detail →" in r.stdout
+
+    # The detail is not lost — it moved to the file the CLI writes, at the
+    # path the CLI derives, and the console no longer carries it.
+    log = _log(flow)
+    assert (tmp_path / "log" / "mini_flow.log").exists()
+    assert "[DetailedNUTS] 46 net segments placed" in log
+    # The planner's per-bundle lines are the bulk of a real flow's output and
+    # none of them is a headline (`RUN_PLANNER 5` summarizes to a line count),
+    # so they are the honest test of what left the console.
+    assert "[Planner] Bundle" in log
+    assert "[Planner] Bundle" not in r.stdout
+
+    # And the whole point: the terminal is now the CLI's order of magnitude,
+    # not the engine's.  (mini is small; bigHalf measured 677 → 58.)
+    assert len(r.stdout.splitlines()) < len(log.splitlines())
+
+
+def test_the_prompt_shows_what_you_type_in_full(tmp_path):
+    # The boundary of the summarizing: a command the USER typed is one whose
+    # output they asked to read.  `topos` exists to print a candidate table,
+    # and summarizing it to "(12 lines)" would answer the question with a
+    # line count — so the driver arms the log around the FLOW and its replays
+    # and drops it while the prompt waits.
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    r = _run(["bash", _BTCL, "-i", flow], tmp_path,
+             stdin="topos d1\nreplan\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    after = r.stdout.split("pin/edit prompt")[1]
+    assert "topo type" in after and "*SEL" in after       # the table, in full
+    # …while the replan — the flow's OWN routing tail — is summarized.
+    assert re.search(r"^  RUN_NUTS +\d+\.\d\ds  ", after, re.M), after
+
+    # One session is one log: the replan APPENDS rather than rotating the
+    # flow's own detail away (two solves, two sections).
+    assert _log(flow).count("━━━ RUN_NUTS ━━━") == 2
