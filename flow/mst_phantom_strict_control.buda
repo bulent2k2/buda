@@ -1,0 +1,81 @@
+# ============================================================
+# flow/mst_phantom_strict_control.buda
+#
+# The CONTROL arm of `flow/mst_phantom_strict.buda`.
+#
+# Same six blocks, same two buses, same pinned candidate CLASS
+# (MST_HV) -- with `set_trim_mst_legs on`, so the duplicated leg
+# that carries the phantom charge is trimmed away.
+#
+#   phantom arm   Bundle 2 ... overflow=118.46   (pushed out of STRICT)
+#   THIS arm      Bundle 2 ... overflow=0        (fits)
+#
+# Bundle 1 is unchanged between the arms in every respect the
+# comparison rests on: same pinned type, same 199.5-unit bus,
+# same BEST_EFFORT warning, same overflow=100.118.
+#
+# ── WHAT THIS CONTROL DOES AND DOES NOT SHOW ────────────────
+#
+# It does NOT isolate the CHARGE.  The trim removes the
+# duplicated METAL, so bundle 1 goes from 7 segments to 5 and
+# genuinely draws less wire; some of bundle 2's relief is that
+# real reduction, not the phantom.  Isolating the charge alone
+# would need an engine that charges coincident same-bundle
+# metal once -- which is exactly the fix phantom_charge.py
+# argued against, since one of the four corpus pairs is placed
+# APART and its two charges are CORRECT.
+#
+# The attribution therefore rests on the arithmetic in the
+# phantom arm (usage 799.46 - phantom 300.24 = 499.22 <= cap
+# 700), which needs no control at all.  This file is here
+# because a reader will reasonably ask "does it actually change
+# anything downstream?", and the answer is yes.
+#
+# ── THE PIN INDEX DIFFERS, ON PURPOSE ───────────────────────
+#
+# `set_trim_mst_legs` shortens legs, candidates are WL-SORTED,
+# so the pool RE-SORTS and MST_HV moves from index 18 to 14.
+# That is the documented cost of the knob ("pins must come from
+# an opted-in run"), and it is why the test asserts the pinned
+# candidate's TYPE rather than trusting either number.
+#
+# Run:  bin/buda flow/mst_phantom_strict_control.buda --no-viz
+# ============================================================
+
+def_layer 4 M4 H TOP 33.33
+def_layer 5 M5 V TOP 33.33
+
+corner_margin dx 10 dy 10
+
+add_block hub   2000 1000  2100 1100
+add_block near  1800  300  1900  400
+add_block far    600  900   700  950
+add_block up    2000 1800  2100 1900
+
+add_block vl   1200 1100  1300 1800
+add_block vr   2300 1100  2400 1800
+
+add_bus d[133] hub.tx near.rx,far.rx,up.rx
+add_bus v[88]  vl.tx vr.rx
+
+run_bundler strict
+
+# The CONTROL knob: cut each leg back to where it stops being a
+# duplicate.  Declared BEFORE generation, as it must be.
+set_trim_mst_legs on
+
+generate_topologies
+
+# MST_HV -- index 14 HERE, 18 in the phantom arm, because the
+# trim re-sorts the WL-ordered pool.
+select_topology 1 14
+
+run_planner 1
+run_nuts
+
+def_track_pattern 4 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+def_track_pattern 5 0  POWER 2 1  (SIGNAL 1 0.5)x4  GROUND 2 1  (SIGNAL 1 0.5)x4
+
+run_detailed_nuts
+check_design dnuts
+report_wirelength

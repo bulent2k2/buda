@@ -190,3 +190,34 @@ what the whole finding rests on.
 One honest limit stands: these are **final** committed states. The planner is
 greedy and widest-first, so a band could have been tight mid-run and relaxed by
 the end; "0 over capacity now" is not quite "never mattered".
+
+### The vehicle that makes the last column read 1
+
+"One more co-placed duplicate on a tighter band is all it would take" is a claim
+about something that has never been seen, so it was built:
+
+    PYTHONPATH=build:src:tools python3 tools/experiment/phantom_charge.py \
+        flow/mst_phantom_strict.buda
+
+    cut 6 band 6  M4  phantom 300.24  cap 700.00  usage 799.46  114.2%
+    ... over capacity BECAUSE of it         1
+
+`799.46 - 300.24 = 499.22 <= 700` — the metal fits, the books do not — and the
+planner pushes bundle 2 out of the STRICT tier for it (`overflow=118.46`;
+`flow/mst_phantom_strict_control.buda`, the same design with
+`set_trim_mst_legs on`, gives `overflow=0`).
+
+Pass those flows **explicitly**, as above. They are deliberately absent from
+`FLOWS`: that list is the census of what real designs do, and an adversarial
+construction inside it would turn the measurement into an argument.
+
+What the vehicle is really worth is the price of admission, which is the
+measurement nobody had: the harm needs a pinned structural loser (the duplicate
+rides candidates that lose), a carrier bus above ~104 bits (below that no victim
+demand satisfies both the fit and the overflow condition while staying narrower
+than the carrier, which widest-first commit order requires), and — measured, not
+chosen — a carrier already in BEST_EFFORT, because a bus that wide no longer
+fits the pinned candidate's slide windows. Every configuration that produces the
+harm does that. So the finding upgrades from "not observed" to *"reachable, and
+here is exactly how far outside ordinary routing it lives"*. Full write-up in
+[antenna_repros.md](../../docs/internal/antenna_repros.md) §5d.
