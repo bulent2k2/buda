@@ -1,10 +1,13 @@
 # Getting a power-routed DEF out of OpenROAD
 
-**Status: recipe written, not yet run.** The inputs are verified present and
-the reachability was probed on 2026-08-16; the `openroad` run itself needs a
-machine this container is not (see §3). Written so that whoever picks it up
-does not have to re-derive which files, which commands, or which of the two
-errands they are actually on.
+**Status: RUN 2026-08-16.** Generated `flow/ariane133/ariane_pdn.def` on a
+macOS dev machine through the `openroad/orfs:latest` Docker image
+(`openroad -version` → `26Q3-1278-g4421880472`); the four verification
+checks in §6 pass — 6673 metal paths read, 113969 via placements censused,
+zero `unread_wire`. The script as first written did **not** run (§5 records
+the `PDN-0008` fix it needed). Written so that whoever picks it up does not
+have to re-derive which files, which commands, or which of the two errands
+they are actually on.
 
 This is the prerequisite named in three places — `opens_interchange.md`
 item 15, `specialnets_scope.md` §4 and §5(0), and `flow/ariane133/ReadMe.md`
@@ -91,10 +94,23 @@ source build that wants tens.
 
 On a normal development machine, in order of preference:
 
-1. **Docker.** The ORFS project publishes prebuilt images; check the current
-   tag in the OpenROAD-flow-scripts README rather than trusting a tag
-   written down here, since they move. Mount the repo and run the script in
-   §5. *(Image name not verified in this session.)*
+1. **Docker.** The ORFS project publishes prebuilt images. This is what the
+   2026-08-16 run used — `openroad/orfs:latest` (~1.6 GB, amd64), the
+   `openroad` binary living at
+   `/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad` (not on
+   `PATH`, so name it as the entrypoint). Check the current tag in the
+   OpenROAD-flow-scripts README rather than trusting `latest` long-term,
+   since they move. The exact command that ran, from the repo root:
+
+   ```bash
+   docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+     -v "$PWD":/work -w /work \
+     --entrypoint /OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad \
+     openroad/orfs:latest -exit flow/ariane133/pdn.tcl
+   ```
+
+   `--user` makes the output DEF yours, not root's; `-w /work` is why the
+   script's repo-relative paths resolve.
 
 2. **Source build.** OpenROAD ships its own dependency installer:
 
@@ -142,14 +158,34 @@ pdngen complains, add the std cell LEF locally and do not check it in.)*
 
 ## 5. The script
 
-`flow/ariane133/pdn.tcl` — write it there when running this; it is not
-checked in yet because an unrunnable script in the tree invites someone to
-believe it has been run.
+`flow/ariane133/pdn.tcl` — checked in, and it runs (§header). It was NOT
+checked in until it had been run, for the reason still worth stating: an
+unrunnable script in the tree invites someone to believe it has been run.
 
 The stripe geometry is ORFS's `grid_strategy-M1-M4-M7.tcl` verbatim (the
 strategy ariane133 is built with); the surrounding read/write is OpenROAD's
 own `src/pdn/test/macros.tcl` pattern, which is the closest test to this
 design — a core grid plus per-macro grids over SRAMs.
+
+**Two edits the ORFS strategy needed on THIS floorplan** (`ariane.def` is a
+MacroPlacement output, not an ORFS one). Both are in the script below:
+
+1. **`cut_rows` before the grids.** `ariane.def` lays 962 `ROW`s across the
+   whole die, *uncut* under the 133 SRAMs — and the macros abut those rows
+   flush. pdngen's macro-grid legality check then refuses the grid with
+   `[ERROR PDN-0008] … halo overlaps row … reduce the halo to at most …`.
+   `cut_rows -halo_width_x 2 -halo_width_y 2` removes the rows around each
+   macro so the M5/M6 macro grids can be built. (An ORFS floorplan arrives
+   with rows already cut, which is why the upstream strategy omits this.)
+
+2. **An explicit small macro-grid `-halo`.** With no `-halo`, or with
+   `-halo {0 0 0 0}` (0 is read as "unset"), the grid inherits the DEF's 5 µm
+   placement halo and PDN-0008 fires again. `{0.1 0.1 0.1 0.1}` sits inside
+   the 2 µm `cut_rows` band. The recipe's original `{2.0 2.0 2.0 2.0}` was
+   too large — the macros abut rows with a sub-micron gap.
+
+`macro_r90` finds no instances (all 133 SRAMs are R0-family — `N/S/FN/FS`)
+and warns `PDN-1051`; harmless, kept so the strategy is complete.
 
 ```tcl
 # Generate a power grid on the ariane133 floorplan.
@@ -169,6 +205,9 @@ add_global_connection -net {VSS} -inst_pattern {.*} -pin_pattern {^VSSE$}
 global_connect
 set_voltage_domain -name {CORE} -power {VDD} -ground {VSS}
 
+# --- cut core rows around the macros (see note 1 above; PDN-0008 without it) ---
+cut_rows -halo_width_x 2 -halo_width_y 2
+
 # --- standard-cell grid: M1 followpins, M4 + M7 stripes ---
 define_pdn_grid -name {grid} -voltage_domains {CORE} -pins {metal7}
 add_pdn_stripe  -grid {grid} -layer {metal1} -width {0.17} -pitch {2.4}  -offset {0} -followpins
@@ -178,8 +217,9 @@ add_pdn_connect -grid {grid} -layers {metal1 metal4}
 add_pdn_connect -grid {grid} -layers {metal4 metal7}
 
 # --- macro grids: M5/M6 over the SRAMs, by orientation class ---
+# -halo {0.1 …} (not {2.0 …} / not unset) — see note 2 above.
 define_pdn_grid -name {macro_r0} -voltage_domains {CORE} -macro \
-  -orient {R0 R180 MX MY} -halo {2.0 2.0 2.0 2.0} -default
+  -orient {R0 R180 MX MY} -halo {0.1 0.1 0.1 0.1} -default
 add_pdn_stripe  -grid {macro_r0} -layer {metal5} -width {0.93} -pitch {10.0} -offset {2}
 add_pdn_stripe  -grid {macro_r0} -layer {metal6} -width {0.93} -pitch {10.0} -offset {2}
 add_pdn_connect -grid {macro_r0} -layers {metal4 metal5}
@@ -187,7 +227,7 @@ add_pdn_connect -grid {macro_r0} -layers {metal5 metal6}
 add_pdn_connect -grid {macro_r0} -layers {metal6 metal7}
 
 define_pdn_grid -name {macro_r90} -voltage_domains {CORE} -macro \
-  -orient {R90 R270 MXR90 MYR90} -halo {2.0 2.0 2.0 2.0} -default
+  -orient {R90 R270 MXR90 MYR90} -halo {0.1 0.1 0.1 0.1} -default
 add_pdn_stripe  -grid {macro_r90} -layer {metal6} -width {0.93} -pitch {40.0} -offset {2}
 add_pdn_connect -grid {macro_r90} -layers {metal4 metal6}
 add_pdn_connect -grid {macro_r90} -layers {metal6 metal7}
@@ -195,6 +235,9 @@ add_pdn_connect -grid {macro_r90} -layers {metal6 metal7}
 pdngen
 write_def flow/ariane133/ariane_pdn.def
 ```
+
+The maintained copy is `flow/ariane133/pdn.tcl` (checked in). If it and this
+block ever diverge, the file is authoritative — it is the one that runs.
 
 ---
 
@@ -229,6 +272,20 @@ is worth knowing precisely because it would be the first vehicle for them
 A count of `0` wires would mean the reader has regressed under this document;
 that is what the four goldens produced before the fix.
 
+**Measured on the 2026-08-16 DEF:**
+
+```
++ SHAPE census   : 1339 FOLLOWPIN, 119303 STRIPE  (no RING — none declared)
+special_wires    : 6673   (1339 FOLLOWPIN + 5334 STRIPE)
+unmodelled       : {'SPECIALNETS.via_placement': 113969}
+```
+
+120642 SPECIALNETS clauses in → 6673 wires + 113969 via placements out,
+nothing dropped. (Most of the 119303 `+ SHAPE STRIPE` clauses are single-point
+via placements carrying that keyword, which is why the STRIPE census dwarfs
+the 5334 STRIPE *polylines*.) At ~175× the goldens' clause count, on a real
+133-macro design, every metal path reads — the item-15 fix confirmed at scale.
+
 ---
 
 ## 7. Where the file goes, and where it does not
@@ -256,6 +313,48 @@ With `ariane_pdn.def` in hand, in the order the work is worth doing:
 1. **Item 15's real measurement** — import the same design with and without
    the PDN and see what the keepouts do to the route. This is the number the
    reader fix is currently landing without.
+
+   **MEASURED 2026-08-16 — and the answer is "it explodes the grid," not a
+   QoR delta.** The measurement must be *controlled*: pdngen's `write_def`
+   reconstructs a 495-net `NETS` section that `demo/ariane/ariane.def` does
+   not have (its signal connectivity comes from `ariane.v`), so importing the
+   whole `ariane_pdn.def` is a *different netlist* — 658 busterms / 244
+   hbundles vs the baseline 161 / 111. To isolate the keepouts, splice only
+   the PDN's `SPECIALNETS` block into the original DEF:
+
+   ```bash
+   head -n 3868 demo/ariane/ariane.def            > flow/ariane133/ariane_keepout.def
+   awk '/^SPECIALNETS/{p=1} p{print} /^END SPECIALNETS/{exit}' \
+       flow/ariane133/ariane_pdn.def             >> flow/ariane133/ariane_keepout.def
+   tail -n +3878 demo/ariane/ariane.def          >> flow/ariane133/ariane_keepout.def
+   ```
+
+   Importing that (netlist now identical — 161 busterms / 111 hbundles
+   confirmed) adds exactly the power metal as keepouts:
+   `keepouts added: OBS:13034, SPECIALNET:6673` (vs baseline `OBS:13034`
+   alone; the 113969 via placements are 0-width and correctly NOT keepouts).
+
+   The result is that **`run_planner hier` becomes intractable.** The 6673
+   PDN wires are die-crossing M4/M7 stripes and M1 followpins that lie
+   *outside* every block, so `set_keepout_loci outside` — which tames the
+   13034 OBS keepouts precisely because they sit *inside* macros — cannot
+   suppress their Hanan loci. They add ~1069 x-lines and ~2836 y-lines, and
+   the grid goes from the ~6,327 cells item 12 achieved to **~3.2 million**
+   (~500×). Baseline routes in 11 s; the keepout variant was still grinding
+   the planner at 96% CPU after 16 minutes (single-threaded, allocating) and
+   was killed — the same regime item 12 hit on raw `demo/ariane` before its
+   fix ("killed at 50 min").
+
+   So this is **item 12 re-opened in a new direction.** `set_keepout_loci
+   outside` is a block-*interior* mitigation; a real PDN's dominant keepouts
+   are die-spanning stripes, which it structurally cannot reach. The route
+   impact is not a congestion number to report — it is that the design cannot
+   be planned at all until stripe loci get a mitigation of their own (a long
+   thin power stripe blocks metal but should not contribute a Hanan line per
+   edge across the whole die). That mitigation is the real follow-up this
+   measurement surfaces; until it exists, a PDN-keepout QoR number is not
+   obtainable on a design this size. Reproduce with the splice above +
+   `flow/ariane133/ariane133.buda`'s pipeline against the spliced DEF.
 2. **`specialnets_scope.md` (a)** — carry each strap's *net identity* into
    the session, not just its rectangle. Small and additive; nothing reads
    the field yet.
