@@ -897,6 +897,51 @@ def apply_thread_env(n, explicit):
         os.environ.setdefault("BUDA_THREADS", str(n))
 
 
+def threads_arg(s):
+    """argparse type for -j/--threads: a plain integer or the literal 'max'.
+
+    Returns the string 'max' or an int; anything else raises so argparse (or a
+    caller) renders one message.  'max' means the whole machine maximum — the
+    explicit opt-out of the max/2 default."""
+    if s == "max":
+        return "max"
+    try:
+        return int(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid thread count '{s}' (an integer or 'max')")
+
+
+def configure_threads(raw, apply=True):
+    """Resolve a -j/--threads request, export it to the engines, and report it.
+
+    ONE source for both entry points — the CLI (`buda -j`) and the Tcl server
+    (`btcl -j`, carried in BUDA_THREADS_REQUEST) — so a `-j` means the same
+    thing through either door.  `raw` is what the launcher asked for:
+
+      * None / 'default' — the launcher DEFAULT: half the machine maximum,
+        applied as the BUDA_THREADS CEILING (the engines' auto paths honor it
+        with their small-work gates intact).
+      * 'max'            — the whole machine maximum, EXPLICIT (per-engine vars,
+        gates bypassed).
+      * an int / digits  — that count, EXPLICIT, clamped LOUD to [1, max].
+
+    Prints the resolved `[threads] N of M` line and returns N.  Raises
+    ValueError on a request that is neither 'max'/'default' nor an integer."""
+    max_threads = detect_max_threads()
+    if raw is None or raw == "default":
+        requested, explicit, label = None, False, "default: max/2"
+    elif raw == "max":
+        requested, explicit, label = max_threads, True, "--threads max"
+    else:
+        requested, explicit, label = int(raw), True, "--threads"
+    n = resolve_threads(requested, max_threads)
+    if apply:
+        apply_thread_env(n, explicit=explicit)
+    print(f"[threads] {n} of {max_threads} logical CPUs ({label})")
+    return n
+
+
 def main():
     _enable_line_buffered_stdio()
     parser = argparse.ArgumentParser(
@@ -948,25 +993,22 @@ def main():
     parser.add_argument('--ipc-verbose', action='store_true',
                         help='surface buda_viz/def_viz IPC socket status chatter '
                              '(listening/connected/timer lines); off by default')
-    parser.add_argument('-j', '--threads', type=int, metavar='N',
+    parser.add_argument('-j', '--threads', type=threads_arg, metavar='N|max',
                         help='worker threads for the parallel pipeline stages: '
                              'planner candidate scoring, NUTS per-layer '
                              'solvers, and the healers\' trial sweep. '
                              'Clamped to [1, <logical CPUs available to this '
                              'process>] — affinity- AND cpu-quota-aware; on '
                              'hybrid CPUs that count is P-cores x SMT + '
-                             'E-cores. Default: half the machine maximum. An '
-                             'explicit N overrides the per-engine env vars '
-                             '(BUDA_PLAN/NUTS/SWEEP_THREADS, explicit '
+                             'E-cores. Default (flag absent): half the machine '
+                             'maximum; `-j max` uses the whole maximum. An '
+                             'explicit N (or `max`) overrides the per-engine '
+                             'env vars (BUDA_PLAN/NUTS/SWEEP_THREADS, explicit '
                              'semantics); the default sets only the '
                              'BUDA_THREADS ceiling, which the engines\' auto '
                              'paths honor with their small-work gates intact')
     args = parser.parse_args()
-    max_threads = detect_max_threads()
-    n_threads = resolve_threads(args.threads, max_threads)
-    apply_thread_env(n_threads, explicit=args.threads is not None)
-    print(f"[threads] {n_threads} of {max_threads} logical CPUs "
-          f"({'--threads' if args.threads is not None else 'default: max/2'})")
+    configure_threads(args.threads)
     session = BudaSession()
     session.no_viz = args.no_viz
     session.viz_final = args.viz_final

@@ -457,6 +457,9 @@ void bind_routing(py::module_& m) {
         .def("set_keepout_loci_outside_only",
              &Floorplan::set_keepout_loci_outside_only, py::arg("on"))
         .def("keepout_loci_outside_only", &Floorplan::keepout_loci_outside_only)
+        .def("set_stripe_loci_suppress",
+             &Floorplan::set_stripe_loci_suppress, py::arg("on"))
+        .def("stripe_loci_suppress", &Floorplan::stripe_loci_suppress)
         .def("get_block_rects", [](const Floorplan& fp, const std::string& name) {
             auto rects = fp.get_block_rects(name);
             std::vector<std::tuple<int,int,int,int>> out;

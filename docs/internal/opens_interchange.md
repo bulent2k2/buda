@@ -1112,13 +1112,23 @@ make in a fresh direction. They stay censused, and
 `test_the_goldens_carry_no_form_the_reader_still_cannot_read` fails the day a
 golden carries one, so the boundary gets revisited with a vehicle in hand.
 
-**Still open: what the keepouts DO to a route.** These designs are 100–200 µm
-with a few hundred nets — parser vehicles, not something we route. That needs
-a PDN on `flow/ariane133`, i.e. the pdngen run in
-[openroad_pdn_recipe.md](openroad_pdn_recipe.md). The reader fix is
-byte-identical on every flow in the tree (none of our DEFs carries `+ SHAPE`),
-which is both why it was safe to land alone and why it proves nothing about
-routing yet.
+**What the keepouts DO to a route — MEASURED 2026-08-16, and it needed a fix.**
+The goldens are 100–200 µm parser vehicles, so this needed a real PDN on
+`flow/ariane133`: the pdngen run in
+[openroad_pdn_recipe.md](openroad_pdn_recipe.md) produced one, spliced into
+the DEF as `SPECIALNET:6673` keepouts (controlled — same netlist as baseline).
+The finding was not a QoR delta but a **grid explosion**: the 6673 straps are
+die-crossing and lie *outside* every block, so `set_keepout_loci outside`
+(item 12, a block-*interior* rule) cannot reach them, and their thin-axis
+edges took the Hanan grid ~6,327 → ~3.2M cells and stalled the planner (killed
+at 16 min) — item 12 re-opened in a new direction. **Fixed by
+`set_keepout_loci stripes`** (§8.1): a thin+long strap (aspect ≥ 8) keeps only
+its long-axis loci. With `outside stripes` the design routes in ~30 s at 0
+overlaps and abstract WL within 5 units of the no-PDN baseline — so the
+enforced PDN keepouts, once they stop exploding the grid, barely perturb this
+design's route (its signal metal lives on M8–M10). Pinned by
+`test_stripe_keepout_loci.py`; the reader fix stays byte-identical on every
+tree flow (none carries `+ SHAPE`), which is why it landed alone.
 
 ### Why it survived this long
 
