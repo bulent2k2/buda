@@ -230,8 +230,34 @@ def test_corpus_members_are_not_candidates():
     assert not (found & set(qc.CORPUS))
 
 
-def test_discovery_is_sorted_and_stable():
-    assert qc.discover_candidates() == sorted(qc.discover_candidates())
+def test_discovery_is_sorted_and_stable(tmp_path):
+    """Sortedness from ONE enumeration of the real tree; stability from a root
+    no other worker writes to.
+
+    It used to compare two enumerations of `flow/`, which under CI's
+    `-p xdist -n 4` is a race with a test that has nothing to do with it:
+    `test_bit_antenna_audit` writes a `_no_trim_*.buda` INTO `flow/rnr/` (it
+    must — the flow `source`s a sibling, so a tmp_path copy would not resolve),
+    that file is a full-pipeline flow like any other, and a worker unlinking it
+    between the two calls makes the lists differ by exactly one entry.
+    Measured on CI: `- 'flow/rnr/_no_trim_8i9km0c8.buda'`.
+
+    `test_qor_baseline_worktree._tree_state` already met this race and answered
+    it the same way — do not let another worker's transient file into the
+    comparison.  Neither claim is weakened: a single call still proves the real
+    tree comes out sorted, and stability across calls is a property of the
+    discovery, provable on any root.
+    """
+    found = qc.discover_candidates()
+    assert found == sorted(found)
+
+    (tmp_path / "flow").mkdir()
+    _write(tmp_path, "flow/b.buda", "run_nuts\nrun_detailed_nuts\n")
+    _write(tmp_path, "flow/a.buda", "run_nuts\nrun_detailed_nuts\n")
+    roots = (str(tmp_path / "flow"),)
+    first = qc.discover_candidates(roots=roots, corpus=[])
+    assert first == qc.discover_candidates(roots=roots, corpus=[])
+    assert first == sorted(first) and len(first) == 2
 
 
 # ------------------------------------------------------------- the contract
