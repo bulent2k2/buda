@@ -618,6 +618,22 @@ public:
     void set_keepout_loci_outside_only(bool on) { keepout_loci_outside_only_ = on; ++rev_; }
     bool keepout_loci_outside_only() const { return keepout_loci_outside_only_; }
 
+    // `set_keepout_loci stripes` (openroad_pdn_recipe.md §8.1 / item 15): a
+    // STRIPE keepout — thin and long, a power-grid strap rather than a
+    // block-shaped obstacle — contributes only its LONG-axis edges as Hanan
+    // loci, dropping the thin-axis pair.  A real PDN imports thousands of
+    // die-crossing straps, each of whose two thin-axis edges is a fresh grid
+    // line; the grid is the PRODUCT of its axis sets, so importing
+    // flow/ariane133's PDN as keepouts took it ~6,327 -> ~3.2M cells and
+    // stalled the planner.  Blocking is unaffected; a strap's thin-axis edge
+    // is near-useless as a trunk nominal anyway (a signal trunk does not align
+    // to a power strap's edge), and its long-axis ends stay loci.  Orthogonal
+    // to `outside` (which drops BOTH edges of an inside-a-block keepout first),
+    // so the two compose.  OPT-IN — removes candidate positions, like
+    // `outside`.
+    void set_stripe_loci_suppress(bool on) { stripe_loci_suppress_ = on; ++rev_; }
+    bool stripe_loci_suppress() const { return stripe_loci_suppress_; }
+
     Rect get_block_bounds(const std::string& name) const;
     // True iff a block with this exact name has been registered (get_block_bounds
     // silently returns a degenerate {0,0,0,0} for unknown names, so callers that
@@ -644,6 +660,7 @@ private:
     FeedthruConfig feedthru_;
     DetourChannelSpec detour_channel_;
     bool keepout_loci_outside_only_ = false;
+    bool stripe_loci_suppress_ = false;
     std::vector<KeepoutZone> keepouts_;
 };
 class TopologyGenerator {
