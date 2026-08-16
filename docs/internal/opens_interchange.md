@@ -1074,7 +1074,11 @@ Deliberately **not** fixing the reader here: extending it changes which metal
 is imported as a keepout, and the only designs available to measure that on
 are the two hand-authored ones that already parse. It wants the same
 prerequisite as [the SPECIALNETS scoping](specialnets_scope.md) — a placed and
-power-routed DEF — and is item (0) of that document's work list.
+power-routed DEF — and is item (0) of that document's work list.  The recipe
+for producing one, down to the pdngen script and which files it needs, is
+[openroad_pdn_recipe.md](openroad_pdn_recipe.md); what does NOT need it is the
+reader's own correctness, since pdngen's regression goldens are fetchable and
+BUDA reads **0 of 3385** of their wires.
 
 Pinned by `test_def_reader.py`, with the twins that keep the rule honest: a
 net that really has no wires must still say `no_geometry`, and a wire read in

@@ -136,6 +136,10 @@ invisible until somebody else's file arrived (item 12).
 
 Getting a real PDN means a placed-and-power-routed DEF, which upstream
 generates rather than ships: an OpenROAD or Innovus run, not a download.
+The errand is written out in
+[openroad_pdn_recipe.md](openroad_pdn_recipe.md) — install, the exact inputs
+(all of them already digest-pinned in `flow/ariane133/`), the pdngen script,
+and how to check the result.
 
 ## 5. What to build, if this is picked up
 
@@ -146,9 +150,17 @@ points, a path that continues past a via, and the `RECT`/`POLYGON` forms; and
 stop reporting an unparsed net as `SPECIALNETS.no_geometry`, which is a false
 statement rather than a missing one. Provably needed the moment a real PDN
 arrives, since a generator emits `+ SHAPE STRIPE` on every stripe — so §4's
-"get a power-routed DEF" and this are the same errand. Until then it cannot
-be measured on anything but a synthetic case, which is why it is not urgent
-and is also why it was not noticed.
+"get a power-routed DEF" and this are the same errand.
+
+**Amended 2026-08-16: they are NOT the same errand, and this paragraph's
+"cannot be measured on anything but a synthetic case" was wrong.** OpenROAD's
+own pdn regression goldens (`src/pdn/test/*.defok`) are pdngen OUTPUT, are
+fetchable through the channel `flow/ariane133/fetch.py` already uses, and BUDA
+reads **0 of their 3385 wires** — every one carries `+ SHAPE`. So the reader's
+correctness has real generator bytes to be tested against with no OpenROAD
+install at all; only the KEEPOUT-impact question still needs §4's run. The
+synthetic-case objection held for as long as nobody looked for somebody else's
+output, which is item 12's lesson wearing one more costume.
 
 **(a) Carry the strap's identity into the session** — a net label on the
 imported keepout, or a parallel strap list beside the keepouts. Small,
