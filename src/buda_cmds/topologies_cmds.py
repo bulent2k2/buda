@@ -264,13 +264,22 @@ def cmd_set_trim_trunk_stubs(session, cmd, args, cmd_line):
 
 
 def cmd_set_keepout_loci(session, cmd, args, cmd_line):
-    # Usage: set_keepout_loci all|outside          (default all)
+    # Usage: set_keepout_loci [all|outside] [stripes]     (default all)
     #
     # WHICH KEEPOUTS CONTRIBUTE HANAN LOCI (opens_interchange.md item 12).
     # `all` (default, historical) = every keepout's four edges become grid
     # lines.  `outside` = only keepouts reaching beyond a block do; one lying
     # wholly inside a block still BLOCKS identically, it just stops adding
     # coordinates.
+    #
+    # `stripes` (openroad_pdn_recipe.md §8.1 / item 15) is an ORTHOGONAL,
+    # composable modifier: a STRIPE keepout — thin and long, a power-grid
+    # strap — contributes only its LONG-axis edges, dropping the thin-axis
+    # pair.  `outside` cannot help a die-crossing strap (it is not inside a
+    # block); `stripes` is what keeps a real imported PDN's thousands of straps
+    # from exploding the grid (~6,327 -> ~3.2M cells on flow/ariane133 + PDN,
+    # stalling the planner).  Combine them: `set_keepout_loci outside stripes`.
+    # OPT-IN for the same reason as `outside` — it removes candidate positions.
     #
     # The problem it answers is quadratic.  The Hanan grid is the PRODUCT of
     # its two axis sets, so a technology that draws obstruction finely buys
@@ -292,16 +301,27 @@ def cmd_set_keepout_loci(session, cmd, args, cmd_line):
     # set_trim_mst_legs, and like them it is asked for by name.
     #
     # Declare it BEFORE import_def_lef / generation.
-    val = args[0].lower() if args else "all"
-    if val not in ("all", "outside"):
-        print(f"Error: set_keepout_loci expects all|outside, got {args[0]!r}")
+    tokens = [a.lower() for a in args] or ["all"]
+    allowed = {"all", "outside", "stripes"}
+    bad = [t for t in tokens if t not in allowed]
+    if bad:
+        print(f"Error: set_keepout_loci expects any of all|outside|stripes, "
+              f"got {bad[0]!r}")
         return
-    session.fp.set_keepout_loci_outside_only(val == "outside")
-    if val == "outside":
-        print("Keepout Hanan loci: OUTSIDE-only — a keepout inside a block "
-              "still blocks but adds no grid line (candidate positions change).")
-    else:
-        print("Keepout Hanan loci: ALL (default).")
+    if "all" in tokens and "outside" in tokens:
+        print("Error: set_keepout_loci: 'all' and 'outside' are mutually "
+              "exclusive (they both set the inside-a-block rule).")
+        return
+    outside = "outside" in tokens
+    stripes = "stripes" in tokens
+    session.fp.set_keepout_loci_outside_only(outside)
+    session.fp.set_stripe_loci_suppress(stripes)
+    inside_msg = ("OUTSIDE-only — a keepout inside a block still blocks but "
+                  "adds no grid line" if outside else "ALL (default)")
+    stripe_msg = ("; STRIPES suppressed — a thin+long strap keeps only its "
+                  "long-axis loci" if stripes else "")
+    print(f"Keepout Hanan loci: {inside_msg}{stripe_msg} "
+          "(candidate positions change).")
 
 
 _DROP_DANGLING_MODES = {"off", "on", "drop", "clamp", "clamp_drop"}

@@ -247,6 +247,14 @@ def test_discovery_is_sorted_and_stable(tmp_path):
     comparison.  Neither claim is weakened: a single call still proves the real
     tree comes out sorted, and stability across calls is a property of the
     discovery, provable on any root.
+
+    Discovery ALSO excludes `_`-prefixed scratch files now (#770), which is the
+    same race answered a second time and one layer lower — an advisory that
+    says "consider adding this to the corpus" must never name a file that will
+    not exist a second later.  The two are worth keeping together: that rule
+    stops this particular file entering discovery at all, while the private
+    root here keeps the stability claim true of ANY concurrent writer, named or
+    not.  `test_scratch_flows_are_not_candidates` pins the rule itself.
     """
     found = qc.discover_candidates()
     assert found == sorted(found)
@@ -258,6 +266,24 @@ def test_discovery_is_sorted_and_stable(tmp_path):
     first = qc.discover_candidates(roots=roots, corpus=[])
     assert first == qc.discover_candidates(roots=roots, corpus=[])
     assert first == sorted(first) and len(first) == 2
+
+
+def test_scratch_flows_are_not_candidates(tmp_path):
+    """A '_'-prefixed flow is machine-written scratch, not a corpus candidate.
+
+    `test_bit_antenna_audit` has to write its trim-free variant INSIDE
+    `flow/rnr/` (the flow does `source mix_tracks.buda`, which resolves against
+    the SCRIPT's directory), and it reaches `run_detailed_nuts` because it is a
+    copy of a real flow -- so without this rule discovery lists a file that is
+    deleted moments later."""
+    (tmp_path / "flow").mkdir()
+    _write(tmp_path, "flow/real.buda", "run_nuts\nrun_detailed_nuts\n")
+    _write(tmp_path, "flow/_no_trim_abc123.buda", "run_nuts\nrun_detailed_nuts\n")
+    names = [os.path.basename(f)
+             for f in qc.discover_candidates(roots=(str(tmp_path / "flow"),),
+                                             corpus=[])]
+    assert "real.buda" in names
+    assert "_no_trim_abc123.buda" not in names
 
 
 # ------------------------------------------------------------- the contract
