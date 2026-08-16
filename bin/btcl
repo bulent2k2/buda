@@ -48,9 +48,16 @@ PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
 
 INTERACTIVE=0
-# A thread request is either an integer or the literal `max`; anything else is
-# a wrapper-level error, caught here before an engine is spawned.
-valid_threads() { case "$1" in max) return 0 ;; ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+# A thread request is an integer (optionally signed) or the literal `max`;
+# anything else is a wrapper-level error, caught here before an engine is
+# spawned.  A NEGATIVE or otherwise out-of-range count is accepted, not
+# rejected — buda_cli.resolve_threads clamps it LOUD to [1, max], and `buda -j`
+# does exactly that, so rejecting here would break the two launchers' identical
+# `-j` semantics (a leading `-` is dropped before the digit check).
+valid_threads() {
+  [ "$1" = max ] && return 0
+  case "${1#-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac
+}
 while [ $# -gt 0 ]; do
   case "$1" in
     -v|--visualize) export BUDA_VIZ_FINAL=1; shift ;;

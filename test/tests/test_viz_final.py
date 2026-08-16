@@ -352,10 +352,14 @@ def test_btcl_j_max_uses_the_whole_machine_maximum(tmp_path):
 
 @pytest.mark.mid
 @_btcl_required
-def test_btcl_j_clamps_a_request_above_the_machine_maximum(tmp_path):
-    """An out-of-range request is honored as closely as possible and LOUD — the
-    same clamp buda_cli applies for `buda -j`, never an error."""
-    _, out = _run_btcl(tmp_path, _TCL_FLOW + "buda::stop\n", "-j", "99999")
+@pytest.mark.parametrize("val", ["99999", "-3"])
+def test_btcl_j_clamps_an_out_of_range_request(tmp_path, val):
+    """An out-of-range request — above the max OR negative — is honored as
+    closely as possible and LOUD, never a wrapper error: the same clamp
+    buda_cli applies for `buda -j`, so the two launchers stay identical.  A
+    signed integer must reach `configure_threads` (which clamps to [1, max]),
+    not be rejected by the wrapper's own validation."""
+    _, out = _run_btcl(tmp_path, _TCL_FLOW + "buda::stop\n", "-j", val)
     assert "clamped to" in out, out[-600:]
 
 
