@@ -506,6 +506,13 @@ class Server:
 
         cap = _StreamCapture(self._out_frame) if self.stream else io.StringIO()
         status, ended = "OK", False
+        # Where the printed-error scan below cannot see: with a flow log armed
+        # the engine SUMMARIZES each command inside a `source`, and the summary
+        # leads with an `x ` marker, so the scan's anchored `Error…` no longer
+        # matches the line that reports the failure.  The session counts those
+        # lines with the same predicate as it captures them, so the diff over
+        # this request says whether anything under it failed by printing.
+        errs_before = self.session._error_line_count
         try:
             # Both redirects: the C++ engine writes to std::cout, and without
             # ostream_redirect that output would go straight to fd 1 and be
@@ -538,8 +545,9 @@ class Server:
         # raises, so a site's `catch` has to see those too.  The scan reads
         # the FULL transcript in both modes — streaming changes how output
         # travels, never what a command means.
-        if status == "OK" and any(buda_cli._is_error_line(ln)
-                                  for ln in text.splitlines()):
+        if status == "OK" and (
+                any(buda_cli._is_error_line(ln) for ln in text.splitlines())
+                or self.session._error_line_count > errs_before):
             status = "ERR"
         # -v twin, second shutdown path: the flow's own `exit` ends the session
         # HERE, and returning False below terminates the server before

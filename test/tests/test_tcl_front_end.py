@@ -152,6 +152,64 @@ def test_a_command_that_fails_by_printing_still_raises(tmp_path):
     assert "RAISED" in out, out
 
 
+def test_a_printed_error_inside_a_summarized_source_still_raises(tmp_path):
+    """The same contract, through the door `buda::log` opens (Codex #769 P1).
+
+    Summarizing replaces a command's `Error: …` line with a one-line abstract
+    that LEADS with the `x ` marker, and the bridge decides "this command
+    failed" by scanning the transcript for a line that leads with the
+    diagnostic — so an anchored scan stops matching and a printed-error
+    command inside a summarized `source` returned OK.  The driver then
+    prompted on a half-failed flow.  Armed and unarmed must agree, so this
+    runs the SAME flow both ways and compares.
+    """
+    flow = tmp_path / "bad.buda"
+    flow.write_text("def_layer 5 M5 V TOP 30\n"
+                    "def_layer 6 M6 H TOP 30\n"
+                    "add_block a 0 0 100 100\n"
+                    "add_block b 300 0 400 100\n"
+                    "add_net n1 a.o b.i\n"
+                    "run_bundler STRICT\n"
+                    "generate_topologies\n"
+                    # Prints `Error: …` and returns normally — no raise.
+                    "run_detailed_nuts\n")
+    body = """
+        if {[info exists ::env(ARM)]} { buda::log %s }
+        if {[catch {buda::source %s} e]} { puts "RAISED" } else { puts "SILENT" }
+        buda::stop""" % (tcl_path(flow), tcl_path(flow))
+
+    import os
+    assert "RAISED" in _tcl(tmp_path, body), "unarmed lost the contract"
+    os.environ["ARM"] = "1"
+    try:
+        out = _tcl(tmp_path, body)
+    finally:
+        del os.environ["ARM"]
+    assert "RAISED" in out, out          # …and armed keeps it
+    # The failure is real, not a stray match: the summary IS the error line.
+    assert "x run_detailed_nuts" in out, out
+
+
+def test_a_clean_summarized_source_does_not_raise(tmp_path):
+    """The other direction of the same fix: counting error lines must not
+    make a clean summarized flow look failed."""
+    flow = tmp_path / "ok.buda"
+    flow.write_text("def_layer 5 M5 V TOP 30\n"
+                    "def_layer 6 M6 H TOP 30\n"
+                    "add_block a 0 0 100 100\n"
+                    "add_block b 300 0 400 100\n"
+                    "add_net n1 a.o b.i\n"
+                    "run_bundler STRICT\n"
+                    "generate_topologies\n"
+                    "run_planner 3\n"
+                    "run_nuts\n")
+    out = _tcl(tmp_path, """
+        buda::log %s
+        if {[catch {buda::source %s} e]} { puts "RAISED: $e" } else { puts "CLEAN" }
+        buda::stop""" % (tcl_path(flow), tcl_path(flow)))
+    assert "CLEAN" in out, out
+
+
 def test_a_warning_does_not_raise(tmp_path):
     """The other direction, and the one that would make the bridge unusable:
     `run_nuts` with nothing to do warns and returns, and a flow with a benign

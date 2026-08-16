@@ -418,6 +418,18 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._flow_log = None          # open flow-log file (see open_flow_log); enables per-command logging
         self._flow_log_path = None     # its path (for the "Full detail →" line)
         self._flow_log_seen = set()    # paths this session already truncated (a re-arm appends)
+        # Captured lines that `_is_error_line` matched, counted while a flow
+        # log is armed.  A DRIVER's failure signal, not a report: summarizing
+        # replaces a command's `Error: …` line with a one-line abstract that
+        # LEADS with the `x ` marker, and the Tcl bridge decides "this command
+        # failed" by scanning the transcript for a line that leads with the
+        # diagnostic.  So a printed-error command inside a summarized `source`
+        # stopped raising — the one contract the front end states outright
+        # ("a command that fails by PRINTING `Error:` still raises").  Counted
+        # with the bridge's OWN predicate rather than `_count_diags`, whose
+        # rules are deliberately different, so armed and unarmed sessions
+        # cannot disagree about what a failure is.
+        self._error_line_count = 0
         self._log_run_dir = None       # --log: log/<cell>/<timestamp>/ archive dir (logs + script copies)
         self._log_archived = set()     # --log: origin abspaths already archived this run
         self._log_tag = None           # --tag: extra token inserted before the log suffix (e.g. rr_experiment)
@@ -488,6 +500,10 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # (`  Error: run_nuts required first.`) — which is byte-identical on
         # every current corpus log (verified) while ignoring incidental prose.
         nwarn, nerr = _count_diags(lines)
+        # Before `significant` filters anything: a command whose only output is
+        # a printed `Error:` must still register, and the count is a failure
+        # signal for whoever is driving, not a line worth surfacing.
+        self._error_line_count += sum(1 for ln in lines if _is_error_line(ln))
 
         # Silent, instant setup commands (add_block, def_layer, set_*, …) are
         # not worth a terminal line or a log section — only surface commands

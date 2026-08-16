@@ -246,6 +246,28 @@ proc _log_off {} { catch {buda::log off} }
 # raising command in full rather than summarizing it.)
 proc _log_finish {} { catch {buda::endreport} ; _log_off }
 
+# The one line of a failed command's payload worth putting on stderr.
+#
+# DISPLAY only: whether the flow failed is the ENGINE's decision, already
+# made (the bridge raised).  This just picks which line to name, because the
+# payload of a failed `source` opens with the flow's FIRST output — "Bundler
+# created 1 hbundles." — and printing all of it duplicates what the bridge
+# has already echoed to stdout, at the length of a whole runtime summary.
+# Two shapes: a summarized command leads with the `x` marker, an
+# unsummarized one leads with the diagnostic itself.  Falls back to the
+# first line, so an unrecognised payload still says something.
+proc _fail_line {text} {
+    foreach ln [split $text \n] {
+        set t [string trim $ln]
+        if {[string match {x *} $ln]
+            || [string match -nocase {Error*} $t]
+            || [regexp {^BUDA-[0-9]+: (ERROR|FATAL):} $t]} {
+            return $t
+        }
+    }
+    return [string trim [lindex [split $text \n] 0]]
+}
+
 # ── shared: the replay engine ─────────────────────────────────────────────
 # A replay that stops partway is a FAILURE, not a finished route: the session
 # then holds a mix of old and new state, and a verdict read off it would be
@@ -349,14 +371,12 @@ if {$stage eq "build"} {
     set rc [catch {buda::source $flow} err]
     _log_finish
     if {$rc} {
-        # The FIRST line of $err, not all of it: the bridge has already echoed
-        # the whole payload to stdout, and on a fail-fast that payload now
-        # carries the end report too — so repeating it here printed the entire
-        # runtime summary a second time, on stderr, where Tcl has not set the
-        # UTF-8 encoding and its arrow comes out as `?`.  The first line IS the
-        # diagnostic (`Error: sourced file not found: …`); the rest is the
-        # detail the reader just saw.
-        puts stderr "$tag: the flow failed: [lindex [split $err \n] 0]"
+        # ONE line of $err, not all of it: the bridge has already echoed the
+        # whole payload to stdout, and on a fail-fast that payload now carries
+        # the end report too — so repeating it here printed an entire runtime
+        # summary a second time, on stderr, where Tcl has not set the UTF-8
+        # encoding and its arrow comes out as `?`.
+        puts stderr "$tag: the flow failed: [_fail_line $err]"
         catch {buda::stop}
         exit 1
     }
