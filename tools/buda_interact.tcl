@@ -55,8 +55,8 @@
 #
 #   btcl -i <flow>.buda ckpt.bdb plan     # skip bundling+generation
 #   btcl -i <flow>.buda ckpt.bdb topo     # skip bundling only
-#   btcl -i <flow>.buda ckpt.bdb nuts     # keep the plan too (flat only)
-#   btcl -i <flow>.buda ckpt.bdb dnuts    # keep abstract NUTS too (flat only)
+#   btcl -i <flow>.buda ckpt.bdb nuts     # keep the plan too
+#   btcl -i <flow>.buda ckpt.bdb dnuts    # keep abstract NUTS too
 #   btcl -i <flow>.buda ckpt.bdb build    # explicit full rerun (the default)
 #
 # A rebuild redoes stages whose result the checkpoint already holds; the
@@ -79,10 +79,20 @@
 #     the restored bundles reference) — so only the session-state verbs
 #     replay (stack, patterns, floorplan projections, policies: the
 #     whitelist below) and the construction verbs are skipped, counted, and
-#     said.  Hier resume supports `topo` and `plan` (the cuts that still
-#     run `run_planner hier`, whose expansion load_pipeline's pre-expansion
-#     view feeds); `nuts`/`dnuts` would need the post-expansion
-#     `load_pipeline expanded` recipe — a resume-aware flow's job today.
+#     said.  Hier `topo`/`plan` restore the pre-expansion view (the cuts
+#     that still run `run_planner hier`, whose expansion it feeds); hier
+#     `nuts`/`dnuts` restore the POST-expansion view (`load_pipeline
+#     expanded`) as an INSPECTION session — the quick look at a long
+#     healer flow's result — where pins/edits/replan are guarded (their
+#     persist would write the expanded view over the checkpoint's template
+#     rows) and the verdict, dumps and explorer are the point.
+#
+# A cut below the planner HOLDS the planner-dependent commands (healers,
+# refine_selection, run_planner post_nuts): load_pipeline restores the
+# plan, not the planner OBJECT, so they would refuse — and for a healed
+# checkpoint the restored plan already CARRIES the healing (a healer
+# commit is a full-pipeline state), so re-solving NUTS/DNUTS from it
+# reproduces the healed endpoint without paying for the healers again.
 # ============================================================
 
 set here [file dirname [file normalize [info script]]]
@@ -120,6 +130,8 @@ if {$stage ne "build" && $armed eq ""} {
                  <ckpt.bdb> argument (and run a build session first)"
     exit 2
 }
+# Set by the resume path for a hier below-plan (post-expansion) session.
+set inspect 0
 
 # ── shared: analyze a recorded command list ───────────────────────────────
 # Sets the globals the banners, the prompt and the verdict read.  The engine
@@ -235,6 +247,21 @@ proc replay_tail {} {
         return
     }
     _replay $::tail
+}
+
+# The inspection session's prompt hooks (hier nuts/dnuts — a post-expansion
+# restore): the guard blocks the persisting mutators, the route refuses the
+# replan, and both say why with the remedy.
+proc _inspect_guard {verb} {
+    puts "[set ::tag]: `$verb` is disabled in this INSPECTION session -- a\
+          persist here would write the post-expansion view over the\
+          checkpoint's template rows; pin/edit from a `plan` resume instead"
+    return 1
+}
+proc _inspect_replan {} {
+    puts "[set ::tag]: `replan` needs `run_planner hier`, which this session\
+          resumed BELOW (the restored plan is the result being inspected) --\
+          resume at `plan` to re-plan or re-heal"
 }
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -356,13 +383,16 @@ if {$stage eq "build"} {
               open_bdb"}]) -- nothing to resume; run build"
         exit 2
     }
-    if {$is_hier && $stage in {nuts dnuts}} {
-        puts stderr "$tag: a HIER resume must re-run `run_planner hier` (the\
-              expansion load_pipeline feeds) -- use `plan` or `topo`; a\
-              post-expansion resume (`load_pipeline expanded`) is a\
-              resume-aware flow's recipe (flow/tcl/hdesign.tcl)"
-        exit 2
-    }
+    # A hier resume BELOW the planner restores the post-expansion view
+    # (`load_pipeline expanded`) — an INSPECTION session: the quick look at
+    # a long healer flow's result.  What it cannot host is anything that
+    # persists the pre-expansion view, because on an expanded restore that
+    # view is not there to persist (_persist_wrappers would fall through to
+    # the expanded list and write it over the checkpoint's template rows —
+    # the #723 clobber through a new door), and a `run_planner hier` here
+    # would re-expand already-expanded wrappers.  So pins/edits/replan are
+    # guarded at the prompt, and the verdict/explorer/dumps are the point.
+    set inspect [expr {$is_hier && $stage in {nuts dnuts}}]
 
     # The stage's cut: the first recorded command the resumed session
     # re-runs.  Everything before it is either replayed as setup or held by
@@ -475,28 +505,66 @@ if {$stage eq "build"} {
 
     # The post-cut replay: the flow's own commands from the stage on, under
     # the replan filter — except that a `topo` cut must of course replay
-    # the generation commands the filter normally holds back.
+    # the generation commands the filter normally holds back.  A cut BELOW
+    # the planner additionally HOLDS the planner-dependent commands
+    # (healers, refine, post_nuts): load_pipeline restores the plan onto the
+    # wrappers but not the planner OBJECT, so negotiate/ripup/refine would
+    # refuse outright — and for a HEALED checkpoint holding them is also the
+    # honest fast path, because a healer commit is a full-pipeline state:
+    # the restored plan already CARRIES the healing, and re-solving
+    # NUTS/DNUTS from it reproduces the healed endpoint without paying for
+    # the healers again.  Re-healing is what a `plan` resume is for.
     set stage_skips $skip_prefixes
     if {$stage eq "topo"} {
         set stage_skips [lsearch -all -inline -not -exact $stage_skips generate_]
     }
+    set held_planner {}
+    if {$stage in {nuts dnuts}} {
+        set planner_dep {run_planner ripup_reroute negotiate_congestion
+                         refine_selection}
+    } else {
+        set planner_dep {}
+    }
     set stage_lines {}
     foreach ln [lrange $lines $cut end] {
-        if {![_skipped [_verb $ln] $stage_skips]} { lappend stage_lines $ln }
+        set verb [_verb $ln]
+        if {[llength $planner_dep] && [_skipped $verb $planner_dep]} {
+            lappend held_planner $verb
+            continue
+        }
+        if {![_skipped $verb $stage_skips]} { lappend stage_lines $ln }
     }
 
     puts "\n$tag: RESUMING at `$stage` from $ckpt --\
           [expr {$is_hier ? "HIER" : "FLAT"}] flow, [llength $setup] setup\
           command(s)[expr {$held ? ", $held held by the checkpoint" : ""}],\
           [llength $stage_lines] to replay"
+    if {[llength $held_planner]} {
+        puts "$tag: holding [llength $held_planner] planner-dependent\
+              command(s) ([lsort -unique $held_planner]) -- the restored\
+              plan already carries their result; resume at `plan` to\
+              re-plan or re-heal"
+    }
+    if {$inspect} {
+        puts "$tag: INSPECTION session (hier `$stage` = post-expansion\
+              restore): pins, edits and replan are disabled here -- they\
+              would persist the expanded view over the checkpoint's\
+              templates; use a `plan` resume to change the design"
+    }
     buda::start
     if {[catch {_replay $setup} err]} {
         puts stderr "$tag: resume setup failed: $err"
         catch {buda::stop}
         exit 1
     }
-    if {[catch {buda::load_pipeline} err]} {
-        puts stderr "$tag: load_pipeline failed: $err"
+    # A hier below-plan resume needs the POST-expansion view — the routed
+    # per-instance wrappers with their assigned layers — which is exactly
+    # what `load_pipeline expanded` restores (bottom-up template wrappers
+    # and fixed copies included, so a post-run_nuts checkpoint keeps its
+    # persisted routing).
+    set lp [expr {$inspect ? "load_pipeline expanded" : "load_pipeline"}]
+    if {[catch {buda::do $lp} err]} {
+        puts stderr "$tag: $lp failed: $err"
         catch {buda::stop}
         exit 1
     }
@@ -555,8 +623,13 @@ if {$ckpt ne "" && !$ckpt_live} {
     set snap_base [file rootname $tag].bdb
 }
 
-set pins_dirty [prompt::run $tag "[file rootname $tag]>" replay_tail \
-                    $snap_base $first_bus]
+if {$inspect} {
+    set pins_dirty [prompt::run $tag "[file rootname $tag]>" _inspect_replan \
+                        $snap_base $first_bus _inspect_guard]
+} else {
+    set pins_dirty [prompt::run $tag "[file rootname $tag]>" replay_tail \
+                        $snap_base $first_bus]
+}
 if {$pins_dirty} {
     puts "$tag: pins changed since the last route -- re-planning so the\
           checkpoint stays coherent"

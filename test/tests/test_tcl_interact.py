@@ -305,11 +305,53 @@ def test_hier_stage_resume_holds_construction_and_replans(tmp_path):
     assert r.stdout.count("topo 2 of 5") >= 4, "the template pin fell out"
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
 
-    # A hier resume below the planner would skip the expansion the restored
-    # pre-expansion view feeds — refused, naming the recipe that could.
-    r = _run(["tclsh", _DRIVER, flow, tmp_path / "h.bdb", "nuts"], tmp_path)
-    assert r.returncode == 2
-    assert "run_planner hier" in r.stderr
+    # A hier resume BELOW the planner is an INSPECTION session — the quick
+    # look at a routed checkpoint: `load_pipeline expanded` restores the
+    # post-expansion view, the stage replays (dnuts: detailed NUTS + its
+    # check), and the verdict comes out — while pins, their raw-command
+    # bypass, and replan are guarded, because their persist would write the
+    # expanded view over the checkpoint's template rows.
+    r = _run(["tclsh", _DRIVER, flow, tmp_path / "h.bdb", "dnuts"], tmp_path,
+             stdin="pin b_lohi 3\nselect_topology b_lohi 3\nreplan\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "INSPECTION session" in r.stdout
+    assert "replay> run_detailed_nuts" in r.stdout
+    assert r.stdout.count("disabled in this INSPECTION") == 2  # pin + raw
+    assert "resume at `plan` to re-plan" in r.stdout           # replan refusal
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    # The proof the guard matters: after the inspection session (with its
+    # attempted pins), a `plan` resume still restores the ORIGINAL template
+    # pin onto every instance — the checkpoint was not clobbered.
+    r = _run(["tclsh", _DRIVER, flow, tmp_path / "h.bdb", "plan"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.count("topo 2 of 5") >= 4, "the inspection session dirtied the checkpoint"
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_below_plan_resume_holds_healers_the_plan_already_carries(tmp_path):
+    # load_pipeline restores the PLAN, not the planner object, so the
+    # healers would refuse outright on a below-plan resume — and holding
+    # them is also the honest fast path: a healer commit is a full-pipeline
+    # state, so the restored plan already carries the healing and re-solving
+    # NUTS/DNUTS from it reproduces the healed endpoint without paying for
+    # the healers again (the quick-inspection case for long healer flows).
+    flow = tmp_path / "healer.buda"
+    flow.write_text("open_bdb heal.bdb\n" + _FLAT_FLOW.replace(
+        "check_design nuts\n",
+        "check_design nuts\nripup_reroute 5\nnegotiate_congestion 3\n"))
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="pin d1 4\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    r = _run(["tclsh", _DRIVER, flow, tmp_path / "heal.bdb", "nuts"],
+             tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "holding 2 planner-dependent command(s)" in r.stdout
+    assert "ripup_reroute" in r.stdout and "negotiate_congestion" in r.stdout
+    assert "replay> ripup_reroute" not in r.stdout
+    assert "replay> negotiate_congestion" not in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
 
 
 def test_relative_checkpoint_paths_resolve_against_the_flow(tmp_path):
