@@ -26,20 +26,21 @@ grammar puts optional clauses between the width and the first point:
 
 So a wire carrying `+ SHAPE` yields zero points and is dropped entirely.
 
-**Measured against pdngen's own regression goldens** (`read_def`, this
-session):
+**Measured against pdngen's own regression goldens** (`read_def`), before
+the fix landed:
 
-| golden | design | die | wires read | census |
-|---|---|---|---:|---|
-| `core_grid.defok` | gcd | 100 × 101 µm | **0** | `unread_wire: 57` |
-| `macros.defok` | RocketTile | 200 × 200 µm | **0** | `unread_wire: 1940` |
-| `existing.defok` | RocketTile | 200 × 200 µm | **0** | `unread_wire: 2084` |
-| `core_grid_snap.defok` | gcd | 100 × 101 µm | **0** | `unread_wire: 3385` |
+| golden | design | die | metal paths | read |
+|---|---|---|---:|---:|
+| `core_grid.defok` | gcd | 100 × 101 µm | 57 | **0** |
+| `macros.defok` | RocketTile | 200 × 200 µm | 254 | **0** |
+| `existing.defok` | RocketTile | 200 × 200 µm | 278 | **0** |
+| `core_grid_snap.defok` | gcd | 100 × 101 µm | 96 | **0** |
 
-Zero of 3385. Across the four files every wire carries `+ SHAPE` — 5749
-`STRIPE`, 530 `FOLLOWPIN`, 64 `RING` — so not one of them starts its point
-walk. This is not a claim about what a generator *might* emit; it is what
-the generator's own goldens contain.
+Zero of 685, every one defeated by `+ SHAPE`. (The files hold 7466 wiring
+clauses in total; the other 6781 are single-point via placements, which draw
+no run — see `test/tests/data/pdn_goldens/ReadMe.md`.) This is not a claim
+about what a generator *might* emit; it is what the generator's own goldens
+contain.
 
 That the count is visible at all is the 2026-08-15 census work: before it,
 these files imported as `no_geometry` (a positive claim that the DEF drew
@@ -57,7 +58,8 @@ answerable against the goldens above. They are fetchable through the same
 channel `flow/ariane133/fetch.py` already uses (`raw.githubusercontent.com`
 is reachable; the GitHub *API* is not, so directory listing has to be
 guessed at or read from a clone). **No OpenROAD install required.**
-This is what is being built now.
+**LANDED 2026-08-16** — 685 of 685 metal paths now read; the fetcher and
+fixtures live in `test/tests/data/pdn_goldens/`.
 
 **(0b) What happens to our routing when a real PDN becomes keepouts?** A
 QoR question, and the goldens cannot answer it: 200 × 200 µm with 269 nets
@@ -217,12 +219,15 @@ print(len(d.special_wires),
       Counter(u.construct for u in d.unmodelled if "SPECIALNET" in u.construct))
 ```
 
-- **Before the (0a) reader fix:** `0` wires and an `unread_wire` count equal
-  to the wire count. If it says anything else, the reader has changed under
-  this document.
-- **After:** wires read, and any residual census entry names a form worth
-  chasing (`partial_wire` on a via-bearing path, if via continuation was not
-  finished).
+Expect, since (0a) landed on 2026-08-16: every metal path read, the via
+placements censused as `via_placement`, and **no `unread_wire` at all**. A
+residual `unread_wire` or `partial_wire` means this design carries a form the
+goldens do not — a via mid-path, a `RECT` or a `POLYGON` special wire — which
+is worth knowing precisely because it would be the first vehicle for them
+(`opens_interchange.md` item 15 names them as deliberately unbuilt).
+
+A count of `0` wires would mean the reader has regressed under this document;
+that is what the four goldens produced before the fix.
 
 ---
 

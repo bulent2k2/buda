@@ -300,6 +300,18 @@ void read_specialnet(const std::vector<std::string>& t, DefDesign& d,
         if (j < t.size()) w.layer = t[j++];
         double width = 0;
         if (j < t.size() && is_number(t[j], width)) { w.width = width; ++j; }
+        // `ROUTED <layer> <width> [+ SHAPE <type>] [+ STYLE <n>] <points>` —
+        // the optional clauses sit BETWEEN the width and the first `(`, so a
+        // point walk that starts only on `(` never starts at all on a wire
+        // carrying one.  That is not an exotic form: it is what a PDN
+        // generator writes on every stripe and every rail it draws, which is
+        // why all 685 metal paths in OpenROAD's own pdngen goldens were read
+        // as nothing (opens_interchange item 15).
+        while (j + 2 < t.size() && t[j] == "+" &&
+               (upper(t[j + 1]) == "SHAPE" || upper(t[j + 1]) == "STYLE")) {
+            if (upper(t[j + 1]) == "SHAPE") w.shape = upper(t[j + 2]);
+            j += 3;
+        }
         double px = 0, py = 0;
         bool have_prev = false;
         while (j < t.size() && t[j] == "(") {
@@ -330,9 +342,22 @@ void read_specialnet(const std::vector<std::string>& t, DefDesign& d,
         const std::string stopped = j < t.size() ? t[j] : std::string();
         const bool clean = stopped.empty() || stopped == "+" ||
                            stopped == ";" || is_special_path_start(upper(stopped));
+        const bool geometry_kw = upper(stopped) == "RECT" ||
+                                 upper(stopped) == "POLYGON";
+        // ONE point followed by a via name is a via PLACEMENT, not a wire —
+        // `NEW metal6 0 ( x y ) via6_7_…`, which is how pdngen emits every
+        // via and is 6781 of the 7466 paths in its goldens.  It draws no run,
+        // so there is no polyline to lose; what goes unmodelled is the via's
+        // ENCLOSURE metal, whose extent lives in the DEF's VIAS section and
+        // not here.  Censusing it as `unread_wire` would drown the wires that
+        // really were lost in a 10:1 majority of things that are not wires.
+        const bool via_placement = w.pts.size() == 1 && !clean && !geometry_kw;
         if (w.pts.size() >= 2) {
             d.special_wires.push_back(std::move(w));
             if (!clean) note(d, "SPECIALNETS.partial_wire", {net, stopped}, line);
+        } else if (via_placement) {
+            note(d, "SPECIALNETS.via_placement", {net, stopped}, line);
+            ++j;                                   // consume the via name
         } else {
             note(d, "SPECIALNETS.unread_wire", {net, stopped}, line);
         }

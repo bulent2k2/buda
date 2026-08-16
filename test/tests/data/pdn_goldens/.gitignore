@@ -1,0 +1,8 @@
+# Fetched from upstream by fetch.py — The OpenROAD Project's pdn regression
+# goldens, BSD 3-Clause, ~1 MB.  Provenance and digests live in fetch.py;
+# what they are and why they are not vendored, in ReadMe.md.
+#
+# pdngen_excerpt.def is NOT ignored: four clauses quoted with attribution so
+# the always-run tests do not need the network.
+*.defok
+*.part

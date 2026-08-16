@@ -426,6 +426,7 @@ void bind_db(py::module_& m) {
         .def_readonly("net", &DefSpecialWire::net)
         .def_readonly("layer", &DefSpecialWire::layer)
         .def_readonly("width", &DefSpecialWire::width)
+        .def_readonly("shape", &DefSpecialWire::shape)
         .def_readonly("pts", &DefSpecialWire::pts);
     py::class_<DefUnmodelled>(m, "DefUnmodelled")
         .def_readonly("construct", &DefUnmodelled::construct)

@@ -168,27 +168,72 @@ END SPECIALNETS
 
 # ── saying what was NOT read ───────────────────────────────────────────────
 #
-# The reader handles one special-wire form: a contiguous width-plus-polyline.
-# That is a real limitation and a separate piece of work (opens_interchange
-# item 15).  What these pin is the CENSUS: whatever the reader cannot read,
-# it may not report as metal the DEF never drew.
+# The reader handles the forms a PDN generator emits: a width-plus-polyline
+# with or without the optional `+ SHAPE`/`+ STYLE` clauses, and the
+# single-point via placement.  What these pin is the CENSUS: whatever it
+# cannot read, it may not report as metal the DEF never drew.  The forms
+# still outside it (a via MID-path, `RECT`, `POLYGON`) are legal DEF that
+# nothing available emits — see test/tests/data/pdn_goldens/ReadMe.md.
 
 def _sn(construct, d):
     return [u for u in d.unmodelled if u.construct == construct]
 
 
-def test_a_stripe_written_with_SHAPE_is_reported_as_unread_not_as_absent():
-    # DEF puts `+ SHAPE` between the width and the first point, which is how
-    # a PDN generator writes every stripe — so the point walk never starts.
-    d = _parse("""SPECIALNETS 1 ;
-  - VDD ( * VDD ) + ROUTED metal5 400 + SHAPE STRIPE ( 1000 1000 ) ( 9000 * )
+@pytest.mark.parametrize("clause", [
+    "+ SHAPE STRIPE",
+    "+ SHAPE FOLLOWPIN",
+    "+ STYLE 1",
+    "+ SHAPE STRIPE + STYLE 1",
+])
+def test_a_stripe_written_with_SHAPE_or_STYLE_is_read(clause):
+    # DEF's grammar is `ROUTED <layer> <width> [+ SHAPE t] [+ STYLE n] pts`,
+    # so these sit BETWEEN the width and the first point and a point walk
+    # that starts only on `(` never starts.  This is not an exotic form: it
+    # is what pdngen writes on every stripe and every rail (item 15 measured
+    # 685 metal paths in its goldens, of which the reader read zero).
+    d = _parse(f"""SPECIALNETS 1 ;
+  - VDD ( * VDD ) + ROUTED metal5 400 {clause} ( 1000 1000 ) ( 9000 * )
       + USE POWER ;
 END SPECIALNETS
 """)
-    assert len(d.special_wires) == 0            # the stripe is still lost
-    assert _sn("SPECIALNETS.unread_wire", d)    # but no longer silently
-    # The point of the fix: this net HAD geometry, so the census must not
-    # claim the DEF drew none.
+    assert len(d.special_wires) == 1
+    w = d.special_wires[0]
+    assert (w.layer, w.width) == ("metal5", 400.0)
+    assert list(w.pts) == [(1000.0, 1000.0), (9000.0, 1000.0)]
+    # Read in full, so nothing to census.
+    assert not [u for u in d.unmodelled if u.construct.startswith("SPECIALNETS")]
+
+
+def test_the_declared_SHAPE_is_kept():
+    # A rail inside a standard-cell row and a stripe crossing the die are
+    # different obstacles, and this clause is the only thing that says which.
+    # It also distinguishes a reader that RECOGNISES the clause from one that
+    # merely tolerates it — which is what the first cut of this fix did.
+    d = _parse("""SPECIALNETS 1 ;
+  - VDD ( * VDD ) + ROUTED metal1 340 + SHAPE FOLLOWPIN ( 100 200 ) ( 900 * )
+      NEW metal5 400 + SHAPE STRIPE ( 100 200 ) ( * 900 )
+      NEW metal5 400 ( 100 300 ) ( * 900 ) + USE POWER ;
+END SPECIALNETS
+""")
+    assert [w.shape for w in d.special_wires] == ["FOLLOWPIN", "STRIPE", ""]
+
+
+def test_a_via_placement_is_not_counted_as_an_unread_wire():
+    # `NEW <layer> 0 ( x y ) <viaName>` — one point, no run.  pdngen emits
+    # 6781 of these against 685 real polylines, so censusing them as unread
+    # WIRE would bury the wires that really were lost under a 10:1 majority
+    # of things that are not wires.  What goes unmodelled is the via's
+    # enclosure metal, whose extent lives in the DEF's VIAS section.
+    d = _parse("""SPECIALNETS 1 ;
+  - VDD ( * VDD ) + ROUTED metal6 1860 + SHAPE STRIPE ( 1000 1000 ) ( * 9000 )
+      NEW metal6 0 + SHAPE STRIPE ( 1000 5000 ) via6_7_1860_2800_4_2_600_600
+      + USE POWER ;
+END SPECIALNETS
+""")
+    assert len(d.special_wires) == 1            # the stripe, not the via
+    assert not _sn("SPECIALNETS.unread_wire", d)
+    got = _sn("SPECIALNETS.via_placement", d)
+    assert len(got) == 1 and "via6_7" in got[0].detail
     assert not _sn("SPECIALNETS.no_geometry", d)
 
 
@@ -265,16 +310,15 @@ END SPECIALNETS
 def test_SHAPE_does_not_end_the_wiring_clause_a_following_NEW_continues():
     # `+ SHAPE`/`+ STYLE` sit INSIDE the wiring clause, so the `NEW` after one
     # is still a path.  If a `+` were taken to always end the clause, this
-    # second stripe would not be counted and its loss would go unreported.
+    # second stripe would not be read at all.
     d = _parse("""SPECIALNETS 1 ;
   - VDD ( * VDD ) + ROUTED metal5 400 + SHAPE STRIPE ( 1000 1000 ) ( 9000 * )
       NEW metal5 400 ( 1000 1000 ) ( * 9000 ) + USE POWER ;
 END SPECIALNETS
 """)
-    # The first path is lost to SHAPE, the second is read normally.
-    assert len(d.special_wires) == 1
-    assert len(_sn("SPECIALNETS.unread_wire", d)) == 1
-    assert not _sn("SPECIALNETS.no_geometry", d)
+    assert len(d.special_wires) == 2
+    assert [w.shape for w in d.special_wires] == ["STRIPE", ""]
+    assert not [u for u in d.unmodelled if u.construct.startswith("SPECIALNETS")]
 
 
 def test_a_wire_the_reader_reads_in_full_is_censused_as_nothing():
