@@ -1186,6 +1186,24 @@ def discover_candidates(roots=CANDIDATE_ROOTS, corpus=None):
             for fn in sorted(fns):
                 if not fn.endswith(".buda"):
                     continue
+                # SCRATCH files are not candidates.  A leading '_' marks a flow
+                # written by something other than a person -- notably
+                # `test_bit_antenna_audit`, which must `mkstemp` its trim-free
+                # variant INSIDE `flow/rnr/` (the flow does `source
+                # mix_tracks.buda`, resolved against the SCRIPT's directory, so
+                # a tmp_path copy would not find it) and unlinks it after.
+                #
+                # Skipping it is right on its own terms -- an advisory that says
+                # "consider adding this to the corpus" must never name a file
+                # that will not exist a second later -- and it also removes a
+                # RACE: CI runs `-p xdist -n 4`, so that temp flow can appear or
+                # vanish between two walks on another worker.  It reaches
+                # `run_detailed_nuts` (it is a copy of a real flow), so
+                # discovery used to pick it up, and `_no_trim_<rand>.buda` sorts
+                # before `mix2_*` -- which is exactly the intermittent
+                # `test_discovery_is_sorted_and_stable` failure seen on main.
+                if fn.startswith("_"):
+                    continue
                 path = os.path.join(dp, fn)
                 try:
                     rel = os.path.relpath(path, _ROOT)
