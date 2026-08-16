@@ -6,6 +6,14 @@
 #
 #   btcl flow.tcl [args...]        # run the flow
 #   btcl -v flow.tcl [args...]     # …and pop a viewer when the flow ends
+#   btcl -j N flow.tcl [args...]   # …with N worker threads for the parallel
+#                                  # pipeline stages (the Tcl twin of `buda -j`:
+#                                  # planner scoring, NUTS solvers, healer
+#                                  # sweeps).  Clamped to the machine's logical
+#                                  # CPUs.  `-j max` uses the whole maximum;
+#                                  # with no -j the default is HALF the maximum,
+#                                  # the same ceiling `buda` applies.  Attached
+#                                  # forms -jN and --threads=N work too.
 #   btcl -i flow.buda [ckpt.bdb [stage]]
 #                                  # run a .BUDA flow, then drop into the
 #                                  # interactive pin/edit prompt (auto-detects
@@ -40,10 +48,34 @@ PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
 
 INTERACTIVE=0
+# A thread request is an integer (optionally signed) or the literal `max`;
+# anything else is a wrapper-level error, caught here before an engine is
+# spawned.  A NEGATIVE or otherwise out-of-range count is accepted, not
+# rejected — buda_cli.resolve_threads clamps it LOUD to [1, max], and `buda -j`
+# does exactly that, so rejecting here would break the two launchers' identical
+# `-j` semantics (a leading `-` is dropped before the digit check).
+valid_threads() {
+  [ "$1" = max ] && return 0
+  case "${1#-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac
+}
 while [ $# -gt 0 ]; do
   case "$1" in
     -v|--visualize) export BUDA_VIZ_FINAL=1; shift ;;
     -i|--interactive) INTERACTIVE=1; shift ;;
+    # -j/--threads: the value is NOT a path — it must pass verbatim, never be
+    # anchored to $PWD or taken as the script (the `buda -j 4` hazard its own
+    # wrapper documents).  It travels to the child engine as an env var, the
+    # same shape as BUDA_VIZ_FINAL; buda_server resolves it through buda_cli so
+    # `btcl -j` means exactly what `buda -j` means.
+    -j|--threads)   [ $# -ge 2 ] || { echo "btcl: $1 requires a thread count" >&2; exit 2; }
+                    valid_threads "$2" || { echo "btcl: $1: invalid thread count '$2' (an integer or 'max')" >&2; exit 2; }
+                    export BUDA_THREADS_REQUEST="$2"; shift 2 ;;
+    -j*)            v="${1#-j}"
+                    valid_threads "$v" || { echo "btcl: invalid thread count '$v' (an integer or 'max')" >&2; exit 2; }
+                    export BUDA_THREADS_REQUEST="$v"; shift ;;
+    --threads=*)    v="${1#--threads=}"
+                    valid_threads "$v" || { echo "btcl: invalid thread count '$v' (an integer or 'max')" >&2; exit 2; }
+                    export BUDA_THREADS_REQUEST="$v"; shift ;;
     --)             shift; break ;;
     # The header block IS the help, read to the first non-comment line rather
     # than to a hand-picked number — which had already gone stale by four
@@ -54,6 +86,13 @@ while [ $# -gt 0 ]; do
     *)              break ;;          # the script — parsing stops here
   esac
 done
+
+# No -j?  Send the launcher DEFAULT, so `btcl` caps the parallel stages exactly
+# as `buda` does with no flag (half the machine maximum, applied as the
+# BUDA_THREADS ceiling by buda_server).  Only the two launchers impose this — a
+# bare `tclsh flow.tcl` sends nothing and keeps the engine's own auto count.
+# A value the caller already exported wins (`:-` leaves it untouched).
+export BUDA_THREADS_REQUEST="${BUDA_THREADS_REQUEST:-default}"
 
 # A script whose NAME begins with a dash is not a script to tclsh — it reads it
 # as an OPTION, runs nothing, drains stdin and returns 0.  Measured on 8.6.14:

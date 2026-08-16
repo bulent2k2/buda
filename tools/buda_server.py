@@ -521,7 +521,35 @@ def main(argv=None):
             stream.reconfigure(encoding="utf-8", newline="\n")
         except (AttributeError, ValueError):
             pass
+    _apply_thread_request()
     return Server(out=out).serve()
+
+
+def _apply_thread_request():
+    """Honor a `-j`/`--threads` request handed to a Tcl driver.
+
+    The engine is a child process, so the request travels as an environment
+    variable (`BUDA_THREADS_REQUEST`) — the same env-signal shape `btcl -v`
+    uses for BUDA_VIZ_FINAL — rather than an argv token a general Tcl flow
+    could also want.  The value is `btcl`'s to set: an integer, the literal
+    `max`, or `default` (its own no-`-j` policy, so `btcl` and `buda` cap the
+    same way).  We resolve it through buda_cli's `configure_threads`, the SAME
+    code the CLI runs, so a `-j` on `btcl` means exactly what a `-j` on `buda`
+    means.
+
+    Prints land on fd 1, which claim_protocol_channel() has already repointed
+    at stderr, so the `[threads]` line and any clamp warning are visible on the
+    terminal and never inside a protocol frame.  A driver that sends NO request
+    (a bare `tclsh`, the web server, the tests) is byte-identical to before —
+    the engines keep their own auto count."""
+    req = os.environ.pop("BUDA_THREADS_REQUEST", None)
+    if req is None:
+        return
+    try:
+        buda_cli.configure_threads(req)
+    except ValueError:
+        print(f"buda: ignoring invalid thread count {req!r} "
+              f"(BUDA_THREADS_REQUEST)")
 
 
 if __name__ == "__main__":
