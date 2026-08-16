@@ -24,6 +24,7 @@ BUDA_THREADS ceiling, which the engines' auto paths honor with their
 small-work gates intact.
 """
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -85,6 +86,43 @@ def test_resolve_clamps_to_machine_range(capsys):
     assert "clamped to 1" in capsys.readouterr().out
 
 
+def test_threads_arg_parses_int_or_max():
+    assert buda_cli.threads_arg("4") == 4
+    assert buda_cli.threads_arg("max") == "max"
+    import argparse
+    import pytest
+    with pytest.raises(argparse.ArgumentTypeError):
+        buda_cli.threads_arg("lots")
+
+
+def test_configure_threads_max_is_the_whole_maximum(monkeypatch, capsys):
+    """`-j max` resolves to the machine maximum and applies EXPLICIT semantics
+    (the per-engine vars), the opt-out of the max/2 default."""
+    monkeypatch.setattr(buda_cli, "detect_max_threads", lambda: 8)
+    for v in _ENV_VARS:
+        monkeypatch.delenv(v, raising=False)
+    n = buda_cli.configure_threads("max")
+    assert n == 8
+    assert all(os.environ[v] == "8" for v in _ENV_VARS)   # explicit
+    assert "8 of 8 logical CPUs (--threads max)" in capsys.readouterr().out
+
+
+def test_configure_threads_default_caps_at_half(monkeypatch, capsys):
+    """None or 'default' — the launcher default `btcl` sends when no `-j` is
+    given — caps at half the maximum via the BUDA_THREADS ceiling only."""
+    monkeypatch.setattr(buda_cli, "detect_max_threads", lambda: 8)
+    for v in _ENV_VARS + ("BUDA_THREADS",):
+        monkeypatch.delenv(v, raising=False)
+    for raw in (None, "default"):
+        for v in _ENV_VARS + ("BUDA_THREADS",):
+            monkeypatch.delenv(v, raising=False)
+        n = buda_cli.configure_threads(raw)
+        assert n == 4
+        assert os.environ["BUDA_THREADS"] == "4"          # ceiling only
+        assert not any(v in os.environ for v in _ENV_VARS)  # not explicit
+        assert "(default: max/2)" in capsys.readouterr().out
+
+
 def test_explicit_flag_overrides_engine_env(monkeypatch):
     for v in _ENV_VARS:
         monkeypatch.setenv(v, "7")
@@ -136,3 +174,12 @@ def test_cli_end_to_end_reports_and_clamps(tmp_path):
          "--no-viz", str(script)],
         capture_output=True, text=True, env=env, timeout=120).stdout
     assert "[threads]" in out and "default: max/2" in out
+
+    # `-j max` opts out of the default: the resolved count is the machine
+    # maximum (an `N of N` line labelled `--threads max`).
+    out = subprocess.run(
+        [sys.executable, str(root / "src" / "buda_cli.py"),
+         "-j", "max", "--no-viz", str(script)],
+        capture_output=True, text=True, env=env, timeout=120).stdout
+    m = re.search(r"\[threads\] (\d+) of (\d+) logical CPUs \(--threads max\)", out)
+    assert m and m.group(1) == m.group(2), out

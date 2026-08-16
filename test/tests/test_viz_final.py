@@ -16,6 +16,7 @@
 script has no `visualize`, so a test vehicle can be eyeballed without editing
 it — unless the flow already ends by visualizing."""
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -310,6 +311,90 @@ def test_btcl_runs_a_script_whose_name_starts_with_a_dash(tmp_path):
                        capture_output=True, text=True, env=env,
                        cwd=str(tmp_path), timeout=300)
     assert "ARGV=a b" in r.stdout, (r.returncode, r.stdout, r.stderr)
+
+
+# ── `btcl -j N`: worker threads for the parallel stages (Tcl twin of buda -j) ─
+#
+# The request travels to the child engine as BUDA_THREADS_REQUEST — the same
+# env-signal shape as BUDA_VIZ_FINAL — and buda_server resolves it through
+# buda_cli, so `btcl -j` means exactly what `buda -j` means.
+
+@pytest.mark.mid
+@_btcl_required
+@pytest.mark.parametrize("flags", [("-j", "3"), ("-j3",), ("--threads=3",)])
+def test_btcl_j_resolves_and_reports_threads(tmp_path, flags):
+    """Every spelling — separate value, attached, and long-with-equals — sets
+    the same count, printed as the resolved `[threads] N of M` line."""
+    _, out = _run_btcl(tmp_path, _TCL_FLOW + "buda::stop\n", *flags)
+    assert "[threads] 3 of " in out, out[-600:]
+
+
+@pytest.mark.mid
+@_btcl_required
+def test_btcl_no_j_uses_the_same_maxhalf_default_as_buda(tmp_path):
+    """No `-j` is NOT no policy: `btcl` sends the launcher DEFAULT, so the
+    parallel stages cap at half the machine maximum exactly as a bare `buda`
+    does — the two launchers are consistent."""
+    _, out = _run_btcl(tmp_path, _TCL_FLOW + "buda::stop\n")
+    assert "[threads]" in out and "(default: max/2)" in out, out[-600:]
+
+
+@pytest.mark.mid
+@_btcl_required
+def test_btcl_j_max_uses_the_whole_machine_maximum(tmp_path):
+    """`-j max` is the explicit opt-out of the max/2 default: the resolved count
+    equals the machine maximum (the `N of N` line, labelled `--threads max`)."""
+    _, out = _run_btcl(tmp_path, _TCL_FLOW + "buda::stop\n", "-j", "max")
+    m = re.search(r"\[threads\] (\d+) of (\d+) logical CPUs \(--threads max\)", out)
+    assert m, out[-600:]
+    assert m.group(1) == m.group(2), out[-600:]     # the whole maximum
+
+
+@pytest.mark.mid
+@_btcl_required
+def test_btcl_j_clamps_a_request_above_the_machine_maximum(tmp_path):
+    """An out-of-range request is honored as closely as possible and LOUD — the
+    same clamp buda_cli applies for `buda -j`, never an error."""
+    _, out = _run_btcl(tmp_path, _TCL_FLOW + "buda::stop\n", "-j", "99999")
+    assert "clamped to" in out, out[-600:]
+
+
+@_btcl_required
+@pytest.mark.parametrize("argv,needle", [
+    (("-j", "x", "flow.tcl"), "invalid thread count"),  # non-integer value
+    (("-jx", "flow.tcl"),     "invalid thread count"),  # …attached form too
+    (("-j",),                 "requires a thread count"),  # value missing entirely
+])
+def test_btcl_j_rejects_a_bad_value_before_the_engine_starts(tmp_path, argv, needle):
+    """A non-integer or missing count is a wrapper-level error (exit 2), caught
+    before any engine is spawned."""
+    script = tmp_path / "flow.tcl"
+    script.write_text(_TCL_FLOW + "buda::stop\n")
+    argv = tuple(str(script) if a == "flow.tcl" else a for a in argv)
+    env = {**os.environ, "MPLBACKEND": "Agg"}
+    r = subprocess.run([*_BTCL_CMD, *argv],
+                       capture_output=True, text=True, env=env, timeout=60)
+    assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+    assert needle in (r.stderr or "") + (r.stdout or "")
+
+
+@pytest.mark.mid
+@_btcl_required
+def test_btcl_j_after_the_script_is_the_flows_own_argument(tmp_path):
+    """WRAPPER OPTIONS ARE READ ONLY BEFORE THE SCRIPT.  A `-j` that follows the
+    script name is the flow's own argument — passed through in position, never
+    consumed as the thread knob.  The engine still runs under the DEFAULT (the
+    trailing `-j max` did NOT become `--threads max`)."""
+    body = _TCL_FLOW + 'puts "ARGV=[list {*}$argv]"\nbuda::stop\n'
+    script = tmp_path / "flow.tcl"
+    script.write_text(body)
+    env = {**os.environ, "MPLBACKEND": "Agg"}
+    r = subprocess.run([*_BTCL_CMD, str(script), "-j", "max"],
+                       capture_output=True, text=True, env=env, timeout=120)
+    out = (r.stdout or "") + (r.stderr or "")
+    assert "ARGV=-j max" in out, out            # reached the flow verbatim
+    assert "(default: max/2)" in out            # …and was NOT taken as the knob
+    assert "--threads max" not in out
 
 
 def test_a_failing_viewer_is_reported_not_swallowed():

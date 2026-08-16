@@ -162,6 +162,39 @@ window blocks until you close it, exactly as `buda::visualize` blocks; with
 Both ways of ending a flow open it: `buda::stop`, and the engine's own
 `buda::exit` (which ends the session before `buda::stop` can be reached).
 
+### `btcl -j N` — worker threads for the parallel stages
+
+The Tcl twin of **`buda -j`**: `-j N` (or `--threads N`, or the attached `-jN`
+/ `--threads=N`, or **`-j max`**) sets the worker-thread count for the parallel
+pipeline stages — planner candidate scoring, the NUTS per-layer solvers, and the
+healers' trial sweep.
+
+```bash
+btcl -j 4 flow.tcl [args...]      # 4 worker threads
+btcl -j max flow.tcl              # the whole machine maximum
+btcl flow.tcl                     # no -j: half the maximum, as `buda` caps
+BUDA_THREADS_REQUEST=4 tclsh flow.tcl   # the same thing with no wrapper
+```
+
+Like `-v`, the value is read **only before the script** — a `-j` among the
+flow's own args passes through untouched — and travels to the child engine as
+an environment variable (**`BUDA_THREADS_REQUEST`**) rather than an argv token.
+`buda_server` resolves it through the same `buda_cli.configure_threads` the CLI
+runs, so `btcl` and `buda` are **consistent**:
+
+- **`-j N`** — that count, clamped (LOUD) to the machine's affinity- and
+  quota-aware logical-CPU count, applied with EXPLICIT semantics (the per-engine
+  `BUDA_PLAN`/`NUTS`/`SWEEP_THREADS` vars).
+- **`-j max`** — the whole machine maximum, the explicit opt-out of the default.
+- **no `-j`** — the launcher default: **half** the maximum, applied as the
+  `BUDA_THREADS` ceiling (the engines' small-work gates intact) — the SAME
+  policy a bare `buda` applies. (Before, a bare `btcl` left the engine's own
+  uncapped auto count; the two launchers now match.)
+
+The resolved count prints as a `[threads] N of M` line. Only the launchers
+impose the default — a bare `tclsh flow.tcl` (no `btcl`) sends nothing and keeps
+the engine's own auto count, byte-identical to before.
+
 `buda::exit 3` still **fails**, and the viewer cannot change that: its note is
 appended after the reply's status is decided, so a `FATAL` stays `FATAL`. What
 it does *not* do is reach the shell — `buda::_request` turns a `FATAL` into a

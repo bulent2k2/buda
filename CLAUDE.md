@@ -54,11 +54,17 @@ The **Floorplanner** (`bin/fp`, `bin/bfp`) is a separate interactive GUI tool th
 All the launcher/build wrappers live in **`bin/`** at the repo root: `bb` (build),
 `buda` (routing CLI), `btcl` (Tcl-flow launcher — `tclsh` + `buda.tcl`, with `-v`
 for a viewer on the finished design however the flow ends, `buda::stop` or
-`buda::exit`, and `-i <flow>.buda` for interactive iteration on ANY `.buda`
+`buda::exit`, `-j N`/`-j max` for the worker-thread count of the parallel stages
+(the twin of `buda -j`; travels as `BUDA_THREADS_REQUEST`, resolved by
+`buda_server` through the same `buda_cli.configure_threads` the CLI runs, so it
+clamps and applies identically — and a bare `btcl` now imposes the SAME max/2
+default a bare `buda` does, only the launchers imposing it), and
+`-i <flow>.buda` for interactive iteration on ANY `.buda`
 flow: run it verbatim, then the pin/edit prompt, with hier/flat and the
 `replan` recipe learned from the recorder — see docs/TCL_FRONT_END.md;
 wrapper options are read only BEFORE the script and the request
-travels as `BUDA_VIZ_FINAL`, so the flow's own args — a `-v` among them —
+travels as an env var (`BUDA_VIZ_FINAL`, `BUDA_THREADS_REQUEST`), so the flow's
+own args — a `-v` or `-j` among them —
 pass through untouched), `fp` / `bfp` (Floorplanner), `viz` (DEF/BDB
 visualizer), `u2b` (unit-test → `.buda` visualizer), and `activate` (sourceable
 env setup).
