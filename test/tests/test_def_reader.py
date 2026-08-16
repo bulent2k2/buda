@@ -237,6 +237,43 @@ END SPECIALNETS
     assert not _sn("SPECIALNETS.no_geometry", d)
 
 
+def test_a_via_that_a_path_CONTINUES_past_is_not_a_placement():
+    """The one-point prefix does not decide it — what follows the via does.
+
+    `( 0 0 ) M5_M6 ( 0 0 ) ( * 1000 )` is a via at the START of a path, and
+    the run after it is on the via's other layer: a MID-PATH via, which this
+    reader does not represent.  Reading the prefix alone called it a
+    placement, consumed the via name and dropped the run in SILENCE — worse
+    than the truncation it replaced, since `unread_wire` at least said so
+    (Codex on #765).
+    """
+    d = _parse("""SPECIALNETS 1 ;
+  - VDD ( * VDD ) + ROUTED metal5 400 ( 0 0 ) M5_M6 ( 0 0 ) ( * 1000 )
+      + USE POWER ;
+END SPECIALNETS
+""")
+    assert not d.special_wires
+    assert not _sn("SPECIALNETS.via_placement", d)
+    got = _sn("SPECIALNETS.unread_wire", d)
+    assert got and "M5_M6" in got[0].detail
+    assert not _sn("SPECIALNETS.no_geometry", d)
+
+
+@pytest.mark.parametrize("tail", [";", "+ USE POWER ;", "NEW metal5 400 ( 0 0 ) ( * 9 ) ;"])
+def test_a_via_is_terminal_when_the_clause_ends_however_it_ends(tail):
+    # The mirror of the test above: a via placement is one nothing follows on
+    # the path.  `NEW` opens a new path, so it terminates this one — and the
+    # via name must still be consumed, or that `NEW` is read as a via name.
+    d = _parse(f"""SPECIALNETS 1 ;
+  - VDD ( * VDD ) + ROUTED metal6 0 ( 100 200 ) via6_7_x {tail}
+END SPECIALNETS
+""")
+    assert len(_sn("SPECIALNETS.via_placement", d)) == 1
+    assert not _sn("SPECIALNETS.unread_wire", d)
+    # The trailing NEW case really did read its own wire.
+    assert len(d.special_wires) == (1 if tail.startswith("NEW") else 0)
+
+
 def test_a_path_truncated_by_a_via_reports_the_part_it_dropped():
     # The run before the via is kept; everything past it is discarded — which
     # was entirely silent, since a kept wire looked like a complete read.

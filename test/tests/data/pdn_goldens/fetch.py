@@ -109,10 +109,15 @@ def main(argv=None):
             if why is None:
                 print(f"  ok       {name}  ({size:,} bytes)")
                 continue
-            print(f"  BAD      {name}: {why}")
-            bad += 1
+            # A stale file is a FAILURE only under --check, whose whole job is
+            # to report state without changing it.  On a normal run it is just
+            # a reason to re-fetch, and counting it here made a successful
+            # repair still exit 1 (Codex #765).
             if args.check:
+                print(f"  BAD      {name}: {why}")
+                bad += 1
                 continue
+            print(f"  stale    {name}: {why}\n           re-fetching")
         elif args.check:
             print(f"  MISSING  {name}  — {what}")
             bad += 1
@@ -120,22 +125,30 @@ def main(argv=None):
 
         url = f"{BASE}/{name}"
         print(f"  fetching {name}  <- {url}")
+        # Download to a sidecar and verify BEFORE replacing the destination:
+        # a wrong file that looks right is the failure this pinning exists to
+        # prevent, so a bad fetch must not be able to leave one behind — nor
+        # destroy a good file that was already there.
+        tmp = dest.with_suffix(dest.suffix + ".part")
         try:
             with urllib.request.urlopen(url, timeout=120) as r:
-                data = r.read()
+                tmp.write_bytes(r.read())
         except Exception as exc:                       # noqa: BLE001
+            tmp.unlink(missing_ok=True)
             print(f"  FAILED   {name}: {exc}")
             bad += 1
             continue
-        dest.write_bytes(data)
-        why = _verify(dest, sha, size)
+        why = _verify(tmp, sha, size)
         if why is not None:
+            tmp.unlink(missing_ok=True)
             print(f"  BAD      {name}: {why}")
-            print("           upstream moved.  Re-pin deliberately after "
-                  "looking at what changed — do not just update the digest.")
+            print("           upstream moved; nothing was written.  Re-pin "
+                  "deliberately after looking at what changed — do not just "
+                  "update the digest.")
             bad += 1
-        else:
-            print(f"  ok       {name}  ({size:,} bytes)")
+            continue
+        tmp.replace(dest)
+        print(f"  ok       {name}  ({size:,} bytes)")
 
     if bad:
         print(f"\n{bad} file(s) missing or wrong.")

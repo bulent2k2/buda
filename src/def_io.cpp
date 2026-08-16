@@ -344,14 +344,26 @@ void read_specialnet(const std::vector<std::string>& t, DefDesign& d,
                            stopped == ";" || is_special_path_start(upper(stopped));
         const bool geometry_kw = upper(stopped) == "RECT" ||
                                  upper(stopped) == "POLYGON";
-        // ONE point followed by a via name is a via PLACEMENT, not a wire —
-        // `NEW metal6 0 ( x y ) via6_7_…`, which is how pdngen emits every
-        // via and is 6781 of the 7466 paths in its goldens.  It draws no run,
-        // so there is no polyline to lose; what goes unmodelled is the via's
-        // ENCLOSURE metal, whose extent lives in the DEF's VIAS section and
-        // not here.  Censusing it as `unread_wire` would drown the wires that
-        // really were lost in a 10:1 majority of things that are not wires.
-        const bool via_placement = w.pts.size() == 1 && !clean && !geometry_kw;
+        // ONE point followed by a TERMINAL via name is a via PLACEMENT, not a
+        // wire — `NEW metal6 0 ( x y ) via6_7_…`, which is how pdngen emits
+        // every via and is 6781 of the 7466 paths in its goldens.  It draws no
+        // run, so there is no polyline to lose; what goes unmodelled is the
+        // via's ENCLOSURE metal, whose extent lives in the DEF's VIAS section
+        // and not here.  Censusing it as `unread_wire` would drown the wires
+        // that really were lost in a 10:1 majority of things that are not
+        // wires.
+        //
+        // TERMINAL is load-bearing, and looking only at the one-point prefix
+        // got it wrong (Codex #765): `( 0 0 ) M5_M6 ( 0 0 ) ( * 1000 )` is a
+        // via at the START of a path, and the metal after it is on the via's
+        // other layer — a mid-path via, which this reader does not represent.
+        // Calling that a placement consumed the via name and then dropped the
+        // run in silence, which is worse than the truncation it replaced: at
+        // least `unread_wire` said so.  A via followed by another `(` is
+        // therefore left to the census below.
+        const bool via_continues = j + 1 < t.size() && t[j + 1] == "(";
+        const bool via_placement =
+            w.pts.size() == 1 && !clean && !geometry_kw && !via_continues;
         if (w.pts.size() >= 2) {
             d.special_wires.push_back(std::move(w));
             if (!clean) note(d, "SPECIALNETS.partial_wire", {net, stopped}, line);
