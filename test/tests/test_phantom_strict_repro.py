@@ -178,13 +178,28 @@ def test_control_arm_relieves_the_victim_and_holds_the_carrier_fixed():
     assert bands == [], bands
 
 
-def test_corpus_flows_still_report_no_harm():
-    """The vehicle must not be mistaken for a corpus finding.
+def test_the_vehicles_stay_out_of_the_census_list():
+    """The separation, asserted where it can actually be broken.
 
-    `phantom_charge.py`'s default sweep is the census, and its verdict is that
-    no REAL design overflows because of a phantom.  A vehicle added to that
-    list would turn the census into an argument.  This pins the separation: on
-    a corpus flow the affected bands are still not over capacity.
+    `phantom_charge.py`'s default `FLOWS` is the census of what REAL designs
+    do.  Adding a construction built to overflow would not fail anything below
+    — it would simply change the census's verdict, turning a measurement into
+    an argument.  So the absence is pinned directly rather than inferred from a
+    corpus flow still coming out clean.
+    """
+    listed = {Path(f).name for f in pc.FLOWS}
+    # Non-vacuity: a `not in` over an empty or differently-spelled set would
+    # pass for the wrong reason, so anchor on a flow that IS the census.
+    assert "four_blocks.buda" in listed, pc.FLOWS
+    assert _PHANTOM.name not in listed, pc.FLOWS
+    assert _CONTROL.name not in listed, pc.FLOWS
+
+
+def test_corpus_flows_still_report_no_harm():
+    """And the census's verdict itself: on a real design, nothing overflows.
+
+    Complements the test above — that one keeps the vehicle out of the list,
+    this one keeps the list's conclusion true.
     """
     _, _, bands = _bands(_ROOT / "flow/four_blocks.buda")
     for row in bands:
