@@ -481,8 +481,8 @@ over the restored pin.
 ```bash
 bin/btcl -i mini.buda ckpt.bdb plan    # skip bundling + generation
 bin/btcl -i mini.buda ckpt.bdb topo    # skip bundling only
-bin/btcl -i mini.buda ckpt.bdb nuts    # keep the plan too   (flat only)
-bin/btcl -i mini.buda ckpt.bdb dnuts   # keep abstract NUTS  (flat only)
+bin/btcl -i mini.buda ckpt.bdb nuts    # keep the plan too
+bin/btcl -i mini.buda ckpt.bdb dnuts   # keep abstract NUTS too
 ```
 
 Every build session with a live file-backed checkpoint writes its recorded
@@ -498,13 +498,30 @@ replayed `add_inst` is a duplicate-instance error, a re-derive would
 renumber busterm ids the restored bundles reference), so only the
 session-state verbs replay — stack, patterns, `add_blocks_from_bdb`
 projections, layer policies — and the construction commands are held,
-counted, and said.  A hier resume supports `topo` and `plan` (the cuts
-that still run `run_planner hier`, whose expansion the restored
-pre-expansion view feeds); `nuts`/`dnuts` there would need the
-post-expansion `load_pipeline expanded` recipe, which stays a
-resume-aware flow's job (`hdesign.tcl`).  A stage without a prior build
-(no trace), a trace built by a DIFFERENT flow, or a checkpoint the flow
-later replaced with `:memory:` are each refused with the remedy.
+counted, and said.  Hier `topo`/`plan` restore the pre-expansion view
+(the cuts that still run `run_planner hier`, whose expansion it feeds);
+hier `nuts`/`dnuts` restore the POST-expansion view (`load_pipeline
+expanded`) as an **INSPECTION session** — the quick look at a long
+healer flow's routed result: the stage replays (DNUTS + its checks), the
+verdict comes out, `topos`/`explore`/`show` all read the restored
+routing — while pins, their raw-command bypass, edits and `replan` are
+guarded with the remedy (their persist would write the expanded view
+over the checkpoint's template rows; a `plan` resume is where the design
+changes).
+
+A cut **below the planner** additionally HOLDS the planner-dependent
+commands (`ripup_reroute`, `negotiate_congestion`, `refine_selection`,
+`run_planner post_nuts`), counted and named: `load_pipeline` restores
+the plan, not the planner object, so they would refuse — and for a
+HEALED checkpoint holding them is also the honest fast path, because a
+healer commit is a full-pipeline state: the restored plan already
+carries the healing, and re-solving NUTS/DNUTS from it reproduces the
+healed endpoint without paying for the healers again.  Re-healing is
+what a `plan` resume is for.
+
+A stage without a prior build (no trace), a trace built by a DIFFERENT
+flow, or a checkpoint the flow later replaced with `:memory:` are each
+refused with the remedy.
 
 **Two concurrent sessions on the same BDB cannot corrupt it**: SQLite
 allows one writer, so the unlucky session fails LOUDLY — at the arming

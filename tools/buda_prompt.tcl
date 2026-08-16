@@ -91,7 +91,17 @@ proc prompt::_commands {pat} {
 # route     — name of the caller's re-plan proc; `replan` and `done` call it
 # bdb       — checkpoint path; `save` writes ${bdb}.sql
 # example   — a bus name from THIS design, for the intro line
-proc prompt::run {tag ps route bdb example} {
+# guard     — OPTIONAL: a command called with the verb about to run — the
+#             pin/unpin verbs' underlying commands, and EVERY raw engine
+#             command (the guard decides which verbs mutate; this loop does
+#             not pretend to know).  Returning 1 blocks it, and the guard
+#             says why.  This is how a post-expansion INSPECTION session
+#             (btcl -i hier nuts/dnuts) keeps a pin's persist — or a raw
+#             `run_planner hier`, or a re-bundle — from writing the
+#             expanded view over the checkpoint's template rows.  Empty
+#             (the default, and the vehicles) = every verb allowed,
+#             behavior unchanged.
+proc prompt::run {tag ps route bdb example {guard ""}} {
     # `pins_dirty` keeps the checkpoint COHERENT — a pin applied after the
     # route would leave the saved metal belonging to the candidate it
     # replaced, so the caller re-plans when this comes back 1.
@@ -126,14 +136,22 @@ proc prompt::run {tag ps route bdb example} {
                     if {[llength $line] != 3} {
                         puts "usage: pin <bus> <topo-N>  (1-based, from\
                               `topos` or the explorer title bar)"
+                    } elseif {$guard ne ""
+                              && [uplevel #0 $guard select_topology]} {
+                        # blocked — the guard said why
                     } else {
                         buda::select_topology [lindex $line 1] [lindex $line 2]
                         set pins_dirty 1
                     }
                 }
                 unpin {
-                    buda::unpin_topology [lindex $line 1]
-                    set pins_dirty 1
+                    if {$guard ne ""
+                            && [uplevel #0 $guard unpin_topology]} {
+                        # blocked — the guard said why
+                    } else {
+                        buda::unpin_topology [lindex $line 1]
+                        set pins_dirty 1
+                    }
                 }
                 topos   { buda::dump_topologies {*}[lrange $line 1 end] }
                 explore { buda::visualize_topologies {*}[lrange $line 1 end] }
@@ -167,6 +185,20 @@ proc prompt::run {tag ps route bdb example} {
                     # `buda::commands` is that registry, asked of the running
                     # engine at start, so it cannot drift.
                     if {$verb in [buda::commands]} {
+                        # The guard sees EVERY raw engine command and
+                        # decides — a blocked `pin` retyped as
+                        # `select_topology` must not become the way around
+                        # it, and neither must `run_planner hier` or a
+                        # re-bundle/regenerate, which persist the same
+                        # tables the named verbs are guarded for; which
+                        # verbs mutate is the CALLER's knowledge, not this
+                        # loop's.  (Plain if/else, not `continue`: inside
+                        # this catch a `continue` would be swallowed as an
+                        # exceptional return, the same trap the `done`
+                        # handling documents above.)
+                        if {$guard ne "" && [uplevel #0 $guard $verb]} {
+                            # blocked — the guard said why
+                        } else {
                         # Escape-hatch parity with the pin/unpin verbs: these
                         # engine commands change the durable pin too, so the
                         # caller must re-plan for the checkpoint to stay
@@ -194,6 +226,7 @@ proc prompt::run {tag ps route bdb example} {
                         # command twice.  A driver that turns the echo off
                         # reads the output with `buda::output`.
                         buda::do $line
+                        }
                     } else {
                         puts "$tag: unknown command '$verb' -- try `help`, or\
                               any engine command (`commands` lists them)"
