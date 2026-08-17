@@ -62,7 +62,8 @@ for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _HERE):
 # The `.buda` line rules, not a copy of them (src/buda_script.py — standalone,
 # so reading a script costs no compiled extension).
 from buda_script import strip_inline_comment as _strip_inline_comment  # noqa: E402
-from buda_script import sole_path_arg                         # noqa: E402
+from buda_script import (sole_path_arg,                       # noqa: E402
+                         split_quoted_args)
 # Tcl quoting, shared with every test that writes a front-end preamble.
 from tcl_quote import tcl_word, tcl_path, posix_sep           # noqa: E402,F401
 
@@ -98,7 +99,13 @@ def translate_line(line, src_dir, out_root, flow_root):
         # a translation that dropped them would be harder to read against the
         # original, which is the one thing a generated file must stay easy to do.
         return ([raw if raw.startswith("#") or not raw.strip() else ""], None, False)
-    toks = body.split()
+    # Quote-aware, like the engine: a spaced path is ONE token
+    # (`buda_script.split_quoted_args`).  A plain split turned
+    # `open_bdb "my designs/ck.bdb" writeback` into THREE arguments carrying
+    # stray quote characters, so the generated Tcl opened a file nobody has.
+    # Identical to `.split()` for every line without a quote, which is every
+    # checked-in flow — so the corpus regenerates byte-identical.
+    toks = split_quoted_args(body, skip=0)
     cmd = toks[0].lower()
 
     if cmd == "source" and len(toks) >= 2:

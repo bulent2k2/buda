@@ -142,6 +142,65 @@ set inspect 0
 # and an `open_bdb` PATH must never be case-folded.
 proc _verb {ln} { string tolower [lindex [split $ln] 0] }
 
+# THE `.buda` argument rule, in Tcl: the twin of
+# `buda_script.split_quoted_args` (src/buda_script.py), which is what the
+# ENGINE reads a recorded line with.  This driver is a `.buda` reader too —
+# the fifth, after buda2tcl/buda2bdb/qor_corpus/scan_fanin — and it was the
+# one the shared-helper fix could not reach, being in a different language.
+#
+# Splitting a recorded `open_bdb "my designs/ck.bdb"` on whitespace took the
+# path as `"my`, which `_resolve_bdb` then joined onto the flow's directory:
+# the checkpoint banner named a file nobody has, the resume recipe it prints
+# named the same one, and no `.trace` was written — so every later
+# `btcl -i <flow> <ckpt> <stage>` refused with "run a build session first",
+# the session that had just run.
+#
+# A quote is honoured only where a token BEGINS, so this is a plain split for
+# every line that does not use one, and an unterminated quote is an ordinary
+# character.  `#` at a token start ends the line (the recorder strips comments
+# already; matching the engine here is what lets the two be compared directly
+# — see test_btcl_quoted_paths.py, which runs the same cases through both).
+proc _split_args {ln {skip 1}} {
+    set out {}
+    set i 0
+    set n [string length $ln]
+    set at_start 1
+    while {$i < $n} {
+        set ch [string index $ln $i]
+        if {[string is space -strict $ch]} {
+            set at_start 1
+            incr i
+            continue
+        }
+        if {$at_start && $ch eq "#"} { break }
+        if {$at_start && ($ch eq "\"" || $ch eq "'")} {
+            set end [string first $ch $ln [expr {$i + 1}]]
+            if {$end >= 0} {
+                lappend out [string range $ln [expr {$i + 1}] [expr {$end - 1}]]
+                set i [expr {$end + 1}]
+                set at_start 0
+                continue
+            }
+        }
+        set j $i
+        while {$j < $n && ![string is space -strict [string index $ln $j]]} {
+            incr j
+        }
+        lappend out [string range $ln $i [expr {$j - 1}]]
+        set i $j
+        set at_start 1
+    }
+    return [lrange $out $skip end]
+}
+
+# A path spelled back to the user must be one they can TYPE.  The banners
+# print a resume recipe (`btcl -i <flow> <ckpt> plan`), and an unquoted
+# spaced path there is four shell words, not a command.
+proc _shell_word {p} {
+    if {[regexp {\s} $p] && ![string match {*"*} $p]} { return "\"$p\"" }
+    return $p
+}
+
 # A replan replay must not repeat: outputs and windows, session control, the
 # checkpoint plumbing, pins/edits (already session state — and a prompt
 # unpin must not be fought by a replayed pin), or generation/bundling (an
@@ -184,7 +243,7 @@ proc analyze {lines} {
         }
         if {$verb eq "run_nuts"} { set routed 1 }
         if {$verb eq "open_bdb"} {
-            set rest [lrange [split $ln] 1 end]
+            set rest [_split_args $ln]
             set p [_resolve_bdb [lindex $rest 0]]
             # `ckpt_live` distinguishes "a file-backed BDB was SEEN" from
             # "the file-backed BDB is the one still OPEN and DURABLE":
@@ -421,7 +480,7 @@ if {$stage eq "build"} {
                   `$tag <ckpt> plan` will need a build session that can"
         } else {
             puts "$tag: resume trace $tf -- next session can skip the\
-                  rebuild: btcl -i $tag $ckpt plan"
+                  rebuild: btcl -i [_shell_word $tag] [_shell_word $ckpt] plan"
         }
     }
 } else {
@@ -429,7 +488,7 @@ if {$stage eq "build"} {
     set tf ${armed}.trace
     if {![file exists $armed] || ![file exists $tf]} {
         puts stderr "$tag: stage `$stage` needs $armed AND its build trace\
-              $tf -- run a build session first: btcl -i $tag $armed"
+              $tf -- run a build session first: btcl -i [_shell_word $tag] [_shell_word $armed]"
         exit 2
     }
     set traced_flow ""; set traced_cwd ""
@@ -565,9 +624,14 @@ if {$stage eq "build"} {
             # against the FLOW's directory, but this replay runs with no
             # script, so a raw resend would resolve against the CWD and
             # open a different file.  Rewrite to the path the build used.
-            set rest [lrange [split $ln] 1 end]
-            set ln [string trim "open_bdb [_resolve_bdb [lindex $rest 0]]\
-                    [join [lrange $rest 1 end] { }]"]
+            set rest [_split_args $ln]
+            # Re-quoted through the bridge's OWN rule rather than joined
+            # raw: `_resolve_bdb` returns an absolute path that may contain
+            # spaces, and this line is sent verbatim (`buda::do`), so a bare
+            # join would hand the engine the very split this proc undid.
+            set ln "open_bdb [::buda::_join_args \
+                    [concat [list [_resolve_bdb [lindex $rest 0]]] \
+                            [lrange $rest 1 end]]]"
         }
         if {!$bdb_built} {
             # Flat: setup is session state by nature — replay it all.
@@ -656,7 +720,7 @@ if {$stage eq "build"} {
     if {$nb == 0} {
         _log_finish
         puts stderr "$tag: $ckpt restored no bundles -- not this flow's\
-              checkpoint?  `btcl -i $tag $armed` rebuilds it"
+              checkpoint?  `btcl -i [_shell_word $tag] [_shell_word $armed]` rebuilds it"
         catch {buda::stop}
         exit 1
     }
@@ -688,7 +752,7 @@ if {$ckpt ne "" && !$ckpt_live} {
     set snap_base [file rootname $tag].bdb
 } elseif {$ckpt ne ""} {
     puts "$tag: checkpoint $ckpt -- pins persist; rerun the flow (or resume:\
-          btcl -i $tag $ckpt plan) and they hold"
+          btcl -i [_shell_word $tag] [_shell_word $ckpt] plan) and they hold"
     if {$armed ne "" && $ckpt ne $armed} {
         # The flow opened its OWN BDB after the armed one, so the armed file
         # holds only what ran before that open — the flow's checkpoint is
