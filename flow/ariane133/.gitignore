@@ -20,3 +20,7 @@ log/
 # artifact; digest-pinning a file we generate proves nothing about whether
 # it is right (recipe §7).  Regenerate it, do not commit it.
 ariane_pdn.def
+
+# The build trace `btcl -i` writes beside a live checkpoint (its name is
+# `<ckpt>.trace`, so the `*.bdb` rule above does not reach it).
+*.bdb.trace

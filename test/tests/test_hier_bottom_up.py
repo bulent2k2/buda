@@ -129,9 +129,28 @@ def _two_inst_db(x2=500, y2=0, cross_net=False, path=":memory:", derive=True):
         db.add_net_pins(f"ab1_{i}", "proc_i1/pa_i.out", ["proc_i1/pb_i.in"])
         db.add_net_pins(f"ab2_{i}", "proc_i2/pa_i.out", ["proc_i2/pb_i.in"])
     if cross_net:
+        # L0 sits left of proc_i1 (which is at the origin), so its x is
+        # NEGATIVE — and that used to make it invisible: while
+        # `add_blocks_from_bdb` and the frame builders read any negative
+        # coordinate as "unplaced", no frame had L0, `get_block_bounds`
+        # handed the generator a phantom {0,0,0,0} block, and this bus
+        # routed out of the DIE CORNER (an L_HV from (0,0)) instead of from
+        # L0 — along proc_i1's bottom edge, never over the frozen copy at
+        # all.  The scenario has been vacuous since it was written; keeping
+        # the negative x is what now exercises it for real.
+        #
+        # The row matters too.  This session declares no floorplan blocks
+        # (`_flow_session` runs no `add_blocks_from_bdb`), so a depth-0
+        # trunk has no Hanan band and lands on its nominal row with ZERO
+        # slide — it cannot dodge anything, whatever the block heights.
+        # Pinning the leaves' pin row (their centre) onto the frozen bus's
+        # own row would therefore assert an impossible route rather than
+        # the occupancy rule.  At y=0 the pin row is 30: the bus crosses
+        # the marked instance's footprint (y 0..200) as the fixture says,
+        # and the frozen copy at y=100 is a real neighbour on the layer.
         db.add_cell("leaf_cell", 60, 60)
-        db.add_inst("L0", "leaf_cell", "", -200, 70)
-        db.add_inst("R0", "leaf_cell", "", 1200, 70)
+        db.add_inst("L0", "leaf_cell", "", -200, 0)
+        db.add_inst("R0", "leaf_cell", "", 1200, 0)
         for i in range(4):
             db.add_net_pins(f"lr_{i}", "L0.out", ["R0.in"])
     if derive:
@@ -154,9 +173,28 @@ def _one_inst_db(cross_net=False, path=":memory:", derive=True):
     for i in range(4):
         db.add_net_pins(f"ab1_{i}", "proc_i1/pa_i.out", ["proc_i1/pb_i.in"])
     if cross_net:
+        # L0 sits left of proc_i1 (which is at the origin), so its x is
+        # NEGATIVE — and that used to make it invisible: while
+        # `add_blocks_from_bdb` and the frame builders read any negative
+        # coordinate as "unplaced", no frame had L0, `get_block_bounds`
+        # handed the generator a phantom {0,0,0,0} block, and this bus
+        # routed out of the DIE CORNER (an L_HV from (0,0)) instead of from
+        # L0 — along proc_i1's bottom edge, never over the frozen copy at
+        # all.  The scenario has been vacuous since it was written; keeping
+        # the negative x is what now exercises it for real.
+        #
+        # The row matters too.  This session declares no floorplan blocks
+        # (`_flow_session` runs no `add_blocks_from_bdb`), so a depth-0
+        # trunk has no Hanan band and lands on its nominal row with ZERO
+        # slide — it cannot dodge anything, whatever the block heights.
+        # Pinning the leaves' pin row (their centre) onto the frozen bus's
+        # own row would therefore assert an impossible route rather than
+        # the occupancy rule.  At y=0 the pin row is 30: the bus crosses
+        # the marked instance's footprint (y 0..200) as the fixture says,
+        # and the frozen copy at y=100 is a real neighbour on the layer.
         db.add_cell("leaf_cell", 60, 60)
-        db.add_inst("L0", "leaf_cell", "", -200, 70)
-        db.add_inst("R0", "leaf_cell", "", 1200, 70)
+        db.add_inst("L0", "leaf_cell", "", -200, 0)
+        db.add_inst("R0", "leaf_cell", "", 1200, 0)
         for i in range(4):
             db.add_net_pins(f"lr_{i}", "L0.out", ["R0.in"])
     if derive:
