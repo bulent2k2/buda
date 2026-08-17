@@ -59,8 +59,10 @@ for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-# The CLI's own comment rule, not a copy of it.
-from buda_cli import _strip_inline_comment                    # noqa: E402
+# The `.buda` line rules, not a copy of them (src/buda_script.py — standalone,
+# so reading a script costs no compiled extension).
+from buda_script import strip_inline_comment as _strip_inline_comment  # noqa: E402
+from buda_script import sole_path_arg                         # noqa: E402
 # Tcl quoting, shared with every test that writes a front-end preamble.
 from tcl_quote import tcl_word, tcl_path, posix_sep           # noqa: E402,F401
 
@@ -106,13 +108,17 @@ def translate_line(line, src_dir, out_root, flow_root):
         # obvious self-relative form silently starts looking for fixtures
         # under the flow's own tree.  `::corpus::root` is captured when the
         # harness is sourced, which is before that cd.
-        ref = os.path.normpath(os.path.join(src_dir, toks[1]))
+        # The rest of the line, not `toks[1]`: `source` takes exactly one path,
+        # so the engine reads a spaced path whole and a translation that split
+        # on the first space would queue a file that does not exist.
+        sub = sole_path_arg(body)
+        ref = os.path.normpath(os.path.join(src_dir, sub))
         # `source fixture` (no suffix) is legal: cmd_source falls back to
         # `fixture.buda` when the exact path is not a file.  Resolving it the
         # same way here is what lets such a flow be translated at all —
         # otherwise the queue tries to open a path that does not exist.
-        if not os.path.isfile(ref) and not toks[1].endswith(".buda"):
-            cand = os.path.normpath(os.path.join(src_dir, toks[1] + ".buda"))
+        if not os.path.isfile(ref) and not sub.endswith(".buda"):
+            cand = os.path.normpath(os.path.join(src_dir, sub + ".buda"))
             if os.path.isfile(cand):
                 ref = cand
         rel = os.path.relpath(_out_path(ref, out_root, flow_root), out_root)

@@ -29,6 +29,8 @@ language's include.
 """
 import contextlib
 import io
+
+import pytest
 from pathlib import Path
 
 import buda_cli
@@ -218,6 +220,128 @@ def test_nested_source_resolves_against_the_innermost_script(
     s, _, _ = _run(script, cwd, monkeypatch)
     assert "M1" in s._layer_name_map     # lib/'s own tech.lef, not the outer one
     assert "M9" not in s._layer_name_map
+
+
+# ── a space in the path is part of the filename ────────────────────────────
+
+def test_a_sourced_path_may_contain_spaces(tmp_path, monkeypatch):
+    """`source` takes exactly ONE path, so its argument runs to end of line.
+
+    `do_command` splits on whitespace, so `args[0]` was the path only up to
+    its first space: `source my dir/inner.buda` looked for `my` and the error
+    named a file the author never wrote.
+    """
+    sdir, cwd = _setup(tmp_path)
+    sub = sdir / "my dir"
+    sub.mkdir()
+    (sub / "inner file.buda").write_text("def_layer 4 M4 H 50\n")
+    script = sdir / "t.buda"
+    script.write_text("source my dir/inner file.buda\n")
+    s, _, _ = _run(script, cwd, monkeypatch)
+    assert s.layers.has_layer(4)
+
+
+def test_the_flow_s_OWN_path_may_contain_spaces(tmp_path, monkeypatch):
+    """The path that actually bit, because it is the one a user does not
+    choose: `bin/buda "my dir/x.buda"` reaches the engine as a `source` line,
+    and so does `btcl -i`, so a checkout under `~/My Designs/` could not be
+    run at all."""
+    sdir, cwd = _setup(tmp_path)
+    home = sdir / "My Designs"
+    home.mkdir()
+    script = home / "my flow.buda"
+    script.write_text("def_layer 4 M4 H 50\n")
+    s, _, _ = _run(script, cwd, monkeypatch)
+    assert s.layers.has_layer(4)
+    assert s.script_path == str(script)      # and it is the flow's identity
+
+
+def test_a_quoted_path_is_accepted(tmp_path, monkeypatch):
+    """The instinctive spelling, and the norm on Windows.  Without this it
+    fails as a near-miss with the quotes inside the filename."""
+    sdir, cwd = _setup(tmp_path)
+    sub = sdir / "my dir"
+    sub.mkdir()
+    (sub / "inner.buda").write_text("def_layer 4 M4 H 50\n")
+    script = sdir / "t.buda"
+    script.write_text('source "my dir/inner.buda"\n')
+    s, _, _ = _run(script, cwd, monkeypatch)
+    assert s.layers.has_layer(4)
+
+
+def test_a_missing_spaced_path_is_named_in_full(tmp_path, monkeypatch):
+    """Half the original confusion was the diagnostic: it reported the
+    truncation (`.../my`) rather than the path the author wrote."""
+    sdir, cwd = _setup(tmp_path)
+    script = sdir / "t.buda"
+    script.write_text("source no such file.buda\n")
+    monkeypatch.chdir(cwd)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    out = io.StringIO()
+    # A missing source is FAIL-FAST — SystemExit, which is a BaseException and
+    # so sails past `_run`'s `except Exception`.
+    with contextlib.redirect_stdout(out), pytest.raises(SystemExit):
+        s.do_command(f"source {script}")
+    # The RESOLVED path, not the echoed command line — the line is quoted in
+    # the message either way, so asserting on it would pass unfixed.
+    head = out.getvalue().split(" ('")[0]
+    assert head.endswith("no such file.buda"), out.getvalue()
+
+
+def test_a_trailing_comment_is_still_not_part_of_the_path(
+        tmp_path, monkeypatch):
+    """Rest-of-line must not swallow the comment the dispatcher strips."""
+    sdir, cwd = _setup(tmp_path)
+    (sdir / "inner.buda").write_text("def_layer 4 M4 H 50\n")
+    script = sdir / "t.buda"
+    script.write_text("source inner.buda   # the tracks fixture\n")
+    s, _, _ = _run(script, cwd, monkeypatch)
+    assert s.layers.has_layer(4)
+
+
+def test_every_buda_reader_resolves_a_spaced_source_the_same(tmp_path):
+    """The engine is not the only thing that parses `.buda` (Codex #771 P2).
+
+    `buda2tcl` translates a flow, `buda2bdb` ingests one as a cell,
+    `qor_corpus` walks one for feature coverage, `scan_fanin` scans one for
+    net shapes — and each FOLLOWS `source` into the next file.  A rule that
+    lives only in the engine is one the tools disagree with, silently: they
+    resolve a different file, or none, and report on a script nobody wrote.
+    (`qor_corpus` is the one that bites hardest — its walk decides whether a
+    flow is a full-pipeline corpus candidate at all.)
+
+    So they share `buda_script.sole_path_arg`, and this pins that they agree
+    on the case that motivated it.  Deliberately behavioural, one assertion
+    per reader: an import-level check would pass while a reader still split
+    the argument itself.
+    """
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+    import qor_corpus
+    import scan_fanin
+    import buda2tcl
+
+    sub = tmp_path / "my dir"
+    sub.mkdir()
+    (sub / "inner file.buda").write_text(
+        "run_bundler COMBINED\nadd_net n1 a.o b.i\n")
+    flow = tmp_path / "top.buda"
+    flow.write_text("source my dir/inner file.buda\nrun_nuts\n")
+
+    # qor_corpus: the sourced file's tokens must reach the walk.
+    assert "run_bundler:combined" in qor_corpus.flow_tokens(str(flow))
+
+    # scan_fanin: the sourced file's nets must reach the scan.
+    nets, _ = scan_fanin.parse_script(flow)
+    assert [n[0] for n in nets] == ["n1"], nets
+
+    # buda2tcl: the include must resolve to the real file, so it is queued
+    # for translation instead of a path that does not exist.
+    _, ref, _ = buda2tcl.translate_line(
+        "source my dir/inner file.buda\n", str(tmp_path),
+        str(tmp_path), str(tmp_path))
+    assert ref == str(sub / "inner file.buda"), ref
 
 
 def test_absolute_paths_are_never_rewritten(tmp_path, monkeypatch):

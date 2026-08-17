@@ -205,17 +205,12 @@ def _rotate_log(path):
         pass
 
 
-def _strip_inline_comment(line):
-    """Strip a `#` comment from a script line: everything from the first `#`
-    that begins a token (start of line, or preceded by whitespace) to the end
-    of the line is removed. This lets a command be commented out partially —
-    `run_bundler # strict` runs `run_bundler`, `def_layer … 0.0 # note` drops
-    the note. A `#` embedded in a token (no preceding whitespace, e.g. a path
-    fragment) is left intact so it can't silently swallow real arguments."""
-    for i, ch in enumerate(line):
-        if ch == '#' and (i == 0 or line[i - 1].isspace()):
-            return line[:i]
-    return line
+# Both live in `buda_session.util` now — a command HANDLER needs the same
+# comment rule the dispatcher applies (see `sole_path_arg`), and a handler
+# cannot import `buda_cli` without a cycle.  Re-exported here because this is
+# where they were, and `tools/buda2tcl.py` imports one of them by this name.
+from buda_session.util import (                             # noqa: E402
+    _strip_inline_comment, sole_path_arg)
 
 
 class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,

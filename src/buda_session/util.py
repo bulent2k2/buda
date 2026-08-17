@@ -22,6 +22,17 @@ import functools
 import os
 
 
+# THE `.buda` line rules live in `buda_script` — standalone and engine-free,
+# so the tools that also parse `.buda` (buda2tcl, buda2bdb, qor_corpus,
+# scan_fanin) reach the same code without importing the compiled extension.
+# Re-exported here because a command HANDLER needs them and cannot import
+# `buda_cli` without a cycle.
+from buda_script import strip_inline_comment, sole_path_arg   # noqa: F401
+
+# The engine-side spelling, kept because that is the name buda_cli exposes.
+_strip_inline_comment = strip_inline_comment
+
+
 def resolve_script_path(session, path, *, is_read=False):
     """Resolve a script-declared relative path against the enclosing script's
     directory — the innermost `source`d file — falling back to the CWD when no

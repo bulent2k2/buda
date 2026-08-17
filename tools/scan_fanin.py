@@ -34,6 +34,10 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+# The `.buda` line rules, shared with the engine (src/buda_script.py) — the
+# scan follows `source`, so it has to resolve a path the way the engine does.
+from buda_script import sole_path_arg                        # noqa: E402
 
 
 def inst_of(pin):
@@ -55,7 +59,8 @@ def parse_script(path, seen=None):
         tok = line.split()
         cmd = tok[0]
         if cmd == "source" and len(tok) > 1:
-            sub_nets, sub_modes = parse_script((path.parent / tok[1]).resolve(), seen)
+            sub = sole_path_arg(line)      # rest of the line, spaces included
+            sub_nets, sub_modes = parse_script((path.parent / sub).resolve(), seen)
             nets += sub_nets
             modes += sub_modes
         elif cmd == "add_net" and len(tok) >= 4:
