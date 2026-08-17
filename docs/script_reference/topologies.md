@@ -515,7 +515,8 @@ keepout's four edges become grid lines.  `outside` restricts that to
 keepouts reaching beyond a block; one lying wholly inside a block still
 **blocks identically**, it just stops adding coordinates.  `stripes` is an
 orthogonal modifier, described below; the two compose
-(`set_keepout_loci outside stripes`).
+(`set_keepout_loci outside stripes`) — on the **design** Hanan grid, with one
+measured exception noted at the end of this section.
 
 The problem it answers is quadratic.  The Hanan grid is the **product** of
 its two axis sets, so a technology that draws obstruction finely buys grid
@@ -579,6 +580,34 @@ measurement above cannot see it, since ariane133's straps and signals are on
 different layers.  Until a design exercises that overlap, prefer `stripes`
 when a PDN would otherwise make the grid intractable, and leave it off when
 the grid is affordable without it.
+
+#### The one place the two do not compose
+
+Both modes govern `Floorplan::get_hanan_grid`, the design-wide grid.  The
+**n-pin trunk generator** builds its own local Hanan grid per bundle
+(`TopologyGenerator::generate_npin`), and that one honours `stripes` but
+**not** `outside`: it walks every keepout without consulting
+`inside_block`.
+
+This is not a corner case.  On `flow/ariane133`, which declares `outside`,
+**12,635 of its 13,034 keepouts are both inside-a-block and strap-shaped** —
+so 97% of them add loci to the per-bundle grid that the design grid drops.
+
+It is written down rather than repaired because which behaviour is *right*
+is an open question, not an oversight to tidy:
+
+- `outside` exists because the design grid is a **product** of its two axis
+  sets and explodes.  The per-bundle grid is bounded by the bundle's own
+  extent, so that argument does not transfer.
+- Item 12's own lesson is that an interior locus **is** reachable, and
+  dropping it cost `flow/rv` a better trunk.  Keeping those positions
+  exactly where the trunk is chosen may be part of why `outside` is
+  affordable at all.
+
+So applying the filter here would change trunk candidates on every flow
+declaring `outside` — a QoR change wanting a corpus measurement, not a
+consistency fix.  Tracked in
+[`opens_interchange.md` item 12](../internal/opens_interchange.md).
 
 ---
 

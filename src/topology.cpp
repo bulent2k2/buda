@@ -3310,6 +3310,24 @@ std::vector<Topology> TopologyGenerator::generate_npin(
 
     // Include keepout edges in the local Hanan grid so trunk midpoints naturally
     // fall above/below keepout bands rather than inside them.
+    //
+    // NOTE, and it is deliberate that this is written down rather than
+    // "fixed": this local grid honours `stripes` but NOT `outside`, unlike
+    // Floorplan::get_hanan_grid which applies both.  The divergence is live,
+    // not theoretical — on flow/ariane133, which DECLARES `outside`, 12,635
+    // of its 13,034 keepouts are both inside-a-block and strap-shaped, so
+    // 97% of them add loci here that the global grid drops.
+    //
+    // Whether that is a defect depends on which way item 12 cuts.  `outside`
+    // exists because the GLOBAL grid is a product and explodes; this grid is
+    // per-bundle and bounded by the bundle's own extent, so the quadratic
+    // argument does not apply.  Meanwhile item 12's own lesson is that an
+    // interior locus IS reachable and dropping it cost flow/rv a better
+    // trunk — so preserving those positions exactly where the trunk choice
+    // is made may be why `outside` is affordable at all.  Applying the
+    // filter here would change trunk candidates on every flow declaring
+    // `outside`, which is a QoR change needing corpus measurement, not a
+    // consistency tidy-up.  See opens_interchange.md item 12.
     const auto& keepouts = floorplan_.get_keepout_zones();
     if (!keepouts.empty()) {
         const bool stripe_suppress = floorplan_.stripe_loci_suppress();
