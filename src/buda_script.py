@@ -25,13 +25,10 @@ file, or none, and reports on a script nobody wrote.
 Standalone and dependency-free for the reason `slot_groups.py`,
 `bus_names.py` and `tcl_quote.py` are: these are TEXT rules, and a tool that
 only reads a script must not have to import the compiled extension to know
-what the script says.  `buda_session.util` (and through it `buda_cli`)
-re-exports them, so a command handler reaches the same code without a cycle
-— `buda_session` imports the engine, which is exactly what a tool cannot.
+what the script says.  It imports nothing, so a command HANDLER imports it
+directly with no risk of a cycle — `buda_session.util` re-exports two names
+only because `buda_cli` has always exposed them under its own.
 """
-import re
-
-_TOKEN = re.compile(r"\S+")
 
 
 def strip_inline_comment(line):

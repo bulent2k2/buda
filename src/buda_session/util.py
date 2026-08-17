@@ -25,11 +25,12 @@ import os
 # THE `.buda` line rules live in `buda_script` — standalone and engine-free,
 # so the tools that also parse `.buda` (buda2tcl, buda2bdb, qor_corpus,
 # scan_fanin) reach the same code without importing the compiled extension.
-# Re-exported here because a command HANDLER needs them and cannot import
-# `buda_cli` without a cycle.
-from buda_script import (strip_inline_comment, sole_path_arg,      # noqa: F401
-                         leading_path_and_options, split_quoted_args,
-                         unquote)
+# Re-exported here for `buda_cli`, which exposes both under these names
+# (`tools/buda2tcl.py` imports one of them from there).  A command HANDLER
+# imports from `buda_script` DIRECTLY — one import path for one rule, so a
+# reader never has to ask which spelling a handler took.
+from buda_script import (strip_inline_comment,                    # noqa: F401
+                         sole_path_arg)
 
 # The engine-side spelling, kept because that is the name buda_cli exposes.
 _strip_inline_comment = strip_inline_comment

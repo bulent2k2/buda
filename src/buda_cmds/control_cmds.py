@@ -24,8 +24,8 @@ import os
 import sys
 
 import buda_diag
-from buda_session.util import (resolve_script_path, sole_path_arg,
-                               split_quoted_args)
+from buda_session.util import resolve_script_path
+from buda_script import sole_path_arg, split_quoted_args
 
 
 def cmd_source(session, cmd, args, cmd_line):
