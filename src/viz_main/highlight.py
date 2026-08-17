@@ -401,8 +401,12 @@ class VizHighlightMixin:
 
             wrapper = next((w for w in self.bundles if w.input.original_bundle.id == bundle_id), None)
 
-            # Get busterm count from the bundle metadata.
-            nterms = wrapper.input.original_bundle.num_terminals
+            # BUSTERMS — what the route lands on — and, when it differs, the
+            # NET ENDPOINT count it resolves from.  This used to print
+            # `num_terminals` under the "bterms" label, which is an endpoint
+            # count at netlist depth: ariane133's B154 said 89 while the
+            # drawing showed 17 blocks (see busterm_counts).
+            nbt, nterms = busterm_counts(wrapper)
 
             # Segment count of the bundle's selected topology — handy when
             # cycling bundles with `n` to gauge each topology's complexity.
@@ -412,7 +416,15 @@ class VizHighlightMixin:
 
             info = []
             if nbits > 0:
-                info.append(f"{nbits} bits/{nterms} bterms")
+                if nbt is None:
+                    info.append(f"{nbits} bits/{nterms} endpoints")
+                elif nbt == nterms:
+                    info.append(f"{nbits} bits/{nbt} bterms")
+                else:
+                    # Both, because the GAP is the information: it says the
+                    # netlist reaches N leaf instances that the routing frame
+                    # resolves onto far fewer blocks.
+                    info.append(f"{nbits} bits/{nbt} bterms of {nterms} endpoints")
             info.append(f"{nsegs} segs")
             info_str = f" ({', '.join(info)})"
             # For ref, old title had: f"(click again or click background to deselect)"
