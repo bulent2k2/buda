@@ -93,28 +93,57 @@ def test_with_no_selection_it_says_so_rather_than_guessing():
     assert busterm_counts(w2) == (None, 7)
 
 
+def _titled(n_blocks, num_terminals, n_nets=2):
+    """The REAL title the viewer renders for such a bundle.
+
+    Drives `BudaVisualizer._set_highlight` and reads `ax.get_title()`, rather
+    than re-deriving the string here.  The first version of this test did
+    re-derive it — it rebuilt the formatting conditional locally and asserted
+    on its own copy, so reverting the production logic left all five tests
+    green and the regression uncovered (Codex P2 on #777).  A test that
+    duplicates the code under test only ever tests itself.
+    """
+    fp = buda.Floorplan()
+    for i in range(max(n_blocks, 1)):
+        fp.add_block(f"blk{i}", i * 20, 0, i * 20 + 10, 10)
+
+    b = buda.HBundle()
+    b.id = 1
+    b.num_terminals = num_terminals
+    b.net_names = [f"bus_{i}" for i in range(n_nets)]
+
+    t = buda.Topology()
+    t.connected_block_names = [f"blk{i}" for i in range(n_blocks)]
+    t.segments = []
+
+    w = buda.BundleWrapper()
+    w.input.original_bundle = b
+    w.input.candidates = [t]
+    w.plan.selected_topology_index = 0
+
+    v = buda_viz.BudaVisualizer(fp, [w])
+    v.draw_blocks()
+    v._set_highlight(1)
+    return v.ax.get_title()
+
+
 def test_the_main_title_shows_both_when_they_differ():
     """The GAP is the information — it says the netlist reaches N leaf
     instances that the routing frame resolves onto far fewer blocks.  So the
     title carries both rather than silently replacing one number with the
-    other."""
-    fp = buda.Floorplan()
-    fp.add_block("b", 0, 0, 10, 10)
-    v = buda_viz.BudaVisualizer(fp, [])
+    other.  The ariane133 B154 shape, through the real renderer."""
+    title = _titled(n_blocks=17, num_terminals=89)
+    assert "17 bterms of 89 endpoints" in title, title
+    # …and the number that was WRONG must not be the one under "bterms".
+    assert "89 bterms" not in title, title
 
-    nbt, nend = 17, 89
-    info = []
-    if nbt is None:
-        info.append(f"2 bits/{nend} endpoints")
-    elif nbt == nend:
-        info.append(f"2 bits/{nbt} bterms")
-    else:
-        info.append(f"2 bits/{nbt} bterms of {nend} endpoints")
-    assert info[0] == "2 bits/17 bterms of 89 endpoints"
 
-    # …and when they agree, the title stays short.
-    nbt = nend = 4
-    assert (f"2 bits/{nbt} bterms" if nbt == nend else "x") == "2 bits/4 bterms"
+def test_the_title_stays_short_when_the_two_agree():
+    """Most bundles are flat enough that the counts coincide; those titles
+    must not grow a redundant clause."""
+    title = _titled(n_blocks=4, num_terminals=4)
+    assert "4 bterms" in title, title
+    assert "endpoints" not in title, title
 
 
 def test_the_old_landing_only_helper_is_not_the_busterm_count():
