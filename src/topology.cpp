@@ -455,6 +455,21 @@ static bool zone_is_stripe(const Rect& b) {
 // contributes only its LONG-axis edges (its ends — few, often already the die
 // boundary); the proliferating thin-axis pair is dropped.  Blocking is
 // unaffected either way (this only governs which grid lines are sampled).
+//
+// WHAT TO WATCH, and why this is opt-in.  The justification for dropping the
+// thin-axis pair is that a signal trunk has no reason to nominal on a power
+// strap's edge.  That is an UNREACHABILITY claim, which is the same class of
+// claim `set_keepout_loci outside` first shipped on and had disproved by
+// flow/rv/soc_conv_div (a trunk sat exactly on the OBS edge whose locus had
+// been dropped).  The case this one would fail on is a layer where signal and
+// strap metal SHARE space: there a strap's thin-axis edges bound the free
+// CHANNEL between straps, which is exactly where the signal routing goes, so
+// they would be the most useful loci on the layer rather than the least.
+// The ariane133 measurement cannot see it — its straps are M1/M4/M7 and its
+// signal metal M8-M10 — so the claim is untested where it matters.  Settling
+// it needs a design whose signal layers carry straps; until then the mode is
+// opt-in and worth declaring only when a PDN would otherwise make the grid
+// intractable.
 static void push_zone_loci(const KeepoutZone& koz, bool stripe_suppress,
                            std::vector<int>& xs, std::vector<int>& ys) {
     if (stripe_suppress && zone_is_stripe(koz.bbox)) {
