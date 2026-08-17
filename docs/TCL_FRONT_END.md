@@ -126,11 +126,39 @@ buda::output      ;# the last command's output, echoed or not
 buda::commands    ;# the command list the engine reported
 buda::viz ?on|off?  ;# may `visualize` open a window; no arg = ask
 buda::vizfinal ?on|off?  ;# open a viewer at buda::stop even with no visualize
+buda::log ?<flow>|off?   ;# summarize like `bin/buda`; no arg = the log path
+buda::endreport     ;# the runtime summary `bin/buda` prints when a run ends
 buda::do <cmd> ...  ;# send a raw command line (the generic form)
 ```
 
 `-echo 0` keeps command output off the terminal; it is still available from
 `buda::output`.
+
+### `buda::log` — the terminal `bin/buda` gives you
+
+`bin/buda` prints **one line per command** and files the full detail in
+`<flow_dir>/log/<stem>_flow.log`.  That shape is not the CLI's: it is the
+engine's, gated on a flow log being open — and until now only the CLI ever
+opened one, so the same flow driven from Tcl printed every line of every
+command.  Measured on `flow/big_data_test/bigHalf.buda`: **677 lines from
+Tcl against the CLI's 51**, and no log afterwards to read the detail in.
+
+```tcl
+buda::log flow/big_data_test/bigHalf.buda   ;# arm — returns the log path
+buda::source flow/big_data_test/bigHalf.buda
+buda::endreport                             ;# runtime summary + the pointer
+buda::log off                               ;# disarm — returns the path
+```
+
+Opt-in, and deliberately not what `buda::start` does: a Tcl flow issues its
+commands one at a time and usually wants each one's output, so arming this by
+default would change every existing flow's console.  It is the driver that
+runs a WHOLE `.buda` flow in one go that wants the other shape — which is why
+**`btcl -i` arms it for you** (see below).
+
+Disarm around anything whose output *is* the point — `dump_topologies` at a
+prompt — since while armed that output goes to the log and the terminal gets
+the one-line abstract.  A re-arm **appends**, so one session is one log file.
 
 ## The viewer
 
@@ -289,10 +317,10 @@ per command, and a reply of `<STATUS> <n_chars>\n` followed by that many
 characters of output, where `STATUS` is `OK`, `ERR`, `BYE` or `FATAL`.
 Character counts, not bytes: both sides speak UTF-8 and count code points.
 
-Five requests are the server's own rather than script commands:
+Seven requests are the server's own rather than script commands:
 `__commands` (the registry, which is how `buda::<name>` procs are minted
 with no second list to keep in step), `__query <name>`, `__stream on|off`,
-`__viz [on|off]`, and `__exit`.
+`__viz [on|off]`, `__log <flow>|off`, `__end_report`, and `__exit`.
 
 With streaming opted in (`__stream on`), a reply is zero or more
 `OUT <n_chars>\n<payload>` progress frames followed by exactly one final
@@ -468,7 +496,24 @@ bin/btcl -i demo/comprehensive_demo.buda
 
 `tools/buda_interact.tcl` runs the flow **verbatim** (the engine's own
 `source`, so it means exactly what `bin/buda` makes it mean), then drops
-into the same prompt. What it knows about the flow it learns from the
+into the same prompt.
+
+The flow's **output** means what `bin/buda` makes it mean too: the driver
+arms `buda::log` around the flow, so the console gets one line per command
+and a runtime summary, and the detail goes to the same
+`<flow_dir>/log/<stem>_flow.log` the CLI writes (`bigHalf`: 677 console lines
+→ 58, with the log now written at all).  The arming follows what is running:
+the **flow** and every **replay** (`replan`, a stage resume) are summarized;
+the **prompt** is not, because a command you typed — `topos`, a raw
+`dump_topologies` — is one whose output you asked to read.
+
+A `.buda` flow handed to the wrapper **without** `-i` is refused with both
+ways to run one, rather than passed to `tclsh`, which reads it as Tcl and
+complains about whatever the flow's first line happens to be (an `invalid
+command name "add_block"`, or — for a flow opening with `source` — Tcl's own
+`source` failing on a path resolved against a different root).
+
+What it knows about the flow it learns from the
 **recorder** (`BUDA_RECORD` at `do_command` — loops unrolled, `source`
 trees flattened), not from parsing its text:
 

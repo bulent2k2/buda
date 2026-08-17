@@ -77,7 +77,7 @@ namespace eval ::buda {
     # `info procs`, which would also capture the generated procs if this
     # file were ever sourced twice.  Pinned by the test suite.
     variable reserved {start stop query output commands stream viz vizfinal
-                       onprogress async wait running cancel do}
+                       log endreport onprogress async wait running cancel do}
     # Captured HERE, at source time.  Inside a proc `info script` names the
     # script being RUN, not the one the proc was defined in, so resolving the
     # server relative to it would look for it beside the site's flow script.
@@ -210,6 +210,34 @@ proc ::buda::output {} {
 proc ::buda::commands {} {
     variable commands
     return $commands
+}
+
+# Summarize the run the way `bin/buda` does: full per-command detail to the
+# flow log beside the flow (`<dir>/log/<stem>_flow.log`), ONE line per command
+# on the terminal.  `buda::log <flow>` arms it, `buda::log off` disarms, and a
+# bare `buda::log` reports the path ("" when off); each form returns the path.
+#
+# Opt-in, and deliberately not what `buda::start` does: a Tcl flow issues its
+# commands one at a time and usually wants to see each one's output, so turning
+# this on by default would change every existing flow's console.  A driver that
+# runs a WHOLE .buda flow in one go wants the other shape — `btcl -i` arms it —
+# because the alternative is the flow's entire output in the scrollback and no
+# file to read the detail in afterwards.
+#
+# Disarm around anything whose output IS the point (`dump_topologies` at a
+# prompt): while armed, that output goes to the log and the terminal gets the
+# one-line abstract.  A re-arm appends, so one session is one log file.
+proc ::buda::log {{arg ""}} {
+    return [string trim [buda::_request [string trim "__log $arg"]]]
+}
+
+# The runtime summary + "Full per-command detail → <path>" line `bin/buda`
+# prints when a run ends.  Once per session (the engine's own guard), so a
+# driver may call it after the flow without worrying about later replans.
+proc ::buda::endreport {} {
+    set out [buda::_request "__end_report"]
+    if {[string trim $out] ne ""} { puts -nonewline $out ; flush stdout }
+    return $out
 }
 
 # Stream command output as it is produced (OUT frames) instead of one blob

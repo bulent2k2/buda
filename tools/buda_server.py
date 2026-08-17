@@ -80,14 +80,29 @@ while one long C++ call (a single `run_planner` on a huge design) returns
 before the interrupt lands.  SIGINT is blocked while a frame is being
 written, so a cancel cannot tear a frame in half.
 
-Five requests are the server's own rather than script commands:
+Seven requests are the server's own rather than script commands:
 
     __commands           the command registry, space-separated
     __query <name>       one scalar about the session (see `_QUERIES`)
     __stream on|off      stream command output as OUT frames (default off)
     __viz [on|off]       may `visualize` open a window (default on); no
                          argument reports the current setting
+    __log <flow>|off     summarize the run the way `bin/buda` does: full
+                         per-command detail to the flow log, one line per
+                         command on the terminal.  Replies with the log path
+    __end_report         the runtime summary + flow-log pointer `bin/buda`
+                         prints when a run finishes
     __exit               shut down
+
+`__log` exists because the terminal is the one place the two front ends did
+NOT agree.  A `.buda` run through `bin/buda` prints a line per command and
+files the detail; the same flow driven from Tcl printed every line of every
+command, because the summarizer is gated on a flow log being open and only
+the CLI ever opened one.  That is a thousand lines of scrollback for a flow
+whose CLI run is fifty — and no log afterwards to read the detail in.  It is
+a REQUEST rather than the default so an existing Tcl flow's output does not
+change under it: a driver that wants the summarized shape asks (`btcl -i`
+does), and one that wants each command's output as it comes says nothing.
 
 `__viz` exists because a window BLOCKS — `visualize` in a `.buda` script
 holds the run until the viewer is closed, and it means the same thing here.
@@ -364,6 +379,30 @@ class Server:
                       f"{type(e).__name__}: {e}\n")
         return cap.getvalue()
 
+    def _end_report_output(self):
+        """The end report, for a session ending inside a command.
+
+        A flow's own `exit` ends the run HERE (SystemExit inside `handle`),
+        which terminates the server before a driver can ask for `__end_report`
+        — and most real flows DO end that way, so the summarized run would
+        lose its summary on exactly the flows that use the documented
+        terminator.  The CLI has the same shape and solves it the same way:
+        its `finally` runs the end report after catching the script's exit.
+
+        Empty unless a flow log is armed, so a session that never asked to be
+        summarized replies with the same `BYE` payload it always did.
+        """
+        if self.session._flow_log is None:
+            return ""
+        cap = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(cap):
+                self.session._print_end_report()
+        except BaseException as e:                        # noqa: BLE001
+            cap.write(f"\nWarning: end report failed: "
+                      f"{type(e).__name__}: {e}\n")
+        return cap.getvalue()
+
     # ── one request ────────────────────────────────────────────────────────
     def handle(self, line):
         """Run one request.  Returns False when the session should end.
@@ -414,6 +453,37 @@ class Server:
             else:
                 self._reply("ERR", "usage: __viz [on|off]")
             return True
+        if req == "__log" or req.startswith("__log "):
+            # Exact-or-with-argument, for the `__viz` reason: a mistyped
+            # `__logg` must be refused, not answered with a plausible path.
+            parts = req.split(None, 1)
+            arg = parts[1].strip() if len(parts) > 1 else ""
+            if arg == "":
+                # The path only while it is ARMED.  `_flow_log_path` outlives
+                # the close (the end report still names the file it wrote), so
+                # reading it directly would report a disarmed session as armed
+                # — and this reply is what a driver branches on.
+                self._reply("OK", self.session._flow_log_path
+                            if self.session._flow_log is not None else "")
+            elif arg == "off":
+                self._reply("OK", self.session.close_flow_log() or "")
+            else:
+                # The argument is the FLOW, not the log: the log's location is
+                # derived from it exactly as the CLI derives it, so both front
+                # ends write the same file for the same flow and neither needs
+                # to know the naming rule.
+                self._reply("OK", self.session.open_flow_log(arg) or "")
+            return True
+        if req == "__end_report":
+            # Runs through the same `_print_end_report` the CLI's `finally`
+            # calls — including its once-only guard, because the runtime
+            # summary is a per-RUN artifact and a driver that replans should
+            # not print a second, cumulative one.
+            cap = io.StringIO()
+            with contextlib.redirect_stdout(cap):
+                self.session._print_end_report()
+            self._reply("OK", cap.getvalue())
+            return True
         if req.startswith("__stream"):
             parts = req.split(None, 1)
             mode = parts[1].strip().lower() if len(parts) > 1 else ""
@@ -436,6 +506,13 @@ class Server:
 
         cap = _StreamCapture(self._out_frame) if self.stream else io.StringIO()
         status, ended = "OK", False
+        # Where the printed-error scan below cannot see: with a flow log armed
+        # the engine SUMMARIZES each command inside a `source`, and the summary
+        # leads with an `x ` marker, so the scan's anchored `Error…` no longer
+        # matches the line that reports the failure.  The session counts those
+        # lines with the same predicate as it captures them, so the diff over
+        # this request says whether anything under it failed by printing.
+        errs_before = self.session._error_line_count
         try:
             # Both redirects: the C++ engine writes to std::cout, and without
             # ostream_redirect that output would go straight to fd 1 and be
@@ -468,8 +545,9 @@ class Server:
         # raises, so a site's `catch` has to see those too.  The scan reads
         # the FULL transcript in both modes — streaming changes how output
         # travels, never what a command means.
-        if status == "OK" and any(buda_cli._is_error_line(ln)
-                                  for ln in text.splitlines()):
+        if status == "OK" and (
+                any(buda_cli._is_error_line(ln) for ln in text.splitlines())
+                or self.session._error_line_count > errs_before):
             status = "ERR"
         # -v twin, second shutdown path: the flow's own `exit` ends the session
         # HERE, and returning False below terminates the server before
@@ -478,11 +556,19 @@ class Server:
         # documented way.  Appended AFTER the error scan on purpose: the
         # viewer's note is about the viewer, and must not be able to turn a
         # clean run into an ERR (or a FATAL's exit code into anything else).
-        viz = self._viz_final_output() if ended else ""
+        #
+        # The end report rides the same path and for the same reason (see
+        # `_end_report_output`), ahead of the viewer because that is the CLI's
+        # order: summary first, then the window that blocks on it.  Both are
+        # appended after the error scan, so neither can turn a clean run into
+        # an ERR — a note about the run's tail is not the run's verdict.
+        epilogue = ""
+        if ended:
+            epilogue = self._end_report_output() + self._viz_final_output()
         # Streamed: everything up to the last newline already went out as
         # OUT frames; the final frame carries only the tail, and the client
         # concatenates.  Buffered: the final frame is the whole output.
-        self._reply(status, (cap.tail() if self.stream else text) + viz)
+        self._reply(status, (cap.tail() if self.stream else text) + epilogue)
         return not ended
 
     def serve(self, inp=None):

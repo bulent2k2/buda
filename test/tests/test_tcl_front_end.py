@@ -30,6 +30,7 @@ The properties worth pinning are the ones where a plausible design is wrong:
   * the command list comes from the engine, so it cannot drift.
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -151,6 +152,64 @@ def test_a_command_that_fails_by_printing_still_raises(tmp_path):
     assert "RAISED" in out, out
 
 
+def test_a_printed_error_inside_a_summarized_source_still_raises(tmp_path):
+    """The same contract, through the door `buda::log` opens (Codex #769 P1).
+
+    Summarizing replaces a command's `Error: …` line with a one-line abstract
+    that LEADS with the `x ` marker, and the bridge decides "this command
+    failed" by scanning the transcript for a line that leads with the
+    diagnostic — so an anchored scan stops matching and a printed-error
+    command inside a summarized `source` returned OK.  The driver then
+    prompted on a half-failed flow.  Armed and unarmed must agree, so this
+    runs the SAME flow both ways and compares.
+    """
+    flow = tmp_path / "bad.buda"
+    flow.write_text("def_layer 5 M5 V TOP 30\n"
+                    "def_layer 6 M6 H TOP 30\n"
+                    "add_block a 0 0 100 100\n"
+                    "add_block b 300 0 400 100\n"
+                    "add_net n1 a.o b.i\n"
+                    "run_bundler STRICT\n"
+                    "generate_topologies\n"
+                    # Prints `Error: …` and returns normally — no raise.
+                    "run_detailed_nuts\n")
+    body = """
+        if {[info exists ::env(ARM)]} { buda::log %s }
+        if {[catch {buda::source %s} e]} { puts "RAISED" } else { puts "SILENT" }
+        buda::stop""" % (tcl_path(flow), tcl_path(flow))
+
+    import os
+    assert "RAISED" in _tcl(tmp_path, body), "unarmed lost the contract"
+    os.environ["ARM"] = "1"
+    try:
+        out = _tcl(tmp_path, body)
+    finally:
+        del os.environ["ARM"]
+    assert "RAISED" in out, out          # …and armed keeps it
+    # The failure is real, not a stray match: the summary IS the error line.
+    assert "x run_detailed_nuts" in out, out
+
+
+def test_a_clean_summarized_source_does_not_raise(tmp_path):
+    """The other direction of the same fix: counting error lines must not
+    make a clean summarized flow look failed."""
+    flow = tmp_path / "ok.buda"
+    flow.write_text("def_layer 5 M5 V TOP 30\n"
+                    "def_layer 6 M6 H TOP 30\n"
+                    "add_block a 0 0 100 100\n"
+                    "add_block b 300 0 400 100\n"
+                    "add_net n1 a.o b.i\n"
+                    "run_bundler STRICT\n"
+                    "generate_topologies\n"
+                    "run_planner 3\n"
+                    "run_nuts\n")
+    out = _tcl(tmp_path, """
+        buda::log %s
+        if {[catch {buda::source %s} e]} { puts "RAISED: $e" } else { puts "CLEAN" }
+        buda::stop""" % (tcl_path(flow), tcl_path(flow)))
+    assert "CLEAN" in out, out
+
+
 def test_a_warning_does_not_raise(tmp_path):
     """The other direction, and the one that would make the bridge unusable:
     `run_nuts` with nothing to do warns and returns, and a flow with a benign
@@ -246,3 +305,66 @@ def test_the_violations_query_is_the_audit_leg(tmp_path):
     """)
     assert "pre=-1" in out, out
     assert "post=0" in out, out
+
+
+def test_buda_log_gives_the_terminal_the_cli_gives(tmp_path):
+    """`bin/buda` prints one line per command and files the detail; the same
+    flow driven from Tcl printed every line of every command, because the
+    summarizer is gated on a flow log being open and only the CLI ever opened
+    one.  `buda::log` opens the same one — same path, same rotation, same
+    summaries — so a flow means the same thing through both doors."""
+    flow = tmp_path / "mini.buda"
+    flow.write_text("def_layer 5 M5 V TOP 30\n"
+                    "def_layer 6 M6 H TOP 30\n"
+                    "add_block a 0 0 100 100\n"
+                    "add_block b 300 0 400 100\n"
+                    "add_bus d[4] a.o b.i\n"
+                    "run_bundler STRICT\n"
+                    "generate_topologies\n"
+                    "run_planner 3\n"
+                    "run_nuts\n")
+    out = _tcl(tmp_path, f"""
+        puts "OFF=[buda::log]"
+        puts "ARMED=[buda::log {tcl_path(flow)}]"
+        buda::source {tcl_path(flow)}
+        buda::endreport
+        puts "DISARMED=[buda::log off]"
+        puts "AFTER=[buda::log]"
+        buda::stop""")
+
+    log_path = tmp_path / "log" / "mini_flow.log"
+    assert re.search(r"^OFF=$", out, re.M), out          # "" while off
+    assert f"ARMED={log_path}" in out, out
+    assert f"DISARMED={log_path}" in out, out
+    # …and a bare query reports OFF again: the path outlives the close
+    # (the end report names the file it wrote), the ARMED state does not.
+    assert re.search(r"^AFTER=$", out, re.M), out
+
+    # The console got the abstract…
+    assert "═══════ Runtime summary (mini.buda)" in out, out
+    assert "Full per-command detail →" in out, out
+    assert "[Planner] Bundle" not in out, out
+    # …and the detail is in the file, at the path the CLI derives.
+    detail = log_path.read_text()
+    assert "[Planner] Bundle" in detail
+    assert "━━━ run_nuts ━━━" in detail
+
+
+def test_an_unarmed_session_is_the_flow_it_always_was(tmp_path):
+    """Opt-in, and byte-identical when not used: a Tcl flow issues its
+    commands one at a time and usually wants each one's output, so arming
+    this in `buda::start` would change every existing flow's console."""
+    body = """
+        buda::def_layer 5 M5 V TOP 30
+        buda::def_layer 6 M6 H TOP 30
+        buda::add_block a 0 0 100 100
+        buda::add_block b 300 0 400 100
+        buda::add_net n1 a.o b.i
+        buda::run_bundler STRICT
+        buda::generate_topologies
+        buda::run_planner 3
+        buda::stop"""
+    out = _tcl(tmp_path, body)
+    assert "[Planner] Bundle" in out, out          # every line, as before
+    assert "Runtime summary" not in out, out       # and no end report
+    assert not (tmp_path / "log").exists()         # and no log written
