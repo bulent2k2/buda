@@ -1963,10 +1963,16 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         for (size_t i = 1; i < w.pts.size(); ++i) {
             const double ax = dbu_to_lu(w.pts[i-1].first),  ay = dbu_to_lu(w.pts[i-1].second);
             const double bx = dbu_to_lu(w.pts[i].first),    by = dbu_to_lu(w.pts[i].second);
+            // `net` carries the strap's identity as its own field.  Nothing
+            // routes differently for it — a strap blocks the same metal
+            // either way — but WHICH net a strap belongs to is what the NDR
+            // rail predicates need in order to see imported power geometry
+            // the way they already see a track pattern's rails
+            // (specialnets_scope.md §5(a), and (b) is what consumes it).
             stats.keepouts.push_back({w.layer,
                                       std::min(ax,bx)-hw, std::min(ay,by)-hw,
                                       std::max(ax,bx)+hw, std::max(ay,by)+hw,
-                                      "SPECIALNET " + w.net});
+                                      "SPECIALNET " + w.net, false, w.net});
         }
     }
 

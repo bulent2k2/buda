@@ -168,11 +168,51 @@ What (0) did NOT do, and what §4's run is still for: change any route. No DEF
 in the tree carries `+ SHAPE`, so the fix is byte-identical on every flow —
 correct, and unmeasured. Details in `opens_interchange.md` item 15.
 
-**(a) Carry the strap's identity into the session** — a net label on the
-imported keepout, or a parallel strap list beside the keepouts. Small,
-self-contained, no semantic risk: nothing reads the field yet, so it is
-additive. Worth doing even if (b) waits, because it is the part that is
-provably missing rather than merely absent.
+**(a) Carry the strap's identity into the session** — **LANDED 2026-08-17.**
+Of the two shapes offered here — a net label on the imported keepout, or a
+parallel strap list beside the keepouts — it is the **label**: a parallel
+list would be a second copy of geometry the keepouts already hold, and a
+second copy is the drift this document's own R4 rule exists to prevent.
+
+What landed, reader to session:
+
+| | |
+|---|---|
+| `DefImportStats::Keepout::net` | set on the `SPECIALNETS` path, empty elsewhere |
+| `KeepoutZone::net` | the session-side label |
+| `Floorplan::add_keepout_zone(..., net = "")` | defaulted, so every existing caller is untouched |
+| `_apply_def_keepouts` | passes it through, both bindings expose it |
+
+Carried as its **own field** rather than recovered from the provenance
+string `why` (`"SPECIALNET VDD"`): a net name may contain a space, so
+splitting that string is a parse that can be wrong, and a field whose whole
+purpose is that an identity survives intact must not arrive via a lossy
+round trip.
+
+Empty for obstruction with no net behind it — a macro's `OBS`, a `LAYER`
+blockage, a hand-declared `add_keepout`. (Not a component halo: item 13
+established that a halo carries no layer and produces no keepout at all,
+so there is no halo zone to label either way.) That is deliberate and
+test-pinned: `net` is a claim that this metal *belongs to* a net, and
+labelling anonymous obstruction would degrade it from "the rail this is" to
+"some string".
+
+**It has a reader on day one.** `import_def_lef`'s keepout census now names
+the nets (`SPECIALNET:3  (nets: VDD:2, VSS:1)`). A field nothing looks at
+rots silently, and this one exists so that a *later* consumer can trust it —
+exactly the situation in which silent rot is undetectable.
+
+**Not built, and why.** The `RoutingGrid` keeps its keepouts as a bare
+`std::vector<Rect>`, so giving them identity is a type change rather than an
+additive field, and it would touch every consumer that walks that list.
+Which of the two stores (b) needs is a real question: `ndr_rail_credits`
+already takes a `(label, type)` pair — no change needed there, the R4
+single-sourcing is intact — but its DNUTS caller enumerates *track slots*
+from the grid, so (b) may well want the grid side too. Deferred to (b),
+where it can be built against a consumer instead of a guess.
+
+Nothing routes differently: additive field, defaulted parameter, no
+behaviour keyed on it yet.
 
 **(b) Teach the three NDR rail predicates to see strap geometry** alongside
 pattern slots — `ndr_rail_credits` (R5a crediting), the R9 `NDR_SHIELD`

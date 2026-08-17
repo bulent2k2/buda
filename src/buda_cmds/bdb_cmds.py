@@ -391,7 +391,7 @@ def _apply_def_keepouts(session, st):
     that cannot see a blockage plans through it."""
     if not st.keepouts:
         return
-    by_why, unmapped = {}, set()
+    by_why, by_net, unmapped, dropped = {}, {}, set(), []
     for k in st.keepouts:
         lids = ([session._layer_name_map[k.layer]]
                 if k.layer and k.layer in session._layer_name_map
@@ -402,7 +402,15 @@ def _apply_def_keepouts(session, st):
         x1, y1 = int(round(k.x1)), int(round(k.y1))
         x2, y2 = int(round(k.x2)), int(round(k.y2))
         if x2 <= x1 or y2 <= y1:
-            continue                     # degenerate after quantization
+            # Degenerate after quantization — obstruction thinner than one
+            # layout unit.  It is DROPPED, which is the honest thing to do
+            # with a zone whose integer bbox has no area, but dropping it in
+            # SILENCE is not: the DEF drew metal there and the session ends
+            # up believing it did not.  Sub-micron rails are ordinary on the
+            # lower metals at a micron import scale, so this is reachable
+            # rather than theoretical.
+            dropped.append(k)
+            continue
         # Both consumers, exactly as cmd_add_keepout does: the Floorplan
         # feeds the planner, the RoutingGrid feeds DetailedNUTS.  Installing
         # only one leaves a blockage that half the pipeline cannot see.
@@ -410,16 +418,55 @@ def _apply_def_keepouts(session, st):
         # against the instance's own placed extent.  It changes nothing about
         # what this zone blocks — only whether its edges become Hanan loci
         # (opens_interchange.md item 12).
+        # `net` rides along for a power strap and is empty for everything
+        # else.  Like `inside_block` it changes nothing about what this zone
+        # blocks; it is the strap's IDENTITY, which is what the NDR rail
+        # predicates need to treat imported power metal as a rail rather than
+        # as anonymous obstruction (specialnets_scope.md §5(a)).
+        #
+        # Read directly rather than through `getattr(k, "net", "")`: the call
+        # below passes the field positionally, so an extension old enough to
+        # lack it would raise TypeError on the very next line — a guard that
+        # cannot fire is not protection, it is decoration that tells a reader
+        # this path is defended when it is not.
         session.fp.add_keepout_zone(x1, y1, x2, y2, lids,
-                                    bool(getattr(k, "inside_block", False)))
+                                    bool(getattr(k, "inside_block", False)),
+                                    k.net)
         if session.routing_grid:
             for lid in lids:
                 if session.routing_grid.has_layer(lid):
                     session.routing_grid.add_keepout(lid, x1, y1, x2, y2)
         by_why[k.why.split()[0]] = by_why.get(k.why.split()[0], 0) + 1
+        if k.net:
+            by_net[k.net] = by_net.get(k.net, 0) + 1
     if by_why:
         detail = ", ".join(f"{k}:{v}" for k, v in sorted(by_why.items()))
+        # Naming the nets gives the identity a READER on the day it lands.
+        # A field nothing looks at is a field that rots silently, and this
+        # one exists precisely so a later consumer can trust it.
+        #
+        # "net rects" rather than "nets": a polyline strap of N points
+        # becomes N-1 rectangles, so this counts RECTANGLES exactly as the
+        # `SPECIALNET:` figure beside it does.  Spelled out because
+        # `VDD:3400` on a real power grid otherwise reads as a count of
+        # something a reader would take to be straps, or nets.
+        if by_net:
+            nets = ", ".join(f"{n}:{c}" for n, c in sorted(by_net.items()))
+            detail += f"  (net rects: {nets})"
         print(f"[DEF] keepouts added: {detail}")
+    if dropped:
+        # What was dropped, and whose it was.  A strap that vanishes here is
+        # the one hole in `net`'s invariant: a predicate asking "is there a
+        # VDD rail at this seat" would get NO for a rail the DEF declares,
+        # and neither the census nor the zone list would show a trace of it.
+        lost_nets = sorted({k.net for k in dropped if k.net})
+        whose = f"  nets: {', '.join(lost_nets)}" if lost_nets else ""
+        buda_diag.emit(
+            "BUDA-1615",
+            f"[DEF] {len(dropped)} keepout(s) thinner than one layout unit "
+            f"were dropped when rounded to integer coordinates.{whose}  "
+            f"Their metal is NOT blocked and carries no identity; import at "
+            f"a finer scale (set_import_scale dbu) to keep them.")
     for l in sorted(unmapped):
         print(f"[DEF] keepouts on layer {l} skipped — no such layer")
 

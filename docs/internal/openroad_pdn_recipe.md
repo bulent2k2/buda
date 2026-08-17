@@ -332,7 +332,9 @@ With `ariane_pdn.def` in hand, in the order the work is worth doing:
    Importing that (netlist now identical — 161 busterms / 111 hbundles
    confirmed) adds the power-grid **wire polylines** as keepouts:
    `keepouts added: OBS:13034, SPECIALNET:6673` (vs baseline `OBS:13034`
-   alone). This is a **wire-only** measurement: the 113969 via placements
+   alone). Since §5(a) landed the line also names the nets —
+   `(nets: VDD:…, VSS:…)` — so a re-run of this measurement reports slightly
+   more than the string quoted here. This is a **wire-only** measurement: the 113969 via placements
    contribute no keepout, but that is not because via metal is absent — it is
    because a via placement's **enclosure metal** is not modelled at all
    (`def_io.cpp:347` — its extent lives in the DEF's `VIAS` section, which the
@@ -415,9 +417,11 @@ With `ariane_pdn.def` in hand, in the order the work is worth doing:
    Drop the middle `sed` line (keep `set_keepout_loci outside`) to reproduce
    the un-mitigated blowup — it will not finish; watch the worker's CPU and
    the `import_def_lef` line's `keepouts added:` count, then kill it.
-2. **`specialnets_scope.md` (a)** — carry each strap's *net identity* into
-   the session, not just its rectangle. Small and additive; nothing reads
-   the field yet.
+2. ~~**`specialnets_scope.md` (a)** — carry each strap's *net identity* into
+   the session, not just its rectangle.~~ **LANDED 2026-08-17**:
+   `KeepoutZone::net`, fed from a new `DefImportStats::Keepout::net`, empty
+   for obstruction with no net behind it. The import census names the nets,
+   so the field has a reader rather than waiting silently for (b).
 3. **`specialnets_scope.md` (b)** — teach the three NDR rail predicates
    (`ndr_rail_credits`, the R9 `NDR_SHIELD` audit, `emit_shield_bond_vias`)
    to see strap geometry beside pattern slots. This is the piece that makes

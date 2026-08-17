@@ -506,6 +506,23 @@ struct KeepoutZone {
     // real trade (an interior locus IS reachable — a trunk may cross a
     // block over-the-cell).  See opens_interchange.md item 12.
     bool inside_block = false;
+    // The NET this zone's metal belongs to, when it has one: a power-grid
+    // strap imported from a DEF `SPECIALNETS` section carries `VDD`, `VSS`
+    // and so on.  EMPTY for obstruction with no net behind it — a macro's
+    // `OBS` or a `LAYER` blockage — which is most keepouts.  (Not a
+    // component halo: item 13 established that a halo is PLACEMENT
+    // information and produces no keepout at all, so there is no halo
+    // zone here to label or not.)
+    //
+    // It changes nothing about what this zone blocks.  It exists because a
+    // strap is not merely occupied metal: it is a RAIL, and the NDR shield
+    // machinery (crediting, the R9 audit, bond vias) decides what it can
+    // credit or strap to by matching a rail's net against the rule's
+    // requested shield net.  Those predicates already take a `(label, type)`
+    // pair and are fed by track-pattern slots; giving an imported strap the
+    // same identity is what lets them see it too.  See
+    // specialnets_scope.md §5(a); (b) is the consumer.
+    std::string net;
 };
 
 // Floorplan identity for the analysis cache (Phase B): every Floorplan carries
@@ -538,9 +555,12 @@ public:
     // Hanan loci unless the caller can say it sits inside a block that
     // already does (see KeepoutZone).  Blocking behaviour is identical
     // either way.
+    // `net` names the zone's net when it has one (a power strap); empty for
+    // obstruction with no net behind it.  Blocking is identical either way.
     void add_keepout_zone(int x1, int y1, int x2, int y2,
                           const std::vector<int>& layer_ids,
-                          bool inside_block = false);
+                          bool inside_block = false,
+                          const std::string& net = "");
     const std::vector<KeepoutZone>& get_keepout_zones() const { return keepouts_; }
     // Mark a block as a hierarchy container (an envelope enclosing finer blocks)
     // rather than a solid leaf cell.  Containers are transparent to LOW layers:
