@@ -64,6 +64,16 @@ DEFAULT_FLOWS = [
 
 
 def solve(flow):
+    """Run a flow, returning its session — or raising if the flow FAILED.
+
+    A bare `except SystemExit: pass` would be wrong here in a way that matters
+    for exactly this tool.  The command handlers signal failure with
+    `SystemExit(1)` (a missing input, an unknown command), and swallowing that
+    returns a half-populated session whose candidate counts are low or zero —
+    which this scanner would then report as `END=0  BOTH=0`, i.e. as EVIDENCE
+    FOR the conclusion, when the truth is that nothing was measured.  A clean
+    `exit 0` in a flow is a different thing and is fine to continue from.
+    """
     import buda_cli
     s = buda_cli.BudaSession()
     s.no_viz = True
@@ -71,8 +81,11 @@ def solve(flow):
             contextlib.redirect_stderr(io.StringIO()):
         try:
             s.do_command(f"source {flow}")
-        except SystemExit:
-            pass
+        except SystemExit as e:
+            if e.code not in (0, None):
+                raise RuntimeError(
+                    f"{flow} exited {e.code} — counts from it would be "
+                    f"meaningless, so they are not reported") from e
     return s
 
 
@@ -121,9 +134,18 @@ def main():
     print(f"{'flow':<46}{'cands':>7}{'START':>7}{'END':>6}{'BOTH':>6}")
     print("-" * 72)
     tot = [0, 0, 0, 0]
+    failed = []
     for flow in flows:
         path = flow if Path(flow).is_absolute() else str(ROOT / flow)
-        s = solve(path)
+        name = flow[5:] if flow.startswith("flow/") else flow
+        try:
+            s = solve(path)
+        except RuntimeError as e:
+            # LOUD and skipped, never counted as a zero.  A flow that did not
+            # run is not a flow with nothing to find.
+            print(f"{name:<46}{'FAILED — ' + str(e).split('—')[0].strip():>26}")
+            failed.append(name)
+            continue
         cands = st = en = bo = 0
         for w in s.bundles:
             for t in w.input.candidates:
@@ -134,17 +156,24 @@ def main():
                 st += a
                 en += b
                 bo += c
-        name = flow[5:] if flow.startswith("flow/") else flow
         print(f"{name:<46}{cands:>7}{st:>7}{en:>6}{bo:>6}")
         for k, v in enumerate((cands, st, en, bo)):
             tot[k] += v
     print("-" * 72)
     print(f"{'total':<46}{tot[0]:>7}{tot[1]:>7}{tot[2]:>6}{tot[3]:>6}")
+    if failed:
+        # Said BEFORE any verdict, and the exit code carries it too: a partial
+        # sweep must not read as a clean one.
+        print(f"\n{len(failed)} flow(s) did NOT run: {', '.join(failed)}.\n"
+              "The totals above cover the rest only — no conclusion about what\n"
+              "is absent can rest on them.")
+        return 1
     if tot[3] == 0:
         print("\nBOTH is 0: the zero-length guard in trim_shared_leg_overlaps is\n"
               "DEFENSIVE on this set — the mirror makes that case reachable, but\n"
               "no flow measured here produces it.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
