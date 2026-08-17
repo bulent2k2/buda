@@ -27,7 +27,8 @@ import os
 # scan_fanin) reach the same code without importing the compiled extension.
 # Re-exported here because a command HANDLER needs them and cannot import
 # `buda_cli` without a cycle.
-from buda_script import strip_inline_comment, sole_path_arg   # noqa: F401
+from buda_script import (strip_inline_comment, sole_path_arg,      # noqa: F401
+                         leading_path_and_options, option_value, unquote)
 
 # The engine-side spelling, kept because that is the name buda_cli exposes.
 _strip_inline_comment = strip_inline_comment

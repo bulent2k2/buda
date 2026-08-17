@@ -86,10 +86,11 @@ def sole_path_arg(cmd_line, skip=1):
     rest = strip_inline_comment(cmd_line).strip().split(None, skip)
     if len(rest) <= skip:
         return ""
-    return _unquote(rest[skip].strip())
+    return unquote(rest[skip].strip())
 
 
-def _unquote(s):
+def unquote(s):
+    """Strip ONE matched surrounding pair of quotes, if present."""
     if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
         return s[1:-1]
     return s
