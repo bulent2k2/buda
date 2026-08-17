@@ -64,3 +64,12 @@ flow/tcl/out/
 # pip's CMake build tree (tool.scikit-build build-dir). Deliberately NOT build/,
 # which is the developer tree bin/bb writes — see pyproject.toml.
 .pipbuild/
+
+# Flow copies made by test helpers.  They are written into the flow's OWN
+# directory (a `source` resolves against the SCRIPT's directory, so a tmp_path
+# copy would not find its includes) and unlinked in a `finally` — which does
+# not run when the test process is killed, so an interrupted run leaves one
+# behind.  Ignored so a stray artifact cannot be swept into a `git add -A`.
+flow/**/_no_trim_*.buda
+flow/**/_trunk_trim_on_*.buda
+flow/**/_mst_trim_off_*.buda
