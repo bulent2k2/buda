@@ -99,6 +99,9 @@ updating this table, which is exactly the drift the guard now prevents):
 
 | Id | Severity | Meaning |
 |---|---|---|
+| BUDA-1210 | WARNING | a hier bundle's endpoint block has no placement; that endpoint was dropped |
+| BUDA-1211 | WARNING | a hier bundle has no placed endpoint pair left; no candidates generated |
+| BUDA-1502 | WARNING | a selected topology names a block absent from the frame a resume restores it in |
 | BUDA-1601 | ERROR | a cell in the DEF has no LEF footprint |
 | BUDA-1602 | WARNING | imported counts differ from the file's declared counts |
 | BUDA-1603 | WARNING | a construct was recorded, not applied |

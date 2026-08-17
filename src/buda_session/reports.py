@@ -25,6 +25,7 @@ cross-mixin helper calls resolve through the class as before.
 import buda
 
 import buda_diag
+from comp_placement import is_placed
 from .util import (UNIT_PITCH_UM_MAX, UNIT_PITCH_UM_MIN, UNIT_TRACKS_MAX,
                    UNIT_TRACKS_MIN, unit_consistency_signals,
                    unit_plausibility_faults)
@@ -743,6 +744,66 @@ class ReportsMixin:
                     f"tree (untapered)")))
         return out
 
+    def _report_block_contract(self, missing):
+        """Report topologies whose block contract does not resolve (BUDA-1502).
+
+        The invariant is `load_pipeline`'s: a candidate names blocks, and a
+        resumed session looks them up in the frame `_restore_wrapper` picks
+        for that bundle.  If the lookup fails there, the checkpoint cannot
+        reload — and until this ran here, nothing said so until the resume,
+        in the one session that could no longer repair it (`flow/ariane133`:
+        `load_pipeline expanded` refusing seven blocks on a checkpoint whose
+        build session had just reported a routed design).
+
+        ADVISORY, not a counted violation.  What it describes is a fault in
+        the design's INPUT — blocks a floorplan never placed — rather than in
+        the wire, so folding it into the violation total would restate the
+        same input fault in a metric that exists to measure routing.  It
+        carries an id instead, which is what a methodology needs to gate.
+
+        The cause is what makes it actionable, so each block is asked which
+        of the two it is: the BDB has it and it has no placement (nothing
+        downstream can help — it needs `derive_container_bboxes`, or a
+        placed descendant for that to work from), or the BDB places it and
+        the session simply never projected it (`add_blocks_from_bdb`)."""
+        if not missing:
+            return
+        comps = ({c.name: c for c in self.bdb.all_components()}
+                 if self.bdb is not None else {})
+        unplaced, unprojected, unknown = [], [], []
+        for name in sorted(missing):
+            c = comps.get(name)
+            if c is None:
+                unknown.append(name)
+            elif is_placed(c):
+                unprojected.append(name)
+            else:
+                unplaced.append(name)
+
+        def _sample(names, limit=5):
+            head = ', '.join(names[:limit])
+            return head + (f", … (+{len(names) - limit})"
+                           if len(names) > limit else "")
+
+        n_bundles = len({b for ids in missing.values() for b in ids})
+        parts = [f"{len(missing)} block(s) named by {n_bundles} bundle(s) are "
+                 f"not in the floorplan those topologies resolve against, so "
+                 f"`load_pipeline` will refuse this design on resume."]
+        if unplaced:
+            parts.append(f"  {len(unplaced)} have a component row with NO "
+                         f"placement ({_sample(unplaced)}) — give them one "
+                         f"(`derive_container_bboxes` needs a placed "
+                         f"descendant) or bundle at a depth that is placed.")
+        if unprojected:
+            parts.append(f"  {len(unprojected)} ARE placed in the BDB but "
+                         f"were never projected into the session floorplan "
+                         f"({_sample(unprojected)}) — add the missing "
+                         f"`add_blocks_from_bdb <depth> skip`.")
+        if unknown:
+            parts.append(f"  {len(unknown)} match no component row at all "
+                         f"({_sample(unknown)}).")
+        buda_diag.emit("BUDA-1502", '\n'.join(parts))
+
     def _check_design(self, stage: str, all_candidates: bool = False):
         """Audit the design at `stage`.
 
@@ -785,21 +846,10 @@ class ReportsMixin:
         suffix = " (all candidates)" if (all_candidates and stage == "topo") else ""
         print(f"[Check] Verifying {labels[stage]}-level design{suffix}...")
 
-        if self._hier_expansion_map:
-            fp_block_names = {name for name, _ in self.fp.get_all_blocks()}
-            missing = set()
-            for w in self.bundles:
-                if w.input.candidates and w.plan.selected_topology_index >= 0:
-                    topo = w.input.candidates[w.plan.selected_topology_index]
-                    for bname in topo.connected_block_names:
-                        if bname not in fp_block_names:
-                            missing.add(bname)
-            if missing:
-                shown = sorted(missing)[:5]
-                ellipsis_str = "..." if len(missing) > 5 else ""
-                print(f"  Warning: {len(missing)} block(s) referenced in topologies "
-                      f"but not in floorplan: {', '.join(shown)}{ellipsis_str}")
-                print(f"  Hint: call 'add_blocks_from_bdb N skip' for all required depths.")
+        # BLOCK-CONTRACT audit — accumulated in the per-bundle loop below,
+        # where each bundle's own frame is already resolved, and reported
+        # after it as BUDA-1502.  See `_report_block_contract`.
+        contract_missing = {}    # block name -> set of bundle ids
 
         # Hier bundles' candidates may live in a cell-local / depth / custom
         # floorplan rather than self.fp; resolve the right one per bundle so the
@@ -842,6 +892,23 @@ class ReportsMixin:
                 resolved = self._floorplan_for_hbundle(b, hier_fp_cache, comps_by_name)
                 if resolved is not None:
                     check_fp = resolved
+
+            # Does every candidate's BLOCK CONTRACT resolve in the very frame
+            # a resume would restore it against?  `check_fp` is picked by the
+            # same rule `_restore_wrapper` uses, so this is `load_pipeline`'s
+            # gate asked one session earlier — the only session that can
+            # still fix it.
+            #
+            # Over the WHOLE pool, deliberately outside the `to_check` loop
+            # below: persistence saves every candidate and `_restore_wrapper`
+            # validates every candidate, so scoping this to the SELECTED one
+            # would let an unselected candidate carry an unresolvable block,
+            # pass the audit, and still be refused on resume — the exact
+            # split this message exists to close (Codex P1 on #780).
+            for topo in w.input.candidates:
+                for bname in topo.connected_block_names:
+                    if not check_fp.has_block(bname):
+                        contract_missing.setdefault(bname, set()).add(bid)
 
             if all_candidates and stage == "topo":
                 to_check = list(enumerate(w.input.candidates))
@@ -918,6 +985,8 @@ class ReportsMixin:
                     if tp:
                         tug_bundles += 1
                         tug_pairs += len(tp)
+
+        self._report_block_contract(contract_missing)
 
         if total == 0:
             print("  Success: no violations found.")
