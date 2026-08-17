@@ -25,6 +25,8 @@ import sys
 
 import buda
 
+from buda_session.util import apply_pattern_layer_facts
+
 from slot_groups import MAX_SLOT_REPEAT as _MAX_SLOT_REPEAT  # noqa: F401
 from slot_groups import expand_slot_groups
 
@@ -189,16 +191,7 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
     session._persist_track_pattern(layer_id, pat, is_h, 'script')
     session._pattern_restored.discard(layer_id)
     session._pattern_source[layer_id] = "script"
-    session.layers.set_layer_dilution(layer_id, pat.dilution_factor())
-    # Measured per-bit channel cost: one signal track every
-    # unit_pitch/n_signals units.  Supersedes the density model
-    # (base width x dilution) in planner/NUTS effective widths.
-    n_sig = sum(1 for s in slots if s.type == "SIGNAL")
-    if n_sig > 0:
-        session.layers.set_bit_pitch(layer_id, pat.unit_pitch() / n_sig)
-        # R1 metal-shaped NDR needs the slot GEOMETRY, not just the pitch:
-        # pushed beside it so the two can never describe different patterns.
-        session.layers.set_ndr_geom(layer_id, pat.ndr_geom())
+    apply_pattern_layer_facts(session.layers, layer_id, pat)
 
     # Re-apply any existing keepouts to this new layer grid.  Explicit layer
     # sets only: a zone with EMPTY layer_ids (= blocks all layers, Python-API

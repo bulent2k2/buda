@@ -167,3 +167,89 @@ def test_the_resumed_grid_answers_the_question_dnuts_asks(tmp_path):
             b = [(round(pos, 6), slot.type)
                  for pos, slot in g2.signal_tracks_in(x, lo, hi)]
             assert a == b, f"layer {lid} probe {(x, lo, hi)}: {len(a)} vs {len(b)}"
+
+
+# ── the derived layer facts, in every declaration order ────────────────────
+
+_PAT = "def_track_pattern 4 0 VDD 2 1 _ 1 1 _ 1 1 GND 2 1"
+
+
+@pytest.mark.parametrize("order, why", [
+    (["def_layer 4 M4 H LOW 30", "OPEN"], "the stack first"),
+    (["OPEN", "def_layer 4 M4 H LOW 30"], "the checkpoint first"),
+])
+def test_the_restored_width_model_does_not_depend_on_declaration_order(
+        tmp_path, order, why):
+    """A pattern's derived facts (dilution, per-bit pitch, NDR geometry) are
+    pushed onto the LayerStack, which has no row for a layer that is declared
+    LATER — so with `open_bdb` before `def_layer` they went nowhere and the
+    session kept the overhead-derived dilution: the coarser model this whole
+    change exists to replace, silently, in exactly the ordering the target
+    flow uses (`flow/ariane133/ariane133_heal.buda` opens at line 27 and
+    declares its stack at 68).  Measured then: 40.0 declared, 17.14 restored.
+
+    `def_layer` now picks up a pattern the restore already installed."""
+    db = str(tmp_path / "o.bdb")
+    built, _ = _session(["def_layer 4 M4 H LOW 30", f"open_bdb {db}", _PAT])
+    declared = built.layers.eff_bus_width(8, 12.0, 4)
+
+    s, _ = _session([f"open_bdb {db}" if c == "OPEN" else c for c in order])
+    assert s.layers.eff_bus_width(8, 12.0, 4) == declared, why
+
+
+def test_the_bit_pitch_is_per_signal_slot_not_per_period(tmp_path):
+    """One derivation, four call sites.  Two of them passed `unit_pitch`
+    whole where the rule is `unit_pitch / n_signal_slots` — invisible on the
+    single-signal-slot patterns LEF and DEF synthesize, and wrong by the
+    signal-slot count on any hand-declared one (this pattern has 2 of 4, so
+    the restored bus came out 80 wide against 40 declared)."""
+    db = str(tmp_path / "o.bdb")
+    s1, _ = _session(["def_layer 4 M4 H LOW 30", f"open_bdb {db}", _PAT])
+    s2, _ = _session([f"open_bdb {db}", "def_layer 4 M4 H LOW 30"])
+    # unit_pitch 10 over 2 signal slots = 5 per bit; 8 bits = 40.
+    assert s1.layers.eff_bus_width(8, 12.0, 4) == 40.0
+    assert s2.layers.eff_bus_width(8, 12.0, 4) == 40.0
+
+
+# ── the pre-v29 warning is detected from the data ──────────────────────────
+
+def test_a_gridless_routed_checkpoint_is_reported(tmp_path):
+    """BUDA-1503 keys on the DATA, not the schema version: opening a BDB
+    MIGRATES it, so `schema_version()` already reads the current one by the
+    time anything can ask, and a version test could never fire (Codex P2 on
+    #782).  Simulated here by dropping the grid rows a v29 build wrote —
+    which is precisely the state a pre-v29 checkpoint is in."""
+    db = str(tmp_path / "r.bdb")
+    s1, _ = _session([
+        "def_layer 4 M4 H LOW 30", "def_layer 5 M5 V LOW 30", f"open_bdb {db}",
+        _PAT, "def_track_pattern 5 0 _ 1 1",
+        "add_block a 0 0 40 40", "add_block b 200 0 240 40",
+        "add_bus d[4] a.tx b.rx",
+        "run_bundler", "generate_topologies", "run_planner 1", "run_nuts",
+        "run_detailed_nuts", "save_bdb",
+    ])
+    assert s1.bdb.net_segments("1"), "vehicle must be detail-routed"
+    s1.bdb.clear_track_patterns()          # what a pre-v29 checkpoint holds
+    del s1
+
+    s2, out = _session(["def_layer 4 M4 H LOW 30", "def_layer 5 M5 V LOW 30",
+                        "add_block a 0 0 40 40", "add_block b 200 0 240 40",
+                        f"open_bdb {db}", "load_pipeline"])
+    assert "BUDA-1503" in out
+    assert "def_track_pattern" in out       # the remedy
+
+
+def test_a_design_that_never_had_a_grid_is_not_accused(tmp_path):
+    """The condition has to be exact: a flow with no track patterns routed
+    without one legitimately, so restoring it must say nothing."""
+    db = str(tmp_path / "n.bdb")
+    _session(["def_layer 4 M4 H LOW 30", "def_layer 5 M5 V LOW 30",
+              f"open_bdb {db}", "add_block a 0 0 40 40",
+              "add_block b 200 0 240 40", "add_bus d[4] a.tx b.rx",
+              "run_bundler", "generate_topologies", "run_planner 1",
+              "run_nuts", "save_bdb"])
+    _s, out = _session(["def_layer 4 M4 H LOW 30", "def_layer 5 M5 V LOW 30",
+                        "add_block a 0 0 40 40", "add_block b 200 0 240 40",
+                        f"open_bdb {db}", "load_pipeline"])
+    assert "BUDA-1503" not in out
+    assert "rehydrated" in out            # it really did restore

@@ -24,7 +24,7 @@ import buda
 import sys
 import re
 
-from buda_session.util import min_bit_pitch, resolve_script_path
+from buda_session.util import apply_pattern_layer_facts, min_bit_pitch, resolve_script_path
 from buda_script import leading_path_and_options
 
 from ._options import (reject_unknown_options, require_distance,
@@ -535,6 +535,19 @@ def cmd_def_layer(session, cmd, args, cmd_line):
         session._layer_overheads[int(lid)] = ovh_val
     session._layer_name_map[name] = int(lid)
     session._layer_source[int(lid)] = "script"
+    # A pattern may already exist for this layer — the v29 restore installs
+    # the grid at `open_bdb`, and a flow declares its stack AFTER that
+    # (`flow/ariane133/ariane133_heal.buda`: open_bdb line 27, def_layer line
+    # 68).  The derived facts are pushed onto the LayerStack, which had no row
+    # for the layer when the restore ran, so they went nowhere and this
+    # `add_layer` would leave the overhead-derived dilution in place: the
+    # coarser model the restore exists to replace, silently, in exactly the
+    # ordering the target flow uses (Codex P1 on #782).
+    if (session.routing_grid is not None
+            and session.routing_grid.has_layer(int(lid))):
+        pat = session.routing_grid.get_layer_grid(int(lid)).global_pattern()
+        if pat.slots:
+            apply_pattern_layer_facts(session.layers, int(lid), pat)
     # An IMPORTED pattern outlives the layer row it was installed beside, and
     # the routing grid stores the layer's direction with it.  Overriding an
     # imported layer with a different H/V would otherwise leave that pattern
@@ -736,9 +749,7 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
         # convert, since `set_import_scale dbu` resolves from the DEF's own
         # UNITS statement.
         session._lef_track_width[lid] = l.width
-        session.layers.set_layer_dilution(lid, pat.dilution_factor())
-        session.layers.set_bit_pitch(lid, pat.unit_pitch())
-        session.layers.set_ndr_geom(lid, pat.ndr_geom())
+        apply_pattern_layer_facts(session.layers, lid, pat)
         return None
 
     for lid, l in sorted(plan):

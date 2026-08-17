@@ -32,7 +32,7 @@ import os
 import buda
 import buda_diag
 
-from .util import _batched
+from .util import _batched, apply_pattern_layer_facts
 
 
 class PersistMixin:
@@ -1196,10 +1196,19 @@ class PersistMixin:
         # cannot fix retroactively; so it is SAID, at the moment the session
         # that suffers it is created, rather than surfacing six stages later
         # as `run_detailed_nuts requires a routing grid`.
+        #
+        # Detected from the DATA, not from the version: opening the BDB
+        # MIGRATES it, so `schema_version()` already reads 29 by the time
+        # anything here can ask, and a version test could never fire (Codex
+        # P2 on #782).  The exact condition is "this checkpoint was
+        # DETAIL-routed and carries no track pattern": detailed NUTS cannot
+        # run without a grid, so a checkpoint holding `net_segment` rows was
+        # certainly routed with one — while a design that legitimately never
+        # had a grid holds none of those rows and is not accused of anything.
         if (self.routing_grid is None
-                and self.bdb.schema_version() < 29
-                and any(self.bdb.bus_segments(w.input.original_bundle.id)
-                        for w in bundles[:1])):
+                and not self.bdb.track_patterns()
+                and any(self.bdb.net_segments(str(w.input.original_bundle.id))
+                        for w in bundles)):
             buda_diag.emit(
                 "BUDA-1503",
                 "this checkpoint holds a routed design but no routing grid "
@@ -1697,9 +1706,7 @@ class PersistMixin:
             # The derived layer facts the pattern feeds — without these the
             # width model falls back to the def_layer overhead figure, which
             # is the silent half of the resume divergence.
-            self.layers.set_layer_dilution(lid, pat.dilution_factor())
-            self.layers.set_bit_pitch(lid, pat.unit_pitch())
-            self.layers.set_ndr_geom(lid, pat.ndr_geom())
+            apply_pattern_layer_facts(self.layers, lid, pat)
             restored_layers.append(lid)
         for r in ovrs:
             if self.routing_grid is None or not self.routing_grid.has_layer(r.layer_id):

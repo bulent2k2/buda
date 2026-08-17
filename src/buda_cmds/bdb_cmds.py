@@ -26,7 +26,8 @@ import sys
 
 import buda_diag
 from ._options import reject_unknown_options
-from buda_session.util import ensure_parent_dir, resolve_script_path
+from buda_session.util import (apply_pattern_layer_facts,
+                               ensure_parent_dir, resolve_script_path)
 from buda_script import (leading_path_and_options, sole_path_arg,
                          split_quoted_args)
 
@@ -377,9 +378,7 @@ def _apply_def_tracks(session, st):
             session.routing_grid.define_layer(lid, pat, layer_is_h)
             session._persist_track_pattern(lid, pat, layer_is_h, 'def')
             session._pattern_source[lid] = "def"
-            session.layers.set_layer_dilution(lid, pat.dilution_factor())
-            session.layers.set_bit_pitch(lid, pat.unit_pitch())
-            session.layers.set_ndr_geom(lid, pat.ndr_geom())
+            apply_pattern_layer_facts(session.layers, lid, pat)
             installed.append(f"{lname}[{tr.count}@{tr.step:g}]")
     if installed:
         print(f"[DEF] tracks installed (bounded): {', '.join(installed)}")
