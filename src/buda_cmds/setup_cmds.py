@@ -25,6 +25,7 @@ import sys
 import re
 
 from buda_session.util import min_bit_pitch, resolve_script_path
+from buda_script import leading_path_and_options
 
 from ._options import (reject_unknown_options, require_distance,
                        require_int)
@@ -610,23 +611,26 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
     # real design drop the hand-typed stack entirely.
     if not args:
         print("Error: import_lef_tech requires <file.lef>"); return
+    # A QUOTED path may contain spaces; unquoted, this is the old args[0]/
+    # args[1:] split exactly (buda_script.leading_path_and_options).
+    lef_arg, opts = leading_path_and_options(cmd_line, ("top",))
     reject_unknown_options("import_lef_tech",
-                           [a for a in args[1:] if not a.replace(".", "").isdigit()],
+                           [a for a in opts if not a.replace(".", "").isdigit()],
                            ("top",))
     n_top = 2                      # the natural pair: one H + one V
-    if "top" in args:
-        i = args.index("top")
-        if i + 1 >= len(args):
+    if "top" in opts:
+        i = opts.index("top")
+        if i + 1 >= len(opts):
             print("Error: import_lef_tech top requires a count"); return
         try:
-            n_top = int(args[i + 1])
+            n_top = int(opts[i + 1])
         except ValueError:
             print(f"Error: import_lef_tech top must be an integer, "
-                  f"got '{args[i + 1]}'"); return
+                  f"got '{opts[i + 1]}'"); return
         if n_top < 0:
             print("Error: import_lef_tech top must be >= 0"); return
 
-    lef_path = resolve_script_path(session, args[0], is_read=True)
+    lef_path = resolve_script_path(session, lef_arg, is_read=True)
     try:
         lib = buda.read_lef(lef_path)
     except RuntimeError as e:

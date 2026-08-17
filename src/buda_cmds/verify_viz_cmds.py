@@ -24,6 +24,7 @@ import os
 
 import buda_diag
 from buda_session.util import resolve_script_path
+from buda_script import leading_path_and_options, option_value
 
 from ._options import reject_unknown_options
 # NOTE: `buda_viz` is imported LAZILY inside the two visualize handlers below,
@@ -508,22 +509,25 @@ def cmd_emit_guides(session, cmd, args, cmd_line):
         print("Error: emit_guides requires an output path "
               "(<file.json> or <file.csv>)")
         return
-    path = args[0]
+    # A QUOTED path may contain spaces — for the output AND for the `tcl` /
+    # `csv` values, which are paths too.  Unquoted, this is the old
+    # args[0]/args[1:] split exactly.
+    path, opts = leading_path_and_options(cmd_line, ("margin", "tcl", "csv"))
     margin, tcl, csv_path = 0.0, None, None
-    i = 1
-    while i < len(args):
-        kw = args[i].lower()
-        if kw == "margin" and i + 1 < len(args):
+    i = 0
+    while i < len(opts):
+        kw = opts[i].lower()
+        if kw == "margin" and i + 1 < len(opts):
             try:
-                margin = float(args[i + 1])
+                margin = float(opts[i + 1])
             except ValueError:
                 print(f"Error: emit_guides margin must be a number, "
-                      f"got '{args[i + 1]}'"); return
+                      f"got '{opts[i + 1]}'"); return
             i += 2
-        elif kw == "tcl" and i + 1 < len(args):
-            tcl = args[i + 1]; i += 2
-        elif kw == "csv" and i + 1 < len(args):
-            csv_path = args[i + 1]; i += 2
+        elif kw == "tcl" and i + 1 < len(opts):
+            tcl, i = option_value(opts, i)
+        elif kw == "csv" and i + 1 < len(opts):
+            csv_path, i = option_value(opts, i)
         else:
             reject_unknown_options("emit_guides", [kw],
                                    ("margin", "tcl", "csv"))
@@ -547,23 +551,24 @@ def cmd_export_def_blockages(session, cmd, args, cmd_line):
     # lives in the manifest and nowhere else.
     if not args:
         print("Error: export_def_blockages requires an output path"); return
-    path = args[0]
+    # A QUOTED path may contain spaces; unquoted this is the old split.
+    path, opts = leading_path_and_options(cmd_line, ("density", "margin"))
     density, margin = None, 0.0
-    i = 1
-    while i < len(args):
-        kw = args[i].lower()
-        if kw == "density" and i + 1 < len(args):
+    i = 0
+    while i < len(opts):
+        kw = opts[i].lower()
+        if kw == "density" and i + 1 < len(opts):
             try:
-                density = float(args[i + 1])
+                density = float(opts[i + 1])
             except ValueError:
                 print(f"Error: export_def_blockages density must be a "
-                      f"number, got '{args[i + 1]}'"); return
+                      f"number, got '{opts[i + 1]}'"); return
             if not 0.0 < density <= 1.0:
                 print("Error: export_def_blockages density must be in (0, 1]")
                 return
             i += 2
-        elif kw == "margin" and i + 1 < len(args):
-            margin = float(args[i + 1]); i += 2
+        elif kw == "margin" and i + 1 < len(opts):
+            margin = float(opts[i + 1]); i += 2
         else:
             reject_unknown_options("export_def_blockages", [kw],
                                    ("density", "margin"))
