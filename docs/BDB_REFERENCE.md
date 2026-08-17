@@ -202,6 +202,44 @@ than the design that was checkpointed while reporting itself clean (see
 [`load_pipeline`](#load_pipeline)).  Empty for every other bundle, and empty
 for a pre-v27 checkpoint, which resumes exactly as it did and says so
 (BUDA-1904).
+v29 added the **routing grid** — the `track_pattern` table (one row per
+layer: origin, direction, bounds, the slot list as JSON, and `source`), the
+`grid_override` table (region-scoped patterns, keyed by layer + region) and
+the `keepout` table (the zone, its layer set as a CSV, `inside_block` and
+the SPECIALNET `net`).  These were the last physical-design facts with no
+table: pure session state, rebuilt by whoever declared them.  When that
+"whoever" is `import_def_lef`, a hier stage-resume loses them, because it
+HOLDS the import — a replayed `add_inst` is a duplicate-instance error.
+`run_detailed_nuts requires a routing grid` was the visible symptom and the
+only loud moment; the quiet half is worse, since `run_nuts` and the healers
+run on before it, so a `plan` resume re-solves against the `def_layer`
+overhead figure instead of the pattern's own pitch and against no
+obstruction at all (measured on `flow/ariane133`: 20 keepout-seated
+segments in the build, 18 in the resume).
+
+What is stored is the **declaration**, not a read-back of the built grid, so
+a restore replays `define_layer` / `add_override` / `add_keepout` verbatim.
+`track_pattern.source` (`script` | `lef` | `def`) is the persisted form of
+the session's provenance memo, and it is what makes precedence survive the
+round trip — "an explicit `def_track_pattern` outranks imported data in
+either order" is a rule about WHO declared a value, which a pattern alone
+cannot say.  A keepout is stored as the ZONE, layer set included, rather
+than one row per (zone, layer): `set_keepout_loci` reasons per zone, and
+splitting it would lose the object the rule is about.  Rows are keyed by
+geometry, so re-running a flow against the same BDB upserts instead of
+accumulating, and a burst is written in one transaction — a DEF import
+declares thousands at once (5,472 on `demo/ariane`, ~0.01 s).
+
+`open_bdb` restores all three beside the layer-policy and NDR restores, and
+re-derives the layer facts the pattern feeds (dilution, bit pitch, NDR
+geometry) — without those the width model falls back to the overhead figure,
+which is the silent half of the divergence.  A flow that opens a checkpoint
+and then re-declares its own patterns is NOT a duplicate declaration: that
+error is about a flow contradicting itself, not about one re-declaring what
+its checkpoint handed back.  A pre-v29 checkpoint carries no grid rows and
+cannot be fixed retroactively, so `load_pipeline` says so (BUDA-1503) when
+it restores a routed design into a session with no grid.
+
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.
 

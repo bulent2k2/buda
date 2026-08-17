@@ -339,6 +339,12 @@ def cmd_add_keepout(session, cmd, args, cmd_line):
                 if session.routing_grid.has_layer(lid):
                     session.routing_grid.add_keepout(lid, x1, y1, x2, y2)
 
+        # 3. Write through to the BDB (v29) so a resumed session has the
+        #    blockage too — the planner and DetailedNUTS both read it, and a
+        #    checkpoint that restores the route but not what blocks it is a
+        #    checkpoint of a different design.
+        session._persist_keepouts([(x1, y1, x2, y2, layer_ids, False, "")])
+
         print(f"[Floorplan] Added keepout zone at ({x1},{y1})-({x2},{y2}) "
               f"for layers {layer_ids}")
     except (ValueError, IndexError):
@@ -722,6 +728,7 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
         if session.routing_grid is None:
             session.routing_grid = buda.RoutingGridStack()
         session.routing_grid.define_layer(lid, pat, is_h)
+        session._persist_track_pattern(lid, pat, is_h, 'lef')
         session._pattern_source[lid] = "lef"
         # In MICRONS, the unit a LEF is written in.  Converted at the one
         # place it is consumed (the DEF TRACKS path), which is where the

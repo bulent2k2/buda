@@ -436,6 +436,32 @@ void BDB::_create_schema() {
             prefix TEXT PRIMARY KEY,
             rule   TEXT NOT NULL REFERENCES ndr_rule(name)
         );
+        CREATE TABLE IF NOT EXISTS track_pattern (
+            layer_id INTEGER PRIMARY KEY,
+            origin   REAL NOT NULL DEFAULT 0,
+            is_horiz INTEGER NOT NULL DEFAULT 0,
+            bounded  INTEGER NOT NULL DEFAULT 0,
+            bound_lo REAL NOT NULL DEFAULT 0,
+            bound_hi REAL NOT NULL DEFAULT 0,
+            source   TEXT NOT NULL DEFAULT 'script',
+            slots    TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS grid_override (
+            layer_id INTEGER NOT NULL,
+            x1 INTEGER NOT NULL, y1 INTEGER NOT NULL,
+            x2 INTEGER NOT NULL, y2 INTEGER NOT NULL,
+            origin REAL NOT NULL DEFAULT 0,
+            slots  TEXT NOT NULL DEFAULT '[]',
+            PRIMARY KEY (layer_id, x1, y1, x2, y2)
+        );
+        CREATE TABLE IF NOT EXISTS keepout (
+            x1 INTEGER NOT NULL, y1 INTEGER NOT NULL,
+            x2 INTEGER NOT NULL, y2 INTEGER NOT NULL,
+            layers       TEXT NOT NULL DEFAULT '',
+            inside_block INTEGER NOT NULL DEFAULT 0,
+            net          TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (x1, y1, x2, y2, layers)
+        );
         CREATE TABLE IF NOT EXISTS cell_children (
             parent_cell TEXT NOT NULL REFERENCES cell(name),
             inst_name   TEXT NOT NULL,
@@ -4060,6 +4086,146 @@ std::vector<std::pair<std::string,std::string>> BDB::ndr_scopes() const {
 void BDB::clear_ndr() {
     _exec("DELETE FROM ndr_scope; DELETE FROM ndr_rule;");
 }
+
+// ── routing-grid persistence (v29) ────────────────────────────────────────
+
+void BDB::set_track_pattern(const TrackPatternRow& r) {
+    Stmt s(_db,
+        "INSERT INTO track_pattern(layer_id,origin,is_horiz,bounded,"
+        "bound_lo,bound_hi,source,slots) VALUES(?,?,?,?,?,?,?,?)"
+        " ON CONFLICT(layer_id) DO UPDATE SET origin=excluded.origin,"
+        " is_horiz=excluded.is_horiz, bounded=excluded.bounded,"
+        " bound_lo=excluded.bound_lo, bound_hi=excluded.bound_hi,"
+        " source=excluded.source, slots=excluded.slots");
+    sqlite3_bind_int   (s, 1, r.layer_id);
+    sqlite3_bind_double(s, 2, r.origin);
+    sqlite3_bind_int   (s, 3, r.is_horiz);
+    sqlite3_bind_int   (s, 4, r.bounded);
+    sqlite3_bind_double(s, 5, r.bound_lo);
+    sqlite3_bind_double(s, 6, r.bound_hi);
+    sqlite3_bind_text  (s, 7, r.source.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (s, 8, r.slots.c_str(),  -1, SQLITE_TRANSIENT);
+    step_checked(_db, s, "set_track_pattern");
+}
+
+std::vector<TrackPatternRow> BDB::track_patterns() const {
+    Stmt q(_db, "SELECT layer_id,origin,is_horiz,bounded,bound_lo,bound_hi,"
+                "source,slots FROM track_pattern ORDER BY layer_id");
+    auto txt = [](sqlite3_stmt* st, int c) -> std::string {
+        const unsigned char* p = sqlite3_column_text(st, c);
+        return p ? reinterpret_cast<const char*>(p) : std::string();
+    };
+    std::vector<TrackPatternRow> rows;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        TrackPatternRow r;
+        r.layer_id = sqlite3_column_int(q, 0);
+        r.origin   = sqlite3_column_double(q, 1);
+        r.is_horiz = sqlite3_column_int(q, 2);
+        r.bounded  = sqlite3_column_int(q, 3);
+        r.bound_lo = sqlite3_column_double(q, 4);
+        r.bound_hi = sqlite3_column_double(q, 5);
+        r.source   = txt(q, 6);
+        r.slots    = txt(q, 7);
+        rows.push_back(std::move(r));
+    }
+    return rows;
+}
+
+void BDB::clear_track_patterns() { _exec("DELETE FROM track_pattern;"); }
+
+void BDB::set_grid_override(const GridOverrideRow& r) {
+    Stmt s(_db,
+        "INSERT INTO grid_override(layer_id,x1,y1,x2,y2,origin,slots)"
+        " VALUES(?,?,?,?,?,?,?)"
+        " ON CONFLICT(layer_id,x1,y1,x2,y2) DO UPDATE SET"
+        " origin=excluded.origin, slots=excluded.slots");
+    sqlite3_bind_int   (s, 1, r.layer_id);
+    sqlite3_bind_int   (s, 2, r.x1);
+    sqlite3_bind_int   (s, 3, r.y1);
+    sqlite3_bind_int   (s, 4, r.x2);
+    sqlite3_bind_int   (s, 5, r.y2);
+    sqlite3_bind_double(s, 6, r.origin);
+    sqlite3_bind_text  (s, 7, r.slots.c_str(), -1, SQLITE_TRANSIENT);
+    step_checked(_db, s, "set_grid_override");
+}
+
+std::vector<GridOverrideRow> BDB::grid_overrides() const {
+    Stmt q(_db, "SELECT layer_id,x1,y1,x2,y2,origin,slots FROM grid_override"
+                " ORDER BY layer_id,x1,y1,x2,y2");
+    auto txt = [](sqlite3_stmt* st, int c) -> std::string {
+        const unsigned char* p = sqlite3_column_text(st, c);
+        return p ? reinterpret_cast<const char*>(p) : std::string();
+    };
+    std::vector<GridOverrideRow> rows;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        GridOverrideRow r;
+        r.layer_id = sqlite3_column_int(q, 0);
+        r.x1 = sqlite3_column_int(q, 1);
+        r.y1 = sqlite3_column_int(q, 2);
+        r.x2 = sqlite3_column_int(q, 3);
+        r.y2 = sqlite3_column_int(q, 4);
+        r.origin = sqlite3_column_double(q, 5);
+        r.slots  = txt(q, 6);
+        rows.push_back(std::move(r));
+    }
+    return rows;
+}
+
+void BDB::clear_grid_overrides() { _exec("DELETE FROM grid_override;"); }
+
+void BDB::add_keepouts(const std::vector<KeepoutRow>& rows) {
+    if (rows.empty()) return;
+    // One transaction for the whole burst: a DEF import hands us ~13k zones,
+    // and per-statement autocommit would fsync the WAL once per rect.
+    begin_batch();
+    try {
+        Stmt s(_db,
+            "INSERT INTO keepout(x1,y1,x2,y2,layers,inside_block,net)"
+            " VALUES(?,?,?,?,?,?,?)"
+            " ON CONFLICT(x1,y1,x2,y2,layers) DO UPDATE SET"
+            " inside_block=excluded.inside_block, net=excluded.net");
+        for (const auto& r : rows) {
+            sqlite3_reset(s);
+            sqlite3_clear_bindings(s);
+            sqlite3_bind_int (s, 1, r.x1);
+            sqlite3_bind_int (s, 2, r.y1);
+            sqlite3_bind_int (s, 3, r.x2);
+            sqlite3_bind_int (s, 4, r.y2);
+            sqlite3_bind_text(s, 5, r.layers.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int (s, 6, r.inside_block);
+            sqlite3_bind_text(s, 7, r.net.c_str(), -1, SQLITE_TRANSIENT);
+            step_checked(_db, s, "add_keepouts");
+        }
+    } catch (...) {
+        rollback_batch();
+        throw;
+    }
+    commit_batch();
+}
+
+std::vector<KeepoutRow> BDB::keepouts() const {
+    Stmt q(_db, "SELECT x1,y1,x2,y2,layers,inside_block,net FROM keepout"
+                " ORDER BY x1,y1,x2,y2,layers");
+    auto txt = [](sqlite3_stmt* st, int c) -> std::string {
+        const unsigned char* p = sqlite3_column_text(st, c);
+        return p ? reinterpret_cast<const char*>(p) : std::string();
+    };
+    std::vector<KeepoutRow> rows;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        KeepoutRow r;
+        r.x1 = sqlite3_column_int(q, 0);
+        r.y1 = sqlite3_column_int(q, 1);
+        r.x2 = sqlite3_column_int(q, 2);
+        r.y2 = sqlite3_column_int(q, 3);
+        r.layers = txt(q, 4);
+        r.inside_block = sqlite3_column_int(q, 5);
+        r.net = txt(q, 6);
+        rows.push_back(std::move(r));
+    }
+    return rows;
+}
+
+void BDB::clear_keepouts() { _exec("DELETE FROM keepout;"); }
 
 int BDB::_ensure_net(const std::string& name) {
     { Stmt q(_db, "SELECT id FROM net WHERE name=?");

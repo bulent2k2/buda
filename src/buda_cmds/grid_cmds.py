@@ -167,6 +167,13 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
         if session._pattern_source.get(layer_id) == "lef":
             print(f"[LEF] def_track_pattern overrides the imported pattern "
                   f"on layer {layer_id}")
+        elif layer_id in session._pattern_restored:
+            # Restored from the open BDB (v29), not declared in THIS session.
+            # The duplicate error is about a flow contradicting itself; a flow
+            # re-declaring what its own checkpoint handed back is the ordinary
+            # case — `open_bdb` then the same setup lines — and erroring on it
+            # would make every flow that opens a checkpoint unrunnable.
+            session._pattern_restored.discard(layer_id)
         else:
             print(f"Error: layer {layer_id} already has a track pattern — "
                   f"duplicate def_track_pattern (use add_grid_override for a "
@@ -179,6 +186,8 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
         is_h = (session.layers.get_layer_dir(layer_id) == buda.LayerDir.HORIZONTAL)
 
     session.routing_grid.define_layer(layer_id, pat, is_h)
+    session._persist_track_pattern(layer_id, pat, is_h, 'script')
+    session._pattern_restored.discard(layer_id)
     session._pattern_source[layer_id] = "script"
     session.layers.set_layer_dilution(layer_id, pat.dilution_factor())
     # Measured per-bit channel cost: one signal track every
@@ -286,6 +295,7 @@ def cmd_add_grid_override(session, cmd, args, cmd_line):
     if session.routing_grid is None:
         session.routing_grid = buda.RoutingGridStack()
     session.routing_grid.add_override(layer_id, x1, y1, x2, y2, pat)
+    session._persist_grid_override(layer_id, x1, y1, x2, y2, pat)
     print(f"[RoutingGrid] Override on layer {layer_id} "
           f"region=({x1},{y1})-({x2},{y2}): "
           f"{len(slots)} slots, unit_pitch={pat.unit_pitch():.3f}")

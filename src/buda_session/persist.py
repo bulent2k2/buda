@@ -1188,6 +1188,27 @@ class PersistMixin:
                   "— run generate_topologies with a BDB open first")
             return 0
         self.bundles = bundles
+        # A checkpoint written BEFORE v29 carries no grid rows, so the restore
+        # above found nothing to install and this session will re-solve
+        # against whatever the stack alone implies — the `def_layer` overhead
+        # figure instead of the pattern's own pitch, and no keepouts.  That is
+        # the state this whole schema bump exists to end, and the one thing it
+        # cannot fix retroactively; so it is SAID, at the moment the session
+        # that suffers it is created, rather than surfacing six stages later
+        # as `run_detailed_nuts requires a routing grid`.
+        if (self.routing_grid is None
+                and self.bdb.schema_version() < 29
+                and any(self.bdb.bus_segments(w.input.original_bundle.id)
+                        for w in bundles[:1])):
+            buda_diag.emit(
+                "BUDA-1503",
+                "this checkpoint holds a routed design but no routing grid "
+                "(written before schema v29, which added one): the restored "
+                "plan was solved against track patterns and keepouts this "
+                "session does not have, so re-solving it here uses the "
+                "layer overhead figure and no obstruction.  Re-run the flow "
+                "once to write a v29 checkpoint, or declare the patterns "
+                "(`def_track_pattern`) before `load_pipeline`.")
         if self._retaper_done:
             print(f"[Resume] re-derived the per-bit fan-in taper on "
                   f"{self._retaper_done} bundle(s)")
@@ -1558,3 +1579,152 @@ class PersistMixin:
         (`sel` here is the BDB cand_index — see _selected_bdb_cand_index)."""
         for seg_index, layer in enumerate(w.plan.seg_layers):
             self.bdb.set_segment_layer(bid, sel, seg_index, int(layer))
+
+    # ── routing-grid persistence (v29) ────────────────────────────────────
+    #
+    # The grid and the keepouts were the last physical-design facts with no
+    # table: pure session state, rebuilt by whoever declared them.  When that
+    # "whoever" is `import_def_lef`, a hier resume loses them — it HOLDS the
+    # import (a replayed one is a duplicate-instance error) — and the result
+    # is not merely that `run_detailed_nuts` refuses for want of a grid.  That
+    # refusal is the only loud moment: `run_nuts` and the healers run on
+    # before it, against a coarser, blockage-free model than the checkpoint
+    # was routed under (measured on flow/ariane133: the build reports 20
+    # keepout-seated segments, the resume 18).
+    #
+    # What is written is the DECLARATION, not a read-back of the built grid —
+    # origin, slots, bounds, region — so a restore replays `define_layer` /
+    # `add_override` / `add_keepout` verbatim.  Recording at the declaration
+    # site also means the C++ grid needs no new getters: every install site
+    # already holds the values.
+
+    @staticmethod
+    def _slots_json(pattern):
+        """A TrackPattern's slot list as the stored JSON array."""
+        import json
+        return json.dumps([{"t": s.type, "l": s.label,
+                            "w": s.width, "s": s.space_after}
+                           for s in pattern.slots])
+
+    @staticmethod
+    def _slots_from_json(text):
+        import json
+        return [buda.TrackSlot(type=d["t"], label=d["l"],
+                               width=d["w"], space_after=d["s"])
+                for d in (json.loads(text) if text else [])]
+
+    def _persist_track_pattern(self, layer_id, pattern, is_horiz, source):
+        """Write through one `define_layer` declaration.  No BDB = no-op, so
+        every install site can call it unconditionally."""
+        if self.bdb is None:
+            return
+        row = buda.TrackPatternRow()
+        row.layer_id = int(layer_id)
+        row.origin   = float(pattern.origin)
+        row.is_horiz = 1 if is_horiz else 0
+        row.bounded  = 1 if pattern.bounded else 0
+        row.bound_lo = float(pattern.bound_lo)
+        row.bound_hi = float(pattern.bound_hi)
+        row.source   = source
+        row.slots    = self._slots_json(pattern)
+        self.bdb.set_track_pattern(row)
+
+    def _persist_grid_override(self, layer_id, x1, y1, x2, y2, pattern):
+        if self.bdb is None:
+            return
+        row = buda.GridOverrideRow()
+        row.layer_id = int(layer_id)
+        row.x1, row.y1, row.x2, row.y2 = int(x1), int(y1), int(x2), int(y2)
+        row.origin = float(pattern.origin)
+        row.slots  = self._slots_json(pattern)
+        self.bdb.set_grid_override(row)
+
+    def _persist_keepouts(self, zones):
+        """Write through a burst of keepout declarations.
+
+        `zones` is [(x1,y1,x2,y2, [layer_ids], inside_block, net)] — the zone
+        as declared, layer set included, because a zone is the object
+        `set_keepout_loci` reasons about; one row per (zone, layer) would
+        lose it.  `net` rides along for the same reason the importer carries
+        it rather than re-splitting a provenance string: a power strap's
+        identity has to survive intact.  One call per burst so the 13k a DEF
+        import declares are one transaction rather than 13k."""
+        if self.bdb is None or not zones:
+            return
+        rows = []
+        for x1, y1, x2, y2, lids, inside, net in zones:
+            r = buda.KeepoutRow()
+            r.x1, r.y1, r.x2, r.y2 = int(x1), int(y1), int(x2), int(y2)
+            r.layers = ",".join(str(int(l)) for l in sorted(lids))
+            r.inside_block = 1 if inside else 0
+            r.net = net or ""
+            rows.append(r)
+        self.bdb.add_keepouts(rows)
+
+    def _restore_grid_from_bdb(self):
+        """Rebuild the routing grid and the keepouts from the open BDB.
+
+        Called from `open_bdb`, beside the layer-policy and NDR restores that
+        already work this way.  Precedence follows the rule the LEF/DEF
+        importers already obey — an explicit `def_track_pattern` outranks
+        imported data in EITHER order — which is why `source` is stored: a
+        pattern alone cannot say who declared it.  A layer this session has
+        already declared is left alone; a layer declared LATER replaces what
+        was restored, and `_pattern_restored` is what lets it, since the
+        duplicate-declaration error must fire for a second declaration in
+        ONE session and not for a re-declaration of a checkpoint's own."""
+        if self.bdb is None:
+            return
+        pats = self.bdb.track_patterns()
+        ovrs = self.bdb.grid_overrides()
+        zones = self.bdb.keepouts()
+        if not pats and not ovrs and not zones:
+            return
+        restored_layers = []
+        for r in pats:
+            lid = int(r.layer_id)
+            if self._pattern_source.get(lid) == "script":
+                continue                    # this session already declared it
+            pat = buda.TrackPattern(origin=r.origin,
+                                    slots=self._slots_from_json(r.slots))
+            if r.bounded:
+                pat.set_bounds(r.bound_lo, r.bound_hi)
+            if self.routing_grid is None:
+                self.routing_grid = buda.RoutingGridStack()
+            self.routing_grid.define_layer(lid, pat, bool(r.is_horiz))
+            self._pattern_source[lid] = r.source or "script"
+            self._pattern_restored.add(lid)
+            # The derived layer facts the pattern feeds — without these the
+            # width model falls back to the def_layer overhead figure, which
+            # is the silent half of the resume divergence.
+            self.layers.set_layer_dilution(lid, pat.dilution_factor())
+            self.layers.set_bit_pitch(lid, pat.unit_pitch())
+            self.layers.set_ndr_geom(lid, pat.ndr_geom())
+            restored_layers.append(lid)
+        for r in ovrs:
+            if self.routing_grid is None or not self.routing_grid.has_layer(r.layer_id):
+                continue
+            pat = buda.TrackPattern(origin=r.origin,
+                                    slots=self._slots_from_json(r.slots))
+            self.routing_grid.add_override(r.layer_id, r.x1, r.y1, r.x2, r.y2, pat)
+        n_zones = 0
+        for r in zones:
+            lids = [int(t) for t in r.layers.split(",") if t]
+            self.fp.add_keepout_zone(r.x1, r.y1, r.x2, r.y2, lids,
+                                     bool(r.inside_block), r.net)
+            if self.routing_grid is not None:
+                for lid in lids:
+                    if self.routing_grid.has_layer(lid):
+                        self.routing_grid.add_keepout(lid, r.x1, r.y1,
+                                                      r.x2, r.y2)
+            n_zones += 1
+        if restored_layers or n_zones:
+            parts = []
+            if restored_layers:
+                parts.append(f"{len(restored_layers)} track pattern(s) "
+                             f"(layers {','.join(map(str, restored_layers))})")
+            if ovrs:
+                parts.append(f"{len(ovrs)} region override(s)")
+            if n_zones:
+                parts.append(f"{n_zones} keepout(s)")
+            print(f"[open_bdb] restored the routing grid: {', '.join(parts)}")

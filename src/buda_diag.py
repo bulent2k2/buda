@@ -79,6 +79,11 @@ MESSAGES = {
     "BUDA-1211": (WARNING, "A hierarchical bundle has no placed endpoint "
                            "pair left, so no candidates were generated and "
                            "its nets are unrouted."),
+    # ── nuts ───────────────────────────────────────────────────────────────
+    "BUDA-1503": (WARNING, "A restored checkpoint holds a routed design but "
+                           "no routing grid (written before schema v29), so "
+                           "re-solving it uses a different physical model "
+                           "than the one it was routed under."),
     # ── verify ─────────────────────────────────────────────────────────────
     "BUDA-1502": (WARNING, "A selected topology names a block that is not in "
                            "the floorplan a resume would restore it against, "

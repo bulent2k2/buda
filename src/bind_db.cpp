@@ -131,6 +131,40 @@ void bind_db(py::module_& m) {
         .def_readwrite("metal",        &NdrRuleRow::metal)
         .def_readwrite("spacing_abs",  &NdrRuleRow::spacing_abs);
 
+    // Routing-grid persistence (v29): the DECLARATIONS, so a restore replays
+    // define_layer / add_override / add_keepout verbatim rather than
+    // re-deriving a grid from a read-back of one.
+    py::class_<TrackPatternRow>(m, "TrackPatternRow")
+        .def(py::init<>())
+        .def_readwrite("layer_id", &TrackPatternRow::layer_id)
+        .def_readwrite("origin",   &TrackPatternRow::origin)
+        .def_readwrite("is_horiz", &TrackPatternRow::is_horiz)
+        .def_readwrite("bounded",  &TrackPatternRow::bounded)
+        .def_readwrite("bound_lo", &TrackPatternRow::bound_lo)
+        .def_readwrite("bound_hi", &TrackPatternRow::bound_hi)
+        .def_readwrite("source",   &TrackPatternRow::source)
+        .def_readwrite("slots",    &TrackPatternRow::slots);
+
+    py::class_<GridOverrideRow>(m, "GridOverrideRow")
+        .def(py::init<>())
+        .def_readwrite("layer_id", &GridOverrideRow::layer_id)
+        .def_readwrite("x1", &GridOverrideRow::x1)
+        .def_readwrite("y1", &GridOverrideRow::y1)
+        .def_readwrite("x2", &GridOverrideRow::x2)
+        .def_readwrite("y2", &GridOverrideRow::y2)
+        .def_readwrite("origin", &GridOverrideRow::origin)
+        .def_readwrite("slots",  &GridOverrideRow::slots);
+
+    py::class_<KeepoutRow>(m, "KeepoutRow")
+        .def(py::init<>())
+        .def_readwrite("x1", &KeepoutRow::x1)
+        .def_readwrite("y1", &KeepoutRow::y1)
+        .def_readwrite("x2", &KeepoutRow::x2)
+        .def_readwrite("y2", &KeepoutRow::y2)
+        .def_readwrite("layers",       &KeepoutRow::layers)
+        .def_readwrite("inside_block", &KeepoutRow::inside_block)
+        .def_readwrite("net",          &KeepoutRow::net);
+
     py::class_<TopoRow>(m, "TopoRow")
         .def(py::init<>())
         .def_readwrite("id",                 &TopoRow::id)
@@ -706,6 +740,15 @@ void bind_db(py::module_& m) {
         .def("delete_ndr_scope", &BDB::delete_ndr_scope, py::arg("prefix"))
         .def("ndr_scopes",       &BDB::ndr_scopes)
         .def("clear_ndr",        &BDB::clear_ndr)
+        .def("set_track_pattern",    &BDB::set_track_pattern, py::arg("row"))
+        .def("track_patterns",       &BDB::track_patterns)
+        .def("clear_track_patterns", &BDB::clear_track_patterns)
+        .def("set_grid_override",    &BDB::set_grid_override, py::arg("row"))
+        .def("grid_overrides",       &BDB::grid_overrides)
+        .def("clear_grid_overrides", &BDB::clear_grid_overrides)
+        .def("add_keepouts",         &BDB::add_keepouts, py::arg("rows"))
+        .def("keepouts",             &BDB::keepouts)
+        .def("clear_keepouts",       &BDB::clear_keepouts)
         .def("cell_child_edges", &BDB::cell_child_edges)
         .def("add_inst",        &BDB::add_inst,
              py::arg("inst_name"), py::arg("cell_name"), py::arg("parent_name"),
