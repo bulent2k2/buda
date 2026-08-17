@@ -33,7 +33,7 @@ __all__ = [
     "_apply_bbox_zoom", "_install_bbox_zoom",
     "_hover_color", "style_button",
     "_pan_axes", "_PAN_STEP", "_UNCONSTRAINED",
-    "collect_candidate_bundles", "_get_nterms",
+    "collect_candidate_bundles", "_get_nterms", "busterm_counts",
     "snap_endpoint_extents",
 ]
 
@@ -518,7 +518,15 @@ def collect_candidate_bundles(bundles):
 
 # Just for ref. No longer used.
 def _get_nterms(topo):
-    """Return the number of unique blocks connected by this topology metadata."""
+    """Blocks this topology LANDS ON — face taps and bridges only.
+
+    NOT the busterm count, and it has no callers: use `busterm_counts()`.
+    `seg_busterms` records where segment ENDPOINTS tap a face, so this misses
+    every PASS-THROUGH — a trunk crossing a block covers it without ending
+    there, and that is a real connection the block contract carries.
+    Measured on `flow/ariane133`: this returns 6 for bundle 154 where the
+    contract has 17, and agrees with it on only 14 of 47 bundles.
+    """
     names = set()
     # 1. Block connections stored during topology generation
     for eps in topo.seg_busterms.values():
@@ -589,3 +597,36 @@ def snap_endpoint_extents(along_lo, along_hi, endpoint_conns, perp):
         if hi_adj:
             hi[i] = max(hi_adj)
     return lo, hi
+
+
+def busterm_counts(wrapper):
+    """(busterms, net endpoints) for a bundle — two different numbers.
+
+    Both titles used to print `HBundle.num_terminals` under the label
+    "bterms", and it is not a busterm count.  It is `1 + |receiver
+    instances|` of the bundle's net — an endpoint count at the depth the
+    NETLIST connects, while a busterm is what the ROUTE lands on, in the
+    frame the bundle is planned in.  On a hierarchical design those are far
+    apart: `flow/ariane133` bundle 154 reports 89, and the route touches 17
+    blocks, because 88 leaf SRAM instances at depth 3 resolve onto 17
+    `sram_block[N].data_sram` / `tag_sram` containers at depth 2.  Measured
+    across that design, 10 of 47 bundles (21%) disagree.
+
+    The busterm number comes from the SELECTED candidate's block contract,
+    which is what the drawing shows and therefore what the title must agree
+    with.  It matches the persisted `bundle_busterm` rows on 41 of 42
+    bundles there; the one exception is a bundle whose second endpoint is an
+    UNPLACED container, which `derive_busterms` skips and the topology still
+    references — so the route is the more faithful source, not the table.
+
+    Returns (None, num_terminals) when no candidate is selected: there is no
+    route to count blocks on yet, and inventing one would be worse than
+    saying so.
+    """
+    bundle = wrapper.input.original_bundle
+    endpoints = bundle.num_terminals
+    cands = wrapper.input.candidates
+    sel = wrapper.plan.selected_topology_index
+    if not cands or not (0 <= sel < len(cands)):
+        return None, endpoints
+    return len(set(cands[sel].connected_block_names)), endpoints

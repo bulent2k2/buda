@@ -671,7 +671,16 @@ class ExplorerDrawMixin:
                 layer_summary_parts.append(lbl)
         layer_summary = " ".join(layer_summary_parts)
         
-        nterms = self.wrapper.input.original_bundle.num_terminals
+        # BUSTERMS (what the route lands on) and, when they differ, the net
+        # ENDPOINT count they resolve from — this printed `num_terminals`
+        # under a "terms" label, which is the endpoint count (see
+        # viz_common.busterm_counts).  Counted on the candidate BEING SHOWN,
+        # not the planner's selection, so the number always describes the
+        # geometry on screen as you step through candidates with a/d.
+        _sel_bt, nterms = busterm_counts(self.wrapper)
+        nbt = len(set(topo.connected_block_names))
+        terms_str = (f"{nbt} bterms" if nbt == nterms
+                     else f"{nbt} bterms of {nterms} endpoints")
         # Super-candidate family annotation: `fam F/M` (this candidate's family
         # index / family count) with a `▸` when family-stepping ('G') is active
         # and `+K` for the K other nominal-locus variants in the family.
@@ -690,7 +699,7 @@ class ExplorerDrawMixin:
         # NDR badge (governed bundles): rule + group demand in the header.
         ndr_badge = self._ndr_badge()
         title_main = (
-            f"{bus_label}B{bid} ({nterms} terms/{len(topo.segments)} segs) · topo {self.idx + 1}/{n}"
+            f"{bus_label}B{bid} ({terms_str}/{len(topo.segments)} segs) · topo {self.idx + 1}/{n}"
             f"{fam_str} · {topo.type} · WL={wl} · [{layer_summary}]"
             f"{ndr_badge}{sel_badge}{grp_badge}"
         )
