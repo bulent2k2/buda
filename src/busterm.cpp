@@ -125,7 +125,12 @@ void BustermGen::derive(int max_depth) {
     for (const ComponentRow* cp : ordered) {
         const ComponentRow& comp = *cp;
         if (comp.depth > max_depth) continue;
-        if (comp.x1 < 0) continue;  // unplaced; skip
+        // The SHARED placement rule (bdb.h `bbox_is_placed`), not `x1 < 0`.
+        // The projection into the routing floorplan uses it too, and the two
+        // must agree: a component one side calls placed and the other skips
+        // is a block in the floorplan with no routing-interface row — an
+        // endpoint nothing can bundle to (Codex P2 on #780).
+        if (!bbox_is_placed(comp.x1, comp.y1, comp.x2, comp.y2)) continue;
 
         HierBusterm hbt = _from_component(comp, cells_with_pins);
 
@@ -142,7 +147,9 @@ void BustermGen::derive(int max_depth) {
         // rather than a crash.
         if (comp.parent_id >= 0) {
             auto it = by_id.find(comp.parent_id);
-            if (it != by_id.end() && it->second.x1 >= 0 &&
+            if (it != by_id.end() &&
+                bbox_is_placed(it->second.x1, it->second.y1,
+                               it->second.x2, it->second.y2) &&
                 it->second.depth <= max_depth)
                 hbt.parent_id = "bt:" + it->second.name;
         }

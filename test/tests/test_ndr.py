@@ -1606,14 +1606,22 @@ def test_v26_absolute_persists_and_restores(tmp_path):
     assert spec.active() and spec.width_slots == 2
 
 
-def _persisted_abs_rule(tmp_path, decl="def_ndr abs3 width 3 layers M3"):
-    """A BDB carrying one absolute rule, ready to reopen."""
+def _persisted_abs_rule(tmp_path, decl="def_ndr abs3 width 3 layers M3",
+                        keep_grid=True):
+    """A BDB carrying one absolute rule, ready to reopen.
+
+    `keep_grid=False` drops the v29 grid rows, leaving the rule with no
+    pattern to quantize against — which is what a checkpoint written BEFORE
+    v29 looks like, and the only way to reach that state now that a track
+    pattern is persisted with the design that declared it."""
     s1 = _bare_session()
     _run(s1, f"open_bdb {tmp_path}/b.bdb")
     for line in ("def_layer 3 M3 H 20",
                  "def_track_pattern 3 0 VDD 2 1 (_ 1 1)x12 GND 2 1"):
         _run(s1, line)
     _run(s1, decl)
+    if not keep_grid:
+        s1.bdb.clear_track_patterns()
     del s1
     return f"{tmp_path}/b.bdb"
 
@@ -1653,7 +1661,13 @@ def test_v26_restored_absolute_still_unpatterned_at_use_is_fatal(tmp_path):
     # Deferral is not permission: a rule whose governed layer STILL has no
     # pattern when it is about to govern routing gets the same refusal
     # `def_ndr` would have made, at the first moment it can be made.
-    path = _persisted_abs_rule(tmp_path)
+    #
+    # `keep_grid=False` because v29 persists the pattern with the design that
+    # declared it, so reopening this checkpoint now RESTORES one and the rule
+    # quantizes correctly — the refusal is right not to fire.  The state this
+    # test is about is a checkpoint that carries the rule and no grid, which
+    # is what every pre-v29 BDB is.
+    path = _persisted_abs_rule(tmp_path, keep_grid=False)
     s2 = _bare_session()
     _run(s2, f"open_bdb {path}")
     _run(s2, "def_layer 3 M3 H 20")           # layer, but no track pattern

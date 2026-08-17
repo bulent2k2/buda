@@ -72,6 +72,22 @@ _RANGES = {
 # Adding an entry is cheap; changing one's MEANING is not allowed.  The test
 # suite pins uniqueness and the id->meaning mapping.
 MESSAGES = {
+    # ── topology generation ────────────────────────────────────────────────
+    "BUDA-1210": (WARNING, "A hierarchical bundle names an endpoint block "
+                           "with no placement, so that endpoint was dropped "
+                           "from the bundle's routing interface."),
+    "BUDA-1211": (WARNING, "A hierarchical bundle has no placed endpoint "
+                           "pair left, so no candidates were generated and "
+                           "its nets are unrouted."),
+    # ── nuts ───────────────────────────────────────────────────────────────
+    "BUDA-1503": (WARNING, "A restored checkpoint holds a routed design but "
+                           "no routing grid (written before schema v29), so "
+                           "re-solving it uses a different physical model "
+                           "than the one it was routed under."),
+    # ── verify ─────────────────────────────────────────────────────────────
+    "BUDA-1502": (WARNING, "A selected topology names a block that is not in "
+                           "the floorplan a resume would restore it against, "
+                           "so a checkpoint of this design will not reload."),
     # ── interchange ────────────────────────────────────────────────────────
     "BUDA-1601": (ERROR, "A cell in the DEF has no footprint in the LEF."),
     "BUDA-1606": (WARNING, "A cell in the DEF has no footprint in the LEF "

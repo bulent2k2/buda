@@ -294,6 +294,11 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # able to replace what the import provided (Phase 2b).
         self._layer_source = {}      # layer_id -> 'script' | 'lef'
         self._pattern_source = {}    # layer_id -> 'script' | 'lef' | 'def'
+        # Layers whose pattern came back from the BDB (v29) rather than
+        # from a command in THIS session.  The duplicate-declaration error
+        # must fire for a second `def_track_pattern` in one session and
+        # NOT for a flow re-declaring what its own checkpoint restored.
+        self._pattern_restored = set()
         # Wire WIDTH per layer, from LEF.  DEF TRACKS give a pitch and a
         # position but no width — only the technology knows that — so a
         # tech import feeds this and `import_def_lef` consumes it.

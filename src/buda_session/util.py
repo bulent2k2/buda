@@ -478,3 +478,36 @@ def unit_plausibility_faults(signals, lu_per_um=1.0):
         elif n > UNIT_TRACKS_MAX:
             faults.append((lid, up, n, "high"))
     return faults
+
+
+def apply_pattern_layer_facts(layers, layer_id, pattern):
+    """Push a track pattern's DERIVED facts onto the layer stack.
+
+    The three of them — dilution, per-bit channel pitch, NDR slot geometry —
+    are what every width model downstream reads, and they were derived at
+    four call sites (`def_track_pattern`, the DEF `TRACKS` path,
+    `import_lef_tech`, and the v29 restore) that did not agree: the bit pitch
+    is `unit_pitch / n_signal_slots`, but two of the four passed `unit_pitch`
+    whole.  That is invisible on a single-signal-slot pattern — which is
+    exactly what LEF and DEF synthesize, so it never bit there — and wrong by
+    the signal-slot count on any hand-declared pattern.  Measured on a
+    4-slot/2-signal pattern: an 8-bit bus came out 80 units wide restored
+    against 40 declared.
+
+    One definition, so the restored design is charged what the declared one
+    was.  Returns True when a pattern was applied (a layer the stack does not
+    have yet takes nothing — see the caller in `def_layer`)."""
+    if not layers.has_layer(layer_id):
+        return False
+    slots = pattern.slots
+    layers.set_layer_dilution(layer_id, pattern.dilution_factor())
+    n_sig = sum(1 for s in slots if s.type == "SIGNAL")
+    if n_sig > 0:
+        # Measured per-bit channel cost: one signal track every
+        # unit_pitch/n_signals units.  Supersedes the density model
+        # (base width x dilution) in planner/NUTS effective widths.
+        layers.set_bit_pitch(layer_id, pattern.unit_pitch() / n_sig)
+        # R1 metal-shaped NDR needs the slot GEOMETRY, not just the pitch:
+        # pushed beside it so the two can never describe different patterns.
+        layers.set_ndr_geom(layer_id, pattern.ndr_geom())
+    return True

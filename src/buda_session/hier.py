@@ -34,7 +34,12 @@ import sys
 
 import buda
 
+import buda_diag
 from bus_names import parse_bus_bit
+# WHETHER a component has a placement — one definition for every frame this
+# module builds, because generation validates in its frame and load_pipeline
+# validates in self.fp, so two answers is a resume failure (comp_placement.py).
+from comp_placement import is_placed
 
 # ── Orientation helpers (module-level: shared pure functions) ────────────────
 # Output-normalized orientation maps over a w×h box: (swap, reflect-x,
@@ -145,7 +150,7 @@ def detect_instance_orients(comps, cell, ref_name=None, cache=None,
     if index is None:
         index = bottom_up_congruence_index(comps)
     insts_by_cell, by_parent = index
-    insts = sorted((c for c in insts_by_cell.get(cell, []) if c.x1 >= 0),
+    insts = sorted((c for c in insts_by_cell.get(cell, []) if is_placed(c)),
                    key=lambda c: c.name)
     if not insts:
         return {}
@@ -656,7 +661,13 @@ class HierMixin:
             shallower branches produce no block.
         mode="error": like deepest but prints a warning and returns early
             if any branch is shorter than the requested depth.
-        Components without valid placement (x1 < 0) are always skipped.
+        Components without a placement are always skipped — `is_placed`, the
+        same rule every generation frame uses.  This site used to read ANY
+        negative coordinate as unplaced, which is not what the sentinel is:
+        on `flow/ariane133` it discarded 496 of 504 depth-0 components that
+        have real geometry (495 die ports at x1 = -70, plus the whole
+        top-level `i_cache_subsystem` at y1 = -240), and the routes generated
+        against those blocks then had nowhere to land on resume.
         """
         comps = self.bdb.all_components()
 
@@ -707,7 +718,7 @@ class HierMixin:
         added_rows = []   # (ComponentRow, is_fallback) for placed blocks
         skipped_unplaced = fallback_count = 0
         for r, is_fallback in blocks_to_add:
-            if r.x1 < 0 or r.y1 < 0:
+            if not is_placed(r):
                 skipped_unplaced += 1
                 continue
             self.fp.add_block(r.name,
@@ -810,7 +821,7 @@ class HierMixin:
         """Build a Floorplan with placed components at exactly this depth from BDB."""
         fp = self._apply_fp_session_settings(buda.Floorplan())
         for c in self.bdb.all_components():
-            if c.depth == depth and c.x1 >= 0:
+            if c.depth == depth and is_placed(c):
                 fp.add_block(c.name, int(round(c.x1)), int(round(c.y1)),
                              int(round(c.x2)), int(round(c.y2)))
         return fp
@@ -944,7 +955,7 @@ class HierMixin:
         eligible, skipped = [], []
         cache = {}
         for cell in sorted(insts_by_cell):
-            placed = sum(1 for c in insts_by_cell[cell] if c.x1 >= 0)
+            placed = sum(1 for c in insts_by_cell[cell] if is_placed(c))
             if placed < 1:
                 continue                        # unplaced: nothing to freeze
             issues = self._bottom_up_congruence_issues(
@@ -993,7 +1004,7 @@ class HierMixin:
             return None
         fp = self._apply_fp_session_settings(buda.Floorplan(), min_stub=True)
         for c in comps.values():
-            if c.parent_id == parent.id and c.x1 >= 0:
+            if c.parent_id == parent.id and is_placed(c):
                 local_name = c.name.rsplit('/', 1)[-1]
                 lx1 = int(round(c.x1 - parent.x1))
                 ly1 = int(round(c.y1 - parent.y1))
@@ -1098,6 +1109,65 @@ class HierMixin:
                             use_hanan_loci, use_spine_relays):
         """Resolve one HBundle's generation task WITHOUT generating.
 
+        The 3-case frame dispatch (`_hier_topo_gen_cases`) plus the ENDPOINT
+        GUARD — a block the resolved frame does not have is refused here
+        rather than routed to.
+
+        The guard is the hier half of a check the flat flow has always had:
+        `Floorplan::get_block_bounds` silently returns a degenerate
+        {0,0,0,0} for an unknown name (`topology.h` says so and points at
+        `has_block`), so `add_net`/`add_bus` run `_validate_endpoint_blocks`
+        — "would route from the chip origin instead of the intended block,
+        with no error".  Hier generation never did, and the sentence
+        describes what it produced: on `flow/ariane133`, 27 of the 128 block
+        names in the persisted topologies are components with no placement,
+        and bundle 41 (`DRV:i_cache_subsystem|REC:i_perf_counters`) came out
+        with a selected topology ending at literally (0,0) and placed metal
+        at y = -840 — off the die — while the flow reported success.
+
+        Returns (tg, src, dsts, meta) or None when the bundle is skipped."""
+        prep = self._hier_topo_gen_cases(w, use_center, use_double_detour,
+                                         fp_cache, comps_by_name,
+                                         use_multi_trunk, use_hanan_loci,
+                                         use_spine_relays)
+        if prep is None:
+            return None
+        tg, src, dsts, meta = prep
+        fp = meta['fp']
+        absent = [d for d in dsts if not fp.has_block(d)]
+        src_absent = src is None or not fp.has_block(src)
+        if not absent and not src_absent:
+            return prep                       # the ordinary case: unchanged
+        bid = w.input.original_bundle.id
+        named = ', '.join(sorted(set(absent + ([src] if src_absent and src
+                                               else []))))
+        kept = [d for d in dsts if d not in set(absent)]
+        # No root, or nothing left to reach: there is no routing interface,
+        # and inventing one at the origin is what this guard exists to stop.
+        # The nets stay unrouted, which is the true state of the design —
+        # a floorplan that places none of these blocks cannot route them.
+        if src_absent or not kept:
+            buda_diag.emit(
+                "BUDA-1211",
+                f"bundle {bid} ({meta['label']}): endpoint block(s) {named} "
+                f"have no placement, leaving no placed endpoint pair — "
+                f"generating no candidates.  Place them (a container needs "
+                f"`derive_container_bboxes`, which needs a placed "
+                f"descendant) or bundle at a depth whose blocks are placed.")
+            return None
+        buda_diag.emit(
+            "BUDA-1210",
+            f"bundle {bid} ({meta['label']}): endpoint block(s) {named} have "
+            f"no placement and were dropped from its routing interface; the "
+            f"remaining {len(kept)} endpoint(s) still route.  Their nets are "
+            f"open at the dropped end.")
+        return tg, src, kept, meta
+
+    def _hier_topo_gen_cases(self, w, use_center, use_double_detour,
+                             fp_cache, comps_by_name, use_multi_trunk,
+                             use_hanan_loci, use_spine_relays):
+        """The 3-case frame/endpoint dispatch behind `_prep_hier_topo_gen`.
+
         Returns (tg, src, dsts, meta) — a configured TopologyGenerator plus
         the endpoints and the install/report context — or None when the
         bundle is skipped (the skip warning prints here, exactly the
@@ -1176,6 +1246,12 @@ class HierMixin:
                     print(f"  Warning: endpoint comp {blk!r} not found — "
                           f"skipping bundle {b.id}")
                     return None
+                # An unplaced endpoint has no extent to route to; leaving it
+                # OUT of the frame is what makes the shared endpoint guard
+                # (below) see it, instead of `get_block_bounds` handing the
+                # generator a phantom {0,0,0,0} block at the die origin.
+                if not is_placed(c):
+                    continue
                 fp.add_block(blk, int(round(c.x1)), int(round(c.y1)),
                              int(round(c.x2)), int(round(c.y2)))
             tg = self._make_topo_gen(fp, use_center, use_double_detour,
@@ -1407,6 +1483,13 @@ class HierMixin:
                     if c is None:
                         fp = None
                         break
+                    # An UNPLACED endpoint is left out, exactly as generation
+                    # leaves it out (_prep_hier_topo_gen's case (c)) — this
+                    # frame's job is to be the one candidates were built in.
+                    # Adding it put a block at (-1,-1,-1,-1) here, which made
+                    # this frame accept a block contract no other frame could.
+                    if not is_placed(c):
+                        continue
                     fp.add_block(blk, int(round(c.x1)), int(round(c.y1)),
                                  int(round(c.x2)), int(round(c.y2)))
                 fp_cache[cache_key] = fp
@@ -1590,7 +1673,7 @@ class HierMixin:
             if (cell_shares and ctx not in bu_cells and insts
                     and self.routing_grid is not None):
                 comp = comps.get(insts[0])
-                if comp is not None and comp.x1 >= 0:
+                if comp is not None and is_placed(comp):
                     budgets = []
                     for lid, s in sorted(cell_shares.items()):
                         if not self.routing_grid.has_layer(lid):
@@ -1926,7 +2009,7 @@ class HierMixin:
             if not cell_shares:
                 continue
             comp = comps.get(b.instances[0])
-            if comp is None or comp.x1 < 0:
+            if comp is None or not is_placed(comp):
                 continue
             for lid, s in sorted(cell_shares.items()):
                 key = (b.instances[0], lid)
@@ -3290,7 +3373,7 @@ class HierMixin:
         comps = self.bdb.all_components()
         by_cell = {}
         for c in comps:
-            if c.cell in bu and c.x1 >= 0:
+            if c.cell in bu and is_placed(c):
                 by_cell.setdefault(c.cell, []).append(c)
         ocache = {}
         for cell, insts in by_cell.items():
@@ -3445,7 +3528,7 @@ class HierMixin:
         if self.bdb.die_w() > 0 and self.bdb.die_h() > 0:
             eng.set_die(self.bdb.die_w(), self.bdb.die_h())
         for c in self.bdb.all_components():
-            if c.x1 >= 0:
+            if is_placed(c):
                 eng.add_block(c.name, c.x1, c.y1, c.x2, c.y2)
         return [(i.kind, i.block_a, i.block_b, i.message)
                 for i in eng.validate()]
@@ -3591,7 +3674,7 @@ class HierMixin:
 
         def all_marked_names():
             return {c.name for c in self.bdb.all_components()
-                    if c.cell in bu_all and c.x1 >= 0}
+                    if c.cell in bu_all and is_placed(c)}
 
         # Enclosing cells before enclosed ones, and FRESH coordinates per
         # cell: a parent's nudge drags its whole subtree, so a nested cell's

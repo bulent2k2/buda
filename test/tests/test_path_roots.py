@@ -599,8 +599,25 @@ def test_no_checked_in_flow_parses_differently(tmp_path):
     root = Path(__file__).resolve().parents[2]
     differ, n_files, n_lines = [], 0, 0
     for p in sorted(root.rglob("*.buda")):
+        # A tree walk in a PARALLEL test run races every test that writes a
+        # `.buda` into the tree: `test_bit_antenna_audit` must create one in
+        # `flow/rnr/` (its flow `source`s a sibling, so a tmp_path copy would
+        # not resolve) and unlinks it in a `finally`, so under CI's
+        # `-p xdist -n 4` this glob can list a file another worker deletes
+        # before the read.  Measured on CI:
+        # `FileNotFoundError: … flow/rnr/_no_trim_wfmpd_13.buda`.
+        #
+        # `test_qor_candidates` and `test_qor_baseline_worktree` already met
+        # this race and answered it by name; the guard here is by BEHAVIOUR —
+        # a file that vanished mid-walk was never part of the checked-in
+        # corpus this test is about, whatever it was called, so a future
+        # temp-file prefix cannot reintroduce the flake.
+        try:
+            text = p.read_text(errors="replace")
+        except FileNotFoundError:
+            continue
         n_files += 1
-        for i, line in enumerate(p.read_text(errors="replace").splitlines(), 1):
+        for i, line in enumerate(text.splitlines(), 1):
             n_lines += 1
             if strip_inline_comment(line) != old_strip(line):
                 differ.append(f"{p.relative_to(root)}:{i}: comment {line!r}")
