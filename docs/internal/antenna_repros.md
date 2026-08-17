@@ -204,9 +204,41 @@ same pass to either shared endpoint, and `trim_shared_leg_prefixes` became
 Two things the mirror had to add rather than inherit. A leg can now share
 **both** of its ends, so the min-stub floor is checked on the COMBINED result —
 two independently legal cuts can still pinch a leg between them, and the
-prefix-only version had no way to reach that case. And when both cuts cannot
-fit, it takes the larger single one rather than giving up, so the more
-duplicated end always wins.
+prefix-only version had no way to reach that case. That floor is also
+`max(floor, 1)` now: a single cut cannot reach zero (the donor is strictly
+shorter), but two can meet exactly, and `set_min_stub_length` is **0 unless a
+design declares one**, so the floor alone would have admitted a zero-length
+segment. And when both cuts cannot fit, it takes the larger single one rather
+than giving up, so the more duplicated end always wins.
+
+**How common each half is** (`tools/scan_shared_legs.py`, raw generated
+geometry — legs with a shorter same-direction sibling at that end):
+
+```
+flow                                            cands  START   END  BOTH
+rnr/mix.buda                                      277      4     0     0
+rnr/mix2_topdown_refine.buda                      506     10     0     0
+big_data_test/big.buda                           1553     10     0     0
+big_data_test/big2/big2.buda                      687      5     3     0
+total                                            3076     29     3     0
+```
+
+Three findings, and each answers a question the QoR gate cannot (the trim is
+opt-in and almost nothing opts in):
+
+* **5b is a real shape, not only a constructed one** — `big2.buda` carries 3 —
+  but it is ~10× rarer than 5a on this set.
+* **The corpus is byte-identical** (48/48 unchanged, abstract and detailed WL
+  +0): `mix2_topdown_refine` is the only corpus flow that opts in, and its END
+  count is **0**, so the mirror has nothing to cut there. The identity is a
+  measurement, not an inference from the knob being off.
+* **The zero-length guard is DEFENSIVE, not load-bearing.** BOTH is 0
+  everywhere measured. The mirror makes that case *reachable*; nothing here
+  reaches it. Worth saying plainly so a later reader does not mistake the guard
+  for evidence the case occurs.
+
+The two vehicles report 0/0/0 because they turn the trim **on** — the scan sees
+what survived it, which is the other way of confirming the cut fires.
 
 5c remains a strict `xfail` in `test/tests/test_mst_shared_leg_prefix.py`, and
 it **still xfails with the trim on** — it records "not covered" rather than "not
