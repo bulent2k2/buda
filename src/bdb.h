@@ -301,6 +301,67 @@ struct NdrRuleRow {
     int         metal = 0;
 };
 
+// One layer's global track pattern (v29 track_pattern table) — the
+// DECLARATION, not a read-back of the built grid: origin, the slot list and
+// the bounds, exactly the arguments `RoutingGridStack::define_layer` takes,
+// so a restore replays the install verbatim instead of re-deriving it.
+//
+// `source` is 'script' | 'lef' | 'def' — the persisted form of the session's
+// pattern-provenance memo.  It is here for the reason `meta.layer_caps_by_depth`
+// exists: precedence is a rule about WHO declared a value ("an explicit
+// def_track_pattern outranks imported data in either order"), and a pattern
+// alone cannot say that, so without this column a reopened design cannot tell
+// a hand-typed layer from one the DEF supplied.
+//
+// `slots` is a JSON array of {type,label,width,space_after}, the same
+// judgement as ndr_rule.per_layer next door: the values are opaque to SQL
+// (nothing joins or filters on a slot), they are read and written only as a
+// whole with their pattern, and a column needs no cascade on layer delete.
+struct TrackPatternRow {
+    int         layer_id = -1;
+    double      origin   = 0.0;
+    int         is_horiz = 0;
+    // A DEF `TRACKS … DO n STEP s` ENUMERATES its tracks, so an imported
+    // pattern is bounded and tiling past it would invent tracks the
+    // technology does not have.  A script-declared pattern is unbounded.
+    int         bounded  = 0;
+    double      bound_lo = 0.0;
+    double      bound_hi = 0.0;
+    std::string source   = "script";
+    std::string slots    = "[]";
+};
+
+// One region-scoped pattern override (v29 grid_override table).  Keyed by
+// layer + region, so re-persisting the same declaration is idempotent rather
+// than growing a row per run.
+struct GridOverrideRow {
+    int         layer_id = -1;
+    int         x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    double      origin = 0.0;
+    std::string slots  = "[]";
+};
+
+// One keep-out zone (v29 keepout table), stored as the ZONE the declaration
+// made rather than one row per (zone, layer): the layer set is a property of
+// the zone, and `set_keepout_loci outside` reasons per zone — splitting it
+// would lose the object the loci rule is about.  `layers` is a CSV of layer
+// ids, as ndr_rule.layers already is; `inside_block` rides along because it
+// decides whether the zone's edges become Hanan loci (opens_interchange
+// item 12), so losing it would silently change the candidate grid.
+//
+// Keyed by geometry + layers so a re-run against the same BDB upserts
+// instead of accumulating — a DEF import brings 13k of these.
+struct KeepoutRow {
+    int         x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    std::string layers;
+    int         inside_block = 0;
+    // The SPECIALNET a power strap belongs to; empty for obstruction with no
+    // net behind it (a macro's OBS, a LAYER blockage).  Carried for the same
+    // reason the importer carries it rather than re-splitting a provenance
+    // string: the identity has to survive intact.
+    std::string net;
+};
+
 struct GrpRow {
     std::string id;
     std::string name;
@@ -516,7 +577,17 @@ public:
     // v26 = ndr_rule.width_abs / spacing_abs (R1 absolute values; a rule
     //       declared absolutely is INDISTINGUISHABLE from a default one
     //       without them, since the multiplier stays 1.0).
-    static constexpr int SCHEMA_VERSION = 28;
+    // v29 = the ROUTING GRID: track_pattern (+ its slot list), grid_override
+    //       and keepout.  These were the last physical-design facts with no
+    //       table — pure session state, rebuilt by whoever declared them.
+    //       For a design whose patterns and blockages come from a DEF that
+    //       is what breaks a resume: a hier session holds `import_def_lef`
+    //       (a replayed one is a duplicate-instance error), so the grid and
+    //       every keepout were simply gone.  `run_detailed_nuts` refused
+    //       outright, which was the only honest moment — `run_nuts` and the
+    //       healers ran on before it, against a coarser, blockage-free
+    //       model than the one the checkpoint was routed under.
+    static constexpr int SCHEMA_VERSION = 29;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -596,6 +667,28 @@ public:
     void delete_ndr_scope(const std::string& prefix);
     std::vector<std::pair<std::string,std::string>> ndr_scopes() const;
     void clear_ndr();
+
+    // ── routing-grid persistence (v29) ────────────────────────────────────
+    // set_track_pattern / set_grid_override upsert one declaration (keyed by
+    // layer, and by layer+region for an override) so re-running a flow
+    // against the same BDB replaces rather than accumulates.
+    //
+    // add_keepouts takes the whole list and writes it in ONE transaction: a
+    // DEF import declares ~13k zones at once, and a statement per zone would
+    // make the import pay a full fsync per rect.
+    //
+    // clear_* is the 'this session is redefining the grid' path, and the
+    // reason each is separate: a design may re-import its blockages without
+    // touching its track patterns.
+    void set_track_pattern(const TrackPatternRow& r);
+    std::vector<TrackPatternRow> track_patterns() const;
+    void clear_track_patterns();
+    void set_grid_override(const GridOverrideRow& r);
+    std::vector<GridOverrideRow> grid_overrides() const;
+    void clear_grid_overrides();
+    void add_keepouts(const std::vector<KeepoutRow>& rows);
+    std::vector<KeepoutRow> keepouts() const;
+    void clear_keepouts();
     // The cell-type child graph as (parent_cell, child_cell) edges, sorted and
     // de-duplicated (one edge per distinct pair however many instances).  The
     // structural source for intrinsic cell LEVELS (set_layer_caps_by_depth,

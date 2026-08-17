@@ -26,7 +26,8 @@ import sys
 
 import buda_diag
 from ._options import reject_unknown_options
-from buda_session.util import ensure_parent_dir, resolve_script_path
+from buda_session.util import (apply_pattern_layer_facts,
+                               ensure_parent_dir, resolve_script_path)
 from buda_script import (leading_path_and_options, sole_path_arg,
                          split_quoted_args)
 
@@ -160,6 +161,9 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # (session-typed entries win; a previous BDB's restored entries drop).
     from buda_cmds import ndr_cmds
     ndr_cmds.restore_ndr_from_bdb(session)
+    # The routing grid + keepouts (v29), same contract: session-declared
+    # entries win, restored ones fill in what this session has not declared.
+    session._restore_grid_from_bdb()
 
 
 def cmd_set_import_scale(session, cmd, args, cmd_line):
@@ -372,10 +376,9 @@ def _apply_def_tracks(session, st):
             if session.routing_grid is None:
                 session.routing_grid = buda.RoutingGridStack()
             session.routing_grid.define_layer(lid, pat, layer_is_h)
+            session._persist_track_pattern(lid, pat, layer_is_h, 'def')
             session._pattern_source[lid] = "def"
-            session.layers.set_layer_dilution(lid, pat.dilution_factor())
-            session.layers.set_bit_pitch(lid, pat.unit_pitch())
-            session.layers.set_ndr_geom(lid, pat.ndr_geom())
+            apply_pattern_layer_facts(session.layers, lid, pat)
             installed.append(f"{lname}[{tr.count}@{tr.step:g}]")
     if installed:
         print(f"[DEF] tracks installed (bounded): {', '.join(installed)}")
@@ -392,6 +395,7 @@ def _apply_def_keepouts(session, st):
     if not st.keepouts:
         return
     by_why, by_net, unmapped, dropped = {}, {}, set(), []
+    persist = []          # one write for the whole burst (a DEF brings ~13k)
     for k in st.keepouts:
         lids = ([session._layer_name_map[k.layer]]
                 if k.layer and k.layer in session._layer_name_map
@@ -429,9 +433,12 @@ def _apply_def_keepouts(session, st):
         # lack it would raise TypeError on the very next line — a guard that
         # cannot fire is not protection, it is decoration that tells a reader
         # this path is defended when it is not.
-        session.fp.add_keepout_zone(x1, y1, x2, y2, lids,
-                                    bool(getattr(k, "inside_block", False)),
-                                    k.net)
+        inside = bool(getattr(k, "inside_block", False))
+        session.fp.add_keepout_zone(x1, y1, x2, y2, lids, inside, k.net)
+        # v29: and into the BDB, so a session that RESUMES this design gets
+        # the blockages with it.  A checkpoint that restores the route but
+        # not what blocks it is a checkpoint of a different design.
+        persist.append((x1, y1, x2, y2, lids, inside, k.net))
         if session.routing_grid:
             for lid in lids:
                 if session.routing_grid.has_layer(lid):
@@ -439,6 +446,7 @@ def _apply_def_keepouts(session, st):
         by_why[k.why.split()[0]] = by_why.get(k.why.split()[0], 0) + 1
         if k.net:
             by_net[k.net] = by_net.get(k.net, 0) + 1
+    session._persist_keepouts(persist)     # after the loop: one transaction
     if by_why:
         detail = ", ".join(f"{k}:{v}" for k, v in sorted(by_why.items()))
         # Naming the nets gives the identity a READER on the day it lands.
