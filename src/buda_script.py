@@ -72,12 +72,10 @@ def sole_path_arg(cmd_line, skip=1):
     verb is the path, which is what `include` means in most languages.
 
     So this is applicable ONLY where the argument list is exactly one path —
-    `source`, `import_verilog`, `save_bdb`.  A command that also takes
-    OPTIONS (`open_bdb <path> [writeback]`) uses `leading_path_and_options`
-    below, which needs a closed option vocabulary to find the boundary; one
-    that takes TWO paths (`import_def_lef <def> <lef>`, `require_file <path>
-    …`) has no rule at all — the split between them is genuinely ambiguous
-    without quoting, so those still take one token each.
+    `source`, `import_verilog`, `save_bdb`.  Every other path-taking command
+    (a path followed by OPTIONS, or SEVERAL adjacent paths) reads its
+    arguments through `split_quoted_args` below, where a spaced path is
+    spelled with quotes.
 
     A path spelled with surrounding matched quotes is accepted too, because
     that is the instinctive spelling (and the norm on Windows) and would
@@ -96,64 +94,64 @@ def unquote(s):
     return s
 
 
-def leading_path_and_options(cmd_line, option_words):
-    """(path, remaining_tokens) for `<cmd> <path> [<option> …]`.
+def split_quoted_args(cmd_line, skip=1):
+    """The argument tokens of a command line, with QUOTED runs kept whole.
 
-    The commands that take a path AND a trailing option list — `open_bdb
-    <path> [writeback]`, `import_lef_tech <path> [top <N>]`, `export_gds
-    <path> [outline <l>] …`.  `sole_path_arg` cannot serve them: rest-of-line
-    would swallow the options into the filename.
+    The one rule for every path-taking command that `sole_path_arg` cannot
+    serve — a path followed by OPTIONS (`open_bdb <path> [writeback]`), and
+    SEVERAL adjacent paths (`import_def_lef <def> <lef>`, `require_file
+    <path> …`).  Rest-of-line serves neither: it swallows the options into
+    the filename, and between two paths there is nothing to swallow toward.
 
-    A spaced path here must be QUOTED, and that is a deliberate refusal to
+    A spaced path is therefore QUOTED, which is a deliberate refusal to
     guess.  Consider `export_gds out.gds bogus_option 1`: no token is a known
     keyword, so a rest-of-line rule reads the whole thing as a filename, the
     unknown-option error disappears, and a typo silently writes a file with a
     garbage name.  Measured — it broke `test_labels_off_and_cli_options`.
     Nothing in the line distinguishes that from a genuinely spaced path, so
-    the ambiguity is real and the quote is how the author resolves it.
+    the ambiguity is real and the quote is how the author resolves it.  Two
+    adjacent paths are the same problem with no keyword to appeal to at all.
 
-    Unquoted, the split is EXACTLY what it always was — first token is the
-    path, the rest are options — so every existing flow and every existing
-    diagnostic is untouched.  Quoted, the path runs to the matching quote and
-    the options follow it.
+    A quote is honoured only where a token BEGINS, which is what keeps this
+    identical to `.split()` for every line that does not use one — the
+    property that leaves every existing flow and every existing diagnostic
+    untouched (`test_no_checked_in_flow_parses_differently` measures it over
+    the whole tree, rather than asserting it).  An unterminated quote falls
+    through to the plain split, so it cannot swallow the rest of the line.
 
-    `source`, `import_verilog` and `save_bdb` need no quotes because they take
-    no options: there the rest of the line is unambiguously the path, which is
-    what `sole_path_arg` implements.
+    `skip` is how many leading words are the COMMAND rather than an argument
+    — 1 normally, 2 for a sub-verb form.
     """
-    rest = strip_inline_comment(cmd_line).strip()
-    parts = rest.split(None, 1)
-    if len(parts) < 2:
+    rest = strip_inline_comment(cmd_line)
+    out, i, n = [], 0, len(rest)
+    while i < n:
+        if rest[i].isspace():
+            i += 1
+            continue
+        if rest[i] in "\"'":
+            end = rest.find(rest[i], i + 1)
+            if end > 0:
+                out.append(rest[i + 1:end])
+                i = end + 1
+                continue
+        j = i
+        while j < n and not rest[j].isspace():
+            j += 1
+        out.append(rest[i:j])
+        i = j
+    return out[skip:]
+
+
+def leading_path_and_options(cmd_line, option_words=None):
+    """(path, remaining_tokens) for `<cmd> <path> [<option> …]`.
+
+    `remaining_tokens` IS the old `args[1:]` whenever nothing is quoted, so
+    each handler keeps its own option parsing and its own error messages.
+    `option_words` is vestigial — the first cut needed a closed option
+    vocabulary to find the end of the path, and the quote is what replaced
+    it.  Kept so the call sites still read as the shape they are.
+    """
+    toks = split_quoted_args(cmd_line)
+    if not toks:
         return "", []
-    tail = parts[1].strip()
-    if tail[:1] in ("'", '"'):
-        end = tail.find(tail[0], 1)
-        if end > 0:                    # unterminated quote falls through
-            return tail[1:end], tail[end + 1:].split()
-    toks = tail.split()
     return toks[0], toks[1:]
-
-
-def option_value(tokens, i, _option_words=None):
-    """(value, next_index) for an option whose value may be a QUOTED path.
-
-    `emit_guides out.json tcl "my scripts/g.tcl"` — the tokens arrive already
-    split, so a quoted value is reassembled here by consuming to the token
-    that closes the quote.  Unquoted, it is the single token it always was.
-    Only the commands whose option values are paths need this; a numeric
-    option (`margin 5`, `top 3`) is unaffected either way.
-    """
-    j = i + 1
-    if j >= len(tokens):
-        return "", j
-    first = tokens[j]
-    if first[:1] in ("'", '"'):
-        q = first[0]
-        if len(first) > 1 and first.endswith(q):
-            return first[1:-1], j + 1
-        k = j + 1
-        while k < len(tokens) and not tokens[k].endswith(q):
-            k += 1
-        if k < len(tokens):
-            return " ".join([first[1:]] + tokens[j + 1:k + 1])[:-1], k + 1
-    return first, j + 1

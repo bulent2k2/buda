@@ -228,6 +228,28 @@ def test_a_spaced_path_survives_the_tcl_argument_boundary(tmp_path):
     assert "OPENED=1" in out, out
 
 
+def test_two_spaced_paths_survive_the_tcl_argument_boundary(tmp_path):
+    """The two-path shape through the bridge: BOTH arguments are re-quoted, so
+    the engine sees two paths rather than four tokens it must guess a boundary
+    in.  `import_def_lef` is the one command where a guess has nowhere to
+    appeal — there is no trailing keyword between the paths."""
+    d = tmp_path / "my dir"
+    d.mkdir()
+    (d / "a.def").write_text("VERSION 5.8 ;\nDESIGN t ;\n"
+                             "UNITS DISTANCE MICRONS 1000 ;\n"
+                             "DIEAREA ( 0 0 ) ( 100000 100000 ) ;\n"
+                             "COMPONENTS 1 ;\n"
+                             "  - i0 m + PLACED ( 1000 2000 ) N ;\n"
+                             "END COMPONENTS\nEND DESIGN\n")
+    (d / "b.lef").write_text("MACRO m\n  SIZE 10 BY 4 ;\nEND m\nEND LIBRARY\n")
+    out = _tcl(tmp_path, """
+        buda::open_bdb :memory:
+        buda::import_def_lef "my dir/a.def" "my dir/b.lef"
+        puts "COMPS=[buda::query blocks]"
+        buda::stop""")
+    assert "imported 1 of 1" in out, out
+
+
 def test_a_whitespace_free_argument_is_passed_through_untouched(tmp_path):
     """The other half: every argument in every existing flow has no
     whitespace, so the wire line is byte-identical for them."""

@@ -28,7 +28,8 @@ import os
 # Re-exported here because a command HANDLER needs them and cannot import
 # `buda_cli` without a cycle.
 from buda_script import (strip_inline_comment, sole_path_arg,      # noqa: F401
-                         leading_path_and_options, option_value, unquote)
+                         leading_path_and_options, split_quoted_args,
+                         unquote)
 
 # The engine-side spelling, kept because that is the name buda_cli exposes.
 _strip_inline_comment = strip_inline_comment

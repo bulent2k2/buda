@@ -565,10 +565,11 @@ proc ::buda::_define {name} {
 # it serves it.  The invariant's original note said re-quoting "would
 # silently make it mean something else", and that was true when NO command
 # understood quotes; now that a quoted path IS meaningful to the engine
-# (buda_script.leading_path_and_options), preserving the caller's argument
-# boundary is what makes the Tcl call mean what was written.  The only
-# handler that reads trailing arguments as FREE TEXT is `require_file`'s
-# `hint`, which strips the quotes back off.
+# (buda_script.split_quoted_args), preserving the caller's argument boundary
+# is what makes the Tcl call mean what was written.  The only handler that
+# reads trailing arguments as FREE TEXT is `require_file`'s `hint`, and the
+# engine's tokenizer hands it the quoted run whole, so the quotes do not
+# reach the message.
 #
 # A value containing BOTH quote characters cannot be spelled in a language
 # with no escapes, so it is passed through unquoted — today's behavior —
