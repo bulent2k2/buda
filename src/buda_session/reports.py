@@ -893,6 +893,23 @@ class ReportsMixin:
                 if resolved is not None:
                     check_fp = resolved
 
+            # Does every candidate's BLOCK CONTRACT resolve in the very frame
+            # a resume would restore it against?  `check_fp` is picked by the
+            # same rule `_restore_wrapper` uses, so this is `load_pipeline`'s
+            # gate asked one session earlier — the only session that can
+            # still fix it.
+            #
+            # Over the WHOLE pool, deliberately outside the `to_check` loop
+            # below: persistence saves every candidate and `_restore_wrapper`
+            # validates every candidate, so scoping this to the SELECTED one
+            # would let an unselected candidate carry an unresolvable block,
+            # pass the audit, and still be refused on resume — the exact
+            # split this message exists to close (Codex P1 on #780).
+            for topo in w.input.candidates:
+                for bname in topo.connected_block_names:
+                    if not check_fp.has_block(bname):
+                        contract_missing.setdefault(bname, set()).add(bid)
+
             if all_candidates and stage == "topo":
                 to_check = list(enumerate(w.input.candidates))
             elif w.plan.selected_topology_index >= 0:
@@ -918,15 +935,6 @@ class ReportsMixin:
                 continue
 
             for topo_idx, topo in to_check:
-                # Does this candidate's BLOCK CONTRACT resolve in the very
-                # frame a resume would restore it against?  `check_fp` is
-                # picked by the same rule `_restore_wrapper` uses, so this
-                # is `load_pipeline`'s gate asked one session earlier —
-                # which is the only session that can still fix it.
-                for bname in topo.connected_block_names:
-                    if not check_fp.has_block(bname):
-                        contract_missing.setdefault(bname, set()).add(bid)
-
                 ct = buda.ConnTopology()
                 ct.build(topo, check_fp)
 

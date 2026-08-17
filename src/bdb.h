@@ -132,6 +132,21 @@ struct ComponentRow {
     bool        is_port = false;
 };
 
+// WHETHER a component has a placement — the C++ half of the rule stated in
+// `src/comp_placement.py`, which the Python session and `tools/` share.  Two
+// implementations rather than a binding because that module is deliberately
+// dependency-free (the tools that read component rows must not have to import
+// the compiled extension); `test_comp_placement.py` pins them to the same
+// table of cases, so a disagreement fails rather than routes.
+//
+// The sentinel is the WHOLE of -1,-1,-1,-1.  A negative coordinate is not the
+// sentinel: a DEF PIN straddles the die edge, and a derived container box can
+// reach below the origin.  A degenerate box is not an extent.
+inline bool bbox_is_placed(double x1, double y1, double x2, double y2) {
+    if (x1 == -1 && y1 == -1 && x2 == -1 && y2 == -1) return false;
+    return x2 > x1 && y2 > y1;
+}
+
 struct NetRow {
     int         id;
     std::string name;

@@ -52,7 +52,11 @@ bolted on: a zero-area block hosts no routing and gives a topology generator
 nothing to tap, so admitting one produces exactly the phantom the sentinel
 check exists to prevent.  It also subsumes the sentinel (`-1 <= -1`); the
 sentinel clause is kept explicit because it is the case a reader needs
-named.
+named — but it must then name the WHOLE sentinel.  Matching on the corner
+alone (`x1 == -1 and y1 == -1`) reads a legitimate block whose lower-left
+happens to sit at (-1,-1) as unplaced, which is the very false negative
+this module exists to remove, reintroduced one corner in (Codex P2 on
+#780).
 
 Standalone and dependency-free, for the reason `slot_groups.py` and
 `bus_names.py` are: `tools/` reads component rows too, and a copy in each
@@ -66,8 +70,8 @@ def bbox_is_placed(x1, y1, x2, y2) -> bool:
     Takes the four numbers, so a caller holding a Floorplanner block, a DEF
     rect or a database row can ask without first shaping it into a component.
     """
-    if x1 == -1 and y1 == -1:
-        return False            # the no-placement sentinel, named explicitly
+    if x1 == -1 and y1 == -1 and x2 == -1 and y2 == -1:
+        return False            # the no-placement sentinel, named in full
     return x2 > x1 and y2 > y1  # a degenerate box is not an extent
 
 

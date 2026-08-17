@@ -203,3 +203,41 @@ def test_a_clean_hier_design_says_nothing():
                       "run_hier_bundler", "generate_hier_topologies",
                       "run_planner 1", "check_design")
     assert "BUDA-1502" not in out
+
+
+# ── the C++ half agrees with the Python half ───────────────────────────────
+
+def test_busterm_derivation_uses_the_same_placement_rule():
+    """`derive_busterms` is C++ (`bbox_is_placed` in bdb.h) and the floorplan
+    projection is Python (`comp_placement.py`); two implementations of one
+    rule, so what is pinned is that they AGREE — a component one side calls
+    placed and the other skips is a block in the floorplan with no routing
+    interface, which is what `x1 < 0` there against the sentinel rule here
+    produced for 495 DEF die ports on ariane133 (Codex P2 on #780).
+
+    Asserted through the observable behaviour rather than a bound predicate:
+    the busterm set has to be exactly the placed set, however either side
+    spells the test."""
+    db = buda.BDB(":memory:")
+    db.add_cell("leaf", 60, 60)
+    shapes = {
+        "ordinary":   (100, 100, 160, 160),      # placed
+        "neg_x":      (-70, 100, 70, 160),       # a die port on the edge
+        "neg_y":      (100, -40, 160, 20),       # a derived box below y=0
+        "neg_corner": (-1, -1, 100, 100),        # NOT the sentinel
+        "sentinel":   (-1, -1, -1, -1),          # unplaced
+        "degenerate": (500, 500, 500, 500),      # no extent
+    }
+    for name, (x1, y1, x2, y2) in shapes.items():
+        db.add_comp(name, "leaf", "", x1, y1, x2, y2)
+    buda.BustermGen(db).derive(1)
+
+    comps = {c.name: c for c in db.all_components()}
+    expected = {n for n, c in comps.items() if is_placed(c)}
+    got = {bt.hier_path for bt in db.all_busterms()}
+    assert got == expected, (
+        f"busterm derivation and the floorplan projection disagree: "
+        f"only in busterms {sorted(got - expected)}, "
+        f"only placed {sorted(expected - got)}")
+    assert "neg_x" in got and "neg_corner" in got   # the regression proper
+    assert "sentinel" not in got and "degenerate" not in got
