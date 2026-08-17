@@ -27,6 +27,8 @@ import sys
 import buda_diag
 from ._options import reject_unknown_options
 from buda_session.util import ensure_parent_dir, resolve_script_path
+from buda_script import (leading_path_and_options, option_value,
+                         sole_path_arg)
 
 
 def cmd_bdb_net_mode(session, cmd, args, cmd_line):
@@ -66,8 +68,13 @@ def cmd_def_gds_layer(session, cmd, args, cmd_line):
         return
     entries = []
     if args[0] == "file":
+        # `def_gds_layer file <path>` takes one path and nothing after it, so
+        # the rest of the line is the path — the `source` rule, one sub-verb
+        # deeper.
         try:
-            with open(resolve_script_path(session, args[1], is_read=True)) as f:
+            with open(resolve_script_path(session,
+                                          sole_path_arg(cmd_line, skip=2),
+                                          is_read=True)) as f:
                 for ln, line in enumerate(f, 1):
                     line = line.split("#", 1)[0].strip()
                     if not line:
@@ -106,9 +113,13 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # open_bdb <path> [writeback]
     if not args:
         print("Error: open_bdb requires a file path"); return
+    # The path may contain SPACES: it runs to the first option keyword
+    # (buda_script.leading_path_and_options).  `opts` is exactly the old
+    # `args[1:]` whenever it does not, so everything below is unchanged.
+    bdb_path, opts = leading_path_and_options(cmd_line, ("writeback",))
     # `writeback` is the only option after the path — a typo must not silently
     # leave write-back disarmed (and drop changes at exit).
-    reject_unknown_options("open_bdb", args[1:], ("writeback",))
+    reject_unknown_options("open_bdb", opts, ("writeback",))
     # Persist any fixture armed by a previous open_bdb before switching.
     session._flush_bdb_writeback()
     # `writeback` must be the explicit optional argument immediately after
@@ -116,8 +127,7 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # inside a trailing comment — do_command only strips full-line comments,
     # so `open_bdb foo.sql # no writeback` keeps 'writeback' as a token —
     # silently arming write-back on a fixture from a read-looking line.
-    writeback = len(args) >= 2 and args[1] == "writeback"
-    bdb_path = args[0]
+    writeback = bool(opts) and opts[0] == "writeback"
     if bdb_path != ':memory:':
         bdb_path = resolve_script_path(session, bdb_path)
     # A serialized text BDB (e.g. mix.bdb.sql) is materialized into a
@@ -410,7 +420,7 @@ def cmd_import_verilog(session, cmd, args, cmd_line):
     if session.bdb is None:
         print("Error: open_bdb first"); return
     st = session.bdb.import_verilog(
-        resolve_script_path(session, args[0], is_read=True))
+        resolve_script_path(session, sole_path_arg(cmd_line), is_read=True))
     print(f"[Verilog] top '{st.top_module}': {st.elaborated} instance(s) "
           f"elaborated")
     if st.skipped_library_cells:
@@ -467,27 +477,29 @@ def cmd_import_gds(session, cmd, args, cmd_line):
     # are excluded from cell footprints (wires, not macro outlines).
     if not args:
         print("Error: import_gds requires a file path"); return
+    # The path may contain spaces — it runs to the first option keyword.
+    gds_in, opts = leading_path_and_options(cmd_line, ("labels",))
     # `labels` is the only keyword after the file — a typo must not silently
     # fall back to the default label layers.  (The layer CSV after it is a
     # free-form value, not validated here.)
-    if len(args) >= 2:
-        reject_unknown_options("import_gds", [args[1]], ("labels",))
-        if len(args) < 3:
+    if opts:
+        reject_unknown_options("import_gds", [opts[0]], ("labels",))
+        if len(opts) < 2:
             print("Error: import_gds labels requires a layer CSV"); return
-        if len(args) > 3:
+        if len(opts) > 2:
             # The layer list is ONE comma-separated token — `labels 63 64`
             # (space-separated) used to import only layer 63, dropping 64.
             print(f"Error: import_gds: unexpected trailing argument(s) "
-                  f"{', '.join(repr(a) for a in args[3:])} — the layer list is "
+                  f"{', '.join(repr(a) for a in opts[2:])} — the layer list is "
                   f"one comma-separated token (e.g. `labels 63,64`)")
             sys.exit(1)
     if session.bdb is None:
         print("Error: open_bdb first"); return
     label_layers = list(session._gds_label_layers)
-    if len(args) >= 3 and args[1] == "labels":
-        label_layers = [int(x) for x in args[2].split(",") if x]
+    if len(opts) >= 2 and opts[0] == "labels":
+        label_layers = [int(x) for x in opts[1].split(",") if x]
     st = session.bdb.import_gds(
-        resolve_script_path(session, args[0], is_read=True), label_layers,
+        resolve_script_path(session, gds_in, is_read=True), label_layers,
         session.layers.gds_mapped_pairs())
     for wmsg in st.warnings:
         # The skipped-label warning is IDENTIFIED (BUDA-1614): the skip is
@@ -527,31 +539,34 @@ def cmd_export_gds(session, cmd, args, cmd_line):
         print("Error: export_gds requires a file path"); return
     if session.bdb is None:
         print("Error: open_bdb first"); return
+    # The path may contain spaces — it runs to the first option keyword.
+    gds_out, opts = leading_path_and_options(
+        cmd_line, ("outline", "labels", "via_size"))
     outline = 10
     label_layer = (session._gds_label_layers[0]
                    if session._gds_label_layers else 63)
     write_labels = True
     via_size = 1.0
-    i = 1
-    while i < len(args):
-        kw = args[i]
-        if kw == "outline" and i + 1 < len(args):
-            outline = int(args[i+1]); i += 2
-        elif kw == "labels" and i + 1 < len(args):
-            if args[i+1] == "off":
+    i = 0
+    while i < len(opts):
+        kw = opts[i]
+        if kw == "outline" and i + 1 < len(opts):
+            outline = int(opts[i+1]); i += 2
+        elif kw == "labels" and i + 1 < len(opts):
+            if opts[i+1] == "off":
                 write_labels = False
             else:
-                label_layer = int(args[i+1])
+                label_layer = int(opts[i+1])
             i += 2
-        elif kw == "via_size" and i + 1 < len(args):
-            via_size = float(args[i+1]); i += 2
+        elif kw == "via_size" and i + 1 < len(opts):
+            via_size = float(opts[i+1]); i += 2
         else:
             print(f"Error: export_gds: unknown option {kw!r}"); return
     layer_map = [(lid, session.layers.get_gds_layer(lid),
                   session.layers.get_gds_datatype(lid))
                  for lid in sorted(set(session._layer_name_map.values()))
                  if session.layers.get_gds_layer(lid) >= 0]
-    gds_path = resolve_script_path(session, args[0])
+    gds_path = resolve_script_path(session, gds_out)
     ensure_parent_dir(gds_path)             # create flow/def/out/ etc. if absent
     st = session.bdb.export_gds(gds_path, layer_map, outline, label_layer,
                              write_labels, via_size)
@@ -1418,7 +1433,7 @@ def cmd_save_bdb(session, cmd, args, cmd_line):
     if args:
         if session.bdb is None:
             print("Error: open_bdb first"); return
-        dest = resolve_script_path(session, args[0])
+        dest = resolve_script_path(session, sole_path_arg(cmd_line))
         live = getattr(session, "_bdb_open_path", None)
         if live and live != ':memory:':
             # Symlink-proof: realpath resolves links in the destination AND

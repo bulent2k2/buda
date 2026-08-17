@@ -539,12 +539,52 @@ proc ::buda::_define {name} {
  own buda::$name — call it as \[buda::do $name ...\]"
         return
     }
-    # The handlers split on whitespace, so arguments are joined and not
-    # re-quoted: a command must mean the same thing from Tcl as from a .buda
-    # script, and adding quoting here would silently make it mean something
-    # else.  A Tcl list argument therefore arrives as its space-joined
-    # elements, which is what {a b c} already looks like to the parser.
+    # The handlers split on whitespace, so arguments are joined: a command
+    # must mean the same thing from Tcl as from a .buda script, and a Tcl
+    # list argument arrives as its space-joined elements, which is what
+    # {a b c} already looks like to the parser.  `_join_args` re-quotes ONLY
+    # an argument that contains whitespace — see there for why that serves
+    # the same invariant rather than breaking it.
     proc ::buda::$name {args} [string map [list @NAME@ [list $name]] {
-        return [buda::_request [string trim "@NAME@ [join $args { }]"]]
+        return [buda::_request [string trim "@NAME@ [buda::_join_args $args]"]]
     }]
+}
+
+# One `.buda` command line from a proc's argument list.
+#
+# A whitespace-free argument is passed through untouched, which is every
+# argument in every existing flow — so this is byte-identical on the wire for
+# them.  An argument that CONTAINS whitespace is re-quoted, because Tcl has
+# already eaten the source-level quotes by the time the proc runs:
+# `buda::open_bdb "my dir/ck.bdb"` calls the proc with ONE argument, and a
+# bare join hands the engine `open_bdb my dir/ck.bdb`, which reads `my` as
+# the path and fails on `dir/ck.bdb` as an unknown option (FATAL — it ends
+# the session).
+#
+# This does not weaken the "same thing from Tcl as from a script" invariant,
+# it serves it.  The invariant's original note said re-quoting "would
+# silently make it mean something else", and that was true when NO command
+# understood quotes; now that a quoted path IS meaningful to the engine
+# (buda_script.leading_path_and_options), preserving the caller's argument
+# boundary is what makes the Tcl call mean what was written.  The only
+# handler that reads trailing arguments as FREE TEXT is `require_file`'s
+# `hint`, which strips the quotes back off.
+#
+# A value containing BOTH quote characters cannot be spelled in a language
+# with no escapes, so it is passed through unquoted — today's behavior —
+# rather than encoded into something the engine would read as neither.
+proc ::buda::_join_args {arg_list} {
+    set out {}
+    foreach a $arg_list {
+        if {![regexp {\s} $a]} {
+            lappend out $a
+        } elseif {![string match {*"*} $a]} {
+            lappend out "\"$a\""
+        } elseif {![string match {*'*} $a]} {
+            lappend out "'$a'"
+        } else {
+            lappend out $a
+        }
+    }
+    return [join $out " "]
 }

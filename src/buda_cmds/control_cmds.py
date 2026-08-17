@@ -24,7 +24,7 @@ import os
 import sys
 
 import buda_diag
-from buda_session.util import resolve_script_path, sole_path_arg
+from buda_session.util import resolve_script_path, sole_path_arg, unquote
 
 
 def cmd_source(session, cmd, args, cmd_line):
@@ -140,7 +140,13 @@ def cmd_require_file(session, cmd, args, cmd_line):
     paths, hint = args, ""
     if "hint" in args:
         cut = args.index("hint")
-        paths, hint = args[:cut], " ".join(args[cut + 1:]).strip()
+        # `unquote`d: the Tcl bridge re-quotes an argument containing
+        # whitespace (buda::_join_args), so `buda::require_file a hint
+        # {see fetch.py}` would otherwise carry the quotes into the
+        # message.  The hint is the one place trailing arguments are
+        # read as FREE TEXT.
+        paths = args[:cut]
+        hint = unquote(" ".join(args[cut + 1:]).strip())
     if not paths:
         _fail("Error: require_file: no path before 'hint' "
               "(require_file <path> [<path> ...] [hint <text>])")

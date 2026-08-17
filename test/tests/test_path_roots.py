@@ -300,6 +300,83 @@ def test_a_trailing_comment_is_still_not_part_of_the_path(
     assert s.layers.has_layer(4)
 
 
+# ── the option-bearing family: a QUOTED path may contain spaces ───────────
+
+def test_a_quoted_path_works_for_a_command_that_also_takes_options(
+        tmp_path, monkeypatch):
+    """`source` can take the rest of the line because it has no options.
+    `open_bdb <path> [writeback]` cannot — so a spaced path is QUOTED there,
+    and the quote is what resolves an ambiguity nothing else can."""
+    sdir, cwd = _setup(tmp_path)
+    (sdir / "my dir").mkdir()
+    script = sdir / "t.buda"
+    script.write_text('open_bdb "my dir/ck.bdb"\n')
+    s, _, _ = _run(script, cwd, monkeypatch)
+    assert s.bdb is not None
+    assert (sdir / "my dir" / "ck.bdb").exists()
+
+
+def test_the_option_after_a_quoted_path_is_still_read(tmp_path, monkeypatch):
+    """The whole point of not using rest-of-line here: the trailing option
+    must not be swallowed into the filename."""
+    sdir, cwd = _setup(tmp_path)
+    (sdir / "my dir").mkdir()
+    fixture = sdir / "my dir" / "f.bdb.sql"
+    fixture.write_text("")                      # empty .sql fixture
+    script = sdir / "t.buda"
+    script.write_text('open_bdb "my dir/f.bdb.sql" writeback\n')
+    s, _, _ = _run(script, cwd, monkeypatch)
+    # `writeback` was READ as the option (it armed the .sql write-back), not
+    # taken as part of the path.
+    assert s._bdb_writeback_src is not None, "writeback was not armed"
+    assert "my dir" in s._bdb_writeback_src
+
+
+def test_an_unknown_option_is_still_refused_beside_a_path(
+        tmp_path, monkeypatch):
+    """The regression that decided the design: with a rest-of-line rule
+    `export_gds out.gds bogus_option 1` reads the typo as part of the
+    filename, the unknown-option error disappears, and the run writes a file
+    with a garbage name.  Nothing in the line distinguishes that from a
+    genuinely spaced path, so unquoted keeps its old meaning exactly."""
+    sdir, cwd = _setup(tmp_path)
+    script = sdir / "t.buda"
+    script.write_text("open_bdb x.bdb\nexport_gds out.gds bogus_option 1\n")
+    _, out, _ = _run(script, cwd, monkeypatch)
+    assert "unknown option 'bogus_option'" in out, out
+    assert not list(sdir.glob("*bogus*")), "the typo became a filename"
+
+
+def test_an_option_value_that_is_a_path_may_be_quoted(tmp_path, monkeypatch):
+    """`emit_guides … tcl <file>` — the VALUE is a path too, so it takes the
+    same quoting.  (`margin 5` is a number and is unaffected either way.)"""
+    sdir, cwd = _setup(tmp_path)
+    (sdir / "my out").mkdir()
+    script = sdir / "t.buda"
+    script.write_text(
+        "def_layer 5 M5 V TOP 30\ndef_layer 6 M6 H TOP 30\n"
+        "add_block a 0 0 100 100\nadd_block b 300 0 400 100\n"
+        "add_net n1 a.o b.i\nrun_bundler STRICT\ngenerate_topologies\n"
+        "run_planner 3\nrun_nuts\n"
+        'emit_guides "my out/g.json" margin 5 tcl "my out/g.tcl"\n')
+    _run(script, cwd, monkeypatch)
+    assert (sdir / "my out" / "g.json").exists()
+    assert (sdir / "my out" / "g.tcl").exists(), "the quoted tcl value was lost"
+
+
+def test_a_sub_verb_path_may_contain_spaces(tmp_path, monkeypatch):
+    """`def_gds_layer file <path>` takes one path and nothing after it, so
+    it takes the rest of the line — the `source` rule, one sub-verb deeper."""
+    sdir, cwd = _setup(tmp_path)
+    (sdir / "my maps").mkdir()
+    (sdir / "my maps" / "gds.map").write_text("4 63\n")
+    script = sdir / "t.buda"
+    script.write_text("def_layer 4 M4 H 50\n"
+                      "def_gds_layer file my maps/gds.map\n")
+    s, out, _ = _run(script, cwd, monkeypatch)
+    assert s.layers.get_gds_layer(4) == 63, out
+
+
 def test_every_buda_reader_resolves_a_spaced_source_the_same(tmp_path):
     """The engine is not the only thing that parses `.buda` (Codex #771 P2).
 

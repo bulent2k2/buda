@@ -210,6 +210,49 @@ def test_a_clean_summarized_source_does_not_raise(tmp_path):
     assert "CLEAN" in out, out
 
 
+def test_a_spaced_path_survives_the_tcl_argument_boundary(tmp_path):
+    """The natural Tcl spelling must reach the engine intact (Codex #772 P2).
+
+    Tcl eats the source-level quotes before the generated proc runs, so
+    `buda::open_bdb "my dir/ck.bdb"` arrives as ONE argument and a bare join
+    hands the engine `open_bdb my dir/ck.bdb` — which reads `my` as the path
+    and dies on `dir/ck.bdb` as an unknown option (FATAL: it ends the
+    session).  `buda::_join_args` re-quotes an argument that contains
+    whitespace, which is exactly the case a join would corrupt.
+    """
+    (tmp_path / "my dir").mkdir()
+    out = _tcl(tmp_path, """
+        buda::open_bdb "my dir/ck.bdb"
+        puts "OPENED=[file exists {my dir/ck.bdb}]"
+        buda::stop""")
+    assert "OPENED=1" in out, out
+
+
+def test_a_whitespace_free_argument_is_passed_through_untouched(tmp_path):
+    """The other half: every argument in every existing flow has no
+    whitespace, so the wire line is byte-identical for them."""
+    import buda_script
+    assert buda_script  # the rule under test lives in the bridge, not here
+    out = _tcl(tmp_path, """
+        buda::def_layer 4 M4 H TOP 30
+        buda::add_block a 0 0 100 100
+        puts "BLOCKS=[buda::query blocks]"
+        buda::stop""")
+    assert "BLOCKS=1" in out, out
+
+
+def test_a_free_text_argument_does_not_gain_the_quotes(tmp_path):
+    """`require_file … hint <text>` is the ONE handler that reads trailing
+    arguments as free text, so it strips the quotes the bridge added."""
+    missing = tmp_path / "nope.lef"
+    out = _tcl(tmp_path, """
+        catch {buda::require_file %s hint {run fetch.py first}} e
+        puts "MSG=$e"
+        buda::stop""" % tcl_path(missing), expect_rc=None)
+    assert "run fetch.py first" in out, out
+    assert '"run fetch.py first"' not in out, out
+
+
 def test_a_warning_does_not_raise(tmp_path):
     """The other direction, and the one that would make the bridge unusable:
     `run_nuts` with nothing to do warns and returns, and a flow with a benign
