@@ -540,25 +540,72 @@ def test_a_missing_quoted_path_is_named_in_full_by_require_file(
     assert "run fetch.py" in msg, msg      # the remedy still rides along
 
 
+def test_a_hash_inside_a_quoted_path_is_not_a_comment(tmp_path, monkeypatch):
+    """`#` in a filename is legal on every filesystem, and the comment rule cut
+    the line at the space before it — so the handler resolved `"inputs/rev`,
+    and the quoted-path support failed on exactly the spelling it exists for
+    (Codex #775 P2).
+
+    Fixed in `strip_inline_comment` rather than only in the tokenizer,
+    because the DISPATCHER strips the comment to derive `args` and to write
+    the `BUDA_RECORD` line: a tokenizer-only fix would have left the recorder
+    writing a path the handler never read.
+    """
+    sdir, cwd = _setup(tmp_path)
+    d = sdir / "rev #2"
+    d.mkdir()
+    (d / "top.v").write_text(_V)
+    (d / "inner.buda").write_text("def_layer 7 M7 V 50\n")
+    script = sdir / "t.buda"
+    script.write_text('require_file "rev #2/top.v"\n'
+                      'source "rev #2/inner.buda"\n')
+    s, out, _ = _run(script, cwd, monkeypatch)
+    assert "BUDA-1905" not in out, out       # the precondition was satisfied
+    assert s.layers.has_layer(7), out        # …and the sourced file was found
+
+
+def test_an_unquoted_hash_still_starts_a_comment(tmp_path, monkeypatch):
+    """The other direction, which is the whole corpus: quoting is the ESCAPE
+    for a `#`, exactly as it is for a space.  Unquoted, the comment wins."""
+    sdir, cwd = _setup(tmp_path)
+    script = sdir / "t.buda"
+    script.write_text("def_layer 4 M4 H 50   # def_layer 9 M9 V 50\n")
+    s, _, _ = _run(script, cwd, monkeypatch)
+    assert s.layers.has_layer(4) and not s.layers.has_layer(9)
+
+
 def test_no_checked_in_flow_parses_differently(tmp_path):
     """The claim the whole design rests on, MEASURED rather than asserted: a
     quote is honoured only where a token BEGINS, so for every line that does
-    not use one the tokenizer is `.split()`.
+    not use one the tokenizer is `.split()` and the comment rule is the
+    character scan it always was.
 
     Every `.buda` in the tree is walked because the byte-identity claim is
     about the corpus, not about a sample of it — and a flow is exactly where a
     stray quote character would hide.
+
+    The baseline is the OLD comment rule written out here, not
+    `strip_inline_comment` itself: both rules now come off one scan, so
+    comparing them to each other would pass however that scan changed.
     """
     from buda_script import split_quoted_args, strip_inline_comment
+
+    def old_strip(line):                    # the rule before quoting existed
+        for i, ch in enumerate(line):
+            if ch == '#' and (i == 0 or line[i - 1].isspace()):
+                return line[:i]
+        return line
+
     root = Path(__file__).resolve().parents[2]
     differ, n_files, n_lines = [], 0, 0
     for p in sorted(root.rglob("*.buda")):
         n_files += 1
         for i, line in enumerate(p.read_text(errors="replace").splitlines(), 1):
             n_lines += 1
-            if (split_quoted_args(line, skip=0)
-                    != strip_inline_comment(line).split()):
-                differ.append(f"{p.relative_to(root)}:{i}: {line!r}")
+            if strip_inline_comment(line) != old_strip(line):
+                differ.append(f"{p.relative_to(root)}:{i}: comment {line!r}")
+            if split_quoted_args(line, skip=0) != old_strip(line).split():
+                differ.append(f"{p.relative_to(root)}:{i}: split {line!r}")
     assert n_files > 100 and n_lines > 1000, (n_files, n_lines)  # it walked
     assert not differ, differ[:10]
 

@@ -31,17 +31,63 @@ only because `buda_cli` has always exposed them under its own.
 """
 
 
+def _scan(line):
+    """(tokens, cut) — ONE walk of a `.buda` line, serving both rules.
+
+    `tokens` are the whitespace-separated arguments with a QUOTED run kept
+    whole and unwrapped; `cut` is where an inline comment begins (len(line)
+    when there is none).  Both callers below are views on this walk, so the
+    tokenizer and the comment stripper cannot come to disagree about where a
+    quoted run is — and they MUST agree: the dispatcher strips the comment to
+    derive `args` and to write the `BUDA_RECORD` line, while the handler
+    re-parses the raw `cmd_line`, so a divergence would record a path the
+    handler did not read.
+
+    A quote is honoured only where a token BEGINS.  That is what makes an
+    apostrophe inside a word (`a's_block`) an ordinary character rather than
+    the start of a run that swallows the rest of the line, and it is the same
+    invariant that keeps the tokenizer identical to `.split()`.  An
+    unterminated quote is likewise just a character.
+    """
+    out, i, n, at_start = [], 0, len(line), True
+    while i < n:
+        ch = line[i]
+        if ch.isspace():
+            at_start = True
+            i += 1
+            continue
+        if ch == '#' and at_start:
+            return out, i
+        if at_start and ch in "\"'":
+            end = line.find(ch, i + 1)
+            if end >= 0:                   # unterminated falls through
+                out.append(line[i + 1:end])
+                i = end + 1
+                at_start = False
+                continue
+        j = i
+        while j < n and not line[j].isspace():
+            j += 1
+        out.append(line[i:j])
+        i, at_start = j, True
+    return out, n
+
+
 def strip_inline_comment(line):
     """Strip a `#` comment from a script line: everything from the first `#`
     that begins a token (start of line, or preceded by whitespace) to the end
     of the line is removed. This lets a command be commented out partially —
     `run_bundler # strict` runs `run_bundler`, `def_layer … 0.0 # note` drops
     the note. A `#` embedded in a token (no preceding whitespace, e.g. a path
-    fragment) is left intact so it can't silently swallow real arguments."""
-    for i, ch in enumerate(line):
-        if ch == '#' and (i == 0 or line[i - 1].isspace()):
-            return line[:i]
-    return line
+    fragment) is left intact so it can't silently swallow real arguments.
+
+    A `#` inside a QUOTED run is part of the path, not a comment (Codex #775
+    P2): `require_file "inputs/rev #2/top.v"` is a legal filename on every
+    filesystem, and cutting at the space before it left the handler resolving
+    `"inputs/rev` — the quoted-path support failing on exactly the spelling it
+    exists for.  Quoting is the escape for a `#` the same way it is for a
+    space; unquoted, the comment still wins."""
+    return line[:_scan(line)[1]]
 
 
 def sole_path_arg(cmd_line, skip=1):
@@ -119,24 +165,7 @@ def split_quoted_args(cmd_line, skip=1):
     `skip` is how many leading words are the COMMAND rather than an argument
     — 1 normally, 2 for a sub-verb form.
     """
-    rest = strip_inline_comment(cmd_line)
-    out, i, n = [], 0, len(rest)
-    while i < n:
-        if rest[i].isspace():
-            i += 1
-            continue
-        if rest[i] in "\"'":
-            end = rest.find(rest[i], i + 1)
-            if end > 0:
-                out.append(rest[i + 1:end])
-                i = end + 1
-                continue
-        j = i
-        while j < n and not rest[j].isspace():
-            j += 1
-        out.append(rest[i:j])
-        i = j
-    return out[skip:]
+    return _scan(cmd_line)[0][skip:]
 
 
 def leading_path_and_options(cmd_line, option_words=None):
