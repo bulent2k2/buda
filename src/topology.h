@@ -509,7 +509,10 @@ struct KeepoutZone {
     // The NET this zone's metal belongs to, when it has one: a power-grid
     // strap imported from a DEF `SPECIALNETS` section carries `VDD`, `VSS`
     // and so on.  EMPTY for obstruction with no net behind it — a macro's
-    // `OBS`, a `LAYER` blockage, a halo — which is most keepouts.
+    // `OBS` or a `LAYER` blockage — which is most keepouts.  (Not a
+    // component halo: item 13 established that a halo is PLACEMENT
+    // information and produces no keepout at all, so there is no halo
+    // zone here to label or not.)
     //
     // It changes nothing about what this zone blocks.  It exists because a
     // strap is not merely occupied metal: it is a RAIL, and the NDR shield

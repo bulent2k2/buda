@@ -97,7 +97,7 @@ struct DefImportStats {
     // footprint whose own edges are already grid lines contributes no
     // reachable trunk position, only grid.
     // `net` names the SPECIALNET a power-grid strap belongs to, and is empty
-    // for every other provenance (a macro's OBS, a LAYER blockage, a halo)
+    // for every other provenance (a macro's OBS, a LAYER blockage)
     // because those are obstruction with no net behind them.  Carried as its
     // own field rather than recovered from `why`: a net name may contain a
     // space, so splitting the provenance string is a parse that can be wrong,

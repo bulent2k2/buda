@@ -190,7 +190,9 @@ purpose is that an identity survives intact must not arrive via a lossy
 round trip.
 
 Empty for obstruction with no net behind it — a macro's `OBS`, a `LAYER`
-blockage, a halo, a hand-declared `add_keepout`. That is deliberate and
+blockage, a hand-declared `add_keepout`. (Not a component halo: item 13
+established that a halo carries no layer and produces no keepout at all,
+so there is no halo zone to label either way.) That is deliberate and
 test-pinned: `net` is a claim that this metal *belongs to* a net, and
 labelling anonymous obstruction would degrade it from "the rail this is" to
 "some string".

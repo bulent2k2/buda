@@ -95,6 +95,9 @@ MESSAGES = {
                            "a BUDA rule and was skipped."),
     "BUDA-1614": (WARNING, "A GDS TEXT label lands outside every component, "
                            "so its net was not recovered."),
+    "BUDA-1615": (WARNING, "Imported obstruction was thinner than one layout "
+                           "unit and was dropped when its coordinates were "
+                           "rounded to integers."),
     "BUDA-1602": (WARNING, "Imported design counts differ from the counts the "
                            "file declares."),
     "BUDA-1603": (WARNING, "A construct in the file has no representation in "
