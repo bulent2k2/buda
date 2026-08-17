@@ -24,16 +24,21 @@ import os
 import sys
 
 import buda_diag
-from buda_session.util import resolve_script_path
+from buda_session.util import resolve_script_path, sole_path_arg
 
 
 def cmd_source(session, cmd, args, cmd_line):
-    if not args:
+    # The whole rest of the line, not `args[0]`: `source` takes exactly one
+    # path, so a space in it is part of the filename rather than an argument
+    # separator (see `sole_path_arg` for why this is not tokenizer quoting).
+    # Identical for every path without spaces — `args[0]` and the rest of the
+    # line are the same string there — which is what keeps every existing
+    # flow byte-for-byte unchanged.
+    raw_path = sole_path_arg(cmd_line)
+    if not raw_path:
         msg = "Error: source command requires a file path"
         print(msg); session._log_write(msg)
         return
-
-    raw_path = args[0]
 
     # Resolve relative to the current executing script's dir (else CWD), and
     # make the '.buda'-suffix decision against the RESOLVED candidates — not
