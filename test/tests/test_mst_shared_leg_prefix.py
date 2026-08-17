@@ -43,6 +43,7 @@ from pathlib import Path
 
 import pytest
 
+import buda
 import buda_cli
 
 _ROOT = Path(__file__).parents[2]
@@ -199,29 +200,225 @@ def test_the_trim_is_OPT_IN_and_the_default_leaves_the_geometry_alone():
     assert all(p[3] == (2010, 1010) for p in bad), bad
 
 
-@pytest.mark.xfail(strict=True, reason="OPEN: the trim matches shared STARTS only")
 def test_MST_legs_that_END_at_the_shared_node_are_also_trimmed(solved_suffix):
-    """The mirror half, still open.
+    """The mirror half — LANDED (was the strict xfail beside this one).
 
     `compute_mst` emits every edge with `u < v` and `realize_mst_edge` routes
     `u -> v`, so a shared node holding the HIGHER index has both its legs END
-    there.  The trim requires identical STARTS, so it never fires.
+    there.  The trim used to require identical STARTS, so it never fired; it
+    now matches on either shared endpoint.
 
     The lever is which block is the DRIVER, not which is declared first — the
     busterm list leads with the driver, so re-ordering `add_block` cannot move
     the hub's index.  flow/mst_shared_leg_suffix.buda demotes the geometric hub
-    to a receiver, which does.  Measured there: MST_VH seg2 (120) inside seg4
-    (1320) and MST_HV seg4 (70) inside seg2 (620), both at the END (2010,1010).
+    to a receiver, which does.  Measured there before the mirror: MST_VH seg2
+    (120) inside seg4 (1320) and MST_HV seg4 (70) inside seg2 (620), both at
+    the END (2010,1010).
 
-    The harm differs in kind and the mirror should not be sold as the same
-    defect: both legs tap the hub's face, so there is NO free end and
-    `check_design` reports Success.  What is wrong is that the short leg is pure
-    duplicate metal (480 of 11114 detailed WL) and its perpendicular partner
-    claims an ENDPOINT conn to both legs, which NUTS reports as a junction
-    infeasibility and which feeds ripup's contender list.
+    The harm differs in kind and the mirror is still not the same defect: both
+    legs tap the hub's face, so there is NO free end and `check_design` reports
+    Success either way.  What the cut removes is duplicate metal and a junction
+    the geometry could not honour — see the two tests below.
     """
     bad = _pairs(solved_suffix, kinds=["MST"])
     assert not bad, f"duplicated MST leg suffixes: {bad}"
+
+
+def _drop_command(src, command):
+    """Comment out every line whose COMMAND is `command`.
+
+    Line-based on purpose.  A substring replace matches the flow's own header
+    comment first — both MST vehicles document the knob in prose above the
+    command — so `replace(..., 1)` edits the documentation and leaves the
+    command running, and the arm meant to be the control is not one.
+    """
+    out, hits = [], 0
+    for line in src.splitlines():
+        if line.split("#", 1)[0].split()[:1] == [command]:
+            out.append(f"# [test] dropped: {line}")
+            hits += 1
+        else:
+            out.append(line)
+    assert hits, f"no `{command}` command line to drop — flow changed?"
+    return "\n".join(out) + "\n"
+
+
+def _solve_without_mst_trim(flow):
+    """The vehicle with its `set_trim_mst_legs` command removed.
+
+    Both MST vehicles turn the trim ON, so the opt-in cannot be observed from
+    them directly — this is what makes the guard below possible.  Unique temp
+    name in the flow's own directory, for the xdist reason the trunk-trim
+    helper documents (Codex #732).
+    """
+    src = _drop_command(flow.read_text(), "set_trim_mst_legs")
+    fd, path = tempfile.mkstemp(dir=flow.parent, prefix="_mst_trim_off_",
+                               suffix=".buda")
+    tmp = Path(path)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(src)
+        return _solve(tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def test_the_MST_leg_trim_is_OPT_IN_on_the_MIRROR_half_too():
+    """The suffix half of the opt-in guard.
+
+    `test_the_trim_is_OPT_IN_and_the_default_leaves_the_geometry_alone` above
+    already holds this for the prefix vehicle; this extends it to the mirror,
+    which rides the SAME knob (one defect seen from two sides, so one opt-in)
+    and is opt-in for the same reason — the cut re-sorts the WL-ordered pool,
+    moving selection well beyond the trimmed bundle.  Asserting the duplication
+    SURVIVES without the knob is what makes a silent default flip fail loudly
+    here rather than somewhere far away.
+    """
+    assert _pairs(_solve_without_mst_trim(_SUFFIX_FLOW), kinds=["MST"]), \
+        "the shared-END duplication vanished with no opt-in — default flipped?"
+
+
+def test_no_candidate_carries_a_zero_length_segment():
+    """The hazard the mirror introduces and the prefix half could not reach.
+
+    A single cut can never reach zero: the donor is strictly shorter than the
+    leg it trims, so at least one unit survives.  Two cuts on ONE leg can meet
+    exactly — 60 off the start and 40 off the end of a 100-unit leg — and that
+    is only possible once a leg can be trimmed at BOTH of its ends.
+
+    The floor that guards it is `set_min_stub_length`, which is **0 unless the
+    design declares one**, so `remaining >= floor` would have admitted the
+    degenerate segment on any vehicle that does not.  Neither vehicle here
+    declares one, which is why this is the right place to hold it.
+    """
+    for flow in (_FLOW, _SUFFIX_FLOW):
+        session = _solve(flow)
+        for w in session.bundles:
+            for t in w.input.candidates:
+                for k, sg in enumerate(t.segments):
+                    assert (sg.start.x, sg.start.y) != (sg.end.x, sg.end.y), \
+                        f"{flow.name} {t.type} seg{k} is zero-length"
+
+
+def _mst_candidate(session, want):
+    for w in session.bundles:
+        for c in w.input.candidates:
+            if c.type == want:
+                return c
+    raise AssertionError(f"{want} absent")
+
+
+@pytest.mark.parametrize("flow,kind", [
+    (_FLOW, "MST_HV"),          # shared STARTS (5a)
+    (_SUFFIX_FLOW, "MST_VH"),   # shared ENDS   (5b)
+])
+def test_a_flip_that_would_strand_a_trimmed_leg_is_refused(flow, kind):
+    """The cross-knob bug, on both halves.
+
+    The trim cuts a leg back to its shorter sibling's far end — which for a
+    2-leg L IS that edge's BEND.  `flip_mst_edge` moves the bend and preserves
+    only its own edge's endpoints, so the trimmed leg is left at the old
+    coordinate touching nothing, and ripup's `_rr_apply_move` re-derives
+    seg_conns but not geometry: a stage-a overlap trial can accept the
+    disconnected result.
+
+    Measured before the guard, on BOTH vehicles: flipping edge 1 moved the
+    bend and the edge-2 leg was stranded.  It needs `set_trim_mst_legs` and
+    ripup's `use_edge_candidates` together — both opt-in, neither on by
+    default — and it predates the mirror, since the prefix half creates the
+    same adjacency.
+    """
+    c = _mst_candidate(_solve(flow), kind)
+    before = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in c.segments]
+
+    # Edge 1's bend is where the trim parked edge 2's leg.
+    anchored = {(s.start.x, s.start.y) for s in c.segments if s.edge_id != 1} | \
+               {(s.end.x, s.end.y) for s in c.segments if s.edge_id != 1}
+    legs = [s for s in c.segments if s.edge_id == 1]
+    assert len(legs) == 2, "edge 1 is not a flippable 2-leg L — vehicle changed?"
+    bend = next(((p.x, p.y) for p in (legs[0].start, legs[0].end)
+                 if (p.x, p.y) in {(legs[1].start.x, legs[1].start.y),
+                                   (legs[1].end.x, legs[1].end.y)}), None)
+    assert bend in anchored, "no foreign leg on the bend — nothing to guard"
+
+    assert buda.flip_mst_edge(c, 1, 4, 5, _solve(flow).fp) is False
+    after = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in c.segments]
+    assert after == before, "a refused flip must not mutate the topology"
+
+
+def test_the_flip_guard_does_not_refuse_every_flip():
+    """Non-vacuity: a flip with no foreign leg on its bend still succeeds.
+
+    Without this, the guard above would pass just as well if it had disabled
+    `flip_mst_edge` outright — which would silently remove ripup's whole
+    edge-flip move class rather than the unsafe subset of it.
+    """
+    session = _solve(_FLOW)
+    c = _mst_candidate(session, "MST_HV")
+    anchored = set()
+    for s in c.segments:
+        anchored |= {(s.start.x, s.start.y), (s.end.x, s.end.y)}
+
+    flipped = []
+    for edge in {s.edge_id for s in c.segments if s.edge_id >= 0}:
+        legs = [s for s in c.segments if s.edge_id == edge]
+        if len(legs) != 2:
+            continue
+        foreign = {(s.start.x, s.start.y) for s in c.segments if s.edge_id != edge} | \
+                  {(s.end.x, s.end.y) for s in c.segments if s.edge_id != edge}
+        bend = next(((p.x, p.y) for p in (legs[0].start, legs[0].end)
+                     if (p.x, p.y) in {(legs[1].start.x, legs[1].start.y),
+                                       (legs[1].end.x, legs[1].end.y)}), None)
+        if bend is None or bend in foreign:
+            continue
+        flipped.append(buda.flip_mst_edge(c, edge, 4, 5, session.fp))
+
+    assert flipped, "no unanchored 2-leg edge on this vehicle to prove it with"
+    assert any(flipped), "the guard refused every flip — it is over-broad"
+
+
+def test_the_mirror_cut_shortens_the_candidate_and_drops_segments():
+    """What the cut buys, on the candidate that carries the shape.
+
+    Named for what it ASSERTS.  The via and junction-infeasibility figures
+    below are measured but not asserted here: both are properties of a NUTS
+    run, and the MST candidate is not the one this vehicle selects, so pinning
+    would be required to reach them.  They are in the flow header, where the
+    pinned measurement lives.
+
+    The MST candidates LOSE on this vehicle (the flow selects a TRUNK), so the
+    effect is measured on the pinned candidate — the same reason the phantom
+    vehicle has to pin.  Pinned by TYPE in each arm, never by index: the trim
+    re-sorts the pool, so MST_VH is candidate 18 without it and 14 with it.
+
+    Measured, trim OFF -> ON on MST_VH:
+
+        nominal WL      2970 -> 2850   exactly the 120-unit duplicate
+        segments           7 -> 5      the relay completion stops needing
+                                       two connectors and extends instead
+        per-bit vias      28 -> 16     the real win: vias scale PER BIT
+        junction infeas    3 -> 2      the partner claimed an ENDPOINT conn to
+                                       BOTH legs; only one can hold
+
+    Note what is NOT here: realized detailed WL barely moves (11114 -> 11087,
+    -0.24%), because NUTS's placement absorbs most of a 120-unit nominal
+    saving.  Asserted as directions rather than as those numbers, so the test
+    survives a re-tune but fails if the cut stops paying.
+    """
+    off = _solve_without_mst_trim(_SUFFIX_FLOW)
+    on = _solve(_SUFFIX_FLOW)
+
+    def mst_candidate(session, want="MST_VH"):
+        for w in session.bundles:
+            for c in w.input.candidates:
+                if c.type == want:
+                    return c
+        raise AssertionError(f"{want} absent")
+
+    a, b = mst_candidate(off), mst_candidate(on)
+    assert b.estimated_wirelength < a.estimated_wirelength, \
+        (a.estimated_wirelength, b.estimated_wirelength)
+    assert len(b.segments) < len(a.segments), (len(a.segments), len(b.segments))
 
 
 def _solve_with_trunk_trim(flow):
@@ -230,8 +427,18 @@ def _solve_with_trunk_trim(flow):
     Unique temp name in the flow's own directory, for the xdist reason the
     sibling opt-in test documents (Codex #732).
     """
-    src = flow.read_text().replace("generate_topologies",
-                                   "set_trim_trunk_stubs on\ngenerate_topologies", 1)
+    # Line-based, for the reason `_drop_command` documents: a substring
+    # replace would fire on a header comment that merely NAMES the command.
+    # Harmless on today's vehicles (neither mentions it in prose) — but this
+    # is the trap that made the opt-in guard above silently test nothing.
+    lines = flow.read_text().splitlines()
+    for i, line in enumerate(lines):
+        if line.split("#", 1)[0].split()[:1] == ["generate_topologies"]:
+            lines.insert(i, "set_trim_trunk_stubs on")
+            break
+    else:
+        raise AssertionError("no `generate_topologies` command line — flow changed?")
+    src = "\n".join(lines) + "\n"
     fd, path = tempfile.mkstemp(dir=flow.parent, prefix="_trunk_trim_on_",
                                 suffix=".buda")
     tmp = Path(path)

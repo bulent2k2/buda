@@ -3,11 +3,15 @@
 #
 # The MIRROR of flow/mst_shared_leg_prefix.buda: two MST edges
 # meeting at one block where the shared legs END rather than
-# START.  STILL OPEN — the trim matches on shared STARTS, so it
-# does not fire here.  Note this flow turns the trim ON
-# (`set_trim_mst_legs on`, below): the duplication below survives
-# a build that HAS the trim and has been asked to apply it, so
-# this is the missing half and not merely the opt-in being off.
+# START.  FIXED — the trim matched on shared STARTS only and now
+# matches on either shared endpoint, on the SAME opt-in knob
+# (`set_trim_mst_legs on`, below), since the two halves are one
+# shape seen from two sides.
+#
+# This vehicle was the strict xfail that recorded the gap.  It
+# still turns the trim ON, so it remains the honest test of the
+# fix rather than of the opt-in: what follows is what a build
+# that HAS the trim and was asked to apply it now does.
 #
 # `compute_mst` emits every edge with `u < v` and
 # `realize_mst_edge` routes `u -> v`, so whether a shared node's
@@ -25,7 +29,7 @@
 # `hub` demoted from driver to receiver, `drv` taking the far
 # position the old `far` block held.
 #
-# Measured on this branch (trim in, and it does not fire):
+# The shape, as it was before the mirror landed:
 #
 #   MST_VH  seg2 (1890,1010)->(2010,1010) len  120
 #             inside seg4 (690,1010)->(2010,1010) len 1320
@@ -57,6 +61,35 @@
 # defect.  The geometric cut is the mirror image: trim the long
 # leg's END back to the short leg's far end, where the short
 # leg's own perpendicular partner already is.
+#
+# ── WHAT THE CUT ACTUALLY BOUGHT ────────────────────────────
+#
+# The MST candidates LOSE on this vehicle — the flow selects a
+# TRUNK — so the routed result below is UNCHANGED by the trim and
+# the effect has to be measured on the pinned candidate.  That is
+# not a weakness of the vehicle; it is the same fact the whole
+# entry rests on, that this shape lives in candidates that lose.
+#
+# Pinned MST_VH, trim OFF -> ON (pin by TYPE, not index: the trim
+# re-sorts the WL-ordered pool, so it is candidate 18 without and
+# 14 with):
+#
+#   nominal WL       2970 -> 2850    exactly the 120-unit duplicate
+#   segments            7 -> 5       the relay completion stops
+#                                    needing two connectors and
+#                                    extends the stubs instead
+#   per-bit vias       28 -> 16      the real win — vias scale PER
+#                                    BIT, so this is 12 fewer on a
+#                                    4-bit bus
+#   junction infeas     3 -> 2       the partner's impossible
+#                                    double ENDPOINT conn, gone
+#
+# And the number that did NOT move: realized detailed WL, 11114 ->
+# 11087 (-0.24%).  A 120-unit nominal saving on a 4-bit bus is
+# 480 units of metal, and NUTS's placement absorbs almost all of
+# it.  Worth stating plainly, because the obvious way to sell
+# this fix -- "it removes 480 units of duplicate wire" -- is the
+# nominal figure, and the realized one is what a design gets.
 #
 # Run:  bin/buda flow/mst_shared_leg_suffix.buda --no-viz
 # ============================================================
