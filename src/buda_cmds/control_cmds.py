@@ -24,7 +24,8 @@ import os
 import sys
 
 import buda_diag
-from buda_session.util import resolve_script_path, sole_path_arg, unquote
+from buda_session.util import resolve_script_path
+from buda_script import sole_path_arg, split_quoted_args
 
 
 def cmd_source(session, cmd, args, cmd_line):
@@ -130,23 +131,26 @@ def cmd_require_file(session, cmd, args, cmd_line):
         session._flush_bdb_writeback()
         sys.exit(1)
 
-    if not args:
+    # A path may contain spaces when QUOTED (buda_script.split_quoted_args).
+    # This command takes a LIST of paths, so there is no rest-of-line rule to
+    # be had: between two paths nothing but a quote can say where one ends.
+    # Unquoted, `argv` is exactly the `args` the dispatcher split.
+    argv = split_quoted_args(cmd_line)
+    if not argv:
         _fail("Error: require_file requires at least one path "
               "(require_file <path> [<path> ...] [hint <text>])")
 
     # `hint` ends the path list, so several files can share one remedy.  The
-    # rest of the line is the hint verbatim — the handlers split on
-    # whitespace and nothing here re-quotes, so it reads as written.
-    paths, hint = args, ""
-    if "hint" in args:
-        cut = args.index("hint")
-        # `unquote`d: the Tcl bridge re-quotes an argument containing
-        # whitespace (buda::_join_args), so `buda::require_file a hint
-        # {see fetch.py}` would otherwise carry the quotes into the
-        # message.  The hint is the one place trailing arguments are
-        # read as FREE TEXT.
-        paths = args[:cut]
-        hint = unquote(" ".join(args[cut + 1:]).strip())
+    # hint is the trailing WORDS joined — which is what it always was (the
+    # ariane133 flows' double-spaced hint already came out single-spaced), and
+    # it is also what makes the Tcl spelling work: `buda::_join_args` re-quotes
+    # a whitespace-bearing argument, and the tokenizer hands the quoted run
+    # back whole instead of leaving the quotes in the message.
+    paths, hint = argv, ""
+    if "hint" in argv:
+        cut = argv.index("hint")
+        paths = argv[:cut]
+        hint = " ".join(argv[cut + 1:]).strip()
     if not paths:
         _fail("Error: require_file: no path before 'hint' "
               "(require_file <path> [<path> ...] [hint <text>])")

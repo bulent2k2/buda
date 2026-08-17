@@ -27,8 +27,8 @@ import sys
 import buda_diag
 from ._options import reject_unknown_options
 from buda_session.util import ensure_parent_dir, resolve_script_path
-from buda_script import (leading_path_and_options, option_value,
-                         sole_path_arg)
+from buda_script import (leading_path_and_options, sole_path_arg,
+                         split_quoted_args)
 
 
 def cmd_bdb_net_mode(session, cmd, args, cmd_line):
@@ -205,15 +205,23 @@ def cmd_import_def_lef(session, cmd, args, cmd_line):
     # A DEF states its own counts, so a reader that ignores them cannot tell
     # a fully-read file from a half-read one — and a half-read floorplan is
     # still a floorplan.
-    if len(args) < 2:
+    # EITHER path may contain spaces when QUOTED (buda_script.split_quoted_args)
+    # — two adjacent paths have no keyword to find a boundary against, so the
+    # quote is the only thing that can state one.  Unquoted, `argv` is exactly
+    # the `args` the dispatcher split, so everything below is unchanged.
+    #
+    # Counted on `argv`, not `args`: `import_def_lef "a b.def"` splits into
+    # two tokens and would pass an `args` check while carrying ONE path.
+    argv = split_quoted_args(cmd_line)
+    if len(argv) < 2:
         print("Error: import_def_lef requires <def_path> <lef_path>"); return
     if session.bdb is None:
         print("Error: open_bdb first"); return
-    reject_unknown_options("import_def_lef", args[2:],
+    reject_unknown_options("import_def_lef", argv[2:],
                            ("no_tracks", "no_blockages",
                             "allow_missing_footprints"))
-    def_path = resolve_script_path(session, args[0], is_read=True)
-    lef_path = resolve_script_path(session, args[1], is_read=True)
+    def_path = resolve_script_path(session, argv[0], is_read=True)
+    lef_path = resolve_script_path(session, argv[1], is_read=True)
     st = session.bdb.import_def_lef(def_path, lef_path)
 
     def _line(what, got, declared):
@@ -249,7 +257,7 @@ def cmd_import_def_lef(session, cmd, args, cmd_line):
         shown = ", ".join(st.missing_cells[:8])
         more = f" (+{len(st.missing_cells) - 8} more)" if len(st.missing_cells) > 8 else ""
         n_bad = len(st.missing_cells)
-        if "allow_missing_footprints" in args:
+        if "allow_missing_footprints" in argv:
             buda_diag.emit("BUDA-1606",
                            f"{n_bad} cell(s) in the DEF have no LEF footprint "
                            f"and were sized 0.5 x 0.5 um: {shown}{more}")
@@ -275,9 +283,12 @@ def cmd_import_def_lef(session, cmd, args, cmd_line):
                        f"[DEF] unmodelled construct(s): {st.unmodelled}")
 
     # ── physical data the SESSION owns, not the database ─────────────────
-    if "no_tracks" not in args:
+    # `argv`, not `args`, for the option tests too: a quoted path whose text
+    # happens to contain the word (`"my no_tracks dir/a.def"`) splits into a
+    # token that reads as the option under a plain split.
+    if "no_tracks" not in argv:
         _apply_def_tracks(session, st)
-    if "no_blockages" not in args:
+    if "no_blockages" not in argv:
         _apply_def_keepouts(session, st)
 
 

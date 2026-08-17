@@ -24,7 +24,7 @@ import os
 
 import buda_diag
 from buda_session.util import resolve_script_path
-from buda_script import leading_path_and_options, option_value
+from buda_script import leading_path_and_options
 
 from ._options import reject_unknown_options
 # NOTE: `buda_viz` is imported LAZILY inside the two visualize handlers below,
@@ -525,9 +525,11 @@ def cmd_emit_guides(session, cmd, args, cmd_line):
                       f"got '{opts[i + 1]}'"); return
             i += 2
         elif kw == "tcl" and i + 1 < len(opts):
-            tcl, i = option_value(opts, i)
+            # A quoted value arrives as ONE token (split_quoted_args), so this
+            # is the same indexing as `margin` above.
+            tcl, i = opts[i + 1], i + 2
         elif kw == "csv" and i + 1 < len(opts):
-            csv_path, i = option_value(opts, i)
+            csv_path, i = opts[i + 1], i + 2
         else:
             reject_unknown_options("emit_guides", [kw],
                                    ("margin", "tcl", "csv"))

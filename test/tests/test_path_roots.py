@@ -377,6 +377,239 @@ def test_a_sub_verb_path_may_contain_spaces(tmp_path, monkeypatch):
     assert s.layers.get_gds_layer(4) == 63, out
 
 
+# ── the two-path family: quoting is the only thing that can say where ─────
+#    one path ends and the next begins
+
+# The smallest pair `import_def_lef` will actually READ — enough that the
+# reader's own count line proves both files were found, not just resolved.
+_DEF2 = """VERSION 5.8 ;
+DESIGN t ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 100000 100000 ) ;
+COMPONENTS 1 ;
+  - i0 m + PLACED ( 1000 2000 ) N ;
+END COMPONENTS
+END DESIGN
+"""
+
+_LEF2 = """MACRO m
+  SIZE 10 BY 4 ;
+END m
+END LIBRARY
+"""
+
+
+def _def_lef_in(sdir, dirname="my dir"):
+    d = sdir / dirname
+    d.mkdir()
+    (d / "a.def").write_text(_DEF2)
+    (d / "b.lef").write_text(_LEF2)
+    return d
+
+
+def test_both_paths_of_import_def_lef_may_be_quoted(tmp_path, monkeypatch):
+    """`import_def_lef <def> <lef>` is the shape rest-of-line cannot serve at
+    all: with TWO adjacent paths there is no trailing keyword to stop at, and
+    nothing between them but whitespace.  A quote is the only thing that can
+    state the boundary — so it does, on either path independently."""
+    sdir, cwd = _setup(tmp_path)
+    _def_lef_in(sdir)
+    script = sdir / "t.buda"
+    script.write_text('open_bdb :memory:\n'
+                      'import_def_lef "my dir/a.def" "my dir/b.lef"\n')
+    s, out, _ = _run(script, cwd, monkeypatch)
+    # The reader RAN on both files: it read the component, and it never fell
+    # back to the 0.5x0.5 speck that a missing LEF footprint produces.
+    assert "[DEF] components: imported 1 of 1" in out, out
+    assert "BUDA-1601" not in out and "BUDA-1609" not in out, out
+    assert s.bdb.all_components()[0].x2 == 11.0, "the LEF SIZE was not read"
+
+
+def test_a_quoted_def_still_leaves_the_lef_a_separate_argument(
+        tmp_path, monkeypatch):
+    """The half a rest-of-line rule would lose: quoting the FIRST path must
+    not swallow the second."""
+    sdir, cwd = _setup(tmp_path)
+    _def_lef_in(sdir)
+    script = sdir / "t.buda"
+    script.write_text('open_bdb :memory:\n'
+                      'import_def_lef "my dir/a.def" my dir/b.lef\n')
+    monkeypatch.chdir(cwd)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    out = io.StringIO()
+    # Not `_run`: the refusal is fail-fast (SystemExit, a BaseException), so
+    # it sails past `_run`'s `except Exception` before it can return the
+    # output this asserts on.
+    with contextlib.redirect_stdout(out), pytest.raises(SystemExit):
+        s.do_command(f"source {script}")
+    # Whatever follows the quoted path is parsed as its own arguments, exactly
+    # as it always was: `my` is the LEF and `dir/b.lef` is a third token, which
+    # the option check refuses.  A rest-of-line rule would have eaten both into
+    # the filename and reported nothing at all.
+    assert "unknown option 'dir/b.lef'" in out.getvalue(), out.getvalue()
+
+
+def test_one_quoted_path_is_not_two_paths(tmp_path, monkeypatch):
+    """The count is taken AFTER quote-aware splitting.  Counted on the
+    dispatcher's plain split, `import_def_lef "a b.def"` is two tokens and
+    sails through the arity check carrying ONE path — then indexes off the
+    end."""
+    sdir, cwd = _setup(tmp_path)
+    _def_lef_in(sdir)
+    script = sdir / "t.buda"
+    script.write_text('open_bdb :memory:\n'
+                      'import_def_lef "my dir/a.def"\n')
+    _s, out, err = _run(script, cwd, monkeypatch, expect_error=None)
+    assert "requires <def_path> <lef_path>" in out, out
+    assert not isinstance(err, IndexError), err
+
+
+def test_an_unknown_option_is_still_refused_after_two_paths(
+        tmp_path, monkeypatch):
+    """The guard that decided the design, in its two-path form: unquoted
+    tokens keep their old meaning, so a typo is still a typo.
+
+    Passes both ways by design — it pins the decision, not a bug."""
+    sdir, cwd = _setup(tmp_path)
+    _def_lef_in(sdir)
+    script = sdir / "t.buda"
+    script.write_text('open_bdb :memory:\n'
+                      'import_def_lef "my dir/a.def" "my dir/b.lef" '
+                      'no_blockage\n')
+    with pytest.raises(SystemExit):
+        _run(script, cwd, monkeypatch, expect_error=None)
+
+
+def test_an_option_word_inside_a_quoted_path_stays_part_of_the_path(
+        tmp_path, monkeypatch):
+    """A membership test over the DISPATCHER's tokens reads a directory named
+    `no_tracks` as the option — the file is found (the handler resolves the
+    quoted path) and the DEF's tracks are silently dropped."""
+    sdir, cwd = _setup(tmp_path)
+    _def_lef_in(sdir, "no_tracks dir")
+    (sdir / "no_tracks dir" / "a.def").write_text(
+        _DEF2.replace("COMPONENTS 1 ;",
+                      "TRACKS Y 500 DO 10 STEP 400 LAYER metal2 ;\n"
+                      "COMPONENTS 1 ;"))
+    script = sdir / "t.buda"
+    script.write_text(
+        'def_layer 2 metal2 H 50\nopen_bdb :memory:\n'
+        'import_def_lef "no_tracks dir/a.def" "no_tracks dir/b.lef"\n')
+    s, out, _ = _run(script, cwd, monkeypatch)
+    assert "[DEF] components: imported 1 of 1" in out, out
+    assert "tracks installed" in out, \
+        f"the DEF's TRACKS were dropped — the path read as `no_tracks`\n{out}"
+    assert s.routing_grid is not None
+
+
+def test_require_file_accepts_a_quoted_spaced_path(tmp_path, monkeypatch):
+    """`require_file` takes a LIST of paths, so it has the same problem twice
+    over.  A satisfied precondition is silent — which is the assertion: the
+    run reaches the command after it."""
+    sdir, cwd = _setup(tmp_path)
+    (sdir / "my inputs").mkdir()
+    (sdir / "my inputs" / "top.v").write_text(_V)
+    script = sdir / "t.buda"
+    script.write_text('require_file "my inputs/top.v"\n'
+                      'def_layer 4 M4 H 50\n')
+    s, out, _ = _run(script, cwd, monkeypatch)
+    assert s.layers.has_layer(4), out     # it did not stop
+    assert "BUDA-1905" not in out, out
+
+
+def test_a_missing_quoted_path_is_named_in_full_by_require_file(
+        tmp_path, monkeypatch):
+    """And when it is NOT satisfied, the diagnostic names the path the author
+    wrote — the truncation was the other half of the original confusion.
+
+    The COUNT is what discriminates: split on whitespace, one missing file is
+    reported as two, both under names nobody typed."""
+    sdir, cwd = _setup(tmp_path)
+    script = sdir / "t.buda"
+    script.write_text('require_file "my inputs/top.v" hint run fetch.py\n')
+    monkeypatch.chdir(cwd)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), pytest.raises(SystemExit):
+        s.do_command(f"source {script}")
+    msg = out.getvalue()
+    assert "1 required input file(s) not found" in msg, msg
+    assert "my inputs/top.v" in msg, msg
+    assert "run fetch.py" in msg, msg      # the remedy still rides along
+
+
+def test_a_hash_inside_a_quoted_path_is_not_a_comment(tmp_path, monkeypatch):
+    """`#` in a filename is legal on every filesystem, and the comment rule cut
+    the line at the space before it — so the handler resolved `"inputs/rev`,
+    and the quoted-path support failed on exactly the spelling it exists for
+    (Codex #775 P2).
+
+    Fixed in `strip_inline_comment` rather than only in the tokenizer,
+    because the DISPATCHER strips the comment to derive `args` and to write
+    the `BUDA_RECORD` line: a tokenizer-only fix would have left the recorder
+    writing a path the handler never read.
+    """
+    sdir, cwd = _setup(tmp_path)
+    d = sdir / "rev #2"
+    d.mkdir()
+    (d / "top.v").write_text(_V)
+    (d / "inner.buda").write_text("def_layer 7 M7 V 50\n")
+    script = sdir / "t.buda"
+    script.write_text('require_file "rev #2/top.v"\n'
+                      'source "rev #2/inner.buda"\n')
+    s, out, _ = _run(script, cwd, monkeypatch)
+    assert "BUDA-1905" not in out, out       # the precondition was satisfied
+    assert s.layers.has_layer(7), out        # …and the sourced file was found
+
+
+def test_an_unquoted_hash_still_starts_a_comment(tmp_path, monkeypatch):
+    """The other direction, which is the whole corpus: quoting is the ESCAPE
+    for a `#`, exactly as it is for a space.  Unquoted, the comment wins."""
+    sdir, cwd = _setup(tmp_path)
+    script = sdir / "t.buda"
+    script.write_text("def_layer 4 M4 H 50   # def_layer 9 M9 V 50\n")
+    s, _, _ = _run(script, cwd, monkeypatch)
+    assert s.layers.has_layer(4) and not s.layers.has_layer(9)
+
+
+def test_no_checked_in_flow_parses_differently(tmp_path):
+    """The claim the whole design rests on, MEASURED rather than asserted: a
+    quote is honoured only where a token BEGINS, so for every line that does
+    not use one the tokenizer is `.split()` and the comment rule is the
+    character scan it always was.
+
+    Every `.buda` in the tree is walked because the byte-identity claim is
+    about the corpus, not about a sample of it — and a flow is exactly where a
+    stray quote character would hide.
+
+    The baseline is the OLD comment rule written out here, not
+    `strip_inline_comment` itself: both rules now come off one scan, so
+    comparing them to each other would pass however that scan changed.
+    """
+    from buda_script import split_quoted_args, strip_inline_comment
+
+    def old_strip(line):                    # the rule before quoting existed
+        for i, ch in enumerate(line):
+            if ch == '#' and (i == 0 or line[i - 1].isspace()):
+                return line[:i]
+        return line
+
+    root = Path(__file__).resolve().parents[2]
+    differ, n_files, n_lines = [], 0, 0
+    for p in sorted(root.rglob("*.buda")):
+        n_files += 1
+        for i, line in enumerate(p.read_text(errors="replace").splitlines(), 1):
+            n_lines += 1
+            if strip_inline_comment(line) != old_strip(line):
+                differ.append(f"{p.relative_to(root)}:{i}: comment {line!r}")
+            if split_quoted_args(line, skip=0) != old_strip(line).split():
+                differ.append(f"{p.relative_to(root)}:{i}: split {line!r}")
+    assert n_files > 100 and n_lines > 1000, (n_files, n_lines)  # it walked
+    assert not differ, differ[:10]
+
+
 def test_every_buda_reader_resolves_a_spaced_source_the_same(tmp_path):
     """The engine is not the only thing that parses `.buda` (Codex #771 P2).
 
