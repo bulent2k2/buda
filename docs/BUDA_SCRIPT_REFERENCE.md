@@ -32,7 +32,7 @@ The per-command documentation lives in one page per pipeline stage under
 | [Non-default rules (NDR)](script_reference/ndr.md) | setup | `def_ndr` · `set_ndr` · `dump_ndr` — per-net width / spacing / shielding, with the demand model and the worked vehicles |
 | [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_design` · `dump_topologies` · `visualize` · `visualize_topologies` · `emit_guides` · `export_def_blockages` · `dump_messages` |
 
-Script control (`source`, `require_file`, `exit`, comments), the output-files table, the typical
+Script control (paths and quoting, `source`, `require_file`, `exit`, comments), the output-files table, the typical
 script skeleton, and the BDB command quick reference stay on this page, below —
 after the pipeline overview that follows.
 
@@ -103,6 +103,41 @@ Commands run in the following order. Later stages depend on earlier ones.
 
 ## Script control
 
+### Paths, and paths with spaces
+
+A `.buda` line is split on whitespace, so a path containing a space needs a
+rule. There are two, and which one applies is decided by the **shape of the
+command's argument list** — not by the command's name:
+
+| Argument shape | Commands | How to spell a spaced path |
+|---|---|---|
+| Exactly one path, nothing after it | `source`, `import_verilog`, `save_bdb`, `def_gds_layer file <p>` | **bare** — the rest of the line *is* the path |
+| A path followed by options | `open_bdb`, `import_gds`, `export_gds`, `import_lef_tech`, `emit_guides` (and its `tcl` / `csv` values), `export_def_blockages` | **quoted** |
+| Several adjacent paths | `import_def_lef`, `require_file` | **quoted** |
+
+```buda
+source my designs/tracks.buda                      # bare: nothing follows it
+open_bdb "my designs/ck.bdb.sql" writeback         # quoted: `writeback` must stay an option
+import_def_lef "rev 2/top.def" "rev 2/top.lef"     # quoted: nothing else marks the boundary
+```
+
+**Why the second and third shapes need the quote.** Consider
+`export_gds out.gds bogus_option 1`: no token is a known keyword, so a
+rest-of-line rule would read the whole thing as a filename — the
+unknown-option error disappears and a typo silently writes a file with a
+garbage name. Nothing in that line distinguishes it from a genuinely spaced
+path, so the engine refuses to guess and the author resolves it with a
+quote. Between two adjacent paths there is not even a keyword to appeal to.
+
+A quote is honoured only where a **token begins**, which is what makes this
+identical to a plain whitespace split for every line that does not use one —
+an apostrophe inside a word (`a's_block`) is an ordinary character, and an
+unterminated quote is too. Every existing flow is therefore untouched:
+measured across all checked-in `.buda` files, 222k lines, nothing parses
+differently.
+
+A quote also escapes a `#` — see [Comments](#comments).
+
 ### `source`
 
 ```
@@ -112,6 +147,13 @@ source <path>
 Execute the contents of another `.buda` script file inline, as if its
 commands had been typed at the current point. Comments and blank lines in
 the included file are skipped.
+
+`source` takes exactly one path and nothing after it, so the whole rest of
+the line is the path — a space in it is part of the filename, and no quotes
+are needed (`source my designs/tracks.buda`). Quoting works too. It matters
+most for the one path a user does not choose: `bin/buda "my designs/x.buda"`
+reaches the engine as a `source` line, so a checkout under `~/My Designs/`
+would otherwise not run at all.
 
 The script path is resolved against the **including script's directory**
 (for the outermost `source` — the one the CLI itself issues — that falls
@@ -147,14 +189,25 @@ silent and the flow continues. A malformed declaration (no path at all)
 stops the run too: this command's job is to have checked something, and one
 that named nothing checked nothing.
 
-Paths follow the same rule as `source` and every `import_*` command — they
-resolve against the **script's own directory** — so a required path names the
-same file the import that reads it will open. The message prints both the
-path as you wrote it and the absolute path it resolved to.
+Paths resolve against the **script's own directory**, like `source` and every
+`import_*` command, so a required path names the same file the import that
+reads it will open. The message prints both the path as you wrote it and the
+absolute path it resolved to.
+
+This command takes a **list** of paths, so a spaced one is
+[quoted](#paths-and-paths-with-spaces) — between two paths there is nothing
+else that can say where one ends:
+
+```buda
+require_file "my inputs/top.v" "my inputs/macro.lef" hint run fetch.py first
+```
 
 Everything after the `hint` keyword is the remedy text, so several files can
-share one hint. It is passed through as written (the parser splits on
-whitespace and re-joins with single spaces; no quoting is needed or applied).
+share one hint. It is read as words and re-joined with single spaces (the
+`flow/ariane133` hint's double space already came out single), and a quoted
+run arrives whole — which is what lets the Tcl front end pass a hint as one
+argument (`buda::require_file top.v hint {run fetch.py first}`) without its
+quotes reaching the message.
 
 **Why not just let the importer fail?** It does fail, correctly — but its
 complaint is about a path it could not open. Where that file *comes from* — a
@@ -216,6 +269,11 @@ command is parsed. So a whole line can be a comment, or a command can be
 commented partially — `run_bundler # strict` runs `run_bundler`. A `#`
 embedded in a token (no preceding whitespace, e.g. inside a path) is **kept**,
 so an inline comment cannot silently swallow a real argument.
+
+A `#` inside a [quoted](#paths-and-paths-with-spaces) run is kept too —
+`require_file "inputs/rev #2/top.v"` is a filename, not a comment. Quoting
+is the escape for a `#` the same way it is for a space; unquoted, the
+comment still wins.
 
 ---
 
@@ -305,6 +363,11 @@ nets, pins, and hierarchy. They can appear anywhere in a script but are
 independent of the BUDA routing pipeline (stages 1–9).
 
 Full reference: **[docs/BDB_REFERENCE.md](BDB_REFERENCE.md)**
+
+Every `<path>` below resolves against the script's own directory, and a
+spaced one is spelled per [Paths, and paths with
+spaces](#paths-and-paths-with-spaces): bare for `import_verilog` and
+`save_bdb`, quoted for `open_bdb` and `import_def_lef`.
 
 ### Quick reference
 

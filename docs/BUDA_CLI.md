@@ -36,7 +36,7 @@ Add `<repo>/bin` to your `PATH`, or `source bin/activate` once per shell, to cal
 
 | Argument | Description |
 |---|---|
-| `script` | Path to a `.buda` flow script to execute. If the path does not exist and does not already end in `.buda`, the suffix is appended automatically (so `buda flow/x` runs `flow/x.buda`). With **no** script argument, `buda` starts and immediately exits — there is no interactive REPL; a script is how you drive the tool. |
+| `script` | Path to a `.buda` flow script to execute. If the path does not exist and does not already end in `.buda`, the suffix is appended automatically (so `buda flow/x` runs `flow/x.buda`). The path may contain **spaces** — quote it for your shell (`bin/buda "my designs/x.buda"`) and it reaches the engine intact, so a checkout under `~/My Designs/` runs. With **no** script argument, `buda` starts and immediately exits — there is no interactive REPL; a script is how you drive the tool. |
 
 The script is run as if by the `source` command: each non-comment line is one
 pipeline command. Relative `source`/`open_bdb` paths inside the script resolve
