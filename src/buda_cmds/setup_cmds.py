@@ -729,6 +729,13 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
         # convert, since `set_import_scale dbu` resolves from the DEF's own
         # UNITS statement.
         session._lef_track_width[lid] = l.width
+        # The file's own PITCH, kept for the SAME reason and converted at the
+        # same place: it is what the DEF's TRACKS step is compared against
+        # (BUDA-1616).  The two describe one technology, so a disagreement
+        # means one of the inputs is wrong about this design — and the
+        # composition is otherwise silent, since the DEF supplies positions
+        # and the LEF only width.
+        session._lef_track_pitch[lid] = l.pitch
         session.layers.set_layer_dilution(lid, pat.dilution_factor())
         session.layers.set_bit_pitch(lid, pat.unit_pitch())
         session.layers.set_ndr_geom(lid, pat.ndr_geom())

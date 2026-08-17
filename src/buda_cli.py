@@ -298,6 +298,10 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         # position but no width — only the technology knows that — so a
         # tech import feeds this and `import_def_lef` consumes it.
         self._lef_track_width = {}   # layer_id -> width
+        # The LEF's own PITCH, for the same layers.  NOT used to place tracks
+        # — the DEF's TRACKS is the design's real grid and wins — but kept so
+        # the two can be COMPARED where they meet (BUDA-1616).
+        self._lef_track_pitch = {}   # layer_id -> pitch
         self._gds_label_layers = []  # def_gds_layer labels <csv> (import default)
         self._nuts_pitch = 1.0
         self._planner_pitch = None   # pitch the last run_planner reserved bands for

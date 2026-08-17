@@ -113,6 +113,7 @@ updating this table, which is exactly the drift the guard now prevents):
 | BUDA-1613 | WARNING | a DEF NONDEFAULTRULE could not be translated to a BUDA rule and was skipped |
 | BUDA-1614 | WARNING | a GDS TEXT label lands outside every component, so its net was not recovered |
 | BUDA-1615 | WARNING | imported obstruction was thinner than one layout unit and was dropped when its coordinates were rounded to integers |
+| BUDA-1616 | WARNING | the DEF's `TRACKS` pitch and the tech LEF's `PITCH` disagree for a layer; the DEF's grid is used |
 | BUDA-1701 | WARNING | nothing to emit: no placed bus segments |
 | BUDA-1901 | FATAL | coordinates and track patterns are on different scales |
 | BUDA-1902 | ERROR | a design audit reported violations and `--strict-check` is on |
