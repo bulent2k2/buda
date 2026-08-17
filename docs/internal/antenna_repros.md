@@ -24,14 +24,15 @@ here is asserted from reading the code alone — every measurement is from a run
 | 2 | busterm tap vouches for every bit | `flow/antenna_taper_passthru.buda` | FIXED #690 |
 | 3 | bus wider than the block it crosses | `flow/antenna_wide_bus_passthru.buda` | UNREACHABLE |
 | 4 | crossing credited at the nominal seg | `flow/rnr/mix2_topdown_refine.buda` | FIXED #695 |
-| 5 | a duplicated leg off one block | `flow/mst_shared_leg_prefix.buda` + `flow/mst_shared_leg_suffix.buda` | **5a FIXED opt-in** (#708) · 5b OPEN · **5c reclassified + fixed opt-in** |
+| 5 | a duplicated leg off one block | `flow/mst_shared_leg_prefix.buda` + `flow/mst_shared_leg_suffix.buda` | **5a+5b FIXED opt-in** (#708 + the mirror) · **5c reclassified + fixed opt-in** |
 | 6 | a culled partner strands a segment | `flow/antenna_culled_partner.buda` + `flow/antenna_starved_partner.buda` | **OPEN — cause found** |
 | 7 | `rv/soc` 1.25M units mid-flow | `flow/rv/soc.buda` | **OPEN — same cause as 6** |
 
-Entries 5, 6 and 7 are the live ones. 6 and 7 are **one defect** — a
+Entries 6 and 7 are the live ones, and they are **one defect** — a
 DetailedNUTS pass-ordering problem, isolated to a 4-bit vehicle in entry 6. 5 is
-a *class* of three members sharing one geometry: 5a is fixed behind an opt-in,
-5b is open, and 5c turns out to be neither an antenna nor (mostly) a redundancy —
+a *class* of three members sharing one geometry: 5a and 5b are two sides of one
+shape, both fixed behind one opt-in, and 5c turns out to be neither an antenna
+nor (mostly) a redundancy —
 measured, not argued, by `tools/scan_collinear_stubs.py` and the two
 `tools/experiment/` scripts, which refuted the cost explanation and localized
 the real one: a suppression pass `add_trunk_v` runs and `add_trunk_h` does not. Entry 3 is a negative
@@ -121,20 +122,25 @@ revealed is entry 5a.
 
 ## 5. A duplicated leg off one block — one geometry, three producers
 
-**Mechanism.** Two wires leave the *same* block from the same point along the
-same axis, and the shorter one lies entirely inside the longer. The longer leg's
-extra stretch is a duplicate with a **free end**, and it pushes that leg's end
-*past* the divergence junction — which makes the junction a mid-span conn, and
-DetailedNUTS only snaps a bit to its own via at an ENDPOINT conn, so every bit
-keeps the shared abstract end.
+**Mechanism.** Two wires meet the *same* block at the same point along the same
+axis, and the shorter one lies entirely inside the longer. In the START-shared
+case the longer leg's extra stretch is a duplicate with a **free end**, and it
+pushes that leg's end *past* the divergence junction — which makes the junction
+a mid-span conn, and DetailedNUTS only snaps a bit to its own via at an ENDPOINT
+conn, so every bit keeps the shared abstract end.
 
-The geometry has **three** producers, and only the first is fixed:
+The geometry has **three** producers:
 
 | # | producer | shared point | status |
 |---|---|---|---|
 | 5a | `realize_mst_edge`, shared node holds the LOWER index | legs **start** there | fixed behind `set_trim_mst_legs` |
-| 5b | `realize_mst_edge`, shared node holds the HIGHER index | legs **end** there | OPEN |
+| 5b | `realize_mst_edge`, shared node holds the HIGHER index | legs **end** there | fixed behind the SAME knob — one shape, two sides |
 | 5c | TRUNK stub generation | stub + leg leave one trunk point | **NOT AN ANTENNA — reclassified**; root-caused and fixed behind `set_trim_trunk_stubs` |
+
+5a and 5b share a knob because which of them a design gets is not a property of
+the defect: it is that node's MST index, and the lever on the index is which
+block is the **driver**. Two knobs would have made a caller choose between
+halves of one shape on grounds they cannot see.
 
 `compute_mst` emits every edge with `u < v` and `realize_mst_edge` routes
 `u → v`, which is what splits 5a from 5b. The lever is **which block is the
@@ -147,8 +153,11 @@ demoting the hub to a receiver can.
 * 5a — `flow/mst_shared_leg_prefix.buda`, and `flow/rnr/mix2_topdown_refine.buda`
   bundle 35 in a real design.
 * 5b — `flow/mst_shared_leg_suffix.buda`: the same four rectangles with the hub
-  demoted to a receiver. It turns the trim **on**, so what it shows survives a
-  build that has the fix and was asked to apply it.
+  demoted to a receiver. It turns the trim **on**, so it now tests the fix
+  rather than the opt-in — and the MST candidates LOSE there (the flow selects a
+  TRUNK), so the routed result is unchanged and the effect has to be read off
+  the pinned candidate. That is not a weakness of the vehicle; it is the same
+  fact the whole entry rests on, that this shape lives in candidates that lose.
 * 5c — `tools/scan_collinear_stubs.py` (no argument scans a default spread of 11
   flows). It is also present in 5a's own fixture, nine pairs of it — all of the
   REDUNDANT kind there, which is what made the shape look worse than it is.
@@ -161,21 +170,48 @@ demoting the hub to a receiver can.
 * 5b: `MST_VH` seg2 len 120 inside seg4 len 1320, `MST_HV` seg4 len 70 inside
   seg2 len 620, both at the END (2010,1010). **The harm differs in kind** — both
   legs tap the hub's face, so there is no free end and `check_design` reports
-  Success. The cost is duplicate metal (480 of 11114 detailed WL) plus a
-  perpendicular partner claiming an ENDPOINT conn to *both* legs, which NUTS
-  reports as a junction infeasibility and which feeds ripup's contenders. Do not
-  sell the mirror as the same defect.
+  Success. The cost is duplicate metal plus a perpendicular partner claiming an
+  ENDPOINT conn to *both* legs, which NUTS reports as a junction infeasibility
+  and which feeds ripup's contenders. Do not sell the mirror as the same defect.
+
+  What the mirror cut buys, pinned `MST_VH`, trim OFF → ON (**by type, not
+  index** — the trim re-sorts the WL-ordered pool, so it is candidate 18
+  without and 14 with):
+
+  ```
+  nominal WL     2970 -> 2850     exactly the 120-unit duplicate
+  segments          7 -> 5        relay completion stops needing two
+                                  connectors and extends the stubs instead
+  per-bit vias     28 -> 16       the real win: vias scale PER BIT
+  junction infeas   3 -> 2        the impossible double ENDPOINT conn, gone
+  ```
+
+  And the figure that did **not** move: realized detailed WL, 11114 → 11087
+  (−0.24%). The nominal saving is 480 units of metal (120 × 4 bits) and NUTS's
+  placement absorbs almost all of it. Worth stating because the obvious way to
+  sell this fix is the nominal number, and the realized one is what a design
+  gets — the same nominal-vs-realized gap `kWLSpread` exists for.
 * 5c: see the section below — it is **not an antenna** and mostly not even
   redundant. `tools/scan_collinear_stubs.py` measures it.
 
-**Status.** 5a FIXED behind an **opt-in** (#708): `set_trim_mst_legs [on|off]`,
-default off, byte-identical unused, `BUDA_MST_LEG_TRIM=1` for corpus A/B. Opted
-in on `mix2_topdown_refine`: `check_design` 3 violations → Success, detailed WL
-793215 → 793198. 5b and 5c are strict `xfail`s in
-`test/tests/test_mst_shared_leg_prefix.py`, and they **still xfail with the trim
-on** — so they record "not covered" rather than "not exercised".  5c's xfail
-stays (it is the DEFAULT behaviour) but is no longer unfixed: its twin passes
-under `set_trim_trunk_stubs on`.
+**Status.** 5a and 5b both FIXED behind one **opt-in**: `set_trim_mst_legs
+[on|off]`, default off, byte-identical unused, `BUDA_MST_LEG_TRIM=1` for corpus
+A/B. 5a landed first (#708) matching shared STARTS; the mirror generalized the
+same pass to either shared endpoint, and `trim_shared_leg_prefixes` became
+`trim_shared_leg_overlaps` with it. Opted in on `mix2_topdown_refine`:
+`check_design` 3 violations → Success, detailed WL 793215 → 793198.
+
+Two things the mirror had to add rather than inherit. A leg can now share
+**both** of its ends, so the min-stub floor is checked on the COMBINED result —
+two independently legal cuts can still pinch a leg between them, and the
+prefix-only version had no way to reach that case. And when both cuts cannot
+fit, it takes the larger single one rather than giving up, so the more
+duplicated end always wins.
+
+5c remains a strict `xfail` in `test/tests/test_mst_shared_leg_prefix.py`, and
+it **still xfails with the trim on** — it records "not covered" rather than "not
+exercised". That xfail stays because it is the DEFAULT behaviour, but it is no
+longer unfixed: its twin passes under `set_trim_trunk_stubs on`.
 
 ### 5c is not an antenna, and mostly not redundant either
 
@@ -505,7 +541,7 @@ one to develop against.
 | check | reads | blind to |
 |---|---|---|
 | `detect_antennas` (`ANTENNA`, structural) | attachment *positions* on the bus-level `ConnSeg` graph | a segment attached at ≥2 points whose individual BITS are not |
-| tap-overhang (#514) | a terminal piece over a block the segment **taps** | a piece past the last junction that taps nothing (entry 5a) — and 5b, where BOTH legs tap the block and neither piece is terminal |
+| tap-overhang (#514) | a terminal piece over a block the segment **taps** | a piece past the last junction that taps nothing (entry 5a) — and 5b, where BOTH legs tap the block and neither piece is terminal, so no audit ever saw it and only the geometry scan did |
 | `detect_bit_antennas` (per bit) | per-bit vias + served taps + crossings the bit really makes | whether a *crossing* should vouch for a bit at all — the open question entry 3's vehicle exists to frame |
 | `check_dnuts` block coverage | per-bit coverage of connected blocks | nothing here; it is the check that keeps the retractions honest |
 

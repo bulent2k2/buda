@@ -729,14 +729,31 @@ public:
     // BUDA_MST_LEG_TRIM=1).
     //
     // realize_mst_edge routes each edge on its own, so two edges incident on
-    // the SAME block start at the same face point; when both go L-shaped with
-    // the same first axis the shorter one's leg lies inside the longer one's,
-    // and the longer leg's prefix is a duplicate with a FREE END.  Its real
-    // cost is downstream — it pushes the leg's end PAST the divergence
-    // junction, making that junction a mid-span conn, and DetailedNUTS only
-    // snaps a bit to its own via at an ENDPOINT conn.  Trimming cuts each leg
-    // back to the shorter sibling's far end (that edge's own bend, or a block
-    // face, so connectivity holds by construction).
+    // the SAME block meet at the same face point; when both go L-shaped with
+    // the same axis there, the shorter one's leg lies inside the longer one's.
+    // Trimming cuts each leg back to the shorter sibling's far end (that
+    // edge's own bend, or a block face, so connectivity holds by
+    // construction).
+    //
+    // Covers BOTH halves — legs that START at the shared node and legs that
+    // END there.  Which one a design gets is decided by that node's MST index
+    // (compute_mst emits u<v and realize_mst_edge routes u->v), and the lever
+    // on the index is which block is the bundle's DRIVER, so the two are one
+    // shape seen from two sides.  The harm is not the same on both, though:
+    //
+    //   START-shared: the longer leg's prefix is a duplicate with a FREE END,
+    //   and its real cost is downstream — it pushes the leg's end PAST the
+    //   divergence junction, making that junction a mid-span conn, and
+    //   DetailedNUTS only snaps a bit to its own via at an ENDPOINT conn.
+    //
+    //   END-shared: no free end at all (both legs tap the face, so
+    //   check_design reports Success).  The cost is duplicate metal plus a
+    //   perpendicular partner claiming an ENDPOINT conn to BOTH legs, which
+    //   NUTS reports as a junction infeasibility.  Measured on the suffix
+    //   vehicle's MST_VH: nominal WL 2970 -> 2850, segments 7 -> 5, per-bit
+    //   vias 28 -> 16, junction infeasibilities 3 -> 2 — while realized
+    //   detailed WL barely moves (11114 -> 11087), NUTS placement absorbing
+    //   most of the nominal saving.
     //
     // OPT-IN because the mutation is not local to the wire it fixes.
     // Candidates are WL-SORTED, so shortening one re-sorts the pool, and a
@@ -750,11 +767,9 @@ public:
     // renumbers candidate indices, so select_topology pins must come from an
     // opted-in run.
     //
-    // Covers the START-shared half only.  Legs that END at the shared node
-    // (which happens when that node holds the higher MST index, since
-    // compute_mst emits u<v and realize_mst_edge routes u->v) are NOT trimmed,
-    // nor is the same geometry when TRUNK stub generation produces it; both
-    // are pinned as strict xfails in test_mst_shared_leg_prefix.py.
+    // What this does NOT cover: the same geometry when TRUNK stub generation
+    // produces it — that is set_trim_trunk_stubs, its own knob, and it stays a
+    // strict xfail here because it is still the DEFAULT behaviour.
     void set_mst_leg_trim(bool v) { allow_mst_leg_trim_ = v; }
 
     // Redundant-stub suppression on the H trunk path (default false —

@@ -679,22 +679,28 @@ violations → **Success**, detailed WL 793215 → 793198, 0 unplaced either way
 **Ordering:** declare *before* the generation command.  The trim renumbers
 candidate indices, so `select_topology` pins must come from an opted-in run.
 
-**Scope — what it does NOT cover.** Both are pinned as strict `xfail`s in
-`test/tests/test_mst_shared_leg_prefix.py`, so they fail loudly when closed:
+**Scope — both shared ENDS.**  The trim matches a leg pair meeting at either
+shared endpoint, not just shared starts.
 
-- **Legs that END at the shared node.**  `compute_mst` emits every edge with
-  `u < v` and `realize_mst_edge` routes `u → v`, so a shared node holding the
-  *higher* index has both legs end there, and a start-only match misses them.
-  The lever is which block is the **driver** (the busterm list leads with it),
-  not declaration order — `flow/mst_shared_leg_suffix.buda` demotes the hub to a
-  receiver and reproduces it.  The harm differs in kind: both legs tap the hub's
-  face, so there is no free end and `check_design` reports Success; the cost is
+- **Legs that END at the shared node** are covered.  `compute_mst` emits every
+  edge with `u < v` and `realize_mst_edge` routes `u → v`, so a shared node
+  holding the *higher* index has both legs end there; the lever is which block
+  is the **driver** (the busterm list leads with it), not declaration order —
+  `flow/mst_shared_leg_suffix.buda` demotes the hub to a receiver and shows it.
+  The harm differs in kind: both legs tap the hub's face, so there is no free
+  end and `check_design` reports Success either way; what the cut removes is
   duplicate metal plus a perpendicular partner claiming an endpoint conn to
-  *both* legs, which NUTS reports as a junction infeasibility.
-- **The same geometry from TRUNK stub generation**, which this trim (living in
-  the MST realization paths) never sees.  That half now has its own opt-in —
-  see [`set_trim_trunk_stubs`](#set_trim_trunk_stubs) — and it is where the
-  corpus's redundant stubs actually are.
+  *both* legs, which NUTS reports as a junction infeasibility.  Measured on that
+  vehicle's pinned `MST_VH`: nominal WL 2970 → 2850, segments 7 → 5, per-bit
+  vias 28 → 16, junction infeasibilities 3 → 2 — while realized detailed WL
+  barely moves (11114 → 11087), NUTS placement absorbing most of the nominal
+  saving.
+- **What it does NOT cover: the same geometry from TRUNK stub generation**,
+  which this trim (living in the MST realization paths) never sees.  That half
+  has its own opt-in — see [`set_trim_trunk_stubs`](#set_trim_trunk_stubs) —
+  and it is where the corpus's redundant stubs actually are.  Pinned as a
+  strict `xfail` in `test/tests/test_mst_shared_leg_prefix.py`, so it fails
+  loudly when closed.
 
 **Corpus A/B:** `BUDA_MST_LEG_TRIM=1` opts a whole sweep in without editing
 flows; an explicit `set_trim_mst_legs` wins over it.
@@ -706,8 +712,8 @@ set_trim_mst_legs on
 generate_topologies            # MST legs no longer duplicate a sibling's prefix
 ```
 
-Vehicles: `flow/mst_shared_leg_prefix.buda` (trimmed) and
-`flow/mst_shared_leg_suffix.buda` (the open mirror).
+Vehicles: `flow/mst_shared_leg_prefix.buda` (shared starts) and
+`flow/mst_shared_leg_suffix.buda` (the mirror — shared ends).
 
 ---
 
