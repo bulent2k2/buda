@@ -465,7 +465,8 @@ void bind_db(py::module_& m) {
         .def_readonly("x2", &DefImportStats::Keepout::x2)
         .def_readonly("y2", &DefImportStats::Keepout::y2)
         .def_readonly("why", &DefImportStats::Keepout::why)
-        .def_readonly("inside_block", &DefImportStats::Keepout::inside_block);
+        .def_readonly("inside_block", &DefImportStats::Keepout::inside_block)
+        .def_readonly("net", &DefImportStats::Keepout::net);
 
     py::class_<DefNdrLayer>(m, "DefNdrLayer")
         .def_readonly("layer", &DefNdrLayer::layer)

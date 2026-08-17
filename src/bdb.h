@@ -96,8 +96,15 @@ struct DefImportStats {
     // Hanan loci (opens_interchange.md item 12) — an obstruction inside a
     // footprint whose own edges are already grid lines contributes no
     // reachable trunk position, only grid.
+    // `net` names the SPECIALNET a power-grid strap belongs to, and is empty
+    // for every other provenance (a macro's OBS, a LAYER blockage, a halo)
+    // because those are obstruction with no net behind them.  Carried as its
+    // own field rather than recovered from `why`: a net name may contain a
+    // space, so splitting the provenance string is a parse that can be wrong,
+    // and the whole point of this field is that the identity survives intact
+    // (specialnets_scope.md §5(a)).
     struct Keepout { std::string layer; double x1, y1, x2, y2; std::string why;
-                     bool inside_block = false; };
+                     bool inside_block = false; std::string net; };
     std::vector<Track>   tracks;
     std::vector<Keepout> keepouts;
     // NONDEFAULTRULES, read in full for the session to translate into

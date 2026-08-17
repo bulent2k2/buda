@@ -428,11 +428,12 @@ void Floorplan::set_detour_channel(const std::string& dirs, int size) {
 }
 void Floorplan::add_keepout_zone(int x1, int y1, int x2, int y2,
                                  const std::vector<int>& layer_ids,
-                                 bool inside_block) {
+                                 bool inside_block, const std::string& net) {
     KeepoutZone koz;
     koz.bbox = Rect{x1, y1, x2, y2};
     for (int lid : layer_ids) koz.layer_ids.insert(lid);
     koz.inside_block = inside_block;
+    koz.net = net;
     keepouts_.push_back(std::move(koz));
     ++rev_;
 }

@@ -576,3 +576,95 @@ def test_units_after_a_streamed_entry_is_a_hard_error(tmp_path):
     b = buda.BDB(str(tmp_path / "b.bdb"))
     with pytest.raises(RuntimeError, match="UNITS"):
         b.import_def_lef(str(tmp_path / "late.def"), str(tmp_path / "m.lef"))
+
+
+# ── strap identity (specialnets_scope.md §5(a)) ────────────────────────────
+#
+# A power strap and a macro's OBS both block metal, and until now the session
+# could not tell them apart once imported: both arrived as an anonymous
+# rectangle.  They are not the same thing — a strap is a RAIL, and whether a
+# rule may credit a shield against it, or bond a shield to it, is decided by
+# matching its NET against the rule's requested shield net.  These pin that
+# the identity survives the trip from the DEF reader into the session.
+
+_STRAP_DEF = """VERSION 5.8 ;
+DESIGN t ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 100000 100000 ) ;
+COMPONENTS 1 ;
+  - i0 m + PLACED ( 1000 2000 ) N ;
+END COMPONENTS
+BLOCKAGES 1 ;
+  - LAYER metal2 RECT ( 20000 20000 ) ( 30000 30000 ) ;
+END BLOCKAGES
+SPECIALNETS 2 ;
+  - VDD ( * VDD ) + ROUTED metal2 2000 + SHAPE STRIPE ( 50000 10000 ) ( * 90000 )
+      + USE POWER ;
+  - VSS ( * VSS ) + ROUTED metal3 2000 + SHAPE STRIPE ( 10000 50000 ) ( 90000 * )
+      + USE GROUND ;
+END SPECIALNETS
+END DESIGN
+"""
+
+
+def test_an_imported_strap_carries_its_net_into_the_session(tmp_path):
+    s, _out = _run(tmp_path, deff=_STRAP_DEF)
+    labelled = {z.net: z for z in s.fp.get_keepout_zones() if z.net}
+    assert sorted(labelled) == ["VDD", "VSS"]
+    # The label rides with the RIGHT geometry, not just with some zone: the
+    # VDD strap runs vertically at x=50 on metal2, 2 um wide.
+    vdd = labelled["VDD"].bbox
+    assert (vdd.x1, vdd.x2) == (49, 51)
+    assert (vdd.y1, vdd.y2) == (9, 91)      # half-width end caps
+
+
+def test_obstruction_with_no_net_behind_it_stays_unlabelled(tmp_path):
+    """The twin that keeps the field honest.  `net` is a claim that this
+    metal BELONGS to a net; a macro's OBS and a LAYER blockage belong to no
+    net at all, so labelling them would make the field mean 'some string'
+    rather than 'the rail this is'."""
+    s, _out = _run(tmp_path, deff=_STRAP_DEF)
+    z = s.fp.get_keepout_zones()
+    assert len(z) > 2                        # OBS + BLOCKAGES are in there
+    assert sum(1 for k in z if k.net) == 2   # and exactly the two straps
+    # Named rather than counted: the BLOCKAGES rect at (20,20)-(30,30) is a
+    # specific zone this DEF declares, and it must come through anonymous.
+    blockage = [k for k in z if (k.bbox.x1, k.bbox.y1, k.bbox.x2, k.bbox.y2)
+                == (20, 20, 30, 30)]
+    assert len(blockage) == 1 and blockage[0].net == ""
+
+
+def test_a_hand_declared_keepout_has_no_net(tmp_path):
+    """`add_keepout` in a .buda script declares obstruction, not a rail, and
+    the parameter defaults so every existing caller is untouched."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.do_command("def_layer 2 metal2 H 20")
+    s.do_command("add_keepout 0 0 10 10 metal2")
+    assert [z.net for z in s.fp.get_keepout_zones()] == [""]
+
+
+def test_the_import_census_names_the_strap_nets(tmp_path):
+    """The field gets a reader on the day it lands.  A field nothing looks
+    at rots silently — and this one exists so a LATER consumer can trust it,
+    which is exactly the situation where silent rot is undetectable."""
+    _s, out = _run(tmp_path, deff=_STRAP_DEF)
+    line = [l for l in out.splitlines() if "keepouts added" in l]
+    assert line, out
+    assert "SPECIALNET:2" in line[0]
+    assert "nets: VDD:1, VSS:1" in line[0], line[0]
+
+
+def test_only_a_DEF_declared_strap_can_carry_a_net():
+    """The invariant behind the field, pinned at the other construction site.
+
+    A `KeepoutZone` is also synthesized internally — `low_layer_keepouts`
+    turns a leaf block's footprint into LOW-layer obstruction — and those are
+    not rails.  If a synthesized zone ever acquired a net, every consumer
+    that asks 'is there a rail here' would start finding block footprints.
+    """
+    fp = buda.Floorplan()
+    fp.add_block("leaf", 0, 0, 100, 100)
+    synthesized = fp.low_layer_keepouts([1, 2, 3])
+    assert synthesized, "expected the leaf footprint to yield a keepout"
+    assert all(k.net == "" for k in synthesized)

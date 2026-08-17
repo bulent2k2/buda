@@ -430,7 +430,8 @@ void bind_routing(py::module_& m) {
     py::class_<KeepoutZone>(m, "KeepoutZone")
         .def_readwrite("bbox",      &KeepoutZone::bbox)
         .def_readwrite("layer_ids", &KeepoutZone::layer_ids)
-        .def_readwrite("inside_block", &KeepoutZone::inside_block);
+        .def_readwrite("inside_block", &KeepoutZone::inside_block)
+        .def_readwrite("net",       &KeepoutZone::net);
 
     py::class_<Floorplan>(m, "Floorplan").def(py::init<>())
         .def("add_block",              &Floorplan::add_block)
@@ -452,7 +453,8 @@ void bind_routing(py::module_& m) {
              py::arg("low_layer_ids"))
         .def("add_keepout_zone",        &Floorplan::add_keepout_zone,
              py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),
-             py::arg("layer_ids"), py::arg("inside_block") = false)
+             py::arg("layer_ids"), py::arg("inside_block") = false,
+             py::arg("net") = "")
         .def("get_keepout_zones",       &Floorplan::get_keepout_zones)
         .def("set_keepout_loci_outside_only",
              &Floorplan::set_keepout_loci_outside_only, py::arg("on"))
