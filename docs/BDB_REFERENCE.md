@@ -396,7 +396,7 @@ opened read-write and persists directly. See
 
 | Argument | Description |
 |---|---|
-| `path` | File path for the `.bdb`; created if it does not exist. A `*.bdb.sql` text fixture is materialized to a temp binary. Use `:memory:` for an in-memory scratch database. A path containing **spaces** is quoted (`open_bdb "my designs/ck.bdb" writeback`) — see [Paths, and paths with spaces](BUDA_SCRIPT_REFERENCE.md#paths-and-paths-with-spaces). |
+| `path` | File path for the `.bdb`; created if it does not exist. A `*.bdb.sql` text fixture is materialized to a temp binary. Use `:memory:` for an in-memory scratch database. A path containing **spaces** is quoted (`open_bdb "my designs/ck.bdb.sql" writeback`, or `open_bdb "my designs/ck.bdb"` on its own) — see [Paths, and paths with spaces](BUDA_SCRIPT_REFERENCE.md#paths-and-paths-with-spaces). |
 | `writeback` | (optional) For a `*.bdb.sql` path, write the working binary back to that `.sql` on `save_bdb`/`exit`/end-of-run. Ignored for a binary `.bdb`. |
 
 ---
