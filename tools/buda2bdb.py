@@ -42,9 +42,12 @@ from typing import Optional
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
-for _p in [os.path.join(_ROOT, "build"), _HERE]:
+for _p in [os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _HERE]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+# The `.buda` line rules, shared with the engine (src/buda_script.py).
+from buda_script import sole_path_arg                        # noqa: E402
 
 try:
     import buda_db
@@ -122,15 +125,19 @@ def parse_script(path: str, parsed: Optional[ParsedScript] = None,
             _parse_add_bus(args, parsed)
 
         elif cmd == "source":
-            if not args:
+            # The rest of the line, not `args[0]`: the engine reads a spaced
+            # path whole, and splitting on the first space made this SKIP the
+            # include with a warning — a converted cell quietly missing
+            # whatever the sourced file declared.
+            sub = sole_path_arg(line)
+            if not sub:
                 continue
-            sub = args[0]
             if not os.path.isabs(sub):
                 sub = os.path.join(os.path.dirname(path), sub)
             if os.path.exists(sub):
                 parse_script(sub, parsed, _seen)
             else:
-                _warn(f"source file not found, skipped: {args[0]}")
+                _warn(f"source file not found, skipped: {sub}")
 
         else:
             _warn(f"ignored command: {cmd}")

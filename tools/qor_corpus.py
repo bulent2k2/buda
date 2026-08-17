@@ -108,6 +108,9 @@ for p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _HERE):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+# The `.buda` line rules, shared with the engine (src/buda_script.py).
+from buda_script import sole_path_arg                        # noqa: E402
+
 # A REPORTED regression exits with this code; every other failure keeps the
 # conventional 1.  The distinction exists because a caller that can ACT on a
 # regression — the nightly's `promote_baseline`, which accepts one and moves the
@@ -1130,7 +1133,12 @@ def _scan(path, seen):
                 return toks, True
             if cmd == "source":
                 if args:
-                    sub, stop = _scan(os.path.join(base, parts[1]), seen)
+                    # The path is the rest of the line, not `parts[1]`: the
+                    # engine reads it that way, so a walk that split on the
+                    # first space would follow a different file (or none) and
+                    # report coverage for a script nobody wrote.
+                    sub, stop = _scan(
+                        os.path.join(base, sole_path_arg(line)), seen)
                     toks |= sub
                     if stop:
                         return toks, True

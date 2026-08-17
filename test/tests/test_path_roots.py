@@ -300,6 +300,50 @@ def test_a_trailing_comment_is_still_not_part_of_the_path(
     assert s.layers.has_layer(4)
 
 
+def test_every_buda_reader_resolves_a_spaced_source_the_same(tmp_path):
+    """The engine is not the only thing that parses `.buda` (Codex #771 P2).
+
+    `buda2tcl` translates a flow, `buda2bdb` ingests one as a cell,
+    `qor_corpus` walks one for feature coverage, `scan_fanin` scans one for
+    net shapes — and each FOLLOWS `source` into the next file.  A rule that
+    lives only in the engine is one the tools disagree with, silently: they
+    resolve a different file, or none, and report on a script nobody wrote.
+    (`qor_corpus` is the one that bites hardest — its walk decides whether a
+    flow is a full-pipeline corpus candidate at all.)
+
+    So they share `buda_script.sole_path_arg`, and this pins that they agree
+    on the case that motivated it.  Deliberately behavioural, one assertion
+    per reader: an import-level check would pass while a reader still split
+    the argument itself.
+    """
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+    import qor_corpus
+    import scan_fanin
+    import buda2tcl
+
+    sub = tmp_path / "my dir"
+    sub.mkdir()
+    (sub / "inner file.buda").write_text(
+        "run_bundler COMBINED\nadd_net n1 a.o b.i\n")
+    flow = tmp_path / "top.buda"
+    flow.write_text("source my dir/inner file.buda\nrun_nuts\n")
+
+    # qor_corpus: the sourced file's tokens must reach the walk.
+    assert "run_bundler:combined" in qor_corpus.flow_tokens(str(flow))
+
+    # scan_fanin: the sourced file's nets must reach the scan.
+    nets, _ = scan_fanin.parse_script(flow)
+    assert [n[0] for n in nets] == ["n1"], nets
+
+    # buda2tcl: the include must resolve to the real file, so it is queued
+    # for translation instead of a path that does not exist.
+    _, ref, _ = buda2tcl.translate_line(
+        "source my dir/inner file.buda\n", str(tmp_path),
+        str(tmp_path), str(tmp_path))
+    assert ref == str(sub / "inner file.buda"), ref
+
+
 def test_absolute_paths_are_never_rewritten(tmp_path, monkeypatch):
     sdir, cwd = _setup(tmp_path)
     dest = tmp_path / "abs" / "g.json"
