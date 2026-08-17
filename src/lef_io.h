@@ -89,8 +89,21 @@ struct LefTechLayer {
     std::string type;                  // ROUTING / CUT / MASTERSLICE / OVERLAP
     std::string dir;                   // HORIZONTAL / VERTICAL / "" (unstated)
     double pitch = 0, width = 0, spacing = 0, offset = 0, area = 0;
+    // LEF allows `PITCH xDistance yDistance` as well as a single value, and
+    // the two are NOT interchangeable for a routing layer: a HORIZONTAL
+    // layer's tracks are spaced along y and a VERTICAL layer's along x.  The
+    // reader kept only the first number, so an anisotropic declaration lost
+    // half of itself silently — and every consumer of `pitch` then had a
+    // 50% chance of reading the axis it did not mean.  `pitch` stays the X
+    // component (and the value of a single-number form, which applies to
+    // both); `pitch_y` carries the Y.  Use `pitch_for()` rather than either.
+    double pitch_y = 0;
     bool has_pitch = false, has_width = false, has_spacing = false;
     bool has_offset = false, has_area = false;
+    // The pitch along the axis this layer's tracks actually step in.
+    double pitch_for(bool is_horizontal) const {
+        return is_horizontal ? pitch_y : pitch;
+    }
 };
 
 // Something the file said that the model cannot represent.  Kept as data —

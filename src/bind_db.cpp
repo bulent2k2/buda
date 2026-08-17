@@ -349,6 +349,8 @@ void bind_db(py::module_& m) {
         .def_readonly("type",    &LefTechLayer::type)
         .def_readonly("dir",     &LefTechLayer::dir)
         .def_readonly("pitch",   &LefTechLayer::pitch)
+        .def_readonly("pitch_y", &LefTechLayer::pitch_y)
+        .def("pitch_for", &LefTechLayer::pitch_for, py::arg("is_horizontal"))
         .def_readonly("width",   &LefTechLayer::width)
         .def_readonly("spacing", &LefTechLayer::spacing)
         .def_readonly("offset",  &LefTechLayer::offset)

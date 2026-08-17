@@ -289,7 +289,20 @@ LefTechLayer read_layer(LefDefLexer& lx, LefLibrary& lib,
         };
         if (kw == "TYPE" && st.size() >= 2)             l.type = upper(st[1]);
         else if (kw == "DIRECTION" && st.size() >= 2)   l.dir  = upper(st[1]);
-        else if (kw == "PITCH")   num(l.pitch,   l.has_pitch);
+        else if (kw == "PITCH") {
+            num(l.pitch, l.has_pitch);
+            // `PITCH x y` — legal LEF, and the y value is the one a
+            // HORIZONTAL layer's tracks step by.  A single value applies to
+            // both axes, which is what the fallback preserves.
+            l.pitch_y = l.pitch;
+            if (st.size() >= 3) {
+                try {
+                    l.pitch_y = std::stod(st[2]);
+                } catch (const std::exception&) {
+                    lx.fail("malformed PITCH: " + LefDefLexer::join(st));
+                }
+            }
+        }
         else if (kw == "WIDTH")   num(l.width,   l.has_width);
         else if (kw == "OFFSET")  num(l.offset,  l.has_offset);
         else if (kw == "AREA")    num(l.area,    l.has_area);

@@ -265,6 +265,61 @@ def test_a_disagreeing_pitch_still_installs_the_defs_grid(tmp_path):
     assert pat.unit_pitch() == pytest.approx(0.4)
 
 
+def test_an_anisotropic_lef_pitch_is_compared_on_the_layers_own_axis(tmp_path):
+    """`PITCH x y` is legal LEF and the two are not interchangeable: a
+    HORIZONTAL layer's tracks step along Y, so Y is what the DEF's `TRACKS Y`
+    must be compared against.  The reader kept only the first number, so the
+    comparison would have been made against the X pitch — inventing a
+    disagreement here, and hiding a real one in the mirror case (Codex #781).
+
+    metal2 is HORIZONTAL, the DEF steps it by 400 @1000 DBU/um = 0.4, and the
+    LEF below says x=0.9 (irrelevant) and y=0.4 (the match).  Silence is the
+    correct answer.
+    """
+    lef = _LEF.replace("""LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.4 ;""", """LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.9 0.4 ;""")
+    _, out = _run(tmp_path, lef=lef)
+    assert "BUDA-1616" not in out, out
+
+
+def test_an_anisotropic_lef_pitch_still_catches_a_real_disagreement(tmp_path):
+    """The other half: reading the RIGHT axis must not mean reading none.
+    Same shape, but the Y value is the one that differs."""
+    lef = _LEF.replace("""LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.4 ;""", """LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.4 0.5 ;""")
+    _, out = _run(tmp_path, lef=lef)
+    assert "BUDA-1616" in out, out
+    assert "-20.0%" in out, out          # DEF 0.4 against the LEF's y 0.5
+
+
+def test_an_anisotropic_pitch_builds_the_pattern_on_the_right_axis(tmp_path):
+    """Not only the check: the synthesized pattern used `pitch` too, so an
+    anisotropic layer got its spacing from the wrong axis.  metal2 is
+    horizontal, so its slot spacing comes from y=0.4, not x=0.9."""
+    lef = _LEF.replace("""LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.4 ;""", """LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.9 0.4 ;""")
+    s, _ = _run(tmp_path, lef=lef, deff=_DEF.replace(
+        "TRACKS Y 500 DO 10 STEP 400 LAYER metal2 ;\n", ""))
+    lid = s._layer_name_map["metal2"]
+    pat = s.routing_grid.get_layer_grid(lid).global_pattern()
+    assert pat.unit_pitch() == pytest.approx(0.4)
+
+
 def test_no_tech_lef_means_no_pitch_to_disagree_with(tmp_path):
     """With no LEF read there is no second opinion, so the check cannot fire.
     A DEF alone is not a disagreement."""
