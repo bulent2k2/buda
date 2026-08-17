@@ -57,6 +57,19 @@ parser uses, so a command means exactly what it means in a script.  A Tcl
 list argument therefore arrives as its space-joined elements, which is what
 `{a b c}` already looks like to the parser.
 
+An argument that **contains whitespace** is re-quoted on the way out, because
+Tcl eats the source-level quotes before the generated proc runs:
+`buda::open_bdb "my dir/ck.bdb"` arrives as ONE argument, and a bare join
+would hand the engine `open_bdb my dir/ck.bdb` — read as the path `my`
+followed by an unknown option.  Re-quoting is what makes the call mean what
+was written; the engine understands a quoted path (see [Paths, and paths
+with spaces](BUDA_SCRIPT_REFERENCE.md#paths-and-paths-with-spaces)), and the
+alternative is not neutrality but corruption, since the argument boundary is
+destroyed either way.  Whitespace-free arguments — every argument in every
+existing flow — pass through untouched, so the wire line is byte-identical
+for them.  `buda::do` is unaffected: it sends a raw command line, quotes and
+all.
+
 ## Errors are Tcl errors
 
 This is the one deliberate difference from a `.buda` script.  BUDA's

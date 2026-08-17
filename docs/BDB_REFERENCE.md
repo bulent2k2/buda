@@ -396,7 +396,7 @@ opened read-write and persists directly. See
 
 | Argument | Description |
 |---|---|
-| `path` | File path for the `.bdb`; created if it does not exist. A `*.bdb.sql` text fixture is materialized to a temp binary. Use `:memory:` for an in-memory scratch database. |
+| `path` | File path for the `.bdb`; created if it does not exist. A `*.bdb.sql` text fixture is materialized to a temp binary. Use `:memory:` for an in-memory scratch database. A path containing **spaces** is quoted (`open_bdb "my designs/ck.bdb" writeback`) — see [Paths, and paths with spaces](BUDA_SCRIPT_REFERENCE.md#paths-and-paths-with-spaces). |
 | `writeback` | (optional) For a `*.bdb.sql` path, write the working binary back to that `.sql` on `save_bdb`/`exit`/end-of-run. Ignored for a binary `.bdb`. |
 
 ---
@@ -581,6 +581,11 @@ for cell sizes and pin offsets. **Clears all existing tables** before import.
 |---|---|
 | `def_path` | Path to the DEF file (VERSION 5.x). Must contain `UNITS DISTANCE MICRONS`, `DIEAREA`, and `COMPONENTS` sections. |
 | `lef_path` | Path to the LEF file. `MACRO … SIZE … PIN …` entries are used; everything else is ignored. |
+
+Both paths resolve against the script's own directory. Either may contain
+**spaces** when quoted — `import_def_lef "rev 2/top.def" "rev 2/top.lef"` —
+which is the only way to state where one ends and the next begins; see
+[Paths, and paths with spaces](BUDA_SCRIPT_REFERENCE.md#paths-and-paths-with-spaces).
 
 After import: `component` rows have `x1/y1/x2/y2` from the DEF placement
 plus the LEF `SIZE`, but `parent_id` and `depth` are `NULL`/0 until
