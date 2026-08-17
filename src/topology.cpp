@@ -266,6 +266,32 @@ bool flip_mst_edge(Topology& topo, int edge_id, int h_layer, int v_layer,
         if (inside || corner) return false;
     }
 
+    // Reject a flip that would STRAND a wire anchored to the bend.  Moving the
+    // bend moves a point another edge's leg may be terminating on, and nothing
+    // downstream repairs that: ripup's `_rr_apply_move` re-derives seg_conns
+    // but not geometry, so the stranded leg simply stops touching anything and
+    // a stage-a overlap trial can accept the disconnected topology.
+    //
+    // `set_trim_mst_legs` is what makes the adjacency common — it cuts a leg
+    // back to its shorter sibling's far end, which for a 2-leg L IS that
+    // edge's bend — so the two opt-in knobs interact.  MEASURED on both
+    // vehicles: flipping edge 1 of the trimmed MST candidate leaves the
+    // edge-2 leg at the old coordinate, touching nothing.  The trim is not
+    // the only way to get here though (a relay connector or a coincidence can
+    // land an endpoint on a bend), and moving a bend something else is
+    // anchored to is unsound however the anchor arrived — so the guard is on
+    // the GEOMETRY, not on whether a trim ran.
+    //
+    // Refusing is the conservative half of the trade: this costs one candidate
+    // move in an opt-in healer, where a flip is tried but has never won a
+    // commit on the corpus, and it cannot produce geometry.  The alternative —
+    // re-running the trim after the flip to repair the dependency — preserves
+    // the move but can strand something else in turn.
+    for (const Segment& s : topo.segments) {
+        if (s.edge_id == edge_id) continue;          // this edge's own legs move
+        if (eq(s.start, bend) || eq(s.end, bend)) return false;
+    }
+
     // Rewrite in place: leg a = p1->alt, leg b = alt->p2, layer by direction.  The
     // two slots are preserved, so seg_busterms stays valid; the junction geometry
     // moves, so the caller re-derives seg_conns (annotate_seg_conns).

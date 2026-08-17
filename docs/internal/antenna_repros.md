@@ -211,6 +211,31 @@ design declares one**, so the floor alone would have admitted a zero-length
 segment. And when both cuts cannot fit, it takes the larger single one rather
 than giving up, so the more duplicated end always wins.
 
+**A cross-knob hazard the trim creates, on both halves.** The cut parks a leg's
+endpoint on its shorter sibling's far end — which for a 2-leg L *is that edge's
+BEND*. `flip_mst_edge` moves the bend and preserves only its own edge's
+endpoints, so the trimmed leg is left at the old coordinate touching nothing;
+ripup's `_rr_apply_move` re-derives `seg_conns` but not geometry, so a stage-a
+overlap trial can accept the disconnected topology. It needs
+`set_trim_mst_legs` **and** ripup's `use_edge_candidates` together — both
+opt-in, neither on by default, and nothing in the tree enables both.
+
+Measured on **both** vehicles before the guard: flipping edge 1 of the trimmed
+MST candidate moved the bend and stranded the edge-2 leg. So this predates the
+mirror — the prefix half creates the same adjacency, and has since #708.
+
+Fixed by **refusing the flip**: `flip_mst_edge` declines when the bend is an
+endpoint of a segment belonging to a different edge. The guard is on the
+GEOMETRY, not on whether a trim ran — a relay connector or a coincidence can
+land an endpoint on a bend too, and moving a bend something else is anchored to
+is unsound however the anchor arrived. Refusing costs one candidate move in an
+opt-in healer where a flip is tried but has never won a commit on the corpus,
+and it cannot produce geometry; the alternative (re-running the trim after the
+flip) preserves the move but can strand something else in turn. Pinned by
+`test_a_flip_that_would_strand_a_trimmed_leg_is_refused` on both halves, plus
+`test_the_flip_guard_does_not_refuse_every_flip` so the guard cannot silently
+become "disable edge flips". Reported by Codex on #774.
+
 **How common each half is** (`tools/scan_shared_legs.py`, raw generated
 geometry — legs with a shorter same-direction sibling at that end):
 

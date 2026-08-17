@@ -767,6 +767,14 @@ public:
     // renumbers candidate indices, so select_topology pins must come from an
     // opted-in run.
     //
+    // INTERACTION with ripup's use_edge_candidates: the cut parks a leg's
+    // endpoint on its shorter sibling's far end, which for a 2-leg L is that
+    // edge's BEND — and flip_mst_edge moves bends.  flip_mst_edge now REFUSES
+    // a flip whose bend carries another edge's endpoint, so the two knobs
+    // compose; see the guard's own comment for why refusing rather than
+    // re-trimming.  Both halves created this adjacency, so it predates the
+    // mirror.
+    //
     // What this does NOT cover: the same geometry when TRUNK stub generation
     // produces it — that is set_trim_trunk_stubs, its own knob, and it stays a
     // strict xfail here because it is still the DEFAULT behaviour.

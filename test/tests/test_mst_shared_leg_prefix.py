@@ -43,6 +43,7 @@ from pathlib import Path
 
 import pytest
 
+import buda
 import buda_cli
 
 _ROOT = Path(__file__).parents[2]
@@ -262,19 +263,19 @@ def _solve_without_mst_trim(flow):
         tmp.unlink(missing_ok=True)
 
 
-def test_the_MST_leg_trim_is_OPT_IN_on_BOTH_halves():
-    """Default off for both, and stated as a passing assertion.
+def test_the_MST_leg_trim_is_OPT_IN_on_the_MIRROR_half_too():
+    """The suffix half of the opt-in guard.
 
-    The mirror rides the SAME knob as the prefix half — one defect seen from
-    two sides, so one opt-in — and it is opt-in for the same reason: the cut
-    re-sorts the WL-ordered pool, which moves selection well beyond the trimmed
-    bundle.  Asserting the duplication SURVIVES without the knob is what makes
-    a silent default flip fail loudly here, rather than somewhere far away.
+    `test_the_trim_is_OPT_IN_and_the_default_leaves_the_geometry_alone` above
+    already holds this for the prefix vehicle; this extends it to the mirror,
+    which rides the SAME knob (one defect seen from two sides, so one opt-in)
+    and is opt-in for the same reason — the cut re-sorts the WL-ordered pool,
+    moving selection well beyond the trimmed bundle.  Asserting the duplication
+    SURVIVES without the knob is what makes a silent default flip fail loudly
+    here rather than somewhere far away.
     """
     assert _pairs(_solve_without_mst_trim(_SUFFIX_FLOW), kinds=["MST"]), \
         "the shared-END duplication vanished with no opt-in — default flipped?"
-    assert _pairs(_solve_without_mst_trim(_FLOW), kinds=["MST"]), \
-        "the shared-START duplication vanished with no opt-in — default flipped?"
 
 
 def test_no_candidate_carries_a_zero_length_segment():
@@ -297,6 +298,83 @@ def test_no_candidate_carries_a_zero_length_segment():
                 for k, sg in enumerate(t.segments):
                     assert (sg.start.x, sg.start.y) != (sg.end.x, sg.end.y), \
                         f"{flow.name} {t.type} seg{k} is zero-length"
+
+
+def _mst_candidate(session, want):
+    for w in session.bundles:
+        for c in w.input.candidates:
+            if c.type == want:
+                return c
+    raise AssertionError(f"{want} absent")
+
+
+@pytest.mark.parametrize("flow,kind", [
+    (_FLOW, "MST_HV"),          # shared STARTS (5a)
+    (_SUFFIX_FLOW, "MST_VH"),   # shared ENDS   (5b)
+])
+def test_a_flip_that_would_strand_a_trimmed_leg_is_refused(flow, kind):
+    """The cross-knob bug, on both halves.
+
+    The trim cuts a leg back to its shorter sibling's far end — which for a
+    2-leg L IS that edge's BEND.  `flip_mst_edge` moves the bend and preserves
+    only its own edge's endpoints, so the trimmed leg is left at the old
+    coordinate touching nothing, and ripup's `_rr_apply_move` re-derives
+    seg_conns but not geometry: a stage-a overlap trial can accept the
+    disconnected result.
+
+    Measured before the guard, on BOTH vehicles: flipping edge 1 moved the
+    bend and the edge-2 leg was stranded.  It needs `set_trim_mst_legs` and
+    ripup's `use_edge_candidates` together — both opt-in, neither on by
+    default — and it predates the mirror, since the prefix half creates the
+    same adjacency.
+    """
+    c = _mst_candidate(_solve(flow), kind)
+    before = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in c.segments]
+
+    # Edge 1's bend is where the trim parked edge 2's leg.
+    anchored = {(s.start.x, s.start.y) for s in c.segments if s.edge_id != 1} | \
+               {(s.end.x, s.end.y) for s in c.segments if s.edge_id != 1}
+    legs = [s for s in c.segments if s.edge_id == 1]
+    assert len(legs) == 2, "edge 1 is not a flippable 2-leg L — vehicle changed?"
+    bend = next(((p.x, p.y) for p in (legs[0].start, legs[0].end)
+                 if (p.x, p.y) in {(legs[1].start.x, legs[1].start.y),
+                                   (legs[1].end.x, legs[1].end.y)}), None)
+    assert bend in anchored, "no foreign leg on the bend — nothing to guard"
+
+    assert buda.flip_mst_edge(c, 1, 4, 5, _solve(flow).fp) is False
+    after = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in c.segments]
+    assert after == before, "a refused flip must not mutate the topology"
+
+
+def test_the_flip_guard_does_not_refuse_every_flip():
+    """Non-vacuity: a flip with no foreign leg on its bend still succeeds.
+
+    Without this, the guard above would pass just as well if it had disabled
+    `flip_mst_edge` outright — which would silently remove ripup's whole
+    edge-flip move class rather than the unsafe subset of it.
+    """
+    session = _solve(_FLOW)
+    c = _mst_candidate(session, "MST_HV")
+    anchored = set()
+    for s in c.segments:
+        anchored |= {(s.start.x, s.start.y), (s.end.x, s.end.y)}
+
+    flipped = []
+    for edge in {s.edge_id for s in c.segments if s.edge_id >= 0}:
+        legs = [s for s in c.segments if s.edge_id == edge]
+        if len(legs) != 2:
+            continue
+        foreign = {(s.start.x, s.start.y) for s in c.segments if s.edge_id != edge} | \
+                  {(s.end.x, s.end.y) for s in c.segments if s.edge_id != edge}
+        bend = next(((p.x, p.y) for p in (legs[0].start, legs[0].end)
+                     if (p.x, p.y) in {(legs[1].start.x, legs[1].start.y),
+                                       (legs[1].end.x, legs[1].end.y)}), None)
+        if bend is None or bend in foreign:
+            continue
+        flipped.append(buda.flip_mst_edge(c, edge, 4, 5, session.fp))
+
+    assert flipped, "no unanchored 2-leg edge on this vehicle to prove it with"
+    assert any(flipped), "the guard refused every flip — it is over-broad"
 
 
 def test_the_mirror_cut_shortens_the_candidate_and_drops_segments():
