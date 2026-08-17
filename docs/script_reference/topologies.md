@@ -506,14 +506,17 @@ opted-in run (it runs before sidecar restore and BDB persistence, so
 ### `set_keepout_loci`
 
 ```
-set_keepout_loci [all|outside]
+set_keepout_loci [all|outside] [stripes]
 ```
 
 **Which keepouts contribute Hanan loci** (default **all** — flows are
 byte-identical without it).  `all` is the historical behaviour: every
 keepout's four edges become grid lines.  `outside` restricts that to
 keepouts reaching beyond a block; one lying wholly inside a block still
-**blocks identically**, it just stops adding coordinates.
+**blocks identically**, it just stops adding coordinates.  `stripes` is an
+orthogonal modifier, described below; the two compose
+(`set_keepout_loci outside stripes`) — on the **design** Hanan grid, with one
+measured exception noted at the end of this section.
 
 The problem it answers is quadratic.  The Hanan grid is the **product** of
 its two axis sets, so a technology that draws obstruction finely buys grid
@@ -534,8 +537,77 @@ design's LEF draws obstruction in tens of rects per macro; leave it alone
 when it draws a handful.
 
 Declare it **before** `import_def_lef` and generation.  Blocking behaviour
-is identical in both modes — this decides grid coordinates and nothing else.
+is identical in every mode — this decides grid coordinates and nothing else.
 See [`opens_interchange.md` item 12](../internal/opens_interchange.md).
+
+#### `stripes` — the case `outside` cannot reach
+
+`outside` keys on a keepout being *inside a block*.  A power-grid **strap**
+is not: it crosses the whole die, between and over the blocks, so `outside`
+leaves every one of its four edges in the grid.  That is the shape a real
+PDN arrives in — thousands of them.
+
+`stripes` drops the **thin-axis** locus pair of any keepout that is thin and
+long (aspect ratio ≥ 8 — a strap, not a block), keeping only its long-axis
+ends, which are few and usually the die boundary already.  It is **geometric,
+not by provenance**: nothing asks where the keepout came from, so a
+hand-declared `add_keepout` of strap proportions is treated the same way.
+Blocking is untouched, exactly as with `outside`.
+
+Measured on [`flow/ariane133/`](../../flow/ariane133/) with a pdngen-generated
+grid spliced in (6673 strap keepouts on top of the design's 13,034 `OBS`
+rects — see [`openroad_pdn_recipe.md` §8.1](../internal/openroad_pdn_recipe.md)):
+
+| | grid cells | `run_planner hier` |
+|---|---:|---|
+| `outside` alone | ~3.2 M | killed at 16 min |
+| `outside stripes` | — | **30.6 s**, 0 overlaps, 0 interval violations |
+
+Abstract WL lands within **5 units** of the no-PDN baseline (88,189,343 vs
+88,189,348): on this design the enforced straps barely perturb the route,
+because its signal metal lives on M8–M10 while the straps are M1/M4/M7.
+`stripes` on the baseline — no straps present — is a measured **no-op**
+(identical WL, segment count, overlaps and violations), so that 5-unit delta
+is the keepouts and not the modifier.
+
+**Opt-in, and for a sharper reason than `outside`'s.**  The justification is
+that a signal trunk has no reason to nominal on a power strap's edge — but
+that is an *unreachability* claim, the same kind `outside` first shipped on
+and had disproved.  Here is the case to watch: where signal and strap metal
+share a layer, a strap's thin-axis edges are the **boundaries of the free
+channel between straps**, which is precisely where signal routing goes.  The
+measurement above cannot see it, since ariane133's straps and signals are on
+different layers.  Until a design exercises that overlap, prefer `stripes`
+when a PDN would otherwise make the grid intractable, and leave it off when
+the grid is affordable without it.
+
+#### The one place the two do not compose
+
+Both modes govern `Floorplan::get_hanan_grid`, the design-wide grid.  The
+**n-pin trunk generator** builds its own local Hanan grid per bundle
+(`TopologyGenerator::generate_npin`), and that one honours `stripes` but
+**not** `outside`: it walks every keepout without consulting
+`inside_block`.
+
+This is not a corner case.  On `flow/ariane133`, which declares `outside`,
+**12,635 of its 13,034 keepouts are both inside-a-block and strap-shaped** —
+so 97% of them add loci to the per-bundle grid that the design grid drops.
+
+It is written down rather than repaired because which behaviour is *right*
+is an open question, not an oversight to tidy:
+
+- `outside` exists because the design grid is a **product** of its two axis
+  sets and explodes.  The per-bundle grid is bounded by the bundle's own
+  extent, so that argument does not transfer.
+- Item 12's own lesson is that an interior locus **is** reachable, and
+  dropping it cost `flow/rv` a better trunk.  Keeping those positions
+  exactly where the trunk is chosen may be part of why `outside` is
+  affordable at all.
+
+So applying the filter here would change trunk candidates on every flow
+declaring `outside` — a QoR change wanting a corpus measurement, not a
+consistency fix.  Tracked in
+[`opens_interchange.md` item 12](../internal/opens_interchange.md).
 
 ---
 

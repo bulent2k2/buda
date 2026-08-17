@@ -455,6 +455,21 @@ static bool zone_is_stripe(const Rect& b) {
 // contributes only its LONG-axis edges (its ends — few, often already the die
 // boundary); the proliferating thin-axis pair is dropped.  Blocking is
 // unaffected either way (this only governs which grid lines are sampled).
+//
+// WHAT TO WATCH, and why this is opt-in.  The justification for dropping the
+// thin-axis pair is that a signal trunk has no reason to nominal on a power
+// strap's edge.  That is an UNREACHABILITY claim, which is the same class of
+// claim `set_keepout_loci outside` first shipped on and had disproved by
+// flow/rv/soc_conv_div (a trunk sat exactly on the OBS edge whose locus had
+// been dropped).  The case this one would fail on is a layer where signal and
+// strap metal SHARE space: there a strap's thin-axis edges bound the free
+// CHANNEL between straps, which is exactly where the signal routing goes, so
+// they would be the most useful loci on the layer rather than the least.
+// The ariane133 measurement cannot see it — its straps are M1/M4/M7 and its
+// signal metal M8-M10 — so the claim is untested where it matters.  Settling
+// it needs a design whose signal layers carry straps; until then the mode is
+// opt-in and worth declaring only when a PDN would otherwise make the grid
+// intractable.
 static void push_zone_loci(const KeepoutZone& koz, bool stripe_suppress,
                            std::vector<int>& xs, std::vector<int>& ys) {
     if (stripe_suppress && zone_is_stripe(koz.bbox)) {
@@ -3295,6 +3310,24 @@ std::vector<Topology> TopologyGenerator::generate_npin(
 
     // Include keepout edges in the local Hanan grid so trunk midpoints naturally
     // fall above/below keepout bands rather than inside them.
+    //
+    // NOTE, and it is deliberate that this is written down rather than
+    // "fixed": this local grid honours `stripes` but NOT `outside`, unlike
+    // Floorplan::get_hanan_grid which applies both.  The divergence is live,
+    // not theoretical — on flow/ariane133, which DECLARES `outside`, 12,635
+    // of its 13,034 keepouts are both inside-a-block and strap-shaped, so
+    // 97% of them add loci here that the global grid drops.
+    //
+    // Whether that is a defect depends on which way item 12 cuts.  `outside`
+    // exists because the GLOBAL grid is a product and explodes; this grid is
+    // per-bundle and bounded by the bundle's own extent, so the quadratic
+    // argument does not apply.  Meanwhile item 12's own lesson is that an
+    // interior locus IS reachable and dropping it cost flow/rv a better
+    // trunk — so preserving those positions exactly where the trunk choice
+    // is made may be why `outside` is affordable at all.  Applying the
+    // filter here would change trunk candidates on every flow declaring
+    // `outside`, which is a QoR change needing corpus measurement, not a
+    // consistency tidy-up.  See opens_interchange.md item 12.
     const auto& keepouts = floorplan_.get_keepout_zones();
     if (!keepouts.empty()) {
         const bool stripe_suppress = floorplan_.stripe_loci_suppress();

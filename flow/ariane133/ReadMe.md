@@ -132,6 +132,19 @@ design whose LEF draws obstruction in 99 rects per macro, and the wrong one
 for a design with a handful, where it measurably cost `flow/rv` a better
 trunk. See item 12.
 
+**A PDN needs the other half of the knob.** `outside` keys on a keepout
+being *inside a block*, and a power strap is not — it crosses the die. Give
+this design a real power grid (`pdn.tcl`, and
+[openroad_pdn_recipe.md](../../docs/internal/openroad_pdn_recipe.md) §8.1)
+and its 6673 strap keepouts push the grid to **~3.2 M cells** with the
+planner killed at 16 minutes — item 12 again, from a direction `outside`
+structurally cannot reach. `set_keepout_loci outside stripes` adds the
+missing half: a thin-and-long keepout keeps only its long-axis loci. The
+flow then completes in **30.6 s**, 0 overlaps, abstract WL within **5 units**
+of the no-PDN baseline. `ariane133.buda` does **not** declare `stripes` —
+it imports no PDN, where the modifier is a measured no-op — so the token is
+for the spliced variant the recipe builds.
+
 ## What is not clean, and why that is the input's shape
 
 Two separate things, worth not conflating.

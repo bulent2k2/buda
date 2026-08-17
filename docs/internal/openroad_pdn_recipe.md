@@ -374,6 +374,27 @@ With `ariane_pdn.def` in hand, in the order the work is worth doing:
    `topology.cpp` (`push_zone_loci` / `zone_is_stripe`), tested in
    `test/tests/test_stripe_keepout_loci.py`.
 
+   **The control, run 2026-08-16 (after the fact).** That 5-unit figure
+   compares a baseline declaring `set_keepout_loci outside` against a variant
+   declaring `outside stripes` — so it moves TWO things at once, the 6673
+   keepouts and the modifier, and attributing the delta to the keepouts is
+   only sound if `stripes` alone changes nothing. It does not: the baseline
+   DEF (no straps) run under `outside stripes` is identical to `outside` on
+   every reported quantity —
+
+   ```
+   outside          abstract WL 88189348   121 segs   0 overlaps   77 viol / 25 bundles
+   outside stripes  abstract WL 88189348   121 segs   0 overlaps   77 viol / 25 bundles
+   ```
+
+   — which is the expected result rather than a lucky one (ariane133's 13,034
+   `OBS` keepouts are all block-interior, so `outside` has already dropped
+   their loci before `stripes` is consulted, and nothing else on the design is
+   strap-shaped). Reproduce with the same `sed` recipe below, changing only
+   the `set_keepout_loci` line and the BDB name, and leaving the input DEF as
+   the original. Stated because a two-variable comparison with no control is
+   how a modifier's own effect gets attributed to the thing being measured.
+
    **Reproducing it.** `flow/ariane133/ariane133.buda` hardcodes its input
    DEF (line ~96) and the CLI has no input-DEF override, so the splice alone
    is not enough — you also need a variant flow that imports it and turns on

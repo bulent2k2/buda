@@ -900,6 +900,34 @@ Convergence there is that vehicle's QoR question, not an interchange one.
 
 Pinned by `test_keepout_hanan_loci.py`.
 
+### Residual, found 2026-08-17: `outside` governs one of the two grids
+
+`outside` filters `Floorplan::get_hanan_grid` — the design-wide grid, which
+is where the quadratic blowup lives and where the 397× above was measured.
+The **n-pin trunk generator** builds a second, per-bundle Hanan grid
+(`TopologyGenerator::generate_npin`) and that one does **not** consult
+`inside_block`, so an interior keepout still contributes loci there. (It
+does honour the later `stripes` modifier, which is how the asymmetry came to
+light — a reviewer noticed the composition claim in the script reference was
+true of only one grid.)
+
+Live rather than theoretical: on `flow/ariane133`, **12,635 of 13,034**
+keepouts are both interior and strap-shaped, so 97% of them add per-bundle
+loci the design grid drops.
+
+**Not repaired, because which behaviour is right is genuinely open.** The
+per-bundle grid is bounded by the bundle's extent, so `outside`'s quadratic
+justification does not transfer to it; and this item's own lesson is that an
+interior locus *is* reachable — `flow/rv`'s bundle 42 proved it — so keeping
+those positions exactly where the trunk is chosen may be part of why
+`outside` is affordable at all. Filtering here would move trunk candidates
+on every flow declaring `outside`, which wants a corpus measurement.
+
+To settle it: apply the filter behind a temporary env knob, sweep
+`tools/qor_corpus.py --vs main`, and read `flow/rv/soc_conv_div` and
+`flow/ariane133` specifically — the first is where dropping interior loci
+already cost a trunk, the second is where 97% of keepouts are affected.
+
 ---
 
 ## 13. ~~A component `HALO` was imported as a routing keepout~~ — RESOLVED 2026-08-14
