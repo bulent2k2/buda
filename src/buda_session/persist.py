@@ -1722,8 +1722,12 @@ class PersistMixin:
             if self.routing_grid is not None:
                 for lid in lids:
                     if self.routing_grid.has_layer(lid):
+                        # WITH the net: a resumed session must see the same
+                        # rails the build did, or NDR credit and bond answers
+                        # differ between a design and its own checkpoint
+                        # (Codex #785).
                         self.routing_grid.add_keepout(lid, r.x1, r.y1,
-                                                      r.x2, r.y2)
+                                                      r.x2, r.y2, r.net)
             n_zones += 1
         if restored_layers or n_zones:
             parts = []

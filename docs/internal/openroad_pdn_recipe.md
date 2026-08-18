@@ -422,11 +422,19 @@ With `ariane_pdn.def` in hand, in the order the work is worth doing:
    `KeepoutZone::net`, fed from a new `DefImportStats::Keepout::net`, empty
    for obstruction with no net behind it. The import census names the nets,
    so the field has a reader rather than waiting silently for (b).
-3. **`specialnets_scope.md` (b)** — teach the three NDR rail predicates
-   (`ndr_rail_credits`, the R9 `NDR_SHIELD` audit, `emit_shield_bond_vias`)
-   to see strap geometry beside pattern slots. This is the piece that makes
-   NDR shielding mean something on an imported design, and the piece the
-   whole scoping exercise was originally aimed at.
+3. ~~**`specialnets_scope.md` (b)** — teach the three NDR rail predicates to
+   see strap geometry beside pattern slots.~~ **LANDED 2026-08-17**, and the
+   R4 note below turned out to understate it: (b) is not three lookups NOR
+   three callers of one identity test, but ONE INSERTION POINT. All three
+   consumers already query `preroutes`, so a strap is emitted AS a
+   `PreRoutedSegment` and reaches every one of them unchanged. The geometry
+   half of the answer had existed TWICE (a C++ coverage sweep in `credit_at`,
+   a line-for-line Python twin in the audit); `ndr_credit_rail` is now the
+   single one. Measured on the PDN this recipe generates: **2923 bonds** on
+   `flow/ariane133/ariane133_ndr_straps.buda`, all necessarily strap-derived
+   because that design carries no pattern rail on any layer. Full account in
+   `specialnets_scope.md` §7, including the two ways the vehicle can look
+   like it works while measuring nothing.
 
 Note the ordering constraint from R4 (`opens_ndr.md`): credit and audit must
 derive their answer from one shared predicate, so (b) is one function with

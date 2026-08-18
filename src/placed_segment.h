@@ -61,6 +61,14 @@ struct PreRoutedSegment : PlacedSegmentBase {
     std::string slot_type;       // the TrackSlot type ("POWER", "GROUND", ...)
     int         track_index = -1;  // index within its layer's enumeration
                                    // (a viz/report identity, not a global id)
+    // True when this rail came from an IDENTIFIED KEEPOUT (a DEF SPECIALNETS
+    // strap) rather than from a track pattern.  The two are both real metal
+    // belonging to a net, but they are not interchangeable to every consumer:
+    // a pattern rail sits on the periodic grid the solver reasons about, and a
+    // strap is an absolute rectangle that answers only to its own
+    // coordinates.  Carried so a consumer can be conservative about the newer
+    // source without having to guess at provenance from geometry.
+    bool        is_strap = false;
 };
 
 } // namespace buda

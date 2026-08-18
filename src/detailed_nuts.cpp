@@ -276,7 +276,8 @@ void DetailedNUTSEngine::cull_keepout_crossers(DetailedNUTSResult& result) const
             const bool horiz = grid.is_horizontal();
             const double a_lo = std::min(ns.span_lo, ns.span_hi);
             const double a_hi = std::max(ns.span_lo, ns.span_hi);
-            for (const Rect& k : grid.keepouts()) {
+            for (const auto& gk : grid.keepouts()) {
+                const Rect& k = gk.bbox;
                 const double k_p1 = horiz ? k.y1 : k.x1;
                 const double k_p2 = horiz ? k.y2 : k.x2;
                 const double k_a1 = horiz ? k.x1 : k.y1;
@@ -625,13 +626,35 @@ void DetailedNUTSEngine::place_by_layer(
                     const int ai = at_index_of(signal_tracks[sig_idx].first);
                     if (ai < 0) return false;
                     const int aj = ai + dir;
-                    if (aj < 0 || aj >= (int)all_tracks.size()) return false;
-                    const TrackSlot& sl = all_tracks[aj].second;
-                    if (sl.type == "SIGNAL") return false;
-                    if (!ndr_rail_credits(bs.ndr, sl.label, sl.type))
-                        return false;
-                    return rail_covers_span(all_tracks[aj].first,
-                                            0.5 * sl.width);
+                    if (aj >= 0 && aj < (int)all_tracks.size()) {
+                        const TrackSlot& sl = all_tracks[aj].second;
+                        if (sl.type != "SIGNAL" &&
+                            ndr_rail_credits(bs.ndr, sl.label, sl.type) &&
+                            rail_covers_span(all_tracks[aj].first,
+                                             0.5 * sl.width))
+                            return true;
+                    }
+                    // NO PATTERN RAIL CREDITS — so ask whether a STRAP does.
+                    // On an imported design this is the only question with an
+                    // answer: a LEF states a wire's width and nothing about
+                    // which tracks a power grid takes, so the pattern above is
+                    // all-signal and `all_tracks[aj]` can never be a rail.  The
+                    // grid is in the DEF's SPECIALNETS, and reaches here as an
+                    // identified keepout (specialnets_scope.md §5(b)).
+                    //
+                    // Deliberately a FALLBACK rather than a replacement: the
+                    // pattern path above decides every design that declares
+                    // rails, unchanged, so this cannot move the corpus.  It
+                    // also takes STRAPS ONLY (`is_strap`) — the shared lookup
+                    // would otherwise credit a pattern rail the path above
+                    // declined, which is a different rule, not a wider one.
+                    const double edge = signal_tracks[sig_idx].first
+                        + (dir > 0 ? 0.5 : -0.5) * signal_tracks[sig_idx].second.width;
+                    const double period = pat.unit_pitch();
+                    if (period <= 0.0) return false;
+                    auto rail = ndr_credit_rail(grid, bs.ndr, edge, dir,
+                                                period, bs_lo, bs_hi);
+                    return rail.has_value() && rail->is_strap;
                 };
                 int    best_start = -1;
                 double best_dist  = std::numeric_limits<double>::max();

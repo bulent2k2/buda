@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <functional>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -99,9 +100,59 @@ struct PatternOverride {
 // ---------------------------------------------------------------------------
 // RoutingGrid — per-layer grid with optional region overrides
 // ---------------------------------------------------------------------------
+class RoutingGrid;   // defined below; the lookup takes a reference
+
+// THE rail lookup (opens_ndr R4).  "Is there a rail immediately beyond this
+// edge, belonging to the rule's shield net, whose metal runs the length of
+// this segment?" — the question R5a crediting asks at DNUTS and the R9 audit
+// asks again of the placed result.  They MUST agree, so they call this and
+// nothing else: two implementations of one predicate is the fault family this
+// codebase keeps re-finding, and it was already half-present here (a C++
+// coverage sweep in `credit_at` and a hand-rolled Python twin in the audit).
+//
+// It answers over BOTH kinds of rail — a pattern slot and an identified
+// keepout (a DEF SPECIALNETS strap) — because on an imported design the
+// pattern carries no rails at all and the strap is the only thing there is.
+//
+// `edge`   outer face of the run's outermost bit, in the perpendicular axis
+// `dir`    +1 to look above that edge, -1 below
+// `window` how far to look — one pattern period is the meaningful distance
+// `[along_lo, along_hi]` the span the rail must cover, gaplessly
+// Returns the crediting rail, or nullopt.  A usable SIGNAL track lying
+// between the edge and the rail disqualifies it: that is a track a bit could
+// have taken, so the rail is not *immediately* adjacent.
+// `allow_gap` skips the intervening-SIGNAL-track test, for the one case that
+// needs it: a run whose outer bit was CULLED leaves an empty slot that would
+// otherwise read as a gap and turn a correctly credited end into a spurious
+// violation on top of the honest UNPLACED.  Identity and coverage still apply.
+std::optional<PreRoutedSegment> ndr_credit_rail(
+    const RoutingGrid& grid, const NdrSpec& spec, double edge, int dir,
+    double window, double along_lo, double along_hi, bool allow_gap = false);
+
+// A blocked rectangle on one layer.  Anonymous obstruction and an identified
+// power strap are the same OBSTACLE and differ only in whether anything can be
+// said about whose metal it is — so they share one list, and `net` is the one
+// field that separates them.  Keeping them apart in two lists would let a
+// strap be forgotten by a blocking consumer, which is the worse failure.
+struct GridKeepout {
+    Rect bbox;
+    std::string net;              // "" = anonymous obstruction, not a rail
+};
+
 class RoutingGrid {
 public:
-    void add_keepout(const Rect& bbox) { keepouts_.push_back(bbox); }
+    // `net` is non-empty only for metal that BELONGS to a net — a DEF
+    // SPECIALNETS strap — and empty for obstruction carrying no identity (a
+    // macro's OBS, a LAYER blockage, a hand-declared add_keepout).  BOTH
+    // block identically; only an identified one is additionally a RAIL, which
+    // is what lets the NDR credit / bond / audit predicates see a power grid
+    // on an imported design (specialnets_scope.md §5(b)).  The identity was
+    // already carried on the Floorplan's KeepoutZone; it stopped at this
+    // boundary, and DetailedNUTSEngine holds only a RoutingGridStack — no
+    // Floorplan — so this is the only route by which it can reach them.
+    void add_keepout(const Rect& bbox, const std::string& net = "") {
+        keepouts_.push_back(GridKeepout{bbox, net});
+    }
 
     // Initialise the global pattern and routing direction (called by RoutingGridStack).
     void init(const TrackPattern& p, bool is_horiz) {
@@ -189,7 +240,7 @@ public:
 
     // Raw keepout rects (read-only) — DetailedNUTS's post-placement crossing
     // cull re-checks final junction-adjusted bit spans against them.
-    const std::vector<Rect>& keepouts() const { return keepouts_; }
+    const std::vector<GridKeepout>& keepouts() const { return keepouts_; }
 
 private:
     // The single span-aware SIGNAL-track walker behind signal_tracks_in_span
@@ -210,7 +261,7 @@ private:
 
     TrackPattern                 global_pattern_;
     std::vector<PatternOverride> overrides_;
-    std::vector<Rect>            keepouts_;
+    std::vector<GridKeepout>     keepouts_;
     bool                         is_horizontal_ = true;
 };
 
@@ -225,8 +276,11 @@ public:
                       int x1, int y1, int x2, int y2,
                       const TrackPattern& pattern);
 
-    void add_keepout(int layer_id, int x1, int y1, int x2, int y2) {
-        get_layer_grid(layer_id).add_keepout(Rect{x1, y1, x2, y2});
+    // `net` defaults empty, so every existing caller installs anonymous
+    // obstruction exactly as before; only the SPECIALNETS import passes one.
+    void add_keepout(int layer_id, int x1, int y1, int x2, int y2,
+                     const std::string& net = "") {
+        get_layer_grid(layer_id).add_keepout(Rect{x1, y1, x2, y2}, net);
     }
 
     // Throws std::out_of_range if layer_id is not defined.

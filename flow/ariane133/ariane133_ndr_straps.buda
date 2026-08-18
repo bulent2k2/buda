@@ -1,0 +1,109 @@
+# ─────────────────────────────────────────────────────────────────────────
+# ariane133 + a real PDN — the vehicle for NDR shielding against STRAPS
+#
+# `specialnets_scope.md` §5(b).  On an imported design every routing layer is
+# ALL-SIGNAL: a LEF states a wire's width and says nothing about which tracks
+# a power grid takes, so the pattern carries no rails and NDR's credit / bond
+# machinery has nothing to bite on.  The rails are in the DEF's SPECIALNETS
+# and nowhere else, which is why this vehicle needs a POWER-ROUTED DEF.
+#
+# It is `ariane133_m4-m7.buda` with two additions and nothing else:
+#   * the spliced strap DEF instead of the plain one, and
+#   * an NDR rule that actually asks the questions (shield + credit + bond).
+#
+# WHY M4-M7 AND NOT THE FULL STACK: with all ten layers the interconnect
+# lives on M8-M10 while the PDN stops at M7, so straps and signal metal
+# occupy almost disjoint layers and every strap lookup returns "no rail" —
+# the code would run, do nothing, and look fine.  Declaring seven layers with
+# M6/M7 as TOP puts ~97% of the wire on the two layers carrying 1686 straps.
+# Measured there: 304 of 305 M6 bit-wires and 668 of 668 M7 bit-wires
+# span-overlap a strap, and 46 M6 + 26 M7 sit within ONE track pitch of one —
+# which is the population R5a crediting is about.
+# ─────────────────────────────────────────────────────────────────────────
+
+# The netlist and macro LEF are fetched (see ReadMe.md).  The strap DEF is
+# GENERATED — it is `demo/ariane/ariane.def` with the SPECIALNETS of a pdngen
+# run spliced in — so it cannot be checked in and the remedy has to be stated
+# here rather than left to a reader complaining about a path.
+require_file ariane.v fakeram45_256x16.lef hint Fetch them first:  python3 flow/ariane133/fetch.py   (~12 MB, checksum-pinned; see flow/ariane133/ReadMe.md)
+require_file ariane_keepout.def hint Generate it:  see docs/internal/openroad_pdn_recipe.md (run pdn.tcl through OpenROAD for ariane_pdn.def, then splice its SPECIALNETS into demo/ariane/ariane.def per section 8.1)
+
+open_bdb ariane133_ndr.bdb
+
+set_import_scale dbu
+set_unit_check on
+
+corner_margin dx 3000 dy 3000
+set_min_stub_length 1000
+
+# `outside` tames the 13,034 OBS keepouts inside the macros; `stripes` is what
+# makes the PDN affordable — its straps cross the die, so they are not inside
+# any block and the `outside` rule cannot reach them.  Without it the Hanan
+# grid goes ~6,327 -> ~3.2M cells and the planner does not finish.
+set_keepout_loci outside stripes
+
+def_layer 1 metal1 H LOW 30
+def_layer 2 metal2 V LOW 30
+def_layer 3 metal3 H LOW 30
+def_layer 4 metal4 V LOW 30
+def_layer 5 metal5 H LOW 30
+def_layer 6 metal6 V TOP 30
+def_layer 7 metal7 H TOP 30
+
+# The DEF whose SPECIALNETS carry the power grid: 6673 strap wires, of which
+# 1596 are on M6 and 90 on M7 — the layers this stack routes on.
+import_def_lef ariane_keepout.def fakeram45_256x16.lef
+import_verilog ariane.v
+
+derive_container_bboxes margin 4000
+
+# ── the rule ──────────────────────────────────────────────────────────────
+#
+# A per-bus shield with BOTH opt-ins that need a rail to mean anything:
+#   `credit` (R5a) — an END shield may be dropped when an identity-matching
+#                    rail already runs beside the bus and spans it.
+#   `bond`   (R6)  — an emitted shield is strapped to the grid wherever a
+#                    matching rail crosses it on the adjacent perpendicular
+#                    layer.  M6 is V and M7 is H, so they are exactly that
+#                    pair for each other.
+# Restricted to the strap-bearing TOP layers, and scoped rather than global:
+# the question is whether a strap is SEEN, and governing every bundle would
+# answer it while also re-planning the design around shield demand.
+#
+# THE SCOPE HAS TO BE A BUS THAT ROUTES.  This is a FLOORPLAN DEF: it places
+# the 133 SRAMs and nothing else, so the 16 pure-logic containers have no
+# placed descendant and every bundle between them has no geometry and no
+# candidates.  `amo_req_o` — the widest bus in the design at 131 bits — is
+# exactly that: driven by `ex_stage_i/lsu_i/i_store_unit/i_amo_buffer`, it
+# can never be routed here, and a rule scoped to it governs a bundle that
+# places nothing.  The nets with geometry are the SRAM-connected ones.
+def_ndr pdn_shield shield bus net VDD credit bond layers metal6,metal7
+set_ndr i_cache_subsystem/i_nbdcache/ pdn_shield
+dump_ndr
+
+# ── routing interface ─────────────────────────────────────────────────────
+derive_busterms 4
+
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+add_blocks_from_bdb 3 skip
+add_blocks_from_bdb 4 skip
+
+# Rule attachment precedes bundling: the bundler splits a mixed-rule bundle
+# into rule-uniform parts, so `set_ndr` above is what makes the governed bits
+# arrive as their own bundle.
+run_hier_bundler depth 4
+generate_hier_topologies
+run_planner hier 2
+run_nuts
+# The m4-m7 vehicle heals on both sides of DNUTS and this needs the same: a
+# congested imported design reaches detailed placement with overlaps the
+# abstract solve could not resolve, and without the repair 99 bit-wires land
+# where ~980 do with it — measured, and nothing to do with the NDR rule (a
+# control with the rule removed places the same 99).
+negotiate_congestion
+run_detailed_nuts
+negotiate_congestion
+check_design
+report_wirelength

@@ -485,7 +485,13 @@ def _apply_def_keepouts(session, st):
         if session.routing_grid:
             for lid in lids:
                 if session.routing_grid.has_layer(lid):
-                    session.routing_grid.add_keepout(lid, x1, y1, x2, y2)
+                    # WITH the net.  This line dropped it, and that was the
+                    # whole gap: DetailedNUTSEngine holds a RoutingGridStack
+                    # and no Floorplan, so a strap's identity — carried
+                    # perfectly well on the zone above — could not reach the
+                    # NDR credit / bond predicates by any other route.
+                    session.routing_grid.add_keepout(lid, x1, y1, x2, y2,
+                                                     k.net)
         by_why[k.why.split()[0]] = by_why.get(k.why.split()[0], 0) + 1
         if k.net:
             by_net[k.net] = by_net.get(k.net, 0) + 1
