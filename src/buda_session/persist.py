@@ -1362,8 +1362,14 @@ class PersistMixin:
         for this wrapper: the selected candidate's identity, the assigned
         layers, the lock flag, and (only when the instance CAN carry
         instance-local USER extras — an `_inherited_uids` entry exists) the
-        extra USER-candidate uids.  Equal fingerprints ⟺ identical persisted
-        rows, so the selective re-persist may skip the bundle."""
+        extra USER-candidate uids, and the governing NDR rule.
+
+        Equal fingerprints ⟺ identical persisted rows, so the selective
+        re-persist may skip the bundle.  The NDR stamp is part of the ROW,
+        so it has to be part of the fingerprint: without it a re-persist
+        after a rule change would leave the old stamp in place and the next
+        resume would audit against a rule the design no longer has."""
+        from buda_cmds.ndr_cmds import bundle_ndr_stamp
         uid, _b = buda.selected_topo_key(w)
         extras = ()
         inherited = getattr(self, "_inherited_uids", {}) \
@@ -1372,7 +1378,8 @@ class PersistMixin:
             extras = tuple(sorted(
                 buda.topo_uid(t) for t in w.input.candidates
                 if t.type == "USER" and buda.topo_uid(t) not in inherited))
-        return (uid, tuple(w.plan.seg_layers), bool(w.hier.locked), extras)
+        return (uid, tuple(w.plan.seg_layers), bool(w.hier.locked), extras,
+                bundle_ndr_stamp(self, w))
 
     @_batched
     def _persist_planner_output(self, selective=False):

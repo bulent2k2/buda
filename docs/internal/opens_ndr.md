@@ -354,6 +354,87 @@ arithmetic, worth doing only for a design that demonstrably needs it.
 
 ## Smaller residuals
 
+### The governing rule on EXPANDED per-instance rows (LANDED 2026-08-18)
+
+Found writing up `specialnets_scope.md` §5(b), and it was filed there as an
+observability gap. Measuring it showed it was more than that.
+
+`bundle.ndr_rule` — the pricing fingerprint `load_pipeline` audits a restored
+plan against — was stamped at the two NON-expanded persist sites
+(`_persist_bundles`, `_persist_normal_bundle`) and **not** in
+`_add_expanded_bundle`. So every per-instance row of a governed hier template
+persisted with an empty stamp, i.e. as if it had been planned under the
+default rule.
+
+The audit compares that stamp against a FRESH resolution of the bundle's
+nets. An empty stamp against a live rule is a mismatch, so **a governed hier
+design restored with `load_pipeline expanded` had every governed instance's
+plan VOIDED** — with a message asserting the opposite of what happened:
+
+```
+WARNING: [NDR] bundle 8 (loc_u1_0): persisted under rule 'default' [default]
+but now resolves to 'loc15' [loc15|w2|g1|s1|p0|nGND|L|c1] — demand was priced
+under the old rule; re-run the planner — restored plan VOIDED
+```
+
+Measured on `flow/ndr_shield_hier` against a file-backed BDB: 4 of 4 governed
+instances voided, and the resume recovered **3 planned selections / 5 placed
+bus segments** where the checkpoint held 7 / 9. Nothing had changed between
+the two sessions.
+
+**Fixed** by stamping in `_add_expanded_bundle` exactly as the other two sites
+do. Two things beyond the one-liner:
+
+- The stamp expression is now one function (`bundle_ndr_stamp`), because
+  `_planner_persist_fp` — which decides whether a selective re-persist may
+  SKIP an expanded row — has to include it. A second spelling of "what
+  governs this bundle" would drift silently in the direction that matters:
+  the fingerprint would simply stop noticing a rule change.
+- The guard it was hiding behind is pinned in BOTH directions. A rule that
+  genuinely reprices still voids, and the message now names the rule the plan
+  was persisted under rather than "default". Note the audit is a PRICING
+  fingerprint: `x1.5` → `x2` quantizes to the same 2 slots + 1 guard on the
+  vehicle's grid and correctly does **not** void, which is why the negative
+  test declares `x3` with a different shield net.
+
+Tests: `test_ndr_hier.py::test_an_expanded_instance_records_the_rule_that_governed_it`
+and the two `_void_the_expanded_restore` twins; all three fail against the
+previous code.
+
+**And then the stamp had to be FROZEN** (found in review, Codex P1 on #788).
+An expanded row is re-stamped at every re-persist — the run_nuts escalation,
+each healer checkpoint — while the two template sites are written once and
+never rewritten. So the moment the stamp became a live read of the rule dict,
+a rule edited AFTER planning was laundered into the checkpoint:
+
+```
+def_ndr cls width x1.5 …        # bundling + planning price the plan
+def_ndr_layer cls M6 width x3   # mutates the declared rule IN PLACE
+                                # …any re-persist now stamps the NEW fp
+```
+
+Measured on 08_cross_level: the expanded rows moved to
+`cls|…|c1|P{"6":{…,"wx":3.0}}` while the plan they label was priced at
+`cls|…|c1`, and the resume — comparing the new rule against itself — restored
+**all 4 instances silently**. Templates were unaffected, purely because
+nothing rewrites them.
+
+The fix is not to skip re-stamping (a genuine re-plan must update it) but to
+stamp the fingerprint of the spec the wrapper is actually holding.
+`_spec_of` is the single place a wrapper's spec is built, so it memoizes the
+rule's fingerprint there and `bundle_ndr_stamp` reads that memo. This is
+exactly right for the mechanism: `def_ndr_layer` mutates the rule dict and
+re-specs nothing, so the wrapper keeps pricing, planning and routing against
+the pre-edit spec — the memo says what actually governed. A re-bundle
+rebuilds the specs and refreshes it, so an edit made BEFORE the bundler
+(which does price the plan) still reaches the checkpoint; both directions are
+pinned (`test_a_post_plan_rule_edit_is_not_laundered_into_the_checkpoint`,
+`test_a_rule_edited_before_bundling_is_the_rule_that_is_stamped`).
+
+Worth stating plainly: this is a defect the ORIGINAL fix introduced, not one
+it exposed. Before it, an expanded row carried no stamp at all.
+
+
 ### The cull-risk predictor fix is test-pinned (LANDED)
 
 `_escalate_dead_low_segments(cull_risk=True)` excludes shield rows from its
