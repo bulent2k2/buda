@@ -1,7 +1,7 @@
 name: Windows wheel
 
-# Build a DISTRIBUTABLE Windows wheel (cp313, x64) and prove it works before
-# anyone downloads it: install into a FRESH venv, import the extension stack,
+# Build a DISTRIBUTABLE Windows wheel (x64, for a CHOSEN CPython) and prove
+# it works before anyone downloads it: install into a FRESH venv, import the extension stack,
 # run a real routed flow through the installed `buda` console script, and
 # check the optional surfaces (GUI deps, web deps, the wheel-shipped Tcl
 # front end).  The wheel is uploaded as a workflow artifact.
@@ -10,8 +10,12 @@ name: Windows wheel
 #   * BUDA_WHEEL=ON       — the pip-only CMake install rules
 #   * BUDA_ARCH=none      — no -march baked in; a distributable build must
 #                           not assume the build machine's ISA
-#   * cp313 tag           — from the interpreter below; the wheel only
-#                           installs into a matching CPython 3.13
+#   * the cpNNN tag       — from the `python-version` input (default 3.13);
+#                           a wheel installs ONLY into a matching CPython, so
+#                           a second machine on a different minor version
+#                           needs its own build, not a re-download.  Measured:
+#                           a box carrying only 3.14 cannot take the cp313
+#                           wheel at all.
 #
 # Dispatch-only, like windows-validate.yml: this is an on-demand deliverable,
 # not a release cadence (docs/internal/packaging.md is explicit that wheel
@@ -19,6 +23,12 @@ name: Windows wheel
 
 on:
   workflow_dispatch:
+    inputs:
+      python-version:
+        description: 'CPython to build for (the wheel installs ONLY into a matching one)'
+        default: '3.13'
+        type: choice
+        options: ['3.13', '3.14', '3.12']
   # Bootstrap trigger: a workflow that exists only on a topic branch is not
   # dispatchable by name until it has run once (GitHub indexes workflows off
   # the default branch — measured: the dispatch 404s).  A push trigger scoped
@@ -40,13 +50,30 @@ jobs:
     env:
       PYTHONUTF8: '1'      # measured requirement (docs/WINDOWS_REQ.md)
       MPLBACKEND: Agg
+      # The ONE statement of which interpreter this run is for: the
+      # setup-python pin, the wheel's ABI tag and the artifact name are all
+      # derived from it, so they cannot disagree.  The `||` fallback is for
+      # the push trigger, where `inputs` is empty.
+      PY_VERSION: ${{ inputs.python-version || '3.13' }}
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: ${{ env.PY_VERSION }}
+
+      - name: Resolve the ABI tag this build will carry
+        # `3.14` -> `cp314`, the tag pip will demand at install time.  Derived
+        # rather than typed: an artifact named for a different interpreter than
+        # the wheel inside it is the one packaging mistake that survives every
+        # green tick and only fails on the target machine.
+        id: tag
+        shell: pwsh
+        run: |
+          $cp = "cp" + ($env:PY_VERSION -replace '\.', '')
+          "cp=$cp" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          python -c "import sys; print('building for', sys.version)"
 
       - name: Build the wheel
         # pip's build isolation fetches scikit-build-core + pybind11 per the
@@ -108,7 +135,7 @@ jobs:
       - name: Upload the wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: buda-wheel-cp313-win_amd64
+          name: buda-wheel-${{ steps.tag.outputs.cp }}-win_amd64
           path: dist/*.whl
           if-no-files-found: error
           retention-days: 30
