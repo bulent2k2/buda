@@ -614,6 +614,19 @@ A stage without a prior build (no trace), a trace built by a DIFFERENT
 flow, or a checkpoint the flow later replaced with `:memory:` are each
 refused with the remedy.
 
+The trace is written only beside a **durable** checkpoint — a binary
+`.bdb`, or a `.sql` opened `writeback`.  A flow that opens a `.sql`
+*without* `writeback` (a throwaway materialized copy) or `:memory:`, or
+that ends in `exit` having replaced the armed BDB with its own, leaves
+nothing to resume from: the build session says so at the end (a
+`WARNING` that the routing was DISCARDED, with the cause), and a later
+`<stage>` resume — the BDB present but no trace beside it — names that
+cause rather than advising the build session that just produced it.  A
+flow ending in `exit` is fine to resume **when its checkpoint is
+durable**: the trace is written on the exit path too, so
+`btcl -i <flow> <ckpt> <stage>` works without an interactive build
+session in between.
+
 **Two concurrent sessions on the same BDB cannot corrupt it**: SQLite
 allows one writer, so the unlucky session fails LOUDLY — at the arming
 open ("cannot open the armed BDB", another session holding it) or

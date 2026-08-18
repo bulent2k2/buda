@@ -446,6 +446,71 @@ def test_sql_fixture_without_writeback_is_not_a_checkpoint(tmp_path):
     assert r.returncode == 2                       # no trace, refused
 
 
+def test_an_exit_ending_flow_with_a_durable_checkpoint_is_resumable(tmp_path):
+    # A flow that ends in `exit` has ended the ENGINE session, so there is no
+    # live pipeline to drive at a prompt.  But if its checkpoint is durable
+    # the routed rows are on disk, so a `<stage>` resume should still work —
+    # which needs the build session to have written the trace.  It used to
+    # return at the exit check BEFORE the trace was written, so the trace was
+    # never written and every later resume refused (the report that cost a
+    # 2000s heal).  The trace write now runs on the exit path too.
+    flow = tmp_path / "exitflow.buda"
+    flow.write_text("open_bdb dur.bdb\n" + _FLAT_FLOW + "exit\n")
+
+    r = _run(["tclsh", _DRIVER, flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "resume trace" in r.stdout                       # written despite exit
+    assert (tmp_path / "dur.bdb.trace").exists()
+    assert "ended in `exit`" in r.stdout
+    assert "DISCARDED" not in r.stdout                      # it was NOT discarded
+
+    # The resume the build advertised actually runs.
+    r = _run(["tclsh", _DRIVER, flow, tmp_path / "dur.bdb", "dnuts"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "run a build session first" not in r.stderr
+    assert "RESUMING at `dnuts`" in r.stdout
+
+
+def test_an_exit_ending_flow_without_a_durable_checkpoint_warns_loudly(tmp_path):
+    # The shape that cost the 2000s heal: a flow opens its OWN `.sql` without
+    # `writeback` (a throwaway materialized copy) and ends in `exit`.  The
+    # routing it did is discarded — and the user must hear THAT at the end of
+    # the build, not at a refused resume a long route later.  The armed BDB is
+    # replaced by the flow's own open, so that is named too.
+    flow = tmp_path / "nondur.buda"
+    flow.write_text("open_bdb work.bdb.sql\n" + _FLAT_FLOW + "exit\n")
+    (tmp_path / "work.bdb.sql").write_text("")
+
+    r = _run(["tclsh", _DRIVER, flow, tmp_path / "armed.bdb"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "WARNING" in r.stdout and "DISCARDED" in r.stdout
+    assert "writeback" in r.stdout                          # the cause is named
+    assert "replacing it" in r.stdout                       # the armed BDB note
+    assert not (tmp_path / "armed.bdb.trace").exists()
+    assert not (tmp_path / "work.bdb.sql.trace").exists()
+
+    # The resume refusal names the real cause, not the command that just ran.
+    r = _run(["tclsh", _DRIVER, flow, tmp_path / "armed.bdb", "dnuts"], tmp_path)
+    assert r.returncode == 2
+    assert "exists but" in r.stderr and "non-durable" in r.stderr
+    assert "writeback" in r.stderr
+    # The old message advised `btcl -i flow armed.bdb` — the build that just
+    # produced this state.  It must not, now.
+    assert "run a build session first" not in r.stderr
+
+
+def test_a_missing_checkpoint_still_says_run_a_build_first(tmp_path):
+    # The other half of the split: when the BDB itself is absent (not just its
+    # trace), "run a build session first" is exactly right and must stay.
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, flow, tmp_path / "ghost.bdb", "plan"], tmp_path)
+    assert r.returncode == 2
+    assert "which\n              does not exist" in r.stderr \
+        or "does not exist" in r.stderr
+    assert "run a build session first" in r.stderr
+
+
 def test_concurrent_sessions_fail_loudly_and_do_not_corrupt_the_bdb(tmp_path):
     # SQLite allows one writer, and that is the protection: two sessions on
     # the SAME armed BDB must never corrupt it — the unlucky one fails
