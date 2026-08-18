@@ -14,13 +14,31 @@
 
 """How a `.buda` LINE is read — the rules the engine and every tool share.
 
-The engine is not the only thing that parses `.buda`.  `tools/buda2tcl.py`
-translates a flow, `tools/buda2bdb.py` ingests one as a cell,
-`tools/qor_corpus.py` walks one for feature coverage, `tools/scan_fanin.py`
-scans one for net shapes — and each follows `source` into the next file.  A
-rule that lives only in the engine is therefore a rule the tools will
-DISAGREE with, and the disagreement is silent: a tool resolves a different
-file, or none, and reports on a script nobody wrote.
+The engine is not the only thing that parses `.buda`.  FIVE other readers
+do, and this is the list to check before adding a sixth:
+
+  * `tools/buda2tcl.py`      translates a flow to Tcl
+  * `tools/buda2bdb.py`      ingests one as a BDB cell
+  * `tools/qor_corpus.py`    walks one for feature coverage
+  * `tools/scan_fanin.py`    scans one for net shapes
+  * `tools/buda_interact.tcl`  reads the RECORDED lines of a `btcl -i`
+                             session — and is written in **Tcl**
+
+Each follows `source` into the next file.  A rule that lives only in the
+engine is therefore a rule the readers will DISAGREE with, and the
+disagreement is silent: a reader resolves a different file, or none, and
+reports on a script nobody wrote.
+
+The four Python readers import this module, so a fix here reaches them.  The
+Tcl one CANNOT, and that is what made it the last to be fixed: the quoting
+rule (#771/#772/#775) landed here and looked complete, while
+`buda_interact.tcl` went on splitting a recorded `open_bdb "my designs/x.bdb"`
+on whitespace — which cost it the `.trace` beside every spaced checkpoint,
+so each later `btcl -i <flow> <ckpt> <stage>` refused and told the user to
+run the build session that had just run (#783).  A reader in another
+language needs a TWIN whose agreement is measured (`_split_args` there, and
+`test_btcl_quoted_paths.py` runs the same cases through both), because
+sharing the code is not available to it.
 
 Standalone and dependency-free for the reason `slot_groups.py`,
 `bus_names.py` and `tcl_quote.py` are: these are TEXT rules, and a tool that
@@ -106,13 +124,25 @@ def sole_path_arg(cmd_line, skip=1):
     `btcl -i` sends the same line — so a checkout under `~/My Designs/` could
     not be run at all.
 
-    Deliberately NOT quoting in the tokenizer.  `.buda` is whitespace-split
-    with no quoting anywhere, the Tcl bridge documents that it does not
-    re-quote (a command must mean the same thing from Tcl as from a script),
-    and teaching the splitter about quotes would change how EVERY command
-    reads its arguments to fix a handful that take a path.  A command that
-    takes exactly one path has no ambiguity to resolve: everything after the
-    verb is the path, which is what `include` means in most languages.
+    Rest-of-line rather than quoting, because a command taking exactly one
+    path has no ambiguity to resolve: everything after the verb IS the path,
+    which is what `include` means in most languages.  A SPACE therefore needs
+    no quotes here.
+
+    Two things still do, because the comment rule and the trim run first
+    (Codex #784 P2 — "never needed" was an overclaim):
+
+      * a `#` at a token boundary, which is a comment unquoted:
+        `source my #2/flow.buda` resolves `my`, `source "my #2/flow.buda"`
+        the whole path;
+      * leading or trailing whitespace IN the filename, which `.strip()`
+        removes: `source " x.buda"` keeps the space.
+
+    (This paragraph used to argue that `.buda` is whitespace-split with no
+    quoting anywhere and that the Tcl bridge never re-quotes.  Both were true
+    when it was written and neither is now — `split_quoted_args` quotes, and
+    `buda::_join_args` re-quotes a whitespace-bearing argument — so the
+    reasoning is restated on the one ground that still holds.)
 
     So this is applicable ONLY where the argument list is exactly one path —
     `source`, `import_verilog`, `save_bdb`.  Every other path-taking command

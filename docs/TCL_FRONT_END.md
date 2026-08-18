@@ -576,6 +576,20 @@ bin/btcl -i mini.buda ckpt.bdb nuts    # keep the plan too
 bin/btcl -i mini.buda ckpt.bdb dnuts   # keep abstract NUTS too
 ```
 
+Both operands may contain **spaces** — quote them for your shell:
+
+```bash
+bin/btcl -i "my designs/mini.buda" "my designs/ck.bdb" plan
+```
+
+The driver reads the recorded `open_bdb` line with the engine's own rule
+([Paths, and paths with spaces](BUDA_SCRIPT_REFERENCE.md#paths-and-paths-with-spaces)),
+so the checkpoint it names and the trace it writes are the file you gave it.
+Until #783 it split that line on whitespace: the `.trace` went missing and
+every stage session afterwards refused, advising the build session that had
+just run.  The resume recipe the banner prints is shell-quoted for the same
+reason — it is meant to be typed back.
+
 Every build session with a live file-backed checkpoint writes its recorded
 trace beside it (`<ckpt.bdb>.trace`); a stage session replays only the
 trace's SETUP portion, calls `load_pipeline` — which restores bundles,

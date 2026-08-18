@@ -150,7 +150,10 @@ the included file are skipped.
 
 `source` takes exactly one path and nothing after it, so the whole rest of
 the line is the path — a space in it is part of the filename, and no quotes
-are needed (`source my designs/tracks.buda`). Quoting works too. It matters
+are needed (`source my designs/tracks.buda`). Quoting works too — and is
+needed for the two things the comment rule and the trim take first: a `#` at
+a token boundary (`source "my #2/flow.buda"`, else the line is cut and `my`
+is the path) and leading or trailing whitespace inside the filename. It matters
 most for the one path a user does not choose: `bin/buda "my designs/x.buda"`
 reaches the engine as a `source` line, so a checkout under `~/My Designs/`
 would otherwise not run at all.

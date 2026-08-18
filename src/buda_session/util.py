@@ -23,8 +23,11 @@ import os
 
 
 # THE `.buda` line rules live in `buda_script` — standalone and engine-free,
-# so the tools that also parse `.buda` (buda2tcl, buda2bdb, qor_corpus,
-# scan_fanin) reach the same code without importing the compiled extension.
+# so the PYTHON tools that also parse `.buda` (buda2tcl, buda2bdb,
+# qor_corpus, scan_fanin) reach the same code without importing the compiled
+# extension.  `tools/buda_interact.tcl` is a reader too and cannot: it is in
+# Tcl, so it carries a measured twin instead (see the buda_script docstring,
+# which is the list to check before adding another reader).
 # Re-exported here for `buda_cli`, which exposes both under these names
 # (`tools/buda2tcl.py` imports one of them from there).  A command HANDLER
 # imports from `buda_script` DIRECTLY — one import path for one rule, so a
