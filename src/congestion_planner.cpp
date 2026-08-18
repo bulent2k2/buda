@@ -238,36 +238,58 @@ int CongestionPlanner::find_band(bool is_vcut, int perp_pos) const {
 // channel passed the closed covers test and falsely zeroed the band — STRICT
 // then priced a physically routable band as hard overflow (audit C3-01; the
 // same truncation hazard cut_coord_2x fixed for segment matching).
-static double band_available_length(
-        int cut_coord_2x, bool is_vcut,
-        const std::vector<KeepoutZone>& keepouts,
-        int layer_id,
-        int band_lo, int band_hi)
-{
-    std::vector<std::pair<int,int>> blocked;
-    for (const auto& koz : keepouts) {
-        if (!koz.layer_ids.empty() && !koz.layer_ids.count(layer_id)) continue;
-        const Rect& r = koz.bbox;
-        bool covers = is_vcut
-            ? (cut_coord_2x >= 2 * r.x1 && cut_coord_2x <= 2 * r.x2)
-            : (cut_coord_2x >= 2 * r.y1 && cut_coord_2x <= 2 * r.y2);
-        if (!covers) continue;
-        int lo = is_vcut ? r.y1 : r.x1;
-        int hi = is_vcut ? r.y2 : r.x2;
-        int clo = std::max(lo, band_lo);
-        int chi = std::min(hi, band_hi);
-        if (clo < chi) blocked.push_back({clo, chi});
+// Per-cut blocked-interval set — the former `band_available_length`
+// hoisted out of the per-band loop.  That helper rescanned the WHOLE
+// keepout list for every band of every cut — O(cuts x bands x keepouts) —
+// and on flow/ariane133 after PR #780 recovered the 495
+// negative-coordinate die ports (each a Hanan y-pair: the y grid went
+// ~30 -> 1018 coords) it made `rebuild_cuts_` the entire planner runtime
+// (10/10 profile samples in this path; run_planner hier 2 at 113s).
+// Filter + MERGE the covering intervals once per (cut, layer) — the
+// merged union is exactly what the per-band cur-sweep subtracted — then
+// answer each band by binary search over the disjoint sorted set.  Same
+// values by construction (the per-band clip commutes with the union);
+// gated by byte-identical flow logs on the keepout-heavy vehicles and the
+// QoR corpus.
+struct CutBlocked {
+    std::vector<std::pair<int,int>> iv;   // merged, disjoint, sorted
+    void build(int cut_coord_2x, bool is_vcut,
+               const std::vector<KeepoutZone>& keepouts, int layer_id) {
+        iv.clear();
+        for (const auto& koz : keepouts) {
+            if (!koz.layer_ids.empty() && !koz.layer_ids.count(layer_id))
+                continue;
+            const Rect& r = koz.bbox;
+            bool covers = is_vcut
+                ? (cut_coord_2x >= 2 * r.x1 && cut_coord_2x <= 2 * r.x2)
+                : (cut_coord_2x >= 2 * r.y1 && cut_coord_2x <= 2 * r.y2);
+            if (!covers) continue;
+            int lo = is_vcut ? r.y1 : r.x1;
+            int hi = is_vcut ? r.y2 : r.x2;
+            if (lo < hi) iv.push_back({lo, hi});
+        }
+        std::sort(iv.begin(), iv.end());
+        size_t w = 0;
+        for (size_t i = 0; i < iv.size(); ++i) {
+            if (w && iv[i].first <= iv[w - 1].second)
+                iv[w - 1].second = std::max(iv[w - 1].second, iv[i].second);
+            else
+                iv[w++] = iv[i];
+        }
+        iv.resize(w);
     }
-
-    std::sort(blocked.begin(), blocked.end());
-    double avail = static_cast<double>(band_hi - band_lo);
-    int cur = band_lo;
-    for (auto [lo, hi] : blocked) {
-        if (lo > cur) cur = lo;
-        if (hi > cur) { avail -= (hi - cur); cur = hi; }
+    double avail(int band_lo, int band_hi) const {
+        double a = static_cast<double>(band_hi - band_lo);
+        // First interval whose end reaches past band_lo.
+        auto it = std::partition_point(iv.begin(), iv.end(),
+            [band_lo](const std::pair<int,int>& p) {
+                return p.second <= band_lo;
+            });
+        for (; it != iv.end() && it->first < band_hi; ++it)
+            a -= std::min(band_hi, it->second) - std::max(band_lo, it->first);
+        return std::max(a, 0.0);
     }
-    return std::max(avail, 0.0);
-}
+};
 
 void CongestionPlanner::build_congestion_map() {
     floorplan_.get_hanan_grid(x_grid_, y_grid_);
@@ -354,15 +376,16 @@ void CongestionPlanner::rebuild_cuts_() {
             c.layer_id  = lid;
             // Leaf cells reach LOW layers via `keepouts` (low_layer_keepouts),
             // so blocks no longer carve capacity directly.
+            CutBlocked cb;
+            cb.build(c.cut_coord_2x, true, keepouts, lid);
             c.init_bands(n_ybands, [&](int b) {
-                return band_available_length(c.cut_coord_2x, true, keepouts, lid,
-                                             y_grid_[b], y_grid_[b+1]);
+                return cb.avail(y_grid_[b], y_grid_[b+1]);
             });
             if (track_mode_for(lid))
                 c.init_sig_ntrk([&](int b) {
                     // Exact midpoint sample (audit C3-01): the truncated
-                    // x_mid shares band_available_length's abutting-keepout
-                    // hazard inside count_signal_tracks_in's coverage test.
+                    // x_mid shares CutBlocked's abutting-keepout hazard
+                    // inside count_signal_tracks_in's coverage test.
                     return grid_->get_layer_grid(lid).count_signal_tracks_in(
                         0.5 * c.cut_coord_2x,
                         (double)y_grid_[b], (double)y_grid_[b+1]);
@@ -383,9 +406,10 @@ void CongestionPlanner::rebuild_cuts_() {
             c.cut_coord_2x = y_grid_[i] + y_grid_[i+1];   // exact midpoint, doubled
             c.dir          = LayerDir::HORIZONTAL;
             c.layer_id  = lid;
+            CutBlocked cb;
+            cb.build(c.cut_coord_2x, false, keepouts, lid);
             c.init_bands(n_xbands, [&](int b) {
-                return band_available_length(c.cut_coord_2x, false, keepouts, lid,
-                                             x_grid_[b], x_grid_[b+1]);
+                return cb.avail(x_grid_[b], x_grid_[b+1]);
             });
             if (track_mode_for(lid))
                 c.init_sig_ntrk([&](int b) {
