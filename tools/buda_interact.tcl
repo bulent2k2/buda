@@ -197,8 +197,16 @@ proc _split_args {ln {skip 1}} {
 # print a resume recipe (`btcl -i <flow> <ckpt> plan`), and an unquoted
 # spaced path there is four shell words, not a command.
 proc _shell_word {p} {
-    if {[regexp {\s} $p] && ![string match {*"*} $p]} { return "\"$p\"" }
-    return $p
+    # SINGLE quotes, not double (Codex #783 P2).  Inside double quotes a
+    # POSIX shell still expands `$VAR`, backticks and `$(...)`, so a
+    # checkpoint named `ck $(date).bdb` would print a recipe that RUNS
+    # something when typed — and the earlier cut returned a path containing a
+    # `"` completely unquoted, which is the same failure the quoting exists
+    # to remove.  Inside single quotes nothing is special but `'` itself, and
+    # the standard `'\''` splice covers that.  This is the shell `bin/btcl`
+    # runs under; a path needing no quoting is printed exactly as typed.
+    if {[regexp {^[A-Za-z0-9_./:@%+=,-]+$} $p]} { return $p }
+    return '[string map [list ' {'\''}] $p]'
 }
 
 # A replan replay must not repeat: outputs and windows, session control, the

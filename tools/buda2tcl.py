@@ -148,7 +148,16 @@ def translate_line(line, src_dir, out_root, flow_root):
         return ([f"corpus::finish [info script] {tcl_word(code or '0')}"],
                 None, True)
 
-    return ([" ".join(["buda::" + cmd] + [tcl_word(t) for t in toks[1:]])],
+    # `escape_ws=True` because the tokens are no longer whitespace-split:
+    # a QUOTED path arrives whole, and one carrying a backslash reaches
+    # `tcl_word`'s escaping fallback (braces cannot hold it), where an
+    # unescaped space would split it again — `open_bdb "C:\\Program
+    # Files\\ck.bdb"` became three Tcl arguments (Codex #783 P2).  The
+    # `tcl_word` docstring names this as the case the default is wrong for;
+    # what changed is that the translator is now that case.  No corpus token
+    # carries whitespace, so the generated flows stay byte-identical.
+    return ([" ".join(["buda::" + cmd]
+                      + [tcl_word(t, escape_ws=True) for t in toks[1:]])],
             None, False)
 
 

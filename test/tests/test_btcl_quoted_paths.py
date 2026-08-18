@@ -165,7 +165,7 @@ def test_the_printed_resume_recipe_is_a_command_you_can_type(tmp_path):
                   None)
     assert recipe, out
     cmd = recipe.split("or resume: ", 1)[1].split(") and they hold")[0]
-    assert '"' in cmd, f"a spaced path went unquoted in the advice: {cmd}"
+    assert "'" in cmd, f"a spaced path went unquoted in the advice: {cmd}"
     p = subprocess.run(["bash", "-c",
                         cmd.replace("btcl", str(_ROOT / "bin" / "btcl"), 1)],
                        cwd=tmp_path, input="done\n", text=True,
@@ -180,8 +180,34 @@ def test_an_unspaced_checkpoint_is_untouched(tmp_path):
     (tmp_path / "flow.buda").write_text(_FLOW)
     out = _btcl_i(tmp_path, "flow.buda", "ck.bdb")
     recipe = next(l for l in out.splitlines() if "or resume: btcl -i" in l)
-    assert '"' not in recipe, recipe
+    assert "'" not in recipe and '"' not in recipe, recipe
     assert (tmp_path / "ck.bdb.trace").exists(), out
+
+
+def test_a_shell_metacharacter_in_the_path_is_not_executed(tmp_path):
+    """A recipe is typed into a shell, so quoting it wrong is not cosmetic
+    (Codex #783 P2).  Double quotes still expand `$(...)`, backticks and
+    `$VAR`, so a checkpoint named `ck $(id).bdb` printed a recipe that RUNS
+    something; a path containing a `"` came back unquoted altogether.
+
+    The assertion is the whole point of the claim "a command you can type":
+    the printed recipe is handed to a real shell and must name the file the
+    driver meant, with no substitution performed.
+    """
+    (tmp_path / "flow.buda").write_text(_FLOW)
+    ck = "ck $(id).bdb"                       # legal filename, hostile word
+    out = _btcl_i(tmp_path, "flow.buda", ck)
+    assert (tmp_path / ck).exists(), out      # the engine took it literally
+
+    recipe = next(l for l in out.splitlines() if "or resume: btcl -i" in l)
+    cmd = recipe.split("or resume: ", 1)[1].split(") and they hold")[0]
+    # What a shell makes of the printed words — `printf %s\n` per word, so
+    # substitution would show up as a changed or extra word.
+    words = subprocess.run(
+        ["bash", "-c", f"printf '%s\n' {cmd}"], text=True,
+        capture_output=True, timeout=60).stdout.splitlines()
+    assert words[-2:] == [str(tmp_path / ck), "plan"], (cmd, words)
+    assert "uid=" not in " ".join(words), f"the recipe ran a command: {words}"
 
 
 def test_buda2tcl_keeps_a_quoted_path_one_argument():
@@ -200,3 +226,22 @@ def test_buda2tcl_keeps_a_quoted_path_one_argument():
     line, _ref, _end = buda2tcl.translate_line(
         'import_def_lef "rev 2/a.def" "rev 2/b.lef"', ".", ".", ".")
     assert line == ["buda::import_def_lef {rev 2/a.def} {rev 2/b.lef}"], line
+
+
+def test_buda2tcl_does_not_re_split_a_backslash_path():
+    """The token that cannot be brace-quoted (Codex #783 P2).
+
+    `tcl_word` falls back to character escaping for a token carrying a
+    backslash, and its `escape_ws` was off because the translator's tokens
+    used to be whitespace-split — a premise this PR removed.  So the ordinary
+    Windows spelling `C:\\Program Files\\ck.bdb` came out with a bare space
+    and Tcl read three arguments.  The `tcl_word` docstring names this exact
+    case; what changed is that the translator became it.
+    """
+    sys.path.insert(0, str(_ROOT / "tools"))
+    import buda2tcl
+
+    line, _ref, _end = buda2tcl.translate_line(
+        r'open_bdb "C:\Program Files\ck.bdb" writeback', ".", ".", ".")
+    assert line == [r"buda::open_bdb C:\\Program\ Files\\ck.bdb {writeback}"], \
+        line
