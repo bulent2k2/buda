@@ -21,6 +21,12 @@ log/
 # it is right (recipe §7).  Regenerate it, do not commit it.
 ariane_pdn.def
 
+# …and the spliced DEF derived from it — `demo/ariane/ariane.def` carrying
+# that PDN's SPECIALNETS, which is what `ariane133_ndr_straps.buda` imports
+# (its `require_file` states how to rebuild it).  Generated from a generated
+# file, so the same rule applies twice over.
+ariane_keepout.def
+
 # The build trace `btcl -i` writes beside a live checkpoint (its name is
 # `<ckpt>.trace`, so the `*.bdb` rule above does not reach it).
 *.bdb.trace
