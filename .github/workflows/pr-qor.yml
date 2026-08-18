@@ -46,11 +46,11 @@ jobs:
       MPLBACKEND: Agg
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0            # need real history to find the merge-base
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -72,7 +72,7 @@ jobs:
 
       - name: Restore the merge-base sweep
         id: basecache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: qor-base.json
           # Keyed by the merge-base COMMIT, so it is reusable across pushes to
@@ -110,7 +110,7 @@ jobs:
 
       - name: Save the merge-base sweep
         if: steps.basecache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: qor-base.json
           key: qor-mergebase-${{ steps.base.outputs.sha }}
@@ -161,7 +161,7 @@ jobs:
       - name: Upload results
         # always(): the JSONs matter most when the compare failed.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pr-qor-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
           path: |

@@ -95,9 +95,9 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: "13.0"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python || '3.13' }}
 
@@ -243,7 +243,7 @@ jobs:
           TCL
           tclsh "$RUNNER_TEMP/t.tcl" | tail -2
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           # TWO path patterns, so the archive keeps the `dist/` and `repaired/`
@@ -265,9 +265,9 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python || '3.13' }}
 
@@ -313,7 +313,7 @@ jobs:
             echo 'the Tcl bridge are actually exercised.'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           # ONE path pattern, so the wheel lands at the archive ROOT and the

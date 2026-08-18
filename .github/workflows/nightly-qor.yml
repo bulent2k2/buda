@@ -56,14 +56,14 @@ jobs:
       MPLBACKEND: Agg
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Full history: the snapshot-table step below pushes a branch, and a
           # push from the default depth-1 shallow clone can be rejected with
           # "shallow update not allowed".
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -74,7 +74,7 @@ jobs:
 
       - name: Restore previous baseline
         id: baseline
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: qor-baseline.json
           # Unique key so the save step below always writes a NEW entry;
@@ -193,7 +193,7 @@ jobs:
       - name: Upload results
         # always(): the JSON is most valuable precisely when the compare failed.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: qor-${{ github.sha }}
           path: |
@@ -214,7 +214,7 @@ jobs:
 
       - name: Save baseline
         if: contains(fromJSON('["clean","established","forced"]'), steps.compare.outputs.status)
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: qor-baseline.json
           key: qor-baseline-${{ github.run_id }}
