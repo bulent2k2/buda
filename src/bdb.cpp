@@ -1704,9 +1704,15 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
                     // component bbox above was built from.
                     const bool inside = kx1 >= x1 && ky1 >= y1 &&
                                         kx2 <= x1 + w && ky2 <= y1 + h;
+                    // `net` empty on purpose: a macro's OBS is obstruction
+                    // with no net behind it (see Keepout's declaration).
+                    // Spelled out rather than defaulted so the
+                    // -Wmissing-field-initializers warning keeps guarding the
+                    // sites that DO carry an identity, like the SPECIALNET
+                    // strap below.
                     stats.keepouts.push_back(
                         {o.layer, kx1, ky1, kx2, ky2,
-                         "OBS of " + c.name, inside});
+                         "OBS of " + c.name, inside, /*net=*/{}});
                 }
         }
     };
@@ -1975,9 +1981,11 @@ DefImportStats BDB::import_def_lef(const std::string& def_path,
         if (b.is_placement) { skipped_placement += (int)b.rects.size(); continue; }
         if (b.has_density)  { skipped_partial   += (int)b.rects.size(); continue; }
         for (const auto& r : b.rects)
+            // Same as the OBS case: a LAYER blockage has no net behind it.
             stats.keepouts.push_back({b.layer, dbu_to_lu(r.x1), dbu_to_lu(r.y1),
                                       dbu_to_lu(r.x2), dbu_to_lu(r.y2),
-                                      "BLOCKAGES"});
+                                      "BLOCKAGES", /*inside_block=*/false,
+                                      /*net=*/{}});
     }
     // (both counts are folded into the unmodelled census below.  Macro OBS
     // keepouts are collected in the COMPONENTS pass above — item 5's first
