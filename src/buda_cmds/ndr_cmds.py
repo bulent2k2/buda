@@ -312,10 +312,26 @@ def bundle_ndr_stamp(session, wrapper):
     the same expression that WRITES it.  Two spellings of "what governs this
     bundle" is exactly the drift R4 exists to prevent, and here it would be
     silent: the fingerprint would simply stop noticing a rule change.
+
+    The fingerprint is the one taken when the wrapper's SPEC was built, not
+    a fresh read of the rule dict.  A wrapper prices, plans and routes
+    against the spec it was given at bundling, and `def_ndr_layer` mutates
+    the rule in place without re-specing anything — so a fresh read would
+    stamp a rule that never priced this plan.  That is not cosmetic: an
+    expanded row is re-stamped at EVERY re-persist (escalation, healer
+    checkpoints), so the laundered value would reach the checkpoint and the
+    resume's VOID audit would compare the new rule against itself and
+    accept an underpriced plan in silence (Codex P1 on #788).  Template
+    rows never had the fault only because nothing rewrites them.  A genuine
+    re-bundle rebuilds the specs and refreshes the memo with them.
     """
     spec = wrapper.input.ndr
-    return (ndr_pricing_fp(session, spec.rule_name) or ""
-            if spec.active() else "")
+    if not spec.active():
+        return ""
+    memo = getattr(session, "_ndr_spec_fp", None) or {}
+    if spec.rule_name in memo:
+        return memo[spec.rule_name]
+    return ndr_pricing_fp(session, spec.rule_name) or ""
 
 
 def stamp_bundle_ndr(session, row, wrapper):
@@ -462,7 +478,17 @@ def _spec_of(session, rule_name):
         lr.guard_slots = (max(0, math.ceil(pl["spacing_x"]) - 1)
                           if pl.get("spacing_x") else -1)
         spec.set_layer_rule(lid, lr)
+    # The fingerprint of the rule THIS spec was built from (see
+    # `bundle_ndr_stamp`).  `_spec_of` is the only place a wrapper's spec is
+    # made, so this is the exact moment the pricing basis is fixed.
+    _remember_pricing_fp(session, rule_name)
     return spec
+
+
+def _remember_pricing_fp(session, rule_name):
+    if not hasattr(session, "_ndr_spec_fp"):
+        session._ndr_spec_fp = {}
+    session._ndr_spec_fp[rule_name] = ndr_pricing_fp(session, rule_name) or ""
 
 
 def _parse_value(tok, what, name, session=None):

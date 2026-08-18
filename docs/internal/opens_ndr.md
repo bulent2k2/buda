@@ -401,6 +401,39 @@ Tests: `test_ndr_hier.py::test_an_expanded_instance_records_the_rule_that_govern
 and the two `_void_the_expanded_restore` twins; all three fail against the
 previous code.
 
+**And then the stamp had to be FROZEN** (found in review, Codex P1 on #788).
+An expanded row is re-stamped at every re-persist — the run_nuts escalation,
+each healer checkpoint — while the two template sites are written once and
+never rewritten. So the moment the stamp became a live read of the rule dict,
+a rule edited AFTER planning was laundered into the checkpoint:
+
+```
+def_ndr cls width x1.5 …        # bundling + planning price the plan
+def_ndr_layer cls M6 width x3   # mutates the declared rule IN PLACE
+                                # …any re-persist now stamps the NEW fp
+```
+
+Measured on 08_cross_level: the expanded rows moved to
+`cls|…|c1|P{"6":{…,"wx":3.0}}` while the plan they label was priced at
+`cls|…|c1`, and the resume — comparing the new rule against itself — restored
+**all 4 instances silently**. Templates were unaffected, purely because
+nothing rewrites them.
+
+The fix is not to skip re-stamping (a genuine re-plan must update it) but to
+stamp the fingerprint of the spec the wrapper is actually holding.
+`_spec_of` is the single place a wrapper's spec is built, so it memoizes the
+rule's fingerprint there and `bundle_ndr_stamp` reads that memo. This is
+exactly right for the mechanism: `def_ndr_layer` mutates the rule dict and
+re-specs nothing, so the wrapper keeps pricing, planning and routing against
+the pre-edit spec — the memo says what actually governed. A re-bundle
+rebuilds the specs and refreshes it, so an edit made BEFORE the bundler
+(which does price the plan) still reaches the checkpoint; both directions are
+pinned (`test_a_post_plan_rule_edit_is_not_laundered_into_the_checkpoint`,
+`test_a_rule_edited_before_bundling_is_the_rule_that_is_stamped`).
+
+Worth stating plainly: this is a defect the ORIGINAL fix introduced, not one
+it exposed. Before it, an expanded row carried no stamp at all.
+
 
 ### The cull-risk predictor fix is test-pinned (LANDED)
 

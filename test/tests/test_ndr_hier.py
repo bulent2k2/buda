@@ -275,19 +275,38 @@ def test_hier_flow_completes_clean_under_v21(tmp_path):
 # instance read as "persisted under the default rule" and had its restored
 # plan VOIDED — on a design whose rules never changed.
 
-def _governed_hier_checkpoint(bdb_path, width="x1.5", net="GND"):
+def _governed_hier_checkpoint(bdb_path, width="x1.5", net="GND",
+                              before_bundling=(), after_planning=()):
     """Run 08_cross_level with a rule governing its cell-level class, against
-    a disk BDB, and return the session."""
+    a disk BDB, and return the session.
+
+    `before_bundling` / `after_planning` inject extra commands on either side
+    of the pipeline — the two sides of "did this edit price the plan?".  An
+    `after_planning` edit is followed by the escalation/healer re-persist, so
+    the checkpoint sees whatever that persist decides to write.
+    """
     s = _session()
     decls = [f"def_ndr cls {width} shield bus net {net} credit".replace(
                  " cls ", " cls width "),
              "set_ndr b_lohi_ cls"]
     for line in _flow_lines("08_cross_level.buda", bdb_path=bdb_path):
         if line.startswith("run_hier_bundler"):
-            for c in decls:
+            for c in list(decls) + list(before_bundling):
                 _run(s, c)
         _run(s, line)
+    for c in after_planning:
+        _run(s, c)
+    if after_planning:
+        s._checkpoint_routing()
     return s
+
+
+def _governed_stamps(s):
+    """The expanded rows' governing-rule stamps, read through the session's
+    own BDB handle — an outside reader can see a stale snapshot while the
+    writing session still holds the file open."""
+    return sorted({b.ndr_rule for b in s.bdb.all_bundles()
+                   if b.is_expanded and b.ndr_rule})
 
 
 def _resume_expanded(bdb_path, pre=()):
@@ -352,3 +371,44 @@ def test_a_repriced_rule_still_voids_the_expanded_restore(tmp_path):
     # And it names the rule it was PERSISTED under, not "default" — the
     # message was the visible half of this defect.
     assert "persisted under rule 'cls'" in out, out
+
+
+# ── the stamp must describe the rule that PRICED the plan ─────────────────
+#
+# An expanded row is re-stamped at every re-persist (escalation, healer
+# checkpoints), and `def_ndr_layer` mutates a declared rule in place.  Read
+# fresh from the rule dict, the stamp would be laundered to the post-edit
+# rule while the plan it labels was priced by the pre-edit one — and the
+# resume's VOID audit, comparing the new rule against itself, would accept
+# it in silence.  Template rows never had the fault only because nothing
+# rewrites them (Codex P1 on #788).
+
+def test_a_post_plan_rule_edit_is_not_laundered_into_the_checkpoint(tmp_path):
+    bdb_path = tmp_path / "gov.bdb"
+    s = _governed_hier_checkpoint(
+        bdb_path, after_planning=["def_ndr_layer cls M6 width x3"])
+    stamps = _governed_stamps(s)
+    assert stamps, "vehicle produced no governed expanded rows"
+    assert not any("|P" in st for st in stamps), (
+        "the post-plan edit was stamped onto a plan it never priced: "
+        f"{stamps}")
+    del s
+    _s2, out = _resume_expanded(bdb_path)
+    assert "VOIDED" in out, out
+
+
+def test_a_rule_edited_before_bundling_is_the_rule_that_is_stamped(tmp_path):
+    """The other direction: freezing the stamp must not freeze it too early.
+
+    An edit made before the bundler builds the specs DID price the plan, so
+    the checkpoint has to carry it — otherwise the resume would void a design
+    nothing is wrong with.
+    """
+    bdb_path = tmp_path / "gov.bdb"
+    s = _governed_hier_checkpoint(
+        bdb_path, before_bundling=["def_ndr_layer cls M6 width x3"])
+    stamps = _governed_stamps(s)
+    assert stamps and all("|P" in st for st in stamps), stamps
+    del s
+    _s2, out = _resume_expanded(bdb_path)
+    assert "VOIDED" not in out, out
