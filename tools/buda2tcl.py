@@ -62,7 +62,8 @@ for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build"), _HERE):
 # The `.buda` line rules, not a copy of them (src/buda_script.py — standalone,
 # so reading a script costs no compiled extension).
 from buda_script import strip_inline_comment as _strip_inline_comment  # noqa: E402
-from buda_script import sole_path_arg                         # noqa: E402
+from buda_script import (sole_path_arg,                       # noqa: E402
+                         split_quoted_args)
 # Tcl quoting, shared with every test that writes a front-end preamble.
 from tcl_quote import tcl_word, tcl_path, posix_sep           # noqa: E402,F401
 
@@ -98,7 +99,13 @@ def translate_line(line, src_dir, out_root, flow_root):
         # a translation that dropped them would be harder to read against the
         # original, which is the one thing a generated file must stay easy to do.
         return ([raw if raw.startswith("#") or not raw.strip() else ""], None, False)
-    toks = body.split()
+    # Quote-aware, like the engine: a spaced path is ONE token
+    # (`buda_script.split_quoted_args`).  A plain split turned
+    # `open_bdb "my designs/ck.bdb" writeback` into THREE arguments carrying
+    # stray quote characters, so the generated Tcl opened a file nobody has.
+    # Identical to `.split()` for every line without a quote, which is every
+    # checked-in flow — so the corpus regenerates byte-identical.
+    toks = split_quoted_args(body, skip=0)
     cmd = toks[0].lower()
 
     if cmd == "source" and len(toks) >= 2:
@@ -141,7 +148,16 @@ def translate_line(line, src_dir, out_root, flow_root):
         return ([f"corpus::finish [info script] {tcl_word(code or '0')}"],
                 None, True)
 
-    return ([" ".join(["buda::" + cmd] + [tcl_word(t) for t in toks[1:]])],
+    # `escape_ws=True` because the tokens are no longer whitespace-split:
+    # a QUOTED path arrives whole, and one carrying a backslash reaches
+    # `tcl_word`'s escaping fallback (braces cannot hold it), where an
+    # unescaped space would split it again — `open_bdb "C:\\Program
+    # Files\\ck.bdb"` became three Tcl arguments (Codex #783 P2).  The
+    # `tcl_word` docstring names this as the case the default is wrong for;
+    # what changed is that the translator is now that case.  No corpus token
+    # carries whitespace, so the generated flows stay byte-identical.
+    return ([" ".join(["buda::" + cmd]
+                      + [tcl_word(t, escape_ws=True) for t in toks[1:]])],
             None, False)
 
 
