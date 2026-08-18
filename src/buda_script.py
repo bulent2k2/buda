@@ -126,8 +126,17 @@ def sole_path_arg(cmd_line, skip=1):
 
     Rest-of-line rather than quoting, because a command taking exactly one
     path has no ambiguity to resolve: everything after the verb IS the path,
-    which is what `include` means in most languages.  Quotes are accepted but
-    never needed here.
+    which is what `include` means in most languages.  A SPACE therefore needs
+    no quotes here.
+
+    Two things still do, because the comment rule and the trim run first
+    (Codex #784 P2 — "never needed" was an overclaim):
+
+      * a `#` at a token boundary, which is a comment unquoted:
+        `source my #2/flow.buda` resolves `my`, `source "my #2/flow.buda"`
+        the whole path;
+      * leading or trailing whitespace IN the filename, which `.strip()`
+        removes: `source " x.buda"` keeps the space.
 
     (This paragraph used to argue that `.buda` is whitespace-split with no
     quoting anywhere and that the Tcl bridge never re-quotes.  Both were true
