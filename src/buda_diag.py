@@ -122,6 +122,9 @@ MESSAGES = {
                            "declared."),
     "BUDA-1605": (INFO,   "Technology data was skipped because the script "
                           "already declared it."),
+    "BUDA-1616": (WARNING, "The DEF's TRACKS pitch and the technology LEF's "
+                           "PITCH disagree for a layer; the DEF's grid is "
+                           "used."),
     # ── advisory writer ────────────────────────────────────────────────────
     "BUDA-1701": (WARNING, "Nothing to emit: the plan has no placed bus "
                            "segments."),

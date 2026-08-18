@@ -727,15 +727,22 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
             return "script-declared pattern wins"
         if not (l.has_pitch and l.has_width):
             return "no PITCH/WIDTH"
-        if l.pitch <= l.width:
-            return (f"PITCH {l.pitch:g} <= WIDTH {l.width:g} — no room for "
+        # THE AXIS MATTERS.  `PITCH x y` is legal LEF and the two values are
+        # not interchangeable: a HORIZONTAL layer's tracks step along y, a
+        # VERTICAL layer's along x.  Reading the wrong one builds the pattern
+        # on the wrong spacing entirely.  A single-value PITCH applies to
+        # both, so `pitch_for` is identical there and every existing file is
+        # unaffected.
+        pitch = l.pitch_for(is_h)
+        if pitch <= l.width:
+            return (f"PITCH {pitch:g} <= WIDTH {l.width:g} — no room for "
                     f"spacing")
-        if l.has_spacing and l.width + l.spacing > l.pitch + 1e-12:
+        if l.has_spacing and l.width + l.spacing > pitch + 1e-12:
             print(f"[LEF] layer {l.name}: WIDTH {l.width:g} + SPACING "
-                  f"{l.spacing:g} exceeds PITCH {l.pitch:g} — the file is "
+                  f"{l.spacing:g} exceeds PITCH {pitch:g} — the file is "
                   f"inconsistent; using PITCH")
         slot = buda.TrackSlot(type="SIGNAL", label="",
-                              width=l.width, space_after=l.pitch - l.width)
+                              width=l.width, space_after=pitch - l.width)
         pat = buda.TrackPattern(origin=l.offset if l.has_offset else 0.0,
                                 slots=[slot])
         if session.routing_grid is None:
@@ -749,6 +756,15 @@ def cmd_import_lef_tech(session, cmd, args, cmd_line):
         # convert, since `set_import_scale dbu` resolves from the DEF's own
         # UNITS statement.
         session._lef_track_width[lid] = l.width
+        # The file's own PITCH, kept for the SAME reason and converted at the
+        # same place: it is what the DEF's TRACKS step is compared against
+        # (BUDA-1616).  The two describe one technology, so a disagreement
+        # means one of the inputs is wrong about this design — and the
+        # composition is otherwise silent, since the DEF supplies positions
+        # and the LEF only width.  Axis-correct (`pitch_for`), so an
+        # anisotropic `PITCH x y` is compared against the axis this layer's
+        # tracks actually step in.
+        session._lef_track_pitch[lid] = pitch
         apply_pattern_layer_facts(session.layers, lid, pat)
         return None
 

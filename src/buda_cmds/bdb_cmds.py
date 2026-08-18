@@ -307,7 +307,11 @@ def _apply_def_tracks(session, st):
     Precedence matches `import_lef_tech`: a script-declared pattern wins."""
     if not st.tracks:
         return
-    installed, skipped = [], []
+    installed, skipped, pitch_diff = [], [], []
+    # One BUDA-1616 per LAYER, not per TRACKS statement: a DEF names a layer in
+    # both axes and may split one axis across several statements, so the same
+    # disagreement would otherwise be reported repeatedly.
+    _pitch_reported = set()
     for tr in st.tracks:
         # `TRACKS X` steps in x, so its tracks carry VERTICAL wires; `TRACKS Y`
         # carries horizontal ones.
@@ -362,6 +366,38 @@ def _apply_def_tracks(session, st):
             lu_per_um = session.bdb.import_scale() if session.bdb else 1.0
             width = session._lef_track_width.get(lid)
             width = tr.step if width is None else width * lu_per_um
+            # THE TWO FILES CAN DISAGREE, and only here are both known.  The
+            # DEF says where tracks ARE and the LEF how wide a wire is, so the
+            # grid is composed from both — but the LEF also states a PITCH,
+            # and nothing was comparing it with the DEF's step.  A design whose
+            # two inputs describe different grids is one where somebody will
+            # later quote a density, a track count or an NDR width that is off
+            # by the ratio, with nothing having said a word.  Measured on
+            # `demo/ariane/ariane.def` + NanGate45: seven layers agree exactly
+            # and metal7/8/10 are 5% apart (0.840 vs 0.800, 1.680 vs 1.600).
+            #
+            # REPORT, never correct: `TRACKS` is an enumeration of the grid the
+            # design was actually built on, so it wins by right, and a LEF
+            # PITCH is a nominal the design is free to depart from.
+            lef_pitch = session._lef_track_pitch.get(lid)
+            if lef_pitch and tr.step > 0 and lid not in _pitch_reported:
+                want = lef_pitch * lu_per_um
+                if abs(want - tr.step) > 1e-6 * max(abs(want), abs(tr.step)):
+                    _pitch_reported.add(lid)
+                    # Its OWN channel, not `skipped`: nothing is skipped here.
+                    # The layer's tracks are installed from the DEF exactly as
+                    # they would be without the LEF, and saying "skipped" would
+                    # be the false-statement failure this codebase keeps
+                    # finding — a message that misdescribes what happened is
+                    # worse than none, because it sends the reader looking for
+                    # a missing grid that is present.
+                    pitch_diff.append(
+                        f"{lname} (DEF TRACKS pitch {tr.step:g} vs LEF PITCH "
+                        f"{want:g} layout units, "
+                        f"{100.0 * (tr.step - want) / want:+.1f}%)")
+            # A LEF width WIDER than the design's own track pitch is not a
+            # disagreement to report twice; it is unusable, and the clamp
+            # keeps the slot inside its track.
             width = min(width, tr.step)
             # DEF's `start` is the CENTRE of the first track; TrackPattern's
             # origin is the START of the first slot, and the generator returns
@@ -384,6 +420,13 @@ def _apply_def_tracks(session, st):
         print(f"[DEF] tracks installed (bounded): {', '.join(installed)}")
     for msg_id, s in skipped:
         buda_diag.emit(msg_id, f"[DEF] tracks skipped for {s}")
+    for s in pitch_diff:
+        # The DEF's grid IS the one installed — this says the two inputs
+        # disagree about the technology, not that anything was dropped.
+        buda_diag.emit("BUDA-1616",
+                       f"[DEF] track pitch disagrees with the tech LEF: {s} "
+                       f"— using the DEF's grid, which is the one the design "
+                       f"was built on")
 
 
 def _apply_def_keepouts(session, st):

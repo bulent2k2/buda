@@ -218,6 +218,115 @@ def test_def_tracks_install_a_bounded_pattern(tmp_path):
     assert len(pat.tracks_in_range(100.0, 200.0)) == 0   # far outside: none
 
 
+def test_agreeing_def_and_lef_pitches_say_nothing(tmp_path):
+    """The fixture's LEF PITCH 0.4 and its DEF STEP 400 @1000 DBU/um are the
+    same grid, so the composition is silent.  Pinned first because a check
+    that fires when the inputs AGREE is worse than no check."""
+    _, out = _run(tmp_path)
+    assert "BUDA-1616" not in out, out
+
+
+def test_a_def_and_lef_that_disagree_about_track_pitch_are_reported(tmp_path):
+    """The two files describe ONE technology, and only where they meet is the
+    disagreement visible: the DEF says where tracks ARE, the LEF how wide a
+    wire is, so the grid is composed from both and nothing was comparing the
+    LEF's own PITCH with the DEF's step.
+
+    Real instance: `demo/ariane/ariane.def` against the NanGate45 tech LEF —
+    seven layers agree exactly and metal7/8/10 are 5% apart (0.840 vs 0.800,
+    1.680 vs 1.600).  Silent before this, and it is the sort of gap that
+    surfaces later as a density or track count quietly off by the ratio.
+    """
+    lef = _LEF.replace("""LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.4 ;""", """LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.5 ;""")
+    _, out = _run(tmp_path, lef=lef)
+    assert "BUDA-1616" in out, out
+    assert "metal2" in out
+    assert "-20.0%" in out, out        # 0.4 against 0.5
+    # It reports; it does not correct.  The DEF's grid is the one the design
+    # was built on, so it stays installed.
+    assert "tracks installed (bounded)" in out, out
+
+
+def test_a_disagreeing_pitch_still_installs_the_defs_grid(tmp_path):
+    """The half that matters most: this is a REPORT, and the routed result is
+    unchanged by it."""
+    lef = _LEF.replace("PITCH 0.4 ;\n  WIDTH 0.2 ;\nEND metal2",
+                       "PITCH 0.5 ;\n  WIDTH 0.2 ;\nEND metal2")
+    s, _ = _run(tmp_path, lef=lef)
+    lid = s._layer_name_map["metal2"]
+    pat = s.routing_grid.get_layer_grid(lid).global_pattern()
+    # The DEF's 400 DBU step, not the LEF's 0.5 um.
+    assert pat.unit_pitch() == pytest.approx(0.4)
+
+
+def test_an_anisotropic_lef_pitch_is_compared_on_the_layers_own_axis(tmp_path):
+    """`PITCH x y` is legal LEF and the two are not interchangeable: a
+    HORIZONTAL layer's tracks step along Y, so Y is what the DEF's `TRACKS Y`
+    must be compared against.  The reader kept only the first number, so the
+    comparison would have been made against the X pitch — inventing a
+    disagreement here, and hiding a real one in the mirror case (Codex #781).
+
+    metal2 is HORIZONTAL, the DEF steps it by 400 @1000 DBU/um = 0.4, and the
+    LEF below says x=0.9 (irrelevant) and y=0.4 (the match).  Silence is the
+    correct answer.
+    """
+    lef = _LEF.replace("""LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.4 ;""", """LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.9 0.4 ;""")
+    _, out = _run(tmp_path, lef=lef)
+    assert "BUDA-1616" not in out, out
+
+
+def test_an_anisotropic_lef_pitch_still_catches_a_real_disagreement(tmp_path):
+    """The other half: reading the RIGHT axis must not mean reading none.
+    Same shape, but the Y value is the one that differs."""
+    lef = _LEF.replace("""LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.4 ;""", """LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.4 0.5 ;""")
+    _, out = _run(tmp_path, lef=lef)
+    assert "BUDA-1616" in out, out
+    assert "-20.0%" in out, out          # DEF 0.4 against the LEF's y 0.5
+
+
+def test_an_anisotropic_pitch_builds_the_pattern_on_the_right_axis(tmp_path):
+    """Not only the check: the synthesized pattern used `pitch` too, so an
+    anisotropic layer got its spacing from the wrong axis.  metal2 is
+    horizontal, so its slot spacing comes from y=0.4, not x=0.9."""
+    lef = _LEF.replace("""LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.4 ;""", """LAYER metal2
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.9 0.4 ;""")
+    s, _ = _run(tmp_path, lef=lef, deff=_DEF.replace(
+        "TRACKS Y 500 DO 10 STEP 400 LAYER metal2 ;\n", ""))
+    lid = s._layer_name_map["metal2"]
+    pat = s.routing_grid.get_layer_grid(lid).global_pattern()
+    assert pat.unit_pitch() == pytest.approx(0.4)
+
+
+def test_no_tech_lef_means_no_pitch_to_disagree_with(tmp_path):
+    """With no LEF read there is no second opinion, so the check cannot fire.
+    A DEF alone is not a disagreement."""
+    _, out = _run(tmp_path, tech=False)
+    assert "BUDA-1616" not in out, out
+
+
 def test_hard_layer_blockages_become_keepouts(tmp_path):
     """The keepout machinery already existed; its absence here was the single
     most surprising omission for a routing tool — a router that cannot see a
