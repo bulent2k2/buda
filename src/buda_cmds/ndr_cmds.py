@@ -304,13 +304,25 @@ def ndr_pricing_fp(session, rule_name):
             f"|p{r['shield_per_n']}|n{r['shield_net']}|L{lay}{cr}{ab}{pl}{mq}")
 
 
+def bundle_ndr_stamp(session, wrapper):
+    """The wrapper's governing rule PRICING FINGERPRINT ("" = default rule).
+
+    Split out from `stamp_bundle_ndr` so the persist-time fingerprint that
+    decides whether an expanded row needs REWRITING derives the stamp from
+    the same expression that WRITES it.  Two spellings of "what governs this
+    bundle" is exactly the drift R4 exists to prevent, and here it would be
+    silent: the fingerprint would simply stop noticing a rule change.
+    """
+    spec = wrapper.input.ndr
+    return (ndr_pricing_fp(session, spec.rule_name) or ""
+            if spec.active() else "")
+
+
 def stamp_bundle_ndr(session, row, wrapper):
     """Stamp the wrapper's governing rule PRICING FINGERPRINT onto a
     BundleRow about to be persisted (v21 provenance —
     audit_restored_ndr's comparison basis; "" = default rule)."""
-    spec = wrapper.input.ndr
-    row.ndr_rule = (ndr_pricing_fp(session, spec.rule_name) or ""
-                    if spec.active() else "")
+    row.ndr_rule = bundle_ndr_stamp(session, wrapper)
 
 
 def audit_restored_ndr(session, bid_to_stamp):

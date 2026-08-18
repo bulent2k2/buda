@@ -354,6 +354,54 @@ arithmetic, worth doing only for a design that demonstrably needs it.
 
 ## Smaller residuals
 
+### The governing rule on EXPANDED per-instance rows (LANDED 2026-08-18)
+
+Found writing up `specialnets_scope.md` §5(b), and it was filed there as an
+observability gap. Measuring it showed it was more than that.
+
+`bundle.ndr_rule` — the pricing fingerprint `load_pipeline` audits a restored
+plan against — was stamped at the two NON-expanded persist sites
+(`_persist_bundles`, `_persist_normal_bundle`) and **not** in
+`_add_expanded_bundle`. So every per-instance row of a governed hier template
+persisted with an empty stamp, i.e. as if it had been planned under the
+default rule.
+
+The audit compares that stamp against a FRESH resolution of the bundle's
+nets. An empty stamp against a live rule is a mismatch, so **a governed hier
+design restored with `load_pipeline expanded` had every governed instance's
+plan VOIDED** — with a message asserting the opposite of what happened:
+
+```
+WARNING: [NDR] bundle 8 (loc_u1_0): persisted under rule 'default' [default]
+but now resolves to 'loc15' [loc15|w2|g1|s1|p0|nGND|L|c1] — demand was priced
+under the old rule; re-run the planner — restored plan VOIDED
+```
+
+Measured on `flow/ndr_shield_hier` against a file-backed BDB: 4 of 4 governed
+instances voided, and the resume recovered **3 planned selections / 5 placed
+bus segments** where the checkpoint held 7 / 9. Nothing had changed between
+the two sessions.
+
+**Fixed** by stamping in `_add_expanded_bundle` exactly as the other two sites
+do. Two things beyond the one-liner:
+
+- The stamp expression is now one function (`bundle_ndr_stamp`), because
+  `_planner_persist_fp` — which decides whether a selective re-persist may
+  SKIP an expanded row — has to include it. A second spelling of "what
+  governs this bundle" would drift silently in the direction that matters:
+  the fingerprint would simply stop noticing a rule change.
+- The guard it was hiding behind is pinned in BOTH directions. A rule that
+  genuinely reprices still voids, and the message now names the rule the plan
+  was persisted under rather than "default". Note the audit is a PRICING
+  fingerprint: `x1.5` → `x2` quantizes to the same 2 slots + 1 guard on the
+  vehicle's grid and correctly does **not** void, which is why the negative
+  test declares `x3` with a different shield net.
+
+Tests: `test_ndr_hier.py::test_an_expanded_instance_records_the_rule_that_governed_it`
+and the two `_void_the_expanded_restore` twins; all three fail against the
+previous code.
+
+
 ### The cull-risk predictor fix is test-pinned (LANDED)
 
 `_escalate_dead_low_segments(cull_risk=True)` excludes shield rows from its

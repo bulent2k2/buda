@@ -326,6 +326,15 @@ class HierMixin:
         row.rcv_spec_depth = hb.rcv_spec_depth
         row.drv_spec_path = hb.drv_spec_path
         row.rcv_spec_paths = json.dumps(list(hb.rcv_spec_paths))
+        # v21: the governing NDR rule, exactly as the two NON-expanded
+        # persist sites stamp it.  Omitting it here did not merely lose
+        # provenance: `load_pipeline expanded` compares this stamp against a
+        # FRESH resolution, so an unstamped instance of a governed template
+        # read as "persisted under the default rule" and had its restored
+        # plan VOIDED — on a design whose rules never changed.  Measured on
+        # flow/ndr_shield_hier: all 4 `loc15` instances voided on resume.
+        from buda_cmds.ndr_cmds import stamp_bundle_ndr
+        stamp_bundle_ndr(self, row, w)
         self.bdb.add_bundle(row)
         for nm in hb.get_net_names():
             self.bdb.add_bundle_net(bid, nm)

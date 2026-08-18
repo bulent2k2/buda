@@ -318,10 +318,22 @@ vehicle initially dropped the m4-m7 flow's `negotiate_congestion` calls, and
 NDR rule collapsed the design" — a control with the rule removed placed the
 same 99, which is what a control is for.
 
-### Residual
+### Residual — RESOLVED 2026-08-18, and it was not what this said
 
-`bundle.ndr_rule` is stamped on PRE-EXPANSION template rows, while the rows
-that route are the expanded per-instance ones, which carry no stamp. So there
-is currently no persisted way to ask "was this ROUTED bundle governed?" —
-which made the working result read as a failure twice during this work. Worth
-closing; it is an observability gap, not a correctness one.
+`bundle.ndr_rule` was stamped on PRE-EXPANSION template rows, while the rows
+that route are the expanded per-instance ones, which carried no stamp. So
+there was no persisted way to ask "was this ROUTED bundle governed?" — which
+made the working result read as a failure twice during this work.
+
+**Called an observability gap here; measuring it showed a correctness one.**
+The stamp is what `load_pipeline` audits a restored plan against, so an
+unstamped instance read as "planned under the default rule" and had its plan
+**VOIDED on restore** — on a design whose rules never changed. On
+`flow/ndr_shield_hier`, all 4 governed instances voided and the resume
+recovered 3 planned selections / 5 placed bus segments against a checkpoint
+holding 7 / 9.
+
+Filed and fixed in [opens_ndr.md](opens_ndr.md) → "The governing rule on
+EXPANDED per-instance rows", where the NDR opens live. The lesson worth
+keeping is the one this paragraph got wrong: "nothing reads it" was an
+assumption about a field, and something did.

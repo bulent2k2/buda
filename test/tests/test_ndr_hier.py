@@ -263,3 +263,92 @@ def test_hier_flow_completes_clean_under_v21(tmp_path):
         _run(s, line)
     assert s.detailed_result is not None
     assert s.bdb.schema_version() == buda.BDB.SCHEMA_VERSION
+
+
+# ── the governing rule on EXPANDED per-instance rows ───────────────────────
+#
+# `bundle.ndr_rule` is the comparison basis `load_pipeline` audits against.
+# It was stamped on the two NON-expanded persist sites but not on
+# `_add_expanded_bundle`, so every per-instance row of a governed template
+# persisted as ungoverned.  That is not merely lost provenance: the expanded
+# view compares the stamp against a FRESH resolution, so an unstamped
+# instance read as "persisted under the default rule" and had its restored
+# plan VOIDED — on a design whose rules never changed.
+
+def _governed_hier_checkpoint(bdb_path, width="x1.5", net="GND"):
+    """Run 08_cross_level with a rule governing its cell-level class, against
+    a disk BDB, and return the session."""
+    s = _session()
+    decls = [f"def_ndr cls {width} shield bus net {net} credit".replace(
+                 " cls ", " cls width "),
+             "set_ndr b_lohi_ cls"]
+    for line in _flow_lines("08_cross_level.buda", bdb_path=bdb_path):
+        if line.startswith("run_hier_bundler"):
+            for c in decls:
+                _run(s, c)
+        _run(s, line)
+    return s
+
+
+def _resume_expanded(bdb_path, pre=()):
+    """Re-open the checkpoint and restore the POST-expansion view, replaying
+    only the setup a resume needs (the hier construction is in the BDB)."""
+    s = _session()
+    out = []
+    for c in pre:
+        out.append(_run(s, c))
+    for line in _flow_lines("08_cross_level.buda", bdb_path=bdb_path):
+        if line.startswith(("open_bdb", "def_layer", "def_track_pattern",
+                            "corner_margin", "set_min_stub", "source",
+                            "add_blocks_from_bdb")):
+            out.append(_run(s, line))
+    out.append(_run(s, "load_pipeline expanded"))
+    return s, "".join(out)
+
+
+def test_an_expanded_instance_records_the_rule_that_governed_it(tmp_path):
+    bdb_path = tmp_path / "gov.bdb"
+    s = _governed_hier_checkpoint(bdb_path)
+    expanded = [b for b in s.bdb.all_bundles() if b.is_expanded]
+    assert expanded, "vehicle produced no expanded per-instance rows"
+    governed = [b for b in expanded if b.ndr_rule]
+    assert governed, ("no expanded row carries a governing rule — the stamp "
+                      "is missing from the expansion persist path")
+    # It is the TEMPLATE's rule, verbatim: an instance is the template's
+    # routing copied, so a differing stamp would mean they were priced apart.
+    assert {b.ndr_rule for b in governed} == {
+        b.ndr_rule for b in s.bdb.all_bundles()
+        if not b.is_expanded and b.ndr_rule and "cls" in b.ndr_rule}
+
+
+def test_an_unchanged_rule_does_not_void_the_expanded_restore(tmp_path):
+    """The false alarm.  Nothing about the design changed between the two
+    sessions, so every restored instance plan must survive."""
+    bdb_path = tmp_path / "gov.bdb"
+    _governed_hier_checkpoint(bdb_path)
+    _s2, out = _resume_expanded(bdb_path)
+    assert "VOIDED" not in out, out
+    assert "persisted under rule 'default'" not in out, out
+
+
+def test_a_repriced_rule_still_voids_the_expanded_restore(tmp_path):
+    """…and the guard it was hiding behind still fires.
+
+    Fixing a false alarm must not disarm the check: a rule whose DEMAND
+    changed since the checkpoint has to void, or a plan priced for one width
+    is silently reused for another.  Declared before `open_bdb` so the
+    session-typed rule wins over the restored one.
+
+    The change must move the PRICING fingerprint, not merely the declared
+    text — x1.5 and x2 both quantize to 2 slots + 1 guard on this grid, so
+    swapping them is correctly a no-op to this audit.
+    """
+    bdb_path = tmp_path / "gov.bdb"
+    _governed_hier_checkpoint(bdb_path)
+    _s2, out = _resume_expanded(bdb_path, pre=[
+        "def_ndr cls width x3 spacing x3 shield bus net VSS credit",
+        "set_ndr b_lohi_ cls"])
+    assert "VOIDED" in out, out
+    # And it names the rule it was PERSISTED under, not "default" — the
+    # message was the visible half of this defect.
+    assert "persisted under rule 'cls'" in out, out
