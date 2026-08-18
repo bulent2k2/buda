@@ -499,6 +499,34 @@ def test_an_exit_ending_flow_without_a_durable_checkpoint_warns_loudly(tmp_path)
     assert "run a build session first" not in r.stderr
 
 
+def test_a_durable_checkpoint_whose_trace_cannot_be_written_does_not_promise_resume(tmp_path):
+    # The resume claim is gated on the trace ACTUALLY being on disk, not just
+    # on the checkpoint being durable (Codex #789 P2).  Block the trace path
+    # with a directory of its name so the write fails, and check that neither
+    # the exit path nor the prompt path advertises a `<stage>` resume that
+    # would immediately refuse.
+    exitflow = tmp_path / "tfexit.buda"
+    exitflow.write_text("open_bdb tf.bdb\n" + _FLAT_FLOW + "exit\n")
+    (tmp_path / "tf.bdb.trace").mkdir()                 # block the write
+
+    r = _run(["tclsh", _DRIVER, exitflow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "could not write the resume trace" in r.stdout
+    assert "resume works" not in r.stdout              # the gated claim
+    assert "unavailable until that path can be" in r.stdout
+
+    # The prompt path (no `exit`) is gated the same way: pins still persist
+    # across a rerun, but no `<stage>` resume is offered.
+    promptflow = tmp_path / "pfprompt.buda"
+    promptflow.write_text("open_bdb pf.bdb\n" + _FLAT_FLOW)
+    (tmp_path / "pf.bdb.trace").mkdir()
+    r = _run(["tclsh", _DRIVER, promptflow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "could not write the resume trace" in r.stdout
+    assert "or resume:" not in r.stdout
+    assert "pins persist across a rerun" in r.stdout
+
+
 def test_a_missing_checkpoint_still_says_run_a_build_first(tmp_path):
     # The other half of the split: when the BDB itself is absent (not just its
     # trace), "run a build session first" is exactly right and must stay.

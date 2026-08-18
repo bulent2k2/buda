@@ -398,6 +398,12 @@ proc _inspect_replan {} {
           resume at `plan` to re-plan or re-heal"
 }
 
+# Default TRUE: a RESUME session got here because its trace already exists, so
+# the shared checkpoint-reporting block below may offer a further resume.  The
+# BUILD path resets this to 0 and flips it back only when it writes the trace,
+# so a build whose trace write failed does not over-promise (Codex #789 P2).
+set trace_ok 1
+
 # ══════════════════════════════════════════════════════════════════════════
 if {$stage eq "build"} {
     # ── BUILD: arm the recorder, run the flow verbatim ────────────────────
@@ -476,6 +482,7 @@ if {$stage eq "build"} {
     # the checkpoint is the live BDB (a dead one resumes nothing).  Runs on
     # BOTH the exit and prompt paths, so an `exit`-ending flow with a durable
     # checkpoint is resumable.
+    set trace_ok 0
     if {$ckpt ne "" && $ckpt_live} {
         set tf ${ckpt}.trace
         if {[catch {
@@ -489,6 +496,7 @@ if {$stage eq "build"} {
             puts "$tag: NOTE -- could not write the resume trace $tf ($err);\
                   `$tag <ckpt> plan` will need a build session that can"
         } else {
+            set trace_ok 1
             puts "$tag: resume trace $tf -- next session can skip the\
                   rebuild: btcl -i [_shell_word $tag] [_shell_word $ckpt] plan"
         }
@@ -500,9 +508,17 @@ if {$stage eq "build"} {
     # routing this session did was DISCARDED, and the user must hear that now
     # — not at a refused resume, a long route later.
     if {[catch {buda::query bundles} nb]} {
-        if {$ckpt ne "" && $ckpt_live} {
+        if {$ckpt ne "" && $ckpt_live && $trace_ok} {
             puts "$tag: the flow ended in `exit`; the checkpoint above holds\
                   the routed result, so a `<stage>` resume works"
+        } elseif {$ckpt ne "" && $ckpt_live} {
+            # Durable checkpoint, but the trace write failed (see the NOTE
+            # above) — a `<stage>` resume reads that trace, so promising it
+            # here would advertise a command that immediately refuses.
+            puts "$tag: the flow ended in `exit`; the checkpoint holds the\
+                  routed result, but the resume trace could not be written\
+                  (above), so a `<stage>` resume is unavailable until that\
+                  path can be -- free it and re-run, or drive the flow live"
         } else {
             set why [expr {$ckpt_why ne "" ? $ckpt_why : "no file-backed\
                   open_bdb"}]
@@ -804,8 +820,21 @@ if {$ckpt ne "" && !$ckpt_live} {
           prompt pins die with this session (`save` snapshots it)"
     set snap_base [file rootname $tag].bdb
 } elseif {$ckpt ne ""} {
-    puts "$tag: checkpoint $ckpt -- pins persist; rerun the flow (or resume:\
-          btcl -i [_shell_word $tag] [_shell_word $ckpt] plan) and they hold"
+    # The `(or resume: ...)` offer is gated on the trace actually being on
+    # disk — the same trace_ok the exit branch checks (Codex #789 P2).  A
+    # durable checkpoint whose trace write failed keeps its pins across a
+    # RERUN, but a `<stage>` resume reads the trace, so offering it would name
+    # a command that refuses.
+    if {$trace_ok} {
+        puts "$tag: checkpoint $ckpt -- pins persist; rerun the flow (or\
+              resume: btcl -i [_shell_word $tag] [_shell_word $ckpt] plan) and\
+              they hold"
+    } else {
+        puts "$tag: checkpoint $ckpt -- pins persist across a rerun of the\
+              flow; the resume trace could not be written (above), so\
+              `btcl -i <flow> <ckpt> <stage>` is unavailable until that path\
+              can be"
+    }
     if {$armed ne "" && $ckpt ne $armed} {
         # The flow opened its OWN BDB after the armed one, so the armed file
         # holds only what ran before that open — the flow's checkpoint is
