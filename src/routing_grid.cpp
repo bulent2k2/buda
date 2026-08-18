@@ -180,7 +180,8 @@ RoutingGrid::signal_tracks_in(double x, double lo, double hi) const {
     for (auto& p : all) {
         if (p.second.type == "SIGNAL") {
             bool blocked = false;
-            for (const auto& koz : keepouts_) {
+            for (const auto& gk : keepouts_) {
+            const Rect& koz = gk.bbox;
                 // p.first is the fixed coordinate of the track (Y if horizontal, X if vertical).
                 // x is the coordinate along the track span (X if horizontal, Y if vertical).
                 double px = is_horizontal_ ? x : p.first;
@@ -246,7 +247,8 @@ void RoutingGrid::for_each_signal_track_in_span(
                 if (hi_closed ? (centre > s_hi) : (centre >= s_hi)) continue;
                 if (slot.type != "SIGNAL") continue;
                 bool blocked = false;
-                for (const auto& koz : keepouts_) {
+                for (const auto& gk : keepouts_) {
+            const Rect& koz = gk.bbox;
                     const double k_p1 = is_horizontal_ ? koz.y1 : koz.x1;
                     const double k_p2 = is_horizontal_ ? koz.y2 : koz.x2;
                     const double k_a1 = is_horizontal_ ? koz.x1 : koz.y1;
@@ -329,7 +331,8 @@ std::vector<PreRoutedSegment> RoutingGrid::preroutes_in(
     auto subtract_keepouts = [&](double centre, const TrackSlot& slot,
                                  std::vector<std::pair<double, double>>& pieces) {
         if (slot.type != "SIGNAL") return;
-        for (const auto& koz : keepouts_) {
+        for (const auto& gk : keepouts_) {
+            const Rect& koz = gk.bbox;
             const auto [k_perp_lo, k_perp_hi, k_along_lo, k_along_hi] =
                 rect_windows(koz);
             if (centre < k_perp_lo || centre > k_perp_hi) continue;
@@ -353,6 +356,51 @@ std::vector<PreRoutedSegment> RoutingGrid::preroutes_in(
         subtract_keepouts(centre, slot, pieces);
         for (const auto& [lo, hi] : pieces)
             emit(centre, slot, lo, hi);
+    }
+
+    // IDENTIFIED KEEPOUTS ARE RAILS (specialnets_scope.md §5(b)).  A DEF
+    // SPECIALNETS strap is not obstruction that happens to be there — it is
+    // metal belonging to a power net, i.e. exactly what a PreRoutedSegment
+    // represents.  Emitting it here is what lets the NDR credit / bond / audit
+    // predicates see a power grid on an IMPORTED design: a LEF states a wire's
+    // width and says nothing about which tracks a grid takes, so a synthesized
+    // pattern is all-signal and carries no rail for them to find.  The rails
+    // are in the DEF and nowhere else.
+    //
+    // One insertion point, three consumers: `credit_at`'s rail_covers_span,
+    // the R9 audit and emit_shield_bond_vias all query preroutes, so a strap
+    // reaches every one of them through the machinery they already use —
+    // which is the single-sourcing R4 asks for, rather than three lookups.
+    //
+    // ANONYMOUS keepouts (`net` empty — a macro's OBS, a LAYER blockage, a
+    // hand-declared add_keepout) are NOT emitted: they block, but there is
+    // nothing to say about whose metal they are, and a consumer asking "is
+    // there a VDD rail here" must never be answered by a block footprint.
+    // `include_signal` does not gate them either — a rail is not a signal
+    // track, so it belongs in the non-SIGNAL half of the result.
+    for (const auto& gk : keepouts_) {
+        if (gk.net.empty()) continue;
+        const auto [k_perp_lo, k_perp_hi, k_along_lo, k_along_hi] =
+            rect_windows(gk.bbox);
+        // Its CENTRE must fall in the perp window, matching how a pattern
+        // slot is selected — a rail is reported where its metal is centred.
+        const double centre = 0.5 * (k_perp_lo + k_perp_hi);
+        if (centre < perp_lo || centre > perp_hi) continue;
+        const double a_lo = std::max(along_lo, k_along_lo);
+        const double a_hi = std::min(along_hi, k_along_hi);
+        if (a_lo > a_hi) continue;
+        TrackSlot rail;
+        // The slot TYPE is derived from the net so an identity test that
+        // falls back to the type (ndr_rail_credits does) still resolves; the
+        // LABEL is the net itself, which is the authoritative answer.
+        rail.type  = ndr_shield_net_matches("GND", gk.net) ? "GROUND"
+                   : ndr_shield_net_matches("VDD", gk.net) ? "POWER"
+                   : "CUSTOM";
+        rail.label = gk.net;
+        rail.width = k_perp_hi - k_perp_lo;
+        const size_t before = out.size();
+        emit(centre, rail, a_lo, a_hi);
+        for (size_t i = before; i < out.size(); ++i) out[i].is_strap = true;
     }
 
     // Overrides: local pattern within (region ∩ perp window), span clipped to
@@ -395,7 +443,8 @@ int RoutingGrid::count_signal_tracks_in(double x, double lo, double hi) const {
             double centre = pos + slot.width / 2.0;
             if (centre >= lo && centre <= hi && slot.type == "SIGNAL") {
                 bool blocked = false;
-                for (const auto& koz : keepouts_) {
+                for (const auto& gk : keepouts_) {
+            const Rect& koz = gk.bbox;
                     double px = is_horizontal_ ? x : centre;
                     double py = is_horizontal_ ? centre : x;
                     if (px >= koz.x1 && px <= koz.x2 &&
@@ -468,6 +517,64 @@ std::vector<PreRoutedSegment> RoutingGridStack::preroutes(
 
 bool RoutingGridStack::has_layer(int layer_id) const {
     return layers_.count(layer_id) > 0;
+}
+
+// THE rail lookup — see routing_grid.h.  One implementation, so R5a crediting
+// at DNUTS and the R9 audit of the placed result cannot answer differently.
+std::optional<PreRoutedSegment> ndr_credit_rail(
+    const RoutingGrid& grid, const NdrSpec& spec, double edge, int dir,
+    double window, double along_lo, double along_hi, bool allow_gap)
+{
+    if (dir == 0 || window <= 0) return std::nullopt;
+    const double eps = 1e-6;
+    const double w_lo = dir > 0 ? edge + eps : edge - window;
+    const double w_hi = dir > 0 ? edge + window : edge - eps;
+    if (w_lo > w_hi) return std::nullopt;
+
+    // Every non-SIGNAL piece in the window: pattern rails AND straps, since
+    // preroutes_in emits an identified keepout as one.
+    auto pieces = grid.preroutes_in(w_lo, w_hi, along_lo, along_hi, false);
+    if (pieces.empty()) return std::nullopt;
+
+    // Group by track position — a rail broken by an override shadow arrives
+    // as several pieces of one rail, and it is their UNION that must cover
+    // the run.  Judging a piece alone would deny credit to a rail that is
+    // continuous, which is the same "absent metal" mistake in reverse.
+    std::map<long long, std::vector<const PreRoutedSegment*>> by_pos;
+    for (const auto& pr : pieces)
+        by_pos[(long long)std::llround(pr.track_position * 1e6)].push_back(&pr);
+
+    // Nearest first: the question is what lies IMMEDIATELY beyond the edge.
+    std::vector<std::pair<double, long long>> order;
+    for (const auto& [k, v] : by_pos)
+        order.emplace_back(std::abs(v.front()->track_position - edge), k);
+    std::sort(order.begin(), order.end());
+
+    for (const auto& [dist, key] : order) {
+        const auto& group = by_pos[key];
+        const PreRoutedSegment& rep = *group.front();
+        // A SIGNAL track between the edge and this rail means a bit could
+        // have sat there, so the rail is not immediately adjacent and the
+        // shield it would credit is not the one that would be emitted.
+        const double s_lo = dir > 0 ? edge + eps : rep.track_position + eps;
+        const double s_hi = dir > 0 ? rep.track_position - eps : edge - eps;
+        if (!allow_gap && s_lo < s_hi &&
+            grid.count_signal_tracks_in(0.5 * (along_lo + along_hi), s_lo, s_hi) > 0)
+            return std::nullopt;      // blocked by a usable track: look no further
+        if (!ndr_rail_credits(spec, rep.label, rep.slot_type)) continue;
+        // …and its metal must actually RUN the length of the segment: a rail
+        // broken across the span is absent metal where it matters.
+        std::vector<std::pair<double, double>> iv;
+        for (const auto* p : group) iv.emplace_back(p->span_lo, p->span_hi);
+        std::sort(iv.begin(), iv.end());
+        double cov = along_lo;
+        for (const auto& [a, b] : iv) {
+            if (a > cov + eps) break;
+            cov = std::max(cov, b);
+        }
+        if (cov >= along_hi - eps) return rep;
+    }
+    return std::nullopt;
 }
 
 } // namespace buda

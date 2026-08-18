@@ -226,18 +226,102 @@ keeps re-finding.
 **What NOT to build:** a `SPECIALNETS → def_track_pattern` synthesizer.
 See §3.
 
-## 6. Recommendation
+## 6. Recommendation — DISCHARGED
 
-**Defer.** (a) is cheap and correct but has no consumer until (b) lands; (b)
-has no design to prove it on until a DEF with a real PDN exists. The honest
-ordering is:
+The ordering held, and every step of it has now run:
 
 1. ~~Finish the special-wire reader~~ **DONE 2026-08-16** — and it turned out
    not to need step 2 at all, which is the correction recorded in §5(0).
-2. Get a placed, power-routed DEF (an upstream tool run — the real cost here).
-   The recipe: [openroad_pdn_recipe.md](openroad_pdn_recipe.md).
-3. Then (a) + (b) together, measured on it.
+2. ~~Get a placed, power-routed DEF~~ **DONE 2026-08-16** —
+   [openroad_pdn_recipe.md](openroad_pdn_recipe.md), run through OpenROAD
+   26Q3 in Docker.
+3. ~~Then (a) + (b) together, measured on it~~ **DONE 2026-08-17.**
 
-Doing (b) against our three hand-drawn stripes would repeat the mistake item
-12 records: building to a vehicle whose shape is an artifact of having been
-typed by hand, and calling the result validated.
+The caution above was right and is worth keeping: doing (b) against the three
+hand-drawn stripes would have repeated item 12's mistake. What it did not
+anticipate is that a REAL PDN can be just as useless a vehicle for a
+different reason — see §7.
+
+---
+
+## 7. What (b) turned out to be
+
+**Not three lookups. One insertion point and one predicate.**
+
+All three consumers already asked the grid the same way — `credit_at`'s
+`rail_covers_span`, the R9 audit's `_ndr_end_credit`, and
+`emit_shield_bond_vias` every one query `preroutes` / `preroutes_in`. So
+"teach the three predicates to see straps" resolved to: make a strap BE a
+preroute. A `SPECIALNETS` strap is metal belonging to a power net, which is
+exactly what a `PreRoutedSegment` represents; emitting it from
+`preroutes_in` reaches all three through machinery they already use.
+
+Two things had to be true first:
+
+- **The identity had to reach them.** §5(a) put `net` on the Floorplan's
+  `KeepoutZone`, but `DetailedNUTSEngine` holds only a `RoutingGridStack` and
+  no `Floorplan` — and `bdb_cmds.py` dropped the net on the way into the
+  grid. `GridKeepout{bbox, net}` closes that; it is the type change (a)
+  deferred, and the grid was the only possible route.
+- **The lookup had to become one function.** R4 was already half-violated:
+  identity was shared (`ndr_rail_credits`) but GEOMETRY existed twice — a C++
+  coverage sweep in `credit_at` and a line-for-line Python twin in
+  `_ndr_end_credit`. `ndr_credit_rail` (routing_grid.cpp) is now the single
+  answer to "is there a crediting rail immediately beyond this edge whose
+  metal runs the length of this segment", over BOTH rail kinds, and the audit
+  calls it instead of re-deriving it.
+
+Conservative by construction: an anonymous keepout (OBS, a LAYER blockage, a
+hand-declared `add_keepout`) is never emitted as a rail — a consumer asking
+"is there a VDD rail here" must not be answered by a block footprint — and
+`credit_at` consults straps only AFTER the pattern path declines, and only
+for `is_strap` rails, so a design that declares pattern rails decides exactly
+as it did before.
+
+**Measured** on `flow/ariane133/ariane133_ndr_straps.buda` (the m4-m7 vehicle
++ the spliced strap DEF + a `shield bus … credit bond` rule on M6/M7):
+
+| bond | count |
+|---|---:|
+| M7 shield → M6 strap | 1653 |
+| M6 shield → M7 strap | 548 |
+| M6 shield → M5 strap | 722 |
+| **total** | **2923** |
+
+Every one is necessarily strap-derived: this design's patterns come from DEF
+`TRACKS` with no tech LEF, so they are synthesized ALL-SIGNAL and the grid
+carries **zero** pattern rails. Before the change there was nothing on any
+layer for `emit_shield_bond_vias` to find. The layer pairs are also the right
+ones — M6 is V, M5/M7 are H, so each bond crosses to an adjacent
+PERPENDICULAR layer, which is R6's rule. 29 shields remain unbonded and are
+flagged `NDR_BOND` rather than passing silently.
+
+### Two traps this vehicle sets, both paid for
+
+Neither is about the PDN, and both cost a full debug cycle:
+
+- **A real PDN is not automatically a usable vehicle.** On the FULL ten-layer
+  stack the interconnect lives on M8-M10 while the PDN stops at M7, so straps
+  and signal metal occupy almost disjoint layers, every lookup returns "no
+  rail", and the code runs, does nothing, and looks fine. The m4-m7 stack
+  (M6/M7 as TOP) is what puts ~97% of the wire on the two strap-bearing
+  layers.
+- **A floorplan DEF places the macros and nothing else.** The first rule was
+  scoped to `amo_req_o` — the widest bus in the design at 131 bits — which is
+  driven by `ex_stage_i/lsu_i/i_store_unit/i_amo_buffer`, a pure-logic
+  container with no placed descendant. No geometry, no candidates, no route,
+  ever. Only SRAM-connected nets have geometry here.
+
+A third was self-inflicted and is recorded because the shape recurs: the
+vehicle initially dropped the m4-m7 flow's `negotiate_congestion` calls, and
+99 bit-wires landed where ~980 do with them. That was briefly read as "the
+NDR rule collapsed the design" — a control with the rule removed placed the
+same 99, which is what a control is for.
+
+### Residual
+
+`bundle.ndr_rule` is stamped on PRE-EXPANSION template rows, while the rows
+that route are the expanded per-instance ones, which carry no stamp. So there
+is currently no persisted way to ask "was this ROUTED bundle governed?" —
+which made the working result read as a failure twice during this work. Worth
+closing; it is an observability gap, not a correctness one.

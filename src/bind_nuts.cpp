@@ -113,7 +113,8 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("placed",         &PreRoutedSegment::placed)
         .def_readwrite("label",          &PreRoutedSegment::label)
         .def_readwrite("slot_type",      &PreRoutedSegment::slot_type)
-        .def_readwrite("track_index",    &PreRoutedSegment::track_index);
+        .def_readwrite("track_index",    &PreRoutedSegment::track_index)
+        .def_readwrite("is_strap",       &PreRoutedSegment::is_strap);
 
     py::class_<PassthruCrossing>(m, "PassthruCrossing")
         .def(py::init<>())
@@ -279,6 +280,13 @@ void bind_nuts(py::module_& m) {
           py::arg("cell_h"), py::arg("src_x"), py::arg("src_y"),
           py::arg("dst_x"), py::arg("dst_y"), py::arg("new_bundle_id"),
           "Orientation-aware offset_net_via (N/S/FN/FS; 90/270 throw)");
+    // THE rail lookup, so the R9 audit asks the SAME question DNUTS asked
+    // rather than re-implementing it in Python (opens_ndr R4).
+    m.def("ndr_credit_rail", &ndr_credit_rail,
+          py::arg("grid"), py::arg("spec"), py::arg("edge"), py::arg("dir"),
+          py::arg("window"), py::arg("along_lo"), py::arg("along_hi"),
+          py::arg("allow_gap") = false);
+
     m.def("emit_shield_bond_vias", &emit_shield_bond_vias,
           py::arg("stack"), py::arg("bus_segs"), py::arg("result"),
           "R6: (re)derive the NDR shield BOND straps of a placed result "
@@ -358,7 +366,8 @@ void bind_nuts(py::module_& m) {
              py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),
              py::arg("pattern"))
         .def("add_keepout",   &RoutingGridStack::add_keepout,
-             py::arg("layer_id"), py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"))
+             py::arg("layer_id"), py::arg("x1"), py::arg("y1"), py::arg("x2"),
+             py::arg("y2"), py::arg("net") = "")
         .def("get_layer_grid", [](RoutingGridStack& s, int id) -> RoutingGrid& {
             return s.get_layer_grid(id);
         }, py::arg("layer_id"), py::return_value_policy::reference_internal)

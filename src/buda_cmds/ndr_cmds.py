@@ -2011,27 +2011,19 @@ def _ndr_end_credit(spec, grid_stack, layer, rows, s_lo, s_hi, low_end,
     period = _ndr_effective_period(g, mid, outer.track_position)
     if period <= 0:
         return False
-    eps = 1e-6
     edge = outer.track_position + (-0.5 if low_end else 0.5) * outer.width
-    win = (edge - period, edge - eps) if low_end else (edge + eps,
-                                                       edge + period)
-    rails = grid_stack.preroutes(layer, win[0], win[1], s_lo, s_hi)
-    if not rails:
-        return False
-    pos = (max if low_end else min)(r.track_position for r in rails)
-    lo, hi = (pos + eps, edge - eps) if low_end else (edge + eps, pos - eps)
-    if not allow_gap and lo < hi and g.signal_tracks_in(mid, lo, hi):
-        return False                     # an empty signal slot intervenes
-    pieces = [r for r in rails if abs(r.track_position - pos) < eps]
-    if not buda.ndr_rail_credits(spec, pieces[0].label, pieces[0].slot_type):
-        return False
-    cov = s_lo                           # keepout-broken rail = no credit
-    for a, b in sorted((min(p.span_lo, p.span_hi),
-                        max(p.span_lo, p.span_hi)) for p in pieces):
-        if a > cov + eps:
-            return False
-        cov = max(cov, b)
-    return cov >= s_hi - eps
+    # THE shared lookup, not a second implementation of it (opens_ndr R4).
+    # This used to re-derive the whole answer in Python — window, nearest
+    # rail, the no-empty-slot-between test, and a coverage sweep that was a
+    # line-for-line twin of `rail_covers_span` in detailed_nuts.cpp.  Two
+    # implementations of one predicate is exactly the drift R4 forbids, and
+    # they were already free to disagree: only the identity half
+    # (`ndr_rail_credits`) was shared.  Now the audit asks the question DNUTS
+    # asked, of the same function, so a credit the seat search granted cannot
+    # be denied here — and both see STRAPS, which is what makes any of this
+    # mean something on an imported design.
+    return buda.ndr_credit_rail(g, spec, edge, -1 if low_end else 1,
+                                period, s_lo, s_hi, allow_gap) is not None
 
 
 def audit_ndr_dnuts(session, wrapper, index=None):
