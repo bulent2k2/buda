@@ -199,9 +199,12 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
     # it here too would double-install it on layers patterned after the zone.
     for koz in session.fp.get_keepout_zones():
         if layer_id in koz.layer_ids:
-            session.routing_grid.add_keepout(layer_id, 
-                                         koz.bbox.x1, koz.bbox.y1, 
-                                         koz.bbox.x2, koz.bbox.y2)
+            # WITH the net, for the same reason as the restore path: a
+            # re-declared track pattern rebuilds this layer's grid, and a
+            # strap that comes back anonymous stops being a rail (Codex #785).
+            session.routing_grid.add_keepout(layer_id,
+                                         koz.bbox.x1, koz.bbox.y1,
+                                         koz.bbox.x2, koz.bbox.y2, koz.net)
 
     print(f"[RoutingGrid] Layer {layer_id}: {len(slots)} slots, "
           f"unit_pitch={pat.unit_pitch():.3f}, "

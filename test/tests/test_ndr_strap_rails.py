@@ -156,3 +156,57 @@ def test_no_strap_no_rail():
     g = _grid().get_layer_grid(6)
     assert buda.ndr_credit_rail(g, _spec(), 100.0, 1, 20.0,
                                 0.0, 1000.0) is None
+
+
+# ── Codex #785: the three ways this was wrong ──────────────────────────────
+
+def test_a_strap_wider_than_the_window_is_still_adjacent():
+    """A pattern slot is picked by its CENTRE because a slot is never wider
+    than its own period.  A strap has no such bound: `flow/def/chip.def`
+    draws 2000-unit M6 straps on an 800-unit pitch, so a strap can abut the
+    run while its centre sits outside a one-period window.  Selecting by
+    centre reported no metal where metal is touching."""
+    st = _grid()
+    st.add_keepout(6, 100, 0, 900, 1000, "VDD")     # 800 wide, centre at 500
+    g = st.get_layer_grid(6)
+    # A one-period window from the abutting edge does not reach centre 500.
+    rail = buda.ndr_credit_rail(g, _spec(), 100.0, 1, 20.0, 0.0, 1000.0)
+    assert rail is not None and rail.label == "VDD"
+
+
+def test_the_nearest_rail_decides_even_when_it_does_not_credit():
+    """Credit must not reach ACROSS foreign metal.  A VSS strap hard against
+    a VDD-shielded run, with VDD just beyond it, would otherwise suppress the
+    VDD shield — while what actually flanks the run is VSS."""
+    st = _grid()
+    st.add_keepout(6, 100, 0, 110, 1000, "VSS")     # nearest: wrong net
+    st.add_keepout(6, 110, 0, 120, 1000, "VDD")     # just beyond it
+    g = st.get_layer_grid(6)
+    assert buda.ndr_credit_rail(g, _spec("VDD"), 100.0, 1, 40.0,
+                                0.0, 1000.0) is None
+    # …and with the identities swapped the nearest one credits, so the rule
+    # is "nearest decides", not "never credit when two rails are present".
+    st2 = _grid()
+    st2.add_keepout(6, 100, 0, 110, 1000, "VDD")
+    st2.add_keepout(6, 110, 0, 120, 1000, "VSS")
+    assert buda.ndr_credit_rail(st2.get_layer_grid(6), _spec("VDD"), 100.0, 1,
+                                40.0, 0.0, 1000.0) is not None
+
+
+def test_a_grid_rebuild_keeps_the_strap_a_rail():
+    """The identity has to survive every path that BUILDS the grid, not just
+    the DEF import.  Declaring a track pattern re-applies existing zones onto
+    the new layer grid, and the restore path does the same on `open_bdb` —
+    both dropped the net, so a resumed or re-patterned design turned every
+    strap into anonymous obstruction and answered NDR credit and bond
+    differently from the build it came from (Codex #785)."""
+    import buda_cli
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.do_command("def_layer 6 metal6 V TOP 30")
+    # Zones first: the pattern declaration below is what re-applies them.
+    s.fp.add_keepout_zone(100, 0, 110, 1000, [6], False, "VDD")
+    s.fp.add_keepout_zone(300, 0, 310, 1000, [6], False, "")
+    s.do_command("def_track_pattern 6 0 SIGNAL 1 1")
+    rails = s.routing_grid.preroutes(6, 0, 400, 0, 1000)
+    assert [(r.label, r.is_strap) for r in rails] == [("VDD", True)]

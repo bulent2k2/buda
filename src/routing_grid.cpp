@@ -382,10 +382,16 @@ std::vector<PreRoutedSegment> RoutingGrid::preroutes_in(
         if (gk.net.empty()) continue;
         const auto [k_perp_lo, k_perp_hi, k_along_lo, k_along_hi] =
             rect_windows(gk.bbox);
-        // Its CENTRE must fall in the perp window, matching how a pattern
-        // slot is selected — a rail is reported where its metal is centred.
+        // Selected by METAL OVERLAP, not by centre containment.  A pattern
+        // slot is picked by its centre because a slot is never wider than its
+        // own period; a strap has no such bound.  `flow/def/chip.def` draws
+        // 2000-unit M6 straps on an 800-unit pitch, so a strap can abut the
+        // run while its centre lies outside a one-period window — and a
+        // centre test would report no metal where metal is touching (Codex
+        // #785).  The reported track_position stays the centre, which is
+        // where the metal actually is centred.
         const double centre = 0.5 * (k_perp_lo + k_perp_hi);
-        if (centre < perp_lo || centre > perp_hi) continue;
+        if (k_perp_hi < perp_lo || k_perp_lo > perp_hi) continue;
         const double a_lo = std::max(along_lo, k_along_lo);
         const double a_hi = std::min(along_hi, k_along_hi);
         if (a_lo > a_hi) continue;
@@ -550,30 +556,35 @@ std::optional<PreRoutedSegment> ndr_credit_rail(
         order.emplace_back(std::abs(v.front()->track_position - edge), k);
     std::sort(order.begin(), order.end());
 
-    for (const auto& [dist, key] : order) {
-        const auto& group = by_pos[key];
-        const PreRoutedSegment& rep = *group.front();
-        // A SIGNAL track between the edge and this rail means a bit could
-        // have sat there, so the rail is not immediately adjacent and the
-        // shield it would credit is not the one that would be emitted.
-        const double s_lo = dir > 0 ? edge + eps : rep.track_position + eps;
-        const double s_hi = dir > 0 ? rep.track_position - eps : edge - eps;
-        if (!allow_gap && s_lo < s_hi &&
-            grid.count_signal_tracks_in(0.5 * (along_lo + along_hi), s_lo, s_hi) > 0)
-            return std::nullopt;      // blocked by a usable track: look no further
-        if (!ndr_rail_credits(spec, rep.label, rep.slot_type)) continue;
-        // …and its metal must actually RUN the length of the segment: a rail
-        // broken across the span is absent metal where it matters.
-        std::vector<std::pair<double, double>> iv;
-        for (const auto* p : group) iv.emplace_back(p->span_lo, p->span_hi);
-        std::sort(iv.begin(), iv.end());
-        double cov = along_lo;
-        for (const auto& [a, b] : iv) {
-            if (a > cov + eps) break;
-            cov = std::max(cov, b);
-        }
-        if (cov >= along_hi - eps) return rep;
+    // ONLY THE NEAREST RAIL DECIDES.  Walking on to a farther matching rail
+    // would credit across intervening foreign metal: a VSS strap hard against
+    // a VDD-shielded run, with a VDD strap just beyond it, would suppress the
+    // VDD shield even though what actually flanks the run is VSS.  The rail
+    // that matters is the one the emitted shield would have sat against, and
+    // that is the nearest one, whatever its net (Codex #785 — the audit this
+    // predicate replaced took the nearest rail and rejected on a mismatch).
+    const auto& group = by_pos[order.front().second];
+    const PreRoutedSegment& rep = *group.front();
+    // A SIGNAL track between the edge and the rail means a bit could have sat
+    // there, so the rail is not immediately adjacent and the shield it would
+    // credit is not the one that would be emitted.
+    const double s_lo = dir > 0 ? edge + eps : rep.track_position + eps;
+    const double s_hi = dir > 0 ? rep.track_position - eps : edge - eps;
+    if (!allow_gap && s_lo < s_hi &&
+        grid.count_signal_tracks_in(0.5 * (along_lo + along_hi), s_lo, s_hi) > 0)
+        return std::nullopt;
+    if (!ndr_rail_credits(spec, rep.label, rep.slot_type)) return std::nullopt;
+    // …and its metal must actually RUN the length of the segment: a rail
+    // broken across the span is absent metal where it matters.
+    std::vector<std::pair<double, double>> iv;
+    for (const auto* p : group) iv.emplace_back(p->span_lo, p->span_hi);
+    std::sort(iv.begin(), iv.end());
+    double cov = along_lo;
+    for (const auto& [a, b] : iv) {
+        if (a > cov + eps) break;
+        cov = std::max(cov, b);
     }
+    if (cov >= along_hi - eps) return rep;
     return std::nullopt;
 }
 
