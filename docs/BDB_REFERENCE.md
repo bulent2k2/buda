@@ -37,9 +37,12 @@ SQLite browser (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)).
 
 ```
 component        id, name, cell, parent_id→component, depth,
-                 x1, y1, x2, y2, is_leaf, is_replicated, orient
+                 x1, y1, x2, y2, is_leaf, is_port (v23), is_replicated,
+                 orient (v13)
 
-cell             name (PK), width, height
+cell             name (PK), width, height,
+                 cls (LEF MACRO CLASS, v24), bottom_up (v17),
+                 layer_cap, layer_floor (band, -1 = unset, v20)
 
 cell_children    parent_cell→cell, inst_name, child_cell→cell, x, y
                  PRIMARY KEY (parent_cell, inst_name)
@@ -64,14 +67,21 @@ busterm          id (TEXT), comp_id→component, hier_path,
 bundle           id (TEXT), level, strategy, reason, num_terminals,
                  cell_context, instances (JSON), parent_id→bundle,
                  is_replicated, drv_spec_depth, rcv_spec_depth,
-                 drv_spec_path, rcv_spec_paths (JSON)
-bundle_net       bundle_id→bundle, net_id→net, ord (bit order)
+                 drv_spec_path, rcv_spec_paths (JSON),
+                 gen_knobs (generation-knob memo, v15),
+                 is_expanded, bu_locked (v18), cloned_from (v19),
+                 ndr_rule (governing rule stamped at persist, v21)
+bundle_net       bundle_id→bundle, net_id→net, ord (bit order),
+                 drv_path, rcv_paths (JSON) — per-bit fan-in/fan-out
+                 endpoints, what makes the taper derivable on resume (v27)
                  PRIMARY KEY (bundle_id, net_id)
 bundle_busterm   bundle_id→bundle, busterm_id, role ('entry'|'exit')
 
 topology         bundle_id→bundle, cand_index, type, wirelength,
                  trunk_location, pass_through_count, connected_blocks (JSON),
-                 feedthru_blocks (JSON), is_selected, is_pinned
+                 feedthru_blocks (JSON), is_selected, is_pinned (v10),
+                 topo_uid (stable content identity, v14),
+                 source ('generated'|'user'|'dogleg', v15)
                  PRIMARY KEY (bundle_id, cand_index)
 topology_segment bundle_id, cand_index, seg_index, x1,y1,x2,y2,
                  layer_hint, is_jog, assigned_layer (planner's per-seg layer),
@@ -120,12 +130,46 @@ net_via          bundle_id→bundle (FK), from_seg, to_seg, bit_index,
                  — one per-bit via (bus_via fanned out per bit)
                  PRIMARY KEY (bundle_id, from_seg, to_seg, bit_index)
 
+cell_layer_share cell→cell, layer_id, share (fraction of the layer's
+                 signal tracks, v20)
+                 PRIMARY KEY (cell, layer_id)
+
+ndr_rule         name (PK), width_x, spacing_x (multipliers), shield_mode,
+                 shield_per_n, shield_net, layers (CSV; '' = every layer),
+                 credit (R5a, v22), bond (R6; 0 = off, N = stride, v25),
+                 width_abs, spacing_abs (R1 absolute, 0 = undeclared, v26),
+                 per_layer, metal (v28)
+                 — the declared rules (v21), RAW values only: the slot
+                 quantization is a function of the CURRENT grid, so it is
+                 re-derived on open and never stored
+ndr_scope        prefix (PK), rule→ndr_rule  — '*' is the global default
+                 scope; longest prefix wins (v21)
+
+track_pattern    layer_id (PK), origin, is_horiz, bounded, bound_lo,
+                 bound_hi, source ('script'|'lef'|'def'), slots (JSON)
+                 — one layer's global pattern as DECLARED, not a read-back
+                 of the built grid (v29)
+grid_override    layer_id, x1, y1, x2, y2, origin, slots (JSON)
+                 PRIMARY KEY (layer_id, x1, y1, x2, y2)
+keepout          x1, y1, x2, y2, layers (CSV), inside_block, net
+                 — the ZONE with its layer set, stored whole rather than
+                 one row per (zone, layer) (v29)
+                 PRIMARY KEY (x1, y1, x2, y2, layers)
+
 grp              id (TEXT), name, color, parent_id→grp
 grp_member       grp_id→grp, kind, ref
 
-meta             key (TEXT PK), value  — die_w, die_h, units,
-                 schema_version, bdb_tool
+meta             key (TEXT PK), value  — die_w, die_h, units, lu_per_um,
+                 schema_version, bdb_tool, verilog_top, layer_cap_default,
+                 layer_caps_by_depth, bu_mismatch_policy,
+                 user_ops:<bundle_id>:<topo_uid>
 ```
+
+**30 tables, 232 columns** at schema v29.  A `bundle.ndr_rule` note for
+anyone reading the DDL: that column is added by the v21 *migration* and is
+absent from `BUNDLE_DDL`, so it exists in every database (a fresh one
+migrates from 0) but cannot be found by reading the `CREATE TABLE` text
+alone.
 
 **Schema version.** The BDB stamps `PRAGMA user_version` (mirrored in
 `meta.schema_version`) and migrates forward on open. v1 added versioning +
@@ -172,6 +216,18 @@ whose governing rule changed — by name OR content — since the checkpoint
 **`ndr_rule.credit`** (the R5a end-shield rail-crediting opt-in — pricing
 basis, so it joins the rule row and, when set, the `|c1` fingerprint
 suffix; pre-v22 rules migrate to 0, correct since they never credited).
+v23 added **`component.is_port`** — a DEF `PINS` die port kept as a
+zero-area boundary component.  Reading `PINS` does not by itself make a
+port an endpoint (endpoint derivation is keyed by component), so each
+placed port becomes a component; the flag is what keeps that fiction
+VISIBLE to the database and to the audits instead of passing as a real
+instance.  Pre-v23 designs have no ports, so the 0 default is correct.
+v24 added **`cell.cls`** — the LEF `MACRO … CLASS` token.  It is the only
+authoritative answer to "is this a hard macro or a standard cell", and
+`import_verilog` needs it to decide which instances of undefined modules
+belong in the routing hierarchy — which is what carries a hard macro
+through a DEF + Verilog merge however its instance name is spelled.  Pre-v24
+designs never recorded it, so `''` (not stated) is correct.
 v25 added **`ndr_rule.bond`** (the R6 shield-bonding opt-in).  Unlike
 `credit`, bonding is OUTPUT-only — it emits extra `net_via` straps and
 moves neither demand nor placement — so it is deliberately NOT part of
@@ -202,6 +258,13 @@ than the design that was checkpointed while reporting itself clean (see
 [`load_pipeline`](#load_pipeline)).  Empty for every other bundle, and empty
 for a pre-v27 checkpoint, which resumes exactly as it did and says so
 (BUDA-1904).
+v28 added **`ndr_rule.per_layer` / `metal`** — per-layer declared values
+(`''` = no entries, so a pre-v28 rule restores as the layer-independent
+rule it was) and the width-anchoring reading (`metal` anchors a declared
+absolute width to the metal rather than to the per-signal-slot channel).
+The `metal` flip was measured and REFUSED as a default, so it is per-rule
+and DECLARATION-ONLY: a restored rule keeps the reading it was persisted
+with (see docs/internal/ndr_metal_default_study.md).
 v29 added the **routing grid** — the `track_pattern` table (one row per
 layer: origin, direction, bounds, the slot list as JSON, and `source`), the
 `grid_override` table (region-scoped patterns, keyed by layer + region) and
