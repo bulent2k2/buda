@@ -184,20 +184,58 @@ this was written, unmeasured.
 a SECOND fix.**  Splicing the PDN's `SPECIALNETS` into the original DEF (the
 netlist held identical, 161 busterms / 111 hbundles, so the keepouts are the
 only thing that changed) adds `SPECIALNET:6673` keepouts beside the 13,034
-`OBS` ones.  Those are die-crossing stripes, so they lie OUTSIDE every block
-and `set_keepout_loci outside` — a block-INTERIOR mitigation — structurally
-cannot reach them: the Hanan grid went ~6,327 → ~3.2M cells and the planner
-was killed at 16 minutes.  With `set_keepout_loci stripes` (a thin-and-long
-zone keeps only its long-axis loci; what it BLOCKS is untouched) the same run
-finishes in 30.6 s at 0 overlaps, abstract WL 88,189,343 against the
-baseline's 88,189,348 — five units, on a design whose signal metal lives on
-M8–M10.
+`OBS` ones.  `set_keepout_loci outside` — a block-INTERIOR mitigation —
+suppresses the loci of NONE of them, and the Hanan grid goes ~6,327 → ~3.2M
+cells with the planner killed at 16 minutes.  With `set_keepout_loci stripes`
+(a thin-and-long zone keeps only its long-axis loci; what it BLOCKS is
+untouched) the same run finishes in 30.6 s at 0 overlaps, abstract WL
+88,189,343 against the baseline's 88,189,348 — five units, on a design whose
+signal metal lives on M8–M10.
 
-That figure is a LOWER bound on what a real PDN blocks: a via placement's
-enclosure metal is not modelled at all, so the 113,969 via placements
-contribute no keepout (`def_io.cpp` — the extent lives in the DEF's `VIAS`
-section, which the reader does not resolve).  It only strengthens the
-conclusion, since the grid already explodes on the wires alone.
+**Why `outside` reaches none of them is TWO reasons, not one** (Codex, #795).
+`flow/ariane133/pdn.tcl` declares three grids, and they are not alike:
+
+| grid | layers | shape |
+|---|---|---|
+| `grid` (core) | M1 followpins, M4 @ 56 µm, M7 @ 30 µm | die-spanning |
+| `macro_r0` | M5 + M6 @ 10 µm | over each SRAM at `R0 R180 MX MY` |
+| `macro_r90` | M6 @ 40 µm | over each SRAM at `R90 R270 MXR90 MYR90` |
+
+The core grid's straps genuinely lie outside every block, so for those the
+reason is geometric and `outside` is the wrong instrument by construction.
+The two `-macro` grids are drawn OVER the 133 SRAMs, which ARE blocks — and
+`outside` misses those for a different reason: the importer builds every
+strap keepout with `inside_block=false` **unconditionally**
+(`src/bdb.cpp`, the `special_wires` loop), where a macro `OBS` has its
+containment MEASURED against the instance's placed extent.  So the flag says
+"outside" whatever the geometry says.
+
+That matters for where a follow-up goes.  `stripes` is the remedy for the
+core grid and is what made this design routable; for the macro-local straps
+the honest fix is to measure containment as `OBS` already does — and it must
+be MEASURED rather than inferred from provenance, because both macro grids
+are declared with `-halo {0.1 0.1 0.1 0.1}`, so a macro-grid strap is
+built to extend slightly PAST the macro it belongs to.  That is the same
+shape as LEF not requiring an `OBS` rect to sit inside `SIZE`: the rect that
+pokes out is exactly the one whose edge is a useful locus.
+
+The split of the 6673 across the three grids is NOT measured here —
+regenerating the spliced DEF needs the OpenROAD run.  What IS certain without
+it is that `outside` suppresses zero of them, since that follows from the
+hardcoded flag alone and needs no geometry at all.
+
+**The five units is an INCOMPLETE measurement, not a bound.**  A via
+placement's enclosure metal is not modelled at all, so the 113,969 via
+placements contribute no keepout (`def_io.cpp` — the extent lives in the
+DEF's `VIAS` section, which the reader does not resolve).  That makes the
+modelled obstruction a strict SUBSET of the PDN's real metal — but it does
+not make five units a floor on the route delta, and calling it one was wrong
+(Codex, #795): more obstruction can move the planner onto a different
+topology, so the delta is not monotone in the amount blocked, in magnitude or
+in sign, and some enclosure metal would land on wire keepouts already
+modelled.  What the subset relation DOES carry is the grid conclusion — more
+keepouts can only add loci — so "the grid explodes on the wires alone" is
+robust to the missing vias in a way the WL figure is not.
 
 Full record — including the control run showing that `stripes` ALONE changes
 nothing, without which the five units would be a two-variable comparison —
