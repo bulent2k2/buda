@@ -1,0 +1,51 @@
+# ============================================================
+# demo/resume_flat.buda — the FLAT build/resume demo vehicle.
+#
+# Pairs with docs/BUILD_RESUME.md.  A small flat SoC-shaped design that
+# opens NO BDB of its own — the plain `bin/buda` run routes it and keeps
+# nothing, while `btcl -b` arms an auto-named checkpoint BEFORE the flow
+# (demo/resume_flat.ckpt.bdb) so every stage persists as it runs:
+#
+#   bin/btcl -b demo/resume_flat.buda          # build + checkpoint
+#   bin/btcl -r demo/resume_flat.buda          # resume at the deepest stage
+#   bin/btcl -r -s plan demo/resume_flat.buda  # re-enter at the planner
+#
+# At the prompt: `topos d1` to look, `pin d1 4` to choose, `replan` to
+# apply, `done` to save and exit.  A pin writes through to the
+# checkpoint, so the next -b rerun or -r resume keeps it.
+#
+# Deliberately no `visualize`: under `btcl -i`/`-b` the flow runs
+# verbatim, and a window would block the session before the prompt.
+# Type `explore` or `show` at the prompt instead.
+# ============================================================
+
+source ../flow/tracks/tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+set_planner_param healersAhead 1
+
+add_block cpu   50  50 250 250
+add_block mem0 550  50 750 250
+add_block mem1 550 350 750 550
+add_block dsp   50 350 250 550
+add_block io   330  20 470 120
+add_block noc  330 480 470 580
+
+add_bus d0[8]     cpu.d0  mem0.d0
+add_bus d1[8]     cpu.d1  mem1.d1
+add_bus w[4]      dsp.w   mem1.w
+add_bus io_in[4]  io.i    cpu.i
+add_bus io_out[4] cpu.o   io.o
+add_bus n0[4]     noc.a   dsp.a
+add_bus n1[4]     noc.b   mem1.b
+add_net irq       io.irq  dsp.irq
+
+run_bundler STRICT
+generate_topologies
+run_planner 5
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+report_wl

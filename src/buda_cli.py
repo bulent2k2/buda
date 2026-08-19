@@ -825,8 +825,43 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
                 # leaving to a FileNotFoundError three commands in.
                 f"# cwd: {os.getcwd()}\n"
                 f"# See tools/tcl2buda.py.\n\n")
-        self._record_fh.write(_strip_inline_comment(cmd_line).strip() + "\n")
+        line = _strip_inline_comment(cmd_line).strip()
+        if cmd == "open_bdb":
+            line = self._record_open_bdb_resolved(line)
+        self._record_fh.write(line + "\n")
         self._record_fh.flush()
+
+    def _record_open_bdb_resolved(self, line):
+        """The recorded `open_bdb` line with its path RESOLVED.
+
+        The record flattens `source` trees, so a relative path recorded
+        from a sourced file has lost the directory the engine resolved it
+        against — the INNERMOST script's (resolve_script_path), not the
+        entry flow's.  Every reader of the record then has to guess, and
+        the Tcl driver's guess (the entry flow's directory) was measurably
+        wrong for a sourced sub-directory open: the build trace landed
+        beside a file nobody has (#796).  The driver now carries a scan
+        that re-derives the answer, but a scan of the CURRENT flow text is
+        the wrong source for a RECORD of a past run — resolving here, at
+        the moment the engine resolves, is provenance rather than
+        reconstruction, and it reaches every reader (tcl2buda --verify
+        replays a recording from any directory now, where a relative open
+        only replayed from the recorded `# cwd:`).
+
+        `:memory:` stays itself, options ride along, and a spaced path
+        comes out quoted — the spelling the engine reads back
+        (split_quoted_args).  Resolution only; the `.sql` materialization
+        must NOT leak in (the record names the input the flow asked for,
+        never the session's temp copy).
+        """
+        from buda_script import leading_path_and_options
+        from buda_session.util import resolve_script_path
+        path, opts = leading_path_and_options(line)
+        if not path or path == ":memory:":
+            return line
+        path = resolve_script_path(self, path)
+        tok = f'"{path}"' if any(c.isspace() for c in path) else path
+        return " ".join(["open_bdb", tok, *opts])
 
     def _record_note(self, text):
         """A comment in the recording (never a command)."""

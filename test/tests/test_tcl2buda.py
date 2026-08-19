@@ -166,3 +166,32 @@ def test_a_relative_out_path_is_the_same_file_for_record_and_replay(tmp_path):
     assert (tmp_path / "rel.buda").exists(), "recorded somewhere else"
     assert not (_ROOT / "rel.buda").exists(), "recorded into the repo root"
     assert "identical on" in r.stdout, r.stdout
+
+
+def test_a_recorded_open_bdb_carries_its_resolved_path(tmp_path):
+    """The record flattens `source` trees, so a relative `open_bdb` recorded
+    from a sourced file has lost the directory the engine resolved it
+    against — the INNERMOST script's, not the entry flow's — and every
+    reader had to guess (the Tcl driver's entry-dir guess put a build trace
+    beside a file nobody has, #796).  The recorder resolves the path at the
+    moment the engine does: provenance, not reconstruction.  `:memory:`
+    stays itself and options ride along."""
+    sub = tmp_path / "setup"
+    sub.mkdir()
+    (sub / "inner.buda").write_text("open_bdb ck.bdb\n")
+    top = tmp_path / "top.buda"
+    top.write_text("source setup/inner.buda\nset_die 100 100\n"
+                   "open_bdb :memory:\nexit\n")
+    out = tmp_path / "rec.buda"
+    p = subprocess.run(
+        [sys.executable, str(_ROOT / "src" / "buda_cli.py"), "--no-viz",
+         str(top)],
+        capture_output=True, encoding="utf-8", cwd=str(_ROOT), timeout=300,
+        env=dict(os.environ, BUDA_RECORD=str(out), MPLBACKEND="Agg"))
+    assert p.returncode == 0, p.stdout + p.stderr
+    opens = [c for c in _commands(out) if c.startswith("open_bdb")]
+    # Resolved against the SOURCED file's directory — where the engine
+    # actually created it — not the entry flow's.
+    assert opens[0] == f"open_bdb {sub / 'ck.bdb'}", opens
+    assert (sub / "ck.bdb").exists()
+    assert opens[1] == "open_bdb :memory:", opens

@@ -87,6 +87,12 @@ When you run BUDA, it automatically looks for a "sidecar" JSON file with the sam
 
 If the engine finds a conflict (e.g., you changed the floorplan and the pinned topology no longer exists), it will print a warning and fall back to the best available candidate.
 
+For iterating on a design *across sessions* — build once with a checkpoint,
+then resume at the planner (or just re-inspect the routed result) without
+rebuilding — see [Build & Resume Sessions](BUILD_RESUME.md): `btcl -b
+<flow>.buda` / `btcl -r <flow>.buda`, with a flat and a hier demo vehicle
+(`demo/resume_flat.buda`, `demo/resume_hier.buda`).
+
 ---
 
 ## 4. Example Script: `quickstart.buda`

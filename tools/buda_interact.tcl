@@ -509,7 +509,15 @@ proc _skipped {verb {skips {}}} {
 # wrong directory and the resume's raw `buda::do` replay — which runs with
 # NO script — would open a DIFFERENT file than the build did.
 proc _resolve_bdb {p} {
-    if {$p eq ":memory:" || [file pathtype $p] eq "absolute"} { return $p }
+    if {$p eq ":memory:"} { return $p }
+    # An ABSOLUTE token is normalized rather than returned raw: the
+    # recorder now writes open_bdb paths resolved (Python's normpath, which
+    # keeps symlinks), while every path this driver computes went through
+    # `file normalize` (which resolves them) — on a box where the flow's
+    # directory crosses a symlink the same file would otherwise spell two
+    # ways and every equality test here (the redirect rewrite, the
+    # armed-vs-flow-checkpoint banner) would miss.
+    if {[file pathtype $p] eq "absolute"} { return [file normalize $p] }
     # The engine resolves against the INNERMOST sourced file's directory,
     # and the flattened record has lost which file that was — but the
     # pre-flight scan walks the same tree and kept the answer (a relative

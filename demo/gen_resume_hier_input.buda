@@ -1,0 +1,45 @@
+# ============================================================
+# demo/gen_resume_hier_input.buda
+#
+# GENERATOR for demo/resume_hier_input.bdb.sql — the read-only input the
+# build/resume demo (resume_hier.buda) opens.  Run it once to (re)create
+# the committed input:
+#
+#   cd demo && ../bin/buda --no-viz gen_resume_hier_input.buda
+#
+# Deterministic: same commands, same rows, so a re-run is a no-op diff.
+# The input holds the DESIGN only — cells, placed instances, and buses —
+# and none of the routing: that is the point of the pair.  The demo flow
+# reads this design without ever writing it back (`open_bdb … ` with no
+# `writeback`), and `btcl -b` materializes it into a durable checkpoint.
+#
+# The design: two tiles, each with two leaves —
+#
+#   tile_cell  180×230   (2 instances: t0 at x=0, t1 at x=450)
+#   leaf_cell   70×130   (2 per tile: lo, hi)
+#
+# Buses:
+#   b_lohi_t0[4]  t0/lo → t0/hi   } the same cell-local shape in both
+#   b_lohi_t1[4]  t1/lo → t1/hi   } tiles: ONE template, solved once
+#   x_tile[4]     t0/hi → t1/lo     cross-tile, leaf→leaf
+# ============================================================
+
+open_bdb :memory:
+set_die 850 500
+
+add_cell tile_cell 180 230
+add_cell leaf_cell  70 130
+
+add_inst_to_cell tile_cell lo leaf_cell 10 50
+add_inst_to_cell tile_cell hi leaf_cell 90 50
+
+add_inst t0 tile_cell -   0 0
+add_inst t1 tile_cell - 450 0
+
+bdb_net_mode on
+add_bus b_lohi_t0[4]  t0/lo.out  t0/hi.in
+add_bus b_lohi_t1[4]  t1/lo.out  t1/hi.in
+add_bus x_tile[4]     t0/hi.out  t1/lo.in
+
+save_bdb resume_hier_input.bdb.sql
+exit

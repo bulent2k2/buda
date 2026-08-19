@@ -1,0 +1,46 @@
+# ============================================================
+# demo/resume_hier.buda — the HIER build/resume demo vehicle.
+#
+# Pairs with docs/BUILD_RESUME.md.  A two-level design read from a
+# READ-ONLY input: `open_bdb resume_hier_input.bdb.sql` carries no
+# `writeback`, so this flow never writes the input — run it through
+# `bin/buda` and the routed result is discarded at the end; run it
+# through `btcl -b` and the materialized copy IS the checkpoint
+# (demo/resume_hier.ckpt.bdb), with the input still never written:
+#
+#   bin/btcl -b demo/resume_hier.buda      # build; checkpoint materialized
+#   bin/btcl -r demo/resume_hier.buda      # resume at the deepest stage
+#   bin/btcl -r -s plan demo/resume_hier.buda   # re-enter at the planner
+#
+# The design (from gen_resume_hier_input.buda): two instances of one
+# tile cell, each with two leaves.  The two intra-tile buses are the
+# SAME cell-local shape, so the bundler makes ONE template — a `pin`
+# on it at the prompt re-routes both tiles — plus a cross-tile bus.
+#
+# Deliberately no `visualize`: under `btcl -i`/`-b` the flow runs
+# verbatim, and a window would block the session before the prompt.
+# Type `explore` or `show` at the prompt instead.
+# ============================================================
+
+source ../flow/tracks/tracks.buda
+
+open_bdb resume_hier_input.bdb.sql
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+# Project the BDB hierarchy onto the routing floorplan, and derive the
+# routing interface (busterms).  On a stage resume these construction
+# steps are HELD — the checkpoint already carries their result.
+derive_busterms 1
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+
+run_hier_bundler
+generate_hier_topologies
+run_planner hier 5
+run_nuts
+check_design nuts
+run_detailed_nuts
+check_design dnuts
+report_wl
