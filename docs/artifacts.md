@@ -3,6 +3,8 @@ Artifacts
 
 Some of these may be obsolete by now, but there is some historical value
 
+[BDB schema v29](https://claude.ai/code/artifact/0c67463d-2e6d-44e8-a151-ec692b2acb18)
+
 [Heal-to-Clean Traces](https://claude.ai/code/artifact/01334610-e7f5-4b58-80d8-21e97d386ba5)  
 
 [The big picture: topo-gen ↔ planner ↔ healer interactions](internal/big-picture-2026-07-22.md)  
