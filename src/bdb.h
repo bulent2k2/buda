@@ -572,11 +572,30 @@ public:
     //       since-changed resolution and VOID the restored plan).
     // v22 = ndr_rule.credit (R5a end-shield crediting opt-in — part of the
     //       rule's pricing basis, so it rides the same table).
+    // v23 = component.is_port (a DEF PINS die port as a zero-area boundary
+    //       component: endpoint derivation is keyed by COMPONENT, so a port
+    //       needs a row, and the flag keeps that fiction visible rather than
+    //       letting it pass as a real instance).
+    // v24 = cell.cls (the LEF MACRO CLASS token — the only authoritative
+    //       hard-macro-vs-standard-cell answer, which is what import_verilog
+    //       needs to decide which instances of undefined modules belong in
+    //       the routing hierarchy).
     // v25 = ndr_rule.bond (R6 shield-bonding opt-in — output-only, so it is
     //       deliberately NOT part of the bundle.ndr_rule pricing stamp).
     // v26 = ndr_rule.width_abs / spacing_abs (R1 absolute values; a rule
     //       declared absolutely is INDISTINGUISHABLE from a default one
     //       without them, since the multiplier stays 1.0).
+    // v27 = bundle_net.drv_path / rcv_paths (the per-BIT endpoints of a
+    //       fan-in / fan-out bundle, on the row that already carries the
+    //       membership so the bit alignment cannot drift from it).  They
+    //       are what makes the per-bit taper (Topology::seg_bits) derivable
+    //       on resume; without them a restored fan-in came back UNTAPERED
+    //       and routed wider than the design that was checkpointed, while
+    //       reporting itself clean.
+    // v28 = ndr_rule.per_layer / metal (per-layer declared values, '' = no
+    //       entries; and the width-anchoring reading, which was measured and
+    //       REFUSED as a default — so it is per-rule and DECLARATION-ONLY,
+    //       a restored rule keeping the reading it was persisted with).
     // v29 = the ROUTING GRID: track_pattern (+ its slot list), grid_override
     //       and keepout.  These were the last physical-design facts with no
     //       table — pure session state, rebuilt by whoever declared them.
