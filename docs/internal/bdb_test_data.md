@@ -51,6 +51,24 @@ text; `git diff` shows exactly which components/nets/busterms/bundles changed.
   isolation for `buda.BDB`-based tests comes from copy-to-temp, not from here
   (`buda.BDB` opens its own read-write connection with no `query_only` hook).
 
+### 2b. Naming the materialization: `BUDA_BDB_MATERIALIZE_TO`
+
+`open_bdb <x>.bdb.sql` (no `writeback`) materializes into a throwaway temp
+binary that receives every pipeline persist and dies with the session.  The
+environment variable **`BUDA_BDB_MATERIALIZE_TO=<path>`** names that binary
+instead: the semantics of the open are unchanged in the one way that
+matters — the `.sql` input is still never written (no writeback source is
+armed) — the pipeline persists into the named file exactly as it persisted
+into the temp, and the file survives the session as a durable checkpoint.
+The request is **popped** by the first no-`writeback` `.sql` open (it names
+ONE file), is declined loudly when the open carries `writeback` (that open
+already has a durable home — the `.sql` itself), and an **existing** target
+is opened as-is rather than re-materialized (a previous session's copy,
+pins and routing included; delete it first for a fresh copy of the input).
+This is the engine half of `btcl -b`'s read-only-input flow
+([TCL_FRONT_END.md](../TCL_FRONT_END.md)); the launcher pre-flights the
+flow and only arms it for a flow whose single `open_bdb` is that shape.
+
 ### 3. Reproducible fixture generation
 
 - **`test/tests/data/build_fixtures.py`** builds each fixture *deterministically*

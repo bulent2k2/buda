@@ -604,18 +604,39 @@ bin/btcl -r -s plan mini.buda    # ...or name the stage (-s alone implies -r)
 `-b` **pre-flights the flow text first** (a `.buda` flow is a flat command
 language — no branching — so a static scan in the engine's own reading
 order, `source`-following and stopping where an `exit` stops the run, sees
-the `open_bdb` sequence the run will execute): a flow whose LAST `open_bdb`
-is **non-durable** (a `.sql` without `writeback`, or `:memory:`) is refused
-*before* the run, naming the file and line — because that shape routes to
-the end and then discards everything, and t=0 is the only cheap place to
-say so (measured the expensive way: a 2000-second heal, gone).  A flow that
-opens its own **durable** BDB keeps it (`-b` arms nothing and says so — an
-armed checkpoint would just be replaced by the flow's own open); a flow
-that opens **none** gets the auto-named checkpoint armed before it, and a
-re-run of `-b` re-arms the same file, so pins persisted there re-attach to
-the rebuilt pool.  The build stamps the flow text's checksum into the
-trace, and a later `-r` NOTEs when the flow changed since — the resume
-replays the *recorded* build — with `btcl -b` as the rebuild remedy.
+the `open_bdb` sequence the run will execute), and decides by what it
+finds.  A flow that opens its own **durable** BDB keeps it (`-b` arms
+nothing and says so — an armed checkpoint would just be replaced by the
+flow's own open); a flow that opens **none** gets the auto-named checkpoint
+armed before it, and a re-run of `-b` re-arms the same file, so pins
+persisted there re-attach to the rebuilt pool.  A flow whose LAST
+`open_bdb` is **non-durable** (a `.sql` without `writeback`, or `:memory:`)
+would route to the end and then discard everything (measured the expensive
+way: a 2000-second heal, gone), so t=0 is where `-b` acts — and for the
+most common such shape it has something better than a refusal:
+
+**The read-only `.sql` input redirects.**  Many hier flows open an input
+`.bdb.sql` *without* `writeback` — "read the design, never write it back".
+The engine already materializes that open into a binary copy and persists
+the whole pipeline into the copy; the only thing wrong with the copy was
+its name (a throwaway temp).  When the flow's **only** `open_bdb` is that
+shape, `-b` names the copy: the materialization lands in the checkpoint
+(`BUDA_BDB_MATERIALIZE_TO`, popped by the first no-`writeback` `.sql`
+open), the input stays read-only **by construction** — same code path, no
+writeback source armed — and the copy survives the session, continuously
+written, so even a killed run keeps its routed state.  The trace records
+the input's path and checksum: a `-b` rerun with the input unchanged
+**reuses** the checkpoint (pins re-attach to the rebuilt pool, exactly as
+in the auto-armed case), a changed input re-materializes fresh — loudly,
+pins discarded, since they would pin a different design's candidates — and
+a `-r` resume rewrites the recorded open onto the checkpoint (re-opening
+the input would materialize a fresh throwaway copy and restore nothing),
+NOTing when the input changed since the build.  A missing input, a flow
+with **several** opens ending non-durable (the request could land on the
+wrong one), or `:memory:` are still refused at t=0, naming the file and
+line.  The build also stamps the flow text's checksum into the trace, and
+a later `-r` NOTEs when the flow changed since — the resume replays the
+*recorded* build — with `btcl -b` as the rebuild remedy.
 `-r` finds the checkpoint at the auto name first, else through any
 `*.trace` beside the flow whose `# flow:` header names it; zero found is a
 refusal with the remedy, two or more is a question, never a guess.  And a

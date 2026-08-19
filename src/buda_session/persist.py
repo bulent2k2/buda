@@ -56,6 +56,40 @@ class PersistMixin:
         """
         import tempfile
         import bdb_serialize
+        # BUDA_BDB_MATERIALIZE_TO: a launcher's request to give the
+        # materialization a DURABLE name instead of a throwaway temp — the
+        # `btcl -b` read-only-input flow.  The semantics of the open are
+        # unchanged in the one way that matters: the .sql input is still
+        # NEVER written (there is no writeback source armed), the pipeline
+        # persists into the named file exactly as it persisted into the
+        # temp, and the file simply survives the session as a checkpoint.
+        # Popped, not read: the request names ONE file, so only the first
+        # no-writeback .sql open takes it (the launcher pre-flights the flow
+        # and only arms this for a single-open flow).  With `writeback` the
+        # open already has a durable home — the .sql itself — so the request
+        # is declined loudly rather than silently changing which file is
+        # authoritative.  An EXISTING target is opened as-is (a previous
+        # session's materialization, pins and routing included); the
+        # launcher deletes it first when it wants a fresh copy of the input.
+        redirect = os.environ.pop('BUDA_BDB_MATERIALIZE_TO', None)
+        if redirect and writeback:
+            print("open_bdb: BUDA_BDB_MATERIALIZE_TO ignored -- `writeback` "
+                  "already gives this open a durable home (the .sql itself)")
+            redirect = None
+        if redirect:
+            out = os.path.abspath(redirect)
+            if os.path.exists(out):
+                print(f"open_bdb: reusing the durable materialization {out} "
+                      f"of {sql_path} (changes persist there; the .sql input "
+                      f"is never written)")
+                return out
+            parent = os.path.dirname(out)
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent, exist_ok=True)
+            bdb_serialize.load(sql_path, out)
+            print(f"open_bdb: materialized {sql_path} -> {out} (durable: "
+                  f"changes persist there; the .sql input is never written)")
+            return out
         base = os.path.basename(sql_path)[:-len('.sql')]  # mix.b_db.sql -> mix.b_db
         tmp_dir = tempfile.mkdtemp(prefix='buda_bdb_')
         out = os.path.join(tmp_dir, base)

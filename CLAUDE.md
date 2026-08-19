@@ -66,7 +66,13 @@ flow: run it verbatim, then the pin/edit prompt, with hier/flat and the
 `-b <flow>.buda` is `-i` with the checkpoint AUTO-NAMED
 (`<flow_dir>/<stem>.ckpt.bdb`) and the flow text pre-flighted first (a flow
 whose own last `open_bdb` is non-durable is refused BEFORE the run, naming
-file+line, instead of discarding the route at the end); `-r [-s <stage>]`
+file+line, instead of discarding the route at the end — EXCEPT the
+read-only-input shape, which is redirected instead: a flow whose ONLY
+`open_bdb` is a `.sql` without `writeback` has its materialization land IN
+the checkpoint (`BUDA_BDB_MATERIALIZE_TO`), so the input is never written,
+the copy survives as the checkpoint, an unchanged-input `-b` rerun reuses
+it with pins re-attaching, and a `-r` resume rewrites the recorded open
+onto it); `-r [-s <stage>]`
 resumes from the auto (or trace-discovered) checkpoint at the DEEPEST stage
 the build trace records, `-s` overriding (and implying `-r` alone), with a
 staleness NOTE when the flow's text changed since the stamped build; a
