@@ -195,3 +195,21 @@ def test_a_recorded_open_bdb_carries_its_resolved_path(tmp_path):
     assert opens[0] == f"open_bdb {sub / 'ck.bdb'}", opens
     assert (sub / "ck.bdb").exists()
     assert opens[1] == "open_bdb :memory:", opens
+
+    # A spaced path quotes with a delimiter the path does not CONTAIN: the
+    # grammar has no escape, so a `"` inside a double-quoted token closes
+    # it early and the tail re-reads as unknown options (Codex #798 P2).
+    spaced = tmp_path / 'a "quote" dir'
+    spaced.mkdir()
+    top.write_text("open_bdb 'a \"quote\" dir/ck.bdb'\nexit\n")
+    out2 = tmp_path / "rec2.buda"
+    p = subprocess.run(
+        [sys.executable, str(_ROOT / "src" / "buda_cli.py"), "--no-viz",
+         str(top)],
+        capture_output=True, encoding="utf-8", cwd=str(_ROOT), timeout=300,
+        env=dict(os.environ, BUDA_RECORD=str(out2), MPLBACKEND="Agg"))
+    assert p.returncode == 0, p.stdout + p.stderr
+    line = [c for c in _commands(out2) if c.startswith("open_bdb")][0]
+    import buda_script
+    toks = buda_script.split_quoted_args(line)
+    assert toks == [str(spaced / "ck.bdb")], (line, toks)

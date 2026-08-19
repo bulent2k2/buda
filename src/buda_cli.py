@@ -860,7 +860,17 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         if not path or path == ":memory:":
             return line
         path = resolve_script_path(self, path)
-        tok = f'"{path}"' if any(c.isspace() for c in path) else path
+        tok = path
+        if any(c.isspace() for c in path):
+            # The delimiter must be a quote the path does not CONTAIN — the
+            # grammar honours either kind but has no escape, so a `"` inside
+            # a double-quoted token closes it early and the tail re-reads as
+            # unknown options (Codex #798 P2).  A path carrying whitespace
+            # AND both quote kinds has no valid spelling anywhere in `.buda`
+            # (the Tcl bridge's `_join_args` has the same limit), so the
+            # single-quote fallback covers every path that can be spelled.
+            q = '"' if '"' not in path else "'"
+            tok = f"{q}{path}{q}"
         return " ".join(["open_bdb", tok, *opts])
 
     def _record_note(self, text):
