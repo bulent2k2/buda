@@ -117,9 +117,16 @@ it — and an absolute rectangle answers that directly.
 
 ---
 
-## 4. The blocker for measuring any of it
+## 4. The blocker for measuring any of it — DISCHARGED 2026-08-16
 
-**No design here has a real power grid.**
+**~~No design here has a real power grid.~~**  One does now:
+`flow/ariane133/ariane_pdn.def`, produced by an OpenROAD pdngen run against
+the digest-pinned ariane133 inputs — this section's own errand, carried out.
+
+The table below is the tree as it stood on 2026-08-15.  It is kept rather
+than deleted because it is what made the blocker real: every strap in it was
+typed by one of us, which is the same limitation that kept macro `OBS`
+invisible until somebody else's file arrived (item 12).
 
 | DEF | SPECIALNETS | geometry |
 |---|---|---|
@@ -141,6 +148,10 @@ The errand is written out in
 (all of them already digest-pinned in `flow/ariane133/`), the pdngen script,
 and how to check the result.
 
+**Run 2026-08-16.**  That document carries its own `Status: RUN` header, the
+resulting DEF, and every measurement taken on it.  Nothing in this section is
+waiting on anything.
+
 ## 5. What to build, if this is picked up
 
 Three pieces, in order, and the first two are each worth doing on their own:
@@ -160,13 +171,38 @@ already uses. BUDA read **0 of their 685 metal paths** — every one carries
 `+ SHAPE` — and now reads all 685, with the 6781 single-point via placements
 censused as what they are rather than as unread wire. So the reader's
 correctness had real generator bytes to be tested against with no OpenROAD
-install at all; only the KEEPOUT-impact question still needs §4's run. The
+install at all; and the KEEPOUT-impact question §4's run was for has since
+been answered too (below). The
 synthetic-case objection held for as long as nobody looked for somebody
 else's output, which is item 12's lesson wearing one more costume.
 
-What (0) did NOT do, and what §4's run is still for: change any route. No DEF
-in the tree carries `+ SHAPE`, so the fix is byte-identical on every flow —
-correct, and unmeasured. Details in `opens_interchange.md` item 15.
+What (0) did NOT do: change any route.  No DEF in the tree carries
+`+ SHAPE`, so the fix is byte-identical on every flow — correct, and, when
+this was written, unmeasured.
+
+**Measured 2026-08-16 on the PDN, and the route barely moves — but only after
+a SECOND fix.**  Splicing the PDN's `SPECIALNETS` into the original DEF (the
+netlist held identical, 161 busterms / 111 hbundles, so the keepouts are the
+only thing that changed) adds `SPECIALNET:6673` keepouts beside the 13,034
+`OBS` ones.  Those are die-crossing stripes, so they lie OUTSIDE every block
+and `set_keepout_loci outside` — a block-INTERIOR mitigation — structurally
+cannot reach them: the Hanan grid went ~6,327 → ~3.2M cells and the planner
+was killed at 16 minutes.  With `set_keepout_loci stripes` (a thin-and-long
+zone keeps only its long-axis loci; what it BLOCKS is untouched) the same run
+finishes in 30.6 s at 0 overlaps, abstract WL 88,189,343 against the
+baseline's 88,189,348 — five units, on a design whose signal metal lives on
+M8–M10.
+
+That figure is a LOWER bound on what a real PDN blocks: a via placement's
+enclosure metal is not modelled at all, so the 113,969 via placements
+contribute no keepout (`def_io.cpp` — the extent lives in the DEF's `VIAS`
+section, which the reader does not resolve).  It only strengthens the
+conclusion, since the grid already explodes on the wires alone.
+
+Full record — including the control run showing that `stripes` ALONE changes
+nothing, without which the five units would be a two-variable comparison —
+[openroad_pdn_recipe.md](openroad_pdn_recipe.md) §8, item 1.  Details in
+`opens_interchange.md` item 15.
 
 **(a) Carry the strap's identity into the session** — **LANDED 2026-08-17.**
 Of the two shapes offered here — a net label on the imported keepout, or a
