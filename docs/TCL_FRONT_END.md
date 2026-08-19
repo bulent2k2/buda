@@ -590,6 +590,40 @@ every stage session afterwards refused, advising the build session that had
 just run.  The resume recipe the banner prints is shell-quoted for the same
 reason — it is meant to be typed back.
 
+**The `-b` / `-r` / `-s` spellings** are the same machinery with the two
+invented names taken off your plate — the checkpoint filename and the
+stage:
+
+```bash
+bin/btcl -b mini.buda            # build; checkpoint auto-named
+                                 #   <flow_dir>/<stem>.ckpt.bdb
+bin/btcl -r mini.buda            # resume at the DEEPEST recorded stage
+bin/btcl -r -s plan mini.buda    # ...or name the stage (-s alone implies -r)
+```
+
+`-b` **pre-flights the flow text first** (a `.buda` flow is a flat command
+language — no branching — so a static scan in the engine's own reading
+order, `source`-following and stopping where an `exit` stops the run, sees
+the `open_bdb` sequence the run will execute): a flow whose LAST `open_bdb`
+is **non-durable** (a `.sql` without `writeback`, or `:memory:`) is refused
+*before* the run, naming the file and line — because that shape routes to
+the end and then discards everything, and t=0 is the only cheap place to
+say so (measured the expensive way: a 2000-second heal, gone).  A flow that
+opens its own **durable** BDB keeps it (`-b` arms nothing and says so — an
+armed checkpoint would just be replaced by the flow's own open); a flow
+that opens **none** gets the auto-named checkpoint armed before it, and a
+re-run of `-b` re-arms the same file, so pins persisted there re-attach to
+the rebuilt pool.  The build stamps the flow text's checksum into the
+trace, and a later `-r` NOTEs when the flow changed since — the resume
+replays the *recorded* build — with `btcl -b` as the rebuild remedy.
+`-r` finds the checkpoint at the auto name first, else through any
+`*.trace` beside the flow whose `# flow:` header names it; zero found is a
+refusal with the remedy, two or more is a question, never a guess.  And a
+session whose pins have nowhere durable to land prints them at exit **as
+flow text** (`select_topology d1 4` paste lines, committed edit
+transactions included), so the experiment's outcome survives the session
+either way: as checkpoint rows, or as source.
+
 Every build session with a live file-backed checkpoint writes its recorded
 trace beside it (`<ckpt.bdb>.trace`); a stage session replays only the
 trace's SETUP portion, calls `load_pipeline` — which restores bundles,

@@ -9,6 +9,10 @@
 #   btcl.ps1 -i flow.buda [ckpt [stage]]
 #                                      # run a .BUDA flow, then the interactive
 #                                      # pin/edit prompt (tools/buda_interact.tcl)
+#   btcl.ps1 -b flow.buda              # -i with the checkpoint auto-named and
+#                                      # the flow text pre-flighted first
+#   btcl.ps1 -r [-s stage] flow.buda   # -i resuming at the deepest recorded
+#                                      # stage; -s overrides (implies -r alone)
 #   btcl.ps1 -- -v.tcl                 # a script whose NAME starts with a dash
 #
 # The operand is a TCL script; a `.buda` flow is refused with the two ways to
@@ -56,6 +60,7 @@ $reThreads = '^(-?\d+|max)$'
 
 $rest = @() + $args
 $interactive = $false
+$modeArgs = @()
 while ($rest.Count -gt 0) {
     $a = $rest[0]
     if ($a -in '-v', '--visualize') {
@@ -63,6 +68,26 @@ while ($rest.Count -gt 0) {
         $rest = @(if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() })
     } elseif ($a -in '-i', '--interactive') {
         $interactive = $true
+        $rest = @(if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() })
+    } elseif ($a -in '-b', '--build') {
+        # -b/-r/-s are modes OF the interactive driver: forwarded as their
+        # long spellings, ahead of the operands, so the driver owns their
+        # meaning and the two wrappers cannot drift.
+        $interactive = $true
+        $modeArgs += '--build'
+        $rest = @(if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() })
+    } elseif ($a -in '-r', '--resume') {
+        $interactive = $true
+        $modeArgs += '--resume'
+        $rest = @(if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() })
+    } elseif ($a -in '-s', '--stage') {
+        if ($rest.Count -lt 2) { Fail2 "btcl: $a requires a stage (topo|plan|nuts|dnuts)" }
+        $interactive = $true
+        $modeArgs += @('--stage', $rest[1])
+        $rest = @(if ($rest.Count -gt 2) { $rest[2..($rest.Count - 1)] } else { @() })
+    } elseif ($a -like '--stage=*') {
+        $interactive = $true
+        $modeArgs += @('--stage', $a.Substring('--stage='.Length))
         $rest = @(if ($rest.Count -gt 1) { $rest[1..($rest.Count - 1)] } else { @() })
     } elseif ($a -in '-j', '--threads') {
         # The value is NOT a path — it travels to the child engine as an env
@@ -115,10 +140,10 @@ if ($rest.Count -gt 0 -and $rest[0] -like '-*') {
 if ($interactive) {
     if ($rest.Count -gt 0 -and $rest[0] -like '*.buda') {
         $driver = Join-Path $ProjectRoot 'tools/buda_interact.tcl'
-        tclsh $driver @rest
+        tclsh $driver @modeArgs @rest
         exit $LASTEXITCODE
     }
-    Fail2 "btcl: -i takes a .buda flow (a Tcl flow can source tools/buda_prompt.tcl itself)"
+    Fail2 "btcl: -i/-b/-r take a .buda flow (a Tcl flow can source tools/buda_prompt.tcl itself)"
 }
 
 # The mirror: a .buda flow handed to the bare wrapper.  tclsh would read it as

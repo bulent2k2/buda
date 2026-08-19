@@ -26,6 +26,16 @@
 #                                  # RESUMES from the checkpoint instead of
 #                                  # rebuilding: setup replayed from the build
 #                                  # trace, load_pipeline, re-enter there
+#   btcl -b flow.buda              # -i with the checkpoint AUTO-NAMED
+#                                  # (<flow_dir>/<stem>.ckpt.bdb) and the flow
+#                                  # text pre-flighted first: a flow whose own
+#                                  # last open_bdb is non-durable is refused
+#                                  # BEFORE the run instead of discarding the
+#                                  # route at the end
+#   btcl -r [-s stage] flow.buda   # -i resuming from the auto (or discovered)
+#                                  # checkpoint, at the DEEPEST stage the build
+#                                  # trace records; -s overrides (and implies
+#                                  # -r on its own)
 #   btcl -- -v.tcl                 # a script whose NAME starts with a dash
 #
 # The operand is a TCL script.  A `.buda` flow handed to the bare wrapper is
@@ -53,6 +63,7 @@ PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
 
 INTERACTIVE=0
+MODE_ARGS=()
 # A thread request is an integer (optionally signed) or the literal `max`;
 # anything else is a wrapper-level error, caught here before an engine is
 # spawned.  A NEGATIVE or otherwise out-of-range count is accepted, not
@@ -67,6 +78,14 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -v|--visualize) export BUDA_VIZ_FINAL=1; shift ;;
     -i|--interactive) INTERACTIVE=1; shift ;;
+    # -b/-r/-s are modes OF the interactive driver: forwarded to it as their
+    # long spellings (MODE_ARGS), ahead of the operands, so the driver owns
+    # their meaning and the two entry points cannot drift.
+    -b|--build)     INTERACTIVE=1; MODE_ARGS+=(--build); shift ;;
+    -r|--resume)    INTERACTIVE=1; MODE_ARGS+=(--resume); shift ;;
+    -s|--stage)     [ $# -ge 2 ] || { echo "btcl: $1 requires a stage (topo|plan|nuts|dnuts)" >&2; exit 2; }
+                    INTERACTIVE=1; MODE_ARGS+=(--stage "$2"); shift 2 ;;
+    --stage=*)      INTERACTIVE=1; MODE_ARGS+=(--stage "${1#--stage=}"); shift ;;
     # -j/--threads: the value is NOT a path — it must pass verbatim, never be
     # anchored to $PWD or taken as the script (the `buda -j 4` hazard its own
     # wrapper documents).  It travels to the child engine as an env var, the
@@ -122,8 +141,8 @@ fi
 # source tools/buda_prompt.tcl itself (as flow/tcl/design.tcl does).
 if [ "$INTERACTIVE" = 1 ]; then
   case "$1" in
-    *.buda) exec tclsh "$PROJECT_ROOT/tools/buda_interact.tcl" "$@" ;;
-    *)      echo "btcl: -i takes a .buda flow (a Tcl flow can source" \
+    *.buda) exec tclsh "$PROJECT_ROOT/tools/buda_interact.tcl" ${MODE_ARGS[@]+"${MODE_ARGS[@]}"} "$@" ;;
+    *)      echo "btcl: -i/-b/-r take a .buda flow (a Tcl flow can source" \
                  "tools/buda_prompt.tcl itself)" >&2; exit 2 ;;
   esac
 fi

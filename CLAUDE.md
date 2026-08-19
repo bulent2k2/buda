@@ -63,6 +63,15 @@ default a bare `buda` does, only the launchers imposing it), and
 `-i <flow>.buda` for interactive iteration on ANY `.buda`
 flow: run it verbatim, then the pin/edit prompt, with hier/flat and the
 `replan` recipe learned from the recorder — see docs/TCL_FRONT_END.md.
+`-b <flow>.buda` is `-i` with the checkpoint AUTO-NAMED
+(`<flow_dir>/<stem>.ckpt.bdb`) and the flow text pre-flighted first (a flow
+whose own last `open_bdb` is non-durable is refused BEFORE the run, naming
+file+line, instead of discarding the route at the end); `-r [-s <stage>]`
+resumes from the auto (or trace-discovered) checkpoint at the DEEPEST stage
+the build trace records, `-s` overriding (and implying `-r` alone), with a
+staleness NOTE when the flow's text changed since the stamped build; a
+session whose pins have nowhere durable to land prints them at exit as
+flow-text paste lines (`select_topology d1 4`).
 The flow's OUTPUT means what `bin/buda` makes it mean too: `-i` arms
 `buda::log`, so the console gets ONE line per command plus the runtime
 summary and the detail goes to the `<flow_dir>/log/<stem>_flow.log` the CLI
