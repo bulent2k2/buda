@@ -33,11 +33,20 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 _DRIVER = _ROOT / "tools" / "buda_interact.tcl"
-_BTCL = _ROOT / "bin" / "btcl"
+# The launcher, platform-selected (bash wrapper on POSIX, the PowerShell
+# twin on native Windows — and on any box with pwsh when BUDA_WRAPPER_PS=1
+# forces it), so the wrapper-level tests below exercise whichever btcl this
+# platform actually runs: the -b/-r/-s forwarding is wrapper code, and the
+# .ps1 twin's copy was only hand-validated until these went through
+# wrapper_select (validated here under BUDA_WRAPPER_PS=1 with pwsh).
+from wrapper_select import wrapper_command, wrapper_missing_reason
+_BTCL_CMD = wrapper_command(_ROOT, "btcl")
 
 pytestmark = [pytest.mark.mid,
               pytest.mark.skipif(shutil.which("tclsh") is None,
-                                 reason="no tclsh on this host")]
+                                 reason="no tclsh on this host"),
+              pytest.mark.skipif(_BTCL_CMD is None,
+                                 reason=wrapper_missing_reason("btcl"))]
 
 # flow/tcl/design.tcl's design as a plain .buda — proven clean, with enough
 # candidates per bundle for a pin to be a real choice.
@@ -262,12 +271,12 @@ def test_armed_bdb_gives_a_flat_flow_durable_pins(tmp_path):
     flow = tmp_path / "mini.buda"
     flow.write_text(_FLAT_FLOW)
 
-    r = _run(["bash", _BTCL, "-i", flow, tmp_path / "armed.bdb"], tmp_path,
+    r = _run([*_BTCL_CMD, "-i", flow, tmp_path / "armed.bdb"], tmp_path,
              stdin="pin d1 4\ndone\n")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "checkpoint" in r.stdout and "no file-backed BDB" not in r.stdout
 
-    r = _run(["bash", _BTCL, "-i", flow, tmp_path / "armed.bdb"], tmp_path)
+    r = _run([*_BTCL_CMD, "-i", flow, tmp_path / "armed.bdb"], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     log = _log(flow)
     assert "durable pin restored -> topo 4" in log
@@ -582,13 +591,13 @@ def test_concurrent_sessions_fail_loudly_and_do_not_corrupt_the_bdb(tmp_path):
 def test_btcl_dash_i_wraps_the_driver_and_refuses_tcl(tmp_path):
     flow = tmp_path / "mini.buda"
     flow.write_text(_FLAT_FLOW)
-    r = _run(["bash", _BTCL, "-i", flow], tmp_path)
+    r = _run([*_BTCL_CMD, "-i", flow], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "FLAT flow" in r.stdout
 
     tclflow = tmp_path / "flow.tcl"
     tclflow.write_text("puts hi\n")
-    r = _run(["bash", _BTCL, "-i", tclflow], tmp_path)
+    r = _run([*_BTCL_CMD, "-i", tclflow], tmp_path)
     assert r.returncode == 2
     assert "prompt.tcl" in r.stderr           # the message names the path
 
@@ -603,7 +612,7 @@ def test_a_buda_flow_without_dash_i_says_which_two_ways_run_it(tmp_path):
     # mistake, and both arrive after part of the flow has already run.
     flow = tmp_path / "mini.buda"
     flow.write_text(_FLAT_FLOW)
-    r = _run(["bash", _BTCL, flow], tmp_path)
+    r = _run([*_BTCL_CMD, flow], tmp_path)
     assert r.returncode == 2
     assert "is a BUDA flow" in r.stderr
     assert "btcl -i" in r.stderr and "buda " in r.stderr   # both remedies
@@ -613,7 +622,7 @@ def test_a_buda_flow_without_dash_i_says_which_two_ways_run_it(tmp_path):
     # does not audit what a Tcl script may be called.
     tclflow = tmp_path / "hi.tcl"
     tclflow.write_text("puts hi\n")
-    r = _run(["bash", _BTCL, tclflow], tmp_path)
+    r = _run([*_BTCL_CMD, tclflow], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "hi" in r.stdout
 
@@ -626,7 +635,7 @@ def test_a_flow_run_is_summarized_like_the_cli_and_filed_in_the_log(tmp_path):
     # being open and only the CLI ever opened one.
     flow = tmp_path / "mini.buda"
     flow.write_text(_FLAT_FLOW)
-    r = _run(["bash", _BTCL, "-i", flow], tmp_path)
+    r = _run([*_BTCL_CMD, "-i", flow], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
 
     # One line per command, in the CLI's own shape (`  <cmd>  <secs>s  <head>`).
@@ -659,7 +668,7 @@ def test_the_prompt_shows_what_you_type_in_full(tmp_path):
     # and drops it while the prompt waits.
     flow = tmp_path / "mini.buda"
     flow.write_text(_FLAT_FLOW)
-    r = _run(["bash", _BTCL, "-i", flow], tmp_path,
+    r = _run([*_BTCL_CMD, "-i", flow], tmp_path,
              stdin="topos d1\nreplan\ndone\n")
     assert r.returncode == 0, r.stdout + r.stderr
 
@@ -684,7 +693,7 @@ def test_build_flag_arms_auto_checkpoint_and_stamps_trace(tmp_path):
     # the flag to the driver is what this test measures first.
     flow = tmp_path / "mini.buda"
     flow.write_text(_FLAT_FLOW)
-    r = _run(["bash", _BTCL, "-b", flow], tmp_path)
+    r = _run([*_BTCL_CMD, "-b", flow], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "-b arming checkpoint" in r.stdout
     ckpt = tmp_path / "mini.ckpt.bdb"
@@ -696,7 +705,7 @@ def test_build_flag_arms_auto_checkpoint_and_stamps_trace(tmp_path):
 
     # A rebuild re-arms the SAME checkpoint (pins persisted there re-attach
     # to the rebuilt pool — the _apply_bdb_pins path), and says so.
-    r = _run(["bash", _BTCL, "-b", flow], tmp_path)
+    r = _run([*_BTCL_CMD, "-b", flow], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "re-arming the existing checkpoint" in r.stdout
 
@@ -719,7 +728,7 @@ def test_resume_flag_defaults_to_deepest_stage(tmp_path):
     assert "replay> run_detailed_nuts" in r.stdout
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
 
-    r = _run(["bash", _BTCL, "-s", "plan", flow], tmp_path)
+    r = _run([*_BTCL_CMD, "-s", "plan", flow], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "RESUMING at `plan`" in r.stdout
     assert "replay> RUN_PLANNER 5" in r.stdout
@@ -1014,3 +1023,53 @@ def test_redirect_reuse_keeps_pins_and_a_changed_input_rebuilds(tmp_path):
     assert "re-materializing" in r.stdout and "fresh" in r.stdout
     assert "[pinned]" not in _log(flow)
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_the_build_resume_demo_vehicles(tmp_path):
+    # docs/BUILD_RESUME.md's two walkthroughs, pinned so the doc's recipes
+    # cannot rot: the FLAT demo (no open_bdb -> auto checkpoint) and the
+    # HIER demo (read-only .bdb.sql input -> materialized checkpoint;
+    # dnuts resume = inspection, plan resume takes a template pin).
+    # Copied to tmp_path with the ../flow/tracks fixture their `source`
+    # expects, so nothing dirties demo/ and the flow logs cannot race
+    # other tests running the demos in place.
+    demo = tmp_path / "demo"
+    demo.mkdir()
+    shutil.copytree(_ROOT / "flow" / "tracks", tmp_path / "flow" / "tracks")
+    for f in ("resume_flat.buda", "resume_hier.buda",
+              "resume_hier_input.bdb.sql"):
+        shutil.copy(_ROOT / "demo" / f, demo / f)
+
+    r = _run([*_BTCL_CMD, "-b", demo / "resume_flat.buda"], tmp_path,
+             stdin="pin d1 4\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "-b arming checkpoint" in r.stdout and "FLAT flow" in r.stdout
+    assert (demo / "resume_flat.ckpt.bdb").exists()
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    r = _run([*_BTCL_CMD, "-r", demo / "resume_flat.buda"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "deepest recorded stage `dnuts`" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    inp = (demo / "resume_hier_input.bdb.sql").read_bytes()
+    r = _run([*_BTCL_CMD, "-b", demo / "resume_hier.buda"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "materializing the read-only input" in r.stdout
+    assert "HIER flow" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+    assert (demo / "resume_hier_input.bdb.sql").read_bytes() == inp
+
+    # dnuts resume = the guarded inspection session; plan resume holds the
+    # construction and takes a template pin that fans to both instances.
+    r = _run([*_BTCL_CMD, "-r", demo / "resume_hier.buda"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "INSPECTION session" in r.stdout
+
+    r = _run([*_BTCL_CMD, "-r", "-s", "plan", demo / "resume_hier.buda"],
+             tmp_path, stdin="pin b_lohi 2\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "held by the checkpoint" in r.stdout
+    assert "2 expanded instances" in r.stdout      # the template pin fanned out
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+    assert (demo / "resume_hier_input.bdb.sql").read_bytes() == inp

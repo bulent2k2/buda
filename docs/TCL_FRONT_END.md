@@ -592,7 +592,8 @@ reason — it is meant to be typed back.
 
 **The `-b` / `-r` / `-s` spellings** are the same machinery with the two
 invented names taken off your plate — the checkpoint filename and the
-stage:
+stage ([Build & Resume Sessions](BUILD_RESUME.md) is the short practical
+guide, with a flat and a hier demo vehicle):
 
 ```bash
 bin/btcl -b mini.buda            # build; checkpoint auto-named
