@@ -378,7 +378,7 @@ spaces](#paths-and-paths-with-spaces): bare for `import_verilog` and
 |---|---|
 | `open_bdb <path> [writeback]` | Open or create a `.bdb`, or materialize a `*.bdb.sql` text fixture to a temp binary. `writeback` (for `.sql` only) dumps changes back to the `.sql` on `save_bdb`/`exit`/end-of-run. Use before any other BDB command. |
 | `save_bdb` | Write the working BDB back to its `*.bdb.sql` source now (after `open_bdb … writeback`). |
-| `import_def_lef <def> <lef>` | Import placements from DEF + cell sizes from LEF. Clears all tables. |
+| `import_def_lef <def> <lef> [no_tracks] [no_blockages] [allow_missing_footprints]` | Import placements from DEF + cell sizes from LEF. Clears all tables. Also imports the DEF's `TRACKS` and its obstruction (macro `OBS`, `LAYER` blockages, `SPECIALNETS` straps) as keepouts — see [BDB_REFERENCE](BDB_REFERENCE.md#obstruction-and-keepouts). |
 | `import_verilog <v>` | Elaborate hierarchy from Verilog; preserves coordinates from a prior `import_def_lef`. |
 | `bdb_net_mode on\|off` | Toggle whether nets/buses are written directly to BDB database. |
 | `add_blocks_from_bdb <depth> [deepest\|skip\|error]` | Populate the BUDA floorplan from BDB instances at hierarchy depth `N`. Blocks that have at least one loaded BDB descendant are automatically marked as containers (hierarchy envelopes, transparent to LOW layers). |

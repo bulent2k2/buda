@@ -240,6 +240,28 @@ add_keepout 300 300 500 500 M4
 add_keepout 100 100 250 250 M4 M5
 ```
 
+**Zones you did not declare by hand.** A hand-declared zone is one of three
+sources, and all three behave identically once installed:
+
+- `import_def_lef` turns the DEF's obstruction — macro `OBS`, `LAYER`
+  blockages, `SPECIALNETS` power straps — into keepouts too, and a strap's
+  keepout carries its **net** so the NDR rail predicates can tell a rail from
+  anonymous obstruction. What is imported, what deliberately is not (a
+  component `+ HALO`, `PLACEMENT` blockages, `+ PARTIAL` density caps), and
+  how it is reported are in
+  [BDB_REFERENCE](../BDB_REFERENCE.md#obstruction-and-keepouts).
+- Solid leaf-cell blocks generate LOW-layer keepouts, as above.
+
+**Persistence.** With a BDB open, keepouts are written through to its
+`keepout` table and restored by `open_bdb` (schema v29) — the zone with its
+layer set, `inside_block`, and `net`. See
+[BDB_REFERENCE](../BDB_REFERENCE.md#1-schema-overview).
+
+**Hanan loci.** Every keepout's edges become grid lines by default. On a
+design that imports thousands of them, that is where the grid cost goes;
+[`set_keepout_loci`](topologies.md#set_keepout_loci) narrows the contribution
+without changing what is blocked.
+
 ---
 
 ### `add_net`
