@@ -727,11 +727,13 @@ def test_resume_flag_defaults_to_deepest_stage(tmp_path):
 
 
 def test_build_flag_refuses_a_nondurable_checkpoint_before_running(tmp_path):
-    # The shape that cost a 2000-second heal: the flow's own last open_bdb
-    # is a `.sql` without `writeback`, so the run ends by DISCARDING
-    # everything it routed.  -b pre-flights the flow TEXT (source-following,
-    # engine reading order) and refuses at t=0 — before an engine is even
-    # spawned — naming the file and line of the open.
+    # The non-durable shapes -b still refuses at t=0 — before an engine is
+    # spawned — naming the file and line of the open.  (The single-open
+    # read-only `.sql` shape is no longer among them: that one REDIRECTS —
+    # see test_build_redirects_a_readonly_sql_input.)  Here: a `.sql` input
+    # that does not exist (the build could only fail at the open, a route
+    # later), a MULTI-open flow ending non-durable (redirect could land on
+    # the wrong open, so those keep the refusal), and `:memory:`.
     sub = tmp_path / "ck_open.buda"
     sub.write_text("# checkpoint half\nopen_bdb design.bdb.sql\n")
     flow = tmp_path / "mini.buda"
@@ -739,11 +741,21 @@ def test_build_flag_refuses_a_nondurable_checkpoint_before_running(tmp_path):
     r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
     assert r.returncode == 2
     assert "-b refused before running" in r.stderr
-    assert "DISCARDED" in r.stderr
+    assert "does not exist" in r.stderr                # the missing input
     assert "ck_open.buda line 2" in r.stderr           # the open, located
-    assert "writeback" in r.stderr                     # the remedy
     assert "Bundler" not in r.stdout                   # nothing was spent
     assert not (tmp_path / "mini.ckpt.bdb").exists()
+
+    # Several opens ending non-durable: the classic refusal, now also
+    # naming the redirect boundary.
+    (tmp_path / "scratch.bdb.sql").write_text("")
+    flow.write_text("open_bdb good.bdb\n" + _FLAT_FLOW
+                    + "open_bdb scratch.bdb.sql\n")
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 2
+    assert "DISCARDED" in r.stderr
+    assert "writeback" in r.stderr                     # the remedy
+    assert "ONLY open_bdb" in r.stderr                 # the redirect boundary
 
     # `:memory:` is the other non-durable spelling.
     flow.write_text(_FLAT_FLOW + "open_bdb :memory:\n")
@@ -905,4 +917,100 @@ def test_sourced_edits_and_nested_checkpoints(tmp_path):
     r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "(or a sourced file's) changed since this build" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+# ── the read-only .sql input: -b redirect (phase 2) ────────────────────────
+# Many hier flows open an input `.bdb.sql` WITHOUT `writeback` — "read the
+# design, never write it back".  The engine materializes such an open into a
+# binary copy and persists the whole pipeline into the copy; -b names that
+# copy (BUDA_BDB_MATERIALIZE_TO) so it survives as the checkpoint, with the
+# input read-only by construction — same code path, no writeback source.
+
+
+def _readonly_input_flow(tmp_path):
+    """A flow opening a real .bdb.sql input read-only, plus the input."""
+    prep = tmp_path / "prep.buda"
+    prep.write_text("open_bdb :memory:\nset_die 800 600\n"
+                    "save_bdb input.bdb.sql\nexit\n")
+    r = _run(["tclsh", _DRIVER, prep], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    inp = tmp_path / "input.bdb.sql"
+    assert inp.exists()
+    flow = tmp_path / "ro.buda"
+    flow.write_text("open_bdb input.bdb.sql\n" + _FLAT_FLOW)
+    return flow, inp
+
+
+def test_build_redirects_a_readonly_sql_input(tmp_path):
+    flow, inp = _readonly_input_flow(tmp_path)
+    before = inp.read_bytes()
+
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "materializing the read-only input" in r.stdout
+    assert "(the input is never written)" in r.stdout
+    ckpt = tmp_path / "ro.ckpt.bdb"
+    assert ckpt.exists()                                # the durable copy
+    trace = tmp_path / "ro.ckpt.bdb.trace"
+    assert trace.exists()
+    assert re.search(r"^# input_crc32: \d+$", trace.read_text(), re.M)
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+    assert inp.read_bytes() == before                   # THE property
+
+    # -r resumes FROM THE CHECKPOINT: the recorded `open_bdb input.bdb.sql`
+    # is rewritten onto it (re-opening the input would materialize a fresh
+    # throwaway copy and restore nothing).
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "resuming at the deepest recorded stage `dnuts`" in r.stdout
+    replayed_opens = [ln for ln in r.stdout.splitlines()
+                      if ln.startswith("replay> open_bdb")]
+    assert replayed_opens and all("ro.ckpt.bdb" in ln
+                                  for ln in replayed_opens), replayed_opens
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+    assert inp.read_bytes() == before
+
+    # A checkpoint path that names an existing DIRECTORY is refused before
+    # anything is deleted: the fresh-rebuild path removes a stale target,
+    # and a recursive delete on a mistyped directory would erase it
+    # wholesale (Codex #796 P1).
+    trap = tmp_path / "trap"
+    (trap / "precious").mkdir(parents=True)
+    (trap / "precious" / "keep.txt").write_text("data\n")
+    r = _run(["tclsh", _DRIVER, "--build", flow, trap], tmp_path)
+    assert r.returncode == 2
+    assert "is not a regular file" in r.stderr
+    assert (trap / "precious" / "keep.txt").read_text() == "data\n"
+
+
+def test_redirect_reuse_keeps_pins_and_a_changed_input_rebuilds(tmp_path):
+    flow, inp = _readonly_input_flow(tmp_path)
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path,
+             stdin="pin d1 3\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    # A -b rerun with the input unchanged REUSES the checkpoint, so the
+    # pin persisted there re-attaches to the rebuilt pool (_apply_bdb_pins).
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "reusing the checkpoint" in r.stdout
+    assert "[pinned]" in _log(flow), "the pin fell out of the reuse rebuild"
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    # A changed input at -r is a NOTE (the resume opens the checkpoint
+    # materialized from the OLD input)...
+    inp.write_text(inp.read_text() + "-- trailing comment\n")
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "the input BDB" in r.stdout and "changed since this" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    # ...and at -b it re-materializes FRESH: the old checkpoint no longer
+    # derives from this input, so keeping its pins would pin a different
+    # design's candidates.  Loud, and the pin is gone.
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "re-materializing" in r.stdout and "fresh" in r.stdout
+    assert "[pinned]" not in _log(flow)
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout

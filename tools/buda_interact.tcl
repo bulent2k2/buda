@@ -208,6 +208,10 @@ if {$mode eq "build"} {
 }
 # Set by the resume path for a hier below-plan (post-expansion) session.
 set inspect 0
+# Set by -b's read-only-input redirect: the checkpoint the materialization
+# lands in, and the .sql it derives from (both "" outside that mode).
+set redirect ""
+set redirect_input ""
 
 # ── shared: analyze a recorded command list ───────────────────────────────
 # Sets the globals the banners, the prompt and the verdict read.  The engine
@@ -338,6 +342,16 @@ proc _rest_of_line {ln {skip 1}} {
     }
     return $s
 }
+# One file's crc32 — the input-BDB staleness stamp (`_flow_crc` is the
+# source-TREE form of the same idea; this one is for a single binary/text
+# input the tree walk does not read).
+proc _file_crc {p} {
+    set f [open $p rb]
+    set d [read $f]
+    close $f
+    format %u [zlib crc32 $d]
+}
+
 # The `# flow:` header of a build trace — which flow built this checkpoint.
 # "" when the file cannot be read or carries no header.
 proc _trace_flow {tf} {
@@ -402,6 +416,7 @@ proc _preflight_scan {path depth} {
             set rest [_split_args $ln]
             set p [lindex $rest 0]
             if {$p eq ""} continue
+            incr ::_pf_nopens
             if {$p eq ":memory:"} {
                 set _pf_last [list nondurable :memory: \
                       "`:memory:` dies with the process" $norm $lno]
@@ -440,8 +455,9 @@ proc _preflight_scan {path depth} {
 }
 # {none} | {durable <path>} | {nondurable <path> <why> <file> <line>}
 proc _preflight_ckpt {flowpath} {
-    global _pf_last _pf_visited _pf_files _pf_bdb
+    global _pf_last _pf_visited _pf_files _pf_bdb _pf_nopens
     set _pf_last {none}
+    set _pf_nopens 0
     array unset _pf_visited
     array unset _pf_bdb
     set _pf_files {}
@@ -690,14 +706,112 @@ if {$stage eq "build"} {
         switch -- [lindex $pf 0] {
             nondurable {
                 lassign $pf - p why where lno
-                puts stderr "$tag: -b refused before running: the flow's\
-                      last open_bdb is not durable -- $why -- so everything\
-                      the build routes would be DISCARDED at the end."
-                puts stderr "$tag: $where line $lno: opens $p"
-                puts stderr "$tag: make it durable (`open_bdb <file>.sql\
-                      writeback`, or a binary `.bdb`), or drop the open and\
-                      let -b arm its own checkpoint"
-                exit 2
+                if {$p ne ":memory:" && $::_pf_nopens == 1} {
+                    # THE read-only-input flow: the flow's ONLY open_bdb is
+                    # a `.sql` without `writeback` — "read the design, never
+                    # write it back".  The engine already copies that .sql
+                    # to a binary and persists the whole pipeline into the
+                    # copy; the only thing wrong with the copy was its NAME
+                    # (a throwaway temp).  -b names it: the materialization
+                    # lands in the checkpoint (BUDA_BDB_MATERIALIZE_TO), the
+                    # input stays read-only by construction — same code
+                    # path, no writeback source armed — and the copy simply
+                    # survives the session, continuously written, so even a
+                    # killed run keeps its routed state.  Only the
+                    # SINGLE-open shape redirects: with several opens the
+                    # request could land on the wrong one, so those keep the
+                    # refusal below.
+                    if {![file isfile $p]} {
+                        puts stderr "$tag: -b refused before running: the\
+                              flow's input BDB $p does not exist\
+                              ($where line $lno)"
+                        exit 2
+                    }
+                    set redirect [expr {$armed ne "" ? $armed : $auto_ckpt}]
+                    if {[string match -nocase *.sql $redirect]} {
+                        puts stderr "$tag: -b: the checkpoint must be a\
+                              BINARY path (got $redirect) -- the input .sql\
+                              stays read-only and the checkpoint is the\
+                              binary it materializes into"
+                        exit 2
+                    }
+                    if {[file exists $redirect] && ![file isfile $redirect]} {
+                        # A directory (or other non-file) here is a typo,
+                        # and the fresh path below DELETES the target — a
+                        # recursive `file delete -force` on a mistyped
+                        # directory would erase it wholesale (Codex #796
+                        # P1).  Refuse before anything is deleted.
+                        puts stderr "$tag: -b: the checkpoint $redirect\
+                              exists and is not a regular file (a\
+                              directory?) -- pick a checkpoint FILENAME"
+                        exit 2
+                    }
+                    if {[file exists $redirect]} {
+                        # Reuse keeps pins (they re-attach to the rebuilt
+                        # pool), and is sound only while the checkpoint
+                        # still derives from THIS input — the trace's input
+                        # stamp decides.
+                        set old_crc ""
+                        catch {
+                            set f [open ${redirect}.trace]
+                            foreach tln [split [read $f] \n] {
+                                if {[regexp {^# input_crc32: (\S+)$} \
+                                        $tln -> v]} {
+                                    set old_crc $v
+                                    break
+                                }
+                            }
+                            close $f
+                        }
+                        if {$old_crc ne "" && ![catch {_file_crc $p} cur]
+                                && $cur eq $old_crc} {
+                            puts "$tag: -b reusing the checkpoint $redirect\
+                                  (materialized from this input before;\
+                                  pins persisted there re-attach to the\
+                                  rebuilt pool)"
+                        } else {
+                            puts "$tag: -b re-materializing $redirect fresh\
+                                  -- the input changed since it was built\
+                                  (or its build trace is gone), so the old\
+                                  checkpoint no longer derives from this\
+                                  input; pins in it are discarded"
+                            # Each victim individually, and only when it
+                            # is a regular file: `-force` on a directory
+                            # recurses, and while the target itself was
+                            # just validated, a same-named sidecar must
+                            # never widen a delete either.
+                            foreach victim [list $redirect \
+                                    ${redirect}-wal ${redirect}-shm \
+                                    ${redirect}.trace] {
+                                if {[file isfile $victim]} {
+                                    file delete -force -- $victim
+                                }
+                            }
+                        }
+                    } else {
+                        puts "$tag: -b materializing the read-only input\
+                              $p into the checkpoint $redirect (the input\
+                              is never written)"
+                    }
+                    set ::env(BUDA_BDB_MATERIALIZE_TO) $redirect
+                    set redirect_input $p
+                    # The flow's own open lands in the target — arming a
+                    # BDB of our own would just be replaced by it.
+                    set armed ""
+                } else {
+                    puts stderr "$tag: -b refused before running: the flow's\
+                          last open_bdb is not durable -- $why -- so\
+                          everything the build routes would be DISCARDED at\
+                          the end."
+                    puts stderr "$tag: $where line $lno: opens $p"
+                    puts stderr "$tag: make it durable (`open_bdb <file>.sql\
+                          writeback`, or a binary `.bdb`), or drop the open\
+                          and let -b arm its own checkpoint"
+                    puts stderr "$tag: (a flow whose ONLY open_bdb is a\
+                          read-only .sql input is redirected instead: -b\
+                          materializes it into a durable checkpoint)"
+                    exit 2
+                }
             }
             durable {
                 if {$armed eq ""} {
@@ -788,6 +902,21 @@ if {$stage eq "build"} {
     # the walk knows which sourced file each one resolved against.
     catch {_preflight_ckpt $flow}
     analyze $lines
+    if {$redirect ne ""} {
+        if {[file exists $redirect]} {
+            # The flow's open landed in the redirect target: what analyze
+            # read as a non-durable .sql open is in fact the durable
+            # checkpoint under its materialized name — so the trace, the
+            # banner and the verdict all speak about the real file.
+            set ckpt $redirect
+            set ckpt_live 1
+            set ckpt_why ""
+        } else {
+            puts "$tag: NOTE -- the redirect checkpoint $redirect was never\
+                  created (the flow did not reach its open_bdb), so this\
+                  run's result is not durable"
+        }
+    }
 
     puts "\n$tag: [llength $lines] command(s) ran --\
           [expr {$is_hier ? "HIER" : "FLAT"}] flow"
@@ -819,6 +948,15 @@ if {$stage eq "build"} {
                 puts $f "# flow_crc32: [_flow_crc $flow]"
             }]} {
                 puts $f "# flow_size: [file size $flow]"
+            }
+            if {$redirect ne "" && $redirect_input ne ""} {
+                # A redirect build's provenance: which read-only input this
+                # checkpoint was materialized from, and its stamp — what a
+                # later -b reads to decide reuse-vs-fresh, and a resume
+                # reads to NOTE a changed input and to rewrite the recorded
+                # open onto the checkpoint.
+                puts $f "# input: $redirect_input"
+                catch {puts $f "# input_crc32: [_file_crc $redirect_input]"}
             }
             foreach ln $lines { puts $f $ln }
             close $f
@@ -949,6 +1087,7 @@ if {$stage eq "build"} {
     }
     set traced_flow ""; set traced_cwd ""
     set traced_crc ""; set traced_size ""
+    set traced_input ""; set traced_input_crc ""
     set lines {}
     set f [open $tf]
     foreach ln [split [read $f] \n] {
@@ -961,6 +1100,14 @@ if {$stage eq "build"} {
         }
         if {[regexp {^# flow_size: (\S+)$} $ln -> p]} {
             set traced_size $p
+            continue
+        }
+        if {[regexp {^# input: (.*)$} $ln -> p]} {
+            set traced_input $p
+            continue
+        }
+        if {[regexp {^# input_crc32: (\S+)$} $ln -> p]} {
+            set traced_input_crc $p
             continue
         }
         if {$ln eq "" || [string index $ln 0] eq "#"} continue
@@ -997,8 +1144,24 @@ if {$stage eq "build"} {
               since this build; the resume replays the build as RECORDED\
               (rebuild to pick up the edit: btcl -b [_shell_word $flow])"
     }
+    if {$traced_input ne "" && $traced_input_crc ne ""
+            && ([catch {_file_crc $traced_input} icur]
+                || $icur ne $traced_input_crc)} {
+        puts "$tag: NOTE -- the input BDB $traced_input changed since this\
+              build (or cannot be read); the resume opens the checkpoint\
+              materialized from the OLD input (rebuild: btcl -b\
+              [_shell_word $flow])"
+    }
     catch {_preflight_ckpt $flow}
     analyze $lines
+    if {$traced_input ne ""} {
+        # A redirect build: the recorded open is the read-only .sql, but
+        # the durable state lives in the checkpoint it materialized into —
+        # the file this trace sits beside.
+        set ckpt $armed
+        set ckpt_live 1
+        set ckpt_why ""
+    }
     if {!$ckpt_live || $ckpt eq ""} {
         puts stderr "$tag: the build left no durable checkpoint\
               ([expr {$ckpt_why ne "" ? $ckpt_why : "no file-backed\
@@ -1126,7 +1289,18 @@ if {$stage eq "build"} {
             # against the FLOW's directory, but this replay runs with no
             # script, so a raw resend would resolve against the CWD and
             # open a different file.  Rewrite to the path the build used.
+            # A redirect build's open is rewritten FURTHER: the recorded
+            # token names the read-only .sql, and re-opening that here
+            # would materialize a fresh throwaway copy and restore nothing
+            # — the durable state is in the checkpoint it materialized
+            # into, so that is the file this session opens.
             set rest [_split_args $ln]
+            if {$traced_input ne ""
+                    && [_resolve_bdb [lindex $rest 0]] eq $traced_input} {
+                set ln "open_bdb [::buda::_join_args [list $armed]]"
+                lappend setup $ln
+                continue
+            }
             # Re-quoted through the bridge's OWN rule rather than joined
             # raw: `_resolve_bdb` returns an absolute path that may contain
             # spaces, and this line is sent verbatim (`buda::do`), so a bare
@@ -1275,6 +1449,15 @@ if {$ckpt ne "" && !$ckpt_live} {
         # in a file the routing never reached.
         puts "$tag: NOTE -- the flow opened its own BDB after the armed\
               $armed; the flow's checkpoint above is the live one"
+    }
+    if {$redirect ne "" && $ckpt eq $redirect} {
+        # The generic banner says "rerun the flow and they hold", which for
+        # a redirect session is true only of a -b rerun: a BARE rerun
+        # re-materializes the input into a throwaway temp and never sees
+        # this checkpoint.
+        puts "$tag: NOTE -- the input $redirect_input stays read-only; pins\
+              hold across `btcl -b` reruns (which reuse this checkpoint),\
+              not across a bare rerun"
     }
     set snap_base $ckpt
 } else {
