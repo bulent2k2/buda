@@ -338,62 +338,133 @@ proc _rest_of_line {ln {skip 1}} {
     }
     return $s
 }
+# The `# flow:` header of a build trace — which flow built this checkpoint.
+# "" when the file cannot be read or carries no header.
+proc _trace_flow {tf} {
+    set hdr ""
+    catch {
+        set f [open $tf]
+        foreach ln [split [read $f] \n] {
+            if {[regexp {^# flow: (.*)$} $ln -> p]} { set hdr $p; break }
+        }
+        close $f
+    }
+    return $hdr
+}
+
 # The scanner: returns 1 when an `exit` ended the run (so a caller mid-tree
 # stops too), and records the last open_bdb's verdict in _pf_last.  Relative
 # paths — the sourced file's and the BDB's — resolve against the SCRIPT's
 # directory, the engine's own rule, so the verdict names the file the run
-# would actually open.
+# would actually open.  Two more engine rules, both measured to matter
+# (Codex #794 P1s):
+#   * `source foo` with only `foo.buda` on disk gets the `.buda` suffix
+#     appended (cmd_source's fallback), so the scanner must follow it too —
+#     skipping it silently approved a build whose included file ends in a
+#     non-durable open, the exact loss the pre-flight exists to refuse;
+#   * a file sourced TWICE executes twice, so the guard is an ACTIVE
+#     RECURSION STACK (cycle protection), not a visited memo — the memo
+#     skipped the second execution, and `include(nondurable-open);
+#     open_bdb good.bdb; include again` read as durable while the run ends
+#     on the include's non-durable open.
 proc _preflight_scan {path depth} {
-    global _pf_last _pf_visited
+    global _pf_last _pf_visited _pf_files
     if {$depth > 16} { return 0 }
     set norm [file normalize $path]
+    if {![file isfile $norm] && ![string match *.buda $norm]
+            && [file isfile $norm.buda]} {
+        set norm $norm.buda
+    }
     if {[info exists _pf_visited($norm)]} { return 0 }
     set _pf_visited($norm) 1
-    if {[catch {open $norm} f]} { return 0 }
-    set text [read $f]
-    close $f
-    set dir [file dirname $norm]
-    set lno 0
-    foreach ln [split $text \n] {
-        incr lno
-        set ln [string trim $ln]
-        set verb [_verb $ln]
-        if {$verb eq "exit"} { return 1 }
-        if {$verb eq "source"} {
-            set p [_rest_of_line $ln]
+    try {
+        if {[catch {open $norm} f]} { return 0 }
+        set text [read $f]
+        close $f
+        lappend _pf_files $norm
+        set dir [file dirname $norm]
+        set lno 0
+        foreach ln [split $text \n] {
+            incr lno
+            set ln [string trim $ln]
+            set verb [_verb $ln]
+            if {$verb eq "exit"} { return 1 }
+            if {$verb eq "source"} {
+                set p [_rest_of_line $ln]
+                if {$p eq ""} continue
+                if {[file pathtype $p] ne "absolute"} {
+                    set p [file join $dir $p]
+                }
+                if {[_preflight_scan $p [expr {$depth + 1}]]} { return 1 }
+                continue
+            }
+            if {$verb ne "open_bdb"} continue
+            set rest [_split_args $ln]
+            set p [lindex $rest 0]
             if {$p eq ""} continue
-            if {[file pathtype $p] ne "absolute"} { set p [file join $dir $p] }
-            if {[_preflight_scan $p [expr {$depth + 1}]]} { return 1 }
-            continue
-        }
-        if {$verb ne "open_bdb"} continue
-        set rest [_split_args $ln]
-        set p [lindex $rest 0]
-        if {$p eq ""} continue
-        if {$p eq ":memory:"} {
-            set _pf_last [list nondurable :memory: \
-                  "`:memory:` dies with the process" $norm $lno]
-        } else {
-            if {[file pathtype $p] ne "absolute"} { set p [file join $dir $p] }
-            set p [file normalize $p]
-            if {[string match -nocase *.sql $p] && "writeback" ni $rest} {
-                set _pf_last [list nondurable $p "a `.sql` opened without\
-                      `writeback` is a throwaway materialized copy" \
-                      $norm $lno]
+            if {$p eq ":memory:"} {
+                set _pf_last [list nondurable :memory: \
+                      "`:memory:` dies with the process" $norm $lno]
             } else {
-                set _pf_last [list durable $p]
+                set raw $p
+                if {[file pathtype $p] ne "absolute"} {
+                    set p [file join $dir $p]
+                }
+                set p [file normalize $p]
+                # raw token -> the file the ENGINE opens.  The recorder
+                # writes the line verbatim and flattens the source tree, so
+                # a relative token recorded from a SOURCED file has lost the
+                # directory it resolved against — the scanner is the one
+                # reader that still knows it (_resolve_bdb consults this;
+                # the same token resolving differently in two files is
+                # marked ambiguous and falls back to the entry-dir rule).
+                global _pf_bdb
+                if {![info exists _pf_bdb($raw)]} {
+                    set _pf_bdb($raw) $p
+                } elseif {$_pf_bdb($raw) ne $p} {
+                    set _pf_bdb($raw) __AMBIGUOUS__
+                }
+                if {[string match -nocase *.sql $p] && "writeback" ni $rest} {
+                    set _pf_last [list nondurable $p "a `.sql` opened\
+                          without `writeback` is a throwaway materialized\
+                          copy" $norm $lno]
+                } else {
+                    set _pf_last [list durable $p]
+                }
             }
         }
+        return 0
+    } finally {
+        unset _pf_visited($norm)
     }
-    return 0
 }
 # {none} | {durable <path>} | {nondurable <path> <why> <file> <line>}
 proc _preflight_ckpt {flowpath} {
-    global _pf_last _pf_visited
+    global _pf_last _pf_visited _pf_files _pf_bdb
     set _pf_last {none}
     array unset _pf_visited
+    array unset _pf_bdb
+    set _pf_files {}
     _preflight_scan $flowpath 0
     return $_pf_last
+}
+# The staleness fingerprint: one crc32 over the flow's WHOLE source tree,
+# in scan order — the recorded recipe is a flattening of the entry file AND
+# everything it sources, so stamping only the entry file let an edit to an
+# included `.buda` resume silently un-applied (Codex #794 P1).  The walk is
+# the pre-flight's, so both sides of the comparison enumerate the same
+# files the same way; a file that vanished since simply drops out and the
+# crc differs, which is the right verdict.
+proc _flow_crc {flowpath} {
+    _preflight_ckpt $flowpath
+    set crc 0
+    foreach p $::_pf_files {
+        set f [open $p rb]
+        set d [read $f]
+        close $f
+        set crc [zlib crc32 $d $crc]
+    }
+    format %u $crc
 }
 
 # A replan replay must not repeat: outputs and windows, session control, the
@@ -423,6 +494,16 @@ proc _skipped {verb {skips {}}} {
 # NO script — would open a DIFFERENT file than the build did.
 proc _resolve_bdb {p} {
     if {$p eq ":memory:" || [file pathtype $p] eq "absolute"} { return $p }
+    # The engine resolves against the INNERMOST sourced file's directory,
+    # and the flattened record has lost which file that was — but the
+    # pre-flight scan walks the same tree and kept the answer (a relative
+    # open in a sourced sub-directory landed the checkpoint THERE, while
+    # the entry-dir guess put the trace beside a file nobody has).  The
+    # entry-dir rule stays as the fallback: token unseen by the scan, or
+    # ambiguous across files.
+    if {[info exists ::_pf_bdb($p)] && $::_pf_bdb($p) ne "__AMBIGUOUS__"} {
+        return $::_pf_bdb($p)
+    }
     file normalize [file join [file dirname $::flow] $p]
 }
 
@@ -702,6 +783,10 @@ if {$stage eq "build"} {
     }
     close $f
     file delete $recpath
+    # The scan that feeds _resolve_bdb's map (idempotent; -b already ran
+    # it): analyze is about to resolve recorded open_bdb tokens, and only
+    # the walk knows which sourced file each one resolved against.
+    catch {_preflight_ckpt $flow}
     analyze $lines
 
     puts "\n$tag: [llength $lines] command(s) ran --\
@@ -725,14 +810,13 @@ if {$stage eq "build"} {
             # A staleness stamp for `-r`: a resume replays the RECORDED
             # lines, so a flow whose TEXT changed since the build gets a
             # NOTE rather than a silent mix of old recipe and new intent.
-            # crc32 is in the Tcl core (no subprocess); it detects
-            # "changed", it does not authenticate.  A build that cannot
-            # read its own flow back stamps the size instead.
+            # One crc32 over the whole SOURCE TREE (_flow_crc), because the
+            # recorded recipe flattens the sourced files too.  crc32 is in
+            # the Tcl core (no subprocess); it detects "changed", it does
+            # not authenticate.  A build that cannot read its own flow back
+            # stamps the size instead.
             if {[catch {
-                set ff [open $flow rb]
-                set fd [read $ff]
-                close $ff
-                puts $f "# flow_crc32: [format %u [zlib crc32 $fd]]"
+                puts $f "# flow_crc32: [_flow_crc $flow]"
             }]} {
                 puts $f "# flow_size: [file size $flow]"
             }
@@ -790,23 +874,29 @@ if {$stage eq "build"} {
         if {[file exists $auto_ckpt] && [file exists ${auto_ckpt}.trace]} {
             set armed $auto_ckpt
         } else {
+            # The flow may OWN its checkpoint (-b arms nothing then), and a
+            # sourced file's relative open lands it — with its trace —
+            # OUTSIDE the entry flow's directory, where the glob below
+            # cannot see it (Codex #794 P2).  The pre-flight walks the same
+            # source tree the run does, so ask it first; the `# flow:`
+            # header check keeps a checkpoint another flow built from being
+            # adopted (mismatch falls through to the glob, not a refusal).
+            set pf [_preflight_ckpt $flow]
+            if {[lindex $pf 0] eq "durable"} {
+                set own [lindex $pf 1]
+                if {[file exists $own] && [file exists ${own}.trace]
+                        && [_trace_flow ${own}.trace] eq $flow} {
+                    set armed $own
+                }
+            }
+        }
+        if {$armed eq ""} {
             set found {}
             foreach t [glob -nocomplain -directory [file dirname $flow] \
                            *.trace] {
                 set c [string range $t 0 end-6]
                 if {![file exists $c]} continue
-                set hdr ""
-                catch {
-                    set f [open $t]
-                    foreach ln [split [read $f] \n] {
-                        if {[regexp {^# flow: (.*)$} $ln -> p]} {
-                            set hdr $p
-                            break
-                        }
-                    }
-                    close $f
-                }
-                if {$hdr eq $flow} { lappend found $c }
+                if {[_trace_flow $t] eq $flow} { lappend found $c }
             }
             if {[llength $found] == 1} {
                 set armed [lindex $found 0]
@@ -896,20 +986,18 @@ if {$stage eq "build"} {
     # perfectly good thing to resume; a pre-stamp trace checks nothing).
     set stale 0
     if {$traced_crc ne ""} {
-        if {![catch {
-            set ff [open $flow rb]
-            set fd [read $ff]
-            close $ff
-            format %u [zlib crc32 $fd]
-        } cur] && $cur ne $traced_crc} { set stale 1 }
+        if {![catch {_flow_crc $flow} cur] && $cur ne $traced_crc} {
+            set stale 1
+        }
     } elseif {$traced_size ne "" && [file size $flow] != $traced_size} {
         set stale 1
     }
     if {$stale} {
-        puts "$tag: NOTE -- the flow's text changed since this build; the\
-              resume replays the build as RECORDED (rebuild to pick up the\
-              edit: btcl -b [_shell_word $flow])"
+        puts "$tag: NOTE -- the flow's text (or a sourced file's) changed\
+              since this build; the resume replays the build as RECORDED\
+              (rebuild to pick up the edit: btcl -b [_shell_word $flow])"
     }
+    catch {_preflight_ckpt $flow}
     analyze $lines
     if {!$ckpt_live || $ckpt eq ""} {
         puts stderr "$tag: the build left no durable checkpoint\

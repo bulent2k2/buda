@@ -812,7 +812,8 @@ def test_resume_notes_a_stale_flow_text(tmp_path):
     flow.write_text(_FLAT_FLOW + "# a post-build edit\n")
     r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "the flow's text changed since this build" in r.stdout
+    assert "the flow's text (or a sourced file's) changed since this build" \
+        in r.stdout
     assert "btcl -b" in r.stdout                       # the rebuild remedy
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
 
@@ -836,3 +837,72 @@ def test_ephemeral_pins_print_their_flow_text_at_exit(tmp_path):
              stdin="pin d1 2\ndone\n")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "as flow text" not in r.stdout
+
+
+def test_preflight_follows_the_engines_source_rules(tmp_path):
+    # Codex #794 P1s: the pre-flight must read `source` the way the ENGINE
+    # does.  (a) `source foo` with only foo.buda on disk gets the suffix
+    # appended (cmd_source's fallback) — skipping it silently approved a
+    # build whose included file ends in a non-durable open; (b) a file
+    # sourced TWICE executes twice, so the cycle guard is an active
+    # recursion stack, not a visited memo — the memo skipped the second
+    # execution and read `include(nondurable); open_bdb good.bdb; include
+    # again` as durable while the real run ends on the include's open.
+    sub = tmp_path / "ck_open.buda"
+    sub.write_text("open_bdb design.bdb.sql\n")
+    flow = tmp_path / "mini.buda"
+    flow.write_text("source ck_open\n" + _FLAT_FLOW)   # suffixless spelling
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 2
+    assert "-b refused before running" in r.stderr
+    assert "ck_open.buda line 1" in r.stderr
+
+    flow.write_text("source ck_open.buda\nopen_bdb good.bdb\n"
+                    "source ck_open.buda\n" + _FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 2, "the re-sourced include's open was skipped"
+    assert "-b refused before running" in r.stderr
+
+    # A genuine cycle terminates (active-stack guard): the self-source is
+    # skipped while on the stack, so the scan reaches the non-durable open
+    # and refuses at t=0 — the engine never runs.
+    cyc = tmp_path / "cyc.buda"
+    cyc.write_text("source cyc.buda\nopen_bdb x.bdb.sql\n")
+    r = _run(["tclsh", _DRIVER, "--build", cyc], tmp_path)
+    assert r.returncode == 2
+    assert "-b refused before running" in r.stderr
+
+
+def test_sourced_edits_and_nested_checkpoints(tmp_path):
+    # Codex #794 P1 + P2, the sourced-file halves: the staleness stamp
+    # covers the whole SOURCE TREE (the recorded recipe flattens the
+    # sourced files too), and a relative open_bdb in a sourced sub-file
+    # resolves where the ENGINE resolves it — the innermost file's
+    # directory — so the trace lands beside the real checkpoint and -r
+    # discovers it through the source tree, outside the entry flow's dir.
+    subdir = tmp_path / "setup"
+    subdir.mkdir()
+    (subdir / "ck.buda").write_text("open_bdb own.bdb\n")
+    flow = tmp_path / "mini.buda"
+    flow.write_text("source setup/ck.buda\n" + _FLAT_FLOW)
+
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "opens its own durable checkpoint" in r.stdout
+    assert (subdir / "own.bdb").exists()               # where the engine put it
+    assert (subdir / "own.bdb.trace").exists()         # ...and the trace beside it
+    assert not (tmp_path / "own.bdb").exists()         # not the entry-dir guess
+
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "-r resuming from" in r.stdout
+    assert "RESUMED" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    # Edit only the SOURCED file: the entry flow is byte-identical, and the
+    # NOTE must still fire.
+    (subdir / "ck.buda").write_text("open_bdb own.bdb\n# edited\n")
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "(or a sourced file's) changed since this build" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
