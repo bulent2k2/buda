@@ -1,10 +1,10 @@
 name: Windows wheel
 
 # Build a DISTRIBUTABLE Windows wheel (x64, for a CHOSEN CPython) and prove
-# it works before anyone downloads it: install into a FRESH venv, import the extension stack,
-# run a real routed flow through the installed `buda` console script, and
-# check the optional surfaces (GUI deps, web deps, the wheel-shipped Tcl
-# front end).  The wheel is uploaded as a workflow artifact.
+# it works before anyone downloads it: install into a FRESH venv, import the
+# extension stack, run a real routed flow through the installed `buda` console
+# script, and check the optional surfaces (GUI deps, web deps, the
+# wheel-shipped Tcl front end).  The wheel is uploaded as a workflow artifact.
 #
 # What the build pins (all from pyproject.toml, none from this file):
 #   * BUDA_WHEEL=ON       — the pip-only CMake install rules
@@ -39,7 +39,13 @@ on:
     paths: ['.github/workflows/windows-wheel.yml']
 
 concurrency:
-  group: windows-wheel-${{ github.ref }}
+  # The Python version is part of the KEY, not just of the build (Codex P2 on
+  # #793).  Before this workflow took an input, two dispatches on one ref were
+  # the same build and cancelling the older was the point; now they are
+  # different deliverables, and a cp314 dispatch would have cancelled an
+  # in-flight cp313 and silently returned one artifact where two were asked
+  # for.  Same `|| '3.13'` fallback as PY_VERSION, for the push trigger.
+  group: windows-wheel-${{ github.ref }}-${{ inputs.python-version || '3.13' }}
   cancel-in-progress: true
 
 jobs:
