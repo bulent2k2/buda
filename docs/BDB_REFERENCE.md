@@ -609,7 +609,7 @@ run when they disagree.
 ### `import_def_lef`
 
 ```
-import_def_lef <def_path> <lef_path>
+import_def_lef <def_path> <lef_path> [no_tracks] [no_blockages] [allow_missing_footprints]
 ```
 
 Parse a DEF file for component placements and die dimensions, and a LEF file
@@ -619,6 +619,12 @@ for cell sizes and pin offsets. **Clears all existing tables** before import.
 |---|---|
 | `def_path` | Path to the DEF file (VERSION 5.x). Must contain `UNITS DISTANCE MICRONS`, `DIEAREA`, and `COMPONENTS` sections. |
 | `lef_path` | Path to the LEF file. `MACRO … SIZE … PIN …` entries are used; everything else is ignored. |
+| `no_tracks` | Do not turn the DEF's `TRACKS` statements into track patterns. |
+| `no_blockages` | Do not import obstruction — see [Obstruction and keepouts](#obstruction-and-keepouts) below. |
+| `allow_missing_footprints` | Proceed when a component's cell has no LEF `MACRO`. Without it that is a hard error: the silent 0.5×0.5 µm fallback it replaced turned a wrong-LEF run into a plausible and entirely wrong design. |
+
+The three option tokens are order-free and validated — a misspelling is a
+flow-stopping error rather than a silently ignored word.
 
 Both paths resolve against the script's own directory. Either may contain
 **spaces** when quoted — `import_def_lef "rev 2/top.def" "rev 2/top.lef"` —
@@ -628,6 +634,71 @@ which is the only way to state where one ends and the next begins; see
 After import: `component` rows have `x1/y1/x2/y2` from the DEF placement
 plus the LEF `SIZE`, but `parent_id` and `depth` are `NULL`/0 until
 `import_verilog` is run.
+
+#### Obstruction and keepouts
+
+A router that cannot see a blockage plans through it, so the import turns the
+DEF's obstruction into the same keepouts `add_keepout` declares, on both
+consumers: the Floorplan (which feeds the planner) and the RoutingGrid (which
+feeds DetailedNUTS).
+
+**What becomes a keepout**
+
+| DEF construct | one keepout per | carries |
+|---|---|---|
+| macro `OBS` (from the component's LEF `MACRO`, for a **placed** instance — see below) | rect | `inside_block` — whether the rect lies within that instance's placed extent. **Measured, not assumed**: LEF does not require an `OBS` rect to sit inside `SIZE`, and one that pokes out is exactly the one whose edge is a useful Hanan locus. |
+| `BLOCKAGES` … `LAYER <layer>` | rect | — |
+| `SPECIALNETS` routed metal (power straps) | polyline segment | the strap's **net**. This is what lets the NDR rail predicates tell a `VDD`/`GND` rail from anonymous obstruction; a LEF states a wire's width and never says which tracks the power grid takes, so on an imported design the rails are in `SPECIALNETS` and nowhere else. |
+
+**What does not** — each counted in the unmodelled census rather than applied,
+so "not imported" is reported rather than silent:
+
+| construct | census key | why not |
+|---|---|---|
+| component `+ HALO` | `COMPONENTS.HALO` | A halo keeps other **cells** away — placement information, carrying no layer. Mapping it onto every routing layer forbids routing the DEF left routable. `+ ROUTEHALO` is the routing construct, and that is the one BUDA ignores; the two were once the wrong way round (recorded, with the measured 195 → 0 track overlaps on `flow/ariane133`, in [opens_interchange.md](internal/opens_interchange.md) item 13). |
+| `BLOCKAGES … + PLACEMENT` | `BLOCKAGES.PLACEMENT` | Says where **cells** may go, and carries no layer. |
+| `BLOCKAGES … + PARTIAL <density>` | `BLOCKAGES.PARTIAL` | A density **cap**, not a prohibition. |
+
+The census is reported as `BUDA-1603` (`[DEF] unmodelled construct(s): …`).
+
+**What is reported.** `[DEF] keepouts added:` gives a count per provenance,
+and names the nets when straps were read — for example
+`OBS:13034, BLOCKAGES:12  (net rects: VDD:3400, VSS:3400)`. Both figures count
+**rectangles**, not nets or straps: a polyline strap of N points becomes N−1
+rectangles.
+
+**Four ways obstruction does not arrive**, and two of them are silent.
+
+*Before a keepout is ever formed* — these apply to macro `OBS`, so the table
+above is what happens for a **placed** instance whose cell is in the LEF:
+
+- The instance is **`UNPLACED`**. Its `OBS` is nowhere, so it is skipped —
+  and, unlike the halo beside it (counted for every halo, placed or not), it
+  is **not** censused. A floorplan DEF that leaves instances unplaced blocks
+  less metal than its macros describe, with nothing in the report saying so.
+- The cell has **no LEF `MACRO`**, so there is no `OBS` to read. Reachable
+  only under `allow_missing_footprints`, since a missing footprint is
+  otherwise a hard error — worth knowing as a second cost of that option:
+  you lose the cell's obstruction along with its size.
+
+*When the keepout is installed* — these are reported:
+
+- A keepout naming a **layer this session has not declared** is skipped;
+  nothing can be placed there to block.
+- A zone whose integer bbox **has no area after quantization** — obstruction
+  thinner than one layout unit, ordinary for sub-micron rails imported at
+  micron scale — is dropped, and said, with the nets it belonged to
+  (`BUDA-1615`). A strap that vanished there is the one hole in `net`'s
+  invariant, so it is never silent.
+
+**Related.** Imported keepouts are persisted and restored like any other —
+see the `keepout` table under [Schema overview](#1-schema-overview) (v29). How much of the Hanan
+grid they contribute is a separate, opt-in decision made **before** the
+import, with
+[`set_keepout_loci`](script_reference/topologies.md#set_keepout_loci):
+blocking behaviour is identical in every mode, and one `fakeram45_256x16`
+carries 99 `OBS` rects, so a 133-macro design imports over 13,000 keepouts and
+the grid pays for every edge.
 
 ---
 
