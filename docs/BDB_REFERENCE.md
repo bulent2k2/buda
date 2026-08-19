@@ -646,7 +646,7 @@ feeds DetailedNUTS).
 
 | DEF construct | one keepout per | carries |
 |---|---|---|
-| macro `OBS` (from the component's LEF `MACRO`) | rect | `inside_block` — whether the rect lies within that instance's placed extent. **Measured, not assumed**: LEF does not require an `OBS` rect to sit inside `SIZE`, and one that pokes out is exactly the one whose edge is a useful Hanan locus. |
+| macro `OBS` (from the component's LEF `MACRO`, for a **placed** instance — see below) | rect | `inside_block` — whether the rect lies within that instance's placed extent. **Measured, not assumed**: LEF does not require an `OBS` rect to sit inside `SIZE`, and one that pokes out is exactly the one whose edge is a useful Hanan locus. |
 | `BLOCKAGES` … `LAYER <layer>` | rect | — |
 | `SPECIALNETS` routed metal (power straps) | polyline segment | the strap's **net**. This is what lets the NDR rail predicates tell a `VDD`/`GND` rail from anonymous obstruction; a LEF states a wire's width and never says which tracks the power grid takes, so on an imported design the rails are in `SPECIALNETS` and nowhere else. |
 
@@ -667,12 +667,29 @@ and names the nets when straps were read — for example
 **rectangles**, not nets or straps: a polyline strap of N points becomes N−1
 rectangles.
 
-**Two ways a zone does not arrive.** A keepout naming a layer this session has
-not declared is skipped (nothing can be placed there to block). A zone whose
-integer bbox has no area after quantization — obstruction thinner than one
-layout unit, ordinary for sub-micron rails imported at micron scale — is
-dropped, and said, with the nets it belonged to (`BUDA-1615`); a strap that
-vanished there is the one hole in `net`'s invariant, so it is never silent.
+**Four ways obstruction does not arrive**, and two of them are silent.
+
+*Before a keepout is ever formed* — these apply to macro `OBS`, so the table
+above is what happens for a **placed** instance whose cell is in the LEF:
+
+- The instance is **`UNPLACED`**. Its `OBS` is nowhere, so it is skipped —
+  and, unlike the halo beside it (counted for every halo, placed or not), it
+  is **not** censused. A floorplan DEF that leaves instances unplaced blocks
+  less metal than its macros describe, with nothing in the report saying so.
+- The cell has **no LEF `MACRO`**, so there is no `OBS` to read. Reachable
+  only under `allow_missing_footprints`, since a missing footprint is
+  otherwise a hard error — worth knowing as a second cost of that option:
+  you lose the cell's obstruction along with its size.
+
+*When the keepout is installed* — these are reported:
+
+- A keepout naming a **layer this session has not declared** is skipped;
+  nothing can be placed there to block.
+- A zone whose integer bbox **has no area after quantization** — obstruction
+  thinner than one layout unit, ordinary for sub-micron rails imported at
+  micron scale — is dropped, and said, with the nets it belonged to
+  (`BUDA-1615`). A strap that vanished there is the one hole in `net`'s
+  invariant, so it is never silent.
 
 **Related.** Imported keepouts are persisted and restored like any other —
 see the `keepout` table under [Schema overview](#1-schema-overview) (v29). How much of the Hanan
