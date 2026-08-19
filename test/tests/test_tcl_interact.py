@@ -971,6 +971,18 @@ def test_build_redirects_a_readonly_sql_input(tmp_path):
     assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
     assert inp.read_bytes() == before
 
+    # A checkpoint path that names an existing DIRECTORY is refused before
+    # anything is deleted: the fresh-rebuild path removes a stale target,
+    # and a recursive delete on a mistyped directory would erase it
+    # wholesale (Codex #796 P1).
+    trap = tmp_path / "trap"
+    (trap / "precious").mkdir(parents=True)
+    (trap / "precious" / "keep.txt").write_text("data\n")
+    r = _run(["tclsh", _DRIVER, "--build", flow, trap], tmp_path)
+    assert r.returncode == 2
+    assert "is not a regular file" in r.stderr
+    assert (trap / "precious" / "keep.txt").read_text() == "data\n"
+
 
 def test_redirect_reuse_keeps_pins_and_a_changed_input_rebuilds(tmp_path):
     flow, inp = _readonly_input_flow(tmp_path)

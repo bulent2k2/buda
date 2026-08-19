@@ -735,6 +735,17 @@ if {$stage eq "build"} {
                               binary it materializes into"
                         exit 2
                     }
+                    if {[file exists $redirect] && ![file isfile $redirect]} {
+                        # A directory (or other non-file) here is a typo,
+                        # and the fresh path below DELETES the target — a
+                        # recursive `file delete -force` on a mistyped
+                        # directory would erase it wholesale (Codex #796
+                        # P1).  Refuse before anything is deleted.
+                        puts stderr "$tag: -b: the checkpoint $redirect\
+                              exists and is not a regular file (a\
+                              directory?) -- pick a checkpoint FILENAME"
+                        exit 2
+                    }
                     if {[file exists $redirect]} {
                         # Reuse keeps pins (they re-attach to the rebuilt
                         # pool), and is sound only while the checkpoint
@@ -764,8 +775,18 @@ if {$stage eq "build"} {
                                   (or its build trace is gone), so the old\
                                   checkpoint no longer derives from this\
                                   input; pins in it are discarded"
-                            file delete -force $redirect ${redirect}-wal \
-                                  ${redirect}-shm ${redirect}.trace
+                            # Each victim individually, and only when it
+                            # is a regular file: `-force` on a directory
+                            # recurses, and while the target itself was
+                            # just validated, a same-named sidecar must
+                            # never widen a delete either.
+                            foreach victim [list $redirect \
+                                    ${redirect}-wal ${redirect}-shm \
+                                    ${redirect}.trace] {
+                                if {[file isfile $victim]} {
+                                    file delete -force -- $victim
+                                }
+                            }
                         }
                     } else {
                         puts "$tag: -b materializing the read-only input\

@@ -78,6 +78,15 @@ class PersistMixin:
             redirect = None
         if redirect:
             out = os.path.abspath(redirect)
+            if os.path.exists(out) and not os.path.isfile(out):
+                # A directory here is a caller's typo; materializing "onto"
+                # it can only fail confusingly later, and a reuse claim on
+                # it would be nonsense.  Fail fast, before any file is
+                # touched (the launcher refuses this shape earlier for the
+                # same reason — this guards the direct env-var user).
+                raise RuntimeError(
+                    f"BUDA_BDB_MATERIALIZE_TO names an existing non-file "
+                    f"({out}) -- pick a checkpoint filename")
             if os.path.exists(out):
                 print(f"open_bdb: reusing the durable materialization {out} "
                       f"of {sql_path} (changes persist there; the .sql input "
