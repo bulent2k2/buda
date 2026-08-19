@@ -16,6 +16,12 @@
 !**/*.bdb.sql
 !**/*.b-db.sql
 !**/*.b_db.sql
+# The build trace `btcl -i`/`btcl -b` writes beside a live checkpoint: its
+# name is `<ckpt>.trace`, so the `*.bdb` rule above does not reach it, and a
+# durable `.sql writeback` checkpoint's trace ends `.bdb.sql.trace`
+# (generalizes flow/ariane133/.gitignore's local rule).
+**/*.bdb.trace
+**/*.bdb.sql.trace
 **/*.sqbpro
 **/build/
 **/__pycache__/

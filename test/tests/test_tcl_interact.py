@@ -671,3 +671,238 @@ def test_the_prompt_shows_what_you_type_in_full(tmp_path):
     # One session is one log: the replan APPENDS rather than rotating the
     # flow's own detail away (two solves, two sections).
     assert _log(flow).count("━━━ RUN_NUTS ━━━") == 2
+
+
+# ── the -b / -r / -s spellings (btcl forwards them; the driver owns them) ──
+
+
+def test_build_flag_arms_auto_checkpoint_and_stamps_trace(tmp_path):
+    # -b takes the checkpoint filename off the user's plate: the flow opens
+    # no BDB, so -b arms <flow_dir>/<stem>.ckpt.bdb before the flow and the
+    # trace lands beside it, stamped with the flow text's crc32 so a later
+    # resume can notice an edit.  Through the WRAPPER, so the forwarding of
+    # the flag to the driver is what this test measures first.
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    r = _run(["bash", _BTCL, "-b", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "-b arming checkpoint" in r.stdout
+    ckpt = tmp_path / "mini.ckpt.bdb"
+    assert ckpt.exists()
+    trace = tmp_path / "mini.ckpt.bdb.trace"
+    assert trace.exists()
+    assert re.search(r"^# flow_crc32: \d+$", trace.read_text(), re.M)
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    # A rebuild re-arms the SAME checkpoint (pins persisted there re-attach
+    # to the rebuilt pool — the _apply_bdb_pins path), and says so.
+    r = _run(["bash", _BTCL, "-b", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "re-arming the existing checkpoint" in r.stdout
+
+
+def test_resume_flag_defaults_to_deepest_stage(tmp_path):
+    # -r with no -s: the checkpoint is discovered at the auto name and the
+    # stage defaults to the DEEPEST the trace records — dnuts here, since
+    # the flow ran run_detailed_nuts — so everything above it restores and
+    # only the last leg re-runs.  -s alone implies -r and overrides.
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "resuming at the deepest recorded stage `dnuts`" in r.stdout
+    assert "RESUMING at `dnuts`" in r.stdout
+    assert "replay> RUN_PLANNER" not in r.stdout       # restored, not re-run
+    assert "replay> run_detailed_nuts" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    r = _run(["bash", _BTCL, "-s", "plan", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "RESUMING at `plan`" in r.stdout
+    assert "replay> RUN_PLANNER 5" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_build_flag_refuses_a_nondurable_checkpoint_before_running(tmp_path):
+    # The shape that cost a 2000-second heal: the flow's own last open_bdb
+    # is a `.sql` without `writeback`, so the run ends by DISCARDING
+    # everything it routed.  -b pre-flights the flow TEXT (source-following,
+    # engine reading order) and refuses at t=0 — before an engine is even
+    # spawned — naming the file and line of the open.
+    sub = tmp_path / "ck_open.buda"
+    sub.write_text("# checkpoint half\nopen_bdb design.bdb.sql\n")
+    flow = tmp_path / "mini.buda"
+    flow.write_text("source ck_open.buda\n" + _FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 2
+    assert "-b refused before running" in r.stderr
+    assert "DISCARDED" in r.stderr
+    assert "ck_open.buda line 2" in r.stderr           # the open, located
+    assert "writeback" in r.stderr                     # the remedy
+    assert "Bundler" not in r.stdout                   # nothing was spent
+    assert not (tmp_path / "mini.ckpt.bdb").exists()
+
+    # `:memory:` is the other non-durable spelling.
+    flow.write_text(_FLAT_FLOW + "open_bdb :memory:\n")
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 2
+    assert "`:memory:` dies with the process" in r.stderr
+
+
+def test_build_flag_defers_to_the_flows_own_durable_checkpoint(tmp_path):
+    # A flow that already opens a durable BDB owns its checkpoint: arming
+    # another would just be replaced by the flow's own open, so -b arms
+    # nothing, says so, and the trace lands beside the flow's checkpoint.
+    flow = tmp_path / "mini.buda"
+    flow.write_text("open_bdb own.bdb\n" + _FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "opens its own durable checkpoint" in r.stdout
+    assert not (tmp_path / "mini.ckpt.bdb").exists()
+    assert (tmp_path / "own.bdb.trace").exists()
+
+    # ...and -r finds it through the trace's `# flow:` header, no name given.
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "-r resuming from" in r.stdout and "own.bdb" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_build_flag_takes_no_stage_and_bad_flags_refuse(tmp_path):
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    # A build runs the whole flow, so a stage with -b is a contradiction —
+    # refused in both spellings rather than silently reinterpreted.
+    r = _run(["tclsh", _DRIVER, "--build", "--stage", "dnuts", flow], tmp_path)
+    assert r.returncode == 2 and "-b takes no stage" in r.stderr
+    r = _run(["tclsh", _DRIVER, "--build", flow, tmp_path / "c.bdb", "dnuts"],
+             tmp_path)
+    assert r.returncode == 2 and "-b takes no stage" in r.stderr
+    r = _run(["tclsh", _DRIVER, "--build", "--resume", flow], tmp_path)
+    assert r.returncode == 2 and "mutually exclusive" in r.stderr
+    r = _run(["tclsh", _DRIVER, "--resume", "--stage", "build", flow], tmp_path)
+    assert r.returncode == 2 and "use -b" in r.stderr
+
+
+def test_resume_flag_with_no_checkpoint_names_the_build_remedy(tmp_path):
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 2
+    assert "found no checkpoint for this flow" in r.stderr
+    assert "btcl -b" in r.stderr                       # the remedy, named
+
+
+def test_resume_notes_a_stale_flow_text(tmp_path):
+    # The resume replays the RECORDED build, so an edit to the flow's text
+    # since then does not take effect — worth a NOTE with the rebuild
+    # remedy, not a refusal (the recorded build is a fine thing to resume).
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "changed since this build" not in r.stdout  # unedited: silent
+
+    flow.write_text(_FLAT_FLOW + "# a post-build edit\n")
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "the flow's text (or a sourced file's) changed since this build" \
+        in r.stdout
+    assert "btcl -b" in r.stdout                       # the rebuild remedy
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+
+def test_ephemeral_pins_print_their_flow_text_at_exit(tmp_path):
+    # A session with no durable checkpoint cannot persist a pin as a BDB
+    # row, but the pin has a second durable form: FLOW TEXT.  The exit
+    # prints the paste lines, so the experiment's outcome survives even
+    # though the checkpoint cannot — and the banner names `btcl -b` as the
+    # way to get the durable kind.
+    flow = tmp_path / "mini.buda"
+    flow.write_text(_FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, flow], tmp_path, stdin="pin d1 2\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "btcl -b" in r.stdout                       # the banner's remedy
+    assert "as flow text" in r.stdout
+    assert "select_topology d1 2" in r.stdout          # the paste line
+
+    # With a durable checkpoint the rows persist — no paste block.
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path,
+             stdin="pin d1 2\ndone\n")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "as flow text" not in r.stdout
+
+
+def test_preflight_follows_the_engines_source_rules(tmp_path):
+    # Codex #794 P1s: the pre-flight must read `source` the way the ENGINE
+    # does.  (a) `source foo` with only foo.buda on disk gets the suffix
+    # appended (cmd_source's fallback) — skipping it silently approved a
+    # build whose included file ends in a non-durable open; (b) a file
+    # sourced TWICE executes twice, so the cycle guard is an active
+    # recursion stack, not a visited memo — the memo skipped the second
+    # execution and read `include(nondurable); open_bdb good.bdb; include
+    # again` as durable while the real run ends on the include's open.
+    sub = tmp_path / "ck_open.buda"
+    sub.write_text("open_bdb design.bdb.sql\n")
+    flow = tmp_path / "mini.buda"
+    flow.write_text("source ck_open\n" + _FLAT_FLOW)   # suffixless spelling
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 2
+    assert "-b refused before running" in r.stderr
+    assert "ck_open.buda line 1" in r.stderr
+
+    flow.write_text("source ck_open.buda\nopen_bdb good.bdb\n"
+                    "source ck_open.buda\n" + _FLAT_FLOW)
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 2, "the re-sourced include's open was skipped"
+    assert "-b refused before running" in r.stderr
+
+    # A genuine cycle terminates (active-stack guard): the self-source is
+    # skipped while on the stack, so the scan reaches the non-durable open
+    # and refuses at t=0 — the engine never runs.
+    cyc = tmp_path / "cyc.buda"
+    cyc.write_text("source cyc.buda\nopen_bdb x.bdb.sql\n")
+    r = _run(["tclsh", _DRIVER, "--build", cyc], tmp_path)
+    assert r.returncode == 2
+    assert "-b refused before running" in r.stderr
+
+
+def test_sourced_edits_and_nested_checkpoints(tmp_path):
+    # Codex #794 P1 + P2, the sourced-file halves: the staleness stamp
+    # covers the whole SOURCE TREE (the recorded recipe flattens the
+    # sourced files too), and a relative open_bdb in a sourced sub-file
+    # resolves where the ENGINE resolves it — the innermost file's
+    # directory — so the trace lands beside the real checkpoint and -r
+    # discovers it through the source tree, outside the entry flow's dir.
+    subdir = tmp_path / "setup"
+    subdir.mkdir()
+    (subdir / "ck.buda").write_text("open_bdb own.bdb\n")
+    flow = tmp_path / "mini.buda"
+    flow.write_text("source setup/ck.buda\n" + _FLAT_FLOW)
+
+    r = _run(["tclsh", _DRIVER, "--build", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "opens its own durable checkpoint" in r.stdout
+    assert (subdir / "own.bdb").exists()               # where the engine put it
+    assert (subdir / "own.bdb.trace").exists()         # ...and the trace beside it
+    assert not (tmp_path / "own.bdb").exists()         # not the entry-dir guess
+
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "-r resuming from" in r.stdout
+    assert "RESUMED" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout
+
+    # Edit only the SOURCED file: the entry flow is byte-identical, and the
+    # NOTE must still fire.
+    (subdir / "ck.buda").write_text("open_bdb own.bdb\n# edited\n")
+    r = _run(["tclsh", _DRIVER, "--resume", flow], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "(or a sourced file's) changed since this build" in r.stdout
+    assert "done -- 0 overlaps, 0 unplaced, 0 audit violations" in r.stdout

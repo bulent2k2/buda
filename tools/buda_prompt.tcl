@@ -45,6 +45,14 @@ namespace eval prompt {
         {help     ""             "this list"}
         {done     ""             "re-plan if pins changed, save, and exit (also: exit, quit)"}
     }
+    # The flow-text form of every pin/unpin (and committed edit
+    # transaction) this session made, in order --
+    # `select_topology d1 4`-style lines a caller can print for pasting into
+    # the flow.  A pin's DURABLE forms are a checkpoint row and a flow-text
+    # line; a session with no durable checkpoint has only the second, so the
+    # driver prints these at exit rather than letting the choice die
+    # silently.  Appended only on SUCCESS (a raised pin is not worth pasting).
+    variable pin_lines {}
 }
 
 # `<sel>` is whatever `select_topology` takes — a bundle ID, a net-name
@@ -102,10 +110,12 @@ proc prompt::_commands {pat} {
 #             (the default, and the vehicles) = every verb allowed,
 #             behavior unchanged.
 proc prompt::run {tag ps route bdb example {guard ""}} {
+    variable pin_lines {}
     # `pins_dirty` keeps the checkpoint COHERENT — a pin applied after the
     # route would leave the saved metal belonging to the candidate it
     # replaced, so the caller re-plans when this comes back 1.
     set pins_dirty 0
+    set edit_pending {}
     puts "\n$tag: pin/edit prompt -- `topos $example` to look, `pin $example\
           <N>` to choose (1-based), `replan` to apply, `done` to save and\
           exit.  `help` lists the verbs; anything else goes to the engine."
@@ -142,6 +152,7 @@ proc prompt::run {tag ps route bdb example {guard ""}} {
                     } else {
                         buda::select_topology [lindex $line 1] [lindex $line 2]
                         set pins_dirty 1
+                        lappend pin_lines "select_topology [lindex $line 1] [lindex $line 2]"
                     }
                 }
                 unpin {
@@ -151,6 +162,7 @@ proc prompt::run {tag ps route bdb example {guard ""}} {
                     } else {
                         buda::unpin_topology [lindex $line 1]
                         set pins_dirty 1
+                        lappend pin_lines "unpin_topology [lindex $line 1]"
                     }
                 }
                 topos   { buda::dump_topologies {*}[lrange $line 1 end] }
@@ -226,6 +238,24 @@ proc prompt::run {tag ps route bdb example {guard ""}} {
                         # command twice.  A driver that turns the echo off
                         # reads the output with `buda::output`.
                         buda::do $line
+                        # After the send, unlike pins_dirty before it: a
+                        # raised command is not a line worth pasting.
+                        if {$verb in {select_topology select_topologies
+                                      unpin_topology}} {
+                            lappend pin_lines $line
+                        } elseif {[string match edit_* $verb]} {
+                            # An edit line is pastable only as its whole
+                            # transaction: buffer until the commit (session
+                            # + commit paste as one block), drop on abort.
+                            if {$verb eq "edit_abort"} {
+                                set edit_pending {}
+                            } elseif {$verb eq "edit_commit"} {
+                                lappend pin_lines {*}$edit_pending $line
+                                set edit_pending {}
+                            } else {
+                                lappend edit_pending $line
+                            }
+                        }
                         }
                     } else {
                         puts "$tag: unknown command '$verb' -- try `help`, or\

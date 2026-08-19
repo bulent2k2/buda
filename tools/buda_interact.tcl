@@ -16,7 +16,11 @@
 # tools/buda_interact.tcl — interactive iteration on ANY .buda flow.
 #
 #   bin/btcl -i <flow>.buda ?<ckpt.bdb>? ?<stage>?
-#   (or: tclsh tools/buda_interact.tcl <flow>.buda ?<ckpt.bdb>? ?<stage>?)
+#   bin/btcl -b <flow>.buda ?<ckpt.bdb>?        build; checkpoint auto-named
+#   bin/btcl -r ?-s <stage>? <flow>.buda ?<ckpt>?  resume; checkpoint
+#                                               auto-discovered, stage
+#                                               defaulting to the deepest
+#   (or: tclsh tools/buda_interact.tcl <same arguments>)
 #
 # design.tcl and hdesign.tcl carry their own design and their own route
 # recipe; this driver carries NEITHER — it runs an arbitrary flow verbatim
@@ -100,35 +104,107 @@ source [file join $here buda.tcl]
 source [file join $here buda_prompt.tcl]
 
 # ── arguments ─────────────────────────────────────────────────────────────
-if {[llength $argv] < 1 || [llength $argv] > 3} {
-    puts stderr "usage: btcl -i <flow>.buda ?<ckpt.bdb>? ?build|topo|plan|nuts|dnuts?"
+# Two spellings of the same machinery (btcl forwards its -b/-r/-s here):
+#   <flow> ?<ckpt>? ?<stage>?           the original, fully explicit
+#   --build  <flow> ?<ckpt>?            build; ckpt auto-named when omitted
+#   --resume [--stage <s>] <flow> ?<ckpt>?   resume; ckpt auto-discovered and
+#                                       stage defaulting to the DEEPEST the
+#                                       trace records when omitted
+# The flags make the MODE explicit instead of inferred from argument count,
+# and take the two things a user had to invent off their plate: the
+# checkpoint filename (auto: <flow_dir>/<stem>.ckpt.bdb) and the stage name.
+set usage "usage: btcl -i <flow>.buda ?<ckpt.bdb>? ?build|topo|plan|nuts|dnuts?\n\
+       btcl -b <flow>.buda ?<ckpt.bdb>?           (build, auto checkpoint)\n\
+       btcl -r ?-s <stage>? <flow>.buda ?<ckpt>?  (resume, deepest stage)"
+set mode ""
+set stage_flag ""
+set pos {}
+for {set i 0} {$i < [llength $argv]} {incr i} {
+    set a [lindex $argv $i]
+    switch -- $a {
+        -b - --build {
+            if {$mode eq "resume"} { puts stderr "btcl -i: -b and -r are\
+                  mutually exclusive"; exit 2 }
+            set mode build
+        }
+        -r - --resume {
+            if {$mode eq "build"} { puts stderr "btcl -i: -b and -r are\
+                  mutually exclusive"; exit 2 }
+            set mode resume
+        }
+        -s - --stage {
+            incr i
+            if {$i >= [llength $argv]} { puts stderr "btcl -i: $a requires a\
+                  stage (topo|plan|nuts|dnuts)"; exit 2 }
+            set stage_flag [string tolower [lindex $argv $i]]
+            # A stage is a RESUME concept, so -s alone implies -r.
+            if {$mode eq ""} { set mode resume }
+        }
+        default { lappend pos $a }
+    }
+}
+if {[llength $pos] < 1 || [llength $pos] > 3} {
+    puts stderr $usage
     exit 2
 }
-set flow [file normalize [lindex $argv 0]]
+set flow [file normalize [lindex $pos 0]]
 if {![file exists $flow]} {
     puts stderr "buda_interact: no such flow: $flow"
     exit 2
 }
 set tag [file tail $flow]
+set auto_ckpt [file rootname $flow].ckpt.bdb
 set armed ""
-if {[llength $argv] >= 2} { set armed [file normalize [lindex $argv 1]] }
-set stage build
-if {[llength $argv] == 3} { set stage [string tolower [lindex $argv 2]] }
-if {$stage eq "bundle"} {
-    # Re-bundling regenerates everything downstream of it, so a bundle-level
-    # "resume" IS the full rerun — named rather than silently aliased.
-    puts "$tag: stage `bundle` re-bundles, which regenerates everything --\
-          that is what `build` does; running build"
+if {[llength $pos] >= 2} { set armed [file normalize [lindex $pos 1]] }
+set stage_pos ""
+if {[llength $pos] == 3} { set stage_pos [string tolower [lindex $pos 2]] }
+
+if {$mode eq "build"} {
+    # -b takes no stage: a build IS the whole run.  Refusing both spellings
+    # keeps `-b -s dnuts` from silently meaning something the user did not
+    # ask for.
+    if {$stage_flag ne "" || $stage_pos ne ""} {
+        puts stderr "$tag: -b takes no stage (a build runs the whole flow;\
+              resume at a stage with -r -s <stage>)"
+        exit 2
+    }
     set stage build
-}
-if {$stage ni {build topo plan nuts dnuts}} {
-    puts stderr "$tag: unknown stage `$stage` -- build|topo|plan|nuts|dnuts"
-    exit 2
-}
-if {$stage ne "build" && $armed eq ""} {
-    puts stderr "$tag: stage `$stage` resumes from a checkpoint -- give the\
-                 <ckpt.bdb> argument (and run a build session first)"
-    exit 2
+} elseif {$mode eq "resume"} {
+    if {$stage_flag ne "" && $stage_pos ne "" && $stage_flag ne $stage_pos} {
+        puts stderr "$tag: -s $stage_flag and the positional stage $stage_pos\
+              disagree -- give one"
+        exit 2
+    }
+    set stage [expr {$stage_flag ne "" ? $stage_flag : $stage_pos}]
+    if {$stage eq "build"} {
+        puts stderr "$tag: `build` is not a resume stage -- use -b"
+        exit 2
+    }
+    if {$stage ni {"" topo plan nuts dnuts}} {
+        puts stderr "$tag: unknown stage `$stage` -- topo|plan|nuts|dnuts"
+        exit 2
+    }
+    # stage "" = resolve to the DEEPEST stage the trace records, below.
+} else {
+    # Legacy positional spelling, byte-compatible.
+    set stage [expr {$stage_pos ne "" ? $stage_pos : "build"}]
+    if {$stage eq "bundle"} {
+        # Re-bundling regenerates everything downstream of it, so a
+        # bundle-level "resume" IS the full rerun — named rather than
+        # silently aliased.
+        puts "$tag: stage `bundle` re-bundles, which regenerates everything --\
+              that is what `build` does; running build"
+        set stage build
+    }
+    if {$stage ni {build topo plan nuts dnuts}} {
+        puts stderr "$tag: unknown stage `$stage` -- build|topo|plan|nuts|dnuts"
+        exit 2
+    }
+    if {$stage ne "build" && $armed eq ""} {
+        puts stderr "$tag: stage `$stage` resumes from a checkpoint -- give the\
+                     <ckpt.bdb> argument (and run a build session first)"
+        exit 2
+    }
 }
 # Set by the resume path for a hier below-plan (post-expansion) session.
 set inspect 0
@@ -209,6 +285,188 @@ proc _shell_word {p} {
     return '[string map [list ' {'\''}] $p]'
 }
 
+# ── -b pre-flight: what the flow TEXT says about its checkpoint ───────────
+# `.buda` is a flat command language — no conditionals — so a static scan in
+# the engine's own reading order (`source`-following, stopping where an
+# `exit` stops the run) sees the open_bdb sequence the run will execute.
+# The verdict is about the LAST effective open, because that is the BDB the
+# routed result lands in: `analyze` applies the same last-one-wins rule to
+# the RECORDED lines after the fact, and this is that rule applied BEFORE
+# the fact — the only time a refusal costs nothing.  The shape it exists to
+# refuse is the one that cost a 2000-second heal: a flow whose last
+# `open_bdb` is a `.sql` without `writeback` routes to the end and then
+# DISCARDS everything, with no message during the run saying so.
+#
+# `_strip_comment` and `_rest_of_line` are the Tcl twins of
+# `buda_script.strip_inline_comment` and `sole_path_arg` (the `source` rule:
+# the rest of the line IS the path, spaces included), the same way
+# `_split_args` twins `split_quoted_args` — a reader in another language
+# needs a twin whose agreement is measured, not assumed
+# (test_btcl_quoted_paths.py runs the same cases through both).
+proc _strip_comment {ln} {
+    set i 0
+    set n [string length $ln]
+    set at_start 1
+    while {$i < $n} {
+        set ch [string index $ln $i]
+        if {[string is space -strict $ch]} { set at_start 1; incr i; continue }
+        if {$at_start && $ch eq "#"} {
+            return [string range $ln 0 [expr {$i - 1}]]
+        }
+        if {$at_start && ($ch eq "\"" || $ch eq "'")} {
+            set end [string first $ch $ln [expr {$i + 1}]]
+            if {$end >= 0} { set i [expr {$end + 1}]; set at_start 0; continue }
+        }
+        while {$i < $n && ![string is space -strict [string index $ln $i]]} {
+            incr i
+        }
+        set at_start 1
+    }
+    return $ln
+}
+proc _rest_of_line {ln {skip 1}} {
+    set s [string trim [_strip_comment $ln]]
+    for {set k 0} {$k < $skip} {incr k} {
+        if {![regexp {^\S+\s+(.*)$} $s -> s]} { return "" }
+    }
+    set s [string trim $s]
+    if {[string length $s] >= 2} {
+        set q [string index $s 0]
+        if {($q eq "\"" || $q eq "'") && [string index $s end] eq $q} {
+            set s [string range $s 1 end-1]
+        }
+    }
+    return $s
+}
+# The `# flow:` header of a build trace — which flow built this checkpoint.
+# "" when the file cannot be read or carries no header.
+proc _trace_flow {tf} {
+    set hdr ""
+    catch {
+        set f [open $tf]
+        foreach ln [split [read $f] \n] {
+            if {[regexp {^# flow: (.*)$} $ln -> p]} { set hdr $p; break }
+        }
+        close $f
+    }
+    return $hdr
+}
+
+# The scanner: returns 1 when an `exit` ended the run (so a caller mid-tree
+# stops too), and records the last open_bdb's verdict in _pf_last.  Relative
+# paths — the sourced file's and the BDB's — resolve against the SCRIPT's
+# directory, the engine's own rule, so the verdict names the file the run
+# would actually open.  Two more engine rules, both measured to matter
+# (Codex #794 P1s):
+#   * `source foo` with only `foo.buda` on disk gets the `.buda` suffix
+#     appended (cmd_source's fallback), so the scanner must follow it too —
+#     skipping it silently approved a build whose included file ends in a
+#     non-durable open, the exact loss the pre-flight exists to refuse;
+#   * a file sourced TWICE executes twice, so the guard is an ACTIVE
+#     RECURSION STACK (cycle protection), not a visited memo — the memo
+#     skipped the second execution, and `include(nondurable-open);
+#     open_bdb good.bdb; include again` read as durable while the run ends
+#     on the include's non-durable open.
+proc _preflight_scan {path depth} {
+    global _pf_last _pf_visited _pf_files
+    if {$depth > 16} { return 0 }
+    set norm [file normalize $path]
+    if {![file isfile $norm] && ![string match *.buda $norm]
+            && [file isfile $norm.buda]} {
+        set norm $norm.buda
+    }
+    if {[info exists _pf_visited($norm)]} { return 0 }
+    set _pf_visited($norm) 1
+    try {
+        if {[catch {open $norm} f]} { return 0 }
+        set text [read $f]
+        close $f
+        lappend _pf_files $norm
+        set dir [file dirname $norm]
+        set lno 0
+        foreach ln [split $text \n] {
+            incr lno
+            set ln [string trim $ln]
+            set verb [_verb $ln]
+            if {$verb eq "exit"} { return 1 }
+            if {$verb eq "source"} {
+                set p [_rest_of_line $ln]
+                if {$p eq ""} continue
+                if {[file pathtype $p] ne "absolute"} {
+                    set p [file join $dir $p]
+                }
+                if {[_preflight_scan $p [expr {$depth + 1}]]} { return 1 }
+                continue
+            }
+            if {$verb ne "open_bdb"} continue
+            set rest [_split_args $ln]
+            set p [lindex $rest 0]
+            if {$p eq ""} continue
+            if {$p eq ":memory:"} {
+                set _pf_last [list nondurable :memory: \
+                      "`:memory:` dies with the process" $norm $lno]
+            } else {
+                set raw $p
+                if {[file pathtype $p] ne "absolute"} {
+                    set p [file join $dir $p]
+                }
+                set p [file normalize $p]
+                # raw token -> the file the ENGINE opens.  The recorder
+                # writes the line verbatim and flattens the source tree, so
+                # a relative token recorded from a SOURCED file has lost the
+                # directory it resolved against — the scanner is the one
+                # reader that still knows it (_resolve_bdb consults this;
+                # the same token resolving differently in two files is
+                # marked ambiguous and falls back to the entry-dir rule).
+                global _pf_bdb
+                if {![info exists _pf_bdb($raw)]} {
+                    set _pf_bdb($raw) $p
+                } elseif {$_pf_bdb($raw) ne $p} {
+                    set _pf_bdb($raw) __AMBIGUOUS__
+                }
+                if {[string match -nocase *.sql $p] && "writeback" ni $rest} {
+                    set _pf_last [list nondurable $p "a `.sql` opened\
+                          without `writeback` is a throwaway materialized\
+                          copy" $norm $lno]
+                } else {
+                    set _pf_last [list durable $p]
+                }
+            }
+        }
+        return 0
+    } finally {
+        unset _pf_visited($norm)
+    }
+}
+# {none} | {durable <path>} | {nondurable <path> <why> <file> <line>}
+proc _preflight_ckpt {flowpath} {
+    global _pf_last _pf_visited _pf_files _pf_bdb
+    set _pf_last {none}
+    array unset _pf_visited
+    array unset _pf_bdb
+    set _pf_files {}
+    _preflight_scan $flowpath 0
+    return $_pf_last
+}
+# The staleness fingerprint: one crc32 over the flow's WHOLE source tree,
+# in scan order — the recorded recipe is a flattening of the entry file AND
+# everything it sources, so stamping only the entry file let an edit to an
+# included `.buda` resume silently un-applied (Codex #794 P1).  The walk is
+# the pre-flight's, so both sides of the comparison enumerate the same
+# files the same way; a file that vanished since simply drops out and the
+# crc differs, which is the right verdict.
+proc _flow_crc {flowpath} {
+    _preflight_ckpt $flowpath
+    set crc 0
+    foreach p $::_pf_files {
+        set f [open $p rb]
+        set d [read $f]
+        close $f
+        set crc [zlib crc32 $d $crc]
+    }
+    format %u $crc
+}
+
 # A replan replay must not repeat: outputs and windows, session control, the
 # checkpoint plumbing, pins/edits (already session state — and a prompt
 # unpin must not be fought by a replayed pin), or generation/bundling (an
@@ -236,6 +494,16 @@ proc _skipped {verb {skips {}}} {
 # NO script — would open a DIFFERENT file than the build did.
 proc _resolve_bdb {p} {
     if {$p eq ":memory:" || [file pathtype $p] eq "absolute"} { return $p }
+    # The engine resolves against the INNERMOST sourced file's directory,
+    # and the flattened record has lost which file that was — but the
+    # pre-flight scan walks the same tree and kept the answer (a relative
+    # open in a sourced sub-directory landed the checkpoint THERE, while
+    # the entry-dir guess put the trace beside a file nobody has).  The
+    # entry-dir rule stays as the fallback: token unseen by the scan, or
+    # ambiguous across files.
+    if {[info exists ::_pf_bdb($p)] && $::_pf_bdb($p) ne "__AMBIGUOUS__"} {
+        return $::_pf_bdb($p)
+    }
     file normalize [file join [file dirname $::flow] $p]
 }
 
@@ -407,6 +675,51 @@ set trace_ok 1
 # ══════════════════════════════════════════════════════════════════════════
 if {$stage eq "build"} {
     # ── BUILD: arm the recorder, run the flow verbatim ────────────────────
+    if {$mode eq "build"} {
+        # -b decides its checkpoint from the flow TEXT, before an engine is
+        # spawned (see _preflight_ckpt above).  Three verdicts:
+        #   * nondurable — REFUSE at t=0: the run would end by discarding
+        #     everything it routed, and t=0 is the only cheap place to say
+        #     so (the alternative is a message after the 30-minute route).
+        #   * durable    — the flow owns its checkpoint; arming another
+        #     would just be replaced by the flow's own open, so -b arms
+        #     nothing (an EXPLICIT <ckpt> stays armed — the user asked, and
+        #     the banner's replacement NOTE reports what the flow did).
+        #   * none       — arm the auto-named <flow_dir>/<stem>.ckpt.bdb.
+        set pf [_preflight_ckpt $flow]
+        switch -- [lindex $pf 0] {
+            nondurable {
+                lassign $pf - p why where lno
+                puts stderr "$tag: -b refused before running: the flow's\
+                      last open_bdb is not durable -- $why -- so everything\
+                      the build routes would be DISCARDED at the end."
+                puts stderr "$tag: $where line $lno: opens $p"
+                puts stderr "$tag: make it durable (`open_bdb <file>.sql\
+                      writeback`, or a binary `.bdb`), or drop the open and\
+                      let -b arm its own checkpoint"
+                exit 2
+            }
+            durable {
+                if {$armed eq ""} {
+                    puts "$tag: the flow opens its own durable checkpoint\
+                          ([lindex $pf 1]) -- using it, no auto checkpoint\
+                          armed"
+                }
+            }
+            none {
+                if {$armed eq ""} {
+                    set armed $auto_ckpt
+                    if {[file exists $armed]} {
+                        puts "$tag: -b re-arming the existing checkpoint\
+                              $armed (pins persisted there re-attach to the\
+                              rebuilt pool)"
+                    } else {
+                        puts "$tag: -b arming checkpoint $armed"
+                    }
+                }
+            }
+        }
+    }
     close [file tempfile recpath buda_record]
     set ::env(BUDA_RECORD) $recpath
     set ::env(BUDA_RECORD_NOTE) "btcl -i $tag"
@@ -470,6 +783,10 @@ if {$stage eq "build"} {
     }
     close $f
     file delete $recpath
+    # The scan that feeds _resolve_bdb's map (idempotent; -b already ran
+    # it): analyze is about to resolve recorded open_bdb tokens, and only
+    # the walk knows which sourced file each one resolved against.
+    catch {_preflight_ckpt $flow}
     analyze $lines
 
     puts "\n$tag: [llength $lines] command(s) ran --\
@@ -490,6 +807,19 @@ if {$stage eq "build"} {
             puts $f "# btcl -i build trace v1"
             puts $f "# flow: $flow"
             puts $f "# cwd: [pwd]"
+            # A staleness stamp for `-r`: a resume replays the RECORDED
+            # lines, so a flow whose TEXT changed since the build gets a
+            # NOTE rather than a silent mix of old recipe and new intent.
+            # One crc32 over the whole SOURCE TREE (_flow_crc), because the
+            # recorded recipe flattens the sourced files too.  crc32 is in
+            # the Tcl core (no subprocess); it detects "changed", it does
+            # not authenticate.  A build that cannot read its own flow back
+            # stamps the size instead.
+            if {[catch {
+                puts $f "# flow_crc32: [_flow_crc $flow]"
+            }]} {
+                puts $f "# flow_size: [file size $flow]"
+            }
             foreach ln $lines { puts $f $ln }
             close $f
         } err]} {
@@ -529,15 +859,72 @@ if {$stage eq "build"} {
                   durable checkpoint ($why), so everything this session\
                   routed was DISCARDED.$repl  For a resumable run open the\
                   checkpoint durably: `open_bdb <file>.sql writeback`, or a\
-                  binary `.bdb`."
+                  binary `.bdb`.  (btcl -b refuses this shape BEFORE running,\
+                  and arms an auto checkpoint when the flow opens no BDB.)"
         }
         exit 0
     }
 } else {
     # ── RESUME: setup from the trace + load_pipeline + re-enter at stage ──
+    if {$mode eq "resume" && $armed eq ""} {
+        # -r discovers the checkpoint: the auto name first, else any trace
+        # beside the flow whose `# flow:` header names THIS flow (a build
+        # with an explicit <ckpt> wrote one of those).  Zero is a refusal
+        # with the remedy; two or more is a QUESTION, not a guess.
+        if {[file exists $auto_ckpt] && [file exists ${auto_ckpt}.trace]} {
+            set armed $auto_ckpt
+        } else {
+            # The flow may OWN its checkpoint (-b arms nothing then), and a
+            # sourced file's relative open lands it — with its trace —
+            # OUTSIDE the entry flow's directory, where the glob below
+            # cannot see it (Codex #794 P2).  The pre-flight walks the same
+            # source tree the run does, so ask it first; the `# flow:`
+            # header check keeps a checkpoint another flow built from being
+            # adopted (mismatch falls through to the glob, not a refusal).
+            set pf [_preflight_ckpt $flow]
+            if {[lindex $pf 0] eq "durable"} {
+                set own [lindex $pf 1]
+                if {[file exists $own] && [file exists ${own}.trace]
+                        && [_trace_flow ${own}.trace] eq $flow} {
+                    set armed $own
+                }
+            }
+        }
+        if {$armed eq ""} {
+            set found {}
+            foreach t [glob -nocomplain -directory [file dirname $flow] \
+                           *.trace] {
+                set c [string range $t 0 end-6]
+                if {![file exists $c]} continue
+                if {[_trace_flow $t] eq $flow} { lappend found $c }
+            }
+            if {[llength $found] == 1} {
+                set armed [lindex $found 0]
+            } elseif {[llength $found] == 0} {
+                puts stderr "$tag: -r found no checkpoint for this flow\
+                      (looked for $auto_ckpt, then for any *.trace beside\
+                      the flow naming it) -- build one first: btcl -b\
+                      [_shell_word $flow]"
+                exit 2
+            } else {
+                puts stderr "$tag: -r found [llength $found] checkpoints\
+                      for this flow -- name one:"
+                foreach c $found {
+                    puts stderr "  btcl -r [_shell_word $flow]\
+                          [_shell_word $c]"
+                }
+                exit 2
+            }
+        }
+        puts "$tag: -r resuming from $armed"
+    }
+    # `-r` may still be resolving its stage (the deepest recorded one), so
+    # the refusals up to that point name the MODE rather than interpolate
+    # an empty stage into their message.
+    set what [expr {$stage eq "" ? "-r" : "stage `$stage`"}]
     set tf ${armed}.trace
     if {![file exists $armed]} {
-        puts stderr "$tag: stage `$stage` needs the checkpoint $armed, which\
+        puts stderr "$tag: $what needs the checkpoint $armed, which\
               does not exist -- run a build session first: btcl -i\
               [_shell_word $tag] [_shell_word $armed]"
         exit 2
@@ -550,7 +937,7 @@ if {$stage eq "build"} {
         # its own — OR the build did not finish.  Either way the routing was
         # not saved.  Advising "run a build session first" would name the very
         # command that produced this state; name the cause instead.
-        puts stderr "$tag: stage `$stage`: the checkpoint $armed exists but\
+        puts stderr "$tag: $what: the checkpoint $armed exists but\
               its build trace $tf does not.  A build writes the trace only\
               beside a DURABLE checkpoint, so the last build either left a\
               non-durable one (a `.sql` opened without `writeback`, or\
@@ -561,12 +948,21 @@ if {$stage eq "build"} {
         exit 2
     }
     set traced_flow ""; set traced_cwd ""
+    set traced_crc ""; set traced_size ""
     set lines {}
     set f [open $tf]
     foreach ln [split [read $f] \n] {
         set ln [string trim $ln]
         if {[regexp {^# flow: (.*)$} $ln -> p]} { set traced_flow $p; continue }
         if {[regexp {^# cwd: (.*)$} $ln -> p]}  { set traced_cwd $p; continue }
+        if {[regexp {^# flow_crc32: (\S+)$} $ln -> p]} {
+            set traced_crc $p
+            continue
+        }
+        if {[regexp {^# flow_size: (\S+)$} $ln -> p]} {
+            set traced_size $p
+            continue
+        }
         if {$ln eq "" || [string index $ln 0] eq "#"} continue
         lappend lines $ln
     }
@@ -584,6 +980,24 @@ if {$stage eq "build"} {
         puts "$tag: NOTE -- the build ran in $traced_cwd, this session in\
               [pwd]; recorded relative paths resolve differently"
     }
+    # The staleness stamp (written at build): a resume replays the RECORDED
+    # lines, so an edit to the flow's text since then does not take effect
+    # here — worth one NOTE, not a refusal (the recorded build is a
+    # perfectly good thing to resume; a pre-stamp trace checks nothing).
+    set stale 0
+    if {$traced_crc ne ""} {
+        if {![catch {_flow_crc $flow} cur] && $cur ne $traced_crc} {
+            set stale 1
+        }
+    } elseif {$traced_size ne "" && [file size $flow] != $traced_size} {
+        set stale 1
+    }
+    if {$stale} {
+        puts "$tag: NOTE -- the flow's text (or a sourced file's) changed\
+              since this build; the resume replays the build as RECORDED\
+              (rebuild to pick up the edit: btcl -b [_shell_word $flow])"
+    }
+    catch {_preflight_ckpt $flow}
     analyze $lines
     if {!$ckpt_live || $ckpt eq ""} {
         puts stderr "$tag: the build left no durable checkpoint\
@@ -591,17 +1005,6 @@ if {$stage eq "build"} {
               open_bdb"}]) -- nothing to resume; run build"
         exit 2
     }
-    # A hier resume BELOW the planner restores the post-expansion view
-    # (`load_pipeline expanded`) — an INSPECTION session: the quick look at
-    # a long healer flow's result.  What it cannot host is anything that
-    # persists the pre-expansion view, because on an expanded restore that
-    # view is not there to persist (_persist_wrappers would fall through to
-    # the expanded list and write it over the checkpoint's template rows —
-    # the #723 clobber through a new door), and a `run_planner hier` here
-    # would re-expand already-expanded wrappers.  So pins/edits/replan are
-    # guarded at the prompt, and the verdict/explorer/dumps are the point.
-    set inspect [expr {$is_hier && $stage in {nuts dnuts}}]
-
     # The stage's cut: the first recorded command the resumed session
     # re-runs.  Everything before it is either replayed as setup or held by
     # the checkpoint; everything from it on replays (minus the outputs/pins
@@ -614,6 +1017,36 @@ if {$stage eq "build"} {
         nuts  {run_nuts}
         dnuts {run_detailed_nuts}
     }
+    if {$stage eq ""} {
+        # -r with no -s: the DEEPEST stage the trace records.  Deepest is
+        # the cheapest honest default — everything above it is restored,
+        # nothing is recomputed — and `-s` is the override for a session
+        # that wants to re-enter higher (re-plan, re-generate).
+        foreach s {dnuts nuts plan topo} {
+            foreach ln $lines {
+                if {[_verb $ln] in $cut_verbs($s)} { set stage $s; break }
+            }
+            if {$stage ne ""} break
+        }
+        if {$stage eq ""} {
+            puts stderr "$tag: the build recorded no resumable stage (no\
+                  generation, planner or NUTS command in the trace) --\
+                  nothing to resume; rebuild: btcl -b [_shell_word $flow]"
+            exit 2
+        }
+        puts "$tag: resuming at the deepest recorded stage `$stage`\
+              (override: -s topo|plan|nuts|dnuts)"
+    }
+    # A hier resume BELOW the planner restores the post-expansion view
+    # (`load_pipeline expanded`) — an INSPECTION session: the quick look at
+    # a long healer flow's result.  What it cannot host is anything that
+    # persists the pre-expansion view, because on an expanded restore that
+    # view is not there to persist (_persist_wrappers would fall through to
+    # the expanded list and write it over the checkpoint's template rows —
+    # the #723 clobber through a new door), and a `run_planner hier` here
+    # would re-expand already-expanded wrappers.  So pins/edits/replan are
+    # guarded at the prompt, and the verdict/explorer/dumps are the point.
+    set inspect [expr {$is_hier && $stage in {nuts dnuts}}]
     set cut -1
     for {set i 0} {$i < [llength $lines]} {incr i} {
         if {[_verb [lindex $lines $i]] in $cut_verbs($stage)} {
@@ -851,8 +1284,9 @@ if {$ckpt ne "" && !$ckpt_live} {
     # no snapshot to offer, and promising one here handed the user a verb
     # that could only fail.  Say what is true instead.
     puts "$tag: no file-backed BDB -- pins and edits die with this session\
-          (a snapshot needs a BDB the flow itself opened; see\
-          flow/tcl/design.tcl for a checkpointing flow)"
+          (a snapshot needs a BDB the flow itself opened); their flow-text\
+          form prints at exit, and `btcl -b [_shell_word $flow]` arms an\
+          auto checkpoint before the flow so they persist"
     set snap_base [file rootname $tag].bdb
 }
 
@@ -869,6 +1303,17 @@ if {$pins_dirty} {
     if {[catch {replay_tail} err]} {
         puts stderr "$tag: $err"
     }
+}
+# Pins (and committed edits) made at THIS prompt with nowhere durable to
+# land: their durable form is FLOW TEXT, so print the lines rather than let
+# the session's outcome die silently — pasted before the flow's
+# `run_planner`, they mean next run exactly what they meant here.  A live
+# durable checkpoint needs none of this: there the rows persist and the
+# next session restores them.
+if {[llength $prompt::pin_lines] && !$ckpt_live} {
+    puts "$tag: this session's pins, as flow text (paste before the flow's\
+          run_planner to keep them):"
+    foreach ln $prompt::pin_lines { puts "    $ln" }
 }
 if {$replay_failed} {
     catch {buda::stop}
