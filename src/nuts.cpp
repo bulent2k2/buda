@@ -449,8 +449,8 @@ static void apply_interval_constraints(
 // [220..580] whose centre (400) sits inside an M5 keepout's y-band 380..450.
 // Every bit of the M5 stub into `rcv` is culled; the healer rescues it by
 // re-pinning to a detour at +15.7% detailed WL, to buy back what a 50-unit
-// slide inside a free window gives for nothing.  Pruning the window to
-// [450..580] is clean at the same detailed WL as every other legal seat.
+// slide inside a free window gives for nothing.  Pruning the window is clean
+// at the same detailed WL as every other legal seat.
 //
 // CONSERVATIVE BY CONSTRUCTION, and that is the whole design: a zone only
 // dooms a partner when the partner cannot SLIDE CLEAR of it, i.e. when the
@@ -459,22 +459,86 @@ static void apply_interval_constraints(
 // pruning would forbid seats that route today.  So the pass either removes
 // provably-dead positions or removes nothing; it never trades QoR for safety.
 //
-// It runs HERE, at seat derivation, rather than on the candidate: mutating a
+// It runs at SEAT derivation rather than on the candidate: mutating a
 // candidate re-sorts the pool, renumbers indices and invalidates the cached
 // topo_uid every `select_topology` pin is keyed on — the coupling that makes
 // set_prune_dominated / set_dedup_loci / set_trim_mst_legs opt-in.  A seat
 // window has no such coupling, so this can simply be right by default.
+
+// One layer-and-orientation's zones, resolved into the frame a partner on that
+// layer reads them in and indexed for the ONE question asked of them: "is there
+// a zone whose perpendicular band covers [q_lo, q_hi] entirely?"
+//
+// Sorted by band start ascending with a PREFIX MAX of band end, so the answer
+// is a binary search plus one comparison: among the zones starting at or below
+// q_lo, if the widest-reaching one still ends below q_hi, none can cover and
+// the whole layer is rejected in O(log Z).  That rejection is the common case
+// by a wide margin — measured over the 48-flow corpus, exactly one flow has a
+// covering zone at all — and it is what keeps the pass off the runtime: the
+// first cut scanned every zone per segment per partner, which on the chip
+// family (where bottom-up copies become keepouts) cost +7% end to end.
+struct ReachZones {
+    std::vector<double> p1, p2, a1, a2;   // band start/end, along start/end
+    std::vector<double> pmax;             // prefix max of p2
+    // Index of the last zone with p1 <= q, or -1.
+    int last_starting_at_or_below(double q) const {
+        int lo = 0, hi = (int)p1.size() - 1, ans = -1;
+        while (lo <= hi) {
+            int mid = (lo + hi) / 2;
+            if (p1[mid] <= q) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+        }
+        return ans;
+    }
+};
+
+static std::map<std::pair<int,bool>, ReachZones>
+build_reach_zones(const std::vector<KeepoutZone>& zones)
+{
+    // Resolved PER ORIENTATION rather than per layer: which axis is the "band"
+    // depends on how the partner runs, and doing it once here keeps the inner
+    // loop free of the branch.  Both orientations are built because a layer's
+    // direction is not consulted anywhere else in this pass, and a wrong guess
+    // would silently skip real obstruction.
+    std::map<std::pair<int,bool>, ReachZones> out;
+    struct Row { double p1, p2, a1, a2; };
+    std::map<std::pair<int,bool>, std::vector<Row>> raw;
+    for (const auto& z : zones) {
+        const Rect& k = z.bbox;
+        for (int lid : z.layer_ids) {
+            raw[{lid, true }].push_back({(double)k.y1, (double)k.y2,
+                                         (double)k.x1, (double)k.x2});
+            raw[{lid, false}].push_back({(double)k.x1, (double)k.x2,
+                                         (double)k.y1, (double)k.y2});
+        }
+    }
+    for (auto& [key, rows] : raw) {
+        std::sort(rows.begin(), rows.end(),
+                  [](const Row& a, const Row& b) { return a.p1 < b.p1; });
+        ReachZones rz;
+        rz.p1.reserve(rows.size()); rz.p2.reserve(rows.size());
+        rz.a1.reserve(rows.size()); rz.a2.reserve(rows.size());
+        rz.pmax.reserve(rows.size());
+        double run = -std::numeric_limits<double>::infinity();
+        for (const Row& r : rows) {
+            rz.p1.push_back(r.p1); rz.p2.push_back(r.p2);
+            rz.a1.push_back(r.a1); rz.a2.push_back(r.a2);
+            run = std::max(run, r.p2);
+            rz.pmax.push_back(run);
+        }
+        out.emplace(key, std::move(rz));
+    }
+    return out;
+}
+
 static void prune_unreachable_partner_windows(
     std::vector<TrackSegment>& segments,
     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
+    const std::map<std::pair<int,int>, TrackSegment*>&            ts_ptr_map,
     const Floorplan& floorplan,
     int& n_pruned,
     int& n_doomed,
     int only_layer)
 {
-    const auto& zones = floorplan.get_keepout_zones();
-    if (zones.empty()) return;        // the common case: nothing declared
-
     // DECLARED zones only — the set add_keepout / import_def_lef install on the
     // RoutingGrid, which is exactly what DetailedNUTS's cull_keepout_crossers
     // tests a final bit span against.  Deliberately NOT the NUTS solver's wider
@@ -482,12 +546,10 @@ static void prune_unreachable_partner_windows(
     // another bundle's fixed occupancy): pruning against obstacles the cull does
     // not apply would make the two disagree about what is legal, and occupancy
     // is a placement, not a property of the design.
-    std::map<int, std::vector<const KeepoutZone*>> by_layer;
-    for (const auto& z : zones)
-        for (int lid : z.layer_ids) by_layer[lid].push_back(&z);
+    const auto& zones = floorplan.get_keepout_zones();
+    if (zones.empty()) return;        // the common case: nothing declared
 
-    std::map<std::pair<int,int>, const TrackSegment*> by_key;
-    for (const auto& ts : segments) by_key[{ts.bundle_id, ts.seg_idx}] = &ts;
+    const auto index = build_reach_zones(zones);
 
     // Every bound is computed from the PRE-prune intervals and applied after,
     // so the result cannot depend on the order segments are visited in.
@@ -502,32 +564,29 @@ static void prune_unreachable_partner_windows(
         double lo = ts.interval_lo, hi = ts.interval_hi;
         bool doomed = false;
         for (const auto& f : it->second) {
-            auto pit = by_key.find({f.src_bid, f.src_si});
-            if (pit == by_key.end()) continue;
+            auto pit = ts_ptr_map.find({f.src_bid, f.src_si});
+            if (pit == ts_ptr_map.end()) continue;
             const TrackSegment& p = *pit->second;
             if (p.horiz == ts.horiz) continue;   // a partner, not a collinear follower
-            auto zit = by_layer.find(p.layer);
-            if (zit == by_layer.end()) continue;
+            auto zit = index.find({p.layer, p.horiz});
+            if (zit == index.end()) continue;
+            const ReachZones& rz = zit->second;
 
             // The partner's own seat window, on ITS perpendicular axis.
             const double q_lo = std::min(p.interval_lo, p.interval_hi);
             const double q_hi = std::max(p.interval_lo, p.interval_hi);
+            const int last = rz.last_starting_at_or_below(q_lo);
+            if (last < 0 || rz.pmax[last] < q_hi) continue;   // nothing can cover
+
             // Its FAR end.  The junction with `ts` rides the near end (that end
             // IS ts's track position, which is what makes this segment's seat
             // decide the partner's span); the other end is fixed geometry.
             const double far = f.lo_end ? std::max(p.span_lo, p.span_hi)
                                         : std::min(p.span_lo, p.span_hi);
 
-            for (const KeepoutZone* z : zit->second) {
-                const Rect& k = z->bbox;
-                // The zone in the PARTNER's frame: same axis convention as
-                // cull_keepout_crossers, so the two read one geometry.
-                const double k_p1 = p.horiz ? (double)k.y1 : (double)k.x1;
-                const double k_p2 = p.horiz ? (double)k.y2 : (double)k.x2;
-                if (!(k_p1 <= q_lo && q_hi <= k_p2)) continue;   // partner can slide clear
-                const double k_a1 = p.horiz ? (double)k.x1 : (double)k.y1;
-                const double k_a2 = p.horiz ? (double)k.x2 : (double)k.y2;
-
+            for (int zi = 0; zi <= last; ++zi) {
+                if (rz.p2[zi] < q_hi) continue;      // partner can slide clear
+                const double k_a1 = rz.a1[zi], k_a2 = rz.a2[zi];
                 // The partner's span runs from ts's seat to `far`, and crosses
                 // the zone iff span_lo < k_a2 && span_hi > k_a1 (the cull's own
                 // strict test).  With one end free that is a half-line in ts's
@@ -1164,6 +1223,11 @@ static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
         auto pt = ctx.passthru_map.find({ts.bundle_id, ts.seg_idx});
         if (pt != ctx.passthru_map.end()) ts.passthru_spans = pt->second;
     }
+    // Before `prep`, not after: the prune uses it as its partner lookup, and a
+    // second identical map per solve was pure duplicated cost.  Nothing in prep
+    // resizes `segments`, so the pointers stay valid.
+    for (auto& ts : segments)
+        ctx.ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
     if (prep) {
         apply_interval_constraints(segments, ctx.slide_map, ctx.trunk_set,
                                    ctx.net_pull_map, only_layer);
@@ -1175,13 +1239,12 @@ static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
         // hard physical constraint and a preference accommodation is not, so the
         // prune goes last — and before set_pull_targets, which clamps each pull
         // target into the interval it is given.
-        prune_unreachable_partner_windows(segments, ctx.rev_conn_map, floorplan,
+        prune_unreachable_partner_windows(segments, ctx.rev_conn_map,
+                                          ctx.ts_ptr_map, floorplan,
                                           ctx.n_reach_pruned, ctx.n_reach_doomed,
                                           only_layer);
         set_pull_targets(segments, ctx.pull_map, ctx.net_pull_map);
     }
-    for (auto& ts : segments)
-        ctx.ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
     return ctx;
 }
 
