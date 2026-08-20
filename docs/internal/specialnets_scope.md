@@ -199,11 +199,12 @@ signal metal lives on M8–M10.
 |---|---|---|
 | `grid` (core) | M1 followpins, M4 @ 56 µm, M7 @ 30 µm | die-spanning |
 | `macro_r0` | M5 + M6 @ 10 µm | over each SRAM at `R0 R180 MX MY` |
-| `macro_r90` | M6 @ 40 µm | over each SRAM at `R90 R270 MXR90 MYR90` |
+| `macro_r90` | M6 @ 40 µm | over each SRAM at `R90 R270 MXR90 MYR90` — **matches nothing on this design**: all 133 SRAMs are R0-family, so pdngen warns `PDN-1051` and emits no straps for it (recipe §5). Declared for completeness; it contributes none of the 6673. |
 
 The core grid's straps genuinely lie outside every block, so for those the
 reason is geometric and `outside` is the wrong instrument by construction.
-The two `-macro` grids are drawn OVER the 133 SRAMs, which ARE blocks — and
+The `-macro` grid that emits here is drawn OVER the 133 SRAMs, which ARE
+blocks — and
 `outside` missed those for a different reason: the importer built every
 strap keepout with `inside_block=false` **unconditionally**
 (`src/bdb.cpp`, the `special_wires` loop), where a macro `OBS` has its

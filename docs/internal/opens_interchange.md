@@ -1177,9 +1177,13 @@ keeps only its long-axis loci.
 *Why `outside` reached none of them was two reasons, not one* — corrected
 2026-08-19/20, after this paragraph first said simply "they are die-crossing
 and lie outside every block".  Only ONE of `pdn.tcl`'s three grids is
-die-spanning (`grid`: M1 followpins + M4/M7); `macro_r0` (M5+M6) and
-`macro_r90` (M6) are `-macro` grids drawn OVER the 133 SRAMs, which ARE
-blocks.  `outside` missed those for a different reason than geometry — the
+die-spanning (`grid`: M1 followpins + M4/M7), while `macro_r0` (M5+M6) is a
+`-macro` grid drawn OVER the SRAMs, which ARE blocks.  (`macro_r90` is
+declared too, and on THIS design matches nothing — all 133 SRAMs are
+R0-family, so pdngen warns `PDN-1051` and emits no straps for it; recipe §5.
+It is named here only because the recipe keeps it for completeness, not
+because it contributes any of the 6673.)  `outside` missed the macro-grid
+straps for a different reason than geometry — the
 importer stamped every strap keepout `inside_block=false` unconditionally,
 where a macro `OBS` had its containment measured — and that half is now
 **fixed**: straps and `LAYER` blockages measure containment like `OBS`
